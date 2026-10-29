@@ -768,6 +768,25 @@ test("test_floor_share takes the span with the larger span_id on a tie of start_
   assertClose(item.share, 0.5);
 });
 
+test("test_floor_share takes the larger span_id over the larger trace_id on a tie of start_time", async (t) => {
+  const store = seededStore(t);
+  addSpans(store, [
+    floorSpan(MONDAY + 1000, 50, 100, { span_id: spanIdOf(LARGER_SPAN) }),
+    floorSpan(MONDAY + 1000, 10, 100, {
+      trace: 3,
+      span_id: spanIdOf(SMALLER_SPAN),
+    }),
+  ]);
+  const { items } = await readFloorShare(store, {
+    group_by: DurationGroupBy.ProjectId,
+  });
+  assert.equal(items.length, ONE_ITEM);
+  const item = items[0]!;
+  assert.equal(item.count, TWO_INSTANCES);
+  assert.ok("share" in item);
+  assertClose(item.share, 0.5);
+});
+
 test("test_floor_share refuses the group_by worker_instance", () => {
   const result = analyticsDurationQuerySchema.safeParse({
     measure: "test_floor_share",
