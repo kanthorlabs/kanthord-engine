@@ -296,7 +296,7 @@ export function buildGraph(root) {
     if (!PARSED_PATTERNS.some((pattern) => pattern.test(path))) continue;
     const parsed = parseFile(root, path);
     for (const file of parsed.files) addImporter(importersByFile, file, path);
-    importsByFile.set(path, new Set([...parsed.files, ...parsed.prefixes]));
+    importsByFile.set(path, new Set(parsed.files));
     for (const prefix of parsed.prefixes) {
       prefixEdges.push({ prefix, importer: path });
     }
@@ -312,22 +312,13 @@ export function buildGraph(root) {
   };
 }
 
-function presentUnder(graph, prefix) {
-  return [...graph.present].filter((file) => file.startsWith(prefix));
-}
-
 function importsOf(graph, path) {
-  const reached = new Set();
-  for (const name of graph.importsByFile.get(path) ?? []) {
-    if (name.endsWith(PATH_SEPARATOR)) {
-      for (const file of presentUnder(graph, name)) reached.add(file);
-    } else {
-      reached.add(name);
-    }
-  }
-  for (const { prefix, importer } of DATA_TABLE) {
+  const reached = new Set(graph.importsByFile.get(path));
+  for (const { prefix, importer } of graph.prefixEdges) {
     if (importer !== path) continue;
-    for (const file of presentUnder(graph, prefix)) reached.add(file);
+    for (const file of graph.present) {
+      if (file.startsWith(prefix)) reached.add(file);
+    }
   }
   return reached;
 }

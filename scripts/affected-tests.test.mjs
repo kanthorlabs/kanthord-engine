@@ -600,11 +600,16 @@ test("the reporter names a nested test and a file that fails to load", async (t)
     "src/nested.test.ts",
     "src/unloadable.test.ts",
   ]);
-  const ids = result.stdout
+  const lines = result.stdout
     .split("\n")
     .filter((line) => line !== "")
-    .map((line) => JSON.parse(line))
-    .filter((line) => "name" in line);
+    .map((line) => JSON.parse(line));
+  const ids = lines.filter((line) => "name" in line);
+  const timed = lines
+    .filter((line) => "seconds" in line)
+    .map(({ file }) => file)
+    .sort();
+  assert.deepEqual(timed, ["src/nested.test.ts", "src/unloadable.test.ts"]);
   assert.deepEqual(
     ids.map(({ file, name }) => `${file}|${name}`).sort(),
     [
@@ -824,7 +829,8 @@ function outsideTestContext(run) {
   try {
     return run();
   } finally {
-    process.env.NODE_TEST_CONTEXT = context;
+    if (context === undefined) delete process.env.NODE_TEST_CONTEXT;
+    else process.env.NODE_TEST_CONTEXT = context;
   }
 }
 
@@ -843,6 +849,14 @@ test("a data edge counts in the closure", async (t) => {
   const closure = closureOf(buildGraph(root), "src/full.test.ts");
   assert.ok(closure.includes("static/openapi/one.yaml"));
   assert.ok(closure.includes("static/openapi/two.yaml"));
+});
+
+test("a template head that is not a directory counts in the closure", async (t) => {
+  const root = await repository(t, {
+    "src/main.ts": "const x = 'y';\nnew URL(`./w${x}`, import.meta.url);\n",
+    "src/w.ts": EMPTY_MODULE,
+  });
+  assert.ok(closureOf(buildGraph(root), "src/main.ts").includes("src/w.ts"));
 });
 
 test("a selection all writes version 2 with the floor and the total test time", async (t) => {

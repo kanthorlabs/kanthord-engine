@@ -14,7 +14,10 @@ function relativePath(file) {
 }
 
 function isFileFailure({ file, name, nesting }) {
-  return nesting === ROOT_NESTING && name === basename(file);
+  return (
+    nesting === ROOT_NESTING &&
+    (name === basename(file) || name === relativePath(file))
+  );
 }
 
 function secondsLine(file, durationMs) {
@@ -37,7 +40,10 @@ export default async function* reporter(source) {
       summarized.add(data.file);
       yield secondsLine(data.file, data.duration_ms);
     }
-    if (type === COMPLETE_EVENT && isFileFailure(data)) {
+    if (
+      (type === COMPLETE_EVENT || type === FAIL_EVENT) &&
+      isFileFailure(data)
+    ) {
       completed.set(data.file, data.details.duration_ms);
     }
     if (type === FAIL_EVENT) {
