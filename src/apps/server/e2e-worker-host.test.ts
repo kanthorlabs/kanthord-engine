@@ -61,6 +61,7 @@ const TASK_LOOP_PHASE = "tasks";
 const TASK_COMPLETED = "complete";
 const TURN_OPERATION = "agent.turn";
 const PASSED_EXIT = 0;
+const RELEASE_CONTEXT = "release";
 const UPLOAD_CALLS = 2;
 const tool = (name: string, args: Parameters<typeof fauxToolCall>[1]) =>
   fauxAssistantMessage(fauxToolCall(name, args), { stopReason: "toolUse" });
@@ -223,7 +224,7 @@ async function assertSpanTree(
     verifications.some(
       (span) =>
         span.attributes["process.exit.code"] === PASSED_EXIT &&
-        span.parent_span_id === task!.span_id,
+        span.attributes["kanthord.verification.context"] === RELEASE_CONTEXT,
     ),
   );
   const turns = named(TURN_OPERATION);

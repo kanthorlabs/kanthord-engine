@@ -303,18 +303,13 @@ function verdictAtHead(h: Harness) {
 }
 
 test("a verdict unit that passes counts as completed when the budget ends in the release gate", async (t) => {
-  const markers = temporary(t);
-  const live = join(markers, "live");
-  const release = join(markers, "release");
+  const release = join(temporary(t), "release");
   const h = await fixture(
     t,
     [],
     [write("addressed"), fauxAssistantMessage("addressed")],
   );
-  h.revision = nodeRevision(
-    h,
-    `if [ -f ${live} ]; then touch ${release}; else touch ${live}; fi`,
-  );
+  h.revision = nodeRevision(h, `touch ${release}`);
   await recordDone(h, nodeUnitOf(h.input.claim.node_id, h.revision));
   h.verdict = verdictAtHead(h);
   h.agent.budget.exhausted = () => existsSync(release);
