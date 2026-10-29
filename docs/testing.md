@@ -44,7 +44,7 @@ The job summary prints these lines:
 
 - `Floor: <n> test files, <s> s`: the floor files among the argument files, and the test time of the floor files that ran.
 - `Ran: <n> test files` and `Skipped: <n> test files`.
-- `Saved share: <p>%`: the record time of the skipped files, divided by the sum of that time and the test time of the files that ran.
+- `Saved share: <p>%`: the record time of the files that did not run, divided by the sum of that time and the test time of the files that ran.
 
 The schedule trigger runs the workflow on `main` at 03:00 UTC each night with `--full`. That run catches a test that the import graph misses.
 
