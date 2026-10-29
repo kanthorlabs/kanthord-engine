@@ -103,12 +103,12 @@ const TOP_LEVEL_NAMES = new Set([
 ]);
 const OTHER_PAGE = "other";
 const NO_ITEMS = 0;
-const DOCUMENTED_COUNT = 193;
+const DOCUMENTED_COUNT = 194;
 const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
-const IMPLEMENTED_COUNT = 188;
-const OPERATION_COUNT = 215;
+const IMPLEMENTED_COUNT = 189;
+const OPERATION_COUNT = 216;
 const INTAKE_LEAVES = [
   "intake event delete",
   "intake event discard",
@@ -129,7 +129,7 @@ const PAGE_COUNTS = {
   repository: 15,
   storage: 10,
   agent: 14,
-  project: 22,
+  project: 23,
   mission: 57,
   intake: 13,
   scheduler: 8,
