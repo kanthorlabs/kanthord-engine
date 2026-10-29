@@ -346,7 +346,7 @@ HTTP `200` returns the summary fields plus:
   Each proposal holds `dependency_id`, `name`, `requirement`, `criterion` and
   one `task`. When `proposals` is not empty, the reviewer submits the result
   `undetermined` with the proposals. The reviewer drops `proposals` for an
-  `implement` node. See `mission proposal approve` in the [Mission CLI](mission.md).
+  `implement` node. See `mission proposal decide` in the [Mission CLI](mission.md).
   A steps execution reads the assessment that caused the latest rework of its
   attempt. When the attempt holds no such assessment, the execution reads the
   change requests of the pull request, then the assessment that the cleared
