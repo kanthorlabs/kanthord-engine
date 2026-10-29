@@ -12,6 +12,9 @@
     "scripts/test-reporter.mjs",
     "scripts/test-path.mjs",
     "scripts/pi-tools.mjs",
-    ".devcontainer/devcontainer.json"
+    ".devcontainer/devcontainer.json",
+    ".kanthord/suite-pass.json",
+    ".github/workflows/ci.yml",
+    "scripts/suite-pass.mjs"
   ]
 }
