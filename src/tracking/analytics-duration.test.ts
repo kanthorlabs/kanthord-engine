@@ -737,6 +737,23 @@ test("test_floor_share keeps one item for each bucket", async (t) => {
   assertClose(shares[1]!, 0.4);
 });
 
+test("test_floor_share takes the span with the larger span_id on a tie of start_time", async (t) => {
+  const store = seededStore(t);
+  addSpans(store, [
+    floorSpan(MONDAY + 1000, 10, 100),
+    floorSpan(MONDAY + 1000, 50, 100),
+    floorSpan(MONDAY + 1000, 30, 100, { trace: 3 }),
+  ]);
+  const { items } = await readFloorShare(store, {
+    group_by: DurationGroupBy.ProjectId,
+  });
+  assert.equal(items.length, ONE_ITEM);
+  const item = items[0]!;
+  assert.equal(item.count, THREE_SPANS);
+  assert.ok("share" in item);
+  assertClose(item.share, 0.3);
+});
+
 test("test_floor_share refuses the group_by worker_instance", () => {
   const result = analyticsDurationQuerySchema.safeParse({
     measure: "test_floor_share",
