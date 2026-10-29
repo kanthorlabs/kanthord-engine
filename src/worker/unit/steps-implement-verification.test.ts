@@ -71,7 +71,7 @@ test("a persistent kill in a task verification stops with the infrastructure cod
   }
 });
 
-test("a persistent kill in a node verification of the verdict unit stops with the infrastructure code", async (t) => {
+test("a persistent kill in a node verification of the release gate stops with the infrastructure code", async (t) => {
   const passing = task("passing", "true");
   const h = await fixture(
     t,

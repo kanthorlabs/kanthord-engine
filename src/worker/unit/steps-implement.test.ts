@@ -8,10 +8,12 @@ import { REASON_MAX_LENGTH } from "../../kernel/probe.ts";
 import {
   fauxAssistantMessage,
   fauxToolCall,
+  listedVerificationSpans,
   recordSpans,
   spanEnds,
 } from "./test-support.ts";
 import { SpanOperation } from "./telemetry.ts";
+import { VerificationContext } from "./method-telemetry.ts";
 import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
@@ -415,6 +417,70 @@ test("an implement node with no task commits its change with the node identity i
   const log = await simpleGit(h.root).log();
   assert.equal(log.latest!.body.split("\n")[0], nodeId);
   assert.ok(existsSync(join(h.root, "node-file")));
+});
+
+test("a task skips each node command in the live checkout and runs each own command", async (t) => {
+  const current = task("work", "true");
+  current.content.verifications = ["true", "test -d .", "true", "test -d ."];
+  const h = await fixture(t, [current], []);
+  const records = recordSpans(h);
+  const { verification } = await verifyTaskRun(h, current);
+  assert.deepEqual(
+    verification.results.map((result) => result.command),
+    ["test -d .", "test -d ."],
+  );
+  assert.deepEqual(
+    listedVerificationSpans(records).map((span) => [span.context, span.index]),
+    [
+      [VerificationContext.Task, 0],
+      [VerificationContext.Task, 1],
+    ],
+  );
+  const node = await verifyTaskRun(
+    h,
+    nodeUnitOf(h.input.claim.node_id, h.revision),
+  );
+  assert.deepEqual(node.verification.results, []);
+  assert.deepEqual(node.commands, []);
+});
+
+test("a node with no task runs no live verification, and the release gate runs each node verification once", async (t) => {
+  const h = await fixture(
+    t,
+    [],
+    [
+      fauxAssistantMessage(
+        fauxToolCall("write", { path: "node-file", content: "node" }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("done"),
+    ],
+  );
+  h.revision = {
+    ...h.revision,
+    content: {
+      ...h.revision.content,
+      verifications: ["test -f node-file", "true"],
+    },
+  };
+  const records = recordSpans(h);
+  acceptEvidence(h);
+  recordReleases(h);
+  assert.deepEqual(await runStepsImplement(h), {
+    kind: "released",
+    furtherWork: false,
+  });
+  const spans = listedVerificationSpans(records);
+  assert.deepEqual(
+    spans.filter((span) => span.context === VerificationContext.Node),
+    [],
+  );
+  assert.deepEqual(
+    spans
+      .filter((span) => span.context === VerificationContext.Release)
+      .map((span) => span.index),
+    [0, 1],
+  );
 });
 
 const NODE_FRAME =

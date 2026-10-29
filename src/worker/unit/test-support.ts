@@ -43,7 +43,7 @@ import {
 import { RecordKind, type TelemetryRecord } from "../../tracking/contract.ts";
 import { AFFECTED_DECLARATION_FILE } from "./affected.ts";
 import { ExecutionBudget } from "./budget.ts";
-import { type SpanOperation, SpanRecorder } from "./telemetry.ts";
+import { SpanOperation, SpanRecorder } from "./telemetry.ts";
 import { openNativeAgent } from "./native-agent.ts";
 import { ExecutionRun, type MethodClaim } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
@@ -52,6 +52,7 @@ import { prepareStepsWorkspace } from "./steps-implement.ts";
 import type { Verdict } from "./node-reads.ts";
 import type { VerificationFacts } from "./progress-rule.ts";
 import { doneTrailerOf } from "./done-record.ts";
+import { VerificationKind } from "./method-telemetry.ts";
 export { LOCAL_GIT_SSH_ACCESS } from "../../repository/sshd-test-support.ts";
 export {
   scriptedProvider,
@@ -476,6 +477,24 @@ export function spanEnds(
     record.operation === operation &&
     "end_time" in record
       ? [record]
+      : [],
+  );
+}
+
+export function listedVerificationSpans(records: readonly TelemetryRecord[]) {
+  return records.flatMap((record) =>
+    record.kind === RecordKind.Span &&
+    record.operation === SpanOperation.Verification &&
+    record.start_time !== undefined &&
+    record.attributes?.["kanthord.verification.kind"] ===
+      VerificationKind.Listed
+      ? [
+          {
+            context: record.attributes["kanthord.verification.context"],
+            index: record.attributes["kanthord.verification.index"],
+            owner: record.attributes["kanthord.verification.owner_id"],
+          },
+        ]
       : [],
   );
 }

@@ -11,6 +11,7 @@ import { runStepsImplement, startCheck } from "./steps-implement.ts";
 import type { WorkspaceCheckout } from "./workspace.ts";
 import { NoProgressRule } from "./progress-rule.ts";
 import { SpanOperation } from "./telemetry.ts";
+import { VerificationContext } from "./method-telemetry.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
 import {
   advanceBase,
@@ -18,9 +19,11 @@ import {
   fauxAssistantMessage,
   fauxToolCall,
   implementFixture as fixture,
+  listedVerificationSpans,
   NO_PROVIDER_CALLS,
   recordDone,
   recordReleases,
+  recordSpans,
   task,
   TEST_SSH_ACCESS,
 } from "./test-support.ts";
@@ -145,7 +148,7 @@ test("a verdict that names no task sends a verdict turn and an unchanged tree st
 
 test("a verdict stop carries the passing verification of a task that ran before the verdict turns", async (t) => {
   const judgedTask = task("judged", "true");
-  const pending = task("pending", "true");
+  const pending = task("pending", "test -d .");
   const h = await fixture(
     t,
     [judgedTask, pending],
@@ -171,6 +174,40 @@ test("a verdict stop carries the passing verification of a task that ran before 
       timed_out: false,
     },
   });
+});
+
+test("a verdict unit whose rule holds runs no live node command and the release gate runs each node command once", async (t) => {
+  const { h } = await verdictHarness(t, [
+    write("addressed"),
+    fauxAssistantMessage("addressed"),
+  ]);
+  h.revision = {
+    ...h.revision,
+    content: { ...h.revision.content, verifications: ["true", "test -d ."] },
+  };
+  h.verdict = verdictAt(VERDICT, h.checkouts);
+  const records = recordSpans(h);
+  recordReleases(h);
+  recordEvidence(h);
+  assert.deepEqual(await executionBoundary(h.run, () => runStepsImplement(h)), {
+    kind: "released",
+    furtherWork: false,
+  });
+  const spans = listedVerificationSpans(records);
+  assert.deepEqual(
+    spans.filter((span) => span.context === VerificationContext.Node),
+    [],
+  );
+  assert.deepEqual(
+    spans
+      .filter(
+        (span) =>
+          span.context === VerificationContext.Release &&
+          span.owner === h.input.claim.node_id,
+      )
+      .map((span) => span.index),
+    [0, 1],
+  );
 });
 
 test("a base move between the review and the rework does not satisfy the verdict rule", async (t) => {

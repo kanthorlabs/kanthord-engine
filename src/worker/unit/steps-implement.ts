@@ -382,7 +382,7 @@ async function runNodeInstruction(
 ): Promise<TaskResult> {
   const budget = state.agent.budget;
   const ended: TaskResult = { kind: TaskResultKind.BudgetEnd };
-  const commands = state.revision.content.verifications;
+  const commands = ownCommandsOf(state, unit);
   const agent = gatedAgent(state, unitCommitMessage(state, unit));
   let ruled = node.judged.length > NO_CHECKOUTS;
   let instruction = node.text;
@@ -411,7 +411,9 @@ async function runNodeInstruction(
       countUnchangedTurn(state, NoProgressRule.UnchangedRevision);
     const checked = await verifyCommands(state, unit, commands);
     const { verification, outputs } = checked;
-    const passed = verificationPassed(verification, commands);
+    const passed =
+      checked.outcome === VerificationClass.Pass &&
+      verificationPassed(verification, checked.commands);
     state.lastVerification = verificationFactsOf(passed, verification);
     state.run.noteVerification(state.lastVerification?.timed_out ?? false);
     state.run.log("task verified", {
@@ -481,7 +483,9 @@ export async function runTask(
     });
     const checked = await verifyTaskRun(state, task);
     const { verification, outputs } = checked;
-    const passed = verificationPassed(verification, task.content.verifications);
+    const passed =
+      checked.outcome === VerificationClass.Pass &&
+      verificationPassed(verification, checked.commands);
     state.lastVerification = verificationFactsOf(passed, verification);
     state.run.noteVerification(state.lastVerification?.timed_out ?? false);
     state.run.log("task verified", {
@@ -703,7 +707,18 @@ export function verifyTaskRun(
   state: StepsState,
   task: TaskContent,
 ): Promise<CheckedRun> {
-  return verifyCommands(state, task, task.content.verifications);
+  return verifyCommands(state, task, ownCommandsOf(state, task));
+}
+
+export function ownCommandsOf(
+  state: Pick<StepsState, "input" | "revision">,
+  unit: TaskContent,
+): string[] {
+  if (unit.id === state.input.claim.node_id) return [];
+  const nodeCommands = new Set(state.revision.content.verifications);
+  return unit.content.verifications.filter(
+    (command) => !nodeCommands.has(command),
+  );
 }
 
 async function pendingSetup(state: StepsState): Promise<CheckedRun | null> {
