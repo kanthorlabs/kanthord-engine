@@ -538,11 +538,9 @@ export class WorkerInstances implements WorkerInstanceLookups {
         ...record,
         connection: this.connectionOf(record.id),
         binding_count: bindings.length,
-        holder_mismatch: this.dependencies.holderMismatch(
-          tx,
-          record.name,
-          bindings,
-        ),
+        holder_mismatch:
+          record.placement === InstancePlacement.Worker &&
+          this.dependencies.holderMismatch(tx, record.name, bindings),
       };
     });
     return {
