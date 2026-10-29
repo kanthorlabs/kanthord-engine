@@ -58,10 +58,12 @@ Opus at medium effort. The plan joins the selector graph, the test run, the git 
   3. Add the test "a change of a global input or a gate file runs every test file". Commit a change of `package.json`, then of `.kanthord/affected-tests.json`. Assert that each run runs every test file.
   4. Add the test "a file of always_run runs with a matching record". List `src/b.test.ts` in `.kanthord/suite-pass.json`. Assert that the second run runs `src/b.test.ts` only.
   5. Add the test "a dirty or untracked tree writes no record". Add an untracked file and run `run --write`. Assert the refusal and no record store. Repeat with a modified tracked file.
-  6. Add the test "a failed test file writes no record". Make `src/b.test.ts` fail. Assert a record for `src/a.test.ts` only and exit code 1.
-  7. Add the test "the full flag runs every test file and writes records".
-  8. Add the test "the key changes with the Node.js version and the pnpm version". Call `keyOf` with two toolchains.
-  9. Add the test "the store keeps the 20000 newest records".
+  6. Add the test "a dirty tree without --write runs every test file". Write a record, then modify `src/a.ts` with no commit. Run `run` without `--write`. Assert that every test file runs and that the store does not change.
+  7. Add the test "a test run that dirties the tree writes no record". Let the test command create an untracked file. Run `run --write`. Assert exit 2 and no record store.
+  8. Add the test "a failed test file writes no record". Make `src/b.test.ts` fail. Assert a record for `src/a.test.ts` only and exit code 1.
+  9. Add the test "the full flag runs every test file and writes records".
+  10. Add the test "the key changes with the Node.js version and the pnpm version". Call `keyOf` with two toolchains.
+  11. Add the test "the store keeps the 20000 newest records".
 - Verify: `PATH="$(node scripts/test-path.mjs)" node --test --test-timeout=60000 scripts/suite-pass.test.mjs` fails, because `scripts/suite-pass.mjs` does not exist.
 
 ### 06.2 Write the record steps
@@ -73,7 +75,7 @@ Opus at medium effort. The plan joins the selector graph, the test run, the git 
   3. Read the toolchain: `process.versions.node` and the output of `pnpm --version`.
   4. Read the blob ids with `git ls-tree -r -z HEAD`. Build the key of each test file of the arguments with decision D8: the global inputs are `GLOBAL_INPUTS` of the selector and `static/pi-tools.json`.
   5. Read the record store. An absent or invalid store reads as empty.
-  6. Select the run files: each argument file with no record of its key, and each argument file that `always_run` lists. A file of `always_run` that is no argument file does not run in this job. With `--full`, select every argument file.
+  6. Select the run files: each argument file with no record of its key, and each argument file that `always_run` lists. When `git status --porcelain --untracked-files=all` prints a line, select every argument file (decision D8). A file of `always_run` that is no argument file does not run in this job. With `--full`, select every argument file.
   7. With `--write`, refuse with exit 2 when `git status --porcelain --untracked-files=all` prints a line.
   8. Run the selected files with `runTests` of the selector and the `--concurrency` value. With no selected file, call no `runTests`.
   9. With `--write`, check the git status again. On a clean tree, add one record for each passed file with its test time and the time of the run. Keep the 20000 newest records, and write the store.
