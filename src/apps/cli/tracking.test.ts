@@ -613,6 +613,23 @@ test("analytics duration sends the measure instance_busy_ratio by worker_instanc
   assert.deepEqual(JSON.parse(result.stdout), ANALYTICS_ANSWER);
 });
 
+test("analytics duration accepts the measure test_floor_share", async (t) => {
+  const { endpoint, seen } = await fakeServer(t, ANALYTICS_ANSWER);
+  const result = await run(
+    t,
+    ["analytics", "duration", "--measure", "test_floor_share"],
+    endpoint,
+  );
+  assert.equal(result.code, ExitCode.Success, result.stderr);
+  const url = new URL(seen[0]?.url ?? "", endpoint);
+  assert.deepEqual(Object.fromEntries(url.searchParams), {
+    measure: "test_floor_share",
+    group_by: "none",
+    bucket: "none",
+  });
+  assert.deepEqual(JSON.parse(result.stdout), ANALYTICS_ANSWER);
+});
+
 const INVALID_ANALYTICS_OPTIONS: readonly (readonly [
   string,
   string[],

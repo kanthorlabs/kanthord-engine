@@ -36,6 +36,7 @@ const TOLERANCE = 0.000001;
 const SPAN_COUNT = 100;
 const ONE_ITEM = 1;
 const TWO_INSTANCES = 2;
+const THREE_SPANS = 3;
 const ALL_DURATIONS = 3;
 const TURN_DURATIONS = 2;
 const TURN_MAX = 30;
@@ -63,6 +64,11 @@ const WAIT = "kanthord.queue.wait_ms";
 const INSTANCE = "kanthord.worker.instance";
 const STATE_FROM = "kanthord.node.state.from";
 const STATE_TO = "kanthord.node.state.to";
+const VERIFICATION_OPERATION = "worker.verification";
+const VERIFICATION_KIND = "kanthord.verification.kind";
+const VERIFICATION_CONTEXT = "kanthord.verification.context";
+const FLOOR_SECONDS = "kanthord.affected.floor_seconds";
+const TOTAL_SECONDS = "kanthord.affected.total_seconds";
 
 function traceIdOf(n: number): string {
   return n.toString(16).padStart(32, "0");
@@ -131,7 +137,11 @@ function addSpans(store: Store, seeds: readonly Seed[]): void {
 
 function read(
   store: Store,
-  measure: Exclude<AnalyticsMeasure, typeof AnalyticsMeasure.InstanceBusyRatio>,
+  measure: Exclude<
+    AnalyticsMeasure,
+    | typeof AnalyticsMeasure.InstanceBusyRatio
+    | typeof AnalyticsMeasure.FloorShare
+  >,
   overrides: Partial<Omit<DurationQuery, "measure">> = {},
   limit = LIMIT,
 ): Promise<DurationRead> {
@@ -626,4 +636,112 @@ test("the query schema pairs instance_busy_ratio with worker_instance only", () 
       .success,
     false,
   );
+});
+
+function floorSpan(
+  start: number,
+  floor: number | undefined,
+  total: number | undefined,
+  overrides: { kind?: string; context?: string; trace?: number } = {},
+): Seed {
+  const attributes: Record<string, string | number> = {
+    [VERIFICATION_KIND]: overrides.kind ?? "affected",
+    [VERIFICATION_CONTEXT]: overrides.context ?? "release",
+  };
+  if (floor !== undefined) attributes[FLOOR_SECONDS] = floor;
+  if (total !== undefined) attributes[TOTAL_SECONDS] = total;
+  return {
+    trace: overrides.trace ?? 1,
+    start,
+    operation: VERIFICATION_OPERATION,
+    attributes,
+  };
+}
+
+function readFloorShare(
+  store: Store,
+  overrides: Partial<Omit<DurationQuery, "measure">> = {},
+) {
+  return readDuration(
+    store,
+    {
+      from: MONDAY,
+      to: RANGE_END,
+      measure: AnalyticsMeasure.FloorShare,
+      group_by: DurationGroupBy.NodeId,
+      bucket: AnalyticsBucket.None,
+      ...overrides,
+    },
+    LIMIT,
+    new AbortController().signal,
+  );
+}
+
+test("test_floor_share answers the share of the latest release affected span of each group", async (t) => {
+  const store = seededStore(t);
+  addSpans(store, [
+    floorSpan(MONDAY + 2000, 20, 100),
+    floorSpan(MONDAY + 3000, 30, 120),
+    floorSpan(MONDAY + 1000, 10, 100),
+  ]);
+  const { items, truncated } = await readFloorShare(store);
+  assert.equal(truncated, false);
+  assert.equal(items.length, ONE_ITEM);
+  const item = items[0]!;
+  assert.equal(item.key, NODE_A);
+  assert.equal(item.bucket_start, null);
+  assert.equal(item.count, THREE_SPANS);
+  assert.ok("share" in item);
+  assertClose(item.share, 0.25);
+  assert.ok(!("p50" in item));
+});
+
+test("test_floor_share skips a span of the evaluation, a span with no total and a span with a total of 0", async (t) => {
+  const store = seededStore(t);
+  addSpans(store, [
+    floorSpan(MONDAY + 1000, 10, 100),
+    floorSpan(MONDAY + 2000, 10, 100, { context: "node" }),
+    floorSpan(MONDAY + 3000, 10, 100, { kind: "evaluation" }),
+    floorSpan(MONDAY + 4000, 10, undefined),
+    floorSpan(MONDAY + 5000, 10, 0),
+    floorSpan(MONDAY + 6000, undefined, 100),
+    { start: MONDAY + 7000, operation: "agent.turn" },
+  ]);
+  const { items } = await readFloorShare(store);
+  assert.equal(items.length, ONE_ITEM);
+  const item = items[0]!;
+  assert.equal(item.count, ONE_ITEM);
+  assert.ok("share" in item);
+  assertClose(item.share, 0.1);
+});
+
+test("test_floor_share keeps one item for each bucket", async (t) => {
+  const store = seededStore(t);
+  addSpans(store, [
+    floorSpan(MONDAY + 1000, 10, 100),
+    floorSpan(MONDAY + DAY + 1000, 50, 100),
+    floorSpan(MONDAY + DAY + 2000, 40, 100),
+  ]);
+  const { items } = await readFloorShare(store, {
+    bucket: AnalyticsBucket.Day,
+  });
+  assert.deepEqual(
+    items.map((item) => [item.bucket_start, item.count]),
+    [
+      [MONDAY, 1],
+      [MONDAY + DAY, 2],
+    ],
+  );
+  const shares = items.map((item) => ("share" in item ? item.share : null));
+  assertClose(shares[0]!, 0.1);
+  assertClose(shares[1]!, 0.4);
+});
+
+test("test_floor_share refuses the group_by worker_instance", () => {
+  const result = analyticsDurationQuerySchema.safeParse({
+    measure: "test_floor_share",
+    group_by: "worker_instance",
+  });
+  assert.equal(result.success, false);
+  assert.deepEqual(result.error?.issues[0]?.path, ["group_by"]);
 });
