@@ -48,14 +48,14 @@ Source: the 115 `worker.verification` spans of the phase 1 nodes `e01` to `e07` 
 
 - T4. It is fixed: `report.mjs` lists each budget end.
 - T6 beyond the prompt text of plan 03. In phase 1, `bash` tool calls of 4 min or more took 67.7 min of the coder executions. Plan 03 changes the text only, and the set measures no saving for it.
-- The other rules of root pull request #277. Open item O4 holds their build:
+- The other rules of root pull request #277. The plan set `suite-pass-record/` builds them (ruling O4):
   - the verification memo (`worker-service.impl.md:1482-1493`). Phase 1 had no failed verification, so it cannot measure the memo;
   - the affected report version 2 with `floor` (`worker-service.impl.md:1595-1611`);
   - the floor span attributes (`docs/brainstorm/tracking-service.impl.md:86-88`);
   - the measure `test_floor_share` (`tracking-service.impl.md:347`, `:352`, `:358`; `docs/brainstorm/architecture.impl.md:1551`, `:1555`);
   - the suite pass record and its proposal (`docs/brainstorm/project-service.impl.md:373`, `:403-435`, `:633-641`).
 - The restated live run and release gate of root `docs/explanation/coder-worker.md`. Root `HANDOFF.md` gives it to the build of the suite pass record.
-- Option D of the reviewer for C2: write the usage of the reply at `message_end`, for example in a child span that ends there. It also covers a revocation during a tool call. It waits for a ruling of Ulrich (open item O5), and no plan of this set builds it.
+- Option D of the reviewer for C2: write the usage of the reply at `message_end`, for example in a child span that ends there. Ruling O5 keeps option B and records D as a root HANDOFF item.
 - The CI `check` job. It runs once for each pull request, 6 to 7 min.
 
 ## Plans
@@ -107,7 +107,7 @@ Each plan ends with its task `NN.E`. The gate holds every row of its plan. A fai
 - O3 (C2) — RULED 2026-10-29 by Ulrich: option B. Plan 04 writes the usage of a finished reply on a stopped turn. Root `docs/brainstorm/tracking-service.impl.md` adds the line of decision D8.
 - S1 (T6) — RULED 2026-10-29 by Ulrich: option A. Plan 03 copies the prompt text (decision D9).
 - T5 — RULED 2026-10-29 by Ulrich: option A, decision D6 as written.
-- O4 — OPEN for Ulrich. The set names no owner of the other rules of root pull request #277 (section "Out of scope"). Recommendation: one new plan set for the suite pass record, which also builds the memo, the affected report version 2, the floor attributes and `test_floor_share`. These rules share the floor and the suite pass configuration, so one set keeps their order. Alternative B: one plan for each rule in later sets. Trade-off: smaller pull requests, but each set must restate the shared floor rules.
-- O5 (C2) — OPEN for Ulrich. Option D of the reviewer: write the usage of the reply at `message_end`, for example in a child span that ends there. It also covers a revocation during a tool call. Aelita raises it with Ulrich. No plan of this set builds it.
+- O4 — RULED 2026-10-29 by Ulrich: option A. One new plan set `suite-pass-record/` builds the other rules of root pull request #277: the verification memo, the affected report version 2 with `floor`, the floor attributes, `test_floor_share`, the suite pass record with its proposal, and the remainder of root `docs/brainstorm/HANDOFF.md:89`. Its execution starts after plan 02 of this set merges.
+- O5 (C2) — RULED 2026-10-29 by Ulrich: option B stays. Option D, a reply span for each model reply, becomes a root HANDOFF item. No plan of this set builds it.
 
 The decisions that this set takes are in [decisions.md](decisions.md).
