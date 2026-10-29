@@ -6,6 +6,7 @@ import { httpClient } from "../../gateway/client.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import {
+  ActorKind,
   AssessmentResult,
   AssetKind,
   Intent,
@@ -386,6 +387,8 @@ async function setup(t: TestContext, adapter: typeof HTTP | typeof DIRECT) {
     token,
     project_id: projectId,
     node_id: nodeId,
+    binding_id: binding.id,
+    mission_id: mission.id,
   };
 }
 
@@ -464,6 +467,53 @@ test("a revoked credential refusal removes the reservation and a repeat reaches 
     [GrantKind.FrozenAction, GrantKind.FrozenAction, GrantKind.SshIdentity],
   );
   assert.equal(h.creates(), SINGLE_CALL);
+});
+
+test("the setup node body creates one node and changes no other node", async (t) => {
+  const h = await setup(t, DIRECT);
+  const listNodes = async () =>
+    completed(
+      await h.call(missionOperations["node.list"], {
+        params: { mission_id: h.mission_id },
+        query: {},
+        body: null,
+      }),
+    ).items;
+  const before = await listNodes();
+  const body = completed(
+    await h.call(projectOperations["binding.suite_pass.plan.get"], {
+      params: { project_id: h.project_id, binding_id: h.binding_id },
+      query: {},
+      body: null,
+    }),
+  );
+  const mission = completed(
+    await h.call(missionOperations.get, {
+      params: { project_id: h.project_id },
+      query: {},
+      body: null,
+    }),
+  );
+  const change = completed(
+    await h.call(missionOperations["node.create"], {
+      params: { mission_id: h.mission_id },
+      query: {},
+      body: { ...body, expected_mission_version: mission.version },
+    }),
+  );
+  assert.equal(change.revisions.length, SINGLE_CALL);
+  const [created] = change.revisions;
+  assert.ok(created);
+  assert.equal(created.filename, body.filename);
+  assert.equal(created.actor.kind, ActorKind.Human);
+  assert.deepEqual(change.retired_node_ids, []);
+  assert.deepEqual(change.added_edges, []);
+  const after = await listNodes();
+  assert.equal(after.length, before.length + SINGLE_CALL);
+  assert.deepEqual(
+    after.filter((node) => node.id !== created.node_id),
+    before,
+  );
 });
 
 test("action operation keeps the long unary execution-scoped contract", () => {

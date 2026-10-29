@@ -17,6 +17,7 @@ import {
   CancellationContext,
   cancelled,
   type Context,
+  ContextCancelled,
 } from "../kernel/context.ts";
 import {
   HealthRegistry,
@@ -46,6 +47,8 @@ import { SSH_AGENT_CLEANUP_TIMEOUT_MS } from "../repository/contract.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { AgentErrorCode, type HolderScope } from "../agent/contract.ts";
 import { SERVER_HOLDER } from "../custody/contract.ts";
+import { Intent, nodeCreateSchema } from "../mission/contract.ts";
+import { CommitType } from "../kernel/commit-message.ts";
 import {
   InvalidReason,
   PROMPT_SOURCE_MAX_BYTES,
@@ -5514,6 +5517,9 @@ test("binding.verify returns 404 for a non-repository binding", async (t) => {
 
 const INSTRUCTION_COMMIT = "a".repeat(40);
 const TREE_PREFIX = "tree-";
+const SUITE_PASS_FILE = ".kanthord/suite-pass.json";
+const SUITE_PASS_TEXT = '{ "version": 1, "always_run": [] }';
+const SuitePassState = { Present: "present", Absent: "absent" } as const;
 type InstructionTexts = Array<string | null>;
 
 function environmentReadFixture(
@@ -5881,28 +5887,228 @@ test("a revision pinned before an environment set takes the environment of the c
   assert.deepEqual(policy?.environment, STORED_ENVIRONMENT);
 });
 
-test("binding.environment.get answers the stored environment with no repository read", async (t) => {
-  const { f, saved, resolveCalls, readCalls } = environmentReadFixture(
-    t,
-    {},
-    WRITABLE,
-  );
-  f.project.cancelEnvironmentRuns();
-  const answer = await setEnvironment(f, saved, STORED_ENVIRONMENT);
+async function storedEnvironmentRead(
+  t: TestContext,
+  behavior: Parameters<typeof environmentReadFixture>[1] = {},
+) {
+  const fixed = environmentReadFixture(t, behavior, WRITABLE);
+  fixed.f.project.cancelEnvironmentRuns();
+  const answer = await setEnvironment(fixed.f, fixed.saved, STORED_ENVIRONMENT);
   const stored = answer.bindings[REPOSITORY_NAME];
   assert.ok(stored);
-  const read = await f.invokeAsync("binding.environment.get", {
-    project_id: saved.project_id,
-    binding_id: stored.id,
-  });
+  return {
+    ...fixed,
+    params: { project_id: fixed.saved.project_id, binding_id: stored.id },
+  };
+}
+
+test("binding.environment.get reads only the suite pass configuration for a stored environment", async (t) => {
+  const { f, params, resolveCalls, readCalls } = await storedEnvironmentRead(t);
+  const read = await f.invokeAsync("binding.environment.get", params);
   assert.deepEqual(read, {
     source: EnvironmentSource.Stored,
     commit: null,
     environment: STORED_ENVIRONMENT,
     reason: null,
+    suite_pass: SuitePassState.Absent,
   });
-  assert.deepEqual(resolveCalls, []);
-  assert.deepEqual(readCalls, []);
+  assert.equal(resolveCalls.length, ONE_CALL);
+  assert.deepEqual(
+    readCalls.map(({ paths }) => paths),
+    [[SUITE_PASS_FILE]],
+  );
+});
+
+test("binding.environment.get answers suite_pass present when the base commit holds the suite pass configuration", async (t) => {
+  const { f, saved, readCalls } = environmentReadFixture(t, {
+    files: {
+      [DEVCONTAINER_FILE]: DEVCONTAINER_TEXT,
+      [SUITE_PASS_FILE]: SUITE_PASS_TEXT,
+    },
+    placement: WorkerPlacement.Container,
+  });
+  const answer = await f.invokeAsync("binding.environment.get", saved);
+  assert.equal(answer.source, EnvironmentSource.Repository);
+  assert.equal(answer.suite_pass, SuitePassState.Present);
+  assert.deepEqual(readCalls[NO_ITEMS]?.paths, [
+    DEVCONTAINER_FILE,
+    SUITE_PASS_FILE,
+  ]);
+});
+
+test("binding.environment.get answers suite_pass absent with no suite pass configuration", async (t) => {
+  const absent = environmentReadFixture(t, {
+    files: { [DEVCONTAINER_FILE]: DEVCONTAINER_TEXT },
+    placement: WorkerPlacement.Container,
+  });
+  const answer = await absent.f.invokeAsync(
+    "binding.environment.get",
+    absent.saved,
+  );
+  assert.equal(answer.suite_pass, SuitePassState.Absent);
+  for (const state of [
+    RepositoryFileState.TooLarge,
+    RepositoryFileState.NotUtf8,
+  ]) {
+    const unreadable = environmentReadFixture(t, {
+      files: {
+        [DEVCONTAINER_FILE]: DEVCONTAINER_TEXT,
+        [SUITE_PASS_FILE]: SUITE_PASS_TEXT,
+      },
+      states: [RepositoryFileState.Present, state],
+      placement: WorkerPlacement.Container,
+    });
+    const read = await unreadable.f.invokeAsync(
+      "binding.environment.get",
+      unreadable.saved,
+    );
+    assert.equal(read.suite_pass, SuitePassState.Present, state);
+  }
+});
+
+test("binding.environment.get answers suite_pass for a stored environment", async (t) => {
+  const { f, params } = await storedEnvironmentRead(t, {
+    files: { [SUITE_PASS_FILE]: SUITE_PASS_TEXT },
+  });
+  assert.deepEqual(await f.invokeAsync("binding.environment.get", params), {
+    source: EnvironmentSource.Stored,
+    commit: null,
+    environment: STORED_ENVIRONMENT,
+    reason: null,
+    suite_pass: SuitePassState.Present,
+  });
+});
+
+test("binding.environment.get keeps the stored environment and answers suite_pass null when the read fails", async (t) => {
+  for (const behavior of [
+    { resolveFails: true },
+    { readFails: true },
+    { commits: [null] },
+  ]) {
+    const { f, params } = await storedEnvironmentRead(t, behavior);
+    assert.deepEqual(
+      await f.invokeAsync("binding.environment.get", params),
+      {
+        source: EnvironmentSource.Stored,
+        commit: null,
+        environment: STORED_ENVIRONMENT,
+        reason: null,
+        suite_pass: null,
+      },
+      JSON.stringify(behavior),
+    );
+  }
+  const { f, params } = await storedEnvironmentRead(t, { readFails: true });
+  const operation = projectOperations["binding.environment.get"];
+  const aborted = new CancellationContext(
+    background,
+    Date.now() + REPOSITORY_FILES_READ_TIMEOUT_MS,
+  );
+  aborted.cancel();
+  await assert.rejects(
+    f.registry
+      .get(operation.id)
+      .handler(operation.input.parse({ params, query: {}, body: null }), {
+        ...f.caller,
+        context: aborted,
+      }),
+    ContextCancelled,
+  );
+});
+
+const SETUP_BINDING_NAME = "engine";
+const SETUP_VERIFICATIONS = [
+  "test -f .kanthord/suite-pass.json",
+  "! git check-ignore -q .kanthord/suite-pass.json",
+  "test ! -f .kanthord/affected-tests.json || grep -qF .kanthord/suite-pass.json .kanthord/affected-tests.json",
+];
+
+function setupPlanFixture(t: TestContext, action?: Record<string, unknown>) {
+  const f = fixture(t);
+  const binding = repositoryBinding();
+  const config = {
+    ...binding.config,
+    strategy: {
+      base_branch: "main",
+      ...(action === undefined ? {} : { action }),
+    },
+  };
+  return f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    const written = persistBindings(tx, project.id, {
+      [SETUP_BINDING_NAME]: { kind: BindingKind.Repository, config },
+      general: workerBinding(),
+    }).bindings;
+    const repository = written[SETUP_BINDING_NAME];
+    const worker = written.general;
+    assert.ok(repository && worker);
+    return {
+      f,
+      params: { project_id: project.id, binding_id: repository.id },
+      worker: { project_id: project.id, binding_id: worker.id },
+    };
+  });
+}
+
+test("binding.suite_pass.plan.get answers the node create body of the setup node", (t) => {
+  for (const action of [
+    { name: GitHubAction.PullRequest, landing: Landing.Human },
+    { name: GitHubAction.PullRequest },
+  ]) {
+    const { f, params } = setupPlanFixture(t, action);
+    const answer = f.invoke("binding.suite_pass.plan.get", null, params);
+    assert.equal(answer.filename, `suite-pass-setup-${SETUP_BINDING_NAME}.md`);
+    assert.deepEqual(answer.content.bindings, [params.binding_id]);
+    assert.equal(answer.content.intent, Intent.Implement);
+    assert.equal(answer.content.commit_type, CommitType.Chore);
+    assert.deepEqual(answer.content.verifications, SETUP_VERIFICATIONS);
+    assert.deepEqual(answer.tasks, []);
+    assert.equal(
+      answer.reason,
+      `Add the suite pass record to ${SETUP_BINDING_NAME}.`,
+    );
+    assert.equal(Object.hasOwn(answer.content, "filename"), false);
+    assert.equal(Object.hasOwn(answer.content, "depends_on"), false);
+    assert.ok(
+      nodeCreateSchema.safeParse({ ...answer, expected_mission_version: 1 })
+        .success,
+    );
+  }
+});
+
+test("binding.suite_pass.plan.get refuses a binding with no human landing", (t) => {
+  for (const action of [
+    { name: GitHubAction.PullRequest, landing: Landing.KanthorD },
+    { name: GitHubAction.MergePush },
+  ]) {
+    const { f, params } = setupPlanFixture(t, action);
+    refuses(
+      () => f.invoke("binding.suite_pass.plan.get", null, params),
+      HttpStatus.Conflict,
+      "project.suite_pass.not_proposed",
+    );
+  }
+  const { f, params } = setupPlanFixture(t);
+  refuses(
+    () => f.invoke("binding.suite_pass.plan.get", null, params),
+    HttpStatus.Conflict,
+    "project.suite_pass.not_proposed",
+  );
+});
+
+test("binding.suite_pass.plan.get refuses an absent or a non-repository binding", (t) => {
+  const { f, params, worker } = setupPlanFixture(t, {
+    name: GitHubAction.PullRequest,
+  });
+  for (const target of [
+    worker,
+    { ...params, binding_id: createIdentity(BINDING_ID_PREFIX) },
+  ])
+    refuses(
+      () => f.invoke("binding.suite_pass.plan.get", null, target),
+      HttpStatus.NotFound,
+      ProjectErrorCode.BindingNotFound,
+    );
 });
 
 test("binding.environment.get reads the devcontainer file of the repository at the base head", async (t) => {
