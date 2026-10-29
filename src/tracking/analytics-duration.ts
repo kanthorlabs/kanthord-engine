@@ -135,6 +135,9 @@ const AFTER = 1;
 const NO_LIMIT = 0;
 const SAME_ORDER = 0;
 const NO_TEST_TIME = 0;
+const NO_SAMPLES = 0;
+const NO_WINDOW_LENGTH = 0;
+const NO_BUSY_RATIO = 0;
 
 function stringOf(span: AnalyticsSpan, name: string): string | null {
   const value = span.attributes[name];
@@ -157,7 +160,7 @@ const KEY_OF: Record<DurationGroupBy, KeyOf> = {
 };
 
 export function percentile(sorted: readonly number[], p: number): number {
-  assert.ok(sorted.length > NO_LIMIT);
+  assert.ok(sorted.length > NO_SAMPLES);
   const last = sorted.length - 1;
   const h = last * p;
   const k = Math.floor(h);
@@ -307,7 +310,7 @@ function selectedTracesOf(store: Store, query: DurationQuery) {
 }
 
 function ratioOf(busyMs: number, lengthMs: number): number {
-  return lengthMs === NO_LIMIT ? NO_LIMIT : busyMs / lengthMs;
+  return lengthMs === NO_WINDOW_LENGTH ? NO_BUSY_RATIO : busyMs / lengthMs;
 }
 
 async function readBusyRatio(
