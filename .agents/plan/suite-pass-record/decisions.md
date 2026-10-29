@@ -115,7 +115,7 @@ A plan removes each field, prop and helper that only fed the code that the plan 
 
 ## D12 — The setup node of the suite pass proposal
 
-RULED 2026-10-29 by Ulrich (O1). The rule of `docs/brainstorm/project-service.impl.md:639-644` and `:806` at root pull request #281 head `2d6587f`:
+RULED 2026-10-29 by Ulrich (O1). The rule of `docs/brainstorm/project-service.impl.md:639-645` and `:806` at root pull request #281 head `2d6587f`:
 
 - A human accepts the proposal with one `mission.node.create`.
 - The engine ships `static/plan/suite-pass-setup.md`, one node file with `intent: implement`, `commit_type: chore`, no task and no `bindings` key.
