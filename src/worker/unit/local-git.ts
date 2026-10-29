@@ -329,6 +329,28 @@ export async function commitOf(
   return commit;
 }
 
+export async function treeOf(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  commit: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string> {
+  assert.ok(directory);
+  assert.match(commit, COMMIT_PATTERN);
+  const tree = (
+    await run(
+      env,
+      directory,
+      ["rev-parse", "--verify", `${commit}^{tree}`],
+      context,
+      deadlineMs,
+    )
+  ).trim();
+  assert.match(tree, COMMIT_PATTERN);
+  return tree;
+}
+
 export async function symbolicHead(
   env: NodeJS.ProcessEnv,
   directory: string,
