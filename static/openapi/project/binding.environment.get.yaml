@@ -274,11 +274,19 @@ components:
             - type: string
               minLength: 1
             - type: "null"
+        suite_pass:
+          anyOf:
+            - type: string
+              enum:
+                - present
+                - absent
+            - type: "null"
       required:
         - source
         - commit
         - environment
         - reason
+        - suite_pass
       additionalProperties: false
     project.binding.environment.set.Input:
       type: object
