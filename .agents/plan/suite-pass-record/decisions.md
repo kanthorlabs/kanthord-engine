@@ -80,8 +80,8 @@ The rule of `docs/brainstorm/project-service.impl.md:403-435`:
 - `gate_files` comes from `.kanthord/affected-tests.json` of the checkout.
 - The blob ids come from `git ls-tree -r HEAD`. A global input that the tree does not hold pairs with null.
 - The record store is the file `node_modules/.cache/suite-pass/records.json`. It maps each key to `{ file, seconds, written_at }`. A write keeps the 20000 newest records.
-- The script writes records only with the flag `--write`. With `--write`, it refuses a run when `git status --porcelain --untracked-files=all` prints a line before or after the tests.
-- Without `--write`, a tree for which `git status --porcelain --untracked-files=all` prints a line reads every record as a miss. The script runs every argument file and writes no record. CI passes `--write` only after `pnpm install --frozen-lockfile`.
+- The script writes records only with the flag `--write`. With `--write`, it refuses a run when `git status --porcelain --untracked-files=all` prints a line before or after the tests. CI passes `--write` only after `pnpm install --frozen-lockfile`.
+- Without `--write`, a tree for which `git status --porcelain --untracked-files=all` prints a line reads every record as a miss. The script runs every argument file and writes no record.
 - A test file passes when the run ran it, holds no failed test id and holds a test time.
 - CI runs each test file with no matching record and each file of `always_run`. The flag `--full` runs every test file and still writes records.
 - `actions/cache/restore` restores the newest record store of the job, and `actions/cache/save` saves it with `if: always()`. The cache key holds the job name, the run identity and the run attempt. The restore key is the prefix of the job name. The restore runs after `pnpm install --frozen-lockfile`, because the store lives under `node_modules/`.
