@@ -4,6 +4,8 @@ on:
   pull_request:
   push:
     branches: [main]
+  schedule:
+    - cron: "0 3 * * *"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
@@ -27,6 +29,11 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - uses: actions/cache/restore@v6
+        with:
+          path: node_modules/.cache/suite-pass
+          key: suite-pass-check-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: suite-pass-check-${{ runner.os }}-
       - run: pnpm run format:check
       - run: pnpm run typecheck
       - run: pnpm run lint
@@ -40,7 +47,12 @@ jobs:
         run: |
           git ls-files 'src/*.test.ts' | grep -vxF -f <(git grep -l startTestSshd -- 'src/*.test.ts') > "$RUNNER_TEMP/tests"
           wc -l < "$RUNNER_TEMP/tests"
-          pnpm run test:files --test-concurrency="$TEST_CONCURRENCY" $(cat "$RUNNER_TEMP/tests") scripts/test-reporter.test.mjs scripts/test-path.test.mjs scripts/affected-tests.test.mjs
+          node scripts/suite-pass.mjs run --job check --write ${{ github.event_name == 'schedule' && '--full' || '' }} --concurrency "$TEST_CONCURRENCY" $(cat "$RUNNER_TEMP/tests") scripts/test-reporter.test.mjs scripts/test-path.test.mjs scripts/affected-tests.test.mjs scripts/suite-pass.test.mjs
+      - uses: actions/cache/save@v6
+        if: always()
+        with:
+          path: node_modules/.cache/suite-pass
+          key: suite-pass-check-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
 
   e2e:
     runs-on: ubuntu-latest
@@ -53,6 +65,11 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - uses: actions/cache/restore@v6
+        with:
+          path: node_modules/.cache/suite-pass
+          key: suite-pass-e2e-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: suite-pass-e2e-${{ runner.os }}-
       - uses: actions/cache@v6
         with:
           path: .pi-tools
@@ -66,4 +83,9 @@ jobs:
         run: |
           files=$(git grep -l startTestSshd -- 'src/*.test.ts')
           test -n "$files"
-          pnpm run test:files --test-concurrency="$TEST_CONCURRENCY" $files
+          node scripts/suite-pass.mjs run --job e2e --write ${{ github.event_name == 'schedule' && '--full' || '' }} --concurrency "$TEST_CONCURRENCY" $files
+      - uses: actions/cache/save@v6
+        if: always()
+        with:
+          path: node_modules/.cache/suite-pass
+          key: suite-pass-e2e-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
