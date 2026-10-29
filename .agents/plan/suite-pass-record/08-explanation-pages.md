@@ -37,7 +37,7 @@ Sonnet at high effort. The plan restates merged behavior in four pages, and each
 
 ## Depends on
 
-- Plans 01 and 02 of this set merged to engine `main`. Plans 06 and 07 landed on engine `main` and apps `main`.
+- Plan 02 merged; plans 06 and 07 landed.
 - Start from `origin/main` of `kanthorlabs/kanthord`.
 
 ## Provides

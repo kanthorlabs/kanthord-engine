@@ -4,15 +4,15 @@ The plans cite these decisions as D1 to D14. Each decision binds every plan and 
 
 ## D1 — Source and gaps
 
-The design pages under `docs/brainstorm/` of the root repository at `c8c41e7` are the rule (`engine/AGENTS.md:3-6`). `docs/brainstorm/HANDOFF.md:89` follows root pull request #279 at head `c418936`. The rulings of 2026-10-29 on O1, O2, O3, S1 and S8 follow root pull request #281 at head `7c0e114`. A plan task implements the page as written. A task that meets a gap that no decision below covers writes one `DEBATE:` line in its report with the page line that proves the gap. Aelita brings it to Ulrich as one open item.
+The design pages under `docs/brainstorm/` of the root repository at `c8c41e7` are the rule (`engine/AGENTS.md:3-6`). `docs/brainstorm/HANDOFF.md:89` follows root pull request #279 at head `c418936`. The rulings of 2026-10-29 on O1, O2, O3, S1 and S8 follow root pull request #281 at head `2d6587f`. A plan task implements the page as written. A task that meets a gap that no decision below covers writes one `DEBATE:` line in its report with the page line that proves the gap. Aelita brings it to Ulrich as one open item.
 
 ## D2 — The base of plan 01
 
-Plan 01 starts from engine `main` after plans 01 and 02 of `dogfood-time/` merge. Its runner already holds `copyRepeated`, and its live checkout already runs only the own commands of a unit (`dogfood-time/decisions.md`, D2 and D3). Plan 01 cites that code by function name. The executor re-anchors each line before the task.
+Done by engine #378. The rule is `worker-service.impl.md:1482-1495`. Plan 01 started from engine `main` after plans 01 and 02 of `dogfood-time/` merged.
 
 ## D3 — The verification memo
 
-The rule of `docs/brainstorm/worker-service.impl.md:1482-1493`:
+Done by engine #378. The rule is `worker-service.impl.md:1482-1495`:
 
 - The memo belongs to one execution. The code that builds the steps state creates it. No memo crosses a claim.
 - The memo key is the context, the command text, the tree id of each checkout head in the order of the checkouts, and the sorted `[identity, digest]` pairs of the environment of each repository binding.
@@ -22,9 +22,9 @@ The rule of `docs/brainstorm/worker-service.impl.md:1482-1493`:
 - In the context `release`, the memo keeps a result with the class `pass`, and a result with the class `code_failure` that has `timed_out: false` and no cancellation.
 - The memo keeps no result with the class `budget_end` or `infrastructure`, and no result with exit code 127.
 - A memo entry holds the result, the output and the class of the run.
-- A memo hit adds the stored result and output to the run list, with the flaky value `false`. It calls no observer, so it writes no `worker.verification` span. It counts in `ran` of the `no_progress` detail, because `ran` counts the results.
+- A memo hit adds the stored result and output to the run list, with the flaky value `false`. It calls no observer, so it writes no `worker.verification` span. It counts in `ran` of the `no_progress` detail.
 - A memo hit with the class `code_failure` ends the run list as a real failure does.
-- Inside one run list, the result copy of `dogfood-time/` D2 decides first. The memo applies to the first item of each command only.
+- Inside one run list, the result copy of `dogfood-time/` D2 decides first.
 
 ## D4 — The affected report version 2 at the worker
 
@@ -48,7 +48,7 @@ An `affected_base` span and an `affected` span with no valid report hold none of
 
 ## D6 — The measure `test_floor_share`
 
-The rule of `docs/brainstorm/tracking-service.impl.md:348`, `:353` and `:358-359` at root pull request #281 head `7c0e114`. The total above 0 is part of that rule (S8, approved by Ulrich on 2026-10-29):
+The rule of `docs/brainstorm/tracking-service.impl.md:348`, `:353` and `:358-359` at root pull request #281 head `2d6587f`. The total above 0 is part of that rule (S8, approved by Ulrich on 2026-10-29):
 
 - A matching span is a `worker.verification` span with `kanthord.verification.kind` `affected`, `kanthord.verification.context` `release`, a finite `kanthord.affected.floor_seconds` and a finite `kanthord.affected.total_seconds` above 0.
 - The group key and the bucket follow the duration read. A span counts in the bucket of its `start_time`.
@@ -59,12 +59,12 @@ The rule of `docs/brainstorm/tracking-service.impl.md:348`, `:353` and `:358-359
 
 ## D7 — The floor of the engine selector
 
-RULED 2026-10-29 by Ulrich (O3). The rule of `docs/brainstorm/worker-service.impl.md:1599` at root pull request #281 head `7c0e114`: "A production file is a file in the import closure of the entry that the program runs. The engine entry is `src/main.ts`."
+RULED 2026-10-29 by Ulrich (O3). The rule of `docs/brainstorm/worker-service.impl.md:1599` at root pull request #281 head `2d6587f`: "A production file is a file in the import closure of the entry that the program runs. The engine entry is `src/main.ts`."
 
-- A production file is a file of the import closure of the program entry. The engine entry is `src/main.ts`, which `bin/kanthord.mjs` loads as `dist/main.js`.
+- A production file is a file of the import closure of the program entry. The engine entry is `src/main.ts`.
 - The import closure of a file is the file and each file that it reaches through the forward edges of the selector graph: the import edges and the data edges of `DATA_TABLE` and of `new URL(..., import.meta.url)`.
 - A floor test file is a run test file whose import closure holds every production file. `floor.tests` counts every floor test file of the repository, also when the selection runs none of them.
-- The test time of a file is `duration_ms / 1000` of the `test:summary` event of the node test runner that holds `data.file` of that file. Node.js 24 sends no file-level `test:pass` for a passing file.
+- The test time of a file is `duration_ms / 1000` of the `test:summary` event of the node test runner that holds `data.file` of that file.
 - `floor.seconds` is the sum of the test time of the floor test files that the run ran.
 - `floor.total_seconds` is the sum of the test time of every file of `tests` when `selection` is `all`, else null.
 - The selector writes `version: 2` and `floor` in every report.
@@ -115,28 +115,29 @@ A plan removes each field, prop and helper that only fed the code that the plan 
 
 ## D12 — The setup node of the suite pass proposal
 
-RULED 2026-10-29 by Ulrich (O1). The rule of `docs/brainstorm/project-service.impl.md:640` and `:803` at root pull request #281 head `7c0e114`:
+RULED 2026-10-29 by Ulrich (O1). The rule of `docs/brainstorm/project-service.impl.md:639-644` and `:806` at root pull request #281 head `2d6587f`:
 
-- A human accepts the proposal with one `mission.node.create`. The node create changes no other node, and `expected_mission_version` refuses a concurrent edit of the mission.
+- A human accepts the proposal with one `mission.node.create`.
 - The engine ships `static/plan/suite-pass-setup.md`, one node file with `intent: implement`, `commit_type: chore`, no task and no `bindings` key.
+- The front matter quotes each verification as a YAML double-quoted string. The verifications are, in order: `test -f .kanthord/suite-pass.json`, `! git check-ignore -q .kanthord/suite-pass.json` and `test ! -f .kanthord/affected-tests.json || grep -qF .kanthord/suite-pass.json .kanthord/affected-tests.json`.
 - The `human` read `project.binding.suite_pass.plan.get` at `GET /api/project/:project_id/binding/:binding_id/suite-pass/plan` answers `{ filename, content, tasks, reason }`, the body of `mission.node.create` without `expected_mission_version`. The client adds the current mission version.
-- `filename` is `suite-pass-setup-<binding name>.md`. `content` is the parsed node file with `bindings: [<binding name>]`. `tasks` is `[]`. `reason` is `Add the suite pass record to <binding name>.`
-- The Project Service imports only `contract.ts` of the Mission Service. The composition root gives it the Mission collaboration `nodeBodyOf(filename, text)`, as it gives `createMission` (`src/apps/server/index.ts:948`). The Mission Service parses the text with `parsePlanFile` of `src/mission/parser.ts` and refuses a task file.
-- The read refuses a binding that is absent, removed or no repository binding with 404 `project.binding.not_found`. It refuses a binding with no `pull_request` action with `landing: human` with 409 `project.suite_pass.not_proposed`. It reads no repository file.
+- `filename` is `suite-pass-setup-<binding name>.md`. `content` is the parsed node file with `bindings: [<binding name>]`, with no `filename` and no `depends_on` key, so that it matches the strict `contentWriteSchema` (`src/mission/contract.ts:645`). `tasks` is `[]`. `reason` is `Add the suite pass record to <binding name>.`
+- The Project Service imports only `contract.ts` of the Mission Service. The composition root gives it the Mission collaboration `nodeBodyOf(filename, text)`, as it gives `createMission` (`src/apps/server/index.ts:948`). The Mission Service parses the text with `parsePlanFile` of `src/mission/parser.ts`. It refuses a task file, an `id` and a nonempty `depends_on` with `mission.import.plan_invalid`.
+- The read refuses a binding that is absent, removed or no repository binding with 404 `project.binding.not_found`. It refuses a binding with no `pull_request` action with `landing: human` with 409 `project.suite_pass.not_proposed`. An absent `landing` reads as `human` (`project-service.impl.md:23`, `:639`; `src/project/service.ts:1656`). It reads no repository file.
 - The CLI leaf `kanthord project environment suite-pass plan <project-id> <binding-id>` calls the read and prints the answer as indented JSON. A human adds `expected_mission_version` and passes the file to `kanthord mission node create <mission-id> --file <path>`.
-- The dashboard action is `Add setup node`. It reads the mission of the project for its version, then calls `mission.node.create` with the body of the read.
+- The dashboard action is `Add setup node`. It reads the mission of the project for its version, then calls `mission.node.create` with the body of the read. A 409 `mission.node.filename_conflict` shows the info toast "Setup node of <binding> exists." with no `Retry`.
 
 ## D13 — The read of the suite pass configuration
 
-RULED 2026-10-29 by Ulrich (O2). The rule of `docs/brainstorm/project-service.impl.md:636-638` at root pull request #281 head `7c0e114`:
+RULED 2026-10-29 by Ulrich (O2). The rule of `docs/brainstorm/project-service.impl.md:636-638` at root pull request #281 head `2d6587f`:
 
 - `project.binding.environment.get` reads `.kanthord/suite-pass.json` with `repositoryFiles.readFilesAtCommit` at the base commit, for every source.
 - For an unstored source, the path joins the paths of the base read of the resolution. `read` removes it from `files` before it builds the answer, so it never enters `GroupResolution.files` and never changes the digest. `resolveGroup` of the Onboarding run reads no such file.
 - For a stored source, `read` runs one base read with that path only.
-- `suite_pass` is `present` when the file exists at the base commit, and `absent` when it does not.
-- When the read of a stored source fails, `suite_pass` is null and the answer keeps the stored environment. A failed read of an unstored source refuses the request as it does today.
+- `suite_pass` is `absent` only for the `RepositoryFileState` `absent`. It is `present` for `present`, `too_large` and `not_utf8`.
+- When the SSH read or the base-branch read of a stored source fails, `suite_pass` is null and the answer keeps the stored environment. An aborted `caller.context.signal` rethrows. A failed read of an unstored source refuses the request as it does today.
 - A binding with `suite_pass` null gets no proposal.
 
 ## D14 — The proposal on the dashboard
 
-The dashboard shows the proposal when `suite_pass` is `absent` and the binding configuration holds a `pull_request` action with `landing: human` (`project-service.impl.md:639`, `:803`). The dashboard derives it from the binding configuration. No answer field carries it.
+The dashboard shows the proposal when `suite_pass` is `absent` and the binding configuration holds a `pull_request` action with `landing: human` (`project-service.impl.md:639`, `:806`). An absent `landing` reads as `human` (`project-service.impl.md:23`, `:639`). The dashboard derives it from the binding configuration. No answer field carries it.

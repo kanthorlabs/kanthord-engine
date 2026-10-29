@@ -29,7 +29,7 @@ Sonnet at high effort. The change stays in two scripts and their test file. The 
 - `docs/brainstorm/worker-service.impl.md:1595-1598` — version 2, the floor and its keys.
 - `docs/brainstorm/worker-service.impl.md:1600-1611` — the version 2 example.
 - `docs/brainstorm/project-service.impl.md:411` — the import closure comes from the graph of the selector, and no second map exists.
-- `docs/brainstorm/worker-service.impl.md:1599` at root pull request #281 head `7c0e114` — the production file (decision D7).
+- `docs/brainstorm/worker-service.impl.md:1599` at root pull request #281 head `2d6587f` — the production file (decision D7).
 
 ## Depends on
 
@@ -79,7 +79,7 @@ The contract of plan 06:
 
 - Files: `scripts/affected-reporter.mjs`, `scripts/affected-tests.mjs` (edit)
 - Do:
-  1. In `affected-reporter.mjs`, on each `test:summary` event that holds `data.file`, write one line `{ "file": <path>, "seconds": <duration_ms / 1000> }`. When that event is absent for a file, use the `test:complete` event with the nesting 0 whose name equals the file argument. Node.js 24 sends no file-level `test:pass` for a passing file. Keep the failed id lines as they are.
+  1. In `affected-reporter.mjs`, on each `test:summary` event that holds `data.file`, write one line `{ "file": <path>, "seconds": <duration_ms / 1000> }`. When that event is absent for a file, use the `test:complete` event with the nesting 0 whose name equals the file argument. Node.js 24 sends no file-level `test:pass` for a passing file, so the reporter reads no such event. Keep the failed id lines as they are.
   2. In `runTests` (`:450-480`), split the lines: a line with `seconds` goes to the map `seconds`, and a line with `name` goes to `ids`.
   3. Set `REPORT_VERSION` (`:92`) to 2.
   4. In `affectedReport` (`:558-585`), compute the floor of decision D7. Sum the test time of the first run of each floor file in `tests`. A rerun adds no time. `total_seconds` is the sum of the test time of every file of `tests` for the selection `all`, else null. Round each sum to 0.1 s.
