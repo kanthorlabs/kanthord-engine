@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
+import { temporary } from "../../kernel/test-support.ts";
+import { doneTrailerOf } from "./done-record.ts";
+import { nodeUnitOf } from "./release-gate.ts";
 import { EndReason, type ExecutionEnd } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
@@ -38,6 +41,8 @@ const BASE_FILE = "other";
 const FETCH_DEADLINE_MS = 20000;
 const SIDE_BRANCH = "side";
 const FIRST_PARENT_FILE = "first-parent";
+const ONE_RUN = 1;
+const WALL_DEADLINE_MS = 300;
 
 type Harness = Awaited<ReturnType<typeof fixture>>;
 
@@ -145,7 +150,7 @@ test("a verdict that names no task sends a verdict turn and an unchanged tree st
 
 test("a verdict stop carries the passing verification of a task that ran before the verdict turns", async (t) => {
   const judgedTask = task("judged", "true");
-  const pending = task("pending", "true");
+  const pending = task("pending", "true && true");
   const h = await fixture(
     t,
     [judgedTask, pending],
@@ -335,4 +340,65 @@ test("a judged commit reached only through a second parent does not satisfy the 
     checked.node?.judged.map((entry) => entry.commit),
     [judged],
   );
+});
+
+async function liveNodeHarness(
+  t: TestContext,
+  script: Parameters<typeof fixture>[2],
+) {
+  const count = join(temporary(t), "node");
+  const node = `echo x >> ${count}`;
+  const base = task("judged", node);
+  const current = {
+    ...base,
+    content: { ...base.content, verifications: [node, "true"] },
+  };
+  const h = await fixture(t, [current], script);
+  await recordDone(h, current);
+  h.revision = {
+    ...h.revision,
+    content: { ...h.revision.content, verifications: [node] },
+  };
+  h.verdict = verdictAt(VERDICT, h.checkouts);
+  return { h, count };
+}
+
+test("a verdict unit runs no node command in the live checkout", async (t) => {
+  const { h, count } = await liveNodeHarness(t, [
+    write("verdict"),
+    fauxAssistantMessage("addressed"),
+    fauxAssistantMessage("never"),
+  ]);
+  recordReleases(h);
+  recordEvidence(h);
+  assert.deepEqual(await executionBoundary(h.run, () => runStepsImplement(h)), {
+    kind: "released",
+    furtherWork: false,
+  });
+  assert.equal(readFileSync(count, "utf8").trim().split("\n").length, ONE_RUN);
+});
+
+test("a setup budget end before the empty list of a verdict unit writes no done record and releases further work", async (t) => {
+  const { h, count } = await liveNodeHarness(t, [
+    write("verdict"),
+    fauxAssistantMessage("addressed"),
+    fauxAssistantMessage("never"),
+  ]);
+  h.setup = h.setup.map((entry) => ({
+    ...entry,
+    environment: { postCreateCommand: "sleep 30" },
+  }));
+  h.setupPending = true;
+  h.agent.budget.wallDeadline = () => Date.now() + WALL_DEADLINE_MS;
+  const bodies = recordReleases(h);
+  recordEvidence(h);
+  const end = await executionBoundary(h.run, () => runStepsImplement(h));
+  assert.ok("furtherWork" in end && end.furtherWork);
+  assert.equal((bodies[0] as { further_work: boolean }).further_work, true);
+  const log = await simpleGit(h.root).raw(["log", "--format=%B", h.nodeBranch]);
+  assert.equal(
+    log.includes(doneTrailerOf(nodeUnitOf(h.input.claim.node_id, h.revision))),
+    false,
+  );
+  assert.equal(existsSync(count), false);
 });

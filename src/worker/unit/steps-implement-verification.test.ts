@@ -7,12 +7,16 @@ import {
 import { test } from "node:test";
 import { join } from "node:path";
 import { temporary } from "../../kernel/test-support.ts";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { EnvironmentFailure } from "../../scheduler/contract.ts";
+import { RecordKind, type TelemetryRecord } from "../../tracking/contract.ts";
 import { EndReason, type ExecutionEnd } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
+import type { MethodClients } from "./method-clients.ts";
 import { VERIFICATION_INFRASTRUCTURE_FAILED } from "./verification.ts";
+import { SpanOperation } from "./telemetry.ts";
+import { VerificationContext } from "./method-telemetry.ts";
 import {
   runStepsImplement,
   runTask,
@@ -24,6 +28,7 @@ import {
   implementFixture as fixture,
   recordDone,
   recordReleases,
+  recordSpans,
   task,
 } from "./test-support.ts";
 
@@ -35,6 +40,53 @@ const FOUR_TURNS = 4;
 const SETUP_MARKER = "setup-ran";
 const SETUP_INSTRUCTION = "Fix the setup: test -e fixed failed.";
 const WALL_DEADLINE_MS = 300;
+const ONE_RUN = 1;
+const TWO_RUNS = 2;
+
+function countCommand(path: string): string {
+  return `echo x >> ${path}`;
+}
+
+function runsOf(path: string): number {
+  if (!existsSync(path)) return 0;
+  return readFileSync(path, "utf8").trim().split("\n").length;
+}
+
+function liveCommands(
+  records: readonly TelemetryRecord[],
+  context: VerificationContext,
+): string[] {
+  const texts = new Map(
+    records.flatMap((record) =>
+      record.kind === RecordKind.Text ? [[record.text_id, record.text]] : [],
+    ),
+  );
+  return records.flatMap((record) =>
+    record.kind === RecordKind.Span &&
+    record.operation === SpanOperation.Verification &&
+    record.start_time !== undefined &&
+    record.attributes?.["kanthord.verification.context"] === context
+      ? [texts.get(`${record.span_id}:command`) ?? ""]
+      : [],
+  );
+}
+
+function acceptEvidence(h: Awaited<ReturnType<typeof fixture>>): void {
+  h.run.clients.mission = {
+    ...h.run.clients.mission,
+    "evidence.submit": async () => ({
+      type: "completed",
+      status: 200,
+      data: { evidence: {} },
+    }),
+  } as unknown as MethodClients["mission"];
+}
+
+function writeTurn(path: string) {
+  return fauxAssistantMessage(fauxToolCall("write", { path, content: path }), {
+    stopReason: "toolUse",
+  });
+}
 
 function infrastructureEnd(
   end: ExecutionEnd,
@@ -71,7 +123,7 @@ test("a persistent kill in a task verification stops with the infrastructure cod
   }
 });
 
-test("a persistent kill in a node verification of the verdict unit stops with the infrastructure code", async (t) => {
+test("a persistent kill in a node verification at the release gate stops with the infrastructure code", async (t) => {
   const passing = task("passing", "true");
   const h = await fixture(
     t,
@@ -262,4 +314,57 @@ test("the setup instruction of a node-head failure goes to the first pending tas
     }),
   );
   assert.deepEqual(instructions, [SETUP_INSTRUCTION]);
+});
+
+test("a task unit skips each node command in the live checkout and runs each own command", async (t) => {
+  const directory = temporary(t);
+  const node = countCommand(join(directory, "node"));
+  const own = countCommand(join(directory, "own"));
+  const base = task("own", own);
+  const current = {
+    ...base,
+    content: { ...base.content, verifications: [node, own] },
+  };
+  const h = await fixture(
+    t,
+    [current],
+    [writeTurn("work"), fauxAssistantMessage("work")],
+  );
+  h.revision = {
+    ...h.revision,
+    content: { ...h.revision.content, verifications: [node] },
+  };
+  recordReleases(h);
+  acceptEvidence(h);
+  const records = recordSpans(h);
+  assert.deepEqual(await executionBoundary(h.run, () => runStepsImplement(h)), {
+    kind: "released",
+    furtherWork: false,
+  });
+  assert.equal(runsOf(join(directory, "node")), ONE_RUN);
+  assert.equal(runsOf(join(directory, "own")), TWO_RUNS);
+  assert.deepEqual(liveCommands(records, VerificationContext.Task), [own]);
+});
+
+test("an implement node with no task runs no live verification and runs each node verification once at the release gate", async (t) => {
+  const directory = temporary(t);
+  const node = countCommand(join(directory, "node"));
+  const h = await fixture(
+    t,
+    [],
+    [writeTurn("work"), fauxAssistantMessage("work")],
+  );
+  h.revision = {
+    ...h.revision,
+    content: { ...h.revision.content, verifications: [node] },
+  };
+  recordReleases(h);
+  acceptEvidence(h);
+  const records = recordSpans(h);
+  assert.deepEqual(await executionBoundary(h.run, () => runStepsImplement(h)), {
+    kind: "released",
+    furtherWork: false,
+  });
+  assert.equal(runsOf(join(directory, "node")), ONE_RUN);
+  assert.deepEqual(liveCommands(records, VerificationContext.Node), []);
 });
