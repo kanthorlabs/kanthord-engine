@@ -89,7 +89,9 @@ const SELECTION = { all: "all", none: "none", related: "related" };
 const GLOBAL_REASON = "global input: ";
 const UNKNOWN_REASON = "unknown path: ";
 const REASON_MAX_BYTES = 256;
-const REPORT_VERSION = 1;
+const REPORT_VERSION = 2;
+const SECONDS_ROUNDING = 10;
+const NO_SECONDS = 0;
 const TEXT_MAX_BYTES = 1024;
 const LIST_MAX_ENTRIES = 10000;
 const REPORT_MAX_BYTES = 1024 * 1024;
@@ -278,12 +280,13 @@ function addImporter(importersByFile, file, importer) {
   importersByFile.get(file).add(importer);
 }
 
-function buildGraph(root) {
+export function buildGraph(root) {
   const nodes = new Set(listFiles(root));
   const present = new Set(
     [...nodes].filter((path) => existsSync(join(root, path))),
   );
   const importersByFile = new Map();
+  const importsByFile = new Map();
   const prefixEdges = DATA_TABLE.map(({ prefix, importer }) => ({
     prefix,
     importer,
@@ -293,12 +296,44 @@ function buildGraph(root) {
     if (!PARSED_PATTERNS.some((pattern) => pattern.test(path))) continue;
     const parsed = parseFile(root, path);
     for (const file of parsed.files) addImporter(importersByFile, file, path);
+    importsByFile.set(path, new Set(parsed.files));
     for (const prefix of parsed.prefixes) {
       prefixEdges.push({ prefix, importer: path });
     }
     if (parsed.namesStartTestSshd) sshdImporters.add(path);
   }
-  return { nodes, present, importersByFile, prefixEdges, sshdImporters };
+  return {
+    nodes,
+    present,
+    importersByFile,
+    importsByFile,
+    prefixEdges,
+    sshdImporters,
+  };
+}
+
+function importsOf(graph, path) {
+  const reached = new Set(graph.importsByFile.get(path));
+  for (const { prefix, importer } of graph.prefixEdges) {
+    if (importer !== path) continue;
+    for (const file of graph.present) {
+      if (file.startsWith(prefix)) reached.add(file);
+    }
+  }
+  return reached;
+}
+
+export function closureOf(graph, path) {
+  const reached = new Set([path]);
+  const queue = [path];
+  for (const current of queue) {
+    for (const file of importsOf(graph, current)) {
+      if (reached.has(file)) continue;
+      reached.add(file);
+      queue.push(file);
+    }
+  }
+  return [...reached].filter((file) => graph.present.has(file)).sort();
 }
 
 function importersOf(graph, path) {
@@ -325,11 +360,24 @@ function needsSshd(graph, path) {
   return TEST_PATTERN.test(path) && graph.sshdImporters.has(path);
 }
 
-function isRunTest(graph, path) {
+export function isRunTest(graph, path) {
   return (
     (TEST_PATTERN.test(path) || TEST_SCRIPTS.has(path)) &&
     !needsSshd(graph, path)
   );
+}
+
+export const PRODUCTION_ENTRY = "src/main.ts";
+
+export function floorOf(graph) {
+  const production = closureOf(graph, PRODUCTION_ENTRY);
+  return [...graph.present]
+    .filter((path) => isRunTest(graph, path))
+    .filter((path) => {
+      const closure = new Set(closureOf(graph, path));
+      return production.every((file) => closure.has(file));
+    })
+    .sort();
 }
 
 function walk(graph, starts) {
@@ -447,7 +495,7 @@ export function computeChanges(root, base) {
   return [...tracked, ...untracked];
 }
 
-function runTests(root, files, concurrency) {
+export function runTests(root, files, concurrency) {
   const directory = mkdtempSync(join(tmpdir(), RUN_TEMPORARY_PREFIX));
   try {
     const destination = join(directory, FAILED_FILE_NAME);
@@ -464,13 +512,19 @@ function runTests(root, files, concurrency) {
       { cwd: root, stdio: STDIO_INHERIT },
     );
     if (result.error) throw result.error;
-    const ids = existsSync(destination)
+    const lines = existsSync(destination)
       ? readFileSync(destination, UTF8)
           .split(NEWLINE)
           .filter((line) => line !== EMPTY)
           .map((line) => JSON.parse(line))
       : [];
-    return { passed: result.status === SUCCESS_STATUS, ids };
+    const ids = lines.filter((line) => "name" in line);
+    const seconds = new Map(
+      lines
+        .filter((line) => "seconds" in line)
+        .map(({ file, seconds }) => [file, seconds]),
+    );
+    return { passed: result.status === SUCCESS_STATUS, ids, seconds };
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -535,7 +589,27 @@ function fitSize(report) {
   return report;
 }
 
-function buildReport(selected, failed, flaky) {
+function roundSeconds(seconds) {
+  return Math.round(seconds * SECONDS_ROUNDING) / SECONDS_ROUNDING;
+}
+
+function sumSeconds(files, seconds) {
+  return roundSeconds(
+    files.reduce((sum, file) => sum + (seconds.get(file) ?? NO_SECONDS), 0),
+  );
+}
+
+function buildFloor(root, selected, seconds) {
+  const floorFiles = floorOf(buildGraph(root));
+  const isAll = selected.selection === SELECTION.all;
+  return {
+    tests: floorFiles.length,
+    seconds: sumSeconds(floorFiles, seconds),
+    total_seconds: isAll ? sumSeconds(selected.tests, seconds) : null,
+  };
+}
+
+function buildReport(selected, failed, flaky, floor) {
   const cutFailed = cutIds(failed);
   const failedKeys = new Set(cutFailed.map(idKey));
   return fitSize({
@@ -546,6 +620,7 @@ function buildReport(selected, failed, flaky) {
     failed: cutFailed,
     flaky: cutIds(flaky).filter((id) => !failedKeys.has(idKey(id))),
     excluded_e2e: cutPaths(selected.excluded_e2e),
+    floor,
   });
 }
 
@@ -558,7 +633,7 @@ function rerunFailures(root, file) {
 export function affectedReport(root, changes) {
   const selected = selectTests(root, changes);
   if (selected.selection === SELECTION.none) {
-    return buildReport(selected, [], []);
+    return buildReport(selected, [], [], buildFloor(root, selected, new Map()));
   }
   const first = runTests(root, selected.tests, FIRST_RUN_CONCURRENCY);
   const tests = new Set(selected.tests);
@@ -566,9 +641,10 @@ export function affectedReport(root, changes) {
   if (!first.passed && failed.length === EMPTY_LENGTH) {
     throw new Error(FAILED_RUN_MESSAGE);
   }
+  const floor = buildFloor(root, selected, first.seconds);
   const failedFiles = [...new Set(failed.map(({ file }) => file))];
   if (failedFiles.length > RERUN_FILE_LIMIT) {
-    return buildReport(selected, failed, []);
+    return buildReport(selected, failed, [], floor);
   }
   const reruns = new Map(
     failedFiles.map((file) => [file, rerunFailures(root, file)]),
@@ -581,6 +657,7 @@ export function affectedReport(root, changes) {
     selected,
     failed.filter(stays),
     failed.filter((id) => !stays(id)),
+    floor,
   );
 }
 
