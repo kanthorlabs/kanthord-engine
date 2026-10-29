@@ -33,7 +33,7 @@ node scripts/suite-pass.mjs run --job <name> [--write] [--full] --concurrency <n
 - The record store is `node_modules/.cache/suite-pass/records.json`. It maps each key to the file, its test time and the write time. A write keeps the 20000 newest records.
 - A test file passes when the run ran it, records no failed test and records a test time.
 - The script runs each argument file with no matching record and each argument file of `always_run`. It exits 0 when every run file passes, 1 when a run file fails and 2 on an error.
-- `always_run` in `.kanthord/suite-pass.json` lists each test file that bundles code, reaches `bin/` or `dist/`, or reads a path that it builds at run time.
+- `always_run` in `.kanthord/suite-pass.json` lists each test file that bundles code, reaches the untracked build output `dist/`, or reads a path that it builds at run time. A tracked file in the import closure, for example `bin/kanthord.mjs`, is part of the key, so its test file needs no entry.
 - With `--write`, the script writes one record for each passed file. It refuses the run with exit 2 when `git status --porcelain --untracked-files=all` prints a line before or after the tests.
 - Without `--write`, a dirty or untracked work tree reads no record. The script runs every argument file and writes no record.
 - `--full` runs every argument file and still writes records.
