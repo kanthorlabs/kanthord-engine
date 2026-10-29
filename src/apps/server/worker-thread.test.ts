@@ -35,6 +35,8 @@ const DATA_KEYS = ["entries", "log"];
 const ENTRY_KEYS = ["client_id", "client_secret", "port", "state"];
 const TWO_INSTANCES = 2;
 const SINGLE_INSTANCE = 1;
+const NO_INSTANCES = 0;
+const THREAD_EXIT_LIMIT_MS = 3000;
 const RESOURCE_IDENTITY = "worker:kanthord:general";
 const FINISHED_MESSAGE = "Request finished";
 const DIRECTORY_VARIABLES = [
@@ -294,4 +296,71 @@ test("a thread instance gets two entries, registers both and drains one after a 
     t.signal,
   );
   assert.equal(remaining.items[0]?.resource_identity, RESOURCE_IDENTITY);
+});
+
+test("a worker thread exits after a stop that follows a drain and a resume of its entry", async (t) => {
+  requirePiTools();
+  const fixture = await gatewayFixture(t, {
+    repositoryConnector: {
+      gitLsRemote: async () => {},
+    },
+  });
+  await provisionRepositoryCredentials(fixture);
+  const project = await provisionWorkerProject(fixture, "thread-resume", {
+    general: SINGLE_INSTANCE,
+  });
+  await project.pause();
+  const logger = pino({ level: "silent" });
+  const token = await fixture.machineToken(project.id, "general", "slot");
+  const channels: MessageChannel[] = [];
+  const served = () => {
+    const channel = new MessageChannel();
+    servePort(channel.port1, fixture.invocation, () => token, logger);
+    channels.push(channel);
+    return channel.port2;
+  };
+  const entry = entryOf(served(), "client_identity_general");
+  const thread = startThread(
+    threadData(entry),
+    threadEnvironment(temporary(t)),
+  );
+  t.after(async () => {
+    await thread.terminate();
+    for (const channel of channels) channel.port1.close();
+  });
+  const list = humanCaller(fixture);
+  const registrations = () =>
+    list(workerOperations["registration.list"], {
+      params: {},
+      query: { project_id: project.id },
+      body: null,
+    });
+  await until(
+    registrations,
+    (candidate) => candidate.items.length === SINGLE_INSTANCE,
+    t.signal,
+  );
+  thread.postMessage({
+    kind: ThreadMessageKind.Bindings,
+    entries: [{ ...entry, port: null, state: BindingEntryState.Draining }],
+  });
+  await until(
+    registrations,
+    (candidate) => candidate.items.length === NO_INSTANCES,
+    t.signal,
+  );
+  const resumed = { ...entry, port: served() };
+  thread.postMessage({ kind: ThreadMessageKind.Bindings, entries: [resumed] }, [
+    resumed.port,
+  ]);
+  await until(
+    registrations,
+    (candidate) => candidate.items.length === SINGLE_INSTANCE,
+    t.signal,
+  );
+  const exited = once(thread, "exit", {
+    signal: AbortSignal.timeout(THREAD_EXIT_LIMIT_MS),
+  });
+  thread.postMessage({ kind: ThreadMessageKind.Stop });
+  await exited;
 });

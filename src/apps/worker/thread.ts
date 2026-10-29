@@ -20,6 +20,7 @@ const DIRECTORY_VARIABLES = [
 
 async function main(): Promise<void> {
   const data = threadDataSchema.parse(workerData);
+  const bindings = new SlotBindings((line) => process.stderr.write(line));
   try {
     const refused = DIRECTORY_VARIABLES.filter(
       (name) => !isAbsolute(process.env[name] ?? ""),
@@ -31,7 +32,6 @@ async function main(): Promise<void> {
         { fields: [["variables", refused.join(", ")]] },
       );
     const state = directories(process.env).state;
-    const bindings = new SlotBindings((line) => process.stderr.write(line));
     const unit = new WorkerUnit({
       bindings: bindings.initial(data.entries),
       directories: { data: state, log: state },
@@ -53,6 +53,7 @@ async function main(): Promise<void> {
     if (error) throw error;
   } finally {
     for (const port of entryPorts(data.entries)) port.close();
+    bindings.close();
     parentPort?.close();
   }
 }

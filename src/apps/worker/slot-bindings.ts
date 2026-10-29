@@ -2,7 +2,7 @@ import type { MessagePort } from "node:worker_threads";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { BindingEntryState } from "../../worker/contract.ts";
 import { portTransport } from "./transport.ts";
-import type { ThreadEntry } from "./thread-data.ts";
+import { entryPorts, type ThreadEntry } from "./thread-data.ts";
 import type { UnitBinding, WorkerUnit } from "./unit.ts";
 
 interface Hosted {
@@ -12,6 +12,7 @@ interface Hosted {
 
 export class SlotBindings {
   private readonly hosted = new Map<string, Hosted>();
+  private readonly received = new Set<MessagePort>();
   private readonly report: (line: string) => void;
   private unit?: WorkerUnit;
   private queue: Promise<void> = Promise.resolve();
@@ -31,8 +32,13 @@ export class SlotBindings {
   }
 
   apply(entries: readonly ThreadEntry[]): Promise<void> {
+    for (const port of entryPorts(entries)) this.received.add(port);
     this.queue = this.queue.then(() => this.reconcile(entries));
     return this.queue;
+  }
+
+  close(): void {
+    for (const port of this.received) port.close();
   }
 
   private host(entry: ThreadEntry, port: MessagePort): UnitBinding {
@@ -73,6 +79,7 @@ export class SlotBindings {
     this.hosted.delete(clientId);
     this.failed(await this.unit!.remove(hosted.binding));
     hosted.port.close();
+    this.received.delete(hosted.port);
   }
 
   private failed(error: Error | null): void {
