@@ -50,8 +50,9 @@ Ruling O4 of `dogfood-time/` gives these rules to this plan set. These rules are
 - Root #284: the base branch sentence of `project-service.impl.md`. A pull request cache never reaches the base branch.
 - Plan 09: engine #388. The suite pass proposal, its read, its CLI leaf and the shipped plan `suite-pass-setup`. Engine #389: an error with no code of the stored suite pass read fails the read.
 - Plan 10: apps #149. The dashboard line and the action `Add setup node`.
-- Root #286 (the root handoff item of plans 09 and 10 deleted) and #287 (the root pointers of `engine` and `apps`).
+- Root #286 (the root handoff item of plans 09 and 10 deleted) and #287 (the root pointers of `engine` and `apps` at plan 10).
 
 ## Open items
 
+- The root pointer of `engine` does not hold engine #389, #390 and #391. Move it in one root pull request after they merge.
 - A repository with no `src/main.ts` has an empty production set, so each run test file counts as a floor file (engine #383, review S1, action:NO). Only test fixtures reach this case. A change needs a ruling of Ulrich.
