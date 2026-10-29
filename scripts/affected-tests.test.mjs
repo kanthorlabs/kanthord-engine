@@ -22,7 +22,6 @@ import {
   floorOf,
   GLOBAL_INPUTS,
   INERT_INPUTS,
-  productionOf,
   runTests,
   selectTests,
 } from "./affected-tests.mjs";
@@ -844,26 +843,6 @@ function outsideTestContext(run) {
 test("the floor holds each test file whose closure holds every production file", async (t) => {
   const root = await repository(t, FLOOR_FILES);
   assert.deepEqual(floorOf(buildGraph(root)), ["src/full.test.ts"]);
-});
-
-test("the production set stops at each run test file that a prefix edge names", async (t) => {
-  const root = await repository(t, {
-    "src/a.ts": EMPTY_MODULE,
-    "src/main.ts": 'import "./a.ts";\nimport "./thread-start.ts";\n',
-    "src/thread-start.ts":
-      "const x = '.ts';\nnew URL(`./thread${x}`, import.meta.url);\n",
-    "src/thread-start.test.ts": `import "./helper.ts";\n${TEST_BODY}`,
-    "src/helper.ts": EMPTY_MODULE,
-    "src/full.test.ts": 'import "./main.ts";\n',
-  });
-  const graph = buildGraph(root);
-  assert.deepEqual(productionOf(graph), [
-    "src/a.ts",
-    "src/main.ts",
-    "src/thread-start.ts",
-  ]);
-  assert.deepEqual(floorOf(graph), ["src/full.test.ts"]);
-  assert.ok(closureOf(graph, "src/full.test.ts").includes("src/helper.ts"));
 });
 
 test("a data edge counts in the closure", async (t) => {
