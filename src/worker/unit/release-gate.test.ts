@@ -60,8 +60,7 @@ const TAG = "x";
 const CONFIG_KEY = "a.b";
 const BASE_CHANGE = "base change";
 const LEFTOVER = "leftover";
-const SHARED_COMMAND = "test -e fixed";
-const RELEASE_VERIFIED = "release verified";
+const FAILS_IN_RELEASE = 'case "$PWD" in */release/*) test -e fixed;; esac';
 
 function write(path: string, content: string) {
   return fauxAssistantMessage(fauxToolCall("write", { path, content }), {
@@ -256,8 +255,8 @@ test("a wall deadline during a release verification releases with the timed-out 
   assert.deepEqual(bodies, [{ further_work: true, stop: BUDGET_STOP }]);
 });
 
-test("a release failure goes to the node unit when the node and a task share one failing command", async (t) => {
-  const current = task("shared", SHARED_COMMAND);
+test("a failed command that the node and a task share routes its revision to the node unit", async (t) => {
+  const current = task("shared", FAILS_IN_RELEASE);
   const h = await fixture(
     t,
     [current],
@@ -265,9 +264,9 @@ test("a release failure goes to the node unit when the node and a task share one
   );
   h.revision = {
     ...h.revision,
-    content: { ...h.revision.content, verifications: [SHARED_COMMAND] },
+    content: { ...h.revision.content, verifications: [FAILS_IN_RELEASE] },
   };
-  const records = recordSpans(h);
+  const nodeUnit = nodeUnitOf(h.input.claim.node_id, h.revision);
   const revisions = recordRevisions(h);
   acceptEvidence(h);
   recordReleases(h);
@@ -275,16 +274,7 @@ test("a release failure goes to the node unit when the node and a task share one
     kind: "released",
     furtherWork: false,
   });
-  assert.deepEqual(revisions, [
-    digestOf(h, nodeUnitOf(h.input.claim.node_id, h.revision)),
-  ]);
-  assert.deepEqual(
-    listedVerificationSpans(records).map((span) => [span.context, span.index]),
-    [
-      [VerificationContext.Release, 0],
-      [VerificationContext.Release, 0],
-    ],
-  );
+  assert.deepEqual(revisions, [digestOf(h, nodeUnit)]);
 });
 
 test("a node command that fails at the release gate sends the node unit back to the gate with no live command, and an unchanged revision counts toward no_progress", async (t) => {
@@ -428,7 +418,7 @@ test("a failed release command writes the result routed with the unit id of its 
 });
 
 test("the verification spans of a release name the owner of each command with the context release", async (t) => {
-  const owner = task("owner", "test -d .");
+  const owner = task("owner", "true && true");
   const h = await fixture(t, [owner], []);
   h.revision = {
     ...h.revision,
@@ -455,20 +445,38 @@ test("the verification spans of a release name the owner of each command with th
   );
 });
 
-test("a node command that a task repeats gives one verification span and two results at the release gate", async (t) => {
-  const h = await fixture(t, [task("repeat", "true")], []);
+test("a command that the node and a task share runs once at the release gate and holds two results", async (t) => {
+  const count = join(temporary(t), "count");
+  const shared = `echo x >> ${count}`;
+  const owner = task("owner", shared);
+  const h = await fixture(t, [owner], []);
+  h.revision = {
+    ...h.revision,
+    content: { ...h.revision.content, verifications: [shared] },
+  };
   const records = recordSpans(h);
-  const log = t.mock.method(h.run, "log");
   assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
-  assert.equal(listedVerificationSpans(records).length, ONE_SPAN);
-  const verified = log.mock.calls.filter(
-    (call) => call.arguments[0] === RELEASE_VERIFIED,
+  assert.equal(readFileSync(count, "utf8").trim().split("\n").length, ONE_SPAN);
+  const starts = records.flatMap((record) =>
+    record.kind === RecordKind.Span &&
+    record.operation === SpanOperation.Verification &&
+    record.start_time !== undefined
+      ? [record.attributes]
+      : [],
   );
-  assert.equal(verified.length, ONE_SPAN);
   assert.deepEqual(
-    (verified[0]!.arguments[1] as { exit_codes: number[] }).exit_codes,
-    [0, 0],
+    starts.map((attributes) => [
+      attributes?.["kanthord.verification.context"],
+      attributes?.["kanthord.verification.owner_id"],
+    ]),
+    [["release", h.input.claim.node_id]],
   );
+  assert.deepEqual(h.lastVerification, {
+    passed: true,
+    ran: RELEASE_COMMANDS_RAN,
+    exit_code: 0,
+    timed_out: false,
+  });
 });
 
 test("a budget end writes the release gate result budget_end", async (t) => {

@@ -1134,6 +1134,44 @@ test("the returned function ends the open tool and turn with Error and stopped, 
   assert.equal(scripted.unsubscribed(), ONE_UNSUBSCRIBE);
 });
 
+test("a stop during a tool call ends the turn with stopped and the usage of its finished reply", () => {
+  const { records, spans } = recorder();
+  const scripted = scriptedSession();
+  const stop = traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
+  scripted.emit({ type: "turn_start" });
+  scripted.emit({
+    type: "message_end",
+    message: assistantMessage({ stopReason: "toolUse" }),
+  });
+  scripted.emit({
+    type: "tool_execution_start",
+    toolCallId: TOOL_CALL,
+    toolName: "bash",
+    args: {},
+  });
+  stop();
+  const tool = endOf(records, SpanOperation.Tool);
+  assert.equal(tool?.status, SpanStatus.Error);
+  assert.deepEqual(tool?.attributes, { "error.type": AgentErrorType.Stopped });
+  const turn = endOf(records, SpanOperation.Turn);
+  assert.equal(turn?.status, SpanStatus.Error);
+  assert.equal(turn?.attributes?.["error.type"], AgentErrorType.Stopped);
+  assert.equal(
+    turn?.attributes?.["gen_ai.usage.input_tokens"],
+    INPUT_TOKENS + CACHE_READ + CACHE_WRITE,
+  );
+  assert.equal(turn?.attributes?.["gen_ai.usage.output_tokens"], OUTPUT_TOKENS);
+  assert.equal(
+    turn?.attributes?.["gen_ai.usage.cache_read.input_tokens"],
+    CACHE_READ,
+  );
+  assert.equal(
+    turn?.attributes?.["gen_ai.usage.cache_creation.input_tokens"],
+    CACHE_WRITE,
+  );
+  assert.equal(turn?.attributes?.["kanthord.usage.cost_usd"], COST_USD);
+});
+
 test("a credential secret in a tool result reaches the sink as [redacted]", () => {
   const { records, spans } = recorder();
   const scripted = scriptedSession();

@@ -44,7 +44,7 @@ import {
   unattributed,
 } from "../../kernel/cause.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { simpleGit } from "simple-git";
 import { SpanOperation } from "./telemetry.ts";
 import { EvaluationAttribute } from "./method-telemetry.ts";
@@ -55,7 +55,6 @@ import { VERIFICATION_INFRASTRUCTURE_FAILED } from "./verification.ts";
 
 const NO_RELEASES = 0;
 const SINGLE_RELEASE = 1;
-const ONE_SPAN = 1;
 const PROPOSAL = {
   dependency_id: "child",
   name: "Fix the defect",
@@ -895,7 +894,7 @@ function verificationStarts(records: readonly TelemetryRecord[]) {
 
 test("the verification spans of a review name the owner of each command with the context evaluation", async (t) => {
   const review = await reviewOf(t, "true", undefined, {
-    taskCommand: "test -d .",
+    taskCommand: "true && true",
   });
   assert.deepEqual(
     verificationStarts(review.records).map((attributes) => [
@@ -909,14 +908,24 @@ test("the verification spans of a review name the owner of each command with the
   );
 });
 
-test("a node command that a task repeats gives one verification span and two results in a review", async (t) => {
-  const review = await reviewOf(t, "true", undefined, { taskCommand: "true" });
-  assert.equal(verificationStarts(review.records).length, ONE_SPAN);
+test("a command that the node and a task share runs once at the evaluation and the evidence holds two results", async (t) => {
+  const count = join(temporary(t), "count");
+  const shared = `echo x >> ${count}`;
+  const review = await reviewOf(t, shared, undefined, { taskCommand: shared });
+  assert.equal(
+    readFileSync(count, "utf8").trim().split("\n").length,
+    SINGLE_RELEASE,
+  );
   assert.deepEqual(
-    review.verifications.map((verification) =>
-      verification.results.map((result) => result.exit_code),
-    ),
-    [[0, 0]],
+    verificationStarts(review.records).map((attributes) => [
+      attributes?.["kanthord.verification.context"],
+      attributes?.["kanthord.verification.owner_id"],
+    ]),
+    [["evaluation", review.nodeId]],
+  );
+  assert.deepEqual(
+    review.verifications[0]?.results.map((result) => result.exit_code),
+    [PASSED, PASSED],
   );
 });
 

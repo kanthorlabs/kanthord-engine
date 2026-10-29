@@ -264,13 +264,13 @@ async function verifyInReleaseClones(
       ),
       directory,
       commands,
+      copyRepeated: true,
       tested_input: testedInput,
       deadline: state.agent.budget.wallDeadline(),
       context: state.run.operationContext,
       env: state.input.env,
       exhausted: () => state.agent.budget.exhausted(),
       baseline: (command) => state.base.exitOf(command),
-      copyRepeated: true,
       memo: await memoScopeOf(state, VerificationContext.Release, commands),
     });
     const listed = { run, commands, setup: false, affected: null };

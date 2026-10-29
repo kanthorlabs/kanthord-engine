@@ -371,6 +371,54 @@ test("a rerun of a failed command carries flaky_check and no other attempt does"
   assert.deepEqual(attempts, [false, true, true]);
 });
 
+function repeatedListRun(
+  t: Parameters<typeof temporary>[0],
+  copyRepeated?: boolean,
+) {
+  const directory = temporary(t);
+  const count = join(directory, "count");
+  const first = `echo x >> ${count}`;
+  const attempts: number[] = [];
+  const input: VerificationInput = {
+    observe: (attempt, execute) => {
+      attempts.push(attempt.index);
+      return execute();
+    },
+    directory,
+    commands: [first, "true", first],
+    tested_input: { kind: "produced", sha256: "hash" },
+    deadline: Date.now() + 10000,
+    context: background,
+    env: hostEnvironment(),
+    ...(copyRepeated === undefined ? {} : { copyRepeated }),
+  };
+  return {
+    attempts,
+    lines: () => readFileSync(count, "utf8").trim().split("\n").length,
+    run: () => runVerificationsWithOutput(input),
+  };
+}
+
+test("a repeated command copies the result of its first pass when the copy applies", async (t) => {
+  const repeated = repeatedListRun(t, true);
+  const run = await repeated.run();
+  assert.equal(run.verification.results.length, THREE_RESULTS);
+  assert.deepEqual(run.verification.results[2], run.verification.results[0]);
+  assert.equal(run.outputs[2], run.outputs[0]);
+  assert.deepEqual(run.flaky, [false, false, false]);
+  assert.equal(run.outcome, VerificationClass.Pass);
+  assert.equal(repeated.lines(), SINGLE_RUN);
+  assert.deepEqual(repeated.attempts, [0, 1]);
+});
+
+test("a repeated command runs again when the copy does not apply", async (t) => {
+  const repeated = repeatedListRun(t);
+  const run = await repeated.run();
+  assert.equal(run.verification.results.length, THREE_RESULTS);
+  assert.equal(repeated.lines(), RUN_AND_RERUN);
+  assert.deepEqual(repeated.attempts, [0, 1, 2]);
+});
+
 function commandRun(exit_code: number | null, signal: string | null) {
   return {
     result: { command: "x", exit_code, signal, timed_out: false },
@@ -396,6 +444,7 @@ const KILLED_EXIT = 137;
 const KILL_SIGNAL = "SIGKILL";
 const COMMAND_ABSENT_EXIT = 127;
 const SINGLE_RUN = 1;
+const THREE_RESULTS = 3;
 const RUN_AND_RERUN = 2;
 const TWO_COMMANDS_RUN = 2;
 
@@ -464,31 +513,6 @@ test("a kill on the run and a code failure on the rerun keeps the flaky reruns",
 const REPEATED = "echo once >> count";
 const ONCE_LINE = "once\n";
 const TWICE_LINES = "once\nonce\n";
-
-test("a repeated command copies the first result and runs once when the copy is on", async (t) => {
-  const directory = temporary(t);
-  const { input, runs } = countedInput(directory, [REPEATED, "true", REPEATED]);
-  const run = await runVerificationsWithOutput({
-    ...input,
-    copyRepeated: true,
-  });
-  assert.equal(run.outcome, VerificationClass.Pass);
-  assert.equal(runs.length, TWO_COMMANDS_RUN);
-  assert.equal(run.verification.results.length, input.commands.length);
-  assert.deepEqual(run.verification.results[2], run.verification.results[0]);
-  assert.equal(run.outputs[2], run.outputs[0]);
-  assert.deepEqual(run.flaky, [false, false, false]);
-  assert.equal(readFileSync(join(directory, "count"), "utf8"), ONCE_LINE);
-  assert.equal(verificationPassed(run.verification, input.commands), true);
-});
-
-test("a repeated command runs again when the copy is off", async (t) => {
-  const directory = temporary(t);
-  const { input, runs } = countedInput(directory, [REPEATED, REPEATED]);
-  await runVerificationsWithOutput(input);
-  assert.equal(runs.length, TWO_COMMANDS_RUN);
-  assert.equal(readFileSync(join(directory, "count"), "utf8"), TWICE_LINES);
-});
 
 test("a repeated command after a failure never runs and never copies", async (t) => {
   const { input, runs } = countedInput(temporary(t), [

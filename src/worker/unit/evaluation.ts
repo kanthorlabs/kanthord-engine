@@ -335,12 +335,12 @@ async function evaluate(
     ),
     directory: prepared.directory,
     commands: verificationCommands(revision),
+    copyRepeated: true,
     tested_input: prepared.tested_input,
     deadline: budget.wallDeadline(),
     context: run.operationContext,
     env: input.env,
     reruns: VERIFICATION_RERUNS,
-    copyRepeated: true,
     exhausted: () => budget.exhausted(),
     ...baselineOf(prepared.base),
   });

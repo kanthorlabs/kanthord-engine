@@ -147,6 +147,7 @@ class AgentTracer {
   private turnStartedAt = NO_ENTRIES;
   private turnEntryCount = NO_ENTRIES;
   private modelDurationMs: number | null = null;
+  private reply: AssistantMessage | null = null;
   private readonly tools = new Map<string, { span: string; started: number }>();
   private readonly session: AgentSession;
   private readonly sessionId: string;
@@ -214,13 +215,22 @@ class AgentTracer {
     if (this.turn === null) return;
     const open = this.turn;
     this.turn = null;
-    this.endStopped(open);
+    this.endStopped(
+      open,
+      this.reply === null
+        ? {}
+        : turnAttributes(
+            this.reply,
+            this.assistantEntryId(),
+            this.modelDurationMs,
+          ),
+    );
   }
 
-  private endStopped(spanId: string): void {
+  private endStopped(spanId: string, attributes: Attributes = {}): void {
     this.spans.end(spanId, {
       status: SpanStatus.Error,
-      attributes: { "error.type": AgentErrorType.Stopped },
+      attributes: { ...attributes, "error.type": AgentErrorType.Stopped },
     });
   }
 
@@ -270,12 +280,14 @@ class AgentTracer {
     this.turnStartedAt = Date.now();
     this.turnEntryCount = this.session.sessionManager.getEntryCount();
     this.modelDurationMs = null;
+    this.reply = null;
     assert.ok(this.turn);
   }
 
   private messageEnded(event: EventOf<typeof MESSAGE_END>): void {
     if (this.turn === null || !isAssistant(event.message)) return;
     this.modelDurationMs = Date.now() - this.turnStartedAt;
+    this.reply = event.message;
   }
 
   private assistantEntryId(): string | null {
@@ -339,6 +351,7 @@ class AgentTracer {
     const ended = this.turn;
     if (ended === null) return;
     this.turn = null;
+    this.reply = null;
     assert.ok(ended);
     if (!isAssistant(event.message)) {
       this.spans.end(ended, { status: SpanStatus.Ok });
