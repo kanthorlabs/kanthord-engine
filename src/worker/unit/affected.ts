@@ -46,7 +46,8 @@ const BINDING_ID_KEY = "binding_id";
 const COMMIT_KEY = "commit";
 const STRING_TYPE = "string";
 const DECLARATION_VERSION = 1;
-const REPORT_VERSION = 1;
+const REPORT_VERSION_ONE = 1;
+const REPORT_VERSION_TWO = 2;
 const DEFAULT_TIME_LIMIT_S = COMMAND_LIMIT_MS / MS_PER_SECOND;
 const MIN_TIME_LIMIT_S = 60;
 const MAX_TIME_LIMIT_S = 3600;
@@ -130,9 +131,18 @@ const testIdSchema = z.strictObject({
 });
 export type AffectedTestId = z.infer<typeof testIdSchema>;
 
+const floorSchema = z.strictObject({
+  tests: z.number().int().nonnegative(),
+  seconds: z.number().finite().nonnegative(),
+  total_seconds: z.number().finite().nonnegative().nullable(),
+});
+
 export const affectedReportSchema = z
   .strictObject({
-    version: z.literal(REPORT_VERSION),
+    version: z.union([
+      z.literal(REPORT_VERSION_ONE),
+      z.literal(REPORT_VERSION_TWO),
+    ]),
     selection: z.enum(AffectedSelection),
     reason: boundedString(REASON_MAX_BYTES)
       .regex(NON_BLANK, NON_BLANK_MESSAGE)
@@ -143,10 +153,18 @@ export const affectedReportSchema = z
     excluded_e2e: z
       .array(boundedString(STRING_MAX_BYTES))
       .max(LIST_MAX_ENTRIES),
+    floor: floorSchema.optional(),
   })
   .superRefine((report, context) => {
     const issue = (path: string, message: string) =>
       context.addIssue({ code: "custom", path: [path], message });
+    if (report.floor !== undefined && report.version === REPORT_VERSION_ONE)
+      issue("floor", "is absent in a version 1 report");
+    if (
+      report.floor?.total_seconds != null &&
+      report.selection !== AffectedSelection.All
+    )
+      issue("floor", "holds total_seconds only for the selection all");
     const needsReason = report.selection === AffectedSelection.All;
     if (needsReason !== (report.reason !== null))
       issue("reason", "is nonblank exactly for the selection all");

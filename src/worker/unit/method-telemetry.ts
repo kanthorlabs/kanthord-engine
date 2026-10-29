@@ -267,6 +267,9 @@ const AffectedAttribute = {
   ExcludedE2eCount: "kanthord.affected.excluded_e2e_count",
   Tests: "kanthord.affected.tests",
   Failed: "kanthord.affected.failed",
+  FloorCount: "kanthord.affected.floor_count",
+  FloorSeconds: "kanthord.affected.floor_seconds",
+  TotalSeconds: "kanthord.affected.total_seconds",
 } as const;
 
 function boundedList(entries: readonly string[]): string[] {
@@ -299,6 +302,12 @@ export function affectedEnd(result: AffectedRun): SpanEnd {
   };
   if (report?.selection === AffectedSelection.All && report.reason !== null)
     attributes[AffectedAttribute.Reason] = report.reason;
+  if (report?.floor) {
+    attributes[AffectedAttribute.FloorCount] = report.floor.tests;
+    attributes[AffectedAttribute.FloorSeconds] = report.floor.seconds;
+    if (report.floor.total_seconds !== null)
+      attributes[AffectedAttribute.TotalSeconds] = report.floor.total_seconds;
+  }
   if (result.head.exit_code !== null)
     attributes[VerificationAttribute.ExitCode] = result.head.exit_code;
   return {
