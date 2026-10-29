@@ -21,7 +21,7 @@ The plan delivers:
 Out of scope:
 
 - The engine. Plan 03 owns the operation.
-- The Unblock and Discard dialogs. The engine rejects the open proposals at these acts, and the dashboard reads the result after its reload.
+- The Unblock, Discard and Override dialogs. The engine rejects the open proposals at these acts, and the dashboard reads the result after its reload.
 
 ## Model
 
@@ -29,7 +29,7 @@ Sonnet at high effort. The plan replaces one hook, one dialog and two call sites
 
 ## Sources
 
-Root pull request #276 at head `14bc18a` is the rule (decision D7):
+Root pull request #276 at head `1809726` is the rule (decision D7):
 
 - `docs/brainstorm/mission-service.impl.md` "The mission screen of the dashboard" — the badges, the one `Decide` action, the dialog text, the disabled confirm and its reason.
 - `docs/brainstorm/mission-service.impl.md` "The fix-node proposal" — the body, the answer and the refusals.
@@ -103,13 +103,23 @@ The dashboard of the decision contract. No engine seam.
   5. Remove every import of the old hook and dialog. `rg -n 'approveProposal|ProposalApprove|use-proposal-approve|proposal-approve-dialog' src mock` prints nothing.
 - Verify: the tests of task 04.1 pass. `pnpm exec vitest run src/features src/lib`.
 
-### 04.6 Move the mock daemon
+### 04.6 Rename the act label
+
+- Files: `src/api/types.ts`, `src/lib/span-labels.ts`, `src/lib/span-labels.test.ts` (edit)
+- Do:
+  1. In `ACT_OPERATIONS` (`src/api/types.ts:1528-1537`), replace `"mission.proposal.approve"` with `"mission.proposal.decide"`.
+  2. In `ACT_LABELS` (`src/lib/span-labels.ts:59`), replace `"mission.proposal.approve": "Proposal approved"` with `"mission.proposal.decide": "Proposals decided"`.
+  3. In `src/lib/span-labels.test.ts:86`, replace the row with `["mission.proposal.decide", "Proposals decided"]`.
+- Cite: `architecture.impl.md:1461`.
+- Verify: `pnpm exec vitest run src/lib/span-labels.test.ts`.
+
+### 04.7 Move the mock daemon
 
 - Files: `mock/daemon.mjs`, `mock/fixtures.mjs` (edit)
 - Do:
   1. Replace the route `POST /api/mission/proposal/:id/approve` (`mock/daemon.mjs:1332-1420`) with `POST /api/mission/assessment/:id/decide`. It applies the order of writes and the refusals of plan 03: 404 for an unknown assessment, 409 `mission.proposal.decided`, 400 `mission.proposal.assessment_mismatch`, 409 `mission.node.state_conflict`. It answers `{ created: [...], rejected_proposal_ids, proposer }`.
   2. Each fixture proposal holds `rejected_at: null`. One fixture assessment of a `Blocked` examine node holds two open proposals.
-  3. The unblock route (`:1477`) and the discard route (`:1512`) set `rejected_at` of every open proposal of the attempt of a `Blocked` proposer.
+  3. The unblock route (`:1477`), the discard route (`:1512`) and the override route (`:1680`) set `rejected_at` of every open proposal of the attempt of a `Blocked` proposer.
 - Verify: `node mock/daemon.mjs` starts.
 
 ### 04.E Run the gate

@@ -10,9 +10,9 @@ The plan delivers:
 
 - The operation `mission.proposal.decide` at `POST /api/mission/assessment/:assessment_id/decide`, with the body `ProposalDecide` and the answer `ProposalDecideResult`.
 - `rejected_at` on the proposal record (decision D8).
-- The rejection of every open proposal of the blocking attempt at a node unblock and a node discard of the proposer.
+- The rejection of every open proposal of the blocking attempt at a node unblock, a node discard and a node override of the proposer.
 - The act `mission.proposal.decide`. It names the proposer.
-- The CLI command `kanthord mission proposal decide <assessment-id>`.
+- The CLI command `kanthord mission proposal decide <assessment-id> --file <path>`, with the same answers and refusals as the API.
 - The removal of `mission.proposal.approve`, `ProposalApprove`, `ProposalApproveResult`, `mission.proposal.already_approved` and `cli.mission.proposal.approve.invalid_proposal_id`.
 - `docs/cli/mission.md` and `docs/cli/worker.md`.
 
@@ -28,9 +28,9 @@ Opus at medium effort. The decision crosses node creation, the dependency edges,
 
 ## Sources
 
-Root pull request #276 at head `14bc18a` is the rule (decision D7):
+Root pull request #276 at head `1809726` is the rule (decision D7):
 
-- `docs/brainstorm/mission-service.impl.md` "The fix-node proposal" — the operation, the body, the answer, the order of the writes, the refusals and the rejection at unblock and discard.
+- `docs/brainstorm/mission-service.impl.md` "The fix-node proposal" — the operation, the body, the answer, the order of the writes, the refusals and the rejection at unblock, discard and override.
 - `docs/brainstorm/mission-service.impl.md` "The act trace" — `mission.proposal.decide` names the proposer, and `kanthord.node.state.from` is `Blocked`.
 - `docs/brainstorm/mission-service.impl.md` "Tests" — the decision test of two of three proposals.
 - `docs/reference/mission/assessment.md` "Fix-node proposals" — the CLI text and the record fields.
@@ -86,7 +86,7 @@ The contract of plan 04:
   2. Replace the operation `"proposal.approve"` (`:2013-2028`) with `"proposal.decide"`: id `mission.proposal.decide`, method `POST`, path `/api/mission/assessment/:assessment_id/decide`, params `{ assessment_id: identitySchema("assessment") }`, the same access policy and mutation flags as the approve. Description: "Decide every fix-node proposal of one assessment: create a fix node for each approved proposal, reject the other open proposals and unblock the proposer once."
   3. Replace `ProposalAlreadyApproved` (`:386`) with `ProposalDecided: "mission.proposal.decided"` and add `ProposalAssessmentMismatch: "mission.proposal.assessment_mismatch"`.
   4. Replace `Act.ApproveProposal` (`src/mission/act-telemetry.ts:26`) with `DecideProposals: "mission.proposal.decide"`.
-- Verify: `pnpm run typecheck` names only the callers that tasks 03.4 to 03.7 change.
+- Verify: `pnpm run typecheck` names only the callers that tasks 03.4 to 03.8 change.
 
 ### 03.4 Implement the decision
 
@@ -104,37 +104,43 @@ The contract of plan 04:
 - Cite: decision D6; `mission-service.impl.md` "The fix-node proposal".
 - Verify: the test of task 03.1 passes.
 
-### 03.5 Reject the open proposals at unblock and discard
+### 03.5 Reject the open proposals at unblock, discard and override
 
 - Files: `src/mission/control-unblock.ts`, `src/mission/control-close.ts`, `src/mission/proposal.test.ts` (edit)
 - Do:
   1. In `unblockNode` (`src/mission/control-unblock.ts:124`), after the check `requireControlState(node, [NodeState.Blocked])`, call `markProposalsRejected(tx, nodeId, node.attempt, now)`.
   2. In `discardNode` (`src/mission/control-close.ts:298`), when the node is `Blocked` at admission, call `markProposalsRejected` with its attempt before the attempt closes.
-  3. Add the tests "an unblock of the proposer rejects every open proposal" and "a discard of the proposer rejects every open proposal". Each test submits two proposals, runs the act and asserts `rejected_at` on both.
+  3. In `overrideNode` (`src/mission/control-close.ts:114`), when the node is `Blocked` at admission, call `markProposalsRejected` with its attempt. `OVERRIDE_STATES` holds `Blocked` (`src/mission/contract.ts:471-480`).
+  4. Add the tests "an unblock of the proposer rejects every open proposal", "a discard of the proposer rejects every open proposal" and "an override of the proposer rejects every open proposal". Each test submits two proposals, runs the act and asserts `rejected_at` on both.
 - Cite: `mission-service.impl.md` "The fix-node proposal", last item.
 - Verify: `PATH="$(node scripts/test-path.mjs)" node --test --test-timeout=60000 src/mission/proposal.test.ts src/mission/control-unblock.test.ts src/mission/control-close.test.ts` passes.
 
-### 03.6 Move the proposal tests to the decision
+### 03.6 Move the CLI
+
+Run this task before task 03.7. Task 03.3 removes `proposalApproveSchema`, which `src/apps/cli/mission-proposal.ts:7` imports, so no test of the CLI or the server compiles before this task.
+
+- Files: `src/apps/cli/mission-proposal.ts`, `src/apps/cli/mission-examples.ts`, `docs/cli/mission.md` and the CLI tests that name `proposal approve` (edit)
+- Do:
+  1. Replace the command `approve <proposal-id>` (`src/apps/cli/mission-proposal.ts:66-90`) with `decide <assessment-id>`. Description: "Decide every fix-node proposal of one assessment and unblock its examine proposer". It takes `proposalDecideSchema` through `addMutationOptions`, so the body comes from `--file <path>` like every mission CLI write.
+  2. An argument that is not a canonical `assessment_<ulid>` exits 1 with `cli.mission.proposal.decide.invalid_assessment_id`. Remove `cli.mission.proposal.approve.invalid_proposal_id` (`:23-24`).
+  3. `missionExamples.proposalApprove` (`src/apps/cli/mission-examples.ts:115`) becomes `proposalDecide: { expected_mission_version: MISSION_VERSION, approved_proposal_ids: ["proposal_01ARZ3NDEKTSV4RRFFQ69G5FAV"] }`.
+  4. The command row 57 of `docs/cli/mission.md:478` becomes `proposal decide <assessment-id> --file <path> [M]`, `POST /api/mission/assessment/:assessment_id/decide`, `mission.proposal.decide`, `H`. The CLI inventory check reads this row.
+  5. Find each CLI test with `rg -n 'proposal approve|proposal\.approve|invalid_proposal_id' src/apps` and move it to `decide`.
+- Verify: `PATH="$(node scripts/test-path.mjs)" node --test --test-timeout=60000 src/apps/cli/*.test.ts` passes.
+
+### 03.7 Move the proposal tests to the decision
 
 - Files: `src/mission/proposal.test.ts`, `src/mission/act-telemetry.test.ts`, `src/apps/server/e2e-mission-proposals.test.ts` (edit)
 - Do:
   1. Replace the `approve` helper with `decide`. Each test of `src/mission/proposal.test.ts:244-480` that approves one proposal decides it with `approved_proposal_ids: [<that proposal>]`.
   2. "approving twice refuses with already_approved" (`:382`) becomes "a repeated decision refuses with decided" and asserts `MissionErrorCode.ProposalDecided`.
-  3. "approving refuses an unknown proposal, a stale version and a changed proposer state" (`:393`) becomes the decision form. It adds an identity of another assessment, answered with `ProposalAssessmentMismatch`, and an empty list and a duplicate list, answered with `gateway.request.validation_failed` at `approved_proposal_ids`. Each refusal compares `databaseSnapshot` before and after.
+  3. "approving refuses an unknown proposal, a stale version and a changed proposer state" (`:393`) becomes the decision form. It adds an unknown assessment, answered with `mission.record.not_found`, and an identity of another assessment, answered with `ProposalAssessmentMismatch`. It adds an empty list and a duplicate list, answered with `gateway.request.validation_failed` at `approved_proposal_ids`. Each refusal compares `databaseSnapshot` before and after.
   4. The act trace tests (`:425-480`) assert that the trace names the proposer, `kanthord.node.state.from` `Blocked` and the operation `Act.DecideProposals`.
   5. `act-telemetry.test.ts:128` uses `Act.DecideProposals`.
-  6. `e2e-mission-proposals.test.ts` (`:315-475`) calls `"proposal.decide"`. Its journey decides two proposals of one assessment and asserts the two fix nodes. The refusal for the machine identity (`:367`) stays.
+  6. `e2e-mission-proposals.test.ts` (`:315-475`) calls `"proposal.decide"` over HTTP. Its journey decides two proposals of one assessment and asserts the two fix nodes. The refusal for the machine identity (`:367`) stays. Keep every HTTP check.
+  7. Prove the parity of the CLI in the same file, with `kanthord` and `cliSession` of `src/apps/server/cli-test-support.ts` (the file already imports them, `:29-38`). Submit three proposals of one assessment. Write a `--file` body with two `approved_proposal_ids`, the current `expected_mission_version` and a `reason`. Run `kanthord mission proposal decide <assessment-id> --file <path>`. Assert exit 0 and a stdout JSON line with two `created` items, one `rejected_proposal_ids` item, `proposer` and `idempotency_key`.
+  8. Through the CLI, assert exit 1 and the stderr prefix of each refusal: `mission.proposal.decided:` for the same decision again, `mission.proposal.assessment_mismatch:` for a proposal identity of another assessment, `mission.version.conflict:` for a stale `expected_mission_version`, and `cli.mission.proposal.decide.invalid_assessment_id:` for the argument `node_01ARZ3NDEKTSV4RRFFQ69G5FAV`.
 - Verify: `PATH="$(node scripts/test-path.mjs)" node --test --test-timeout=180000 src/mission/proposal.test.ts src/mission/act-telemetry.test.ts src/apps/server/e2e-mission-proposals.test.ts` passes.
-
-### 03.7 Move the CLI
-
-- Files: `src/apps/cli/mission-proposal.ts`, `src/apps/cli/mission-examples.ts` and the CLI tests that name `proposal approve` (edit)
-- Do:
-  1. Replace the command `approve <proposal-id>` (`src/apps/cli/mission-proposal.ts:66-90`) with `decide <assessment-id>`. Description: "Decide every fix-node proposal of one assessment and unblock its examine proposer". It takes `proposalDecideSchema` through `addMutationOptions`.
-  2. An argument that is not a canonical `assessment_<ulid>` exits 1 with `cli.mission.proposal.decide.invalid_assessment_id`. Remove `cli.mission.proposal.approve.invalid_proposal_id` (`:23-24`).
-  3. `missionExamples.proposalApprove` (`src/apps/cli/mission-examples.ts:115`) becomes `proposalDecide: { expected_mission_version: MISSION_VERSION, approved_proposal_ids: ["proposal_01ARZ3NDEKTSV4RRFFQ69G5FAV"] }`.
-  4. Find each CLI test with `rg -n 'proposal approve|proposal\.approve|invalid_proposal_id' src/apps` and move it to `decide`.
-- Verify: `PATH="$(node scripts/test-path.mjs)" node --test --test-timeout=60000 src/apps/cli/*.test.ts` passes.
 
 ### 03.8 Regenerate the OpenAPI document
 
@@ -149,8 +155,8 @@ The contract of plan 04:
 - Files: `docs/cli/mission.md`, `docs/cli/worker.md` (edit)
 - Do:
   1. `docs/cli/mission.md:69`: "proposal approve" becomes "proposal decide".
-  2. The command row 57 (`:478`) becomes `proposal decide <assessment-id> --file <path> [M]`, `POST /api/mission/assessment/:assessment_id/decide`, `mission.proposal.decide`, `H`.
-  3. Rewrite `:490-501` from `docs/reference/mission/assessment.md` "Fix-node proposals" of root pull request #276: the body, the answer, the order of the writes, the refusals, and the rejection at unblock and discard. Delete "No operation rejects a proposal." (`:501`).
+  2. Rewrite `:490-502` from `docs/reference/mission/assessment.md` "Fix-node proposals" of root pull request #276: the body, the answer, the order of the writes, the refusals, and the rejection at unblock, discard and override. Delete "No operation rejects a proposal." (`:502`).
+  3. In the control texts, add one sentence to Unblock (`:431-443`), Override (`:455-462`) and Discard (`:463-467`): "From `Blocked`, it rejects every open fix-node proposal of the assessment that blocked the node." Link "fix-node proposal" to root `docs/reference/mission/assessment.md#fix-node-proposals`, with the GitHub URL form of the other root links of the page.
   4. Replace the rows `ProposalApprove` (`:868`) and `ProposalApproveResult` (`:1022`) with `ProposalDecide` and `ProposalDecideResult` of the table "Provides". The `Proposal` row adds `rejected_at`.
   5. In the error tables, replace `cli.mission.proposal.approve.invalid_proposal_id` (`:1120`) with `cli.mission.proposal.decide.invalid_assessment_id`, and `mission.proposal.already_approved` (`:1211`) with `mission.proposal.decided`. Add the row 400 `mission.proposal.assessment_mismatch`.
   6. `docs/cli/worker.md:349`: "See `mission proposal decide` in the [Mission CLI](mission.md)."
@@ -163,7 +169,7 @@ The contract of plan 04:
 
 ## E2E
 
-`src/apps/server/e2e-mission-proposals.test.ts` decides two proposals of one assessment through the gateway (task 03.6).
+`src/apps/server/e2e-mission-proposals.test.ts` decides two proposals of one assessment through the gateway and through the CLI (task 03.7).
 
 ## Blockers
 

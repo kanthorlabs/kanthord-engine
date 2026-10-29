@@ -17,7 +17,7 @@ The fix follows decision D9: `/workers` and the worker page read `?project=` and
 Out of scope:
 
 - A project selector on the worker pages. No design page asks for one.
-- The instance page. Its bindings come from `worker.instance.get` over every project (`architecture.impl.md:1261`).
+- The bindings of the instance page. They come from `worker.instance.get` over every project (`architecture.impl.md:1261`). Task 05.3 changes only its links.
 
 ## Model
 
@@ -59,14 +59,16 @@ Sonnet at high effort. The change adds one hook and moves two readers to it.
 - Cite: decision D9.
 - Verify: the tests of steps 2 and 3 of task 05.1 pass.
 
-### 05.3 Keep the project on the links to a worker page
+### 05.3 Keep the project on the links between the worker pages
 
-- Files: `src/lib/worker-paths.ts`, `src/lib/worker-paths.test.ts`, `src/features/workers/catalogue/workers-screen.tsx`, `src/features/workers/catalogue/components/binding-instance-item.tsx` (edit)
+- Files: `src/lib/worker-paths.ts`, `src/lib/worker-paths.test.ts`, `src/features/workers/catalogue/workers-screen.tsx`, `src/features/workers/catalogue/components/binding-instance-item.tsx`, `src/features/workers/worker/worker-screen.tsx`, `src/features/workers/instance/instance-screen.tsx`, `src/features/projects/view/components/instances-field.tsx`, `src/features/projects/view/components/instance-add-sheet.tsx` and their tests (edit)
 - Do:
-  1. `workerPagePath(workerName, projectId?)` (`src/lib/worker-paths.ts:1-3`) appends `?project=<encoded project id>` when `projectId` is a nonempty string. `instancePagePath` does not change.
+  1. `workerPagePath(workerName, projectId?)` and `instancePagePath(workerName, instanceName, projectId?)` (`src/lib/worker-paths.ts:1-7`) append `?project=<encoded project id>` when `projectId` is a nonempty string. A test of `worker-paths.ts` asserts both forms of both functions.
   2. The `Open` link of a worker card (`workers-screen.tsx:55`) and the link "Open the worker page" (`binding-instance-item.tsx:24`) pass the project of `useWorkersProjectId()`. Read the value in the screen hook, not in the component body, under `apps/AGENTS.md` "A component body holds no business logic".
-  3. A test of `worker-paths.ts` asserts both forms.
-- Verify: `pnpm exec vitest run src/lib src/features/workers` passes, the tests of task 05.1 included.
+  3. The worker page opens an instance page with the project of `useWorkersProjectId()` (`worker-screen.tsx:353`).
+  4. The instance page keeps the query on its links back to the worker page: the header link (`instance-screen.tsx:94`), the navigation after an archive (`:469`) and the button of the read failure (`:600`). They pass the project of `useWorkersProjectId()`.
+  5. The links of the project page to a worker page pass the project of that page: "worker page" of `instances-field.tsx:71` and `:115`, and "Add a worker instance on the worker page" of `instance-add-sheet.tsx:75`. Pass the project identity into these components from the binding sheet that renders them, as a prop.
+- Verify: `pnpm exec vitest run src/lib src/features/workers src/features/projects` passes, the tests of task 05.1 included.
 
 ### 05.E Run the gate
 
