@@ -1,0 +1,100 @@
+# Plan 00: Index
+
+## Scope
+
+Ulrich ruled on 2026-10-29 to run the full suite once for each node execution (root pull request #275). Root pull request #277 wrote the rulings into the design pages. The plan set `dogfood-time/` builds the result copy and the own commands. Ruling O4 of that set (option A) gives every other rule of root pull requests #275 and #277 to this set.
+
+This set plans these rules:
+
+- Plan 01: the verification memo (root `docs/brainstorm/worker-service.impl.md:1482-1493`, test line `:1462`).
+- Plan 02: the affected report version 2 with `floor` at the worker (`worker-service.impl.md:1595-1611`), and the floor span attributes (`docs/brainstorm/tracking-service.impl.md:86-88`). The ruling of root pull request #275 says that the worker accepts version 2 before a repository writes it.
+- Plan 03: the measure `test_floor_share` of `tracking.analytics.duration` (`tracking-service.impl.md:347`, `:352`, `:358`).
+- Plan 04: the `Test floor share` row of the `Time` section of `/analytics` (`docs/brainstorm/architecture.impl.md:1551`, `:1555`).
+- Plan 05: the floor in the report of the engine selector (`worker-service.impl.md:1596-1597`).
+- Plan 06: the suite pass record of the engine repository (`docs/brainstorm/project-service.impl.md:403-435`, `worker-service.impl.md:1539-1540`).
+- Plan 07: the suite pass record of the apps repository (same sources).
+- Plan 08: the remainder of root `docs/brainstorm/HANDOFF.md:89` in the root pages `docs/explanation/worker-contract.md` and `docs/explanation/coder-worker.md`.
+
+Plans 06 and 07 also add `.kanthord/suite-pass.json` and `.github/workflows/ci.yml` to `gate_files` of the engine and the apps declaration. That is the first part of `HANDOFF.md:89`.
+
+## Out of scope
+
+- The suite pass proposal: `suite_pass` in `project.binding.environment.get` (`project-service.impl.md:373`, `:636-637`), the shipped plan `suite-pass-setup` (`:638-641`) and the dashboard line (`:802`). Open items O1 and O2 hold them. No plan of this set builds them.
+- The result copy and the own commands. Plans 01 and 02 of `dogfood-time/` own them.
+- The engine prompt `static/prompt/swe@1.md`. Plan 03 of `dogfood-time/` owns it.
+- The trend of `Test floor share` on the dashboard. The ruling of root pull request #275 says that the dashboard shows it later.
+- Records that a developer or KanthorD writes (`project-service.impl.md:413`).
+- An import graph for the apps selector. The apps selector gives no import graph, so apps uses one record for the whole tree (decision D9).
+
+## Plans
+
+Each plan is one pull request and ends green. The set starts after plan 02 of `dogfood-time/` merges to engine `main`. Plans 01, 02, 03 and 07 start then. Plan 04 starts after plan 03 merges. Plan 05 starts after plan 02 merges and after Ulrich rules open item O3. Plan 06 starts after plan 05 lands. Plan 08 starts after plans 01, 02, 06 and 07 land.
+
+| Plan | File                          | Repository                    | Model        | Landing | Start condition                | Component                             | Boundary                                                                                                                                                                                                    |
+| ---- | ----------------------------- | ----------------------------- | ------------ | ------- | ------------------------------ | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 01   | `01-verification-memo.md`     | `kanthorlabs/kanthord-engine` | Opus, medium | Aelita  | `dogfood-time/` plan 02 merged | Worker unit — verification run        | One memo for each claim in the steps state; the runner reads and writes it in the contexts `task`, `node` and `release`; a hit writes no span and counts in `ran`; the evaluation reads no memo.            |
+| 02   | `02-affected-report-floor.md` | `kanthorlabs/kanthord-engine` | Sonnet, high | Aelita  | `dogfood-time/` plan 02 merged | Worker unit — affected test run       | The strict report schema takes `version` 1 or 2 and the optional `floor` of version 2; the affected span ends with `kanthord.affected.floor_count`, `floor_seconds` and `total_seconds`.                    |
+| 03   | `03-test-floor-share.md`      | `kanthorlabs/kanthord-engine` | Sonnet, high | Aelita  | `dogfood-time/` plan 02 merged | Tracking Service — analytics          | `test_floor_share` joins the measure set; its item holds `key`, `bucket_start`, `count` and `share`; the OpenAPI document and `docs/cli/tracking.md` follow.                                                |
+| 04   | `04-dashboard-floor-share.md` | `kanthorlabs/kanthord-apps`   | Sonnet, high | Aelita  | Plan 03 merged                 | Dashboard — analytics page            | The measure select holds `Test floor share`; its row shows the count, the share as a percent and one bar from 0 to 1; `mock/` serves the measure.                                                           |
+| 05   | `05-selector-floor.md`        | `kanthorlabs/kanthord-engine` | Sonnet, high | Ulrich  | Plan 02 merged; O3 ruled       | Engine repository — affected selector | The reporter writes the test time of each file; the selector writes version 2 with `floor` from its import graph; `floorOf` and the closure of a file become exports for plan 06.                           |
+| 06   | `06-engine-suite-pass.md`     | `kanthorlabs/kanthord-engine` | Opus, medium | Ulrich  | Plan 05 landed                 | Engine repository — CI and suite pass | `scripts/suite-pass.mjs` keys, skips and records each test file; `.kanthord/suite-pass.json`; the gitignore exception; `ci.yml` with the record cache, the job summary and the nightly run; `gate_files`.   |
+| 07   | `07-apps-suite-pass.md`       | `kanthorlabs/kanthord-apps`   | Sonnet, high | Ulrich  | `dogfood-time/` plan 02 merged | Apps repository — CI and suite pass   | One record for the whole tree; `scripts/suite-pass.mjs`; `.kanthord/suite-pass.json`; the gitignore exception; `ci.yml` with the record cache, the job summary and the nightly run; `gate_files`.           |
+| 08   | `08-explanation-pages.md`     | `kanthorlabs/kanthord`        | Sonnet, high | Aelita  | Plans 01, 02, 06 and 07 landed | Root — explanation and how-to pages   | The floor attributes in `worker-contract.md`; the live run, the result copy, the memo and the release gate in `coder-worker.md`; report version 2 in `declare-affected-tests.md`; the `HANDOFF.md:89` item. |
+
+"Landing" names the person who merges the pull request. Aelita merges a plan with no gate file change after review. Ulrich lands each plan that changes a gate file of a `.kanthord/affected-tests.json` at its base (decision D10).
+
+**Rationale for order.**
+Plan 01 edits the runner and the steps code that plans 01 and 02 of `dogfood-time/` change, so it starts from their merged state (decision D2). Plan 05 writes version 2, and the worker accepts version 2 only after plan 02 (ruling of root pull request #275). Plan 06 imports `floorOf`, the closure and the test time of plan 05. Plan 04 follows the contract of plan 03. Plan 07 shares no file with another plan. Plan 08 describes the merged behavior of plans 01, 02, 06 and 07, and deletes the `HANDOFF.md:89` item after both `gate_files` changes land.
+
+## Repositories, branches and worktrees
+
+Create each worktree from `origin/main` of its repository. The worktree directory `.dev/<name>` matches the branch `<type>/<name>`. Never commit to `main`. Push the branch and open a pull request to `main`. Merge only after review (root `CLAUDE.local.md` "Commits"). When a repository rule refuses a push, stop and report it.
+
+| Plan | Repository root | Worktree                            | Branch                       | Command                                                                                                                                                                            |
+| ---- | --------------- | ----------------------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 01   | `engine/`       | `engine/.dev/verification-memo`     | `feat/verification-memo`     | `git -C engine fetch origin && git -C engine worktree add -b feat/verification-memo .dev/verification-memo origin/main`, then `pnpm install` and `pnpm run pi-tools:fetch`         |
+| 02   | `engine/`       | `engine/.dev/affected-report-floor` | `feat/affected-report-floor` | `git -C engine fetch origin && git -C engine worktree add -b feat/affected-report-floor .dev/affected-report-floor origin/main`, then `pnpm install` and `pnpm run pi-tools:fetch` |
+| 03   | `engine/`       | `engine/.dev/test-floor-share`      | `feat/test-floor-share`      | `git -C engine fetch origin && git -C engine worktree add -b feat/test-floor-share .dev/test-floor-share origin/main`, then `pnpm install` and `pnpm run pi-tools:fetch`           |
+| 04   | `apps/`         | `apps/.dev/test-floor-share`        | `feat/test-floor-share`      | `git -C apps fetch origin && git -C apps worktree add -b feat/test-floor-share .dev/test-floor-share origin/main`, then `pnpm install`                                             |
+| 05   | `engine/`       | `engine/.dev/selector-floor`        | `feat/selector-floor`        | `git -C engine fetch origin && git -C engine worktree add -b feat/selector-floor .dev/selector-floor origin/main`, then `pnpm install` and `pnpm run pi-tools:fetch`               |
+| 06   | `engine/`       | `engine/.dev/suite-pass-record`     | `feat/suite-pass-record`     | `git -C engine fetch origin && git -C engine worktree add -b feat/suite-pass-record .dev/suite-pass-record origin/main`, then `pnpm install` and `pnpm run pi-tools:fetch`         |
+| 07   | `apps/`         | `apps/.dev/suite-pass-record`       | `feat/suite-pass-record`     | `git -C apps fetch origin && git -C apps worktree add -b feat/suite-pass-record .dev/suite-pass-record origin/main`, then `pnpm install`                                           |
+| 08   | root            | `.dev/suite-pass-pages`             | `docs/suite-pass-pages`      | `git fetch origin && git worktree add -b docs/suite-pass-pages .dev/suite-pass-pages origin/main`, then `make bootstrap`                                                           |
+
+## Verify gate per plan
+
+Each plan ends with its task `NN.E`. The gate holds every row of its plan. A failed row blocks the pull request.
+
+| Plan | Gate                                                                                                                                                                                                                                                                                     |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 01   | `pnpm run verify`; the tests of task 01.1 failed before task 01.2 and pass after task 01.3; `rg -n 'VerificationMemo' src --glob '!*.test.ts'` names only `src/worker/unit/verification-memo.ts`, `verification.ts`, `steps-implement.ts` and `release-gate.ts`.                         |
+| 02   | `pnpm run verify`; the tests of task 02.1 failed before task 02.2 and pass after task 02.3.                                                                                                                                                                                              |
+| 03   | `pnpm run verify`; `pnpm run build && node bin/kanthord.mjs gateway openapi && git status --porcelain static/` prints nothing after the commit of task 03.4; `pnpm exec prettier --check docs/cli/tracking.md`; the tests of task 03.1 failed before task 03.2 and pass after task 03.3. |
+| 04   | `pnpm verify` in `apps/`; the tests of task 04.1 failed before task 04.2 and pass after task 04.3; the browser check of task 04.E at 1280 by 800 and at 390 by 844.                                                                                                                      |
+| 05   | `pnpm run verify`; the tests of task 05.1 failed before task 05.2 and pass after task 05.3; `KANTHORD_AFFECTED_REPORT=<tmp> pnpm --silent run test:affected` on a clean checkout writes a version 2 report with `floor`, and the worker schema of plan 02 accepts it.                    |
+| 06   | `pnpm run verify`; the tests of task 06.1 failed before task 06.2 and pass after it; the first CI run of the pull request prints the job summary; a re-run of the `check` job skips each test file that passed in the first run and prints a saved share above 0.                        |
+| 07   | `pnpm verify` in `apps/`; the tests of task 07.1 failed before task 07.2 and pass after it; the first CI run of the pull request prints the job summary; a re-run of the `check` job skips the test run and prints the saved share `100%`.                                               |
+| 08   | `pnpm exec prettier --check` on each edited page; each changed sentence cites the engine code of plans 01, 02, 06 and 07 in the pull request body; `rg -n 'suite-pass-record' docs/brainstorm/HANDOFF.md` prints nothing.                                                                |
+
+## Citations
+
+- A design citation names `docs/brainstorm/<page>:<line>` of the root repository at `c8c41e7`. `docs/brainstorm/HANDOFF.md:89` cites root pull request #279 at head `c418936`.
+- An engine citation names a path under the engine root at `0f89b527`. Plan 01 cites the code that plans 01 and 02 of `dogfood-time/` change by function name, and re-anchors each line after their merge (decision D2).
+- An apps citation names a path under the apps root at `ca73cb0`.
+- When `main` moved before the plan starts, re-anchor each citation to the sentence or code block that the text means (`engine/AGENTS.md`, section "Plans").
+
+## Open items
+
+- O1 — The suite pass proposal. The design says that a human accepts the proposal "with an import of the shipped plan `suite-pass-setup`" (`project-service.impl.md:639`). An import replaces the whole plan of a mission, and it retires each current node that no entry names (root `docs/reference/mission/import.md:7-11`). A project holds one mission (`project-service.impl.md:41`). No page names the place of a shipped plan, the read that gives it to the dashboard, or the field that tells the dashboard that a binding gets the proposal (`:638`, `:802`).
+  - I want option A: `Import setup plan` creates one node with `mission.node.create`, which admits a node at any time (`docs/brainstorm/mission-service.impl.md:226`). The engine ships `static/plan/suite-pass-setup.md`, one `implement` node file with no task. A new `human` read `project.binding.suite_pass.plan.get` answers that file with the binding name in `bindings`. The dashboard derives the proposal from the binding configuration: `suite_pass` `absent` and a `pull_request` action with `landing: human`. Line `:639` changes "an import of" to "a node create from". Trade-off: one node write that touches no other node, and one new read.
+  - Option B: keep the import. The dashboard exports the mission, adds the shipped file, previews and applies. Trade-off: the design word stays, but each acceptance rewrites the whole mission, and a concurrent edit refuses the apply.
+  - Option C: a new mutation `project.binding.suite_pass.propose` creates the node on the server through a Mission collaboration. Trade-off: one call for every client, but a new cross-service write path with its own actor rule.
+- O2 — The read of `.kanthord/suite-pass.json`. The design says that the Onboarding component reads it "with `fileAtRevision`" (`project-service.impl.md:636`). `fileAtRevision` is a function of the worker unit that reads a local checkout (`src/worker/unit/local-git.ts:896`). The Project Service holds no checkout. It reads repository files over SSH with `repositoryFiles.readFilesAtCommit` (`src/project/environment.ts:467-517`). A stored environment reads no repository file today (`src/project/environment.ts:216-222`).
+  - I want option A: read the file with `readFilesAtCommit` at the base commit that `readBase` resolves, for every source, and change `fileAtRevision` at line `:636` to the read of the resolution. Trade-off: one more file in the existing SSH read; a stored source gets one base read.
+  - Option B: the Project Service keeps a local mirror clone and reads the file with `fileAtRevision`. Trade-off: the design word stays, but the server gets a clone store, its cleanup and its disk cost.
+- O3 — The production file of the floor. The design says: "The floor is the set of test files whose import closure holds every production file of the repository" (`worker-service.impl.md:1596`). No page defines a production file. The engine holds 437 source files that are no test file, and 22 of them are test helpers, for example `src/worker/unit/test-support.ts`.
+  - I want option A: a production file is a file of the import closure of `src/main.ts`, the entry that `bin/kanthord.mjs` loads through `dist/main.js`. Trade-off: test helpers and modules that only a test imports do not count, so the floor holds the test files that load the whole program.
+  - Option B: a production file is each `src/**/*.ts` file that is no `*.test.ts` file and whose name holds no `test-support` and no `test-identity`. Trade-off: no entry is needed, but one module that only a test reaches makes the floor empty.
+  - Option C: a production file is each parsed file that a test file reaches. Trade-off: the floor never misses a file, but it then equals the test files that load every tested file, which is a different measure.
+
+The decisions that this set takes are in [decisions.md](decisions.md).
