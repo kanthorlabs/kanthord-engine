@@ -383,7 +383,8 @@ export const MissionErrorCode = {
   EvidenceRequestAssetRefused: "mission.evidence.request_asset_refused",
   AssessmentEvidenceUnpublished: "mission.assessment.evidence_unpublished",
   AssessmentVerificationFailed: "mission.assessment.verification_failed",
-  ProposalAlreadyApproved: "mission.proposal.already_approved",
+  ProposalDecided: "mission.proposal.decided",
+  ProposalAssessmentMismatch: "mission.proposal.assessment_mismatch",
   NoUnresolvedRequest: "mission.node.no_unresolved_request",
   RecordNotFound: "mission.record.not_found",
   ExecutionContextMismatch: "mission.execution.context_mismatch",
@@ -1307,18 +1308,26 @@ export const proposalSchema = z.strictObject({
   content: proposalContentSchema,
   created_node_id: identitySchema(NODE_IDENTITY_PREFIX).nullable(),
   approved_at: timestamp.nullable(),
+  rejected_at: timestamp.nullable(),
   created_at: timestamp,
 });
 export type Proposal = z.infer<typeof proposalSchema>;
-export const proposalApproveSchema = z.strictObject({
+export const proposalDecideSchema = z.strictObject({
   expected_mission_version: z.number().int().positive(),
+  approved_proposal_ids: z
+    .array(identitySchema(PROPOSAL_IDENTITY_PREFIX))
+    .min(1)
+    .max(PROPOSAL_MAX)
+    .refine((items) => new Set(items).size === items.length),
   reason: textSchema.optional(),
 });
-export type ProposalApprove = z.infer<typeof proposalApproveSchema>;
-export const proposalApproveResultSchema = z.strictObject({
-  created: nodeChangeSchema,
+export type ProposalDecide = z.infer<typeof proposalDecideSchema>;
+export const proposalDecideResultSchema = z.strictObject({
+  created: z.array(nodeChangeSchema),
+  rejected_proposal_ids: z.array(identitySchema(PROPOSAL_IDENTITY_PREFIX)),
   proposer: controlResultSchema,
 });
+export type ProposalDecideResult = z.infer<typeof proposalDecideResultSchema>;
 export const gateFilesSchema = z.array(
   z.strictObject({
     binding_id: identitySchema("binding"),
@@ -2010,21 +2019,21 @@ export const missionOperations = {
     output: pageOf(proposalSchema),
     description: "List the fix-node proposals of an examine proposer.",
   },
-  "proposal.approve": {
+  "proposal.decide": {
     ...writeOperation,
-    id: "mission.proposal.approve",
+    id: "mission.proposal.decide",
     method: HttpMethod.Post,
-    path: "/api/mission/proposal/:proposal_id/approve",
+    path: "/api/mission/assessment/:assessment_id/decide",
     input: z.strictObject({
       params: z.strictObject({
-        proposal_id: identitySchema(PROPOSAL_IDENTITY_PREFIX),
+        assessment_id: identitySchema("assessment"),
       }),
       query: z.strictObject({}),
-      body: proposalApproveSchema,
+      body: proposalDecideSchema,
     }),
-    output: proposalApproveResultSchema,
+    output: proposalDecideResultSchema,
     description:
-      "Approve a fix-node proposal, create its node, add the dependency of the proposer on it and unblock the proposer.",
+      "Decide every fix-node proposal of one assessment: create a fix node for each approved proposal, reject the other open proposals and unblock the proposer once.",
   },
   "node.unblock": {
     ...writeOperation,

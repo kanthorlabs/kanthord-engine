@@ -23,7 +23,7 @@ export const Act = {
   Override: "mission.node.override",
   Block: "mission.node.block",
   Discard: "mission.node.discard",
-  ApproveProposal: "mission.proposal.approve",
+  DecideProposals: "mission.proposal.decide",
   DeleteEvidence: "mission.evidence.delete",
 } as const;
 export type Act = (typeof Act)[keyof typeof Act];

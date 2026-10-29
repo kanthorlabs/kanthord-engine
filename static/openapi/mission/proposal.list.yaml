@@ -196,6 +196,13 @@ components:
                     maximum: 9007199254740991
                     description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
                   - type: "null"
+              rejected_at:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                    description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                  - type: "null"
               created_at:
                 type: integer
                 minimum: 0
@@ -209,6 +216,7 @@ components:
               - content
               - created_node_id
               - approved_at
+              - rejected_at
               - created_at
             additionalProperties: false
         next_cursor:

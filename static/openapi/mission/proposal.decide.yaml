@@ -1,11 +1,12 @@
 # Generated from the operation registry by kanthord gateway openapi.
 pathItem:
   post:
-    operationId: mission.proposal.approve
+    operationId: mission.proposal.decide
     tags:
       - mission
-    description: Approve a fix-node proposal, create its node, add the dependency of
-      the proposer on it and unblock the proposer.
+    description: "Decide every fix-node proposal of one assessment: create a fix
+      node for each approved proposal, reject the other open proposals and
+      unblock the proposer once."
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: true
@@ -13,26 +14,26 @@ pathItem:
     security:
       - bearerAuth: []
     parameters:
-      - name: proposal_id
+      - name: assessment_id
         in: path
         required: true
         schema:
-          $ref: "#/components/schemas/mission.proposal.approve.Input/properties/params/pr\
-            operties/proposal_id"
+          $ref: "#/components/schemas/mission.proposal.decide.Input/properties/params/pro\
+            perties/assessment_id"
       - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
     requestBody:
       required: true
       content:
         application/json:
           schema:
-            $ref: "#/components/schemas/mission.proposal.approve.Input/properties/body"
+            $ref: "#/components/schemas/mission.proposal.decide.Input/properties/body"
     responses:
       "200":
         description: Completed result
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/mission.proposal.approve.Output"
+              $ref: "#/components/schemas/mission.proposal.decide.Output"
       "400":
         $ref: ../shared/components.yaml#/components/responses/Error
       "401":
@@ -55,20 +56,20 @@ pathItem:
         $ref: ../shared/components.yaml#/components/responses/Error
 components:
   schemas:
-    mission.proposal.approve.Input:
+    mission.proposal.decide.Input:
       type: object
       properties:
         params:
           type: object
           properties:
-            proposal_id:
+            assessment_id:
               type: string
-              minLength: 35
-              maxLength: 35
-              pattern: ^proposal_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-              description: proposal_ followed by a canonical 26-character uppercase ULID.
+              minLength: 37
+              maxLength: 37
+              pattern: ^assessment_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: assessment_ followed by a canonical 26-character uppercase ULID.
           required:
-            - proposal_id
+            - assessment_id
           additionalProperties: false
         query:
           type: object
@@ -81,370 +82,391 @@ components:
               type: integer
               exclusiveMinimum: 0
               maximum: 9007199254740991
+            approved_proposal_ids:
+              minItems: 1
+              maxItems: 10
+              type: array
+              items:
+                type: string
+                minLength: 35
+                maxLength: 35
+                pattern: ^proposal_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: proposal_ followed by a canonical 26-character uppercase ULID.
             reason:
               type: string
               minLength: 1
           required:
             - expected_mission_version
+            - approved_proposal_ids
           additionalProperties: false
       required:
         - params
         - query
         - body
       additionalProperties: false
-    mission.proposal.approve.Output:
+    mission.proposal.decide.Output:
       type: object
       properties:
         created:
-          type: object
-          properties:
-            mission_version:
-              type: integer
-              exclusiveMinimum: 0
-              maximum: 9007199254740991
-            revisions:
-              type: array
-              items:
-                type: object
-                properties:
-                  node_id:
-                    type: string
-                    minLength: 31
-                    maxLength: 31
-                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                    description: node_ followed by a canonical 26-character uppercase ULID.
-                  filename:
-                    type: string
-                    pattern: ^[a-z][a-z0-9_-]*\.md$
-                  revision:
-                    type: integer
-                    exclusiveMinimum: 0
-                    maximum: 9007199254740991
-                  reason:
-                    type: string
-                  actor:
-                    oneOf:
-                      - type: object
-                        properties:
-                          kind:
-                            type: string
-                            const: human
-                          account:
-                            type: string
-                          name:
-                            type: string
-                        required:
-                          - kind
-                          - account
-                          - name
-                        additionalProperties: false
-                      - type: object
-                        properties:
-                          kind:
-                            type: string
-                            const: execution
-                          execution_id:
-                            type: string
-                            minLength: 36
-                            maxLength: 36
-                            pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                            description: execution_ followed by a canonical 26-character uppercase ULID.
-                          client_id:
-                            anyOf:
-                              - type: string
-                                minLength: 42
-                                maxLength: 42
-                                pattern: ^client_identity_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                                description: client_identity_ followed by a canonical 26-character uppercase
-                                  ULID.
-                              - type: "null"
-                          name:
-                            anyOf:
-                              - type: string
-                              - type: "null"
-                        required:
-                          - kind
-                          - execution_id
-                          - client_id
-                          - name
-                        additionalProperties: false
-                      - type: object
-                        properties:
-                          kind:
-                            type: string
-                            const: service
-                          service:
-                            type: string
-                            enum:
-                              - scheduler
-                              - mission
-                          inbound_event_id:
-                            type: string
-                            minLength: 40
-                            maxLength: 40
-                            pattern: ^inbound_event_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                            description: inbound_event_ followed by a canonical 26-character uppercase ULID.
-                        required:
-                          - kind
-                          - service
-                        additionalProperties: false
-                  created_at:
-                    type: integer
-                    minimum: 0
-                    maximum: 9007199254740991
-                    description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
-                  content:
-                    type: object
-                    properties:
-                      name:
-                        type: string
-                        minLength: 1
-                      requirement:
-                        type: string
-                        minLength: 1
-                      criterion:
-                        type: string
-                        minLength: 1
-                      verifications:
-                        minItems: 1
-                        type: array
-                        items:
-                          type: string
-                          minLength: 1
-                      bindings:
-                        type: array
-                        items:
-                          type: string
-                      intent:
-                        type: string
-                        enum:
-                          - implement
-                          - examine
-                      tags:
-                        default: []
-                        type: array
-                        items:
-                          type: string
-                          maxLength: 64
-                          pattern: ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$
-                      commit_type:
-                        type: string
-                        enum:
-                          - feat
-                          - fix
-                          - docs
-                          - style
-                          - refactor
-                          - test
-                          - chore
-                    required:
-                      - name
-                      - requirement
-                      - criterion
-                      - verifications
-                      - bindings
-                      - intent
-                      - tags
-                    additionalProperties: false
-                  tasks:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        id:
-                          type: string
-                          minLength: 31
-                          maxLength: 31
-                          pattern: ^task_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                          description: task_ followed by a canonical 26-character uppercase ULID.
-                        filename:
-                          type: string
-                          pattern: ^[a-z][a-z0-9_-]*\.md$
-                        content:
-                          type: object
-                          properties:
-                            name:
-                              type: string
-                              minLength: 1
-                            requirement:
-                              type: string
-                              minLength: 1
-                            criterion:
-                              type: string
-                              minLength: 1
-                            verifications:
-                              minItems: 1
-                              type: array
-                              items:
-                                type: string
-                                minLength: 1
-                            bindings:
-                              maxItems: 0
-                              type: array
-                              items:
-                                type: string
-                          required:
-                            - name
-                            - requirement
-                            - criterion
-                            - verifications
-                            - bindings
-                          additionalProperties: false
-                      required:
-                        - id
-                        - filename
-                        - content
-                      additionalProperties: false
-                  change:
-                    type: object
-                    properties:
-                      write:
-                        type: string
-                        enum:
-                          - import
-                          - node.create
-                          - node.update
-                          - node.rebind
-                          - criterion.set
-                          - unblock
-                      previous_revision:
-                        anyOf:
-                          - type: integer
-                            exclusiveMinimum: 0
-                            maximum: 9007199254740991
-                          - type: "null"
-                      changed_fields:
-                        type: array
-                        items:
-                          type: string
-                      tasks:
-                        type: array
-                        items:
-                          type: object
-                          properties:
-                            id:
-                              type: string
-                              minLength: 31
-                              maxLength: 31
-                              pattern: ^task_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                              description: task_ followed by a canonical 26-character uppercase ULID.
-                            change:
-                              type: string
-                              enum:
-                                - created
-                                - updated
-                                - moved-in
-                                - moved-out
-                                - retired
-                            changed_fields:
-                              type: array
-                              items:
-                                type: string
-                          required:
-                            - id
-                            - change
-                            - changed_fields
-                          additionalProperties: false
-                    required:
-                      - write
-                      - previous_revision
-                      - changed_fields
-                    additionalProperties: false
-                  pinned_by_attempts:
-                    type: array
-                    items:
+          type: array
+          items:
+            type: object
+            properties:
+              mission_version:
+                type: integer
+                exclusiveMinimum: 0
+                maximum: 9007199254740991
+              revisions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    node_id:
+                      type: string
+                      minLength: 31
+                      maxLength: 31
+                      pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                      description: node_ followed by a canonical 26-character uppercase ULID.
+                    filename:
+                      type: string
+                      pattern: ^[a-z][a-z0-9_-]*\.md$
+                    revision:
                       type: integer
                       exclusiveMinimum: 0
                       maximum: 9007199254740991
-                required:
-                  - node_id
-                  - filename
-                  - revision
-                  - reason
-                  - actor
-                  - created_at
-                  - content
-                  - tasks
-                  - change
-                  - pinned_by_attempts
-                additionalProperties: false
-            retired_node_ids:
-              type: array
-              items:
-                type: string
-                minLength: 31
-                maxLength: 31
-                pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                description: node_ followed by a canonical 26-character uppercase ULID.
-            added_edges:
-              type: array
-              items:
-                type: object
-                properties:
-                  dependent_id:
-                    type: string
-                    minLength: 31
-                    maxLength: 31
-                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                    description: node_ followed by a canonical 26-character uppercase ULID.
-                  depends_on_id:
-                    type: string
-                    minLength: 31
-                    maxLength: 31
-                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                    description: node_ followed by a canonical 26-character uppercase ULID.
-                required:
-                  - dependent_id
-                  - depends_on_id
-                additionalProperties: false
-            removed_edges:
-              type: array
-              items:
-                type: object
-                properties:
-                  dependent_id:
-                    type: string
-                    minLength: 31
-                    maxLength: 31
-                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                    description: node_ followed by a canonical 26-character uppercase ULID.
-                  depends_on_id:
-                    type: string
-                    minLength: 31
-                    maxLength: 31
-                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                    description: node_ followed by a canonical 26-character uppercase ULID.
-                required:
-                  - dependent_id
-                  - depends_on_id
-                additionalProperties: false
-            open_attempts_unchanged:
-              type: array
-              items:
-                type: object
-                properties:
-                  node_id:
-                    type: string
-                    minLength: 31
-                    maxLength: 31
-                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                    description: node_ followed by a canonical 26-character uppercase ULID.
-                  attempt:
-                    type: integer
-                    minimum: 0
-                    maximum: 9007199254740991
-                required:
-                  - node_id
-                  - attempt
-                additionalProperties: false
-          required:
-            - mission_version
-            - revisions
-            - retired_node_ids
-            - added_edges
-            - removed_edges
-            - open_attempts_unchanged
-          additionalProperties: false
+                    reason:
+                      type: string
+                    actor:
+                      oneOf:
+                        - type: object
+                          properties:
+                            kind:
+                              type: string
+                              const: human
+                            account:
+                              type: string
+                            name:
+                              type: string
+                          required:
+                            - kind
+                            - account
+                            - name
+                          additionalProperties: false
+                        - type: object
+                          properties:
+                            kind:
+                              type: string
+                              const: execution
+                            execution_id:
+                              type: string
+                              minLength: 36
+                              maxLength: 36
+                              pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                              description: execution_ followed by a canonical 26-character uppercase ULID.
+                            client_id:
+                              anyOf:
+                                - type: string
+                                  minLength: 42
+                                  maxLength: 42
+                                  pattern: ^client_identity_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                                  description: client_identity_ followed by a canonical 26-character uppercase
+                                    ULID.
+                                - type: "null"
+                            name:
+                              anyOf:
+                                - type: string
+                                - type: "null"
+                          required:
+                            - kind
+                            - execution_id
+                            - client_id
+                            - name
+                          additionalProperties: false
+                        - type: object
+                          properties:
+                            kind:
+                              type: string
+                              const: service
+                            service:
+                              type: string
+                              enum:
+                                - scheduler
+                                - mission
+                            inbound_event_id:
+                              type: string
+                              minLength: 40
+                              maxLength: 40
+                              pattern: ^inbound_event_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                              description: inbound_event_ followed by a canonical 26-character uppercase ULID.
+                          required:
+                            - kind
+                            - service
+                          additionalProperties: false
+                    created_at:
+                      type: integer
+                      minimum: 0
+                      maximum: 9007199254740991
+                      description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                    content:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                          minLength: 1
+                        requirement:
+                          type: string
+                          minLength: 1
+                        criterion:
+                          type: string
+                          minLength: 1
+                        verifications:
+                          minItems: 1
+                          type: array
+                          items:
+                            type: string
+                            minLength: 1
+                        bindings:
+                          type: array
+                          items:
+                            type: string
+                        intent:
+                          type: string
+                          enum:
+                            - implement
+                            - examine
+                        tags:
+                          default: []
+                          type: array
+                          items:
+                            type: string
+                            maxLength: 64
+                            pattern: ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$
+                        commit_type:
+                          type: string
+                          enum:
+                            - feat
+                            - fix
+                            - docs
+                            - style
+                            - refactor
+                            - test
+                            - chore
+                      required:
+                        - name
+                        - requirement
+                        - criterion
+                        - verifications
+                        - bindings
+                        - intent
+                        - tags
+                      additionalProperties: false
+                    tasks:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                            minLength: 31
+                            maxLength: 31
+                            pattern: ^task_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                            description: task_ followed by a canonical 26-character uppercase ULID.
+                          filename:
+                            type: string
+                            pattern: ^[a-z][a-z0-9_-]*\.md$
+                          content:
+                            type: object
+                            properties:
+                              name:
+                                type: string
+                                minLength: 1
+                              requirement:
+                                type: string
+                                minLength: 1
+                              criterion:
+                                type: string
+                                minLength: 1
+                              verifications:
+                                minItems: 1
+                                type: array
+                                items:
+                                  type: string
+                                  minLength: 1
+                              bindings:
+                                maxItems: 0
+                                type: array
+                                items:
+                                  type: string
+                            required:
+                              - name
+                              - requirement
+                              - criterion
+                              - verifications
+                              - bindings
+                            additionalProperties: false
+                        required:
+                          - id
+                          - filename
+                          - content
+                        additionalProperties: false
+                    change:
+                      type: object
+                      properties:
+                        write:
+                          type: string
+                          enum:
+                            - import
+                            - node.create
+                            - node.update
+                            - node.rebind
+                            - criterion.set
+                            - unblock
+                        previous_revision:
+                          anyOf:
+                            - type: integer
+                              exclusiveMinimum: 0
+                              maximum: 9007199254740991
+                            - type: "null"
+                        changed_fields:
+                          type: array
+                          items:
+                            type: string
+                        tasks:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              id:
+                                type: string
+                                minLength: 31
+                                maxLength: 31
+                                pattern: ^task_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                                description: task_ followed by a canonical 26-character uppercase ULID.
+                              change:
+                                type: string
+                                enum:
+                                  - created
+                                  - updated
+                                  - moved-in
+                                  - moved-out
+                                  - retired
+                              changed_fields:
+                                type: array
+                                items:
+                                  type: string
+                            required:
+                              - id
+                              - change
+                              - changed_fields
+                            additionalProperties: false
+                      required:
+                        - write
+                        - previous_revision
+                        - changed_fields
+                      additionalProperties: false
+                    pinned_by_attempts:
+                      type: array
+                      items:
+                        type: integer
+                        exclusiveMinimum: 0
+                        maximum: 9007199254740991
+                  required:
+                    - node_id
+                    - filename
+                    - revision
+                    - reason
+                    - actor
+                    - created_at
+                    - content
+                    - tasks
+                    - change
+                    - pinned_by_attempts
+                  additionalProperties: false
+              retired_node_ids:
+                type: array
+                items:
+                  type: string
+                  minLength: 31
+                  maxLength: 31
+                  pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                  description: node_ followed by a canonical 26-character uppercase ULID.
+              added_edges:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    dependent_id:
+                      type: string
+                      minLength: 31
+                      maxLength: 31
+                      pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                      description: node_ followed by a canonical 26-character uppercase ULID.
+                    depends_on_id:
+                      type: string
+                      minLength: 31
+                      maxLength: 31
+                      pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                      description: node_ followed by a canonical 26-character uppercase ULID.
+                  required:
+                    - dependent_id
+                    - depends_on_id
+                  additionalProperties: false
+              removed_edges:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    dependent_id:
+                      type: string
+                      minLength: 31
+                      maxLength: 31
+                      pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                      description: node_ followed by a canonical 26-character uppercase ULID.
+                    depends_on_id:
+                      type: string
+                      minLength: 31
+                      maxLength: 31
+                      pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                      description: node_ followed by a canonical 26-character uppercase ULID.
+                  required:
+                    - dependent_id
+                    - depends_on_id
+                  additionalProperties: false
+              open_attempts_unchanged:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    node_id:
+                      type: string
+                      minLength: 31
+                      maxLength: 31
+                      pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                      description: node_ followed by a canonical 26-character uppercase ULID.
+                    attempt:
+                      type: integer
+                      minimum: 0
+                      maximum: 9007199254740991
+                  required:
+                    - node_id
+                    - attempt
+                  additionalProperties: false
+            required:
+              - mission_version
+              - revisions
+              - retired_node_ids
+              - added_edges
+              - removed_edges
+              - open_attempts_unchanged
+            additionalProperties: false
+        rejected_proposal_ids:
+          type: array
+          items:
+            type: string
+            minLength: 35
+            maxLength: 35
+            pattern: ^proposal_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+            description: proposal_ followed by a canonical 26-character uppercase ULID.
         proposer:
           type: object
           properties:
@@ -1514,5 +1536,6 @@ components:
           additionalProperties: false
       required:
         - created
+        - rejected_proposal_ids
         - proposer
       additionalProperties: false

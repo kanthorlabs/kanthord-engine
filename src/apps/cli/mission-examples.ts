@@ -112,5 +112,8 @@ export const missionExamples = {
       commit: COMMIT,
     },
   },
-  proposalApprove: { expected_mission_version: MISSION_VERSION },
+  proposalDecide: {
+    expected_mission_version: MISSION_VERSION,
+    approved_proposal_ids: ["proposal_01ARZ3NDEKTSV4RRFFQ69G5FAV"],
+  },
 };

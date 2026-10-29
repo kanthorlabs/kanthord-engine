@@ -30,6 +30,7 @@ import {
   stateConflict,
   transition,
 } from "./control.ts";
+import { markProposalsRejected } from "./proposal-store.ts";
 import { openAttempt } from "./record-store.ts";
 import { revisionFromRow } from "./revision.ts";
 import { requireActive, requireMission, requireNonterminal } from "./write.ts";
@@ -143,6 +144,7 @@ export function unblockNode(
   requireNonterminal(node);
   if (node.attempt !== body.blocked_attempt) stateConflict(node);
   requireControlState(node, [NodeState.Blocked]);
+  markProposalsRejected(tx, nodeId, node.attempt, now);
   if (body.reason !== undefined)
     validateText(REASON, body.reason, dependencies.config.text_max_bytes);
   const row = readCurrentRevision(tx, nodeId);

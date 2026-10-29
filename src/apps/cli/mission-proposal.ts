@@ -3,8 +3,7 @@ import { Diagnostic } from "../../kernel/errors.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import {
   NODE_IDENTITY_PREFIX,
-  PROPOSAL_IDENTITY_PREFIX,
-  proposalApproveSchema,
+  proposalDecideSchema,
 } from "../../mission/contract.ts";
 import { singleUse } from "./shared.ts";
 import {
@@ -20,8 +19,8 @@ import { missionExamples } from "./mission-examples.ts";
 const MIN_ATTEMPT_FILTER = 0;
 const LIST_INVALID_NODE_ID = "cli.mission.proposal.list.invalid_node_id";
 const LIST_INVALID_ATTEMPT = "cli.mission.proposal.list.invalid_attempt";
-const APPROVE_INVALID_PROPOSAL_ID =
-  "cli.mission.proposal.approve.invalid_proposal_id";
+const DECIDE_INVALID_ASSESSMENT_ID =
+  "cli.mission.proposal.decide.invalid_assessment_id";
 
 function attemptFilter(value: string | undefined): number | undefined {
   if (value === undefined) return undefined;
@@ -65,22 +64,25 @@ export function addProposalCommands(mission: Command): void {
   });
   addMutationOptions(
     proposal
-      .command("approve")
+      .command("decide")
       .description(
-        "Approve a fix-node proposal and unblock its examine proposer",
+        "Decide every fix-node proposal of one assessment and unblock its examine proposer",
       )
-      .argument("<proposal-id>", "Proposal ID"),
-    { schema: proposalApproveSchema, example: missionExamples.proposalApprove },
-  ).action(async (proposalId: string, _options, command: Command) => {
-    if (!identitySchema(PROPOSAL_IDENTITY_PREFIX).safeParse(proposalId).success)
-      throw new Diagnostic(APPROVE_INVALID_PROPOSAL_ID, "invalid proposal ID");
+      .argument("<assessment-id>", "Assessment ID"),
+    { schema: proposalDecideSchema, example: missionExamples.proposalDecide },
+  ).action(async (assessmentId: string, _options, command: Command) => {
+    if (!identitySchema("assessment").safeParse(assessmentId).success)
+      throw new Diagnostic(
+        DECIDE_INVALID_ASSESSMENT_ID,
+        "invalid assessment ID",
+      );
     await mutate(
       command,
-      "proposal.approve",
-      proposalApproveSchema,
+      "proposal.decide",
+      proposalDecideSchema,
       (api, body, key) =>
-        api["proposal.approve"](
-          { params: { proposal_id: proposalId }, query: {}, body },
+        api["proposal.decide"](
+          { params: { assessment_id: assessmentId }, query: {}, body },
           { idempotencyKey: key },
         ),
     );

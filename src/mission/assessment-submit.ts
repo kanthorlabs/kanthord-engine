@@ -184,6 +184,7 @@ export function submitAssessment(
         content: canonicalJSON(proposal),
         created_node_id: null,
         approved_at: null,
+        rejected_at: null,
         created_at: now,
       });
     transition(

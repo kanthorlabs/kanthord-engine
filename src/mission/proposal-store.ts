@@ -11,6 +11,7 @@ export interface ProposalRow {
   content: string;
   created_node_id: string | null;
   approved_at: number | null;
+  rejected_at: number | null;
   created_at: number;
 }
 
@@ -18,9 +19,10 @@ export function insertProposal(tx: Transaction, row: ProposalRow): void {
   assert.ok(tx.database.isTransaction);
   assert.equal(row.created_node_id, null);
   assert.equal(row.approved_at, null);
+  assert.equal(row.rejected_at, null);
   tx.database
     .prepare(
-      "INSERT INTO mission_proposal (id, node_id, attempt, assessment_id, content, created_node_id, approved_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO mission_proposal (id, node_id, attempt, assessment_id, content, created_node_id, approved_at, rejected_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .run(
       row.id,
@@ -30,16 +32,9 @@ export function insertProposal(tx: Transaction, row: ProposalRow): void {
       row.content,
       row.created_node_id,
       row.approved_at,
+      row.rejected_at,
       row.created_at,
     );
-}
-
-export function readProposal(tx: Transaction, id: string): ProposalRow | null {
-  return (
-    (tx.database
-      .prepare("SELECT * FROM mission_proposal WHERE id = ?")
-      .get(id) as unknown as ProposalRow | undefined) ?? null
-  );
 }
 
 export function listProposals(
@@ -63,6 +58,32 @@ export function listProposals(
     ) as unknown as ProposalRow[];
 }
 
+export function listProposalsOfAssessment(
+  tx: Transaction,
+  assessmentId: string,
+): ProposalRow[] {
+  return tx.database
+    .prepare(
+      "SELECT * FROM mission_proposal WHERE assessment_id = ? ORDER BY id",
+    )
+    .all(assessmentId) as unknown as ProposalRow[];
+}
+
+export function markProposalsRejected(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number,
+  rejectedAt: number,
+): string[] {
+  assert.ok(tx.database.isTransaction);
+  const rows = tx.database
+    .prepare(
+      "UPDATE mission_proposal SET rejected_at = ? WHERE node_id = ? AND attempt = ? AND approved_at IS NULL AND rejected_at IS NULL RETURNING id",
+    )
+    .all(rejectedAt, nodeId, attempt) as unknown as { id: string }[];
+  return rows.map((row) => row.id).sort();
+}
+
 export function markProposalApproved(
   tx: Transaction,
   id: string,
@@ -72,7 +93,7 @@ export function markProposalApproved(
   assert.ok(tx.database.isTransaction);
   const result = tx.database
     .prepare(
-      "UPDATE mission_proposal SET created_node_id = ?, approved_at = ? WHERE id = ? AND approved_at IS NULL",
+      "UPDATE mission_proposal SET created_node_id = ?, approved_at = ? WHERE id = ? AND approved_at IS NULL AND rejected_at IS NULL",
     )
     .run(createdNodeId, approvedAt, id);
   assert.equal(result.changes, EXPECTED_ROW_CHANGE);

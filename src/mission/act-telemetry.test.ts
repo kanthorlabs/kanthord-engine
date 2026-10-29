@@ -125,7 +125,7 @@ test("actTrace names no attempt before the first attempt opens", () => {
 });
 
 test("actTrace names no state before when the act creates the node", () => {
-  const { contribution } = actTrace(Act.ApproveProposal, {
+  const { contribution } = actTrace(Act.DecideProposals, {
     ...FACTS,
     from: null,
   });
