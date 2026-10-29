@@ -275,9 +275,9 @@ test("a version 2 report with no floor is a valid report", () => {
 });
 
 test("a floor key in a version 1 report is an invalid report", () => {
-  const result = parsedReport({ floor: FLOOR });
+  const result = parsedReport({ floor: { ...FLOOR, total_seconds: null } });
   assert.ok("error" in result);
-  assert.match(result.error, /floor/);
+  assert.match(result.error, /is absent in a version 1 report/);
 });
 
 test("a total_seconds with the selection related is an invalid report", () => {
