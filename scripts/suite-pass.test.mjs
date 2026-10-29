@@ -261,6 +261,26 @@ test("an always_run file that dirties the tree writes no record", async (t) => {
   assert.equal(await readFile(join(root, STORE_PATH), "utf8"), stored);
 });
 
+test("a file that skips a test writes no record", async (t) => {
+  const root = await fixture(t, {
+    "src/b.test.ts": `${loggedTest("src/b.test.ts")}test("skipped", { skip: true }, () => {});\n`,
+  });
+  const first = runSuitePass(root, ["--write"]);
+  assert.equal(first.status, SUCCESS, first.stderr);
+  assert.deepEqual(recordedFiles(root), ["src/a.test.ts"]);
+  const second = runSuitePass(root, ["--write"]);
+  assert.equal(second.status, SUCCESS, second.stderr);
+  assert.deepEqual(second.ran, ["src/b.test.ts"]);
+});
+
+test("a file with a todo test writes no record", async (t) => {
+  const root = await fixture(t, {
+    "src/b.test.ts": `${loggedTest("src/b.test.ts")}test("later", { todo: true }, () => {});\n`,
+  });
+  assert.equal(runSuitePass(root, ["--write"]).status, SUCCESS);
+  assert.deepEqual(recordedFiles(root), ["src/a.test.ts"]);
+});
+
 test("a failed test file writes no record", async (t) => {
   const root = await fixture(t, {
     "src/b.test.ts": loggedTest("src/b.test.ts", 'throw new Error("boom");'),
