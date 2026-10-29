@@ -6038,6 +6038,18 @@ test("binding.environment.get keeps the stored environment and answers suite_pas
   );
 });
 
+test("binding.environment.get fails when the stored suite pass read throws an error with no code", async (t) => {
+  const { f, params } = await storedEnvironmentRead(t);
+  const defect = new TypeError("defect in the suite pass read");
+  t.mock.method(f.projectCustody, "authorizeOperation", () => {
+    throw defect;
+  });
+  await assert.rejects(
+    async () => f.invokeAsync("binding.environment.get", params),
+    (error) => error === defect,
+  );
+});
+
 const SETUP_BINDING_NAME = "engine";
 const SETUP_CONTENT = {
   name: "Set up",
