@@ -115,10 +115,10 @@ async function commitFile(root, path, content) {
   commitAll(root);
 }
 
-function runSuitePass(root, flags = [], files = TEST_FILES) {
+function runSuitePass(root, flags = [], files = TEST_FILES, extra = {}) {
   const log = `${root}.log`;
   rmSync(log, { force: true });
-  const env = { ...process.env, RUN_LOG: log };
+  const env = { ...process.env, RUN_LOG: log, ...extra };
   for (const name of DROPPED_VARIABLES) delete env[name];
   const result = spawnSync(
     process.execPath,
@@ -158,12 +158,14 @@ test("a test file with a matching record is skipped", async (t) => {
   assert.equal(first.status, SUCCESS, first.stderr);
   assert.deepEqual(first.ran, TEST_FILES);
   assert.match(first.stdout, /Skipped: 0 test files/);
+  const before = readStore(root).records;
   const second = runSuitePass(root, ["--write"]);
   assert.equal(second.status, SUCCESS, second.stderr);
   assert.deepEqual(second.ran, []);
   assert.match(second.stdout, /Ran: 0 test files/);
   assert.match(second.stdout, /Skipped: 2 test files/);
   assert.match(second.stdout, /Saved share: 100%/);
+  assert.deepEqual(readStore(root).records, before);
 });
 
 test("a change in the closure of a test file runs it again", async (t) => {
@@ -238,6 +240,25 @@ test("a test run that dirties the tree writes no record", async (t) => {
   assert.equal(result.status, RUN_ERROR);
   assert.match(result.stderr, /clean/);
   assert.equal(existsSync(join(root, STORE_PATH)), false);
+});
+
+test("an always_run file that dirties the tree writes no record", async (t) => {
+  const root = await fixture(t, {
+    ".kanthord/suite-pass.json": configuration(["src/b.test.ts"]),
+    "src/b.test.ts": loggedTest(
+      "src/b.test.ts",
+      'if (process.env.WRITE_STRAY) writeFileSync("stray.txt", "");',
+    ).replace("{ appendFileSync }", "{ appendFileSync, writeFileSync }"),
+  });
+  assert.equal(runSuitePass(root, ["--write"]).status, SUCCESS);
+  const stored = await readFile(join(root, STORE_PATH), "utf8");
+  const result = runSuitePass(root, ["--write"], TEST_FILES, {
+    WRITE_STRAY: "1",
+  });
+  assert.equal(result.status, RUN_ERROR);
+  assert.deepEqual(result.ran, ["src/b.test.ts"]);
+  assert.match(result.stderr, /clean/);
+  assert.equal(await readFile(join(root, STORE_PATH), "utf8"), stored);
 });
 
 test("a failed test file writes no record", async (t) => {
