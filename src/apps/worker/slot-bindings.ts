@@ -79,6 +79,7 @@ export class SlotBindings {
     this.hosted.delete(clientId);
     this.failed(await this.unit!.remove(hosted.binding));
     hosted.port.close();
+    this.received.delete(hosted.port);
   }
 
   private failed(error: Error | null): void {
