@@ -103,7 +103,7 @@ test("agent prompts are valid published UTF-8 assets", () => {
   );
   assert.ok(
     SWE_AGENT_PROMPT.includes(
-      "Run every test file that names such a symbol. Run the verification commands of the work prompt, also when a command runs a whole test suite. Do not run another whole test suite.",
+      "Run every test file that names such a symbol. Run the verification commands of the work prompt that run targeted tests. Run a whole test suite only when your change needs one, for example after a change to a shared module.",
     ),
   );
   assert.ok(
