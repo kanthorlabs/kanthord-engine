@@ -787,6 +787,13 @@ test(
         status: BAD_REQUEST,
         code: VALIDATION_FAILED,
       });
+      assert.deepEqual(
+        await r.refused(DURATION_PATH, {
+          measure: AnalyticsMeasure.FloorShare,
+          group_by: DurationGroupBy.WorkerInstance,
+        }),
+        { status: BAD_REQUEST, code: VALIDATION_FAILED },
+      );
       const longRange = { from: "0", to: String(32 * DAY_MS) };
       assert.deepEqual(await r.refused(COST_PATH, longRange), {
         status: BAD_REQUEST,

@@ -40,6 +40,12 @@ export interface BusyRatioItem {
   count: number;
   ratio: number;
 }
+export interface FloorShareItem {
+  key: string | null;
+  bucket_start: number | null;
+  count: number;
+  share: number;
+}
 export interface DurationRead {
   items: DurationItem[];
   truncated: boolean;
@@ -48,19 +54,35 @@ export interface BusyRatioRead {
   items: BusyRatioItem[];
   truncated: boolean;
 }
+export interface FloorShareRead {
+  items: FloorShareItem[];
+  truncated: boolean;
+}
 
 type BusyRatioQuery = DurationQuery & {
   measure: typeof AnalyticsMeasure.InstanceBusyRatio;
 };
-type SampleQuery = DurationQuery & {
-  measure: Exclude<AnalyticsMeasure, typeof AnalyticsMeasure.InstanceBusyRatio>;
+type FloorShareQuery = DurationQuery & {
+  measure: typeof AnalyticsMeasure.FloorShare;
 };
+type SampleMeasure = Exclude<
+  AnalyticsMeasure,
+  typeof AnalyticsMeasure.InstanceBusyRatio | typeof AnalyticsMeasure.FloorShare
+>;
+type SampleQuery = DurationQuery & { measure: SampleMeasure };
 type Ordered = Pick<DurationItem, "key" | "bucket_start" | "count">;
 
 interface Group {
   key: string | null;
   bucket_start: number | null;
   values: number[];
+}
+interface FloorGroup {
+  key: string | null;
+  bucket_start: number | null;
+  count: number;
+  latest: AnalyticsSpan;
+  share: number;
 }
 interface BusyGroup {
   key: string;
@@ -87,6 +109,12 @@ const TOOL_OPERATION = "agent.tool";
 const VERIFICATION_OPERATION = "worker.verification";
 const EXECUTION_OPERATION = "scheduler.execution";
 const TRANSITION_OPERATION = "scheduler.transition";
+const AFFECTED_KIND = "affected";
+const RELEASE_CONTEXT = "release";
+const VERIFICATION_KIND_ATTRIBUTE = "kanthord.verification.kind";
+const VERIFICATION_CONTEXT_ATTRIBUTE = "kanthord.verification.context";
+const FLOOR_SECONDS_ATTRIBUTE = "kanthord.affected.floor_seconds";
+const TOTAL_SECONDS_ATTRIBUTE = "kanthord.affected.total_seconds";
 const STEPS_KIND = "steps";
 const EVALUATION_KIND = "evaluation";
 const EXECUTION_KIND_ATTRIBUTE = "kanthord.execution.kind";
@@ -248,10 +276,7 @@ const collectRevisionTurns: Collect = async (
     if (first !== null) add(first.span, first.trace, turns);
 };
 
-const COLLECT: Record<
-  Exclude<AnalyticsMeasure, typeof AnalyticsMeasure.InstanceBusyRatio>,
-  Collect
-> = {
+const COLLECT: Record<SampleMeasure, Collect> = {
   [AnalyticsMeasure.SpanDuration]: collectDurations((query) => query.operation),
   [AnalyticsMeasure.ToolLatency]: collectDurations(() => TOOL_OPERATION),
   [AnalyticsMeasure.VerificationTime]: collectDurations(
@@ -330,6 +355,79 @@ async function readBusyRatio(
   return pageOf(items, limit);
 }
 
+function finiteOf(span: AnalyticsSpan, name: string): number | null {
+  const value = span.attributes[name];
+  return isNumber(value) && Number.isFinite(value) ? value : null;
+}
+
+function isLater(span: AnalyticsSpan, latest: AnalyticsSpan): boolean {
+  assert.ok(span.start_time !== null && latest.start_time !== null);
+  return (
+    (span.start_time - latest.start_time ||
+      compareKeys(span.span_id, latest.span_id) ||
+      compareKeys(span.trace_id, latest.trace_id)) > NO_LIMIT
+  );
+}
+
+async function readFloorShare(
+  store: Store,
+  query: DurationQuery,
+  limit: number,
+  signal: AbortSignal,
+): Promise<FloorShareRead> {
+  const keyOf = KEY_OF[query.group_by];
+  const traces = selectedTracesOf(store, query);
+  const groups = new Map<string, FloorGroup>();
+  await walkSpans(
+    store,
+    traces,
+    { operation: VERIFICATION_OPERATION, from: query.from, to: query.to },
+    signal,
+    (span, trace) => {
+      if (span.start_time === null) return;
+      if (span.attributes[VERIFICATION_KIND_ATTRIBUTE] !== AFFECTED_KIND)
+        return;
+      if (span.attributes[VERIFICATION_CONTEXT_ATTRIBUTE] !== RELEASE_CONTEXT)
+        return;
+      const floor = finiteOf(span, FLOOR_SECONDS_ATTRIBUTE);
+      const total = finiteOf(span, TOTAL_SECONDS_ATTRIBUTE);
+      if (floor === null || total === null || total <= NO_LIMIT) return;
+      const key = keyOf(span, trace);
+      const start = bucketStart(span.start_time, query.bucket);
+      const identity = JSON.stringify([start, key]);
+      const group = groups.get(identity);
+      if (group === undefined) {
+        groups.set(identity, {
+          key,
+          bucket_start: start,
+          count: 1,
+          latest: span,
+          share: floor / total,
+        });
+        return;
+      }
+      group.count += 1;
+      if (isLater(span, group.latest)) {
+        group.latest = span;
+        group.share = floor / total;
+      }
+    },
+  );
+  const items = [...groups.values()].map((group): FloorShareItem => ({
+    key: group.key,
+    bucket_start: group.bucket_start,
+    count: group.count,
+    share: group.share,
+  }));
+  return pageOf(items, limit);
+}
+
+export function readDuration(
+  store: Store,
+  query: FloorShareQuery,
+  limit: number,
+  signal: AbortSignal,
+): Promise<FloorShareRead>;
 export function readDuration(
   store: Store,
   query: BusyRatioQuery,
@@ -347,14 +445,16 @@ export function readDuration(
   query: DurationQuery,
   limit: number,
   signal: AbortSignal,
-): Promise<DurationRead | BusyRatioRead>;
+): Promise<DurationRead | BusyRatioRead | FloorShareRead>;
 export async function readDuration(
   store: Store,
   query: DurationQuery,
   limit: number,
   signal: AbortSignal,
-): Promise<DurationRead | BusyRatioRead> {
+): Promise<DurationRead | BusyRatioRead | FloorShareRead> {
   assert.ok(Number.isSafeInteger(limit) && limit > NO_LIMIT);
+  if (query.measure === AnalyticsMeasure.FloorShare)
+    return readFloorShare(store, query, limit, signal);
   if (query.measure === AnalyticsMeasure.InstanceBusyRatio)
     return readBusyRatio(store, query, limit, signal);
   const keyOf = KEY_OF[query.group_by];

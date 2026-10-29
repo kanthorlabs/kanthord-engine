@@ -143,6 +143,7 @@ export const AnalyticsMeasure = {
   ReviewWait: "review_wait",
   RevisionTurns: "revision_turns",
   InstanceBusyRatio: "instance_busy_ratio",
+  FloorShare: "test_floor_share",
 } as const;
 export const analyticsMeasureSchema = z.enum(AnalyticsMeasure);
 export type AnalyticsMeasure = z.infer<typeof analyticsMeasureSchema>;
@@ -577,6 +578,11 @@ export const analyticsBusyRatioItemSchema = z.strictObject({
   count: z.int(),
   ratio: z.number(),
 });
+export const analyticsFloorShareItemSchema = z.strictObject({
+  ...analyticsItemShape,
+  count: z.int(),
+  share: z.number(),
+});
 
 export const trackingOperations = {
   telemetryWrite: {
@@ -797,7 +803,7 @@ export const trackingOperations = {
     body: false,
     status: HttpStatus.OK,
     description:
-      "Summarize one duration measure in a time range of at most 31 days, by group and time bucket. An item holds the count, the percentiles, the mean and the maximum. The measure instance_busy_ratio requires the group_by worker_instance, and an item of it holds the count and the busy ratio only. The default range is the last 7 days. The answer holds at most 1000 items.",
+      "Summarize one duration measure in a time range of at most 31 days, by group and time bucket. An item holds the count, the percentiles, the mean and the maximum. The measure instance_busy_ratio requires the group_by worker_instance, and an item of it holds the count and the busy ratio only. An item of test_floor_share holds the count and the floor share of the latest release affected span only. The default range is the last 7 days. The answer holds at most 1000 items.",
     input: z.strictObject({
       params: z.strictObject({}),
       query: analyticsDurationQuerySchema,
@@ -805,7 +811,11 @@ export const trackingOperations = {
     }),
     output: z.strictObject({
       items: z.array(
-        analyticsDurationItemSchema.or(analyticsBusyRatioItemSchema),
+        z.union([
+          analyticsDurationItemSchema,
+          analyticsBusyRatioItemSchema,
+          analyticsFloorShareItemSchema,
+        ]),
       ),
       truncated: z.boolean(),
     }),

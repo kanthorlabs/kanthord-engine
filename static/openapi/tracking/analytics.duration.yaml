@@ -8,8 +8,9 @@ pathItem:
       by group and time bucket. An item holds the count, the percentiles, the
       mean and the maximum. The measure instance_busy_ratio requires the
       group_by worker_instance, and an item of it holds the count and the busy
-      ratio only. The default range is the last 7 days. The answer holds at most
-      1000 items.
+      ratio only. An item of test_floor_share holds the count and the floor
+      share of the latest release affected span only. The default range is the
+      last 7 days. The answer holds at most 1000 items.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: false
@@ -134,6 +135,7 @@ components:
                 - review_wait
                 - revision_turns
                 - instance_busy_ratio
+                - test_floor_share
             operation:
               type: string
               minLength: 1
@@ -234,6 +236,30 @@ components:
                   - bucket_start
                   - count
                   - ratio
+                additionalProperties: false
+              - type: object
+                properties:
+                  key:
+                    anyOf:
+                      - type: string
+                      - type: "null"
+                  bucket_start:
+                    anyOf:
+                      - type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      - type: "null"
+                  count:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  share:
+                    type: number
+                required:
+                  - key
+                  - bucket_start
+                  - count
+                  - share
                 additionalProperties: false
         truncated:
           type: boolean
