@@ -607,7 +607,7 @@ The refusal names the key and the reason.
 - `environment` is the document, or null.
 - `reason` names the defect of a repository file that is no valid environment, or the refused key, else null.
 - `suite_pass` is the suite pass state of the repository: `present`, `absent` or null. The service reads `.kanthord/suite-pass.json` at the commit of the base branch, in the same SSH read as the environment files. The file is not part of the digest of the environment. `absent` means that the file does not exist. `present` means that the file exists, also when it is too large or is no UTF-8 text.
-- For `stored`, the service reads only `.kanthord/suite-pass.json` at the base branch. When that read fails, `suite_pass` is null and the answer keeps the stored environment. For the other sources, a failed read refuses the request.
+- For `stored`, the service reads only `.kanthord/suite-pass.json` at the base branch. When that read fails with a coded error, `suite_pass` is null and the answer keeps the stored environment. An error with no code fails the request. For the other sources, a failed read refuses the request.
 
 `environment suite-pass plan` calls `project.binding.suite_pass.plan.get`, a read under `human` access. It gives the body of `mission.node.create` for the suite pass setup node of one repository binding. The command prints the answer as JSON indented by two spaces, with a final newline. The service reads no repository file.
 

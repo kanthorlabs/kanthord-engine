@@ -1,6 +1,6 @@
 # Handoff: suite pass record plan set
 
-This page gives the state of the plan set on 2026-10-29 and the steps to continue it. Read `00-index.md` and `decisions.md` first. The design pages in `docs/brainstorm/` of the root repository `main` are the rule.
+This page gives the state of the plan set on 2026-10-30. Every plan of the set is merged. Read `00-index.md` and `decisions.md` first. The design pages in `docs/brainstorm/` of the root repository `main` are the rule.
 
 ## The problem
 
@@ -42,16 +42,17 @@ Ruling O4 of `dogfood-time/` gives these rules to this plan set. These rules are
 - Plan 05: engine #383. The engine selector writes the version 2 report with `floor`. The production set is the import closure of `src/main.ts`: 622 files. The floor holds 83 test files.
 - Plan 07: apps #145. One record for the whole apps tree, the CI record cache, the job summary and the nightly full run. A dirty tree without `--write` runs every test. The CI re-run on a clean tree skipped the test run and printed `Saved share: 100%`.
 - Root #281 (the rulings O1 to O3, S1, S6 and S8 in the design pages) and #282 (a dirty work tree reads no record).
-
-### Not started
-
-- Plan 06: the suite pass record of the engine. It can start now. It imports `floorOf` and `closureOf` of plan 05, and it includes the dirty-tree rule of engine #382.
-- Plan 08: the root explanation pages. It starts after plan 06 lands.
-- Plan 09: the suite pass proposal in the Project Service, its read, its CLI leaf and the shipped plan `suite-pass-setup`. It starts after plan 06 lands.
-- Plan 10: the dashboard line and the action `Add setup node`. It starts after plan 09 merges.
+- Plan 06: engine #385. The suite pass record of the engine, the CI record cache and the nightly full run. A file that skips a test gets no record.
+- Engine #386 and apps #148: the test fixes of the plan 02, 03 and 04 reviews.
+- Apps #147: the plan 07 fixes. The script checks the tree after each write run.
+- Engine #387: plan 05 S1. The floor uses the graph of the selection.
+- Plan 08: root #285. The explanation pages.
+- Root #284: the base branch sentence of `project-service.impl.md`. A pull request cache never reaches the base branch.
+- Plan 09: engine #388. The suite pass proposal, its read, its CLI leaf and the shipped plan `suite-pass-setup`. Engine #389: an error with no code of the stored suite pass read fails the read.
+- Plan 10: apps #149. The dashboard line and the action `Add setup node`.
+- Root #286 (the root handoff item of plans 09 and 10 deleted) and #287 (the root pointers of `engine` and `apps` at plan 10).
 
 ## Open items
 
+- The root pointer of `engine` does not hold engine #389, #390 and #391. Move it in one root pull request after they merge.
 - A repository with no `src/main.ts` has an empty production set, so each run test file counts as a floor file (engine #383, review S1, action:NO). Only test fixtures reach this case. A change needs a ruling of Ulrich.
-- The root pointers of `engine` and `apps` do not hold the merges of this set. Move them in one root pull request after the next merge.
-- A mock daemon on port 31415 and a Vite server on `[::1]:27182` from the plan 04 check still run from `apps/.dev/test-floor-share`. Stop them, then remove that worktree.
