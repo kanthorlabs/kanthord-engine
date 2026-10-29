@@ -408,6 +408,7 @@ function truncateBytes(text, maxBytes) {
 function everything(graph, reason) {
   const present = [...graph.present];
   return {
+    graph,
     selection: SELECTION.all,
     reason: truncateBytes(reason, REASON_MAX_BYTES),
     tests: present.filter((path) => isRunTest(graph, path)).sort(),
@@ -436,6 +437,7 @@ export function selectTests(root, changes) {
   );
   const tests = reached.filter((path) => isRunTest(graph, path)).sort();
   return {
+    graph,
     selection: tests.length === 0 ? SELECTION.none : SELECTION.related,
     reason: null,
     tests,
@@ -605,8 +607,8 @@ function sumSeconds(files, seconds) {
   );
 }
 
-function buildFloor(root, selected, seconds) {
-  const floorFiles = floorOf(buildGraph(root));
+function buildFloor(selected, seconds) {
+  const floorFiles = floorOf(selected.graph);
   const isAll = selected.selection === SELECTION.all;
   return {
     tests: floorFiles.length,
@@ -639,7 +641,7 @@ function rerunFailures(root, file) {
 export function affectedReport(root, changes) {
   const selected = selectTests(root, changes);
   if (selected.selection === SELECTION.none) {
-    return buildReport(selected, [], [], buildFloor(root, selected, new Map()));
+    return buildReport(selected, [], [], buildFloor(selected, new Map()));
   }
   const first = runTests(root, selected.tests, FIRST_RUN_CONCURRENCY);
   const tests = new Set(selected.tests);
@@ -647,7 +649,7 @@ export function affectedReport(root, changes) {
   if (!first.passed && failed.length === EMPTY_LENGTH) {
     throw new Error(FAILED_RUN_MESSAGE);
   }
-  const floor = buildFloor(root, selected, first.seconds);
+  const floor = buildFloor(selected, first.seconds);
   const failedFiles = [...new Set(failed.map(({ file }) => file))];
   if (failedFiles.length > RERUN_FILE_LIMIT) {
     return buildReport(selected, failed, [], floor);

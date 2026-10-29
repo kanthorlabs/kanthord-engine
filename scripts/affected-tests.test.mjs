@@ -108,6 +108,12 @@ async function repository(t, files) {
   return root;
 }
 
+function select(root, changes) {
+  const { graph, ...selected } = selectTests(root, changes);
+  assert.ok(graph.present instanceof Set);
+  return selected;
+}
+
 function withoutFloor({ floor, ...report }) {
   assert.ok(Number.isInteger(floor.tests));
   return report;
@@ -133,7 +139,7 @@ test("an import edge selects the test of the importer", async (t) => {
     "src/other.test.ts": TEST_BODY,
   });
   assert.deepEqual(
-    selectTests(root, [change("src/a.ts")]),
+    select(root, [change("src/a.ts")]),
     related(["src/b.test.ts"]),
   );
 });
@@ -143,7 +149,7 @@ test("a bare and a node specifier make no edge", async (t) => {
     "src/a.ts": EMPTY_MODULE,
     "src/a.test.ts": 'import test from "node:test";\nimport "yaml";\n',
   });
-  assert.deepEqual(selectTests(root, [change("src/a.ts")]), NONE);
+  assert.deepEqual(select(root, [change("src/a.ts")]), NONE);
 });
 
 test("a re-export makes an edge", async (t) => {
@@ -153,7 +159,7 @@ test("a re-export makes an edge", async (t) => {
     "src/index.test.ts": 'import "./index.ts";\n',
   });
   assert.deepEqual(
-    selectTests(root, [change("src/a.ts")]),
+    select(root, [change("src/a.ts")]),
     related(["src/index.test.ts"]),
   );
 });
@@ -164,7 +170,7 @@ test("an import type makes an edge", async (t) => {
     "src/b.test.ts": 'let value: import("./a.ts").A = "";\nvalue;\n',
   });
   assert.deepEqual(
-    selectTests(root, [change("src/a.ts")]),
+    select(root, [change("src/a.ts")]),
     related(["src/b.test.ts"]),
   );
 });
@@ -175,7 +181,7 @@ test("a dynamic import with a string literal makes an edge", async (t) => {
     "src/b.test.ts": 'await import("./a.ts");\n',
   });
   assert.deepEqual(
-    selectTests(root, [change("src/a.ts")]),
+    select(root, [change("src/a.ts")]),
     related(["src/b.test.ts"]),
   );
 });
@@ -186,7 +192,7 @@ test("a URL with a string literal makes a file edge", async (t) => {
     "src/b.test.ts": 'new URL("../static/data.json", import.meta.url);\n',
   });
   assert.deepEqual(
-    selectTests(root, [change("static/data.json")]),
+    select(root, [change("static/data.json")]),
     related(["src/b.test.ts"]),
   );
 });
@@ -198,10 +204,10 @@ test("a URL that ends with a slash makes a prefix edge", async (t) => {
     "src/b.test.ts": 'new URL("../static/dir/", import.meta.url);\n',
   });
   assert.deepEqual(
-    selectTests(root, [change("static/dir/one.json")]),
+    select(root, [change("static/dir/one.json")]),
     related(["src/b.test.ts"]),
   );
-  assert.deepEqual(selectTests(root, [change("static/other.json")]), NONE);
+  assert.deepEqual(select(root, [change("static/other.json")]), NONE);
 });
 
 test("a template URL makes a prefix edge to the text before the substitution", async (t) => {
@@ -212,10 +218,10 @@ test("a template URL makes a prefix edge to the text before the substitution", a
       "const n = 'x';\nnew URL(`../static/dir/part-${n}.json`, import.meta.url);\n",
   });
   assert.deepEqual(
-    selectTests(root, [change("static/dir/part-one.json")]),
+    select(root, [change("static/dir/part-one.json")]),
     related(["src/b.test.ts"]),
   );
-  assert.deepEqual(selectTests(root, [change("static/dir/other.json")]), NONE);
+  assert.deepEqual(select(root, [change("static/dir/other.json")]), NONE);
 });
 
 test("a prefix edge to the repository root is dropped", async (t) => {
@@ -225,7 +231,7 @@ test("a prefix edge to the repository root is dropped", async (t) => {
     "src/b.test.ts":
       'new URL("../", import.meta.url);\nnew URL("../../", import.meta.url);\nnew URL("./", import.meta.url);\n',
   });
-  assert.deepEqual(selectTests(root, [change("static/data.json")]), NONE);
+  assert.deepEqual(select(root, [change("static/data.json")]), NONE);
 });
 
 test("the data table makes static/openapi/ an input of static/openapi.yaml", async (t) => {
@@ -235,7 +241,7 @@ test("the data table makes static/openapi/ an input of static/openapi.yaml", asy
     "src/spec.test.ts": 'new URL("../static/openapi.yaml", import.meta.url);\n',
   });
   assert.deepEqual(
-    selectTests(root, [change("static/openapi/part.yaml")]),
+    select(root, [change("static/openapi/part.yaml")]),
     related(["src/spec.test.ts"]),
   );
 });
@@ -245,7 +251,7 @@ test("a deleted module selects each importer that still names it", async (t) => 
     "src/b.test.ts": 'import "./gone.ts";\n',
   });
   assert.deepEqual(
-    selectTests(root, [change("src/gone.ts", DELETED)]),
+    select(root, [change("src/gone.ts", DELETED)]),
     related(["src/b.test.ts"]),
   );
 });
@@ -256,7 +262,7 @@ test("a rename selects the importers of the previous path", async (t) => {
     "src/b.test.ts": 'import "./old.ts";\n',
   });
   assert.deepEqual(
-    selectTests(root, [change("src/new.ts", RENAMED, "src/old.ts")]),
+    select(root, [change("src/new.ts", RENAMED, "src/old.ts")]),
     related(["src/b.test.ts"]),
   );
 });
@@ -267,7 +273,7 @@ test("an untracked file is a graph node", async (t) => {
     "src/new.test.ts": 'import "./new.ts";\n',
   });
   assert.deepEqual(
-    selectTests(root, [change("src/new.ts", ADDED)]),
+    select(root, [change("src/new.ts", ADDED)]),
     related(["src/new.test.ts"]),
   );
 });
@@ -291,9 +297,9 @@ for (const input of GLOBAL_INPUTS) {
       ],
       excluded_e2e: [SSHD_TEST_PATH],
     };
-    assert.deepEqual(selectTests(root, [change(input)]), expected);
+    assert.deepEqual(select(root, [change(input)]), expected);
     assert.deepEqual(
-      selectTests(root, [change("src/a.test.ts", RENAMED, input)]),
+      select(root, [change("src/a.test.ts", RENAMED, input)]),
       expected,
     );
   });
@@ -326,7 +332,7 @@ test("an inert path that no edge names is ignored", async (t) => {
     ...paths.filter((path) => !path.includes("/") && !path.endsWith(".md")),
   ]);
   assert.deepEqual(
-    selectTests(
+    select(
       root,
       paths.map((path) => change(path)),
     ),
@@ -336,7 +342,7 @@ test("an inert path that no edge names is ignored", async (t) => {
 
 test("a nested markdown file is not inert", async (t) => {
   const root = await repository(t, { "src/a.test.ts": TEST_BODY });
-  const result = selectTests(root, [change("src/notes.md", ADDED)]);
+  const result = select(root, [change("src/notes.md", ADDED)]);
   assert.equal(result.selection, "all");
   assert.equal(result.reason, "unknown path: src/notes.md");
 });
@@ -347,7 +353,7 @@ test("an inert path that an edge names selects the importer", async (t) => {
     "src/b.test.ts": 'new URL("../docs/spec.md", import.meta.url);\n',
   });
   assert.deepEqual(
-    selectTests(root, [change("docs/spec.md")]),
+    select(root, [change("docs/spec.md")]),
     related(["src/b.test.ts"]),
   );
 });
@@ -359,7 +365,7 @@ test("an unknown path selects each test that needs no sshd", async (t) => {
     "src/a.test.ts": TEST_BODY,
     "src/apps/server/e2e-one.test.ts": TEST_BODY,
   });
-  assert.deepEqual(selectTests(root, [change("Makefile", ADDED)]), {
+  assert.deepEqual(select(root, [change("Makefile", ADDED)]), {
     selection: "all",
     reason: "unknown path: Makefile",
     tests: ["src/a.test.ts", "src/apps/server/e2e-one.test.ts"],
@@ -370,7 +376,7 @@ test("an unknown path selects each test that needs no sshd", async (t) => {
 test("the reason holds at most 256 UTF-8 bytes", async (t) => {
   const root = await repository(t, { "src/a.test.ts": TEST_BODY });
   const path = `é${"é".repeat(LONG_NAME_LENGTH)}`;
-  const { reason } = selectTests(root, [change(path, ADDED)]);
+  const { reason } = select(root, [change(path, ADDED)]);
   assert.ok(Buffer.byteLength(reason) <= REASON_MAX_BYTES);
   assert.ok(reason.startsWith("unknown path: é"));
   assert.ok(!reason.includes("\uFFFD"));
@@ -384,7 +390,7 @@ test("a reached e2e path is selected", async (t) => {
     "src/a.test.ts": 'import "./a.ts";\n',
   });
   assert.deepEqual(
-    selectTests(root, [change("src/a.ts")]),
+    select(root, [change("src/a.ts")]),
     related(["src/a.test.ts", "src/apps/server/e2e-one.test.ts"]),
   );
 });
@@ -401,7 +407,7 @@ test("a test that imports startTestSshd is excluded", async (t) => {
       'import { startTestSshd } from "../../repository/sshd-test-support.ts";\nstartTestSshd();\n',
   });
   assert.deepEqual(
-    selectTests(root, [change(SSHD_MODULE)]),
+    select(root, [change(SSHD_MODULE)]),
     related(
       ["src/repository/plain.test.ts"],
       [
@@ -421,7 +427,7 @@ test("a namespace import of sshd-test-support.ts is excluded", async (t) => {
       'import * as sshd from "./sshd-test-support.ts";\nsshd.startTestSshd();\n',
   });
   assert.deepEqual(
-    selectTests(root, [change(SSHD_MODULE)]),
+    select(root, [change(SSHD_MODULE)]),
     related(
       ["src/repository/plain.test.ts"],
       ["src/repository/namespace.test.ts"],
@@ -437,7 +443,7 @@ test("a dynamic import of sshd-test-support.ts is excluded", async (t) => {
       'const sshd = await import("./sshd-test-support.ts");\nsshd.startTestSshd();\n',
   });
   assert.deepEqual(
-    selectTests(root, [change(SSHD_MODULE)]),
+    select(root, [change(SSHD_MODULE)]),
     related(
       ["src/repository/plain.test.ts"],
       ["src/repository/dynamic.test.ts"],
@@ -451,7 +457,7 @@ test("an unrelated namespace import is still run", async (t) => {
     "src/a.test.ts": 'import * as a from "./a.ts";\na.start();\n',
   });
   assert.deepEqual(
-    selectTests(root, [change("src/a.ts")]),
+    select(root, [change("src/a.ts")]),
     related(["src/a.test.ts"]),
   );
 });
@@ -463,7 +469,7 @@ test("a test that names startTestSshd only in a comment is excluded", async (t) 
     "src/b.test.ts": 'import "./a.ts";\n// startTestSshd\n',
   });
   assert.deepEqual(
-    selectTests(root, [change("src/a.ts")]),
+    select(root, [change("src/a.ts")]),
     related(["src/a.test.ts"], ["src/b.test.ts"]),
   );
 });
@@ -474,11 +480,11 @@ test("a changed unit test selects itself", async (t) => {
     "scripts/affected-tests.test.mjs": TEST_BODY,
   });
   assert.deepEqual(
-    selectTests(root, [change("src/a.test.ts")]),
+    select(root, [change("src/a.test.ts")]),
     related(["src/a.test.ts"]),
   );
   assert.deepEqual(
-    selectTests(root, [change("scripts/affected-tests.test.mjs")]),
+    select(root, [change("scripts/affected-tests.test.mjs")]),
     related(["scripts/affected-tests.test.mjs"]),
   );
 });
@@ -488,7 +494,7 @@ test("a change that reaches no unit test gives none", async (t) => {
     "src/a.ts": EMPTY_MODULE,
     "src/a.test.ts": TEST_BODY,
   });
-  assert.deepEqual(selectTests(root, [change("src/a.ts")]), NONE);
+  assert.deepEqual(select(root, [change("src/a.ts")]), NONE);
 });
 
 test("the change set of engine #285 selects the tracking test", async (t) => {
@@ -502,7 +508,7 @@ test("the change set of engine #285 selects the tracking test", async (t) => {
     "src/worker/service.test.ts": 'import "./service.ts";\n',
   });
   assert.deepEqual(
-    selectTests(root, [change("src/tracking/contract.ts")]),
+    select(root, [change("src/tracking/contract.ts")]),
     related(["src/tracking/service.test.ts"]),
   );
 });
@@ -515,7 +521,7 @@ test("the change set of engine #287 selects the changed worker test", async (t) 
     "src/worker/service.test.ts": 'import "./service.ts";\n',
   });
   assert.deepEqual(
-    selectTests(root, [change("src/worker/service.test.ts")]),
+    select(root, [change("src/worker/service.test.ts")]),
     related(["src/worker/service.test.ts"]),
   );
 });
@@ -877,6 +883,25 @@ test("a related selection writes a floor with a null total", async (t) => {
   );
   assert.equal(report.floor.tests, 1);
   assert.equal(report.floor.total_seconds, null);
+});
+
+test("a file that a test leaves untracked does not change the floor", async (t) => {
+  const leftover = `import "./main.ts";\nimport { writeFileSync } from "node:fs";\nimport test from "node:test";\ntest("leaves a test file", () => {\n  writeFileSync("src/left.test.ts", 'import "./main.ts";\\n');\n});\n`;
+  const root = await fixture(t, {
+    ...FLOOR_FILES,
+    "src/leave.test.ts": leftover,
+  });
+  commitAll(root);
+  const report = outsideTestContext(() =>
+    affectedReport(root, [change("src/a.ts")]),
+  );
+  assert.ok(existsSync(join(root, "src/left.test.ts")));
+  assert.deepEqual(report.tests, [
+    "src/full.test.ts",
+    "src/leave.test.ts",
+    "src/part.test.ts",
+  ]);
+  assert.equal(report.floor.tests, 2);
 });
 
 test("a selection none writes a floor of 0 seconds", async (t) => {
