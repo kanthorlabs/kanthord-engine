@@ -506,6 +506,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     releases: ssh.releases,
     dropped: ssh.dropped,
     grantAddress: ssh.grantAddress,
+    projectCustody: ssh.custody,
   };
 }
 
@@ -6000,6 +6001,24 @@ test("binding.environment.get keeps the stored environment and answers suite_pas
       JSON.stringify(behavior),
     );
   }
+  const refused = await storedEnvironmentRead(t);
+  t.mock.method(refused.f.projectCustody, "authorizeOperation", () => {
+    throw new OperationError(
+      HttpStatus.Conflict,
+      "credential.revision.revoked",
+      "The credential revision is revoked.",
+    );
+  });
+  const foreign = await storedEnvironmentRead(t);
+  foreign.f.grantAddress.value = "git@foreign.example:owner/repo.git";
+  for (const { f, params } of [refused, foreign])
+    assert.deepEqual(await f.invokeAsync("binding.environment.get", params), {
+      source: EnvironmentSource.Stored,
+      commit: null,
+      environment: STORED_ENVIRONMENT,
+      reason: null,
+      suite_pass: null,
+    });
   const { f, params } = await storedEnvironmentRead(t, { readFails: true });
   const operation = projectOperations["binding.environment.get"];
   const aborted = new CancellationContext(

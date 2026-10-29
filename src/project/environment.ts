@@ -61,10 +61,6 @@ export const EnvironmentErrorCode = {
 } as const;
 export const SUITE_PASS_FILE = ".kanthord/suite-pass.json";
 const SSH_UNREACHABLE_STATUS = 422;
-const UNREADABLE_CODES: readonly string[] = [
-  ProjectErrorCode.RepositorySshUnreachable,
-  ProjectErrorCode.RepositoryBaseBranchAbsent,
-];
 const ENVIRONMENT_KEY = "environment";
 
 type RepositoryConfig = typeof repositoryConfigSchema._output;
@@ -272,12 +268,7 @@ export class ProjectEnvironments {
       );
       return suitePassOf(read.files);
     } catch (error) {
-      if (
-        caller.context.signal.aborted ||
-        !(error instanceof OperationError) ||
-        !UNREADABLE_CODES.includes(error.code)
-      )
-        throw error;
+      if (caller.context.signal.aborted) throw error;
       return null;
     }
   }
