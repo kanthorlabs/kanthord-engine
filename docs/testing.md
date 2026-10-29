@@ -51,4 +51,4 @@ The schedule trigger runs the workflow on `main` at 03:00 UTC each night with `-
 The record has two accepted limits:
 
 - The test files that load the composed server reach every production file. They run for every production change.
-- A push to `main` runs the selected test files again. That run stops when `main` reads the records of the pull request.
+- A push to `main` runs each test file again that has no record in the cache of `main`. The cache of a pull request never reaches `main`.
