@@ -567,7 +567,14 @@ test(
         await h.missionVersion(),
         INVALID_ASSESSMENT_ID_CODE,
       );
-      for (const item of proposals.values()) {
+      const after = await h.session.read<Page<Proposal>>([
+        "mission",
+        "proposal",
+        "list",
+        h.examineId,
+      ]);
+      assert.equal(after.items.length, names.length);
+      for (const item of after.items) {
         assert.equal(item.approved_at, null);
         assert.equal(item.rejected_at, null);
       }

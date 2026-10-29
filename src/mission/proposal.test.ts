@@ -460,6 +460,55 @@ test("a decision whose new content names mixed environments is refused and keeps
   assert.equal(open.rejected_at, null);
 });
 
+test("a decision that takes a used filename is refused and writes nothing", async (t) => {
+  const h = await fixture(t);
+  const submitted = await h.submit([
+    h.proposal(h.childId, "First"),
+    h.proposal(h.childId, "Second"),
+  ]);
+  const byName = new Map(
+    (await h.list()).items.map((item) => [item.content.name, item.id]),
+  );
+  const first = byName.get("First")!;
+  const second = byName.get("Second")!;
+  const usedFilename = `proposal-${second.slice("proposal_".length).toLowerCase()}.md`;
+  h.store.transaction((tx) => {
+    const base = getRevision(tx, h.node_id, FIRST_REVISION);
+    const occupantId = createIdentity("node");
+    insertNode(tx, {
+      id: occupantId,
+      mission_id: h.mission_id,
+      filename: usedFilename,
+      created_at: NOW,
+    });
+    insertRevision(tx, {
+      ...base,
+      node_id: occupantId,
+      filename: usedFilename,
+      content: { ...base.content, intent: Intent.Implement },
+      tasks: [],
+    });
+  });
+  const before = databaseSnapshot(h.store);
+  await assert.rejects(
+    h.decide(submitted.assessment.id, [first, second]),
+    (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.code, MissionErrorCode.FilenameConflict);
+      assert.deepEqual(error.details, { filename: usedFilename });
+      return true;
+    },
+  );
+  assert.deepEqual(databaseSnapshot(h.store), before);
+  for (const item of (await h.list()).items) {
+    assert.equal(item.approved_at, null);
+    assert.equal(item.rejected_at, null);
+    assert.equal(item.created_node_id, null);
+  }
+  assert.equal(h.node().state, NodeState.Blocked);
+  assert.equal(h.node().attempt, FIRST_ATTEMPT);
+});
+
 test("a repeated decision refuses with decided", async (t) => {
   const h = await fixture(t);
   const submitted = await h.submit([h.proposal()]);
