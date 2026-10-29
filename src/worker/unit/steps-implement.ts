@@ -419,9 +419,7 @@ async function runNodeInstruction(
       countUnchangedTurn(state, NoProgressRule.UnchangedRevision);
     const checked = await verifyCommands(state, unit, commands);
     const { verification, outputs } = checked;
-    const passed =
-      checked.outcome === VerificationClass.Pass &&
-      verificationPassed(verification, checked.commands);
+    const passed = verificationPassed(verification, checked.commands);
     state.lastVerification = verificationFactsOf(passed, verification);
     state.run.noteVerification(state.lastVerification?.timed_out ?? false);
     state.run.log("task verified", {
@@ -491,9 +489,7 @@ export async function runTask(
     });
     const checked = await verifyTaskRun(state, task);
     const { verification, outputs } = checked;
-    const passed =
-      checked.outcome === VerificationClass.Pass &&
-      verificationPassed(verification, checked.commands);
+    const passed = verificationPassed(verification, checked.commands);
     state.lastVerification = verificationFactsOf(passed, verification);
     state.run.noteVerification(state.lastVerification?.timed_out ?? false);
     state.run.log("task verified", {

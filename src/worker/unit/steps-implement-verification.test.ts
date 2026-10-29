@@ -368,3 +368,20 @@ test("an implement node with no task runs no live verification and runs each nod
   assert.equal(runsOf(join(directory, "node")), ONE_RUN);
   assert.deepEqual(liveCommands(records, VerificationContext.Node), []);
 });
+
+test("a passing own command at a budget end releases further work with no operation_failed stop", async (t) => {
+  const marker = join(temporary(t), "marker");
+  const current = task("budget", `touch ${marker}`);
+  const h = await fixture(
+    t,
+    [current],
+    [writeTurn("work"), fauxAssistantMessage("work")],
+  );
+  h.agent.budget.exhausted = () => existsSync(marker);
+  const bodies = recordReleases(h);
+  acceptEvidence(h);
+  const end = await executionBoundary(h.run, () => runStepsImplement(h));
+  assert.ok("furtherWork" in end && end.furtherWork);
+  assert.notEqual(end.stop?.reason, EndReason.OperationFailed);
+  assert.equal(bodies.length, ONE_TURN);
+});
