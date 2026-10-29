@@ -4,25 +4,26 @@
 
 Repository: `kanthorlabs/kanthord`.
 
-This plan writes the remainder of root `docs/brainstorm/HANDOFF.md:89` at `c418936`: "The same build also adds the floor attributes to `docs/explanation/worker-contract.md`, and restates the live run and the release gate in `docs/explanation/coder-worker.md`." It also deletes that item after plans 06 and 07 land.
+This plan writes the remainder of root `docs/brainstorm/HANDOFF.md:89` at `c418936`: "The same build also adds the floor attributes to `docs/explanation/worker-contract.md`, and restates the live run and the release gate in `docs/explanation/coder-worker.md`." It also replaces that item with one item for the suite pass proposal of plans 09 and 10, after plans 06 and 07 land.
 
-Today `docs/explanation/coder-worker.md` states that each unit runs every verification of its list in the live checkout (`:291`), that the verdict unit runs the node verifications (`:375`) and that the release gate runs every listed command with no copy and no memo (`:388`). `docs/explanation/worker-contract.md:103` lists no floor attribute. `docs/how-to-guides/declare-affected-tests.md:92` gives the report `version` `1` only.
+Today `docs/explanation/coder-worker.md` states that each unit runs every verification of its list in the live checkout (`:291`), that the verdict unit runs the node verifications (`:375`) and that the release gate runs every listed command with no copy and no memo (`:388`). `docs/explanation/worker-contract.md:103` lists no floor attribute and says "One span per command". `docs/explanation/worker.md:176` gives the reviewer run with no result copy. `docs/how-to-guides/declare-affected-tests.md:92` gives the report `version` `1` only.
 
 The plan delivers:
 
-- The floor attributes in the row `worker.verification` of `worker-contract.md`.
+- The floor attributes and the span count in the row `worker.verification` of `worker-contract.md`.
+- The result copy of the reviewer run in `worker.md`.
 - The own commands, the result copy, the verification memo and the done record in `coder-worker.md`.
 - The report version 2 with `floor` in `declare-affected-tests.md`.
-- The deletion of the item `HANDOFF.md:89`.
+- The item `HANDOFF.md:89` replaced by one item for the suite pass proposal.
 
 Out of scope:
 
 - The design pages under `docs/brainstorm/`. Root pull request #277 holds the rules.
-- The suite pass proposal (open items O1 and O2).
+- The suite pass proposal. Plans 09 and 10 own it.
 
 ## Model
 
-Sonnet at high effort. The plan restates merged behavior in three pages, and each sentence cites the design page and the engine code.
+Sonnet at high effort. The plan restates merged behavior in four pages, and each sentence cites the design page and the engine code.
 
 ## Sources
 
@@ -50,8 +51,9 @@ No code seam.
 - Files: `docs/explanation/worker-contract.md` (edit)
 - Do:
   1. In the row `worker.verification` (`:103`), after `kanthord.affected.failed`, add: "`kanthord.affected.floor_count` and `kanthord.affected.floor_seconds` from `floor` of a version 2 report, and `kanthord.affected.total_seconds` when `floor.total_seconds` is not null".
-  2. Keep every other cell of the row.
-- Cite: `tracking-service.impl.md:86-88`; engine `src/worker/unit/method-telemetry.ts`, `affectedEnd`.
+  2. In the same row, replace "One span per command." with "One span for each run of a command. A copied result and a memo hit write no span."
+  3. Keep every other cell of the row.
+- Cite: `tracking-service.impl.md:86-88`; `worker-service.impl.md:1479`, `:1491`; engine `src/worker/unit/method-telemetry.ts`, `affectedEnd`.
 - Verify: `npx prettier --check docs/explanation/worker-contract.md` passes.
 
 ### 08.2 Restate the live run and the release gate
@@ -79,16 +81,24 @@ No code seam.
 - Cite: `worker-service.impl.md:1595-1598`.
 - Verify: `npx prettier --check docs/how-to-guides/declare-affected-tests.md` passes.
 
-### 08.4 Delete the handoff item
+### 08.4 Add the result copy to the reviewer page
+
+- Files: `docs/explanation/worker.md` (edit)
+- Do:
+  1. In item 3 of the reviewer run (`:176`), add: "A command that the list holds again copies the result of its first run. The reviewer reads no memo, so each rerun runs its command."
+- Cite: `worker-service.impl.md:1477`, `:1485`.
+- Verify: `npx prettier --check docs/explanation/worker.md` passes.
+
+### 08.5 Replace the handoff item
 
 - Files: `docs/brainstorm/HANDOFF.md` (edit)
 - Do:
-  1. Delete the item of `:89` that names the engine plan set `suite-pass-record`.
+  1. Replace the item of `:89` with one item: "Build the suite pass proposal: `suite_pass` in `project.binding.environment.get`, the shipped plan `suite-pass-setup` and the dashboard line of [the suite pass proposal](project-service.impl.md#the-suite-pass-proposal). The engine plan set `suite-pass-record` plans it in plans 09 and 10, after the rulings O1 and O2 of that set."
   2. Keep every other item.
-- Verify: `rg -n 'suite-pass-record' docs/brainstorm/HANDOFF.md` prints nothing. `npx prettier --check docs/brainstorm/HANDOFF.md` passes.
+- Verify: `rg -n 'gate_files' docs/brainstorm/HANDOFF.md` names no item of `suite-pass.json`. `npx prettier --check docs/brainstorm/HANDOFF.md` passes.
 
 ### 08.E Gate
 
-- Run `npx prettier --check docs/explanation/worker-contract.md docs/explanation/coder-worker.md docs/how-to-guides/declare-affected-tests.md docs/brainstorm/HANDOFF.md`.
-- Run `rg -n 'suite-pass-record' docs/brainstorm/HANDOFF.md`. It prints nothing.
+- Run `npx prettier --check docs/explanation/worker-contract.md docs/explanation/coder-worker.md docs/explanation/worker.md docs/how-to-guides/declare-affected-tests.md docs/brainstorm/HANDOFF.md`.
+- Run `rg -n 'suite-pass-record' docs/brainstorm/HANDOFF.md`. It prints only the item of task 08.5.
 - The pull request body lists each changed sentence with its design line and its engine function.

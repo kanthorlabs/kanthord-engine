@@ -32,7 +32,7 @@ Sonnet at high effort. The change is one schema, one span end and their tests.
 ## Depends on
 
 - Plan 02 of `dogfood-time/` merged. Start from `origin/main` of `kanthorlabs/kanthord-engine`.
-- No file overlaps with plans 01 and 03.
+- Plan 01 of this set also edits `src/worker/unit/test-support.ts`. The plan that merges second rebases on the first. No file overlaps with plan 03.
 
 ## Provides
 

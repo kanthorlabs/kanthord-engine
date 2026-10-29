@@ -14,8 +14,8 @@ Plan 01 starts from engine `main` after plans 01 and 02 of `dogfood-time/` merge
 
 The rule of `docs/brainstorm/worker-service.impl.md:1482-1493`:
 
-- The memo belongs to one execution. `runStepsImplement` creates it in the steps state. No memo crosses a claim.
-- The memo key is the context, the command text, the tree id of each checkout head in the order of the checkouts, and the environment digests of the verification span.
+- The memo belongs to one execution. The code that builds the steps state creates it. No memo crosses a claim.
+- The memo key is the context, the command text, the tree id of each checkout head in the order of the checkouts, and the sorted `[identity, digest]` pairs of the environment of each repository binding.
 - The tree id of a checkout is `git rev-parse <head>^{tree}` of the head that the run tests.
 - The contexts are `task`, `node` and `release`. The evaluation, the affected test run, the environment setup and the `examine` steps read and write no memo.
 - In the contexts `task` and `node`, the memo keeps a result with the class `pass` only.
@@ -64,7 +64,7 @@ Plan 05 follows open item O3, option A. Ulrich rules O3 before plan 05 starts. A
 - A production file is a file of the import closure of `src/main.ts`.
 - The import closure of a file is the file and each file that it reaches through the forward edges of the selector graph: the import edges and the data edges of `DATA_TABLE` and of `new URL(..., import.meta.url)`.
 - A floor test file is a run test file whose import closure holds every production file. `floor.tests` counts every floor test file of the repository, also when the selection runs none of them.
-- The test time of a file is the duration of the file-level test event of the node test runner, in seconds.
+- The test time of a file is `duration_ms / 1000` of the `test:summary` event of the node test runner that holds `data.file` of that file. Node.js 24 sends no file-level `test:pass` for a passing file.
 - `floor.seconds` is the sum of the test time of the floor test files that the run ran.
 - `floor.total_seconds` is the sum of the test time of every file of `tests` when `selection` is `all`, else null.
 - The selector writes `version: 2` and `floor` in every report.
@@ -98,7 +98,8 @@ The apps selector runs `vitest related` and gives no import graph (apps `scripts
 - One record covers the whole tree. Its key is the SHA-256 hex of the canonical JSON of the tree id of `HEAD`, the Node.js version and the pnpm version.
 - `scripts/suite-pass.mjs` holds the record steps. On a hit, CI runs only the files of `always_run`. On a miss, CI runs `vitest run`.
 - The record store, `--write`, `--full`, the cache steps, the schedule trigger and the clean-tree rule follow D8.
-- The job summary prints "Floor: none" and the saved share. The saved share is `100%` on a hit with an empty `always_run`, and `0%` on a miss.
+- The job summary prints "Floor: none" and the saved share. The saved share is `100%` on a hit with an empty `always_run`, and `0%` on a miss. On a hit with a nonempty `always_run`, it is the record time minus the test time of the `always_run` files, divided by the record time, with 0 as its lower bound.
+- The environment variable `SUITE_PASS_TEST_COMMAND` replaces the vitest command in the tests of the script. CI never sets it.
 - `.kanthord/suite-pass.json` holds `version: 1` and `always_run: []`, unless a test file of apps meets the rule of `project-service.impl.md:433`.
 - `.gitignore` adds `!/.kanthord/suite-pass.json`.
 - `gate_files` adds `.kanthord/suite-pass.json`, `.github/workflows/ci.yml` and `scripts/suite-pass.mjs`.

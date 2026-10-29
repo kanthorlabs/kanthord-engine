@@ -20,7 +20,7 @@ Out of scope:
 
 - The apps repository. Plan 07 owns it.
 - Records that a developer or KanthorD writes (`project-service.impl.md:413`).
-- The suite pass proposal (open items O1 and O2).
+- The suite pass proposal. Plans 09 and 10 own it.
 
 ## Model
 
@@ -73,9 +73,9 @@ Opus at medium effort. The plan joins the selector graph, the test run, the git 
   3. Read the toolchain: `process.versions.node` and the output of `pnpm --version`.
   4. Read the blob ids with `git ls-tree -r -z HEAD`. Build the key of each test file of the arguments with decision D8: the global inputs are `GLOBAL_INPUTS` of the selector and `static/pi-tools.json`.
   5. Read the record store. An absent or invalid store reads as empty.
-  6. Select the run files: each argument file with no record of its key, and each file of `always_run`. With `--full`, select every argument file.
+  6. Select the run files: each argument file with no record of its key, and each argument file that `always_run` lists. A file of `always_run` that is no argument file does not run in this job. With `--full`, select every argument file.
   7. With `--write`, refuse with exit 2 when `git status --porcelain --untracked-files=all` prints a line.
-  8. Run the selected files with `runTests` of the selector and the `--concurrency` value.
+  8. Run the selected files with `runTests` of the selector and the `--concurrency` value. With no selected file, call no `runTests`.
   9. With `--write`, check the git status again. On a clean tree, add one record for each passed file with its test time and the time of the run. Keep the 20000 newest records, and write the store.
   10. Write the job summary of section "Provides" to `$GITHUB_STEP_SUMMARY` when it is set, and to the standard output. The floor count is the count of `floorOf` among the argument files. The floor seconds is the test time of the floor files that ran. The saved share follows decision D8.
   11. Exit 0 when every run file passes. Exit 1 when a run file fails.
@@ -88,7 +88,7 @@ Opus at medium effort. The plan joins the selector graph, the test run, the git 
 
 - Files: `.kanthord/suite-pass.json` (new), `.kanthord/affected-tests.json`, `.gitignore` (edit)
 - Do:
-  1. Build the always-run list. Run `git ls-files 'src/*.test.ts' | xargs rg -l 'bin/|dist/|esbuild|build\('`. Read each match. Keep each test file that bundles code, reaches `bin/` or `dist/`, or reads a path that it builds at run time (`project-service.impl.md:433`). Name each kept file and its reason in the pull request body.
+  1. Build the always-run list. Run `git ls-files 'src/*.test.ts' 'scripts/*.test.mjs' | xargs rg -l -F -e 'bin/' -e 'dist/' -e esbuild -e 'build(' -e fileURLToPath -e import.meta.dirname -e 'process.cwd()' -e 'readFileSync(join(' -e readdirSync`. Read each match. Keep each test file that bundles code, reaches `bin/` or `dist/`, or reads a path that it builds at run time (`project-service.impl.md:433`). Name each kept file and its reason in the pull request body. Name each excluded match and its reason there too.
   2. Write `.kanthord/suite-pass.json` with `version: 1` and the sorted list.
   3. Add `!/.kanthord/suite-pass.json` to `.gitignore` after `!/.kanthord/comments.json`.
   4. Add `.kanthord/suite-pass.json`, `.github/workflows/ci.yml` and `scripts/suite-pass.mjs` to `gate_files` of `.kanthord/affected-tests.json`.
@@ -101,7 +101,7 @@ Opus at medium effort. The plan joins the selector graph, the test run, the git 
 - Do:
   1. Add the trigger `schedule: - cron: "0 3 * * *"`.
   2. In `check` and in `e2e`, after `pnpm install --frozen-lockfile` and before the test step, add `actions/cache/restore@v6` with the path `node_modules/.cache/suite-pass`, the key `suite-pass-<job>-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}` and the restore key `suite-pass-<job>-${{ runner.os }}-`.
-  3. Replace the test command of `check` (`:41-45`) with `node scripts/suite-pass.mjs run --job check --write --concurrency "$TEST_CONCURRENCY" <files>`, with the same file list. Add `--full` when `github.event_name` is `schedule`.
+  3. Replace the test command of `check` (`:41-45`) with `node scripts/suite-pass.mjs run --job check --write --concurrency "$TEST_CONCURRENCY" <files>`, with the same file list plus `scripts/suite-pass.test.mjs`. Add `--full` when `github.event_name` is `schedule`.
   4. Replace the test command of `e2e` (`:66-71`) in the same way with `--job e2e`.
   5. After the test step, add `actions/cache/save@v6` with `if: always()`, the same path and the same key.
   6. Keep every other step and the order of the steps.

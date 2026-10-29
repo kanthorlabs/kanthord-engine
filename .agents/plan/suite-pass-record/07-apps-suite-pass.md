@@ -52,7 +52,7 @@ Sonnet at high effort. One key for the whole tree keeps the script small, and th
 
 - Files: `scripts/suite-pass.test.mjs` (new)
 - Do:
-  1. Add the test "a tree with a matching record runs no test". Build a fixture git repository in a temporary directory with one commit, a `.gitignore` with `node_modules/` and a `.kanthord/suite-pass.json`. Give the script a test command that appends one line to a count file outside the fixture. Run `run --write` twice. Assert one line, and a saved share of `100%` on the second run.
+  1. Add the test "a tree with a matching record runs no test". Build a fixture git repository in a temporary directory with one commit, a `.gitignore` with `node_modules/` and a `.kanthord/suite-pass.json`. Set `SUITE_PASS_TEST_COMMAND` to a command that appends one line to a count file outside the fixture and writes a vitest JSON report with one test file. Run `run --write` twice. Assert one line, and a saved share of `100%` on the second run.
   2. Add the test "a new commit runs the tests again". Commit one change between the runs. Assert 2 lines.
   3. Add the test "a file of always_run runs on a matching record". List one test file. Assert that the second run runs only that file.
   4. Add the test "a dirty or untracked tree writes no record".
@@ -69,10 +69,10 @@ Sonnet at high effort. One key for the whole tree keeps the script small, and th
   2. Read the tree id with `git rev-parse HEAD^{tree}`, and the toolchain from `process.versions.node` and `pnpm --version`. Build the key of decision D9.
   3. Read the record store. An absent or invalid store reads as empty.
   4. With `--write`, refuse with exit 2 when `git status --porcelain --untracked-files=all` prints a line.
-  5. On a miss or with `--full`, run `vitest run`. On a hit, run `vitest run` with the files of `always_run`, or no test when the list is empty.
+  5. On a miss or with `--full`, run `vitest run`. On a hit, run `vitest run` with the files of `always_run`, or no test when the list is empty. When `SUITE_PASS_TEST_COMMAND` is set, run that command with `bash -c` in place of vitest, with the same arguments and the same JSON output file. Only the tests set it.
   6. Read the test time from the JSON reporter of vitest, as `runVitest` of `scripts/affected-tests.mjs:128-139` does.
   7. With `--write`, check the git status again. After a pass of a full run on a clean tree, write the record `{ file: ".", seconds, written_at }`. Keep the 20000 newest records.
-  8. Write the job summary of section "Provides" to `$GITHUB_STEP_SUMMARY` when it is set, and to the standard output. The saved share follows decision D9.
+  8. Write the job summary of section "Provides" to `$GITHUB_STEP_SUMMARY` when it is set, and to the standard output. The saved share follows decision D9. On a hit with a nonempty `always_run`, the saved share is `(record seconds - always_run seconds) / record seconds`, with 0 as its lower bound.
   9. Exit 0 on a pass, 1 on a failed test and 2 on a refusal.
 - Cite: decision D9; `project-service.impl.md:412-416`.
 - Verify: the tests of task 07.1 pass.
