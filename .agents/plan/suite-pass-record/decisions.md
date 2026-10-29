@@ -61,7 +61,7 @@ The rule of `docs/brainstorm/tracking-service.impl.md:348`, `:353` and `:358-359
 
 RULED 2026-10-29 by Ulrich (O3). The rule of `docs/brainstorm/worker-service.impl.md:1599` at root pull request #281 head `2d6587f`: "A production file is a file in the import closure of the entry that the program runs. The engine entry is `src/main.ts`."
 
-- A production file is a file of the import closure of the program entry. The engine entry is `src/main.ts`. The import closure of the program entry stops at each run test file. A run test file is never a production file (ruled by Ulrich on 2026-10-29, review of engine #383 S2).
+- A production file is a file of the import closure of the program entry. The engine entry is `src/main.ts`.
 - The import closure of a file is the file and each file that it reaches through the forward edges of the selector graph: the import edges and the data edges of `DATA_TABLE` and of `new URL(..., import.meta.url)`.
 - A floor test file is a run test file whose import closure holds every production file. `floor.tests` counts every floor test file of the repository, also when the selection runs none of them.
 - The test time of a file is `duration_ms / 1000` of the `test:summary` event of the node test runner that holds `data.file` of that file.
