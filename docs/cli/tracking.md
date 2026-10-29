@@ -340,10 +340,10 @@ The answer holds `items` and `truncated`. Each item holds `key`, `bucket_start`,
 `count`, `p50`, `p90`, `p99`, `mean` and `max`. An item of `instance_busy_ratio`
 holds `key` (the instance name), `bucket_start`, `count` (the root spans) and
 `ratio`, and no percentile. An item of `test_floor_share` holds `key`,
-`bucket_start`, `count` (the matching spans) and `share`, and no percentile. A percentile interpolates
-linearly between the two nearest samples. The order is ascending by
-`bucket_start`, then descending by `count`, then ascending by `key` with `null`
-last. The answer holds at most 1000 items.
+`bucket_start`, `count` (the matching spans) and `share`, and no percentile. A
+percentile interpolates linearly between the two nearest samples. The order is
+ascending by `bucket_start`, then descending by `count`, then ascending by `key`
+with `null` last. The answer holds at most 1000 items.
 
 The CLI exposes `--measure`, `--operation`, `--group-by`, `--bucket`, `--project`,
 `--node`, `--from` and `--to`. A missing `--measure`, or an invalid `--measure`,

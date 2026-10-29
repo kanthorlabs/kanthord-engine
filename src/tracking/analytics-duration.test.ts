@@ -707,7 +707,7 @@ test("test_floor_share answers the share of the latest release affected span of 
   assert.ok(!("p50" in item));
 });
 
-test("test_floor_share skips a span of the evaluation, a span with no total and a span with a total of 0", async (t) => {
+test("test_floor_share skips a span of the evaluation, a span with no total and a span with a total of 0 or less", async (t) => {
   const store = seededStore(t);
   addSpans(store, [
     floorSpan(MONDAY + 1000, 10, 100),
@@ -716,6 +716,7 @@ test("test_floor_share skips a span of the evaluation, a span with no total and 
     floorSpan(MONDAY + 4000, 10, undefined),
     floorSpan(MONDAY + 5000, 10, 0),
     floorSpan(MONDAY + 6000, undefined, 100),
+    floorSpan(MONDAY + 8000, 10, -5),
     { start: MONDAY + 7000, operation: "agent.turn" },
   ]);
   const { items } = await readFloorShare(store);
@@ -749,6 +750,25 @@ test("test_floor_share keeps one item for each bucket", async (t) => {
 });
 
 test("test_floor_share takes the span with the larger span_id on a tie of start_time", async (t) => {
+  const store = seededStore(t);
+  addSpans(store, [
+    floorSpan(MONDAY + 1000, 10, 100, { span_id: spanIdOf(SMALLER_SPAN) }),
+    floorSpan(MONDAY + 1000, 50, 100, {
+      trace: 3,
+      span_id: spanIdOf(LARGER_SPAN),
+    }),
+  ]);
+  const { items } = await readFloorShare(store, {
+    group_by: DurationGroupBy.ProjectId,
+  });
+  assert.equal(items.length, ONE_ITEM);
+  const item = items[0]!;
+  assert.equal(item.count, TWO_INSTANCES);
+  assert.ok("share" in item);
+  assertClose(item.share, 0.5);
+});
+
+test("test_floor_share takes the larger span_id over the larger trace_id on a tie of start_time", async (t) => {
   const store = seededStore(t);
   addSpans(store, [
     floorSpan(MONDAY + 1000, 50, 100, { span_id: spanIdOf(LARGER_SPAN) }),
