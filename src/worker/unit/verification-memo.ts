@@ -66,7 +66,14 @@ export class VerificationMemo {
           replayed.push(entry);
           if (entry.outcome !== VerificationClass.Pass) break;
         }
-        return replayed.length > NO_COMMANDS ? replayed : null;
+        const last = replayed.at(-1);
+        if (last === undefined) return null;
+        if (
+          context === VerificationContext.Release &&
+          last.outcome === VerificationClass.Pass
+        )
+          return null;
+        return replayed;
       },
       ran: (command, run, outcome) => {
         if (!storable(context, run, outcome)) return;

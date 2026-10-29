@@ -48,12 +48,8 @@ function scopeOf(
   return memo.scope(context, trees, digests);
 }
 
-test("a pass is reused in the contexts task, node and release", () => {
-  for (const context of [
-    VerificationContext.Task,
-    VerificationContext.Node,
-    VerificationContext.Release,
-  ]) {
+test("a pass is reused in the contexts task and node", () => {
+  for (const context of [VerificationContext.Task, VerificationContext.Node]) {
     const scope = scopeOf(new VerificationMemo(), context);
     scope.ran(BUILD, commandRun(BUILD, 0), VerificationClass.Pass);
     const replayed = scope.replay([BUILD]);
@@ -177,8 +173,16 @@ test("the memo refuses the context evaluation", () => {
   );
 });
 
-test("a replay gives a whole list or nothing", () => {
+test("a release replay of passes only gives nothing", () => {
   const scope = scopeOf(new VerificationMemo(), VerificationContext.Release);
+  scope.ran(BUILD, commandRun(BUILD, 0), VerificationClass.Pass);
+  scope.ran(TEST, commandRun(TEST, 0), VerificationClass.Pass);
+  assert.equal(scope.replay([BUILD]), null);
+  assert.equal(scope.replay([BUILD, TEST]), null);
+});
+
+test("a replay gives a whole list or nothing", () => {
+  const scope = scopeOf(new VerificationMemo(), VerificationContext.Task);
   scope.ran(BUILD, commandRun(BUILD, 0), VerificationClass.Pass);
   assert.equal(scope.replay([BUILD, TEST]), null);
   assert.equal(scope.replay([TEST, BUILD]), null);
@@ -188,7 +192,7 @@ test("a replay gives a whole list or nothing", () => {
 });
 
 test("a replay counts a repeated command as a hit on its first entry", () => {
-  const scope = scopeOf(new VerificationMemo(), VerificationContext.Release);
+  const scope = scopeOf(new VerificationMemo(), VerificationContext.Task);
   scope.ran(BUILD, commandRun(BUILD, 0), VerificationClass.Pass);
   const replayed = scope.replay([BUILD, BUILD]);
   assert.equal(replayed?.length, TWO_ENTRIES);
