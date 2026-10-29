@@ -45,7 +45,7 @@ import { executionBoundary } from "./native-method.ts";
 
 const TASK_VERIFIED = "task verified";
 const REVISION_COUNT_ATTRIBUTE = "kanthord.task.revision_count";
-const WALL_DEADLINE_MS = 2000;
+const WALL_DEADLINE_MS = 5000;
 
 function writeFile(content: string) {
   return fauxAssistantMessage(
