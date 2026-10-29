@@ -34,7 +34,6 @@ Sonnet at high effort. One key for the whole tree keeps the script small, and th
 
 ## Depends on
 
-- Plan 02 of `dogfood-time/` merged to engine `main`, the start of this set.
 - Start from `origin/main` of `kanthorlabs/kanthord-apps`. No file overlaps with plan 04.
 
 ## Provides

@@ -33,7 +33,7 @@ Sonnet at high effort. The read follows the pattern of `readBusyRatio` (`src/tra
 
 ## Depends on
 
-- Plan 02 of `dogfood-time/` merged. Start from `origin/main` of `kanthorlabs/kanthord-engine`.
+- Start from `origin/main` of `kanthorlabs/kanthord-engine`.
 - The tests write the span attributes directly, so this plan does not wait for plan 02 of this set.
 
 ## Provides

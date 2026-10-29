@@ -1,5 +1,7 @@
 # Plan 01: Worker unit — the verification memo
 
+Status: done by `kanthorlabs/kanthord-engine` pull request #378, merged as `14c241d6` on 2026-10-29. Do not build this plan.
+
 ## Scope
 
 Repository: `kanthorlabs/kanthord-engine`.

@@ -29,11 +29,11 @@ Sonnet at high effort. The plan restates merged behavior in four pages, and each
 
 - `docs/brainstorm/worker-service.impl.md:1368-1370` — the own command, the skip of each node command, the done record.
 - `docs/brainstorm/worker-service.impl.md:1388`, `:1409-1411` — the release gate and the verdict unit.
-- `docs/brainstorm/worker-service.impl.md:1475-1493` — the result copy and the verification memo.
+- `docs/brainstorm/worker-service.impl.md:1475-1495` — the result copy and the verification memo. Lines `:1489-1490` hold the whole-list replay of root pull request #280 at `8332592`.
 - `docs/brainstorm/worker-service.impl.md:1595-1611` — the report version 2.
 - `docs/brainstorm/tracking-service.impl.md:86-88` — the floor attributes.
 - `docs/brainstorm/worker-service.md:400-411`, `:428` — the summary text of the same rules.
-- The merged code of `dogfood-time/` plans 01 and 02 and of this set, plans 01, 02, 06 and 07.
+- The merged code of `dogfood-time/` plans 01 and 02, of engine pull request #378 (plan 01), and of this set, plans 02, 06 and 07.
 
 ## Depends on
 
@@ -63,12 +63,12 @@ No code seam.
   1. In "In short" (`:26`), state that the live checkout runs only the own commands of a unit, and that the release gate runs each node command once in a clean clone.
   2. In step 6 (`:238`), state that the node unit holds the node verifications, and that each of them is a node command, so the node unit has no own command.
   3. In step 7, item 5 (`:291`) and the diagram text (`:266`, `:274`), replace "each verification command of the unit" with "each own command of the unit". Define the own command: a verification of the unit that the node does not list. State that a unit with no own command passes with an empty list.
-  4. In step 7, add the memo: inside one execution, a command on an unchanged tree reuses its earlier pass. Only the release gate also reuses a code failure. No timeout, cancellation or infrastructure result is reused. A hit writes no span.
+  4. In step 7, add the memo: inside one execution, a command on an unchanged tree reuses its earlier pass. Only the release gate also reuses a code failure. No timeout, cancellation or infrastructure result is reused. The memo replays a whole run list or nothing. A command with no stored result runs the whole list again. At the release gate, a replay needs a stored code failure at its end, because a later command and the affected test run need the output of each listed command in a fresh clone. A hit writes no span.
   5. In "The done record" (`:357-367`), state that a done record certifies the own commands of its unit only.
   6. In "The verdict unit" (`:375`), replace "It runs the node verifications only." with "It runs no command in the live checkout. The release gate runs the node verifications."
   7. In steps 8 and 9, item 2 (`:388`), add: "A command that the list holds again copies the result of its first run. A command that passed on the same tree in this execution reuses that pass."
   8. Check each example of "Example: a run with no problem" (`:101-178`), "A verification fails" (`:546-565`), "The release gate fails" (`:592-594`) and the rework example (`:669-695`). Change each sentence that runs a node command in the live checkout.
-- Cite: `worker-service.impl.md:1368-1370`, `:1388`, `:1411`, `:1475-1493`; engine `src/worker/unit/steps-implement.ts` `ownCommandsOf`, `src/worker/unit/verification-memo.ts`.
+- Cite: `worker-service.impl.md:1368-1370`, `:1388`, `:1411`, `:1475-1495`; engine `src/worker/unit/steps-implement.ts` `ownCommandsOf`, `src/worker/unit/verification-memo.ts`.
 - Verify: `npx prettier --check docs/explanation/coder-worker.md` passes. `rg -n 'runs the node verifications only|each verification command of the unit' docs/explanation/coder-worker.md` prints nothing.
 
 ### 08.3 Give the report version 2 in the how-to page
