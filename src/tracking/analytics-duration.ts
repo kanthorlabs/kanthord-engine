@@ -133,6 +133,8 @@ const P90 = 0.9;
 const P99 = 0.99;
 const AFTER = 1;
 const NO_LIMIT = 0;
+const SAME_ORDER = 0;
+const NO_TEST_TIME = 0;
 
 function stringOf(span: AnalyticsSpan, name: string): string | null {
   const value = span.attributes[name];
@@ -365,7 +367,7 @@ function isLater(span: AnalyticsSpan, latest: AnalyticsSpan): boolean {
   return (
     (span.start_time - latest.start_time ||
       compareKeys(span.span_id, latest.span_id) ||
-      compareKeys(span.trace_id, latest.trace_id)) > NO_LIMIT
+      compareKeys(span.trace_id, latest.trace_id)) > SAME_ORDER
   );
 }
 
@@ -391,7 +393,7 @@ async function readFloorShare(
         return;
       const floor = finiteOf(span, FLOOR_SECONDS_ATTRIBUTE);
       const total = finiteOf(span, TOTAL_SECONDS_ATTRIBUTE);
-      if (floor === null || total === null || total <= NO_LIMIT) return;
+      if (floor === null || total === null || total <= NO_TEST_TIME) return;
       const key = keyOf(span, trace);
       const start = bucketStart(span.start_time, query.bucket);
       const identity = JSON.stringify([start, key]);
