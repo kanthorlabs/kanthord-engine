@@ -234,7 +234,7 @@ test("a valid report of each selection parses", () => {
 test("a report that breaks a rule answers an error", () => {
   const invalid: Record<string, unknown>[] = [
     { extra: true },
-    { version: 2 },
+    { version: 3 },
     { selection: "some" },
     { selection: AffectedSelection.All, reason: null },
     { selection: AffectedSelection.All, reason: "  " },
@@ -251,6 +251,54 @@ test("a report that breaks a rule answers an error", () => {
   ];
   for (const overrides of invalid)
     assert.ok("error" in parsedReport(overrides), JSON.stringify(overrides));
+});
+
+const FLOOR = { tests: 1, seconds: 41.7, total_seconds: 1428.5 };
+const FLOOR_EXAMPLE = {
+  version: 2,
+  selection: AffectedSelection.All,
+  reason: "global input: package.json",
+  tests: ["src/apps/server/server.test.ts", "src/tracking/service.test.ts"],
+  floor: FLOOR,
+};
+
+test("a version 2 report with a floor is a valid report", () => {
+  const result = parsedReport(FLOOR_EXAMPLE);
+  assert.ok("report" in result);
+  assert.deepEqual(result.report.floor, FLOOR);
+});
+
+test("a version 2 report with no floor is a valid report", () => {
+  const result = parsedReport({ version: 2 });
+  assert.ok("report" in result);
+  assert.equal(result.report.floor, undefined);
+});
+
+test("a floor key in a version 1 report is an invalid report", () => {
+  const result = parsedReport({ floor: FLOOR });
+  assert.ok("error" in result);
+  assert.match(result.error, /floor/);
+});
+
+test("a total_seconds with the selection related is an invalid report", () => {
+  const result = parsedReport({
+    version: 2,
+    floor: { ...FLOOR, total_seconds: 12.5 },
+  });
+  assert.ok("error" in result);
+  assert.match(result.error, /floor/);
+});
+
+test("a floor with a negative or a fractional test count is an invalid report", () => {
+  for (const tests of [-1, 1.5])
+    assert.ok(
+      "error" in
+        parsedReport({
+          version: 2,
+          floor: { ...FLOOR, tests, total_seconds: null },
+        }),
+      String(tests),
+    );
 });
 
 test("a flaky test and a failed test of one file with another name are no common id", () => {
@@ -400,6 +448,18 @@ const SCRIPT_REPORTS: Record<string, AffectedReport> = {
   flaky_changed: report({
     tests: [A_TEST],
     flaky: [{ file: A_TEST, name: "one" }],
+  }),
+  floor: report({
+    version: 2,
+    selection: AffectedSelection.All,
+    reason: "global input: package.json",
+    tests: [A_TEST],
+    floor: FLOOR,
+  }),
+  floor_null: report({
+    version: 2,
+    tests: [A_TEST],
+    floor: { ...FLOOR, total_seconds: null },
   }),
   flaky_other: report({
     tests: [A_TEST, B_TEST],
@@ -631,6 +691,53 @@ test("a flaky test in another file answers passed", async (t) => {
   assert.equal(result.verdict, AffectedVerdict.Passed);
   assert.deepEqual(result.promoted_flaky, []);
   assert.equal(result.base_run, null);
+});
+
+test("an affected span holds the floor attributes of a version 2 report", async (t) => {
+  const f = await fixture(t, { base: "pass", head: "floor" });
+  await ran(f);
+  const [head] = verificationSpans(f);
+  assert.equal(
+    head?.end?.attributes?.["kanthord.affected.floor_count"],
+    FLOOR.tests,
+  );
+  assert.equal(
+    head?.end?.attributes?.["kanthord.affected.floor_seconds"],
+    FLOOR.seconds,
+  );
+  assert.equal(
+    head?.end?.attributes?.["kanthord.affected.total_seconds"],
+    FLOOR.total_seconds,
+  );
+});
+
+test("an affected span holds no total_seconds when the floor holds null", async (t) => {
+  const f = await fixture(t, { base: "pass", head: "floor_null" });
+  await ran(f);
+  const [head] = verificationSpans(f);
+  assert.equal(
+    head?.end?.attributes?.["kanthord.affected.floor_count"],
+    FLOOR.tests,
+  );
+  assert.equal(
+    head?.end?.attributes?.["kanthord.affected.floor_seconds"],
+    FLOOR.seconds,
+  );
+  assert.equal(
+    "kanthord.affected.total_seconds" in (head?.end?.attributes ?? {}),
+    false,
+  );
+});
+
+test("an affected span of a version 1 report holds no floor attribute", async (t) => {
+  const f = await fixture(t, { base: "pass", head: "pass" });
+  await ran(f);
+  const [head] = verificationSpans(f);
+  for (const name of ["floor_count", "floor_seconds", "total_seconds"])
+    assert.equal(
+      `kanthord.affected.${name}` in (head?.end?.attributes ?? {}),
+      false,
+    );
 });
 
 test("an invalid head report with a valid base report answers failed", async (t) => {
