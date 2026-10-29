@@ -22,7 +22,7 @@ import {
 } from "./steps-implement.ts";
 import { AFFECTED_DECLARATION_FILE } from "./affected.ts";
 import { refreshAtRelease } from "./base-refresh.ts";
-import { releaseGate, ReleaseGateKind } from "./release-gate.ts";
+import { nodeUnitOf, releaseGate, ReleaseGateKind } from "./release-gate.ts";
 import { noProgressDetail, NoProgressRule } from "./progress-rule.ts";
 import { RELEASE_DIRECTORY, WorkspaceKind } from "./workspace.ts";
 import {
@@ -33,6 +33,7 @@ import {
   fauxAssistantMessage,
   fauxToolCall,
   implementFixture as fixture,
+  listedVerificationSpans,
   recordReleases,
   recordSpans,
   spanEnds,
@@ -40,6 +41,7 @@ import {
 } from "./test-support.ts";
 import { RecordKind, SpanStatus } from "../../tracking/contract.ts";
 import { SpanOperation } from "./telemetry.ts";
+import { VerificationContext } from "./method-telemetry.ts";
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
@@ -58,8 +60,8 @@ const TAG = "x";
 const CONFIG_KEY = "a.b";
 const BASE_CHANGE = "base change";
 const LEFTOVER = "leftover";
-const RUN_ONCE =
-  "if [ -e .ran ] && [ ! -e fixed ]; then exit 1; fi; touch .ran";
+const SHARED_COMMAND = "test -e fixed";
+const RELEASE_VERIFIED = "release verified";
 
 function write(path: string, content: string) {
   return fauxAssistantMessage(fauxToolCall("write", { path, content }), {
@@ -254,8 +256,8 @@ test("a wall deadline during a release verification releases with the timed-out 
   assert.deepEqual(bodies, [{ further_work: true, stop: BUDGET_STOP }]);
 });
 
-test("a release failure goes to the owner of the first failed index when the node and a task share one command", async (t) => {
-  const current = task("shared", RUN_ONCE);
+test("a release failure goes to the node unit when the node and a task share one failing command", async (t) => {
+  const current = task("shared", SHARED_COMMAND);
   const h = await fixture(
     t,
     [current],
@@ -263,7 +265,7 @@ test("a release failure goes to the owner of the first failed index when the nod
   );
   h.revision = {
     ...h.revision,
-    content: { ...h.revision.content, verifications: [RUN_ONCE] },
+    content: { ...h.revision.content, verifications: [SHARED_COMMAND] },
   };
   const revisions = recordRevisions(h);
   acceptEvidence(h);
@@ -272,7 +274,54 @@ test("a release failure goes to the owner of the first failed index when the nod
     kind: "released",
     furtherWork: false,
   });
-  assert.deepEqual(revisions, [digestOf(h, current)]);
+  assert.deepEqual(revisions, [
+    digestOf(h, nodeUnitOf(h.input.claim.node_id, h.revision)),
+  ]);
+});
+
+test("a node command that fails at the release gate sends the node unit back to the gate with no live command, and an unchanged revision counts toward no_progress", async (t) => {
+  const current = task("plain", "true");
+  const h = await fixture(
+    t,
+    [current],
+    [
+      NOTHING,
+      fauxAssistantMessage("nothing again"),
+      fauxAssistantMessage("still nothing"),
+    ],
+  );
+  h.revision = {
+    ...h.revision,
+    content: { ...h.revision.content, verifications: [`test -e ${SECRET}`] },
+  };
+  appendFileSync(join(h.root, ".git", "info", "exclude"), `${SECRET}\n`);
+  writeFileSync(join(h.root, SECRET), SECRET);
+  const records = recordSpans(h);
+  const revisions = recordRevisions(h);
+  recordReleases(h);
+  acceptEvidence(h);
+  const end = await executionBoundary(h.run, () => runStepsImplement(h));
+  const node = nodeUnitOf(h.input.claim.node_id, h.revision);
+  assert.deepEqual(revisions, [digestOf(h, node), digestOf(h, node)]);
+  assert.ok("stop" in end && end.stop);
+  assert.equal(end.stop.reason, EndReason.NoProgress);
+  assert.deepEqual(JSON.parse(end.stop.detail!), {
+    rule: NoProgressRule.UnchangedRevision,
+    count: NO_PROGRESS_LIMIT,
+    limit: NO_PROGRESS_LIMIT,
+    verification: {
+      passed: false,
+      ran: ONE_SPAN,
+      exit_code: FAILED_EXIT_CODE,
+      timed_out: false,
+    },
+  });
+  assert.deepEqual(
+    listedVerificationSpans(records).filter(
+      (span) => span.context === VerificationContext.Node,
+    ),
+    [],
+  );
 });
 
 test("a release verification that writes git state leaves the live checkout unchanged", async (t) => {
@@ -368,7 +417,7 @@ test("a failed release command writes the result routed with the unit id of its 
 });
 
 test("the verification spans of a release name the owner of each command with the context release", async (t) => {
-  const owner = task("owner", "true");
+  const owner = task("owner", "test -d .");
   const h = await fixture(t, [owner], []);
   h.revision = {
     ...h.revision,
@@ -392,6 +441,22 @@ test("the verification spans of a release name the owner of each command with th
       ["release", h.input.claim.node_id],
       ["release", owner.id],
     ],
+  );
+});
+
+test("a node command that a task repeats gives one verification span and two results at the release gate", async (t) => {
+  const h = await fixture(t, [task("repeat", "true")], []);
+  const records = recordSpans(h);
+  const log = t.mock.method(h.run, "log");
+  assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+  assert.equal(listedVerificationSpans(records).length, ONE_SPAN);
+  const verified = log.mock.calls.filter(
+    (call) => call.arguments[0] === RELEASE_VERIFIED,
+  );
+  assert.equal(verified.length, ONE_SPAN);
+  assert.deepEqual(
+    (verified[0]!.arguments[1] as { exit_codes: number[] }).exit_codes,
+    [0, 0],
   );
 });
 

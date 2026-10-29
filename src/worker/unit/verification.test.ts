@@ -395,6 +395,7 @@ const KILL_SIGNAL = "SIGKILL";
 const COMMAND_ABSENT_EXIT = 127;
 const SINGLE_RUN = 1;
 const RUN_AND_RERUN = 2;
+const TWO_COMMANDS_RUN = 2;
 
 function countedInput(directory: string, commands: readonly string[]) {
   const runs: number[] = [];
@@ -456,6 +457,51 @@ test("a kill on the run and a code failure on the rerun keeps the flaky reruns",
   assert.deepEqual(runs, [1, 2, 3, 4]);
   assert.deepEqual(run.flaky, [false]);
   assert.equal(run.verification.results[0]?.exit_code, FAILED_EXIT);
+});
+
+const REPEATED = "echo once >> count";
+const ONCE_LINE = "once\n";
+const TWICE_LINES = "once\nonce\n";
+
+test("a repeated command copies the first result and runs once when the copy is on", async (t) => {
+  const directory = temporary(t);
+  const { input, runs } = countedInput(directory, [REPEATED, "true", REPEATED]);
+  const run = await runVerificationsWithOutput({
+    ...input,
+    copyRepeated: true,
+  });
+  assert.equal(run.outcome, VerificationClass.Pass);
+  assert.equal(runs.length, TWO_COMMANDS_RUN);
+  assert.equal(run.verification.results.length, input.commands.length);
+  assert.deepEqual(run.verification.results[2], run.verification.results[0]);
+  assert.equal(run.outputs[2], run.outputs[0]);
+  assert.deepEqual(run.flaky, [false, false, false]);
+  assert.equal(readFileSync(join(directory, "count"), "utf8"), ONCE_LINE);
+  assert.equal(verificationPassed(run.verification, input.commands), true);
+});
+
+test("a repeated command runs again when the copy is off", async (t) => {
+  const directory = temporary(t);
+  const { input, runs } = countedInput(directory, [REPEATED, REPEATED]);
+  await runVerificationsWithOutput(input);
+  assert.equal(runs.length, TWO_COMMANDS_RUN);
+  assert.equal(readFileSync(join(directory, "count"), "utf8"), TWICE_LINES);
+});
+
+test("a repeated command after a failure never runs and never copies", async (t) => {
+  const { input, runs } = countedInput(temporary(t), [
+    "false",
+    "true",
+    "false",
+  ]);
+  const run = await runVerificationsWithOutput({
+    ...input,
+    reruns: 0,
+    copyRepeated: true,
+  });
+  assert.equal(run.outcome, VerificationClass.CodeFailure);
+  assert.equal(runs.length, SINGLE_RUN);
+  assert.equal(run.verification.results.length, SINGLE_RUN);
 });
 
 test("a command over the command limit is a code failure with no rerun", async (t) => {

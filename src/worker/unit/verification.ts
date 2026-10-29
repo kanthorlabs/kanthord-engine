@@ -98,6 +98,7 @@ export interface VerificationInput {
   reruns?: number;
   exhausted?: () => boolean;
   baseline?: (command: string) => Promise<number | null>;
+  copyRepeated?: boolean;
 }
 
 function outputTail(chunks: Buffer[]): string {
@@ -303,6 +304,7 @@ export async function runVerificationsWithOutput(
   const results: Verification["results"] = [];
   const outputs: string[] = [];
   const flaky: boolean[] = [];
+  const passed = new Map<string, CommandRun>();
   let outcome: VerificationClass = VerificationClass.Pass;
   for (const [index, command] of input.commands.entries()) {
     const unstarted = unstartedClass(input);
@@ -310,11 +312,19 @@ export async function runVerificationsWithOutput(
       outcome = unstarted;
       break;
     }
+    const first = input.copyRepeated ? passed.get(command) : undefined;
+    if (first !== undefined) {
+      results.push(first.result);
+      outputs.push(first.output);
+      flaky.push(false);
+      continue;
+    }
     const classified = await classifiedCommand(command, index, input);
     results.push(classified.ran.result);
     outputs.push(classified.ran.output);
     outcome = classified.outcome;
     if (outcome === VerificationClass.Pass) {
+      if (input.copyRepeated) passed.set(command, classified.ran);
       flaky.push(false);
       continue;
     }

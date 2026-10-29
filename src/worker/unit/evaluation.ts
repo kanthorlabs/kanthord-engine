@@ -340,6 +340,7 @@ async function evaluate(
     context: run.operationContext,
     env: input.env,
     reruns: VERIFICATION_RERUNS,
+    copyRepeated: true,
     exhausted: () => budget.exhausted(),
     ...baselineOf(prepared.base),
   });

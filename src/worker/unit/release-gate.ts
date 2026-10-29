@@ -269,6 +269,7 @@ async function verifyInReleaseClones(
       env: state.input.env,
       exhausted: () => state.agent.budget.exhausted(),
       baseline: (command) => state.base.exitOf(command),
+      copyRepeated: true,
     });
     const listed = { run, commands, setup: false, affected: null };
     if (!verificationPassed(run.verification, commands)) return listed;

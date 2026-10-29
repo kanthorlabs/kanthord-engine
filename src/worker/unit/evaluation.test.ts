@@ -55,6 +55,7 @@ import { VERIFICATION_INFRASTRUCTURE_FAILED } from "./verification.ts";
 
 const NO_RELEASES = 0;
 const SINGLE_RELEASE = 1;
+const ONE_SPAN = 1;
 const PROPOSAL = {
   dependency_id: "child",
   name: "Fix the defect",
@@ -893,7 +894,9 @@ function verificationStarts(records: readonly TelemetryRecord[]) {
 }
 
 test("the verification spans of a review name the owner of each command with the context evaluation", async (t) => {
-  const review = await reviewOf(t, "true", undefined, { taskCommand: "true" });
+  const review = await reviewOf(t, "true", undefined, {
+    taskCommand: "test -d .",
+  });
   assert.deepEqual(
     verificationStarts(review.records).map((attributes) => [
       attributes?.["kanthord.verification.context"],
@@ -903,6 +906,17 @@ test("the verification spans of a review name the owner of each command with the
       ["evaluation", review.nodeId],
       ["evaluation", TASK_ID],
     ],
+  );
+});
+
+test("a node command that a task repeats gives one verification span and two results in a review", async (t) => {
+  const review = await reviewOf(t, "true", undefined, { taskCommand: "true" });
+  assert.equal(verificationStarts(review.records).length, ONE_SPAN);
+  assert.deepEqual(
+    review.verifications.map((verification) =>
+      verification.results.map((result) => result.exit_code),
+    ),
+    [[0, 0]],
   );
 });
 
