@@ -39,7 +39,7 @@ const ONE_TOOL_TURN = 2;
 const FOUR_TURNS = 4;
 const SETUP_MARKER = "setup-ran";
 const SETUP_INSTRUCTION = "Fix the setup: test -e fixed failed.";
-const WALL_DEADLINE_MS = 300;
+const WALL_DEADLINE_MS = 2000;
 const ONE_RUN = 1;
 const TWO_RUNS = 2;
 
@@ -211,7 +211,8 @@ suite(
     });
 
     test("a kill at the wall deadline during a verification is a budget end and not a stop", async (t) => {
-      const current = task("slow", "sleep 30");
+      const started = join(temporary(t), "started");
+      const current = task("slow", `touch ${started}; sleep 30`);
       const worked = await fixture(
         t,
         [current],
@@ -225,6 +226,7 @@ suite(
       });
       assert.equal(worked.provider.calls.length, ONE_TURN);
       assert.equal(worked.agent.budget.exhausted(), true);
+      assert.equal(existsSync(started), true);
     });
 
     test("a stored environment runs its setup in the node checkout before the first task verification", async (t) => {
