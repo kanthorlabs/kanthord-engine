@@ -22,7 +22,6 @@ const TOOLS = [
   "ssh-keyscan",
   "ssh-keygen",
   "podman",
-  "pnpm",
   "sleep",
   "ps",
   "mkdir",

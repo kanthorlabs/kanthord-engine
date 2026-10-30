@@ -24,7 +24,6 @@ const TOOLS = [
   "ssh-keyscan",
   "ssh-keygen",
   "podman",
-  "pnpm",
   "sleep",
   "ps",
   "mkdir",
@@ -34,7 +33,7 @@ const ROUNDS = 25;
 const PARALLEL = 8;
 const EXECUTABLE = 0o755;
 const SUCCESS = 0;
-const MISSING = ["podman", "pnpm", "which"];
+const MISSING = ["podman", "mkdir", "which"];
 
 function run(script, path) {
   return new Promise((resolve, reject) => {
