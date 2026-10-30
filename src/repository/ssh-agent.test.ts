@@ -325,7 +325,7 @@ test("withSshAgent loads the key only after the agent socket accepts a connectio
   const { stdout } = await execFileAsync("sh", ["-c", "command -v ssh-agent"]);
   const bound = `require("node:net").createServer().listen(process.argv[1], () => process.exit(0))`;
   await withAgentScript(
-    `#!/bin/sh\nset -e\nnode -e '${bound}' "$3"\nsleep ${BOUND_SOCKET_SECONDS}\nrm -f "$3"\nexec '${stdout.trim()}' "$@"\n`,
+    `#!/bin/sh\nset -e\nnode -e '${bound}' "$3.tmp"\nmv "$3.tmp" "$3"\nsleep ${BOUND_SOCKET_SECONDS}\nrm -f "$3"\nexec '${stdout.trim()}' "$@"\n`,
     async (path) => {
       const key = access("bound");
       const loaded = await withSshAgent(
