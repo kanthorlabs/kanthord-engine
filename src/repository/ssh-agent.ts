@@ -126,16 +126,23 @@ export function sshAgentEnvironment(
   };
 }
 
-function socketAccepts(socket: string): Promise<boolean> {
+function socketAccepts(
+  socket: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<boolean> {
   return new Promise((resolve) => {
     const client = connect(socket);
     const settle = (accepted: boolean) => {
+      signal?.removeEventListener("abort", refuse);
       client.destroy();
       resolve(accepted);
     };
-    client.setTimeout(SOCKET_PROBE_TIMEOUT_MS, () => settle(false));
+    const refuse = () => settle(false);
+    signal?.addEventListener("abort", refuse, { once: true });
+    client.setTimeout(timeoutMs, refuse);
     client.once("connect", () => settle(true));
-    client.once("error", () => settle(false));
+    client.once("error", refuse);
   });
 }
 
@@ -152,7 +159,10 @@ export async function sweepSshAgentDirectories(now: number): Promise<void> {
     const path = join(root, name);
     const info = await lstat(path).catch(() => null);
     if (!info?.isDirectory() || info.uid !== uid) continue;
-    if (await socketAccepts(join(path, SSH_AGENT_SOCKET))) continue;
+    if (
+      await socketAccepts(join(path, SSH_AGENT_SOCKET), SOCKET_PROBE_TIMEOUT_MS)
+    )
+      continue;
     await rm(path, { recursive: true, force: true }).catch(() => {});
   }
 }
@@ -220,9 +230,18 @@ function spawnAgent(socket: string): Agent {
   };
 }
 
-async function socketExists(socket: string): Promise<boolean> {
-  const info = await stat(socket).catch(() => null);
-  return info?.isSocket() ?? false;
+async function agentAccepts(
+  socket: string,
+  context: Context,
+  deadlineAt: number,
+): Promise<boolean> {
+  const now = Date.now();
+  if (now >= deadlineAt) return false;
+  return socketAccepts(
+    socket,
+    Math.min(deadlineAt - now, SOCKET_PROBE_TIMEOUT_MS),
+    context.signal,
+  );
 }
 
 async function waitForSocket(
@@ -236,15 +255,15 @@ async function waitForSocket(
     exited = true;
   });
   while (Date.now() < deadlineAt && !exited && !context.signal.aborted) {
-    if (await socketExists(socket)) return;
+    if (await agentAccepts(socket, context, deadlineAt)) return;
     await delay(SOCKET_POLL_MS);
   }
   context.signal.throwIfAborted();
-  if (await socketExists(socket)) return;
+  if (await agentAccepts(socket, context, deadlineAt)) return;
   if (!exited && Date.now() >= deadlineAt) throw new DeadlineExceeded();
   throw agentFailure(
     SshAgentStep.Agent,
-    agent.stderr() || "The SSH agent socket did not appear.",
+    agent.stderr() || "The SSH agent socket accepts no connection.",
   );
 }
 

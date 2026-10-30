@@ -48,6 +48,10 @@ const SLOW_AGENT_SECONDS = 6.0137;
 const FAILED_AGENT_MS_MAX = 2000;
 const SCRIPT_MODE = 0o700;
 const SLOW_AGENT_START_MS = 15_000;
+const BOUND_SOCKET_SECONDS = 1;
+const WAIT_DEADLINE_MS = 500;
+const WAIT_DEADLINE_MS_MAX = 3000;
+const DEADLINE_CODE = "system.context.deadline_exceeded";
 const CANCELLED_CODE = "system.context.cancelled";
 const LIFECYCLE_RUNS = 3;
 const PARALLEL_RUNS = 8;
@@ -317,6 +321,29 @@ test("withSshAgent waits for an agent socket that appears after 5 s", async () =
   });
 });
 
+test("withSshAgent loads the key only after the agent socket accepts a connection", async () => {
+  const { stdout } = await execFileAsync("sh", ["-c", "command -v ssh-agent"]);
+  const bound = `require("node:net").createServer().listen(process.argv[1], () => process.exit(0))`;
+  await withAgentScript(
+    `#!/bin/sh\nset -e\nnode -e '${bound}' "$3"\nsleep ${BOUND_SOCKET_SECONDS}\nrm -f "$3"\nexec '${stdout.trim()}' "$@"\n`,
+    async (path) => {
+      const key = access("bound");
+      const loaded = await withSshAgent(
+        key,
+        background,
+        DEADLINE_MS,
+        async (env) => {
+          const { stdout: listed } = await execFileAsync("ssh-add", ["-L"], {
+            env: { PATH: path, SSH_AUTH_SOCK: socketOf(env) },
+          });
+          return listed.trim();
+        },
+      );
+      assert.equal(loaded, key.public_key);
+    },
+  );
+});
+
 test("a cancel ends the wait for a slow agent socket and leaves no agent directory", async (t) => {
   await withSlowAgent(async () => {
     const context = new CancellationContext();
@@ -329,6 +356,29 @@ test("a cancel ends the wait for a slow agent socket and leaves no agent directo
     );
     const cancelledAt = await cancelled;
     assert.ok(cancelledAt !== undefined);
+    assert.equal(await slowAgentLives(), false);
+    assert.deepEqual(
+      (await readdir(scratch)).filter((name) =>
+        name.startsWith(SSH_AGENT_DIRECTORY_PREFIX),
+      ),
+      [],
+    );
+  });
+});
+
+test("a deadline that ends during the wait for a slow agent socket fails the wait and leaves no agent directory", async () => {
+  await withSlowAgent(async () => {
+    const startedAt = Date.now();
+    await assert.rejects(
+      withSshAgent(
+        access("deadline-wait"),
+        background,
+        WAIT_DEADLINE_MS,
+        async () => assert.fail("The work must not run."),
+      ),
+      { code: DEADLINE_CODE },
+    );
+    assert.ok(Date.now() - startedAt < WAIT_DEADLINE_MS_MAX);
     assert.equal(await slowAgentLives(), false);
     assert.deepEqual(
       (await readdir(scratch)).filter((name) =>

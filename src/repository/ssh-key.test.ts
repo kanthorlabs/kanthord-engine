@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { connect } from "node:net";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
@@ -62,6 +63,17 @@ function runWithInput(
   );
 }
 
+function socketAccepts(socket: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const client = connect(socket);
+    client.once("connect", () => {
+      client.destroy();
+      resolve(true);
+    });
+    client.once("error", () => resolve(false));
+  });
+}
+
 async function scratchAgent(t: TestContext): Promise<string> {
   const socket = join(temporary(t), "a");
   const agent = spawn("ssh-agent", ["-D", "-a", socket], {
@@ -80,7 +92,7 @@ async function scratchAgent(t: TestContext): Promise<string> {
     await closed;
   });
   while (!exited) {
-    if (await stat(socket).catch(() => null)) return socket;
+    if (await socketAccepts(socket)) return socket;
     await delay(SOCKET_POLL_MS, undefined, { signal: t.signal });
   }
   assert.fail("The scratch agent did not start.");
