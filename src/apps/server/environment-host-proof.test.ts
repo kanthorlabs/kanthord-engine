@@ -18,7 +18,6 @@ const RUN_ID = "RUN1";
 const COMMIT = "commit";
 const PASSING_COMMAND = "true";
 const LIMIT_MS = 30000;
-const SHORT_LIMIT_MS = 300;
 const GRANDCHILD_LIMIT_MS = 2000;
 const TEST_TIMEOUT = 60000;
 const POLL_MS = 50;
@@ -238,16 +237,18 @@ test(
   "a command over the limit answers timed_out and leaves no process",
   { timeout: TEST_TIMEOUT },
   async (t) => {
+    const pidFile = join(temporary(t), "pid.txt");
     const { host, runDirectory } = proofs(t, {
-      commandLimitMs: SHORT_LIMIT_MS,
+      commandLimitMs: GRANDCHILD_LIMIT_MS,
     });
     const results = await host.proveOnHost(
-      input([], ["sleep 30 & echo $! > ../pid.txt; wait"]),
+      input([], [`sleep 30 & echo $! > ${pidFile}; wait`]),
       AbortSignal.timeout(LIMIT_MS),
     );
     assert.equal(results.length, ONE_RESULT);
     assert.equal(results[0]!.timed_out, true);
     assert.equal(existsSync(runDirectory), false);
+    assert.equal(await gone(Number(readFileSync(pidFile, "utf8"))), true);
   },
 );
 
