@@ -121,7 +121,7 @@ function scriptedFactory(script: FauxResponseStep[]): {
 async function workbenchFixture(
   t: TestContext,
   script: FauxResponseStep[] = [],
-  stateDirectory = temporary(t),
+  stateDirectory?: string,
   agentDirectory = temporary(t),
 ) {
   const scripted = scriptedFactory(script);
@@ -179,7 +179,6 @@ async function workbenchFixture(
   );
   return {
     ...fixture,
-    stateDirectory,
     provider: scripted.provider,
     options,
     agent,
@@ -768,7 +767,7 @@ test("an override file replaces the shipped workbench text and an invalid one re
   const fixture = await workbenchFixture(
     t,
     [fauxAssistantMessage(ANSWER)],
-    temporary(t),
+    undefined,
     agentDirectory,
   );
   const session = await createSession(fixture);

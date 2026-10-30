@@ -11,6 +11,7 @@ import type { ModelRuntimeFactory } from "../../worker/unit/index.ts";
 import { httpTransport } from "../worker/transport.ts";
 import {
   requirePiTools,
+  stopAfter,
   temporary,
   temporaryDirectory,
 } from "../../kernel/test-support.ts";
@@ -430,7 +431,7 @@ export async function inProcessWorker(
   };
   process.on("SIGTERM", stop);
   const running = worker.run();
-  t.after(async () => {
+  stopAfter(t, async () => {
     process.off("SIGTERM", stop);
     let stopped = false;
     try {
@@ -744,7 +745,7 @@ export async function gatewayFixture(
   );
   if (options.repositoryTransport === undefined)
     gitWriter.changedGateFiles = async () => [];
-  t.after(async () => {
+  stopAfter(t, async () => {
     const failures: Error[] = [];
     let stopped = false;
     try {
@@ -1491,7 +1492,7 @@ export function outboundHosts(t: TestContext) {
     record(hosts.http, request.host);
   };
   subscribe(HTTP_REQUEST_CHANNEL, onRequest);
-  t.after(() => unsubscribe(HTTP_REQUEST_CHANNEL, onRequest));
+  stopAfter(t, () => unsubscribe(HTTP_REQUEST_CHANNEL, onRequest));
   return hosts;
 }
 
@@ -1525,7 +1526,7 @@ export async function fakeGitHub(t: TestContext) {
       );
     });
   });
-  t.after(async () => {
+  stopAfter(t, async () => {
     releaseGate();
     releaseEvents();
     server.closeAllConnections();
@@ -2079,7 +2080,7 @@ export async function fakeS3(t: TestContext) {
       );
     });
   });
-  t.after(async () => {
+  stopAfter(t, async () => {
     server.closeAllConnections();
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),
