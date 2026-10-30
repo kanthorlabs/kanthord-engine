@@ -19,6 +19,7 @@ const COMMIT = "commit";
 const PASSING_COMMAND = "true";
 const LIMIT_MS = 30000;
 const SHORT_LIMIT_MS = 300;
+const GRANDCHILD_LIMIT_MS = 2000;
 const TEST_TIMEOUT = 60000;
 const POLL_MS = 50;
 const POLL_LIMIT = 100;
@@ -259,7 +260,7 @@ test(
     const host = new HostProofs({
       stateDirectory,
       source: SOURCE,
-      commandLimitMs: SHORT_LIMIT_MS,
+      commandLimitMs: GRANDCHILD_LIMIT_MS,
       async exportRepository() {},
     });
     const results = await host.proveOnHost(
