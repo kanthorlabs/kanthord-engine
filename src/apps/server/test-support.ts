@@ -364,6 +364,16 @@ export const domainHealth = {
   tracking: { store: 200 },
 };
 
+function removedOnThrow<T>(directories: string[], create: () => T): T {
+  try {
+    return create();
+  } catch (error) {
+    for (const directory of directories)
+      rmSync(directory, { recursive: true, force: true });
+    throw error;
+  }
+}
+
 export async function inProcessWorker(
   t: TestContext,
   input: {
@@ -386,23 +396,27 @@ export async function inProcessWorker(
   const logs: Record<string, unknown>[] = [];
   const ready = Promise.withResolvers<void>();
   const readyMessage = "Worker application ready";
-  const worker = new WorkerUnit({
-    bindings: [
-      {
-        transport: httpTransport(input.endpoint, input.token),
-        client_secret: input.client_secret,
-      },
-    ],
-    directories: { data: state, log: state },
-    env,
-    model_runtime_factory: input.modelRuntimeFactory,
-    repository_transport: input.repositoryTransport,
-    log: (line) => {
-      const record = JSON.parse(line) as Record<string, unknown>;
-      logs.push(record);
-      if (record.msg === readyMessage) ready.resolve();
-    },
-  });
+  const worker = removedOnThrow(
+    [root],
+    () =>
+      new WorkerUnit({
+        bindings: [
+          {
+            transport: httpTransport(input.endpoint, input.token),
+            client_secret: input.client_secret,
+          },
+        ],
+        directories: { data: state, log: state },
+        env,
+        model_runtime_factory: input.modelRuntimeFactory,
+        repository_transport: input.repositoryTransport,
+        log: (line) => {
+          const record = JSON.parse(line) as Record<string, unknown>;
+          logs.push(record);
+          if (record.msg === readyMessage) ready.resolve();
+        },
+      }),
+  );
   const stop = () => {
     void worker.stop();
   };
@@ -410,10 +424,13 @@ export async function inProcessWorker(
   const running = worker.run();
   t.after(async () => {
     process.off("SIGTERM", stop);
-    await worker.stop();
-    await running;
+    try {
+      await worker.stop();
+      await running;
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
-  t.after(() => rmSync(root, { recursive: true, force: true }));
   await Promise.race([
     ready.promise,
     running.then((error) => {
@@ -658,6 +675,7 @@ export async function gatewayFixture(
   const trackingStore = new Store(":memory:");
   trackingStore.migrate(trackingDatabaseMigrations);
   const logs: string[] = [];
+  const ownsStateDirectory = options.stateDirectory === undefined;
   const stateDirectory = options.stateDirectory ?? temporaryDirectory();
   const {
     scheduler,
@@ -677,41 +695,43 @@ export async function gatewayFixture(
     github,
     gitWriter,
     s3,
-  } = composeServices({
-    config,
-    store,
-    trackingStore,
-    stateDirectory,
-    workbenchModelRuntimeFactory: options.workbenchModelRuntimeFactory,
-    environmentModelRuntimeFactory: options.environmentModelRuntimeFactory,
-    registry: options.registry,
-    health: options.health ?? new HealthRegistry(),
-    repositoryConnector: options.repositoryConnector,
-    github: options.github,
-    repositoryTransport: options.repositoryTransport,
-    hostKeySources: options.hostKeySources ?? FAKE_HOST_KEY_SOURCES,
-    oauthProviders: options.oauthProviders,
-    loadModelRuntime: options.loadModelRuntime,
-    bindings: options.machines?.project,
-    registrations: options.machines?.worker,
-    inventoryOverrides: options.inventoryOverrides,
-    intake: options.intake,
-    handoverRefreshWaitMs: options.handoverRefreshWaitMs,
-    serverSlotDriver: slotDriver ?? options.serverSlotDriver,
-    environmentRuntime: options.environmentRuntime,
-    containerRuntimeHost: options.containerRuntimeHost,
-    environmentDevcontainerCli: options.environmentDevcontainerCli,
-    containerSlotDriver: options.containerSlotDriver,
-    repositoryFiles: options.repositoryFiles ?? fakeRepositoryFiles(),
-    logger: pino(
-      { level: "info" },
-      {
-        write: (line) => {
-          logs.push(line);
+  } = removedOnThrow(ownsStateDirectory ? [stateDirectory] : [], () =>
+    composeServices({
+      config,
+      store,
+      trackingStore,
+      stateDirectory,
+      workbenchModelRuntimeFactory: options.workbenchModelRuntimeFactory,
+      environmentModelRuntimeFactory: options.environmentModelRuntimeFactory,
+      registry: options.registry,
+      health: options.health ?? new HealthRegistry(),
+      repositoryConnector: options.repositoryConnector,
+      github: options.github,
+      repositoryTransport: options.repositoryTransport,
+      hostKeySources: options.hostKeySources ?? FAKE_HOST_KEY_SOURCES,
+      oauthProviders: options.oauthProviders,
+      loadModelRuntime: options.loadModelRuntime,
+      bindings: options.machines?.project,
+      registrations: options.machines?.worker,
+      inventoryOverrides: options.inventoryOverrides,
+      intake: options.intake,
+      handoverRefreshWaitMs: options.handoverRefreshWaitMs,
+      serverSlotDriver: slotDriver ?? options.serverSlotDriver,
+      environmentRuntime: options.environmentRuntime,
+      containerRuntimeHost: options.containerRuntimeHost,
+      environmentDevcontainerCli: options.environmentDevcontainerCli,
+      containerSlotDriver: options.containerSlotDriver,
+      repositoryFiles: options.repositoryFiles ?? fakeRepositoryFiles(),
+      logger: pino(
+        { level: "info" },
+        {
+          write: (line) => {
+            logs.push(line);
+          },
         },
-      },
-    ),
-  });
+      ),
+    }),
+  );
   if (options.repositoryTransport === undefined)
     gitWriter.changedGateFiles = async () => [];
   t.after(async () => {
@@ -753,10 +773,10 @@ export async function gatewayFixture(
     } finally {
       store.close();
       trackingStore.close();
+      if (ownsStateDirectory)
+        rmSync(stateDirectory, { recursive: true, force: true });
     }
   });
-  if (options.stateDirectory === undefined)
-    t.after(() => rmSync(stateDirectory, { recursive: true, force: true }));
   for (const service of [
     scheduler,
     custody,
@@ -804,6 +824,7 @@ export async function gatewayFixture(
     );
   };
   return {
+    stateDirectory,
     repoConnector,
     github,
     gitWriter,
