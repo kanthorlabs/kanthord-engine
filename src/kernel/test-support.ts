@@ -16,7 +16,13 @@ import { CancellationContext } from "./context.ts";
 import { diagnostic, diagnosticRows } from "./errors.ts";
 import { redaction } from "./log.ts";
 
-export const SUITE_CONCURRENCY = 4;
+const EXEC_CHECKED_PLATFORM = "darwin";
+const EXEC_CHECKED_SUITE_CONCURRENCY = 1;
+const DEFAULT_SUITE_CONCURRENCY = 4;
+export const SUITE_CONCURRENCY =
+  process.platform === EXEC_CHECKED_PLATFORM
+    ? EXEC_CHECKED_SUITE_CONCURRENCY
+    : DEFAULT_SUITE_CONCURRENCY;
 
 interface PiToolsDigests {
   tools: Record<string, { targets: Record<string, { binary_sha256: string }> }>;
