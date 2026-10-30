@@ -48,6 +48,7 @@ const SLOW_AGENT_SECONDS = 6.0137;
 const FAILED_AGENT_MS_MAX = 2000;
 const SCRIPT_MODE = 0o700;
 const SLOW_AGENT_START_MS = 15_000;
+const BOUND_SOCKET_SECONDS = 1;
 const CANCELLED_CODE = "system.context.cancelled";
 const LIFECYCLE_RUNS = 3;
 const PARALLEL_RUNS = 8;
@@ -315,6 +316,29 @@ test("withSshAgent waits for an agent socket that appears after 5 s", async () =
     );
     assert.equal(loaded, key.public_key);
   });
+});
+
+test("withSshAgent loads the key only after the agent socket accepts a connection", async () => {
+  const { stdout } = await execFileAsync("sh", ["-c", "command -v ssh-agent"]);
+  const bound = `import os, socket, sys, time; s = socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); time.sleep(${BOUND_SOCKET_SECONDS}); s.close(); os.unlink(sys.argv[1])`;
+  await withAgentScript(
+    `#!/bin/sh\npython3 -c '${bound}' "$3"\nexec '${stdout.trim()}' "$@"\n`,
+    async (path) => {
+      const key = access("bound");
+      const loaded = await withSshAgent(
+        key,
+        background,
+        DEADLINE_MS,
+        async (env) => {
+          const { stdout: listed } = await execFileAsync("ssh-add", ["-L"], {
+            env: { PATH: path, SSH_AUTH_SOCK: socketOf(env) },
+          });
+          return listed.trim();
+        },
+      );
+      assert.equal(loaded, key.public_key);
+    },
+  );
 });
 
 test("a cancel ends the wait for a slow agent socket and leaves no agent directory", async (t) => {
