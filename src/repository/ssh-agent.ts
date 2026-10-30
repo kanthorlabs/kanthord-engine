@@ -263,7 +263,7 @@ async function waitForSocket(
   if (!exited && Date.now() >= deadlineAt) throw new DeadlineExceeded();
   throw agentFailure(
     SshAgentStep.Agent,
-    agent.stderr() || "The SSH agent socket did not appear.",
+    agent.stderr() || "The SSH agent socket accepts no connection.",
   );
 }
 
