@@ -4,6 +4,7 @@ import type { z } from "zod";
 import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { createIdentity } from "../kernel/identity.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 import {
   DEFAULT_RELEASE_RESERVE_SECONDS,
   DEFAULT_STOP_BACKOFF_SECONDS,
@@ -88,7 +89,7 @@ export function schedulerHarness(
   overrides: Partial<Dependencies> = {},
 ) {
   const store = overrides.store ?? new Store(IN_MEMORY_DATABASE);
-  if (!overrides.store) t.after(() => store.close());
+  if (!overrides.store) stopAfter(t, () => store.close());
   store.migrate([
     { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
   ]);
@@ -205,7 +206,7 @@ export function schedulerHarness(
     ...overrides,
   };
   const service = new SchedulerService(dependencies);
-  t.after(() => service.stop());
+  stopAfter(t, () => service.stop());
   const registry = new OperationRegistry();
   service.declare(registry);
   async function invoke<K extends keyof typeof schedulerOperations>(

@@ -76,11 +76,33 @@ export async function childRun(
   return { status, stdout, stderr };
 }
 
+const SINGLE_FAILURE = 1;
+const stopFailures = new WeakMap<TestContext, unknown[]>();
+
+export function stopAfter(t: TestContext, stop: () => unknown): void {
+  t.after(async () => {
+    try {
+      await stop();
+    } catch (error) {
+      const failures = stopFailures.get(t);
+      if (!failures) {
+        const recorded = [error];
+        stopFailures.set(t, recorded);
+        t.after(() => {
+          throw recorded.length === SINGLE_FAILURE
+            ? recorded[0]
+            : new AggregateError(recorded, "Test stops failed.");
+        });
+      } else failures.push(error);
+    }
+  });
+}
+
 export function testContext(t: TestContext): CancellationContext {
   const context = new CancellationContext();
   const cancel = () => context.cancel(t.signal.reason);
   t.signal.addEventListener("abort", cancel, { once: true });
-  t.after(() => {
+  stopAfter(t, () => {
     t.signal.removeEventListener("abort", cancel);
     context.cancel();
   });
@@ -96,7 +118,7 @@ export function temporaryDirectory(): string {
 
 export function temporary(t: TestContext): string {
   const path = temporaryDirectory();
-  t.after(() => rmSync(path, { recursive: true, force: true }));
+  stopAfter(t, () => rmSync(path, { recursive: true, force: true }));
   return path;
 }
 
@@ -145,7 +167,7 @@ export function overrideEnvironment(
       else process.env[name] = value;
   };
   apply(values);
-  t.after(() => apply(previous));
+  stopAfter(t, () => apply(previous));
 }
 
 const PROCESS_ABSENT = "ESRCH";

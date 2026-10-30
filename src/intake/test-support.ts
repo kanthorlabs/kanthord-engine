@@ -17,6 +17,7 @@ import {
   OperationResultType,
 } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 import { REPOSITORY_COMPONENT_NAME } from "../repository/contract.ts";
 import { GitHubPlatform } from "../repository/github.ts";
 import { RepositoryComponent } from "../repository/index.ts";
@@ -127,7 +128,7 @@ export function sshStore(t: TestContext): {
   pin: (host: string) => string;
 } {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
     { service: REPOSITORY_COMPONENT_NAME, migrations: repositoryMigrations },
