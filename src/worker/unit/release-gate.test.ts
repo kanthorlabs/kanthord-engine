@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { CauseCategory, unattributed } from "../../kernel/cause.ts";
-import { test } from "node:test";
+import { suite, test } from "node:test";
 import {
   appendFileSync,
   existsSync,
@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
-import { temporary } from "../../kernel/test-support.ts";
+import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
 import type { TaskContent } from "../../mission/contract.ts";
 import { EndReason } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
@@ -92,80 +92,57 @@ function digestOf(h: Fixture, unit: TaskContent): string {
   return taskWork(h, unit).digest;
 }
 
-test("a task that breaks the verification of an earlier task routes a revision to that task before the release", async (t) => {
-  const first = task("first", "grep -q base file");
-  const second = task("second", "grep -q two file");
-  const h = await fixture(
-    t,
-    [first, second],
-    [
-      NOTHING,
-      write("file", "two"),
-      fauxAssistantMessage("done"),
-      write("file", REVISED_CONTENT),
-      fauxAssistantMessage("fixed"),
-    ],
-  );
-  const revisions = recordRevisions(h);
-  const bodies = recordReleases(h);
-  acceptEvidence(h);
-  assert.deepEqual(await runStepsImplement(h), {
-    kind: "released",
-    furtherWork: false,
+suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
+  test("a task that breaks the verification of an earlier task routes a revision to that task before the release", async (t) => {
+    const first = task("first", "grep -q base file");
+    const second = task("second", "grep -q two file");
+    const h = await fixture(
+      t,
+      [first, second],
+      [
+        NOTHING,
+        write("file", "two"),
+        fauxAssistantMessage("done"),
+        write("file", REVISED_CONTENT),
+        fauxAssistantMessage("fixed"),
+      ],
+    );
+    const revisions = recordRevisions(h);
+    const bodies = recordReleases(h);
+    acceptEvidence(h);
+    assert.deepEqual(await runStepsImplement(h), {
+      kind: "released",
+      furtherWork: false,
+    });
+    assert.deepEqual(revisions, [digestOf(h, first)]);
+    assert.deepEqual(bodies, [{ further_work: false, stop: null }]);
+    assert.equal(
+      await simpleGit(h.bare).raw(["show", `refs/heads/${h.nodeBranch}:file`]),
+      REVISED_CONTENT,
+    );
   });
-  assert.deepEqual(revisions, [digestOf(h, first)]);
-  assert.deepEqual(bodies, [{ further_work: false, stop: null }]);
-  assert.equal(
-    await simpleGit(h.bare).raw(["show", `refs/heads/${h.nodeBranch}:file`]),
-    REVISED_CONTENT,
-  );
-});
 
-test("a release failure that no revision changes stops with no_progress and never releases further work false", async (t) => {
-  const current = task("ignored", `test -e ${SECRET}`);
-  const h = await fixture(
-    t,
-    [current],
-    [
-      NOTHING,
-      fauxAssistantMessage("nothing again"),
-      fauxAssistantMessage("still nothing"),
-    ],
-  );
-  appendFileSync(join(h.root, ".git", "info", "exclude"), `${SECRET}\n`);
-  writeFileSync(join(h.root, SECRET), SECRET);
-  const revisions = recordRevisions(h);
-  const bodies = recordReleases(h);
-  acceptEvidence(h);
-  const end = await executionBoundary(h.run, () => runStepsImplement(h));
-  assert.deepEqual(revisions, [digestOf(h, current), digestOf(h, current)]);
-  assert.deepEqual(end, {
-    kind: "released",
-    furtherWork: true,
-    stop: {
-      reason: EndReason.NoProgress,
-      code: null,
-      cause: unattributed([
-        CauseCategory.Model,
-        CauseCategory.Prompt,
-        CauseCategory.Plan,
-      ]),
-      detail: noProgressDetail({
-        rule: NoProgressRule.UnchangedRevision,
-        count: NO_PROGRESS_LIMIT,
-        limit: NO_PROGRESS_LIMIT,
-        verification: {
-          passed: false,
-          ran: RELEASE_COMMANDS_RAN,
-          exit_code: FAILED_EXIT_CODE,
-          timed_out: false,
-        },
-      }),
-    },
-  });
-  assert.deepEqual(bodies, [
-    {
-      further_work: true,
+  test("a release failure that no revision changes stops with no_progress and never releases further work false", async (t) => {
+    const current = task("ignored", `test -e ${SECRET}`);
+    const h = await fixture(
+      t,
+      [current],
+      [
+        NOTHING,
+        fauxAssistantMessage("nothing again"),
+        fauxAssistantMessage("still nothing"),
+      ],
+    );
+    appendFileSync(join(h.root, ".git", "info", "exclude"), `${SECRET}\n`);
+    writeFileSync(join(h.root, SECRET), SECRET);
+    const revisions = recordRevisions(h);
+    const bodies = recordReleases(h);
+    acceptEvidence(h);
+    const end = await executionBoundary(h.run, () => runStepsImplement(h));
+    assert.deepEqual(revisions, [digestOf(h, current), digestOf(h, current)]);
+    assert.deepEqual(end, {
+      kind: "released",
+      furtherWork: true,
       stop: {
         reason: EndReason.NoProgress,
         code: null,
@@ -186,398 +163,432 @@ test("a release failure that no revision changes stops with no_progress and neve
           },
         }),
       },
-    },
-  ]);
-});
-
-const BUDGET_STOP = {
-  reason: "budget_end",
-  code: "wall_time",
-  cause: unattributed([
-    CauseCategory.Environment,
-    CauseCategory.Plan,
-    CauseCategory.Model,
-  ]),
-};
-
-test("a wall deadline during a task verification releases further work", async (t) => {
-  const h = await fixture(
-    t,
-    [task("timed", "touch transient; sleep 30")],
-    [NOTHING],
-  );
-  let deadline = Date.now() + 60000;
-  h.agent.budget.wallDeadline = () => {
-    deadline = Date.now() + 30;
-    return deadline;
-  };
-  h.agent.budget.exhausted = () => Date.now() >= deadline;
-  const bodies = recordReleases(h);
-  acceptEvidence(h);
-  assert.deepEqual(await runStepsImplement(h), {
-    kind: "released",
-    furtherWork: true,
-    stop: BUDGET_STOP,
+    });
+    assert.deepEqual(bodies, [
+      {
+        further_work: true,
+        stop: {
+          reason: EndReason.NoProgress,
+          code: null,
+          cause: unattributed([
+            CauseCategory.Model,
+            CauseCategory.Prompt,
+            CauseCategory.Plan,
+          ]),
+          detail: noProgressDetail({
+            rule: NoProgressRule.UnchangedRevision,
+            count: NO_PROGRESS_LIMIT,
+            limit: NO_PROGRESS_LIMIT,
+            verification: {
+              passed: false,
+              ran: RELEASE_COMMANDS_RAN,
+              exit_code: FAILED_EXIT_CODE,
+              timed_out: false,
+            },
+          }),
+        },
+      },
+    ]);
   });
-  assert.deepEqual(bodies, [{ further_work: true, stop: BUDGET_STOP }]);
-});
 
-test("a wall deadline during a release verification releases with the timed-out budget cause", async (t) => {
-  const h = await fixture(t, [task("settled", "true")], [NOTHING]);
-  h.revision = {
-    ...h.revision,
-    content: {
-      ...h.revision.content,
-      verifications: [
-        `case "$PWD" in */${RELEASE_DIRECTORY}/*) sleep 30;; esac`,
+  const BUDGET_STOP = {
+    reason: "budget_end",
+    code: "wall_time",
+    cause: unattributed([
+      CauseCategory.Environment,
+      CauseCategory.Plan,
+      CauseCategory.Model,
+    ]),
+  };
+
+  test("a wall deadline during a task verification releases further work", async (t) => {
+    const h = await fixture(
+      t,
+      [task("timed", "touch transient; sleep 30")],
+      [NOTHING],
+    );
+    let deadline = Date.now() + 60000;
+    h.agent.budget.wallDeadline = () => {
+      deadline = Date.now() + 30;
+      return deadline;
+    };
+    h.agent.budget.exhausted = () => Date.now() >= deadline;
+    const bodies = recordReleases(h);
+    acceptEvidence(h);
+    assert.deepEqual(await runStepsImplement(h), {
+      kind: "released",
+      furtherWork: true,
+      stop: BUDGET_STOP,
+    });
+    assert.deepEqual(bodies, [{ further_work: true, stop: BUDGET_STOP }]);
+  });
+
+  const RELEASE_WINDOW_MS = 3000;
+
+  test("a wall deadline during a release verification releases with the timed-out budget cause", async (t) => {
+    const h = await fixture(t, [task("settled", "true")], [NOTHING]);
+    h.revision = {
+      ...h.revision,
+      content: {
+        ...h.revision.content,
+        verifications: [
+          `case "$PWD" in */${RELEASE_DIRECTORY}/*) sleep 30;; esac`,
+        ],
+      },
+    };
+    const releaseDirectory = join(
+      h.input.workspaces.nodeKey(h.input.claim.node_id),
+      RELEASE_DIRECTORY,
+    );
+    const wallDeadline = h.agent.budget.wallDeadline.bind(h.agent.budget);
+    let deadline = Number.POSITIVE_INFINITY;
+    h.agent.budget.wallDeadline = () => {
+      if (!existsSync(releaseDirectory)) return wallDeadline();
+      deadline = Math.min(deadline, Date.now() + RELEASE_WINDOW_MS);
+      return deadline;
+    };
+    h.agent.budget.exhausted = () => Date.now() >= deadline;
+    const bodies = recordReleases(h);
+    acceptEvidence(h);
+    assert.deepEqual(await runStepsImplement(h), {
+      kind: "released",
+      furtherWork: true,
+      stop: BUDGET_STOP,
+    });
+    assert.deepEqual(bodies, [{ further_work: true, stop: BUDGET_STOP }]);
+  });
+
+  test("a failed command that the node and a task share routes its revision to the node unit", async (t) => {
+    const current = task("shared", FAILS_IN_RELEASE);
+    const h = await fixture(
+      t,
+      [current],
+      [NOTHING, write("fixed", "fixed"), fauxAssistantMessage("fixed")],
+    );
+    h.revision = {
+      ...h.revision,
+      content: { ...h.revision.content, verifications: [FAILS_IN_RELEASE] },
+    };
+    const nodeUnit = nodeUnitOf(h.input.claim.node_id, h.revision);
+    const revisions = recordRevisions(h);
+    acceptEvidence(h);
+    recordReleases(h);
+    assert.deepEqual(await runStepsImplement(h), {
+      kind: "released",
+      furtherWork: false,
+    });
+    assert.deepEqual(revisions, [digestOf(h, nodeUnit)]);
+  });
+
+  test("a node command that fails at the release gate sends the node unit back to the gate with no live command, and an unchanged revision counts toward no_progress", async (t) => {
+    const current = task("plain", "true");
+    const h = await fixture(
+      t,
+      [current],
+      [
+        NOTHING,
+        fauxAssistantMessage("nothing again"),
+        fauxAssistantMessage("still nothing"),
       ],
-    },
-  };
-  const releaseDirectory = join(
-    h.input.workspaces.nodeKey(h.input.claim.node_id),
-    RELEASE_DIRECTORY,
-  );
-  const wallDeadline = h.agent.budget.wallDeadline.bind(h.agent.budget);
-  let deadline = Number.POSITIVE_INFINITY;
-  h.agent.budget.wallDeadline = () => {
-    if (!existsSync(releaseDirectory)) return wallDeadline();
-    deadline = Math.min(deadline, Date.now() + 500);
-    return deadline;
-  };
-  h.agent.budget.exhausted = () => Date.now() >= deadline;
-  const bodies = recordReleases(h);
-  acceptEvidence(h);
-  assert.deepEqual(await runStepsImplement(h), {
-    kind: "released",
-    furtherWork: true,
-    stop: BUDGET_STOP,
+    );
+    h.revision = {
+      ...h.revision,
+      content: { ...h.revision.content, verifications: [`test -e ${SECRET}`] },
+    };
+    appendFileSync(join(h.root, ".git", "info", "exclude"), `${SECRET}\n`);
+    writeFileSync(join(h.root, SECRET), SECRET);
+    const records = recordSpans(h);
+    const revisions = recordRevisions(h);
+    recordReleases(h);
+    acceptEvidence(h);
+    const end = await executionBoundary(h.run, () => runStepsImplement(h));
+    const node = nodeUnitOf(h.input.claim.node_id, h.revision);
+    assert.deepEqual(revisions, [digestOf(h, node), digestOf(h, node)]);
+    assert.ok("stop" in end && end.stop);
+    assert.equal(end.stop.reason, EndReason.NoProgress);
+    assert.deepEqual(JSON.parse(end.stop.detail!), {
+      rule: NoProgressRule.UnchangedRevision,
+      count: NO_PROGRESS_LIMIT,
+      limit: NO_PROGRESS_LIMIT,
+      verification: {
+        passed: false,
+        ran: ONE_SPAN,
+        exit_code: FAILED_EXIT_CODE,
+        timed_out: false,
+      },
+    });
+    const spans = listedVerificationSpans(records);
+    assert.deepEqual(
+      spans.filter((span) => span.context === VerificationContext.Node),
+      [],
+    );
+    assert.equal(
+      spans.filter((span) => span.context === VerificationContext.Release)
+        .length,
+      ONE_SPAN,
+    );
   });
-  assert.deepEqual(bodies, [{ further_work: true, stop: BUDGET_STOP }]);
-});
 
-test("a failed command that the node and a task share routes its revision to the node unit", async (t) => {
-  const current = task("shared", FAILS_IN_RELEASE);
-  const h = await fixture(
-    t,
-    [current],
-    [NOTHING, write("fixed", "fixed"), fauxAssistantMessage("fixed")],
-  );
-  h.revision = {
-    ...h.revision,
-    content: { ...h.revision.content, verifications: [FAILS_IN_RELEASE] },
-  };
-  const nodeUnit = nodeUnitOf(h.input.claim.node_id, h.revision);
-  const revisions = recordRevisions(h);
-  acceptEvidence(h);
-  recordReleases(h);
-  assert.deepEqual(await runStepsImplement(h), {
-    kind: "released",
-    furtherWork: false,
+  test("a release verification that writes git state leaves the live checkout unchanged", async (t) => {
+    const marker = join(temporary(t), MARKER);
+    const h = await fixture(t, [task("plain", "true")], [NOTHING]);
+    h.revision = {
+      ...h.revision,
+      content: {
+        ...h.revision.content,
+        verifications: [
+          `git tag ${TAG} && git config ${CONFIG_KEY} c && pwd > ${marker}`,
+        ],
+      },
+    };
+    acceptEvidence(h);
+    recordReleases(h);
+    assert.deepEqual(await runStepsImplement(h), {
+      kind: "released",
+      furtherWork: false,
+    });
+    const directory = readFileSync(marker, "utf8").trim();
+    assert.notEqual(directory, h.root);
+    assert.equal(existsSync(directory), false);
+    assert.equal((await simpleGit(h.root).tags()).all.includes(TAG), false);
+    assert.equal(
+      (await simpleGit(h.root).getConfig(CONFIG_KEY, "local")).value,
+      null,
+    );
   });
-  assert.deepEqual(revisions, [digestOf(h, nodeUnit)]);
-});
 
-test("a node command that fails at the release gate sends the node unit back to the gate with no live command, and an unchanged revision counts toward no_progress", async (t) => {
-  const current = task("plain", "true");
-  const h = await fixture(
-    t,
-    [current],
-    [
-      NOTHING,
-      fauxAssistantMessage("nothing again"),
-      fauxAssistantMessage("still nothing"),
-    ],
-  );
-  h.revision = {
-    ...h.revision,
-    content: { ...h.revision.content, verifications: [`test -e ${SECRET}`] },
-  };
-  appendFileSync(join(h.root, ".git", "info", "exclude"), `${SECRET}\n`);
-  writeFileSync(join(h.root, SECRET), SECRET);
-  const records = recordSpans(h);
-  const revisions = recordRevisions(h);
-  recordReleases(h);
-  acceptEvidence(h);
-  const end = await executionBoundary(h.run, () => runStepsImplement(h));
-  const node = nodeUnitOf(h.input.claim.node_id, h.revision);
-  assert.deepEqual(revisions, [digestOf(h, node), digestOf(h, node)]);
-  assert.ok("stop" in end && end.stop);
-  assert.equal(end.stop.reason, EndReason.NoProgress);
-  assert.deepEqual(JSON.parse(end.stop.detail!), {
-    rule: NoProgressRule.UnchangedRevision,
-    count: NO_PROGRESS_LIMIT,
-    limit: NO_PROGRESS_LIMIT,
-    verification: {
-      passed: false,
-      ran: ONE_SPAN,
-      exit_code: FAILED_EXIT_CODE,
+  test("a release clone holds the remote of the reviewer clone and the fetched base", async (t) => {
+    const markers = temporary(t);
+    const base = join(markers, "base");
+    const url = join(markers, "url");
+    const h = await fixture(t, [], []);
+    h.revision = {
+      ...h.revision,
+      content: {
+        ...h.revision.content,
+        verifications: [
+          `git rev-parse origin/main > ${base} && git remote get-url origin > ${url}`,
+        ],
+      },
+    };
+    await advanceBase(h, t, BASE_CHANGE, "other");
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    const fetched = (await simpleGit(h.bare).revparse(["main"])).trim();
+    assert.equal(readFileSync(base, "utf8").trim(), fetched);
+    assert.equal(
+      readFileSync(url, "utf8").trim(),
+      h.input.setup.repositories[0]!.address,
+    );
+  });
+
+  test("the next prepare removes release clones that a crash left", async (t) => {
+    const h = await fixture(t, [], []);
+    const key = h.input.workspaces.nodeKey(h.input.claim.node_id);
+    const leftover = join(key, RELEASE_DIRECTORY, LEFTOVER);
+    mkdirSync(leftover, { recursive: true });
+    h.input.workspaces.release(key, WorkspaceKind.Node);
+    await prepareStepsWorkspace(h.input, h.run);
+    assert.equal(existsSync(join(key, RELEASE_DIRECTORY)), false);
+  });
+
+  test("a passing release gate writes one release gate span with the result passed", async (t) => {
+    const h = await fixture(t, [task("pass", "true")], []);
+    const records = recordSpans(h);
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    const ends = spanEnds(records, SpanOperation.ReleaseGate);
+    assert.equal(ends.length, ONE_SPAN);
+    assert.equal(ends[0]?.status, SpanStatus.Ok);
+    assert.deepEqual(ends[0]?.attributes, {
+      "kanthord.release_gate.result": "passed",
+      "kanthord.release_gate.affected": "absent",
+    });
+  });
+
+  test("a failed release command writes the result routed with the unit id of its owner", async (t) => {
+    const owner = task("owner", "false");
+    const h = await fixture(t, [owner], []);
+    const records = recordSpans(h);
+    const gate = await releaseGate(h);
+    assert.equal(gate.kind, ReleaseGateKind.Routed);
+    assert.ok(gate.kind === ReleaseGateKind.Routed);
+    assert.ok(gate.instruction.includes(RELEASE_CLONE_TEXT));
+    const ends = spanEnds(records, SpanOperation.ReleaseGate);
+    assert.equal(ends.length, ONE_SPAN);
+    assert.equal(ends[0]?.status, SpanStatus.Ok);
+    assert.deepEqual(ends[0]?.attributes, {
+      "kanthord.release_gate.result": "routed",
+      "kanthord.release_gate.unit_id": owner.id,
+    });
+  });
+
+  test("the verification spans of a release name the owner of each command with the context release", async (t) => {
+    const owner = task("owner", "true && true");
+    const h = await fixture(t, [owner], []);
+    h.revision = {
+      ...h.revision,
+      content: { ...h.revision.content, verifications: ["true"] },
+    };
+    const records = recordSpans(h);
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    const starts = records.flatMap((record) =>
+      record.kind === RecordKind.Span &&
+      record.operation === SpanOperation.Verification &&
+      record.start_time !== undefined
+        ? [record.attributes]
+        : [],
+    );
+    assert.deepEqual(
+      starts.map((attributes) => [
+        attributes?.["kanthord.verification.context"],
+        attributes?.["kanthord.verification.owner_id"],
+      ]),
+      [
+        ["release", h.input.claim.node_id],
+        ["release", owner.id],
+      ],
+    );
+  });
+
+  test("a command that the node and a task share runs once at the release gate and holds two results", async (t) => {
+    const count = join(temporary(t), "count");
+    const shared = `echo x >> ${count}`;
+    const owner = task("owner", shared);
+    const h = await fixture(t, [owner], []);
+    h.revision = {
+      ...h.revision,
+      content: { ...h.revision.content, verifications: [shared] },
+    };
+    const records = recordSpans(h);
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    assert.equal(
+      readFileSync(count, "utf8").trim().split("\n").length,
+      ONE_SPAN,
+    );
+    const starts = records.flatMap((record) =>
+      record.kind === RecordKind.Span &&
+      record.operation === SpanOperation.Verification &&
+      record.start_time !== undefined
+        ? [record.attributes]
+        : [],
+    );
+    assert.deepEqual(
+      starts.map((attributes) => [
+        attributes?.["kanthord.verification.context"],
+        attributes?.["kanthord.verification.owner_id"],
+      ]),
+      [["release", h.input.claim.node_id]],
+    );
+    assert.deepEqual(h.lastVerification, {
+      passed: true,
+      ran: RELEASE_COMMANDS_RAN,
+      exit_code: 0,
       timed_out: false,
-    },
+    });
   });
-  const spans = listedVerificationSpans(records);
-  assert.deepEqual(
-    spans.filter((span) => span.context === VerificationContext.Node),
-    [],
-  );
-  assert.equal(
-    spans.filter((span) => span.context === VerificationContext.Release).length,
-    ONE_SPAN,
-  );
-});
 
-test("a release verification that writes git state leaves the live checkout unchanged", async (t) => {
-  const marker = join(temporary(t), MARKER);
-  const h = await fixture(t, [task("plain", "true")], [NOTHING]);
-  h.revision = {
-    ...h.revision,
-    content: {
-      ...h.revision.content,
-      verifications: [
-        `git tag ${TAG} && git config ${CONFIG_KEY} c && pwd > ${marker}`,
-      ],
-    },
-  };
-  acceptEvidence(h);
-  recordReleases(h);
-  assert.deepEqual(await runStepsImplement(h), {
-    kind: "released",
-    furtherWork: false,
+  test("a budget end writes the release gate result budget_end", async (t) => {
+    const h = await fixture(t, [task("late", "true")], []);
+    const records = recordSpans(h);
+    h.agent.budget.exhausted = () => true;
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.BudgetEnd });
+    const ends = spanEnds(records, SpanOperation.ReleaseGate);
+    assert.equal(ends.length, ONE_SPAN);
+    assert.deepEqual(ends[0]?.attributes, {
+      "kanthord.release_gate.result": "budget_end",
+    });
   });
-  const directory = readFileSync(marker, "utf8").trim();
-  assert.notEqual(directory, h.root);
-  assert.equal(existsSync(directory), false);
-  assert.equal((await simpleGit(h.root).tags()).all.includes(TAG), false);
-  assert.equal(
-    (await simpleGit(h.root).getConfig(CONFIG_KEY, "local")).value,
-    null,
-  );
-});
 
-test("a release clone holds the remote of the reviewer clone and the fetched base", async (t) => {
-  const markers = temporary(t);
-  const base = join(markers, "base");
-  const url = join(markers, "url");
-  const h = await fixture(t, [], []);
-  h.revision = {
-    ...h.revision,
-    content: {
-      ...h.revision.content,
-      verifications: [
-        `git rev-parse origin/main > ${base} && git remote get-url origin > ${url}`,
-      ],
-    },
-  };
-  await advanceBase(h, t, BASE_CHANGE, "other");
-  assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
-  const fetched = (await simpleGit(h.bare).revparse(["main"])).trim();
-  assert.equal(readFileSync(base, "utf8").trim(), fetched);
-  assert.equal(
-    readFileSync(url, "utf8").trim(),
-    h.input.setup.repositories[0]!.address,
-  );
-});
+  const BROKEN = "broken";
+  const FAILS_WHEN_BROKEN = `grep -q ${BROKEN} file`;
+  const ALWAYS_FAILS = "true";
+  const NEVER_FAILS = "false";
+  const RATIONALE_START = "The affected test run of repository repo failed.";
+  const RATIONALE_FAILED = "1 test failed: a.test.ts > one.";
 
-test("the next prepare removes release clones that a crash left", async (t) => {
-  const h = await fixture(t, [], []);
-  const key = h.input.workspaces.nodeKey(h.input.claim.node_id);
-  const leftover = join(key, RELEASE_DIRECTORY, LEFTOVER);
-  mkdirSync(leftover, { recursive: true });
-  h.input.workspaces.release(key, WorkspaceKind.Node);
-  await prepareStepsWorkspace(h.input, h.run);
-  assert.equal(existsSync(join(key, RELEASE_DIRECTORY)), false);
-});
+  async function changeNode(h: Fixture, content: string) {
+    await commitOnNode(h.root, content);
+    h.checkouts[0]!.head = (await simpleGit(h.root).revparse(["HEAD"])).trim();
+  }
 
-test("a passing release gate writes one release gate span with the result passed", async (t) => {
-  const h = await fixture(t, [task("pass", "true")], []);
-  const records = recordSpans(h);
-  assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
-  const ends = spanEnds(records, SpanOperation.ReleaseGate);
-  assert.equal(ends.length, ONE_SPAN);
-  assert.equal(ends[0]?.status, SpanStatus.Ok);
-  assert.deepEqual(ends[0]?.attributes, {
-    "kanthord.release_gate.result": "passed",
-    "kanthord.release_gate.affected": "absent",
+  function gateEnd(records: ReturnType<typeof recordSpans>) {
+    const ends = spanEnds(records, SpanOperation.ReleaseGate);
+    assert.equal(ends.length, ONE_SPAN);
+    return ends[0]?.attributes;
+  }
+
+  test("an affected command that passes ends the gate with the verdict passed", async (t) => {
+    const h = await fixture(t, [task("pass", "true")], []);
+    await declareAffected(h, t, affectedCommand(NEVER_FAILS));
+    await changeNode(h, "changed");
+    const records = recordSpans(h);
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    assert.deepEqual(gateEnd(records), {
+      "kanthord.release_gate.result": "passed",
+      "kanthord.release_gate.affected": "passed",
+    });
   });
-});
 
-test("a failed release command writes the result routed with the unit id of its owner", async (t) => {
-  const owner = task("owner", "false");
-  const h = await fixture(t, [owner], []);
-  const records = recordSpans(h);
-  const gate = await releaseGate(h);
-  assert.equal(gate.kind, ReleaseGateKind.Routed);
-  assert.ok(gate.kind === ReleaseGateKind.Routed);
-  assert.ok(gate.instruction.includes(RELEASE_CLONE_TEXT));
-  const ends = spanEnds(records, SpanOperation.ReleaseGate);
-  assert.equal(ends.length, ONE_SPAN);
-  assert.equal(ends[0]?.status, SpanStatus.Ok);
-  assert.deepEqual(ends[0]?.attributes, {
-    "kanthord.release_gate.result": "routed",
-    "kanthord.release_gate.unit_id": owner.id,
+  test("an affected command that fails at the node head and passes at the base routes one revision to the node unit", async (t) => {
+    const h = await fixture(t, [task("pass", "true")], []);
+    await declareAffected(h, t, affectedCommand(FAILS_WHEN_BROKEN));
+    await changeNode(h, BROKEN);
+    const records = recordSpans(h);
+    const gate = await releaseGate(h);
+    assert.equal(gate.kind, ReleaseGateKind.Routed);
+    assert.ok(gate.kind === ReleaseGateKind.Routed);
+    assert.equal(gate.unit.id, h.input.claim.node_id);
+    assert.ok(gate.instruction.startsWith(REVISION_TEXT));
+    assert.ok(gate.instruction.includes(RATIONALE_START));
+    assert.ok(gate.instruction.includes(RATIONALE_FAILED));
+    assert.ok(gate.instruction.includes(RELEASE_CLONE_TEXT));
+    assert.deepEqual(gateEnd(records), {
+      "kanthord.release_gate.result": "routed",
+      "kanthord.release_gate.unit_id": h.input.claim.node_id,
+      "kanthord.release_gate.affected": "failed",
+    });
   });
-});
 
-test("the verification spans of a release name the owner of each command with the context release", async (t) => {
-  const owner = task("owner", "true && true");
-  const h = await fixture(t, [owner], []);
-  h.revision = {
-    ...h.revision,
-    content: { ...h.revision.content, verifications: ["true"] },
-  };
-  const records = recordSpans(h);
-  assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
-  const starts = records.flatMap((record) =>
-    record.kind === RecordKind.Span &&
-    record.operation === SpanOperation.Verification &&
-    record.start_time !== undefined
-      ? [record.attributes]
-      : [],
-  );
-  assert.deepEqual(
-    starts.map((attributes) => [
-      attributes?.["kanthord.verification.context"],
-      attributes?.["kanthord.verification.owner_id"],
-    ]),
-    [
-      ["release", h.input.claim.node_id],
-      ["release", owner.id],
-    ],
-  );
-});
-
-test("a command that the node and a task share runs once at the release gate and holds two results", async (t) => {
-  const count = join(temporary(t), "count");
-  const shared = `echo x >> ${count}`;
-  const owner = task("owner", shared);
-  const h = await fixture(t, [owner], []);
-  h.revision = {
-    ...h.revision,
-    content: { ...h.revision.content, verifications: [shared] },
-  };
-  const records = recordSpans(h);
-  assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
-  assert.equal(readFileSync(count, "utf8").trim().split("\n").length, ONE_SPAN);
-  const starts = records.flatMap((record) =>
-    record.kind === RecordKind.Span &&
-    record.operation === SpanOperation.Verification &&
-    record.start_time !== undefined
-      ? [record.attributes]
-      : [],
-  );
-  assert.deepEqual(
-    starts.map((attributes) => [
-      attributes?.["kanthord.verification.context"],
-      attributes?.["kanthord.verification.owner_id"],
-    ]),
-    [["release", h.input.claim.node_id]],
-  );
-  assert.deepEqual(h.lastVerification, {
-    passed: true,
-    ran: RELEASE_COMMANDS_RAN,
-    exit_code: 0,
-    timed_out: false,
+  test("an affected test that fails at both heads passes the gate with the verdict base_red", async (t) => {
+    const h = await fixture(t, [task("pass", "true")], []);
+    await declareAffected(h, t, affectedCommand(ALWAYS_FAILS));
+    await changeNode(h, "changed");
+    const records = recordSpans(h);
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    assert.deepEqual(gateEnd(records), {
+      "kanthord.release_gate.result": "passed",
+      "kanthord.release_gate.affected": "base_red",
+    });
   });
-});
 
-test("a budget end writes the release gate result budget_end", async (t) => {
-  const h = await fixture(t, [task("late", "true")], []);
-  const records = recordSpans(h);
-  h.agent.budget.exhausted = () => true;
-  assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.BudgetEnd });
-  const ends = spanEnds(records, SpanOperation.ReleaseGate);
-  assert.equal(ends.length, ONE_SPAN);
-  assert.deepEqual(ends[0]?.attributes, {
-    "kanthord.release_gate.result": "budget_end",
+  test("a failed listed command routes its revision and runs no affected command", async (t) => {
+    const marker = join(temporary(t), "affected-ran");
+    const h = await fixture(t, [task("owner", "false")], []);
+    await declareAffected(
+      h,
+      t,
+      affectedCommand(`touch ${marker}; ${ALWAYS_FAILS}`),
+    );
+    await changeNode(h, "changed");
+    const records = recordSpans(h);
+    assert.equal((await releaseGate(h)).kind, ReleaseGateKind.Routed);
+    assert.equal(existsSync(marker), false);
+    assert.equal(
+      gateEnd(records)?.["kanthord.release_gate.affected"],
+      undefined,
+    );
   });
-});
 
-const BROKEN = "broken";
-const FAILS_WHEN_BROKEN = `grep -q ${BROKEN} file`;
-const ALWAYS_FAILS = "true";
-const NEVER_FAILS = "false";
-const RATIONALE_START = "The affected test run of repository repo failed.";
-const RATIONALE_FAILED = "1 test failed: a.test.ts > one.";
-
-async function changeNode(h: Fixture, content: string) {
-  await commitOnNode(h.root, content);
-  h.checkouts[0]!.head = (await simpleGit(h.root).revparse(["HEAD"])).trim();
-}
-
-function gateEnd(records: ReturnType<typeof recordSpans>) {
-  const ends = spanEnds(records, SpanOperation.ReleaseGate);
-  assert.equal(ends.length, ONE_SPAN);
-  return ends[0]?.attributes;
-}
-
-test("an affected command that passes ends the gate with the verdict passed", async (t) => {
-  const h = await fixture(t, [task("pass", "true")], []);
-  await declareAffected(h, t, affectedCommand(NEVER_FAILS));
-  await changeNode(h, "changed");
-  const records = recordSpans(h);
-  assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
-  assert.deepEqual(gateEnd(records), {
-    "kanthord.release_gate.result": "passed",
-    "kanthord.release_gate.affected": "passed",
+  test("a node change that edits the declaration does not change the command that judges it", async (t) => {
+    const h = await fixture(t, [task("pass", "true")], []);
+    await declareAffected(h, t, affectedCommand(FAILS_WHEN_BROKEN));
+    await refreshAtRelease(h);
+    writeFileSync(
+      join(h.root, AFFECTED_DECLARATION_FILE),
+      JSON.stringify({ version: 1, command: affectedCommand(NEVER_FAILS) }),
+    );
+    await simpleGit(h.root).add(AFFECTED_DECLARATION_FILE);
+    await changeNode(h, BROKEN);
+    const gate = await releaseGate(h);
+    assert.equal(gate.kind, ReleaseGateKind.Routed);
   });
-});
-
-test("an affected command that fails at the node head and passes at the base routes one revision to the node unit", async (t) => {
-  const h = await fixture(t, [task("pass", "true")], []);
-  await declareAffected(h, t, affectedCommand(FAILS_WHEN_BROKEN));
-  await changeNode(h, BROKEN);
-  const records = recordSpans(h);
-  const gate = await releaseGate(h);
-  assert.equal(gate.kind, ReleaseGateKind.Routed);
-  assert.ok(gate.kind === ReleaseGateKind.Routed);
-  assert.equal(gate.unit.id, h.input.claim.node_id);
-  assert.ok(gate.instruction.startsWith(REVISION_TEXT));
-  assert.ok(gate.instruction.includes(RATIONALE_START));
-  assert.ok(gate.instruction.includes(RATIONALE_FAILED));
-  assert.ok(gate.instruction.includes(RELEASE_CLONE_TEXT));
-  assert.deepEqual(gateEnd(records), {
-    "kanthord.release_gate.result": "routed",
-    "kanthord.release_gate.unit_id": h.input.claim.node_id,
-    "kanthord.release_gate.affected": "failed",
-  });
-});
-
-test("an affected test that fails at both heads passes the gate with the verdict base_red", async (t) => {
-  const h = await fixture(t, [task("pass", "true")], []);
-  await declareAffected(h, t, affectedCommand(ALWAYS_FAILS));
-  await changeNode(h, "changed");
-  const records = recordSpans(h);
-  assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
-  assert.deepEqual(gateEnd(records), {
-    "kanthord.release_gate.result": "passed",
-    "kanthord.release_gate.affected": "base_red",
-  });
-});
-
-test("a failed listed command routes its revision and runs no affected command", async (t) => {
-  const marker = join(temporary(t), "affected-ran");
-  const h = await fixture(t, [task("owner", "false")], []);
-  await declareAffected(
-    h,
-    t,
-    affectedCommand(`touch ${marker}; ${ALWAYS_FAILS}`),
-  );
-  await changeNode(h, "changed");
-  const records = recordSpans(h);
-  assert.equal((await releaseGate(h)).kind, ReleaseGateKind.Routed);
-  assert.equal(existsSync(marker), false);
-  assert.equal(gateEnd(records)?.["kanthord.release_gate.affected"], undefined);
-});
-
-test("a node change that edits the declaration does not change the command that judges it", async (t) => {
-  const h = await fixture(t, [task("pass", "true")], []);
-  await declareAffected(h, t, affectedCommand(FAILS_WHEN_BROKEN));
-  await refreshAtRelease(h);
-  writeFileSync(
-    join(h.root, AFFECTED_DECLARATION_FILE),
-    JSON.stringify({ version: 1, command: affectedCommand(NEVER_FAILS) }),
-  );
-  await simpleGit(h.root).add(AFFECTED_DECLARATION_FILE);
-  await changeNode(h, BROKEN);
-  const gate = await releaseGate(h);
-  assert.equal(gate.kind, ReleaseGateKind.Routed);
 });
