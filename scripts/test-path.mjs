@@ -1,6 +1,7 @@
 import {
   accessSync,
   constants,
+  lstatSync,
   mkdirSync,
   readdirSync,
   renameSync,
@@ -56,6 +57,14 @@ function stale(entry) {
   return !TOOLS.includes(pending[1]) || pid === process.pid || !alive(pid);
 }
 
+function blocking(link) {
+  try {
+    return !lstatSync(link).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
 function resolve(tool, directories) {
   return directories
     .map((directory) => join(directory, tool))
@@ -77,6 +86,7 @@ for (const entry of readdirSync(TOOL_DIRECTORY)) {
 for (const tool of TOOLS) {
   const link = join(TOOL_DIRECTORY, tool);
   const target = resolve(tool, directories);
+  if (blocking(link)) rmSync(link, { recursive: true, force: true });
   if (target) {
     const pending = `${link}.${process.pid}`;
     symlinkSync(target, pending);

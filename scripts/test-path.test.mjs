@@ -195,3 +195,22 @@ test("the pending name of an ended run is removed and the pending name of a live
   assert.equal(await readlink(live), join(bin, SHADOWED));
   assert.equal(await readlink(join(directory, SHADOWED)), join(bin, SHADOWED));
 });
+
+test("a directory with the name of a tool in the link directory gives way to the link", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "kanthord-test-path-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const script = join(root, "scripts", "test-path.mjs");
+  await mkdir(join(root, "scripts"));
+  await copyFile(SCRIPT, script);
+  const bin = join(root, "bin");
+  await mkdir(bin);
+  for (const tool of TOOLS) {
+    await writeFile(join(bin, tool), "#!/bin/sh\n", { mode: EXECUTABLE });
+  }
+  const directory = join(root, "node_modules", ".cache", "test-path");
+  await mkdir(join(directory, SHADOWED, SHADOWED), { recursive: true });
+
+  assert.deepEqual(await run(script, bin), { status: SUCCESS, stderr: "" });
+
+  assert.equal(await readlink(join(directory, SHADOWED)), join(bin, SHADOWED));
+});
