@@ -29,7 +29,7 @@ const TOOLS = [
   "mkdir",
   "which",
 ];
-const PENDING = /^(.+)\.\d+$/;
+const PENDING = /^(.+)\.(\d+)$/;
 
 function executable(path) {
   try {
@@ -40,9 +40,20 @@ function executable(path) {
   }
 }
 
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code !== "ESRCH";
+  }
+}
+
 function stale(entry) {
   const pending = PENDING.exec(entry);
-  return !TOOLS.includes(pending ? pending[1] : entry);
+  if (!pending) return !TOOLS.includes(entry);
+  const pid = Number(pending[2]);
+  return !TOOLS.includes(pending[1]) || pid === process.pid || !alive(pid);
 }
 
 function resolve(tool, directories) {
@@ -60,7 +71,8 @@ const directories = path
   );
 mkdirSync(TOOL_DIRECTORY, { recursive: true });
 for (const entry of readdirSync(TOOL_DIRECTORY)) {
-  if (stale(entry)) rmSync(join(TOOL_DIRECTORY, entry), { force: true });
+  if (stale(entry))
+    rmSync(join(TOOL_DIRECTORY, entry), { recursive: true, force: true });
 }
 for (const tool of TOOLS) {
   const link = join(TOOL_DIRECTORY, tool);

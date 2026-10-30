@@ -37,6 +37,7 @@ const SUCCESS = 0;
 const MISSING = ["podman", "mkdir", "which"];
 const RETIRED = "pnpm";
 const SHADOWED = "git";
+const RETIRED_DIRECTORY = "retired";
 
 function run(script, path) {
   return new Promise((resolve, reject) => {
@@ -49,6 +50,14 @@ function run(script, path) {
     child.stderr.on("data", (chunk) => (stderr += chunk));
     child.on("error", reject);
     child.on("close", (status) => resolve({ status, stderr }));
+  });
+}
+
+function endedPid() {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ["-e", ""], { stdio: "ignore" });
+    child.on("error", reject);
+    child.on("close", () => resolve(child.pid));
   });
 }
 
@@ -135,5 +144,54 @@ test("a directory with the name of a tool is not a target", async (t) => {
   });
 
   const directory = join(root, "node_modules", ".cache", "test-path");
+  assert.equal(await readlink(join(directory, SHADOWED)), join(bin, SHADOWED));
+});
+
+test("a directory in the link directory does not stop the script", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "kanthord-test-path-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const script = join(root, "scripts", "test-path.mjs");
+  await mkdir(join(root, "scripts"));
+  await copyFile(SCRIPT, script);
+  const bin = join(root, "bin");
+  await mkdir(bin);
+  for (const tool of TOOLS) {
+    await writeFile(join(bin, tool), "#!/bin/sh\n", { mode: EXECUTABLE });
+  }
+  const directory = join(root, "node_modules", ".cache", "test-path");
+  await mkdir(join(directory, RETIRED_DIRECTORY, RETIRED_DIRECTORY), {
+    recursive: true,
+  });
+
+  assert.deepEqual(await run(script, bin), { status: SUCCESS, stderr: "" });
+
+  await assert.rejects(readlink(join(directory, RETIRED_DIRECTORY)), {
+    code: "ENOENT",
+  });
+  assert.equal(await readlink(join(directory, SHADOWED)), join(bin, SHADOWED));
+});
+
+test("the pending name of an ended run is removed and the pending name of a live run is kept", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "kanthord-test-path-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const script = join(root, "scripts", "test-path.mjs");
+  await mkdir(join(root, "scripts"));
+  await copyFile(SCRIPT, script);
+  const bin = join(root, "bin");
+  await mkdir(bin);
+  for (const tool of TOOLS) {
+    await writeFile(join(bin, tool), "#!/bin/sh\n", { mode: EXECUTABLE });
+  }
+  const directory = join(root, "node_modules", ".cache", "test-path");
+  await mkdir(directory, { recursive: true });
+  const ended = join(directory, `${SHADOWED}.${await endedPid()}`);
+  const live = join(directory, `${SHADOWED}.${process.pid}`);
+  await symlink(join(bin, SHADOWED), ended);
+  await symlink(join(bin, SHADOWED), live);
+
+  assert.deepEqual(await run(script, bin), { status: SUCCESS, stderr: "" });
+
+  await assert.rejects(readlink(ended), { code: "ENOENT" });
+  assert.equal(await readlink(live), join(bin, SHADOWED));
   assert.equal(await readlink(join(directory, SHADOWED)), join(bin, SHADOWED));
 });
