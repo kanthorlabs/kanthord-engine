@@ -10,7 +10,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { isolatedGitEnvironment } from "../kernel/git-environment.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
-import { temporary } from "../kernel/test-support.ts";
+import { stopAfter, temporary } from "../kernel/test-support.ts";
 import { HostKeyErrorCode, RepositoryErrorCode } from "./contract.ts";
 import {
   RepositoryComponent,
@@ -53,7 +53,7 @@ delete process.env.SSH_AGENT_PID;
 
 function pinnedStore(t: TestContext): Store {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([{ service: "repository", migrations: repositoryMigrations }]);
   store.database
     .prepare(
@@ -196,7 +196,7 @@ test("the known_hosts seam lets a test reach a local sshd on another port", asyn
     portOf: () => sshd.port,
   });
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const address = sshd.url(bare);
   const access = store.transaction((tx) =>
     component.sshAccessOf(

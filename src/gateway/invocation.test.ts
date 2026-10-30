@@ -22,6 +22,7 @@ import {
   testMachineIdentity,
 } from "../kernel/test-identity.ts";
 import type { ExecutionProofRow } from "../kernel/operation.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 
 const AUTH_VERSION = 1;
 
@@ -48,7 +49,7 @@ const VALIDATION_FAILED = "gateway.request.validation_failed";
 
 async function fixture(t: TestContext, registry: OperationRegistry) {
   const store = new Store(":memory:");
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([{ service: "gateway", migrations: gatewayMigrations }]);
   registry.seal({ [StoreName.Operational]: store });
   const masterKey = randomBytes(MASTER_KEY_BYTES).toString("base64");
@@ -58,7 +59,7 @@ async function fixture(t: TestContext, registry: OperationRegistry) {
     masterKey,
     authVersion: AUTH_VERSION,
   });
-  t.after(() => invocation.stop());
+  stopAfter(t, () => invocation.stop());
   const { token } = await generateHumanJWT(masterKey, AUTH_VERSION, 600);
   return { invocation, token };
 }
@@ -103,7 +104,7 @@ test("execution proof precedes reservation and replay and supplies only proven c
   t.mock.method(Date, "now", () => now);
   const registry = new OperationRegistry();
   const store = new Store(":memory:");
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const row: ExecutionProofRow = {
     execution_id: createIdentity("execution"),
     project_id: createIdentity("project"),
@@ -189,7 +190,7 @@ test("execution proof precedes reservation and replay and supplies only proven c
       },
     },
   });
-  t.after(() => invocation.stop());
+  stopAfter(t, () => invocation.stop());
   const key = createIdempotencyKey();
   const request = {
     params: { execution_id: row.execution_id },
@@ -354,7 +355,7 @@ function machineInvocation(
   drained: { registered: boolean } | null = null,
 ) {
   const store = new Store(":memory:");
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   registry.seal({ [StoreName.Operational]: store });
   const heartbeats: string[] = [];
   const runtime = createIdentity("worker_registration");
@@ -412,7 +413,7 @@ function machineInvocation(
       },
     },
   });
-  t.after(() => invocation.stop());
+  stopAfter(t, () => invocation.stop());
   const failures: { fields: Record<string, unknown>; message: string }[] = [];
   const logger = {
     error: (fields: Record<string, unknown>, message: string) =>

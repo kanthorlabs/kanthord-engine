@@ -26,6 +26,7 @@ import { gatewayOperations } from "./contract.ts";
 import { workerOperations } from "../worker/contract.ts";
 import { emitOpenAPIFiles } from "./openapi.ts";
 import { requestIdSchema, resolveRequestId } from "./request-id.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 const apiOperations = { ...gatewayOperations, ...workerOperations };
 const requestId = "request_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const invalidIds = [
@@ -71,7 +72,7 @@ test("clients treat a failure with a bare or wrong-kind request ID as indetermin
 
 test("idempotency records retain full request IDs while their keys carry the idempotency key prefix", async (t) => {
   const idempotency = new Idempotency();
-  t.after(() => idempotency.stop());
+  stopAfter(t, () => idempotency.stop());
   const key = createIdempotencyKey();
   const { reservation } = idempotency.reserve(
     key,

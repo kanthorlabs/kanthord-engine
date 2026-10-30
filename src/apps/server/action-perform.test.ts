@@ -25,7 +25,11 @@ import {
   OperationResultType,
 } from "../../kernel/operation.ts";
 import { mintServiceIdentity } from "../../kernel/service-mint.ts";
-import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
+import {
+  stopAfter,
+  SUITE_CONCURRENCY,
+  temporary,
+} from "../../kernel/test-support.ts";
 import {
   Intent,
   MISSION_SERVICE_NAME,
@@ -776,7 +780,7 @@ test(
       async () => {
         const before = h.materials.length;
         const scratch = mkdtempSync(join(tmpdir(), "kd-perform-"));
-        t.after(() => rmSync(scratch, { recursive: true, force: true }));
+        stopAfter(t, () => rmSync(scratch, { recursive: true, force: true }));
         const previous = process.env.TMPDIR;
         process.env.TMPDIR = scratch;
         const writer = h.fixture.gitWriter;

@@ -21,7 +21,11 @@ import {
   runNativeExecution,
   stopOnEnd,
 } from "./native-method.ts";
-import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
+import {
+  hostEnvironment,
+  stopAfter,
+  temporary,
+} from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import {
@@ -585,7 +589,7 @@ test("refused execution evidence aborts the agent and prevents later server oper
       credentials: { release: async () => {} },
       context: background,
     });
-    t.after(() => run.dispose());
+    stopAfter(t, () => run.dispose());
     stopOnEnd(run, {
       abort: async () => {
         aborts++;

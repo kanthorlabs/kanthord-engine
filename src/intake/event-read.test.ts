@@ -23,6 +23,7 @@ import { insertEvent } from "./event-store.ts";
 import { allocateInboundId, insertInbound } from "./inbound-store.ts";
 import { intakeMigrations } from "./migrations.ts";
 import { unusedActionDependencies } from "./test-support.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const CREATED_AT = 100;
@@ -44,7 +45,7 @@ const PROJECTION_KEYS = [
 
 function harness(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
   ]);

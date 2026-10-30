@@ -24,6 +24,7 @@ import {
   WorkerErrorCode,
 } from "./contract.ts";
 import { ActionPerformer } from "./action-performer.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 
 const FIRST_ATTEMPT = 1;
 const SINGLE_CALL_COUNT = 1;
@@ -100,7 +101,7 @@ function actionable(t: TestContext) {
 
 function harness(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const nodeId = createIdentity("node");
   const claim = {
     executionId: createIdentity("execution"),

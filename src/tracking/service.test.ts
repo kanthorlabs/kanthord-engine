@@ -49,6 +49,7 @@ import { CauseLabelCode, HUMAN_USERNAME_ATTRIBUTE } from "./cause-label.ts";
 import { trackingMigrations } from "./migrations.ts";
 import { TrackingService } from "./service.ts";
 import { insertSpan, insertTrace } from "./trace-store.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 
 const HUMAN_ACCOUNT = "account_01JZ8R2B3C4D5E6F7G8H9J0K1M";
 const TRACE: ExecutionTrace = {
@@ -105,7 +106,7 @@ const OTHER_TRACE = "b".repeat(32);
 
 function harness(t: TestContext, now: () => number = () => NOW) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: TRACKING_SERVICE_NAME, migrations: trackingMigrations },
   ]);
@@ -1201,7 +1202,7 @@ test("start sweeps an expired trace", async (t) => {
     insertTrace(tx, TRACE, NOW - EXPIRED_AGE_DAYS * DAY_MS),
   );
   assert.equal(traceCount(store), ONE_ENTRY);
-  t.after(() => service.stop());
+  stopAfter(t, () => service.stop());
   assert.equal(await service.start(), null);
   assert.equal(traceCount(store), NO_ROWS);
   assert.equal(service.sweepFailures(), NO_ROWS);

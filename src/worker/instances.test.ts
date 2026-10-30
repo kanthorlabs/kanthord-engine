@@ -44,6 +44,7 @@ import {
   testWorkerIdentity,
 } from "../kernel/test-identity.ts";
 import { packageVersion } from "../kernel/version.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 
 const WORKER = "coder@1";
 const INSTANCE = "laptop";
@@ -131,7 +132,7 @@ function instanceFixture(
   config: Partial<typeof WORKER_CONFIG> = {},
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
   ]);

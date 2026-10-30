@@ -66,6 +66,7 @@ import {
   readMissionNodes,
   readNode,
 } from "./store.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 
 const TEXT_MAX_BYTES = 32768;
 const VERSION = 1;
@@ -296,7 +297,7 @@ function seed(
 
 function fixture(t: TestContext, inputs = [entry()]) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
   ]);
@@ -2860,7 +2861,7 @@ function mixedPreview(t: TestContext, files: ReturnType<typeof mixedSet>) {
 
 test("import preview lists the environment mix of a node file", (t) => {
   mixedAnswer = true;
-  t.after(() => {
+  stopAfter(t, () => {
     mixedAnswer = false;
   });
   assert.deepEqual(mixedPreview(t, mixedSet().slice(0, 1)), [
@@ -2874,7 +2875,7 @@ test("import preview lists the environment mix of a node file", (t) => {
 
 test("import preview lists one environment mix violation for each node file", (t) => {
   mixedAnswer = true;
-  t.after(() => {
+  stopAfter(t, () => {
     mixedAnswer = false;
   });
   assert.deepEqual(mixedPreview(t, mixedSet()), [
@@ -2893,7 +2894,7 @@ test("import preview lists one environment mix violation for each node file", (t
 
 test("import apply refuses the environment mix and writes no node", (t) => {
   mixedAnswer = true;
-  t.after(() => {
+  stopAfter(t, () => {
     mixedAnswer = false;
   });
   const { store, mission } = fixture(t, []);

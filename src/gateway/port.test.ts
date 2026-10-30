@@ -20,6 +20,7 @@ import type { PortAnswer } from "./client.ts";
 import type { RecordedResponse } from "./idempotency.ts";
 import { createInvocation, gatewayMigrations, servePort } from "./index.ts";
 import type { Invocation, InvocationOptions } from "./invocation.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 
 const TOKEN = "port-test-token";
 const IDEMPOTENCY_KEY = "key-1";
@@ -64,7 +65,7 @@ function connect(
   servePort(port1, invocation, credential, pino({ level: "silent" }));
   const answers: PortAnswer[] = [];
   port2.on("message", (answer: PortAnswer) => answers.push(answer));
-  t.after(() => {
+  stopAfter(t, () => {
     port1.close();
     port2.close();
   });
@@ -109,7 +110,7 @@ function realInvocation(t: TestContext): Invocation {
     assert.fail("The handler is unreachable."),
   );
   const store = new Store(":memory:");
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([{ service: "gateway", migrations: gatewayMigrations }]);
   registry.seal({ [StoreName.Operational]: store });
   const invocation = createInvocation({
@@ -118,7 +119,7 @@ function realInvocation(t: TestContext): Invocation {
     masterKey: randomBytes(MASTER_KEY_BYTES).toString("base64"),
     authVersion: AUTH_VERSION,
   });
-  t.after(() => invocation.stop());
+  stopAfter(t, () => invocation.stop());
   return invocation;
 }
 
@@ -267,7 +268,7 @@ test("a port call passes its logger and logs an unknown failure at the error lev
   );
   const answers: PortAnswer[] = [];
   port2.on("message", (answer: PortAnswer) => answers.push(answer));
-  t.after(() => {
+  stopAfter(t, () => {
     port1.close();
     port2.close();
   });

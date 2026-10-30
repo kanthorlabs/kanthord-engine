@@ -24,6 +24,7 @@ import {
 import { BudgetLimit } from "../../scheduler/contract.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 import { GitStep, markGitStep } from "./git-step.ts";
+import { stopAfter } from "../../kernel/test-support.ts";
 
 const SETTLE_CALL_COUNT = 1;
 const CALLS = 2;
@@ -62,7 +63,7 @@ test("execution calls return data with fresh canonical keys and settle credentia
   const run = fixture(async () => {
     reports++;
   });
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const keys = new Set<string>();
   for (let i = 0; i < CALLS; i++) {
     const value = await run.call(async (options) => {
@@ -176,7 +177,7 @@ test("submissions pin claim fields and settle credentials before an assessment",
   const run = fixture(async () => {
     order.push("credential");
   });
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const evidence = { id: "evidence" };
   run.clients.mission = {
     "evidence.submit": async (input: { body: unknown }) => {
@@ -221,7 +222,7 @@ test("submissions pin claim fields and settle credentials before an assessment",
 test("lost release answers reconcile only a finished claim", async (t) => {
   for (const claimState of ["finished", "running"] as const) {
     const run = fixture();
-    t.after(() => run.dispose());
+    stopAfter(t, () => run.dispose());
     const calls: string[] = [];
     run.clients.scheduler = {
       executionRelease: async (input: { body: unknown }) => {
@@ -252,7 +253,7 @@ test("lost release answers reconcile only a finished claim", async (t) => {
 test("release refusal preserves the owning error code", async (t) => {
   const code = "mission.release.obligation_unmet";
   const run = fixture();
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   run.clients.scheduler = {
     executionRelease: async () => ({
       type: OperationResultType.Failure,
@@ -283,7 +284,7 @@ test("a stop release settles credentials under a fresh context and reconciles a 
     const run = fixture(async () => {
       reports++;
     });
-    t.after(() => run.dispose());
+    stopAfter(t, () => run.dispose());
     const stopped = await run.stopOf(new ExecutionStop(stop.reason, stop.code));
     assert.ok(run.operationContext.signal.aborted);
     run.clients.scheduler = {
@@ -313,7 +314,7 @@ test("a stop release settles credentials under a fresh context and reconciles a 
 
 test("a stop of an uncoded error carries its cause with the run secrets removed", async (t) => {
   const run = fixture();
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const stopped = await run.stopOf(
     new Error(`hook refused with ${RUN_SECRET}`),
   );
@@ -335,7 +336,7 @@ test("a stop of an uncoded error halts and releases with no detail when the secr
   const run = fixture(undefined, async () => {
     throw new Error("store unreadable");
   });
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   assert.equal(await run.reasonOf(new Error("hook refused")), null);
   const stopped = await run.stopOf(new Error("hook refused"));
   assert.ok(run.operationContext.signal.aborted);
@@ -372,7 +373,7 @@ test("a stop of an uncoded error halts and releases with no detail when the secr
 
 test("a stop of a coded error keeps its code and carries no detail", async (t) => {
   const run = fixture();
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const stopped = await run.stopOf(new CodedError(ERROR, "refused"));
   assert.deepEqual(
     { code: stopped.code, detail: stopped.detail },
@@ -382,7 +383,7 @@ test("a stop of a coded error keeps its code and carries no detail", async (t) =
 
 test("a stop release sends the cause detail of a provider failure", async (t) => {
   const run = fixture();
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const stop = {
     reason: EndReason.ProviderFailed,
     code: ProviderFailure.Unavailable,
@@ -423,7 +424,7 @@ test("a stop release keeps the cause detail when it reconciles a lost answer or 
   };
   for (const recorded of [sent, null]) {
     const run = fixture();
-    t.after(() => run.dispose());
+    stopAfter(t, () => run.dispose());
     const stopped = await run.stopOf(
       new ExecutionStop(stop.reason, stop.code, stop.detail),
     );
@@ -452,7 +453,7 @@ test("a stop release that the scheduler refuses as ended ends the run as revoked
     [403, EXECUTION_PROOF_FAILED],
   ] as const) {
     const run = fixture();
-    t.after(() => run.dispose());
+    stopAfter(t, () => run.dispose());
     const stopped = await run.stopOf(
       new ExecutionStop(EndReason.JudgementInvalid, null),
     );
@@ -482,7 +483,7 @@ test("a stop release whose credential report the server refuses as ended ends th
     const run = fixture(async () => {
       throw new CodedError(code, `Refused with ${status}`);
     });
-    t.after(() => run.dispose());
+    stopAfter(t, () => run.dispose());
     let releases = 0;
     run.clients.scheduler = {
       executionRelease: async () => {
@@ -505,7 +506,7 @@ test("a credential settlement that the server refuses as ended stops the run as 
   const run = fixture(async () => {
     throw new CodedError(EXECUTION_PROOF_FAILED, "Refused");
   });
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   await assert.rejects(
     run.settleCredentials(),
     (error: unknown) =>
@@ -517,7 +518,7 @@ test("a credential settlement that the server refuses as ended stops the run as 
 
 test("a lost release answer with a claim read that the server refuses as ended ends the run as revoked", async (t) => {
   const run = fixture();
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const stopped = await run.stopOf(
     new ExecutionStop(EndReason.OperationFailed, null),
   );
@@ -613,7 +614,7 @@ async function releasedStop(run: ExecutionRun, stop: unknown) {
 
 test("an environment failure stop detail holds the digests of the environments of the setup", async (t) => {
   const run = fixture(async () => {}, undefined, DIGESTS);
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const stop = await releasedStop(
     run,
     new ExecutionStop(
@@ -632,7 +633,7 @@ test("an environment failure stop detail holds the digests of the environments o
 test("an environment failure stop with a text detail or no detail holds the digests", async (t) => {
   for (const detail of [".devcontainer/devcontainer.json: invalid", null]) {
     const run = fixture(async () => {}, undefined, DIGESTS);
-    t.after(() => run.dispose());
+    stopAfter(t, () => run.dispose());
     const stop = await releasedStop(
       run,
       new ExecutionStop(EndReason.EnvironmentFailed, "setup_failed", detail),
@@ -646,7 +647,7 @@ test("an environment failure stop with a text detail or no detail holds the dige
 
 test("a stop of another reason or a setup without environment digests keeps its detail", async (t) => {
   const other = fixture(async () => {}, undefined, DIGESTS);
-  t.after(() => other.dispose());
+  stopAfter(t, () => other.dispose());
   assert.equal(
     (
       await releasedStop(
@@ -657,7 +658,7 @@ test("a stop of another reason or a setup without environment digests keeps its 
     CAUSE,
   );
   const bare = fixture();
-  t.after(() => bare.dispose());
+  stopAfter(t, () => bare.dispose());
   assert.equal(
     (
       await releasedStop(
@@ -686,7 +687,7 @@ function capture(run: ExecutionRun) {
 
 test("a budget-end release sends the cause with the timeout of the last noted verification", async (t) => {
   const run = fixture();
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const bodies = capture(run);
   await run.release(true, BudgetLimit.Turns);
   run.noteVerification(true);
@@ -706,7 +707,7 @@ test("a budget-end release sends the cause with the timeout of the last noted ve
 
 test("a provider failure stop sends the provider cause", async (t) => {
   const run = fixture();
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const stop = await releasedStop(
     run,
     new ExecutionStop(EndReason.ProviderFailed, ProviderFailure.RateLimited),
@@ -719,7 +720,7 @@ test("a provider failure stop sends the provider cause", async (t) => {
 
 test("a git commit failure sends the redacted git stderr and its suspects", async (t) => {
   const run = fixture();
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const stop = await releasedStop(
     run,
     new CodedError(GIT_COMMIT_FAILED, "commit failed", {
@@ -739,7 +740,7 @@ test("a git commit failure sends the redacted git stderr and its suspects", asyn
 
 test("an error marked with a git step sends the suspects of the step", async (t) => {
   const run = fixture();
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const error = new Error("push refused");
   markGitStep(error, GitStep.Push);
   const stop = await releasedStop(run, error);
@@ -751,7 +752,7 @@ test("an error marked with a git step sends the suspects of the step", async (t)
 
 test("a revoked stop holds no cause", async (t) => {
   const run = fixture();
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const stopped = await run.stopOf(new ExecutionStop(EndReason.Revoked, null));
   assert.equal(stopped.cause, null);
 });

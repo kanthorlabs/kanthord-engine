@@ -75,6 +75,7 @@ import {
   userAuthenticationData,
 } from "../repository/sshd-test-support.ts";
 import { sshPublicKeyBlob } from "../repository/ssh-key.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 
 const SECRET = Buffer.alloc(32, 9).toString("base64");
 const FIRST = { type: SecretShape.ApiKey, key: "private-first" };
@@ -162,7 +163,7 @@ function fixture(
   oauthNames: readonly string[] = [],
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
   ]);

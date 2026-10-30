@@ -25,6 +25,7 @@ import { intakeMigrations } from "../../intake/index.ts";
 import { REPOSITORY_COMPONENT_NAME } from "../../repository/contract.ts";
 import { repositoryMigrations } from "../../repository/migrations.ts";
 import { serverMigrations, trackingDatabaseMigrations } from "./index.ts";
+import { stopAfter } from "../../kernel/test-support.ts";
 
 const PROJECT_SERVICE_NAME = "project";
 const GATEWAY_SERVICE_NAME = "gateway";
@@ -574,7 +575,7 @@ function assertSchemaRules(store: Store, owners: ReadonlyMap<string, string>) {
 
 test("Scheduler executions have exactly the ruled columns and partial unique indexes", (t) => {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
   ]);
@@ -633,7 +634,7 @@ test("Scheduler executions have exactly the ruled columns and partial unique ind
 
 test("Scheduler jobs hold available_at and queued_at", (t) => {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
   ]);
@@ -655,7 +656,7 @@ test("Scheduler jobs hold available_at and queued_at", (t) => {
 
 test("Scheduler queue places hold the first job identity of each node", (t) => {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
   ]);
@@ -722,7 +723,7 @@ test("Mission execution records have exactly six unique indexes with the ruled p
 
 test("Mission lookups search the lookup indexes", (t) => {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
   ]);

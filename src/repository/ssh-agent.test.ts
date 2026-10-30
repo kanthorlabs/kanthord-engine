@@ -36,6 +36,7 @@ import {
   withSshAgent,
 } from "./ssh-agent.ts";
 import { generateSshKey } from "./ssh-key.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 
 const execFileAsync = promisify(execFile);
 const DEADLINE_MS = 30_000;
@@ -603,7 +604,10 @@ test("the sweep keeps an expired directory whose agent socket accepts a connecti
   await new Promise<void>((resolve) =>
     server.listen(join(live, SSH_AGENT_SOCKET), resolve),
   );
-  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  stopAfter(
+    t,
+    () => new Promise<void>((resolve) => server.close(() => resolve())),
+  );
   await sweepSshAgentDirectories(Date.now());
   assert.equal(await exists(live), true);
   assert.equal(await exists(dead), false);

@@ -11,7 +11,7 @@ import { delimiter, dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { httpClient } from "../../gateway/client.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { MissionErrorCode, missionOperations } from "../../mission/contract.ts";
 import {
@@ -363,7 +363,7 @@ async function l3Fixture(t: TestContext, options: { memoryMb?: number } = {}) {
       : { project: { environment_memory_mb: options.memoryMb } }),
   });
   fixture.worker.startPool();
-  t.after(async () => {
+  stopAfter(t, async () => {
     fixture.project.cancelEnvironmentRuns();
     await fixture.worker.stopPool();
   });

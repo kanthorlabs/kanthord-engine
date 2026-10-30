@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
+import {
+  hostEnvironment,
+  stopAfter,
+  temporary,
+} from "../../kernel/test-support.ts";
 import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { background } from "../../kernel/context.ts";
@@ -108,7 +112,7 @@ test("examine reports its dependencies once and removes its workspace", async (t
       credentials: { release: async () => {} },
       context: background,
     });
-    t.after(() => run.dispose());
+    stopAfter(t, () => run.dispose());
     const open = async () => {
       opens++;
       return {
@@ -201,7 +205,7 @@ test("B4 examine releases when reads or agent opening consume the wall budget", 
       credentials: { release: async () => {} },
       context: background,
     });
-    t.after(() => run.dispose());
+    stopAfter(t, () => run.dispose());
     const open = async () => {
       assert.ok(duringOpen);
       await setTimeout(120);
@@ -270,7 +274,7 @@ test("an examine node that its agent deadline cuts releases with further work an
     credentials: { release: async () => {} },
     context: background,
   });
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const budget = new ExecutionBudget({
     ...claim,
     resource_budget: setup.resource_budget,
@@ -355,7 +359,7 @@ test("an examine node with two repository bindings runs from checkouts/ and list
     credentials: { release: async () => {} },
     context: background,
   });
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const workspaces = WorkspaceRoot.open(realpathSync(temporary(t)));
   const key = workspaces.executionKey(claim.execution_id);
   const root = join(key, CHECKOUTS_DIRECTORY);
@@ -454,7 +458,7 @@ test("an examine verification that the wall deadline cuts gives a later assessme
     credentials: { release: async () => {} },
     context: background,
   });
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const budget = new ExecutionBudget({
     ...claim,
     resource_budget: setup.resource_budget,

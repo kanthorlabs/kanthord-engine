@@ -22,6 +22,7 @@ import { IntakeService } from "./index.ts";
 import { allocateInboundId, insertInbound } from "./inbound-store.ts";
 import { intakeMigrations } from "./migrations.ts";
 import { unusedActionDependencies } from "./test-support.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const RESOURCE = "owner/repo";
@@ -37,7 +38,7 @@ const NOTIFICATIONS_PER_DELETE = 1;
 
 function harness(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
   ]);

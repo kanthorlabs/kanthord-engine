@@ -55,6 +55,7 @@ import {
   statusOfErrorMessage,
 } from "./probes.ts";
 import { HEALTH_OF_CONNECTION } from "./provider.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 
 const SECRET = "test_private-resource-health-secret";
 const BASE_URL = "https://models.example/v1";
@@ -524,8 +525,8 @@ const DEADLINE_MS = 50;
 
 async function silentServer(t: TestContext): Promise<string> {
   const server = createServer(() => {});
-  t.after(() => server.closeAllConnections());
-  t.after(() => server.close());
+  stopAfter(t, () => server.closeAllConnections());
+  stopAfter(t, () => server.close());
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   return `http://127.0.0.1:${port}`;

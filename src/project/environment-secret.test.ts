@@ -23,6 +23,7 @@ import {
   ENVIRONMENT_SECRET_PLATFORM,
   ENVIRONMENT_SECRET_PLATFORMS,
 } from "./environment-secret-platform.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 
 const SECRET = "test_private-registry-secret";
 const ROTATED_SECRET = "test_private-registry-rotated";
@@ -89,7 +90,7 @@ function custodyOf(store: Store) {
 
 function fixture(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
   ]);

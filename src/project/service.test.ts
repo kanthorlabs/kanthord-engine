@@ -39,7 +39,7 @@ import {
 } from "../kernel/store.ts";
 import { createIdentity, identitySchema } from "../kernel/identity.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
-import { temporary } from "../kernel/test-support.ts";
+import { stopAfter, temporary } from "../kernel/test-support.ts";
 import { IdentityKind } from "../kernel/caller.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { GIT_DEADLINE_EXCEEDED } from "../repository/git-failure.ts";
@@ -452,8 +452,8 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
   };
   held.dependencies = dependencies;
   const project = new ProjectService(dependencies);
-  t.after(() => project.stop());
-  t.after(() => store.close());
+  stopAfter(t, () => project.stop());
+  stopAfter(t, () => store.close());
   const registry = new OperationRegistry();
   project.declare(registry);
   let commits = NO_CALLS;
@@ -3193,7 +3193,7 @@ test("the resource check reports an alias-model host, an unpinned host and a leg
     background,
     Date.now() + HEALTH_DEADLINE_MS,
   );
-  t.after(() => context.cancel());
+  stopAfter(t, () => context.cancel());
   const expected = [
     [
       REPOSITORY_NAME,
@@ -4204,7 +4204,7 @@ test("resource checks pass the caller deadline and distinguish success, failure 
     background,
     beforeCall + HEALTH_DEADLINE_MS,
   );
-  t.after(() => context.cancel());
+  stopAfter(t, () => context.cancel());
   assert.equal(await entry.check(context), ResourceStatus.Healthy);
   failure = gitFailure(REPOSITORY_NOT_FOUND_STDERR);
   beforeCall = Date.now();
@@ -4222,7 +4222,7 @@ test("resource checks pass the caller deadline and distinguish success, failure 
     background,
     Date.now() + HEALTH_DEADLINE_MS,
   );
-  t.after(() => cancelled.cancel());
+  stopAfter(t, () => cancelled.cancel());
   cancelled.cancel();
   beforeCall = Date.now();
   assert.equal(await entry.check(cancelled), ResourceStatus.Unknown);
@@ -4259,7 +4259,7 @@ test("a binding check observes deadline_exceeded before a deadline race settles,
       background,
       Date.now() + SLOW_CHECK_DEADLINE_MS,
     );
-    t.after(() => context.cancel());
+    stopAfter(t, () => context.cancel());
     const observed: string[] = [];
     const pending: Promise<ResourceStatusValue> = entry.check(
       context,
@@ -4304,7 +4304,7 @@ test("resource inventory keeps separate checks for the same repository address a
     background,
     Date.now() + HEALTH_DEADLINE_MS,
   );
-  t.after(() => context.cancel());
+  stopAfter(t, () => context.cancel());
   for (const entry of entries) {
     assert.equal(await entry.check(context), ResourceStatus.Healthy);
     assert.ok(calls <= TWO_CALLS);

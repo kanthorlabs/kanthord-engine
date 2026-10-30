@@ -13,6 +13,7 @@ import {
   readReworkAssessment,
 } from "./node-reads.ts";
 import type { MethodClients } from "./method-clients.ts";
+import { stopAfter } from "../../kernel/test-support.ts";
 
 const SECOND_ATTEMPT = 2;
 const ONE_READ = 1;
@@ -52,7 +53,7 @@ function fixture(attempt = 1) {
 
 test("reads concatenate ordered pages and enforce their finite limit", async (t) => {
   const run = fixture();
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const seen: (string | null)[] = [];
   const items = await readAllPages(run, async (cursor) => {
     seen.push(cursor);
@@ -105,7 +106,7 @@ test("the assessment reads answer null only on a record not found", async (t) =>
       [failure(404, "mission.execution.revision_above_pin"), ExecutionStop],
     ] as const) {
       const run = fixture(SECOND_ATTEMPT);
-      t.after(() => run.dispose());
+      stopAfter(t, () => run.dispose());
       run.clients.mission = {
         [operation]: async () => answer,
       } as unknown as MethodClients["mission"];
@@ -141,7 +142,7 @@ test("the prior is the rework verdict, else the cleared rationale, else null", a
     [notFound, notFound, null],
   ] as const) {
     const run = fixture(SECOND_ATTEMPT);
-    t.after(() => run.dispose());
+    stopAfter(t, () => run.dispose());
     run.clients.mission = {
       "execution.rework_assessment.get": async () => rework,
       "execution.clearedOutcome.get": async () => notFound,
@@ -203,7 +204,7 @@ const CHANGE_REQUESTS = {
 
 test("the prior rationale of an attempt after a change request holds the requested changes", async (t) => {
   const run = fixture(SECOND_ATTEMPT);
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   let reads = 0;
   run.clients.mission = {
     "execution.rework_assessment.get": async () => NOT_FOUND,
@@ -244,7 +245,7 @@ test("an attempt not ended by a change request reads no change request", async (
     NOT_FOUND,
   ]) {
     const run = fixture(SECOND_ATTEMPT);
-    t.after(() => run.dispose());
+    stopAfter(t, () => run.dispose());
     run.clients.mission = {
       "execution.rework_assessment.get": async () => NOT_FOUND,
       "execution.clearedOutcome.get": async () => outcome,
@@ -262,7 +263,7 @@ test("an attempt not ended by a change request reads no change request", async (
     });
   }
   const first = fixture();
-  t.after(() => first.dispose());
+  stopAfter(t, () => first.dispose());
   first.clients.mission = {} as MethodClients["mission"];
   first.clients.worker = {} as MethodClients["worker"];
   assert.equal(await readRequestedChanges(first, REPOSITORIES), null);
@@ -270,7 +271,7 @@ test("an attempt not ended by a change request reads no change request", async (
 
 test("an external failure without a current change request keeps the cleared rationale", async (t) => {
   const run = fixture(SECOND_ATTEMPT);
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   run.clients.mission = {
     "execution.rework_assessment.get": async () => NOT_FOUND,
     "execution.clearedOutcome.get": async () =>
@@ -299,14 +300,14 @@ test("an external failure without a current change request keeps the cleared rat
 
 test("the cleared assessment read of a first attempt answers null with no call", async (t) => {
   const run = fixture();
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   run.clients.mission = {} as MethodClients["mission"];
   assert.equal(await readClearedAssessment(run), null);
 });
 
 test("each change request names its binding", async (t) => {
   const run = fixture(SECOND_ATTEMPT);
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const [item] = CHANGE_REQUESTS.items;
   assert.ok(item);
   run.clients.mission = {
@@ -345,7 +346,7 @@ test("each change request names its binding", async (t) => {
 
 test("a change request of a binding that the pinned revision does not name names its binding_id", async (t) => {
   const run = fixture(SECOND_ATTEMPT);
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const [item] = CHANGE_REQUESTS.items;
   assert.ok(item);
   run.clients.mission = {
@@ -390,7 +391,7 @@ test("the judged commits of a rework are the repository commits of its tested in
     [null, []],
   ] as const) {
     const run = fixture(SECOND_ATTEMPT);
-    t.after(() => run.dispose());
+    stopAfter(t, () => run.dispose());
     run.clients.mission = {
       "execution.rework_assessment.get": async () => reworkRead(testedInput),
     } as unknown as MethodClients["mission"];
@@ -404,7 +405,7 @@ test("the judged commits of a rework are the repository commits of its tested in
 
 test("the judged commit of a binding is the commit of its latest change request", async (t) => {
   const run = fixture(SECOND_ATTEMPT);
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const [item] = CHANGE_REQUESTS.items;
   const [request] = item!.change_requests;
   const later = {
@@ -448,7 +449,7 @@ test("a cleared assessment with the result success is not instruction text", asy
     ["criterion-not-met", CLEARED_RATIONALE],
   ] as const) {
     const run = fixture(SECOND_ATTEMPT);
-    t.after(() => run.dispose());
+    stopAfter(t, () => run.dispose());
     run.clients.mission = {
       "execution.rework_assessment.get": async () => NOT_FOUND,
       "execution.clearedOutcome.get": async () => NOT_FOUND,
@@ -489,7 +490,7 @@ function failedCheckRead(failed: string[]) {
 
 test("a failed check comes before a rework assessment and the text holds both", async (t) => {
   const run = fixture(SECOND_ATTEMPT);
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   run.clients.mission = {
     "execution.rework_assessment.get": async () =>
       reworkRead({
@@ -518,7 +519,7 @@ test("a failed check comes before a rework assessment and the text holds both", 
 
 test("a failed check without a rework assessment is the whole verdict", async (t) => {
   const run = fixture(SECOND_ATTEMPT);
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   run.clients.mission = {
     "execution.rework_assessment.get": async () => NOT_FOUND,
   } as unknown as MethodClients["mission"];
@@ -539,7 +540,7 @@ test("a failed check without a rework assessment is the whole verdict", async (t
 
 test("an empty failed check answer keeps the current verdict", async (t) => {
   const run = fixture(SECOND_ATTEMPT);
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   run.clients.mission = {
     "execution.rework_assessment.get": async () => reworkRead(null),
   } as unknown as MethodClients["mission"];

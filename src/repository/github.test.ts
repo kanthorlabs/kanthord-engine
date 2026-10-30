@@ -38,6 +38,7 @@ import {
   ReviewState,
 } from "./github.ts";
 import { platformImplementations } from "./index.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 
 const TOKEN = "ghp_secret_token_value";
 const CALL_DEADLINE_MS = 10_000;
@@ -93,7 +94,7 @@ async function platform(t: TestContext, handler: Handler): Promise<Platform> {
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
-  t.after(() => {
+  stopAfter(t, () => {
     server.closeAllConnections();
     server.close();
   });

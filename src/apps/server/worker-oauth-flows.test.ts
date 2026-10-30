@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { Worker } from "node:worker_threads";
 import { build } from "esbuild";
-import { temporary } from "../../kernel/test-support.ts";
+import { stopAfter, temporary } from "../../kernel/test-support.ts";
 
 const ENGINE_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const FAKE_ACCESS = "fake-access-token";
@@ -89,7 +89,7 @@ test("the release bundle of a worker unit derives OAuth auth in an eval worker t
     eval: true,
     env: { HOME: temporary(t) },
   });
-  t.after(() => thread.terminate());
+  stopAfter(t, () => thread.terminate());
   const [report] = (await once(thread, "message")) as [Derivation[]];
   assertDerived(report);
 });

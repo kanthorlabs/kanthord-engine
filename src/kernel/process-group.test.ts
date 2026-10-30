@@ -10,7 +10,7 @@ import {
   type ProcessSystem,
   procStatRow,
 } from "./process-group.ts";
-import { killIfPresent } from "./test-support.ts";
+import { killIfPresent, stopAfter } from "./test-support.ts";
 
 const OWN_GROUP = 500;
 const LEADER = 1000;
@@ -220,7 +220,7 @@ function detachedLeader(t: TestContext, script: string) {
     stdio: "ignore",
   });
   assert.ok(leader.pid);
-  t.after(() => {
+  stopAfter(t, () => {
     if (leader.exitCode === null && leader.signalCode === null)
       killIfPresent(leader.pid!);
   });
@@ -231,7 +231,7 @@ test("a descendant that forks into new groups during the kill leaves no process"
   const seconds = uniqueSeconds();
   const forker = `const {spawn}=require("node:child_process");let n=0;setInterval(()=>{if(n<${FORKS_MAX}){n+=1;spawn("sleep",["${seconds}"],{detached:true,stdio:"ignore"})}},${FORK_INTERVAL_MS})`;
   const leader = detachedLeader(t, `"${process.execPath}" -e '${forker}'`);
-  t.after(() => markedPids(seconds).forEach(killIfPresent));
+  stopAfter(t, () => markedPids(seconds).forEach(killIfPresent));
   for (let poll = 0; poll < START_POLLS; poll += 1) {
     if (markedPids(seconds).length >= FORKS_BEFORE_KILL) break;
     await delay(POLL_MS);
@@ -248,7 +248,7 @@ test("a descendant whose parent exited before the kill is no longer a descendant
     t,
     `"${process.execPath}" -e '${orphan}'; sleep ${ESCAPED_SECONDS}`,
   );
-  t.after(() => markedPids(seconds).forEach(killIfPresent));
+  stopAfter(t, () => markedPids(seconds).forEach(killIfPresent));
   for (let poll = 0; poll < START_POLLS; poll += 1) {
     if (markedPids(seconds).length === ONE_ORPHAN) break;
     await delay(POLL_MS);

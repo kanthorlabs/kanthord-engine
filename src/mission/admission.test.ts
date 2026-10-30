@@ -9,6 +9,7 @@ import {
 } from "./admission.ts";
 import { MISSION_SERVICE_NAME, NodeState, type WorkQueue } from "./contract.ts";
 import { missionMigrations } from "./migrations.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 
 const PROJECT_ID = "project_00000000000000000000000000";
 const QUEUED_NODE_ID = "node-id";
@@ -21,7 +22,7 @@ const UNEXPECTED_CALL = "unexpected priority update";
 
 function fixture(t: TestContext): Store {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
   ]);

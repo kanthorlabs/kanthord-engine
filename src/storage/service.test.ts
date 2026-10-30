@@ -29,6 +29,7 @@ import { CAPABILITY_BUCKET_HEAD, STORAGE_PLATFORMS } from "./platforms.ts";
 import { StorageComponent } from "./service.ts";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 import { PROJECT_SERVICE_NAME } from "../project/contract.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 
 const SECRET = "test_private-s3-secret";
 const ACCESS_KEY_ID = "test_private-s3-access-id";
@@ -66,7 +67,7 @@ const BINDINGS_ANSWER = [
 
 function fixture(t: TestContext, logger: Logger = pino({ enabled: false })) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
   ]);

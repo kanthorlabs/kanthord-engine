@@ -17,6 +17,7 @@ import {
   readDuration,
 } from "./analytics-duration.ts";
 import { insertSpan } from "./trace-store.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 
 interface Seed {
   trace?: number;
@@ -83,7 +84,7 @@ function spanIdOf(n: number): string {
 
 function seededStore(t: TestContext): Store {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: TRACKING_SERVICE_NAME, migrations: trackingMigrations },
   ]);

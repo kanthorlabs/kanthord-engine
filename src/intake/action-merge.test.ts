@@ -35,6 +35,7 @@ import { insertPending, succeed } from "./outbound-store.ts";
 import { runOutbound } from "./outbound.ts";
 import { SSH_HOST, sshCustody, sshStore } from "./test-support.ts";
 import type { GitWriter } from "../repository/index.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const BINDING_ID = "binding_01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -139,7 +140,7 @@ async function gitHubServer(
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
-  t.after(() => {
+  stopAfter(t, () => {
     server.closeAllConnections();
     server.close();
   });

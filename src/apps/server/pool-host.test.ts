@@ -8,7 +8,7 @@ import { MessagePort } from "node:worker_threads";
 import type { Logger } from "pino";
 import { deriveClientSecret } from "../../gateway/auth/jwt.ts";
 import type { createInvocation } from "../../gateway/index.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import {
   BindingEntryState,
   PlacementIssue,
@@ -178,7 +178,7 @@ function fixture(t: TestContext, options: { instanceLimit?: number } = {}) {
     stateDirectory,
     logger,
   });
-  t.after(() => {
+  stopAfter(t, () => {
     for (const launch of [...driver.launches, ...containerDriver.launches])
       for (const entry of launch.entries) entry.channel?.close();
     for (const instance of [...driver.instances, ...containerDriver.instances])

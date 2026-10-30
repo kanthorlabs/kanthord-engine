@@ -8,7 +8,11 @@ import { httpClient } from "../../gateway/client.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { openJSON } from "../../kernel/hpke.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
-import { requirePiTools, temporary } from "../../kernel/test-support.ts";
+import {
+  requirePiTools,
+  stopAfter,
+  temporary,
+} from "../../kernel/test-support.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { Intent, missionOperations } from "../../mission/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
@@ -259,7 +263,7 @@ test(
     const project = await instanceProject(t);
     const bare = await seedRepository(t);
     const marker = `sleep ${randomInt(SLEEP_MIN_SECONDS, SLEEP_MAX_SECONDS)}`;
-    t.after(() => {
+    stopAfter(t, () => {
       for (const pid of processesWith(marker)) process.kill(pid, "SIGKILL");
     });
     const provider = scriptedProvider([
@@ -286,7 +290,7 @@ test(
       repositoryTransport: localRepository(bare),
       log: () => {},
     });
-    t.after(() => first.stop());
+    stopAfter(t, () => first.stop());
     const firstRun = first.run();
     await until(project.running, Boolean, t.signal);
     await until(

@@ -5,7 +5,7 @@ import { IdentityKind, type ServiceIdentity } from "../kernel/caller.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
-import { temporary } from "../kernel/test-support.ts";
+import { stopAfter, temporary } from "../kernel/test-support.ts";
 import { repositoryMigrations } from "../repository/index.ts";
 import {
   BINDING_SET_INITIAL_VERSION,
@@ -214,7 +214,7 @@ function submission(storagePrefix: string) {
 
 function storeFixture(t: TestContext, beforeWrite: () => void = () => {}) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: PROJECT_SERVICE_NAME, migrations: projectMigrations },
     { service: "repository", migrations: repositoryMigrations },
@@ -267,7 +267,7 @@ function storeFixture(t: TestContext, beforeWrite: () => void = () => {}) {
     version: "0.0.0",
     environmentReady: async () => {},
   });
-  t.after(() => service.stop());
+  stopAfter(t, () => service.stop());
   const registry = new OperationRegistry();
   service.declare(registry);
   const callers: CallerContext[] = [];

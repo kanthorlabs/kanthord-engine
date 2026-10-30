@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { Diagnostic } from "./errors.ts";
 import { writePrivate } from "./files.ts";
-import { temporary } from "./test-support.ts";
+import { stopAfter, temporary } from "./test-support.ts";
 
 const PUBLISH_FAILED = "system.files.publish_failed";
 const REMOVAL_FAILED = "EACCES";
@@ -20,7 +20,7 @@ test("writePrivate keeps the publish error when the temporary file removal also 
     throw Object.assign(new Error(REMOVAL_FAILED), { code: REMOVAL_FAILED });
   });
   syncBuiltinESMExports();
-  t.after(() => {
+  stopAfter(t, () => {
     t.mock.restoreAll();
     syncBuiltinESMExports();
   });

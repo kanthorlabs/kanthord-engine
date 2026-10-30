@@ -54,6 +54,7 @@ import {
   PollRead,
   storeBatch,
 } from "./poll.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const CREDENTIAL = "github-poll";
@@ -131,7 +132,7 @@ function closedPull(number: number, closedAt: string): GitHubEvent {
 
 function harness(t: TestContext, options: HarnessOptions = {}) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
   ]);
@@ -741,7 +742,7 @@ function loopHarness(t: TestContext, options: HarnessOptions = {}) {
     context: shutdown,
     pollIntervalMs: intervalMs,
   });
-  t.after(() => loops.stopAll());
+  stopAfter(t, () => loops.stopAll());
   const elapse = (ms: number) => t.mock.timers.tick(ms);
   const interval = () => elapse(intervalMs);
   const rearmed = (count: number) =>

@@ -19,6 +19,7 @@ import { MatchKind, matchRequests } from "./delivery-match.ts";
 import { missionMigrations } from "./migrations.ts";
 import { closeAttempt, insertEvidence, openAttempt } from "./record-store.ts";
 import { insertMission, insertNode, readNode } from "./store.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 
 const NOW = 100;
 const FIRST_REVISION = 1;
@@ -34,7 +35,7 @@ const OTHER_ADDRESS: PlatformAddress = { ...ADDRESS, number: 8 };
 
 function fixture(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
   ]);

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { createServer } from "node:http";
 import pino from "pino";
 import { decode } from "hono/jwt";
-import { temporary } from "../kernel/test-support.ts";
+import { stopAfter, temporary } from "../kernel/test-support.ts";
 import { gatewayFixture } from "./test-support.ts";
 import { KANTHORD_AUTH_USERNAME } from "./auth/jwt.ts";
 import { Store } from "../kernel/store.ts";
@@ -21,14 +21,14 @@ test("concurrent starts share startup and restart preserves locally issued human
   assert.equal(await fixture.gateway.stop(), null);
   fixture.store.close();
   const store = new Store(path);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([{ service: "gateway", migrations: gatewayMigrations }]);
   const gateway = composeGateway({
     config: fixture.config,
     store,
     logger: pino({ enabled: false }),
   });
-  t.after(async () => {
+  stopAfter(t, async () => {
     await gateway.stop();
     await gateway.invocation.stop();
   });
@@ -58,13 +58,14 @@ test("a failed listener releases resources", async (t) => {
   await new Promise<void>((resolve) =>
     listener.listen(0, "127.0.0.1", resolve),
   );
-  t.after(
+  stopAfter(
+    t,
     () => new Promise<void>((resolve) => listener.close(() => resolve())),
   );
   const address = listener.address();
   assert.ok(address && !isString(address));
   const store = new Store(":memory:");
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([{ service: "gateway", migrations: gatewayMigrations }]);
   const gateway = composeGateway({
     store,
@@ -74,7 +75,7 @@ test("a failed listener releases resources", async (t) => {
     }).getProperties(),
     logger: pino({ enabled: false }),
   });
-  t.after(() => gateway.invocation.stop());
+  stopAfter(t, () => gateway.invocation.stop());
   assert.match((await gateway.start())!.message, /cannot bind/);
   assert.equal(gateway.address(), undefined);
   assert.equal(gateway.invocation.idempotency.healthcheck(), true);
@@ -83,7 +84,7 @@ test("a failed listener releases resources", async (t) => {
 
 test("cancellation before and during gateway startup returns an error after releasing the listener", async (t) => {
   const store = new Store(":memory:");
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([{ service: "gateway", migrations: gatewayMigrations }]);
   const config = configuration({
     master_key: Buffer.alloc(32).toString("base64"),
@@ -96,7 +97,7 @@ test("cancellation before and during gateway startup returns an error after rele
       store,
       logger: pino({ enabled: false }),
     });
-    t.after(() => gateway.invocation.stop());
+    stopAfter(t, () => gateway.invocation.stop());
     if (before) context.cancel();
     const running = gateway.run(context);
     if (!before) context.cancel();

@@ -18,7 +18,11 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { stringify } from "yaml";
 import { CONFIG_VERSION, configuration } from "../../config/index.ts";
-import { requirePiTools, temporary } from "../../kernel/test-support.ts";
+import {
+  requirePiTools,
+  stopAfter,
+  temporary,
+} from "../../kernel/test-support.ts";
 import { createServer } from "node:http";
 import { writePrivate } from "../../kernel/files.ts";
 import {
@@ -394,7 +398,7 @@ function intakeOnlyReport(t: TestContext, fixture: Fixture) {
       }),
     );
   const context = new CancellationContext();
-  t.after(() => context.cancel());
+  stopAfter(t, () => context.cancel());
   const caller = {
     identity: testHumanIdentity("health-reader", "Health Reader", ulid()),
     context,
@@ -418,7 +422,7 @@ test("the check deadline of a poll inbound answers unknown with deadline_exceede
     gitHub.calls.filter((call) => EVENTS_PATH.test(call.path)).length;
   const calledBefore = eventsCalls();
   const releaseEvents = gitHub.holdEvents({ pass: HELD_EVENTS_PASS });
-  t.after(() => releaseEvents());
+  stopAfter(t, () => releaseEvents());
   const released = releasedMaterials(t, fixture);
   const report = await intakeOnlyReport(t, fixture);
   assert.deepEqual(report.services.intake, {
@@ -608,7 +612,8 @@ test("serve rejects unsafe owned directories/files and releases earlier resource
   await new Promise<void>((resolve) =>
     listener.listen(0, "127.0.0.1", resolve),
   );
-  t.after(
+  stopAfter(
+    t,
     () => new Promise<void>((resolve) => listener.close(() => resolve())),
   );
   const address = listener.address();
@@ -656,7 +661,8 @@ test("serve refuses another master_key against an existing database and writes n
   await new Promise<void>((resolve) =>
     listener.listen(0, "127.0.0.1", resolve),
   );
-  t.after(
+  stopAfter(
+    t,
     () => new Promise<void>((resolve) => listener.close(() => resolve())),
   );
   const address = listener.address();
@@ -778,7 +784,7 @@ test("serve starts with redirected stdout without issuing a JWT; SIGTERM drains 
     ],
     { env: paths.env, stdio: "pipe" },
   );
-  t.after(() => {
+  stopAfter(t, () => {
     if (child.exitCode === null) child.kill("SIGKILL");
   });
   let stdout = "";
@@ -869,7 +875,7 @@ test("serve installs the pinned pi tools into the state directory before the gat
     ],
     { env: paths.env, stdio: "pipe" },
   );
-  t.after(() => {
+  stopAfter(t, () => {
     if (child.exitCode === null) child.kill("SIGKILL");
   });
   let stderr = "";
@@ -933,7 +939,7 @@ test("unsafe SIGHUP replacement initiates shutdown and receives no log record", 
     ],
     { env: paths.env, stdio: "pipe" },
   );
-  t.after(() => {
+  stopAfter(t, () => {
     if (child.exitCode === null) child.kill("SIGKILL");
   });
   await new Promise<void>((resolve, reject) => {
