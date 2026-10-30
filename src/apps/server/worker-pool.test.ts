@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { projectOperations } from "../../project/contract.ts";
-import { requirePiTools, temporary } from "../../kernel/test-support.ts";
+import { requirePiTools } from "../../kernel/test-support.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
   alwaysAvailable,
@@ -45,8 +45,8 @@ const INSTANCE_REQUIRED_CODE = "gateway.jwt.instance_required";
 
 async function serverPool(t: TestContext, count: number) {
   requirePiTools();
-  const stateDirectory = temporary(t);
-  const setup = await workerAcceptance(t, true, { stateDirectory });
+  const setup = await workerAcceptance(t, true);
+  const stateDirectory = setup.fixture.stateDirectory;
   const call = humanCaller(setup.fixture);
   const params = { project_id: setup.project_id };
   const started = t.mock.method(setup.fixture.workerPool, "start");
@@ -469,9 +469,7 @@ test(
   "the placement list and the instance create read the placement status of the pool host",
   { timeout: POOL_TEST_TIMEOUT },
   async (t) => {
-    const setup = await workerAcceptance(t, true, {
-      stateDirectory: temporary(t),
-    });
+    const setup = await workerAcceptance(t, true);
     const unavailable: PlacementStatus = {
       placement: InstancePlacement.Container,
       available: false,
