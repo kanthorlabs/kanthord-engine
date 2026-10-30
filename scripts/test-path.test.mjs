@@ -34,6 +34,7 @@ const ROUNDS = 25;
 const PARALLEL = 8;
 const EXECUTABLE = 0o755;
 const SUCCESS = 0;
+const MISSING = ["podman", "pnpm", "which"];
 
 function run(script, path) {
   return new Promise((resolve, reject) => {
@@ -74,5 +75,38 @@ test("concurrent invocations all succeed and link each tool to its target", asyn
   const directory = join(root, "node_modules", ".cache", "test-path");
   for (const tool of TOOLS) {
     assert.equal(await readlink(join(directory, tool)), join(bin, tool));
+  }
+});
+
+test("a tool that PATH does not have gets no link and the script still succeeds", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "kanthord-test-path-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const script = join(root, "scripts", "test-path.mjs");
+  await mkdir(join(root, "scripts"));
+  await copyFile(SCRIPT, script);
+  const full = join(root, "full");
+  const partial = join(root, "partial");
+  await mkdir(full);
+  await mkdir(partial);
+  for (const tool of TOOLS) {
+    await writeFile(join(full, tool), "#!/bin/sh\n", { mode: EXECUTABLE });
+    if (!MISSING.includes(tool))
+      await writeFile(join(partial, tool), "#!/bin/sh\n", {
+        mode: EXECUTABLE,
+      });
+  }
+
+  assert.deepEqual(await run(script, full), { status: SUCCESS, stderr: "" });
+  assert.deepEqual(await run(script, partial), {
+    status: SUCCESS,
+    stderr: "",
+  });
+
+  const directory = join(root, "node_modules", ".cache", "test-path");
+  for (const tool of TOOLS) {
+    if (MISSING.includes(tool))
+      await assert.rejects(readlink(join(directory, tool)), { code: "ENOENT" });
+    else
+      assert.equal(await readlink(join(directory, tool)), join(partial, tool));
   }
 });
