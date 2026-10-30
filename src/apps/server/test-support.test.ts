@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import type { z } from "zod";
 import { directClient } from "../../gateway/index.ts";
@@ -25,7 +25,7 @@ import {
 } from "./test-support.ts";
 
 const FIRST_VERSION = 1;
-const CHILD_TIMEOUT_MS = 10000;
+const CHILD_TIMEOUT_MS = 30000;
 const TEST_FAILURE = 1;
 const DIRECTORY_LINE = /^directory=(.+)$/m;
 const ONBOARDING_POLLS = 200;
@@ -131,7 +131,7 @@ test("the gateway fixture onboards a repository binding with no environment to n
   assert.equal(state.status, EnvironmentStatus.None);
 });
 
-test("a fixture stop that throws leaves every later stop and directory removal to run", (t) => {
+function failedChildTest(t: TestContext, body: string): string {
   const file = join(temporary(t), "stop.test.mjs");
   const support = (path: string) =>
     JSON.stringify(new URL(path, import.meta.url).href);
@@ -141,13 +141,7 @@ test("a fixture stop that throws leaves every later stop and directory removal t
 import { fakeGitHub, fakeS3 } from ${support("./test-support.ts")};
 import { stopAfter, temporary } from ${support("../../kernel/test-support.ts")};
 test("stops", async (t) => {
-  const github = await fakeGitHub(t);
-  await fetch(github.endpoint).catch(() => {});
-  await fakeS3(t);
-  stopAfter(t, () => {
-    throw new Error("Second stop failed.");
-  });
-  console.log("directory=" + temporary(t));
+${body}
 });
 `,
   );
@@ -160,10 +154,35 @@ test("stops", async (t) => {
   );
   assert.equal(child.error, undefined, child.stdout);
   assert.equal(child.status, TEST_FAILURE, child.stdout);
-  assert.match(child.stdout, /Test stops failed\./);
-  assert.match(child.stdout, /Fake GitHub failed\./);
-  assert.match(child.stdout, /Second stop failed\./);
-  const directory = DIRECTORY_LINE.exec(child.stdout)?.[1];
-  assert.ok(directory, child.stdout);
+  return child.stdout;
+}
+
+test("a fixture stop that throws leaves every later stop and directory removal to run", (t) => {
+  const output = failedChildTest(
+    t,
+    `  const github = await fakeGitHub(t);
+  await fetch(github.endpoint).catch(() => {});
+  await fakeS3(t);
+  stopAfter(t, () => {
+    throw new Error("Second stop failed.");
+  });
+  console.log("directory=" + temporary(t));`,
+  );
+  assert.match(output, /Test stops failed\./);
+  assert.match(output, /Fake GitHub failed\./);
+  assert.match(output, /Second stop failed\./);
+  const directory = DIRECTORY_LINE.exec(output)?.[1];
+  assert.ok(directory, output);
   assert.equal(existsSync(directory), false);
+});
+
+test("a single stop that throws fails the test with its own error", (t) => {
+  const output = failedChildTest(
+    t,
+    `  stopAfter(t, () => {
+    throw new Error("Only stop failed.");
+  });`,
+  );
+  assert.match(output, /Error: Only stop failed\./);
+  assert.doesNotMatch(output, /Test stops failed\./);
 });

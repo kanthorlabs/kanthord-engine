@@ -84,16 +84,16 @@ export function stopAfter(t: TestContext, stop: () => unknown): void {
     try {
       await stop();
     } catch (error) {
-      const failures = stopFailures.get(t) ?? [];
-      if (!stopFailures.has(t)) {
-        stopFailures.set(t, failures);
+      const failures = stopFailures.get(t);
+      if (!failures) {
+        const recorded = [error];
+        stopFailures.set(t, recorded);
         t.after(() => {
-          throw failures.length === SINGLE_FAILURE
-            ? failures[0]
-            : new AggregateError(failures, "Test stops failed.");
+          throw recorded.length === SINGLE_FAILURE
+            ? recorded[0]
+            : new AggregateError(recorded, "Test stops failed.");
         });
-      }
-      failures.push(error);
+      } else failures.push(error);
     }
   });
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import {
@@ -21,7 +21,11 @@ import {
   type OperationResult,
   OperationResultType,
 } from "../../kernel/operation.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import {
+  stopAfter,
+  temporary,
+  temporaryDirectory,
+} from "../../kernel/test-support.ts";
 import { isString } from "../../kernel/values.ts";
 import { AgentErrorCode, agentOperations } from "../../agent/contract.ts";
 import { loadPi } from "../../agent/pi.ts";
@@ -394,7 +398,7 @@ test("the Agent component refuses an invalid workbench configuration", async (t)
 });
 
 test("the workbench lists and opens no env@1 session", async (t) => {
-  const state = temporary(t);
+  const state = temporaryDirectory();
   const pi = await loadPi();
   const envAgent = "env@1";
   pi.SessionManager.create(
@@ -407,6 +411,7 @@ test("the workbench lists and opens no env@1 session", async (t) => {
     timestamp: Date.now(),
   });
   const fixture = await workbenchFixture(t, [], state);
+  stopAfter(t, () => rmSync(state, { recursive: true, force: true }));
   const listed = completed(
     await fixture.workbench["session.list"](
       { params: {}, query: {}, body: null },
@@ -445,7 +450,7 @@ test("the workbench lists and opens no env@1 session", async (t) => {
 });
 
 test("a stored session resumes from the last entry of each kind and lists through pi", async (t) => {
-  const state = temporary(t);
+  const state = temporaryDirectory();
   const pi = await loadPi();
   const id = "workbench_session_01ARZ3NDEKTSV4RRFFQ69G5FAV";
   const manager = pi.SessionManager.create(
@@ -486,6 +491,7 @@ test("a stored session resumes from the last entry of each kind and lists throug
     timestamp: Date.now(),
   });
   const fixture = await workbenchFixture(t, [], state);
+  stopAfter(t, () => rmSync(state, { recursive: true, force: true }));
   const dependencies = (
     fixture.workbenchService as unknown as {
       dependencies: { hostHome: string };
@@ -833,7 +839,7 @@ test("an abort stops the active run", async (t) => {
 });
 
 test("a session resumes after a restart with its configuration and its completed runs", async (t) => {
-  const state = temporary(t);
+  const state = temporaryDirectory();
   const first = await workbenchFixture(
     t,
     [fauxAssistantMessage(ANSWER)],
@@ -858,6 +864,7 @@ test("a session resumes after a restart with its configuration and its completed
     [fauxAssistantMessage("Still two.")],
     state,
   );
+  stopAfter(t, () => rmSync(state, { recursive: true, force: true }));
   const listed = completed(
     await second.workbench["session.list"](
       { params: {}, query: { agent_name: AGENT }, body: null },
