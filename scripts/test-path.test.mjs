@@ -6,10 +6,11 @@ import {
   mkdtemp,
   readlink,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -34,6 +35,8 @@ const PARALLEL = 8;
 const EXECUTABLE = 0o755;
 const SUCCESS = 0;
 const MISSING = ["podman", "mkdir", "which"];
+const RETIRED = "pnpm";
+const SHADOWED = "git";
 
 function run(script, path) {
   return new Promise((resolve, reject) => {
@@ -77,7 +80,7 @@ test("concurrent invocations all succeed and link each tool to its target", asyn
   }
 });
 
-test("a tool that PATH does not have gets no link and the script still succeeds", async (t) => {
+test("a tool that PATH does not have or that TOOLS does not list gets no link and the script still succeeds", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "kanthord-test-path-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const script = join(root, "scripts", "test-path.mjs");
@@ -96,16 +99,41 @@ test("a tool that PATH does not have gets no link and the script still succeeds"
   }
 
   assert.deepEqual(await run(script, full), { status: SUCCESS, stderr: "" });
+  const directory = join(root, "node_modules", ".cache", "test-path");
+  await symlink(join(full, SHADOWED), join(directory, RETIRED));
   assert.deepEqual(await run(script, partial), {
     status: SUCCESS,
     stderr: "",
   });
 
-  const directory = join(root, "node_modules", ".cache", "test-path");
+  await assert.rejects(readlink(join(directory, RETIRED)), { code: "ENOENT" });
   for (const tool of TOOLS) {
     if (MISSING.includes(tool))
       await assert.rejects(readlink(join(directory, tool)), { code: "ENOENT" });
     else
       assert.equal(await readlink(join(directory, tool)), join(partial, tool));
   }
+});
+
+test("a directory with the name of a tool is not a target", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "kanthord-test-path-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const script = join(root, "scripts", "test-path.mjs");
+  await mkdir(join(root, "scripts"));
+  await copyFile(SCRIPT, script);
+  const shadow = join(root, "shadow");
+  const bin = join(root, "bin");
+  await mkdir(join(shadow, SHADOWED), { recursive: true, mode: EXECUTABLE });
+  await mkdir(bin);
+  for (const tool of TOOLS) {
+    await writeFile(join(bin, tool), "#!/bin/sh\n", { mode: EXECUTABLE });
+  }
+
+  assert.deepEqual(await run(script, [shadow, bin].join(delimiter)), {
+    status: SUCCESS,
+    stderr: "",
+  });
+
+  const directory = join(root, "node_modules", ".cache", "test-path");
+  assert.equal(await readlink(join(directory, SHADOWED)), join(bin, SHADOWED));
 });

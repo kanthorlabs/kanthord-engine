@@ -2,8 +2,10 @@ import {
   accessSync,
   constants,
   mkdirSync,
+  readdirSync,
   renameSync,
   rmSync,
+  statSync,
   symlinkSync,
 } from "node:fs";
 import { delimiter, isAbsolute, join } from "node:path";
@@ -27,14 +29,20 @@ const TOOLS = [
   "mkdir",
   "which",
 ];
+const PENDING = /^(.+)\.\d+$/;
 
 function executable(path) {
   try {
     accessSync(path, constants.X_OK);
-    return true;
+    return statSync(path).isFile();
   } catch {
     return false;
   }
+}
+
+function stale(entry) {
+  const pending = PENDING.exec(entry);
+  return !TOOLS.includes(pending ? pending[1] : entry);
 }
 
 function resolve(tool, directories) {
@@ -51,6 +59,9 @@ const directories = path
       isAbsolute(directory) && join(directory, "/") !== TOOL_DIRECTORY,
   );
 mkdirSync(TOOL_DIRECTORY, { recursive: true });
+for (const entry of readdirSync(TOOL_DIRECTORY)) {
+  if (stale(entry)) rmSync(join(TOOL_DIRECTORY, entry), { force: true });
+}
 for (const tool of TOOLS) {
   const link = join(TOOL_DIRECTORY, tool);
   const target = resolve(tool, directories);
