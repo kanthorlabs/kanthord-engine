@@ -26,7 +26,7 @@ import {
   selectTests,
 } from "./affected-tests.mjs";
 import { affectedReportSchema } from "../src/worker/unit/affected.ts";
-import { stopAfter } from "../src/kernel/test-support.ts";
+import { stopAfter } from "../src/kernel/stop-test-support.ts";
 
 const MODIFIED = "modified";
 const ADDED = "added";

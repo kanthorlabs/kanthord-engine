@@ -13,7 +13,7 @@ import {
   readReworkAssessment,
 } from "./node-reads.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { stopAfter } from "../../kernel/test-support.ts";
+import { stopAfter } from "../../kernel/stop-test-support.ts";
 
 const SECOND_ATTEMPT = 2;
 const ONE_READ = 1;

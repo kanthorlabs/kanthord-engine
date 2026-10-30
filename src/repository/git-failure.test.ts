@@ -16,7 +16,7 @@ import {
   LOCAL_GIT_SSH_ACCESS,
   startTestSshd,
 } from "./sshd-test-support.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const GIT_FAILED = "repository.connector.git_failed";
 const DEADLINE_MS = 60_000;

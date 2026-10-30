@@ -11,7 +11,7 @@ import {
   OutboundRequestState,
 } from "./contract.ts";
 import { intakeMigrations } from "./migrations.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const INBOUND_TABLE = "intake_inbound";
 const INBOUND_EVENT_TABLE = "intake_inbound_event";

@@ -20,7 +20,7 @@ import type { PortAnswer } from "./client.ts";
 import type { RecordedResponse } from "./idempotency.ts";
 import { createInvocation, gatewayMigrations, servePort } from "./index.ts";
 import type { Invocation, InvocationOptions } from "./invocation.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const TOKEN = "port-test-token";
 const IDEMPOTENCY_KEY = "key-1";

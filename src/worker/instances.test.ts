@@ -44,7 +44,7 @@ import {
   testWorkerIdentity,
 } from "../kernel/test-identity.ts";
 import { packageVersion } from "../kernel/version.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const WORKER = "coder@1";
 const INSTANCE = "laptop";

@@ -17,7 +17,7 @@ import {
   readDuration,
 } from "./analytics-duration.ts";
 import { insertSpan } from "./trace-store.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 interface Seed {
   trace?: number;

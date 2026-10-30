@@ -79,7 +79,7 @@ import {
 } from "./registration-rows.ts";
 import { HEARTBEAT_SWEEP_INTERVAL_MS } from "./heartbeat.ts";
 import { FakePoolHost } from "./test-support.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const fakeCollaborations = {
   promptTelemetry: { agentPrompted: () => {} },

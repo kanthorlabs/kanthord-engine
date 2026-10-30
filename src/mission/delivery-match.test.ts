@@ -19,7 +19,7 @@ import { MatchKind, matchRequests } from "./delivery-match.ts";
 import { missionMigrations } from "./migrations.ts";
 import { closeAttempt, insertEvidence, openAttempt } from "./record-store.ts";
 import { insertMission, insertNode, readNode } from "./store.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const NOW = 100;
 const FIRST_REVISION = 1;

@@ -21,7 +21,7 @@ import { IntakeService } from "./index.ts";
 import { intakeMigrations } from "./migrations.ts";
 import { discard, insertPending } from "./outbound-store.ts";
 import { unusedActionDependencies } from "./test-support.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const OTHER_PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAW";

@@ -9,7 +9,7 @@ import {
 } from "./admission.ts";
 import { MISSION_SERVICE_NAME, NodeState, type WorkQueue } from "./contract.ts";
 import { missionMigrations } from "./migrations.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const PROJECT_ID = "project_00000000000000000000000000";
 const QUEUED_NODE_ID = "node-id";

@@ -34,7 +34,7 @@ import { HealthStatus } from "../kernel/service.ts";
 import { compareRouteSpecificity } from "./service.ts";
 import { GATEWAY_STARTED_MESSAGE } from "./constants.ts";
 import { createIdempotencyKey } from "../kernel/identity.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const AUTH_VERSION = 1;
 const NEXT_VERSION_STEP = 1;

@@ -36,7 +36,7 @@ import {
   withSshAgent,
 } from "./ssh-agent.ts";
 import { generateSshKey } from "./ssh-key.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const execFileAsync = promisify(execFile);
 const DEADLINE_MS = 30_000;

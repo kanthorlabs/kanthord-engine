@@ -18,7 +18,7 @@ import {
 import { loadPi } from "../agent/pi.ts";
 import { piProviderId, Platform, ReasoningLevel } from "./platforms.ts";
 import { ANTHROPIC_SUBSCRIPTION_CHECK_MODEL } from "./probes.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const SUBSCRIPTION_LIFETIME_MS = 3600000;
 

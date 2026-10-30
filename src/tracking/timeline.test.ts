@@ -18,7 +18,7 @@ import {
   type TimelineQuery,
 } from "./timeline.ts";
 import { insertSpan } from "./trace-store.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 interface TraceFixture {
   n: number;

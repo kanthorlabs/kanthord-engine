@@ -39,7 +39,7 @@ import {
   SESSION_EXPIRY_MS,
 } from "./sessions.ts";
 import { LlmComponent } from "./service.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const INSTANCE = "laptop";
 const OTHER_INSTANCE = "desktop";

@@ -30,7 +30,7 @@ import {
   readCurrentBindingByName,
   writeBindingSet,
 } from "./store.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const ADDRESS = "git@github.com:owner/repo.git";
 const SSH_CREDENTIAL = "deploy";

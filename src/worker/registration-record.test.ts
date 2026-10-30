@@ -22,7 +22,7 @@ import {
   listRegistrationRecords,
   registrationRecord,
 } from "./registration-record.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const NOW = 1000;
 const PROJECT = createIdentity("project");

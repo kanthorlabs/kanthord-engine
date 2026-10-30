@@ -26,7 +26,7 @@ import { gatewayOperations } from "./contract.ts";
 import { workerOperations } from "../worker/contract.ts";
 import { emitOpenAPIFiles } from "./openapi.ts";
 import { requestIdSchema, resolveRequestId } from "./request-id.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 const apiOperations = { ...gatewayOperations, ...workerOperations };
 const requestId = "request_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const invalidIds = [

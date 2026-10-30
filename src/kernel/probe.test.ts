@@ -12,7 +12,7 @@ import {
   redactReason,
   thrownReason,
 } from "./probe.ts";
-import { stopAfter } from "./test-support.ts";
+import { stopAfter } from "./stop-test-support.ts";
 
 const SECRET = "test_private-resource-health-secret";
 const URL = "https://probe.example/v1/check";

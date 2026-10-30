@@ -24,7 +24,7 @@ import {
 import { BudgetLimit } from "../../scheduler/contract.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 import { GitStep, markGitStep } from "./git-step.ts";
-import { stopAfter } from "../../kernel/test-support.ts";
+import { stopAfter } from "../../kernel/stop-test-support.ts";
 
 const SETTLE_CALL_COUNT = 1;
 const CALLS = 2;

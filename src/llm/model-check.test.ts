@@ -24,7 +24,7 @@ import {
 import { Platform } from "./platforms.ts";
 import { ANTHROPIC_SUBSCRIPTION_CHECK_MODEL } from "./probes.ts";
 import { scriptedModelRuntime } from "./test-support.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const LOW_EFFORT = "low";
 const SYSTEM_ROLE = "system";

@@ -47,7 +47,7 @@ import { IntakeService } from "./index.ts";
 import { intakeMigrations } from "./migrations.ts";
 import type { Dependencies } from "./service.ts";
 import { unusedActionDependencies } from "./test-support.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const UNKNOWN_PROJECT_ID = "project_01BX5ZZKBKACTAV9WEVGEMMVRZ";

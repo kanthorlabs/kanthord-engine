@@ -31,7 +31,7 @@ import {
   MaterialBuffer,
   mintGrant,
 } from "./facility.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const FIELDS = {
   kind: GrantKind.ModelInference,

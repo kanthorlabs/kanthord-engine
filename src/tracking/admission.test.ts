@@ -15,7 +15,7 @@ import {
 } from "./contract.ts";
 import { trackingMigrations } from "./migrations.ts";
 import { insertTrace, readSpan, readText } from "./trace-store.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const TRACE = "a".repeat(32);
 const OTHER_TRACE = "b".repeat(32);

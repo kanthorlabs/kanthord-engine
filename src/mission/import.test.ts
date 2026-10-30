@@ -66,7 +66,7 @@ import {
   readMissionNodes,
   readNode,
 } from "./store.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const TEXT_MAX_BYTES = 32768;
 const VERSION = 1;

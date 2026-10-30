@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { stopAfter } from "../src/kernel/test-support.ts";
+import { stopAfter } from "../src/kernel/stop-test-support.ts";
 
 const SCRIPT = fileURLToPath(new URL("./test-path.mjs", import.meta.url));
 const TOOLS = ["git", "bash", "ssh"];

@@ -18,7 +18,7 @@ import {
   type S3Location,
   S3Platform,
 } from "./s3.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const ACCESS_KEY_ID = "test_private-s3-access-id";
 const SECRET = "test_private-s3-secret-access-key";

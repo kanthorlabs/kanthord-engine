@@ -14,7 +14,7 @@ import {
 } from "./contract.ts";
 import { AgentErrorCode, ChainLevel } from "../agent/contract.ts";
 import type { AgentSelection } from "../scheduler/contract.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 function pinOf(
   agentName: string,

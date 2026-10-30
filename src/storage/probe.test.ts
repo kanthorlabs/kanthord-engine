@@ -11,7 +11,7 @@ import {
 import { ResourceFailureReason, ResourceStatus } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { probeS3 } from "./probe.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const SECRET = "test_private-resource-health-secret";
 const ACCESS_KEY_ID = "test_private-s3-access-id";

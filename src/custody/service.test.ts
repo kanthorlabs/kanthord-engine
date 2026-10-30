@@ -57,7 +57,7 @@ import {
   ENVIRONMENT_SECRET_PLATFORM,
   PROJECT_SERVICE_NAME,
 } from "../project/contract.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const TestPlatform = {
   Key: "key-platform",

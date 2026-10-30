@@ -11,7 +11,7 @@ import {
 import { trackingMigrations } from "./migrations.ts";
 import { type CostItem, type CostQuery, readCost } from "./analytics-cost.ts";
 import { insertSpan } from "./trace-store.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 interface Turn {
   trace?: number;

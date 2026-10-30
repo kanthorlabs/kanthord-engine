@@ -56,7 +56,7 @@ import {
   recordingConsumers,
   unusedActionDependencies,
 } from "./test-support.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const STOPPED_CODE = "intake.lifecycle.stopped";
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";

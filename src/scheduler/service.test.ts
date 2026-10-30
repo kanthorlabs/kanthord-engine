@@ -34,7 +34,7 @@ import {
   CauseSubcategory,
 } from "../kernel/cause.ts";
 import { insertExecution, readExecution } from "./execution-store.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const EXECUTION_ENDED = "executionEnded";
 const EXECUTION_TRANSITION = "executionTransition";

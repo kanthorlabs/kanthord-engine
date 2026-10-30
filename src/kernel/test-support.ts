@@ -15,6 +15,9 @@ import {
 import { CancellationContext } from "./context.ts";
 import { diagnostic, diagnosticRows } from "./errors.ts";
 import { redaction } from "./log.ts";
+import { stopAfter } from "./stop-test-support.ts";
+
+export { stopAfter };
 
 const EXEC_CHECKED_PLATFORM = "darwin";
 const EXEC_CHECKED_SUITE_CONCURRENCY = 1;
@@ -74,28 +77,6 @@ export async function childRun(
   child.stdin.end(options.input);
   const [status] = (await once(child, "close")) as [number | null];
   return { status, stdout, stderr };
-}
-
-const SINGLE_FAILURE = 1;
-const stopFailures = new WeakMap<TestContext, unknown[]>();
-
-export function stopAfter(t: TestContext, stop: () => unknown): void {
-  t.after(async () => {
-    try {
-      await stop();
-    } catch (error) {
-      const failures = stopFailures.get(t);
-      if (!failures) {
-        const recorded = [error];
-        stopFailures.set(t, recorded);
-        t.after(() => {
-          throw recorded.length === SINGLE_FAILURE
-            ? recorded[0]
-            : new AggregateError(recorded, "Test stops failed.");
-        });
-      } else failures.push(error);
-    }
-  });
 }
 
 export function testContext(t: TestContext): CancellationContext {

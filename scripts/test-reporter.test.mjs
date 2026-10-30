@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
-import { stopAfter } from "../src/kernel/test-support.ts";
+import { stopAfter } from "../src/kernel/stop-test-support.ts";
 
 const REPORTER = fileURLToPath(new URL("./test-reporter.mjs", import.meta.url));
 const SUCCESS = 0;

@@ -26,7 +26,7 @@ import {
   provisionRepositoryCredentials,
   provisionWorkerProject,
 } from "./test-support.ts";
-import { stopAfter } from "../../kernel/test-support.ts";
+import { stopAfter } from "../../kernel/stop-test-support.ts";
 
 type Fixture = Awaited<ReturnType<typeof gatewayFixture>>;
 type Provision = Awaited<ReturnType<typeof provisionWorkerProject>>;

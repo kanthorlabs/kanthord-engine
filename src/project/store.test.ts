@@ -85,7 +85,7 @@ import {
   resumeProject,
   writeBindingSet,
 } from "./store.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const EMPTY_BINDING_COUNT = 0;
 const INITIAL_BINDING_VERSION = 1;

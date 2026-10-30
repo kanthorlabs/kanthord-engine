@@ -29,7 +29,7 @@ import {
 } from "./outbound-store.ts";
 import { type CallAnswer, FinalizationKind } from "./outbound.ts";
 import { unusedActionDependencies } from "./test-support.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const CREATED_AT = 100;

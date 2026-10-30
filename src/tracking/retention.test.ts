@@ -9,7 +9,7 @@ import {
 import { trackingMigrations } from "./migrations.ts";
 import { DAY_MS, retentionCutoff, sweepExpiredTraces } from "./retention.ts";
 import { insertTrace, traceRowOf } from "./trace-store.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const NOW = 1751566593132;
 const RETENTION_DAYS = 30;

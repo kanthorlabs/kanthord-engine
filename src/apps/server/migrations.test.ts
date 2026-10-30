@@ -25,7 +25,7 @@ import { intakeMigrations } from "../../intake/index.ts";
 import { REPOSITORY_COMPONENT_NAME } from "../../repository/contract.ts";
 import { repositoryMigrations } from "../../repository/migrations.ts";
 import { serverMigrations, trackingDatabaseMigrations } from "./index.ts";
-import { stopAfter } from "../../kernel/test-support.ts";
+import { stopAfter } from "../../kernel/stop-test-support.ts";
 
 const PROJECT_SERVICE_NAME = "project";
 const GATEWAY_SERVICE_NAME = "gateway";

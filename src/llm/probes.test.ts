@@ -55,7 +55,7 @@ import {
   statusOfErrorMessage,
 } from "./probes.ts";
 import { HEALTH_OF_CONNECTION } from "./provider.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const SECRET = "test_private-resource-health-secret";
 const BASE_URL = "https://models.example/v1";

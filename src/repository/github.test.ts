@@ -38,7 +38,7 @@ import {
   ReviewState,
 } from "./github.ts";
 import { platformImplementations } from "./index.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const TOKEN = "ghp_secret_token_value";
 const CALL_DEADLINE_MS = 10_000;

@@ -75,7 +75,7 @@ import {
   userAuthenticationData,
 } from "../repository/sshd-test-support.ts";
 import { sshPublicKeyBlob } from "../repository/ssh-key.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const SECRET = Buffer.alloc(32, 9).toString("base64");
 const FIRST = { type: SecretShape.ApiKey, key: "private-first" };

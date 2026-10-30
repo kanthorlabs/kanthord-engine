@@ -24,7 +24,7 @@ import {
   WorkerErrorCode,
 } from "./contract.ts";
 import { ActionPerformer } from "./action-performer.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const FIRST_ATTEMPT = 1;
 const SINGLE_CALL_COUNT = 1;

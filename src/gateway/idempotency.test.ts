@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { Idempotency } from "./idempotency.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdempotencyKey } from "../kernel/identity.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const TTL_SECONDS = 1;
 const TTL_MS = 1000;

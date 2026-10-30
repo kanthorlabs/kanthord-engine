@@ -24,7 +24,7 @@ import { errorSchema } from "../../kernel/errors.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { IN_MEMORY_DATABASE, Store } from "../../kernel/store.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
-import { stopAfter } from "../../kernel/test-support.ts";
+import { stopAfter } from "../../kernel/stop-test-support.ts";
 
 const NO_REGISTRATIONS = 0;
 const SINGLE_REGISTRATION = 1;

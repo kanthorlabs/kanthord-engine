@@ -22,7 +22,7 @@ import {
   testMachineIdentity,
 } from "../kernel/test-identity.ts";
 import type { ExecutionProofRow } from "../kernel/operation.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const AUTH_VERSION = 1;
 

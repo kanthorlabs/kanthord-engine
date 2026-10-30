@@ -34,7 +34,7 @@ import {
   Onboarding,
   type OnboardingDependencies,
 } from "../project/onboarding.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const WALL_TIME = 7200000;
 const RESERVE_MS = 600000;

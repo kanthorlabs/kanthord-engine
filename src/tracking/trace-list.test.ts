@@ -28,7 +28,7 @@ import {
   type TraceCursor,
   type TraceListQuery,
 } from "./trace-list.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 interface Fixture {
   n: number;

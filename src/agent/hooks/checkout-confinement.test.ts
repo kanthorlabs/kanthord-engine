@@ -14,7 +14,7 @@ import type {
   ToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
 import { checkoutConfinement } from "./checkout-confinement.ts";
-import { stopAfter } from "../../kernel/test-support.ts";
+import { stopAfter } from "../../kernel/stop-test-support.ts";
 
 type Handler = (event: ToolCallEvent) => unknown;
 

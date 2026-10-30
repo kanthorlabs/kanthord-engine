@@ -10,7 +10,7 @@ import {
   walkSpans,
 } from "./analytics-walk.ts";
 import { insertSpan } from "./trace-store.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 interface Fixture {
   n: number;

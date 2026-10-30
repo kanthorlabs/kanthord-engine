@@ -23,7 +23,7 @@ import {
   ENVIRONMENT_SECRET_PLATFORM,
   ENVIRONMENT_SECRET_PLATFORMS,
 } from "./environment-secret-platform.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const SECRET = "test_private-registry-secret";
 const ROTATED_SECRET = "test_private-registry-rotated";

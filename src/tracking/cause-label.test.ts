@@ -32,7 +32,7 @@ import {
 import { trackingMigrations } from "./migrations.ts";
 import { TrackingService } from "./service.ts";
 import { insertTrace, listSpans, readSpan, readText } from "./trace-store.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const ROOT_SPAN_ID = "0123456789abcdef";
 const OPERATION = "tracking.cause_label";

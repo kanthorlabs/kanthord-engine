@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { setImmediate as turn } from "node:timers/promises";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { WaitingPulls } from "./wakeup.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const WAIT_MS = 1000;
 const NO_WAITERS = 0;

@@ -110,7 +110,7 @@ import {
   taskOwnerOf,
   updateNodeFilename,
 } from "./store.ts";
-import { stopAfter } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const UNEXPECTED_COLLABORATION = "unexpected collaboration call";
 test("attempt pins survive edits and a rebind keeps the open revision's binding live", (t) => {
