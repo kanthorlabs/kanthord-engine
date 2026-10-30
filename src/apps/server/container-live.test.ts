@@ -216,11 +216,10 @@ function launchEntry(
 }
 
 async function containerPool(t: TestContext) {
-  const stateDirectory = temporary(t);
   const setup = await workerAcceptance(t, true, {
-    stateDirectory,
     containerImage: IMAGE_NAME,
   });
+  const stateDirectory = setup.fixture.stateDirectory;
   const status = await setup.fixture.containerDriver.check();
   assert.ok(status.available, JSON.stringify(status));
   const runtime = status.container_runtime!;
