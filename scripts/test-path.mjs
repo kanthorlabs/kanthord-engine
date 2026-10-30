@@ -12,7 +12,22 @@ import { fileURLToPath } from "node:url";
 const TOOL_DIRECTORY = fileURLToPath(
   new URL("../node_modules/.cache/test-path/", import.meta.url),
 );
-const TOOLS = ["git", "bash", "ssh"];
+const TOOLS = [
+  "git",
+  "bash",
+  "ssh",
+  "sh",
+  "ssh-add",
+  "ssh-agent",
+  "ssh-keyscan",
+  "ssh-keygen",
+  "podman",
+  "pnpm",
+  "sleep",
+  "ps",
+  "mkdir",
+  "which",
+];
 
 function executable(path) {
   try {

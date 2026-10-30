@@ -14,7 +14,22 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const SCRIPT = fileURLToPath(new URL("./test-path.mjs", import.meta.url));
-const TOOLS = ["git", "bash", "ssh"];
+const TOOLS = [
+  "git",
+  "bash",
+  "ssh",
+  "sh",
+  "ssh-add",
+  "ssh-agent",
+  "ssh-keyscan",
+  "ssh-keygen",
+  "podman",
+  "pnpm",
+  "sleep",
+  "ps",
+  "mkdir",
+  "which",
+];
 const ROUNDS = 25;
 const PARALLEL = 8;
 const EXECUTABLE = 0o755;
