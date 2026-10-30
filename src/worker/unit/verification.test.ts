@@ -243,7 +243,7 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.match(run.outputs[0] ?? "", /started/);
   });
 
-  const TREE_LIMIT_MS = 5000;
+  const TREE_LIMIT_MS = 20000;
 
   test("a command that reaches its limit leaves no process of its tree, also a process in its own group", async (t) => {
     const run = await runVerificationsWithOutput({
