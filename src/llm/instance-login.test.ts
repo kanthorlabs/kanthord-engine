@@ -39,6 +39,7 @@ import {
   SESSION_EXPIRY_MS,
 } from "./sessions.ts";
 import { LlmComponent } from "./service.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const INSTANCE = "laptop";
 const OTHER_INSTANCE = "desktop";
@@ -155,7 +156,7 @@ async function fixture(t: TestContext) {
     instanceKeys,
     instanceConnected: (holder) => connected.has(holder),
   });
-  t.after(async () => {
+  stopAfter(t, async () => {
     await component.stop();
     store.close();
   });

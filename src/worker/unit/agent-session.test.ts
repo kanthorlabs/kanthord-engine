@@ -10,7 +10,11 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { background } from "../../kernel/context.ts";
-import { overrideEnvironment, temporary } from "../../kernel/test-support.ts";
+import {
+  overrideEnvironment,
+  stopAfter,
+  temporary,
+} from "../../kernel/test-support.ts";
 import {
   openSession,
   RUNTIME_SETUP_DEADLINE_MS,
@@ -80,7 +84,7 @@ test("native session isolates filesystem discovery, settings and session persist
     hooks: [],
     context: background,
   });
-  t.after(() => session.dispose());
+  stopAfter(t, () => session.dispose());
   await session.prompt("work");
   assert.ok(
     provider.calls[0]?.systemPrompt?.startsWith("owned system"),

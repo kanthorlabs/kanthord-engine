@@ -9,6 +9,7 @@ import { HealthStatus } from "../../kernel/service.ts";
 import {
   hostEnvironment,
   requirePiTools,
+  stopAfter,
   temporary,
 } from "../../kernel/test-support.ts";
 import { isObject } from "../../kernel/values.ts";
@@ -213,7 +214,7 @@ test("a stop during the start ends the run with no error", async (t) => {
     return undefined;
   };
   const worker = new Worker(f.options());
-  t.after(() => worker.stop());
+  stopAfter(t, () => worker.stop());
   const running = worker.run();
   await until(() => held, t.signal);
   const stopped = worker.stop();
@@ -240,7 +241,7 @@ test("a heartbeat with another server_version stops the unit", async (t) => {
   const worker = new Worker(
     f.options({ heartbeatIntervalMs: FAST_HEARTBEAT_MS }),
   );
-  t.after(() => worker.stop());
+  stopAfter(t, () => worker.stop());
   const running = worker.run();
   await f.ready();
   f.server.state.version = MISMATCH_VERSION;
@@ -258,11 +259,11 @@ test(
     const firstWorker = new Worker(
       f.options({ heartbeatIntervalMs: FAST_HEARTBEAT_MS }),
     );
-    t.after(() => firstWorker.stop());
+    stopAfter(t, () => firstWorker.stop());
     const first = firstWorker.run();
     await f.ready();
     const second = new Worker(f.options({ connectionName: CONNECTION_B }));
-    t.after(() => second.stop());
+    stopAfter(t, () => second.stop());
     const secondRun = second.run();
     const error = await first;
     assert.ok(error instanceof Diagnostic);
@@ -289,7 +290,7 @@ test(
       return undefined;
     };
     const firstWorker = new Worker(f.options());
-    t.after(() => firstWorker.stop());
+    stopAfter(t, () => firstWorker.stop());
     const first = firstWorker.run();
     await f.ready();
     await until(() => held, t.signal);
@@ -298,7 +299,7 @@ test(
       t.signal,
     );
     const second = new Worker(f.options({ connectionName: CONNECTION_B }));
-    t.after(() => second.stop());
+    stopAfter(t, () => second.stop());
     assert.equal(await second.start(), null);
     gate.resolve();
     const error = await first;
@@ -333,7 +334,7 @@ test("an execution passes one token renewal and the next request carries the ren
     return undefined;
   };
   const worker = new Worker(f.options({ renewalIntervalMs: RENEWAL_MS }));
-  t.after(() => worker.stop());
+  stopAfter(t, () => worker.stop());
   const running = worker.run();
   const held = await until(
     () => f.server.requestsTo(FakePath.Handover)[0],
@@ -397,7 +398,7 @@ test("an auth-version increment with a changed client secret ends the process, a
   const worker = new Worker(
     f.options({ heartbeatIntervalMs: FAST_HEARTBEAT_MS }),
   );
-  t.after(() => worker.stop());
+  stopAfter(t, () => worker.stop());
   const running = worker.run();
   await f.ready();
   const runtime = [...f.server.state.runtimes.values()][0]!;
@@ -428,7 +429,7 @@ test("an auth-version increment with a changed client secret ends the process, a
     return undefined;
   };
   const restarted = new Worker(f.options());
-  t.after(() => restarted.stop());
+  stopAfter(t, () => restarted.stop());
   const again = restarted.run();
   const resumed = await until(
     () => f.server.requestsTo(FakePath.Handover)[0],
@@ -456,7 +457,7 @@ test("a client request refused after an auth-version increment ends the process 
     return UNAUTHORIZED;
   };
   const worker = new Worker(f.options());
-  t.after(() => worker.stop());
+  stopAfter(t, () => worker.stop());
   const running = worker.run();
   await f.ready();
   await until(() => held, t.signal);
@@ -498,7 +499,7 @@ test("a removed binding ends only its own entry while another binding completes 
     };
   };
   const worker = new Worker(f.options());
-  t.after(() => worker.stop());
+  stopAfter(t, () => worker.stop());
   let settled = false;
   const running = worker.run().finally(() => {
     settled = true;
@@ -544,7 +545,7 @@ test("a binding version change adds a new binding and drains a dropped binding",
   const worker = new Worker(
     f.options({ heartbeatIntervalMs: FAST_HEARTBEAT_MS }),
   );
-  t.after(() => worker.stop());
+  stopAfter(t, () => worker.stop());
   const running = worker.run();
   await f.ready();
   const dropped = f.server.state.bindings[0]!;
@@ -561,7 +562,7 @@ test("a binding version change adds a new binding and drains a dropped binding",
 test("stop aborts each outstanding pull and deregisters each registration", async (t) => {
   const f = await fixture(t);
   const worker = new Worker(f.options());
-  t.after(() => worker.stop());
+  stopAfter(t, () => worker.stop());
   const running = worker.run();
   await until(
     () => f.server.requestsTo(FakePath.Pull).length === TWO_BINDINGS,
@@ -597,7 +598,7 @@ test("SIGHUP leaves the worker healthy and the handlers leave at termination", a
   const f = await fixture(t, SINGLE);
   const before = process.listenerCount("SIGHUP");
   const worker = new Worker(f.options());
-  t.after(() => worker.stop());
+  stopAfter(t, () => worker.stop());
   const running = worker.run();
   await f.ready();
   process.emit("SIGHUP");

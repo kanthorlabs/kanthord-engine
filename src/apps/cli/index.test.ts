@@ -12,7 +12,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { requirePiTools, temporary } from "../../kernel/test-support.ts";
+import {
+  requirePiTools,
+  stopAfter,
+  temporary,
+} from "../../kernel/test-support.ts";
 import { initialConfig, loadConfig } from "../../config/index.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { CLIENT_IDENTITY_PREFIX, IdentityKind } from "../../kernel/caller.ts";
@@ -509,7 +513,7 @@ async function environmentServer(
     response.end(JSON.stringify(answer));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => server.close());
+  stopAfter(t, () => server.close());
   return {
     endpoint: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
     seen,
@@ -841,7 +845,7 @@ async function secretServer(
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => server.close());
+  stopAfter(t, () => server.close());
   return {
     endpoint: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
     seen,
@@ -2520,7 +2524,7 @@ async function livenessServer(
     response.end(JSON.stringify(body));
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => server.close());
+  stopAfter(t, () => server.close());
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 }
 

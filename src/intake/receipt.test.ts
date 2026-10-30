@@ -25,6 +25,7 @@ import { allocateInboundId, insertInbound } from "./inbound-store.ts";
 import { intakeMigrations } from "./migrations.ts";
 import { unusedActionDependencies } from "./test-support.ts";
 import { webhookSecret } from "./webhook-secret.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const UNKNOWN_INBOUND_ID = "inbound_01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -61,7 +62,7 @@ function sign(secret: string, body: string): string {
 
 function harness(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
   ]);

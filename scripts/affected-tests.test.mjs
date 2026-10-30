@@ -26,6 +26,7 @@ import {
   selectTests,
 } from "./affected-tests.mjs";
 import { affectedReportSchema } from "../src/worker/unit/affected.ts";
+import { stopAfter } from "../src/kernel/stop-test-support.ts";
 
 const MODIFIED = "modified";
 const ADDED = "added";
@@ -99,7 +100,7 @@ const UNLOADABLE_TEST = 'import "./missing.mjs";\n';
 
 async function repository(t, files) {
   const root = await mkdtemp(join(tmpdir(), "kanthord-affected-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  stopAfter(t, () => rm(root, { recursive: true, force: true }));
   for (const [path, content] of Object.entries(files)) {
     await mkdir(join(root, dirname(path)), { recursive: true });
     await writeFile(join(root, path), content);

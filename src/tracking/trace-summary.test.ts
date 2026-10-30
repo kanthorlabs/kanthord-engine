@@ -16,6 +16,7 @@ import {
 } from "./contract.ts";
 import { trackingMigrations } from "./migrations.ts";
 import { insertTrace, readTrace } from "./trace-store.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const TRACE: ExecutionTrace = {
   trace_id: "a".repeat(32),
@@ -58,7 +59,7 @@ const FIRST_AGENT = "agent-0";
 
 function trackingStore(t: TestContext): Store {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: TRACKING_SERVICE_NAME, migrations: trackingMigrations },
   ]);

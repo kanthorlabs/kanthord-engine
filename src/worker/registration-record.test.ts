@@ -22,6 +22,7 @@ import {
   listRegistrationRecords,
   registrationRecord,
 } from "./registration-record.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const NOW = 1000;
 const PROJECT = createIdentity("project");
@@ -94,7 +95,7 @@ test("registration output enforces host, registration and activity field presenc
 
 function fixture(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([{ service: "worker", migrations: workerMigrations }]);
   return store;
 }

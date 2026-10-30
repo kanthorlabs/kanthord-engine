@@ -11,6 +11,7 @@ import {
 import { ResourceFailureReason, ResourceStatus } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { probeS3 } from "./probe.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const SECRET = "test_private-resource-health-secret";
 const ACCESS_KEY_ID = "test_private-s3-access-id";
@@ -137,8 +138,8 @@ test("S3 names the failure reason of a status failure and a network error", asyn
 
 test("S3 past its deadline observes no reason", async (t) => {
   const server = createServer(() => {});
-  t.after(() => server.closeAllConnections());
-  t.after(() => server.close());
+  stopAfter(t, () => server.closeAllConnections());
+  stopAfter(t, () => server.close());
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   const observed: string[] = [];
@@ -189,7 +190,7 @@ test("S3 network, construction and cleanup errors remain unknown without leaking
 
 test("S3 skips cancelled contexts and aborts an in-flight request, destroying its client", async (t) => {
   const context = new CancellationContext();
-  t.after(() => context.cancel());
+  stopAfter(t, () => context.cancel());
   const entered = Promise.withResolvers<AbortSignal>();
   const destroy = t.mock.fn();
   const createClient = t.mock.fn(() => ({

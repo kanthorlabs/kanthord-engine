@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { buildGraph } from "./affected-tests.mjs";
 import { keyOf } from "./suite-pass.mjs";
+import { stopAfter } from "../src/kernel/stop-test-support.ts";
 
 const ENTRY_POINT = fileURLToPath(new URL("./suite-pass.mjs", import.meta.url));
 const AFFECTED_REPORTER = fileURLToPath(
@@ -66,7 +67,7 @@ function configuration(alwaysRun = []) {
 
 async function fixture(t, files = {}) {
   const root = await mkdtemp(join(tmpdir(), "kanthord-suite-pass-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  stopAfter(t, () => rm(root, { recursive: true, force: true }));
   const all = {
     "package.json": fixturePackage(),
     ".gitignore": "node_modules/\npnpm-lock.yaml\n",

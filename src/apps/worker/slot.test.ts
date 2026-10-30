@@ -4,7 +4,11 @@ import { statSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { test, type TestContext } from "node:test";
-import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
+import {
+  hostEnvironment,
+  stopAfter,
+  temporary,
+} from "../../kernel/test-support.ts";
 import {
   encodeFrame,
   FrameKind,
@@ -107,7 +111,7 @@ function spawnSlot(
     ["-c", FRAME_DESCRIPTOR_REDIRECT, process.execPath, ...args],
     { env, stdio: "pipe" },
   );
-  t.after(() => {
+  stopAfter(t, () => {
     if (child.exitCode === null && child.signalCode === null)
       child.kill("SIGKILL");
   });

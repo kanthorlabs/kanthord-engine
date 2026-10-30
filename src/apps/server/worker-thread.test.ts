@@ -12,6 +12,7 @@ import { LogDestination } from "../../kernel/log.ts";
 import {
   hostEnvironment,
   requirePiTools,
+  stopAfter,
   temporary,
 } from "../../kernel/test-support.ts";
 import { directories } from "../../kernel/xdg.ts";
@@ -144,7 +145,7 @@ test("a worker thread registers its worker unit through the port and the invocat
   assert.deepEqual(Object.keys(data).sort(), DATA_KEYS);
   const env = threadEnvironment(root);
   const thread = startThread(data, env);
-  t.after(async () => {
+  stopAfter(t, async () => {
     await thread.terminate();
     port1.close();
   });
@@ -191,7 +192,7 @@ test("a worker thread exits by itself after its run ends", async (t) => {
     threadData(entryOf(port2)),
     threadEnvironment(temporary(t)),
   );
-  t.after(() => thread.terminate());
+  stopAfter(t, () => thread.terminate());
   port1.close();
   const [error] = await once(thread, "error");
   assert.match(String(error.message), /cannot read the server package version/);
@@ -217,7 +218,7 @@ test("the release bundle of the worker thread starts as an eval worker", async (
   mkdirSync(cwd, { recursive: true });
   const previous = process.cwd();
   process.chdir(cwd);
-  t.after(() => process.chdir(previous));
+  stopAfter(t, () => process.chdir(previous));
   const { port1, port2 } = new MessageChannel();
   const thread = new Worker(bundle.outputFiles[0]!.text, {
     eval: true,
@@ -225,7 +226,7 @@ test("the release bundle of the worker thread starts as an eval worker", async (
     transferList: [port2],
     env: threadEnvironment(temporary(t)),
   });
-  t.after(() => thread.terminate());
+  stopAfter(t, () => thread.terminate());
   port1.close();
   const [error] = await once(thread, "error");
   assert.equal(
@@ -263,7 +264,7 @@ test("a thread instance gets two entries, registers both and drains one after a 
     threadData(general, reviewer),
     threadEnvironment(temporary(t)),
   );
-  t.after(async () => {
+  stopAfter(t, async () => {
     await thread.terminate();
     for (const channel of served.values()) channel.port1.close();
   });
@@ -324,7 +325,7 @@ test("a worker thread exits after a stop that follows a drain and a resume of it
     threadData(entry),
     threadEnvironment(temporary(t)),
   );
-  t.after(async () => {
+  stopAfter(t, async () => {
     await thread.terminate();
     for (const channel of channels) channel.port1.close();
   });

@@ -15,7 +15,7 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { background } from "../../kernel/context.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { httpTransport } from "./transport.ts";
 import {
@@ -174,7 +174,8 @@ test("upload submits metadata then transfers bytes then completes without exposi
   await new Promise<void>((resolve) =>
     listener.listen(0, "127.0.0.1", resolve),
   );
-  t.after(
+  stopAfter(
+    t,
     () =>
       new Promise<void>((resolve, reject) =>
         listener.close((error) => (error ? reject(error) : resolve())),
@@ -291,7 +292,8 @@ async function failoverInput(t: TestContext) {
   await new Promise<void>((resolve) =>
     listener.listen(0, "127.0.0.1", resolve),
   );
-  t.after(
+  stopAfter(
+    t,
     () =>
       new Promise<void>((resolve, reject) =>
         listener.close((error) => (error ? reject(error) : resolve())),

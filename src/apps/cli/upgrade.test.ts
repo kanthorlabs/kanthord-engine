@@ -9,7 +9,11 @@ import {
 } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { Store } from "../../kernel/store.ts";
-import { requirePiTools, temporary } from "../../kernel/test-support.ts";
+import {
+  requirePiTools,
+  stopAfter,
+  temporary,
+} from "../../kernel/test-support.ts";
 import {
   DATABASE_FILE,
   enforceMasterKey,
@@ -258,7 +262,7 @@ test("upgrade writes each row when it happens, before a later step fails", async
   writePrivate(`${paths.database}.bak-${FIXED_STAMP}`, "");
   const previous = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = paths.env.XDG_DATA_HOME;
-  t.after(() => {
+  stopAfter(t, () => {
     if (previous === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = previous;
   });

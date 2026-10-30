@@ -14,12 +14,13 @@ import type {
   ToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
 import { checkoutConfinement } from "./checkout-confinement.ts";
+import { stopAfter } from "../../kernel/stop-test-support.ts";
 
 type Handler = (event: ToolCallEvent) => unknown;
 
 function fixture(t: TestContext) {
   const base = mkdtempSync(join(tmpdir(), "confinement-"));
-  t.after(() => rmSync(base, { recursive: true, force: true }));
+  stopAfter(t, () => rmSync(base, { recursive: true, force: true }));
   const root = join(base, "checkout");
   const outside = join(base, "outside");
   mkdirSync(join(root, "src"), { recursive: true });

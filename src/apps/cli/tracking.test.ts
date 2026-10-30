@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import { TRACE_QUERY_MAX_CHARACTERS } from "../../tracking/contract.ts";
 import { ExitCode } from "./constants.ts";
 import { runKanthord } from "./test-support.ts";
@@ -56,7 +56,7 @@ async function fakeServer(
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => server.close());
+  stopAfter(t, () => server.close());
   return {
     endpoint: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
     seen,
@@ -495,7 +495,7 @@ test("timeline list with a lost answer exits with indeterminate", async (t) => {
     response.destroy();
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => server.close());
+  stopAfter(t, () => server.close());
   const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const result = await run(
     t,
@@ -735,7 +735,7 @@ for (const [leaf, prefix, options] of [
     await new Promise<void>((resolve) =>
       server.listen(0, "127.0.0.1", resolve),
     );
-    t.after(() => server.close());
+    stopAfter(t, () => server.close());
     const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const result = await run(t, ["analytics", leaf, ...options], endpoint);
     assert.equal(result.code, ExitCode.Failure);

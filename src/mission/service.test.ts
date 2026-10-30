@@ -110,6 +110,7 @@ import {
   taskOwnerOf,
   updateNodeFilename,
 } from "./store.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const UNEXPECTED_COLLABORATION = "unexpected collaboration call";
 test("attempt pins survive edits and a rebind keeps the open revision's binding live", (t) => {
@@ -409,7 +410,7 @@ function fixture(
   text_max_bytes?: number,
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
   ]);

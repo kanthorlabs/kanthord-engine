@@ -14,6 +14,7 @@ import {
 } from "./contract.ts";
 import { AgentErrorCode, ChainLevel } from "../agent/contract.ts";
 import type { AgentSelection } from "../scheduler/contract.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 function pinOf(
   agentName: string,
@@ -34,7 +35,7 @@ function pinOf(
 
 test("Worker authorizes the pinned inference configuration and refuses each broken binding chain", (t) => {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const row: NonNullable<ReturnType<WorkerBindingRowOf>> = {
     binding_id: createIdentity("binding"),
     project_id: createIdentity("project"),
@@ -173,7 +174,7 @@ test("Worker authorizes the pinned inference configuration and refuses each brok
 
 test("Worker authorizes one credential per distinct credential of the agents of a two-agent worker", (t) => {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const row: NonNullable<ReturnType<WorkerBindingRowOf>> = {
     binding_id: createIdentity("binding"),
     project_id: createIdentity("project"),

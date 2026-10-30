@@ -10,7 +10,7 @@ import { agentOperations } from "../../agent/contract.ts";
 import { loadPi } from "../../agent/pi.ts";
 import { scriptedProvider } from "../../agent/test-support.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import { createModelRuntime, resolveModel } from "../../llm/model-connector.ts";
 import {
   BindingKind,
@@ -162,7 +162,7 @@ async function recordSessionManagers(t: TestContext) {
     managers.push(manager);
     return manager;
   };
-  t.after(() => {
+  stopAfter(t, () => {
     SessionManager.inMemory = original;
   });
   return managers;
@@ -276,7 +276,7 @@ async function agentFixture(
     environmentModelRuntimeFactory: model.factory,
   });
   const revision = await enableEnvironmentAgent(fixture);
-  t.after(async () => {
+  stopAfter(t, async () => {
     fixture.project.cancelEnvironmentRuns();
     await fixture.worker.stopPool();
   });
@@ -619,7 +619,7 @@ test(
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const held = Promise.withResolvers<void>();
-    t.after(() => held.resolve());
+    stopAfter(t, () => held.resolve());
     const reached = { step: false };
     const agent = await agentFixture(t, [
       async () => {

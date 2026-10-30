@@ -25,7 +25,11 @@ import {
   type OperationResult,
   OperationResultType,
 } from "../../kernel/operation.ts";
-import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
+import {
+  hostEnvironment,
+  stopAfter,
+  temporary,
+} from "../../kernel/test-support.ts";
 import { Intent, missionOperations } from "../../mission/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import {
@@ -319,7 +323,7 @@ test(
           throw new Error("Unexpected refresh");
         },
       );
-      t.after(() => credentials.discard());
+      stopAfter(t, () => credentials.discard());
       const setup = completed(
         await holder.client["execution.setup.get"]({
           params: { execution_id: holder.execution.execution_id },
@@ -509,7 +513,7 @@ test(
       modelRuntimeFactory: scriptedModelRuntime(provider),
       context: background,
     });
-    t.after(() => agent.dispose());
+    stopAfter(t, () => agent.dispose());
     await t.test(
       "E07.5 layered inference and execution credentials",
       async () => {

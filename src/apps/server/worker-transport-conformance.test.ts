@@ -26,6 +26,7 @@ import {
   provisionRepositoryCredentials,
   provisionWorkerProject,
 } from "./test-support.ts";
+import { stopAfter } from "../../kernel/stop-test-support.ts";
 
 type Fixture = Awaited<ReturnType<typeof gatewayFixture>>;
 type Provision = Awaited<ReturnType<typeof provisionWorkerProject>>;
@@ -260,7 +261,7 @@ async function portSide(
     },
   });
   const opened: Closable[] = [];
-  t.after(async () => {
+  stopAfter(t, async () => {
     await thread.terminate();
     for (const port of opened) port.close();
   });

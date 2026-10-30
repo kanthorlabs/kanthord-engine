@@ -30,7 +30,7 @@ import {
   ResourceStatus,
 } from "../../kernel/health.ts";
 import { HttpStatus } from "../../kernel/http.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import {
   Intent,
   type Mission,
@@ -676,7 +676,7 @@ test("E07.12 a failed project inventory refuses the healthcheck report", async (
 
 test("E07.13 a resource check past its deadline reports unknown with deadline_exceeded", async (t) => {
   let timer: NodeJS.Timeout | undefined;
-  t.after(() => clearTimeout(timer));
+  stopAfter(t, () => clearTimeout(timer));
   const check: ResourceCheck = () =>
     new Promise((resolve) => {
       timer = setTimeout(

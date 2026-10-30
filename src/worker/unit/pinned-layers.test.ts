@@ -11,7 +11,7 @@ import {
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { background } from "../../kernel/context.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import { getAgentDeclaration } from "../../agent/catalog.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { framing, PromptConsumer } from "../../agent/prompt-render.ts";
@@ -87,13 +87,13 @@ test("pinned prompt layers survive compaction and all model calls retain their o
     hooks: [pinned.hook],
     context: background,
   });
-  t.after(() => session.dispose());
+  stopAfter(t, () => session.dispose());
   pinned.pinInference(session, composed.systemPrompt);
   let turns = 0;
   const unsubscribe = countTurns(session, () => {
     turns++;
   });
-  t.after(unsubscribe);
+  stopAfter(t, unsubscribe);
   await session.prompt(work.text);
   await session.prompt("second request");
   await session.compact();
@@ -163,10 +163,11 @@ test("two tool calls produce three counted turns with no absent project message"
     hooks: [pins.hook],
     context: background,
   });
-  t.after(() => session.dispose());
+  stopAfter(t, () => session.dispose());
   pins.pinInference(session, "owned system");
   let turns = 0;
-  t.after(
+  stopAfter(
+    t,
     countTurns(session, () => {
       turns++;
     }),
@@ -298,7 +299,7 @@ for (const isSplitTurn of [false, true]) {
       hooks: [pins.hook],
       context: background,
     });
-    t.after(() => session.dispose());
+    stopAfter(t, () => session.dispose());
     pins.pinInference(session, composed.systemPrompt);
     const decorated = session.agent.streamFunction;
     const requests: Parameters<StreamFn>[1][] = [];

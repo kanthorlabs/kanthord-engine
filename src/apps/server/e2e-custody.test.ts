@@ -9,7 +9,7 @@ import { writePrivate } from "../../kernel/files.ts";
 import { ResourceFailureReason, ResourceStatus } from "../../kernel/health.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { CAPABILITY_MODEL_LIST_READ } from "../../llm/platforms.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import { environment, kanthord } from "./cli-test-support.ts";
 import { gatewayFixture } from "./test-support.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
@@ -498,7 +498,7 @@ test("check of a key that the provider refuses answers unhealthy with the failur
   const provider = createServer((_request, response) => {
     response.writeHead(HttpStatus.Unauthorized).end();
   });
-  t.after(() => provider.close());
+  stopAfter(t, () => provider.close());
   await new Promise<void>((resolve) =>
     provider.listen(0, "127.0.0.1", resolve),
   );

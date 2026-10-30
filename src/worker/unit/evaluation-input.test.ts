@@ -14,7 +14,11 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
-import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
+import {
+  hostEnvironment,
+  stopAfter,
+  temporary,
+} from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import type { Evidence } from "../../mission/contract.ts";
 import type { MethodClients } from "./method-clients.ts";
@@ -279,7 +283,7 @@ test("an examine node with no binding places the produced evidence privately and
     credentials: { release: async () => {} },
     context: background,
   });
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const workspaces = WorkspaceRoot.open(temporary(t));
   const prepared = await prepareEvaluation(
     {
@@ -370,7 +374,7 @@ test("an examine node with one binding places the produced evidence outside its 
     credentials: { release: async () => {} },
     context: background,
   });
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const workspaces = WorkspaceRoot.open(temporary(t));
   const prepared = await prepareEvaluation(
     {
@@ -485,7 +489,7 @@ test("an implement snapshot evaluation places the produced evidence outside its 
     credentials: { release: async () => {} },
     context: background,
   });
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const workspaces = WorkspaceRoot.open(join(state, "workspaces"));
   const prepared = await prepareEvaluation(
     {
@@ -602,7 +606,7 @@ async function twoBindingEvaluation(t: test.TestContext, names: string[]) {
     credentials: { release: async () => {} },
     context: background,
   });
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const workspaces = WorkspaceRoot.open(join(state, "workspaces"));
   const pending = prepareEvaluation(
     {

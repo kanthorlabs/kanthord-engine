@@ -32,6 +32,7 @@ import {
 import { trackingMigrations } from "./migrations.ts";
 import { TrackingService } from "./service.ts";
 import { insertTrace, listSpans, readSpan, readText } from "./trace-store.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const ROOT_SPAN_ID = "0123456789abcdef";
 const OPERATION = "tracking.cause_label";
@@ -189,7 +190,7 @@ const SECOND_BODY: CauseLabelBody = {
 
 function endedTrace(t: TestContext, state = "ok"): Store {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: TRACKING_SERVICE_NAME, migrations: trackingMigrations },
   ]);

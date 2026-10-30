@@ -3,6 +3,7 @@ import { test, type TestContext } from "node:test";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { TRACKING_SERVICE_NAME } from "./contract.ts";
 import { trackingMigrations } from "./migrations.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const TEXT_TABLE = "tracking_telemetry_text";
 const ENTRY_TABLE = "tracking_session_entry";
@@ -13,7 +14,7 @@ const UNIQUE_INDEX = 1;
 
 function migratedStore(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: TRACKING_SERVICE_NAME, migrations: trackingMigrations },
   ]);

@@ -49,6 +49,7 @@ import { isString } from "../kernel/values.ts";
 import {
   fixtureTemplate,
   overrideEnvironment,
+  stopAfter,
   SUITE_CONCURRENCY,
   temporary,
   UNSET_GIT_ENVIRONMENT,
@@ -66,7 +67,7 @@ const MISSING_REPOSITORY = "file:////nonexistent_kanthord_plan04_test";
 suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
   test("gitLsRemote resolves for a local git repository", async (t) => {
     const dir = mkdtempSync(join(tmpdir(), "kanthord-repository-"));
-    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    stopAfter(t, () => rmSync(dir, { recursive: true, force: true }));
     await simpleGit(dir).init();
     await assert.doesNotReject(
       gitLsRemote(
@@ -91,7 +92,7 @@ suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
 
   test("gitLsRemote rejects when the deadline elapses", async (t) => {
     const dir = mkdtempSync(join(tmpdir(), "kanthord-repository-"));
-    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    stopAfter(t, () => rmSync(dir, { recursive: true, force: true }));
     await simpleGit(dir).init();
     await assert.rejects(
       gitLsRemote(
@@ -105,7 +106,7 @@ suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
 
   test("gitLsRemote rejects when the context was already cancelled", async (t) => {
     const dir = mkdtempSync(join(tmpdir(), "kanthord-repository-"));
-    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    stopAfter(t, () => rmSync(dir, { recursive: true, force: true }));
     await simpleGit(dir).init();
     const context = new CancellationContext();
     context.cancel();
@@ -324,7 +325,7 @@ function isolateTemporary(t: test.TestContext): string {
   const scratch = mkdtempSync(join(SHORT_TEMPORARY_ROOT, "kd-scratch-"));
   const previous = process.env.TMPDIR;
   process.env.TMPDIR = scratch;
-  t.after(() => {
+  stopAfter(t, () => {
     if (previous === undefined) delete process.env.TMPDIR;
     else process.env.TMPDIR = previous;
     rmSync(scratch, { recursive: true, force: true });
@@ -396,7 +397,7 @@ test("every git caller rejects a nonzero exit with an empty stderr", async (t) =
   writeFileSync(join(bin, "git"), "#!/bin/sh\nexit 1\n", { mode: 0o700 });
   const path = process.env.PATH;
   process.env.PATH = `${bin}:${path}`;
-  t.after(() => {
+  stopAfter(t, () => {
     process.env.PATH = path;
   });
   const failed = { code: GIT_FAILED };
@@ -467,7 +468,7 @@ test("a git failure keeps the operation and the stderr without credentials in it
   );
   const path = process.env.PATH;
   process.env.PATH = `${bin}:${path}`;
-  t.after(() => {
+  stopAfter(t, () => {
     process.env.PATH = path;
   });
   const keepsCause = (operation: string) => (error: unknown) => {

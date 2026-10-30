@@ -57,6 +57,7 @@ import {
   ENVIRONMENT_SECRET_PLATFORM,
   PROJECT_SERVICE_NAME,
 } from "../project/contract.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const TestPlatform = {
   Key: "key-platform",
@@ -130,7 +131,7 @@ function unexpectedCollaboration(): never {
 
 test("credential creation and rotation enforce the serialized budget before any write", (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   const overhead = Buffer.byteLength(
     canonicalJSON({ type: "api_key", key: "" }),
   );
@@ -1902,7 +1903,7 @@ const ONE_CALL = 1;
 
 test("check runs the probe of the platform on the parsed secret and metadata and stores nothing", async (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   const calls: {
     secret: unknown;
     metadata: unknown;
@@ -1991,7 +1992,7 @@ test("check runs the probe of the platform on the parsed secret and metadata and
 test("check answers deadline_exceeded when the probe exceeds the 10 s deadline", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   const set: CredentialPlatformSet = {
     platforms: {
       [TestPlatform.Key]: {
@@ -2019,7 +2020,7 @@ test("check answers deadline_exceeded when the probe exceeds the 10 s deadline",
 test("check keeps a definite answer that the probe returns after the 10 s deadline", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   const set: CredentialPlatformSet = {
     platforms: {
       [TestPlatform.Key]: {
@@ -2047,7 +2048,7 @@ test("check keeps a definite answer that the probe returns after the 10 s deadli
 
 test("check answers unclassified when the caller cancels the probe", async (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   const caller = new CancellationContext();
   const set: CredentialPlatformSet = {
     platforms: {
@@ -2077,7 +2078,7 @@ test("check answers unclassified when the caller cancels the probe", async (t) =
 
 test("check answers unknown when the probe throws", async (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   const set: CredentialPlatformSet = {
     platforms: {
       [TestPlatform.Key]: {
@@ -2142,7 +2143,7 @@ function storedSecret(f: ReturnType<typeof fixture>, name: string): unknown {
 
 test("a generated secret refuses the generic create, rotate, metadata edit and check", async (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   fails(
     () =>
       f.create({
@@ -2205,7 +2206,7 @@ test("a generated secret refuses the generic create, rotate, metadata edit and c
 
 test("a generated create checks the name before the generator and logs no secret", (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   const calls: string[] = [];
   const created = f.store.transaction((tx) =>
     f.component.createGenerated(
@@ -2276,7 +2277,7 @@ test("a generated create checks the name before the generator and logs no secret
 test("a generated rotate refuses a stale revision, replaces a legacy secret and drains the older revision", (t) => {
   const pins = new Map<string, string[]>();
   const f = fixture({ pins });
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   const id = createIdentity("credential");
   const legacy = encrypt(key, id, TestPlatform.Generated, {});
   f.store.database
