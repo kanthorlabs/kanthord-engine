@@ -9,7 +9,11 @@ import { WorkerUnit } from "../worker/unit.ts";
 import { directories } from "../../kernel/xdg.ts";
 import type { ModelRuntimeFactory } from "../../worker/unit/index.ts";
 import { httpTransport } from "../worker/transport.ts";
-import { requirePiTools, temporary } from "../../kernel/test-support.ts";
+import {
+  requirePiTools,
+  temporary,
+  temporaryDirectory,
+} from "../../kernel/test-support.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { httpClient } from "../../gateway/client.ts";
 import {
@@ -371,7 +375,7 @@ export async function inProcessWorker(
   },
 ) {
   requirePiTools();
-  const root = temporary(t);
+  const root = temporaryDirectory();
   const env = {
     ...process.env,
     HOME: root,
@@ -409,6 +413,7 @@ export async function inProcessWorker(
     await worker.stop();
     await running;
   });
+  t.after(() => rmSync(root, { recursive: true, force: true }));
   await Promise.race([
     ready.promise,
     running.then((error) => {
@@ -653,6 +658,7 @@ export async function gatewayFixture(
   const trackingStore = new Store(":memory:");
   trackingStore.migrate(trackingDatabaseMigrations);
   const logs: string[] = [];
+  const stateDirectory = options.stateDirectory ?? temporaryDirectory();
   const {
     scheduler,
     tracking,
@@ -675,7 +681,7 @@ export async function gatewayFixture(
     config,
     store,
     trackingStore,
-    stateDirectory: options.stateDirectory ?? temporary(t),
+    stateDirectory,
     workbenchModelRuntimeFactory: options.workbenchModelRuntimeFactory,
     environmentModelRuntimeFactory: options.environmentModelRuntimeFactory,
     registry: options.registry,
@@ -749,6 +755,8 @@ export async function gatewayFixture(
       trackingStore.close();
     }
   });
+  if (options.stateDirectory === undefined)
+    t.after(() => rmSync(stateDirectory, { recursive: true, force: true }));
   for (const service of [
     scheduler,
     custody,
