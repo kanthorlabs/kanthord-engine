@@ -16,6 +16,8 @@ import { CancellationContext } from "./context.ts";
 import { diagnostic, diagnosticRows } from "./errors.ts";
 import { redaction } from "./log.ts";
 
+export const SUITE_CONCURRENCY = 4;
+
 interface PiToolsDigests {
   tools: Record<string, { targets: Record<string, { binary_sha256: string }> }>;
 }
