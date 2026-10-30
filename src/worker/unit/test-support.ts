@@ -14,6 +14,7 @@ import { background } from "../../kernel/context.ts";
 import {
   fixtureTemplate,
   hostEnvironment,
+  stopAfter,
   temporary,
 } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
@@ -305,7 +306,7 @@ async function openExecution(
     context: background,
     secrets: async () => [STEPS_KEY],
   });
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const workspace = await prepareStepsWorkspace(input, run);
   for (const checkout of workspace.checkouts)
     appendFileSync(join(checkout.directory, ".git", "config"), USER_CONFIG);
@@ -337,7 +338,7 @@ async function openExecution(
     modelRuntimeFactory: scriptedModelRuntime(provider),
     context: run.operationContext,
   });
-  t.after(() => agent.dispose());
+  stopAfter(t, () => agent.dispose());
   return {
     input,
     run,

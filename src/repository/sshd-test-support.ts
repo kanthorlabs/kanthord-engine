@@ -10,7 +10,7 @@ import type { TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import { isolatedGitEnvironment } from "../kernel/git-environment.ts";
-import { temporary } from "../kernel/test-support.ts";
+import { stopAfter, temporary } from "../kernel/test-support.ts";
 import type { SshAccess } from "./ssh-agent.ts";
 import { SSH_SIGN_USER } from "./contract.ts";
 import {
@@ -172,7 +172,7 @@ export async function startTestSshd(t: TestContext): Promise<TestSshd> {
       resolve();
     });
   });
-  t.after(async () => {
+  stopAfter(t, async () => {
     sshd.kill();
     await closed;
   });

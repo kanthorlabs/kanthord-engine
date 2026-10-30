@@ -9,6 +9,7 @@ import {
   keyFingerprint,
   sealJSON,
 } from "../../kernel/hpke.ts";
+import { stopAfter } from "../../kernel/test-support.ts";
 import { isString } from "../../kernel/values.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import {
@@ -271,7 +272,8 @@ export async function fakeInstanceServer(t: TestContext) {
     });
   });
   await new Promise<void>((resolve) => listener.listen(0, LOOPBACK, resolve));
-  t.after(
+  stopAfter(
+    t,
     () =>
       new Promise<void>((resolve) => {
         listener.closeAllConnections();
