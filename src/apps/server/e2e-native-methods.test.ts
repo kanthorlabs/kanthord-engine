@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { unusedHostTools } from "../../worker/test-support.ts";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test, type TestContext } from "node:test";
+import { suite, test, type TestContext } from "node:test";
 import { simpleGit } from "simple-git";
 import { httpClient } from "../../gateway/client.ts";
 import { plainHandoverPayloadSchema } from "../../custody/contract.ts";
@@ -19,7 +19,11 @@ import {
   type OperationResult,
   OperationResultType,
 } from "../../kernel/operation.ts";
-import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
+import {
+  hostEnvironment,
+  SUITE_CONCURRENCY,
+  temporary,
+} from "../../kernel/test-support.ts";
 import {
   ActorKind,
   AssessmentResult,
@@ -452,416 +456,422 @@ async function methodsFixture(t: TestContext) {
   };
 }
 
-test(
-  "E08 native methods execute, checkpoint, assess and request actions over HTTP",
-  { timeout: JOURNEY_TIMEOUT_MS },
-  async (t) => {
-    const {
-      gitHub,
-      execute,
-      evidence,
-      state,
-      read,
-      nodes,
-      tasks,
-      barePaths,
-      workspaces,
-      general,
-      lab,
-      reviewer,
-    } = await methodsFixture(t);
-    const [A, B, C] = nodes as [string, string, string];
-    let headA = "";
-    let headC = "";
-    let gatedResource = "";
-    await t.test("E08.1 implement task commit and head evidence", async () => {
-      const answer = await execute(general, A, hello());
-      assert.deepEqual(answer.result, {
-        kind: "released",
-        furtherWork: false,
-      });
-      headA = (
-        await simpleGit(
-          barePaths.get("git@github.com:owner/repo.git")!,
-        ).revparse([`refs/heads/kanthord/${A}`])
-      ).trim();
-      const items = (await evidence(A)).items;
-      assert.equal(items.length, SINGLE_ITEM);
-      assert.deepEqual(items[0]!.assets[0]!.address, {
-        kind: "repository",
-        binding_id: answer.setup.repositories[0]!.binding_id,
-        commit: headA,
-      });
-      assert.ok(
-        (
-          await simpleGit(barePaths.get("git@github.com:owner/repo.git")!).raw([
-            "log",
-            "-1",
-            "--format=%b",
-            headA,
-          ])
-        ).includes(tasks[0]!),
+suite("native methods", { concurrency: SUITE_CONCURRENCY }, () => {
+  test(
+    "E08 native methods execute, checkpoint, assess and request actions over HTTP",
+    { timeout: JOURNEY_TIMEOUT_MS },
+    async (t) => {
+      const {
+        gitHub,
+        execute,
+        evidence,
+        state,
+        read,
+        nodes,
+        tasks,
+        barePaths,
+        workspaces,
+        general,
+        lab,
+        reviewer,
+      } = await methodsFixture(t);
+      const [A, B, C] = nodes as [string, string, string];
+      let headA = "";
+      let headC = "";
+      let gatedResource = "";
+      await t.test(
+        "E08.1 implement task commit and head evidence",
+        async () => {
+          const answer = await execute(general, A, hello());
+          assert.deepEqual(answer.result, {
+            kind: "released",
+            furtherWork: false,
+          });
+          headA = (
+            await simpleGit(
+              barePaths.get("git@github.com:owner/repo.git")!,
+            ).revparse([`refs/heads/kanthord/${A}`])
+          ).trim();
+          const items = (await evidence(A)).items;
+          assert.equal(items.length, SINGLE_ITEM);
+          assert.deepEqual(items[0]!.assets[0]!.address, {
+            kind: "repository",
+            binding_id: answer.setup.repositories[0]!.binding_id,
+            commit: headA,
+          });
+          assert.ok(
+            (
+              await simpleGit(
+                barePaths.get("git@github.com:owner/repo.git")!,
+              ).raw(["log", "-1", "--format=%b", headA])
+            ).includes(tasks[0]!),
+          );
+          const WAITING = "Waiting";
+          assert.equal(await state(A), WAITING);
+        },
       );
-      const WAITING = "Waiting";
-      assert.equal(await state(A), WAITING);
-    });
-    await t.test("E08.2 gated implement node publishes its task", async () => {
-      const answer = await execute(general, C, hello());
-      assert.deepEqual(answer.result, {
-        kind: "released",
-        furtherWork: false,
-      });
-      headC = (
-        await simpleGit(
-          barePaths.get("git@github.com:owner/gated.git")!,
-        ).revparse([`refs/heads/kanthord/${C}`])
-      ).trim();
-      const asset = (await evidence(C)).items[0]!.assets[0]!;
-      assert.ok(asset.kind === REPOSITORY);
-      assert.equal(asset.address.commit, headC);
-      gatedResource = "repository:github:owner/gated";
-    });
-    await t.test(
-      "E08.3 turn budget publishes a checkpoint without evidence",
-      async () => {
-        const answer = await execute(lab, B, [
-          tool("write", { path: "notes.txt", content: "partial" }),
-          tool("write", { path: "never.txt", content: "never" }),
-        ]);
-        const budgetEnd = { reason: "budget_end", code: "turns" };
-        assert.deepEqual(answer.result, {
-          kind: "released",
-          furtherWork: true,
-          stop: {
-            ...budgetEnd,
-            cause: {
-              category: "unattributed",
-              suspects: ["plan", "model"],
-              assigner: "rule",
-            },
-          },
-        });
-        assert.equal(answer.provider.calls.length, SINGLE_ITEM);
-        assert.deepEqual((await evidence(B)).items, []);
-        const git = simpleGit(barePaths.get("git@github.com:owner/repo.git")!);
-        assert.match(
-          await git.raw([
-            "log",
-            "-1",
-            "--format=%s",
-            `refs/heads/kanthord/${B}`,
-          ]),
-          /^feat: say hello\n$/,
-        );
-        assert.ok(
-          (
-            await git.raw([
-              "ls-tree",
-              "--name-only",
-              `refs/heads/kanthord/${B}`,
-            ])
-          ).includes("notes.txt"),
-        );
-        const AVAILABLE = "Available";
-        assert.equal(await state(B), AVAILABLE);
-        const claim = await read<{ claim_state: string; stop: unknown }>(
-          ["scheduler", "claim", "get", answer.execution.execution_id],
-          lab.env,
-        );
-        const FINISHED = "finished";
-        assert.equal(claim.claim_state, FINISHED);
-        assert.deepEqual(claim.stop, budgetEnd);
-      },
-    );
-    await t.test(
-      "E08.4 reviewer verifies implement node and task and closes the claim",
-      async () => {
-        const answer = await execute(reviewer, A, review());
-        const CLOSED = "closed";
-        assert.equal(answer.result.kind, CLOSED);
-        const verified = (await evidence(A)).items.find(
-          (item) => item.verification,
-        )!;
-        assert.deepEqual(verified.verification!.tested_input, {
-          kind: "repository",
-          binding_id: answer.setup.repositories[0]!.binding_id,
-          commit: headA,
-        });
-        assert.deepEqual(
-          verified.verification!.results.map((result) => result.exit_code),
-          [SUCCESSFUL_EXIT, SUCCESSFUL_EXIT],
-        );
-        assert.deepEqual(
-          verified.verification!.results.map((result) => result.command),
-          ["test -f hello.txt", "grep -q hello hello.txt"],
-        );
-        assert.equal(
-          existsSync(workspaces.executionKey(answer.execution.execution_id)),
-          false,
-        );
-        assert.equal(
-          JSON.stringify(answer.provider.calls).includes(
-            "WORKSPACE_AGENT_FILE_MUST_NOT_WIN",
-          ),
-          false,
-        );
-        const COMPLETED = "Completed";
-        assert.equal(await state(A), COMPLETED);
-      },
-    );
-    await t.test(
-      "E08.5 passing reviewer requests the gated action before release",
-      async () => {
-        const answer = await execute(reviewer, C, review());
-        assert.deepEqual(answer.result, {
-          kind: "released",
-          furtherWork: false,
-        });
-        assert.deepEqual(
-          gitHub.calls.map((call) => ({
-            method: call.method,
-            path: call.path,
-            body: call.body,
-            token: call.token,
-          })),
-          [
-            {
-              method: "POST",
-              path: "/repos/owner/gated/pulls",
-              body: {
-                head: `kanthord/${C}`,
-                base: "main",
-                title: "feat: say hello",
+      await t.test(
+        "E08.2 gated implement node publishes its task",
+        async () => {
+          const answer = await execute(general, C, hello());
+          assert.deepEqual(answer.result, {
+            kind: "released",
+            furtherWork: false,
+          });
+          headC = (
+            await simpleGit(
+              barePaths.get("git@github.com:owner/gated.git")!,
+            ).revparse([`refs/heads/kanthord/${C}`])
+          ).trim();
+          const asset = (await evidence(C)).items[0]!.assets[0]!;
+          assert.ok(asset.kind === REPOSITORY);
+          assert.equal(asset.address.commit, headC);
+          gatedResource = "repository:github:owner/gated";
+        },
+      );
+      await t.test(
+        "E08.3 turn budget publishes a checkpoint without evidence",
+        async () => {
+          const answer = await execute(lab, B, [
+            tool("write", { path: "notes.txt", content: "partial" }),
+            tool("write", { path: "never.txt", content: "never" }),
+          ]);
+          const budgetEnd = { reason: "budget_end", code: "turns" };
+          assert.deepEqual(answer.result, {
+            kind: "released",
+            furtherWork: true,
+            stop: {
+              ...budgetEnd,
+              cause: {
+                category: "unattributed",
+                suspects: ["plan", "model"],
+                assigner: "rule",
               },
-              token: "test_methods_github",
+            },
+          });
+          assert.equal(answer.provider.calls.length, SINGLE_ITEM);
+          assert.deepEqual((await evidence(B)).items, []);
+          const git = simpleGit(
+            barePaths.get("git@github.com:owner/repo.git")!,
+          );
+          assert.match(
+            await git.raw([
+              "log",
+              "-1",
+              "--format=%s",
+              `refs/heads/kanthord/${B}`,
+            ]),
+            /^feat: say hello\n$/,
+          );
+          assert.ok(
+            (
+              await git.raw([
+                "ls-tree",
+                "--name-only",
+                `refs/heads/kanthord/${B}`,
+              ])
+            ).includes("notes.txt"),
+          );
+          const AVAILABLE = "Available";
+          assert.equal(await state(B), AVAILABLE);
+          const claim = await read<{ claim_state: string; stop: unknown }>(
+            ["scheduler", "claim", "get", answer.execution.execution_id],
+            lab.env,
+          );
+          const FINISHED = "finished";
+          assert.equal(claim.claim_state, FINISHED);
+          assert.deepEqual(claim.stop, budgetEnd);
+        },
+      );
+      await t.test(
+        "E08.4 reviewer verifies implement node and task and closes the claim",
+        async () => {
+          const answer = await execute(reviewer, A, review());
+          const CLOSED = "closed";
+          assert.equal(answer.result.kind, CLOSED);
+          const verified = (await evidence(A)).items.find(
+            (item) => item.verification,
+          )!;
+          assert.deepEqual(verified.verification!.tested_input, {
+            kind: "repository",
+            binding_id: answer.setup.repositories[0]!.binding_id,
+            commit: headA,
+          });
+          assert.deepEqual(
+            verified.verification!.results.map((result) => result.exit_code),
+            [SUCCESSFUL_EXIT, SUCCESSFUL_EXIT],
+          );
+          assert.deepEqual(
+            verified.verification!.results.map((result) => result.command),
+            ["test -f hello.txt", "grep -q hello hello.txt"],
+          );
+          assert.equal(
+            existsSync(workspaces.executionKey(answer.execution.execution_id)),
+            false,
+          );
+          assert.equal(
+            JSON.stringify(answer.provider.calls).includes(
+              "WORKSPACE_AGENT_FILE_MUST_NOT_WIN",
+            ),
+            false,
+          );
+          const COMPLETED = "Completed";
+          assert.equal(await state(A), COMPLETED);
+        },
+      );
+      await t.test(
+        "E08.5 passing reviewer requests the gated action before release",
+        async () => {
+          const answer = await execute(reviewer, C, review());
+          assert.deepEqual(answer.result, {
+            kind: "released",
+            furtherWork: false,
+          });
+          assert.deepEqual(
+            gitHub.calls.map((call) => ({
+              method: call.method,
+              path: call.path,
+              body: call.body,
+              token: call.token,
+            })),
+            [
+              {
+                method: "POST",
+                path: "/repos/owner/gated/pulls",
+                body: {
+                  head: `kanthord/${C}`,
+                  base: "main",
+                  title: "feat: say hello",
+                },
+                token: "test_methods_github",
+              },
+            ],
+          );
+          const requested = (await evidence(C)).items.find(
+            (item) => item.requirement_key === GATED_REQUIREMENT,
+          );
+          assert.deepEqual(requested?.assets[0]?.address, {
+            kind: "pull_request",
+            resource_identity: gatedResource,
+            number: gitHub.pulls[0]!.number,
+          });
+          const REQUESTED = "External.Requested";
+          assert.equal(await state(C), REQUESTED);
+        },
+      );
+    },
+  );
+
+  const CHECKOUT_FLOW_PRIORITY = 10;
+  const TWO_ASSETS = 2;
+  const FAILED_EXIT = 1;
+  const MERGE_COMMITS = { api: "a".repeat(40), web: "b".repeat(40) };
+  const BOTH_HELLO = () => [
+    tool("bash", {
+      command: "printf hello > api/hello.txt && printf hello > web/hello.txt",
+    }),
+    fauxAssistantMessage("done"),
+  ];
+
+  test(
+    "EF09b.1-EF09b.5 an implement node with two repository bindings runs, reviews and lands over HTTP",
+    { timeout: JOURNEY_TIMEOUT_MS },
+    async (t) => {
+      const h = await methodsFixture(t);
+      const api = h.bindingSet.bindings.api!.id;
+      const web = h.bindingSet.bindings.web!.id;
+      const version = async () =>
+        (await h.read<{ version: number }>(["mission", "get", h.project.id]))
+          .version;
+      const checkoutFlow = (
+        await h.create({
+          filename: "checkout-flow.md",
+          content: {
+            ...CONTENT,
+            name: "Checkout flow",
+            criterion: "each checkout holds hello.txt",
+            verifications: ["test -f api/hello.txt && test -f web/hello.txt"],
+            intent: Intent.Implement,
+            bindings: [api, web],
+          },
+          tasks: [
+            {
+              filename: "task-checkout-flow.md",
+              content: {
+                ...CONTENT,
+                criterion: "each checkout holds hello",
+                verifications: [
+                  "grep -q hello api/hello.txt && grep -q hello web/hello.txt",
+                ],
+              },
             },
           ],
-        );
-        const requested = (await evidence(C)).items.find(
-          (item) => item.requirement_key === GATED_REQUIREMENT,
-        );
-        assert.deepEqual(requested?.assets[0]?.address, {
-          kind: "pull_request",
-          resource_identity: gatedResource,
-          number: gitHub.pulls[0]!.number,
-        });
-        const REQUESTED = "External.Requested";
-        assert.equal(await state(C), REQUESTED);
-      },
-    );
-  },
-);
-
-const CHECKOUT_FLOW_PRIORITY = 10;
-const TWO_ASSETS = 2;
-const FAILED_EXIT = 1;
-const MERGE_COMMITS = { api: "a".repeat(40), web: "b".repeat(40) };
-const BOTH_HELLO = () => [
-  tool("bash", {
-    command: "printf hello > api/hello.txt && printf hello > web/hello.txt",
-  }),
-  fauxAssistantMessage("done"),
-];
-
-test(
-  "EF09b.1-EF09b.5 an implement node with two repository bindings runs, reviews and lands over HTTP",
-  { timeout: JOURNEY_TIMEOUT_MS },
-  async (t) => {
-    const h = await methodsFixture(t);
-    const api = h.bindingSet.bindings.api!.id;
-    const web = h.bindingSet.bindings.web!.id;
-    const version = async () =>
-      (await h.read<{ version: number }>(["mission", "get", h.project.id]))
-        .version;
-    const checkoutFlow = (
-      await h.create({
-        filename: "checkout-flow.md",
-        content: {
-          ...CONTENT,
-          name: "Checkout flow",
-          criterion: "each checkout holds hello.txt",
-          verifications: ["test -f api/hello.txt && test -f web/hello.txt"],
-          intent: Intent.Implement,
-          bindings: [api, web],
+        })
+      ).node_id;
+      await h.write(["mission", "node", "priority", "set", checkoutFlow], {
+        value: CHECKOUT_FLOW_PRIORITY,
+        expected_mission_version: await version(),
+      });
+      const bare = (name: string) =>
+        simpleGit(h.barePaths.get(`git@github.com:owner/${name}.git`)!);
+      await t.test(
+        "EF09b.1 the node get holds api and web in binding order",
+        async () => {
+          const node = await h.read<{ content: { bindings: string[] } }>([
+            "mission",
+            "node",
+            "get",
+            checkoutFlow,
+          ]);
+          assert.deepEqual(node.content.bindings, [api, web]);
         },
-        tasks: [
-          {
-            filename: "task-checkout-flow.md",
-            content: {
-              ...CONTENT,
-              criterion: "each checkout holds hello",
-              verifications: [
-                "grep -q hello api/hello.txt && grep -q hello web/hello.txt",
-              ],
-            },
-          },
-        ],
-      })
-    ).node_id;
-    await h.write(["mission", "node", "priority", "set", checkoutFlow], {
-      value: CHECKOUT_FLOW_PRIORITY,
-      expected_mission_version: await version(),
-    });
-    const bare = (name: string) =>
-      simpleGit(h.barePaths.get(`git@github.com:owner/${name}.git`)!);
-    await t.test(
-      "EF09b.1 the node get holds api and web in binding order",
-      async () => {
-        const node = await h.read<{ content: { bindings: string[] } }>([
-          "mission",
-          "node",
-          "get",
-          checkoutFlow,
-        ]);
-        assert.deepEqual(node.content.bindings, [api, web]);
-      },
-    );
-    let refused: Awaited<ReturnType<typeof kanthord>> | null = null;
-    const heads: string[] = [];
-    await t.test(
-      "EF09b.2 one steps execution pushes both node branches and submits one evidence",
-      { timeout: JOURNEY_TIMEOUT_MS },
-      async () => {
-        const answer = await h.execute(
-          h.general,
-          checkoutFlow,
-          BOTH_HELLO(),
-          async (execution, env) => {
-            const path = join(temporary(t), "evidence.json");
-            writePrivate(
-              path,
-              JSON.stringify({
-                execution_id: execution.execution_id,
-                attempt: execution.attempt,
-                node_revision: execution.pinned_revision,
-                subject: "api alone",
-                assets: [
-                  {
-                    kind: "repository",
-                    address: {
+      );
+      let refused: Awaited<ReturnType<typeof kanthord>> | null = null;
+      const heads: string[] = [];
+      await t.test(
+        "EF09b.2 one steps execution pushes both node branches and submits one evidence",
+        { timeout: JOURNEY_TIMEOUT_MS },
+        async () => {
+          const answer = await h.execute(
+            h.general,
+            checkoutFlow,
+            BOTH_HELLO(),
+            async (execution, env) => {
+              const path = join(temporary(t), "evidence.json");
+              writePrivate(
+                path,
+                JSON.stringify({
+                  execution_id: execution.execution_id,
+                  attempt: execution.attempt,
+                  node_revision: execution.pinned_revision,
+                  subject: "api alone",
+                  assets: [
+                    {
                       kind: "repository",
-                      binding_id: api,
-                      commit: (await bare("api").revparse(["main"])).trim(),
+                      address: {
+                        kind: "repository",
+                        binding_id: api,
+                        commit: (await bare("api").revparse(["main"])).trim(),
+                      },
                     },
-                  },
-                ],
-              }),
-            );
-            refused = await kanthord(
-              ["mission", "evidence", "submit", checkoutFlow, "--file", path],
-              env,
-            );
-          },
-        );
-        assert.deepEqual(answer.result, {
-          kind: "released",
-          furtherWork: false,
-        });
-        for (const name of ["api", "web"])
-          heads.push(
-            (
-              await bare(name).revparse([`refs/heads/kanthord/${checkoutFlow}`])
-            ).trim(),
+                  ],
+                }),
+              );
+              refused = await kanthord(
+                ["mission", "evidence", "submit", checkoutFlow, "--file", path],
+                env,
+              );
+            },
           );
-        const items = (await h.evidence(checkoutFlow)).items;
-        assert.equal(items.length, SINGLE_ITEM);
-        assert.equal(items[0]!.assets.length, TWO_ASSETS);
-        for (const [index, binding_id] of [api, web].entries())
+          assert.deepEqual(answer.result, {
+            kind: "released",
+            furtherWork: false,
+          });
+          for (const name of ["api", "web"])
+            heads.push(
+              (
+                await bare(name).revparse([
+                  `refs/heads/kanthord/${checkoutFlow}`,
+                ])
+              ).trim(),
+            );
+          const items = (await h.evidence(checkoutFlow)).items;
+          assert.equal(items.length, SINGLE_ITEM);
+          assert.equal(items[0]!.assets.length, TWO_ASSETS);
+          for (const [index, binding_id] of [api, web].entries())
+            assert.deepEqual(
+              items[0]!.assets
+                .map((asset) => asset.address)
+                .filter(
+                  (address) =>
+                    address.kind === REPOSITORY &&
+                    address.binding_id === binding_id,
+                ),
+              [{ kind: REPOSITORY, binding_id, commit: heads[index] }],
+            );
+        },
+      );
+      await t.test(
+        "EF09b.3 one repository asset of api alone answers mission.evidence.binding_mismatch",
+        () => {
+          assert.ok(refused);
+          assert.equal(refused.code, FAILED_EXIT);
+          assert.ok(
+            refused.stderr.startsWith("mission.evidence.binding_mismatch:"),
+            refused.stderr,
+          );
+        },
+      );
+      await t.test(
+        "EF09b.4 one reviewer execution writes one success assessment with a tested input list",
+        { timeout: JOURNEY_TIMEOUT_MS },
+        async () => {
+          const answer = await h.execute(h.reviewer, checkoutFlow, review());
+          assert.deepEqual(answer.result, {
+            kind: "released",
+            furtherWork: false,
+          });
+          const assessments = await h.read<{
+            items: { result: string; tested_input: unknown }[];
+          }>(["mission", "assessment", "list", checkoutFlow]);
+          assert.equal(assessments.items.length, SINGLE_ITEM);
+          assert.equal(assessments.items[0]!.result, AssessmentResult.Success);
           assert.deepEqual(
-            items[0]!.assets
+            assessments.items[0]!.tested_input,
+            [api, web].map((binding_id, index) => ({
+              kind: "repository",
+              binding_id,
+              commit: heads[index],
+            })),
+          );
+          assert.deepEqual(
+            h.gitHub.pulls.map(({ repo, head }) => ({ repo, head })),
+            ["api", "web"].map((repo) => ({
+              repo,
+              head: `kanthord/${checkoutFlow}`,
+            })),
+          );
+        },
+      );
+      await t.test(
+        "EF09b.5 both merged pull requests complete the node with one landed commit for each binding",
+        async () => {
+          for (const pull of h.gitHub.pulls)
+            h.gitHub.merge(
+              pull.number,
+              MERGE_COMMITS[pull.repo as keyof typeof MERGE_COMMITS],
+            );
+          await h.write(["mission", "node", "check", checkoutFlow], {
+            expected_mission_version: await version(),
+          });
+          assert.equal(await h.state(checkoutFlow), NodeState.Completed);
+          const outcomes = await h.read<{
+            items: { evidence_ids: string[] }[];
+          }>(["mission", "outcome", "list", checkoutFlow]);
+          assert.equal(outcomes.items.length, SINGLE_ITEM);
+          const landed = (await h.evidence(checkoutFlow)).items.filter(
+            (item) =>
+              outcomes.items[0]!.evidence_ids.includes(item.id) &&
+              item.provenance.kind === ActorKind.Service,
+          );
+          assert.deepEqual(
+            landed
+              .flatMap((item) => item.assets)
               .map((asset) => asset.address)
-              .filter(
-                (address) =>
-                  address.kind === REPOSITORY &&
-                  address.binding_id === binding_id,
+              .sort((left, right) =>
+                JSON.stringify(left).localeCompare(JSON.stringify(right)),
               ),
-            [{ kind: REPOSITORY, binding_id, commit: heads[index] }],
+            [
+              { binding_id: api, commit: MERGE_COMMITS.api },
+              { binding_id: web, commit: MERGE_COMMITS.web },
+            ]
+              .map((address) => ({ kind: "repository", ...address }))
+              .sort((left, right) =>
+                JSON.stringify(left).localeCompare(JSON.stringify(right)),
+              ),
           );
-      },
-    );
-    await t.test(
-      "EF09b.3 one repository asset of api alone answers mission.evidence.binding_mismatch",
-      () => {
-        assert.ok(refused);
-        assert.equal(refused.code, FAILED_EXIT);
-        assert.ok(
-          refused.stderr.startsWith("mission.evidence.binding_mismatch:"),
-          refused.stderr,
-        );
-      },
-    );
-    await t.test(
-      "EF09b.4 one reviewer execution writes one success assessment with a tested input list",
-      { timeout: JOURNEY_TIMEOUT_MS },
-      async () => {
-        const answer = await h.execute(h.reviewer, checkoutFlow, review());
-        assert.deepEqual(answer.result, {
-          kind: "released",
-          furtherWork: false,
-        });
-        const assessments = await h.read<{
-          items: { result: string; tested_input: unknown }[];
-        }>(["mission", "assessment", "list", checkoutFlow]);
-        assert.equal(assessments.items.length, SINGLE_ITEM);
-        assert.equal(assessments.items[0]!.result, AssessmentResult.Success);
-        assert.deepEqual(
-          assessments.items[0]!.tested_input,
-          [api, web].map((binding_id, index) => ({
-            kind: "repository",
-            binding_id,
-            commit: heads[index],
-          })),
-        );
-        assert.deepEqual(
-          h.gitHub.pulls.map(({ repo, head }) => ({ repo, head })),
-          ["api", "web"].map((repo) => ({
-            repo,
-            head: `kanthord/${checkoutFlow}`,
-          })),
-        );
-      },
-    );
-    await t.test(
-      "EF09b.5 both merged pull requests complete the node with one landed commit for each binding",
-      async () => {
-        for (const pull of h.gitHub.pulls)
-          h.gitHub.merge(
-            pull.number,
-            MERGE_COMMITS[pull.repo as keyof typeof MERGE_COMMITS],
-          );
-        await h.write(["mission", "node", "check", checkoutFlow], {
-          expected_mission_version: await version(),
-        });
-        assert.equal(await h.state(checkoutFlow), NodeState.Completed);
-        const outcomes = await h.read<{ items: { evidence_ids: string[] }[] }>([
-          "mission",
-          "outcome",
-          "list",
-          checkoutFlow,
-        ]);
-        assert.equal(outcomes.items.length, SINGLE_ITEM);
-        const landed = (await h.evidence(checkoutFlow)).items.filter(
-          (item) =>
-            outcomes.items[0]!.evidence_ids.includes(item.id) &&
-            item.provenance.kind === ActorKind.Service,
-        );
-        assert.deepEqual(
-          landed
-            .flatMap((item) => item.assets)
-            .map((asset) => asset.address)
-            .sort((left, right) =>
-              JSON.stringify(left).localeCompare(JSON.stringify(right)),
-            ),
-          [
-            { binding_id: api, commit: MERGE_COMMITS.api },
-            { binding_id: web, commit: MERGE_COMMITS.web },
-          ]
-            .map((address) => ({ kind: "repository", ...address }))
-            .sort((left, right) =>
-              JSON.stringify(left).localeCompare(JSON.stringify(right)),
-            ),
-        );
-      },
-    );
-  },
-);
+        },
+      );
+    },
+  );
+});

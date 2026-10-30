@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test, type TestContext } from "node:test";
+import { suite, test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
 import { ulid } from "ulid";
@@ -25,7 +25,7 @@ import {
   OperationResultType,
 } from "../../kernel/operation.ts";
 import { mintServiceIdentity } from "../../kernel/service-mint.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
 import {
   Intent,
   MISSION_SERVICE_NAME,
@@ -905,445 +905,561 @@ test(
   },
 );
 
-test(
-  "intake.action.perform reuses a pull request by a push of the snapshot",
-  { timeout: TIMEOUT },
-  async (t) => {
-    const h = await setup(t);
-    const G = h.nodes.gated;
-    const nodeRef = `refs/heads/kanthord/${G}`;
-    const bare = simpleGit(h.gated.bare);
-    const open = () =>
-      h.gitHub.open({
-        owner: "owner",
-        repo: "gated",
-        head: `kanthord/${G}`,
-        base: "main",
-      });
-    const address = (number: number): PlatformAddress => ({
-      kind: PlatformAddressKind.PullRequest,
-      resource_identity: h.resource("gated"),
-      number,
-    });
-    const first = await h.evaluated(G, "gated", h.gated.head);
-    const closed = open();
-    const closedEvidence = await h.requested(
-      G,
-      first,
-      "gated.pull_request",
-      address(closed),
-    );
-    await until(() => readOf(h.gitHub.calls, closed), t.signal);
-    h.gitHub.close(closed);
-    await h.write(["mission", "node", "check", G], {
-      expected_mission_version: await h.version(),
-    });
-    await h.write(["mission", "node", "unblock", G], {
-      blocked_attempt: FIRST_ATTEMPT,
-      expected_revision: FIRST_REVISION,
-      expected_mission_version: await h.version(),
-    });
-    const snapshot = await commitOnBranch(t, h.gated.bare, SNAPSHOT_BRANCH);
-    const second = await h.evaluated(G, "gated", snapshot);
-    assert.equal(second.attempt, SECOND_ATTEMPT);
-    const later = open();
-    const laterEvidence = await h.request(
-      G,
-      second,
-      "gated.pull_request",
-      address(later),
-    );
-    const keyOf = (number: number) =>
-      `${G}/${SECOND_ATTEMPT}/gated.pull_request/${number}/${snapshot}`;
-    const body = (requestKey: string) => ({
-      key: "gated.pull_request",
-      commit: snapshot,
-      request_key: requestKey,
-    });
-    const writer = h.fixture.gitWriter;
-    const pushSnapshotFresh = writer.pushSnapshotFresh;
-    const landedOn = writer.landedOn;
-    const pushes: string[] = [];
-    const landings: string[] = [];
-    writer.pushSnapshotFresh = (input, ...args) => {
-      pushes.push(input.branch);
-      return pushSnapshotFresh(input, ...args);
-    };
-    writer.landedOn = async (input, ...args) => {
-      try {
-        const landing = await landedOn(input, ...args);
-        landings.push(landing.landed ? LANDED : NOT_LANDED);
-        return landing;
-      } catch (error) {
-        landings.push(THREW);
-        throw error;
-      }
-    };
-    const refusal = (answer: Answer) => {
-      assert.ok("class" in answer, JSON.stringify(answer));
-      assert.equal(answer.class, ResultClass.UnknownOutcome);
-      assert.equal(answer.code, GIT_FAILED_CODE);
-    };
-
-    await t.test(
-      "a reuse pushes the snapshot to the node branch and answers the reused address",
-      async () => {
-        assert.equal(await remoteHead(h.gated.bare, nodeRef), null);
-        const calls = h.gitHub.calls.length;
-        const released = h.materials.length;
-        const answer = completed(
-          await h.perform(second, body(keyOf(closed)), closedEvidence),
-        );
-        assert.deepEqual(answer, address(closed));
-        assert.equal(await remoteHead(h.gated.bare, nodeRef), snapshot);
-        assert.deepEqual(pushes, [`kanthord/${G}`]);
-        const stored = h.row(keyOf(closed));
-        assert.equal(stored?.operation, OutboundOperation.GitHubPullRequest);
-        assert.equal(stored?.state, OutboundRequestState.Succeeded);
-        assert.equal(stored?.credential, null);
-        assert.deepEqual(JSON.parse(stored!.result!), answer);
-        assert.equal(h.gitHub.calls.length, calls);
-        assert.equal(h.materials.length, released + ONE_SSH_RELEASE);
-        dropped(h.materials);
-      },
-    );
-
-    await t.test(
-      "a candidate change with one snapshot gives two keys and two requests",
-      async () => {
-        const answer = completed(
-          await h.perform(second, body(keyOf(later)), laterEvidence),
-        );
-        assert.deepEqual(answer, address(later));
-        assert.deepEqual(
-          h
-            .rows()
-            .filter(
-              (item) => item.operation === OutboundOperation.GitHubPullRequest,
-            )
-            .map((item) => item.request_key),
-          [keyOf(closed), keyOf(later)],
-        );
-        assert.equal(pushes.length, TWO_PUSHES);
-      },
-    );
-
-    await t.test(
-      "a landed push that loses its answer repeats to the reused address with one push",
-      async () => {
-        await bare.raw(["update-ref", "-d", nodeRef]);
-        const before = pushes.length;
-        writer.pushSnapshotFresh = async (input, ...args) => {
-          pushes.push(input.branch);
-          await pushSnapshotFresh(input, ...args);
-          throw new GitWriteError(
-            GitStage.Push,
-            new Diagnostic(GIT_FAILED_CODE, "The push answer is lost."),
-          );
-        };
-        try {
-          refusal(
-            completed(await h.perform(second, body("lost"), closedEvidence)),
-          );
-        } finally {
-          writer.pushSnapshotFresh = (input, ...args) => {
-            pushes.push(input.branch);
-            return pushSnapshotFresh(input, ...args);
-          };
-        }
-        assert.equal(h.row("lost")?.state, OutboundRequestState.Failed);
-        assert.deepEqual(
-          completed(await h.perform(second, body("lost"), closedEvidence)),
+suite(
+  "intake action perform landings",
+  { concurrency: SUITE_CONCURRENCY },
+  () => {
+    test(
+      "intake.action.perform reuses a pull request by a push of the snapshot",
+      { timeout: TIMEOUT },
+      async (t) => {
+        const h = await setup(t);
+        const G = h.nodes.gated;
+        const nodeRef = `refs/heads/kanthord/${G}`;
+        const bare = simpleGit(h.gated.bare);
+        const open = () =>
+          h.gitHub.open({
+            owner: "owner",
+            repo: "gated",
+            head: `kanthord/${G}`,
+            base: "main",
+          });
+        const address = (number: number): PlatformAddress => ({
+          kind: PlatformAddressKind.PullRequest,
+          resource_identity: h.resource("gated"),
+          number,
+        });
+        const first = await h.evaluated(G, "gated", h.gated.head);
+        const closed = open();
+        const closedEvidence = await h.requested(
+          G,
+          first,
+          "gated.pull_request",
           address(closed),
         );
-        assert.equal(pushes.length, before + ONE_PUSH);
-        assert.equal(landings.at(-1), LANDED);
-        assert.equal(h.row("lost")?.state, OutboundRequestState.Succeeded);
-        assert.equal(await remoteHead(h.gated.bare, nodeRef), snapshot);
-      },
-    );
-
-    await t.test(
-      "a push-stage failure answers unknown_outcome with git_failed and records no credential",
-      async () => {
-        await bare.raw(["update-ref", "-d", nodeRef]);
-        const hook = join(h.gated.bare, "hooks", "pre-receive");
-        writeFileSync(hook, REJECTING_HOOK, { mode: EXECUTABLE_MODE });
-        try {
-          refusal(
-            completed(
-              await h.perform(second, body("rejected"), closedEvidence),
-            ),
-          );
-        } finally {
-          rmSync(hook);
-        }
-        assert.equal(await remoteHead(h.gated.bare, nodeRef), null);
-        const stored = h.row("rejected");
-        assert.equal(stored?.state, OutboundRequestState.Failed);
-        assert.equal(stored?.credential, null);
-        dropped(h.materials);
-      },
-    );
-
-    await t.test(
-      "a rebased node branch without the snapshot keeps the request failed",
-      async () => {
-        await bare.raw(["update-ref", nodeRef, h.gated.head]);
-        refusal(
-          completed(await h.perform(second, body("rejected"), closedEvidence)),
+        await until(() => readOf(h.gitHub.calls, closed), t.signal);
+        h.gitHub.close(closed);
+        await h.write(["mission", "node", "check", G], {
+          expected_mission_version: await h.version(),
+        });
+        await h.write(["mission", "node", "unblock", G], {
+          blocked_attempt: FIRST_ATTEMPT,
+          expected_revision: FIRST_REVISION,
+          expected_mission_version: await h.version(),
+        });
+        const snapshot = await commitOnBranch(t, h.gated.bare, SNAPSHOT_BRANCH);
+        const second = await h.evaluated(G, "gated", snapshot);
+        assert.equal(second.attempt, SECOND_ATTEMPT);
+        const later = open();
+        const laterEvidence = await h.request(
+          G,
+          second,
+          "gated.pull_request",
+          address(later),
         );
-        assert.equal(landings.at(-1), NOT_LANDED);
-        assert.equal(h.row("rejected")?.state, OutboundRequestState.Failed);
-      },
-    );
-
-    await t.test(
-      "a missing commit object throws and keeps the request failed",
-      async () => {
-        await bare.raw(["update-ref", "-d", `refs/heads/${SNAPSHOT_BRANCH}`]);
-        await bare.raw(["reflog", "expire", "--expire=now", "--all"]);
-        await bare.raw(["gc", "--prune=now"]);
-        refusal(
-          completed(await h.perform(second, body("rejected"), closedEvidence)),
-        );
-        assert.equal(landings.at(-1), THREW);
-        assert.equal(h.row("rejected")?.state, OutboundRequestState.Failed);
-      },
-    );
-
-    await t.test(
-      "a transport failure of the landing read throws and keeps the request failed",
-      async () => {
-        rmSync(h.gated.bare, { recursive: true, force: true });
-        refusal(
-          completed(await h.perform(second, body("rejected"), closedEvidence)),
-        );
-        assert.equal(landings.at(-1), THREW);
-        assert.equal(h.row("rejected")?.state, OutboundRequestState.Failed);
-        writer.pushSnapshotFresh = pushSnapshotFresh;
-        writer.landedOn = landedOn;
-      },
-    );
-  },
-);
-
-test(
-  "intake.action.perform uses the node branch of the claim after a restart from the base branch",
-  { timeout: TIMEOUT },
-  async (t) => {
-    const h = await setup(t);
-    const G = h.nodes.gated;
-    const earlierBranch = `kanthord/${G}`;
-    const restartBranch = `kanthord/${G}-a2`;
-    const address = (number: number): PlatformAddress => ({
-      kind: PlatformAddressKind.PullRequest,
-      resource_identity: h.resource("gated"),
-      number,
-    });
-    const first = await h.evaluated(G, "gated", h.gated.head);
-    assert.equal(first.node_branch, earlierBranch);
-    const closed = h.gitHub.open({
-      owner: "owner",
-      repo: "gated",
-      head: earlierBranch,
-      base: "main",
-    });
-    const closedEvidence = await h.requested(
-      G,
-      first,
-      "gated.pull_request",
-      address(closed),
-    );
-    await until(() => readOf(h.gitHub.calls, closed), t.signal);
-    h.gitHub.close(closed);
-    await h.write(["mission", "node", "check", G], {
-      expected_mission_version: await h.version(),
-    });
-    await h.write(["mission", "node", "unblock", G], {
-      blocked_attempt: FIRST_ATTEMPT,
-      expected_revision: FIRST_REVISION,
-      expected_mission_version: await h.version(),
-      start_point: StartPoint.BaseBranch,
-    });
-    const snapshot = await commitOnBranch(t, h.gated.bare, SNAPSHOT_BRANCH);
-    const second = await h.evaluated(G, "gated", snapshot);
-    assert.equal(second.attempt, SECOND_ATTEMPT);
-    assert.equal(second.node_branch, restartBranch);
-    const body = (requestKey: string) => ({
-      key: "gated.pull_request",
-      commit: snapshot,
-      request_key: requestKey,
-    });
-
-    await t.test(
-      "the create and its read-back name the restart branch",
-      async () => {
-        h.gitHub.dropNextAfterApply();
-        completed(await h.perform(second, body("create")));
-        const found = completed(await h.perform(second, body("create")));
-        const pull = h.gitHub.pulls.at(-1);
-        assert.ok(pull);
-        assert.equal(pull.head, restartBranch);
-        assert.deepEqual(found, address(pull.number));
-        assert.ok(
-          h.gitHub.calls
-            .filter(
-              (call) =>
-                call.method === HttpMethod.Post && call.path === PULLS_PATH,
-            )
-            .every(
-              (call) => (call.body as { head: string }).head === restartBranch,
-            ),
-        );
-      },
-    );
-
-    await t.test(
-      "the reuse push and its read-back name the restart branch",
-      async () => {
+        const keyOf = (number: number) =>
+          `${G}/${SECOND_ATTEMPT}/gated.pull_request/${number}/${snapshot}`;
+        const body = (requestKey: string) => ({
+          key: "gated.pull_request",
+          commit: snapshot,
+          request_key: requestKey,
+        });
         const writer = h.fixture.gitWriter;
         const pushSnapshotFresh = writer.pushSnapshotFresh;
         const landedOn = writer.landedOn;
-        const branches: string[] = [];
+        const pushes: string[] = [];
+        const landings: string[] = [];
         writer.pushSnapshotFresh = (input, ...args) => {
-          branches.push(input.branch);
+          pushes.push(input.branch);
           return pushSnapshotFresh(input, ...args);
         };
-        writer.landedOn = (input, ...args) => {
-          branches.push(input.branch);
-          return landedOn(input, ...args);
+        writer.landedOn = async (input, ...args) => {
+          try {
+            const landing = await landedOn(input, ...args);
+            landings.push(landing.landed ? LANDED : NOT_LANDED);
+            return landing;
+          } catch (error) {
+            landings.push(THREW);
+            throw error;
+          }
         };
-        try {
-          assert.deepEqual(
-            completed(await h.perform(second, body("reuse"), closedEvidence)),
-            address(closed),
-          );
-        } finally {
-          writer.pushSnapshotFresh = pushSnapshotFresh;
-          writer.landedOn = landedOn;
-        }
-        assert.ok(branches.length > NO_ROWS);
-        assert.ok(branches.every((branch) => branch === restartBranch));
-        assert.equal(
-          await remoteHead(h.gated.bare, `refs/heads/${restartBranch}`),
-          snapshot,
+        const refusal = (answer: Answer) => {
+          assert.ok("class" in answer, JSON.stringify(answer));
+          assert.equal(answer.class, ResultClass.UnknownOutcome);
+          assert.equal(answer.code, GIT_FAILED_CODE);
+        };
+
+        await t.test(
+          "a reuse pushes the snapshot to the node branch and answers the reused address",
+          async () => {
+            assert.equal(await remoteHead(h.gated.bare, nodeRef), null);
+            const calls = h.gitHub.calls.length;
+            const released = h.materials.length;
+            const answer = completed(
+              await h.perform(second, body(keyOf(closed)), closedEvidence),
+            );
+            assert.deepEqual(answer, address(closed));
+            assert.equal(await remoteHead(h.gated.bare, nodeRef), snapshot);
+            assert.deepEqual(pushes, [`kanthord/${G}`]);
+            const stored = h.row(keyOf(closed));
+            assert.equal(
+              stored?.operation,
+              OutboundOperation.GitHubPullRequest,
+            );
+            assert.equal(stored?.state, OutboundRequestState.Succeeded);
+            assert.equal(stored?.credential, null);
+            assert.deepEqual(JSON.parse(stored!.result!), answer);
+            assert.equal(h.gitHub.calls.length, calls);
+            assert.equal(h.materials.length, released + ONE_SSH_RELEASE);
+            dropped(h.materials);
+          },
         );
-        assert.equal(
-          await remoteHead(h.gated.bare, `refs/heads/${earlierBranch}`),
-          null,
+
+        await t.test(
+          "a candidate change with one snapshot gives two keys and two requests",
+          async () => {
+            const answer = completed(
+              await h.perform(second, body(keyOf(later)), laterEvidence),
+            );
+            assert.deepEqual(answer, address(later));
+            assert.deepEqual(
+              h
+                .rows()
+                .filter(
+                  (item) =>
+                    item.operation === OutboundOperation.GitHubPullRequest,
+                )
+                .map((item) => item.request_key),
+              [keyOf(closed), keyOf(later)],
+            );
+            assert.equal(pushes.length, TWO_PUSHES);
+          },
+        );
+
+        await t.test(
+          "a landed push that loses its answer repeats to the reused address with one push",
+          async () => {
+            await bare.raw(["update-ref", "-d", nodeRef]);
+            const before = pushes.length;
+            writer.pushSnapshotFresh = async (input, ...args) => {
+              pushes.push(input.branch);
+              await pushSnapshotFresh(input, ...args);
+              throw new GitWriteError(
+                GitStage.Push,
+                new Diagnostic(GIT_FAILED_CODE, "The push answer is lost."),
+              );
+            };
+            try {
+              refusal(
+                completed(
+                  await h.perform(second, body("lost"), closedEvidence),
+                ),
+              );
+            } finally {
+              writer.pushSnapshotFresh = (input, ...args) => {
+                pushes.push(input.branch);
+                return pushSnapshotFresh(input, ...args);
+              };
+            }
+            assert.equal(h.row("lost")?.state, OutboundRequestState.Failed);
+            assert.deepEqual(
+              completed(await h.perform(second, body("lost"), closedEvidence)),
+              address(closed),
+            );
+            assert.equal(pushes.length, before + ONE_PUSH);
+            assert.equal(landings.at(-1), LANDED);
+            assert.equal(h.row("lost")?.state, OutboundRequestState.Succeeded);
+            assert.equal(await remoteHead(h.gated.bare, nodeRef), snapshot);
+          },
+        );
+
+        await t.test(
+          "a push-stage failure answers unknown_outcome with git_failed and records no credential",
+          async () => {
+            await bare.raw(["update-ref", "-d", nodeRef]);
+            const hook = join(h.gated.bare, "hooks", "pre-receive");
+            writeFileSync(hook, REJECTING_HOOK, { mode: EXECUTABLE_MODE });
+            try {
+              refusal(
+                completed(
+                  await h.perform(second, body("rejected"), closedEvidence),
+                ),
+              );
+            } finally {
+              rmSync(hook);
+            }
+            assert.equal(await remoteHead(h.gated.bare, nodeRef), null);
+            const stored = h.row("rejected");
+            assert.equal(stored?.state, OutboundRequestState.Failed);
+            assert.equal(stored?.credential, null);
+            dropped(h.materials);
+          },
+        );
+
+        await t.test(
+          "a rebased node branch without the snapshot keeps the request failed",
+          async () => {
+            await bare.raw(["update-ref", nodeRef, h.gated.head]);
+            refusal(
+              completed(
+                await h.perform(second, body("rejected"), closedEvidence),
+              ),
+            );
+            assert.equal(landings.at(-1), NOT_LANDED);
+            assert.equal(h.row("rejected")?.state, OutboundRequestState.Failed);
+          },
+        );
+
+        await t.test(
+          "a missing commit object throws and keeps the request failed",
+          async () => {
+            await bare.raw([
+              "update-ref",
+              "-d",
+              `refs/heads/${SNAPSHOT_BRANCH}`,
+            ]);
+            await bare.raw(["reflog", "expire", "--expire=now", "--all"]);
+            await bare.raw(["gc", "--prune=now"]);
+            refusal(
+              completed(
+                await h.perform(second, body("rejected"), closedEvidence),
+              ),
+            );
+            assert.equal(landings.at(-1), THREW);
+            assert.equal(h.row("rejected")?.state, OutboundRequestState.Failed);
+          },
+        );
+
+        await t.test(
+          "a transport failure of the landing read throws and keeps the request failed",
+          async () => {
+            rmSync(h.gated.bare, { recursive: true, force: true });
+            refusal(
+              completed(
+                await h.perform(second, body("rejected"), closedEvidence),
+              ),
+            );
+            assert.equal(landings.at(-1), THREW);
+            assert.equal(h.row("rejected")?.state, OutboundRequestState.Failed);
+            writer.pushSnapshotFresh = pushSnapshotFresh;
+            writer.landedOn = landedOn;
+          },
         );
       },
     );
-  },
-);
 
-test(
-  "intake.action.perform creates a pull request for a kanthord landing without merging",
-  { timeout: TIMEOUT },
-  async (t) => {
-    const h = await setup(t, KANTHORD_LANDING);
-    const G = h.nodes.gated;
-    const execution = await h.evaluated(G, "gated", h.gatedSnapshot);
-    const body = (requestKey: string) => ({
-      key: "gated.pull_request",
-      commit: h.gatedSnapshot,
-      request_key: requestKey,
-    });
-    const merges = () =>
-      h.gitHub.calls.filter((call) => call.method === HttpMethod.Put);
-    let created: PlatformAddress | null = null;
+    test(
+      "intake.action.perform uses the node branch of the claim after a restart from the base branch",
+      { timeout: TIMEOUT },
+      async (t) => {
+        const h = await setup(t);
+        const G = h.nodes.gated;
+        const earlierBranch = `kanthord/${G}`;
+        const restartBranch = `kanthord/${G}-a2`;
+        const address = (number: number): PlatformAddress => ({
+          kind: PlatformAddressKind.PullRequest,
+          resource_identity: h.resource("gated"),
+          number,
+        });
+        const first = await h.evaluated(G, "gated", h.gated.head);
+        assert.equal(first.node_branch, earlierBranch);
+        const closed = h.gitHub.open({
+          owner: "owner",
+          repo: "gated",
+          head: earlierBranch,
+          base: "main",
+        });
+        const closedEvidence = await h.requested(
+          G,
+          first,
+          "gated.pull_request",
+          address(closed),
+        );
+        await until(() => readOf(h.gitHub.calls, closed), t.signal);
+        h.gitHub.close(closed);
+        await h.write(["mission", "node", "check", G], {
+          expected_mission_version: await h.version(),
+        });
+        await h.write(["mission", "node", "unblock", G], {
+          blocked_attempt: FIRST_ATTEMPT,
+          expected_revision: FIRST_REVISION,
+          expected_mission_version: await h.version(),
+          start_point: StartPoint.BaseBranch,
+        });
+        const snapshot = await commitOnBranch(t, h.gated.bare, SNAPSHOT_BRANCH);
+        const second = await h.evaluated(G, "gated", snapshot);
+        assert.equal(second.attempt, SECOND_ATTEMPT);
+        assert.equal(second.node_branch, restartBranch);
+        const body = (requestKey: string) => ({
+          key: "gated.pull_request",
+          commit: snapshot,
+          request_key: requestKey,
+        });
 
-    await t.test("a kanthord create sends no PUT", async () => {
-      const answer = completed(await h.perform(execution, body("create")));
-      assert.ok("kind" in answer, JSON.stringify(answer));
-      assert.equal(answer.kind, PlatformAddressKind.PullRequest);
-      created = answer;
-      assert.equal(h.row("create")?.state, OutboundRequestState.Succeeded);
-      assert.equal(merges().length, NO_ROWS);
-      assert.equal(h.gitHub.pulls.at(-1)?.merged, false);
-    });
+        await t.test(
+          "the create and its read-back name the restart branch",
+          async () => {
+            h.gitHub.dropNextAfterApply();
+            completed(await h.perform(second, body("create")));
+            const found = completed(await h.perform(second, body("create")));
+            const pull = h.gitHub.pulls.at(-1);
+            assert.ok(pull);
+            assert.equal(pull.head, restartBranch);
+            assert.deepEqual(found, address(pull.number));
+            assert.ok(
+              h.gitHub.calls
+                .filter(
+                  (call) =>
+                    call.method === HttpMethod.Post && call.path === PULLS_PATH,
+                )
+                .every(
+                  (call) =>
+                    (call.body as { head: string }).head === restartBranch,
+                ),
+            );
+          },
+        );
 
-    await t.test(
-      "a reuse pushes the snapshot with no credential and sends no PUT",
-      async () => {
-        assert.ok(created?.kind === PlatformAddressKind.PullRequest);
-        const evidence = await h.request(
+        await t.test(
+          "the reuse push and its read-back name the restart branch",
+          async () => {
+            const writer = h.fixture.gitWriter;
+            const pushSnapshotFresh = writer.pushSnapshotFresh;
+            const landedOn = writer.landedOn;
+            const branches: string[] = [];
+            writer.pushSnapshotFresh = (input, ...args) => {
+              branches.push(input.branch);
+              return pushSnapshotFresh(input, ...args);
+            };
+            writer.landedOn = (input, ...args) => {
+              branches.push(input.branch);
+              return landedOn(input, ...args);
+            };
+            try {
+              assert.deepEqual(
+                completed(
+                  await h.perform(second, body("reuse"), closedEvidence),
+                ),
+                address(closed),
+              );
+            } finally {
+              writer.pushSnapshotFresh = pushSnapshotFresh;
+              writer.landedOn = landedOn;
+            }
+            assert.ok(branches.length > NO_ROWS);
+            assert.ok(branches.every((branch) => branch === restartBranch));
+            assert.equal(
+              await remoteHead(h.gated.bare, `refs/heads/${restartBranch}`),
+              snapshot,
+            );
+            assert.equal(
+              await remoteHead(h.gated.bare, `refs/heads/${earlierBranch}`),
+              null,
+            );
+          },
+        );
+      },
+    );
+
+    test(
+      "intake.action.perform creates a pull request for a kanthord landing without merging",
+      { timeout: TIMEOUT },
+      async (t) => {
+        const h = await setup(t, KANTHORD_LANDING);
+        const G = h.nodes.gated;
+        const execution = await h.evaluated(G, "gated", h.gatedSnapshot);
+        const body = (requestKey: string) => ({
+          key: "gated.pull_request",
+          commit: h.gatedSnapshot,
+          request_key: requestKey,
+        });
+        const merges = () =>
+          h.gitHub.calls.filter((call) => call.method === HttpMethod.Put);
+        let created: PlatformAddress | null = null;
+
+        await t.test("a kanthord create sends no PUT", async () => {
+          const answer = completed(await h.perform(execution, body("create")));
+          assert.ok("kind" in answer, JSON.stringify(answer));
+          assert.equal(answer.kind, PlatformAddressKind.PullRequest);
+          created = answer;
+          assert.equal(h.row("create")?.state, OutboundRequestState.Succeeded);
+          assert.equal(merges().length, NO_ROWS);
+          assert.equal(h.gitHub.pulls.at(-1)?.merged, false);
+        });
+
+        await t.test(
+          "a reuse pushes the snapshot with no credential and sends no PUT",
+          async () => {
+            assert.ok(created?.kind === PlatformAddressKind.PullRequest);
+            const evidence = await h.request(
+              G,
+              execution,
+              "gated.pull_request",
+              created,
+            );
+            const mergesBefore = merges().length;
+            const answer = completed(
+              await h.perform(execution, body("reuse"), evidence),
+            );
+            assert.deepEqual(answer, created);
+            assert.equal(h.row("reuse")?.credential, null);
+            assert.equal(merges().length, mergesBefore);
+            assert.equal(h.gitHub.pulls.at(-1)?.merged, false);
+            dropped(h.materials);
+          },
+        );
+      },
+    );
+
+    test(
+      "intake.action.perform merges the pull request for a kanthord landing",
+      { timeout: TIMEOUT },
+      async (t) => {
+        const h = await setup(t, KANTHORD_LANDING);
+        const G = h.nodes.gated;
+        const execution = await h.evaluated(G, "gated", h.gatedSnapshot);
+        const mergeBody = (requestKey: string) => ({
+          key: "gated.pull_request",
+          commit: h.gatedSnapshot,
+          request_key: requestKey,
+        });
+        const merges = () =>
+          h.gitHub.calls.filter((call) => call.method === HttpMethod.Put);
+        let evidenceId!: string;
+
+        await t.test("setup: create and record evidence", async () => {
+          const answer = completed(
+            await h.perform(execution, mergeBody("create")),
+          );
+          assert.ok("kind" in answer, JSON.stringify(answer));
+          assert.equal(answer.kind, PlatformAddressKind.PullRequest);
+          evidenceId = await h.request(
+            G,
+            execution,
+            "gated.pull_request",
+            answer,
+          );
+        });
+
+        await t.test("a mismatched evidence is refused", async () => {
+          failed(
+            await h.perform(
+              execution,
+              mergeBody("mismatch"),
+              null,
+              `evidence_${ulid()}`,
+            ),
+            HttpStatus.Forbidden,
+            MissionErrorCode.AuthorizationRefused,
+          );
+        });
+
+        await t.test("a 405 sets failed", async () => {
+          h.gitHub.refuseMerge(MERGE_REFUSED_STATUS);
+          let answer: Answer;
+          try {
+            answer = completed(
+              await h.perform(
+                execution,
+                mergeBody("refused"),
+                null,
+                evidenceId,
+              ),
+            );
+          } finally {
+            h.gitHub.refuseMerge(null);
+          }
+          assert.ok("class" in answer, JSON.stringify(answer));
+          assert.equal(answer.class, ResultClass.FinalRefusal);
+          assert.equal(h.row("refused")?.state, OutboundRequestState.Failed);
+          dropped(h.materials);
+        });
+
+        await t.test(
+          "a pending merge whose pull request merged at the tested head sets succeeded with one PUT",
+          async () => {
+            const mergesBefore = merges().length;
+            const realMerge = h.fixture.github.mergePullRequest.bind(
+              h.fixture.github,
+            );
+            h.fixture.github.mergePullRequest = async (...args) => {
+              const result = await realMerge(...args);
+              if (!result.ok) throw new Error("dropped merge");
+              return result;
+            };
+            h.gitHub.dropNextAfterApply();
+            try {
+              failed(
+                await h.perform(
+                  execution,
+                  mergeBody("pending"),
+                  null,
+                  evidenceId,
+                ),
+                HttpStatus.InternalServerError,
+                UNKNOWN_CODE,
+              );
+            } finally {
+              h.fixture.github.mergePullRequest = realMerge;
+            }
+            assert.equal(h.row("pending")?.state, OutboundRequestState.Pending);
+            const lastMerge = merges().at(-1);
+            assert.deepEqual(lastMerge?.body, {
+              sha: h.gatedSnapshot,
+              merge_method: "merge",
+            });
+            assert.equal(merges().length, mergesBefore + ONE_CREATE);
+            const answer = completed(
+              await h.perform(
+                execution,
+                mergeBody("pending"),
+                null,
+                evidenceId,
+              ),
+            );
+            assert.ok("kind" in answer, JSON.stringify(answer));
+            assert.equal(
+              h.row("pending")?.state,
+              OutboundRequestState.Succeeded,
+            );
+            assert.equal(merges().length, mergesBefore + ONE_CREATE);
+            dropped(h.materials);
+          },
+        );
+
+        await t.test("a repeat of succeeded makes no call", async () => {
+          const callsBefore = h.gitHub.calls.length;
+          const answer = completed(
+            await h.perform(execution, mergeBody("pending"), null, evidenceId),
+          );
+          assert.ok("kind" in answer, JSON.stringify(answer));
+          assert.equal(h.gitHub.calls.length, callsBefore);
+        });
+      },
+    );
+
+    test(
+      "intake.action.perform: a pending merge at another head stays unresolved",
+      { timeout: TIMEOUT },
+      async (t) => {
+        const h = await setup(t, KANTHORD_LANDING);
+        const G = h.nodes.gated;
+        const execution = await h.evaluated(G, "gated", h.gatedSnapshot);
+        const mergeBody = (requestKey: string) => ({
+          key: "gated.pull_request",
+          commit: h.gatedSnapshot,
+          request_key: requestKey,
+        });
+        const answer = completed(
+          await h.perform(execution, mergeBody("create")),
+        );
+        assert.ok("kind" in answer, JSON.stringify(answer));
+        const evidenceId = await h.request(
           G,
           execution,
           "gated.pull_request",
-          created,
+          answer,
         );
-        const mergesBefore = merges().length;
-        const answer = completed(
-          await h.perform(execution, body("reuse"), evidence),
-        );
-        assert.deepEqual(answer, created);
-        assert.equal(h.row("reuse")?.credential, null);
-        assert.equal(merges().length, mergesBefore);
-        assert.equal(h.gitHub.pulls.at(-1)?.merged, false);
-        dropped(h.materials);
-      },
-    );
-  },
-);
-
-test(
-  "intake.action.perform merges the pull request for a kanthord landing",
-  { timeout: TIMEOUT },
-  async (t) => {
-    const h = await setup(t, KANTHORD_LANDING);
-    const G = h.nodes.gated;
-    const execution = await h.evaluated(G, "gated", h.gatedSnapshot);
-    const mergeBody = (requestKey: string) => ({
-      key: "gated.pull_request",
-      commit: h.gatedSnapshot,
-      request_key: requestKey,
-    });
-    const merges = () =>
-      h.gitHub.calls.filter((call) => call.method === HttpMethod.Put);
-    let evidenceId!: string;
-
-    await t.test("setup: create and record evidence", async () => {
-      const answer = completed(await h.perform(execution, mergeBody("create")));
-      assert.ok("kind" in answer, JSON.stringify(answer));
-      assert.equal(answer.kind, PlatformAddressKind.PullRequest);
-      evidenceId = await h.request(G, execution, "gated.pull_request", answer);
-    });
-
-    await t.test("a mismatched evidence is refused", async () => {
-      failed(
-        await h.perform(
-          execution,
-          mergeBody("mismatch"),
-          null,
-          `evidence_${ulid()}`,
-        ),
-        HttpStatus.Forbidden,
-        MissionErrorCode.AuthorizationRefused,
-      );
-    });
-
-    await t.test("a 405 sets failed", async () => {
-      h.gitHub.refuseMerge(MERGE_REFUSED_STATUS);
-      let answer: Answer;
-      try {
-        answer = completed(
-          await h.perform(execution, mergeBody("refused"), null, evidenceId),
-        );
-      } finally {
-        h.gitHub.refuseMerge(null);
-      }
-      assert.ok("class" in answer, JSON.stringify(answer));
-      assert.equal(answer.class, ResultClass.FinalRefusal);
-      assert.equal(h.row("refused")?.state, OutboundRequestState.Failed);
-      dropped(h.materials);
-    });
-
-    await t.test(
-      "a pending merge whose pull request merged at the tested head sets succeeded with one PUT",
-      async () => {
-        const mergesBefore = merges().length;
         const realMerge = h.fixture.github.mergePullRequest.bind(
           h.fixture.github,
         );
@@ -1352,130 +1468,74 @@ test(
           if (!result.ok) throw new Error("dropped merge");
           return result;
         };
+        h.gitHub.mergeAtOtherHead(OTHER_MERGE_SHA);
         h.gitHub.dropNextAfterApply();
         try {
           failed(
-            await h.perform(execution, mergeBody("pending"), null, evidenceId),
+            await h.perform(
+              execution,
+              mergeBody("other-head"),
+              null,
+              evidenceId,
+            ),
             HttpStatus.InternalServerError,
             UNKNOWN_CODE,
           );
         } finally {
           h.fixture.github.mergePullRequest = realMerge;
         }
-        assert.equal(h.row("pending")?.state, OutboundRequestState.Pending);
-        const lastMerge = merges().at(-1);
-        assert.deepEqual(lastMerge?.body, {
-          sha: h.gatedSnapshot,
-          merge_method: "merge",
-        });
-        assert.equal(merges().length, mergesBefore + ONE_CREATE);
-        const answer = completed(
-          await h.perform(execution, mergeBody("pending"), null, evidenceId),
+        assert.equal(h.row("other-head")?.state, OutboundRequestState.Pending);
+        const readBack = completed(
+          await h.perform(execution, mergeBody("other-head"), null, evidenceId),
         );
-        assert.ok("kind" in answer, JSON.stringify(answer));
-        assert.equal(h.row("pending")?.state, OutboundRequestState.Succeeded);
-        assert.equal(merges().length, mergesBefore + ONE_CREATE);
-        dropped(h.materials);
+        assert.ok("class" in readBack, JSON.stringify(readBack));
+        assert.equal(readBack.class, ResultClass.UnknownOutcome);
+        assert.equal(h.row("other-head")?.state, OutboundRequestState.Pending);
       },
     );
 
-    await t.test("a repeat of succeeded makes no call", async () => {
-      const callsBefore = h.gitHub.calls.length;
-      const answer = completed(
-        await h.perform(execution, mergeBody("pending"), null, evidenceId),
-      );
-      assert.ok("kind" in answer, JSON.stringify(answer));
-      assert.equal(h.gitHub.calls.length, callsBefore);
-    });
-  },
-);
-
-test(
-  "intake.action.perform: a pending merge at another head stays unresolved",
-  { timeout: TIMEOUT },
-  async (t) => {
-    const h = await setup(t, KANTHORD_LANDING);
-    const G = h.nodes.gated;
-    const execution = await h.evaluated(G, "gated", h.gatedSnapshot);
-    const mergeBody = (requestKey: string) => ({
-      key: "gated.pull_request",
-      commit: h.gatedSnapshot,
-      request_key: requestKey,
-    });
-    const answer = completed(await h.perform(execution, mergeBody("create")));
-    assert.ok("kind" in answer, JSON.stringify(answer));
-    const evidenceId = await h.request(
-      G,
-      execution,
-      "gated.pull_request",
-      answer,
+    test(
+      "a pull request whose base branch contains the snapshot opens no pull request and answers the branch push address of the oldest first-parent commit",
+      { timeout: TIMEOUT },
+      async (t) => {
+        const h = await setup(t);
+        const merge = await mergeIntoMain(t, h.gated.bare, "snapshot");
+        const execution = await h.evaluated(
+          h.nodes.gated,
+          "gated",
+          h.gatedSnapshot,
+        );
+        const answer = completed(
+          await h.perform(execution, {
+            key: "gated.pull_request",
+            commit: h.gatedSnapshot,
+            request_key: "contained",
+          }),
+        );
+        const landed = {
+          kind: PlatformAddressKind.BranchPush,
+          resource_identity: h.resource("gated"),
+          branch: "main",
+          commit: merge,
+        } as const;
+        assert.deepEqual(answer, landed);
+        assert.equal(
+          h.gitHub.calls.filter((call) => call.method === HttpMethod.Post)
+            .length,
+          NO_ROWS,
+        );
+        assert.equal(h.row("contained")?.state, OutboundRequestState.Succeeded);
+        const evidenceId = await h.request(
+          h.nodes.gated,
+          execution,
+          "gated.pull_request",
+          landed,
+        );
+        assert.deepEqual(completed(await h.check(evidenceId)), {
+          end_state: CheckEndState.Expected,
+          landed_commits: [merge],
+        });
+      },
     );
-    const realMerge = h.fixture.github.mergePullRequest.bind(h.fixture.github);
-    h.fixture.github.mergePullRequest = async (...args) => {
-      const result = await realMerge(...args);
-      if (!result.ok) throw new Error("dropped merge");
-      return result;
-    };
-    h.gitHub.mergeAtOtherHead(OTHER_MERGE_SHA);
-    h.gitHub.dropNextAfterApply();
-    try {
-      failed(
-        await h.perform(execution, mergeBody("other-head"), null, evidenceId),
-        HttpStatus.InternalServerError,
-        UNKNOWN_CODE,
-      );
-    } finally {
-      h.fixture.github.mergePullRequest = realMerge;
-    }
-    assert.equal(h.row("other-head")?.state, OutboundRequestState.Pending);
-    const readBack = completed(
-      await h.perform(execution, mergeBody("other-head"), null, evidenceId),
-    );
-    assert.ok("class" in readBack, JSON.stringify(readBack));
-    assert.equal(readBack.class, ResultClass.UnknownOutcome);
-    assert.equal(h.row("other-head")?.state, OutboundRequestState.Pending);
-  },
-);
-
-test(
-  "a pull request whose base branch contains the snapshot opens no pull request and answers the branch push address of the oldest first-parent commit",
-  { timeout: TIMEOUT },
-  async (t) => {
-    const h = await setup(t);
-    const merge = await mergeIntoMain(t, h.gated.bare, "snapshot");
-    const execution = await h.evaluated(
-      h.nodes.gated,
-      "gated",
-      h.gatedSnapshot,
-    );
-    const answer = completed(
-      await h.perform(execution, {
-        key: "gated.pull_request",
-        commit: h.gatedSnapshot,
-        request_key: "contained",
-      }),
-    );
-    const landed = {
-      kind: PlatformAddressKind.BranchPush,
-      resource_identity: h.resource("gated"),
-      branch: "main",
-      commit: merge,
-    } as const;
-    assert.deepEqual(answer, landed);
-    assert.equal(
-      h.gitHub.calls.filter((call) => call.method === HttpMethod.Post).length,
-      NO_ROWS,
-    );
-    assert.equal(h.row("contained")?.state, OutboundRequestState.Succeeded);
-    const evidenceId = await h.request(
-      h.nodes.gated,
-      execution,
-      "gated.pull_request",
-      landed,
-    );
-    assert.deepEqual(completed(await h.check(evidenceId)), {
-      end_state: CheckEndState.Expected,
-      landed_commits: [merge],
-    });
   },
 );
