@@ -364,6 +364,14 @@ export const domainHealth = {
   tracking: { store: 200 },
 };
 
+function removedAfterStop(directory: string, stopped: boolean): void {
+  try {
+    rmSync(directory, { recursive: true, force: true });
+  } catch (error) {
+    if (stopped) throw error;
+  }
+}
+
 function removedOnThrow<T>(directories: string[], create: () => T): T {
   try {
     return create();
@@ -424,11 +432,13 @@ export async function inProcessWorker(
   const running = worker.run();
   t.after(async () => {
     process.off("SIGTERM", stop);
+    let stopped = false;
     try {
       await worker.stop();
       await running;
+      stopped = true;
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      removedAfterStop(root, stopped);
     }
   });
   await Promise.race([
@@ -736,6 +746,7 @@ export async function gatewayFixture(
     gitWriter.changedGateFiles = async () => [];
   t.after(async () => {
     const failures: Error[] = [];
+    let stopped = false;
     try {
       await worker.stopPool();
       const quiescence = await Promise.all(
@@ -770,11 +781,11 @@ export async function gatewayFixture(
       }
       if (failures.length)
         throw new AggregateError(failures, "Fixture cleanup failed.");
+      stopped = true;
     } finally {
       store.close();
       trackingStore.close();
-      if (ownsStateDirectory)
-        rmSync(stateDirectory, { recursive: true, force: true });
+      if (ownsStateDirectory) removedAfterStop(stateDirectory, stopped);
     }
   });
   for (const service of [
