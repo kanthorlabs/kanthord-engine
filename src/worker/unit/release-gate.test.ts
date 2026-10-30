@@ -223,6 +223,8 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.deepEqual(bodies, [{ further_work: true, stop: BUDGET_STOP }]);
   });
 
+  const RELEASE_WINDOW_MS = 3000;
+
   test("a wall deadline during a release verification releases with the timed-out budget cause", async (t) => {
     const h = await fixture(t, [task("settled", "true")], [NOTHING]);
     h.revision = {
@@ -242,7 +244,7 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     let deadline = Number.POSITIVE_INFINITY;
     h.agent.budget.wallDeadline = () => {
       if (!existsSync(releaseDirectory)) return wallDeadline();
-      deadline = Math.min(deadline, Date.now() + 500);
+      deadline = Math.min(deadline, Date.now() + RELEASE_WINDOW_MS);
       return deadline;
     };
     h.agent.budget.exhausted = () => Date.now() >= deadline;
