@@ -35,7 +35,9 @@ export const TEST_REPOSITORY_FILE = "README.md";
 export const TEST_REPOSITORY_TEXT = "kanthord ssh test\n";
 const LOCAL_GIT_KEY = generateSshKey("local-git");
 export const LOCAL_GIT_SSH_ACCESS: SshAccess = {
-  private_key: LOCAL_GIT_KEY.private_key,
+  relay: async () => {
+    throw new Error("A local git remote signs nothing.");
+  },
   public_key: LOCAL_GIT_KEY.public_key,
   known_hosts: "",
   port: DEFAULT_SSH_PORT,
