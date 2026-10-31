@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   copyFile,
   mkdir,
@@ -38,6 +38,7 @@ const MISSING = ["podman", "mkdir", "which"];
 const RETIRED = "pnpm";
 const SHADOWED = "git";
 const RETIRED_DIRECTORY = "retired";
+const SYSTEM_BIN = "/usr/bin";
 
 function run(script, path) {
   return new Promise((resolve, reject) => {
@@ -214,3 +215,27 @@ test("a directory with the name of a tool in the link directory gives way to the
 
   assert.equal(await readlink(join(directory, SHADOWED)), join(bin, SHADOWED));
 });
+
+test(
+  "the git link on macOS skips the /usr/bin/git trampoline",
+  { skip: process.platform !== "darwin" },
+  async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "kanthord-test-path-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const script = join(root, "scripts", "test-path.mjs");
+    await mkdir(join(root, "scripts"));
+    await copyFile(SCRIPT, script);
+    const direct = execFileSync("/usr/bin/xcrun", ["-f", SHADOWED], {
+      encoding: "utf8",
+    }).trim();
+
+    assert.deepEqual(await run(script, SYSTEM_BIN), {
+      status: SUCCESS,
+      stderr: "",
+    });
+
+    const directory = join(root, "node_modules", ".cache", "test-path");
+    assert.notEqual(direct, join(SYSTEM_BIN, SHADOWED));
+    assert.equal(await readlink(join(directory, SHADOWED)), direct);
+  },
+);

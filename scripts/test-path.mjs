@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   accessSync,
   constants,
@@ -31,6 +32,8 @@ const TOOLS = [
   "which",
 ];
 const PENDING = /^(.+)\.(\d+)$/;
+const TRAMPOLINE_GIT = "/usr/bin/git";
+const XCRUN = "/usr/bin/xcrun";
 
 function executable(path) {
   try {
@@ -71,6 +74,24 @@ function resolve(tool, directories) {
     .find((path) => executable(path));
 }
 
+function direct(tool, target) {
+  if (
+    process.platform !== "darwin" ||
+    tool !== "git" ||
+    target !== TRAMPOLINE_GIT
+  )
+    return target;
+  try {
+    const found = execFileSync(XCRUN, ["-f", "git"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return executable(found) ? found : target;
+  } catch {
+    return target;
+  }
+}
+
 const path = process.env.PATH ?? "";
 const directories = path
   .split(delimiter)
@@ -85,7 +106,7 @@ for (const entry of readdirSync(TOOL_DIRECTORY)) {
 }
 for (const tool of TOOLS) {
   const link = join(TOOL_DIRECTORY, tool);
-  const target = resolve(tool, directories);
+  const target = direct(tool, resolve(tool, directories));
   if (blocking(link)) rmSync(link, { recursive: true, force: true });
   if (target) {
     const pending = `${link}.${process.pid}`;
