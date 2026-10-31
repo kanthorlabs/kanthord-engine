@@ -31,7 +31,7 @@
     "lint": "NODE_OPTIONS=--max-old-space-size=512 eslint src bin eslint.config.js scripts/pi-tools.mjs scripts/test-path.mjs scripts/test-path.test.mjs scripts/test-reporter.mjs scripts/test-reporter.test.mjs scripts/affected-tests.mjs scripts/affected-reporter.mjs scripts/affected-tests.test.mjs scripts/suite-pass.mjs scripts/suite-pass.test.mjs",
     "start": "node bin/kanthord.mjs",
     "format:check": "prettier --check src bin eslint.config.js scripts/pi-tools.mjs scripts/test-path.mjs scripts/test-path.test.mjs scripts/test-reporter.mjs scripts/test-reporter.test.mjs scripts/affected-tests.mjs scripts/affected-reporter.mjs scripts/affected-tests.test.mjs scripts/suite-pass.mjs scripts/suite-pass.test.mjs --log-level warn",
-    "verify": "pnpm run \"/^(format:check|typecheck|lint|build)$/\" && pnpm --silent test",
+    "verify": "pnpm run --no-bail \"/^(format:check|typecheck|lint|build)$/\" && pnpm --silent test",
     "verify:guards": "node -e \"process.exit(0)\"",
     "prepare": "husky"
   },
