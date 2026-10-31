@@ -9,9 +9,9 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
@@ -27,6 +27,7 @@ import {
 } from "./affected-tests.mjs";
 import { affectedReportSchema } from "../src/worker/unit/affected.ts";
 import { stopAfter } from "../src/kernel/stop-test-support.ts";
+import { HOST_PATH } from "./pnpm-stub-test-support.ts";
 
 const MODIFIED = "modified";
 const ADDED = "added";
@@ -97,20 +98,6 @@ const FLOOR_FILES = {
   "src/part.test.ts": `import "./a.ts";\n${WAITING_TEST}`,
 };
 const UNLOADABLE_TEST = 'import "./missing.mjs";\n';
-const HOST_PATH = process.env.PATH;
-const PNPM_STUB = [
-  "#!/bin/sh",
-  'if [ "$1" = --version ]; then echo 0.0.0-stub; exit 0; fi',
-  '[ "$1 $2 $3" = "--silent run test:files" ] || exit 2',
-  "shift 3",
-  `script=$(node -p 'require("./package.json").scripts["test:files"]') || exit 2`,
-  'exec sh -c "$script \\"\\$@\\"" pnpm "$@"',
-  "",
-].join("\n");
-const pnpmStub = mkdtempSync(join(tmpdir(), "kanthord-pnpm-stub-"));
-process.on("exit", () => rmSync(pnpmStub, { recursive: true, force: true }));
-writeFileSync(join(pnpmStub, "pnpm"), PNPM_STUB, { mode: 0o755 });
-process.env.PATH = `${pnpmStub}${delimiter}${HOST_PATH}`;
 
 async function repository(t, files) {
   const root = await mkdtemp(join(tmpdir(), "kanthord-affected-"));

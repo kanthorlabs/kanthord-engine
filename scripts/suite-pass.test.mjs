@@ -8,20 +8,15 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import {
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { buildGraph } from "./affected-tests.mjs";
 import { keyOf } from "./suite-pass.mjs";
 import { stopAfter } from "../src/kernel/stop-test-support.ts";
+import { HOST_PATH } from "./pnpm-stub-test-support.ts";
 
 const ENTRY_POINT = fileURLToPath(new URL("./suite-pass.mjs", import.meta.url));
 const AFFECTED_REPORTER = fileURLToPath(
@@ -43,20 +38,6 @@ const NODE_TEST_COMMAND =
 const EMPTY_MODULE = "export {};\n";
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 const OLD_TIME = Date.UTC(2020, 0, 1);
-const HOST_PATH = process.env.PATH;
-const PNPM_STUB = [
-  "#!/bin/sh",
-  'if [ "$1" = --version ]; then echo 0.0.0-stub; exit 0; fi',
-  '[ "$1 $2 $3" = "--silent run test:files" ] || exit 2',
-  "shift 3",
-  `script=$(node -p 'require("./package.json").scripts["test:files"]') || exit 2`,
-  'exec sh -c "$script \\"\\$@\\"" pnpm "$@"',
-  "",
-].join("\n");
-const pnpmStub = mkdtempSync(join(tmpdir(), "kanthord-pnpm-stub-"));
-process.on("exit", () => rmSync(pnpmStub, { recursive: true, force: true }));
-writeFileSync(join(pnpmStub, "pnpm"), PNPM_STUB, { mode: 0o755 });
-process.env.PATH = `${pnpmStub}${delimiter}${HOST_PATH}`;
 
 function loggedTest(path, body = "") {
   return `import test from "node:test";
