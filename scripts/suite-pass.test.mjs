@@ -8,9 +8,15 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { buildGraph } from "./affected-tests.mjs";
@@ -37,6 +43,20 @@ const NODE_TEST_COMMAND =
 const EMPTY_MODULE = "export {};\n";
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 const OLD_TIME = Date.UTC(2020, 0, 1);
+const HOST_PATH = process.env.PATH;
+const PNPM_STUB = [
+  "#!/bin/sh",
+  'if [ "$1" = --version ]; then echo 0.0.0-stub; exit 0; fi',
+  '[ "$1 $2 $3" = "--silent run test:files" ] || exit 2',
+  "shift 3",
+  `script=$(node -p 'require("./package.json").scripts["test:files"]') || exit 2`,
+  'exec sh -c "$script \\"\\$@\\"" pnpm "$@"',
+  "",
+].join("\n");
+const pnpmStub = mkdtempSync(join(tmpdir(), "kanthord-pnpm-stub-"));
+process.on("exit", () => rmSync(pnpmStub, { recursive: true, force: true }));
+writeFileSync(join(pnpmStub, "pnpm"), PNPM_STUB, { mode: 0o755 });
+process.env.PATH = `${pnpmStub}${delimiter}${HOST_PATH}`;
 
 function loggedTest(path, body = "") {
   return `import test from "node:test";
@@ -155,12 +175,13 @@ function recordedFiles(root) {
 
 test("a test file with a matching record is skipped", async (t) => {
   const root = await fixture(t);
-  const first = runSuitePass(root, ["--write"]);
+  const host = { PATH: HOST_PATH };
+  const first = runSuitePass(root, ["--write"], TEST_FILES, host);
   assert.equal(first.status, SUCCESS, first.stderr);
   assert.deepEqual(first.ran, TEST_FILES);
   assert.match(first.stdout, /Skipped: 0 test files/);
   const before = readStore(root).records;
-  const second = runSuitePass(root, ["--write"]);
+  const second = runSuitePass(root, ["--write"], TEST_FILES, host);
   assert.equal(second.status, SUCCESS, second.stderr);
   assert.deepEqual(second.ran, []);
   assert.match(second.stdout, /Ran: 0 test files/);
