@@ -456,6 +456,82 @@ export const ExecutionKind = {
 } as const;
 export const executionKindSchema = z.enum(ExecutionKind);
 export type ExecutionKind = z.infer<typeof executionKindSchema>;
+export const FlowGrain = { Hour: "hour", Day: "day" } as const;
+export const flowGrainSchema = z.enum(FlowGrain);
+export type FlowGrain = z.infer<typeof flowGrainSchema>;
+export const FlowKind = {
+  Steps: "steps",
+  Evaluation: "evaluation",
+  None: "",
+} as const;
+export const flowKindSchema = z.enum(FlowKind);
+export type FlowKind = z.infer<typeof flowKindSchema>;
+export const FlowStage = {
+  Queued: "queued",
+  Executing: "executing",
+  Verification: "verification",
+  ReleaseGate: "release_gate",
+  Evaluation: "evaluation",
+  Outcome: "outcome",
+} as const;
+export const flowStageSchema = z.enum(FlowStage);
+export type FlowStage = z.infer<typeof flowStageSchema>;
+export const FlowExit = {
+  Open: "open",
+  Revoked: "revoked",
+  Paused: "paused",
+  Completed: "completed",
+  External: "external",
+  Rework: "rework",
+  Blocked: "blocked",
+  Budget: "budget",
+  Stopped: "stopped",
+  FurtherWork: "further_work",
+  HandedOn: "handed_on",
+  Unknown: "unknown",
+} as const;
+export const flowExitSchema = z.enum(FlowExit);
+export type FlowExit = z.infer<typeof flowExitSchema>;
+export const FlowMeasure = {
+  QueueWait: "queue_wait",
+  ExecutionTime: "execution_time",
+  VerificationRunTime: "verification_run_time",
+  GateRunTime: "gate_run_time",
+  ReviewWait: "review_wait",
+  EvaluationTime: "evaluation_time",
+  LeadTime: "lead_time",
+} as const;
+export const flowMeasureSchema = z.enum(FlowMeasure);
+export type FlowMeasure = z.infer<typeof flowMeasureSchema>;
+export const FlowStopReason = {
+  OperationFailed: "operation_failed",
+  JudgementInvalid: "judgement_invalid",
+  ReportAbsent: "report_absent",
+  ActionUnsettled: "action_unsettled",
+  AssessmentAbsent: "assessment_absent",
+  ProviderFailed: "provider_failed",
+  NoProgress: "no_progress",
+  EnvironmentFailed: "environment_failed",
+  Lost: "lost",
+  BudgetEnd: "budget_end",
+} as const;
+export const flowStopReasonSchema = z.enum(FlowStopReason);
+export type FlowStopReason = z.infer<typeof flowStopReasonSchema>;
+export const FlowEvaluationStage = {
+  Setup: "setup",
+  Verification: "verification",
+  Affected: "affected",
+  Judgement: "judgement",
+} as const;
+export const flowEvaluationStageSchema = z.enum(FlowEvaluationStage);
+export type FlowEvaluationStage = z.infer<typeof flowEvaluationStageSchema>;
+export const FlowGateAffected = {
+  Passed: "passed",
+  BaseRed: "base_red",
+  Absent: "absent",
+} as const;
+export const flowGateAffectedSchema = z.enum(FlowGateAffected);
+export type FlowGateAffected = z.infer<typeof flowGateAffectedSchema>;
 export interface ExecutionOpening {
   kind: ExecutionKind;
   worker_name: string;
