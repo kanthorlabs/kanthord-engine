@@ -8,6 +8,7 @@ import { HttpStatus } from "../../kernel/http.ts";
 import { HealthStatus } from "../../kernel/service.ts";
 import {
   hostEnvironment,
+  linkPiTools,
   requirePiTools,
   stopAfter,
   temporary,
@@ -16,6 +17,7 @@ import { isObject } from "../../kernel/values.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { WorkPullKind } from "../../scheduler/contract.ts";
 import { runWorker, Worker, type WorkerOptions } from "./index.ts";
+import { instanceDirectories } from "./instance-config.ts";
 import {
   FAKE_INSTANCE_NAME,
   FAKE_WORKER,
@@ -106,13 +108,15 @@ async function until<T>(
 function environmentOf(t: TestContext, value?: string): NodeJS.ProcessEnv {
   requirePiTools();
   const root = temporary(t);
-  return {
+  const env = {
     HOME: root,
     XDG_CONFIG_HOME: `${root}/config`,
     XDG_DATA_HOME: `${root}/data`,
     XDG_STATE_HOME: `${root}/state`,
     ...(value === undefined ? {} : { KANTHORD_WORKER_CONFIG: value }),
   };
+  linkPiTools(instanceDirectories(env, FAKE_INSTANCE_NAME).data);
+  return env;
 }
 
 async function fixture(t: TestContext, bindings = TWO_BINDINGS) {

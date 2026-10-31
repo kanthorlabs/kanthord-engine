@@ -10,6 +10,7 @@ import { directories } from "../../kernel/xdg.ts";
 import type { ModelRuntimeFactory } from "../../worker/unit/index.ts";
 import { httpTransport } from "../worker/transport.ts";
 import {
+  linkPiTools,
   requirePiTools,
   stopAfter,
   temporary,
@@ -402,6 +403,7 @@ export async function inProcessWorker(
     XDG_STATE_HOME: join(root, "state"),
   };
   const state = directories(env).state;
+  linkPiTools(state);
   const logs: Record<string, unknown>[] = [];
   const ready = Promise.withResolvers<void>();
   const readyMessage = "Worker application ready";

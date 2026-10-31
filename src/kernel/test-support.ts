@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  copyFileSync,
+  cpSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
@@ -26,6 +33,12 @@ export const SUITE_CONCURRENCY =
   process.platform === EXEC_CHECKED_PLATFORM
     ? EXEC_CHECKED_SUITE_CONCURRENCY
     : DEFAULT_SUITE_CONCURRENCY;
+
+const PI_TOOLS_DIRECTORY = new URL("../../.pi-tools/", import.meta.url);
+const PI_BIN_PATH = ["pi", "bin"];
+const PRIVATE_DIRECTORY_MODE = 0o700;
+const CROSS_DEVICE = "EXDEV";
+const FILE_EXISTS = "EEXIST";
 
 interface PiToolsDigests {
   tools: Record<string, { targets: Record<string, { binary_sha256: string }> }>;
@@ -54,6 +67,26 @@ export function requirePiTools(
     assert.fail(
       `pi tools are absent or stale: ${refused.join(", ")}. Run pnpm run pi-tools:fetch before this test.`,
     );
+}
+
+export function linkPiTools(data: string): void {
+  const manifest = JSON.parse(
+    shippedAsset(PI_TOOLS_MANIFEST),
+  ) as PiToolsDigests;
+  const target = `${process.platform}-${process.arch}`;
+  const bin = join(data, ...PI_BIN_PATH);
+  mkdirSync(bin, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
+  for (const tool of Object.keys(manifest.tools)) {
+    const source = new URL(`${target}/bin/${tool}`, PI_TOOLS_DIRECTORY);
+    const path = join(bin, tool);
+    try {
+      linkSync(source, path);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === CROSS_DEVICE) copyFileSync(source, path);
+      else if (code !== FILE_EXISTS) throw error;
+    }
+  }
 }
 
 export function diagnosticText(error: unknown): string {
