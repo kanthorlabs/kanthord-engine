@@ -29,6 +29,7 @@ const TOOL_DEADLINE_MS = 60000;
 const PS_FOUND = 0;
 const ZOMBIE = "Z";
 const LINE_END = "\n";
+const GONE_POLL_MS = 10;
 const FIRST_PULL = 1;
 const REGISTRATION = {
   runtime_identity: "worker_registration_01ARZ3NDEKTSV4RRFFQ69G5FAA",
@@ -426,7 +427,7 @@ test("abandon kills the tool process group of the live execution", async (t) => 
   await verification;
   assert.ok(await abandoned);
   await running;
-  assert.equal(alive(grandchild), false);
+  await gone(grandchild, t.signal);
   assert.deepEqual(deregistrations, []);
 });
 
@@ -435,6 +436,10 @@ function alive(pid: number): boolean {
     encoding: "utf8",
   });
   return ps.status === PS_FOUND && !ps.stdout.trim().startsWith(ZOMBIE);
+}
+
+async function gone(pid: number, signal: AbortSignal): Promise<void> {
+  while (alive(pid)) await delay(GONE_POLL_MS, undefined, { signal });
 }
 
 async function pidOf(file: string, signal: AbortSignal): Promise<number> {
