@@ -29,7 +29,9 @@ import { readCost } from "./analytics-cost.ts";
 import { readDuration } from "./analytics-duration.ts";
 import { type Admission, admitRecords, admitServerSpan } from "./admission.ts";
 import { openFlow } from "./flow-admission.ts";
+import { runFlowBackfill } from "./flow-backfill.ts";
 import { readFlow } from "./flow-read.ts";
+import { relabelFlow } from "./flow-relabel.ts";
 import {
   type Acknowledgement,
   ANALYTICS_ITEMS_MAX,
@@ -81,6 +83,7 @@ import {
 import {
   RETENTION_SWEEP_INTERVAL_MS,
   retentionCutoff,
+  sweepExpiredFlow,
   sweepExpiredTraces,
 } from "./retention.ts";
 import {
@@ -303,6 +306,7 @@ export class TrackingService implements Service, ExecutionTelemetry {
   private started = false;
   private dropped = 0;
   private failedSweeps = 0;
+  private pendingUntil: number | null = null;
   private sweepTimer: NodeJS.Timeout | undefined;
   private readonly now: () => number;
 
@@ -323,11 +327,43 @@ export class TrackingService implements Service, ExecutionTelemetry {
   }
 
   sweep(): number {
+    const deleted = this.sweepTraces();
+    this.sweepFlow();
+    return deleted;
+  }
+
+  private sweepTraces(): number {
     try {
       return sweepExpiredTraces(this.dependencies.store, this.cutoff());
     } catch {
       this.failedSweeps += 1;
       return 0;
+    }
+  }
+
+  private sweepFlow(): void {
+    try {
+      sweepExpiredFlow(this.dependencies.store, this.now());
+    } catch {
+      this.failedSweeps += 1;
+    }
+  }
+
+  private async backfill(): Promise<void> {
+    try {
+      await runFlowBackfill(
+        this.dependencies.store,
+        {
+          isHostedWorker: this.dependencies.isHostedWorker,
+          now: this.now,
+        },
+        this.shutdown.signal,
+        (pendingUntil) => {
+          this.pendingUntil = pendingUntil;
+        },
+      );
+    } catch {
+      this.failedSweeps += 1;
     }
   }
 
@@ -578,7 +614,10 @@ export class TrackingService implements Service, ExecutionTelemetry {
     assert.ok(caller.identity);
     return readFlow(this.dependencies.store, query, this.now(), {
       isHostedWorker: this.dependencies.isHostedWorker,
-      rebuild: null,
+      rebuild:
+        this.pendingUntil === null
+          ? null
+          : { pending_until: this.pendingUntil },
     });
   }
 
@@ -672,6 +711,13 @@ export class TrackingService implements Service, ExecutionTelemetry {
       const span = writeCauseLabel(tx, traceId, body, username, this.now());
       const cause = effectiveCauseOf(null, span.attributes);
       assert.ok(cause);
+      relabelFlow(
+        tx,
+        traceId,
+        cause,
+        this.dependencies.isHostedWorker,
+        this.now(),
+      );
       return {
         trace_id: traceId,
         span_id: span.span_id,
@@ -765,6 +811,7 @@ export class TrackingService implements Service, ExecutionTelemetry {
       RETENTION_SWEEP_INTERVAL_MS,
     );
     this.sweepTimer.unref();
+    void this.backfill();
     return Promise.resolve(null);
   }
   quiesce(): Promise<Error | null> {

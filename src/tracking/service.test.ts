@@ -31,6 +31,7 @@ import {
   FlowCompare,
   FlowExit,
   FlowGrain,
+  FlowKind,
   FlowStage,
   MISSION_PRODUCER,
   PROJECT_PRODUCER,
@@ -103,6 +104,8 @@ const NO_DROP = 0;
 const NO_ROWS = 0;
 const ONE_ENTRY = 1;
 const ONE_DROP = 1;
+const TWO_FAILURES = 2;
+const BACKFILL_WAIT_TURNS = 100;
 const PAGE_OF_ONE = 1;
 const STOP_DETAIL = "Cannot find module";
 const SPAN_PAGE = 10;
@@ -1292,11 +1295,131 @@ test("start sweeps an expired trace", async (t) => {
   assert.equal(service.sweepFailures(), NO_ROWS);
 });
 
-test("a failed sweep is counted and answers zero", (t) => {
+function insertUnfilledTrace(store: Store, createdAt: number): void {
+  store.transaction((tx) => {
+    insertTrace(tx, TRACE, createdAt);
+    tx.database
+      .prepare("UPDATE tracking_trace SET kind = NULL WHERE trace_id = ?")
+      .run(TRACE.trace_id);
+  });
+}
+
+function kindOfTrace(store: Store): unknown {
+  return store.database
+    .prepare("SELECT kind FROM tracking_trace WHERE trace_id = ?")
+    .get(TRACE.trace_id)?.kind;
+}
+
+function rollupRowCount(store: Store): number {
+  const row = store.database
+    .prepare("SELECT COUNT(*) AS count FROM tracking_flow_rollup")
+    .get();
+  return Number(row?.count);
+}
+
+async function backfillEnded(service: TrackingService, store: Store) {
+  for (let turn = 0; turn < BACKFILL_WAIT_TURNS; turn++) {
+    if (service.analyticsFlow(flowQuery(), caller(store)).rebuild === null)
+      return;
+    await setImmediate();
+  }
+  assert.fail("the backfill did not end");
+}
+
+test("start runs the backfill after the sweep and does not wait for it", async (t) => {
+  const { store, service } = harness(t);
+  insertUnfilledTrace(store, NOW - DAY_MS);
+  stopAfter(t, () => service.stop());
+  assert.equal(await service.start(), null);
+  assert.equal(kindOfTrace(store), null);
+  await backfillEnded(service, store);
+  assert.equal(kindOfTrace(store), FlowKind.None);
+  assert.equal(rollupRowCount(store), TWO_ROWS);
+  assert.equal(service.sweepFailures(), NO_ROWS);
+});
+
+test("the backfill leaves out a trace that the first sweep deletes", async (t) => {
+  const { store, service } = harness(t);
+  insertUnfilledTrace(store, NOW - EXPIRED_AGE_DAYS * DAY_MS);
+  stopAfter(t, () => service.stop());
+  assert.equal(await service.start(), null);
+  await backfillEnded(service, store);
+  assert.equal(traceCount(store), NO_ROWS);
+  assert.equal(rollupRowCount(store), NO_ROWS);
+});
+
+test("analyticsFlow answers rebuild with the job start while the backfill runs and null after it", async (t) => {
+  const { store, service } = harness(t);
+  assert.equal(service.analyticsFlow(flowQuery(), caller(store)).rebuild, null);
+  insertUnfilledTrace(store, NOW - DAY_MS);
+  stopAfter(t, () => service.stop());
+  assert.equal(await service.start(), null);
+  assert.deepEqual(service.analyticsFlow(flowQuery(), caller(store)).rebuild, {
+    pending_until: NOW,
+  });
+  await backfillEnded(service, store);
+  assert.equal(service.analyticsFlow(flowQuery(), caller(store)).rebuild, null);
+});
+
+test("a failed sweep is counted for the traces and for the rollups and answers zero", (t) => {
   const { store, service } = harness(t);
   store.close();
   assert.equal(service.sweep(), NO_ROWS);
+  assert.equal(service.sweepFailures(), TWO_FAILURES);
+});
+
+test("a failed rollup sweep is counted and the trace sweep still runs", (t) => {
+  const { store, service } = harness(t);
+  store.transaction((tx) =>
+    insertTrace(tx, TRACE, NOW - EXPIRED_AGE_DAYS * DAY_MS),
+  );
+  store.database.exec("DROP TABLE tracking_usage_rollup");
+  assert.equal(service.sweep(), ONE_ENTRY);
   assert.equal(service.sweepFailures(), ONE_DROP);
+  assert.equal(traceCount(store), NO_ROWS);
+});
+
+function insertUsageRow(store: Store, grain: FlowGrain, bucketStart: number) {
+  store.database
+    .prepare(
+      "INSERT INTO tracking_usage_rollup VALUES (?, ?, 'project', 'worker', 'model', 1, 1, 1, 1, 1, 0)",
+    )
+    .run(grain, bucketStart);
+}
+
+function usageBuckets(store: Store, grain: FlowGrain): number[] {
+  return store.database
+    .prepare(
+      "SELECT bucket_start FROM tracking_usage_rollup WHERE grain = ? ORDER BY bucket_start",
+    )
+    .all(grain)
+    .map((row) => Number(row.bucket_start));
+}
+
+test("the sweep deletes the rollup rows of an expired trace only at their own cutoff", (t) => {
+  const { store, service } = harness(t);
+  store.transaction((tx) =>
+    insertTrace(tx, TRACE, NOW - EXPIRED_AGE_DAYS * DAY_MS),
+  );
+  insertUsageRow(store, FlowGrain.Hour, NOW - 9 * DAY_MS);
+  insertUsageRow(store, FlowGrain.Hour, NOW - 7 * DAY_MS);
+  insertUsageRow(store, FlowGrain.Day, NOW - 65 * DAY_MS);
+  insertUsageRow(store, FlowGrain.Day, NOW - EXPIRED_AGE_DAYS * DAY_MS);
+  assert.equal(service.sweep(), ONE_ENTRY);
+  assert.equal(service.sweepFailures(), NO_ROWS);
+  assert.equal(traceCount(store), NO_ROWS);
+  assert.deepEqual(usageBuckets(store, FlowGrain.Hour), [NOW - 7 * DAY_MS]);
+  assert.deepEqual(usageBuckets(store, FlowGrain.Day), [
+    NOW - EXPIRED_AGE_DAYS * DAY_MS,
+  ]);
+});
+
+test("start sweeps an expired rollup row", async (t) => {
+  const { store, service } = harness(t);
+  insertUsageRow(store, FlowGrain.Hour, NOW - 9 * DAY_MS);
+  stopAfter(t, () => service.stop());
+  assert.equal(await service.start(), null);
+  assert.deepEqual(usageBuckets(store, FlowGrain.Hour), []);
 });
 
 test("a telemetry write of an expired execution is refused and opens no trace", (t) => {
@@ -2029,7 +2152,7 @@ test("the cause label operation answers the cause with the assigner human and wr
     ended_at: ENDED,
     end: ExecutionEnd.Finished,
     revoke_cause: null,
-    stop: null,
+    stop: { reason: "provider_failed", code: RATE_LIMITED },
     cause: unattributed([CauseCategory.Prompt, CauseCategory.Model]),
   });
   const body = {
@@ -2050,6 +2173,24 @@ test("the cause label operation answers the cause with the assigner human and wr
     created_at: ENDED,
   });
   assert.doesNotThrow(() => trackingOperations.causeLabel.output.parse(answer));
+  for (const grain of Object.values(FlowGrain)) {
+    const rows = store.database
+      .prepare(
+        "SELECT cause_category, cause_detail, cause_assigner, executions FROM tracking_flow_rollup WHERE grain = ?",
+      )
+      .all(grain);
+    assert.deepEqual(
+      rows.map((row) => ({ ...row })),
+      [
+        {
+          cause_category: CauseCategory.Prompt,
+          cause_detail: CauseSubcategory.ContextMissing,
+          cause_assigner: CauseAssigner.Human,
+          executions: 1,
+        },
+      ],
+    );
+  }
   const label = service
     .spanList(TRACE.trace_id, { limit: SPAN_PAGE }, caller(store))
     .items.find((span) => span.span_id === answer.span_id);
