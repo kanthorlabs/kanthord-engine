@@ -31,6 +31,7 @@ import {
   FlowCompare,
   FlowExit,
   FlowGrain,
+  FlowKind,
   FlowStage,
   MISSION_PRODUCER,
   PROJECT_PRODUCER,
@@ -104,6 +105,7 @@ const NO_ROWS = 0;
 const ONE_ENTRY = 1;
 const ONE_DROP = 1;
 const TWO_FAILURES = 2;
+const BACKFILL_WAIT_TURNS = 100;
 const PAGE_OF_ONE = 1;
 const STOP_DETAIL = "Cannot find module";
 const SPAN_PAGE = 10;
@@ -1291,6 +1293,72 @@ test("start sweeps an expired trace", async (t) => {
   assert.equal(await service.start(), null);
   assert.equal(traceCount(store), NO_ROWS);
   assert.equal(service.sweepFailures(), NO_ROWS);
+});
+
+function insertUnfilledTrace(store: Store, createdAt: number): void {
+  store.transaction((tx) => {
+    insertTrace(tx, TRACE, createdAt);
+    tx.database
+      .prepare("UPDATE tracking_trace SET kind = NULL WHERE trace_id = ?")
+      .run(TRACE.trace_id);
+  });
+}
+
+function kindOfTrace(store: Store): unknown {
+  return store.database
+    .prepare("SELECT kind FROM tracking_trace WHERE trace_id = ?")
+    .get(TRACE.trace_id)?.kind;
+}
+
+function rollupRowCount(store: Store): number {
+  const row = store.database
+    .prepare("SELECT COUNT(*) AS count FROM tracking_flow_rollup")
+    .get();
+  return Number(row?.count);
+}
+
+async function backfillEnded(service: TrackingService, store: Store) {
+  for (let turn = 0; turn < BACKFILL_WAIT_TURNS; turn++) {
+    if (service.analyticsFlow(flowQuery(), caller(store)).rebuild === null)
+      return;
+    await setImmediate();
+  }
+  assert.fail("the backfill did not end");
+}
+
+test("start runs the backfill after the sweep and does not wait for it", async (t) => {
+  const { store, service } = harness(t);
+  insertUnfilledTrace(store, NOW - DAY_MS);
+  stopAfter(t, () => service.stop());
+  assert.equal(await service.start(), null);
+  assert.equal(kindOfTrace(store), null);
+  await backfillEnded(service, store);
+  assert.equal(kindOfTrace(store), FlowKind.None);
+  assert.equal(rollupRowCount(store), TWO_ROWS);
+  assert.equal(service.sweepFailures(), NO_ROWS);
+});
+
+test("the backfill leaves out a trace that the first sweep deletes", async (t) => {
+  const { store, service } = harness(t);
+  insertUnfilledTrace(store, NOW - EXPIRED_AGE_DAYS * DAY_MS);
+  stopAfter(t, () => service.stop());
+  assert.equal(await service.start(), null);
+  await backfillEnded(service, store);
+  assert.equal(traceCount(store), NO_ROWS);
+  assert.equal(rollupRowCount(store), NO_ROWS);
+});
+
+test("analyticsFlow answers rebuild with the job start while the backfill runs and null after it", async (t) => {
+  const { store, service } = harness(t);
+  assert.equal(service.analyticsFlow(flowQuery(), caller(store)).rebuild, null);
+  insertUnfilledTrace(store, NOW - DAY_MS);
+  stopAfter(t, () => service.stop());
+  assert.equal(await service.start(), null);
+  assert.deepEqual(service.analyticsFlow(flowQuery(), caller(store)).rebuild, {
+    pending_until: NOW,
+  });
+  await backfillEnded(service, store);
+  assert.equal(service.analyticsFlow(flowQuery(), caller(store)).rebuild, null);
 });
 
 test("a failed sweep is counted for the traces and for the rollups and answers zero", (t) => {
