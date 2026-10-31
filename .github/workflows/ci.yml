@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 env:
-  TEST_CONCURRENCY: "4"
+  TEST_CONCURRENCY: "8"
 
 jobs:
   check:
