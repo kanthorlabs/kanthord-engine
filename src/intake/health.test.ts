@@ -40,6 +40,7 @@ import {
 } from "./health.ts";
 import { allocateInboundId, insertInbound } from "./inbound-store.ts";
 import { intakeMigrations } from "./migrations.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const CREDENTIAL = "github-poll";
@@ -135,7 +136,7 @@ function fakeCustody(options: HarnessOptions) {
 
 function harness(t: TestContext, options: HarnessOptions = {}) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
   ]);
@@ -226,7 +227,7 @@ function harness(t: TestContext, options: HarnessOptions = {}) {
 
 function checkContext(t: TestContext, budgetMs = CHECK_BUDGET_MS) {
   const context = new CancellationContext(background, Date.now() + budgetMs);
-  t.after(() => context.cancel());
+  stopAfter(t, () => context.cancel());
   return context;
 }
 

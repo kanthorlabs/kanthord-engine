@@ -7,8 +7,14 @@ import {
   TRACKING_SERVICE_NAME,
 } from "./contract.ts";
 import { trackingMigrations } from "./migrations.ts";
-import { DAY_MS, retentionCutoff, sweepExpiredTraces } from "./retention.ts";
+import {
+  DAY_MS,
+  retentionCutoff,
+  sweepExpiredFlow,
+  sweepExpiredTraces,
+} from "./retention.ts";
 import { insertTrace, traceRowOf } from "./trace-store.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const NOW = 1751566593132;
 const RETENTION_DAYS = 30;
@@ -19,6 +25,7 @@ const EXPECTED_BATCHES = 3;
 const CUTOFF_30_DAYS = NOW - 2592000000;
 const NO_ROWS = 0;
 const ONE_ROW = 1;
+const TWO_ROWS = 2;
 const TABLES = [
   "tracking_span",
   "tracking_record",
@@ -28,7 +35,7 @@ const TABLES = [
 
 function memoryStore(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: TRACKING_SERVICE_NAME, migrations: trackingMigrations },
   ]);
@@ -126,6 +133,65 @@ test("one sweep deletes 45 expired traces in three batches", (t) => {
   assert.equal(batches, EXPECTED_BATCHES);
   assert.equal(countOf(store, "tracking_trace"), NO_ROWS);
   for (const table of TABLES) assert.equal(countOf(store, table), NO_ROWS);
+});
+
+const SQL_TEXT = "TEXT";
+const SQL_BLOB = "BLOB";
+const ROLLUP_TABLES = [
+  "tracking_flow_rollup",
+  "tracking_flow_histogram",
+  "tracking_usage_rollup",
+] as const;
+
+function insertRollupRow(store: Store, table: string): void {
+  const columns = store.database
+    .prepare(`PRAGMA table_info(${table})`)
+    .all()
+    .map((column) => ({
+      name: String(column.name),
+      type: String(column.type),
+    }));
+  const values = columns.map(({ type }) =>
+    type === SQL_TEXT ? "'x'" : type === SQL_BLOB ? "x'00'" : "1",
+  );
+  store.database.exec(
+    `INSERT INTO ${table} (${columns.map(({ name }) => name).join(", ")}) VALUES (${values.join(", ")})`,
+  );
+}
+
+test("the sweep of a trace keeps the rollup rows", (t) => {
+  const store = memoryStore(t);
+  insertTraceWithChildren(store, 1, EXPIRED_AT);
+  for (const table of ROLLUP_TABLES) insertRollupRow(store, table);
+  const deleted = sweepExpiredTraces(
+    store,
+    retentionCutoff(NOW, RETENTION_DAYS),
+  );
+  assert.equal(deleted, ONE_ROW);
+  assert.equal(countOf(store, "tracking_trace"), NO_ROWS);
+  for (const table of ROLLUP_TABLES)
+    assert.equal(countOf(store, table), ONE_ROW);
+});
+
+test("the sweep keeps the rollup rows of a deleted trace until their own cutoff", (t) => {
+  const store = memoryStore(t);
+  insertTraceWithChildren(store, 1, EXPIRED_AT);
+  const insertUsage = store.database.prepare(
+    "INSERT INTO tracking_usage_rollup VALUES (?, ?, 'p', 'w', 'm', 1, 1, 1, 1, 1, 0)",
+  );
+  insertUsage.run("day", NOW - 40 * DAY_MS);
+  insertUsage.run("hour", NOW - 40 * DAY_MS);
+  assert.equal(
+    sweepExpiredTraces(store, retentionCutoff(NOW, RETENTION_DAYS)),
+    ONE_ROW,
+  );
+  assert.equal(countOf(store, "tracking_usage_rollup"), TWO_ROWS);
+  assert.equal(sweepExpiredFlow(store, NOW), ONE_ROW);
+  const kept = store.database
+    .prepare("SELECT grain FROM tracking_usage_rollup")
+    .all()
+    .map((row) => String(row.grain));
+  assert.deepEqual(kept, ["day"]);
 });
 
 test("the cutoff lies the retention before now", () => {

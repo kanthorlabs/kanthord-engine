@@ -8,6 +8,7 @@ import { identitySchema } from "../../kernel/identity.ts";
 import {
   analyticsBucketSchema,
   analyticsDurationQuerySchema,
+  analyticsFlowQuerySchema,
   analyticsMeasureSchema,
   causeLabelTextIdSchema,
   costGroupBySchema,
@@ -16,6 +17,8 @@ import {
   ENTRY_LIST_LIMIT_MAX,
   ENTRY_LIST_LIMIT_MIN,
   entryIdentitySchema,
+  flowCompareSchema,
+  flowGrainSchema,
   SPAN_LIST_LIMIT_DEFAULT,
   SPAN_LIST_LIMIT_MAX,
   SPAN_LIST_LIMIT_MIN,
@@ -55,6 +58,7 @@ const TIMELINE = "timeline";
 const ANALYTICS = "analytics";
 const COST = "cost";
 const DURATION = "duration";
+const FLOW = "flow";
 const PROJECT_IDENTITY_PREFIX = "project";
 const NODE_IDENTITY_PREFIX = "node";
 const EXECUTION_IDENTITY_PREFIX = "execution";
@@ -347,6 +351,48 @@ async function analyticsDuration(command: Command): Promise<void> {
   );
 }
 
+async function analyticsFlow(command: Command): Promise<void> {
+  const leaf = `${ANALYTICS}.${FLOW}`;
+  const options = command.optsWithGlobals();
+  const code = (suffix: string) => `cli.tracking.${leaf}.${suffix}`;
+  const query = {
+    project_id: optionOf(
+      identitySchema(PROJECT_IDENTITY_PREFIX),
+      options.project,
+      code("invalid_project_id"),
+      "project ID",
+    ),
+    worker_name: optionOf(
+      analyticsFlowQuerySchema.shape.worker_name.unwrap(),
+      options.worker,
+      code("invalid_query"),
+      "worker name",
+    ),
+    from: unixMsOption(options.from, code("invalid_query")),
+    to: unixMsOption(options.to, code("invalid_query")),
+    bucket: optionOf(
+      flowGrainSchema,
+      options.bucket,
+      code("invalid_query"),
+      "bucket",
+    ),
+    compare: optionOf(
+      flowCompareSchema,
+      options.compare,
+      code("invalid_query"),
+      "compare",
+    ),
+  };
+  const result = await client(command, leaf).analyticsFlow({
+    params: {},
+    query,
+    body: null,
+  });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, code("indeterminate")))}\n`,
+  );
+}
+
 async function facetGet(command: Command): Promise<void> {
   const leaf = `${FACET}.${GET}`;
   const options = command.optsWithGlobals();
@@ -580,7 +626,9 @@ export function addTrackingCommand(program: Command): void {
     .action((_options, command: Command) => timelineList(command));
   const analytics = tracking
     .command(ANALYTICS)
-    .description("Read the cost and the duration analytics of the traces");
+    .description(
+      "Read the cost, the duration and the flow analytics of the traces",
+    );
   analytics.action(() => analytics.help());
   analytics
     .command(COST)
@@ -604,6 +652,16 @@ export function addTrackingCommand(program: Command): void {
     .option("--from <unix-ms>", "Range start", singleUse("--from"))
     .option("--to <unix-ms>", "Range end", singleUse("--to"))
     .action((_options, command: Command) => analyticsDuration(command));
+  analytics
+    .command(FLOW)
+    .description("Read the lifecycle flow and the cost scorecard as JSON")
+    .option("--project <project-id>", "Project ID", singleUse("--project"))
+    .option("--worker <worker-name>", "Worker name", singleUse("--worker"))
+    .option("--from <unix-ms>", "Range start", singleUse("--from"))
+    .option("--to <unix-ms>", "Range end", singleUse("--to"))
+    .option("--bucket <size>", "Time bucket", singleUse("--bucket"))
+    .option("--compare <mode>", "Previous window mode", singleUse("--compare"))
+    .action((_options, command: Command) => analyticsFlow(command));
   const span = tracking.command(SPAN).description("Read the spans of a trace");
   span.action(() => span.help());
   span

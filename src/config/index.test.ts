@@ -13,7 +13,11 @@ import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { execFile, type ExecFileException } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { diagnosticText, temporary } from "../kernel/test-support.ts";
+import {
+  diagnosticText,
+  stopAfter,
+  temporary,
+} from "../kernel/test-support.ts";
 import { isNumber } from "../kernel/values.ts";
 import {
   CONFIG_VERSION,
@@ -490,7 +494,7 @@ test("configuration is strict, file-only, masks secrets, and reports every inval
   );
   const previous = process.env.GATEWAY_PORT;
   process.env.GATEWAY_PORT = "9999";
-  t.after(() => {
+  stopAfter(t, () => {
     if (previous === undefined) delete process.env.GATEWAY_PORT;
     else process.env.GATEWAY_PORT = previous;
   });

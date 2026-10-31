@@ -24,6 +24,7 @@ import { errorSchema } from "../../kernel/errors.ts";
 import { workerOperations } from "../../worker/contract.ts";
 import { IN_MEMORY_DATABASE, Store } from "../../kernel/store.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
+import { stopAfter } from "../../kernel/stop-test-support.ts";
 
 const NO_REGISTRATIONS = 0;
 const SINGLE_REGISTRATION = 1;
@@ -59,7 +60,7 @@ const machineRead = {
 
 test("machine fake keeps attribution after a registration ends and a replacement registers", (t) => {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const { worker } = fakeMachines();
   const client = {
     client_id: "client",
@@ -436,7 +437,7 @@ test("a new invocation loses replay but registration retains its natural-key ide
     authVersion: fixture.config.gateway.auth.version,
     lookups: fixture.machines,
   });
-  t.after(() => invocation.stop());
+  stopAfter(t, () => invocation.stop());
   const reserve = t.mock.method(invocation.idempotency, "reserve");
   const identity = await invocation.authentication.authenticate(
     `Bearer ${fixture.machineJWT}`,

@@ -23,7 +23,11 @@ import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { background, CancellationContext } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { createIdentity } from "../../kernel/identity.ts";
-import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
+import {
+  hostEnvironment,
+  stopAfter,
+  temporary,
+} from "../../kernel/test-support.ts";
 import {
   credentialRedaction,
   openNativeAgent,
@@ -117,7 +121,7 @@ async function fixture(
     key: SECRET,
   }));
   const context = new CancellationContext(background);
-  t.after(() => context.cancel());
+  stopAfter(t, () => context.cancel());
   const records: TelemetryRecord[] = [];
   const spans = new SpanRecorder(
     {
@@ -161,7 +165,7 @@ async function fixture(
     context,
     turnCheck: options.turnCheck && (() => options.turnCheck!(context)),
   });
-  t.after(() => agent.dispose());
+  stopAfter(t, () => agent.dispose());
   return {
     agent,
     provider,

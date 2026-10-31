@@ -11,7 +11,7 @@ import { HealthRegistry } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
-import { temporary } from "../kernel/test-support.ts";
+import { stopAfter, temporary } from "../kernel/test-support.ts";
 import {
   INTAKE_SERVICE_NAME,
   OutboundOperation,
@@ -120,7 +120,7 @@ function migrate(store: Store): void {
 
 function harness(t: TestContext): Harness {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   migrate(store);
   const lines: string[] = [];
   const logger = pino(
@@ -328,7 +328,7 @@ test("A restart after the insert calls nothing, and a repeat with no match answe
   );
   await assert.rejects(crashed, (error) => error === crash);
   const second = new Store(path);
-  t.after(() => second.close());
+  stopAfter(t, () => second.close());
   const after = new IntakeService({
     store: second,
     logger,
@@ -337,7 +337,7 @@ test("A restart after the insert calls nothing, and a repeat with no match answe
     ...unusedActionDependencies(),
   });
   assert.equal(await after.start(), null);
-  t.after(() => after.stop());
+  stopAfter(t, () => after.stop());
   assert.equal(stored(second).state, OutboundRequestState.Pending);
   assert.equal(counts.calls, RUNS_PER_REQUEST);
   assert.equal(counts.readBacks, UNRUN_COUNT);

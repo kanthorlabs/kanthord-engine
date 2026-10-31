@@ -6,6 +6,7 @@ import type { CallerIdentity } from "../kernel/caller.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { background } from "../kernel/context.ts";
 import { createIdentity } from "../kernel/identity.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 import {
   type CallerContext,
   type ExecutionClaim,
@@ -314,7 +315,7 @@ export function missionHarness(
   overrides: Partial<Dependencies> = {},
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
   ]);

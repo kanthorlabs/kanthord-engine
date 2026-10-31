@@ -107,7 +107,7 @@ function completed<T>(result: OperationResult<T>): T {
 }
 
 async function methodsFixture(t: TestContext) {
-  const gitHub = await fakeGitHub(t);
+  const gitHub = await fakeGitHub(t, { stopLast: true });
   const f = await gatewayFixture(t, {
     fakeSlots: true,
     repositoryConnector: {

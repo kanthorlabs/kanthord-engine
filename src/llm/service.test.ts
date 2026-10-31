@@ -85,7 +85,7 @@ import {
 import { LlmComponent } from "./service.ts";
 import { scriptedModelRuntime } from "./test-support.ts";
 import { loadPi } from "../agent/pi.ts";
-import { redactingLogger } from "../kernel/test-support.ts";
+import { redactingLogger, stopAfter } from "../kernel/test-support.ts";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 import { PROJECT_SERVICE_NAME } from "../project/contract.ts";
@@ -481,7 +481,7 @@ test("offline OAuth login persists the maximum aggregate credential and sanitize
   for (const extra of ["", "x"]) {
     const gate = gatedLogin();
     const f = fixture({ oauthProviders: () => [gate.provider] });
-    t.after(async () => {
+    stopAfter(t, async () => {
       await f.component.stop();
       f.store.close();
     });
@@ -868,7 +868,7 @@ test("Copilot built-in OAuth prompt matches the enterprise placeholder", async (
     fetchCalls++;
     throw new Error("OAuth prompt test must not fetch");
   };
-  t.after(() => {
+  stopAfter(t, () => {
     globalThis.fetch = originalFetch;
   });
   const controller = new AbortController();
@@ -920,7 +920,7 @@ test("OAuth uses real pi-ai modify, defaults Copilot enterprise, and stores only
     oauthProviders: () => [provider],
     now: () => CLOCK_START,
   });
-  t.after(async () => {
+  stopAfter(t, async () => {
     await f.component.stop();
     f.store.close();
   });
@@ -998,7 +998,7 @@ test("openai-codex login offers both modes and stores only refresh, access and e
     oauthProviders: () => [provider],
     now: () => CLOCK_START,
   });
-  t.after(async () => {
+  stopAfter(t, async () => {
     await f.component.stop();
     f.store.close();
   });
@@ -1066,7 +1066,7 @@ test("anthropic-subscription login runs in copy_code mode, completes through log
     oauthProviders: () => [provider],
     now: () => CLOCK_START,
   });
-  t.after(async () => {
+  stopAfter(t, async () => {
     await f.component.stop();
     f.store.close();
   });
@@ -1122,7 +1122,7 @@ test("anthropic-subscription login ignores a requested browser mode and refuses 
     oauthProviders: () => [provider],
     now: () => CLOCK_START,
   });
-  t.after(async () => {
+  stopAfter(t, async () => {
     await f.component.stop();
     f.store.close();
   });
@@ -1163,7 +1163,7 @@ test("the built-in anthropic provider completes a copy_code login from the code#
     },
   );
   const f = fixture();
-  t.after(async () => {
+  stopAfter(t, async () => {
     await f.component.stop();
     f.store.close();
   });
@@ -1193,7 +1193,7 @@ test("OAuth validates entry, name, mode and start-time name conflict before star
       assert.fail("Invalid input must not start OAuth");
     },
   });
-  t.after(async () => {
+  stopAfter(t, async () => {
     await f.component.stop();
     f.store.close();
   });
@@ -1242,7 +1242,7 @@ test("OAuth validates entry, name, mode and start-time name conflict before star
 test("OAuth commit-time name conflict survives pi-ai's error wrapper without storing another row", async (t) => {
   const gate = gatedLogin();
   const f = fixture({ oauthProviders: () => [gate.provider] });
-  t.after(async () => {
+  stopAfter(t, async () => {
     await f.component.stop();
     f.store.close();
   });
@@ -1272,7 +1272,7 @@ for (const type of ["manual_code", "text", "secret"] as const) {
       return oauthCredential;
     });
     const f = fixture({ oauthProviders: () => [provider] });
-    t.after(async () => {
+    stopAfter(t, async () => {
       await f.component.stop();
       f.store.close();
     });
@@ -1297,7 +1297,7 @@ for (const type of ["manual_code", "text", "secret"] as const) {
 test("OAuth provider failure records a non-secret reason and no credential", async (t) => {
   const gate = gatedLogin();
   const f = fixture({ oauthProviders: () => [gate.provider] });
-  t.after(async () => {
+  stopAfter(t, async () => {
     await f.component.stop();
     f.store.close();
   });
@@ -1320,7 +1320,7 @@ test("OAuth expiry aborts an unanswered prompt and never writes credentials", as
     return oauthCredential;
   });
   const f = fixture({ oauthProviders: () => [provider], now: () => now });
-  t.after(async () => {
+  stopAfter(t, async () => {
     await f.component.stop();
     f.store.close();
   });
@@ -1350,7 +1350,7 @@ test("OAuth expiry timer cancels a pre-address wait without any status polling",
     return oauthCredential;
   });
   const f = fixture({ oauthProviders: () => [provider] });
-  t.after(async () => {
+  stopAfter(t, async () => {
     await f.component.stop();
     f.store.close();
   });
@@ -1370,7 +1370,7 @@ test("OAuth rechecks expiry on completion before a delayed expiry timer fires", 
   let now = CLOCK_START;
   const gate = gatedLogin();
   const f = fixture({ oauthProviders: () => [gate.provider], now: () => now });
-  t.after(async () => {
+  stopAfter(t, async () => {
     await f.component.stop();
     f.store.close();
   });
@@ -1392,7 +1392,7 @@ test("OAuth rechecks expiry on completion before a delayed expiry timer fires", 
 test("OAuth rejects an invalid returned secret without logging or storing it", async (t) => {
   const gate = gatedLogin();
   const f = fixture({ oauthProviders: () => [gate.provider] });
-  t.after(async () => {
+  stopAfter(t, async () => {
     await f.component.stop();
     f.store.close();
   });
@@ -1409,7 +1409,7 @@ test("OAuth rejects an invalid returned secret without logging or storing it", a
 test("OAuth a failed insert never completes the session or emits a success log", async (t) => {
   const gate = gatedLogin();
   const f = fixture({ oauthProviders: () => [gate.provider] });
-  t.after(async () => {
+  stopAfter(t, async () => {
     await f.component.stop();
     f.store.close();
   });
@@ -1440,7 +1440,7 @@ test("OAuth the enterprise-shaped prompt after an address still requires login_c
     return oauthCredential;
   });
   const f = fixture({ oauthProviders: () => [provider] });
-  t.after(async () => {
+  stopAfter(t, async () => {
     await f.component.stop();
     f.store.close();
   });
@@ -1461,7 +1461,7 @@ for (const shutdown of ["stop", "quiesce"] as const) {
   test(`OAuth ${shutdown} aborts running work and refuses late persistence`, async (t) => {
     const gate = gatedLogin();
     const f = fixture({ oauthProviders: () => [gate.provider] });
-    t.after(async () => {
+    stopAfter(t, async () => {
       await f.component.stop();
       f.store.close();
     });
@@ -1488,7 +1488,7 @@ test("OAuth waiting for an address observes caller cancellation", async (t) => {
     return oauthCredential;
   });
   const f = fixture({ oauthProviders: () => [provider] });
-  t.after(async () => {
+  stopAfter(t, async () => {
     await f.component.stop();
     f.store.close();
   });
@@ -1519,7 +1519,7 @@ test("OAuth pre-address failures preserve OperationError and sanitize arbitrary 
       throw original;
     });
     const f = fixture({ oauthProviders: () => [provider] });
-    t.after(async () => {
+    stopAfter(t, async () => {
       await f.component.stop();
       f.store.close();
     });
@@ -1546,7 +1546,7 @@ test("OAuth unsupported select options fail without an address or a credential",
     return oauthCredential;
   });
   const f = fixture({ oauthProviders: () => [provider] });
-  t.after(async () => {
+  stopAfter(t, async () => {
     await f.component.stop();
     f.store.close();
   });
@@ -1564,7 +1564,7 @@ test("OAuth auth_url records a browser address with a null code", async (t) => {
     return await gate.promise;
   });
   const f = fixture({ oauthProviders: () => [provider] });
-  t.after(async () => {
+  stopAfter(t, async () => {
     await f.component.stop();
     f.store.close();
   });
@@ -1606,7 +1606,7 @@ test("lifecycle aborts logins and joins cancellation", async () => {
 
 test("platform list answers the LLM platform table", (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   const answer = f.platformList();
   assert.deepEqual(
     answer.items.map(({ platform }) => platform).toSorted(),
@@ -1652,7 +1652,7 @@ const GROQ = "groq";
 
 test("create accepts a plain api_key record for groq and refuses metadata", (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   fails(
     () =>
       f.create({
@@ -1717,7 +1717,7 @@ const llmMetadataCases = [
 for (const { platform, metadata, edited } of llmMetadataCases) {
   test(`${platform} create and metadata edit accept its metadata schema and refuse other metadata`, (t) => {
     const f = fixture();
-    t.after(() => f.store.close());
+    stopAfter(t, () => f.store.close());
     const refused: unknown[] = [
       null,
       {},
@@ -1798,7 +1798,7 @@ const healthCredentials = [
 
 test("inventory lists only LLM records with their capability and dispatches each probe", async (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   for (const credential of healthCredentials)
     f.create({
       name: credential.name,
@@ -1870,7 +1870,7 @@ test("inventory lists only LLM records with their capability and dispatches each
 
 test("provider capability answers the capability of the LLM provider of a credential", (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   for (const credential of healthCredentials)
     f.create({
       name: credential.name,
@@ -1887,7 +1887,7 @@ test("provider capability answers the capability of the LLM provider of a creden
 
 test("provider healthchecks call the LLM provider check of every LLM platform with a check", async (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   f.create({
     name: "anthropic",
     platform: Platform.Anthropic,
@@ -1973,7 +1973,7 @@ async function failsAsync(
 
 test("provider check answers the connection and model list of an LLM credential without its key", async (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   f.create({
     name: "compatible",
     platform: Platform.OpenAICompatible,
@@ -2007,7 +2007,7 @@ test("provider check answers the connection and model list of an LLM credential 
 
 test("provider check refuses invalid input, an unknown or foreign credential and a platform without a check", async (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   const fetch = t.mock.method(globalThis, "fetch", async () => {
     throw new Error("unexpected request");
   });
@@ -2095,7 +2095,7 @@ test("model check runs one tool round trip with the key of the credential and st
     }),
     fauxAssistantMessage("done"),
   ]);
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   const before = f.get("anthropic");
   const answer = await f.modelCheck(MODEL_CHECK_BODY);
   assert.deepEqual(answer, { result: "ok", message: null });
@@ -2111,7 +2111,7 @@ test("model check answers a provider failure with a redacted message", async (t)
       errorMessage: `401 invalid x-api-key ${HEALTH_SECRET}`,
     }),
   ]);
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   const answer = await f.modelCheck(MODEL_CHECK_BODY);
   assert.equal(answer.result, ModelCheckResult.Unauthorized);
   assert.ok(answer.message);
@@ -2132,7 +2132,7 @@ test("model check logs the credential name as credential_name without redaction"
     ],
     redactingLogger(lines),
   );
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   await f.modelCheck(MODEL_CHECK_BODY);
   const record = lines
     .map((line) => JSON.parse(line))
@@ -2144,7 +2144,7 @@ test("model check logs the credential name as credential_name without redaction"
 test("provider check logs the credential name as credential_name without redaction", async (t) => {
   const lines: string[] = [];
   const f = fixture({ logger: redactingLogger(lines) });
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   f.create({
     name: COMPATIBLE_NAME,
     platform: Platform.OpenAICompatible,
@@ -2164,7 +2164,7 @@ test("provider check logs the credential name as credential_name without redacti
 
 test("model check refuses an unknown or foreign credential, an unknown model and an unsupported reasoning effort", async (t) => {
   const { f, calls } = await scriptedModelCheck([fauxAssistantMessage("done")]);
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   f.store.transaction((tx) =>
     f.custody.create(
       tx,
@@ -2199,7 +2199,7 @@ test("model check refuses an unknown or foreign credential, an unknown model and
 
 test("approved models answer the openai-compatible metadata models with defaults and nothing for another credential", (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   f.create({
     name: "compatible",
     platform: Platform.OpenAICompatible,
@@ -2251,7 +2251,7 @@ function rowCount(f: ReturnType<typeof fixture>): number {
 
 test("check answers healthy, unhealthy and unknown through the LLM provider without a row, a log or an answer that holds the key", async (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   const statuses = [
     [HttpStatus.OK, "healthy", null],
     [HttpStatus.Forbidden, "unhealthy", ResourceFailureReason.Forbidden],
@@ -2313,7 +2313,7 @@ test("check answers healthy, unhealthy and unknown through the LLM provider with
 
 test("check refuses an OAuth platform, a platform without a check, a platform of another component and invalid input", async (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   const fetch = t.mock.method(globalThis, "fetch", async () => {
     throw new Error("unexpected request");
   });
@@ -2388,7 +2388,7 @@ function credentialRows(f: ReturnType<typeof fixture>): string {
 
 test("verify answers healthy, unhealthy and unknown like the health report without a write, a log or an answer that holds the key", async (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   f.create({
     name: "anthropic",
     platform: Platform.Anthropic,
@@ -2433,7 +2433,7 @@ test("verify answers healthy, unhealthy and unknown like the health report witho
 
 test("verify answers unknown when the request throws", async (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   f.create({
     name: "compatible",
     platform: Platform.OpenAICompatible,
@@ -2453,7 +2453,7 @@ test("verify answers unknown when the request throws", async (t) => {
 
 test("verify refuses an archived record, a platform without a check, an unknown name and a name of another component", async (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   const fetch = t.mock.method(globalThis, "fetch", async () => {
     throw new Error("unexpected request");
   });
@@ -2933,7 +2933,7 @@ function storedSubscription(f: ReturnType<typeof fixture>, id: string) {
 
 test("verify of an expired anthropic-subscription record refreshes the token through pi-ai, stores it in place and checks with the new token", async (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   const id = insertSubscription(f);
   const requests: { url: string; authorization: string | null }[] = [];
   t.mock.method(
@@ -2980,7 +2980,7 @@ test("verify of an expired anthropic-subscription record refreshes the token thr
 
 test("verify of an anthropic-subscription record answers unauthorized and keeps the stored value when the refresh fails", async (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   const id = insertSubscription(f);
   const fetch = t.mock.method(globalThis, "fetch", async () =>
     Response.json(
@@ -3043,7 +3043,7 @@ function assertRefreshed(
 
 test("the provider check of an expired anthropic-subscription record refreshes through pi-ai and stores the token in place", async (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   const id = insertSubscription(f);
   const requests = refreshingFetch(t);
   const answer = await f.providerCheck({ credential: SUBSCRIPTION_NAME });
@@ -3053,7 +3053,7 @@ test("the provider check of an expired anthropic-subscription record refreshes t
 
 test("the health check of an expired anthropic-subscription record refreshes through pi-ai and stores the token in place", async (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   const id = insertSubscription(f);
   const requests = refreshingFetch(t);
   const [entry] = f.store.transaction((tx) =>
@@ -3065,7 +3065,7 @@ test("the health check of an expired anthropic-subscription record refreshes thr
 
 test("the model check of an expired anthropic-subscription record refreshes through pi-ai and stores the token in place", async (t) => {
   const f = fixture({ loadModelRuntime: loadPi });
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   const id = insertSubscription(f);
   const requests = refreshingFetch(t);
   const answer = await f.modelCheck({
@@ -3079,7 +3079,7 @@ test("the model check of an expired anthropic-subscription record refreshes thro
 
 test("the model check of an anthropic-subscription record answers unauthorized and keeps the stored value when the refresh fails", async (t) => {
   const f = fixture({ loadModelRuntime: loadPi });
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   const id = insertSubscription(f);
   t.mock.method(globalThis, "fetch", async () =>
     Response.json(
@@ -3108,7 +3108,7 @@ const TOKEN_ENDPOINT_DELAY_MS = 20;
 
 test("two concurrent checks of one expired anthropic-subscription record make one token-endpoint call and both use the rotated token", async (t) => {
   const f = fixture();
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   const id = insertSubscription(f);
   const requests: { url: string; authorization: string | null }[] = [];
   t.mock.method(
@@ -3163,7 +3163,7 @@ test("two concurrent checks of one expired anthropic-subscription record make on
 test("a pin that commits after the health inventory and before the refresh makes no token-endpoint call and keeps the stored value", async (t) => {
   const pins: string[] = [];
   const f = fixture({ pinning: () => pins });
-  t.after(() => f.store.close());
+  stopAfter(t, () => f.store.close());
   const id = insertSubscription(f);
   const requests = refreshingFetch(t);
   const [entry] = f.store.transaction((tx) =>

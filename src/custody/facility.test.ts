@@ -31,6 +31,7 @@ import {
   MaterialBuffer,
   mintGrant,
 } from "./facility.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const FIELDS = {
   kind: GrantKind.ModelInference,
@@ -160,7 +161,7 @@ function sshSecret(body: string) {
 
 function sshFixture(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
   ]);

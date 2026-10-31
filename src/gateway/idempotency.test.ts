@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { Idempotency } from "./idempotency.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdempotencyKey } from "../kernel/identity.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const TTL_SECONDS = 1;
 const TTL_MS = 1000;
@@ -12,7 +13,7 @@ test("memory replay isolates answers, callers, routes and fingerprints and expir
   let now = Date.now();
   t.mock.method(Date, "now", () => now);
   const component = new Idempotency(TTL_SECONDS);
-  t.after(() => component.stop());
+  stopAfter(t, () => component.stop());
   const key = createIdempotencyKey();
   const held = component.reserve(key, "first", "write", "digest");
   assert.throws(

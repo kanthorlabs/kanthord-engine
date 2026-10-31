@@ -12,7 +12,7 @@ import {
 } from "../../intake/contract.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { HttpStatus } from "../../kernel/http.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import {
   ActorKind,
   ActorService,
@@ -206,7 +206,7 @@ test("E07 poll acquisition journey", { timeout: TIMEOUT }, async (t) => {
     async () => {
       const before = eventsCalls().length;
       release = gitHub.holdEvents({ pass: 0 });
-      t.after(() => release());
+      stopAfter(t, () => release());
       seedUnresolvedRequest(fixture.store, {
         project_id: project.id,
         resource_identity: RESOURCE_IDENTITY,

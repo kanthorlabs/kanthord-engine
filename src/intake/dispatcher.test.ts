@@ -15,7 +15,7 @@ import {
   OperationResultType,
 } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
-import { temporary } from "../kernel/test-support.ts";
+import { stopAfter, temporary } from "../kernel/test-support.ts";
 import {
   Consumer,
   ERROR_ARRAY_MAX_BYTES,
@@ -160,7 +160,7 @@ function dispatcherOver(
 
 function memoryStore(t: TestContext): Store {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   migrate(store);
   return store;
 }
@@ -505,7 +505,7 @@ test("A store failure during a drain raises no unhandled rejection", async (t) =
   const rejections: unknown[] = [];
   const collect = (reason: unknown) => rejections.push(reason);
   process.on("unhandledRejection", collect);
-  t.after(() => process.off("unhandledRejection", collect));
+  stopAfter(t, () => process.off("unhandledRejection", collect));
   const id = addEvent(h.store, h.inboundId, "d-1");
   const answer = Promise.withResolvers<OperationResult<unknown>>();
   h.answers.push(() => answer.promise);
@@ -538,7 +538,7 @@ test("A start hands an event over again after a kill of the process during its h
     ["--input-type=module", "-e", childScript(path)],
     { cwd: import.meta.dirname, stdio: ["ignore", "pipe", "inherit"] },
   );
-  t.after(() => {
+  stopAfter(t, () => {
     if (child.exitCode === null) child.kill("SIGKILL");
   });
   const first = await firstLine(child.stdout);
@@ -552,7 +552,7 @@ test("A start hands an event over again after a kill of the process during its h
   child.kill("SIGKILL");
   await exited;
   const store = new Store(path);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const calls: ConsumerCall[] = [];
   const dispatcher = dispatcherOver(
     store,

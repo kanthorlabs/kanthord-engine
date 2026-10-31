@@ -25,7 +25,7 @@ import {
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
-import { temporary } from "../kernel/test-support.ts";
+import { stopAfter, temporary } from "../kernel/test-support.ts";
 import { testServiceIdentity } from "../kernel/test-identity.ts";
 import { type ServerTrace, SpanStatus } from "../tracking/contract.ts";
 import {
@@ -327,7 +327,7 @@ class Harness {
     this.root = temporary(t);
     this.proofs = new ProofFiles(this.root);
     this.custodyStore = new Store(IN_MEMORY_DATABASE);
-    t.after(() => this.custodyStore.close());
+    stopAfter(t, () => this.custodyStore.close());
     this.custodyStore.migrate([
       { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
     ]);
@@ -494,7 +494,7 @@ class Harness {
         },
       },
     });
-    t.after(() => this.onboarding.stop());
+    stopAfter(t, () => this.onboarding.stop());
   }
 
   createSecret(text: string = SECRET_TEXT): void {
@@ -2740,7 +2740,7 @@ function resolvingHarness(
   workers: (name: string) => readonly WorkerBindingFacts[],
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([{ service: "project", migrations: projectMigrations }]);
   const group = store.transaction((tx) => {
     const project = insertProject(tx, "alpha");

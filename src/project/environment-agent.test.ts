@@ -35,7 +35,7 @@ import { FacilityError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { testServiceIdentity } from "../kernel/test-identity.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
-import { temporary } from "../kernel/test-support.ts";
+import { stopAfter, temporary } from "../kernel/test-support.ts";
 import { isString } from "../kernel/values.ts";
 import { createModelRuntime, resolveModel } from "../llm/model-connector.ts";
 import { PROJECT_SERVICE_NAME } from "./contract.ts";
@@ -164,7 +164,7 @@ function fixture(
 ) {
   const stateDirectory = temporary(t);
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const provider: ScriptedProvider = scriptedProvider(script);
   const identity = testServiceIdentity(PROJECT_SERVICE_NAME);
   const credentials = new InMemoryCredentialStore();

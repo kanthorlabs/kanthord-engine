@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { simpleGit } from "simple-git";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import {
   EnvironmentStatus,
   EnvironmentTarget,
@@ -157,7 +157,7 @@ async function detectionFixture(
   });
   if (placement === WorkerPlacement.Container) {
     fixture.worker.startPool();
-    t.after(async () => {
+    stopAfter(t, async () => {
       fixture.project.cancelEnvironmentRuns();
       await fixture.worker.stopPool();
     });

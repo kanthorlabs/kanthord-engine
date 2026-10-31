@@ -28,6 +28,10 @@ import type { Store } from "../kernel/store.ts";
 import { readCost } from "./analytics-cost.ts";
 import { readDuration } from "./analytics-duration.ts";
 import { type Admission, admitRecords, admitServerSpan } from "./admission.ts";
+import { openFlow } from "./flow-admission.ts";
+import { runFlowBackfill } from "./flow-backfill.ts";
+import { readFlow } from "./flow-read.ts";
+import { relabelFlow } from "./flow-relabel.ts";
 import {
   type Acknowledgement,
   ANALYTICS_ITEMS_MAX,
@@ -35,6 +39,7 @@ import {
   ANALYTICS_RANGE_DAYS_MAX,
   type AnalyticsCostQuery,
   type AnalyticsDurationQuery,
+  type AnalyticsFlowQuery,
   type Attributes,
   Disposition,
   ExecutionEnd,
@@ -78,6 +83,7 @@ import {
 import {
   RETENTION_SWEEP_INTERVAL_MS,
   retentionCutoff,
+  sweepExpiredFlow,
   sweepExpiredTraces,
 } from "./retention.ts";
 import {
@@ -131,6 +137,7 @@ export interface Dependencies {
   executions: ExecutionTraces;
   health?: HealthRegistry;
   retentionDays: number;
+  isHostedWorker: (workerName: string) => boolean;
   now?: () => number;
 }
 
@@ -299,6 +306,7 @@ export class TrackingService implements Service, ExecutionTelemetry {
   private started = false;
   private dropped = 0;
   private failedSweeps = 0;
+  private pendingUntil: number | null = null;
   private sweepTimer: NodeJS.Timeout | undefined;
   private readonly now: () => number;
 
@@ -319,11 +327,43 @@ export class TrackingService implements Service, ExecutionTelemetry {
   }
 
   sweep(): number {
+    const deleted = this.sweepTraces();
+    this.sweepFlow();
+    return deleted;
+  }
+
+  private sweepTraces(): number {
     try {
       return sweepExpiredTraces(this.dependencies.store, this.cutoff());
     } catch {
       this.failedSweeps += 1;
       return 0;
+    }
+  }
+
+  private sweepFlow(): void {
+    try {
+      sweepExpiredFlow(this.dependencies.store, this.now());
+    } catch {
+      this.failedSweeps += 1;
+    }
+  }
+
+  private async backfill(): Promise<void> {
+    try {
+      await runFlowBackfill(
+        this.dependencies.store,
+        {
+          isHostedWorker: this.dependencies.isHostedWorker,
+          now: this.now,
+        },
+        this.shutdown.signal,
+        (pendingUntil) => {
+          this.pendingUntil = pendingUntil;
+        },
+      );
+    } catch {
+      this.failedSweeps += 1;
     }
   }
 
@@ -452,10 +492,16 @@ export class TrackingService implements Service, ExecutionTelemetry {
     try {
       this.dependencies.store.transaction((tx) => {
         const now = this.now();
-        insertTrace(tx, row, createdAt ?? now);
+        const inserted = insertTrace(tx, row, createdAt ?? now);
+        const flow = openFlow(
+          tx,
+          row.trace_id,
+          inserted,
+          this.dependencies.isHostedWorker,
+        );
         const reason = admitServerSpan(
           tx,
-          { trace: row, producer, origin: SpanOrigin.Observed, now },
+          { trace: row, producer, origin: SpanOrigin.Observed, now, flow },
           contribution,
         );
         if (reason !== null)
@@ -492,12 +538,19 @@ export class TrackingService implements Service, ExecutionTelemetry {
     assert.ok(trace, "a proven execution has a trace");
     return caller.commit((tx) => {
       const now = this.now();
-      insertTrace(tx, trace, now);
+      const inserted = insertTrace(tx, trace, now);
+      const flow = openFlow(
+        tx,
+        trace.trace_id,
+        inserted,
+        this.dependencies.isHostedWorker,
+      );
       const admission: Admission = {
         trace,
         producer: proof.runtimeIdentity,
         origin: SpanOrigin.Observed,
         now,
+        flow,
       };
       return admitRecords(tx, admission, records);
     });
@@ -555,6 +608,17 @@ export class TrackingService implements Service, ExecutionTelemetry {
       ANALYTICS_ITEMS_MAX,
       caller.context.signal,
     );
+  }
+
+  analyticsFlow(query: AnalyticsFlowQuery, caller: CallerContext) {
+    assert.ok(caller.identity);
+    return readFlow(this.dependencies.store, query, this.now(), {
+      isHostedWorker: this.dependencies.isHostedWorker,
+      rebuild:
+        this.pendingUntil === null
+          ? null
+          : { pending_until: this.pendingUntil },
+    });
   }
 
   facetGet(query: { project_id?: string }, caller: CallerContext) {
@@ -647,6 +711,13 @@ export class TrackingService implements Service, ExecutionTelemetry {
       const span = writeCauseLabel(tx, traceId, body, username, this.now());
       const cause = effectiveCauseOf(null, span.attributes);
       assert.ok(cause);
+      relabelFlow(
+        tx,
+        traceId,
+        cause,
+        this.dependencies.isHostedWorker,
+        this.now(),
+      );
       return {
         trace_id: traceId,
         span_id: span.span_id,
@@ -670,6 +741,7 @@ export class TrackingService implements Service, ExecutionTelemetry {
       trackingOperations.timelineList.access !== AccessPolicy.Human ||
       trackingOperations.analyticsCost.access !== AccessPolicy.Human ||
       trackingOperations.analyticsDuration.access !== AccessPolicy.Human ||
+      trackingOperations.analyticsFlow.access !== AccessPolicy.Human ||
       trackingOperations.spanList.access !== AccessPolicy.Human ||
       trackingOperations.textGet.access !== AccessPolicy.Human ||
       trackingOperations.sessionEntryList.access !== AccessPolicy.Human ||
@@ -704,6 +776,9 @@ export class TrackingService implements Service, ExecutionTelemetry {
     registry.register(trackingOperations.analyticsDuration, (input, caller) =>
       this.analyticsDuration(input.query, caller),
     );
+    registry.register(trackingOperations.analyticsFlow, (input, caller) =>
+      this.analyticsFlow(input.query, caller),
+    );
     registry.register(trackingOperations.spanList, (input, caller) =>
       this.spanList(input.params.trace_id, input.query, caller),
     );
@@ -736,6 +811,7 @@ export class TrackingService implements Service, ExecutionTelemetry {
       RETENTION_SWEEP_INTERVAL_MS,
     );
     this.sweepTimer.unref();
+    void this.backfill();
     return Promise.resolve(null);
   }
   quiesce(): Promise<Error | null> {

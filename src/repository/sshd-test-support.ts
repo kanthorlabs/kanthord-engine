@@ -10,7 +10,7 @@ import type { TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import { isolatedGitEnvironment } from "../kernel/git-environment.ts";
-import { temporary } from "../kernel/test-support.ts";
+import { stopAfter, temporary } from "../kernel/test-support.ts";
 import type { SshAccess } from "./ssh-agent.ts";
 import { SSH_SIGN_USER } from "./contract.ts";
 import {
@@ -35,7 +35,9 @@ export const TEST_REPOSITORY_FILE = "README.md";
 export const TEST_REPOSITORY_TEXT = "kanthord ssh test\n";
 const LOCAL_GIT_KEY = generateSshKey("local-git");
 export const LOCAL_GIT_SSH_ACCESS: SshAccess = {
-  private_key: LOCAL_GIT_KEY.private_key,
+  relay: async () => {
+    throw new Error("A local git remote signs nothing.");
+  },
   public_key: LOCAL_GIT_KEY.public_key,
   known_hosts: "",
   port: DEFAULT_SSH_PORT,
@@ -170,7 +172,7 @@ export async function startTestSshd(t: TestContext): Promise<TestSshd> {
       resolve();
     });
   });
-  t.after(async () => {
+  stopAfter(t, async () => {
     sshd.kill();
     await closed;
   });

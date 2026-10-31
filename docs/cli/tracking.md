@@ -20,14 +20,16 @@ data directory beside `kanthord.db`. It holds the tables of
   API-only.
 - A human lists traces, reads a trace, its spans, its telemetry texts and its
   session entries, reads the timeline of an execution, a node or a project,
-  reads the cost and duration analytics, and reads the filter values with the ten
+  reads the cost, duration and flow analytics, and reads the filter values with the eleven
   CLI leaves below.
 - A human labels the cause of an ended trace with `cause label`. The label is
   an annotation that every reader of the cause prefers to the root cause.
 - The server deletes a trace, with its spans, texts, records and session
   entries, `tracking.retention_days` after its creation. A sweep runs at the
   start and then every hour. A record of an older execution is `Refused` with
-  `trace_expired`, and a server span of it is dropped and counted.
+  `trace_expired`, and a server span of it is dropped and counted. The flow
+  rollups outlive their traces: hour rows stay 8 days, and day rows stay 64
+  days.
 
 Telemetry is lossy and has no current effect. It is not Mission evidence,
 assessment or outcome. It completes no node, renews no claim and authorizes no
@@ -50,6 +52,7 @@ The literal service prefix is `/api/tracking`. Read requests have no body.
 | `timeline list (--execution <execution-id> \| --node <node-id> \| --project <project-id>) [--depth <1\|2>] [--from <unix-ms>] [--to <unix-ms>] [--limit <count>] [--cursor <opaque>]`  | `tracking.timeline.list`      | `GET /api/tracking/timeline`                                            | `human`; read                               |
 | `analytics cost [--group-by <field>] [--bucket <size>] [--project <project-id>] [--node <node-id>] [--from <unix-ms>] [--to <unix-ms>]`                                                | `tracking.analytics.cost`     | `GET /api/tracking/analytics/cost`                                      | `human`; read                               |
 | `analytics duration --measure <measure> [--operation <name>] [--group-by <field>] [--bucket <size>] [--project <project-id>] [--node <node-id>] [--from <unix-ms>] [--to <unix-ms>]`   | `tracking.analytics.duration` | `GET /api/tracking/analytics/duration`                                  | `human`; read                               |
+| `analytics flow [--project <project-id>] [--worker <worker-name>] [--from <unix-ms>] [--to <unix-ms>] [--bucket <size>] [--compare <mode>]`                                            | `tracking.analytics.flow`     | `GET /api/tracking/analytics/flow`                                      | `human`; read                               |
 | `facet get [--project <project-id>]`                                                                                                                                                   | `tracking.facet.get`          | `GET /api/tracking/facet`                                               | `human`; read                               |
 | `trace get <trace-id>`                                                                                                                                                                 | `tracking.trace.get`          | `GET /api/tracking/trace/:trace_id`                                     | `human`; read                               |
 | `span list <trace-id> [--limit <count>] [--cursor <opaque>]`                                                                                                                           | `tracking.span.list`          | `GET /api/tracking/trace/:trace_id/span`                                | `human`; read                               |
@@ -89,6 +92,11 @@ kanthord tracking analytics cost [--group-by <field>] [--bucket <size>]
 kanthord tracking analytics duration --measure <measure> [--operation <name>]
   [--group-by <field>] [--bucket <size>] [--project <project-id>]
   [--node <node-id>] [--from <unix-ms>] [--to <unix-ms>]
+  [--endpoint <url>] [--token <jwt>] [--help]
+
+kanthord tracking analytics flow [--project <project-id>]
+  [--worker <worker-name>] [--from <unix-ms>] [--to <unix-ms>]
+  [--bucket <size>] [--compare <mode>]
   [--endpoint <url>] [--token <jwt>] [--help]
 
 kanthord tracking facet get [--project <project-id>]
@@ -350,6 +358,81 @@ The CLI exposes `--measure`, `--operation`, `--group-by`, `--bucket`, `--project
 `--group-by`, `--bucket`, `--from` or `--to`, exits 1 with
 `cli.tracking.analytics.duration.invalid_query`. A pair of `--measure` and
 `--group-by` that the pairing rule refuses exits 1 with the same code.
+
+## `analytics flow`
+
+Reads the lifecycle flow of the executions, the cost and token scorecard, the
+causes and the stop reasons in a range. The read sums the three rollup tables of
+`tracking.db`: `tracking_flow_rollup`, `tracking_flow_histogram` and
+`tracking_usage_rollup`. It reads no span and no trace row, runs in one read
+transaction of at most six statements, and never writes. The answer holds raw
+numbers. `from` and `to` are Unix milliseconds.
+
+| Query field   | Meaning                                                                                      |
+| ------------- | -------------------------------------------------------------------------------------------- |
+| `from`        | The start of the range. Default: 7 days before `to`. The read floors it to its bucket start. |
+| `to`          | The end of the range. Default: the time of the read. The read ceils it to its bucket end.    |
+| `bucket`      | `hour` or `day`. Default: `hour` for a range of at most 2 days, else `day`.                  |
+| `project_id`  | The rows of this project.                                                                    |
+| `worker_name` | The rows of this worker. At most 256 bytes.                                                  |
+| `compare`     | `previous` or `none`. Default `previous`. `previous` adds the previous window.               |
+
+The range holds at most 31 days. The bucket `hour` takes a range of at most 2
+days. A range above its limit, or a `from` after `to`, answers `400`
+`tracking.filter.range_invalid`. The check uses the default of a missing bound.
+A value outside `bucket` or `compare` answers `400`
+`gateway.request.validation_failed`.
+
+A bucket starts on a UTC hour or a UTC day. `window.from` is the start of the
+bucket of `from`. `window.to` is `to` on a bucket boundary, else the end of the
+bucket of `to`. `window.now` is the smaller value of `to` and the time of the
+read. The last bucket is partial when `window.now` is before `window.to`.
+`window.buckets` lists each bucket start from `window.from` to before
+`window.to`.
+
+`previous_window` is the window of the same length that ends at `window.from`.
+It is `null` with `compare` `none`. It is also `null` when its `from` is before
+the retention cutoff of the bucket (8 days for `hour`, 64 days for `day`), before
+the smallest `bucket_start` of the rollup rows of that bucket, or when that
+bucket holds no row. With a `null` `previous_window`, every `previous` field of
+the answer is `null`.
+
+The answer holds these fields:
+
+- `window`, `previous_window` and `percentile_method`, which is `log_bins_4`.
+- `stages`: the six stages `queued`, `executing`, `verification`,
+  `release_gate`, `evaluation` and `outcome`, in this order. Each stage holds
+  `current`, `previous`, `series`, `dimensions` and `previous_bucket_median`.
+  `current` and `previous` hold `entered`, `unobserved`, `open`, `exits`, `time`
+  and `signals`. `time` holds `count`, `p50`, `p90` and `p99` of the merged bins,
+  or `null` with no value. A signal with a denominator of 0 has no key in a
+  window and a `null` in a series. `series` holds one value for each bucket.
+  `dimensions` holds one item for each project and worker, by `entered`.
+- `cost`: `current`, `previous`, `previous_same_hour` and `series`. A cost window
+  holds `total_usd`, `success`, `per_success_usd`, `leaked_usd` and
+  `rejected_review_usd`.
+- `causes`: the rows of the exits `stopped`, `paused`, `revoked`, `rework`,
+  `blocked` and `budget`, the previous rows, the unattributed share and its
+  series. Each list holds at most 1000 rows, and `truncated` is `true` when more
+  exist.
+- `stop_reasons`: `order`, the counts of each bucket, and `previous_totals`.
+- `usage`: `current`, `previous`, `previous_same_hour`, `series` and the lists
+  `by.model`, `by.worker_name` and `by.project_id`.
+- `completeness`: `executions`, `open`, `no_root`, `exit_unknown`,
+  `awaiting_ingestion` and `late_records`.
+- `rebuild`: `null`.
+
+The same-hour sums compare the current window with the previous window up to
+the same hour. `cut` is the end of the UTC hour of `window.now`, minus the length
+of the window. For the bucket `day`, the read adds the hour rows from the start
+of the UTC day of `cut` to before `cut`, and skips them when `cut` is on a day
+boundary. `previous_same_hour` is `null` when `previous_window` is `null`, and
+when the read needs hour rows older than 8 days.
+
+The CLI exposes `--project`, `--worker`, `--from`, `--to`, `--bucket` and
+`--compare`, and prints the answer as one JSON line. An invalid `--worker`,
+`--from`, `--to`, `--bucket` or `--compare` exits 1 with
+`cli.tracking.analytics.flow.invalid_query`.
 
 ## `facet get`
 
@@ -636,11 +719,16 @@ Every remote command can also answer the shared codes of
 | local | `cli.tracking.analytics.duration.invalid_query`      | `--measure` is missing, or `--measure`, `--group-by`, `--bucket`, `--from` or `--to` is not a value of its set or Unix milliseconds.                                 | analytics duration                                       |
 | local | `cli.tracking.analytics.duration.token_required`     | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.                                                                                                    | analytics duration                                       |
 | local | `cli.tracking.analytics.duration.indeterminate`      | The answer is lost. Repeat the read.                                                                                                                                 | analytics duration                                       |
+| local | `cli.tracking.analytics.flow.invalid_project_id`     | `--project` is not a `ProjectID`.                                                                                                                                    | analytics flow                                           |
+| local | `cli.tracking.analytics.flow.invalid_query`          | `--worker` is blank or has more than 256 bytes, or `--bucket`, `--compare`, `--from` or `--to` is not a value of its set or Unix milliseconds.                       | analytics flow                                           |
+| local | `cli.tracking.analytics.flow.token_required`         | No token resolves from `--token`, `KANTHORD_TOKEN` or `cli.yaml`.                                                                                                    | analytics flow                                           |
+| local | `cli.tracking.analytics.flow.indeterminate`          | The answer is lost. Repeat the read.                                                                                                                                 | analytics flow                                           |
 | local | `cli.pagination.limit_invalid`                       | `--limit` is not a positive integer.                                                                                                                                 | span list, timeline list, trace list, session entry list |
 | local | `cli.pagination.limit_out_of_range`                  | `--limit` is outside 1 to 1000 for `span list`, `timeline list`, `trace list` and `session entry list`.                                                              | span list, timeline list, trace list, session entry list |
 | 400   | `system.pagination.cursor_invalid`                   | `--cursor` is not a cursor of this listing.                                                                                                                          | span list, timeline list, trace list, session entry list |
 | 400   | `tracking.filter.range_invalid`                      | `from` is after `to`.                                                                                                                                                | trace list, timeline list                                |
-| 400   | `tracking.filter.range_invalid`                      | The range of `from` and `to` is longer than 31 days, or `from` is after `to`.                                                                                        | analytics cost, analytics duration                       |
+| 400   | `tracking.filter.range_invalid`                      | The range of `from` and `to` is longer than 31 days, or `from` is after `to`.                                                                                        | analytics cost, analytics duration, analytics flow       |
+| 400   | `tracking.filter.range_invalid`                      | `bucket` is `hour` and the range of `from` and `to` is longer than 2 days.                                                                                           | analytics flow                                           |
 | 400   | `gateway.request.validation_failed`                  | `category` is `unattributed` or unknown, or `reason` is blank or has more than 4096 characters.                                                                      | cause label                                              |
 | 400   | `tracking.cause.subcategory_mismatch`                | `subcategory` is not in the set of `category`.                                                                                                                       | cause label                                              |
 | 409   | `tracking.cause.trace_open`                          | The state of the trace is `open`.                                                                                                                                    | cause label                                              |

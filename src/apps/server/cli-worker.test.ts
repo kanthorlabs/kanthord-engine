@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { stringify } from "yaml";
 import { decode } from "hono/jwt";
-import { temporary } from "../../kernel/test-support.ts";
+import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import {
   fakeMachines,
   gatewayFixture,
@@ -620,7 +620,7 @@ async function archiveBodies(t: TestContext, ...options: string[]) {
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => server.close());
+  stopAfter(t, () => server.close());
   const result = await command(
     [
       "worker",

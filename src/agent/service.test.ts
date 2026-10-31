@@ -10,7 +10,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
-import { temporary } from "../kernel/test-support.ts";
+import { stopAfter, temporary } from "../kernel/test-support.ts";
 import { AgentComponent, type Dependencies, SelectionKind } from "./service.ts";
 import {
   AdvancingFailure,
@@ -127,7 +127,7 @@ function enablementFixture(
   collaborations: Partial<Dependencies> = {},
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: AGENT_COMPONENT_NAME, migrations: agentMigrations },
   ]);

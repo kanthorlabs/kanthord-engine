@@ -8,6 +8,7 @@ import { background, CancellationContext } from "../../kernel/context.ts";
 import {
   hostEnvironment,
   killIfPresent,
+  stopAfter,
   SUITE_CONCURRENCY,
   temporary,
 } from "../../kernel/test-support.ts";
@@ -289,7 +290,7 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
     )
       await delay(TREE_START_POLL_MS);
     const spawned = spawnedPids(t, [{ type: "text", text: output }]);
-    t.after(() => killIfPresent(-leader));
+    stopAfter(t, () => killIfPresent(-leader));
     assert.equal(spawned.length, PROCESS_TREE_PIDS);
     assert.equal(output.trim().split("\n").length, PROCESS_TREE_PIDS);
     assert.equal(
@@ -682,7 +683,7 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
     const context = new CancellationContext();
     const { input, runs } = countedInput(temporary(t), ["sleep 30"]);
     const cancel = setTimeout(() => context.cancel(), CANCEL_AFTER_MS);
-    t.after(() => clearTimeout(cancel));
+    stopAfter(t, () => clearTimeout(cancel));
     const run = await runVerificationsWithOutput({ ...input, context });
     assert.equal(run.outcome, VerificationClass.CodeFailure);
     assert.equal(runs.length, SINGLE_RUN);
@@ -800,7 +801,7 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
     const memo = new VerificationMemo();
     const context = new CancellationContext();
     const cancel = setTimeout(() => context.cancel(), CANCEL_AFTER_MS);
-    t.after(() => clearTimeout(cancel));
+    stopAfter(t, () => clearTimeout(cancel));
     const first = memoInput(
       temporary(t),
       ["sleep 30"],

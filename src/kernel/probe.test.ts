@@ -12,6 +12,7 @@ import {
   redactReason,
   thrownReason,
 } from "./probe.ts";
+import { stopAfter } from "./stop-test-support.ts";
 
 const SECRET = "test_private-resource-health-secret";
 const URL = "https://probe.example/v1/check";
@@ -78,7 +79,7 @@ const check = (context: Context) => probeHttp(URL, HEADERS, context);
   test(`probeHttp aborts an in-flight request through the context signal`, async (t) => {
     const context = new CancellationContext();
     const entered = Promise.withResolvers<AbortSignal>();
-    t.after(() => context.cancel());
+    stopAfter(t, () => context.cancel());
     t.mock.method(
       globalThis,
       "fetch",
@@ -155,8 +156,8 @@ test("probeHttp observes a network error as unreachable without the secret", asy
 
 test("probeHttp past its deadline observes deadline_exceeded", async (t) => {
   const server = createServer(() => {});
-  t.after(() => server.closeAllConnections());
-  t.after(() => server.close());
+  stopAfter(t, () => server.closeAllConnections());
+  stopAfter(t, () => server.close());
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   const observed: string[] = [];

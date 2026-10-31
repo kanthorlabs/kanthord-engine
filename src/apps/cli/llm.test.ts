@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { temporary } from "../../kernel/test-support.ts";
+import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import { ExitCode } from "./constants.ts";
 import { runKanthord } from "./test-support.ts";
 
@@ -33,7 +33,7 @@ async function loginServer(
     );
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => server.close());
+  stopAfter(t, () => server.close());
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 }
 

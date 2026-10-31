@@ -41,6 +41,7 @@ import {
   scriptedConsumers,
   unusedActionDependencies,
 } from "./test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const CREATED_AT = 100;
@@ -70,7 +71,7 @@ function completed(): Promise<OperationResult<unknown>> {
 
 function harness(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
   ]);

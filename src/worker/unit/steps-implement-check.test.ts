@@ -4,7 +4,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
-import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
+import {
+  stopAfter,
+  SUITE_CONCURRENCY,
+  temporary,
+} from "../../kernel/test-support.ts";
 import * as connector from "../../repository/connector.ts";
 import { nodeBranchOf } from "../../repository/node-branch.ts";
 import type { Revision } from "../../mission/contract.ts";
@@ -289,7 +293,7 @@ suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
       credentials: { release: async () => {} },
       context: background,
     });
-    t.after(() => run.dispose());
+    stopAfter(t, () => run.dispose());
     const error = await prepareStepsWorkspace(h.input, run).then(
       () => assert.fail("The preparation must stop."),
       (error: unknown) => error,

@@ -12,7 +12,7 @@ import {
 } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
-import { redactingLogger } from "../kernel/test-support.ts";
+import { redactingLogger, stopAfter } from "../kernel/test-support.ts";
 import {
   type CredentialPlatform,
   type CredentialPlatformSet,
@@ -85,7 +85,7 @@ function fixture(
   },
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => {
+  stopAfter(t, () => {
     if (store.database.isOpen) store.close();
   });
   store.migrate([

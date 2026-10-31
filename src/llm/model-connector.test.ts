@@ -18,6 +18,7 @@ import {
 import { loadPi } from "../agent/pi.ts";
 import { piProviderId, Platform, ReasoningLevel } from "./platforms.ts";
 import { ANTHROPIC_SUBSCRIPTION_CHECK_MODEL } from "./probes.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const SUBSCRIPTION_LIFETIME_MS = 3600000;
 
@@ -72,7 +73,7 @@ test("runtime pins credentials, resolves models, and rejects unsupported configu
   });
   const prior = process.env.ANTHROPIC_API_KEY;
   process.env.ANTHROPIC_API_KEY = "test_environment-secret";
-  t.after(() => {
+  stopAfter(t, () => {
     if (prior === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = prior;
   });

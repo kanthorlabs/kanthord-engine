@@ -8,7 +8,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { httpClient } from "../../gateway/client.ts";
 import { CancellationContext } from "../../kernel/context.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import { LlmErrorCode, llmOperations } from "../../llm/contract.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
@@ -130,7 +130,7 @@ test("a live worker instance signs in through a fake pi-ai copy_code flow, and t
   });
   const context = new CancellationContext();
   const running = instance.run(context);
-  t.after(async () => {
+  stopAfter(t, async () => {
     context.cancel();
     await running;
   });

@@ -15,6 +15,8 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { buildGraph } from "./affected-tests.mjs";
 import { keyOf } from "./suite-pass.mjs";
+import { stopAfter } from "../src/kernel/stop-test-support.ts";
+import { HOST_PATH } from "../src/kernel/pnpm-stub-test-support.ts";
 
 const ENTRY_POINT = fileURLToPath(new URL("./suite-pass.mjs", import.meta.url));
 const AFFECTED_REPORTER = fileURLToPath(
@@ -66,7 +68,7 @@ function configuration(alwaysRun = []) {
 
 async function fixture(t, files = {}) {
   const root = await mkdtemp(join(tmpdir(), "kanthord-suite-pass-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  stopAfter(t, () => rm(root, { recursive: true, force: true }));
   const all = {
     "package.json": fixturePackage(),
     ".gitignore": "node_modules/\npnpm-lock.yaml\n",
@@ -154,12 +156,13 @@ function recordedFiles(root) {
 
 test("a test file with a matching record is skipped", async (t) => {
   const root = await fixture(t);
-  const first = runSuitePass(root, ["--write"]);
+  const host = { PATH: HOST_PATH };
+  const first = runSuitePass(root, ["--write"], TEST_FILES, host);
   assert.equal(first.status, SUCCESS, first.stderr);
   assert.deepEqual(first.ran, TEST_FILES);
   assert.match(first.stdout, /Skipped: 0 test files/);
   const before = readStore(root).records;
-  const second = runSuitePass(root, ["--write"]);
+  const second = runSuitePass(root, ["--write"], TEST_FILES, host);
   assert.equal(second.status, SUCCESS, second.stderr);
   assert.deepEqual(second.ran, []);
   assert.match(second.stdout, /Ran: 0 test files/);

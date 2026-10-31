@@ -17,7 +17,11 @@ import {
   PI_TOOLS_MANIFEST,
   shippedAsset,
 } from "../kernel/assets.ts";
-import { requirePiTools, temporary } from "../kernel/test-support.ts";
+import {
+  requirePiTools,
+  stopAfter,
+  temporary,
+} from "../kernel/test-support.ts";
 import {
   installPiTools,
   type PiToolsManifest,
@@ -262,7 +266,7 @@ test(
       ],
       { stdio: ["ignore", "pipe", "inherit"] },
     );
-    t.after(async () => {
+    stopAfter(t, async () => {
       const exited = once(holder, "exit");
       holder.kill();
       await exited;

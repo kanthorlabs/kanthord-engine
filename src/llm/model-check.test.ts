@@ -24,6 +24,7 @@ import {
 import { Platform } from "./platforms.ts";
 import { ANTHROPIC_SUBSCRIPTION_CHECK_MODEL } from "./probes.ts";
 import { scriptedModelRuntime } from "./test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const LOW_EFFORT = "low";
 const SYSTEM_ROLE = "system";
@@ -340,7 +341,7 @@ async function compatibleServer(
     response.end(body);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  t.after(() => server.close());
+  stopAfter(t, () => server.close());
   const { port } = server.address() as AddressInfo;
   return { requests, baseUrl: `http://127.0.0.1:${port}/v1` };
 }

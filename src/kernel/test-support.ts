@@ -15,6 +15,9 @@ import {
 import { CancellationContext } from "./context.ts";
 import { diagnostic, diagnosticRows } from "./errors.ts";
 import { redaction } from "./log.ts";
+import { stopAfter } from "./stop-test-support.ts";
+
+export { stopAfter };
 
 const EXEC_CHECKED_PLATFORM = "darwin";
 const EXEC_CHECKED_SUITE_CONCURRENCY = 1;
@@ -80,7 +83,7 @@ export function testContext(t: TestContext): CancellationContext {
   const context = new CancellationContext();
   const cancel = () => context.cancel(t.signal.reason);
   t.signal.addEventListener("abort", cancel, { once: true });
-  t.after(() => {
+  stopAfter(t, () => {
     t.signal.removeEventListener("abort", cancel);
     context.cancel();
   });
@@ -96,7 +99,7 @@ export function temporaryDirectory(): string {
 
 export function temporary(t: TestContext): string {
   const path = temporaryDirectory();
-  t.after(() => rmSync(path, { recursive: true, force: true }));
+  stopAfter(t, () => rmSync(path, { recursive: true, force: true }));
   return path;
 }
 
@@ -145,7 +148,7 @@ export function overrideEnvironment(
       else process.env[name] = value;
   };
   apply(values);
-  t.after(() => apply(previous));
+  stopAfter(t, () => apply(previous));
 }
 
 const PROCESS_ABSENT = "ESRCH";

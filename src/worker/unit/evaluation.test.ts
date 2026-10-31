@@ -3,7 +3,11 @@ import { PromptTemplate } from "../../agent/contract.ts";
 import { test, type TestContext } from "node:test";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
+import {
+  hostEnvironment,
+  stopAfter,
+  temporary,
+} from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import {
   background,
@@ -121,7 +125,7 @@ test("reviewer release accepts only settled or prerequisite-waiting action resul
       credentials: { release: async () => {} },
       context: background,
     });
-    t.after(() => run.dispose());
+    stopAfter(t, () => run.dispose());
     const accepted = kinds.every(
       (kind) =>
         kind === ActionResultKind.Submitted ||
@@ -375,7 +379,7 @@ test("evaluation writes failed-verification assessments without inference and ga
       },
       context: background,
     });
-    t.after(() => run.dispose());
+    stopAfter(t, () => run.dispose());
     const workspaces = WorkspaceRoot.open(temporary(t));
     const open = async () => {
       opens++;
@@ -538,7 +542,7 @@ test("an evaluation that its agent deadline cuts ends with no assessment and no 
     credentials: { release: async () => {} },
     context: background,
   });
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const budget = new ExecutionBudget({
     ...claim,
     resource_budget: setup.resource_budget,
@@ -739,7 +743,7 @@ async function reviewOf(
       flush: async () => {},
     },
   });
-  t.after(() => run.dispose());
+  stopAfter(t, () => run.dispose());
   const budget = new ExecutionBudget({
     ...claim,
     resource_budget: setup.resource_budget,

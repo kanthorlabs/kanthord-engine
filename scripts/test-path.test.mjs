@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { stopAfter } from "../src/kernel/stop-test-support.ts";
 
 const SCRIPT = fileURLToPath(new URL("./test-path.mjs", import.meta.url));
 const TOOLS = [
@@ -63,7 +64,7 @@ function endedPid() {
 
 test("concurrent invocations all succeed and link each tool to its target", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "kanthord-test-path-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
+  stopAfter(t, () => rm(root, { recursive: true, force: true }));
   const script = join(root, "scripts", "test-path.mjs");
   await mkdir(join(root, "scripts"));
   await copyFile(SCRIPT, script);

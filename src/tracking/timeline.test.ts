@@ -18,6 +18,7 @@ import {
   type TimelineQuery,
 } from "./timeline.ts";
 import { insertSpan } from "./trace-store.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 interface TraceFixture {
   n: number;
@@ -147,7 +148,7 @@ function child(
 
 function emptyStore(t: TestContext): Store {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: TRACKING_SERVICE_NAME, migrations: trackingMigrations },
   ]);

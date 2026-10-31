@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { stopAfter } from "../src/kernel/stop-test-support.ts";
 
 const REPORTER = fileURLToPath(new URL("./test-reporter.mjs", import.meta.url));
 const SUCCESS = 0;
@@ -13,7 +14,7 @@ const FAILURE = 1;
 
 async function runFixture(t, source) {
   const directory = await mkdtemp(join(tmpdir(), "kanthord-reporter-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  stopAfter(t, () => rm(directory, { recursive: true, force: true }));
   const file = join(directory, "fixture.test.mjs");
   await writeFile(file, source);
   const env = { ...process.env };
