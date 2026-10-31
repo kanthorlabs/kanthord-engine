@@ -27,6 +27,7 @@ import {
 } from "./affected-tests.mjs";
 import { affectedReportSchema } from "../src/worker/unit/affected.ts";
 import { stopAfter } from "../src/kernel/stop-test-support.ts";
+import { HOST_PATH } from "../src/kernel/pnpm-stub-test-support.ts";
 
 const MODIFIED = "modified";
 const ADDED = "added";
@@ -638,6 +639,7 @@ test("a failed test gives the report, the report file and the exit code 1", asyn
   const result = runEntry(root, [], {
     KANTHORD_CHANGES: await changesFile(root, [change("src/a.ts")]),
     KANTHORD_AFFECTED_REPORT: reportPath,
+    PATH: HOST_PATH,
   });
   assert.equal(result.status, FAILED);
   assert.deepEqual(withoutFloor(result.report), {
