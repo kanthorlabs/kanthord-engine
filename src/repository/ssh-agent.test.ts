@@ -99,31 +99,45 @@ function directoryOf(socket: string): string {
   return socket.slice(0, -SSH_AGENT_SOCKET.length - 1);
 }
 
+async function processIds(): Promise<string[]> {
+  return (await readdir(PROC)).filter((entry) => /^\d+$/.test(entry));
+}
+
+async function commandLineOf(pid: string): Promise<string> {
+  const text = await readFile(join(PROC, pid, "cmdline"), "utf8").catch(
+    () => "",
+  );
+  return text.replaceAll("\0", " ");
+}
+
 async function commandLines(): Promise<string[]> {
   if (process.platform !== LINUX) {
     const { stdout } = await execFileAsync("ps", ["-axo", "command"]);
     return stdout.split(LINE_END);
   }
   const lines: string[] = [];
-  for (const entry of await readdir(PROC)) {
-    if (!/^\d+$/.test(entry)) continue;
-    const text = await readFile(join(PROC, entry, "cmdline"), "utf8").catch(
-      () => "",
-    );
-    lines.push(text.replaceAll("\0", " "));
-  }
+  for (const pid of await processIds()) lines.push(await commandLineOf(pid));
   return lines;
 }
 
+function isAgentOf(socket: string, line: string): boolean {
+  return line.includes("ssh-agent") && line.includes(socket);
+}
+
 async function agentLives(socket: string): Promise<boolean> {
-  return (await commandLines()).some(
-    (line) => line.includes("ssh-agent") && line.includes(socket),
-  );
+  return (await commandLines()).some((line) => isAgentOf(socket, line));
 }
 
 async function agentEnds(socket: string, signal: AbortSignal): Promise<void> {
-  while (await agentLives(socket))
-    await delay(AGENT_EXIT_POLL_MS, undefined, { signal });
+  if (process.platform !== LINUX) {
+    while (await agentLives(socket))
+      await delay(AGENT_EXIT_POLL_MS, undefined, { signal });
+    return;
+  }
+  for (const pid of await processIds())
+    while (isAgentOf(socket, await commandLineOf(pid)))
+      await delay(AGENT_EXIT_POLL_MS, undefined, { signal });
+  assert.equal(await agentLives(socket), false);
 }
 
 async function slowAgentLives(): Promise<boolean> {
