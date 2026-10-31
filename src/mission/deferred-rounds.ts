@@ -5,7 +5,7 @@ const NO_ROUNDS = 0;
 
 export class DeferredRounds {
   readonly #rounds = new Set<Promise<void>>();
-  readonly #timers = new Set<NodeJS.Timeout | NodeJS.Immediate>();
+  readonly #timers = new Set<() => void>();
   #quiescent = false;
 
   get quiescent(): boolean {
@@ -21,20 +21,23 @@ export class DeferredRounds {
     assert.ok(Number.isSafeInteger(delayMs) && delayMs >= IMMEDIATE_DELAY_MS);
     if (this.#quiescent) return;
     const fire = () => {
-      this.#timers.delete(timer);
+      this.#timers.delete(cancel);
       run();
     };
-    const timer =
-      delayMs === IMMEDIATE_DELAY_MS
-        ? setImmediate(fire)
-        : setTimeout(fire, delayMs);
-    timer.unref();
-    this.#timers.add(timer);
+    let cancel: () => void;
+    if (delayMs === IMMEDIATE_DELAY_MS) {
+      const immediate = setImmediate(fire).unref();
+      cancel = () => clearImmediate(immediate);
+    } else {
+      const timeout = setTimeout(fire, delayMs).unref();
+      cancel = () => clearTimeout(timeout);
+    }
+    this.#timers.add(cancel);
   }
 
   quiesce(): void {
     this.#quiescent = true;
-    for (const timer of this.#timers) timer[Symbol.dispose]();
+    for (const cancel of this.#timers) cancel();
     this.#timers.clear();
   }
 
