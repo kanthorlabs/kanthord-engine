@@ -37,6 +37,16 @@ export class SlotBindings {
     return this.queue;
   }
 
+  settle(
+    started: Promise<Error | null>,
+    entries: readonly ThreadEntry[],
+  ): Promise<void> {
+    this.queue = this.queue
+      .then(() => started)
+      .then((error) => (error ? undefined : this.reconcile(entries)));
+    return this.queue;
+  }
+
   close(): void {
     for (const port of this.received) port.close();
   }

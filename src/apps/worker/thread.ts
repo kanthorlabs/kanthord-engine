@@ -47,8 +47,9 @@ async function main(): Promise<void> {
       else if (control.data.kind === ThreadMessageKind.Drain) void unit.drain();
       else void unit.stop();
     });
-    const started = await unit.start();
-    if (!started) await bindings.apply(data.entries);
+    const starting = unit.start();
+    await bindings.settle(starting, data.entries);
+    const started = await starting;
     const error = started ? ((await unit.stop()) ?? started) : await unit.run();
     if (error) throw error;
   } finally {

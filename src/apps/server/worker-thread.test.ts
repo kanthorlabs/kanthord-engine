@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { once } from "node:events";
+import { setTimeout as delay } from "node:timers/promises";
 import { MessageChannel, Worker } from "node:worker_threads";
 import { test } from "node:test";
 import { build } from "esbuild";
@@ -38,6 +39,8 @@ const TWO_INSTANCES = 2;
 const SINGLE_INSTANCE = 1;
 const NO_INSTANCES = 0;
 const THREAD_EXIT_LIMIT_MS = 3000;
+const DRAIN_DELIVERY_MS = 200;
+const RESUME_LIMIT_MS = 20000;
 const RESOURCE_IDENTITY = "worker:kanthord:general";
 const FINISHED_MESSAGE = "Request finished";
 const DIRECTORY_VARIABLES = [
@@ -364,4 +367,90 @@ test("a worker thread exits after a stop that follows a drain and a resume of it
   });
   thread.postMessage({ kind: ThreadMessageKind.Stop });
   await exited;
+});
+
+test("a worker thread keeps a drain that arrives before its start ends and registers again after a resume", async (t) => {
+  requirePiTools();
+  const fixture = await gatewayFixture(t, {
+    repositoryConnector: {
+      gitLsRemote: async () => {},
+    },
+  });
+  await provisionRepositoryCredentials(fixture);
+  const project = await provisionWorkerProject(fixture, "thread-early", {
+    general: SINGLE_INSTANCE,
+  });
+  await project.pause();
+  const logger = pino({ level: "silent" });
+  const token = await fixture.machineToken(project.id, "general", "slot");
+  const channels: MessageChannel[] = [];
+  const served = () => {
+    const channel = new MessageChannel();
+    servePort(channel.port1, fixture.invocation, () => token, logger);
+    channels.push(channel);
+    return channel;
+  };
+  const upstream = served();
+  const relay = new MessageChannel();
+  channels.push(relay);
+  const held = Promise.withResolvers<void>();
+  const registerCalls = new Set<string>();
+  relay.port1.on(
+    "message",
+    (message: { call_id: string; operation_id?: string }) => {
+      if (message.operation_id === workerOperations.register.id)
+        registerCalls.add(message.call_id);
+      upstream.port2.postMessage(message);
+    },
+  );
+  upstream.port2.on("message", (message: { call_id: string }) => {
+    const forward = () => relay.port1.postMessage(message);
+    if (registerCalls.has(message.call_id)) void held.promise.then(forward);
+    else forward();
+  });
+  const entry = entryOf(relay.port2, "client_identity_general");
+  const thread = startThread(
+    threadData(entry),
+    threadEnvironment(temporary(t)),
+  );
+  stopAfter(t, async () => {
+    held.resolve();
+    await thread.terminate();
+    for (const channel of channels) {
+      channel.port1.close();
+      channel.port2.close();
+    }
+  });
+  const list = humanCaller(fixture);
+  const registrations = () =>
+    list(workerOperations["registration.list"], {
+      params: {},
+      query: { project_id: project.id },
+      body: null,
+    });
+  await until(
+    registrations,
+    (candidate) => candidate.items.length === SINGLE_INSTANCE,
+    t.signal,
+  );
+  thread.postMessage({
+    kind: ThreadMessageKind.Bindings,
+    entries: [{ ...entry, port: null, state: BindingEntryState.Draining }],
+  });
+  await delay(DRAIN_DELIVERY_MS);
+  held.resolve();
+  await until(
+    registrations,
+    (candidate) => candidate.items.length === NO_INSTANCES,
+    t.signal,
+  );
+  const resumed = { ...entry, port: served().port2 };
+  thread.postMessage({ kind: ThreadMessageKind.Bindings, entries: [resumed] }, [
+    resumed.port,
+  ]);
+  await until(
+    registrations,
+    (candidate) => candidate.items.length === SINGLE_INSTANCE,
+    AbortSignal.any([t.signal, AbortSignal.timeout(RESUME_LIMIT_MS)]),
+  );
 });
