@@ -194,9 +194,10 @@ test("a worker thread exits by itself after its run ends", async (t) => {
   );
   stopAfter(t, () => thread.terminate());
   port1.close();
+  const exited = new Promise((resolve) => thread.once("exit", resolve));
   const [error] = await once(thread, "error");
   assert.match(String(error.message), /cannot read the server package version/);
-  await once(thread, "exit");
+  await exited;
 });
 
 test("the release bundle of the worker thread starts as an eval worker", async (t) => {
@@ -228,12 +229,13 @@ test("the release bundle of the worker thread starts as an eval worker", async (
   });
   stopAfter(t, () => thread.terminate());
   port1.close();
+  const exited = new Promise((resolve) => thread.once("exit", resolve));
   const [error] = await once(thread, "error");
   assert.equal(
     String(error.message),
     `ENOENT: no such file or directory, open '${join(root, "package.json")}'`,
   );
-  await once(thread, "exit");
+  await exited;
 });
 
 test("a thread instance gets two entries, registers both and drains one after a new entry list", async (t) => {
