@@ -16,7 +16,7 @@ import test from "node:test";
 import { buildGraph } from "./affected-tests.mjs";
 import { keyOf } from "./suite-pass.mjs";
 import { stopAfter } from "../src/kernel/stop-test-support.ts";
-import { HOST_PATH } from "./pnpm-stub-test-support.ts";
+import { HOST_PATH } from "../src/kernel/pnpm-stub-test-support.ts";
 
 const ENTRY_POINT = fileURLToPath(new URL("./suite-pass.mjs", import.meta.url));
 const AFFECTED_REPORTER = fileURLToPath(
