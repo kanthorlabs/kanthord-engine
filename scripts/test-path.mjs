@@ -32,6 +32,8 @@ const TOOLS = [
   "which",
 ];
 const PENDING = /^(.+)\.(\d+)$/;
+const DARWIN_PLATFORM = "darwin";
+const GIT = "git";
 const TRAMPOLINE_GIT = "/usr/bin/git";
 const XCRUN = "/usr/bin/xcrun";
 
@@ -76,13 +78,13 @@ function resolve(tool, directories) {
 
 function direct(tool, target) {
   if (
-    process.platform !== "darwin" ||
-    tool !== "git" ||
+    process.platform !== DARWIN_PLATFORM ||
+    tool !== GIT ||
     target !== TRAMPOLINE_GIT
   )
     return target;
   try {
-    const found = execFileSync(XCRUN, ["-f", "git"], {
+    const found = execFileSync(XCRUN, ["-f", tool], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
