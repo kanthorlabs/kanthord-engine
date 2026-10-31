@@ -29,6 +29,7 @@ import { readCost } from "./analytics-cost.ts";
 import { readDuration } from "./analytics-duration.ts";
 import { type Admission, admitRecords, admitServerSpan } from "./admission.ts";
 import { openFlow } from "./flow-admission.ts";
+import { readFlow } from "./flow-read.ts";
 import {
   type Acknowledgement,
   ANALYTICS_ITEMS_MAX,
@@ -36,6 +37,7 @@ import {
   ANALYTICS_RANGE_DAYS_MAX,
   type AnalyticsCostQuery,
   type AnalyticsDurationQuery,
+  type AnalyticsFlowQuery,
   type Attributes,
   Disposition,
   ExecutionEnd,
@@ -572,6 +574,14 @@ export class TrackingService implements Service, ExecutionTelemetry {
     );
   }
 
+  analyticsFlow(query: AnalyticsFlowQuery, caller: CallerContext) {
+    assert.ok(caller.identity);
+    return readFlow(this.dependencies.store, query, this.now(), {
+      isHostedWorker: this.dependencies.isHostedWorker,
+      rebuild: null,
+    });
+  }
+
   facetGet(query: { project_id?: string }, caller: CallerContext) {
     assert.ok(caller.identity);
     return caller.commit((tx) => readFacets(tx, query.project_id));
@@ -685,6 +695,7 @@ export class TrackingService implements Service, ExecutionTelemetry {
       trackingOperations.timelineList.access !== AccessPolicy.Human ||
       trackingOperations.analyticsCost.access !== AccessPolicy.Human ||
       trackingOperations.analyticsDuration.access !== AccessPolicy.Human ||
+      trackingOperations.analyticsFlow.access !== AccessPolicy.Human ||
       trackingOperations.spanList.access !== AccessPolicy.Human ||
       trackingOperations.textGet.access !== AccessPolicy.Human ||
       trackingOperations.sessionEntryList.access !== AccessPolicy.Human ||
@@ -718,6 +729,9 @@ export class TrackingService implements Service, ExecutionTelemetry {
     );
     registry.register(trackingOperations.analyticsDuration, (input, caller) =>
       this.analyticsDuration(input.query, caller),
+    );
+    registry.register(trackingOperations.analyticsFlow, (input, caller) =>
+      this.analyticsFlow(input.query, caller),
     );
     registry.register(trackingOperations.spanList, (input, caller) =>
       this.spanList(input.params.trace_id, input.query, caller),

@@ -308,6 +308,8 @@ paths:
     $ref: ./openapi/tracking/analytics.cost.yaml#/pathItem
   /api/tracking/analytics/duration:
     $ref: ./openapi/tracking/analytics.duration.yaml#/pathItem
+  /api/tracking/analytics/flow:
+    $ref: ./openapi/tracking/analytics.flow.yaml#/pathItem
   /api/tracking/trace/{trace_id}/cause/label:
     $ref: ./openapi/tracking/cause.label.yaml#/pathItem
   /api/tracking/facet:

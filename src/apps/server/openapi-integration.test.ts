@@ -1,4 +1,9 @@
-import { trackingOperations } from "../../tracking/contract.ts";
+import {
+  flowExitSchema,
+  flowStageSchema,
+  flowStopReasonSchema,
+  trackingOperations,
+} from "../../tracking/contract.ts";
 import { z } from "zod";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -442,6 +447,7 @@ const PROVIDER_PROPERTY = "provider";
 const ENUM_KEYWORD = "enum";
 const AGENT_PROVIDER_ENUM_COUNT = 3;
 const TRACE_LIST_FRAGMENT_EXCEPTION = "openapi/tracking/trace.list.yaml";
+const FLOW_FRAGMENT_EXCEPTION = "openapi/tracking/analytics.flow.yaml";
 const NAMED_FRAGMENT_EXCEPTIONS = new Set([
   ...MISSION_BLOCKED_CONTEXT_FRAGMENT_EXCEPTIONS.map(
     ([file]) => `openapi/mission/${file}.yaml`,
@@ -454,6 +460,7 @@ const NAMED_FRAGMENT_EXCEPTIONS = new Set([
   AGENT_PROVIDER_FRAGMENT_EXCEPTION,
   EXECUTION_SETUP_FRAGMENT_EXCEPTION,
   TRACE_LIST_FRAGMENT_EXCEPTION,
+  FLOW_FRAGMENT_EXCEPTION,
 ]);
 const NULL_SCHEMA_TYPE = "null";
 const STRING_SCHEMA_TYPE = "string";
@@ -859,12 +866,13 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["tracking.facet.get", AccessPolicy.Human],
   ["tracking.analytics.cost", AccessPolicy.Human],
   ["tracking.analytics.duration", AccessPolicy.Human],
+  ["tracking.analytics.flow", AccessPolicy.Human],
   ["tracking.session.entry.list", AccessPolicy.Human],
   ["tracking.session.entry.get", AccessPolicy.Human],
   ["tracking.cause.label", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 224;
-const ROUTED_OPERATION_COUNT = 212;
+const OPERATION_COUNT = 225;
+const ROUTED_OPERATION_COUNT = 213;
 const INTAKE_OPERATION_COUNT = 24;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = [
@@ -1222,6 +1230,25 @@ test("the trace list fragment exceeds the soft limit only through the effective 
     causeCategorySchema.options,
   );
   assert.deepEqual(cause.required, ["category", "assigner"]);
+});
+test("the flow fragment exceeds the soft limit only through the flow closed sets", () => {
+  const fragment = parse(
+    readFileSync(join(dirname(openapiPath()), FLOW_FRAGMENT_EXCEPTION), "utf8"),
+  );
+  const output = fragment.components.schemas["tracking.analytics.flow.Output"];
+  const stage = output.properties.stages.items.properties;
+  assert.deepEqual(stage.stage.enum, flowStageSchema.options);
+  assert.deepEqual(
+    stage.current.properties.exits.propertyNames.enum,
+    flowExitSchema.options,
+  );
+  const causes = output.properties.causes.properties;
+  const cause = causes.rows.items.properties;
+  assert.deepEqual(cause.stage.enum, flowStageSchema.options);
+  assert.deepEqual(cause.exit.enum, flowExitSchema.options);
+  const stops = output.properties.stop_reasons.properties;
+  assert.deepEqual(stops.order.items.enum, flowStopReasonSchema.options);
+  assert.deepEqual(stops.rows.required, flowStopReasonSchema.options);
 });
 test("the execution setup fragment exceeds the soft limit only through the environment documents", () => {
   const fragment = parse(

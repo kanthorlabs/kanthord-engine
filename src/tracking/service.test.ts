@@ -5,7 +5,11 @@ import { IdentityKind } from "../kernel/caller.ts";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import type { CallerContext } from "../kernel/operation.ts";
+import {
+  AccessPolicy,
+  type CallerContext,
+  OperationRegistry,
+} from "../kernel/operation.ts";
 import {
   attributed,
   CauseAssigner,
@@ -24,6 +28,10 @@ import {
   ExecutionKind,
   type ExecutionOpening,
   type ExecutionTrace,
+  FlowCompare,
+  FlowExit,
+  FlowGrain,
+  FlowStage,
   MISSION_PRODUCER,
   PROJECT_PRODUCER,
   RecordKind,
@@ -46,6 +54,7 @@ import {
   trackingOperations,
   TransitionRule,
 } from "./contract.ts";
+import { FLOW_VECTOR_COLUMNS } from "./flow-model.ts";
 import { CauseLabelCode, HUMAN_USERNAME_ATTRIBUTE } from "./cause-label.ts";
 import { trackingMigrations } from "./migrations.ts";
 import { TrackingService } from "./service.ts";
@@ -86,6 +95,9 @@ const RETENTION_DAYS = 30;
 const EXPIRED_AGE_DAYS = 31;
 const DAY_MS = 86400000;
 const NO_STORED = 0;
+const CURRENT_FLOW_SUCCESS = 2;
+const PREVIOUS_FLOW_SUCCESS = 4;
+const FLOW_STAGE_COUNT = 6;
 const ENDED = 5000;
 const NO_DROP = 0;
 const NO_ROWS = 0;
@@ -1868,6 +1880,145 @@ test("an analytics read stops at the step after its signal aborts", async (t) =>
     (error: unknown) => error === context.signal.reason,
   );
   assert.equal(transaction.mock.callCount(), ABORT_CALLS);
+});
+
+function flowQuery(query: object = {}) {
+  return trackingOperations.analyticsFlow.input.shape.query.parse(query);
+}
+
+function seedFlowRow(
+  store: Store,
+  bucketStart: number,
+  executions: number,
+): void {
+  const values = {
+    grain: FlowGrain.Day,
+    bucket_start: bucketStart,
+    project_id: "project_a",
+    worker_name: "worker_a",
+    stage: FlowStage.Outcome,
+    exit: FlowExit.Completed,
+    stop_reason: "",
+    cause_category: "",
+    cause_detail: "",
+    cause_assigner: "",
+    ...Object.fromEntries(FLOW_VECTOR_COLUMNS.map((column) => [column, 0])),
+    executions,
+    changed_after_end: 0,
+  };
+  const columns = Object.keys(values);
+  store.transaction((tx) =>
+    tx.database
+      .prepare(
+        `INSERT INTO tracking_flow_rollup (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`,
+      )
+      .run(...Object.values(values)),
+  );
+}
+
+test("declare registers the flow operation with human access", (t) => {
+  const { service } = harness(t);
+  const registry = new OperationRegistry();
+  service.declare(registry);
+  const flow = registry
+    .all()
+    .find(
+      ({ operation }) => operation.id === trackingOperations.analyticsFlow.id,
+    );
+  assert.equal(flow?.operation.access, AccessPolicy.Human);
+  assert.equal(flow?.operation.path, trackingOperations.analyticsFlow.path);
+});
+
+test("declare refuses a flow operation with another access", (t) => {
+  const { service } = harness(t);
+  t.mock.property(
+    trackingOperations.analyticsFlow as { access: AccessPolicy },
+    "access",
+    AccessPolicy.Client,
+  );
+  assert.throws(
+    () => service.declare(new OperationRegistry()),
+    /Tracking operations require tracking ownership and their declared access/,
+  );
+});
+
+test("a flow query holds the values of the closed sets", () => {
+  const { query } = trackingOperations.analyticsFlow.input.shape;
+  assert.equal(query.parse({}).compare, FlowCompare.Previous);
+  assert.ok(query.safeParse({ bucket: "hour", compare: "none" }).success);
+  assert.ok(!query.safeParse({ bucket: "week" }).success);
+  assert.ok(!query.safeParse({ bucket: "none" }).success);
+  assert.ok(!query.safeParse({ compare: "next" }).success);
+  assert.ok(!query.safeParse({ extra: 1 }).success);
+  assert.ok(!query.safeParse({ worker_name: "x".repeat(257) }).success);
+});
+
+test("a flow read answers the schema for a store with rows", (t) => {
+  const { store, service } = harness(t);
+  seedFlowRow(store, DAY_START - 2 * DAY_MS, 2);
+  seedFlowRow(store, DAY_START - 9 * DAY_MS, 3);
+  seedFlowRow(store, DAY_START - 15 * DAY_MS, 1);
+  const read = service.analyticsFlow(flowQuery(), caller(store));
+  assert.deepEqual(trackingOperations.analyticsFlow.output.parse(read), read);
+  assert.equal(read.window.bucket, FlowGrain.Day);
+  assert.equal(read.window.now, NOW);
+  assert.equal(read.window.from, DAY_START - 7 * DAY_MS);
+  assert.deepEqual(read.previous_window, {
+    from: DAY_START - 15 * DAY_MS,
+    to: DAY_START - 7 * DAY_MS,
+  });
+  assert.equal(read.cost.current.success, CURRENT_FLOW_SUCCESS);
+  assert.equal(read.cost.previous?.success, PREVIOUS_FLOW_SUCCESS);
+  assert.equal(read.rebuild, null);
+});
+
+test("a flow read of an empty store answers a null previous window", (t) => {
+  const { store, service } = harness(t);
+  const read = service.analyticsFlow(flowQuery(), caller(store));
+  assert.equal(read.previous_window, null);
+  assert.equal(read.stages.length, FLOW_STAGE_COUNT);
+});
+
+test("a flow read never commits", (t) => {
+  const { store, service } = harness(t);
+  const reader: CallerContext = {
+    ...caller(store),
+    commit: () => assert.fail("a flow read must not commit"),
+  };
+  assert.doesNotThrow(() => service.analyticsFlow(flowQuery(), reader));
+});
+
+test("a flow range above 31 days, a from after to and the hour bucket above 2 days are refused", (t) => {
+  const { store, service } = harness(t);
+  const refused = [
+    { from: NOW - 31 * DAY_MS - 1 },
+    { from: NOW - 31 * DAY_MS - 1, to: NOW },
+    { from: NOW - DAY_MS, to: NOW - 2 * DAY_MS },
+    { from: NOW + 1 },
+    { bucket: FlowGrain.Hour },
+    { bucket: FlowGrain.Hour, from: NOW - 2 * DAY_MS - 1 },
+  ];
+  for (const query of refused)
+    assert.throws(
+      () => service.analyticsFlow(flowQuery(query), caller(store)),
+      rangeInvalid,
+    );
+  for (const query of [
+    { from: NOW - 31 * DAY_MS },
+    { bucket: FlowGrain.Hour, from: NOW - 2 * DAY_MS },
+  ])
+    assert.doesNotThrow(() =>
+      service.analyticsFlow(flowQuery(query), caller(store)),
+    );
+});
+
+test("a flow read with only to takes from 7 days before it", (t) => {
+  const { store, service } = harness(t);
+  const to = DAY_START - 10 * DAY_MS;
+  const read = service.analyticsFlow(flowQuery({ to }), caller(store));
+  assert.equal(read.window.from, to - 7 * DAY_MS);
+  assert.equal(read.window.to, to);
+  assert.equal(read.window.now, to);
 });
 
 test("the cause label operation answers the cause with the assigner human and writes the username", (t) => {

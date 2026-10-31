@@ -1083,6 +1083,27 @@ export const trackingOperations = {
       truncated: z.boolean(),
     }),
   },
+  analyticsFlow: {
+    id: "tracking.analytics.flow",
+    service: TRACKING_SERVICE_NAME,
+    method: HttpMethod.Get,
+    path: "/api/tracking/analytics/flow",
+    access: AccessPolicy.Human,
+    store: StoreName.Tracking,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: TRACKING_TIMEOUT_MS,
+    mutation: false,
+    body: false,
+    status: HttpStatus.OK,
+    description:
+      "Read the lifecycle flow, the cost and token scorecard, the causes and the stop reasons of the executions claimed in a time range. The range is at most 31 days. The read sums the flow rollups and answers raw numbers.",
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: analyticsFlowQuerySchema,
+      body: z.null(),
+    }),
+    output: flowReadSchema,
+  },
   textGet: {
     id: "tracking.text.get",
     service: TRACKING_SERVICE_NAME,
