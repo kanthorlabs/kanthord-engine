@@ -1496,7 +1496,10 @@ export function outboundHosts(t: TestContext) {
   return hosts;
 }
 
-export async function fakeGitHub(t: TestContext) {
+export async function fakeGitHub(
+  t: TestContext,
+  options: { stopLast?: boolean } = {},
+) {
   const state: FakeGitHubState = {
     pulls: [],
     calls: [],
@@ -1526,7 +1529,7 @@ export async function fakeGitHub(t: TestContext) {
       );
     });
   });
-  stopAfter(t, async () => {
+  const stop = async () => {
     releaseGate();
     releaseEvents();
     server.closeAllConnections();
@@ -1535,7 +1538,9 @@ export async function fakeGitHub(t: TestContext) {
     );
     if (failures.length)
       throw new AggregateError(failures, "Fake GitHub failed.");
-  });
+  };
+  if (options.stopLast) t.after(() => stopAfter(t, stop));
+  else stopAfter(t, stop);
   server.listen(EPHEMERAL_PORT, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
