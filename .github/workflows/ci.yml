@@ -18,6 +18,21 @@ env:
   TEST_CONCURRENCY: "4"
 
 jobs:
+  static:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run format:check
+      - run: pnpm run typecheck
+      - run: pnpm run lint
+
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -34,9 +49,6 @@ jobs:
           path: node_modules/.cache/suite-pass
           key: suite-pass-check-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: suite-pass-check-${{ runner.os }}-
-      - run: pnpm run format:check
-      - run: pnpm run typecheck
-      - run: pnpm run lint
       - run: pnpm run build
       - uses: actions/cache@v6
         with:
