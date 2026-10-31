@@ -36,6 +36,7 @@ import {
   type SessionEntryRecord,
   SpanOrigin,
   SpanStatus,
+  type TelemetryRecord,
   TIMELINE_LIMIT_DEFAULT,
   TimelineDepth,
   TraceSort,
@@ -113,6 +114,7 @@ function harness(t: TestContext, now: () => number = () => NOW) {
   const service = new TrackingService({
     store,
     retentionDays: RETENTION_DAYS,
+    isHostedWorker: () => false,
     now,
     executions: {
       traceOf: (executionId) =>
@@ -605,6 +607,76 @@ test("the claimant writes spans and texts of its execution", (t) => {
   const text = service.textGet(TRACE.trace_id, `${SPAN}:input`, caller(store));
   assert.equal(text.content, INPUT_TEXT);
   assert.equal("state" in text, false);
+});
+
+function kindOf(store: Store): unknown {
+  return store.database
+    .prepare("SELECT kind FROM tracking_trace WHERE trace_id = ?")
+    .get(TRACE.trace_id)?.kind;
+}
+
+function toolStart(): TelemetryRecord {
+  return {
+    record_id: `${SPAN}:start`,
+    trace_id: TRACE.trace_id,
+    kind: RecordKind.Span,
+    span_id: SPAN,
+    operation: "agent.tool",
+    parent_span_id: TRACE.root_span_id,
+    start_time: CREATED,
+  };
+}
+
+function toolEnd(): TelemetryRecord {
+  return {
+    record_id: `${SPAN}:end`,
+    trace_id: TRACE.trace_id,
+    kind: RecordKind.Span,
+    span_id: SPAN,
+    operation: "agent.tool",
+    parent_span_id: TRACE.root_span_id,
+    end_time: ENDED,
+  };
+}
+
+test("a telemetry write opens a new execution trace with the empty kind and keeps the kind of a stored row", (t) => {
+  const { store, service } = harness(t);
+  service.telemetryWrite(TRACE.execution_id, [toolStart()], caller(store));
+  assert.deepEqual([kindOf(store)], [""]);
+  service.executionOpened(TRACE, CREATED, OPENING);
+  assert.equal(kindOf(store), ExecutionKind.Steps);
+  service.telemetryWrite(TRACE.execution_id, [toolEnd()], caller(store));
+  assert.equal(kindOf(store), ExecutionKind.Steps);
+});
+
+test("a server span opens a new execution trace with the empty kind and the root start sets the kind", (t) => {
+  const { store, service } = harness(t);
+  service.serverSpan(TRACE, SCHEDULER_PRODUCER, {
+    record_id: `${SPAN}:server`,
+    span_id: SPAN,
+    parent_span_id: TRACE.root_span_id,
+    operation: TRANSITION_SPAN,
+    start_time: CREATED,
+  });
+  assert.deepEqual([kindOf(store)], [""]);
+  service.executionOpened(TRACE, CREATED, OPENING);
+  assert.equal(kindOf(store), ExecutionKind.Steps);
+  assert.equal(service.droppedRecords(), NO_DROP);
+});
+
+test("the claim writes the flow rows of its execution", (t) => {
+  const { store, service } = harness(t);
+  service.executionOpened(TRACE, CREATED, OPENING);
+  const rows = store.database
+    .prepare(
+      "SELECT grain, stage, exit, executions FROM tracking_flow_rollup ORDER BY grain",
+    )
+    .all()
+    .map((row) => ({ ...row }));
+  assert.deepEqual(rows, [
+    { grain: "day", stage: "executing", exit: "open", executions: 1 },
+    { grain: "hour", stage: "executing", exit: "open", executions: 1 },
+  ]);
 });
 
 test("textGet answers exactly the trace, the text id, the content and the creation time", (t) => {

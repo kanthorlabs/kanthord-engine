@@ -4,6 +4,7 @@ import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   type ExecutionTrace,
+  FlowKind,
   type RecordKind,
   type ServerTrace,
   type SessionEntry,
@@ -58,12 +59,12 @@ export function insertTrace(
   tx: Transaction,
   trace: TraceRow,
   createdAt: number,
-): void {
+): boolean {
   assert.ok(trace.trace_id);
   assert.ok(trace.root_span_id);
-  tx.database
+  const result = tx.database
     .prepare(
-      "INSERT INTO tracking_trace (trace_id, project_id, execution_id, root_span_id, created_at, node_id, attempt) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (trace_id) DO NOTHING",
+      "INSERT INTO tracking_trace (trace_id, project_id, execution_id, root_span_id, created_at, node_id, attempt, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (trace_id) DO NOTHING",
     )
     .run(
       trace.trace_id,
@@ -73,7 +74,9 @@ export function insertTrace(
       createdAt,
       trace.node_id,
       trace.attempt,
+      trace.execution_id === null ? null : FlowKind.None,
     );
+  return Number(result.changes) === ONE_ROW;
 }
 
 export const TRACE_COLUMNS =

@@ -70,6 +70,7 @@ function admission(producer = PRODUCER): Admission {
     producer,
     origin: SpanOrigin.Observed,
     now: STARTED,
+    flow: null,
   };
 }
 

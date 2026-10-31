@@ -20,6 +20,12 @@ import {
   type TextRecord,
 } from "./contract.ts";
 import {
+  close as closeFlow,
+  type FlowState,
+  late as lateFlow,
+  observe as observeFlow,
+} from "./flow-admission.ts";
+import {
   countRecords,
   insertRecord,
   insertSessionEntry,
@@ -39,6 +45,7 @@ export interface Admission {
   producer: string;
   origin: SpanOrigin;
   now: number;
+  flow: FlowState | null;
 }
 interface Outcome {
   disposition: Disposition;
@@ -142,6 +149,7 @@ export function applySpan(
     const span = newSpan(admission, added);
     insertSpan(tx, span);
     updateTraceSummary(tx, admission.trace.root_span_id, null, span);
+    if (admission.flow) observeFlow(admission.flow, null, span);
     return null;
   }
   if (existing.producer !== admission.producer)
@@ -150,6 +158,7 @@ export function applySpan(
   if (!merged) return RefusalReason.ValueReplaced;
   updateSpan(tx, merged);
   updateTraceSummary(tx, admission.trace.root_span_id, existing, merged);
+  if (admission.flow) observeFlow(admission.flow, existing, merged);
   return null;
 }
 
@@ -257,12 +266,15 @@ export function admitRecords(
   for (const record of records) {
     const outcome = admitRecord(tx, admission, record, stored);
     if (outcome.inserted) stored += 1;
+    if (outcome.inserted && admission.flow)
+      lateFlow(admission.flow, admission.now);
     dispositions.push({
       record_id: record.record_id,
       disposition: outcome.disposition,
       reason: outcome.reason,
     });
   }
+  if (admission.flow) closeFlow(tx, admission.flow, admission.now);
   const refusedCount = dispositions.filter(
     (entry) => entry.disposition === Disposition.Refused,
   ).length;
@@ -320,5 +332,8 @@ export function admitServerSpan(
     },
     admission.now,
   );
+  if (!admission.flow) return null;
+  lateFlow(admission.flow, admission.now);
+  closeFlow(tx, admission.flow, admission.now);
   return null;
 }

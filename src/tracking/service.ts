@@ -28,6 +28,7 @@ import type { Store } from "../kernel/store.ts";
 import { readCost } from "./analytics-cost.ts";
 import { readDuration } from "./analytics-duration.ts";
 import { type Admission, admitRecords, admitServerSpan } from "./admission.ts";
+import { openFlow } from "./flow-admission.ts";
 import {
   type Acknowledgement,
   ANALYTICS_ITEMS_MAX,
@@ -131,6 +132,7 @@ export interface Dependencies {
   executions: ExecutionTraces;
   health?: HealthRegistry;
   retentionDays: number;
+  isHostedWorker: (workerName: string) => boolean;
   now?: () => number;
 }
 
@@ -452,10 +454,16 @@ export class TrackingService implements Service, ExecutionTelemetry {
     try {
       this.dependencies.store.transaction((tx) => {
         const now = this.now();
-        insertTrace(tx, row, createdAt ?? now);
+        const inserted = insertTrace(tx, row, createdAt ?? now);
+        const flow = openFlow(
+          tx,
+          row.trace_id,
+          inserted,
+          this.dependencies.isHostedWorker,
+        );
         const reason = admitServerSpan(
           tx,
-          { trace: row, producer, origin: SpanOrigin.Observed, now },
+          { trace: row, producer, origin: SpanOrigin.Observed, now, flow },
           contribution,
         );
         if (reason !== null)
@@ -492,12 +500,19 @@ export class TrackingService implements Service, ExecutionTelemetry {
     assert.ok(trace, "a proven execution has a trace");
     return caller.commit((tx) => {
       const now = this.now();
-      insertTrace(tx, trace, now);
+      const inserted = insertTrace(tx, trace, now);
+      const flow = openFlow(
+        tx,
+        trace.trace_id,
+        inserted,
+        this.dependencies.isHostedWorker,
+      );
       const admission: Admission = {
         trace,
         producer: proof.runtimeIdentity,
         origin: SpanOrigin.Observed,
         now,
+        flow,
       };
       return admitRecords(tx, admission, records);
     });

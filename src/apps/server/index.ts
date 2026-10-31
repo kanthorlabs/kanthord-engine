@@ -110,6 +110,7 @@ import {
 import { mintServiceIdentity } from "../../kernel/service-mint.ts";
 import {
   agentPromptContribution,
+  isHostedWorker,
   toolDeclarations,
   workerMigrations,
   WorkerService,
@@ -482,6 +483,7 @@ export function composeServices(options: {
   const tracking = new TrackingService({
     store: options.trackingStore,
     retentionDays: options.config.tracking.retention_days,
+    isHostedWorker,
     executions: {
       traceOf: (executionId) => {
         const row = scheduler.executionOf(executionId);
