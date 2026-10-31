@@ -56,6 +56,7 @@ import {
   recordingConsumers,
   unusedActionDependencies,
 } from "./test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const STOPPED_CODE = "intake.lifecycle.stopped";
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -87,7 +88,7 @@ function identity(service: string): ServiceIdentity {
 
 function fixture(t: TestContext, service = INTAKE_SERVICE_NAME) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const health = new HealthRegistry();
   const intake = new IntakeService({
     store,
@@ -118,7 +119,7 @@ test("Intake start refuses the identity of another service", async (t) => {
 
 function consumerFixture(t: TestContext, consumers: IntakeConsumers) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   return new IntakeService({
     store,
     logger: pino({ enabled: false }),
@@ -427,7 +428,7 @@ function pollService(t: TestContext, store: Store) {
 function pollStore(t: TestContext): Store {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
   ]);
@@ -638,7 +639,7 @@ test("a restart starts the poll loops again from the stored checkpoint", async (
 
 function handoffFixture(t: TestContext, consumers: IntakeConsumers) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
   ]);

@@ -11,7 +11,7 @@ import {
 } from "../../intake/contract.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import {
   ActorKind,
   ActorService,
@@ -268,7 +268,7 @@ test("E09 event handoff journey", { timeout: TIMEOUT }, async (t) => {
         item.provenance.service === ActorService.Mission,
     );
   let release = () => {};
-  t.after(() => release());
+  stopAfter(t, () => release());
 
   await t.test("E09.1 to E09.8", { timeout: ROWS_TIMEOUT }, async () => {
     h.gitHub.failPulls(BAD_GATEWAY_STATUS);

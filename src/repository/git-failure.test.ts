@@ -16,6 +16,7 @@ import {
   LOCAL_GIT_SSH_ACCESS,
   startTestSshd,
 } from "./sshd-test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const GIT_FAILED = "repository.connector.git_failed";
 const DEADLINE_MS = 60_000;
@@ -222,7 +223,7 @@ test("gitFailureReason answers deadline_exceeded for a real ls-remote that excee
   const server = createServer((socket) => sockets.add(socket));
   server.listen(0, SILENT_HOST);
   await once(server, "listening");
-  t.after(() => {
+  stopAfter(t, () => {
     for (const socket of sockets) socket.destroy();
     server.close();
   });

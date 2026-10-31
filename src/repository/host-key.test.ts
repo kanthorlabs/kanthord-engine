@@ -7,7 +7,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
-import { childRun } from "../kernel/test-support.ts";
+import { childRun, stopAfter } from "../kernel/test-support.ts";
 import {
   HOST_KEY_SCAN_FAILED_STATUS,
   HostKeyErrorCode,
@@ -91,7 +91,7 @@ function fails(error: unknown, status: number, code: string): boolean {
 
 function fixture(t: TestContext, sources: Partial<HostKeySources> = {}) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: REPOSITORY_SERVICE, migrations: repositoryMigrations },
   ]);

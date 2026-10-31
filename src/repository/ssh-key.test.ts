@@ -7,7 +7,7 @@ import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
-import { temporary } from "../kernel/test-support.ts";
+import { stopAfter, temporary } from "../kernel/test-support.ts";
 import { generateSshKey, sshFingerprintOf, sshPublicKeyOf } from "./ssh-key.ts";
 
 const execFileAsync = promisify(execFile);
@@ -87,7 +87,7 @@ async function scratchAgent(t: TestContext): Promise<string> {
       resolve(undefined);
     }),
   );
-  t.after(async () => {
+  stopAfter(t, async () => {
     agent.kill();
     await closed;
   });

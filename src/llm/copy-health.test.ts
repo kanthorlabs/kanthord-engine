@@ -34,6 +34,7 @@ import {
   Platform,
 } from "./platforms.ts";
 import { LlmComponent } from "./service.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const INSTANCE = "laptop";
 const OTHER_INSTANCE = "desktop";
@@ -148,11 +149,11 @@ async function fixture(t: TestContext) {
     });
     const registry = new OperationRegistry();
     component.declare(registry);
-    t.after(() => component.stop());
+    stopAfter(t, () => component.stop());
     return { component, registry };
   };
   let server = start();
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const human: CallerContext = {
     identity: { kind: "human", accountId: "alice", name: "Alice", jti: "j" },
     context: background,

@@ -47,6 +47,7 @@ import { IntakeService } from "./index.ts";
 import { intakeMigrations } from "./migrations.ts";
 import type { Dependencies } from "./service.ts";
 import { unusedActionDependencies } from "./test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const UNKNOWN_PROJECT_ID = "project_01BX5ZZKBKACTAV9WEVGEMMVRZ";
@@ -93,7 +94,7 @@ function harness(
   collaborations: Partial<Pick<Dependencies, "custody" | "github">> = {},
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
   ]);

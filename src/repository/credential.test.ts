@@ -39,7 +39,7 @@ import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 import { PROJECT_SERVICE_NAME } from "../project/contract.ts";
 import { decrypt, encrypt } from "../custody/envelope.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import { temporary } from "../kernel/test-support.ts";
+import { stopAfter, temporary } from "../kernel/test-support.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { generateSshKey, sshFingerprintOf, sshPublicKeyOf } from "./ssh-key.ts";
 
@@ -71,7 +71,7 @@ function fixture(
   database = IN_MEMORY_DATABASE,
 ) {
   const store = new Store(database);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
   ]);

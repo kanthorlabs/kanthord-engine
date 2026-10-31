@@ -79,6 +79,7 @@ import {
 } from "./registration-rows.ts";
 import { HEARTBEAT_SWEEP_INTERVAL_MS } from "./heartbeat.ts";
 import { FakePoolHost } from "./test-support.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const fakeCollaborations = {
   promptTelemetry: { agentPrompted: () => {} },
@@ -318,7 +319,7 @@ const clientIdentity = {
 test("Worker owns registrations, declares its handler, and joins lifecycle calls", async (t) => {
   const health = new HealthRegistry();
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
   ]);
@@ -779,7 +780,7 @@ test("start resets live heartbeats and sweep ends only expired rows while preser
     f.worker.registrations.register(tx, client, Date.now()),
   );
   await f.worker.start();
-  t.after(() => f.worker.stop());
+  stopAfter(t, () => f.worker.stop());
   assert.equal(f.worker.heartbeatClock.ageMs(row.runtime_identity), zero);
   now += inside;
   f.worker.sweepRegistrations();
@@ -862,7 +863,7 @@ test("ending a binding shares its caller transaction and leaves reopened heartbe
     f.worker.registrations.register(tx, client, Date.now()),
   );
   await f.worker.start();
-  t.after(() => f.worker.stop());
+  stopAfter(t, () => f.worker.stop());
   const before = f.worker.heartbeatClock.ageMs(row.runtime_identity);
   const failure = new Error("rollback binding end");
   assert.throws(
@@ -1116,7 +1117,7 @@ test("registration checks read heartbeat boundaries without renewing, ending or 
     f.worker.registrations.register(tx, client, Date.now()),
   );
   await f.worker.start();
-  t.after(() => f.worker.stop());
+  stopAfter(t, () => f.worker.stop());
   const before = f.store.transaction((tx) => ({
     row: readRow(tx, row.runtime_identity),
     changes: tx.database.prepare("SELECT total_changes() AS count").get(),
@@ -1197,7 +1198,7 @@ test("registration liveness stays separate from native configuration and exclude
     f.worker.registrations.register(tx, client, Date.now()),
   );
   await f.worker.start();
-  t.after(() => f.worker.stop());
+  stopAfter(t, () => f.worker.stop());
   assert.equal(
     f.store.transaction((tx) =>
       f.worker.registrationHealthcheck(tx, row.runtime_identity),
@@ -1232,7 +1233,7 @@ function enablementFixture(
   agentCollaborations: Partial<AgentDependencies> = {},
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: AGENT_COMPONENT_NAME, migrations: agentMigrations },
     { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
@@ -1484,7 +1485,7 @@ test("catalog pages released declarations once per commit and registrations add 
   );
   assert.equal(second.next_cursor, null);
   await f.worker.start();
-  t.after(() => f.worker.stop());
+  stopAfter(t, () => f.worker.stop());
   f.store.transaction((tx) =>
     f.worker.registrations.register(tx, client, Date.now()),
   );

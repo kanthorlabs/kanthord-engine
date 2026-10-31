@@ -15,6 +15,7 @@ import {
 } from "./contract.ts";
 import { trackingMigrations } from "./migrations.ts";
 import { insertTrace, readSpan, readText } from "./trace-store.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const TRACE = "a".repeat(32);
 const OTHER_TRACE = "b".repeat(32);
@@ -35,7 +36,7 @@ const ENTRY_TIME = 1500;
 
 function trackingStore(t: TestContext): Store {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: TRACKING_SERVICE_NAME, migrations: trackingMigrations },
   ]);
@@ -69,6 +70,7 @@ function admission(producer = PRODUCER): Admission {
     producer,
     origin: SpanOrigin.Observed,
     now: STARTED,
+    flow: null,
   };
 }
 

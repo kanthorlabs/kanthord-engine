@@ -18,6 +18,7 @@ import type {
   CredentialHolds,
 } from "../custody/contract.ts";
 import type { Transaction } from "../kernel/store.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 
 export function scriptedProvider(
   script: FauxResponseStep[],
@@ -170,7 +171,7 @@ export function pidsIn(content: TextContent): number[] {
 
 export function spawnedPids(t: TestContext, content: TextContent): number[] {
   const spawned = pidsIn(content);
-  t.after(() => {
+  stopAfter(t, () => {
     for (const pid of spawned.filter(alive)) process.kill(pid, "SIGKILL");
   });
   return spawned;

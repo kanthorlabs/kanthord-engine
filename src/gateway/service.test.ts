@@ -34,6 +34,7 @@ import { HealthStatus } from "../kernel/service.ts";
 import { compareRouteSpecificity } from "./service.ts";
 import { GATEWAY_STARTED_MESSAGE } from "./constants.ts";
 import { createIdempotencyKey } from "../kernel/identity.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const AUTH_VERSION = 1;
 const NEXT_VERSION_STEP = 1;
@@ -235,7 +236,7 @@ test("JWT verification rejects expiry, wrong algorithm, invalid usernames, accou
     masterKey: otherMasterKey,
     authVersion: AUTH_VERSION,
   });
-  t.after(() => rotated.stop());
+  stopAfter(t, () => rotated.stop());
   await assert.rejects(
     rotated.authentication.authenticate(`Bearer ${fresh.token}`),
     /Authentication required/,
@@ -246,7 +247,7 @@ test("JWT verification rejects expiry, wrong algorithm, invalid usernames, accou
     masterKey: fixture.config.master_key,
     authVersion: fixture.config.gateway.auth.version + NEXT_VERSION_STEP,
   });
-  t.after(() => versioned.stop());
+  stopAfter(t, () => versioned.stop());
   await assert.rejects(
     versioned.authentication.authenticate(`Bearer ${fresh.token}`),
     /Authentication required/,

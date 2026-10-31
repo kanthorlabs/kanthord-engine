@@ -9,7 +9,12 @@ import { WorkerUnit } from "../worker/unit.ts";
 import { directories } from "../../kernel/xdg.ts";
 import type { ModelRuntimeFactory } from "../../worker/unit/index.ts";
 import { httpTransport } from "../worker/transport.ts";
-import { requirePiTools, temporary } from "../../kernel/test-support.ts";
+import {
+  requirePiTools,
+  stopAfter,
+  temporary,
+  temporaryDirectory,
+} from "../../kernel/test-support.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { httpClient } from "../../gateway/client.ts";
 import {
@@ -360,6 +365,24 @@ export const domainHealth = {
   tracking: { store: 200 },
 };
 
+function removedAfterStop(directory: string, stopped: boolean): void {
+  try {
+    rmSync(directory, { recursive: true, force: true });
+  } catch (error) {
+    if (stopped) throw error;
+  }
+}
+
+function removedOnThrow<T>(directories: string[], create: () => T): T {
+  try {
+    return create();
+  } catch (error) {
+    for (const directory of directories)
+      rmSync(directory, { recursive: true, force: true });
+    throw error;
+  }
+}
+
 export async function inProcessWorker(
   t: TestContext,
   input: {
@@ -371,7 +394,7 @@ export async function inProcessWorker(
   },
 ) {
   requirePiTools();
-  const root = temporary(t);
+  const root = temporaryDirectory();
   const env = {
     ...process.env,
     HOME: root,
@@ -382,32 +405,42 @@ export async function inProcessWorker(
   const logs: Record<string, unknown>[] = [];
   const ready = Promise.withResolvers<void>();
   const readyMessage = "Worker application ready";
-  const worker = new WorkerUnit({
-    bindings: [
-      {
-        transport: httpTransport(input.endpoint, input.token),
-        client_secret: input.client_secret,
-      },
-    ],
-    directories: { data: state, log: state },
-    env,
-    model_runtime_factory: input.modelRuntimeFactory,
-    repository_transport: input.repositoryTransport,
-    log: (line) => {
-      const record = JSON.parse(line) as Record<string, unknown>;
-      logs.push(record);
-      if (record.msg === readyMessage) ready.resolve();
-    },
-  });
+  const worker = removedOnThrow(
+    [root],
+    () =>
+      new WorkerUnit({
+        bindings: [
+          {
+            transport: httpTransport(input.endpoint, input.token),
+            client_secret: input.client_secret,
+          },
+        ],
+        directories: { data: state, log: state },
+        env,
+        model_runtime_factory: input.modelRuntimeFactory,
+        repository_transport: input.repositoryTransport,
+        log: (line) => {
+          const record = JSON.parse(line) as Record<string, unknown>;
+          logs.push(record);
+          if (record.msg === readyMessage) ready.resolve();
+        },
+      }),
+  );
   const stop = () => {
     void worker.stop();
   };
   process.on("SIGTERM", stop);
   const running = worker.run();
-  t.after(async () => {
+  stopAfter(t, async () => {
     process.off("SIGTERM", stop);
-    await worker.stop();
-    await running;
+    let stopped = false;
+    try {
+      await worker.stop();
+      await running;
+      stopped = true;
+    } finally {
+      removedAfterStop(root, stopped);
+    }
   });
   await Promise.race([
     ready.promise,
@@ -653,6 +686,8 @@ export async function gatewayFixture(
   const trackingStore = new Store(":memory:");
   trackingStore.migrate(trackingDatabaseMigrations);
   const logs: string[] = [];
+  const ownsStateDirectory = options.stateDirectory === undefined;
+  const stateDirectory = options.stateDirectory ?? temporaryDirectory();
   const {
     scheduler,
     tracking,
@@ -671,45 +706,48 @@ export async function gatewayFixture(
     github,
     gitWriter,
     s3,
-  } = composeServices({
-    config,
-    store,
-    trackingStore,
-    stateDirectory: options.stateDirectory ?? temporary(t),
-    workbenchModelRuntimeFactory: options.workbenchModelRuntimeFactory,
-    environmentModelRuntimeFactory: options.environmentModelRuntimeFactory,
-    registry: options.registry,
-    health: options.health ?? new HealthRegistry(),
-    repositoryConnector: options.repositoryConnector,
-    github: options.github,
-    repositoryTransport: options.repositoryTransport,
-    hostKeySources: options.hostKeySources ?? FAKE_HOST_KEY_SOURCES,
-    oauthProviders: options.oauthProviders,
-    loadModelRuntime: options.loadModelRuntime,
-    bindings: options.machines?.project,
-    registrations: options.machines?.worker,
-    inventoryOverrides: options.inventoryOverrides,
-    intake: options.intake,
-    handoverRefreshWaitMs: options.handoverRefreshWaitMs,
-    serverSlotDriver: slotDriver ?? options.serverSlotDriver,
-    environmentRuntime: options.environmentRuntime,
-    containerRuntimeHost: options.containerRuntimeHost,
-    environmentDevcontainerCli: options.environmentDevcontainerCli,
-    containerSlotDriver: options.containerSlotDriver,
-    repositoryFiles: options.repositoryFiles ?? fakeRepositoryFiles(),
-    logger: pino(
-      { level: "info" },
-      {
-        write: (line) => {
-          logs.push(line);
+  } = removedOnThrow(ownsStateDirectory ? [stateDirectory] : [], () =>
+    composeServices({
+      config,
+      store,
+      trackingStore,
+      stateDirectory,
+      workbenchModelRuntimeFactory: options.workbenchModelRuntimeFactory,
+      environmentModelRuntimeFactory: options.environmentModelRuntimeFactory,
+      registry: options.registry,
+      health: options.health ?? new HealthRegistry(),
+      repositoryConnector: options.repositoryConnector,
+      github: options.github,
+      repositoryTransport: options.repositoryTransport,
+      hostKeySources: options.hostKeySources ?? FAKE_HOST_KEY_SOURCES,
+      oauthProviders: options.oauthProviders,
+      loadModelRuntime: options.loadModelRuntime,
+      bindings: options.machines?.project,
+      registrations: options.machines?.worker,
+      inventoryOverrides: options.inventoryOverrides,
+      intake: options.intake,
+      handoverRefreshWaitMs: options.handoverRefreshWaitMs,
+      serverSlotDriver: slotDriver ?? options.serverSlotDriver,
+      environmentRuntime: options.environmentRuntime,
+      containerRuntimeHost: options.containerRuntimeHost,
+      environmentDevcontainerCli: options.environmentDevcontainerCli,
+      containerSlotDriver: options.containerSlotDriver,
+      repositoryFiles: options.repositoryFiles ?? fakeRepositoryFiles(),
+      logger: pino(
+        { level: "info" },
+        {
+          write: (line) => {
+            logs.push(line);
+          },
         },
-      },
-    ),
-  });
+      ),
+    }),
+  );
   if (options.repositoryTransport === undefined)
     gitWriter.changedGateFiles = async () => [];
-  t.after(async () => {
+  stopAfter(t, async () => {
     const failures: Error[] = [];
+    let stopped = false;
     try {
       await worker.stopPool();
       const quiescence = await Promise.all(
@@ -744,9 +782,11 @@ export async function gatewayFixture(
       }
       if (failures.length)
         throw new AggregateError(failures, "Fixture cleanup failed.");
+      stopped = true;
     } finally {
       store.close();
       trackingStore.close();
+      if (ownsStateDirectory) removedAfterStop(stateDirectory, stopped);
     }
   });
   for (const service of [
@@ -796,6 +836,7 @@ export async function gatewayFixture(
     );
   };
   return {
+    stateDirectory,
     repoConnector,
     github,
     gitWriter,
@@ -1451,11 +1492,14 @@ export function outboundHosts(t: TestContext) {
     record(hosts.http, request.host);
   };
   subscribe(HTTP_REQUEST_CHANNEL, onRequest);
-  t.after(() => unsubscribe(HTTP_REQUEST_CHANNEL, onRequest));
+  stopAfter(t, () => unsubscribe(HTTP_REQUEST_CHANNEL, onRequest));
   return hosts;
 }
 
-export async function fakeGitHub(t: TestContext) {
+export async function fakeGitHub(
+  t: TestContext,
+  options: { stopLast?: boolean } = {},
+) {
   const state: FakeGitHubState = {
     pulls: [],
     calls: [],
@@ -1485,7 +1529,7 @@ export async function fakeGitHub(t: TestContext) {
       );
     });
   });
-  t.after(async () => {
+  const stop = async () => {
     releaseGate();
     releaseEvents();
     server.closeAllConnections();
@@ -1494,7 +1538,9 @@ export async function fakeGitHub(t: TestContext) {
     );
     if (failures.length)
       throw new AggregateError(failures, "Fake GitHub failed.");
-  });
+  };
+  if (options.stopLast) t.after(() => stopAfter(t, stop));
+  else stopAfter(t, stop);
   server.listen(EPHEMERAL_PORT, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
@@ -2039,7 +2085,7 @@ export async function fakeS3(t: TestContext) {
       );
     });
   });
-  t.after(async () => {
+  stopAfter(t, async () => {
     server.closeAllConnections();
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error ? reject(error) : resolve())),

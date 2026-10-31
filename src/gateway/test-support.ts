@@ -9,6 +9,7 @@ import {
   MASTER_KEY_BYTES,
 } from "../config/global.ts";
 import { Store } from "../kernel/store.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 import { OperationRegistry, StoreName } from "../kernel/operation.ts";
 import type { HealthRegistry } from "../kernel/health.ts";
 import type { Context } from "../kernel/context.ts";
@@ -114,7 +115,7 @@ export async function authenticationFixture(
     master_key: randomBytes(MASTER_KEY_BYTES).toString("base64"),
   }).getProperties();
   const store = storeAt();
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const authentication = new Authentication(
     config.master_key,
     config.gateway.auth.version,
@@ -197,7 +198,7 @@ export async function gatewayFixture(
       },
     ),
   });
-  t.after(async () => {
+  stopAfter(t, async () => {
     try {
       await gateway.quiesce();
       await gateway.drain();

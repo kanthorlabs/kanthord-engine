@@ -5,7 +5,11 @@ import { IdentityKind } from "../kernel/caller.ts";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import type { CallerContext } from "../kernel/operation.ts";
+import {
+  AccessPolicy,
+  type CallerContext,
+  OperationRegistry,
+} from "../kernel/operation.ts";
 import {
   attributed,
   CauseAssigner,
@@ -24,6 +28,11 @@ import {
   ExecutionKind,
   type ExecutionOpening,
   type ExecutionTrace,
+  FlowCompare,
+  FlowExit,
+  FlowGrain,
+  FlowKind,
+  FlowStage,
   MISSION_PRODUCER,
   PROJECT_PRODUCER,
   RecordKind,
@@ -36,6 +45,7 @@ import {
   type SessionEntryRecord,
   SpanOrigin,
   SpanStatus,
+  type TelemetryRecord,
   TIMELINE_LIMIT_DEFAULT,
   TimelineDepth,
   TraceSort,
@@ -45,10 +55,12 @@ import {
   trackingOperations,
   TransitionRule,
 } from "./contract.ts";
+import { FLOW_VECTOR_COLUMNS } from "./flow-model.ts";
 import { CauseLabelCode, HUMAN_USERNAME_ATTRIBUTE } from "./cause-label.ts";
 import { trackingMigrations } from "./migrations.ts";
 import { TrackingService } from "./service.ts";
 import { insertSpan, insertTrace } from "./trace-store.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const HUMAN_ACCOUNT = "account_01JZ8R2B3C4D5E6F7G8H9J0K1M";
 const TRACE: ExecutionTrace = {
@@ -84,11 +96,16 @@ const RETENTION_DAYS = 30;
 const EXPIRED_AGE_DAYS = 31;
 const DAY_MS = 86400000;
 const NO_STORED = 0;
+const CURRENT_FLOW_SUCCESS = 2;
+const PREVIOUS_FLOW_SUCCESS = 4;
+const FLOW_STAGE_COUNT = 6;
 const ENDED = 5000;
 const NO_DROP = 0;
 const NO_ROWS = 0;
 const ONE_ENTRY = 1;
 const ONE_DROP = 1;
+const TWO_FAILURES = 2;
+const BACKFILL_WAIT_TURNS = 100;
 const PAGE_OF_ONE = 1;
 const STOP_DETAIL = "Cannot find module";
 const SPAN_PAGE = 10;
@@ -105,13 +122,14 @@ const OTHER_TRACE = "b".repeat(32);
 
 function harness(t: TestContext, now: () => number = () => NOW) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: TRACKING_SERVICE_NAME, migrations: trackingMigrations },
   ]);
   const service = new TrackingService({
     store,
     retentionDays: RETENTION_DAYS,
+    isHostedWorker: () => false,
     now,
     executions: {
       traceOf: (executionId) =>
@@ -604,6 +622,76 @@ test("the claimant writes spans and texts of its execution", (t) => {
   const text = service.textGet(TRACE.trace_id, `${SPAN}:input`, caller(store));
   assert.equal(text.content, INPUT_TEXT);
   assert.equal("state" in text, false);
+});
+
+function kindOf(store: Store): unknown {
+  return store.database
+    .prepare("SELECT kind FROM tracking_trace WHERE trace_id = ?")
+    .get(TRACE.trace_id)?.kind;
+}
+
+function toolStart(): TelemetryRecord {
+  return {
+    record_id: `${SPAN}:start`,
+    trace_id: TRACE.trace_id,
+    kind: RecordKind.Span,
+    span_id: SPAN,
+    operation: "agent.tool",
+    parent_span_id: TRACE.root_span_id,
+    start_time: CREATED,
+  };
+}
+
+function toolEnd(): TelemetryRecord {
+  return {
+    record_id: `${SPAN}:end`,
+    trace_id: TRACE.trace_id,
+    kind: RecordKind.Span,
+    span_id: SPAN,
+    operation: "agent.tool",
+    parent_span_id: TRACE.root_span_id,
+    end_time: ENDED,
+  };
+}
+
+test("a telemetry write opens a new execution trace with the empty kind and keeps the kind of a stored row", (t) => {
+  const { store, service } = harness(t);
+  service.telemetryWrite(TRACE.execution_id, [toolStart()], caller(store));
+  assert.deepEqual([kindOf(store)], [""]);
+  service.executionOpened(TRACE, CREATED, OPENING);
+  assert.equal(kindOf(store), ExecutionKind.Steps);
+  service.telemetryWrite(TRACE.execution_id, [toolEnd()], caller(store));
+  assert.equal(kindOf(store), ExecutionKind.Steps);
+});
+
+test("a server span opens a new execution trace with the empty kind and the root start sets the kind", (t) => {
+  const { store, service } = harness(t);
+  service.serverSpan(TRACE, SCHEDULER_PRODUCER, {
+    record_id: `${SPAN}:server`,
+    span_id: SPAN,
+    parent_span_id: TRACE.root_span_id,
+    operation: TRANSITION_SPAN,
+    start_time: CREATED,
+  });
+  assert.deepEqual([kindOf(store)], [""]);
+  service.executionOpened(TRACE, CREATED, OPENING);
+  assert.equal(kindOf(store), ExecutionKind.Steps);
+  assert.equal(service.droppedRecords(), NO_DROP);
+});
+
+test("the claim writes the flow rows of its execution", (t) => {
+  const { store, service } = harness(t);
+  service.executionOpened(TRACE, CREATED, OPENING);
+  const rows = store.database
+    .prepare(
+      "SELECT grain, stage, exit, executions FROM tracking_flow_rollup ORDER BY grain",
+    )
+    .all()
+    .map((row) => ({ ...row }));
+  assert.deepEqual(rows, [
+    { grain: "day", stage: "executing", exit: "open", executions: 1 },
+    { grain: "hour", stage: "executing", exit: "open", executions: 1 },
+  ]);
 });
 
 test("textGet answers exactly the trace, the text id, the content and the creation time", (t) => {
@@ -1201,17 +1289,137 @@ test("start sweeps an expired trace", async (t) => {
     insertTrace(tx, TRACE, NOW - EXPIRED_AGE_DAYS * DAY_MS),
   );
   assert.equal(traceCount(store), ONE_ENTRY);
-  t.after(() => service.stop());
+  stopAfter(t, () => service.stop());
   assert.equal(await service.start(), null);
   assert.equal(traceCount(store), NO_ROWS);
   assert.equal(service.sweepFailures(), NO_ROWS);
 });
 
-test("a failed sweep is counted and answers zero", (t) => {
+function insertUnfilledTrace(store: Store, createdAt: number): void {
+  store.transaction((tx) => {
+    insertTrace(tx, TRACE, createdAt);
+    tx.database
+      .prepare("UPDATE tracking_trace SET kind = NULL WHERE trace_id = ?")
+      .run(TRACE.trace_id);
+  });
+}
+
+function kindOfTrace(store: Store): unknown {
+  return store.database
+    .prepare("SELECT kind FROM tracking_trace WHERE trace_id = ?")
+    .get(TRACE.trace_id)?.kind;
+}
+
+function rollupRowCount(store: Store): number {
+  const row = store.database
+    .prepare("SELECT COUNT(*) AS count FROM tracking_flow_rollup")
+    .get();
+  return Number(row?.count);
+}
+
+async function backfillEnded(service: TrackingService, store: Store) {
+  for (let turn = 0; turn < BACKFILL_WAIT_TURNS; turn++) {
+    if (service.analyticsFlow(flowQuery(), caller(store)).rebuild === null)
+      return;
+    await setImmediate();
+  }
+  assert.fail("the backfill did not end");
+}
+
+test("start runs the backfill after the sweep and does not wait for it", async (t) => {
+  const { store, service } = harness(t);
+  insertUnfilledTrace(store, NOW - DAY_MS);
+  stopAfter(t, () => service.stop());
+  assert.equal(await service.start(), null);
+  assert.equal(kindOfTrace(store), null);
+  await backfillEnded(service, store);
+  assert.equal(kindOfTrace(store), FlowKind.None);
+  assert.equal(rollupRowCount(store), TWO_ROWS);
+  assert.equal(service.sweepFailures(), NO_ROWS);
+});
+
+test("the backfill leaves out a trace that the first sweep deletes", async (t) => {
+  const { store, service } = harness(t);
+  insertUnfilledTrace(store, NOW - EXPIRED_AGE_DAYS * DAY_MS);
+  stopAfter(t, () => service.stop());
+  assert.equal(await service.start(), null);
+  await backfillEnded(service, store);
+  assert.equal(traceCount(store), NO_ROWS);
+  assert.equal(rollupRowCount(store), NO_ROWS);
+});
+
+test("analyticsFlow answers rebuild with the job start while the backfill runs and null after it", async (t) => {
+  const { store, service } = harness(t);
+  assert.equal(service.analyticsFlow(flowQuery(), caller(store)).rebuild, null);
+  insertUnfilledTrace(store, NOW - DAY_MS);
+  stopAfter(t, () => service.stop());
+  assert.equal(await service.start(), null);
+  assert.deepEqual(service.analyticsFlow(flowQuery(), caller(store)).rebuild, {
+    pending_until: NOW,
+  });
+  await backfillEnded(service, store);
+  assert.equal(service.analyticsFlow(flowQuery(), caller(store)).rebuild, null);
+});
+
+test("a failed sweep is counted for the traces and for the rollups and answers zero", (t) => {
   const { store, service } = harness(t);
   store.close();
   assert.equal(service.sweep(), NO_ROWS);
+  assert.equal(service.sweepFailures(), TWO_FAILURES);
+});
+
+test("a failed rollup sweep is counted and the trace sweep still runs", (t) => {
+  const { store, service } = harness(t);
+  store.transaction((tx) =>
+    insertTrace(tx, TRACE, NOW - EXPIRED_AGE_DAYS * DAY_MS),
+  );
+  store.database.exec("DROP TABLE tracking_usage_rollup");
+  assert.equal(service.sweep(), ONE_ENTRY);
   assert.equal(service.sweepFailures(), ONE_DROP);
+  assert.equal(traceCount(store), NO_ROWS);
+});
+
+function insertUsageRow(store: Store, grain: FlowGrain, bucketStart: number) {
+  store.database
+    .prepare(
+      "INSERT INTO tracking_usage_rollup VALUES (?, ?, 'project', 'worker', 'model', 1, 1, 1, 1, 1, 0)",
+    )
+    .run(grain, bucketStart);
+}
+
+function usageBuckets(store: Store, grain: FlowGrain): number[] {
+  return store.database
+    .prepare(
+      "SELECT bucket_start FROM tracking_usage_rollup WHERE grain = ? ORDER BY bucket_start",
+    )
+    .all(grain)
+    .map((row) => Number(row.bucket_start));
+}
+
+test("the sweep deletes the rollup rows of an expired trace only at their own cutoff", (t) => {
+  const { store, service } = harness(t);
+  store.transaction((tx) =>
+    insertTrace(tx, TRACE, NOW - EXPIRED_AGE_DAYS * DAY_MS),
+  );
+  insertUsageRow(store, FlowGrain.Hour, NOW - 9 * DAY_MS);
+  insertUsageRow(store, FlowGrain.Hour, NOW - 7 * DAY_MS);
+  insertUsageRow(store, FlowGrain.Day, NOW - 65 * DAY_MS);
+  insertUsageRow(store, FlowGrain.Day, NOW - EXPIRED_AGE_DAYS * DAY_MS);
+  assert.equal(service.sweep(), ONE_ENTRY);
+  assert.equal(service.sweepFailures(), NO_ROWS);
+  assert.equal(traceCount(store), NO_ROWS);
+  assert.deepEqual(usageBuckets(store, FlowGrain.Hour), [NOW - 7 * DAY_MS]);
+  assert.deepEqual(usageBuckets(store, FlowGrain.Day), [
+    NOW - EXPIRED_AGE_DAYS * DAY_MS,
+  ]);
+});
+
+test("start sweeps an expired rollup row", async (t) => {
+  const { store, service } = harness(t);
+  insertUsageRow(store, FlowGrain.Hour, NOW - 9 * DAY_MS);
+  stopAfter(t, () => service.stop());
+  assert.equal(await service.start(), null);
+  assert.deepEqual(usageBuckets(store, FlowGrain.Hour), []);
 });
 
 test("a telemetry write of an expired execution is refused and opens no trace", (t) => {
@@ -1797,6 +2005,145 @@ test("an analytics read stops at the step after its signal aborts", async (t) =>
   assert.equal(transaction.mock.callCount(), ABORT_CALLS);
 });
 
+function flowQuery(query: object = {}) {
+  return trackingOperations.analyticsFlow.input.shape.query.parse(query);
+}
+
+function seedFlowRow(
+  store: Store,
+  bucketStart: number,
+  executions: number,
+): void {
+  const values = {
+    grain: FlowGrain.Day,
+    bucket_start: bucketStart,
+    project_id: "project_a",
+    worker_name: "worker_a",
+    stage: FlowStage.Outcome,
+    exit: FlowExit.Completed,
+    stop_reason: "",
+    cause_category: "",
+    cause_detail: "",
+    cause_assigner: "",
+    ...Object.fromEntries(FLOW_VECTOR_COLUMNS.map((column) => [column, 0])),
+    executions,
+    changed_after_end: 0,
+  };
+  const columns = Object.keys(values);
+  store.transaction((tx) =>
+    tx.database
+      .prepare(
+        `INSERT INTO tracking_flow_rollup (${columns.join(", ")}) VALUES (${columns.map(() => "?").join(", ")})`,
+      )
+      .run(...Object.values(values)),
+  );
+}
+
+test("declare registers the flow operation with human access", (t) => {
+  const { service } = harness(t);
+  const registry = new OperationRegistry();
+  service.declare(registry);
+  const flow = registry
+    .all()
+    .find(
+      ({ operation }) => operation.id === trackingOperations.analyticsFlow.id,
+    );
+  assert.equal(flow?.operation.access, AccessPolicy.Human);
+  assert.equal(flow?.operation.path, trackingOperations.analyticsFlow.path);
+});
+
+test("declare refuses a flow operation with another access", (t) => {
+  const { service } = harness(t);
+  t.mock.property(
+    trackingOperations.analyticsFlow as { access: AccessPolicy },
+    "access",
+    AccessPolicy.Client,
+  );
+  assert.throws(
+    () => service.declare(new OperationRegistry()),
+    /Tracking operations require tracking ownership and their declared access/,
+  );
+});
+
+test("a flow query holds the values of the closed sets", () => {
+  const { query } = trackingOperations.analyticsFlow.input.shape;
+  assert.equal(query.parse({}).compare, FlowCompare.Previous);
+  assert.ok(query.safeParse({ bucket: "hour", compare: "none" }).success);
+  assert.ok(!query.safeParse({ bucket: "week" }).success);
+  assert.ok(!query.safeParse({ bucket: "none" }).success);
+  assert.ok(!query.safeParse({ compare: "next" }).success);
+  assert.ok(!query.safeParse({ extra: 1 }).success);
+  assert.ok(!query.safeParse({ worker_name: "x".repeat(257) }).success);
+});
+
+test("a flow read answers the schema for a store with rows", (t) => {
+  const { store, service } = harness(t);
+  seedFlowRow(store, DAY_START - 2 * DAY_MS, 2);
+  seedFlowRow(store, DAY_START - 9 * DAY_MS, 3);
+  seedFlowRow(store, DAY_START - 15 * DAY_MS, 1);
+  const read = service.analyticsFlow(flowQuery(), caller(store));
+  assert.deepEqual(trackingOperations.analyticsFlow.output.parse(read), read);
+  assert.equal(read.window.bucket, FlowGrain.Day);
+  assert.equal(read.window.now, NOW);
+  assert.equal(read.window.from, DAY_START - 7 * DAY_MS);
+  assert.deepEqual(read.previous_window, {
+    from: DAY_START - 15 * DAY_MS,
+    to: DAY_START - 7 * DAY_MS,
+  });
+  assert.equal(read.cost.current.success, CURRENT_FLOW_SUCCESS);
+  assert.equal(read.cost.previous?.success, PREVIOUS_FLOW_SUCCESS);
+  assert.equal(read.rebuild, null);
+});
+
+test("a flow read of an empty store answers a null previous window", (t) => {
+  const { store, service } = harness(t);
+  const read = service.analyticsFlow(flowQuery(), caller(store));
+  assert.equal(read.previous_window, null);
+  assert.equal(read.stages.length, FLOW_STAGE_COUNT);
+});
+
+test("a flow read never commits", (t) => {
+  const { store, service } = harness(t);
+  const reader: CallerContext = {
+    ...caller(store),
+    commit: () => assert.fail("a flow read must not commit"),
+  };
+  assert.doesNotThrow(() => service.analyticsFlow(flowQuery(), reader));
+});
+
+test("a flow range above 31 days, a from after to and the hour bucket above 2 days are refused", (t) => {
+  const { store, service } = harness(t);
+  const refused = [
+    { from: NOW - 31 * DAY_MS - 1 },
+    { from: NOW - 31 * DAY_MS - 1, to: NOW },
+    { from: NOW - DAY_MS, to: NOW - 2 * DAY_MS },
+    { from: NOW + 1 },
+    { bucket: FlowGrain.Hour },
+    { bucket: FlowGrain.Hour, from: NOW - 2 * DAY_MS - 1 },
+  ];
+  for (const query of refused)
+    assert.throws(
+      () => service.analyticsFlow(flowQuery(query), caller(store)),
+      rangeInvalid,
+    );
+  for (const query of [
+    { from: NOW - 31 * DAY_MS },
+    { bucket: FlowGrain.Hour, from: NOW - 2 * DAY_MS },
+  ])
+    assert.doesNotThrow(() =>
+      service.analyticsFlow(flowQuery(query), caller(store)),
+    );
+});
+
+test("a flow read with only to takes from 7 days before it", (t) => {
+  const { store, service } = harness(t);
+  const to = DAY_START - 10 * DAY_MS;
+  const read = service.analyticsFlow(flowQuery({ to }), caller(store));
+  assert.equal(read.window.from, to - 7 * DAY_MS);
+  assert.equal(read.window.to, to);
+  assert.equal(read.window.now, to);
+});
+
 test("the cause label operation answers the cause with the assigner human and writes the username", (t) => {
   const { store, service } = harness(t, () => ENDED);
   service.executionOpened(TRACE, CREATED, OPENING);
@@ -1805,7 +2152,7 @@ test("the cause label operation answers the cause with the assigner human and wr
     ended_at: ENDED,
     end: ExecutionEnd.Finished,
     revoke_cause: null,
-    stop: null,
+    stop: { reason: "provider_failed", code: RATE_LIMITED },
     cause: unattributed([CauseCategory.Prompt, CauseCategory.Model]),
   });
   const body = {
@@ -1826,6 +2173,24 @@ test("the cause label operation answers the cause with the assigner human and wr
     created_at: ENDED,
   });
   assert.doesNotThrow(() => trackingOperations.causeLabel.output.parse(answer));
+  for (const grain of Object.values(FlowGrain)) {
+    const rows = store.database
+      .prepare(
+        "SELECT cause_category, cause_detail, cause_assigner, executions FROM tracking_flow_rollup WHERE grain = ?",
+      )
+      .all(grain);
+    assert.deepEqual(
+      rows.map((row) => ({ ...row })),
+      [
+        {
+          cause_category: CauseCategory.Prompt,
+          cause_detail: CauseSubcategory.ContextMissing,
+          cause_assigner: CauseAssigner.Human,
+          executions: 1,
+        },
+      ],
+    );
+  }
   const label = service
     .spanList(TRACE.trace_id, { limit: SPAN_PAGE }, caller(store))
     .items.find((span) => span.span_id === answer.span_id);

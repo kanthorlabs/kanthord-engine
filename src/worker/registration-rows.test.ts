@@ -16,6 +16,7 @@ import {
   registrationIdsOfInstance,
   reopenRegistration,
 } from "./registration-rows.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const NOW = 1000;
 const ENDED = 2000;
@@ -33,7 +34,7 @@ const CLIENT = {
 function fixture(t: TestContext): Store {
   const store = new Store(":memory:");
   store.migrate([{ service: "worker", migrations: workerMigrations }]);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   assert.ok(store.database.isOpen);
   assert.ok(!store.database.isTransaction);
   return store;

@@ -8,7 +8,7 @@ import { test, type TestContext } from "node:test";
 import { directories } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { generateX25519KeyPair } from "../../kernel/hpke.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import {
   instanceConfigurationValue,
   InstancePlacement,
@@ -383,7 +383,10 @@ test("E09.4 tools that cannot be installed refuse before any network request", a
   await new Promise<void>((resolve) =>
     server.listen(EPHEMERAL_PORT, LOOPBACK, resolve),
   );
-  t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  stopAfter(
+    t,
+    () => new Promise<void>((resolve) => server.close(() => resolve())),
+  );
   const address = server.address();
   assert.ok(address && address instanceof Object);
   const env = workerEnvironment(t);

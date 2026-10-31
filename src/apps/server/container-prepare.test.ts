@@ -11,7 +11,11 @@ import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { Writable } from "node:stream";
 import { MessageChannel } from "node:worker_threads";
-import { temporary, temporaryDirectory } from "../../kernel/test-support.ts";
+import {
+  stopAfter,
+  temporary,
+  temporaryDirectory,
+} from "../../kernel/test-support.ts";
 import {
   BindingEntryState,
   ContainerRuntime,
@@ -349,7 +353,7 @@ test("an instance spawns no container while the image answer is pending", async 
   const gate = imageGate();
   const f = hostWith(true, () => ok(), gate.imageFor);
   const instance = f.driver.launch(launchOf(runtime.environment));
-  t.after(() => instance.terminate());
+  stopAfter(t, () => instance.terminate());
   await gate.asked;
   await delay(SETTLE_MS);
   assert.equal(runtime.spawned(), false);
@@ -404,7 +408,7 @@ test("a stop during the cache volume command spawns no container and ends the in
     () => group,
   );
   const instance = f.driver.launch(launchOf(runtime.environment));
-  t.after(() => instance.terminate());
+  stopAfter(t, () => instance.terminate());
   await asked.promise;
   instance.control(SlotControl.Stop);
   runtime.release();
@@ -617,7 +621,7 @@ test("the container and the volume carry the instance name", async (t) => {
   const runtime = framedRuntime(t);
   const f = hostWith(true, () => ok());
   const instance = f.driver.launch(launchOf(runtime.environment));
-  t.after(() => instance.terminate());
+  stopAfter(t, () => instance.terminate());
   await runtime.framesCount(1);
   const name = `${VOLUME_PREFIX}${INSTANCE_NAME}`;
   const lines = runtime.arguments();
@@ -637,7 +641,7 @@ test("an unlisted container instance runs the default image of the driver", asyn
   const runtime = framedRuntime(t);
   const f = hostWith(true, () => ok());
   const instance = f.driver.launch(launchOf(runtime.environment, []));
-  t.after(() => instance.terminate());
+  stopAfter(t, () => instance.terminate());
   await runtime.framesCount(1);
   assert.ok(runtime.arguments().includes("kanthord:test"));
 });
@@ -646,7 +650,7 @@ test("the init frame carries the entries, a bindings frame changes them and a po
   const runtime = framedRuntime(t);
   const first = new MessageChannel();
   const second = new MessageChannel();
-  t.after(() => {
+  stopAfter(t, () => {
     first.port1.close();
     second.port1.close();
   });
@@ -654,7 +658,7 @@ test("the init frame carries the entries, a bindings frame changes them and a po
   const instance = f.driver.launch(
     launchOf(runtime.environment, [entryOf(CLIENT_ID, first.port2)]),
   );
-  t.after(() => instance.terminate());
+  stopAfter(t, () => instance.terminate());
   const [init] = await runtime.framesCount(1);
   assert.deepEqual(init, {
     kind: FrameKind.Init,

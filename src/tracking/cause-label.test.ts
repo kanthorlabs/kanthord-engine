@@ -32,11 +32,13 @@ import {
 import { trackingMigrations } from "./migrations.ts";
 import { TrackingService } from "./service.ts";
 import { insertTrace, listSpans, readSpan, readText } from "./trace-store.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const ROOT_SPAN_ID = "0123456789abcdef";
 const OPERATION = "tracking.cause_label";
 const SUFFIX = ".cause_label";
 const TRACE_ID = "a".repeat(32);
+const EXECUTION_ID = "execution_01JZ8R2B3C4D5E6F7G8H9J0K1M";
 
 const ROOT_CAUSE = {
   [CauseAttribute.Category]: "model",
@@ -189,7 +191,7 @@ const SECOND_BODY: CauseLabelBody = {
 
 function endedTrace(t: TestContext, state = "ok"): Store {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: TRACKING_SERVICE_NAME, migrations: trackingMigrations },
   ]);
@@ -340,12 +342,71 @@ test("a subcategory outside its category answers tracking.cause.subcategory_mism
   assert.equal(spanCount(store), NO_ROWS);
 });
 
-test("a label leaves the trace row unchanged", (t) => {
+function labelThroughService(store: Store, body: CauseLabelBody, now: number) {
+  const service = new TrackingService({
+    store,
+    retentionDays: 30,
+    isHostedWorker: () => false,
+    now: () => now,
+    executions: { traceOf: () => undefined },
+  });
+  const caller: CallerContext = {
+    identity: {
+      kind: IdentityKind.Human,
+      accountId: USERNAME,
+      name: "Ulrich",
+      jti: "jti",
+    },
+    context: background,
+    requestId: "request",
+    commit: (write) => store.transaction(write),
+  };
+  return service.causeLabel(TRACE_ID, body, caller);
+}
+
+test("a label leaves the trace row of a trace without an execution unchanged", (t) => {
   const store = endedTrace(t);
   const before = traceRow(store);
-  label(store, FIRST_BODY, FIRST_LABEL_TIME);
-  label(store, SECOND_BODY, SECOND_LABEL_TIME);
+  labelThroughService(store, FIRST_BODY, FIRST_LABEL_TIME);
+  labelThroughService(store, SECOND_BODY, SECOND_LABEL_TIME);
   assert.deepEqual(traceRow(store), before);
+});
+
+test("a label writes the cause columns of an execution trace and moves its rollup", (t) => {
+  const store = endedTrace(t);
+  store.database
+    .prepare(
+      "UPDATE tracking_trace SET execution_id = ?, kind = 'steps', root_end = 'finished', stop_reason = 'no_progress', cause_category = 'model', cause_detail = 'no_progress', cause_assigner = 'rule' WHERE trace_id = ?",
+    )
+    .run(EXECUTION_ID, TRACE_ID);
+  labelThroughService(store, FIRST_BODY, FIRST_LABEL_TIME);
+  assert.deepEqual(
+    {
+      ...store.database
+        .prepare(
+          "SELECT cause_category, cause_detail, cause_assigner FROM tracking_trace WHERE trace_id = ?",
+        )
+        .get(TRACE_ID),
+    },
+    {
+      cause_category: "prompt",
+      cause_detail: "context_missing",
+      cause_assigner: "human",
+    },
+  );
+  const rows = store.database
+    .prepare(
+      "SELECT cause_category, cause_assigner, executions FROM tracking_flow_rollup ORDER BY grain",
+    )
+    .all();
+  assert.deepEqual(
+    rows.map((row) => ({ ...row })),
+    ["day", "hour"].map(() => ({
+      cause_category: "prompt",
+      cause_assigner: "human",
+      executions: 1,
+    })),
+  );
 });
 
 test("tracking.text.get answers the reason of the last label", (t) => {
@@ -353,6 +414,7 @@ test("tracking.text.get answers the reason of the last label", (t) => {
   const service = new TrackingService({
     store,
     retentionDays: 30,
+    isHostedWorker: () => false,
     executions: { traceOf: () => undefined },
   });
   const caller: CallerContext = {

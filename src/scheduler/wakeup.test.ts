@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { setImmediate as turn } from "node:timers/promises";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { WaitingPulls } from "./wakeup.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const WAIT_MS = 1000;
 const NO_WAITERS = 0;
@@ -13,7 +14,7 @@ const SECOND_PULLER_ID = "second";
 
 test("project wakeups coalesce and preserve waiter arrival order", async (t) => {
   const waiting = new WaitingPulls();
-  t.after(() => waiting.wakeAll());
+  stopAfter(t, () => waiting.wakeAll());
   const order: string[] = [];
   const first = waiting
     .park(PROJECT, FIRST_PULLER_ID, WAIT_MS, background)

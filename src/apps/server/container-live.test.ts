@@ -12,7 +12,7 @@ import { deriveClientSecret } from "../../gateway/auth/jwt.ts";
 import { isNumber } from "../../kernel/values.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { createIdentity } from "../../kernel/identity.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import { projectOperations } from "../../project/contract.ts";
 import {
   BindingEntryState,
@@ -180,7 +180,7 @@ async function liveDriver(t: TestContext) {
   const status = await driver.check();
   assert.ok(status.available, JSON.stringify(status));
   const runtime = status.container_runtime!;
-  t.after(() => removeOwned(runtime, driver.owner));
+  stopAfter(t, () => removeOwned(runtime, driver.owner));
   return { driver, runtime, masterKey };
 }
 
@@ -216,16 +216,15 @@ function launchEntry(
 }
 
 async function containerPool(t: TestContext) {
-  const stateDirectory = temporary(t);
   const setup = await workerAcceptance(t, true, {
-    stateDirectory,
     containerImage: IMAGE_NAME,
   });
+  const stateDirectory = setup.fixture.stateDirectory;
   const status = await setup.fixture.containerDriver.check();
   assert.ok(status.available, JSON.stringify(status));
   const runtime = status.container_runtime!;
   const owner = containerOwner(setup.fixture.masterKey);
-  t.after(async () => {
+  stopAfter(t, async () => {
     await setup.fixture.workerPool.stop();
     await removeOwned(runtime, owner);
   });
@@ -468,7 +467,7 @@ test(
     const slot = poolInstance("boxed-live");
     const root = temporary(t);
     const { port1, port2 } = new MessageChannel();
-    t.after(() => port1.close());
+    stopAfter(t, () => port1.close());
     const instance = driver.launch({
       instance: slot,
       entries: [launchEntry(masterKey, slot, port2)],
@@ -523,7 +522,7 @@ test(
       ["--input-type=module", "--eval", program],
       { stdio: ["ignore", "ignore", "inherit"] },
     );
-    t.after(() => launcher.kill("SIGKILL"));
+    stopAfter(t, () => launcher.kill("SIGKILL"));
     const name = slotName(slot.name);
     await waitUntil(() => running(runtime, name), Boolean, t.signal);
     launcher.kill("SIGKILL");
@@ -541,7 +540,7 @@ test(
     const suffix = randomBytes(4).toString("hex");
     const own = `kanthord_slot_test_own_${suffix}`;
     const other = `kanthord_slot_test_other_${suffix}`;
-    t.after(async () => {
+    stopAfter(t, async () => {
       await runtimeCall(runtime, ["rm", "--force", other]);
       await runtimeCall(runtime, ["volume", "rm", "--force", own, other]);
     });

@@ -1,26 +1,40 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { spawnSync } from "node:child_process";
+import { existsSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import type { z } from "zod";
 import { directClient } from "../../gateway/index.ts";
+import { HttpStatus } from "../../kernel/http.ts";
 import {
   type Operation,
   type OperationResult,
   OperationResultType,
 } from "../../kernel/operation.ts";
 import {
+  hostEnvironment,
+  stopAfter,
+  temporary,
+} from "../../kernel/test-support.ts";
+import {
   EnvironmentStatus,
   projectOperations,
 } from "../../project/contract.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
+import { GITHUB_API_VERSION } from "../../repository/github.ts";
 import {
   FAKE_GITHUB_HOST_KEY_FINGERPRINT,
   FAKE_SSH_CREDENTIAL,
   FAKE_SSH_HOST,
+  fakeGitHub,
   gatewayFixture,
 } from "./test-support.ts";
 
 const FIRST_VERSION = 1;
+const CHILD_TIMEOUT_MS = 30000;
+const TEST_FAILURE = 1;
+const DIRECTORY_LINE = /^directory=(.+)$/m;
 const ONBOARDING_POLLS = 200;
 const ONBOARDING_POLL_MS = 25;
 
@@ -122,4 +136,71 @@ test("the gateway fixture onboards a repository binding with no environment to n
   assert.ok(state);
   assert.equal(state.reason, null);
   assert.equal(state.status, EnvironmentStatus.None);
+});
+
+function failedChildTest(t: TestContext, body: string): string {
+  const file = join(temporary(t), "stop.test.mjs");
+  const support = (path: string) =>
+    JSON.stringify(new URL(path, import.meta.url).href);
+  writeFileSync(
+    file,
+    `import { test } from "node:test";
+import { fakeGitHub, fakeS3 } from ${support("./test-support.ts")};
+import { stopAfter, temporary } from ${support("../../kernel/test-support.ts")};
+test("stops", async (t) => {
+${body}
+});
+`,
+  );
+  const env = hostEnvironment();
+  delete env.NODE_TEST_CONTEXT;
+  const child = spawnSync(
+    process.execPath,
+    ["--test", "--test-reporter=spec", file],
+    { env, encoding: "utf8", timeout: CHILD_TIMEOUT_MS },
+  );
+  assert.equal(child.error, undefined, child.stdout);
+  assert.equal(child.status, TEST_FAILURE, child.stdout);
+  return child.stdout;
+}
+
+test("a fixture stop that throws leaves every later stop and directory removal to run", (t) => {
+  const output = failedChildTest(
+    t,
+    `  const github = await fakeGitHub(t);
+  await fetch(github.endpoint).catch(() => {});
+  await fakeS3(t);
+  stopAfter(t, () => {
+    throw new Error("Second stop failed.");
+  });
+  console.log("directory=" + temporary(t));`,
+  );
+  assert.match(output, /Test stops failed\./);
+  assert.match(output, /Fake GitHub failed\./);
+  assert.match(output, /Second stop failed\./);
+  const directory = DIRECTORY_LINE.exec(output)?.[1];
+  assert.ok(directory, output);
+  assert.equal(existsSync(directory), false);
+});
+
+test("a single stop that throws fails the test with its own error", (t) => {
+  const output = failedChildTest(
+    t,
+    `  stopAfter(t, () => {
+    throw new Error("Only stop failed.");
+  });`,
+  );
+  assert.match(output, /Error: Only stop failed\./);
+  assert.doesNotMatch(output, /Test stops failed\./);
+});
+
+test("a fake GitHub that stops last answers a request in a stop registered after it", async (t) => {
+  const github = await fakeGitHub(t, { stopLast: true });
+  stopAfter(t, async () => {
+    const response = await fetch(`${github.endpoint}/repos/owner/repo`, {
+      headers: { "x-github-api-version": GITHUB_API_VERSION },
+    });
+    assert.equal(response.status, HttpStatus.OK);
+    await response.text();
+  });
 });

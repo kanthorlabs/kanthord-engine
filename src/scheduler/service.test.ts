@@ -34,6 +34,7 @@ import {
   CauseSubcategory,
 } from "../kernel/cause.ts";
 import { insertExecution, readExecution } from "./execution-store.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const EXECUTION_ENDED = "executionEnded";
 const EXECUTION_TRANSITION = "executionTransition";
@@ -140,7 +141,7 @@ function invokePeek(
 
 test("WorkQueue insert adds a row and enforces the node_id unique index", (t) => {
   const store = makeStore();
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const scheduler = schedulerHarness(t, { store }).service;
   const nodeId = createIdentity(NODE_PREFIX);
   const projectId = createIdentity(PROJECT_PREFIX);
@@ -169,7 +170,7 @@ test("WorkQueue insert adds a row and enforces the node_id unique index", (t) =>
 
 test("WorkQueue delete removes a row and is safe on a missing node_id", (t) => {
   const store = makeStore();
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const scheduler = schedulerHarness(t, { store }).service;
   const nodeId = createIdentity(NODE_PREFIX);
   store.transaction((tx) =>
@@ -199,7 +200,7 @@ test("WorkQueue delete removes a row and is safe on a missing node_id", (t) => {
 
 test("WorkQueue priorityUpdate changes priority and preserves id", (t) => {
   const store = makeStore();
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const scheduler = schedulerHarness(t, { store }).service;
   const nodeId = createIdentity(NODE_PREFIX);
   store.transaction((tx) =>
@@ -226,7 +227,7 @@ test("WorkQueue priorityUpdate changes priority and preserves id", (t) => {
 
 test("WorkQueue insert of a returning node reuses the identity of the first job of that node", (t) => {
   const store = makeStore();
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const scheduler = schedulerHarness(t, { store }).service;
   const nodeId = createIdentity(NODE_PREFIX);
   const projectId = createIdentity(PROJECT_PREFIX);
@@ -250,7 +251,7 @@ test("WorkQueue insert of a returning node reuses the identity of the first job 
 test("firstQueuedAt answers the first insert, survives a delete and a second insert, and answers null for a node that never queued", (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: FIRST_QUEUED_AT });
   const store = makeStore();
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const scheduler = schedulerHarness(t, { store }).service;
   const nodeId = createIdentity(NODE_PREFIX);
   const projectId = createIdentity(PROJECT_PREFIX);
@@ -273,7 +274,7 @@ test("firstQueuedAt answers the first insert, survives a delete and a second ins
 test("a returning job keeps the identity of its first job and carries the time of its own insert", (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: FIRST_QUEUED_AT });
   const store = makeStore();
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const scheduler = schedulerHarness(t, { store }).service;
   const nodeId = createIdentity(NODE_PREFIX);
   const projectId = createIdentity(PROJECT_PREFIX);
@@ -298,7 +299,7 @@ test("a returning job keeps the identity of its first job and carries the time o
 
 test("queue list handler pages the work queue order with no duplicate and no omission", (t) => {
   const store = makeStore();
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const scheduler = schedulerHarness(t, { store }).service;
   const projectId = createIdentity(PROJECT_PREFIX);
   const otherProjectId = createIdentity(PROJECT_PREFIX);
@@ -352,7 +353,7 @@ test("queue list handler pages the work queue order with no duplicate and no omi
 
 test("queue list handler continues after a cursor whose job left the queue", (t) => {
   const store = makeStore();
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const scheduler = schedulerHarness(t, { store }).service;
   const projectId = createIdentity(PROJECT_PREFIX);
   store.transaction((tx) => {
@@ -385,7 +386,7 @@ test("queue list handler continues after a cursor whose job left the queue", (t)
 
 test("queue list handler rejects an invalid cursor", (t) => {
   const store = makeStore();
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const scheduler = schedulerHarness(t, { store }).service;
   const projectId = createIdentity(PROJECT_PREFIX);
   const registry = new OperationRegistry();
@@ -420,7 +421,7 @@ test("queue list handler rejects an invalid cursor", (t) => {
 
 test("queue peek handler returns the first job by priority desc then id asc, or null", (t) => {
   const store = makeStore();
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const scheduler = schedulerHarness(t, { store }).service;
   const projectId = createIdentity(PROJECT_PREFIX);
   store.transaction((tx) =>

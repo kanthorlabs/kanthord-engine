@@ -28,6 +28,7 @@ import {
   type TraceCursor,
   type TraceListQuery,
 } from "./trace-list.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 interface Fixture {
   n: number;
@@ -163,7 +164,7 @@ function insert(store: Store, fixture: Fixture): void {
 
 function seeded(t: TestContext): Store {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: TRACKING_SERVICE_NAME, migrations: trackingMigrations },
   ]);
@@ -583,6 +584,7 @@ test("after a label the list item answers the label cause and the span list answ
   const service = new TrackingService({
     store,
     retentionDays: 30,
+    isHostedWorker: () => false,
     executions: { traceOf: () => undefined },
   });
   const caller: CallerContext = {

@@ -26,7 +26,11 @@ import {
   type OperationResult,
   OperationResultType,
 } from "../../kernel/operation.ts";
-import { temporary, testContext } from "../../kernel/test-support.ts";
+import {
+  stopAfter,
+  temporary,
+  testContext,
+} from "../../kernel/test-support.ts";
 import {
   type ExecutionRecord,
   WorkPullKind,
@@ -273,7 +277,7 @@ async function setup(t: TestContext) {
   ]);
   assert.ok(ssh.revisions[0]);
   const keys = deriveHandoverKeys(general.client_secret);
-  t.after(() => {
+  stopAfter(t, () => {
     keys.handover.fill(0);
     keys.report.fill(0);
   });

@@ -22,7 +22,7 @@ import {
 } from "../agent/contract.ts";
 import { getAgentDeclaration } from "../agent/catalog.ts";
 import { resolveAgentPrompt } from "../agent/prompt-files.ts";
-import { temporary } from "../kernel/test-support.ts";
+import { stopAfter, temporary } from "../kernel/test-support.ts";
 import {
   framing,
   PromptConsumer,
@@ -109,7 +109,7 @@ const promptParts = [
 
 test("setup answers the system and agent prompt after its single snapshot and supports a pinned entry", async (t) => {
   const store = new Store(":memory:");
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const setup = anthropicSetup();
   const agent = setup.agents[0]!;
   const entry = {
@@ -490,7 +490,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
 
 test("setup claims no environment for a container slot whose worker binding names none", async (t) => {
   const store = new Store(":memory:");
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const setup = anthropicSetup();
   const agent = setup.agents[0]!;
   const claimed: string[][] = [];
@@ -584,7 +584,7 @@ test("setup claims no environment for a container slot whose worker binding name
 
 test("one binding that lists a server and a container instance claims the environment for the container instance only", async (t) => {
   const store = new Store(":memory:");
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const setup = anthropicSetup();
   const agent = setup.agents[0]!;
   const claimed: string[][] = [];
@@ -692,7 +692,7 @@ test("one binding that lists a server and a container instance claims the enviro
 
 test("setup of a container worker binding with an environment claims inside a real transaction and its compute reads the binding facts", async (t) => {
   const store = new Store(":memory:");
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const setup = anthropicSetup();
   const agent = setup.agents[0]!;
   const claim = {
@@ -714,7 +714,7 @@ test("setup of a container worker binding with an environment claims inside a re
     },
     logger: { error: (failure: unknown) => failures.push(failure) },
   } as unknown as OnboardingDependencies);
-  t.after(() => onboarding.stop());
+  stopAfter(t, () => onboarding.stop());
   const bindingId = createIdentity("binding");
   const answer = await executionSetup(
     {
@@ -814,7 +814,7 @@ async function twoAgentAnswer(
   promptTelemetry: Dependencies["promptTelemetry"],
 ) {
   const store = new Store(":memory:");
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   const setup = anthropicSetup();
   const enablementIds: Record<string, string> = {
     "swe@1": createIdentity("agent_enablement"),
@@ -1039,7 +1039,7 @@ test("setup reports the prompt facts of each native agent once and survives a fa
 
 async function repositorySetup(t: TestContext, address: string, pin: boolean) {
   const store = new Store(":memory:");
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([{ service: "repository", migrations: repositoryMigrations }]);
   if (pin)
     store.database

@@ -8,7 +8,7 @@ import {
   type ResourceObserver,
   ResourceStatus,
 } from "../../kernel/health.ts";
-import { temporary } from "../../kernel/test-support.ts";
+import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import { Connection, llmOperations } from "../../llm/contract.ts";
 import { InstancePlacement, workerOperations } from "../../worker/contract.ts";
 import { Worker } from "../worker/index.ts";
@@ -110,7 +110,7 @@ test("a live worker instance checks its own bad key and the instance page answer
   });
   const context = new CancellationContext();
   const running = instance.run(context);
-  t.after(async () => {
+  stopAfter(t, async () => {
     context.cancel();
     await running;
   });

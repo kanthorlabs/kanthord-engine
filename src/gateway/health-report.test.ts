@@ -29,6 +29,7 @@ import {
   OWNER_WORKER,
 } from "./contract.ts";
 import { collectInventories, resourceHealthReport } from "./health-report.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const LIMITS = { maxConcurrent: 3, checkDeadlineMs: 500, reportBudgetMs: 2000 };
 const EMPTY_COUNT = 0;
@@ -99,7 +100,7 @@ function fixture(t: TestContext, entries: InventorySnapshot["entries"] = []) {
     collections++;
     return { entries, missing_inventories: [] };
   };
-  t.after(() => {
+  stopAfter(t, () => {
     context.cancel();
     store.close();
   });

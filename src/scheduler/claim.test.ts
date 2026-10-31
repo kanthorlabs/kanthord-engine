@@ -34,6 +34,7 @@ import {
   Onboarding,
   type OnboardingDependencies,
 } from "../project/onboarding.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const WALL_TIME = 7200000;
 const RESERVE_MS = 600000;
@@ -803,7 +804,7 @@ test("a claim whose repository group has no record answers no claim and starts o
     },
     logger: { error: (failure: unknown) => failures.push(failure) },
   } as unknown as OnboardingDependencies);
-  t.after(() => onboarding.stop());
+  stopAfter(t, () => onboarding.stop());
   h.dependencies.environments.environmentsClaimable = (projectId, ids) =>
     onboarding.environmentsClaimable(projectId, ids);
   const result = h.claim();

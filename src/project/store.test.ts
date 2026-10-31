@@ -85,6 +85,7 @@ import {
   resumeProject,
   writeBindingSet,
 } from "./store.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const EMPTY_BINDING_COUNT = 0;
 const INITIAL_BINDING_VERSION = 1;
@@ -154,7 +155,7 @@ const encode = (value: string) =>
 
 function fixture(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: PROJECT_SERVICE_NAME, migrations: projectMigrations },
   ]);

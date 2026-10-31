@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
+  CauseAssigner,
   causeCategorySchema,
   causeSubcategorySchema,
   effectiveCauseSchema,
@@ -456,6 +457,82 @@ export const ExecutionKind = {
 } as const;
 export const executionKindSchema = z.enum(ExecutionKind);
 export type ExecutionKind = z.infer<typeof executionKindSchema>;
+export const FlowGrain = { Hour: "hour", Day: "day" } as const;
+export const flowGrainSchema = z.enum(FlowGrain);
+export type FlowGrain = z.infer<typeof flowGrainSchema>;
+export const FlowKind = {
+  Steps: "steps",
+  Evaluation: "evaluation",
+  None: "",
+} as const;
+export const flowKindSchema = z.enum(FlowKind);
+export type FlowKind = z.infer<typeof flowKindSchema>;
+export const FlowStage = {
+  Queued: "queued",
+  Executing: "executing",
+  Verification: "verification",
+  ReleaseGate: "release_gate",
+  Evaluation: "evaluation",
+  Outcome: "outcome",
+} as const;
+export const flowStageSchema = z.enum(FlowStage);
+export type FlowStage = z.infer<typeof flowStageSchema>;
+export const FlowExit = {
+  Open: "open",
+  Revoked: "revoked",
+  Paused: "paused",
+  Completed: "completed",
+  External: "external",
+  Rework: "rework",
+  Blocked: "blocked",
+  Budget: "budget",
+  Stopped: "stopped",
+  FurtherWork: "further_work",
+  HandedOn: "handed_on",
+  Unknown: "unknown",
+} as const;
+export const flowExitSchema = z.enum(FlowExit);
+export type FlowExit = z.infer<typeof flowExitSchema>;
+export const FlowMeasure = {
+  QueueWait: "queue_wait",
+  ExecutionTime: "execution_time",
+  VerificationRunTime: "verification_run_time",
+  GateRunTime: "gate_run_time",
+  ReviewWait: "review_wait",
+  EvaluationTime: "evaluation_time",
+  LeadTime: "lead_time",
+} as const;
+export const flowMeasureSchema = z.enum(FlowMeasure);
+export type FlowMeasure = z.infer<typeof flowMeasureSchema>;
+export const FlowStopReason = {
+  OperationFailed: "operation_failed",
+  JudgementInvalid: "judgement_invalid",
+  ReportAbsent: "report_absent",
+  ActionUnsettled: "action_unsettled",
+  AssessmentAbsent: "assessment_absent",
+  ProviderFailed: "provider_failed",
+  NoProgress: "no_progress",
+  EnvironmentFailed: "environment_failed",
+  Lost: "lost",
+  BudgetEnd: "budget_end",
+} as const;
+export const flowStopReasonSchema = z.enum(FlowStopReason);
+export type FlowStopReason = z.infer<typeof flowStopReasonSchema>;
+export const FlowEvaluationStage = {
+  Setup: "setup",
+  Verification: "verification",
+  Affected: "affected",
+  Judgement: "judgement",
+} as const;
+export const flowEvaluationStageSchema = z.enum(FlowEvaluationStage);
+export type FlowEvaluationStage = z.infer<typeof flowEvaluationStageSchema>;
+export const FlowGateAffected = {
+  Passed: "passed",
+  BaseRed: "base_red",
+  Absent: "absent",
+} as const;
+export const flowGateAffectedSchema = z.enum(FlowGateAffected);
+export type FlowGateAffected = z.infer<typeof flowGateAffectedSchema>;
 export interface ExecutionOpening {
   kind: ExecutionKind;
   worker_name: string;
@@ -550,6 +627,18 @@ export const analyticsDurationQuerySchema = z
 export type AnalyticsDurationQuery = z.infer<
   typeof analyticsDurationQuerySchema
 >;
+export const FlowCompare = { Previous: "previous", None: "none" } as const;
+export const flowCompareSchema = z.enum(FlowCompare);
+export type FlowCompare = z.infer<typeof flowCompareSchema>;
+export const analyticsFlowQuerySchema = z.strictObject({
+  from: nonNegativeInteger.optional(),
+  to: nonNegativeInteger.optional(),
+  bucket: flowGrainSchema.optional(),
+  project_id: identitySchema("project").optional(),
+  worker_name: boundedName.optional(),
+  compare: flowCompareSchema.default(FlowCompare.Previous),
+});
+export type AnalyticsFlowQuery = z.infer<typeof analyticsFlowQuerySchema>;
 const analyticsItemShape = {
   key: z.string().nullable(),
   bucket_start: z.int().nullable(),
@@ -583,6 +672,180 @@ export const analyticsFloorShareItemSchema = z.strictObject({
   count: z.int(),
   share: z.number(),
 });
+
+export const FLOW_PERCENTILE_METHOD = "log_bins_4";
+export const FlowDimensionBy = {
+  ProjectId: "project_id",
+  WorkerName: "worker_name",
+} as const;
+export const flowDimensionBySchema = z.enum(FlowDimensionBy);
+export type FlowDimensionBy = z.infer<typeof flowDimensionBySchema>;
+export const FlowCauseRowAssigner = { ...CauseAssigner, None: "" } as const;
+export const flowCauseRowAssignerSchema = z.enum(FlowCauseRowAssigner);
+export type FlowCauseRowAssigner = z.infer<typeof flowCauseRowAssignerSchema>;
+
+export const percentilesSchema = z.strictObject({
+  count: z.int(),
+  p50: z.number().nullable(),
+  p90: z.number().nullable(),
+  p99: z.number().nullable(),
+});
+export type Percentiles = z.infer<typeof percentilesSchema>;
+export const stageWindowSchema = z.strictObject({
+  entered: z.int(),
+  unobserved: z.int(),
+  open: z.int(),
+  exits: z.partialRecord(
+    flowExitSchema,
+    z.strictObject({ count: z.int(), cost_usd: z.number() }),
+  ),
+  time: percentilesSchema.nullable(),
+  signals: z.record(z.string(), z.number()),
+});
+export type StageWindow = z.infer<typeof stageWindowSchema>;
+export const stageSeriesSchema = z.strictObject({
+  entered: z.array(z.int()),
+  open: z.array(z.int()),
+  leaked: z.array(z.int()),
+  loops: z.array(z.int()),
+  time_p90: z.array(z.number().nullable()),
+  signals: z.record(z.string(), z.array(z.number().nullable())),
+  changed_after_end: z.array(z.boolean()),
+});
+export type StageSeries = z.infer<typeof stageSeriesSchema>;
+export const stageDimensionSchema = z.strictObject({
+  by: flowDimensionBySchema,
+  key: z.string(),
+  entered: z.int(),
+  leaked: z.int(),
+  loops: z.int(),
+  time: percentilesSchema.nullable(),
+  signals: z.record(z.string(), z.number()),
+});
+export type StageDimension = z.infer<typeof stageDimensionSchema>;
+export const flowStageResultSchema = z.strictObject({
+  stage: flowStageSchema,
+  current: stageWindowSchema,
+  previous: stageWindowSchema.nullable(),
+  series: stageSeriesSchema,
+  dimensions: z.array(stageDimensionSchema),
+  previous_bucket_median: z.record(z.string(), z.number()).nullable(),
+});
+export type FlowStageResult = z.infer<typeof flowStageResultSchema>;
+export const costWindowSchema = z.strictObject({
+  total_usd: z.number(),
+  success: z.int(),
+  per_success_usd: z.number().nullable(),
+  leaked_usd: z.number(),
+  rejected_review_usd: z.number(),
+});
+export type CostWindow = z.infer<typeof costWindowSchema>;
+export const causeRowSchema = z.strictObject({
+  stage: flowStageSchema,
+  exit: flowExitSchema,
+  category: z.string(),
+  detail: z.string(),
+  assigner: flowCauseRowAssignerSchema,
+  count: z.int(),
+  cost_usd: z.number(),
+});
+export type CauseRow = z.infer<typeof causeRowSchema>;
+export const usageTotalsSchema = z.strictObject({
+  turn_count: z.int(),
+  input_tokens: z.number(),
+  output_tokens: z.number(),
+  cache_read_tokens: z.number(),
+  cost_usd: z.number(),
+  unpriced_tokens: z.number(),
+});
+export type UsageTotals = z.infer<typeof usageTotalsSchema>;
+export const usageRowSchema = usageTotalsSchema.extend({
+  key: z.string(),
+  success: z.int().optional(),
+  previous_same_hour: z.strictObject({ cost_usd: z.number() }).nullable(),
+  series: z.strictObject({
+    cost_usd: z.array(z.number()),
+    cache_hit: z.array(z.number().nullable()),
+  }),
+});
+export type UsageRow = z.infer<typeof usageRowSchema>;
+export const flowReadSchema = z.strictObject({
+  window: z.strictObject({
+    from: z.int(),
+    to: z.int(),
+    now: z.int(),
+    bucket: flowGrainSchema,
+    buckets: z.array(z.int()),
+  }),
+  previous_window: z.strictObject({ from: z.int(), to: z.int() }).nullable(),
+  percentile_method: z.literal(FLOW_PERCENTILE_METHOD),
+  stages: z.array(flowStageResultSchema),
+  cost: z.strictObject({
+    current: costWindowSchema,
+    previous: costWindowSchema.nullable(),
+    previous_same_hour: z
+      .strictObject({
+        total_usd: z.number(),
+        success: z.int(),
+        rejected_review_usd: z.number(),
+      })
+      .nullable(),
+    series: z.strictObject({
+      total_usd: z.array(z.number()),
+      leaked_usd: z.array(z.number()),
+      rejected_review_usd: z.array(z.number()),
+      success: z.array(z.int()),
+    }),
+  }),
+  causes: z.strictObject({
+    rows: z.array(causeRowSchema),
+    previous_rows: z
+      .array(
+        z.strictObject({
+          stage: flowStageSchema,
+          exit: flowExitSchema,
+          category: z.string(),
+          count: z.int(),
+        }),
+      )
+      .nullable(),
+    previous_unattributed_share: z.number().nullable(),
+    unattributed_share_series: z.array(z.number().nullable()),
+    truncated: z.boolean(),
+  }),
+  stop_reasons: z.strictObject({
+    order: z.array(flowStopReasonSchema),
+    rows: z.record(flowStopReasonSchema, z.array(z.int())),
+    previous_totals: z.record(flowStopReasonSchema, z.int()).nullable(),
+  }),
+  usage: z.strictObject({
+    current: usageTotalsSchema,
+    previous: usageTotalsSchema.nullable(),
+    previous_same_hour: usageTotalsSchema.nullable(),
+    series: z.strictObject({
+      total_tokens: z.array(z.number()),
+      cache_hit: z.array(z.number().nullable()),
+      unpriced_tokens: z.array(z.number()),
+    }),
+    by: z.strictObject({
+      model: z.array(usageRowSchema),
+      worker_name: z.array(usageRowSchema),
+      project_id: z.array(usageRowSchema),
+    }),
+  }),
+  completeness: z.strictObject({
+    executions: z.int(),
+    open: z.int(),
+    no_root: z.int(),
+    exit_unknown: z.int(),
+    awaiting_ingestion: z.array(
+      z.strictObject({ worker_name: z.string(), count: z.int() }),
+    ),
+    late_records: z.int(),
+  }),
+  rebuild: z.strictObject({ pending_until: z.int() }).nullable(),
+});
+export type FlowRead = z.infer<typeof flowReadSchema>;
 
 export const trackingOperations = {
   telemetryWrite: {
@@ -819,6 +1082,27 @@ export const trackingOperations = {
       ),
       truncated: z.boolean(),
     }),
+  },
+  analyticsFlow: {
+    id: "tracking.analytics.flow",
+    service: TRACKING_SERVICE_NAME,
+    method: HttpMethod.Get,
+    path: "/api/tracking/analytics/flow",
+    access: AccessPolicy.Human,
+    store: StoreName.Tracking,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: TRACKING_TIMEOUT_MS,
+    mutation: false,
+    body: false,
+    status: HttpStatus.OK,
+    description:
+      "Read the lifecycle flow, the cost and token scorecard, the causes and the stop reasons of the executions claimed in a time range. The range is at most 31 days. The read sums the flow rollups and answers raw numbers.",
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: analyticsFlowQuerySchema,
+      body: z.null(),
+    }),
+    output: flowReadSchema,
   },
   textGet: {
     id: "tracking.text.get",

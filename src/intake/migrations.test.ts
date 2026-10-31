@@ -11,6 +11,7 @@ import {
   OutboundRequestState,
 } from "./contract.ts";
 import { intakeMigrations } from "./migrations.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const INBOUND_TABLE = "intake_inbound";
 const INBOUND_EVENT_TABLE = "intake_inbound_event";
@@ -33,7 +34,7 @@ const FOREIGN_KEY_CONSTRAINT = /FOREIGN KEY constraint failed/;
 
 function migratedStore(t: TestContext): Store {
   const store = new Store(IN_MEMORY_DATABASE);
-  t.after(() => store.close());
+  stopAfter(t, () => store.close());
   store.migrate([
     { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
   ]);

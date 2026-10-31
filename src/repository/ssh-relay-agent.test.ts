@@ -7,7 +7,7 @@ import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { promisify } from "node:util";
 import { background } from "../kernel/context.ts";
-import { temporary } from "../kernel/test-support.ts";
+import { stopAfter, temporary } from "../kernel/test-support.ts";
 import type { SshRelayAccess } from "./contract.ts";
 import {
   generateSshKey,
@@ -116,7 +116,7 @@ class AgentClient {
       socket.once("connect", resolve);
       socket.once("error", reject);
     });
-    t.after(() => socket.destroy());
+    stopAfter(t, () => socket.destroy());
     return new AgentClient(socket);
   }
   writeRaw(bytes: Buffer): void {
@@ -167,7 +167,7 @@ function signatureOf(reply: Buffer): Buffer {
 async function served(t: TestContext, access: SshRelayAccess) {
   const path = join(temporary(t), SSH_AGENT_SOCKET);
   const agent = await serveRelayAgent(path, access, background);
-  t.after(() => agent.close());
+  stopAfter(t, () => agent.close());
   return { path, agent };
 }
 

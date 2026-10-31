@@ -18,6 +18,7 @@ import {
   type S3Location,
   S3Platform,
 } from "./s3.ts";
+import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const ACCESS_KEY_ID = "test_private-s3-access-id";
 const SECRET = "test_private-s3-secret-access-key";
@@ -58,7 +59,7 @@ async function store(t: TestContext, handler: Handler): Promise<Store> {
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
-  t.after(() => {
+  stopAfter(t, () => {
     server.closeAllConnections();
     server.close();
   });
