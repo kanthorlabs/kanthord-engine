@@ -25,6 +25,7 @@ import type {
 import {
   type Healthcheck,
   HealthStatus,
+  lifecycle,
   type Service,
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
@@ -87,6 +88,7 @@ import { executionContentBound, readContent } from "./evidence-content-read.ts";
 import { submitAssessment } from "./assessment-submit.ts";
 import { serverGateFiles } from "./gate-files.ts";
 import { checkNode, resumeDeferredChecks } from "./node-check.ts";
+import { DeferredRounds } from "./deferred-rounds.ts";
 import {
   AdmissionQueue,
   admitDelivery,
@@ -250,6 +252,7 @@ export interface Dependencies {
   acts: ActTelemetry;
   logger: Logger;
   shutdown?: Context;
+  rounds?: DeferredRounds;
   projectPaused(tx: Transaction, projectId: string): boolean;
 }
 
@@ -275,6 +278,7 @@ export class MissionService
     return nodeBranchesOf(...args);
   }
   private readonly shutdown = new CancellationContext();
+  private readonly rounds = new DeferredRounds();
   private startTask?: Promise<Error | null>;
   private stopTask?: Promise<Error | null>;
   private readonly quiesceTask = Promise.resolve(null);
@@ -285,6 +289,7 @@ export class MissionService
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
     dependencies.shutdown = this.shutdown;
+    dependencies.rounds = this.rounds;
     dependencies.health?.register(MISSION_SERVICE_NAME, () =>
       this.healthcheck(),
     );
@@ -1266,13 +1271,19 @@ export class MissionService
   }
 
   quiesce(): Promise<Error | null> {
+    this.rounds.quiesce();
     return this.quiesceTask;
   }
 
+  drain(): Promise<void> {
+    return this.rounds.drain();
+  }
+
   stop(): Promise<Error | null> {
+    void this.quiesce();
     this.shutdown.cancel();
     this.started = false;
-    this.stopTask ??= Promise.resolve(null);
+    this.stopTask ??= lifecycle(() => this.drain());
     return this.stopTask;
   }
 
