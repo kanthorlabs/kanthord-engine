@@ -38,7 +38,7 @@ node scripts/suite-pass.mjs run --job <name> [--write] [--full] --concurrency <n
 - Without `--write`, a dirty or untracked work tree reads no record. The script runs every argument file and writes no record.
 - `--full` runs every argument file and still writes records.
 
-CI runs the `check` job and the `e2e` job through the script with `--write`. `actions/cache/restore` restores the newest record store of the job after `pnpm install --frozen-lockfile`. `actions/cache/save` saves the store after the tests, also when the tests fail. Each job keeps its own store.
+CI runs the `check` job and the `e2e` job through the script with `--write`. `actions/cache/restore` restores the newest record store of the job after `pnpm install --frozen-lockfile`. `actions/cache/save` saves the store after the tests, also when the tests fail. Each job keeps its own store. Each job uploads the store as the artifact `suite-pass-records-<job>-<attempt>`, also when the tests fail. `<attempt>` is the run attempt number. GitHub keeps the artifact for 7 days.
 
 The job summary prints these lines:
 
