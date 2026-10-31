@@ -6,21 +6,28 @@ import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import type { z } from "zod";
 import { directClient } from "../../gateway/index.ts";
+import { HttpStatus } from "../../kernel/http.ts";
 import {
   type Operation,
   type OperationResult,
   OperationResultType,
 } from "../../kernel/operation.ts";
-import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
+import {
+  hostEnvironment,
+  stopAfter,
+  temporary,
+} from "../../kernel/test-support.ts";
 import {
   EnvironmentStatus,
   projectOperations,
 } from "../../project/contract.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
+import { GITHUB_API_VERSION } from "../../repository/github.ts";
 import {
   FAKE_GITHUB_HOST_KEY_FINGERPRINT,
   FAKE_SSH_CREDENTIAL,
   FAKE_SSH_HOST,
+  fakeGitHub,
   gatewayFixture,
 } from "./test-support.ts";
 
@@ -185,4 +192,15 @@ test("a single stop that throws fails the test with its own error", (t) => {
   );
   assert.match(output, /Error: Only stop failed\./);
   assert.doesNotMatch(output, /Test stops failed\./);
+});
+
+test("a fake GitHub that stops last answers a request in a stop registered after it", async (t) => {
+  const github = await fakeGitHub(t, { stopLast: true });
+  stopAfter(t, async () => {
+    const response = await fetch(`${github.endpoint}/repos/owner/repo`, {
+      headers: { "x-github-api-version": GITHUB_API_VERSION },
+    });
+    assert.equal(response.status, HttpStatus.OK);
+    await response.text();
+  });
 });
