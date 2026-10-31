@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   copyFile,
   mkdir,
@@ -39,11 +39,15 @@ const MISSING = ["podman", "mkdir", "which"];
 const RETIRED = "pnpm";
 const SHADOWED = "git";
 const RETIRED_DIRECTORY = "retired";
+const SYSTEM_BIN = "/usr/bin";
+const DARWIN_PLATFORM = "darwin";
+const XCRUN = join(SYSTEM_BIN, "xcrun");
+const MISSING_DEVELOPER_DIR = "/nonexistent";
 
-function run(script, path) {
+function run(script, path, environment = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [script], {
-      env: { ...process.env, PATH: path },
+      env: { ...process.env, ...environment, PATH: path },
       stdio: ["ignore", "ignore", "pipe"],
     });
     let stderr = "";
@@ -215,3 +219,50 @@ test("a directory with the name of a tool in the link directory gives way to the
 
   assert.equal(await readlink(join(directory, SHADOWED)), join(bin, SHADOWED));
 });
+
+test(
+  "the git link on macOS skips the /usr/bin/git trampoline",
+  { skip: process.platform !== DARWIN_PLATFORM },
+  async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "kanthord-test-path-"));
+    stopAfter(t, () => rm(root, { recursive: true, force: true }));
+    const script = join(root, "scripts", "test-path.mjs");
+    await mkdir(join(root, "scripts"));
+    await copyFile(SCRIPT, script);
+    const direct = execFileSync(XCRUN, ["-f", SHADOWED], {
+      encoding: "utf8",
+    }).trim();
+
+    assert.deepEqual(await run(script, SYSTEM_BIN), {
+      status: SUCCESS,
+      stderr: "",
+    });
+
+    const directory = join(root, "node_modules", ".cache", "test-path");
+    assert.notEqual(direct, join(SYSTEM_BIN, SHADOWED));
+    assert.equal(await readlink(join(directory, SHADOWED)), direct);
+  },
+);
+
+test(
+  "the git link on macOS keeps /usr/bin/git when xcrun fails",
+  { skip: process.platform !== DARWIN_PLATFORM },
+  async (t) => {
+    const root = await mkdtemp(join(tmpdir(), "kanthord-test-path-"));
+    stopAfter(t, () => rm(root, { recursive: true, force: true }));
+    const script = join(root, "scripts", "test-path.mjs");
+    await mkdir(join(root, "scripts"));
+    await copyFile(SCRIPT, script);
+
+    assert.deepEqual(
+      await run(script, SYSTEM_BIN, { DEVELOPER_DIR: MISSING_DEVELOPER_DIR }),
+      { status: SUCCESS, stderr: "" },
+    );
+
+    const directory = join(root, "node_modules", ".cache", "test-path");
+    assert.equal(
+      await readlink(join(directory, SHADOWED)),
+      join(SYSTEM_BIN, SHADOWED),
+    );
+  },
+);
