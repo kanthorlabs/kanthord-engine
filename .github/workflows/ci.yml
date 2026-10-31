@@ -53,6 +53,13 @@ jobs:
         with:
           path: node_modules/.cache/suite-pass
           key: suite-pass-check-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: suite-pass-records-check-${{ github.run_attempt }}
+          path: node_modules/.cache/suite-pass/records.json
+          include-hidden-files: true
+          retention-days: 7
 
   e2e:
     runs-on: ubuntu-latest
@@ -89,3 +96,10 @@ jobs:
         with:
           path: node_modules/.cache/suite-pass
           key: suite-pass-e2e-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: suite-pass-records-e2e-${{ github.run_attempt }}
+          path: node_modules/.cache/suite-pass/records.json
+          include-hidden-files: true
+          retention-days: 7
