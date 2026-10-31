@@ -528,6 +528,43 @@ test("a request whose assessment is not a success skips the merge and keeps the 
   assert.equal(mergeCalls, NO_MERGES);
 });
 
+test("a quiescence during a round checks no further request and calls no merge", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setImmediate"] });
+  const advance = async (ms: number) => {
+    t.mock.timers.tick(ms);
+    for (let turn = 0; turn < MICROTASK_TURNS; turn++) await Promise.resolve();
+  };
+  const h = await externalRequestHarness(t, IDENTITY, true);
+  insertNextRequest(h);
+  const policy = h.dependencies.bindings.repositoryPolicyOf;
+  h.dependencies.bindings.repositoryPolicyOf = (tx, bindingId) => ({
+    ...policy(tx, bindingId)!,
+    landing: RepositoryLanding.KanthorD,
+  });
+  const answer =
+    Promise.withResolvers<
+      Awaited<ReturnType<typeof h.dependencies.intakeCheck.check>>
+    >();
+  let checkCalls = 0;
+  let mergeCalls = 0;
+  h.dependencies.intakeCheck.check = async () => {
+    checkCalls++;
+    return answer.promise;
+  };
+  h.dependencies.intakeCheck.merge = async () => {
+    mergeCalls++;
+    return REFUSAL;
+  };
+  scheduleDeferredCheck(h.dependencies, h.node_id, FIRST_ATTEMPT);
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(checkCalls, SINGLE_CALL);
+  await h.service.quiesce();
+  answer.resolve({ end_state: CheckEndState.None, landed_commits: [] });
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(checkCalls, SINGLE_CALL);
+  assert.equal(mergeCalls, NO_MERGES);
+});
+
 const EndedClaim = { Revoked: "revoked", Lost: "lost" } as const;
 
 async function deferredCheckAfter(

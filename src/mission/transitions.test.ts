@@ -4,6 +4,7 @@ import { setImmediate as turn } from "node:timers/promises";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { OperationError } from "../kernel/errors.ts";
+import { cancelled, type Context } from "../kernel/context.ts";
 import { ResultClass } from "../intake/contract.ts";
 import {
   ActorKind,
@@ -22,7 +23,7 @@ import {
   StartPoint,
   TransitionRule,
 } from "./contract.ts";
-import type { Dependencies } from "./service.ts";
+import { type Dependencies, MissionService } from "./service.ts";
 import {
   closeAttempt,
   insertAssessment,
@@ -641,12 +642,13 @@ type MergeInput = Parameters<Dependencies["intakeCheck"]["merge"]>[1];
 type DeferredOptions = {
   landing?: (typeof RepositoryLanding)[keyof typeof RepositoryLanding];
   gateFiles?: { binding_id: string; paths: string[] }[];
-  merge?: (input: MergeInput) => Promise<MergeAnswer>;
+  merge?: (input: MergeInput, context: Context) => Promise<MergeAnswer>;
 };
 
 function deferredFixture(
   t: TestContext,
-  check: CheckAnswer | ((call: number) => Promise<CheckAnswer>),
+  check:
+    CheckAnswer | ((call: number, context: Context) => Promise<CheckAnswer>),
   options: DeferredOptions = {},
 ) {
   let checkCalls = 0;
@@ -661,15 +663,15 @@ function deferredFixture(
         warnings.push({ fields, message }),
     } as unknown as Dependencies["logger"],
     intakeCheck: {
-      check: async () => {
+      check: async (context) => {
         checkCalls++;
-        return check instanceof Function ? check(checkCalls) : check;
+        return check instanceof Function ? check(checkCalls, context) : check;
       },
-      merge: async (_context, input) => {
+      merge: async (context, input) => {
         mergeInputs.push(input);
         return options.merge === undefined
           ? MERGE_ADDRESS
-          : options.merge(input);
+          : options.merge(input, context);
       },
     },
   });
@@ -1128,6 +1130,140 @@ test("no round runs after the Mission Service stops", async (t) => {
   await h.service.stop();
   await advance(DEFERRED_CHECK_RETRY_MS);
   assert.equal(h.checkCalls(), ONE_CALL);
+});
+
+const CHECK_CANCELLED = "Check cancelled.";
+const EXPECTED: CheckAnswer = {
+  end_state: CheckEndState.Expected,
+  landed_commits: [LANDED_COMMIT],
+};
+
+async function cancelledCheck(context: Context): Promise<CheckAnswer> {
+  await cancelled(context.signal);
+  throw new Error(CHECK_CANCELLED);
+}
+
+function requestEndState(h: ReturnType<typeof deferredFixture>) {
+  return h.store.transaction((tx) => readEvidence(tx, h.evidenceId))?.end_state;
+}
+
+test("no round runs after the Mission Service quiesces", async (t) => {
+  const advance = mockTimers(t);
+  const h = deferredFixture(t, PENDING);
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(h.checkCalls(), ONE_CALL);
+  await h.service.quiesce();
+  await advance(DEFERRED_CHECK_RETRY_MS);
+  assert.equal(h.checkCalls(), ONE_CALL);
+});
+
+test("a release after the quiescence runs no round and the next start checks the node", async (t) => {
+  const advance = mockTimers(t);
+  const h = deferredFixture(t, PENDING);
+  await h.service.quiesce();
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(h.checkCalls(), NO_CALLS);
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+  const restarted = new MissionService(h.dependencies);
+  const running = restarted.run();
+  await advance(FIRST_ROUND_DELAY_MS);
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(h.checkCalls(), ONE_CALL);
+  await restarted.stop();
+  assert.equal(await running, null);
+});
+
+test("a release before the quiescence runs no round after the quiescence", async (t) => {
+  const advance = mockTimers(t);
+  const h = deferredFixture(t, PENDING);
+  h.release();
+  await h.service.quiesce();
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(h.checkCalls(), NO_CALLS);
+});
+
+test("the drain joins the round that is in flight at the quiescence", async (t) => {
+  const advance = mockTimers(t);
+  const answer = Promise.withResolvers<CheckAnswer>();
+  const h = deferredFixture(t, () => answer.promise);
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  await h.service.quiesce();
+  let drained = false;
+  const drain = h.service.drain().then(() => {
+    drained = true;
+  });
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(drained, false);
+  answer.resolve(PENDING);
+  await drain;
+  await advance(DEFERRED_CHECK_RETRY_MS);
+  assert.equal(h.checkCalls(), ONE_CALL);
+});
+
+test("a check in flight at the quiescence stores its expected end state before the drain ends", async (t) => {
+  const advance = mockTimers(t);
+  const answer = Promise.withResolvers<CheckAnswer>();
+  const h = deferredFixture(t, () => answer.promise);
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  await h.service.quiesce();
+  const drain = h.service.drain();
+  answer.resolve(EXPECTED);
+  await drain;
+  assert.equal(requestEndState(h), CheckEndState.Expected);
+  assert.equal(h.node().state, NodeState.Completed);
+});
+
+test("the quiescence keeps the context of the check in flight and the stop cancels it", async (t) => {
+  const advance = mockTimers(t);
+  const contexts: Context[] = [];
+  const h = deferredFixture(t, (_call, context) => {
+    contexts.push(context);
+    return cancelledCheck(context);
+  });
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(contexts.length, ONE_CALL);
+  await h.service.quiesce();
+  assert.equal(contexts[FIRST_INDEX]!.signal.aborted, false);
+  await h.service.stop();
+  assert.equal(contexts[FIRST_INDEX]!.signal.aborted, true);
+});
+
+test("the stop cancels the check in flight and joins its round", async (t) => {
+  const advance = mockTimers(t);
+  const h = deferredFixture(t, (_call, context) => cancelledCheck(context));
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  const before = wakes(h.calls);
+  await h.service.stop();
+  assert.equal(wakes(h.calls), before + ONE_CALL);
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+  assert.equal(requestEndState(h), null);
+  await advance(DEFERRED_CHECK_RETRY_MS);
+  assert.equal(h.checkCalls(), ONE_CALL);
+});
+
+test("a merge in flight at the quiescence runs no next round", async (t) => {
+  const advance = mockTimers(t);
+  const address = Promise.withResolvers<MergeAnswer>();
+  const h = deferredFixture(
+    t,
+    async (call) => (call === ONE_CALL ? SETTLED : EXPECTED),
+    { landing: RepositoryLanding.KanthorD, merge: () => address.promise },
+  );
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(h.mergeInputs.length, ONE_CALL);
+  await h.service.quiesce();
+  address.resolve(MERGE_ADDRESS);
+  await advance(FIRST_ROUND_DELAY_MS);
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(h.checkCalls(), ONE_CALL);
+  assert.equal(h.node().state, NodeState.ExternalRequested);
 });
 
 function deferredBranchPushFixture(

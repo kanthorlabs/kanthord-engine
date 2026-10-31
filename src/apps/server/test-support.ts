@@ -763,7 +763,7 @@ export async function gatewayFixture(
         ].map((service) => service.quiesce()),
       );
       failures.push(...quiescence.filter((error) => error !== null));
-      await Promise.all([intake.drain(), gateway.drain()]);
+      await Promise.all([intake.drain(), gateway.drain(), mission.drain()]);
       const invocationError = await invocation.stop();
       if (invocationError) failures.push(invocationError);
       for (const service of [
