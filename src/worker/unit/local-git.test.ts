@@ -42,8 +42,9 @@ const DEFAULT_IDENTITY = "kanthord <kanthord@localhost>";
 const CRLF_CONTENT = "a\r\nb\r\n";
 const HOOK_MARKER = "hook-ran";
 const EXECUTABLE_MODE = 0o755;
-const MANY_FILES = 20000;
-const LONG_NAME = "x".repeat(120);
+const MANY_FILES = 9000;
+const LONG_NAME = "x".repeat(235);
+const LINUX_ARG_MAX_BYTES = 2 * 1024 * 1024;
 const CRLF_LINE = "a\r\n";
 const EMPTY_OBJECT = "{}";
 const FAILING_SIGNER = "false";
@@ -556,6 +557,11 @@ test("work commits handle more conversion-only files than one command line holds
     { length: MANY_FILES },
     (_, index) => `${LONG_NAME}-${index}.txt`,
   );
+  const pathBytes = names.reduce(
+    (total, name) => total + Buffer.byteLength(name) + 1,
+    0,
+  );
+  assert.ok(pathBytes > LINUX_ARG_MAX_BYTES);
   for (const name of names) writeFileSync(join(directory, name), CRLF_LINE);
   await git.raw(["add", "--all"]);
   await git.raw(["commit", "-q", "-m", "initial"]);
