@@ -12,6 +12,7 @@ import { servePort } from "../../gateway/index.ts";
 import { LogDestination } from "../../kernel/log.ts";
 import {
   hostEnvironment,
+  linkPiTools,
   requirePiTools,
   stopAfter,
   temporary,
@@ -51,7 +52,7 @@ const DIRECTORY_VARIABLES = [
 ];
 
 function threadEnvironment(root: string): NodeJS.ProcessEnv {
-  return {
+  const env = {
     PATH: hostEnvironment().PATH,
     HOME: root,
     XDG_CONFIG_HOME: `${root}/config`,
@@ -59,6 +60,8 @@ function threadEnvironment(root: string): NodeJS.ProcessEnv {
     XDG_STATE_HOME: `${root}/state`,
     XDG_CACHE_HOME: `${root}/cache`,
   };
+  linkPiTools(directories(env).state);
+  return env;
 }
 
 function entryOf(

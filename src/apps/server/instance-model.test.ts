@@ -8,7 +8,11 @@ import { simpleGit } from "simple-git";
 import { httpClient } from "../../gateway/client.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
-import { requirePiTools, temporary } from "../../kernel/test-support.ts";
+import {
+  linkPiTools,
+  requirePiTools,
+  temporary,
+} from "../../kernel/test-support.ts";
 import { directories } from "../../kernel/xdg.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import {
@@ -216,6 +220,7 @@ class ModelUnit implements SlotInstance {
     const name = launch.instance.name;
     const env = threadEnvironment(launch.environment, launch.root);
     const state = directories(env).state;
+    linkPiTools(state);
     const wire = threadEntries(launch.entries);
     this.hosted = new HostedBindings((transport) =>
       this.hold(transport, name, host),
