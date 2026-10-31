@@ -103,6 +103,7 @@ const NO_DROP = 0;
 const NO_ROWS = 0;
 const ONE_ENTRY = 1;
 const ONE_DROP = 1;
+const TWO_FAILURES = 2;
 const PAGE_OF_ONE = 1;
 const STOP_DETAIL = "Cannot find module";
 const SPAN_PAGE = 10;
@@ -1292,11 +1293,65 @@ test("start sweeps an expired trace", async (t) => {
   assert.equal(service.sweepFailures(), NO_ROWS);
 });
 
-test("a failed sweep is counted and answers zero", (t) => {
+test("a failed sweep is counted for the traces and for the rollups and answers zero", (t) => {
   const { store, service } = harness(t);
   store.close();
   assert.equal(service.sweep(), NO_ROWS);
+  assert.equal(service.sweepFailures(), TWO_FAILURES);
+});
+
+test("a failed rollup sweep is counted and the trace sweep still runs", (t) => {
+  const { store, service } = harness(t);
+  store.transaction((tx) =>
+    insertTrace(tx, TRACE, NOW - EXPIRED_AGE_DAYS * DAY_MS),
+  );
+  store.database.exec("DROP TABLE tracking_usage_rollup");
+  assert.equal(service.sweep(), ONE_ENTRY);
   assert.equal(service.sweepFailures(), ONE_DROP);
+  assert.equal(traceCount(store), NO_ROWS);
+});
+
+function insertUsageRow(store: Store, grain: FlowGrain, bucketStart: number) {
+  store.database
+    .prepare(
+      "INSERT INTO tracking_usage_rollup VALUES (?, ?, 'project', 'worker', 'model', 1, 1, 1, 1, 1, 0)",
+    )
+    .run(grain, bucketStart);
+}
+
+function usageBuckets(store: Store, grain: FlowGrain): number[] {
+  return store.database
+    .prepare(
+      "SELECT bucket_start FROM tracking_usage_rollup WHERE grain = ? ORDER BY bucket_start",
+    )
+    .all(grain)
+    .map((row) => Number(row.bucket_start));
+}
+
+test("the sweep deletes the rollup rows of an expired trace only at their own cutoff", (t) => {
+  const { store, service } = harness(t);
+  store.transaction((tx) =>
+    insertTrace(tx, TRACE, NOW - EXPIRED_AGE_DAYS * DAY_MS),
+  );
+  insertUsageRow(store, FlowGrain.Hour, NOW - 9 * DAY_MS);
+  insertUsageRow(store, FlowGrain.Hour, NOW - 7 * DAY_MS);
+  insertUsageRow(store, FlowGrain.Day, NOW - 65 * DAY_MS);
+  insertUsageRow(store, FlowGrain.Day, NOW - EXPIRED_AGE_DAYS * DAY_MS);
+  assert.equal(service.sweep(), ONE_ENTRY);
+  assert.equal(service.sweepFailures(), NO_ROWS);
+  assert.equal(traceCount(store), NO_ROWS);
+  assert.deepEqual(usageBuckets(store, FlowGrain.Hour), [NOW - 7 * DAY_MS]);
+  assert.deepEqual(usageBuckets(store, FlowGrain.Day), [
+    NOW - EXPIRED_AGE_DAYS * DAY_MS,
+  ]);
+});
+
+test("start sweeps an expired rollup row", async (t) => {
+  const { store, service } = harness(t);
+  insertUsageRow(store, FlowGrain.Hour, NOW - 9 * DAY_MS);
+  stopAfter(t, () => service.stop());
+  assert.equal(await service.start(), null);
+  assert.deepEqual(usageBuckets(store, FlowGrain.Hour), []);
 });
 
 test("a telemetry write of an expired execution is refused and opens no trace", (t) => {
@@ -2029,7 +2084,7 @@ test("the cause label operation answers the cause with the assigner human and wr
     ended_at: ENDED,
     end: ExecutionEnd.Finished,
     revoke_cause: null,
-    stop: null,
+    stop: { reason: "provider_failed", code: RATE_LIMITED },
     cause: unattributed([CauseCategory.Prompt, CauseCategory.Model]),
   });
   const body = {
@@ -2050,6 +2105,24 @@ test("the cause label operation answers the cause with the assigner human and wr
     created_at: ENDED,
   });
   assert.doesNotThrow(() => trackingOperations.causeLabel.output.parse(answer));
+  for (const grain of Object.values(FlowGrain)) {
+    const rows = store.database
+      .prepare(
+        "SELECT cause_category, cause_detail, cause_assigner, executions FROM tracking_flow_rollup WHERE grain = ?",
+      )
+      .all(grain);
+    assert.deepEqual(
+      rows.map((row) => ({ ...row })),
+      [
+        {
+          cause_category: CauseCategory.Prompt,
+          cause_detail: CauseSubcategory.ContextMissing,
+          cause_assigner: CauseAssigner.Human,
+          executions: 1,
+        },
+      ],
+    );
+  }
   const label = service
     .spanList(TRACE.trace_id, { limit: SPAN_PAGE }, caller(store))
     .items.find((span) => span.span_id === answer.span_id);

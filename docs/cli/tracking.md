@@ -27,7 +27,9 @@ data directory beside `kanthord.db`. It holds the tables of
 - The server deletes a trace, with its spans, texts, records and session
   entries, `tracking.retention_days` after its creation. A sweep runs at the
   start and then every hour. A record of an older execution is `Refused` with
-  `trace_expired`, and a server span of it is dropped and counted.
+  `trace_expired`, and a server span of it is dropped and counted. The flow
+  rollups outlive their traces: hour rows stay 8 days, and day rows stay 64
+  days.
 
 Telemetry is lossy and has no current effect. It is not Mission evidence,
 assessment or outcome. It completes no node, renews no claim and authorizes no
