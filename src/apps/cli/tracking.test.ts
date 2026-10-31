@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { stopAfter, temporary } from "../../kernel/test-support.ts";
-import { TRACE_QUERY_MAX_CHARACTERS } from "../../tracking/contract.ts";
+import {
+  flowStopReasonSchema,
+  TRACE_QUERY_MAX_CHARACTERS,
+} from "../../tracking/contract.ts";
 import { ExitCode } from "./constants.ts";
 import { runKanthord } from "./test-support.ts";
 
@@ -511,9 +514,79 @@ test("timeline list with a lost answer exits with indeterminate", async (t) => {
 
 const ANALYTICS_COST_PATH = "/api/tracking/analytics/cost";
 const ANALYTICS_DURATION_PATH = "/api/tracking/analytics/duration";
+const ANALYTICS_FLOW_PATH = "/api/tracking/analytics/flow";
 const ANALYTICS_COST_LEAF = "cli.tracking.analytics.cost";
 const ANALYTICS_DURATION_LEAF = "cli.tracking.analytics.duration";
+const ANALYTICS_FLOW_LEAF = "cli.tracking.analytics.flow";
 const ANALYTICS_ANSWER = { items: [], truncated: false };
+const NO_VALUES: number[] = [];
+const NO_TOTAL = 0;
+const COST_WINDOW = {
+  total_usd: NO_TOTAL,
+  success: NO_TOTAL,
+  per_success_usd: null,
+  leaked_usd: NO_TOTAL,
+  rejected_review_usd: NO_TOTAL,
+};
+const USAGE_TOTALS = {
+  turn_count: NO_TOTAL,
+  input_tokens: NO_TOTAL,
+  output_tokens: NO_TOTAL,
+  cache_read_tokens: NO_TOTAL,
+  cost_usd: NO_TOTAL,
+  unpriced_tokens: NO_TOTAL,
+};
+const FLOW_ANSWER = {
+  window: { from: 0, to: 0, now: 0, bucket: "hour", buckets: NO_VALUES },
+  previous_window: null,
+  percentile_method: "log_bins_4",
+  stages: [],
+  cost: {
+    current: COST_WINDOW,
+    previous: null,
+    previous_same_hour: null,
+    series: {
+      total_usd: NO_VALUES,
+      leaked_usd: NO_VALUES,
+      rejected_review_usd: NO_VALUES,
+      success: NO_VALUES,
+    },
+  },
+  causes: {
+    rows: [],
+    previous_rows: null,
+    previous_unattributed_share: null,
+    unattributed_share_series: NO_VALUES,
+    truncated: false,
+  },
+  stop_reasons: {
+    order: flowStopReasonSchema.options,
+    rows: Object.fromEntries(
+      flowStopReasonSchema.options.map((reason) => [reason, NO_VALUES]),
+    ),
+    previous_totals: null,
+  },
+  usage: {
+    current: USAGE_TOTALS,
+    previous: null,
+    previous_same_hour: null,
+    series: {
+      total_tokens: NO_VALUES,
+      cache_hit: NO_VALUES,
+      unpriced_tokens: NO_VALUES,
+    },
+    by: { model: [], worker_name: [], project_id: [] },
+  },
+  completeness: {
+    executions: NO_TOTAL,
+    open: NO_TOTAL,
+    no_root: NO_TOTAL,
+    exit_unknown: NO_TOTAL,
+    awaiting_ingestion: [],
+    late_records: NO_TOTAL,
+  },
+  rebuild: null,
+};
 const RANGE_INVALID_ANSWER = {
   error: {
     code: "tracking.filter.range_invalid",
@@ -630,6 +703,54 @@ test("analytics duration accepts the measure test_floor_share", async (t) => {
   assert.deepEqual(JSON.parse(result.stdout), ANALYTICS_ANSWER);
 });
 
+test("analytics flow sends its options as query fields and writes the answer", async (t) => {
+  const { endpoint, seen } = await fakeServer(t, FLOW_ANSWER);
+  const result = await run(
+    t,
+    [
+      "analytics",
+      "flow",
+      "--project",
+      PROJECT_ID,
+      "--worker",
+      "coder-1",
+      "--from",
+      "1000",
+      "--to",
+      "2000",
+      "--bucket",
+      "hour",
+      "--compare",
+      "none",
+    ],
+    endpoint,
+  );
+  assert.equal(result.code, ExitCode.Success, result.stderr);
+  assert.equal(seen.length, ONE_REQUEST);
+  assert.equal(seen[0]?.method, HttpMethod.Get);
+  const url = new URL(seen[0]?.url ?? "", endpoint);
+  assert.equal(url.pathname, ANALYTICS_FLOW_PATH);
+  assert.deepEqual(Object.fromEntries(url.searchParams), {
+    project_id: PROJECT_ID,
+    worker_name: "coder-1",
+    from: "1000",
+    to: "2000",
+    bucket: "hour",
+    compare: "none",
+  });
+  assert.deepEqual(JSON.parse(result.stdout), FLOW_ANSWER);
+});
+
+test("analytics flow sends the default compare and no other field", async (t) => {
+  const { endpoint, seen } = await fakeServer(t, FLOW_ANSWER);
+  const result = await run(t, ["analytics", "flow"], endpoint);
+  assert.equal(result.code, ExitCode.Success, result.stderr);
+  const url = new URL(seen[0]?.url ?? "", endpoint);
+  assert.deepEqual(Object.fromEntries(url.searchParams), {
+    compare: "previous",
+  });
+});
+
 const INVALID_ANALYTICS_OPTIONS: readonly (readonly [
   string,
   string[],
@@ -691,6 +812,20 @@ const INVALID_ANALYTICS_OPTIONS: readonly (readonly [
     ["--measure", "tool_latency", "--to", "soon"],
     `${ANALYTICS_DURATION_LEAF}.invalid_query`,
   ],
+  [
+    "flow",
+    ["--project", "invalid"],
+    `${ANALYTICS_FLOW_LEAF}.invalid_project_id`,
+  ],
+  ["flow", ["--bucket", "week"], `${ANALYTICS_FLOW_LEAF}.invalid_query`],
+  ["flow", ["--compare", "next"], `${ANALYTICS_FLOW_LEAF}.invalid_query`],
+  ["flow", ["--from", "soon"], `${ANALYTICS_FLOW_LEAF}.invalid_query`],
+  ["flow", ["--to", "-1"], `${ANALYTICS_FLOW_LEAF}.invalid_query`],
+  [
+    "flow",
+    ["--worker", "x".repeat(257)],
+    `${ANALYTICS_FLOW_LEAF}.invalid_query`,
+  ],
 ];
 
 for (const [leaf, options, code] of INVALID_ANALYTICS_OPTIONS)
@@ -705,6 +840,7 @@ for (const [leaf, options, code] of INVALID_ANALYTICS_OPTIONS)
 for (const [leaf, prefix, options] of [
   ["cost", ANALYTICS_COST_LEAF, []],
   ["duration", ANALYTICS_DURATION_LEAF, ["--measure", "tool_latency"]],
+  ["flow", ANALYTICS_FLOW_LEAF, []],
 ] as const) {
   test(`analytics ${leaf} without a token exits with token_required`, async (t) => {
     const directory = temporary(t);

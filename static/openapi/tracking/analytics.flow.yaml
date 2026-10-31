@@ -1,0 +1,1200 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: tracking.analytics.flow
+    tags:
+      - tracking
+    description: Read the lifecycle flow, the cost and token scorecard, the causes
+      and the stop reasons of the executions claimed in a time range. The range
+      is at most 31 days. The read sums the flow rollups and answers raw
+      numbers.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: from
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.analytics.flow.Input/properties/query/prop\
+            erties/from"
+      - name: to
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.analytics.flow.Input/properties/query/prop\
+            erties/to"
+      - name: bucket
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.analytics.flow.Input/properties/query/prop\
+            erties/bucket"
+      - name: project_id
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.analytics.flow.Input/properties/query/prop\
+            erties/project_id"
+      - name: worker_name
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.analytics.flow.Input/properties/query/prop\
+            erties/worker_name"
+      - name: compare
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/tracking.analytics.flow.Input/properties/query/prop\
+            erties/compare"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/tracking.analytics.flow.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    tracking.analytics.flow.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties:
+            from:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            to:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            bucket:
+              type: string
+              enum:
+                - hour
+                - day
+            project_id:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: project_ followed by a canonical 26-character uppercase ULID.
+            worker_name:
+              type: string
+              minLength: 1
+            compare:
+              default: previous
+              type: string
+              enum:
+                - previous
+                - none
+          required: []
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    tracking.analytics.flow.Output:
+      type: object
+      properties:
+        window:
+          type: object
+          properties:
+            from:
+              type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            to:
+              type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            now:
+              type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            bucket:
+              type: string
+              enum:
+                - hour
+                - day
+            buckets:
+              type: array
+              items:
+                type: integer
+                minimum: -9007199254740991
+                maximum: 9007199254740991
+          required:
+            - from
+            - to
+            - now
+            - bucket
+            - buckets
+          additionalProperties: false
+        previous_window:
+          anyOf:
+            - type: object
+              properties:
+                from:
+                  type: integer
+                  minimum: -9007199254740991
+                  maximum: 9007199254740991
+                to:
+                  type: integer
+                  minimum: -9007199254740991
+                  maximum: 9007199254740991
+              required:
+                - from
+                - to
+              additionalProperties: false
+            - type: "null"
+        percentile_method:
+          type: string
+          const: log_bins_4
+        stages:
+          type: array
+          items:
+            type: object
+            properties:
+              stage:
+                type: string
+                enum:
+                  - queued
+                  - executing
+                  - verification
+                  - release_gate
+                  - evaluation
+                  - outcome
+              current:
+                type: object
+                properties:
+                  entered:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  unobserved:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  open:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  exits:
+                    type: object
+                    propertyNames:
+                      type: string
+                      enum:
+                        - open
+                        - revoked
+                        - paused
+                        - completed
+                        - external
+                        - rework
+                        - blocked
+                        - budget
+                        - stopped
+                        - further_work
+                        - handed_on
+                        - unknown
+                    additionalProperties:
+                      type: object
+                      properties:
+                        count:
+                          type: integer
+                          minimum: -9007199254740991
+                          maximum: 9007199254740991
+                        cost_usd:
+                          type: number
+                      required:
+                        - count
+                        - cost_usd
+                      additionalProperties: false
+                  time:
+                    anyOf:
+                      - type: object
+                        properties:
+                          count:
+                            type: integer
+                            minimum: -9007199254740991
+                            maximum: 9007199254740991
+                          p50:
+                            anyOf:
+                              - type: number
+                              - type: "null"
+                          p90:
+                            anyOf:
+                              - type: number
+                              - type: "null"
+                          p99:
+                            anyOf:
+                              - type: number
+                              - type: "null"
+                        required:
+                          - count
+                          - p50
+                          - p90
+                          - p99
+                        additionalProperties: false
+                      - type: "null"
+                  signals:
+                    type: object
+                    propertyNames:
+                      type: string
+                    additionalProperties:
+                      type: number
+                required:
+                  - entered
+                  - unobserved
+                  - open
+                  - exits
+                  - time
+                  - signals
+                additionalProperties: false
+              previous:
+                anyOf:
+                  - type: object
+                    properties:
+                      entered:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      unobserved:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      open:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      exits:
+                        type: object
+                        propertyNames:
+                          type: string
+                          enum:
+                            - open
+                            - revoked
+                            - paused
+                            - completed
+                            - external
+                            - rework
+                            - blocked
+                            - budget
+                            - stopped
+                            - further_work
+                            - handed_on
+                            - unknown
+                        additionalProperties:
+                          type: object
+                          properties:
+                            count:
+                              type: integer
+                              minimum: -9007199254740991
+                              maximum: 9007199254740991
+                            cost_usd:
+                              type: number
+                          required:
+                            - count
+                            - cost_usd
+                          additionalProperties: false
+                      time:
+                        anyOf:
+                          - type: object
+                            properties:
+                              count:
+                                type: integer
+                                minimum: -9007199254740991
+                                maximum: 9007199254740991
+                              p50:
+                                anyOf:
+                                  - type: number
+                                  - type: "null"
+                              p90:
+                                anyOf:
+                                  - type: number
+                                  - type: "null"
+                              p99:
+                                anyOf:
+                                  - type: number
+                                  - type: "null"
+                            required:
+                              - count
+                              - p50
+                              - p90
+                              - p99
+                            additionalProperties: false
+                          - type: "null"
+                      signals:
+                        type: object
+                        propertyNames:
+                          type: string
+                        additionalProperties:
+                          type: number
+                    required:
+                      - entered
+                      - unobserved
+                      - open
+                      - exits
+                      - time
+                      - signals
+                    additionalProperties: false
+                  - type: "null"
+              series:
+                type: object
+                properties:
+                  entered:
+                    type: array
+                    items:
+                      type: integer
+                      minimum: -9007199254740991
+                      maximum: 9007199254740991
+                  open:
+                    type: array
+                    items:
+                      type: integer
+                      minimum: -9007199254740991
+                      maximum: 9007199254740991
+                  leaked:
+                    type: array
+                    items:
+                      type: integer
+                      minimum: -9007199254740991
+                      maximum: 9007199254740991
+                  loops:
+                    type: array
+                    items:
+                      type: integer
+                      minimum: -9007199254740991
+                      maximum: 9007199254740991
+                  time_p90:
+                    type: array
+                    items:
+                      anyOf:
+                        - type: number
+                        - type: "null"
+                  signals:
+                    type: object
+                    propertyNames:
+                      type: string
+                    additionalProperties:
+                      type: array
+                      items:
+                        anyOf:
+                          - type: number
+                          - type: "null"
+                  changed_after_end:
+                    type: array
+                    items:
+                      type: boolean
+                required:
+                  - entered
+                  - open
+                  - leaked
+                  - loops
+                  - time_p90
+                  - signals
+                  - changed_after_end
+                additionalProperties: false
+              dimensions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    by:
+                      type: string
+                      enum:
+                        - project_id
+                        - worker_name
+                    key:
+                      type: string
+                    entered:
+                      type: integer
+                      minimum: -9007199254740991
+                      maximum: 9007199254740991
+                    leaked:
+                      type: integer
+                      minimum: -9007199254740991
+                      maximum: 9007199254740991
+                    loops:
+                      type: integer
+                      minimum: -9007199254740991
+                      maximum: 9007199254740991
+                    time:
+                      anyOf:
+                        - type: object
+                          properties:
+                            count:
+                              type: integer
+                              minimum: -9007199254740991
+                              maximum: 9007199254740991
+                            p50:
+                              anyOf:
+                                - type: number
+                                - type: "null"
+                            p90:
+                              anyOf:
+                                - type: number
+                                - type: "null"
+                            p99:
+                              anyOf:
+                                - type: number
+                                - type: "null"
+                          required:
+                            - count
+                            - p50
+                            - p90
+                            - p99
+                          additionalProperties: false
+                        - type: "null"
+                    signals:
+                      type: object
+                      propertyNames:
+                        type: string
+                      additionalProperties:
+                        type: number
+                  required:
+                    - by
+                    - key
+                    - entered
+                    - leaked
+                    - loops
+                    - time
+                    - signals
+                  additionalProperties: false
+              previous_bucket_median:
+                anyOf:
+                  - type: object
+                    propertyNames:
+                      type: string
+                    additionalProperties:
+                      type: number
+                  - type: "null"
+            required:
+              - stage
+              - current
+              - previous
+              - series
+              - dimensions
+              - previous_bucket_median
+            additionalProperties: false
+        cost:
+          type: object
+          properties:
+            current:
+              type: object
+              properties:
+                total_usd:
+                  type: number
+                success:
+                  type: integer
+                  minimum: -9007199254740991
+                  maximum: 9007199254740991
+                per_success_usd:
+                  anyOf:
+                    - type: number
+                    - type: "null"
+                leaked_usd:
+                  type: number
+                rejected_review_usd:
+                  type: number
+              required:
+                - total_usd
+                - success
+                - per_success_usd
+                - leaked_usd
+                - rejected_review_usd
+              additionalProperties: false
+            previous:
+              anyOf:
+                - type: object
+                  properties:
+                    total_usd:
+                      type: number
+                    success:
+                      type: integer
+                      minimum: -9007199254740991
+                      maximum: 9007199254740991
+                    per_success_usd:
+                      anyOf:
+                        - type: number
+                        - type: "null"
+                    leaked_usd:
+                      type: number
+                    rejected_review_usd:
+                      type: number
+                  required:
+                    - total_usd
+                    - success
+                    - per_success_usd
+                    - leaked_usd
+                    - rejected_review_usd
+                  additionalProperties: false
+                - type: "null"
+            previous_same_hour:
+              anyOf:
+                - type: object
+                  properties:
+                    total_usd:
+                      type: number
+                    success:
+                      type: integer
+                      minimum: -9007199254740991
+                      maximum: 9007199254740991
+                    rejected_review_usd:
+                      type: number
+                  required:
+                    - total_usd
+                    - success
+                    - rejected_review_usd
+                  additionalProperties: false
+                - type: "null"
+            series:
+              type: object
+              properties:
+                total_usd:
+                  type: array
+                  items:
+                    type: number
+                leaked_usd:
+                  type: array
+                  items:
+                    type: number
+                rejected_review_usd:
+                  type: array
+                  items:
+                    type: number
+                success:
+                  type: array
+                  items:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+              required:
+                - total_usd
+                - leaked_usd
+                - rejected_review_usd
+                - success
+              additionalProperties: false
+          required:
+            - current
+            - previous
+            - previous_same_hour
+            - series
+          additionalProperties: false
+        causes:
+          type: object
+          properties:
+            rows:
+              type: array
+              items:
+                type: object
+                properties:
+                  stage:
+                    type: string
+                    enum:
+                      - queued
+                      - executing
+                      - verification
+                      - release_gate
+                      - evaluation
+                      - outcome
+                  exit:
+                    type: string
+                    enum:
+                      - open
+                      - revoked
+                      - paused
+                      - completed
+                      - external
+                      - rework
+                      - blocked
+                      - budget
+                      - stopped
+                      - further_work
+                      - handed_on
+                      - unknown
+                  category:
+                    type: string
+                  detail:
+                    type: string
+                  assigner:
+                    type: string
+                    enum:
+                      - rule
+                      - reviewer
+                      - human
+                      - ""
+                  count:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  cost_usd:
+                    type: number
+                required:
+                  - stage
+                  - exit
+                  - category
+                  - detail
+                  - assigner
+                  - count
+                  - cost_usd
+                additionalProperties: false
+            previous_rows:
+              anyOf:
+                - type: array
+                  items:
+                    type: object
+                    properties:
+                      stage:
+                        type: string
+                        enum:
+                          - queued
+                          - executing
+                          - verification
+                          - release_gate
+                          - evaluation
+                          - outcome
+                      exit:
+                        type: string
+                        enum:
+                          - open
+                          - revoked
+                          - paused
+                          - completed
+                          - external
+                          - rework
+                          - blocked
+                          - budget
+                          - stopped
+                          - further_work
+                          - handed_on
+                          - unknown
+                      category:
+                        type: string
+                      count:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                    required:
+                      - stage
+                      - exit
+                      - category
+                      - count
+                    additionalProperties: false
+                - type: "null"
+            previous_unattributed_share:
+              anyOf:
+                - type: number
+                - type: "null"
+            unattributed_share_series:
+              type: array
+              items:
+                anyOf:
+                  - type: number
+                  - type: "null"
+            truncated:
+              type: boolean
+          required:
+            - rows
+            - previous_rows
+            - previous_unattributed_share
+            - unattributed_share_series
+            - truncated
+          additionalProperties: false
+        stop_reasons:
+          type: object
+          properties:
+            order:
+              type: array
+              items:
+                type: string
+                enum:
+                  - operation_failed
+                  - judgement_invalid
+                  - report_absent
+                  - action_unsettled
+                  - assessment_absent
+                  - provider_failed
+                  - no_progress
+                  - environment_failed
+                  - lost
+                  - budget_end
+            rows:
+              type: object
+              propertyNames:
+                type: string
+                enum:
+                  - operation_failed
+                  - judgement_invalid
+                  - report_absent
+                  - action_unsettled
+                  - assessment_absent
+                  - provider_failed
+                  - no_progress
+                  - environment_failed
+                  - lost
+                  - budget_end
+              additionalProperties:
+                type: array
+                items:
+                  type: integer
+                  minimum: -9007199254740991
+                  maximum: 9007199254740991
+              required:
+                - operation_failed
+                - judgement_invalid
+                - report_absent
+                - action_unsettled
+                - assessment_absent
+                - provider_failed
+                - no_progress
+                - environment_failed
+                - lost
+                - budget_end
+            previous_totals:
+              anyOf:
+                - type: object
+                  propertyNames:
+                    type: string
+                    enum:
+                      - operation_failed
+                      - judgement_invalid
+                      - report_absent
+                      - action_unsettled
+                      - assessment_absent
+                      - provider_failed
+                      - no_progress
+                      - environment_failed
+                      - lost
+                      - budget_end
+                  additionalProperties:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  required:
+                    - operation_failed
+                    - judgement_invalid
+                    - report_absent
+                    - action_unsettled
+                    - assessment_absent
+                    - provider_failed
+                    - no_progress
+                    - environment_failed
+                    - lost
+                    - budget_end
+                - type: "null"
+          required:
+            - order
+            - rows
+            - previous_totals
+          additionalProperties: false
+        usage:
+          type: object
+          properties:
+            current:
+              type: object
+              properties:
+                turn_count:
+                  type: integer
+                  minimum: -9007199254740991
+                  maximum: 9007199254740991
+                input_tokens:
+                  type: number
+                output_tokens:
+                  type: number
+                cache_read_tokens:
+                  type: number
+                cost_usd:
+                  type: number
+                unpriced_tokens:
+                  type: number
+              required:
+                - turn_count
+                - input_tokens
+                - output_tokens
+                - cache_read_tokens
+                - cost_usd
+                - unpriced_tokens
+              additionalProperties: false
+            previous:
+              anyOf:
+                - type: object
+                  properties:
+                    turn_count:
+                      type: integer
+                      minimum: -9007199254740991
+                      maximum: 9007199254740991
+                    input_tokens:
+                      type: number
+                    output_tokens:
+                      type: number
+                    cache_read_tokens:
+                      type: number
+                    cost_usd:
+                      type: number
+                    unpriced_tokens:
+                      type: number
+                  required:
+                    - turn_count
+                    - input_tokens
+                    - output_tokens
+                    - cache_read_tokens
+                    - cost_usd
+                    - unpriced_tokens
+                  additionalProperties: false
+                - type: "null"
+            previous_same_hour:
+              anyOf:
+                - type: object
+                  properties:
+                    turn_count:
+                      type: integer
+                      minimum: -9007199254740991
+                      maximum: 9007199254740991
+                    input_tokens:
+                      type: number
+                    output_tokens:
+                      type: number
+                    cache_read_tokens:
+                      type: number
+                    cost_usd:
+                      type: number
+                    unpriced_tokens:
+                      type: number
+                  required:
+                    - turn_count
+                    - input_tokens
+                    - output_tokens
+                    - cache_read_tokens
+                    - cost_usd
+                    - unpriced_tokens
+                  additionalProperties: false
+                - type: "null"
+            series:
+              type: object
+              properties:
+                total_tokens:
+                  type: array
+                  items:
+                    type: number
+                cache_hit:
+                  type: array
+                  items:
+                    anyOf:
+                      - type: number
+                      - type: "null"
+                unpriced_tokens:
+                  type: array
+                  items:
+                    type: number
+              required:
+                - total_tokens
+                - cache_hit
+                - unpriced_tokens
+              additionalProperties: false
+            by:
+              type: object
+              properties:
+                model:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      turn_count:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      input_tokens:
+                        type: number
+                      output_tokens:
+                        type: number
+                      cache_read_tokens:
+                        type: number
+                      cost_usd:
+                        type: number
+                      unpriced_tokens:
+                        type: number
+                      key:
+                        type: string
+                      success:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      previous_same_hour:
+                        anyOf:
+                          - type: object
+                            properties:
+                              cost_usd:
+                                type: number
+                            required:
+                              - cost_usd
+                            additionalProperties: false
+                          - type: "null"
+                      series:
+                        type: object
+                        properties:
+                          cost_usd:
+                            type: array
+                            items:
+                              type: number
+                          cache_hit:
+                            type: array
+                            items:
+                              anyOf:
+                                - type: number
+                                - type: "null"
+                        required:
+                          - cost_usd
+                          - cache_hit
+                        additionalProperties: false
+                    required:
+                      - turn_count
+                      - input_tokens
+                      - output_tokens
+                      - cache_read_tokens
+                      - cost_usd
+                      - unpriced_tokens
+                      - key
+                      - previous_same_hour
+                      - series
+                    additionalProperties: false
+                worker_name:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      turn_count:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      input_tokens:
+                        type: number
+                      output_tokens:
+                        type: number
+                      cache_read_tokens:
+                        type: number
+                      cost_usd:
+                        type: number
+                      unpriced_tokens:
+                        type: number
+                      key:
+                        type: string
+                      success:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      previous_same_hour:
+                        anyOf:
+                          - type: object
+                            properties:
+                              cost_usd:
+                                type: number
+                            required:
+                              - cost_usd
+                            additionalProperties: false
+                          - type: "null"
+                      series:
+                        type: object
+                        properties:
+                          cost_usd:
+                            type: array
+                            items:
+                              type: number
+                          cache_hit:
+                            type: array
+                            items:
+                              anyOf:
+                                - type: number
+                                - type: "null"
+                        required:
+                          - cost_usd
+                          - cache_hit
+                        additionalProperties: false
+                    required:
+                      - turn_count
+                      - input_tokens
+                      - output_tokens
+                      - cache_read_tokens
+                      - cost_usd
+                      - unpriced_tokens
+                      - key
+                      - previous_same_hour
+                      - series
+                    additionalProperties: false
+                project_id:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      turn_count:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      input_tokens:
+                        type: number
+                      output_tokens:
+                        type: number
+                      cache_read_tokens:
+                        type: number
+                      cost_usd:
+                        type: number
+                      unpriced_tokens:
+                        type: number
+                      key:
+                        type: string
+                      success:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      previous_same_hour:
+                        anyOf:
+                          - type: object
+                            properties:
+                              cost_usd:
+                                type: number
+                            required:
+                              - cost_usd
+                            additionalProperties: false
+                          - type: "null"
+                      series:
+                        type: object
+                        properties:
+                          cost_usd:
+                            type: array
+                            items:
+                              type: number
+                          cache_hit:
+                            type: array
+                            items:
+                              anyOf:
+                                - type: number
+                                - type: "null"
+                        required:
+                          - cost_usd
+                          - cache_hit
+                        additionalProperties: false
+                    required:
+                      - turn_count
+                      - input_tokens
+                      - output_tokens
+                      - cache_read_tokens
+                      - cost_usd
+                      - unpriced_tokens
+                      - key
+                      - previous_same_hour
+                      - series
+                    additionalProperties: false
+              required:
+                - model
+                - worker_name
+                - project_id
+              additionalProperties: false
+          required:
+            - current
+            - previous
+            - previous_same_hour
+            - series
+            - by
+          additionalProperties: false
+        completeness:
+          type: object
+          properties:
+            executions:
+              type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            open:
+              type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            no_root:
+              type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            exit_unknown:
+              type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            awaiting_ingestion:
+              type: array
+              items:
+                type: object
+                properties:
+                  worker_name:
+                    type: string
+                  count:
+                    type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                required:
+                  - worker_name
+                  - count
+                additionalProperties: false
+            late_records:
+              type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+          required:
+            - executions
+            - open
+            - no_root
+            - exit_unknown
+            - awaiting_ingestion
+            - late_records
+          additionalProperties: false
+        rebuild:
+          anyOf:
+            - type: object
+              properties:
+                pending_until:
+                  type: integer
+                  minimum: -9007199254740991
+                  maximum: 9007199254740991
+              required:
+                - pending_until
+              additionalProperties: false
+            - type: "null"
+      required:
+        - window
+        - previous_window
+        - percentile_method
+        - stages
+        - cost
+        - causes
+        - stop_reasons
+        - usage
+        - completeness
+        - rebuild
+      additionalProperties: false

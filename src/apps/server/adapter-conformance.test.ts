@@ -93,6 +93,7 @@ function assertDirectOnly(result: OperationResult<unknown>): void {
 }
 
 test("every composed operation conforms across direct and HTTP adapters", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
   const fixture = await gatewayFixture(t, {
     machines: fakeMachines(),
     containerRuntimeHost: fakeContainerHost(t).host,
