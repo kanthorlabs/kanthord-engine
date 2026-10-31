@@ -73,6 +73,7 @@ function admission(producer: string): Admission {
     producer,
     origin: SpanOrigin.Observed,
     now: STARTED,
+    flow: null,
   };
 }
 

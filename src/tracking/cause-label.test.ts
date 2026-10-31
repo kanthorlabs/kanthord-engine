@@ -354,6 +354,7 @@ test("tracking.text.get answers the reason of the last label", (t) => {
   const service = new TrackingService({
     store,
     retentionDays: 30,
+    isHostedWorker: () => false,
     executions: { traceOf: () => undefined },
   });
   const caller: CallerContext = {

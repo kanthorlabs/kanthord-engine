@@ -129,6 +129,44 @@ test("one sweep deletes 45 expired traces in three batches", (t) => {
   for (const table of TABLES) assert.equal(countOf(store, table), NO_ROWS);
 });
 
+const SQL_TEXT = "TEXT";
+const SQL_BLOB = "BLOB";
+const ROLLUP_TABLES = [
+  "tracking_flow_rollup",
+  "tracking_flow_histogram",
+  "tracking_usage_rollup",
+] as const;
+
+function insertRollupRow(store: Store, table: string): void {
+  const columns = store.database
+    .prepare(`PRAGMA table_info(${table})`)
+    .all()
+    .map((column) => ({
+      name: String(column.name),
+      type: String(column.type),
+    }));
+  const values = columns.map(({ type }) =>
+    type === SQL_TEXT ? "'x'" : type === SQL_BLOB ? "x'00'" : "1",
+  );
+  store.database.exec(
+    `INSERT INTO ${table} (${columns.map(({ name }) => name).join(", ")}) VALUES (${values.join(", ")})`,
+  );
+}
+
+test("the sweep of a trace keeps the rollup rows", (t) => {
+  const store = memoryStore(t);
+  insertTraceWithChildren(store, 1, EXPIRED_AT);
+  for (const table of ROLLUP_TABLES) insertRollupRow(store, table);
+  const deleted = sweepExpiredTraces(
+    store,
+    retentionCutoff(NOW, RETENTION_DAYS),
+  );
+  assert.equal(deleted, ONE_ROW);
+  assert.equal(countOf(store, "tracking_trace"), NO_ROWS);
+  for (const table of ROLLUP_TABLES)
+    assert.equal(countOf(store, table), ONE_ROW);
+});
+
 test("the cutoff lies the retention before now", () => {
   assert.equal(retentionCutoff(NOW, RETENTION_DAYS), CUTOFF_30_DAYS);
 });
