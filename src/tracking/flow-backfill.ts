@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { setImmediate } from "node:timers/promises";
 import { identityTime } from "../kernel/identity.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
-import { FlowKind, type Span } from "./contract.ts";
+import { FlowKind, RecordKind, type Span } from "./contract.ts";
 import { close, type FlowState, observe } from "./flow-admission.ts";
 import { LATE_RECORD_MS } from "./flow-model.ts";
 import { flowColumnsOf, readFlowTrace } from "./flow-trace.ts";
@@ -69,14 +69,16 @@ function spansOf(tx: Transaction, traceId: string): Span[] {
 function lateRecordsOf(
   tx: Transaction,
   traceId: string,
+  rootSpanId: string,
   endedAt: number | null,
 ): number {
   if (endedAt === null) return NO_COUNT;
+  const bound = endedAt + LATE_RECORD_MS;
   const row = tx.database
     .prepare(
-      "SELECT COUNT(*) AS count FROM tracking_record WHERE trace_id = ? AND created_at > ?",
+      "SELECT COUNT(*) AS count FROM tracking_record WHERE trace_id = ? AND created_at > MAX(?, COALESCE((SELECT MAX(created_at) FROM tracking_record WHERE trace_id = ? AND kind = ? AND target_id = ?), ?))",
     )
-    .get(traceId, endedAt + LATE_RECORD_MS);
+    .get(traceId, bound, traceId, RecordKind.Span, rootSpanId, bound);
   assert.ok(row);
   return Number(row.count);
 }
@@ -109,7 +111,8 @@ function fillTrace(
     ...state.current,
     kind: state.current.kind ?? FlowKind.None,
     late_records:
-      state.current.late_records + lateRecordsOf(tx, traceId, row.ended_at),
+      state.current.late_records +
+      lateRecordsOf(tx, traceId, row.root_span_id, row.ended_at),
   };
   close(tx, state, options.now());
 }
