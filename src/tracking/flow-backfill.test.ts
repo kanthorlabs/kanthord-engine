@@ -25,6 +25,10 @@ const HOUR_MS = 3600000;
 const ANCHOR = Date.UTC(2026, 9, 31, 10, 30);
 const NOW = ANCHOR + 2000;
 const JOB_START = ANCHOR + 3 * HOUR_MS;
+const LATE_END_AT = ANCHOR + 2 * HOUR_MS;
+const LATE_TOOL_AT = ANCHOR + 3 * HOUR_MS;
+const LATE_END_TRACE = 5;
+const ONE_LATE_RECORD = 1;
 const HOSTED = "hosted_worker";
 const MODEL = "model-a";
 const TOLERANCE = 1e-9;
@@ -345,6 +349,26 @@ test("a start that finds no trace to handle reports the job start and then null"
   const values: (number | null)[] = [];
   await runBackfill(store, undefined, (value) => values.push(value));
   assert.deepEqual(values, [JOB_START, null]);
+});
+
+test("the backfill counts no late record for a late root end, as the admission does", async (t) => {
+  const store = memoryStore(t);
+  const trace = traceOf(LATE_END_TRACE);
+  write(store, trace, [rootStart(trace, "steps"), turn(trace, 1)]);
+  write(store, trace, [rootEnd(trace)], LATE_END_AT);
+  write(store, trace, [toolError(trace, "9")], LATE_TOOL_AT);
+  const columns = traceColumns(store);
+  const tables = flowTables(store);
+  resetFlow(store);
+  await runBackfill(store);
+  assertRowsMatch(traceColumns(store), columns);
+  flowTables(store).forEach((rows, index) =>
+    assertRowsMatch(rows, tables[index] ?? []),
+  );
+  const row = store.database
+    .prepare("SELECT late_records FROM tracking_trace WHERE trace_id = ?")
+    .get(trace.trace_id);
+  assert.equal(Number(row?.late_records), ONE_LATE_RECORD);
 });
 
 function admitSimpleTraces(store: Store): TraceRow[] {
