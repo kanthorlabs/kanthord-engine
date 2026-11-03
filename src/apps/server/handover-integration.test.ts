@@ -71,6 +71,7 @@ import {
   openEnvelope,
   sealEnvelope,
 } from "../../kernel/handover.ts";
+import { FAKE_COMMIT } from "./container-fakes-test-support.ts";
 import {
   COVERING_WORKER_BINDINGS,
   enableCoveringAgents,
@@ -407,6 +408,8 @@ async function setup(
     extraRepository?: boolean;
     handoverRefreshWaitMs?: number;
     promptBase?: PromptBase;
+    instructionFile?: string;
+    implementBindsOther?: boolean;
   } = {},
 ) {
   const oauth = boundary?.type === SecretShape.OAuth ? boundary : undefined;
@@ -586,7 +589,12 @@ async function setup(
       ssh_credential: FAKE_SSH_CREDENTIAL,
       strategy: { base_branch: "main" },
       credential: "github",
-      prompts: { "swe@1": "Follow repository conventions." },
+      prompts: {
+        ...(setupOptions.instructionFile === undefined
+          ? {}
+          : { instruction_file: setupOptions.instructionFile }),
+        agents: { "swe@1": "Follow repository conventions." },
+      },
     },
   };
   const bindingsOf = (generalInstances: readonly string[]) => ({
@@ -599,6 +607,7 @@ async function setup(
             config: {
               ...repository.config,
               address: "git@github.com:owner/other.git",
+              prompts: {},
             },
           },
         }
@@ -668,7 +677,12 @@ async function setup(
         content: {
           ...CONTENT,
           intent: Intent.Implement,
-          bindings: [bindingSet.bindings.repo!.id],
+          bindings: [
+            bindingSet.bindings.repo!.id,
+            ...(setupOptions.implementBindsOther
+              ? [bindingSet.bindings.other!.id]
+              : []),
+          ],
         },
         tasks: [],
         reason: "plan",
@@ -1541,6 +1555,19 @@ test("the first handover of an attempt pins its prompt commits and a later execu
   completed(await h.handover(next.execution_id));
   assert.equal(reads, FIRST_HEAD_READ);
   assert.equal(storedPromptCommits(h), pinned);
+});
+
+test("the server prompt base pins one entry for the repository binding that names an instruction file", async (t) => {
+  const h = await setup(t, "direct", undefined, {
+    instructionFile: "AGENTS.md",
+    extraRepository: true,
+    implementBindsOther: true,
+  });
+  completed(await h.handover());
+  assert.equal(
+    storedPromptCommits(h),
+    canonicalJSON([{ binding_id: h.bindings.repo!.id, commit: FAKE_COMMIT }]),
+  );
 });
 
 test("two concurrent first handovers of one attempt store one pin and both answer it", async (t) => {

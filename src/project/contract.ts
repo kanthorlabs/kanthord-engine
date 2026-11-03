@@ -12,6 +12,7 @@ import {
 import type { Transaction } from "../kernel/store.ts";
 import { isString } from "../kernel/values.ts";
 import {
+  ResourceFailureReason,
   resourceFailureReasonSchema,
   ResourceStatus,
 } from "../kernel/health.ts";
@@ -22,6 +23,7 @@ import {
   type AgentName,
   fallbackConfigurationsSchema,
   type HolderScope,
+  InstructionFileState,
 } from "../agent/contract.ts";
 import {
   type RepositoryFile,
@@ -186,12 +188,61 @@ export function isNonblank(s: string): boolean {
 export { EnvironmentSource };
 export const ENVIRONMENT_FILE_MAX_BYTES = 65536;
 
-export const bindingPromptsSchema = z.strictObject(
+export const INSTRUCTION_FILE_PATH_MAX_BYTES = 255;
+export const INSTRUCTION_FILE_CACHE_ENTRIES = 256;
+export const BindingPromptKey = {
+  InstructionFile: "instruction_file",
+  Repository: "repository",
+} as const;
+export const PromptInvalidReason = {
+  PathInvalid: "path_invalid",
+} as const;
+export const InstructionFileReason = {
+  ...ResourceFailureReason,
+  TooLarge: "too_large",
+  NotUtf8: "not_utf8",
+  Unreadable: "unreadable",
+  ControlCharacter: "control_character",
+  BaseBranchAbsent: "base_branch_absent",
+} as const;
+export type InstructionFileReason =
+  (typeof InstructionFileReason)[keyof typeof InstructionFileReason];
+
+export const bindingAgentPromptsSchema = z.strictObject(
   Object.fromEntries(
     AGENT_NAMES.map((name) => [name, z.string().optional()]),
   ) as Record<AgentName, z.ZodOptional<z.ZodString>>,
 );
+export const bindingPromptsSchema = z.strictObject({
+  instruction_file: z.string().optional(),
+  repository: z.string().optional(),
+  agents: bindingAgentPromptsSchema.optional(),
+});
 export type BindingPrompts = z.infer<typeof bindingPromptsSchema>;
+
+export const instructionFileCheckSchema = z.strictObject({
+  path: z.string(),
+  commit: z.string().nullable(),
+  state: z.enum(InstructionFileState),
+  reason: z.enum(InstructionFileReason).nullable(),
+});
+export type InstructionFileCheck = z.infer<typeof instructionFileCheckSchema>;
+export type InstructionFile = {
+  path: string;
+  commit: string;
+  state: Exclude<InstructionFileState, typeof InstructionFileState.Unreachable>;
+  reason: InstructionFileReason | null;
+  text: string | null;
+};
+export type BaseCommitOf = (
+  bindingId: string,
+  context: Context,
+) => Promise<string>;
+export type InstructionFileOf = (
+  bindingId: string,
+  commit: string,
+  context: Context,
+) => Promise<InstructionFile | null>;
 
 export const ENVIRONMENT_SECRET_VARIABLE = /^[A-Z_][A-Z0-9_]*$/;
 export const ENVIRONMENT_SECRETS_MAX = 16;
@@ -1094,6 +1145,8 @@ export const projectOperations = {
       address: bindingVerifyAnswerEntrySchema,
       ssh_credential: bindingVerifyAnswerEntrySchema,
       credential: bindingVerifyAnswerEntrySchema.nullable(),
+      instruction_file: instructionFileCheckSchema.nullable(),
+      instruction_file_hint: z.string().nullable(),
     }),
     description:
       "Check an unsaved repository binding configuration without a write.",

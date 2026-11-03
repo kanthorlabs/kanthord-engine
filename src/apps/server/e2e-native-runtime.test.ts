@@ -195,7 +195,7 @@ test(
             ssh_credential: "github-ssh",
             strategy: { base_branch: "main" },
             credential: "github",
-            prompts: { [SWE]: PROJECT },
+            prompts: { agents: { [SWE]: PROJECT } },
           },
         },
         general: { kind: "worker", config: await worker("general") },

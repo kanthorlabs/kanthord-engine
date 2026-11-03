@@ -18,6 +18,7 @@ import {
   cancelled,
   type Context,
   ContextCancelled,
+  DeadlineExceeded,
 } from "../kernel/context.ts";
 import {
   HealthRegistry,
@@ -45,7 +46,11 @@ import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { GIT_DEADLINE_EXCEEDED } from "../repository/git-failure.ts";
 import { SSH_AGENT_CLEANUP_TIMEOUT_MS } from "../repository/contract.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import { AgentErrorCode, type HolderScope } from "../agent/contract.ts";
+import {
+  AgentErrorCode,
+  type HolderScope,
+  InstructionFileState,
+} from "../agent/contract.ts";
 import { SERVER_HOLDER } from "../custody/contract.ts";
 import { Intent, nodeCreateSchema } from "../mission/contract.ts";
 import { shippedAsset } from "../kernel/assets.ts";
@@ -54,12 +59,14 @@ import {
   InvalidReason,
   PROMPT_SOURCE_MAX_BYTES,
 } from "../agent/prompt-source.ts";
+import { PROMPT_SOURCE_READ_MS } from "../kernel/prompt-source.ts";
 import {
   BINDING_CHECK_TIMEOUT_MS,
   BINDING_ID_PREFIX,
   BINDING_SET_INITIAL_VERSION,
   type BindingCheckEntry,
   BindingKind,
+  BindingPromptKey,
   bindingSetWriteInputSchema,
   BindingState,
   ChangeKind,
@@ -70,12 +77,15 @@ import {
   INSTANCE_COUNT_MAX,
   INSTANCE_COUNT_MIN,
   type InstanceOf,
+  INSTRUCTION_FILE_PATH_MAX_BYTES,
+  InstructionFileReason,
   Landing,
   LS_REMOTE_TIMEOUT_MS,
   PROJECT_ID_PREFIX,
   PROJECT_SERVICE_NAME,
   ProjectErrorCode,
   projectOperations,
+  PromptInvalidReason,
   REPOSITORY_FILES_READ_TIMEOUT_MS,
   REPOSITORY_PLATFORM,
   repositoryConfigSchema,
@@ -3079,7 +3089,10 @@ test("a write stores the binding prompts and a prompt change revises the binding
     undefined,
   );
   assert.equal(first.bindings[REPOSITORY_NAME]?.revision, FIRST_REVISION);
-  const prompts = { [SWE_AGENT]: "Run make check.", [RE_AGENT]: "Be strict." };
+  const prompts = {
+    repository: "A test file sits beside its source file.",
+    agents: { [SWE_AGENT]: "Run make check.", [RE_AGENT]: "Be strict." },
+  };
   const second = await f.write(
     {
       [REPOSITORY_NAME]: {
@@ -3097,24 +3110,27 @@ test("a write stores the binding prompts and a prompt change revises the binding
   );
 });
 
-test("a binding prompt key outside the agent catalog fails the strict parse", () => {
-  assert.deepEqual(
-    schemaIssues({
-      [REPOSITORY_NAME]: {
-        ...repositoryBinding(),
-        config: {
-          ...repositoryBinding().config,
-          prompts: { "coder@1": "text" },
+test("a binding prompt key outside the three keys or the agent catalog fails the strict parse", () => {
+  const promptsPath = [
+    "body",
+    "bindings",
+    REPOSITORY_NAME,
+    "config",
+    "prompts",
+  ];
+  for (const [prompts, path] of [
+    [{ [SWE_AGENT]: "text" }, promptsPath],
+    [{ agents: { "coder@1": "text" } }, [...promptsPath, "agents"]],
+  ] as const)
+    assert.deepEqual(
+      schemaIssues({
+        [REPOSITORY_NAME]: {
+          ...repositoryBinding(),
+          config: { ...repositoryBinding().config, prompts },
         },
-      },
-    }),
-    [
-      {
-        code: "unrecognized_keys",
-        path: ["body", "bindings", REPOSITORY_NAME, "config", "prompts"],
-      },
-    ],
-  );
+      }),
+      [{ code: "unrecognized_keys", path }],
+    );
 });
 
 test("a git-only platform accepts merge_push and refuses a credential or pull_request", async (t) => {
@@ -3439,19 +3455,51 @@ test("instance count and UTF-8 prompt bounds return domain refusals and roll bac
   }
   const oversized = "é".repeat(PROMPT_SOURCE_MAX_BYTES);
   assert.ok(Buffer.byteLength(oversized, UTF8) > PROMPT_SOURCE_MAX_BYTES);
+  const pathInvalid = {
+    prompt: BindingPromptKey.InstructionFile,
+    reason: PromptInvalidReason.PathInvalid,
+  };
   const refusals = [
     [
-      { [SWE_AGENT]: oversized },
-      { agent_name: SWE_AGENT, reason: InvalidReason.TooLarge },
+      { agents: { [SWE_AGENT]: oversized } },
+      { prompt: SWE_AGENT, reason: InvalidReason.TooLarge },
     ],
     [
-      { [RE_AGENT]: "a".repeat(PROMPT_SOURCE_MAX_BYTES + ONE_BYTE_OVER) },
-      { agent_name: RE_AGENT, reason: InvalidReason.TooLarge },
+      {
+        agents: {
+          [RE_AGENT]: "a".repeat(PROMPT_SOURCE_MAX_BYTES + ONE_BYTE_OVER),
+        },
+      },
+      { prompt: RE_AGENT, reason: InvalidReason.TooLarge },
     ],
     [
-      { [SWE_AGENT]: "valid", [RE_AGENT]: "bad\u0000text" },
-      { agent_name: RE_AGENT, reason: InvalidReason.ControlCharacter },
+      { agents: { [SWE_AGENT]: "valid", [RE_AGENT]: "bad\u0000text" } },
+      { prompt: RE_AGENT, reason: InvalidReason.ControlCharacter },
     ],
+    [
+      { repository: oversized },
+      { prompt: BindingPromptKey.Repository, reason: InvalidReason.TooLarge },
+    ],
+    [
+      { repository: "bad\rtext" },
+      {
+        prompt: BindingPromptKey.Repository,
+        reason: InvalidReason.ControlCharacter,
+      },
+    ],
+    ...[
+      "/AGENTS.md",
+      "../AGENTS.md",
+      "docs/../AGENTS.md",
+      "./AGENTS.md",
+      "docs/./a.md",
+      "docs//AGENTS.md",
+      "docs/",
+      "",
+      "docs\\AGENTS.md",
+      "AGENTS\tmd",
+      "a".repeat(INSTRUCTION_FILE_PATH_MAX_BYTES + ONE_BYTE_OVER),
+    ].map((path) => [{ instruction_file: path }, pathInvalid] as const),
   ] as const;
   for (const [prompts, details] of refusals)
     await rejectsWrite(
@@ -3466,13 +3514,8 @@ test("instance count and UTF-8 prompt bounds return domain refusals and roll bac
       details,
     );
   assert.deepEqual(f.snapshot(), before);
-  assert.deepEqual(
-    f.custody,
-    Array.from({ length: refusals.length }, () => ({
-      credential: sshCredentialOf(REPOSITORY_ADDRESS),
-      platform: SSH_CREDENTIAL_PLATFORM,
-    })),
-  );
+  assert.deepEqual(f.custody, []);
+  assert.deepEqual(f.ssh, []);
   assert.deepEqual(
     f.entries,
     Array.from({ length: TWO_INSTANCES }, () => ({
@@ -3495,7 +3538,10 @@ test("instance count and UTF-8 prompt bounds return domain refusals and roll bac
           ...repositoryBinding(),
           config: {
             ...repositoryBinding().config,
-            prompts: { [SWE_AGENT]: "a".repeat(PROMPT_SOURCE_MAX_BYTES) },
+            prompts: {
+              repository: "\t",
+              agents: { [SWE_AGENT]: "a".repeat(PROMPT_SOURCE_MAX_BYTES) },
+            },
           },
         },
       },
@@ -4927,7 +4973,11 @@ test("workerBindingRowOf retains the pinned configuration in the caller transact
 test("repositoryPolicyOf preserves the named revision after a strategy change", (t) => {
   const f = fixture(t);
   const baseBranch = "develop";
-  const prompts = { [SWE_AGENT]: "Follow the repository conventions." };
+  const prompts = {
+    instruction_file: "AGENTS.md",
+    repository: "A test file sits beside its source file.",
+    agents: { [SWE_AGENT]: "Follow the repository conventions." },
+  };
   f.store.transaction((tx) => {
     const project = insertProject(tx, PROJECT_NAME);
     const original = repositoryBinding();
@@ -4982,23 +5032,53 @@ test("a binding prompt change inserts the next binding revision and the policy k
   f.store.transaction((tx) => {
     const project = insertProject(tx, PROJECT_NAME);
     const original = repositoryBinding();
-    original.config.prompts = { [SWE_AGENT]: "first" };
+    original.config.prompts = { agents: { [SWE_AGENT]: "first" } };
     const pinned = persistBindings(tx, project.id, {
       [REPOSITORY_NAME]: original,
     }).bindings[REPOSITORY_NAME]!;
     const later = persistBindings(tx, project.id, {
       [REPOSITORY_NAME]: {
         ...original,
-        config: { ...original.config, prompts: { [SWE_AGENT]: "second" } },
+        config: {
+          ...original.config,
+          prompts: { agents: { [SWE_AGENT]: "second" } },
+        },
       },
     }).bindings[REPOSITORY_NAME]!;
     assert.equal(later.revision, pinned.revision + 1);
     assert.deepEqual(f.project.repositoryPolicyOf(tx, pinned.id)?.prompts, {
-      [SWE_AGENT]: "first",
+      agents: { [SWE_AGENT]: "first" },
     });
     assert.deepEqual(f.project.repositoryPolicyOf(tx, later.id)?.prompts, {
-      [SWE_AGENT]: "second",
+      agents: { [SWE_AGENT]: "second" },
     });
+  });
+});
+
+test("instructionBindingsOf answers only the repository revisions that name an instruction file", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    const named = repositoryBinding();
+    named.config.prompts = { instruction_file: "AGENTS.md" };
+    const unnamed = repositoryBinding(SECOND_REPOSITORY_ADDRESS);
+    unnamed.config.prompts = {
+      repository: "A test file sits beside its source file.",
+    };
+    const rows = persistBindings(tx, project.id, {
+      [REPOSITORY_NAME]: named,
+      [SECOND_REPOSITORY_NAME]: unnamed,
+      [WORKER_NAME]: workerBinding(),
+    }).bindings;
+    const ids = [
+      rows[REPOSITORY_NAME]!.id,
+      rows[SECOND_REPOSITORY_NAME]!.id,
+      rows[WORKER_NAME]!.id,
+      MISSING_NAME,
+    ];
+    assert.deepEqual(f.project.instructionBindingsOf(tx, ids), [
+      rows[REPOSITORY_NAME]!.id,
+    ]);
   });
 });
 
@@ -5206,6 +5286,10 @@ function verifyFixture(
         );
       return credentialAnswer;
     },
+    repositoryFiles: instructionRepositoryFiles({
+      state: RepositoryFileState.Absent,
+      text: null,
+    }).repositoryFiles,
     ...overrides,
   });
   return { f, sshCalls, sshStarted, credentialCalls, credentialAnswer };
@@ -5709,6 +5793,8 @@ test("binding.check answers the verify badges of an unsaved configuration and wr
     },
     ssh_credential: credentialAnswer,
     credential: credentialAnswer,
+    instruction_file: null,
+    instruction_file_hint: null,
   });
   assert.deepEqual(
     sshCalls.map(({ address }) => address),
@@ -5726,26 +5812,392 @@ test("binding.check answers the verify badges of an unsaved configuration and wr
     { credential: REPOSITORY_CREDENTIAL, platform: REPOSITORY_PLATFORM },
     sshSuitability,
     sshSuitability,
+    sshSuitability,
   ]);
+  const draftRelease = {
+    identity: f.caller.identity,
+    subject: {
+      kind: SshIdentitySubjectKind.Draft,
+      project_id: project.id,
+      credential: sshCredentialOf(REPOSITORY_ADDRESS),
+      address: REPOSITORY_ADDRESS,
+    },
+  };
   assert.deepEqual(
     f.releases.map(({ identity, subject }) => ({ identity, subject })),
-    [
-      {
-        identity: f.caller.identity,
-        subject: {
-          kind: SshIdentitySubjectKind.Draft,
-          project_id: project.id,
-          credential: sshCredentialOf(REPOSITORY_ADDRESS),
-          address: REPOSITORY_ADDRESS,
-        },
-      },
-    ],
+    [draftRelease, draftRelease],
   );
   assert.equal(f.commits(), commits + ONE_CALL);
   assert.equal(
     f.store.database.prepare("SELECT id FROM project_binding").all().length,
     NO_ITEMS,
   );
+});
+
+const INSTRUCTION_PATH = "AGENTS.md";
+const INSTRUCTION_TEXT = "Write every name in snake_case.\n";
+const DEADLINE_MARGIN_MS = 1000;
+
+function instructionRepositoryFiles(
+  file: { state: RepositoryFileState; text: string | null } | null,
+  head: string | null = INSTRUCTION_COMMIT,
+) {
+  const reads: Array<{
+    commit: string;
+    paths: readonly string[];
+    maxBytes: number;
+  }> = [];
+  const heads: string[] = [];
+  const repositoryFiles: Dependencies["repositoryFiles"] = {
+    async resolveBranchCommit(_address, branch) {
+      heads.push(branch);
+      return head;
+    },
+    async readFilesAtCommit(_address, commit, paths, maxBytes) {
+      reads.push({ commit, paths, maxBytes });
+      assert.ok(file);
+      return paths.map((path) => ({ path, ...file }));
+    },
+    listFilesAtCommit: unexpected,
+    readObjectIds: unexpected,
+    cloneSnapshot: unexpected,
+  };
+  return { repositoryFiles, reads, heads };
+}
+
+function withInstructionFile(prompts: Record<string, unknown> = {}) {
+  return {
+    ...repositoryBinding(),
+    config: {
+      ...repositoryBinding().config,
+      prompts: { instruction_file: INSTRUCTION_PATH, ...prompts },
+    },
+  };
+}
+
+test("a write reads the instruction file at the base head: a present or absent file passes", async (t) => {
+  for (const file of [
+    { state: RepositoryFileState.Present, text: INSTRUCTION_TEXT },
+    { state: RepositoryFileState.Absent, text: null },
+    { state: RepositoryFileState.OutsideRoot, text: null },
+  ]) {
+    const { repositoryFiles, reads, heads } = instructionRepositoryFiles(file);
+    const f = writeFixture(t, { repositoryFiles });
+    const result = await f.write({
+      [REPOSITORY_NAME]: withInstructionFile({ repository: "  " }),
+    });
+    assert.deepEqual(
+      repositoryConfigSchema.parse(result.bindings[REPOSITORY_NAME]?.config)
+        .prompts,
+      { instruction_file: INSTRUCTION_PATH, repository: "  " },
+    );
+    assert.deepEqual(heads, ["main"]);
+    assert.deepEqual(reads, [
+      {
+        commit: INSTRUCTION_COMMIT,
+        paths: [INSTRUCTION_PATH],
+        maxBytes: PROMPT_SOURCE_MAX_BYTES,
+      },
+    ]);
+    const unchanged = await f.write(
+      { [REPOSITORY_NAME]: withInstructionFile({ repository: "  " }) },
+      result.binding_set_version,
+    );
+    assert.equal(
+      unchanged.bindings[REPOSITORY_NAME]?.id,
+      result.bindings[REPOSITORY_NAME]?.id,
+    );
+    assert.equal(reads.length, ONE_CALL);
+    const revised = await f.write(
+      { [REPOSITORY_NAME]: withInstructionFile({ repository: "Be strict." }) },
+      unchanged.binding_set_version,
+    );
+    assert.equal(revised.bindings[REPOSITORY_NAME]?.revision, SECOND_REVISION);
+    assert.equal(reads.length, ONE_CALL + ONE_CALL);
+  }
+});
+
+test("a write refuses an instruction file that is invalid at the base head with details.prompt", async (t) => {
+  for (const [file, reason] of [
+    [{ state: RepositoryFileState.TooLarge, text: null }, "too_large"],
+    [{ state: RepositoryFileState.NotUtf8, text: null }, "not_utf8"],
+    [{ state: RepositoryFileState.Unreadable, text: null }, "unreadable"],
+    [
+      { state: RepositoryFileState.Present, text: "one\r\ntwo\n" },
+      InvalidReason.ControlCharacter,
+    ],
+  ] as const) {
+    const { repositoryFiles } = instructionRepositoryFiles(file);
+    const f = writeFixture(t, { repositoryFiles });
+    const before = f.snapshot();
+    await rejectsWrite(
+      f.write({ [REPOSITORY_NAME]: withInstructionFile() }),
+      HttpStatus.BadRequest,
+      ProjectErrorCode.RepositoryPromptInvalid,
+      { prompt: BindingPromptKey.InstructionFile, reason },
+    );
+    assert.deepEqual(f.snapshot(), before);
+  }
+});
+
+test("a write with an instruction file refuses an absent base branch and a failed read", async (t) => {
+  const absent = writeFixture(t, {
+    repositoryFiles: instructionRepositoryFiles(null, null).repositoryFiles,
+  });
+  await rejectsWrite(
+    absent.write({ [REPOSITORY_NAME]: withInstructionFile() }),
+    SSH_FAILURE_STATUS,
+    ProjectErrorCode.RepositoryBaseBranchAbsent,
+  );
+  const failing = instructionRepositoryFiles(null);
+  failing.repositoryFiles.readFilesAtCommit = async () => {
+    throw new Error("fetch failed");
+  };
+  const failed = writeFixture(t, { repositoryFiles: failing.repositoryFiles });
+  await assert.rejects(
+    failed.write({ [REPOSITORY_NAME]: withInstructionFile() }),
+    (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.code, ProjectErrorCode.RepositorySshUnreachable);
+      return true;
+    },
+  );
+});
+
+test("a write reads the instruction files of two changed bindings in parallel under one deadline", async (t) => {
+  const started: string[] = [];
+  const allStarted = Promise.withResolvers<void>();
+  const contexts: Context[] = [];
+  const f = writeFixture(t, {
+    repositoryFiles: {
+      async resolveBranchCommit(address, _branch, context) {
+        started.push(address);
+        contexts.push(context);
+        if (started.length === TWO_INSTANCES) allStarted.resolve();
+        await allStarted.promise;
+        return INSTRUCTION_COMMIT;
+      },
+      async readFilesAtCommit(_address, _commit, paths) {
+        return paths.map((path) => ({
+          path,
+          state: RepositoryFileState.Absent,
+          text: null,
+        }));
+      },
+      listFilesAtCommit: unexpected,
+      readObjectIds: unexpected,
+      cloneSnapshot: unexpected,
+    },
+  });
+  const second = withInstructionFile();
+  second.config = {
+    ...second.config,
+    address: SECOND_REPOSITORY_ADDRESS,
+    ssh_credential: sshCredentialOf(SECOND_REPOSITORY_ADDRESS),
+  };
+  f.secrets.set(sshCredentialOf(SECOND_REPOSITORY_ADDRESS), {
+    private_key: SSH_KEY.private_key,
+  });
+  const begun = Date.now();
+  await f.write({
+    [REPOSITORY_NAME]: withInstructionFile(),
+    [SECOND_REPOSITORY_NAME]: second,
+  });
+  assert.deepEqual(
+    started.sort(),
+    [REPOSITORY_ADDRESS, SECOND_REPOSITORY_ADDRESS].sort(),
+  );
+  for (const context of contexts) {
+    assert.ok(context.deadline !== null);
+    assert.ok(
+      context.deadline <= begun + PROMPT_SOURCE_READ_MS + DEADLINE_MARGIN_MS,
+    );
+  }
+});
+
+test("binding.check answers the state of the instruction file at the base head", async (t) => {
+  const cases = [
+    [
+      { state: RepositoryFileState.Present, text: INSTRUCTION_TEXT },
+      InstructionFileState.Present,
+      null,
+    ],
+    [
+      { state: RepositoryFileState.Absent, text: null },
+      InstructionFileState.Absent,
+      null,
+    ],
+    [
+      { state: RepositoryFileState.NotRegularFile, text: null },
+      InstructionFileState.Absent,
+      null,
+    ],
+    [
+      { state: RepositoryFileState.TooLarge, text: null },
+      InstructionFileState.Invalid,
+      RepositoryFileState.TooLarge,
+    ],
+    [
+      { state: RepositoryFileState.Present, text: "bad\u0000" },
+      InstructionFileState.Invalid,
+      InvalidReason.ControlCharacter,
+    ],
+  ] as const;
+  for (const [file, state, reason] of cases) {
+    const { repositoryFiles } = instructionRepositoryFiles(file);
+    const { f } = verifyFixture(t, "healthy", "healthy", {
+      custodySuitability: () => {},
+      repositoryFiles,
+    });
+    const project = f.store.transaction((tx) =>
+      insertProject(tx, PROJECT_NAME),
+    );
+    const result = await checkBinding(
+      f,
+      project.id,
+      withInstructionFile().config,
+    );
+    assert.deepEqual(result.instruction_file, {
+      path: INSTRUCTION_PATH,
+      commit: INSTRUCTION_COMMIT,
+      state,
+      reason,
+    });
+    assert.equal(result.instruction_file_hint, null);
+    assert.equal(
+      f.store.database.prepare("SELECT id FROM project_binding").all().length,
+      NO_ITEMS,
+    );
+  }
+});
+
+test("binding.check without an instruction file hints a present AGENTS.md at the base head", async (t) => {
+  const cases = [
+    [
+      instructionRepositoryFiles({
+        state: RepositoryFileState.Present,
+        text: INSTRUCTION_TEXT,
+      }),
+      "AGENTS.md exists at the base head.",
+      [[INSTRUCTION_PATH]],
+    ],
+    [
+      instructionRepositoryFiles({
+        state: RepositoryFileState.Absent,
+        text: null,
+      }),
+      null,
+      [[INSTRUCTION_PATH]],
+    ],
+    [instructionRepositoryFiles(null, null), null, []],
+  ] as const;
+  for (const [{ repositoryFiles, reads, heads }, hint, paths] of cases) {
+    const { f } = verifyFixture(t, "healthy", "healthy", {
+      custodySuitability: () => {},
+      repositoryFiles,
+    });
+    const project = f.store.transaction((tx) =>
+      insertProject(tx, PROJECT_NAME),
+    );
+    const result = await checkBinding(
+      f,
+      project.id,
+      repositoryBinding().config,
+    );
+    assert.equal(result.instruction_file, null);
+    assert.equal(result.instruction_file_hint, hint);
+    assert.deepEqual(heads, ["main"]);
+    assert.deepEqual(
+      reads.map((read) => read.paths),
+      paths,
+    );
+  }
+});
+
+test("binding.check answers an unreachable instruction file and refuses an invalid path", async (t) => {
+  const { repositoryFiles } = instructionRepositoryFiles(null, null);
+  const { f } = verifyFixture(t, "healthy", "healthy", {
+    custodySuitability: () => {},
+    repositoryFiles,
+  });
+  const project = f.store.transaction((tx) => insertProject(tx, PROJECT_NAME));
+  const result = await checkBinding(
+    f,
+    project.id,
+    withInstructionFile().config,
+  );
+  assert.deepEqual(result.instruction_file, {
+    path: INSTRUCTION_PATH,
+    commit: null,
+    state: InstructionFileState.Unreachable,
+    reason: InstructionFileReason.BaseBranchAbsent,
+  });
+  await assert.rejects(
+    checkBinding(f, project.id, {
+      ...repositoryBinding().config,
+      prompts: { instruction_file: "../AGENTS.md" },
+    }),
+    (error) => {
+      assert.ok(error instanceof OperationError);
+      assert.equal(error.code, ProjectErrorCode.RepositoryPromptInvalid);
+      assert.deepEqual(error.details, {
+        prompt: BindingPromptKey.InstructionFile,
+        reason: PromptInvalidReason.PathInvalid,
+      });
+      return true;
+    },
+  );
+});
+
+test("binding.check answers the failure reason of a failed instruction file read and of an alias host", async (t) => {
+  const failing = instructionRepositoryFiles(null);
+  failing.repositoryFiles.resolveBranchCommit = async () => {
+    throw new DeadlineExceeded();
+  };
+  const failed = verifyFixture(t, "healthy", "healthy", {
+    custodySuitability: () => {},
+    repositoryFiles: failing.repositoryFiles,
+  }).f;
+  const project = failed.store.transaction((tx) =>
+    insertProject(tx, PROJECT_NAME),
+  );
+  const unreachable = (reason: InstructionFileReason) => ({
+    path: INSTRUCTION_PATH,
+    commit: null,
+    state: InstructionFileState.Unreachable,
+    reason,
+  });
+  assert.deepEqual(
+    (await checkBinding(failed, project.id, withInstructionFile().config))
+      .instruction_file,
+    unreachable(InstructionFileReason.DeadlineExceeded),
+  );
+  const { repositoryFiles, heads } = instructionRepositoryFiles({
+    state: RepositoryFileState.Present,
+    text: INSTRUCTION_TEXT,
+  });
+  const alias = verifyFixture(t, "healthy", "healthy", {
+    custodySuitability: () => {},
+    repositoryFiles,
+  }).f;
+  const aliasProject = alias.store.transaction((tx) =>
+    insertProject(tx, PROJECT_NAME),
+  );
+  alias.grantAddress.value = ALIAS_ADDRESS;
+  const result = await checkBinding(
+    alias,
+    aliasProject.id,
+    withInstructionFile().config,
+  );
+  assert.deepEqual(
+    result.instruction_file,
+    unreachable(InstructionFileReason.AddressInvalid),
+  );
+  assert.equal(
+    result.address.failure_reason,
+    ResourceFailureReason.AddressInvalid,
+  );
+  assert.deepEqual(heads, []);
 });
 
 test("binding.check answers deadline_exceeded for an address read that exceeds its deadline", async (t) => {

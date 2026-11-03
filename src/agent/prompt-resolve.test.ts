@@ -6,6 +6,7 @@ import { background } from "../kernel/context.ts";
 import { temporary } from "../kernel/test-support.ts";
 import { getAgentDeclaration } from "./catalog.ts";
 import {
+  InstructionFileState,
   PromptLayer,
   PromptOrigin,
   PromptPart,
@@ -25,7 +26,6 @@ import {
 } from "./prompt-render.ts";
 import {
   type InstructionFileRead,
-  InstructionFileState,
   type PromptReaders,
   resolvePrompt,
   resolveReference,
@@ -126,7 +126,7 @@ test("the references of a composition resolve to the composed text", async (t) =
         {
           binding_id: BINDING_ID,
           name: BINDING_NAME,
-          prompts: { [AGENT]: BINDING_TEXT },
+          prompts: { agents: { [AGENT]: BINDING_TEXT } },
         },
       ],
       AGENT,

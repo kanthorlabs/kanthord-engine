@@ -218,7 +218,9 @@ function fixture(
         ? {
             binding_id: BINDING_ID,
             name: BINDING_NAME,
-            prompts: { [ENV_AGENT_NAME]: ENV_BINDING_TEXT, "swe@1": SWE_TEXT },
+            prompts: {
+              agents: { [ENV_AGENT_NAME]: ENV_BINDING_TEXT, "swe@1": SWE_TEXT },
+            },
           }
         : null,
     templates: async () => SHIPPED_TEMPLATES,

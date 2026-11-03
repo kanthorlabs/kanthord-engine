@@ -67,6 +67,15 @@ export const PromptPartState = {
 export type PromptPartState =
   (typeof PromptPartState)[keyof typeof PromptPartState];
 
+export const InstructionFileState = {
+  Present: "present",
+  Absent: "absent",
+  Invalid: "invalid",
+  Unreachable: "unreachable",
+} as const;
+export type InstructionFileState =
+  (typeof InstructionFileState)[keyof typeof InstructionFileState];
+
 export const PromptView = { Final: "final" } as const;
 export type PromptView = (typeof PromptView)[keyof typeof PromptView];
 

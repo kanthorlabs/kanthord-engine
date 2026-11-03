@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import type { Context } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import {
+  InstructionFileState,
   PromptOrigin,
   PromptPart,
   type PromptPartAnswer,
@@ -13,15 +14,6 @@ import { shippedText } from "./prompt-files.ts";
 import { finalPrompt, isFramingTemplate, promptPart } from "./prompt-render.ts";
 import { readAgentFile, SourceState } from "./prompt-source.ts";
 import { renderTemplate, SHIPPED_TEMPLATES } from "./prompt-templates.ts";
-
-export const InstructionFileState = {
-  Present: "present",
-  Absent: "absent",
-  Invalid: "invalid",
-  Unreachable: "unreachable",
-} as const;
-export type InstructionFileState =
-  (typeof InstructionFileState)[keyof typeof InstructionFileState];
 
 export type InstructionFileRead =
   | { state: typeof InstructionFileState.Present; text: string }

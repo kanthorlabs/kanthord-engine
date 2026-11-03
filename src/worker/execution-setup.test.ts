@@ -847,15 +847,17 @@ async function twoAgentAnswer(
   };
   const policies: Record<
     string,
-    { name: string; prompts: Record<string, string> }
+    { name: string; prompts: { agents: Record<string, string> } }
   > = {
     [createIdentity("binding")]: {
       name: "api",
-      prompts: { "swe@1": SWE_BINDING_TEXT, "re@1": RE_BINDING_TEXT },
+      prompts: {
+        agents: { "swe@1": SWE_BINDING_TEXT, "re@1": RE_BINDING_TEXT },
+      },
     },
     [createIdentity("binding")]: {
       name: "web",
-      prompts: { "swe@1": SECOND_SWE_TEXT, "re@1": "  " },
+      prompts: { agents: { "swe@1": SECOND_SWE_TEXT, "re@1": "  " } },
     },
   };
   const caller: CallerContext = {

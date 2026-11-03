@@ -362,15 +362,15 @@ test("agent read with a repository binding answers the binding prompt of the age
   const root = temporary(t);
   const policies: Record<
     string,
-    { project_id: string; prompts: Record<string, string> }
+    { project_id: string; prompts: { agents: Record<string, string> } }
   > = {
     "binding-on": {
       project_id: "project-a",
-      prompts: { [AGENT]: PROJECT_TEXT, "re@1": REVIEW_TEXT },
+      prompts: { agents: { [AGENT]: PROJECT_TEXT, "re@1": REVIEW_TEXT } },
     },
     "binding-blank": {
       project_id: "project-a",
-      prompts: { [AGENT]: " \n" },
+      prompts: { agents: { [AGENT]: " \n" } },
     },
   };
   const f = enablementFixture(t, {
