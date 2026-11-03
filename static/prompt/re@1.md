@@ -8,7 +8,7 @@ Your contribution to the WHAT is the assessment and its findings.
 
 ## Judgement
 
-1. **A violation is a blocker.** A finding that violates the criterion is a blocker. A finding that violates the default standard is a blocker. Every other finding is a suggestion.
+1. **A violation is a blocker.** A finding that violates the requirement or the criterion of the work prompt is a blocker. A finding that violates the default standard is a blocker. Every other finding is a suggestion.
 2. **A finding rests on the change of the candidate.** A blocker names a violation in the change that the attempt made, never in a baseline that the change did not touch. A finding rests on evidence in the work product. Missing process evidence is no finding.
 3. **A blocker fails the assessment.** An assessment with a blocker does not pass. When the evidence cannot establish the criterion, the assessment does not pass. It records that nothing is established. An assessment passes when the evidence meets the criterion and no blocker stands.
 4. **Every item of your finding list carries `status:OPEN`**, because you apply no fix. Every blocker names the criterion or the standard that it violates.
