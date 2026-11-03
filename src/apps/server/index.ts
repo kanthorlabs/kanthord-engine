@@ -30,6 +30,7 @@ import {
 } from "../../scheduler/contract.ts";
 import { trackingMigrations, TrackingService } from "../../tracking/index.ts";
 import {
+  type ExecutionTrace,
   MISSION_PRODUCER,
   PROJECT_PRODUCER,
   TRACKING_SERVICE_NAME,
@@ -120,7 +121,6 @@ import {
 } from "../../worker/index.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
 import { ThreadDriver } from "./thread-driver.ts";
-import { projectInstructionFileReader } from "./prompt-base.ts";
 import { ContainerDriver } from "./container-driver.ts";
 import { EnvironmentImages } from "./environment-image.ts";
 import { EnvironmentProbe } from "./environment-probe.ts";
@@ -497,6 +497,13 @@ export function composeServices(options: {
     },
     health: options.health,
   });
+  const promptRecordOf = (trace: ExecutionTrace, agentName: string) => {
+    const span = tracking.serverSpanOf(
+      trace,
+      agentPromptSpanId(trace.execution_id, agentName),
+    );
+    return span === null ? null : storedPromptFacts(span.attributes);
+  };
   const workQueue: WorkQueue = {
     insert: (tx, nodeId, projectId, priority) =>
       scheduler.insert(tx, nodeId, projectId, priority),
@@ -624,17 +631,7 @@ export function composeServices(options: {
         const row = scheduler.executionOf(executionId);
         return row === undefined ? null : executionTrace(row);
       },
-      promptRecordOf: (trace, agentName) => {
-        const span = tracking.serverSpanOf(
-          trace,
-          agentPromptSpanId(trace.execution_id, agentName),
-        );
-        return span === null ? null : storedPromptFacts(span.attributes);
-      },
-      instructionFileOf: projectInstructionFileReader({
-        instructionFileOf: (bindingId, commit, context) =>
-          project.instructionFileOf(bindingId, commit, context),
-      }),
+      promptRecordOf,
     },
     toolDeclarations: (name) => toolDeclarations(name),
     logger: options.logger,
@@ -742,12 +739,9 @@ export function composeServices(options: {
       },
       promptRecordOf: (executionId, agentName) => {
         const row = scheduler.executionOf(executionId);
-        if (row === undefined) return null;
-        const span = tracking.serverSpanOf(
-          executionTrace(row),
-          agentPromptSpanId(executionId, agentName),
-        );
-        return span === null ? null : storedPromptFacts(span.attributes);
+        return row === undefined
+          ? null
+          : promptRecordOf(executionTrace(row), agentName);
       },
     },
     store: options.store,

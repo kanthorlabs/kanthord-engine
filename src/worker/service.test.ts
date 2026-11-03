@@ -281,9 +281,6 @@ const fakeAgentCollaborations: Omit<AgentDependencies, "store"> = {
     promptRecordOf: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
-    instructionFileOf: () => {
-      throw new Error("UNEXPECTED_COLLABORATION");
-    },
   },
   providerHealthCheck: () => async () => ResourceStatus.Unknown,
   providerCapability: () => PROVIDER_CAPABILITY,

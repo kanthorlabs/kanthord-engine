@@ -27,7 +27,10 @@ import { LLM_PLATFORMS } from "../../llm/platforms.ts";
 import { background } from "../../kernel/context.ts";
 import { takeHandover } from "../worker/handover.ts";
 import { httpTransport } from "../worker/transport.ts";
-import { repositoryOperations } from "../../repository/contract.ts";
+import {
+  RepositoryFileState,
+  repositoryOperations,
+} from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import {
   connectionPayloadSchema,
@@ -51,6 +54,7 @@ import {
   AgentErrorCode,
   agentOperations,
   ChainLevel,
+  PromptPart,
 } from "../../agent/contract.ts";
 import { Intent, missionOperations } from "../../mission/contract.ts";
 import { schedulerOperations, WorkPullKind } from "../../scheduler/contract.ts";
@@ -75,7 +79,10 @@ import {
   openEnvelope,
   sealEnvelope,
 } from "../../kernel/handover.ts";
-import { FAKE_COMMIT } from "./container-fakes-test-support.ts";
+import {
+  FAKE_COMMIT,
+  fakeRepositoryFiles,
+} from "./container-fakes-test-support.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import {
   COVERING_WORKER_BINDINGS,
@@ -413,6 +420,7 @@ async function setup(
     extraRepository?: boolean;
     handoverRefreshWaitMs?: number;
     promptBase?: PromptBase;
+    repositoryFiles?: ReturnType<typeof fakeRepositoryFiles>;
     instructionFile?: string;
     implementBindsOther?: boolean;
   } = {},
@@ -434,6 +442,7 @@ async function setup(
     oauthProviders: oauth ? () => [offlineProvider(oauth)] : undefined,
     handoverRefreshWaitMs: setupOptions.handoverRefreshWaitMs,
     promptBase: setupOptions.promptBase,
+    repositoryFiles: setupOptions.repositoryFiles,
   });
   async function call<T extends Operation>(
     operation: T,
@@ -1619,8 +1628,29 @@ test("the server setup stores the agent.prompt span with the references and the 
   assert.ok(!rows[0]!.attributes.includes(SWE_AGENT_PROMPT));
 });
 
+const INSTRUCTION_PATH = "AGENTS.md";
+const INSTRUCTION_TEXT = "Write every name outside the code in snake_case.";
+
 test("agent prompt resolve over HTTP rebuilds the served system prompt for a human and refuses a worker, an absent record and an absent execution", async (t) => {
-  const h = await setup(t, HTTP, undefined, { instructionFile: "AGENTS.md" });
+  const files = fakeRepositoryFiles();
+  const h = await setup(t, HTTP, undefined, {
+    instructionFile: INSTRUCTION_PATH,
+    repositoryFiles: {
+      ...files,
+      readFilesAtCommit: async (address, commit, paths, ...rest) =>
+        paths.includes(INSTRUCTION_PATH)
+          ? paths.map((path) =>
+              path === INSTRUCTION_PATH
+                ? {
+                    path,
+                    state: RepositoryFileState.Present,
+                    text: INSTRUCTION_TEXT,
+                  }
+                : { path, state: RepositoryFileState.Absent, text: null },
+            )
+          : files.readFilesAtCommit(address, commit, paths, ...rest),
+    },
+  });
   completed(await h.handover());
   const setupAnswer = completed(
     await h.call(
@@ -1634,6 +1664,19 @@ test("agent prompt resolve over HTTP rebuilds the served system prompt for a hum
     ),
   );
   const served = setupAnswer.agents[0]!;
+  assert.deepEqual(
+    served.prompt.sources
+      .filter(({ part }) => part === PromptPart.InstructionFile)
+      .map(({ path, commit, binding_id }) => ({ path, commit, binding_id })),
+    [
+      {
+        path: INSTRUCTION_PATH,
+        commit: FAKE_COMMIT,
+        binding_id: h.bindings.repo!.id,
+      },
+    ],
+  );
+  assert.ok(served.prompt.final.includes(INSTRUCTION_TEXT));
   const resolve = (executionId: string, agentName: string, token = h.f.token) =>
     h.call(
       agentOperations["prompt.resolve"],

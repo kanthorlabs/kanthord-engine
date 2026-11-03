@@ -39,7 +39,7 @@ import {
   promptReferenceSchema,
   ToolSource,
 } from "./contract.ts";
-import type { InstructionFileRead } from "./prompt-resolve.ts";
+import { PROMPT_SOURCE_READ_MS } from "../kernel/prompt-source.ts";
 import { agentMigrations } from "./migrations.ts";
 import { getAgentDeclaration } from "./catalog.ts";
 import {
@@ -53,7 +53,7 @@ import {
   type CallerContext,
   OperationRegistry,
 } from "../kernel/operation.ts";
-import { background } from "../kernel/context.ts";
+import { background, type Context } from "../kernel/context.ts";
 import { HealthScope, ResourceStatus } from "../kernel/health.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -141,9 +141,6 @@ const fakeCollaborations: Omit<Dependencies, "store" | "credentialHolds"> = {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
     promptRecordOf: () => {
-      throw new Error("UNEXPECTED_COLLABORATION");
-    },
-    instructionFileOf: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
   },
@@ -707,7 +704,7 @@ async function resolveFixture(
   options: {
     trace?: boolean;
     record?: (sources: PromptReference[]) => PromptReference[] | null;
-    file?: InstructionFileRead;
+    file?: InstructionFileState;
   } = {},
 ) {
   const stack = stackFixture(t, {
@@ -717,6 +714,7 @@ async function resolveFixture(
   const sources = referencesOf(composed.prompt.parts!);
   const lookups: [string, string][] = [];
   const reads: string[] = [];
+  const contexts: Context[] = [];
   const f = enablementFixture(t, {
     repositoryPromptsOf: (_, id) => ({
       binding_id: id,
@@ -741,14 +739,36 @@ async function resolveFixture(
           ? null
           : { sources: recorded, engine_version: RESOLVE_VERSION };
       },
-      instructionFileOf: async (bindingId, commit, path) => {
-        reads.push(`${bindingId}:${commit}:${path}`);
-        return (
-          options.file ?? {
-            state: InstructionFileState.Present,
-            text: STACK_PINNED_TEXT,
-          }
-        );
+    },
+    promptBase: {
+      baseCommitOf: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
+      instructionFileOf: async (bindingId, commit, context) => {
+        reads.push(`${bindingId}:${commit}`);
+        contexts.push(context);
+        if (options.file === InstructionFileState.Unreachable)
+          throw new OperationError(
+            422,
+            ProjectErrorCode.RepositorySshUnreachable,
+            "Repository is unreachable.",
+            { failure_reason: "deadline_exceeded" },
+          );
+        return options.file === InstructionFileState.Invalid
+          ? {
+              path: STACK_FILE,
+              commit,
+              state: InstructionFileState.Invalid,
+              reason: "not_utf8",
+              text: null,
+            }
+          : {
+              path: STACK_FILE,
+              commit,
+              state: InstructionFileState.Present,
+              reason: null,
+              text: STACK_PINNED_TEXT,
+            };
       },
     },
   });
@@ -764,14 +784,30 @@ async function resolveFixture(
         f.caller,
       ),
     );
-  return { composed, sources, lookups, reads, resolve };
+  return {
+    composed,
+    sources,
+    lookups,
+    reads,
+    contexts,
+    resolve,
+    caller: f.caller,
+  };
 }
 
 test("agent prompt resolve rebuilds the parts and the final prompt from the span references, with the engine version", async (t) => {
   const f = await resolveFixture(t);
+  const before = Date.now();
   const answer = await f.resolve();
   assert.deepEqual(f.lookups, [[RESOLVE_EXECUTION, AGENT]]);
-  assert.deepEqual(f.reads, [`binding-on:${STACK_PINNED}:${STACK_FILE}`]);
+  assert.deepEqual(f.reads, [`binding-on:${STACK_PINNED}`]);
+  const [context] = f.contexts;
+  assert.deepEqual(f.contexts, [context]);
+  assert.notEqual(context, f.caller.context);
+  const deadline = context!.deadline;
+  assert.ok(deadline);
+  assert.ok(deadline >= before);
+  assert.ok(deadline <= Date.now() + PROMPT_SOURCE_READ_MS);
   assert.deepEqual(answer, {
     parts: f.composed.prompt.parts,
     final: f.composed.prompt.final,
@@ -804,8 +840,8 @@ test("agent prompt resolve answers a changed layer 1 part with no text and a nul
 
 test("agent prompt resolve answers an unreachable and an invalid instruction file as a part state", async (t) => {
   for (const [file, state] of [
-    [{ state: InstructionFileState.Unreachable }, PromptPartState.Unreachable],
-    [{ state: InstructionFileState.Invalid }, PromptPartState.Invalid],
+    [InstructionFileState.Unreachable, PromptPartState.Unreachable],
+    [InstructionFileState.Invalid, PromptPartState.Invalid],
   ] as const) {
     const f = await resolveFixture(t, { file });
     const answer = await f.resolve();

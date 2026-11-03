@@ -4,7 +4,7 @@ import type { Transaction } from "../kernel/store.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { approvedModels } from "../llm/platforms.ts";
-import type { AgentName, ApprovedModelsFn } from "../agent/contract.ts";
+import type { ApprovedModelsFn } from "../agent/contract.ts";
 import type { Environment } from "../kernel/devcontainer.ts";
 import { EnvironmentSource } from "../kernel/devcontainer.ts";
 import {
@@ -20,7 +20,6 @@ import {
 import { bindingParts, finalPrompt } from "../agent/prompt-render.ts";
 import {
   InstructionFileState,
-  PromptPart,
   type PromptPartAnswer,
   PromptPartState,
   PromptSourceReason,
@@ -32,7 +31,7 @@ import {
 } from "../agent/instruction-files.ts";
 import { CancellationContext, type Context } from "../kernel/context.ts";
 import { PROMPT_SOURCE_READ_MS } from "../kernel/prompt-source.ts";
-import { resolvePrompt } from "../agent/prompt-resolve.ts";
+import { bindingText, resolvePrompt } from "../agent/prompt-resolve.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { Dependencies, WorkerService } from "./service.ts";
 import { RepositoryErrorCode } from "../repository/contract.ts";
@@ -145,15 +144,13 @@ async function storedPrompt(
   const resolved = await resolvePrompt(facts.sources, {
     agentName: facts.agent_name,
     bindingTextOf: (bindingId, part, agentName) =>
-      dependencies.store.transaction((tx) => {
-        const prompts = dependencies.repositoryPolicyOf(tx, bindingId)?.prompts;
-        if (prompts === undefined) return null;
-        const text =
-          part === PromptPart.Repository
-            ? prompts.repository
-            : prompts.agents?.[agentName as AgentName];
-        return text ?? null;
-      }),
+      bindingText(
+        dependencies.store.transaction(
+          (tx) => dependencies.repositoryPolicyOf(tx, bindingId)?.prompts,
+        ),
+        part,
+        agentName,
+      ),
     instructionFileOf: async (bindingId, commit, path, context) => {
       assert.ok(promptBase);
       const file = await promptBase.instructionFileOf(

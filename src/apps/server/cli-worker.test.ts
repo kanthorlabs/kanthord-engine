@@ -55,6 +55,34 @@ test("agent get CLI publishes the declaration and rejects a machine caller", asy
   assert.equal(response.status, unauthorized);
 });
 
+test("agent prompt resolve CLI answers scheduler.execution.not_found with the execution of an absent execution", async (t) => {
+  const fixture = await gatewayFixture(t);
+  const env = {
+    ...environment(temporary(t)),
+    KANTHORD_ENDPOINT: fixture.endpoint,
+    KANTHORD_TOKEN: fixture.token,
+  };
+  const execution = "execution_absent";
+  const absent = await command(
+    [
+      "agent",
+      "prompt",
+      "resolve",
+      "--execution",
+      execution,
+      "--agent",
+      NATIVE_AGENT,
+    ],
+    env,
+  );
+  assert.equal(absent.code, ExitCode.Failure);
+  assert.equal(absent.stdout, EMPTY_OUTPUT);
+  assert.match(absent.stderr, /^scheduler\.execution\.not_found:/);
+  const details = /^details: (.+)$/m.exec(absent.stderr)?.[1];
+  assert.ok(details, absent.stderr);
+  assert.deepEqual(JSON.parse(details), { execution_id: execution });
+});
+
 test("deregistration CLI validates identity and token and returns replayable JSON", async (t) => {
   const fixture = await gatewayFixture(t, { machines: fakeMachines() });
   const env = {

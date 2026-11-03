@@ -12,7 +12,42 @@ import {
   PromptPartState,
   type PromptReference,
 } from "./contract.ts";
+import { ProjectErrorCode } from "../project/contract.ts";
 import type { InstructionFilePart } from "./prompt-render.ts";
+import type { InstructionFileRead, PromptReaders } from "./prompt-resolve.ts";
+
+export const UNREACHABLE_CODES: ReadonlySet<string> = new Set([
+  ProjectErrorCode.RepositoryBaseBranchAbsent,
+  ProjectErrorCode.RepositorySshUnreachable,
+]);
+
+export function isUnreachable(error: unknown): boolean {
+  return error instanceof OperationError && UNREACHABLE_CODES.has(error.code);
+}
+
+export function projectInstructionFileReader(project: {
+  instructionFileOf: InstructionFileReader;
+}): PromptReaders["instructionFileOf"] {
+  return async (bindingId, commit, path, context) => {
+    let file;
+    try {
+      file = await project.instructionFileOf(bindingId, commit, context);
+    } catch (error) {
+      if (isUnreachable(error))
+        return { state: InstructionFileState.Unreachable };
+      throw error;
+    }
+    if (file === null) return { state: InstructionFileState.Absent };
+    assert.equal(file.path, path);
+    if (file.state !== InstructionFileState.Present)
+      return { state: file.state };
+    assert.ok(file.text !== null);
+    return {
+      state: InstructionFileState.Present,
+      text: file.text,
+    } satisfies InstructionFileRead;
+  };
+}
 
 export interface InstructionFileTarget {
   binding_id: string;

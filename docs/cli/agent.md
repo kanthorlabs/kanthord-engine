@@ -218,18 +218,19 @@ Each part resolves by its `origin`:
 - `binary` and `file`: the current shipped text or the current file of `agent.prompt.agent_directory`. KanthorD keeps no copy of a layer 1 text.
 
 Each resolved text passes a digest check against `digest`. A text with another digest, or a source that no longer exists, answers `changed` with a `null` text.
+Each part holds the `digest` and `commit` of its span reference, also when the part is not `resolved`.
 A failed part is a part state, and the command answers `200`. The read takes every instruction file in parallel under one 20 s deadline.
 
 A deploy that edits a shipped text turns every older trace into `changed` for that part, with `final: null`.
 For a `changed` part of origin `binary`, read the old shipped text at `engine_version` in a root checkout of the kanthord repository:
 
 ```sh
-git -C engine show "$(git rev-parse <engine_version>:engine):static/prompt/<name>"
-git -C engine show "$(git rev-parse <engine_version>:engine):static/prompt/template/<name>.md"
+git -C engine show "$(git rev-parse "v<engine_version>:engine"):static/prompt/<name>"
+git -C engine show "$(git rev-parse "v<engine_version>:engine"):static/prompt/template/<name>.md"
 ```
 
 The first command reads a part with the name `<name>`, for example `base.md`. The second command reads a `framing` part, for example `framing-worker`.
-The release tag `<engine_version>` of the root repository names the engine commit. A development build has no release tag, so its version names no unique engine commit.
+The release tag `v<engine_version>` of the root repository names the engine commit. A development build has no release tag, so its version names no unique engine commit.
 For a `changed` part of origin `file`, read the old file from the version control of the agent directory.
 
 Compare the system prompts of two executions with `diff`:
@@ -461,7 +462,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `agent.prompt.template_invalid`                           | An override file or a prompt template is invalid; details `{ file, path, reason }`, and `template` for a template.                                                                                                                                              | agent get                                                                                                                                         |
 | 404   | `agent.prompt.record_absent`                              | The trace of the execution holds no `agent.prompt` span for the agent; details `{ execution_id, agent_name }`.                                                                                                                                                  | agent prompt resolve                                                                                                                              |
 | 404   | `scheduler.execution.not_found`                           | The `--execution` value names no execution.                                                                                                                                                                                                                     | agent prompt resolve                                                                                                                              |
-| 400   | `gateway.request.validation_failed`                       | The request violates the input schema, for example a `view` value other than `final`, `attempt` without `node_id`, or `node_id` with `project_id` or `binding_id`.                                                                                              | agent get                                                                                                                                         |
+| 400   | `gateway.request.validation_failed`                       | The request violates the input schema, for example a `view` value other than `final`, `attempt` without `node_id`, or `node_id` with `project_id` or `binding_id`.                                                                                              | agent get, agent prompt resolve                                                                                                                   |
 
 `error.details` names the agent and lists affected bindings or other dependents when applicable. No error holds secret material.
 
