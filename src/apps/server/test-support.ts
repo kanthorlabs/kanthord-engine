@@ -615,6 +615,7 @@ export async function gatewayFixture(
     path?: string;
     scheduler?: Partial<SchedulerConfig>;
     project?: { environment_memory_mb?: number };
+    mission?: { rework_limit?: number };
     oauthProviders?: Parameters<typeof composeServices>[0]["oauthProviders"];
     loadModelRuntime?: Parameters<
       typeof composeServices
@@ -657,6 +658,7 @@ export async function gatewayFixture(
     gateway: { port: 0, allowed_hosts: ["localhost"] },
     scheduler: options.scheduler ?? {},
     project: options.project ?? {},
+    mission: options.mission ?? {},
     agent:
       options.agentDirectory === undefined
         ? {}

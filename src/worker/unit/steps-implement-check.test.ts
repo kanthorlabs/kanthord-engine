@@ -98,6 +98,8 @@ suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.deepEqual((await startCheck(h)).pending, []);
     h.verdict = {
       text: `Unmet:\n- ${current.id}: still open`,
+      findings: [],
+      round: null,
       judged: [],
     };
     const reworked = await startCheck(h);
@@ -129,6 +131,8 @@ suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
     await recordDone(h, current);
     h.verdict = {
       text: requested,
+      findings: [],
+      round: null,
       judged: [
         {
           binding_id: h.checkouts[0]!.binding_id,
@@ -167,6 +171,8 @@ suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
     for (const current of tasks) await recordDone(h, current);
     h.verdict = {
       text: "The route stays unhandled.",
+      findings: [],
+      round: null,
       judged: [
         {
           binding_id: h.checkouts[0]!.binding_id,

@@ -144,6 +144,8 @@ suite(
       await recordDone(h, passing);
       h.verdict = {
         text: "The verdict names no task.",
+        findings: [],
+        round: null,
         judged: [
           {
             binding_id: h.checkouts[0]!.binding_id,

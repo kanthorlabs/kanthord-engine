@@ -1,6 +1,17 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
-import type { TaskContent } from "../../mission/contract.ts";
+import {
+  type Finding,
+  FINDING_MAX,
+  FINDING_TEXT_MAX_BYTES,
+  FindingAction,
+  findingActionSchema,
+  FindingGround,
+  findingGroundSchema,
+  FindingKind,
+  REVIEWER_FINDING_LABEL_PATTERN,
+  type TaskContent,
+} from "../../mission/contract.ts";
 import type { WorkPrompt } from "../../agent/prompt-composer.ts";
 import type { Verification, VerificationRun } from "./verification.ts";
 import {
@@ -19,25 +30,35 @@ const NO_ITEMS = 0;
 const MIN_VERIFICATIONS = 1;
 const FIRST_ENTRY = 0;
 const RATIONALE_SEPARATOR = "\n\n";
+const ISSUE_PATH_SEPARATOR = ".";
+const BLOCKER_LABEL_PREFIX = "B";
 export const REQUESTED_CHANGES_MAX_BYTES = 4096;
 const AssessmentResult = {
   Success: "success",
   CriterionNotMet: "criterion-not-met",
   Undetermined: "undetermined",
 } as const;
-export const UnmetGround = {
-  Stated: "stated",
-  Standard: "standard",
-  Unstated: "unstated",
-  Conflict: "conflict",
-} as const;
-export const unmetGroundSchema = z.enum(UnmetGround);
-export type UnmetGround = z.infer<typeof unmetGroundSchema>;
-const unmetItemSchema = z.strictObject({
-  id: z.string().trim().min(1),
-  reason: z.string().trim().min(1),
-  ground: unmetGroundSchema,
+export const UnmetGround = FindingGround;
+export const unmetGroundSchema = findingGroundSchema;
+export type UnmetGround = FindingGround;
+const findingTextSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .refine((text) => Buffer.byteLength(text, "utf8") <= FINDING_TEXT_MAX_BYTES, {
+    message: `A finding text holds at most ${FINDING_TEXT_MAX_BYTES} bytes`,
+  });
+const judgementFindingSchema = z.strictObject({
+  label: z.string().regex(REVIEWER_FINDING_LABEL_PATTERN),
+  action: findingActionSchema,
+  task_id: z.string().nullable(),
+  ground: findingGroundSchema.nullable(),
+  name: findingTextSchema,
+  description: findingTextSchema,
+  fix: findingTextSchema,
+  why: findingTextSchema,
 });
+export type JudgementFinding = z.infer<typeof judgementFindingSchema>;
 const proposalTextSchema = z.string().trim().min(1);
 const proposalSchema = z.strictObject({
   dependency_id: proposalTextSchema,
@@ -51,20 +72,118 @@ const proposalSchema = z.strictObject({
     verifications: z.array(proposalTextSchema).min(MIN_VERIFICATIONS),
   }),
 });
-export const evaluationJudgementSchema = z
-  .strictObject({
-    result: z.enum(AssessmentResult),
-    rationale: z.string().trim().min(1),
-    unmet: z.array(unmetItemSchema).default([]),
-    proposals: z.array(proposalSchema).default([]),
-  })
-  .refine(
-    (judgement) =>
-      judgement.result !== AssessmentResult.CriterionNotMet ||
-      judgement.unmet.length > NO_ITEMS ||
-      judgement.proposals.length > NO_ITEMS,
-    { path: ["unmet"] },
-  );
+
+function isBlockerLabel(label: string): boolean {
+  return label.startsWith(BLOCKER_LABEL_PREFIX);
+}
+
+export interface JudgementContext {
+  priorIds: readonly string[];
+  priorBlockerIds: readonly string[];
+  taskIds: readonly string[];
+}
+
+export function evaluationJudgementSchemaOf(context: JudgementContext) {
+  const priorIds = new Set(context.priorIds);
+  const taskIds = new Set(context.taskIds);
+  return z
+    .strictObject({
+      result: z.enum(AssessmentResult),
+      rationale: z.string().trim().min(1),
+      findings: z.array(judgementFindingSchema).max(FINDING_MAX).default([]),
+      fixed_finding_ids: z.array(z.string()).default([]),
+      proposals: z.array(proposalSchema).default([]),
+    })
+    .superRefine((judgement, issues) => {
+      const fail = (path: (string | number)[], message: string) =>
+        issues.addIssue({ code: "custom", path, message });
+      const labels = new Set<string>();
+      judgement.findings.forEach((finding, index) => {
+        if (labels.has(finding.label))
+          fail(["findings", index, "label"], "A finding label is unique");
+        labels.add(finding.label);
+        if (isBlockerLabel(finding.label)) {
+          if (finding.action !== FindingAction.Yes)
+            fail(["findings", index, "action"], "A blocker holds action yes");
+          if (finding.ground === null)
+            fail(["findings", index, "ground"], "A blocker holds a ground");
+        } else if (finding.ground !== null)
+          fail(["findings", index, "ground"], "A suggestion holds ground null");
+        if (finding.task_id !== null && !taskIds.has(finding.task_id))
+          fail(
+            ["findings", index, "task_id"],
+            "task_id is null or a task id of the work prompt",
+          );
+      });
+      const listed = new Set<string>();
+      judgement.fixed_finding_ids.forEach((id, index) => {
+        if (!priorIds.has(id))
+          fail(["fixed_finding_ids", index], "An id names a prior finding");
+        if (listed.has(id))
+          fail(["fixed_finding_ids", index], "An id appears once");
+        listed.add(id);
+      });
+      const blockers =
+        judgement.findings.some((finding) => isBlockerLabel(finding.label)) ||
+        context.priorBlockerIds.some((id) => !listed.has(id));
+      if (judgement.result === AssessmentResult.Success) {
+        if (judgement.findings.some((finding) => isBlockerLabel(finding.label)))
+          fail(["findings"], "success holds no blocker");
+        if (context.priorBlockerIds.some((id) => !listed.has(id)))
+          fail(
+            ["fixed_finding_ids"],
+            "success lists each prior blocker in fixed_finding_ids",
+          );
+      }
+      if (
+        judgement.result === AssessmentResult.CriterionNotMet &&
+        !blockers &&
+        judgement.proposals.length === NO_ITEMS
+      )
+        fail(["findings"], "criterion-not-met holds a blocker or a proposal");
+    });
+}
+
+export type EvaluationJudgement = z.output<
+  ReturnType<typeof evaluationJudgementSchemaOf>
+>;
+
+export interface Blocker {
+  id: string;
+  reason: string;
+  ground: UnmetGround;
+}
+
+export function judgementBlockers(
+  nodeId: string,
+  judgement: Pick<EvaluationJudgement, "findings" | "fixed_finding_ids">,
+  prior: readonly Finding[],
+): Blocker[] {
+  const listed = new Set(judgement.fixed_finding_ids);
+  const blockerOf = (finding: {
+    task_id: string | null;
+    description: string;
+    ground: UnmetGround | null;
+  }): Blocker => {
+    assert.ok(finding.ground !== null);
+    return {
+      id: finding.task_id ?? nodeId,
+      reason: finding.description,
+      ground: finding.ground,
+    };
+  };
+  return [
+    ...judgement.findings
+      .filter((finding) => isBlockerLabel(finding.label))
+      .map(blockerOf),
+    ...prior
+      .filter(
+        (finding) =>
+          finding.kind === FindingKind.Blocker && !listed.has(finding.id),
+      )
+      .map(blockerOf),
+  ];
+}
 
 const RATIONALE_BLOCKS: readonly {
   heading: string;
@@ -87,10 +206,10 @@ const RATIONALE_BLOCKS: readonly {
 
 export function judgementRationale(judgement: {
   rationale: string;
-  unmet: readonly { id: string; reason: string; ground: UnmetGround }[];
+  blockers: readonly Blocker[];
 }): string {
   const blocks = RATIONALE_BLOCKS.flatMap(({ heading, holds }) => {
-    const lines = judgement.unmet
+    const lines = judgement.blockers
       .filter((item) => holds(item.ground))
       .map((item) => `- ${item.id}: ${item.reason}`);
     return lines.length === NO_ITEMS ? [] : [`${heading}\n${lines.join("\n")}`];
@@ -98,22 +217,38 @@ export function judgementRationale(judgement: {
   return [judgement.rationale, ...blocks].join("\n");
 }
 
+export interface JudgementIssue {
+  path: string;
+  message: string;
+}
+
+export type ParsedJudgement<T> =
+  { reply: T; issues: null } | { reply: null; issues: JudgementIssue[] };
+
 export function parseJudgement<T extends z.ZodType>(
   text: string | undefined,
   schema: T,
   marker: string = JUDGEMENT_MARKER,
-): z.output<T> | null {
+): ParsedJudgement<z.output<T>> {
   const line = text?.split("\n").findLast((value) => value.startsWith(marker));
-  if (!line) return null;
+  if (!line) return { reply: null, issues: [] };
   let value: unknown;
   try {
     value = JSON.parse(line.slice(marker.length));
   } catch (error) {
-    if (error instanceof SyntaxError) return null;
+    if (error instanceof SyntaxError)
+      return { reply: null, issues: [{ path: "", message: error.message }] };
     throw error;
   }
   const parsed = schema.safeParse(value);
-  return parsed.success ? parsed.data : null;
+  if (parsed.success) return { reply: parsed.data, issues: null };
+  return {
+    reply: null,
+    issues: parsed.error.issues.map((issue) => ({
+      path: issue.path.map(String).join(ISSUE_PATH_SEPARATOR),
+      message: issue.message,
+    })),
+  };
 }
 
 export const ReplyRepair = {
@@ -125,9 +260,10 @@ export type ReplyRepair = (typeof ReplyRepair)[keyof typeof ReplyRepair];
 export function repairInstruction(
   templates: PromptTemplates,
   marker: string,
+  issues: readonly JudgementIssue[] = [],
 ): string {
   assert.ok(marker);
-  return renderTemplate(templates, PromptTemplate.Repair, { marker });
+  return renderTemplate(templates, PromptTemplate.Repair, { marker, issues });
 }
 
 export async function parseRepaired<T extends z.ZodType>(
@@ -138,17 +274,17 @@ export async function parseRepaired<T extends z.ZodType>(
   marker: string = JUDGEMENT_MARKER,
 ): Promise<{ reply: z.output<T> | ReplyRepair; repaired: boolean }> {
   const first = parseJudgement(agent.lastText(), schema, marker);
-  if (first !== null) return { reply: first, repaired: false };
+  if (first.issues === null) return { reply: first.reply, repaired: false };
   await agent.instruct(
     work,
-    repairInstruction(templates, marker),
+    repairInstruction(templates, marker, first.issues),
     PromptTemplate.Repair,
   );
   if (agent.budget.exhausted())
     return { reply: ReplyRepair.BudgetEnd, repaired: true };
+  const second = parseJudgement(agent.lastText(), schema, marker);
   return {
-    reply:
-      parseJudgement(agent.lastText(), schema, marker) ?? ReplyRepair.Invalid,
+    reply: second.issues === null ? second.reply : ReplyRepair.Invalid,
     repaired: true,
   };
 }
@@ -305,14 +441,34 @@ export function affectedFailureReport(
   return parts.join(RATIONALE_SEPARATOR);
 }
 
+export interface RevisionFinding {
+  id: string;
+  label: string;
+  round: number | null;
+  name: string;
+  description: string;
+  fix: string;
+  why: string;
+}
+
 export function criterionRevisionInstruction(
   templates: PromptTemplates,
   rationale: string,
+  findings: readonly RevisionFinding[] = [],
 ): string {
   assert.ok(rationale.trim());
   assert.ok(rationale.length);
   return renderTemplate(templates, PromptTemplate.CriterionRevision, {
     rationale,
+    findings: findings.map((finding) => ({
+      id: finding.id,
+      label: finding.label,
+      round: finding.round,
+      name: finding.name,
+      description: finding.description,
+      fix: finding.fix,
+      why: finding.why,
+    })),
   });
 }
 
@@ -325,6 +481,8 @@ export function evaluationInstruction(
     evidence: unknown;
     dependencies?: unknown;
     affected: unknown;
+    round: { number: number; review_base: unknown };
+    priorFindings: readonly Finding[];
   },
 ): string {
   return renderTemplate(templates, PromptTemplate.Evaluation, {
@@ -339,6 +497,20 @@ export function evaluationInstruction(
     dependencies: input.dependencies ?? null,
     affected: input.affected,
     marker: JUDGEMENT_MARKER,
+    round: input.round,
+    prior_findings: input.priorFindings.map((finding) => ({
+      id: finding.id,
+      label: finding.label,
+      round: finding.round,
+      kind: finding.kind,
+      action: finding.action,
+      task_id: finding.task_id,
+      ground: finding.ground,
+      name: finding.name,
+      description: finding.description,
+      fix: finding.fix,
+      why: finding.why,
+    })),
   });
 }
 

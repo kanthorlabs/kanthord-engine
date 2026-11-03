@@ -1,4 +1,12 @@
-import { addedFiles, modifiedFiles } from "./local-git.ts";
+import {
+  addedFiles,
+  changePatch,
+  modifiedFiles,
+  onFirstParentChain,
+  roundFiles,
+  roundPatch,
+} from "./local-git.ts";
+import { lstatSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { ensureDirectory } from "../../kernel/files.ts";
@@ -8,6 +16,7 @@ import {
   AssetKind,
   type Evidence,
   type EvidenceAsset,
+  type ReviewRound,
   type Revision,
 } from "../../mission/contract.ts";
 import { EndReason, type ExecutionRun } from "./execution-run.ts";
@@ -30,15 +39,31 @@ import {
 import { ExecutionIntent } from "../contract.ts";
 import { AFFECTED_SUBJECT } from "./affected.ts";
 import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
+import { ROUND_PATCH_SUBJECT, roundPatchName } from "./round-patch.ts";
 
 const NO_SNAPSHOTS = 0;
+const NO_PATCH_BYTES = 0;
 
 function isSupportEvidence(item: Evidence): boolean {
   return (
     !item.verification &&
     !item.requirement_key &&
-    item.subject !== AFFECTED_SUBJECT
+    item.subject !== AFFECTED_SUBJECT &&
+    item.subject !== ROUND_PATCH_SUBJECT
   );
+}
+
+interface BindingPatch {
+  binding_id: string;
+  name: string;
+  text: string;
+}
+
+interface ReviewScope {
+  addedFiles: string[];
+  changedFiles: string[];
+  patches: BindingPatch[];
+  emptyPatches: string[];
 }
 
 function withLatestCoderReport(support: readonly Evidence[]): Evidence[] {
@@ -129,11 +154,19 @@ async function placeAsset(
   }
 }
 
+const NO_SCOPE: ReviewScope = {
+  addedFiles: [],
+  changedFiles: [],
+  patches: [],
+  emptyPatches: [],
+};
+
 async function prepareWorkspace(
   input: StepsInput,
   run: ExecutionRun,
   intent: ExecutionIntent,
   evidence: readonly Evidence[],
+  round: ReviewRound,
 ) {
   const deadline = Math.min(
     input.claim.created_at + input.setup.resource_budget.wall_time_ms,
@@ -165,8 +198,14 @@ async function prepareWorkspace(
         return {
           ...workspace,
           evidenceIds: [...new Set(found.map((item) => item.evidenceId))],
-          addedFiles: await addedFilesOf(input, run, workspace, deadline),
-          changedFiles: await changedFilesOf(input, run, workspace, deadline),
+          scope: await reviewScopeOf(
+            input,
+            run,
+            workspace,
+            found,
+            round,
+            deadline,
+          ),
         };
       } catch (error) {
         input.workspaces.release(workspace.key, WorkspaceKind.Execution);
@@ -181,8 +220,7 @@ async function prepareWorkspace(
         repositories: input.setup.repositories,
       })),
       evidenceIds: [] as string[],
-      addedFiles: [],
-      changedFiles: [],
+      scope: NO_SCOPE,
     };
   const { directory } = input.workspaces.prepareExecution(common);
   return {
@@ -191,51 +229,147 @@ async function prepareWorkspace(
     checkouts: [] as ExamineCheckout[],
     tested_input: null,
     evidenceIds: [] as string[],
-    addedFiles: [],
-    changedFiles: [],
+    scope: NO_SCOPE,
   };
 }
 
-async function addedFilesOf(
-  input: StepsInput,
-  run: ExecutionRun,
-  workspace: { directory: string; checkouts: readonly ExamineCheckout[] },
-  deadline: number,
-): Promise<string[]> {
-  const files: string[] = [];
-  for (const checkout of workspace.checkouts) {
-    const prefix = relative(workspace.directory, checkout.directory);
-    for (const file of await addedFiles(
-      input.env,
-      checkout.directory,
-      `origin/${checkout.base_branch}`,
-      run.operationContext,
-      deadline - Date.now(),
-    ))
-      files.push(prefix ? join(prefix, file) : file);
-  }
-  return files;
+function reviewBaseCommit(
+  reviewBase: TestedInput | null,
+  bindingId: string,
+): string | null {
+  if (reviewBase === null) return null;
+  const addresses = Array.isArray(reviewBase) ? reviewBase : [reviewBase];
+  const address = addresses.find(
+    (entry) =>
+      entry.kind === AssetKind.Repository && entry.binding_id === bindingId,
+  );
+  return address?.kind === AssetKind.Repository ? address.commit : null;
 }
 
-async function changedFilesOf(
+function existsAt(directory: string, file: string): boolean {
+  return (
+    lstatSync(join(directory, file), { throwIfNoEntry: false }) !== undefined
+  );
+}
+
+async function reviewScopeOf(
   input: StepsInput,
   run: ExecutionRun,
   workspace: { directory: string; checkouts: readonly ExamineCheckout[] },
+  snapshots: readonly {
+    repository: { binding_id: string; name: string };
+    commit: string;
+  }[],
+  round: ReviewRound,
   deadline: number,
-): Promise<string[]> {
-  const files: string[] = [];
+): Promise<ReviewScope> {
+  const scope: ReviewScope = {
+    addedFiles: [],
+    changedFiles: [],
+    patches: [],
+    emptyPatches: [],
+  };
   for (const checkout of workspace.checkouts) {
     const prefix = relative(workspace.directory, checkout.directory);
-    for (const file of await modifiedFiles(
+    const prefixed = (file: string) => (prefix ? join(prefix, file) : file);
+    const snapshot = snapshots.find(
+      (entry) => entry.repository.name === checkout.name,
+    );
+    const base =
+      snapshot === undefined
+        ? null
+        : reviewBaseCommit(round.review_base, snapshot.repository.binding_id);
+    if (snapshot !== undefined && base === snapshot.commit) {
+      scope.emptyPatches.push(checkout.name);
+      continue;
+    }
+    if (
+      snapshot !== undefined &&
+      base !== null &&
+      (await onFirstParentChain(
+        input.env,
+        checkout.directory,
+        base,
+        run.operationContext,
+        deadline - Date.now(),
+      ))
+    ) {
+      const read = (added: boolean) =>
+        roundFiles(
+          input.env,
+          checkout.directory,
+          base,
+          added,
+          run.operationContext,
+          deadline - Date.now(),
+        );
+      scope.changedFiles.push(...(await read(false)).map(prefixed));
+      scope.addedFiles.push(
+        ...(await read(true))
+          .filter((file) => existsAt(checkout.directory, file))
+          .map(prefixed),
+      );
+      scope.patches.push({
+        binding_id: snapshot.repository.binding_id,
+        name: checkout.name,
+        text: await roundPatch(
+          input.env,
+          checkout.directory,
+          base,
+          run.operationContext,
+          deadline - Date.now(),
+        ),
+      });
+      continue;
+    }
+    if (round.review_base !== null)
+      run.log("review base off the node history", {
+        binding: checkout.name,
+        review_base: base,
+      });
+    const origin = `origin/${checkout.base_branch}`;
+    scope.addedFiles.push(
+      ...(
+        await addedFiles(
+          input.env,
+          checkout.directory,
+          origin,
+          run.operationContext,
+          deadline - Date.now(),
+        )
+      ).map(prefixed),
+    );
+    scope.changedFiles.push(
+      ...(
+        await modifiedFiles(
+          input.env,
+          checkout.directory,
+          origin,
+          run.operationContext,
+          deadline - Date.now(),
+        )
+      ).map(prefixed),
+    );
+    if (round.review_base === null || snapshot === undefined) continue;
+    const text = await changePatch(
       input.env,
       checkout.directory,
-      `origin/${checkout.base_branch}`,
+      origin,
       run.operationContext,
       deadline - Date.now(),
-    ))
-      files.push(prefix ? join(prefix, file) : file);
+    );
+    if (text.length === NO_PATCH_BYTES) {
+      scope.emptyPatches.push(checkout.name);
+      continue;
+    }
+    scope.patches.push({
+      binding_id: snapshot.repository.binding_id,
+      name: checkout.name,
+      text,
+    });
   }
-  return files.toSorted();
+  scope.changedFiles.sort();
+  return scope;
 }
 
 function testedCommits(testedInput: TestedInput): string[] {
@@ -293,8 +427,9 @@ export async function prepareEvaluation(
   run: ExecutionRun,
   intent: ExecutionIntent,
   evidence: readonly Evidence[],
+  round: ReviewRound,
 ) {
-  const workspace = await prepareWorkspace(input, run, intent, evidence);
+  const workspace = await prepareWorkspace(input, run, intent, evidence, round);
   try {
     const testedInput: TestedInput | undefined =
       workspace.tested_input ?? placedOf(evidence)?.asset.address;
@@ -334,6 +469,12 @@ export async function prepareEvaluation(
       evidenceIds.add(evidenceId);
       assets.push({ evidence_id: evidenceId, asset_id: asset.id, path });
     }
+    const patches: (BindingPatch & { path: string })[] = [];
+    for (const patch of workspace.scope.patches) {
+      const file = join(placement, roundPatchName(round.round, patch.name));
+      await writeFile(file, patch.text, { mode: 0o600, flag: "wx" });
+      patches.push({ ...patch, path: relative(workspace.directory, file) });
+    }
     return {
       key: workspace.key,
       directory: workspace.directory,
@@ -342,11 +483,19 @@ export async function prepareEvaluation(
       base,
       setupFailure,
       evidenceIds: [...evidenceIds],
+      patches: patches.filter((patch) => patch.text.length > NO_PATCH_BYTES),
       reviewBundle: {
         evidence: evidence.filter((item) => evidenceIds.has(item.id)),
         assets,
-        added_files: workspace.addedFiles,
-        changed_files: workspace.changedFiles,
+        added_files: workspace.scope.addedFiles,
+        changed_files: workspace.scope.changedFiles,
+        ...(round.review_base === null
+          ? {}
+          : {
+              round: { number: round.round, review_base: round.review_base },
+              patch_paths: patches.map((patch) => patch.path),
+              empty_patches: workspace.scope.emptyPatches,
+            }),
       },
     };
   } catch (error) {

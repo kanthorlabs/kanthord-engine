@@ -21,6 +21,8 @@ import type { TurnPrompt } from "./native-agent.ts";
 import type { ToolTimeout } from "./tool-table.ts";
 import {
   environmentDigestsOf,
+  EvaluationAttribute,
+  evaluationEnd,
   GitStep,
   taskEnd,
   taskFailure,
@@ -42,6 +44,7 @@ import {
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { ChainLevel, PromptTemplate } from "../../agent/contract.ts";
+import { EvaluationStage } from "./rework-cause.ts";
 
 const CLAIM = {
   execution_id: "execution_01JZ8R2B3C4D5E6F7G8H9J0K1M",
@@ -1232,4 +1235,58 @@ test("an entry with an invalid identity is skipped and counted as a fault", () =
     [2],
   );
   assert.equal(spans.faultCount(), ONE_FAULT);
+});
+
+const FINAL_ROUND = 3;
+const FIXED_COUNT = 2;
+const FIXED_ROUND = 2;
+const ROUND_ATTRIBUTES = {
+  "kanthord.evaluation.round": FINAL_ROUND,
+  "kanthord.evaluation.final_round": true,
+  "kanthord.evaluation.action_labels": ["S1", "S4"],
+  "kanthord.evaluation.fixed_count": FIXED_COUNT,
+};
+
+test("the evaluation span ends with the round, the final round, the action labels and the fixed count", () => {
+  const end = evaluationEnd({
+    result: "success",
+    rationale: "met",
+    facts: {
+      stage: EvaluationStage.Judgement,
+      unmet_ids: [],
+      unmet_grounds: [],
+      proposal_count: 0,
+      repaired: false,
+      verification_class: VerificationClass.Pass,
+      affected: null,
+      round: FINAL_ROUND,
+      final_round: true,
+      action_labels: ["S1", "S4"],
+      fixed_count: FIXED_COUNT,
+    },
+  });
+  const attributes = end.attributes ?? {};
+  assert.deepEqual(
+    Object.fromEntries(
+      [
+        EvaluationAttribute.Round,
+        EvaluationAttribute.FinalRound,
+        EvaluationAttribute.ActionLabels,
+        EvaluationAttribute.FixedCount,
+      ].map((name) => [name, attributes[name]]),
+    ),
+    ROUND_ATTRIBUTES,
+  );
+});
+
+test("the task span of a verdict unit holds the round that it fixes", () => {
+  const { spans } = recorder();
+  const task = { id: CLAIM.node_id } as TaskContent;
+  assert.deepEqual(taskSpan(spans, task, FIXED_ROUND).attributes, {
+    "kanthord.task.id": CLAIM.node_id,
+    "kanthord.evaluation.round": FIXED_ROUND,
+  });
+  assert.deepEqual(taskSpan(spans, task).attributes, {
+    "kanthord.task.id": CLAIM.node_id,
+  });
 });

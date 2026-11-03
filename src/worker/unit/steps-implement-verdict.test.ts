@@ -17,6 +17,7 @@ import {
 } from "./steps-implement.ts";
 import type { WorkspaceCheckout } from "./workspace.ts";
 import { NoProgressRule } from "./progress-rule.ts";
+import { readPrior } from "./node-reads.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
 import {
@@ -47,12 +48,17 @@ const SIDE_BRANCH = "side";
 const FIRST_PARENT_FILE = "first-parent";
 const ONE_RUN = 1;
 const WALL_DEADLINE_MS = 300;
+const FIXED_ROUND = 2;
+const NO_INDEX = 0;
+const ROUND_ATTRIBUTE = "kanthord.evaluation.round";
 
 type Harness = Awaited<ReturnType<typeof fixture>>;
 
 function verdictAt(text: string, checkouts: readonly WorkspaceCheckout[]) {
   return {
     text,
+    findings: [],
+    round: null,
     judged: checkouts.map((checkout) => ({
       binding_id: checkout.binding_id,
       commit: checkout.head,
@@ -350,6 +356,8 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
     await headOf(h);
     h.verdict = {
       text: VERDICT,
+      findings: [],
+      round: null,
       judged: [{ binding_id: h.checkouts[0]!.binding_id, commit: judged }],
     };
     const checked = await startCheck(h);
@@ -431,5 +439,130 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
       false,
     );
     assert.equal(existsSync(count), false);
+  });
+
+  test("the criterion revision lists each open finding of the attempt and an OPEN answer with no commit stops with no_progress", async (t) => {
+    const { h } = await verdictHarness(t, [
+      fauxAssistantMessage("finding_round_one OPEN: the suggestion is wrong"),
+      fauxAssistantMessage("finding_round_one OPEN again"),
+      fauxAssistantMessage("never"),
+    ]);
+    const finding = (id: string, label: string, round: number) => ({
+      id,
+      label,
+      round,
+      name: `name ${label}`,
+      description: `defect ${label}`,
+      fix: `fix ${label}`,
+      why: `why ${label}`,
+    });
+    h.verdict = {
+      ...verdictAt(VERDICT, h.checkouts),
+      findings: [
+        finding("finding_round_one", "S2", 1),
+        finding("finding_round_two", "B1", 2),
+      ] as never,
+      round: FIXED_ROUND,
+    };
+    const starts = t.mock.method(h.run.spans, "start");
+    const { end } = await noProgressEnd(h);
+    assert.ok("stop" in end && end.stop);
+    assert.equal(
+      JSON.parse(end.stop.detail!).rule,
+      NoProgressRule.VerdictRuleUnmet,
+    );
+    const first = JSON.stringify(h.provider.calls[0]);
+    assert.ok(
+      first.includes(
+        "- finding_round_one (S2, round 1) name S2: defect S2 fix: fix S2 why: why S2",
+      ),
+    );
+    assert.ok(
+      first.includes(
+        "- finding_round_two (B1, round 2) name B1: defect B1 fix: fix B1 why: why B1",
+      ),
+    );
+    assert.ok(first.includes("answer each finding id with FIXED or OPEN"));
+    const taskStart = starts.mock.calls.find(
+      (call) => call.arguments[0].operation === SpanOperation.Task,
+    );
+    assert.equal(
+      taskStart?.arguments[0].attributes?.[ROUND_ATTRIBUTE],
+      FIXED_ROUND,
+    );
+  });
+
+  test("a task unit span holds no evaluation round", async (t) => {
+    const pending = task("pending", "true");
+    const h = await fixture(t, [pending], [fauxAssistantMessage("done")]);
+    const starts = t.mock.method(h.run.spans, "start");
+    recordReleases(h);
+    await executionBoundary(h.run, () => runStepsImplement(h));
+    const taskStart = starts.mock.calls.find(
+      (call) => call.arguments[0].operation === SpanOperation.Task,
+    );
+    assert.ok(taskStart);
+    assert.equal(
+      ROUND_ATTRIBUTE in (taskStart.arguments[0].attributes ?? {}),
+      false,
+    );
+  });
+
+  test("a success rework assessment with open findings gives a criterion revision that lists each open finding id", async (t) => {
+    const { h } = await verdictHarness(t, [fauxAssistantMessage("never")]);
+    const completed = (data: unknown) => ({
+      type: "completed",
+      status: 200,
+      data,
+    });
+    const open = ["finding_open_blocker", "finding_open_suggestion"].map(
+      (id, index) => ({
+        id,
+        label: index === NO_INDEX ? "B1" : "S1",
+        round: 1,
+        name: `name ${id}`,
+        description: `defect ${id}`,
+        fix: `fix ${id}`,
+        why: `why ${id}`,
+      }),
+    );
+    h.run.clients.mission = {
+      ...h.run.clients.mission,
+      "execution.rework_assessment.get": async () =>
+        completed({
+          id: "assessment",
+          result: "success",
+          rationale: VERDICT,
+          round: FIXED_ROUND,
+          tested_input: h.checkouts.map((checkout) => ({
+            kind: "repository",
+            binding_id: checkout.binding_id,
+            commit: checkout.head,
+          })),
+        }),
+      "execution.review_round.get": async () =>
+        completed({
+          round: FIXED_ROUND + 1,
+          final: false,
+          review_base: null,
+          findings: open,
+        }),
+    } as unknown as MethodClients["mission"];
+    h.run.clients.worker = {
+      ...h.run.clients.worker,
+      "execution.failed_check.get": async () => completed({ items: [] }),
+    } as unknown as MethodClients["worker"];
+    const prior = await readPrior(h.run, h.input.setup.repositories);
+    h.verdict = prior.verdict;
+    const { node } = await startCheck(h);
+    assert.ok(node);
+    assert.equal(node.round, FIXED_ROUND);
+    for (const finding of open)
+      assert.ok(
+        node.text.includes(
+          `- ${finding.id} (${finding.label}, round 1) ${finding.name}:`,
+        ),
+        finding.id,
+      );
   });
 });

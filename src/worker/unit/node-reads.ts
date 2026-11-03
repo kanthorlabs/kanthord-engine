@@ -9,6 +9,7 @@ import {
   AssessmentResult,
   AssetKind,
   ClosingEvent,
+  type Finding,
   MissionErrorCode,
   type Outcome,
   type TestedInput,
@@ -122,6 +123,19 @@ export async function readReworkAssessment(run: ExecutionRun) {
   );
 }
 
+export function readReviewRound(run: ExecutionRun) {
+  return run.call((options) =>
+    run.clients.mission["execution.review_round.get"](
+      {
+        params: { execution_id: run.claim.execution_id },
+        query: {},
+        body: null,
+      },
+      options,
+    ),
+  );
+}
+
 export async function readClearedAssessment(run: ExecutionRun) {
   if (run.claim.attempt === FIRST_ATTEMPT) return null;
   return run.call(async (options) =>
@@ -180,7 +194,12 @@ export async function readRequestedChanges(
     })),
   );
   if (text === null) return null;
-  return { text, judged: latestRequestCommits(read.items) };
+  return {
+    text,
+    judged: latestRequestCommits(read.items),
+    findings: [],
+    round: null,
+  };
 }
 
 async function readFailedChecks(
@@ -213,6 +232,8 @@ async function readFailedChecks(
       binding_id: item.binding_id,
       commit: item.head_commit,
     })),
+    findings: [],
+    round: null,
   };
 }
 
@@ -258,6 +279,8 @@ export interface JudgedCommit {
 export interface Verdict {
   text: string;
   judged: JudgedCommit[];
+  findings: Finding[];
+  round: number | null;
 }
 
 export interface Prior {
@@ -271,6 +294,8 @@ export async function readPrior(
 ): Promise<Prior> {
   const failed = await readFailedChecks(run, repositories);
   const rework = await readReworkAssessment(run);
+  const findings = rework ? (await readReviewRound(run)).findings : [];
+  const round = rework?.round ?? null;
   if (failed !== null)
     return {
       verdict: {
@@ -278,6 +303,8 @@ export async function readPrior(
           ? `${failed.text}${VERDICT_SEPARATOR}${rework.rationale}`
           : failed.text,
         judged: failed.judged,
+        findings,
+        round,
       },
       cleared: null,
     };
@@ -286,6 +313,8 @@ export async function readPrior(
       verdict: {
         text: rework.rationale,
         judged: testedCommits(rework.tested_input),
+        findings,
+        round,
       },
       cleared: null,
     };
