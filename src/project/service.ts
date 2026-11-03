@@ -45,6 +45,7 @@ import {
   isGitOnlyPlatform,
   isPlatformSshHost,
 } from "../repository/platform.ts";
+import { InstructionFileState } from "../agent/contract.ts";
 import { validateText } from "../agent/prompt-source.ts";
 import { gitFailureReason } from "../repository/git-failure.ts";
 import { tagSchema } from "../kernel/tag.ts";
@@ -74,6 +75,7 @@ import {
   bindingHolders,
   BindingKind,
   type BindingNaming,
+  BindingPromptKey,
   type BindingPrompts,
   type BindingRevisionResult,
   type BindingsChanged,
@@ -94,6 +96,9 @@ import {
   INSTANCE_COUNT_MAX,
   INSTANCE_COUNT_MIN,
   type InstanceOf,
+  INSTRUCTION_FILE_READ_TIMEOUT_MS,
+  type InstructionFile,
+  type InstructionFileCheck,
   Landing,
   LIST_LIMIT_MAX,
   type LiveNodesPinning,
@@ -158,6 +163,7 @@ import {
 } from "./store.ts";
 import type { ProjectConfig } from "./config.ts";
 import { ProjectEnvironments, refuseEnvironment } from "./environment.ts";
+import { instructionFilePathReason } from "./instruction-file.ts";
 import type { EnvironmentAgent } from "./environment-agent.ts";
 import { writeStoredEnvironment } from "./environment-agent-tools.ts";
 import type { EnvironmentProbeRunner } from "./environment-probe-contract.ts";
@@ -269,6 +275,15 @@ function draftSubject(
     credential: config.ssh_credential,
     address: config.address,
   };
+}
+const CHECKED_BINDING_NAME = "check";
+function unreachableReason(error: OperationError): string {
+  const details = error.details;
+  return isObject(details) &&
+    !Array.isArray(details) &&
+    isString(details.failure_reason)
+    ? details.failure_reason
+    : error.code;
 }
 function unmatchedKey(pair: { node_id: string; claim: string }): string {
   return JSON.stringify([pair.node_id, pair.claim]);
@@ -558,18 +573,36 @@ function requireWorkerBinding(
   return { project, config: workerConfigSchema.parse(binding.config) };
 }
 
+function refusePrompt(prompt: string, reason: string): OperationError {
+  return new OperationError(
+    HttpStatus.BadRequest,
+    ProjectErrorCode.RepositoryPromptInvalid,
+    "Repository binding prompt is invalid.",
+    { prompt, reason },
+  );
+}
+
 function validatePrompts(prompts: BindingPrompts): void {
-  for (const [agentName, text] of Object.entries(prompts)) {
+  if (prompts.instruction_file !== undefined) {
+    const reason = instructionFilePathReason(prompts.instruction_file);
+    if (reason !== null)
+      throw refusePrompt(BindingPromptKey.InstructionFile, reason);
+  }
+  const texts: Array<[string, string | undefined]> = [
+    [BindingPromptKey.Repository, prompts.repository],
+    ...Object.entries(prompts.agents ?? {}),
+  ];
+  for (const [prompt, text] of texts) {
     if (text === undefined) continue;
     const reason = validateText(text);
-    if (reason !== null)
-      throw new OperationError(
-        HttpStatus.BadRequest,
-        ProjectErrorCode.RepositoryPromptInvalid,
-        "Repository binding prompt is invalid.",
-        { agent_name: agentName, reason },
-      );
+    if (reason !== null) throw refusePrompt(prompt, reason);
   }
+}
+
+function refuseInstructionFile(file: InstructionFile | null): void {
+  if (file?.state !== InstructionFileState.Invalid) return;
+  assert.ok(file.reason !== null);
+  throw refusePrompt(BindingPromptKey.InstructionFile, file.reason);
 }
 
 function agentCursor(cursor: string): string {
@@ -1012,16 +1045,23 @@ export class ProjectService implements Service, ProjectBindings {
         platform: SSH_CREDENTIAL_PLATFORM,
       });
     });
+    validatePrompts(config.prompts ?? {});
     caller.context.signal.throwIfAborted();
-    const health = await this.bindingHealth(
-      config,
-      {
-        identity: callerIdentity(caller),
-        subject: draftSubject(params.project_id, config),
-      },
-      caller.context,
-    );
-    return caller.commit(() => health);
+    const [health, instructionFile] = await Promise.all([
+      this.bindingHealth(
+        config,
+        {
+          identity: callerIdentity(caller),
+          subject: draftSubject(params.project_id, config),
+        },
+        caller.context,
+      ),
+      this.checkInstructionFile(params.project_id, config, caller),
+    ]);
+    return caller.commit(() => ({
+      ...health,
+      instruction_file: instructionFile,
+    }));
   }
   private async bindingHealth(
     config: typeof repositoryConfigSchema._output,
@@ -1200,13 +1240,18 @@ export class ProjectService implements Service, ProjectBindings {
   ) {
     const submission = uniqueSubmission(body.bindings);
     const saved = this.savedBindingSet(projectId, body.version);
+    const changed: Array<[string, typeof repositoryConfigSchema._output]> = [];
     for (const [name, binding] of submission) {
       if (binding.kind !== BindingKind.Repository) continue;
       refuseRepositoryAction(binding.config);
       refuseEnvironment(binding.config.environment);
+      validatePrompts(binding.config.prompts ?? {});
       if (bindingUnchanged(name, binding, saved.get(name))) continue;
       await this.checkRepository(projectId, binding.config, caller);
+      changed.push([name, binding.config]);
     }
+    const files = await this.instructionFilesAtHead(projectId, changed, caller);
+    files.forEach(refuseInstructionFile);
     caller.context.signal.throwIfAborted();
     const answer = caller.commit((tx) => {
       assert.ok(tx.database.isTransaction);
@@ -1304,6 +1349,64 @@ export class ProjectService implements Service, ProjectBindings {
       return { address: granted.facts.address, ssh };
     });
   }
+  private async instructionFilesAtHead(
+    projectId: string,
+    configs: ReadonlyArray<[string, typeof repositoryConfigSchema._output]>,
+    caller: CallerContext,
+  ): Promise<Array<InstructionFile | null>> {
+    const deadline = new CancellationContext(
+      caller.context,
+      Date.now() + INSTRUCTION_FILE_READ_TIMEOUT_MS,
+    );
+    try {
+      return await Promise.all(
+        configs.map(([name, config]) =>
+          this.environments.instructionFileAtHead(
+            {
+              identity: callerIdentity(caller),
+              subject: draftSubject(projectId, config),
+            },
+            deriveResourceIdentity(BindingKind.Repository, name, config),
+            config,
+            deadline,
+          ),
+        ),
+      );
+    } finally {
+      deadline.cancel();
+    }
+  }
+  private async checkInstructionFile(
+    projectId: string,
+    config: typeof repositoryConfigSchema._output,
+    caller: CallerContext,
+  ): Promise<InstructionFileCheck | null> {
+    const path = config.prompts?.instruction_file;
+    if (path === undefined) return null;
+    try {
+      const [file] = await this.instructionFilesAtHead(
+        projectId,
+        [[CHECKED_BINDING_NAME, config]],
+        caller,
+      );
+      assert.ok(file);
+      return {
+        path: file.path,
+        commit: file.commit,
+        state: file.state,
+        reason: file.reason,
+      };
+    } catch (error) {
+      if (caller.context.signal.aborted || !(error instanceof OperationError))
+        throw error;
+      return {
+        path,
+        commit: null,
+        state: InstructionFileState.Unreachable,
+        reason: unreachableReason(error),
+      };
+    }
+  }
   private async checkRepository(
     projectId: string,
     config: typeof repositoryConfigSchema._output,
@@ -1372,8 +1475,6 @@ export class ProjectService implements Service, ProjectBindings {
       this.validateWorker(tx, name, binding.config);
       return;
     }
-    if (binding.kind === BindingKind.Repository)
-      validatePrompts(binding.config.prompts ?? {});
     if (binding.kind === BindingKind.Storage) {
       this.custodySuitability(tx, {
         credential: binding.config.credential,
@@ -1659,6 +1760,16 @@ export class ProjectService implements Service, ProjectBindings {
       project_id: binding.project_id,
       ...storageConfigSchema.parse(binding.config),
     };
+  }
+  baseCommitOf(bindingId: string, context: Context): Promise<string> {
+    return this.environments.baseCommitOf(bindingId, context);
+  }
+  instructionFileOf(
+    bindingId: string,
+    commit: string,
+    context: Context,
+  ): Promise<InstructionFile | null> {
+    return this.environments.instructionFileOf(bindingId, commit, context);
   }
   repositoryPolicyOf(
     tx: Transaction,

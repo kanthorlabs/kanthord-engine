@@ -216,12 +216,20 @@ components:
                       prompts:
                         type: object
                         properties:
-                          swe@1:
+                          instruction_file:
                             type: string
-                          re@1:
+                          repository:
                             type: string
-                          env@1:
-                            type: string
+                          agents:
+                            type: object
+                            properties:
+                              swe@1:
+                                type: string
+                              re@1:
+                                type: string
+                              env@1:
+                                type: string
+                            additionalProperties: false
                         additionalProperties: false
                       environment:
                         type: object
@@ -596,12 +604,20 @@ components:
                           prompts:
                             type: object
                             properties:
-                              swe@1:
+                              instruction_file:
                                 type: string
-                              re@1:
+                              repository:
                                 type: string
-                              env@1:
-                                type: string
+                              agents:
+                                type: object
+                                properties:
+                                  swe@1:
+                                    type: string
+                                  re@1:
+                                    type: string
+                                  env@1:
+                                    type: string
+                                additionalProperties: false
                             additionalProperties: false
                           environment:
                             type: object

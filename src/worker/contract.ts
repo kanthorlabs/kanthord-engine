@@ -491,7 +491,11 @@ export type RepositoryPolicyOf = (
   platform: string;
   ssh_credential: string;
   base_branch: string;
-  prompts: Partial<Record<AgentName, string>>;
+  prompts: {
+    instruction_file?: string;
+    repository?: string;
+    agents?: Partial<Record<AgentName, string>>;
+  };
   environment: Environment | null;
   repository_environment: boolean;
 } | null;

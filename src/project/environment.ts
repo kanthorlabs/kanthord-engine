@@ -19,6 +19,7 @@ import { HttpStatus } from "../kernel/http.ts";
 import { isObject } from "../kernel/values.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import type { Store } from "../kernel/store.ts";
+import { PROMPT_SOURCE_MAX_BYTES } from "../agent/prompt-source.ts";
 import { SshIdentitySubjectKind } from "../custody/contract.ts";
 import type { SshIdentitySubject } from "../custody/contract.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
@@ -30,6 +31,7 @@ import {
   bindingSetWriteInputSchema,
   ENVIRONMENT_FILE_MAX_BYTES,
   EnvironmentSource,
+  type InstructionFile,
   ProjectErrorCode,
   REPOSITORY_FILES_READ_TIMEOUT_MS,
   repositoryConfigSchema,
@@ -53,6 +55,10 @@ import {
   requireRepositoryBinding,
 } from "./store.ts";
 import { universalEnvironment } from "./universal-environment.ts";
+import {
+  InstructionFileCache,
+  instructionFileFrom,
+} from "./instruction-file.ts";
 
 export const ENVIRONMENT_CLONE_TIMEOUT_MS = 300000;
 export const EnvironmentErrorCode = {
@@ -215,6 +221,7 @@ function repositoryDocument(file: RepositoryFile): Environment | null {
 export class ProjectEnvironments {
   private readonly dependencies: EnvironmentDependencies;
   private readonly resolved = new Map<string, ResolvedSlot>();
+  private readonly instructionFiles = new InstructionFileCache();
 
   constructor(dependencies: EnvironmentDependencies) {
     this.dependencies = dependencies;
@@ -351,6 +358,61 @@ export class ProjectEnvironments {
     });
     const read = await this.readBase(bindingId, config, [], { context });
     return read.commit;
+  }
+
+  async instructionFileOf(
+    bindingId: string,
+    commit: string,
+    context: Context,
+  ): Promise<InstructionFile | null> {
+    const { resourceIdentity, config } = this.dependencies.store.transaction(
+      (tx) => {
+        const binding = readBindingRevision(tx, bindingId);
+        assert.ok(binding);
+        return {
+          resourceIdentity: binding.resource_identity,
+          config: repositoryConfigSchema.parse(binding.config),
+        };
+      },
+    );
+    const path = config.prompts?.instruction_file;
+    if (path === undefined) return null;
+    const cached = this.instructionFiles.get(resourceIdentity, commit, path);
+    if (cached !== undefined) return cached;
+    context.signal.throwIfAborted();
+    const [file] = await this.readFilesWith(
+      this.access(bindingId, config),
+      commit,
+      [path],
+      PROMPT_SOURCE_MAX_BYTES,
+      context,
+    );
+    assert.ok(file);
+    const answer = instructionFileFrom(file, commit);
+    this.instructionFiles.set(resourceIdentity, answer);
+    return answer;
+  }
+
+  async instructionFileAtHead(
+    release: SshRelease,
+    resourceIdentity: string,
+    config: RepositoryConfig,
+    context: Context,
+  ): Promise<InstructionFile | null> {
+    const path = config.prompts?.instruction_file;
+    if (path === undefined) return null;
+    const read = await this.readBaseWith(
+      () => this.dependencies.sshAccess(config.platform, release),
+      config,
+      [path],
+      PROMPT_SOURCE_MAX_BYTES,
+      { context },
+    );
+    const [file] = read.files;
+    assert.ok(file);
+    const answer = instructionFileFrom(file, read.commit);
+    this.instructionFiles.set(resourceIdentity, answer);
+    return answer;
   }
 
   private async resolveUnstored(
@@ -542,10 +604,26 @@ export class ProjectEnvironments {
     });
   }
 
-  private async readBase(
+  private readBase(
     bindingId: string,
     config: RepositoryConfig,
     paths: readonly string[],
+    caller: Pick<CallerContext, "context">,
+  ): Promise<BaseRead> {
+    return this.readBaseWith(
+      () => this.access(bindingId, config),
+      config,
+      paths,
+      ENVIRONMENT_FILE_MAX_BYTES,
+      caller,
+    );
+  }
+
+  private async readBaseWith(
+    accessOf: () => { address: string; ssh: SshAccess },
+    config: RepositoryConfig,
+    paths: readonly string[],
+    maxBytes: number,
     caller: Pick<CallerContext, "context">,
   ): Promise<BaseRead> {
     caller.context.signal.throwIfAborted();
@@ -555,7 +633,8 @@ export class ProjectEnvironments {
     );
     const end = Date.now() + REPOSITORY_FILES_READ_TIMEOUT_MS;
     try {
-      const { address, ssh } = this.access(bindingId, config);
+      const access = accessOf();
+      const { address, ssh } = access;
       let commit: string | null;
       try {
         commit = await this.dependencies.repositoryFiles.resolveBranchCommit(
@@ -575,7 +654,7 @@ export class ProjectEnvironments {
           "The base branch is absent on the remote.",
         );
       const files = paths.length
-        ? await this.readFiles(bindingId, config, commit, paths, deadline)
+        ? await this.readFilesWith(access, commit, paths, maxBytes, deadline)
         : [];
       return { commit, files };
     } finally {
@@ -583,20 +662,35 @@ export class ProjectEnvironments {
     }
   }
 
-  private async readFiles(
+  private readFiles(
     bindingId: string,
     config: RepositoryConfig,
     commit: string,
     paths: readonly string[],
     context: Context,
   ): Promise<RepositoryFile[]> {
-    const { address, ssh } = this.access(bindingId, config);
+    return this.readFilesWith(
+      this.access(bindingId, config),
+      commit,
+      paths,
+      ENVIRONMENT_FILE_MAX_BYTES,
+      context,
+    );
+  }
+
+  private async readFilesWith(
+    { address, ssh }: { address: string; ssh: SshAccess },
+    commit: string,
+    paths: readonly string[],
+    maxBytes: number,
+    context: Context,
+  ): Promise<RepositoryFile[]> {
     try {
       const files = await this.dependencies.repositoryFiles.readFilesAtCommit(
         address,
         commit,
         paths,
-        ENVIRONMENT_FILE_MAX_BYTES,
+        maxBytes,
         context,
         REPOSITORY_FILES_READ_TIMEOUT_MS,
         ssh,

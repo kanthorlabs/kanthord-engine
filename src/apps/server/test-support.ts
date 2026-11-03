@@ -2482,7 +2482,7 @@ function workerProjectBindings(
         ssh_credential: WORKER_PROJECT_SSH_CREDENTIAL,
         strategy: { base_branch: "main" },
         credential: WORKER_PROJECT_REPOSITORY_CREDENTIAL,
-        prompts: { "swe@1": "Follow repository conventions." },
+        prompts: { agents: { "swe@1": "Follow repository conventions." } },
       },
     },
     ...Object.fromEntries(

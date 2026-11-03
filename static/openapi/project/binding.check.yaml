@@ -148,12 +148,20 @@ components:
                 prompts:
                   type: object
                   properties:
-                    swe@1:
+                    instruction_file:
                       type: string
-                    re@1:
+                    repository:
                       type: string
-                    env@1:
-                      type: string
+                    agents:
+                      type: object
+                      properties:
+                        swe@1:
+                          type: string
+                        re@1:
+                          type: string
+                        env@1:
+                          type: string
+                      additionalProperties: false
                   additionalProperties: false
                 environment:
                   type: object
@@ -404,8 +412,37 @@ components:
                 - failure_reason
               additionalProperties: false
             - type: "null"
+        instruction_file:
+          anyOf:
+            - type: object
+              properties:
+                path:
+                  type: string
+                commit:
+                  anyOf:
+                    - type: string
+                    - type: "null"
+                state:
+                  type: string
+                  enum:
+                    - present
+                    - absent
+                    - invalid
+                    - unreachable
+                reason:
+                  anyOf:
+                    - type: string
+                    - type: "null"
+              required:
+                - path
+                - commit
+                - state
+                - reason
+              additionalProperties: false
+            - type: "null"
       required:
         - address
         - ssh_credential
         - credential
+        - instruction_file
       additionalProperties: false

@@ -98,13 +98,14 @@ export function bindingParts(
   repositories: readonly {
     binding_id: string;
     name: string;
-    prompts: Partial<Record<AgentName, string>>;
+    prompts: { agents?: Partial<Record<AgentName, string>> };
   }[],
   agentName: string,
 ): PromptPartAnswer[] {
   return repositories.flatMap(({ binding_id, name, prompts }) => {
-    const text = Object.hasOwn(prompts, agentName)
-      ? prompts[agentName as AgentName]
+    const agents = prompts.agents ?? {};
+    const text = Object.hasOwn(agents, agentName)
+      ? agents[agentName as AgentName]
       : undefined;
     return text === undefined || text.trim().length === NO_CHARACTERS
       ? []

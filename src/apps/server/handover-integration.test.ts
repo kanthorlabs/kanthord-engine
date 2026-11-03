@@ -583,7 +583,7 @@ async function setup(
       ssh_credential: FAKE_SSH_CREDENTIAL,
       strategy: { base_branch: "main" },
       credential: "github",
-      prompts: { "swe@1": "Follow repository conventions." },
+      prompts: { agents: { "swe@1": "Follow repository conventions." } },
     },
   };
   const bindingsOf = (generalInstances: readonly string[]) => ({
