@@ -41,9 +41,11 @@ import {
   type IntakeActions,
   type IntentOf,
   type MissionActions,
+  type MissionPromptPins,
   type PinnedCredentialMetadataFn,
   type PlacementStatus,
   type PoolHost,
+  type PromptBase,
   REGISTRATION_CAPABILITY,
   REGISTRATION_TARGET_KIND,
   type RepositoryBindingIdsOf,
@@ -125,6 +127,7 @@ import {
 } from "./instance-rows.ts";
 import { declareInstances } from "./instance-operations.ts";
 import type { AgentPromptFacts } from "./prompt-telemetry.ts";
+import { unpinnedPromptCommits } from "./prompt-pin.ts";
 
 const NO_ITEMS = 0;
 
@@ -140,6 +143,8 @@ function invalidWorkerConfiguration(workerName: string): OperationError {
 export interface Dependencies {
   handoverRefreshWaitMs?: number;
   missionActions: MissionActions;
+  missionPromptPins: MissionPromptPins;
+  promptBase?: PromptBase;
   instanceArchive: Pick<
     MissionCollaborations,
     "revokeForInstanceArchive" | "reportExecutionEnds"
@@ -974,10 +979,23 @@ export class WorkerService implements Service {
       const deadline =
         Date.now() +
         (this.dependencies.handoverRefreshWaitMs ?? HANDOVER_REFRESH_WAIT_MS);
+      const promptCommits = await unpinnedPromptCommits(
+        this.dependencies,
+        execution,
+        deadline,
+        caller.context,
+      );
       while (Date.now() < deadline) {
         try {
-          return caller.commit((tx) =>
-            this.dependencies.custodyHandover.handover(
+          return caller.commit((tx) => {
+            if (promptCommits !== null)
+              this.dependencies.missionPromptPins.pinPromptCommits(
+                tx,
+                execution.nodeId,
+                execution.attempt,
+                promptCommits,
+              );
+            return this.dependencies.custodyHandover.handover(
               tx,
               identity,
               execution,
@@ -988,8 +1006,8 @@ export class WorkerService implements Service {
                 execution.pinnedRevision,
               ),
               Date.now(),
-            ),
-          );
+            );
+          });
         } catch (error) {
           if (!(error instanceof CredentialRefreshInFlight)) throw error;
           await settledBefore(error.settled, deadline, caller.context);

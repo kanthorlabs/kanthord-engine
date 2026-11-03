@@ -10,6 +10,8 @@ import {
   type AssetKind,
   type EndState,
   NodeState,
+  type PromptCommits,
+  promptCommitsSchema,
   StartPoint,
 } from "./contract.ts";
 import { readNode } from "./store.ts";
@@ -29,6 +31,7 @@ export interface AttemptRow {
   opened_by: string;
   opened_at: number;
   closed_at: number | null;
+  prompt_commits: string | null;
 }
 export interface EvidenceRow {
   id: string;
@@ -104,6 +107,7 @@ export function openAttempt(
     opened_by: canonicalJSON(openedBy),
     opened_at: now,
     closed_at: null,
+    prompt_commits: null,
   };
   tx.database
     .prepare(
@@ -151,6 +155,33 @@ export function readAttempt(
       )
       .get(nodeId, attempt) as unknown as AttemptRow | undefined) ?? null
   );
+}
+export function readPromptCommits(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number,
+): PromptCommits | null {
+  const row = readAttempt(tx, nodeId, attempt);
+  assert.ok(row);
+  return row.prompt_commits === null
+    ? null
+    : promptCommitsSchema.parse(JSON.parse(row.prompt_commits));
+}
+export function pinPromptCommits(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number,
+  commits: PromptCommits,
+): PromptCommits {
+  assert.ok(tx.database.isTransaction);
+  tx.database
+    .prepare(
+      "UPDATE mission_attempt SET prompt_commits = ? WHERE node_id = ? AND attempt = ? AND prompt_commits IS NULL",
+    )
+    .run(canonicalJSON(promptCommitsSchema.parse(commits)), nodeId, attempt);
+  const stored = readPromptCommits(tx, nodeId, attempt);
+  assert.ok(stored);
+  return stored;
 }
 export function readOpenAttempt(
   tx: Transaction,

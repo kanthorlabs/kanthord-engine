@@ -506,6 +506,28 @@ export type RepositoryBindingIdsOf = (
   nodeRevision: number,
 ) => string[];
 
+export type PromptCommits = { binding_id: string; commit: string }[];
+export interface MissionPromptPins {
+  attemptPromptCommits(
+    tx: Transaction,
+    nodeId: string,
+    attempt: number,
+  ): PromptCommits | null;
+  pinPromptCommits(
+    tx: Transaction,
+    nodeId: string,
+    attempt: number,
+    commits: PromptCommits,
+  ): PromptCommits;
+}
+export interface PromptBase {
+  instructionBindingsOf(
+    tx: Transaction,
+    bindingIds: readonly string[],
+  ): string[];
+  baseCommitOf(bindingId: string, context: Context): Promise<string>;
+}
+
 export const ExecutionIntent = {
   Implement: "implement",
   Examine: "examine",

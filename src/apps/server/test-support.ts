@@ -634,6 +634,7 @@ export async function gatewayFixture(
     containerImage?: string;
     intake?: { pendingEventLimit?: number; pollIntervalMs?: number };
     handoverRefreshWaitMs?: number;
+    promptBase?: Parameters<typeof composeServices>[0]["promptBase"];
     fakeSlots?: boolean;
     environmentRuntime?: Parameters<
       typeof composeServices
@@ -729,6 +730,7 @@ export async function gatewayFixture(
       inventoryOverrides: options.inventoryOverrides,
       intake: options.intake,
       handoverRefreshWaitMs: options.handoverRefreshWaitMs,
+      promptBase: options.promptBase,
       serverSlotDriver: slotDriver ?? options.serverSlotDriver,
       environmentRuntime: options.environmentRuntime,
       containerRuntimeHost: options.containerRuntimeHost,
