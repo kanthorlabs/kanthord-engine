@@ -216,6 +216,7 @@ function fixture(
     repositoryPromptsOf: (_tx, bindingId) =>
       bindingId === BINDING_ID
         ? {
+            binding_id: BINDING_ID,
             name: BINDING_NAME,
             prompts: { [ENV_AGENT_NAME]: ENV_BINDING_TEXT, "swe@1": SWE_TEXT },
           }
@@ -342,7 +343,7 @@ test(
     assert.ok(first.systemPrompt?.includes(ENV_AGENT_PROMPT));
     assert.ok(
       first.systemPrompt?.includes(
-        `Instructions of repository ${BINDING_NAME}:\n\n${ENV_BINDING_TEXT}\n\n${framing(SHIPPED_TEMPLATES, PromptConsumer.Worker)}`,
+        `Binding prompt of repository ${BINDING_NAME}:\n\n${ENV_BINDING_TEXT}\n\n${framing(SHIPPED_TEMPLATES, PromptConsumer.Worker)}`,
       ),
     );
     assert.ok(!first.systemPrompt?.includes(SWE_TEXT));

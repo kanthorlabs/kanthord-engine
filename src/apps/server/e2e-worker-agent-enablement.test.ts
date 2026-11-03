@@ -558,6 +558,7 @@ test("E03.18 agent get answers the prompt parts over HTTP", async (t) => {
       ["standard", "base.md"],
       ["role", `${AGENT}.md`],
       ["workbench", "workbench.md"],
+      ["framing", "framing-workbench"],
     ],
   );
 });

@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import {
   type AgentName,
+  PromptLayer,
   PromptOrigin,
   PromptPart,
   type PromptPartAnswer,
+  PromptPartState,
+  type PromptReference,
   PromptTemplate,
   type PromptTemplates,
 } from "./contract.ts";
@@ -22,47 +25,119 @@ const FRAMING_TEMPLATES: Record<PromptConsumer, PromptTemplate> = {
   [PromptConsumer.Worker]: PromptTemplate.FramingWorker,
 };
 
+export function framingTemplate(consumer: PromptConsumer): PromptTemplate {
+  assert.ok(Object.hasOwn(FRAMING_TEMPLATES, consumer));
+  return FRAMING_TEMPLATES[consumer];
+}
+
+export function isFramingTemplate(name: string): name is PromptTemplate {
+  return Object.values<string>(FRAMING_TEMPLATES).includes(name);
+}
+
 export function framing(
   templates: PromptTemplates,
   consumer: PromptConsumer,
 ): string {
-  assert.ok(Object.hasOwn(FRAMING_TEMPLATES, consumer));
-  return renderTemplate(templates, FRAMING_TEMPLATES[consumer], {});
+  return renderTemplate(templates, framingTemplate(consumer), {});
 }
 
 const PART_SEPARATOR = "\n\n";
 const NO_CHARACTERS = 0;
 
+const PART_LAYERS: Record<PromptPart, PromptLayer | null> = {
+  [PromptPart.Standard]: PromptLayer.KanthorD,
+  [PromptPart.Role]: PromptLayer.KanthorD,
+  [PromptPart.Workbench]: PromptLayer.KanthorD,
+  [PromptPart.InstructionFile]: PromptLayer.Repository,
+  [PromptPart.Repository]: PromptLayer.Repository,
+  [PromptPart.Binding]: PromptLayer.Binding,
+  [PromptPart.Framing]: null,
+};
+
+export function layerOf(part: PromptPart): PromptLayer | null {
+  assert.ok(Object.hasOwn(PART_LAYERS, part));
+  return PART_LAYERS[part];
+}
+
+export function headingOf(reference: PromptReference): string | null {
+  switch (reference.part) {
+    case PromptPart.InstructionFile:
+      assert.ok(reference.path);
+      return `Repository prompt of repository ${reference.name}, file ${reference.path}:`;
+    case PromptPart.Repository:
+      return `Repository prompt of repository ${reference.name}, set in KanthorD:`;
+    case PromptPart.Binding:
+      return `Binding prompt of repository ${reference.name}:`;
+    default:
+      return null;
+  }
+}
+
+export function promptPart(
+  reference: PromptReference,
+  state: PromptPartState,
+  text: string | null,
+): PromptPartAnswer {
+  assert.equal(state === PromptPartState.Resolved, text !== null);
+  return {
+    layer: layerOf(reference.part),
+    part: reference.part,
+    name: reference.name,
+    origin: reference.origin,
+    path: reference.path,
+    binding_id: reference.binding_id,
+    commit: reference.commit,
+    digest: reference.digest,
+    heading: headingOf(reference),
+    state,
+    text,
+  };
+}
+
 export function bindingParts(
   repositories: readonly {
+    binding_id: string;
     name: string;
     prompts: Partial<Record<AgentName, string>>;
   }[],
   agentName: string,
 ): PromptPartAnswer[] {
-  return repositories.flatMap(({ name, prompts }) => {
+  return repositories.flatMap(({ binding_id, name, prompts }) => {
     const text = Object.hasOwn(prompts, agentName)
       ? prompts[agentName as AgentName]
       : undefined;
     return text === undefined || text.trim().length === NO_CHARACTERS
       ? []
       : [
-          {
-            part: PromptPart.Binding,
-            name,
-            origin: PromptOrigin.Database,
-            path: null,
-            digest: digest(text),
+          promptPart(
+            {
+              part: PromptPart.Binding,
+              name,
+              origin: PromptOrigin.Database,
+              path: null,
+              binding_id,
+              commit: null,
+              digest: digest(text),
+            },
+            PromptPartState.Resolved,
             text,
-          },
+          ),
         ];
   });
 }
 
 function partText(part: PromptPartAnswer): string {
-  if (part.part !== PromptPart.Binding) return part.text;
-  assert.ok(part.name);
-  return `Instructions of repository ${part.name}:\n\n${part.text}`;
+  assert.ok(part.state === PromptPartState.Resolved && part.text !== null);
+  return part.heading === null
+    ? part.text
+    : `${part.heading}${PART_SEPARATOR}${part.text}`;
+}
+
+export function finalPrompt(parts: readonly PromptPartAnswer[]): string | null {
+  assert.equal(parts.at(-1)?.part, PromptPart.Framing);
+  return parts.every(({ state }) => state === PromptPartState.Resolved)
+    ? parts.map(partText).join(PART_SEPARATOR)
+    : null;
 }
 
 export function systemPrompt(

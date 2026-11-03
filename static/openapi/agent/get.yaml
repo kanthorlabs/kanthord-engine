@@ -121,13 +121,24 @@ components:
               items:
                 type: object
                 properties:
+                  layer:
+                    anyOf:
+                      - type: number
+                        enum:
+                          - 1
+                          - 2
+                          - 3
+                      - type: "null"
                   part:
                     type: string
                     enum:
                       - standard
                       - role
                       - workbench
+                      - instruction_file
+                      - repository
                       - binding
+                      - framing
                   name:
                     type: string
                     minLength: 1
@@ -137,24 +148,57 @@ components:
                       - binary
                       - file
                       - database
+                      - repository
                   path:
                     anyOf:
                       - type: string
                       - type: "null"
+                  binding_id:
+                    anyOf:
+                      - type: string
+                        minLength: 1
+                      - type: "null"
+                  commit:
+                    anyOf:
+                      - type: string
+                        pattern: ^[0-9a-f]{40}$
+                      - type: "null"
                   digest:
                     type: string
-                  text:
+                    pattern: ^[0-9a-f]{64}$
+                  heading:
+                    anyOf:
+                      - type: string
+                        minLength: 1
+                      - type: "null"
+                  state:
                     type: string
+                    enum:
+                      - resolved
+                      - changed
+                      - invalid
+                      - unreachable
+                  text:
+                    anyOf:
+                      - type: string
+                      - type: "null"
                 required:
+                  - layer
                   - part
                   - name
                   - origin
                   - path
+                  - binding_id
+                  - commit
                   - digest
+                  - heading
+                  - state
                   - text
                 additionalProperties: false
             final:
-              type: string
+              anyOf:
+                - type: string
+                - type: "null"
           required:
             - final
           additionalProperties: false

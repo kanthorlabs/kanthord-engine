@@ -73,8 +73,8 @@ import {
   ProjectErrorCode,
   type RepositoryPolicy,
 } from "../project/contract.ts";
-import { resolveAgentPrompt } from "./prompt-files.ts";
-import { bindingParts, PromptConsumer, systemPrompt } from "./prompt-render.ts";
+import { framingPart, resolveAgentPrompt } from "./prompt-files.ts";
+import { bindingParts, finalPrompt, PromptConsumer } from "./prompt-render.ts";
 import { resolveTemplates, templateDirectory } from "./prompt-templates.ts";
 
 const NO_ITEMS = 0;
@@ -186,7 +186,10 @@ export interface Dependencies {
   repositoryPromptsOf: (
     tx: Transaction,
     bindingId: string,
-  ) => Pick<RepositoryPolicy, "project_id" | "name" | "prompts"> | null;
+  ) => Pick<
+    RepositoryPolicy,
+    "binding_id" | "project_id" | "name" | "prompts"
+  > | null;
   providerHealthCheck: ProviderHealthCheckFn;
   providerCapability: ProviderCapabilityFn;
   toolDeclarations: ToolDeclarationsFn;
@@ -974,7 +977,7 @@ export class AgentComponent {
   private repositoryPrompts(
     projectId: string,
     bindingId: string,
-  ): Pick<RepositoryPolicy, "name" | "prompts"> {
+  ): Pick<RepositoryPolicy, "binding_id" | "name" | "prompts"> {
     const repository = this.dependencies.store.transaction((tx) =>
       this.dependencies.repositoryPromptsOf(tx, bindingId),
     );
@@ -1088,12 +1091,13 @@ export class AgentComponent {
             repository === null ? [] : [repository],
             params.agent_name,
           ),
+          framingPart(
+            await this.promptTemplates(caller.context),
+            consumer,
+            this.agentDirectory(),
+          ),
         ];
-        const final = systemPrompt(
-          parts,
-          consumer,
-          await this.promptTemplates(caller.context),
-        );
+        const final = finalPrompt(parts);
         return caller.commit((tx) => {
           const row = getEnablement(tx, params.agent_name);
           const view = this.agentView(

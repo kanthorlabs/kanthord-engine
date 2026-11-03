@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { PromptOrigin, PromptPart } from "../agent/contract.ts";
+import {
+  PromptOrigin,
+  PromptPart,
+  PromptPartState,
+} from "../agent/contract.ts";
 import type { PromptPartAnswer } from "../agent/contract.ts";
 import { digest } from "../agent/prompt-composer.ts";
+import { promptPart } from "../agent/prompt-render.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { type ExecutionTrace, SpanStatus } from "../tracking/contract.ts";
@@ -24,14 +29,19 @@ function partOf(
   name: string,
   partDigest: string,
 ): PromptPartAnswer {
-  return {
-    part,
-    name,
-    origin: PromptOrigin.File,
-    path: null,
-    digest: partDigest,
-    text: "text",
-  };
+  return promptPart(
+    {
+      part,
+      name,
+      origin: PromptOrigin.File,
+      path: null,
+      binding_id: null,
+      commit: null,
+      digest: partDigest,
+    },
+    PromptPartState.Resolved,
+    "text",
+  );
 }
 
 const TRACE: ExecutionTrace = {

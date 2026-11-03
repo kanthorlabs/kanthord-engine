@@ -179,7 +179,7 @@ for (const adapter of ["direct", "http"] as const) {
     assert.equal(answer.agents[0]!.metadata, null);
     assert.ok(
       answer.agents[0]!.prompt.final.endsWith(
-        `Instructions of repository repo:\n\nFollow repository conventions.\n\n${framing(SHIPPED_TEMPLATES, PromptConsumer.Worker)}`,
+        `Binding prompt of repository repo:\n\nFollow repository conventions.\n\n${framing(SHIPPED_TEMPLATES, PromptConsumer.Worker)}`,
       ),
     );
     assert.ok(answer.agents[0]!.prompt.final.includes(SWE_AGENT_PROMPT));
