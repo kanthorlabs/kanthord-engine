@@ -12,7 +12,9 @@ import {
   type PromptPartAnswer,
   PromptPartState,
   type PromptReference,
+  promptReferenceSchema,
 } from "./contract.ts";
+import { WORKBENCH_PROMPT } from "./prompt-assets.ts";
 import { digest } from "./prompt-composer.ts";
 import { framingPart, resolveAgentPrompt } from "./prompt-files.ts";
 import {
@@ -178,6 +180,15 @@ test("each origin resolves its text and its layer and heading", async () => {
           })
         )[0]!.digest,
       },
+      {
+        part: PromptPart.Workbench,
+        name: "workbench.md",
+        origin: PromptOrigin.Binary,
+        path: null,
+        binding_id: null,
+        commit: null,
+        digest: digest(WORKBENCH_PROMPT),
+      },
       instructionReference,
       bindingReference,
       referenceOf(shipped),
@@ -199,6 +210,12 @@ test("each origin resolves its text and its layer and heading", async () => {
         PromptPartState.Resolved,
       ],
       [
+        PromptLayer.KanthorD,
+        PromptPart.Workbench,
+        null,
+        PromptPartState.Resolved,
+      ],
+      [
         PromptLayer.Repository,
         PromptPart.InstructionFile,
         `Repository prompt of repository ${BINDING_NAME}, file ${INSTRUCTION_PATH}:`,
@@ -216,9 +233,10 @@ test("each origin resolves its text and its layer and heading", async () => {
   assert.deepEqual(source.reads, [
     `${BINDING_ID}:${COMMIT}:${INSTRUCTION_PATH}`,
   ]);
-  assert.equal(answer.parts[1]!.text, INSTRUCTION_TEXT);
-  assert.equal(answer.parts[2]!.text, BINDING_TEXT);
-  assert.equal(answer.parts[3]!.text, shipped.text);
+  assert.equal(answer.parts[1]!.text, WORKBENCH_PROMPT);
+  assert.equal(answer.parts[2]!.text, INSTRUCTION_TEXT);
+  assert.equal(answer.parts[3]!.text, BINDING_TEXT);
+  assert.equal(answer.parts[4]!.text, shipped.text);
   assert.ok(
     answer.final!.includes(
       `Repository prompt of repository ${BINDING_NAME}, file ${INSTRUCTION_PATH}:\n\n${INSTRUCTION_TEXT}\n\nBinding prompt of repository ${BINDING_NAME}:\n\n${BINDING_TEXT}`,
@@ -382,4 +400,19 @@ test("an override template whose text equals the shipped text reports origin fil
     (await resolveReference(referenceOf(part), readers())).state,
     PromptPartState.Resolved,
   );
+});
+
+test("a reference accepts a SHA-1 or a SHA-256 commit and refuses another length", () => {
+  for (const commit of [COMMIT, "d".repeat(64)])
+    assert.equal(
+      promptReferenceSchema.safeParse({ ...instructionReference, commit })
+        .success,
+      true,
+    );
+  for (const commit of ["e".repeat(41), "f".repeat(39), "g".repeat(40)])
+    assert.equal(
+      promptReferenceSchema.safeParse({ ...instructionReference, commit })
+        .success,
+      false,
+    );
 });

@@ -375,7 +375,7 @@ export const promptReferenceSchema = z.strictObject({
   binding_id: z.string().min(1).nullable(),
   commit: z
     .string()
-    .regex(/^[0-9a-f]{40}$/)
+    .regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/)
     .nullable(),
   digest: z.string().regex(/^[0-9a-f]{64}$/),
 });
