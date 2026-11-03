@@ -6,6 +6,7 @@ import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import type { Acted } from "./act-telemetry.ts";
 import {
+  AssessmentResult,
   type Finding,
   FINDING_IDENTITY_PREFIX,
   FindingAction,
@@ -25,7 +26,11 @@ import {
   updateFindingReport,
 } from "./finding-store.ts";
 import { getRevision, requireNode } from "./node-read.ts";
-import { type AssessmentRow, readAssessment } from "./record-store.ts";
+import {
+  type AssessmentRow,
+  isDeliveredAttempt,
+  readAssessment,
+} from "./record-store.ts";
 import { requireMission } from "./write.ts";
 
 const HUMAN_LABEL_PREFIX = "H";
@@ -33,13 +38,22 @@ const NEXT_LABEL = 1;
 const ASSESSMENT_ID_FIELD = "assessment_id";
 const TASK_ID_FIELD = "task_id";
 
-function requireNodeAssessment(
+function requireDeliveredAssessment(
   tx: Transaction,
   nodeId: string,
   assessmentId: string,
 ): AssessmentRow {
   const assessment = readAssessment(tx, assessmentId);
-  if (assessment === null || assessment.node_id !== nodeId)
+  if (
+    assessment === null ||
+    assessment.node_id !== nodeId ||
+    !isDeliveredAttempt(
+      tx,
+      nodeId,
+      assessment.attempt,
+      AssessmentResult.Success,
+    )
+  )
     invalidExecutionInput(ASSESSMENT_ID_FIELD);
   return assessment;
 }
@@ -65,7 +79,11 @@ export function createFinding(
 ): Acted<Finding> {
   const node = requireNode(tx, nodeId);
   requireMission(tx, node.mission_id, body.expected_mission_version);
-  const assessment = requireNodeAssessment(tx, node.id, body.assessment_id);
+  const assessment = requireDeliveredAssessment(
+    tx,
+    node.id,
+    body.assessment_id,
+  );
   requireAssessmentTask(tx, assessment, body.task_id);
   requireFindingTexts((key) => key, body);
   const id = createIdentity(FINDING_IDENTITY_PREFIX);

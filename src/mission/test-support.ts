@@ -26,6 +26,7 @@ import {
 } from "../kernel/store.ts";
 import {
   ActorKind,
+  ActorService,
   AssessmentResult,
   type AssessmentSubmit,
   AssetKind,
@@ -67,6 +68,7 @@ import {
   openAttempt,
 } from "./record-store.ts";
 import { getRevision } from "./node-read.ts";
+import { LANDED_COMMIT_SUBJECT } from "./node-check.ts";
 
 const CONSECUTIVE_FAILURE_LIMIT = 3;
 const LOST_FAILURES = 1;
@@ -569,6 +571,46 @@ export function authorizationHarness(t: TestContext, identity: CallerIdentity) {
     pullRequest,
     resourceIdentity,
   };
+}
+
+export function markDelivered(
+  h: { store: Store; node_id: string; repositoryId: string },
+  attempt: number,
+): string {
+  const id = createIdentity("evidence");
+  h.store.transaction((tx) =>
+    insertEvidence(
+      tx,
+      {
+        id,
+        node_id: h.node_id,
+        attempt,
+        subject: LANDED_COMMIT_SUBJECT,
+        requirement_key: null,
+        end_state: null,
+        verification: null,
+        provenance: canonicalJSON({
+          kind: ActorKind.Service,
+          service: ActorService.Mission,
+        }),
+        created_at: FIXTURE_TIME,
+      },
+      [
+        {
+          id: createIdentity("evidence_asset"),
+          evidence_id: id,
+          kind: AssetKind.Repository,
+          content: canonicalJSON({
+            binding_id: h.repositoryId,
+            commit: ASSESSED_COMMIT,
+          }),
+          published_at: FIXTURE_TIME,
+          expired_at: null,
+        },
+      ],
+    ),
+  );
+  return id;
 }
 
 const REQUEST_RESOURCE = "repository:github:owner/repo";

@@ -18,6 +18,7 @@ const ATTEMPT_INCREMENT = 1;
 const FIRST_ATTEMPT = 1;
 const EXPECTED_ROW_CHANGE = 1;
 const SEQUENCE_LOWER_BOUND = 0;
+const SQL_TRUE = 1;
 const stringSetSchema = z.array(z.string());
 
 export interface AttemptRow {
@@ -397,6 +398,30 @@ export function readLandedCommitEvidence(
       ActorKind.Service,
       ActorService.Mission,
     ) as unknown as EvidenceRow[];
+}
+export function isDeliveredAttempt(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number,
+  success: AssessmentResult,
+): boolean {
+  return (
+    (
+      tx.database
+        .prepare(
+          "SELECT EXISTS (SELECT 1 FROM mission_outcome o JOIN mission_assessment b ON b.id = o.assessment_id WHERE o.node_id = ? AND o.result = ? AND b.attempt = ?) OR EXISTS (SELECT 1 FROM mission_evidence WHERE node_id = ? AND attempt = ? AND json_extract(provenance, '$.kind') = ? AND json_extract(provenance, '$.service') = ?) AS value",
+        )
+        .get(
+          nodeId,
+          success,
+          attempt,
+          nodeId,
+          attempt,
+          ActorKind.Service,
+          ActorService.Mission,
+        ) as { value: number }
+    ).value === SQL_TRUE
+  );
 }
 export function readReleaseEvidence(
   tx: Transaction,

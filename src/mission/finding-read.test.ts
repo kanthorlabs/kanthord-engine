@@ -11,7 +11,12 @@ import {
   MissionErrorCode,
 } from "./contract.ts";
 import { closeAttempt, openAttempt } from "./record-store.ts";
-import { codedAs, reviewerFinding, reviewHarness } from "./test-support.ts";
+import {
+  codedAs,
+  markDelivered,
+  reviewerFinding,
+  reviewHarness,
+} from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const FIRST_BLOCKER_LABEL = "B1";
@@ -65,6 +70,8 @@ async function twoAttempts(t: Parameters<typeof reviewHarness>[0]) {
     evidence_ids: [evidence.evidence.id],
     findings: [reviewerFinding("B1")],
   });
+  markDelivered(h, FIRST_ATTEMPT);
+  markDelivered(h, SECOND_ATTEMPT);
   const report = (assessmentId: string) =>
     h.invoke("finding.create", {
       params: { node_id: h.node_id },

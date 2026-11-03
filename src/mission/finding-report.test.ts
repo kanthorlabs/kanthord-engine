@@ -4,6 +4,7 @@ import { createIdentity } from "../kernel/identity.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   ActorKind,
+  AssessmentResult,
   AssetKind,
   FindingAction,
   FindingCauseOwner,
@@ -21,6 +22,8 @@ import { setNodeState } from "./store.ts";
 import {
   actCalls,
   codedAs,
+  controlHarness,
+  markDelivered,
   refusedAt,
   reviewerFinding,
   reviewHarness,
@@ -32,6 +35,9 @@ const RENAMED = "Renamed";
 const MISSION_VERSION = 1;
 const STALE_VERSION = 2;
 const FIRST_ATTEMPT = 1;
+const FIRST_REVISION = 1;
+const SECOND_ATTEMPT = 2;
+const NO_ATTEMPT = 0;
 const REWORK_OFF = 0;
 const LATER_COMMIT = "b".repeat(40);
 const TWO_CREATES = 2;
@@ -51,10 +57,11 @@ function report(assessmentId: string): FindingCreate {
   };
 }
 
-test("a human creates findings H1 and H2 on an Available node and the create keeps the mission version", async (t) => {
+test("a human creates findings H1 and H2 on a delivered attempt and the create keeps the mission version", async (t) => {
   const h = await reviewHarness(t, IDENTITY);
   const a1 = await h.submit({ ...h.notMet, findings: [reviewerFinding("B1")] });
   assert.equal(h.node().state, NodeState.Available);
+  markDelivered(h, FIRST_ATTEMPT);
   const create = (body: FindingCreate, nodeId = h.node_id) =>
     h.invoke("finding.create", {
       params: { node_id: nodeId },
@@ -115,7 +122,7 @@ test("a human creates findings H1 and H2 on an Available node and the create kee
     );
 });
 
-test("a human creates a finding on a Completed node and on a Blocked node with a human assessment", async (t) => {
+test("a human creates a finding on a Completed node and a Blocked node with no landed commit answers 400", async (t) => {
   const completed = await reviewHarness(t, IDENTITY);
   completed.dependencies.config.rework_limit = REWORK_OFF;
   const closing = await completed.submit();
@@ -141,14 +148,14 @@ test("a human creates a finding on a Completed node and on a Blocked node with a
     },
   });
   assert.ok(block.outcome);
-  const onBlocked = await blocked.invoke("finding.create", {
-    params: { node_id: blocked.node_id },
-    query: {},
-    body: report(block.outcome.assessment_id),
-  });
-  assert.equal(onBlocked.label, FIRST_HUMAN_LABEL);
-  assert.equal(onBlocked.round, null);
-  assert.equal(onBlocked.attempt, FIRST_ATTEMPT);
+  await assert.rejects(
+    blocked.invoke("finding.create", {
+      params: { node_id: blocked.node_id },
+      query: {},
+      body: report(block.outcome.assessment_id),
+    }),
+    refusedAt("assessment_id"),
+  );
 });
 
 test("a human finding on an unjudged round changes neither the next review base nor any status", async (t) => {
@@ -176,6 +183,7 @@ test("a human finding on an unjudged round changes neither the next review base 
     evidence_ids: [evidence.evidence.id],
     tested_input: address,
   });
+  markDelivered(h, FIRST_ATTEMPT);
   await h.invoke("finding.create", {
     params: { node_id: h.node_id },
     query: {},
@@ -193,6 +201,7 @@ test("a human finding on an unjudged round changes neither the next review base 
 test("a human updates the cause owner and the texts of a human finding until a decision", async (t) => {
   const h = await reviewHarness(t, IDENTITY);
   const a1 = await h.submit({ ...h.notMet, findings: [reviewerFinding("B1")] });
+  markDelivered(h, FIRST_ATTEMPT);
   const h1 = await h.invoke("finding.create", {
     params: { node_id: h.node_id },
     query: {},
@@ -245,4 +254,200 @@ test("a human updates the cause owner and the texts of a human finding until a d
     ).length,
     ONE_UPDATE,
   );
+});
+
+function discardOf(state: NodeState) {
+  return {
+    reason: "Drop it",
+    expected_mission_version: MISSION_VERSION,
+    expected_state: state,
+    expected_attempt: FIRST_ATTEMPT,
+  };
+}
+
+function createOn(
+  h: Awaited<ReturnType<typeof reviewHarness>>,
+  assessmentId: string,
+) {
+  return h.invoke("finding.create", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: report(assessmentId),
+  });
+}
+
+test("an assessment of an attempt with no landed commit and no successful outcome answers 400", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  const a1 = await h.submit({ ...h.notMet, findings: [reviewerFinding("B1")] });
+  assert.equal(h.node().state, NodeState.Available);
+  await assert.rejects(
+    createOn(h, a1.assessment.id),
+    refusedAt("assessment_id"),
+  );
+});
+
+test("a success override at attempt 0 admits its human assessment", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Pending));
+  const override = await h.invoke("node.override", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      ...h.body(NodeState.Pending, NO_ATTEMPT),
+      result: AssessmentResult.Success,
+    },
+  });
+  assert.equal(h.node().state, NodeState.Completed);
+  assert.ok(override.outcome);
+  const finding = await h.invoke("finding.create", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: report(override.outcome.assessment_id),
+  });
+  assert.equal(finding.attempt, NO_ATTEMPT);
+});
+
+test("a success override of a node blocked at attempt 0 admits both human assessments", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Paused));
+  const block = await h.invoke("node.block", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(NodeState.Paused, NO_ATTEMPT),
+  });
+  assert.equal(h.node().state, NodeState.Blocked);
+  assert.ok(block.outcome);
+  const override = await h.invoke("node.override", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      ...h.body(NodeState.Blocked, NO_ATTEMPT),
+      result: AssessmentResult.Success,
+    },
+  });
+  assert.equal(h.node().state, NodeState.Completed);
+  assert.ok(override.outcome);
+  for (const assessmentId of [
+    block.outcome.assessment_id,
+    override.outcome.assessment_id,
+  ]) {
+    const finding = await h.invoke("finding.create", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: report(assessmentId),
+    });
+    assert.equal(finding.attempt, NO_ATTEMPT);
+  }
+});
+
+test("a reopened node admits only its delivered attempt", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  h.dependencies.config.rework_limit = REWORK_OFF;
+  const a1 = await h.submit({ ...h.notMet, findings: [reviewerFinding("B1")] });
+  assert.equal(h.node().state, NodeState.Blocked);
+  await h.invoke("node.unblock", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      blocked_attempt: FIRST_ATTEMPT,
+      expected_revision: FIRST_REVISION,
+      expected_mission_version: MISSION_VERSION,
+    },
+  });
+  h.claim.attempt = SECOND_ATTEMPT;
+  h.evaluate();
+  const context = { ...h.context, attempt: SECOND_ATTEMPT };
+  const evidence = await h.invoke("evidence.submit", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      ...context,
+      subject: "Verified",
+      assets: [{ kind: AssetKind.Repository, address: h.address }],
+      verification: {
+        tested_input: h.address,
+        results: [
+          { command: "true", exit_code: 0, signal: null, timed_out: false },
+        ],
+      },
+    },
+  });
+  const a2 = await h.submit({
+    ...context,
+    evidence_ids: [evidence.evidence.id],
+  });
+  assert.equal(h.node().state, NodeState.Completed);
+  const finding = await createOn(h, a2.assessment.id);
+  assert.equal(finding.attempt, SECOND_ATTEMPT);
+  await assert.rejects(
+    createOn(h, a1.assessment.id),
+    refusedAt("assessment_id"),
+  );
+});
+
+test("a success override of a Blocked node admits its execution assessment", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  h.dependencies.config.rework_limit = REWORK_OFF;
+  const a1 = await h.submit({ ...h.notMet, findings: [reviewerFinding("B1")] });
+  assert.equal(h.node().state, NodeState.Blocked);
+  const override = await h.invoke("node.override", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      reason: "Done by hand",
+      expected_mission_version: MISSION_VERSION,
+      expected_state: NodeState.Blocked,
+      expected_attempt: FIRST_ATTEMPT,
+      result: AssessmentResult.Success,
+    },
+  });
+  assert.equal(h.node().state, NodeState.Completed);
+  assert.ok(override.outcome);
+  for (const assessmentId of [a1.assessment.id, override.outcome.assessment_id])
+    assert.equal((await createOn(h, assessmentId)).attempt, FIRST_ATTEMPT);
+});
+
+test("a discarded node with no landed commit answers 400", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  const a1 = await h.submit({ ...h.notMet, findings: [reviewerFinding("B1")] });
+  const discard = await h.invoke("node.discard", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: discardOf(NodeState.Available),
+  });
+  assert.equal(h.node().state, NodeState.Discarded);
+  assert.ok(discard.outcome);
+  for (const assessmentId of [a1.assessment.id, discard.outcome.assessment_id])
+    await assert.rejects(createOn(h, assessmentId), refusedAt("assessment_id"));
+});
+
+test("an evidence delete of the landed commit refuses a new create and keeps the stored finding", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  const a1 = await h.submit({ ...h.notMet, findings: [reviewerFinding("B1")] });
+  const landed = markDelivered(h, FIRST_ATTEMPT);
+  const h1 = await createOn(h, a1.assessment.id);
+  await h.invoke("node.discard", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: discardOf(NodeState.Available),
+  });
+  await h.invoke("evidence.delete", {
+    params: { evidence_id: landed },
+    query: {},
+    body: {
+      expected_mission_version: MISSION_VERSION,
+      force: true,
+      reason: "Remove",
+    },
+  });
+  await assert.rejects(
+    createOn(h, a1.assessment.id),
+    refusedAt("assessment_id"),
+  );
+  const stored = await h.invoke("finding.get", {
+    params: { finding_id: h1.id },
+    query: {},
+    body: null,
+  });
+  assert.deepEqual(stored, h1);
 });

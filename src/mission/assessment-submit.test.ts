@@ -56,6 +56,7 @@ import { requiredActionsOf } from "./frozen-action.ts";
 import {
   evidenceHarness,
   executionHarness,
+  markDelivered,
   refusedAt,
   reviewerFinding,
   reviewHarness,
@@ -70,6 +71,7 @@ const SUCCESSFUL_EXIT_CODE = 0;
 const NO_ATTEMPT = 0;
 const NO_CALLS = 0;
 const FIRST_REVISION = 1;
+const FIRST_ATTEMPT = 1;
 const NOT_RUNNING = "scheduler.execution.not_running";
 const VALIDATION = "gateway.request.validation_failed";
 const QUEUE_INSERT = "workQueue.insert";
@@ -1138,6 +1140,7 @@ test("a current success is admitted while the attempt holds an open human blocke
     ...h.notMet,
     findings: [reviewerFinding("S1")],
   });
+  markDelivered(h, FIRST_ATTEMPT);
   const human = await h.invoke("finding.create", {
     params: { node_id: h.node_id },
     query: {},
