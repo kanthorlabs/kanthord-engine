@@ -11,7 +11,6 @@ import {
   type PromptPartAnswer,
   PromptPartState,
   type PromptReference,
-  type PromptTemplates,
 } from "./contract.ts";
 import { BASE_PROMPT, WORKBENCH_PROMPT } from "./prompt-assets.ts";
 import { digest } from "./prompt-composer.ts";
@@ -27,6 +26,7 @@ import {
   renderTemplate,
   SHIPPED_TEMPLATES,
   templateDirectory,
+  type TemplateSet,
 } from "./prompt-templates.ts";
 
 const STANDARD_FILE = "base.md";
@@ -119,7 +119,7 @@ async function resolveFile(
 }
 
 export function framingPart(
-  templates: PromptTemplates,
+  set: TemplateSet,
   consumer: PromptConsumer,
   directory: string | null,
 ): PromptPartAnswer {
@@ -127,13 +127,11 @@ export function framingPart(
   const templatesDirectory = templateDirectory(directory);
   return filePart(
     { part: PromptPart.Framing, name },
-    templates[name] === SHIPPED_TEMPLATES[name]
-      ? PromptOrigin.Binary
-      : PromptOrigin.File,
+    set.origins[name],
     templatesDirectory === null
       ? null
       : join(templatesDirectory, `${name}${MARKDOWN_EXTENSION}`),
-    framing(templates, consumer),
+    framing(set.templates, consumer),
   );
 }
 

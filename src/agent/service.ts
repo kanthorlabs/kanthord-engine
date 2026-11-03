@@ -75,7 +75,12 @@ import {
 } from "../project/contract.ts";
 import { framingPart, resolveAgentPrompt } from "./prompt-files.ts";
 import { bindingParts, finalPrompt, PromptConsumer } from "./prompt-render.ts";
-import { resolveTemplates, templateDirectory } from "./prompt-templates.ts";
+import {
+  resolveTemplates,
+  resolveTemplateSet,
+  templateDirectory,
+  type TemplateSet,
+} from "./prompt-templates.ts";
 
 const NO_ITEMS = 0;
 const LAST_PROVIDER = 1;
@@ -1017,6 +1022,13 @@ export class AgentComponent {
     return resolveTemplates(templateDirectory(this.agentDirectory()), context);
   }
 
+  private templateSet(context: Context): Promise<TemplateSet> {
+    return resolveTemplateSet(
+      templateDirectory(this.agentDirectory()),
+      context,
+    );
+  }
+
   declare(registry: OperationRegistry): void {
     registry.register(agentOperations["enablement.list"], ({ query }, caller) =>
       caller.commit((tx) => {
@@ -1092,7 +1104,7 @@ export class AgentComponent {
             params.agent_name,
           ),
           framingPart(
-            await this.promptTemplates(caller.context),
+            await this.templateSet(caller.context),
             consumer,
             this.agentDirectory(),
           ),

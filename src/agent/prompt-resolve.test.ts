@@ -28,7 +28,10 @@ import {
   resolvePrompt,
   resolveReference,
 } from "./prompt-resolve.ts";
-import { resolveTemplates, SHIPPED_TEMPLATES } from "./prompt-templates.ts";
+import {
+  resolveTemplateSet,
+  SHIPPED_TEMPLATE_SET,
+} from "./prompt-templates.ts";
 
 const AGENT = "swe@1";
 const BINDING_ID = "binding_01JZ8R2B3C4D5E6F7G8H9J0K1M";
@@ -105,7 +108,7 @@ test("the references of a composition resolve to the composed text", async (t) =
     join(directory, "prompts", "framing-worker.md"),
     "Custom framing.\n",
   );
-  const templates = await resolveTemplates(
+  const templates = await resolveTemplateSet(
     join(directory, "prompts"),
     background,
   );
@@ -142,13 +145,17 @@ test("the references of a composition resolve to the composed text", async (t) =
   assert.equal(answer.final, finalPrompt(composed));
   assert.equal(
     answer.final,
-    systemPrompt(composed.slice(0, -1), PromptConsumer.Worker, templates),
+    systemPrompt(
+      composed.slice(0, -1),
+      PromptConsumer.Worker,
+      templates.templates,
+    ),
   );
 });
 
 test("each origin resolves its text and its layer and heading", async () => {
   const shipped = framingPart(
-    SHIPPED_TEMPLATES,
+    SHIPPED_TEMPLATE_SET,
     PromptConsumer.Workbench,
     null,
   );
@@ -272,7 +279,7 @@ test("a text whose digest or source changed resolves as changed with no text and
     { ...referenceOf(role!), origin: PromptOrigin.Binary, name: "x@1.md" },
     {
       ...referenceOf(
-        framingPart(SHIPPED_TEMPLATES, PromptConsumer.Worker, null),
+        framingPart(SHIPPED_TEMPLATE_SET, PromptConsumer.Worker, null),
       ),
       name: "work",
     },
@@ -289,7 +296,9 @@ test("a text whose digest or source changed resolves as changed with no text and
   const answer = await resolvePrompt(
     [
       { ...bindingReference, digest: digest("Another text.") },
-      referenceOf(framingPart(SHIPPED_TEMPLATES, PromptConsumer.Worker, null)),
+      referenceOf(
+        framingPart(SHIPPED_TEMPLATE_SET, PromptConsumer.Worker, null),
+      ),
     ],
     readers(),
   );
@@ -311,7 +320,7 @@ test("an invalid source resolves as invalid and an unreachable remote as unreach
     context: background,
   });
   const framing = framingPart(
-    await resolveTemplates(join(directory, "prompts"), background),
+    await resolveTemplateSet(join(directory, "prompts"), background),
     PromptConsumer.Worker,
     directory,
   );
@@ -336,7 +345,9 @@ test("an invalid source resolves as invalid and an unreachable remote as unreach
   const unreachable = await resolvePrompt(
     [
       instructionReference,
-      referenceOf(framingPart(SHIPPED_TEMPLATES, PromptConsumer.Worker, null)),
+      referenceOf(
+        framingPart(SHIPPED_TEMPLATE_SET, PromptConsumer.Worker, null),
+      ),
     ],
     readers({}, { state: InstructionFileState.Unreachable }),
   );
@@ -345,4 +356,30 @@ test("an invalid source resolves as invalid and an unreachable remote as unreach
     [PromptPartState.Unreachable, null],
   );
   assert.equal(unreachable.final, null);
+});
+
+test("an override template whose text equals the shipped text reports origin file", async (t) => {
+  const directory = temporary(t);
+  mkdirSync(join(directory, "prompts"));
+  const path = join(directory, "prompts", "framing-worker.md");
+  writeFileSync(path, SHIPPED_TEMPLATE_SET.templates["framing-worker"]);
+  const part = framingPart(
+    await resolveTemplateSet(join(directory, "prompts"), background),
+    PromptConsumer.Worker,
+    directory,
+  );
+  const shipped = framingPart(
+    SHIPPED_TEMPLATE_SET,
+    PromptConsumer.Worker,
+    directory,
+  );
+  assert.deepEqual(
+    [part.origin, part.path, part.digest],
+    [PromptOrigin.File, path, shipped.digest],
+  );
+  assert.equal(shipped.origin, PromptOrigin.Binary);
+  assert.equal(
+    (await resolveReference(referenceOf(part), readers())).state,
+    PromptPartState.Resolved,
+  );
 });

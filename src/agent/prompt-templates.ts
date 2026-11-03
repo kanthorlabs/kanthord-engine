@@ -6,6 +6,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
   AgentErrorCode,
+  PromptOrigin,
   PromptTemplate,
   type PromptTemplates,
 } from "./contract.ts";
@@ -26,6 +27,21 @@ export const SHIPPED_TEMPLATES: PromptTemplates = Object.freeze(
     TEMPLATE_NAMES.map((name) => [name, shippedTemplate(name)]),
   ) as Record<PromptTemplate, string>,
 );
+
+export type TemplateOrigins = Readonly<Record<PromptTemplate, PromptOrigin>>;
+export interface TemplateSet {
+  templates: PromptTemplates;
+  origins: TemplateOrigins;
+}
+
+export const SHIPPED_TEMPLATE_SET: TemplateSet = Object.freeze({
+  templates: SHIPPED_TEMPLATES,
+  origins: Object.freeze(
+    Object.fromEntries(
+      TEMPLATE_NAMES.map((name) => [name, PromptOrigin.Binary]),
+    ) as Record<PromptTemplate, PromptOrigin>,
+  ),
+});
 
 const handlebars = Handlebars.create();
 handlebars.registerHelper("json", (value: unknown) => JSON.stringify(value));
@@ -81,8 +97,18 @@ export async function resolveTemplates(
   directory: string | null,
   context: Context,
 ): Promise<PromptTemplates> {
-  if (directory === null) return SHIPPED_TEMPLATES;
+  return (await resolveTemplateSet(directory, context)).templates;
+}
+
+export async function resolveTemplateSet(
+  directory: string | null,
+  context: Context,
+): Promise<TemplateSet> {
+  if (directory === null) return SHIPPED_TEMPLATE_SET;
   const templates: Record<PromptTemplate, string> = { ...SHIPPED_TEMPLATES };
+  const origins: Record<PromptTemplate, PromptOrigin> = {
+    ...SHIPPED_TEMPLATE_SET.origins,
+  };
   for (const name of TEMPLATE_NAMES) {
     const path = join(directory, `${name}${MARKDOWN_EXTENSION}`);
     const read = await readAgentFile(path, { context });
@@ -91,8 +117,9 @@ export async function resolveTemplates(
       throw templateInvalid(name, path, read.reason, read.reason);
     checkSyntax(name, path, read.text);
     templates[name] = read.text;
+    origins[name] = PromptOrigin.File;
   }
-  return templates;
+  return { templates, origins };
 }
 
 export function renderTemplate(
