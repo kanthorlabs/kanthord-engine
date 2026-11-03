@@ -1565,3 +1565,27 @@ test("a verification failure submits no finding, also with prior findings", asyn
   assert.deepEqual(attributes[EvaluationAttribute.ActionLabels], []);
   assert.equal(attributes[EvaluationAttribute.FixedCount], NO_RELEASES);
 });
+
+test("a fallback binding of a round with a review base submits its full change as patch evidence", async (t) => {
+  const binding = await roundSnapshot(t, REPOSITORY_NAME, "fixed");
+  const review = await reviewOf(t, "true", undefined, {
+    bindings: [binding],
+    transport: localTransport,
+    round: secondRound([
+      { repository: { binding_id: "binding_other" }, judged: binding.judged },
+    ]),
+    reply: ROUND_SUCCESS,
+  });
+  const [patch, ...others] = patchSubmits(review);
+  assert.equal(others.length, NO_RELEASES);
+  const text = Buffer.from(patch!.assets[0]!.content.data, "base64").toString(
+    "utf8",
+  );
+  assert.match(text, /\+\+\+ b\/work/);
+  assert.match(text, /\+\+\+ b\/fix/);
+  assert.ok(
+    review.assessments[0]?.evidence_ids.includes(
+      `patch_${review.submits.indexOf(patch!) + 1}`,
+    ),
+  );
+});

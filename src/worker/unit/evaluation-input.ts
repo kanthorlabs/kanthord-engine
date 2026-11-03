@@ -1,5 +1,6 @@
 import {
   addedFiles,
+  changePatch,
   modifiedFiles,
   onFirstParentChain,
   roundFiles,
@@ -349,6 +350,18 @@ async function reviewScopeOf(
         )
       ).map(prefixed),
     );
+    if (round.review_base === null || snapshot === undefined) continue;
+    scope.patches.push({
+      binding_id: snapshot.repository.binding_id,
+      name: checkout.name,
+      text: await changePatch(
+        input.env,
+        checkout.directory,
+        origin,
+        run.operationContext,
+        deadline - Date.now(),
+      ),
+    });
   }
   scope.changedFiles.sort();
   return scope;

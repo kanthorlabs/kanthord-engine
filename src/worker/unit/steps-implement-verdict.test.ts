@@ -17,6 +17,7 @@ import {
 } from "./steps-implement.ts";
 import type { WorkspaceCheckout } from "./workspace.ts";
 import { NoProgressRule } from "./progress-rule.ts";
+import { readPrior } from "./node-reads.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
 import {
@@ -48,6 +49,7 @@ const FIRST_PARENT_FILE = "first-parent";
 const ONE_RUN = 1;
 const WALL_DEADLINE_MS = 300;
 const FIXED_ROUND = 2;
+const NO_INDEX = 0;
 const ROUND_ATTRIBUTE = "kanthord.evaluation.round";
 
 type Harness = Awaited<ReturnType<typeof fixture>>;
@@ -504,5 +506,63 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
       ROUND_ATTRIBUTE in (taskStart.arguments[0].attributes ?? {}),
       false,
     );
+  });
+
+  test("a success rework assessment with open findings gives a criterion revision that lists each open finding id", async (t) => {
+    const { h } = await verdictHarness(t, [fauxAssistantMessage("never")]);
+    const completed = (data: unknown) => ({
+      type: "completed",
+      status: 200,
+      data,
+    });
+    const open = ["finding_open_blocker", "finding_open_suggestion"].map(
+      (id, index) => ({
+        id,
+        label: index === NO_INDEX ? "B1" : "S1",
+        round: 1,
+        name: `name ${id}`,
+        description: `defect ${id}`,
+        fix: `fix ${id}`,
+        why: `why ${id}`,
+      }),
+    );
+    h.run.clients.mission = {
+      ...h.run.clients.mission,
+      "execution.rework_assessment.get": async () =>
+        completed({
+          id: "assessment",
+          result: "success",
+          rationale: VERDICT,
+          round: FIXED_ROUND,
+          tested_input: h.checkouts.map((checkout) => ({
+            kind: "repository",
+            binding_id: checkout.binding_id,
+            commit: checkout.head,
+          })),
+        }),
+      "execution.review_round.get": async () =>
+        completed({
+          round: FIXED_ROUND + 1,
+          final: false,
+          review_base: null,
+          findings: open,
+        }),
+    } as unknown as MethodClients["mission"];
+    h.run.clients.worker = {
+      ...h.run.clients.worker,
+      "execution.failed_check.get": async () => completed({ items: [] }),
+    } as unknown as MethodClients["worker"];
+    const prior = await readPrior(h.run, h.input.setup.repositories);
+    h.verdict = prior.verdict;
+    const { node } = await startCheck(h);
+    assert.ok(node);
+    assert.equal(node.round, FIXED_ROUND);
+    for (const finding of open)
+      assert.ok(
+        node.text.includes(
+          `- ${finding.id} (${finding.label}, round 1) ${finding.name}:`,
+        ),
+        finding.id,
+      );
   });
 });

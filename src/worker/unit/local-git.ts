@@ -670,6 +670,24 @@ export async function roundPatch(
   );
 }
 
+export async function changePatch(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  base: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string> {
+  assert.ok(base);
+  assert.ok(!base.startsWith("-"));
+  return run(
+    env,
+    directory,
+    ["diff", "--no-color", `${base}...HEAD`, "--"],
+    context,
+    deadlineMs,
+  );
+}
+
 export async function roundFiles(
   env: NodeJS.ProcessEnv,
   directory: string,
@@ -688,7 +706,8 @@ export async function roundFiles(
       "--diff-merges=remerge",
       "--name-only",
       "-z",
-      added ? "--diff-filter=A" : "--no-renames",
+      "--no-renames",
+      ...(added ? ["--diff-filter=A"] : []),
       "--format=",
       `${base}..HEAD`,
       "--",

@@ -941,8 +941,14 @@ test("a review base that is an ancestor only through a second parent gives the f
     "fix.md",
     "node.md",
   ]);
-  assert.deepEqual(prepared.reviewBundle.patch_paths, []);
-  assert.deepEqual(prepared.patches, []);
+  const path = join("..", "..", EVIDENCE_DIRECTORY, "round-2-repo.patch");
+  assert.deepEqual(prepared.reviewBundle.patch_paths, [path]);
+  assert.equal(prepared.patches.length, ONE_ENTRY);
+  const patch = prepared.patches[0]!.text;
+  assert.equal(readFileSync(join(prepared.directory, path), "utf8"), patch);
+  assert.match(patch, /\+\+\+ b\/node\.md/);
+  assert.match(patch, /\+\+\+ b\/fix\.md/);
+  assert.doesNotMatch(patch, /upstream\.md/);
   assert.deepEqual(
     logs.filter((entry) => entry.message === OFF_HISTORY).length,
     ONE_ENTRY,
@@ -987,11 +993,16 @@ test("a binding with no review-base commit gives the full change", async (t) => 
   ]);
   assert.deepEqual(prepared.reviewBundle.patch_paths, [
     join("..", EVIDENCE_DIRECTORY, "round-2-api.patch"),
+    join("..", EVIDENCE_DIRECTORY, "round-2-web.patch"),
   ]);
   assert.deepEqual(
     prepared.patches.map((patch) => patch.name),
-    ["api"],
+    ["api", "web"],
   );
+  const [api, web] = prepared.patches;
+  assert.match(api!.text, /\+\+\+ b\/api-fix\.md/);
+  assert.doesNotMatch(api!.text, /b\/api\.md/);
+  assert.match(web!.text, /\+\+\+ b\/web\.md/);
   assert.deepEqual(
     logs
       .filter((entry) => entry.message === OFF_HISTORY)
@@ -1012,5 +1023,21 @@ test("a file that the round adds and then deletes is not in added_files", async 
   assert.deepEqual(prepared.reviewBundle.changed_files, [
     "kept.md",
     "temporary.md",
+  ]);
+});
+
+test("a file that the round adds and then renames is in added_files under its new name", async (t) => {
+  const { prepared } = await roundEvaluation(t, ["repo"], async ({ repo }) => {
+    const judged = await repo!.commit("node.md");
+    await repo!.commit("draft.md");
+    await repo!.git.raw(["mv", "draft.md", "final.md"]);
+    await repo!.git.raw([...COMMITTER, "commit", "-m", "rename draft.md"]);
+    const head = (await repo!.git.revparse(["HEAD"])).trim();
+    return { snapshots: { repo: head }, base: { repo: judged } };
+  });
+  assert.deepEqual(prepared.reviewBundle.added_files, ["final.md"]);
+  assert.deepEqual(prepared.reviewBundle.changed_files, [
+    "draft.md",
+    "final.md",
   ]);
 });

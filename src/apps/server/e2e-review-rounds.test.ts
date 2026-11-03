@@ -424,7 +424,7 @@ const RELEASED = { kind: "released", furtherWork: false };
 
 suite("review rounds", { concurrency: SUITE_CONCURRENCY }, () => {
   test(
-    "E09 three review rounds fix the action items and report the last unlisted item",
+    "E11 three review rounds fix the action items and report the last unlisted item",
     { timeout: JOURNEY_TIMEOUT_MS },
     async (t) => {
       const f = await roundsFixture(t);
@@ -531,7 +531,7 @@ suite("review rounds", { concurrency: SUITE_CONCURRENCY }, () => {
   );
 
   test(
-    "E09.2 a rework limit of 0 gives one final round with report-only findings",
+    "E11.2 a rework limit of 0 gives one final round with report-only findings",
     { timeout: JOURNEY_TIMEOUT_MS },
     async (t) => {
       const f = await roundsFixture(t, NO_REWORK);
