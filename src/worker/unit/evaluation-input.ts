@@ -351,16 +351,21 @@ async function reviewScopeOf(
       ).map(prefixed),
     );
     if (round.review_base === null || snapshot === undefined) continue;
+    const text = await changePatch(
+      input.env,
+      checkout.directory,
+      origin,
+      run.operationContext,
+      deadline - Date.now(),
+    );
+    if (text.length === NO_PATCH_BYTES) {
+      scope.emptyPatches.push(checkout.name);
+      continue;
+    }
     scope.patches.push({
       binding_id: snapshot.repository.binding_id,
       name: checkout.name,
-      text: await changePatch(
-        input.env,
-        checkout.directory,
-        origin,
-        run.operationContext,
-        deadline - Date.now(),
-      ),
+      text,
     });
   }
   scope.changedFiles.sort();

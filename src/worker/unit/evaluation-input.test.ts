@@ -1041,3 +1041,30 @@ test("a file that the round adds and then renames is in added_files under its ne
     "final.md",
   ]);
 });
+
+test("a fallback binding with no change gives an empty_patches entry and no patch", async (t) => {
+  const { prepared } = await roundEvaluation(
+    t,
+    ["api", "web"],
+    async ({ api, web }) => {
+      const judged = await api!.commit("api.md");
+      const apiHead = await api!.commit("api-fix.md");
+      const webHead = (await web!.git.revparse(["main"])).trim();
+      return {
+        snapshots: { api: apiHead, web: webHead },
+        base: { api: judged },
+      };
+    },
+  );
+  assert.deepEqual(prepared.reviewBundle.empty_patches, ["web"]);
+  assert.deepEqual(prepared.reviewBundle.patch_paths, [
+    join("..", EVIDENCE_DIRECTORY, "round-2-api.patch"),
+  ]);
+  assert.deepEqual(
+    prepared.patches.map((patch) => patch.name),
+    ["api"],
+  );
+  assert.deepEqual(prepared.reviewBundle.changed_files, [
+    join("api", "api-fix.md"),
+  ]);
+});

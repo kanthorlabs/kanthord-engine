@@ -9,4 +9,4 @@ src/**/__fixtures__/
 /static/openapi.yaml
 /static/openapi/**/*.yaml
 
-/static/prompt/template/criterion-revision.md
+/static/prompt/
