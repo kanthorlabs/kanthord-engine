@@ -123,8 +123,8 @@ export function listFindings(
          AND (? IS NULL OR round = ?)
          AND (? IS NULL OR route = ?)
          AND (? = 0 OR fixed_assessment_id IS NULL)
-         AND (? IS NULL OR (round_key, kind_key, label_key, id) > (SELECT round_key, kind_key, label_key, id FROM keyed WHERE id = ?))
-       ORDER BY round_key, kind_key, label_key, id
+         AND (? IS NULL OR (attempt, round_key, kind_key, label_key, id) > (SELECT attempt, round_key, kind_key, label_key, id FROM keyed WHERE id = ?))
+       ORDER BY attempt, round_key, kind_key, label_key, id
        LIMIT ?`,
     )
     .all(

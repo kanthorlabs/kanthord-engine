@@ -535,7 +535,7 @@ All controls recheck admission at commit. Human-control race precedence remains 
 - Finding list accepts `<node-id>` and returns `Page<Finding>`.
   `--attempt` accepts a nonnegative safe integer and selects the findings of that attempt through their assessment.
   `--round` accepts a positive safe integer and selects the findings of that round.
-  The list orders by the round with a human finding last, then by the kind with `blocker` first, then by the label number, then by the identity. The cursor follows the same order.
+  The list orders by the attempt, then by the round with a human finding last, then by the kind with `blocker` first, then by the label number, then by the identity. The cursor follows the same order.
 - Finding get accepts `<finding-id>` and returns `Finding`.
 - Finding undecided list accepts `<project-id>` and returns `Page<Finding>` of the findings of the project that wait for a human, in descending identity order.
 - Finding decide accepts `<finding-id>` and `FindingDecide`, and returns `Finding`.

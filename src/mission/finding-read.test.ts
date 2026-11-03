@@ -85,17 +85,17 @@ async function twoAttempts(t: Parameters<typeof reviewHarness>[0]) {
   return { ...h, a1, a2, a3, h1, report };
 }
 
-test("the finding list filters by attempt and round, orders by round, kind and label number and pages", async (t) => {
+test("the finding list filters by attempt and round, orders by attempt, round, kind and label number and pages", async (t) => {
   const h = await twoAttempts(t);
   const labels = (items: { label: string }[]) =>
     items.map((item) => item.label);
   assert.deepEqual(labels(await h.findings()), [
-    "B1",
     "B2",
     "B10",
     "S1",
     "S1",
     "H1",
+    "B1",
   ]);
   assert.deepEqual(
     labels(await h.findings({ attempt: String(FIRST_ATTEMPT) })),
@@ -124,9 +124,9 @@ test("the finding list filters by attempt and round, orders by round, kind and l
     cursor = page.next_cursor;
   } while (cursor !== null);
   assert.deepEqual(pages, [
-    ["B1", "B2"],
-    ["B10", "S1"],
-    ["S1", "H1"],
+    ["B2", "B10"],
+    ["S1", "S1"],
+    ["H1", "B1"],
   ]);
   await assert.rejects(
     h.invoke("finding.list", {
