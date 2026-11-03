@@ -45,7 +45,7 @@ import {
   snapshotOf,
   verificationCommands,
 } from "./evaluation-input.ts";
-import { CODER_REPORT_SUBJECT } from "./steps-implement.ts";
+import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 
 test("snapshot selection excludes requests and verifications and orders by identity", () => {
   const asset = {

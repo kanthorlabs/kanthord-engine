@@ -20,8 +20,8 @@ import { EndReason, ExecutionStop } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { CHECKOUTS_DIRECTORY, WorkspaceKind } from "./workspace.ts";
 import { DONE_TRAILER, doneRecordOf } from "./done-record.ts";
+import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 import {
-  CODER_REPORT_SUBJECT,
   HEAD_COMMIT_SUBJECT,
   runStepsImplement,
   runTask,

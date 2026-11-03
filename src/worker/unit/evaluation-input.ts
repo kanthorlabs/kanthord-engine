@@ -29,7 +29,7 @@ import {
 } from "./environment-setup.ts";
 import { ExecutionIntent } from "../contract.ts";
 import { AFFECTED_SUBJECT } from "./affected.ts";
-import { CODER_REPORT_SUBJECT } from "./steps-implement.ts";
+import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 
 const NO_SNAPSHOTS = 0;
 

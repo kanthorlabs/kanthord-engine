@@ -94,9 +94,9 @@ import {
 import { nodeUnitOf, releaseGate, ReleaseGateKind } from "./release-gate.ts";
 import { memoScopeOf, type VerificationMemo } from "./verification-memo.ts";
 import { REPORT_MEDIA_TYPE } from "./steps-examine.ts";
+import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 
 export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
-export const CODER_REPORT_SUBJECT = "Coder report of the node attempt";
 const NO_TASKS = 0;
 const NO_CHECKOUTS = 0;
 const NO_PROGRESS_LIMIT = 2;
