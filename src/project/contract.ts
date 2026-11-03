@@ -1136,6 +1136,7 @@ export const projectOperations = {
       ssh_credential: bindingVerifyAnswerEntrySchema,
       credential: bindingVerifyAnswerEntrySchema.nullable(),
       instruction_file: instructionFileCheckSchema.nullable(),
+      instruction_file_hint: z.string().nullable(),
     }),
     description:
       "Check an unsaved repository binding configuration without a write.",

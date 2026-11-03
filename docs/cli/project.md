@@ -785,6 +785,7 @@ A complete file:
 - It refuses an invalid `prompts` text or path with `project.bindings.repository.prompt_invalid`.
 - Then it runs the checks of `binding verify` on the configuration and answers the same `{ address, ssh_credential, credential }`. A host outside the SSH host set answers the `address` entry `unhealthy` with `failure_reason: address_invalid`. A host with no pin answers `host_key_unknown`.
 - The answer also holds `instruction_file: { path, commit, state, reason }`, the state of the instruction file at the base head. It is null when the configuration names no instruction file. `state` is `present`, `absent`, `invalid` or `unreachable`. `reason` is null for `present` and `absent`. For `invalid`, `reason` is `too_large`, `not_utf8`, `unreadable` or `control_character`. For `unreachable`, `commit` is null and `reason` is the git failure reason, or `project.bindings.repository.base_branch_absent`.
+- When the configuration names no instruction file, the check reads `AGENTS.md` at the base head with the same head read and the same 20 s deadline. When that file is present, the answer holds `instruction_file_hint: "AGENTS.md exists at the base head."`. Otherwise `instruction_file_hint` is null. A failed read gives no hint and does not refuse the request. `instruction_file_hint` is always null when the configuration names an instruction file.
 
 An absent project answers `404 project.project.not_found`.
 

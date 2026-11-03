@@ -277,6 +277,8 @@ function draftSubject(
   };
 }
 const CHECKED_BINDING_NAME = "check";
+const AGENTS_FILE = "AGENTS.md";
+const AGENTS_FILE_HINT = "AGENTS.md exists at the base head.";
 function unreachableReason(error: OperationError): string {
   const details = error.details;
   return isObject(details) &&
@@ -1058,10 +1060,7 @@ export class ProjectService implements Service, ProjectBindings {
       ),
       this.checkInstructionFile(params.project_id, config, caller),
     ]);
-    return caller.commit(() => ({
-      ...health,
-      instruction_file: instructionFile,
-    }));
+    return caller.commit(() => ({ ...health, ...instructionFile }));
   }
   private async bindingHealth(
     config: typeof repositoryConfigSchema._output,
@@ -1380,30 +1379,56 @@ export class ProjectService implements Service, ProjectBindings {
     projectId: string,
     config: typeof repositoryConfigSchema._output,
     caller: CallerContext,
-  ): Promise<InstructionFileCheck | null> {
+  ): Promise<{
+    instruction_file: InstructionFileCheck | null;
+    instruction_file_hint: string | null;
+  }> {
     const path = config.prompts?.instruction_file;
-    if (path === undefined) return null;
+    const probed =
+      path === undefined
+        ? {
+            ...config,
+            prompts: { ...config.prompts, instruction_file: AGENTS_FILE },
+          }
+        : config;
     try {
       const [file] = await this.instructionFilesAtHead(
         projectId,
-        [[CHECKED_BINDING_NAME, config]],
+        [[CHECKED_BINDING_NAME, probed]],
         caller,
       );
       assert.ok(file);
+      if (path === undefined)
+        return {
+          instruction_file: null,
+          instruction_file_hint:
+            file.state === InstructionFileState.Present
+              ? AGENTS_FILE_HINT
+              : null,
+        };
       return {
-        path: file.path,
-        commit: file.commit,
-        state: file.state,
-        reason: file.reason,
+        instruction_file: {
+          path: file.path,
+          commit: file.commit,
+          state: file.state,
+          reason: file.reason,
+        },
+        instruction_file_hint: null,
       };
     } catch (error) {
       if (caller.context.signal.aborted || !(error instanceof OperationError))
         throw error;
       return {
-        path,
-        commit: null,
-        state: InstructionFileState.Unreachable,
-        reason: unreachableReason(error),
+        instruction_file:
+          path === undefined
+            ? null
+            : {
+                path,
+                commit: null,
+                state: InstructionFileState.Unreachable,
+                reason: unreachableReason(error),
+              },
+        instruction_file_hint: null,
       };
     }
   }

@@ -5255,6 +5255,10 @@ function verifyFixture(
         );
       return credentialAnswer;
     },
+    repositoryFiles: instructionRepositoryFiles({
+      state: RepositoryFileState.Absent,
+      text: null,
+    }).repositoryFiles,
     ...overrides,
   });
   return { f, sshCalls, sshStarted, credentialCalls, credentialAnswer };
@@ -5759,6 +5763,7 @@ test("binding.check answers the verify badges of an unsaved configuration and wr
     ssh_credential: credentialAnswer,
     credential: credentialAnswer,
     instruction_file: null,
+    instruction_file_hint: null,
   });
   assert.deepEqual(
     sshCalls.map(({ address }) => address),
@@ -5776,20 +5781,20 @@ test("binding.check answers the verify badges of an unsaved configuration and wr
     { credential: REPOSITORY_CREDENTIAL, platform: REPOSITORY_PLATFORM },
     sshSuitability,
     sshSuitability,
+    sshSuitability,
   ]);
+  const draftRelease = {
+    identity: f.caller.identity,
+    subject: {
+      kind: SshIdentitySubjectKind.Draft,
+      project_id: project.id,
+      credential: sshCredentialOf(REPOSITORY_ADDRESS),
+      address: REPOSITORY_ADDRESS,
+    },
+  };
   assert.deepEqual(
     f.releases.map(({ identity, subject }) => ({ identity, subject })),
-    [
-      {
-        identity: f.caller.identity,
-        subject: {
-          kind: SshIdentitySubjectKind.Draft,
-          project_id: project.id,
-          credential: sshCredentialOf(REPOSITORY_ADDRESS),
-          address: REPOSITORY_ADDRESS,
-        },
-      },
-    ],
+    [draftRelease, draftRelease],
   );
   assert.equal(f.commits(), commits + ONE_CALL);
   assert.equal(
@@ -6031,6 +6036,49 @@ test("binding.check answers the state of the instruction file at the base head",
     assert.equal(
       f.store.database.prepare("SELECT id FROM project_binding").all().length,
       NO_ITEMS,
+    );
+  }
+});
+
+test("binding.check without an instruction file hints a present AGENTS.md at the base head", async (t) => {
+  const cases = [
+    [
+      instructionRepositoryFiles({
+        state: RepositoryFileState.Present,
+        text: INSTRUCTION_TEXT,
+      }),
+      "AGENTS.md exists at the base head.",
+      [[INSTRUCTION_PATH]],
+    ],
+    [
+      instructionRepositoryFiles({
+        state: RepositoryFileState.Absent,
+        text: null,
+      }),
+      null,
+      [[INSTRUCTION_PATH]],
+    ],
+    [instructionRepositoryFiles(null, null), null, []],
+  ] as const;
+  for (const [{ repositoryFiles, reads, heads }, hint, paths] of cases) {
+    const { f } = verifyFixture(t, "healthy", "healthy", {
+      custodySuitability: () => {},
+      repositoryFiles,
+    });
+    const project = f.store.transaction((tx) =>
+      insertProject(tx, PROJECT_NAME),
+    );
+    const result = await checkBinding(
+      f,
+      project.id,
+      repositoryBinding().config,
+    );
+    assert.equal(result.instruction_file, null);
+    assert.equal(result.instruction_file_hint, hint);
+    assert.deepEqual(heads, ["main"]);
+    assert.deepEqual(
+      reads.map((read) => read.paths),
+      paths,
     );
   }
 });

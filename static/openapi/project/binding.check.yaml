@@ -440,9 +440,14 @@ components:
                 - reason
               additionalProperties: false
             - type: "null"
+        instruction_file_hint:
+          anyOf:
+            - type: string
+            - type: "null"
       required:
         - address
         - ssh_credential
         - credential
         - instruction_file
+        - instruction_file_hint
       additionalProperties: false
