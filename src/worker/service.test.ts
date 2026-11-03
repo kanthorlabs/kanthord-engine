@@ -18,9 +18,12 @@ import {
   HANDOVER_REFRESH_WAIT_MS,
   HANDOVER_TIMEOUT_MS,
   InstancePlacement,
+  type MissionPromptPins,
   PlacementIssue,
   type PlacementStatus,
   PoolPlacement,
+  type PromptBase,
+  type PromptCommits,
   REGISTRATION_CAPABILITY,
   REGISTRATION_TARGET_KIND,
   RegistrationActivity,
@@ -67,9 +70,11 @@ import {
   type AgentSelection,
 } from "../scheduler/contract.ts";
 import { HttpStatus } from "../kernel/http.ts";
+import { ProjectErrorCode } from "../project/contract.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
+import { PROMPT_SOURCE_READ_MS } from "../kernel/prompt-source.ts";
 import {
   endRegistration,
   insertRegistration,
@@ -129,6 +134,12 @@ const fakeCollaborations = {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
     actionContextOf: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+  },
+  missionPromptPins: {
+    attemptPromptCommits: () => [],
+    pinPromptCommits: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
   },
@@ -2554,6 +2565,7 @@ const TWO_HANDOVER_ATTEMPTS = 2;
 function refreshingHandoverFixture(
   t: TestContext,
   handover: () => { nonce: string; ciphertext: string },
+  collaborations: Partial<Dependencies> = {},
 ) {
   const execution = {
     executionId: createIdentity("execution"),
@@ -2583,13 +2595,15 @@ function refreshingHandoverFixture(
       ...fakeCollaborations.custodyHandover,
       handover,
     },
+    ...collaborations,
   });
-  const caller = { ...f.caller, identity, execution };
-  const body = { execution_id: execution.executionId };
-  return () =>
+  return (executionId = execution.executionId) =>
     f.registry
       .get(workerOperations.handover.id)
-      .handler({ params: {}, query: {}, body }, caller);
+      .handler(
+        { params: {}, query: {}, body: { execution_id: executionId } },
+        { ...f.caller, identity, execution: { ...execution, executionId } },
+      );
 }
 
 test("a handover that meets an in-flight credential refresh waits for the refresh to settle and then answers the envelope", async (t) => {
@@ -2637,6 +2651,256 @@ test("a handover whose credential refresh outlasts the wait answers 503 worker.h
 
 test("the handover refresh wait ends before the route timeout with a margin", () => {
   assert.ok(HANDOVER_REFRESH_WAIT_MS < HANDOVER_TIMEOUT_MS);
+  assert.ok(PROMPT_SOURCE_READ_MS < HANDOVER_REFRESH_WAIT_MS);
+});
+
+const NAMED_BINDING = createIdentity("binding");
+const OTHER_NAMED_BINDING = createIdentity("binding");
+const UNNAMED_BINDING = createIdentity("binding");
+const HEAD = "a".repeat(40);
+const OTHER_HEAD = "b".repeat(64);
+const MOVED_HEAD = "c".repeat(40);
+const HANDOVER_ENVELOPE = { nonce: "nonce", ciphertext: "ciphertext" };
+const SLOW_REMOTE_MS = 15000;
+const SSH_UNREACHABLE_STATUS = 422;
+
+function memoryPromptPins() {
+  let stored: PromptCommits | null = null;
+  const answered: PromptCommits[] = [];
+  const pins: MissionPromptPins = {
+    attemptPromptCommits: (tx, nodeId, attempt) => {
+      assert.equal(attempt, FIRST_HANDOVER_ATTEMPT);
+      assert.ok(nodeId.startsWith("node_"));
+      return stored;
+    },
+    pinPromptCommits: (tx, _nodeId, attempt, commits) => {
+      assert(tx.database.isTransaction);
+      assert.equal(attempt, FIRST_HANDOVER_ATTEMPT);
+      stored ??= commits;
+      answered.push(stored);
+      return stored;
+    },
+  };
+  return { pins, answered, stored: () => stored };
+}
+
+function promptBaseOf(
+  baseCommitOf: PromptBase["baseCommitOf"],
+  named: readonly string[] = [NAMED_BINDING, OTHER_NAMED_BINDING],
+): PromptBase {
+  return {
+    instructionBindingsOf: (tx, bindingIds) => {
+      assert(tx.database.isTransaction);
+      return bindingIds.filter((id) => named.includes(id));
+    },
+    baseCommitOf,
+  };
+}
+
+const PROMPT_BINDINGS = () => [
+  NAMED_BINDING,
+  UNNAMED_BINDING,
+  OTHER_NAMED_BINDING,
+];
+
+test("the first handover of an attempt reads the base head of each binding that names an instruction file in parallel and pins it", async (t) => {
+  const memory = memoryPromptPins();
+  const pending = new Map<string, (commit: string) => void>();
+  const invoke = refreshingHandoverFixture(t, () => HANDOVER_ENVELOPE, {
+    repositoryBindingIdsOf: PROMPT_BINDINGS,
+    missionPromptPins: memory.pins,
+    promptBase: promptBaseOf(
+      (bindingId, context) =>
+        new Promise((resolve) => {
+          assert.ok(context.deadline !== null);
+          pending.set(bindingId, resolve);
+        }),
+    ),
+  });
+  const answer = invoke();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual([...pending.keys()], [NAMED_BINDING, OTHER_NAMED_BINDING]);
+  pending.get(OTHER_NAMED_BINDING)!(OTHER_HEAD);
+  pending.get(NAMED_BINDING)!(HEAD);
+  assert.deepEqual(await answer, HANDOVER_ENVELOPE);
+  assert.deepEqual(memory.stored(), [
+    { binding_id: NAMED_BINDING, commit: HEAD },
+    { binding_id: OTHER_NAMED_BINDING, commit: OTHER_HEAD },
+  ]);
+});
+
+test("a first handover with no binding that names an instruction file pins an empty list and reads no head", async (t) => {
+  const memory = memoryPromptPins();
+  const invoke = refreshingHandoverFixture(t, () => HANDOVER_ENVELOPE, {
+    repositoryBindingIdsOf: PROMPT_BINDINGS,
+    missionPromptPins: memory.pins,
+    promptBase: promptBaseOf(async () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    }, []),
+  });
+  assert.deepEqual(await invoke(), HANDOVER_ENVELOPE);
+  assert.deepEqual(memory.stored(), []);
+});
+
+test("a later handover of the attempt reads the stored pin and no head", async (t) => {
+  const memory = memoryPromptPins();
+  let reads = 0;
+  const invoke = refreshingHandoverFixture(t, () => HANDOVER_ENVELOPE, {
+    repositoryBindingIdsOf: PROMPT_BINDINGS,
+    missionPromptPins: memory.pins,
+    promptBase: promptBaseOf(async () => {
+      reads++;
+      return reads === FIRST_HANDOVER_ATTEMPT ? HEAD : MOVED_HEAD;
+    }, [NAMED_BINDING]),
+  });
+  assert.deepEqual(await invoke(), HANDOVER_ENVELOPE);
+  assert.deepEqual(
+    await invoke(createIdentity("execution")),
+    HANDOVER_ENVELOPE,
+  );
+  assert.equal(reads, FIRST_HANDOVER_ATTEMPT);
+  assert.deepEqual(memory.answered, [
+    [{ binding_id: NAMED_BINDING, commit: HEAD }],
+  ]);
+});
+
+test("two concurrent first handovers of one execution store one pin and both read it back", async (t) => {
+  const memory = memoryPromptPins();
+  const heads: ((commit: string) => void)[] = [];
+  const invoke = refreshingHandoverFixture(t, () => HANDOVER_ENVELOPE, {
+    repositoryBindingIdsOf: PROMPT_BINDINGS,
+    missionPromptPins: memory.pins,
+    promptBase: promptBaseOf(
+      () => new Promise((resolve) => heads.push(resolve)),
+      [NAMED_BINDING],
+    ),
+  });
+  const first = invoke();
+  const second = invoke();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(heads.length, TWO_HANDOVER_ATTEMPTS);
+  heads[0]!(HEAD);
+  assert.deepEqual(await first, HANDOVER_ENVELOPE);
+  heads[1]!(MOVED_HEAD);
+  assert.deepEqual(await second, HANDOVER_ENVELOPE);
+  const pinned = [{ binding_id: NAMED_BINDING, commit: HEAD }];
+  assert.deepEqual(memory.stored(), pinned);
+  assert.deepEqual(memory.answered, [pinned, pinned]);
+});
+
+test("a head read failure answers ssh_unreachable and pins nothing", async (t) => {
+  const memory = memoryPromptPins();
+  const unreachable = new OperationError(
+    SSH_UNREACHABLE_STATUS,
+    ProjectErrorCode.RepositorySshUnreachable,
+    "The remote is unreachable.",
+    { failure_reason: "timeout" },
+  );
+  const invoke = refreshingHandoverFixture(
+    t,
+    () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+    {
+      repositoryBindingIdsOf: PROMPT_BINDINGS,
+      missionPromptPins: memory.pins,
+      promptBase: promptBaseOf(async () => {
+        throw unreachable;
+      }),
+    },
+  );
+  await assert.rejects(
+    async () => {
+      await invoke();
+    },
+    (error: unknown) => error === unreachable,
+  );
+  assert.equal(memory.stored(), null);
+});
+
+test("a head read takes at most its budget of the one handover deadline", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const memory = memoryPromptPins();
+  const invoke = refreshingHandoverFixture(
+    t,
+    () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+    {
+      repositoryBindingIdsOf: PROMPT_BINDINGS,
+      missionPromptPins: memory.pins,
+      promptBase: promptBaseOf(
+        (_bindingId, context) =>
+          new Promise((_resolve, reject) => {
+            assert.equal(context.deadline, Date.now() + PROMPT_SOURCE_READ_MS);
+            context.signal.addEventListener("abort", () =>
+              reject(
+                new OperationError(
+                  SSH_UNREACHABLE_STATUS,
+                  ProjectErrorCode.RepositorySshUnreachable,
+                  "The remote is unreachable.",
+                ),
+              ),
+            );
+          }),
+        [NAMED_BINDING],
+      ),
+    },
+  );
+  const answer = invoke();
+  await new Promise((resolve) => setImmediate(resolve));
+  t.mock.timers.tick(PROMPT_SOURCE_READ_MS);
+  await assert.rejects(
+    async () => {
+      await answer;
+    },
+    (error: unknown) =>
+      error instanceof OperationError &&
+      error.code === ProjectErrorCode.RepositorySshUnreachable,
+  );
+  assert.equal(memory.stored(), null);
+});
+
+test("a slow remote together with a credential refresh in flight ends within the handover timeout", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const started = Date.now();
+  const memory = memoryPromptPins();
+  let attempts = 0;
+  const invoke = refreshingHandoverFixture(
+    t,
+    () => {
+      attempts++;
+      throw new CredentialRefreshInFlight(new Promise<void>(() => {}));
+    },
+    {
+      repositoryBindingIdsOf: PROMPT_BINDINGS,
+      missionPromptPins: memory.pins,
+      promptBase: promptBaseOf(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(() => resolve(HEAD), SLOW_REMOTE_MS),
+          ),
+        [NAMED_BINDING],
+      ),
+    },
+  );
+  let settledAt: number | null = null;
+  const answer = Promise.resolve(invoke()).finally(() => {
+    settledAt = Date.now();
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  t.mock.timers.tick(SLOW_REMOTE_MS);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(attempts, FIRST_HANDOVER_ATTEMPT);
+  t.mock.timers.tick(HANDOVER_REFRESH_WAIT_MS - SLOW_REMOTE_MS);
+  await assert.rejects(
+    answer,
+    (error: unknown) =>
+      error instanceof OperationError &&
+      error.code === WorkerErrorCode.HandoverRefreshInFlight,
+  );
+  assert.equal(settledAt, started + HANDOVER_REFRESH_WAIT_MS);
+  assert.ok(settledAt! - started < HANDOVER_TIMEOUT_MS);
 });
 
 test("instanceOf answers the placement of a live instance and instanceKeyOf answers only a worker instance", (t) => {

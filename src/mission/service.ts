@@ -52,6 +52,7 @@ import {
   type MissionEnvironments,
   MissionErrorCode,
   missionOperations,
+  type MissionPromptPins,
   type MissionTelemetry,
   type MissionTransitions,
   type NodeBody,
@@ -130,6 +131,7 @@ import {
   type ObjectPutInput,
 } from "./authorization.ts";
 import { repositoryBindingIdsOf } from "./evidence-content.ts";
+import { pinPromptCommits, readPromptCommits } from "./record-store.ts";
 import {
   assessmentPage,
   attemptPage,
@@ -265,7 +267,12 @@ export interface Dependencies {
 }
 
 export class MissionService
-  implements Service, MissionCollaborations, MissionTransitions, MissionActions
+  implements
+    Service,
+    MissionCollaborations,
+    MissionTransitions,
+    MissionActions,
+    MissionPromptPins
 {
   claim(...args: Parameters<MissionTransitions["claim"]>) {
     const [tx, ...rest] = args;
@@ -1332,6 +1339,16 @@ export class MissionService
       nodeId,
       nodeRevision,
     );
+  }
+
+  attemptPromptCommits(
+    ...args: Parameters<MissionPromptPins["attemptPromptCommits"]>
+  ) {
+    return readPromptCommits(...args);
+  }
+
+  pinPromptCommits(...args: Parameters<MissionPromptPins["pinPromptCommits"]>) {
+    return pinPromptCommits(...args);
   }
 
   intentOf(tx: Transaction, nodeId: string, nodeRevision: number): Intent {

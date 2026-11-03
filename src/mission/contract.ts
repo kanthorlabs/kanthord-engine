@@ -954,6 +954,26 @@ export const repositoryAddressSchema = z.strictObject({
   commit: commitSchema,
 });
 export type RepositoryAddress = z.infer<typeof repositoryAddressSchema>;
+export const promptCommitsSchema = z.array(
+  z.strictObject({
+    binding_id: identitySchema("binding"),
+    commit: commitSchema,
+  }),
+);
+export type PromptCommits = z.infer<typeof promptCommitsSchema>;
+export interface MissionPromptPins {
+  attemptPromptCommits(
+    tx: Transaction,
+    nodeId: string,
+    attempt: number,
+  ): PromptCommits | null;
+  pinPromptCommits(
+    tx: Transaction,
+    nodeId: string,
+    attempt: number,
+    commits: PromptCommits,
+  ): PromptCommits;
+}
 export const producedAddressSchema = z.strictObject({
   kind: z.literal(AssetKind.Produced),
   sha256: sha256Schema,

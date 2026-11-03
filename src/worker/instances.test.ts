@@ -150,6 +150,10 @@ function instanceFixture(
       authorizeAction: unexpected,
       actionContextOf: unexpected,
     },
+    missionPromptPins: {
+      attemptPromptCommits: unexpected,
+      pinPromptCommits: unexpected,
+    },
     instanceArchive: {
       revokeForInstanceArchive: (_tx, executionId) => {
         if (revocation.failure) throw revocation.failure;
