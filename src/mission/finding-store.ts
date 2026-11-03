@@ -210,17 +210,14 @@ export function routeOpenFixFindings(
   nodeId: string,
   attempt: number,
   route: FindingRoute,
-): string[] {
+): void {
   assert.ok(tx.database.isTransaction);
   assert.notEqual(route, FindingRoute.Fix);
-  const rows = tx.database
+  tx.database
     .prepare(
-      "UPDATE mission_finding SET route = ? WHERE node_id = ? AND route = ? AND fixed_assessment_id IS NULL AND assessment_id IN (SELECT id FROM mission_assessment WHERE node_id = ? AND attempt = ?) RETURNING id",
+      "UPDATE mission_finding SET route = ? WHERE node_id = ? AND route = ? AND fixed_assessment_id IS NULL AND assessment_id IN (SELECT id FROM mission_assessment WHERE node_id = ? AND attempt = ?)",
     )
-    .all(route, nodeId, FindingRoute.Fix, nodeId, attempt) as unknown as {
-    id: string;
-  }[];
-  return rows.map((row) => row.id).sort();
+    .run(route, nodeId, FindingRoute.Fix, nodeId, attempt);
 }
 
 export function updateFindingReport(

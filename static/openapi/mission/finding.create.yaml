@@ -57,8 +57,8 @@ pathItem:
     operationId: mission.finding.list
     tags:
       - mission
-    description: List the review findings of a node in the order of round, kind,
-      label number and identity.
+    description: List the review findings of a node in the order of attempt, round
+      with a human finding last, kind, label number and identity.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: false

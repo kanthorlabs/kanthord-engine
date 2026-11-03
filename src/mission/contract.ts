@@ -2208,7 +2208,7 @@ export const missionOperations = {
     ),
     output: pageOf(findingSchema),
     description:
-      "List the review findings of a node in the order of round, kind, label number and identity.",
+      "List the review findings of a node in the order of attempt, round with a human finding last, kind, label number and identity.",
   },
   "finding.get": {
     ...readOperation,

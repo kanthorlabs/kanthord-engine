@@ -906,6 +906,7 @@ const FIRST_ROUND = 1;
 const SECOND_ROUND = 2;
 const FINAL_ROUND = 3;
 const REWORK_ONCE = 1;
+const FAILED_EXIT_CODE = 1;
 
 test("a success with an action:yes finding reworks below the limit and the final round reports its findings", async (t) => {
   const h = await reviewHarness(t, IDENTITY);
@@ -965,7 +966,7 @@ test("an unlisted open finding keeps its text, reworks a success and reads fixed
   assert.equal(listed.fixed_assessment_id, final.assessment.id);
 });
 
-test("a criterion-not-met final round after a failed verification blocks with the rule rework_limit and reports the open findings", async (t) => {
+test("a criterion-not-met final round blocks with the rule rework_limit and reports the open findings", async (t) => {
   const h = await reviewHarness(t, IDENTITY);
   await h.submit({ ...h.notMet, findings: [reviewerFinding("B1")] });
   h.evaluate();
@@ -985,6 +986,51 @@ test("a criterion-not-met final round after a failed verification blocks with th
   const b1 = await h.byLabel("B1");
   assert.equal(b1.route, FindingRoute.Report);
   assert.equal(b1.status, FindingStatus.Open);
+});
+
+test("a final round with a failed verification blocks with the rule rework_limit", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  await h.submit({ ...h.notMet, findings: [reviewerFinding("B1")] });
+  h.evaluate();
+  await h.submit(h.notMet);
+  h.evaluate();
+  const failed = await h.invoke("evidence.submit", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      ...h.context,
+      subject: "Verification failed",
+      assets: [{ kind: AssetKind.Repository, address: h.address }],
+      verification: {
+        tested_input: h.address,
+        results: [
+          {
+            command: "true",
+            exit_code: FAILED_EXIT_CODE,
+            signal: null,
+            timed_out: false,
+          },
+        ],
+      },
+    },
+  });
+  const final = await h.submit({
+    ...h.notMet,
+    evidence_ids: [failed.evidence.id],
+  });
+  assert.equal(final.assessment.round, FINAL_ROUND);
+  assert.ok("state" in final.node);
+  assert.equal(final.node.state, NodeState.Blocked);
+  assert.equal(final.outcome?.closing_event, ClosingEvent.AssessmentNotPassed);
+  assert.deepEqual(revokedTransition(h.calls), {
+    from: NodeState.Evaluating,
+    to: NodeState.Blocked,
+    rule: TransitionRule.ReworkLimit,
+    count: h.dependencies.config.rework_limit,
+    limit: h.dependencies.config.rework_limit,
+    first_available_at: null,
+  });
+  assert.equal((await h.byLabel("B1")).route, FindingRoute.Report);
 });
 
 test("a round after a request evidence reports its action:yes findings and causes no rework", async (t) => {
