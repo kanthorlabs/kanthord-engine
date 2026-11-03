@@ -1,0 +1,1 @@
+export const PROMPT_SOURCE_READ_MS = 20000;

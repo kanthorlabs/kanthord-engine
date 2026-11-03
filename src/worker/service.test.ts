@@ -15,7 +15,6 @@ import {
   ContainerRuntime,
   ExecutionIntent,
   type ExecutionSetup,
-  HANDOVER_HEAD_READ_MS,
   HANDOVER_REFRESH_WAIT_MS,
   HANDOVER_TIMEOUT_MS,
   InstancePlacement,
@@ -75,6 +74,7 @@ import { ProjectErrorCode } from "../project/contract.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
+import { PROMPT_SOURCE_READ_MS } from "../kernel/prompt-source.ts";
 import {
   endRegistration,
   insertRegistration,
@@ -2597,12 +2597,13 @@ function refreshingHandoverFixture(
     },
     ...collaborations,
   });
-  const caller = { ...f.caller, identity, execution };
-  const body = { execution_id: execution.executionId };
-  return () =>
+  return (executionId = execution.executionId) =>
     f.registry
       .get(workerOperations.handover.id)
-      .handler({ params: {}, query: {}, body }, caller);
+      .handler(
+        { params: {}, query: {}, body: { execution_id: executionId } },
+        { ...f.caller, identity, execution: { ...execution, executionId } },
+      );
 }
 
 test("a handover that meets an in-flight credential refresh waits for the refresh to settle and then answers the envelope", async (t) => {
@@ -2650,7 +2651,7 @@ test("a handover whose credential refresh outlasts the wait answers 503 worker.h
 
 test("the handover refresh wait ends before the route timeout with a margin", () => {
   assert.ok(HANDOVER_REFRESH_WAIT_MS < HANDOVER_TIMEOUT_MS);
-  assert.ok(HANDOVER_HEAD_READ_MS < HANDOVER_REFRESH_WAIT_MS);
+  assert.ok(PROMPT_SOURCE_READ_MS < HANDOVER_REFRESH_WAIT_MS);
 });
 
 const NAMED_BINDING = createIdentity("binding");
@@ -2753,7 +2754,10 @@ test("a later handover of the attempt reads the stored pin and no head", async (
     }, [NAMED_BINDING]),
   });
   assert.deepEqual(await invoke(), HANDOVER_ENVELOPE);
-  assert.deepEqual(await invoke(), HANDOVER_ENVELOPE);
+  assert.deepEqual(
+    await invoke(createIdentity("execution")),
+    HANDOVER_ENVELOPE,
+  );
   assert.equal(reads, FIRST_HANDOVER_ATTEMPT);
   assert.deepEqual(memory.answered, [
     [{ binding_id: NAMED_BINDING, commit: HEAD }],
@@ -2828,7 +2832,7 @@ test("a head read takes at most its budget of the one handover deadline", async 
       promptBase: promptBaseOf(
         (_bindingId, context) =>
           new Promise((_resolve, reject) => {
-            assert.equal(context.deadline, Date.now() + HANDOVER_HEAD_READ_MS);
+            assert.equal(context.deadline, Date.now() + PROMPT_SOURCE_READ_MS);
             context.signal.addEventListener("abort", () =>
               reject(
                 new OperationError(
@@ -2845,7 +2849,7 @@ test("a head read takes at most its budget of the one handover deadline", async 
   );
   const answer = invoke();
   await new Promise((resolve) => setImmediate(resolve));
-  t.mock.timers.tick(HANDOVER_HEAD_READ_MS);
+  t.mock.timers.tick(PROMPT_SOURCE_READ_MS);
   await assert.rejects(
     async () => {
       await answer;

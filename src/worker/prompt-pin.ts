@@ -1,12 +1,12 @@
 import { CancellationContext, type Context } from "../kernel/context.ts";
 import type { ExecutionClaim } from "../kernel/operation.ts";
+import { PROMPT_SOURCE_READ_MS } from "../kernel/prompt-source.ts";
 import type { Store } from "../kernel/store.ts";
-import {
-  HANDOVER_HEAD_READ_MS,
-  type MissionPromptPins,
-  type PromptBase,
-  type PromptCommits,
-  type RepositoryBindingIdsOf,
+import type {
+  MissionPromptPins,
+  PromptBase,
+  PromptCommits,
+  RepositoryBindingIdsOf,
 } from "./contract.ts";
 
 export interface PromptPinDependencies {
@@ -47,7 +47,7 @@ export async function unpinnedPromptCommits(
   if (promptBase === undefined) return [];
   const read = new CancellationContext(
     context,
-    Math.min(deadline, Date.now() + HANDOVER_HEAD_READ_MS),
+    Math.min(deadline, Date.now() + PROMPT_SOURCE_READ_MS),
   );
   try {
     return await Promise.all(
