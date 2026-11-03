@@ -951,7 +951,7 @@ test("a round with a review base renders the round block with the prior findings
   });
   assert.match(
     instruction,
-    /^This is review round 2\. `patch_paths` in the review bundle lists the patch of each repository since the latest review with a judgement\. Review only that change: raise a new finding only on a line that a patch adds or changes\. List each prior finding that the change fixes in fixed_finding_ids\. Never report a prior finding again\. A finding that you do not list stays open\. A prior blocker that you do not list stays a blocker of this judgement\.$/m,
+    /^This is review round 2\. `patch_paths` in the review bundle lists the patch of each repository since the latest review that gave success, a new finding or a proposal\. Review only that change: raise a new finding only on a line that a patch adds or changes\. List each prior finding that the change fixes in fixed_finding_ids\. Never report a prior finding again\. A finding that you do not list stays open\. A prior blocker that you do not list stays a blocker of this judgement\.$/m,
   );
   const line = instruction
     .split("\n")
@@ -995,7 +995,7 @@ test("the criterion revision lists each open finding with its id and asks for an
     [
       PLAIN_REVISION,
       "",
-      "Resolve each finding below. Change only what each finding needs, because the next review reads only the change since the latest review with a judgement. In your final reply, answer each finding id with FIXED or OPEN and the reason. A finding answer is no blocker of your finding list.",
+      "Resolve each finding below. Change only what each finding needs, because the next review reads only the change since the latest review that gave success, a new finding or a proposal. In your final reply, answer each finding id with FIXED or OPEN and the reason. A finding answer is no blocker of your finding list.",
       `- ${PRIOR_BLOCKER_ID} (B1, round 1) name B1: defect B1 fix: fix B1 why: why B1`,
       `- ${PRIOR_SUGGESTION_ID} (S1, round 2) name S1: defect S1 fix: fix S1 why: why S1`,
     ].join("\n"),
