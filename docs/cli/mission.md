@@ -426,6 +426,7 @@ tasks.
 
 - Block accepts `HumanAct`, returns `ControlResult`, and requires `Paused`.
   It records the human reason in an outcome and closes an open attempt.
+  When it closes an open attempt, each open finding of that attempt with the route `fix` gets the route `report`.
   When the attempt reads 0, it opens or closes no attempt.
   The attempt stays 0. There is no separate block entity. This is the only human
   block path; a generic force-state command is not proposed.
@@ -454,7 +455,7 @@ tasks.
   It reaches `Waiting` in the same transaction.
 - Override accepts `Override`, returns `ControlResult`, and
   creates a human assessment and an outcome that names it, with the requested `result`, which becomes the
-  current outcome of the node. Eligible states in the current design are
+  current outcome of the node. When it closes an open attempt, each open finding of that attempt with the route `fix` gets the route `report`. Eligible states in the current design are
   `Pending`, `Available`, `Executing`, `Waiting`, `Blocked`, `Paused`,
   `External.Success`, `External.Failed`. It is not defined from `Evaluating` or
   `External.Requested`, and cannot reach a terminal node. Any supplied landed
@@ -462,7 +463,7 @@ tasks.
   `--result` is required, and its closed set is `success`. The CLI sets `result` from `--result`, and it refuses a `--file` that holds a `result` member before a request, under [`--file`](common-flags.md#--file).
   From `Blocked`, it rejects every open [fix-node proposal](https://github.com/kanthorlabs/kanthord/blob/main/docs/reference/mission/assessment.md#fix-node-proposals) of the assessment that blocked the node.
 - Discard accepts `HumanAct`, returns `ControlResult`, and creates a
-  human assessment and an outcome with `undetermined`, closing an attempt when one is open; from `Blocked`, no attempt closes. Eligible states are `Pending`, `Available`,
+  human assessment and an outcome with `undetermined`, closing an attempt when one is open; from `Blocked`, no attempt closes. When it closes an open attempt, each open finding of that attempt with the route `fix` gets the route `record`. Eligible states are `Pending`, `Available`,
   `Executing`, `Waiting`, `Evaluating`, `Blocked`, `Paused`, `External.Success`,
   `External.Failed`, subject to no unresolved action. It reaches `Discarded`,
   which satisfies no dependency. Discard also admits an `External.Requested` node when each unresolved request of the open attempt is a human-landing `branch_push` request. It sets the end state `other` on those requests. No other command cancels an unresolved remote request.
