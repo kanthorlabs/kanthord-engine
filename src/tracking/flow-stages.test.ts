@@ -36,6 +36,8 @@ const COUNT_THREE = 3;
 const COUNT_FOUR = 4;
 const COUNT_FIVE = 5;
 const COUNT_EIGHT = 8;
+const COUNT_FIFTEEN = 15;
+const COUNT_SIXTEEN = 16;
 const MEDIAN_ODD = 1;
 const MEDIAN_EVEN = 2;
 const BUCKETS_ODD = 3;
@@ -262,6 +264,55 @@ test("release_gate does not count the unobserved execution", () => {
     handed_on: { count: COUNT_ONE, cost_usd: 0 },
     further_work: { count: COUNT_THREE, cost_usd: 0 },
   });
+});
+
+const FUNNEL_ROWS = [
+  row({ stage: FlowStage.Executing, exit: FlowExit.Open }),
+  row({
+    stage: FlowStage.Executing,
+    exit: FlowExit.Stopped,
+    executions: COUNT_TWO,
+  }),
+  row({ stage: FlowStage.Verification, exit: FlowExit.Budget }),
+  row({
+    stage: FlowStage.ReleaseGate,
+    exit: FlowExit.HandedOn,
+    executions: COUNT_SIXTEEN,
+    unobserved: COUNT_ONE,
+  }),
+  row({ stage: FlowStage.Evaluation, exit: FlowExit.Open }),
+  row({
+    stage: FlowStage.Outcome,
+    exit: FlowExit.Completed,
+    executions: COUNT_THREE,
+  }),
+  row({ stage: FlowStage.Outcome, exit: FlowExit.Rework }),
+];
+
+test("the exits of each stage are at most entered plus unobserved", () => {
+  const stages = stagesOf(
+    FUNNEL_ROWS,
+    NO_HISTOGRAMS,
+    windows(COUNT_TWO),
+    isHosted,
+  );
+  for (const { stage, current } of stages) {
+    const exits = Object.values(current.exits).reduce(
+      (total, exit) => total + (exit?.count ?? NO_COUNT),
+      NO_COUNT,
+    );
+    assert.ok(
+      exits <= current.entered + current.unobserved,
+      `${stage}: ${exits} > ${current.entered} + ${current.unobserved}`,
+    );
+  }
+});
+
+test("release_gate hands on the unobserved execution beyond entered", () => {
+  const { current } = stageOf(FUNNEL_ROWS, FlowStage.ReleaseGate);
+  assert.equal(current.entered, COUNT_FIFTEEN);
+  assert.equal(current.unobserved, COUNT_ONE);
+  assert.equal(current.exits.handed_on?.count, COUNT_SIXTEEN);
 });
 
 test("evaluation and outcome read the rows of the kind evaluation", () => {
