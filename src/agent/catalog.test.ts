@@ -13,6 +13,8 @@ import {
   getAgentDeclaration,
   WORKBENCH_AGENT_NAMES,
 } from "./catalog.ts";
+import { PromptPart } from "./contract.ts";
+import { headingOf } from "./prompt-render.ts";
 
 test("static agent declarations", () => {
   assert.deepEqual(Object.keys(AGENT_DECLARATIONS), ["swe@1", "re@1", "env@1"]);
@@ -127,9 +129,14 @@ test("agent prompts are valid published UTF-8 assets", () => {
       "A finding that violates the default standard is a blocker. A rule of a repository prompt or a binding prompt about the method, the tools, the repository operations or the release is no ground for a blocker. Give a finding on such a rule `action: no`. Every other finding is a suggestion.",
     ),
   );
+  const instructionFileHeading = headingOf({
+    part: PromptPart.InstructionFile,
+    name: "<name>",
+    path: "<path>",
+  })!.replace(/:$/, "");
   assert.ok(
     RE_AGENT_PROMPT.includes(
-      'and the test runner scripts. Each instruction file is also a gate input: a file that a heading "Repository prompt of repository <name>, file <path>" of your system prompt names. A change to a gate input',
+      `and the test runner scripts. Each instruction file is also a gate input: a file that a heading "${instructionFileHeading}" of your system prompt names. A change to a gate input`,
     ),
   );
   assert.ok(WORKBENCH_PROMPT.startsWith("## Human interlocutor"));
