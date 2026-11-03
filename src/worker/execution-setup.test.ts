@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import type { Environment } from "../kernel/devcontainer.ts";
 import { EnvironmentSource } from "../project/contract.ts";
-import { setImmediate as turn } from "node:timers/promises";
+import {
+  setTimeout as delay,
+  setImmediate as turn,
+} from "node:timers/promises";
 import { test, type TestContext } from "node:test";
 import { background } from "../kernel/context.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -46,7 +49,8 @@ import {
 import { WorkerErrorCode } from "./contract.ts";
 import { digest } from "../agent/prompt-composer.ts";
 import type { Dependencies } from "./service.ts";
-import { promptReference } from "./prompt-telemetry.ts";
+import { type AgentPromptFacts, promptReference } from "./prompt-telemetry.ts";
+import { PROMPT_SOURCE_READ_MS } from "../kernel/prompt-source.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 import { ExecutionIntent, InstancePlacement } from "./contract.ts";
 import type { AgentSelection } from "../scheduler/contract.ts";
@@ -857,6 +861,8 @@ interface TwoAgentOptions {
   pins?: (attempt: number) => PromptCommits | null;
   readFile?: InstructionFileReader;
   compose?: (agentName: string) => PromptPartAnswer[];
+  everyBindingNamesFile?: boolean;
+  composeDelayMs?: number;
 }
 
 async function twoAgentAnswer(
@@ -920,7 +926,13 @@ function twoAgentFixture(t: TestContext, options: TwoAgentOptions = {}) {
     },
     [createIdentity("binding")]: {
       name: "web",
-      prompts: { agents: { "swe@1": SECOND_SWE_TEXT, "re@1": "  " } },
+      prompts: {
+        ...(options.everyBindingNamesFile === true &&
+        options.instructionFile !== undefined
+          ? { instruction_file: options.instructionFile }
+          : {}),
+        agents: { "swe@1": SECOND_SWE_TEXT, "re@1": "  " },
+      },
     },
   };
   const caller: CallerContext = {
@@ -961,6 +973,8 @@ function twoAgentFixture(t: TestContext, options: TwoAgentOptions = {}) {
           framing: async () => shippedFraming(),
           compose: async (agentName: string) => {
             composed.push(agentName);
+            if (options.composeDelayMs !== undefined)
+              await delay(options.composeDelayMs);
             return (
               options.compose?.(agentName) ?? [
                 partOf(PromptPart.Role, `${agentName}.md`, agentName),
@@ -1422,6 +1436,146 @@ test("a retried setup after an agent-directory edit answers 409 source_invalid w
       reason: PromptSourceReason.Changed,
     },
   });
+});
+
+function shippedRole(agentName: string): PromptPartAnswer[] {
+  const text = getAgentDeclaration(agentName)!.agent_prompt;
+  return [
+    promptPart(
+      {
+        part: PromptPart.Role,
+        name: `${agentName}.md`,
+        origin: PromptOrigin.Binary,
+        path: null,
+        binding_id: null,
+        commit: null,
+        digest: digest(text),
+      },
+      PromptPartState.Resolved,
+      text,
+    ),
+  ];
+}
+
+const READ_DELAY_MS = 20;
+const BOTH_READS = 2;
+const NO_WRITES = 0;
+
+function barrierReader(deadlines: (number | null)[]): InstructionFileReader {
+  let inFlight = 0;
+  let release = () => {};
+  const both = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return async (_bindingId, commit, context) => {
+    deadlines.push(context.deadline);
+    inFlight++;
+    if (inFlight === BOTH_READS) release();
+    await both;
+    await delay(READ_DELAY_MS);
+    return {
+      path: INSTRUCTION_PATH,
+      commit,
+      state: InstructionFileState.Present,
+      reason: null,
+      text: PINNED_TEXT,
+    };
+  };
+}
+
+test("one setup reads every instruction file in parallel under one deadline that starts with the setup", async (t) => {
+  const deadlines: (number | null)[] = [];
+  let reader = barrierReader(deadlines);
+  const f = twoAgentFixture(t, {
+    instructionFile: INSTRUCTION_PATH,
+    everyBindingNamesFile: true,
+    composeDelayMs: READ_DELAY_MS,
+    compose: shippedRole,
+    pins: () =>
+      f.bindingIds.map((binding_id) => ({ binding_id, commit: PINNED_COMMIT })),
+    readFile: (bindingId, commit, context) =>
+      reader(bindingId, commit, context),
+  });
+  const composedStart = Date.now();
+  await f.run();
+  assert.equal(deadlines.length, BOTH_READS);
+  for (const deadline of deadlines) {
+    assert.ok(deadline !== null);
+    assert.ok(deadline <= composedStart + PROMPT_SOURCE_READ_MS);
+  }
+  deadlines.length = 0;
+  let retried = 0;
+  const shared = barrierReader(deadlines);
+  reader = async (bindingId, commit, context) => {
+    retried++;
+    if (retried <= BOTH_READS) return shared(bindingId, commit, context);
+    deadlines.push(context.deadline);
+    return {
+      path: INSTRUCTION_PATH,
+      commit,
+      state: InstructionFileState.Present,
+      reason: null,
+      text: PINNED_TEXT,
+    };
+  };
+  const retryStart = Date.now();
+  await f.run();
+  assert.ok(deadlines.length > BOTH_READS);
+  for (const deadline of deadlines) {
+    assert.ok(deadline !== null);
+    assert.ok(deadline <= retryStart + PROMPT_SOURCE_READ_MS);
+  }
+});
+
+test("a concurrent first setup that stored other sources makes the setup answer the stored text", async (t) => {
+  const records = new Map<string, AgentPromptFacts>();
+  const stored = (agentName: string): AgentPromptFacts => {
+    const role = getAgentDeclaration(agentName)!.agent_prompt;
+    return {
+      agent_name: agentName,
+      sources: [
+        {
+          part: PromptPart.Role,
+          name: `${agentName}.md`,
+          origin: PromptOrigin.Binary,
+          path: null,
+          binding_id: null,
+          commit: null,
+          digest: digest(role),
+        },
+        promptReference(shippedFraming()),
+      ],
+      templates_digest: "0".repeat(64),
+      engine_version: packageVersion(),
+    };
+  };
+  const written: string[] = [];
+  const f = twoAgentFixture(t, {
+    promptTelemetry: {
+      agentPrompted: (_executionId, facts) => {
+        written.push(facts.agent_name);
+      },
+      promptRecordOf: (_executionId, agentName) =>
+        written.length === NO_WRITES ? null : (records.get(agentName) ?? null),
+    },
+  });
+  for (const agentName of ["swe@1", "re@1"])
+    records.set(agentName, stored(agentName));
+  const answer = await f.run();
+  assert.deepEqual(written, ["swe@1", "re@1"]);
+  for (const agent of answer.agents) {
+    assert.equal(
+      agent.prompt.final,
+      [
+        getAgentDeclaration(agent.agent_name)!.agent_prompt,
+        framing(SHIPPED_TEMPLATES, PromptConsumer.Worker),
+      ].join("\n\n"),
+    );
+    assert.deepEqual(
+      agent.prompt.sources,
+      records.get(agent.agent_name)!.sources,
+    );
+  }
 });
 
 function bindingOf(f: { bindingIds: string[] }): string {

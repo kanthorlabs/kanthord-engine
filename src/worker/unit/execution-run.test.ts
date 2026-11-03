@@ -14,7 +14,9 @@ import {
 } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { ProviderFailure } from "../../scheduler/contract.ts";
-import { CodedError } from "../../kernel/errors.ts";
+import { CodedError, OperationError } from "../../kernel/errors.ts";
+import { HttpStatus } from "../../kernel/http.ts";
+import { AgentErrorCode, PromptSourceReason } from "../../agent/contract.ts";
 import {
   attributed,
   CauseCategory,
@@ -755,4 +757,57 @@ test("a revoked stop holds no cause", async (t) => {
   stopAfter(t, () => run.dispose());
   const stopped = await run.stopOf(new ExecutionStop(EndReason.Revoked, null));
   assert.equal(stopped.cause, null);
+});
+
+test("a source_invalid operation failure gives its details reason as the stop detail and the cause of that reason", async (t) => {
+  for (const [reason, cause] of [
+    [
+      PromptSourceReason.Changed,
+      attributed(CauseCategory.Infrastructure, CauseSubcategory.PromptRecord),
+    ],
+    [
+      PromptSourceReason.ControlCharacter,
+      attributed(CauseCategory.Prompt, CauseSubcategory.SourceInvalid),
+    ],
+  ] as const) {
+    const coded = fixture();
+    stopAfter(t, () => coded.dispose());
+    assert.deepEqual(
+      await releasedStop(
+        coded,
+        new OperationError(
+          HttpStatus.Conflict,
+          AgentErrorCode.PromptSourceInvalid,
+          "Prompt source is invalid.",
+          { part: "role", reason },
+        ),
+      ),
+      {
+        reason: EndReason.OperationFailed,
+        code: AgentErrorCode.PromptSourceInvalid,
+        detail: reason,
+        cause,
+      },
+    );
+    const called = fixture();
+    stopAfter(t, () => called.dispose());
+    await assert.rejects(
+      called.call(async () => ({
+        type: OperationResultType.Failure,
+        status: HttpStatus.Conflict,
+        error: {
+          error: {
+            code: AgentErrorCode.PromptSourceInvalid,
+            message: "invalid",
+            details: { part: "role", reason },
+          },
+          request_id: "test",
+        },
+      })),
+      (error) =>
+        error instanceof ExecutionStop &&
+        error.detail === reason &&
+        JSON.stringify(error.cause) === JSON.stringify(cause),
+    );
+  }
 });

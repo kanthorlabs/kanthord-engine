@@ -29,8 +29,9 @@ import {
   type InstructionFileTarget,
   pinnedInstructionFiles,
   sourceInvalid,
-  withinPromptDeadline,
 } from "../agent/instruction-files.ts";
+import { CancellationContext, type Context } from "../kernel/context.ts";
+import { PROMPT_SOURCE_READ_MS } from "../kernel/prompt-source.ts";
 import { resolvePrompt } from "../agent/prompt-resolve.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { Dependencies, WorkerService } from "./service.ts";
@@ -138,42 +139,37 @@ function instructionTargets(
 async function storedPrompt(
   dependencies: SetupDependencies,
   facts: AgentPromptFacts,
-  caller: CallerContext,
+  reads: Context,
 ): Promise<SetupPrompt> {
   const { promptBase } = dependencies;
-  const resolved = await withinPromptDeadline(caller.context, (deadline) =>
-    resolvePrompt(facts.sources, {
-      agentName: facts.agent_name,
-      bindingTextOf: (bindingId, part, agentName) =>
-        dependencies.store.transaction((tx) => {
-          const prompts = dependencies.repositoryPolicyOf(
-            tx,
-            bindingId,
-          )?.prompts;
-          if (prompts === undefined) return null;
-          const text =
-            part === PromptPart.Repository
-              ? prompts.repository
-              : prompts.agents?.[agentName as AgentName];
-          return text ?? null;
-        }),
-      instructionFileOf: async (bindingId, commit, path, context) => {
-        assert.ok(promptBase);
-        const file = await promptBase.instructionFileOf(
-          bindingId,
-          commit,
-          context,
-        );
-        if (file === null || file.path !== path)
-          return { state: InstructionFileState.Absent };
-        if (file.state !== InstructionFileState.Present)
-          return { state: file.state };
-        assert.ok(file.text !== null);
-        return { state: InstructionFileState.Present, text: file.text };
-      },
-      context: deadline,
-    }),
-  );
+  const resolved = await resolvePrompt(facts.sources, {
+    agentName: facts.agent_name,
+    bindingTextOf: (bindingId, part, agentName) =>
+      dependencies.store.transaction((tx) => {
+        const prompts = dependencies.repositoryPolicyOf(tx, bindingId)?.prompts;
+        if (prompts === undefined) return null;
+        const text =
+          part === PromptPart.Repository
+            ? prompts.repository
+            : prompts.agents?.[agentName as AgentName];
+        return text ?? null;
+      }),
+    instructionFileOf: async (bindingId, commit, path, context) => {
+      assert.ok(promptBase);
+      const file = await promptBase.instructionFileOf(
+        bindingId,
+        commit,
+        context,
+      );
+      if (file === null) return { state: InstructionFileState.Absent };
+      assert.equal(file.path, path);
+      if (file.state !== InstructionFileState.Present)
+        return { state: file.state };
+      assert.ok(file.text !== null);
+      return { state: InstructionFileState.Present, text: file.text };
+    },
+    context: reads,
+  });
   const failed = resolved.parts.find(
     ({ state }) => state !== PromptPartState.Resolved,
   );
@@ -209,13 +205,32 @@ function recordedPrompt(
   return stored;
 }
 
+type SetupWorker = Pick<
+  WorkerService,
+  "declarationOf" | "pinnedAgentView" | "placementOf"
+>;
+
 export async function executionSetup(
   dependencies: SetupDependencies,
-  worker: Pick<
-    WorkerService,
-    "declarationOf" | "pinnedAgentView" | "placementOf"
-  >,
+  worker: SetupWorker,
   caller: CallerContext,
+): Promise<ExecutionSetup> {
+  const reads = new CancellationContext(
+    caller.context,
+    Date.now() + PROMPT_SOURCE_READ_MS,
+  );
+  try {
+    return await setupWithin(dependencies, worker, caller, reads);
+  } finally {
+    reads.cancel();
+  }
+}
+
+async function setupWithin(
+  dependencies: SetupDependencies,
+  worker: SetupWorker,
+  caller: CallerContext,
+  reads: Context,
 ): Promise<ExecutionSetup> {
   const claim = caller.execution;
   assert.ok(claim);
@@ -244,7 +259,7 @@ export async function executionSetup(
         await dependencies.agentPrompt.compose(agentName, caller.context),
       );
     else
-      answered.set(agentName, await storedPrompt(dependencies, record, caller));
+      answered.set(agentName, await storedPrompt(dependencies, record, reads));
   }
   const composes = parts.size > NO_AGENTS;
   const files =
@@ -259,7 +274,7 @@ export async function executionSetup(
               context,
             );
           },
-          caller.context,
+          reads,
         )
       : new Map();
   const framing = composes
@@ -438,7 +453,7 @@ export async function executionSetup(
     if (canonicalJSON(stored.sources) !== canonicalJSON(facts.sources))
       recorded.set(
         facts.agent_name,
-        await storedPrompt(dependencies, stored, caller),
+        await storedPrompt(dependencies, stored, reads),
       );
   }
   return recorded.size === NO_AGENTS
