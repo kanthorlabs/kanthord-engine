@@ -27,7 +27,10 @@ import { LLM_PLATFORMS } from "../../llm/platforms.ts";
 import { background } from "../../kernel/context.ts";
 import { takeHandover } from "../worker/handover.ts";
 import { httpTransport } from "../worker/transport.ts";
-import { repositoryOperations } from "../../repository/contract.ts";
+import {
+  RepositoryFileState,
+  repositoryOperations,
+} from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import {
   connectionPayloadSchema,
@@ -47,7 +50,12 @@ import {
   type SealedObject,
   sealJSON,
 } from "../../kernel/hpke.ts";
-import { agentOperations, ChainLevel } from "../../agent/contract.ts";
+import {
+  AgentErrorCode,
+  agentOperations,
+  ChainLevel,
+  PromptPart,
+} from "../../agent/contract.ts";
 import { Intent, missionOperations } from "../../mission/contract.ts";
 import { schedulerOperations, WorkPullKind } from "../../scheduler/contract.ts";
 import {
@@ -71,7 +79,10 @@ import {
   openEnvelope,
   sealEnvelope,
 } from "../../kernel/handover.ts";
-import { FAKE_COMMIT } from "./container-fakes-test-support.ts";
+import {
+  FAKE_COMMIT,
+  fakeRepositoryFiles,
+} from "./container-fakes-test-support.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import {
   COVERING_WORKER_BINDINGS,
@@ -409,6 +420,7 @@ async function setup(
     extraRepository?: boolean;
     handoverRefreshWaitMs?: number;
     promptBase?: PromptBase;
+    repositoryFiles?: ReturnType<typeof fakeRepositoryFiles>;
     instructionFile?: string;
     implementBindsOther?: boolean;
   } = {},
@@ -430,6 +442,7 @@ async function setup(
     oauthProviders: oauth ? () => [offlineProvider(oauth)] : undefined,
     handoverRefreshWaitMs: setupOptions.handoverRefreshWaitMs,
     promptBase: setupOptions.promptBase,
+    repositoryFiles: setupOptions.repositoryFiles,
   });
   async function call<T extends Operation>(
     operation: T,
@@ -1613,6 +1626,101 @@ test("the server setup stores the agent.prompt span with the references and the 
     ["kanthord.prompt.sources", "kanthord.prompt.templates_digest"],
   );
   assert.ok(!rows[0]!.attributes.includes(SWE_AGENT_PROMPT));
+});
+
+const INSTRUCTION_PATH = "AGENTS.md";
+const INSTRUCTION_TEXT = "Write every name outside the code in snake_case.";
+
+test("agent prompt resolve over HTTP rebuilds the served system prompt for a human and refuses a worker, an absent record and an absent execution", async (t) => {
+  const files = fakeRepositoryFiles();
+  const h = await setup(t, HTTP, undefined, {
+    instructionFile: INSTRUCTION_PATH,
+    repositoryFiles: {
+      ...files,
+      readFilesAtCommit: async (address, commit, paths, ...rest) =>
+        paths.includes(INSTRUCTION_PATH)
+          ? paths.map((path) =>
+              path === INSTRUCTION_PATH
+                ? {
+                    path,
+                    state: RepositoryFileState.Present,
+                    text: INSTRUCTION_TEXT,
+                  }
+                : { path, state: RepositoryFileState.Absent, text: null },
+            )
+          : files.readFilesAtCommit(address, commit, paths, ...rest),
+    },
+  });
+  completed(await h.handover());
+  const setupAnswer = completed(
+    await h.call(
+      workerOperations["execution.setup.get"],
+      {
+        params: { execution_id: h.execution.execution_id },
+        query: {},
+        body: null,
+      },
+      h.token,
+    ),
+  );
+  const served = setupAnswer.agents[0]!;
+  assert.deepEqual(
+    served.prompt.sources
+      .filter(({ part }) => part === PromptPart.InstructionFile)
+      .map(({ path, commit, binding_id }) => ({ path, commit, binding_id })),
+    [
+      {
+        path: INSTRUCTION_PATH,
+        commit: FAKE_COMMIT,
+        binding_id: h.bindings.repo!.id,
+      },
+    ],
+  );
+  assert.ok(served.prompt.final.includes(INSTRUCTION_TEXT));
+  const resolve = (executionId: string, agentName: string, token = h.f.token) =>
+    h.call(
+      agentOperations["prompt.resolve"],
+      {
+        params: {},
+        query: { execution_id: executionId, agent_name: agentName },
+        body: null,
+      },
+      token,
+    );
+  const answer = completed(
+    await resolve(h.execution.execution_id, served.agent_name),
+  );
+  assert.equal(answer.final, served.prompt.final);
+  assert.equal(answer.engine_version, packageVersion());
+  assert.deepEqual(
+    answer.parts.map(
+      ({ part, name, origin, path, binding_id, commit, digest }) => ({
+        part,
+        name,
+        origin,
+        path,
+        binding_id,
+        commit,
+        digest,
+      }),
+    ),
+    served.prompt.sources,
+  );
+  refused(
+    await resolve(h.execution.execution_id, served.agent_name, h.token),
+    HttpStatus.Unauthorized,
+    "gateway.authentication.unauthorized",
+  );
+  refused(
+    await resolve(h.execution.execution_id, "re@1"),
+    HttpStatus.NotFound,
+    AgentErrorCode.PromptRecordAbsent,
+  );
+  refused(
+    await resolve("execution_absent", served.agent_name),
+    HttpStatus.NotFound,
+    "scheduler.execution.not_found",
+  );
 });
 
 test("two concurrent first handovers of one attempt store one pin and both answer it", async (t) => {

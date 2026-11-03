@@ -48,8 +48,10 @@ import {
   type InstructionFileReader,
   InstructionFileState,
   LIST_LIMIT_DEFAULT,
+  type PromptPart,
   type PromptPartAnswer,
   PromptPartState,
+  type PromptRecord,
   type PromptTemplates,
   PromptView,
   type ProviderCapabilityFn,
@@ -77,11 +79,19 @@ import {
   type RepositoryPolicy,
 } from "../project/contract.ts";
 import type { AttemptPromptStack } from "../mission/contract.ts";
+import type { ExecutionTrace } from "../tracking/contract.ts";
 import {
-  instructionFilePart,
+  isUnreachable,
+  projectInstructionFileReader,
   withinPromptDeadline,
 } from "./instruction-files.ts";
 import { framingPart, resolveAgentPrompt } from "./prompt-files.ts";
+import {
+  bindingText,
+  type PromptReaders,
+  type ResolvedPrompt,
+  resolvePrompt,
+} from "./prompt-resolve.ts";
 import {
   bindingParts,
   finalPrompt,
@@ -102,10 +112,7 @@ const FIRST_POSITION = 0;
 const NO_STRIKES = 0;
 const FIRST_STRIKE = 1;
 const ENABLEMENT_SCOPE: HolderScope = { holders: [], claimant: SERVER_HOLDER };
-const UNREACHABLE_CODES: ReadonlySet<string> = new Set([
-  ProjectErrorCode.RepositoryBaseBranchAbsent,
-  ProjectErrorCode.RepositorySshUnreachable,
-]);
+const EXECUTION_NOT_FOUND = "scheduler.execution.not_found";
 
 type RepositoryPrompts = Pick<
   RepositoryPolicy,
@@ -261,6 +268,13 @@ export interface Dependencies {
     nodeId: string,
     attempt: number | null,
   ): AttemptPromptStack;
+  promptRecords: {
+    executionTraceOf(executionId: string): ExecutionTrace | null;
+    promptRecordOf(
+      trace: ExecutionTrace,
+      agentName: string,
+    ): PromptRecord | null;
+  };
   providerHealthCheck: ProviderHealthCheckFn;
   providerCapability: ProviderCapabilityFn;
   toolDeclarations: ToolDeclarationsFn;
@@ -291,11 +305,15 @@ export class AgentComponent {
   private readonly dependencies: Dependencies;
   private readonly logger: Logger;
   private readonly now: () => number;
+  private readonly instructionFileRead: PromptReaders["instructionFileOf"];
 
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
     this.logger = dependencies.logger;
     this.now = dependencies.clock ?? Date.now;
+    this.instructionFileRead = projectInstructionFileReader(
+      dependencies.promptBase,
+    );
   }
 
   private validateEffectiveConfig(
@@ -1090,26 +1108,14 @@ export class AgentComponent {
     target: StackTarget,
     context: Context,
   ): Promise<InstructionFilePart | null> {
-    const { promptBase } = this.dependencies;
     let commit = target.commit;
     try {
-      commit ??= await promptBase.baseCommitOf(target.binding_id, context);
-      const file = await promptBase.instructionFileOf(
+      commit ??= await this.dependencies.promptBase.baseCommitOf(
         target.binding_id,
-        commit,
         context,
       );
-      if (file === null || file.state === InstructionFileState.Absent)
-        return null;
-      if (file.state === InstructionFileState.Invalid)
-        return {
-          state: PromptPartState.Invalid,
-          path: file.path,
-          commit: file.commit,
-        };
-      return instructionFilePart(target, file);
     } catch (error) {
-      if (error instanceof OperationError && UNREACHABLE_CODES.has(error.code))
+      if (isUnreachable(error))
         return {
           state: PromptPartState.Unreachable,
           path: target.path,
@@ -1117,6 +1123,28 @@ export class AgentComponent {
         };
       throw error;
     }
+    const file = await this.instructionFileRead(
+      target.binding_id,
+      commit,
+      target.path,
+      context,
+    );
+    if (file.state === InstructionFileState.Absent) return null;
+    if (file.state === InstructionFileState.Present)
+      return {
+        state: PromptPartState.Resolved,
+        path: target.path,
+        commit,
+        text: file.text,
+      };
+    return {
+      state:
+        file.state === InstructionFileState.Invalid
+          ? PromptPartState.Invalid
+          : PromptPartState.Unreachable,
+      path: target.path,
+      commit,
+    };
   }
 
   private instructionFilesOf(
@@ -1138,6 +1166,54 @@ export class AgentComponent {
         if (part !== null) parts.set(bindingId, part);
       return parts;
     });
+  }
+
+  private bindingTextOf(
+    bindingId: string,
+    part: PromptPart,
+    agentName: string,
+  ): string | null {
+    return bindingText(
+      this.dependencies.store.transaction(
+        (tx) => this.dependencies.repositoryPromptsOf(tx, bindingId)?.prompts,
+      ),
+      part,
+      agentName,
+    );
+  }
+
+  private async resolveRecordedPrompt(
+    executionId: string,
+    agentName: string,
+    context: Context,
+  ): Promise<ResolvedPrompt & { engine_version: string }> {
+    const { promptRecords } = this.dependencies;
+    const trace = promptRecords.executionTraceOf(executionId);
+    if (trace === null)
+      throw new OperationError(
+        HttpStatus.NotFound,
+        EXECUTION_NOT_FOUND,
+        "Execution not found.",
+        { execution_id: executionId },
+      );
+    const record = promptRecords.promptRecordOf(trace, agentName);
+    if (record === null)
+      throw new OperationError(
+        HttpStatus.NotFound,
+        AgentErrorCode.PromptRecordAbsent,
+        "The trace of the execution holds no prompt record of the agent.",
+        { execution_id: executionId, agent_name: agentName },
+      );
+    const resolved = await withinPromptDeadline(context, (deadline) =>
+      resolvePrompt(record.sources, {
+        agentName,
+        bindingTextOf: (bindingId, part, name) =>
+          this.bindingTextOf(bindingId, part, name),
+        instructionFileOf: this.instructionFileRead,
+        context: deadline,
+      }),
+    );
+    return { ...resolved, engine_version: record.engine_version };
   }
 
   composePrompt(
@@ -1289,6 +1365,13 @@ export class AgentComponent {
           };
         });
       },
+    );
+    registry.register(agentOperations["prompt.resolve"], ({ query }, caller) =>
+      this.resolveRecordedPrompt(
+        query.execution_id,
+        query.agent_name,
+        caller.context,
+      ),
     );
     registry.register(agentOperations["enablement.get"], ({ params }, caller) =>
       caller.commit((tx) =>

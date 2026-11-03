@@ -1,6 +1,6 @@
 # Agent CLI specification
 
-This specification for `kanthord agent` contains **14 command leaves: 13 implemented and 1 proposed**.
+This specification for `kanthord agent` contains **15 command leaves: 14 implemented and 1 proposed**.
 
 See the [CLI index](./README.md) for shared conventions.
 Agent entries of a worker binding belong to [Project](./project.md).
@@ -31,6 +31,7 @@ The request, output, failure and replay rules of the [Worker shared contract](./
 | ------ | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- | -------------------------------------- | ------- |
 | P      | `list [L]`                                                                                                               | `GET /api/agent`                                                      | `agent.list`                           | `human` |
 | I      | `get <agent-name> [--view final] [--project <project-id> --binding-id <binding-id> \| --node <node-id> [--attempt <k>]]` | `GET /api/agent/:agent_name`                                          | `agent.get`                            | `human` |
+| I      | `prompt resolve --execution <execution-id> --agent <agent-name>`                                                         | `GET /api/agent/prompt/resolve`                                       | `agent.prompt.resolve`                 | `human` |
 | I      | `enablement list [L] [R]`                                                                                                | `GET /api/agent/enablement`                                           | `agent.enablement.list`                | `human` |
 | I      | `enablement get <agent-name> [R]`                                                                                        | `GET /api/agent/enablement/:agent_name`                               | `agent.enablement.get`                 | `human` |
 | I      | `enablement put <agent-name> --file <path> [M] [R]`                                                                      | `PUT /api/agent/enablement/:agent_name`                               | `agent.enablement.put`                 | `human` |
@@ -44,7 +45,7 @@ The request, output, failure and replay rules of the [Worker shared contract](./
 | I      | `cooldown list`                                                                                                          | `GET /api/agent/cooldown`                                             | `agent.cooldown.list`                  | `human` |
 | I      | `cooldown clear <credential> [--holder <name>] [M]`                                                                      | `DELETE /api/agent/cooldown/:credential`                              | `agent.cooldown.clear`                 | `human` |
 
-The static `/api/agent/enablement` path takes precedence over `/:agent_name`.
+The static `/api/agent/enablement` and `/api/agent/prompt/resolve` paths take precedence over `/:agent_name`.
 
 The two catalog reads follow [the agent catalog](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/agent.impl.md#the-agent-catalog).
 Each is `unary`, has `mutation: false` and a default timeout of 30 s.
@@ -158,7 +159,7 @@ Each part holds the following fields:
 | `commit`     | The commit of an `instruction_file` part, 40 or 64 lower-case hex. `null` for an unreachable head and for every other part.                                                                                                                                                                   |
 | `digest`     | The SHA-256 hex digest of `text`, with no heading. `null` for a part that the server cannot read.                                                                                                                                                                                             |
 | `heading`    | The line that the server writes before the text: `Repository prompt of repository <name>, file <path>:` for `instruction_file`, `Repository prompt of repository <name>, set in KanthorD:` for `repository` and `Binding prompt of repository <name>:` for `binding`. `null` for other parts. |
-| `state`      | `resolved`, or for an `instruction_file` part `unreachable` when the read of the remote fails or exceeds its deadline, and `invalid` when the file is too large, not UTF-8, unreadable or holds a control character.                                                                          |
+| `state`      | `resolved`, or for an `instruction_file` part `unreachable` when the read of the remote fails or exceeds its deadline, and `invalid` when the file is too large, not UTF-8, unreadable or holds a control character. [`prompt resolve`](#prompt-resolve) also answers `changed`.              |
 | `text`       | The text of a `resolved` part. `null` otherwise.                                                                                                                                                                                                                                              |
 
 A file of the same name in `agent.prompt.agent_directory` replaces the shipped text. The default directory is `<data>/agents` on the server host.
@@ -185,6 +186,58 @@ kanthord agent get re@1 --node node_01ARZ3NDEKTSV4RRFFQ69G5FAV --attempt 2 --vie
 ```
 
 The binding prompts of a repository binding belong to [Project](./project.md#repository-configuration--proposed-fields).
+
+### `prompt resolve`
+
+```text
+kanthord agent prompt resolve --execution <execution-id> --agent <agent-name>
+```
+
+The command rebuilds the exact system prompt that one agent of an execution served.
+The execution setup stores one `agent.prompt` span for each agent of the execution. The span holds the prompt references and the engine version, and no text.
+The server reads that span and resolves each reference. The command reads no file that the caller names.
+Required token: human JWT. Absent body. Both options are required.
+
+| Option                       | Query          | Meaning                                                                                                                 |
+| ---------------------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `--execution <execution-id>` | `execution_id` | The execution. An absent execution answers `404 scheduler.execution.not_found`.                                         |
+| `--agent <agent-name>`       | `agent_name`   | The agent of the execution. A trace with no `agent.prompt` span for the agent answers `404 agent.prompt.record_absent`. |
+
+HTTP `200` returns `{ parts, final, engine_version }`:
+
+| Result field     | Type and meaning                                                                                               |
+| ---------------- | -------------------------------------------------------------------------------------------------------------- |
+| `parts`          | The parts of the span in reading order. Each part holds the fields of [the prompt answer](#the-prompt-answer). |
+| `final`          | The system prompt that the execution served. `null` when a part is not `resolved`.                             |
+| `engine_version` | The value of `kanthord.engine.version` of the span: the engine version that served the execution.              |
+
+Each part resolves by its `origin`:
+
+- `database`: the text of `prompts.repository` or `prompts.agents[<agent-name>]` in the binding revision `binding_id`. A binding revision never changes.
+- `repository`: the file `path` at `commit` of the binding `binding_id`. A failed read of the remote is `unreachable`. An invalid file is `invalid`. An absent file is `changed`.
+- `binary` and `file`: the current shipped text or the current file of `agent.prompt.agent_directory`. KanthorD keeps no copy of a layer 1 text.
+
+Each resolved text passes a digest check against `digest`. A text with another digest, or a source that no longer exists, answers `changed` with a `null` text.
+Each part holds the `digest` and `commit` of its span reference, also when the part is not `resolved`.
+A failed part is a part state, and the command answers `200`. The read takes every instruction file in parallel under one 20 s deadline.
+
+A deploy that edits a shipped text turns every older trace into `changed` for that part, with `final: null`.
+For a `changed` part of origin `binary`, read the old shipped text at `engine_version` in a root checkout of the kanthord repository:
+
+```sh
+git -C engine show "$(git rev-parse "v<engine_version>:engine"):static/prompt/<name>"
+git -C engine show "$(git rev-parse "v<engine_version>:engine"):static/prompt/template/<name>.md"
+```
+
+The first command reads a part with the name `<name>`, for example `base.md`. The second command reads a `framing` part, for example `framing-worker`.
+The release tag `v<engine_version>` of the root repository names the engine commit. A development build has no release tag, so its version names no unique engine commit.
+For a `changed` part of origin `file`, read the old file from the version control of the agent directory.
+
+Compare the system prompts of two executions with `diff`:
+
+```sh
+diff <(kanthord agent prompt resolve --execution E1 --agent re@1 | jq -r .final) <(kanthord agent prompt resolve --execution E2 --agent re@1 | jq -r .final)
+```
 
 ## Agent enablement record
 
@@ -368,6 +421,8 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | local | `cli.agent.get.indeterminate`                             | The read result is indeterminate.                                                                                                                                                                                                                               | agent get                                                                                                                                         |
 | local | `cli.agent.get.invalid_view`                              | The `--view` value is not `final`.                                                                                                                                                                                                                              | agent get                                                                                                                                         |
 | local | `cli.agent.get.project_binding_pair_required`             | One of `--project` and `--binding-id` is present without the other.                                                                                                                                                                                             | agent get                                                                                                                                         |
+| local | `cli.agent.prompt.resolve.token_required`                 | No option, environment variable or `cli.yaml` supplies a token.                                                                                                                                                                                                 | agent prompt resolve                                                                                                                              |
+| local | `cli.agent.prompt.resolve.indeterminate`                  | The read result is indeterminate.                                                                                                                                                                                                                               | agent prompt resolve                                                                                                                              |
 | local | `cli.agent.cooldown.list.token_required`                  | No option, environment variable or `cli.yaml` supplies a token.                                                                                                                                                                                                 | agent cooldown list                                                                                                                               |
 | local | `cli.agent.cooldown.list.indeterminate`                   | The read result is indeterminate.                                                                                                                                                                                                                               | agent cooldown list                                                                                                                               |
 | local | `cli.agent.cooldown.clear.token_required`                 | No option, environment variable or `cli.yaml` supplies a token.                                                                                                                                                                                                 | agent cooldown clear                                                                                                                              |
@@ -405,7 +460,9 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 404   | `mission.node.not_found`                                  | The `--node` value names no mission node.                                                                                                                                                                                                                       | agent get                                                                                                                                         |
 | 404   | `mission.record.not_found`                                | The node holds no attempt, or no attempt `--attempt`.                                                                                                                                                                                                           | agent get                                                                                                                                         |
 | 409   | `agent.prompt.template_invalid`                           | An override file or a prompt template is invalid; details `{ file, path, reason }`, and `template` for a template.                                                                                                                                              | agent get                                                                                                                                         |
-| 400   | `gateway.request.validation_failed`                       | The request violates the input schema, for example a `view` value other than `final`, `attempt` without `node_id`, or `node_id` with `project_id` or `binding_id`.                                                                                              | agent get                                                                                                                                         |
+| 404   | `agent.prompt.record_absent`                              | The trace of the execution holds no `agent.prompt` span for the agent; details `{ execution_id, agent_name }`.                                                                                                                                                  | agent prompt resolve                                                                                                                              |
+| 404   | `scheduler.execution.not_found`                           | The `--execution` value names no execution.                                                                                                                                                                                                                     | agent prompt resolve                                                                                                                              |
+| 400   | `gateway.request.validation_failed`                       | The request violates the input schema, for example a `view` value other than `final`, `attempt` without `node_id`, or `node_id` with `project_id` or `binding_id`.                                                                                              | agent get, agent prompt resolve                                                                                                                   |
 
 `error.details` names the agent and lists affected bindings or other dependents when applicable. No error holds secret material.
 

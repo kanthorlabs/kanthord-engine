@@ -481,6 +481,14 @@ function pinHarness(
     attemptPromptStackOf: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
+    promptRecords: {
+      executionTraceOf: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
+      promptRecordOf: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
+    },
     providerHealthCheck: () => async () => ResourceStatus.Unknown,
     providerCapability: () => "model-list read",
     toolDeclarations: async () => [],

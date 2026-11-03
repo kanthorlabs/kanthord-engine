@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { InstructionFileState } from "../../agent/contract.ts";
-import { background } from "../../kernel/context.ts";
-import { OperationError } from "../../kernel/errors.ts";
-import { HttpStatus } from "../../kernel/http.ts";
+import { InstructionFileState } from "./contract.ts";
+import { background } from "../kernel/context.ts";
+import { OperationError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import {
   type InstructionFile,
   InstructionFileReason,
   ProjectErrorCode,
-} from "../../project/contract.ts";
-import { projectInstructionFileReader } from "./prompt-base.ts";
+} from "../project/contract.ts";
+import { projectInstructionFileReader } from "./instruction-files.ts";
 
 const BINDING_ID = "binding_01";
 const COMMIT = "c".repeat(40);

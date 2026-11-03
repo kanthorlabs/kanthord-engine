@@ -430,6 +430,17 @@ export const promptAnswerSchema = z.strictObject({
   final: z.string().nullable(),
 });
 
+export const promptResolveAnswerSchema = z.strictObject({
+  parts: z.array(promptPartSchema),
+  final: z.string().nullable(),
+  engine_version: z.string().min(1),
+});
+
+export interface PromptRecord {
+  sources: readonly PromptReference[];
+  engine_version: string;
+}
+
 export const chainEntrySchema = agentSelectionSchema
   .omit({ agent_name: true })
   .extend({
@@ -554,6 +565,25 @@ export const agentOperations = {
     output: agentDeclarationSchema,
     description:
       "Get an agent declaration, its current enablement and the chain view of that enablement.",
+  },
+  "prompt.resolve": {
+    ...enablementOperation,
+    id: "agent.prompt.resolve",
+    method: HttpMethod.Get,
+    path: "/api/agent/prompt/resolve",
+    mutation: false,
+    body: false,
+    input: z.strictObject({
+      params: emptyFields,
+      query: z.strictObject({
+        execution_id: z.string().min(1),
+        agent_name: z.string().min(1),
+      }),
+      body: z.null(),
+    }),
+    output: promptResolveAnswerSchema,
+    description:
+      "Rebuild the system prompt that one agent of an execution served, from the prompt references of its agent.prompt span.",
   },
   "enablement.get": {
     ...enablementOperation,

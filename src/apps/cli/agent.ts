@@ -62,6 +62,10 @@ const ENABLEMENT = "enablement";
 const PROVIDER = "provider";
 const MODEL = "model";
 const COOLDOWN = "cooldown";
+const PROMPT = "prompt";
+const RESOLVE = "resolve";
+const PROMPT_RESOLVE_TOKEN_REQUIRED = "cli.agent.prompt.resolve.token_required";
+const PROMPT_RESOLVE_INDETERMINATE = "cli.agent.prompt.resolve.indeterminate";
 const CLEAR = "clear";
 const COOLDOWN_LIST_TOKEN_REQUIRED = "cli.agent.cooldown.list.token_required";
 const COOLDOWN_LIST_INDETERMINATE = "cli.agent.cooldown.list.indeterminate";
@@ -174,6 +178,24 @@ async function agentGet(agentName: string, command: Command): Promise<void> {
   });
   process.stdout.write(
     `${JSON.stringify(handleReadResult(result, "cli.agent.get.indeterminate"))}\n`,
+  );
+}
+
+async function promptResolve(command: Command): Promise<void> {
+  assert.equal(agentOperations["prompt.resolve"].access, AccessPolicy.Human);
+  assert.equal(agentOperations["prompt.resolve"].mutation, false);
+  const options = command.optsWithGlobals();
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, PROMPT_RESOLVE_TOKEN_REQUIRED);
+  const result = await httpClient(agentOperations, endpoint, token)[
+    "prompt.resolve"
+  ]({
+    params: {},
+    query: { execution_id: options.execution, agent_name: options.agent },
+    body: null,
+  });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, PROMPT_RESOLVE_INDETERMINATE))}\n`,
   );
 }
 
@@ -441,6 +463,22 @@ export function addAgentCommand(program: Command): void {
       agentGet(agentName, command),
     );
   agent.action(() => agent.help());
+  const prompt = agent
+    .command(PROMPT)
+    .description("Inspect the system prompt that an execution served");
+  prompt.action(() => prompt.help());
+  prompt
+    .command(RESOLVE)
+    .description(
+      "Rebuild the system prompt of one agent of an execution as JSON (human JWT)",
+    )
+    .requiredOption(
+      "--execution <execution-id>",
+      "Execution",
+      singleUse("--execution"),
+    )
+    .requiredOption("--agent <agent-name>", "Agent name", singleUse("--agent"))
+    .action((_options, command: Command) => promptResolve(command));
   const model = agent
     .command(MODEL)
     .description("Inspect the models of a credential");

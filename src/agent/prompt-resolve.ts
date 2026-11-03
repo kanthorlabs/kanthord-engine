@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import type { Context } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
+import type { BindingPrompts } from "../project/contract.ts";
 import {
+  type AgentName,
   InstructionFileState,
   PromptOrigin,
   PromptPart,
@@ -51,6 +53,19 @@ type Resolution =
 const CHANGED: Resolution = { state: PromptPartState.Changed };
 const INVALID: Resolution = { state: PromptPartState.Invalid };
 const UNREACHABLE: Resolution = { state: PromptPartState.Unreachable };
+
+export function bindingText(
+  prompts: BindingPrompts | undefined,
+  part: PromptPart,
+  agentName: string,
+): string | null {
+  if (prompts === undefined) return null;
+  const text =
+    part === PromptPart.Repository
+      ? prompts.repository
+      : prompts.agents?.[agentName as AgentName];
+  return text ?? null;
+}
 
 function resolved(text: string | null): Resolution {
   return text === null ? CHANGED : { state: PromptPartState.Resolved, text };

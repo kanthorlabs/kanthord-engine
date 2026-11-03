@@ -274,6 +274,14 @@ const fakeAgentCollaborations: Omit<AgentDependencies, "store"> = {
   attemptPromptStackOf: () => {
     throw new Error("UNEXPECTED_COLLABORATION");
   },
+  promptRecords: {
+    executionTraceOf: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+    promptRecordOf: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+  },
   providerHealthCheck: () => async () => ResourceStatus.Unknown,
   providerCapability: () => PROVIDER_CAPABILITY,
   toolDeclarations: async () => [],

@@ -1278,7 +1278,7 @@ test("agent enablement commands expose offline help and validate inputs before I
   );
 });
 
-test("agent get exposes help, refuses invalid options before I/O and has no prompt command", async (t) => {
+test("agent get exposes help and refuses invalid options before I/O", async (t) => {
   const env = environment(temporary(t));
   const help = await invocation(["agent", "get", "--help"], env, t.signal);
   assert.equal(help.status, ExitCode.Success, help.stderr);
@@ -1286,9 +1286,6 @@ test("agent get exposes help, refuses invalid options before I/O and has no prom
     help.stdout,
     /--view <view>[\s\S]*--project <project-id>[\s\S]*--binding-id <binding-id>/,
   );
-  const agentHelp = await invocation(["agent", "--help"], env, t.signal);
-  assert.equal(agentHelp.status, ExitCode.Success, agentHelp.stderr);
-  assert.doesNotMatch(agentHelp.stdout, /^ +prompt\b/m);
   for (const [args, code] of [
     [["get", "swe@1", "--view", "full"], "cli.agent.get.invalid_view"],
     [
@@ -1320,6 +1317,46 @@ test("agent get exposes help, refuses invalid options before I/O and has no prom
       code,
     );
   }
+});
+
+test("agent prompt resolve exposes help, requires both options and a token before I/O", async (t) => {
+  const env = environment(temporary(t));
+  const help = await invocation(
+    ["agent", "prompt", "resolve", "--help"],
+    env,
+    t.signal,
+  );
+  assert.equal(help.status, ExitCode.Success, help.stderr);
+  assert.match(
+    help.stdout,
+    /--execution <execution-id>[\s\S]*--agent <agent-name>/,
+  );
+  const missing = await invocation(
+    ["agent", "prompt", "resolve", "--execution", "execution_01"],
+    env,
+    t.signal,
+  );
+  assert.equal(missing.status, ExitCode.Failure);
+  assert.equal(missing.stdout, EMPTY_OUTPUT);
+  assert.match(missing.stderr, /--agent <agent-name>/);
+  const token = await invocation(
+    [
+      "agent",
+      "prompt",
+      "resolve",
+      "--execution",
+      "execution_01",
+      "--agent",
+      "swe@1",
+      "--endpoint",
+      "http://127.0.0.1:1",
+    ],
+    env,
+    t.signal,
+  );
+  assert.equal(token.status, ExitCode.Failure);
+  assert.equal(token.stdout, EMPTY_OUTPUT);
+  assert.match(token.stderr, /^cli\.agent\.prompt\.resolve\.token_required:/);
 });
 
 test("serve worker refuses --config and --token and requires an instance configuration before contacting a server", async (t) => {
