@@ -251,6 +251,8 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
   let assessments = 0;
   const clients = {
     mission: {
+      "execution.review_round.get": async () =>
+        complete({ round: 1, final: false, review_base: null, findings: [] }),
       "execution.pinnedRevision.get": async () =>
         complete({
           content: {

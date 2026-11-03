@@ -27,6 +27,10 @@ export interface EvaluationFacts {
   repaired: boolean | null;
   verification_class: VerificationClass;
   affected: AffectedVerdict | null;
+  round: number;
+  final_round: boolean;
+  action_labels: string[];
+  fixed_count: number;
 }
 
 const GROUND_CAUSES: Readonly<

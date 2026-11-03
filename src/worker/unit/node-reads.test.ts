@@ -108,6 +108,7 @@ test("the assessment reads answer null only on a record not found", async (t) =>
       const run = fixture(SECOND_ATTEMPT);
       stopAfter(t, () => run.dispose());
       run.clients.mission = {
+        "execution.review_round.get": async () => reviewRound([]),
         [operation]: async () => answer,
       } as unknown as MethodClients["mission"];
       if (expected === ExecutionStop)
@@ -144,6 +145,7 @@ test("the prior is the rework verdict, else the cleared rationale, else null", a
     const run = fixture(SECOND_ATTEMPT);
     stopAfter(t, () => run.dispose());
     run.clients.mission = {
+      "execution.review_round.get": async () => reviewRound([]),
       "execution.rework_assessment.get": async () => rework,
       "execution.clearedOutcome.get": async () => notFound,
       "execution.cleared_assessment.get": async () => cleared,
@@ -153,7 +155,10 @@ test("the prior is the rework verdict, else the cleared rationale, else null", a
       await readPrior(run, REPOSITORIES),
       rework === notFound
         ? { verdict: null, cleared: expected }
-        : { verdict: { text: expected, judged: [] }, cleared: null },
+        : {
+            verdict: { text: expected, judged: [], findings: [], round: null },
+            cleared: null,
+          },
     );
   }
 });
@@ -163,6 +168,14 @@ function clearedOutcome(closingEvent: string) {
     type: OperationResultType.Completed,
     status: 200,
     data: { id: "outcome", closing_event: closingEvent },
+  };
+}
+
+function reviewRound(findings: unknown[]) {
+  return {
+    type: OperationResultType.Completed,
+    status: 200,
+    data: { round: 2, final: false, review_base: null, findings },
   };
 }
 
@@ -207,6 +220,7 @@ test("the prior rationale of an attempt after a change request holds the request
   stopAfter(t, () => run.dispose());
   let reads = 0;
   run.clients.mission = {
+    "execution.review_round.get": async () => reviewRound([]),
     "execution.rework_assessment.get": async () => NOT_FOUND,
     "execution.clearedOutcome.get": async () =>
       clearedOutcome(ClosingEvent.ExternalFailed),
@@ -247,6 +261,7 @@ test("an attempt not ended by a change request reads no change request", async (
     const run = fixture(SECOND_ATTEMPT);
     stopAfter(t, () => run.dispose());
     run.clients.mission = {
+      "execution.review_round.get": async () => reviewRound([]),
       "execution.rework_assessment.get": async () => NOT_FOUND,
       "execution.clearedOutcome.get": async () => outcome,
       "execution.cleared_assessment.get": async () => ({
@@ -273,6 +288,7 @@ test("an external failure without a current change request keeps the cleared rat
   const run = fixture(SECOND_ATTEMPT);
   stopAfter(t, () => run.dispose());
   run.clients.mission = {
+    "execution.review_round.get": async () => reviewRound([]),
     "execution.rework_assessment.get": async () => NOT_FOUND,
     "execution.clearedOutcome.get": async () =>
       clearedOutcome(ClosingEvent.ExternalFailed),
@@ -311,6 +327,7 @@ test("each change request names its binding", async (t) => {
   const [item] = CHANGE_REQUESTS.items;
   assert.ok(item);
   run.clients.mission = {
+    "execution.review_round.get": async () => reviewRound([]),
     "execution.clearedOutcome.get": async () =>
       clearedOutcome(ClosingEvent.ExternalFailed),
   } as unknown as MethodClients["mission"];
@@ -350,6 +367,7 @@ test("a change request of a binding that the pinned revision does not name names
   const [item] = CHANGE_REQUESTS.items;
   assert.ok(item);
   run.clients.mission = {
+    "execution.review_round.get": async () => reviewRound([]),
     "execution.clearedOutcome.get": async () =>
       clearedOutcome(ClosingEvent.ExternalFailed),
   } as unknown as MethodClients["mission"];
@@ -393,12 +411,15 @@ test("the judged commits of a rework are the repository commits of its tested in
     const run = fixture(SECOND_ATTEMPT);
     stopAfter(t, () => run.dispose());
     run.clients.mission = {
+      "execution.review_round.get": async () => reviewRound([]),
       "execution.rework_assessment.get": async () => reworkRead(testedInput),
     } as unknown as MethodClients["mission"];
     run.clients.worker = NO_FAILED_CHECKS as unknown as MethodClients["worker"];
     assert.deepEqual((await readPrior(run, REPOSITORIES)).verdict, {
       text: "rework",
       judged: judged.map(({ binding_id, commit }) => ({ binding_id, commit })),
+      findings: [],
+      round: null,
     });
   }
 });
@@ -415,6 +436,7 @@ test("the judged commit of a binding is the commit of its latest change request"
     commit_id: "b".repeat(40),
   };
   run.clients.mission = {
+    "execution.review_round.get": async () => reviewRound([]),
     "execution.rework_assessment.get": async () => NOT_FOUND,
     "execution.clearedOutcome.get": async () =>
       clearedOutcome(ClosingEvent.ExternalFailed),
@@ -451,6 +473,7 @@ test("a cleared assessment with the result success is not instruction text", asy
     const run = fixture(SECOND_ATTEMPT);
     stopAfter(t, () => run.dispose());
     run.clients.mission = {
+      "execution.review_round.get": async () => reviewRound([]),
       "execution.rework_assessment.get": async () => NOT_FOUND,
       "execution.clearedOutcome.get": async () => NOT_FOUND,
       "execution.cleared_assessment.get": async () => ({
@@ -492,6 +515,7 @@ test("a failed check comes before a rework assessment and the text holds both", 
   const run = fixture(SECOND_ATTEMPT);
   stopAfter(t, () => run.dispose());
   run.clients.mission = {
+    "execution.review_round.get": async () => reviewRound([]),
     "execution.rework_assessment.get": async () =>
       reworkRead({
         kind: "repository",
@@ -512,6 +536,8 @@ test("a failed check comes before a rework assessment and the text holds both", 
         "rework",
       ].join("\n"),
       judged: [{ binding_id: "binding_api", commit: "c".repeat(40) }],
+      findings: [],
+      round: null,
     },
     cleared: null,
   });
@@ -521,6 +547,7 @@ test("a failed check without a rework assessment is the whole verdict", async (t
   const run = fixture(SECOND_ATTEMPT);
   stopAfter(t, () => run.dispose());
   run.clients.mission = {
+    "execution.review_round.get": async () => reviewRound([]),
     "execution.rework_assessment.get": async () => NOT_FOUND,
   } as unknown as MethodClients["mission"];
   run.clients.worker = failedCheckRead([
@@ -533,6 +560,8 @@ test("a failed check without a rework assessment is the whole verdict", async (t
         `The required checks lint failed on api at commit ${"c".repeat(40)}.`,
       ].join("\n"),
       judged: [{ binding_id: "binding_api", commit: "c".repeat(40) }],
+      findings: [],
+      round: null,
     },
     cleared: null,
   });
@@ -542,13 +571,59 @@ test("an empty failed check answer keeps the current verdict", async (t) => {
   const run = fixture(SECOND_ATTEMPT);
   stopAfter(t, () => run.dispose());
   run.clients.mission = {
+    "execution.review_round.get": async () => reviewRound([]),
     "execution.rework_assessment.get": async () => reworkRead(null),
   } as unknown as MethodClients["mission"];
   run.clients.worker = failedCheckRead(
     [],
   ) as unknown as MethodClients["worker"];
   assert.deepEqual(await readPrior(run, REPOSITORIES), {
-    verdict: { text: "rework", judged: [] },
+    verdict: { text: "rework", judged: [], findings: [], round: null },
     cleared: null,
   });
+});
+
+test("readPrior adds the open findings of the review round and the round of a rework assessment", async (t) => {
+  const findings = [
+    { id: "finding_a", label: "B1" },
+    { id: "finding_b", label: "S2" },
+  ];
+  let reads = 0;
+  for (const rework of [true, false]) {
+    const run = fixture(SECOND_ATTEMPT);
+    stopAfter(t, () => run.dispose());
+    run.clients.mission = {
+      "execution.review_round.get": async () => {
+        reads++;
+        return reviewRound(findings);
+      },
+      "execution.rework_assessment.get": async () =>
+        rework
+          ? {
+              type: OperationResultType.Completed,
+              status: 200,
+              data: {
+                id: "assessment",
+                rationale: "rework",
+                tested_input: null,
+                result: "success",
+                round: 2,
+              },
+            }
+          : NOT_FOUND,
+      "execution.clearedOutcome.get": async () => NOT_FOUND,
+      "execution.cleared_assessment.get": async () => NOT_FOUND,
+    } as unknown as MethodClients["mission"];
+    run.clients.worker = NO_FAILED_CHECKS as unknown as MethodClients["worker"];
+    const prior = await readPrior(run, REPOSITORIES);
+    if (rework)
+      assert.deepEqual(prior.verdict, {
+        text: "rework",
+        judged: [],
+        findings,
+        round: 2,
+      });
+    else assert.deepEqual(prior, { verdict: null, cleared: null });
+  }
+  assert.equal(reads, ONE_READ);
 });

@@ -85,14 +85,23 @@ export function withinGit<T>(
   );
 }
 
-export function taskSpan(spans: SpanRecorder, task: TaskContent): SpanStart {
+export function taskSpan(
+  spans: SpanRecorder,
+  task: TaskContent,
+  fixedRound: number | null = null,
+): SpanStart {
   assert.ok(task.id);
   const key = spans.key(SpanOperation.Task);
   assert.ok(key);
   return {
     key,
     operation: SpanOperation.Task,
-    attributes: { "kanthord.task.id": task.id },
+    attributes: {
+      "kanthord.task.id": task.id,
+      ...(fixedRound === null
+        ? {}
+        : { [EvaluationAttribute.Round]: fixedRound }),
+    },
   };
 }
 
@@ -365,6 +374,10 @@ export const EvaluationAttribute = {
   ProposalCount: "kanthord.evaluation.proposal_count",
   Repaired: "kanthord.judgement.repaired",
   Affected: "kanthord.evaluation.affected",
+  Round: "kanthord.evaluation.round",
+  FinalRound: "kanthord.evaluation.final_round",
+  ActionLabels: "kanthord.evaluation.action_labels",
+  FixedCount: "kanthord.evaluation.fixed_count",
 } as const;
 
 export function evaluationEnd(judgement: {
@@ -383,6 +396,10 @@ export function evaluationEnd(judgement: {
       [EvaluationAttribute.UnmetIds]: facts.unmet_ids,
       [EvaluationAttribute.UnmetGrounds]: facts.unmet_grounds,
       [EvaluationAttribute.ProposalCount]: facts.proposal_count,
+      [EvaluationAttribute.Round]: facts.round,
+      [EvaluationAttribute.FinalRound]: facts.final_round,
+      [EvaluationAttribute.ActionLabels]: facts.action_labels,
+      [EvaluationAttribute.FixedCount]: facts.fixed_count,
       ...(facts.repaired === null
         ? {}
         : { [EvaluationAttribute.Repaired]: facts.repaired }),

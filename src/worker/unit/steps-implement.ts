@@ -402,6 +402,7 @@ async function runPending(
   const units = pending.map(({ task, instruction }) => ({
     task,
     verdict: false,
+    round: null as number | null,
     run: () => taskRunner(state, task, instruction),
   }));
   if (node !== null) {
@@ -409,14 +410,15 @@ async function runPending(
     units.push({
       task: unit,
       verdict: true,
+      round: node.round,
       run: () => runNodeInstruction(state, unit, node),
     });
   }
-  for (const { task, verdict, run } of units) {
+  for (const { task, verdict, round, run } of units) {
     state.task = task;
     state.revisionCount = 0;
     const result = await state.run.spans.within(
-      taskSpan(state.run.spans, task),
+      taskSpan(state.run.spans, task, round),
       run,
       (ended) => taskEnd(ended, state.revisionCount),
       (error) => taskFailure(error, state.revisionCount),
@@ -872,6 +874,7 @@ export interface PendingTask {
 export interface NodeInstruction {
   text: string;
   judged: JudgedCheckout[];
+  round: number | null;
 }
 
 export interface StartCheck {
@@ -885,7 +888,9 @@ async function nodeInstructionOf(
   state: StepsState,
 ): Promise<NodeInstruction | null> {
   if (state.verdict === null)
-    return state.cleared === null ? null : { text: state.cleared, judged: [] };
+    return state.cleared === null
+      ? null
+      : { text: state.cleared, judged: [], round: null };
   const judged = await judgedCheckouts(state, state.verdict.judged);
   const holds =
     judged.length > NO_CHECKOUTS && (await verdictRuleHolds(state, judged));
@@ -899,8 +904,10 @@ async function nodeInstructionOf(
     text: criterionRevisionInstruction(
       state.input.setup.templates,
       state.verdict.text,
+      state.verdict.findings,
     ),
     judged,
+    round: state.verdict.round,
   };
 }
 

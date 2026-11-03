@@ -150,13 +150,24 @@ test("base prompt holds exactly the shared rules", () => {
 
 test("swe@1 and re@1 hold the code rules in the same words", () => {
   const heading = "## Code principles";
+  const findings = "## Findings";
   const fileStart = 0;
   const sweStart = SWE_AGENT_PROMPT.indexOf(heading);
   const reStart = RE_AGENT_PROMPT.indexOf(heading);
   assert.ok(sweStart > fileStart);
   assert.ok(reStart > fileStart);
-  const shared = SWE_AGENT_PROMPT.slice(sweStart);
-  assert.equal(RE_AGENT_PROMPT.slice(reStart), shared);
+  const sweFindings = SWE_AGENT_PROMPT.indexOf(findings);
+  const reFindings = RE_AGENT_PROMPT.indexOf(findings);
+  const shared = SWE_AGENT_PROMPT.slice(sweStart, sweFindings);
+  assert.equal(RE_AGENT_PROMPT.slice(reStart, reFindings), shared);
+  const sweRules = SWE_AGENT_PROMPT.slice(sweFindings);
+  const reRules = RE_AGENT_PROMPT.slice(reFindings);
+  assert.ok(sweRules.includes("`status:FIXED` when the work holds the change"));
+  assert.deepEqual(ruleNames(reRules), [
+    "Present every blocker and every suggestion only in the findings array of the judgement line.",
+  ]);
+  assert.ok(reRules.includes("Write no second list."));
+  assert.equal(reRules.includes("status:"), false);
   assert.deepEqual(ruleNames(shared), [
     "Simplicity in code.",
     "Surgical code changes.",
@@ -174,9 +185,10 @@ test("swe@1 and re@1 hold the code rules in the same words", () => {
     "No test knowledge in production code.",
     "Bounded waits.",
     "No self-spawning test.",
+  ]);
+  assert.deepEqual(ruleNames(sweRules), [
     "Present every blocker and every suggestion as a bullet list, one item per bullet, in this exact format:",
   ]);
-  assert.ok(shared.includes("`status:FIXED` when the work holds the change"));
 });
 
 test("unknown and inherited names are not agent declarations", () => {

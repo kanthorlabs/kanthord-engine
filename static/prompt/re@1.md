@@ -9,9 +9,9 @@ Your contribution to the WHAT is the assessment and its findings.
 ## Judgement
 
 1. **A violation is a blocker.** A finding that violates the requirement or the criterion of the work prompt is a blocker. A finding that violates the default standard is a blocker. Every other finding is a suggestion.
-2. **A finding rests on the change of the candidate.** A blocker names a violation in the change that the attempt made, never in a baseline that the change did not touch. A finding rests on evidence in the work product. Missing process evidence is no finding.
+2. **A finding rests on the change under review.** A blocker names a violation in the change under review, never in a baseline that the change did not touch. A finding rests on evidence in the work product. Missing process evidence is no finding.
 3. **A blocker fails the assessment.** An assessment with a blocker does not pass. When the evidence cannot establish the criterion, the assessment does not pass. It records that nothing is established. An assessment passes when the evidence meets the criterion and no blocker stands.
-4. **Every item of your finding list carries `status:OPEN`**, because you apply no fix. Every blocker names the criterion or the standard that it violates.
+4. **Every blocker names the criterion or the standard that it violates.**
 5. **A passing assessment states the evidence that meets the criterion.** A failing assessment states its findings. Neither holds praise.
 6. **The default standard binds your own text.** A violation of it in your assessment is a defect of your assessment, not of the candidate.
 7. **The style of a candidate report is no violation.** The prose style and the finding format of a candidate report are no default-standard violation.
@@ -46,4 +46,4 @@ These rules bind every code change.
 
 ## Findings
 
-1. **Present every blocker and every suggestion as a bullet list, one item per bullet, in this exact format:** `<B1/S1> - status:<FIXED/OPEN> - action:<YES/NO> - <name> - <description> - fix:<recommended change> - why:<reason>`. `B` is a blocker and `S` is a suggestion, numbered. `status:FIXED` when the work holds the change, `status:OPEN` when the work still needs it. `action:YES` when the change applies, `action:NO` when it is a no-op or a won't-do. Every item carries a status, a fix and a why. Bury no item in a table, in prose or in a count.
+1. **Present every blocker and every suggestion only in the findings array of the judgement line.** Write no second list. `B` is a blocker and `S` is a suggestion, numbered. `action: yes` when the change applies, `action: no` when it is a no-op or a won't-do. Every item carries a fix and a why. Bury no item in a table, in prose or in a count.

@@ -39,7 +39,17 @@ import {
 import { SetupEnd } from "./environment-setup.ts";
 import { VerificationClass } from "./verification.ts";
 import { ActionResultKind } from "../contract.ts";
-import { AssessmentResult, AssetKind } from "../../mission/contract.ts";
+import {
+  AssessmentResult,
+  AssetKind,
+  INLINE_BYTES_MAX,
+  type ReviewRound,
+} from "../../mission/contract.ts";
+import {
+  ROUND_PATCH_MEDIA_TYPE,
+  ROUND_PATCH_SUBJECT,
+  roundPatchContent,
+} from "./round-patch.ts";
 import { RecordKind, type TelemetryRecord } from "../../tracking/contract.ts";
 import {
   CauseAssigner,
@@ -59,6 +69,17 @@ import { VERIFICATION_INFRASTRUCTURE_FAILED } from "./verification.ts";
 
 const NO_RELEASES = 0;
 const SINGLE_RELEASE = 1;
+const SINGLE_BINDING = 1;
+const NO_BINDINGS = 0;
+const SECOND_ROUND = 2;
+const TWO_PATCHES = 2;
+const GATEWAY_BODY_LIMIT_BYTES = 10 * 1024 * 1024;
+const FIRST_ROUND = {
+  round: 1,
+  final: false,
+  review_base: null,
+  findings: [],
+};
 const PROPOSAL = {
   dependency_id: "child",
   name: "Fix the defect",
@@ -70,6 +91,16 @@ const PROPOSAL = {
     criterion: "The test passes",
     verifications: ["npm test"],
   },
+};
+const STATED_FINDING = {
+  label: "B1",
+  action: "yes",
+  task_id: null,
+  ground: "stated",
+  name: "Defect",
+  description: "the defect",
+  fix: "Repair it",
+  why: "The criterion fails",
 };
 const PROPOSAL_REPLY = `kanthord-judgement: ${JSON.stringify({
   result: "criterion-not-met",
@@ -173,7 +204,7 @@ test("evaluation writes failed-verification assessments without inference and ga
     {
       command: "true",
       texts: [
-        'kanthord-judgement: {"result":"criterion-not-met","rationale":"unmet","unmet":[{"id":"task","reason":"the defect","ground":"stated"}]}',
+        `kanthord-judgement: ${JSON.stringify({ result: "criterion-not-met", rationale: "unmet", findings: [STATED_FINDING] })}`,
       ],
       result: "criterion-not-met",
       opens: 1,
@@ -182,7 +213,7 @@ test("evaluation writes failed-verification assessments without inference and ga
     {
       command: "true",
       texts: [
-        'kanthord-judgement: {"result":"criterion-not-met","rationale":"unmet","unmet":[{"id":"task","reason":"the defect","ground":"stated"}]}',
+        `kanthord-judgement: ${JSON.stringify({ result: "criterion-not-met", rationale: "unmet", findings: [STATED_FINDING] })}`,
       ],
       result: "criterion-not-met",
       opens: 1,
@@ -271,6 +302,7 @@ test("evaluation writes failed-verification assessments without inference and ga
     let reported = false;
     const clients = {
       mission: {
+        "execution.review_round.get": async () => complete(FIRST_ROUND),
         "execution.pinnedRevision.get": async () =>
           complete({
             content: {
@@ -493,6 +525,7 @@ test("an evaluation that its agent deadline cuts ends with no assessment and no 
   const releases: unknown[] = [];
   const clients = {
     mission: {
+      "execution.review_round.get": async () => complete(FIRST_ROUND),
       "execution.pinnedRevision.get": async () =>
         complete({
           content: {
@@ -604,8 +637,14 @@ interface ReviewOptions {
   reply?: string;
   repository?: ReturnType<typeof repositorySetup>;
   snapshot?: string;
+  bindings?: {
+    repository: ReturnType<typeof repositorySetup>;
+    snapshot: string;
+  }[];
   taskCommand?: string;
   transport?: RepositoryTransport;
+  round?: ReviewRound;
+  answer?: unknown;
 }
 
 async function reviewOf(
@@ -614,8 +653,19 @@ async function reviewOf(
   wallTimeMs?: number,
   options: ReviewOptions = {},
 ) {
-  const repository = options.repository ?? repositorySetup();
-  const setup = anthropicSetup({ repositories: [repository] });
+  const repository =
+    options.bindings?.[0]?.repository ??
+    options.repository ??
+    repositorySetup();
+  const bindings =
+    options.bindings ??
+    (options.snapshot === undefined
+      ? []
+      : [{ repository, snapshot: options.snapshot }]);
+  const repositories = options.bindings?.map((entry) => entry.repository) ?? [
+    repository,
+  ];
+  const setup = anthropicSetup({ repositories });
   if (wallTimeMs !== undefined) setup.resource_budget.wall_time_ms = wallTimeMs;
   const claim = {
     execution_id: setup.execution_id,
@@ -640,14 +690,25 @@ async function reviewOf(
     rationale: string;
     evidence_ids: string[];
     cause?: unknown;
+    findings: unknown[];
+    fixed_finding_ids: string[];
   }[] = [];
   const records: TelemetryRecord[] = [];
   const verifications: { results: { exit_code: number | null }[] }[] = [];
   const submits: Submitted[] = [];
   const instructions: string[] = [];
   const releases: unknown[] = [];
+  const actionRequests: unknown[] = [];
   const clients = {
+    worker: {
+      "action.request": async (input: unknown) => {
+        actionRequests.push(input);
+        return complete({ items: [] });
+      },
+    },
     mission: {
+      "execution.review_round.get": async () =>
+        complete(options.round ?? FIRST_ROUND),
       "execution.pinnedRevision.get": async () =>
         complete({
           content: {
@@ -655,7 +716,7 @@ async function reviewOf(
             requirement: "work",
             criterion: "met",
             verifications: [command],
-            bindings: [repository.binding_id],
+            bindings: repositories.map((entry) => entry.binding_id),
           },
           tasks:
             options.taskCommand === undefined
@@ -681,22 +742,20 @@ async function reviewOf(
               id: "placed",
               assets: [{ id: assetId, kind: "produced", address }],
             },
-            ...(options.snapshot === undefined
+            ...(bindings.length === NO_BINDINGS
               ? []
               : [
                   {
                     id: "snapshot",
-                    assets: [
-                      {
-                        id: createIdentity("evidence_asset"),
+                    assets: bindings.map((entry) => ({
+                      id: createIdentity("evidence_asset"),
+                      kind: "repository",
+                      address: {
                         kind: "repository",
-                        address: {
-                          kind: "repository",
-                          binding_id: repository.binding_id,
-                          commit: options.snapshot,
-                        },
+                        binding_id: entry.repository.binding_id,
+                        commit: entry.snapshot,
                       },
-                    ],
+                    })),
                   },
                 ]),
           ],
@@ -714,6 +773,8 @@ async function reviewOf(
         body: Submitted & { verification?: (typeof verifications)[number] };
       }) => {
         submits.push(input.body);
+        if (input.body.subject === ROUND_PATCH_SUBJECT)
+          return complete({ evidence: { id: `patch_${submits.length}` } });
         if (!input.body.verification)
           return complete({ evidence: { id: "affected" } });
         verifications.push(input.body.verification);
@@ -723,7 +784,7 @@ async function reviewOf(
         body: (typeof assessments)[number];
       }) => {
         assessments.push(input.body);
-        return complete({ outcome: { id: "outcome" } });
+        return complete(options.answer ?? { outcome: { id: "outcome" } });
       },
     },
     scheduler: {
@@ -785,6 +846,7 @@ async function reviewOf(
     instructions,
     releases,
     records,
+    actionRequests,
     opens: () => opens,
   };
 }
@@ -933,8 +995,15 @@ test("a command that the node and a task share runs once at the evaluation and t
   );
 });
 
-const STATED_REPLY =
-  'kanthord-judgement: {"result":"criterion-not-met","rationale":"unmet","unmet":[{"id":"task","reason":"a","ground":"stated"},{"id":"other","reason":"b","ground":"standard"}]}';
+const STATED_REPLY = `kanthord-judgement: ${JSON.stringify({
+  result: "criterion-not-met",
+  rationale: "unmet",
+  findings: [
+    { ...STATED_FINDING, task_id: TASK_ID, description: "a" },
+    { ...STATED_FINDING, label: "B2", ground: "standard", description: "b" },
+    { ...STATED_FINDING, label: "S1", ground: null, description: "c" },
+  ],
+})}`;
 
 function evaluationEndOf(records: readonly TelemetryRecord[]) {
   const ends = records.filter(
@@ -965,8 +1034,11 @@ test("a failed review verification submits the cause with the suspects model and
   assert.equal(EvaluationAttribute.Repaired in attributes, false);
 });
 
-test("a judgement with a stated first unmet item submits the work defect cause and its facts", async (t) => {
-  const review = await reviewOf(t, "true", undefined, { reply: STATED_REPLY });
+test("a judgement with a stated first blocker submits the work defect cause and its facts", async (t) => {
+  const review = await reviewOf(t, "true", undefined, {
+    reply: STATED_REPLY,
+    taskCommand: "true",
+  });
   assert.deepEqual(review.assessments[0]?.cause, {
     category: CauseCategory.Model,
     subcategory: CauseSubcategory.WorkDefect,
@@ -976,11 +1048,22 @@ test("a judgement with a stated first unmet item submits the work defect cause a
   assert.deepEqual(end.attributes, {
     [EvaluationAttribute.Result]: AssessmentResult.CriterionNotMet,
     [EvaluationAttribute.Stage]: EvaluationStage.Judgement,
-    [EvaluationAttribute.UnmetIds]: ["task", "other"],
+    [EvaluationAttribute.UnmetIds]: [TASK_ID, review.nodeId],
     [EvaluationAttribute.UnmetGrounds]: ["stated", "standard"],
     [EvaluationAttribute.ProposalCount]: NO_RELEASES,
     [EvaluationAttribute.Repaired]: false,
+    [EvaluationAttribute.Round]: 1,
+    [EvaluationAttribute.FinalRound]: false,
+    [EvaluationAttribute.ActionLabels]: ["B1", "B2", "S1"],
+    [EvaluationAttribute.FixedCount]: NO_RELEASES,
   });
+  assert.deepEqual(
+    review.assessments[0]?.findings.map(
+      (finding) => (finding as { label: string }).label,
+    ),
+    ["B1", "B2", "S1"],
+  );
+  assert.deepEqual(review.assessments[0]?.fixed_finding_ids, []);
   assert.equal(
     Object.keys(end.attributes).some((name) =>
       name.startsWith("kanthord.cause."),
@@ -1233,4 +1316,252 @@ test("a failed listed command runs no affected command", async (t) => {
     EvaluationAttribute.Affected in evaluationEndOf(review.records).attributes,
     false,
   );
+});
+
+async function roundSnapshot(t: TestContext, name: string, fixContent: string) {
+  const origin = join(temporary(t), `${name}-origin`);
+  mkdirSync(origin);
+  const git = simpleGit(origin);
+  await git.raw(["init", "-b", "main"]);
+  const commit = async (file: string, content: string) => {
+    writeFileSync(join(origin, file), content);
+    await git.add(file);
+    await git.raw([...COMMIT_IDENTITY, "commit", "-m", file]);
+    return (await git.revparse(["HEAD"])).trim();
+  };
+  await commit("base", "base");
+  await git.raw(["checkout", "-b", "node"]);
+  const judged = await commit("work", "work");
+  const snapshot = await commit("fix", fixContent);
+  await git.raw(["checkout", "main"]);
+  return {
+    repository: {
+      ...repositorySetup(),
+      name,
+      address: origin,
+    } as unknown as ReturnType<typeof repositorySetup>,
+    snapshot,
+    judged,
+  };
+}
+
+const PRIOR_BLOCKER_ID = createIdentity("finding");
+const PRIOR_SUGGESTION_ID = createIdentity("finding");
+
+function priorFinding(id: string, label: string) {
+  const blocker = label.startsWith("B");
+  return {
+    id,
+    node_id: "node",
+    attempt: 1,
+    round: 1,
+    assessment_id: createIdentity("assessment"),
+    source: "reviewer",
+    label,
+    kind: blocker ? "blocker" : "suggestion",
+    action: "yes",
+    task_id: null,
+    ground: blocker ? "stated" : null,
+    name: `name ${label}`,
+    description: `defect ${label}`,
+    fix: `fix ${label}`,
+    why: `why ${label}`,
+    route: "fix",
+    status: "open",
+    fixed_assessment_id: null,
+    cause_owner: null,
+    created_by: null,
+    created_at: 0,
+    decision: null,
+    decision_reason: null,
+    decided_by: null,
+    decided_at: null,
+  };
+}
+
+function secondRound(
+  bindings: readonly { repository: { binding_id: string }; judged: string }[],
+  final = false,
+): ReviewRound {
+  const base = bindings.map(({ repository, judged }) => ({
+    kind: "repository" as const,
+    binding_id: repository.binding_id,
+    commit: judged,
+  }));
+  return {
+    round: 2,
+    final,
+    review_base: base.length === SINGLE_BINDING ? base[0]! : base,
+    findings: [
+      priorFinding(PRIOR_BLOCKER_ID, "B1"),
+      priorFinding(PRIOR_SUGGESTION_ID, "S1"),
+    ],
+  } as ReviewRound;
+}
+
+const ROUND_SUCCESS = `kanthord-judgement: ${JSON.stringify({
+  result: "success",
+  rationale: "fixed",
+  findings: [{ ...STATED_FINDING, label: "S1", ground: null }],
+  fixed_finding_ids: [PRIOR_BLOCKER_ID],
+})}`;
+
+function patchSubmits(review: Awaited<ReturnType<typeof reviewOf>>) {
+  return review.submits.filter(
+    (submit) => submit.subject === ROUND_PATCH_SUBJECT,
+  );
+}
+
+test("a round with a review base submits one patch evidence and the findings with fixed_finding_ids", async (t) => {
+  const binding = await roundSnapshot(t, REPOSITORY_NAME, "fixed");
+  const review = await reviewOf(t, "true", undefined, {
+    bindings: [binding],
+    transport: localTransport,
+    round: secondRound([binding], true),
+    reply: ROUND_SUCCESS,
+  });
+  assert.deepEqual(review.end, { kind: "closed", outcomeId: "outcome" });
+  const [patch, ...others] = patchSubmits(review);
+  assert.equal(others.length, NO_RELEASES);
+  assert.equal(patch?.assets.length, SINGLE_RELEASE);
+  assert.equal(patch?.assets[0]?.kind, AssetKind.Produced);
+  assert.equal(patch?.assets[0]?.content.media_type, ROUND_PATCH_MEDIA_TYPE);
+  const text = Buffer.from(patch!.assets[0]!.content.data, "base64").toString(
+    "utf8",
+  );
+  assert.match(text, /\+\+\+ b\/fix/);
+  assert.doesNotMatch(text, /b\/work/);
+  const [assessment] = review.assessments;
+  const patchId = `patch_${review.submits.indexOf(patch!) + 1}`;
+  assert.deepEqual(assessment?.evidence_ids, [
+    "verification",
+    patchId,
+    "snapshot",
+    "placed",
+  ]);
+  assert.deepEqual(assessment?.findings, [
+    { ...STATED_FINDING, label: "S1", ground: null },
+  ]);
+  assert.deepEqual(assessment?.fixed_finding_ids, [PRIOR_BLOCKER_ID]);
+  assert.match(review.instructions[0]!, /^This is review round 2\./m);
+  assert.ok(review.instructions[0]!.includes(PRIOR_SUGGESTION_ID));
+  const bundle = JSON.parse(
+    review.instructions[0]!.split("\n")
+      .find((line) => line.startsWith("Evidence: "))!
+      .slice("Evidence: ".length),
+  );
+  assert.deepEqual(bundle.patch_paths, [
+    join("..", "..", "evidence", `round-2-${REPOSITORY_NAME}.patch`),
+  ]);
+  assert.deepEqual(bundle.changed_files, ["fix"]);
+  const attributes = evaluationEndOf(review.records).attributes;
+  assert.equal(attributes[EvaluationAttribute.Round], SECOND_ROUND);
+  assert.equal(attributes[EvaluationAttribute.FinalRound], true);
+  assert.deepEqual(attributes[EvaluationAttribute.ActionLabels], ["S1"]);
+  assert.equal(attributes[EvaluationAttribute.FixedCount], SINGLE_RELEASE);
+  assert.deepEqual(attributes[EvaluationAttribute.UnmetIds], []);
+});
+
+test("two bindings with patches over 5 MiB submit two patch evidences, each under the body limit", async (t) => {
+  const large = "x"
+    .repeat(1023)
+    .concat("\n")
+    .repeat(6 * 1024);
+  const api = await roundSnapshot(t, "api", large);
+  const web = await roundSnapshot(t, "web", large);
+  const review = await reviewOf(t, "true", undefined, {
+    bindings: [api, web],
+    transport: localTransport,
+    round: secondRound([api, web]),
+    reply: ROUND_SUCCESS,
+  });
+  const patches = patchSubmits(review);
+  assert.equal(patches.length, TWO_PATCHES);
+  for (const patch of patches) {
+    const asset = patch.assets[0]!;
+    const bytes = Buffer.from(asset.content.data, "base64");
+    assert.ok(bytes.length <= INLINE_BYTES_MAX);
+    assert.match(
+      bytes.toString("utf8"),
+      /\n\[The patch exceeds 5 MiB and ends here\.\]\n$/,
+    );
+    assert.equal(bytes.toString("base64"), asset.content.data);
+    assert.ok(
+      Buffer.byteLength(JSON.stringify(patch), "utf8") <
+        GATEWAY_BODY_LIMIT_BYTES,
+    );
+  }
+  assert.equal(
+    review.assessments[0]?.evidence_ids.filter((id) => id.startsWith("patch_"))
+      .length,
+    TWO_PATCHES,
+  );
+});
+
+test("a cut patch with its trailer line holds at most INLINE_BYTES_MAX bytes, and the Mission Service accepts it", () => {
+  const exact = "a".repeat(INLINE_BYTES_MAX);
+  assert.equal(roundPatchContent(exact).toString("utf8"), exact);
+  for (const patch of [
+    "a".repeat(INLINE_BYTES_MAX + 1),
+    "é".repeat(INLINE_BYTES_MAX),
+  ]) {
+    const content = roundPatchContent(patch);
+    assert.ok(content.length <= INLINE_BYTES_MAX);
+    assert.ok(content.length > INLINE_BYTES_MAX - 64);
+    const text = content.toString("utf8");
+    assert.equal(text.includes("�"), false);
+    assert.match(text, /\n\[The patch exceeds 5 MiB and ends here\.\]\n$/);
+    assert.ok(patch.startsWith(text.slice(0, text.lastIndexOf("\n["))));
+    assert.equal(
+      Buffer.from(content.toString("base64"), "base64").length,
+      content.length,
+    );
+  }
+});
+
+test("a success answer with the node no longer Evaluating ends revoked with no request", async (t) => {
+  const review = await reviewOf(t, "true", undefined, {
+    answer: {
+      assessment: { result: AssessmentResult.Success },
+      node: { state: "Available" },
+      outcome: null,
+    },
+  });
+  assert.deepEqual(review.end, {
+    kind: "ended",
+    reason: EndReason.Revoked,
+    code: null,
+  });
+  assert.deepEqual(review.actionRequests, []);
+  assert.deepEqual(review.releases, []);
+});
+
+test("a success answer with the node still Evaluating requests the actions", async (t) => {
+  const review = await reviewOf(t, "true", undefined, {
+    answer: {
+      assessment: { result: AssessmentResult.Success },
+      node: { state: "Evaluating" },
+      outcome: null,
+    },
+  });
+  assert.deepEqual(review.end, { kind: "released", furtherWork: false });
+  assert.equal(review.actionRequests.length, SINGLE_RELEASE);
+});
+
+test("a verification failure submits no finding, also with prior findings", async (t) => {
+  const review = await reviewOf(t, "false", undefined, {
+    round: {
+      ...FIRST_ROUND,
+      round: 2,
+      findings: [priorFinding(PRIOR_BLOCKER_ID, "B1")],
+    } as ReviewRound,
+  });
+  assert.equal(review.opens(), NO_OPENS);
+  assert.equal(review.assessments[0]?.result, AssessmentResult.CriterionNotMet);
+  assert.deepEqual(review.assessments[0]?.findings, []);
+  assert.deepEqual(review.assessments[0]?.fixed_finding_ids, []);
+  const attributes = evaluationEndOf(review.records).attributes;
+  assert.equal(attributes[EvaluationAttribute.Round], SECOND_ROUND);
+  assert.deepEqual(attributes[EvaluationAttribute.ActionLabels], []);
+  assert.equal(attributes[EvaluationAttribute.FixedCount], NO_RELEASES);
 });

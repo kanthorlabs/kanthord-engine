@@ -626,6 +626,79 @@ export async function modifiedFiles(
   return output.split(NUL).filter(Boolean);
 }
 
+export async function onFirstParentChain(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  commit: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<boolean> {
+  assert.match(commit, COMMIT_PATTERN);
+  const output = await run(
+    env,
+    directory,
+    ["rev-list", "--first-parent", "HEAD"],
+    context,
+    deadlineMs,
+  );
+  return output.split(NEWLINE).includes(commit);
+}
+
+export async function roundPatch(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  base: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string> {
+  assert.match(base, COMMIT_PATTERN);
+  return run(
+    env,
+    directory,
+    [
+      "log",
+      "--first-parent",
+      "--diff-merges=remerge",
+      "--patch",
+      "--no-color",
+      "--format=fuller",
+      `${base}..HEAD`,
+      "--",
+    ],
+    context,
+    deadlineMs,
+  );
+}
+
+export async function roundFiles(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  base: string,
+  added: boolean,
+  context: Context,
+  deadlineMs: number,
+): Promise<string[]> {
+  assert.match(base, COMMIT_PATTERN);
+  const output = await run(
+    env,
+    directory,
+    [
+      "log",
+      "--first-parent",
+      "--diff-merges=remerge",
+      "--name-only",
+      "-z",
+      added ? "--diff-filter=A" : "--no-renames",
+      "--format=",
+      `${base}..HEAD`,
+      "--",
+    ],
+    context,
+    deadlineMs,
+  );
+  return [...new Set(output.split(NUL).filter(Boolean))].toSorted();
+}
+
 export async function changedFiles(
   env: NodeJS.ProcessEnv,
   directory: string,

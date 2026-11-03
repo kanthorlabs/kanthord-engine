@@ -3,13 +3,15 @@ import { test } from "node:test";
 import {
   affectedFailureReport,
   affectedRevisionInstruction,
+  criterionRevisionInstruction,
   evaluationInstruction,
-  evaluationJudgementSchema,
+  evaluationJudgementSchemaOf,
   examineInstruction,
   failedChecksText,
   failedVerificationRationale,
   failedVerificationReport,
   JUDGEMENT_MARKER,
+  judgementBlockers,
   judgementRationale,
   parseJudgement,
   parseRepaired,
@@ -32,7 +34,34 @@ import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import { PromptTemplate } from "../../agent/contract.ts";
 import type { WorkPrompt } from "../../agent/prompt-composer.ts";
+import { type Finding, FindingKind } from "../../mission/contract.ts";
 
+const evaluationJudgementSchema = evaluationJudgementSchemaOf({
+  priorIds: [],
+  priorBlockerIds: [],
+  taskIds: ["task"],
+});
+
+const BLOCKER = {
+  label: "B1",
+  action: "yes",
+  task_id: "task",
+  ground: "unstated",
+  name: "No test",
+  description: "no test",
+  fix: "Add a test",
+  why: "The criterion asks for a test",
+};
+const GROUNDED_REPLY = `kanthord-judgement: ${JSON.stringify({
+  result: "criterion-not-met",
+  rationale: "r",
+  findings: [BLOCKER],
+})}`;
+const UNGROUNDED_REPLY = `kanthord-judgement: ${JSON.stringify({
+  result: "criterion-not-met",
+  rationale: "r",
+  findings: [{ ...BLOCKER, ground: null }],
+})}`;
 const PLAN_DEFECT_RATIONALE =
   'plan defects\nPlan conflict:\n- node: "edit a.ts" vs "a.ts stays unchanged"\nPlan gap:\n- task_b: no test asked\nUnmet:\n- task_a: no route check\n- task_c: no lint';
 const PLAN_GAP_RATIONALE = "one gap\nPlan gap:\n- task_b: no test asked";
@@ -44,10 +73,11 @@ const TWO_GAP_RATIONALE =
 test("the final marker is strict and invalid handoffs are refused", () => {
   const text =
     'kanthord-judgement: {"result":"undetermined","rationale":"before"}\nkanthord-judgement: {"result":"success","rationale":" final "}';
-  assert.deepEqual(parseJudgement(text, evaluationJudgementSchema), {
+  assert.deepEqual(parseJudgement(text, evaluationJudgementSchema).reply, {
     result: "success",
     rationale: "final",
-    unmet: [],
+    findings: [],
+    fixed_finding_ids: [],
     proposals: [],
   });
   for (const invalid of [
@@ -56,17 +86,19 @@ test("the final marker is strict and invalid handoffs are refused", () => {
     "kanthord-judgement: invalid",
     'kanthord-judgement: {"result":"success","rationale":" "}',
     'kanthord-judgement: {"result":"success","rationale":"yes","extra":true}',
+    'kanthord-judgement: {"result":"criterion-not-met","rationale":"r","unmet":[{"id":"task","reason":"no test","ground":"stated"}]}',
   ])
-    assert.equal(parseJudgement(invalid, evaluationJudgementSchema), null);
+    assert.equal(
+      parseJudgement(invalid, evaluationJudgementSchema).reply,
+      null,
+    );
   assert.deepEqual(
-    parseJudgement(
-      'kanthord-judgement: {"result":"criterion-not-met","rationale":"task failed","unmet":[{"id":"task","reason":"no test","ground":"stated"}]}',
-      evaluationJudgementSchema,
-    ),
+    parseJudgement(GROUNDED_REPLY, evaluationJudgementSchema).reply,
     {
       result: "criterion-not-met",
-      rationale: "task failed",
-      unmet: [{ id: "task", reason: "no test", ground: "stated" }],
+      rationale: "r",
+      findings: [BLOCKER],
+      fixed_finding_ids: [],
       proposals: [],
     },
   );
@@ -74,20 +106,13 @@ test("the final marker is strict and invalid handoffs are refused", () => {
     parseJudgement(
       'kanthord-judgement: {"result":"criterion-not-met","rationale":"task failed"}',
       evaluationJudgementSchema,
-    ),
+    ).reply,
     null,
-  );
-  assert.deepEqual(
-    parseJudgement(
-      'kanthord-judgement: {"result":"success","rationale":"met"}',
-      evaluationJudgementSchema,
-    ),
-    { result: "success", rationale: "met", unmet: [], proposals: [] },
   );
   assert.equal(
     judgementRationale({
       rationale: "two gaps",
-      unmet: [
+      blockers: [
         { id: "task_a", reason: "no route check", ground: UnmetGround.Stated },
         {
           id: "task_b",
@@ -104,7 +129,7 @@ test("the rationale writes plan conflict and plan gap blocks before the unmet bl
   assert.equal(
     judgementRationale({
       rationale: "plan defects",
-      unmet: [
+      blockers: [
         { id: "task_a", reason: "no route check", ground: UnmetGround.Stated },
         { id: "task_b", reason: "no test asked", ground: UnmetGround.Unstated },
         {
@@ -120,14 +145,14 @@ test("the rationale writes plan conflict and plan gap blocks before the unmet bl
   assert.equal(
     judgementRationale({
       rationale: "one gap",
-      unmet: [
+      blockers: [
         { id: "task_b", reason: "no test asked", ground: UnmetGround.Unstated },
       ],
     }),
     PLAN_GAP_RATIONALE,
   );
   assert.equal(
-    judgementRationale({ rationale: MET_RATIONALE, unmet: [] }),
+    judgementRationale({ rationale: MET_RATIONALE, blockers: [] }),
     MET_RATIONALE,
   );
 });
@@ -197,6 +222,8 @@ test("failed and unrun rationale names the command and cause", () => {
     },
     evidence: [],
     affected: null,
+    round: { number: 1, review_base: null },
+    priorFindings: [],
   };
   const instruction = evaluationInstruction(SHIPPED_TEMPLATES, input);
   const examineEvaluation = evaluationInstruction(SHIPPED_TEMPLATES, {
@@ -233,27 +260,36 @@ test("failed and unrun rationale names the command and cause", () => {
   );
   assert.match(
     instruction,
-    /default-standard violation requires criterion-not-met/,
+    /A blocker requires criterion-not-met, and success holds no blocker\. Give each item of your finding list as one item of findings\. Give each item its label, action, name, description, fix and why\. Report each defect once\. Put the task id in task_id, or null for the node criterion or the default standard\./,
   );
   assert.doesNotMatch(instruction, /prose style/);
-  assert.match(instruction, /List every unmet item that you find/);
+  assert.doesNotMatch(instruction, /unmet/);
   assert.match(
     instruction,
-    /in the review bundle\. If the review bundle holds a coder report, read it\. Judge each OPEN blocker of the coder report: list it as unmet with its ground, or state in the rationale why it is not a defect\. An OPEN blocker of the coder report that the node scope forbids is an unmet item with the conflict ground\. Weigh each current dependency outcome/,
+    /in the review bundle\. If the review bundle holds a coder report, read it\. Judge each OPEN blocker of the coder report: list it as a blocker finding with its ground, or state in the rationale why it is not a defect\. An OPEN blocker of the coder report that the node scope forbids is a blocker finding with the conflict ground\. An answer of the coder report to a prior finding id is no coder blocker\. A coder blocker is exempt from the patch rule\. Weigh each current dependency outcome/,
   );
   assert.doesNotMatch(examineEvaluation, /coder report/);
   assert.match(
     instruction,
-    /Give each unmet item a ground: stated for a requirement or criterion of the work prompt, standard for a default-standard rule, unstated for a defect that neither states, conflict for two stated requirements or criteria that the work cannot meet together\./,
+    /Give each blocker a ground: stated for a requirement or criterion of the work prompt, standard for a default-standard rule, unstated for a defect that neither states, conflict for two stated requirements or criteria that the work cannot meet together\. Give each suggestion the ground null\./,
   );
   assert.match(
     instruction,
-    /conflict for two stated requirements or criteria that the work cannot meet together\. For example, correct work fails a criterion, a verification or an affected test unless it changes a file that the requirement forbids\. A failure that a defect of the work causes is no conflict\. For a conflict, write the reason as the two requirements in quotes, joined by " vs ": "requirement A" vs "requirement B"\. Write every reason in full/,
+    /conflict for two stated requirements or criteria that the work cannot meet together\. Give each suggestion the ground null\. For example, correct work fails a criterion, a verification or an affected test unless it changes a file that the requirement forbids\. A failure that a defect of the work causes is no conflict\. For a conflict, write the description as the two requirements in quotes, joined by " vs ": "requirement A" vs "requirement B"\. Write every description in full; do not cite another finding label\./,
   );
   assert.match(
     instruction,
-    /A changed file that the requirement forbids is an unmet stated item\. The exception is a change that correct work needs for a criterion, a verification or an affected test\./,
+    /`changed_files` in the review bundle lists every file that the change under review adds, modifies or deletes\./,
   );
+  assert.match(
+    instruction,
+    /A changed file that the requirement forbids is a blocker with the ground stated\. The exception is a change that correct work needs for a criterion, a verification or an affected test\./,
+  );
+  assert.match(
+    instruction,
+    /"findings": \[\{"label": "B1", "action": "yes", "task_id": null, "ground": "stated", "name": "Short name", "description": "The concrete defect", "fix": "The recommended change", "why": "The reason for the action"\}\], "fixed_finding_ids": \[\]/,
+  );
+  assert.doesNotMatch(instruction, /review round|Prior findings/);
   assert.equal(
     instruction.match(/ground conflict|conflict for/g)?.length,
     SINGLE_CONFLICT_DEFINITION,
@@ -518,12 +554,8 @@ test("the failed checks text names each check, binding and commit and stops at 4
 });
 
 const SINGLE_REPAIR = 1;
-const GROUNDED_REPLY =
-  'kanthord-judgement: {"result":"criterion-not-met","rationale":"r","unmet":[{"id":"task","reason":"no test","ground":"unstated"}]}';
-const UNGROUNDED_REPLY =
-  'kanthord-judgement: {"result":"criterion-not-met","rationale":"r","unmet":[{"id":"task","reason":"no test"}]}';
 
-test("an unmet item requires a ground of the closed set", () => {
+test("a blocker finding requires a ground of the closed set", () => {
   assert.deepEqual(Object.values(UnmetGround), [
     "stated",
     "standard",
@@ -532,18 +564,19 @@ test("an unmet item requires a ground of the closed set", () => {
   ]);
   assert.equal(unmetGroundSchema.safeParse("other").success, false);
   assert.equal(
-    parseJudgement(UNGROUNDED_REPLY, evaluationJudgementSchema),
+    parseJudgement(UNGROUNDED_REPLY, evaluationJudgementSchema).reply,
     null,
   );
   assert.equal(
     parseJudgement(
       GROUNDED_REPLY.replace("unstated", "other"),
       evaluationJudgementSchema,
-    ),
+    ).reply,
     null,
   );
   assert.equal(
-    parseJudgement(GROUNDED_REPLY, evaluationJudgementSchema)?.unmet[0]?.ground,
+    parseJudgement(GROUNDED_REPLY, evaluationJudgementSchema).reply?.findings[0]
+      ?.ground,
     UnmetGround.Unstated,
   );
 });
@@ -589,7 +622,7 @@ test("parseRepaired marks a reply that the repair turn produced", async () => {
   assert.equal(repaired.instructions.length, SINGLE_REPAIR);
   assert.deepEqual(repaired.templates, [PromptTemplate.Repair]);
   assert.equal(
-    (second.reply as { unmet: { ground: string }[] }).unmet.at(0)?.ground,
+    (second.reply as { findings: { ground: string }[] }).findings.at(0)?.ground,
     UnmetGround.Unstated,
   );
   const invalid = repairAgent([UNGROUNDED_REPLY, UNGROUNDED_REPLY]);
@@ -666,4 +699,305 @@ test("the affected failure report joins the text of each failed repository and e
 test("the affected failure report holds no output block for an empty output", () => {
   const run = failedRun("api", "");
   assert.equal(affectedFailureReport([run]), run.failure_text);
+});
+
+const PRIOR_BLOCKER_ID = "finding_01ARZ3NDEKTSV4RRFFQ69G5FAB";
+const PRIOR_SUGGESTION_ID = "finding_01ARZ3NDEKTSV4RRFFQ69G5FAC";
+const UNLISTED_BLOCKER_RATIONALE = "r\nUnmet:\n- node: defect B1";
+const PLAIN_REVISION =
+  "Revise the task work to meet its criterion. Previous judgement: r";
+const ROUND_SCHEMA = evaluationJudgementSchemaOf({
+  priorIds: [PRIOR_BLOCKER_ID, PRIOR_SUGGESTION_ID],
+  priorBlockerIds: [PRIOR_BLOCKER_ID],
+  taskIds: ["task"],
+});
+const SUGGESTION = { ...BLOCKER, label: "S1", ground: null };
+
+function priorFinding(id: string, label: string): Finding {
+  const blocker = label.startsWith("B");
+  return {
+    id,
+    node_id: "node",
+    attempt: 1,
+    round: 1,
+    assessment_id: "assessment_01ARZ3NDEKTSV4RRFFQ69G5FAD",
+    source: "reviewer",
+    label,
+    kind: blocker ? FindingKind.Blocker : FindingKind.Suggestion,
+    action: "yes",
+    task_id: blocker ? null : "task",
+    ground: blocker ? "stated" : null,
+    name: `name ${label}`,
+    description: `defect ${label}`,
+    fix: `fix ${label}`,
+    why: `why ${label}`,
+    route: "fix",
+    status: "open",
+    fixed_assessment_id: null,
+    cause_owner: null,
+    created_by: null,
+    created_at: 0,
+    decision: null,
+    decision_reason: null,
+    decided_by: null,
+    decided_at: null,
+  };
+}
+
+function judged(body: Record<string, unknown>) {
+  return parseJudgement(
+    `kanthord-judgement: ${JSON.stringify({ rationale: "r", ...body })}`,
+    ROUND_SCHEMA,
+  );
+}
+
+function refusedAt(body: Record<string, unknown>, path: string) {
+  const parsed = judged(body);
+  assert.equal(parsed.reply, null, JSON.stringify(body));
+  assert.ok(
+    parsed.issues?.some((issue) => issue.path === path),
+    `${path} in ${JSON.stringify(parsed.issues)}`,
+  );
+}
+
+test("the judgement schema refuses each value that the Mission Service refuses", () => {
+  const fixed = { fixed_finding_ids: [PRIOR_BLOCKER_ID] };
+  refusedAt(
+    { result: "criterion-not-met", findings: [{ ...BLOCKER, label: "X1" }] },
+    "findings.0.label",
+  );
+  refusedAt(
+    { result: "criterion-not-met", findings: [{ ...BLOCKER, label: "B0" }] },
+    "findings.0.label",
+  );
+  refusedAt(
+    {
+      result: "criterion-not-met",
+      findings: [{ ...BLOCKER, label: "B1000" }],
+    },
+    "findings.0.label",
+  );
+  refusedAt(
+    { result: "criterion-not-met", findings: [BLOCKER, BLOCKER] },
+    "findings.1.label",
+  );
+  refusedAt(
+    { result: "criterion-not-met", findings: [{ ...BLOCKER, action: "no" }] },
+    "findings.0.action",
+  );
+  refusedAt(
+    { result: "criterion-not-met", findings: [{ ...BLOCKER, ground: null }] },
+    "findings.0.ground",
+  );
+  refusedAt(
+    {
+      result: "success",
+      ...fixed,
+      findings: [{ ...SUGGESTION, ground: "stated" }],
+    },
+    "findings.0.ground",
+  );
+  refusedAt(
+    {
+      result: "success",
+      ...fixed,
+      findings: [{ ...SUGGESTION, task_id: "other" }],
+    },
+    "findings.0.task_id",
+  );
+  refusedAt(
+    { result: "success", ...fixed, findings: [{ ...SUGGESTION, fix: " " }] },
+    "findings.0.fix",
+  );
+  refusedAt(
+    {
+      result: "success",
+      ...fixed,
+      findings: [{ ...SUGGESTION, why: "x".repeat(8193) }],
+    },
+    "findings.0.why",
+  );
+  refusedAt(
+    {
+      result: "success",
+      ...fixed,
+      findings: Array.from({ length: 101 }, (_, index) => ({
+        ...SUGGESTION,
+        label: `S${index + 1}`,
+      })),
+    },
+    "findings",
+  );
+  refusedAt({ result: "success", ...fixed, findings: [BLOCKER] }, "findings");
+  refusedAt(
+    { result: "criterion-not-met", ...fixed, findings: [SUGGESTION] },
+    "findings",
+  );
+  assert.ok(
+    judged({
+      result: "success",
+      ...fixed,
+      findings: [{ ...SUGGESTION, why: "x".repeat(8192) }],
+    }).reply,
+  );
+  assert.ok(
+    judged({
+      result: "success",
+      ...fixed,
+      findings: Array.from({ length: 100 }, (_, index) => ({
+        ...SUGGESTION,
+        label: `S${index + 1}`,
+      })),
+    }).reply,
+  );
+});
+
+test("fixed_finding_ids names each prior finding once, and success lists each prior blocker", () => {
+  refusedAt(
+    {
+      result: "success",
+      fixed_finding_ids: [
+        PRIOR_BLOCKER_ID,
+        "finding_01ARZ3NDEKTSV4RRFFQ69G5FAE",
+      ],
+    },
+    "fixed_finding_ids.1",
+  );
+  refusedAt(
+    {
+      result: "success",
+      fixed_finding_ids: [PRIOR_BLOCKER_ID, PRIOR_BLOCKER_ID],
+    },
+    "fixed_finding_ids.1",
+  );
+  refusedAt(
+    { result: "success", fixed_finding_ids: [PRIOR_SUGGESTION_ID] },
+    "fixed_finding_ids",
+  );
+  assert.deepEqual(
+    judged({ result: "success", fixed_finding_ids: [PRIOR_BLOCKER_ID] }).reply
+      ?.fixed_finding_ids,
+    [PRIOR_BLOCKER_ID],
+  );
+});
+
+test("a criterion-not-met that rests only on an unlisted prior blocker is admitted and names that blocker", () => {
+  const parsed = judged({
+    result: "criterion-not-met",
+    findings: [SUGGESTION],
+    fixed_finding_ids: [PRIOR_SUGGESTION_ID],
+  });
+  assert.ok(parsed.reply);
+  const prior = [
+    priorFinding(PRIOR_BLOCKER_ID, "B1"),
+    priorFinding(PRIOR_SUGGESTION_ID, "S1"),
+  ];
+  const blockers = judgementBlockers("node", parsed.reply, prior);
+  assert.deepEqual(blockers, [
+    { id: "node", reason: "defect B1", ground: UnmetGround.Stated },
+  ]);
+  assert.equal(
+    judgementRationale({ rationale: "r", blockers }),
+    UNLISTED_BLOCKER_RATIONALE,
+  );
+  assert.deepEqual(
+    judgementBlockers(
+      "node",
+      { findings: [BLOCKER] as never, fixed_finding_ids: [PRIOR_BLOCKER_ID] },
+      prior,
+    ),
+    [{ id: "task", reason: "no test", ground: UnmetGround.Unstated }],
+  );
+});
+
+test("the issues of a refused line reach the repair text", async () => {
+  const absent = parseJudgement("no marker", ROUND_SCHEMA);
+  assert.deepEqual(absent, { reply: null, issues: [] });
+  assert.equal(
+    repairInstruction(SHIPPED_TEMPLATES, JUDGEMENT_MARKER, absent.issues!),
+    JUDGEMENT_REPAIR,
+  );
+  const refused = repairAgent([UNGROUNDED_REPLY, GROUNDED_REPLY]);
+  await parseRepaired(
+    SHIPPED_TEMPLATES,
+    refused.agent,
+    {} as WorkPrompt,
+    evaluationJudgementSchema,
+  );
+  assert.equal(
+    refused.instructions[0],
+    `${JUDGEMENT_REPAIR} Correct each issue of the last line: ${JSON.stringify([
+      { path: "findings.0.ground", message: "A blocker holds a ground" },
+    ])}`,
+  );
+});
+
+test("a round with a review base renders the round block with the prior findings", () => {
+  const verification = { tested_input: [], results: [] } as never;
+  const base = {
+    tasks: [],
+    verification,
+    evidence: [],
+    affected: null,
+  };
+  const prior = [priorFinding(PRIOR_BLOCKER_ID, "B1")];
+  const reviewBase = [
+    { kind: "repository", binding_id: "binding", commit: "a".repeat(40) },
+  ];
+  const instruction = evaluationInstruction(SHIPPED_TEMPLATES, {
+    ...base,
+    round: { number: 2, review_base: reviewBase },
+    priorFindings: prior,
+  });
+  assert.match(
+    instruction,
+    /^This is review round 2\. `patch_paths` in the review bundle lists the patch of each repository since the latest review with a judgement\. Review only that change: raise a new finding only on a line that a patch adds or changes\. List each prior finding that the change fixes in fixed_finding_ids\. Never report a prior finding again\. A finding that you do not list stays open\. A prior blocker that you do not list stays a blocker of this judgement\.$/m,
+  );
+  const line = instruction
+    .split("\n")
+    .find((entry) => entry.startsWith("Prior findings: "));
+  assert.deepEqual(JSON.parse(line!.slice("Prior findings: ".length)), [
+    {
+      id: PRIOR_BLOCKER_ID,
+      label: "B1",
+      round: 1,
+      kind: "blocker",
+      action: "yes",
+      task_id: null,
+      ground: "stated",
+      name: "name B1",
+      description: "defect B1",
+      fix: "fix B1",
+      why: "why B1",
+    },
+  ]);
+  assert.doesNotMatch(
+    evaluationInstruction(SHIPPED_TEMPLATES, {
+      ...base,
+      round: { number: 2, review_base: null },
+      priorFindings: prior,
+    }),
+    /review round|Prior findings/,
+  );
+});
+
+test("the criterion revision lists each open finding with its id and asks for an answer per id", () => {
+  assert.equal(
+    criterionRevisionInstruction(SHIPPED_TEMPLATES, "r"),
+    PLAIN_REVISION,
+  );
+  const text = criterionRevisionInstruction(SHIPPED_TEMPLATES, "r", [
+    priorFinding(PRIOR_BLOCKER_ID, "B1"),
+    { ...priorFinding(PRIOR_SUGGESTION_ID, "S1"), round: 2 },
+  ]);
+  assert.equal(
+    text,
+    [
+      PLAIN_REVISION,
+      "",
+      "Resolve each finding below. Change only what each finding needs, because the next review reads only the change since the latest review with a judgement. In your final reply, answer each finding id with FIXED or OPEN and the reason. A finding answer is no blocker of your finding list.",
+      `- ${PRIOR_BLOCKER_ID} (B1, round 1) name B1: defect B1 fix: fix B1 why: why B1`,
+      `- ${PRIOR_SUGGESTION_ID} (S1, round 2) name S1: defect S1 fix: fix S1 why: why S1`,
+    ].join("\n"),
+  );
 });

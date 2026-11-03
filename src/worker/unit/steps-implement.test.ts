@@ -205,7 +205,12 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
       },
     } as unknown as Revision;
     await recordDone(h, done);
-    h.verdict = { text: "Rework the node.", judged: [] };
+    h.verdict = {
+      text: "Rework the node.",
+      judged: [],
+      findings: [],
+      round: null,
+    };
     const instruct = t.mock.method(h.agent, "instruct");
     recordReleases(h);
     await executionBoundary(h.run, () => runStepsImplement(h));

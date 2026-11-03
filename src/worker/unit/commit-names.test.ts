@@ -150,6 +150,8 @@ test("a verdict commit takes the node name", async (t) => {
   await recordDone(h, current);
   h.verdict = {
     text: "The edge case stays unhandled.",
+    findings: [],
+    round: null,
     judged: h.checkouts.map((checkout) => ({
       binding_id: checkout.binding_id,
       commit: checkout.head,

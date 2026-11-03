@@ -334,6 +334,8 @@ suite(
     function verdictAtHead(h: Harness) {
       return {
         text: VERDICT,
+        findings: [],
+        round: null,
         judged: h.checkouts.map((checkout) => ({
           binding_id: checkout.binding_id,
           commit: checkout.head,

@@ -5,7 +5,10 @@ import { canonicalJSON } from "../../kernel/json.ts";
 import {
   AssessmentResult,
   AssetKind,
+  FindingAction,
+  FindingKind,
   NodeState,
+  type ReviewRound,
   type Revision,
 } from "../../mission/contract.ts";
 import {
@@ -28,7 +31,13 @@ import {
   readAttemptEvidence,
   readDependencies,
   readPinnedRevision,
+  readReviewRound,
 } from "./node-reads.ts";
+import {
+  ROUND_PATCH_MEDIA_TYPE,
+  ROUND_PATCH_SUBJECT,
+  roundPatchContent,
+} from "./round-patch.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import { prepareEvaluation, verificationCommands } from "./evaluation-input.ts";
 import {
@@ -41,13 +50,15 @@ import {
 } from "./verification.ts";
 import {
   affectedFailureReport,
+  type Blocker,
   evaluationInstruction,
-  evaluationJudgementSchema,
+  evaluationJudgementSchemaOf,
   failedVerificationReport,
+  judgementBlockers,
+  type JudgementFinding,
   judgementRationale,
   parseRepaired,
   ReplyRepair,
-  type UnmetGround,
 } from "./judgement.ts";
 import {
   type EvaluationFacts,
@@ -94,23 +105,48 @@ const VERIFICATION_RERUNS = 2;
 export const VERIFICATION_SUBJECT = "Evaluation verification results";
 type OpenAgent = (directory: string) => Promise<NativeAgent>;
 
+interface JudgedFacts {
+  blockers: readonly Blocker[];
+  findings: readonly JudgementFinding[];
+  fixedCount: number;
+  proposalCount: number;
+  repaired: boolean | null;
+}
+
+const UNJUDGED: JudgedFacts = {
+  blockers: [],
+  findings: [],
+  fixedCount: NO_ITEMS,
+  proposalCount: NO_ITEMS,
+  repaired: null,
+};
+
 function factsOf(
   stage: EvaluationStage,
   verificationRun: VerificationRun,
-  unmet: readonly { id: string; ground: UnmetGround }[] = [],
-  proposalCount = NO_ITEMS,
-  repaired: boolean | null = null,
+  round: ReviewRound,
+  judged: JudgedFacts = UNJUDGED,
   affected: AffectedVerdict | null = null,
 ): EvaluationFacts {
   return {
     stage,
-    unmet_ids: unmet.map((item) => item.id),
-    unmet_grounds: unmet.map((item) => item.ground),
-    proposal_count: proposalCount,
-    repaired,
+    unmet_ids: judged.blockers.map((item) => item.id),
+    unmet_grounds: judged.blockers.map((item) => item.ground),
+    proposal_count: judged.proposalCount,
+    repaired: judged.repaired,
     verification_class: verificationRun.outcome,
     affected,
+    round: round.round,
+    final_round: round.final,
+    action_labels: judged.findings
+      .filter((finding) => finding.action === FindingAction.Yes)
+      .map((finding) => finding.label),
+    fixed_count: judged.fixedCount,
   };
+}
+
+function unjudged() {
+  return { findings: [], fixed_finding_ids: [] };
 }
 
 interface AffectedStep {
@@ -131,6 +167,7 @@ async function judge(
   dependencies: Awaited<ReturnType<typeof readDependencies>> | null,
   setupFailure: SetupFailure | null,
   affected: AffectedStep | null,
+  round: ReviewRound,
 ) {
   const examine = input.setup.intent === ExecutionIntent.Examine;
   const commands = verificationCommands(revision);
@@ -144,26 +181,28 @@ async function judge(
   if (setupAssessment)
     return {
       ...setupAssessment,
-      facts: factsOf(EvaluationStage.Setup, verificationRun),
+      ...unjudged(),
+      facts: factsOf(EvaluationStage.Setup, verificationRun, round),
     };
   if (!verificationPassed(verification, commands))
     return {
       result: AssessmentResult.CriterionNotMet,
       rationale: failedVerificationReport(verificationRun, commands),
       proposals: [],
-      facts: factsOf(EvaluationStage.Verification, verificationRun),
+      ...unjudged(),
+      facts: factsOf(EvaluationStage.Verification, verificationRun, round),
     };
   if (affected?.verdict === AffectedVerdict.Failed)
     return {
       result: AssessmentResult.CriterionNotMet,
       rationale: affectedFailureReport(affected.results),
       proposals: [],
+      ...unjudged(),
       facts: factsOf(
         EvaluationStage.Affected,
         verificationRun,
-        [],
-        NO_ITEMS,
-        null,
+        round,
+        UNJUDGED,
         affected.verdict,
       ),
     };
@@ -184,6 +223,8 @@ async function judge(
       evidence,
       dependencies,
       affected: affected?.document ?? null,
+      round: { number: round.round, review_base: round.review_base },
+      priorFindings: round.findings,
     }),
     PromptTemplate.Evaluation,
   );
@@ -192,15 +233,28 @@ async function judge(
     input.setup.templates,
     agent,
     work,
-    evaluationJudgementSchema,
+    evaluationJudgementSchemaOf({
+      priorIds: round.findings.map((finding) => finding.id),
+      priorBlockerIds: round.findings
+        .filter((finding) => finding.kind === FindingKind.Blocker)
+        .map((finding) => finding.id),
+      taskIds: revision.tasks.map((task) => task.id),
+    }),
   );
   if (judgement === ReplyRepair.BudgetEnd)
     return run.stop(EndReason.AssessmentAbsent);
   if (judgement === ReplyRepair.Invalid)
     return run.stop(EndReason.JudgementInvalid);
+  const blockers = judgementBlockers(
+    input.claim.node_id,
+    judgement,
+    round.findings,
+  );
   run.log("node judged", {
     result: judgement.result,
-    unmet: judgement.unmet.map((item) => item.id),
+    unmet: blockers.map((item) => item.id),
+    findings: judgement.findings.map((finding) => finding.label),
+    fixed: judgement.fixed_finding_ids,
   });
   const proposals = examine ? judgement.proposals : [];
   return {
@@ -208,14 +262,24 @@ async function judge(
       proposals.length > NO_ITEMS
         ? AssessmentResult.Undetermined
         : judgement.result,
-    rationale: judgementRationale(judgement),
+    rationale: judgementRationale({
+      rationale: judgement.rationale,
+      blockers,
+    }),
     proposals,
+    findings: judgement.findings,
+    fixed_finding_ids: judgement.fixed_finding_ids,
     facts: factsOf(
       EvaluationStage.Judgement,
       verificationRun,
-      judgement.unmet,
-      proposals.length,
-      repaired,
+      round,
+      {
+        blockers,
+        findings: judgement.findings,
+        fixedCount: judgement.fixed_finding_ids.length,
+        proposalCount: proposals.length,
+        repaired,
+      },
       affected?.verdict ?? null,
     ),
   };
@@ -319,6 +383,7 @@ async function evaluate(
   prepared: PreparedEvaluation,
   budget: ExecutionBudget,
   openAgent: OpenAgent,
+  round: ReviewRound,
 ) {
   assert.ok(prepared.directory);
   assert.equal(input.claim.execution_id, input.setup.execution_id);
@@ -408,12 +473,31 @@ async function evaluate(
       dependencies,
       prepared.setupFailure,
       affected,
+      round,
     ),
   );
+  const patchIds: string[] = [];
+  for (const patch of prepared.patches) {
+    const submitted = await run.submitEvidence(input.claim.node_id, {
+      subject: ROUND_PATCH_SUBJECT,
+      assets: [
+        {
+          kind: "produced",
+          content: {
+            media_type: ROUND_PATCH_MEDIA_TYPE,
+            encoding: "base64",
+            data: roundPatchContent(patch.text).toString("base64"),
+          },
+        },
+      ],
+    });
+    patchIds.push(submitted.id);
+  }
   return {
     evidence_ids: [
       recorded.id,
       ...(recordedAffected ? [recordedAffected.id] : []),
+      ...patchIds,
       ...prepared.evidenceIds,
     ],
     dependency_outcome_ids:
@@ -421,6 +505,8 @@ async function evaluate(
     result: judgement.result,
     rationale: judgement.rationale,
     proposals: judgement.proposals,
+    findings: judgement.findings,
+    fixed_finding_ids: judgement.fixed_finding_ids,
     facts: judgement.facts,
   };
 }
@@ -433,16 +519,18 @@ export async function runEvaluation(
 ): Promise<ExecutionEnd> {
   const revision = await readPinnedRevision(run);
   const evidence = await readAttemptEvidence(run);
+  const round = await readReviewRound(run);
   const prepared = await prepareEvaluation(
     input,
     run,
     input.setup.intent,
     evidence,
+    round,
   );
   try {
     const assessment = await run.spans.within(
       evaluationSpan(run.spans, testedCommitOf(prepared.tested_input)),
-      () => evaluate(input, run, revision, prepared, budget, openAgent),
+      () => evaluate(input, run, revision, prepared, budget, openAgent, round),
       evaluationEnd,
     );
     const answer = await run.submitAssessment(input.claim.node_id, {
@@ -451,6 +539,8 @@ export async function runEvaluation(
       result: assessment.result,
       rationale: assessment.rationale,
       proposals: assessment.proposals,
+      findings: assessment.findings,
+      fixed_finding_ids: assessment.fixed_finding_ids,
       tested_input: prepared.tested_input,
       ...(assessment.result === AssessmentResult.CriterionNotMet
         ? { cause: reworkCauseOf(assessment.facts) }
@@ -458,17 +548,14 @@ export async function runEvaluation(
     });
     if (answer.outcome)
       return { kind: ExecutionEndKind.Closed, outcomeId: answer.outcome.id };
-    if (answer.assessment.result === AssessmentResult.Success)
-      return await requestAndRelease(run);
-    if (
-      answer.assessment.result === AssessmentResult.CriterionNotMet &&
-      !("state" in answer.node && answer.node.state === NodeState.Evaluating)
-    )
+    if (!("state" in answer.node && answer.node.state === NodeState.Evaluating))
       return {
         kind: ExecutionEndKind.Ended,
         reason: EndReason.Revoked,
         code: null,
       };
+    if (answer.assessment.result === AssessmentResult.Success)
+      return await requestAndRelease(run);
     return run.stop(EndReason.OperationFailed);
   } finally {
     input.workspaces.release(prepared.key, WorkspaceKind.Execution);
