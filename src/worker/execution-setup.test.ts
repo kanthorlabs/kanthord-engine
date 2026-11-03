@@ -19,6 +19,7 @@ import {
   PromptOrigin,
   PromptPart,
   type PromptPartAnswer,
+  PromptPartState,
 } from "../agent/contract.ts";
 import { getAgentDeclaration } from "../agent/catalog.ts";
 import { resolveAgentPrompt } from "../agent/prompt-files.ts";
@@ -26,6 +27,7 @@ import { stopAfter, temporary } from "../kernel/test-support.ts";
 import {
   framing,
   PromptConsumer,
+  promptPart,
   systemPrompt,
 } from "../agent/prompt-render.ts";
 import {
@@ -92,14 +94,19 @@ function partOf(
   name: string,
   text: string,
 ): PromptPartAnswer {
-  return {
-    part,
-    name,
-    origin: PromptOrigin.File,
-    path: null,
-    digest: "0".repeat(64),
+  return promptPart(
+    {
+      part,
+      name,
+      origin: PromptOrigin.File,
+      path: null,
+      binding_id: null,
+      commit: null,
+      digest: "0".repeat(64),
+    },
+    PromptPartState.Resolved,
     text,
-  };
+  );
 }
 
 const promptParts = [
@@ -982,8 +989,8 @@ test("setup answers one entry per agent of a two-agent worker with its own promp
     swe,
     [
       "swe@1",
-      `Instructions of repository api:\n\n${SWE_BINDING_TEXT}`,
-      `Instructions of repository web:\n\n${SECOND_SWE_TEXT}`,
+      `Binding prompt of repository api:\n\n${SWE_BINDING_TEXT}`,
+      `Binding prompt of repository web:\n\n${SECOND_SWE_TEXT}`,
       worker,
     ].join("\n\n"),
   );
@@ -991,7 +998,7 @@ test("setup answers one entry per agent of a two-agent worker with its own promp
     re,
     [
       "re@1",
-      `Instructions of repository api:\n\n${RE_BINDING_TEXT}`,
+      `Binding prompt of repository api:\n\n${RE_BINDING_TEXT}`,
       worker,
     ].join("\n\n"),
   );

@@ -73,9 +73,14 @@ import {
   ProjectErrorCode,
   type RepositoryPolicy,
 } from "../project/contract.ts";
-import { resolveAgentPrompt } from "./prompt-files.ts";
-import { bindingParts, PromptConsumer, systemPrompt } from "./prompt-render.ts";
-import { resolveTemplates, templateDirectory } from "./prompt-templates.ts";
+import { framingPart, resolveAgentPrompt } from "./prompt-files.ts";
+import { bindingParts, finalPrompt, PromptConsumer } from "./prompt-render.ts";
+import {
+  resolveTemplates,
+  resolveTemplateSet,
+  templateDirectory,
+  type TemplateSet,
+} from "./prompt-templates.ts";
 
 const NO_ITEMS = 0;
 const LAST_PROVIDER = 1;
@@ -186,7 +191,10 @@ export interface Dependencies {
   repositoryPromptsOf: (
     tx: Transaction,
     bindingId: string,
-  ) => Pick<RepositoryPolicy, "project_id" | "name" | "prompts"> | null;
+  ) => Pick<
+    RepositoryPolicy,
+    "binding_id" | "project_id" | "name" | "prompts"
+  > | null;
   providerHealthCheck: ProviderHealthCheckFn;
   providerCapability: ProviderCapabilityFn;
   toolDeclarations: ToolDeclarationsFn;
@@ -974,7 +982,7 @@ export class AgentComponent {
   private repositoryPrompts(
     projectId: string,
     bindingId: string,
-  ): Pick<RepositoryPolicy, "name" | "prompts"> {
+  ): Pick<RepositoryPolicy, "binding_id" | "name" | "prompts"> {
     const repository = this.dependencies.store.transaction((tx) =>
       this.dependencies.repositoryPromptsOf(tx, bindingId),
     );
@@ -1012,6 +1020,13 @@ export class AgentComponent {
 
   promptTemplates(context: Context): Promise<PromptTemplates> {
     return resolveTemplates(templateDirectory(this.agentDirectory()), context);
+  }
+
+  private templateSet(context: Context): Promise<TemplateSet> {
+    return resolveTemplateSet(
+      templateDirectory(this.agentDirectory()),
+      context,
+    );
   }
 
   declare(registry: OperationRegistry): void {
@@ -1088,12 +1103,13 @@ export class AgentComponent {
             repository === null ? [] : [repository],
             params.agent_name,
           ),
+          framingPart(
+            await this.templateSet(caller.context),
+            consumer,
+            this.agentDirectory(),
+          ),
         ];
-        const final = systemPrompt(
-          parts,
-          consumer,
-          await this.promptTemplates(caller.context),
-        );
+        const final = finalPrompt(parts);
         return caller.commit((tx) => {
           const row = getEnablement(tx, params.agent_name);
           const view = this.agentView(

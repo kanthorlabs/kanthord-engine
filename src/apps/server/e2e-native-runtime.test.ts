@@ -437,7 +437,7 @@ test(
       });
       assert.ok(
         runtimeX.setup.agents[0]!.prompt.final.endsWith(
-          `Instructions of repository repo:\n\n${PROJECT}\n\n${framing(SHIPPED_TEMPLATES, PromptConsumer.Worker)}`,
+          `Binding prompt of repository repo:\n\n${PROJECT}\n\n${framing(SHIPPED_TEMPLATES, PromptConsumer.Worker)}`,
         ),
       );
       assert.ok(

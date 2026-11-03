@@ -75,7 +75,7 @@ export interface EnvironmentAgentDependencies {
   repositoryPromptsOf(
     tx: Transaction,
     bindingId: string,
-  ): Pick<RepositoryPolicy, "name" | "prompts"> | null;
+  ): Pick<RepositoryPolicy, "binding_id" | "name" | "prompts"> | null;
   templates(context: Context): Promise<PromptTemplates>;
   exportRepository(
     bindingId: string,

@@ -36,6 +36,7 @@ export const PromptOrigin = {
   Binary: "binary",
   File: "file",
   Database: "database",
+  Repository: "repository",
 } as const;
 export type PromptOrigin = (typeof PromptOrigin)[keyof typeof PromptOrigin];
 
@@ -43,9 +44,28 @@ export const PromptPart = {
   Standard: "standard",
   Role: "role",
   Workbench: "workbench",
+  InstructionFile: "instruction_file",
+  Repository: "repository",
   Binding: "binding",
+  Framing: "framing",
 } as const;
 export type PromptPart = (typeof PromptPart)[keyof typeof PromptPart];
+
+export const PromptLayer = {
+  KanthorD: 1,
+  Repository: 2,
+  Binding: 3,
+} as const;
+export type PromptLayer = (typeof PromptLayer)[keyof typeof PromptLayer];
+
+export const PromptPartState = {
+  Resolved: "resolved",
+  Changed: "changed",
+  Invalid: "invalid",
+  Unreachable: "unreachable",
+} as const;
+export type PromptPartState =
+  (typeof PromptPartState)[keyof typeof PromptPartState];
 
 export const PromptView = { Final: "final" } as const;
 export type PromptView = (typeof PromptView)[keyof typeof PromptView];
@@ -94,6 +114,8 @@ export const AgentErrorCode = {
   CredentialUnsuitable: "agent.configuration.credential_unsuitable",
   CredentialHolderMismatch: "agent.configuration.credential_holder_mismatch",
   PromptTemplateInvalid: "agent.prompt.template_invalid",
+  PromptSourceInvalid: "agent.prompt.source_invalid",
+  PromptRecordAbsent: "agent.prompt.record_absent",
 } as const;
 
 export type AgentProviderItem = {
@@ -345,19 +367,32 @@ export const agentModelSchema = z.strictObject({
   reasoning_efforts: z.array(reasoningEffortSchema),
 });
 
-export const promptPartSchema = z.strictObject({
+export const promptReferenceSchema = z.strictObject({
   part: z.enum(PromptPart),
   name: z.string().min(1),
   origin: z.enum(PromptOrigin),
   path: z.string().nullable(),
-  digest: z.string(),
-  text: z.string(),
+  binding_id: z.string().min(1).nullable(),
+  commit: z
+    .string()
+    .regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/)
+    .nullable(),
+  digest: z.string().regex(/^[0-9a-f]{64}$/),
+});
+export type PromptReference = z.infer<typeof promptReferenceSchema>;
+
+export const promptPartSchema = z.strictObject({
+  layer: z.literal(Object.values(PromptLayer)).nullable(),
+  ...promptReferenceSchema.shape,
+  heading: z.string().min(1).nullable(),
+  state: z.enum(PromptPartState),
+  text: z.string().nullable(),
 });
 export type PromptPartAnswer = z.infer<typeof promptPartSchema>;
 
 export const promptAnswerSchema = z.strictObject({
   parts: z.array(promptPartSchema).optional(),
-  final: z.string(),
+  final: z.string().nullable(),
 });
 
 export const chainEntrySchema = agentSelectionSchema

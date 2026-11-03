@@ -136,22 +136,28 @@ KanthorD reads no `AGENTS.md`, `CLAUDE.md` or `*.local.md` file of a repository 
 2. `role`: the file `<agent-name>.md`, for example `swe@1.md`.
 3. `workbench`: the file `workbench.md`, only in the Workbench system prompt.
 4. `binding`: one part for each repository binding with a nonblank binding prompt of the agent.
+5. `framing`: the rendered framing template, `framing-worker` or `framing-workbench`. It closes the system prompt.
 
 Each part holds the following fields:
 
-| Part field | Type and meaning                                                                                                           |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `part`     | One of `standard`, `role`, `workbench` and `binding`.                                                                      |
-| `name`     | The file name of a file part, for example `base.md`. The repository name of a `binding` part.                              |
-| `origin`   | `binary` for a shipped text, `file` for an override file and `database` for a binding prompt.                              |
-| `path`     | The override path that the server looked up, also for `binary`. `null` for `binding`, and when `agent_directory` is empty. |
-| `digest`   | The SHA-256 hex digest of `text`.                                                                                          |
-| `text`     | The text of the part.                                                                                                      |
+| Part field   | Type and meaning                                                                                                                      |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `layer`      | The prompt layer: `1` for `standard`, `role` and `workbench`, `3` for `binding`. `null` for `framing`.                                |
+| `part`       | One of `standard`, `role`, `workbench`, `binding` and `framing`.                                                                      |
+| `name`       | The file name of a file part, for example `base.md`. The template name of `framing`. The repository name of a `binding` part.         |
+| `origin`     | `binary` for a shipped text, `file` for an override file and `database` for a binding prompt.                                         |
+| `path`       | The override path that the server looked up, also for `binary`. `null` for `binding`, and when `agent_directory` is empty.            |
+| `binding_id` | The binding revision of a `binding` part. `null` otherwise.                                                                           |
+| `commit`     | `null` for every part of this answer.                                                                                                 |
+| `digest`     | The SHA-256 hex digest of `text`, with no heading.                                                                                    |
+| `heading`    | The line that the server writes before the text: `Binding prompt of repository <name>:` for a `binding` part. `null` for other parts. |
+| `state`      | `resolved` for every part of this answer.                                                                                             |
+| `text`       | The text of the part.                                                                                                                 |
 
 A file of the same name in `agent.prompt.agent_directory` replaces the shipped text. The default directory is `<data>/agents` on the server host.
 An empty `agent_directory` selects the shipped texts only.
-A `binding` part renders as `Instructions of repository <name>:` and the text.
-`final` holds every part, then the framing of the [prompt templates](#prompt-templates).
+A part with a heading renders as the heading, a blank line and the text.
+`final` holds every part in reading order. The `framing` part comes from the [prompt templates](#prompt-templates).
 The precedence is framing, then binding, then workbench, then role, then standard. A later text governs an earlier one.
 With `--view final`, `parts` is absent.
 

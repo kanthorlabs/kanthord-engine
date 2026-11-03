@@ -29,8 +29,10 @@ import {
   FALLBACK_CONFIGURATIONS_MAX,
   type HolderScope,
   LIST_LIMIT_DEFAULT,
+  PromptLayer,
   PromptOrigin,
   PromptPart,
+  PromptPartState,
   ToolSource,
 } from "./contract.ts";
 import { agentMigrations } from "./migrations.ts";
@@ -200,32 +202,71 @@ test("agent read answers the shipped parts, the workbench part of a workbench ag
   const answer = await read(AGENT);
   const parts = answer.prompt.parts!;
   assert.deepEqual(
-    parts.map(({ part, name, origin, path }) => [part, name, origin, path]),
+    parts.map(({ layer, part, name, origin, path, heading, state }) => [
+      layer,
+      part,
+      name,
+      origin,
+      path,
+      heading,
+      state,
+    ]),
     [
-      [PromptPart.Standard, "base.md", PromptOrigin.Binary, null],
-      [PromptPart.Role, `${AGENT}.md`, PromptOrigin.Binary, null],
-      [PromptPart.Workbench, "workbench.md", PromptOrigin.Binary, null],
+      [
+        PromptLayer.KanthorD,
+        PromptPart.Standard,
+        "base.md",
+        PromptOrigin.Binary,
+        null,
+        null,
+        PromptPartState.Resolved,
+      ],
+      [
+        PromptLayer.KanthorD,
+        PromptPart.Role,
+        `${AGENT}.md`,
+        PromptOrigin.Binary,
+        null,
+        null,
+        PromptPartState.Resolved,
+      ],
+      [
+        PromptLayer.KanthorD,
+        PromptPart.Workbench,
+        "workbench.md",
+        PromptOrigin.Binary,
+        null,
+        null,
+        PromptPartState.Resolved,
+      ],
+      [
+        null,
+        PromptPart.Framing,
+        FRAMING_WORKBENCH,
+        PromptOrigin.Binary,
+        null,
+        null,
+        PromptPartState.Resolved,
+      ],
     ],
   );
   assert.equal(parts[1]!.text, getAgentDeclaration(AGENT)!.agent_prompt);
   assert.match(parts[0]!.digest, /^[a-f0-9]{64}$/);
   assert.equal(
-    answer.prompt.final,
-    [
-      ...parts.map(({ text }) => text),
-      framing(SHIPPED_TEMPLATES, PromptConsumer.Workbench),
-    ].join("\n\n"),
+    parts[3]!.text,
+    framing(SHIPPED_TEMPLATES, PromptConsumer.Workbench),
   );
+  assert.equal(answer.prompt.final, parts.map(({ text }) => text).join("\n\n"));
   const final = await read(AGENT, { view: "final" });
   assert.equal(final.prompt.parts, undefined);
   assert.equal(final.prompt.final, answer.prompt.final);
   const env = await read(ENV_AGENT);
   assert.deepEqual(
     env.prompt.parts!.map(({ part }) => part),
-    [PromptPart.Standard, PromptPart.Role],
+    [PromptPart.Standard, PromptPart.Role, PromptPart.Framing],
   );
   assert.ok(
-    env.prompt.final.endsWith(
+    env.prompt.final!.endsWith(
       framing(SHIPPED_TEMPLATES, PromptConsumer.Worker),
     ),
   );
@@ -256,7 +297,7 @@ test("an override file of the agent directory replaces the shipped text and an i
     },
     { origin: PromptOrigin.File, path: overridePath, text: OVERRIDE_TEXT },
   );
-  const final = (await read(AGENT)).prompt.final;
+  const final = (await read(AGENT)).prompt.final!;
   assert.ok(final.includes(OVERRIDE_TEXT));
   assert.ok(!final.includes(getAgentDeclaration(AGENT)!.agent_prompt));
   writeFileSync(overridePath, INVALID_OVERRIDE_TEXT);
@@ -285,7 +326,24 @@ test("agent read renders the framing from the template files of the agent direct
   });
   const read = promptReader(f);
   const answer = await read(AGENT, { view: "final" });
-  assert.ok(answer.prompt.final.endsWith("Custom framing."));
+  assert.ok(answer.prompt.final!.endsWith("Custom framing."));
+  const framingPart = (await read(AGENT)).prompt.parts!.at(-1)!;
+  assert.deepEqual(
+    {
+      part: framingPart.part,
+      name: framingPart.name,
+      origin: framingPart.origin,
+      path: framingPart.path,
+      text: framingPart.text,
+    },
+    {
+      part: PromptPart.Framing,
+      name: FRAMING_WORKBENCH,
+      origin: PromptOrigin.File,
+      path: join(templates, `${FRAMING_WORKBENCH}.md`),
+      text: "Custom framing.",
+    },
+  );
   writeFileSync(join(templates, "framing-workbench.md"), "{{#if}}");
   await assert.rejects(read(AGENT), (error) => {
     assert.ok(error instanceof OperationError);
@@ -318,7 +376,7 @@ test("agent read with a repository binding answers the binding prompt of the age
   const f = enablementFixture(t, {
     dataDirectory: root,
     repositoryPromptsOf: (_, id) =>
-      policies[id] ? { name: "repo", ...policies[id] } : null,
+      policies[id] ? { binding_id: id, name: "repo", ...policies[id] } : null,
   });
   const operation = agentOperations.get;
   const read = async (query: Record<string, unknown>) =>
@@ -334,29 +392,59 @@ test("agent read with a repository binding answers the binding prompt of the age
     );
   const on = await read({ project_id: "project-a", binding_id: "binding-on" });
   assert.deepEqual(
-    on.prompt.parts!.map(({ part, origin, path, text }) => [
-      part,
-      origin,
-      path,
-      part === PromptPart.Binding ? text : null,
-    ]),
+    on.prompt.parts!.map(
+      ({ layer, part, origin, path, binding_id, heading, text }) => [
+        layer,
+        part,
+        origin,
+        path,
+        binding_id,
+        heading,
+        part === PromptPart.Binding ? text : null,
+      ],
+    ),
     [
-      [PromptPart.Standard, PromptOrigin.Binary, null, null],
-      [PromptPart.Role, PromptOrigin.Binary, null, null],
-      [PromptPart.Binding, PromptOrigin.Database, null, PROJECT_TEXT],
+      [
+        PromptLayer.KanthorD,
+        PromptPart.Standard,
+        PromptOrigin.Binary,
+        null,
+        null,
+        null,
+        null,
+      ],
+      [
+        PromptLayer.KanthorD,
+        PromptPart.Role,
+        PromptOrigin.Binary,
+        null,
+        null,
+        null,
+        null,
+      ],
+      [
+        PromptLayer.Binding,
+        PromptPart.Binding,
+        PromptOrigin.Database,
+        null,
+        "binding-on",
+        "Binding prompt of repository repo:",
+        PROJECT_TEXT,
+      ],
+      [null, PromptPart.Framing, PromptOrigin.Binary, null, null, null, null],
     ],
   );
   assert.ok(
-    on.prompt.final.endsWith(
-      `Instructions of repository repo:\n\n${PROJECT_TEXT}\n\n${framing(SHIPPED_TEMPLATES, PromptConsumer.Worker)}`,
+    on.prompt.final!.endsWith(
+      `Binding prompt of repository repo:\n\n${PROJECT_TEXT}\n\n${framing(SHIPPED_TEMPLATES, PromptConsumer.Worker)}`,
     ),
   );
-  assert.ok(!on.prompt.final.includes(REVIEW_TEXT));
+  assert.ok(!on.prompt.final!.includes(REVIEW_TEXT));
   const blank = await read({
     project_id: "project-a",
     binding_id: "binding-blank",
   });
-  assert.ok(!blank.prompt.final.includes("Instructions of repository"));
+  assert.ok(!blank.prompt.final!.includes("Binding prompt of repository"));
   await assert.rejects(
     read({ project_id: "project-b", binding_id: "binding-on" }),
     (error) =>
@@ -412,11 +500,11 @@ test("agent declaration read exposes prompts, tools and current enablement witho
   assert.deepEqual(declaration.tools, TOOLS);
   const parts = declaration.prompt.parts!;
   assert.ok(
-    parts[0]!.text.startsWith(
+    parts[0]!.text!.startsWith(
       "This text is the shared standard of every agent.",
     ),
   );
-  assert.ok(parts[1]!.text.startsWith("## Role"));
+  assert.ok(parts[1]!.text!.startsWith("## Role"));
   assert.equal(declaration.configuration_schema.$schema, schemaVersion);
   assert.equal(declaration.configuration_schema.additionalProperties, false);
   assert.deepEqual(declaration.configuration_schema.required, [
