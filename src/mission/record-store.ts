@@ -513,6 +513,50 @@ export function readExecutionAssessmentsOfAttempt(
     .all(nodeId, attempt, result) as unknown as AssessmentRow[];
 }
 
+export function readAssessmentRound(
+  tx: Transaction,
+  row: AssessmentRow,
+): number | null {
+  if (row.execution_id === null) return null;
+  const found = tx.database
+    .prepare(
+      "SELECT round FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY node_id, attempt ORDER BY sequence) AS round FROM mission_assessment WHERE node_id = ? AND attempt = ? AND execution_id IS NOT NULL) WHERE id = ?",
+    )
+    .get(row.node_id, row.attempt, row.id) as { round: number } | undefined;
+  assert.ok(found);
+  return found.round;
+}
+
+export function countExecutionAssessmentsOfAttempt(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number,
+): number {
+  return (
+    tx.database
+      .prepare(
+        "SELECT COUNT(*) AS value FROM mission_assessment WHERE node_id = ? AND attempt = ? AND execution_id IS NOT NULL",
+      )
+      .get(nodeId, attempt) as { value: number }
+  ).value;
+}
+
+export function readReviewBase(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number,
+  success: AssessmentResult,
+): AssessmentRow | null {
+  return (
+    (tx.database
+      .prepare(
+        "SELECT a.* FROM mission_assessment a WHERE a.node_id = ? AND a.attempt = ? AND a.execution_id IS NOT NULL AND (a.result = ? OR EXISTS (SELECT 1 FROM mission_finding f WHERE f.assessment_id = a.id AND f.created_by IS NULL) OR EXISTS (SELECT 1 FROM mission_proposal p WHERE p.assessment_id = a.id)) ORDER BY a.sequence DESC LIMIT 1",
+      )
+      .get(nodeId, attempt, success) as unknown as AssessmentRow | undefined) ??
+    null
+  );
+}
+
 export function insertOutcome(
   tx: Transaction,
   row: Omit<OutcomeRow, "sequence">,

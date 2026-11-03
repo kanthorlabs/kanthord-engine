@@ -80,6 +80,13 @@ import { blockNode, discardNode, overrideNode } from "./control-close.ts";
 import { unblockNode } from "./control-unblock.ts";
 import { decideProposals } from "./proposal-decide.ts";
 import { proposalPage, requireAssessment } from "./proposal-read.ts";
+import { decideFinding } from "./finding-decide.ts";
+import {
+  findingPage,
+  getFinding,
+  undecidedFindingPage,
+} from "./finding-read.ts";
+import { createFinding, updateFinding } from "./finding-report.ts";
 import { completeEvidence } from "./evidence-complete.ts";
 import { requestEvidence } from "./evidence-request.ts";
 import { submitEvidence } from "./evidence-submit.ts";
@@ -104,6 +111,7 @@ import {
   executionEvidencePage,
   executionRevision,
   executionRevisionPage,
+  reviewRound,
   reworkAssessment,
 } from "./execution-read.ts";
 import { claim, failure, nodeBranchesOf, release } from "./transitions.ts";
@@ -367,6 +375,14 @@ export class MissionService
       },
     );
     registry.register(
+      missionOperations["execution.review_round.get"],
+      (_input, caller) => {
+        assert.ok(caller.execution);
+        const claim = caller.execution;
+        return caller.commit((tx) => reviewRound(tx, this.dependencies, claim));
+      },
+    );
+    registry.register(
       missionOperations["execution.pinnedRevision.get"],
       (_input, caller) => {
         assert.ok(caller.execution);
@@ -603,6 +619,55 @@ export class MissionService
                 ends,
               ),
             ),
+        ),
+    );
+    registry.register(
+      missionOperations["finding.list"],
+      ({ params, query }, caller) =>
+        caller.commit((tx) => findingPage(tx, params.node_id, query)),
+    );
+    registry.register(missionOperations["finding.get"], ({ params }, caller) =>
+      caller.commit((tx) => getFinding(tx, params.finding_id)),
+    );
+    registry.register(
+      missionOperations["finding.undecided.list"],
+      ({ params, query }, caller) =>
+        caller.commit((tx) =>
+          undecidedFindingPage(tx, params.project_id, query),
+        ),
+    );
+    registry.register(
+      missionOperations["finding.decide"],
+      ({ params, body }, caller) =>
+        this.commitFindingAct(Act.DecideFinding, caller, (tx) =>
+          decideFinding(
+            tx,
+            params.finding_id,
+            body,
+            humanActor(caller),
+            this.dependencies.config.text_max_bytes,
+            Date.now(),
+          ),
+        ),
+    );
+    registry.register(
+      missionOperations["finding.create"],
+      ({ params, body }, caller) =>
+        this.commitFindingAct(Act.CreateFinding, caller, (tx) =>
+          createFinding(
+            tx,
+            params.node_id,
+            body,
+            humanActor(caller),
+            Date.now(),
+          ),
+        ),
+    );
+    registry.register(
+      missionOperations["finding.update"],
+      ({ params, body }, caller) =>
+        this.commitFindingAct(Act.UpdateFinding, caller, (tx) =>
+          updateFinding(tx, params.finding_id, body, Date.now()),
         ),
     );
     registry.register(
@@ -1118,6 +1183,22 @@ export class MissionService
         recordAct(this.dependencies, act, facts);
       },
     );
+  }
+
+  private commitFindingAct<T>(
+    act: Act,
+    caller: CallerContext,
+    write: (tx: Transaction) => Acted<T>,
+  ): T {
+    let facts: ActFacts | null = null;
+    const result = caller.commit((tx) => {
+      const acted = write(tx);
+      facts = acted.act;
+      return acted.result;
+    });
+    assert.ok(facts);
+    recordAct(this.dependencies, act, facts);
+    return result;
   }
 
   createMission(tx: Transaction, projectId: string, actor: HumanActor): void {

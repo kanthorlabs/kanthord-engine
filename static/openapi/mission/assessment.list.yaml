@@ -400,6 +400,12 @@ components:
                   - type: string
                     minLength: 1
                   - type: "null"
+              round:
+                anyOf:
+                  - type: integer
+                    exclusiveMinimum: 0
+                    maximum: 9007199254740991
+                  - type: "null"
             required:
               - id
               - node_id
@@ -416,6 +422,7 @@ components:
               - currency
               - dependency_node_ids
               - worker_version
+              - round
             additionalProperties: false
         next_cursor:
           anyOf:
@@ -696,6 +703,70 @@ components:
                 - category
                 - assigner
               additionalProperties: false
+            findings:
+              default: []
+              maxItems: 100
+              type: array
+              items:
+                type: object
+                properties:
+                  label:
+                    type: string
+                    pattern: ^[BS][1-9][0-9]{0,2}$
+                  action:
+                    type: string
+                    enum:
+                      - yes
+                      - no
+                  task_id:
+                    anyOf:
+                      - type: string
+                        minLength: 31
+                        maxLength: 31
+                        pattern: ^task_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: task_ followed by a canonical 26-character uppercase ULID.
+                      - type: "null"
+                  ground:
+                    anyOf:
+                      - type: string
+                        enum:
+                          - stated
+                          - standard
+                          - unstated
+                          - conflict
+                      - type: "null"
+                  name:
+                    type: string
+                    minLength: 1
+                  description:
+                    type: string
+                    minLength: 1
+                  fix:
+                    type: string
+                    minLength: 1
+                  why:
+                    type: string
+                    minLength: 1
+                required:
+                  - label
+                  - action
+                  - task_id
+                  - ground
+                  - name
+                  - description
+                  - fix
+                  - why
+                additionalProperties: false
+            fixed_finding_ids:
+              default: []
+              type: array
+              items:
+                type: string
+                minLength: 34
+                maxLength: 34
+                pattern: ^finding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: finding_ followed by a canonical 26-character uppercase ULID.
+              uniqueItems: true
           required:
             - execution_id
             - attempt
@@ -955,6 +1026,12 @@ components:
                 - type: string
                   minLength: 1
                 - type: "null"
+            round:
+              anyOf:
+                - type: integer
+                  exclusiveMinimum: 0
+                  maximum: 9007199254740991
+                - type: "null"
           required:
             - id
             - node_id
@@ -971,6 +1048,7 @@ components:
             - currency
             - dependency_node_ids
             - worker_version
+            - round
           additionalProperties: false
         node:
           type: object

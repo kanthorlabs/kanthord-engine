@@ -19,6 +19,8 @@ import {
   verificationPasses,
 } from "./evidence-content.ts";
 import { invalidExecutionInput, requireTextBound } from "./execution.ts";
+import { admitFindings } from "./finding-admit.ts";
+import type { PlacedFindingRow } from "./finding-store.ts";
 import {
   type AttemptRow,
   readAssets,
@@ -162,7 +164,7 @@ export function admitAssessment(
   attempt: AttemptRow,
   revision: Revision,
   body: AssessmentSubmit,
-): void {
+): PlacedFindingRow[] {
   assert.equal(attempt.node_id, node.id);
   assert.equal(attempt.node_revision, revision.revision);
   requireTextBound(
@@ -207,4 +209,5 @@ export function admitAssessment(
     body.tested_input,
   );
   requireResult(body, verifications, requiredVerifications(tx, node, revision));
+  return admitFindings(tx, node.id, attempt.attempt, revision, body);
 }

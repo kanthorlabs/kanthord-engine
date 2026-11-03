@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -8,6 +8,7 @@ import {
   AssessmentResult,
   AssetKind,
   ClosingEvent,
+  FindingRoute,
   Intent,
   NodeState,
   PlatformAddressKind,
@@ -18,6 +19,7 @@ import {
 import { Act, ActAttribute } from "./act-telemetry.ts";
 import { ControlError } from "./control.ts";
 import {
+  closeAttempt,
   insertAssessment,
   insertEvidence,
   openAttempt,
@@ -33,6 +35,8 @@ import {
 import {
   actCalls,
   controlHarness,
+  reviewerFinding,
+  reviewHarness,
   revokedExecution,
   settlesExpired,
 } from "./test-support.ts";
@@ -901,5 +905,90 @@ test("discard of an External.Requested node refuses every other unresolved reque
       h.endStates(),
       specs.map(() => null),
     );
+  }
+});
+
+async function openFixFinding(t: TestContext) {
+  const h = await reviewHarness(t, IDENTITY);
+  const first = await h.submit({
+    ...h.notMet,
+    findings: [reviewerFinding("S1")],
+  });
+  assert.equal((await h.byLabel("S1")).route, FindingRoute.Fix);
+  const undecided = async () =>
+    (
+      await h.invoke("finding.undecided.list", {
+        params: { project_id: h.project_id },
+        query: {},
+        body: null,
+      })
+    ).items.map((item) => item.label);
+  const act = (state: NodeState) => ({
+    reason: "Close",
+    expected_mission_version: FIRST_ATTEMPT,
+    expected_state: state,
+    expected_attempt: FIRST_ATTEMPT,
+  });
+  return { ...h, first, undecided, act };
+}
+
+test("an override and a block report the open fix findings of the closed attempt", async (t) => {
+  for (const block of [false, true]) {
+    const h = await openFixFinding(t);
+    if (block) {
+      h.store.transaction((tx) =>
+        setNodeState(tx, h.node_id, NodeState.Paused),
+      );
+      await h.invoke("node.block", {
+        params: { node_id: h.node_id },
+        query: {},
+        body: h.act(NodeState.Paused),
+      });
+    } else
+      await h.invoke("node.override", {
+        params: { node_id: h.node_id },
+        query: {},
+        body: {
+          ...h.act(NodeState.Available),
+          result: AssessmentResult.Success,
+        },
+      });
+    assert.equal((await h.byLabel("S1")).route, FindingRoute.Report);
+    assert.deepEqual(await h.undecided(), ["S1"]);
+  }
+});
+
+test("a discard records the open fix findings of the closed attempt", async (t) => {
+  const h = await openFixFinding(t);
+  await h.invoke("node.discard", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.act(NodeState.Available),
+  });
+  assert.equal((await h.byLabel("S1")).route, FindingRoute.Record);
+  assert.deepEqual(await h.undecided(), []);
+});
+
+test("an override or a discard of a Blocked node changes no route", async (t) => {
+  for (const discard of [false, true]) {
+    const h = await openFixFinding(t);
+    h.store.transaction((tx) => {
+      closeAttempt(tx, h.node_id, FIRST_ATTEMPT, NOW);
+      setNodeState(tx, h.node_id, NodeState.Blocked);
+    });
+    const body = h.act(NodeState.Blocked);
+    if (discard)
+      await h.invoke("node.discard", {
+        params: { node_id: h.node_id },
+        query: {},
+        body,
+      });
+    else
+      await h.invoke("node.override", {
+        params: { node_id: h.node_id },
+        query: {},
+        body: { ...body, result: AssessmentResult.Success },
+      });
+    assert.equal((await h.byLabel("S1")).route, FindingRoute.Fix);
   }
 });

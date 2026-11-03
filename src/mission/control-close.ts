@@ -9,6 +9,7 @@ import {
   AssetKind,
   EndState,
   type ExecutionEnds,
+  FindingRoute,
   type HumanAct,
   type HumanActor,
   Intent,
@@ -30,6 +31,7 @@ import { gateFilesOf } from "./gate-files.ts";
 import { landsByHuman } from "./authorization.ts";
 import { requireNode } from "./node-read.ts";
 import { requestContext } from "./node-check.ts";
+import { routeOpenFixFindings } from "./finding-store.ts";
 import { markProposalsRejected } from "./proposal-store.ts";
 import {
   closeAttempt,
@@ -159,8 +161,10 @@ export function overrideNode(
     );
   if (node.state === NodeState.Blocked)
     markProposalsRejected(tx, nodeId, node.attempt, now);
-  if (node.attempt > NO_ATTEMPT && node.state !== NodeState.Blocked)
+  if (node.attempt > NO_ATTEMPT && node.state !== NodeState.Blocked) {
     closeAttempt(tx, nodeId, node.attempt, now);
+    routeOpenFixFindings(tx, nodeId, node.attempt, FindingRoute.Report);
+  }
   const outcome = writeHumanRecords(
     tx,
     node,
@@ -205,13 +209,16 @@ function closeHuman(
   body: HumanAct,
   actor: HumanActor,
   state: NodeState,
+  route: FindingRoute,
   now: number,
   revoked: ExecutionTrace | null,
 ) {
   assert.ok(node.attempt !== null);
   assert.ok(state === NodeState.Blocked || state === NodeState.Discarded);
-  if (node.attempt > NO_ATTEMPT && node.state !== NodeState.Blocked)
+  if (node.attempt > NO_ATTEMPT && node.state !== NodeState.Blocked) {
     closeAttempt(tx, node.id, node.attempt, now);
+    routeOpenFixFindings(tx, node.id, node.attempt, route);
+  }
   const evidenceIds =
     node.attempt === NO_ATTEMPT
       ? []
@@ -265,6 +272,7 @@ export function blockNode(
     body,
     actor,
     NodeState.Blocked,
+    FindingRoute.Report,
     now,
     null,
   );
@@ -347,6 +355,7 @@ export function discardNode(
     body,
     actor,
     NodeState.Discarded,
+    FindingRoute.Record,
     now,
     claim?.execution.trace ?? null,
   );

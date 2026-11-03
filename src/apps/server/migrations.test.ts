@@ -70,12 +70,16 @@ const MISSION_EVIDENCE_ASSET_TABLE = "mission_evidence_asset";
 const MISSION_ASSESSMENT_TABLE = "mission_assessment";
 const MISSION_OUTCOME_TABLE = "mission_outcome";
 const MISSION_PROPOSAL_TABLE = "mission_proposal";
+const MISSION_FINDING_TABLE = "mission_finding";
 const MISSION_ATTEMPT_OPEN_INDEX = "mission_attempt_open";
 const MISSION_EVIDENCE_REQUEST_INDEX = "mission_evidence_request";
 const MISSION_ASSESSMENT_SEQUENCE_INDEX = "mission_assessment_sequence";
 const MISSION_OUTCOME_SEQUENCE_INDEX = "mission_outcome_sequence";
 const MISSION_EVIDENCE_NODE_INDEX = "mission_evidence_node";
 const MISSION_EVIDENCE_ASSET_EVIDENCE_INDEX = "mission_evidence_asset_evidence";
+const MISSION_FINDING_HUMAN_LABEL_INDEX = "mission_finding_human_label";
+const MISSION_FINDING_LABEL_INDEX = "mission_finding_label";
+const MISSION_FINDING_NODE_INDEX = "mission_finding_node";
 const ERD2_MISSION_TABLES = [
   MISSION_ATTEMPT_TABLE,
   MISSION_EVIDENCE_TABLE,
@@ -83,6 +87,7 @@ const ERD2_MISSION_TABLES = [
   MISSION_ASSESSMENT_TABLE,
   MISSION_OUTCOME_TABLE,
   MISSION_PROPOSAL_TABLE,
+  MISSION_FINDING_TABLE,
 ];
 const MISSION_TABLES = [
   MISSION_MISSION_TABLE,
@@ -115,6 +120,7 @@ const ALL_TABLES = [
   MISSION_DEPENDENCY_TABLE,
   MISSION_EVIDENCE_TABLE,
   MISSION_EVIDENCE_ASSET_TABLE,
+  MISSION_FINDING_TABLE,
   MISSION_MISSION_TABLE,
   MISSION_NODE_TABLE,
   MISSION_NODE_REVISION_TABLE,
@@ -139,6 +145,9 @@ const ALL_INDEXES = [
   MISSION_EVIDENCE_ASSET_EVIDENCE_INDEX,
   MISSION_EVIDENCE_NODE_INDEX,
   MISSION_EVIDENCE_REQUEST_INDEX,
+  MISSION_FINDING_HUMAN_LABEL_INDEX,
+  MISSION_FINDING_LABEL_INDEX,
+  MISSION_FINDING_NODE_INDEX,
   "mission_node_filename_active",
   "mission_node_mission",
   MISSION_OUTCOME_SEQUENCE_INDEX,
@@ -439,7 +448,7 @@ test("each service migration set applies alone to an empty store", () => {
   }
 });
 
-test("all ERD 1, ERD 2 and ERD 3 migrations produce exactly the twenty-three tables", () => {
+test("all ERD 1, ERD 2 and ERD 3 migrations produce exactly the twenty-four tables", () => {
   const allServices: Migrations = [
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
     { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },
@@ -565,6 +574,9 @@ function assertSchemaRules(store: Store, owners: ReadonlyMap<string, string>) {
     "mission_attempt.node_id->mission_node.id",
     "mission_evidence.node_id->mission_node.id",
     "mission_evidence_asset.evidence_id->mission_evidence.id",
+    "mission_finding.assessment_id->mission_assessment.id",
+    "mission_finding.fixed_assessment_id->mission_assessment.id",
+    "mission_finding.node_id->mission_node.id",
     "mission_outcome.assessment_id->mission_assessment.id",
     "mission_outcome.node_id->mission_node.id",
     "mission_proposal.assessment_id->mission_assessment.id",
@@ -672,7 +684,7 @@ test("Scheduler queue places hold the first job identity of each node", (t) => {
   );
 });
 
-test("Mission execution records have exactly six unique indexes with the ruled predicates", () => {
+test("Mission execution records have exactly nine unique indexes with the ruled predicates", () => {
   const store = new Store(IN_MEMORY_DATABASE);
   try {
     store.migrate([
@@ -690,6 +702,9 @@ test("Mission execution records have exactly six unique indexes with the ruled p
       MISSION_EVIDENCE_ASSET_EVIDENCE_INDEX,
       MISSION_EVIDENCE_NODE_INDEX,
       MISSION_EVIDENCE_REQUEST_INDEX,
+      MISSION_FINDING_HUMAN_LABEL_INDEX,
+      MISSION_FINDING_LABEL_INDEX,
+      MISSION_FINDING_NODE_INDEX,
       MISSION_OUTCOME_SEQUENCE_INDEX,
     ]);
     for (const row of indexes)
@@ -705,6 +720,13 @@ test("Mission execution records have exactly six unique indexes with the ruled p
         indexes.find((row) => row.name === MISSION_EVIDENCE_REQUEST_INDEX)?.sql,
       ),
       /WHERE requirement_key IS NOT NULL$/,
+    );
+    assert.match(
+      String(
+        indexes.find((row) => row.name === MISSION_FINDING_HUMAN_LABEL_INDEX)
+          ?.sql,
+      ),
+      /WHERE created_by IS NOT NULL$/,
     );
     for (const table of ERD2_MISSION_TABLES) {
       assert.doesNotMatch(

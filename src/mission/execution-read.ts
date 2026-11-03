@@ -11,7 +11,11 @@ import {
   Intent,
   MissionErrorCode,
   NODE_LIST_LIMIT_DEFAULT,
+  type ReviewRound,
+  reviewRoundSchema,
 } from "./contract.ts";
+import { findingRecord } from "./finding-read.ts";
+import { readOpenFixFindings } from "./finding-store.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import { evidencePage } from "./evidence-read.ts";
 import { recordNotFound } from "./record-list.ts";
@@ -21,11 +25,14 @@ import {
   outcomeRecord,
 } from "./record-read.ts";
 import {
+  countExecutionAssessmentsOfAttempt,
   readAssessment,
   readCurrentOutcome,
   readEvidence,
   readExecutionAssessmentsOfAttempt,
   readOutcomesOfAttempt,
+  readRequests,
+  readReviewBase,
 } from "./record-store.ts";
 import { directDependenciesOf } from "./graph.ts";
 import { readDependencies, readMissionNodes } from "./store.ts";
@@ -43,6 +50,9 @@ import {
 import type { Dependencies } from "./service.ts";
 
 const FIRST_ATTEMPT = 1;
+const FIRST_ROUND = 1;
+const NO_OPEN_FINDINGS = 0;
+const NO_REQUESTS = 0;
 const SORT_EQUAL = 0;
 const SLICE_FROM_START = 0;
 
@@ -232,14 +242,62 @@ export function reworkAssessment(
   claim: ExecutionClaim,
 ) {
   executionRead(tx, dependencies, claim);
-  const assessment = readExecutionAssessmentsOfAttempt(
+  const results =
+    readOpenFixFindings(tx, claim.nodeId, claim.attempt).length >
+    NO_OPEN_FINDINGS
+      ? [AssessmentResult.CriterionNotMet, AssessmentResult.Success]
+      : [AssessmentResult.CriterionNotMet];
+  const assessment = results
+    .flatMap((result) =>
+      readExecutionAssessmentsOfAttempt(
+        tx,
+        claim.nodeId,
+        claim.attempt,
+        result,
+      ),
+    )
+    .sort((left, right) => left.sequence - right.sequence)
+    .at(-1);
+  if (!assessment) recordNotFound();
+  return assessmentRecord(tx, dependencies, assessment);
+}
+
+export function reviewRound(
+  tx: Transaction,
+  dependencies: Dependencies,
+  claim: ExecutionClaim,
+): ReviewRound {
+  const { revision } = executionRead(tx, dependencies, claim);
+  const round =
+    countExecutionAssessmentsOfAttempt(tx, claim.nodeId, claim.attempt) +
+    FIRST_ROUND;
+  const final =
+    round - FIRST_ROUND >= dependencies.config.rework_limit ||
+    readRequests(tx, claim.nodeId, claim.attempt).length > NO_REQUESTS;
+  if (revision.content.intent !== Intent.Implement)
+    return reviewRoundSchema.parse({
+      round,
+      final,
+      review_base: null,
+      findings: [],
+    });
+  const base = readReviewBase(
     tx,
     claim.nodeId,
     claim.attempt,
-    AssessmentResult.CriterionNotMet,
-  ).at(-1);
-  if (!assessment) recordNotFound();
-  return assessmentRecord(tx, dependencies, assessment);
+    AssessmentResult.Success,
+  );
+  return reviewRoundSchema.parse({
+    round,
+    final,
+    review_base:
+      base === null || base.tested_input === null
+        ? null
+        : JSON.parse(base.tested_input),
+    findings: readOpenFixFindings(tx, claim.nodeId, claim.attempt).map(
+      findingRecord,
+    ),
+  });
 }
 
 export function executionRead(

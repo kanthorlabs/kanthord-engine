@@ -116,4 +116,23 @@ export const missionExamples = {
     expected_mission_version: MISSION_VERSION,
     approved_proposal_ids: ["proposal_01ARZ3NDEKTSV4RRFFQ69G5FAV"],
   },
+  findingDecide: {
+    decision: "accepted",
+    decision_reason: "Describe why the finding is a defect.",
+  },
+  findingCreate: {
+    expected_mission_version: MISSION_VERSION,
+    assessment_id: "assessment_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    kind: "blocker",
+    task_id: null,
+    name: "Name the defect.",
+    description: "Describe the defect found after delivery.",
+    fix: "Describe the recommended change.",
+    why: "Describe the reason for the change.",
+    cause_owner: "agent",
+  },
+  findingUpdate: {
+    expected_mission_version: MISSION_VERSION,
+    cause_owner: "plan",
+  },
 };

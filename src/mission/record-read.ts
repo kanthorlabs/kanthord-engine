@@ -33,6 +33,7 @@ import {
   type EvidenceRow,
   type OutcomeRow,
   readAssessment,
+  readAssessmentRound,
   readAssets,
   readAttempt,
   readCurrentOutcome,
@@ -263,6 +264,7 @@ export function assessmentRecord(
     result: row.result,
     rationale: row.rationale,
     created_at: row.created_at,
+    round: readAssessmentRound(tx, row),
   };
   if (row.execution_id === null) {
     assert.ok(row.actor !== null);

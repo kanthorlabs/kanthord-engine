@@ -30,6 +30,7 @@ import { addFileBodyHelp } from "./file-body.ts";
 import { addControlCommands } from "./mission-control.ts";
 import { addRecordCommands } from "./mission-record.ts";
 import { addProposalCommands } from "./mission-proposal.ts";
+import { addFindingCommands } from "./mission-finding.ts";
 import { addEvidenceCommands } from "./mission-evidence.ts";
 import { addExecutionCommands } from "./mission-execution.ts";
 import {
@@ -572,6 +573,7 @@ export function addMissionCommand(program: Command): void {
   addNodeCommands(mission);
   addRecordCommands(mission);
   addProposalCommands(mission);
+  addFindingCommands(mission);
   addEvidenceCommands(mission);
   addExecutionCommands(mission);
   addEdgeCommands(mission);
