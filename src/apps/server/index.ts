@@ -55,6 +55,7 @@ import {
 } from "../../project/contract.ts";
 import type {
   PoolPlacement,
+  PromptBase,
   WorkerRegistrations,
 } from "../../worker/contract.ts";
 import type { SlotDriver } from "./slot-driver.ts";
@@ -247,6 +248,7 @@ export function composeServices(options: {
   containerSlotDriver?: (driver: SlotDriver) => SlotDriver;
   repositoryFiles?: RepositoryFiles;
   handoverRefreshWaitMs?: number;
+  promptBase?: PromptBase;
 }) {
   const repoConnector =
     options.repositoryConnector ??
@@ -632,6 +634,7 @@ export function composeServices(options: {
       attemptPromptCommits: (...args) => mission.attemptPromptCommits(...args),
       pinPromptCommits: (...args) => mission.pinPromptCommits(...args),
     },
+    promptBase: options.promptBase,
     instanceArchive: {
       revokeForInstanceArchive: (...args) =>
         mission.revokeForInstanceArchive(...args),

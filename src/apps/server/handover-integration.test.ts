@@ -34,6 +34,7 @@ import {
   HANDOVER_TIMEOUT_MS,
   INSTANCE_CONNECTION_INFO,
   InstancePlacement,
+  type PromptBase,
   WORKER_TOKEN_INFO,
   WorkerErrorCode,
   workerOperations,
@@ -405,6 +406,7 @@ async function setup(
     resourceBudget?: { turns: number; wall_time_ms: number };
     extraRepository?: boolean;
     handoverRefreshWaitMs?: number;
+    promptBase?: PromptBase;
   } = {},
 ) {
   const oauth = boundary?.type === SecretShape.OAuth ? boundary : undefined;
@@ -423,6 +425,7 @@ async function setup(
     },
     oauthProviders: oauth ? () => [offlineProvider(oauth)] : undefined,
     handoverRefreshWaitMs: setupOptions.handoverRefreshWaitMs,
+    promptBase: setupOptions.promptBase,
   });
   async function call<T extends Operation>(
     operation: T,
@@ -1494,24 +1497,89 @@ for (const adapter of ["direct", "http"] as const) {
   });
 }
 
-test("the first handover of an attempt pins its prompt commits and a later handover keeps the pin", async (t) => {
-  const h = await setup(t, "direct");
-  const pin = () =>
-    (
-      h.f.store.database
-        .prepare(
-          "SELECT prompt_commits FROM mission_attempt WHERE node_id = ? AND attempt = ?",
-        )
-        .get(h.execution.node_id, h.execution.attempt) as {
-        prompt_commits: string | null;
-      }
-    ).prompt_commits;
-  const unnamed = "[]";
-  assert.equal(pin(), null);
+const PINNED_HEAD = "a".repeat(40);
+const MOVED_HEAD = "b".repeat(40);
+const FIRST_HEAD_READ = 1;
+const CONCURRENT_HANDOVERS = 2;
+
+function storedPromptCommits(
+  h: Awaited<ReturnType<typeof setup>>,
+): string | null {
+  return (
+    h.f.store.database
+      .prepare(
+        "SELECT prompt_commits FROM mission_attempt WHERE node_id = ? AND attempt = ?",
+      )
+      .get(h.execution.node_id, h.execution.attempt) as {
+      prompt_commits: string | null;
+    }
+  ).prompt_commits;
+}
+
+test("the first handover of an attempt pins its prompt commits and a later execution of the attempt reads no head", async (t) => {
+  let reads = 0;
+  const h = await setup(t, "direct", undefined, {
+    promptBase: {
+      instructionBindingsOf: (_tx, bindingIds) => [...bindingIds],
+      baseCommitOf: async () => {
+        reads++;
+        return reads === FIRST_HEAD_READ ? PINNED_HEAD : MOVED_HEAD;
+      },
+    },
+  });
+  assert.equal(storedPromptCommits(h), null);
   completed(await h.handover());
-  assert.equal(pin(), unnamed);
-  completed(await h.handover());
-  assert.equal(pin(), unnamed);
+  const pinned = canonicalJSON([
+    { binding_id: h.bindings.repo!.id, commit: PINNED_HEAD },
+  ]);
+  assert.equal(storedPromptCommits(h), pinned);
+  completed(await h.release());
+  const next = await h.pull();
+  assert.notEqual(next.execution_id, h.execution.execution_id);
+  assert.equal(next.node_id, h.execution.node_id);
+  assert.equal(next.attempt, h.execution.attempt);
+  completed(await h.handover(next.execution_id));
+  assert.equal(reads, FIRST_HEAD_READ);
+  assert.equal(storedPromptCommits(h), pinned);
+});
+
+test("two concurrent first handovers of one attempt store one pin and both answer it", async (t) => {
+  const heads: ((commit: string) => void)[] = [];
+  let bothRead = () => {};
+  const reading = new Promise<void>((resolve) => {
+    bothRead = resolve;
+  });
+  const h = await setup(t, "direct", undefined, {
+    promptBase: {
+      instructionBindingsOf: (_tx, bindingIds) => [...bindingIds],
+      baseCommitOf: () =>
+        new Promise((resolve) => {
+          heads.push(resolve);
+          if (heads.length === CONCURRENT_HANDOVERS) bothRead();
+        }),
+    },
+  });
+  const answered: unknown[] = [];
+  const pinPromptCommits = h.f.mission.pinPromptCommits.bind(h.f.mission);
+  t.mock.method(
+    h.f.mission,
+    "pinPromptCommits",
+    (...args: Parameters<typeof pinPromptCommits>) => {
+      const stored = pinPromptCommits(...args);
+      answered.push(stored);
+      return stored;
+    },
+  );
+  const first = h.handover();
+  const second = h.handover();
+  await reading;
+  heads[0]!(PINNED_HEAD);
+  heads[1]!(MOVED_HEAD);
+  completed(await first);
+  completed(await second);
+  const pinned = [{ binding_id: h.bindings.repo!.id, commit: PINNED_HEAD }];
+  assert.equal(storedPromptCommits(h), canonicalJSON(pinned));
+  assert.deepEqual(answered, [pinned, pinned]);
 });
 
 test("HTTP handover enforces its byte limit before body parsing", async (t) => {
