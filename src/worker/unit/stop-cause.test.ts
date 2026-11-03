@@ -12,8 +12,15 @@ import {
   ExecutionStopReason,
   ProviderFailure,
 } from "../../scheduler/contract.ts";
+import { AgentErrorCode, PromptSourceReason } from "../../agent/contract.ts";
+import { ProjectErrorCode } from "../../project/contract.ts";
+import { WorkerErrorCode } from "../contract.ts";
 import { GitStep } from "./git-step.ts";
-import { stopCauseOf, type StopSignals } from "./stop-cause.ts";
+import {
+  codedStopDetail,
+  stopCauseOf,
+  type StopSignals,
+} from "./stop-cause.ts";
 import {
   GIT_COMMIT_FAILED,
   MERGE_MARKERS_LEFT,
@@ -135,6 +142,59 @@ test("a git step wins over the code of an operation failure", () => {
     ),
     unattributed([CauseCategory.Infrastructure, CauseCategory.WorkerAction]),
   );
+});
+
+test("a prompt setup stop maps by its code and its stop detail", () => {
+  const operation = (code: string, detail: string | null = null) =>
+    stopCauseOf(ExecutionStopReason.OperationFailed, code, detail, QUIET);
+  const promptRecord = attributed(
+    CauseCategory.Infrastructure,
+    CauseSubcategory.PromptRecord,
+  );
+  assert.deepEqual(
+    operation(AgentErrorCode.PromptSourceInvalid, PromptSourceReason.Changed),
+    promptRecord,
+  );
+  for (const reason of [
+    PromptSourceReason.TooLarge,
+    PromptSourceReason.NotUtf8,
+    PromptSourceReason.Unreadable,
+    PromptSourceReason.ControlCharacter,
+  ])
+    assert.deepEqual(
+      operation(AgentErrorCode.PromptSourceInvalid, reason),
+      attributed(CauseCategory.Prompt, CauseSubcategory.SourceInvalid),
+    );
+  for (const code of [
+    WorkerErrorCode.ExecutionPromptNotPinned,
+    WorkerErrorCode.ExecutionPromptRecordFailed,
+  ])
+    assert.deepEqual(operation(code), promptRecord);
+  assert.deepEqual(
+    operation(ProjectErrorCode.RepositorySshUnreachable),
+    attributed(CauseCategory.Infrastructure, CauseSubcategory.Network),
+  );
+  assert.deepEqual(
+    operation(ProjectErrorCode.RepositoryBaseBranchAbsent),
+    attributed(CauseCategory.Human, CauseSubcategory.Configuration),
+  );
+});
+
+test("a source_invalid error gives its details reason as the stop detail", () => {
+  assert.equal(
+    codedStopDetail(AgentErrorCode.PromptSourceInvalid, {
+      part: "instruction_file",
+      reason: PromptSourceReason.Changed,
+    }),
+    PromptSourceReason.Changed,
+  );
+  assert.equal(
+    codedStopDetail(WorkerErrorCode.ExecutionPromptNotPinned, {
+      reason: PromptSourceReason.Changed,
+    }),
+    null,
+  );
+  assert.equal(codedStopDetail(AgentErrorCode.PromptSourceInvalid, null), null);
 });
 
 test("an operation failure maps by its code", () => {

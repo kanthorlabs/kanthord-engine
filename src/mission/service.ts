@@ -33,6 +33,7 @@ import { isTerminal } from "./admission.ts";
 import type { MissionConfig } from "./config.ts";
 import {
   ActorKind,
+  type AttemptPromptStack,
   type CurrentNodePin,
   type EventDecoder,
   type ExecutionAttribution,
@@ -131,7 +132,13 @@ import {
   type ObjectPutInput,
 } from "./authorization.ts";
 import { repositoryBindingIdsOf } from "./evidence-content.ts";
-import { pinPromptCommits, readPromptCommits } from "./record-store.ts";
+import {
+  listAttempts,
+  pinPromptCommits,
+  readAttempt,
+  readOpenAttempt,
+  readPromptCommits,
+} from "./record-store.ts";
 import {
   assessmentPage,
   attemptPage,
@@ -141,6 +148,7 @@ import {
   getExternalAction,
   getOutcome,
   outcomePage,
+  recordNotFound,
 } from "./record-list.ts";
 import { edgeCursor, edgePage } from "./edge-read.ts";
 import { exportMission } from "./export.ts";
@@ -174,6 +182,7 @@ const MISSION_STOPPED_CODE = "mission.lifecycle.stopped";
 const NO_VIOLATIONS = 0;
 const DEFERRED_CHECK_RESUME_FAILED = "Deferred check resume failed.";
 const NO_DEPENDENCIES = 0;
+const LATEST_ATTEMPT_COUNT = 1;
 const NodeBodyRefusal = {
   TaskFile: "task_file_forbidden",
   Id: "id_forbidden",
@@ -1349,6 +1358,31 @@ export class MissionService
 
   pinPromptCommits(...args: Parameters<MissionPromptPins["pinPromptCommits"]>) {
     return pinPromptCommits(...args);
+  }
+
+  attemptPromptStackOf(
+    tx: Transaction,
+    nodeId: string,
+    attempt: number | null,
+  ): AttemptPromptStack {
+    requireNode(tx, nodeId);
+    const row =
+      attempt === null
+        ? (readOpenAttempt(tx, nodeId) ??
+          listAttempts(tx, nodeId, null, LATEST_ATTEMPT_COUNT)[0] ??
+          null)
+        : readAttempt(tx, nodeId, attempt);
+    if (row === null) recordNotFound();
+    return {
+      attempt: row.attempt,
+      binding_ids: repositoryBindingIdsOf(
+        tx,
+        this.dependencies.bindings,
+        nodeId,
+        row.node_revision,
+      ),
+      prompt_commits: readPromptCommits(tx, nodeId, row.attempt),
+    };
   }
 
   intentOf(tx: Transaction, nodeId: string, nodeRevision: number): Intent {

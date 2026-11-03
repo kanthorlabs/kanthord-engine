@@ -59,7 +59,9 @@ export function layerOf(part: PromptPart): PromptLayer | null {
   return PART_LAYERS[part];
 }
 
-export function headingOf(reference: PromptReference): string | null {
+export function headingOf(
+  reference: Pick<PromptReference, "part" | "name" | "path">,
+): string | null {
   switch (reference.part) {
     case PromptPart.InstructionFile:
       assert.ok(reference.path);
@@ -94,36 +96,108 @@ export function promptPart(
   };
 }
 
+export type InstructionFilePart =
+  | {
+      state: typeof PromptPartState.Resolved;
+      path: string;
+      commit: string;
+      text: string;
+    }
+  | {
+      state:
+        typeof PromptPartState.Invalid | typeof PromptPartState.Unreachable;
+      path: string;
+      commit: string | null;
+    };
+
+export interface RepositoryPrompts {
+  binding_id: string;
+  name: string;
+  prompts: {
+    repository?: string;
+    agents?: Partial<Record<AgentName, string>>;
+  };
+}
+
+function databasePart(
+  part: typeof PromptPart.Repository | typeof PromptPart.Binding,
+  name: string,
+  bindingId: string,
+  text: string | undefined,
+): PromptPartAnswer[] {
+  return text === undefined || text.trim().length === NO_CHARACTERS
+    ? []
+    : [
+        promptPart(
+          {
+            part,
+            name,
+            origin: PromptOrigin.Database,
+            path: null,
+            binding_id: bindingId,
+            commit: null,
+            digest: digest(text),
+          },
+          PromptPartState.Resolved,
+          text,
+        ),
+      ];
+}
+
+function filePart(
+  name: string,
+  bindingId: string,
+  file: InstructionFilePart,
+): PromptPartAnswer {
+  const reference = {
+    part: PromptPart.InstructionFile,
+    name,
+    origin: PromptOrigin.Repository,
+    path: file.path,
+    binding_id: bindingId,
+    commit: file.commit,
+  };
+  if (file.state === PromptPartState.Resolved)
+    return promptPart(
+      { ...reference, digest: digest(file.text) },
+      PromptPartState.Resolved,
+      file.text,
+    );
+  return {
+    layer: layerOf(reference.part),
+    ...reference,
+    digest: null,
+    heading: headingOf(reference),
+    state: file.state,
+    text: null,
+  };
+}
+
 export function bindingParts(
-  repositories: readonly {
-    binding_id: string;
-    name: string;
-    prompts: { agents?: Partial<Record<AgentName, string>> };
-  }[],
+  repositories: readonly RepositoryPrompts[],
   agentName: string,
+  files: ReadonlyMap<string, InstructionFilePart> = new Map(),
 ): PromptPartAnswer[] {
   return repositories.flatMap(({ binding_id, name, prompts }) => {
     const agents = prompts.agents ?? {};
-    const text = Object.hasOwn(agents, agentName)
-      ? agents[agentName as AgentName]
-      : undefined;
-    return text === undefined || text.trim().length === NO_CHARACTERS
-      ? []
-      : [
-          promptPart(
-            {
-              part: PromptPart.Binding,
-              name,
-              origin: PromptOrigin.Database,
-              path: null,
-              binding_id,
-              commit: null,
-              digest: digest(text),
-            },
-            PromptPartState.Resolved,
-            text,
-          ),
-        ];
+    const file = files.get(binding_id);
+    return [
+      ...(file === undefined ? [] : [filePart(name, binding_id, file)]),
+      ...databasePart(
+        PromptPart.Repository,
+        name,
+        binding_id,
+        prompts.repository,
+      ),
+      ...databasePart(
+        PromptPart.Binding,
+        name,
+        binding_id,
+        Object.hasOwn(agents, agentName)
+          ? agents[agentName as AgentName]
+          : undefined,
+      ),
+    ];
   });
 }
 

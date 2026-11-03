@@ -55,6 +55,7 @@ import {
   type RootSpanEnd,
   SCHEDULER_PRODUCER,
   type ServerTrace,
+  type Span,
   type SpanContribution,
   spanIdSchema,
   SpanOrigin,
@@ -97,6 +98,7 @@ import {
   listSessionEntries,
   listSpans,
   readSessionEntry,
+  readSpan,
   readText,
   readTrace,
   type TraceRow,
@@ -458,6 +460,13 @@ export class TrackingService implements Service, ExecutionTelemetry {
         ...contribution.attributes,
       },
     });
+  }
+
+  serverSpanOf(trace: ExecutionTrace, spanId: string): Span | null {
+    assert.ok(spanId);
+    return this.dependencies.store.transaction((tx) =>
+      readSpan(tx, trace.trace_id, spanId),
+    );
   }
 
   serverTraceSpan(

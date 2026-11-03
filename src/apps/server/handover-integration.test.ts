@@ -72,6 +72,7 @@ import {
   sealEnvelope,
 } from "../../kernel/handover.ts";
 import { FAKE_COMMIT } from "./container-fakes-test-support.ts";
+import { packageVersion } from "../../kernel/version.ts";
 import {
   COVERING_WORKER_BINDINGS,
   enableCoveringAgents,
@@ -1535,6 +1536,7 @@ test("the first handover of an attempt pins its prompt commits and a later execu
   const h = await setup(t, "direct", undefined, {
     promptBase: {
       instructionBindingsOf: (_tx, bindingIds) => [...bindingIds],
+      instructionFileOf: async () => null,
       baseCommitOf: async () => {
         reads++;
         return reads === FIRST_HEAD_READ ? PINNED_HEAD : MOVED_HEAD;
@@ -1570,6 +1572,49 @@ test("the server prompt base pins one entry for the repository binding that name
   );
 });
 
+test("the server setup stores the agent.prompt span with the references and the engine version, and a retried setup answers the stored text", async (t) => {
+  const h = await setup(t, "direct", undefined, {
+    instructionFile: "AGENTS.md",
+    extraRepository: true,
+    implementBindsOther: true,
+  });
+  completed(await h.handover());
+  const input = {
+    params: { execution_id: h.execution.execution_id },
+    query: {},
+    body: null,
+  };
+  const first = completed(
+    await h.call(workerOperations["execution.setup.get"], input, h.token),
+  );
+  const second = completed(
+    await h.call(workerOperations["execution.setup.get"], input, h.token),
+  );
+  assert.deepEqual(
+    second.agents.map(({ prompt }) => prompt),
+    first.agents.map(({ prompt }) => prompt),
+  );
+  const rows = h.f.trackingStore.database
+    .prepare("SELECT attributes FROM tracking_span WHERE operation = ?")
+    .all("agent.prompt") as { attributes: string }[];
+  assert.equal(rows.length, first.agents.length);
+  const attributes = JSON.parse(rows[0]!.attributes) as Record<string, unknown>;
+  assert.equal(attributes["kanthord.engine.version"], packageVersion());
+  assert.deepEqual(
+    (attributes["kanthord.prompt.sources"] as string[]).map((source) =>
+      JSON.parse(source),
+    ),
+    first.agents[0]!.prompt.sources,
+  );
+  assert.deepEqual(
+    Object.keys(attributes)
+      .filter((key) => key.startsWith("kanthord.prompt."))
+      .sort(),
+    ["kanthord.prompt.sources", "kanthord.prompt.templates_digest"],
+  );
+  assert.ok(!rows[0]!.attributes.includes(SWE_AGENT_PROMPT));
+});
+
 test("two concurrent first handovers of one attempt store one pin and both answer it", async (t) => {
   const heads: ((commit: string) => void)[] = [];
   let bothRead = () => {};
@@ -1579,6 +1624,7 @@ test("two concurrent first handovers of one attempt store one pin and both answe
   const h = await setup(t, "direct", undefined, {
     promptBase: {
       instructionBindingsOf: (_tx, bindingIds) => [...bindingIds],
+      instructionFileOf: async () => null,
       baseCommitOf: () =>
         new Promise((resolve) => {
           heads.push(resolve);

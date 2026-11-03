@@ -52,7 +52,7 @@ function referenceOf(part: PromptPartAnswer): PromptReference {
     path: part.path,
     binding_id: part.binding_id,
     commit: part.commit,
-    digest: part.digest,
+    digest: part.digest!,
   };
 }
 
@@ -178,7 +178,7 @@ test("each origin resolves its text and its layer and heading", async () => {
             workbench: false,
             context: background,
           })
-        )[0]!.digest,
+        )[0]!.digest!,
       },
       {
         part: PromptPart.Workbench,

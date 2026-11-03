@@ -34,6 +34,8 @@ import {
   type DefaultConfiguration,
   effectiveConfigurationSchema,
   type HolderScope,
+  type InstructionFileReader,
+  promptReferenceSchema,
   promptTemplatesSchema,
 } from "../agent/contract.ts";
 export const WorkerHost = {
@@ -526,6 +528,7 @@ export interface PromptBase {
     bindingIds: readonly string[],
   ): string[];
   baseCommitOf(bindingId: string, context: Context): Promise<string>;
+  instructionFileOf: InstructionFileReader;
 }
 
 export const ExecutionIntent = {
@@ -803,6 +806,8 @@ export const WorkerErrorCode = {
   HandoverRefreshInFlight: "worker.handover.refresh_in_flight",
   ExecutionNoNativeAgent: "worker.execution.no_native_agent",
   ExecutionCredentialNotPinned: "worker.execution.credential_not_pinned",
+  ExecutionPromptNotPinned: "worker.execution.prompt_not_pinned",
+  ExecutionPromptRecordFailed: "worker.execution.prompt_record_failed",
   StartToolMissing: "worker.start.tool_missing",
   RuntimeSetupRefused: "worker.runtime.setup_refused",
   ClaimNotEvaluation: "worker.action_performer.claim_not_evaluation",
@@ -1012,7 +1017,10 @@ export const agentSetupSchema = z.strictObject({
   level: z.enum(ChainLevel),
   credential_id: identitySchema("credential"),
   metadata: z.record(z.string(), z.unknown()).nullable(),
-  prompt: z.strictObject({ final: z.string() }),
+  prompt: z.strictObject({
+    final: z.string(),
+    sources: z.array(promptReferenceSchema),
+  }),
 });
 export type AgentSetup = z.infer<typeof agentSetupSchema>;
 export const executionEnvironmentSchema = z

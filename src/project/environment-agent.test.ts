@@ -21,7 +21,12 @@ import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 import { framing, PromptConsumer } from "../agent/prompt-render.ts";
 import { ENV_AGENT_PROMPT } from "../agent/prompt-assets.ts";
 import { getAgentDeclaration } from "../agent/catalog.ts";
-import { AgentErrorCode, type AgentView } from "../agent/contract.ts";
+import {
+  AgentErrorCode,
+  type AgentView,
+  type InstructionFileSource,
+  InstructionFileState,
+} from "../agent/contract.ts";
 import { InvalidReason } from "../agent/prompt-source.ts";
 import { resolveAgentPrompt } from "../agent/prompt-files.ts";
 import { loadPi } from "../agent/pi.ts";
@@ -70,6 +75,9 @@ const SWE_TEXT = "Prefer small commits.";
 const OVERRIDE_TEXT = "Use only the documented build command.";
 const INVALID_OVERRIDE_TEXT = "bell\u0007";
 const COMMIT = "0123456789abcdef";
+const INSTRUCTION_PATH = "AGENTS.md";
+const INSTRUCTION_TEXT = "Write every name outside the code in snake_case.";
+const REPOSITORY_TEXT = "A test file sits beside its source file.";
 const TAIL = "npm ERR! missing script: build";
 const FAILURE_CLASS = "setup_failed";
 const ESCAPES = [
@@ -160,6 +168,7 @@ function fixture(
     view: AgentView;
     onExport?: () => void;
     promptDirectory?: string;
+    instructionFile?: InstructionFileSource;
   } = { view: available },
 ) {
   const stateDirectory = temporary(t);
@@ -179,6 +188,7 @@ function fixture(
     sessionIds: [] as string[],
     checkouts: [] as string[],
     outside: "",
+    instructionReads: [] as string[],
   };
   const modelRuntimeFactory: EnvironmentModelRuntimeFactory = async (input) => {
     record.factoryCalls++;
@@ -219,10 +229,21 @@ function fixture(
             binding_id: BINDING_ID,
             name: BINDING_NAME,
             prompts: {
+              ...(state.instructionFile === undefined
+                ? {}
+                : {
+                    instruction_file: INSTRUCTION_PATH,
+                    repository: REPOSITORY_TEXT,
+                  }),
               agents: { [ENV_AGENT_NAME]: ENV_BINDING_TEXT, "swe@1": SWE_TEXT },
             },
           }
         : null,
+    instructionFileOf: async (bindingId, commit) => {
+      assert.equal(bindingId, BINDING_ID);
+      record.instructionReads.push(commit);
+      return state.instructionFile ?? null;
+    },
     templates: async () => SHIPPED_TEMPLATES,
     exportRepository: async (bindingId, commit, directory) => {
       record.exports.push({ bindingId, commit, directory });
@@ -354,6 +375,60 @@ test(
     assert.ok(body.includes(BINDING_NAME));
     assert.ok(body.includes(FAILURE_CLASS));
     assert.ok(body.includes(TAIL));
+  },
+);
+
+test(
+  "env@1 reads the instruction file at the commit of its run before the stored repository prompt",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const f = fixture(t, [fauxAssistantMessage("done")], {
+      view: available,
+      instructionFile: {
+        path: INSTRUCTION_PATH,
+        commit: COMMIT,
+        state: InstructionFileState.Present,
+        reason: null,
+        text: INSTRUCTION_TEXT,
+      },
+    });
+    assert.equal(await f.agent.run(f.input()), EnvironmentSessionEnd.Ended);
+    assert.deepEqual(f.record.instructionReads, [COMMIT]);
+    assert.ok(
+      f.provider.calls[0]!.systemPrompt?.includes(
+        `Repository prompt of repository ${BINDING_NAME}, file ${INSTRUCTION_PATH}:\n\n${INSTRUCTION_TEXT}\n\nRepository prompt of repository ${BINDING_NAME}, set in KanthorD:\n\n${REPOSITORY_TEXT}\n\nBinding prompt of repository ${BINDING_NAME}:\n\n${ENV_BINDING_TEXT}`,
+      ),
+    );
+  },
+);
+
+test(
+  "an invalid instruction file answers 409 source_invalid with no model call",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const f = fixture(t, [fauxAssistantMessage("done")], {
+      view: available,
+      instructionFile: {
+        path: INSTRUCTION_PATH,
+        commit: COMMIT,
+        state: InstructionFileState.Invalid,
+        reason: InvalidReason.ControlCharacter,
+        text: null,
+      },
+    });
+    await assert.rejects(f.agent.run(f.input()), {
+      status: HttpStatus.Conflict,
+      code: AgentErrorCode.PromptSourceInvalid,
+      details: {
+        part: "instruction_file",
+        name: BINDING_NAME,
+        binding_id: BINDING_ID,
+        path: INSTRUCTION_PATH,
+        commit: COMMIT,
+        reason: InvalidReason.ControlCharacter,
+      },
+    });
+    assert.equal(f.provider.calls.length, NO_CALLS);
   },
 );
 

@@ -16,7 +16,9 @@ import {
   agentPromptFacts,
   AgentPromptSpan,
   agentPromptSpanId,
+  storedPromptFacts,
 } from "./prompt-telemetry.ts";
+import { packageVersion } from "../kernel/version.ts";
 
 const EXECUTION_ID = "execution_01JZ8R2B3C4D5E6F7G8H9J0K1M";
 const SPAN_ID_PATTERN = /^[a-f0-9]{16}$/;
@@ -53,22 +55,30 @@ const TRACE: ExecutionTrace = {
   root_span_id: "b".repeat(16),
 };
 
-test("facts keep the reading order and the part name digest form", () => {
+const D1 = "1".repeat(64);
+const D2 = "2".repeat(64);
+const D3 = "3".repeat(64);
+
+test("facts keep the reading order of the references and the engine version", () => {
   const facts = agentPromptFacts(
     FIRST_AGENT,
     [
-      partOf(PromptPart.Standard, "base.md", "d1"),
-      partOf(PromptPart.Role, "swe@1.md", "d2"),
-      partOf(PromptPart.Binding, "api", "d3"),
+      partOf(PromptPart.Standard, "base.md", D1),
+      partOf(PromptPart.Role, "swe@1.md", D2),
+      partOf(PromptPart.Binding, "api", D3),
     ],
     SHIPPED_TEMPLATES,
   );
   assert.equal(facts.agent_name, FIRST_AGENT);
-  assert.deepEqual(facts.parts, [
-    "standard:base.md:d1",
-    "role:swe@1.md:d2",
-    "binding:api:d3",
-  ]);
+  assert.deepEqual(
+    facts.sources.map(({ part, name, digest }) => [part, name, digest]),
+    [
+      [PromptPart.Standard, "base.md", D1],
+      [PromptPart.Role, "swe@1.md", D2],
+      [PromptPart.Binding, "api", D3],
+    ],
+  );
+  assert.equal(facts.engine_version, packageVersion());
   assert.equal(
     facts.templates_digest,
     digest(canonicalJSON(SHIPPED_TEMPLATES)),
@@ -82,10 +92,10 @@ test("span id is stable for one execution and one agent and differs for two agen
   assert.notEqual(first, agentPromptSpanId(EXECUTION_ID, SECOND_AGENT));
 });
 
-test("contribution sits under the root span and holds the three attributes", () => {
+test("contribution sits under the root span and holds the references, the engine version and no text", () => {
   const facts = agentPromptFacts(
     FIRST_AGENT,
-    [partOf(PromptPart.Role, "swe@1.md", "d2")],
+    [partOf(PromptPart.Role, "swe@1.md", D2)],
     SHIPPED_TEMPLATES,
   );
   const contribution = agentPromptContribution(TRACE, facts, AT);
@@ -99,7 +109,10 @@ test("contribution sits under the root span and holds the three attributes", () 
   assert.equal(contribution.status, SpanStatus.Ok);
   assert.deepEqual(contribution.attributes, {
     [AgentPromptSpan.AgentName]: FIRST_AGENT,
-    [AgentPromptSpan.Parts]: ["role:swe@1.md:d2"],
+    [AgentPromptSpan.Sources]: [canonicalJSON(facts.sources[0])],
     [AgentPromptSpan.TemplatesDigest]: facts.templates_digest,
+    [AgentPromptSpan.EngineVersion]: packageVersion(),
   });
+  assert.ok(!JSON.stringify(contribution).includes('"text"'));
+  assert.deepEqual(storedPromptFacts(contribution.attributes!), facts);
 });

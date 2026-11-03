@@ -27,22 +27,22 @@ The request, output, failure and replay rules of the [Worker shared contract](./
 `P` means proposed; `I` means implemented syntax and operation. `[R]`, `[M]` and `[L]` use the [common synopsis definitions](./common-flags.md#synopsis-markers).
 `human` authenticates a human JWT.
 
-| Status | Command after `kanthord agent`                                                                   | Route                                                                 | Operation ID                           | Access  |
-| ------ | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- | -------------------------------------- | ------- |
-| P      | `list [L]`                                                                                       | `GET /api/agent`                                                      | `agent.list`                           | `human` |
-| I      | `get <agent-name> [--view final] [--project <project-id> --binding-id <binding-id>]`             | `GET /api/agent/:agent_name`                                          | `agent.get`                            | `human` |
-| I      | `enablement list [L] [R]`                                                                        | `GET /api/agent/enablement`                                           | `agent.enablement.list`                | `human` |
-| I      | `enablement get <agent-name> [R]`                                                                | `GET /api/agent/enablement/:agent_name`                               | `agent.enablement.get`                 | `human` |
-| I      | `enablement put <agent-name> --file <path> [M] [R]`                                              | `PUT /api/agent/enablement/:agent_name`                               | `agent.enablement.put`                 | `human` |
-| I      | `enablement enable <agent-name> --expected-revision <revision> [M] [R]`                          | `POST /api/agent/enablement/:agent_name/enable`                       | `agent.enablement.enable`              | `human` |
-| I      | `enablement disable <agent-name> --expected-revision <revision> [M] [R]`                         | `POST /api/agent/enablement/:agent_name/disable`                      | `agent.enablement.disable`             | `human` |
-| I      | `enablement remove <agent-name> --expected-revision <revision> [M] [R]`                          | `DELETE /api/agent/enablement/:agent_name`                            | `agent.enablement.remove`              | `human` |
-| I      | `enablement provider add <agent-name> --file <path> [M] [R]`                                     | `POST /api/agent/enablement/:agent_name/provider`                     | `agent.enablement.provider.add`        | `human` |
-| I      | `enablement provider remove <agent-name> <provider-name> --expected-revision <revision> [M] [R]` | `DELETE /api/agent/enablement/:agent_name/provider/:provider_name`    | `agent.enablement.provider.remove`     | `human` |
-| I      | `enablement provider model list <agent-name> <provider-name>`                                    | `GET /api/agent/enablement/:agent_name/provider/:provider_name/model` | `agent.enablement.provider.model.list` | `human` |
-| I      | `model list --provider <provider> --credential <credential>`                                     | `GET /api/agent/model`                                                | `agent.model.list`                     | `human` |
-| I      | `cooldown list`                                                                                  | `GET /api/agent/cooldown`                                             | `agent.cooldown.list`                  | `human` |
-| I      | `cooldown clear <credential> [--holder <name>] [M]`                                              | `DELETE /api/agent/cooldown/:credential`                              | `agent.cooldown.clear`                 | `human` |
+| Status | Command after `kanthord agent`                                                                                           | Route                                                                 | Operation ID                           | Access  |
+| ------ | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- | -------------------------------------- | ------- |
+| P      | `list [L]`                                                                                                               | `GET /api/agent`                                                      | `agent.list`                           | `human` |
+| I      | `get <agent-name> [--view final] [--project <project-id> --binding-id <binding-id> \| --node <node-id> [--attempt <k>]]` | `GET /api/agent/:agent_name`                                          | `agent.get`                            | `human` |
+| I      | `enablement list [L] [R]`                                                                                                | `GET /api/agent/enablement`                                           | `agent.enablement.list`                | `human` |
+| I      | `enablement get <agent-name> [R]`                                                                                        | `GET /api/agent/enablement/:agent_name`                               | `agent.enablement.get`                 | `human` |
+| I      | `enablement put <agent-name> --file <path> [M] [R]`                                                                      | `PUT /api/agent/enablement/:agent_name`                               | `agent.enablement.put`                 | `human` |
+| I      | `enablement enable <agent-name> --expected-revision <revision> [M] [R]`                                                  | `POST /api/agent/enablement/:agent_name/enable`                       | `agent.enablement.enable`              | `human` |
+| I      | `enablement disable <agent-name> --expected-revision <revision> [M] [R]`                                                 | `POST /api/agent/enablement/:agent_name/disable`                      | `agent.enablement.disable`             | `human` |
+| I      | `enablement remove <agent-name> --expected-revision <revision> [M] [R]`                                                  | `DELETE /api/agent/enablement/:agent_name`                            | `agent.enablement.remove`              | `human` |
+| I      | `enablement provider add <agent-name> --file <path> [M] [R]`                                                             | `POST /api/agent/enablement/:agent_name/provider`                     | `agent.enablement.provider.add`        | `human` |
+| I      | `enablement provider remove <agent-name> <provider-name> --expected-revision <revision> [M] [R]`                         | `DELETE /api/agent/enablement/:agent_name/provider/:provider_name`    | `agent.enablement.provider.remove`     | `human` |
+| I      | `enablement provider model list <agent-name> <provider-name>`                                                            | `GET /api/agent/enablement/:agent_name/provider/:provider_name/model` | `agent.enablement.provider.model.list` | `human` |
+| I      | `model list --provider <provider> --credential <credential>`                                                             | `GET /api/agent/model`                                                | `agent.model.list`                     | `human` |
+| I      | `cooldown list`                                                                                                          | `GET /api/agent/cooldown`                                             | `agent.cooldown.list`                  | `human` |
+| I      | `cooldown clear <credential> [--holder <name>] [M]`                                                                      | `DELETE /api/agent/cooldown/:credential`                              | `agent.cooldown.clear`                 | `human` |
 
 The static `/api/agent/enablement` path takes precedence over `/:agent_name`.
 
@@ -67,7 +67,7 @@ It lists every catalog agent, also an agent without an enablement. Each item hol
 ### `get <agent-name>`
 
 ```text
-kanthord agent get <agent-name> [--view final] [--project <project-id> --binding-id <binding-id>]
+kanthord agent get <agent-name> [--view final] [--project <project-id> --binding-id <binding-id> | --node <node-id> [--attempt <k>]]
 ```
 
 `agent-name` is required `AgentName`, with no default, and maps to
@@ -75,14 +75,18 @@ kanthord agent get <agent-name> [--view final] [--project <project-id> --binding
 Required token: human JWT. Absent body. HTTP `200` returns
 `agent_name` and the following declaration/configuration fields:
 
-| Option                      | Query        | Meaning                                                                                                                                       |
-| --------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--view final`              | `view`       | Optional. The only value is `final`. The `prompt` answer holds `final` only and no `parts`.                                                   |
-| `--project <project-id>`    | `project_id` | Optional, and only together with `--binding-id`. Selects the repository binding whose binding prompt of the agent joins `final`.              |
-| `--binding-id <binding-id>` | `binding_id` | Optional, and only together with `--project`. A binding that is no repository binding of the project answers `404 project.binding.not_found`. |
+| Option                      | Query        | Meaning                                                                                                                                                                                                                    |
+| --------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--view final`              | `view`       | Optional. The only value is `final`. The `prompt` answer holds `final` only and no `parts`.                                                                                                                                |
+| `--project <project-id>`    | `project_id` | Optional, and only together with `--binding-id`. Selects the repository binding whose binding prompt of the agent joins `final`.                                                                                           |
+| `--binding-id <binding-id>` | `binding_id` | Optional, and only together with `--project`. A binding that is no repository binding of the project answers `404 project.binding.not_found`.                                                                              |
+| `--node <node-id>`          | `node_id`    | Optional. Selects the stack that the agent of one mission node reads. It excludes `--project` and `--binding-id`. An absent node answers `404 mission.node.not_found`.                                                     |
+| `--attempt <k>`             | `attempt`    | Optional, a positive integer, and only together with `--node`. Without it, the read takes the open attempt, else the latest attempt. An absent attempt, or a node with no attempt, answers `404 mission.record.not_found`. |
 
-With `--project` and `--binding-id`, `final` is the worker system prompt with the binding prompt of the agent before the framing.
-Without `--project` and `--binding-id`, a workbench agent answers the Workbench system prompt, and `env@1` answers the worker system prompt.
+With `--project` and `--binding-id`, `final` is the worker system prompt with the parts of that binding before the framing. The read takes the instruction file at the current head of the base branch, as the next attempt takes it.
+With `--node`, `final` is the worker system prompt with the parts of each repository binding of the node revision that the attempt pins. The read takes the instruction file at the commit that the attempt pins, and at the current base head for an attempt with no pin.
+The read takes every instruction file in parallel under one 20 s deadline. A failed read is a part state, and the read answers `200`. `--attempt` without `--node`, and `--node` with `--project` or `--binding-id`, answer `400 gateway.request.validation_failed`.
+Without `--project`, `--binding-id` and `--node`, a workbench agent answers the Workbench system prompt, and `env@1` answers the worker system prompt.
 
 | Result field           | Type and meaning                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -125,7 +129,7 @@ An external worker declares no agent and needs no enablement. An unknown agent
 name returns `404 agent.catalog.not_found`. Catalog prompt changes require a
 new worker version. An enablement default change creates a revision.
 This command composes the prompt from the same sources as an execution, but starts no execution.
-KanthorD reads no `AGENTS.md`, `CLAUDE.md` or `*.local.md` file of a repository or of a home directory.
+KanthorD reads only the one repository file that `prompts.instruction_file` of a binding names. It reads no other `AGENTS.md` or `CLAUDE.md` file, no nested file, no `*.local.md` file and no file of a home directory.
 `claude-code@1` loads its own `CLAUDE.md` files. That load is behavior of the Claude Code harness, not KanthorD support.
 
 ### The prompt answer
@@ -135,30 +139,33 @@ KanthorD reads no `AGENTS.md`, `CLAUDE.md` or `*.local.md` file of a repository 
 1. `standard`: the file `base.md`, for every agent.
 2. `role`: the file `<agent-name>.md`, for example `swe@1.md`.
 3. `workbench`: the file `workbench.md`, only in the Workbench system prompt.
-4. `binding`: one part for each repository binding with a nonblank binding prompt of the agent.
+4. For each repository binding, in binding order:
+   1. `instruction_file`: the file that `prompts.instruction_file` names. An absent file adds no part.
+   2. `repository`: the nonblank text of `prompts.repository`.
+   3. `binding`: the nonblank text of `prompts.agents[<agent-name>]`.
 5. `framing`: the rendered framing template, `framing-worker` or `framing-workbench`. It closes the system prompt.
 
 Each part holds the following fields:
 
-| Part field   | Type and meaning                                                                                                                      |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `layer`      | The prompt layer: `1` for `standard`, `role` and `workbench`, `3` for `binding`. `null` for `framing`.                                |
-| `part`       | One of `standard`, `role`, `workbench`, `binding` and `framing`.                                                                      |
-| `name`       | The file name of a file part, for example `base.md`. The template name of `framing`. The repository name of a `binding` part.         |
-| `origin`     | `binary` for a shipped text, `file` for an override file and `database` for a binding prompt.                                         |
-| `path`       | The override path that the server looked up, also for `binary`. `null` for `binding`, and when `agent_directory` is empty.            |
-| `binding_id` | The binding revision of a `binding` part. `null` otherwise.                                                                           |
-| `commit`     | `null` for every part of this answer.                                                                                                 |
-| `digest`     | The SHA-256 hex digest of `text`, with no heading.                                                                                    |
-| `heading`    | The line that the server writes before the text: `Binding prompt of repository <name>:` for a `binding` part. `null` for other parts. |
-| `state`      | `resolved` for every part of this answer.                                                                                             |
-| `text`       | The text of the part.                                                                                                                 |
+| Part field   | Type and meaning                                                                                                                                                                                                                                                                              |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `layer`      | The prompt layer: `1` for `standard`, `role` and `workbench`, `2` for `instruction_file` and `repository`, `3` for `binding`. `null` for `framing`.                                                                                                                                           |
+| `part`       | One of `standard`, `role`, `workbench`, `instruction_file`, `repository`, `binding` and `framing`.                                                                                                                                                                                            |
+| `name`       | The file name of a layer 1 part, for example `base.md`. The template name of `framing`. The repository name of a layer 2 or layer 3 part.                                                                                                                                                     |
+| `origin`     | `binary` for a shipped text, `file` for an override file, `database` for `repository` and `binding`, and `repository` for `instruction_file`.                                                                                                                                                 |
+| `path`       | The override path that the server looked up, also for `binary`. The repository path for `instruction_file`. `null` for `repository` and `binding`, and when `agent_directory` is empty.                                                                                                       |
+| `binding_id` | The binding revision of a layer 2 or layer 3 part. `null` otherwise.                                                                                                                                                                                                                          |
+| `commit`     | The commit of an `instruction_file` part, 40 or 64 lower-case hex. `null` for an unreachable head and for every other part.                                                                                                                                                                   |
+| `digest`     | The SHA-256 hex digest of `text`, with no heading. `null` for a part that the server cannot read.                                                                                                                                                                                             |
+| `heading`    | The line that the server writes before the text: `Repository prompt of repository <name>, file <path>:` for `instruction_file`, `Repository prompt of repository <name>, set in KanthorD:` for `repository` and `Binding prompt of repository <name>:` for `binding`. `null` for other parts. |
+| `state`      | `resolved`, or for an `instruction_file` part `unreachable` when the read of the remote fails or exceeds its deadline, and `invalid` when the file is too large, not UTF-8, unreadable or holds a control character.                                                                          |
+| `text`       | The text of a `resolved` part. `null` otherwise.                                                                                                                                                                                                                                              |
 
 A file of the same name in `agent.prompt.agent_directory` replaces the shipped text. The default directory is `<data>/agents` on the server host.
 An empty `agent_directory` selects the shipped texts only.
 A part with a heading renders as the heading, a blank line and the text.
-`final` holds every part in reading order. The `framing` part comes from the [prompt templates](#prompt-templates).
-The precedence is framing, then binding, then workbench, then role, then standard. A later text governs an earlier one.
+`final` holds every part in reading order, and it is `null` when a part is not `resolved`. The `framing` part comes from the [prompt templates](#prompt-templates).
+The precedence is framing, then binding, then the stored repository prompt, then the instruction file, then workbench, then role, then standard. A later text governs an earlier one.
 With `--view final`, `parts` is absent.
 
 An override file that is not a regular UTF-8 file, exceeds 32768 bytes or holds a control character answers `409 agent.prompt.template_invalid`.
@@ -174,6 +181,7 @@ An invalid template answers `409 agent.prompt.template_invalid` with the details
 ```sh
 kanthord agent get swe@1 --view final
 kanthord agent get swe@1 --project project_01ARZ3NDEKTSV4RRFFQ69G5FAV --binding-id binding_01ARZ3NDEKTSV4RRFFQ69G5FAV
+kanthord agent get re@1 --node node_01ARZ3NDEKTSV4RRFFQ69G5FAV --attempt 2 --view final
 ```
 
 The binding prompts of a repository binding belong to [Project](./project.md#repository-configuration--proposed-fields).
@@ -394,8 +402,10 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 400   | `agent.enablement.unavailable`                            | The agent lacks a live enabled configuration.                                                                                                                                                                                                                   | binding apply, agent configuration reads, handover, worker.execution.setup.get (API only)                                                         |
 | 404   | `agent.catalog.not_found`                                 | The agent name is absent from the agent catalog.                                                                                                                                                                                                                | agent enablement put, agent enablement enable, agent enablement disable, agent enablement remove, agent enablement provider model list, agent get |
 | 404   | `project.binding.not_found`                               | The `--binding-id` value names no repository binding of the `--project` value.                                                                                                                                                                                  | agent get                                                                                                                                         |
+| 404   | `mission.node.not_found`                                  | The `--node` value names no mission node.                                                                                                                                                                                                                       | agent get                                                                                                                                         |
+| 404   | `mission.record.not_found`                                | The node holds no attempt, or no attempt `--attempt`.                                                                                                                                                                                                           | agent get                                                                                                                                         |
 | 409   | `agent.prompt.template_invalid`                           | An override file or a prompt template is invalid; details `{ file, path, reason }`, and `template` for a template.                                                                                                                                              | agent get                                                                                                                                         |
-| 400   | `gateway.request.validation_failed`                       | The request violates the input schema, for example a `view` value other than `final`.                                                                                                                                                                           | agent get                                                                                                                                         |
+| 400   | `gateway.request.validation_failed`                       | The request violates the input schema, for example a `view` value other than `final`, `attempt` without `node_id`, or `node_id` with `project_id` or `binding_id`.                                                                                              | agent get                                                                                                                                         |
 
 `error.details` names the agent and lists affected bindings or other dependents when applicable. No error holds secret material.
 

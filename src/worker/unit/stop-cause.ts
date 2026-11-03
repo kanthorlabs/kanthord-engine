@@ -11,6 +11,9 @@ import {
   ExecutionStopReason,
   ProviderFailure,
 } from "../../scheduler/contract.ts";
+import { AgentErrorCode, PromptSourceReason } from "../../agent/contract.ts";
+import { ProjectErrorCode } from "../../project/contract.ts";
+import { WorkerErrorCode } from "../contract.ts";
 import { GitStep } from "./git-step.ts";
 import {
   GIT_COMMIT_FAILED,
@@ -45,10 +48,25 @@ const environmentSubcategories: Readonly<Record<string, CauseSubcategory>> = {
   [EnvironmentFailure.AffectedTimeout]: CauseSubcategory.AffectedTimeout,
 };
 
+const promptRecordCodes: readonly string[] = [
+  WorkerErrorCode.ExecutionPromptNotPinned,
+  WorkerErrorCode.ExecutionPromptRecordFailed,
+];
+
 const modelFaultCodes: readonly string[] = [
   ...Object.values(TurnViolation),
   MERGE_MARKERS_LEFT,
 ];
+
+const sourceInvalidDetailSchema = z.looseObject({
+  reason: z.string().min(1),
+});
+
+export function codedStopDetail(code: string, details: unknown): string | null {
+  if (code !== AgentErrorCode.PromptSourceInvalid) return null;
+  const parsed = sourceInvalidDetailSchema.safeParse(details);
+  return parsed.success ? parsed.data.reason : null;
+}
 
 function isTimedOut(detail: string | null, signals: StopSignals): boolean {
   if (detail === null) return signals.verification_timed_out;
@@ -90,6 +108,7 @@ function environmentCauseOf(code: string | null): FailureCause {
 
 function operationCauseOf(
   code: string | null,
+  detail: string | null,
   gitStep: GitStep | null,
 ): FailureCause {
   if (gitStep === GitStep.FetchBase || gitStep === GitStep.Push)
@@ -107,6 +126,19 @@ function operationCauseOf(
       CauseCategory.Infrastructure,
       CauseSubcategory.VerificationKilled,
     );
+  if (code === AgentErrorCode.PromptSourceInvalid)
+    return detail === PromptSourceReason.Changed
+      ? attributed(CauseCategory.Infrastructure, CauseSubcategory.PromptRecord)
+      : attributed(CauseCategory.Prompt, CauseSubcategory.SourceInvalid);
+  if (code !== null && promptRecordCodes.includes(code))
+    return attributed(
+      CauseCategory.Infrastructure,
+      CauseSubcategory.PromptRecord,
+    );
+  if (code === ProjectErrorCode.RepositorySshUnreachable)
+    return attributed(CauseCategory.Infrastructure, CauseSubcategory.Network);
+  if (code === ProjectErrorCode.RepositoryBaseBranchAbsent)
+    return attributed(CauseCategory.Human, CauseSubcategory.Configuration);
   if (code?.startsWith(BINDING_CODE_PREFIX))
     return attributed(CauseCategory.Human, CauseSubcategory.Configuration);
   if (code === GIT_COMMIT_FAILED)
@@ -161,7 +193,7 @@ export function stopCauseOf(
     case ExecutionStopReason.EnvironmentFailed:
       return environmentCauseOf(code);
     case ExecutionStopReason.OperationFailed:
-      return operationCauseOf(code, signals.git_step);
+      return operationCauseOf(code, detail, signals.git_step);
     case ExecutionStopReason.NoProgress:
       return noProgressCauseOf(isTimedOut(detail, signals));
     case ExecutionStopReason.BudgetEnd:

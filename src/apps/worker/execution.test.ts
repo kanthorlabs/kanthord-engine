@@ -183,7 +183,7 @@ test("host takes handover before setup and method, discards on every method end"
         position: 0,
         level: ChainLevel.Enablement,
         metadata: null,
-        prompt: { final: "setup prompt" },
+        prompt: { final: "setup prompt", sources: [] },
       },
     ],
     templates: SHIPPED_TEMPLATES,

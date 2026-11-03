@@ -22,6 +22,7 @@ import { checkoutConfinement } from "../agent/hooks/checkout-confinement.ts";
 import { loadPi } from "../agent/pi.ts";
 import type {
   AgentView,
+  InstructionFileReader,
   PromptPartAnswer,
   PromptTemplates,
 } from "../agent/contract.ts";
@@ -30,6 +31,7 @@ import {
   PromptConsumer,
   systemPrompt,
 } from "../agent/prompt-render.ts";
+import { pinnedInstructionFiles } from "../agent/instruction-files.ts";
 import {
   connectModel,
   type ModelConnectorInput,
@@ -76,6 +78,7 @@ export interface EnvironmentAgentDependencies {
     tx: Transaction,
     bindingId: string,
   ): Pick<RepositoryPolicy, "binding_id" | "name" | "prompts"> | null;
+  instructionFileOf: InstructionFileReader;
   templates(context: Context): Promise<PromptTemplates>;
   exportRepository(
     bindingId: string,
@@ -228,6 +231,20 @@ export class EnvironmentAgent {
     const repository = this.dependencies.store.transaction((tx) =>
       this.dependencies.repositoryPromptsOf(tx, input.binding_id),
     );
+    const files =
+      repository?.prompts.instruction_file === undefined
+        ? new Map()
+        : await pinnedInstructionFiles(
+            [
+              {
+                binding_id: repository.binding_id,
+                name: repository.name,
+                commit: input.commit,
+              },
+            ],
+            this.dependencies.instructionFileOf,
+            input.context,
+          );
     let ended = false;
     const customTools = input.tools({
       session_id: sessionId,
@@ -244,7 +261,11 @@ export class EnvironmentAgent {
       systemPrompt: systemPrompt(
         [
           ...parts,
-          ...bindingParts(repository ? [repository] : [], ENV_AGENT_NAME),
+          ...bindingParts(
+            repository ? [repository] : [],
+            ENV_AGENT_NAME,
+            files,
+          ),
         ],
         PromptConsumer.Worker,
         templates,

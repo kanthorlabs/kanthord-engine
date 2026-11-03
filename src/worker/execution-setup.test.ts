@@ -16,11 +16,16 @@ import { join } from "node:path";
 import {
   AgentErrorCode,
   ChainLevel,
+  type InstructionFileReader,
+  InstructionFileState,
   PromptOrigin,
   PromptPart,
   type PromptPartAnswer,
   PromptPartState,
+  PromptSourceReason,
 } from "../agent/contract.ts";
+import type { PromptCommits } from "./contract.ts";
+import { packageVersion } from "../kernel/version.ts";
 import { getAgentDeclaration } from "../agent/catalog.ts";
 import { resolveAgentPrompt } from "../agent/prompt-files.ts";
 import { stopAfter, temporary } from "../kernel/test-support.ts";
@@ -32,6 +37,8 @@ import {
 } from "../agent/prompt-render.ts";
 import {
   anthropicSetup,
+  memoryPromptTelemetry,
+  shippedFraming,
   TEST_SSH_PUBLIC_KEY,
   TWO_AGENT_WORKER,
   twoAgentDeclarationOf,
@@ -39,7 +46,7 @@ import {
 import { WorkerErrorCode } from "./contract.ts";
 import { digest } from "../agent/prompt-composer.ts";
 import type { Dependencies } from "./service.ts";
-import type { AgentPromptFacts } from "./prompt-telemetry.ts";
+import { promptReference } from "./prompt-telemetry.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 import { ExecutionIntent, InstancePlacement } from "./contract.ts";
 import type { AgentSelection } from "../scheduler/contract.ts";
@@ -52,7 +59,11 @@ import {
   RepositoryErrorCode,
 } from "../repository/contract.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import { ProjectErrorCode, RepositoryPlatform } from "../project/contract.ts";
+import {
+  InstructionFileReason,
+  ProjectErrorCode,
+  RepositoryPlatform,
+} from "../project/contract.ts";
 import {
   Onboarding,
   type OnboardingDependencies,
@@ -88,6 +99,7 @@ const OVERRIDE_TEXT = "Write the smallest complete change.";
 const INVALID_OVERRIDE_TEXT = "bell\u0007";
 const SECOND_SWE_TEXT = "Keep the web bundle small.";
 const RE_BINDING_TEXT = "Treat a missing changelog entry as a blocker.";
+const REPOSITORY_TEXT = "A test file sits beside its source file.";
 
 function partOf(
   part: PromptPart,
@@ -108,6 +120,13 @@ function partOf(
     text,
   );
 }
+
+const NO_PROMPT_PINS = {
+  attemptPromptCommits: () => null,
+  pinPromptCommits: () => {
+    throw new Error("UNEXPECTED_COLLABORATION");
+  },
+};
 
 const promptParts = [
   partOf(PromptPart.Standard, "base.md", STANDARD_TEXT),
@@ -163,9 +182,11 @@ test("setup answers the system and agent prompt after its single snapshot and su
   const digested: string[][] = [];
   const dependencies = {
     store,
-    promptTelemetry: { agentPrompted: () => {} },
+    promptTelemetry: memoryPromptTelemetry(),
+    missionPromptPins: NO_PROMPT_PINS,
     agentPrompt: {
       templates: async () => SHIPPED_TEMPLATES,
+      framing: async () => shippedFraming(),
       compose: async (agentName: string) => {
         composed.push(agentName);
         return promptParts;
@@ -253,6 +274,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
   assert.ok(answered);
   assert.deepEqual(answered.prompt, {
     final: systemPrompt(promptParts, PromptConsumer.Worker, SHIPPED_TEMPLATES),
+    sources: [...promptParts, shippedFraming()].map(promptReference),
   });
   assert.ok(
     answered.prompt.final.endsWith(
@@ -295,9 +317,11 @@ test("setup answers the system and agent prompt after its single snapshot and su
   writeFileSync(overridePath, OVERRIDE_TEXT);
   const resolving = {
     ...dependencies,
-    promptTelemetry: { agentPrompted: () => {} },
+    promptTelemetry: memoryPromptTelemetry(),
+    missionPromptPins: NO_PROMPT_PINS,
     agentPrompt: {
       templates: async () => SHIPPED_TEMPLATES,
+      framing: async () => shippedFraming(),
       compose: (agentName: string) =>
         resolveAgentPrompt({
           agent: getAgentDeclaration(agentName)!,
@@ -315,7 +339,8 @@ test("setup answers the system and agent prompt after its single snapshot and su
     ),
   );
   writeFileSync(overridePath, INVALID_OVERRIDE_TEXT);
-  await assert.rejects(executionSetup(resolving, worker, caller), {
+  const fresh = { ...resolving, promptTelemetry: memoryPromptTelemetry() };
+  await assert.rejects(executionSetup(fresh, worker, caller), {
     status: HttpStatus.Conflict,
     code: AgentErrorCode.PromptTemplateInvalid,
     details: {
@@ -330,6 +355,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
   const pinned = await executionSetup(
     {
       ...dependencies,
+      promptTelemetry: memoryPromptTelemetry(),
       repositoryBindingIdsOf: () => [bindingId],
       intentOf: () => ExecutionIntent.Implement,
       repositoryPolicyOf: () => ({
@@ -362,6 +388,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
     executionSetup(
       {
         ...dependencies,
+        promptTelemetry: memoryPromptTelemetry(),
         repositoryBindingIdsOf: () => [bindingId],
         repositoryPolicyOf: () => ({
           binding_id: bindingId,
@@ -400,6 +427,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
       await executionSetup(
         {
           ...dependencies,
+          promptTelemetry: memoryPromptTelemetry(),
           environmentOf: () => recorded,
           repositoryBindingIdsOf: () => [bindingId],
           repositoryPolicyOf: () => ({
@@ -464,6 +492,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
     await executionSetup(
       {
         ...dependencies,
+        promptTelemetry: memoryPromptTelemetry(),
         workerBindingRowOf: () => ({
           ...dependencies.workerBindingRowOf(),
           environment: API_IDENTITY,
@@ -514,9 +543,11 @@ test("setup claims no environment for a container slot whose worker binding name
   await executionSetup(
     {
       store,
-      promptTelemetry: { agentPrompted: () => {} },
+      promptTelemetry: memoryPromptTelemetry(),
+      missionPromptPins: NO_PROMPT_PINS,
       agentPrompt: {
         templates: async () => SHIPPED_TEMPLATES,
+        framing: async () => shippedFraming(),
         compose: async () => promptParts,
       },
       workerBindingRowOf: () => ({
@@ -617,9 +648,11 @@ test("one binding that lists a server and a container instance claims the enviro
     await executionSetup(
       {
         store,
-        promptTelemetry: { agentPrompted: () => {} },
+        promptTelemetry: memoryPromptTelemetry(),
+        missionPromptPins: NO_PROMPT_PINS,
         agentPrompt: {
           templates: async () => SHIPPED_TEMPLATES,
+          framing: async () => shippedFraming(),
           compose: async () => promptParts,
         },
         workerBindingRowOf: () => ({
@@ -726,9 +759,11 @@ test("setup of a container worker binding with an environment claims inside a re
   const answer = await executionSetup(
     {
       store,
-      promptTelemetry: { agentPrompted: () => {} },
+      promptTelemetry: memoryPromptTelemetry(),
+      missionPromptPins: NO_PROMPT_PINS,
       agentPrompt: {
         templates: async () => SHIPPED_TEMPLATES,
+        framing: async () => shippedFraming(),
         compose: async () => promptParts,
       },
       workerBindingRowOf: () => ({
@@ -816,10 +851,25 @@ test("setup of a container worker binding with an environment claims inside a re
   assert.deepEqual(failures, []);
 });
 
+interface TwoAgentOptions {
+  promptTelemetry?: Dependencies["promptTelemetry"];
+  instructionFile?: string;
+  pins?: (attempt: number) => PromptCommits | null;
+  readFile?: InstructionFileReader;
+  compose?: (agentName: string) => PromptPartAnswer[];
+}
+
 async function twoAgentAnswer(
   t: TestContext,
   promptTelemetry: Dependencies["promptTelemetry"],
 ) {
+  const f = twoAgentFixture(t, { promptTelemetry });
+  return { ...f, answer: await f.run() };
+}
+
+function twoAgentFixture(t: TestContext, options: TwoAgentOptions = {}) {
+  const promptTelemetry = options.promptTelemetry ?? memoryPromptTelemetry();
+  const composed: string[] = [];
   const store = new Store(":memory:");
   stopAfter(t, () => store.close());
   const setup = anthropicSetup();
@@ -847,11 +897,24 @@ async function twoAgentAnswer(
   };
   const policies: Record<
     string,
-    { name: string; prompts: { agents: Record<string, string> } }
+    {
+      name: string;
+      prompts: {
+        instruction_file?: string;
+        repository?: string;
+        agents: Record<string, string>;
+      };
+    }
   > = {
     [createIdentity("binding")]: {
       name: "api",
       prompts: {
+        ...(options.instructionFile === undefined
+          ? {}
+          : {
+              instruction_file: options.instructionFile,
+              repository: REPOSITORY_TEXT,
+            }),
         agents: { "swe@1": SWE_BINDING_TEXT, "re@1": RE_BINDING_TEXT },
       },
     },
@@ -867,108 +930,138 @@ async function twoAgentAnswer(
     execution: claim,
     commit: (fn) => store.transaction(fn),
   };
-  const answer = await executionSetup(
-    {
-      store,
-      promptTelemetry,
-      agentPrompt: {
-        templates: async () => SHIPPED_TEMPLATES,
-        compose: async (agentName: string) => [
-          partOf(PromptPart.Role, `${agentName}.md`, agentName),
-        ],
+  const run = (attempt = claim.attempt, executionId = claim.executionId) =>
+    executionSetup(
+      {
+        store,
+        promptTelemetry,
+        missionPromptPins: {
+          attemptPromptCommits: (_tx, nodeId, pinnedAttempt) => {
+            assert.deepEqual([nodeId, pinnedAttempt], [claim.nodeId, attempt]);
+            return options.pins?.(pinnedAttempt) ?? null;
+          },
+          pinPromptCommits: () => {
+            throw new Error("UNEXPECTED_COLLABORATION");
+          },
+        },
+        promptBase: {
+          instructionBindingsOf: () => {
+            throw new Error("UNEXPECTED_COLLABORATION");
+          },
+          baseCommitOf: () => {
+            throw new Error("UNEXPECTED_COLLABORATION");
+          },
+          instructionFileOf: async (bindingId, commit, context) => {
+            assert.ok(options.readFile);
+            return options.readFile(bindingId, commit, context);
+          },
+        },
+        agentPrompt: {
+          templates: async () => SHIPPED_TEMPLATES,
+          framing: async () => shippedFraming(),
+          compose: async (agentName: string) => {
+            composed.push(agentName);
+            return (
+              options.compose?.(agentName) ?? [
+                partOf(PromptPart.Role, `${agentName}.md`, agentName),
+              ]
+            );
+          },
+        },
+        workerBindingRowOf: () => ({
+          binding_id: claim.workerBindingId,
+          project_id: claim.projectId,
+          resource_identity: `worker:${TWO_AGENT_WORKER}`,
+          tombstone: false,
+          disabled: false,
+          placement: InstancePlacement.Server,
+          worker_instances: [],
+          worker_name: TWO_AGENT_WORKER,
+          entries: [],
+          resource_budget: null,
+        }),
+        pinnedCredentialMetadata: (_tx, _claim, name) => ({
+          id: credentialIds[name]!,
+          name,
+          platform: "anthropic",
+          metadata: null,
+        }),
+        environmentClaimed: () => {},
+        environmentDigestOf: () => ENVIRONMENT_DIGEST,
+        environmentOf: () => null,
+        repositoryBindingIdsOf: (_tx, nodeId, pinnedRevision) => {
+          assert.deepEqual(
+            [nodeId, pinnedRevision],
+            [claim.nodeId, claim.pinnedRevision],
+          );
+          return Object.keys(policies);
+        },
+        intentOf: () => ExecutionIntent.Implement,
+        repositoryPolicyOf: (_tx, id) => ({
+          binding_id: id,
+          resource_identity: REPOSITORY_IDENTITY,
+          name: policies[id]!.name,
+          address: "git@github.com:kanthorlabs/api.git",
+          platform: RepositoryPlatform.GitHub,
+          ssh_credential: SSH_CREDENTIAL,
+          base_branch: "main",
+          prompts: policies[id]!.prompts,
+          environment: null,
+          repository_environment: false,
+        }),
+        sshHostKeysOf: () => `github.com ${HOST_KEY}\n`,
+        custodyHandover: publicKeyCustody,
+        schedulerClaims: {
+          agentSelectionsOf: () =>
+            Object.entries(credentials).map(([agent, credential]) => ({
+              agent_name: agent,
+              position: 0,
+              level: ChainLevel.Enablement,
+              agent_provider: "default",
+              provider: "anthropic",
+              credential,
+              model_identifier: "claude-sonnet-4-5",
+              reasoning_effort: "off",
+            })),
+          agentPinsOf: () => ({
+            worker_binding_id: claim.workerBindingId,
+            pins: Object.keys(credentials).map((agent, position) => ({
+              agent_name: agent,
+              enablement_id: enablementIds[agent]!,
+              position,
+            })),
+          }),
+        },
       },
-      workerBindingRowOf: () => ({
-        binding_id: claim.workerBindingId,
-        project_id: claim.projectId,
-        resource_identity: `worker:${TWO_AGENT_WORKER}`,
-        tombstone: false,
-        disabled: false,
-        placement: InstancePlacement.Server,
-        worker_instances: [],
-        worker_name: TWO_AGENT_WORKER,
-        entries: [],
-        resource_budget: null,
-      }),
-      pinnedCredentialMetadata: (_tx, _claim, name) => ({
-        id: credentialIds[name]!,
-        name,
-        platform: "anthropic",
-        metadata: null,
-      }),
-      environmentClaimed: () => {},
-      environmentDigestOf: () => ENVIRONMENT_DIGEST,
-      environmentOf: () => null,
-      repositoryBindingIdsOf: (_tx, nodeId, pinnedRevision) => {
-        assert.deepEqual(
-          [nodeId, pinnedRevision],
-          [claim.nodeId, claim.pinnedRevision],
-        );
-        return Object.keys(policies);
-      },
-      intentOf: () => ExecutionIntent.Implement,
-      repositoryPolicyOf: (_tx, id) => ({
-        binding_id: id,
-        resource_identity: REPOSITORY_IDENTITY,
-        name: policies[id]!.name,
-        address: "git@github.com:kanthorlabs/api.git",
-        platform: RepositoryPlatform.GitHub,
-        ssh_credential: SSH_CREDENTIAL,
-        base_branch: "main",
-        prompts: policies[id]!.prompts,
-        environment: null,
-        repository_environment: false,
-      }),
-      sshHostKeysOf: () => `github.com ${HOST_KEY}\n`,
-      custodyHandover: publicKeyCustody,
-      schedulerClaims: {
-        agentSelectionsOf: () =>
-          Object.entries(credentials).map(([agent, credential]) => ({
-            agent_name: agent,
-            position: 0,
-            level: ChainLevel.Enablement,
-            agent_provider: "default",
-            provider: "anthropic",
-            credential,
-            model_identifier: "claude-sonnet-4-5",
-            reasoning_effort: "off",
-          })),
-        agentPinsOf: () => ({
-          worker_binding_id: claim.workerBindingId,
-          pins: Object.keys(credentials).map((agent, position) => ({
-            agent_name: agent,
-            enablement_id: enablementIds[agent]!,
-            position,
-          })),
+      {
+        declarationOf: twoAgentDeclarationOf,
+        placementOf: () => InstancePlacement.Server,
+        pinnedAgentView: (_tx, _worker, selection) => ({
+          effective: {
+            ...setup.agents[0]!.effective_configuration,
+            credential: selection.credential,
+          },
+          valid: true,
+          issues: [],
         }),
       },
-    },
-    {
-      declarationOf: twoAgentDeclarationOf,
-      placementOf: () => InstancePlacement.Server,
-      pinnedAgentView: (_tx, _worker, selection) => ({
-        effective: {
-          ...setup.agents[0]!.effective_configuration,
-          credential: selection.credential,
-        },
-        valid: true,
-        issues: [],
-      }),
-    },
-    caller,
-  );
+      { ...caller, execution: { ...claim, attempt, executionId } },
+    );
   return {
-    answer,
+    run,
+    composed,
+    promptTelemetry,
+    bindingIds: Object.keys(policies),
     credentialIds,
     enablementIds,
     workerBindingId: claim.workerBindingId,
+    executionId: claim.executionId,
   };
 }
 
 test("setup answers one entry per agent of a two-agent worker with its own prompt, binding prompts and pinned credential", async (t) => {
   const { answer, credentialIds, enablementIds, workerBindingId } =
-    await twoAgentAnswer(t, {
-      agentPrompted: () => {},
-    });
+    await twoAgentAnswer(t, memoryPromptTelemetry());
   assert.deepEqual(
     answer.agents.map((agent) => agent.agent_name),
     ["swe@1", "re@1"],
@@ -1008,43 +1101,334 @@ test("setup answers one entry per agent of a two-agent worker with its own promp
   assert.ok(!swe!.includes(RE_BINDING_TEXT));
 });
 
-test("setup reports the prompt facts of each native agent once and survives a failing report", async (t) => {
-  const reported: [string, AgentPromptFacts][] = [];
-  const { answer } = await twoAgentAnswer(t, {
-    agentPrompted: (executionId, facts) => {
-      reported.push([executionId, facts]);
-    },
-  });
-  assert.deepEqual(
-    reported.map(([executionId]) => executionId),
-    [answer.execution_id, answer.execution_id],
+test("setup records the references of each native agent once, with the engine version and no text", async (t) => {
+  const telemetry = memoryPromptTelemetry();
+  const { answer } = await twoAgentAnswer(t, telemetry);
+  const [swe, re] = ["swe@1", "re@1"].map((agentName) =>
+    telemetry.promptRecordOf(answer.execution_id, agentName),
   );
-  assert.deepEqual(
-    reported.map(([, facts]) => facts.agent_name),
-    ["swe@1", "re@1"],
-  );
-  const [swe, re] = reported.map(([, facts]) => facts);
   const empty = "0".repeat(64);
-  assert.deepEqual(swe!.parts, [
-    `role:swe@1.md:${empty}`,
-    `binding:api:${digest(SWE_BINDING_TEXT)}`,
-    `binding:web:${digest(SECOND_SWE_TEXT)}`,
-  ]);
-  assert.deepEqual(re!.parts, [
-    `role:re@1.md:${empty}`,
-    `binding:api:${digest(RE_BINDING_TEXT)}`,
-  ]);
-  assert.equal(swe!.templates_digest, re!.templates_digest);
-  const failing = await twoAgentAnswer(t, {
-    agentPrompted: () => {
-      throw new Error("TRACKING_DOWN");
-    },
-  });
+  const framingDigest = shippedFraming().digest;
   assert.deepEqual(
-    failing.answer.agents.map((agent) => agent.prompt),
-    answer.agents.map((agent) => agent.prompt),
+    swe!.sources.map(({ part, name, digest }) => [part, name, digest]),
+    [
+      [PromptPart.Role, "swe@1.md", empty],
+      [PromptPart.Binding, "api", digest(SWE_BINDING_TEXT)],
+      [PromptPart.Binding, "web", digest(SECOND_SWE_TEXT)],
+      [PromptPart.Framing, "framing-worker", framingDigest],
+    ],
+  );
+  assert.deepEqual(
+    re!.sources.map(({ part, name, digest }) => [part, name, digest]),
+    [
+      [PromptPart.Role, "re@1.md", empty],
+      [PromptPart.Binding, "api", digest(RE_BINDING_TEXT)],
+      [PromptPart.Framing, "framing-worker", framingDigest],
+    ],
+  );
+  assert.deepEqual(
+    answer.agents.map(({ prompt }) => prompt.sources),
+    [swe!.sources, re!.sources],
+  );
+  assert.equal(swe!.engine_version, packageVersion());
+  assert.equal(swe!.templates_digest, re!.templates_digest);
+  assert.ok(!JSON.stringify([swe, re]).includes(SWE_BINDING_TEXT));
+});
+
+test("a failed span write or a writer that stores no record fails the setup with prompt_record_failed", async (t) => {
+  const refusal = {
+    status: HttpStatus.ServiceUnavailable,
+    code: WorkerErrorCode.ExecutionPromptRecordFailed,
+    details: { agent_name: "swe@1" },
+  };
+  await assert.rejects(
+    twoAgentAnswer(t, {
+      agentPrompted: () => {
+        throw new Error("TRACKING_DOWN");
+      },
+      promptRecordOf: () => null,
+    }),
+    refusal,
+  );
+  await assert.rejects(
+    twoAgentAnswer(t, {
+      agentPrompted: () => {},
+      promptRecordOf: () => null,
+    }),
+    refusal,
   );
 });
+
+const SSH_UNREACHABLE_STATUS = 422;
+const FIRST_ATTEMPT = 1;
+const SECOND_ATTEMPT = 2;
+const PINNED_COMMIT = "a".repeat(40);
+const MOVED_COMMIT = "b".repeat(40);
+const INSTRUCTION_PATH = "AGENTS.md";
+const PINNED_TEXT = "Write every name outside the code in snake_case.";
+const MOVED_TEXT = "Write every name outside the code in camelCase.";
+
+function filesAt(
+  texts: Record<string, string>,
+  reads: string[] = [],
+): InstructionFileReader {
+  return async (_bindingId, commit) => {
+    reads.push(commit);
+    const text = texts[commit];
+    assert.ok(text !== undefined);
+    return {
+      path: INSTRUCTION_PATH,
+      commit,
+      state: InstructionFileState.Present,
+      reason: null,
+      text,
+    };
+  };
+}
+
+test("setup composes the instruction file at the pinned commit and the stored repository prompt under their headings after the base moves", async (t) => {
+  const reads: string[] = [];
+  const f = twoAgentFixture(t, {
+    instructionFile: INSTRUCTION_PATH,
+    pins: () => [{ binding_id: bindingOf(f), commit: PINNED_COMMIT }],
+    readFile: filesAt(
+      { [PINNED_COMMIT]: PINNED_TEXT, [MOVED_COMMIT]: MOVED_TEXT },
+      reads,
+    ),
+  });
+  const answer = await f.run();
+  assert.deepEqual(reads, [PINNED_COMMIT]);
+  const [swe, re] = answer.agents.map(({ prompt }) => prompt.final);
+  const layerTwo = [
+    `Repository prompt of repository api, file ${INSTRUCTION_PATH}:\n\n${PINNED_TEXT}`,
+    `Repository prompt of repository api, set in KanthorD:\n\n${REPOSITORY_TEXT}`,
+  ].join("\n\n");
+  assert.ok(
+    swe!.includes(`swe@1\n\n${layerTwo}\n\nBinding prompt of repository api:`),
+  );
+  assert.ok(
+    re!.includes(`re@1\n\n${layerTwo}\n\nBinding prompt of repository api:`),
+  );
+  assert.ok(!swe!.includes(MOVED_TEXT));
+  const file = answer.agents[0]!.prompt.sources[1]!;
+  assert.deepEqual(file, {
+    part: PromptPart.InstructionFile,
+    name: "api",
+    origin: PromptOrigin.Repository,
+    path: INSTRUCTION_PATH,
+    binding_id: bindingOf(f),
+    commit: PINNED_COMMIT,
+    digest: digest(PINNED_TEXT),
+  });
+});
+
+test("a new attempt reads the instruction file at its own pinned commit", async (t) => {
+  const reads: string[] = [];
+  const f = twoAgentFixture(t, {
+    instructionFile: INSTRUCTION_PATH,
+    pins: (attempt) => [
+      {
+        binding_id: bindingOf(f),
+        commit: attempt === FIRST_ATTEMPT ? PINNED_COMMIT : MOVED_COMMIT,
+      },
+    ],
+    readFile: filesAt(
+      { [PINNED_COMMIT]: PINNED_TEXT, [MOVED_COMMIT]: MOVED_TEXT },
+      reads,
+    ),
+  });
+  const first = await f.run(FIRST_ATTEMPT);
+  const second = await f.run(SECOND_ATTEMPT, createIdentity("execution"));
+  assert.deepEqual(reads, [PINNED_COMMIT, MOVED_COMMIT]);
+  assert.ok(first.agents[0]!.prompt.final.includes(PINNED_TEXT));
+  assert.ok(second.agents[0]!.prompt.final.includes(MOVED_TEXT));
+});
+
+test("a node-branch change of the instruction file changes no prompt, because the setup reads only the pinned commit", async (t) => {
+  const nodeBranchHead = "d".repeat(40);
+  const reads: string[] = [];
+  const f = twoAgentFixture(t, {
+    instructionFile: INSTRUCTION_PATH,
+    pins: () => [{ binding_id: bindingOf(f), commit: PINNED_COMMIT }],
+    readFile: filesAt(
+      { [PINNED_COMMIT]: PINNED_TEXT, [nodeBranchHead]: MOVED_TEXT },
+      reads,
+    ),
+  });
+  const answer = await f.run();
+  assert.deepEqual(reads, [PINNED_COMMIT]);
+  assert.ok(!answer.agents[0]!.prompt.final.includes(MOVED_TEXT));
+});
+
+test("an absent instruction file adds no part", async (t) => {
+  const f = twoAgentFixture(t, {
+    instructionFile: INSTRUCTION_PATH,
+    pins: () => [{ binding_id: bindingOf(f), commit: PINNED_COMMIT }],
+    readFile: async (_bindingId, commit) => ({
+      path: INSTRUCTION_PATH,
+      commit,
+      state: InstructionFileState.Absent,
+      reason: null,
+      text: null,
+    }),
+  });
+  const answer = await f.run();
+  assert.deepEqual(
+    answer.agents[0]!.prompt.sources.map(({ part }) => part),
+    [
+      PromptPart.Role,
+      PromptPart.Repository,
+      PromptPart.Binding,
+      PromptPart.Binding,
+      PromptPart.Framing,
+    ],
+  );
+});
+
+for (const reason of [
+  InstructionFileReason.TooLarge,
+  InstructionFileReason.NotUtf8,
+  InstructionFileReason.Unreadable,
+  InstructionFileReason.ControlCharacter,
+])
+  test(`an instruction file that is ${reason} at the pinned commit answers 409 source_invalid`, async (t) => {
+    const f = twoAgentFixture(t, {
+      instructionFile: INSTRUCTION_PATH,
+      pins: () => [{ binding_id: bindingOf(f), commit: PINNED_COMMIT }],
+      readFile: async (_bindingId, commit) => ({
+        path: INSTRUCTION_PATH,
+        commit,
+        state: InstructionFileState.Invalid,
+        reason,
+        text: null,
+      }),
+    });
+    await assert.rejects(f.run(), {
+      status: HttpStatus.Conflict,
+      code: AgentErrorCode.PromptSourceInvalid,
+      details: {
+        part: PromptPart.InstructionFile,
+        name: "api",
+        binding_id: bindingOf(f),
+        path: INSTRUCTION_PATH,
+        commit: PINNED_COMMIT,
+        reason,
+      },
+    });
+  });
+
+test("a failed read of the pinned commit answers its project code", async (t) => {
+  const f = twoAgentFixture(t, {
+    instructionFile: INSTRUCTION_PATH,
+    pins: () => [{ binding_id: bindingOf(f), commit: PINNED_COMMIT }],
+    readFile: async () => {
+      throw new OperationError(
+        SSH_UNREACHABLE_STATUS,
+        ProjectErrorCode.RepositorySshUnreachable,
+        "Repository is unreachable.",
+        { failure_reason: "deadline_exceeded" },
+      );
+    },
+  });
+  await assert.rejects(f.run(), {
+    code: ProjectErrorCode.RepositorySshUnreachable,
+  });
+});
+
+test("a binding that names an instruction file answers 409 prompt_not_pinned with a null pin and with a pin that holds no entry for it", async (t) => {
+  for (const pin of [
+    null,
+    [{ binding_id: "binding_other", commit: PINNED_COMMIT }],
+  ]) {
+    const f = twoAgentFixture(t, {
+      instructionFile: INSTRUCTION_PATH,
+      pins: () => pin,
+      readFile: async () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
+    });
+    await assert.rejects(f.run(), {
+      status: HttpStatus.Conflict,
+      code: WorkerErrorCode.ExecutionPromptNotPinned,
+      details: { binding_id: bindingOf(f) },
+    });
+    assert.deepEqual(f.composed, []);
+  }
+});
+
+test("a retried setup answers the text of the stored span and composes nothing", async (t) => {
+  const f = twoAgentFixture(t, {
+    instructionFile: INSTRUCTION_PATH,
+    pins: () => [{ binding_id: bindingOf(f), commit: PINNED_COMMIT }],
+    readFile: filesAt({ [PINNED_COMMIT]: PINNED_TEXT }),
+    compose: (agentName) => [
+      promptPart(
+        {
+          part: PromptPart.Role,
+          name: `${agentName}.md`,
+          origin: PromptOrigin.Binary,
+          path: null,
+          binding_id: null,
+          commit: null,
+          digest: digest(getAgentDeclaration(agentName)!.agent_prompt),
+        },
+        PromptPartState.Resolved,
+        getAgentDeclaration(agentName)!.agent_prompt,
+      ),
+    ],
+  });
+  const first = await f.run();
+  const recorded = f.composed.length;
+  const retried = await f.run();
+  assert.equal(f.composed.length, recorded);
+  assert.deepEqual(
+    retried.agents.map(({ prompt }) => prompt),
+    first.agents.map(({ prompt }) => prompt),
+  );
+});
+
+test("a retried setup after an agent-directory edit answers 409 source_invalid with reason changed", async (t) => {
+  const directory = temporary(t);
+  const file = join(directory, "swe@1.md");
+  writeFileSync(file, OVERRIDE_TEXT);
+  const f = twoAgentFixture(t, {
+    compose: (agentName) => [
+      promptPart(
+        {
+          part: PromptPart.Role,
+          name: `${agentName}.md`,
+          origin: PromptOrigin.File,
+          path: file,
+          binding_id: null,
+          commit: null,
+          digest: digest(OVERRIDE_TEXT),
+        },
+        PromptPartState.Resolved,
+        OVERRIDE_TEXT,
+      ),
+    ],
+  });
+  await f.run();
+  writeFileSync(file, SECOND_SWE_TEXT);
+  await assert.rejects(f.run(), {
+    status: HttpStatus.Conflict,
+    code: AgentErrorCode.PromptSourceInvalid,
+    details: {
+      part: PromptPart.Role,
+      name: "swe@1.md",
+      binding_id: null,
+      path: file,
+      commit: null,
+      reason: PromptSourceReason.Changed,
+    },
+  });
+});
+
+function bindingOf(f: { bindingIds: string[] }): string {
+  const [bindingId] = f.bindingIds;
+  assert.ok(bindingId);
+  return bindingId;
+}
 
 async function repositorySetup(t: TestContext, address: string, pin: boolean) {
   const store = new Store(":memory:");
@@ -1083,9 +1467,11 @@ async function repositorySetup(t: TestContext, address: string, pin: boolean) {
   return executionSetup(
     {
       store,
-      promptTelemetry: { agentPrompted: () => {} },
+      promptTelemetry: memoryPromptTelemetry(),
+      missionPromptPins: NO_PROMPT_PINS,
       agentPrompt: {
         templates: async () => SHIPPED_TEMPLATES,
+        framing: async () => shippedFraming(),
         compose: async () => promptParts,
       },
       workerBindingRowOf: () => ({

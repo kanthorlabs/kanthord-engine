@@ -10,6 +10,7 @@ import {
   StoreName,
 } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
+import type { Context } from "../kernel/context.ts";
 import { SERVER_HOLDER } from "../custody/contract.ts";
 import {
   AdvancingProviderFailure,
@@ -75,6 +76,30 @@ export const InstructionFileState = {
 } as const;
 export type InstructionFileState =
   (typeof InstructionFileState)[keyof typeof InstructionFileState];
+
+export interface InstructionFileSource {
+  path: string;
+  commit: string;
+  state: Exclude<InstructionFileState, typeof InstructionFileState.Unreachable>;
+  reason: string | null;
+  text: string | null;
+}
+
+export type InstructionFileReader = (
+  bindingId: string,
+  commit: string,
+  context: Context,
+) => Promise<InstructionFileSource | null>;
+
+export const PromptSourceReason = {
+  TooLarge: "too_large",
+  NotUtf8: "not_utf8",
+  Unreadable: "unreadable",
+  ControlCharacter: "control_character",
+  Changed: "changed",
+} as const;
+export type PromptSourceReason =
+  (typeof PromptSourceReason)[keyof typeof PromptSourceReason];
 
 export const PromptView = { Final: "final" } as const;
 export type PromptView = (typeof PromptView)[keyof typeof PromptView];
@@ -393,6 +418,7 @@ export type PromptReference = z.infer<typeof promptReferenceSchema>;
 export const promptPartSchema = z.strictObject({
   layer: z.literal(Object.values(PromptLayer)).nullable(),
   ...promptReferenceSchema.shape,
+  digest: promptReferenceSchema.shape.digest.nullable(),
   heading: z.string().min(1).nullable(),
   state: z.enum(PromptPartState),
   text: z.string().nullable(),
@@ -496,6 +522,8 @@ export const agentOperations = {
           view: z.enum(PromptView).optional(),
           project_id: z.string().min(1).optional(),
           binding_id: z.string().min(1).optional(),
+          node_id: z.string().min(1).optional(),
+          attempt: z.coerce.number().int().positive().optional(),
         })
         .refine(
           ({ project_id, binding_id }) =>
@@ -503,6 +531,22 @@ export const agentOperations = {
           {
             path: ["binding_id"],
             message: "The queries project_id and binding_id go together.",
+          },
+        )
+        .refine(
+          ({ node_id, attempt }) =>
+            attempt === undefined || node_id !== undefined,
+          {
+            path: ["attempt"],
+            message: "The query attempt requires node_id.",
+          },
+        )
+        .refine(
+          ({ node_id, project_id }) =>
+            node_id === undefined || project_id === undefined,
+          {
+            path: ["node_id"],
+            message: "The query node_id excludes project_id and binding_id.",
           },
         ),
       body: z.null(),
