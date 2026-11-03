@@ -13,8 +13,10 @@ import {
   CancellationContext,
   cancelled,
   type Context,
+  ContextCancelled,
 } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
+import { ResourceFailureReason } from "../kernel/health.ts";
 import { isString } from "../kernel/values.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { stopAfter, temporary } from "../kernel/test-support.ts";
@@ -358,4 +360,39 @@ test("parallel instruction file reads of a slow remote answer ssh_unreachable wi
     assert.ok(result.reason instanceof OperationError);
     assert.equal(result.reason.code, ProjectErrorCode.RepositorySshUnreachable);
   }
+});
+
+test("a read context past its deadline answers ssh_unreachable with deadline_exceeded and a cancelled one propagates", async (t) => {
+  const { environments, bindingIds } = environmentsWith(
+    t,
+    "git@github.com:acme/api.git",
+    {
+      ...realFiles,
+      resolveBranchCommit: () => assert.fail("The read must not start."),
+      readFilesAtCommit: () => assert.fail("The read must not start."),
+    },
+    [PATH],
+  );
+  const [bindingId] = bindingIds;
+  assert.ok(bindingId);
+  const expired = new CancellationContext(undefined, Date.now());
+  const refusal = (error: unknown) => {
+    assert.ok(error instanceof OperationError);
+    assert.equal(error.code, ProjectErrorCode.RepositorySshUnreachable);
+    assert.deepEqual(error.details, {
+      failure_reason: ResourceFailureReason.DeadlineExceeded,
+    });
+    return true;
+  };
+  await assert.rejects(
+    environments.instructionFileOf(bindingId, COMMIT, expired),
+    refusal,
+  );
+  await assert.rejects(environments.baseCommitOf(bindingId, expired), refusal);
+  const cancelledContext = new CancellationContext();
+  cancelledContext.cancel();
+  await assert.rejects(
+    environments.instructionFileOf(bindingId, COMMIT, cancelledContext),
+    ContextCancelled,
+  );
 });

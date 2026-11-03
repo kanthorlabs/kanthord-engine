@@ -37,6 +37,7 @@ import {
   type ResourceCheck,
   type ResourceEntry,
   ResourceFailureReason,
+  resourceFailureReasonSchema,
   ResourceStatus,
   type ResourceStatusValue,
 } from "../kernel/health.ts";
@@ -99,6 +100,7 @@ import {
   INSTRUCTION_FILE_READ_TIMEOUT_MS,
   type InstructionFile,
   type InstructionFileCheck,
+  InstructionFileReason,
   Landing,
   LIST_LIMIT_MAX,
   type LiveNodesPinning,
@@ -279,13 +281,17 @@ function draftSubject(
 const CHECKED_BINDING_NAME = "check";
 const AGENTS_FILE = "AGENTS.md";
 const AGENTS_FILE_HINT = "AGENTS.md exists at the base head.";
-function unreachableReason(error: OperationError): string {
+function unreachableReason(error: OperationError): InstructionFileReason {
+  if (error.code === ProjectErrorCode.RepositoryBaseBranchAbsent)
+    return InstructionFileReason.BaseBranchAbsent;
   const details = error.details;
-  return isObject(details) &&
-    !Array.isArray(details) &&
-    isString(details.failure_reason)
-    ? details.failure_reason
-    : error.code;
+  const reported =
+    isObject(details) && !Array.isArray(details)
+      ? resourceFailureReasonSchema.safeParse(details.failure_reason)
+      : null;
+  return reported?.success && reported.data !== null
+    ? reported.data
+    : repositoryFailureReason(error);
 }
 function unmatchedKey(pair: { node_id: string; claim: string }): string {
   return JSON.stringify([pair.node_id, pair.claim]);

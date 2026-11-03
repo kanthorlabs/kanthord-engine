@@ -128,6 +128,10 @@ function refuseUnreadable(context: Context, error: unknown): never {
   );
 }
 
+function refuseAborted(context: Context): void {
+  if (context.signal.aborted) refuseUnreadable(context, context.signal.reason);
+}
+
 function suitePassOf(files: RepositoryFile[]): SuitePassState {
   const file = files.find(({ path }) => path === SUITE_PASS_FILE);
   assert.ok(file);
@@ -379,7 +383,7 @@ export class ProjectEnvironments {
     if (path === undefined) return null;
     const cached = this.instructionFiles.get(resourceIdentity, commit, path);
     if (cached !== undefined) return cached;
-    context.signal.throwIfAborted();
+    refuseAborted(context);
     const [file] = await this.readFilesWith(
       this.access(bindingId, config),
       commit,
@@ -626,7 +630,7 @@ export class ProjectEnvironments {
     maxBytes: number,
     caller: Pick<CallerContext, "context">,
   ): Promise<BaseRead> {
-    caller.context.signal.throwIfAborted();
+    refuseAborted(caller.context);
     const deadline = new CancellationContext(
       caller.context,
       Date.now() + REPOSITORY_FILES_READ_TIMEOUT_MS,

@@ -432,6 +432,27 @@ components:
                 reason:
                   anyOf:
                     - type: string
+                      enum:
+                        - host_key_unknown
+                        - key_refused
+                        - repository_not_found
+                        - host_unreachable
+                        - address_invalid
+                        - unauthorized
+                        - forbidden
+                        - rate_limited
+                        - unreachable
+                        - invalid_response
+                        - host_key_changed
+                        - identity_unavailable
+                        - held_by_instance
+                        - deadline_exceeded
+                        - unclassified
+                        - too_large
+                        - not_utf8
+                        - unreadable
+                        - control_character
+                        - base_branch_absent
                     - type: "null"
               required:
                 - path

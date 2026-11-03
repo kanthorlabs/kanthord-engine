@@ -18,6 +18,7 @@ import {
   cancelled,
   type Context,
   ContextCancelled,
+  DeadlineExceeded,
 } from "../kernel/context.ts";
 import {
   HealthRegistry,
@@ -77,6 +78,7 @@ import {
   type InstanceOf,
   INSTRUCTION_FILE_PATH_MAX_BYTES,
   INSTRUCTION_FILE_READ_TIMEOUT_MS,
+  InstructionFileReason,
   Landing,
   LS_REMOTE_TIMEOUT_MS,
   PROJECT_ID_PREFIX,
@@ -3489,6 +3491,8 @@ test("instance count and UTF-8 prompt bounds return domain refusals and roll bac
       "/AGENTS.md",
       "../AGENTS.md",
       "docs/../AGENTS.md",
+      "./AGENTS.md",
+      "docs/./a.md",
       "docs//AGENTS.md",
       "docs/",
       "",
@@ -6033,6 +6037,7 @@ test("binding.check answers the state of the instruction file at the base head",
       state,
       reason,
     });
+    assert.equal(result.instruction_file_hint, null);
     assert.equal(
       f.store.database.prepare("SELECT id FROM project_binding").all().length,
       NO_ITEMS,
@@ -6099,7 +6104,7 @@ test("binding.check answers an unreachable instruction file and refuses an inval
     path: INSTRUCTION_PATH,
     commit: null,
     state: InstructionFileState.Unreachable,
-    reason: ProjectErrorCode.RepositoryBaseBranchAbsent,
+    reason: InstructionFileReason.BaseBranchAbsent,
   });
   await assert.rejects(
     checkBinding(f, project.id, {
@@ -6116,6 +6121,57 @@ test("binding.check answers an unreachable instruction file and refuses an inval
       return true;
     },
   );
+});
+
+test("binding.check answers the failure reason of a failed instruction file read and of an alias host", async (t) => {
+  const failing = instructionRepositoryFiles(null);
+  failing.repositoryFiles.resolveBranchCommit = async () => {
+    throw new DeadlineExceeded();
+  };
+  const failed = verifyFixture(t, "healthy", "healthy", {
+    custodySuitability: () => {},
+    repositoryFiles: failing.repositoryFiles,
+  }).f;
+  const project = failed.store.transaction((tx) =>
+    insertProject(tx, PROJECT_NAME),
+  );
+  const unreachable = (reason: InstructionFileReason) => ({
+    path: INSTRUCTION_PATH,
+    commit: null,
+    state: InstructionFileState.Unreachable,
+    reason,
+  });
+  assert.deepEqual(
+    (await checkBinding(failed, project.id, withInstructionFile().config))
+      .instruction_file,
+    unreachable(InstructionFileReason.DeadlineExceeded),
+  );
+  const { repositoryFiles, heads } = instructionRepositoryFiles({
+    state: RepositoryFileState.Present,
+    text: INSTRUCTION_TEXT,
+  });
+  const alias = verifyFixture(t, "healthy", "healthy", {
+    custodySuitability: () => {},
+    repositoryFiles,
+  }).f;
+  const aliasProject = alias.store.transaction((tx) =>
+    insertProject(tx, PROJECT_NAME),
+  );
+  alias.grantAddress.value = ALIAS_ADDRESS;
+  const result = await checkBinding(
+    alias,
+    aliasProject.id,
+    withInstructionFile().config,
+  );
+  assert.deepEqual(
+    result.instruction_file,
+    unreachable(InstructionFileReason.AddressInvalid),
+  );
+  assert.equal(
+    result.address.failure_reason,
+    ResourceFailureReason.AddressInvalid,
+  );
+  assert.deepEqual(heads, []);
 });
 
 test("binding.check answers deadline_exceeded for an address read that exceeds its deadline", async (t) => {

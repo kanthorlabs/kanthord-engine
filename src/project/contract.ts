@@ -12,6 +12,7 @@ import {
 import type { Transaction } from "../kernel/store.ts";
 import { isString } from "../kernel/values.ts";
 import {
+  ResourceFailureReason,
   resourceFailureReasonSchema,
   ResourceStatus,
 } from "../kernel/health.ts";
@@ -197,6 +198,16 @@ export const BindingPromptKey = {
 export const PromptInvalidReason = {
   PathInvalid: "path_invalid",
 } as const;
+export const InstructionFileReason = {
+  ...ResourceFailureReason,
+  TooLarge: "too_large",
+  NotUtf8: "not_utf8",
+  Unreadable: "unreadable",
+  ControlCharacter: "control_character",
+  BaseBranchAbsent: "base_branch_absent",
+} as const;
+export type InstructionFileReason =
+  (typeof InstructionFileReason)[keyof typeof InstructionFileReason];
 
 export const bindingAgentPromptsSchema = z.strictObject(
   Object.fromEntries(
@@ -214,14 +225,14 @@ export const instructionFileCheckSchema = z.strictObject({
   path: z.string(),
   commit: z.string().nullable(),
   state: z.enum(InstructionFileState),
-  reason: z.string().nullable(),
+  reason: z.enum(InstructionFileReason).nullable(),
 });
 export type InstructionFileCheck = z.infer<typeof instructionFileCheckSchema>;
 export type InstructionFile = {
   path: string;
   commit: string;
   state: Exclude<InstructionFileState, typeof InstructionFileState.Unreachable>;
-  reason: string | null;
+  reason: InstructionFileReason | null;
   text: string | null;
 };
 export type BaseCommitOf = (
