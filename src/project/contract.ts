@@ -189,7 +189,6 @@ export { EnvironmentSource };
 export const ENVIRONMENT_FILE_MAX_BYTES = 65536;
 
 export const INSTRUCTION_FILE_PATH_MAX_BYTES = 255;
-export const INSTRUCTION_FILE_READ_TIMEOUT_MS = 20000;
 export const INSTRUCTION_FILE_CACHE_ENTRIES = 256;
 export const BindingPromptKey = {
   InstructionFile: "instruction_file",

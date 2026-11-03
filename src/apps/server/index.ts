@@ -634,7 +634,12 @@ export function composeServices(options: {
       attemptPromptCommits: (...args) => mission.attemptPromptCommits(...args),
       pinPromptCommits: (...args) => mission.pinPromptCommits(...args),
     },
-    promptBase: options.promptBase,
+    promptBase: options.promptBase ?? {
+      instructionBindingsOf: (tx, bindingIds) =>
+        project.instructionBindingsOf(tx, bindingIds),
+      baseCommitOf: (bindingId, context) =>
+        project.baseCommitOf(bindingId, context),
+    },
     instanceArchive: {
       revokeForInstanceArchive: (...args) =>
         mission.revokeForInstanceArchive(...args),

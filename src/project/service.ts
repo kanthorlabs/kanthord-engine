@@ -48,6 +48,7 @@ import {
 } from "../repository/platform.ts";
 import { InstructionFileState } from "../agent/contract.ts";
 import { validateText } from "../agent/prompt-source.ts";
+import { PROMPT_SOURCE_READ_MS } from "../kernel/prompt-source.ts";
 import { gitFailureReason } from "../repository/git-failure.ts";
 import { tagSchema } from "../kernel/tag.ts";
 import { isObject, isString } from "../kernel/values.ts";
@@ -97,7 +98,6 @@ import {
   INSTANCE_COUNT_MAX,
   INSTANCE_COUNT_MIN,
   type InstanceOf,
-  INSTRUCTION_FILE_READ_TIMEOUT_MS,
   type InstructionFile,
   type InstructionFileCheck,
   InstructionFileReason,
@@ -1361,7 +1361,7 @@ export class ProjectService implements Service, ProjectBindings {
   ): Promise<Array<InstructionFile | null>> {
     const deadline = new CancellationContext(
       caller.context,
-      Date.now() + INSTRUCTION_FILE_READ_TIMEOUT_MS,
+      Date.now() + PROMPT_SOURCE_READ_MS,
     );
     try {
       return await Promise.all(
@@ -1791,6 +1791,21 @@ export class ProjectService implements Service, ProjectBindings {
       project_id: binding.project_id,
       ...storageConfigSchema.parse(binding.config),
     };
+  }
+  instructionBindingsOf(
+    tx: Transaction,
+    bindingIds: readonly string[],
+  ): string[] {
+    assert.ok(tx.database.isTransaction);
+    return bindingIds.filter((bindingId) => {
+      const binding = readBindingRevision(tx, bindingId);
+      return (
+        binding !== null &&
+        kindOf(binding.resource_identity) === BindingKind.Repository &&
+        repositoryConfigSchema.parse(binding.config).prompts
+          ?.instruction_file !== undefined
+      );
+    });
   }
   baseCommitOf(bindingId: string, context: Context): Promise<string> {
     return this.environments.baseCommitOf(bindingId, context);

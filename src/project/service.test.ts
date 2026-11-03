@@ -59,6 +59,7 @@ import {
   InvalidReason,
   PROMPT_SOURCE_MAX_BYTES,
 } from "../agent/prompt-source.ts";
+import { PROMPT_SOURCE_READ_MS } from "../kernel/prompt-source.ts";
 import {
   BINDING_CHECK_TIMEOUT_MS,
   BINDING_ID_PREFIX,
@@ -77,7 +78,6 @@ import {
   INSTANCE_COUNT_MIN,
   type InstanceOf,
   INSTRUCTION_FILE_PATH_MAX_BYTES,
-  INSTRUCTION_FILE_READ_TIMEOUT_MS,
   InstructionFileReason,
   Landing,
   LS_REMOTE_TIMEOUT_MS,
@@ -5983,8 +5983,7 @@ test("a write reads the instruction files of two changed bindings in parallel un
   for (const context of contexts) {
     assert.ok(context.deadline !== null);
     assert.ok(
-      context.deadline <=
-        begun + INSTRUCTION_FILE_READ_TIMEOUT_MS + DEADLINE_MARGIN_MS,
+      context.deadline <= begun + PROMPT_SOURCE_READ_MS + DEADLINE_MARGIN_MS,
     );
   }
 });
