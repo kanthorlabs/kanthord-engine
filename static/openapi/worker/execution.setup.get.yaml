@@ -213,8 +213,60 @@ components:
                 properties:
                   final:
                     type: string
+                  sources:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        part:
+                          type: string
+                          enum:
+                            - standard
+                            - role
+                            - workbench
+                            - instruction_file
+                            - repository
+                            - binding
+                            - framing
+                        name:
+                          type: string
+                          minLength: 1
+                        origin:
+                          type: string
+                          enum:
+                            - binary
+                            - file
+                            - database
+                            - repository
+                        path:
+                          anyOf:
+                            - type: string
+                            - type: "null"
+                        binding_id:
+                          anyOf:
+                            - type: string
+                              minLength: 1
+                            - type: "null"
+                        commit:
+                          anyOf:
+                            - type: string
+                              pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
+                            - type: "null"
+                        digest:
+                          type: string
+                          pattern: ^[0-9a-f]{64}$
+                      required:
+                        - part
+                        - name
+                        - origin
+                        - path
+                        - binding_id
+                        - commit
+                        - digest
+                      additionalProperties: false
                 required:
                   - final
+                  - sources
                 additionalProperties: false
             required:
               - agent_name

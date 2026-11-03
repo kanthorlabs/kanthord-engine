@@ -83,16 +83,28 @@ import {
   reopenRegistration,
 } from "./registration-rows.ts";
 import { HEARTBEAT_SWEEP_INTERVAL_MS } from "./heartbeat.ts";
-import { FakePoolHost } from "./test-support.ts";
+import {
+  FakePoolHost,
+  memoryPromptTelemetry,
+  shippedFraming,
+} from "./test-support.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const fakeCollaborations = {
-  promptTelemetry: { agentPrompted: () => {} },
+  promptTelemetry: {
+    agentPrompted: () => {},
+    promptRecordOf: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+  },
   agentPrompt: {
     compose: async () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
     templates: async () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+    framing: async () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
   },
@@ -251,6 +263,17 @@ const fakeAgentCollaborations: Omit<AgentDependencies, "store"> = {
   approvedModels: () => null,
   entriesOfAgent: () => [],
   repositoryPromptsOf: () => null,
+  promptBase: {
+    baseCommitOf: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+    instructionFileOf: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+  },
+  attemptPromptStackOf: () => {
+    throw new Error("UNEXPECTED_COLLABORATION");
+  },
   providerHealthCheck: () => async () => ResourceStatus.Unknown,
   providerCapability: () => PROVIDER_CAPABILITY,
   toolDeclarations: async () => [],
@@ -1759,10 +1782,17 @@ function authorizationFixture(t: TestContext) {
         return record ? { ...record, name } : null;
       },
       credentialMetadata: (_tx, name) => newestOf(name),
-      promptTelemetry: { agentPrompted: () => {} },
+      promptTelemetry: memoryPromptTelemetry(),
       agentPrompt: {
         compose: async () => [],
         templates: async () => SHIPPED_TEMPLATES,
+        framing: async () => shippedFraming(),
+      },
+      missionPromptPins: {
+        attemptPromptCommits: () => null,
+        pinPromptCommits: () => {
+          throw new Error("UNEXPECTED_COLLABORATION");
+        },
       },
       repositoryBindingIdsOf: () => [],
       intentOf: () => ExecutionIntent.Implement,
@@ -2694,6 +2724,9 @@ function promptBaseOf(
       return bindingIds.filter((id) => named.includes(id));
     },
     baseCommitOf,
+    instructionFileOf: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
   };
 }
 

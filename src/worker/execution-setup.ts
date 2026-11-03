@@ -4,10 +4,11 @@ import type { Transaction } from "../kernel/store.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { approvedModels } from "../llm/platforms.ts";
-import type { ApprovedModelsFn } from "../agent/contract.ts";
+import type { AgentName, ApprovedModelsFn } from "../agent/contract.ts";
 import type { Environment } from "../kernel/devcontainer.ts";
 import { EnvironmentSource } from "../kernel/devcontainer.ts";
 import {
+  type AgentSetup,
   type CredentialMetadataRecord,
   type ExecutionEnvironment,
   type ExecutionSetup,
@@ -16,15 +17,30 @@ import {
   type SchedulerClaims,
   WorkerErrorCode,
 } from "./contract.ts";
+import { bindingParts, finalPrompt } from "../agent/prompt-render.ts";
 import {
-  bindingParts,
-  PromptConsumer,
-  systemPrompt,
-} from "../agent/prompt-render.ts";
-import type { PromptPartAnswer } from "../agent/contract.ts";
+  InstructionFileState,
+  PromptPart,
+  type PromptPartAnswer,
+  PromptPartState,
+  PromptSourceReason,
+} from "../agent/contract.ts";
+import {
+  type InstructionFileTarget,
+  pinnedInstructionFiles,
+  sourceInvalid,
+} from "../agent/instruction-files.ts";
+import { CancellationContext, type Context } from "../kernel/context.ts";
+import { PROMPT_SOURCE_READ_MS } from "../kernel/prompt-source.ts";
+import { resolvePrompt } from "../agent/prompt-resolve.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import type { Dependencies, WorkerService } from "./service.ts";
 import { RepositoryErrorCode } from "../repository/contract.ts";
-import { agentPromptFacts, type AgentPromptFacts } from "./prompt-telemetry.ts";
+import {
+  agentPromptFacts,
+  type AgentPromptFacts,
+  promptReference,
+} from "./prompt-telemetry.ts";
 
 const FIRST_ISSUE_INDEX = 0;
 
@@ -54,44 +70,216 @@ function executionEnvironment(
 
 const NO_AGENTS = 0;
 
+type SetupDependencies = Pick<
+  Dependencies,
+  | "agentPrompt"
+  | "promptTelemetry"
+  | "store"
+  | "workerBindingRowOf"
+  | "pinnedCredentialMetadata"
+  | "sshHostKeysOf"
+  | "repositoryBindingIdsOf"
+  | "intentOf"
+  | "repositoryPolicyOf"
+  | "custodyHandover"
+  | "environmentClaimed"
+  | "environmentDigestOf"
+  | "environmentOf"
+  | "missionPromptPins"
+  | "promptBase"
+> & {
+  schedulerClaims: Pick<SchedulerClaims, "agentSelectionsOf" | "agentPinsOf">;
+};
+
+type SetupPrompt = { final: string; sources: AgentSetup["prompt"]["sources"] };
+
+function promptNotPinned(bindingId: string): OperationError {
+  return new OperationError(
+    HttpStatus.Conflict,
+    WorkerErrorCode.ExecutionPromptNotPinned,
+    "The attempt holds no instruction commit for the repository binding.",
+    { binding_id: bindingId },
+  );
+}
+
+function promptRecordFailed(agentName: string): OperationError {
+  return new OperationError(
+    HttpStatus.ServiceUnavailable,
+    WorkerErrorCode.ExecutionPromptRecordFailed,
+    "The server cannot store the prompt record of the agent.",
+    { agent_name: agentName },
+  );
+}
+
+function instructionTargets(
+  dependencies: SetupDependencies,
+  tx: Transaction,
+  claim: NonNullable<CallerContext["execution"]>,
+): InstructionFileTarget[] {
+  const named = dependencies
+    .repositoryBindingIdsOf(tx, claim.nodeId, claim.pinnedRevision)
+    .map((id) => {
+      const repository = dependencies.repositoryPolicyOf(tx, id);
+      assert.ok(repository);
+      return repository;
+    })
+    .filter(({ prompts }) => prompts.instruction_file !== undefined);
+  const pin = dependencies.missionPromptPins.attemptPromptCommits(
+    tx,
+    claim.nodeId,
+    claim.attempt,
+  );
+  return named.map(({ binding_id, name }) => {
+    const entry = pin?.find((item) => item.binding_id === binding_id);
+    if (entry === undefined) throw promptNotPinned(binding_id);
+    return { binding_id, name, commit: entry.commit };
+  });
+}
+
+async function storedPrompt(
+  dependencies: SetupDependencies,
+  facts: AgentPromptFacts,
+  reads: Context,
+): Promise<SetupPrompt> {
+  const { promptBase } = dependencies;
+  const resolved = await resolvePrompt(facts.sources, {
+    agentName: facts.agent_name,
+    bindingTextOf: (bindingId, part, agentName) =>
+      dependencies.store.transaction((tx) => {
+        const prompts = dependencies.repositoryPolicyOf(tx, bindingId)?.prompts;
+        if (prompts === undefined) return null;
+        const text =
+          part === PromptPart.Repository
+            ? prompts.repository
+            : prompts.agents?.[agentName as AgentName];
+        return text ?? null;
+      }),
+    instructionFileOf: async (bindingId, commit, path, context) => {
+      assert.ok(promptBase);
+      const file = await promptBase.instructionFileOf(
+        bindingId,
+        commit,
+        context,
+      );
+      if (file === null) return { state: InstructionFileState.Absent };
+      assert.equal(file.path, path);
+      if (file.state !== InstructionFileState.Present)
+        return { state: file.state };
+      assert.ok(file.text !== null);
+      return { state: InstructionFileState.Present, text: file.text };
+    },
+    context: reads,
+  });
+  const failed = resolved.parts.find(
+    ({ state }) => state !== PromptPartState.Resolved,
+  );
+  if (failed !== undefined || resolved.final === null) {
+    assert.ok(failed);
+    throw sourceInvalid({
+      part: failed.part,
+      name: failed.name,
+      binding_id: failed.binding_id,
+      path: failed.path,
+      commit: failed.commit,
+      reason: PromptSourceReason.Changed,
+    });
+  }
+  return { final: resolved.final, sources: [...facts.sources] };
+}
+
+function recordedPrompt(
+  dependencies: SetupDependencies,
+  executionId: string,
+  facts: AgentPromptFacts,
+): AgentPromptFacts {
+  try {
+    dependencies.promptTelemetry.agentPrompted(executionId, facts);
+  } catch {
+    throw promptRecordFailed(facts.agent_name);
+  }
+  const stored = dependencies.promptTelemetry.promptRecordOf(
+    executionId,
+    facts.agent_name,
+  );
+  if (stored === null) throw promptRecordFailed(facts.agent_name);
+  return stored;
+}
+
+type SetupWorker = Pick<
+  WorkerService,
+  "declarationOf" | "pinnedAgentView" | "placementOf"
+>;
+
 export async function executionSetup(
-  dependencies: Pick<
-    Dependencies,
-    | "agentPrompt"
-    | "promptTelemetry"
-    | "store"
-    | "workerBindingRowOf"
-    | "pinnedCredentialMetadata"
-    | "sshHostKeysOf"
-    | "repositoryBindingIdsOf"
-    | "intentOf"
-    | "repositoryPolicyOf"
-    | "custodyHandover"
-    | "environmentClaimed"
-    | "environmentDigestOf"
-    | "environmentOf"
-  > & {
-    schedulerClaims: Pick<SchedulerClaims, "agentSelectionsOf" | "agentPinsOf">;
-  },
-  worker: Pick<
-    WorkerService,
-    "declarationOf" | "pinnedAgentView" | "placementOf"
-  >,
+  dependencies: SetupDependencies,
+  worker: SetupWorker,
   caller: CallerContext,
+): Promise<ExecutionSetup> {
+  const reads = new CancellationContext(
+    caller.context,
+    Date.now() + PROMPT_SOURCE_READ_MS,
+  );
+  try {
+    return await setupWithin(dependencies, worker, caller, reads);
+  } finally {
+    reads.cancel();
+  }
+}
+
+async function setupWithin(
+  dependencies: SetupDependencies,
+  worker: SetupWorker,
+  caller: CallerContext,
+  reads: Context,
 ): Promise<ExecutionSetup> {
   const claim = caller.execution;
   assert.ok(claim);
-  const nativeAgentNames = dependencies.store.transaction((tx) => {
+  const { nativeAgentNames, targets } = dependencies.store.transaction((tx) => {
     const row = dependencies.workerBindingRowOf(tx, claim.workerBindingId);
     assert.ok(row);
-    return worker.declarationOf(row.worker_name)?.agent_names ?? [];
+    const names = worker.declarationOf(row.worker_name)?.agent_names ?? [];
+    return {
+      nativeAgentNames: names,
+      targets:
+        names.length === NO_AGENTS
+          ? []
+          : instructionTargets(dependencies, tx, claim),
+    };
   });
+  const answered = new Map<string, SetupPrompt>();
   const parts = new Map<string, PromptPartAnswer[]>();
-  for (const agentName of nativeAgentNames)
-    parts.set(
+  for (const agentName of nativeAgentNames) {
+    const record = dependencies.promptTelemetry.promptRecordOf(
+      claim.executionId,
       agentName,
-      await dependencies.agentPrompt.compose(agentName, caller.context),
     );
+    if (record === null)
+      parts.set(
+        agentName,
+        await dependencies.agentPrompt.compose(agentName, caller.context),
+      );
+    else
+      answered.set(agentName, await storedPrompt(dependencies, record, reads));
+  }
+  const composes = parts.size > NO_AGENTS;
+  const files =
+    composes && targets.length > NO_AGENTS
+      ? await pinnedInstructionFiles(
+          targets,
+          (bindingId, commit, context) => {
+            assert.ok(dependencies.promptBase);
+            return dependencies.promptBase.instructionFileOf(
+              bindingId,
+              commit,
+              context,
+            );
+          },
+          reads,
+        )
+      : new Map();
+  const framing = composes
+    ? await dependencies.agentPrompt.framing(caller.context)
+    : null;
   const templates = await dependencies.agentPrompt.templates(caller.context);
   const prompted: AgentPromptFacts[] = [];
   const setup = caller.commit((tx) => {
@@ -147,6 +335,20 @@ export async function executionSetup(
         assert.ok(repository);
         return repository;
       });
+    const composedPrompt = (agentName: string): SetupPrompt => {
+      const agentParts = parts.get(agentName);
+      assert.ok(agentParts);
+      assert.ok(framing);
+      const promptParts = [
+        ...agentParts,
+        ...bindingParts(policies, agentName, files),
+        framing,
+      ];
+      const final = finalPrompt(promptParts);
+      assert.ok(final !== null);
+      prompted.push(agentPromptFacts(agentName, promptParts, templates));
+      return { final, sources: promptParts.map(promptReference) };
+    };
     const agents = agentNames.map((agentName) => {
       const selection = selections.find(
         ({ agent_name }) => agent_name === agentName,
@@ -174,10 +376,7 @@ export async function executionSetup(
       }
       assert.ok(view.effective);
       const record = pinned(tx, view.effective.credential);
-      const agentParts = parts.get(agentName);
-      assert.ok(agentParts);
-      const promptParts = [...agentParts, ...bindingParts(policies, agentName)];
-      prompted.push(agentPromptFacts(agentName, promptParts, templates));
+      const prompt = answered.get(agentName) ?? composedPrompt(agentName);
       return {
         agent_name: agentName,
         enablement_id:
@@ -189,9 +388,7 @@ export async function executionSetup(
         level: selection.level,
         credential_id: record.id,
         metadata: record.metadata,
-        prompt: {
-          final: systemPrompt(promptParts, PromptConsumer.Worker, templates),
-        },
+        prompt,
       };
     });
     const sshPublicKeyOf = (credential: string): string => {
@@ -250,12 +447,22 @@ export async function executionSetup(
       repositories,
     });
   });
+  const recorded = new Map<string, SetupPrompt>();
   for (const facts of prompted) {
-    try {
-      dependencies.promptTelemetry.agentPrompted(claim.executionId, facts);
-    } catch {
-      continue;
-    }
+    const stored = recordedPrompt(dependencies, claim.executionId, facts);
+    if (canonicalJSON(stored.sources) !== canonicalJSON(facts.sources))
+      recorded.set(
+        facts.agent_name,
+        await storedPrompt(dependencies, stored, reads),
+      );
   }
-  return setup;
+  return recorded.size === NO_AGENTS
+    ? setup
+    : {
+        ...setup,
+        agents: setup.agents.map((agent) => ({
+          ...agent,
+          prompt: recorded.get(agent.agent_name) ?? agent.prompt,
+        })),
+      };
 }

@@ -74,6 +74,7 @@ import {
   closeAttempt,
   insertEvidence,
   openAttempt,
+  pinPromptCommits,
   readOpenAttempt,
 } from "./record-store.ts";
 import { importDigest, normalizeImportSnapshot } from "./import.ts";
@@ -96,6 +97,7 @@ import { ControlError } from "./control.ts";
 import { revisionFromRow } from "./revision.ts";
 import {
   databaseSnapshot,
+  executionHarness,
   lostHold,
   lostTransition,
   unexpectedCollaboration,
@@ -104,6 +106,7 @@ import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import {
   insertDependency,
   insertNode as insertNodeRow,
+  insertRevision as insertRevisionRow,
   readCurrentRevision,
   readMissionNodes,
   readNode,
@@ -6217,4 +6220,89 @@ test("nodeBodyOf gives the node create body of the shipped suite pass setup node
       expected_mission_version: MISSION_INITIAL_VERSION,
     }).success,
   );
+});
+
+const STACK_COMMIT = "a".repeat(40);
+const STACK_FIRST_ATTEMPT = 1;
+const STACK_SECOND_ATTEMPT = 2;
+const STACK_ABSENT_ATTEMPT = 9;
+const STACK_LATER = 300;
+const RECORD_NOT_FOUND = "mission.record.not_found";
+
+test("attemptPromptStackOf reads the open attempt, else the latest attempt, or an explicit attempt, with its bindings and its pin", (t) => {
+  const h = executionHarness(
+    t,
+    testHumanIdentity(ACCOUNT_ID, DISPLAY_NAME, TOKEN_ID),
+  );
+  const bindingId = createIdentity("binding");
+  h.dependencies.bindings.getBindingRevision = (_tx, id) => ({
+    binding_id: id,
+    project_id: h.project_id,
+    name: id,
+    resource_identity: "repository:github:owner/repository",
+    revision: STACK_FIRST_ATTEMPT,
+    tombstone: false,
+    disabled: false,
+  });
+  const pin = [{ binding_id: bindingId, commit: STACK_COMMIT }];
+  h.store.transaction((tx) => {
+    assert.deepEqual(h.service.attemptPromptStackOf(tx, h.node_id, null), {
+      attempt: STACK_FIRST_ATTEMPT,
+      binding_ids: [],
+      prompt_commits: null,
+    });
+    pinPromptCommits(tx, h.node_id, STACK_FIRST_ATTEMPT, pin);
+    const revision = getRevision(tx, h.node_id, STACK_FIRST_ATTEMPT);
+    insertRevisionRow(tx, {
+      ...revision,
+      revision: STACK_SECOND_ATTEMPT,
+      content: { ...revision.content, bindings: [bindingId] },
+    });
+    closeAttempt(tx, h.node_id, STACK_FIRST_ATTEMPT, STACK_LATER);
+    assert.deepEqual(h.service.attemptPromptStackOf(tx, h.node_id, null), {
+      attempt: STACK_FIRST_ATTEMPT,
+      binding_ids: [],
+      prompt_commits: pin,
+    });
+    openAttempt(
+      tx,
+      h.node_id,
+      STACK_SECOND_ATTEMPT,
+      h.executionActor,
+      STACK_LATER,
+    );
+    closeAttempt(tx, h.node_id, STACK_SECOND_ATTEMPT, STACK_LATER);
+    assert.deepEqual(h.service.attemptPromptStackOf(tx, h.node_id, null), {
+      attempt: STACK_SECOND_ATTEMPT,
+      binding_ids: [bindingId],
+      prompt_commits: null,
+    });
+    assert.deepEqual(
+      h.service.attemptPromptStackOf(tx, h.node_id, STACK_FIRST_ATTEMPT),
+      { attempt: STACK_FIRST_ATTEMPT, binding_ids: [], prompt_commits: pin },
+    );
+  });
+});
+
+test("attemptPromptStackOf refuses an absent attempt and an absent node", (t) => {
+  const h = executionHarness(
+    t,
+    testHumanIdentity(ACCOUNT_ID, DISPLAY_NAME, TOKEN_ID),
+  );
+  h.store.transaction((tx) => {
+    assert.throws(
+      () => h.service.attemptPromptStackOf(tx, h.node_id, STACK_ABSENT_ATTEMPT),
+      (error) =>
+        error instanceof OperationError &&
+        error.status === HttpStatus.NotFound &&
+        error.code === RECORD_NOT_FOUND,
+    );
+    assert.throws(
+      () => h.service.attemptPromptStackOf(tx, createIdentity("node"), null),
+      (error) =>
+        error instanceof OperationError &&
+        error.status === HttpStatus.NotFound &&
+        error.code === MissionErrorCode.NodeNotFound,
+    );
+  });
 });

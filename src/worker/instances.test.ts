@@ -172,8 +172,12 @@ function instanceFixture(
       sshSign: unexpected,
       sshPublicKeyOf: unexpected,
     },
-    promptTelemetry: { agentPrompted: () => {} },
-    agentPrompt: { compose: unexpected, templates: unexpected },
+    promptTelemetry: { agentPrompted: () => {}, promptRecordOf: unexpected },
+    agentPrompt: {
+      compose: unexpected,
+      templates: unexpected,
+      framing: unexpected,
+    },
     workerBindingOf: (_tx, projectId, resourceIdentity) =>
       bindings.find(
         (binding) =>

@@ -167,6 +167,8 @@ async function agentGet(agentName: string, command: Command): Promise<void> {
       ...(options.project !== undefined
         ? { project_id: options.project, binding_id: options.bindingId }
         : {}),
+      ...(options.node !== undefined ? { node_id: options.node } : {}),
+      ...(options.attempt !== undefined ? { attempt: options.attempt } : {}),
     },
     body: null,
   });
@@ -428,6 +430,12 @@ export function addAgentCommand(program: Command): void {
       "--binding-id <binding-id>",
       "Repository binding revision",
       singleUse("--binding-id"),
+    )
+    .option("--node <node-id>", "Mission node", singleUse("--node"))
+    .option(
+      "--attempt <k>",
+      "Attempt of the node (otherwise the open, else the latest attempt)",
+      singleUse("--attempt"),
     )
     .action((agentName: string, _options, command: Command) =>
       agentGet(agentName, command),

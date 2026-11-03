@@ -470,6 +470,17 @@ function pinHarness(
     approvedModels: () => null,
     entriesOfAgent: () => [],
     repositoryPromptsOf: () => null,
+    promptBase: {
+      baseCommitOf: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
+      instructionFileOf: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
+      },
+    },
+    attemptPromptStackOf: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
     providerHealthCheck: () => async () => ResourceStatus.Unknown,
     providerCapability: () => "model-list read",
     toolDeclarations: async () => [],

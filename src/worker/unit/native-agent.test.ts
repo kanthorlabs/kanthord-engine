@@ -412,7 +412,10 @@ test("a prompt writes every pi entry as a session_entry record with the pinned c
   );
   assert.deepEqual(
     customs.map(({ entry }) => entry.data),
-    [{ part: "system_prompt", text: SETUP_PROMPT }],
+    [{ part: "system_prompt" }],
+  );
+  assert.ok(
+    customs.every(({ entry }) => !JSON.stringify(entry).includes(SETUP_PROMPT)),
   );
   assert.equal(
     new Set(entries.map(({ entry_id }) => entry_id)).size,

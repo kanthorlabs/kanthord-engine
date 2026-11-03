@@ -18,6 +18,9 @@ export const ENTRY_CUT_LIMITS = [
   ENTRY_CUT_TIGHT_LIMIT,
 ];
 export const PINNED_CONTEXT_TYPE = "kanthord.pinned_context";
+export const PinnedContextPart = { SystemPrompt: "system_prompt" } as const;
+export type PinnedContextPart =
+  (typeof PinnedContextPart)[keyof typeof PinnedContextPart];
 
 const REDACTED = "[redacted]";
 const HALVES = 2;

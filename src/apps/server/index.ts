@@ -111,7 +111,9 @@ import {
 import { mintServiceIdentity } from "../../kernel/service-mint.ts";
 import {
   agentPromptContribution,
+  agentPromptSpanId,
   isHostedWorker,
+  storedPromptFacts,
   toolDeclarations,
   workerMigrations,
   WorkerService,
@@ -608,6 +610,14 @@ export function composeServices(options: {
     providerCapability: (tx, name) => llm.providerCapability(tx, name),
     entriesOfAgent: (tx, name) => project.entriesOfAgent(tx, name),
     repositoryPromptsOf: (tx, id) => project.repositoryPolicyOf(tx, id),
+    promptBase: {
+      baseCommitOf: (bindingId, context) =>
+        project.baseCommitOf(bindingId, context),
+      instructionFileOf: (bindingId, commit, context) =>
+        project.instructionFileOf(bindingId, commit, context),
+    },
+    attemptPromptStackOf: (tx, nodeId, attempt) =>
+      mission.attemptPromptStackOf(tx, nodeId, attempt),
     toolDeclarations: (name) => toolDeclarations(name),
     logger: options.logger,
   });
@@ -639,6 +649,8 @@ export function composeServices(options: {
         project.instructionBindingsOf(tx, bindingIds),
       baseCommitOf: (bindingId, context) =>
         project.baseCommitOf(bindingId, context),
+      instructionFileOf: (bindingId, commit, context) =>
+        project.instructionFileOf(bindingId, commit, context),
     },
     instanceArchive: {
       revokeForInstanceArchive: (...args) =>
@@ -697,6 +709,7 @@ export function composeServices(options: {
       compose: (name, context) =>
         agent.composePrompt(name, PromptConsumer.Worker, context),
       templates: (context) => agent.promptTemplates(context),
+      framing: (context) => agent.promptFraming(PromptConsumer.Worker, context),
     },
     promptTelemetry: {
       agentPrompted: (executionId, facts) => {
@@ -708,6 +721,15 @@ export function composeServices(options: {
           WORKER_PRODUCER,
           agentPromptContribution(trace, facts, Date.now()),
         );
+      },
+      promptRecordOf: (executionId, agentName) => {
+        const row = scheduler.executionOf(executionId);
+        if (row === undefined) return null;
+        const span = tracking.serverSpanOf(
+          executionTrace(row),
+          agentPromptSpanId(executionId, agentName),
+        );
+        return span === null ? null : storedPromptFacts(span.attributes);
       },
     },
     store: options.store,
@@ -944,6 +966,8 @@ export function composeServices(options: {
     composePrompt: (name, context) =>
       agent.composePrompt(name, PromptConsumer.Worker, context),
     repositoryPromptsOf: (tx, id) => project.repositoryPolicyOf(tx, id),
+    instructionFileOf: (bindingId, commit, context) =>
+      project.instructionFileOf(bindingId, commit, context),
     templates: (context) => agent.promptTemplates(context),
     exportRepository: (bindingId, commit, directory, context) =>
       project.exportRepository(bindingId, commit, directory, context),

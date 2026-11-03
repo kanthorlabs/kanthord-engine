@@ -13,9 +13,14 @@ import {
   unattributed,
 } from "./cause.ts";
 
-const SUBCATEGORY_COUNT = 39;
+const SUBCATEGORY_COUNT = 41;
 const EXPECTED_SUBCATEGORIES = {
-  prompt: ["context_missing", "instruction_conflict", "rule_absent"],
+  prompt: [
+    "context_missing",
+    "instruction_conflict",
+    "rule_absent",
+    "source_invalid",
+  ],
   plan: [
     "criterion_unstated",
     "requirement_conflict",
@@ -53,7 +58,12 @@ const EXPECTED_SUBCATEGORIES = {
     "verification_hang",
     "repository_hook",
   ],
-  infrastructure: ["verification_killed", "network", "execution_lost"],
+  infrastructure: [
+    "verification_killed",
+    "network",
+    "execution_lost",
+    "prompt_record",
+  ],
   human: ["intervention", "configuration"],
   unattributed: [],
 };

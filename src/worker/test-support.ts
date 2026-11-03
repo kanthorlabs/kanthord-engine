@@ -15,8 +15,14 @@ export const unusedHostTools: HostTools = {
   evidenceUpload: () =>
     Promise.reject(new Error("Unexpected evidence upload in fixture")),
 };
-import { ChainLevel } from "../agent/contract.ts";
-import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
+import { ChainLevel, type PromptPartAnswer } from "../agent/contract.ts";
+import { framingPart } from "../agent/prompt-files.ts";
+import { PromptConsumer } from "../agent/prompt-render.ts";
+import {
+  SHIPPED_TEMPLATE_SET,
+  SHIPPED_TEMPLATES,
+} from "../agent/prompt-templates.ts";
+import type { AgentPromptFacts } from "./prompt-telemetry.ts";
 import { alwaysAvailable, ExecutionIntent } from "./contract.ts";
 
 export const TWO_AGENT_WORKER = "two-agent@1";
@@ -30,6 +36,32 @@ export function twoAgentDeclarationOf(name: string): WorkerDeclaration | null {
 }
 
 export const SETUP_PROMPT = "setup prompt";
+
+export function shippedFraming(): PromptPartAnswer {
+  return framingPart(SHIPPED_TEMPLATE_SET, PromptConsumer.Worker, null);
+}
+
+export function memoryPromptTelemetry(): {
+  agentPrompted(executionId: string, facts: AgentPromptFacts): void;
+  promptRecordOf(
+    executionId: string,
+    agentName: string,
+  ): AgentPromptFacts | null;
+  records: Map<string, AgentPromptFacts>;
+} {
+  const records = new Map<string, AgentPromptFacts>();
+  const key = (executionId: string, agentName: string) =>
+    `${executionId}:${agentName}`;
+  return {
+    records,
+    agentPrompted: (executionId, facts) => {
+      if (!records.has(key(executionId, facts.agent_name)))
+        records.set(key(executionId, facts.agent_name), facts);
+    },
+    promptRecordOf: (executionId, agentName) =>
+      records.get(key(executionId, agentName)) ?? null,
+  };
+}
 export const TEST_SSH_HOST_KEY = {
   known_hosts:
     "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl\n",
@@ -55,7 +87,7 @@ export function anthropicAgent(
     position: 0,
     level: ChainLevel.Enablement,
     metadata: null,
-    prompt: { final: SETUP_PROMPT },
+    prompt: { final: SETUP_PROMPT, sources: [] },
     ...overrides,
   };
 }

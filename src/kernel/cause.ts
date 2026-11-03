@@ -20,6 +20,7 @@ export const CauseSubcategory = {
   ContextMissing: "context_missing",
   InstructionConflict: "instruction_conflict",
   RuleAbsent: "rule_absent",
+  SourceInvalid: "source_invalid",
   CriterionUnstated: "criterion_unstated",
   RequirementConflict: "requirement_conflict",
   Dependency: "dependency",
@@ -54,6 +55,7 @@ export const CauseSubcategory = {
   VerificationKilled: "verification_killed",
   Network: "network",
   ExecutionLost: "execution_lost",
+  PromptRecord: "prompt_record",
   Intervention: "intervention",
   Configuration: "configuration",
 } as const;
@@ -67,6 +69,7 @@ export const CAUSE_SUBCATEGORIES: Readonly<
     CauseSubcategory.ContextMissing,
     CauseSubcategory.InstructionConflict,
     CauseSubcategory.RuleAbsent,
+    CauseSubcategory.SourceInvalid,
   ],
   [CauseCategory.Plan]: [
     CauseSubcategory.CriterionUnstated,
@@ -113,6 +116,7 @@ export const CAUSE_SUBCATEGORIES: Readonly<
     CauseSubcategory.VerificationKilled,
     CauseSubcategory.Network,
     CauseSubcategory.ExecutionLost,
+    CauseSubcategory.PromptRecord,
   ],
   [CauseCategory.Human]: [
     CauseSubcategory.Intervention,

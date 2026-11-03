@@ -156,9 +156,14 @@ export interface Dependencies {
   agentPrompt: {
     compose(agentName: string, context: Context): Promise<PromptPartAnswer[]>;
     templates(context: Context): Promise<PromptTemplates>;
+    framing(context: Context): Promise<PromptPartAnswer>;
   };
   promptTelemetry: {
     agentPrompted(executionId: string, facts: AgentPromptFacts): void;
+    promptRecordOf(
+      executionId: string,
+      agentName: string,
+    ): AgentPromptFacts | null;
   };
   store: Store;
   workerBindingOf: WorkerBindingOf;

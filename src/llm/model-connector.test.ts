@@ -60,7 +60,7 @@ const setup: AgentSetup = {
   position: 0,
   level: "enablement",
   metadata: null,
-  prompt: { final: "setup prompt" },
+  prompt: { final: "setup prompt", sources: [] },
 };
 const handoverItem = {
   credential_id: setup.credential_id,

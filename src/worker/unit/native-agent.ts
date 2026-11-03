@@ -34,7 +34,7 @@ import {
   type SpanRecorder,
 } from "./telemetry.ts";
 import { executionSessionDirectory } from "./session-store.ts";
-import { PINNED_CONTEXT_TYPE } from "./session-entries.ts";
+import { PINNED_CONTEXT_TYPE, PinnedContextPart } from "./session-entries.ts";
 
 const REASONING_EFFORT_ATTRIBUTE = "kanthord.agent.reasoning_effort";
 
@@ -246,13 +246,9 @@ function nativeAgent(
   };
 }
 
-function appendPinnedContext(
-  session: AgentSession,
-  systemPrompt: string,
-): void {
+function appendPinnedContext(session: AgentSession): void {
   session.sessionManager.appendCustomEntry(PINNED_CONTEXT_TYPE, {
-    part: "system_prompt",
-    text: systemPrompt,
+    part: PinnedContextPart.SystemPrompt,
   });
 }
 
@@ -336,7 +332,7 @@ export async function openNativeAgent(
       sessionManager,
     });
     pins.pinInference(session, input.agent.prompt.final);
-    appendPinnedContext(session, input.agent.prompt.final);
+    appendPinnedContext(session);
     if (input.spans && sessionId !== undefined)
       trace?.watch(
         traceAgent(session, input.spans, input.agent, {

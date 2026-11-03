@@ -131,6 +131,7 @@ components:
                             - context_missing
                             - instruction_conflict
                             - rule_absent
+                            - source_invalid
                             - criterion_unstated
                             - requirement_conflict
                             - dependency
@@ -165,6 +166,7 @@ components:
                             - verification_killed
                             - network
                             - execution_lost
+                            - prompt_record
                             - intervention
                             - configuration
                         suspects:

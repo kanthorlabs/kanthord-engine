@@ -28,6 +28,7 @@ import {
   CooldownChangeKind,
   FALLBACK_CONFIGURATIONS_MAX,
   type HolderScope,
+  InstructionFileState,
   LIST_LIMIT_DEFAULT,
   PromptLayer,
   PromptOrigin,
@@ -116,6 +117,17 @@ const fakeCollaborations: Omit<Dependencies, "store" | "credentialHolds"> = {
   approvedModels: () => null,
   entriesOfAgent: () => [],
   repositoryPromptsOf: () => null,
+  promptBase: {
+    baseCommitOf: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+    instructionFileOf: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+  },
+  attemptPromptStackOf: () => {
+    throw new Error("UNEXPECTED_COLLABORATION");
+  },
   providerHealthCheck: () => async () => ResourceStatus.Unknown,
   providerCapability: () => PROVIDER_CAPABILITY,
   toolDeclarations: async () => TOOLS,
@@ -251,7 +263,7 @@ test("agent read answers the shipped parts, the workbench part of a workbench ag
     ],
   );
   assert.equal(parts[1]!.text, getAgentDeclaration(AGENT)!.agent_prompt);
-  assert.match(parts[0]!.digest, /^[a-f0-9]{64}$/);
+  assert.match(parts[0]!.digest!, /^[a-f0-9]{64}$/);
   assert.equal(
     parts[3]!.text,
     framing(SHIPPED_TEMPLATES, PromptConsumer.Workbench),
@@ -464,6 +476,179 @@ test("agent read with a repository binding answers the binding prompt of the age
   ])
     assert.equal(
       operation.input.safeParse({
+        params: { agent_name: AGENT },
+        query,
+        body: null,
+      }).success,
+      false,
+    );
+});
+
+const STACK_PINNED = "a".repeat(40);
+const STACK_HEAD = "b".repeat(40);
+const STACK_FILE = "AGENTS.md";
+const STACK_PINNED_TEXT = "Write every name outside the code in snake_case.";
+const STACK_HEAD_TEXT = "Write every name outside the code in camelCase.";
+const STACK_REPOSITORY_TEXT = "A test file sits beside its source file.";
+const STACK_NODE = "node_01";
+
+function stackFixture(
+  t: TestContext,
+  options: {
+    prompt_commits: { binding_id: string; commit: string }[] | null;
+    unreachable?: boolean;
+    invalid?: boolean;
+  },
+) {
+  const reads: string[] = [];
+  const stacks: [string, number | null][] = [];
+  const f = enablementFixture(t, {
+    repositoryPromptsOf: (_, id) => ({
+      binding_id: id,
+      project_id: "project-a",
+      name: "repo",
+      prompts: {
+        instruction_file: STACK_FILE,
+        repository: STACK_REPOSITORY_TEXT,
+        agents: { [AGENT]: PROJECT_TEXT },
+      },
+    }),
+    promptBase: {
+      baseCommitOf: async () => {
+        if (options.unreachable)
+          throw new OperationError(
+            422,
+            ProjectErrorCode.RepositorySshUnreachable,
+            "Repository is unreachable.",
+            { failure_reason: "deadline_exceeded" },
+          );
+        return STACK_HEAD;
+      },
+      instructionFileOf: async (_bindingId, commit) => {
+        reads.push(commit);
+        if (options.invalid)
+          return {
+            path: STACK_FILE,
+            commit,
+            state: InstructionFileState.Invalid,
+            reason: "not_utf8",
+            text: null,
+          };
+        return {
+          path: STACK_FILE,
+          commit,
+          state: InstructionFileState.Present,
+          reason: null,
+          text: commit === STACK_PINNED ? STACK_PINNED_TEXT : STACK_HEAD_TEXT,
+        };
+      },
+    },
+    attemptPromptStackOf: (_tx, nodeId, attempt) => {
+      stacks.push([nodeId, attempt]);
+      return {
+        attempt: attempt ?? 2,
+        binding_ids: ["binding-on"],
+        prompt_commits: options.prompt_commits,
+      };
+    },
+  });
+  return { read: promptReader(f), reads, stacks };
+}
+
+test("agent get --node answers the stack that the agent of the node reads at the pinned commit", async (t) => {
+  const f = stackFixture(t, {
+    prompt_commits: [{ binding_id: "binding-on", commit: STACK_PINNED }],
+  });
+  const answer = await f.read(AGENT, { node_id: STACK_NODE });
+  assert.deepEqual(f.stacks, [[STACK_NODE, null]]);
+  assert.deepEqual(f.reads, [STACK_PINNED]);
+  assert.deepEqual(
+    answer.prompt.parts!.map(({ layer, part, commit, state }) => [
+      layer,
+      part,
+      commit,
+      state,
+    ]),
+    [
+      [
+        PromptLayer.KanthorD,
+        PromptPart.Standard,
+        null,
+        PromptPartState.Resolved,
+      ],
+      [PromptLayer.KanthorD, PromptPart.Role, null, PromptPartState.Resolved],
+      [
+        PromptLayer.Repository,
+        PromptPart.InstructionFile,
+        STACK_PINNED,
+        PromptPartState.Resolved,
+      ],
+      [
+        PromptLayer.Repository,
+        PromptPart.Repository,
+        null,
+        PromptPartState.Resolved,
+      ],
+      [PromptLayer.Binding, PromptPart.Binding, null, PromptPartState.Resolved],
+      [null, PromptPart.Framing, null, PromptPartState.Resolved],
+    ],
+  );
+  assert.ok(
+    answer.prompt.final!.includes(
+      `Repository prompt of repository repo, file ${STACK_FILE}:\n\n${STACK_PINNED_TEXT}\n\nRepository prompt of repository repo, set in KanthorD:\n\n${STACK_REPOSITORY_TEXT}\n\nBinding prompt of repository repo:\n\n${PROJECT_TEXT}`,
+    ),
+  );
+  await f.read(AGENT, { node_id: STACK_NODE, attempt: "1" });
+  assert.deepEqual(f.stacks.at(-1), [STACK_NODE, 1]);
+});
+
+test("agent get --node of an attempt with no pin and agent get --binding-id read the current base head", async (t) => {
+  const f = stackFixture(t, { prompt_commits: null });
+  const node = await f.read(AGENT, { node_id: STACK_NODE });
+  const binding = await f.read(AGENT, {
+    project_id: "project-a",
+    binding_id: "binding-on",
+  });
+  assert.deepEqual(f.reads, [STACK_HEAD, STACK_HEAD]);
+  for (const answer of [node, binding])
+    assert.ok(answer.prompt.final!.includes(STACK_HEAD_TEXT));
+});
+
+test("a failed layer 2 read in agent get answers a part state and 200", async (t) => {
+  for (const [options, state, commit] of [
+    [{ unreachable: true }, PromptPartState.Unreachable, null],
+    [{ invalid: true }, PromptPartState.Invalid, STACK_HEAD],
+  ] as const) {
+    const f = stackFixture(t, { prompt_commits: null, ...options });
+    const answer = await f.read(AGENT, { node_id: STACK_NODE });
+    const file = answer.prompt.parts!.find(
+      ({ part }) => part === PromptPart.InstructionFile,
+    );
+    assert.deepEqual(file, {
+      layer: PromptLayer.Repository,
+      part: PromptPart.InstructionFile,
+      name: "repo",
+      origin: PromptOrigin.Repository,
+      path: STACK_FILE,
+      binding_id: "binding-on",
+      commit,
+      digest: null,
+      heading: `Repository prompt of repository repo, file ${STACK_FILE}:`,
+      state,
+      text: null,
+    });
+    assert.equal(answer.prompt.final, null);
+  }
+});
+
+test("agent get refuses attempt without node_id and node_id with project_id", () => {
+  for (const query of [
+    { attempt: "1" },
+    { node_id: STACK_NODE, project_id: "project-a", binding_id: "binding-on" },
+    { node_id: STACK_NODE, attempt: "0" },
+  ])
+    assert.equal(
+      agentOperations.get.input.safeParse({
         params: { agent_name: AGENT },
         query,
         body: null,

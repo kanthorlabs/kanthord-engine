@@ -45,8 +45,11 @@ import {
   effectiveConfigurationSchema,
   type EntriesOfAgent,
   type HolderScope,
+  type InstructionFileReader,
+  InstructionFileState,
   LIST_LIMIT_DEFAULT,
   type PromptPartAnswer,
+  PromptPartState,
   type PromptTemplates,
   PromptView,
   type ProviderCapabilityFn,
@@ -73,8 +76,18 @@ import {
   ProjectErrorCode,
   type RepositoryPolicy,
 } from "../project/contract.ts";
+import type { AttemptPromptStack } from "../mission/contract.ts";
+import {
+  instructionFilePart,
+  withinPromptDeadline,
+} from "./instruction-files.ts";
 import { framingPart, resolveAgentPrompt } from "./prompt-files.ts";
-import { bindingParts, finalPrompt, PromptConsumer } from "./prompt-render.ts";
+import {
+  bindingParts,
+  finalPrompt,
+  type InstructionFilePart,
+  PromptConsumer,
+} from "./prompt-render.ts";
 import {
   resolveTemplates,
   resolveTemplateSet,
@@ -89,6 +102,22 @@ const FIRST_POSITION = 0;
 const NO_STRIKES = 0;
 const FIRST_STRIKE = 1;
 const ENABLEMENT_SCOPE: HolderScope = { holders: [], claimant: SERVER_HOLDER };
+const UNREACHABLE_CODES: ReadonlySet<string> = new Set([
+  ProjectErrorCode.RepositoryBaseBranchAbsent,
+  ProjectErrorCode.RepositorySshUnreachable,
+]);
+
+type RepositoryPrompts = Pick<
+  RepositoryPolicy,
+  "binding_id" | "name" | "prompts"
+>;
+
+interface StackTarget {
+  binding_id: string;
+  name: string;
+  path: string;
+  commit: string | null;
+}
 
 function wireRecord(row: EnablementRow) {
   return agentEnablementSchema.parse({
@@ -179,6 +208,34 @@ function saveRevision(tx: Transaction, current: EnablementRow) {
   );
 }
 
+function stackTargets(
+  repositories: readonly RepositoryPrompts[],
+  commitOf: (bindingId: string) => string | null,
+): StackTarget[] {
+  return repositories.flatMap(({ binding_id, name, prompts }) =>
+    prompts.instruction_file === undefined
+      ? []
+      : [
+          {
+            binding_id,
+            name,
+            path: prompts.instruction_file,
+            commit: commitOf(binding_id),
+          },
+        ],
+  );
+}
+
+function headPrompts(repository: RepositoryPrompts): {
+  repositories: RepositoryPrompts[];
+  targets: StackTarget[];
+} {
+  return {
+    repositories: [repository],
+    targets: stackTargets([repository], () => null),
+  };
+}
+
 export interface Dependencies {
   store: Store;
   config: AgentConfig;
@@ -195,6 +252,15 @@ export interface Dependencies {
     RepositoryPolicy,
     "binding_id" | "project_id" | "name" | "prompts"
   > | null;
+  promptBase: {
+    baseCommitOf(bindingId: string, context: Context): Promise<string>;
+    instructionFileOf: InstructionFileReader;
+  };
+  attemptPromptStackOf(
+    tx: Transaction,
+    nodeId: string,
+    attempt: number | null,
+  ): AttemptPromptStack;
   providerHealthCheck: ProviderHealthCheckFn;
   providerCapability: ProviderCapabilityFn;
   toolDeclarations: ToolDeclarationsFn;
@@ -996,6 +1062,84 @@ export class AgentComponent {
     return repository;
   }
 
+  private nodePrompts(
+    nodeId: string,
+    attempt: number | null,
+  ): { repositories: RepositoryPrompts[]; targets: StackTarget[] } {
+    return this.dependencies.store.transaction((tx) => {
+      const stack = this.dependencies.attemptPromptStackOf(tx, nodeId, attempt);
+      const repositories = stack.binding_ids.map((bindingId) => {
+        const repository = this.dependencies.repositoryPromptsOf(tx, bindingId);
+        assert.ok(repository);
+        return repository;
+      });
+      return {
+        repositories,
+        targets: stackTargets(
+          repositories,
+          (bindingId) =>
+            stack.prompt_commits?.find(
+              (entry) => entry.binding_id === bindingId,
+            )?.commit ?? null,
+        ),
+      };
+    });
+  }
+
+  private async instructionFilePartOf(
+    target: StackTarget,
+    context: Context,
+  ): Promise<InstructionFilePart | null> {
+    const { promptBase } = this.dependencies;
+    let commit = target.commit;
+    try {
+      commit ??= await promptBase.baseCommitOf(target.binding_id, context);
+      const file = await promptBase.instructionFileOf(
+        target.binding_id,
+        commit,
+        context,
+      );
+      if (file === null || file.state === InstructionFileState.Absent)
+        return null;
+      if (file.state === InstructionFileState.Invalid)
+        return {
+          state: PromptPartState.Invalid,
+          path: file.path,
+          commit: file.commit,
+        };
+      return instructionFilePart(target, file);
+    } catch (error) {
+      if (error instanceof OperationError && UNREACHABLE_CODES.has(error.code))
+        return {
+          state: PromptPartState.Unreachable,
+          path: target.path,
+          commit,
+        };
+      throw error;
+    }
+  }
+
+  private instructionFilesOf(
+    targets: readonly StackTarget[],
+    context: Context,
+  ): Promise<Map<string, InstructionFilePart>> {
+    return withinPromptDeadline(context, async (deadline) => {
+      const parts = new Map<string, InstructionFilePart>();
+      const read = await Promise.all(
+        targets.map(
+          async (target) =>
+            [
+              target.binding_id,
+              await this.instructionFilePartOf(target, deadline),
+            ] as const,
+        ),
+      );
+      for (const [bindingId, part] of read)
+        if (part !== null) parts.set(bindingId, part);
+      return parts;
+    });
+  }
+
   composePrompt(
     agentName: string,
     consumer: PromptConsumer,
@@ -1016,6 +1160,17 @@ export class AgentComponent {
     return config.prompt.agent_directory
       ? resolve(dataDirectory, config.prompt.agent_directory)
       : null;
+  }
+
+  async promptFraming(
+    consumer: PromptConsumer,
+    context: Context,
+  ): Promise<PromptPartAnswer> {
+    return framingPart(
+      await this.templateSet(context),
+      consumer,
+      this.agentDirectory(),
+    );
   }
 
   promptTemplates(context: Context): Promise<PromptTemplates> {
@@ -1085,29 +1240,30 @@ export class AgentComponent {
           params.agent_name,
         );
         assert.equal(declaration.agent_name, params.agent_name);
-        const repository =
-          query.binding_id === undefined || query.project_id === undefined
-            ? null
-            : this.repositoryPrompts(query.project_id, query.binding_id);
+        const stack =
+          query.node_id !== undefined
+            ? this.nodePrompts(query.node_id, query.attempt ?? null)
+            : query.binding_id === undefined || query.project_id === undefined
+              ? null
+              : headPrompts(
+                  this.repositoryPrompts(query.project_id, query.binding_id),
+                );
         const consumer =
-          repository === null && declaration.workbench
+          stack === null && declaration.workbench
             ? PromptConsumer.Workbench
             : PromptConsumer.Worker;
+        const files = await this.instructionFilesOf(
+          stack?.targets ?? [],
+          caller.context,
+        );
         const parts = [
           ...(await this.composePrompt(
             params.agent_name,
             consumer,
             caller.context,
           )),
-          ...bindingParts(
-            repository === null ? [] : [repository],
-            params.agent_name,
-          ),
-          framingPart(
-            await this.templateSet(caller.context),
-            consumer,
-            this.agentDirectory(),
-          ),
+          ...bindingParts(stack?.repositories ?? [], params.agent_name, files),
+          await this.promptFraming(consumer, caller.context),
         ];
         const final = finalPrompt(parts);
         return caller.commit((tx) => {

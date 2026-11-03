@@ -23,7 +23,7 @@ import { SpanStatus } from "../../tracking/contract.ts";
 import { type FailureCause, unattributed } from "../../kernel/cause.ts";
 import { type GitStep, gitStepOf } from "./git-step.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
-import { stopCauseOf } from "./stop-cause.ts";
+import { codedStopDetail, stopCauseOf } from "./stop-cause.ts";
 
 type EvidenceBody = Omit<
   Parameters<MethodClients["mission"]["evidence.submit"]>[0]["body"],
@@ -250,7 +250,10 @@ export class ExecutionRun {
         error.code,
         error.code === GIT_COMMIT_FAILED
           ? await this.reasonOf(error.cause ?? error)
-          : null,
+          : codedStopDetail(
+              error.code,
+              "details" in error ? error.details : null,
+            ),
         gitStep,
       );
     return this.halt(
@@ -325,6 +328,9 @@ export class ExecutionRun {
       isExecutionEnd(result) ? EndReason.Revoked : EndReason.OperationFailed,
       result.type === OperationResultType.Failure
         ? result.error.error.code
+        : null,
+      result.type === OperationResultType.Failure
+        ? codedStopDetail(result.error.error.code, result.error.error.details)
         : null,
     );
   }

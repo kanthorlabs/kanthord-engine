@@ -961,6 +961,11 @@ export const promptCommitsSchema = z.array(
   }),
 );
 export type PromptCommits = z.infer<typeof promptCommitsSchema>;
+export interface AttemptPromptStack {
+  attempt: number;
+  binding_ids: string[];
+  prompt_commits: PromptCommits | null;
+}
 export interface MissionPromptPins {
   attemptPromptCommits(
     tx: Transaction,
