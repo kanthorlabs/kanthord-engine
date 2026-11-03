@@ -45,6 +45,7 @@ import {
   snapshotOf,
   verificationCommands,
 } from "./evaluation-input.ts";
+import { CODER_REPORT_SUBJECT } from "./steps-implement.ts";
 
 test("snapshot selection excludes requests and verifications and orders by identity", () => {
   const asset = {
@@ -407,7 +408,7 @@ test("an examine node with one binding places the produced evidence outside its 
   workspaces.release(prepared.key, WorkspaceKind.Execution);
 });
 
-test("an implement snapshot evaluation places the produced evidence outside its clean checkout", async (t) => {
+test("an implement snapshot evaluation places the coder report outside its clean checkout", async (t) => {
   const state = temporary(t);
   const origin = join(state, "origin");
   mkdirSync(origin);
@@ -466,7 +467,11 @@ test("an implement snapshot evaluation places the produced evidence outside its 
         },
       ],
     },
-    { id: "evidence_2", assets: [{ id: assetId, kind: "produced", address }] },
+    {
+      id: "evidence_2",
+      subject: CODER_REPORT_SUBJECT,
+      assets: [{ id: assetId, kind: "produced", address }],
+    },
   ] as Evidence[];
   const clients = {
     mission: {
@@ -526,6 +531,10 @@ test("an implement snapshot evaluation places the produced evidence outside its 
   assert.deepEqual(
     prepared.reviewBundle.assets.map((item) => item.path),
     [join("..", "..", EVIDENCE_DIRECTORY, assetId)],
+  );
+  assert.deepEqual(
+    prepared.reviewBundle.evidence.map((item) => item.subject),
+    [undefined, CODER_REPORT_SUBJECT],
   );
   assert.deepEqual(prepared.reviewBundle.added_files, [ADDED_FILE]);
   assert.deepEqual(prepared.reviewBundle.changed_files, [

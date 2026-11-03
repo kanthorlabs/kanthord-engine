@@ -73,6 +73,7 @@ const JOURNEY_TIMEOUT_MS = 180000;
 const GATED_BINDING_INDEX = 2;
 const NO_OUTPUT = "";
 const REPOSITORY = "repository";
+const CODER_REPORT = "Coder report of the node attempt";
 const GATED_REQUIREMENT = "gated.pull_request";
 const SECRET = "test_e2e_methods_secret";
 const DEFAULTS = {
@@ -492,7 +493,12 @@ suite("native methods", { concurrency: SUITE_CONCURRENCY }, () => {
               barePaths.get("git@github.com:owner/repo.git")!,
             ).revparse([`refs/heads/kanthord/${A}`])
           ).trim();
-          const items = (await evidence(A)).items;
+          const { items: all } = await evidence(A);
+          assert.equal(
+            all.filter((item) => item.subject === CODER_REPORT).length,
+            SINGLE_ITEM,
+          );
+          const items = all.filter((item) => item.subject !== CODER_REPORT);
           assert.equal(items.length, SINGLE_ITEM);
           assert.deepEqual(items[0]!.assets[0]!.address, {
             kind: "repository",
@@ -523,7 +529,9 @@ suite("native methods", { concurrency: SUITE_CONCURRENCY }, () => {
               barePaths.get("git@github.com:owner/gated.git")!,
             ).revparse([`refs/heads/kanthord/${C}`])
           ).trim();
-          const asset = (await evidence(C)).items[0]!.assets[0]!;
+          const asset = (await evidence(C)).items.find(
+            (item) => item.subject !== CODER_REPORT,
+          )!.assets[0]!;
           assert.ok(asset.kind === REPOSITORY);
           assert.equal(asset.address.commit, headC);
           gatedResource = "repository:github:owner/gated";
@@ -729,7 +737,7 @@ suite("native methods", { concurrency: SUITE_CONCURRENCY }, () => {
       let refused: Awaited<ReturnType<typeof kanthord>> | null = null;
       const heads: string[] = [];
       await t.test(
-        "EF09b.2 one steps execution pushes both node branches and submits one evidence",
+        "EF09b.2 one steps execution pushes both node branches and submits one head commit evidence",
         { timeout: JOURNEY_TIMEOUT_MS },
         async () => {
           const answer = await h.execute(
@@ -775,7 +783,9 @@ suite("native methods", { concurrency: SUITE_CONCURRENCY }, () => {
                 ])
               ).trim(),
             );
-          const items = (await h.evidence(checkoutFlow)).items;
+          const items = (await h.evidence(checkoutFlow)).items.filter(
+            (item) => item.subject !== CODER_REPORT,
+          );
           assert.equal(items.length, SINGLE_ITEM);
           assert.equal(items[0]!.assets.length, TWO_ASSETS);
           for (const [index, binding_id] of [api, web].entries())

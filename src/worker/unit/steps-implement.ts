@@ -93,8 +93,10 @@ import {
 } from "./progress-rule.ts";
 import { nodeUnitOf, releaseGate, ReleaseGateKind } from "./release-gate.ts";
 import { memoScopeOf, type VerificationMemo } from "./verification-memo.ts";
+import { REPORT_MEDIA_TYPE } from "./steps-examine.ts";
 
 export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
+export const CODER_REPORT_SUBJECT = "Coder report of the node attempt";
 const NO_TASKS = 0;
 const NO_CHECKOUTS = 0;
 const NO_PROGRESS_LIMIT = 2;
@@ -124,6 +126,38 @@ interface UnitsEnd {
   task: TaskContent | null;
   budgetEnd: boolean;
   completedTasks: number;
+  reports: ReadonlyMap<string, string>;
+}
+
+function noteReport(
+  reports: Map<string, string>,
+  unit: TaskContent,
+  text: string | undefined,
+): void {
+  if (text?.trim())
+    reports.set(unit.id, `## ${unit.id} ${unit.content.name}\n\n${text}`);
+  else reports.delete(unit.id);
+}
+
+async function submitCoderReport(
+  state: StepsState,
+  reports: ReadonlyMap<string, string>,
+): Promise<void> {
+  if (reports.size === NO_TASKS) return;
+  const report = [...reports.values()].join("\n\n");
+  await state.run.submitEvidence(state.input.claim.node_id, {
+    subject: CODER_REPORT_SUBJECT,
+    assets: [
+      {
+        kind: "produced",
+        content: {
+          media_type: REPORT_MEDIA_TYPE,
+          encoding: "base64",
+          data: Buffer.from(report, "utf8").toString("base64"),
+        },
+      },
+    ],
+  });
 }
 
 async function finishImplement(
@@ -181,6 +215,7 @@ async function settleImplement(
           },
         })),
       });
+      await submitCoderReport(state, end.reports);
     }
   } finally {
     cleanup.cancel();
@@ -268,6 +303,7 @@ export async function runStepsImplement(
           task: checked.budgetEnd.task,
           budgetEnd: true,
           completedTasks: NO_TASKS,
+          reports: new Map(),
         }
       : await spans.within(phaseSpan(Phase.Tasks), () =>
           runUnits(state, checked, taskRunner),
@@ -305,6 +341,7 @@ async function runUnits(
   taskRunner: TaskRunner,
 ): Promise<UnitsEnd> {
   const completed = new Set<string>();
+  const reports = new Map<string, string>();
   let units: readonly PendingTask[] = withSetupInstruction(
     checked.pending,
     state.setupInstruction,
@@ -314,12 +351,18 @@ async function runUnits(
     const ran = await runPending(state, units, nodeInstruction, taskRunner, {
       done: checked.done,
       completed,
+      reports,
     });
     if (ran.budgetEnd) return ran;
     nodeInstruction = null;
     const gate = await releaseGate(state);
     if (gate.kind === ReleaseGateKind.Passed)
-      return { task: null, budgetEnd: false, completedTasks: completed.size };
+      return {
+        task: null,
+        budgetEnd: false,
+        completedTasks: completed.size,
+        reports,
+      };
     if (gate.kind === ReleaseGateKind.BudgetEnd) break;
     state.run.log("release failure routed", { task_id: gate.unit.id });
     units = [{ task: gate.unit, instruction: gate.instruction }];
@@ -328,6 +371,7 @@ async function runUnits(
     task: state.task ?? null,
     budgetEnd: true,
     completedTasks: completed.size,
+    reports,
   };
 }
 
@@ -344,6 +388,7 @@ function withSetupInstruction(
 interface Completion {
   done: ReadonlySet<string>;
   completed: Set<string>;
+  reports: Map<string, string>;
 }
 
 async function runPending(
@@ -351,7 +396,7 @@ async function runPending(
   pending: readonly PendingTask[],
   node: NodeInstruction | null,
   taskRunner: TaskRunner,
-  { done, completed }: Completion,
+  { done, completed, reports }: Completion,
 ): Promise<UnitsEnd> {
   assert.ok(pending.length <= unitsOf(state).length);
   const units = pending.map(({ task, instruction }) => ({
@@ -377,11 +422,17 @@ async function runPending(
       (error) => taskFailure(error, state.revisionCount),
     );
     if (result.kind === TaskResultKind.BudgetEnd)
-      return { task, budgetEnd: true, completedTasks: completed.size };
+      return { task, budgetEnd: true, completedTasks: completed.size, reports };
+    noteReport(reports, task, state.agent.lastText());
     if (verdict || (result.recorded && !isDone(done, task)))
       completed.add(task.id);
   }
-  return { task: null, budgetEnd: false, completedTasks: completed.size };
+  return {
+    task: null,
+    budgetEnd: false,
+    completedTasks: completed.size,
+    reports,
+  };
 }
 
 async function runNodeInstruction(

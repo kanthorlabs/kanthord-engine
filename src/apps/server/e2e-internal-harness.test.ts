@@ -54,7 +54,8 @@ const SINGLE_INSTANCE = 1;
 const INITIAL_BINDING_VERSION = 1;
 const SINGLE_ITEM = 1;
 const TWO_ITEMS = 2;
-const EXPECTED_EVIDENCE_COUNT = 3;
+const EXPECTED_EVIDENCE_COUNT = 4;
+const CODER_REPORT = "Coder report of the node attempt";
 const EXPECTED_REVIEW_CALLS = 3;
 const EXPECTED_GENERAL_CALLS = 6;
 const FILE_SIZE = 5;
@@ -432,6 +433,10 @@ test(
           commit: head,
         });
         const verification = evidence.items.find((item) => item.verification)!;
+        const report = evidence.items.find(
+          (item) => item.subject === CODER_REPORT,
+        )!;
+        assert.ok(report.assets[0]!.kind === AssetKind.Produced);
         assert.deepEqual(
           verification.verification!.results.map(
             ({ command, exit_code: exitCode }) => ({
@@ -460,7 +465,7 @@ test(
         assert.equal(assessments.items[0]!.worker_version, REVIEWER);
         assert.deepEqual(
           [...assessments.items[0]!.evidence_ids].sort(),
-          [uploaded.id, work.id, verification.id].sort(),
+          [uploaded.id, work.id, verification.id, report.id].sort(),
         );
         const outcomes = await f.cli.read<Page<Outcome>>([
           "mission",
