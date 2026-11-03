@@ -628,6 +628,10 @@ export function composeServices(options: {
       authorizeAction: (...args) => mission.authorizeAction(...args),
       actionContextOf: (...args) => mission.actionContextOf(...args),
     },
+    missionPromptPins: {
+      attemptPromptCommits: (...args) => mission.attemptPromptCommits(...args),
+      pinPromptCommits: (...args) => mission.pinPromptCommits(...args),
+    },
     instanceArchive: {
       revokeForInstanceArchive: (...args) =>
         mission.revokeForInstanceArchive(...args),

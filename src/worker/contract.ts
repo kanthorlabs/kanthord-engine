@@ -57,6 +57,7 @@ export const HANDOVER_TIMEOUT_MS = 30000;
 export const HANDOVER_TIMEOUT_MARGIN_MS = 5000;
 export const HANDOVER_REFRESH_WAIT_MS =
   HANDOVER_TIMEOUT_MS - HANDOVER_TIMEOUT_MARGIN_MS;
+export const HANDOVER_HEAD_READ_MS = 20000;
 export const ACTION_REQUEST_TOOL_NAME = "repository-action-request";
 export const ACTION_REQUEST_TIMEOUT_MS = 900000;
 export const CHANGE_REQUEST_TIMEOUT_MS = 60000;
@@ -501,6 +502,28 @@ export type RepositoryBindingIdsOf = (
   nodeId: string,
   nodeRevision: number,
 ) => string[];
+
+export type PromptCommits = { binding_id: string; commit: string }[];
+export interface MissionPromptPins {
+  attemptPromptCommits(
+    tx: Transaction,
+    nodeId: string,
+    attempt: number,
+  ): PromptCommits | null;
+  pinPromptCommits(
+    tx: Transaction,
+    nodeId: string,
+    attempt: number,
+    commits: PromptCommits,
+  ): PromptCommits;
+}
+export interface PromptBase {
+  instructionBindingsOf(
+    tx: Transaction,
+    bindingIds: readonly string[],
+  ): string[];
+  baseCommitOf(bindingId: string, context: Context): Promise<string>;
+}
 
 export const ExecutionIntent = {
   Implement: "implement",

@@ -27,6 +27,7 @@ import {
   listAttempts,
   listOutcomes,
   openAttempt,
+  pinPromptCommits,
   readAssessment,
   readAssessmentsOfAttempt,
   readAssets,
@@ -39,6 +40,7 @@ import {
   readOpenAttempt,
   readOutcome,
   readOutcomesOfAttempt,
+  readPromptCommits,
   readReleaseEvidence,
   readRequests,
 } from "./record-store.ts";
@@ -142,6 +144,53 @@ test("attempts stay contiguous across rollback and never reopen a closed attempt
         { attempt: SECOND_ATTEMPT, node_revision: SECOND_ATTEMPT },
       ],
     );
+  });
+});
+
+test("an attempt opens with no prompt pin, the first pin write wins, and a new attempt starts with no pin", (t) => {
+  const h = fixture(t);
+  const binding = createIdentity("binding");
+  const first = [{ binding_id: binding, commit: "a".repeat(40) }];
+  const lost = [{ binding_id: binding, commit: "b".repeat(64) }];
+  h.store.transaction((tx) => {
+    openAttempt(tx, h.node_id, FIRST_ATTEMPT, ACTOR, NOW);
+    assert.equal(readPromptCommits(tx, h.node_id, FIRST_ATTEMPT), null);
+    assert.equal(
+      readAttempt(tx, h.node_id, FIRST_ATTEMPT)?.prompt_commits,
+      null,
+    );
+  });
+  h.store.transaction((tx) => {
+    assert.deepEqual(
+      pinPromptCommits(tx, h.node_id, FIRST_ATTEMPT, first),
+      first,
+    );
+  });
+  h.store.transaction((tx) => {
+    assert.deepEqual(
+      pinPromptCommits(tx, h.node_id, FIRST_ATTEMPT, lost),
+      first,
+    );
+    assert.deepEqual(readPromptCommits(tx, h.node_id, FIRST_ATTEMPT), first);
+    closeAttempt(tx, h.node_id, FIRST_ATTEMPT, LATER);
+    openAttempt(tx, h.node_id, SECOND_ATTEMPT, ACTOR, LATER);
+    assert.equal(readPromptCommits(tx, h.node_id, SECOND_ATTEMPT), null);
+    assert.deepEqual(pinPromptCommits(tx, h.node_id, SECOND_ATTEMPT, []), []);
+    assert.deepEqual(pinPromptCommits(tx, h.node_id, SECOND_ATTEMPT, lost), []);
+    assert.deepEqual(readPromptCommits(tx, h.node_id, FIRST_ATTEMPT), first);
+  });
+});
+
+test("a prompt pin refuses a commit outside the 40 or 64 hex set", (t) => {
+  const h = fixture(t);
+  h.store.transaction((tx) => {
+    openAttempt(tx, h.node_id, FIRST_ATTEMPT, ACTOR, NOW);
+    assert.throws(() =>
+      pinPromptCommits(tx, h.node_id, FIRST_ATTEMPT, [
+        { binding_id: createIdentity("binding"), commit: "main" },
+      ]),
+    );
+    assert.equal(readPromptCommits(tx, h.node_id, FIRST_ATTEMPT), null);
   });
 });
 

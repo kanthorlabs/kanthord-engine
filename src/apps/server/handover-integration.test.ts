@@ -1494,6 +1494,26 @@ for (const adapter of ["direct", "http"] as const) {
   });
 }
 
+test("the first handover of an attempt pins its prompt commits and a later handover keeps the pin", async (t) => {
+  const h = await setup(t, "direct");
+  const pin = () =>
+    (
+      h.f.store.database
+        .prepare(
+          "SELECT prompt_commits FROM mission_attempt WHERE node_id = ? AND attempt = ?",
+        )
+        .get(h.execution.node_id, h.execution.attempt) as {
+        prompt_commits: string | null;
+      }
+    ).prompt_commits;
+  const unnamed = "[]";
+  assert.equal(pin(), null);
+  completed(await h.handover());
+  assert.equal(pin(), unnamed);
+  completed(await h.handover());
+  assert.equal(pin(), unnamed);
+});
+
 test("HTTP handover enforces its byte limit before body parsing", async (t) => {
   const h = await setup(t, "http");
   const response = await fetch(`${h.f.endpoint}/api/worker/handover`, {
