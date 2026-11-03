@@ -114,6 +114,31 @@ const createMissionTables: Migration = (database) => {
       rejected_at INTEGER,
       created_at INTEGER NOT NULL
     );
+    CREATE TABLE mission_finding (
+      id TEXT NOT NULL PRIMARY KEY,
+      node_id TEXT NOT NULL REFERENCES mission_node(id),
+      assessment_id TEXT NOT NULL REFERENCES mission_assessment(id),
+      label TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      action TEXT NOT NULL,
+      task_id TEXT,
+      ground TEXT,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      fix TEXT NOT NULL,
+      why TEXT NOT NULL,
+      route TEXT NOT NULL,
+      fixed_assessment_id TEXT REFERENCES mission_assessment(id),
+      cause_owner TEXT,
+      created_by TEXT,
+      decision TEXT,
+      decision_reason TEXT,
+      decided_by TEXT,
+      decided_at INTEGER
+    );
+    CREATE UNIQUE INDEX mission_finding_label ON mission_finding (assessment_id, label);
+    CREATE UNIQUE INDEX mission_finding_node ON mission_finding (node_id, id);
+    CREATE UNIQUE INDEX mission_finding_human_label ON mission_finding (node_id, label) WHERE created_by IS NOT NULL;
     CREATE UNIQUE INDEX mission_node_mission ON mission_node (mission_id, id);
     CREATE UNIQUE INDEX mission_evidence_node ON mission_evidence (node_id, attempt, id);
     CREATE UNIQUE INDEX mission_evidence_asset_evidence ON mission_evidence_asset (evidence_id, id);

@@ -25,6 +25,9 @@ export const Act = {
   Discard: "mission.node.discard",
   DecideProposals: "mission.proposal.decide",
   DeleteEvidence: "mission.evidence.delete",
+  CreateFinding: "mission.finding.create",
+  UpdateFinding: "mission.finding.update",
+  DecideFinding: "mission.finding.decide",
 } as const;
 export type Act = (typeof Act)[keyof typeof Act];
 export const actSchema = z.enum(Act);

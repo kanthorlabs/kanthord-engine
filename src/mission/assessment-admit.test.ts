@@ -68,6 +68,8 @@ function fixture(t: TestContext) {
     rationale: "Checked",
     tested_input: INPUT,
     proposals: [],
+    findings: [],
+    fixed_finding_ids: [],
   };
   const seed = (
     verification: Verification | null,

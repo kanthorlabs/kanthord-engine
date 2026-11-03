@@ -6,6 +6,7 @@ import {
   CauseCategory,
   CauseSubcategory,
 } from "../kernel/cause.ts";
+import { ZodError } from "zod";
 import { OperationError } from "../kernel/errors.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -15,6 +16,11 @@ import {
   type AssessmentSubmit,
   AssetKind,
   ClosingEvent,
+  FindingAction,
+  FindingCauseOwner,
+  FindingKind,
+  FindingRoute,
+  FindingStatus,
   Intent,
   MissionErrorCode,
   NodeState,
@@ -26,6 +32,7 @@ import {
   TransitionRule,
 } from "./contract.ts";
 import {
+  deleteEvidence,
   insertAssessment,
   insertOutcome,
   listAssessments,
@@ -42,17 +49,23 @@ import {
   setNodeState,
 } from "./store.ts";
 import { getRevision } from "./node-read.ts";
+import { insertFinding } from "./finding-store.ts";
 import { landsByHuman } from "./authorization.ts";
 import { gateFilesOf } from "./gate-files.ts";
 import { requiredActionsOf } from "./frozen-action.ts";
 import {
   evidenceHarness,
   executionHarness,
+  refusedAt,
+  reviewerFinding,
+  reviewHarness,
   revokedExecution,
   unexpectedCollaboration,
 } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
+const FIRST_HUMAN_LABEL = "H1";
+const FIRST_SUGGESTION_LABEL = "S1";
 const SUCCESSFUL_EXIT_CODE = 0;
 const NO_ATTEMPT = 0;
 const NO_CALLS = 0;
@@ -72,6 +85,7 @@ const BAD_GATEWAY = 502;
 const ONE_ASSESSMENT = 1;
 const FAILURE_CAUSE_ARGUMENT = 3;
 const FIRST_QUEUED_AT = 40;
+const FIXED_FINDING_IDS = "fixed_finding_ids";
 const REWORK_CAUSE = attributed(
   CauseCategory.Model,
   CauseSubcategory.WorkDefect,
@@ -303,6 +317,8 @@ async function fixture(
     rationale: "Passed",
     tested_input: address,
     proposals: [],
+    findings: [],
+    fixed_finding_ids: [],
   };
   const submit = (input = body) =>
     h.invoke("assessment.submit", {
@@ -884,4 +900,514 @@ test("the cleared assessment read answers the assessment that the cleared outcom
       humanBlock ? HUMAN_REASON : h.body.rationale,
     );
   }
+});
+
+const FIRST_ROUND = 1;
+const SECOND_ROUND = 2;
+const FINAL_ROUND = 3;
+const REWORK_ONCE = 1;
+const FAILED_EXIT_CODE = 1;
+
+test("a success with an action:yes finding reworks below the limit and the final round reports its findings", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  const first = await h.submit({ findings: [reviewerFinding("S1")] });
+  assert.equal(first.assessment.round, FIRST_ROUND);
+  assert.ok("state" in first.node);
+  assert.equal(first.node.state, NodeState.Available);
+  assert.equal(first.outcome, null);
+  assert.equal(revokedFailureCause(h.calls), null);
+  assert.equal((await h.byLabel("S1")).route, FindingRoute.Fix);
+  const s1 = await h.byLabel("S1");
+  h.evaluate();
+  const second = await h.submit({
+    findings: [reviewerFinding("S2")],
+    fixed_finding_ids: [s1.id],
+  });
+  assert.equal(second.assessment.round, SECOND_ROUND);
+  assert.ok("state" in second.node);
+  assert.equal(second.node.state, NodeState.Available);
+  const fixed = await h.byLabel("S1");
+  assert.equal(fixed.status, FindingStatus.Fixed);
+  assert.equal(fixed.fixed_assessment_id, second.assessment.id);
+  h.evaluate();
+  const final = await h.submit({ findings: [reviewerFinding("S3")] });
+  assert.equal(final.assessment.round, FINAL_ROUND);
+  assert.ok("state" in final.node);
+  assert.equal(final.node.state, NodeState.Completed);
+  assert.equal(final.outcome?.result, AssessmentResult.Success);
+  assert.equal((await h.byLabel("S3")).route, FindingRoute.Report);
+  const unlisted = await h.byLabel("S2");
+  assert.equal(unlisted.route, FindingRoute.Report);
+  assert.equal(unlisted.status, FindingStatus.Open);
+  assert.equal((await h.byLabel("S1")).route, FindingRoute.Fix);
+});
+
+test("an unlisted open finding keeps its text, reworks a success and reads fixed when the final round lists it", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  await h.submit({
+    ...h.notMet,
+    findings: [reviewerFinding("B1"), reviewerFinding("S1")],
+  });
+  const [b1, s1] = [await h.byLabel("B1"), await h.byLabel("S1")];
+  h.evaluate();
+  const second = await h.submit({ fixed_finding_ids: [b1.id] });
+  assert.ok("state" in second.node);
+  assert.equal(second.node.state, NodeState.Available);
+  assert.equal(second.outcome, null);
+  assert.equal(revokedFailureCause(h.calls), null);
+  assert.deepEqual(await h.byLabel("S1"), s1);
+  h.evaluate();
+  const final = await h.submit({ fixed_finding_ids: [s1.id] });
+  assert.ok("state" in final.node);
+  assert.equal(final.node.state, NodeState.Completed);
+  const listed = await h.byLabel("S1");
+  assert.equal(listed.route, FindingRoute.Fix);
+  assert.equal(listed.status, FindingStatus.Fixed);
+  assert.equal(listed.fixed_assessment_id, final.assessment.id);
+});
+
+test("a criterion-not-met final round blocks with the rule rework_limit and reports the open findings", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  await h.submit({ ...h.notMet, findings: [reviewerFinding("B1")] });
+  h.evaluate();
+  await h.submit(h.notMet);
+  h.evaluate();
+  const final = await h.submit(h.notMet);
+  assert.ok("state" in final.node);
+  assert.equal(final.node.state, NodeState.Blocked);
+  assert.deepEqual(revokedTransition(h.calls), {
+    from: NodeState.Evaluating,
+    to: NodeState.Blocked,
+    rule: TransitionRule.ReworkLimit,
+    count: h.dependencies.config.rework_limit,
+    limit: h.dependencies.config.rework_limit,
+    first_available_at: null,
+  });
+  const b1 = await h.byLabel("B1");
+  assert.equal(b1.route, FindingRoute.Report);
+  assert.equal(b1.status, FindingStatus.Open);
+});
+
+test("a final round with a failed verification blocks with the rule rework_limit", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  await h.submit({ ...h.notMet, findings: [reviewerFinding("B1")] });
+  h.evaluate();
+  await h.submit(h.notMet);
+  h.evaluate();
+  const failed = await h.invoke("evidence.submit", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      ...h.context,
+      subject: "Verification failed",
+      assets: [{ kind: AssetKind.Repository, address: h.address }],
+      verification: {
+        tested_input: h.address,
+        results: [
+          {
+            command: "true",
+            exit_code: FAILED_EXIT_CODE,
+            signal: null,
+            timed_out: false,
+          },
+        ],
+      },
+    },
+  });
+  const final = await h.submit({
+    ...h.notMet,
+    evidence_ids: [failed.evidence.id],
+  });
+  assert.equal(final.assessment.round, FINAL_ROUND);
+  assert.ok("state" in final.node);
+  assert.equal(final.node.state, NodeState.Blocked);
+  assert.equal(final.outcome?.closing_event, ClosingEvent.AssessmentNotPassed);
+  assert.deepEqual(revokedTransition(h.calls), {
+    from: NodeState.Evaluating,
+    to: NodeState.Blocked,
+    rule: TransitionRule.ReworkLimit,
+    count: h.dependencies.config.rework_limit,
+    limit: h.dependencies.config.rework_limit,
+    first_available_at: null,
+  });
+  assert.equal((await h.byLabel("B1")).route, FindingRoute.Report);
+});
+
+test("a round after a request evidence reports its action:yes findings and causes no rework", async (t) => {
+  const h = await reviewHarness(t, IDENTITY, RepositoryAction.PullRequest);
+  await h.submit();
+  await requestPullRequest(h);
+  assert.equal((await h.reviewRound()).final, true);
+  const answer = await h.submit({ findings: [reviewerFinding("S1")] });
+  assert.ok("state" in answer.node);
+  assert.equal(answer.node.state, NodeState.Evaluating);
+  assert.equal(h.revokes(), NO_CALLS);
+  assert.equal((await h.byLabel("S1")).route, FindingRoute.Report);
+});
+
+test("a current success that requests the actions reports the open findings", async (t) => {
+  const h = await reviewHarness(t, IDENTITY, RepositoryAction.PullRequest);
+  h.dependencies.config.rework_limit = REWORK_ONCE;
+  await h.submit({ ...h.notMet, findings: [reviewerFinding("S1")] });
+  assert.equal((await h.byLabel("S1")).route, FindingRoute.Fix);
+  h.evaluate();
+  const answer = await h.submit();
+  assert.ok("state" in answer.node);
+  assert.equal(answer.node.state, NodeState.Evaluating);
+  assert.equal(answer.outcome, null);
+  assert.equal((await h.byLabel("S1")).route, FindingRoute.Report);
+});
+
+test("a forced request delete keeps the requesting round, so the attempt gets one rework less", async (t) => {
+  const h = await reviewHarness(t, IDENTITY, RepositoryAction.PullRequest);
+  await h.submit();
+  const request = await requestPullRequest(h);
+  h.store.transaction((tx) => deleteEvidence(tx, request.id));
+  const second = await h.submit(h.notMet);
+  assert.equal(second.assessment.round, SECOND_ROUND);
+  assert.ok("state" in second.node);
+  assert.equal(second.node.state, NodeState.Available);
+  h.evaluate();
+  const final = await h.submit(h.notMet);
+  assert.ok("state" in final.node);
+  assert.equal(final.node.state, NodeState.Blocked);
+  assert.equal(
+    (revokedTransition(h.calls) as { rule: TransitionRule }).rule,
+    TransitionRule.ReworkLimit,
+  );
+});
+
+test("the refusals at fixed_finding_ids", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  await h.submit({
+    ...h.notMet,
+    findings: [
+      reviewerFinding("B1"),
+      reviewerFinding("S1"),
+      reviewerFinding("S2", { action: FindingAction.No }),
+    ],
+  });
+  const [b1, s1, s2] = [
+    await h.byLabel("B1"),
+    await h.byLabel("S1"),
+    await h.byLabel("S2"),
+  ];
+  assert.equal(s2.route, FindingRoute.Record);
+  h.evaluate();
+  for (const ids of [[createIdentity("finding")], [s2.id]])
+    await assert.rejects(
+      h.submit({ ...h.notMet, fixed_finding_ids: ids }),
+      refusedAt(FIXED_FINDING_IDS),
+    );
+  await assert.rejects(
+    h.submit({ fixed_finding_ids: [s1.id] }),
+    refusedAt(FIXED_FINDING_IDS),
+  );
+  await assert.rejects(
+    h.submit({ ...h.notMet, fixed_finding_ids: [b1.id, b1.id] }),
+    (error) =>
+      error instanceof ZodError &&
+      error.issues.some((issue) => issue.path.includes(FIXED_FINDING_IDS)),
+  );
+  await h.submit({ ...h.notMet, fixed_finding_ids: [s1.id] });
+  h.evaluate();
+  await assert.rejects(
+    h.submit({ ...h.notMet, fixed_finding_ids: [s1.id] }),
+    refusedAt(FIXED_FINDING_IDS),
+  );
+  const done = await h.submit({ fixed_finding_ids: [b1.id] });
+  assert.ok("state" in done.node);
+  assert.equal(done.node.state, NodeState.Completed);
+});
+
+test("a fixed_finding_ids identity of a report finding is refused", async (t) => {
+  const h = await reviewHarness(t, IDENTITY, RepositoryAction.PullRequest);
+  h.dependencies.config.rework_limit = REWORK_OFF;
+  await h.submit({ findings: [reviewerFinding("S1")] });
+  const s1 = await h.byLabel("S1");
+  assert.equal(s1.route, FindingRoute.Report);
+  await assert.rejects(
+    h.submit({ fixed_finding_ids: [s1.id] }),
+    refusedAt(FIXED_FINDING_IDS),
+  );
+});
+
+test("a current success is admitted while the attempt holds an open human blocker H1", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  const first = await h.submit({
+    ...h.notMet,
+    findings: [reviewerFinding("S1")],
+  });
+  const human = await h.invoke("finding.create", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      expected_mission_version: FIRST_REVISION,
+      assessment_id: first.assessment.id,
+      kind: FindingKind.Blocker,
+      task_id: null,
+      name: "Missed",
+      description: "A defect after delivery",
+      fix: "Fix it",
+      why: "It breaks",
+      cause_owner: FindingCauseOwner.Reviewer,
+    },
+  });
+  assert.equal(human.label, FIRST_HUMAN_LABEL);
+  h.evaluate();
+  const s1 = await h.byLabel("S1");
+  const done = await h.submit({ fixed_finding_ids: [s1.id] });
+  assert.ok("state" in done.node);
+  assert.equal(done.node.state, NodeState.Completed);
+  assert.equal((await h.byLabel("H1")).route, FindingRoute.Report);
+});
+
+test("rework_limit 0 gives one final round", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  h.dependencies.config.rework_limit = REWORK_OFF;
+  const round = await h.reviewRound();
+  assert.equal(round.round, FIRST_ROUND);
+  assert.equal(round.final, true);
+  const answer = await h.submit({ findings: [reviewerFinding("S1")] });
+  assert.ok("state" in answer.node);
+  assert.equal(answer.node.state, NodeState.Completed);
+  assert.equal((await h.byLabel("S1")).route, FindingRoute.Report);
+});
+
+async function requestPullRequest(
+  h: Awaited<ReturnType<typeof reviewHarness>>,
+) {
+  return h.invoke("evidence.request", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      ...h.context,
+      subject: "PR",
+      requirement_key: "repo.pull_request",
+      address: {
+        kind: PlatformAddressKind.PullRequest,
+        resource_identity: "repository:github:owner/repo",
+        number: FIRST_REVISION,
+      },
+    },
+  });
+}
+
+async function examineFixture(t: TestContext) {
+  const h = executionHarness(t, IDENTITY);
+  const childId = createIdentity("node");
+  h.store.transaction((tx) => {
+    const base = getRevision(tx, h.node_id, FIRST_REVISION);
+    insertNode(tx, {
+      id: childId,
+      mission_id: h.mission_id,
+      filename: "child.md",
+      created_at: FIRST_REVISION,
+    });
+    insertDependency(tx, h.mission_id, h.node_id, childId);
+    insertRevision(tx, {
+      ...base,
+      node_id: childId,
+      filename: "child.md",
+      content: { ...base.content, intent: Intent.Implement },
+      tasks: [],
+    });
+    setNodeState(tx, h.node_id, NodeState.Evaluating);
+  });
+  const input = { kind: AssetKind.Produced, sha256: "a".repeat(64) } as const;
+  const evidence = await h.invoke("evidence.submit", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      ...h.context,
+      subject: "Run",
+      assets: [
+        {
+          kind: AssetKind.Produced,
+          content: {
+            media_type: "text/plain",
+            encoding: "base64",
+            data: "b2s=",
+          },
+        },
+      ],
+      verification: {
+        tested_input: input,
+        results: [
+          {
+            command: "true",
+            exit_code: SUCCESSFUL_EXIT_CODE,
+            signal: null,
+            timed_out: false,
+          },
+        ],
+      },
+    },
+  });
+  const body: AssessmentSubmit = {
+    ...h.context,
+    evidence_ids: [evidence.evidence.id],
+    dependency_outcome_ids: [],
+    result: AssessmentResult.Success,
+    rationale: "Passed",
+    tested_input: input,
+    proposals: [],
+    findings: [],
+    fixed_finding_ids: [],
+  };
+  const submit = (input: Partial<AssessmentSubmit> = {}) =>
+    h.invoke("assessment.submit", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: { ...body, ...input },
+    });
+  const findings = async () =>
+    (
+      await h.invoke("finding.list", {
+        params: { node_id: h.node_id },
+        query: {},
+        body: null,
+      })
+    ).items;
+  const completeChild = () =>
+    h.store.transaction((tx) => {
+      const id = createIdentity("assessment");
+      insertAssessment(tx, {
+        id,
+        node_id: childId,
+        attempt: NO_ATTEMPT,
+        result: AssessmentResult.Success,
+        rationale: "Override",
+        evidence_ids: "[]",
+        dependency_outcome_ids: "[]",
+        tested_input: null,
+        gate_files: null,
+        execution_id: null,
+        actor: canonicalJSON(h.actor),
+        node_revision: FIRST_REVISION,
+        created_at: FIRST_REVISION,
+      });
+      const outcome = insertOutcome(tx, {
+        id: createIdentity("outcome"),
+        node_id: childId,
+        result: AssessmentResult.Success,
+        assessment_id: id,
+        evidence_ids: "[]",
+        created_at: FIRST_REVISION,
+      });
+      setNodeState(tx, childId, NodeState.Completed);
+      return outcome.id;
+    });
+  return { ...h, submit, findings, completeChild };
+}
+
+test("a non-current submit stores its findings as records and changes no earlier finding", async (t) => {
+  const h = await examineFixture(t);
+  const stale = await h.submit({
+    result: AssessmentResult.CriterionNotMet,
+    cause: REWORK_CAUSE,
+    findings: [reviewerFinding("B1")],
+  });
+  assert.equal(stale.assessment.currency?.current, false);
+  const [b1] = await h.findings();
+  assert.equal(b1?.route, FindingRoute.Record);
+  const seeded = createIdentity("finding");
+  h.store.transaction((tx) =>
+    insertFinding(tx, {
+      id: seeded,
+      node_id: h.node_id,
+      assessment_id: stale.assessment.id,
+      label: "S9",
+      kind: FindingKind.Suggestion,
+      action: FindingAction.Yes,
+      task_id: null,
+      ground: null,
+      name: "Seeded",
+      description: "Seeded",
+      fix: "Seeded",
+      why: "Seeded",
+      route: FindingRoute.Fix,
+      fixed_assessment_id: null,
+      cause_owner: null,
+      created_by: null,
+      decision: null,
+      decision_reason: null,
+      decided_by: null,
+      decided_at: null,
+    }),
+  );
+  const listing = await h.submit({
+    findings: [reviewerFinding("S1")],
+    fixed_finding_ids: [seeded],
+  });
+  assert.equal(listing.assessment.currency?.current, false);
+  const afterStale = await h.findings();
+  const seededRow = afterStale.find((item) => item.id === seeded);
+  assert.equal(seededRow?.fixed_assessment_id, null);
+  assert.equal(seededRow?.route, FindingRoute.Fix);
+  assert.equal(
+    afterStale.find((item) => item.label === FIRST_SUGGESTION_LABEL)?.route,
+    FindingRoute.Record,
+  );
+  const undecided = await h.invoke("finding.undecided.list", {
+    params: { project_id: h.project_id },
+    query: {},
+    body: null,
+  });
+  assert.deepEqual(undecided.items, []);
+  const outcomeId = h.completeChild();
+  const current = await h.submit({ dependency_outcome_ids: [outcomeId] });
+  assert.equal(current.assessment.currency?.current, true);
+  assert.ok("state" in current.node);
+  assert.equal(current.node.state, NodeState.Completed);
+  const routes = (await h.findings()).map((item) => [item.label, item.route]);
+  assert.deepEqual(routes.sort(), [
+    ["B1", FindingRoute.Record],
+    ["S1", FindingRoute.Record],
+    ["S9", FindingRoute.Report],
+  ]);
+});
+
+test("an examine finding never gets the route fix, causes no rework and is reported only by the closing round", async (t) => {
+  const h = await examineFixture(t);
+  const outcomeId = h.completeChild();
+  const rework = await h.submit({
+    result: AssessmentResult.CriterionNotMet,
+    cause: REWORK_CAUSE,
+    dependency_outcome_ids: [outcomeId],
+    findings: [reviewerFinding("B1"), reviewerFinding("S1")],
+  });
+  assert.ok("state" in rework.node);
+  assert.equal(rework.node.state, NodeState.Available);
+  assert.ok(
+    (await h.findings()).every((item) => item.route === FindingRoute.Record),
+  );
+  h.dependencies.schedulerClaims.liveExecutionOf = () => ({
+    execution_id: h.claim.executionId,
+    runtime_identity: h.claim.runtimeIdentity,
+    attempt: h.claim.attempt,
+    pinned_revision: h.claim.pinnedRevision,
+  });
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
+  const round = await h.invoke("execution.review_round.get", {
+    params: { execution_id: h.claim.executionId },
+    query: {},
+    body: null,
+  });
+  assert.deepEqual(round.findings, []);
+  assert.equal(round.review_base, null);
+  const closing = await h.submit({
+    dependency_outcome_ids: [outcomeId],
+    findings: [reviewerFinding("S2")],
+  });
+  assert.ok("state" in closing.node);
+  assert.equal(closing.node.state, NodeState.Completed);
+  const routes = (await h.findings()).map((item) => [item.label, item.route]);
+  assert.deepEqual(routes.sort(), [
+    ["B1", FindingRoute.Record],
+    ["S1", FindingRoute.Record],
+    ["S2", FindingRoute.Report],
+  ]);
 });

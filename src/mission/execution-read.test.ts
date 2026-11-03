@@ -3,7 +3,14 @@ import { test } from "node:test";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
-import { AssessmentResult, MissionErrorCode, NodeState } from "./contract.ts";
+import {
+  AssessmentResult,
+  AssetKind,
+  FindingAction,
+  FindingStatus,
+  MissionErrorCode,
+  NodeState,
+} from "./contract.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import {
   closeAttempt,
@@ -19,7 +26,12 @@ import {
   insertRevision,
   setNodeState,
 } from "./store.ts";
-import { evidenceHarness, executionHarness } from "./test-support.ts";
+import {
+  evidenceHarness,
+  executionHarness,
+  reviewerFinding,
+  reviewHarness,
+} from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const NO_ATTEMPT = 0;
@@ -307,4 +319,132 @@ test("execution revision reads carry the pinned tasks and exclude later human re
       error instanceof OperationError &&
       error.code === MissionErrorCode.ExecutionRevisionAbovePin,
   );
+});
+
+const LATER_COMMIT = "b".repeat(40);
+const SECOND_ROUND = 2;
+const THIRD_ROUND = 3;
+
+async function laterEvidence(h: Awaited<ReturnType<typeof reviewHarness>>) {
+  const address = { ...h.address, commit: LATER_COMMIT };
+  const evidence = await h.invoke("evidence.submit", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      ...h.context,
+      subject: "Verified again",
+      assets: [{ kind: AssetKind.Repository, address }],
+      verification: {
+        tested_input: address,
+        results: [
+          { command: "true", exit_code: 0, signal: null, timed_out: false },
+        ],
+      },
+    },
+  });
+  return { evidence_ids: [evidence.evidence.id], tested_input: address };
+}
+
+test("the review round answers its number, its review base and the open findings in label order", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  const first = await h.reviewRound();
+  assert.deepEqual(first, {
+    round: FIRST_ATTEMPT,
+    final: false,
+    review_base: null,
+    findings: [],
+  });
+  await h.submit({
+    ...h.notMet,
+    findings: [
+      reviewerFinding("S1"),
+      reviewerFinding("B10"),
+      reviewerFinding("B2"),
+      reviewerFinding("S3", { action: FindingAction.No }),
+    ],
+  });
+  h.evaluate();
+  const second = await h.reviewRound();
+  assert.equal(second.round, SECOND_ROUND);
+  assert.equal(second.final, false);
+  assert.deepEqual(second.review_base, h.address);
+  assert.deepEqual(
+    second.findings.map((item) => item.label),
+    ["B2", "B10", "S1"],
+  );
+});
+
+test("the review base skips an unjudged round and a round that rests only on an unlisted open blocker", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  await h.submit({ ...h.notMet, findings: [reviewerFinding("B1")] });
+  h.evaluate();
+  const later = await laterEvidence(h);
+  const unjudged = await h.submit({ ...h.notMet, ...later });
+  assert.ok("state" in unjudged.node);
+  assert.equal(unjudged.node.state, NodeState.Available);
+  h.evaluate();
+  const round = await h.reviewRound();
+  assert.equal(round.round, THIRD_ROUND);
+  assert.equal(round.final, true);
+  assert.deepEqual(round.review_base, h.address);
+  assert.deepEqual(
+    round.findings.map((item) => [item.label, item.status]),
+    [["B1", FindingStatus.Open]],
+  );
+});
+
+test("a criterion-not-met round with one new suggestion and an unlisted open blocker is the next review base", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  await h.submit({ ...h.notMet, findings: [reviewerFinding("B1")] });
+  h.evaluate();
+  const later = await laterEvidence(h);
+  await h.submit({
+    ...h.notMet,
+    ...later,
+    findings: [reviewerFinding("S1")],
+  });
+  h.evaluate();
+  const round = await h.reviewRound();
+  assert.deepEqual(round.review_base, later.tested_input);
+  assert.deepEqual(
+    round.findings.map((item) => item.label),
+    ["B1", "S1"],
+  );
+});
+
+test("the rework assessment selects a success while the attempt holds an open finding", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  const success = await h.submit({ findings: [reviewerFinding("S1")] });
+  h.evaluate();
+  const rework = await h.invoke("execution.rework_assessment.get", {
+    params: { execution_id: h.claim.executionId },
+    query: {},
+    body: null,
+  });
+  assert.equal(rework.id, success.assessment.id);
+  assert.equal(rework.round, FIRST_ATTEMPT);
+});
+
+test("a request evidence makes round 1 final", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  h.store.transaction((tx) =>
+    insertEvidence(
+      tx,
+      {
+        id: createIdentity("evidence"),
+        node_id: h.node_id,
+        attempt: h.claim.attempt,
+        subject: "PR",
+        requirement_key: "repo.pull_request",
+        end_state: null,
+        verification: null,
+        provenance: canonicalJSON(h.executionActor),
+        created_at: CREATED_AT,
+      },
+      [],
+    ),
+  );
+  const round = await h.reviewRound();
+  assert.equal(round.round, FIRST_ATTEMPT);
+  assert.equal(round.final, true);
 });

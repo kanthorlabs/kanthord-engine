@@ -8,7 +8,12 @@ import {
   AssessmentResult,
   type AssessmentSubmit,
   type ExecutionEnds,
+  FINDING_IDENTITY_PREFIX,
+  FindingAction,
+  FindingRoute,
+  type FindingSubmit,
   type GateFiles,
+  Intent,
   NodeState,
   PROPOSAL_IDENTITY_PREFIX,
   RevokeCause,
@@ -25,15 +30,20 @@ import { currencyOf } from "./currency.ts";
 import { admitExecution, requireEvaluationClaim } from "./execution.ts";
 import { requiredActionsOf } from "./frozen-action.ts";
 import { nodeRecord, requireNode } from "./node-read.ts";
+import { kindOfLabel } from "./finding-admit.ts";
+import {
+  insertFinding,
+  markFindingsFixed,
+  routeOpenFixFindings,
+} from "./finding-store.ts";
 import { insertProposal } from "./proposal-store.ts";
 import { assessmentRecord, outcomeRecord } from "./record-read.ts";
 import {
-  type AssessmentRow,
   closeAttempt,
   insertAssessment,
   insertOutcome,
   type OutcomeRow,
-  readExecutionAssessmentsOfAttempt,
+  readAssessmentRound,
   readLandedCommitEvidence,
   readRequests,
 } from "./record-store.ts";
@@ -43,23 +53,19 @@ import { requireMission } from "./write.ts";
 const NO_REQUIRED_ACTIONS = 0;
 const NO_REQUESTS = 0;
 const NO_GATE_FILE_ENTRIES = 0;
+const NO_ACTION_ITEMS = 0;
+const FIRST_ROUND = 1;
 
-function priorReworks(
-  tx: Transaction,
-  assessment: AssessmentRow,
-): number | null {
-  if (assessment.result !== AssessmentResult.CriterionNotMet) return null;
-  if (
-    readRequests(tx, assessment.node_id, assessment.attempt).length >
-    NO_REQUESTS
-  )
-    return null;
-  return readExecutionAssessmentsOfAttempt(
-    tx,
-    assessment.node_id,
-    assessment.attempt,
-    AssessmentResult.CriterionNotMet,
-  ).filter((row) => row.sequence < assessment.sequence).length;
+function routeOf(
+  finding: FindingSubmit,
+  current: boolean,
+  reworkDue: boolean,
+  intent: Intent,
+): FindingRoute {
+  if (finding.action === FindingAction.No || !current)
+    return FindingRoute.Record;
+  if (!reworkDue) return FindingRoute.Report;
+  return intent === Intent.Implement ? FindingRoute.Fix : FindingRoute.Record;
 }
 
 export function submitAssessment(
@@ -81,7 +87,7 @@ export function submitAssessment(
     now,
   );
   requireEvaluationClaim(node);
-  admitAssessment(tx, dependencies, node, attempt, revision, body);
+  const open = admitAssessment(tx, dependencies, node, attempt, revision, body);
   const assessment = insertAssessment(tx, {
     id: createIdentity("assessment"),
     node_id: node.id,
@@ -108,19 +114,63 @@ export function submitAssessment(
     revision.revision,
   );
   let outcome: OutcomeRow | null = null;
-  const reworks = current ? priorReworks(tx, assessment) : null;
+  const round = readAssessmentRound(tx, assessment);
+  assert.ok(round !== null);
+  const reworks = round - FIRST_ROUND;
+  const requested =
+    readRequests(tx, node.id, attempt.attempt).length > NO_REQUESTS;
   const reworkLimit = dependencies.config.rework_limit;
   const planDefect = current && body.cause?.category === CauseCategory.Plan;
+  const intent = revision.content.intent;
+  const listed = new Set(body.fixed_finding_ids);
+  const actionItems =
+    body.findings.filter((finding) => finding.action === FindingAction.Yes)
+      .length + open.filter((row) => !listed.has(row.id)).length;
+  const reworkDue =
+    current &&
+    !requested &&
+    !planDefect &&
+    reworks < reworkLimit &&
+    (body.result === AssessmentResult.CriterionNotMet ||
+      (body.result === AssessmentResult.Success &&
+        intent === Intent.Implement &&
+        actionItems > NO_ACTION_ITEMS));
   const limited = planDefect
     ? { rule: TransitionRule.PlanDefect, count: null, limit: null }
-    : reworks === null
-      ? null
-      : {
+    : body.result === AssessmentResult.CriterionNotMet && !requested
+      ? {
           rule: TransitionRule.ReworkLimit,
           count: reworks,
           limit: reworkLimit,
-        };
-  if (reworks !== null && !planDefect && reworks < reworkLimit) {
+        }
+      : null;
+  for (const finding of body.findings)
+    insertFinding(tx, {
+      id: createIdentity(FINDING_IDENTITY_PREFIX),
+      node_id: node.id,
+      assessment_id: assessment.id,
+      label: finding.label,
+      kind: kindOfLabel(finding.label),
+      action: finding.action,
+      task_id: finding.task_id,
+      ground: finding.ground,
+      name: finding.name,
+      description: finding.description,
+      fix: finding.fix,
+      why: finding.why,
+      route: routeOf(finding, current, reworkDue, intent),
+      fixed_assessment_id: null,
+      cause_owner: null,
+      created_by: null,
+      decision: null,
+      decision_reason: null,
+      decided_by: null,
+      decided_at: null,
+    });
+  if (current) markFindingsFixed(tx, body.fixed_finding_ids, assessment.id);
+  if (current && !reworkDue)
+    routeOpenFixFindings(tx, node.id, attempt.attempt, FindingRoute.Report);
+  if (reworkDue) {
     const revoked = endLiveClaim(
       tx,
       dependencies,

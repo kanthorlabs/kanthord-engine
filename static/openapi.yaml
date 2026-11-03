@@ -136,6 +136,8 @@ paths:
     $ref: ./openapi/mission/execution.evidence.list.yaml#/pathItem
   /api/mission/execution/{execution_id}/pinned-revision:
     $ref: ./openapi/mission/execution.pinnedRevision.get.yaml#/pathItem
+  /api/mission/execution/{execution_id}/review-round:
+    $ref: ./openapi/mission/execution.review_round.get.yaml#/pathItem
   /api/mission/execution/{execution_id}/revision/{revision}:
     $ref: ./openapi/mission/execution.revision.get.yaml#/pathItem
   /api/mission/execution/{execution_id}/revision:
@@ -148,6 +150,14 @@ paths:
     $ref: ./openapi/mission/externalAction.get.yaml#/pathItem
   /api/mission/node/{node_id}/external-action:
     $ref: ./openapi/mission/externalAction.list.yaml#/pathItem
+  /api/mission/node/{node_id}/finding:
+    $ref: ./openapi/mission/finding.create.yaml#/pathItem
+  /api/mission/finding/{finding_id}/decide:
+    $ref: ./openapi/mission/finding.decide.yaml#/pathItem
+  /api/mission/finding/{finding_id}:
+    $ref: ./openapi/mission/finding.get.yaml#/pathItem
+  /api/mission/project/{project_id}/undecided-finding:
+    $ref: ./openapi/mission/finding.undecided.list.yaml#/pathItem
   /api/mission/project/{project_id}:
     $ref: ./openapi/mission/get.yaml#/pathItem
   /api/mission/{mission_id}/import:

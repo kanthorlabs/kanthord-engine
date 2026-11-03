@@ -22,6 +22,7 @@ export const MISSION_IDENTITY_PREFIX = "mission";
 export const NODE_IDENTITY_PREFIX = "node";
 export const TASK_IDENTITY_PREFIX = "task";
 export const PROPOSAL_IDENTITY_PREFIX = "proposal";
+export const FINDING_IDENTITY_PREFIX = "finding";
 export const MISSION_INITIAL_VERSION = 1;
 export const MISSION_OPERATION_TIMEOUT_MS = 30000;
 
@@ -385,6 +386,9 @@ export const MissionErrorCode = {
   AssessmentVerificationFailed: "mission.assessment.verification_failed",
   ProposalDecided: "mission.proposal.decided",
   ProposalAssessmentMismatch: "mission.proposal.assessment_mismatch",
+  FindingNotReported: "mission.finding.not_reported",
+  FindingDecided: "mission.finding.decided",
+  FindingNotHuman: "mission.finding.not_human",
   NoUnresolvedRequest: "mission.node.no_unresolved_request",
   RecordNotFound: "mission.record.not_found",
   ExecutionContextMismatch: "mission.execution.context_mismatch",
@@ -1153,6 +1157,7 @@ export const assessmentSchema = z.strictObject({
   currency: currencySchema.nullable(),
   dependency_node_ids: z.array(identitySchema("node")),
   worker_version: textSchema.nullable(),
+  round: z.number().int().positive().nullable(),
 });
 export type Assessment = z.infer<typeof assessmentSchema>;
 export const outcomeSchema = z.strictObject({
@@ -1332,6 +1337,134 @@ export const proposalDecideResultSchema = z.strictObject({
   proposer: controlResultSchema,
 });
 export type ProposalDecideResult = z.infer<typeof proposalDecideResultSchema>;
+export const FindingKind = {
+  Blocker: "blocker",
+  Suggestion: "suggestion",
+} as const;
+export const findingKindSchema = z.enum(FindingKind);
+export type FindingKind = z.infer<typeof findingKindSchema>;
+export const FindingAction = { Yes: "yes", No: "no" } as const;
+export const findingActionSchema = z.enum(FindingAction);
+export type FindingAction = z.infer<typeof findingActionSchema>;
+export const FindingGround = {
+  Stated: "stated",
+  Standard: "standard",
+  Unstated: "unstated",
+  Conflict: "conflict",
+} as const;
+export const findingGroundSchema = z.enum(FindingGround);
+export type FindingGround = z.infer<typeof findingGroundSchema>;
+export const FindingRoute = {
+  Fix: "fix",
+  Report: "report",
+  Record: "record",
+} as const;
+export const findingRouteSchema = z.enum(FindingRoute);
+export type FindingRoute = z.infer<typeof findingRouteSchema>;
+export const FindingStatus = { Open: "open", Fixed: "fixed" } as const;
+export const findingStatusSchema = z.enum(FindingStatus);
+export type FindingStatus = z.infer<typeof findingStatusSchema>;
+export const FindingSource = { Reviewer: "reviewer", Human: "human" } as const;
+export const findingSourceSchema = z.enum(FindingSource);
+export type FindingSource = z.infer<typeof findingSourceSchema>;
+export const FindingCauseOwner = {
+  Plan: "plan",
+  Agent: "agent",
+  Reviewer: "reviewer",
+  Gate: "gate",
+  Engine: "engine",
+  Apps: "apps",
+  Load: "load",
+  Human: "human",
+} as const;
+export const findingCauseOwnerSchema = z.enum(FindingCauseOwner);
+export type FindingCauseOwner = z.infer<typeof findingCauseOwnerSchema>;
+export const FindingDecision = {
+  Accepted: "accepted",
+  Dismissed: "dismissed",
+} as const;
+export const findingDecisionSchema = z.enum(FindingDecision);
+export type FindingDecision = z.infer<typeof findingDecisionSchema>;
+export const FINDING_MAX = 100;
+export const FINDING_TEXT_MAX_BYTES = 8192;
+export const REVIEWER_FINDING_LABEL_PATTERN = /^[BS][1-9][0-9]{0,2}$/;
+export const findingSubmitSchema = z.strictObject({
+  label: z.string().regex(REVIEWER_FINDING_LABEL_PATTERN),
+  action: findingActionSchema,
+  task_id: identitySchema(TASK_IDENTITY_PREFIX).nullable(),
+  ground: findingGroundSchema.nullable(),
+  name: textSchema,
+  description: textSchema,
+  fix: textSchema,
+  why: textSchema,
+});
+export type FindingSubmit = z.infer<typeof findingSubmitSchema>;
+export const findingSchema = z.strictObject({
+  id: identitySchema(FINDING_IDENTITY_PREFIX),
+  node_id: identitySchema(NODE_IDENTITY_PREFIX),
+  attempt: z.number().int().nonnegative(),
+  round: z.number().int().positive().nullable(),
+  assessment_id: identitySchema("assessment"),
+  source: findingSourceSchema,
+  label: textSchema,
+  kind: findingKindSchema,
+  action: findingActionSchema,
+  task_id: identitySchema(TASK_IDENTITY_PREFIX).nullable(),
+  ground: findingGroundSchema.nullable(),
+  name: textSchema,
+  description: textSchema,
+  fix: textSchema,
+  why: textSchema,
+  route: findingRouteSchema,
+  status: findingStatusSchema,
+  fixed_assessment_id: identitySchema("assessment").nullable(),
+  cause_owner: findingCauseOwnerSchema.nullable(),
+  created_by: actorSchema.nullable(),
+  created_at: timestamp,
+  decision: findingDecisionSchema.nullable(),
+  decision_reason: textSchema.nullable(),
+  decided_by: actorSchema.nullable(),
+  decided_at: timestamp.nullable(),
+});
+export type Finding = z.infer<typeof findingSchema>;
+export const reviewRoundSchema = z.strictObject({
+  round: z.number().int().positive(),
+  final: z.boolean(),
+  review_base: testedInputSchema.nullable(),
+  findings: z.array(findingSchema),
+});
+export type ReviewRound = z.infer<typeof reviewRoundSchema>;
+export const findingDecideSchema = z.strictObject({
+  decision: findingDecisionSchema,
+  decision_reason: textSchema,
+});
+export type FindingDecide = z.infer<typeof findingDecideSchema>;
+const findingReportFields = {
+  kind: findingKindSchema,
+  task_id: identitySchema(TASK_IDENTITY_PREFIX).nullable(),
+  name: textSchema,
+  description: textSchema,
+  fix: textSchema,
+  why: textSchema,
+  cause_owner: findingCauseOwnerSchema,
+};
+export const findingCreateSchema = z.strictObject({
+  expected_mission_version: z.number().int().positive(),
+  assessment_id: identitySchema("assessment"),
+  ...findingReportFields,
+});
+export type FindingCreate = z.infer<typeof findingCreateSchema>;
+export const findingUpdateSchema = z
+  .strictObject({
+    expected_mission_version: z.number().int().positive(),
+    ...z.strictObject(findingReportFields).partial().shape,
+  })
+  .refine((body) =>
+    Object.keys(findingReportFields).some(
+      (key) => body[key as keyof typeof findingReportFields] !== undefined,
+    ),
+  );
+export type FindingUpdate = z.infer<typeof findingUpdateSchema>;
 export const gateFilesSchema = z.array(
   z.strictObject({
     binding_id: identitySchema("binding"),
@@ -1354,6 +1487,12 @@ export const assessmentSubmitSchema = executionContextSchema
     tested_input: testedInputSchema,
     proposals: z.array(proposalContentSchema).max(PROPOSAL_MAX).default([]),
     cause: failureCauseSchema.optional(),
+    findings: z.array(findingSubmitSchema).max(FINDING_MAX).default([]),
+    fixed_finding_ids: z
+      .array(identitySchema(FINDING_IDENTITY_PREFIX))
+      .refine((items) => new Set(items).size === items.length)
+      .meta({ uniqueItems: true })
+      .default([]),
   })
   .refine(
     (body) =>
@@ -1667,6 +1806,21 @@ export const missionOperations = {
     output: assessmentSchema,
     description:
       "Read the assessment that caused the latest rework of the claimed attempt.",
+  },
+  "execution.review_round.get": {
+    ...readOperation,
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    id: "mission.execution.review_round.get",
+    method: HttpMethod.Get,
+    path: "/api/mission/execution/:execution_id/review-round",
+    input: readInput(
+      z.strictObject({ execution_id: identitySchema("execution") }),
+      z.strictObject({}),
+    ),
+    output: reviewRoundSchema,
+    description:
+      "Read the review round of the next assessment of the claimed attempt: its number, its finality, its review base and the open findings.",
   },
   "execution.pinnedRevision.get": {
     ...readOperation,
@@ -2038,6 +2192,93 @@ export const missionOperations = {
     output: proposalDecideResultSchema,
     description:
       "Decide every fix-node proposal of one assessment: create a fix node for each approved proposal, reject the other open proposals and unblock the proposer once.",
+  },
+  "finding.list": {
+    ...readOperation,
+    id: "mission.finding.list",
+    method: HttpMethod.Get,
+    path: "/api/mission/node/:node_id/finding",
+    input: readInput(
+      z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
+      z.strictObject({
+        ...pageQuery,
+        attempt: attemptSelector(0).optional(),
+        round: attemptSelector(1).optional(),
+      }),
+    ),
+    output: pageOf(findingSchema),
+    description:
+      "List the review findings of a node in the order of attempt, round with a human finding last, kind, label number and identity.",
+  },
+  "finding.get": {
+    ...readOperation,
+    id: "mission.finding.get",
+    method: HttpMethod.Get,
+    path: "/api/mission/finding/:finding_id",
+    input: readInput(
+      z.strictObject({ finding_id: identitySchema(FINDING_IDENTITY_PREFIX) }),
+      z.strictObject({}),
+    ),
+    output: findingSchema,
+    description: "Get a review finding.",
+  },
+  "finding.undecided.list": {
+    ...readOperation,
+    id: "mission.finding.undecided.list",
+    method: HttpMethod.Get,
+    path: "/api/mission/project/:project_id/undecided-finding",
+    input: readInput(
+      z.strictObject({ project_id: identitySchema("project") }),
+      z.strictObject(pageQuery),
+    ),
+    output: pageOf(findingSchema),
+    description:
+      "List the review findings of a project that wait for a human decision.",
+  },
+  "finding.decide": {
+    ...writeOperation,
+    id: "mission.finding.decide",
+    method: HttpMethod.Post,
+    path: "/api/mission/finding/:finding_id/decide",
+    input: z.strictObject({
+      params: z.strictObject({
+        finding_id: identitySchema(FINDING_IDENTITY_PREFIX),
+      }),
+      query: z.strictObject({}),
+      body: findingDecideSchema,
+    }),
+    output: findingSchema,
+    description:
+      "Decide a review finding that waits for a human: accepted or dismissed, with a reason.",
+  },
+  "finding.create": {
+    ...writeOperation,
+    id: "mission.finding.create",
+    method: HttpMethod.Post,
+    path: "/api/mission/node/:node_id/finding",
+    input: z.strictObject({
+      params: z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
+      query: z.strictObject({}),
+      body: findingCreateSchema,
+    }),
+    output: findingSchema,
+    description:
+      "Create a human finding for a defect found after delivery, with the assessment that missed it and the owner of the cause.",
+  },
+  "finding.update": {
+    ...writeOperation,
+    id: "mission.finding.update",
+    method: HttpMethod.Patch,
+    path: "/api/mission/finding/:finding_id",
+    input: z.strictObject({
+      params: z.strictObject({
+        finding_id: identitySchema(FINDING_IDENTITY_PREFIX),
+      }),
+      query: z.strictObject({}),
+      body: findingUpdateSchema,
+    }),
+    output: findingSchema,
+    description: "Update a human finding that holds no decision.",
   },
   "node.unblock": {
     ...writeOperation,

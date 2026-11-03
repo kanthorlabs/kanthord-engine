@@ -30,6 +30,7 @@ import {
 } from "../../project/contract.ts";
 import {
   AssetKind,
+  findingSchema,
   Intent,
   MISSION_INITIAL_VERSION,
   missionOperations,
@@ -429,6 +430,10 @@ const EVIDENCE_FRAGMENT_EXCEPTIONS = [
     true,
   ],
 ] as const;
+const FINDING_FRAGMENT_EXCEPTIONS = [
+  ["finding.create", "mission.finding.list", true],
+  ["finding.get", "mission.finding.get", false],
+] as const;
 const LEGACY_FRAGMENT_EXCEPTIONS = [
   "openapi/mission/dependency.add.yaml",
   "openapi/mission/import.apply.yaml",
@@ -453,6 +458,9 @@ const NAMED_FRAGMENT_EXCEPTIONS = new Set([
     ([file]) => `openapi/mission/${file}.yaml`,
   ),
   ...EVIDENCE_FRAGMENT_EXCEPTIONS.map(
+    ([file]) => `openapi/mission/${file}.yaml`,
+  ),
+  ...FINDING_FRAGMENT_EXCEPTIONS.map(
     ([file]) => `openapi/mission/${file}.yaml`,
   ),
   "openapi/mission/execution.dependency.list.yaml",
@@ -791,6 +799,12 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["mission.node.unblock", AccessPolicy.Human],
   ["mission.proposal.list", AccessPolicy.Human],
   ["mission.proposal.decide", AccessPolicy.Human],
+  ["mission.finding.list", AccessPolicy.Human],
+  ["mission.finding.get", AccessPolicy.Human],
+  ["mission.finding.undecided.list", AccessPolicy.Human],
+  ["mission.finding.decide", AccessPolicy.Human],
+  ["mission.finding.create", AccessPolicy.Human],
+  ["mission.finding.update", AccessPolicy.Human],
   ["mission.node.ready", AccessPolicy.Human],
   ["mission.node.override", AccessPolicy.Human],
   ["mission.node.discard", AccessPolicy.Human],
@@ -825,6 +839,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["mission.execution.clearedOutcome.get", AccessPolicy.Client],
   ["mission.execution.cleared_assessment.get", AccessPolicy.Client],
   ["mission.execution.rework_assessment.get", AccessPolicy.Client],
+  ["mission.execution.review_round.get", AccessPolicy.Client],
   ["workbench.session.list", AccessPolicy.Human],
   ["workbench.session.create", AccessPolicy.Human],
   ["workbench.session.get", AccessPolicy.Human],
@@ -871,8 +886,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["tracking.session.entry.get", AccessPolicy.Human],
   ["tracking.cause.label", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 225;
-const ROUTED_OPERATION_COUNT = 213;
+const OPERATION_COUNT = 232;
+const ROUTED_OPERATION_COUNT = 220;
 const INTAKE_OPERATION_COUNT = 24;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = [
@@ -1075,6 +1090,31 @@ function assertEvidenceShape(schema: ResolvedSchema): void {
     ["human", "execution", "service"],
   );
 }
+
+test("named finding exceptions retain the finding record shape", () => {
+  for (const [file, operation, page] of FINDING_FRAGMENT_EXCEPTIONS) {
+    const fragment = parse(
+      readFileSync(
+        join(dirname(openapiPath()), `openapi/mission/${file}.yaml`),
+        "utf8",
+      ),
+    );
+    const output = fragment.components.schemas[
+      `${operation}.Output`
+    ] as ResolvedSchema;
+    const finding = page ? output.properties.items!.items! : output;
+    assert.deepEqual(
+      [...(finding.required ?? [])].sort(),
+      Object.keys(findingSchema.shape).sort(),
+    );
+    assert.deepEqual(finding.properties.route!.enum, [
+      "fix",
+      "report",
+      "record",
+    ]);
+    assert.deepEqual(finding.properties.status!.enum, ["open", "fixed"]);
+  }
+});
 
 test("named evidence exceptions retain record shapes and conditional request validation", () => {
   for (const [file, operation, page] of EVIDENCE_FRAGMENT_EXCEPTIONS) {

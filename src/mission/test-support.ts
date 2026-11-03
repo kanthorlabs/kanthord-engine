@@ -4,6 +4,13 @@ import pino from "pino";
 import type { z } from "zod";
 import type { CallerIdentity } from "../kernel/caller.ts";
 import { canonicalJSON } from "../kernel/json.ts";
+import {
+  attributed,
+  CauseAssigner,
+  CauseCategory,
+  CauseSubcategory,
+} from "../kernel/cause.ts";
+import { OperationError } from "../kernel/errors.ts";
 import { background } from "../kernel/context.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { stopAfter } from "../kernel/test-support.ts";
@@ -20,8 +27,12 @@ import {
 import {
   ActorKind,
   AssessmentResult,
+  type AssessmentSubmit,
   AssetKind,
   type FailureHold,
+  FindingAction,
+  FindingGround,
+  type FindingSubmit,
   type GateFiles,
   type HumanAct,
   Intent,
@@ -32,6 +43,7 @@ import {
   type PlatformAddress,
   PlatformAddressKind,
   RepositoryAction,
+  RepositoryLanding,
   RevisionWrite,
   type RevokedExecution,
   TransitionRule,
@@ -65,6 +77,7 @@ const FIXTURE_TIME = 100;
 const FIRST_REVISION = 1;
 const ACT_CALL = "acts.act";
 const UNEXPECTED_COLLABORATION = "unexpected collaboration call";
+const VALIDATION_FAILED = "gateway.request.validation_failed";
 
 export function databaseSnapshot(store: Store): Record<string, unknown[]> {
   const tables = store.database
@@ -673,4 +686,162 @@ export function actCalls(h: {
   return h.calls
     .filter((call) => call.method === ACT_CALL)
     .map((call) => call.arguments as [ServerTrace, ActContribution]);
+}
+
+const SUCCESSFUL_EXIT = 0;
+const NO_REVOKES = 0;
+
+export function refusedAt(field: string, code = "custom") {
+  return (error: unknown) =>
+    error instanceof OperationError &&
+    error.code === VALIDATION_FAILED &&
+    canonicalJSON(error.details) === canonicalJSON([{ path: [field], code }]);
+}
+
+export function codedAs(code: string) {
+  return (error: unknown) =>
+    error instanceof OperationError && error.code === code;
+}
+
+export function reviewerFinding(
+  label: string,
+  overrides: Partial<FindingSubmit> = {},
+): FindingSubmit {
+  return {
+    label,
+    action: FindingAction.Yes,
+    task_id: null,
+    ground: label.startsWith("B") ? FindingGround.Stated : null,
+    name: `Name ${label}`,
+    description: `Description ${label}`,
+    fix: `Fix ${label}`,
+    why: `Why ${label}`,
+    ...overrides,
+  };
+}
+
+export async function reviewHarness(
+  t: TestContext,
+  identity: CallerIdentity,
+  action: RepositoryAction | null = null,
+) {
+  const h = evidenceHarness(t, identity);
+  h.dependencies.bindings.repositoryPolicyOf = () => ({
+    binding_id: h.repositoryId,
+    project_id: h.project_id,
+    name: "repo",
+    address: "git@github.com:owner/repo.git",
+    platform: "github",
+    ssh_credential: "github-ssh",
+    credential: "github",
+    base_branch: "main",
+    action,
+    landing: RepositoryLanding.Human,
+  });
+  const address = {
+    kind: AssetKind.Repository,
+    binding_id: h.repositoryId,
+    commit: ASSESSED_COMMIT,
+  } as const;
+  const evidence = await h.invoke("evidence.submit", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      ...h.context,
+      subject: "Verified",
+      assets: [{ kind: AssetKind.Repository, address }],
+      verification: {
+        tested_input: address,
+        results: [
+          {
+            command: "true",
+            exit_code: SUCCESSFUL_EXIT,
+            signal: null,
+            timed_out: false,
+          },
+        ],
+      },
+    },
+  });
+  let revokes = NO_REVOKES;
+  const live = () => {
+    h.dependencies.schedulerClaims.liveExecutionOf = () => ({
+      execution_id: h.claim.executionId,
+      runtime_identity: h.claim.runtimeIdentity,
+      attempt: h.claim.attempt,
+      pinned_revision: h.claim.pinnedRevision,
+    });
+  };
+  h.dependencies.schedulerClaims.revoke = (_tx, nodeId, now) => {
+    revokes++;
+    h.dependencies.schedulerClaims.liveExecutionOf = () => null;
+    return revokedExecution(h.claim.executionId, nodeId, now);
+  };
+  const evaluate = () => {
+    live();
+    h.store.transaction((tx) =>
+      setNodeState(tx, h.node_id, NodeState.Evaluating),
+    );
+  };
+  evaluate();
+  const body: AssessmentSubmit = {
+    ...h.context,
+    evidence_ids: [evidence.evidence.id],
+    dependency_outcome_ids: [],
+    result: AssessmentResult.Success,
+    rationale: "Passed",
+    tested_input: address,
+    proposals: [],
+    findings: [],
+    fixed_finding_ids: [],
+  };
+  const notMet = {
+    result: AssessmentResult.CriterionNotMet,
+    cause: attributed(
+      CauseCategory.Model,
+      CauseSubcategory.WorkDefect,
+      CauseAssigner.Reviewer,
+    ),
+  };
+  const submit = (input: Partial<AssessmentSubmit> = {}) =>
+    h.invoke("assessment.submit", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: { ...body, ...input },
+    });
+  const findings = async (query: Record<string, string> = {}) =>
+    (
+      await h.invoke("finding.list", {
+        params: { node_id: h.node_id },
+        query,
+        body: null,
+      })
+    ).items;
+  const reviewRound = () => {
+    live();
+    return h.invoke("execution.review_round.get", {
+      params: { execution_id: h.claim.executionId },
+      query: {},
+      body: null,
+    });
+  };
+  const byLabel = async (label: string) => {
+    const found = (await findings()).find((item) => item.label === label);
+    assert.ok(found);
+    return found;
+  };
+  return {
+    ...h,
+    address,
+    evidence_id: evidence.evidence.id,
+    body,
+    notMet,
+    submit,
+    evaluate,
+    live,
+    findings,
+    byLabel,
+    reviewRound,
+    revokes: () => revokes,
+  };
 }

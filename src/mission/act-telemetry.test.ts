@@ -32,13 +32,13 @@ const FACTS: ActFacts = {
   evidence_id: null,
   lead_time_ms: null,
 };
-const NINE_ACTS = 9;
+const TWELVE_ACTS = 12;
 const EVIDENCE_ID = "evidence_1";
 const LEAD_TIME_MS = 460;
 
-test("the acts are the closed set of nine operations", () => {
-  assert.equal(Object.keys(Act).length, NINE_ACTS);
-  assert.equal(new Set(Object.values(Act)).size, NINE_ACTS);
+test("the acts are the closed set of twelve operations", () => {
+  assert.equal(Object.keys(Act).length, TWELVE_ACTS);
+  assert.equal(new Set(Object.values(Act)).size, TWELVE_ACTS);
 });
 
 test("actSchema accepts each act and refuses another operation", () => {

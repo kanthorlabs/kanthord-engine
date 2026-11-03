@@ -20,6 +20,21 @@ import {
   evidenceRequestSchema,
   evidenceSubmitSchema,
   executionContextSchema,
+  FINDING_IDENTITY_PREFIX,
+  FINDING_MAX,
+  FINDING_TEXT_MAX_BYTES,
+  FindingAction,
+  FindingCauseOwner,
+  findingCreateSchema,
+  findingDecideSchema,
+  FindingDecision,
+  FindingGround,
+  FindingKind,
+  FindingRoute,
+  FindingSource,
+  FindingStatus,
+  findingSubmitSchema,
+  findingUpdateSchema,
   humanActSchema,
   Intent,
   mediaTypeSchema,
@@ -32,6 +47,7 @@ import {
   overrideSchema,
   resumeSchema,
   ResumeTarget,
+  reviewRoundSchema,
   TASK_IDENTITY_PREFIX,
   taskBodySchema,
   taskContentSchema,
@@ -41,6 +57,7 @@ import {
 } from "./contract.ts";
 
 const ZERO_ATTEMPT = 0;
+const EIGHT_KIB = 8192;
 test("service provenance accepts an optional canonical snake-case inbound event identity", () => {
   const plain = { kind: ActorKind.Service, service: ActorService.Mission };
   const provenance = {
@@ -491,4 +508,145 @@ test("an edge names the dependent and the dependency alone", () => {
     edgeSchema.safeParse({ ...edge, kind: "dependency" }).success,
     false,
   );
+});
+
+test("an assessment submit defaults findings and fixed_finding_ids to empty lists and refuses a repeated fixed identity", () => {
+  const parsed = assessmentSubmitSchema.parse(ASSESSMENT);
+  assert.deepEqual(parsed.findings, []);
+  assert.deepEqual(parsed.fixed_finding_ids, []);
+  const id = createIdentity(FINDING_IDENTITY_PREFIX);
+  assert.deepEqual(
+    assessmentSubmitSchema.parse({ ...ASSESSMENT, fixed_finding_ids: [id] })
+      .fixed_finding_ids,
+    [id],
+  );
+  const repeated = assessmentSubmitSchema.safeParse({
+    ...ASSESSMENT,
+    fixed_finding_ids: [id, id],
+  });
+  assert.equal(repeated.success, false);
+  assert.deepEqual(repeated.error?.issues[0]?.path, ["fixed_finding_ids"]);
+  assert.equal(
+    assessmentSubmitSchema.safeParse({
+      ...ASSESSMENT,
+      fixed_finding_ids: [createIdentity("proposal")],
+    }).success,
+    false,
+  );
+});
+
+test("a submitted finding takes a reviewer label, the closed sets and at most FINDING_MAX items", () => {
+  const finding = {
+    label: "B12",
+    action: FindingAction.Yes,
+    task_id: null,
+    ground: FindingGround.Conflict,
+    name: "Name",
+    description: "Description",
+    fix: "Fix",
+    why: "Why",
+  };
+  assert.equal(findingSubmitSchema.safeParse(finding).success, true);
+  for (const label of ["H1", "B0", "S1000", "B", "s1"])
+    assert.equal(
+      findingSubmitSchema.safeParse({ ...finding, label }).success,
+      false,
+    );
+  for (const change of [
+    { action: "maybe" },
+    { ground: "other" },
+    { name: "" },
+    { prior_finding_id: createIdentity(FINDING_IDENTITY_PREFIX) },
+  ])
+    assert.equal(
+      findingSubmitSchema.safeParse({ ...finding, ...change }).success,
+      false,
+    );
+  assert.equal(
+    assessmentSubmitSchema.safeParse({
+      ...ASSESSMENT,
+      findings: Array.from({ length: FINDING_MAX + 1 }, () => finding),
+    }).success,
+    false,
+  );
+});
+
+test("the finding decide, create and update bodies are strict and take the closed sets", () => {
+  assert.equal(
+    findingDecideSchema.safeParse({
+      decision: FindingDecision.Dismissed,
+      decision_reason: "No defect",
+    }).success,
+    true,
+  );
+  assert.equal(
+    findingDecideSchema.safeParse({
+      decision: "rejected",
+      decision_reason: "x",
+    }).success,
+    false,
+  );
+  const create = {
+    expected_mission_version: 1,
+    assessment_id: createIdentity("assessment"),
+    kind: FindingKind.Blocker,
+    task_id: null,
+    name: "Name",
+    description: "Description",
+    fix: "Fix",
+    why: "Why",
+    cause_owner: FindingCauseOwner.Engine,
+  };
+  assert.equal(findingCreateSchema.safeParse(create).success, true);
+  assert.equal(
+    findingCreateSchema.safeParse({ ...create, label: "H1" }).success,
+    false,
+  );
+  assert.equal(
+    findingCreateSchema.safeParse({ ...create, cause_owner: "other" }).success,
+    false,
+  );
+  assert.equal(
+    findingUpdateSchema.safeParse({ expected_mission_version: 1 }).success,
+    false,
+  );
+  assert.equal(
+    findingUpdateSchema.safeParse({
+      expected_mission_version: 1,
+      task_id: null,
+    }).success,
+    true,
+  );
+  assert.equal(
+    findingUpdateSchema.safeParse({
+      expected_mission_version: 1,
+      route: FindingRoute.Fix,
+    }).success,
+    false,
+  );
+});
+
+test("a review round names its number, its finality, its review base and its findings", () => {
+  assert.equal(
+    reviewRoundSchema.safeParse({
+      round: 1,
+      final: false,
+      review_base: null,
+      findings: [],
+    }).success,
+    true,
+  );
+  assert.equal(
+    reviewRoundSchema.safeParse({
+      round: 0,
+      final: false,
+      review_base: null,
+      findings: [],
+    }).success,
+    false,
+  );
+  assert.deepEqual(Object.values(FindingStatus), ["open", "fixed"]);
+  assert.deepEqual(Object.values(FindingSource), ["reviewer", "human"]);
+  assert.deepEqual(Object.values(FindingRoute), ["fix", "report", "record"]);
+  assert.equal(FINDING_TEXT_MAX_BYTES, EIGHT_KIB);
 });

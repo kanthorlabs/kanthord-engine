@@ -421,7 +421,12 @@ The implemented fields are:
   before the Mission Service pauses the node. The value `0`
   turns the limit off.
 - `mission.rework_limit`: optional Convict `nat`, default `2`. It holds the
-  rework limit of the Mission Service. The value `0` turns rework off.
+  rework limit of the Mission Service. Its `doc` text is "Reworks of an attempt
+  that the Mission Service permits. A criterion-not-met assessment and, on an
+  implement node, a success assessment with an action:yes finding or an open
+  finding cause a rework below the limit. An assessment of a later round causes
+  no rework, and its findings are report-only. The value 0 turns rework off."
+  The value `0` gives one round, and that round is final.
 - `mission.text_max_bytes`: optional Convict `nat` in UTF-8 bytes, default
   `32768`. It bounds every `Text` value of a Mission write; a stored value keeps
   its length after a change of the bound.

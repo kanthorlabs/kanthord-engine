@@ -104,6 +104,28 @@ export function addExecutionCommands(mission: Command): void {
         "execution.rework_assessment.get",
       );
     });
+  const reviewRound = execution
+    .command("review-round")
+    .description("Review round of the next assessment");
+  reviewRound.action(() => reviewRound.help());
+  reviewRound
+    .command("get")
+    .description(
+      "Get the review round, the review base and the open findings of the attempt as JSON",
+    )
+    .argument("<execution-id>", "Execution ID")
+    .action(async (executionId: string, _options, command: Command) => {
+      executionIdentity(
+        executionId,
+        "cli.mission.execution.review_round.get.invalid_execution_id",
+      );
+      printResult(
+        await client(command, "execution.review_round.get")[
+          "execution.review_round.get"
+        ]({ params: { execution_id: executionId }, query: {}, body: null }),
+        "execution.review_round.get",
+      );
+    });
   const asset = evidence.command("asset").description("Bound assets");
   asset.action(() => asset.help());
   const content = asset.command("content").description("Bound asset content");
