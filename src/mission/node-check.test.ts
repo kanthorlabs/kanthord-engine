@@ -9,6 +9,8 @@ import {
   AssetKind,
   CheckEndState,
   ClosingEvent,
+  FindingCauseOwner,
+  FindingKind,
   MissionErrorCode,
   NodeState,
   RepositoryLanding,
@@ -22,6 +24,7 @@ import {
 import { outcomeRecord } from "./record-read.ts";
 import {
   insertEvidence,
+  readAssessmentsOfAttempt,
   readCurrentOutcome,
   readEvidence,
   readLandedCommitEvidence,
@@ -39,6 +42,8 @@ const SINGLE_CALL = 1;
 const SINGLE_LANDED_COMMIT = 1;
 const FIRST_MISSION_VERSION = 1;
 const FIRST_ATTEMPT = 1;
+const SECOND_ATTEMPT = 2;
+const FIRST_REVISION = 1;
 const LANDED_COMMIT_COUNT = 2;
 const COMMIT = "a".repeat(40);
 const MICROTASK_TURNS = 50;
@@ -454,6 +459,80 @@ test("one other end blocks the node after a sibling landed", async (t) => {
       readLandedCommitEvidence(tx, h.node_id, FIRST_ATTEMPT).length,
       SINGLE_LANDED_COMMIT,
     ),
+  );
+});
+
+test("a landed sibling makes its attempt delivered across an unblock", async (t) => {
+  const h = await externalRequestHarness(t, IDENTITY, true);
+  insertNextRequest(h);
+  let nextEnded = false;
+  h.dependencies.intakeCheck.check = async (_context, evidenceId) =>
+    evidenceId === h.request.id
+      ? { end_state: CheckEndState.Expected, landed_commits: [COMMIT] }
+      : {
+          end_state: nextEnded ? CheckEndState.Other : CheckEndState.None,
+          landed_commits: [],
+        };
+  const check = () =>
+    h.invoke("node.check", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: { expected_mission_version: FIRST_MISSION_VERSION },
+    });
+  const create = (assessmentId: string) =>
+    h.invoke("finding.create", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: {
+        expected_mission_version: FIRST_MISSION_VERSION,
+        assessment_id: assessmentId,
+        kind: FindingKind.Blocker,
+        task_id: null,
+        name: "Missed",
+        description: "Found after delivery",
+        fix: "Change it",
+        why: "It breaks",
+        cause_owner: FindingCauseOwner.Agent,
+      },
+    });
+  await check();
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+  const [assessment] = h.store.transaction((tx) =>
+    readAssessmentsOfAttempt(tx, h.node_id, FIRST_ATTEMPT),
+  );
+  assert.ok(assessment);
+  assert.equal((await create(assessment.id)).attempt, FIRST_ATTEMPT);
+  nextEnded = true;
+  await check();
+  assert.equal(h.node().state, NodeState.Blocked);
+  assert.equal((await create(assessment.id)).attempt, FIRST_ATTEMPT);
+  await h.invoke("node.unblock", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      blocked_attempt: FIRST_ATTEMPT,
+      expected_revision: FIRST_REVISION,
+      expected_mission_version: FIRST_MISSION_VERSION,
+    },
+  });
+  assert.equal(h.node().state, NodeState.Available);
+  const override = await h.invoke("node.override", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      reason: "Done by hand",
+      expected_mission_version: FIRST_MISSION_VERSION,
+      expected_state: NodeState.Available,
+      expected_attempt: SECOND_ATTEMPT,
+      result: AssessmentResult.Success,
+    },
+  });
+  assert.equal(h.node().state, NodeState.Completed);
+  assert.ok(override.outcome);
+  assert.equal((await create(assessment.id)).attempt, FIRST_ATTEMPT);
+  assert.equal(
+    (await create(override.outcome.assessment_id)).attempt,
+    SECOND_ATTEMPT,
   );
 });
 
