@@ -307,6 +307,39 @@ test("a success override at attempt 0 admits its human assessment", async (t) =>
   assert.equal(finding.attempt, NO_ATTEMPT);
 });
 
+test("a success override of a node blocked at attempt 0 admits both human assessments", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Paused));
+  const block = await h.invoke("node.block", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(NodeState.Paused, NO_ATTEMPT),
+  });
+  assert.equal(h.node().state, NodeState.Blocked);
+  assert.ok(block.outcome);
+  const override = await h.invoke("node.override", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      ...h.body(NodeState.Blocked, NO_ATTEMPT),
+      result: AssessmentResult.Success,
+    },
+  });
+  assert.equal(h.node().state, NodeState.Completed);
+  assert.ok(override.outcome);
+  for (const assessmentId of [
+    block.outcome.assessment_id,
+    override.outcome.assessment_id,
+  ]) {
+    const finding = await h.invoke("finding.create", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: report(assessmentId),
+    });
+    assert.equal(finding.attempt, NO_ATTEMPT);
+  }
+});
+
 test("a reopened node admits only its delivered attempt", async (t) => {
   const h = await reviewHarness(t, IDENTITY);
   h.dependencies.config.rework_limit = REWORK_OFF;
