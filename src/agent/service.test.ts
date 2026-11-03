@@ -513,6 +513,8 @@ function stackFixture(
   options: {
     prompt_commits: { binding_id: string; commit: string }[] | null;
     unreachable?: boolean;
+    fileUnreachable?: boolean;
+    absent?: boolean;
     invalid?: boolean;
   },
 ) {
@@ -542,6 +544,14 @@ function stackFixture(
       },
       instructionFileOf: async (_bindingId, commit) => {
         reads.push(commit);
+        if (options.fileUnreachable)
+          throw new OperationError(
+            422,
+            ProjectErrorCode.RepositorySshUnreachable,
+            "Repository is unreachable.",
+            { failure_reason: "deadline_exceeded" },
+          );
+        if (options.absent) return null;
         if (options.invalid)
           return {
             path: STACK_FILE,
@@ -626,13 +636,37 @@ test("agent get --node of an attempt with no pin and agent get --binding-id read
     binding_id: "binding-on",
   });
   assert.deepEqual(f.reads, [STACK_HEAD, STACK_HEAD]);
-  for (const answer of [node, binding])
+  for (const answer of [node, binding]) {
     assert.ok(answer.prompt.final!.includes(STACK_HEAD_TEXT));
+    const file = answer.prompt.parts!.find(
+      ({ part }) => part === PromptPart.InstructionFile,
+    );
+    assert.equal(file?.state, PromptPartState.Resolved);
+    assert.equal(file?.commit, STACK_HEAD);
+  }
+});
+
+test("agent get --node with an absent instruction file answers no instruction file part", async (t) => {
+  const f = stackFixture(t, { prompt_commits: null, absent: true });
+  const answer = await f.read(AGENT, { node_id: STACK_NODE });
+  assert.deepEqual(f.reads, [STACK_HEAD]);
+  assert.deepEqual(
+    answer.prompt.parts!.map(({ part }) => part),
+    [
+      PromptPart.Standard,
+      PromptPart.Role,
+      PromptPart.Repository,
+      PromptPart.Binding,
+      PromptPart.Framing,
+    ],
+  );
+  assert.ok(answer.prompt.final !== null);
 });
 
 test("a failed layer 2 read in agent get answers a part state and 200", async (t) => {
   for (const [options, state, commit] of [
     [{ unreachable: true }, PromptPartState.Unreachable, null],
+    [{ fileUnreachable: true }, PromptPartState.Unreachable, STACK_HEAD],
     [{ invalid: true }, PromptPartState.Invalid, STACK_HEAD],
   ] as const) {
     const f = stackFixture(t, { prompt_commits: null, ...options });
@@ -806,7 +840,7 @@ test("agent prompt resolve rebuilds the parts and the final prompt from the span
   assert.notEqual(context, f.caller.context);
   const deadline = context!.deadline;
   assert.ok(deadline);
-  assert.ok(deadline >= before);
+  assert.ok(deadline >= before + PROMPT_SOURCE_READ_MS);
   assert.ok(deadline <= Date.now() + PROMPT_SOURCE_READ_MS);
   assert.deepEqual(answer, {
     parts: f.composed.prompt.parts,

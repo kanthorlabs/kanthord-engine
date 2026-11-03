@@ -19,12 +19,12 @@ import {
 } from "./contract.ts";
 import { bindingParts, finalPrompt } from "../agent/prompt-render.ts";
 import {
-  InstructionFileState,
   type PromptPartAnswer,
   PromptPartState,
   PromptSourceReason,
 } from "../agent/contract.ts";
 import {
+  instructionFileRead,
   type InstructionFileTarget,
   pinnedInstructionFiles,
   sourceInvalid,
@@ -153,17 +153,10 @@ async function storedPrompt(
       ),
     instructionFileOf: async (bindingId, commit, path, context) => {
       assert.ok(promptBase);
-      const file = await promptBase.instructionFileOf(
-        bindingId,
-        commit,
-        context,
+      return instructionFileRead(
+        await promptBase.instructionFileOf(bindingId, commit, context),
+        path,
       );
-      if (file === null) return { state: InstructionFileState.Absent };
-      assert.equal(file.path, path);
-      if (file.state !== InstructionFileState.Present)
-        return { state: file.state };
-      assert.ok(file.text !== null);
-      return { state: InstructionFileState.Present, text: file.text };
     },
     context: reads,
   });

@@ -16,13 +16,24 @@ import { ProjectErrorCode } from "../project/contract.ts";
 import type { InstructionFilePart } from "./prompt-render.ts";
 import type { InstructionFileRead, PromptReaders } from "./prompt-resolve.ts";
 
-export const UNREACHABLE_CODES: ReadonlySet<string> = new Set([
+const UNREACHABLE_CODES: ReadonlySet<string> = new Set([
   ProjectErrorCode.RepositoryBaseBranchAbsent,
   ProjectErrorCode.RepositorySshUnreachable,
 ]);
 
 export function isUnreachable(error: unknown): boolean {
   return error instanceof OperationError && UNREACHABLE_CODES.has(error.code);
+}
+
+export function instructionFileRead(
+  file: InstructionFileSource | null,
+  path: string,
+): InstructionFileRead {
+  if (file === null) return { state: InstructionFileState.Absent };
+  assert.equal(file.path, path);
+  if (file.state !== InstructionFileState.Present) return { state: file.state };
+  assert.ok(file.text !== null);
+  return { state: InstructionFileState.Present, text: file.text };
 }
 
 export function projectInstructionFileReader(project: {
@@ -37,15 +48,7 @@ export function projectInstructionFileReader(project: {
         return { state: InstructionFileState.Unreachable };
       throw error;
     }
-    if (file === null) return { state: InstructionFileState.Absent };
-    assert.equal(file.path, path);
-    if (file.state !== InstructionFileState.Present)
-      return { state: file.state };
-    assert.ok(file.text !== null);
-    return {
-      state: InstructionFileState.Present,
-      text: file.text,
-    } satisfies InstructionFileRead;
+    return instructionFileRead(file, path);
   };
 }
 
