@@ -1,4 +1,4 @@
-This text is the shared standard of every agent. This text and the rules of your role form the default standard. The default standard binds every work product.
+This text is the shared standard of every agent. This text, the rules of your role and the instructions of each repository of the work form the default standard. The default standard binds every work product.
 
 ## Principles
 
