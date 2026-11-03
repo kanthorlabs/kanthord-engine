@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { contentText } from "@earendil-works/pi-ai";
 import { REASON_MAX_LENGTH } from "../../kernel/probe.ts";
-import { SUITE_CONCURRENCY } from "../../kernel/test-support.ts";
+import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
 import {
   fauxAssistantMessage,
   fauxToolCall,
@@ -84,6 +84,40 @@ function recordEvidence(
     },
   } as unknown as MethodClients["mission"];
   return bodies;
+}
+
+function reportTextOf(bodies: readonly SubmittedEvidence[]): string | null {
+  const report = bodies.find((body) => body.subject === CODER_REPORT_SUBJECT);
+  if (!report) return null;
+  const [asset] = report.assets as { content: { data: string } }[];
+  return Buffer.from(asset!.content.data, "base64").toString("utf8");
+}
+
+async function rerouteReportOf(
+  t: Parameters<typeof fixture>[0],
+  rerunText: string,
+) {
+  const count = join(temporary(t), "count");
+  const routed = task(
+    "routed",
+    `echo x >> ${count}; test "$(wc -l < ${count} | tr -d ' ')" != 2`,
+  );
+  const other = task("other", "true");
+  const h = await fixture(
+    t,
+    [routed, other],
+    [
+      writeFile("draft"),
+      fauxAssistantMessage("routed draft"),
+      fauxAssistantMessage("other final"),
+      writeFile("rerun"),
+      fauxAssistantMessage(rerunText),
+    ],
+  );
+  const bodies = recordEvidence(h);
+  recordReleases(h);
+  await runStepsImplement(h);
+  return { report: reportTextOf(bodies), routed, other };
 }
 
 async function revisionCountsOf(
@@ -482,6 +516,19 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
         },
       },
     ]);
+  });
+
+  test("a unit that the release gate routes again keeps its section at its position with the text of the rerun", async (t) => {
+    const { report, routed, other } = await rerouteReportOf(t, "routed rerun");
+    assert.equal(
+      report,
+      `## ${routed.id} routed\n\nrouted rerun\n\n## ${other.id} other\n\nother final`,
+    );
+  });
+
+  test("a rerun of a routed unit with an empty last text removes its section", async (t) => {
+    const { report, other } = await rerouteReportOf(t, "");
+    assert.equal(report, `## ${other.id} other\n\nother final`);
   });
 
   test("a budget end stores no coder report", async (t) => {
