@@ -120,6 +120,7 @@ import {
 } from "../../worker/index.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
 import { ThreadDriver } from "./thread-driver.ts";
+import { projectInstructionFileReader } from "./prompt-base.ts";
 import { ContainerDriver } from "./container-driver.ts";
 import { EnvironmentImages } from "./environment-image.ts";
 import { EnvironmentProbe } from "./environment-probe.ts";
@@ -618,6 +619,23 @@ export function composeServices(options: {
     },
     attemptPromptStackOf: (tx, nodeId, attempt) =>
       mission.attemptPromptStackOf(tx, nodeId, attempt),
+    promptRecords: {
+      executionTraceOf: (executionId) => {
+        const row = scheduler.executionOf(executionId);
+        return row === undefined ? null : executionTrace(row);
+      },
+      promptRecordOf: (trace, agentName) => {
+        const span = tracking.serverSpanOf(
+          trace,
+          agentPromptSpanId(trace.execution_id, agentName),
+        );
+        return span === null ? null : storedPromptFacts(span.attributes);
+      },
+      instructionFileOf: projectInstructionFileReader({
+        instructionFileOf: (bindingId, commit, context) =>
+          project.instructionFileOf(bindingId, commit, context),
+      }),
+    },
     toolDeclarations: (name) => toolDeclarations(name),
     logger: options.logger,
   });

@@ -33,9 +33,13 @@ import {
   PromptLayer,
   PromptOrigin,
   PromptPart,
+  type PromptPartAnswer,
   PromptPartState,
+  type PromptReference,
+  promptReferenceSchema,
   ToolSource,
 } from "./contract.ts";
+import type { InstructionFileRead } from "./prompt-resolve.ts";
 import { agentMigrations } from "./migrations.ts";
 import { getAgentDeclaration } from "./catalog.ts";
 import {
@@ -44,7 +48,11 @@ import {
   getLatestRevision,
   insertEnablementRevision,
 } from "./enablements.ts";
-import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
+import {
+  AccessPolicy,
+  type CallerContext,
+  OperationRegistry,
+} from "../kernel/operation.ts";
 import { background } from "../kernel/context.ts";
 import { HealthScope, ResourceStatus } from "../kernel/health.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
@@ -127,6 +135,17 @@ const fakeCollaborations: Omit<Dependencies, "store" | "credentialHolds"> = {
   },
   attemptPromptStackOf: () => {
     throw new Error("UNEXPECTED_COLLABORATION");
+  },
+  promptRecords: {
+    executionTraceOf: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+    promptRecordOf: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+    instructionFileOf: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
   },
   providerHealthCheck: () => async () => ResourceStatus.Unknown,
   providerCapability: () => PROVIDER_CAPABILITY,
@@ -653,6 +672,191 @@ test("agent get refuses attempt without node_id and node_id with project_id", ()
         query,
         body: null,
       }).success,
+      false,
+    );
+});
+
+const RESOLVE_EXECUTION = "execution_01";
+const EXECUTION_NOT_FOUND = "scheduler.execution.not_found";
+const RESOLVE_VERSION = "0.1.0-test";
+const RESOLVE_TRACE = {
+  execution_id: RESOLVE_EXECUTION,
+  project_id: "project-a",
+  node_id: STACK_NODE,
+  attempt: 1,
+  trace_id: "1".repeat(32),
+  root_span_id: "2".repeat(16),
+};
+
+function referencesOf(parts: readonly PromptPartAnswer[]): PromptReference[] {
+  return parts.map(({ part, name, origin, path, binding_id, commit, digest }) =>
+    promptReferenceSchema.parse({
+      part,
+      name,
+      origin,
+      path,
+      binding_id,
+      commit,
+      digest,
+    }),
+  );
+}
+
+async function resolveFixture(
+  t: TestContext,
+  options: {
+    trace?: boolean;
+    record?: (sources: PromptReference[]) => PromptReference[] | null;
+    file?: InstructionFileRead;
+  } = {},
+) {
+  const stack = stackFixture(t, {
+    prompt_commits: [{ binding_id: "binding-on", commit: STACK_PINNED }],
+  });
+  const composed = await stack.read(AGENT, { node_id: STACK_NODE });
+  const sources = referencesOf(composed.prompt.parts!);
+  const lookups: [string, string][] = [];
+  const reads: string[] = [];
+  const f = enablementFixture(t, {
+    repositoryPromptsOf: (_, id) => ({
+      binding_id: id,
+      project_id: "project-a",
+      name: "repo",
+      prompts: {
+        instruction_file: STACK_FILE,
+        repository: STACK_REPOSITORY_TEXT,
+        agents: { [AGENT]: PROJECT_TEXT },
+      },
+    }),
+    promptRecords: {
+      executionTraceOf: (executionId) =>
+        options.trace === false
+          ? null
+          : { ...RESOLVE_TRACE, execution_id: executionId },
+      promptRecordOf: (trace, agentName) => {
+        lookups.push([trace.execution_id, agentName]);
+        const recorded =
+          options.record === undefined ? sources : options.record(sources);
+        return recorded === null
+          ? null
+          : { sources: recorded, engine_version: RESOLVE_VERSION };
+      },
+      instructionFileOf: async (bindingId, commit, path) => {
+        reads.push(`${bindingId}:${commit}:${path}`);
+        return (
+          options.file ?? {
+            state: InstructionFileState.Present,
+            text: STACK_PINNED_TEXT,
+          }
+        );
+      },
+    },
+  });
+  const operation = agentOperations["prompt.resolve"];
+  const resolve = async (agentName = AGENT) =>
+    operation.output.parse(
+      await f.registry.get(operation.id).handler(
+        operation.input.parse({
+          params: {},
+          query: { execution_id: RESOLVE_EXECUTION, agent_name: agentName },
+          body: null,
+        }),
+        f.caller,
+      ),
+    );
+  return { composed, sources, lookups, reads, resolve };
+}
+
+test("agent prompt resolve rebuilds the parts and the final prompt from the span references, with the engine version", async (t) => {
+  const f = await resolveFixture(t);
+  const answer = await f.resolve();
+  assert.deepEqual(f.lookups, [[RESOLVE_EXECUTION, AGENT]]);
+  assert.deepEqual(f.reads, [`binding-on:${STACK_PINNED}:${STACK_FILE}`]);
+  assert.deepEqual(answer, {
+    parts: f.composed.prompt.parts,
+    final: f.composed.prompt.final,
+    engine_version: RESOLVE_VERSION,
+  });
+  assert.ok(
+    answer.parts.every(({ state }) => state === PromptPartState.Resolved),
+  );
+});
+
+test("agent prompt resolve answers a changed layer 1 part with no text and a null final", async (t) => {
+  const f = await resolveFixture(t, {
+    record: (sources) =>
+      sources.map((source) =>
+        source.part === PromptPart.Standard
+          ? { ...source, digest: "0".repeat(64) }
+          : source,
+      ),
+  });
+  const answer = await f.resolve();
+  const standard = answer.parts.find(
+    ({ part }) => part === PromptPart.Standard,
+  );
+  assert.equal(standard?.state, PromptPartState.Changed);
+  assert.equal(standard?.text, null);
+  assert.equal(standard?.digest, "0".repeat(64));
+  assert.equal(answer.final, null);
+  assert.equal(answer.engine_version, RESOLVE_VERSION);
+});
+
+test("agent prompt resolve answers an unreachable and an invalid instruction file as a part state", async (t) => {
+  for (const [file, state] of [
+    [{ state: InstructionFileState.Unreachable }, PromptPartState.Unreachable],
+    [{ state: InstructionFileState.Invalid }, PromptPartState.Invalid],
+  ] as const) {
+    const f = await resolveFixture(t, { file });
+    const answer = await f.resolve();
+    const part = answer.parts.find(
+      ({ part }) => part === PromptPart.InstructionFile,
+    );
+    assert.equal(part?.state, state);
+    assert.equal(part?.commit, STACK_PINNED);
+    assert.equal(part?.text, null);
+    assert.equal(answer.final, null);
+    assert.ok(
+      answer.parts
+        .filter(({ part }) => part !== PromptPart.InstructionFile)
+        .every(({ state }) => state === PromptPartState.Resolved),
+    );
+  }
+});
+
+test("agent prompt resolve refuses an execution with no agent.prompt span and an absent execution", async (t) => {
+  const absent = await resolveFixture(t, { record: () => null });
+  await assert.rejects(absent.resolve(OTHER_AGENT), (error) => {
+    assert.ok(error instanceof OperationError);
+    assert.equal(error.status, HttpStatus.NotFound);
+    assert.equal(error.code, AgentErrorCode.PromptRecordAbsent);
+    assert.deepEqual(error.details, {
+      execution_id: RESOLVE_EXECUTION,
+      agent_name: OTHER_AGENT,
+    });
+    return true;
+  });
+  const missing = await resolveFixture(t, { trace: false });
+  await assert.rejects(missing.resolve(), (error) => {
+    assert.ok(error instanceof OperationError);
+    assert.equal(error.status, HttpStatus.NotFound);
+    assert.equal(error.code, EXECUTION_NOT_FOUND);
+    return true;
+  });
+  assert.deepEqual(missing.lookups, []);
+});
+
+test("agent prompt resolve requires execution_id and agent_name and admits only a human", () => {
+  const operation = agentOperations["prompt.resolve"];
+  assert.equal(operation.access, AccessPolicy.Human);
+  assert.equal(operation.mutation, false);
+  for (const query of [
+    { execution_id: RESOLVE_EXECUTION },
+    { agent_name: AGENT },
+    { execution_id: "", agent_name: AGENT },
+  ])
+    assert.equal(
+      operation.input.safeParse({ params: {}, query, body: null }).success,
       false,
     );
 });

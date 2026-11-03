@@ -32,6 +32,7 @@ import {
   type AgentEntry,
   AgentErrorCode,
   agentModelSchema,
+  type AgentName,
   agentOperations,
   type AgentProviderItem,
   type AgentSelection,
@@ -48,8 +49,10 @@ import {
   type InstructionFileReader,
   InstructionFileState,
   LIST_LIMIT_DEFAULT,
+  PromptPart,
   type PromptPartAnswer,
   PromptPartState,
+  type PromptRecord,
   type PromptTemplates,
   PromptView,
   type ProviderCapabilityFn,
@@ -77,11 +80,17 @@ import {
   type RepositoryPolicy,
 } from "../project/contract.ts";
 import type { AttemptPromptStack } from "../mission/contract.ts";
+import type { ExecutionTrace } from "../tracking/contract.ts";
 import {
   instructionFilePart,
   withinPromptDeadline,
 } from "./instruction-files.ts";
 import { framingPart, resolveAgentPrompt } from "./prompt-files.ts";
+import {
+  type PromptReaders,
+  type ResolvedPrompt,
+  resolvePrompt,
+} from "./prompt-resolve.ts";
 import {
   bindingParts,
   finalPrompt,
@@ -102,6 +111,7 @@ const FIRST_POSITION = 0;
 const NO_STRIKES = 0;
 const FIRST_STRIKE = 1;
 const ENABLEMENT_SCOPE: HolderScope = { holders: [], claimant: SERVER_HOLDER };
+const EXECUTION_NOT_FOUND = "scheduler.execution.not_found";
 const UNREACHABLE_CODES: ReadonlySet<string> = new Set([
   ProjectErrorCode.RepositoryBaseBranchAbsent,
   ProjectErrorCode.RepositorySshUnreachable,
@@ -261,6 +271,14 @@ export interface Dependencies {
     nodeId: string,
     attempt: number | null,
   ): AttemptPromptStack;
+  promptRecords: {
+    executionTraceOf(executionId: string): ExecutionTrace | null;
+    promptRecordOf(
+      trace: ExecutionTrace,
+      agentName: string,
+    ): PromptRecord | null;
+    instructionFileOf: PromptReaders["instructionFileOf"];
+  };
   providerHealthCheck: ProviderHealthCheckFn;
   providerCapability: ProviderCapabilityFn;
   toolDeclarations: ToolDeclarationsFn;
@@ -1140,6 +1158,56 @@ export class AgentComponent {
     });
   }
 
+  private bindingTextOf(
+    bindingId: string,
+    part: PromptPart,
+    agentName: string,
+  ): string | null {
+    const prompts = this.dependencies.store.transaction(
+      (tx) => this.dependencies.repositoryPromptsOf(tx, bindingId)?.prompts,
+    );
+    if (prompts === undefined) return null;
+    const text =
+      part === PromptPart.Repository
+        ? prompts.repository
+        : prompts.agents?.[agentName as AgentName];
+    return text ?? null;
+  }
+
+  private async resolveRecordedPrompt(
+    executionId: string,
+    agentName: string,
+    context: Context,
+  ): Promise<ResolvedPrompt & { engine_version: string }> {
+    const { promptRecords } = this.dependencies;
+    const trace = promptRecords.executionTraceOf(executionId);
+    if (trace === null)
+      throw new OperationError(
+        HttpStatus.NotFound,
+        EXECUTION_NOT_FOUND,
+        "Execution not found.",
+        { execution_id: executionId },
+      );
+    const record = promptRecords.promptRecordOf(trace, agentName);
+    if (record === null)
+      throw new OperationError(
+        HttpStatus.NotFound,
+        AgentErrorCode.PromptRecordAbsent,
+        "The trace of the execution holds no prompt record of the agent.",
+        { execution_id: executionId, agent_name: agentName },
+      );
+    const resolved = await withinPromptDeadline(context, (deadline) =>
+      resolvePrompt(record.sources, {
+        agentName,
+        bindingTextOf: (bindingId, part, name) =>
+          this.bindingTextOf(bindingId, part, name),
+        instructionFileOf: promptRecords.instructionFileOf,
+        context: deadline,
+      }),
+    );
+    return { ...resolved, engine_version: record.engine_version };
+  }
+
   composePrompt(
     agentName: string,
     consumer: PromptConsumer,
@@ -1289,6 +1357,13 @@ export class AgentComponent {
           };
         });
       },
+    );
+    registry.register(agentOperations["prompt.resolve"], ({ query }, caller) =>
+      this.resolveRecordedPrompt(
+        query.execution_id,
+        query.agent_name,
+        caller.context,
+      ),
     );
     registry.register(agentOperations["enablement.get"], ({ params }, caller) =>
       caller.commit((tx) =>

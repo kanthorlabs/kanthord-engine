@@ -47,7 +47,11 @@ import {
   type SealedObject,
   sealJSON,
 } from "../../kernel/hpke.ts";
-import { agentOperations, ChainLevel } from "../../agent/contract.ts";
+import {
+  AgentErrorCode,
+  agentOperations,
+  ChainLevel,
+} from "../../agent/contract.ts";
 import { Intent, missionOperations } from "../../mission/contract.ts";
 import { schedulerOperations, WorkPullKind } from "../../scheduler/contract.ts";
 import {
@@ -1613,6 +1617,67 @@ test("the server setup stores the agent.prompt span with the references and the 
     ["kanthord.prompt.sources", "kanthord.prompt.templates_digest"],
   );
   assert.ok(!rows[0]!.attributes.includes(SWE_AGENT_PROMPT));
+});
+
+test("agent prompt resolve over HTTP rebuilds the served system prompt for a human and refuses a worker, an absent record and an absent execution", async (t) => {
+  const h = await setup(t, HTTP, undefined, { instructionFile: "AGENTS.md" });
+  completed(await h.handover());
+  const setupAnswer = completed(
+    await h.call(
+      workerOperations["execution.setup.get"],
+      {
+        params: { execution_id: h.execution.execution_id },
+        query: {},
+        body: null,
+      },
+      h.token,
+    ),
+  );
+  const served = setupAnswer.agents[0]!;
+  const resolve = (executionId: string, agentName: string, token = h.f.token) =>
+    h.call(
+      agentOperations["prompt.resolve"],
+      {
+        params: {},
+        query: { execution_id: executionId, agent_name: agentName },
+        body: null,
+      },
+      token,
+    );
+  const answer = completed(
+    await resolve(h.execution.execution_id, served.agent_name),
+  );
+  assert.equal(answer.final, served.prompt.final);
+  assert.equal(answer.engine_version, packageVersion());
+  assert.deepEqual(
+    answer.parts.map(
+      ({ part, name, origin, path, binding_id, commit, digest }) => ({
+        part,
+        name,
+        origin,
+        path,
+        binding_id,
+        commit,
+        digest,
+      }),
+    ),
+    served.prompt.sources,
+  );
+  refused(
+    await resolve(h.execution.execution_id, served.agent_name, h.token),
+    HttpStatus.Unauthorized,
+    "gateway.authentication.unauthorized",
+  );
+  refused(
+    await resolve(h.execution.execution_id, "re@1"),
+    HttpStatus.NotFound,
+    AgentErrorCode.PromptRecordAbsent,
+  );
+  refused(
+    await resolve("execution_absent", served.agent_name),
+    HttpStatus.NotFound,
+    "scheduler.execution.not_found",
+  );
 });
 
 test("two concurrent first handovers of one attempt store one pin and both answer it", async (t) => {

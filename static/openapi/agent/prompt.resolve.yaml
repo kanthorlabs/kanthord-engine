@@ -1,0 +1,179 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: agent.prompt.resolve
+    tags:
+      - agent
+    description: Rebuild the system prompt that one agent of an execution served,
+      from the prompt references of its agent.prompt span.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: execution_id
+        in: query
+        required: true
+        schema:
+          $ref: "#/components/schemas/agent.prompt.resolve.Input/properties/query/propert\
+            ies/execution_id"
+      - name: agent_name
+        in: query
+        required: true
+        schema:
+          $ref: "#/components/schemas/agent.prompt.resolve.Input/properties/query/propert\
+            ies/agent_name"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/agent.prompt.resolve.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    agent.prompt.resolve.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties:
+            execution_id:
+              type: string
+              minLength: 1
+            agent_name:
+              type: string
+              minLength: 1
+          required:
+            - execution_id
+            - agent_name
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    agent.prompt.resolve.Output:
+      type: object
+      properties:
+        parts:
+          type: array
+          items:
+            type: object
+            properties:
+              layer:
+                anyOf:
+                  - type: number
+                    enum:
+                      - 1
+                      - 2
+                      - 3
+                  - type: "null"
+              part:
+                type: string
+                enum:
+                  - standard
+                  - role
+                  - workbench
+                  - instruction_file
+                  - repository
+                  - binding
+                  - framing
+              name:
+                type: string
+                minLength: 1
+              origin:
+                type: string
+                enum:
+                  - binary
+                  - file
+                  - database
+                  - repository
+              path:
+                anyOf:
+                  - type: string
+                  - type: "null"
+              binding_id:
+                anyOf:
+                  - type: string
+                    minLength: 1
+                  - type: "null"
+              commit:
+                anyOf:
+                  - type: string
+                    pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
+                  - type: "null"
+              digest:
+                anyOf:
+                  - type: string
+                    pattern: ^[0-9a-f]{64}$
+                  - type: "null"
+              heading:
+                anyOf:
+                  - type: string
+                    minLength: 1
+                  - type: "null"
+              state:
+                type: string
+                enum:
+                  - resolved
+                  - changed
+                  - invalid
+                  - unreachable
+              text:
+                anyOf:
+                  - type: string
+                  - type: "null"
+            required:
+              - layer
+              - part
+              - name
+              - origin
+              - path
+              - binding_id
+              - commit
+              - digest
+              - heading
+              - state
+              - text
+            additionalProperties: false
+        final:
+          anyOf:
+            - type: string
+            - type: "null"
+        engine_version:
+          type: string
+          minLength: 1
+      required:
+        - parts
+        - final
+        - engine_version
+      additionalProperties: false
