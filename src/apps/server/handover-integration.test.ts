@@ -71,6 +71,7 @@ import {
   openEnvelope,
   sealEnvelope,
 } from "../../kernel/handover.ts";
+import { FAKE_COMMIT } from "./container-fakes-test-support.ts";
 import {
   COVERING_WORKER_BINDINGS,
   enableCoveringAgents,
@@ -408,6 +409,7 @@ async function setup(
     handoverRefreshWaitMs?: number;
     promptBase?: PromptBase;
     instructionFile?: string;
+    implementBindsOther?: boolean;
   } = {},
 ) {
   const oauth = boundary?.type === SecretShape.OAuth ? boundary : undefined;
@@ -675,7 +677,12 @@ async function setup(
         content: {
           ...CONTENT,
           intent: Intent.Implement,
-          bindings: [bindingSet.bindings.repo!.id],
+          bindings: [
+            bindingSet.bindings.repo!.id,
+            ...(setupOptions.implementBindsOther
+              ? [bindingSet.bindings.other!.id]
+              : []),
+          ],
         },
         tasks: [],
         reason: "plan",
@@ -1506,7 +1513,6 @@ for (const adapter of ["direct", "http"] as const) {
 
 const PINNED_HEAD = "a".repeat(40);
 const MOVED_HEAD = "b".repeat(40);
-const FAKE_HEAD = "a".repeat(40);
 const FIRST_HEAD_READ = 1;
 const CONCURRENT_HANDOVERS = 2;
 
@@ -1555,11 +1561,12 @@ test("the server prompt base pins one entry for the repository binding that name
   const h = await setup(t, "direct", undefined, {
     instructionFile: "AGENTS.md",
     extraRepository: true,
+    implementBindsOther: true,
   });
   completed(await h.handover());
   assert.equal(
     storedPromptCommits(h),
-    canonicalJSON([{ binding_id: h.bindings.repo!.id, commit: FAKE_HEAD }]),
+    canonicalJSON([{ binding_id: h.bindings.repo!.id, commit: FAKE_COMMIT }]),
   );
 });
 

@@ -5055,6 +5055,33 @@ test("a binding prompt change inserts the next binding revision and the policy k
   });
 });
 
+test("instructionBindingsOf answers only the repository revisions that name an instruction file", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    const named = repositoryBinding();
+    named.config.prompts = { instruction_file: "AGENTS.md" };
+    const unnamed = repositoryBinding(SECOND_REPOSITORY_ADDRESS);
+    unnamed.config.prompts = {
+      repository: "A test file sits beside its source file.",
+    };
+    const rows = persistBindings(tx, project.id, {
+      [REPOSITORY_NAME]: named,
+      [SECOND_REPOSITORY_NAME]: unnamed,
+      [WORKER_NAME]: workerBinding(),
+    }).bindings;
+    const ids = [
+      rows[REPOSITORY_NAME]!.id,
+      rows[SECOND_REPOSITORY_NAME]!.id,
+      rows[WORKER_NAME]!.id,
+      MISSING_NAME,
+    ];
+    assert.deepEqual(f.project.instructionBindingsOf(tx, ids), [
+      rows[REPOSITORY_NAME]!.id,
+    ]);
+  });
+});
+
 test("repositoryPolicyOf answers null for an absent or nonrepository binding", (t) => {
   const f = fixture(t);
   f.store.transaction((tx) => {
