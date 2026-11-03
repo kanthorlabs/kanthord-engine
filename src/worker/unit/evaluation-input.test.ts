@@ -45,6 +45,7 @@ import {
   snapshotOf,
   verificationCommands,
 } from "./evaluation-input.ts";
+import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 
 test("snapshot selection excludes requests and verifications and orders by identity", () => {
   const asset = {
@@ -407,7 +408,7 @@ test("an examine node with one binding places the produced evidence outside its 
   workspaces.release(prepared.key, WorkspaceKind.Execution);
 });
 
-test("an implement snapshot evaluation places the produced evidence outside its clean checkout", async (t) => {
+test("an implement snapshot evaluation places only the latest coder report outside its clean checkout", async (t) => {
   const state = temporary(t);
   const origin = join(state, "origin");
   mkdirSync(origin);
@@ -450,6 +451,7 @@ test("an implement snapshot evaluation places the produced evidence outside its 
     root_span_id: "1".repeat(16),
   };
   const assetId = createIdentity("evidence_asset");
+  const staleAssetId = createIdentity("evidence_asset");
   const address = { kind: "produced", sha256: "a".repeat(64) };
   const evidence = [
     {
@@ -466,7 +468,16 @@ test("an implement snapshot evaluation places the produced evidence outside its 
         },
       ],
     },
-    { id: "evidence_2", assets: [{ id: assetId, kind: "produced", address }] },
+    {
+      id: "evidence_2",
+      subject: CODER_REPORT_SUBJECT,
+      assets: [{ id: staleAssetId, kind: "produced", address }],
+    },
+    {
+      id: "evidence_3",
+      subject: CODER_REPORT_SUBJECT,
+      assets: [{ id: assetId, kind: "produced", address }],
+    },
   ] as Evidence[];
   const clients = {
     mission: {
@@ -526,6 +537,14 @@ test("an implement snapshot evaluation places the produced evidence outside its 
   assert.deepEqual(
     prepared.reviewBundle.assets.map((item) => item.path),
     [join("..", "..", EVIDENCE_DIRECTORY, assetId)],
+  );
+  assert.deepEqual(
+    prepared.reviewBundle.evidence.map((item) => item.id),
+    ["evidence_1", "evidence_3"],
+  );
+  assert.equal(
+    existsSync(join(prepared.key, EVIDENCE_DIRECTORY, staleAssetId)),
+    false,
   );
   assert.deepEqual(prepared.reviewBundle.added_files, [ADDED_FILE]);
   assert.deepEqual(prepared.reviewBundle.changed_files, [

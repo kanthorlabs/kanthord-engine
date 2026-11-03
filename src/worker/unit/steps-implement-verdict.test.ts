@@ -10,7 +10,11 @@ import { nodeUnitOf } from "./release-gate.ts";
 import { EndReason, type ExecutionEnd } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { runStepsImplement, startCheck } from "./steps-implement.ts";
+import {
+  HEAD_COMMIT_SUBJECT,
+  runStepsImplement,
+  startCheck,
+} from "./steps-implement.ts";
 import type { WorkspaceCheckout } from "./workspace.ts";
 import { NoProgressRule } from "./progress-rule.ts";
 import { SpanOperation } from "./telemetry.ts";
@@ -61,9 +65,10 @@ function recordEvidence(h: Harness): string[][] {
   h.run.clients.mission = {
     ...h.run.clients.mission,
     "evidence.submit": async (input: {
-      body: { assets: { address: { commit: string } }[] };
+      body: { subject: string; assets: { address: { commit: string } }[] };
     }) => {
-      commits.push(input.body.assets.map((asset) => asset.address.commit));
+      if (input.body.subject === HEAD_COMMIT_SUBJECT)
+        commits.push(input.body.assets.map((asset) => asset.address.commit));
       return { type: "completed", status: 200, data: { evidence: {} } };
     },
   } as unknown as MethodClients["mission"];

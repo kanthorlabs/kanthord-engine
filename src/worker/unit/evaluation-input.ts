@@ -29,6 +29,7 @@ import {
 } from "./environment-setup.ts";
 import { ExecutionIntent } from "../contract.ts";
 import { AFFECTED_SUBJECT } from "./affected.ts";
+import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 
 const NO_SNAPSHOTS = 0;
 
@@ -37,6 +38,17 @@ function isSupportEvidence(item: Evidence): boolean {
     !item.verification &&
     !item.requirement_key &&
     item.subject !== AFFECTED_SUBJECT
+  );
+}
+
+function withLatestCoderReport(support: readonly Evidence[]): Evidence[] {
+  const latest = support
+    .filter((item) => item.subject === CODER_REPORT_SUBJECT)
+    .map((item) => item.id)
+    .toSorted()
+    .at(-1);
+  return support.filter(
+    (item) => item.subject !== CODER_REPORT_SUBJECT || item.id === latest,
   );
 }
 
@@ -290,7 +302,7 @@ export async function prepareEvaluation(
     const evidenceIds = new Set(workspace.evidenceIds);
     const assets: { evidence_id: string; asset_id: string; path: string }[] =
       [];
-    const support = evidence.filter(isSupportEvidence);
+    const support = withLatestCoderReport(evidence.filter(isSupportEvidence));
     const selected = support.flatMap((item) =>
       item.assets
         .filter(

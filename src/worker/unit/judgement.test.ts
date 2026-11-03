@@ -239,6 +239,11 @@ test("failed and unrun rationale names the command and cause", () => {
   assert.match(instruction, /List every unmet item that you find/);
   assert.match(
     instruction,
+    /in the review bundle\. If the review bundle holds a coder report, read it\. Judge each OPEN blocker of the coder report: list it as unmet with its ground, or state in the rationale why it is not a defect\. An OPEN blocker of the coder report that the node scope forbids is an unmet item with the conflict ground\. Weigh each current dependency outcome/,
+  );
+  assert.doesNotMatch(examineEvaluation, /coder report/);
+  assert.match(
+    instruction,
     /Give each unmet item a ground: stated for a requirement or criterion of the work prompt, standard for a default-standard rule, unstated for a defect that neither states, conflict for two stated requirements or criteria that the work cannot meet together\./,
   );
   assert.match(
