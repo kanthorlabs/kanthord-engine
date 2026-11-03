@@ -545,7 +545,7 @@ All controls recheck admission at commit. Human-control race precedence remains 
 - Finding create accepts `<node-id>` and `FindingCreate`, and returns `Finding`.
   It records a human finding for a defect that a human finds after delivery.
   The service gives the label `H<n>`, the action `yes`, no ground, the route `report` and `created_by`.
-  `assessment_id` names an assessment of the node in the attempt that delivered the code. That attempt is the attempt of the successful outcome of the node, or an attempt that holds a landed commit. `task_id` names a task of the revision of that assessment, or it is null.
+  `assessment_id` names an assessment of the node in an attempt that delivered the code. An attempt delivered the code when it is the attempt of the successful outcome of the node, or when it holds a landed commit. `task_id` names a task of the revision of that assessment, or it is null.
   Another `assessment_id` or `task_id` answers 400 `gateway.request.validation_failed` with an issue at that field.
   The act checks `expected_mission_version` and keeps the mission version, because a finding changes no node. It admits a node in any state.
 - Finding update accepts `<finding-id>` and `FindingUpdate`, and returns `Finding`.
