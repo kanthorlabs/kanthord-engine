@@ -12,6 +12,7 @@ import {
 import { diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
+  ALERT_IDENTITY_PREFIX,
   CLEANUP_IDENTITY_PREFIX,
   createIdentity,
   identityTime,
@@ -75,19 +76,31 @@ import {
 import {
   acknowledgeAlert,
   alertOf,
+  insertAlert,
   listAlerts,
   openAlerts,
+  resolveAlert,
   type StoredAlert,
 } from "./alert-store.ts";
+import {
+  acknowledgedUntil,
+  acknowledgementHolds,
+  type AlertEvent,
+  type AlertTrack,
+  FIRING_TRACK,
+  OK_TRACK,
+  step,
+} from "./alerts.ts";
 import { type CleanupDeleter, CleanupTask } from "./cleanup-task.ts";
 import type { ServerHost } from "./server-host.ts";
 
 const MEASURE_ERROR_CHANGED = "footprint.measure.error_changed";
 const MEASURE_FAILED = "footprint.measure.failed";
 const BACKUP_DELETED = "footprint.backup.deleted";
+const ALERT_FIRED = "footprint.alert.fired";
+const ALERT_RESOLVED = "footprint.alert.resolved";
+const ALERT_EVALUATION_FAILED = "footprint.alert.evaluation_failed";
 const KEY_SEPARATOR = "\u0000";
-const HALF = 2;
-const DOUBLE = 2;
 const WINDOW_MIN_DAYS = 1;
 const NO_ITEMS = 0;
 const NO_GROWTH = 0;
@@ -167,6 +180,7 @@ export class FootprintService implements Service {
   private readonly now: () => number;
   private readonly owners: FootprintOwner[] = [];
   private readonly entries = new Map<string, Entry>();
+  private readonly tracks = new Map<string, AlertTrack>();
   private readonly tableCache = new Map<
     FootprintKind,
     { at: number; tables: FootprintTable[] | null }
@@ -215,6 +229,9 @@ export class FootprintService implements Service {
   }
 
   private async measureOwners(): Promise<void> {
+    const reported = new Set<string>();
+    const skipped = new Set<FootprintKind>();
+    const hosts = new Set<string | null>([null]);
     for (const owner of this.owners) {
       let measures: readonly FootprintMeasure[];
       try {
@@ -227,15 +244,18 @@ export class FootprintService implements Service {
         measures = owner.kinds.map((kind) =>
           failedMeasure(kind, MEASURE_FAILED, messageOf(error)),
         );
+        owner.kinds.forEach((kind) => skipped.add(kind));
       }
-      await this.record(owner, measures);
+      measures.forEach((measure) => hosts.add(measure.instance_name));
+      for (const key of await this.record(owner, measures)) reported.add(key);
     }
+    for (const host of hosts) this.settle(host, reported, skipped);
   }
 
   private async record(
     owner: FootprintOwner,
     measures: readonly FootprintMeasure[],
-  ): Promise<void> {
+  ): Promise<Set<string>> {
     const at = this.now();
     const reported = new Set<string>();
     for (const measure of measures) {
@@ -275,13 +295,99 @@ export class FootprintService implements Service {
         candidates: await this.defaultCandidates(owner, measure, at),
       });
     }
+    return reported;
+  }
+
+  private settle(
+    instanceName: string | null,
+    reported: ReadonlySet<string>,
+    skipped: ReadonlySet<FootprintKind>,
+  ): void {
+    const vanished = (kind: FootprintKind, host: string | null, key: string) =>
+      host === instanceName && !skipped.has(kind) && !reported.has(key);
     for (const [key, entry] of this.entries)
-      if (
-        owner.kinds.includes(entry.measure.kind) &&
-        entry.measure.instance_name === null &&
-        !reported.has(key)
-      )
+      if (vanished(entry.measure.kind, entry.measure.instance_name, key)) {
         this.entries.delete(key);
+        this.tracks.delete(key);
+      }
+    try {
+      const open = new Map(
+        this.dependencies.store
+          .transaction((tx) => openAlerts(tx))
+          .map((alert) => [
+            entryKey(alert.kind, alert.instance_name, alert.item_key),
+            alert,
+          ]),
+      );
+      for (const [key, alert] of open)
+        if (vanished(alert.kind, alert.instance_name, key))
+          this.resolve(key, alert);
+      for (const stat of this.stats()) {
+        const key = entryKey(stat.kind, stat.instance_name, stat.item_key);
+        if (stat.instance_name !== instanceName || !reported.has(key)) continue;
+        const alert = open.get(key);
+        const next = step(
+          this.tracks.get(key) ?? (alert ? FIRING_TRACK : OK_TRACK),
+          stat,
+        );
+        this.tracks.set(key, next.track);
+        if (next.event?.fire) this.fire(stat, next.event);
+        else if (next.event && alert) this.resolve(key, alert);
+      }
+    } catch (error) {
+      this.dependencies.logger.error(
+        { reason: diagnostic(error) },
+        ALERT_EVALUATION_FAILED,
+      );
+    }
+  }
+
+  private fire(
+    stat: FootprintStat,
+    event: Extract<AlertEvent, { fire: true }>,
+  ): void {
+    const alert: StoredAlert = {
+      alert_id: createIdentity(ALERT_IDENTITY_PREFIX),
+      kind: stat.kind,
+      instance_name: stat.instance_name,
+      item_key: stat.item_key,
+      threshold: event.threshold,
+      value: event.value,
+      resolved_at: null,
+      acknowledged_by: null,
+      acknowledged_at: null,
+      acknowledged_until: null,
+    };
+    this.dependencies.store.transaction((tx) => insertAlert(tx, alert));
+    this.dependencies.logger.warn(
+      {
+        alert_id: alert.alert_id,
+        kind: alert.kind,
+        instance_name: alert.instance_name,
+        item_key: alert.item_key,
+        value: alert.value,
+        threshold: alert.threshold,
+      },
+      ALERT_FIRED,
+    );
+  }
+
+  private resolve(key: string, alert: StoredAlert): void {
+    this.dependencies.store.transaction((tx) =>
+      resolveAlert(tx, alert.alert_id, this.now()),
+    );
+    this.tracks.delete(key);
+    this.dependencies.logger.info(
+      {
+        alert_id: alert.alert_id,
+        kind: alert.kind,
+        instance_name: alert.instance_name,
+        item_key: alert.item_key,
+        value: alert.value,
+        threshold: alert.threshold,
+      },
+      ALERT_RESOLVED,
+    );
   }
 
   private async defaultCandidates(
@@ -308,17 +414,20 @@ export class FootprintService implements Service {
   }
 
   private thresholds(kind: FootprintKind): FootprintThreshold[] {
-    const ratio = this.dependencies.config.disk_free_ratio;
-    return kind === FootprintKind.Disk
-      ? [
-          { measure: ThresholdMeasure.FreeRatio, value: ratio },
-          {
-            measure: ThresholdMeasure.DaysToFloor,
-            value: DEFAULT_AGE_DAYS,
-            free_ratio: ratio,
-          },
-        ]
-      : [];
+    const { disk_free_ratio: ratio, thresholds } = this.dependencies.config;
+    if (kind === FootprintKind.Disk)
+      return [
+        { measure: ThresholdMeasure.FreeRatio, value: ratio },
+        {
+          measure: ThresholdMeasure.DaysToFloor,
+          value: DEFAULT_AGE_DAYS,
+          free_ratio: ratio,
+        },
+      ];
+    const bytes = thresholds[kind];
+    return bytes === null
+      ? []
+      : [{ measure: ThresholdMeasure.Bytes, value: bytes }];
   }
 
   private growth(
@@ -418,9 +527,14 @@ export class FootprintService implements Service {
             ? this.daysToFloor(entry, entries, growths)
             : null,
         thresholds: this.thresholds(measure.kind),
-        alert: alert
-          ? { state: FootprintAlertState.Firing, alert_id: alert.alert_id }
-          : { state: FootprintAlertState.Ok, alert_id: null },
+        alert: {
+          state:
+            this.tracks.get(
+              entryKey(measure.kind, measure.instance_name, measure.item_key),
+            )?.state ??
+            (alert ? FootprintAlertState.Firing : FootprintAlertState.Ok),
+          alert_id: alert?.alert_id ?? null,
+        },
         delete_operation:
           cleanable === null ? null : DELETE_OPERATIONS[cleanable],
         rules: cleanable === null ? [] : [...KIND_RULES[cleanable]],
@@ -554,45 +668,25 @@ export class FootprintService implements Service {
       fired_at: identityTime(alert.alert_id),
       state:
         alert.resolved_at === null
-          ? FootprintAlertState.Firing
+          ? (this.tracks.get(
+              entryKey(alert.kind, alert.instance_name, alert.item_key),
+            )?.state ?? FootprintAlertState.Firing)
           : FootprintAlertState.Ok,
     };
   }
 
-  private statOf(alert: StoredAlert): FootprintStat | null {
+  private statOf(
+    stats: readonly FootprintStat[],
+    alert: StoredAlert,
+  ): FootprintStat | null {
     return (
-      this.stats().find(
+      stats.find(
         (stat) =>
           stat.kind === alert.kind &&
           stat.instance_name === alert.instance_name &&
           stat.item_key === alert.item_key,
       ) ?? null
     );
-  }
-
-  private acknowledgementHolds(
-    alert: StoredAlert,
-    stat: FootprintStat | null,
-  ): boolean {
-    if (alert.acknowledged_until === null) return false;
-    if (alert.kind === FootprintKind.Disk)
-      return (stat?.free_bytes ?? 0) >= alert.acknowledged_until;
-    return (stat?.bytes ?? alert.value) < alert.acknowledged_until;
-  }
-
-  private acknowledgedUntil(
-    alert: StoredAlert,
-    stat: FootprintStat | null,
-  ): number {
-    if (alert.kind === FootprintKind.Disk) {
-      const free = stat?.free_bytes ?? 0;
-      const floor =
-        this.dependencies.config.disk_free_ratio * (stat?.total_bytes ?? 0);
-      return free < floor
-        ? Math.floor(free / HALF)
-        : Math.floor(Math.max(free / HALF, floor));
-    }
-    return Math.floor((stat?.bytes ?? alert.value) * DOUBLE);
   }
 
   private async deleteBackups(
@@ -625,16 +719,7 @@ export class FootprintService implements Service {
         stats,
         open_alerts: open.length,
         unacknowledged_alerts: open.filter(
-          (alert) =>
-            !this.acknowledgementHolds(
-              alert,
-              stats.find(
-                (stat) =>
-                  stat.kind === alert.kind &&
-                  stat.instance_name === alert.instance_name &&
-                  stat.item_key === alert.item_key,
-              ) ?? null,
-            ),
+          (alert) => !acknowledgementHolds(alert, this.statOf(stats, alert)),
         ).length,
       };
     });
@@ -788,6 +873,7 @@ export class FootprintService implements Service {
       footprintOperations["alert.acknowledge"],
       ({ params }, caller) => {
         const by = humanOf(caller);
+        const stats = this.stats();
         return caller.commit((tx) => {
           const alert = alertOf(tx, params.alert_id);
           if (alert === null)
@@ -800,14 +886,18 @@ export class FootprintService implements Service {
               FootprintErrorCode.AlertResolved,
               "The alert episode is resolved.",
             );
-          const stat = this.statOf(alert);
-          if (this.acknowledgementHolds(alert, stat))
+          const stat = this.statOf(stats, alert);
+          if (acknowledgementHolds(alert, stat))
             throw conflict(
               FootprintErrorCode.AlertAcknowledged,
               "The acknowledgement holds.",
             );
           const at = this.now();
-          const until = this.acknowledgedUntil(alert, stat);
+          const until = acknowledgedUntil(
+            alert,
+            stat,
+            this.dependencies.config.disk_free_ratio,
+          );
           acknowledgeAlert(tx, alert.alert_id, by, at, until);
           return this.alertView({
             ...alert,

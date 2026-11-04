@@ -38,6 +38,10 @@ import { Diagnostic } from "../kernel/errors.ts";
 
 const FIRST_AUTH_VERSION = 1;
 const DEFAULT_TRACE_WRITABLE_DAYS = 30;
+const DEFAULT_DISK_FREE_RATIO = 0.1;
+const TRACE_THRESHOLD_BYTES = 8589934592;
+const LOG_THRESHOLD_BYTES = 2147483648;
+const CONFIGURED_THRESHOLD = 1073741824;
 const ExitCode = { Success: 0, Failure: 1 } as const;
 
 const EMPTY_OUTPUT = "";
@@ -378,6 +382,61 @@ test("the trace writable period accepts only a safe integer from 1 to 3650", () 
       }).getProperties().tracking.trace_writable_days,
       writableDays,
     );
+});
+
+test("footprint thresholds default to null except trace and log, and accept null", () => {
+  const masterKey = randomBytes(32).toString("base64");
+  const defaults = configuration({
+    version: CONFIG_VERSION,
+    master_key: masterKey,
+  }).getProperties().footprint;
+  assert.equal(defaults.disk_free_ratio, DEFAULT_DISK_FREE_RATIO);
+  assert.deepEqual(defaults.thresholds, {
+    operational_database: null,
+    trace: TRACE_THRESHOLD_BYTES,
+    database_backup: null,
+    log: LOG_THRESHOLD_BYTES,
+    environment: null,
+    cache_volume: null,
+    slot_image: null,
+    slot_residue: null,
+    intake_mirror: null,
+    workbench: null,
+    session: null,
+    workspace: null,
+    tool_output: null,
+  });
+  const configured = configuration({
+    version: CONFIG_VERSION,
+    master_key: masterKey,
+    footprint: { thresholds: { trace: null, workspace: CONFIGURED_THRESHOLD } },
+  }).getProperties().footprint.thresholds;
+  assert.equal(configured.trace, null);
+  assert.equal(configured.workspace, CONFIGURED_THRESHOLD);
+  assert.equal(configured.log, LOG_THRESHOLD_BYTES);
+  for (const value of [0, 1.5, "8GiB", Number.MAX_SAFE_INTEGER + 1])
+    assert.throws(
+      () =>
+        configuration({
+          version: CONFIG_VERSION,
+          master_key: masterKey,
+          footprint: { thresholds: { trace: value } },
+        }),
+      (error: Error & { code?: string }) => {
+        assert.equal(error.code, INVALID_FIELD_CODE);
+        assert.match(diagnosticText(error), /footprint.thresholds.trace/);
+        return true;
+      },
+    );
+  assert.throws(
+    () =>
+      configuration({
+        version: CONFIG_VERSION,
+        master_key: masterKey,
+        footprint: { thresholds: { disk: null } },
+      }),
+    (error: Error & { code?: string }) => error.code === INVALID_FIELD_CODE,
+  );
 });
 
 test("project configuration defaults to the environment run limits", () => {

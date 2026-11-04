@@ -20,8 +20,8 @@ confirms.
 - The instance kinds `session`, `workspace`, `tool_output`, the instance `log`
   and `slot_residue` have no measurement yet. A cleanup of an instance kind
   ends `failed`, because its owner delete is not available yet.
-- The alert list answers the stored alert episodes. No evaluation inserts an
-  episode yet.
+- The service evaluates the alert state of each kind, host and item after
+  each measurement. See [Alerts](#alerts).
 - The `environment` kind offers the rules `unbound` and `superseded`. The rule
   `dangling` is not offered until a field check confirms that Podman keeps the
   owner label on a dangling image.
@@ -106,6 +106,53 @@ holds `refusal: "live"`. The newest backup of each file holds `kept: true`.
   the owner cannot run the order.
 - After a server restart, the task runs each `queued` and `running` record
   again from its stored outcome.
+
+## Alerts
+
+The service evaluates each statistic after each measurement. An alert deletes
+nothing and starts no cleanup.
+
+- A kind with a bytes threshold in `footprint.thresholds` is above the
+  threshold when its bytes exceed the value. The `log` value applies to each
+  file. A `null` threshold turns the bytes alert of the kind off.
+- The `disk` statistic of each device is above the threshold when
+  `free_bytes / total_bytes` is below `footprint.disk_free_ratio`, or when
+  `days_to_floor` is 30 or less. A null `days_to_floor` is not above the
+  threshold. One episode for each device covers both conditions.
+- The clear value is 0.9 times the threshold for bytes. It is the threshold
+  divided by 0.9 for the free ratio and for `days_to_floor`. A `disk` statistic
+  clears only when both conditions clear.
+
+| From         | Condition at a measurement                           | To                          |
+| ------------ | ---------------------------------------------------- | --------------------------- |
+| `ok`         | above the threshold                                  | `pending`                   |
+| `pending`    | above the threshold, 2 measurements in a row         | `firing`; insert an episode |
+| `pending`    | at or below the threshold                            | `ok`                        |
+| `firing`     | at or below the clear value                          | `recovering`                |
+| `recovering` | at or below the clear value, 2 measurements in a row | `ok`; set `resolved_at`     |
+| `recovering` | above the clear value                                | `firing`                    |
+
+- A stale or a failed measurement changes no state.
+- A `null` threshold sets the state `ok` and resolves an open episode.
+- After each successful measurement of a host, the service resolves each open
+  episode of that host whose item the measurement no longer reports.
+- After a server restart, an open episode starts as `firing`.
+- The episode records in `threshold` the condition that fired first, and in
+  `value` its measured value at the fire.
+- At each fire, the server logs `footprint.alert.fired` at level `warn`. At
+  each resolve, it logs `footprint.alert.resolved` at level `info`. Each record
+  holds `alert_id`, `kind`, `instance_name`, `item_key`, `value` and
+  `threshold` of the episode.
+
+`alert acknowledge` hides an open episode from the banner and the badge. The
+answer holds `acknowledged_until` in bytes, rounded down.
+
+- `disk`: the larger of half the free bytes and the floor bytes
+  (`disk_free_ratio × total_bytes`). Below the floor, half the free bytes. The
+  acknowledgement holds until the free bytes drop below `acknowledged_until`.
+- A bytes kind: twice the bytes at the acknowledgement. The acknowledgement
+  holds until the bytes reach `acknowledged_until`.
+- After the acknowledgement ends, a new acknowledgement replaces the old one.
 
 ## `footprint.backup.delete`
 

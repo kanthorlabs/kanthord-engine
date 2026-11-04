@@ -474,7 +474,17 @@ The implemented fields are:
   its value.
 - `footprint.disk_free_ratio`: optional number above 0 and below 1, default
   `0.1`. The `disk` statistic of each device projects the days until its free
-  bytes reach this part of its total bytes. The key deletes nothing.
+  bytes reach this part of its total bytes. The `disk` alert fires when the
+  free bytes fall below this part. The key deletes nothing.
+- `footprint.thresholds.<kind>`: optional positive safe integer of bytes, or
+  `null`, for each kind except `disk`: `operational_database`, `trace`,
+  `database_backup`, `log`, `environment`, `cache_volume`, `slot_image`,
+  `slot_residue`, `intake_mirror`, `workbench`, `session`, `workspace` and
+  `tool_output`. The defaults are `null`, except `trace` `8589934592` (8 GiB)
+  and `log` `2147483648` (2 GiB for each file). The bytes alert of the kind
+  fires above the value; an instance kind applies it to each instance. The
+  value `null` turns the alert off. A change takes effect at the next
+  measurement after a server start. The key deletes nothing.
 
 The current Project fragment is empty and adds no YAML section.
 See [Gateway](./gateway.md) for authentication context.
