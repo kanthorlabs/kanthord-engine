@@ -4,8 +4,9 @@ pathItem:
     operationId: worker.instance.work
     tags:
       - worker
-    description: Answer the work version and the open login sessions of the current
-      connection of the instance. The call renews no liveness.
+    description: Answer the work version, the open login sessions and the pending
+      session reads of the current connection of the instance. The call renews
+      no liveness.
     x-access-policy: worker
     x-timeout-ms: 30000
     x-mutation: false
@@ -112,7 +113,42 @@ components:
               - mode
               - code
             additionalProperties: false
+        session_reads:
+          maxItems: 8
+          type: array
+          items:
+            type: object
+            properties:
+              read_id:
+                type: string
+                minLength: 39
+                maxLength: 39
+                pattern: ^session_read_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: session_read_ followed by a canonical 26-character uppercase ULID.
+              execution_id:
+                type: string
+                minLength: 36
+                maxLength: 36
+                pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: execution_ followed by a canonical 26-character uppercase ULID.
+              session_id:
+                type: string
+                minLength: 1
+              entry_id:
+                type: string
+                minLength: 1
+              entry_type:
+                type: string
+                minLength: 1
+            required:
+              - read_id
+              - execution_id
+              - session_id
+              - entry_id
+              - entry_type
+            additionalProperties: false
       required:
         - work_version
         - login_sessions
+        - session_reads
       additionalProperties: false

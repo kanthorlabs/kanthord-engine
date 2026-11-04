@@ -92,11 +92,13 @@ import {
 } from "./test-support.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
 import {
+  SESSION_READ_WAIT_MS,
   SessionAbsentReason,
   UnreachableReason,
 } from "../tracking/contract.ts";
 
 const fakeCollaborations = {
+  sessionReadWaitMs: SESSION_READ_WAIT_MS,
   promptTelemetry: {
     agentPrompted: () => {},
     promptRecordOf: () => {
@@ -1308,6 +1310,7 @@ function enablementFixture(
         agent.selectionView(tx, selection, models),
     },
     ...collaborations,
+    sessionReadWaitMs: SESSION_READ_WAIT_MS,
   });
   const registry = new OperationRegistry();
   worker.declare(registry);
@@ -3174,6 +3177,49 @@ test("a session read of a container or a worker instance answers offline and rea
         placement,
       },
     );
+  }
+  assert.equal(f.host.sessionReads.length, NO_STARTS);
+});
+
+test("a session read of a connected worker instance waits for its report and answers unreadable for another entry", async (t) => {
+  const f = poolFixture(t, 0);
+  const instanceId = f.addInstance("laptop", InstancePlacement.Worker);
+  const runtime = registrationOf(f, instanceId);
+  const connectionId = createIdentity("connection");
+  f.worker.instances.holdConnection(instanceId, connectionId);
+  const target = { instance: "laptop", placement: InstancePlacement.Worker };
+  const outcomes = [
+    {
+      report: {
+        outcome: SessionReadOutcome.Resolved,
+        entry: { id: SESSION_READ.entry_id, type: SESSION_READ.entry_type },
+      },
+      answer: {
+        outcome: SessionReadOutcome.Resolved,
+        entry: { id: SESSION_READ.entry_id, type: SESSION_READ.entry_type },
+      },
+    },
+    {
+      report: {
+        outcome: SessionReadOutcome.Resolved,
+        entry: { id: "e5f6a7b8", type: SESSION_READ.entry_type },
+      },
+      answer: { outcome: SessionReadOutcome.Unreadable },
+    },
+  ];
+  for (const { report, answer } of outcomes) {
+    const waiting = f.worker.readSessionEntry(
+      runtime,
+      SESSION_READ,
+      readSignal,
+    );
+    const [pending] = f.worker.instances.work(
+      instanceId,
+      "laptop",
+      connectionId,
+    ).session_reads;
+    f.worker.instances.reportSessionRead(instanceId, pending!.read_id, report);
+    assert.deepEqual(await waiting, { result: answer, ...target });
   }
   assert.equal(f.host.sessionReads.length, NO_STARTS);
 });

@@ -781,6 +781,7 @@ export type PoolEntry = Omit<
   "token" | "expired_at" | "client_secret"
 >;
 export const SESSION_READS_PENDING_MAX = 8;
+export const SESSION_READ_PREFIX = "session_read";
 export const SessionReadOutcome = {
   Resolved: "resolved",
   SessionAbsent: "session_absent",
@@ -808,6 +809,32 @@ export type SessionReadResult =
         | typeof SessionReadOutcome.EntryAbsent
         | typeof SessionReadOutcome.Unreadable;
     };
+export const sessionReadIdSchema = identitySchema(SESSION_READ_PREFIX);
+export const sessionReadEntrySchema = z.strictObject({
+  read_id: sessionReadIdSchema,
+  execution_id: identitySchema("execution"),
+  session_id: z.string().min(1),
+  entry_id: z.string().min(1),
+  entry_type: z.string().min(1),
+});
+export type SessionReadEntry = z.infer<typeof sessionReadEntrySchema>;
+export const sessionReadResultSchema = z.discriminatedUnion("outcome", [
+  z.strictObject({
+    outcome: z.literal(SessionReadOutcome.Resolved),
+    entry: z.record(z.string(), z.unknown()),
+  }),
+  z.strictObject({
+    outcome: z.literal(SessionReadOutcome.TooLarge),
+    bytes: z.int().min(1),
+  }),
+  z.strictObject({
+    outcome: z.enum([
+      SessionReadOutcome.SessionAbsent,
+      SessionReadOutcome.EntryAbsent,
+      SessionReadOutcome.Unreadable,
+    ]),
+  }),
+]);
 export interface PoolHost {
   prepare(): void;
   start(instance: PoolInstance, entries: readonly PoolEntry[]): void;
@@ -865,6 +892,7 @@ export const WorkerErrorCode = {
   InstancePlacementUnavailable: "worker.instance.placement_unavailable",
   InstanceServerLimit: "worker.instance.server_limit",
   InstancePlacementUnsupported: "worker.instance.placement_unsupported",
+  SessionReadNotFound: "worker.session_read.not_found",
 } as const;
 
 export const WORKER_INSTANCE_ID_PREFIX = "worker_instance";
@@ -1371,9 +1399,30 @@ export const instanceOperations = {
     output: z.strictObject({
       work_version: z.number().int().min(0),
       login_sessions: z.array(loginSessionEntrySchema),
+      session_reads: z
+        .array(sessionReadEntrySchema)
+        .max(SESSION_READS_PENDING_MAX),
     }),
     description:
-      "Answer the work version and the open login sessions of the current connection of the instance. The call renews no liveness.",
+      "Answer the work version, the open login sessions and the pending session reads of the current connection of the instance. The call renews no liveness.",
+  },
+  "session_read.report": {
+    ...instanceOperation,
+    access: AccessPolicy.Worker,
+    id: "worker.session_read.report",
+    body: true,
+    method: HttpMethod.Post,
+    path: "/api/worker/session-read/:read_id/report",
+    mutation: true,
+    status: HttpStatus.NoContent,
+    input: z.strictObject({
+      params: z.strictObject({ read_id: sessionReadIdSchema }),
+      query: emptyFields,
+      body: sessionReadResultSchema,
+    }),
+    output: z.null(),
+    description:
+      "Report the outcome of a pending session read of the instance of the token. A resolved outcome carries the pi entry as pi wrote it.",
   },
 } as const satisfies Record<string, Operation>;
 

@@ -157,6 +157,15 @@ function declareExchange(
       body.connection_id,
     );
   });
+  registry.register(
+    instanceOperations["session_read.report"],
+    ({ params, body }, caller) => {
+      const identity = caller.identity;
+      assert.ok(isWorkerIdentity(identity));
+      instances.reportSessionRead(identity.instanceId, params.read_id, body);
+      return null;
+    },
+  );
 }
 
 export function declareInstances(

@@ -33,6 +33,7 @@ import {
   type ExecutionTrace,
   MISSION_PRODUCER,
   PROJECT_PRODUCER,
+  SESSION_READ_WAIT_MS,
   TRACKING_SERVICE_NAME,
   WORKER_PRODUCER,
 } from "../../tracking/contract.ts";
@@ -802,6 +803,7 @@ export function composeServices(options: {
       heldCopies: (tx, holder) => custody.heldCopies(tx, holder),
     },
     handoverRefreshWaitMs: options.handoverRefreshWaitMs,
+    sessionReadWaitMs: SESSION_READ_WAIT_MS,
     loginSessionsOf: (holder) => llm.loginSessionsOf(holder),
     credentialVersionOf: (holder) => llm.credentialVersionOf(holder),
     copyHealthOf: (holder, copy) => llm.copyHealthOf(holder, copy),

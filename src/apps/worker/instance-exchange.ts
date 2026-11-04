@@ -19,6 +19,7 @@ import {
   connectionPayloadSchema,
   INSTANCE_CONNECTION_INFO,
   type InstanceConfiguration,
+  type SessionReadResult,
   WORKER_TOKEN_INFO,
   workerOperations,
   type WorkerTokenPayload,
@@ -180,6 +181,21 @@ export class InstanceExchange {
         { context, idempotencyKey },
       ),
       "login report",
+    );
+  }
+
+  async sessionReadReport(
+    readId: string,
+    result: SessionReadResult,
+    idempotencyKey: string,
+    context: Context = background,
+  ): Promise<void> {
+    settled(
+      await this.client["session_read.report"](
+        { params: { read_id: readId }, query: {}, body: result },
+        { context, idempotencyKey },
+      ),
+      "session read report",
     );
   }
 

@@ -402,6 +402,8 @@ paths:
     $ref: ./openapi/worker/registration.list.yaml#/pathItem
   /api/worker/registration/{runtime_identity}/resume:
     $ref: ./openapi/worker/registration.resume.yaml#/pathItem
+  /api/worker/session-read/{read_id}/report:
+    $ref: ./openapi/worker/session_read.report.yaml#/pathItem
   /api/worker/ssh/sign:
     $ref: ./openapi/worker/ssh.sign.yaml#/pathItem
 components:
