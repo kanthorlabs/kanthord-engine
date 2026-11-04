@@ -27,6 +27,8 @@ import {
 } from "./test-support.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 
+const FAKE_KEY = ["AKIA", "KANTHORDCANARY01"].join("");
+
 function composedPrompt(first: string, second: string) {
   return {
     systemPrompt: [
@@ -75,7 +77,7 @@ test("pinned prompt layers survive compaction and all model calls retain their o
     agent: setup.agents[0]!,
     signal: new AbortController().signal,
   });
-  const session = await openSession({
+  const { session } = await openSession({
     cwd,
     modelRuntime: runtime,
     model,
@@ -86,6 +88,7 @@ test("pinned prompt layers survive compaction and all model calls retain their o
     hostHome: cwd,
     hooks: [pinned.hook],
     context: background,
+    knownSecrets: async () => [],
   });
   stopAfter(t, () => session.dispose());
   pinned.pinInference(session, composed.systemPrompt);
@@ -123,6 +126,66 @@ test("pinned prompt layers survive compaction and all model calls retain their o
   }
 });
 
+test("pinInference with a redacted system prompt and work inserts nothing and sends no value", async (t) => {
+  const cwd = temporary(t);
+  const composed = composedPrompt(`GLOBAL ${FAKE_KEY}`, "PROJECT_MARKER");
+  const work = renderWorkPrompt(SHIPPED_TEMPLATES, {
+    node_id: "node",
+    revision: 1,
+    content: {
+      name: `WORK ${FAKE_KEY}`,
+      requirement: "build",
+      criterion: "pass",
+      verifications: [],
+    },
+  });
+  const pins = pinnedLayers();
+  const provider = scriptedProvider([fauxAssistantMessage("done")]);
+  const setup = anthropicSetup();
+  const credentials = new InMemoryCredentialStore();
+  await credentials.modify("anthropic", async () => ({
+    type: "api_key",
+    key: "scripted",
+  }));
+  const { runtime, model } = await scriptedModelRuntime(provider)({
+    credential: {
+      credential_id: setup.agents[0]!.credential_id,
+      provider_id: "anthropic",
+      store: credentials,
+    },
+    agent: setup.agents[0]!,
+    signal: new AbortController().signal,
+  });
+  const opened = await openSession({
+    cwd,
+    modelRuntime: runtime,
+    model,
+    thinkingLevel: "off",
+    systemPrompt: composed.systemPrompt,
+    allowlist: [],
+    customTools: [],
+    hostHome: cwd,
+    hooks: [pins.hook],
+    context: background,
+    knownSecrets: async () => [],
+  });
+  stopAfter(t, () => opened.session.dispose());
+  const redacted = {
+    ...work,
+    text: await opened.redaction.text(work.text),
+  };
+  pins.setWork(redacted);
+  pins.pinInference(opened.session, opened.systemPrompt);
+  await opened.session.prompt(redacted.text);
+  const [call] = provider.calls;
+  assert.ok(call);
+  assert.deepEqual(
+    call.messages.map((entry) => entry.role),
+    ["system", "user"],
+  );
+  assert.ok(!JSON.stringify(call).includes(FAKE_KEY));
+});
+
 test("two tool calls produce three counted turns with no absent project message", async (t) => {
   const cwd = temporary(t);
   writeFileSync(join(cwd, "file"), "content");
@@ -151,7 +214,7 @@ test("two tool calls produce three counted turns with no absent project message"
     agent: setup.agents[0]!,
     signal: new AbortController().signal,
   });
-  const session = await openSession({
+  const { session } = await openSession({
     cwd,
     modelRuntime: runtime,
     model,
@@ -162,6 +225,7 @@ test("two tool calls produce three counted turns with no absent project message"
     hostHome: cwd,
     hooks: [pins.hook],
     context: background,
+    knownSecrets: async () => [],
   });
   stopAfter(t, () => session.dispose());
   pins.pinInference(session, "owned system");
@@ -287,7 +351,7 @@ for (const isSplitTurn of [false, true]) {
       agent: setup.agents[0]!,
       signal: new AbortController().signal,
     });
-    const session = await openSession({
+    const { session } = await openSession({
       cwd,
       modelRuntime: runtime,
       model,
@@ -298,6 +362,7 @@ for (const isSplitTurn of [false, true]) {
       hostHome: cwd,
       hooks: [pins.hook],
       context: background,
+      knownSecrets: async () => [],
     });
     stopAfter(t, () => session.dispose());
     pins.pinInference(session, composed.systemPrompt);

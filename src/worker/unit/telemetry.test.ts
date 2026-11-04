@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { SensitiveRule, tracerMarker } from "../../agent/sensitive-text.ts";
 import { test } from "node:test";
 import type {
   AgentSession,
@@ -1175,7 +1176,7 @@ test("a stop during a tool call ends the turn with stopped and the usage of its 
   assert.equal(turn?.attributes?.["kanthord.usage.cost_usd"], COST_USD);
 });
 
-test("a credential secret in a tool result reaches the sink as [redacted]", () => {
+test("a credential secret in a tool result reaches the sink as the tracer marker", () => {
   const { records, spans } = recorder();
   const scripted = scriptedSession();
   traceAgent(scripted.session, spans, TRACED_AGENT, {
@@ -1196,7 +1197,11 @@ test("a credential secret in a tool result reaches the sink as [redacted]", () =
   const [record] = entryRecords(records);
   assert.equal(record?.tool_call_id, TOOL_CALL);
   assert.ok(!JSON.stringify(records).includes(CREDENTIAL_SECRET));
-  assert.ok(JSON.stringify(record?.entry).includes("token [redacted]"));
+  assert.ok(
+    JSON.stringify(record?.entry).includes(
+      `token ${tracerMarker(SensitiveRule.LlmCredential)}`,
+    ),
+  );
 });
 
 test("a turn start refreshes the secrets and a rejection keeps the old list", async () => {
@@ -1211,16 +1216,20 @@ test("a turn start refreshes the secrets and a rejection keeps the old list", as
   let calls = 0;
   traceAgent(scripted.session, spans, TRACED_AGENT, {
     ...TRACING,
+    secrets: [CREDENTIAL_SECRET],
     refreshSecrets: () => refreshes[calls++]!(),
   });
   scripted.emit({ type: "turn_start" });
   await new Promise((resolve) => setImmediate(resolve));
   scripted.emit({ type: "turn_start" });
   await new Promise((resolve) => setImmediate(resolve));
-  scripted.append({ data: `a ${REFRESHED_SECRET}` });
+  scripted.append({ data: `a ${REFRESHED_SECRET} b ${CREDENTIAL_SECRET}` });
   scripted.emit({ type: "message_end" });
   assert.equal(calls, TWO_REFRESHES);
   assert.ok(!JSON.stringify(records).includes(REFRESHED_SECRET));
+  assert.ok(!JSON.stringify(records).includes(CREDENTIAL_SECRET));
+  const marker = tracerMarker(SensitiveRule.LlmCredential);
+  assert.ok(JSON.stringify(records).includes(`a ${marker} b ${marker}`));
 });
 
 test("an entry with an invalid identity is skipped and counted as a fault", () => {

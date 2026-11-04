@@ -15,6 +15,11 @@ import {
 } from "../kernel/context.ts";
 import { loadPi, piAgentDirectory } from "./pi.ts";
 import { homeRelativeCwd } from "./hooks/home-relative-cwd.ts";
+import {
+  type KnownSecrets,
+  sensitiveTextRedaction,
+  type SensitiveTextRedaction,
+} from "./hooks/sensitive-text-redaction.ts";
 
 export const RUNTIME_SETUP_DEADLINE_MS = 30000;
 
@@ -50,7 +55,7 @@ export async function withDeadline<T>(
   }
 }
 
-export async function openSession(input: {
+export interface OpenSessionInput {
   cwd: string;
   modelRuntime: ModelRuntime;
   model: Model<Api>;
@@ -62,7 +67,18 @@ export async function openSession(input: {
   hooks: InlineExtension[];
   context: Context;
   sessionManager?: SessionManager;
-}): Promise<AgentSession> {
+}
+
+export type SessionRedactionInput =
+  { knownSecrets: KnownSecrets } | { redaction: SensitiveTextRedaction };
+
+export async function openSession(
+  input: OpenSessionInput & SessionRedactionInput,
+): Promise<{
+  session: AgentSession;
+  redaction: SensitiveTextRedaction;
+  systemPrompt: string;
+}> {
   assert.ok(input.cwd);
   assert.ok(input.hostHome);
   assert.ok(input.systemPrompt);
@@ -74,6 +90,17 @@ export async function openSession(input: {
   });
   const sessionManager =
     input.sessionManager ?? pi.SessionManager.inMemory(input.cwd);
+  const redaction =
+    "redaction" in input
+      ? input.redaction
+      : sensitiveTextRedaction(
+          input.knownSecrets,
+          sessionManager.getSessionId(),
+        );
+  const systemPrompt = await withDeadline(
+    redaction.text(input.systemPrompt),
+    input.context,
+  );
   const resourceLoader = new pi.DefaultResourceLoader({
     cwd: input.cwd,
     agentDir: piAgentDirectory(),
@@ -83,8 +110,13 @@ export async function openSession(input: {
     noPromptTemplates: true,
     noThemes: true,
     noContextFiles: true,
-    systemPrompt: input.systemPrompt,
-    extensionFactories: [homeRelativeCwd(input.hostHome), ...input.hooks],
+    systemPrompt,
+    extensionFactories: [
+      homeRelativeCwd(input.hostHome),
+      redaction.restore,
+      ...input.hooks,
+      redaction.hook,
+    ],
   });
   await withDeadline(resourceLoader.reload(), input.context);
   const { session } = await withDeadline(
@@ -103,5 +135,5 @@ export async function openSession(input: {
     input.context,
     ({ session }) => session.dispose(),
   );
-  return session;
+  return { session, redaction, systemPrompt };
 }

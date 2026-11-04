@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { rmSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import {
@@ -29,6 +29,14 @@ import {
 import { isString } from "../../kernel/values.ts";
 import { AgentErrorCode, agentOperations } from "../../agent/contract.ts";
 import { loadPi } from "../../agent/pi.ts";
+import {
+  REDACTION_LOG_MESSAGE,
+  RestoreReason,
+} from "../../agent/hooks/sensitive-text-redaction.ts";
+import {
+  SensitiveRule,
+  SESSION_MARKER_PATTERN,
+} from "../../agent/sensitive-text.ts";
 import { scriptedProvider } from "../../agent/test-support.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { createModelRuntime, resolveModel } from "../../llm/model-connector.ts";
@@ -65,6 +73,7 @@ const CustomType = "custom";
 const ModelChange = "model_change";
 const ThinkingChange = "thinking_level_change";
 const SINGLE = 1;
+const NO_UNKEPT = 0;
 const HOST_HOME = "/home/kanthord_host";
 const MESSAGE_ENTRY = "message";
 const SYSTEM_ROLE = "system";
@@ -1289,4 +1298,93 @@ test("an abort rejects every pending approval", async (t) => {
     WorkbenchErrorCode.ApprovalNotFound,
   );
   assert.deepEqual(await providerNames(fixture), [DEFAULT, BACKUP]);
+});
+
+const FAKE_KEY = ["AKIA", "KANTHORDCANARY01"].join("");
+const KEY_FILE = "key.txt";
+
+function contextMarker(context: { messages: unknown[] }): string {
+  const [marker] = JSON.stringify(context.messages).match(
+    SESSION_MARKER_PATTERN,
+  ) ?? [""];
+  assert.ok(marker);
+  return marker;
+}
+
+async function configureBackup(fixture: Fixture, sessionId: string) {
+  completed(
+    await fixture.workbench["session.configure"](
+      {
+        params: { session_id: sessionId },
+        query: {},
+        body: {
+          agent_provider: BACKUP,
+          model_identifier: SONNET,
+          reasoning_effort: OFF,
+        },
+      },
+      fixture.options,
+    ),
+  );
+}
+
+function redactionRecords(fixture: Fixture): Record<string, unknown>[] {
+  return fixture.logs
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+    .filter((record) => record.msg === REDACTION_LOG_MESSAGE);
+}
+
+test("a fake key of a workbench message reaches no model request, and its marker restores into write after configure", async (t) => {
+  const path = join(temporary(t), KEY_FILE);
+  const fixture = await workbenchFixture(t, [
+    fauxAssistantMessage(ANSWER),
+    (context) => toolCall("write", { path, content: contextMarker(context) }),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  const session = await createSession(fixture);
+  completed(await message(fixture, session.id, `key ${FAKE_KEY}`));
+  await untilIdle(fixture, session.id, t.signal);
+  await configureBackup(fixture, session.id);
+  const [record] = redactionRecords(fixture);
+  assert.ok(record);
+  assert.equal(record.session_id, session.id);
+  assert.equal(record.unkept, NO_UNKEPT);
+  assert.deepEqual(record.redaction_rules, [SensitiveRule.AwsAccessKeyId]);
+  completed(await message(fixture, session.id, FIRST_MESSAGE));
+  const entries = await untilIdle(fixture, session.id, t.signal);
+  assert.deepEqual(
+    toolResults(entries).map(({ isError }) => isError),
+    [false],
+  );
+  assert.equal(readFileSync(path, "utf8"), FAKE_KEY);
+  assert.ok(
+    fixture.provider.calls.every(
+      (call) =>
+        !JSON.stringify(call.messages).includes(FAKE_KEY) &&
+        !call.systemPrompt?.includes(FAKE_KEY),
+    ),
+  );
+});
+
+test("a credential marker from before configure to another credential blocks after it", async (t) => {
+  const path = join(temporary(t), KEY_FILE);
+  const fixture = await workbenchFixture(t, [
+    fauxAssistantMessage(ANSWER),
+    (context) => toolCall("write", { path, content: contextMarker(context) }),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  const session = await createSession(fixture);
+  completed(await message(fixture, session.id, `key ${PRIMARY_KEY}`));
+  await untilIdle(fixture, session.id, t.signal);
+  await configureBackup(fixture, session.id);
+  completed(await message(fixture, session.id, FIRST_MESSAGE));
+  const entries = await untilIdle(fixture, session.id, t.signal);
+  assert.deepEqual(toolResults(entries), [
+    { toolName: "write", isError: true, text: RestoreReason.Credential },
+  ]);
+  assert.ok(
+    fixture.provider.calls.every(
+      (call) => !JSON.stringify(call.messages).includes(PRIMARY_KEY),
+    ),
+  );
 });
