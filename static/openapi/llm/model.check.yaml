@@ -65,12 +65,15 @@ components:
             credential:
               type: string
               minLength: 1
+              maxLength: 63
             model_identifier:
               type: string
               minLength: 1
+              maxLength: 256
             reasoning_effort:
               type: string
               minLength: 1
+              maxLength: 256
           required:
             - credential
             - model_identifier

@@ -58,7 +58,7 @@ Only the applicability and Scheduler-specific requirements are listed here.
 | [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | Paginated `list` commands only.                                                                                             |
 | [`--file`](./common-flags.md#--file)                                             | Required on `work pull` and `execution release`; their sections define the JSON fields.                                     |
 
-Every route follows the [Scheduler operation contracts](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#operation-contracts): 30 s by default, 120 s with a 90 s wait window on `work pull`, 10 MiB on a body.
+Every route follows the [Scheduler operation contracts](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/scheduler-service.impl.md#operation-contracts): 30 s by default, 120 s with a 90 s wait window on `work pull`, 32 MiB on a body.
 
 These commands accept no `--config`. They open no engine database and do not
 read server configuration. Options, positional arguments and JSON fields not

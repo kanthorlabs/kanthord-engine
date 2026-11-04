@@ -591,7 +591,7 @@ that the execution is a live claim of the caller's registration. The Tracking
 Service derives the producer from the claimant runtime identity and stores each
 span with the origin `observed`.
 
-The body is `{ "records": [...] }` with 1 to 1000 records and at most 1 MiB. The
+The body is `{ "records": [...] }` with 1 to 1000 records and at most 32 MiB. The
 answer is the acknowledgement below.
 
 ### Span record fields (`kind: "span"`)

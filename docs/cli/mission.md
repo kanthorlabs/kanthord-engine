@@ -156,7 +156,7 @@ rules apply. Import and unblock carry no domain request identifier. After a lost
 ### Operation contracts
 
 - Every Mission route follows the [operation contracts](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#operation-contracts).
-- Each route uses the shared error envelope, the default 30 s timeout and the 10 MiB body limit.
+- Each route uses the shared error envelope, the default 30 s timeout and the 32 MiB body limit.
 - A stale expected revision answers 409 `mission.revision.conflict` with the current value in `details`. A stale expected mission version answers 409 `mission.version.conflict` with the current value in `details`.
 - An absent mission answers 404 `mission.mission.not_found`. An absent node answers 404 `mission.node.not_found`. An absent record answers 404 `mission.record.not_found`.
 

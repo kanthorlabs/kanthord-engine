@@ -95,14 +95,14 @@ The shared host check can return `403 gateway.http.host_not_allowed` before
 authentication. Its `details` name the refused `host` and the `field`
 `gateway.allowed_hosts`; the answer never lists the allowlist. Readiness can
 return `503 gateway.lifecycle.not_ready`.
-The route body limit can return `413 gateway.request.body_too_large` before
+The 32 MiB body limit can return `413 gateway.request.body_too_large` before
 authentication. On a route that requires a credential, authentication and the
 access policy run before request validation. A missing or invalid credential
 returns `401` before `gateway.request.unsupported_media_type`,
 `gateway.request.invalid_json`, `gateway.request.unexpected_body` and
 `gateway.request.validation_failed`.
-Unexpected query data or a nonempty body is invalid. The `/api/auth/*` body
-limit is 40 KiB, although verification accepts no body.
+Unexpected query data or a nonempty body is invalid. The `/api/auth/*` routes
+use the same 32 MiB body limit, although verification accepts no body.
 
 ### Results and exit status
 
