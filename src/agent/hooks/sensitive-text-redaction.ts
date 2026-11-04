@@ -401,7 +401,12 @@ export function sensitiveTextRedaction(
         SESSION_MARKER_PATTERN,
         (whole, rule: string, index: string, markerTag: string) => {
           if (!markerTag.startsWith(sessionPart)) return whole;
-          if (rule === SensitiveRule.LlmCredential) {
+          const entry =
+            markerTag === tag ? byIndex.get(Number(index)) : undefined;
+          if (
+            entry?.rule === SensitiveRule.LlmCredential ||
+            rule === SensitiveRule.LlmCredential
+          ) {
             block(RestoreReason.Credential);
             return whole;
           }
@@ -414,7 +419,6 @@ export function sensitiveTextRedaction(
             reason ??= RestoreReason.Resume;
             return whole;
           }
-          const entry = byIndex.get(Number(index));
           if (!entry) {
             reason ??= RestoreReason.Unkept;
             return whole;
@@ -457,7 +461,8 @@ export function sensitiveTextRedaction(
       }
       if (!reason) return undefined;
       counts.restore_blocked++;
-      pending.delete(outermostCall(event));
+      if (outermostCall(event) === event.toolCallId)
+        pending.delete(event.toolCallId);
       return { block: true, reason };
     });
     pi.on("agent_end", () => {

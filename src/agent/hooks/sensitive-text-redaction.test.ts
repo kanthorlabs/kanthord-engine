@@ -356,6 +356,54 @@ test("restore blocks the LLM credential in every tool", async () => {
   });
 });
 
+test("a marker with a forged rule that points at an LLM credential entry blocks in every tool", async () => {
+  const key = providerKey();
+  const { end, call, redaction } = redactionOf([key]);
+  await redaction.text("warm up");
+  const marker = await markerOf(end, j("key ", key));
+  const forged = marker.replace(
+    j("<redacted:", SensitiveRule.LlmCredential, ":"),
+    j("<redacted:", SensitiveRule.Jwt, ":"),
+  );
+  assert.notEqual(forged, marker);
+  for (const [tool, input] of [
+    ["write", { path: "a.txt", content: forged }],
+    ["edit", { path: "a.txt", edits: [{ oldText: "x", newText: forged }] }],
+    ["bash", { command: forged }],
+  ] as const)
+    assert.deepEqual(await call(tool, { ...input }), {
+      block: true,
+      reason: RestoreReason.Credential,
+    });
+});
+
+test("a blocked nested call keeps the short values of the earlier nested calls", async () => {
+  const { end, call } = redactionOf();
+  const userinfo = "app:pass";
+  const marker = await markerOf(
+    end,
+    j("postgres://", userinfo, "@db.example.com/x"),
+  );
+  assert.equal(
+    await call(
+      "edit",
+      { edits: [{ oldText: "x", newText: marker }] },
+      { toolCallId: "outer/1", parentToolCallId: "outer" },
+    ),
+    undefined,
+  );
+  assert.deepEqual(
+    await call(
+      "bash",
+      { command: marker },
+      { toolCallId: "outer/2", parentToolCallId: "outer" },
+    ),
+    { block: true, reason: RestoreReason.Shell },
+  );
+  const result = await end(toolResult(j("diff +", userinfo), "outer"));
+  assert.ok(!JSON.stringify(result).includes(userinfo));
+});
+
 test("restore blocks a marker that this session cannot give back", async () => {
   const { end, call, redaction } = redactionOf();
   const marker = await markerOf(end, j(PASS, ' = "', an(16), '"'));
