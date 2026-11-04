@@ -77,6 +77,12 @@ export const CONFIG_STEPS: readonly ConfigStep[] = [
       "worker.server_slot_limit",
       "worker.server_instance_limit",
     ),
+  (document) =>
+    renameKey(
+      document,
+      "tracking.retention_days",
+      "tracking.trace_writable_days",
+    ),
 ];
 
 export const CONFIG_VERSION = ABSENT_CONFIG_VERSION + CONFIG_STEPS.length;

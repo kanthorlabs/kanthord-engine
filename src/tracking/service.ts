@@ -85,12 +85,7 @@ import {
   type TimelineCursor,
   TRACE_END_SPAN_ID,
 } from "./timeline.ts";
-import {
-  RETENTION_SWEEP_INTERVAL_MS,
-  retentionCutoff,
-  sweepExpiredFlow,
-  sweepExpiredTraces,
-} from "./retention.ts";
+import { writableCutoff } from "./writable-period.ts";
 import {
   listTraces,
   readFacets,
@@ -146,7 +141,7 @@ export interface Dependencies {
   store: Store;
   executions: ExecutionTraces;
   health?: HealthRegistry;
-  retentionDays: number;
+  writableDays: number;
   isHostedWorker: (workerName: string) => boolean;
   sessionHosts: SessionHosts;
   now?: () => number;
@@ -378,9 +373,8 @@ export class TrackingService implements Service, ExecutionTelemetry {
   private readonly shutdown = new CancellationContext();
   private started = false;
   private dropped = 0;
-  private failedSweeps = 0;
+  private failedBackfills = 0;
   private pendingUntil: number | null = null;
-  private sweepTimer: NodeJS.Timeout | undefined;
   private readonly now: () => number;
 
   constructor(dependencies: Dependencies) {
@@ -395,31 +389,8 @@ export class TrackingService implements Service, ExecutionTelemetry {
     return this.dropped;
   }
 
-  sweepFailures(): number {
-    return this.failedSweeps;
-  }
-
-  sweep(): number {
-    const deleted = this.sweepTraces();
-    this.sweepFlow();
-    return deleted;
-  }
-
-  private sweepTraces(): number {
-    try {
-      return sweepExpiredTraces(this.dependencies.store, this.cutoff());
-    } catch {
-      this.failedSweeps += 1;
-      return 0;
-    }
-  }
-
-  private sweepFlow(): void {
-    try {
-      sweepExpiredFlow(this.dependencies.store, this.now());
-    } catch {
-      this.failedSweeps += 1;
-    }
+  backfillFailures(): number {
+    return this.failedBackfills;
   }
 
   private async backfill(): Promise<void> {
@@ -436,12 +407,12 @@ export class TrackingService implements Service, ExecutionTelemetry {
         },
       );
     } catch {
-      this.failedSweeps += 1;
+      this.failedBackfills += 1;
     }
   }
 
   private cutoff(): number {
-    return retentionCutoff(this.now(), this.dependencies.retentionDays);
+    return writableCutoff(this.now(), this.dependencies.writableDays);
   }
 
   executionOpened(
@@ -929,12 +900,6 @@ export class TrackingService implements Service, ExecutionTelemetry {
         ),
       );
     this.started = true;
-    this.sweep();
-    this.sweepTimer = setInterval(
-      () => this.sweep(),
-      RETENTION_SWEEP_INTERVAL_MS,
-    );
-    this.sweepTimer.unref();
     void this.backfill();
     return Promise.resolve(null);
   }
@@ -943,7 +908,6 @@ export class TrackingService implements Service, ExecutionTelemetry {
   }
   stop(): Promise<Error | null> {
     this.shutdown.cancel();
-    clearInterval(this.sweepTimer);
     this.started = false;
     return Promise.resolve(null);
   }

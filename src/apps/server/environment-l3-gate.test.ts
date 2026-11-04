@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
+import { setImmediate } from "node:timers/promises";
 import { httpClient } from "../../gateway/client.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { stopAfter, temporary } from "../../kernel/test-support.ts";
@@ -962,7 +963,7 @@ test(
     );
 
     await t.test(
-      "the removal of the repository binding removes the cache volume",
+      "the removal of the repository binding keeps the cache volume",
       async () => {
         await writeBindings(fixture, projectId, {
           [WORKER_BINDING]: {
@@ -975,11 +976,9 @@ test(
           },
           [REVIEWER_BINDING]: REVIEWER,
         });
-        await until(
-          () => volumeCalled(l3, Subject.Remove, cacheName),
-          Boolean,
-          t.signal,
-        );
+        await setImmediate();
+        assert.equal(volumeCalled(l3, Subject.Remove, cacheName), false);
+        assert.deepEqual(Array.from(cacheNames(l3)), [cacheName]);
       },
     );
   },

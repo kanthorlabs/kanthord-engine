@@ -27,9 +27,7 @@ import {
   bucketsOf,
   contributionOf,
   exitOf,
-  FLOW_DAY_RETENTION_DAYS,
   FLOW_HOUR_RANGE_DAYS_MAX,
-  FLOW_HOUR_RETENTION_DAYS,
   FLOW_VECTOR_COLUMNS,
   FlowCauseAssigner,
   flowCauseAssignerSchema,
@@ -651,9 +649,7 @@ test("FlowStopReason holds the values of ExecutionStopReason plus lost", () => {
   );
 });
 
-test("the retention and late constants hold their values", () => {
-  assert.deepEqual([FLOW_HOUR_RETENTION_DAYS], [8]);
-  assert.deepEqual([FLOW_DAY_RETENTION_DAYS], [64]);
+test("the range and late constants hold their values", () => {
   assert.deepEqual([FLOW_HOUR_RANGE_DAYS_MAX], [2]);
   assert.equal(LATE_RECORD_MS, HOUR_MS);
 });

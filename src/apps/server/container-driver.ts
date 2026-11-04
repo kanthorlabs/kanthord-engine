@@ -749,7 +749,7 @@ export class ContainerDriver implements SlotDriver {
     await this.removeVolumeOf(runtime, instanceName);
   }
 
-  async sweepVolumes(live: ReadonlySet<string>): Promise<void> {
+  async sweepVolumes(archived: ReadonlySet<string>): Promise<void> {
     const runtime = await this.answeringRuntime();
     if (runtime === null) return;
     const answer = await this.command(
@@ -760,7 +760,7 @@ export class ContainerDriver implements SlotDriver {
       throw commandFailure("volume ls", answer.stderr);
     for (const name of linesOf(answer.stdout)) {
       const instanceName = slotInstanceName(name);
-      if (instanceName !== null && !live.has(instanceName))
+      if (instanceName !== null && archived.has(instanceName))
         await this.removeVolumeOf(runtime, instanceName);
     }
   }

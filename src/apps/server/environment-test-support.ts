@@ -419,7 +419,7 @@ export function recordingSlotDriver(
     check: () => driver.check(),
     prepare: () => driver.prepare(),
     removeVolume: (instanceName) => driver.removeVolume(instanceName),
-    sweepVolumes: (live) => driver.sweepVolumes(live),
+    sweepVolumes: (archived) => driver.sweepVolumes(archived),
     imageOf: (instanceName) => driver.imageOf?.(instanceName) ?? null,
     launch: (launch) => {
       const launched = driver.launch({

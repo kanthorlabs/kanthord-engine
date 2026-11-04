@@ -512,6 +512,7 @@ const VolumeAction = { List: "ls", Remove: "rm" } as const;
 const VOLUME_PREFIX = "kanthord_slot_";
 const LIVE_ID = "coder-live";
 const ORPHAN_ID = "coder-archived";
+const UNKNOWN_ID = "coder-unknown";
 const OTHER_VOLUME = "unrelated_volume";
 
 function volumeCalls(f: ReturnType<typeof hostWith>, action: string) {
@@ -553,16 +554,17 @@ test("removeVolume and sweepVolumes with no runtime do nothing and log nothing",
   assert.deepEqual(writes, []);
 });
 
-test("sweepVolumes removes the volume of each archived instance and of no live instance and only that volume", async () => {
+test("sweepVolumes removes only the volume of an archived name and keeps the volume of a live or unknown name", async () => {
   const names = [
     `${VOLUME_PREFIX}${LIVE_ID}`,
     `${VOLUME_PREFIX}${ORPHAN_ID}`,
+    `${VOLUME_PREFIX}${UNKNOWN_ID}`,
     OTHER_VOLUME,
   ].join("\n");
   const f = hostWith(true, (call) =>
     call.args[1] === VolumeAction.List ? ok(names) : ok(),
   );
-  await f.driver.sweepVolumes(new Set([LIVE_ID]));
+  await f.driver.sweepVolumes(new Set([ORPHAN_ID]));
   assert.equal(volumeCalls(f, VolumeAction.List).length, ONE_CALL);
   assert.ok(
     volumeCalls(f, VolumeAction.List)[0]?.args.some((arg) =>
@@ -581,7 +583,7 @@ test("sweepVolumes keeps a cache volume", async () => {
   const f = hostWith(true, (call) =>
     call.args[1] === VolumeAction.List ? ok(names) : ok(),
   );
-  await f.driver.sweepVolumes(new Set());
+  await f.driver.sweepVolumes(new Set([ORPHAN_ID]));
   assert.deepEqual(
     volumeCalls(f, VolumeAction.Remove).map((call) => call.args[2]),
     [`${VOLUME_PREFIX}${ORPHAN_ID}`],
@@ -727,7 +729,7 @@ test("the start sweep removes the volume of an archived instance and keeps the v
   const f = hostWith(true, (call) =>
     call.args[1] === VolumeAction.List ? ok(names) : ok(),
   );
-  await f.driver.sweepVolumes(new Set(["coder-1"]));
+  await f.driver.sweepVolumes(new Set(["gone-1"]));
   assert.deepEqual(
     volumeCalls(f, VolumeAction.Remove).map((call) => call.args[2]),
     [`${VOLUME_PREFIX}gone-1`],

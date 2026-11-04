@@ -22,6 +22,7 @@ const MIGRATED_LIMIT = 4;
 const MIGRATED_VERSION = 2;
 const MIGRATED_LIFETIME = 600;
 const MIGRATED_SERVER_LIMIT = 8;
+const MIGRATED_WRITABLE_DAYS = 90;
 const PROMPT_FILES_VERSION = 2;
 const PROMPT_DIRECTORY_LINE = "  prompt:\n    agent_directory: agents\n";
 
@@ -187,8 +188,8 @@ test("upgrade removes the system file and the host file keys of the agent prompt
   );
 });
 
-test("upgrade renames the server slot limit to the server instance limit and raises the version by one", () => {
-  const previous = CONFIG_VERSION - 1;
+test("upgrade renames the server slot limit to the server instance limit", () => {
+  const previous = CONFIG_VERSION - 2;
   const current = initialConfig();
   assert.ok(current.includes("  server_instance_limit: 16\n"));
   const legacy = current
@@ -212,5 +213,33 @@ test("upgrade renames the server slot limit to the server instance limit and rai
     configuration(parseMapping(upgrade.content!)).getProperties().worker
       .server_instance_limit,
     MIGRATED_SERVER_LIMIT,
+  );
+});
+
+test("upgrade renames the trace retention to the trace writable period, keeps the value and raises the version by one", () => {
+  const previous = CONFIG_VERSION - 1;
+  const current = initialConfig();
+  assert.ok(current.includes("  trace_writable_days: 30\n"));
+  const legacy = current
+    .replace(CURRENT_VERSION_LINE, `version: ${previous}\n`)
+    .replace(
+      "  trace_writable_days: 30\n",
+      `  retention_days: ${MIGRATED_WRITABLE_DAYS}\n`,
+    );
+  const upgrade = upgradeConfig(legacy);
+  assert.equal(upgrade.from, previous);
+  assert.equal(upgrade.to, CONFIG_VERSION);
+  assert.deepEqual(upgrade.changes, [
+    {
+      kind: "rename",
+      from: "tracking.retention_days",
+      to: "tracking.trace_writable_days",
+    },
+  ]);
+  assert.ok(!upgrade.content!.includes("retention_days"));
+  assert.equal(
+    configuration(parseMapping(upgrade.content!)).getProperties().tracking
+      .trace_writable_days,
+    MIGRATED_WRITABLE_DAYS,
   );
 });

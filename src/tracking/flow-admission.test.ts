@@ -23,6 +23,7 @@ import { FLOW_VECTOR_COLUMNS } from "./flow-model.ts";
 import { trackingMigrations } from "./migrations.ts";
 import { insertTrace, type TraceRow } from "./trace-store.ts";
 
+const NO_ROWS = 0;
 const HOUR_MS = 3600000;
 const DAY_MS = 86400000;
 const ANCHOR = Date.UTC(2026, 9, 31, 10, 30);
@@ -903,7 +904,7 @@ test("insertTrace answers true for a new row and false for a stored row", (t) =>
   });
 });
 
-test("an anchor older than 8 days writes no hour row and still writes its day row", (t) => {
+test("an anchor older than 8 days writes its hour row and its day row", (t) => {
   const store = memoryStore(t);
   const now = ANCHOR + 10 * DAY_MS;
   const trace = traceOf(1);
@@ -913,21 +914,17 @@ test("an anchor older than 8 days writes no hour row and still writes its day ro
     [rootStart(trace, "steps"), turn(trace, 1), releaseGate(trace)],
     now,
   );
-  assert.deepEqual(rollup(store, FlowGrain.Hour), []);
-  assert.deepEqual(usageRows(store, FlowGrain.Hour), []);
-  assert.deepEqual(
-    histogramOf(store, FlowGrain.Hour, FlowMeasure.GateRunTime),
-    null,
-  );
-  assert.deepEqual(keysOf(rollup(store, FlowGrain.Day)), ["release_gate/open"]);
-  assert.deepEqual([usageRows(store, FlowGrain.Day).length], [1]);
-  assert.deepEqual(
-    [histogramOf(store, FlowGrain.Day, FlowMeasure.GateRunTime)?.count],
-    [1],
-  );
+  for (const grain of [FlowGrain.Hour, FlowGrain.Day]) {
+    assert.deepEqual(keysOf(rollup(store, grain)), ["release_gate/open"]);
+    assert.deepEqual([usageRows(store, grain).length], [1]);
+    assert.deepEqual(
+      [histogramOf(store, grain, FlowMeasure.GateRunTime)?.count],
+      [1],
+    );
+  }
 });
 
-test("an anchor older than 64 days writes no row of either grain", (t) => {
+test("an anchor older than 64 days writes the rows of both grains", (t) => {
   const store = memoryStore(t);
   const trace = traceOf(1);
   write(
@@ -936,12 +933,10 @@ test("an anchor older than 64 days writes no row of either grain", (t) => {
     [rootStart(trace, "steps"), turn(trace, 1)],
     ANCHOR + 70 * DAY_MS,
   );
-  assert.deepEqual(
-    [
-      "tracking_flow_rollup",
-      "tracking_flow_histogram",
-      "tracking_usage_rollup",
-    ].map((table) => countOf(store, table)),
-    [0, 0, 0],
-  );
+  for (const table of [
+    "tracking_flow_rollup",
+    "tracking_flow_histogram",
+    "tracking_usage_rollup",
+  ])
+    assert.notEqual(countOf(store, table), NO_ROWS, table);
 });

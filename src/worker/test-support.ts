@@ -151,8 +151,8 @@ export class FakePoolHost implements PoolHost {
     this.archived.push(instance);
     return Promise.resolve();
   }
-  sweep(live: ReadonlySet<string>): Promise<void> {
-    this.swept.push(live);
+  sweep(archived: ReadonlySet<string>): Promise<void> {
+    this.swept.push(archived);
     return Promise.resolve();
   }
   async stop(): Promise<void> {

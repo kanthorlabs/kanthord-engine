@@ -28,10 +28,7 @@ import {
   parseMapping,
   showConfig,
 } from "./index.ts";
-import {
-  DEFAULT_RETENTION_DAYS,
-  RETENTION_DAYS_MAX,
-} from "../tracking/config.ts";
+import { WRITABLE_DAYS_MAX } from "../tracking/config.ts";
 import {
   DEFAULT_ENVIRONMENT_BUILD_TIMEOUT_MS,
   DEFAULT_ENVIRONMENT_MEMORY_MB,
@@ -40,6 +37,7 @@ import { writePrivate } from "../kernel/files.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 
 const FIRST_AUTH_VERSION = 1;
+const DEFAULT_TRACE_WRITABLE_DAYS = 30;
 const ExitCode = { Success: 0, Failure: 1 } as const;
 
 const EMPTY_OUTPUT = "";
@@ -118,7 +116,7 @@ test("service fragments preserve the existing YAML field set", () => {
     stop_backoff: DEFAULT_STOP_BACKOFF_SECONDS,
   });
   assert.deepEqual(initial.tracking, {
-    retention_days: DEFAULT_RETENTION_DAYS,
+    trace_writable_days: DEFAULT_TRACE_WRITABLE_DAYS,
   });
   assert.deepEqual(initial.worker, {
     heartbeat_window: DEFAULT_HEARTBEAT_WINDOW,
@@ -353,31 +351,31 @@ test("Scheduler reserve accepts only a positive safe integer", () => {
   }
 });
 
-test("Tracking retention accepts only a safe integer from 1 to 3650", () => {
+test("the trace writable period accepts only a safe integer from 1 to 3650", () => {
   const masterKey = randomBytes(32).toString("base64");
-  for (const retentionDays of [0, RETENTION_DAYS_MAX + 1, 1.5]) {
+  for (const writableDays of [0, WRITABLE_DAYS_MAX + 1, 1.5]) {
     assert.throws(
       () =>
         configuration({
           version: CONFIG_VERSION,
           master_key: masterKey,
-          tracking: { retention_days: retentionDays },
+          tracking: { trace_writable_days: writableDays },
         }),
       (error: Error & { code?: string }) => {
         assert.equal(error.code, INVALID_FIELD_CODE);
-        assert.match(diagnosticText(error), /tracking.retention_days/);
+        assert.match(diagnosticText(error), /tracking.trace_writable_days/);
         return true;
       },
     );
   }
-  for (const retentionDays of [1, RETENTION_DAYS_MAX])
+  for (const writableDays of [1, WRITABLE_DAYS_MAX])
     assert.equal(
       configuration({
         version: CONFIG_VERSION,
         master_key: masterKey,
-        tracking: { retention_days: retentionDays },
-      }).getProperties().tracking.retention_days,
-      retentionDays,
+        tracking: { trace_writable_days: writableDays },
+      }).getProperties().tracking.trace_writable_days,
+      writableDays,
     );
 });
 

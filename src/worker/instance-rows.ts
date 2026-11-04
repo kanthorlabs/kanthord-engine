@@ -127,6 +127,16 @@ export function readLiveServerInstances(tx: Transaction): InstanceRecord[] {
     .map(record);
 }
 
+export function readArchivedServerInstanceNames(tx: Transaction): string[] {
+  assert.ok(tx.database.isTransaction);
+  return tx.database
+    .prepare(
+      "SELECT DISTINCT name FROM worker_instance AS ended WHERE ended_at IS NOT NULL AND placement IN (?, ?) AND NOT EXISTS (SELECT 1 FROM worker_instance AS live WHERE live.name = ended.name AND live.ended_at IS NULL) ORDER BY name",
+    )
+    .all(InstancePlacement.Server, InstancePlacement.Container)
+    .map((row) => String(row.name));
+}
+
 export function insertInstance(
   tx: Transaction,
   value: {

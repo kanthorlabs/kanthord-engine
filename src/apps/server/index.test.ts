@@ -1438,7 +1438,7 @@ test(
       check: () => driver.check(),
       prepare: () => driver.prepare(),
       removeVolume: (instanceName) => driver.removeVolume(instanceName),
-      sweepVolumes: (live) => driver.sweepVolumes(live),
+      sweepVolumes: (archived) => driver.sweepVolumes(archived),
       launch: (launch) => {
         assert.ok(holder.fake);
         starts.push(launch.instance.name);

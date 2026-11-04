@@ -583,7 +583,7 @@ test("after a label the list item answers the label cause and the span list answ
   assert.deepEqual(idsOf(store, { cause_category: "model" }), []);
   const service = new TrackingService({
     store,
-    retentionDays: 30,
+    writableDays: 30,
     isHostedWorker: () => false,
     executions: { traceOf: () => undefined },
     sessionHosts: {

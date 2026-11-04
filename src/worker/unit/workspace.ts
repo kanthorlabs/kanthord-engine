@@ -2,8 +2,6 @@ import assert from "node:assert/strict";
 import {
   appendFileSync,
   existsSync,
-  lstatSync,
-  readdirSync,
   readFileSync,
   rmSync,
   utimesSync,
@@ -21,8 +19,6 @@ import type { HandoverSshIdentity } from "../../custody/contract.ts";
 export const WORKSPACES_DIRECTORY = "workspaces";
 export const SCRATCH_DIRECTORY = ".kanthord-scratch/";
 const GIT_EXCLUDE = [".git", "info", "exclude"];
-export const WORKSPACE_RETENTION_MS = 604800000;
-export const SWEEP_INTERVAL_MS = 3600000;
 export const CHECKOUTS_DIRECTORY = "checkouts";
 export const RELEASE_DIRECTORY = "release";
 export const EVIDENCE_DIRECTORY = "evidence";
@@ -112,7 +108,6 @@ export function sshAccessOf(
 export class WorkspaceRoot {
   readonly root: string;
   private readonly held = new Set<string>();
-  private timer?: NodeJS.Timeout;
   private constructor(root: string) {
     this.root = root;
   }
@@ -329,27 +324,6 @@ export class WorkspaceRoot {
     if (kind === WorkspaceKind.Node) this.touch(key);
     else rmSync(key, { recursive: true, force: true });
     this.held.delete(key);
-  }
-  sweep(now: number): void {
-    assert.ok(Number.isFinite(now));
-    assert.ok(this.root);
-    for (const entry of readdirSync(this.root)) {
-      const key = join(this.root, entry);
-      if (this.held.has(key)) continue;
-      if (lstatSync(key).mtimeMs < now - WORKSPACE_RETENTION_MS)
-        rmSync(key, { recursive: true, force: true });
-    }
-  }
-  startSweeping(): void {
-    assert.equal(this.timer, undefined);
-    assert.ok(this.root);
-    this.sweep(Date.now());
-    this.timer = setInterval(() => this.sweep(Date.now()), SWEEP_INTERVAL_MS);
-    this.timer.unref();
-  }
-  stopSweeping(): void {
-    clearInterval(this.timer);
-    this.timer = undefined;
   }
 }
 

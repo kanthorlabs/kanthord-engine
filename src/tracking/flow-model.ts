@@ -27,8 +27,6 @@ import {
   transitionRuleSchema,
 } from "./contract.ts";
 
-export const FLOW_HOUR_RETENTION_DAYS = 8;
-export const FLOW_DAY_RETENTION_DAYS = 64;
 export const FLOW_HOUR_RANGE_DAYS_MAX = 2;
 export const LATE_RECORD_MS = 3600000;
 

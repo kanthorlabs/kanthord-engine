@@ -24,12 +24,12 @@ data directory beside `kanthord.db`. It holds the tables of
   CLI leaves below.
 - A human labels the cause of an ended trace with `cause label`. The label is
   an annotation that every reader of the cause prefers to the root cause.
-- The server deletes a trace, with its spans, texts, records and session
-  entries, `tracking.retention_days` after its creation. A sweep runs at the
-  start and then every hour. A record of an older execution is `Refused` with
-  `trace_expired`, and a server span of it is dropped and counted. The flow
-  rollups outlive their traces: hour rows stay 8 days, and day rows stay 64
-  days.
+- The server deletes no trace and no flow rollup row automatically.
+  `tracking.trace_writable_days` sets the writable period of a trace: the
+  number of days after the start of an execution during which the server admits
+  its records. A record of an older execution is `Refused` with
+  `trace_expired`, and a server span of it is dropped and counted. An admitted
+  record updates its flow rollup bucket at every age.
 
 Telemetry is lossy and has no current effect. It is not Mission evidence,
 assessment or outcome. It completes no node, renews no claim and authorizes no
@@ -392,9 +392,8 @@ read. The last bucket is partial when `window.now` is before `window.to`.
 
 `previous_window` is the window of the same length that ends at `window.from`.
 It is `null` with `compare` `none`. It is also `null` when its `from` is before
-the retention cutoff of the bucket (8 days for `hour`, 64 days for `day`), before
 the smallest `bucket_start` of the rollup rows of that bucket, or when that
-bucket holds no row. With a `null` `previous_window`, every `previous` field of
+bucket holds no row. The first rollup row of each bucket is the coverage start. With a `null` `previous_window`, every `previous` field of
 the answer is `null`.
 
 The answer holds these fields:
@@ -427,7 +426,7 @@ the same hour. `cut` is the end of the UTC hour of `window.now`, minus the lengt
 of the window. For the bucket `day`, the read adds the hour rows from the start
 of the UTC day of `cut` to before `cut`, and skips them when `cut` is on a day
 boundary. `previous_same_hour` is `null` when `previous_window` is `null`, and
-when the read needs hour rows older than 8 days.
+when the start of the UTC day of `cut` is before the first hour row.
 
 The CLI exposes `--project`, `--worker`, `--from`, `--to`, `--bucket` and
 `--compare`, and prints the answer as one JSON line. An invalid `--worker`,
@@ -500,9 +499,9 @@ from the store.
 Reads one telemetry text. The answer holds `trace_id`, `text_id`, `content` and
 `created_at`. The reason text of a cause label has the text identity
 `<root_span_id>.cause_label:reason`, the one text identity outside the `TextID`
-format. A telemetry text has no state of its own. It expires with its
-trace: one delete of the trace row removes its spans, texts and records. A
-trace expires `tracking.retention_days` after its creation. An
+format. A telemetry text has no state of its own. It lives as long as its
+trace: one delete of the trace row removes its spans, texts and records. No
+automatic delete removes a trace. An
 unknown text answers `404` `tracking.text.not_found`. An unknown or deleted
 trace answers `404` `tracking.trace.not_found`.
 
@@ -716,7 +715,7 @@ permanent: retry the record only with a new identity and new content.
 | `foreign_producer` | Another producer created the span.                                                                                                                               |
 | `value_replaced`   | The record changes the operation, the parent, a time, a status or an attribute value of the span, or a new session entry takes a stored sequence of its session. |
 | `text_exists`      | The text already holds content.                                                                                                                                  |
-| `trace_expired`    | The execution is older than the retention of the server.                                                                                                         |
+| `trace_expired`    | The execution is older than the writable period of the server.                                                                                                   |
 
 One transaction applies the whole batch. A transport failure or a timeout
 leaves every disposition unknown, and the producer retries the same records

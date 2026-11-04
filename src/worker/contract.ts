@@ -842,7 +842,7 @@ export interface PoolHost {
   restart(instance: PoolInstance): void;
   imageOf(instance: PoolInstance): string | null;
   archive(instance: PoolInstance): Promise<void>;
-  sweep(live: ReadonlySet<string>): Promise<void>;
+  sweep(archived: ReadonlySet<string>): Promise<void>;
   stop(): Promise<void>;
   placementStatus(placement: PoolPlacement): Promise<PlacementStatus>;
   readSessionEntry(
