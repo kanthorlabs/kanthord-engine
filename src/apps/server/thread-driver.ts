@@ -1,3 +1,4 @@
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Worker } from "node:worker_threads";
 import { LogDestination } from "../../kernel/log.ts";
@@ -33,6 +34,8 @@ const INHERITED_VARIABLES = [
   "GIT_COMMITTER_NAME",
   "GIT_COMMITTER_EMAIL",
 ];
+const TEMPORARY_DIRECTORY = "tmp";
+const PRIVATE_DIRECTORY_MODE = 0o700;
 const SLOT_DIRECTORIES = {
   XDG_CONFIG_HOME: "config",
   XDG_STATE_HOME: "state",
@@ -50,6 +53,15 @@ export function threadEnvironment(
   for (const [name, directory] of Object.entries(SLOT_DIRECTORIES))
     env[name] = join(root, directory);
   return env;
+}
+
+export function launchEnvironment(
+  source: NodeJS.ProcessEnv,
+  root: string,
+): NodeJS.ProcessEnv {
+  const temporary = join(root, TEMPORARY_DIRECTORY);
+  mkdirSync(temporary, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
+  return { ...threadEnvironment(source, root), TMPDIR: temporary };
 }
 
 function threadEntries(entries: readonly SlotEntry[]): ThreadEntry[] {
@@ -129,7 +141,7 @@ export class ThreadDriver implements SlotDriver {
         entries: threadEntries(launch.entries),
         log: LogDestination.File,
       },
-      threadEnvironment(launch.environment, launch.root),
+      launchEnvironment(launch.environment, launch.root),
     );
     worker.stdout.pipe(launch.output, { end: false });
     worker.stderr.pipe(launch.output, { end: false });

@@ -128,6 +128,15 @@ export interface MissionCollaborations {
   reportExecutionEnds(ends: ExecutionEnds): void;
 }
 
+export interface NodeStateFact {
+  readonly state: NodeState;
+  readonly retired: boolean;
+}
+export type NodeStates = (
+  tx: Transaction,
+  nodeIds: readonly string[],
+) => ReadonlyMap<string, NodeStateFact>;
+
 export const RevokeCause = {
   Assessment: "assessment",
   Human: "human",

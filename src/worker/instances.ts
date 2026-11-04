@@ -24,6 +24,7 @@ import {
   BindingEntryState,
   CONNECTION_ID_PREFIX,
   type ConnectionBinding,
+  type FootprintOrder,
   INSTANCE_CONNECTED_WINDOW_MS,
   INSTANCE_CONNECTION_INFO,
   instanceConfigurationValue,
@@ -105,6 +106,7 @@ export interface InstanceDependencies {
   loginSessionsOf: (holder: string) => LoginSessionEntry[];
   credentialVersionOf: (holder: string) => number;
   sessionReadWaitMs: number;
+  instanceArchived?: (tx: Transaction, name: string) => void;
 }
 
 export interface SessionReadTarget {
@@ -266,6 +268,10 @@ export class WorkerInstances implements WorkerInstanceLookups {
     string,
     Map<string, PendingSessionRead>
   >();
+  private readonly footprintOrders = new Map<
+    string,
+    Map<string, FootprintOrder>
+  >();
   private readonly listedByProject = new Map<string, Set<string>>();
   private readonly startedAt = Date.now();
 
@@ -315,6 +321,32 @@ export class WorkerInstances implements WorkerInstanceLookups {
 
   raiseWorkVersion(name: string): void {
     this.workVersions.set(name, this.workVersionOf(name) + VERSION_STEP);
+  }
+
+  queueFootprintOrder(
+    instance: { id: string; name: string; placement: InstancePlacement },
+    order: FootprintOrder,
+  ): void {
+    let orders = this.footprintOrders.get(instance.id);
+    if (!orders) {
+      orders = new Map();
+      this.footprintOrders.set(instance.id, orders);
+    }
+    const known = orders.has(order.cleanup_id);
+    orders.set(order.cleanup_id, order);
+    if (!known && instance.placement === InstancePlacement.Worker)
+      this.raiseWorkVersion(instance.name);
+  }
+
+  footprintOrdersOf(instanceId: string): FootprintOrder[] {
+    return [...(this.footprintOrders.get(instanceId)?.values() ?? [])];
+  }
+
+  dropFootprintOrders(instanceId: string, cleanupIds: readonly string[]): void {
+    const orders = this.footprintOrders.get(instanceId);
+    if (!orders) return;
+    for (const cleanupId of cleanupIds) orders.delete(cleanupId);
+    if (!orders.size) this.footprintOrders.delete(instanceId);
   }
 
   liveInstance(instanceId: string): LiveInstance | null {
@@ -533,6 +565,8 @@ export class WorkerInstances implements WorkerInstanceLookups {
     endInstance(tx, live.id, now);
     const ended = endOfInstances(tx, revisions, now);
     this.dependencies.archiveHeld(tx, name, now);
+    this.dependencies.instanceArchived?.(tx, name);
+    this.footprintOrders.delete(live.id);
     const record = readInstanceById(tx, live.id);
     assert.ok(record);
     return { record, ended, executionEnds };
@@ -735,6 +769,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
     work_version: number;
     login_sessions: LoginSessionEntry[];
     session_reads: SessionReadEntry[];
+    footprint_orders: FootprintOrder[];
   } {
     const current = this.connections.get(instanceId);
     if (current?.connection_id !== connectionId) throw superseded(current);
@@ -745,6 +780,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
       session_reads: [
         ...(this.sessionReads.get(instanceId)?.values() ?? []),
       ].map((pending) => ({ read_id: pending.read_id, ...pending.read })),
+      footprint_orders: this.footprintOrdersOf(instanceId),
     };
   }
 

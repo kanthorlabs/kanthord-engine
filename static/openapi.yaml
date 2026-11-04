@@ -400,6 +400,8 @@ paths:
     $ref: ./openapi/worker/execution.failed_check.get.yaml#/pathItem
   /api/worker/execution/{execution_id}/setup:
     $ref: ./openapi/worker/execution.setup.get.yaml#/pathItem
+  /api/worker/footprint:
+    $ref: ./openapi/worker/footprint.report.yaml#/pathItem
   /api/worker/handover:
     $ref: ./openapi/worker/handover.yaml#/pathItem
   /api/worker/heartbeat:
@@ -416,10 +418,16 @@ paths:
     $ref: ./openapi/worker/instance.heartbeat.yaml#/pathItem
   /api/worker/instance/{instance_name}/revision:
     $ref: ./openapi/worker/instance.rotate.yaml#/pathItem
+  /api/worker/instance/{instance_name}/session/delete:
+    $ref: ./openapi/worker/instance.session.delete.yaml#/pathItem
   /api/worker/instance/token:
     $ref: ./openapi/worker/instance.token.yaml#/pathItem
+  /api/worker/instance/{instance_name}/tool-output/delete:
+    $ref: ./openapi/worker/instance.tool_output.delete.yaml#/pathItem
   /api/worker/instance/work:
     $ref: ./openapi/worker/instance.work.yaml#/pathItem
+  /api/worker/instance/{instance_name}/workspace/delete:
+    $ref: ./openapi/worker/instance.workspace.delete.yaml#/pathItem
   /api/worker/placement:
     $ref: ./openapi/worker/placement.list.yaml#/pathItem
   /api/worker/register:

@@ -1,4 +1,4 @@
-import { isAbsolute } from "node:path";
+import { dirname, isAbsolute } from "node:path";
 import { parentPort, workerData } from "node:worker_threads";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { directories } from "../../kernel/xdg.ts";
@@ -37,6 +37,10 @@ async function main(): Promise<void> {
       directories: { data: state, log: state },
       env: process.env,
       log: data.log,
+      footprint: {
+        residue_root: dirname(process.env.XDG_STATE_HOME!),
+        worker_placement: false,
+      },
     });
     bindings.bind(unit);
     parentPort?.on("message", (message: unknown) => {

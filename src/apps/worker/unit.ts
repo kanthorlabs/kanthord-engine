@@ -1,6 +1,7 @@
 import { addAbortListener } from "node:events";
 import { registerBunOAuthFlows as registerOAuthFlows } from "@earendil-works/pi-ai/bun-oauth";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   background,
   CancellationContext,
@@ -16,6 +17,15 @@ import {
   lifecycle,
 } from "../../kernel/service.ts";
 import { isString } from "../../kernel/values.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
+import { OperationResultType } from "../../kernel/operation.ts";
+import { FOOTPRINT_MEASURE_INTERVAL_MS } from "../../footprint/contract.ts";
+import {
+  type FootprintMeasurement,
+  type FootprintOrder,
+  type FootprintResult,
+  WorkerErrorCode,
+} from "../../worker/contract.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import { PI_DIRECTORY_NAME, usePiDirectory } from "../../agent/pi.ts";
@@ -33,6 +43,7 @@ import {
   installPiTools,
   type ModelRuntimeFactory,
   type RepositoryTransport,
+  UnitFootprint,
   WorkspaceRoot,
 } from "../../worker/unit/index.ts";
 import { hostExecution } from "./execution.ts";
@@ -48,6 +59,8 @@ const GATEWAY_CODE = "gateway.";
 const GATEWAY_CLIENT_CODE = "gateway.client.";
 const ANSWER_INVALID = "gateway.client.answer_invalid";
 const RESUME_PULL_WAIT_MS = 5000;
+const FOOTPRINT_REPORT_FAILED = "Worker footprint report failed";
+const FOOTPRINT_MEASURE_FAILED = "Worker footprint measure failed";
 
 export interface UnitBinding {
   transport: WorkerTransport;
@@ -57,6 +70,11 @@ export interface UnitBinding {
 export interface UnitDirectories {
   data: string;
   log: string;
+}
+
+export interface UnitFootprintScope {
+  residue_root: string;
+  worker_placement: boolean;
 }
 
 export interface WorkerUnitOptions {
@@ -70,6 +88,7 @@ export interface WorkerUnitOptions {
   resume_pull_wait_ms?: number;
   refused?: (binding: UnitBinding) => void;
   instance_key?: InstanceCopyKey;
+  footprint?: UnitFootprintScope;
 }
 
 interface Entry {
@@ -85,6 +104,7 @@ interface Entry {
 }
 
 interface Execution {
+  claim: ExecutionRecord;
   entry: Entry;
   context: CancellationContext;
   task: Promise<Diagnostic | null | typeof SETUP_UNAVAILABLE>;
@@ -112,6 +132,12 @@ export class WorkerUnit {
   private pullStarted = false;
   private failure?: Diagnostic;
   private changed = Promise.withResolvers<void>();
+  private footprint?: UnitFootprint;
+  private footprintTimer?: NodeJS.Timeout;
+  private footprintTask: Promise<void> = Promise.resolve();
+  private footprintResults: FootprintResult[] = [];
+  private readonly footprintReported = new Set<string>();
+  private executionStartedAt: number | null = null;
 
   constructor(options: WorkerUnitOptions) {
     registerOAuthFlows();
@@ -148,8 +174,124 @@ export class WorkerUnit {
       if (this.shutdown.signal.aborted) return;
       this.started = true;
       this.keepalive = setInterval(() => {}, KEEPALIVE_INTERVAL_MS);
+      this.startFootprint();
     });
     return this.startTask;
+  }
+
+  private startFootprint(): void {
+    const scope = this.options.footprint;
+    if (!scope || this.footprint) return;
+    this.footprint = new UnitFootprint({
+      data: this.options.directories.data,
+      logDirectory: this.options.directories.log,
+      temporary: this.options.env.TMPDIR ?? tmpdir(),
+      residueRoot: scope.residue_root,
+      workerPlacement: scope.worker_placement,
+      workspaces: this.workspaces!,
+      runningSince: () => this.executionStartedAt,
+      liveExecutions: () =>
+        this.executionLive && this.execution
+          ? [this.execution.claim.execution_id]
+          : [],
+    });
+    this.measureFootprint();
+    this.footprintTimer = setInterval(
+      () => this.measureFootprint(),
+      FOOTPRINT_MEASURE_INTERVAL_MS,
+    );
+    this.footprintTimer.unref();
+  }
+
+  private serializeFootprint(task: () => Promise<void>): Promise<void> {
+    this.footprintTask = this.footprintTask.then(task).catch((error) => {
+      if (!this.shutdown.signal.aborted)
+        this.logRecord(
+          {
+            msg: FOOTPRINT_REPORT_FAILED,
+            code: error instanceof Diagnostic ? error.code : null,
+          },
+          "warn",
+        );
+    });
+    return this.footprintTask;
+  }
+
+  private measureFootprint(): void {
+    void this.serializeFootprint(async () => {
+      let measurement: FootprintMeasurement | null = null;
+      try {
+        measurement = await this.footprint!.measure(this.shutdown.signal);
+      } catch (error) {
+        if (this.shutdown.signal.aborted) return;
+        this.logRecord(
+          {
+            msg: FOOTPRINT_MEASURE_FAILED,
+            code: (error as NodeJS.ErrnoException).code ?? null,
+          },
+          "warn",
+        );
+      }
+      await this.reportFootprint(measurement);
+    });
+  }
+
+  footprintOrders(orders: readonly FootprintOrder[]): Promise<void> {
+    if (!this.footprint || !orders.length) return Promise.resolve();
+    return this.serializeFootprint(() => this.runFootprintOrders(orders));
+  }
+
+  private async reportFootprint(
+    measurement: FootprintMeasurement | null,
+  ): Promise<void> {
+    if (this.shutdown.signal.aborted) return;
+    const transport = this.entries.find((entry) => entry.registration)?.binding
+      .transport;
+    if (!transport) return;
+    if (measurement === null && !this.footprintResults.length) return;
+    const results = [...this.footprintResults];
+    const answer = await transport.worker["footprint.report"](
+      { params: {}, query: {}, body: { measurement, results } },
+      { context: this.shutdown, idempotencyKey: createIdempotencyKey() },
+    );
+    if (answer.type === OperationResultType.Indeterminate) return;
+    if (
+      answer.type === OperationResultType.Failure &&
+      answer.error.error.code !== WorkerErrorCode.FootprintOrderUnknown
+    ) {
+      this.logRecord(
+        { msg: FOOTPRINT_REPORT_FAILED, code: answer.error.error.code },
+        "warn",
+      );
+      return;
+    }
+    for (const result of results) this.footprintReported.add(result.cleanup_id);
+    this.footprintResults = this.footprintResults.filter(
+      (result) => !results.includes(result),
+    );
+    if (answer.type === OperationResultType.Completed)
+      await this.runFootprintOrders(answer.data.orders);
+  }
+
+  private async runFootprintOrders(
+    orders: readonly FootprintOrder[],
+  ): Promise<void> {
+    let ran = false;
+    for (const order of orders) {
+      if (this.shutdown.signal.aborted) return;
+      if (
+        this.footprintReported.has(order.cleanup_id) ||
+        this.footprintResults.some(
+          (result) => result.cleanup_id === order.cleanup_id,
+        )
+      )
+        continue;
+      const result = await this.footprint!.run(order, this.shutdown.signal);
+      if (!result) continue;
+      this.footprintResults.push(result);
+      ran = true;
+    }
+    if (ran) await this.reportFootprint(null);
   }
 
   quiesce(): Promise<Error | null> {
@@ -179,6 +321,8 @@ export class WorkerUnit {
             "worker: stop during a live execution.",
           );
         }
+        clearInterval(this.footprintTimer);
+        await this.footprintTask;
         disarm = this.options.watchdog?.();
         for (const entry of this.entries) {
           const failure = await this.deregisterEntry(entry);
@@ -470,17 +614,20 @@ export class WorkerUnit {
 
   private beginExecution(entry: Entry, claim: ExecutionRecord): void {
     this.executionLive = true;
+    this.executionStartedAt = Date.now();
     this.round?.cancel();
     const context = new CancellationContext(background, claim.expired_at);
     if (this.shutdown.signal.aborted) context.cancel();
     const task = this.execute(entry, claim, context)
       .then((result) => {
-        if (result === null || result === SETUP_UNAVAILABLE)
+        if (result === null || result === SETUP_UNAVAILABLE) {
           this.executionLive = false;
+          this.executionStartedAt = null;
+        }
         return result;
       })
       .finally(() => context.cancel());
-    this.execution = { entry, context, task };
+    this.execution = { claim, entry, context, task };
   }
 
   private async execute(

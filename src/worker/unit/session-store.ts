@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { constants, type Stats } from "node:fs";
-import { type FileHandle, lstat, open, readdir } from "node:fs/promises";
+import { type FileHandle, lstat, open, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { PI_DIRECTORY_NAME } from "../../agent/pi.ts";
 import { ensureDirectory, FILE_NOT_FOUND } from "../../kernel/files.ts";
@@ -12,9 +12,12 @@ import {
   spanIdSchema,
 } from "../../tracking/contract.ts";
 import {
+  type FootprintItem,
   type SessionRead,
   SessionReadOutcome,
   type SessionReadResult,
+  SessionRemoval,
+  type SessionRemovalResult,
 } from "../contract.ts";
 
 const SESSIONS_DIRECTORY = "sessions";
@@ -28,6 +31,8 @@ const START = 0;
 const NEEDLE_OVERLAP = 1;
 const LINE_FEED_BYTES = 1;
 const NOT_FOUND_INDEX = -1;
+const SINGLE_LINK = 1;
+const NO_BYTES = 0;
 const SESSION_FILE_OPEN_FLAGS =
   constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
@@ -242,4 +247,132 @@ export async function readSessionFileEntry(
       return { outcome: SessionReadOutcome.Unreadable };
     throw error;
   }
+}
+
+interface TrustedTotal {
+  bytes: number;
+  newest_at: number;
+}
+
+async function trustedTotal(
+  directory: string,
+  kept: Stats,
+  seen: Set<string>,
+  signal: AbortSignal,
+): Promise<TrustedTotal | null> {
+  return walkTrusted(directory, kept, seen, signal).catch((error: unknown) => {
+    if (signal.aborted) throw error;
+    return null;
+  });
+}
+
+async function walkTrusted(
+  directory: string,
+  kept: Stats,
+  seen: Set<string>,
+  signal: AbortSignal,
+): Promise<TrustedTotal | null> {
+  let bytes = 0;
+  let newest = kept.mtimeMs;
+  const pending = [directory];
+  while (pending.length) {
+    signal.throwIfAborted();
+    const path = pending.pop()!;
+    for (const name of await readdir(path)) {
+      const stats = await lstat(join(path, name));
+      if (stats.isSymbolicLink()) return null;
+      if (stats.isDirectory()) {
+        pending.push(join(path, name));
+        continue;
+      }
+      if (!stats.isFile()) continue;
+      newest = Math.max(newest, stats.mtimeMs);
+      if (stats.nlink > SINGLE_LINK) {
+        const identity = `${stats.dev}:${stats.ino}`;
+        if (seen.has(identity)) continue;
+        seen.add(identity);
+      }
+      bytes += stats.size;
+    }
+  }
+  const after = await lstat(directory).catch(() => null);
+  if (!after || after.dev !== kept.dev || after.ino !== kept.ino) return null;
+  return { bytes, newest_at: Math.floor(newest) };
+}
+
+interface TrustedExecution {
+  directory: string;
+  kept: Stats;
+}
+
+function isTrusted(
+  found: TrustedExecution | SessionRemoval,
+): found is TrustedExecution {
+  return isObject(found);
+}
+
+async function trustedExecution(
+  sessionRoot: string,
+  executionId: string,
+): Promise<TrustedExecution | SessionRemoval> {
+  const executions = join(sessionRoot, EXECUTION_DIRECTORY);
+  const directory = join(
+    executions,
+    identitySchema("execution").parse(executionId),
+  );
+  try {
+    if (!(await directoryStats(executions))) return SessionRemoval.Absent;
+    const kept = await directoryStats(directory);
+    return kept ? { directory, kept } : SessionRemoval.Absent;
+  } catch (error) {
+    if (error instanceof Unreadable) return SessionRemoval.Unreadable;
+    throw error;
+  }
+}
+
+export async function executionSessionItems(
+  sessionRoot: string,
+  signal: AbortSignal,
+): Promise<FootprintItem[]> {
+  const executions = join(sessionRoot, EXECUTION_DIRECTORY);
+  const root = await directoryStats(executions).catch((error: unknown) => {
+    if (error instanceof Unreadable)
+      throw new Error("The execution session root is not a directory.");
+    throw error;
+  });
+  if (!root) return [];
+  const seen = new Set<string>();
+  const items: FootprintItem[] = [];
+  for (const name of await readdir(executions)) {
+    signal.throwIfAborted();
+    if (!identitySchema("execution").safeParse(name).success) continue;
+    const found = await trustedExecution(sessionRoot, name);
+    if (!isTrusted(found)) continue;
+    const total = await trustedTotal(found.directory, found.kept, seen, signal);
+    if (total)
+      items.push({
+        key: name,
+        bytes: total.bytes,
+        modified_at: total.newest_at,
+      });
+  }
+  return items;
+}
+
+export async function removeExecutionSession(
+  sessionRoot: string,
+  executionId: string,
+  signal: AbortSignal,
+): Promise<SessionRemovalResult> {
+  const found = await trustedExecution(sessionRoot, executionId);
+  if (!isTrusted(found)) return { removal: found, bytes: NO_BYTES };
+  const total = await trustedTotal(
+    found.directory,
+    found.kept,
+    new Set(),
+    signal,
+  );
+  if (!total) return { removal: SessionRemoval.Unreadable, bytes: NO_BYTES };
+  await rm(found.directory, { recursive: true, force: true });
+  return { removal: SessionRemoval.Removed, bytes: total.bytes };
 }

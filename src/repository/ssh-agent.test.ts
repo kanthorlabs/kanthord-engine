@@ -27,6 +27,7 @@ import {
   DEADLINE_RADIX,
   SOCKET_PATH_BYTES_MAX,
   SSH_AGENT_DIRECTORY_PREFIX,
+  SSH_AGENT_ROOT,
   SSH_AGENT_SOCKET,
   SshAgentErrorCode,
   SshAgentStep,
@@ -64,6 +65,10 @@ const LINE_END = "\n";
 const SSH_VARIANT = "ssh";
 const DIRECTORY_FILES = ["a", "id.pub", "known_hosts"];
 const PORT = 2222;
+const INSTANCE_NAME_LENGTH_MAX = 63;
+const MKDTEMP_SUFFIX = "XXXXXX";
+const WINDOWS: NodeJS.Platform = "win32";
+const POSIX_TEMPORARY_ROOT = "/tmp";
 const KNOWN_HOSTS = `[127.0.0.1]:${PORT} ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA\n`;
 const PROC = "/proc";
 const LINUX = "linux";
@@ -189,38 +194,65 @@ function deadlineOf(directory: string): number {
   return Number.parseInt(encoded, DEADLINE_RADIX);
 }
 
+test("the agent root is /tmp on POSIX", () => {
+  if (process.platform === WINDOWS) return;
+  assert.equal(SSH_AGENT_ROOT, POSIX_TEMPORARY_ROOT);
+});
+
+test("an agent socket below the default root stays within the socket path limit for a 63-character instance name", () => {
+  const name = "a".repeat(INSTANCE_NAME_LENGTH_MAX);
+  const slotTemporary = join(scratch, "workers", name, "tmp");
+  const deadlineAt = Number.MAX_SAFE_INTEGER.toString(DEADLINE_RADIX);
+  const socket = join(
+    SSH_AGENT_ROOT,
+    `${SSH_AGENT_DIRECTORY_PREFIX}${deadlineAt}-${MKDTEMP_SUFFIX}`,
+    SSH_AGENT_SOCKET,
+  );
+  assert.ok(Buffer.byteLength(slotTemporary) > SOCKET_PATH_BYTES_MAX / 2);
+  assert.ok(Buffer.byteLength(socket) <= SOCKET_PATH_BYTES_MAX);
+});
+
 test("withSshAgent prepares a private directory and an isolated SSH command", async () => {
   const key = access("layout");
   const fingerprint = key.public_key.split(" ")[1];
   assert.ok(fingerprint);
-  await withSshAgent(key, background, DEADLINE_MS, async (env) => {
-    const socket = socketOf(env);
-    const directory = directoryOf(socket);
-    assert.equal((await stat(directory)).mode & PERMISSION_BITS, PRIVATE_MODE);
-    assert.deepEqual((await readdir(directory)).sort(), DIRECTORY_FILES);
-    assert.equal(
-      await readFile(join(directory, "id.pub"), "utf8"),
-      key.public_key,
-    );
-    assert.equal(
-      await readFile(join(directory, "known_hosts"), "utf8"),
-      KNOWN_HOSTS,
-    );
-    const { stdout } = await execFileAsync("ssh-add", ["-L"], {
-      env: { PATH: process.env.PATH, SSH_AUTH_SOCK: socket },
-    });
-    assert.equal(stdout.trim(), key.public_key);
-    for (let sample = 0; sample < SAMPLES; sample += 1) {
-      await assertNoKeyOnDisk(directory);
-      await assertNoKeyInArguments(key.private_key);
-      await delay(SAMPLE_INTERVAL_MS);
-    }
-    assert.equal(env.GIT_SSH_VARIANT, SSH_VARIANT);
-    assert.equal(
-      env.GIT_SSH_COMMAND,
-      `ssh -F none -o Port=${PORT} -o IdentitiesOnly=yes -o IdentityFile='${directory}/id.pub' -o IdentityAgent='${directory}/a' -o UserKnownHostsFile='${directory}/known_hosts' -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes -o UpdateHostKeys=no -o BatchMode=yes -o ForwardAgent=no -o ControlMaster=no -o ControlPath=none -o PreferredAuthentications=publickey`,
-    );
-  });
+  await withSshAgent(
+    key,
+    background,
+    DEADLINE_MS,
+    async (env) => {
+      const socket = socketOf(env);
+      const directory = directoryOf(socket);
+      assert.equal(
+        (await stat(directory)).mode & PERMISSION_BITS,
+        PRIVATE_MODE,
+      );
+      assert.deepEqual((await readdir(directory)).sort(), DIRECTORY_FILES);
+      assert.equal(
+        await readFile(join(directory, "id.pub"), "utf8"),
+        key.public_key,
+      );
+      assert.equal(
+        await readFile(join(directory, "known_hosts"), "utf8"),
+        KNOWN_HOSTS,
+      );
+      const { stdout } = await execFileAsync("ssh-add", ["-L"], {
+        env: { PATH: process.env.PATH, SSH_AUTH_SOCK: socket },
+      });
+      assert.equal(stdout.trim(), key.public_key);
+      for (let sample = 0; sample < SAMPLES; sample += 1) {
+        await assertNoKeyOnDisk(directory);
+        await assertNoKeyInArguments(key.private_key);
+        await delay(SAMPLE_INTERVAL_MS);
+      }
+      assert.equal(env.GIT_SSH_VARIANT, SSH_VARIANT);
+      assert.equal(
+        env.GIT_SSH_COMMAND,
+        `ssh -F none -o Port=${PORT} -o IdentitiesOnly=yes -o IdentityFile='${directory}/id.pub' -o IdentityAgent='${directory}/a' -o UserKnownHostsFile='${directory}/known_hosts' -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes -o UpdateHostKeys=no -o BatchMode=yes -o ForwardAgent=no -o ControlMaster=no -o ControlPath=none -o PreferredAuthentications=publickey`,
+      );
+    },
+    scratch,
+  );
 });
 
 test("withSshAgent ends the agent after a success, a failure and a cancel", async () => {
@@ -232,22 +264,35 @@ test("withSshAgent ends the agent after a success, a failure and a cancel", asyn
     async (env) => {
       sockets.push(socketOf(env));
     },
+    scratch,
   );
   await assert.rejects(
-    withSshAgent(access("failure"), background, DEADLINE_MS, async (env) => {
-      sockets.push(socketOf(env));
-      throw new Error("work failed");
-    }),
+    withSshAgent(
+      access("failure"),
+      background,
+      DEADLINE_MS,
+      async (env) => {
+        sockets.push(socketOf(env));
+        throw new Error("work failed");
+      },
+      scratch,
+    ),
     /work failed/,
   );
   const context = new CancellationContext();
   await assert.rejects(
-    withSshAgent(access("cancel"), context, DEADLINE_MS, async (env) => {
-      sockets.push(socketOf(env));
-      setImmediate(() => context.cancel());
-      await cancelled(context.signal);
-      throw context.signal.reason;
-    }),
+    withSshAgent(
+      access("cancel"),
+      context,
+      DEADLINE_MS,
+      async (env) => {
+        sockets.push(socketOf(env));
+        setImmediate(() => context.cancel());
+        await cancelled(context.signal);
+        throw context.signal.reason;
+      },
+      scratch,
+    ),
   );
   assert.equal(sockets.length, LIFECYCLE_RUNS);
   for (const socket of sockets) {
@@ -265,12 +310,18 @@ test("parallel withSshAgent calls each load their own key", async () => {
   );
   const loaded = await Promise.all(
     keys.map((key) =>
-      withSshAgent(key, background, DEADLINE_MS, async (env) => {
-        const { stdout } = await execFileAsync("ssh-add", ["-L"], {
-          env: { PATH: process.env.PATH, SSH_AUTH_SOCK: socketOf(env) },
-        });
-        return stdout.trim();
-      }),
+      withSshAgent(
+        key,
+        background,
+        DEADLINE_MS,
+        async (env) => {
+          const { stdout } = await execFileAsync("ssh-add", ["-L"], {
+            env: { PATH: process.env.PATH, SSH_AUTH_SOCK: socketOf(env) },
+          });
+          return stdout.trim();
+        },
+        scratch,
+      ),
     ),
   );
   assert.deepEqual(
@@ -317,6 +368,7 @@ test("withSshAgent waits for an agent socket that appears after 5 s", async () =
         });
         return listed.trim();
       },
+      scratch,
     );
     assert.equal(loaded, key.public_key);
   });
@@ -339,6 +391,7 @@ test("withSshAgent loads the key only after the agent socket accepts a connectio
           });
           return listed.trim();
         },
+        scratch,
       );
       assert.equal(loaded, key.public_key);
     },
@@ -350,9 +403,15 @@ test("a cancel ends the wait for a slow agent socket and leaves no agent directo
     const context = new CancellationContext();
     const cancelled = cancelOnSlowAgent(context, t.signal);
     await assert.rejects(
-      withSshAgent(access("cancel-wait"), context, DEADLINE_MS, async () => {
-        assert.fail("The work must not run.");
-      }),
+      withSshAgent(
+        access("cancel-wait"),
+        context,
+        DEADLINE_MS,
+        async () => {
+          assert.fail("The work must not run.");
+        },
+        scratch,
+      ),
       { code: CANCELLED_CODE },
     );
     const cancelledAt = await cancelled;
@@ -376,6 +435,7 @@ test("a deadline that ends during the wait for a slow agent socket fails the wai
         background,
         WAIT_DEADLINE_MS,
         async () => assert.fail("The work must not run."),
+        scratch,
       ),
       { code: DEADLINE_CODE },
     );
@@ -396,9 +456,15 @@ test("an agent that exits before its socket appears fails the wait at once", asy
     `#!/bin/sh\necho 'bind: No such file or directory' >&2\ntouch '${exited}'\nexit 1\n`,
     async () => {
       await assert.rejects(
-        withSshAgent(access("failed"), background, DEADLINE_MS, async () => {
-          assert.fail("The work must not run.");
-        }),
+        withSshAgent(
+          access("failed"),
+          background,
+          DEADLINE_MS,
+          async () => {
+            assert.fail("The work must not run.");
+          },
+          scratch,
+        ),
         (error: unknown) => {
           assert.ok(error instanceof Diagnostic);
           assert.equal(error.code, SshAgentErrorCode.Failed);
@@ -415,23 +481,24 @@ test("an agent that exits before its socket appears fails the wait at once", asy
 test("withSshAgent refuses a socket path above the limit", async () => {
   const long = join(scratch, "l".repeat(SOCKET_PATH_BYTES_MAX));
   mkdirSync(long);
-  process.env.TMPDIR = long;
-  try {
-    await assert.rejects(
-      withSshAgent(access("long"), background, DEADLINE_MS, async () => {
+  await assert.rejects(
+    withSshAgent(
+      access("long"),
+      background,
+      DEADLINE_MS,
+      async () => {
         assert.fail("work must not run");
-      }),
-      (error: unknown) => {
-        assert.ok(error instanceof Diagnostic);
-        assert.equal(error.code, SshAgentErrorCode.Failed);
-        assert.deepEqual(error.fields, [["step", SshAgentStep.SocketPath]]);
-        return true;
       },
-    );
-    assert.deepEqual(await readdir(long), []);
-  } finally {
-    process.env.TMPDIR = scratch;
-  }
+      long,
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof Diagnostic);
+      assert.equal(error.code, SshAgentErrorCode.Failed);
+      assert.deepEqual(error.fields, [["step", SshAgentStep.SocketPath]]);
+      return true;
+    },
+  );
+  assert.deepEqual(await readdir(long), []);
 });
 
 for (const [label, name] of [
@@ -441,23 +508,24 @@ for (const [label, name] of [
   test(`withSshAgent refuses a directory path with ${label}`, async () => {
     const unsafe = join(scratch, name);
     mkdirSync(unsafe);
-    process.env.TMPDIR = unsafe;
-    try {
-      await assert.rejects(
-        withSshAgent(access("unsafe"), background, DEADLINE_MS, async () => {
+    await assert.rejects(
+      withSshAgent(
+        access("unsafe"),
+        background,
+        DEADLINE_MS,
+        async () => {
           assert.fail("work must not run");
-        }),
-        (error: unknown) => {
-          assert.ok(error instanceof Diagnostic);
-          assert.equal(error.code, SshAgentErrorCode.Failed);
-          assert.deepEqual(error.fields, [["step", SshAgentStep.SocketPath]]);
-          return true;
         },
-      );
-      assert.deepEqual(await readdir(unsafe), []);
-    } finally {
-      process.env.TMPDIR = scratch;
-    }
+        unsafe,
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof Diagnostic);
+        assert.equal(error.code, SshAgentErrorCode.Failed);
+        assert.deepEqual(error.fields, [["step", SshAgentStep.SocketPath]]);
+        return true;
+      },
+    );
+    assert.deepEqual(await readdir(unsafe), []);
   });
 
 test("withSshAgent reports an ssh-add refusal with no key material", async () => {
@@ -471,6 +539,7 @@ test("withSshAgent reports an ssh-add refusal with no key material", async () =>
       background,
       DEADLINE_MS,
       async () => assert.fail("work must not run"),
+      scratch,
     ),
     (error: unknown) => {
       assert.ok(error instanceof Diagnostic);
@@ -494,6 +563,7 @@ test("withSshAgent throws DeadlineExceeded for an elapsed deadline before it sta
         background,
         ELAPSED_DEADLINE_MS,
         async () => assert.fail("The work must not run."),
+        scratch,
       ),
       DeadlineExceeded,
     );
@@ -516,7 +586,7 @@ test("a killed process leaves no agent, and a later sweep removes its directory"
     await withSshAgent({ ...generateSshKey("crash"), known_hosts: "", port: 22 }, background, 60000, async (env) => {
       process.stdout.write(env.GIT_SSH_COMMAND + "\\n");
       await new Promise(() => {});
-    });
+    }, ${JSON.stringify(scratch)});
   `;
   const child = spawn(
     process.execPath,
@@ -541,7 +611,10 @@ test("a killed process leaves no agent, and a later sweep removes its directory"
   await agentEnds(socket, t.signal);
   const directory = directoryOf(socket);
   assert.equal(await exists(directory), true);
-  await sweepSshAgentDirectories(deadlineOf(directory) + SWEEP_GRACE_MS + 1);
+  await sweepSshAgentDirectories(
+    deadlineOf(directory) + SWEEP_GRACE_MS + 1,
+    scratch,
+  );
   assert.equal(await exists(directory), false);
 });
 
@@ -555,7 +628,7 @@ test("a terminated worker thread leaves no agent", async (t) => {
       await withSshAgent({ ...generateSshKey("thread"), known_hosts: "", port: 22 }, background, 60000, async (env) => {
         parentPort.postMessage(env.GIT_SSH_COMMAND);
         await new Promise(() => {});
-      });
+      }, ${JSON.stringify(scratch)});
     })();
   `;
   const worker = new Worker(script, { eval: true });
@@ -567,7 +640,10 @@ test("a terminated worker thread leaves no agent", async (t) => {
   await worker.terminate();
   await agentEnds(socket, t.signal);
   const directory = directoryOf(socket);
-  await sweepSshAgentDirectories(deadlineOf(directory) + SWEEP_GRACE_MS + 1);
+  await sweepSshAgentDirectories(
+    deadlineOf(directory) + SWEEP_GRACE_MS + 1,
+    scratch,
+  );
   assert.equal(await exists(directory), false);
 });
 
@@ -583,7 +659,7 @@ test("the sweep spares a directory whose deadline is not past", async () => {
   const expired = named(now - SWEEP_GRACE_MS - DEADLINE_MS, "expired");
   const foreign = join(scratch, "kd-other-1-expired");
   for (const path of [live, recent, expired, foreign]) await mkdir(path);
-  await sweepSshAgentDirectories(now);
+  await sweepSshAgentDirectories(now, scratch);
   assert.equal(await exists(live), true);
   assert.equal(await exists(recent), true);
   assert.equal(await exists(foreign), true);
@@ -608,7 +684,7 @@ test("the sweep keeps an expired directory whose agent socket accepts a connecti
     t,
     () => new Promise<void>((resolve) => server.close(() => resolve())),
   );
-  await sweepSshAgentDirectories(Date.now());
+  await sweepSshAgentDirectories(Date.now(), scratch);
   assert.equal(await exists(live), true);
   assert.equal(await exists(dead), false);
 });

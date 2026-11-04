@@ -840,6 +840,7 @@ test("the work read answers the work version and the login sessions, renews no l
     work_version: f.worker().instances.workVersionOf(INSTANCE),
     login_sessions: [LOGIN_ENTRY],
     session_reads: [],
+    footprint_orders: [],
   });
   assert.equal(liveness(), renewed);
   await f.invoke("instance.connect", {

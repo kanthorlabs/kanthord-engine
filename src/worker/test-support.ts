@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import type {
   AgentSetup,
   ExecutionSetup,
+  FootprintItem,
   HostTools,
   PlacementStatus,
   PoolEntry,
@@ -12,6 +13,7 @@ import type {
   RuntimeUsage,
   SessionRead,
   SessionReadResult,
+  SessionRemovalResult,
 } from "./contract.ts";
 import { getWorkerDeclaration, type WorkerDeclaration } from "./catalog.ts";
 
@@ -31,6 +33,7 @@ import {
   alwaysAvailable,
   ExecutionIntent,
   SessionReadOutcome,
+  SessionRemoval,
 } from "./contract.ts";
 
 export const TWO_AGENT_WORKER = "two-agent@1";
@@ -196,5 +199,34 @@ export class FakePoolHost implements PoolHost {
       ) ?? false;
     if (known) this.removedImages.push(reference);
     return known;
+  }
+  readonly sessions = new Map<string, FootprintItem[]>();
+  readonly unreadableSessions = new Set<string>();
+  readonly removedSessions: Array<{ instance: string; execution: string }> = [];
+  stderrLog: FootprintItem | null = null;
+  async sessionItems(instance: PoolInstance): Promise<FootprintItem[]> {
+    return this.sessions.get(instance.name) ?? [];
+  }
+  async removeSession(
+    instance: PoolInstance,
+    executionId: string,
+  ): Promise<SessionRemovalResult> {
+    if (this.unreadableSessions.has(executionId))
+      return { removal: SessionRemoval.Unreadable, bytes: 0 };
+    const items = this.sessions.get(instance.name) ?? [];
+    const item = items.find((entry) => entry.key === executionId);
+    if (!item) return { removal: SessionRemoval.Absent, bytes: 0 };
+    this.sessions.set(
+      instance.name,
+      items.filter((entry) => entry !== item),
+    );
+    this.removedSessions.push({
+      instance: instance.name,
+      execution: executionId,
+    });
+    return { removal: SessionRemoval.Removed, bytes: item.bytes };
+  }
+  async logItem(): Promise<FootprintItem | null> {
+    return this.stderrLog;
   }
 }

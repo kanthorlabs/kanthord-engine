@@ -114,6 +114,20 @@ export function readUnendedOfNode(
 ): ExecutionRow | null {
   return readBy(tx, "node_id", nodeId, true);
 }
+export function readEndTimes(
+  tx: Transaction,
+  executionIds: readonly string[],
+): Map<string, number | null> {
+  const rows = tx.database
+    .prepare(
+      "SELECT id, ended_at FROM scheduler_execution WHERE id IN (SELECT value FROM json_each(?))",
+    )
+    .all(JSON.stringify(executionIds)) as unknown as Array<{
+    id: string;
+    ended_at: number | null;
+  }>;
+  return new Map(rows.map((row) => [row.id, row.ended_at]));
+}
 export function readUnendedOfRuntime(
   tx: Transaction,
   runtimeIdentity: string,

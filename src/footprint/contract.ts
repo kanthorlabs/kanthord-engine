@@ -4,7 +4,14 @@ import {
   CLEANUP_BATCH_ROWS,
   CleanupRefusal,
   cleanupRefusedSchema,
+  FOOTPRINT_CLEANUP_KEYS_MAX,
+  FOOTPRINT_KEY_MAX_LENGTH,
+  FOOTPRINT_REPORT_ITEMS_MAX,
   FOOTPRINT_SERVICE,
+  InstanceCleanableKind,
+  InstanceFootprintKind,
+  TOOL_OUTPUT_NAME_PATTERN,
+  WORKSPACE_KEY_PATTERN,
 } from "../kernel/cleanup.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
@@ -20,11 +27,21 @@ import {
 } from "../kernel/operation.ts";
 import { DEFAULT_AGE_DAYS } from "../tracking/contract.ts";
 import {
+  type FootprintItem,
   instanceNameSchema,
   slotImageReferenceSchema,
 } from "../worker/contract.ts";
 
-export { CleanupRefusal, DEFAULT_AGE_DAYS };
+export {
+  CleanupRefusal,
+  DEFAULT_AGE_DAYS,
+  FOOTPRINT_CLEANUP_KEYS_MAX,
+  FOOTPRINT_KEY_MAX_LENGTH,
+  FOOTPRINT_REPORT_ITEMS_MAX,
+  InstanceCleanableKind,
+  InstanceFootprintKind,
+  TOOL_OUTPUT_NAME_PATTERN,
+};
 
 export const FOOTPRINT_SERVICE_NAME = FOOTPRINT_SERVICE;
 export const FOOTPRINT_TIMEOUT_MS = 30000;
@@ -33,10 +50,7 @@ export const FOOTPRINT_STALE_INTERVALS = 3;
 export const FOOTPRINT_ALERT_CONFIRMATIONS = 2;
 export const FOOTPRINT_ALERT_CLEAR_RATIO = 0.9;
 export const FOOTPRINT_CLEANUP_BATCH_ROWS = CLEANUP_BATCH_ROWS;
-export const FOOTPRINT_CLEANUP_KEYS_MAX = 1000;
-export const FOOTPRINT_REPORT_ITEMS_MAX = 10000;
 export const FOOTPRINT_SCAN_BUDGET_MS = 500;
-export const FOOTPRINT_KEY_MAX_LENGTH = 512;
 export const FOOTPRINT_LIST_LIMIT_DEFAULT = 100;
 export const FOOTPRINT_LIST_LIMIT_MAX = 1000;
 export const OLDER_THAN_DAYS_MAX = 3650;
@@ -72,24 +86,6 @@ export const CleanableKind = {
   ToolOutput: FootprintKind.ToolOutput,
 } as const;
 export type CleanableKind = (typeof CleanableKind)[keyof typeof CleanableKind];
-
-export const InstanceFootprintKind = {
-  Session: FootprintKind.Session,
-  Workspace: FootprintKind.Workspace,
-  ToolOutput: FootprintKind.ToolOutput,
-  Log: FootprintKind.Log,
-  SlotResidue: FootprintKind.SlotResidue,
-} as const;
-export type InstanceFootprintKind =
-  (typeof InstanceFootprintKind)[keyof typeof InstanceFootprintKind];
-
-export const InstanceCleanableKind = {
-  Session: FootprintKind.Session,
-  Workspace: FootprintKind.Workspace,
-  ToolOutput: FootprintKind.ToolOutput,
-} as const;
-export type InstanceCleanableKind =
-  (typeof InstanceCleanableKind)[keyof typeof InstanceCleanableKind];
 
 export const CleanupRule = {
   OlderThan: "older_than",
@@ -139,6 +135,10 @@ export const FootprintErrorCode = {
   CursorInvalid: "system.pagination.cursor_invalid",
   ValidationFailed: "gateway.request.validation_failed",
 } as const;
+
+export const INSTANCE_KINDS: readonly FootprintKind[] = Object.values(
+  InstanceFootprintKind,
+);
 
 export const SERVER_KINDS: readonly FootprintKind[] = [
   FootprintKind.OperationalDatabase,
@@ -278,11 +278,7 @@ const environmentKeySchema = z
   .regex(/^(?:[a-z0-9][a-z0-9/-]*@[0-9a-f]{64}|sha256:[0-9a-f]{64})$/);
 const cacheVolumeKeySchema = z.string().regex(/^kanthord_cache_[0-9a-z]{24}$/);
 const executionKeySchema = identitySchema("execution");
-const workspaceKeySchema = z
-  .string()
-  .regex(/^(?:node|execution)_[0-7][0-9A-HJKMNP-TV-Z]{25}$/);
-export const TOOL_OUTPUT_NAME_PATTERN =
-  /^pi-[a-z0-9-]+-[0-9a-f]{16}(\.[A-Za-z0-9]+)?$/;
+const workspaceKeySchema = z.string().regex(WORKSPACE_KEY_PATTERN);
 const toolOutputKeySchema = z.string().regex(TOOL_OUTPUT_NAME_PATTERN);
 
 const KEY_SCHEMAS: Readonly<Record<CleanableKind, z.ZodType<string>>> = {
@@ -369,6 +365,7 @@ export interface FootprintMeasure {
   readonly oldest_at: number | null;
   readonly newest_at: number | null;
   readonly recent_count: number | null;
+  readonly items: readonly FootprintItem[] | null;
 }
 
 export interface CandidateQuery {
@@ -417,6 +414,7 @@ export function emptyMeasure(
     oldest_at: null,
     newest_at: null,
     recent_count: null,
+    items: null,
     ...fields,
   };
 }
