@@ -66,6 +66,7 @@ export const piCredentialSchema = z
     );
   }, "The normalized credential must contain well-formed Unicode and fit the serialized byte budget.");
 export { SERVER_HOLDER } from "../kernel/holder.ts";
+export const CREDENTIAL_NAME_MAX_LENGTH = 63;
 export const CREDENTIAL_SEAL_INFO = "kanthord/credential/v1";
 export const SEALED_PLAINTEXT_MAX_BYTES = 32768;
 export const SEALED_CIPHERTEXT_MAX_BYTES = 32784;
@@ -557,6 +558,16 @@ export const s3AccessKeySecretSchema = z.strictObject({
   access_key_id: z.string().min(1).refine(isNonblank),
   secret_access_key: z.string().min(1).refine(isNonblank),
 });
+export const S3_ACCESS_KEY_TEXT_MAX_LENGTH = 1024;
+const s3AccessKeyTextSchema = z
+  .string()
+  .min(1)
+  .max(S3_ACCESS_KEY_TEXT_MAX_LENGTH)
+  .refine(isNonblank);
+export const s3AccessKeyWriteSchema = z.strictObject({
+  access_key_id: s3AccessKeyTextSchema,
+  secret_access_key: s3AccessKeyTextSchema,
+});
 const OPENSSH_ARMOR_LABEL = "OPENSSH PRIVATE KEY";
 const OPENSSH_ARMOR_BEGIN = `-----BEGIN ${OPENSSH_ARMOR_LABEL}-----`;
 const OPENSSH_ARMOR_END = `-----END ${OPENSSH_ARMOR_LABEL}-----`;
@@ -620,7 +631,7 @@ export const sshPublicKeyMetadataSchema = z.object({
 export const secretSchemas: Readonly<Record<SecretShape, z.ZodType>> = {
   [SecretShape.ApiKey]: apiKeySecretSchema,
   [SecretShape.OAuth]: oauthSecretSchema,
-  [SecretShape.S3AccessKey]: s3AccessKeySecretSchema,
+  [SecretShape.S3AccessKey]: s3AccessKeyWriteSchema,
   [SecretShape.SshKey]: sshKeySecretSchema,
 };
 
@@ -683,10 +694,19 @@ export const credentialRevisionParamsSchema = z.strictObject({
   credential_name: z.string().min(1),
   revision: z.coerce.number().int().positive(),
 });
+export const CREDENTIAL_METADATA_MAX_BYTES = 16384;
+function fitsMetadataBound(metadata: unknown): boolean {
+  return (
+    metadata === undefined ||
+    Buffer.byteLength(JSON.stringify(metadata), "utf8") <=
+      CREDENTIAL_METADATA_MAX_BYTES
+  );
+}
+export const credentialMetadataSchema = z.unknown().refine(fitsMetadataBound);
 export const credentialCreateSchema = z.strictObject({
   name: z.string(),
   platform: z.string(),
-  metadata: z.unknown(),
+  metadata: credentialMetadataSchema,
   secret: z.unknown(),
 });
 export const credentialCheckBodySchema = credentialCreateSchema.omit({
@@ -695,11 +715,11 @@ export const credentialCheckBodySchema = credentialCreateSchema.omit({
 export const credentialRotateBodySchema = z.strictObject({
   expected_revision: z.number().int().positive(),
   secret: z.unknown(),
-  metadata: z.unknown().optional(),
+  metadata: credentialMetadataSchema.optional(),
 });
 export const credentialUpdateMetadataBodySchema = z.strictObject({
   expected_revision: z.number().int().positive(),
-  metadata: z.unknown(),
+  metadata: credentialMetadataSchema,
 });
 export const credentialListQuerySchema = z.strictObject({
   platform: z.string().optional(),

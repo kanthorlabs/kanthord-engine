@@ -135,7 +135,10 @@ export const hostKeyListAnswerSchema = z.strictObject({
 });
 export type HostKeyListAnswer = z.infer<typeof hostKeyListAnswerSchema>;
 const hostKeyParamsSchema = z.strictObject({ host: z.string().min(1) });
-const hostKeyScanBodySchema = z.strictObject({ host: z.string().min(1) });
+export const HOST_NAME_MAX_LENGTH = 253;
+const hostKeyScanBodySchema = z.strictObject({
+  host: z.string().min(1).max(HOST_NAME_MAX_LENGTH),
+});
 const hostKeyPinBodySchema = z.strictObject({
   fingerprint: z.string().regex(HOST_KEY_FINGERPRINT_PATTERN),
 });

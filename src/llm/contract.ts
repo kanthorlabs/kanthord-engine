@@ -1,11 +1,13 @@
 import { z } from "zod";
 import {
+  CREDENTIAL_NAME_MAX_LENGTH,
   CREDENTIAL_TIMEOUT_MS,
   credentialAnswerSchema,
   credentialCheckAnswerSchema,
   credentialCheckBodySchema,
   credentialListAnswerSchema,
   credentialListQuerySchema,
+  credentialMetadataSchema,
   credentialParamsSchema,
   credentialPlatformListAnswerSchema,
   credentialRevisionParamsSchema,
@@ -61,7 +63,7 @@ const holderQuery = z.strictObject({ holder: holderSchema.optional() });
 export const llmCredentialCreateSchema = z.strictObject({
   name: z.string(),
   platform: z.string(),
-  metadata: z.unknown(),
+  metadata: credentialMetadataSchema,
   secret: z.unknown().optional(),
   holders: z.array(holderSchema).min(1).optional(),
   holder: holderSchema.optional(),
@@ -71,7 +73,7 @@ export const llmCredentialCreateSchema = z.strictObject({
 export const llmCredentialRotateSchema = z.strictObject({
   expected_revision: z.number().int().positive(),
   secret: z.unknown().optional(),
-  metadata: z.unknown().optional(),
+  metadata: credentialMetadataSchema.optional(),
   holder: holderSchema.optional(),
   sealed: z.unknown().optional(),
   sealed_to: z.string().optional(),
@@ -128,7 +130,7 @@ const loginAnswerSchema = z.strictObject({
   expires_at: z.number().int(),
 });
 export const providerCheckBodySchema = z.strictObject({
-  credential: z.string().min(1),
+  credential: z.string().min(1).max(CREDENTIAL_NAME_MAX_LENGTH),
 });
 export const Connection = {
   Ok: "ok",
@@ -179,9 +181,9 @@ export const copyHealthSchema = z.strictObject({
 });
 export type CopyHealth = z.infer<typeof copyHealthSchema>;
 export const modelCheckBodySchema = z.strictObject({
-  credential: z.string().min(1),
-  model_identifier: z.string().min(1),
-  reasoning_effort: z.string().min(1),
+  credential: z.string().min(1).max(CREDENTIAL_NAME_MAX_LENGTH),
+  model_identifier: z.string().min(1).max(COPY_REPORT_TEXT_MAX_LENGTH),
+  reasoning_effort: z.string().min(1).max(COPY_REPORT_TEXT_MAX_LENGTH),
 });
 export const ModelCheckResult = {
   Ok: "ok",
@@ -453,7 +455,9 @@ export const llmOperations = {
     input: z.strictObject({
       params: sessionParams,
       query: emptyQuery,
-      body: z.strictObject({ value: z.string().min(1) }),
+      body: z.strictObject({
+        value: z.string().min(1).max(LOGIN_REPORT_TEXT_MAX_LENGTH),
+      }),
     }),
     output: loginCodeAnswerSchema,
     description: "Supply a requested OAuth login code.",

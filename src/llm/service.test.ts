@@ -17,6 +17,7 @@ import {
   custodyMigrations,
 } from "../custody/index.ts";
 import {
+  CREDENTIAL_NAME_MAX_LENGTH,
   CREDENTIAL_SEAL_INFO,
   type CredentialAnswer,
   credentialSealAad,
@@ -2039,13 +2040,18 @@ test("provider check refuses invalid input, an unknown or foreign credential and
       credential: "groq",
       extra: true,
     },
+    { credential: "x".repeat(CREDENTIAL_NAME_MAX_LENGTH + 1) },
   ])
     await failsAsync(
       () => f.providerCheck(body),
       HttpStatus.BadRequest,
       PROVIDER_INVALID_INPUT_CODE,
     );
-  for (const credential of ["missing", "github"])
+  for (const credential of [
+    "missing",
+    "github",
+    "x".repeat(CREDENTIAL_NAME_MAX_LENGTH),
+  ])
     await failsAsync(
       () => f.providerCheck({ credential }),
       HttpStatus.NotFound,
