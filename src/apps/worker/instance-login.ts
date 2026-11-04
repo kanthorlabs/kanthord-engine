@@ -96,6 +96,11 @@ export class InstanceLogins {
     }
   }
 
+  resend(): void {
+    for (const running of this.running.values())
+      void this.reportPending(running);
+  }
+
   stop(): void {
     this.stopped = true;
     for (const running of this.running.values()) running.flow.abort();

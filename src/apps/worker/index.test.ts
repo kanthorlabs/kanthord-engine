@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
+import { createProvider, type Provider } from "@earendil-works/pi-ai";
 import { CancellationContext } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { HttpStatus } from "../../kernel/http.ts";
@@ -15,6 +16,8 @@ import {
 import { isObject } from "../../kernel/values.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { WorkPullKind } from "../../scheduler/contract.ts";
+import { piProviderId, Platform } from "../../llm/platforms.ts";
+import { LoginSessionMode } from "../../llm/sessions.ts";
 import { runWorker, Worker, type WorkerOptions } from "./index.ts";
 import {
   FAKE_INSTANCE_NAME,
@@ -49,6 +52,22 @@ const SUPERSEDE_TIMEOUT_MS = 60000;
 const POLL_MS = 10;
 const NO_WORK_DELAY_MS = 20;
 const TWO_BINDINGS = 2;
+const TWO_READS = 2;
+const LOGIN_INTERVAL_MS = 4000;
+const LOGIN_OBSERVATION_MS = 3000;
+const OBSERVED_BEATS = 3;
+const EXCHANGE_FAILED = "Worker instance exchange failed";
+const WORK_UNAVAILABLE = {
+  status: HttpStatus.ServiceUnavailable,
+  body: {
+    error: {
+      code: "gateway.service.unavailable",
+      message: "The service is unavailable.",
+      details: null,
+    },
+    request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+  },
+};
 const SINGLE = 1;
 const EXIT_SUCCESS = 0;
 const WORKER_STOP_WATCHDOG_MS = 10000;
@@ -557,6 +576,103 @@ test("a binding version change adds a new binding and drains a dropped binding",
   assert.equal(await worker.stop(), null);
   assert.equal(await running, null);
   assert.equal(f.server.state.deregistered.length, TWO_BINDINGS);
+});
+
+function heldLoginProvider(): Provider {
+  const unexpected = () => {
+    throw new Error("unexpected call");
+  };
+  return createProvider({
+    id: piProviderId(Platform.AnthropicSubscription),
+    models: [],
+    api: { stream: unexpected, streamSimple: unexpected },
+    auth: {
+      oauth: {
+        name: "Held OAuth",
+        login: () => new Promise(() => {}),
+        refresh: unexpected,
+        toAuth: unexpected,
+      },
+    },
+  });
+}
+
+test("the first heartbeat reads the work, a new work_version reads it once, and the same version reads none", async (t) => {
+  const f = await fixture(t, SINGLE);
+  const worker = new Worker(
+    f.options({ heartbeatIntervalMs: FAST_HEARTBEAT_MS }),
+  );
+  stopAfter(t, () => worker.stop());
+  const running = worker.run();
+  await f.ready();
+  const reads = () => f.server.requestsTo(FakePath.InstanceWork).length;
+  const beats = () => f.server.requestsTo(FakePath.InstanceHeartbeat).length;
+  await until(() => reads() === SINGLE, t.signal);
+  const after = beats();
+  await until(() => beats() >= after + OBSERVED_BEATS, t.signal);
+  assert.equal(reads(), SINGLE);
+  f.server.state.workVersion++;
+  await until(() => reads() === TWO_READS, t.signal);
+  const changed = beats();
+  await until(() => beats() >= changed + OBSERVED_BEATS, t.signal);
+  assert.equal(reads(), TWO_READS);
+  assert.equal(await worker.stop(), null);
+  assert.equal(await running, null);
+});
+
+test("a failed work read keeps the work version, so the next heartbeat reads the work again", async (t) => {
+  const f = await fixture(t, SINGLE);
+  let refused = false;
+  f.server.state.intercept = (request) => {
+    if (request.path !== FakePath.InstanceWork || refused) return undefined;
+    refused = true;
+    return WORK_UNAVAILABLE;
+  };
+  const worker = new Worker(
+    f.options({ heartbeatIntervalMs: FAST_HEARTBEAT_MS }),
+  );
+  stopAfter(t, () => worker.stop());
+  const running = worker.run();
+  await f.ready();
+  const reads = () => f.server.requestsTo(FakePath.InstanceWork).length;
+  await until(() => reads() === TWO_READS, t.signal);
+  assert.ok(f.records.some((record) => record.msg === EXCHANGE_FAILED));
+  const beats = () => f.server.requestsTo(FakePath.InstanceHeartbeat).length;
+  const after = beats();
+  await until(() => beats() >= after + OBSERVED_BEATS, t.signal);
+  assert.equal(reads(), TWO_READS);
+  assert.equal(await worker.stop(), null);
+  assert.equal(await running, null);
+});
+
+test("the heartbeat interval stays the same while a login runs", async (t) => {
+  const f = await fixture(t, SINGLE);
+  f.server.state.loginSessions = [
+    {
+      session_id: "login_session_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      name: "claude",
+      platform: Platform.AnthropicSubscription,
+      mode: LoginSessionMode.CopyCode,
+      code: null,
+    },
+  ];
+  const worker = new Worker(
+    f.options({
+      heartbeatIntervalMs: LOGIN_INTERVAL_MS,
+      oauthProviders: () => [heldLoginProvider()],
+    }),
+  );
+  stopAfter(t, () => worker.stop());
+  const running = worker.run();
+  await f.ready();
+  await until(
+    () => f.server.requestsTo(FakePath.InstanceWork).length === SINGLE,
+    t.signal,
+  );
+  await delay(LOGIN_OBSERVATION_MS, undefined, { signal: t.signal });
+  assert.equal(f.server.requestsTo(FakePath.InstanceHeartbeat).length, SINGLE);
+  assert.equal(await worker.stop(), null);
+  assert.equal(await running, null);
 });
 
 test("stop aborts each outstanding pull and deregisters each registration", async (t) => {

@@ -35,6 +35,7 @@ const DEVICE_URL = "https://auth.openai.com/codex/device";
 const DEVICE_CODE = "ABCD-EFGH";
 const COPY_CODE_VALUE = "authorization-code#state-value";
 const NO_REPORTS = 0;
+const ONE_REPORT = 1;
 const RETRY_MS = 1;
 const DEVICE_OPTION = "device_code";
 const OAUTH_SECRET = {
@@ -281,6 +282,23 @@ test("a lost pending report is sent again at the next heartbeat entry", async (t
   f.logins.sync([listed]);
   await f.until(() => f.reports.length > NO_REPORTS, t.signal);
   assert.equal(f.reports[0]!.address, AUTHORIZATION_URL);
+  f.logins.stop();
+});
+
+test("a lost pending report is sent again at the next resend", async (t) => {
+  const f = await fixture(copyCodeProvider(), () => true);
+  f.logins.sync([
+    entry(Platform.AnthropicSubscription, LoginSessionMode.CopyCode),
+  ]);
+  await f.until(() => f.keys.length > NO_REPORTS, t.signal);
+  assert.equal(f.reports.length, NO_REPORTS);
+  f.logins.resend();
+  await f.until(() => f.reports.length > NO_REPORTS, t.signal);
+  assert.equal(f.reports[0]!.address, AUTHORIZATION_URL);
+  await setImmediate();
+  f.logins.resend();
+  await setImmediate();
+  assert.equal(f.reports.length, ONE_REPORT);
   f.logins.stop();
 });
 

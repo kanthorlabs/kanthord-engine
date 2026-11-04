@@ -35,7 +35,6 @@ import { validateClientEndpoint } from "../../gateway/client.ts";
 import {
   BindingEntryState,
   INSTANCE_HEARTBEAT_INTERVAL_MS,
-  INSTANCE_LOGIN_HEARTBEAT_INTERVAL_MS,
   INSTANCE_RENEWAL_INTERVAL_MS,
   INSTANCE_SUPERSEDED_CODE,
   WorkerErrorCode,
@@ -136,6 +135,7 @@ export class Worker implements Service {
   private exchange?: InstanceExchange;
   private endpoint?: string;
   private connection?: Connection;
+  private workVersion?: number;
   private logins?: InstanceLogins;
   private copyChecks?: CopyChecks;
   private connectionName = "";
@@ -393,13 +393,9 @@ export class Worker implements Service {
   private armHeartbeat(): void {
     clearTimeout(this.heartbeatTimer);
     if (this.shutdown.signal.aborted) return;
-    const interval =
-      this.options.heartbeatIntervalMs ?? INSTANCE_HEARTBEAT_INTERVAL_MS;
     this.heartbeatTimer = setTimeout(
       () => void this.check().finally(() => this.armHeartbeat()),
-      this.logins?.pending()
-        ? Math.min(interval, INSTANCE_LOGIN_HEARTBEAT_INTERVAL_MS)
-        : interval,
+      this.options.heartbeatIntervalMs ?? INSTANCE_HEARTBEAT_INTERVAL_MS,
     );
   }
 
@@ -432,13 +428,23 @@ export class Worker implements Service {
       );
       if (answer.server_version !== packageVersion())
         return this.finish(versionMismatch(answer.server_version));
-      this.logins!.sync(answer.login_sessions);
       this.copyChecks!.observe(answer.credential_version);
       if (answer.binding_version !== this.connection.binding_version)
         await this.reconnect();
+      if (answer.work_version === this.workVersion) this.logins!.resend();
+      else await this.readWork();
     } catch (error) {
       await this.refused(error);
     }
+  }
+
+  private async readWork(): Promise<void> {
+    const work = await this.exchange!.work(
+      this.connection!.connection_id,
+      this.shutdown,
+    );
+    this.logins!.sync(work.login_sessions);
+    this.workVersion = work.work_version;
   }
 
   private async renew(): Promise<void> {
