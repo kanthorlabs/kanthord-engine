@@ -1,4 +1,13 @@
 import { ExecutionBudget } from "./budget.ts";
+import {
+  credentialSecrets,
+  mergedSecrets,
+  RestoreReason,
+} from "../../agent/hooks/sensitive-text-redaction.ts";
+import {
+  SensitiveRule,
+  SESSION_MARKER_PATTERN,
+} from "../../agent/sensitive-text.ts";
 import assert from "node:assert/strict";
 import {
   declareAffected,
@@ -28,11 +37,7 @@ import {
   stopAfter,
   temporary,
 } from "../../kernel/test-support.ts";
-import {
-  credentialRedaction,
-  openNativeAgent,
-  promptStop,
-} from "./native-agent.ts";
+import { openNativeAgent, promptStop } from "./native-agent.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { CodedError } from "../../kernel/errors.ts";
 import { ExecutionIntent } from "../contract.ts";
@@ -153,6 +158,7 @@ async function fixture(
       provider_id: "anthropic",
       store: credentials,
     },
+    knownSecrets: credentialSecrets(credentials, "anthropic"),
     budget: new ExecutionBudget({
       created_at: Date.now(),
       expired_at: Date.now() + 60000,
@@ -544,7 +550,90 @@ test("a session entry record never holds the credential secret", async (t) => {
   h.agent.closeTrace(SpanStatus.Ok);
   assert.ok(sessionEntries(h).length > NO_ENTRIES);
   assert.ok(!JSON.stringify(sessionEntries(h)).includes(SECRET));
-  assert.ok(JSON.stringify(sessionEntries(h)).includes("key [redacted]"));
+  assert.ok(
+    JSON.stringify(sessionEntries(h)).includes(
+      `key <redacted:${SensitiveRule.LlmCredential}:`,
+    ),
+  );
+});
+
+const FAKE_KEY = ["AKIA", "KANTHORDCANARY01"].join("");
+const KEY_FILE = "key.txt";
+const PROMPT_FINDINGS = 2;
+const REDACTION_ATTRIBUTES = [
+  "kanthord.session.redaction_count",
+  "kanthord.session.redaction_rules",
+  "kanthord.session.redaction_failed",
+  "kanthord.session.unkept",
+  "kanthord.session.restore_blocked",
+  "kanthord.session.compaction_residual",
+  "kanthord.session.thinking_kept",
+];
+
+function contextMarker(context: { messages: unknown[] }): string {
+  const [marker] = JSON.stringify(context.messages).match(
+    SESSION_MARKER_PATTERN,
+  ) ?? [""];
+  assert.ok(marker);
+  return marker;
+}
+
+test("a fake key of the work and the system prompt restores into write, blocks in bash and stays out of the session", async (t) => {
+  const work = renderWorkPrompt(SHIPPED_TEMPLATES, {
+    node_id: NODE,
+    revision: 1,
+    content: {
+      name: `work ${FAKE_KEY}`,
+      requirement: "write files",
+      criterion: "files exist",
+      verifications: [],
+    },
+  });
+  const h = await fixture(
+    t,
+    [
+      (context) =>
+        tool("write", { path: KEY_FILE, content: contextMarker(context) }),
+      (context) =>
+        tool("bash", { command: `printf %s '${contextMarker(context)}'` }),
+      fauxAssistantMessage("done"),
+    ],
+    {
+      agents: [
+        anthropicAgent({
+          prompt: { final: `${SETUP_PROMPT} ${FAKE_KEY}`, sources: [] },
+        }),
+      ],
+    },
+  );
+  await h.agent.prompt(work);
+  h.agent.closeTrace(SpanStatus.Ok);
+  assert.equal(readFileSync(join(h.workspace, KEY_FILE), "utf8"), FAKE_KEY);
+  const results = sessionMessages(h).filter(
+    (message) => (message as { role: string }).role === TOOL_RESULT,
+  ) as { isError: boolean; content: { text: string }[] }[];
+  assert.equal(results.at(-1)?.isError, true);
+  assert.ok(results.at(-1)?.content[0]?.text.includes(RestoreReason.Shell));
+  for (const file of sessionFiles(h))
+    assert.ok(!readFileSync(file, "utf8").includes(FAKE_KEY));
+  assert.ok(!JSON.stringify(h.provider.calls).includes(FAKE_KEY));
+  for (const call of h.provider.calls)
+    assert.equal(
+      call.messages.filter((message) => message.role === USER_ROLE).length,
+      SINGLE_CALL_COUNT,
+    );
+  assert.equal(work.digest, digest(work.text));
+  assert.equal(turnStarts(h)[0]?.["kanthord.prompt.work.digest"], work.digest);
+  const [end] = sessionEnds(h);
+  for (const name of REDACTION_ATTRIBUTES)
+    assert.ok(end?.attributes && name in end.attributes, name);
+  assert.equal(
+    end?.attributes?.["kanthord.session.redaction_count"],
+    PROMPT_FINDINGS,
+  );
+  assert.deepEqual(end?.attributes?.["kanthord.session.redaction_rules"], [
+    SensitiveRule.AwsAccessKeyId,
+  ]);
 });
 
 test("the work prompt lists both repositories", async (t) => {
@@ -812,14 +901,9 @@ test("a thrown prompt error stops the run with its cause text and the OAuth toke
     refresh,
     expires: Date.now() + 60000,
   }));
-  const credential = {
-    credential_id: "credential_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-    provider_id: "anthropic",
-    store,
-  };
   const stopped = await promptStop(
     new CodedError(AUTH_FAILED, `Authentication failed ${access} ${refresh}`),
-    credentialRedaction(credential),
+    credentialSecrets(store, "anthropic"),
   );
   assert.ok(stopped instanceof ExecutionStop);
   assert.equal(stopped.reason, EndReason.OperationFailed);
@@ -827,7 +911,7 @@ test("a thrown prompt error stops the run with its cause text and the OAuth toke
   assert.equal(stopped.detail, AUTH_FAILED_DETAIL);
   const earlier = new ExecutionStop(EndReason.Revoked, null);
   assert.equal(
-    await promptStop(earlier, credentialRedaction(credential)),
+    await promptStop(earlier, credentialSecrets(store, "anthropic")),
     earlier,
   );
 });
@@ -841,11 +925,7 @@ test("the stop detail removes the OAuth tokens from before and after a refresh",
     expires: Date.now() + 60000,
   });
   await store.modify("anthropic", tokens("old_access_1", "old_refresh_1"));
-  const secrets = credentialRedaction({
-    credential_id: "credential_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-    provider_id: "anthropic",
-    store,
-  });
+  const secrets = mergedSecrets([credentialSecrets(store, "anthropic")]);
   await secrets();
   await store.modify("anthropic", tokens("new_access_1", "new_refresh_1"));
   const stopped = await promptStop(

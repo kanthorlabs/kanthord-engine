@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { credentialSecrets } from "../../agent/hooks/sensitive-text-redaction.ts";
 import type { TestContext } from "node:test";
 import { appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -327,6 +328,7 @@ async function openExecution(
       provider_id: "anthropic",
       store: credentials,
     },
+    knownSecrets: credentialSecrets(credentials, "anthropic"),
     budget: new ExecutionBudget({
       created_at: Date.now(),
       expired_at: Date.now() + 60000,

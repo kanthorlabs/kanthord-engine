@@ -29,6 +29,8 @@ import {
 } from "../agent/contract.ts";
 import { InvalidReason } from "../agent/prompt-source.ts";
 import { resolveAgentPrompt } from "../agent/prompt-files.ts";
+import { REDACTION_LOG_MESSAGE } from "../agent/hooks/sensitive-text-redaction.ts";
+import { SensitiveRule } from "../agent/sensitive-text.ts";
 import { loadPi } from "../agent/pi.ts";
 import {
   scriptedProvider,
@@ -40,7 +42,11 @@ import { FacilityError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { testServiceIdentity } from "../kernel/test-identity.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
-import { stopAfter, temporary } from "../kernel/test-support.ts";
+import {
+  redactingLogger,
+  stopAfter,
+  temporary,
+} from "../kernel/test-support.ts";
 import { isString } from "../kernel/values.ts";
 import { createModelRuntime, resolveModel } from "../llm/model-connector.ts";
 import { PROJECT_SERVICE_NAME } from "./contract.ts";
@@ -177,6 +183,7 @@ function fixture(
   const provider: ScriptedProvider = scriptedProvider(script);
   const identity = testServiceIdentity(PROJECT_SERVICE_NAME);
   const credentials = new InMemoryCredentialStore();
+  const logLines: string[] = [];
   const record = {
     factoryCalls: 0,
     exports: [] as {
@@ -198,6 +205,7 @@ function fixture(
   };
   const agent = new EnvironmentAgent({
     store,
+    logger: redactingLogger(logLines),
     stateDirectory,
     hostHome: temporary(t),
     identity,
@@ -287,7 +295,16 @@ function fixture(
       ? readdirSync(directory).filter((name) => name.startsWith("run-"))
       : [];
   };
-  return { agent, provider, record, context, input, runDirectories, state };
+  return {
+    agent,
+    provider,
+    record,
+    context,
+    input,
+    runDirectories,
+    state,
+    logLines,
+  };
 }
 
 function toolResults(provider: ScriptedProvider) {
@@ -562,6 +579,45 @@ test(
       assert.ok(!body.includes(LINKED_TEXT));
       assert.ok(!body.includes(SECRET_FILE));
     });
+  },
+);
+
+test(
+  "the env@1 session redacts its JSON failure, keeps the confinement and logs the counts after drive",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const fakeKey = ["AKIA", "KANTHORDCANARY01"].join("");
+    const outside = ESCAPES[0]!;
+    const f = fixture(t, [
+      fauxAssistantMessage(
+        [fauxToolCall(outside.tool, { path: outside.path })],
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("done"),
+    ]);
+    const input = {
+      ...f.input(),
+      failure: { ...failure, tail: `${TAIL}\nAWS_KEY=${fakeKey}` },
+    };
+    assert.equal(await f.agent.run(input), EnvironmentSessionEnd.Ended);
+    assert.ok(!JSON.stringify(f.provider.calls).includes(fakeKey));
+    const user = f.provider.calls[0]!.messages.find(
+      (message) => message.role === ROLE_USER,
+    )!;
+    assert.ok(
+      text(user).includes(`<redacted:${SensitiveRule.AwsAccessKeyId}:`),
+    );
+    const [result] = toolResults(f.provider);
+    assert.equal((result as { isError: boolean }).isError, true);
+    assert.ok(!text(result!).includes(OUTSIDE_TEXT));
+    const records = f.logLines
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((entry) => entry.msg === REDACTION_LOG_MESSAGE);
+    assert.equal(records.length, ONE_CALL);
+    assert.equal(records[0]!.session_id, f.record.sessionIds[0]);
+    assert.deepEqual(records[0]!.redaction_rules, [
+      SensitiveRule.AwsAccessKeyId,
+    ]);
   },
 );
 

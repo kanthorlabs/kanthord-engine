@@ -42,6 +42,41 @@ export interface SensitiveTextRedaction {
 }
 
 export const REDACTION_TABLE_MAX = 4096;
+export const REDACTION_LOG_MESSAGE = "sensitive text redacted";
+
+export interface RedactionSummary {
+  redaction_count: number;
+  redaction_rules: SensitiveRule[];
+  redaction_failed: number;
+  unkept: number;
+  restore_blocked: number;
+  compaction_residual: number;
+  thinking_kept: number;
+}
+
+export function redactionSummary(counts: RedactionCounts): RedactionSummary {
+  const rules = (Object.keys(counts.redacted) as SensitiveRule[])
+    .filter((rule) => counts.redacted[rule])
+    .sort();
+  return {
+    redaction_count: rules.reduce(
+      (sum, rule) => sum + (counts.redacted[rule] ?? 0),
+      0,
+    ),
+    redaction_rules: rules,
+    redaction_failed: counts.scan_failed,
+    unkept: counts.unkept,
+    restore_blocked: counts.restore_blocked,
+    compaction_residual: counts.compaction_residual,
+    thinking_kept: counts.thinking_kept,
+  };
+}
+
+export function redactionObserved(summary: RedactionSummary): boolean {
+  return Object.values(summary).some((value) =>
+    Array.isArray(value) ? value.length : value,
+  );
+}
 
 export const RestoreReason = {
   Unkept:
@@ -98,11 +133,11 @@ export function credentialSecrets(
 }
 
 export function mergedSecrets(sources: readonly KnownSecrets[]): KnownSecrets {
+  const seen = new Set<string>();
   return async () => {
-    const all = new Set<string>();
     for (const secrets of await Promise.all(sources.map((source) => source())))
-      for (const secret of secrets) all.add(secret);
-    return [...all];
+      for (const secret of secrets) seen.add(secret);
+    return [...seen];
   };
 }
 

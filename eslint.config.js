@@ -482,6 +482,8 @@ export default tseslint.config(
                       "prompt-render",
                       "prompt-templates",
                       "pinned-layers",
+                      "sensitive-text",
+                      "hooks/sensitive-text-redaction",
                     ].join(",")}}.ts`,
                   }),
                 },

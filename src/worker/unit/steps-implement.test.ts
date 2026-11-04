@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import {
+  SensitiveRule,
+  SESSION_MARKER_PATTERN,
+} from "../../agent/sensitive-text.ts";
 import { suite, test } from "node:test";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -478,9 +482,11 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
     const stopped = await stopOf(runTask(h, current));
     assert.equal(stopped.reason, EndReason.ProviderFailed);
     assert.equal(stopped.code, ProviderFailure.Unavailable);
+    const [marker] = stopped.detail?.match(SESSION_MARKER_PATTERN) ?? [""];
+    assert.ok(marker.startsWith(`<redacted:${SensitiveRule.LlmCredential}:`));
     assert.ok(
       stopped.detail?.startsWith(
-        "OAuth auth derivation failed for anthropic: Cannot find module 'x' key [redacted] [redacted]",
+        `OAuth auth derivation failed for anthropic: Cannot find module 'x' key ${marker} [redacted]`,
       ),
     );
     assert.equal(stopped.detail?.includes(STEPS_KEY), false);

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { credentialSecrets } from "../../agent/hooks/sensitive-text-redaction.ts";
 import { unusedHostTools } from "../../worker/test-support.ts";
 import {
   existsSync,
@@ -503,6 +504,10 @@ test(
         provider_id: runtimeX.item.provider_id,
         store: runtimeX.credentials.store,
       },
+      knownSecrets: credentialSecrets(
+        runtimeX.credentials.store,
+        runtimeX.item.provider_id,
+      ),
       budget: new ExecutionBudget({
         ...x.execution,
         resource_budget: runtimeX.setup.resource_budget,
@@ -676,6 +681,10 @@ test(
           provider_id: runtimeY.item.provider_id,
           store: runtimeY.credentials.store,
         },
+        knownSecrets: credentialSecrets(
+          runtimeY.credentials.store,
+          runtimeY.item.provider_id,
+        ),
         budget: new ExecutionBudget({
           ...y.execution,
           resource_budget: runtimeY.setup.resource_budget,

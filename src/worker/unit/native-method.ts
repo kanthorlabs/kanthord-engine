@@ -6,11 +6,11 @@ import {
   type ExecutionRun,
   type ExecutionStop,
 } from "./execution-run.ts";
+import { type NativeAgent, openNativeAgent } from "./native-agent.ts";
 import {
-  credentialRedaction,
-  type NativeAgent,
-  openNativeAgent,
-} from "./native-agent.ts";
+  credentialSecrets,
+  mergedSecrets,
+} from "../../agent/hooks/sensitive-text-redaction.ts";
 import { Phase, type SpanEnd, type TelemetrySink } from "./telemetry.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
 import type { Revision } from "../../mission/contract.ts";
@@ -70,7 +70,11 @@ export interface NativeExecutionInput {
 export async function runNativeExecution(
   input: NativeExecutionInput,
 ): Promise<ExecutionEnd> {
-  const secrets = runSecrets(input.credentials.items);
+  const secrets = mergedSecrets(
+    input.credentials.items.map((item) =>
+      credentialSecrets(item.store, item.provider_id),
+    ),
+  );
   const run = new Run({
     ...input,
     workerName: input.setup.worker_name,
@@ -112,6 +116,7 @@ export async function runNativeExecution(
           intent,
           agent,
           credential,
+          knownSecrets: secrets,
           budget,
           workspace,
           hostHome: input.hostHome,
@@ -221,14 +226,6 @@ export function environmentDigestsOf(
         : [[repository.resource_identity, repository.environment.digest]],
     ),
   );
-}
-
-function runSecrets(
-  items: readonly ExecutionCredential[],
-): () => Promise<readonly string[]> {
-  const redactions = items.map(credentialRedaction);
-  return async () =>
-    (await Promise.all(redactions.map((redaction) => redaction()))).flat();
 }
 
 export function disposeAgent(agent: NativeAgent | null): void {

@@ -2,6 +2,7 @@ import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import { homedir } from "node:os";
 import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Logger } from "pino";
 import type {
   AgentSession,
   ModelRuntime,
@@ -37,6 +38,14 @@ import {
 } from "../agent/catalog.ts";
 import { AgentErrorCode, type AgentView } from "../agent/contract.ts";
 import { openSession, withDeadline } from "../agent/agent-session.ts";
+import {
+  credentialSecrets,
+  type KnownSecrets,
+  REDACTION_LOG_MESSAGE,
+  redactionObserved,
+  redactionSummary,
+  type SensitiveTextRedaction,
+} from "../agent/hooks/sensitive-text-redaction.ts";
 import { pinnedLayers } from "../agent/pinned-layers.ts";
 import { toolApproval } from "../agent/hooks/tool-approval.ts";
 import { loadPi } from "../agent/pi.ts";
@@ -92,6 +101,7 @@ export type WorkbenchModelRuntimeFactory = (
 
 export interface Dependencies {
   store: Store;
+  logger: Logger;
   stateDirectory: string;
   hostHome?: string;
   agentPrompt: {
@@ -138,6 +148,8 @@ interface OpenSession {
   waiters: Set<() => void>;
   version: number;
   approvals: Map<string, Approval>;
+  redaction: SensitiveTextRedaction | null;
+  secrets: KnownSecrets;
 }
 
 interface Approval {
@@ -155,6 +167,8 @@ const IDLE_SESSION = {
   disposeAgent: () => {},
   run: null,
   runError: null,
+  redaction: null,
+  secrets: async () => [],
 } as const;
 const NOT_FOUND_INDEX = -1;
 const AGENT_END = "agent_end";
@@ -376,7 +390,11 @@ export class WorkbenchService implements Service {
           );
         },
       );
-      agent = await openSession({
+      session.secrets = credentialSecrets(
+        credentials,
+        piProviderId(resolved.provider),
+      );
+      const opened = await openSession({
         cwd: session.place.cwd,
         modelRuntime: runtime,
         model,
@@ -408,17 +426,22 @@ export class WorkbenchService implements Service {
         ],
         context,
         sessionManager: session.manager,
+        ...(session.redaction
+          ? { redaction: session.redaction }
+          : { knownSecrets: () => session.secrets() }),
       });
-      pinnedLayers().pinInference(agent, prompt);
-      const opened = agent;
-      const unsubscribeEvents = opened.subscribe((event) => {
+      agent = opened.session;
+      session.redaction = opened.redaction;
+      pinnedLayers().pinInference(agent, opened.systemPrompt);
+      const unsubscribeEvents = agent.subscribe((event) => {
         if (event.type === AGENT_END && session.run) session.run.ended = true;
         this.notify(session);
       });
-      session.agent = opened;
+      const running = agent;
+      session.agent = running;
       session.disposeAgent = () => {
         unsubscribeEvents();
-        opened.dispose();
+        running.dispose();
         lifetime.cancel();
       };
     } catch (error) {
@@ -474,6 +497,13 @@ export class WorkbenchService implements Service {
     session.disposeAgent();
     session.disposeAgent = () => {};
     session.agent = null;
+    if (!session.redaction) return;
+    const summary = redactionSummary(session.redaction.counts());
+    if (redactionObserved(summary))
+      this.dependencies.logger.info(
+        { session_id: session.id, ...summary },
+        REDACTION_LOG_MESSAGE,
+      );
   }
 
   private syncEntries(session: OpenSession, provider: string): void {

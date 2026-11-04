@@ -14,6 +14,11 @@ import type { ExecutionBudget } from "./budget.ts";
 import { digest, type WorkPrompt } from "../../agent/prompt-composer.ts";
 import { PromptTemplate, type PromptTemplates } from "../../agent/contract.ts";
 import { openSession, withDeadline } from "../../agent/agent-session.ts";
+import {
+  type KnownSecrets,
+  redactionSummary,
+  type SensitiveTextRedaction,
+} from "../../agent/hooks/sensitive-text-redaction.ts";
 import { countTurns, pinnedLayers } from "../../agent/pinned-layers.ts";
 import { loadPi } from "../../agent/pi.ts";
 import { sessionTools, ToolProcesses } from "./tool-table.ts";
@@ -25,8 +30,7 @@ import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { providerFailureOf } from "../../llm/provider-failure.ts";
 import { redactReason, thrownReason } from "../../kernel/probe.ts";
 import { CodedError } from "../../kernel/errors.ts";
-import { SecretShape } from "../../custody/contract.ts";
-import { SpanStatus } from "../../tracking/contract.ts";
+import { type Attributes, SpanStatus } from "../../tracking/contract.ts";
 import { traceAgent } from "./agent-telemetry.ts";
 import {
   SessionFormat,
@@ -49,6 +53,7 @@ export interface NativeAgentInput {
   intent: ExecutionIntent;
   agent: AgentSetup;
   credential: ExecutionCredential;
+  knownSecrets: KnownSecrets;
   budget: ExecutionBudget;
   workspace: string;
   hostHome: string;
@@ -82,30 +87,9 @@ export interface NativeAgent {
 const ASSISTANT_ROLE = "assistant";
 const PROVIDER_ERROR = "error";
 
-async function credentialSecrets(
-  credential: ExecutionCredential,
-): Promise<string[]> {
-  const stored = await credential.store.read(credential.provider_id);
-  if (stored === undefined) return [];
-  if (stored.type === SecretShape.OAuth) return [stored.access, stored.refresh];
-  return stored.key === undefined ? [] : [stored.key];
-}
-
-export type CredentialRedaction = () => Promise<readonly string[]>;
-
-export function credentialRedaction(
-  credential: ExecutionCredential,
-): CredentialRedaction {
-  const seen = new Set<string>();
-  return async () => {
-    for (const secret of await credentialSecrets(credential)) seen.add(secret);
-    return [...seen];
-  };
-}
-
 export async function promptStop(
   error: unknown,
-  secrets: CredentialRedaction,
+  secrets: KnownSecrets,
 ): Promise<unknown> {
   if (error instanceof ExecutionStop) return error;
   return new ExecutionStop(
@@ -117,7 +101,7 @@ export async function promptStop(
 
 async function providerFailure(
   messages: readonly AgentMessage[],
-  secrets: CredentialRedaction,
+  secrets: KnownSecrets,
 ): Promise<ExecutionStop | null> {
   const last = messages.findLast(
     (message): message is AssistantMessage => message.role === ASSISTANT_ROLE,
@@ -133,28 +117,32 @@ async function providerFailure(
 }
 
 interface SessionTrace {
-  watch(finish: () => number): void;
+  watch(finish: () => number, redaction: SensitiveTextRedaction): void;
   end(status: SpanStatus): void;
+}
+
+function redactionAttributes(redaction: SensitiveTextRedaction): Attributes {
+  return Object.fromEntries(
+    Object.entries(redactionSummary(redaction.counts())).map(
+      ([name, value]) => [`kanthord.session.${name}`, value],
+    ),
+  );
 }
 
 function sessionTrace(spans: SpanRecorder, spanId: string): SessionTrace {
   let open = true;
-  let finish: () => number | undefined = () => undefined;
+  let finish: () => Attributes = () => ({});
   return {
-    watch(next) {
-      finish = next;
+    watch(next, redaction) {
+      finish = () => ({
+        "kanthord.session.entry_count": next(),
+        ...redactionAttributes(redaction),
+      });
     },
     end(status) {
       if (!open) return;
       open = false;
-      const entryCount = finish();
-      spans.end(spanId, {
-        status,
-        attributes:
-          entryCount === undefined
-            ? {}
-            : { "kanthord.session.entry_count": entryCount },
-      });
+      spans.end(spanId, { status, attributes: finish() });
     },
   };
 }
@@ -166,7 +154,8 @@ function nativeAgent(
   context: CancellationContext,
   turnCheck: () => Promise<void>,
   trace: SessionTrace | undefined,
-  secrets: CredentialRedaction,
+  secrets: KnownSecrets,
+  redaction: SensitiveTextRedaction,
   templates: PromptTemplates,
   record: (sent: TurnPrompt) => void,
 ): NativeAgent {
@@ -212,9 +201,10 @@ function nativeAgent(
     async prompt(work) {
       assert.ok(session);
       context.signal.throwIfAborted();
-      pins.setWork(work);
+      const redacted = await redactedWork(redaction, work);
+      pins.setWork(redacted);
       recordSend(work, PromptTemplate.Work);
-      await settle(work.text);
+      await settle(redacted.text);
     },
     async abort() {
       await session?.abort();
@@ -222,9 +212,9 @@ function nativeAgent(
     async instruct(work, text, template) {
       assert.ok(session);
       context.signal.throwIfAborted();
-      pins.setWork(work);
+      pins.setWork(await redactedWork(redaction, work));
       recordSend(work, template);
-      await settle(text);
+      await settle(await redaction.text(text));
     },
     lastText() {
       assert.ok(session);
@@ -246,6 +236,13 @@ function nativeAgent(
   };
 }
 
+async function redactedWork(
+  redaction: SensitiveTextRedaction,
+  work: WorkPrompt,
+): Promise<WorkPrompt> {
+  return { ...work, text: await redaction.text(work.text) };
+}
+
 function appendPinnedContext(session: AgentSession): void {
   session.sessionManager.appendCustomEntry(PINNED_CONTEXT_TYPE, {
     part: PinnedContextPart.SystemPrompt,
@@ -261,7 +258,7 @@ export async function openNativeAgent(
   const context = budget.agentContext(input.context);
   let session: AgentSession | undefined;
   let trace: SessionTrace | undefined;
-  const secrets = credentialRedaction(input.credential);
+  const secrets = input.knownSecrets;
   let sent: TurnPrompt | null = null;
   try {
     await secrets();
@@ -311,7 +308,7 @@ export async function openNativeAgent(
         )
       : pi.SessionManager.inMemory(input.workspace, options);
     const processes = new ToolProcesses(pi.getShellConfig());
-    session = await openSession({
+    const opened = await openSession({
       cwd: input.workspace,
       modelRuntime: runtime,
       model,
@@ -330,8 +327,10 @@ export async function openNativeAgent(
       hooks: [pins.hook],
       context,
       sessionManager,
+      knownSecrets: secrets,
     });
-    pins.pinInference(session, input.agent.prompt.final);
+    session = opened.session;
+    pins.pinInference(session, opened.systemPrompt);
     appendPinnedContext(session);
     if (input.spans && sessionId !== undefined)
       trace?.watch(
@@ -342,6 +341,7 @@ export async function openNativeAgent(
           processes,
           promptOf: () => sent,
         }),
+        opened.redaction,
       );
     return nativeAgent(
       session,
@@ -351,6 +351,7 @@ export async function openNativeAgent(
       input.turnCheck ?? (async () => {}),
       trace,
       secrets,
+      opened.redaction,
       input.setup.templates,
       (prompt) => {
         sent = prompt;

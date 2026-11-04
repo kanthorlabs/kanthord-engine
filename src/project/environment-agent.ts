@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Api, CredentialStore, Model } from "@earendil-works/pi-ai";
+import type { Logger } from "pino";
 import type {
   AgentSession,
   ModelRuntime,
@@ -19,6 +20,13 @@ import type { Store, Transaction } from "../kernel/store.ts";
 import { getAgentDeclaration } from "../agent/catalog.ts";
 import { openSession, withDeadline } from "../agent/agent-session.ts";
 import { checkoutConfinement } from "../agent/hooks/checkout-confinement.ts";
+import {
+  credentialSecrets,
+  REDACTION_LOG_MESSAGE,
+  redactionObserved,
+  redactionSummary,
+  type SensitiveTextRedaction,
+} from "../agent/hooks/sensitive-text-redaction.ts";
 import { loadPi } from "../agent/pi.ts";
 import type {
   AgentView,
@@ -65,6 +73,7 @@ const defaultModelRuntimeFactory: EnvironmentModelRuntimeFactory = async (
 
 export interface EnvironmentAgentDependencies {
   store: Store;
+  logger: Logger;
   stateDirectory: string;
   hostHome: string;
   identity: ServiceIdentity;
@@ -120,6 +129,11 @@ type UsableView = AgentView & {
   effective: NonNullable<AgentView["effective"]>;
 };
 
+interface OpenedSession {
+  session: AgentSession;
+  redaction: SensitiveTextRedaction;
+}
+
 function usable(view: AgentView | null): view is UsableView {
   return view !== null && view.valid && view.effective !== null;
 }
@@ -147,7 +161,7 @@ export class EnvironmentAgent {
     const checkout = join(directory, CHECKOUT_DIRECTORY);
     mkdirSync(checkout, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
     const lifetime = new CancellationContext(input.context);
-    let session: AgentSession | null = null;
+    let opened: OpenedSession | null = null;
     try {
       await this.dependencies.exportRepository(
         input.binding_id,
@@ -155,18 +169,31 @@ export class EnvironmentAgent {
         checkout,
         input.context,
       );
-      session = await this.open(input, view, sessionId, checkout, lifetime);
-      await this.drive(session, input);
+      opened = await this.open(input, view, sessionId, checkout, lifetime);
+      await this.drive(opened.session, input);
     } catch (error) {
       if (!input.context.signal.aborted) throw error;
     } finally {
-      session?.dispose();
+      if (opened) this.logRedaction(sessionId, opened.redaction);
+      opened?.session.dispose();
       lifetime.cancel();
       rmSync(directory, { recursive: true, force: true });
     }
     return input.context.signal.aborted
       ? EnvironmentSessionEnd.Aborted
       : EnvironmentSessionEnd.Ended;
+  }
+
+  private logRedaction(
+    sessionId: string,
+    redaction: SensitiveTextRedaction,
+  ): void {
+    const summary = redactionSummary(redaction.counts());
+    if (redactionObserved(summary))
+      this.dependencies.logger.info(
+        { session_id: sessionId, ...summary },
+        REDACTION_LOG_MESSAGE,
+      );
   }
 
   private view(): AgentView | null {
@@ -181,7 +208,7 @@ export class EnvironmentAgent {
     sessionId: string,
     checkout: string,
     lifetime: CancellationContext,
-  ): Promise<AgentSession> {
+  ): Promise<OpenedSession> {
     const { effective } = view;
     const declaration = getAgentDeclaration(ENV_AGENT_NAME);
     assert.ok(declaration);
@@ -253,7 +280,7 @@ export class EnvironmentAgent {
         ended = true;
       },
     });
-    const session = await openSession({
+    const opened = await openSession({
       cwd: checkout,
       modelRuntime: runtime,
       model,
@@ -278,11 +305,16 @@ export class EnvironmentAgent {
       hostHome: this.dependencies.hostHome,
       hooks: [checkoutConfinement(checkout)],
       context: input.context,
+      knownSecrets: credentialSecrets(
+        credentials,
+        piProviderId(effective.provider),
+      ),
     });
+    const { session } = opened;
     const finishTurn = session.agent.finishTurn;
     session.agent.finishTurn = async (turn, signal) =>
       ended ? END_TURN : ((await finishTurn?.(turn, signal)) ?? undefined);
-    return session;
+    return opened;
   }
 
   private async drive(

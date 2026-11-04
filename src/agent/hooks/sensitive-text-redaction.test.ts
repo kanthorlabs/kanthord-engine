@@ -766,7 +766,7 @@ async function openTestSession(
     cwd,
     sessions,
   );
-  const session = await openSession({
+  const { session } = await openSession({
     cwd,
     modelRuntime: runtime,
     model: runtime.getModel("anthropic", "claude-sonnet-4-5")!,
@@ -781,12 +781,8 @@ async function openTestSession(
     ],
     customTools: input.customTools ?? [],
     hostHome: home,
-    hooks: [
-      input.redaction.restore,
-      ...(input.gates ?? []),
-      ...(input.contextHooks ?? []),
-      input.redaction.hook,
-    ],
+    hooks: [...(input.gates ?? []), ...(input.contextHooks ?? [])],
+    redaction: input.redaction,
     context: background,
     sessionManager,
   });

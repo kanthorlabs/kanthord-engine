@@ -1,4 +1,5 @@
 import { ExecutionBudget } from "./budget.ts";
+import { credentialSecrets } from "../../agent/hooks/sensitive-text-redaction.ts";
 import assert from "node:assert/strict";
 import { unusedHostTools } from "./test-support.ts";
 import { existsSync } from "node:fs";
@@ -126,6 +127,7 @@ async function startedSession(t: TestContext, clients: MethodClients) {
       provider_id: "anthropic",
       store,
     },
+    knownSecrets: credentialSecrets(store, "anthropic"),
     budget: new ExecutionBudget({
       created_at: Date.now(),
       expired_at: Date.now() + 60000,

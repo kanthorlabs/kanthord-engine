@@ -966,6 +966,7 @@ export function composeServices(options: {
   const projectIdentity = mintServiceIdentity(PROJECT_SERVICE_NAME);
   const environmentAgent = new EnvironmentAgent({
     store: options.store,
+    logger: options.logger,
     stateDirectory: options.stateDirectory,
     hostHome: homedir(),
     identity: projectIdentity,
@@ -1081,6 +1082,7 @@ export function composeServices(options: {
   });
   const workbench = new WorkbenchService({
     store: options.store,
+    logger: options.logger,
     stateDirectory: options.stateDirectory,
     agentPrompt: {
       compose: (name, context) =>
