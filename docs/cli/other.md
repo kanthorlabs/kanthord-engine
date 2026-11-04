@@ -781,6 +781,18 @@ seals the result to its own key. A lost pending report repeats at each
 heartbeat while its session runs. The heartbeat interval stays 15 s while a
 session is pending, so a human login code reaches the instance within 15 s.
 
+The work read also lists the pending session reads of the instance in
+`session_reads`. The instance runs each new listed read once. It reads the
+session file below `<data directory>/pi/sessions/` with the untrusted path
+rules of the server read: it follows no symlink, skips a file that is not a
+regular file and stops at a changed directory. It reports the outcome through
+`worker.session_read.report`. The report holds the outcome alone, the entry
+for `resolved` and the byte length for `too_large`. A report after an
+indeterminate answer repeats every 2 s with the same idempotency key for up to
+25 s. A failed read or report logs `Worker instance session read failed` or
+`Worker instance session read report failed` with the read identity and the
+error code, and never the entry content.
+
 The first heartbeat answer and each new `credential_version` start a check of
 the copies of the instance. The instance lists its copies with
 `llm.credential.list` and reads each live copy sealed to its current key with
