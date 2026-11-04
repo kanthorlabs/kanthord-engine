@@ -28,7 +28,6 @@ import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const LOGIN_FAILED = "login failed";
 const INSTANCE_HUMAN = "";
-const NO_RUNNING_LOGINS = 0;
 const NO_REPORT = "";
 export const LOGIN_REPORT_RETRY_MS = 2000;
 
@@ -74,10 +73,6 @@ export class InstanceLogins {
         anthropicProvider(),
       ]);
     this.now = options.now ?? Date.now;
-  }
-
-  pending(): boolean {
-    return this.running.size > NO_RUNNING_LOGINS;
   }
 
   sync(entries: readonly LoginSessionEntry[]): void {

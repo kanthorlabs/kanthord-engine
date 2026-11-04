@@ -162,7 +162,6 @@ test("an instance runs a copy_code login, supplies the code of the heartbeat ent
   f.logins.sync([
     entry(Platform.AnthropicSubscription, LoginSessionMode.CopyCode),
   ]);
-  assert.equal(f.logins.pending(), true);
   await f.until(() => f.reports.length > NO_REPORTS, t.signal);
   assert.deepEqual(
     [...f.reports],
@@ -196,7 +195,8 @@ test("an instance runs a copy_code login, supplies the code of the heartbeat ent
     OAUTH_SECRET,
   );
   assert.equal(JSON.stringify(f.reports).includes(OAUTH_SECRET.access), false);
-  await f.until(() => !f.logins.pending(), t.signal);
+  await setImmediate();
+  const sent = f.reports.length;
   f.logins.sync([
     entry(
       Platform.AnthropicSubscription,
@@ -204,7 +204,8 @@ test("an instance runs a copy_code login, supplies the code of the heartbeat ent
       COPY_CODE_VALUE,
     ),
   ]);
-  assert.equal(f.logins.pending(), false);
+  await setImmediate();
+  assert.equal(f.reports.length, sent);
 });
 
 test("an instance runs a device login, reports only the user code and the address, and aborts when the server no longer lists the session", async (t) => {
@@ -242,7 +243,6 @@ test("an instance runs a device login, reports only the user code and the addres
     [DEVICE_URL, DEVICE_CODE],
   );
   f.logins.sync([]);
-  assert.equal(f.logins.pending(), false);
   await f.until(() => aborted, t.signal);
   assert.equal(
     f.reports.some((report) => report.state === InstanceLoginState.Completed),
@@ -340,7 +340,7 @@ test("a stopped instance starts no login flow", async () => {
   f.logins.sync([
     entry(Platform.AnthropicSubscription, LoginSessionMode.CopyCode),
   ]);
-  assert.equal(f.logins.pending(), false);
   await setImmediate();
   assert.equal(started, false);
+  assert.equal(f.reports.length, NO_REPORTS);
 });
