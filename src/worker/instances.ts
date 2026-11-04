@@ -24,6 +24,7 @@ import {
   BindingEntryState,
   CONNECTION_ID_PREFIX,
   type ConnectionBinding,
+  FOOTPRINT_ORDERS_PENDING_MAX,
   type FootprintOrder,
   INSTANCE_CONNECTED_WINDOW_MS,
   INSTANCE_CONNECTION_INFO,
@@ -138,6 +139,14 @@ interface PreparedKey {
 }
 
 export type ListedBinding = ReturnType<WorkerBindingsOf>[number];
+
+function ordersFull(): OperationError {
+  return new OperationError(
+    HttpStatus.Conflict,
+    WorkerErrorCode.FootprintOrdersFull,
+    "The instance holds the maximum number of pending footprint orders.",
+  );
+}
 
 function keyInvalid(): OperationError {
   return new OperationError(
@@ -333,6 +342,8 @@ export class WorkerInstances implements WorkerInstanceLookups {
       this.footprintOrders.set(instance.id, orders);
     }
     const known = orders.has(order.cleanup_id);
+    if (!known && orders.size >= FOOTPRINT_ORDERS_PENDING_MAX)
+      throw ordersFull();
     orders.set(order.cleanup_id, order);
     if (!known && instance.placement === InstancePlacement.Worker)
       this.raiseWorkVersion(instance.name);

@@ -274,7 +274,6 @@ test("a running cleanup_id is skipped", async (t) => {
     keys: [OUTPUT_OLD],
   };
   const first = footprint.run(order, background.signal);
-  assert.equal(footprint.isRunning(CLEANUP_ID), true);
   assert.equal(await footprint.run(order, background.signal), null);
   assert.ok(await first);
 });

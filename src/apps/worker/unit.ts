@@ -136,7 +136,6 @@ export class WorkerUnit {
   private footprintTimer?: NodeJS.Timeout;
   private footprintTask: Promise<void> = Promise.resolve();
   private footprintResults: FootprintResult[] = [];
-  private readonly footprintReported = new Set<string>();
   private executionStartedAt: number | null = null;
 
   constructor(options: WorkerUnitOptions) {
@@ -248,29 +247,42 @@ export class WorkerUnit {
     const transport = this.entries.find((entry) => entry.registration)?.binding
       .transport;
     if (!transport) return;
-    if (measurement === null && !this.footprintResults.length) return;
-    const results = [...this.footprintResults];
+    let orders: readonly FootprintOrder[] = [];
+    for (const result of [...this.footprintResults]) {
+      const answer = await this.sendFootprint(transport, null, [result]);
+      if (answer === null) break;
+      this.footprintResults = this.footprintResults.filter(
+        (pending) => pending !== result,
+      );
+      orders = answer;
+    }
+    if (measurement !== null) {
+      const answer = await this.sendFootprint(transport, measurement, []);
+      if (answer === null) return;
+      orders = answer;
+    }
+    if (orders.length) await this.runFootprintOrders(orders);
+  }
+
+  private async sendFootprint(
+    transport: WorkerTransport,
+    measurement: FootprintMeasurement | null,
+    results: readonly FootprintResult[],
+  ): Promise<readonly FootprintOrder[] | null> {
     const answer = await transport.worker["footprint.report"](
-      { params: {}, query: {}, body: { measurement, results } },
+      { params: {}, query: {}, body: { measurement, results: [...results] } },
       { context: this.shutdown, idempotencyKey: createIdempotencyKey() },
     );
-    if (answer.type === OperationResultType.Indeterminate) return;
-    if (
-      answer.type === OperationResultType.Failure &&
-      answer.error.error.code !== WorkerErrorCode.FootprintOrderUnknown
-    ) {
-      this.logRecord(
-        { msg: FOOTPRINT_REPORT_FAILED, code: answer.error.error.code },
-        "warn",
-      );
-      return;
-    }
-    for (const result of results) this.footprintReported.add(result.cleanup_id);
-    this.footprintResults = this.footprintResults.filter(
-      (result) => !results.includes(result),
-    );
+    if (answer.type === OperationResultType.Indeterminate) return null;
     if (answer.type === OperationResultType.Completed)
-      await this.runFootprintOrders(answer.data.orders);
+      return answer.data.orders;
+    if (answer.error.error.code === WorkerErrorCode.FootprintOrderUnknown)
+      return [];
+    this.logRecord(
+      { msg: FOOTPRINT_REPORT_FAILED, code: answer.error.error.code },
+      "warn",
+    );
+    return null;
   }
 
   private async runFootprintOrders(
@@ -280,7 +292,6 @@ export class WorkerUnit {
     for (const order of orders) {
       if (this.shutdown.signal.aborted) return;
       if (
-        this.footprintReported.has(order.cleanup_id) ||
         this.footprintResults.some(
           (result) => result.cleanup_id === order.cleanup_id,
         )

@@ -22,6 +22,21 @@ import {
 const MAX_WIRE_NODES = 10000;
 const NO_SYMBOL_KEYS = 0;
 const input = { params: {}, query: {}, body: null };
+const MEASURED_OPERATIONS: readonly string[] = ["footprint.measure.run"];
+
+function shapeOf(value: unknown): unknown {
+  if (typeof value === ValueType.Number) return ValueType.Number;
+  if (Array.isArray(value)) return value.map(shapeOf);
+  if (isObject(value))
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [key, shapeOf(child)]),
+    );
+  return value;
+}
+
+function sameData(data: unknown): unknown {
+  return data;
+}
 
 function assertWireData(data: unknown): void {
   const values = [data];
@@ -59,6 +74,7 @@ function assertWireData(data: unknown): void {
 function assertEquivalent(
   left: OperationResult<unknown>,
   right: OperationResult<unknown>,
+  compared: (data: unknown) => unknown = sameData,
 ): void {
   assert.equal(left.type, right.type);
   assert.notEqual(left.type, OperationResultType.Indeterminate);
@@ -80,7 +96,7 @@ function assertEquivalent(
   ) {
     assertWireData(left.data);
     assertWireData(right.data);
-    assert.deepEqual(left.data, right.data);
+    assert.deepEqual(compared(left.data), compared(right.data));
   }
 }
 
@@ -128,6 +144,7 @@ test("every composed operation conforms across direct and HTTP adapters", async 
       assertEquivalent(
         await direct.operation(input, { identity }),
         await http.operation(input),
+        MEASURED_OPERATIONS.includes(operation.id) ? shapeOf : sameData,
       );
     });
   }
@@ -165,4 +182,23 @@ test("the wire walk rejects functions, responses, transactions and class instanc
   } finally {
     database.close();
   }
+});
+
+test("the shape of a measured answer keeps every key, string, boolean and null and drops only the number values", () => {
+  const measured = {
+    stats: [{ kind: "disk", free_bytes: 1, stale: false, error: null }],
+  };
+  assert.deepEqual(
+    shapeOf(measured),
+    shapeOf({
+      stats: [{ kind: "disk", free_bytes: 2, stale: false, error: null }],
+    }),
+  );
+  for (const changed of [
+    { stats: [{ kind: "trace", free_bytes: 1, stale: false, error: null }] },
+    { stats: [{ kind: "disk", free_bytes: null, stale: false, error: null }] },
+    { stats: [{ kind: "disk", free_bytes: 1, stale: true, error: null }] },
+    { stats: [] },
+  ])
+    assert.notDeepEqual(shapeOf(measured), shapeOf(changed));
 });

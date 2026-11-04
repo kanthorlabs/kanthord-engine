@@ -148,6 +148,7 @@ components:
               - entry_type
             additionalProperties: false
         footprint_orders:
+          maxItems: 8
           type: array
           items:
             type: object

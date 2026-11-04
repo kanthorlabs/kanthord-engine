@@ -9,9 +9,8 @@ import {
 import { lstat } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { WORKSPACE_KEY_PATTERN } from "../../kernel/cleanup.ts";
-import { FILE_NOT_FOUND } from "../../kernel/files.ts";
+import { ensureDirectory, FILE_NOT_FOUND } from "../../kernel/files.ts";
 import { walkFootprint } from "../../kernel/footprint-walk.ts";
-import { ensureDirectory } from "../../kernel/files.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import { bindingNameSchema } from "../../project/contract.ts";
 import type { Context } from "../../kernel/context.ts";
@@ -330,9 +329,6 @@ export class WorkspaceRoot {
     assert.ok(this.held.has(key));
     const now = new Date();
     utimesSync(key, now, now);
-  }
-  isHeld(key: string): boolean {
-    return this.held.has(key);
   }
   async removeWorkspace(
     name: string,

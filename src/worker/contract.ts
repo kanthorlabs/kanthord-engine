@@ -795,6 +795,7 @@ export type PoolEntry = Omit<
   "token" | "expired_at" | "client_secret"
 >;
 export const SESSION_READS_PENDING_MAX = 8;
+export const FOOTPRINT_ORDERS_PENDING_MAX = SESSION_READS_PENDING_MAX;
 export const SESSION_READ_PREFIX = "session_read";
 export const SessionReadOutcome = {
   Resolved: "resolved",
@@ -959,6 +960,7 @@ export const WorkerErrorCode = {
   InstancePlacementUnsupported: "worker.instance.placement_unsupported",
   SessionReadNotFound: "worker.session_read.not_found",
   FootprintOrderUnknown: "worker.footprint.order_unknown",
+  FootprintOrdersFull: "worker.footprint.orders_full",
 } as const;
 
 export const WORKER_INSTANCE_ID_PREFIX = "worker_instance";
@@ -1536,7 +1538,9 @@ export const instanceOperations = {
       session_reads: z
         .array(sessionReadEntrySchema)
         .max(SESSION_READS_PENDING_MAX),
-      footprint_orders: z.array(footprintOrderSchema),
+      footprint_orders: z
+        .array(footprintOrderSchema)
+        .max(FOOTPRINT_ORDERS_PENDING_MAX),
     }),
     description:
       "Answer the work version, the open login sessions, the pending session reads and the footprint cleanup orders of the current connection of the instance. The call renews no liveness.",
@@ -1926,7 +1930,9 @@ export const workerOperations = {
       query: emptyFields,
       body: footprintReportSchema,
     }),
-    output: z.strictObject({ orders: z.array(footprintOrderSchema) }),
+    output: z.strictObject({
+      orders: z.array(footprintOrderSchema).max(FOOTPRINT_ORDERS_PENDING_MAX),
+    }),
     description:
       "Report the footprint measurement of the unit data and the results of its cleanup orders. At the server and container placements, the answer lists the cleanup orders of the instance.",
   },

@@ -8,6 +8,7 @@ import {
   alwaysAvailable,
   BindingEntryState,
   connectionPayloadSchema,
+  FOOTPRINT_ORDERS_PENDING_MAX,
   INSTANCE_CONNECTED_WINDOW_MS,
   INSTANCE_CONNECTION_INFO,
   instanceConfigurationSchema,
@@ -1712,4 +1713,23 @@ test("an archive drops the orders of the instance and reports the archive to the
   await archiveFixture(f).archive(true);
   assert.deepEqual(f.footprint.archived, [INSTANCE]);
   assert.deepEqual(f.worker().instances.footprintOrdersOf(record.id), []);
+});
+
+test("an instance holds at most FOOTPRINT_ORDERS_PENDING_MAX orders, a repeat of a held order is accepted and a new order answers orders_full", async (t) => {
+  const f = instanceFixture(t);
+  const { record, queue } = await footprintInstance(f);
+  const held = Array.from({ length: FOOTPRINT_ORDERS_PENDING_MAX }, () =>
+    createIdentity("cleanup"),
+  );
+  for (const cleanupId of held) await queue(cleanupId);
+  assert.deepEqual(await queue(held[0]!), { queued: true });
+  await f.refuses(
+    () => queue(createIdentity("cleanup")),
+    HttpStatus.Conflict,
+    WorkerErrorCode.FootprintOrdersFull,
+  );
+  assert.equal(
+    f.worker().instances.footprintOrdersOf(record.id).length,
+    FOOTPRINT_ORDERS_PENDING_MAX,
+  );
 });

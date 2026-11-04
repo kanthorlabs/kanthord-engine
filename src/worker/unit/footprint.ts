@@ -261,10 +261,6 @@ export class UnitFootprint {
     };
   }
 
-  isRunning(cleanupId: string): boolean {
-    return this.running.has(cleanupId);
-  }
-
   async run(
     order: FootprintOrder,
     signal: AbortSignal,

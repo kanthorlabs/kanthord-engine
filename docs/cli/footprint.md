@@ -17,9 +17,14 @@ confirms.
 - The statistics of the server hold `operational_database`, `trace`,
   `database_backup`, the server `log`, `environment`, `cache_volume`,
   `slot_image`, `intake_mirror`, `workbench` and the `disk` of each device.
-- The instance kinds `session`, `workspace`, `tool_output`, the instance `log`
-  and `slot_residue` have no measurement yet. A cleanup of an instance kind
-  ends `failed`, because its owner delete is not available yet.
+- The unit of each instance measures `workspace`, `tool_output`, the instance
+  `log` and `slot_residue` at its start and every 15 minutes, and reports them
+  through `worker.footprint.report`. At the `worker` placement, the unit also
+  measures `session` and its `disk`. At the `server` and `container`
+  placements, the server measures `session`. See
+  [worker.md](worker.md#instance-footprint-outside-the-cli-inventory).
+- The candidates of an instance kind cover the oldest 10000 items of the last
+  report. A `count` above 10000 marks a kind with more items.
 - The service evaluates the alert state of each kind, host and item after
   each measurement. See [Alerts](#alerts).
 - The `environment` kind offers the rules `unbound` and `superseded`. The rule
@@ -104,8 +109,13 @@ holds `refusal: "live"`. The newest backup of each file holds `kept: true`.
 - Each key ends as `removed`, `absent` or `refused` with a reason. The record
   moves to `completed` when each key holds a result. It moves to `failed` when
   the owner cannot run the order.
+- An instance kind runs as one call. The session delete at the `server` and
+  `container` placements answers the result at once. Every other instance
+  delete queues an order, and the result arrives through
+  `worker.footprint.report`.
 - After a server restart, the task runs each `queued` and `running` record
-  again from its stored outcome.
+  again from its stored outcome. For an instance kind, it sends the order to
+  the Worker Service again.
 
 ## Alerts
 

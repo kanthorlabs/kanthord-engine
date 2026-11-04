@@ -622,8 +622,7 @@ export class FootprintService implements Service {
     const replaced = new Set<FootprintKind>(
       measurement.kinds.map((reported) => reported.kind),
     );
-    if (placement === InstancePlacement.Worker)
-      replaced.add(FootprintKind.Disk);
+    if (measurement.disk !== null) replaced.add(FootprintKind.Disk);
     const reported = new Set(
       measures.map((measure) =>
         entryKey(measure.kind, measure.instance_name, measure.item_key),
