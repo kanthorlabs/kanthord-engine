@@ -769,11 +769,17 @@ binding ends the process with `worker.instance.secret_changed`. A different
 server version ends it with `worker.version.mismatch`. A rotated or archived
 instance answers `404 worker.instance.not_found` and ends the process.
 
-The heartbeat answer lists the pending OAuth login sessions of the instance in
-`login_sessions`. The instance runs each session with pi-ai in `copy_code` or
-`device` mode, reports its address and code through
-`llm.credential.login_report`, and seals the result to its own key. While a
-session is pending, the heartbeat runs every 2 s.
+The heartbeat is a liveness signal. Its answer holds `server_version`,
+`binding_version`, `credential_version` and `work_version`. When
+`work_version` differs from the version of the last successful work read, the
+instance calls `worker.instance.work`. The work read answers `work_version`
+and the pending OAuth login sessions of the instance in `login_sessions`. A
+failed work read keeps the old version, so the next heartbeat reads the work
+again. The instance runs each session with pi-ai in `copy_code` or `device`
+mode, reports its address and code through `llm.credential.login_report`, and
+seals the result to its own key. A lost pending report repeats at each
+heartbeat while its session runs. The heartbeat interval stays 15 s while a
+session is pending, so a human login code reaches the instance within 15 s.
 
 The first heartbeat answer and each new `credential_version` start a check of
 the copies of the instance. The instance lists its copies with
