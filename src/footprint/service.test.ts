@@ -48,6 +48,7 @@ const OTHER_DEVICE = "device-2";
 const TRACE_THRESHOLD = 8 * GIB;
 const ALERT_PAGE = 100;
 const LOG_BASE_KEYS = ["level", "time", "pid", "hostname", "msg"];
+const PREPARE = "prepare";
 
 function statOf(
   stats: readonly FootprintStat[],
@@ -585,4 +586,101 @@ test("an open episode whose item_key the next measurement no longer reports reso
     fixture.service.stats().some((stat) => stat.item_key === DEVICE),
     false,
   );
+});
+
+test("a second disk owner keeps the server disk entries and a throwing owner keeps its own entries", async (t) => {
+  const fixture = footprintFixture(t);
+  const serverDisks = () =>
+    fixture.service
+      .stats()
+      .filter(
+        (stat) =>
+          stat.kind === FootprintKind.Disk &&
+          stat.instance_name === null &&
+          stat.item_key !== null &&
+          stat.item_key !== DEVICE,
+      ).length;
+  await fixture.service.measure();
+  const measuredDisks = serverDisks();
+  assert.ok(measuredDisks > NO_ALERTS);
+  let fail = false;
+  const owner = new FakeOwner(
+    [FootprintKind.Disk],
+    [
+      measured(FootprintKind.Disk, {
+        item_key: DEVICE,
+        total_bytes: TOTAL,
+        free_bytes: TOTAL / 2,
+      }),
+    ],
+  );
+  const measure = owner.measure.bind(owner);
+  owner.measure = () =>
+    fail ? Promise.reject(new Error("runtime down")) : measure();
+  fixture.service.register(owner);
+  await fixture.service.measure();
+  assert.equal(serverDisks(), measuredDisks);
+  fail = true;
+  await fixture.service.measure();
+  assert.equal(serverDisks(), measuredDisks);
+  assert.equal(deviceStat(fixture.service.stats()).free_bytes, TOTAL / 2);
+});
+
+test("acknowledge of an open episode completes", async (t) => {
+  const fixture = footprintFixture(t);
+  const alertId = createIdentity("alert");
+  fixture.store.transaction((tx) =>
+    insertAlert(tx, {
+      alert_id: alertId,
+      kind: FootprintKind.Trace,
+      instance_name: null,
+      item_key: null,
+      threshold: { measure: ThresholdMeasure.Bytes, value: GIB },
+      value: TOTAL,
+      resolved_at: null,
+      acknowledged_by: null,
+      acknowledged_at: null,
+      acknowledged_until: null,
+    }),
+  );
+  const acknowledged = await fixture.footprint["alert.acknowledge"](
+    { params: { alert_id: alertId }, query: {}, body: null },
+    { identity: HUMAN, idempotencyKey: createIdempotencyKey() },
+  );
+  assert.equal(acknowledged.type, OperationResultType.Completed);
+  assert.equal(acknowledged.data.acknowledged_until, 2 * TOTAL);
+});
+
+test("a failed alert write keeps the state, so the next measurement writes again", async (t) => {
+  const fixture = footprintFixture(t);
+  fixture.service.register(traceOwner(TRACE_THRESHOLD + 1));
+  let failing: string | null = null;
+  const transaction = fixture.store.transaction.bind(fixture.store);
+  fixture.store.transaction = (work) =>
+    transaction((tx) => {
+      const prepare = tx.database.prepare.bind(tx.database);
+      return work({
+        database: new Proxy(tx.database, {
+          get: (target, property) =>
+            property === PREPARE
+              ? (sql: string) => {
+                  if (failing !== null && sql.startsWith(failing))
+                    throw new Error("database busy");
+                  return prepare(sql);
+                }
+              : Reflect.get(target, property, target),
+        }),
+      });
+    });
+  const state = () =>
+    statOf(fixture.service.stats(), FootprintKind.Trace).alert.state;
+  await fixture.service.measure();
+  failing = "INSERT INTO footprint_alert";
+  await fixture.service.measure();
+  assert.equal(state(), FootprintAlertState.Pending);
+  assert.deepEqual(traceAlerts(fixture), []);
+  failing = null;
+  await fixture.service.measure();
+  assert.equal(state(), FootprintAlertState.Firing);
+  assert.equal(traceAlerts(fixture).length, ONE_CHANGE);
 });

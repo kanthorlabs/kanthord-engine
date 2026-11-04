@@ -330,9 +330,12 @@ export class FootprintService implements Service {
           this.tracks.get(key) ?? (alert ? FIRING_TRACK : OK_TRACK),
           stat,
         );
-        this.tracks.set(key, next.track);
         if (next.event?.fire) this.fire(stat, next.event);
-        else if (next.event && alert) this.resolve(key, alert);
+        else if (next.event && alert) {
+          this.resolve(key, alert);
+          continue;
+        }
+        this.tracks.set(key, next.track);
       }
     } catch (error) {
       this.dependencies.logger.error(

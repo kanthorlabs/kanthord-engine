@@ -178,6 +178,18 @@ test("the days_to_floor clear value is value / 0.9 and a null value is clear and
   );
 });
 
+test("a null bytes value and a null free ratio are clear and not above", () => {
+  assert.equal(isAbove(BYTES, null), false);
+  assert.equal(isClear(BYTES, null), true);
+  const resolved = run(FIRING_TRACK, [bytesSubject(null), bytesSubject(null)]);
+  assert.deepEqual(resolved.event, { fire: false });
+  const unsized = { ...diskSubject(0, null), total_bytes: 0 };
+  assert.equal(
+    run(OK_TRACK, [unsized, unsized]).track.state,
+    FootprintAlertState.Ok,
+  );
+});
+
 test("a disk episode fires on the projection while the free ratio is above the floor", () => {
   const projected = diskSubject(TOTAL / 2, DEFAULT_AGE_DAYS - 1);
   const fired = run(OK_TRACK, [projected, projected]);

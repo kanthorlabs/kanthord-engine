@@ -117,8 +117,10 @@ nothing and starts no cleanup.
   file. A `null` threshold turns the bytes alert of the kind off.
 - The `disk` statistic of each device is above the threshold when
   `free_bytes / total_bytes` is below `footprint.disk_free_ratio`, or when
-  `days_to_floor` is 30 or less. A null `days_to_floor` is not above the
-  threshold. One episode for each device covers both conditions.
+  `days_to_floor` is 30 or less. One episode for each device covers both
+  conditions.
+- A null value (bytes, free ratio or `days_to_floor`) is not above the
+  threshold and counts as clear.
 - The clear value is 0.9 times the threshold for bytes. It is the threshold
   divided by 0.9 for the free ratio and for `days_to_floor`. A `disk` statistic
   clears only when both conditions clear.
@@ -153,6 +155,7 @@ answer holds `acknowledged_until` in bytes, rounded down.
 - A bytes kind: twice the bytes at the acknowledgement. The acknowledgement
   holds until the bytes reach `acknowledged_until`.
 - After the acknowledgement ends, a new acknowledgement replaces the old one.
+- A new episode after a resolve needs a new acknowledgement.
 
 ## `footprint.backup.delete`
 
