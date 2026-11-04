@@ -639,7 +639,7 @@ function cacheRig(t: TestContext, scenario: Scenario = {}) {
   return { ...f, cachedDriver: driver, record };
 }
 
-test("the cache volume step of a labeled volume runs an auto container after the image wait with --pull=never", async (t) => {
+test("the cache volume step of a labeled volume runs an auto container once after the image wait with --pull=never", async (t) => {
   const f = cacheRig(t);
   const slot = f.launch("coder-1", {
     driver: f.cachedDriver,
@@ -653,13 +653,21 @@ test("the cache volume step of a labeled volume runs an auto container after the
   assert.ok(
     owner!.at(-1)!.includes("[ -e /var/lib/kanthord/.cache/.kanthord_owner ]"),
   );
-  assert.equal(existsSync(f.record), false);
+  assert.equal(readFileSync(f.record, "utf8"), CREATED_AT);
   assert.ok(
     slot.slotArguments().includes(`${CACHE_VOLUME}:/var/lib/kanthord/.cache`),
   );
+  slot.release();
+  await slot.instance.exited;
+  const second = f.launch("coder-1", {
+    driver: f.cachedDriver,
+    entries: [cachedEntry()],
+  });
+  await until(second.spawned, "The second slot did not start.");
+  assert.equal(f.cacheOwners().length, ONE_RUN);
 });
 
-test("a cache volume without the label runs the full-map carrier once, writes the host record and then takes the auto container", async (t) => {
+test("a cache volume without the label runs the full-map carrier once, writes the host record and then runs no owner step", async (t) => {
   const f = cacheRig(t);
   f.volumes.set(CACHE_VOLUME, { labeled: false, createdAt: CREATED_AT });
   const first = f.launch("coder-1", {
@@ -693,7 +701,7 @@ test("a cache volume without the label runs the full-map carrier once, writes th
     f.calls.filter((call) => call[0] === Verb.Unshare).length,
     unshares,
   );
-  assert.ok(f.cacheOwners()[0]!.includes(AUTO_OPTION));
+  assert.equal(f.cacheOwners().length, NO_RUNS);
 });
 
 test("a cache volume without the label on macOS runs a keep-id one-shot container in exclusive", async (t) => {

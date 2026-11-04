@@ -667,43 +667,51 @@ export class ContainerDriver implements SlotDriver {
       VOLUMES_DIRECTORY,
       `${name}${CACHE_OWNER_RECORD_SUFFIX}`,
     );
-    const idMap =
-      recorded(record) === volume.createdAt
-        ? IdMap.Auto
-        : idMapOf(runtime, facts, volume.labeled);
-    if (idMap === IdMap.Auto) {
-      await this.requireUnbounded(
-        runtime,
-        cacheOwnerArguments({ image, owner: this.owner, volume: name, idMap }),
-        signal,
-        this.shared.bind(this),
-      );
-      return;
-    }
-    const changed =
-      idMap === IdMap.Unshare
-        ? (await this.requireUnbounded(
-            runtime,
-            unshareOwnerArguments(volume.mountPoint),
-            signal,
-          )) &&
-          (await this.requireUnbounded(
-            runtime,
-            unshareMarkerArguments(volume.mountPoint),
-            signal,
-          ))
-        : await this.requireUnbounded(
-            runtime,
-            cacheOwnerArguments({
-              image,
-              owner: this.owner,
-              volume: name,
-              idMap: IdMap.KeepId,
-            }),
-            signal,
-            this.exclusive.bind(this),
-          );
+    if (recorded(record) === volume.createdAt) return;
+    const changed = await this.ownCacheVolume(
+      runtime,
+      name,
+      image,
+      volume,
+      idMapOf(runtime, facts, volume.labeled),
+      signal,
+    );
     if (changed) writePrivate(record, volume.createdAt, true);
+  }
+
+  private async ownCacheVolume(
+    runtime: ContainerRuntime,
+    name: string,
+    image: string,
+    volume: VolumeState,
+    idMap: IdMap,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    if (idMap === IdMap.Unshare)
+      return (
+        (await this.requireUnbounded(
+          runtime,
+          unshareOwnerArguments(volume.mountPoint),
+          signal,
+        )) &&
+        (await this.requireUnbounded(
+          runtime,
+          unshareMarkerArguments(volume.mountPoint),
+          signal,
+        ))
+      );
+    const keepId = idMap === IdMap.KeepId;
+    return this.requireUnbounded(
+      runtime,
+      cacheOwnerArguments({
+        image,
+        owner: this.owner,
+        volume: name,
+        idMap: keepId ? IdMap.KeepId : IdMap.Auto,
+      }),
+      signal,
+      keepId ? this.exclusive.bind(this) : this.shared.bind(this),
+    );
   }
 
   private async requireUnbounded(

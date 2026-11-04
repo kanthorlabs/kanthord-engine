@@ -691,7 +691,7 @@ function refusal(
     !dockerDesktop(info) &&
     securityOption(info, ROOTLESS_OPTION)
   )
-    return "rootless Docker cannot map the container uid 10001 to the server user. Use rootless Podman or a rootful runtime.";
+    return `rootless Docker cannot map the container uid ${CONTAINER_UID} to the server user. Use rootless Podman or a rootful runtime.`;
   const version = field(info, "version", "Version");
   if (
     runtime === ContainerRuntime.Podman &&

@@ -661,6 +661,7 @@ instances and starts no instance. A binding that drops an instance keeps a
 instance ends that execution and deregisters that registration. The slot root
 of an instance is `workers/<instance name>/` of the state directory with mode
 `0700`, and its container and volume are `kanthord_slot_<instance name>`. The
+container mounts `sessions/` of the slot root as its session directory. The
 archive stops the instance, then removes the slot root and the volume. Each
 start removes the roots and the volumes of no live server instance. An instance
 that exits with no stop restarts with a backoff under the same client
