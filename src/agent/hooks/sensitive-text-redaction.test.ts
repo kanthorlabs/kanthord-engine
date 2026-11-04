@@ -559,7 +559,7 @@ test("a value whose escaped view differs from its source keeps index 0", async (
     ),
   );
   const marker = markers(copy)[0]!;
-  assert.ok(marker.includes(":0:"), marker);
+  assert.ok(marker.includes(":a:"), marker);
   assert.ok(redaction.counts().unkept >= SINGLE_FINDING);
   assert.deepEqual(await call("write", { content: marker }), {
     block: true,
@@ -594,7 +594,7 @@ test("a full table gives index 0 and its restore blocks", async () => {
   const marker = markers(
     await redaction.text(j(PASS, ' = "', an(16), '"')),
   )[0]!;
-  assert.ok(marker.includes(":0:"));
+  assert.ok(marker.includes(":a:"));
   assert.deepEqual(await call("write", { content: marker }), {
     block: true,
     reason: RestoreReason.Unkept,
@@ -674,7 +674,7 @@ test("counts and text report each finding and a failure fails closed", async () 
   const copy = await end(toolResult(huge));
   assert.ok(
     String((copy!.content as { text: string }[])[0]!.text).startsWith(
-      "<redacted:scan_failed:0:",
+      "<redacted:scan_failed:a:",
     ),
   );
   assert.equal(redaction.counts().scan_failed, SINGLE_FINDING);

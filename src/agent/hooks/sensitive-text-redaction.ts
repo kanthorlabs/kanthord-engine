@@ -12,6 +12,8 @@ import {
   KNOWN_VALUE_MIN_CHARACTERS,
   knownMatcher,
   mapSensitiveStrings,
+  markerIndex,
+  markerTag,
   mergeSpans,
   promotes,
   replaceSpans,
@@ -189,8 +191,9 @@ export function sensitiveTextRedaction(
   known: KnownSecrets,
   sessionId: string,
 ): SensitiveTextRedaction {
-  const sessionPart = sessionPartOf(sessionId);
-  const tag = sessionPart + randomBytes(TAG_PART_BYTES).toString("hex");
+  const sessionPart = markerTag(sessionPartOf(sessionId));
+  const tag =
+    sessionPart + markerTag(randomBytes(TAG_PART_BYTES).toString("hex"));
   const matcher = knownMatcher();
   const secretMatcher = knownMatcher();
   const secrets = new Set<string>();
@@ -402,7 +405,7 @@ export function sensitiveTextRedaction(
         (whole, rule: string, index: string, markerTag: string) => {
           if (!markerTag.startsWith(sessionPart)) return whole;
           const entry =
-            markerTag === tag ? byIndex.get(Number(index)) : undefined;
+            markerTag === tag ? byIndex.get(markerIndex(index)) : undefined;
           if (
             entry?.rule === SensitiveRule.LlmCredential ||
             rule === SensitiveRule.LlmCredential

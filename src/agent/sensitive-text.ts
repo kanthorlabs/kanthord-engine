@@ -107,6 +107,9 @@ const JWT_START = "eyJ";
 const JWT_SEGMENTS = 3;
 const TRUNCATION_TEXT = "... [truncated]";
 const MARKER_START = "<redacted:";
+const LETTER_BASE = "a".charCodeAt(0);
+const DECIMAL_RADIX = 10;
+const HEX_RADIX = 16;
 const GO_DSN_ANCHORS = ["@tcp(", "@unix("] as const;
 
 const ORDERED_RULES: readonly SensitiveRule[] = Object.values(SensitiveRule);
@@ -116,11 +119,11 @@ const RULE_RANKS: ReadonlyMap<SensitiveRule, number> = new Map(
 const MARKER_RULES = [...ORDERED_RULES, SCAN_FAILED].join("|");
 
 export const SESSION_MARKER_PATTERN = new RegExp(
-  `<redacted:(?<rule>${MARKER_RULES}):(?<index>\\d{1,10}):(?<tag>[0-9a-f]{16})>`,
+  `<redacted:(?<rule>${MARKER_RULES}):(?<index>[a-j]{1,10}):(?<tag>[a-p]{16})>`,
   "g",
 );
 const ANY_MARKER_PATTERN = new RegExp(
-  `<redacted:(?:${MARKER_RULES})(?::\\d{1,10}:[0-9a-f]{16})?>`,
+  `<redacted:(?:${MARKER_RULES})(?::[a-j]{1,10}:[a-p]{16})?>`,
   "g",
 );
 
@@ -129,15 +132,29 @@ export function sessionMarker(
   index: number,
   tag: string,
 ): string {
-  return `<redacted:${rule}:${index}:${tag}>`;
+  return `<redacted:${rule}:${shiftedLetters(String(index), DECIMAL_RADIX)}:${tag}>`;
+}
+
+function shiftedLetters(digits: string, radix: number): string {
+  return Array.from(digits, (digit) =>
+    String.fromCharCode(LETTER_BASE + parseInt(digit, radix)),
+  ).join("");
+}
+
+export function markerTag(hex: string): string {
+  return shiftedLetters(hex, HEX_RADIX);
+}
+
+export function markerIndex(letters: string): number {
+  return Number(
+    Array.from(letters, (letter) => letter.charCodeAt(0) - LETTER_BASE).join(
+      "",
+    ),
+  );
 }
 
 export function tracerMarker(rule: SensitiveRule | typeof SCAN_FAILED): string {
   return `<redacted:${rule}>`;
-}
-
-export function withoutMarkers(text: string): string {
-  return text.replace(ANY_MARKER_PATTERN, " ");
 }
 
 const PROMOTED_RULES: ReadonlySet<SensitiveRule> = new Set([

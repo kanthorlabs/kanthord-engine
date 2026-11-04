@@ -19,7 +19,6 @@ import {
   redactionSummary,
   type SensitiveTextRedaction,
 } from "../../agent/hooks/sensitive-text-redaction.ts";
-import { withoutMarkers } from "../../agent/sensitive-text.ts";
 import { countTurns, pinnedLayers } from "../../agent/pinned-layers.ts";
 import { loadPi } from "../../agent/pi.ts";
 import { sessionTools, ToolProcesses } from "./tool-table.ts";
@@ -112,7 +111,7 @@ async function providerFailure(
   const detail = redactReason(errorMessage, await secrets());
   return new ExecutionStop(
     EndReason.ProviderFailed,
-    providerFailureOf(withoutMarkers(errorMessage)),
+    providerFailureOf(errorMessage),
     detail || null,
   );
 }
