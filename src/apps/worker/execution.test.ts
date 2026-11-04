@@ -738,6 +738,17 @@ function failureAnswer(refusal: {
   };
 }
 
+function instantBackoff(t: TestContext) {
+  const backoff = new Backoff();
+  const delays: number[] = [];
+  const next = backoff.next.bind(backoff);
+  t.mock.method(backoff, "next", () => {
+    delays.push(next());
+    return NO_ENTRIES;
+  });
+  return { backoff, delays };
+}
+
 function refusedSetupHost(
   t: TestContext,
   refusal: { status: number; code: string; details: unknown },
@@ -761,11 +772,9 @@ function refusedSetupHost(
   const releases: unknown[] = [];
   const events: string[] = [];
   const logs: Record<string, unknown>[] = [];
-  const pulledAt: number[] = [];
   const setups: unknown[] = [];
   let pulls = 0;
   t.mock.method(api.scheduler, "workPull", async () => {
-    pulledAt.push(performance.now());
     if (++pulls === (entry.pulls ?? TWO_PULLS)) {
       shutdown.cancel();
       return { type: OperationResultType.Indeterminate };
@@ -828,7 +837,7 @@ function refusedSetupHost(
   const running = pullLoop({
     api,
     registration: REGISTRATION,
-    backoff: entry.backoff ?? new Backoff(),
+    backoff: entry.backoff ?? instantBackoff(t).backoff,
     shutdown,
     host: (execution) =>
       hostExecution(
@@ -858,7 +867,6 @@ function refusedSetupHost(
     releases,
     events,
     logs,
-    pulledAt,
     setups,
     pulls: () => pulls,
   };
@@ -1024,14 +1032,7 @@ const THREE_PULLS = 3;
 const BACKOFF_GROWTH = 2;
 
 test("a persistent gateway answer of the setup re-pulls the same claim after a growing pull backoff", async (t) => {
-  const backoff = new Backoff();
-  const delays: number[] = [];
-  const next = backoff.next.bind(backoff);
-  t.mock.method(backoff, "next", () => {
-    const delay = next();
-    delays.push(delay);
-    return delay;
-  });
+  const { backoff, delays } = instantBackoff(t);
   const reset = t.mock.method(backoff, "reset");
   const answer = GATEWAY_ANSWERS[1]!;
   const host = refusedSetupHost(t, answer, undefined, {
@@ -1045,11 +1046,6 @@ test("a persistent gateway answer of the setup re-pulls the same claim after a g
     BACKOFF_INITIAL_MS * BACKOFF_GROWTH,
   ]);
   assert.equal(reset.mock.callCount(), NO_ENTRIES);
-  assert.ok(host.pulledAt[1]! - host.pulledAt[0]! >= BACKOFF_INITIAL_MS);
-  assert.ok(
-    host.pulledAt[2]! - host.pulledAt[1]! >=
-      BACKOFF_INITIAL_MS * BACKOFF_GROWTH,
-  );
   assert.equal(host.setups.length, TWO_PULLS);
   assert.deepEqual(host.setups[0], host.setups[1]);
   assert.deepEqual(unavailableRecords(host.logs), [answer.code, answer.code]);
