@@ -11,7 +11,7 @@ import { isObject } from "../../kernel/values.ts";
 import { providerFailureOf } from "../../llm/provider-failure.ts";
 import { SpanOperation, type SpanRecorder } from "./telemetry.ts";
 import { sessionEntryRecord } from "./session-entries.ts";
-import { knownMatcher } from "../../agent/sensitive-text.ts";
+import { knownMatcher, withoutMarkers } from "../../agent/sensitive-text.ts";
 import type { TurnPrompt } from "./native-agent.ts";
 import type { ToolProcesses, ToolTimeout } from "./tool-table.ts";
 import type { BashProcess } from "../../agent/bash-process.ts";
@@ -59,7 +59,7 @@ function turnAttributes(
   const { usage } = message;
   const failure =
     message.stopReason === ERROR_STOP
-      ? providerFailureOf(message.errorMessage ?? "")
+      ? providerFailureOf(withoutMarkers(message.errorMessage ?? ""))
       : null;
   const duration = Number.isFinite(message.durationMs)
     ? message.durationMs

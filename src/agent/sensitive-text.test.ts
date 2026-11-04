@@ -20,6 +20,7 @@ import {
   type SensitiveSpan,
   sessionMarker,
   tracerMarker,
+  withoutMarkers,
 } from "./sensitive-text.ts";
 import {
   GO_DSN_REVISION_2,
@@ -1343,6 +1344,19 @@ test("overlapping spans merge, and the lowest rule number wins", () => {
       findPatternText(secret),
     ).map((span) => span.rule),
     [SensitiveRule.LlmCredential],
+  );
+});
+
+test("withoutMarkers removes each session marker and tracer marker with its digits", () => {
+  const session = sessionMarker(
+    SensitiveRule.LlmCredential,
+    404,
+    "0000000000000418",
+  );
+  const tracer = tracerMarker(SensitiveRule.Jwt);
+  assert.equal(
+    withoutMarkers(j("key", session, "and", tracer, "end")),
+    j("key", " ", "and", " ", "end"),
   );
 });
 

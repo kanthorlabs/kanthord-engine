@@ -136,6 +136,10 @@ export function tracerMarker(rule: SensitiveRule | typeof SCAN_FAILED): string {
   return `<redacted:${rule}>`;
 }
 
+export function withoutMarkers(text: string): string {
+  return text.replace(ANY_MARKER_PATTERN, " ");
+}
+
 const PROMOTED_RULES: ReadonlySet<SensitiveRule> = new Set([
   SensitiveRule.LlmCredential,
   SensitiveRule.AwsAccessKeyId,
