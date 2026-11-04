@@ -780,6 +780,34 @@ export type PoolEntry = Omit<
   ConnectionBinding,
   "token" | "expired_at" | "client_secret"
 >;
+export const SESSION_READS_PENDING_MAX = 8;
+export const SessionReadOutcome = {
+  Resolved: "resolved",
+  SessionAbsent: "session_absent",
+  EntryAbsent: "entry_absent",
+  TooLarge: "too_large",
+  Unreadable: "unreadable",
+} as const;
+export type SessionReadOutcome =
+  (typeof SessionReadOutcome)[keyof typeof SessionReadOutcome];
+export interface SessionRead {
+  execution_id: string;
+  session_id: string;
+  entry_id: string;
+  entry_type: string;
+}
+export type SessionReadResult =
+  | {
+      outcome: typeof SessionReadOutcome.Resolved;
+      entry: Record<string, unknown>;
+    }
+  | { outcome: typeof SessionReadOutcome.TooLarge; bytes: number }
+  | {
+      outcome:
+        | typeof SessionReadOutcome.SessionAbsent
+        | typeof SessionReadOutcome.EntryAbsent
+        | typeof SessionReadOutcome.Unreadable;
+    };
 export interface PoolHost {
   prepare(): void;
   start(instance: PoolInstance, entries: readonly PoolEntry[]): void;
@@ -790,6 +818,11 @@ export interface PoolHost {
   sweep(live: ReadonlySet<string>): Promise<void>;
   stop(): Promise<void>;
   placementStatus(placement: PoolPlacement): Promise<PlacementStatus>;
+  readSessionEntry(
+    instance: PoolInstance,
+    read: SessionRead,
+    signal: AbortSignal,
+  ): Promise<SessionReadResult>;
 }
 
 export const WORKER_SERVICE_NAME = "worker";

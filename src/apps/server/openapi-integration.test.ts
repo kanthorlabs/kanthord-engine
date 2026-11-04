@@ -886,10 +886,11 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["tracking.analytics.flow", AccessPolicy.Human],
   ["tracking.session.entry.list", AccessPolicy.Human],
   ["tracking.session.entry.get", AccessPolicy.Human],
+  ["tracking.session.entry.rebuild", AccessPolicy.Human],
   ["tracking.cause.label", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 234;
-const ROUTED_OPERATION_COUNT = 222;
+const OPERATION_COUNT = 235;
+const ROUTED_OPERATION_COUNT = 223;
 const INTAKE_OPERATION_COUNT = 24;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = [

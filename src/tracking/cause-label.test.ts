@@ -349,6 +349,9 @@ function labelThroughService(store: Store, body: CauseLabelBody, now: number) {
     isHostedWorker: () => false,
     now: () => now,
     executions: { traceOf: () => undefined },
+    sessionHosts: {
+      read: () => Promise.reject(new Error("Unexpected session read")),
+    },
   });
   const caller: CallerContext = {
     identity: {
@@ -416,6 +419,9 @@ test("tracking.text.get answers the reason of the last label", (t) => {
     retentionDays: 30,
     isHostedWorker: () => false,
     executions: { traceOf: () => undefined },
+    sessionHosts: {
+      read: () => Promise.reject(new Error("Unexpected session read")),
+    },
   });
   const caller: CallerContext = {
     identity: {

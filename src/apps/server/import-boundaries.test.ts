@@ -323,6 +323,44 @@ test("an import of a worker unit file other than its entry is a boundary error f
   );
 });
 
+test("the server production code imports the session store of the worker unit and no other unit file", async () => {
+  const directory = "src/apps/server";
+  assert.equal(
+    await boundaryErrors(
+      `${directory}/worker-pool.ts`,
+      importSource(directory, "worker/unit/session-store.ts", "* as probe"),
+    ),
+    NO_REFUSALS,
+  );
+  for (const target of ["index.ts", "native-method.ts"])
+    assert.equal(
+      await boundaryErrors(
+        `${directory}/worker-pool.ts`,
+        importSource(directory, `worker/unit/${target}`, "* as probe"),
+      ),
+      EXPECTED_REFUSALS,
+      target,
+    );
+});
+
+test("the tracking contract imports only types from the worker contract", async () => {
+  const contract = "src/tracking/contract.ts";
+  assert.equal(
+    await boundaryErrors(
+      contract,
+      'import type { SessionRead } from "../worker/contract.ts";\nexport type Probe = SessionRead;\n',
+    ),
+    NO_REFUSALS,
+  );
+  assert.equal(
+    await boundaryErrors(
+      contract,
+      'import { SessionReadOutcome } from "../worker/contract.ts";\nexport const probe = SessionReadOutcome;\n',
+    ),
+    EXPECTED_REFUSALS,
+  );
+});
+
 test("a name of the repository other than RepositoryComponent is a lint error in a worker element", async () => {
   for (const directory of WORKER_ELEMENT_DIRECTORIES) {
     const file = `${directory}/probe.ts`;

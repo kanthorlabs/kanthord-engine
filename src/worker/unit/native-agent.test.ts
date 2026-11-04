@@ -48,6 +48,8 @@ import {
   anthropicAgent,
   anthropicSetup,
   fauxAssistantMessage,
+  fauxText,
+  fauxThinking,
   fauxToolCall,
   scriptedModelRuntime,
   scriptedProvider,
@@ -64,6 +66,8 @@ import {
 } from "../../tracking/contract.ts";
 import { SessionFormat, SpanOperation, SpanRecorder } from "./telemetry.ts";
 import { PINNED_CONTEXT_TYPE } from "./session-entries.ts";
+import { readSessionFileEntry } from "./session-store.ts";
+import { SessionReadOutcome } from "../contract.ts";
 
 const SECRET = "test_native-scripted-key";
 const NODE = "node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
@@ -112,7 +116,7 @@ async function fixture(
     prepare?: (workspace: string, hostHome: string) => void;
     turnCheck?: (context: CancellationContext) => Promise<void>;
     intent?: ExecutionIntent;
-    sessionRoot?: false;
+    sessionRoot?: false | string;
   } = {},
 ) {
   const setup = anthropicSetup(overrides);
@@ -139,7 +143,10 @@ async function fixture(
     "coder@1",
     { write: (batch) => records.push(...batch), flush: async () => {} },
   );
-  const sessionRoot = options.sessionRoot === false ? undefined : temporary(t);
+  const sessionRoot =
+    options.sessionRoot === false
+      ? undefined
+      : (options.sessionRoot ?? temporary(t));
   const agent = await openNativeAgent({
     spans,
     sessionRoot,
@@ -427,6 +434,76 @@ test("a prompt writes every pi entry as a session_entry record with the pinned c
     new Set(entries.map(({ entry_id }) => entry_id)).size,
     entries.length,
   );
+});
+
+const LARGE_WRITE_LENGTH = 70000;
+const THINKING_TEXT = "plan the write";
+
+test("a rebuild from the session file answers each pi entry that the tracer sent, the cut write call in full", async (t) => {
+  const sessionsRoot = temporary(t);
+  const large = "w".repeat(LARGE_WRITE_LENGTH);
+  const h = await fixture(
+    t,
+    [
+      fauxAssistantMessage(
+        [
+          fauxThinking(THINKING_TEXT),
+          fauxToolCall("write", { path: "large.txt", content: large }),
+        ],
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage([fauxThinking(THINKING_TEXT), fauxText("done")]),
+    ],
+    {},
+    unusedHostTools,
+    { sessionRoot: join(sessionsRoot, "execution") },
+  );
+  await h.agent.prompt(WORK);
+  h.agent.closeTrace(SpanStatus.Ok);
+  const entries = sessionEntries(h);
+  const types = new Set(entries.map(({ entry_type }) => entry_type));
+  for (const type of ["model_change", "thinking_level_change", CUSTOM_ENTRY])
+    assert.ok(types.has(type), type);
+  assert.ok(
+    entries.some(({ entry }) => entry.customType === PINNED_CONTEXT_TYPE),
+  );
+  assert.ok(
+    entries.some(
+      ({ entry }) =>
+        (entry.message as { role?: string } | undefined)?.role === TOOL_RESULT,
+    ),
+  );
+  const cut = entries.filter(({ truncated }) => truncated);
+  assert.equal(cut.length, SINGLE_CALL_COUNT);
+  const signal = new AbortController().signal;
+  for (const record of entries) {
+    const result = await readSessionFileEntry(
+      sessionsRoot,
+      {
+        execution_id: h.executionId,
+        session_id: record.session_id,
+        entry_id: record.entry_id,
+        entry_type: record.entry_type,
+      },
+      signal,
+    );
+    assert.equal(result.outcome, SessionReadOutcome.Resolved, record.entry_id);
+    assert.ok(result.outcome === SessionReadOutcome.Resolved);
+    if (!record.truncated) {
+      assert.deepEqual(result.entry, record.entry);
+      continue;
+    }
+    assert.notDeepEqual(result.entry, record.entry);
+    const content = (
+      result.entry.message as { content: Record<string, unknown>[] }
+    ).content;
+    assert.deepEqual(
+      content.map(({ type }) => type),
+      ["thinking", TOOL_CALL_PART],
+    );
+    assert.equal(content[0]!.thinking, THINKING_TEXT);
+    assert.equal((content[1]!.arguments as { content: string }).content, large);
+  }
 });
 
 test("a turn end names the assistant session entry of the turn and links the session", async (t) => {

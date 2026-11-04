@@ -586,6 +586,9 @@ test("after a label the list item answers the label cause and the span list answ
     retentionDays: 30,
     isHostedWorker: () => false,
     executions: { traceOf: () => undefined },
+    sessionHosts: {
+      read: () => Promise.reject(new Error("Unexpected session read")),
+    },
   });
   const caller: CallerContext = {
     identity: {

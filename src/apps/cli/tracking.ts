@@ -5,6 +5,7 @@ import { httpClient, resolveClient } from "../../gateway/client.ts";
 import { causeCategorySchema } from "../../kernel/cause.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { identitySchema } from "../../kernel/identity.ts";
+import { isObject } from "../../kernel/values.ts";
 import {
   analyticsBucketSchema,
   analyticsDurationQuerySchema,
@@ -19,6 +20,7 @@ import {
   entryIdentitySchema,
   flowCompareSchema,
   flowGrainSchema,
+  type SessionEntry,
   SPAN_LIST_LIMIT_DEFAULT,
   SPAN_LIST_LIMIT_MAX,
   SPAN_LIST_LIMIT_MIN,
@@ -36,6 +38,7 @@ import {
   traceStateSchema,
   trackingOperations,
 } from "../../tracking/contract.ts";
+import { SESSION_READS_PENDING_MAX } from "../../worker/contract.ts";
 import { CommandName, PROGRAM_NAME } from "./constants.ts";
 import {
   handleMutationResult,
@@ -67,6 +70,10 @@ const UNIX_MS = /^\d+$/;
 const GET = "get";
 const LIST = "list";
 const TEXT_IDENTITY = /^[0-9a-f]{16}:[a-z][a-z0-9_.-]*$/;
+const REBUILD_PARALLEL_DIVISOR = 2;
+const REBUILD_PARALLEL_COUNT =
+  SESSION_READS_PENDING_MAX / REBUILD_PARALLEL_DIVISOR;
+const ENTRY_TOO_LARGE_CODE = "tracking.entry.too_large";
 
 function requireTraceId(traceId: string, leaf: string): void {
   assert.ok(leaf);
@@ -479,6 +486,75 @@ function entryListLimit(value: string | undefined): number {
   return limit;
 }
 
+function rebuiltEntry(
+  entries: ReturnType<typeof client>,
+  entry: SessionEntry,
+  leaf: string,
+): Promise<SessionEntry> {
+  return entries
+    .sessionEntryRebuild({
+      params: {
+        trace_id: entry.trace_id,
+        session_id: entry.session_id,
+        entry_id: entry.entry_id,
+      },
+      query: {},
+      body: null,
+    })
+    .then((result) =>
+      handleReadResult(result, `cli.tracking.${leaf}.indeterminate`),
+    );
+}
+
+async function rebuildCutEntries(
+  entries: ReturnType<typeof client>,
+  items: readonly SessionEntry[],
+  leaf: string,
+): Promise<SessionEntry[]> {
+  const cut = items.filter((item) => item.truncated);
+  const rebuilt = new Map<string, SessionEntry>();
+  const failures: { sequence: number; error: unknown }[] = [];
+  let next = 0;
+  const rebuildNext = async () => {
+    while (next < cut.length) {
+      const item = cut[next++]!;
+      try {
+        rebuilt.set(item.entry_id, await rebuiltEntry(entries, item, leaf));
+      } catch (error) {
+        if (
+          !(error instanceof Diagnostic) ||
+          error.code !== ENTRY_TOO_LARGE_CODE
+        )
+          failures.push({ sequence: item.sequence, error });
+      }
+    }
+  };
+  await Promise.all(
+    Array.from(
+      { length: Math.min(REBUILD_PARALLEL_COUNT, cut.length) },
+      rebuildNext,
+    ),
+  );
+  const first = failures.toSorted(
+    (left, right) => left.sequence - right.sequence,
+  )[0];
+  if (first) {
+    if (!(first.error instanceof Diagnostic)) throw first.error;
+    const entryId = items.find(
+      (item) => item.sequence === first.sequence,
+    )!.entry_id;
+    const details = first.error.details;
+    throw new Diagnostic(first.error.code, first.error.message, {
+      fields: first.error.fields,
+      details: {
+        ...(isObject(details) && !Array.isArray(details) ? details : {}),
+        entry_id: entryId,
+      },
+    });
+  }
+  return items.map((item) => rebuilt.get(item.entry_id) ?? item);
+}
+
 async function sessionEntryList(
   traceId: string,
   sessionId: string,
@@ -489,14 +565,17 @@ async function sessionEntryList(
   requireSpanId(sessionId, leaf);
   const options = command.optsWithGlobals();
   const limit = entryListLimit(options.limit);
-  const result = await client(command, leaf).sessionEntryList({
+  const entries = client(command, leaf);
+  const result = await entries.sessionEntryList({
     params: { trace_id: traceId, session_id: sessionId },
     query: { limit, cursor: options.cursor, tool_call_id: options.toolCall },
     body: null,
   });
-  process.stdout.write(
-    `${JSON.stringify(handleReadResult(result, `cli.tracking.${leaf}.indeterminate`))}\n`,
-  );
+  const page = handleReadResult(result, `cli.tracking.${leaf}.indeterminate`);
+  const items = options.full
+    ? await rebuildCutEntries(entries, page.items, leaf)
+    : page.items;
+  process.stdout.write(`${JSON.stringify({ ...page, items })}\n`);
 }
 
 async function sessionEntryGet(
@@ -513,11 +592,15 @@ async function sessionEntryGet(
       `cli.tracking.${leaf}.invalid_entry_id`,
       "invalid entry ID",
     );
-  const result = await client(command, leaf).sessionEntryGet({
+  const request = {
     params: { trace_id: traceId, session_id: sessionId, entry_id: entryId },
     query: {},
     body: null,
-  });
+  };
+  const entries = client(command, leaf);
+  const result = command.optsWithGlobals().full
+    ? await entries.sessionEntryRebuild(request)
+    : await entries.sessionEntryGet(request);
   process.stdout.write(
     `${JSON.stringify(handleReadResult(result, `cli.tracking.${leaf}.indeterminate`))}\n`,
   );
@@ -713,6 +796,7 @@ export function addTrackingCommand(program: Command): void {
       "Continue from a cursor",
       singleUse("--cursor"),
     )
+    .option("--full", "Rebuild each cut entry from the host of the execution")
     .action((traceId: string, sessionId: string, _options, command: Command) =>
       sessionEntryList(traceId, sessionId, command),
     );
@@ -722,6 +806,7 @@ export function addTrackingCommand(program: Command): void {
     .argument("<trace-id>", "Trace ID")
     .argument("<session-id>", "Session ID")
     .argument("<entry-id>", "Entry ID")
+    .option("--full", "Rebuild the full entry from the host of the execution")
     .action(
       (
         traceId: string,

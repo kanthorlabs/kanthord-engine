@@ -16,6 +16,7 @@ import {
   type PoolEntry,
   type PoolInstance,
   PoolPlacement,
+  SessionReadOutcome,
 } from "../../worker/contract.ts";
 import { SlotControl } from "../worker/thread-data.ts";
 import type {
@@ -612,5 +613,51 @@ test("the sweep of a state directory with no workers directory does nothing and 
   assert.deepEqual(
     f.records.map((entry) => entry.message),
     [CLEANUP_MESSAGE],
+  );
+});
+
+test("a session read of a pending server instance reads its slot root directly", async (t) => {
+  const f = fixture(t, { instanceLimit: 1 });
+  f.pool.start(f.instanceOf("coder-1"), []);
+  const pending = f.instanceOf("coder-2");
+  f.pool.start(pending, []);
+  assert.equal(f.driver.launches.length, FIRST_LAUNCH);
+  const executionId = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  const sessionId = "0123456789abcdef";
+  const entry = { type: "message", id: "a1b2c3d4", text: "full" };
+  const directory = join(
+    f.stateDirectory,
+    "workers",
+    "coder-2",
+    "state",
+    "kanthord",
+    "pi",
+    "sessions",
+    "execution",
+    executionId,
+  );
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, `2026-11-04T00-00-00-000Z_${sessionId}.jsonl`),
+    `${JSON.stringify(entry)}\n`,
+  );
+  const read = {
+    execution_id: executionId,
+    session_id: sessionId,
+    entry_id: entry.id,
+    entry_type: entry.type,
+  };
+  const signal = new AbortController().signal;
+  assert.deepEqual(await f.pool.readSessionEntry(pending, read, signal), {
+    outcome: SessionReadOutcome.Resolved,
+    entry,
+  });
+  assert.deepEqual(
+    await f.pool.readSessionEntry(f.instanceOf("coder-3"), read, signal),
+    { outcome: SessionReadOutcome.SessionAbsent },
+  );
+  assert.deepEqual(
+    f.records.map(({ message }) => message),
+    [LIMIT_MESSAGE],
   );
 });

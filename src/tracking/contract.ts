@@ -13,8 +13,10 @@ import {
   AccessPolicy,
   type Operation,
   OperationLifetime,
+  REQUEST_BODY_MAX_BYTES,
   StoreName,
 } from "../kernel/operation.ts";
+import type { SessionRead, SessionReadResult } from "../worker/contract.ts";
 export const TRACKING_SERVICE_NAME = "tracking";
 export const EXECUTION_IDENTITY_PREFIX = "execution";
 export const ROOT_SPAN_OPERATION = "scheduler.execution";
@@ -51,6 +53,41 @@ export const TIMELINE_LIMIT_MAX = 1000;
 export const ANALYTICS_ITEMS_MAX = 1000;
 export const ANALYTICS_RANGE_DAYS_DEFAULT = 7;
 export const ANALYTICS_RANGE_DAYS_MAX = 31;
+export const SESSION_READ_ENVELOPE_BYTES = 65536;
+export const SESSION_ENTRY_FULL_MAX_BYTES =
+  REQUEST_BODY_MAX_BYTES - SESSION_READ_ENVELOPE_BYTES;
+export const SESSION_READ_ANSWER_MARGIN_MS = 5000;
+export const SESSION_READ_WAIT_MS =
+  TRACKING_TIMEOUT_MS - SESSION_READ_ANSWER_MARGIN_MS;
+
+export const UnreachableReason = {
+  Offline: "offline",
+  Timeout: "timeout",
+  Busy: "busy",
+} as const;
+export type UnreachableReason =
+  (typeof UnreachableReason)[keyof typeof UnreachableReason];
+
+export const SessionAbsentReason = {
+  NotKept: "not_kept",
+  Archived: "archived",
+  InstanceUnknown: "instance_unknown",
+} as const;
+export type SessionAbsentReason =
+  (typeof SessionAbsentReason)[keyof typeof SessionAbsentReason];
+
+export type SessionReadAnswer =
+  | { result: SessionReadResult; instance: string; placement: string }
+  | { unreachable: UnreachableReason; instance: string; placement: string }
+  | {
+      session_absent: SessionAbsentReason;
+      instance: string | null;
+      placement: string | null;
+    };
+
+export interface SessionHosts {
+  read(read: SessionRead, signal: AbortSignal): Promise<SessionReadAnswer>;
+}
 
 export const SpanStatus = { Unset: "Unset", Ok: "Ok", Error: "Error" } as const;
 export const spanStatusSchema = z.enum(SpanStatus);
@@ -1205,6 +1242,31 @@ export const trackingOperations = {
     body: false,
     status: HttpStatus.OK,
     description: "Read one entry of an agent session.",
+    input: z.strictObject({
+      params: z.strictObject({
+        trace_id: traceIdSchema,
+        session_id: spanIdSchema,
+        entry_id: entryIdentitySchema,
+      }),
+      query: z.strictObject({}),
+      body: z.null(),
+    }),
+    output: sessionEntrySchema,
+  },
+  sessionEntryRebuild: {
+    id: "tracking.session.entry.rebuild",
+    service: TRACKING_SERVICE_NAME,
+    method: HttpMethod.Get,
+    path: "/api/tracking/trace/:trace_id/session/:session_id/entry/:entry_id/full",
+    access: AccessPolicy.Human,
+    store: StoreName.Tracking,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: TRACKING_TIMEOUT_MS,
+    mutation: false,
+    body: false,
+    status: HttpStatus.OK,
+    description:
+      "Read the full entry of an agent session entry from the host of the execution. A failure answers an error code, never the cut entry.",
     input: z.strictObject({
       params: z.strictObject({
         trace_id: traceIdSchema,

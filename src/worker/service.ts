@@ -51,6 +51,7 @@ import {
   type RepositoryBindingIdsOf,
   type RepositoryPolicyOf,
   type SchedulerClaims,
+  type SessionRead,
   type SshHostKeysOf,
   WORKER_SERVICE_NAME,
   type WorkerAgentView,
@@ -95,6 +96,8 @@ import {
 } from "./catalog.ts";
 import { resumeRegistration, TableRegistrations } from "./registrations.ts";
 import { Pool } from "./pool.ts";
+import { readSessionEntry } from "./session-read.ts";
+import type { SessionReadAnswer } from "../tracking/contract.ts";
 import {
   instanceDropped,
   listRegistrationRecords,
@@ -467,6 +470,23 @@ export class WorkerService implements Service {
     void host.sweep(this.liveInstanceNames());
     this.reconcile();
     void this.logUnavailableContainerDriver();
+  }
+
+  readSessionEntry(
+    runtimeIdentity: string | null,
+    read: SessionRead,
+    signal: AbortSignal,
+  ): Promise<SessionReadAnswer> {
+    return readSessionEntry(
+      {
+        store: this.dependencies.store,
+        host: this.dependencies.pool?.host ?? null,
+        logger: this.dependencies.pool?.logger ?? null,
+      },
+      runtimeIdentity,
+      read,
+      signal,
+    );
   }
 
   async placementStatus(

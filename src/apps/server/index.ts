@@ -495,6 +495,14 @@ export function composeServices(options: {
         return row === undefined ? undefined : executionTrace(row);
       },
     },
+    sessionHosts: {
+      read: (read, signal) =>
+        worker.readSessionEntry(
+          scheduler.executionOf(read.execution_id)?.runtime_identity ?? null,
+          read,
+          signal,
+        ),
+    },
     health: options.health,
   });
   const promptRecordOf = (trace: ExecutionTrace, agentName: string) => {

@@ -373,7 +373,9 @@ export default tseslint.config(
                   }),
                 },
                 {
-                  to: element("worker-unit", { fileInternalPath: "budget.ts" }),
+                  to: element("worker-unit", {
+                    fileInternalPath: "{budget,session-store}.ts",
+                  }),
                 },
                 {
                   to: element("apps-worker", {
@@ -678,6 +680,21 @@ export default tseslint.config(
                     captured: { name: "custody" },
                     fileInternalPath: "contract.ts",
                   }),
+                },
+              ],
+            },
+            {
+              from: element("service", {
+                captured: { name: "tracking" },
+                fileInternalPath: "contract.ts",
+              }),
+              allow: [
+                {
+                  to: element("service", {
+                    captured: { name: "worker" },
+                    fileInternalPath: "contract.ts",
+                  }),
+                  dependency: { kind: "type" },
                 },
               ],
             },
