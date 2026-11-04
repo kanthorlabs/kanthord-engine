@@ -1359,6 +1359,26 @@ test("a session marker holds no digit and keeps its index and tag", () => {
   assert.equal(match!.groups!.tag, tag);
 });
 
+test("a session marker index has one form for each number", () => {
+  const tag = markerTag("0123456789abcdef");
+  const marked = (index: string) =>
+    [
+      ...j("<redacted:", SensitiveRule.Jwt, ":", index, ":", tag, ">").matchAll(
+        SESSION_MARKER_PATTERN,
+      ),
+    ].length;
+  const markers = ["a", "b", "ba"];
+  const others = ["aa", "ab"];
+  assert.deepEqual(
+    markers.map(marked),
+    markers.map(() => 1),
+  );
+  assert.deepEqual(
+    others.map(marked),
+    others.map(() => 0),
+  );
+});
+
 test("a valid marker cuts a span and an invalid marker is scanned", () => {
   const marker = sessionMarker(
     SensitiveRule.QuotedAssignment,

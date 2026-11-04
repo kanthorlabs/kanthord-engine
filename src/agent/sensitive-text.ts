@@ -119,11 +119,11 @@ const RULE_RANKS: ReadonlyMap<SensitiveRule, number> = new Map(
 const MARKER_RULES = [...ORDERED_RULES, SCAN_FAILED].join("|");
 
 export const SESSION_MARKER_PATTERN = new RegExp(
-  `<redacted:(?<rule>${MARKER_RULES}):(?<index>[a-j]{1,10}):(?<tag>[a-p]{16})>`,
+  `<redacted:(?<rule>${MARKER_RULES}):(?<index>a|[b-j][a-j]{0,9}):(?<tag>[a-p]{16})>`,
   "g",
 );
 const ANY_MARKER_PATTERN = new RegExp(
-  `<redacted:(?:${MARKER_RULES})(?::[a-j]{1,10}:[a-p]{16})?>`,
+  `<redacted:(?:${MARKER_RULES})(?::(?:a|[b-j][a-j]{0,9}):[a-p]{16})?>`,
   "g",
 );
 
