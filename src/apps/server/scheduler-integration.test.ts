@@ -31,6 +31,7 @@ import {
   OperationLifetime,
   type OperationResult,
   OperationResultType,
+  REQUEST_BODY_MAX_BYTES,
 } from "../../kernel/operation.ts";
 import { CancellationContext } from "../../kernel/context.ts";
 import { HttpStatus } from "../../kernel/http.ts";
@@ -655,7 +656,7 @@ test("Scheduler routes preserve closed inputs, shared envelopes, lifetimes and b
           Authorization: `Bearer ${h.generalToken}`,
           "Content-Type": "application/json",
         },
-        body: "x".repeat(10 * 1024 * 1024 + 1),
+        body: "x".repeat(REQUEST_BODY_MAX_BYTES + 1),
       },
     );
     assert.equal(response.status, HttpStatus.PayloadTooLarge);

@@ -25,7 +25,6 @@ export const PROJECT_PRODUCER = "project";
 export const WORKER_PRODUCER = "worker";
 const ONE_KIND_AT_MOST = 1;
 export const TRACKING_TIMEOUT_MS = 30000;
-export const TELEMETRY_WRITE_MAX_BODY_BYTES = 1048576;
 export const TELEMETRY_WRITE_RECORDS_MAX = 1000;
 export const TELEMETRY_RECORD_MAX_BYTES = 65536;
 export const EXECUTION_RECORD_LIMIT = 50000;
@@ -860,7 +859,6 @@ export const trackingOperations = {
     mutation: true,
     body: true,
     requiresExecution: true,
-    maxBodyBytes: TELEMETRY_WRITE_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     description:
       "Store the spans and telemetry texts that a native worker observed in its live execution.",

@@ -7,6 +7,7 @@ import {
   hasHttpRoute,
   type Operation,
   OperationLifetime,
+  REQUEST_BODY_MAX_BYTES,
 } from "../kernel/operation.ts";
 import { isString } from "../kernel/values.ts";
 import { gatewayOperations } from "./contract.ts";
@@ -14,7 +15,6 @@ import { workerOperations } from "../worker/contract.ts";
 import { schedulerOperations } from "../scheduler/contract.ts";
 import { missionOperations } from "../mission/contract.ts";
 import { trackingOperations } from "../tracking/contract.ts";
-import { bodyLimitOf } from "./body-limit.ts";
 import {
   type PortAnswer,
   type PortCall,
@@ -79,7 +79,7 @@ async function invokeCall(
 ): Promise<RecordedResponse> {
   if (
     call.body !== null &&
-    Buffer.byteLength(call.body) > bodyLimitOf(operation)
+    Buffer.byteLength(call.body) > REQUEST_BODY_MAX_BYTES
   )
     return failure(
       new GatewayError(

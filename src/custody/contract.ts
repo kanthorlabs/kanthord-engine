@@ -474,9 +474,6 @@ export type Material = {
 export const CUSTODY_SERVICE_NAME = "custody";
 export const CREDENTIAL_TIMEOUT_MS = 30000;
 export const CREDENTIAL_CHECK_TIMEOUT_MS = 10000;
-export const CREATE_MAX_BODY_BYTES = 65536;
-export const METADATA_MAX_BODY_BYTES = 16384;
-export const REVOKE_MAX_BODY_BYTES = 0;
 export const LIST_LIMIT_DEFAULT = 100;
 export const LIST_LIMIT_MAX = 1000;
 

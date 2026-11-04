@@ -37,6 +37,7 @@ const NO_TIMEOUT_MS = 0;
 const API_PATH_PREFIX = "/api/";
 const DELIVERY_PATH_PREFIX = "/hooks/";
 const EMPTY_REGISTRY_SIZE = 0;
+export const REQUEST_BODY_MAX_BYTES = 33554432;
 export const emptyInput = z.strictObject({
   params: z.strictObject({}),
   query: z.strictObject({}),
@@ -65,7 +66,6 @@ export interface Operation<
   requiresRegistration?: boolean;
   endedGroup?: { code: string; message: string };
   requiresExecution?: boolean;
-  maxBodyBytes?: number;
   replayGuard?: (recorded: unknown, identity: CallerIdentity) => boolean;
   lifetime: OperationLifetime;
   delivery?: true;

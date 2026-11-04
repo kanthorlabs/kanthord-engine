@@ -1,6 +1,5 @@
 import { z } from "zod";
 import {
-  CREATE_MAX_BODY_BYTES,
   CREDENTIAL_TIMEOUT_MS,
   credentialAnswerSchema,
   credentialCheckAnswerSchema,
@@ -12,7 +11,6 @@ import {
   credentialRevisionParamsSchema,
   credentialUpdateMetadataBodySchema,
   LoginSessionMode,
-  METADATA_MAX_BODY_BYTES,
   sealedCopyAnswerSchema,
 } from "../custody/contract.ts";
 import { resourceFailureReasonSchema } from "../kernel/health.ts";
@@ -154,7 +152,6 @@ export const providerCheckAnswerSchema = z.strictObject({
 export type ProviderCheckAnswer = z.infer<typeof providerCheckAnswerSchema>;
 export const COPY_REPORT_MODELS_MAX = 512;
 export const COPY_REPORT_TEXT_MAX_LENGTH = 256;
-const COPY_REPORT_MAX_BODY_BYTES = 1048576;
 const reportedModelsSchema = z
   .array(
     z.strictObject({
@@ -237,7 +234,6 @@ export const llmOperations = {
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
     mutation: true,
     body: true,
-    maxBodyBytes: CREATE_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     input: z.strictObject({
       params: emptyParams,
@@ -303,7 +299,6 @@ export const llmOperations = {
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
     mutation: true,
     body: true,
-    maxBodyBytes: CREATE_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     input: z.strictObject({
       params: credentialParamsSchema,
@@ -325,7 +320,6 @@ export const llmOperations = {
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
     mutation: true,
     body: true,
-    maxBodyBytes: METADATA_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     input: z.strictObject({
       params: credentialParamsSchema,
@@ -389,7 +383,6 @@ export const llmOperations = {
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
     mutation: false,
     body: true,
-    maxBodyBytes: CREATE_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     input: z.strictObject({
       params: emptyParams,
@@ -430,7 +423,6 @@ export const llmOperations = {
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
     mutation: true,
     body: true,
-    maxBodyBytes: METADATA_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     input: z.strictObject({
       params: emptyParams,
@@ -457,7 +449,6 @@ export const llmOperations = {
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
     mutation: true,
     body: true,
-    maxBodyBytes: METADATA_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     input: z.strictObject({
       params: sessionParams,
@@ -498,7 +489,6 @@ export const llmOperations = {
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
     mutation: true,
     body: true,
-    maxBodyBytes: CREATE_MAX_BODY_BYTES,
     status: HttpStatus.NoContent,
     input: z.strictObject({
       params: sessionParams,
@@ -520,7 +510,6 @@ export const llmOperations = {
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
     mutation: true,
     body: true,
-    maxBodyBytes: COPY_REPORT_MAX_BODY_BYTES,
     status: HttpStatus.NoContent,
     input: z.strictObject({
       params: credentialParamsSchema,
@@ -564,7 +553,6 @@ export const llmOperations = {
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
     mutation: false,
     body: true,
-    maxBodyBytes: METADATA_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     input: z.strictObject({
       params: emptyParams,
@@ -586,7 +574,6 @@ export const llmOperations = {
     timeoutMs: MODEL_CHECK_OPERATION_TIMEOUT_MS,
     mutation: false,
     body: true,
-    maxBodyBytes: METADATA_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     input: z.strictObject({
       params: emptyParams,

@@ -32,7 +32,6 @@ import {
 } from "../repository/contract.ts";
 import { timestamp } from "../kernel/json.ts";
 import {
-  CREATE_MAX_BODY_BYTES,
   CREDENTIAL_TIMEOUT_MS,
   credentialAnswerSchema,
   credentialCheckAnswerSchema,
@@ -45,7 +44,6 @@ import {
   credentialRevisionParamsSchema,
   credentialRotateBodySchema,
   credentialUpdateMetadataBodySchema,
-  METADATA_MAX_BODY_BYTES,
 } from "../custody/contract.ts";
 import {
   type Environment,
@@ -1250,7 +1248,6 @@ const credentialWrite = {
   ...credentialOperation,
   mutation: true,
   body: true,
-  maxBodyBytes: CREATE_MAX_BODY_BYTES,
 } as const;
 const credentialAction = {
   ...credentialOperation,
@@ -1319,7 +1316,6 @@ export const environmentSecretOperations = {
     id: "project.credential.update_metadata",
     method: HttpMethod.Put,
     path: "/api/project/credential/:credential_name/metadata",
-    maxBodyBytes: METADATA_MAX_BODY_BYTES,
     input: z.strictObject({
       params: credentialParamsSchema,
       query: emptyFields,

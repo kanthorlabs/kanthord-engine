@@ -1,6 +1,5 @@
 import { z } from "zod";
 import {
-  CREATE_MAX_BODY_BYTES,
   CREDENTIAL_TIMEOUT_MS,
   credentialAnswerSchema,
   credentialCheckAnswerSchema,
@@ -13,7 +12,6 @@ import {
   credentialRevisionParamsSchema,
   credentialRotateBodySchema,
   credentialUpdateMetadataBodySchema,
-  METADATA_MAX_BODY_BYTES,
 } from "../custody/contract.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
@@ -75,7 +73,6 @@ export const storageOperations = {
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
     mutation: true,
     body: true,
-    maxBodyBytes: CREATE_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     input: z.strictObject({
       params: emptyParams,
@@ -138,7 +135,6 @@ export const storageOperations = {
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
     mutation: true,
     body: true,
-    maxBodyBytes: CREATE_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     input: z.strictObject({
       params: credentialParamsSchema,
@@ -159,7 +155,6 @@ export const storageOperations = {
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
     mutation: true,
     body: true,
-    maxBodyBytes: METADATA_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     input: z.strictObject({
       params: credentialParamsSchema,
@@ -220,7 +215,6 @@ export const storageOperations = {
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
     mutation: false,
     body: true,
-    maxBodyBytes: CREATE_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     input: z.strictObject({
       params: emptyParams,

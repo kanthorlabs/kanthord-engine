@@ -352,10 +352,6 @@ export interface EvidenceRequests {
     options: ClientOptions,
   ): Promise<OperationResult<unknown>>;
 }
-export const HANDOVER_MAX_BODY_BYTES = 1024;
-export const SSH_SIGN_MAX_BODY_BYTES = 16384;
-export const CREDENTIAL_REPORT_MAX_BODY_BYTES = 65536;
-const REGISTER_MAX_BODY_BYTES = 40960;
 const REGISTRATION_NAME_MAX_LENGTH = 64;
 const INSTANCE_NAME_MAX_LENGTH = 63;
 const CONNECTION_NAME_MAX_LENGTH = 255;
@@ -1430,7 +1426,6 @@ export const workerOperations = {
     mutation: true,
     secret: true,
     body: true,
-    maxBodyBytes: HANDOVER_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     input: z.strictObject({
       params: emptyFields,
@@ -1453,7 +1448,6 @@ export const workerOperations = {
     timeoutMs: HANDOVER_TIMEOUT_MS,
     mutation: true,
     body: true,
-    maxBodyBytes: CREDENTIAL_REPORT_MAX_BODY_BYTES,
     status: HttpStatus.NoContent,
     input: z.strictObject({
       params: emptyFields,
@@ -1479,7 +1473,6 @@ export const workerOperations = {
     mutation: true,
     secret: true,
     body: true,
-    maxBodyBytes: SSH_SIGN_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     input: z.strictObject({
       params: emptyFields,
@@ -1669,7 +1662,6 @@ export const workerOperations = {
     requiresRegistration: false,
     timeoutMs: 10000,
     mutation: true,
-    maxBodyBytes: REGISTER_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     input: emptyInput,
     output: z.strictObject({

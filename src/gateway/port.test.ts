@@ -11,6 +11,7 @@ import {
   type Operation,
   OperationLifetime,
   OperationRegistry,
+  REQUEST_BODY_MAX_BYTES,
   StoreName,
 } from "../kernel/operation.ts";
 import { Store } from "../kernel/store.ts";
@@ -222,13 +223,20 @@ test("a body that fails to parse reaches the invocation as a rejection", async (
   assert.equal(calls[0]?.options.rejection?.code, INVALID_JSON);
 });
 
+test("a body at the limit reaches the invocation", async (t) => {
+  const { invocation, calls } = fakeInvocation();
+  const { port, answers } = connect(t, invocation);
+  const body = "x".repeat(REQUEST_BODY_MAX_BYTES);
+  port.postMessage(callOf(workerOperations.handover, "call-1", body));
+  await answerOf(answers, "call-1", t.signal);
+  assert.equal(calls.length, SINGLE_ANSWER);
+  assert.equal(calls[0]?.options.rejection?.code, INVALID_JSON);
+});
+
 test("a body above the limit is refused before the invocation", async (t) => {
   const { invocation, calls } = fakeInvocation();
   const { port, answers } = connect(t, invocation);
-  const body = "x".repeat(
-    (workerOperations.handover.maxBodyBytes ?? NO_CALLS) +
-      OVERSIZED_BODY_PADDING,
-  );
+  const body = "x".repeat(REQUEST_BODY_MAX_BYTES + OVERSIZED_BODY_PADDING);
   port.postMessage(callOf(workerOperations.handover, "call-1", body));
   const answer = await answerOf(answers, "call-1", t.signal);
   assert.equal(answer.status, HttpStatus.PayloadTooLarge);
@@ -239,10 +247,7 @@ test("a body above the limit is refused before the invocation", async (t) => {
 test("an authentication failure wins over a body failure and a body above the limit wins over authentication", async (t) => {
   const { port, answers } = connect(t, realInvocation(t), () => "not-a-jwt");
   port.postMessage(callOf(workerOperations.handover, "call-1", "not json"));
-  const oversized = "x".repeat(
-    (workerOperations.handover.maxBodyBytes ?? NO_CALLS) +
-      OVERSIZED_BODY_PADDING,
-  );
+  const oversized = "x".repeat(REQUEST_BODY_MAX_BYTES + OVERSIZED_BODY_PADDING);
   port.postMessage(callOf(workerOperations.handover, "call-2", oversized));
   const authentication = await answerOf(answers, "call-1", t.signal);
   assert.equal(authentication.status, HttpStatus.Unauthorized);

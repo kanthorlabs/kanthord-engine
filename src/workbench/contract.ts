@@ -15,8 +15,6 @@ export const WORKBENCH_DIRECTORY_NAME = "workbench";
 export const WORKBENCH_CONFIGURATION_ENTRY = "kanthord.workbench.configuration";
 export const WORKBENCH_TIMEOUT_MS = 30000;
 export const WORKBENCH_EVENTS_WAIT_MS = 25000;
-export const WORKBENCH_MAX_BODY_BYTES = 65536;
-export const WORKBENCH_MESSAGE_MAX_BODY_BYTES = 1048576;
 
 export const WorkbenchErrorCode = {
   Stopped: "workbench.lifecycle.stopped",
@@ -116,7 +114,6 @@ const workbenchMutation = {
   ...workbenchOperation,
   mutation: true,
   body: true,
-  maxBodyBytes: WORKBENCH_MAX_BODY_BYTES,
 } as const;
 
 export const workbenchOperations = {
@@ -186,7 +183,6 @@ export const workbenchOperations = {
     method: HttpMethod.Post,
     path: "/api/workbench/session/:session_id/message",
     status: HttpStatus.Accepted,
-    maxBodyBytes: WORKBENCH_MESSAGE_MAX_BODY_BYTES,
     input: z.strictObject({
       params: sessionParams,
       query: emptyFields,
