@@ -62,6 +62,8 @@ const PRIOR_NAMES = "kanthord_slot_one\nkanthord_slot_two\n";
 const PRIOR_COUNT = 2;
 const ONE_CALL = 1;
 const NO_CALLS = 0;
+const SLOT_AND_SESSION_VOLUMES = 2;
+const VOLUME_INSPECT = "inspect";
 const INFO_ANSWER: RuntimeAnswer = {
   code: SUCCESS_CODE,
   stdout: JSON.stringify({
@@ -79,6 +81,26 @@ const INFO_ANSWER: RuntimeAnswer = {
   }),
   stderr: "",
 };
+
+const VOLUME_ANSWER = JSON.stringify([
+  {
+    CreatedAt: "2026-11-04T00:00:00Z",
+    Mountpoint: "/volumes/kanthord_slot_coder-1/_data",
+    Labels: { "io.kanthord.id_map": "auto" },
+  },
+]);
+
+const scratchRoots: string[] = [];
+process.on("exit", () => {
+  for (const root of scratchRoots)
+    rmSync(root, { recursive: true, force: true });
+});
+
+function scratch(): string {
+  const root = temporaryDirectory();
+  scratchRoots.push(root);
+  return root;
+}
 
 interface Call {
   readonly verb: string;
@@ -102,15 +124,17 @@ function hostWith(
     run: (_runtime, args) => {
       const call = { verb: args[0] ?? "", args };
       calls.push(call);
-      return call.verb === Verb.Info
-        ? Promise.resolve(INFO_ANSWER)
-        : answerOf(call);
+      if (call.verb === Verb.Info) return Promise.resolve(INFO_ANSWER);
+      if (call.verb === Verb.Volume && args[1] === VOLUME_INSPECT)
+        return ok(VOLUME_ANSWER);
+      return answerOf(call);
     },
   };
   const driver = new ContainerDriver({
     masterKey: MASTER_KEY,
     image: "kanthord:test",
     host,
+    stateDirectory: scratch(),
     imageFor,
     cacheGroupOf,
   });
@@ -146,7 +170,7 @@ function launchOf(
       created_at: 1,
     },
     entries,
-    root: "unused",
+    root: scratch(),
     output: new Writable({ write: (_chunk, _encoding, done) => done() }),
     environment,
   };
@@ -478,7 +502,7 @@ test("a slot on the image of its group creates the cache volume and mounts it, a
   const plain = await mounts("kanthord:test");
   assert.equal(
     plain.lines.filter((line) => line === VOLUME_OPTION).length,
-    ONE_CALL,
+    SLOT_AND_SESSION_VOLUMES,
   );
   assert.ok(!plain.creates.some((call) => call.args.includes(cache)));
 });

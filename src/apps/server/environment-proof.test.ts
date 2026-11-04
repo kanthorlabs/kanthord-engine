@@ -20,9 +20,15 @@ import {
   cacheVolumeName,
   inspectContainerArguments,
   type RuntimeAnswer,
+  type RuntimeFacts,
   type RuntimeHost,
 } from "./container-runtime.ts";
-import { type ProofOptions, proveInImage } from "./environment-proof.ts";
+import { ContainerDriver } from "./container-driver.ts";
+import {
+  type ProofContainers,
+  type ProofOptions,
+  proveInImage,
+} from "./environment-proof.ts";
 
 const OWNER = "OWNER";
 const TAG = "localhost/kanthord-env/repository/github/acme/app:digest";
@@ -36,6 +42,15 @@ const CHECKOUT = `${HOME}/checkout`;
 const HOST_LINE = "host";
 const SPAWN_LINE = "spawn";
 const STDIN_LINE = "stdin";
+const PREPARE_LINE = "prepare";
+const AUTO_OPTION = "--userns=auto:uidmapping=10001:0:1,gidmapping=10001:0:1";
+const ROOTLESS_FACTS: RuntimeFacts = {
+  rootless: true,
+  selinux: false,
+  platform: "linux",
+  dockerDesktop: false,
+  remote: false,
+};
 const EXEC = "exec";
 const VOLUME = "volume";
 const SLOT_USER = "10001:10001";
@@ -107,6 +122,8 @@ function proof(
     environmentMemoryMb?: number;
     existingCache?: boolean;
     answerOf?: (args: readonly string[]) => RuntimeAnswer | null;
+    facts?: RuntimeFacts | null;
+    shared?: ProofContainers["shared"];
   } = {},
 ) {
   const log = join(directory, "log");
@@ -180,6 +197,12 @@ function proof(
       ? {}
       : { commandLimitMs: overrides.commandLimitMs }),
     environmentMemoryMb: overrides.environmentMemoryMb ?? MEMORY_MB,
+    runtimeFacts: () => Promise.resolve(overrides.facts ?? null),
+    shared: overrides.shared ?? ((run) => run()),
+    prepareCacheVolume: (_runtime, name, image) => {
+      appendFileSync(log, `${JSON.stringify([PREPARE_LINE, name, image])}\n`);
+      return Promise.resolve();
+    },
   };
   const lines = (): unknown[][] =>
     existsSync(log)
@@ -223,6 +246,8 @@ test("the container starts hardened with the slot flags, a new volume and an idl
     "create",
     "--label",
     `io.kanthord.owner=${OWNER}`,
+    "--label",
+    "io.kanthord.id_map=auto",
     NAME,
   ]);
   const start = host.find((line) => line[0] === START);
@@ -249,6 +274,62 @@ test("the container starts hardened with the slot flags, a new volume and an idl
     start.some((argument) => argument.startsWith("--network")),
     false,
   );
+  assert.equal(
+    start.some((argument) => argument.startsWith("--userns")),
+    false,
+  );
+});
+
+test("with rootless Podman facts the proof container takes the auto option and prepares the cache volume before it mounts it", async (t) => {
+  const { options, lines } = proof(temporary(t), { facts: ROOTLESS_FACTS });
+  await proveInImage(options, input(), new AbortController().signal);
+  const all = lines();
+  const prepared = all.findIndex((line) => line[0] === PREPARE_LINE);
+  const started = all.findIndex(
+    (line) => line[0] === HOST_LINE && line[1] === START,
+  );
+  assert.deepEqual(all[prepared], [PREPARE_LINE, CACHE_VOLUME, TAG]);
+  assert.ok(prepared < started);
+  const start = all[started]!.slice(1) as string[];
+  assert.deepEqual(
+    start.filter((argument) => argument.startsWith("--userns")),
+    [AUTO_OPTION],
+  );
+  assert.equal(after(start, "--user"), SLOT_USER);
+});
+
+test("a proof start waits while a full-map keep-id container runs in exclusive", async (t) => {
+  const directory = temporary(t);
+  const driver = new ContainerDriver({
+    masterKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    image: "kanthord:test",
+    host: {
+      platform: "linux",
+      uid: 1000,
+      user: "user",
+      environment: {},
+      exists: () => false,
+      resolves: () => false,
+      run: () => Promise.reject(new Error("no runtime call")),
+    },
+    stateDirectory: directory,
+  });
+  const full = Promise.withResolvers<void>();
+  const fullMap = driver.exclusive(() => full.promise);
+  const { options, lines } = proof(directory, {
+    facts: ROOTLESS_FACTS,
+    shared: (run) => driver.shared(run),
+  });
+  const pending = proveInImage(options, input(), new AbortController().signal);
+  await delay(POLL_STEP_MS);
+  assert.equal(
+    ofKind(lines(), HOST_LINE).some((line) => line[0] === START),
+    false,
+  );
+  full.resolve();
+  await fullMap;
+  await pending;
+  assert.ok(ofKind(lines(), HOST_LINE).some((line) => line[0] === START));
 });
 
 test("the proof container holds the memory bound", async (t) => {

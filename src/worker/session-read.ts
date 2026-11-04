@@ -3,7 +3,6 @@ import type { Store } from "../kernel/store.ts";
 import {
   SessionAbsentReason,
   type SessionReadAnswer,
-  UnreachableReason,
 } from "../tracking/contract.ts";
 import {
   InstancePlacement,
@@ -93,8 +92,6 @@ export async function readSessionEntry(
       ...target,
     };
   }
-  if (live.placement !== InstancePlacement.Server)
-    return { unreachable: UnreachableReason.Offline, ...target };
   if (!dependencies.host) throw new Error("worker: no pool host");
   const result = await dependencies.host.readSessionEntry(
     {

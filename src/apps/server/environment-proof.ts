@@ -15,13 +15,18 @@ import { COMMAND_LIMIT_MS } from "../../worker/unit/budget.ts";
 import type { ContainerRuntime } from "../../worker/contract.ts";
 import {
   absentVolume,
+  AUTO_USER_NAMESPACE,
   CACHE_MOUNT,
   cacheVolumeArguments,
   cacheVolumeName,
   CONTAINER_UID,
   containerRemovalFailure,
+  ID_MAP_LABEL,
+  IdMap,
+  idMapOf,
   OWNER_LABEL,
   presentVolume,
+  type RuntimeFacts,
   type RuntimeHost,
   SLOT_HOME,
   SUCCESS_CODE,
@@ -62,7 +67,18 @@ export interface CommandOutput {
   tail: string;
 }
 
-export interface ProofOptions {
+export interface ProofContainers {
+  runtimeFacts(): Promise<RuntimeFacts | null>;
+  shared<T>(run: () => Promise<T>): Promise<T>;
+  prepareCacheVolume(
+    runtime: ContainerRuntime,
+    name: string,
+    image: string,
+    signal: AbortSignal,
+  ): Promise<void>;
+}
+
+export interface ProofOptions extends ProofContainers {
   readonly host: RuntimeHost;
   readonly runtime: ContainerRuntime;
   readonly owner: string;
@@ -186,6 +202,7 @@ function startArguments(
   owner: string,
   memoryMb: number,
   cacheVolume: string,
+  rootless: boolean,
 ): readonly string[] {
   return [
     "run",
@@ -199,6 +216,7 @@ function startArguments(
     `${memoryMb}m`,
     "--user",
     `${CONTAINER_UID}:${CONTAINER_UID}`,
+    ...(rootless ? [AUTO_USER_NAMESPACE] : []),
     "--no-healthcheck",
     "--cap-drop=ALL",
     "--security-opt=no-new-privileges",
@@ -383,21 +401,36 @@ export async function proveInImage(
       "create",
       "--label",
       `${OWNER_LABEL}=${options.owner}`,
+      "--label",
+      ID_MAP_LABEL,
       name,
     ]);
     await ensureCacheVolume(options, input);
-    await requireSuccess(
-      options,
-      "start",
-      startArguments(
-        name,
-        input.tag,
-        options.owner,
-        options.environmentMemoryMb,
-        cacheVolumeName(
+    const cacheVolume = cacheVolumeName(
+      options.owner,
+      input.project_id,
+      input.resource_identity,
+    );
+    await options.prepareCacheVolume(
+      options.runtime,
+      cacheVolume,
+      input.tag,
+      signal,
+    );
+    const facts = await options.runtimeFacts();
+    const rootless =
+      facts !== null && idMapOf(options.runtime, facts, true) === IdMap.Auto;
+    await options.shared(() =>
+      requireSuccess(
+        options,
+        "start",
+        startArguments(
+          name,
+          input.tag,
           options.owner,
-          input.project_id,
-          input.resource_identity,
+          options.environmentMemoryMb,
+          cacheVolume,
+          rootless,
         ),
       ),
     );

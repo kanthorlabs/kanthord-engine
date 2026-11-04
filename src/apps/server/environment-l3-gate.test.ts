@@ -40,6 +40,7 @@ import {
   CACHE_RESOURCE_LABEL,
   cacheVolumeName,
   containerOwner,
+  ID_MAP_LABEL,
   type RuntimeAnswer,
   type RuntimeHost,
   SUCCESS_CODE,
@@ -261,6 +262,9 @@ function listedCaches(state: RuntimeState): string {
   return Array.from(state.caches.keys()).join("\n");
 }
 
+const VOLUME_CREATED_AT = "2026-11-04T00:00:00Z";
+const [ID_MAP_KEY = "", ID_MAP_VALUE = ""] = ID_MAP_LABEL.split("=");
+
 function inspectedCaches(
   state: RuntimeState,
   names: readonly string[],
@@ -268,14 +272,20 @@ function inspectedCaches(
   return JSON.stringify(
     names.flatMap((name) => {
       const cache = state.caches.get(name);
+      const volume = {
+        Name: name,
+        CreatedAt: VOLUME_CREATED_AT,
+        Mountpoint: `/volumes/${name}/_data`,
+      };
       return cache === undefined
-        ? []
+        ? [{ ...volume, Labels: { [ID_MAP_KEY]: ID_MAP_VALUE } }]
         : [
             {
-              Name: name,
+              ...volume,
               Labels: {
                 [CACHE_PROJECT_LABEL]: cache.project,
                 [CACHE_RESOURCE_LABEL]: cache.resource,
+                [ID_MAP_KEY]: ID_MAP_VALUE,
               },
             },
           ];

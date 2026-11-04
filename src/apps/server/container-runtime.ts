@@ -21,6 +21,17 @@ export const CACHE_MOUNT = "/var/lib/kanthord/.cache";
 export const CACHE_VOLUME_PREFIX = "kanthord_cache_";
 export const CACHE_PROJECT_LABEL = "io.kanthord.cache_project";
 export const CACHE_RESOURCE_LABEL = "io.kanthord.cache_resource";
+export const CONTAINER_SESSIONS_DIRECTORY = "sessions";
+export const SESSION_MOUNT = "/var/lib/kanthord/state/kanthord/pi/sessions";
+export const PODMAN_AUTO_UIDMAPPING_MIN_VERSION = "4.1.0";
+const ID_MAP_KEY = "io.kanthord.id_map";
+const ID_MAP_VALUE = "auto";
+export const ID_MAP_LABEL = `${ID_MAP_KEY}=${ID_MAP_VALUE}`;
+export const CACHE_OWNER_MARKER = ".kanthord_owner";
+export const MIGRATE_NAME_PREFIX = "kanthord_migrate_";
+export const AUTO_USER_NAMESPACE = `--userns=auto:uidmapping=${CONTAINER_UID}:0:1,gidmapping=${CONTAINER_UID}:0:1`;
+export const KEEP_ID_USER_NAMESPACE = `--userns=keep-id:uid=${CONTAINER_UID},gid=${CONTAINER_UID}`;
+export const NO_TIME_LIMIT_MS = 0;
 export const FORWARDED_VARIABLES = [
   "TZ",
   "GIT_AUTHOR_NAME",
@@ -44,6 +55,24 @@ const NO_LENGTH = 0;
 const FAILED_CODE = 1;
 export const SUCCESS_CODE = 0;
 const LINUX: NodeJS.Platform = "linux";
+const MACOS: NodeJS.Platform = "darwin";
+const SELINUX_OPTION = "name=selinux";
+const PRIVATE_LABEL = ":Z";
+const VERSION_SEPARATOR = ".";
+const MIGRATE_MOUNT = "/migrate";
+const SHELL = "/bin/sh";
+const SESSION_SOURCE = `${SLOT_HOME}/state/kanthord/pi/sessions`;
+const HOST_DIRECTORY_SCRIPT = `src=${SESSION_SOURCE}; if [ -d "$src" ]; then cp -a "$src/." ${MIGRATE_MOUNT}/ && rm -rf "$src"; fi; mkdir -p "$src" && chown -R ${CONTAINER_UID}:${CONTAINER_UID} ${SLOT_HOME} ${MIGRATE_MOUNT}`;
+const FILE_SHARE_SCRIPT = `src=${SESSION_SOURCE}; if [ -d "$src" ]; then cp -R --preserve=mode,timestamps "$src/." ${MIGRATE_MOUNT}/ && rm -rf "$src"; fi; mkdir -p "$src" && chown -R ${CONTAINER_UID}:${CONTAINER_UID} ${SLOT_HOME}`;
+export const UNSHARE_MIGRATION_SCRIPT = `src="$1/state/kanthord/pi/sessions"; if [ -d "$src" ]; then cp -a "$src/." "$2/" && rm -rf "$src"; fi; mkdir -p "$src" && chown -R 0:0 "$1" "$2"`;
+const CACHE_MARKER_PATH = `${CACHE_MOUNT}/${CACHE_OWNER_MARKER}`;
+const CACHE_OWNER_SCRIPT = `[ -e ${CACHE_MARKER_PATH} ] || { chown -R ${CONTAINER_UID}:${CONTAINER_UID} ${CACHE_MOUNT} && touch ${CACHE_MARKER_PATH} && chown ${CONTAINER_UID}:${CONTAINER_UID} ${CACHE_MARKER_PATH}; }`;
+const CARRIER_CAPABILITIES = [
+  "--cap-drop=ALL",
+  "--cap-add=CHOWN",
+  "--cap-add=DAC_OVERRIDE",
+  "--cap-add=FOWNER",
+];
 const LINE_BREAK = /\r?\n/;
 const ROOTLESS_OPTION = "name=rootless";
 const DOCKER_DESKTOP = "Docker Desktop";
@@ -76,8 +105,30 @@ export interface RuntimeHost {
     runtime: ContainerRuntime,
     args: readonly string[],
     timeoutMs: number,
+    signal?: AbortSignal,
   ): Promise<RuntimeAnswer>;
 }
+
+export interface RuntimeFacts {
+  readonly rootless: boolean;
+  readonly selinux: boolean;
+  readonly platform: NodeJS.Platform;
+  readonly dockerDesktop: boolean;
+  readonly remote: boolean;
+}
+
+export interface RuntimeCheck {
+  readonly status: PlacementStatus;
+  readonly facts: RuntimeFacts | null;
+}
+
+export const IdMap = {
+  None: "none",
+  Auto: "auto",
+  KeepId: "keep_id",
+  Unshare: "unshare",
+} as const;
+export type IdMap = (typeof IdMap)[keyof typeof IdMap];
 
 export interface RunCommand {
   readonly image: string;
@@ -85,6 +136,31 @@ export interface RunCommand {
   readonly owner: string;
   readonly environment: NodeJS.ProcessEnv;
   readonly cacheVolume: string | null;
+  readonly sessionDirectory: string;
+  readonly rootless: boolean;
+  readonly selinux: boolean;
+}
+
+export interface MigrationCommand {
+  readonly image: string;
+  readonly instanceName: string;
+  readonly owner: string;
+  readonly mount: string;
+  readonly idMap: typeof IdMap.None | typeof IdMap.Auto | typeof IdMap.KeepId;
+  readonly facts: RuntimeFacts;
+}
+
+export interface CacheOwnerCommand {
+  readonly image: string;
+  readonly owner: string;
+  readonly volume: string;
+  readonly idMap: typeof IdMap.Auto | typeof IdMap.KeepId;
+}
+
+export interface VolumeState {
+  readonly createdAt: string;
+  readonly labeled: boolean;
+  readonly mountPoint: string;
 }
 
 interface RuntimeAttempt {
@@ -95,6 +171,10 @@ interface RuntimeAttempt {
 
 export function slotName(instanceName: string): string {
   return `${SLOT_NAME_PREFIX}${instanceName}`;
+}
+
+export function migrateName(instanceName: string): string {
+  return `${MIGRATE_NAME_PREFIX}${instanceName}`;
 }
 
 export function containerOwner(masterKey: string): string {
@@ -153,6 +233,8 @@ export function volumeArguments(instanceName: string, owner: string): string[] {
     `${OWNER_LABEL}=${owner}`,
     "--label",
     `${INSTANCE_LABEL}=${instanceName}`,
+    "--label",
+    ID_MAP_LABEL,
     slotName(instanceName),
   ];
 }
@@ -182,6 +264,8 @@ export function cacheVolumeArguments(
     `${CACHE_PROJECT_LABEL}=${projectId}`,
     "--label",
     `${CACHE_RESOURCE_LABEL}=${resourceIdentity}`,
+    "--label",
+    ID_MAP_LABEL,
     cacheVolumeName(owner, projectId, resourceIdentity),
   ];
 }
@@ -244,6 +328,117 @@ export function parseCacheVolumes(stdout: string): CacheVolumeListing[] {
   return listings;
 }
 
+export function parseVolume(stdout: string): VolumeState {
+  const volumes: unknown = JSON.parse(stdout);
+  const volume: unknown = Array.isArray(volumes) ? volumes[0] : undefined;
+  const createdAt = field(volume, "CreatedAt");
+  const mountPoint = field(volume, "Mountpoint");
+  if (!filled(createdAt) || !isString(mountPoint))
+    throw new Error("The volume inspection answers no volume.");
+  return {
+    createdAt,
+    labeled: field(volume, "Labels", ID_MAP_KEY) === ID_MAP_VALUE,
+    mountPoint,
+  };
+}
+
+export function idMapOf(
+  runtime: ContainerRuntime,
+  facts: RuntimeFacts,
+  labeled: boolean,
+): IdMap {
+  if (runtime !== ContainerRuntime.Podman || !facts.rootless) return IdMap.None;
+  if (labeled) return IdMap.Auto;
+  return facts.platform === LINUX && !facts.remote
+    ? IdMap.Unshare
+    : IdMap.KeepId;
+}
+
+function userNamespaceArguments(idMap: IdMap): string[] {
+  if (idMap === IdMap.Auto) return [AUTO_USER_NAMESPACE];
+  if (idMap === IdMap.KeepId) return [KEEP_ID_USER_NAMESPACE];
+  return [];
+}
+
+function labelOption(selinux: boolean): string {
+  return selinux ? PRIVATE_LABEL : "";
+}
+
+export function migrationArguments(command: MigrationCommand): string[] {
+  const fileShare =
+    command.facts.platform === MACOS || command.facts.dockerDesktop;
+  return [
+    "run",
+    "--rm",
+    "--pull=never",
+    "--network=none",
+    "--name",
+    migrateName(command.instanceName),
+    "--label",
+    `${OWNER_LABEL}=${command.owner}`,
+    "--user",
+    "0:0",
+    ...userNamespaceArguments(command.idMap),
+    ...CARRIER_CAPABILITIES,
+    "--security-opt=no-new-privileges",
+    "--volume",
+    `${slotName(command.instanceName)}:${SLOT_HOME}`,
+    "--volume",
+    `${command.mount}:${MIGRATE_MOUNT}${labelOption(command.facts.selinux)}`,
+    "--entrypoint",
+    SHELL,
+    command.image,
+    "-c",
+    fileShare ? FILE_SHARE_SCRIPT : HOST_DIRECTORY_SCRIPT,
+  ];
+}
+
+export function unshareMigrationArguments(
+  mountPoint: string,
+  mount: string,
+): string[] {
+  return [
+    "unshare",
+    SHELL,
+    "-c",
+    UNSHARE_MIGRATION_SCRIPT,
+    "sh",
+    mountPoint,
+    mount,
+  ];
+}
+
+export function unshareOwnerArguments(mountPoint: string): string[] {
+  return ["unshare", "chown", "-R", "0:0", mountPoint];
+}
+
+export function unshareMarkerArguments(mountPoint: string): string[] {
+  return ["unshare", "touch", join(mountPoint, CACHE_OWNER_MARKER)];
+}
+
+export function cacheOwnerArguments(command: CacheOwnerCommand): string[] {
+  return [
+    "run",
+    "--rm",
+    "--pull=never",
+    "--network=none",
+    "--label",
+    `${OWNER_LABEL}=${command.owner}`,
+    "--user",
+    "0:0",
+    ...userNamespaceArguments(command.idMap),
+    ...CARRIER_CAPABILITIES,
+    "--security-opt=no-new-privileges",
+    "--volume",
+    `${command.volume}:${CACHE_MOUNT}`,
+    "--entrypoint",
+    SHELL,
+    command.image,
+    "-c",
+    CACHE_OWNER_SCRIPT,
+  ];
+}
+
 export function runArguments(command: RunCommand): string[] {
   const name = slotName(command.instanceName);
   const directories = Object.entries(SLOT_DIRECTORIES).flatMap(
@@ -267,7 +462,8 @@ export function runArguments(command: RunCommand): string[] {
     "--label",
     `${INSTANCE_LABEL}=${command.instanceName}`,
     "--user",
-    String(CONTAINER_UID),
+    `${CONTAINER_UID}:${CONTAINER_UID}`,
+    ...(command.rootless ? [AUTO_USER_NAMESPACE] : []),
     "--sig-proxy=false",
     "--log-driver",
     "none",
@@ -281,6 +477,8 @@ export function runArguments(command: RunCommand): string[] {
     TMP_MOUNT,
     "--volume",
     `${name}:${SLOT_HOME}`,
+    "--volume",
+    `${command.sessionDirectory}:${SESSION_MOUNT}${labelOption(command.selinux)}`,
     ...(command.cacheVolume === null
       ? []
       : ["--volume", `${command.cacheVolume}:${CACHE_MOUNT}`]),
@@ -384,11 +582,12 @@ function dockerRefusal(info: Record<string, unknown>): string | null {
   if (Array.isArray(errors) && errors.length)
     return isString(errors[0]) ? errors[0] : "docker answers server errors";
   const version = field(info, "ServerVersion");
-  if (!isString(version) || !version) return "docker answers no server version";
+  if (!isString(version) || !version)
+    return "docker answers no server version. Remove the podman-docker shim, or point docker at a Docker Engine.";
   const client = field(info, "ClientInfo", "Version");
   const major = isString(client) ? Number.parseInt(client, 10) : Number.NaN;
   if (!Number.isSafeInteger(major) || major < MINIMUM_DOCKER_CLIENT_MAJOR)
-    return `docker client ${isString(client) ? client : "unknown"} is below ${MINIMUM_DOCKER_CLIENT_MAJOR}`;
+    return `docker client ${isString(client) ? client : "unknown"} is below ${MINIMUM_DOCKER_CLIENT_MAJOR}. Upgrade the Docker client to ${MINIMUM_DOCKER_CLIENT_MAJOR} or later.`;
   return null;
 }
 
@@ -435,62 +634,152 @@ function coversContainerUid(info: Record<string, unknown>): boolean {
   });
 }
 
+function securityOption(info: Record<string, unknown>, option: string) {
+  const options = field(info, "SecurityOptions");
+  return (
+    Array.isArray(options) &&
+    options.some((entry) => isString(entry) && entry.includes(option))
+  );
+}
+
+function dockerDesktop(info: Record<string, unknown>): boolean {
+  return field(info, "OperatingSystem") === DOCKER_DESKTOP;
+}
+
+function rootlessPodman(info: Record<string, unknown>): boolean {
+  return field(info, "host", "security", "rootless") === true;
+}
+
 function rootful(runtime: ContainerRuntime, info: Record<string, unknown>) {
   if (runtime === ContainerRuntime.Podman)
     return field(info, "host", "security", "rootless") === false;
-  if (field(info, "OperatingSystem") === DOCKER_DESKTOP) return false;
-  const options = field(info, "SecurityOptions");
-  return !(
-    Array.isArray(options) &&
-    options.some(
-      (option) => isString(option) && option.includes(ROOTLESS_OPTION),
-    )
-  );
+  if (dockerDesktop(info)) return false;
+  return !securityOption(info, ROOTLESS_OPTION);
+}
+
+function versionParts(version: string): number[] {
+  return version
+    .split(VERSION_SEPARATOR)
+    .map((part) => Number.parseInt(part, 10));
+}
+
+export function versionBelow(version: string, minimum: string): boolean {
+  const parts = versionParts(version);
+  const floor = versionParts(minimum);
+  for (const [index, least] of floor.entries()) {
+    const part = parts[index];
+    if (part === undefined || !Number.isSafeInteger(part)) return true;
+    if (part !== least) return part < least;
+  }
+  return false;
+}
+
+function refusal(
+  host: RuntimeHost,
+  runtime: ContainerRuntime,
+  info: Record<string, unknown>,
+): string | null {
+  if (
+    runtime === ContainerRuntime.Podman &&
+    rootlessPodman(info) &&
+    !coversContainerUid(info)
+  )
+    return `the subordinate uid range of ${host.user} does not cover the container uid ${CONTAINER_UID}. Add a subordinate uid range of at least ${CONTAINER_UID} ids for ${host.user}.`;
+  if (
+    runtime === ContainerRuntime.Docker &&
+    host.platform === LINUX &&
+    !dockerDesktop(info) &&
+    securityOption(info, ROOTLESS_OPTION)
+  )
+    return `rootless Docker cannot map the container uid ${CONTAINER_UID} to the server user. Use rootless Podman or a rootful runtime.`;
+  const version = field(info, "version", "Version");
+  if (
+    runtime === ContainerRuntime.Podman &&
+    rootlessPodman(info) &&
+    (!isString(version) ||
+      versionBelow(version, PODMAN_AUTO_UIDMAPPING_MIN_VERSION))
+  )
+    return `podman ${isString(version) ? version : "unknown"} refuses --userns=auto:uidmapping=. Upgrade Podman to ${PODMAN_AUTO_UIDMAPPING_MIN_VERSION} or later.`;
+  return null;
+}
+
+function factsOf(
+  host: RuntimeHost,
+  runtime: ContainerRuntime,
+  info: Record<string, unknown>,
+): RuntimeFacts {
+  if (runtime === ContainerRuntime.Podman)
+    return {
+      rootless: rootlessPodman(info),
+      selinux: field(info, "host", "security", "selinuxEnabled") === true,
+      platform: host.platform,
+      dockerDesktop: false,
+      remote: field(info, "host", "serviceIsRemote") === true,
+    };
+  return {
+    rootless: securityOption(info, ROOTLESS_OPTION),
+    selinux: securityOption(info, SELINUX_OPTION),
+    platform: host.platform,
+    dockerDesktop: dockerDesktop(info),
+    remote: false,
+  };
 }
 
 function answered(
   host: RuntimeHost,
   runtime: ContainerRuntime,
   info: Record<string, unknown>,
-): PlacementStatus {
-  if (
-    runtime === ContainerRuntime.Podman &&
-    field(info, "host", "security", "rootless") === true &&
-    !coversContainerUid(info)
-  )
-    return status(
-      PlacementIssue.RuntimeFailed,
-      boundedDetail(
-        `the subordinate uid range of ${host.user} does not cover the container uid ${CONTAINER_UID}`,
+): RuntimeCheck {
+  const refused = refusal(host, runtime, info);
+  if (refused !== null)
+    return {
+      status: status(
+        PlacementIssue.RuntimeFailed,
+        boundedDetail(refused),
+        runtime,
       ),
-      runtime,
-    );
+      facts: null,
+    };
   if (
     host.platform === LINUX &&
     host.uid !== ROOT_UID &&
     rootful(runtime, info)
   )
-    return status(PlacementIssue.RuntimeRootful, null, runtime);
-  return status(null, null, runtime);
+    return {
+      status: status(PlacementIssue.RuntimeRootful, null, runtime),
+      facts: null,
+    };
+  return {
+    status: status(null, null, runtime),
+    facts: factsOf(host, runtime, info),
+  };
 }
 
-export async function detectRuntime(
-  host: RuntimeHost,
-): Promise<PlacementStatus> {
+export async function detectRuntime(host: RuntimeHost): Promise<RuntimeCheck> {
   if (
     SERVER_IN_CONTAINER_MARKERS.some((path) => host.exists(path)) ||
     host.environment[KUBERNETES_VARIABLE] !== undefined
   )
-    return status(PlacementIssue.ServerInContainer, null, null);
+    return {
+      status: status(PlacementIssue.ServerInContainer, null, null),
+      facts: null,
+    };
   const runtimes = RUNTIME_ORDER.filter((runtime) => host.resolves(runtime));
-  if (!runtimes.length) return status(PlacementIssue.RuntimeAbsent, null, null);
+  if (!runtimes.length)
+    return {
+      status: status(PlacementIssue.RuntimeAbsent, null, null),
+      facts: null,
+    };
   let firstFailure: string | null = null;
   for (const runtime of runtimes) {
     const result = await attempt(host, runtime);
     if (result.info) return answered(host, runtime, result.info);
     firstFailure ??= result.detail;
   }
-  return status(PlacementIssue.RuntimeFailed, firstFailure, null);
+  return {
+    status: status(PlacementIssue.RuntimeFailed, firstFailure, null),
+    facts: null,
+  };
 }
 
 function onPath(command: string, environment: NodeJS.ProcessEnv): boolean {
@@ -513,12 +802,12 @@ function exitCode(error: unknown): number {
 export function runtimeCommand(
   environment: NodeJS.ProcessEnv,
 ): RuntimeHost["run"] {
-  return (runtime, args, timeoutMs) =>
+  return (runtime, args, timeoutMs, signal) =>
     new Promise((resolve) => {
       execFile(
         runtime,
         args,
-        { env: environment, timeout: timeoutMs, encoding: "utf8" },
+        { env: environment, timeout: timeoutMs, encoding: "utf8", signal },
         (error, stdout, stderr) => {
           resolve({
             code: error ? exitCode(error) : SUCCESS_CODE,

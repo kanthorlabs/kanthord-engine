@@ -2477,6 +2477,7 @@ test("a failed reconciliation in a change notice is logged and does not reach th
 });
 
 const DRIVER_RECORDS = 1;
+const ONE_SESSION_READ = 1;
 const NO_STATUS_READS = 0;
 const UNAVAILABLE_CONTAINER = {
   placement: InstancePlacement.Container,
@@ -2552,6 +2553,33 @@ test("start with an unavailable runtime and a live container instance logs the d
   assert.equal(record.reason, PlacementIssue.RuntimeFailed);
   assert.equal(record.detail, UNAVAILABLE_CONTAINER.detail);
   assert.equal(f.host.started.length, POOL_ONE_START);
+});
+
+const ROOTLESS_DOCKER_CONTAINER = {
+  placement: InstancePlacement.Container,
+  available: false,
+  reason: PlacementIssue.RuntimeFailed,
+  detail:
+    "rootless Docker cannot map the container uid 10001 to the server user. Use rootless Podman or a rootful runtime.",
+  container_runtime: ContainerRuntime.Docker,
+} satisfies PlacementStatus;
+
+test("the placement list answers runtime_failed with the rootless Docker detail for the worker screen", async (t) => {
+  const f = poolFixture(t, 1);
+  f.host.statuses.set(PoolPlacement.Container, ROOTLESS_DOCKER_CONTAINER);
+  const { items } = await placementList(f);
+  assert.deepEqual(items[1], ROOTLESS_DOCKER_CONTAINER);
+});
+
+test("a live container instance on rootless Docker logs the driver record with the rootless Docker detail for the instance screen", async (t) => {
+  const f = poolFixture(t, 0);
+  f.addInstance("boxed", InstancePlacement.Container);
+  f.host.statuses.set(PoolPlacement.Container, ROOTLESS_DOCKER_CONTAINER);
+  const lines = await loggedAfterStart(f);
+  assert.equal(lines.length, DRIVER_RECORDS);
+  const record = JSON.parse(lines[0]!);
+  assert.equal(record.reason, PlacementIssue.RuntimeFailed);
+  assert.equal(record.detail, ROOTLESS_DOCKER_CONTAINER.detail);
 });
 
 test("start logs no driver record for an available runtime", async (t) => {
@@ -3159,25 +3187,21 @@ test("a resolved entry with another id or type answers unreadable and the log re
   }
 });
 
-test("a session read of a container or a worker instance answers offline and reads no pool host", async (t) => {
+test("a session read of a worker instance answers offline and reads no pool host", async (t) => {
   const f = poolFixture(t, 0);
-  for (const placement of [
-    InstancePlacement.Container,
-    InstancePlacement.Worker,
-  ]) {
-    const runtime = registrationOf(
-      f,
-      f.addInstance(`box-${placement}`, placement),
-    );
-    assert.deepEqual(
-      await f.worker.readSessionEntry(runtime, SESSION_READ, readSignal),
-      {
-        unreachable: UnreachableReason.Offline,
-        instance: `box-${placement}`,
-        placement,
-      },
-    );
-  }
+  const placement = InstancePlacement.Worker;
+  const runtime = registrationOf(
+    f,
+    f.addInstance(`box-${placement}`, placement),
+  );
+  assert.deepEqual(
+    await f.worker.readSessionEntry(runtime, SESSION_READ, readSignal),
+    {
+      unreachable: UnreachableReason.Offline,
+      instance: `box-${placement}`,
+      placement,
+    },
+  );
   assert.equal(f.host.sessionReads.length, NO_STARTS);
 });
 
@@ -3222,4 +3246,24 @@ test("a session read of a connected worker instance waits for its report and ans
     assert.deepEqual(await waiting, { result: answer, ...target });
   }
   assert.equal(f.host.sessionReads.length, NO_STARTS);
+});
+
+test("a session read of a container instance reads the pool host", async (t) => {
+  const f = poolFixture(t, 0);
+  const placement = InstancePlacement.Container;
+  const runtime = registrationOf(
+    f,
+    f.addInstance(`box-${placement}`, placement),
+  );
+  const answer = await f.worker.readSessionEntry(
+    runtime,
+    SESSION_READ,
+    readSignal,
+  );
+  assert.equal(f.host.sessionReads.length, ONE_SESSION_READ);
+  assert.equal(f.host.sessionReads[0]!.instance.placement, placement);
+  assert.deepEqual(
+    { instance: answer.instance, placement: answer.placement },
+    { instance: `box-${placement}`, placement },
+  );
 });

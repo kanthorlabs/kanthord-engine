@@ -50,6 +50,7 @@ import {
   buildEnvironment,
   endGroup,
   OUTPUT_TAIL_BYTES,
+  type ProofContainers,
   proveInImage,
   runCommand,
 } from "./environment-proof.ts";
@@ -167,7 +168,7 @@ export const CHECK_SCRIPT = [
   `${KANTHORD_PATH} --version >/dev/null 2>&1 || fail "kanthord does not run"`,
 ].join("\n");
 
-export interface EnvironmentImageOptions {
+export interface EnvironmentImageOptions extends ProofContainers {
   readonly host: RuntimeHost;
   readonly owner: string;
   readonly kanthordImage: string;
@@ -750,6 +751,10 @@ export class EnvironmentImages implements Omit<
         exportRepository: this.options.exportRepository,
         running: this.running,
         environmentMemoryMb: this.options.environmentMemoryMb,
+        runtimeFacts: () => this.options.runtimeFacts(),
+        shared: (run) => this.options.shared(run),
+        prepareCacheVolume: (runtime, name, image, signal) =>
+          this.options.prepareCacheVolume(runtime, name, image, signal),
       },
       input,
       signal,
