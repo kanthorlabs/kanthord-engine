@@ -1648,8 +1648,7 @@ function usageBuckets(store: Store, grain: FlowGrain): number[] {
 }
 
 test("no trace and no rollup row goes after 31 days", async (t) => {
-  let now = NOW;
-  const { store, service } = harness(t, () => now);
+  const { store, service } = harness(t);
   store.transaction((tx) =>
     insertTrace(tx, TRACE, NOW - EXPIRED_AGE_DAYS * DAY_MS),
   );
@@ -1658,7 +1657,6 @@ test("no trace and no rollup row goes after 31 days", async (t) => {
   stopAfter(t, () => service.stop());
   assert.equal(await service.start(), null);
   await backfillEnded(service, store);
-  now = EXPIRED_NOW;
   assert.equal(traceCount(store), ONE_ENTRY);
   assert.deepEqual(usageBuckets(store, FlowGrain.Hour), [NOW - 9 * DAY_MS]);
   assert.deepEqual(usageBuckets(store, FlowGrain.Day), [NOW - 65 * DAY_MS]);

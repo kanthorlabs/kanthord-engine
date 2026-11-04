@@ -6,7 +6,6 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
-  rmdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -78,7 +77,6 @@ const TEMPORARY_RANDOM_BYTES = 8;
 const PRIVATE_FILE_MODE = 0o600;
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const FILE_NOT_FOUND = "ENOENT";
-const DIRECTORY_NOT_EMPTY = "ENOTEMPTY";
 const COMMAND_ABSENT_EXIT = 127;
 const PASSED_EXIT = 0;
 const ROOT_PATH = "";
@@ -329,21 +327,6 @@ export class ProofFiles {
     return this.pathsUnder(ROOT_PATH);
   }
 
-  removePath(path: string): void {
-    for (const name of this.entries(path))
-      if (name.endsWith(PROOF_EXTENSION) || name.endsWith(TEMPORARY_EXTENSION))
-        rmSync(join(this.root, path, name), { force: true });
-    try {
-      rmdirSync(join(this.root, path));
-    } catch (error) {
-      if (
-        !isAbsent(error) &&
-        (error as NodeJS.ErrnoException).code !== DIRECTORY_NOT_EMPTY
-      )
-        throw error;
-    }
-  }
-
   private fileOf(path: string, sum: string): string {
     return join(this.root, path, `${sum}${PROOF_EXTENSION}`);
   }
@@ -417,7 +400,7 @@ export interface EnvironmentRuntime {
   proveOnHost(input: ProofInput, signal: AbortSignal): Promise<CommandResult[]>;
   tagProved(tag: string): Promise<void>;
   removeTags(tags: readonly string[]): Promise<void>;
-  collect(identityPath: string, keepDigest: string | null): Promise<void>;
+  collect(identityPath: string, keepDigest: string): Promise<void>;
   removeStaleRuns(): Promise<void>;
   cacheVolumes(): Promise<
     Array<{ project_id: string; resource_identity: string }>

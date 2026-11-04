@@ -665,10 +665,10 @@ of an instance is `workers/<instance name>/` of the state directory with mode
 container mounts `sessions/` of the slot root as its session directory. The
 archive stops the instance, then removes the slot root and the volume. Each
 start removes only the root and the volume of a `server` or `container` instance
-that an archive ended and that no live instance of the same name holds. A root or
-a volume of another name stays. An instance
-that exits with no stop restarts with a backoff under the same client
-identities. The server logs `instance` with the instance name.
+that an archive ended and that no live instance of the same name holds. A root
+or a volume of another name stays. An instance that exits with no stop restarts
+with a backoff under the same client identities. The server logs `instance`
+with the instance name.
 
 Files/effects: validate or create the XDG configuration, data, and state
 directories as needed; read the selected configuration; open/create

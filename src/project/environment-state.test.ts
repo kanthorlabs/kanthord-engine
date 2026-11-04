@@ -300,12 +300,7 @@ test("proof files write, read, list and remove", (t) => {
   assert.deepEqual(files.paths().sort(), [path, other].sort());
   files.remove(path, second);
   assert.deepEqual(files.digests(path), [sum]);
-  files.removePath(path);
-  assert.deepEqual(files.digests(path), []);
   assert.deepEqual(files.digests(other), [sum]);
-  assert.deepEqual(files.paths(), [other]);
-  files.removePath(other);
-  assert.deepEqual(files.paths(), []);
 });
 
 test("a proof file that fails the schema reads as absent", (t) => {

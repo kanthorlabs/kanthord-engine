@@ -393,8 +393,8 @@ read. The last bucket is partial when `window.now` is before `window.to`.
 `previous_window` is the window of the same length that ends at `window.from`.
 It is `null` with `compare` `none`. It is also `null` when its `from` is before
 the smallest `bucket_start` of the rollup rows of that bucket, or when that
-bucket holds no row. The first rollup row of each bucket is the coverage start. With a `null` `previous_window`, every `previous` field of
-the answer is `null`.
+bucket holds no row. The first rollup row of each bucket is the coverage start.
+With a `null` `previous_window`, every `previous` field of the answer is `null`.
 
 The answer holds these fields:
 

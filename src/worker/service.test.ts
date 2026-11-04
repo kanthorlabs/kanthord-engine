@@ -2181,7 +2181,7 @@ test("startPool sweeps with the name of each archived server and container insta
         name: f.nameOf(FIRST_INSTANCE),
         worker: WORKER,
         revision: FIRST_REVISION + 1,
-        placement: InstancePlacement.Server,
+        placement: InstancePlacement.Worker,
         public_key: null,
         fingerprint: null,
       },
@@ -3019,7 +3019,7 @@ test("instanceOf answers the placement of a live instance and instanceKeyOf answ
         public_key: null,
         fingerprint: null,
       },
-      ARCHIVED_AT,
+      NOW,
     ),
     container: insertInstance(
       tx,
@@ -3030,7 +3030,7 @@ test("instanceOf answers the placement of a live instance and instanceKeyOf answ
         public_key: null,
         fingerprint: null,
       },
-      ARCHIVED_AT,
+      NOW,
     ),
     remote: insertInstance(
       tx,
@@ -3052,7 +3052,7 @@ test("instanceOf answers the placement of a live instance and instanceKeyOf answ
         public_key: null,
         fingerprint: null,
       },
-      ARCHIVED_AT,
+      NOW,
     ),
   }));
   f.store.transaction((tx) => endInstance(tx, rows.archived.id, ENDED));
