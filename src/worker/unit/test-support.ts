@@ -65,6 +65,7 @@ export {
   fauxAssistantMessage,
   fauxToolCall,
   fauxText,
+  fauxThinking,
 } from "@earendil-works/pi-ai";
 export * from "../test-support.ts";
 

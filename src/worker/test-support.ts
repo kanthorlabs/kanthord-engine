@@ -8,6 +8,8 @@ import type {
   PoolHost,
   PoolInstance,
   PoolPlacement,
+  SessionRead,
+  SessionReadResult,
 } from "./contract.ts";
 import { getWorkerDeclaration, type WorkerDeclaration } from "./catalog.ts";
 
@@ -23,7 +25,11 @@ import {
   SHIPPED_TEMPLATES,
 } from "../agent/prompt-templates.ts";
 import type { AgentPromptFacts } from "./prompt-telemetry.ts";
-import { alwaysAvailable, ExecutionIntent } from "./contract.ts";
+import {
+  alwaysAvailable,
+  ExecutionIntent,
+  SessionReadOutcome,
+} from "./contract.ts";
 
 export const TWO_AGENT_WORKER = "two-agent@1";
 export function twoAgentDeclarationOf(name: string): WorkerDeclaration | null {
@@ -155,5 +161,17 @@ export class FakePoolHost implements PoolHost {
   async placementStatus(placement: PoolPlacement): Promise<PlacementStatus> {
     this.statusReads++;
     return this.statuses.get(placement) ?? alwaysAvailable(placement);
+  }
+  readonly sessionReads: Array<{ instance: PoolInstance; read: SessionRead }> =
+    [];
+  sessionReadResult: SessionReadResult = {
+    outcome: SessionReadOutcome.EntryAbsent,
+  };
+  async readSessionEntry(
+    instance: PoolInstance,
+    read: SessionRead,
+  ): Promise<SessionReadResult> {
+    this.sessionReads.push({ instance, read });
+    return this.sessionReadResult;
   }
 }

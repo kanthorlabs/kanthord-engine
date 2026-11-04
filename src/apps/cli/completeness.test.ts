@@ -109,7 +109,7 @@ const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
 const IMPLEMENTED_COUNT = 198;
-const OPERATION_COUNT = 226;
+const OPERATION_COUNT = 227;
 const INTAKE_LEAVES = [
   "intake event delete",
   "intake event discard",

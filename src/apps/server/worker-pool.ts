@@ -6,16 +6,24 @@ import type { Logger } from "pino";
 import { deriveClientSecret, generateSlotJWT } from "../../gateway/auth/jwt.ts";
 import { type createInvocation, servePort } from "../../gateway/index.ts";
 import { ensureDirectory, openPrivate } from "../../kernel/files.ts";
+import { directories } from "../../kernel/xdg.ts";
 import {
   BindingEntryState,
   type PlacementStatus,
   type PoolEntry,
   type PoolHost,
   type PoolInstance,
-  type PoolPlacement,
+  PoolPlacement,
+  type SessionRead,
+  type SessionReadResult,
 } from "../../worker/contract.ts";
+import {
+  readSessionFileEntry,
+  sessionRootOf,
+} from "../../worker/unit/session-store.ts";
 import { SlotControl } from "../worker/thread-data.ts";
 import type { SlotDriver, SlotEntry, SlotInstance } from "./slot-driver.ts";
+import { threadEnvironment } from "./thread-driver.ts";
 
 export const POOL_BACKOFF_INITIAL_MS = 1000;
 export const POOL_BACKOFF_MAX_MS = 30000;
@@ -71,6 +79,21 @@ export class WorkerPool implements PoolHost {
 
   placementStatus(placement: PoolPlacement): Promise<PlacementStatus> {
     return this.driver(placement).check();
+  }
+
+  readSessionEntry(
+    instance: PoolInstance,
+    read: SessionRead,
+    signal: AbortSignal,
+  ): Promise<SessionReadResult> {
+    if (instance.placement !== PoolPlacement.Server)
+      throw new Error("worker pool: no session root for the placement");
+    const slotRoot = join(this.workersDirectory(), instance.name);
+    return readSessionFileEntry(
+      sessionRootOf(directories(threadEnvironment({}, slotRoot)).state),
+      read,
+      signal,
+    );
   }
 
   prepare(): void {

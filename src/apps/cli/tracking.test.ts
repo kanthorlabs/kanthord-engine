@@ -9,6 +9,7 @@ import {
   flowStopReasonSchema,
   TRACE_QUERY_MAX_CHARACTERS,
 } from "../../tracking/contract.ts";
+import { SESSION_READS_PENDING_MAX } from "../../worker/contract.ts";
 import { ExitCode } from "./constants.ts";
 import { runKanthord } from "./test-support.ts";
 
@@ -305,6 +306,184 @@ test("session entry get sends the entry path and writes the answer", async (t) =
   assert.equal(seen[0]?.method, HttpMethod.Get);
   assert.equal(seen[0]?.url, ENTRY_GET_PATH);
   assert.deepEqual(JSON.parse(result.stdout), ENTRY_ANSWER);
+});
+
+const FULL_SUFFIX = "/full";
+const NO_OUTPUT = "";
+const REBUILD_DELAY_MS = 50;
+const REBUILD_PARALLEL = SESSION_READS_PENDING_MAX / 2;
+const CUT_COUNT = 10;
+const TOO_LARGE_CODE = "tracking.entry.too_large";
+const UNREACHABLE_CODE = "tracking.entry.unreachable";
+const UNREADABLE_CODE = "tracking.entry.unreadable";
+
+function errorAnswer(code: string, details: unknown) {
+  return {
+    error: { code, message: "refused", details },
+    request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  };
+}
+
+function cutEntry(sequence: number) {
+  return {
+    ...ENTRY_ANSWER,
+    entry_id: `e${sequence}`,
+    sequence,
+    truncated: true,
+    entry: { cut: true },
+  };
+}
+
+interface RebuildServer {
+  endpoint: string;
+  rebuilt: string[];
+  peak: number;
+}
+
+async function rebuildServer(
+  t: TestContext,
+  page: unknown,
+  answers: ReadonlyMap<string, readonly [number, unknown]>,
+): Promise<RebuildServer> {
+  const state: RebuildServer = { endpoint: "", rebuilt: [], peak: 0 };
+  let active = 0;
+  const server = createServer((request, response) => {
+    const url = new URL(request.url ?? "", "http://127.0.0.1");
+    const reply = (status: number, body: unknown) => {
+      response.writeHead(status, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(body));
+    };
+    if (!url.pathname.endsWith(FULL_SUFFIX)) return reply(HttpStatus.OK, page);
+    const entryId = url.pathname
+      .slice(0, -FULL_SUFFIX.length)
+      .split("/")
+      .pop()!;
+    state.rebuilt.push(entryId);
+    active += 1;
+    state.peak = Math.max(state.peak, active);
+    setTimeout(() => {
+      active -= 1;
+      const [status, body] = answers.get(entryId) ?? [
+        HttpStatus.OK,
+        {
+          ...cutEntry(Number(entryId.slice(1))),
+          truncated: false,
+          entry: { full: entryId },
+        },
+      ];
+      reply(status, body);
+    }, REBUILD_DELAY_MS);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  stopAfter(t, () => server.close());
+  state.endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  return state;
+}
+
+test("session entry get --full sends the rebuild path and writes the full entry", async (t) => {
+  const full = { ...ENTRY_ANSWER, entry: { role: "user", full: true } };
+  const { endpoint, seen } = await fakeServer(t, full);
+  const result = await run(
+    t,
+    ["session", "entry", "get", TRACE_ID, SESSION_ID, ENTRY_ID, "--full"],
+    endpoint,
+  );
+  assert.equal(result.code, ExitCode.Success, result.stderr);
+  assert.equal(seen.length, ONE_REQUEST);
+  assert.equal(seen[0]?.method, HttpMethod.Get);
+  assert.equal(seen[0]?.url, `${ENTRY_GET_PATH}${FULL_SUFFIX}`);
+  assert.deepEqual(JSON.parse(result.stdout), full);
+});
+
+test("session entry get --full exits 1 with tracking.entry.too_large", async (t) => {
+  const { endpoint } = await fakeServer(
+    t,
+    errorAnswer(TOO_LARGE_CODE, { bytes: 1, limit: 1 }),
+    HttpStatus.Conflict,
+  );
+  const result = await run(
+    t,
+    ["session", "entry", "get", TRACE_ID, SESSION_ID, ENTRY_ID, "--full"],
+    endpoint,
+  );
+  assert.equal(result.code, ExitCode.Failure);
+  assert.ok(result.stderr.includes(TOO_LARGE_CODE), result.stderr);
+  assert.equal(result.stdout, NO_OUTPUT);
+});
+
+test("session entry list --full rebuilds each cut entry at most half of the pending reads at a time and keeps a too_large entry cut", async (t) => {
+  const items = [
+    ENTRY_ANSWER,
+    ...Array.from({ length: CUT_COUNT }, (_, index) => cutEntry(index + 2)),
+  ];
+  const tooLarge = items[3]!;
+  const server = await rebuildServer(
+    t,
+    { items, next_cursor: null },
+    new Map([
+      [
+        tooLarge.entry_id,
+        [
+          HttpStatus.Conflict,
+          errorAnswer(TOO_LARGE_CODE, { bytes: 1, limit: 1 }),
+        ],
+      ],
+    ]),
+  );
+  const result = await run(
+    t,
+    ["session", "entry", "list", TRACE_ID, SESSION_ID, "--full"],
+    server.endpoint,
+  );
+  assert.equal(result.code, ExitCode.Success, result.stderr);
+  assert.equal(server.peak, REBUILD_PARALLEL);
+  assert.equal(server.rebuilt.length, CUT_COUNT);
+  assert.ok(!server.rebuilt.includes(ENTRY_ID));
+  const page = JSON.parse(result.stdout);
+  assert.equal(page.next_cursor, null);
+  assert.deepEqual(page.items[0], ENTRY_ANSWER);
+  assert.deepEqual(page.items[3], tooLarge);
+  for (const item of page.items.filter(
+    (entry: { entry_id: string }) =>
+      entry.entry_id !== ENTRY_ID && entry.entry_id !== tooLarge.entry_id,
+  )) {
+    assert.equal(item.truncated, false);
+    assert.deepEqual(item.entry, { full: item.entry_id });
+  }
+});
+
+test("session entry list --full exits 1 with the failure of the lowest sequence and its entry id", async (t) => {
+  const items = Array.from({ length: CUT_COUNT }, (_, index) =>
+    cutEntry(index + 1),
+  );
+  const server = await rebuildServer(
+    t,
+    { items, next_cursor: null },
+    new Map([
+      [
+        "e7",
+        [HttpStatus.ServiceUnavailable, errorAnswer(UNREADABLE_CODE, null)],
+      ],
+      [
+        "e3",
+        [
+          HttpStatus.ServiceUnavailable,
+          errorAnswer(UNREACHABLE_CODE, { reason: "offline" }),
+        ],
+      ],
+    ]),
+  );
+  const result = await run(
+    t,
+    ["session", "entry", "list", TRACE_ID, SESSION_ID, "--full"],
+    server.endpoint,
+  );
+  assert.equal(result.code, ExitCode.Failure);
+  assert.ok(result.stderr.includes(UNREACHABLE_CODE), result.stderr);
+  assert.ok(!result.stderr.includes(UNREADABLE_CODE), result.stderr);
+  assert.ok(result.stderr.includes('"entry_id":"e3"'), result.stderr);
+  assert.ok(result.stderr.includes('"reason":"offline"'), result.stderr);
+  assert.equal(result.stdout, NO_OUTPUT);
 });
 
 const ROOT_SPAN_ID = "0123456789abcdef";

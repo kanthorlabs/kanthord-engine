@@ -27,6 +27,8 @@ import {
   REGISTRATION_CAPABILITY,
   REGISTRATION_TARGET_KIND,
   RegistrationActivity,
+  type SessionRead,
+  SessionReadOutcome,
   WORKER_SERVICE_NAME,
   type WorkerBindingOf,
   type WorkerEntry,
@@ -89,6 +91,10 @@ import {
   shippedFraming,
 } from "./test-support.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
+import {
+  SessionAbsentReason,
+  UnreachableReason,
+} from "../tracking/contract.ts";
 
 const fakeCollaborations = {
   promptTelemetry: {
@@ -3018,4 +3024,156 @@ test("instanceOf answers the placement of a live instance and instanceKeyOf answ
       fingerprint: FINGERPRINT,
     });
   });
+});
+
+const SESSION_READ: SessionRead = {
+  execution_id: POOL_EXECUTION,
+  session_id: "0123456789abcdef",
+  entry_id: "a1b2c3d4",
+  entry_type: "message",
+};
+const SESSION_SECRET = "full-entry-secret";
+const readSignal = new AbortController().signal;
+
+function registrationOf(
+  f: ReturnType<typeof poolFixture>,
+  instanceId: string | null,
+): string {
+  return f.store.transaction(
+    (tx) =>
+      insertRegistration(
+        tx,
+        {
+          client_id: createIdentity("client_identity"),
+          name: "coder-1",
+          resource_identity: POOL_RESOURCE,
+          project_id: POOL_PROJECT,
+          instance_id: instanceId,
+        },
+        Date.now(),
+      ).runtime_identity,
+  );
+}
+
+test("a session read of an unknown execution or of a registration without an instance answers instance_unknown", async (t) => {
+  const f = poolFixture(t, 1);
+  const unknown = {
+    session_absent: SessionAbsentReason.InstanceUnknown,
+    instance: null,
+    placement: null,
+  };
+  assert.deepEqual(
+    await f.worker.readSessionEntry(null, SESSION_READ, readSignal),
+    unknown,
+  );
+  assert.deepEqual(
+    await f.worker.readSessionEntry(
+      createIdentity("worker_registration"),
+      SESSION_READ,
+      readSignal,
+    ),
+    unknown,
+  );
+  assert.deepEqual(
+    await f.worker.readSessionEntry(
+      registrationOf(f, null),
+      SESSION_READ,
+      readSignal,
+    ),
+    unknown,
+  );
+  assert.equal(f.host.sessionReads.length, NO_STARTS);
+});
+
+test("a session read of an archived instance answers archived with its name and placement", async (t) => {
+  const f = poolFixture(t, 1);
+  const runtime = registrationOf(f, f.instanceIdOf(FIRST_INSTANCE));
+  f.archive(FIRST_INSTANCE);
+  assert.deepEqual(
+    await f.worker.readSessionEntry(runtime, SESSION_READ, readSignal),
+    {
+      session_absent: SessionAbsentReason.Archived,
+      instance: f.nameOf(FIRST_INSTANCE),
+      placement: InstancePlacement.Server,
+    },
+  );
+  assert.equal(f.host.sessionReads.length, NO_STARTS);
+});
+
+test("a session read of a server instance reads the pool host and answers its result", async (t) => {
+  const f = poolFixture(t, 1);
+  const runtime = registrationOf(f, f.instanceIdOf(FIRST_INSTANCE));
+  const entry = { type: "message", id: SESSION_READ.entry_id, text: "full" };
+  f.host.sessionReadResult = { outcome: SessionReadOutcome.Resolved, entry };
+  assert.deepEqual(
+    await f.worker.readSessionEntry(runtime, SESSION_READ, readSignal),
+    {
+      result: { outcome: SessionReadOutcome.Resolved, entry },
+      instance: f.nameOf(FIRST_INSTANCE),
+      placement: InstancePlacement.Server,
+    },
+  );
+  assert.deepEqual(
+    f.host.sessionReads.map(({ instance, read }) => [instance.name, read]),
+    [[f.nameOf(FIRST_INSTANCE), SESSION_READ]],
+  );
+  f.host.sessionReadResult = { outcome: SessionReadOutcome.TooLarge, bytes: 9 };
+  assert.deepEqual(
+    await f.worker.readSessionEntry(runtime, SESSION_READ, readSignal),
+    {
+      result: { outcome: SessionReadOutcome.TooLarge, bytes: 9 },
+      instance: f.nameOf(FIRST_INSTANCE),
+      placement: InstancePlacement.Server,
+    },
+  );
+});
+
+test("a resolved entry with another id or type answers unreadable and the log record holds no entry content", async (t) => {
+  const f = poolFixture(t, 1);
+  const runtime = registrationOf(f, f.instanceIdOf(FIRST_INSTANCE));
+  const mismatches = [
+    { type: "message", id: "e5f6a7b8", secret: SESSION_SECRET },
+    { type: "custom", id: SESSION_READ.entry_id, secret: SESSION_SECRET },
+  ];
+  for (const entry of mismatches) {
+    f.host.sessionReadResult = { outcome: SessionReadOutcome.Resolved, entry };
+    assert.deepEqual(
+      await f.worker.readSessionEntry(runtime, SESSION_READ, readSignal),
+      {
+        result: { outcome: SessionReadOutcome.Unreadable },
+        instance: f.nameOf(FIRST_INSTANCE),
+        placement: InstancePlacement.Server,
+      },
+    );
+  }
+  const records = f.logs.filter((line) =>
+    line.includes("worker.session_read.entry_mismatch"),
+  );
+  assert.equal(records.length, mismatches.length);
+  for (const line of records) {
+    assert.ok(!line.includes(SESSION_SECRET), line);
+    assert.ok(line.includes(SESSION_READ.entry_id), line);
+  }
+});
+
+test("a session read of a container or a worker instance answers offline and reads no pool host", async (t) => {
+  const f = poolFixture(t, 0);
+  for (const placement of [
+    InstancePlacement.Container,
+    InstancePlacement.Worker,
+  ]) {
+    const runtime = registrationOf(
+      f,
+      f.addInstance(`box-${placement}`, placement),
+    );
+    assert.deepEqual(
+      await f.worker.readSessionEntry(runtime, SESSION_READ, readSignal),
+      {
+        unreachable: UnreachableReason.Offline,
+        instance: `box-${placement}`,
+        placement,
+      },
+    );
+  }
+  assert.equal(f.host.sessionReads.length, NO_STARTS);
 });

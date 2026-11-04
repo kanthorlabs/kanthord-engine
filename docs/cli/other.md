@@ -808,7 +808,7 @@ fails, the application logs `checkpoint failed` with the `reason`, the thrown
 error text with secrets removed. The record has no `reason` when the worker
 cannot read the secrets. A record holds the execution, node, attempt and
 task identities, commits, exit codes and results, and no agent content. pi persists each agent session of an execution to
-`<data directory>/pi/sessions/execution/<execution id>/`, a directory of mode 0700. The application keeps the newest 50 execution directories.
+`<data directory>/pi/sessions/execution/<execution id>/`, a directory of mode 0700. The application keeps every execution directory and deletes none.
 
 When an execution ends, the application logs one record `execution ended`
 with `execution_id` and `kind`. The `kind` is `released`, `closed` or `ended`.

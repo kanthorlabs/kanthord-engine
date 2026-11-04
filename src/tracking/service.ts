@@ -55,6 +55,10 @@ import {
   type RootSpanEnd,
   SCHEDULER_PRODUCER,
   type ServerTrace,
+  SESSION_ENTRY_FULL_MAX_BYTES,
+  SessionAbsentReason,
+  type SessionEntry,
+  type SessionHosts,
   type Span,
   type SpanContribution,
   spanIdSchema,
@@ -104,6 +108,10 @@ import {
   type TraceRow,
   traceRowOf,
 } from "./trace-store.ts";
+import {
+  SessionReadOutcome,
+  type SessionReadResult,
+} from "../worker/contract.ts";
 
 const OpeningAttribute = {
   WorkerInstance: "kanthord.worker.instance",
@@ -140,6 +148,7 @@ export interface Dependencies {
   health?: HealthRegistry;
   retentionDays: number;
   isHostedWorker: (workerName: string) => boolean;
+  sessionHosts: SessionHosts;
   now?: () => number;
 }
 
@@ -149,6 +158,68 @@ function traceNotFound(): never {
     "tracking.trace.not_found",
     "The trace is unknown or expired.",
   );
+}
+
+function entryNotFound(): never {
+  throw new OperationError(
+    HttpStatus.NotFound,
+    "tracking.entry.not_found",
+    "The session entry is unknown.",
+  );
+}
+
+function sessionAbsent(answer: {
+  session_absent: SessionAbsentReason;
+  instance: string | null;
+  placement: string | null;
+}): never {
+  throw new OperationError(
+    HttpStatus.NotFound,
+    "tracking.entry.session_absent",
+    "The host holds no file of the session.",
+    {
+      instance: answer.instance,
+      placement: answer.placement,
+      reason: answer.session_absent,
+    },
+  );
+}
+
+function fullEntry(
+  stored: SessionEntry,
+  result: SessionReadResult,
+  target: { instance: string; placement: string },
+): SessionEntry {
+  switch (result.outcome) {
+    case SessionReadOutcome.Resolved:
+      return { ...stored, truncated: false, entry: result.entry };
+    case SessionReadOutcome.SessionAbsent:
+      return sessionAbsent({
+        session_absent: SessionAbsentReason.NotKept,
+        ...target,
+      });
+    case SessionReadOutcome.EntryAbsent:
+      throw new OperationError(
+        HttpStatus.NotFound,
+        "tracking.entry.entry_absent",
+        "The session file holds no entry with the entry identity and type.",
+        target,
+      );
+    case SessionReadOutcome.TooLarge:
+      throw new OperationError(
+        HttpStatus.Conflict,
+        "tracking.entry.too_large",
+        "The full entry is above the full entry bound.",
+        { ...target, bytes: result.bytes, limit: SESSION_ENTRY_FULL_MAX_BYTES },
+      );
+    case SessionReadOutcome.Unreadable:
+      throw new OperationError(
+        HttpStatus.ServiceUnavailable,
+        "tracking.entry.unreadable",
+        "The host failed to read the session file.",
+        target,
+      );
+  }
 }
 
 function rangeInvalid(message: string): never {
@@ -702,14 +773,54 @@ export class TrackingService implements Service, ExecutionTelemetry {
         params.session_id,
         params.entry_id,
       );
-      if (!entry)
-        throw new OperationError(
-          HttpStatus.NotFound,
-          "tracking.entry.not_found",
-          "The session entry is unknown.",
-        );
+      if (!entry) entryNotFound();
       return entry;
     });
+  }
+
+  async sessionEntryRebuild(
+    params: { trace_id: string; session_id: string; entry_id: string },
+    caller: CallerContext,
+  ): Promise<SessionEntry> {
+    assert.ok(caller.identity);
+    const { trace, entry } = caller.commit((tx) => {
+      const found = readTrace(tx, params.trace_id);
+      if (!found) traceNotFound();
+      const stored = readSessionEntry(
+        tx,
+        params.trace_id,
+        params.session_id,
+        params.entry_id,
+      );
+      if (!stored) entryNotFound();
+      return { trace: found, entry: stored };
+    });
+    if (!entry.truncated) return entry;
+    if (trace.execution_id === null)
+      sessionAbsent({
+        session_absent: SessionAbsentReason.InstanceUnknown,
+        instance: null,
+        placement: null,
+      });
+    const answer = await this.dependencies.sessionHosts.read(
+      {
+        execution_id: trace.execution_id,
+        session_id: entry.session_id,
+        entry_id: entry.entry_id,
+        entry_type: entry.entry_type,
+      },
+      caller.context.signal,
+    );
+    if ("session_absent" in answer) sessionAbsent(answer);
+    const target = { instance: answer.instance, placement: answer.placement };
+    if ("unreachable" in answer)
+      throw new OperationError(
+        HttpStatus.ServiceUnavailable,
+        "tracking.entry.unreachable",
+        "The worker instance cannot serve the session read now.",
+        { ...target, reason: answer.unreachable },
+      );
+    return fullEntry(entry, answer.result, target);
   }
 
   causeLabel(traceId: string, body: CauseLabelBody, caller: CallerContext) {
@@ -755,6 +866,7 @@ export class TrackingService implements Service, ExecutionTelemetry {
       trackingOperations.textGet.access !== AccessPolicy.Human ||
       trackingOperations.sessionEntryList.access !== AccessPolicy.Human ||
       trackingOperations.sessionEntryGet.access !== AccessPolicy.Human ||
+      trackingOperations.sessionEntryRebuild.access !== AccessPolicy.Human ||
       trackingOperations.causeLabel.access !== AccessPolicy.Human
     )
       throw new Error(
@@ -799,6 +911,9 @@ export class TrackingService implements Service, ExecutionTelemetry {
     );
     registry.register(trackingOperations.sessionEntryGet, (input, caller) =>
       this.sessionEntryGet(input.params, caller),
+    );
+    registry.register(trackingOperations.sessionEntryRebuild, (input, caller) =>
+      this.sessionEntryRebuild(input.params, caller),
     );
     registry.register(trackingOperations.causeLabel, (input, caller) =>
       this.causeLabel(input.params.trace_id, input.body, caller),

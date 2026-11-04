@@ -46,20 +46,20 @@ The ingestion reuses the record schema of `tracking.telemetry.write` and adds
 
 The literal service prefix is `/api/tracking`. Read requests have no body.
 
-| Command suffix / synopsis                                                                                                                                                              | Operation identifier          | HTTP route                                                              | Access / effect                             |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ----------------------------------------------------------------------- | ------------------------------------------- |
-| `trace list [--project <project-id>] [--node <node-id>] [--state <state>] [--query <text>] [--sort <field>] [--from <unix-ms>] [--to <unix-ms>] [--limit <count>] [--cursor <opaque>]` | `tracking.trace.list`         | `GET /api/tracking/trace`                                               | `human`; read                               |
-| `timeline list (--execution <execution-id> \| --node <node-id> \| --project <project-id>) [--depth <1\|2>] [--from <unix-ms>] [--to <unix-ms>] [--limit <count>] [--cursor <opaque>]`  | `tracking.timeline.list`      | `GET /api/tracking/timeline`                                            | `human`; read                               |
-| `analytics cost [--group-by <field>] [--bucket <size>] [--project <project-id>] [--node <node-id>] [--from <unix-ms>] [--to <unix-ms>]`                                                | `tracking.analytics.cost`     | `GET /api/tracking/analytics/cost`                                      | `human`; read                               |
-| `analytics duration --measure <measure> [--operation <name>] [--group-by <field>] [--bucket <size>] [--project <project-id>] [--node <node-id>] [--from <unix-ms>] [--to <unix-ms>]`   | `tracking.analytics.duration` | `GET /api/tracking/analytics/duration`                                  | `human`; read                               |
-| `analytics flow [--project <project-id>] [--worker <worker-name>] [--from <unix-ms>] [--to <unix-ms>] [--bucket <size>] [--compare <mode>]`                                            | `tracking.analytics.flow`     | `GET /api/tracking/analytics/flow`                                      | `human`; read                               |
-| `facet get [--project <project-id>]`                                                                                                                                                   | `tracking.facet.get`          | `GET /api/tracking/facet`                                               | `human`; read                               |
-| `trace get <trace-id>`                                                                                                                                                                 | `tracking.trace.get`          | `GET /api/tracking/trace/:trace_id`                                     | `human`; read                               |
-| `span list <trace-id> [--limit <count>] [--cursor <opaque>]`                                                                                                                           | `tracking.span.list`          | `GET /api/tracking/trace/:trace_id/span`                                | `human`; read                               |
-| `session entry list <trace-id> <session-id> [--tool-call <tool-call-id>] [--limit <count>] [--cursor <opaque>]`                                                                        | `tracking.session.entry.list` | `GET /api/tracking/trace/:trace_id/session/:session_id/entry`           | `human`; read                               |
-| `session entry get <trace-id> <session-id> <entry-id>`                                                                                                                                 | `tracking.session.entry.get`  | `GET /api/tracking/trace/:trace_id/session/:session_id/entry/:entry_id` | `human`; read                               |
-| `text get <trace-id> <text-id>`                                                                                                                                                        | `tracking.text.get`           | `GET /api/tracking/trace/:trace_id/text/:text_id`                       | `human`; read                               |
-| `cause label <trace-id> --category <category> --subcategory <subcategory> --reason <text> [--idempotency-key <key>]`                                                                   | `tracking.cause.label`        | `POST /api/tracking/trace/:trace_id/cause/label`                        | `human`; mutation, idempotency key required |
+| Command suffix / synopsis                                                                                                                                                              | Operation identifier                                                               | HTTP route                                                                                                                                                          | Access / effect                             |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `trace list [--project <project-id>] [--node <node-id>] [--state <state>] [--query <text>] [--sort <field>] [--from <unix-ms>] [--to <unix-ms>] [--limit <count>] [--cursor <opaque>]` | `tracking.trace.list`                                                              | `GET /api/tracking/trace`                                                                                                                                           | `human`; read                               |
+| `timeline list (--execution <execution-id> \| --node <node-id> \| --project <project-id>) [--depth <1\|2>] [--from <unix-ms>] [--to <unix-ms>] [--limit <count>] [--cursor <opaque>]`  | `tracking.timeline.list`                                                           | `GET /api/tracking/timeline`                                                                                                                                        | `human`; read                               |
+| `analytics cost [--group-by <field>] [--bucket <size>] [--project <project-id>] [--node <node-id>] [--from <unix-ms>] [--to <unix-ms>]`                                                | `tracking.analytics.cost`                                                          | `GET /api/tracking/analytics/cost`                                                                                                                                  | `human`; read                               |
+| `analytics duration --measure <measure> [--operation <name>] [--group-by <field>] [--bucket <size>] [--project <project-id>] [--node <node-id>] [--from <unix-ms>] [--to <unix-ms>]`   | `tracking.analytics.duration`                                                      | `GET /api/tracking/analytics/duration`                                                                                                                              | `human`; read                               |
+| `analytics flow [--project <project-id>] [--worker <worker-name>] [--from <unix-ms>] [--to <unix-ms>] [--bucket <size>] [--compare <mode>]`                                            | `tracking.analytics.flow`                                                          | `GET /api/tracking/analytics/flow`                                                                                                                                  | `human`; read                               |
+| `facet get [--project <project-id>]`                                                                                                                                                   | `tracking.facet.get`                                                               | `GET /api/tracking/facet`                                                                                                                                           | `human`; read                               |
+| `trace get <trace-id>`                                                                                                                                                                 | `tracking.trace.get`                                                               | `GET /api/tracking/trace/:trace_id`                                                                                                                                 | `human`; read                               |
+| `span list <trace-id> [--limit <count>] [--cursor <opaque>]`                                                                                                                           | `tracking.span.list`                                                               | `GET /api/tracking/trace/:trace_id/span`                                                                                                                            | `human`; read                               |
+| `session entry list <trace-id> <session-id> [--tool-call <tool-call-id>] [--limit <count>] [--cursor <opaque>] [--full]`                                                               | `tracking.session.entry.list`; with `--full` also `tracking.session.entry.rebuild` | `GET /api/tracking/trace/:trace_id/session/:session_id/entry`                                                                                                       | `human`; read                               |
+| `session entry get <trace-id> <session-id> <entry-id> [--full]`                                                                                                                        | `tracking.session.entry.get`; with `--full` `tracking.session.entry.rebuild`       | `GET /api/tracking/trace/:trace_id/session/:session_id/entry/:entry_id`; with `--full` `GET /api/tracking/trace/:trace_id/session/:session_id/entry/:entry_id/full` | `human`; read                               |
+| `text get <trace-id> <text-id>`                                                                                                                                                        | `tracking.text.get`                                                                | `GET /api/tracking/trace/:trace_id/text/:text_id`                                                                                                                   | `human`; read                               |
+| `cause label <trace-id> --category <category> --subcategory <subcategory> --reason <text> [--idempotency-key <key>]`                                                                   | `tracking.cause.label`                                                             | `POST /api/tracking/trace/:trace_id/cause/label`                                                                                                                    | `human`; mutation, idempotency key required |
 
 API-only operation:
 
@@ -116,10 +116,10 @@ kanthord tracking cause label <trace-id> --category <category>
   [--endpoint <url>] [--token <jwt>] [--help]
 
 kanthord tracking session entry list <trace-id> <session-id>
-  [--tool-call <tool-call-id>] [--limit <count>] [--cursor <opaque>]
+  [--tool-call <tool-call-id>] [--limit <count>] [--cursor <opaque>] [--full]
   [--endpoint <url>] [--token <jwt>] [--help]
 
-kanthord tracking session entry get <trace-id> <session-id> <entry-id>
+kanthord tracking session entry get <trace-id> <session-id> <entry-id> [--full]
   [--endpoint <url>] [--token <jwt>] [--help]
 ```
 
@@ -575,7 +575,22 @@ an empty page. An unknown or deleted trace answers `404`
 Each entry holds the eleven fields `trace_id`, `session_id`, `entry_id`,
 `parent_entry_id`, `sequence`, `entry_type`, `entry_time`, `tool_call_id`,
 `truncated`, `entry` and `created_at`. The value `truncated: true` marks an entry
-whose strings the producer cut.
+whose strings the producer cut. A reader can rebuild that entry with `--full`.
+
+`--full` reads the page, then rebuilds each entry with `truncated: true` through
+`tracking.session.entry.rebuild`, under
+[`session entry get --full`](#session-entry-get---full). It runs at most 4
+rebuilds at the same time, half of `SESSION_READS_PENDING_MAX` (8). The output
+keeps the page shape. Each rebuilt entry holds the full entry and
+`truncated: false`.
+
+- A failed rebuild exits 1 with the code of the failure of the lowest
+  `sequence`. Its `details` add `entry_id` of that entry.
+- An entry that answers `tracking.entry.too_large` stays cut with
+  `truncated: true`, and it alone does not exit 1. The size is a fixed property
+  of the entry, not a host fault.
+- A whole session is `session entry list --full` over its pages. No export
+  command exists.
 
 ## `session entry get`
 
@@ -583,6 +598,45 @@ Reads one entry of an agent session. The answer holds the eleven fields of
 [`session entry list`](#session-entry-list). An unknown entry answers `404`
 `tracking.entry.not_found`. An unknown or deleted trace answers `404`
 `tracking.trace.not_found`.
+
+### `session entry get --full`
+
+`--full` calls `tracking.session.entry.rebuild` at
+`GET /api/tracking/trace/:trace_id/session/:session_id/entry/:entry_id/full`.
+The read asks the host of the execution for the pi entry and answers it as pi
+wrote it. The output keeps the eleven fields of `get`. `entry` is the full pi
+entry, and `truncated` is `false`. The read stores nothing.
+
+- An entry with `truncated: false` is the full entry. The read answers the
+  stored entry at once.
+- The host is the server for a `server` instance. The server reads the session
+  directory of the instance directly, also while the instance stops or waits.
+  A `container` or a `worker` instance answers `503`
+  `tracking.entry.unreachable` with reason `offline` in this release.
+- The host measures the UTF-8 byte length of the line as pi wrote it. Above the
+  full entry bound of 33488896 bytes, the request body limit minus 65536 bytes,
+  the host sends no entry. The read answers `409` `tracking.entry.too_large`
+  with the size.
+- The host applies no redaction. The pi session file holds the entry as pi
+  wrote it, so a rebuild can serve content that the cut removed.
+- A failure answers an error code, never the cut entry. An error exits 1 with
+  its code. `tracking.entry.too_large` also exits 1, because the command asks
+  for one full entry.
+
+| HTTP | Code                            | Condition                                                                                                                                                         |
+| ---- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 409  | `tracking.entry.too_large`      | The full entry is above the full entry bound. `details: { instance, placement, bytes, limit }`.                                                                   |
+| 503  | `tracking.entry.unreachable`    | The instance cannot serve the read now. `details: { instance, placement, reason }`. `reason` is `offline`, `timeout` or `busy`.                                   |
+| 404  | `tracking.entry.session_absent` | The host holds no file of the session. `details: { instance, placement, reason }`. `reason` is `not_kept`, `archived` or `instance_unknown`.                      |
+| 404  | `tracking.entry.entry_absent`   | The session file holds no entry with the entry identity and type. `details: { instance, placement }`.                                                             |
+| 503  | `tracking.entry.unreadable`     | The host failed to read the session file, met a symlink or a changed directory below the session root, or sent another entry. `details: { instance, placement }`. |
+
+- `not_kept`: pi never wrote the session, a stateless host lost it, or the
+  instance moved to a new host.
+- `archived`: the instance is archived, and KanthorD no longer reads its
+  sessions.
+- `instance_unknown`: no instance of KanthorD ran the execution. `instance` and
+  `placement` are `null`.
 
 ## `tracking.telemetry.write`
 
@@ -735,3 +789,8 @@ Every remote command can also answer the shared codes of
 | 404   | `tracking.trace.not_found`                           | The trace is unknown.                                                                                                                                                | all                                                      |
 | 404   | `tracking.text.not_found`                            | The trace holds no such text.                                                                                                                                        | text get                                                 |
 | 404   | `tracking.entry.not_found`                           | The session holds no such entry.                                                                                                                                     | session entry get                                        |
+| 409   | `tracking.entry.too_large`                           | The full entry is above the full entry bound.                                                                                                                        | session entry get --full                                 |
+| 503   | `tracking.entry.unreachable`                         | The instance cannot serve the session read now.                                                                                                                      | session entry get --full, session entry list --full      |
+| 404   | `tracking.entry.session_absent`                      | The host holds no file of the session.                                                                                                                               | session entry get --full, session entry list --full      |
+| 404   | `tracking.entry.entry_absent`                        | The session file holds no entry with the entry identity and type.                                                                                                    | session entry get --full, session entry list --full      |
+| 503   | `tracking.entry.unreadable`                          | The host failed to read the session file.                                                                                                                            | session entry get --full, session entry list --full      |

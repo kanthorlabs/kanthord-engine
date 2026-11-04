@@ -330,6 +330,8 @@ paths:
     $ref: ./openapi/tracking/session.entry.get.yaml#/pathItem
   /api/tracking/trace/{trace_id}/session/{session_id}/entry:
     $ref: ./openapi/tracking/session.entry.list.yaml#/pathItem
+  /api/tracking/trace/{trace_id}/session/{session_id}/entry/{entry_id}/full:
+    $ref: ./openapi/tracking/session.entry.rebuild.yaml#/pathItem
   /api/tracking/trace/{trace_id}/span:
     $ref: ./openapi/tracking/span.list.yaml#/pathItem
   /api/tracking/execution/{execution_id}/telemetry:

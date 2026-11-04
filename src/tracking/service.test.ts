@@ -42,7 +42,11 @@ import {
   type RootSpanEnd,
   SCHEDULER_PRODUCER,
   type ServerTrace,
+  SESSION_ENTRY_FULL_MAX_BYTES,
+  SessionAbsentReason,
   type SessionEntryRecord,
+  type SessionHosts,
+  type SessionReadAnswer,
   SpanOrigin,
   SpanStatus,
   type TelemetryRecord,
@@ -54,12 +58,14 @@ import {
   TRACKING_SERVICE_NAME,
   trackingOperations,
   TransitionRule,
+  UnreachableReason,
 } from "./contract.ts";
+import { type SessionRead, SessionReadOutcome } from "../worker/contract.ts";
 import { FLOW_VECTOR_COLUMNS } from "./flow-model.ts";
 import { CauseLabelCode, HUMAN_USERNAME_ATTRIBUTE } from "./cause-label.ts";
 import { trackingMigrations } from "./migrations.ts";
 import { TrackingService } from "./service.ts";
-import { insertSpan, insertTrace } from "./trace-store.ts";
+import { insertSessionEntry, insertSpan, insertTrace } from "./trace-store.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const HUMAN_ACCOUNT = "account_01JZ8R2B3C4D5E6F7G8H9J0K1M";
@@ -120,7 +126,15 @@ const CURSOR_INVALID = "system.pagination.cursor_invalid";
 const OTHER_EXECUTION = "execution_01JZ8R2B3C4D5E6F7G8H9J0K1N";
 const OTHER_TRACE = "b".repeat(32);
 
-function harness(t: TestContext, now: () => number = () => NOW) {
+const unusedSessionHosts: SessionHosts = {
+  read: () => Promise.reject(new Error("Unexpected session read")),
+};
+
+function harness(
+  t: TestContext,
+  now: () => number = () => NOW,
+  sessionHosts: SessionHosts = unusedSessionHosts,
+) {
   const store = new Store(IN_MEMORY_DATABASE);
   stopAfter(t, () => store.close());
   store.migrate([
@@ -135,6 +149,7 @@ function harness(t: TestContext, now: () => number = () => NOW) {
       traceOf: (executionId) =>
         executionId === TRACE.execution_id ? TRACE : undefined,
     },
+    sessionHosts,
   });
   return { store, service };
 }
@@ -1141,8 +1156,11 @@ function entryRecord(
   };
 }
 
-function entryHarness(t: TestContext) {
-  const { store, service } = harness(t);
+function entryHarness(
+  t: TestContext,
+  sessionHosts: SessionHosts = unusedSessionHosts,
+) {
+  const { store, service } = harness(t, () => NOW, sessionHosts);
   const records = [
     ...Array.from({ length: ENTRY_COUNT }, (_, index) =>
       entryRecord(
@@ -1249,6 +1267,246 @@ test("a session entry read answers one entry or a refusal", (t) => {
     (error) =>
       error instanceof OperationError && error.code === TRACE_NOT_FOUND,
   );
+});
+
+const REBUILD_INSTANCE = "coder-one";
+const REBUILD_PLACEMENT = "server";
+const REBUILD_TARGET = {
+  instance: REBUILD_INSTANCE,
+  placement: REBUILD_PLACEMENT,
+};
+const FULL_ENTRY = {
+  type: "message",
+  id: `e${TRUNCATED_SEQUENCE}`,
+  full: true,
+};
+const TOO_LARGE_BYTES = SESSION_ENTRY_FULL_MAX_BYTES + 1;
+const REBUILD_PATH =
+  "/api/tracking/trace/:trace_id/session/:session_id/entry/:entry_id/full";
+
+function rebuildHarness(t: TestContext, answer: SessionReadAnswer) {
+  const reads: SessionRead[] = [];
+  const hosts: SessionHosts = {
+    read: async (read) => {
+      reads.push(read);
+      return answer;
+    },
+  };
+  return { ...entryHarness(t, hosts), reads };
+}
+
+const CUT_ENTRY = {
+  trace_id: TRACE.trace_id,
+  session_id: SPAN,
+  entry_id: `e${TRUNCATED_SEQUENCE}`,
+};
+
+async function rejectsWith(
+  promise: Promise<unknown>,
+  status: number,
+  code: string,
+  details: unknown,
+): Promise<void> {
+  await assert.rejects(promise, (error) => {
+    assert.ok(error instanceof OperationError);
+    assert.equal(error.status, status);
+    assert.equal(error.code, code);
+    assert.deepEqual(error.details, details);
+    return true;
+  });
+}
+
+test("a rebuild of a cut entry answers the full entry with truncated false", async (t) => {
+  const { store, service, reads } = rebuildHarness(t, {
+    result: { outcome: SessionReadOutcome.Resolved, entry: FULL_ENTRY },
+    ...REBUILD_TARGET,
+  });
+  const stored = service.sessionEntryGet(CUT_ENTRY, caller(store));
+  const rebuilt = await service.sessionEntryRebuild(CUT_ENTRY, caller(store));
+  assert.deepEqual(rebuilt, { ...stored, truncated: false, entry: FULL_ENTRY });
+  assert.deepEqual(reads, [
+    {
+      execution_id: TRACE.execution_id,
+      session_id: SPAN,
+      entry_id: `e${TRUNCATED_SEQUENCE}`,
+      entry_type: "message",
+    },
+  ]);
+  assert.deepEqual(service.sessionEntryGet(CUT_ENTRY, caller(store)), stored);
+});
+
+test("a rebuild of an uncut entry answers the stored entry and reads no host", async (t) => {
+  const { store, service, reads } = rebuildHarness(t, {
+    result: { outcome: SessionReadOutcome.Unreadable },
+    ...REBUILD_TARGET,
+  });
+  const params = { ...CUT_ENTRY, entry_id: `e${FIRST_SEQUENCE}` };
+  assert.deepEqual(
+    await service.sessionEntryRebuild(params, caller(store)),
+    service.sessionEntryGet(params, caller(store)),
+  );
+  assert.equal(reads.length, NO_ROWS);
+});
+
+test("a rebuild refuses an unknown trace and an unknown entry before a host read", async (t) => {
+  const { store, service, reads } = rebuildHarness(t, {
+    result: { outcome: SessionReadOutcome.Unreadable },
+    ...REBUILD_TARGET,
+  });
+  await assert.rejects(
+    service.sessionEntryRebuild(
+      { ...CUT_ENTRY, trace_id: OTHER_TRACE },
+      caller(store),
+    ),
+    (error) =>
+      error instanceof OperationError && error.code === TRACE_NOT_FOUND,
+  );
+  await assert.rejects(
+    service.sessionEntryRebuild(
+      { ...CUT_ENTRY, entry_id: "e9" },
+      caller(store),
+    ),
+    (error) =>
+      error instanceof OperationError && error.code === ENTRY_NOT_FOUND,
+  );
+  assert.equal(reads.length, NO_ROWS);
+});
+
+const REBUILD_FAILURES: readonly (readonly [
+  string,
+  SessionReadAnswer,
+  number,
+  string,
+  unknown,
+])[] = [
+  [
+    "too_large",
+    {
+      result: { outcome: SessionReadOutcome.TooLarge, bytes: TOO_LARGE_BYTES },
+      ...REBUILD_TARGET,
+    },
+    HttpStatus.Conflict,
+    "tracking.entry.too_large",
+    {
+      ...REBUILD_TARGET,
+      bytes: TOO_LARGE_BYTES,
+      limit: SESSION_ENTRY_FULL_MAX_BYTES,
+    },
+  ],
+  [
+    "entry_absent",
+    { result: { outcome: SessionReadOutcome.EntryAbsent }, ...REBUILD_TARGET },
+    HttpStatus.NotFound,
+    "tracking.entry.entry_absent",
+    REBUILD_TARGET,
+  ],
+  [
+    "unreadable",
+    { result: { outcome: SessionReadOutcome.Unreadable }, ...REBUILD_TARGET },
+    HttpStatus.ServiceUnavailable,
+    "tracking.entry.unreadable",
+    REBUILD_TARGET,
+  ],
+  [
+    "session_absent of the host",
+    {
+      result: { outcome: SessionReadOutcome.SessionAbsent },
+      ...REBUILD_TARGET,
+    },
+    HttpStatus.NotFound,
+    "tracking.entry.session_absent",
+    { ...REBUILD_TARGET, reason: SessionAbsentReason.NotKept },
+  ],
+  [
+    "archived",
+    { session_absent: SessionAbsentReason.Archived, ...REBUILD_TARGET },
+    HttpStatus.NotFound,
+    "tracking.entry.session_absent",
+    { ...REBUILD_TARGET, reason: SessionAbsentReason.Archived },
+  ],
+  [
+    "instance_unknown",
+    {
+      session_absent: SessionAbsentReason.InstanceUnknown,
+      instance: null,
+      placement: null,
+    },
+    HttpStatus.NotFound,
+    "tracking.entry.session_absent",
+    {
+      instance: null,
+      placement: null,
+      reason: SessionAbsentReason.InstanceUnknown,
+    },
+  ],
+  ...Object.values(UnreachableReason).map(
+    (reason) =>
+      [
+        `unreachable ${reason}`,
+        { unreachable: reason, ...REBUILD_TARGET },
+        HttpStatus.ServiceUnavailable,
+        "tracking.entry.unreachable",
+        { ...REBUILD_TARGET, reason },
+      ] as const,
+  ),
+];
+
+for (const [name, answer, status, code, details] of REBUILD_FAILURES)
+  test(`a rebuild answers ${code} for ${name}`, async (t) => {
+    const { store, service } = rebuildHarness(t, answer);
+    await rejectsWith(
+      service.sessionEntryRebuild(CUT_ENTRY, caller(store)),
+      status,
+      code,
+      details,
+    );
+  });
+
+test("a rebuild of an entry of a trace without an execution answers instance_unknown and reads no host", async (t) => {
+  const { store, service, reads } = rebuildHarness(t, {
+    result: { outcome: SessionReadOutcome.Unreadable },
+    ...REBUILD_TARGET,
+  });
+  store.transaction((tx) => {
+    insertTrace(
+      tx,
+      {
+        trace_id: OTHER_TRACE,
+        project_id: TRACE.project_id,
+        execution_id: null,
+        node_id: null,
+        attempt: null,
+        root_span_id: TRACE.root_span_id,
+      },
+      NOW,
+    );
+    insertSessionEntry(
+      tx,
+      { ...entryRecord(SPAN, TRUNCATED_SEQUENCE, null), trace_id: OTHER_TRACE },
+      NOW,
+    );
+  });
+  await rejectsWith(
+    service.sessionEntryRebuild(
+      { ...CUT_ENTRY, trace_id: OTHER_TRACE },
+      caller(store),
+    ),
+    HttpStatus.NotFound,
+    "tracking.entry.session_absent",
+    {
+      instance: null,
+      placement: null,
+      reason: SessionAbsentReason.InstanceUnknown,
+    },
+  );
+  assert.equal(reads.length, NO_ROWS);
+});
+
+test("the rebuild operation is a human read with the tracking timeout", () => {
+  const operation = trackingOperations.sessionEntryRebuild;
+  assert.equal(operation.access, AccessPolicy.Human);
+  assert.equal(operation.mutation, false);
+  assert.equal(operation.path, REBUILD_PATH);
 });
 
 test("a session entry list refuses an unknown trace and a malformed cursor", (t) => {
