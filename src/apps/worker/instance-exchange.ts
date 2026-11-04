@@ -29,6 +29,7 @@ import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const BASE64URL = "base64url";
 export const EXCHANGE_UNAVAILABLE = "worker.instance.exchange_unavailable";
+export const INSTANCE_REPORT_RETRY_MS = 2000;
 
 export type ConnectionEntry = ReturnType<
   typeof connectionPayloadSchema.parse

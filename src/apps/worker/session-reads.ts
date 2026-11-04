@@ -7,9 +7,10 @@ import type {
   SessionReadResult,
 } from "../../worker/contract.ts";
 import { readSessionFileEntry } from "../../worker/unit/index.ts";
-import { EXCHANGE_UNAVAILABLE } from "./instance-exchange.ts";
-
-export const SESSION_READ_REPORT_RETRY_MS = 2000;
+import {
+  EXCHANGE_UNAVAILABLE,
+  INSTANCE_REPORT_RETRY_MS,
+} from "./instance-exchange.ts";
 
 export type SessionReadReporter = (
   readId: string,
@@ -86,7 +87,7 @@ export class SessionReads {
       }
       try {
         await delay(
-          this.options.retryMs ?? SESSION_READ_REPORT_RETRY_MS,
+          this.options.retryMs ?? INSTANCE_REPORT_RETRY_MS,
           undefined,
           { signal: this.options.signal },
         );
