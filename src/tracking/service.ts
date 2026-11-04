@@ -25,6 +25,9 @@ import { causeAttributes } from "../kernel/cause.ts";
 import { IdentityKind } from "../kernel/caller.ts";
 import { identityTime } from "../kernel/identity.ts";
 import type { Store } from "../kernel/store.ts";
+import type { Logger } from "pino";
+import { requesterOf } from "../kernel/cleanup.ts";
+import { deleteTraces } from "./footprint.ts";
 import { readCost } from "./analytics-cost.ts";
 import { readDuration } from "./analytics-duration.ts";
 import { type Admission, admitRecords, admitServerSpan } from "./admission.ts";
@@ -129,6 +132,7 @@ const TRANSITION_RECORD = "transition";
 const SPAN_ID_LENGTH = 16;
 const TRACKING_STOPPED_CODE = "system.tracking.stopped";
 const CURSOR_INVALID_CODE = "system.pagination.cursor_invalid";
+const TRACE_DELETED = "tracking.trace.deleted";
 const CURSOR_ENCODING = "base64url";
 const TEXT_ENCODING = "utf8";
 const CURSOR_START = 0;
@@ -139,6 +143,7 @@ const DAY_MS = 86400000;
 
 export interface Dependencies {
   store: Store;
+  logger?: Logger;
   executions: ExecutionTraces;
   health?: HealthRegistry;
   writableDays: number;
@@ -838,7 +843,8 @@ export class TrackingService implements Service, ExecutionTelemetry {
       trackingOperations.sessionEntryList.access !== AccessPolicy.Human ||
       trackingOperations.sessionEntryGet.access !== AccessPolicy.Human ||
       trackingOperations.sessionEntryRebuild.access !== AccessPolicy.Human ||
-      trackingOperations.causeLabel.access !== AccessPolicy.Human
+      trackingOperations.causeLabel.access !== AccessPolicy.Human ||
+      trackingOperations.traceDelete.access !== AccessPolicy.HumanOrService
     )
       throw new Error(
         "Tracking operations require tracking ownership and their declared access.",
@@ -886,6 +892,20 @@ export class TrackingService implements Service, ExecutionTelemetry {
     registry.register(trackingOperations.sessionEntryRebuild, (input, caller) =>
       this.sessionEntryRebuild(input.params, caller),
     );
+    registry.register(trackingOperations.traceDelete, ({ body }, caller) => {
+      const requestedBy = requesterOf(caller.identity, body.requested_by);
+      const answer = caller.commit((tx) => deleteTraces(tx, body.trace_ids));
+      this.dependencies.logger?.info(
+        {
+          requested_by: requestedBy.account,
+          removed: answer.removed,
+          absent: answer.absent,
+          refused: answer.refused.length,
+        },
+        TRACE_DELETED,
+      );
+      return answer;
+    });
     registry.register(trackingOperations.causeLabel, (input, caller) =>
       this.causeLabel(input.params.trace_id, input.body, caller),
     );

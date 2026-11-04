@@ -19,6 +19,10 @@ import {
 } from "../kernel/cause.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
+  testHumanIdentity,
+  testServiceIdentity,
+} from "../kernel/test-identity.ts";
+import {
   AnalyticsBucket,
   AnalyticsMeasure,
   CostGroupBy,
@@ -2462,5 +2466,98 @@ test("the cause label operation refuses a trace that is still open", (t) => {
     (error) =>
       error instanceof OperationError &&
       error.code === CauseLabelCode.TraceOpen,
+  );
+});
+
+function traceDelete(
+  t: TestContext,
+  identity: CallerContext["identity"],
+  body: {
+    trace_ids: string[];
+    requested_by?: { kind: "human"; account: string; name: string };
+  },
+) {
+  const { store, service } = harness(t);
+  const registry = new OperationRegistry();
+  service.declare(registry);
+  const handler = registry.get(trackingOperations.traceDelete.id).handler;
+  const call = () =>
+    handler(
+      { params: {}, query: {}, body },
+      {
+        identity,
+        context: background,
+        requestId: "request",
+        commit: (write) => store.transaction(write),
+      },
+    );
+  return { store, call };
+}
+
+const DELETE_ACTOR = {
+  kind: "human" as const,
+  account: "ulrich",
+  name: "Ulrich",
+};
+const ENDED_TRACE = "c".repeat(32);
+const OPEN_TRACE = "d".repeat(32);
+
+function seedDeleteTraces(store: Store): void {
+  store.transaction((tx) => {
+    const insert = tx.database.prepare(
+      "INSERT INTO tracking_trace (trace_id, root_span_id, created_at, state) VALUES (?, ?, ?, ?)",
+    );
+    insert.run(ENDED_TRACE, "1".repeat(16), NOW - 86400000, "ok");
+    insert.run(OPEN_TRACE, "2".repeat(16), NOW, "open");
+    tx.database
+      .prepare(
+        "INSERT INTO tracking_session_entry (trace_id, session_id, entry_id, sequence, entry_type, entry_time, truncated, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        ENDED_TRACE,
+        "3".repeat(16),
+        "entry-1",
+        1,
+        "message",
+        NOW,
+        0,
+        "{}",
+        NOW,
+      );
+  });
+}
+
+test("tracking.trace.delete keeps an open trace as live, deletes an ended trace and cascades its session entries", async (t) => {
+  const { store, call } = traceDelete(t, testServiceIdentity("footprint"), {
+    trace_ids: [ENDED_TRACE, OPEN_TRACE, "e".repeat(32)],
+    requested_by: DELETE_ACTOR,
+  });
+  seedDeleteTraces(store);
+  assert.deepEqual(await call(), {
+    removed: 1,
+    absent: 1,
+    refused: [{ key: OPEN_TRACE, reason: "live" }],
+  });
+  const entries = store.transaction(
+    (tx) =>
+      tx.database
+        .prepare("SELECT COUNT(*) AS count FROM tracking_session_entry")
+        .get() as { count: number },
+  );
+  assert.equal(entries.count, NO_ROWS);
+});
+
+test("tracking.trace.delete answers 400 for requested_by from a human caller", async (t) => {
+  const { call } = traceDelete(
+    t,
+    testHumanIdentity("ulrich", "Ulrich", "jti"),
+    { trace_ids: [ENDED_TRACE], requested_by: DELETE_ACTOR },
+  );
+  await assert.rejects(
+    async () => call(),
+    (error: unknown) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.BadRequest &&
+      JSON.stringify(error.details).includes("requested_by"),
   );
 });

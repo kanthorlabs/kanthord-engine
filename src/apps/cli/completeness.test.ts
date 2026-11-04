@@ -17,6 +17,7 @@ import {
 import { missionOperations } from "../../mission/contract.ts";
 import { intakeOperations } from "../../intake/contract.ts";
 import { trackingOperations } from "../../tracking/contract.ts";
+import { footprintOperations } from "../../footprint/contract.ts";
 
 const PAGE_INVENTORIES = {
   llm: "## Command inventory",
@@ -31,6 +32,7 @@ const PAGE_INVENTORIES = {
   gateway: "## Complete command table",
   other: "## Command inventory",
   tracking: "## Command inventory and operation mapping",
+  footprint: "## Command inventory and operation mapping",
 };
 const SYNOPSIS_PREFIX = /Synopsis after `kanthord ([^`]+)`/;
 const EXEMPT_LEAVES = new Map([
@@ -85,6 +87,11 @@ const API_ONLY_OPERATIONS = [
   "intake.storage.delete",
   "intake.inbound.event.receive",
   "tracking.telemetry.write",
+  "tracking.trace.delete",
+  "footprint.backup.delete",
+  "project.environment.delete",
+  "project.environment.cache_volume.delete",
+  "worker.slot_image.delete",
 ];
 const TOP_LEVEL_NAMES = new Set([
   "config",
@@ -97,6 +104,7 @@ const TOP_LEVEL_NAMES = new Set([
   "intake",
   "worker",
   "tracking",
+  "footprint",
   "gateway",
   "llm",
   "repository",
@@ -105,12 +113,12 @@ const TOP_LEVEL_NAMES = new Set([
 ]);
 const OTHER_PAGE = "other";
 const NO_ITEMS = 0;
-const DOCUMENTED_COUNT = 203;
+const DOCUMENTED_COUNT = 214;
 const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
-const IMPLEMENTED_COUNT = 198;
-const OPERATION_COUNT = 228;
+const IMPLEMENTED_COUNT = 209;
+const OPERATION_COUNT = 244;
 const INTAKE_LEAVES = [
   "intake event delete",
   "intake event discard",
@@ -139,6 +147,7 @@ const PAGE_COUNTS = {
   gateway: 3,
   other: 9,
   tracking: 12,
+  footprint: 11,
 };
 type Documented = { path: string; operations: string[] };
 
@@ -173,7 +182,7 @@ function inventory(group: string, heading: string): Documented[] {
       {
         path: group === OTHER_PAGE ? leaf : `${prefix} ${leaf}`,
         operations: spans.filter((span) =>
-          /^(gateway|llm|repository|storage|agent|worker|scheduler|project|mission|intake|tracking)\.[A-Za-z_.]+$/.test(
+          /^(gateway|llm|repository|storage|agent|worker|scheduler|project|mission|intake|tracking|footprint)\.[A-Za-z_.]+$/.test(
             span,
           ),
         ),
@@ -273,6 +282,7 @@ test("documented ERD 2 and ERD 3 CLI leaves and API-only operations exactly cove
     missionOperations,
     intakeOperations,
     trackingOperations,
+    footprintOperations,
   ]
     .flatMap((operations) => Object.values(operations).map(({ id }) => id))
     .sort();

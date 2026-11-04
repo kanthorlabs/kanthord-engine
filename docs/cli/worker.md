@@ -767,6 +767,12 @@ When the pinned revision names no such binding, the line names `binding_id`.
 
 The steps method writes the failed checks into one text that starts with `The pull request cannot merge:` and stops at 4 KiB. This text is the first verdict of the attempt. When a rework assessment exists, its rationale follows after a blank line.
 
+### Slot image delete outside the CLI inventory
+
+`worker.slot_image.delete` is an API-only `human_or_service` mutation at `POST /api/worker/slot-image/delete` with the body `{ references, requested_by? }`. `references` holds 1 to 20 image references of the repository of `worker.container_image`. The Footprint Service calls it for a human cleanup of the `slot_image` kind, see [footprint.md](footprint.md). The operation removes each image reference and answers 200 with `{ removed, absent, refused: [{ key, reason }] }`. A reference that is gone counts in `absent`. The configured image of the running version and an image that a container uses count in `refused` with the reason `live`. The route accepts a human JWT. The direct adapter accepts a human identity or the `footprint` service identity, and every other service identity answers `403 gateway.access.service_refused`. A human caller with `requested_by`, or a service caller without it, answers `400 gateway.request.validation_failed` with the field `requested_by`. Each call writes one log record with the account of the requester and the three counts.
+
+The Worker Service measures the `slot_image` kind from `<runtime> system df --verbose --format json`, and the `disk` of the container runtime store from `<runtime> info --format json`. It reads the store only while a `container` placement instance exists. At Podman, `total_bytes` is `GraphRootAllocated` and `free_bytes` is `GraphRootAllocated - GraphRootUsed`. At Docker, the Worker Service applies `statfs` to `DockerRootDir` only when the server runs on Linux and `OperatingSystem` is other than `Docker Desktop`. Else the store answers the measure error `runtime_store_unmeasured`. The device key is the device number of the store directory on the server host, else `container_runtime`.
+
 ### Action performer results
 
 The operation and the action tool return this result, not CLI output:

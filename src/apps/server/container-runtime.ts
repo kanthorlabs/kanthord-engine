@@ -9,6 +9,10 @@ import {
   PlacementIssue,
   type PlacementStatus,
   PoolPlacement,
+  type RuntimeImageUsage,
+  type RuntimeStoreInfo,
+  type RuntimeUsage,
+  type RuntimeVolumeUsage,
 } from "../../worker/contract.ts";
 import { derivedCrockford } from "./slot-identity.ts";
 
@@ -52,6 +56,14 @@ const CACHE_NAME_HEX_LENGTH = 24;
 const MINIMUM_DOCKER_CLIENT_MAJOR = 23;
 const ROOT_UID = 0;
 const NO_LENGTH = 0;
+const NO_BYTES = 0;
+const NO_COUNT = 0;
+const NO_EPOCH = 0;
+const BINARY_UNIT = 1024;
+const MEBI = 2;
+const GIBI = 3;
+const TEBI = 4;
+const PEBI = 5;
 const FAILED_CODE = 1;
 export const SUCCESS_CODE = 0;
 const LINUX: NodeJS.Platform = "linux";
@@ -295,6 +307,195 @@ export interface CacheVolumeListing {
   readonly name: string;
   readonly project_id: string;
   readonly resource_identity: string;
+  readonly created_at: number | null;
+}
+
+const SIZE_PATTERN = /^\s*(\d+(?:\.\d+)?)\s*([kKMGTP]?i?B)?\s*$/;
+const SIZE_UNITS: Readonly<Record<string, number>> = {
+  B: 1,
+  kB: 1e3,
+  KB: 1e3,
+  MB: 1e6,
+  GB: 1e9,
+  TB: 1e12,
+  PB: 1e15,
+  KiB: BINARY_UNIT,
+  MiB: BINARY_UNIT ** MEBI,
+  GiB: BINARY_UNIT ** GIBI,
+  TiB: BINARY_UNIT ** TEBI,
+  PiB: BINARY_UNIT ** PEBI,
+};
+const NO_REFERENCE = "<none>";
+const IMAGE_ID_PREFIX = "sha256:";
+const IMAGE_ID_HEX = /^[0-9a-f]+$/;
+const SECONDS_LIMIT = 1e11;
+const MS_PER_SECOND = 1000;
+const DOCKER_TIME_ZONE = / [A-Z]{2,5}$/;
+const NO_SUCH_IMAGE = /no such image|image not known|image not found/i;
+
+export function systemUsageArguments(): string[] {
+  return ["system", "df", "--verbose", "--format", "json"];
+}
+
+export function removeImageArguments(reference: string): string[] {
+  return ["image", "rm", reference];
+}
+
+export function ownedImageArguments(owner: string): string[] {
+  return [
+    "image",
+    "ls",
+    "--all",
+    "--no-trunc",
+    "--filter",
+    `label=${OWNER_LABEL}=${owner}`,
+    "--format",
+    "{{.ID}}",
+  ];
+}
+
+export function absentImage(answer: RuntimeAnswer): boolean {
+  return answer.code !== SUCCESS_CODE && NO_SUCH_IMAGE.test(answer.stderr);
+}
+
+export function imageIdOf(value: string): string {
+  const trimmed = value.trim();
+  const hex = trimmed.startsWith(IMAGE_ID_PREFIX)
+    ? trimmed.slice(IMAGE_ID_PREFIX.length)
+    : trimmed;
+  return IMAGE_ID_HEX.test(hex) ? `${IMAGE_ID_PREFIX}${hex}` : trimmed;
+}
+
+export function sameImage(left: string, right: string): boolean {
+  const a = imageIdOf(left);
+  const b = imageIdOf(right);
+  return a.length <= b.length ? b.startsWith(a) : a.startsWith(b);
+}
+
+export function bytesOf(value: unknown): number {
+  if (isNumber(value) && Number.isFinite(value) && value >= NO_BYTES)
+    return Math.floor(value);
+  if (!isString(value)) return NO_BYTES;
+  const match = SIZE_PATTERN.exec(value);
+  if (!match) return NO_BYTES;
+  const unit = SIZE_UNITS[match[2] ?? "B"] ?? 1;
+  return Math.floor(Number(match[1]) * unit);
+}
+
+export function timeOf(value: unknown): number | null {
+  if (isNumber(value) && Number.isFinite(value) && value > NO_EPOCH)
+    return Math.floor(value < SECONDS_LIMIT ? value * MS_PER_SECOND : value);
+  if (!isString(value) || !value) return null;
+  const parsed = Date.parse(value.replace(DOCKER_TIME_ZONE, ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function countOf(value: unknown): number {
+  if (isNumber(value) && Number.isSafeInteger(value) && value >= NO_COUNT)
+    return value;
+  const parsed = isString(value) ? Number.parseInt(value, 10) : Number.NaN;
+  return Number.isSafeInteger(parsed) && parsed >= NO_COUNT ? parsed : NO_COUNT;
+}
+
+function firstOf(value: unknown, ...names: string[]): unknown {
+  for (const name of names) {
+    const found = field(value, name);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+function sections(stdout: string): Record<string, unknown[]> {
+  const merged: Record<string, unknown[]> = {};
+  const documents: unknown[] = [];
+  try {
+    documents.push(JSON.parse(stdout));
+  } catch {
+    for (const line of linesOf(stdout)) documents.push(JSON.parse(line));
+  }
+  for (const document of documents)
+    for (const name of ["Images", "Volumes"]) {
+      const rows = field(document, name);
+      if (Array.isArray(rows)) (merged[name] ??= []).push(...rows);
+    }
+  return merged;
+}
+
+export function parseSystemUsage(
+  runtime: ContainerRuntime,
+  stdout: string,
+): RuntimeUsage {
+  const found = sections(stdout);
+  const images = new Map<string, RuntimeImageUsage>();
+  for (const row of found.Images ?? []) {
+    const id = firstOf(row, "ID", "Id", "ImageID", "ImageId");
+    if (!filled(id)) continue;
+    const key = imageIdOf(id);
+    const repository = firstOf(row, "Repository");
+    const tag = firstOf(row, "Tag");
+    const reference =
+      filled(repository) &&
+      filled(tag) &&
+      repository !== NO_REFERENCE &&
+      tag !== NO_REFERENCE
+        ? `${repository}:${tag}`
+        : null;
+    const previous = images.get(key);
+    images.set(key, {
+      id: key,
+      references: [
+        ...(previous?.references ?? []),
+        ...(reference === null || previous?.references.includes(reference)
+          ? []
+          : [reference]),
+      ],
+      created_at: timeOf(firstOf(row, "CreatedAt", "Created")),
+      unique_bytes: bytesOf(firstOf(row, "UniqueSize")),
+      containers: countOf(firstOf(row, "Containers")),
+    });
+  }
+  const volumes: RuntimeVolumeUsage[] = [];
+  for (const row of found.Volumes ?? []) {
+    const name = firstOf(row, "Name", "VolumeName");
+    if (!filled(name)) continue;
+    volumes.push({
+      name,
+      bytes: bytesOf(firstOf(row, "Size")),
+      links: countOf(firstOf(row, "Links")),
+    });
+  }
+  return { runtime, images: [...images.values()], volumes };
+}
+
+function numberOrNull(value: unknown): number | null {
+  return isNumber(value) && Number.isFinite(value) && value >= NO_BYTES
+    ? Math.floor(value)
+    : null;
+}
+
+function stringOrNull(value: unknown): string | null {
+  return filled(value) ? value : null;
+}
+
+export function parseRuntimeStore(
+  runtime: ContainerRuntime,
+  stdout: string,
+): RuntimeStoreInfo {
+  const info = parseInfo(stdout);
+  if (info === null) throw new Error(`${runtime} info answers no object.`);
+  const store = firstOf(info, "store", "Store");
+  return {
+    runtime,
+    graph_root: stringOrNull(firstOf(store, "graphRoot", "GraphRoot")),
+    graph_root_allocated: numberOrNull(
+      firstOf(store, "graphRootAllocated", "GraphRootAllocated"),
+    ),
+    graph_root_used: numberOrNull(
+      firstOf(store, "graphRootUsed", "GraphRootUsed"),
+    ),
+    docker_root_dir: stringOrNull(field(info, "DockerRootDir")),
+    operating_system: stringOrNull(field(info, "OperatingSystem")),
+  };
 }
 
 export function linesOf(text: string): string[] {
@@ -323,6 +524,7 @@ export function parseCacheVolumes(stdout: string): CacheVolumeListing[] {
       name,
       project_id: projectId,
       resource_identity: resourceIdentity,
+      created_at: timeOf(field(volume, "CreatedAt")),
     });
   }
   return listings;

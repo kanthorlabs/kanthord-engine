@@ -22,7 +22,7 @@ import {
 import type { OperationRegistry } from "../kernel/operation.ts";
 import assert from "node:assert/strict";
 import type { Environment, EnvironmentSource } from "../kernel/devcontainer.ts";
-import type { Logger } from "pino";
+import pino, { type Logger } from "pino";
 import { isMachineIdentity } from "../kernel/caller.ts";
 import { AccessPolicy } from "../kernel/operation.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -125,9 +125,14 @@ import { unreportedHealth } from "../llm/copy-health.ts";
 import { WorkerInstances } from "./instances.ts";
 import {
   readInstanceById,
+  readLatestInstance,
   readLiveInstance,
   readLiveInstances,
+  readLiveServerInstances,
 } from "./instance-rows.ts";
+import { WorkerFootprint } from "./footprint.ts";
+import { requesterOf } from "../kernel/cleanup.ts";
+import { packageVersion } from "../kernel/version.ts";
 import { declareInstances } from "./instance-operations.ts";
 import type { AgentPromptFacts } from "./prompt-telemetry.ts";
 import { unpinnedPromptCommits } from "./prompt-pin.ts";
@@ -357,8 +362,23 @@ export class WorkerService implements Service {
   private readonly pool?: Pool;
   private poolStarted = false;
   readonly instances: WorkerInstances;
+  readonly footprint: WorkerFootprint;
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
+    this.footprint = new WorkerFootprint({
+      host: () => dependencies.pool?.host ?? null,
+      configuredImage: `${dependencies.config.container_image}:${packageVersion()}`,
+      containerInstances: () =>
+        dependencies.store.transaction((tx) =>
+          readLiveServerInstances(tx)
+            .filter(
+              (instance) => instance.placement === InstancePlacement.Container,
+            )
+            .map((instance) => instance.name),
+        ),
+      platform: process.platform,
+      logger: dependencies.pool?.logger ?? pino({ level: "silent" }),
+    });
     this.instances = new WorkerInstances({
       store: dependencies.store,
       serverInstanceLimit: dependencies.config.server_instance_limit,
@@ -1081,7 +1101,21 @@ export class WorkerService implements Service {
     });
   }
 
+  instanceStateOf(tx: Transaction, name: string): { archived: boolean } | null {
+    const latest = readLatestInstance(tx, name);
+    return latest === null ? null : { archived: latest.ended_at !== null };
+  }
+
   declare(registry: OperationRegistry): void {
+    registry.register(
+      workerOperations["slot_image.delete"],
+      ({ body }, caller) =>
+        this.footprint.deleteSlotImages(
+          body.references,
+          requesterOf(caller.identity, body.requested_by),
+          caller.context.signal,
+        ),
+    );
     registry.register(
       workerOperations["execution.setup.get"],
       (_input, caller) => executionSetup(this.dependencies, this, caller),

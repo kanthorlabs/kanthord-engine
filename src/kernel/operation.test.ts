@@ -209,3 +209,27 @@ test("registry admits /hooks for a delivery operation alone", () => {
     [delivery.path],
   );
 });
+
+test("services is non-empty exactly for human_or_service", () => {
+  const registry = new OperationRegistry();
+  const healthy = () => ({ status: "ok" as const, services: {} });
+  const human = {
+    ...read,
+    id: "test.owner_delete",
+    path: "/api/owner/delete",
+    access: AccessPolicy.HumanOrService,
+  } as const;
+  assert.throws(
+    () => registry.register({ ...human, services: [] }, healthy),
+    /human_or_service operation lists its services/,
+  );
+  assert.throws(
+    () => registry.register(human, healthy),
+    /human_or_service operation lists its services/,
+  );
+  assert.throws(
+    () => registry.register({ ...read, services: ["footprint"] }, healthy),
+    /human_or_service operation lists its services/,
+  );
+  registry.register({ ...human, services: ["footprint"] }, healthy);
+});

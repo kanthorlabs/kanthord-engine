@@ -650,3 +650,18 @@ test("a review round names its number, its finality, its review base and its fin
   assert.deepEqual(Object.values(FindingRoute), ["fix", "report", "record"]);
   assert.equal(FINDING_TEXT_MAX_BYTES, EIGHT_KIB);
 });
+
+test("the actor union still parses each variant", () => {
+  const variants = [
+    { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" },
+    {
+      kind: ActorKind.Execution,
+      execution_id: createIdentity("execution"),
+      client_id: null,
+      name: null,
+    },
+    { kind: ActorKind.Service, service: ActorService.Mission },
+  ];
+  for (const variant of variants)
+    assert.deepEqual(actorSchema.parse(variant), variant);
+});

@@ -472,6 +472,9 @@ The implemented fields are:
   than this writable period is `Refused` with `trace_expired`. The key deletes
   nothing. `kanthord upgrade` renames the former key of this period and keeps
   its value.
+- `footprint.disk_free_ratio`: optional number above 0 and below 1, default
+  `0.1`. The `disk` statistic of each device projects the days until its free
+  bytes reach this part of its total bytes. The key deletes nothing.
 
 The current Project fragment is empty and adds no YAML section.
 See [Gateway](./gateway.md) for authentication context.

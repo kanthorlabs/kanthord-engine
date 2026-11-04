@@ -41,6 +41,10 @@ import {
   type TrackingConfig,
   trackingConfigSchema,
 } from "../tracking/config.ts";
+import {
+  type FootprintConfig,
+  footprintConfigSchema,
+} from "../footprint/config.ts";
 const EMPTY_SCHEMA_FIELD_COUNT = 0;
 const CONTAINER_INIT_COMMAND =
   "podman run --rm -v <volume>:/var/lib/kanthord docker.io/kanthorlabs/kanthord:<version> config init --gateway-bind :: --gateway-allowed-host localhost:<port> --gateway-allowed-host 127.0.0.1:<port>";
@@ -53,6 +57,7 @@ export interface ServerConfig extends GlobalConfig {
   worker: WorkerConfig;
   scheduler: SchedulerConfig;
   tracking: TrackingConfig;
+  footprint: FootprintConfig;
 }
 
 convict.addParser({ extension: ["yaml", "yml"], parse: parseMapping });
@@ -66,6 +71,7 @@ const fragments = {
   worker: workerConfigSchema,
   scheduler: schedulerConfigSchema,
   tracking: trackingConfigSchema,
+  footprint: footprintConfigSchema,
 };
 function isConfigVersion(value: unknown): value is number {
   return (

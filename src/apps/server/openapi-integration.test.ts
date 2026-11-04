@@ -4,6 +4,11 @@ import {
   flowStopReasonSchema,
   trackingOperations,
 } from "../../tracking/contract.ts";
+import {
+  CleanableKind,
+  CleanupState,
+  footprintOperations,
+} from "../../footprint/contract.ts";
 import { z } from "zod";
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -75,6 +80,7 @@ const INBOUND_VALIDATION_FAILED = "gateway.request.validation_failed";
 const INBOUND_UNAUTHORIZED = "gateway.authentication.unauthorized";
 const INBOUND_NOT_FOUND = "intake.inbound.not_found";
 const INBOUND_EMPTY_BODY = "";
+const NO_OWNER_ROUTES = 0;
 const FAILED_CHECK_OPERATION_ID = "worker.execution.failed_check.get";
 
 test("published native setup is an execution-scoped bodyless read", () => {
@@ -452,6 +458,7 @@ const PROVIDER_PROPERTY = "provider";
 const ENUM_KEYWORD = "enum";
 const AGENT_PROVIDER_ENUM_COUNT = 3;
 const TRACE_LIST_FRAGMENT_EXCEPTION = "openapi/tracking/trace.list.yaml";
+const CLEANUP_FRAGMENT_EXCEPTION = "openapi/footprint/cleanup.create.yaml";
 const FLOW_FRAGMENT_EXCEPTION = "openapi/tracking/analytics.flow.yaml";
 const NAMED_FRAGMENT_EXCEPTIONS = new Set([
   ...MISSION_BLOCKED_CONTEXT_FRAGMENT_EXCEPTIONS.map(
@@ -469,6 +476,7 @@ const NAMED_FRAGMENT_EXCEPTIONS = new Set([
   EXECUTION_SETUP_FRAGMENT_EXCEPTION,
   TRACE_LIST_FRAGMENT_EXCEPTION,
   FLOW_FRAGMENT_EXCEPTION,
+  CLEANUP_FRAGMENT_EXCEPTION,
 ]);
 const NULL_SCHEMA_TYPE = "null";
 const STRING_SCHEMA_TYPE = "string";
@@ -486,6 +494,7 @@ const OPERATION_PREFIXES = [
   "workbench.",
   "intake.",
   "tracking.",
+  "footprint.",
 ];
 const BEARER_SECURITY = [{ bearerAuth: [] }];
 const LIVENESS_PATH = "/api/liveness";
@@ -651,6 +660,7 @@ const apiOperations = [
   ...Object.values(workbenchOperations),
   ...Object.values(intakeOperations),
   ...Object.values(trackingOperations),
+  ...Object.values(footprintOperations),
 ];
 const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["gateway.liveness", AccessPolicy.Public],
@@ -889,9 +899,25 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["tracking.session.entry.get", AccessPolicy.Human],
   ["tracking.session.entry.rebuild", AccessPolicy.Human],
   ["tracking.cause.label", AccessPolicy.Human],
+  ["tracking.trace.delete", AccessPolicy.HumanOrService],
+  ["project.environment.delete", AccessPolicy.HumanOrService],
+  ["project.environment.cache_volume.delete", AccessPolicy.HumanOrService],
+  ["worker.slot_image.delete", AccessPolicy.HumanOrService],
+  ["footprint.summary.get", AccessPolicy.Human],
+  ["footprint.kind.get", AccessPolicy.Human],
+  ["footprint.candidate.list", AccessPolicy.Human],
+  ["footprint.item.list", AccessPolicy.Human],
+  ["footprint.cleanup.create", AccessPolicy.Human],
+  ["footprint.cleanup.get", AccessPolicy.Human],
+  ["footprint.cleanup.list", AccessPolicy.Human],
+  ["footprint.cleanup.cancel", AccessPolicy.Human],
+  ["footprint.alert.list", AccessPolicy.Human],
+  ["footprint.alert.acknowledge", AccessPolicy.Human],
+  ["footprint.measure.run", AccessPolicy.Human],
+  ["footprint.backup.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 236;
-const ROUTED_OPERATION_COUNT = 224;
+const OPERATION_COUNT = 252;
+const ROUTED_OPERATION_COUNT = 240;
 const INTAKE_OPERATION_COUNT = 24;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = [
@@ -1274,6 +1300,31 @@ test("the trace list fragment exceeds the soft limit only through the effective 
     causeCategorySchema.options,
   );
   assert.deepEqual(cause.required, ["category", "assigner"]);
+});
+test("the cleanup fragment exceeds the soft limit only through the create and list operations of one path", () => {
+  const fragment = parse(
+    readFileSync(
+      join(dirname(openapiPath()), CLEANUP_FRAGMENT_EXCEPTION),
+      "utf8",
+    ),
+  );
+  assert.deepEqual(
+    [fragment.pathItem.post.operationId, fragment.pathItem.get.operationId],
+    [
+      footprintOperations["cleanup.create"].id,
+      footprintOperations["cleanup.list"].id,
+    ],
+  );
+  assert.deepEqual(Object.keys(fragment.components.schemas).sort(), [
+    "footprint.cleanup.create.Input",
+    "footprint.cleanup.create.Output",
+    "footprint.cleanup.list.Input",
+    "footprint.cleanup.list.Output",
+  ]);
+  const record =
+    fragment.components.schemas["footprint.cleanup.create.Output"].properties;
+  assert.deepEqual(record.kind.enum, Object.values(CleanableKind));
+  assert.deepEqual(record.state.enum, Object.values(CleanupState));
 });
 test("the flow fragment exceeds the soft limit only through the flow closed sets", () => {
   const fragment = parse(
@@ -2207,4 +2258,19 @@ test("every routed operation with a JSON body input declares body and every othe
   );
   assert.ok(kinds.some(({ json }) => json));
   assert.ok(kinds.some(({ json }) => !json));
+});
+
+test("each human_or_service owner route keeps bearerAuth", async () => {
+  const resolved = await SwaggerParser.dereference(openapiPath());
+  const owners = apiOperations.filter(
+    ({ access }) => access === AccessPolicy.HumanOrService,
+  );
+  assert.ok(owners.length > NO_OWNER_ROUTES);
+  for (const operation of owners) {
+    const published = resolved.paths?.[
+      operation.path.replace(/:([^/]+)/g, "{$1}")
+    ]?.post as ResolvedOperation | undefined;
+    assert.equal(published?.operationId, operation.id);
+    assert.deepEqual(published?.security, BEARER_SECURITY);
+  }
 });

@@ -48,6 +48,8 @@ export function identityTime(identity: string): number {
 }
 
 export const IDEMPOTENCY_KEY_PREFIX = "idempotency_key";
+export const CLEANUP_IDENTITY_PREFIX = "cleanup";
+export const ALERT_IDENTITY_PREFIX = "alert";
 
 export const idempotencyKeySchema = identitySchema(IDEMPOTENCY_KEY_PREFIX);
 

@@ -37,6 +37,8 @@ import { addProjectCommand } from "./project.ts";
 import { addMissionCommand } from "./mission.ts";
 import { addIntakeCommand } from "./intake.ts";
 import { addTrackingCommand } from "./tracking.ts";
+import { addFootprintCommand } from "./footprint.ts";
+import { footprintOperations } from "../../footprint/contract.ts";
 import { trackingOperations } from "../../tracking/contract.ts";
 import { addSchedulerCommand } from "./scheduler.ts";
 import {
@@ -278,6 +280,7 @@ export function createProgram(
   addMissionCommand(program);
   addIntakeCommand(program);
   addTrackingCommand(program);
+  addFootprintCommand(program);
   addWorkerCommand(program);
   addGatewayCommand(program);
   const names = program.commands.map((command) => command.name());
@@ -423,6 +426,7 @@ const apiOperations = [
   ...Object.values(workbenchOperations),
   ...Object.values(intakeOperations),
   ...Object.values(trackingOperations),
+  ...Object.values(footprintOperations),
 ];
 const allOperationIds = apiOperations.map((operation) => operation.id);
 assert.equal(

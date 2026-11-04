@@ -197,3 +197,20 @@ test("a delivery path publishes no security, an octet-stream body and two empty 
     description: "Completed result",
   });
 });
+
+test("a human_or_service operation publishes bearerAuth", () => {
+  const owned = {
+    ...gatewayOperations.liveness,
+    id: "test.owner_delete",
+    service: "test",
+    path: "/api/test/owner-delete",
+    access: AccessPolicy.HumanOrService,
+    services: ["footprint"],
+  } as const;
+  const files = emitOpenAPIFiles([owned]);
+  const document = files["openapi/test/owner_delete.yaml"];
+  assert.ok(document && "pathItem" in document);
+  const path = document.pathItem as Record<string, { security: unknown }>;
+  const method = Object.values(path)[0];
+  assert.deepEqual(method?.security, [{ bearerAuth: [] }]);
+});

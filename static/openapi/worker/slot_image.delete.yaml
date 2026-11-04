@@ -1,0 +1,128 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: worker.slot_image.delete
+    tags:
+      - worker
+    description: Delete slot images by reference. The configured image of the
+      running version and an image that a container uses refuse.
+    x-access-policy: human_or_service
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/worker.slot_image.delete.Input/properties/body"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/worker.slot_image.delete.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    worker.slot_image.delete.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            references:
+              minItems: 1
+              maxItems: 20
+              type: array
+              items:
+                type: string
+                maxLength: 512
+                pattern: ^[A-Za-z0-9][A-Za-z0-9._/:@-]*$
+            requested_by:
+              type: object
+              properties:
+                kind:
+                  type: string
+                  const: human
+                account:
+                  type: string
+                name:
+                  type: string
+              required:
+                - kind
+                - account
+                - name
+              additionalProperties: false
+          required:
+            - references
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    worker.slot_image.delete.Output:
+      type: object
+      properties:
+        removed:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        absent:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        refused:
+          type: array
+          items:
+            type: object
+            properties:
+              key:
+                type: string
+              reason:
+                type: string
+                enum:
+                  - live
+                  - unreadable
+            required:
+              - key
+              - reason
+            additionalProperties: false
+      required:
+        - removed
+        - absent
+        - refused
+      additionalProperties: false

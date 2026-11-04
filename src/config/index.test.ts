@@ -92,6 +92,7 @@ test("service fragments preserve the existing YAML field set", () => {
   const config = configuration(initial).getProperties();
   assert.deepEqual(Object.keys(initial).sort(), [
     "agent",
+    "footprint",
     "gateway",
     "log",
     "master_key",

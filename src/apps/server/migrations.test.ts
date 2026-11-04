@@ -20,6 +20,8 @@ import { MISSION_SERVICE_NAME } from "../../mission/contract.ts";
 import { missionMigrations } from "../../mission/index.ts";
 import { workbenchMigrations } from "../../workbench/index.ts";
 import { WORKBENCH_SERVICE_NAME } from "../../workbench/contract.ts";
+import { FOOTPRINT_SERVICE_NAME } from "../../footprint/contract.ts";
+import { footprintMigrations } from "../../footprint/index.ts";
 import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
 import { intakeMigrations } from "../../intake/index.ts";
 import { REPOSITORY_COMPONENT_NAME } from "../../repository/contract.ts";
@@ -41,6 +43,7 @@ const services: Migrations = [
   { service: WORKBENCH_SERVICE_NAME, migrations: workbenchMigrations },
   { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
   { service: REPOSITORY_COMPONENT_NAME, migrations: repositoryMigrations },
+  { service: FOOTPRINT_SERVICE_NAME, migrations: footprintMigrations },
 ];
 const MAXIMUM_MIGRATIONS_PER_SERVICE = 1;
 const HISTORY_TABLE = "migration";
@@ -105,6 +108,7 @@ const INTAKE_TABLES = [
   INTAKE_OUTBOUND_REQUEST_TABLE,
 ];
 const REPOSITORY_HOST_KEY_TABLE = "repository_host_key";
+const FOOTPRINT_TABLES = ["footprint_cleanup", "footprint_alert"];
 const INTEGRITY_OK = "ok";
 const NO_PREFIX_MATCHES = 0;
 const SINGLE_PREFIX_MATCH = 1;
@@ -223,6 +227,7 @@ test("service migrations own distinct prefixes and create only tables in their n
       ...MISSION_TABLES,
       ...INTAKE_TABLES,
       REPOSITORY_HOST_KEY_TABLE,
+      ...FOOTPRINT_TABLES,
     ]);
   } finally {
     store.close();

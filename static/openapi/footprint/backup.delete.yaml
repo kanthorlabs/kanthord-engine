@@ -1,0 +1,95 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: footprint.backup.delete
+    tags:
+      - footprint
+    description: Delete database backup files by name. A name outside the backup
+      form refuses.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/footprint.backup.delete.Input/properties/body"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/footprint.backup.delete.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    footprint.backup.delete.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            names:
+              minItems: 1
+              maxItems: 20
+              type: array
+              items:
+                type: string
+                pattern: ^(kanthord\.db|tracking\.db|[A-Za-z0-9._-]+\.yaml)\.bak-\d{8}T\d{6}$
+          required:
+            - names
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    footprint.backup.delete.Output:
+      type: object
+      properties:
+        removed:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        absent:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+      required:
+        - removed
+        - absent
+      additionalProperties: false

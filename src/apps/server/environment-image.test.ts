@@ -1435,3 +1435,60 @@ test("cacheVolumes rejects with the runtime message when the inspection fails", 
     /The cache volume listing failed: Error: no such volume/,
   );
 });
+
+test("footprintUsage on a Docker host reads docker system df with the owned image ids and the cache volumes", async (t) => {
+  const calls: Array<{ runtime: string; args: string[] }> = [];
+  const imageHex = "a".repeat(64);
+  const uniqueBytes = 1000;
+  const [usageCommand, imageCommand] = ["system", "image"];
+  const host: RuntimeHost = {
+    platform: "linux",
+    uid: 1000,
+    user: "user",
+    environment: process.env,
+    exists: () => false,
+    resolves: (runtime) => runtime === ContainerRuntime.Docker,
+    run: (runtime, args) => {
+      calls.push({ runtime, args: [...args] });
+      const stdout =
+        args[0] === usageCommand
+          ? JSON.stringify({
+              Images: [
+                {
+                  ID: `sha256:${imageHex}`,
+                  Repository: "localhost/kanthord-env/x",
+                  Tag: "b".repeat(64),
+                  CreatedAt: "2026-10-01 10:00:00 +0000 UTC",
+                  UniqueSize: "1kB",
+                  Containers: "0",
+                },
+              ],
+              Volumes: [],
+            })
+          : args[0] === imageCommand
+            ? `sha256:${imageHex}\n`
+            : "";
+      return Promise.resolve({ code: SUCCESS, stdout, stderr: "" });
+    },
+  };
+  const built = new EnvironmentImages({
+    ...plainContainers,
+    host,
+    owner: OWNER,
+    kanthordImage: KANTHORD_IMAGE,
+    version: VERSION,
+    stateDirectory: temporary(t),
+    exportRepository: () => Promise.resolve(),
+    buildTimeoutMs: BUILD_TIMEOUT_MS,
+    environmentMemoryMb: MEMORY_MB,
+  });
+  const answer = await built.footprintUsage(new AbortController().signal);
+  assert.deepEqual(calls[0], {
+    runtime: "docker",
+    args: ["system", "df", "--verbose", "--format", "json"],
+  });
+  assert.equal(answer.usage.runtime, ContainerRuntime.Docker);
+  assert.equal(answer.usage.images[0]?.unique_bytes, uniqueBytes);
+  assert.deepEqual(answer.owned_image_ids, [`sha256:${imageHex}`]);
+  assert.deepEqual(answer.cache_volumes, []);
+});

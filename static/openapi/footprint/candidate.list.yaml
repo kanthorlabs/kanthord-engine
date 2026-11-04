@@ -1,0 +1,225 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: footprint.candidate.list
+    tags:
+      - footprint
+    description: Page the cleanup candidates of a rule for one cleanable kind and
+      host, with the totals of the whole set. A rule only proposes.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: kind
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/footprint.candidate.list.Input/properties/params/pr\
+            operties/kind"
+      - name: instance_name
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/footprint.candidate.list.Input/properties/query/pro\
+            perties/instance_name"
+      - name: rule
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/footprint.candidate.list.Input/properties/query/pro\
+            perties/rule"
+      - name: older_than_days
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/footprint.candidate.list.Input/properties/query/pro\
+            perties/older_than_days"
+      - name: limit
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/footprint.candidate.list.Input/properties/query/pro\
+            perties/limit"
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/footprint.candidate.list.Input/properties/query/pro\
+            perties/cursor"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/footprint.candidate.list.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    footprint.candidate.list.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - trace
+                - database_backup
+                - environment
+                - cache_volume
+                - slot_image
+                - session
+                - workspace
+                - tool_output
+          required:
+            - kind
+          additionalProperties: false
+        query:
+          type: object
+          properties:
+            instance_name:
+              type: string
+              minLength: 1
+              maxLength: 63
+              pattern: ^[a-z][a-z0-9-]*$
+            rule:
+              type: string
+              enum:
+                - older_than
+                - node_closed
+                - unbound
+                - superseded
+                - dangling
+            older_than_days:
+              type: integer
+              minimum: 1
+              maximum: 3650
+            limit:
+              default: 100
+              type: integer
+              minimum: 1
+              maximum: 1000
+            cursor:
+              type: string
+              minLength: 1
+          required: []
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    footprint.candidate.list.Output:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              key:
+                type: string
+                minLength: 1
+                maxLength: 512
+              at:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              bytes:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                  - type: "null"
+              project_id:
+                anyOf:
+                  - type: string
+                    minLength: 34
+                    maxLength: 34
+                    pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: project_ followed by a canonical 26-character uppercase ULID.
+                  - type: "null"
+              node_id:
+                anyOf:
+                  - type: string
+                    minLength: 31
+                    maxLength: 31
+                    pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: node_ followed by a canonical 26-character uppercase ULID.
+                  - type: "null"
+              execution_id:
+                anyOf:
+                  - type: string
+                    minLength: 36
+                    maxLength: 36
+                    pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: execution_ followed by a canonical 26-character uppercase ULID.
+                  - type: "null"
+              refusal:
+                anyOf:
+                  - type: string
+                    enum:
+                      - live
+                      - unreadable
+                  - type: "null"
+              kept:
+                type: boolean
+            required:
+              - key
+              - at
+              - bytes
+              - project_id
+              - node_id
+              - execution_id
+              - refusal
+              - kept
+            additionalProperties: false
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+        total_count:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        total_bytes:
+          anyOf:
+            - type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            - type: "null"
+        bytes_estimated:
+          type: boolean
+      required:
+        - items
+        - next_cursor
+        - total_count
+        - total_bytes
+        - bytes_estimated
+      additionalProperties: false

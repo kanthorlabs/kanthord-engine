@@ -38,6 +38,11 @@ export type Migrations = ReadonlyArray<{
   service: string;
   migrations: readonly Migration[];
 }>;
+export interface StorePages {
+  readonly page_size: number;
+  readonly page_count: number;
+  readonly freelist_count: number;
+}
 export interface PendingMigration {
   readonly service: string;
   readonly from: number;
@@ -358,6 +363,52 @@ export class Store {
       );
     }
     audit(path, "file");
+  }
+
+  pages(): StorePages {
+    const read = (pragma: string) =>
+      Number(
+        Object.values(this.database.prepare(`PRAGMA ${pragma}`).get() ?? {}).at(
+          0,
+        ) ?? 0,
+      );
+    return {
+      page_size: read("page_size"),
+      page_count: read("page_count"),
+      freelist_count: read("freelist_count"),
+    };
+  }
+
+  tableNames(): string[] {
+    return this.database
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+      )
+      .all()
+      .map((row) => String(row.name));
+  }
+
+  treeBytes(table: string): number | null {
+    const names = this.database
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE tbl_name = ? AND type IN ('table', 'index')",
+      )
+      .all(table)
+      .map((row) => String(row.name));
+    let bytes = 0;
+    try {
+      for (const name of names)
+        bytes += Number(
+          this.database
+            .prepare(
+              "SELECT COALESCE(SUM(pgsize), 0) AS bytes FROM dbstat WHERE name = ?",
+            )
+            .get(name)?.bytes ?? 0,
+        );
+    } catch {
+      return null;
+    }
+    return bytes;
   }
 
   healthcheck(): boolean {

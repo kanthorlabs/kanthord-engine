@@ -12,6 +12,12 @@ import {
 import type { Transaction } from "../kernel/store.ts";
 import { isString } from "../kernel/values.ts";
 import {
+  CLEANUP_BATCH_ROWS,
+  CLEANUP_SERVICES,
+  ownerDeleteAnswerSchema,
+  requestedByField,
+} from "../kernel/cleanup.ts";
+import {
   ResourceFailureReason,
   resourceFailureReasonSchema,
   ResourceStatus,
@@ -95,6 +101,7 @@ export const PROJECT_OPERATION_TIMEOUT_MS = 30000;
 export const LIST_LIMIT_DEFAULT = 100;
 export const LIST_LIMIT_MAX = 1000;
 export const PROJECT_NAME_MAX_LENGTH = 63;
+export const ENVIRONMENT_KEY_MAX_LENGTH = 512;
 export const EMPTY_LENGTH = 0;
 export const PROJECT_NAME_PATTERN = /^[a-z][a-z0-9-]*$/;
 
@@ -868,6 +875,13 @@ const suitePassPlanSchema = z.strictObject({
   tasks: z.array(z.never()),
   reason: z.string().min(1),
 });
+export const environmentKeySchema = z
+  .string()
+  .max(ENVIRONMENT_KEY_MAX_LENGTH)
+  .regex(/^(?:[a-z0-9][a-z0-9/-]*@[0-9a-f]{64}|sha256:[0-9a-f]{64})$/);
+export const cacheVolumeNameSchema = z
+  .string()
+  .regex(/^kanthord_cache_[0-9a-z]{24}$/);
 const pageOf = <T extends z.ZodType>(item: T) =>
   z.strictObject({ items: z.array(item), next_cursor: z.string().nullable() });
 const baseOperation = {
@@ -1148,6 +1162,44 @@ export const projectOperations = {
     }),
     description:
       "Check an unsaved repository binding configuration without a write.",
+  },
+  "environment.delete": {
+    ...writeOperation,
+    access: AccessPolicy.HumanOrService,
+    services: CLEANUP_SERVICES,
+    id: "project.environment.delete",
+    method: HttpMethod.Post,
+    path: "/api/project/environment/delete",
+    input: z.strictObject({
+      params: emptyFields,
+      query: emptyFields,
+      body: z.strictObject({
+        keys: z.array(environmentKeySchema).min(1).max(CLEANUP_BATCH_ROWS),
+        ...requestedByField,
+      }),
+    }),
+    output: ownerDeleteAnswerSchema,
+    description:
+      "Delete the image tags and the proof file of each environment key, or the untagged image of an image id. A live key refuses.",
+  },
+  "environment.cache_volume.delete": {
+    ...writeOperation,
+    access: AccessPolicy.HumanOrService,
+    services: CLEANUP_SERVICES,
+    id: "project.environment.cache_volume.delete",
+    method: HttpMethod.Post,
+    path: "/api/project/environment/cache-volume/delete",
+    input: z.strictObject({
+      params: emptyFields,
+      query: emptyFields,
+      body: z.strictObject({
+        names: z.array(cacheVolumeNameSchema).min(1).max(CLEANUP_BATCH_ROWS),
+        ...requestedByField,
+      }),
+    }),
+    output: ownerDeleteAnswerSchema,
+    description:
+      "Delete environment cache volumes by name. A bound pair and a volume that a container uses refuse.",
   },
 } as const satisfies Record<string, Operation>;
 

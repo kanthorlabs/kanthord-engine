@@ -14,6 +14,8 @@ import {
   type PoolHost,
   type PoolInstance,
   PoolPlacement,
+  type RuntimeStoreInfo,
+  type RuntimeUsage,
   type SessionRead,
   type SessionReadResult,
 } from "../../worker/contract.ts";
@@ -164,6 +166,30 @@ export class WorkerPool implements PoolHost {
 
   imageOf(instance: PoolInstance): string | null {
     return this.driver(instance.placement).imageOf?.(instance.name) ?? null;
+  }
+
+  async runtimeUsage(): Promise<RuntimeUsage | null> {
+    return (
+      (await this.options.drivers
+        .get(PoolPlacement.Container)
+        ?.runtimeUsage?.()) ?? null
+    );
+  }
+
+  async runtimeStore(): Promise<RuntimeStoreInfo | null> {
+    return (
+      (await this.options.drivers
+        .get(PoolPlacement.Container)
+        ?.runtimeStore?.()) ?? null
+    );
+  }
+
+  async removeImage(reference: string): Promise<boolean> {
+    return (
+      (await this.options.drivers
+        .get(PoolPlacement.Container)
+        ?.removeImage?.(reference)) ?? false
+    );
   }
 
   async archive(instance: PoolInstance): Promise<void> {

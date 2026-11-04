@@ -28,6 +28,28 @@ paths:
     $ref: ./openapi/agent/model.list.yaml#/pathItem
   /api/agent/prompt/resolve:
     $ref: ./openapi/agent/prompt.resolve.yaml#/pathItem
+  /api/footprint/alert/{alert_id}/acknowledge:
+    $ref: ./openapi/footprint/alert.acknowledge.yaml#/pathItem
+  /api/footprint/alert:
+    $ref: ./openapi/footprint/alert.list.yaml#/pathItem
+  /api/footprint/backup/delete:
+    $ref: ./openapi/footprint/backup.delete.yaml#/pathItem
+  /api/footprint/kind/{kind}/candidate:
+    $ref: ./openapi/footprint/candidate.list.yaml#/pathItem
+  /api/footprint/cleanup/{cleanup_id}/cancel:
+    $ref: ./openapi/footprint/cleanup.cancel.yaml#/pathItem
+  /api/footprint/cleanup:
+    $ref: ./openapi/footprint/cleanup.create.yaml#/pathItem
+  /api/footprint/cleanup/{cleanup_id}:
+    $ref: ./openapi/footprint/cleanup.get.yaml#/pathItem
+  /api/footprint/kind/{kind}/item:
+    $ref: ./openapi/footprint/item.list.yaml#/pathItem
+  /api/footprint/kind/{kind}:
+    $ref: ./openapi/footprint/kind.get.yaml#/pathItem
+  /api/footprint/measure:
+    $ref: ./openapi/footprint/measure.run.yaml#/pathItem
+  /api/footprint:
+    $ref: ./openapi/footprint/summary.get.yaml#/pathItem
   /api/healthcheck:
     $ref: ./openapi/gateway/healthcheck.yaml#/pathItem
   /api/liveness:
@@ -248,6 +270,10 @@ paths:
     $ref: ./openapi/project/credential.update_metadata.yaml#/pathItem
   /api/project/credential/{credential_name}/verify:
     $ref: ./openapi/project/credential.verify.yaml#/pathItem
+  /api/project/environment/cache-volume/delete:
+    $ref: ./openapi/project/environment.cache_volume.delete.yaml#/pathItem
+  /api/project/environment/delete:
+    $ref: ./openapi/project/environment.delete.yaml#/pathItem
   /api/project/{project_id}/environment:
     $ref: ./openapi/project/environment.list.yaml#/pathItem
   /api/project/{project_id}:
@@ -340,6 +366,8 @@ paths:
     $ref: ./openapi/tracking/text.get.yaml#/pathItem
   /api/tracking/timeline:
     $ref: ./openapi/tracking/timeline.list.yaml#/pathItem
+  /api/tracking/trace/delete:
+    $ref: ./openapi/tracking/trace.delete.yaml#/pathItem
   /api/tracking/trace/{trace_id}:
     $ref: ./openapi/tracking/trace.get.yaml#/pathItem
   /api/tracking/trace:
@@ -404,6 +432,8 @@ paths:
     $ref: ./openapi/worker/registration.resume.yaml#/pathItem
   /api/worker/session-read/{read_id}/report:
     $ref: ./openapi/worker/session_read.report.yaml#/pathItem
+  /api/worker/slot-image/delete:
+    $ref: ./openapi/worker/slot_image.delete.yaml#/pathItem
   /api/worker/ssh/sign:
     $ref: ./openapi/worker/ssh.sign.yaml#/pathItem
 components:

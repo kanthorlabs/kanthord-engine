@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { test, type TestContext } from "node:test";
 import type { Logger } from "pino";
 import { z } from "zod";
+import { IdentityKind } from "../kernel/caller.ts";
 import { CancellationContext, type Context } from "../kernel/context.ts";
 import { MASTER_KEY_BYTES } from "../config/global.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -20,6 +21,7 @@ import { createIdempotencyKey, createIdentity } from "../kernel/identity.ts";
 import {
   testHumanIdentity,
   testMachineIdentity,
+  testServiceIdentity,
 } from "../kernel/test-identity.ts";
 import type { ExecutionProofRow } from "../kernel/operation.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
@@ -46,6 +48,7 @@ const COMMITTED_VALUE = 42;
 const EXECUTION_PROOF_FAILED = "gateway.invocation.execution_proof_failed";
 const UNAUTHORIZED = "gateway.authentication.unauthorized";
 const VALIDATION_FAILED = "gateway.request.validation_failed";
+const SERVICE_REFUSED = "gateway.access.service_refused";
 
 async function fixture(t: TestContext, registry: OperationRegistry) {
   const store = new Store(":memory:");
@@ -640,4 +643,40 @@ test("an operation with no ended group answer answers 401 for an ended group", a
       UNAUTHORIZED,
     );
   }
+});
+
+const humanOrService = {
+  ...operation,
+  id: "test.human_or_service",
+  path: "/api/test/human-or-service",
+  access: AccessPolicy.HumanOrService,
+  services: ["footprint"],
+  output: z.string(),
+} as const;
+
+test("human_or_service accepts a human and the listed service, and refuses every other service identity with gateway.access.service_refused", async (t) => {
+  const registry = new OperationRegistry();
+  registry.register(
+    humanOrService,
+    (_input, caller) => caller.identity?.kind ?? "none",
+  );
+  const { invocation, token } = await fixture(t, registry);
+  const human = await invocation.invoke(humanOrService.id, input, {
+    authorization: `Bearer ${token}`,
+  });
+  assert.equal(human.status, HttpStatus.OK);
+  assert.equal(human.body, IdentityKind.Human);
+  const listed = await invocation.invoke(humanOrService.id, input, {
+    identity: testServiceIdentity("footprint"),
+  });
+  assert.equal(listed.status, HttpStatus.OK);
+  assert.equal(listed.body, IdentityKind.Service);
+  const other = await invocation.invoke(humanOrService.id, input, {
+    identity: testServiceIdentity("mission"),
+  });
+  assert.equal(other.status, HttpStatus.Forbidden);
+  assert.equal(
+    (other.body as { error: { code: string } }).error.code,
+    SERVICE_REFUSED,
+  );
 });

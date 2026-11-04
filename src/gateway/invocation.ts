@@ -45,13 +45,26 @@ import type {
 } from "../kernel/operation.ts";
 
 const AUTHENTICATED_POLICIES: Partial<
-  Record<AccessPolicy, (identity: CallerIdentity) => boolean>
+  Record<
+    AccessPolicy,
+    (identity: CallerIdentity, operation: Operation) => boolean
+  >
 > = {
   [AccessPolicy.Human]: isHumanIdentity,
   [AccessPolicy.Client]: isMachineIdentity,
   [AccessPolicy.Worker]: isWorkerIdentity,
   [AccessPolicy.HumanOrWorker]: (identity) =>
     isHumanIdentity(identity) || isWorkerIdentity(identity),
+  [AccessPolicy.HumanOrService]: (identity, operation) => {
+    if (isHumanIdentity(identity)) return true;
+    if (!isServiceIdentity(identity)) return false;
+    if (operation.services?.includes(identity.service)) return true;
+    throw new GatewayError(
+      HttpStatus.Forbidden,
+      "gateway.access.service_refused",
+      "The operation does not accept this service identity.",
+    );
+  },
 };
 
 export interface InvocationOptions {
@@ -294,7 +307,7 @@ export class Invocation {
           options.authorization,
           context,
         );
-        if (!admits(identity)) throw unauthorized();
+        if (!admits(identity, operation)) throw unauthorized();
       }
       return identity;
     } catch (thrown) {

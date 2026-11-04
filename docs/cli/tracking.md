@@ -30,6 +30,9 @@ data directory beside `kanthord.db`. It holds the tables of
   its records. A record of an older execution is `Refused` with
   `trace_expired`, and a server span of it is dropped and counted. An admitted
   record updates its flow rollup bucket at every age.
+- A human deletes ended traces through `tracking.trace.delete`. The dashboard
+  and the CLI send the request through `footprint.cleanup.create` of the
+  [Footprint Service](footprint.md). The operation is API-only.
 
 Telemetry is lossy and has no current effect. It is not Mission evidence,
 assessment or outcome. It completes no node, renews no claim and authorizes no
@@ -66,6 +69,7 @@ API-only operation:
 | Operation identifier       | HTTP route                                             | Access / effect                                                       |
 | -------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------- |
 | `tracking.telemetry.write` | `POST /api/tracking/execution/:execution_id/telemetry` | `client` with the execution proof; mutation, idempotency key required |
+| `tracking.trace.delete`    | `POST /api/tracking/trace/delete`                      | `human_or_service`; mutation, idempotency key required                |
 
 ## Synopses
 
@@ -720,6 +724,27 @@ permanent: retry the record only with a new identity and new content.
 One transaction applies the whole batch. A transport failure or a timeout
 leaves every disposition unknown, and the producer retries the same records
 with the same identities.
+
+## `tracking.trace.delete`
+
+A human, or the Footprint Service for a recorded cleanup, deletes ended traces.
+The body is `{ "trace_ids": [...], "requested_by": <human actor> }` with 1 to
+20 trace IDs. Only the Footprint service identity sends `requested_by`. A human
+caller sends no `requested_by`, and the operation takes the caller identity.
+
+- The operation deletes each trace whose state is not `open`. The cascade
+  deletes its spans, records, telemetry texts and session entries.
+- An open trace answers `refused` with the reason `live`.
+- A trace that is already gone counts as `absent`.
+- The flow rollups, the `scheduler_execution` row and every Mission record
+  stay. A later read of the trace answers `404 tracking.trace.not_found`.
+
+The answer is `{ "removed": <count>, "absent": <count>, "refused": [{ "key", "reason" }] }`.
+
+| HTTP | Code                                | Condition                                                                                                      |
+| ---- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| 400  | `gateway.request.validation_failed` | The list is empty, has more than 20 IDs or holds an ID of the wrong form; a human caller sends `requested_by`. |
+| 403  | `gateway.access.service_refused`    | A service identity other than the Footprint Service calls the operation.                                       |
 
 ## Error codes
 

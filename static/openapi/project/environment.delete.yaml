@@ -1,0 +1,128 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: project.environment.delete
+    tags:
+      - project
+    description: Delete the image tags and the proof file of each environment key,
+      or the untagged image of an image id. A live key refuses.
+    x-access-policy: human_or_service
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/project.environment.delete.Input/properties/body"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/project.environment.delete.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    project.environment.delete.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            keys:
+              minItems: 1
+              maxItems: 20
+              type: array
+              items:
+                type: string
+                maxLength: 512
+                pattern: ^(?:[a-z0-9][a-z0-9/-]*@[0-9a-f]{64}|sha256:[0-9a-f]{64})$
+            requested_by:
+              type: object
+              properties:
+                kind:
+                  type: string
+                  const: human
+                account:
+                  type: string
+                name:
+                  type: string
+              required:
+                - kind
+                - account
+                - name
+              additionalProperties: false
+          required:
+            - keys
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    project.environment.delete.Output:
+      type: object
+      properties:
+        removed:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        absent:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        refused:
+          type: array
+          items:
+            type: object
+            properties:
+              key:
+                type: string
+              reason:
+                type: string
+                enum:
+                  - live
+                  - unreadable
+            required:
+              - key
+              - reason
+            additionalProperties: false
+      required:
+        - removed
+        - absent
+        - refused
+      additionalProperties: false

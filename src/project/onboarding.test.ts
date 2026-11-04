@@ -403,6 +403,12 @@ class Harness {
             entry.resource_identity !== identity,
         );
       },
+      footprintUsage: async () => ({
+        usage: { runtime: "podman", images: [], volumes: [] },
+        owned_image_ids: [],
+        cache_volumes: [],
+      }),
+      removeImage: async () => false,
     } as unknown as EnvironmentRuntime;
     this.onboarding = new Onboarding({
       bindingsOf: (projectId) => {
