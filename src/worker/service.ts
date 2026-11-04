@@ -307,6 +307,9 @@ export class WorkerService implements Service {
   instanceConnected(name: string): boolean {
     return this.instances.connected(name);
   }
+  raiseWorkVersion(name: string): void {
+    this.instances.raiseWorkVersion(name);
+  }
   instanceNameOf(tx: Transaction, instanceId: string): string | null {
     const instance = readInstanceById(tx, instanceId);
     return instance?.ended_at === null ? instance.name : null;

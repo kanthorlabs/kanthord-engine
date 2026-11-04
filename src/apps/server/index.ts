@@ -599,6 +599,7 @@ export function composeServices(options: {
       nameOf: (tx, instanceId) => worker.instanceNameOf(tx, instanceId),
     },
     instanceConnected: (holder) => worker.instanceConnected(holder),
+    workChanged: (holder) => worker.raiseWorkVersion(holder),
   });
   const agent: AgentComponent = new AgentComponent({
     store: options.store,

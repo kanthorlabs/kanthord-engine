@@ -388,6 +388,8 @@ paths:
     $ref: ./openapi/worker/instance.rotate.yaml#/pathItem
   /api/worker/instance/token:
     $ref: ./openapi/worker/instance.token.yaml#/pathItem
+  /api/worker/instance/work:
+    $ref: ./openapi/worker/instance.work.yaml#/pathItem
   /api/worker/placement:
     $ref: ./openapi/worker/placement.list.yaml#/pathItem
   /api/worker/register:

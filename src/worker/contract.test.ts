@@ -10,6 +10,7 @@ import {
   alwaysAvailable,
   ContainerRuntime,
   executionEnvironmentSchema,
+  instanceNameSchema,
   InstancePlacement,
   PlacementIssue,
   placementStatusSchema,
@@ -28,6 +29,12 @@ type Same<Left, Right> = [Left] extends [Right]
     ? true
     : false
   : false;
+
+test("each static route segment of the instance exchange is a reserved instance name", () => {
+  for (const name of ["server", "token", "connect", "heartbeat", "work"])
+    assert.equal(instanceNameSchema.safeParse(name).success, false);
+  assert.equal(instanceNameSchema.safeParse("worker").success, true);
+});
 
 test("the instance placement and the binding placement hold the same values", () => {
   const same: Same<InstancePlacement, WorkerPlacement> = true;

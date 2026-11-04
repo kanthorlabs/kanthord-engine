@@ -31,6 +31,7 @@ const COPY_CODE_VALUE = "authorization-code#state-value";
 const COPY_CODE_OPTION = "copy_code";
 const COMPLETED = "completed";
 const FIRST_REVISION = 1;
+const LOGIN_WORK_CHANGES = 3;
 const FAST_HEARTBEAT_MS = 50;
 const SLOW_INTERVAL_MS = 3600000;
 const POLL_MS = 20;
@@ -142,6 +143,7 @@ test("a live worker instance signs in through a fake pi-ai copy_code flow, and t
     });
     return completed(answer).connection !== null;
   }, t.signal);
+  const workVersion = f.worker.instances.workVersionOf(INSTANCE);
   const login = completed(
     await llm.login(
       {
@@ -176,6 +178,10 @@ test("a live worker instance signs in through a fake pi-ai copy_code flow, and t
   }, t.signal);
   assert.equal(status.failure_reason, null);
   assert.equal(submitted, COPY_CODE_VALUE);
+  assert.equal(
+    f.worker.instances.workVersionOf(INSTANCE),
+    workVersion + LOGIN_WORK_CHANGES,
+  );
   const copy = completed(
     await llm.get({
       params: { credential_name: CREDENTIAL_NAME },
