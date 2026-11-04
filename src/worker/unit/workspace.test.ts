@@ -22,7 +22,6 @@ import {
   CHECKOUTS_DIRECTORY,
   handedSshAccess,
   SCRATCH_DIRECTORY,
-  WORKSPACE_RETENTION_MS,
   WorkspaceKind,
   WorkspaceRoot,
 } from "./workspace.ts";
@@ -83,30 +82,24 @@ test("workspace root audits private mode and keys refuse foreign identities", (t
   });
 });
 
-test("workspace retention respects holds and release kind", (t) => {
+test("the workspace root keeps an idle node workspace and removes only a released execution workspace", (t) => {
   const workspace = WorkspaceRoot.open(temporary(t));
-  const old = workspace.nodeKey(createIdentity("node"));
-  const recent = workspace.nodeKey(createIdentity("node"));
+  const idle = workspace.nodeKey(createIdentity("node"));
   const held = workspace.nodeKey(createIdentity("node"));
   const execution = workspace.executionKey(createIdentity("execution"));
   const now = Date.now();
-  for (const key of [old, recent, held, execution])
-    mkdirSync(key, { mode: 0o700 });
-  const expired = new Date(now - WORKSPACE_RETENTION_MS - 86400000);
-  for (const key of [old, held]) utimesSync(key, expired, expired);
+  for (const key of [idle, held, execution]) mkdirSync(key, { mode: 0o700 });
+  const idleSince = new Date(now - 365 * 86400000);
+  for (const key of [idle, held]) utimesSync(key, idleSince, idleSince);
   workspace.hold(held);
   assert.throws(() => workspace.hold(held));
-  workspace.sweep(now);
-  assert.equal(existsSync(old), false);
-  assert.equal(existsSync(recent), true);
-  assert.equal(existsSync(held), true);
   workspace.release(held, WorkspaceKind.Node);
-  assert.ok(statSync(held).mtimeMs > now - WORKSPACE_RETENTION_MS);
+  assert.ok(statSync(held).mtimeMs > idleSince.getTime());
   workspace.hold(execution);
   workspace.release(execution, WorkspaceKind.Execution);
   assert.equal(existsSync(execution), false);
-  workspace.startSweeping();
-  workspace.stopSweeping();
+  assert.equal(existsSync(idle), true);
+  assert.equal(existsSync(held), true);
 });
 
 test("workspace preparation refreshes implement branches and creates disposable snapshots and examine workspaces", async (t) => {

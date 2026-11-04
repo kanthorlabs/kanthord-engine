@@ -8,6 +8,7 @@ import {
   FLOW_PERCENTILE_METHOD,
   flowExitSchema,
   FlowGrain,
+  flowGrainSchema,
   flowMeasureSchema,
   type FlowRead,
 } from "./contract.ts";
@@ -32,7 +33,11 @@ import {
   type FlowRow,
   stagesOf,
 } from "./flow-stages.ts";
-import { flowWindowOf, type FlowWindows } from "./flow-window.ts";
+import {
+  type FlowCoverage,
+  flowWindowOf,
+  type FlowWindows,
+} from "./flow-window.ts";
 
 export interface FlowReadOptions {
   isHostedWorker: (workerName: string) => boolean;
@@ -83,7 +88,11 @@ const USAGE_COLUMNS = [
 ];
 const RANGE_SQL = "grain = ? AND bucket_start >= ? AND bucket_start < ?";
 const COVERAGE_SQL =
-  "SELECT min(bucket_start) AS coverage_start FROM tracking_flow_rollup WHERE grain = ?";
+  "SELECT grain, min(bucket_start) AS coverage_start FROM tracking_flow_rollup WHERE grain IN (?, ?) GROUP BY grain";
+const NO_COVERAGE: FlowCoverage = {
+  [FlowGrain.Hour]: null,
+  [FlowGrain.Day]: null,
+};
 
 function selectOf(
   table: string,
@@ -106,11 +115,16 @@ function filterOf(query: AnalyticsFlowQuery): RowFilter {
   return filter;
 }
 
-function coverageStartOf(tx: Transaction, grain: FlowGrain): number | null {
-  const row = tx.database.prepare(COVERAGE_SQL).get(grain);
-  const start = row?.coverage_start;
-  assert.ok(start === null || isNumber(start));
-  return start ?? null;
+function coverageOf(tx: Transaction): FlowCoverage {
+  const coverage: Record<FlowGrain, number | null> = { ...NO_COVERAGE };
+  for (const row of tx.database
+    .prepare(COVERAGE_SQL)
+    .all(FlowGrain.Hour, FlowGrain.Day)) {
+    const start = row.coverage_start;
+    assert.ok(isNumber(start));
+    coverage[flowGrainSchema.parse(row.grain)] = start;
+  }
+  return coverage;
 }
 
 function selectAll(
@@ -267,10 +281,10 @@ export function readFlow(
   now: number,
   options: FlowReadOptions,
 ): FlowRead {
-  const { grain } = flowWindowOf(query, now, null);
+  const { grain } = flowWindowOf(query, now, NO_COVERAGE);
   const filter = filterOf(query);
   return store.transaction((tx) => {
-    const windows = flowWindowOf(query, now, coverageStartOf(tx, grain));
+    const windows = flowWindowOf(query, now, coverageOf(tx));
     const { window, previous_window: previousWindow, cut } = windows;
     const read = readRows(
       tx,

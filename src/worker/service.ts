@@ -469,7 +469,7 @@ export class WorkerService implements Service {
     this.poolStarted = true;
     const host = this.dependencies.pool!.host;
     host.prepare();
-    void host.sweep(this.liveInstanceNames());
+    void host.sweep(this.archivedInstanceNames());
     this.reconcile();
     void this.logUnavailableContainerDriver();
   }
@@ -502,11 +502,11 @@ export class WorkerService implements Service {
     return host.placementStatus(placement);
   }
 
-  private liveInstanceNames(): Set<string> {
+  private archivedInstanceNames(): Set<string> {
     return new Set(
-      this.dependencies.store
-        .transaction((tx) => this.instances.liveServerInstances(tx))
-        .map(({ name }) => name),
+      this.dependencies.store.transaction((tx) =>
+        this.instances.archivedServerInstanceNames(tx),
+      ),
     );
   }
 

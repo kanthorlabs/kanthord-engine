@@ -98,7 +98,7 @@ const SPAN = "2".repeat(16);
 const RUNTIME = "worker_registration_01JZ8R2B3C4D5E6F7G8H9J0K1M";
 const CREATED = 1000;
 const NOW = 1751566593132;
-const RETENTION_DAYS = 30;
+const WRITABLE_DAYS = 30;
 const EXPIRED_AGE_DAYS = 31;
 const DAY_MS = 86400000;
 const NO_STORED = 0;
@@ -110,7 +110,7 @@ const NO_DROP = 0;
 const NO_ROWS = 0;
 const ONE_ENTRY = 1;
 const ONE_DROP = 1;
-const TWO_FAILURES = 2;
+const ONE_FAILURE = 1;
 const BACKFILL_WAIT_TURNS = 100;
 const PAGE_OF_ONE = 1;
 const STOP_DETAIL = "Cannot find module";
@@ -142,7 +142,7 @@ function harness(
   ]);
   const service = new TrackingService({
     store,
-    retentionDays: RETENTION_DAYS,
+    writableDays: WRITABLE_DAYS,
     isHostedWorker: () => false,
     now,
     executions: {
@@ -1541,16 +1541,15 @@ function traceCount(store: Store): number {
   return Number(row.count);
 }
 
-test("start sweeps an expired trace", async (t) => {
+test("start keeps a trace older than the writable period", async (t) => {
   const { store, service } = harness(t);
   store.transaction((tx) =>
     insertTrace(tx, TRACE, NOW - EXPIRED_AGE_DAYS * DAY_MS),
   );
-  assert.equal(traceCount(store), ONE_ENTRY);
   stopAfter(t, () => service.stop());
   assert.equal(await service.start(), null);
-  assert.equal(traceCount(store), NO_ROWS);
-  assert.equal(service.sweepFailures(), NO_ROWS);
+  assert.equal(traceCount(store), ONE_ENTRY);
+  assert.equal(service.backfillFailures(), NO_ROWS);
 });
 
 function insertUnfilledTrace(store: Store, createdAt: number): void {
@@ -1584,7 +1583,7 @@ async function backfillEnded(service: TrackingService, store: Store) {
   assert.fail("the backfill did not end");
 }
 
-test("start runs the backfill after the sweep and does not wait for it", async (t) => {
+test("start runs the backfill and does not wait for it", async (t) => {
   const { store, service } = harness(t);
   insertUnfilledTrace(store, NOW - DAY_MS);
   stopAfter(t, () => service.stop());
@@ -1593,17 +1592,17 @@ test("start runs the backfill after the sweep and does not wait for it", async (
   await backfillEnded(service, store);
   assert.equal(kindOfTrace(store), FlowKind.None);
   assert.equal(rollupRowCount(store), TWO_ROWS);
-  assert.equal(service.sweepFailures(), NO_ROWS);
+  assert.equal(service.backfillFailures(), NO_ROWS);
 });
 
-test("the backfill leaves out a trace that the first sweep deletes", async (t) => {
+test("the backfill fills a trace older than the writable period and keeps it", async (t) => {
   const { store, service } = harness(t);
   insertUnfilledTrace(store, NOW - EXPIRED_AGE_DAYS * DAY_MS);
   stopAfter(t, () => service.stop());
   assert.equal(await service.start(), null);
   await backfillEnded(service, store);
-  assert.equal(traceCount(store), NO_ROWS);
-  assert.equal(rollupRowCount(store), NO_ROWS);
+  assert.equal(traceCount(store), ONE_ENTRY);
+  assert.equal(kindOfTrace(store), FlowKind.None);
 });
 
 test("analyticsFlow answers rebuild with the job start while the backfill runs and null after it", async (t) => {
@@ -1619,22 +1618,16 @@ test("analyticsFlow answers rebuild with the job start while the backfill runs a
   assert.equal(service.analyticsFlow(flowQuery(), caller(store)).rebuild, null);
 });
 
-test("a failed sweep is counted for the traces and for the rollups and answers zero", (t) => {
+test("a failed backfill is counted", async (t) => {
   const { store, service } = harness(t);
   store.close();
-  assert.equal(service.sweep(), NO_ROWS);
-  assert.equal(service.sweepFailures(), TWO_FAILURES);
-});
-
-test("a failed rollup sweep is counted and the trace sweep still runs", (t) => {
-  const { store, service } = harness(t);
-  store.transaction((tx) =>
-    insertTrace(tx, TRACE, NOW - EXPIRED_AGE_DAYS * DAY_MS),
-  );
-  store.database.exec("DROP TABLE tracking_usage_rollup");
-  assert.equal(service.sweep(), ONE_ENTRY);
-  assert.equal(service.sweepFailures(), ONE_DROP);
-  assert.equal(traceCount(store), NO_ROWS);
+  stopAfter(t, () => service.stop());
+  assert.equal(await service.start(), null);
+  for (let turn = 0; turn < BACKFILL_WAIT_TURNS; turn++) {
+    if (service.backfillFailures() === ONE_FAILURE) break;
+    await setImmediate();
+  }
+  assert.equal(service.backfillFailures(), ONE_FAILURE);
 });
 
 function insertUsageRow(store: Store, grain: FlowGrain, bucketStart: number) {
@@ -1654,30 +1647,19 @@ function usageBuckets(store: Store, grain: FlowGrain): number[] {
     .map((row) => Number(row.bucket_start));
 }
 
-test("the sweep deletes the rollup rows of an expired trace only at their own cutoff", (t) => {
+test("no trace and no rollup row goes after 31 days", async (t) => {
   const { store, service } = harness(t);
   store.transaction((tx) =>
     insertTrace(tx, TRACE, NOW - EXPIRED_AGE_DAYS * DAY_MS),
   );
   insertUsageRow(store, FlowGrain.Hour, NOW - 9 * DAY_MS);
-  insertUsageRow(store, FlowGrain.Hour, NOW - 7 * DAY_MS);
   insertUsageRow(store, FlowGrain.Day, NOW - 65 * DAY_MS);
-  insertUsageRow(store, FlowGrain.Day, NOW - EXPIRED_AGE_DAYS * DAY_MS);
-  assert.equal(service.sweep(), ONE_ENTRY);
-  assert.equal(service.sweepFailures(), NO_ROWS);
-  assert.equal(traceCount(store), NO_ROWS);
-  assert.deepEqual(usageBuckets(store, FlowGrain.Hour), [NOW - 7 * DAY_MS]);
-  assert.deepEqual(usageBuckets(store, FlowGrain.Day), [
-    NOW - EXPIRED_AGE_DAYS * DAY_MS,
-  ]);
-});
-
-test("start sweeps an expired rollup row", async (t) => {
-  const { store, service } = harness(t);
-  insertUsageRow(store, FlowGrain.Hour, NOW - 9 * DAY_MS);
   stopAfter(t, () => service.stop());
   assert.equal(await service.start(), null);
-  assert.deepEqual(usageBuckets(store, FlowGrain.Hour), []);
+  await backfillEnded(service, store);
+  assert.equal(traceCount(store), ONE_ENTRY);
+  assert.deepEqual(usageBuckets(store, FlowGrain.Hour), [NOW - 9 * DAY_MS]);
+  assert.deepEqual(usageBuckets(store, FlowGrain.Day), [NOW - 65 * DAY_MS]);
 });
 
 test("a telemetry write of an expired execution is refused and opens no trace", (t) => {
@@ -1853,7 +1835,7 @@ test("a server trace admits a child of the root span and refuses another parent 
   );
 });
 
-test("a server trace older than the retention is dropped and counted", (t) => {
+test("a server trace older than the writable period is dropped and counted", (t) => {
   const { store, service } = harness(t);
   service.serverTraceSpan(
     { ...SERVER_TRACE, created_at: NOW - EXPIRED_AGE_DAYS * DAY_MS },

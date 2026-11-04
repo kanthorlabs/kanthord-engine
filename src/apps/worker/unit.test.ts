@@ -16,11 +16,12 @@ import { installPiTools } from "../../agent/pi-tools.ts";
 import { WorkerUnit } from "./unit.ts";
 import type { WorkerTransport } from "./transport.ts";
 import { testClaim } from "./test-support.ts";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { hostEnvironment } from "../../kernel/test-support.ts";
-import { runVerifications } from "../../worker/unit/index.ts";
+import { runVerifications, WorkspaceRoot } from "../../worker/unit/index.ts";
 import { spawnSync } from "node:child_process";
+import { createIdentity } from "../../kernel/identity.ts";
 
 const CLIENT_SECRET_BYTES = 32;
 const SETTLE_WAIT_MS = 50;
@@ -109,8 +110,11 @@ function directoriesOf(env: NodeJS.ProcessEnv) {
   return { data: state, log: state };
 }
 
-function unitOf(t: TestContext, transport: WorkerTransport) {
-  const env = environmentOf(t);
+function unitOf(
+  t: TestContext,
+  transport: WorkerTransport,
+  env: NodeJS.ProcessEnv = environmentOf(t),
+) {
   return new WorkerUnit({
     bindings: [
       {
@@ -149,6 +153,30 @@ test("an idle unit deregisters and ends run at a drain", async (t) => {
   assert.deepEqual(await unit.healthcheck(), {
     client: HealthStatus.Unavailable,
   });
+});
+
+test("a unit run keeps an idle node workspace and starts no sweep", async (t) => {
+  const env = environmentOf(t);
+  const idle = WorkspaceRoot.open(directoriesOf(env).data).nodeKey(
+    createIdentity("node"),
+  );
+  mkdirSync(idle, { mode: 0o700 });
+  const idleSince = new Date(Date.now() - 365 * 86400000);
+  utimesSync(idle, idleSince, idleSince);
+  const pulled = Promise.withResolvers<void>();
+  const { transport } = scripted({
+    pull: (context) => {
+      pulled.resolve();
+      return cancelled(context);
+    },
+  });
+  const unit = unitOf(t, transport, env);
+  const running = unit.run();
+  await pulled.promise;
+  assert.equal(existsSync(idle), true);
+  assert.equal(await unit.drain(), null);
+  assert.equal(await running, null);
+  assert.equal(existsSync(idle), true);
 });
 
 function deregisterFailure(status: number, code: string) {

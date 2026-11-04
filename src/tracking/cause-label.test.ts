@@ -345,7 +345,7 @@ test("a subcategory outside its category answers tracking.cause.subcategory_mism
 function labelThroughService(store: Store, body: CauseLabelBody, now: number) {
   const service = new TrackingService({
     store,
-    retentionDays: 30,
+    writableDays: 30,
     isHostedWorker: () => false,
     now: () => now,
     executions: { traceOf: () => undefined },
@@ -416,7 +416,7 @@ test("tracking.text.get answers the reason of the last label", (t) => {
   const store = endedTrace(t);
   const service = new TrackingService({
     store,
-    retentionDays: 30,
+    writableDays: 30,
     isHostedWorker: () => false,
     executions: { traceOf: () => undefined },
     sessionHosts: {

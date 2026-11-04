@@ -299,7 +299,6 @@ class Harness {
     [];
   telemetryFails = false;
   cacheList: Array<{ project_id: string; resource_identity: string }> = [];
-  cacheRemovalFails = false;
   clock = 0;
   beforeRelease: (() => void) | null = null;
   script: (tools: ToolDefinition[]) => Promise<void> = async () => {};
@@ -398,7 +397,6 @@ class Harness {
       cacheVolumes: async () => [...this.cacheList],
       removeCacheVolume: async (projectId: string, identity: string) => {
         this.events.push(`removeCacheVolume ${projectId} ${identity}`);
-        if (this.cacheRemovalFails) throw new Error(BOOM);
         this.cacheList = this.cacheList.filter(
           (entry) =>
             entry.project_id !== projectId ||
@@ -2160,9 +2158,20 @@ test("environmentsClaimable answers false for a changed ready binding until its 
   assert.equal(h.state().status, EnvironmentStatus.Ready);
 });
 
-test("start removes the stale runs, computes each binding and collects each path that no binding holds", async (t) => {
+const GONE_CACHE = { project_id: PROJECT, resource_identity: STRAY_IDENTITY };
+
+function cacheOf(identity: string) {
+  return { project_id: PROJECT, resource_identity: identity };
+}
+
+function cacheRemovals(h: Harness): string[] {
+  return h.events.filter((event) => event.startsWith("removeCacheVolume"));
+}
+
+test("start removes the stale runs, computes each binding and keeps the proofs, the images and the cache volumes of an unbound repository", async (t) => {
   const h = new Harness(t);
   h.resolution = NOTHING;
+  h.cacheList = [GONE_CACHE, cacheOf(APP.resource_identity)];
   const stray = environmentPath(STRAY_IDENTITY);
   h.proofs.write(stray, proofFile("old"));
   h.writeProof(proofFile(h.digest()));
@@ -2170,9 +2179,11 @@ test("start removes the stale runs, computes each binding and collects each path
   assert.equal(h.events.at(NO_CALLS), REMOVE_STALE_RUNS);
   assert.deepEqual(
     h.events.filter((event) => event.startsWith("collect")),
-    [`collect ${stray} null`],
+    [],
   );
-  assert.deepEqual(h.proofs.paths(), [h.pathOf()]);
+  assert.deepEqual(h.proofs.paths().toSorted(), [h.pathOf(), stray].toSorted());
+  assert.deepEqual(cacheRemovals(h), []);
+  assert.deepEqual(h.cacheList, [GONE_CACHE, cacheOf(APP.resource_identity)]);
   await h.until(() => h.onboarding.states(PROJECT).length === ONE_CALL);
   assert.deepEqual(
     h.resolveCalls.map((call) => call.bindingId),
@@ -2313,58 +2324,21 @@ test("a held read discarded by a write computes no more after cancel", async (t)
   assert.equal(h.resolveCalls.length, TWO_CALLS);
 });
 
-const GONE_CACHE = { project_id: PROJECT, resource_identity: STRAY_IDENTITY };
-
-function cacheOf(identity: string) {
-  return { project_id: PROJECT, resource_identity: identity };
-}
-
-function cacheRemovals(h: Harness): string[] {
-  return h.events.filter((event) => event.startsWith("removeCacheVolume"));
-}
-
-test("start removes the cache volume of a group that no repository binding holds and keeps the cache volume of a current group", async (t) => {
-  const h = new Harness(t);
-  h.resolution = NOTHING;
-  h.cacheList = [GONE_CACHE, cacheOf(APP.resource_identity)];
-  await h.onboarding.start();
-  assert.deepEqual(cacheRemovals(h), [
-    `removeCacheVolume ${PROJECT} ${STRAY_IDENTITY}`,
-  ]);
-  assert.deepEqual(h.cacheList, [cacheOf(APP.resource_identity)]);
-});
-
-test("a binding-set write that removes a repository binding leads to the removal of the cache volume of its group", async (t) => {
+test("a binding-set write that removes a repository binding keeps the cache volume of its group", async (t) => {
   const h = new Harness(t);
   h.resolution = NOTHING;
   h.cacheList = [cacheOf(APP.resource_identity)];
   await h.compute();
+  h.bindings = facts([], []);
   h.onboarding.bindingsChanged(PROJECT);
   await turn();
   assert.deepEqual(cacheRemovals(h), []);
-  h.bindings = facts([], []);
-  h.onboarding.bindingsChanged(PROJECT);
-  await h.until(() => h.cacheList.length === NO_CALLS);
-  assert.deepEqual(cacheRemovals(h), [
-    `removeCacheVolume ${PROJECT} ${APP.resource_identity}`,
-  ]);
+  assert.deepEqual(h.cacheList, [cacheOf(APP.resource_identity)]);
 });
 
-test("a failed cache volume removal leaves the volume and the next collection removes it", async (t) => {
+test("a new digest keeps the cache volume of its group and of an unbound pair", async (t) => {
   const h = new Harness(t);
-  h.resolution = NOTHING;
-  h.cacheList = [GONE_CACHE];
-  h.cacheRemovalFails = true;
-  await h.onboarding.start();
-  assert.deepEqual(h.cacheList, [GONE_CACHE]);
-  h.cacheRemovalFails = false;
-  h.onboarding.bindingsChanged(PROJECT);
-  await h.until(() => h.cacheList.length === NO_CALLS);
-});
-
-test("a new digest of a current group keeps its cache volume", async (t) => {
-  const h = new Harness(t);
-  h.cacheList = [cacheOf(APP.resource_identity)];
+  h.cacheList = [cacheOf(APP.resource_identity), GONE_CACHE];
   h.existing.add(h.provedOf(h.digest()));
   await h.compute();
   h.resolution = {
@@ -2378,7 +2352,7 @@ test("a new digest of a current group keeps its cache volume", async (t) => {
   await h.until(() => h.events.some((event) => event.startsWith("collect")));
   await turn();
   assert.deepEqual(cacheRemovals(h), []);
-  assert.deepEqual(h.cacheList, [cacheOf(APP.resource_identity)]);
+  assert.deepEqual(h.cacheList, [cacheOf(APP.resource_identity), GONE_CACHE]);
 });
 
 test("environmentClaimed returns at once, starts a run for a changed digest and none for an equal digest", async (t) => {

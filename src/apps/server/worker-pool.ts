@@ -108,11 +108,11 @@ export class WorkerPool implements PoolHost {
       driver.prepare().catch(() => {});
   }
 
-  async sweep(live: ReadonlySet<string>): Promise<void> {
+  async sweep(archived: ReadonlySet<string>): Promise<void> {
     await Promise.all([
-      this.guarded(null, () => this.sweepRoots(live)),
+      this.guarded(null, () => this.sweepRoots(archived)),
       ...Array.from(this.options.drivers.values(), (driver) =>
-        this.guarded(null, () => driver.sweepVolumes(live)),
+        this.guarded(null, () => driver.sweepVolumes(archived)),
       ),
     ]);
   }
@@ -235,14 +235,15 @@ export class WorkerPool implements PoolHost {
     });
   }
 
-  private async sweepRoots(live: ReadonlySet<string>): Promise<void> {
+  private async sweepRoots(archived: ReadonlySet<string>): Promise<void> {
     const names = await readdir(this.workersDirectory()).catch(
       (error: NodeJS.ErrnoException) => {
         if (error.code === MISSING_ENTRY) return [];
         throw error;
       },
     );
-    for (const name of names) if (!live.has(name)) await this.removeRoot(name);
+    for (const name of names)
+      if (archived.has(name)) await this.removeRoot(name);
   }
 
   private async guarded(

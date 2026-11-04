@@ -18,7 +18,8 @@ const DAY = 24 * HOUR;
 const D0 = Date.UTC(2024, 5, 15);
 const NOW = D0 + 10 * HOUR + 30 * 60_000;
 const NOW_ON_HOUR = D0 + 10 * HOUR;
-const COVERED = 0;
+const COVERED = { [FlowGrain.Hour]: 0, [FlowGrain.Day]: 0 };
+const UNCOVERED = { [FlowGrain.Hour]: null, [FlowGrain.Day]: null };
 const RANGE_INVALID = "tracking.filter.range_invalid";
 const HOURS_IN_TWO_DAYS_PLUS_ONE = 49;
 const FOUR_BUCKETS = 4;
@@ -212,52 +213,47 @@ test("compare none answers a null previous window and a null cut", () => {
   assert.equal(result.cut, null);
 });
 
-test("the previous window of the hour grain is null before the cutoff of 8 days", () => {
-  const cutoff = NOW_ON_HOUR - 8 * DAY;
-  const at = flowWindowOf(
-    query({ from: cutoff + 4 * HOUR, to: cutoff + 8 * HOUR }),
+test("the previous window of the hour grain older than 8 days stays", () => {
+  const start = NOW_ON_HOUR - 9 * DAY;
+  const { previous_window } = flowWindowOf(
+    query({ from: start + 4 * HOUR, to: start + 8 * HOUR }),
     NOW_ON_HOUR,
     COVERED,
   );
-  assert.deepEqual(at.previous_window, { from: cutoff, to: cutoff + 4 * HOUR });
-  const before = flowWindowOf(
-    query({ from: cutoff + 3 * HOUR, to: cutoff + 7 * HOUR }),
-    NOW_ON_HOUR,
-    COVERED,
-  );
-  assert.equal(before.previous_window, null);
+  assert.deepEqual(previous_window, { from: start, to: start + 4 * HOUR });
 });
 
-test("the previous window of the day grain is null before the cutoff of 64 days", () => {
-  const at = flowWindowOf(
-    query({ from: D0 - 62 * DAY, to: D0 - 61 * DAY, bucket: FlowGrain.Day }),
+test("the previous window of the day grain older than 64 days stays", () => {
+  const { previous_window } = flowWindowOf(
+    query({ from: D0 - 90 * DAY, to: D0 - 89 * DAY, bucket: FlowGrain.Day }),
     NOW,
     COVERED,
   );
-  assert.deepEqual(at.previous_window, {
-    from: D0 - 63 * DAY,
-    to: D0 - 62 * DAY,
+  assert.deepEqual(previous_window, {
+    from: D0 - 91 * DAY,
+    to: D0 - 90 * DAY,
   });
-  const before = flowWindowOf(
-    query({ from: D0 - 63 * DAY, to: D0 - 62 * DAY, bucket: FlowGrain.Day }),
-    NOW,
-    COVERED,
-  );
-  assert.equal(before.previous_window, null);
 });
 
 test("the previous window is null before the coverage start of its grain", () => {
   const input = query({ from: D0 + 6 * HOUR, to: D0 + 10 * HOUR });
   const start = D0 + 2 * HOUR;
-  assert.notEqual(flowWindowOf(input, NOW, start).previous_window, null);
-  assert.equal(flowWindowOf(input, NOW, start + 1).previous_window, null);
+  const coverage = (hour: number) => ({ ...UNCOVERED, [FlowGrain.Hour]: hour });
+  assert.notEqual(
+    flowWindowOf(input, NOW, coverage(start)).previous_window,
+    null,
+  );
+  assert.equal(
+    flowWindowOf(input, NOW, coverage(start + 1)).previous_window,
+    null,
+  );
 });
 
 test("the previous window is null when the grain holds no row", () => {
   const result = flowWindowOf(
     query({ from: D0 + 6 * HOUR, to: D0 + 10 * HOUR }),
     NOW,
-    null,
+    UNCOVERED,
   );
   assert.equal(result.previous_window, null);
   assert.equal(result.cut, null);
@@ -300,13 +296,23 @@ test("the cut of the day grain on an hour boundary ends at window.now", () => {
   assert.equal(result.cut, D0 + 10 * HOUR - 7 * DAY);
 });
 
-test("the cut of the day grain is null when a window of 8 days needs expired hour rows", () => {
+test("the cut of the day grain of a window of 8 days counts the hour rows older than 8 days", () => {
   const result = flowWindowOf(
     query({ from: D0 - 7 * DAY, to: NOW, bucket: FlowGrain.Day }),
     NOW,
     COVERED,
   );
   assert.equal(result.window.to - result.window.from, 8 * DAY);
+  assert.notEqual(result.previous_window, null);
+  assert.equal(result.cut, D0 + 11 * HOUR - 8 * DAY);
+});
+
+test("the cut of the day grain is null when its day starts before the first hour row", () => {
+  const result = flowWindowOf(
+    query({ from: D0 - 6 * DAY, to: NOW, bucket: FlowGrain.Day }),
+    NOW,
+    { [FlowGrain.Hour]: D0 - 7 * DAY + HOUR, [FlowGrain.Day]: 0 },
+  );
   assert.notEqual(result.previous_window, null);
   assert.equal(result.cut, null);
 });

@@ -999,21 +999,6 @@ test("collect removes the owner images of the path other than the current digest
   ]);
 });
 
-test("collect with no digest removes every owner image of the path", async (t) => {
-  const { built, calls } = collection(temporary(t));
-  await built.collect(PATH_OF_IDENTITY, null);
-  assert.deepEqual(
-    calls.slice(1).map((call) => call.at(-1)),
-    [
-      `${IMAGE_ROOT}:old`,
-      `${IMAGE_ROOT}:${DIGEST}`,
-      `${IMAGE_ROOT}:${DIGEST}-base`,
-      `${IMAGE_ROOT}:${DIGEST}-proved`,
-      `${IMAGE_ROOT}:${DIGEST}-unchecked`,
-    ],
-  );
-});
-
 test("removeStaleRuns removes each run directory and nothing else of the environments directory", async (t) => {
   const directory = temporary(t);
   const { built } = runtimeImages(directory, () => ({}));

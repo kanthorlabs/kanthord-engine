@@ -9,8 +9,6 @@ import {
 } from "./contract.ts";
 import { BIN_COUNT, binOf, decodeBins, encodeBins } from "./flow-bins.ts";
 import {
-  FLOW_DAY_RETENTION_DAYS,
-  FLOW_HOUR_RETENTION_DAYS,
   FLOW_VECTOR_COLUMNS,
   flowCauseAssignerSchema,
   flowCauseCategorySchema,
@@ -20,7 +18,7 @@ import {
   type FlowVector,
   stopReasonKeySchema,
 } from "./flow-model.ts";
-import { DAY_MS } from "./retention.ts";
+import { DAY_MS } from "./writable-period.ts";
 
 const HOUR_MS = 3600000;
 const KEY_COLUMNS = [
@@ -43,10 +41,6 @@ const ROLLUP_COLUMNS = [
 const GRAIN_MS: Readonly<Record<FlowGrain, number>> = {
   [FlowGrain.Hour]: HOUR_MS,
   [FlowGrain.Day]: DAY_MS,
-};
-const RETENTION_DAYS: Readonly<Record<FlowGrain, number>> = {
-  [FlowGrain.Hour]: FLOW_HOUR_RETENTION_DAYS,
-  [FlowGrain.Day]: FLOW_DAY_RETENTION_DAYS,
 };
 const UPSERT_ROLLUP = `INSERT INTO tracking_flow_rollup (${ROLLUP_COLUMNS.join(", ")}) VALUES (${ROLLUP_COLUMNS.map(() => "?").join(", ")}) ON CONFLICT (${KEY_COLUMNS.join(", ")}) DO UPDATE SET ${[...FLOW_VECTOR_COLUMNS].map((column) => `${column} = ${column} + excluded.${column}`).join(", ")}, changed_after_end = MAX(changed_after_end, excluded.changed_after_end)`;
 const USAGE_COLUMNS = [
@@ -79,11 +73,6 @@ export interface RollupPlace {
   now: number;
 }
 
-function isExpired(place: RollupPlace): boolean {
-  const days = RETENTION_DAYS[flowGrainSchema.parse(place.grain)];
-  return place.bucket_start < place.now - days * DAY_MS;
-}
-
 function keyValues(place: RollupPlace, key: FlowKey) {
   return [
     flowGrainSchema.parse(place.grain),
@@ -106,7 +95,6 @@ export function addFlowVector(
   vector: FlowVector,
   late: boolean,
 ): void {
-  if (isExpired(place)) return;
   const pastBucket = place.bucket_start + GRAIN_MS[place.grain] < place.now;
   tx.database
     .prepare(UPSERT_ROLLUP)
@@ -122,7 +110,6 @@ export function deleteEmptyFlowRow(
   place: RollupPlace,
   key: FlowKey,
 ): void {
-  if (isExpired(place)) return;
   tx.database.prepare(DELETE_EMPTY_ROLLUP).run(...keyValues(place, key));
 }
 
@@ -134,7 +121,6 @@ export function addHistogramValue(
   measure: FlowMeasure,
   value: number,
 ): void {
-  if (isExpired(place)) return;
   const grain = flowGrainSchema.parse(place.grain);
   const parsed = flowMeasureSchema.parse(measure);
   const row = tx.database
@@ -168,7 +154,6 @@ export function addUsage(
   model: string,
   sum: FlowUsageSum,
 ): void {
-  if (isExpired(place)) return;
   tx.database
     .prepare(UPSERT_USAGE)
     .run(

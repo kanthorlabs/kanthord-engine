@@ -466,11 +466,12 @@ The implemented fields are:
 - `project.environment_memory_mb`: optional safe integer of at least `256`,
   default `4096`. The layer build, the image check and the proof container of an
   environment take this memory bound in megabytes.
-- `tracking.retention_days`: optional positive safe integer from 1 to 3650,
-  default `30`. The server deletes a trace, with its spans, texts and session
-  entries, when the trace is older than this retention. A sweep runs at the
-  start and then every hour. A record of an execution older than the retention
-  is `Refused` with `trace_expired`.
+- `tracking.trace_writable_days`: optional positive safe integer from 1 to
+  3650, default `30`. The Tracking Service admits the records of an execution
+  during this number of days after its start. A record of an execution older
+  than this writable period is `Refused` with `trace_expired`. The key deletes
+  nothing. `kanthord upgrade` renames the former key of this period and keeps
+  its value.
 
 The current Project fragment is empty and adds no YAML section.
 See [Gateway](./gateway.md) for authentication context.
@@ -663,9 +664,11 @@ of an instance is `workers/<instance name>/` of the state directory with mode
 `0700`, and its container and volume are `kanthord_slot_<instance name>`. The
 container mounts `sessions/` of the slot root as its session directory. The
 archive stops the instance, then removes the slot root and the volume. Each
-start removes the roots and the volumes of no live server instance. An instance
-that exits with no stop restarts with a backoff under the same client
-identities. The server logs `instance` with the instance name.
+start removes only the root and the volume of a `server` or `container` instance
+that an archive ended and that no live instance of the same name holds. A root
+or a volume of another name stays. An instance that exits with no stop restarts
+with a backoff under the same client identities. The server logs `instance`
+with the instance name.
 
 Files/effects: validate or create the XDG configuration, data, and state
 directories as needed; read the selected configuration; open/create
@@ -1239,7 +1242,6 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `project.onboarding.run_started`                 | The Onboarding component starts a run of the environment of a repository binding. The `info` record holds `binding`, `digest`, `target`, `status` and `class`.                                                                                                                                                                                                     | serve server                                                               |
 | local           | `project.onboarding.run_ended`                   | The run of the environment of a repository binding ends. The `info` record holds `binding`, `digest`, `target`, `status` and `class`.                                                                                                                                                                                                                              | serve server                                                               |
 | local           | `project.onboarding.run_failed`                  | An error stops a run of the environment of a repository binding. The `error` record holds `err`, `binding` and `digest`. An error of the build or the setup step writes the class `build_failed` or `setup_failed`; another error sets `reason`. The server keeps running.                                                                                         | serve server                                                               |
-| local           | `project.onboarding.cache_collection_failed`     | The list of the cache volumes fails, or the removal of a cache volume that no current repository binding holds fails. The `error` record holds `err`, and for a removal also `project_id` and `resource_identity`. The server keeps running.                                                                                                                       | serve server                                                               |
 | local           | `project.onboarding.read_failed`                 | A read of the environment source of a repository binding fails with a new reason. The `error` record holds `project_id`, `binding`, `resource_identity`, `reason` and `failure_reason`. A group with no successful read stays `pending`.                                                                                                                           | serve server                                                               |
 | local           | `project.onboarding.session_failed`              | A session of `env@1` for the environment of a repository binding fails. The `error` record holds `binding` and `digest`. The server keeps running.                                                                                                                                                                                                                 | serve server                                                               |
 | local           | `worker.pool.environment_proof_failed`           | A step of the image proof fails. The message is `The environment proof failed at <step>: <message>`, where `<message>` is the bounded output of the step. With no output, the message is `The environment proof failed at <step>.`. The run records the class `setup_failed`. The proof accepts a failed `rm --force` when `container inspect` finds no container. | serve server                                                               |

@@ -493,7 +493,7 @@ export function composeServices(options: {
   });
   const tracking = new TrackingService({
     store: options.trackingStore,
-    retentionDays: options.config.tracking.retention_days,
+    writableDays: options.config.tracking.trace_writable_days,
     isHostedWorker,
     executions: {
       traceOf: (executionId) => {

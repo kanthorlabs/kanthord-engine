@@ -121,7 +121,7 @@ function completed<T>(result: OperationResult<T>): T {
 }
 
 test(
-  "E07 native runtime proves setup, inference, verification, push, budget and retention in order",
+  "E07 native runtime proves setup, inference, verification, push, budget and the kept workspaces in order",
   { timeout: 180000 },
   async (t) => {
     const f = await gatewayFixture(t, {
@@ -708,11 +708,14 @@ test(
         root.release(root.nodeKey(y.execution.node_id), WorkspaceKind.Node);
       }
     });
-    await t.test("E07.9 sweep retains only the held implement node", () => {
-      root.sweep(Date.now() + 8 * 24 * 3600 * 1000);
-      assert.equal(existsSync(root.nodeKey(y.execution.node_id)), false);
-      assert.equal(existsSync(root.nodeKey(x.execution.node_id)), true);
-      root.release(root.nodeKey(x.execution.node_id), WorkspaceKind.Node);
-    });
+    await t.test(
+      "E07.9 the root keeps the released and the held implement node",
+      () => {
+        assert.equal(existsSync(root.nodeKey(y.execution.node_id)), true);
+        assert.equal(existsSync(root.nodeKey(x.execution.node_id)), true);
+        root.release(root.nodeKey(x.execution.node_id), WorkspaceKind.Node);
+        assert.equal(existsSync(root.nodeKey(x.execution.node_id)), true);
+      },
+    );
   },
 );

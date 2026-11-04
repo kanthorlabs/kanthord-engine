@@ -130,8 +130,8 @@ class FakeDriver implements SlotDriver {
       : Promise.resolve();
   }
 
-  sweepVolumes(live: ReadonlySet<string>): Promise<void> {
-    this.volumeSweeps.push(live);
+  sweepVolumes(archived: ReadonlySet<string>): Promise<void> {
+    this.volumeSweeps.push(archived);
     return this.volumeError
       ? Promise.reject(this.volumeError)
       : Promise.resolve();
@@ -594,15 +594,20 @@ test("a failed volume removal is logged and does not throw", async (t) => {
   );
 });
 
-test("the sweep removes each slot root of no live instance and keeps the live roots", async (t) => {
+test("the sweep removes only the slot root of an archived name and keeps a worker placement root and an operator file", async (t) => {
   const f = fixture(t);
   const live = plantRoot(f.stateDirectory, "coder-1");
-  const orphan = plantRoot(f.stateDirectory, "gone-1");
-  await f.pool.sweep(new Set(["coder-1"]));
+  const workerPlacement = plantRoot(f.stateDirectory, "remote-1");
+  const archived = plantRoot(f.stateDirectory, "gone-1");
+  const operatorFile = join(f.stateDirectory, "workers", "notes.txt");
+  writeFileSync(operatorFile, "keep");
+  await f.pool.sweep(new Set(["gone-1"]));
   assert.equal(existsSync(live), true);
-  assert.equal(existsSync(orphan), false);
-  assert.deepEqual(f.driver.volumeSweeps, [new Set(["coder-1"])]);
-  assert.deepEqual(f.containerDriver.volumeSweeps, [new Set(["coder-1"])]);
+  assert.equal(existsSync(workerPlacement), true);
+  assert.equal(existsSync(operatorFile), true);
+  assert.equal(existsSync(archived), false);
+  assert.deepEqual(f.driver.volumeSweeps, [new Set(["gone-1"])]);
+  assert.deepEqual(f.containerDriver.volumeSweeps, [new Set(["gone-1"])]);
   assert.deepEqual(f.records, []);
 });
 

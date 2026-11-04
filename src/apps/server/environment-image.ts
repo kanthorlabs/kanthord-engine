@@ -662,10 +662,7 @@ export class EnvironmentImages implements Omit<
     for (const tag of tags) await this.answer(["image", "rm", tag]);
   }
 
-  async collect(
-    identityPath: string,
-    keepDigest: string | null,
-  ): Promise<void> {
+  async collect(identityPath: string, keepDigest: string): Promise<void> {
     const name = `${ENVIRONMENT_IMAGE_PREFIX}/${identityPath}`;
     const listed = await this.answer([
       "image",
@@ -683,14 +680,11 @@ export class EnvironmentImages implements Omit<
         name,
         listed.stderr.slice(-OUTPUT_TAIL_BYTES),
       );
-    const kept =
-      keepDigest === null
-        ? []
-        : [
-            keepDigest,
-            `${keepDigest}${BASE_SUFFIX}`,
-            `${keepDigest}${PROVED_SUFFIX}`,
-          ];
+    const kept = [
+      keepDigest,
+      `${keepDigest}${BASE_SUFFIX}`,
+      `${keepDigest}${PROVED_SUFFIX}`,
+    ];
     const prefix = `${name}:`;
     const stale = listed.stdout
       .split(LINE_BREAK)

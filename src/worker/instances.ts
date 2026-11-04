@@ -53,6 +53,7 @@ import {
   fingerprintTaken,
   insertInstance,
   listInstances,
+  readArchivedServerInstanceNames,
   readInstanceById,
   readLatestInstance,
   readLiveInstance,
@@ -845,6 +846,10 @@ export class WorkerInstances implements WorkerInstanceLookups {
 
   liveServerInstances(tx: Transaction): InstanceRecord[] {
     return readLiveServerInstances(tx);
+  }
+
+  archivedServerInstanceNames(tx: Transaction): string[] {
+    return readArchivedServerInstanceNames(tx);
   }
 
   entriesOf(tx: Transaction, instance: InstanceRecord): PoolEntry[] {

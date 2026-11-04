@@ -156,7 +156,6 @@ export class WorkerUnit {
     this.quiesceTask ??= lifecycle(async () => {
       this.shutdown.cancel();
       for (const entry of this.entries) entry.heartbeat?.stop();
-      this.workspaces?.stopSweeping();
     });
     return this.quiesceTask;
   }
@@ -414,7 +413,6 @@ export class WorkerUnit {
     const error = await (this.startTask ?? this.start());
     if (error) return (await this.stop()) ?? reasonOf(context.signal) ?? error;
     const loopError = await lifecycle(async () => {
-      if (!this.shutdown.signal.aborted) this.workspaces!.startSweeping();
       this.running = true;
       for (const entry of [...this.entries])
         if (entry.registration && !entry.loop) this.runEntry(entry);

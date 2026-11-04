@@ -10,18 +10,12 @@ import {
   FlowGrain,
   type FlowRead,
 } from "./contract.ts";
-import {
-  FLOW_DAY_RETENTION_DAYS,
-  FLOW_HOUR_RANGE_DAYS_MAX,
-  FLOW_HOUR_RETENTION_DAYS,
-} from "./flow-model.ts";
-import { DAY_MS, retentionCutoff } from "./retention.ts";
+import { FLOW_HOUR_RANGE_DAYS_MAX } from "./flow-model.ts";
+import { DAY_MS } from "./writable-period.ts";
 
 const RANGE_INVALID_CODE = "tracking.filter.range_invalid";
-const RETENTION_DAYS: Readonly<Record<FlowGrain, number>> = {
-  [FlowGrain.Hour]: FLOW_HOUR_RETENTION_DAYS,
-  [FlowGrain.Day]: FLOW_DAY_RETENTION_DAYS,
-};
+
+export type FlowCoverage = Readonly<Record<FlowGrain, number | null>>;
 
 export interface FlowWindows {
   grain: FlowGrain;
@@ -84,33 +78,32 @@ function previousWindowOf(
   compare: FlowCompare,
   grain: FlowGrain,
   window: FlowRead["window"],
-  now: number,
-  coverageStart: number | null,
+  coverage: FlowCoverage,
 ): FlowRead["previous_window"] {
+  const coverageStart = coverage[grain];
   if (compare === FlowCompare.None || coverageStart === null) return null;
   const from = window.from - (window.to - window.from);
-  const cutoff = retentionCutoff(now, RETENTION_DAYS[grain]);
-  if (from < cutoff || from < coverageStart) return null;
+  if (from < coverageStart) return null;
   return { from, to: window.from };
 }
 
 function cutOf(
   grain: FlowGrain,
   window: FlowRead["window"],
-  now: number,
+  coverage: FlowCoverage,
 ): number | null {
   const cut = endOf(window.now, FlowGrain.Hour) - (window.to - window.from);
   if (grain === FlowGrain.Hour) return cut;
   const dayStart = startOf(cut, FlowGrain.Day);
   if (dayStart === cut) return cut;
-  const hourCutoff = retentionCutoff(now, FLOW_HOUR_RETENTION_DAYS);
-  return dayStart < hourCutoff ? null : cut;
+  const hourStart = coverage[FlowGrain.Hour];
+  return hourStart === null || dayStart < hourStart ? null : cut;
 }
 
 export function flowWindowOf(
   query: Pick<AnalyticsFlowQuery, "from" | "to" | "bucket" | "compare">,
   now: number,
-  coverageStart: number | null,
+  coverage: FlowCoverage,
 ): FlowWindows {
   const range = checkedRange(query, now);
   const grain = grainOf(query.bucket, range);
@@ -127,13 +120,12 @@ export function flowWindowOf(
     query.compare,
     grain,
     window,
-    now,
-    coverageStart,
+    coverage,
   );
   return {
     grain,
     window,
     previous_window,
-    cut: previous_window === null ? null : cutOf(grain, window, now),
+    cut: previous_window === null ? null : cutOf(grain, window, coverage),
   };
 }

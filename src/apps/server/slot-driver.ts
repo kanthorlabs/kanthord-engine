@@ -38,7 +38,7 @@ export interface SlotDriver {
   check(): Promise<PlacementStatus>;
   prepare(): Promise<void>;
   removeVolume(instanceName: string): Promise<void>;
-  sweepVolumes(live: ReadonlySet<string>): Promise<void>;
+  sweepVolumes(archived: ReadonlySet<string>): Promise<void>;
   launch(launch: SlotLaunch): SlotInstance;
   imageOf?(instanceName: string): string | null;
 }

@@ -27,6 +27,7 @@ export const PROJECT_PRODUCER = "project";
 export const WORKER_PRODUCER = "worker";
 const ONE_KIND_AT_MOST = 1;
 export const TRACKING_TIMEOUT_MS = 30000;
+export const DEFAULT_AGE_DAYS = 30;
 export const TELEMETRY_WRITE_RECORDS_MAX = 1000;
 export const TELEMETRY_RECORD_MAX_BYTES = 65536;
 export const EXECUTION_RECORD_LIMIT = 50000;

@@ -2164,12 +2164,33 @@ test("startPool prepares the pool host once when no instance is live", (t) => {
   assert.equal(f.host.started.length, NO_STARTS);
 });
 
-test("startPool sweeps with the name of each live server instance and no worker instance", (t) => {
+const ARCHIVED_AT = 1751566593132;
+
+test("startPool sweeps with the name of each archived server and container instance and no live or worker instance", (t) => {
   const f = poolFixture(t, 2);
-  f.addInstance("laptop", InstancePlacement.Worker, []);
+  const end = (id: string) =>
+    f.store.transaction((tx) => endInstance(tx, id, ARCHIVED_AT));
+  end(f.addInstance("gone", InstancePlacement.Server, []));
+  end(f.addInstance("boxed", InstancePlacement.Container, []));
+  end(f.addInstance("laptop", InstancePlacement.Worker, []));
+  f.archive(FIRST_INSTANCE);
+  f.store.transaction((tx) =>
+    insertInstance(
+      tx,
+      {
+        name: f.nameOf(FIRST_INSTANCE),
+        worker: WORKER,
+        revision: FIRST_REVISION + 1,
+        placement: InstancePlacement.Worker,
+        public_key: null,
+        fingerprint: null,
+      },
+      ARCHIVED_AT,
+    ),
+  );
   f.worker.startPool();
   assert.equal(f.host.swept.length, POOL_ONE_START);
-  assert.deepEqual([...f.host.swept[0]!].sort(), ["server-0", "server-1"]);
+  assert.deepEqual([...f.host.swept[0]!].sort(), ["boxed", "gone"]);
 });
 
 test("startPool starts an instance that no binding lists with no entry", (t) => {
