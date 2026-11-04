@@ -609,10 +609,11 @@ entry, and `truncated` is `false`. The read stores nothing.
 
 - An entry with `truncated: false` is the full entry. The read answers the
   stored entry at once.
-- The host is the server for a `server` instance. The server reads the session
-  directory of the instance directly, also while the instance stops or waits.
-  A `container` instance answers `503` `tracking.entry.unreachable` with
-  reason `offline` in this release.
+- The host is the server for a `server` and a `container` instance. The server
+  reads the session directory of the instance directly, also while the
+  instance or its container stops or waits. The session directory of a
+  `container` instance is `workers/<instance name>/sessions/` of the server
+  state directory.
 - The host is the instance process for a `worker` instance. The server queues
   the read, the instance picks it up at its next heartbeat within 15 s and
   reports the outcome. The read answers `503` `tracking.entry.unreachable` with

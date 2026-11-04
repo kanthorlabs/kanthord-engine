@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { once } from "node:events";
-import { createWriteStream, readFileSync } from "node:fs";
+import { createWriteStream, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { test, type TestContext } from "node:test";
@@ -28,6 +28,7 @@ import {
   CONTAINER_UID,
   containerOwner,
   OWNER_LABEL,
+  SESSION_MOUNT,
   SLOT_HOME,
   slotName,
   SUCCESS_CODE,
@@ -176,6 +177,7 @@ async function liveDriver(t: TestContext) {
     masterKey,
     image: `${IMAGE_NAME}:${packageVersion()}`,
     host: systemRuntimeHost(process.env),
+    stateDirectory: temporary(t),
   });
   const status = await driver.check();
   assert.ok(status.available, JSON.stringify(status));
@@ -512,7 +514,7 @@ test(
       `import { createWriteStream } from "node:fs";`,
       `import { ContainerDriver } from ${JSON.stringify(driverPath)};`,
       `import { systemRuntimeHost } from ${JSON.stringify(runtimePath)};`,
-      `const driver = new ContainerDriver({ masterKey: ${JSON.stringify(masterKey)}, image: ${JSON.stringify(`${IMAGE_NAME}:${packageVersion()}`)}, host: systemRuntimeHost(process.env) });`,
+      `const driver = new ContainerDriver({ masterKey: ${JSON.stringify(masterKey)}, image: ${JSON.stringify(`${IMAGE_NAME}:${packageVersion()}`)}, host: systemRuntimeHost(process.env), stateDirectory: ${JSON.stringify(root)} });`,
       `const { port2 } = new MessageChannel();`,
       `driver.launch({ instance: ${JSON.stringify(slot)}, entries: [{ project_id: ${JSON.stringify(PROJECT)}, resource_identity: ${JSON.stringify(RESOURCE)}, client_id: ${JSON.stringify(entry.client_id)}, state: ${JSON.stringify(entry.state)}, client_secret: ${JSON.stringify(entry.client_secret)}, channel: port2 }], root: ${JSON.stringify(root)}, output: createWriteStream(${JSON.stringify(join(root, "stderr.log"))}), environment: process.env });`,
       `setInterval(() => {}, 1000);`,
@@ -564,5 +566,99 @@ test(
     assert.deepEqual(await containerNames(runtime, `name=${own}`), []);
     assert.deepEqual(await containerNames(runtime, `name=${other}`), [other]);
     t.diagnostic("criterion 6: prepare removed the own container only");
+  },
+);
+
+const SESSION_FILE = "execution/execution_live/live.jsonl";
+const SESSION_LINE = '{"type":"message","id":"live"}';
+
+test(
+  "a container slot writes its sessions into the host session directory that the server user owns and reads after the stop",
+  { skip: SKIP, timeout: LIVE_TIMEOUT_MS },
+  async (t) => {
+    const f = await containerPool(t);
+    await f.setCount(1);
+    f.fixture.worker.startPool();
+    await waitUntil(
+      f.instances,
+      (items) => items.length === ONE_ITEM,
+      t.signal,
+    );
+    const name = slotName(f.containerInstance[0]!);
+    await shell(
+      f.runtime,
+      name,
+      `mkdir -p ${SESSION_MOUNT}/execution/execution_live && printf '%s\\n' '${SESSION_LINE}' > ${SESSION_MOUNT}/${SESSION_FILE}`,
+    );
+    const hostFile = join(
+      f.stateDirectory,
+      "workers",
+      f.containerInstance[0]!,
+      "sessions",
+      SESSION_FILE,
+    );
+    await f.fixture.workerPool.stop();
+    assert.equal(readFileSync(hostFile, "utf8").trim(), SESSION_LINE);
+    const owner = statSync(hostFile).uid;
+    t.diagnostic(
+      `session file owner ${owner}, server uid ${process.getuid?.()}`,
+    );
+    const facts = await f.fixture.containerDriver.facts();
+    if (facts?.rootless) assert.equal(owner, process.getuid?.());
+  },
+);
+
+test(
+  "the full-map migration moves the sessions of an earlier engine volume and the workspace stays writable",
+  { skip: SKIP, timeout: LIVE_TIMEOUT_MS },
+  async (t) => {
+    const f = await containerPool(t);
+    const instanceName = f.containerInstance[0]!;
+    const name = slotName(instanceName);
+    const created = await runtimeCall(f.runtime, [
+      "volume",
+      "create",
+      "--label",
+      `${OWNER_LABEL}=${f.owner}`,
+      name,
+    ]);
+    assert.equal(created.code, SUCCESS_CODE, created.stderr);
+    const seeded = await runtimeCall(f.runtime, [
+      "run",
+      "--rm",
+      "--user",
+      "0:0",
+      "--volume",
+      `${name}:${SLOT_HOME}`,
+      "--entrypoint",
+      "/bin/sh",
+      `${IMAGE_NAME}:${packageVersion()}`,
+      "-c",
+      `mkdir -p ${SESSION_MOUNT}/execution/execution_live && printf '%s\\n' '${SESSION_LINE}' > ${SESSION_MOUNT}/${SESSION_FILE} && chown -R ${CONTAINER_UID}:${CONTAINER_UID} ${SLOT_HOME}`,
+    ]);
+    assert.equal(seeded.code, SUCCESS_CODE, seeded.stderr);
+    await f.setCount(1);
+    f.fixture.worker.startPool();
+    await waitUntil(
+      f.instances,
+      (items) => items.length === ONE_ITEM,
+      t.signal,
+    );
+    const hostFile = join(
+      f.stateDirectory,
+      "workers",
+      instanceName,
+      "sessions",
+      SESSION_FILE,
+    );
+    assert.equal(readFileSync(hostFile, "utf8").trim(), SESSION_LINE);
+    assert.equal(
+      await shell(
+        f.runtime,
+        name,
+        `touch ${SLOT_HOME}/workspace_probe && stat -c %u ${SLOT_HOME}/workspace_probe`,
+      ),
+      String(CONTAINER_UID),
+    );
   },
 );

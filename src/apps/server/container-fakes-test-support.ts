@@ -8,17 +8,21 @@ import { ENVIRONMENT_IMAGE_PREFIX } from "../../project/environment-state.ts";
 import { RepositoryFileState } from "../../repository/contract.ts";
 import { ContainerRuntime } from "../../worker/contract.ts";
 import {
+  ID_MAP_LABEL,
   type RuntimeAnswer,
   type RuntimeHost,
   SUCCESS_CODE,
 } from "./container-runtime.ts";
+import type { ProofContainers } from "./environment-proof.ts";
 
 const SERVER_UID = 1000;
 const ABSENT_CODE = 1;
 const FORMAT_OPTION = "--format";
-const Verb = { Info: "info", Image: "image" } as const;
+const Verb = { Info: "info", Image: "image", Volume: "volume" } as const;
 const Subject = { Inspect: "inspect" } as const;
 export const FAKE_COMMIT = "a".repeat(40);
+const VOLUME_CREATED_AT = "2026-11-04T00:00:00Z";
+const [ID_MAP_KEY = "", ID_MAP_VALUE = ""] = ID_MAP_LABEL.split("=");
 const IMAGE_SETTINGS = JSON.stringify([{ Config: { Env: [], Labels: null } }]);
 const INFO_ANSWER: RuntimeAnswer = {
   code: SUCCESS_CODE,
@@ -41,6 +45,19 @@ const INFO_ANSWER: RuntimeAnswer = {
 function answerOf(args: readonly string[]): RuntimeAnswer {
   const [verb, subject] = args;
   if (verb === Verb.Info) return INFO_ANSWER;
+  if (verb === Verb.Volume && subject === Subject.Inspect)
+    return {
+      code: SUCCESS_CODE,
+      stdout: JSON.stringify(
+        args.slice(2).map((name) => ({
+          Name: name,
+          CreatedAt: VOLUME_CREATED_AT,
+          Mountpoint: `/volumes/${name}/_data`,
+          Labels: { [ID_MAP_KEY]: ID_MAP_VALUE },
+        })),
+      ),
+      stderr: "",
+    };
   const reference = args.at(-1)!;
   if (
     verb === Verb.Image &&
@@ -63,6 +80,12 @@ function answerOf(args: readonly string[]): RuntimeAnswer {
     };
   return { code: SUCCESS_CODE, stdout: "", stderr: "" };
 }
+
+export const plainContainers: ProofContainers = {
+  runtimeFacts: () => Promise.resolve(null),
+  shared: (run) => run(),
+  prepareCacheVolume: () => Promise.resolve(),
+};
 
 export function fakeContainerHost(t: TestContext) {
   const directory = temporary(t);

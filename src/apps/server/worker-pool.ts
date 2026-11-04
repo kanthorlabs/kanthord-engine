@@ -22,6 +22,7 @@ import {
   sessionRootOf,
 } from "../../worker/unit/session-store.ts";
 import { SlotControl } from "../worker/thread-data.ts";
+import { CONTAINER_SESSIONS_DIRECTORY } from "./container-runtime.ts";
 import type { SlotDriver, SlotEntry, SlotInstance } from "./slot-driver.ts";
 import { threadEnvironment } from "./thread-driver.ts";
 
@@ -86,9 +87,15 @@ export class WorkerPool implements PoolHost {
     read: SessionRead,
     signal: AbortSignal,
   ): Promise<SessionReadResult> {
+    const slotRoot = join(this.workersDirectory(), instance.name);
+    if (instance.placement === PoolPlacement.Container)
+      return readSessionFileEntry(
+        join(slotRoot, CONTAINER_SESSIONS_DIRECTORY),
+        read,
+        signal,
+      );
     if (instance.placement !== PoolPlacement.Server)
       throw new Error("worker pool: no session root for the placement");
-    const slotRoot = join(this.workersDirectory(), instance.name);
     return readSessionFileEntry(
       sessionRootOf(directories(threadEnvironment({}, slotRoot)).state),
       read,

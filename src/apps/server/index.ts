@@ -315,22 +315,11 @@ export function composeServices(options: {
   const containerImage = `${options.config.worker.container_image}:${packageVersion()}`;
   const containerHost =
     options.containerRuntimeHost ?? systemRuntimeHost(process.env);
-  const environmentImages = new EnvironmentImages({
-    host: containerHost,
-    owner: containerOwner(options.config.master_key),
-    kanthordImage: containerImage,
-    version: packageVersion(),
-    stateDirectory: options.stateDirectory,
-    devcontainerCli: options.environmentDevcontainerCli,
-    buildTimeoutMs: options.config.project.environment_build_timeout_ms,
-    environmentMemoryMb: options.config.project.environment_memory_mb,
-    exportRepository: (bindingId, commit, directory, context) =>
-      project.exportRepository(bindingId, commit, directory, context),
-  });
   const containerDriver = new ContainerDriver({
     masterKey: options.config.master_key,
     image: containerImage,
     host: containerHost,
+    stateDirectory: options.stateDirectory,
     imageFor: (_runtime, entries, signal) => {
       const first = entries.at(0);
       return first
@@ -347,6 +336,22 @@ export function composeServices(options: {
           )
         : null;
     },
+  });
+  const environmentImages = new EnvironmentImages({
+    host: containerHost,
+    owner: containerOwner(options.config.master_key),
+    kanthordImage: containerImage,
+    version: packageVersion(),
+    stateDirectory: options.stateDirectory,
+    devcontainerCli: options.environmentDevcontainerCli,
+    buildTimeoutMs: options.config.project.environment_build_timeout_ms,
+    environmentMemoryMb: options.config.project.environment_memory_mb,
+    exportRepository: (bindingId, commit, directory, context) =>
+      project.exportRepository(bindingId, commit, directory, context),
+    runtimeFacts: () => containerDriver.facts(),
+    shared: (run) => containerDriver.shared(run),
+    prepareCacheVolume: (runtime, name, image, signal) =>
+      containerDriver.prepareCacheVolume(runtime, name, image, signal),
   });
   const hostProofs = new HostProofs({
     stateDirectory: options.stateDirectory,

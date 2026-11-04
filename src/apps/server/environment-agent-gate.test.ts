@@ -61,6 +61,7 @@ import {
 import { humanCaller } from "./test-support.ts";
 import { join } from "node:path";
 
+const OWNER_CHANGE_CAPABILITY = "--cap-add=CHOWN";
 const TEST_TIMEOUT_MS = 120000;
 const SETTLE_WAIT_MS = 500;
 const CONTAINER_IMAGE = "kanthord-test";
@@ -462,7 +463,11 @@ test(
     await client.claimed();
 
     const probed = podman.calls.filter((call) => call[0] === RUN_VERB);
-    const probe = probed.find((call) => call.includes("--network=none"));
+    const probe = probed.find(
+      (call) =>
+        call.includes("--network=none") &&
+        !call.includes(OWNER_CHANGE_CAPABILITY),
+    );
     assert.ok(probe);
     assert.ok(probe.includes("--read-only"));
     assert.equal(probe[probe.indexOf("--pids-limit") + 1], PROBE_PIDS_LIMIT);

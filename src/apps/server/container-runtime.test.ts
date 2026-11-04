@@ -9,24 +9,34 @@ import {
 } from "../../worker/contract.ts";
 import {
   boundedDetail,
+  cacheOwnerArguments,
   cacheVolumeArguments,
   cacheVolumeName,
   containerOwner,
   containerRemovalFailure,
   detectRuntime,
+  IdMap,
+  idMapOf,
   infoArguments,
   inspectContainerArguments,
   inspectVolumeArguments,
   killArguments,
+  migrationArguments,
   ownedArguments,
   ownedCacheVolumeArguments,
   parseCacheVolumes,
+  parseVolume,
+  PODMAN_AUTO_UIDMAPPING_MIN_VERSION,
   removeArguments,
   runArguments,
   type RuntimeAnswer,
+  type RuntimeFacts,
   type RuntimeHost,
   slotInstanceName,
   SUCCESS_CODE,
+  unshareMigrationArguments,
+  unshareOwnerArguments,
+  versionBelow,
   volumeArguments,
 } from "./container-runtime.ts";
 
@@ -34,6 +44,12 @@ const INSTANCE_NAME = "coder-1";
 const OWNER = "0123456789ABCDEFGHJKMNPQRS";
 const IMAGE = "localhost/kanthord-dev:28.0.1";
 const NAME_OF_SLOT = `kanthord_slot_${INSTANCE_NAME}`;
+const SESSION_DIRECTORY = `/state/workers/${INSTANCE_NAME}/sessions`;
+const SLOT_STATE = {
+  sessionDirectory: SESSION_DIRECTORY,
+  rootless: false,
+  selinux: false,
+};
 const SECRET = "slot_client_secret_value";
 const SERVER_USER = "kanthord";
 const SERVER_UID = 1000;
@@ -42,6 +58,8 @@ const DETAIL_LIMIT_BYTES = 200;
 const ENV_OPTION = "--env";
 const FIRST_LINE = "first line";
 const SUCCESS = 0;
+const ROOTLESS_DOCKER_DETAIL =
+  "rootless Docker cannot map the container uid 10001 to the server user. Use rootless Podman or a rootful runtime.";
 const FAILURE = 1;
 const RUNTIME_ERROR = 125;
 const PODMAN_STOPPED =
@@ -84,7 +102,7 @@ const GOLDEN_RUN = [
   "--label",
   `io.kanthord.instance=${INSTANCE_NAME}`,
   "--user",
-  "10001",
+  "10001:10001",
   "--sig-proxy=false",
   "--log-driver",
   "none",
@@ -98,6 +116,8 @@ const GOLDEN_RUN = [
   "/tmp:rw,nosuid,nodev,size=64m",
   "--volume",
   `kanthord_slot_${INSTANCE_NAME}:/var/lib/kanthord`,
+  "--volume",
+  `${SESSION_DIRECTORY}:/var/lib/kanthord/state/kanthord/pi/sessions`,
   "--workdir",
   "/var/lib/kanthord",
   "--env",
@@ -170,14 +190,17 @@ function answer(info: unknown, code = SUCCESS, stderr = ""): RuntimeAnswer {
 function podmanInfo(
   rootless: boolean,
   uidmap: Array<{ container_id: number; host_id: number; size: number }>,
+  version = "5.4.2",
+  extra: { selinuxEnabled?: boolean; serviceIsRemote?: boolean } = {},
 ) {
   return {
     host: {
       os: "linux",
-      security: { rootless },
+      security: { rootless, selinuxEnabled: extra.selinuxEnabled ?? false },
       idMappings: { uidmap, gidmap: uidmap },
+      serviceIsRemote: extra.serviceIsRemote ?? false,
     },
-    version: { Version: "5.4.2" },
+    version: { Version: version },
   };
 }
 
@@ -218,6 +241,7 @@ for (const runtime of Object.values(ContainerRuntime))
       owner: OWNER,
       environment: HOST_ENVIRONMENT,
       cacheVolume: null,
+      ...SLOT_STATE,
     });
     assert.deepEqual([runtime, ...args], [runtime, ...GOLDEN_RUN]);
     const text = args.join("\n");
@@ -251,6 +275,7 @@ test("the run command forwards only the env names that the server sets", () => {
     owner: OWNER,
     environment: { TZ: "UTC" },
     cacheVolume: null,
+    ...SLOT_STATE,
   });
   const forwarded = args.filter(
     (arg, index) => args[index - 1] === ENV_OPTION && !arg.includes("="),
@@ -296,6 +321,8 @@ test("the runtime commands of the driver hold their documented argv", () => {
     `io.kanthord.owner=${OWNER}`,
     "--label",
     `io.kanthord.instance=${INSTANCE_NAME}`,
+    "--label",
+    "io.kanthord.id_map=auto",
     `kanthord_slot_${INSTANCE_NAME}`,
   ]);
 });
@@ -326,7 +353,7 @@ test("a server in a container answers server_in_container before any runtime che
       answers: { podman: answer(podmanInfo(true, ROOTLESS_MAP)) },
     });
     assert.deepEqual(
-      await detectRuntime(host),
+      (await detectRuntime(host)).status,
       expected(PlacementIssue.ServerInContainer, null),
     );
     assert.deepEqual(calls, []);
@@ -336,7 +363,7 @@ test("a server in a container answers server_in_container before any runtime che
 test("a host with no runtime on the PATH answers runtime_absent", async () => {
   const { host } = fakeHost({});
   assert.deepEqual(
-    await detectRuntime(host),
+    (await detectRuntime(host)).status,
     expected(PlacementIssue.RuntimeAbsent, null),
   );
 });
@@ -349,7 +376,7 @@ test("rootless Podman answers available with a 10 s info check", async () => {
     },
   });
   assert.deepEqual(
-    await detectRuntime(host),
+    (await detectRuntime(host)).status,
     expected(null, ContainerRuntime.Podman),
   );
   assert.deepEqual(calls, [
@@ -369,7 +396,7 @@ test("a stopped Podman machine answers runtime_failed with the first stderr line
     },
   });
   assert.deepEqual(
-    await detectRuntime(host),
+    (await detectRuntime(host)).status,
     expected(PlacementIssue.RuntimeFailed, null, boundedDetail(PODMAN_STOPPED)),
   );
 });
@@ -386,7 +413,7 @@ test("the subordinate uid range must cover the container uid 10001", async () =>
     },
   });
   assert.deepEqual(
-    await detectRuntime(exact.host),
+    (await detectRuntime(exact.host)).status,
     expected(null, ContainerRuntime.Podman),
   );
   const short = fakeHost({
@@ -400,11 +427,11 @@ test("the subordinate uid range must cover the container uid 10001", async () =>
     },
   });
   assert.deepEqual(
-    await detectRuntime(short.host),
+    (await detectRuntime(short.host)).status,
     expected(
       PlacementIssue.RuntimeFailed,
       ContainerRuntime.Podman,
-      `the subordinate uid range of ${SERVER_USER} does not cover the container uid 10001`,
+      `the subordinate uid range of ${SERVER_USER} does not cover the container uid 10001. Add a subordinate uid range of at least 10001 ids for ${SERVER_USER}.`,
     ),
   );
 });
@@ -414,7 +441,7 @@ test("rootful Podman on Linux answers runtime_rootful for a non-root server", as
     answers: { podman: answer(podmanInfo(false, [])) },
   });
   assert.deepEqual(
-    await detectRuntime(host),
+    (await detectRuntime(host)).status,
     expected(PlacementIssue.RuntimeRootful, ContainerRuntime.Podman),
   );
 });
@@ -428,13 +455,13 @@ test("Docker Desktop answers available on every host", async () => {
       },
     });
     assert.deepEqual(
-      await detectRuntime(host),
+      (await detectRuntime(host)).status,
       expected(null, ContainerRuntime.Docker),
     );
   }
 });
 
-test("rootless Docker answers available", async () => {
+test("rootless Docker on Linux answers runtime_failed with the detail of its action", async () => {
   const { host } = fakeHost({
     answers: {
       docker: answer(
@@ -444,16 +471,20 @@ test("rootless Docker answers available", async () => {
       ),
     },
   });
-  assert.deepEqual(
-    await detectRuntime(host),
-    expected(null, ContainerRuntime.Docker),
-  );
+  assert.deepEqual(await detectRuntime(host), {
+    status: expected(
+      PlacementIssue.RuntimeFailed,
+      ContainerRuntime.Docker,
+      ROOTLESS_DOCKER_DETAIL,
+    ),
+    facts: null,
+  });
 });
 
 test("rootful Docker on Linux answers runtime_rootful only for a non-root server", async () => {
   const rootful = fakeHost({ answers: { docker: answer(dockerInfo()) } });
   assert.deepEqual(
-    await detectRuntime(rootful.host),
+    (await detectRuntime(rootful.host)).status,
     expected(PlacementIssue.RuntimeRootful, ContainerRuntime.Docker),
   );
   const root = fakeHost({
@@ -461,7 +492,7 @@ test("rootful Docker on Linux answers runtime_rootful only for a non-root server
     answers: { docker: answer(dockerInfo()) },
   });
   assert.deepEqual(
-    await detectRuntime(root.host),
+    (await detectRuntime(root.host)).status,
     expected(null, ContainerRuntime.Docker),
   );
 });
@@ -476,7 +507,7 @@ test("a stopped Docker daemon answers runtime_failed with its server error", asy
     },
   });
   assert.deepEqual(
-    await detectRuntime(host),
+    (await detectRuntime(host)).status,
     expected(PlacementIssue.RuntimeFailed, null, DOCKER_STOPPED),
   );
 });
@@ -488,11 +519,11 @@ test("a Docker client below version 23 answers runtime_failed with its version",
     },
   });
   assert.deepEqual(
-    await detectRuntime(host),
+    (await detectRuntime(host)).status,
     expected(
       PlacementIssue.RuntimeFailed,
       null,
-      "docker client 20.10.24 is below 23",
+      "docker client 20.10.24 is below 23. Upgrade the Docker client to 23 or later.",
     ),
   );
 });
@@ -502,11 +533,11 @@ test("the podman-docker shim counts as a failed Docker answer", async () => {
     answers: { docker: answer(podmanInfo(true, ROOTLESS_MAP)) },
   });
   assert.deepEqual(
-    await detectRuntime(shim.host),
+    (await detectRuntime(shim.host)).status,
     expected(
       PlacementIssue.RuntimeFailed,
       null,
-      "docker answers no server version",
+      "docker answers no server version. Remove the podman-docker shim, or point docker at a Docker Engine.",
     ),
   );
   const stopped = fakeHost({
@@ -517,7 +548,7 @@ test("the podman-docker shim counts as a failed Docker answer", async () => {
     },
   });
   assert.deepEqual(
-    await detectRuntime(stopped.host),
+    (await detectRuntime(stopped.host)).status,
     expected(PlacementIssue.RuntimeFailed, null, boundedDetail(PODMAN_STOPPED)),
   );
 });
@@ -530,14 +561,14 @@ test("Docker answers when Podman fails, and the first failure names the detail o
     },
   });
   assert.deepEqual(
-    await detectRuntime(fallback.host),
+    (await detectRuntime(fallback.host)).status,
     expected(null, ContainerRuntime.Docker),
   );
   const silent = fakeHost({
     answers: { podman: answer(null, FAILURE) },
   });
   assert.deepEqual(
-    await detectRuntime(silent.host),
+    (await detectRuntime(silent.host)).status,
     expected(PlacementIssue.RuntimeFailed, null, "podman info exits 1"),
   );
 });
@@ -546,7 +577,7 @@ const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const RESOURCE = "repository:github:acme/app";
 const CACHE_NAME = /^kanthord_cache_[0-9a-f]{24}$/;
 const VOLUME_OPTION = "--volume";
-const SLOT_VOLUMES = 1;
+const SLOT_VOLUMES = 2;
 const NETAVARK_ERROR =
   'Error: netavark (exit code 1): nftables error: "nft" did not return successfully while applying ruleset';
 const REMOVE_REFUSED = 125;
@@ -568,6 +599,7 @@ test("the run command mounts the cache volume after the slot volume and only whe
     instanceName: INSTANCE_NAME,
     owner: OWNER,
     environment: {},
+    ...SLOT_STATE,
   };
   const mounted = runArguments({ ...base, cacheVolume: "kanthord_cache_abc" });
   const volumes = mounted.flatMap((arg, index) =>
@@ -575,6 +607,7 @@ test("the run command mounts the cache volume after the slot volume and only whe
   );
   assert.deepEqual(volumes, [
     `kanthord_slot_${INSTANCE_NAME}:/var/lib/kanthord`,
+    `${SESSION_DIRECTORY}:/var/lib/kanthord/state/kanthord/pi/sessions`,
     `kanthord_cache_abc:${CACHE_MOUNT}`,
   ]);
   const bare = runArguments({ ...base, cacheVolume: null });
@@ -594,6 +627,8 @@ test("cacheVolumeArguments creates the named volume with the owner and group lab
     `io.kanthord.cache_project=${PROJECT_ID}`,
     "--label",
     `io.kanthord.cache_resource=${RESOURCE}`,
+    "--label",
+    "io.kanthord.id_map=auto",
     cacheVolumeName(OWNER, PROJECT_ID, RESOURCE),
   ]);
 });
@@ -726,4 +761,367 @@ test("containerRemovalFailure answers the refused removal when the inspection fa
     { code: INSPECT_ABSENT, stdout: "", stderr: "Error: cannot connect" },
   ]);
   assert.deepEqual(await containerRemovalFailure(call, NAME_OF_SLOT), refused);
+});
+
+const AUTO_OPTION = "--userns=auto:uidmapping=10001:0:1,gidmapping=10001:0:1";
+const KEEP_ID_OPTION = "--userns=keep-id:uid=10001,gid=10001";
+const SLOT_USER = "10001:10001";
+const MIGRATE_DIRECTORY = `/state/workers/${INSTANCE_NAME}/sessions.partial`;
+const LINUX_FACTS: RuntimeFacts = {
+  rootless: true,
+  selinux: false,
+  platform: "linux",
+  dockerDesktop: false,
+  remote: false,
+};
+const MACOS_FACTS: RuntimeFacts = {
+  ...LINUX_FACTS,
+  platform: "darwin",
+  remote: true,
+};
+const HOST_DIRECTORY_SCRIPT =
+  'src=/var/lib/kanthord/state/kanthord/pi/sessions; if [ -d "$src" ]; then cp -a "$src/." /migrate/ && rm -rf "$src"; fi; mkdir -p "$src" && chown -R 10001:10001 /var/lib/kanthord /migrate';
+const FILE_SHARE_SCRIPT =
+  'src=/var/lib/kanthord/state/kanthord/pi/sessions; if [ -d "$src" ]; then cp -R --preserve=mode,timestamps "$src/." /migrate/ && rm -rf "$src"; fi; mkdir -p "$src" && chown -R 10001:10001 /var/lib/kanthord';
+const UNSHARE_SCRIPT =
+  'src="$1/state/kanthord/pi/sessions"; if [ -d "$src" ]; then cp -a "$src/." "$2/" && rm -rf "$src"; fi; mkdir -p "$src" && chown -R 0:0 "$1" "$2"';
+
+function userNamespaceOf(args: readonly string[]): string[] {
+  return args.filter((arg) => arg.startsWith("--userns"));
+}
+
+function migrationOf(
+  runtime: ContainerRuntime,
+  facts: RuntimeFacts,
+  labeled: boolean,
+) {
+  const idMap = idMapOf(runtime, facts, labeled);
+  assert.notEqual(idMap, IdMap.Unshare);
+  return migrationArguments({
+    image: IMAGE,
+    instanceName: INSTANCE_NAME,
+    owner: OWNER,
+    mount: MIGRATE_DIRECTORY,
+    idMap: idMap as Exclude<IdMap, typeof IdMap.Unshare>,
+    facts,
+  });
+}
+
+test("the run command mounts the session directory with :Z only on an SELinux host", () => {
+  const base = {
+    image: IMAGE,
+    instanceName: INSTANCE_NAME,
+    owner: OWNER,
+    environment: {},
+    cacheVolume: null,
+    ...SLOT_STATE,
+  };
+  const plain = runArguments(base);
+  assert.ok(
+    plain.includes(
+      `${SESSION_DIRECTORY}:/var/lib/kanthord/state/kanthord/pi/sessions`,
+    ),
+  );
+  const labeled = runArguments({ ...base, selinux: true });
+  assert.ok(
+    labeled.includes(
+      `${SESSION_DIRECTORY}:/var/lib/kanthord/state/kanthord/pi/sessions:Z`,
+    ),
+  );
+});
+
+test("the run command takes the auto option only on rootless Podman, with no keep-id and no size", () => {
+  const base = {
+    image: IMAGE,
+    instanceName: INSTANCE_NAME,
+    owner: OWNER,
+    environment: {},
+    cacheVolume: null,
+    ...SLOT_STATE,
+  };
+  const rootless = runArguments({
+    ...base,
+    rootless:
+      idMapOf(ContainerRuntime.Podman, LINUX_FACTS, true) === IdMap.Auto,
+  });
+  assert.deepEqual(userNamespaceOf(rootless), [AUTO_OPTION]);
+  assert.ok(!rootless.join(" ").includes("keep-id"));
+  assert.ok(!userNamespaceOf(rootless).join(" ").includes("size="));
+  assert.equal(rootless[rootless.indexOf("--user") + 1], SLOT_USER);
+  assert.equal(idMapOf(ContainerRuntime.Docker, LINUX_FACTS, true), IdMap.None);
+  assert.deepEqual(userNamespaceOf(runArguments(base)), []);
+});
+
+test("idMapOf picks the auto option for a labeled volume and a full map for an earlier volume", () => {
+  assert.equal(idMapOf(ContainerRuntime.Podman, LINUX_FACTS, true), IdMap.Auto);
+  assert.equal(
+    idMapOf(ContainerRuntime.Podman, LINUX_FACTS, false),
+    IdMap.Unshare,
+  );
+  assert.equal(
+    idMapOf(ContainerRuntime.Podman, { ...LINUX_FACTS, remote: true }, false),
+    IdMap.KeepId,
+  );
+  assert.equal(
+    idMapOf(ContainerRuntime.Podman, MACOS_FACTS, false),
+    IdMap.KeepId,
+  );
+  assert.equal(
+    idMapOf(
+      ContainerRuntime.Podman,
+      { ...LINUX_FACTS, rootless: false },
+      false,
+    ),
+    IdMap.None,
+  );
+});
+
+test("migrationArguments on rootless Podman on macOS takes keep-id with no size for a volume without the label", () => {
+  const args = migrationOf(ContainerRuntime.Podman, MACOS_FACTS, false);
+  assert.deepEqual(userNamespaceOf(args), [KEEP_ID_OPTION]);
+  assert.ok(!args.join(" ").includes("size="));
+});
+
+test("migrationArguments on rootless Podman on macOS takes the auto option for a labeled volume", () => {
+  const args = migrationOf(ContainerRuntime.Podman, MACOS_FACTS, true);
+  assert.deepEqual(userNamespaceOf(args), [AUTO_OPTION]);
+  assert.ok(!args.join(" ").includes("keep-id"));
+  assert.equal(args.at(-1), FILE_SHARE_SCRIPT);
+});
+
+test("migrationArguments on rootless Podman on Linux takes the auto option and the host directory variant for a labeled volume", () => {
+  const args = migrationOf(ContainerRuntime.Podman, LINUX_FACTS, true);
+  assert.deepEqual(userNamespaceOf(args), [AUTO_OPTION]);
+  assert.equal(args.at(-1), HOST_DIRECTORY_SCRIPT);
+});
+
+test("migrationArguments holds the documented argv of the host directory variant", () => {
+  const rootful = { ...LINUX_FACTS, rootless: false };
+  assert.deepEqual(migrationOf(ContainerRuntime.Podman, rootful, true), [
+    "run",
+    "--rm",
+    "--pull=never",
+    "--network=none",
+    "--name",
+    `kanthord_migrate_${INSTANCE_NAME}`,
+    "--label",
+    `io.kanthord.owner=${OWNER}`,
+    "--user",
+    "0:0",
+    "--cap-drop=ALL",
+    "--cap-add=CHOWN",
+    "--cap-add=DAC_OVERRIDE",
+    "--cap-add=FOWNER",
+    "--security-opt=no-new-privileges",
+    "--volume",
+    `kanthord_slot_${INSTANCE_NAME}:/var/lib/kanthord`,
+    "--volume",
+    `${MIGRATE_DIRECTORY}:/migrate`,
+    "--entrypoint",
+    "/bin/sh",
+    IMAGE,
+    "-c",
+    HOST_DIRECTORY_SCRIPT,
+  ]);
+  assert.deepEqual(
+    userNamespaceOf(migrationOf(ContainerRuntime.Docker, rootful, false)),
+    [],
+  );
+});
+
+test("migrationArguments on macOS runs the file share variant also on rootless Podman, and Docker Desktop on Linux too", () => {
+  for (const [runtime, facts] of [
+    [ContainerRuntime.Podman, MACOS_FACTS],
+    [ContainerRuntime.Podman, { ...MACOS_FACTS, rootless: false }],
+    [
+      ContainerRuntime.Docker,
+      { ...LINUX_FACTS, rootless: false, dockerDesktop: true },
+    ],
+  ] as const) {
+    const args = migrationOf(runtime, facts, true);
+    assert.equal(args.at(-1), FILE_SHARE_SCRIPT);
+    assert.ok(!args.at(-1)!.includes("/var/lib/kanthord /migrate"));
+  }
+});
+
+test("migrationArguments mounts /migrate with :Z only on an SELinux host", () => {
+  const plain = migrationOf(ContainerRuntime.Podman, LINUX_FACTS, true);
+  assert.ok(plain.includes(`${MIGRATE_DIRECTORY}:/migrate`));
+  const labeled = migrationOf(
+    ContainerRuntime.Podman,
+    { ...LINUX_FACTS, selinux: true },
+    true,
+  );
+  assert.ok(labeled.includes(`${MIGRATE_DIRECTORY}:/migrate:Z`));
+});
+
+test("unshareMigrationArguments passes both paths as arguments, not in the script", () => {
+  const mountPoint =
+    "/home/kanthord/.local/share/containers/storage/volumes/kanthord_slot_coder-1/_data";
+  assert.deepEqual(unshareMigrationArguments(mountPoint, MIGRATE_DIRECTORY), [
+    "unshare",
+    "/bin/sh",
+    "-c",
+    UNSHARE_SCRIPT,
+    "sh",
+    mountPoint,
+    MIGRATE_DIRECTORY,
+  ]);
+  assert.ok(!UNSHARE_SCRIPT.includes(mountPoint));
+  assert.ok(!UNSHARE_SCRIPT.includes(MIGRATE_DIRECTORY));
+});
+
+test("unshareOwnerArguments changes the owner of the mount point to the server user", () => {
+  assert.deepEqual(unshareOwnerArguments("/volumes/cache/_data"), [
+    "unshare",
+    "chown",
+    "-R",
+    "0:0",
+    "/volumes/cache/_data",
+  ]);
+});
+
+test("cacheOwnerArguments runs the owner step once for a volume without the marker", () => {
+  for (const [idMap, option] of [
+    [IdMap.Auto, AUTO_OPTION],
+    [IdMap.KeepId, KEEP_ID_OPTION],
+  ] as const) {
+    const args = cacheOwnerArguments({
+      image: IMAGE,
+      owner: OWNER,
+      volume: "kanthord_cache_abc",
+      idMap,
+    });
+    assert.deepEqual(userNamespaceOf(args), [option]);
+    assert.ok(args.includes("--pull=never"));
+    assert.ok(args.includes(`kanthord_cache_abc:${CACHE_MOUNT}`));
+    assert.equal(
+      args.at(-1),
+      `[ -e ${CACHE_MOUNT}/.kanthord_owner ] || { chown -R 10001:10001 ${CACHE_MOUNT} && touch ${CACHE_MOUNT}/.kanthord_owner && chown 10001:10001 ${CACHE_MOUNT}/.kanthord_owner; }`,
+    );
+  }
+});
+
+test("parseVolume answers the creation time, the id map label and the mount point", () => {
+  assert.deepEqual(
+    parseVolume(
+      JSON.stringify([
+        {
+          CreatedAt: "2026-11-04T00:00:00Z",
+          Mountpoint: "/volumes/a/_data",
+          Labels: { "io.kanthord.id_map": "auto" },
+        },
+      ]),
+    ),
+    {
+      createdAt: "2026-11-04T00:00:00Z",
+      labeled: true,
+      mountPoint: "/volumes/a/_data",
+    },
+  );
+  assert.equal(
+    parseVolume(
+      JSON.stringify([
+        { CreatedAt: "2026-11-04T00:00:00Z", Mountpoint: "/m", Labels: null },
+      ]),
+    ).labeled,
+    false,
+  );
+  assert.throws(() => parseVolume("[]"));
+});
+
+test("detectRuntime answers the facts of an available runtime and no facts otherwise", async () => {
+  const podman = fakeHost({
+    answers: {
+      podman: answer(
+        podmanInfo(true, ROOTLESS_MAP, "5.4.2", {
+          selinuxEnabled: true,
+          serviceIsRemote: true,
+        }),
+      ),
+    },
+  });
+  assert.deepEqual(await detectRuntime(podman.host), {
+    status: expected(null, ContainerRuntime.Podman),
+    facts: {
+      rootless: true,
+      selinux: true,
+      platform: "linux",
+      dockerDesktop: false,
+      remote: true,
+    },
+  });
+  const desktop = fakeHost({
+    platform: "darwin",
+    answers: {
+      docker: answer(
+        dockerInfo({
+          OperatingSystem: "Docker Desktop",
+          SecurityOptions: ["name=seccomp,profile=builtin", "name=selinux"],
+        }),
+      ),
+    },
+  });
+  assert.deepEqual(await detectRuntime(desktop.host), {
+    status: expected(null, ContainerRuntime.Docker),
+    facts: {
+      rootless: false,
+      selinux: true,
+      platform: "darwin",
+      dockerDesktop: true,
+      remote: false,
+    },
+  });
+  const rootful = fakeHost({
+    answers: { podman: answer(podmanInfo(false, [])) },
+  });
+  assert.equal((await detectRuntime(rootful.host)).facts, null);
+});
+
+test("a rootless Podman below the auto uidmapping version answers runtime_failed with the version detail", async () => {
+  const { host } = fakeHost({
+    answers: { podman: answer(podmanInfo(true, ROOTLESS_MAP, "4.0.3")) },
+  });
+  assert.deepEqual(await detectRuntime(host), {
+    status: expected(
+      PlacementIssue.RuntimeFailed,
+      ContainerRuntime.Podman,
+      `podman 4.0.3 refuses --userns=auto:uidmapping=. Upgrade Podman to ${PODMAN_AUTO_UIDMAPPING_MIN_VERSION} or later.`,
+    ),
+    facts: null,
+  });
+});
+
+test("a rootful Podman below the auto uidmapping version with server uid 0 answers available", async () => {
+  const { host } = fakeHost({
+    uid: ROOT_UID,
+    answers: { podman: answer(podmanInfo(false, [], "4.0.3")) },
+  });
+  assert.deepEqual(
+    (await detectRuntime(host)).status,
+    expected(null, ContainerRuntime.Podman),
+  );
+});
+
+test("the fixture Podman version meets the auto uidmapping version", () => {
+  assert.equal(
+    versionBelow("5.4.2", PODMAN_AUTO_UIDMAPPING_MIN_VERSION),
+    false,
+  );
+  assert.equal(
+    versionBelow(
+      PODMAN_AUTO_UIDMAPPING_MIN_VERSION,
+      PODMAN_AUTO_UIDMAPPING_MIN_VERSION,
+    ),
+    false,
+  );
+  assert.equal(versionBelow("4.0.3", PODMAN_AUTO_UIDMAPPING_MIN_VERSION), true);
+  assert.equal(
+    versionBelow("5.0.0-dev", PODMAN_AUTO_UIDMAPPING_MIN_VERSION),
+    false,
+  );
+  assert.equal(
+    versionBelow("unknown", PODMAN_AUTO_UIDMAPPING_MIN_VERSION),
+    true,
+  );
 });

@@ -1,9 +1,18 @@
 import { type ChildProcessByStdio, spawn } from "node:child_process";
+import { lstatSync, mkdirSync, renameSync } from "node:fs";
+import { join } from "node:path";
 import { constants } from "node:os";
 import { performance } from "node:perf_hooks";
 import type { Readable, Writable } from "node:stream";
 import type { MessagePort } from "node:worker_threads";
 import { Diagnostic } from "../../kernel/errors.ts";
+import {
+  audit,
+  FileKind,
+  PRIVATE_DIRECTORY_MODE,
+  readPrivate,
+  writePrivate,
+} from "../../kernel/files.ts";
 import type { ContainerRuntime } from "../../worker/contract.ts";
 import {
   type PlacementStatus,
@@ -21,24 +30,40 @@ import {
 import type { SlotControl } from "../worker/thread-data.ts";
 import {
   absentVolume,
+  cacheOwnerArguments,
   cacheVolumeArguments,
   cacheVolumeName,
+  CONTAINER_SESSIONS_DIRECTORY,
   containerOwner,
   containerRemovalFailure,
   detectRuntime,
+  IdMap,
+  idMapOf,
+  inspectVolumeArguments,
   killArguments,
   linesOf,
+  migrateName,
+  migrationArguments,
+  NO_TIME_LIMIT_MS,
   ownedArguments,
   ownedVolumeArguments,
+  parseVolume,
   presentVolume,
   removeVolumeArguments,
   runArguments,
   RUNTIME_CHECK_TIMEOUT_MS,
+  type RuntimeAnswer,
+  type RuntimeCheck,
+  type RuntimeFacts,
   type RuntimeHost,
   slotInstanceName,
   slotName,
   SUCCESS_CODE,
+  unshareMarkerArguments,
+  unshareMigrationArguments,
+  unshareOwnerArguments,
   volumeArguments,
+  type VolumeState,
 } from "./container-runtime.ts";
 import type {
   SlotDriver,
@@ -56,11 +81,16 @@ const SIGNAL_CODE_BASE = 128;
 const RUNTIME_ERROR_CODE = 125;
 const NOT_EXECUTABLE_CODE = 126;
 const NOT_FOUND_CODE = 127;
+export const SESSION_VOLUME_MARKER = "sessions.volume";
+export const CACHE_OWNER_RECORD_SUFFIX = ".owner";
+const PARTIAL_SESSIONS_DIRECTORY = "sessions.partial";
+const VOLUMES_DIRECTORY = "volumes";
 
 export interface ContainerDriverOptions {
   readonly masterKey: string;
   readonly image: string;
   readonly host: RuntimeHost;
+  readonly stateDirectory: string;
   imageFor?(
     runtime: ContainerRuntime,
     entries: readonly PoolEntry[],
@@ -70,7 +100,7 @@ export interface ContainerDriverOptions {
 }
 
 interface StatusEntry {
-  readonly answer: Promise<PlacementStatus>;
+  readonly answer: Promise<RuntimeCheck>;
   settledAt: number | null;
 }
 
@@ -104,6 +134,18 @@ function exitError(code: number): Error | null {
       "container: the image command cannot run; stderr.log holds the runtime text",
     );
   return null;
+}
+
+function presentDirectory(path: string): boolean {
+  try {
+    return lstatSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function recorded(path: string): string | null {
+  return audit(path, FileKind.File, true) ? readPrivate(path) : null;
 }
 
 function frameEntries(entries: readonly SlotEntry[]): FrameEntry[] {
@@ -207,6 +249,10 @@ class ContainerInstance implements SlotInstance {
     this.runtime = runtime;
     await this.driver.prepare();
     await this.driver.removeContainer(runtime, this.name);
+    await this.driver.removeContainer(
+      runtime,
+      migrateName(this.launch.instance.name),
+    );
     await this.driver.createVolume(runtime, this.launch.instance.name);
     const image = await this.waitForImage(runtime);
     if (image === null) {
@@ -214,13 +260,52 @@ class ContainerInstance implements SlotInstance {
       return;
     }
     if (this.settled) return;
+    const facts = await this.driver.facts();
+    if (facts === null) throw unavailable(await this.driver.check());
+    await this.migrate(runtime, image, facts);
+    if (this.stopped()) return;
     const cacheVolume = await this.cacheVolumeFor(runtime, image);
-    if (this.settled) return;
-    if (this.waiting.signal.aborted) {
-      this.finish(SUCCESS_CODE, null);
-      return;
-    }
-    this.spawn(runtime, image, cacheVolume);
+    if (this.stopped()) return;
+    await this.driver.shared(() => {
+      if (this.stopped()) return Promise.resolve();
+      return this.spawn(runtime, image, cacheVolume, facts);
+    });
+  }
+
+  private stopped(): boolean {
+    if (this.settled) return true;
+    if (!this.waiting.signal.aborted) return false;
+    this.finish(SUCCESS_CODE, null);
+    return true;
+  }
+
+  private async migrate(
+    runtime: ContainerRuntime,
+    image: string,
+    facts: RuntimeFacts,
+  ): Promise<void> {
+    const { root } = this.launch;
+    const sessions = join(root, CONTAINER_SESSIONS_DIRECTORY);
+    const marker = join(root, SESSION_VOLUME_MARKER);
+    const present = presentDirectory(sessions);
+    const volume = await this.driver.inspectVolume(runtime, this.name);
+    if (present && recorded(marker) === volume.createdAt) return;
+    const mount = present ? sessions : join(root, PARTIAL_SESSIONS_DIRECTORY);
+    if (!present)
+      mkdirSync(mount, { mode: PRIVATE_DIRECTORY_MODE, recursive: true });
+    const answer = await this.driver.runMigration(runtime, {
+      image,
+      instanceName: this.launch.instance.name,
+      mount,
+      facts,
+      volume,
+      signal: this.waiting.signal,
+    });
+    if (this.waiting.signal.aborted) return;
+    if (answer.code !== SUCCESS_CODE)
+      throw commandFailure("session migration", answer.stderr);
+    writePrivate(marker, volume.createdAt, true);
+    if (!present) renameSync(mount, sessions);
   }
 
   private async cacheVolumeFor(
@@ -230,7 +315,18 @@ class ContainerInstance implements SlotInstance {
     const group = this.driver.cacheGroupOf(this.entries, image);
     const first = this.entries.at(0);
     if (group === null || !first) return null;
-    return this.driver.createCacheVolume(runtime, first.project_id, group);
+    const name = await this.driver.createCacheVolume(
+      runtime,
+      first.project_id,
+      group,
+    );
+    await this.driver.prepareCacheVolume(
+      runtime,
+      name,
+      image,
+      this.waiting.signal,
+    );
+    return name;
   }
 
   private waitForImage(runtime: ContainerRuntime): Promise<string | null> {
@@ -249,7 +345,9 @@ class ContainerInstance implements SlotInstance {
     runtime: ContainerRuntime,
     image: string,
     cacheVolume: string | null,
-  ): void {
+    facts: RuntimeFacts,
+  ): Promise<void> {
+    const started = Promise.withResolvers<void>();
     const client = spawn(
       runtime,
       runArguments({
@@ -258,6 +356,9 @@ class ContainerInstance implements SlotInstance {
         owner: this.driver.owner,
         environment: this.launch.environment,
         cacheVolume,
+        sessionDirectory: join(this.launch.root, CONTAINER_SESSIONS_DIRECTORY),
+        rootless: idMapOf(runtime, facts, true) === IdMap.Auto,
+        selinux: facts.selinux,
       }),
       {
         detached: true,
@@ -271,7 +372,7 @@ class ContainerInstance implements SlotInstance {
     client.stderr.pipe(this.launch.output, { end: false });
     const bridge = bridgePort(client.stdout, client.stdin, {
       frames: instanceFrameSchema,
-      onFrame: () => {},
+      onFrame: () => started.resolve(),
       onInvalid: (error) => {
         this.error = error;
         this.terminate();
@@ -294,15 +395,18 @@ class ContainerInstance implements SlotInstance {
       if (client.pid === undefined) {
         clearInterval(ping);
         bridge.close();
+        started.resolve();
         this.finish(FAILED_CODE, error);
       }
     });
     client.once("close", (code, signal) => {
       clearInterval(ping);
       bridge.close();
+      started.resolve();
       const exit = exitCode(code, signal);
       this.finish(exit, this.error ?? exitError(exit));
     });
+    return started.promise;
   }
 
   private finish(code: number, error: Error | null): void {
@@ -313,6 +417,57 @@ class ContainerInstance implements SlotInstance {
   }
 }
 
+interface Migration {
+  readonly image: string;
+  readonly instanceName: string;
+  readonly mount: string;
+  readonly facts: RuntimeFacts;
+  readonly volume: VolumeState;
+  readonly signal: AbortSignal;
+}
+
+class IdMapGate {
+  private sharedRuns = 0;
+  private exclusiveRun = false;
+  private exclusiveWaits = 0;
+  private waiters: Array<() => void> = [];
+
+  async shared<T>(run: () => Promise<T>): Promise<T> {
+    while (this.exclusiveRun || this.exclusiveWaits) await this.changed();
+    this.sharedRuns++;
+    try {
+      return await run();
+    } finally {
+      this.sharedRuns--;
+      this.wake();
+    }
+  }
+
+  async exclusive<T>(run: () => Promise<T>): Promise<T> {
+    this.exclusiveWaits++;
+    try {
+      while (this.exclusiveRun || this.sharedRuns) await this.changed();
+    } finally {
+      this.exclusiveWaits--;
+    }
+    this.exclusiveRun = true;
+    try {
+      return await run();
+    } finally {
+      this.exclusiveRun = false;
+      this.wake();
+    }
+  }
+
+  private changed(): Promise<void> {
+    return new Promise((resolve) => this.waiters.push(resolve));
+  }
+
+  private wake(): void {
+    for (const waiter of this.waiters.splice(0)) waiter();
+  }
+}
+
 export class ContainerDriver implements SlotDriver {
   readonly placement = PoolPlacement.Container;
   readonly image: string;
@@ -320,14 +475,17 @@ export class ContainerDriver implements SlotDriver {
   private readonly host: RuntimeHost;
   private readonly resolveImage: ContainerDriverOptions["imageFor"];
   private readonly resolveCacheGroup: ContainerDriverOptions["cacheGroupOf"];
+  private readonly stateDirectory: string;
   private latest: StatusEntry | null = null;
   private prepared: Promise<void> | null = null;
   private readonly images = new Map<string, string>();
+  private readonly gate = new IdMapGate();
 
   constructor(options: ContainerDriverOptions) {
     this.image = options.image;
     this.owner = containerOwner(options.masterKey);
     this.host = options.host;
+    this.stateDirectory = options.stateDirectory;
     this.resolveImage = options.imageFor;
     this.resolveCacheGroup = options.cacheGroupOf;
   }
@@ -359,6 +517,22 @@ export class ContainerDriver implements SlotDriver {
   }
 
   check(): Promise<PlacementStatus> {
+    return this.detected().then(({ status }) => status);
+  }
+
+  facts(): Promise<RuntimeFacts | null> {
+    return this.detected().then(({ facts }) => facts);
+  }
+
+  exclusive<T>(run: () => Promise<T>): Promise<T> {
+    return this.gate.exclusive(run);
+  }
+
+  shared<T>(run: () => Promise<T>): Promise<T> {
+    return this.gate.shared(run);
+  }
+
+  private detected(): Promise<RuntimeCheck> {
     const latest = this.latest;
     if (
       latest &&
@@ -438,6 +612,127 @@ export class ContainerDriver implements SlotDriver {
     if (!presentVolume(answer))
       throw commandFailure(`volume create ${name}`, answer.stderr);
     return name;
+  }
+
+  async inspectVolume(
+    runtime: ContainerRuntime,
+    name: string,
+  ): Promise<VolumeState> {
+    const answer = await this.command(runtime, inspectVolumeArguments([name]));
+    if (answer.code !== SUCCESS_CODE)
+      throw commandFailure(`volume inspect ${name}`, answer.stderr);
+    return parseVolume(answer.stdout);
+  }
+
+  runMigration(
+    runtime: ContainerRuntime,
+    migration: Migration,
+  ): Promise<RuntimeAnswer> {
+    const idMap = idMapOf(runtime, migration.facts, migration.volume.labeled);
+    if (idMap === IdMap.Unshare)
+      return this.unbounded(
+        runtime,
+        unshareMigrationArguments(migration.volume.mountPoint, migration.mount),
+        migration.signal,
+      );
+    const args = migrationArguments({
+      image: migration.image,
+      instanceName: migration.instanceName,
+      owner: this.owner,
+      mount: migration.mount,
+      idMap,
+      facts: migration.facts,
+    });
+    const run = () =>
+      this.unbounded(
+        runtime,
+        args,
+        migration.signal,
+        migrateName(migration.instanceName),
+      );
+    return idMap === IdMap.KeepId ? this.exclusive(run) : this.shared(run);
+  }
+
+  async prepareCacheVolume(
+    runtime: ContainerRuntime,
+    name: string,
+    image: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const facts = await this.facts();
+    if (facts === null || idMapOf(runtime, facts, true) !== IdMap.Auto) return;
+    const volume = await this.inspectVolume(runtime, name);
+    const record = join(
+      this.stateDirectory,
+      VOLUMES_DIRECTORY,
+      `${name}${CACHE_OWNER_RECORD_SUFFIX}`,
+    );
+    const idMap =
+      recorded(record) === volume.createdAt
+        ? IdMap.Auto
+        : idMapOf(runtime, facts, volume.labeled);
+    if (idMap === IdMap.Auto) {
+      await this.requireUnbounded(
+        runtime,
+        cacheOwnerArguments({ image, owner: this.owner, volume: name, idMap }),
+        signal,
+        this.shared.bind(this),
+      );
+      return;
+    }
+    const changed =
+      idMap === IdMap.Unshare
+        ? (await this.requireUnbounded(
+            runtime,
+            unshareOwnerArguments(volume.mountPoint),
+            signal,
+          )) &&
+          (await this.requireUnbounded(
+            runtime,
+            unshareMarkerArguments(volume.mountPoint),
+            signal,
+          ))
+        : await this.requireUnbounded(
+            runtime,
+            cacheOwnerArguments({
+              image,
+              owner: this.owner,
+              volume: name,
+              idMap: IdMap.KeepId,
+            }),
+            signal,
+            this.exclusive.bind(this),
+          );
+    if (changed) writePrivate(record, volume.createdAt, true);
+  }
+
+  private async requireUnbounded(
+    runtime: ContainerRuntime,
+    args: readonly string[],
+    signal: AbortSignal,
+    hold: <T>(run: () => Promise<T>) => Promise<T> = (run) => run(),
+  ): Promise<boolean> {
+    const answer = await hold(() => this.unbounded(runtime, args, signal));
+    if (signal.aborted) return false;
+    if (answer.code !== SUCCESS_CODE)
+      throw commandFailure("cache volume owner", answer.stderr);
+    return true;
+  }
+
+  private unbounded(
+    runtime: ContainerRuntime,
+    args: readonly string[],
+    signal: AbortSignal,
+    container?: string,
+  ): Promise<RuntimeAnswer> {
+    const kill = () => {
+      if (container !== undefined)
+        void this.command(runtime, killArguments(container));
+    };
+    signal.addEventListener("abort", kill, { once: true });
+    return this.host
+      .run(runtime, args, NO_TIME_LIMIT_MS, signal)
+      .finally(() => signal.removeEventListener("abort", kill));
   }
 
   async removeVolume(instanceName: string): Promise<void> {

@@ -15,6 +15,7 @@ import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { temporary } from "../../kernel/test-support.ts";
+import { plainContainers } from "./container-fakes-test-support.ts";
 import { ContainerRuntime } from "../../worker/contract.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import type { SlotEnvironment } from "../../project/contract.ts";
@@ -135,6 +136,7 @@ function images(
   const cli = join(directory, "cli.mjs");
   writeFileSync(cli, options.cli ?? FAILED_CLI);
   const built = new EnvironmentImages({
+    ...plainContainers,
     host,
     owner: OWNER,
     kanthordImage: KANTHORD_IMAGE,
@@ -891,6 +893,7 @@ function runtimeImages(
     },
   };
   const built = new EnvironmentImages({
+    ...plainContainers,
     host,
     owner: OWNER,
     kanthordImage: KANTHORD_IMAGE,
@@ -1374,6 +1377,7 @@ function cacheListing(
     },
   };
   const built = new EnvironmentImages({
+    ...plainContainers,
     host,
     owner: OWNER,
     kanthordImage: KANTHORD_IMAGE,

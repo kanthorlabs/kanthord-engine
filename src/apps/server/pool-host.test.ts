@@ -661,3 +661,47 @@ test("a session read of a pending server instance reads its slot root directly",
     [LIMIT_MESSAGE],
   );
 });
+
+test("a session read of a container instance reads its session directory directly while the container is stopped", async (t) => {
+  const f = fixture(t);
+  const boxed = f.instanceOf("boxed-1", PoolPlacement.Container);
+  const executionId = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  const sessionId = "0123456789abcdef";
+  const entry = { type: "message", id: "a1b2c3d4", text: "full" };
+  const directory = join(
+    f.stateDirectory,
+    "workers",
+    "boxed-1",
+    "sessions",
+    "execution",
+    executionId,
+  );
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, `2026-11-04T00-00-00-000Z_${sessionId}.jsonl`),
+    `${JSON.stringify(entry)}\n`,
+  );
+  const read = {
+    execution_id: executionId,
+    session_id: sessionId,
+    entry_id: entry.id,
+    entry_type: entry.type,
+  };
+  assert.equal(f.containerDriver.launches.length, NO_LAUNCH);
+  assert.deepEqual(
+    await f.pool.readSessionEntry(boxed, read, new AbortController().signal),
+    { outcome: SessionReadOutcome.Resolved, entry },
+  );
+});
+
+test("an archive of a container instance removes its session directory with the slot root", async (t) => {
+  const f = fixture(t);
+  const container = f.instanceOf("boxed-1", PoolPlacement.Container);
+  f.pool.start(container, []);
+  const sessions = join(f.stateDirectory, "workers", "boxed-1", "sessions");
+  mkdirSync(join(sessions, "execution"), { recursive: true });
+  const archived = f.pool.archive(container);
+  f.containerDriver.instances[0]!.end(CLEAN_CODE);
+  await archived;
+  assert.equal(existsSync(sessions), false);
+});
