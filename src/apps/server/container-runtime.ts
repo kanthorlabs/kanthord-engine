@@ -311,7 +311,7 @@ export interface CacheVolumeListing {
 }
 
 const SIZE_PATTERN = /^\s*(\d+(?:\.\d+)?)\s*([kKMGTP]?i?B)?\s*$/;
-const DECIMAL_UNITS: Readonly<Record<string, number>> = {
+const SIZE_UNITS: Readonly<Record<string, number>> = {
   B: 1,
   kB: 1e3,
   KB: 1e3,
@@ -377,8 +377,8 @@ export function bytesOf(value: unknown): number {
     return Math.floor(value);
   if (!isString(value)) return NO_BYTES;
   const match = SIZE_PATTERN.exec(value);
-  if (!match) return 0;
-  const unit = DECIMAL_UNITS[match[2] ?? "B"] ?? 1;
+  if (!match) return NO_BYTES;
+  const unit = SIZE_UNITS[match[2] ?? "B"] ?? 1;
   return Math.floor(Number(match[1]) * unit);
 }
 

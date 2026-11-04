@@ -24,6 +24,8 @@ const BACKUP_SEPARATOR = ".bak-";
 const WAL_SUFFIX = "-wal";
 const SERVER_LOG_NAME = "kanthord.log";
 const FILE_NOT_FOUND = "ENOENT";
+const DATA_DIRECTORY_LABEL = "data_directory";
+const STATE_DIRECTORY_LABEL = "state_directory";
 
 export const ServerHostErrorCode = {
   DatabaseUnmeasured: "footprint.database.unmeasured",
@@ -107,6 +109,7 @@ export class ServerHost implements FootprintOwner {
   ];
   private readonly dependencies: ServerHostDependencies;
   private readonly now: () => number;
+  private readonly devices = new Map<string, string>();
 
   constructor(dependencies: ServerHostDependencies) {
     this.dependencies = dependencies;
@@ -236,13 +239,14 @@ export class ServerHost implements FootprintOwner {
 
   private async measureDisks(): Promise<FootprintMeasure[]> {
     const measures = new Map<string, FootprintMeasure>();
-    for (const directory of [
-      this.dataDirectory,
-      this.dependencies.stateDirectory,
-    ]) {
+    for (const [directory, label] of [
+      [this.dataDirectory, DATA_DIRECTORY_LABEL],
+      [this.dependencies.stateDirectory, STATE_DIRECTORY_LABEL],
+    ] as const) {
       const kind = FootprintKind.Disk;
       try {
         const key = await deviceKey(directory);
+        this.devices.set(directory, key);
         if (measures.has(key)) continue;
         const space = await statfs(directory);
         measures.set(
@@ -254,13 +258,15 @@ export class ServerHost implements FootprintOwner {
           }),
         );
       } catch (error) {
+        const key = this.devices.get(directory) ?? label;
+        if (measures.has(key)) continue;
         measures.set(
-          directory,
+          key,
           failedMeasure(
             kind,
             ServerHostErrorCode.DiskUnmeasured,
             messageOf(error),
-            { item_key: directory },
+            { item_key: key },
           ),
         );
       }

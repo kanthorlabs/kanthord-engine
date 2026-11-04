@@ -19,7 +19,10 @@ import {
   StoreName,
 } from "../kernel/operation.ts";
 import { DEFAULT_AGE_DAYS } from "../tracking/contract.ts";
-import { instanceNameSchema } from "../worker/contract.ts";
+import {
+  instanceNameSchema,
+  slotImageReferenceSchema,
+} from "../worker/contract.ts";
 
 export { CleanupRefusal, DEFAULT_AGE_DAYS };
 
@@ -274,7 +277,6 @@ const environmentKeySchema = z
   .string()
   .regex(/^(?:[a-z0-9][a-z0-9/-]*@[0-9a-f]{64}|sha256:[0-9a-f]{64})$/);
 const cacheVolumeKeySchema = z.string().regex(/^kanthord_cache_[0-9a-z]{24}$/);
-const slotImageKeySchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._/:@-]*$/);
 const executionKeySchema = identitySchema("execution");
 const workspaceKeySchema = z
   .string()
@@ -288,7 +290,7 @@ const KEY_SCHEMAS: Readonly<Record<CleanableKind, z.ZodType<string>>> = {
   [CleanableKind.DatabaseBackup]: backupKeySchema,
   [CleanableKind.Environment]: environmentKeySchema,
   [CleanableKind.CacheVolume]: cacheVolumeKeySchema,
-  [CleanableKind.SlotImage]: slotImageKeySchema,
+  [CleanableKind.SlotImage]: slotImageReferenceSchema,
   [CleanableKind.Session]: executionKeySchema,
   [CleanableKind.Workspace]: workspaceKeySchema,
   [CleanableKind.ToolOutput]: toolOutputKeySchema,

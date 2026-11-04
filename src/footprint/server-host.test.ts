@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { utimesSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { createIdempotencyKey } from "../kernel/identity.ts";
@@ -142,4 +149,34 @@ test("footprint.backup.delete refuses a name outside the backup form and removes
   );
   assert.equal(removed.type, OperationResultType.Completed);
   assert.deepEqual(removed.data, { removed: 1, absent: 1 });
+});
+
+test("footprint.backup.delete leaves a symlink with a backup name and its target", async (t) => {
+  const fixture = footprintFixture(t);
+  const outside = temporary(t);
+  const target = join(outside, "kept");
+  writeFileSync(target, "x");
+  const name = "kanthord.db.bak-20261002T101500";
+  symlinkSync(target, join(fixture.directory, name));
+  const answer = await fixture.footprint["backup.delete"](
+    { params: {}, query: {}, body: { names: [name] } },
+    { identity: HUMAN, idempotencyKey: createIdempotencyKey() },
+  );
+  assert.equal(answer.type, OperationResultType.Completed);
+  assert.deepEqual(answer.data, { removed: 0, absent: 1 });
+  assert.ok(lstatSync(join(fixture.directory, name)).isSymbolicLink());
+  assert.ok(existsSync(target));
+});
+
+test("a failed disk measure keeps the device key of its last measure and holds no path", async (t) => {
+  const { serverHost, directory } = host(t);
+  const key = kind(await serverHost.measure(), FootprintKind.Disk).at(
+    0,
+  )?.item_key;
+  rmSync(directory, { recursive: true, force: true });
+  const failed = kind(await serverHost.measure(), FootprintKind.Disk);
+  assert.deepEqual(
+    failed.map((measure) => [measure.item_key, measure.measure_error?.code]),
+    [[key, "footprint.disk.unmeasured"]],
+  );
 });

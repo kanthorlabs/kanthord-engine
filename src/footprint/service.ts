@@ -9,7 +9,7 @@ import {
   type Context,
   reasonOf,
 } from "../kernel/context.ts";
-import { OperationError } from "../kernel/errors.ts";
+import { diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
   CLEANUP_IDENTITY_PREFIX,
@@ -33,6 +33,7 @@ import {
   DAY_MS,
   DEFAULT_AGE_DAYS,
   DELETE_OPERATIONS,
+  failedMeasure,
   FOOTPRINT_MEASURE_INTERVAL_MS,
   FOOTPRINT_SERVICE_NAME,
   FOOTPRINT_STALE_INTERVALS,
@@ -220,39 +221,15 @@ export class FootprintService implements Service {
         measures = await owner.measure(this.shutdown.signal);
       } catch (error) {
         this.dependencies.logger.error(
-          { kinds: owner.kinds, reason: messageOf(error) },
+          { kinds: owner.kinds, reason: diagnostic(error) },
           MEASURE_FAILED,
         );
-        measures = owner.kinds.map((kind) => ({
-          ...this.blank(kind),
-          measure_error: {
-            code: "footprint.measure.failed",
-            message: messageOf(error),
-          },
-        }));
+        measures = owner.kinds.map((kind) =>
+          failedMeasure(kind, MEASURE_FAILED, messageOf(error)),
+        );
       }
       await this.record(owner, measures);
     }
-  }
-
-  private blank(kind: FootprintKind): FootprintMeasure {
-    return {
-      kind,
-      instance_name: null,
-      item_key: null,
-      instance_names: [],
-      device: null,
-      runtime_store: false,
-      measure_error: null,
-      count: null,
-      bytes: null,
-      wal_bytes: null,
-      free_bytes: null,
-      total_bytes: null,
-      oldest_at: null,
-      newest_at: null,
-      recent_count: null,
-    };
   }
 
   private async record(

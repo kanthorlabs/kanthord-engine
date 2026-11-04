@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createIdentity } from "../kernel/identity.ts";
+import { createIdempotencyKey, createIdentity } from "../kernel/identity.ts";
 import { OperationResultType } from "../kernel/operation.ts";
 import {
   CleanableKind,
@@ -8,10 +8,13 @@ import {
   DAY_MS,
   DEFAULT_AGE_DAYS,
   FOOTPRINT_MEASURE_INTERVAL_MS,
+  FootprintAlertState,
   FootprintErrorCode,
   FootprintKind,
   type FootprintStat,
+  ThresholdMeasure,
 } from "./contract.ts";
+import { insertAlert } from "./alert-store.ts";
 import { CleanupRefusal } from "../kernel/cleanup.ts";
 import { workerOperations } from "../worker/contract.ts";
 import { insertCleanup } from "./cleanup-store.ts";
@@ -395,7 +398,7 @@ test("a rule outside the kind answers footprint.rule.not_supported", async (t) =
   assert.equal(result.error.error.code, FootprintErrorCode.RuleNotSupported);
 });
 
-test("the alert list answers the stored episodes and acknowledge refuses an unknown alert", async (t) => {
+test("the alert list answers the stored episodes and acknowledge refuses an unknown and a resolved alert", async (t) => {
   const fixture = footprintFixture(t);
   const list = await fixture.footprint["alert.list"](
     { params: {}, query: { limit: 10 }, body: null },
@@ -409,4 +412,38 @@ test("the alert list answers the stored episodes and acknowledge refuses an unkn
   );
   assert.equal(summary.type, OperationResultType.Completed);
   assert.equal(summary.data.open_alerts, NO_ALERTS);
+  const unknown = await fixture.footprint["alert.acknowledge"](
+    { params: { alert_id: createIdentity("alert") }, query: {}, body: null },
+    { identity: HUMAN, idempotencyKey: createIdempotencyKey() },
+  );
+  assert.equal(unknown.type, OperationResultType.Failure);
+  assert.equal(unknown.error.error.code, FootprintErrorCode.AlertNotFound);
+  const resolved = {
+    alert_id: createIdentity("alert"),
+    kind: FootprintKind.Trace,
+    instance_name: null,
+    item_key: null,
+    threshold: { measure: ThresholdMeasure.Bytes, value: GIB },
+    value: TOTAL,
+    resolved_at: NOW,
+    acknowledged_by: null,
+    acknowledged_at: null,
+    acknowledged_until: null,
+  };
+  fixture.store.transaction((tx) => insertAlert(tx, resolved));
+  const stored = await fixture.footprint["alert.list"](
+    { params: {}, query: { open: "false", limit: 10 }, body: null },
+    { identity: HUMAN },
+  );
+  assert.equal(stored.type, OperationResultType.Completed);
+  assert.deepEqual(
+    stored.data.items.map((alert) => [alert.alert_id, alert.state]),
+    [[resolved.alert_id, FootprintAlertState.Ok]],
+  );
+  const refused = await fixture.footprint["alert.acknowledge"](
+    { params: { alert_id: resolved.alert_id }, query: {}, body: null },
+    { identity: HUMAN, idempotencyKey: createIdempotencyKey() },
+  );
+  assert.equal(refused.type, OperationResultType.Failure);
+  assert.equal(refused.error.error.code, FootprintErrorCode.AlertResolved);
 });

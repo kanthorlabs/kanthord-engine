@@ -309,3 +309,46 @@ test("the default age of every kind is DEFAULT_AGE_DAYS", () => {
       assert.equal(rule.older_than_days, DEFAULT_AGE_DAYS);
   }
 });
+
+test("a cleanup of an instance kind with no owner delete ends failed", async (t) => {
+  const fixture = footprintFixture(t, {
+    instances: { "e2e-coder-1": { archived: false } },
+  });
+  const result = await fixture.footprint["cleanup.create"](
+    {
+      params: {},
+      query: {},
+      body: {
+        kind: CleanableKind.Workspace,
+        instance_name: "e2e-coder-1",
+        rule: { name: CleanupRule.NodeClosed },
+        keys: ["node_01JZ8R2B3C4D5E6F7G8H9J0K1M"],
+      },
+    },
+    { identity: HUMAN, idempotencyKey: createIdempotencyKey() },
+  );
+  assert.equal(result.type, OperationResultType.Completed);
+  await fixture.service.runCleanups();
+  const stored = fixture.store.transaction((tx) =>
+    cleanupOf(tx, result.data.cleanup_id),
+  );
+  assert.equal(stored?.state, CleanupState.Failed);
+  assert.equal(stored?.outcome, null);
+});
+
+test("cleanup get and cancel answer footprint.cleanup.not_found for an unknown id", async (t) => {
+  const fixture = footprintFixture(t);
+  const params = { cleanup_id: "cleanup_01JZ8R2B3C4D5E6F7G8H9J0K1M" };
+  const read = await fixture.footprint["cleanup.get"](
+    { params, query: {}, body: null },
+    { identity: HUMAN },
+  );
+  const cancel = await fixture.footprint["cleanup.cancel"](
+    { params, query: {}, body: null },
+    { identity: HUMAN, idempotencyKey: createIdempotencyKey() },
+  );
+  for (const result of [read, cancel]) {
+    assert.equal(result.type, OperationResultType.Failure);
+    assert.equal(result.error.error.code, FootprintErrorCode.CleanupNotFound);
+  }
+});

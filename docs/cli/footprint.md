@@ -111,9 +111,10 @@ holds `refusal: "live"`. The newest backup of each file holds `kept: true`.
 
 A human deletes database backup files by name. The body is
 `{ "names": [...] }` with 1 to 20 names of the form `<file>.bak-<stamp>`. The
-answer is `{ "removed": <count>, "absent": <count> }`. The candidate set and the
-dashboard keep the newest backup of each file. The operation adds no refusal
-for a name that a human picks.
+answer is `{ "removed": <count>, "absent": <count> }`. A name that is not a
+regular file beside its base file, for example a symlink, counts in `absent`
+and stays. The candidate set and the dashboard keep the newest backup of each
+file. The operation adds no refusal for a name that a human picks.
 
 ## Error codes
 

@@ -715,12 +715,26 @@ export default tseslint.config(
             {
               from: element("service", {
                 captured: { name: "footprint" },
-                fileInternalPath: "{test-support.ts,*.test.ts}",
+                fileInternalPath: "test-support.ts",
               }),
               allow: [
                 {
                   to: element("service", {
                     captured: { name: "{gateway,tracking}" },
+                    fileInternalPath: "index.ts",
+                  }),
+                },
+              ],
+            },
+            {
+              from: element("service", {
+                captured: { name: "footprint" },
+                fileInternalPath: "service.test.ts",
+              }),
+              allow: [
+                {
+                  to: element("service", {
+                    captured: { name: "tracking" },
                     fileInternalPath: "index.ts",
                   }),
                 },
