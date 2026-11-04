@@ -20,12 +20,15 @@ import { createIdempotencyKey } from "../../kernel/identity.ts";
 const REGISTRATION_REQUIRED = "gateway.registration.required";
 const CONNECTION_SUPERSEDED = "gateway.jwt.connection_superseded";
 const NO_DELAY = 0;
+export const SETUP_UNAVAILABLE = "setup_unavailable";
 export interface PullLoopInput {
   api: WorkerTransport;
   registration: Registration;
   backoff: Backoff;
   shutdown: Context;
-  host(execution: ExecutionRecord): Promise<Diagnostic | null>;
+  host(
+    execution: ExecutionRecord,
+  ): Promise<Diagnostic | null | typeof SETUP_UNAVAILABLE>;
   register(): Promise<Registration>;
   pulling(task: Promise<unknown>): void;
   claimed(execution: ExecutionRecord): void;
@@ -76,9 +79,13 @@ export async function pullLoop(
       result.type === OperationResultType.Completed &&
       result.data.kind === WorkPullKind.Claimed
     ) {
-      input.backoff.reset();
       const failure = await input.host(result.data.execution);
+      if (failure === SETUP_UNAVAILABLE) {
+        await sleep(input.backoff.next(), input.shutdown);
+        continue;
+      }
       if (failure) return failure;
+      input.backoff.reset();
       continue;
     }
     if (input.shutdown.signal.aborted) return null;

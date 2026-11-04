@@ -26,6 +26,7 @@ import type { WorkerTransport } from "./transport.ts";
 import { uploadEvidence } from "./evidence-upload.ts";
 import { relaySigner } from "./ssh-relay.ts";
 import { HttpTelemetrySink } from "./telemetry-sink.ts";
+import { SETUP_UNAVAILABLE } from "./pull-loop.ts";
 
 export interface HostExecutionInput {
   claim: ExecutionRecord;
@@ -43,6 +44,8 @@ export interface HostExecutionInput {
 }
 
 const GATEWAY_CODE_PREFIX = "gateway.";
+const SETUP_UNAVAILABLE_RECORD = "worker.execution.setup_unavailable";
+const NO_CREDENTIALS = { items: [], release: async () => {} };
 
 function setupRefusalOf(answer: OperationResult<unknown>): Diagnostic | null {
   if (
@@ -56,16 +59,52 @@ function setupRefusalOf(answer: OperationResult<unknown>): Diagnostic | null {
   });
 }
 
+function handoverRefusalOf(error: unknown): Diagnostic | null {
+  if (error instanceof HandoverRefused)
+    return error.result ? setupRefusalOf(error.result) : null;
+  return error instanceof Diagnostic ? error : null;
+}
+
 function detailOf(result: ExecutionEnd): string | undefined {
   if (result.kind === ExecutionEndKind.Ended) return result.detail;
   if (result.kind === ExecutionEndKind.Released) return result.stop?.detail;
   return undefined;
 }
 
+function endOf(
+  input: HostExecutionInput,
+  context: Context,
+  result: ExecutionEnd,
+): Diagnostic | null {
+  context.signal.throwIfAborted();
+  const detail = detailOf(result);
+  input.log({
+    msg: "execution ended",
+    execution_id: input.claim.execution_id,
+    kind: result.kind,
+    ...(result.kind === ExecutionEndKind.Ended
+      ? { reason: result.reason, code: result.code }
+      : {}),
+    ...(result.kind === ExecutionEndKind.Released && result.stop
+      ? { reason: result.stop.reason, code: result.stop.code }
+      : {}),
+    ...(detail === undefined ? {} : { detail }),
+  });
+  if (
+    result.kind !== ExecutionEndKind.Ended ||
+    result.reason === EndReason.Revoked
+  )
+    return null;
+  return new Diagnostic(
+    result.code ?? "system.operation.unknown",
+    "worker: execution cannot progress.",
+  );
+}
+
 export async function hostExecution(
   input: HostExecutionInput,
   execute = runNativeExecution,
-): Promise<Diagnostic | null> {
+): Promise<Diagnostic | null | typeof SETUP_UNAVAILABLE> {
   assert.ok(input.claim.execution_id);
   assert.ok(input.clientSecret);
   let handover: Awaited<ReturnType<typeof takeHandover>> | undefined;
@@ -83,7 +122,26 @@ export async function hostExecution(
   });
   try {
     context.signal.throwIfAborted();
-    handover = await takeHandover({ ...input, context });
+    try {
+      handover = await takeHandover({ ...input, context });
+    } catch (error) {
+      const refusal = handoverRefusalOf(error);
+      if (!refusal) throw error;
+      return endOf(
+        input,
+        context,
+        await releaseSetupRefusal(
+          {
+            ...input,
+            clients: input.api,
+            credentials: NO_CREDENTIALS,
+            context,
+            telemetry,
+          },
+          refusal,
+        ),
+      );
+    }
     input.log({
       msg: "credential handover received",
       execution_id: input.claim.execution_id,
@@ -165,29 +223,7 @@ export async function hostExecution(
       });
     }
     if (revoked) return null;
-    context.signal.throwIfAborted();
-    const detail = detailOf(result);
-    input.log({
-      msg: "execution ended",
-      execution_id: input.claim.execution_id,
-      kind: result.kind,
-      ...(result.kind === ExecutionEndKind.Ended
-        ? { reason: result.reason, code: result.code }
-        : {}),
-      ...(result.kind === ExecutionEndKind.Released && result.stop
-        ? { reason: result.stop.reason, code: result.stop.code }
-        : {}),
-      ...(detail === undefined ? {} : { detail }),
-    });
-    if (
-      result.kind !== ExecutionEndKind.Ended ||
-      result.reason === EndReason.Revoked
-    )
-      return null;
-    return new Diagnostic(
-      result.code ?? "system.operation.unknown",
-      "worker: execution cannot progress.",
-    );
+    return endOf(input, context, result);
   } catch (error) {
     if (revoked) return null;
     if (
@@ -196,6 +232,17 @@ export async function hostExecution(
       isExecutionEnd(error.result)
     )
       return null;
+    if (
+      error instanceof HandoverRefused &&
+      error.code.startsWith(GATEWAY_CODE_PREFIX)
+    ) {
+      input.log({
+        msg: SETUP_UNAVAILABLE_RECORD,
+        execution_id: input.claim.execution_id,
+        code: error.code,
+      });
+      return SETUP_UNAVAILABLE;
+    }
     if (error instanceof Diagnostic) return error;
     return new Diagnostic(
       error instanceof CodedError ? error.code : "system.operation.unknown",

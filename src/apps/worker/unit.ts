@@ -39,7 +39,7 @@ import { hostExecution } from "./execution.ts";
 import type { InstanceCopyKey } from "../../custody/client.ts";
 import { readServerVersion } from "../../gateway/client.ts";
 import { homedir } from "node:os";
-import { pullLoop } from "./pull-loop.ts";
+import { pullLoop, SETUP_UNAVAILABLE } from "./pull-loop.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
 
 const KEEPALIVE_INTERVAL_MS = 60000;
@@ -87,7 +87,7 @@ interface Entry {
 interface Execution {
   entry: Entry;
   context: CancellationContext;
-  task: Promise<Diagnostic | null>;
+  task: Promise<Diagnostic | null | typeof SETUP_UNAVAILABLE>;
 }
 
 export class WorkerUnit {
@@ -477,7 +477,8 @@ export class WorkerUnit {
     if (this.shutdown.signal.aborted) context.cancel();
     const task = this.execute(entry, claim, context)
       .then((result) => {
-        if (result === null) this.executionLive = false;
+        if (result === null || result === SETUP_UNAVAILABLE)
+          this.executionLive = false;
         return result;
       })
       .finally(() => context.cancel());
@@ -488,7 +489,7 @@ export class WorkerUnit {
     entry: Entry,
     claim: ExecutionRecord,
     context: Context,
-  ): Promise<Diagnostic | null> {
+  ): Promise<Diagnostic | null | typeof SETUP_UNAVAILABLE> {
     return hostExecution({
       claim,
       api: entry.binding.transport,

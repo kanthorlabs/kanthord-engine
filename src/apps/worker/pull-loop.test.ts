@@ -11,7 +11,7 @@ import {
 } from "../../scheduler/contract.ts";
 import { Backoff, BACKOFF_INITIAL_MS } from "./api.ts";
 import { httpTransport } from "./transport.ts";
-import { pullLoop } from "./pull-loop.ts";
+import { pullLoop, SETUP_UNAVAILABLE } from "./pull-loop.ts";
 import { testClaim } from "./test-support.ts";
 
 const REGISTRATION = {
@@ -20,6 +20,7 @@ const REGISTRATION = {
   worker_name: "coder@1",
 };
 const ONCE = 1;
+const SETTLE_ROUNDS = 5;
 const ANSWER_INVALID = "gateway.client.answer_invalid";
 test("claim admission precedes hosting even when shutdown races the pull", async (t) => {
   const api = httpTransport("http://127.0.0.1:1");
@@ -243,6 +244,54 @@ test("a no-work answer that the server held pulls again at once, and a quick one
   t.mock.timers.tick(1);
   for (let index = 0; index < turns; index++) await turn();
   assert.equal(pulls, thrice);
+  shutdown.cancel();
+  assert.equal(await running, null);
+});
+
+test("a setup unavailable host waits the growing pull backoff before the next pull of the same claim", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const api = httpTransport("http://127.0.0.1:1");
+  const shutdown = new CancellationContext();
+  const execution = testClaim();
+  const hosted: unknown[] = [];
+  t.mock.method(api.scheduler, "workPull", async () => ({
+    type: OperationResultType.Completed,
+    status: 200,
+    data: { kind: "claimed", execution },
+  }));
+  const running = pullLoop({
+    api,
+    registration: REGISTRATION,
+    backoff: new Backoff(),
+    shutdown,
+    host: async (claim) => {
+      hosted.push(claim);
+      return SETUP_UNAVAILABLE;
+    },
+    register: async () => REGISTRATION,
+    pulling: () => {},
+    claimed: () => {},
+  });
+  const settle = async () => {
+    for (let round = 0; round < SETTLE_ROUNDS; round++) await turn();
+  };
+  const growth = 2;
+  const three = 3;
+  await settle();
+  assert.equal(hosted.length, ONCE);
+  t.mock.timers.tick(BACKOFF_INITIAL_MS - ONCE);
+  await settle();
+  assert.equal(hosted.length, ONCE);
+  t.mock.timers.tick(ONCE);
+  await settle();
+  assert.equal(hosted.length, growth);
+  t.mock.timers.tick(BACKOFF_INITIAL_MS * growth - ONCE);
+  await settle();
+  assert.equal(hosted.length, growth);
+  t.mock.timers.tick(ONCE);
+  await settle();
+  assert.equal(hosted.length, three);
+  assert.ok(hosted.every((claim) => claim === execution));
   shutdown.cancel();
   assert.equal(await running, null);
 });

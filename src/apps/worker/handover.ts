@@ -84,12 +84,17 @@ async function openSealedItem(
   return opened;
 }
 
+type ExecutionItemView = {
+  item: Pick<SealedHandoverItem, "credential_id" | "provider_id">;
+  view: ReturnType<typeof executionCredentialStore>;
+};
+
 async function executionItems(
   items: HandoverPayload["items"],
   key: InstanceCopyKey | undefined,
   send: (report: WireReport) => Promise<void>,
+  views: ExecutionItemView[],
 ) {
-  const views = [];
   for (const item of items) {
     if ("credential" in item) {
       views.push({
@@ -113,7 +118,6 @@ async function executionItems(
       ),
     });
   }
-  return views;
 }
 
 export function retryableRefreshInFlight<T>(
@@ -143,6 +147,7 @@ export async function takeHandover(input: {
   const context = new CancellationContext(input.context, claim.expired_at);
   const keys = deriveHandoverKeys(input.clientSecret);
   const aad = handoverAad(claim.execution_id, claim.claimant.runtime_identity);
+  const views: ExecutionItemView[] = [];
   try {
     const envelope = completed(
       await retryIndeterminate(
@@ -183,11 +188,7 @@ export async function takeHandover(input: {
       );
     };
     keys.handover.fill(0);
-    const views = await executionItems(
-      payload.items,
-      input.instanceKey,
-      report,
-    );
+    await executionItems(payload.items, input.instanceKey, report, views);
     const sshIdentities = payload.ssh_identities;
     return {
       sshIdentities,
@@ -209,6 +210,7 @@ export async function takeHandover(input: {
       },
     };
   } catch (error) {
+    for (const { view } of views) view.discard();
     context.cancel();
     keys.handover.fill(0);
     keys.report.fill(0);
