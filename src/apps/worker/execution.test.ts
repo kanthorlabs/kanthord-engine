@@ -717,11 +717,13 @@ const SETUP_REFUSALS = [
 function refusedSetupHost(
   t: TestContext,
   refusal: { status: number; code: string; details: unknown },
+  releaseAnswer?: unknown,
 ) {
   const api = httpTransport("http://127.0.0.1:1");
   const shutdown = new CancellationContext();
   const claim = testClaim();
   const releases: unknown[] = [];
+  const events: string[] = [];
   let pulls = 0;
   t.mock.method(api.scheduler, "workPull", async () => {
     if (++pulls === TWO_PULLS) {
@@ -764,16 +766,17 @@ function refusedSetupHost(
       },
     },
   }));
-  t.mock.method(api.worker, "credential", async () => ({
-    type: OperationResultType.Completed,
-    status: 200,
-    data: null,
-  }));
+  t.mock.method(api.worker, "credential", async () => {
+    events.push("credential");
+    return { type: OperationResultType.Completed, status: 200, data: null };
+  });
   t.mock.method(
     api.scheduler,
     "executionRelease",
     async (request: { body: unknown }) => {
       releases.push(request.body);
+      events.push("release");
+      if (releaseAnswer) return releaseAnswer;
       return {
         type: OperationResultType.Completed,
         status: 200,
@@ -809,7 +812,7 @@ function refusedSetupHost(
     pulling: () => {},
     claimed: () => {},
   });
-  return { running, releases, pulls: () => pulls };
+  return { running, releases, events, pulls: () => pulls };
 }
 
 test("a refused setup releases one stop with the cause of its code and the pull loop takes the next work", async (t) => {
@@ -832,6 +835,7 @@ test("a refused setup releases one stop with the cause of its code and the pull 
       ],
       refusal.code,
     );
+    assert.deepEqual(host.events, ["credential", "release"], refusal.code);
   }
 });
 
@@ -841,4 +845,38 @@ test("a gateway refusal of the setup releases no stop and ends the pull loop", a
   assert.equal((await host.running)?.code, code);
   assert.equal(host.pulls(), ONE_ENTRY);
   assert.deepEqual(host.releases, []);
+});
+
+test("a setup answer that ends the execution releases no stop and the pull loop takes the next work", async (t) => {
+  const host = refusedSetupHost(t, {
+    status: 409,
+    code: "scheduler.execution.not_running",
+    details: null,
+  });
+  assert.equal(await host.running, null);
+  assert.equal(host.pulls(), TWO_PULLS);
+  assert.deepEqual(host.releases, []);
+});
+
+test("a refused setup whose release fails ends the pull loop with the setup code", async (t) => {
+  const code = "worker.execution.prompt_not_pinned";
+  const host = refusedSetupHost(
+    t,
+    { status: 409, code, details: { binding_id: BINDING_ID } },
+    {
+      type: OperationResultType.Failure,
+      status: 500,
+      error: {
+        request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+        error: {
+          code: "system.operation.unknown",
+          message: "test failure",
+          details: null,
+        },
+      },
+    },
+  );
+  assert.equal((await host.running)?.code, code);
+  assert.equal(host.pulls(), ONE_ENTRY);
+  assert.equal(host.releases.length, ONE_ENTRY);
 });
