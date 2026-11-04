@@ -7,6 +7,12 @@ import {
   effectiveCauseSchema,
   type FailureCause,
 } from "../kernel/cause.ts";
+import {
+  CLEANUP_BATCH_ROWS,
+  CLEANUP_SERVICES,
+  ownerDeleteAnswerSchema,
+  requestedByField,
+} from "../kernel/cleanup.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import { timestamp } from "../kernel/json.ts";
 import {
@@ -1278,5 +1284,30 @@ export const trackingOperations = {
       body: z.null(),
     }),
     output: sessionEntrySchema,
+  },
+  traceDelete: {
+    id: "tracking.trace.delete",
+    service: TRACKING_SERVICE_NAME,
+    method: HttpMethod.Post,
+    path: "/api/tracking/trace/delete",
+    access: AccessPolicy.HumanOrService,
+    services: CLEANUP_SERVICES,
+    store: StoreName.Tracking,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: TRACKING_TIMEOUT_MS,
+    mutation: true,
+    body: true,
+    status: HttpStatus.OK,
+    description:
+      "Delete ended traces with their spans, records, telemetry texts and session entries. An open trace refuses with live.",
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: z.strictObject({}),
+      body: z.strictObject({
+        trace_ids: z.array(traceIdSchema).min(1).max(CLEANUP_BATCH_ROWS),
+        ...requestedByField,
+      }),
+    }),
+    output: ownerDeleteAnswerSchema,
   },
 } as const satisfies Record<string, Operation>;

@@ -12,6 +12,7 @@ import {
 import { join } from "node:path";
 import { z } from "zod";
 import type { EnvironmentSource } from "../kernel/devcontainer.ts";
+import type { RuntimeUsage } from "../worker/contract.ts";
 import type { Environment } from "../kernel/devcontainer.ts";
 import { digest, timestamp } from "../kernel/json.ts";
 import {
@@ -387,6 +388,19 @@ export interface ProofInput {
   checks: string[];
 }
 
+export interface EnvironmentCacheVolume {
+  readonly name: string;
+  readonly project_id: string;
+  readonly resource_identity: string;
+  readonly created_at: number | null;
+}
+
+export interface EnvironmentUsage {
+  readonly usage: RuntimeUsage;
+  readonly owned_image_ids: readonly string[];
+  readonly cache_volumes: readonly EnvironmentCacheVolume[];
+}
+
 export interface EnvironmentRuntime {
   readonly runtimeName: string;
   imageId(reference: string, signal: AbortSignal): Promise<string | null>;
@@ -406,4 +420,6 @@ export interface EnvironmentRuntime {
     Array<{ project_id: string; resource_identity: string }>
   >;
   removeCacheVolume(projectId: string, resourceIdentity: string): Promise<void>;
+  footprintUsage(signal: AbortSignal): Promise<EnvironmentUsage>;
+  removeImage(reference: string): Promise<boolean>;
 }

@@ -9,7 +9,8 @@ import {
   survivingProcesses,
 } from "../agent/test-support.ts";
 import { temporary } from "../kernel/test-support.ts";
-import { builtinTools } from "./tools.ts";
+import { trackingOperations } from "../tracking/contract.ts";
+import { builtinTools, toolOperations } from "./tools.ts";
 
 const TIMEOUT_SECONDS = 20;
 
@@ -40,4 +41,12 @@ test("a workbench bash call that times out leaves no process of its tree", async
   assert.match(failure.message, /Command timed out after 20 seconds/);
   assert.equal(spawned.length, PROCESS_TREE_PIDS);
   assert.deepEqual(await survivingProcesses(spawned), []);
+});
+
+test("the human_or_service operations are workbench tools", () => {
+  const tools = toolOperations([trackingOperations.traceDelete]);
+  assert.deepEqual(
+    tools.map((operation) => operation.id),
+    [trackingOperations.traceDelete.id],
+  );
 });

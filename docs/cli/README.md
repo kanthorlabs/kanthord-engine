@@ -27,6 +27,7 @@ non-flag conventions and commands outside these groups live in `other.md`.
 | `worker`                        | [Worker Service](worker.md)                       | Workers, registrations, and execution hosting.                                                          |
 | `workbench`                     | [Workbench Service](workbench.md)                 | Human-driven agent sessions; API only.                                                                  |
 | `tracking`                      | [Tracking Service](tracking.md)                   | Trace, span and telemetry text reads; worker telemetry writes.                                          |
+| `footprint`                     | [Footprint Service](footprint.md)                 | Storage statistics, cleanup candidates, human-confirmed cleanups and alerts.                            |
 | `gateway`                       | [Gateway Service](gateway.md)                     | Identity verification and local OpenAPI generation.                                                     |
 | `config`, `serve`, `auth`, help | [Other commands and shared conventions](other.md) | Configuration files, application startup, local token issuance, client options, and input/output rules. |
 

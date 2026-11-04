@@ -1,0 +1,371 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: footprint.measure.run
+    tags:
+      - footprint
+    description: Measure the server kinds at once and answer their statistics.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/footprint.measure.run.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    footprint.measure.run.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    footprint.measure.run.Output:
+      type: object
+      properties:
+        stats:
+          type: array
+          items:
+            type: object
+            properties:
+              kind:
+                type: string
+                enum:
+                  - operational_database
+                  - trace
+                  - database_backup
+                  - log
+                  - environment
+                  - cache_volume
+                  - slot_image
+                  - slot_residue
+                  - intake_mirror
+                  - workbench
+                  - session
+                  - workspace
+                  - tool_output
+                  - disk
+              instance_name:
+                anyOf:
+                  - type: string
+                    minLength: 1
+                    maxLength: 63
+                    pattern: ^[a-z][a-z0-9-]*$
+                  - type: "null"
+              item_key:
+                anyOf:
+                  - type: string
+                    minLength: 1
+                  - type: "null"
+              instance_names:
+                type: array
+                items:
+                  type: string
+                  minLength: 1
+                  maxLength: 63
+                  pattern: ^[a-z][a-z0-9-]*$
+              measured_at:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                  - type: "null"
+              stale:
+                type: boolean
+              measure_error:
+                anyOf:
+                  - type: object
+                    properties:
+                      code:
+                        type: string
+                        minLength: 1
+                      message:
+                        type: string
+                    required:
+                      - code
+                      - message
+                    additionalProperties: false
+                  - type: "null"
+              count:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                  - type: "null"
+              bytes:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                  - type: "null"
+              wal_bytes:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                  - type: "null"
+              free_bytes:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                  - type: "null"
+              total_bytes:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                  - type: "null"
+              oldest_at:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                  - type: "null"
+              newest_at:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                  - type: "null"
+              growth_per_day:
+                anyOf:
+                  - type: object
+                    properties:
+                      count:
+                        type: number
+                        minimum: 0
+                      bytes:
+                        type: number
+                        minimum: 0
+                    required:
+                      - count
+                      - bytes
+                    additionalProperties: false
+                  - type: "null"
+              days_to_floor:
+                anyOf:
+                  - type: number
+                    minimum: 0
+                  - type: "null"
+              thresholds:
+                type: array
+                items:
+                  oneOf:
+                    - type: object
+                      properties:
+                        measure:
+                          type: string
+                          const: bytes
+                        value:
+                          type: integer
+                          minimum: 1
+                          maximum: 9007199254740991
+                      required:
+                        - measure
+                        - value
+                      additionalProperties: false
+                    - type: object
+                      properties:
+                        measure:
+                          type: string
+                          const: free_ratio
+                        value:
+                          type: number
+                          exclusiveMinimum: 0
+                          exclusiveMaximum: 1
+                      required:
+                        - measure
+                        - value
+                      additionalProperties: false
+                    - type: object
+                      properties:
+                        measure:
+                          type: string
+                          const: days_to_floor
+                        value:
+                          type: integer
+                          minimum: 1
+                          maximum: 9007199254740991
+                        free_ratio:
+                          type: number
+                          exclusiveMinimum: 0
+                          exclusiveMaximum: 1
+                      required:
+                        - measure
+                        - value
+                        - free_ratio
+                      additionalProperties: false
+              alert:
+                type: object
+                properties:
+                  state:
+                    type: string
+                    enum:
+                      - ok
+                      - pending
+                      - firing
+                      - recovering
+                  alert_id:
+                    anyOf:
+                      - type: string
+                        minLength: 32
+                        maxLength: 32
+                        pattern: ^alert_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: alert_ followed by a canonical 26-character uppercase ULID.
+                      - type: "null"
+                required:
+                  - state
+                  - alert_id
+                additionalProperties: false
+              delete_operation:
+                anyOf:
+                  - type: string
+                    minLength: 1
+                  - type: "null"
+              rules:
+                type: array
+                items:
+                  type: string
+                  enum:
+                    - older_than
+                    - node_closed
+                    - unbound
+                    - superseded
+                    - dangling
+              candidates:
+                anyOf:
+                  - type: object
+                    properties:
+                      rule:
+                        oneOf:
+                          - type: object
+                            properties:
+                              name:
+                                type: string
+                                const: older_than
+                              older_than_days:
+                                type: integer
+                                minimum: 1
+                                maximum: 3650
+                            required:
+                              - name
+                              - older_than_days
+                            additionalProperties: false
+                          - type: object
+                            properties:
+                              name:
+                                type: string
+                                const: node_closed
+                            required:
+                              - name
+                            additionalProperties: false
+                          - type: object
+                            properties:
+                              name:
+                                type: string
+                                const: unbound
+                            required:
+                              - name
+                            additionalProperties: false
+                          - type: object
+                            properties:
+                              name:
+                                type: string
+                                const: superseded
+                            required:
+                              - name
+                            additionalProperties: false
+                          - type: object
+                            properties:
+                              name:
+                                type: string
+                                const: dangling
+                            required:
+                              - name
+                            additionalProperties: false
+                      count:
+                        type: integer
+                        minimum: 0
+                        maximum: 9007199254740991
+                      bytes:
+                        anyOf:
+                          - type: integer
+                            minimum: 0
+                            maximum: 9007199254740991
+                          - type: "null"
+                      bytes_estimated:
+                        type: boolean
+                    required:
+                      - rule
+                      - count
+                      - bytes
+                      - bytes_estimated
+                    additionalProperties: false
+                  - type: "null"
+            required:
+              - kind
+              - instance_name
+              - item_key
+              - instance_names
+              - measured_at
+              - stale
+              - measure_error
+              - count
+              - bytes
+              - wal_bytes
+              - free_bytes
+              - total_bytes
+              - oldest_at
+              - newest_at
+              - growth_per_day
+              - days_to_floor
+              - thresholds
+              - alert
+              - delete_operation
+              - rules
+              - candidates
+            additionalProperties: false
+      required:
+        - stats
+      additionalProperties: false

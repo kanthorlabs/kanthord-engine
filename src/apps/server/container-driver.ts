@@ -13,7 +13,11 @@ import {
   readPrivate,
   writePrivate,
 } from "../../kernel/files.ts";
-import type { ContainerRuntime } from "../../worker/contract.ts";
+import type {
+  ContainerRuntime,
+  RuntimeStoreInfo,
+  RuntimeUsage,
+} from "../../worker/contract.ts";
 import {
   type PlacementStatus,
   type PoolEntry,
@@ -29,6 +33,7 @@ import {
 } from "../worker/frames.ts";
 import type { SlotControl } from "../worker/thread-data.ts";
 import {
+  absentImage,
   absentVolume,
   cacheOwnerArguments,
   cacheVolumeArguments,
@@ -39,6 +44,7 @@ import {
   detectRuntime,
   IdMap,
   idMapOf,
+  infoArguments,
   inspectVolumeArguments,
   killArguments,
   linesOf,
@@ -47,8 +53,11 @@ import {
   NO_TIME_LIMIT_MS,
   ownedArguments,
   ownedVolumeArguments,
+  parseRuntimeStore,
+  parseSystemUsage,
   parseVolume,
   presentVolume,
+  removeImageArguments,
   removeVolumeArguments,
   runArguments,
   RUNTIME_CHECK_TIMEOUT_MS,
@@ -59,6 +68,7 @@ import {
   slotInstanceName,
   slotName,
   SUCCESS_CODE,
+  systemUsageArguments,
   unshareMarkerArguments,
   unshareMigrationArguments,
   unshareOwnerArguments,
@@ -577,6 +587,33 @@ export class ContainerDriver implements SlotDriver {
 
   command(runtime: ContainerRuntime, args: readonly string[]) {
     return this.host.run(runtime, args, RUNTIME_CHECK_TIMEOUT_MS);
+  }
+
+  async runtimeUsage(): Promise<RuntimeUsage | null> {
+    const runtime = await this.answeringRuntime();
+    if (runtime === null) return null;
+    const answer = await this.command(runtime, systemUsageArguments());
+    if (answer.code !== SUCCESS_CODE)
+      throw commandFailure("system df", answer.stderr);
+    return parseSystemUsage(runtime, answer.stdout);
+  }
+
+  async runtimeStore(): Promise<RuntimeStoreInfo | null> {
+    const runtime = await this.answeringRuntime();
+    if (runtime === null) return null;
+    const answer = await this.command(runtime, infoArguments());
+    if (answer.code !== SUCCESS_CODE)
+      throw commandFailure("info", answer.stderr);
+    return parseRuntimeStore(runtime, answer.stdout);
+  }
+
+  async removeImage(reference: string): Promise<boolean> {
+    const runtime = await this.answeringRuntime();
+    if (runtime === null) return false;
+    const answer = await this.command(runtime, removeImageArguments(reference));
+    if (answer.code === SUCCESS_CODE) return true;
+    if (absentImage(answer)) return false;
+    throw commandFailure(`image rm ${reference}`, answer.stderr);
   }
 
   async removeContainer(runtime: ContainerRuntime, name: string) {

@@ -865,6 +865,17 @@ no healthcheck command.
   configuration; applying a binding does not itself claim work or register a
   caller's instance.
 
+## Footprint deletes outside the CLI inventory
+
+The Footprint Service calls two API-only Project operations for a human cleanup. No `kanthord project` command calls them. The CLI and the dashboard go through `footprint.cleanup.create`, see [footprint.md](footprint.md).
+
+- `project.environment.delete` is a `human_or_service` mutation at `POST /api/project/environment/delete` with the body `{ keys, requested_by? }`. `keys` holds 1 to 20 keys. A key is `<identity path>@<digest>` or the id `sha256:<hex>` of an untagged image with the owner label. For an environment key, the operation removes the image tags of the digest, its `-base`, `-proved` and `-unchecked` tags, and the proof file `S/environments/<identity path>/<digest>.json` together. For an image id, it removes the image.
+- `project.environment.cache_volume.delete` is a `human_or_service` mutation at `POST /api/project/environment/cache-volume/delete` with the body `{ names, requested_by? }`. `names` holds 1 to 20 names of the form `kanthord_cache_<24 characters>`. The operation removes each named cache volume.
+- Each operation answers 200 with `{ removed, absent, refused: [{ key, reason }] }`. A key that is gone counts in `absent`. A live key counts in `refused` with the reason `live`. The bound current digest of a path is live. A bound pair of a cache volume is live. An image or a volume that a container uses is live.
+- The route accepts a human JWT. The direct adapter accepts a human identity or the `footprint` service identity. Every other service identity answers `403 gateway.access.service_refused`.
+- The Footprint service identity sends `requested_by`, the human who confirmed the cleanup. A human caller sends no `requested_by`. A human caller with `requested_by`, or a service caller without it, answers `400 gateway.request.validation_failed` with the field `requested_by`.
+- Each call writes one log record with the operation, the account of the requester and the three counts. The record holds no key.
+
 ## Error codes
 
 Every remote command can also answer the shared codes of [other.md](other.md#error-codes).

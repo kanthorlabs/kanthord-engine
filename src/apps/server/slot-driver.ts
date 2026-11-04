@@ -5,6 +5,8 @@ import type {
   PoolEntry,
   PoolInstance,
   PoolPlacement,
+  RuntimeStoreInfo,
+  RuntimeUsage,
 } from "../../worker/contract.ts";
 import type { SlotControl } from "../worker/thread-data.ts";
 
@@ -41,4 +43,7 @@ export interface SlotDriver {
   sweepVolumes(archived: ReadonlySet<string>): Promise<void>;
   launch(launch: SlotLaunch): SlotInstance;
   imageOf?(instanceName: string): string | null;
+  runtimeUsage?(): Promise<RuntimeUsage | null>;
+  runtimeStore?(): Promise<RuntimeStoreInfo | null>;
+  removeImage?(reference: string): Promise<boolean>;
 }

@@ -39,12 +39,17 @@ import {
   type Transaction,
 } from "../kernel/store.ts";
 import { createIdentity, identitySchema } from "../kernel/identity.ts";
-import { testHumanIdentity } from "../kernel/test-identity.ts";
+import {
+  testHumanIdentity,
+  testServiceIdentity,
+} from "../kernel/test-identity.ts";
 import { stopAfter, temporary } from "../kernel/test-support.ts";
 import { IdentityKind } from "../kernel/caller.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { GIT_DEADLINE_EXCEEDED } from "../repository/git-failure.ts";
 import { SSH_AGENT_CLEANUP_TIMEOUT_MS } from "../repository/contract.ts";
+import { FootprintErrorCode } from "../footprint/contract.ts";
+import { FOOTPRINT_SERVICE } from "../kernel/cleanup.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
   AgentErrorCode,
@@ -198,6 +203,8 @@ const CORE_OPERATIONS = [
   "project.binding.environment.rebuild",
   "project.environment.list",
   "project.binding.check",
+  "project.environment.delete",
+  "project.environment.cache_volume.delete",
   "project.credential.platform_list",
   "project.credential.create",
   "project.credential.list",
@@ -7398,3 +7405,43 @@ test("binding.environment.set with null removes the key and the source returns t
   assert.equal(read.source, EnvironmentSource.Repository);
   assert.equal(read.commit, INSTRUCTION_COMMIT);
 });
+
+const DELETE_REQUESTER = {
+  kind: "human",
+  account: "ulrich",
+  name: "Ulrich",
+} as const;
+const ENVIRONMENT_KEY = `repository/github/acme/app@${"a".repeat(64)}`;
+
+for (const [key, body] of [
+  [
+    "environment.delete",
+    { keys: [ENVIRONMENT_KEY], requested_by: DELETE_REQUESTER },
+  ],
+  [
+    "environment.cache_volume.delete",
+    {
+      names: ["kanthord_cache_aaaaaaaaaaaaaaaaaaaaaaaa"],
+      requested_by: DELETE_REQUESTER,
+    },
+  ],
+] as const)
+  test(`${key} refuses requested_by from a human caller and takes it from the Footprint service identity`, async (t) => {
+    const f = fixture(t);
+    const operation = projectOperations[key];
+    const input = operation.input.parse({ params: {}, query: {}, body });
+    await assert.rejects(
+      async () => f.registry.get(operation.id).handler(input, f.caller),
+      (error: unknown) =>
+        error instanceof OperationError &&
+        error.status === HttpStatus.BadRequest &&
+        error.code === FootprintErrorCode.ValidationFailed &&
+        JSON.stringify(error.details) ===
+          JSON.stringify([{ path: ["body", "requested_by"], code: "custom" }]),
+    );
+    const answer = await f.registry.get(operation.id).handler(input, {
+      ...f.caller,
+      identity: testServiceIdentity(FOOTPRINT_SERVICE),
+    });
+    assert.deepEqual(answer, { removed: 0, absent: 1, refused: [] });
+  });

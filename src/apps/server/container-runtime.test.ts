@@ -8,7 +8,9 @@ import {
   PoolPlacement,
 } from "../../worker/contract.ts";
 import {
+  absentImage,
   boundedDetail,
+  bytesOf,
   cacheOwnerArguments,
   cacheVolumeArguments,
   cacheVolumeName,
@@ -17,6 +19,7 @@ import {
   detectRuntime,
   IdMap,
   idMapOf,
+  imageIdOf,
   infoArguments,
   inspectContainerArguments,
   inspectVolumeArguments,
@@ -24,16 +27,23 @@ import {
   migrationArguments,
   ownedArguments,
   ownedCacheVolumeArguments,
+  ownedImageArguments,
   parseCacheVolumes,
+  parseRuntimeStore,
+  parseSystemUsage,
   parseVolume,
   PODMAN_AUTO_UIDMAPPING_MIN_VERSION,
   removeArguments,
+  removeImageArguments,
   runArguments,
   type RuntimeAnswer,
   type RuntimeFacts,
   type RuntimeHost,
+  sameImage,
   slotInstanceName,
   SUCCESS_CODE,
+  systemUsageArguments,
+  timeOf,
   unshareMigrationArguments,
   unshareOwnerArguments,
   versionBelow,
@@ -660,10 +670,11 @@ test("inspectVolumeArguments inspects each named volume in one command", () => {
   );
 });
 
-test("parseCacheVolumes answers the name and the two labels of each inspected volume and skips a volume without both labels", () => {
+test("parseCacheVolumes answers the name, the creation time and the two labels of each inspected volume and skips a volume without both labels", () => {
   const output = JSON.stringify([
     {
       Name: "kanthord_cache_aaa",
+      CreatedAt: "2026-11-01T10:00:00Z",
       Labels: {
         "io.kanthord.owner": OWNER,
         "io.kanthord.cache_project": PROJECT_ID,
@@ -685,6 +696,7 @@ test("parseCacheVolumes answers the name and the two labels of each inspected vo
       name: "kanthord_cache_aaa",
       project_id: PROJECT_ID,
       resource_identity: RESOURCE,
+      created_at: Date.parse("2026-11-01T10:00:00Z"),
     },
   ]);
 });
@@ -1124,4 +1136,182 @@ test("the fixture Podman version meets the auto uidmapping version", () => {
     versionBelow("unknown", PODMAN_AUTO_UIDMAPPING_MIN_VERSION),
     true,
   );
+});
+
+const IMAGE_HEX = "a".repeat(64);
+const OTHER_HEX = "b".repeat(64);
+
+test("systemUsageArguments reads the verbose usage as JSON and the image reads hold the owner label", () => {
+  assert.deepEqual(systemUsageArguments(), [
+    "system",
+    "df",
+    "--verbose",
+    "--format",
+    "json",
+  ]);
+  assert.deepEqual(removeImageArguments("localhost/x:1"), [
+    "image",
+    "rm",
+    "localhost/x:1",
+  ]);
+  assert.deepEqual(ownedImageArguments(OWNER), [
+    "image",
+    "ls",
+    "--all",
+    "--no-trunc",
+    "--filter",
+    `label=io.kanthord.owner=${OWNER}`,
+    "--format",
+    "{{.ID}}",
+  ]);
+});
+
+test("parseSystemUsage reads the Docker verbose answer: one image for each id, its references, unique size and containers", () => {
+  const stdout = JSON.stringify({
+    Images: [
+      {
+        ID: `sha256:${IMAGE_HEX}`,
+        Repository: "localhost/kanthord-dev-node",
+        Tag: "1.0.0",
+        CreatedAt: "2026-10-01 10:00:00 +0000 UTC",
+        UniqueSize: "1.5GB",
+        Containers: "2",
+      },
+      {
+        ID: `sha256:${IMAGE_HEX}`,
+        Repository: "localhost/kanthord-dev-node",
+        Tag: "latest",
+        CreatedAt: "2026-10-01 10:00:00 +0000 UTC",
+        UniqueSize: "1.5GB",
+        Containers: "2",
+      },
+      {
+        ID: OTHER_HEX,
+        Repository: "<none>",
+        Tag: "<none>",
+        CreatedAt: "2026-09-01 10:00:00 +0000 UTC",
+        UniqueSize: "12.5MB",
+        Containers: "0",
+      },
+    ],
+    Volumes: [{ Name: "kanthord_cache_x", Size: "2kB", Links: 1 }],
+  });
+  assert.deepEqual(parseSystemUsage(ContainerRuntime.Docker, stdout), {
+    runtime: ContainerRuntime.Docker,
+    images: [
+      {
+        id: `sha256:${IMAGE_HEX}`,
+        references: [
+          "localhost/kanthord-dev-node:1.0.0",
+          "localhost/kanthord-dev-node:latest",
+        ],
+        created_at: Date.parse("2026-10-01T10:00:00Z"),
+        unique_bytes: 1500000000,
+        containers: 2,
+      },
+      {
+        id: `sha256:${OTHER_HEX}`,
+        references: [],
+        created_at: Date.parse("2026-09-01T10:00:00Z"),
+        unique_bytes: 12500000,
+        containers: 0,
+      },
+    ],
+    volumes: [{ name: "kanthord_cache_x", bytes: 2000, links: 1 }],
+  });
+});
+
+test("parseSystemUsage reads the Podman answer with numeric sizes, seconds and VolumeName", () => {
+  const stdout = JSON.stringify({
+    Images: [
+      {
+        ImageID: IMAGE_HEX,
+        Repository: "localhost/kanthord-env/x",
+        Tag: OTHER_HEX,
+        Created: 1790000000,
+        UniqueSize: 4096,
+        Containers: 0,
+      },
+    ],
+    Volumes: [{ VolumeName: "kanthord_cache_y", Size: 10, Links: 0 }],
+  });
+  const usage = parseSystemUsage(ContainerRuntime.Podman, stdout);
+  assert.deepEqual(usage.images, [
+    {
+      id: `sha256:${IMAGE_HEX}`,
+      references: [`localhost/kanthord-env/x:${OTHER_HEX}`],
+      created_at: 1790000000000,
+      unique_bytes: 4096,
+      containers: 0,
+    },
+  ]);
+  assert.deepEqual(usage.volumes, [
+    { name: "kanthord_cache_y", bytes: 10, links: 0 },
+  ]);
+});
+
+test("bytesOf, timeOf and the image id helpers read the runtime value forms", () => {
+  const noBytes = 0;
+  const kiloBytes = 1200;
+  const mebiBytes = 2097152;
+  const plainBytes = 77;
+  assert.equal(bytesOf("0B"), noBytes);
+  assert.equal(bytesOf("1.2kB"), kiloBytes);
+  assert.equal(bytesOf("2MiB"), mebiBytes);
+  assert.equal(bytesOf(plainBytes), plainBytes);
+  assert.equal(bytesOf("n/a"), noBytes);
+  assert.equal(timeOf(null), null);
+  assert.equal(
+    timeOf("2026-11-01T00:00:00Z"),
+    Date.parse("2026-11-01T00:00:00Z"),
+  );
+  assert.equal(imageIdOf(IMAGE_HEX), `sha256:${IMAGE_HEX}`);
+  assert.ok(sameImage(IMAGE_HEX.slice(0, 12), `sha256:${IMAGE_HEX}`));
+  assert.ok(!sameImage(OTHER_HEX, `sha256:${IMAGE_HEX}`));
+  assert.ok(
+    absentImage({ code: 1, stdout: "", stderr: "Error: image not known" }),
+  );
+  assert.ok(!absentImage({ code: 1, stdout: "", stderr: "permission denied" }));
+});
+
+test("parseRuntimeStore reads the Podman graph root sizes and the Docker root directory and system", () => {
+  assert.deepEqual(
+    parseRuntimeStore(
+      ContainerRuntime.Podman,
+      JSON.stringify({
+        host: {},
+        store: {
+          graphRoot: "/var/lib/containers/storage",
+          graphRootAllocated: 1000,
+          graphRootUsed: 400,
+        },
+      }),
+    ),
+    {
+      runtime: ContainerRuntime.Podman,
+      graph_root: "/var/lib/containers/storage",
+      graph_root_allocated: 1000,
+      graph_root_used: 400,
+      docker_root_dir: null,
+      operating_system: null,
+    },
+  );
+  assert.deepEqual(
+    parseRuntimeStore(
+      ContainerRuntime.Docker,
+      JSON.stringify({
+        DockerRootDir: "/var/lib/docker",
+        OperatingSystem: "Docker Desktop",
+      }),
+    ),
+    {
+      runtime: ContainerRuntime.Docker,
+      graph_root: null,
+      graph_root_allocated: null,
+      graph_root_used: null,
+      docker_root_dir: "/var/lib/docker",
+      operating_system: "Docker Desktop",
+    },
+  );
+  assert.throws(() => parseRuntimeStore(ContainerRuntime.Docker, "[]"));
 });

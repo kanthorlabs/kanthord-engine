@@ -171,6 +171,8 @@ import { writeStoredEnvironment } from "./environment-agent-tools.ts";
 import type { EnvironmentProbeRunner } from "./environment-probe-contract.ts";
 import { EnvironmentSecretRoutes } from "./environment-secret.ts";
 import { EnvironmentSecrets } from "./environment-secrets.ts";
+import { type BoundRepository, ProjectFootprint } from "./footprint.ts";
+import { requesterOf } from "../kernel/cleanup.ts";
 import type { EnvironmentTelemetry } from "./environment-telemetry.ts";
 import type { EnvironmentTarget } from "./environment-state.ts";
 import {
@@ -752,6 +754,7 @@ export class ProjectService implements Service, ProjectBindings {
   private readonly wakeup: SchedulerWakeup;
   private readonly environments: ProjectEnvironments;
   private readonly onboarding: Onboarding;
+  readonly footprint: ProjectFootprint;
   private readonly logger: Logger;
   constructor(dependencies: Dependencies) {
     this.logger = dependencies.logger ?? pino({ level: "silent" });
@@ -788,6 +791,15 @@ export class ProjectService implements Service, ProjectBindings {
       writeBindings: (projectId, body, caller) =>
         this.writeBindings(projectId, body, caller),
     });
+    const proofRoot = join(this.stateDirectory, ENVIRONMENT_DIRECTORY);
+    const proofs = new ProofFiles(proofRoot);
+    this.footprint = new ProjectFootprint({
+      runtime: dependencies.environmentRuntime,
+      proofs,
+      proofRoot,
+      bound: () => this.boundRepositories(),
+      logger: this.logger,
+    });
     this.onboarding = new Onboarding({
       bindingsOf: (projectId) => this.bindingFactsOf(projectId),
       workerEnvironmentOf: (projectId, resourceIdentity) =>
@@ -799,7 +811,7 @@ export class ProjectService implements Service, ProjectBindings {
       baseCommitOf: (bindingId, context) =>
         this.environments.baseCommitOf(bindingId, context),
       runtime: dependencies.environmentRuntime,
-      proofs: new ProofFiles(join(this.stateDirectory, ENVIRONMENT_DIRECTORY)),
+      proofs,
       secrets: new EnvironmentSecrets({
         root: join(this.stateDirectory, ENVIRONMENT_DIRECTORY),
         transaction: (write) => this.operationalStore.transaction(write),
@@ -1014,6 +1026,44 @@ export class ProjectService implements Service, ProjectBindings {
       projectOperations["binding.check"],
       ({ params, body }, caller) =>
         this.checkBinding(params, body.config, caller),
+    );
+    registry.register(
+      projectOperations["environment.delete"],
+      ({ body }, caller) =>
+        this.footprint.deleteEnvironments(
+          body.keys,
+          requesterOf(caller.identity, body.requested_by),
+          caller.context.signal,
+        ),
+    );
+    registry.register(
+      projectOperations["environment.cache_volume.delete"],
+      ({ body }, caller) =>
+        this.footprint.deleteCacheVolumes(
+          body.names,
+          requesterOf(caller.identity, body.requested_by),
+          caller.context.signal,
+        ),
+    );
+  }
+
+  boundPaths(): string[] {
+    return this.footprint.boundPaths();
+  }
+
+  private boundRepositories(): BoundRepository[] {
+    const projectIds = this.operationalStore.transaction((tx) =>
+      readProjectIds(tx),
+    );
+    return projectIds.flatMap((projectId) =>
+      this.bindingFactsOf(projectId).repositories.map((group) => ({
+        project_id: projectId,
+        resource_identity: group.resource_identity,
+        digest: this.onboarding.environmentDigestOf(
+          projectId,
+          group.resource_identity,
+        ),
+      })),
     );
   }
   private async verifyBinding(

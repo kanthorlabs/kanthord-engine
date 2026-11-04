@@ -1,0 +1,247 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: footprint.cleanup.cancel
+    tags:
+      - footprint
+    description: Cancel a queued cleanup. A running cleanup refuses.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: cleanup_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/footprint.cleanup.cancel.Input/properties/params/pr\
+            operties/cleanup_id"
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/footprint.cleanup.cancel.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    footprint.cleanup.cancel.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            cleanup_id:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^cleanup_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: cleanup_ followed by a canonical 26-character uppercase ULID.
+          required:
+            - cleanup_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    footprint.cleanup.cancel.Output:
+      type: object
+      properties:
+        cleanup_id:
+          type: string
+          minLength: 34
+          maxLength: 34
+          pattern: ^cleanup_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: cleanup_ followed by a canonical 26-character uppercase ULID.
+        kind:
+          type: string
+          enum:
+            - trace
+            - database_backup
+            - environment
+            - cache_volume
+            - slot_image
+            - session
+            - workspace
+            - tool_output
+        instance_name:
+          anyOf:
+            - type: string
+              minLength: 1
+              maxLength: 63
+              pattern: ^[a-z][a-z0-9-]*$
+            - type: "null"
+        rule:
+          anyOf:
+            - oneOf:
+                - type: object
+                  properties:
+                    name:
+                      type: string
+                      const: older_than
+                    older_than_days:
+                      type: integer
+                      minimum: 1
+                      maximum: 3650
+                  required:
+                    - name
+                    - older_than_days
+                  additionalProperties: false
+                - type: object
+                  properties:
+                    name:
+                      type: string
+                      const: node_closed
+                  required:
+                    - name
+                  additionalProperties: false
+                - type: object
+                  properties:
+                    name:
+                      type: string
+                      const: unbound
+                  required:
+                    - name
+                  additionalProperties: false
+                - type: object
+                  properties:
+                    name:
+                      type: string
+                      const: superseded
+                  required:
+                    - name
+                  additionalProperties: false
+                - type: object
+                  properties:
+                    name:
+                      type: string
+                      const: dangling
+                  required:
+                    - name
+                  additionalProperties: false
+            - type: "null"
+        keys:
+          type: array
+          items:
+            type: string
+        requested_by:
+          type: object
+          properties:
+            kind:
+              type: string
+              const: human
+            account:
+              type: string
+            name:
+              type: string
+          required:
+            - kind
+            - account
+            - name
+          additionalProperties: false
+        requested_at:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+        state:
+          type: string
+          enum:
+            - queued
+            - running
+            - completed
+            - failed
+            - cancelled
+        finished_at:
+          anyOf:
+            - type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            - type: "null"
+        outcome:
+          anyOf:
+            - type: object
+              properties:
+                removed:
+                  type: integer
+                  minimum: 0
+                  maximum: 9007199254740991
+                removed_bytes:
+                  anyOf:
+                    - type: integer
+                      minimum: 0
+                      maximum: 9007199254740991
+                    - type: "null"
+                absent:
+                  type: integer
+                  minimum: 0
+                  maximum: 9007199254740991
+                refused:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      key:
+                        type: string
+                      reason:
+                        type: string
+                        enum:
+                          - live
+                          - unreadable
+                    required:
+                      - key
+                      - reason
+                    additionalProperties: false
+                pending:
+                  type: integer
+                  minimum: 0
+                  maximum: 9007199254740991
+              required:
+                - removed
+                - removed_bytes
+                - absent
+                - refused
+                - pending
+              additionalProperties: false
+            - type: "null"
+      required:
+        - cleanup_id
+        - kind
+        - instance_name
+        - rule
+        - keys
+        - requested_by
+        - requested_at
+        - state
+        - finished_at
+        - outcome
+      additionalProperties: false

@@ -28,13 +28,18 @@ import {
   SCHEDULER_SERVICE_NAME,
   type WorkQueue,
 } from "../../scheduler/contract.ts";
-import { trackingMigrations, TrackingService } from "../../tracking/index.ts";
+import {
+  TrackingFootprint,
+  trackingMigrations,
+  TrackingService,
+} from "../../tracking/index.ts";
 import {
   type ExecutionTrace,
   MISSION_PRODUCER,
   PROJECT_PRODUCER,
   SESSION_READ_WAIT_MS,
   TRACKING_SERVICE_NAME,
+  trackingOperations,
   WORKER_PRODUCER,
 } from "../../tracking/contract.ts";
 import {
@@ -55,10 +60,11 @@ import {
   type RepositoryFiles,
   RepositoryPlatform,
 } from "../../project/contract.ts";
-import type {
-  PoolPlacement,
-  PromptBase,
-  WorkerRegistrations,
+import {
+  type PoolPlacement,
+  type PromptBase,
+  workerOperations,
+  type WorkerRegistrations,
 } from "../../worker/contract.ts";
 import type { SlotDriver } from "./slot-driver.ts";
 import { audit, ensureDirectory, PRIVATE_UMASK } from "../../kernel/files.ts";
@@ -104,12 +110,29 @@ import {
   ProjectService,
   projectSshIdentityAuthorization,
 } from "../../project/index.ts";
-import { intakeMigrations, IntakeService } from "../../intake/index.ts";
+import {
+  IntakeFootprint,
+  intakeMigrations,
+  IntakeService,
+  oldestInboundEvent,
+} from "../../intake/index.ts";
 import {
   Consumer,
   INTAKE_SERVICE_NAME,
   intakeOperations,
 } from "../../intake/contract.ts";
+import {
+  CleanableKind,
+  FOOTPRINT_SERVICE_NAME,
+} from "../../footprint/contract.ts";
+import {
+  deviceKey,
+  footprintMigrations,
+  FootprintService,
+  type InvokeOperation,
+  ownerDeleter,
+  ServerHost,
+} from "../../footprint/index.ts";
 import { mintServiceIdentity } from "../../kernel/service-mint.ts";
 import {
   agentPromptContribution,
@@ -138,6 +161,7 @@ import { WorkerPool } from "./worker-pool.ts";
 import { instanceIssuer } from "./instance-issuer.ts";
 import { AgentComponent, agentMigrations } from "../../agent/index.ts";
 import {
+  WorkbenchFootprint,
   workbenchMigrations,
   type WorkbenchModelRuntimeFactory,
   WorkbenchService,
@@ -226,6 +250,7 @@ export function composeServices(options: {
   store: Store;
   trackingStore: Store;
   stateDirectory: string;
+  configPath?: string;
   logger: Logger;
   health: HealthRegistry;
   repositoryConnector?: RepositoryConnector;
@@ -380,6 +405,8 @@ export function composeServices(options: {
     cacheVolumes: () => environmentImages.cacheVolumes(),
     removeCacheVolume: (projectId, resourceIdentity) =>
       environmentImages.removeCacheVolume(projectId, resourceIdentity),
+    footprintUsage: (signal) => environmentImages.footprintUsage(signal),
+    removeImage: (reference) => environmentImages.removeImage(reference),
   };
   const containerSlotDriver =
     options.containerSlotDriver?.(containerDriver) ?? containerDriver;
@@ -493,6 +520,7 @@ export function composeServices(options: {
   });
   const tracking = new TrackingService({
     store: options.trackingStore,
+    logger: options.logger,
     writableDays: options.config.tracking.trace_writable_days,
     isHostedWorker,
     executions: {
@@ -1125,6 +1153,84 @@ export function composeServices(options: {
         clientOptions,
       ),
   });
+  const footprintIdentity = mintServiceIdentity(FOOTPRINT_SERVICE_NAME);
+  const invokeOperation: InvokeOperation = (operation, input, clientOptions) =>
+    directClient({ [operation.id]: operation }, invocation)[operation.id]!(
+      input as never,
+      clientOptions,
+    );
+  const stateDevice = () => deviceKey(options.stateDirectory);
+  const footprint = new FootprintService({
+    store: options.store,
+    config: options.config.footprint,
+    logger: options.logger,
+    serverHost: new ServerHost({
+      store: options.store,
+      databasePath: options.store.path,
+      trackingDatabasePath: options.trackingStore.path,
+      configPath: options.configPath ?? configPath(),
+      stateDirectory: options.stateDirectory,
+      breakdownRows: {
+        mission_evidence: { delete_operation: "mission.evidence.delete" },
+        intake_inbound_event: {
+          delete_operation: "intake.inbound.event.delete",
+          oldest_at: () => options.store.transaction(oldestInboundEvent),
+        },
+        intake_outbound_request: {
+          delete_operation: "intake.outbound.request.delete",
+        },
+      },
+    }),
+    instances: {
+      instanceStateOf: (tx, name) => worker.instanceStateOf(tx, name),
+    },
+    deleters: () => ({
+      [CleanableKind.Trace]: ownerDeleter(
+        invokeOperation,
+        footprintIdentity,
+        trackingOperations.traceDelete,
+        "trace_ids",
+      ),
+      [CleanableKind.Environment]: ownerDeleter(
+        invokeOperation,
+        footprintIdentity,
+        projectOperations["environment.delete"],
+        "keys",
+      ),
+      [CleanableKind.CacheVolume]: ownerDeleter(
+        invokeOperation,
+        footprintIdentity,
+        projectOperations["environment.cache_volume.delete"],
+        "names",
+      ),
+      [CleanableKind.SlotImage]: ownerDeleter(
+        invokeOperation,
+        footprintIdentity,
+        workerOperations["slot_image.delete"],
+        "references",
+      ),
+    }),
+  });
+  footprint.register(project.footprint);
+  footprint.register(worker.footprint);
+  footprint.register(
+    new TrackingFootprint({
+      store: options.trackingStore,
+      path: options.trackingStore.path,
+    }),
+  );
+  footprint.register(
+    new IntakeFootprint({
+      stateDirectory: options.stateDirectory,
+      device: stateDevice,
+    }),
+  );
+  footprint.register(
+    new WorkbenchFootprint({
+      stateDirectory: options.stateDirectory,
+      device: stateDevice,
+    }),
+  );
   scheduler.declare(registry);
   tracking.declare(registry);
   llm.declare(registry);
@@ -1137,6 +1243,7 @@ export function composeServices(options: {
   project.declare(registry);
   intake.declare(registry);
   workbench.declare(registry);
+  footprint.declare(registry);
   const gateway = new GatewayService({
     config: options.config.gateway,
     logger: options.logger,
@@ -1193,6 +1300,7 @@ export function composeServices(options: {
     intake,
     worker,
     workbench,
+    footprint,
     gateway,
     invocation,
     registry,
@@ -1217,6 +1325,7 @@ export const serverMigrations: Migrations = [
   { service: "project", migrations: projectMigrations },
   { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
   { service: WORKBENCH_SERVICE_NAME, migrations: workbenchMigrations },
+  { service: FOOTPRINT_SERVICE_NAME, migrations: footprintMigrations },
   { service: REPOSITORY_COMPONENT_NAME, migrations: repositoryMigrations },
 ];
 
@@ -1323,6 +1432,7 @@ export class Server implements Service {
         project,
         intake,
         workbench,
+        footprint,
         gateway,
         invocation,
         environmentImages,
@@ -1331,6 +1441,7 @@ export class Server implements Service {
         store: this.store,
         trackingStore,
         stateDirectory: paths.state,
+        configPath: this.path,
         logger: this.log.logger,
         health: this.health,
       });
@@ -1350,6 +1461,7 @@ export class Server implements Service {
         project,
         intake,
         workbench,
+        footprint,
         gateway,
       ];
       this.services = services;

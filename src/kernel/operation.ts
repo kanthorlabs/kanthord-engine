@@ -10,6 +10,7 @@ export const AccessPolicy = {
   Client: "client",
   Worker: "worker",
   HumanOrWorker: "human_or_worker",
+  HumanOrService: "human_or_service",
   Public: "public",
   Delivery: "delivery",
   Service: "service",
@@ -55,6 +56,7 @@ export interface Operation<
   >;
   path: string;
   access: AccessPolicy;
+  services?: readonly string[];
   timeoutMs: number;
   mutation: boolean;
   store: StoreName;
@@ -168,6 +170,14 @@ export class OperationRegistry {
       operation.access !== AccessPolicy.Client
     )
       throw new Error("Only a human or client operation is direct.");
+    if (
+      (operation.access === AccessPolicy.HumanOrService) !==
+      (operation.services !== undefined &&
+        operation.services.length > EMPTY_REGISTRY_SIZE)
+    )
+      throw new Error(
+        "A human_or_service operation lists its services, and no other operation lists services.",
+      );
     if (!Object.values(OperationLifetime).includes(operation.lifetime))
       throw new Error("Every route must declare a valid lifetime.");
     if (operation.access === AccessPolicy.Delivery) {

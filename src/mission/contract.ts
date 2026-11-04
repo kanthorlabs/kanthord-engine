@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { humanActorSchema } from "../kernel/actor.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import { timestamp } from "../kernel/json.ts";
 import { isString } from "../kernel/values.ts";
@@ -745,11 +746,7 @@ export const revisionChangeSchema = z.strictObject({
 });
 export type RevisionChange = z.infer<typeof revisionChangeSchema>;
 export const actorSchema = z.discriminatedUnion("kind", [
-  z.strictObject({
-    kind: z.literal(ActorKind.Human),
-    account: z.string(),
-    name: z.string(),
-  }),
+  humanActorSchema,
   z.strictObject({
     kind: z.literal(ActorKind.Execution),
     execution_id: identitySchema("execution"),

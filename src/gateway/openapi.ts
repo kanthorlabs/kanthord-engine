@@ -198,6 +198,7 @@ function emitOperation(operation: Operation, schemas: Record<string, unknown>) {
     "x-kanthord-lifetime": operation.lifetime,
     security:
       operation.access === AccessPolicy.Human ||
+      operation.access === AccessPolicy.HumanOrService ||
       operation.access === AccessPolicy.Client
         ? [{ bearerAuth: [] }]
         : [],

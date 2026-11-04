@@ -71,9 +71,15 @@ import {
   type AgentPin,
   type AgentSelection,
 } from "../scheduler/contract.ts";
+import { FOOTPRINT_SERVICE } from "../kernel/cleanup.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { ProjectErrorCode } from "../project/contract.ts";
 import { OperationError } from "../kernel/errors.ts";
+import {
+  testHumanIdentity,
+  testServiceIdentity,
+} from "../kernel/test-identity.ts";
+import { packageVersion } from "../kernel/version.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
 import { PROMPT_SOURCE_READ_MS } from "../kernel/prompt-source.ts";
@@ -3286,5 +3292,81 @@ test("a session read of a container instance reads the pool host", async (t) => 
   assert.deepEqual(
     { instance: answer.instance, placement: answer.placement },
     { instance: `box-${placement}`, placement },
+  );
+});
+
+const SLOT_REQUESTER = {
+  kind: "human",
+  account: "ulrich",
+  name: "Ulrich",
+} as const;
+
+test("slot_image.delete refuses requested_by from a human caller and refuses the configured image from the Footprint service identity", async (t) => {
+  const f = poolFixture(t, 0);
+  const configured = `docker.io/kanthorlabs/kanthord:${packageVersion()}`;
+  const old = "docker.io/kanthorlabs/kanthord:0.0.1";
+  f.host.usage = {
+    runtime: ContainerRuntime.Podman,
+    images: [
+      {
+        id: `sha256:${"1".repeat(64)}`,
+        references: [configured],
+        created_at: 1,
+        unique_bytes: 1,
+        containers: 0,
+      },
+      {
+        id: `sha256:${"2".repeat(64)}`,
+        references: [old],
+        created_at: 1,
+        unique_bytes: 1,
+        containers: 0,
+      },
+    ],
+    volumes: [],
+  };
+  const operation = workerOperations["slot_image.delete"];
+  const input = operation.input.parse({
+    params: {},
+    query: {},
+    body: { references: [configured, old], requested_by: SLOT_REQUESTER },
+  });
+  await assert.rejects(
+    async () =>
+      f.registry.get(operation.id).handler(input, {
+        ...f.caller,
+        identity: testHumanIdentity("alice", "Alice", "jti"),
+      }),
+    (error: unknown) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.BadRequest &&
+      JSON.stringify(error.details) ===
+        JSON.stringify([{ path: ["body", "requested_by"], code: "custom" }]),
+  );
+  const answer = await f.registry.get(operation.id).handler(input, {
+    ...f.caller,
+    identity: testServiceIdentity(FOOTPRINT_SERVICE),
+  });
+  assert.deepEqual(answer, {
+    removed: 1,
+    absent: 0,
+    refused: [{ key: configured, reason: "live" }],
+  });
+  assert.deepEqual(f.host.removedImages, [old]);
+});
+
+test("instanceStateOf answers null for an unknown name and the archive state of the latest revision", (t) => {
+  const f = poolFixture(t, 1);
+  f.store.transaction((tx) => {
+    assert.equal(f.worker.instanceStateOf(tx, "absent"), null);
+    assert.deepEqual(f.worker.instanceStateOf(tx, f.nameOf(0)), {
+      archived: false,
+    });
+  });
+  f.archive(0);
+  f.store.transaction((tx) =>
+    assert.deepEqual(f.worker.instanceStateOf(tx, f.nameOf(0)), {
+      archived: true,
+    }),
   );
 });

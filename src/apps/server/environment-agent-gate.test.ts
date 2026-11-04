@@ -150,6 +150,12 @@ function fakeEnvironmentRuntime(passing: ReadonlySet<string>) {
     removeStaleRuns: async () => {},
     cacheVolumes: async () => [],
     removeCacheVolume: async () => {},
+    footprintUsage: async () => ({
+      usage: { runtime: "podman", images: [], volumes: [] },
+      owned_image_ids: [],
+      cache_volumes: [],
+    }),
+    removeImage: async () => false,
   };
   return { runtime, proves, builds };
 }

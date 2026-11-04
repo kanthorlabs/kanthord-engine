@@ -41,6 +41,7 @@ export const SECRET_OPERATION_IDS: ReadonlySet<string> = new Set([
 const HUMAN_POLICIES: readonly AccessPolicy[] = [
   AccessPolicy.Human,
   AccessPolicy.HumanOrWorker,
+  AccessPolicy.HumanOrService,
 ];
 
 export type InvokeOperation = (

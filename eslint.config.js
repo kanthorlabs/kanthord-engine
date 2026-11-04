@@ -280,7 +280,7 @@ export default tseslint.config(
         {
           type: "service",
           pattern:
-            "src/(custody|project|mission|scheduler|worker|workbench|tracking|gateway|intake)",
+            "src/(custody|project|mission|scheduler|worker|workbench|tracking|gateway|intake|footprint)",
           capture: ["name"],
         },
         { type: "apps-server", pattern: "src/apps/server" },
@@ -695,6 +695,34 @@ export default tseslint.config(
                     fileInternalPath: "contract.ts",
                   }),
                   dependency: { kind: "type" },
+                },
+              ],
+            },
+            {
+              from: element("service", {
+                captured: { name: "footprint" },
+                fileInternalPath: "contract.ts",
+              }),
+              allow: [
+                {
+                  to: element("service", {
+                    captured: { name: "{tracking,worker}" },
+                    fileInternalPath: "contract.ts",
+                  }),
+                },
+              ],
+            },
+            {
+              from: element("service", {
+                captured: { name: "footprint" },
+                fileInternalPath: "{test-support.ts,*.test.ts}",
+              }),
+              allow: [
+                {
+                  to: element("service", {
+                    captured: { name: "{gateway,tracking}" },
+                    fileInternalPath: "index.ts",
+                  }),
                 },
               ],
             },

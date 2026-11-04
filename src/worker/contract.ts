@@ -1,5 +1,11 @@
 import { z } from "zod";
 import { identitySchema } from "../kernel/identity.ts";
+import {
+  CLEANUP_BATCH_ROWS,
+  CLEANUP_SERVICES,
+  ownerDeleteAnswerSchema,
+  requestedByField,
+} from "../kernel/cleanup.ts";
 import { canonicalJSON, timestamp } from "../kernel/json.ts";
 import { base64urlSchema, sealedObjectSchema } from "../kernel/hpke.ts";
 import {
@@ -835,6 +841,32 @@ export const sessionReadResultSchema = z.discriminatedUnion("outcome", [
     ]),
   }),
 ]);
+export interface RuntimeImageUsage {
+  readonly id: string;
+  readonly references: readonly string[];
+  readonly created_at: number | null;
+  readonly unique_bytes: number;
+  readonly containers: number;
+}
+export interface RuntimeVolumeUsage {
+  readonly name: string;
+  readonly bytes: number;
+  readonly links: number;
+}
+export interface RuntimeUsage {
+  readonly runtime: ContainerRuntime;
+  readonly images: readonly RuntimeImageUsage[];
+  readonly volumes: readonly RuntimeVolumeUsage[];
+}
+export interface RuntimeStoreInfo {
+  readonly runtime: ContainerRuntime;
+  readonly graph_root: string | null;
+  readonly graph_root_allocated: number | null;
+  readonly graph_root_used: number | null;
+  readonly docker_root_dir: string | null;
+  readonly operating_system: string | null;
+}
+
 export interface PoolHost {
   prepare(): void;
   start(instance: PoolInstance, entries: readonly PoolEntry[]): void;
@@ -850,6 +882,9 @@ export interface PoolHost {
     read: SessionRead,
     signal: AbortSignal,
   ): Promise<SessionReadResult>;
+  runtimeUsage(signal: AbortSignal): Promise<RuntimeUsage | null>;
+  runtimeStore(signal: AbortSignal): Promise<RuntimeStoreInfo | null>;
+  removeImage(reference: string): Promise<boolean>;
 }
 
 export const WORKER_SERVICE_NAME = "worker";
@@ -1142,6 +1177,11 @@ const emptyFields = z.strictObject({});
 const runtimeIdentityParams = z.strictObject({
   runtime_identity: identitySchema("worker_registration"),
 });
+export const SLOT_IMAGE_REFERENCE_MAX_LENGTH = 512;
+export const slotImageReferenceSchema = z
+  .string()
+  .max(SLOT_IMAGE_REFERENCE_MAX_LENGTH)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._/:@-]*$/);
 const humanOperation = {
   service: WORKER_SERVICE_NAME,
   store: StoreName.Operational,
@@ -1773,5 +1813,29 @@ export const workerOperations = {
     }),
     description:
       "Create a worker registration with a bearer machine JWT and an empty body. A client identity with a live registration receives that runtime identity with any key. A recorded replay after the registration ends answers 409 gateway.registration.stale. Admission and the binding instance count share one transaction.",
+  },
+  "slot_image.delete": {
+    ...humanOperation,
+    access: AccessPolicy.HumanOrService,
+    services: CLEANUP_SERVICES,
+    id: "worker.slot_image.delete",
+    method: HttpMethod.Post,
+    path: "/api/worker/slot-image/delete",
+    mutation: true,
+    body: true,
+    input: z.strictObject({
+      params: emptyFields,
+      query: emptyFields,
+      body: z.strictObject({
+        references: z
+          .array(slotImageReferenceSchema)
+          .min(1)
+          .max(CLEANUP_BATCH_ROWS),
+        ...requestedByField,
+      }),
+    }),
+    output: ownerDeleteAnswerSchema,
+    description:
+      "Delete slot images by reference. The configured image of the running version and an image that a container uses refuse.",
   },
 } as const satisfies Record<string, Operation>;

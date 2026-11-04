@@ -8,6 +8,8 @@ import type {
   PoolHost,
   PoolInstance,
   PoolPlacement,
+  RuntimeStoreInfo,
+  RuntimeUsage,
   SessionRead,
   SessionReadResult,
 } from "./contract.ts";
@@ -173,5 +175,26 @@ export class FakePoolHost implements PoolHost {
   ): Promise<SessionReadResult> {
     this.sessionReads.push({ instance, read });
     return this.sessionReadResult;
+  }
+  usage: RuntimeUsage | null = null;
+  store: RuntimeStoreInfo | null = null;
+  usageReads = 0;
+  storeReads = 0;
+  readonly removedImages: string[] = [];
+  async runtimeUsage(): Promise<RuntimeUsage | null> {
+    this.usageReads++;
+    return this.usage;
+  }
+  async runtimeStore(): Promise<RuntimeStoreInfo | null> {
+    this.storeReads++;
+    return this.store;
+  }
+  async removeImage(reference: string): Promise<boolean> {
+    const known =
+      this.usage?.images.some((image) =>
+        image.references.includes(reference),
+      ) ?? false;
+    if (known) this.removedImages.push(reference);
+    return known;
   }
 }

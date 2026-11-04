@@ -3,9 +3,12 @@ import { test } from "node:test";
 import { directClient } from "./index.ts";
 import { generateHumanJWT } from "./auth/jwt.ts";
 import { gatewayOperations } from "./contract.ts";
-import { IdentityKind } from "../kernel/caller.ts";
+import { IdentityKind, isServiceIdentity } from "../kernel/caller.ts";
+import { FOOTPRINT_SERVICE } from "../kernel/cleanup.ts";
+import { testServiceIdentity } from "../kernel/test-identity.ts";
 import { z } from "zod";
 import {
+  AccessPolicy,
   emptyInput,
   OperationLifetime,
   OperationRegistry,
@@ -77,4 +80,35 @@ test("HTTP invocations forward the Host header and direct invocations forward no
   const result = await fixture.gateway.invocation.invoke(operation.id, input);
   assert.equal(result.status, HttpStatus.OK);
   assert.deepEqual(result.body, { host: null });
+});
+
+test("the Footprint service identity reaches a human_or_service owner handler", async (t) => {
+  const registry = new OperationRegistry();
+  const owner = {
+    id: "test.owner_delete",
+    service: "test",
+    method: "POST",
+    path: "/api/test/owner-delete",
+    access: AccessPolicy.HumanOrService,
+    services: [FOOTPRINT_SERVICE],
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    timeoutMs: 30000,
+    mutation: false,
+    input: emptyInput,
+    output: z.string(),
+    status: HttpStatus.OK,
+    description: "Answer the service of the caller.",
+  } as const;
+  registry.register(owner, (_input, caller) =>
+    isServiceIdentity(caller.identity) ? caller.identity.service : "none",
+  );
+  const fixture = await gatewayFixture(t, { registry });
+  const result = await directClient(
+    { owner },
+    fixture.gateway.invocation,
+  ).owner(input, { identity: testServiceIdentity(FOOTPRINT_SERVICE) });
+  assert.equal(result.type, OperationResultType.Completed);
+  assert.ok(result.type === OperationResultType.Completed);
+  assert.equal(result.data, FOOTPRINT_SERVICE);
 });

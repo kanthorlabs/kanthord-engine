@@ -38,6 +38,7 @@ import {
   ENVIRONMENT_IMAGE_PREFIX,
   type EnvironmentFailureClass,
   type EnvironmentRuntime,
+  type EnvironmentUsage,
   type ImageBuildInput,
   ImageBuildOutcome,
   type ImageBuildResult,
@@ -55,19 +56,25 @@ import {
   runCommand,
 } from "./environment-proof.ts";
 import {
+  absentImage,
   absentVolume,
   CACHE_MOUNT,
   cacheVolumeName,
   CONTAINER_UID,
+  imageIdOf,
   inspectVolumeArguments,
   linesOf,
   ownedCacheVolumeArguments,
+  ownedImageArguments,
   OWNER_LABEL,
   parseCacheVolumes,
+  parseSystemUsage,
+  removeImageArguments,
   removeNamedVolumeArguments,
   type RuntimeHost,
   SLOT_HOME,
   SUCCESS_CODE,
+  systemUsageArguments,
 } from "./container-runtime.ts";
 
 export const EnvironmentImageFailure = {
@@ -628,6 +635,47 @@ export class EnvironmentImages implements Omit<
         project_id,
         resource_identity,
       }),
+    );
+  }
+
+  async footprintUsage(signal: AbortSignal): Promise<EnvironmentUsage> {
+    signal.throwIfAborted();
+    const runtime = this.runtime();
+    const used = await this.answer(systemUsageArguments());
+    if (used.code !== SUCCESS_CODE)
+      throw new Error(
+        `The runtime usage read failed: ${used.stderr.slice(-OUTPUT_TAIL_BYTES)}`,
+      );
+    const owned = await this.answer(ownedImageArguments(this.options.owner));
+    if (owned.code !== SUCCESS_CODE)
+      throw new Error(
+        `The owned image listing failed: ${owned.stderr.slice(-OUTPUT_TAIL_BYTES)}`,
+      );
+    const listed = await this.answer(
+      ownedCacheVolumeArguments(this.options.owner),
+    );
+    if (listed.code !== SUCCESS_CODE) throw cacheListingFailure(listed.stderr);
+    const names = linesOf(listed.stdout);
+    let cacheVolumes: EnvironmentUsage["cache_volumes"] = [];
+    if (names.length !== NO_VOLUMES) {
+      const inspected = await this.answer(inspectVolumeArguments(names));
+      if (inspected.code !== SUCCESS_CODE)
+        throw cacheListingFailure(inspected.stderr);
+      cacheVolumes = parseCacheVolumes(inspected.stdout);
+    }
+    return {
+      usage: parseSystemUsage(runtime, used.stdout),
+      owned_image_ids: linesOf(owned.stdout).map(imageIdOf),
+      cache_volumes: cacheVolumes,
+    };
+  }
+
+  async removeImage(reference: string): Promise<boolean> {
+    const removed = await this.answer(removeImageArguments(reference));
+    if (removed.code === SUCCESS_CODE) return true;
+    if (absentImage(removed)) return false;
+    throw new Error(
+      `The removal of the image ${reference} failed: ${removed.stderr.slice(-OUTPUT_TAIL_BYTES)}`,
     );
   }
 
