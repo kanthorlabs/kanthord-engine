@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { canonicalJSON } from "../../kernel/json.ts";
 import { isObject, isString } from "../../kernel/values.ts";
+import { type KnownMatcher, redactValue } from "../../agent/sensitive-text.ts";
 import {
   entryIdentitySchema,
   RecordKind,
@@ -22,7 +23,6 @@ export const PinnedContextPart = { SystemPrompt: "system_prompt" } as const;
 export type PinnedContextPart =
   (typeof PinnedContextPart)[keyof typeof PinnedContextPart];
 
-const REDACTED = "[redacted]";
 const HALVES = 2;
 const NO_CHARACTERS = 0;
 const MESSAGE_TYPE = "message";
@@ -55,19 +55,6 @@ function mapStrings(
       key,
       mapStrings(item, transform),
     ]),
-  );
-}
-
-export function redactSecrets(
-  value: unknown,
-  secrets: readonly string[],
-): unknown {
-  const present = secrets.filter((secret) => secret.length > NO_CHARACTERS);
-  return mapStrings(value, (text) =>
-    present.reduce(
-      (result, secret) => result.split(secret).join(REDACTED),
-      text,
-    ),
   );
 }
 
@@ -137,7 +124,7 @@ export function sessionEntryRecord(input: {
   sessionId: string;
   sequence: number;
   entry: SessionEntry;
-  secrets: readonly string[];
+  matcher: KnownMatcher;
 }): SessionEntryRecord | null {
   const { entry } = input;
   if (!entryIdentitySchema.safeParse(entry.id).success) return null;
@@ -147,7 +134,7 @@ export function sessionEntryRecord(input: {
   )
     return null;
   const snapshot: unknown = JSON.parse(JSON.stringify(entry));
-  const copy = redactSecrets(snapshot, input.secrets);
+  const copy = redactValue(snapshot, input.matcher);
   assert.ok(isObject(copy));
   const bounded = boundedEntry(copy as Fields);
   return {

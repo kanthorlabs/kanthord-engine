@@ -11,6 +11,7 @@ import { isObject } from "../../kernel/values.ts";
 import { providerFailureOf } from "../../llm/provider-failure.ts";
 import { SpanOperation, type SpanRecorder } from "./telemetry.ts";
 import { sessionEntryRecord } from "./session-entries.ts";
+import { knownMatcher } from "../../agent/sensitive-text.ts";
 import type { TurnPrompt } from "./native-agent.ts";
 import type { ToolProcesses, ToolTimeout } from "./tool-table.ts";
 import type { BashProcess } from "../../agent/bash-process.ts";
@@ -154,7 +155,7 @@ class AgentTracer {
   private readonly refreshSecrets: AgentTracing["refreshSecrets"];
   private readonly processes: AgentTracing["processes"];
   private readonly promptOf: AgentTracing["promptOf"];
-  private secrets: readonly string[];
+  private readonly matcher = knownMatcher();
   private sent = NO_ENTRIES;
 
   constructor(
@@ -168,7 +169,7 @@ class AgentTracer {
     assert.ok(tracing.sessionId);
     this.session = session;
     this.sessionId = tracing.sessionId;
-    this.secrets = tracing.secrets;
+    this.addSecrets(tracing.secrets);
     this.refreshSecrets = tracing.refreshSecrets;
     this.processes = tracing.processes;
     this.promptOf = tracing.promptOf;
@@ -241,19 +242,21 @@ class AgentTracer {
         sessionId: this.sessionId,
         sequence,
         entry,
-        secrets: this.secrets,
+        matcher: this.matcher,
       });
     } catch {
       return null;
     }
   }
 
+  private addSecrets(secrets: readonly string[]): void {
+    for (const secret of secrets) this.matcher.addSecret(secret);
+  }
+
   private turnStarted(): void {
     assert.ok(this.agentName);
     this.refreshSecrets().then(
-      (secrets) => {
-        this.secrets = secrets;
-      },
+      (secrets) => this.addSecrets(secrets),
       () => {},
     );
     if (this.turn !== null)

@@ -6,10 +6,14 @@ import { canonicalJSON } from "../../kernel/json.ts";
 import {
   cutString,
   ENTRY_CUT_LIMITS,
-  redactSecrets,
   SESSION_ENTRY_MAX_BYTES,
   sessionEntryRecord,
 } from "./session-entries.ts";
+import {
+  knownMatcher,
+  SensitiveRule,
+  tracerMarker,
+} from "../../agent/sensitive-text.ts";
 
 const TRACE_ID = "a".repeat(32);
 const SESSION_ID = "1".repeat(16);
@@ -71,12 +75,14 @@ function recordOf(
   value: SessionEntry,
   secrets: readonly string[] = NO_SECRETS,
 ) {
+  const matcher = knownMatcher();
+  for (const secret of secrets) matcher.addSecret(secret);
   return sessionEntryRecord({
     traceId: TRACE_ID,
     sessionId: SESSION_ID,
     sequence: FIRST_SEQUENCE,
     entry: value,
-    secrets,
+    matcher,
   });
 }
 
@@ -91,7 +97,7 @@ function manyStrings(count: number) {
   }));
 }
 
-test("a small entry is whole and a secret becomes [redacted]", () => {
+test("a small entry is whole and a secret becomes the tracer marker", () => {
   const value = toolResult([{ type: "text", text: `key ${SECRET} end` }]);
   const record = recordOf(value, [SECRET]);
   assert.ok(record);
@@ -101,21 +107,40 @@ test("a small entry is whole and a secret becomes [redacted]", () => {
     toolCallId: TOOL_CALL_ID,
     toolName: "bash",
     isError: false,
-    content: [{ type: "text", text: "key [redacted] end" }],
+    content: [
+      {
+        type: "text",
+        text: `key ${tracerMarker(SensitiveRule.LlmCredential)} end`,
+      },
+    ],
     timestamp: 1,
   });
   assert.equal(sessionEntryRecordSchema.safeParse(record).success, true);
 });
 
-test("redactSecrets copies, keeps keys and ignores an empty secret", () => {
-  const original = { [SECRET]: [`a${SECRET}b${SECRET}`, 3, null, true] };
-  const copy = redactSecrets(original, ["", SECRET]);
-  assert.deepEqual(copy, {
-    [SECRET]: ["a[redacted]b[redacted]", 3, null, true],
+test("the record copies the entry, keeps its keys and ignores an empty secret", () => {
+  const data = { [SECRET]: [`a ${SECRET} b ${SECRET}`, 3, null, true] };
+  const value = custom({ data });
+  const record = recordOf(value, ["", SECRET]);
+  const marker = tracerMarker(SensitiveRule.LlmCredential);
+  assert.deepEqual(record?.entry.data, {
+    [SECRET]: [`a ${marker} b ${marker}`, 3, null, true],
   });
-  assert.deepEqual(original, {
-    [SECRET]: [`a${SECRET}b${SECRET}`, 3, null, true],
+  assert.deepEqual((value as unknown as { data: unknown }).data, {
+    [SECRET]: [`a ${SECRET} b ${SECRET}`, 3, null, true],
   });
+});
+
+test("the record masks a pattern finding with the tracer marker", () => {
+  const fakeKey = ["AKIA", "KANTHORDCANARY01"].join("");
+  const record = recordOf(
+    toolResult([{ type: "text", text: `id ${fakeKey} end` }]),
+  );
+  const message = record?.entry.message as { content: { text: string }[] };
+  assert.equal(
+    message.content[0]?.text,
+    `id ${tracerMarker(SensitiveRule.AwsAccessKeyId)} end`,
+  );
 });
 
 test("commit, tool call, UUID and kanthord identities stay whole", () => {
