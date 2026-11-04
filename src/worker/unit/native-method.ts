@@ -17,6 +17,7 @@ import type { Revision } from "../../mission/contract.ts";
 import { verificationCommands } from "./evaluation-input.ts";
 import { VerificationMemo } from "./verification-memo.ts";
 import type { Context } from "../../kernel/context.ts";
+import type { Diagnostic } from "../../kernel/errors.ts";
 import { type MethodClaim, ExecutionRun as Run } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import {
@@ -177,6 +178,25 @@ export async function runNativeExecution(
     } finally {
       run.dispose();
     }
+  }
+}
+
+export type SetupRefusalInput = Pick<
+  NativeExecutionInput,
+  "claim" | "clients" | "credentials" | "context" | "log" | "telemetry"
+>;
+
+export async function releaseSetupRefusal(
+  input: SetupRefusalInput,
+  refusal: Diagnostic,
+): Promise<ExecutionEnd> {
+  const run = new Run(input);
+  try {
+    return await executionBoundary(run, async () => {
+      throw refusal;
+    });
+  } finally {
+    run.dispose();
   }
 }
 

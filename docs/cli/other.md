@@ -814,6 +814,8 @@ text or the thrown error text, with secrets removed and cut to 300 characters.
 An execution that ends with a release or a closure leaves the binding
 registered, and the application pulls again. A release with a `stop` is a
 release. An execution that ends with no release and no closure exits `1`.
+A refused execution setup releases a `stop` with the refusal code, and the
+application pulls again.
 
 A work pull answer that fails its schema ends the pull loop with
 `gateway.client.answer_invalid`. The application then deregisters nothing and

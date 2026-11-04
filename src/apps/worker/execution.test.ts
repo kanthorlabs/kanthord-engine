@@ -1,11 +1,11 @@
 import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { writeFile } from "node:fs/promises";
 import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
-import { background } from "../../kernel/context.ts";
+import { background, CancellationContext } from "../../kernel/context.ts";
 import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
 import {
   deriveHandoverKeys,
@@ -25,6 +25,8 @@ import type { ExecutionSetup } from "../../worker/contract.ts";
 import { httpTransport } from "./transport.ts";
 import { testClaim } from "./test-support.ts";
 import { hostExecution } from "./execution.ts";
+import { pullLoop } from "./pull-loop.ts";
+import { Backoff } from "./api.ts";
 import { ChainLevel } from "../../agent/contract.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import { ExecutionIntent } from "../../worker/contract.ts";
@@ -38,6 +40,11 @@ const ENDED_RECORD = "execution ended";
 const SESSION_ROOT = "/test/session-root";
 const NO_ENTRIES = 0;
 const ONE_ENTRY = 1;
+const REGISTRATION = {
+  runtime_identity: "worker_registration_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+  resource_identity: "worker:kanthord:test",
+  worker_name: "coder@1",
+};
 const PROVIDER_CAUSE = "OAuth auth derivation failed for anthropic";
 test("host logs the stop of a released or ended execution in the execution ended record", async (t) => {
   const api = httpTransport("http://127.0.0.1:1");
@@ -634,4 +641,204 @@ test("host builds a relay SSH access for a repository whose handover holds no SS
       flags: RELAY_FLAGS,
     },
   ]);
+});
+
+const BINDING_ID = "binding_01ARZ3NDEKTSV4RRFFQ69G5FAB";
+const TWO_PULLS = 2;
+const SETUP_REFUSALS = [
+  {
+    status: 409,
+    code: "worker.execution.prompt_not_pinned",
+    details: { binding_id: BINDING_ID },
+    detail: undefined,
+    cause: {
+      category: "infrastructure",
+      assigner: "rule",
+      subcategory: "prompt_record",
+    },
+  },
+  {
+    status: 409,
+    code: "agent.prompt.source_invalid",
+    details: { binding_id: BINDING_ID, reason: "too_large" },
+    detail: "too_large",
+    cause: {
+      category: "prompt",
+      assigner: "rule",
+      subcategory: "source_invalid",
+    },
+  },
+  {
+    status: 409,
+    code: "agent.prompt.source_invalid",
+    details: { part: "repository", name: "repo", reason: "changed" },
+    detail: "changed",
+    cause: {
+      category: "infrastructure",
+      assigner: "rule",
+      subcategory: "prompt_record",
+    },
+  },
+  {
+    status: 503,
+    code: "worker.execution.prompt_record_failed",
+    details: { agent_name: "coder" },
+    detail: undefined,
+    cause: {
+      category: "infrastructure",
+      assigner: "rule",
+      subcategory: "prompt_record",
+    },
+  },
+  {
+    status: 422,
+    code: "project.bindings.repository.ssh_unreachable",
+    details: null,
+    detail: undefined,
+    cause: {
+      category: "infrastructure",
+      assigner: "rule",
+      subcategory: "network",
+    },
+  },
+  {
+    status: 409,
+    code: "worker.execution.credential_not_pinned",
+    details: null,
+    detail: undefined,
+    cause: {
+      category: "unattributed",
+      assigner: "rule",
+      suspects: ["worker_action", "infrastructure"],
+    },
+  },
+];
+
+function refusedSetupHost(
+  t: TestContext,
+  refusal: { status: number; code: string; details: unknown },
+) {
+  const api = httpTransport("http://127.0.0.1:1");
+  const shutdown = new CancellationContext();
+  const claim = testClaim();
+  const releases: unknown[] = [];
+  let pulls = 0;
+  t.mock.method(api.scheduler, "workPull", async () => {
+    if (++pulls === TWO_PULLS) {
+      shutdown.cancel();
+      return { type: OperationResultType.Indeterminate };
+    }
+    return {
+      type: OperationResultType.Completed,
+      status: 200,
+      data: { kind: "claimed", execution: claim },
+    };
+  });
+  t.mock.method(api.worker, "handover", async () => ({
+    type: OperationResultType.Completed,
+    status: 200,
+    data: sealEnvelope(
+      deriveHandoverKeys(SECRET).handover,
+      handoverAad(claim.execution_id, claim.claimant.runtime_identity),
+      {
+        items: [
+          {
+            credential_id: "credential_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+            provider_id: "anthropic",
+            credential: { type: "api_key", key: "test_host_key" },
+          },
+        ],
+        ssh_identities: [],
+      },
+    ),
+  }));
+  t.mock.method(api.worker, "execution.setup.get", async () => ({
+    type: OperationResultType.Failure,
+    status: refusal.status,
+    error: {
+      request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+      error: {
+        code: refusal.code,
+        message: "test refusal",
+        details: refusal.details,
+      },
+    },
+  }));
+  t.mock.method(api.worker, "credential", async () => ({
+    type: OperationResultType.Completed,
+    status: 200,
+    data: null,
+  }));
+  t.mock.method(
+    api.scheduler,
+    "executionRelease",
+    async (request: { body: unknown }) => {
+      releases.push(request.body);
+      return {
+        type: OperationResultType.Completed,
+        status: 200,
+        data: { execution_id: claim.execution_id, ended_at: Date.now() },
+      };
+    },
+  );
+  const running = pullLoop({
+    api,
+    registration: REGISTRATION,
+    backoff: new Backoff(),
+    shutdown,
+    host: (execution) =>
+      hostExecution(
+        {
+          api,
+          claim: execution,
+          clientSecret: SECRET,
+          context: shutdown,
+          workspaces: WorkspaceRoot.open(temporary(t)),
+          transport: new RepositoryComponent(),
+          modelRuntimeFactory: async () => {
+            throw new Error("Unexpected inference");
+          },
+          hostHome: temporary(t),
+          env: hostEnvironment(),
+          sessionRoot: SESSION_ROOT,
+          log: () => {},
+        },
+        async () => assert.fail("Refused setup ran the method"),
+      ),
+    register: async () => REGISTRATION,
+    pulling: () => {},
+    claimed: () => {},
+  });
+  return { running, releases, pulls: () => pulls };
+}
+
+test("a refused setup releases one stop with the cause of its code and the pull loop takes the next work", async (t) => {
+  for (const refusal of SETUP_REFUSALS) {
+    const host = refusedSetupHost(t, refusal);
+    assert.equal(await host.running, null, refusal.code);
+    assert.equal(host.pulls(), TWO_PULLS, refusal.code);
+    assert.deepEqual(
+      host.releases,
+      [
+        {
+          further_work: true,
+          stop: {
+            reason: EndReason.OperationFailed,
+            code: refusal.code,
+            ...(refusal.detail === undefined ? {} : { detail: refusal.detail }),
+            cause: refusal.cause,
+          },
+        },
+      ],
+      refusal.code,
+    );
+  }
+});
+
+test("a gateway refusal of the setup releases no stop and ends the pull loop", async (t) => {
+  const code = "gateway.authentication.unauthorized";
+  const host = refusedSetupHost(t, { status: 401, code, details: null });
+  assert.equal((await host.running)?.code, code);
+  assert.equal(host.pulls(), ONE_ENTRY);
+  assert.deepEqual(host.releases, []);
 });

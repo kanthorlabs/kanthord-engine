@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { CancellationContext, type Context } from "../../kernel/context.ts";
 import { CodedError, Diagnostic } from "../../kernel/errors.ts";
+import {
+  type OperationResult,
+  OperationResultType,
+} from "../../kernel/operation.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 import {
@@ -10,6 +14,7 @@ import {
   handedSshAccess,
   isExecutionEnd,
   type ModelRuntimeFactory,
+  releaseSetupRefusal,
   type RepositoryTransport,
   runNativeExecution,
   type WorkspaceRoot,
@@ -35,6 +40,20 @@ export interface HostExecutionInput {
   context: Context;
   sessionRoot?: string;
   log(record: Record<string, unknown>): void;
+}
+
+const GATEWAY_CODE_PREFIX = "gateway.";
+
+function setupRefusalOf(answer: OperationResult<unknown>): Diagnostic | null {
+  if (
+    answer.type !== OperationResultType.Failure ||
+    isExecutionEnd(answer) ||
+    answer.error.error.code.startsWith(GATEWAY_CODE_PREFIX)
+  )
+    return null;
+  return new Diagnostic(answer.error.error.code, answer.error.error.message, {
+    details: answer.error.error.details ?? null,
+  });
 }
 
 function detailOf(result: ExecutionEnd): string | undefined {
@@ -72,65 +91,79 @@ export async function hostExecution(
         (item) => item.credential_id,
       ),
     });
-    const setup = completed(
-      await retryIndeterminate(
-        () =>
-          input.api.worker["execution.setup.get"](
-            {
-              params: { execution_id: input.claim.execution_id },
-              query: {},
-              body: null,
-            },
-            { context },
-          ),
-        input.claim.expired_at,
-        context,
-      ),
-    );
-    sshAccess = handedSshAccess(
-      handover.sshIdentities,
-      setup.repositories,
-      (bindingId) => relaySigner({ ...input, bindingId }),
-    );
-    const result = await execute({
-      ...input,
-      setup,
-      clients: input.api,
-      credentials: handover.credentials,
-      sshAccess,
+    const answer = await retryIndeterminate(
+      () =>
+        input.api.worker["execution.setup.get"](
+          {
+            params: { execution_id: input.claim.execution_id },
+            query: {},
+            body: null,
+          },
+          { context },
+        ),
+      input.claim.expired_at,
       context,
-      telemetry,
-      hostTools: (workspace) => ({
-        evidenceUpload: async (path, signal) => {
-          const uploadContext = new CancellationContext(context);
-          const abort = () => uploadContext.cancel();
-          signal?.addEventListener("abort", abort, { once: true });
-          if (signal?.aborted) abort();
-          try {
-            return await uploadEvidence({
-              workspace,
-              path,
-              claim: input.claim,
-              api: input.api,
-              context: uploadContext,
-            });
-          } catch (error) {
-            if (
-              error instanceof HandoverRefused &&
-              error.result &&
-              isExecutionEnd(error.result)
-            ) {
-              revoked = true;
-              context.cancel();
-            }
-            throw error;
-          } finally {
-            signal?.removeEventListener("abort", abort);
-            uploadContext.cancel();
-          }
+    );
+    const refusal = setupRefusalOf(answer);
+    let result: ExecutionEnd;
+    if (refusal)
+      result = await releaseSetupRefusal(
+        {
+          ...input,
+          clients: input.api,
+          credentials: handover.credentials,
+          context,
+          telemetry,
         },
-      }),
-    });
+        refusal,
+      );
+    else {
+      const setup = completed(answer);
+      sshAccess = handedSshAccess(
+        handover.sshIdentities,
+        setup.repositories,
+        (bindingId) => relaySigner({ ...input, bindingId }),
+      );
+      result = await execute({
+        ...input,
+        setup,
+        clients: input.api,
+        credentials: handover.credentials,
+        sshAccess,
+        context,
+        telemetry,
+        hostTools: (workspace) => ({
+          evidenceUpload: async (path, signal) => {
+            const uploadContext = new CancellationContext(context);
+            const abort = () => uploadContext.cancel();
+            signal?.addEventListener("abort", abort, { once: true });
+            if (signal?.aborted) abort();
+            try {
+              return await uploadEvidence({
+                workspace,
+                path,
+                claim: input.claim,
+                api: input.api,
+                context: uploadContext,
+              });
+            } catch (error) {
+              if (
+                error instanceof HandoverRefused &&
+                error.result &&
+                isExecutionEnd(error.result)
+              ) {
+                revoked = true;
+                context.cancel();
+              }
+              throw error;
+            } finally {
+              signal?.removeEventListener("abort", abort);
+              uploadContext.cancel();
+            }
+          },
+        }),
+      });
+    }
     if (revoked) return null;
     context.signal.throwIfAborted();
     const detail = detailOf(result);
