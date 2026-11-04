@@ -31,6 +31,7 @@ const FORMER_KEPT_COUNT = 50;
 const CHUNK_BYTES = 65536;
 const CHUNK_COUNT_ABOVE_BOUND = 512;
 const NEEDLE_LEAD = 3;
+const PARSED_HEAD_LENGTH = 40;
 const SESSION_ID = "0123456789abcdef";
 const OTHER_SESSION_ID = "fedcba9876543210";
 const ENTRY_ID = "a1b2c3d4";
@@ -308,14 +309,17 @@ test("a malformed line and a partly written last line are skipped", async (t) =>
   );
 });
 
-function parsedLengths(t: TestContext): number[] {
-  const lengths: number[] = [];
+function parsedTexts(t: TestContext): { bytes: number; head: string }[] {
+  const texts: { bytes: number; head: string }[] = [];
   const parse = JSON.parse;
   t.mock.method(JSON, "parse", (text: string) => {
-    lengths.push(text.length);
+    texts.push({
+      bytes: Buffer.byteLength(text, "utf8"),
+      head: text.slice(0, PARSED_HEAD_LENGTH),
+    });
     return parse(text);
   });
-  return lengths;
+  return texts;
 }
 
 test("a line above the bound answers too_large with its byte length and is never parsed", async (t) => {
@@ -329,12 +333,17 @@ test("a line above the bound answers too_large with its byte length and is never
   const bytes = Buffer.byteLength(line, "utf8");
   assert.ok(bytes > SESSION_ENTRY_FULL_MAX_BYTES);
   writeFileSync(file(), `${line}\n${entryLine({ ...ENTRY, type: "custom" })}`);
-  const lengths = parsedLengths(t);
+  const texts = parsedTexts(t);
   assert.deepEqual(await readSessionFileEntry(root, read, signal), {
     outcome: SessionReadOutcome.TooLarge,
     bytes,
   });
-  assert.ok(lengths.every((length) => length <= SESSION_ENTRY_FULL_MAX_BYTES));
+  assert.ok(
+    texts.every((parsed) => parsed.bytes <= SESSION_ENTRY_FULL_MAX_BYTES),
+  );
+  assert.ok(
+    texts.every(({ head }) => head !== prefix.slice(0, PARSED_HEAD_LENGTH)),
+  );
 });
 
 test("a custom_message above the bound with its content before the id answers too_large", async (t) => {
