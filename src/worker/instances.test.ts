@@ -823,6 +823,23 @@ test("the work read answers the work version and the login sessions, renews no l
   );
 });
 
+test("a work read after a dropped connection answers connection_superseded and adopts no connection", async (t) => {
+  const f = instanceFixture(t);
+  const { record } = await f.created();
+  f.asWorker(record.id);
+  const connection = await f.invoke("instance.connect", {
+    connection_name: CONNECTION_NAME,
+  });
+  f.worker().instances.dropConnection(record.id);
+  await f.refuses(
+    () =>
+      f.invoke("instance.work", { connection_id: connection.connection_id }),
+    HttpStatus.Conflict,
+    WorkerErrorCode.InstanceConnectionSuperseded,
+  );
+  assert.equal(f.worker().instances.connectionOf(record.id), null);
+});
+
 test("a binding change bumps the binding version of each listed instance", async (t) => {
   const f = instanceFixture(t);
   const { record } = await f.created();
