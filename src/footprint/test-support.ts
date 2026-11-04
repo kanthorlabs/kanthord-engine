@@ -23,7 +23,11 @@ import {
   footprintOperations,
   type FootprintOwner,
 } from "./contract.ts";
-import { DEFAULT_DISK_FREE_RATIO } from "./config.ts";
+import {
+  DEFAULT_DISK_FREE_RATIO,
+  DEFAULT_THRESHOLDS,
+  type FootprintConfig,
+} from "./config.ts";
 import { footprintMigrations } from "./migrations.ts";
 import { FootprintService } from "./service.ts";
 import { ServerHost } from "./server-host.ts";
@@ -68,6 +72,7 @@ export function footprintFixture(
     deleters?: Partial<Record<string, CleanupDeleter>>;
     instances?: Record<string, { archived: boolean }>;
     lines?: string[];
+    config?: FootprintConfig;
   } = {},
 ) {
   const directory = temporary(t);
@@ -125,7 +130,10 @@ export function footprintFixture(
   });
   const service = new FootprintService({
     store,
-    config: { disk_free_ratio: DEFAULT_DISK_FREE_RATIO },
+    config: options.config ?? {
+      disk_free_ratio: DEFAULT_DISK_FREE_RATIO,
+      thresholds: { ...DEFAULT_THRESHOLDS },
+    },
     logger,
     serverHost,
     now,
