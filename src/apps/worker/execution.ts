@@ -26,6 +26,7 @@ import type { WorkerTransport } from "./transport.ts";
 import { uploadEvidence } from "./evidence-upload.ts";
 import { relaySigner } from "./ssh-relay.ts";
 import { HttpTelemetrySink } from "./telemetry-sink.ts";
+import { SETUP_UNAVAILABLE } from "./pull-loop.ts";
 
 export interface HostExecutionInput {
   claim: ExecutionRecord;
@@ -103,7 +104,7 @@ function endOf(
 export async function hostExecution(
   input: HostExecutionInput,
   execute = runNativeExecution,
-): Promise<Diagnostic | null> {
+): Promise<Diagnostic | null | typeof SETUP_UNAVAILABLE> {
   assert.ok(input.claim.execution_id);
   assert.ok(input.clientSecret);
   let handover: Awaited<ReturnType<typeof takeHandover>> | undefined;
@@ -240,7 +241,7 @@ export async function hostExecution(
         execution_id: input.claim.execution_id,
         code: error.code,
       });
-      return null;
+      return SETUP_UNAVAILABLE;
     }
     if (error instanceof Diagnostic) return error;
     return new Diagnostic(

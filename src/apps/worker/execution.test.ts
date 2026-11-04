@@ -14,6 +14,7 @@ import {
   openEnvelope,
   sealEnvelope,
 } from "../../kernel/handover.ts";
+import type { Diagnostic } from "../../kernel/errors.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import {
   EndReason,
@@ -26,7 +27,7 @@ import { httpTransport } from "./transport.ts";
 import { testClaim } from "./test-support.ts";
 import { hostExecution } from "./execution.ts";
 import { pullLoop } from "./pull-loop.ts";
-import { Backoff } from "./api.ts";
+import { Backoff, BACKOFF_INITIAL_MS } from "./api.ts";
 import { ChainLevel } from "../../agent/contract.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import { ExecutionIntent } from "../../worker/contract.ts";
@@ -274,8 +275,12 @@ test("host takes handover before setup and method, discards on every method end"
     null,
   );
   assert.equal(
-    (await hostExecution(input, async () => ({ kind: "ended", ...stop })))
-      ?.code,
+    (
+      (await hostExecution(input, async () => ({
+        kind: "ended",
+        ...stop,
+      }))) as Diagnostic | null
+    )?.code,
     stop.code,
   );
   assert.equal(
@@ -293,12 +298,12 @@ test("host takes handover before setup and method, discards on every method end"
   const expected = "system.operation.unknown";
   assert.equal(
     (
-      await hostExecution(input, async (native) => {
+      (await hostExecution(input, async (native) => {
         stored = native.credentials;
         held = native.sshAccess;
         assert.equal(held.size, ONE_ENTRY);
         throw new Error("test_private_material");
-      })
+      })) as Diagnostic | null
     )?.code,
     expected,
   );
@@ -737,7 +742,13 @@ function refusedSetupHost(
   t: TestContext,
   refusal: { status: number; code: string; details: unknown },
   releaseAnswer?: unknown,
-  entry: { handover?: unknown; setup?: unknown; lifetime?: number } = {},
+  entry: {
+    handover?: unknown;
+    setup?: unknown;
+    lifetime?: number;
+    pulls?: number;
+    backoff?: Backoff;
+  } = {},
 ) {
   const api = httpTransport("http://127.0.0.1:1");
   const shutdown = new CancellationContext();
@@ -750,9 +761,12 @@ function refusedSetupHost(
   const releases: unknown[] = [];
   const events: string[] = [];
   const logs: Record<string, unknown>[] = [];
+  const pulledAt: number[] = [];
+  const setups: unknown[] = [];
   let pulls = 0;
   t.mock.method(api.scheduler, "workPull", async () => {
-    if (++pulls === TWO_PULLS) {
+    pulledAt.push(performance.now());
+    if (++pulls === (entry.pulls ?? TWO_PULLS)) {
       shutdown.cancel();
       return { type: OperationResultType.Indeterminate };
     }
@@ -788,7 +802,10 @@ function refusedSetupHost(
   t.mock.method(
     api.worker,
     "execution.setup.get",
-    async () => entry.setup ?? failureAnswer(refusal),
+    async (request: { params: unknown }) => {
+      setups.push(request.params);
+      return entry.setup ?? failureAnswer(refusal);
+    },
   );
   t.mock.method(api.worker, "credential", async () => {
     events.push("credential");
@@ -811,7 +828,7 @@ function refusedSetupHost(
   const running = pullLoop({
     api,
     registration: REGISTRATION,
-    backoff: new Backoff(),
+    backoff: entry.backoff ?? new Backoff(),
     shutdown,
     host: (execution) =>
       hostExecution(
@@ -836,7 +853,15 @@ function refusedSetupHost(
     pulling: () => {},
     claimed: () => {},
   });
-  return { running, releases, events, logs, pulls: () => pulls };
+  return {
+    running,
+    releases,
+    events,
+    logs,
+    pulledAt,
+    setups,
+    pulls: () => pulls,
+  };
 }
 
 test("a refused setup releases one stop with the cause of its code and the pull loop takes the next work", async (t) => {
@@ -993,4 +1018,50 @@ test("a gateway answer of the handover ends only the execution and the pull loop
     assert.deepEqual(host.releases, [], answer.code);
     assert.deepEqual(unavailableRecords(host.logs), [answer.code]);
   }
+});
+
+const THREE_PULLS = 3;
+const BACKOFF_GROWTH = 2;
+
+test("a persistent gateway answer of the setup re-pulls the same claim after a growing pull backoff", async (t) => {
+  const backoff = new Backoff();
+  const delays: number[] = [];
+  const next = backoff.next.bind(backoff);
+  t.mock.method(backoff, "next", () => {
+    const delay = next();
+    delays.push(delay);
+    return delay;
+  });
+  const reset = t.mock.method(backoff, "reset");
+  const answer = GATEWAY_ANSWERS[1]!;
+  const host = refusedSetupHost(t, answer, undefined, {
+    pulls: THREE_PULLS,
+    backoff,
+  });
+  assert.equal(await host.running, null);
+  assert.equal(host.pulls(), THREE_PULLS);
+  assert.deepEqual(delays, [
+    BACKOFF_INITIAL_MS,
+    BACKOFF_INITIAL_MS * BACKOFF_GROWTH,
+  ]);
+  assert.equal(reset.mock.callCount(), NO_ENTRIES);
+  assert.ok(host.pulledAt[1]! - host.pulledAt[0]! >= BACKOFF_INITIAL_MS);
+  assert.ok(
+    host.pulledAt[2]! - host.pulledAt[1]! >=
+      BACKOFF_INITIAL_MS * BACKOFF_GROWTH,
+  );
+  assert.equal(host.setups.length, TWO_PULLS);
+  assert.deepEqual(host.setups[0], host.setups[1]);
+  assert.deepEqual(unavailableRecords(host.logs), [answer.code, answer.code]);
+  assert.deepEqual(host.releases, []);
+});
+
+test("a host that reaches setup resets the pull backoff", async (t) => {
+  const backoff = new Backoff();
+  const reset = t.mock.method(backoff, "reset");
+  const host = refusedSetupHost(t, SETUP_REFUSALS[0]!, undefined, {
+    backoff,
+  });
+  assert.equal(await host.running, null);
+  assert.equal(reset.mock.callCount(), ONE_ENTRY);
 });

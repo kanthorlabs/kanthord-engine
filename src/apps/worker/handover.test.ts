@@ -20,6 +20,7 @@ import {
   CREDENTIAL_SEAL_INFO,
   credentialSealAad,
 } from "../../custody/contract.ts";
+import { executionCredentialStore } from "../../custody/client.ts";
 import { httpTransport } from "./transport.ts";
 import { takeHandover } from "./handover.ts";
 import { testClaim } from "./test-support.ts";
@@ -361,4 +362,51 @@ test("handover ends after one call on a 503 with another code", async (t) => {
     takeHandover({ api, claim, clientSecret: SECRET, context: background }),
   );
   assert.equal(calls, ONCE);
+});
+
+test("a refused sealed item discards every credential view that the handover opened before it", async (t) => {
+  const api = httpTransport("http://127.0.0.1:1");
+  const claim = testClaim();
+  const keys = deriveHandoverKeys(SECRET);
+  const aad = handoverAad(claim.execution_id, claim.claimant.runtime_identity);
+  const pair = await generateX25519KeyPair();
+  const sealed = await sealJSON(
+    pair.public_key,
+    CREDENTIAL_SEAL_INFO,
+    credentialSealAad({
+      name: "anthro-1",
+      platform: "anthropic",
+      holder: "relay-a",
+      sealed_to: keyFingerprint(pair.public_key),
+    }),
+    { key: CREDENTIAL.key },
+  );
+  t.mock.method(api.worker, "handover", async () => ({
+    type: OperationResultType.Completed,
+    status: 200,
+    data: sealEnvelope(keys.handover, aad, {
+      items: [
+        ITEM,
+        {
+          credential_id: "credential_01ARZ3NDEKTSV4RRFFQ69G5FAB",
+          provider_id: ITEM.provider_id,
+          name: "anthro-1",
+          platform: "anthropic",
+          sealed,
+        },
+      ],
+      ssh_identities: [],
+    }),
+  }));
+  const discard = t.mock.method(
+    Object.getPrototypeOf(
+      executionCredentialStore({ items: [ITEM] }, async () => {}),
+    ) as { discard(): void },
+    "discard",
+  );
+  await assert.rejects(
+    takeHandover({ api, claim, clientSecret: SECRET, context: background }),
+    { code: "worker.handover.sealed_unopened" },
+  );
+  assert.equal(discard.mock.callCount(), ONCE);
 });
