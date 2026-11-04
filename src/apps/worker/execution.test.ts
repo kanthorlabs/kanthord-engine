@@ -714,16 +714,42 @@ const SETUP_REFUSALS = [
   },
 ];
 
+function failureAnswer(refusal: {
+  status: number;
+  code: string;
+  details: unknown;
+}) {
+  return {
+    type: OperationResultType.Failure,
+    status: refusal.status,
+    error: {
+      request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+      error: {
+        code: refusal.code,
+        message: "test refusal",
+        details: refusal.details,
+      },
+    },
+  };
+}
+
 function refusedSetupHost(
   t: TestContext,
   refusal: { status: number; code: string; details: unknown },
   releaseAnswer?: unknown,
+  entry: { handover?: unknown; setup?: unknown; lifetime?: number } = {},
 ) {
   const api = httpTransport("http://127.0.0.1:1");
   const shutdown = new CancellationContext();
-  const claim = testClaim();
+  const claim = {
+    ...testClaim(),
+    ...(entry.lifetime === undefined
+      ? {}
+      : { expired_at: Date.now() + entry.lifetime }),
+  };
   const releases: unknown[] = [];
   const events: string[] = [];
+  const logs: Record<string, unknown>[] = [];
   let pulls = 0;
   t.mock.method(api.scheduler, "workPull", async () => {
     if (++pulls === TWO_PULLS) {
@@ -736,36 +762,34 @@ function refusedSetupHost(
       data: { kind: "claimed", execution: claim },
     };
   });
-  t.mock.method(api.worker, "handover", async () => ({
-    type: OperationResultType.Completed,
-    status: 200,
-    data: sealEnvelope(
-      deriveHandoverKeys(SECRET).handover,
-      handoverAad(claim.execution_id, claim.claimant.runtime_identity),
-      {
-        items: [
+  t.mock.method(
+    api.worker,
+    "handover",
+    async () =>
+      entry.handover ?? {
+        type: OperationResultType.Completed,
+        status: 200,
+        data: sealEnvelope(
+          deriveHandoverKeys(SECRET).handover,
+          handoverAad(claim.execution_id, claim.claimant.runtime_identity),
           {
-            credential_id: "credential_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-            provider_id: "anthropic",
-            credential: { type: "api_key", key: "test_host_key" },
+            items: [
+              {
+                credential_id: "credential_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+                provider_id: "anthropic",
+                credential: { type: "api_key", key: "test_host_key" },
+              },
+            ],
+            ssh_identities: [],
           },
-        ],
-        ssh_identities: [],
+        ),
       },
-    ),
-  }));
-  t.mock.method(api.worker, "execution.setup.get", async () => ({
-    type: OperationResultType.Failure,
-    status: refusal.status,
-    error: {
-      request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-      error: {
-        code: refusal.code,
-        message: "test refusal",
-        details: refusal.details,
-      },
-    },
-  }));
+  );
+  t.mock.method(
+    api.worker,
+    "execution.setup.get",
+    async () => entry.setup ?? failureAnswer(refusal),
+  );
   t.mock.method(api.worker, "credential", async () => {
     events.push("credential");
     return { type: OperationResultType.Completed, status: 200, data: null };
@@ -804,7 +828,7 @@ function refusedSetupHost(
           hostHome: temporary(t),
           env: hostEnvironment(),
           sessionRoot: SESSION_ROOT,
-          log: () => {},
+          log: (record) => logs.push(record),
         },
         async () => assert.fail("Refused setup ran the method"),
       ),
@@ -812,7 +836,7 @@ function refusedSetupHost(
     pulling: () => {},
     claimed: () => {},
   });
-  return { running, releases, events, pulls: () => pulls };
+  return { running, releases, events, logs, pulls: () => pulls };
 }
 
 test("a refused setup releases one stop with the cause of its code and the pull loop takes the next work", async (t) => {
@@ -837,14 +861,6 @@ test("a refused setup releases one stop with the cause of its code and the pull 
     );
     assert.deepEqual(host.events, ["credential", "release"], refusal.code);
   }
-});
-
-test("a gateway refusal of the setup releases no stop and ends the pull loop", async (t) => {
-  const code = "gateway.authentication.unauthorized";
-  const host = refusedSetupHost(t, { status: 401, code, details: null });
-  assert.equal((await host.running)?.code, code);
-  assert.equal(host.pulls(), ONE_ENTRY);
-  assert.deepEqual(host.releases, []);
 });
 
 test("a setup answer that ends the execution releases no stop and the pull loop takes the next work", async (t) => {
@@ -879,4 +895,102 @@ test("a refused setup whose release fails ends the pull loop with the setup code
   assert.equal((await host.running)?.code, code);
   assert.equal(host.pulls(), ONE_ENTRY);
   assert.equal(host.releases.length, ONE_ENTRY);
+});
+
+const SETUP_UNAVAILABLE_RECORD = "worker.execution.setup_unavailable";
+const SHORT_LIFETIME_MS = 300;
+const GATEWAY_ANSWERS = [
+  { status: 504, code: "gateway.invocation.timeout", details: null },
+  { status: 500, code: "gateway.invocation.unknown", details: null },
+  { status: 503, code: "gateway.invocation.stopping", details: null },
+  { status: 401, code: "gateway.authentication.unauthorized", details: null },
+];
+
+function releasedStop(release: unknown) {
+  const { further_work, stop } = release as {
+    further_work: boolean;
+    stop: { reason: string; code: string };
+  };
+  return { further_work, reason: stop.reason, code: stop.code };
+}
+
+function unavailableRecords(logs: Record<string, unknown>[]) {
+  return logs
+    .filter((record) => record.msg === SETUP_UNAVAILABLE_RECORD)
+    .map(({ code }) => code);
+}
+
+test("a gateway answer of the setup ends only the execution and the pull loop takes the next work", async (t) => {
+  for (const answer of GATEWAY_ANSWERS) {
+    const host = refusedSetupHost(t, answer);
+    assert.equal(await host.running, null, answer.code);
+    assert.equal(host.pulls(), TWO_PULLS, answer.code);
+    assert.deepEqual(host.releases, [], answer.code);
+    assert.deepEqual(unavailableRecords(host.logs), [answer.code]);
+  }
+});
+
+test("a setup read that stays indeterminate until expired_at ends only the execution and the pull loop takes the next work", async (t) => {
+  const host = refusedSetupHost(t, GATEWAY_ANSWERS[0]!, undefined, {
+    setup: { type: OperationResultType.Indeterminate },
+    lifetime: SHORT_LIFETIME_MS,
+  });
+  assert.equal(await host.running, null);
+  assert.equal(host.pulls(), TWO_PULLS);
+  assert.deepEqual(host.releases, []);
+  assert.deepEqual(unavailableRecords(host.logs), [
+    "gateway.invocation.timeout",
+  ]);
+});
+
+test("a handover that the handover key does not open releases a stop with worker.handover.decryption_failed and the pull loop takes the next work", async (t) => {
+  const claim = testClaim();
+  const host = refusedSetupHost(t, GATEWAY_ANSWERS[0]!, undefined, {
+    handover: {
+      type: OperationResultType.Completed,
+      status: 200,
+      data: sealEnvelope(
+        deriveHandoverKeys(Buffer.alloc(32, 9).toString("base64")).handover,
+        handoverAad(claim.execution_id, claim.claimant.runtime_identity),
+        { items: [], ssh_identities: [] },
+      ),
+    },
+  });
+  assert.equal(await host.running, null);
+  assert.equal(host.pulls(), TWO_PULLS);
+  assert.equal(host.releases.length, ONE_ENTRY);
+  assert.deepEqual(releasedStop(host.releases[0]), {
+    further_work: true,
+    reason: EndReason.OperationFailed,
+    code: "worker.handover.decryption_failed",
+  });
+  assert.deepEqual(host.events, ["release"]);
+});
+
+test("a service refusal of the handover releases a stop with its code and the pull loop takes the next work", async (t) => {
+  const code = "credential.revision.revoked";
+  const host = refusedSetupHost(t, GATEWAY_ANSWERS[0]!, undefined, {
+    handover: failureAnswer({ status: 409, code, details: null }),
+  });
+  assert.equal(await host.running, null);
+  assert.equal(host.pulls(), TWO_PULLS);
+  assert.equal(host.releases.length, ONE_ENTRY);
+  assert.deepEqual(releasedStop(host.releases[0]), {
+    further_work: true,
+    reason: EndReason.OperationFailed,
+    code,
+  });
+  assert.deepEqual(host.events, ["release"]);
+});
+
+test("a gateway answer of the handover ends only the execution and the pull loop takes the next work", async (t) => {
+  for (const answer of GATEWAY_ANSWERS) {
+    const host = refusedSetupHost(t, answer, undefined, {
+      handover: failureAnswer(answer),
+    });
+    assert.equal(await host.running, null, answer.code);
+    assert.equal(host.pulls(), TWO_PULLS, answer.code);
+    assert.deepEqual(host.releases, [], answer.code);
+    assert.deepEqual(unavailableRecords(host.logs), [answer.code]);
+  }
 });

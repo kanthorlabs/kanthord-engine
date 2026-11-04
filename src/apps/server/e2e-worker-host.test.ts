@@ -55,6 +55,7 @@ const READY = "Worker application ready";
 const CLAIMED = "credential handover received";
 const LIVE_STOP = "worker.stop.execution_live";
 const DECRYPTION_FAILED = "worker.handover.decryption_failed";
+const ENDED = "execution ended";
 const PATH_REFUSED = "worker.evidence_upload.path_refused";
 const PHASES = ["finish", "prepare", "start", "tasks"];
 const TASK_LOOP_PHASE = "tasks";
@@ -420,7 +421,7 @@ test(
     const handoverSetup = await fixture(t);
     const other = await handoverSetup.machine("general-b");
     await t.test(
-      "E09.16 wrong secret refuses handover without release or deregistration",
+      "E09.16 wrong secret releases a stop with the decryption code and the worker keeps pulling",
       { timeout: JOURNEY_TIMEOUT },
       async (t) => {
         const provider = scriptedProvider([]);
@@ -431,11 +432,31 @@ test(
           modelRuntimeFactory: scriptedModelRuntime(provider),
           repositoryTransport: handoverSetup.transport,
         });
-        const error = await host.running;
-        assert.ok(error instanceof Diagnostic);
-        assert.equal(error.code, DECRYPTION_FAILED);
+        while (
+          !host.logs.some(
+            (record) =>
+              record.msg === ENDED && record.code === DECRYPTION_FAILED,
+          )
+        )
+          await delay(POLL_INTERVAL_MS);
+        assert.equal(await host.worker.stop(), null);
+        assert.equal(await host.running, null);
         assert.deepEqual(provider.calls, []);
-        await assertLive(handoverSetup, host.logs);
+        const executions = await handoverSetup.read<{
+          items: ExecutionRecord[];
+        }>([
+          "scheduler",
+          "execution",
+          "list",
+          handoverSetup.project_id,
+          "--node",
+          handoverSetup.node_id,
+        ]);
+        assert.ok(
+          executions.items.some(
+            (item) => item.claim_state === ClaimState.Finished,
+          ),
+        );
       },
     );
   },
