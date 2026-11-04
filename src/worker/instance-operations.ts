@@ -148,6 +148,15 @@ function declareExchange(
       );
     },
   );
+  registry.register(instanceOperations["instance.work"], ({ body }, caller) => {
+    const identity = caller.identity;
+    assert.ok(isWorkerIdentity(identity));
+    return instances.work(
+      identity.instanceId,
+      identity.name,
+      body.connection_id,
+    );
+  });
 }
 
 export function declareInstances(

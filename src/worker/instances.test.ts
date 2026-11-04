@@ -23,6 +23,7 @@ import {
 } from "./contract.ts";
 import { AgentErrorCode, type HolderScope } from "../agent/contract.ts";
 import type { ExecutionEnds } from "../mission/contract.ts";
+import type { LoginSessionEntry } from "../llm/contract.ts";
 import {
   insertRegistration,
   readAllLive,
@@ -76,6 +77,14 @@ const INVALID_PLACEMENT = "thread";
 const ANSWERED_ENDS: ExecutionEnds = { lost: [], revoked: [] };
 const REVOKE_FAILURE = "revoke failed";
 const NO_CALLS = 0;
+const LIVENESS_GAP_MS = 5;
+const LOGIN_ENTRY: LoginSessionEntry = {
+  session_id: "login_session_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  name: "claude",
+  platform: "anthropic-subscription",
+  mode: "copy_code",
+  code: null,
+};
 const SINGLE_CALL = 1;
 
 type Binding = ReturnType<WorkerBindingsOf>[number];
@@ -142,9 +151,11 @@ function instanceFixture(
   const revoked: string[] = [];
   const reports: { ends: ExecutionEnds; inTransaction: boolean }[] = [];
   const revocation = { failure: null as Error | null };
+  const logins = new Map<string, LoginSessionEntry[]>();
   const dependencies: Dependencies = {
     config: { ...WORKER_CONFIG, ...config },
     store,
+    loginSessionsOf: (holder) => logins.get(holder) ?? [],
     missionActions: {
       authorizeRequest: unexpected,
       authorizeAction: unexpected,
@@ -345,6 +356,7 @@ function instanceFixture(
     revoked,
     reports,
     revocation,
+    logins,
     invoke,
     refuses,
     created,
@@ -711,7 +723,6 @@ test("connect answers one sealed entry for each listing binding, and a second pr
   });
   assert.equal(heartbeat.server_version, packageVersion());
   assert.equal(heartbeat.credential_version, NO_VERSION);
-  assert.deepEqual(heartbeat.login_sessions, []);
   const second = await f.invoke("instance.connect", {
     connection_name: OTHER_CONNECTION_NAME,
   });
@@ -747,6 +758,86 @@ test("connect answers one sealed entry for each listing binding, and a second pr
     read.bindings.map((binding) => binding.binding),
     ["general", "review"],
   );
+});
+
+test("the heartbeat answers four versions, and the work version starts at the start time and rises by one", async (t) => {
+  const before = Date.now();
+  const f = instanceFixture(t);
+  const after = Date.now();
+  const { record } = await f.created();
+  f.logins.set(INSTANCE, [LOGIN_ENTRY]);
+  f.asWorker(record.id);
+  const connection = await f.invoke("instance.connect", {
+    connection_name: CONNECTION_NAME,
+  });
+  const beat = () =>
+    f.invoke("instance.heartbeat", {
+      connection_id: connection.connection_id,
+      connection_name: CONNECTION_NAME,
+    });
+  const first = await beat();
+  assert.deepEqual(Object.keys(first).sort(), [
+    "binding_version",
+    "credential_version",
+    "server_version",
+    "work_version",
+  ]);
+  assert.ok(first.work_version >= before && first.work_version <= after);
+  f.worker().raiseWorkVersion(INSTANCE);
+  const raised = await beat();
+  assert.equal(raised.work_version, first.work_version + FIRST_VERSION);
+  assert.equal(
+    f.worker().instances.workVersionOf("desktop"),
+    first.work_version,
+  );
+});
+
+test("the work read answers the work version and the login sessions, renews no liveness and refuses a superseded connection", async (t) => {
+  const f = instanceFixture(t);
+  const { record } = await f.created();
+  f.logins.set(INSTANCE, [LOGIN_ENTRY]);
+  f.asWorker(record.id);
+  const first = await f.invoke("instance.connect", {
+    connection_name: CONNECTION_NAME,
+  });
+  const liveness = () =>
+    f.worker().instances.connectionOf(record.id)?.last_heartbeat_at;
+  const renewed = liveness();
+  await new Promise((resolve) => setTimeout(resolve, LIVENESS_GAP_MS));
+  f.worker().raiseWorkVersion(INSTANCE);
+  const work = await f.invoke("instance.work", {
+    connection_id: first.connection_id,
+  });
+  assert.deepEqual(work, {
+    work_version: f.worker().instances.workVersionOf(INSTANCE),
+    login_sessions: [LOGIN_ENTRY],
+  });
+  assert.equal(liveness(), renewed);
+  await f.invoke("instance.connect", {
+    connection_name: OTHER_CONNECTION_NAME,
+  });
+  await f.refuses(
+    () => f.invoke("instance.work", { connection_id: first.connection_id }),
+    HttpStatus.Conflict,
+    WorkerErrorCode.InstanceConnectionSuperseded,
+  );
+});
+
+test("a work read after a dropped connection answers connection_superseded and adopts no connection", async (t) => {
+  const f = instanceFixture(t);
+  const { record } = await f.created();
+  f.asWorker(record.id);
+  const connection = await f.invoke("instance.connect", {
+    connection_name: CONNECTION_NAME,
+  });
+  f.worker().instances.dropConnection(record.id);
+  await f.refuses(
+    () =>
+      f.invoke("instance.work", { connection_id: connection.connection_id }),
+    HttpStatus.Conflict,
+    WorkerErrorCode.InstanceConnectionSuperseded,
+  );
+  assert.equal(f.worker().instances.connectionOf(record.id), null);
 });
 
 test("a binding change bumps the binding version of each listed instance", async (t) => {

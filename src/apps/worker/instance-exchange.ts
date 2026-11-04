@@ -41,6 +41,8 @@ export interface Connection {
 
 export type HeartbeatAnswer =
   (typeof workerOperations)["instance.heartbeat"]["output"]["_output"];
+export type WorkAnswer =
+  (typeof workerOperations)["instance.work"]["output"]["_output"];
 
 export class ExchangeFailure extends Diagnostic {
   readonly status: number | null;
@@ -247,6 +249,23 @@ export class InstanceExchange {
         { context, idempotencyKey: createIdempotencyKey() },
       ),
       "heartbeat",
+    );
+  }
+
+  async work(
+    connectionId: string,
+    context: Context = background,
+  ): Promise<WorkAnswer> {
+    return settled(
+      await this.client["instance.work"](
+        {
+          params: {},
+          query: {},
+          body: { connection_id: connectionId },
+        },
+        { context },
+      ),
+      "work",
     );
   }
 }

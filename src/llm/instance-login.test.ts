@@ -104,6 +104,7 @@ async function fixture(t: TestContext) {
       [...pairs.values()].find(({ id }) => id === instanceId)?.key.name ?? null,
   };
   const connected = new Set([INSTANCE, OTHER_INSTANCE]);
+  const workChanges: string[] = [];
   const pinned = new Set<string>();
   let now = CLOCK_START;
   const store = new Store(IN_MEMORY_DATABASE);
@@ -155,6 +156,7 @@ async function fixture(t: TestContext) {
     loadModelRuntime: unexpectedCollaboration,
     instanceKeys,
     instanceConnected: (holder) => connected.has(holder),
+    workChanged: (holder) => workChanges.push(holder),
   });
   stopAfter(t, async () => {
     await component.stop();
@@ -289,6 +291,7 @@ async function fixture(t: TestContext) {
     store,
     pairs,
     connected,
+    workChanges,
     logs,
     human,
     invoke,
@@ -519,6 +522,41 @@ test("a completed report sealed to another key fails the session and stores noth
   );
   assert.equal(f.loginStatus(entry.session_id).state, LoginSessionState.Failed);
   assert.equal(f.rows().length, NO_CREDENTIALS);
+});
+
+test("an instance login changes the work of its holder at the start, the code supply, the completion, the failure and the expiry", async (t) => {
+  const f = await fixture(t);
+  const failing = f.login({ platform: Platform.AnthropicSubscription });
+  const failed = await f.listed();
+  assert.deepEqual(f.workChanges, [INSTANCE]);
+  f.report(failed.session_id, {
+    state: InstanceLoginState.Failed,
+    failure_reason: "login failed",
+  });
+  await assert.rejects(failing);
+  assert.deepEqual(f.workChanges, [INSTANCE, INSTANCE]);
+  f.workChanges.length = 0;
+  const expiring = f.login({ platform: Platform.AnthropicSubscription });
+  const expired = await f.listed();
+  f.report(expired.session_id, { address: AUTHORIZATION_URL });
+  await expiring;
+  f.advance(SESSION_EXPIRY_MS);
+  assert.deepEqual(f.component.loginSessionsOf(INSTANCE), []);
+  assert.deepEqual(f.workChanges, [INSTANCE, INSTANCE]);
+  f.workChanges.length = 0;
+  const started = f.login({ platform: Platform.AnthropicSubscription });
+  const entry = await f.listed();
+  f.report(entry.session_id, { address: AUTHORIZATION_URL });
+  await started;
+  assert.deepEqual(f.workChanges, [INSTANCE]);
+  f.loginCode(entry.session_id, COPY_CODE_VALUE);
+  assert.deepEqual(f.workChanges, [INSTANCE, INSTANCE]);
+  f.report(entry.session_id, {
+    state: InstanceLoginState.Completed,
+    address: AUTHORIZATION_URL,
+    ...(await f.sealFor(Platform.AnthropicSubscription)),
+  });
+  assert.deepEqual(f.workChanges, [INSTANCE, INSTANCE, INSTANCE]);
 });
 
 test("an instance failure report fails the pending login before an address", async (t) => {

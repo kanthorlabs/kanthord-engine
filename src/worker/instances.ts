@@ -64,6 +64,7 @@ const BASE64URL = "base64url";
 const UTF8 = "utf8";
 const ZERO_BYTE = 0;
 const NO_VERSION = 0;
+const VERSION_STEP = 1;
 const FIRST_ITEM = 0;
 const QUERY_TRUE = "true";
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]+$/;
@@ -217,7 +218,9 @@ export class WorkerInstances implements WorkerInstanceLookups {
   private readonly dependencies: InstanceDependencies;
   private readonly connections = new Map<string, CurrentConnection>();
   private readonly bindingVersions = new Map<string, number>();
+  private readonly workVersions = new Map<string, number>();
   private readonly listedByProject = new Map<string, Set<string>>();
+  private readonly startedAt = Date.now();
 
   constructor(dependencies: InstanceDependencies) {
     this.dependencies = dependencies;
@@ -257,6 +260,14 @@ export class WorkerInstances implements WorkerInstanceLookups {
 
   bindingVersionOf(name: string): number {
     return this.bindingVersions.get(name) ?? NO_VERSION;
+  }
+
+  workVersionOf(name: string): number {
+    return this.workVersions.get(name) ?? this.startedAt;
+  }
+
+  raiseWorkVersion(name: string): void {
+    this.workVersions.set(name, this.workVersionOf(name) + VERSION_STEP);
   }
 
   liveInstance(instanceId: string): LiveInstance | null {
@@ -656,7 +667,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
     server_version: string;
     binding_version: number;
     credential_version: number;
-    login_sessions: LoginSessionEntry[];
+    work_version: number;
   } {
     if (!this.holdConnection(instanceId, connectionId, connectionName))
       throw superseded(this.connections.get(instanceId));
@@ -665,7 +676,21 @@ export class WorkerInstances implements WorkerInstanceLookups {
       server_version: packageVersion(),
       binding_version: this.bindingVersionOf(name),
       credential_version: this.dependencies.credentialVersionOf(name),
-      login_sessions: this.dependencies.loginSessionsOf(name),
+      work_version: this.workVersionOf(name),
+    };
+  }
+
+  work(
+    instanceId: string,
+    name: string,
+    connectionId: string,
+  ): { work_version: number; login_sessions: LoginSessionEntry[] } {
+    const current = this.connections.get(instanceId);
+    if (current?.connection_id !== connectionId) throw superseded(current);
+    const loginSessions = this.dependencies.loginSessionsOf(name);
+    return {
+      work_version: this.workVersionOf(name),
+      login_sessions: loginSessions,
     };
   }
 

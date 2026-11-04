@@ -103,6 +103,7 @@ export interface Dependencies {
   loadModelRuntime: () => Promise<ModelRuntimeModule>;
   instanceKeys?: InstanceKeys;
   instanceConnected?: (holder: string) => boolean;
+  workChanged?: (holder: string) => void;
 }
 
 const NO_INSTANCE_KEYS: InstanceKeys = {
@@ -189,6 +190,7 @@ export class LlmComponent implements Service {
   private readonly platformSet: CredentialPlatformSet;
   private readonly instanceKeys: InstanceKeys;
   private readonly instanceConnected: (holder: string) => boolean;
+  private readonly workChanged: (holder: string) => void;
 
   constructor(dependencies: Dependencies) {
     registerOAuthFlows();
@@ -209,6 +211,7 @@ export class LlmComponent implements Service {
     this.loadModelRuntime = dependencies.loadModelRuntime;
     this.instanceKeys = dependencies.instanceKeys ?? NO_INSTANCE_KEYS;
     this.instanceConnected = dependencies.instanceConnected ?? (() => false);
+    this.workChanged = dependencies.workChanged ?? (() => {});
     this.platformSet = {
       platforms: LLM_PLATFORMS,
       instance_copies: true,
@@ -944,11 +947,13 @@ export class LlmComponent implements Service {
       this.now(),
       holder,
     );
-    const flow = new InstanceLogin(session, this.sessions, this.now, () =>
-      this.instanceLogins.delete(session.id),
-    );
+    const flow = new InstanceLogin(session, this.sessions, this.now, () => {
+      this.instanceLogins.delete(session.id);
+      this.workChanged(holder);
+    });
     this.instanceLogins.set(session.id, flow);
     flow.arm();
+    this.workChanged(holder);
     using cancellation = addAbortListener(caller.context.signal, () =>
       flow.fail(LOGIN_FAILED_REASON),
     );
@@ -1028,6 +1033,7 @@ export class LlmComponent implements Service {
       const instance = this.instanceLogins.get(session.id);
       if (instance) {
         instance.supply(input.body.value);
+        this.workChanged(instance.session.holder);
         return { session_id: session.id };
       }
       const flow = this.logins.get(session.id);

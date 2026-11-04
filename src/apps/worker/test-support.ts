@@ -19,6 +19,7 @@ import {
   WORKER_TOKEN_INFO,
 } from "../../worker/contract.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
+import type { LoginSessionEntry } from "../../llm/contract.ts";
 
 export function testClaim(): ExecutionRecord {
   return {
@@ -52,6 +53,7 @@ export const FakePath = {
   Token: "/api/worker/instance/token",
   Connect: "/api/worker/instance/connect",
   InstanceHeartbeat: "/api/worker/instance/heartbeat",
+  InstanceWork: "/api/worker/instance/work",
   Register: "/api/worker/register",
   Heartbeat: "/api/worker/heartbeat",
   Pull: "/api/scheduler/work/pull",
@@ -100,6 +102,8 @@ export async function fakeInstanceServer(t: TestContext) {
   const state = {
     version: packageVersion(),
     bindingVersion: 0,
+    workVersion: 0,
+    loginSessions: [] as LoginSessionEntry[],
     serial: 0,
     current: null as { id: string; name: string } | null,
     workerTokens: new Set<string>(),
@@ -212,7 +216,21 @@ export async function fakeInstanceServer(t: TestContext) {
           server_version: state.version,
           binding_version: state.bindingVersion,
           credential_version: 0,
-          login_sessions: [],
+          work_version: state.workVersion,
+        },
+      };
+    }
+    if (request.path === FakePath.InstanceWork) {
+      if (!workerToken(request.bearer)) return failure(401, UNAUTHORIZED_CODE);
+      if (state.current?.id !== body?.connection_id)
+        return failure(409, SUPERSEDED_CODE, {
+          connection_name: state.current?.name ?? null,
+        });
+      return {
+        status: 200,
+        body: {
+          work_version: state.workVersion,
+          login_sessions: state.loginSessions,
         },
       };
     }

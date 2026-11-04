@@ -841,12 +841,12 @@ export const RESERVED_INSTANCE_NAMES: readonly string[] = [
   "token",
   "connect",
   "heartbeat",
+  "work",
 ];
 export const WORKER_TOKEN_INFO = "kanthord/worker-token/v1";
 export const INSTANCE_CONNECTION_INFO = "kanthord/instance-connection/v1";
 export const INSTANCE_HEARTBEAT_INTERVAL_MS = 15000;
 export const INSTANCE_CONNECTED_WINDOW_MS = 60000;
-export const INSTANCE_LOGIN_HEARTBEAT_INTERVAL_MS = 2000;
 export const INSTANCE_RENEWAL_INTERVAL_MS = 1800000;
 export const INSTANCE_SUPERSEDED_CODE = "worker.instance.superseded";
 export const BindingEntryState = {
@@ -1317,10 +1317,30 @@ export const instanceOperations = {
       server_version: z.string().min(1),
       binding_version: z.number().int().min(0),
       credential_version: z.number().int().min(0),
+      work_version: z.number().int().min(0),
+    }),
+    description:
+      "Renew the current connection of the instance and answer the server version, the binding version, the credential version and the work version.",
+  },
+  "instance.work": {
+    ...instanceOperation,
+    access: AccessPolicy.Worker,
+    id: "worker.instance.work",
+    body: true,
+    method: HttpMethod.Post,
+    path: "/api/worker/instance/work",
+    mutation: false,
+    input: z.strictObject({
+      params: emptyFields,
+      query: emptyFields,
+      body: z.strictObject({ connection_id: connectionIdSchema }),
+    }),
+    output: z.strictObject({
+      work_version: z.number().int().min(0),
       login_sessions: z.array(loginSessionEntrySchema),
     }),
     description:
-      "Renew the current connection of the instance and answer the server version, the binding version, the credential version and the open login sessions.",
+      "Answer the work version and the open login sessions of the current connection of the instance. The call renews no liveness.",
   },
 } as const satisfies Record<string, Operation>;
 

@@ -35,6 +35,7 @@ const DEVICE_URL = "https://auth.openai.com/codex/device";
 const DEVICE_CODE = "ABCD-EFGH";
 const COPY_CODE_VALUE = "authorization-code#state-value";
 const NO_REPORTS = 0;
+const ONE_REPORT = 1;
 const RETRY_MS = 1;
 const DEVICE_OPTION = "device_code";
 const OAUTH_SECRET = {
@@ -161,7 +162,6 @@ test("an instance runs a copy_code login, supplies the code of the heartbeat ent
   f.logins.sync([
     entry(Platform.AnthropicSubscription, LoginSessionMode.CopyCode),
   ]);
-  assert.equal(f.logins.pending(), true);
   await f.until(() => f.reports.length > NO_REPORTS, t.signal);
   assert.deepEqual(
     [...f.reports],
@@ -195,7 +195,8 @@ test("an instance runs a copy_code login, supplies the code of the heartbeat ent
     OAUTH_SECRET,
   );
   assert.equal(JSON.stringify(f.reports).includes(OAUTH_SECRET.access), false);
-  await f.until(() => !f.logins.pending(), t.signal);
+  await setImmediate();
+  const sent = f.reports.length;
   f.logins.sync([
     entry(
       Platform.AnthropicSubscription,
@@ -203,7 +204,8 @@ test("an instance runs a copy_code login, supplies the code of the heartbeat ent
       COPY_CODE_VALUE,
     ),
   ]);
-  assert.equal(f.logins.pending(), false);
+  await setImmediate();
+  assert.equal(f.reports.length, sent);
 });
 
 test("an instance runs a device login, reports only the user code and the address, and aborts when the server no longer lists the session", async (t) => {
@@ -241,7 +243,6 @@ test("an instance runs a device login, reports only the user code and the addres
     [DEVICE_URL, DEVICE_CODE],
   );
   f.logins.sync([]);
-  assert.equal(f.logins.pending(), false);
   await f.until(() => aborted, t.signal);
   assert.equal(
     f.reports.some((report) => report.state === InstanceLoginState.Completed),
@@ -284,6 +285,23 @@ test("a lost pending report is sent again at the next heartbeat entry", async (t
   f.logins.stop();
 });
 
+test("a lost pending report is sent again at the next resend", async (t) => {
+  const f = await fixture(copyCodeProvider(), () => true);
+  f.logins.sync([
+    entry(Platform.AnthropicSubscription, LoginSessionMode.CopyCode),
+  ]);
+  await f.until(() => f.keys.length > NO_REPORTS, t.signal);
+  assert.equal(f.reports.length, NO_REPORTS);
+  f.logins.resend();
+  await f.until(() => f.reports.length > NO_REPORTS, t.signal);
+  assert.equal(f.reports[0]!.address, AUTHORIZATION_URL);
+  await setImmediate();
+  f.logins.resend();
+  await setImmediate();
+  assert.equal(f.reports.length, ONE_REPORT);
+  f.logins.stop();
+});
+
 test("a lost completed report is retried with one idempotency key", async (t) => {
   const f = await fixture(
     copyCodeProvider(),
@@ -322,7 +340,7 @@ test("a stopped instance starts no login flow", async () => {
   f.logins.sync([
     entry(Platform.AnthropicSubscription, LoginSessionMode.CopyCode),
   ]);
-  assert.equal(f.logins.pending(), false);
   await setImmediate();
   assert.equal(started, false);
+  assert.equal(f.reports.length, NO_REPORTS);
 });

@@ -28,7 +28,6 @@ import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const LOGIN_FAILED = "login failed";
 const INSTANCE_HUMAN = "";
-const NO_RUNNING_LOGINS = 0;
 const NO_REPORT = "";
 export const LOGIN_REPORT_RETRY_MS = 2000;
 
@@ -76,10 +75,6 @@ export class InstanceLogins {
     this.now = options.now ?? Date.now;
   }
 
-  pending(): boolean {
-    return this.running.size > NO_RUNNING_LOGINS;
-  }
-
   sync(entries: readonly LoginSessionEntry[]): void {
     if (this.stopped) return;
     const listed = new Set(entries.map((entry) => entry.session_id));
@@ -94,6 +89,11 @@ export class InstanceLogins {
       const running = this.running.get(entry.session_id) ?? this.begin(entry);
       if (running) this.advance(running, entry);
     }
+  }
+
+  resend(): void {
+    for (const running of this.running.values())
+      void this.reportPending(running);
   }
 
   stop(): void {
