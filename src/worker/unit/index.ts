@@ -16,6 +16,7 @@ export {
 export type { RepositoryTransport } from "../contract.ts";
 export { loadPi } from "../../agent/pi.ts";
 export {
+  releaseSetupRefusal,
   runNativeExecution,
   type NativeExecutionInput,
 } from "./native-method.ts";
