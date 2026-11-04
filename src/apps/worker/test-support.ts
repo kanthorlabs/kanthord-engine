@@ -231,6 +231,7 @@ export async function fakeInstanceServer(t: TestContext) {
         body: {
           work_version: state.workVersion,
           login_sessions: state.loginSessions,
+          session_reads: [],
         },
       };
     }

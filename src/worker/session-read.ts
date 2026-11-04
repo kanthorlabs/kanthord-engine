@@ -13,12 +13,18 @@ import {
   type SessionReadResult,
 } from "./contract.ts";
 import { readInstanceById, readLiveInstance } from "./instance-rows.ts";
+import type { SessionReadTarget, SessionReadWait } from "./instances.ts";
 import { readRow } from "./registration-rows.ts";
 
 export interface SessionReadDependencies {
   store: Store;
   host: PoolHost | null;
   logger: Logger | null;
+  remote: (
+    instance: SessionReadTarget,
+    read: SessionRead,
+    signal: AbortSignal,
+  ) => Promise<SessionReadWait>;
 }
 
 function checked(
@@ -74,6 +80,19 @@ export async function readSessionEntry(
       placement: recorded.placement,
     };
   const target = { instance: live.name, placement: live.placement };
+  if (live.placement === InstancePlacement.Worker) {
+    const answer = await dependencies.remote(
+      { id: live.id, name: live.name },
+      read,
+      signal,
+    );
+    if ("unreachable" in answer)
+      return { unreachable: answer.unreachable, ...target };
+    return {
+      result: checked(answer.result, read, live.name, dependencies.logger),
+      ...target,
+    };
+  }
   if (live.placement !== InstancePlacement.Server)
     return { unreachable: UnreachableReason.Offline, ...target };
   if (!dependencies.host) throw new Error("worker: no pool host");

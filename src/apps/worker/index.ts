@@ -27,9 +27,10 @@ import {
 } from "../../kernel/service.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { isString } from "../../kernel/values.ts";
-import type {
-  ModelRuntimeFactory,
-  RepositoryTransport,
+import {
+  type ModelRuntimeFactory,
+  type RepositoryTransport,
+  sessionRootOf,
 } from "../../worker/unit/index.ts";
 import { validateClientEndpoint } from "../../gateway/client.ts";
 import {
@@ -58,6 +59,7 @@ import {
 } from "./instance-exchange.ts";
 import { instanceCopyKey } from "./instance-credential.ts";
 import { InstanceLogins } from "./instance-login.ts";
+import { SessionReads } from "./session-reads.ts";
 import { CopyChecks } from "./copy-checks.ts";
 
 const WORKER_STOP_WATCHDOG_MS = 10000;
@@ -137,6 +139,7 @@ export class Worker implements Service {
   private connection?: Connection;
   private workVersion?: number;
   private logins?: InstanceLogins;
+  private sessionReads?: SessionReads;
   private copyChecks?: CopyChecks;
   private connectionName = "";
   private operationalLog?: OperationalLog;
@@ -187,6 +190,18 @@ export class Worker implements Service {
         providers: this.options.oauthProviders,
         report: (sessionId, body, idempotencyKey) =>
           exchange.loginReport(sessionId, body, idempotencyKey, this.shutdown),
+        log: (record) => this.logRecord(record),
+      });
+      this.sessionReads = new SessionReads({
+        sessionRoot: sessionRootOf(directories.data),
+        report: (readId, result, idempotencyKey) =>
+          exchange.sessionReadReport(
+            readId,
+            result,
+            idempotencyKey,
+            this.shutdown,
+          ),
+        signal: this.shutdown.signal,
         log: (record) => this.logRecord(record),
       });
       this.copyChecks = new CopyChecks({
@@ -444,6 +459,7 @@ export class Worker implements Service {
       this.shutdown,
     );
     this.logins!.sync(work.login_sessions);
+    this.sessionReads!.sync(work.session_reads);
     this.workVersion = work.work_version;
   }
 

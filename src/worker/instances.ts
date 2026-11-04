@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -13,6 +14,7 @@ import {
 import type { Store, Transaction } from "../kernel/store.ts";
 import { packageVersion } from "../kernel/version.ts";
 import type { LoginSessionEntry } from "../llm/contract.ts";
+import { UnreachableReason } from "../tracking/contract.ts";
 import type {
   ExecutionEnds,
   MissionCollaborations,
@@ -34,6 +36,11 @@ import {
   PlacementIssue,
   type PlacementStatus,
   type PoolEntry,
+  SESSION_READ_PREFIX,
+  SESSION_READS_PENDING_MAX,
+  type SessionRead,
+  type SessionReadEntry,
+  type SessionReadResult,
   WORKER_TOKEN_INFO,
   type WorkerBindingsOf,
   WorkerErrorCode,
@@ -65,6 +72,8 @@ const UTF8 = "utf8";
 const ZERO_BYTE = 0;
 const NO_VERSION = 0;
 const VERSION_STEP = 1;
+const NO_WAITERS = 0;
+const NO_PENDING_READS = 0;
 const FIRST_ITEM = 0;
 const QUERY_TRUE = "true";
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]+$/;
@@ -94,6 +103,22 @@ export interface InstanceDependencies {
   ) => boolean;
   loginSessionsOf: (holder: string) => LoginSessionEntry[];
   credentialVersionOf: (holder: string) => number;
+  sessionReadWaitMs: number;
+}
+
+export interface SessionReadTarget {
+  id: string;
+  name: string;
+}
+
+export type SessionReadWait =
+  { result: SessionReadResult } | { unreachable: UnreachableReason };
+
+interface PendingSessionRead {
+  read_id: string;
+  read: SessionRead;
+  answered: PromiseWithResolvers<SessionReadResult>;
+  waiters: number;
 }
 
 interface CurrentConnection {
@@ -141,6 +166,23 @@ function superseded(current: CurrentConnection | undefined): OperationError {
     WorkerErrorCode.InstanceConnectionSuperseded,
     "Another connection of the worker instance is current.",
     { connection_name: current?.connection_name ?? null },
+  );
+}
+
+function sessionReadNotFound(): OperationError {
+  return new OperationError(
+    HttpStatus.NotFound,
+    WorkerErrorCode.SessionReadNotFound,
+    "No pending session read of the worker instance holds the read id.",
+  );
+}
+
+function sameRead(left: SessionRead, right: SessionRead): boolean {
+  return (
+    left.execution_id === right.execution_id &&
+    left.session_id === right.session_id &&
+    left.entry_id === right.entry_id &&
+    left.entry_type === right.entry_type
   );
 }
 
@@ -219,6 +261,10 @@ export class WorkerInstances implements WorkerInstanceLookups {
   private readonly connections = new Map<string, CurrentConnection>();
   private readonly bindingVersions = new Map<string, number>();
   private readonly workVersions = new Map<string, number>();
+  private readonly sessionReads = new Map<
+    string,
+    Map<string, PendingSessionRead>
+  >();
   private readonly listedByProject = new Map<string, Set<string>>();
   private readonly startedAt = Date.now();
 
@@ -684,14 +730,93 @@ export class WorkerInstances implements WorkerInstanceLookups {
     instanceId: string,
     name: string,
     connectionId: string,
-  ): { work_version: number; login_sessions: LoginSessionEntry[] } {
+  ): {
+    work_version: number;
+    login_sessions: LoginSessionEntry[];
+    session_reads: SessionReadEntry[];
+  } {
     const current = this.connections.get(instanceId);
     if (current?.connection_id !== connectionId) throw superseded(current);
     const loginSessions = this.dependencies.loginSessionsOf(name);
     return {
       work_version: this.workVersionOf(name),
       login_sessions: loginSessions,
+      session_reads: [
+        ...(this.sessionReads.get(instanceId)?.values() ?? []),
+      ].map((pending) => ({ read_id: pending.read_id, ...pending.read })),
     };
+  }
+
+  async queueSessionRead(
+    instance: SessionReadTarget,
+    read: SessionRead,
+    signal: AbortSignal,
+  ): Promise<SessionReadWait> {
+    signal.throwIfAborted();
+    if (this.connectionOf(instance.id) === null)
+      return { unreachable: UnreachableReason.Offline };
+    let pending = this.sessionReads.get(instance.id);
+    let queued = [...(pending?.values() ?? [])].find((candidate) =>
+      sameRead(candidate.read, read),
+    );
+    if (!queued) {
+      if ((pending?.size ?? NO_PENDING_READS) >= SESSION_READS_PENDING_MAX)
+        return { unreachable: UnreachableReason.Busy };
+      if (!pending) {
+        pending = new Map();
+        this.sessionReads.set(instance.id, pending);
+      }
+      queued = {
+        read_id: createIdentity(SESSION_READ_PREFIX),
+        read: {
+          execution_id: read.execution_id,
+          session_id: read.session_id,
+          entry_id: read.entry_id,
+          entry_type: read.entry_type,
+        },
+        answered: Promise.withResolvers(),
+        waiters: NO_WAITERS,
+      };
+      pending.set(queued.read_id, queued);
+      this.raiseWorkVersion(instance.name);
+    }
+    queued.waiters++;
+    const cancel = new AbortController();
+    const expired = delay(this.dependencies.sessionReadWaitMs, null, {
+      signal: AbortSignal.any([signal, cancel.signal]),
+    });
+    try {
+      const result = await Promise.race([queued.answered.promise, expired]);
+      return result === null
+        ? { unreachable: UnreachableReason.Timeout }
+        : { result };
+    } finally {
+      cancel.abort();
+      queued.waiters--;
+      if (queued.waiters === NO_WAITERS)
+        this.dropSessionRead(instance.id, queued);
+    }
+  }
+
+  reportSessionRead(
+    instanceId: string,
+    readId: string,
+    result: SessionReadResult,
+  ): void {
+    const queued = this.sessionReads.get(instanceId)?.get(readId);
+    if (!queued) throw sessionReadNotFound();
+    this.dropSessionRead(instanceId, queued);
+    queued.answered.resolve(result);
+  }
+
+  private dropSessionRead(
+    instanceId: string,
+    queued: PendingSessionRead,
+  ): void {
+    const pending = this.sessionReads.get(instanceId);
+    if (pending?.get(queued.read_id) !== queued) return;
+    pending.delete(queued.read_id);
+    if (pending.size === NO_PENDING_READS) this.sessionReads.delete(instanceId);
   }
 
   private takeConnection(

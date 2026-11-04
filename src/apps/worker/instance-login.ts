@@ -23,13 +23,15 @@ import {
   LoginSessionStore,
   SESSION_EXPIRY_MS,
 } from "../../llm/sessions.ts";
-import { EXCHANGE_UNAVAILABLE } from "./instance-exchange.ts";
+import {
+  EXCHANGE_UNAVAILABLE,
+  INSTANCE_REPORT_RETRY_MS,
+} from "./instance-exchange.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const LOGIN_FAILED = "login failed";
 const INSTANCE_HUMAN = "";
 const NO_REPORT = "";
-export const LOGIN_REPORT_RETRY_MS = 2000;
 
 export type LoginReporter = (
   sessionId: string,
@@ -198,7 +200,7 @@ export class InstanceLogins {
         break;
       } catch (error) {
         if (!this.retryable(running, error)) throw error;
-        await delay(this.options.retryMs ?? LOGIN_REPORT_RETRY_MS);
+        await delay(this.options.retryMs ?? INSTANCE_REPORT_RETRY_MS);
       }
     }
     this.sessions.complete(session.id);

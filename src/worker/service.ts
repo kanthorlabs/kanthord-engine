@@ -145,6 +145,7 @@ function invalidWorkerConfiguration(workerName: string): OperationError {
 
 export interface Dependencies {
   handoverRefreshWaitMs?: number;
+  sessionReadWaitMs: number;
   missionActions: MissionActions;
   missionPromptPins: MissionPromptPins;
   promptBase?: PromptBase;
@@ -377,6 +378,7 @@ export class WorkerService implements Service {
       loginSessionsOf: (holder) => dependencies.loginSessionsOf?.(holder) ?? [],
       credentialVersionOf: (holder) =>
         dependencies.credentialVersionOf?.(holder) ?? NO_CREDENTIAL_VERSION,
+      sessionReadWaitMs: dependencies.sessionReadWaitMs,
     });
     if (dependencies.pool) this.pool = new Pool(dependencies.pool.host);
     this.performer = new ActionPerformer({
@@ -482,6 +484,8 @@ export class WorkerService implements Service {
         store: this.dependencies.store,
         host: this.dependencies.pool?.host ?? null,
         logger: this.dependencies.pool?.logger ?? null,
+        remote: (instance, remoteRead, remoteSignal) =>
+          this.instances.queueSessionRead(instance, remoteRead, remoteSignal),
       },
       runtimeIdentity,
       read,

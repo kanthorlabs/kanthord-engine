@@ -13,6 +13,9 @@ import {
   instanceConfigurationSchema,
   InstancePlacement,
   PlacementIssue,
+  SESSION_READS_PENDING_MAX,
+  type SessionRead,
+  SessionReadOutcome,
   WORKER_SERVICE_NAME,
   WORKER_TOKEN_INFO,
   type WorkerAgentView,
@@ -24,6 +27,10 @@ import {
 import { AgentErrorCode, type HolderScope } from "../agent/contract.ts";
 import type { ExecutionEnds } from "../mission/contract.ts";
 import type { LoginSessionEntry } from "../llm/contract.ts";
+import {
+  SESSION_READ_WAIT_MS,
+  UnreachableReason,
+} from "../tracking/contract.ts";
 import {
   insertRegistration,
   readAllLive,
@@ -86,6 +93,25 @@ const LOGIN_ENTRY: LoginSessionEntry = {
   code: null,
 };
 const SINGLE_CALL = 1;
+const SHORT_SESSION_READ_WAIT_MS = 20;
+const SESSION_READ_ID_PATTERN = /^session_read_[0-9A-HJKMNP-TV-Z]{26}$/;
+const SESSION_READ: SessionRead = {
+  execution_id: createIdentity("execution"),
+  session_id: "0123456789abcdef",
+  entry_id: "a1b2c3d4",
+  entry_type: "message",
+};
+const RESOLVED = {
+  outcome: SessionReadOutcome.Resolved,
+  entry: { id: SESSION_READ.entry_id, type: SESSION_READ.entry_type },
+};
+
+function sessionReadOf(index: number): SessionRead {
+  return {
+    ...SESSION_READ,
+    entry_id: `e${index.toString(16).padStart(7, "0")}`,
+  };
+}
 
 type Binding = ReturnType<WorkerBindingsOf>[number];
 
@@ -139,6 +165,7 @@ function bindingOf(projectId: string, name: string, instances: string[]) {
 function instanceFixture(
   t: TestContext,
   config: Partial<typeof WORKER_CONFIG> = {},
+  sessionReadWaitMs = SESSION_READ_WAIT_MS,
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
   stopAfter(t, () => store.close());
@@ -156,6 +183,7 @@ function instanceFixture(
     config: { ...WORKER_CONFIG, ...config },
     store,
     loginSessionsOf: (holder) => logins.get(holder) ?? [],
+    sessionReadWaitMs,
     missionActions: {
       authorizeRequest: unexpected,
       authorizeAction: unexpected,
@@ -811,6 +839,7 @@ test("the work read answers the work version and the login sessions, renews no l
   assert.deepEqual(work, {
     work_version: f.worker().instances.workVersionOf(INSTANCE),
     login_sessions: [LOGIN_ENTRY],
+    session_reads: [],
   });
   assert.equal(liveness(), renewed);
   await f.invoke("instance.connect", {
@@ -1305,4 +1334,194 @@ test("instance.get and instance.list show no connection once the last heartbeat 
     listed.items.map((item) => [item.name, item.connection]),
     [[INSTANCE, null]],
   );
+});
+
+async function connectedInstance(
+  f: ReturnType<typeof instanceFixture>,
+  name = INSTANCE,
+) {
+  const { record } = await f.created(name);
+  f.asWorker(record.id, name);
+  const connection = await f.invoke("instance.connect", {
+    connection_name: CONNECTION_NAME,
+  });
+  const work = () => {
+    f.asWorker(record.id, name);
+    return f.invoke("instance.work", {
+      connection_id: connection.connection_id,
+    });
+  };
+  const queue = (
+    read: SessionRead,
+    signal = AbortSignal.timeout(TOKEN_LIFETIME_MS),
+  ) =>
+    f
+      .worker()
+      .instances.queueSessionRead({ id: record.id, name }, read, signal);
+  const report = (readId: string, body: unknown = RESOLVED) => {
+    f.asWorker(record.id, name);
+    return f.invoke("session_read.report", body, { read_id: readId });
+  };
+  return { record, work, queue, report };
+}
+
+test("the work read lists each pending session read, the work version rises at each queue and a report answers each waiter", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedInstance(f);
+  const before = (await box.work()).work_version;
+  const first = box.queue(SESSION_READ);
+  const joined = box.queue({ ...SESSION_READ });
+  const other = box.queue(sessionReadOf(1));
+  const work = await box.work();
+  assert.equal(work.work_version, before + SECOND_VERSION);
+  assert.deepEqual(
+    work.session_reads.map((listed) => ({
+      execution_id: listed.execution_id,
+      session_id: listed.session_id,
+      entry_id: listed.entry_id,
+      entry_type: listed.entry_type,
+    })),
+    [SESSION_READ, sessionReadOf(1)],
+  );
+  for (const { read_id } of work.session_reads)
+    assert.match(read_id, SESSION_READ_ID_PATTERN);
+  assert.equal(await box.report(work.session_reads[0]!.read_id), null);
+  assert.deepEqual(await first, { result: RESOLVED });
+  assert.deepEqual(await joined, { result: RESOLVED });
+  await box.report(work.session_reads[1]!.read_id, {
+    outcome: SessionReadOutcome.EntryAbsent,
+  });
+  assert.deepEqual(await other, {
+    result: { outcome: SessionReadOutcome.EntryAbsent },
+  });
+  const after = await box.work();
+  assert.deepEqual(after.session_reads, []);
+  assert.equal(after.work_version, before + SECOND_VERSION);
+});
+
+test("a session read of an instance with no current connection answers offline at once and queues nothing", async (t) => {
+  const f = instanceFixture(t);
+  const { record } = await f.created();
+  const target = { id: record.id, name: INSTANCE };
+  const version = f.worker().instances.workVersionOf(INSTANCE);
+  assert.deepEqual(
+    await f
+      .worker()
+      .instances.queueSessionRead(
+        target,
+        SESSION_READ,
+        AbortSignal.timeout(TOKEN_LIFETIME_MS),
+      ),
+    { unreachable: UnreachableReason.Offline },
+  );
+  f.asWorker(record.id);
+  const connection = await f.invoke("instance.connect", {
+    connection_name: CONNECTION_NAME,
+  });
+  const start = Date.now();
+  t.mock.method(Date, "now", () => start + INSTANCE_CONNECTED_WINDOW_MS + 1);
+  assert.deepEqual(
+    await f
+      .worker()
+      .instances.queueSessionRead(
+        target,
+        SESSION_READ,
+        AbortSignal.timeout(TOKEN_LIFETIME_MS),
+      ),
+    { unreachable: UnreachableReason.Offline },
+  );
+  assert.equal(f.worker().instances.workVersionOf(INSTANCE), version);
+  t.mock.restoreAll();
+  const work = await f.invoke("instance.work", {
+    connection_id: connection.connection_id,
+  });
+  assert.deepEqual(work.session_reads, []);
+});
+
+test("the ninth distinct pending session read answers busy and a read of a pending entry joins it", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedInstance(f);
+  const waits = Array.from({ length: SESSION_READS_PENDING_MAX }, (_, index) =>
+    box.queue(sessionReadOf(index)),
+  );
+  const version = f.worker().instances.workVersionOf(INSTANCE);
+  assert.deepEqual(await box.queue(sessionReadOf(SESSION_READS_PENDING_MAX)), {
+    unreachable: UnreachableReason.Busy,
+  });
+  const joined = box.queue(sessionReadOf(0));
+  assert.equal(f.worker().instances.workVersionOf(INSTANCE), version);
+  const work = await box.work();
+  assert.equal(work.session_reads.length, SESSION_READS_PENDING_MAX);
+  for (const { read_id } of work.session_reads) await box.report(read_id);
+  for (const wait of [...waits, joined])
+    assert.deepEqual(await wait, { result: RESOLVED });
+});
+
+test("no report within the session read wait answers timeout, drops the read and a later report answers not_found", async (t) => {
+  const f = instanceFixture(t, {}, SHORT_SESSION_READ_WAIT_MS);
+  const box = await connectedInstance(f);
+  const wait = box.queue(SESSION_READ);
+  const [listed] = (await box.work()).session_reads;
+  assert.deepEqual(await wait, { unreachable: UnreachableReason.Timeout });
+  assert.deepEqual((await box.work()).session_reads, []);
+  await f.refuses(
+    () => box.report(listed!.read_id),
+    HttpStatus.NotFound,
+    WorkerErrorCode.SessionReadNotFound,
+  );
+});
+
+test("an aborted session read drops its waiter and the read", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedInstance(f);
+  const controller = new AbortController();
+  const wait = box.queue(SESSION_READ, controller.signal);
+  controller.abort();
+  await assert.rejects(wait);
+  assert.deepEqual((await box.work()).session_reads, []);
+});
+
+test("a report of a session read of another instance answers not_found and keeps the read pending", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedInstance(f);
+  const other = await connectedInstance(f, "desktop");
+  const wait = box.queue(SESSION_READ);
+  const [listed] = (await box.work()).session_reads;
+  await f.refuses(
+    () => other.report(listed!.read_id),
+    HttpStatus.NotFound,
+    WorkerErrorCode.SessionReadNotFound,
+  );
+  assert.deepEqual((await box.work()).session_reads, [listed]);
+  await box.report(listed!.read_id);
+  assert.deepEqual(await wait, { result: RESOLVED });
+});
+
+test("the session read report refuses a body outside the outcome union", () => {
+  const body = workerOperations["session_read.report"].input.shape.body;
+  for (const refused of [
+    { outcome: SessionReadOutcome.Resolved },
+    { outcome: SessionReadOutcome.Resolved, entry: RESOLVED.entry, bytes: 1 },
+    { outcome: SessionReadOutcome.TooLarge },
+    { outcome: SessionReadOutcome.TooLarge, bytes: 0 },
+    { outcome: SessionReadOutcome.Unreadable, entry: RESOLVED.entry },
+    { outcome: "changed" },
+  ])
+    assert.equal(
+      body.safeParse(refused).success,
+      false,
+      JSON.stringify(refused),
+    );
+  for (const accepted of [
+    RESOLVED,
+    { outcome: SessionReadOutcome.TooLarge, bytes: 1 },
+    { outcome: SessionReadOutcome.SessionAbsent },
+    { outcome: SessionReadOutcome.EntryAbsent },
+    { outcome: SessionReadOutcome.Unreadable },
+  ])
+    assert.equal(
+      body.safeParse(accepted).success,
+      true,
+      JSON.stringify(accepted),
+    );
 });

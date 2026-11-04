@@ -27,7 +27,11 @@ export {
   type ExecutionEnd,
 } from "./execution-run.ts";
 export type { MethodClients } from "./method-clients.ts";
-export { executionSessionRoot, readSessionFileEntry } from "./session-store.ts";
+export {
+  executionSessionRoot,
+  readSessionFileEntry,
+  sessionRootOf,
+} from "./session-store.ts";
 export {
   HostTool,
   uploadResultSchema,

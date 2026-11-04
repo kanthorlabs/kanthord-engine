@@ -19,6 +19,7 @@ import {
   connectionPayloadSchema,
   INSTANCE_CONNECTION_INFO,
   type InstanceConfiguration,
+  type SessionReadResult,
   WORKER_TOKEN_INFO,
   workerOperations,
   type WorkerTokenPayload,
@@ -28,6 +29,7 @@ import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const BASE64URL = "base64url";
 export const EXCHANGE_UNAVAILABLE = "worker.instance.exchange_unavailable";
+export const INSTANCE_REPORT_RETRY_MS = 2000;
 
 export type ConnectionEntry = ReturnType<
   typeof connectionPayloadSchema.parse
@@ -180,6 +182,21 @@ export class InstanceExchange {
         { context, idempotencyKey },
       ),
       "login report",
+    );
+  }
+
+  async sessionReadReport(
+    readId: string,
+    result: SessionReadResult,
+    idempotencyKey: string,
+    context: Context = background,
+  ): Promise<void> {
+    settled(
+      await this.client["session_read.report"](
+        { params: { read_id: readId }, query: {}, body: result },
+        { context, idempotencyKey },
+      ),
+      "session read report",
     );
   }
 
