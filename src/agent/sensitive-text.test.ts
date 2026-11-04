@@ -9,6 +9,8 @@ import {
   findPatternText,
   KNOWN_PART_MIN_CHARACTERS,
   knownMatcher,
+  markerIndex,
+  markerTag,
   matcherNodes,
   mergeSpans,
   promotes,
@@ -18,6 +20,7 @@ import {
   SENSITIVE_VALUE_MAX_CHARACTERS,
   SensitiveRule,
   type SensitiveSpan,
+  SESSION_MARKER_PATTERN,
   sessionMarker,
   tracerMarker,
 } from "./sensitive-text.ts";
@@ -1346,11 +1349,41 @@ test("overlapping spans merge, and the lowest rule number wins", () => {
   );
 });
 
+test("a session marker holds no digit and keeps its index and tag", () => {
+  const index = 4290;
+  const tag = markerTag("0123456789abcdef");
+  const marker = sessionMarker(SensitiveRule.LlmCredential, index, tag);
+  assert.doesNotMatch(marker, /\d/);
+  const [match] = [...marker.matchAll(SESSION_MARKER_PATTERN)];
+  assert.equal(markerIndex(match!.groups!.index!), index);
+  assert.equal(match!.groups!.tag, tag);
+});
+
+test("a session marker index has one form for each number", () => {
+  const tag = markerTag("0123456789abcdef");
+  const marked = (index: string) =>
+    [
+      ...j("<redacted:", SensitiveRule.Jwt, ":", index, ":", tag, ">").matchAll(
+        SESSION_MARKER_PATTERN,
+      ),
+    ].length;
+  const markers = ["a", "b", "ba"];
+  const others = ["aa", "ab"];
+  assert.deepEqual(
+    markers.map(marked),
+    markers.map(() => 1),
+  );
+  assert.deepEqual(
+    others.map(marked),
+    others.map(() => 0),
+  );
+});
+
 test("a valid marker cuts a span and an invalid marker is scanned", () => {
   const marker = sessionMarker(
     SensitiveRule.QuotedAssignment,
     3,
-    "9f2c41ab07d1e5c3",
+    markerTag("9f2c41ab07d1e5c3"),
   );
   const before = an(8);
   const text = j(PASS, ' = "', before, marker, 'abc"');
@@ -1581,7 +1614,7 @@ test("redactValue keeps structural keys and session markers and masks each findi
   const marker = sessionMarker(
     SensitiveRule.UrlUserinfo,
     1,
-    "9f2c41ab07d1e5c3",
+    markerTag("9f2c41ab07d1e5c3"),
   );
   const key = j("AK", "IA", up(16));
   const secret = ANTHROPIC_SECRET();
