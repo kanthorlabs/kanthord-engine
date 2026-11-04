@@ -57,6 +57,8 @@ import {
   type MissionTelemetry,
   type MissionTransitions,
   type NodeBody,
+  type NodeStateFact,
+  nodeStateSchema,
   type SchedulerClaims,
   type SchedulerMatch,
   type SchedulerWakeup,
@@ -173,6 +175,7 @@ import {
   readCurrentPins,
   readLiveNodesPinning,
   readMissionByProject,
+  readNodeStates,
   updateNodePriority,
 } from "./store.ts";
 import { requireActive, requireMission, requireNonterminal } from "./write.ts";
@@ -1220,6 +1223,19 @@ export class MissionService
   createMission(tx: Transaction, projectId: string, actor: HumanActor): void {
     void actor;
     insertMission(tx, projectId, Date.now());
+  }
+
+  nodeStates(
+    tx: Transaction,
+    nodeIds: readonly string[],
+  ): Map<string, NodeStateFact> {
+    const states = new Map<string, NodeStateFact>();
+    for (const [id, fact] of readNodeStates(tx, nodeIds))
+      states.set(id, {
+        state: nodeStateSchema.parse(fact.state),
+        retired: fact.retired,
+      });
+    return states;
   }
 
   liveNodesPinning(tx: Transaction, bindingId: string): string[] {

@@ -7,7 +7,12 @@ import {
   FootprintKind,
   RUNTIME_STORE_DEVICE,
 } from "../footprint/contract.ts";
-import { ContainerRuntime, type RuntimeImageUsage } from "./contract.ts";
+import {
+  ContainerRuntime,
+  type PoolInstance,
+  PoolPlacement,
+  type RuntimeImageUsage,
+} from "./contract.ts";
 import {
   repositoryOf,
   WorkerFootprint,
@@ -36,6 +41,21 @@ const PODMAN_FREE = 400;
 const STATFS_TOTAL = 1000;
 const STATFS_FREE = 250;
 const DOCKER_IMAGE_BYTES = 7;
+const STATE_DEVICE = "7";
+const EXECUTION_OLD = "execution_01JABCDEFGHJKMNPQRSTVWXYZ0";
+const EXECUTION_NEW = "execution_01JABCDEFGHJKMNPQRSTVWXYZ1";
+const SERVER_INSTANCE: PoolInstance = {
+  id: "worker_instance_01JABCDEFGHJKMNPQRSTVWXYZ0",
+  name: "coder-1",
+  placement: PoolPlacement.Server,
+  created_at: NOW - 50 * DAY,
+};
+const CONTAINER_INSTANCE: PoolInstance = {
+  id: "worker_instance_01JABCDEFGHJKMNPQRSTVWXYZ1",
+  name: "coder-2",
+  placement: PoolPlacement.Container,
+  created_at: NOW - 50 * DAY,
+};
 
 function image(
   hex: string,
@@ -57,6 +77,7 @@ function harness(
     platform?: NodeJS.Platform;
     containers?: string[];
     statable?: boolean;
+    servers?: PoolInstance[];
   } = {},
 ) {
   const host = new FakePoolHost();
@@ -75,6 +96,8 @@ function harness(
     host: () => host,
     configuredImage: CONFIGURED,
     containerInstances: () => options.containers ?? [],
+    serverInstances: () => options.servers ?? [],
+    stateDevice: async () => STATE_DEVICE,
     platform: options.platform ?? "linux",
     logger: pino({ level: "silent" }),
     device: {
@@ -259,4 +282,55 @@ test("slot_image reads the Docker usage answer of the pool host", async () => {
   const [slot] = await footprint.measure(background.signal);
   assert.equal(host.usageReads, ONE_READ);
   assert.equal(slot?.bytes, DOCKER_IMAGE_BYTES);
+});
+
+test("session at server and container measures the server-side session walk of each instance, oldest first, on the state device", async () => {
+  const { host, footprint } = harness({
+    servers: [SERVER_INSTANCE, CONTAINER_INSTANCE],
+  });
+  host.sessions.set(SERVER_INSTANCE.name, [
+    { key: EXECUTION_NEW, bytes: 20, modified_at: NOW - DAY },
+    { key: EXECUTION_OLD, bytes: 10, modified_at: NOW - 40 * DAY },
+  ]);
+  const sessions = (await footprint.measure(background.signal)).filter(
+    (measure) => measure.kind === FootprintKind.Session,
+  );
+  assert.deepEqual(
+    sessions.map((measure) => [
+      measure.instance_name,
+      measure.device,
+      measure.count,
+      measure.bytes,
+      measure.oldest_at,
+      measure.recent_count,
+      measure.items?.map((item) => item.key),
+    ]),
+    [
+      [
+        SERVER_INSTANCE.name,
+        STATE_DEVICE,
+        2,
+        30,
+        NOW - 40 * DAY,
+        1,
+        [EXECUTION_OLD, EXECUTION_NEW],
+      ],
+      [CONTAINER_INSTANCE.name, STATE_DEVICE, 0, 0, null, 0, []],
+    ],
+  );
+});
+
+test("a failed server-side session walk answers a measure error for that instance only", async () => {
+  const { host, footprint } = harness({ servers: [SERVER_INSTANCE] });
+  host.sessionItems = async () => {
+    throw new Error("The execution session root is not a directory.");
+  };
+  const [session] = (await footprint.measure(background.signal)).filter(
+    (measure) => measure.kind === FootprintKind.Session,
+  );
+  assert.equal(session?.instance_name, SERVER_INSTANCE.name);
+  assert.equal(
+    session?.measure_error?.code,
+    WorkerFootprintErrorCode.SessionUnmeasured,
+  );
 });

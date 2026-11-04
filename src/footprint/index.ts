@@ -7,6 +7,7 @@ export { footprintMigrations } from "./migrations.ts";
 export { footprintConfigSchema, type FootprintConfig } from "./config.ts";
 export { ServerHost, deviceKey } from "./server-host.ts";
 export {
+  instanceDeleter,
   ownerDeleter,
   type CleanupDeleter,
   type InvokeOperation,

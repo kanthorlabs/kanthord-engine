@@ -4,6 +4,7 @@ export {
   type NativeAgentInput,
 } from "./native-agent.ts";
 export { handedSshAccess, WorkspaceRoot, WorkspaceKind } from "./workspace.ts";
+export { UnitFootprint, type UnitFootprintOptions } from "./footprint.ts";
 export { runVerifications, verificationPassed } from "./verification.ts";
 export { discardChanges, headCommit } from "./local-git.ts";
 export { ExecutionBudget } from "./budget.ts";
@@ -28,8 +29,10 @@ export {
 } from "./execution-run.ts";
 export type { MethodClients } from "./method-clients.ts";
 export {
+  executionSessionItems,
   executionSessionRoot,
   readSessionFileEntry,
+  removeExecutionSession,
   sessionRootOf,
 } from "./session-store.ts";
 export {

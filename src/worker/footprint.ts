@@ -13,17 +13,20 @@ import {
   FootprintKind,
   type FootprintMeasure,
   type FootprintOwner,
+  itemsMeasure,
   RUNTIME_STORE_DEVICE,
 } from "../footprint/contract.ts";
 import {
   ContainerRuntime,
   type PoolHost,
+  type PoolInstance,
   type RuntimeStoreInfo,
 } from "./contract.ts";
 
 export const WorkerFootprintErrorCode = {
   RuntimeUnmeasured: "worker.footprint.runtime_unmeasured",
   RuntimeStoreUnmeasured: "runtime_store_unmeasured",
+  SessionUnmeasured: "worker.footprint.session_unmeasured",
 } as const;
 const DELETED = "worker.footprint.deleted";
 const DOCKER_DESKTOP = "Docker Desktop";
@@ -46,6 +49,8 @@ export interface WorkerFootprintDependencies {
   readonly host: () => PoolHost | null;
   readonly configuredImage: string;
   readonly containerInstances: () => readonly string[];
+  readonly serverInstances: () => readonly PoolInstance[];
+  readonly stateDevice?: () => Promise<string>;
   readonly platform: NodeJS.Platform;
   readonly logger: Logger;
   readonly device?: StoreDevice;
@@ -79,6 +84,7 @@ export class WorkerFootprint implements FootprintOwner {
   readonly kinds: readonly FootprintKind[] = [
     FootprintKind.SlotImage,
     FootprintKind.Disk,
+    FootprintKind.Session,
   ];
   private readonly dependencies: WorkerFootprintDependencies;
   private readonly device: StoreDevice;
@@ -119,7 +125,45 @@ export class WorkerFootprint implements FootprintOwner {
     return [
       await this.measureImages(signal),
       ...(await this.measureStore(signal)),
+      ...(await this.measureSessions(signal)),
     ];
+  }
+
+  private async measureSessions(
+    signal: AbortSignal,
+  ): Promise<FootprintMeasure[]> {
+    const host = this.dependencies.host();
+    const instances = this.dependencies.serverInstances();
+    if (host === null || !instances.length) return [];
+    const device =
+      (await this.dependencies.stateDevice?.().catch(() => null)) ?? null;
+    const measures: FootprintMeasure[] = [];
+    for (const instance of instances) {
+      const fields = { instance_name: instance.name, device };
+      try {
+        const items = (await host.sessionItems(instance, signal)).sort(
+          (a, b) => a.modified_at - b.modified_at || a.key.localeCompare(b.key),
+        );
+        measures.push(
+          itemsMeasure(
+            FootprintKind.Session,
+            items.map((item) => ({ bytes: item.bytes, at: item.modified_at })),
+            this.now(),
+            { ...fields, items },
+          ),
+        );
+      } catch (error) {
+        measures.push(
+          failedMeasure(
+            FootprintKind.Session,
+            WorkerFootprintErrorCode.SessionUnmeasured,
+            messageOf(error),
+            fields,
+          ),
+        );
+      }
+    }
+    return measures;
   }
 
   private async measureImages(signal: AbortSignal): Promise<FootprintMeasure> {

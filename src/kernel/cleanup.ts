@@ -12,6 +12,32 @@ export const CLEANUP_BATCH_ROWS = 20;
 export const FOOTPRINT_SERVICE = "footprint";
 export const CLEANUP_SERVICES: readonly string[] = [FOOTPRINT_SERVICE];
 
+export const FOOTPRINT_KEY_MAX_LENGTH = 512;
+export const FOOTPRINT_CLEANUP_KEYS_MAX = 1000;
+export const FOOTPRINT_REPORT_ITEMS_MAX = 10000;
+export const TOOL_OUTPUT_NAME_PATTERN =
+  /^pi-[a-z0-9-]+-[0-9a-f]{16}(\.[A-Za-z0-9]+)?$/;
+export const WORKSPACE_KEY_PATTERN =
+  /^(?:node|execution)_[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
+
+export const InstanceFootprintKind = {
+  Session: "session",
+  Workspace: "workspace",
+  ToolOutput: "tool_output",
+  Log: "log",
+  SlotResidue: "slot_residue",
+} as const;
+export type InstanceFootprintKind =
+  (typeof InstanceFootprintKind)[keyof typeof InstanceFootprintKind];
+
+export const InstanceCleanableKind = {
+  Session: InstanceFootprintKind.Session,
+  Workspace: InstanceFootprintKind.Workspace,
+  ToolOutput: InstanceFootprintKind.ToolOutput,
+} as const;
+export type InstanceCleanableKind =
+  (typeof InstanceCleanableKind)[keyof typeof InstanceCleanableKind];
+
 export const CleanupRefusal = {
   Live: "live",
   Unreadable: "unreadable",

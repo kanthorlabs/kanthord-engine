@@ -2,6 +2,7 @@ import { addAbortListener } from "node:events";
 import { hostname } from "node:os";
 import type { Provider } from "@earendil-works/pi-ai";
 import type { LlmProvider } from "../../llm/provider.ts";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { PI_DIRECTORY_NAME } from "../../agent/pi.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
@@ -69,6 +70,8 @@ const GATEWAY_CODE = "gateway.";
 const CONNECTION_SUPERSEDED = "gateway.jwt.connection_superseded";
 const SECRET_CHANGED_CODE = "worker.instance.secret_changed";
 const VERSION_MISMATCH_CODE = "worker.version.mismatch";
+const TEMPORARY_DIRECTORY = "tmp";
+const PRIVATE_DIRECTORY_MODE = 0o700;
 
 function ignoreHangup(): void {}
 
@@ -176,6 +179,9 @@ export class Worker implements Service {
       validateClientEndpoint(endpoint);
       await refuseInsecureEndpoint(endpoint, this.options.addressLookup);
       const directories = instanceDirectories(env, configuration.name);
+      const temporary = join(directories.data, TEMPORARY_DIRECTORY);
+      mkdirSync(temporary, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
+      process.env.TMPDIR = temporary;
       installPiTools({
         env,
         directory: join(directories.data, PI_DIRECTORY_NAME),
@@ -230,13 +236,14 @@ export class Worker implements Service {
       this.unit = new WorkerUnit({
         bindings,
         directories,
-        env,
+        env: { ...env, TMPDIR: temporary },
         log: this.options.log ?? LogDestination.StandardError,
         model_runtime_factory: this.options.modelRuntimeFactory,
         repository_transport: this.options.repositoryTransport,
         watchdog: armWatchdog,
         refused: (binding) => this.bindingRefused(binding),
         instance_key: instanceKey,
+        footprint: { residue_root: temporary, worker_placement: true },
       });
       const error = await this.unit.start();
       if (error) throw error;
@@ -460,6 +467,7 @@ export class Worker implements Service {
     );
     this.logins!.sync(work.login_sessions);
     this.sessionReads!.sync(work.session_reads);
+    void this.unit?.footprintOrders(work.footprint_orders);
     this.workVersion = work.work_version;
   }
 

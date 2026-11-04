@@ -684,3 +684,302 @@ test("a failed alert write keeps the state, so the next measurement writes again
   assert.equal(state(), FootprintAlertState.Firing);
   assert.equal(traceAlerts(fixture).length, ONE_CHANGE);
 });
+
+const EXECUTION_OLD = "execution_01JABCDEFGHJKMNPQRSTVWXYZ0";
+const EXECUTION_LIVE = "execution_01JABCDEFGHJKMNPQRSTVWXYZ1";
+const EXECUTION_RECENT = "execution_01JABCDEFGHJKMNPQRSTVWXYZ2";
+const NODE_DONE = "node_01JABCDEFGHJKMNPQRSTVWXYZ0";
+const NODE_OPEN = "node_01JABCDEFGHJKMNPQRSTVWXYZ1";
+const NODE_RETIRED = "node_01JABCDEFGHJKMNPQRSTVWXYZ2";
+const UNIT_DEVICE = "unit-device";
+
+function reportedKind(
+  kind: "session" | "workspace" | "tool_output" | "log" | "slot_residue",
+  items: { key: string; bytes: number; modified_at: number }[],
+) {
+  return {
+    kind,
+    count: items.length,
+    bytes: items.reduce((sum, item) => sum + item.bytes, 0),
+    oldest_at: items.at(0)?.modified_at ?? null,
+    newest_at: items.at(-1)?.modified_at ?? null,
+    recent_count: items.length,
+    items,
+    items_complete: true,
+  };
+}
+
+const SESSION_BYTES = 10;
+const ONE_CANDIDATE = 1;
+const UNIT_LOG_KEY = "kanthord.log";
+const SELECTED_WORKSPACE_BYTES = 9;
+
+function instanceFixture(t: Parameters<typeof footprintFixture>[0]) {
+  return footprintFixture(t, {
+    instances: { [INSTANCE]: { archived: false } },
+    endTimes: {
+      [EXECUTION_OLD]: NOW - 40 * DAY_MS,
+      [EXECUTION_LIVE]: null,
+      [EXECUTION_RECENT]: NOW - DAY_MS,
+    },
+    nodeStates: {
+      [NODE_DONE]: { state: "Completed", retired: false },
+      [NODE_OPEN]: { state: "Executing", retired: false },
+      [NODE_RETIRED]: { state: "Available", retired: true },
+    },
+  });
+}
+
+test("recordMeasurement keeps the unit kinds of a worker instance with its disk and device", async (t) => {
+  const fixture = instanceFixture(t);
+  await fixture.service.measure();
+  fixture.store.transaction((tx) =>
+    fixture.service.recordMeasurement(tx, INSTANCE, "worker", {
+      measured_at: NOW,
+      disk: { device: UNIT_DEVICE, total_bytes: 1000, free_bytes: 500 },
+      kinds: [
+        reportedKind("session", [
+          {
+            key: EXECUTION_OLD,
+            bytes: SESSION_BYTES,
+            modified_at: NOW - 40 * DAY_MS,
+          },
+        ]),
+        reportedKind("log", [
+          { key: UNIT_LOG_KEY, bytes: 7, modified_at: NOW },
+        ]),
+        { ...reportedKind("slot_residue", []), count: 1, bytes: 5 },
+      ],
+    }),
+  );
+  fixture.service.settleMeasurement(INSTANCE);
+  const stats = fixture.service
+    .stats()
+    .filter((stat) => stat.instance_name === INSTANCE);
+  const session = statOf(stats, FootprintKind.Session);
+  assert.equal(session.bytes, SESSION_BYTES);
+  assert.deepEqual(session.candidates?.count, ONE_CANDIDATE);
+  assert.equal(statOf(stats, FootprintKind.Log).item_key, UNIT_LOG_KEY);
+  assert.equal(statOf(stats, FootprintKind.SlotResidue).growth_per_day, null);
+  const disk = statOf(stats, FootprintKind.Disk);
+  assert.deepEqual(
+    [disk.item_key, disk.instance_names, disk.free_bytes],
+    [UNIT_DEVICE, [INSTANCE], 500],
+  );
+});
+
+test("the session candidates join executionEndTimes and keep a live execution out", async (t) => {
+  const fixture = instanceFixture(t);
+  fixture.store.transaction((tx) =>
+    fixture.service.recordMeasurement(tx, INSTANCE, "worker", {
+      measured_at: NOW,
+      disk: null,
+      kinds: [
+        reportedKind("session", [
+          { key: EXECUTION_LIVE, bytes: 1, modified_at: NOW - 50 * DAY_MS },
+          { key: EXECUTION_OLD, bytes: 2, modified_at: NOW - 45 * DAY_MS },
+          { key: EXECUTION_RECENT, bytes: 3, modified_at: NOW - 44 * DAY_MS },
+        ]),
+      ],
+    }),
+  );
+  const page = await fixture.footprint["candidate.list"](
+    {
+      params: { kind: "session" },
+      query: { instance_name: INSTANCE, limit: 10 },
+      body: null,
+    },
+    { identity: HUMAN },
+  );
+  assert.equal(page.type, OperationResultType.Completed);
+  assert.deepEqual(
+    page.data.items.map((item) => [item.key, item.at]),
+    [[EXECUTION_OLD, NOW - 40 * DAY_MS]],
+  );
+  const items = await fixture.footprint["item.list"](
+    {
+      params: { kind: "session" },
+      query: { instance_name: INSTANCE, limit: 10 },
+      body: null,
+    },
+    { identity: HUMAN },
+  );
+  assert.equal(items.type, OperationResultType.Completed);
+  assert.equal(
+    items.data.items.find((item) => item.key === EXECUTION_LIVE)?.refusal,
+    CleanupRefusal.Live,
+  );
+});
+
+test("the workspace candidates join nodeStates: a closed or retired node and an ended execution", async (t) => {
+  const fixture = instanceFixture(t);
+  fixture.store.transaction((tx) =>
+    fixture.service.recordMeasurement(tx, INSTANCE, "server", {
+      measured_at: NOW,
+      disk: null,
+      kinds: [
+        reportedKind("workspace", [
+          { key: NODE_DONE, bytes: 1, modified_at: NOW - 3 * DAY_MS },
+          { key: NODE_OPEN, bytes: 2, modified_at: NOW - 2 * DAY_MS },
+          { key: NODE_RETIRED, bytes: 3, modified_at: NOW - DAY_MS },
+          { key: EXECUTION_LIVE, bytes: 4, modified_at: NOW },
+          { key: EXECUTION_RECENT, bytes: 5, modified_at: NOW },
+        ]),
+      ],
+    }),
+  );
+  const page = await fixture.footprint["candidate.list"](
+    {
+      params: { kind: "workspace" },
+      query: { instance_name: INSTANCE, limit: 10 },
+      body: null,
+    },
+    { identity: HUMAN },
+  );
+  assert.equal(page.type, OperationResultType.Completed);
+  assert.deepEqual(
+    page.data.items.map((item) => item.key),
+    [NODE_DONE, NODE_RETIRED, EXECUTION_RECENT],
+  );
+  assert.equal(page.data.total_bytes, SELECTED_WORKSPACE_BYTES);
+});
+
+test("recordResults completes an open instance record, keeps removed_bytes and answers an unknown cleanup", async (t) => {
+  const fixture = instanceFixture(t);
+  const cleanupId = createIdentity("cleanup");
+  fixture.store.transaction((tx) =>
+    insertCleanup(tx, {
+      cleanup_id: cleanupId,
+      kind: CleanableKind.Workspace,
+      instance_name: INSTANCE,
+      rule: null,
+      keys: [NODE_DONE, NODE_RETIRED],
+      requested_by: HUMAN_ACTOR,
+      state: CleanupState.Running,
+      finished_at: null,
+      outcome: null,
+    }),
+  );
+  const other = createIdentity("cleanup");
+  const unknown = fixture.store.transaction((tx) =>
+    fixture.service.recordResults(tx, INSTANCE, [
+      {
+        cleanup_id: cleanupId,
+        removed: [NODE_DONE],
+        removed_bytes: 11,
+        absent: [NODE_RETIRED],
+        refused: [],
+      },
+      {
+        cleanup_id: other,
+        removed: [],
+        removed_bytes: 0,
+        absent: [],
+        refused: [],
+      },
+    ]),
+  );
+  assert.deepEqual(unknown, [other]);
+  const record = await fixture.footprint["cleanup.get"](
+    { params: { cleanup_id: cleanupId }, query: {}, body: null },
+    { identity: HUMAN },
+  );
+  assert.equal(record.type, OperationResultType.Completed);
+  assert.equal(record.data.state, CleanupState.Completed);
+  assert.deepEqual(record.data.outcome, {
+    removed: 1,
+    removed_bytes: 11,
+    absent: 1,
+    refused: [],
+    pending: 0,
+  });
+});
+
+test("instanceArchived fails the open orders, resolves the open episodes and drops the instance statistics", async (t) => {
+  const fixture = instanceFixture(t);
+  const cleanupId = createIdentity("cleanup");
+  const alertId = createIdentity("alert");
+  fixture.store.transaction((tx) => {
+    insertCleanup(tx, {
+      cleanup_id: cleanupId,
+      kind: CleanableKind.ToolOutput,
+      instance_name: INSTANCE,
+      rule: null,
+      keys: ["pi-bash-0123456789abcdef.log"],
+      requested_by: HUMAN_ACTOR,
+      state: CleanupState.Queued,
+      finished_at: null,
+      outcome: null,
+    });
+    insertAlert(tx, {
+      alert_id: alertId,
+      kind: FootprintKind.Log,
+      instance_name: INSTANCE,
+      item_key: "kanthord.log",
+      threshold: { measure: ThresholdMeasure.Bytes, value: GIB },
+      value: 2 * GIB,
+      resolved_at: null,
+      acknowledged_by: null,
+      acknowledged_at: null,
+      acknowledged_until: null,
+    });
+    fixture.service.recordMeasurement(tx, INSTANCE, "server", {
+      measured_at: NOW,
+      disk: null,
+      kinds: [reportedKind("tool_output", [])],
+    });
+  });
+  fixture.store.transaction((tx) =>
+    fixture.service.instanceArchived(tx, INSTANCE),
+  );
+  const record = await fixture.footprint["cleanup.get"](
+    { params: { cleanup_id: cleanupId }, query: {}, body: null },
+    { identity: HUMAN },
+  );
+  assert.equal(record.type, OperationResultType.Completed);
+  assert.equal(record.data.state, CleanupState.Failed);
+  assert.notEqual(
+    fixture.store.transaction((tx) => alertOf(tx, alertId))?.resolved_at,
+    null,
+  );
+  assert.equal(
+    fixture.service.stats().some((stat) => stat.instance_name === INSTANCE),
+    false,
+  );
+});
+
+test("a queued instance order stays running until its result arrives and is dispatched once in a run", async (t) => {
+  const calls: string[] = [];
+  const fixture = footprintFixture(t, {
+    instances: { [INSTANCE]: { archived: false } },
+    deleters: {
+      [CleanableKind.Workspace]: async (call) => {
+        calls.push(call.cleanup_id);
+        return null;
+      },
+    },
+  });
+  const created = await fixture.footprint["cleanup.create"](
+    {
+      params: {},
+      query: {},
+      body: {
+        kind: CleanableKind.Workspace,
+        instance_name: INSTANCE,
+        rule: null,
+        keys: [NODE_DONE],
+      },
+    },
+    { identity: HUMAN, idempotencyKey: createIdempotencyKey() },
+  );
+  assert.equal(created.type, OperationResultType.Completed);
+  await fixture.service.runCleanups();
+  await fixture.service.runCleanups();
+  assert.deepEqual(calls, [created.data.cleanup_id]);
+  const record = await fixture.footprint["cleanup.get"](
+    { params: { cleanup_id: created.data.cleanup_id }, query: {}, body: null },
+    { identity: HUMAN },
+  );
+  assert.equal(record.type, OperationResultType.Completed);
+  assert.equal(record.data.state, CleanupState.Running);
+});

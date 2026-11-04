@@ -619,6 +619,27 @@ export function deleteDependency(
     .run(nodeId, dependsOnId);
 }
 
+export function readNodeStates(
+  tx: Transaction,
+  nodeIds: readonly string[],
+): Map<string, { state: string; retired: boolean }> {
+  const rows = tx.database
+    .prepare(
+      "SELECT id, state, retired_at FROM mission_node WHERE id IN (SELECT value FROM json_each(?))",
+    )
+    .all(JSON.stringify(nodeIds)) as unknown as Array<{
+    id: string;
+    state: string;
+    retired_at: number | null;
+  }>;
+  return new Map(
+    rows.map((row) => [
+      row.id,
+      { state: row.state, retired: row.retired_at !== null },
+    ]),
+  );
+}
+
 export function readLiveNodesPinning(
   tx: Transaction,
   bindingId: string,

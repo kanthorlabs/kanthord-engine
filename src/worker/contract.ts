@@ -3,8 +3,16 @@ import { identitySchema } from "../kernel/identity.ts";
 import {
   CLEANUP_BATCH_ROWS,
   CLEANUP_SERVICES,
+  cleanupRefusedSchema,
+  FOOTPRINT_CLEANUP_KEYS_MAX,
+  FOOTPRINT_KEY_MAX_LENGTH,
+  FOOTPRINT_REPORT_ITEMS_MAX,
+  InstanceCleanableKind,
+  InstanceFootprintKind,
   ownerDeleteAnswerSchema,
   requestedByField,
+  TOOL_OUTPUT_NAME_PATTERN,
+  WORKSPACE_KEY_PATTERN,
 } from "../kernel/cleanup.ts";
 import { canonicalJSON, timestamp } from "../kernel/json.ts";
 import { base64urlSchema, sealedObjectSchema } from "../kernel/hpke.ts";
@@ -787,6 +795,7 @@ export type PoolEntry = Omit<
   "token" | "expired_at" | "client_secret"
 >;
 export const SESSION_READS_PENDING_MAX = 8;
+export const FOOTPRINT_ORDERS_PENDING_MAX = SESSION_READS_PENDING_MAX;
 export const SESSION_READ_PREFIX = "session_read";
 export const SessionReadOutcome = {
   Resolved: "resolved",
@@ -867,6 +876,18 @@ export interface RuntimeStoreInfo {
   readonly operating_system: string | null;
 }
 
+export const SessionRemoval = {
+  Removed: "removed",
+  Absent: "absent",
+  Unreadable: "unreadable",
+} as const;
+export type SessionRemoval =
+  (typeof SessionRemoval)[keyof typeof SessionRemoval];
+export interface SessionRemovalResult {
+  readonly removal: SessionRemoval;
+  readonly bytes: number;
+}
+
 export interface PoolHost {
   prepare(): void;
   start(instance: PoolInstance, entries: readonly PoolEntry[]): void;
@@ -885,6 +906,16 @@ export interface PoolHost {
   runtimeUsage(signal: AbortSignal): Promise<RuntimeUsage | null>;
   runtimeStore(signal: AbortSignal): Promise<RuntimeStoreInfo | null>;
   removeImage(reference: string): Promise<boolean>;
+  sessionItems(
+    instance: PoolInstance,
+    signal: AbortSignal,
+  ): Promise<FootprintItem[]>;
+  removeSession(
+    instance: PoolInstance,
+    executionId: string,
+    signal: AbortSignal,
+  ): Promise<SessionRemovalResult>;
+  logItem(instance: PoolInstance): Promise<FootprintItem | null>;
 }
 
 export const WORKER_SERVICE_NAME = "worker";
@@ -928,6 +959,8 @@ export const WorkerErrorCode = {
   InstanceServerLimit: "worker.instance.server_limit",
   InstancePlacementUnsupported: "worker.instance.placement_unsupported",
   SessionReadNotFound: "worker.session_read.not_found",
+  FootprintOrderUnknown: "worker.footprint.order_unknown",
+  FootprintOrdersFull: "worker.footprint.orders_full",
 } as const;
 
 export const WORKER_INSTANCE_ID_PREFIX = "worker_instance";
@@ -1182,6 +1215,69 @@ export const slotImageReferenceSchema = z
   .string()
   .max(SLOT_IMAGE_REFERENCE_MAX_LENGTH)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._/:@-]*$/);
+const footprintTimeField = z.int().min(0);
+const footprintKeyField = z.string().min(1).max(FOOTPRINT_KEY_MAX_LENGTH);
+const footprintKeysField = z
+  .array(footprintKeyField)
+  .max(FOOTPRINT_CLEANUP_KEYS_MAX);
+export const footprintItemSchema = z.strictObject({
+  key: footprintKeyField,
+  bytes: z.int().min(0),
+  modified_at: footprintTimeField,
+});
+export type FootprintItem = z.infer<typeof footprintItemSchema>;
+export const footprintKindMeasureSchema = z.strictObject({
+  kind: z.enum(InstanceFootprintKind),
+  count: z.int().min(0),
+  bytes: z.int().min(0),
+  oldest_at: footprintTimeField.nullable(),
+  newest_at: footprintTimeField.nullable(),
+  recent_count: z.int().min(0),
+  items: z.array(footprintItemSchema).max(FOOTPRINT_REPORT_ITEMS_MAX),
+  items_complete: z.boolean(),
+});
+export type FootprintKindMeasure = z.infer<typeof footprintKindMeasureSchema>;
+export const footprintMeasurementSchema = z.strictObject({
+  measured_at: footprintTimeField,
+  disk: z
+    .strictObject({
+      device: z.string().min(1),
+      total_bytes: z.int().min(0),
+      free_bytes: z.int().min(0),
+    })
+    .nullable(),
+  kinds: z.array(footprintKindMeasureSchema),
+});
+export type FootprintMeasurement = z.infer<typeof footprintMeasurementSchema>;
+export const footprintResultSchema = z.strictObject({
+  cleanup_id: identitySchema("cleanup"),
+  removed: footprintKeysField,
+  removed_bytes: z.int().min(0),
+  absent: footprintKeysField,
+  refused: z.array(cleanupRefusedSchema).max(FOOTPRINT_CLEANUP_KEYS_MAX),
+});
+export type FootprintResult = z.infer<typeof footprintResultSchema>;
+export const footprintReportSchema = z.strictObject({
+  measurement: footprintMeasurementSchema.nullable(),
+  results: z.array(footprintResultSchema),
+});
+export type FootprintReport = z.infer<typeof footprintReportSchema>;
+export const footprintOrderSchema = z.strictObject({
+  cleanup_id: identitySchema("cleanup"),
+  kind: z.enum(InstanceCleanableKind),
+  keys: footprintKeysField.min(1),
+});
+export type FootprintOrder = z.infer<typeof footprintOrderSchema>;
+export const sessionDeleteResultSchema = z.strictObject({
+  removed: z.int().min(0),
+  removed_bytes: z.int().min(0),
+  absent: z.int().min(0),
+  refused: z.array(cleanupRefusedSchema),
+});
+export type SessionDeleteResult = z.infer<typeof sessionDeleteResultSchema>;
+export const queuedAnswerSchema = z.strictObject({ queued: z.literal(true) });
+export const workspaceKeySchema = z.string().regex(WORKSPACE_KEY_PATTERN);
+export const toolOutputKeySchema = z.string().regex(TOOL_OUTPUT_NAME_PATTERN);
 const humanOperation = {
   service: WORKER_SERVICE_NAME,
   store: StoreName.Operational,
@@ -1442,9 +1538,12 @@ export const instanceOperations = {
       session_reads: z
         .array(sessionReadEntrySchema)
         .max(SESSION_READS_PENDING_MAX),
+      footprint_orders: z
+        .array(footprintOrderSchema)
+        .max(FOOTPRINT_ORDERS_PENDING_MAX),
     }),
     description:
-      "Answer the work version, the open login sessions and the pending session reads of the current connection of the instance. The call renews no liveness.",
+      "Answer the work version, the open login sessions, the pending session reads and the footprint cleanup orders of the current connection of the instance. The call renews no liveness.",
   },
   "session_read.report": {
     ...instanceOperation,
@@ -1813,6 +1912,106 @@ export const workerOperations = {
     }),
     description:
       "Create a worker registration with a bearer machine JWT and an empty body. A client identity with a live registration receives that runtime identity with any key. A recorded replay after the registration ends answers 409 gateway.registration.stale. Admission and the binding instance count share one transaction.",
+  },
+  "footprint.report": {
+    service: WORKER_SERVICE_NAME,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    id: "worker.footprint.report",
+    method: HttpMethod.Post,
+    path: "/api/worker/footprint",
+    access: AccessPolicy.Client,
+    timeoutMs: HUMAN_TIMEOUT_MS,
+    mutation: true,
+    body: true,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: emptyFields,
+      query: emptyFields,
+      body: footprintReportSchema,
+    }),
+    output: z.strictObject({
+      orders: z.array(footprintOrderSchema).max(FOOTPRINT_ORDERS_PENDING_MAX),
+    }),
+    description:
+      "Report the footprint measurement of the unit data and the results of its cleanup orders. At the server and container placements, the answer lists the cleanup orders of the instance.",
+  },
+  "instance.session.delete": {
+    ...humanOperation,
+    access: AccessPolicy.HumanOrService,
+    services: CLEANUP_SERVICES,
+    id: "worker.instance.session.delete",
+    method: HttpMethod.Post,
+    path: "/api/worker/instance/:instance_name/session/delete",
+    mutation: true,
+    body: true,
+    input: z.strictObject({
+      params: instanceParams,
+      query: emptyFields,
+      body: z.strictObject({
+        cleanup_id: identitySchema("cleanup"),
+        execution_ids: z
+          .array(identitySchema("execution"))
+          .min(1)
+          .max(FOOTPRINT_CLEANUP_KEYS_MAX),
+        ...requestedByField,
+      }),
+    }),
+    output: z.union([sessionDeleteResultSchema, queuedAnswerSchema]),
+    description:
+      "Delete the pi session directories of ended executions of an instance. At the server and container placements, the server deletes them and answers the result. At the worker placement, the order waits for the instance.",
+  },
+  "instance.workspace.delete": {
+    ...humanOperation,
+    access: AccessPolicy.HumanOrService,
+    services: CLEANUP_SERVICES,
+    id: "worker.instance.workspace.delete",
+    method: HttpMethod.Post,
+    path: "/api/worker/instance/:instance_name/workspace/delete",
+    mutation: true,
+    body: true,
+    status: HttpStatus.Accepted,
+    input: z.strictObject({
+      params: instanceParams,
+      query: emptyFields,
+      body: z.strictObject({
+        cleanup_id: identitySchema("cleanup"),
+        keys: z
+          .array(workspaceKeySchema)
+          .min(1)
+          .max(FOOTPRINT_CLEANUP_KEYS_MAX),
+        ...requestedByField,
+      }),
+    }),
+    output: queuedAnswerSchema,
+    description:
+      "Queue the removal of node and execution workspaces of an instance. The unit refuses a held workspace and reports the result.",
+  },
+  "instance.tool_output.delete": {
+    ...humanOperation,
+    access: AccessPolicy.HumanOrService,
+    services: CLEANUP_SERVICES,
+    id: "worker.instance.tool_output.delete",
+    method: HttpMethod.Post,
+    path: "/api/worker/instance/:instance_name/tool-output/delete",
+    mutation: true,
+    body: true,
+    status: HttpStatus.Accepted,
+    input: z.strictObject({
+      params: instanceParams,
+      query: emptyFields,
+      body: z.strictObject({
+        cleanup_id: identitySchema("cleanup"),
+        keys: z
+          .array(toolOutputKeySchema)
+          .min(1)
+          .max(FOOTPRINT_CLEANUP_KEYS_MAX),
+        ...requestedByField,
+      }),
+    }),
+    output: queuedAnswerSchema,
+    description:
+      "Queue the removal of pi output files in the temporary directory of an instance. The unit refuses a file of a running execution and reports the result.",
   },
   "slot_image.delete": {
     ...humanOperation,

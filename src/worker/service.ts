@@ -27,7 +27,16 @@ import { isMachineIdentity } from "../kernel/caller.ts";
 import { AccessPolicy } from "../kernel/operation.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import type { PoolPlacement } from "./contract.ts";
+import type {
+  FootprintMeasurement,
+  FootprintOrder,
+  FootprintResult,
+  PoolInstance,
+  PoolPlacement,
+  SessionDeleteResult,
+} from "./contract.ts";
+import type { HumanActor } from "../kernel/actor.ts";
+import type { ExecutionEndTimes } from "../scheduler/contract.ts";
 import type { MissionCollaborations } from "../mission/contract.ts";
 import {
   type AgentConfiguration,
@@ -52,6 +61,7 @@ import {
   type RepositoryPolicyOf,
   type SchedulerClaims,
   type SessionRead,
+  SessionRemoval,
   type SshHostKeysOf,
   WORKER_SERVICE_NAME,
   type WorkerAgentView,
@@ -131,13 +141,20 @@ import {
   readLiveServerInstances,
 } from "./instance-rows.ts";
 import { WorkerFootprint } from "./footprint.ts";
-import { requesterOf } from "../kernel/cleanup.ts";
+import {
+  CleanupRefusal,
+  InstanceCleanableKind,
+  InstanceFootprintKind,
+  requesterOf,
+} from "../kernel/cleanup.ts";
 import { packageVersion } from "../kernel/version.ts";
 import { declareInstances } from "./instance-operations.ts";
 import type { AgentPromptFacts } from "./prompt-telemetry.ts";
 import { unpinnedPromptCommits } from "./prompt-pin.ts";
 
 const NO_ITEMS = 0;
+const FOOTPRINT_DELETED = "worker.footprint.deleted";
+const STDERR_LOG_KIND = InstanceFootprintKind.Log;
 
 function invalidWorkerConfiguration(workerName: string): OperationError {
   return new OperationError(
@@ -148,7 +165,42 @@ function invalidWorkerConfiguration(workerName: string): OperationError {
   );
 }
 
+export interface FootprintCollaborations {
+  recordMeasurement(
+    tx: Transaction,
+    instanceName: string,
+    placement: InstancePlacement,
+    measurement: FootprintMeasurement,
+  ): void;
+  recordResults(
+    tx: Transaction,
+    instanceName: string,
+    results: readonly FootprintResult[],
+  ): string[];
+  settleMeasurement(instanceName: string): void;
+  instanceArchived(tx: Transaction, instanceName: string): void;
+}
+
+function instanceNotFound(): OperationError {
+  return new OperationError(
+    HttpStatus.NotFound,
+    WorkerErrorCode.InstanceNotFound,
+    "Worker instance not found.",
+  );
+}
+
+function orderUnknown(): OperationError {
+  return new OperationError(
+    HttpStatus.NotFound,
+    WorkerErrorCode.FootprintOrderUnknown,
+    "A result names a cleanup that is not an order of the instance.",
+  );
+}
+
 export interface Dependencies {
+  footprint?: FootprintCollaborations;
+  executionEndTimes?: ExecutionEndTimes;
+  stateDevice?: () => Promise<string>;
   handoverRefreshWaitMs?: number;
   sessionReadWaitMs: number;
   missionActions: MissionActions;
@@ -212,6 +264,20 @@ export interface Dependencies {
     logger: Logger;
   };
 }
+function poolInstanceOf(instance: {
+  id: string;
+  name: string;
+  placement: InstancePlacement;
+  created_at: number;
+}): PoolInstance {
+  return {
+    id: instance.id,
+    name: instance.name,
+    placement: instance.placement as PoolPlacement,
+    created_at: instance.created_at,
+  };
+}
+
 function instanceOfRegistration(tx: Transaction, runtimeIdentity: string) {
   const instanceId = readRow(tx, runtimeIdentity)?.instance_id;
   return instanceId ? readInstanceById(tx, instanceId) : null;
@@ -376,6 +442,11 @@ export class WorkerService implements Service {
             )
             .map((instance) => instance.name),
         ),
+      serverInstances: () =>
+        dependencies.store.transaction((tx) =>
+          readLiveServerInstances(tx).map(poolInstanceOf),
+        ),
+      stateDevice: dependencies.stateDevice,
       platform: process.platform,
       logger: dependencies.pool?.logger ?? pino({ level: "silent" }),
     });
@@ -399,6 +470,8 @@ export class WorkerService implements Service {
       credentialVersionOf: (holder) =>
         dependencies.credentialVersionOf?.(holder) ?? NO_CREDENTIAL_VERSION,
       sessionReadWaitMs: dependencies.sessionReadWaitMs,
+      instanceArchived: (tx, name) =>
+        dependencies.footprint?.instanceArchived(tx, name),
     });
     if (dependencies.pool) this.pool = new Pool(dependencies.pool.host);
     this.performer = new ActionPerformer({
@@ -1106,7 +1179,240 @@ export class WorkerService implements Service {
     return latest === null ? null : { archived: latest.ended_at !== null };
   }
 
+  private liveInstanceNamed(name: string) {
+    const instance = this.dependencies.store.transaction((tx) =>
+      readLiveInstance(tx, name),
+    );
+    if (!instance) throw instanceNotFound();
+    return instance;
+  }
+
+  private logDeleted(
+    operation: string,
+    instanceName: string,
+    requestedBy: HumanActor,
+    fields: Record<string, number | boolean>,
+  ): void {
+    this.dependencies.pool?.logger.info(
+      {
+        operation,
+        instance: instanceName,
+        requested_by: requestedBy.account,
+        ...fields,
+      },
+      FOOTPRINT_DELETED,
+    );
+  }
+
+  private queueOrder(
+    operation: string,
+    instanceName: string,
+    order: FootprintOrder,
+    requestedBy: HumanActor,
+  ): { queued: true } {
+    const instance = this.liveInstanceNamed(instanceName);
+    this.instances.queueFootprintOrder(instance, order);
+    this.logDeleted(operation, instance.name, requestedBy, {
+      queued: true,
+      keys: order.keys.length,
+    });
+    return { queued: true };
+  }
+
+  private async deleteSessions(
+    instanceName: string,
+    cleanupId: string,
+    executionIds: readonly string[],
+    requestedBy: HumanActor,
+    signal: AbortSignal,
+  ): Promise<SessionDeleteResult | { queued: true }> {
+    const operation = workerOperations["instance.session.delete"].id;
+    const instance = this.liveInstanceNamed(instanceName);
+    if (instance.placement === InstancePlacement.Worker)
+      return this.queueOrder(
+        operation,
+        instanceName,
+        {
+          cleanup_id: cleanupId,
+          kind: InstanceCleanableKind.Session,
+          keys: [...executionIds],
+        },
+        requestedBy,
+      );
+    const host = this.dependencies.pool?.host;
+    if (!host) throw instanceNotFound();
+    const ends = this.dependencies.store.transaction(
+      (tx) =>
+        this.dependencies.executionEndTimes?.(tx, executionIds) ?? new Map(),
+    );
+    const answer: SessionDeleteResult = {
+      removed: 0,
+      removed_bytes: 0,
+      absent: 0,
+      refused: [],
+    };
+    for (const executionId of executionIds) {
+      if (ends.get(executionId) === null) {
+        answer.refused.push({ key: executionId, reason: CleanupRefusal.Live });
+        continue;
+      }
+      const result = await host.removeSession(
+        poolInstanceOf(instance),
+        executionId,
+        signal,
+      );
+      if (result.removal === SessionRemoval.Removed) {
+        answer.removed += 1;
+        answer.removed_bytes += result.bytes;
+      } else if (result.removal === SessionRemoval.Absent) answer.absent += 1;
+      else
+        answer.refused.push({
+          key: executionId,
+          reason: CleanupRefusal.Unreadable,
+        });
+    }
+    this.logDeleted(operation, instance.name, requestedBy, {
+      removed: answer.removed,
+      absent: answer.absent,
+      refused: answer.refused.length,
+    });
+    return answer;
+  }
+
+  private async reportedMeasurement(
+    instance: PoolInstance | null,
+    placement: InstancePlacement,
+    measurement: FootprintMeasurement | null,
+  ): Promise<FootprintMeasurement | null> {
+    if (measurement === null) return null;
+    if (placement === InstancePlacement.Worker) return measurement;
+    const kinds = measurement.kinds.filter(
+      (reported) => reported.kind !== InstanceCleanableKind.Session,
+    );
+    const stderr =
+      instance === null
+        ? null
+        : await this.dependencies.pool?.host
+            .logItem(instance)
+            .catch(() => null);
+    return {
+      measured_at: measurement.measured_at,
+      disk: null,
+      kinds: stderr
+        ? kinds.map((reported) =>
+            reported.kind === STDERR_LOG_KIND
+              ? {
+                  ...reported,
+                  count: reported.count + 1,
+                  bytes: reported.bytes + stderr.bytes,
+                  items: [...reported.items, stderr],
+                }
+              : reported,
+          )
+        : kinds,
+    };
+  }
+
+  private declareFootprint(registry: OperationRegistry): void {
+    registry.register(
+      workerOperations["footprint.report"],
+      async ({ body }, caller) => {
+        const identity = caller.identity;
+        assert.ok(isMachineIdentity(identity));
+        const instance = this.dependencies.store.transaction((tx) =>
+          identity.instanceId === undefined
+            ? null
+            : readInstanceById(tx, identity.instanceId),
+        );
+        if (!instance || instance.ended_at !== null) throw instanceNotFound();
+        const placement = instance.placement;
+        const measurement = await this.reportedMeasurement(
+          placement === InstancePlacement.Worker
+            ? null
+            : poolInstanceOf(instance),
+          placement,
+          body.measurement,
+        );
+        const answer = caller.commit((tx) => {
+          const memory = new Set(
+            this.instances
+              .footprintOrdersOf(instance.id)
+              .map((order) => order.cleanup_id),
+          );
+          const unknown =
+            this.dependencies.footprint?.recordResults(
+              tx,
+              instance.name,
+              body.results,
+            ) ?? body.results.map((result) => result.cleanup_id);
+          if (unknown.some((cleanupId) => !memory.has(cleanupId)))
+            throw orderUnknown();
+          if (measurement !== null)
+            this.dependencies.footprint?.recordMeasurement(
+              tx,
+              instance.name,
+              placement,
+              measurement,
+            );
+          this.instances.dropFootprintOrders(
+            instance.id,
+            body.results.map((result) => result.cleanup_id),
+          );
+          return {
+            orders:
+              placement === InstancePlacement.Worker
+                ? []
+                : this.instances.footprintOrdersOf(instance.id),
+          };
+        });
+        if (measurement !== null)
+          this.dependencies.footprint?.settleMeasurement(instance.name);
+        return answer;
+      },
+    );
+    registry.register(
+      workerOperations["instance.session.delete"],
+      ({ params, body }, caller) =>
+        this.deleteSessions(
+          params.instance_name,
+          body.cleanup_id,
+          body.execution_ids,
+          requesterOf(caller.identity, body.requested_by),
+          caller.context.signal,
+        ),
+    );
+    registry.register(
+      workerOperations["instance.workspace.delete"],
+      ({ params, body }, caller) =>
+        this.queueOrder(
+          workerOperations["instance.workspace.delete"].id,
+          params.instance_name,
+          {
+            cleanup_id: body.cleanup_id,
+            kind: InstanceCleanableKind.Workspace,
+            keys: [...body.keys],
+          },
+          requesterOf(caller.identity, body.requested_by),
+        ),
+    );
+    registry.register(
+      workerOperations["instance.tool_output.delete"],
+      ({ params, body }, caller) =>
+        this.queueOrder(
+          workerOperations["instance.tool_output.delete"].id,
+          params.instance_name,
+          {
+            cleanup_id: body.cleanup_id,
+            kind: InstanceCleanableKind.ToolOutput,
+            keys: [...body.keys],
+          },
+          requesterOf(caller.identity, body.requested_by),
+        ),
+    );
+  }
+
   declare(registry: OperationRegistry): void {
+    this.declareFootprint(registry);
     registry.register(
       workerOperations["slot_image.delete"],
       ({ body }, caller) =>

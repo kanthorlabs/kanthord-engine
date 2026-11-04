@@ -1,5 +1,5 @@
 import { constants, createWriteStream, type WriteStream } from "node:fs";
-import { readdir, rm } from "node:fs/promises";
+import { lstat, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { MessageChannel, type MessagePort } from "node:worker_threads";
 import type { Logger } from "pino";
@@ -9,6 +9,7 @@ import { ensureDirectory, openPrivate } from "../../kernel/files.ts";
 import { directories } from "../../kernel/xdg.ts";
 import {
   BindingEntryState,
+  type FootprintItem,
   type PlacementStatus,
   type PoolEntry,
   type PoolHost,
@@ -18,9 +19,12 @@ import {
   type RuntimeUsage,
   type SessionRead,
   type SessionReadResult,
+  type SessionRemovalResult,
 } from "../../worker/contract.ts";
 import {
+  executionSessionItems,
   readSessionFileEntry,
+  removeExecutionSession,
   sessionRootOf,
 } from "../../worker/unit/session-store.ts";
 import { SlotControl } from "../worker/thread-data.ts";
@@ -84,25 +88,55 @@ export class WorkerPool implements PoolHost {
     return this.driver(placement).check();
   }
 
+  private sessionRoot(instance: PoolInstance): string {
+    const slotRoot = join(this.workersDirectory(), instance.name);
+    if (instance.placement === PoolPlacement.Container)
+      return join(slotRoot, CONTAINER_SESSIONS_DIRECTORY);
+    if (instance.placement !== PoolPlacement.Server)
+      throw new Error("worker pool: no session root for the placement");
+    return sessionRootOf(directories(threadEnvironment({}, slotRoot)).state);
+  }
+
   readSessionEntry(
     instance: PoolInstance,
     read: SessionRead,
     signal: AbortSignal,
   ): Promise<SessionReadResult> {
-    const slotRoot = join(this.workersDirectory(), instance.name);
-    if (instance.placement === PoolPlacement.Container)
-      return readSessionFileEntry(
-        join(slotRoot, CONTAINER_SESSIONS_DIRECTORY),
-        read,
-        signal,
-      );
-    if (instance.placement !== PoolPlacement.Server)
-      throw new Error("worker pool: no session root for the placement");
-    return readSessionFileEntry(
-      sessionRootOf(directories(threadEnvironment({}, slotRoot)).state),
-      read,
+    return readSessionFileEntry(this.sessionRoot(instance), read, signal);
+  }
+
+  sessionItems(
+    instance: PoolInstance,
+    signal: AbortSignal,
+  ): Promise<FootprintItem[]> {
+    return executionSessionItems(this.sessionRoot(instance), signal);
+  }
+
+  removeSession(
+    instance: PoolInstance,
+    executionId: string,
+    signal: AbortSignal,
+  ): Promise<SessionRemovalResult> {
+    return removeExecutionSession(
+      this.sessionRoot(instance),
+      executionId,
       signal,
     );
+  }
+
+  async logItem(instance: PoolInstance): Promise<FootprintItem | null> {
+    const stats = await lstat(
+      join(this.workersDirectory(), instance.name, STDERR_LOG),
+    ).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === MISSING_ENTRY) return null;
+      throw error;
+    });
+    if (!stats?.isFile()) return null;
+    return {
+      key: STDERR_LOG,
+      bytes: stats.size,
+      modified_at: Math.floor(stats.mtimeMs),
+    };
   }
 
   prepare(): void {

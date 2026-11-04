@@ -304,6 +304,10 @@ export interface SchedulerClaims {
   ): void;
   liveExecutionsPinning(tx: Transaction, credentialId: string): string[];
 }
+export type ExecutionEndTimes = (
+  tx: Transaction,
+  executionIds: readonly string[],
+) => ReadonlyMap<string, number | null>;
 export interface SchedulerWakeup {
   wake(projectId: string): void;
 }

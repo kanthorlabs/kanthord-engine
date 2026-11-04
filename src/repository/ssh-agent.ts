@@ -43,6 +43,10 @@ export const SSH_KNOWN_HOSTS_FILE = "known_hosts";
 export const SOCKET_PATH_BYTES_MAX = 100;
 export const SWEEP_GRACE_MS = 60_000;
 export const DEADLINE_RADIX = 36;
+const WINDOWS: NodeJS.Platform = "win32";
+const POSIX_TEMPORARY_ROOT = "/tmp";
+export const SSH_AGENT_ROOT =
+  process.platform === WINDOWS ? tmpdir() : POSIX_TEMPORARY_ROOT;
 
 const SWEEP_PATTERN = /^kd-ssh-([0-9a-z]+)-/;
 const SAFE_PATH = /^[A-Za-z0-9/._-]+$/;
@@ -146,8 +150,10 @@ function socketAccepts(
   });
 }
 
-export async function sweepSshAgentDirectories(now: number): Promise<void> {
-  const root = tmpdir();
+export async function sweepSshAgentDirectories(
+  now: number,
+  root: string = SSH_AGENT_ROOT,
+): Promise<void> {
   const uid = process.getuid?.();
   const names = await readdir(root).catch(() => [] as string[]);
   for (const name of names) {
@@ -167,10 +173,13 @@ export async function sweepSshAgentDirectories(now: number): Promise<void> {
   }
 }
 
-async function createDirectory(deadlineAt: number): Promise<string> {
+async function createDirectory(
+  deadlineAt: number,
+  root: string = SSH_AGENT_ROOT,
+): Promise<string> {
   const prefix = `${SSH_AGENT_DIRECTORY_PREFIX}${deadlineAt.toString(DEADLINE_RADIX)}-`;
   try {
-    return await mkdtemp(join(tmpdir(), prefix));
+    return await mkdtemp(join(root, prefix));
   } catch (error) {
     throw agentFailure(SshAgentStep.Directory, errorText(error));
   }
@@ -338,13 +347,14 @@ export async function withSshAgent<T>(
     environment: NodeJS.ProcessEnv,
     relayError: () => Error | null,
   ) => Promise<T>,
+  root: string = SSH_AGENT_ROOT,
 ): Promise<T> {
   assert.ok("relay" in access || access.private_key);
   assert.ok(access.public_key);
   context.signal.throwIfAborted();
   const deadlineAt = Date.now() + deadlineMs;
-  await sweepSshAgentDirectories(Date.now());
-  const directory = await createDirectory(deadlineAt);
+  await sweepSshAgentDirectories(Date.now(), root);
+  const directory = await createDirectory(deadlineAt, root);
   const socket = join(directory, SSH_AGENT_SOCKET);
   let agent: Agent | undefined;
   let relay: RelayAgent | undefined;

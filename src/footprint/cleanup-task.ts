@@ -1,4 +1,5 @@
 import { setImmediate as yieldTurn } from "node:timers/promises";
+import { z } from "zod";
 import type { Logger } from "pino";
 import type { HumanActor } from "../kernel/actor.ts";
 import type { ServiceIdentity } from "../kernel/caller.ts";
@@ -42,7 +43,7 @@ export interface DeleteAnswer extends OwnerDeleteAnswer {
   readonly removed_bytes: number | null;
 }
 
-export type CleanupDeleter = (call: DeleteCall) => Promise<DeleteAnswer>;
+export type CleanupDeleter = (call: DeleteCall) => Promise<DeleteAnswer | null>;
 
 export type InvokeOperation = (
   operation: Operation,
@@ -91,6 +92,46 @@ export function ownerDeleter(
   };
 }
 
+const queuedSchema = z.strictObject({ queued: z.literal(true) });
+const instanceAnswerSchema = ownerDeleteAnswerSchema.extend({
+  removed_bytes: z.int().min(0),
+});
+
+export function instanceDeleter(
+  invoke: InvokeOperation,
+  identity: ServiceIdentity,
+  operation: Operation,
+  keysField: string,
+): CleanupDeleter {
+  return async (call) => {
+    const result = await invoke(
+      operation,
+      {
+        params: { instance_name: call.instance_name },
+        query: {},
+        body: {
+          cleanup_id: call.cleanup_id,
+          [keysField]: [...call.keys],
+          requested_by: call.requested_by,
+        },
+      },
+      { identity, idempotencyKey: createIdempotencyKey() },
+    );
+    if (result.type === OperationResultType.Failure)
+      throw new OwnerRefusal(
+        result.error.error.code,
+        result.error.error.message,
+      );
+    if (result.type !== OperationResultType.Completed)
+      throw new OwnerRefusal(
+        "system.operation.unknown",
+        `${operation.id} answered no result.`,
+      );
+    if (queuedSchema.safeParse(result.data).success) return null;
+    return instanceAnswerSchema.parse(result.data);
+  };
+}
+
 export interface CleanupTaskDependencies {
   readonly store: Store;
   readonly logger: Logger;
@@ -122,6 +163,7 @@ function added(
 export class CleanupTask {
   private readonly dependencies: CleanupTaskDependencies;
   private running: Promise<void> | null = null;
+  private readonly dispatched = new Set<string>();
   private again = false;
   private stopped = false;
 
@@ -154,6 +196,7 @@ export class CleanupTask {
       );
       for (const cleanup of open) {
         if (this.stopped) return;
+        if (this.dispatched.has(cleanup.cleanup_id)) continue;
         await this.run(cleanup.cleanup_id);
       }
     } while (this.again && !this.stopped);
@@ -233,6 +276,10 @@ export class CleanupTask {
           keys,
           requested_by: cleanup.requested_by,
         });
+        if (answer === null) {
+          this.dispatched.add(cleanup.cleanup_id);
+          return;
+        }
         const next = added(outcome, answer);
         if (resumeIndex(next) !== index + keys.length)
           throw new OwnerRefusal(

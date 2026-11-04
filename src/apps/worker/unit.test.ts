@@ -22,6 +22,8 @@ import { hostEnvironment } from "../../kernel/test-support.ts";
 import { runVerifications, WorkspaceRoot } from "../../worker/unit/index.ts";
 import { spawnSync } from "node:child_process";
 import { createIdentity } from "../../kernel/identity.ts";
+import { InstanceCleanableKind } from "../../kernel/cleanup.ts";
+import { WorkerErrorCode } from "../../worker/contract.ts";
 
 const CLIENT_SECRET_BYTES = 32;
 const SETTLE_WAIT_MS = 50;
@@ -477,3 +479,90 @@ async function pidOf(file: string, signal: AbortSignal): Promise<number> {
     await delay(1, undefined, { signal });
   }
 }
+
+async function footprintUnit(t: TestContext, answers: unknown[]) {
+  const reports: { results: { cleanup_id: string }[] }[] = [];
+  const { transport } = scripted({ pull: cancelled });
+  const worker = transport.worker as unknown as Record<string, unknown>;
+  worker["footprint.report"] = async (input: {
+    body: { results: { cleanup_id: string }[] };
+  }) => {
+    reports.push(input.body);
+    return answers.shift();
+  };
+  const env = environmentOf(t);
+  const unit = new WorkerUnit({
+    bindings: [
+      {
+        transport,
+        client_secret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
+      },
+    ],
+    directories: directoriesOf(env),
+    env: { ...env, TMPDIR: temporary(t) },
+    log: () => {},
+    footprint: { residue_root: temporary(t), worker_placement: false },
+  });
+  const running = unit.run();
+  t.after(async () => {
+    await unit.stop();
+    await running;
+  });
+  while (!reports.length) await delay(GONE_POLL_MS);
+  return {
+    unit,
+    reported: () =>
+      reports.map((report) =>
+        report.results.map((result) => result.cleanup_id),
+      ),
+  };
+}
+
+function toolOutputOrder(cleanupId: string) {
+  return {
+    cleanup_id: cleanupId,
+    kind: InstanceCleanableKind.ToolOutput,
+    keys: ["pi-bash-0123456789abcdef.log"],
+  };
+}
+
+test("a lost footprint report answer keeps the result, the order does not run again and the next report sends it", async (t) => {
+  const { unit, reported } = await footprintUnit(t, [
+    completed({ orders: [] }),
+    { type: OperationResultType.Indeterminate },
+    completed({ orders: [] }),
+    completed({ orders: [] }),
+  ]);
+  const lost = createIdentity("cleanup");
+  await unit.footprintOrders([toolOutputOrder(lost)]);
+  await unit.footprintOrders([toolOutputOrder(lost)]);
+  const next = createIdentity("cleanup");
+  await unit.footprintOrders([toolOutputOrder(next)]);
+  assert.deepEqual(reported(), [[], [lost], [lost], [next]]);
+});
+
+test("an order_unknown answer drops only its own result and the other result reaches the server", async (t) => {
+  const { unit, reported } = await footprintUnit(t, [
+    completed({ orders: [] }),
+    {
+      type: OperationResultType.Failure,
+      status: HttpStatus.NotFound,
+      error: {
+        error: {
+          code: WorkerErrorCode.FootprintOrderUnknown,
+          message:
+            "A result names a cleanup that is not an order of the instance.",
+        },
+        request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+      },
+    },
+    completed({ orders: [] }),
+  ]);
+  const unknown = createIdentity("cleanup");
+  const known = createIdentity("cleanup");
+  await unit.footprintOrders([
+    toolOutputOrder(unknown),
+    toolOutputOrder(known),
+  ]);
+  assert.deepEqual(reported(), [[], [unknown], [known]]);
+});

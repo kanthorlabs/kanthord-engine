@@ -42,6 +42,7 @@ import {
 import * as settlement from "./settlement.ts";
 import {
   nodeBranchOfExecution,
+  readEndTimes,
   readExecution,
   readExpiredUnsettled,
   readUnendedOfRuntime,
@@ -274,6 +275,12 @@ export class SchedulerService implements Service, WorkQueue {
   }
   liveExecutionOf(tx: Transaction, nodeId: string, now: number) {
     return settlement.liveExecutionOf(tx, nodeId, now);
+  }
+  executionEndTimes(
+    tx: Transaction,
+    executionIds: readonly string[],
+  ): Map<string, number | null> {
+    return readEndTimes(tx, executionIds);
   }
   unendedExecutionOf(tx: Transaction, runtimeIdentity: string) {
     return readUnendedOfRuntime(tx, runtimeIdentity);

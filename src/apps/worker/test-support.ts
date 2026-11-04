@@ -13,6 +13,7 @@ import { stopAfter } from "../../kernel/test-support.ts";
 import { isString } from "../../kernel/values.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import {
+  type FootprintOrder,
   INSTANCE_CONNECTION_INFO,
   type InstanceConfiguration,
   instanceConfigurationValue,
@@ -59,6 +60,7 @@ export const FakePath = {
   Pull: "/api/scheduler/work/pull",
   Handover: "/api/worker/handover",
   Deregister: "/api/worker/registration/",
+  FootprintReport: "/api/worker/footprint",
 } as const;
 const UNAUTHORIZED_CODE = "gateway.authentication.unauthorized";
 const SUPERSEDED_CODE = "worker.instance.connection_superseded";
@@ -104,6 +106,7 @@ export async function fakeInstanceServer(t: TestContext) {
     bindingVersion: 0,
     workVersion: 0,
     loginSessions: [] as LoginSessionEntry[],
+    footprintOrders: [] as FootprintOrder[],
     serial: 0,
     current: null as { id: string; name: string } | null,
     workerTokens: new Set<string>(),
@@ -232,9 +235,12 @@ export async function fakeInstanceServer(t: TestContext) {
           work_version: state.workVersion,
           login_sessions: state.loginSessions,
           session_reads: [],
+          footprint_orders: state.footprintOrders,
         },
       };
     }
+    if (request.path === FakePath.FootprintReport)
+      return { status: 200, body: { orders: [] } };
     const binding = clientBinding(request.bearer);
     if ("status" in binding) return binding;
     if (request.path === FakePath.Register) {

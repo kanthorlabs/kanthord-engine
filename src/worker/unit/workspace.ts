@@ -6,8 +6,11 @@ import {
   rmSync,
   utimesSync,
 } from "node:fs";
+import { lstat } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
-import { ensureDirectory } from "../../kernel/files.ts";
+import { WORKSPACE_KEY_PATTERN } from "../../kernel/cleanup.ts";
+import { ensureDirectory, FILE_NOT_FOUND } from "../../kernel/files.ts";
+import { walkFootprint } from "../../kernel/footprint-walk.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import { bindingNameSchema } from "../../project/contract.ts";
 import type { Context } from "../../kernel/context.ts";
@@ -30,6 +33,15 @@ export const WorkspaceKind = {
   Execution: "execution",
 } as const;
 export type WorkspaceKind = (typeof WorkspaceKind)[keyof typeof WorkspaceKind];
+export const WorkspaceRemoval = {
+  Removed: "removed",
+  Absent: "absent",
+  Live: "live",
+  Unreadable: "unreadable",
+} as const;
+export type WorkspaceRemoval =
+  (typeof WorkspaceRemoval)[keyof typeof WorkspaceRemoval];
+const NO_BYTES = 0;
 interface Preparation {
   transport: RepositoryTransport;
   sshAccess: ReadonlyMap<string, SshAccess>;
@@ -317,6 +329,29 @@ export class WorkspaceRoot {
     assert.ok(this.held.has(key));
     const now = new Date();
     utimesSync(key, now, now);
+  }
+  async removeWorkspace(
+    name: string,
+    signal: AbortSignal,
+  ): Promise<{ removal: WorkspaceRemoval; bytes: number }> {
+    if (!WORKSPACE_KEY_PATTERN.test(name))
+      return { removal: WorkspaceRemoval.Unreadable, bytes: NO_BYTES };
+    const key = join(this.root, name);
+    assert.equal(dirname(key), this.root);
+    if (this.held.has(key))
+      return { removal: WorkspaceRemoval.Live, bytes: NO_BYTES };
+    const stats = await lstat(key).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === FILE_NOT_FOUND) return null;
+      throw error;
+    });
+    if (!stats) return { removal: WorkspaceRemoval.Absent, bytes: NO_BYTES };
+    if (!stats.isDirectory())
+      return { removal: WorkspaceRemoval.Unreadable, bytes: NO_BYTES };
+    const total = await walkFootprint(key, { signal });
+    if (this.held.has(key))
+      return { removal: WorkspaceRemoval.Live, bytes: NO_BYTES };
+    rmSync(key, { recursive: true, force: true });
+    return { removal: WorkspaceRemoval.Removed, bytes: total.bytes };
   }
   release(key: string, kind: WorkspaceKind): void {
     assert.equal(dirname(key), this.root);

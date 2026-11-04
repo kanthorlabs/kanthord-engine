@@ -60,6 +60,8 @@ import { gatewayMigrations } from "../../gateway/index.ts";
 import { projectMigrations } from "../../project/index.ts";
 import { missionMigrations } from "../../mission/index.ts";
 import { intakeMigrations } from "../../intake/index.ts";
+import { footprintMigrations } from "../../footprint/index.ts";
+import { FOOTPRINT_SERVICE_NAME } from "../../footprint/contract.ts";
 import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
 import {
   AssetKind,
@@ -685,6 +687,7 @@ export async function gatewayFixture(
     { service: INTAKE_SERVICE_NAME, migrations: intakeMigrations },
     { service: WORKBENCH_SERVICE_NAME, migrations: workbenchMigrations },
     { service: REPOSITORY_COMPONENT_NAME, migrations: repositoryMigrations },
+    { service: FOOTPRINT_SERVICE_NAME, migrations: footprintMigrations },
   ]);
   const trackingStore = new Store(":memory:");
   trackingStore.migrate(trackingDatabaseMigrations);

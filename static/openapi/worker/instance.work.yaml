@@ -4,9 +4,9 @@ pathItem:
     operationId: worker.instance.work
     tags:
       - worker
-    description: Answer the work version, the open login sessions and the pending
-      session reads of the current connection of the instance. The call renews
-      no liveness.
+    description: Answer the work version, the open login sessions, the pending
+      session reads and the footprint cleanup orders of the current connection
+      of the instance. The call renews no liveness.
     x-access-policy: worker
     x-timeout-ms: 30000
     x-mutation: false
@@ -147,8 +147,40 @@ components:
               - entry_id
               - entry_type
             additionalProperties: false
+        footprint_orders:
+          maxItems: 8
+          type: array
+          items:
+            type: object
+            properties:
+              cleanup_id:
+                type: string
+                minLength: 34
+                maxLength: 34
+                pattern: ^cleanup_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: cleanup_ followed by a canonical 26-character uppercase ULID.
+              kind:
+                type: string
+                enum:
+                  - session
+                  - workspace
+                  - tool_output
+              keys:
+                minItems: 1
+                maxItems: 1000
+                type: array
+                items:
+                  type: string
+                  minLength: 1
+                  maxLength: 512
+            required:
+              - cleanup_id
+              - kind
+              - keys
+            additionalProperties: false
       required:
         - work_version
         - login_sessions
         - session_reads
+        - footprint_orders
       additionalProperties: false

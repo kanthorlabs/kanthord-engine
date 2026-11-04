@@ -8,6 +8,7 @@ import {
   alwaysAvailable,
   BindingEntryState,
   connectionPayloadSchema,
+  FOOTPRINT_ORDERS_PENDING_MAX,
   INSTANCE_CONNECTED_WINDOW_MS,
   INSTANCE_CONNECTION_INFO,
   instanceConfigurationSchema,
@@ -25,6 +26,7 @@ import {
   workerTokenPayloadSchema,
 } from "./contract.ts";
 import { AgentErrorCode, type HolderScope } from "../agent/contract.ts";
+import { InstanceCleanableKind } from "../kernel/cleanup.ts";
 import type { ExecutionEnds } from "../mission/contract.ts";
 import type { LoginSessionEntry } from "../llm/contract.ts";
 import {
@@ -48,6 +50,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import {
+  testHumanIdentity,
   testMachineIdentity,
   testWorkerIdentity,
 } from "../kernel/test-identity.ts";
@@ -179,9 +182,30 @@ function instanceFixture(
   const reports: { ends: ExecutionEnds; inTransaction: boolean }[] = [];
   const revocation = { failure: null as Error | null };
   const logins = new Map<string, LoginSessionEntry[]>();
+  const footprint = {
+    stored: new Set<string>(),
+    measured: [] as string[],
+    settled: [] as string[],
+    archived: [] as string[],
+  };
   const dependencies: Dependencies = {
     config: { ...WORKER_CONFIG, ...config },
     store,
+    footprint: {
+      recordMeasurement: (_tx, name) => {
+        footprint.measured.push(name);
+      },
+      recordResults: (_tx, _name, results) =>
+        results
+          .map((result) => result.cleanup_id)
+          .filter((cleanupId) => !footprint.stored.has(cleanupId)),
+      settleMeasurement: (name) => {
+        footprint.settled.push(name);
+      },
+      instanceArchived: (_tx, name) => {
+        footprint.archived.push(name);
+      },
+    },
     loginSessionsOf: (holder) => logins.get(holder) ?? [],
     sessionReadWaitMs,
     missionActions: {
@@ -369,6 +393,18 @@ function instanceFixture(
     );
     return invoke("register");
   }
+  function asClient(binding: Binding) {
+    caller.identity = testMachineIdentity(
+      {
+        clientId: createIdentity("client_identity"),
+        name: INSTANCE,
+        projectId: binding.project_id,
+        resourceIdentity: binding.resource_identity,
+        issuedAt: Date.now(),
+      },
+      "jti",
+    );
+  }
   async function restart() {
     await worker.stop();
     worker = service();
@@ -385,12 +421,18 @@ function instanceFixture(
     reports,
     revocation,
     logins,
+    footprint,
     invoke,
     refuses,
     created,
     createdAt,
     asWorker,
     asHuman,
+    asClient,
+    as: (identity: CallerContext["identity"]) => {
+      caller.identity = identity;
+    },
+    caller: () => caller.identity,
     register,
     restart,
     worker: () => worker,
@@ -840,6 +882,7 @@ test("the work read answers the work version and the login sessions, renews no l
     work_version: f.worker().instances.workVersionOf(INSTANCE),
     login_sessions: [LOGIN_ENTRY],
     session_reads: [],
+    footprint_orders: [],
   });
   assert.equal(liveness(), renewed);
   await f.invoke("instance.connect", {
@@ -1524,4 +1567,169 @@ test("the session read report refuses a body outside the outcome union", () => {
       true,
       JSON.stringify(accepted),
     );
+});
+
+const WORKSPACE_KEY = "node_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const CLEANUP_HUMAN = testHumanIdentity("alice", "Alice", "jti");
+const EMPTY_MEASUREMENT = { measured_at: 1, disk: null, kinds: [] };
+
+function cleanupResult(cleanupId: string) {
+  return {
+    cleanup_id: cleanupId,
+    removed: [WORKSPACE_KEY],
+    removed_bytes: 1,
+    absent: [],
+    refused: [],
+  };
+}
+
+async function footprintInstance(f: ReturnType<typeof instanceFixture>) {
+  const { record } = await f.created();
+  const binding = bindingOf(createIdentity("project"), "general", [INSTANCE]);
+  f.bindings.push(binding);
+  await f.register(binding, record.id);
+  const reporter = f.caller();
+  const report = (body: unknown) => {
+    f.as(reporter);
+    return f.invoke("footprint.report", body);
+  };
+  const queue = (cleanupId: string) => {
+    f.as(CLEANUP_HUMAN);
+    return f.invoke(
+      "instance.workspace.delete",
+      { cleanup_id: cleanupId, keys: [WORKSPACE_KEY] },
+      { instance_name: INSTANCE },
+    );
+  };
+  return { record, report, queue };
+}
+
+test("a queued order raises the work version once, the work read lists it and a report result drops it without a version change", async (t) => {
+  const f = instanceFixture(t);
+  const { record, report, queue } = await footprintInstance(f);
+  const version = () => f.worker().instances.workVersionOf(INSTANCE);
+  const before = version();
+  const cleanupId = createIdentity("cleanup");
+  assert.deepEqual(await queue(cleanupId), { queued: true });
+  assert.equal(version(), before + FIRST_VERSION);
+  await queue(cleanupId);
+  assert.equal(version(), before + FIRST_VERSION);
+  f.asWorker(record.id);
+  const connection = await f.invoke("instance.connect", {
+    connection_name: CONNECTION_NAME,
+  });
+  const work = await f.invoke("instance.work", {
+    connection_id: connection.connection_id,
+  });
+  assert.deepEqual(work.footprint_orders, [
+    {
+      cleanup_id: cleanupId,
+      kind: InstanceCleanableKind.Workspace,
+      keys: [WORKSPACE_KEY],
+    },
+  ]);
+  const answer = await report({
+    measurement: EMPTY_MEASUREMENT,
+    results: [cleanupResult(cleanupId)],
+  });
+  assert.deepEqual(answer, { orders: [] });
+  assert.equal(version(), before + FIRST_VERSION);
+  assert.deepEqual(f.worker().instances.footprintOrdersOf(record.id), []);
+  assert.deepEqual(f.footprint.measured, [INSTANCE]);
+  assert.deepEqual(f.footprint.settled, [INSTANCE]);
+});
+
+test("a result of an order unknown to the server and the memory answers order_unknown, and a stored order after a restart is accepted", async (t) => {
+  const f = instanceFixture(t);
+  const { report } = await footprintInstance(f);
+  await f.refuses(
+    () =>
+      report({
+        measurement: EMPTY_MEASUREMENT,
+        results: [cleanupResult(createIdentity("cleanup"))],
+      }),
+    HttpStatus.NotFound,
+    WorkerErrorCode.FootprintOrderUnknown,
+  );
+  assert.deepEqual(f.footprint.measured, []);
+  assert.deepEqual(f.footprint.settled, []);
+  const stored = createIdentity("cleanup");
+  f.footprint.stored.add(stored);
+  await f.restart();
+  assert.deepEqual(
+    await report({ measurement: null, results: [cleanupResult(stored)] }),
+    { orders: [] },
+  );
+  assert.deepEqual(f.footprint.settled, []);
+});
+
+test("a footprint report from a registration with no instance answers instance_not_found", async (t) => {
+  const f = instanceFixture(t);
+  await f.created();
+  const binding = bindingOf(createIdentity("project"), "general", [INSTANCE]);
+  f.bindings.push(binding);
+  f.asClient(binding);
+  await f.refuses(
+    () =>
+      f.invoke("footprint.report", {
+        measurement: EMPTY_MEASUREMENT,
+        results: [],
+      }),
+    HttpStatus.NotFound,
+    WorkerErrorCode.InstanceNotFound,
+  );
+  assert.deepEqual(f.footprint.measured, []);
+});
+
+test("a session delete at the worker placement queues a session order", async (t) => {
+  const f = instanceFixture(t);
+  const { record } = await f.created();
+  const cleanupId = createIdentity("cleanup");
+  const executionId = createIdentity("execution");
+  f.as(CLEANUP_HUMAN);
+  assert.deepEqual(
+    await f.invoke(
+      "instance.session.delete",
+      { cleanup_id: cleanupId, execution_ids: [executionId] },
+      { instance_name: INSTANCE },
+    ),
+    { queued: true },
+  );
+  assert.deepEqual(f.worker().instances.footprintOrdersOf(record.id), [
+    {
+      cleanup_id: cleanupId,
+      kind: InstanceCleanableKind.Session,
+      keys: [executionId],
+    },
+  ]);
+});
+
+test("an archive drops the orders of the instance and reports the archive to the footprint", async (t) => {
+  const f = instanceFixture(t);
+  const { record, queue } = await footprintInstance(f);
+  await queue(createIdentity("cleanup"));
+  f.bindings[0]!.worker_instances = [];
+  f.asHuman();
+  await archiveFixture(f).archive(true);
+  assert.deepEqual(f.footprint.archived, [INSTANCE]);
+  assert.deepEqual(f.worker().instances.footprintOrdersOf(record.id), []);
+});
+
+test("an instance holds at most FOOTPRINT_ORDERS_PENDING_MAX orders, a repeat of a held order is accepted and a new order answers orders_full", async (t) => {
+  const f = instanceFixture(t);
+  const { record, queue } = await footprintInstance(f);
+  const held = Array.from({ length: FOOTPRINT_ORDERS_PENDING_MAX }, () =>
+    createIdentity("cleanup"),
+  );
+  for (const cleanupId of held) await queue(cleanupId);
+  assert.deepEqual(await queue(held[0]!), { queued: true });
+  await f.refuses(
+    () => queue(createIdentity("cleanup")),
+    HttpStatus.Conflict,
+    WorkerErrorCode.FootprintOrdersFull,
+  );
+  assert.equal(
+    f.worker().instances.footprintOrdersOf(record.id).length,
+    FOOTPRINT_ORDERS_PENDING_MAX,
+  );
 });

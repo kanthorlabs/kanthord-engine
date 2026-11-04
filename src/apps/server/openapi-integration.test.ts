@@ -903,6 +903,10 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["project.environment.delete", AccessPolicy.HumanOrService],
   ["project.environment.cache_volume.delete", AccessPolicy.HumanOrService],
   ["worker.slot_image.delete", AccessPolicy.HumanOrService],
+  ["worker.footprint.report", AccessPolicy.Client],
+  ["worker.instance.session.delete", AccessPolicy.HumanOrService],
+  ["worker.instance.workspace.delete", AccessPolicy.HumanOrService],
+  ["worker.instance.tool_output.delete", AccessPolicy.HumanOrService],
   ["footprint.summary.get", AccessPolicy.Human],
   ["footprint.kind.get", AccessPolicy.Human],
   ["footprint.candidate.list", AccessPolicy.Human],
@@ -916,8 +920,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["footprint.measure.run", AccessPolicy.Human],
   ["footprint.backup.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 252;
-const ROUTED_OPERATION_COUNT = 240;
+const OPERATION_COUNT = 256;
+const ROUTED_OPERATION_COUNT = 244;
 const INTAKE_OPERATION_COUNT = 24;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = [

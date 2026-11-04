@@ -24,6 +24,14 @@ import {
   type Service,
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
+import type { NodeStates } from "../mission/contract.ts";
+import type { ExecutionEndTimes } from "../scheduler/contract.ts";
+import {
+  type FootprintKindMeasure,
+  type FootprintMeasurement,
+  type FootprintResult,
+  InstancePlacement,
+} from "../worker/contract.ts";
 import {
   CleanableKind,
   type CleanupCreate,
@@ -34,6 +42,7 @@ import {
   DAY_MS,
   DEFAULT_AGE_DAYS,
   DELETE_OPERATIONS,
+  emptyMeasure,
   failedMeasure,
   FOOTPRINT_MEASURE_INTERVAL_MS,
   FOOTPRINT_SERVICE_NAME,
@@ -49,6 +58,7 @@ import {
   type FootprintStat,
   type FootprintTable,
   type FootprintThreshold,
+  INSTANCE_KINDS,
   KIND_RULES,
   type MeasureError,
   RUNTIME_STORE_DEVICE,
@@ -60,6 +70,9 @@ import {
   decodeCursor,
   defaultRule,
   encodeCursor,
+  factKeys,
+  instanceCandidates,
+  type InstanceFacts,
   offsetOf,
   ruleSupported,
   ruleValue,
@@ -70,6 +83,8 @@ import {
   completedSince,
   insertCleanup,
   listCleanups,
+  openCleanups,
+  resumeIndex,
   type StoredCleanup,
   updateCleanup,
 } from "./cleanup-store.ts";
@@ -100,6 +115,8 @@ const BACKUP_DELETED = "footprint.backup.deleted";
 const ALERT_FIRED = "footprint.alert.fired";
 const ALERT_RESOLVED = "footprint.alert.resolved";
 const ALERT_EVALUATION_FAILED = "footprint.alert.evaluation_failed";
+const CLEANUP_ENDED = "footprint.cleanup.ended";
+const INSTANCE_ARCHIVED = "footprint.instance.archived";
 const KEY_SEPARATOR = "\u0000";
 const WINDOW_MIN_DAYS = 1;
 const NO_ITEMS = 0;
@@ -117,8 +134,17 @@ export interface Dependencies {
   readonly serverHost: ServerHost;
   readonly instances: InstanceLookup;
   readonly deleters?: () => Partial<Record<CleanableKind, CleanupDeleter>>;
+  readonly executionEndTimes?: ExecutionEndTimes;
+  readonly nodeStates?: NodeStates;
+  readonly stateDevice?: () => Promise<string>;
   readonly now?: () => number;
 }
+
+const NO_FACTS: InstanceFacts = { endTimes: new Map(), nodeStates: new Map() };
+const ITEMLESS_KINDS: readonly FootprintKind[] = [
+  FootprintKind.Log,
+  FootprintKind.SlotResidue,
+];
 
 interface Entry {
   readonly measure: FootprintMeasure;
@@ -171,6 +197,15 @@ function isServerKind(kind: FootprintKind): boolean {
   return SERVER_KINDS.includes(kind);
 }
 
+function isInstanceCleanable(
+  kind: FootprintKind,
+  instanceName: string | null,
+): kind is CleanableKind {
+  return (
+    instanceName !== null && isCleanable(kind) && INSTANCE_KINDS.includes(kind)
+  );
+}
+
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -189,6 +224,11 @@ export class FootprintService implements Service {
   private task?: CleanupTask;
   private timer?: NodeJS.Timeout;
   private measuring: Promise<void> | null = null;
+  private stateDeviceKey: string | null = null;
+  private readonly unsettled = new Map<
+    string,
+    { reported: Set<string>; skipped: Set<FootprintKind> }
+  >();
   private started = false;
 
   constructor(dependencies: Dependencies) {
@@ -229,9 +269,13 @@ export class FootprintService implements Service {
   }
 
   private async measureOwners(): Promise<void> {
+    this.stateDeviceKey =
+      (await this.dependencies.stateDevice?.().catch(() => null)) ??
+      this.stateDeviceKey;
     const reported = new Set<string>();
     const skipped = new Set<FootprintKind>();
     const hosts = new Set<string | null>([null]);
+    const hostKinds = new Map<string, Set<FootprintKind>>();
     for (const owner of this.owners) {
       let measures: readonly FootprintMeasure[];
       try {
@@ -246,10 +290,34 @@ export class FootprintService implements Service {
         );
         owner.kinds.forEach((kind) => skipped.add(kind));
       }
-      measures.forEach((measure) => hosts.add(measure.instance_name));
+      for (const measure of measures) {
+        hosts.add(measure.instance_name);
+        if (measure.instance_name === null) continue;
+        const kinds = hostKinds.get(measure.instance_name) ?? new Set();
+        kinds.add(measure.kind);
+        hostKinds.set(measure.instance_name, kinds);
+      }
       for (const key of await this.record(owner, measures)) reported.add(key);
     }
-    for (const host of hosts) this.settle(host, reported, skipped);
+    for (const host of hosts)
+      this.settle(
+        host,
+        reported,
+        host === null
+          ? skipped
+          : this.unmeasuredKinds(hostKinds.get(host), skipped),
+      );
+  }
+
+  private unmeasuredKinds(
+    measured: ReadonlySet<FootprintKind> | undefined,
+    skipped: ReadonlySet<FootprintKind>,
+  ): Set<FootprintKind> {
+    return new Set(
+      Object.values(FootprintKind).filter(
+        (kind) => skipped.has(kind) || !measured?.has(kind),
+      ),
+    );
   }
 
   private async record(
@@ -398,6 +466,10 @@ export class FootprintService implements Service {
     measure: FootprintMeasure,
     now: number,
   ): Promise<Entry["candidates"]> {
+    if (isInstanceCleanable(measure.kind, measure.instance_name))
+      return this.dependencies.store.transaction((tx) =>
+        this.instanceDefault(tx, measure, now),
+      );
     if (!isCleanable(measure.kind) || measure.instance_name !== null)
       return null;
     try {
@@ -414,6 +486,246 @@ export class FootprintService implements Service {
     } catch {
       return null;
     }
+  }
+
+  private facts(
+    tx: Transaction,
+    kind: CleanableKind,
+    items: NonNullable<FootprintMeasure["items"]>,
+  ): InstanceFacts {
+    const keys = factKeys(kind, items);
+    return {
+      endTimes: keys.executions.length
+        ? (this.dependencies.executionEndTimes?.(tx, keys.executions) ??
+          NO_FACTS.endTimes)
+        : NO_FACTS.endTimes,
+      nodeStates: keys.nodes.length
+        ? (this.dependencies.nodeStates?.(tx, keys.nodes) ??
+          NO_FACTS.nodeStates)
+        : NO_FACTS.nodeStates,
+    };
+  }
+
+  private instanceItems(
+    tx: Transaction,
+    kind: CleanableKind,
+    instanceName: string,
+    rule: CleanupRuleValue | null,
+    now: number,
+  ) {
+    const items =
+      this.entries.get(entryKey(kind, instanceName, null))?.measure.items ?? [];
+    return instanceCandidates(
+      kind,
+      items,
+      rule,
+      this.facts(tx, kind, items),
+      now,
+    );
+  }
+
+  private instanceDefault(
+    tx: Transaction,
+    measure: FootprintMeasure,
+    now: number,
+  ): Entry["candidates"] {
+    if (!isInstanceCleanable(measure.kind, measure.instance_name)) return null;
+    const items = measure.items ?? [];
+    const selected = instanceCandidates(
+      measure.kind,
+      items,
+      defaultRule(measure.kind),
+      this.facts(tx, measure.kind, items),
+      now,
+    );
+    return {
+      count: selected.length,
+      bytes: selected.reduce((sum, item) => sum + (item.bytes ?? 0), 0),
+    };
+  }
+
+  private kindDevice(
+    kind: FootprintKind,
+    placement: InstancePlacement,
+    unitDevice: string | null,
+  ): string | null {
+    if (ITEMLESS_KINDS.includes(kind)) return null;
+    if (placement === InstancePlacement.Worker) return unitDevice;
+    if (
+      placement === InstancePlacement.Container &&
+      kind !== FootprintKind.Session
+    )
+      return RUNTIME_STORE_DEVICE;
+    return this.stateDeviceKey;
+  }
+
+  private kindMeasures(
+    instanceName: string,
+    placement: InstancePlacement,
+    reported: FootprintKindMeasure,
+    unitDevice: string | null,
+  ): FootprintMeasure[] {
+    const fields = {
+      instance_name: instanceName,
+      device: this.kindDevice(reported.kind, placement, unitDevice),
+    };
+    if (reported.kind === FootprintKind.Log)
+      return reported.items.map((item) =>
+        emptyMeasure(FootprintKind.Log, {
+          ...fields,
+          item_key: item.key,
+          count: 1,
+          bytes: item.bytes,
+          oldest_at: item.modified_at,
+          newest_at: item.modified_at,
+        }),
+      );
+    return [
+      emptyMeasure(reported.kind, {
+        ...fields,
+        count: reported.count,
+        bytes: reported.bytes,
+        oldest_at: reported.oldest_at,
+        newest_at: reported.newest_at,
+        recent_count: ITEMLESS_KINDS.includes(reported.kind)
+          ? null
+          : reported.recent_count,
+        items: ITEMLESS_KINDS.includes(reported.kind)
+          ? null
+          : [...reported.items],
+      }),
+    ];
+  }
+
+  recordMeasurement(
+    tx: Transaction,
+    instanceName: string,
+    placement: InstancePlacement,
+    measurement: FootprintMeasurement,
+  ): void {
+    const at = this.now();
+    const unitDevice = measurement.disk?.device ?? null;
+    const measures = measurement.kinds.flatMap((reported) =>
+      this.kindMeasures(instanceName, placement, reported, unitDevice),
+    );
+    if (measurement.disk !== null)
+      measures.push(
+        emptyMeasure(FootprintKind.Disk, {
+          instance_name: instanceName,
+          item_key: measurement.disk.device,
+          instance_names: [instanceName],
+          device: measurement.disk.device,
+          total_bytes: measurement.disk.total_bytes,
+          free_bytes: measurement.disk.free_bytes,
+        }),
+      );
+    const replaced = new Set<FootprintKind>(
+      measurement.kinds.map((reported) => reported.kind),
+    );
+    if (measurement.disk !== null) replaced.add(FootprintKind.Disk);
+    const reported = new Set(
+      measures.map((measure) =>
+        entryKey(measure.kind, measure.instance_name, measure.item_key),
+      ),
+    );
+    this.unsettled.set(instanceName, {
+      reported,
+      skipped: this.unmeasuredKinds(replaced, new Set()),
+    });
+    for (const measure of measures)
+      this.entries.set(
+        entryKey(measure.kind, measure.instance_name, measure.item_key),
+        {
+          measure,
+          measured_at: at,
+          error: null,
+          candidates: this.instanceDefault(tx, measure, at),
+        },
+      );
+  }
+
+  settleMeasurement(instanceName: string): void {
+    const pending = this.unsettled.get(instanceName);
+    if (!pending) return;
+    this.unsettled.delete(instanceName);
+    this.settle(instanceName, pending.reported, pending.skipped);
+  }
+
+  recordResults(
+    tx: Transaction,
+    instanceName: string,
+    results: readonly FootprintResult[],
+  ): string[] {
+    const unknown: string[] = [];
+    for (const result of results) {
+      const cleanup = cleanupOf(tx, result.cleanup_id);
+      if (
+        cleanup === null ||
+        cleanup.instance_name !== instanceName ||
+        (cleanup.state !== CleanupState.Queued &&
+          cleanup.state !== CleanupState.Running)
+      ) {
+        unknown.push(result.cleanup_id);
+        continue;
+      }
+      const outcome = {
+        removed: result.removed.length,
+        removed_bytes: result.removed_bytes,
+        absent: result.absent.length,
+        refused: [...result.refused],
+      };
+      const state =
+        resumeIndex(outcome) === cleanup.keys.length
+          ? CleanupState.Completed
+          : CleanupState.Failed;
+      updateCleanup(tx, cleanup.cleanup_id, state, outcome, this.now());
+      this.dependencies.logger.info(
+        {
+          cleanup_id: cleanup.cleanup_id,
+          kind: cleanup.kind,
+          instance_name: cleanup.instance_name,
+          requested_by: cleanup.requested_by.account,
+          state,
+          removed: outcome.removed,
+          absent: outcome.absent,
+          refused: outcome.refused.length,
+        },
+        CLEANUP_ENDED,
+      );
+    }
+    return unknown;
+  }
+
+  instanceArchived(tx: Transaction, instanceName: string): void {
+    const at = this.now();
+    let failed = 0;
+    for (const cleanup of openCleanups(tx))
+      if (cleanup.instance_name === instanceName) {
+        updateCleanup(
+          tx,
+          cleanup.cleanup_id,
+          CleanupState.Failed,
+          cleanup.outcome,
+          at,
+        );
+        failed += 1;
+      }
+    let resolved = 0;
+    for (const alert of openAlerts(tx))
+      if (alert.instance_name === instanceName) {
+        resolveAlert(tx, alert.alert_id, at);
+        resolved += 1;
+      }
+    for (const [key, entry] of this.entries)
+      if (entry.measure.instance_name === instanceName) {
+        this.entries.delete(key);
+        this.tracks.delete(key);
+      }
+    this.unsettled.delete(instanceName);
+    this.dependencies.logger.info(
+      { instance_name: instanceName, failed, resolved },
+      INSTANCE_ARCHIVED,
+    );
   }
 
   private thresholds(kind: FootprintKind): FootprintThreshold[] {
@@ -637,17 +949,19 @@ export class FootprintService implements Service {
     const scope = { kind, instance_name: instanceName, rule };
     const offset = offsetOf(decodeCursor(scope, cursor));
     const owner = this.ownerOf(kind);
-    const page = owner
-      ? await owner.candidates({
-          kind,
-          instance_name: instanceName,
-          rule,
-          offset,
-          limit,
-          now: this.now(),
-          signal: this.shutdown.signal,
-        })
-      : { items: [], total_count: 0, total_bytes: 0 };
+    const page = isInstanceCleanable(kind, instanceName)
+      ? this.instancePage(kind, instanceName!, rule, offset, limit)
+      : owner
+        ? await owner.candidates({
+            kind,
+            instance_name: instanceName,
+            rule,
+            offset,
+            limit,
+            now: this.now(),
+            signal: this.shutdown.signal,
+          })
+        : { items: [], total_count: 0, total_bytes: 0 };
     const next = offset + page.items.length;
     return {
       page,
@@ -655,6 +969,23 @@ export class FootprintService implements Service {
         page.items.length === limit && next < page.total_count
           ? encodeCursor(scope, String(next))
           : null,
+    };
+  }
+
+  private instancePage(
+    kind: CleanableKind,
+    instanceName: string,
+    rule: CleanupRuleValue | null,
+    offset: number,
+    limit: number,
+  ) {
+    const selected = this.dependencies.store.transaction((tx) =>
+      this.instanceItems(tx, kind, instanceName, rule, this.now()),
+    );
+    return {
+      items: selected.slice(offset, offset + limit),
+      total_count: selected.length,
+      total_bytes: selected.reduce((sum, item) => sum + (item.bytes ?? 0), 0),
     };
   }
 

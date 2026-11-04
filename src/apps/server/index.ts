@@ -129,6 +129,7 @@ import {
   deviceKey,
   footprintMigrations,
   FootprintService,
+  instanceDeleter,
   type InvokeOperation,
   ownerDeleter,
   ServerHost,
@@ -693,6 +694,16 @@ export function composeServices(options: {
     bindingsNaming: (tx, name) => project.bindingsNaming(tx, name),
   });
   const worker: WorkerService = new WorkerService({
+    footprint: {
+      recordMeasurement: (tx, name, placement, measurement) =>
+        footprint.recordMeasurement(tx, name, placement, measurement),
+      recordResults: (tx, name, results) =>
+        footprint.recordResults(tx, name, results),
+      settleMeasurement: (name) => footprint.settleMeasurement(name),
+      instanceArchived: (tx, name) => footprint.instanceArchived(tx, name),
+    },
+    executionEndTimes: (tx, ids) => scheduler.executionEndTimes(tx, ids),
+    stateDevice: () => deviceKey(options.stateDirectory),
     missionActions: {
       authorizeRequest: (...args) => mission.authorizeRequest(...args),
       authorizeAction: (...args) => mission.authorizeAction(...args),
@@ -1184,6 +1195,9 @@ export function composeServices(options: {
     instances: {
       instanceStateOf: (tx, name) => worker.instanceStateOf(tx, name),
     },
+    executionEndTimes: (tx, ids) => scheduler.executionEndTimes(tx, ids),
+    nodeStates: (tx, ids) => mission.nodeStates(tx, ids),
+    stateDevice,
     deleters: () => ({
       [CleanableKind.Trace]: ownerDeleter(
         invokeOperation,
@@ -1208,6 +1222,24 @@ export function composeServices(options: {
         footprintIdentity,
         workerOperations["slot_image.delete"],
         "references",
+      ),
+      [CleanableKind.Session]: instanceDeleter(
+        invokeOperation,
+        footprintIdentity,
+        workerOperations["instance.session.delete"],
+        "execution_ids",
+      ),
+      [CleanableKind.Workspace]: instanceDeleter(
+        invokeOperation,
+        footprintIdentity,
+        workerOperations["instance.workspace.delete"],
+        "keys",
+      ),
+      [CleanableKind.ToolOutput]: instanceDeleter(
+        invokeOperation,
+        footprintIdentity,
+        workerOperations["instance.tool_output.delete"],
+        "keys",
       ),
     }),
   });

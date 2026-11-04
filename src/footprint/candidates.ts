@@ -1,13 +1,18 @@
 import { createHash } from "node:crypto";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
+import { NodeState, type NodeStateFact } from "../mission/contract.ts";
+import type { FootprintItem } from "../worker/contract.ts";
 import {
-  type CleanableKind,
+  CleanableKind,
+  CleanupRefusal,
   CleanupRule,
   type CleanupRuleValue,
   DEFAULT_AGE_DAYS,
+  type FootprintCandidate,
   FootprintErrorCode,
   KIND_RULES,
+  olderThanCutoff,
 } from "./contract.ts";
 
 const BASE64URL = "base64url";
@@ -81,4 +86,109 @@ export function offsetOf(position: string | null): number {
   const offset = Number(position);
   if (!Number.isSafeInteger(offset)) throw cursorInvalid();
   return offset;
+}
+
+export interface InstanceFacts {
+  readonly endTimes: ReadonlyMap<string, number | null>;
+  readonly nodeStates: ReadonlyMap<string, NodeStateFact>;
+}
+
+const NODE_PREFIX = "node_";
+const EXECUTION_PREFIX = "execution_";
+const CLOSED_STATES: readonly string[] = [
+  NodeState.Completed,
+  NodeState.Discarded,
+];
+
+export function factKeys(
+  kind: CleanableKind,
+  items: readonly FootprintItem[],
+): { executions: string[]; nodes: string[] } {
+  if (kind === CleanableKind.Session)
+    return { executions: items.map((item) => item.key), nodes: [] };
+  if (kind !== CleanableKind.Workspace) return { executions: [], nodes: [] };
+  return {
+    executions: items
+      .map((item) => item.key)
+      .filter((key) => key.startsWith(EXECUTION_PREFIX)),
+    nodes: items
+      .map((item) => item.key)
+      .filter((key) => key.startsWith(NODE_PREFIX)),
+  };
+}
+
+interface Judged {
+  readonly candidate: FootprintCandidate;
+  readonly selectable: boolean;
+}
+
+function judged(
+  kind: CleanableKind,
+  item: FootprintItem,
+  facts: InstanceFacts,
+): Judged {
+  const base = {
+    key: item.key,
+    at: item.modified_at,
+    bytes: item.bytes,
+    project_id: null,
+    node_id: null,
+    execution_id: null,
+    refusal: null,
+    kept: false,
+  };
+  if (kind === CleanableKind.Session) {
+    const ended = facts.endTimes.get(item.key);
+    const live = ended === null;
+    return {
+      candidate: {
+        ...base,
+        at: ended ?? item.modified_at,
+        execution_id: item.key,
+        refusal: live ? CleanupRefusal.Live : null,
+      },
+      selectable: !live,
+    };
+  }
+  if (kind === CleanableKind.Workspace && item.key.startsWith(NODE_PREFIX)) {
+    const node = facts.nodeStates.get(item.key);
+    return {
+      candidate: { ...base, node_id: item.key },
+      selectable:
+        node === undefined ||
+        node.retired ||
+        CLOSED_STATES.includes(node.state),
+    };
+  }
+  if (kind === CleanableKind.Workspace) {
+    const live = facts.endTimes.get(item.key) === null;
+    return {
+      candidate: {
+        ...base,
+        execution_id: item.key,
+        refusal: live ? CleanupRefusal.Live : null,
+      },
+      selectable: !live,
+    };
+  }
+  return { candidate: base, selectable: true };
+}
+
+export function instanceCandidates(
+  kind: CleanableKind,
+  items: readonly FootprintItem[],
+  rule: CleanupRuleValue | null,
+  facts: InstanceFacts,
+  now: number,
+): FootprintCandidate[] {
+  const cutoff = olderThanCutoff(rule, now);
+  return items
+    .map((item) => judged(kind, item, facts))
+    .filter(
+      (entry) =>
+        rule === null ||
+        (entry.selectable && (cutoff === null || entry.candidate.at < cutoff)),
+    )
+    .map((entry) => entry.candidate)
+    .sort((a, b) => a.at - b.at || a.key.localeCompare(b.key));
 }
