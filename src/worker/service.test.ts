@@ -71,7 +71,12 @@ import {
   type AgentPin,
   type AgentSelection,
 } from "../scheduler/contract.ts";
-import { FOOTPRINT_SERVICE } from "../kernel/cleanup.ts";
+import {
+  CleanupRefusal,
+  FOOTPRINT_SERVICE,
+  InstanceCleanableKind,
+  InstanceFootprintKind,
+} from "../kernel/cleanup.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { ProjectErrorCode } from "../project/contract.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -1972,7 +1977,11 @@ interface PoolBinding {
   listed: string[];
 }
 
-function poolFixture(t: TestContext, instanceCount: number) {
+function poolFixture(
+  t: TestContext,
+  instanceCount: number,
+  collaborations: Partial<Dependencies> = {},
+) {
   const host = new FakePoolHost();
   const logs: string[] = [];
   const state = {
@@ -2055,6 +2064,7 @@ function poolFixture(t: TestContext, instanceCount: number) {
       workerBindingsOf: bindingsOf,
       logger: pino({ level: "error" }, { write: (line) => logs.push(line) }),
     },
+    ...collaborations,
   });
   function addInstance(
     name: string,
@@ -3369,4 +3379,147 @@ test("instanceStateOf answers null for an unknown name and the archive state of 
       archived: true,
     }),
   );
+});
+
+const FOOTPRINT_HUMAN = testHumanIdentity("alice", "Alice", "jti");
+const TOOL_OUTPUT_KEY = "pi-bash-0123456789abcdef.log";
+const STDERR_ITEM = { key: "stderr.log", bytes: 7, modified_at: 3 };
+const SESSION_ITEM_BYTES = 11;
+
+function footprintKind(kind: InstanceFootprintKind, bytes: number) {
+  return {
+    kind,
+    count: 1,
+    bytes,
+    oldest_at: 1,
+    newest_at: 1,
+    recent_count: 1,
+    items: [{ key: `${kind}-item`, bytes, modified_at: 1 }],
+    items_complete: true,
+  };
+}
+
+function footprintPool(t: TestContext) {
+  const measured: unknown[] = [];
+  const settled: string[] = [];
+  const ends = new Map<string, number | null>();
+  const f = poolFixture(t, 1, {
+    footprint: {
+      recordMeasurement: (_tx, _name, _placement, measurement) => {
+        measured.push(measurement);
+      },
+      recordResults: (_tx, _name, results) =>
+        results.map((result) => result.cleanup_id),
+      settleMeasurement: (name) => {
+        settled.push(name);
+      },
+      instanceArchived: () => {},
+    },
+    executionEndTimes: (_tx, executionIds) =>
+      new Map(
+        executionIds.flatMap((id) =>
+          ends.has(id) ? [[id, ends.get(id)!] as const] : [],
+        ),
+      ),
+  });
+  const invoke = async <K extends keyof typeof workerOperations>(
+    key: K,
+    body: unknown,
+    params: Record<string, string> = {},
+  ) => {
+    const operation = workerOperations[key];
+    return operation.output.parse(
+      await f.registry
+        .get(operation.id)
+        .handler(operation.input.parse({ params, query: {}, body }), f.caller),
+    ) as (typeof workerOperations)[K]["output"]["_output"];
+  };
+  return { ...f, measured, settled, ends, invoke };
+}
+
+test("a server footprint report drops the session kind and the disk, adds stderr.log and answers the orders of the instance", async (t) => {
+  const f = footprintPool(t);
+  f.host.stderrLog = STDERR_ITEM;
+  const cleanupId = createIdentity("cleanup");
+  f.caller.identity = FOOTPRINT_HUMAN;
+  await f.invoke(
+    "instance.tool_output.delete",
+    { cleanup_id: cleanupId, keys: [TOOL_OUTPUT_KEY] },
+    { instance_name: f.nameOf(FIRST_INSTANCE) },
+  );
+  f.register(FIRST_INSTANCE);
+  const answer = await f.invoke("footprint.report", {
+    measurement: {
+      measured_at: 1,
+      disk: { device: "1", total_bytes: 2, free_bytes: 1 },
+      kinds: [
+        footprintKind(InstanceFootprintKind.Session, 1),
+        footprintKind(InstanceFootprintKind.Log, 1),
+      ],
+    },
+    results: [],
+  });
+  assert.deepEqual(answer, {
+    orders: [
+      {
+        cleanup_id: cleanupId,
+        kind: InstanceCleanableKind.ToolOutput,
+        keys: [TOOL_OUTPUT_KEY],
+      },
+    ],
+  });
+  const log = footprintKind(InstanceFootprintKind.Log, 1);
+  assert.deepEqual(f.measured, [
+    {
+      measured_at: 1,
+      disk: null,
+      kinds: [
+        {
+          ...log,
+          count: log.count + 1,
+          bytes: log.bytes + STDERR_ITEM.bytes,
+          items: [...log.items, STDERR_ITEM],
+        },
+      ],
+    },
+  ]);
+  assert.deepEqual(f.settled, [f.nameOf(FIRST_INSTANCE)]);
+});
+
+test("a server session delete refuses a live execution, answers an unreadable directory and removes an ended one", async (t) => {
+  const f = footprintPool(t);
+  const name = f.nameOf(FIRST_INSTANCE);
+  const live = createIdentity("execution");
+  const ended = createIdentity("execution");
+  const unreadable = createIdentity("execution");
+  const absent = createIdentity("execution");
+  f.ends.set(live, null);
+  f.ends.set(ended, 1);
+  f.ends.set(unreadable, 1);
+  f.host.sessions.set(name, [
+    { key: ended, bytes: SESSION_ITEM_BYTES, modified_at: 1 },
+    { key: live, bytes: 1, modified_at: 1 },
+  ]);
+  f.host.unreadableSessions.add(unreadable);
+  f.caller.identity = FOOTPRINT_HUMAN;
+  const answer = await f.invoke(
+    "instance.session.delete",
+    {
+      cleanup_id: createIdentity("cleanup"),
+      execution_ids: [live, ended, unreadable, absent],
+    },
+    { instance_name: name },
+  );
+  assert.deepEqual(answer, {
+    removed: 1,
+    removed_bytes: SESSION_ITEM_BYTES,
+    absent: 1,
+    refused: [
+      { key: live, reason: CleanupRefusal.Live },
+      { key: unreadable, reason: CleanupRefusal.Unreadable },
+    ],
+  });
+  assert.deepEqual(f.host.removedSessions, [
+    { instance: name, execution: ended },
+  ]);
 });

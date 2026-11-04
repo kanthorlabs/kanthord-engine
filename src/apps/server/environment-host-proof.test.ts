@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
@@ -29,6 +30,7 @@ const ONE_RESULT = 1;
 const SOURCE: NodeJS.ProcessEnv = {
   PATH: process.env.PATH,
   HOME: "/home/test",
+  TMPDIR: tmpdir(),
   SECRET_TOKEN: "hidden",
 };
 
@@ -124,6 +126,7 @@ test(
     for (const [name, value] of Object.entries(expected))
       assert.equal(actual[name], value, name);
     assert.equal(actual.SECRET_TOKEN, undefined);
+    assert.equal(actual.TMPDIR, SOURCE.TMPDIR);
     assert.equal(actual.XDG_CONFIG_HOME!.startsWith(runDirectory), true);
     assert.equal(
       Object.keys(actual).every(

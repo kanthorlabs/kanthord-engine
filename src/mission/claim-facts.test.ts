@@ -441,3 +441,25 @@ test("opening facts answer null for an absent node", (t) => {
     null,
   );
 });
+
+test("nodeStates answers the state and the retirement of each known node and omits an unknown node", (t) => {
+  const h = factsHarness(t);
+  const completed = h.node({});
+  const retired = h.node({});
+  h.store.transaction((tx) => {
+    setNodeState(tx, completed, NodeState.Completed);
+    tx.database
+      .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
+      .run(NOW, retired);
+  });
+  const unknown = createIdentity("node");
+  assert.deepEqual(
+    h.store.transaction((tx) =>
+      h.service.nodeStates(tx, [completed, retired, unknown]),
+    ),
+    new Map([
+      [completed, { state: NodeState.Completed, retired: false }],
+      [retired, { state: NodeState.Available, retired: true }],
+    ]),
+  );
+});

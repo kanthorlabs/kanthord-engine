@@ -25,6 +25,7 @@ import {
   ThreadMessageKind,
 } from "../worker/thread-data.ts";
 import { until } from "./cli-test-support.ts";
+import { launchEnvironment } from "./thread-driver.ts";
 import {
   gatewayFixture,
   humanCaller,
@@ -172,6 +173,17 @@ test("a worker thread registers its worker unit through the port and the invocat
   assert.equal(registered.length, SINGLE_INSTANCE);
   const logFile = `${directories(env).state}/kanthord.log`;
   assert.ok(await until(() => existsSync(logFile), Boolean, t.signal));
+});
+
+test("inside a thread of the launch environment, os.tmpdir() answers <slot root>/tmp", async (t) => {
+  const root = temporary(t);
+  const thread = new Worker(
+    "require('node:worker_threads').parentPort.postMessage(require('node:os').tmpdir())",
+    { eval: true, env: launchEnvironment(hostEnvironment(), root) },
+  );
+  stopAfter(t, () => thread.terminate());
+  const [answer] = await once(thread, "message");
+  assert.equal(answer, join(root, "tmp"));
 });
 
 test("a worker thread refuses to start without an absolute directory variable", async (t) => {

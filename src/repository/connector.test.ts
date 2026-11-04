@@ -54,7 +54,6 @@ import {
   temporary,
   UNSET_GIT_ENVIRONMENT,
 } from "../kernel/test-support.ts";
-import { SshAgentErrorCode } from "./ssh-agent.ts";
 import { LOCAL_GIT_SSH_ACCESS } from "./sshd-test-support.ts";
 
 const DEADLINE_MS = 60_000;
@@ -657,7 +656,7 @@ test("a missing temporary directory throws before_push for both git writes", asy
   const beforePush = (error: unknown) =>
     error instanceof GitWriteError &&
     error.stage === GitStage.BeforePush &&
-    error.code === SshAgentErrorCode.Failed;
+    error.code === GIT_FAILED;
   await assert.rejects(
     mergePushFresh(
       { address: origin, base_branch: BASE_BRANCH, commit: snapshot },

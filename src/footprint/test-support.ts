@@ -31,12 +31,14 @@ import {
 import { footprintMigrations } from "./migrations.ts";
 import { FootprintService } from "./service.ts";
 import { ServerHost } from "./server-host.ts";
+import type { NodeStateFact } from "../mission/contract.ts";
 import type { CleanupDeleter, InvokeOperation } from "./cleanup-task.ts";
 
 const MASTER_KEY_BYTES = 32;
 const AUTH_VERSION = 1;
 const WRITABLE_DAYS = 30;
 export const NOW = Date.UTC(2026, 10, 3, 9);
+export const STATE_DEVICE = "state-device";
 export const HUMAN_ACTOR = {
   kind: "human" as const,
   account: "ulrich",
@@ -71,6 +73,8 @@ export function footprintFixture(
     now?: () => number;
     deleters?: Partial<Record<string, CleanupDeleter>>;
     instances?: Record<string, { archived: boolean }>;
+    endTimes?: Record<string, number | null>;
+    nodeStates?: Record<string, NodeStateFact>;
     lines?: string[];
     config?: FootprintConfig;
   } = {},
@@ -142,6 +146,23 @@ export function footprintFixture(
         options.instances?.[name] ?? null,
     },
     deleters: () => options.deleters ?? {},
+    executionEndTimes: (_tx, ids) =>
+      new Map(
+        ids.flatMap((id) =>
+          options.endTimes && id in options.endTimes
+            ? [[id, options.endTimes[id]!] as const]
+            : [],
+        ),
+      ),
+    nodeStates: (_tx, ids) =>
+      new Map(
+        ids.flatMap((id) =>
+          options.nodeStates?.[id]
+            ? [[id, options.nodeStates[id]] as const]
+            : [],
+        ),
+      ),
+    stateDevice: async () => STATE_DEVICE,
   });
   stopAfter(t, async () => {
     await service.stop();

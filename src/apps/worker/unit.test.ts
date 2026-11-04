@@ -22,6 +22,7 @@ import { hostEnvironment } from "../../kernel/test-support.ts";
 import { runVerifications, WorkspaceRoot } from "../../worker/unit/index.ts";
 import { spawnSync } from "node:child_process";
 import { createIdentity } from "../../kernel/identity.ts";
+import { InstanceCleanableKind } from "../../kernel/cleanup.ts";
 
 const CLIENT_SECRET_BYTES = 32;
 const SETTLE_WAIT_MS = 50;
@@ -477,3 +478,53 @@ async function pidOf(file: string, signal: AbortSignal): Promise<number> {
     await delay(1, undefined, { signal });
   }
 }
+
+test("a lost footprint report answer keeps the result, the order does not run again and the next report sends it", async (t) => {
+  const reports: { results: { cleanup_id: string }[] }[] = [];
+  const answers = [
+    completed({ orders: [] }),
+    { type: OperationResultType.Indeterminate },
+    completed({ orders: [] }),
+  ];
+  const { transport } = scripted({ pull: cancelled });
+  const worker = transport.worker as unknown as Record<string, unknown>;
+  worker["footprint.report"] = async (input: {
+    body: { results: { cleanup_id: string }[] };
+  }) => {
+    reports.push(input.body);
+    return answers.shift();
+  };
+  const env = environmentOf(t);
+  const unit = new WorkerUnit({
+    bindings: [
+      {
+        transport,
+        client_secret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
+      },
+    ],
+    directories: directoriesOf(env),
+    env: { ...env, TMPDIR: temporary(t) },
+    log: () => {},
+    footprint: { residue_root: temporary(t), worker_placement: false },
+  });
+  const running = unit.run();
+  t.after(async () => {
+    await unit.stop();
+    await running;
+  });
+  while (!reports.length) await delay(GONE_POLL_MS);
+  const order = (cleanupId: string) => ({
+    cleanup_id: cleanupId,
+    kind: InstanceCleanableKind.ToolOutput,
+    keys: ["pi-bash-0123456789abcdef.log"],
+  });
+  const lost = createIdentity("cleanup");
+  await unit.footprintOrders([order(lost)]);
+  await unit.footprintOrders([order(lost)]);
+  const next = createIdentity("cleanup");
+  await unit.footprintOrders([order(next)]);
+  assert.deepEqual(
+    reports.map((report) => report.results.map((result) => result.cleanup_id)),
+    [[], [lost], [lost, next]],
+  );
+});

@@ -92,6 +92,10 @@ const API_ONLY_OPERATIONS = [
   "project.environment.delete",
   "project.environment.cache_volume.delete",
   "worker.slot_image.delete",
+  "worker.footprint.report",
+  "worker.instance.session.delete",
+  "worker.instance.workspace.delete",
+  "worker.instance.tool_output.delete",
 ];
 const TOP_LEVEL_NAMES = new Set([
   "config",
@@ -118,7 +122,7 @@ const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
 const IMPLEMENTED_COUNT = 209;
-const OPERATION_COUNT = 244;
+const OPERATION_COUNT = 248;
 const INTAKE_LEAVES = [
   "intake event delete",
   "intake event discard",

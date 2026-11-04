@@ -239,6 +239,8 @@ export async function fakeInstanceServer(t: TestContext) {
         },
       };
     }
+    if (request.path === FakePath.FootprintReport)
+      return { status: 200, body: { orders: [] } };
     const binding = clientBinding(request.bearer);
     if ("status" in binding) return binding;
     if (request.path === FakePath.Register) {
@@ -257,8 +259,6 @@ export async function fakeInstanceServer(t: TestContext) {
       };
     }
     if (request.path === FakePath.Heartbeat) return { status: 200, body: null };
-    if (request.path === FakePath.FootprintReport)
-      return { status: 200, body: { orders: [] } };
     if (request.path.startsWith(FakePath.Deregister)) {
       const runtime = request.path.slice(FakePath.Deregister.length);
       state.deregistered.push(runtime);

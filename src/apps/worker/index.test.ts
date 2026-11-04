@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { createProvider, type Provider } from "@earendil-works/pi-ai";
@@ -9,6 +12,7 @@ import { HttpStatus } from "../../kernel/http.ts";
 import { HealthStatus } from "../../kernel/service.ts";
 import {
   hostEnvironment,
+  overrideEnvironment,
   requirePiTools,
   stopAfter,
   temporary,
@@ -122,9 +126,16 @@ async function until<T>(
   }
 }
 
+const KANTHORD_DIRECTORY = "kanthord";
+const WORKERS_DIRECTORY = "workers";
+const TEMPORARY_DIRECTORY = "tmp";
+const PERMISSION_BITS = 0o777;
+const PRIVATE_MODE = 0o700;
+
 function environmentOf(t: TestContext, value?: string): NodeJS.ProcessEnv {
   requirePiTools();
   const root = temporary(t);
+  overrideEnvironment(t, { TMPDIR: hostEnvironment().TMPDIR });
   return {
     HOME: root,
     XDG_CONFIG_HOME: `${root}/config`,
@@ -157,6 +168,24 @@ async function fixture(t: TestContext, bindings = TWO_BINDINGS) {
     );
   return { server, env, records, options, ready };
 }
+
+test("the unit temporary directory is <unit>/tmp with mode 0700", async (t) => {
+  const f = await fixture(t, SINGLE);
+  const worker = new Worker(f.options());
+  try {
+    assert.equal(await worker.start(), null);
+    const unit = join(
+      f.env.XDG_DATA_HOME!,
+      KANTHORD_DIRECTORY,
+      WORKERS_DIRECTORY,
+      FAKE_INSTANCE_NAME,
+    );
+    assert.equal(tmpdir(), join(unit, TEMPORARY_DIRECTORY));
+    assert.equal(statSync(tmpdir()).mode & PERMISSION_BITS, PRIVATE_MODE);
+  } finally {
+    await worker.stop();
+  }
+});
 
 test("startup resolves the configuration, takes a token, logs the ready record, connects and registers each binding", async (t) => {
   const f = await fixture(t);

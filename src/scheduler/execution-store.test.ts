@@ -17,6 +17,7 @@ import {
   executionRecord,
   insertExecution,
   listExecutions,
+  readEndTimes,
   readExecution,
   readExpiredUnsettled,
   readUnendedOfNode,
@@ -263,4 +264,23 @@ test("the record resolves the pins into the selections of the record", (t) => {
   assert.deepEqual(record.agent_selections, [selection]);
   assert.equal(Object.hasOwn(record, "agent_pins"), false);
   assert.deepEqual(resolved, [[row.worker_binding_id, [pin]]]);
+});
+
+test("readEndTimes answers ended_at of each known execution, null while running, and omits an unknown id", (t) => {
+  const { store } = schedulerHarness(t);
+  const ended = executionFixture();
+  const running = executionFixture();
+  const unknown = createIdentity("execution");
+  store.transaction((tx) => {
+    insertExecution(tx, ended);
+    insertExecution(tx, running);
+    endExecution(tx, ended.execution_id, FIXTURE_NOW);
+    assert.deepEqual(
+      readEndTimes(tx, [ended.execution_id, running.execution_id, unknown]),
+      new Map([
+        [ended.execution_id, FIXTURE_NOW],
+        [running.execution_id, null],
+      ]),
+    );
+  });
 });

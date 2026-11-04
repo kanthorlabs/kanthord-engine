@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { projectOperations } from "../../project/contract.ts";
-import { requirePiTools } from "../../kernel/test-support.ts";
+import { requirePiTools, temporary } from "../../kernel/test-support.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
   alwaysAvailable,
@@ -20,7 +20,7 @@ import { createIdentity } from "../../kernel/identity.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { until } from "./cli-test-support.ts";
 import { humanCaller } from "./test-support.ts";
-import { threadEnvironment } from "./thread-driver.ts";
+import { launchEnvironment, threadEnvironment } from "./thread-driver.ts";
 import { POOL_BACKOFF_INITIAL_MS } from "./worker-pool.ts";
 import {
   serverInstanceName,
@@ -170,6 +170,10 @@ test(
     for (const item of items) {
       const root = join(f.stateDirectory, "workers", item.name!);
       assert.equal(statSync(root).mode & MODE_MASK, SLOT_ROOT_MODE);
+      assert.equal(
+        statSync(join(root, "tmp")).mode & MODE_MASK,
+        SLOT_ROOT_MODE,
+      );
       assert.ok(existsSync(join(root, "state", "kanthord", "kanthord.log")));
       assert.ok(existsSync(join(root, "stderr.log")));
       assert.ok(!existsSync(join(f.stateDirectory, "kanthord.log")));
@@ -463,6 +467,17 @@ test("the thread environment holds the allowlist and the slot directories only",
   assert.equal(env.XDG_DATA_HOME, `${SLOT_ROOT}/data`);
   assert.equal(env.XDG_CACHE_HOME, `${SLOT_ROOT}/cache`);
   assert.equal(threadEnvironment({}, SLOT_ROOT).PATH, undefined);
+});
+
+test("the launch environment sets TMPDIR to <slot root>/tmp over the thread environment and creates it with mode 0700", (t) => {
+  const root = temporary(t);
+  const source = { PATH: "/bin", TMPDIR: "/host/tmp" };
+  const env = launchEnvironment(source, root);
+  assert.deepEqual(env, {
+    ...threadEnvironment(source, root),
+    TMPDIR: join(root, "tmp"),
+  });
+  assert.equal(statSync(join(root, "tmp")).mode & MODE_MASK, SLOT_ROOT_MODE);
 });
 
 test(
