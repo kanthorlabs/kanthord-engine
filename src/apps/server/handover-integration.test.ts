@@ -118,7 +118,6 @@ const GENERAL_RESOURCE = "worker:kanthord:general";
 const AUTHORIZATION_REFUSED = "project.authorization.refused";
 const RSA_SHA2_256 = 2;
 const INVALID_REPORT = "custody.handover.report_invalid";
-const BODY_TOO_LARGE = "gateway.request.body_too_large";
 const COPILOT = "github-copilot";
 const LOGIN_COMPLETED = "completed";
 const LOGIN_PENDING = "pending";
@@ -1137,8 +1136,8 @@ for (const type of [SecretShape.ApiKey, SecretShape.OAuth] as const) {
         { params: {}, query: {}, body },
         { idempotencyKey: createIdempotencyKey() },
       ),
-      HttpStatus.PayloadTooLarge,
-      BODY_TOO_LARGE,
+      HttpStatus.BadRequest,
+      INVALID_REPORT,
     );
     assert.deepEqual(
       h.f.store.database.prepare("SELECT * FROM credential ORDER BY id").all(),
@@ -1763,7 +1762,7 @@ test("two concurrent first handovers of one attempt store one pin and both answe
   assert.deepEqual(answered, [pinned, pinned]);
 });
 
-test("HTTP handover enforces its byte limit before body parsing", async (t) => {
+test("HTTP handover accepts a body of 1025 bytes below the body limit", async (t) => {
   const h = await setup(t, "http");
   const response = await fetch(`${h.f.endpoint}/api/worker/handover`, {
     method: "POST",
@@ -1777,9 +1776,7 @@ test("HTTP handover enforces its byte limit before body parsing", async (t) => {
       " ",
     ),
   });
-  assert.equal(response.status, HttpStatus.PayloadTooLarge);
-  const body = (await response.json()) as { error: { code: string } };
-  assert.equal(body.error.code, BODY_TOO_LARGE);
+  assert.equal(response.status, HttpStatus.OK);
 });
 
 const REFRESH_WAIT_MS = 200;

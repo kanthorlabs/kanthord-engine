@@ -1,6 +1,5 @@
 import { z } from "zod";
 import {
-  CREATE_MAX_BODY_BYTES,
   CREDENTIAL_TIMEOUT_MS,
   credentialAnswerSchema,
   credentialCheckAnswerSchema,
@@ -14,7 +13,6 @@ import {
   credentialRotateBodySchema,
   credentialUpdateMetadataBodySchema,
   LIST_LIMIT_MAX,
-  METADATA_MAX_BODY_BYTES,
 } from "../custody/contract.ts";
 import type { Context } from "../kernel/context.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
@@ -137,12 +135,13 @@ export const hostKeyListAnswerSchema = z.strictObject({
 });
 export type HostKeyListAnswer = z.infer<typeof hostKeyListAnswerSchema>;
 const hostKeyParamsSchema = z.strictObject({ host: z.string().min(1) });
-const hostKeyScanBodySchema = z.strictObject({ host: z.string().min(1) });
+export const HOST_NAME_MAX_LENGTH = 253;
+const hostKeyScanBodySchema = z.strictObject({
+  host: z.string().min(1).max(HOST_NAME_MAX_LENGTH),
+});
 const hostKeyPinBodySchema = z.strictObject({
   fingerprint: z.string().regex(HOST_KEY_FINGERPRINT_PATTERN),
 });
-const HOST_KEY_MAX_BODY_BYTES = 1024;
-const SSH_KEY_MAX_BODY_BYTES = 1024;
 const sshKeyCreateBodySchema = z.strictObject({ name: z.string() });
 const sshKeyRotateBodySchema = z.strictObject({
   expected_revision: z.number().int().positive(),
@@ -180,7 +179,6 @@ export const repositoryOperations = {
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
     mutation: true,
     body: true,
-    maxBodyBytes: CREATE_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     input: z.strictObject({
       params: emptyParams,
@@ -243,7 +241,6 @@ export const repositoryOperations = {
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
     mutation: true,
     body: true,
-    maxBodyBytes: CREATE_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     input: z.strictObject({
       params: credentialParamsSchema,
@@ -264,7 +261,6 @@ export const repositoryOperations = {
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
     mutation: true,
     body: true,
-    maxBodyBytes: METADATA_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     input: z.strictObject({
       params: credentialParamsSchema,
@@ -325,7 +321,6 @@ export const repositoryOperations = {
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
     mutation: false,
     body: true,
-    maxBodyBytes: CREATE_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     input: z.strictObject({
       params: emptyParams,
@@ -367,7 +362,6 @@ export const repositoryOperations = {
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
     mutation: true,
     body: true,
-    maxBodyBytes: SSH_KEY_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     input: z.strictObject({
       params: emptyParams,
@@ -389,7 +383,6 @@ export const repositoryOperations = {
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
     mutation: true,
     body: true,
-    maxBodyBytes: SSH_KEY_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     input: z.strictObject({
       params: credentialParamsSchema,
@@ -431,7 +424,6 @@ export const repositoryOperations = {
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
     mutation: false,
     body: true,
-    maxBodyBytes: HOST_KEY_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     errors: [HOST_KEY_SCAN_FAILED_STATUS],
     input: z.strictObject({
@@ -453,7 +445,6 @@ export const repositoryOperations = {
     timeoutMs: CREDENTIAL_TIMEOUT_MS,
     mutation: true,
     body: true,
-    maxBodyBytes: HOST_KEY_MAX_BODY_BYTES,
     status: HttpStatus.OK,
     errors: [HOST_KEY_SCAN_FAILED_STATUS],
     input: z.strictObject({

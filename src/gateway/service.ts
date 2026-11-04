@@ -35,7 +35,6 @@ import type { Authentication } from "./auth/authentication.ts";
 import { GatewayError, respondError } from "./errors.ts";
 import type { Idempotency } from "./idempotency.ts";
 import type { Invocation } from "./invocation.ts";
-import { bodyLimitOf } from "./body-limit.ts";
 import { parseJSON } from "./json.ts";
 import { gatewayOperations, type InventoryCollector } from "./contract.ts";
 import { registerGatewayOperations } from "./declarations.ts";
@@ -44,6 +43,7 @@ import {
   hasHttpRoute,
   type Operation,
   OperationLifetime,
+  REQUEST_BODY_MAX_BYTES,
 } from "../kernel/operation.ts";
 import { isWorkerIdentity } from "../kernel/caller.ts";
 import { HttpMethod, HttpStatus, MediaType } from "../kernel/http.ts";
@@ -526,13 +526,12 @@ export class GatewayService implements Service {
       .sort((left, right) =>
         compareRouteSpecificity(left.operation.path, right.operation.path),
       )) {
-      const maxSize = bodyLimitOf(operation);
       this.app.on(
         operation.method,
         operation.path,
         timeout(operation.timeoutMs),
         bodyLimit({
-          maxSize,
+          maxSize: REQUEST_BODY_MAX_BYTES,
           onError: (context) =>
             respondError(
               new GatewayError(

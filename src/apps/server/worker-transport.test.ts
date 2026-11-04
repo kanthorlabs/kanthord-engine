@@ -11,14 +11,17 @@ import {
 } from "./test-support.ts";
 import { errorSchema } from "../../kernel/errors.ts";
 import { httpClient } from "../../gateway/client.ts";
-import { OperationResultType } from "../../kernel/operation.ts";
+import {
+  OperationResultType,
+  REQUEST_BODY_MAX_BYTES,
+} from "../../kernel/operation.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { workerOperations } from "../../worker/contract.ts";
 const ALLOWED_ORIGIN = "https://allowed.example";
 const ExpectedErrorCode = {
   RouteNotFound: "gateway.routing.not_found",
   HostNotAllowed: "gateway.http.host_not_allowed",
-  BodyTooLarge: "gateway.request.body_too_large",
+  Unauthorized: "gateway.authentication.unauthorized",
 } as const;
 test("real listener serves unversioned liveness, applies host/origin policy and uses one failure envelope", async (t) => {
   const fixture = await gatewayFixture(t);
@@ -113,7 +116,7 @@ test("real listener serves unversioned liveness, applies host/origin policy and 
   );
 });
 
-test("body limits cover declared sizes and streaming auth bodies; unexpected registration bodies are rejected", async (t) => {
+test("the body limit covers a declared size, a streamed register body below it reaches authentication, and unexpected registration bodies are rejected", async (t) => {
   const fixture = await gatewayFixture(t, {
     machines: fakeMachines({
       bindings: new Map([
@@ -135,7 +138,7 @@ test("body limits cover declared sizes and streaming auth bodies; unexpected reg
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Content-Length": 41 * 1024,
+          "Content-Length": REQUEST_BODY_MAX_BYTES + 1,
         },
       },
       (response) => {
@@ -147,22 +150,37 @@ test("body limits cover declared sizes and streaming auth bodies; unexpected reg
     request.end("x");
   });
   assert.equal(tooLarge, HttpStatus.PayloadTooLarge);
-  const body = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(new Uint8Array(41 * 1024));
-      controller.close();
+  const streamed = await new Promise<{ status: number; body: string }>(
+    (resolve, reject) => {
+      const request = httpRequest(
+        fixture.endpoint + "/api/worker/register",
+        {
+          method: "POST",
+          agent: false,
+          headers: {
+            "Content-Type": "application/json",
+            "Transfer-Encoding": "chunked",
+          },
+        },
+        (response) => {
+          const chunks: Buffer[] = [];
+          response.on("data", (chunk: Buffer) => chunks.push(chunk));
+          response.on("end", () =>
+            resolve({
+              status: response.statusCode!,
+              body: Buffer.concat(chunks).toString("utf8"),
+            }),
+          );
+        },
+      );
+      request.on("error", reject);
+      request.end(Buffer.alloc(41 * 1024));
     },
-  });
-  const streamed = await fixture.request("/api/worker/register", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body,
-    duplex: "half",
-  } as RequestInit);
-  assert.equal(streamed.status, HttpStatus.PayloadTooLarge);
+  );
+  assert.equal(streamed.status, HttpStatus.Unauthorized);
   assert.equal(
-    errorSchema.parse(await streamed.json()).error.code,
-    ExpectedErrorCode.BodyTooLarge,
+    errorSchema.parse(JSON.parse(streamed.body)).error.code,
+    ExpectedErrorCode.Unauthorized,
   );
   const duplicate = await fixture.request("/api/worker/register", {
     method: "POST",

@@ -12,6 +12,7 @@ import {
   emptyInput,
   type Operation,
   OperationRegistry,
+  REQUEST_BODY_MAX_BYTES,
   StoreName,
 } from "../kernel/operation.ts";
 import { createInvocation } from "./index.ts";
@@ -50,7 +51,6 @@ const HANDSHAKE_SEGMENT = "handshake";
 const HANDSHAKE_HEADER = "x-test-kind";
 const EMPTY_RESPONSE_BODY = "";
 const DELIVERY_SIGNATURE = "exact";
-const DELIVERY_BODY_LIMIT_BYTES = 50 * 1024 * 1024;
 const HOST_LIMIT = 255;
 const INFO_LEVEL = 30;
 const ERROR_LEVEL = 50;
@@ -502,7 +502,7 @@ test("timeout leaves a mutation in progress until its atomic commit, then replay
   assert.equal(count, SINGLE_EXECUTION_COUNT);
 });
 
-test("a delivery under /hooks forwards exact bytes and headers, refuses a body above 50 MiB, and the shutdown context closes an active stream", async (t) => {
+test("a delivery under /hooks forwards exact bytes and headers, refuses a body above the body limit, and the shutdown context closes an active stream", async (t) => {
   const registry = new OperationRegistry();
   const bytes = Buffer.from('{ "b" : 1,\r\n"a":2.0 }\n');
   let delivered = 0;
@@ -568,7 +568,7 @@ test("a delivery under /hooks forwards exact bytes and headers, refuses a body a
   const oversized = await fixture.request("/hooks/test", {
     method: "POST",
     headers: { "x-signature": DELIVERY_SIGNATURE, connection: "keep-alive" },
-    body: Buffer.alloc(DELIVERY_BODY_LIMIT_BYTES + 1),
+    body: Buffer.alloc(REQUEST_BODY_MAX_BYTES + 1),
   });
   assert.equal(oversized.status, HttpStatus.PayloadTooLarge);
   assert.equal(
@@ -592,6 +592,52 @@ test("a delivery under /hooks forwards exact bytes and headers, refuses a body a
     registry: 503,
     invocation: 503,
   });
+});
+
+test("every route kind passes a body at the body limit and refuses one byte more", async (t) => {
+  const registry = new OperationRegistry();
+  const routes = [
+    { id: "test.limit.human", path: "/api/limit/human", access: "human" },
+    { id: "test.limit.auth", path: "/api/auth/limit", access: "human" },
+    { id: "test.limit.client", path: "/api/limit/client", access: "client" },
+    { id: "test.limit.delivery", path: "/hooks/limit", access: "delivery" },
+  ] as const;
+  for (const route of routes)
+    registry.register(
+      {
+        ...protectedRead,
+        ...route,
+        method: "POST",
+        output: z.strictObject({ accepted: z.boolean() }),
+        ...(route.access === AccessPolicy.Delivery
+          ? { delivery: true as const }
+          : {}),
+      },
+      () => ({ accepted: true }),
+    );
+  const fixture = await gatewayFixture(t, { registry });
+  for (const route of routes) {
+    const accepted = await fixture.request(route.path, {
+      method: "POST",
+      body: Buffer.alloc(REQUEST_BODY_MAX_BYTES),
+    });
+    assert.equal(
+      accepted.status,
+      route.access === AccessPolicy.Delivery
+        ? HttpStatus.OK
+        : HttpStatus.Unauthorized,
+      route.path,
+    );
+    const refused = await fixture.request(route.path, {
+      method: "POST",
+      body: Buffer.alloc(REQUEST_BODY_MAX_BYTES + 1),
+    });
+    assert.equal(refused.status, HttpStatus.PayloadTooLarge, route.path);
+    assert.equal(
+      errorSchema.parse(await refused.json()).error.code,
+      ExpectedErrorCode.BodyTooLarge,
+    );
+  }
 });
 
 test("a delivery answers the Response of its handler, after a commit or without one", async (t) => {

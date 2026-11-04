@@ -130,12 +130,12 @@ and deregistration require no live registration.
 | I      | `join [--force]`                                                   | local                                                    | none                             | none; reads the instance configuration from standard input                        |
 
 `credential` runs inside the `worker` application alone and is no CLI command.
-Its implemented operation is `worker.credential` at `POST /api/worker/credential`, with `client` access and a live execution requirement. Its body holds `execution_id`, `nonce` and `ciphertext`, the sealed refresh report, and it answers 204 with no HTTP body (`null` through the direct adapter). It is a mutation with a 30-second timeout and a 64 KiB body limit. The worker application caller is later Plan 09 work.
-Custody's [serialized credential budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#serialized-credential-budget) limits normalized `api_key` and `oauth` canonical JSON to 48,914 UTF-8 bytes so the compact encrypted report fits. The worker reports once at release even without a refresh. An oversized decrypted credential answers HTTP 400 `custody.handover.report_invalid` without an update; an oversized HTTP body still answers Gateway's 413 before Custody validation.
+Its implemented operation is `worker.credential` at `POST /api/worker/credential`, with `client` access and a live execution requirement. Its body holds `execution_id`, `nonce` and `ciphertext`, the sealed refresh report, and it answers 204 with no HTTP body (`null` through the direct adapter). It is a mutation with a 30-second timeout and the 32 MiB body limit. The worker application caller is later Plan 09 work.
+Custody's [serialized credential budget](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#serialized-credential-budget) limits normalized `api_key` and `oauth` canonical JSON to 48,914 UTF-8 bytes so the compact encrypted report fits. The worker reports once at release even without a refresh. An oversized decrypted credential answers HTTP 400 `custody.handover.report_invalid` without an update; an HTTP body above the 32 MiB body limit answers Gateway's 413 before Custody validation.
 
 `worker.ssh.sign` runs inside the `worker` application alone and is no CLI command. It is the [SSH signature relay](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-ssh-signature-relay) of a repository binding whose SSH identity the handover does not carry.
 Its route is `POST /api/worker/ssh/sign`, with `client` access and a live execution requirement. Its body holds `execution_id`, `nonce` and `ciphertext`, the sealed `{ binding_id, data, flags }`. It answers 200 with `{ nonce, ciphertext }`, the sealed `{ signature }`.
-It is a secret mutation with a 30-second timeout and a 16 KiB body limit. A repeated idempotency key answers 409 with no answer, so a retry uses a new key.
+It is a secret mutation with a 30-second timeout and the 32 MiB body limit. A repeated idempotency key answers 409 with no answer, so a retry uses a new key.
 The server signs only a user authentication request with the user name `git` for the key of a repository binding of the node of the execution. A host-bound request must name the pinned host key.
 The relay serves only an execution whose instance is at the `worker` placement. Another placement answers 403 `worker.ssh.placement_refused`.
 
@@ -208,9 +208,9 @@ The [registration contract](https://github.com/kanthorlabs/kanthord/blob/main/do
 | `params`, `query`        | Empty objects                                                                  | No nominated subject, kind, binding, worker, project or runtime identity.                          |
 | `body`                   | Absent HTTP body; internal value `null`                                        | JSON `{}` is not an empty request body and is rejected. `--file` is not accepted.                  |
 
-The operation is a mutation, declares a `10,000 ms` timeout and a `40 KiB` body
-limit, and returns HTTP `200` with `{ "runtime_identity": "...", "resource_identity": "...", "worker_name": "..." }`. The body limit
-does not permit a registration payload. The runtime identity is `worker_registration_<ulid>`.
+The operation is a mutation, declares a `10,000 ms` timeout and the 32 MiB body
+limit, and returns HTTP `200` with `{ "runtime_identity": "...", "resource_identity": "...", "worker_name": "..." }`. The input
+holds no registration payload. The runtime identity is `worker_registration_<ulid>`.
 
 The CLI prints one JSON line with `runtime_identity`, `resource_identity`, `worker_name` and `idempotency_key`, saves no configuration and prints no token.
 Success exits with zero; failure exits with a non-zero status. Registration creates no client identity,
@@ -281,7 +281,7 @@ kanthord worker [--endpoint <url>] handover <execution-id> [--token <jwt>] [--id
 ```
 
 The command calls `POST /api/worker/handover`, operation `worker.handover`, with `client` access and the body `{ execution_id }`, which names the execution that the invocation chain proves. It is a secret mutation with `[M]`: a repeat of its key answers 409 without the envelope, and a lost answer takes a new key.
-The operation is implemented, requires a live execution and returns the strict AES-256-GCM envelope `{ nonce, ciphertext }` as canonical base64. It has a 30-second timeout and a 1 KiB body limit. Registration and execution proof precede replay lookup; the handler repeats execution liveness in its one write transaction before authorization, pinning and encryption.
+The operation is implemented, requires a live execution and returns the strict AES-256-GCM envelope `{ nonce, ciphertext }` as canonical base64. It has a 30-second timeout and the 32 MiB body limit. Registration and execution proof precede replay lookup; the handler repeats execution liveness in its one write transaction before authorization, pinning and encryption.
 In server and container placements, a handover of a credential revision with an [OAuth refresh](./llm.md#oauth-refresh) in flight waits until the refresh ends, and then hands over the new value. The wait ends 5 seconds before the 30-second timeout. When the refresh does not end in the wait, the handover pins nothing and answers 503 `worker.handover.refresh_in_flight`. The worker application retries the handover with a new key until the claim expires.
 
 The first handover of an attempt reads the base head of each repository binding that names an instruction file, with a 20 s deadline, and pins it as the prompt commit of the attempt. A failed or timed-out read answers [`422 project.bindings.repository.ssh_unreachable`](./project.md#error-codes), and a base branch that the remote does not hold answers [`422 project.bindings.repository.base_branch_absent`](./project.md#error-codes).
@@ -491,7 +491,7 @@ JWT. The shared mutation key applies. HTTP `200` returns
 The [deregistration contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#deregistration)
 declares `worker.registration.deregister` as a `client` mutation at
 `DELETE /api/worker/registration/:runtime_identity`, with `unary` lifetime,
-the default 30 s timeout and the default 10 MiB body limit. The explicit runtime
+the default 30 s timeout and the 32 MiB body limit. The explicit runtime
 identity prevents a delayed retry from ending a newer registration of the same
 client. The handler ends only the live registration whose runtime identity
 matches the path and whose client identity, binding and project match the caller.
@@ -543,7 +543,7 @@ JWT. The shared mutation key applies. HTTP `200` returns
 The [resume contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#resume-of-a-registration)
 declares `worker.registration.resume` as a `human` mutation at
 `POST /api/worker/registration/:runtime_identity/resume`, with `unary` lifetime, the
-default 30 s timeout and the default 10 MiB body limit. It reopens an ended
+default 30 s timeout and the 32 MiB body limit. It reopens an ended
 registration only while that registration is the claimant of a live execution,
 and it takes the slot through the Project instance-count collaboration in the
 same transaction. The next registration of the client identity answers that
@@ -792,7 +792,7 @@ Failure release and recovery remain **blocked** under [HANDOFF B9](https://githu
 
 The [MCP server contract](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#mcp-server)
 declares three `client` operations at `/api/worker/mcp`. Each requires a live
-registration, uses the operational store, a 10 MiB body limit and a 900 s timeout,
+registration, uses the operational store, the 32 MiB body limit and a 900 s timeout,
 and declares `mutation: false` under the [Gateway exemption](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/gateway-service.impl.md#idempotency-of-a-mutation).
 An MCP client carries no `Idempotency-Key`.
 

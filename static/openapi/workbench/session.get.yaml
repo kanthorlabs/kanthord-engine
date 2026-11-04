@@ -93,9 +93,11 @@ components:
             agent_provider:
               type: string
               minLength: 1
+              maxLength: 256
             model_identifier:
               type: string
               minLength: 1
+              maxLength: 256
             reasoning_effort:
               type: string
               enum:

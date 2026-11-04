@@ -23,6 +23,8 @@ import {
   CUSTODY_SERVICE_NAME,
   type CustodySuitabilityFn,
   type InboundsNamingFn,
+  S3_ACCESS_KEY_TEXT_MAX_LENGTH,
+  s3AccessKeySecretSchema,
   SecretShape,
   SERVER_HOLDER,
 } from "./contract.ts";
@@ -168,6 +170,52 @@ test("credential creation and rotation enforce the serialized budget before any 
     secret: maximum,
   }) as CredentialAnswer;
   assert.equal(rotated.revisions[0]?.revision, NEXT_REVISION);
+});
+
+test("an s3 field passes at its bound and one more character refuses on create and rotate", (t) => {
+  const f = fixture();
+  stopAfter(t, () => f.store.close());
+  const storage = inputs[3]!;
+  const bounded = "x".repeat(S3_ACCESS_KEY_TEXT_MAX_LENGTH);
+  for (const field of ["access_key_id", "secret_access_key"]) {
+    const oversized = { ...storage.secret, [field]: bounded + "x" };
+    fails(
+      () => f.create({ ...storage, name: "oversized", secret: oversized }),
+      HttpStatus.BadRequest,
+      INVALID_INPUT_CODE,
+    );
+    const name = `bounded-${field.replaceAll("_", "-")}`;
+    const created = f.create({
+      ...storage,
+      name,
+      secret: { ...storage.secret, [field]: bounded },
+    }) as CredentialAnswer;
+    fails(
+      () =>
+        f.rotate(created.name, {
+          expected_revision: FIRST_REVISION,
+          secret: oversized,
+        }),
+      HttpStatus.BadRequest,
+      INVALID_INPUT_CODE,
+    );
+    const rotated = f.rotate(created.name, {
+      expected_revision: FIRST_REVISION,
+      secret: { ...storage.secret, [field]: bounded },
+    }) as CredentialAnswer;
+    assert.equal(rotated.revisions[0]?.revision, NEXT_REVISION);
+  }
+});
+
+test("a stored s3 secret above the write bound still parses", () => {
+  const long = "x".repeat(S3_ACCESS_KEY_TEXT_MAX_LENGTH + 1);
+  assert.equal(
+    s3AccessKeySecretSchema.safeParse({
+      access_key_id: long,
+      secret_access_key: long,
+    }).success,
+    true,
+  );
 });
 
 const unusedExecutionDependencies = {

@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   apiKeySecretSchema,
+  CREDENTIAL_NAME_MAX_LENGTH,
   isNonblank,
   oauthSecretSchema,
   s3AccessKeySecretSchema,
 } from "./contract.ts";
 import {
-  CREDENTIAL_NAME_MAX_LENGTH,
   RESERVED_NAME_CHECK,
   RESERVED_NAME_LOGIN,
   RESERVED_NAME_PLATFORM,

@@ -8,6 +8,7 @@ import {
   StoreName,
 } from "../kernel/operation.ts";
 import { reasoningEffortSchema } from "../agent/contract.ts";
+import { COPY_REPORT_TEXT_MAX_LENGTH } from "../llm/contract.ts";
 
 export const WORKBENCH_SERVICE_NAME = "workbench";
 export const WORKBENCH_SESSION_PREFIX = "workbench_session";
@@ -15,8 +16,7 @@ export const WORKBENCH_DIRECTORY_NAME = "workbench";
 export const WORKBENCH_CONFIGURATION_ENTRY = "kanthord.workbench.configuration";
 export const WORKBENCH_TIMEOUT_MS = 30000;
 export const WORKBENCH_EVENTS_WAIT_MS = 25000;
-export const WORKBENCH_MAX_BODY_BYTES = 65536;
-export const WORKBENCH_MESSAGE_MAX_BODY_BYTES = 1048576;
+export const WORKBENCH_MESSAGE_MAX_LENGTH = 1048576;
 
 export const WorkbenchErrorCode = {
   Stopped: "workbench.lifecycle.stopped",
@@ -29,8 +29,8 @@ export const WorkbenchErrorCode = {
 } as const;
 
 export const workbenchConfigurationSchema = z.strictObject({
-  agent_provider: z.string().min(1),
-  model_identifier: z.string().min(1),
+  agent_provider: z.string().min(1).max(COPY_REPORT_TEXT_MAX_LENGTH),
+  model_identifier: z.string().min(1).max(COPY_REPORT_TEXT_MAX_LENGTH),
   reasoning_effort: reasoningEffortSchema,
 });
 export type WorkbenchConfiguration = z.infer<
@@ -116,7 +116,6 @@ const workbenchMutation = {
   ...workbenchOperation,
   mutation: true,
   body: true,
-  maxBodyBytes: WORKBENCH_MAX_BODY_BYTES,
 } as const;
 
 export const workbenchOperations = {
@@ -186,11 +185,12 @@ export const workbenchOperations = {
     method: HttpMethod.Post,
     path: "/api/workbench/session/:session_id/message",
     status: HttpStatus.Accepted,
-    maxBodyBytes: WORKBENCH_MESSAGE_MAX_BODY_BYTES,
     input: z.strictObject({
       params: sessionParams,
       query: emptyFields,
-      body: z.strictObject({ text: z.string().min(1) }),
+      body: z.strictObject({
+        text: z.string().min(1).max(WORKBENCH_MESSAGE_MAX_LENGTH),
+      }),
     }),
     output: sessionParams.extend({ run_active: z.literal(true) }),
     description:

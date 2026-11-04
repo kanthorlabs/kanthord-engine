@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   credentialPlatformList,
-  s3AccessKeySecretSchema,
+  s3AccessKeyWriteSchema,
   secretSchemas,
   SecretShape,
 } from "../custody/contract.ts";
@@ -28,7 +28,7 @@ test("the platform list holds s3 alone with its secret shape and metadata fields
   });
   assert.equal(
     secretSchemas[STORAGE_PLATFORMS.s3.secret_shape],
-    s3AccessKeySecretSchema,
+    s3AccessKeyWriteSchema,
   );
   assert.equal(STORAGE_PLATFORMS.s3.metadata_schema, s3MetadataSchema);
 });

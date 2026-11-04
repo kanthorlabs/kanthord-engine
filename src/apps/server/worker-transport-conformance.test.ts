@@ -6,7 +6,11 @@ import pino from "pino";
 import { servePort } from "../../gateway/index.ts";
 import { intakeOperations } from "../../intake/contract.ts";
 import { CancellationContext } from "../../kernel/context.ts";
-import type { ClientOptions, Operation } from "../../kernel/operation.ts";
+import {
+  type ClientOptions,
+  type Operation,
+  REQUEST_BODY_MAX_BYTES,
+} from "../../kernel/operation.ts";
 import { isObject, isString } from "../../kernel/values.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { missionOperations } from "../../mission/contract.ts";
@@ -512,7 +516,7 @@ async function run(t: TestContext, side: Side, scenario: Scenario) {
     side.raw("a", handover, {
       body: JSON.stringify({
         execution_id: "x".repeat(
-          (handover.maxBodyBytes ?? 0) + OVERSIZED_BODY_PADDING,
+          REQUEST_BODY_MAX_BYTES + OVERSIZED_BODY_PADDING,
         ),
       }),
     }),
