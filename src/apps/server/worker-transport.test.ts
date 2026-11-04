@@ -150,21 +150,36 @@ test("the body limit covers a declared size, a streamed register body below it r
     request.end("x");
   });
   assert.equal(tooLarge, HttpStatus.PayloadTooLarge);
-  const body = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(new Uint8Array(41 * 1024));
-      controller.close();
+  const streamed = await new Promise<{ status: number; body: string }>(
+    (resolve, reject) => {
+      const request = httpRequest(
+        fixture.endpoint + "/api/worker/register",
+        {
+          method: "POST",
+          agent: false,
+          headers: {
+            "Content-Type": "application/json",
+            "Transfer-Encoding": "chunked",
+          },
+        },
+        (response) => {
+          const chunks: Buffer[] = [];
+          response.on("data", (chunk: Buffer) => chunks.push(chunk));
+          response.on("end", () =>
+            resolve({
+              status: response.statusCode!,
+              body: Buffer.concat(chunks).toString("utf8"),
+            }),
+          );
+        },
+      );
+      request.on("error", reject);
+      request.end(Buffer.alloc(41 * 1024));
     },
-  });
-  const streamed = await fixture.request("/api/worker/register", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body,
-    duplex: "half",
-  } as RequestInit);
+  );
   assert.equal(streamed.status, HttpStatus.Unauthorized);
   assert.equal(
-    errorSchema.parse(await streamed.json()).error.code,
+    errorSchema.parse(JSON.parse(streamed.body)).error.code,
     ExpectedErrorCode.Unauthorized,
   );
   const duplicate = await fixture.request("/api/worker/register", {
