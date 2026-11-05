@@ -97,13 +97,6 @@ In the table, `\|` is the Markdown escape of `|`. Type `|` in the command.
 
 - O1 — Must every `worker` instance name a machine? RULED 2026-11-05 by Ulrich: yes. The machine is required at the `worker` placement (decision D3).
 - O2 — Does the refresh lease apply to every OAuth copy? RULED 2026-11-05 by Ulrich: yes, at every placement (decision D14).
-
-## Open rulings
-
-Aelita brings the open ruling to Ulrich as one item. The plans use the recommendation until Ulrich rules.
-
-- O3 — Can an instance take a new own copy after the archive of its override?
-  - Recommendation: no, the archive stays final (decision D12). The `(name, instance)` group stays taken. The instance uses the machine copy of that name for good.
-  - Alternative A: an archive of an instance copy whose instance has a machine frees the group. A later own copy continues at the next revision. The override stays reversible, but one case breaks the rule "An archive is final" (`custody.md:50`).
+- O3 — Can an instance take a new own copy after the archive of its override? RULED 2026-11-05 by Ulrich: no. The archive stays final (decision D12).
 
 The decisions that this set takes are in [decisions.md](decisions.md).

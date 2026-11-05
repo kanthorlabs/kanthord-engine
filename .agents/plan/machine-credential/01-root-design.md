@@ -8,7 +8,7 @@ Out of scope:
 
 - Every engine file, every apps file and every e2e script. Plans 02 to 08b change them.
 - The root `AGENTS.md` e2e text. Plans 08a and 08b change it with the scripts that it describes.
-- `docs/brainstorm/HANDOFF.md`. The decisions of this set carry no open item, except the open ruling O3.
+- `docs/brainstorm/HANDOFF.md`. The decisions of this set carry no open item.
 
 ## Model
 
@@ -169,9 +169,9 @@ Each task edits the pages that it names. A task writes the decision and its cons
   1. Run the gate row 01 of `00-index.md`.
   2. Grep the edited pages for `instance holder` and `instance copy`. Each hit that now means "instance or machine" names the holder kind that it means.
   3. Grep the edited pages for `host`. Each hit keeps the meaning of `worker-service.vocabulary.md:20-29` or names a container host kind.
-  4. Commit with `docs: design the worker machine and the shared credential copy`. Push the branch and open a pull request to root `main`. Name the open ruling O3 in the pull request body.
+  4. Commit with `docs: design the worker machine and the shared credential copy`. Push the branch and open a pull request to root `main`.
 - Verify: every command of the row exits 0. Ulrich approves the pull request before plans 02 and 05 start.
 
 ## Blockers
 
-None. A ruling of O3 can change the text of task 01.2 and of D12. Apply it before the approval.
+None.

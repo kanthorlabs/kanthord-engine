@@ -1,6 +1,6 @@
 # Machine credential plan decisions
 
-The plans cite these decisions as D1 to D16. Each decision binds every plan and every task of this set. Ulrich ruled O1 and O2. O3 stays open, and the decisions use its recommendation.
+The plans cite these decisions as D1 to D16. Each decision binds every plan and every task of this set. Ulrich ruled O1, O2 and O3.
 
 ## D1 — Source and gaps
 
@@ -126,7 +126,7 @@ The machine configuration is `{ name, private_key }`. Its value is the unpadded 
 - A human gives one instance its own credential: a login or a create of the same name, with the instance as holder.
 - The own copy wins while its group holds a live revision.
 - A stale own copy, sealed to an ended key of the instance, does not fall back to the machine copy. The handover refuses it, and `holder_mismatch` shows it.
-- An archive of the own copy returns the instance to the machine copy. The archive stays final, so the instance takes no new own copy of that name (open ruling O3).
+- An archive of the own copy returns the instance to the machine copy. The archive stays final, so the instance takes no new own copy of that name (ruling O3, RULED 2026-11-05 by Ulrich).
 
 ## D13 — The Mission Service and the handover
 
