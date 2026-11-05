@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { randomBytes } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { test } from "node:test";
-import { getHeapStatistics } from "node:v8";
+import { beforeEach, test } from "node:test";
+import { getHeapStatistics, setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import {
   findKnownText,
   findPatternText,
@@ -28,12 +28,17 @@ import {
   GO_DSN_REVISION_2,
   MiB,
   scanRows,
+  seededText,
   wholeScan,
 } from "./sensitive-text-test-support.ts";
 
 const j = (...parts: string[]) => parts.join("");
+let { bytes } = seededText();
+beforeEach(() => {
+  ({ bytes } = seededText());
+});
 const pick = (alphabet: string, n: number) =>
-  [...randomBytes(n)].map((byte) => alphabet[byte % alphabet.length]).join("");
+  [...bytes(n)].map((byte) => alphabet[byte % alphabet.length]).join("");
 const UP = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const LO = "abcdefghijklmnopqrstuvwxyz";
 const DG = "0123456789";
@@ -1250,9 +1255,10 @@ test("rule 5 is anchored at the DSN literal and keeps every finding of the revis
   assert.equal(only(j("us$:", password, "@unix(/tmp/s)")).value, password);
   assert.equal(only(j("us<:", password, "@tcp(db)")).value, password);
   const dense = j("a:".repeat(25 * 1024), "@tcp(h)");
-  const started = performance.now();
-  assert.equal(findPatternText(dense).length, ONE_SPAN);
-  assert.ok(performance.now() - started < CI_ROW_LIMIT_MS);
+  const cost = cpuMs(() =>
+    assert.equal(findPatternText(dense).length, ONE_SPAN),
+  );
+  assert.ok(cost < CI_ROW_LIMIT_MS);
   const alphabet = [
     "a",
     "b",
@@ -1308,6 +1314,14 @@ test("rule 5 is anchored at the DSN literal and keeps every finding of the revis
 const DIFFERENTIAL_MIN_FINDINGS = 1000;
 const DIFFERENTIAL_TRIALS = 200000;
 const CI_ROW_LIMIT_MS = 600;
+const MICROSECONDS_PER_MS = 1000;
+
+function cpuMs(run: () => unknown) {
+  const before = process.threadCpuUsage();
+  run();
+  const used = process.threadCpuUsage(before);
+  return (used.user + used.system) / MICROSECONDS_PER_MS;
+}
 
 test("overlapping spans merge, and the lowest rule number wins", () => {
   const value = an(16);
@@ -1567,12 +1581,12 @@ const GROUP_VALUES = 9;
 
 test("the matcher holds at most 32 nodes for each value and keeps its heap bound", () => {
   const values = Array.from({ length: 4096 }, () => u(128));
-  const before = getHeapStatistics().used_heap_size;
+  const before = retainedHeap();
   const matcher = knownMatcher();
   for (const value of values)
     matcher.add({ value, rule: SensitiveRule.QuotedAssignment });
   const nodes = matcherNodes(matcher);
-  const growth = getHeapStatistics().used_heap_size - before;
+  const growth = retainedHeap() - before;
   assert.ok(nodes <= values.length * 32 + 1);
   assert.ok(growth < MATCHER_HEAP_LIMIT_BYTES, String(growth));
   const groups = knownMatcher();
@@ -1584,11 +1598,18 @@ test("the matcher holds at most 32 nodes for each value and keeps its heap bound
         rule: SensitiveRule.QuotedAssignment,
       });
   }
-  const started = performance.now();
-  assert.ok(matcherNodes(groups) <= SHARED_GROUPS * GROUP_VALUES * 32 + 1);
-  assert.ok(performance.now() - started < CI_ROW_LIMIT_MS);
+  const cost = cpuMs(() =>
+    assert.ok(matcherNodes(groups) <= SHARED_GROUPS * GROUP_VALUES * 32 + 1),
+  );
+  assert.ok(cost < CI_ROW_LIMIT_MS);
 });
 const MATCHER_HEAP_LIMIT_BYTES = 64 * 1024 * 1024;
+
+function retainedHeap() {
+  setFlagsFromString("--expose-gc");
+  (runInNewContext("gc") as () => void)();
+  return getHeapStatistics().used_heap_size;
+}
 
 test("a string above the scan limit becomes a scan failure", () => {
   const huge = "a".repeat(SENSITIVE_SCAN_MAX_CHARACTERS + 1);
@@ -1662,14 +1683,8 @@ test("redactValue keeps structural keys and session markers and masks each findi
 test("every whole-scan row stays below the CI limit", () => {
   const code = readCode();
   for (const row of scanRows(code)) {
-    const run = row.prepare();
-    const started = performance.now();
-    run();
-    const elapsed = performance.now() - started;
-    assert.ok(
-      elapsed < CI_ROW_LIMIT_MS,
-      `${row.name}: ${elapsed.toFixed(1)} ms`,
-    );
+    const cost = cpuMs(row.prepare());
+    assert.ok(cost < CI_ROW_LIMIT_MS, `${row.name}: ${cost.toFixed(1)} ms`);
   }
 });
 

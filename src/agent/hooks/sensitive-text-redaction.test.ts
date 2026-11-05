@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { randomBytes } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test, type TestContext } from "node:test";
+import { beforeEach, test, type TestContext } from "node:test";
 import {
   fauxAssistantMessage,
   type FauxResponseStep,
@@ -31,6 +30,7 @@ import {
   sessionMarker,
   tracerMarker,
 } from "../sensitive-text.ts";
+import { seededText } from "../sensitive-text-test-support.ts";
 import { scriptedProvider } from "../test-support.ts";
 import { checkoutConfinement } from "./checkout-confinement.ts";
 import { toolApproval } from "./tool-approval.ts";
@@ -46,8 +46,12 @@ import {
 
 const j = (...parts: string[]) => parts.join("");
 const AN = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+let { bytes } = seededText();
+beforeEach(() => {
+  ({ bytes } = seededText());
+});
 const an = (n: number) =>
-  [...randomBytes(n)].map((byte) => AN[byte % AN.length]).join("");
+  [...bytes(n)].map((byte) => AN[byte % AN.length]).join("");
 const PASS = j("pass", "word");
 const providerKey = () => j("sk", "-ant-api03-", an(93));
 const SESSION_ID = "session-1";
