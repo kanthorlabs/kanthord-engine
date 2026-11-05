@@ -27,7 +27,7 @@ export const CACHE_PROJECT_LABEL = "io.kanthord.cache_project";
 export const CACHE_RESOURCE_LABEL = "io.kanthord.cache_resource";
 export const CONTAINER_SESSIONS_DIRECTORY = "sessions";
 export const SESSION_MOUNT = "/var/lib/kanthord/state/kanthord/pi/sessions";
-export const PODMAN_MIN_VERSION = "6.0.0";
+export const PODMAN_MIN_VERSION = "5.7.0";
 const ID_MAP_KEY = "io.kanthord.id_map";
 const ID_MAP_VALUE = "auto";
 export const ID_MAP_LABEL = `${ID_MAP_KEY}=${ID_MAP_VALUE}`;
