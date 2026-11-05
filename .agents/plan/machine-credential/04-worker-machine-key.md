@@ -100,8 +100,9 @@ Plan 03 merged. Plan 05 merges before plan 03. Start from `origin/main` of `kant
   2. In `heartbeat` (`:443-458`), read `machine` of each answer. A null `machine` opens the gate.
   3. For a `machine` value, call `copyKeys.of(machine)`. A key opens the gate. A null answer closes the gate.
   4. When the gate closes, log `worker.machine.config_absent` with the machine name once. Log again only after the gate opened in between.
-  5. In `src/apps/worker/unit.ts:473-489`, pass the gate to each `pullLoop`. In `src/apps/worker/pull-loop.ts`, read the gate before each claim. A closed gate sends no claim and waits for the next read.
-  6. Keep the read at each use. Cache no machine key.
+  5. In `src/apps/worker/unit.ts:473-489`, pass the gate to each `pullLoop`. The gate is an optional unit option. An absent gate is open, and `src/apps/worker/thread.ts:35` passes no gate.
+  6. In `src/apps/worker/pull-loop.ts`, read the gate before each claim. A closed gate sends no claim and waits for the next read.
+  7. Keep the read at each use. Cache no machine key.
 - Cite: D5.
 - Verify: `PATH="$(node scripts/test-path.mjs)" node --test --test-timeout=60000 src/apps/worker/pull-loop.test.ts src/apps/worker/index.test.ts` passes.
 

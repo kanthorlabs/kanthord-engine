@@ -59,7 +59,7 @@ The approval of the root pull request of plan 01. Start from `origin/main` of `k
   9. In `instances.test.ts`, add tests for `machine` of `worker.instance.create`. Each case answers 400 `worker.instance.machine_invalid`: an absent machine at the `worker` placement, an unknown machine, an archived machine, and a machine at the `server` placement.
   10. A valid machine gives the record `machine`. A create of a name that a machine holds answers 409 `worker.instance.name_conflict`.
   11. Add a test that the heartbeat answer of a `worker` instance holds `machine`.
-  12. Add `machine` to every `worker` create of the current tests. Create one machine in the fixture for it.
+  12. Add `machine` to every `worker` create of the current tests. Create one machine in the fixture for it. Change the helpers `createInstances` (`src/apps/server/test-support.ts:2416-2431`) and `createInstancesByCli` (`:2433-2450`), and the worker placement case of `src/apps/server/cli-worker.test.ts:565-577`.
   13. In `machine-config.test.ts`, copy the tests of `instance-config.test.ts`. Cover the env source, the file source, the conflict, the absence with its paths, an invalid value and a file name mismatch.
   14. In `cli-worker.test.ts`, add a test of `worker machine create --output`, `worker machine join` and `worker instance create --placement worker --machine <name>`.
 - Verify: `PATH="$(node scripts/test-path.mjs)" node --test --test-timeout=60000 src/worker/machines.test.ts src/worker/instances.test.ts src/apps/worker/machine-config.test.ts` fails on the new tests only.
