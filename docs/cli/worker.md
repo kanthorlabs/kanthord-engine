@@ -407,10 +407,10 @@ other fields. `container` answers the runtime check of the server:
 | `runtime_failed`      | The runtime does not answer, or it fails a check. `detail` states why and names the host action of a failed check. |
 | `runtime_rootful`     | The host is Linux, the runtime is rootful and the server user is not root. Docker Desktop is exempt.               |
 
-The `container` placement on Podman requires Podman 6.0.0 or later, rootless or
+The `container` placement on Podman requires Podman 5.7.0 or later, rootless or
 rootful, on every platform. The check reads `version.Version` of `podman info`,
 the version of the Podman service. On macOS that is the Podman machine. A
-pre-release of 6.0.0, for example `6.0.0-dev`, is below 6.0.0.
+pre-release of 5.7.0, for example `5.7.0-dev`, is below 5.7.0.
 
 The server reuses the newest runtime answer for 10 s.
 `runtime_failed` has two kinds. A runtime that does not answer is transient: a
@@ -418,7 +418,7 @@ stopped Podman machine, Docker `ServerErrors`, a nonzero `info` exit, or a Podma
 answer with no `host`. A failed check stays until a human changes the host: the
 uid 10001 cover check, a Docker client below 23, a Docker answer with no server
 version (the `podman-docker` shim), rootless Docker on Linux and a Podman below
-`PODMAN_MIN_VERSION` (6.0.0). The pool host retries with a
+`PODMAN_MIN_VERSION` (5.7.0). The pool host retries with a
 backoff in both cases. The other reasons stay until a human changes the host.
 [`project binding apply`](./project.md#binding-resource-and-complete-set-edits)
 refuses a new `container` binding for the three stable reasons only.
@@ -776,7 +776,7 @@ The steps method writes the failed checks into one text that starts with `The pu
 
 `worker.slot_image.delete` is an API-only `human_or_service` mutation at `POST /api/worker/slot-image/delete` with the body `{ references, requested_by? }`. `references` holds 1 to 20 image references of the repository of `worker.container_image`. The Footprint Service calls it for a human cleanup of the `slot_image` kind, see [footprint.md](footprint.md). The operation removes each image reference and answers 200 with `{ removed, absent, refused: [{ key, reason }] }`. A reference that is gone counts in `absent`. The configured image of the running version and an image that a container uses count in `refused` with the reason `live`. The route accepts a human JWT. The direct adapter accepts a human identity or the `footprint` service identity, and every other service identity answers `403 gateway.access.service_refused`. A human caller with `requested_by`, or a service caller without it, answers `400 gateway.request.validation_failed` with the field `requested_by`. Each call writes one log record with the account of the requester and the three counts.
 
-The Worker Service measures the `slot_image` kind from `docker system df --verbose --format json` at Docker. At Podman, it takes the full image id, the references, the creation time and the container count of each image from `podman image ls --all --format json`. It takes the unique size of each image from the `podman system df --verbose` table, because no JSON answer of Podman 6 holds it. The table shows a size with 4 significant digits, so the unique size has an error of at most 0.05 percent. An image that only one of the two reads holds does not count. A table line or an image entry of unknown form fails the measure with `worker.footprint.runtime_unmeasured`. It measures the `disk` of the container runtime store from `<runtime> info --format json`. It reads the store only while a `container` placement instance exists. At Podman, `total_bytes` is `GraphRootAllocated` and `free_bytes` is `GraphRootAllocated - GraphRootUsed`. At Docker, the Worker Service applies `statfs` to `DockerRootDir` only when the server runs on Linux and `OperatingSystem` is other than `Docker Desktop`. Else the store answers the measure error `runtime_store_unmeasured`. The device key is the device number of the store directory on the server host, else `container_runtime`.
+The Worker Service measures the `slot_image` kind from `docker system df --verbose --format json` at Docker. At Podman, it takes the full image id, the references, the creation time and the container count of each image from `podman image ls --all --format json`. The references are the names in `Names` that have a tag, without the digest. It takes the unique size of each image from the `podman system df --verbose` table, because no JSON answer of Podman 5.7 and later holds it. The table shows a size with 4 significant digits, so the unique size has an error of at most 0.05 percent. An image that only one of the two reads holds does not count. A table line or an image entry of unknown form fails the measure with `worker.footprint.runtime_unmeasured`. It measures the `disk` of the container runtime store from `<runtime> info --format json`. It reads the store only while a `container` placement instance exists. At Podman, `total_bytes` is `GraphRootAllocated` and `free_bytes` is `GraphRootAllocated - GraphRootUsed`. At Docker, the Worker Service applies `statfs` to `DockerRootDir` only when the server runs on Linux and `OperatingSystem` is other than `Docker Desktop`. Else the store answers the measure error `runtime_store_unmeasured`. The device key is the device number of the store directory on the server host, else `container_runtime`.
 
 ### Instance footprint outside the CLI inventory
 

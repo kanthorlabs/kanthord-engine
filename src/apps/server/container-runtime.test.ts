@@ -1097,13 +1097,13 @@ test("detectRuntime answers the facts of an available runtime and no facts other
 
 test("a rootless Podman below the minimum version answers runtime_failed with the version detail", async () => {
   const { host } = fakeHost({
-    answers: { podman: answer(podmanInfo(true, ROOTLESS_MAP, "5.4.2")) },
+    answers: { podman: answer(podmanInfo(true, ROOTLESS_MAP, "5.6.3")) },
   });
   assert.deepEqual(await detectRuntime(host), {
     status: expected(
       PlacementIssue.RuntimeFailed,
       ContainerRuntime.Podman,
-      "podman 5.4.2 is below the required version 6.0.0. Upgrade Podman to 6.0.0 or later.",
+      "podman 5.6.3 is below the required version 5.7.0. Upgrade Podman to 5.7.0 or later.",
     ),
     facts: null,
   });
@@ -1112,14 +1112,14 @@ test("a rootless Podman below the minimum version answers runtime_failed with th
 test("a rootful Podman below the minimum version with server uid 0 answers runtime_failed with the version detail", async () => {
   const { host } = fakeHost({
     uid: ROOT_UID,
-    answers: { podman: answer(podmanInfo(false, [], "5.4.2")) },
+    answers: { podman: answer(podmanInfo(false, [], "5.6.3")) },
   });
   assert.deepEqual(
     (await detectRuntime(host)).status,
     expected(
       PlacementIssue.RuntimeFailed,
       ContainerRuntime.Podman,
-      "podman 5.4.2 is below the required version 6.0.0. Upgrade Podman to 6.0.0 or later.",
+      "podman 5.6.3 is below the required version 5.7.0. Upgrade Podman to 5.7.0 or later.",
     ),
   );
 });
@@ -1133,7 +1133,7 @@ test("a Podman with no version answers runtime_failed with the unknown version d
     expected(
       PlacementIssue.RuntimeFailed,
       ContainerRuntime.Podman,
-      "podman unknown is below the required version 6.0.0. Upgrade Podman to 6.0.0 or later.",
+      "podman unknown is below the required version 5.7.0. Upgrade Podman to 5.7.0 or later.",
     ),
   );
 });
@@ -1151,12 +1151,13 @@ test("a Podman at or above the minimum version answers available", async () => {
 });
 
 test("versionBelow compares the Podman minimum version", () => {
-  assert.equal(versionBelow("5.4.2", PODMAN_MIN_VERSION), true);
+  assert.equal(versionBelow("5.6.3", PODMAN_MIN_VERSION), true);
+  assert.equal(versionBelow("4.9.3", PODMAN_MIN_VERSION), true);
   assert.equal(versionBelow(PODMAN_MIN_VERSION, PODMAN_MIN_VERSION), false);
   assert.equal(versionBelow("6.1.3", PODMAN_MIN_VERSION), false);
-  assert.equal(versionBelow("6.0.0-dev", PODMAN_MIN_VERSION), true);
-  assert.equal(versionBelow("6.0.0-rc1", PODMAN_MIN_VERSION), true);
-  assert.equal(versionBelow("6.1.0-dev", PODMAN_MIN_VERSION), false);
+  assert.equal(versionBelow("5.7.0-dev", PODMAN_MIN_VERSION), true);
+  assert.equal(versionBelow("5.7.0-rc1", PODMAN_MIN_VERSION), true);
+  assert.equal(versionBelow("5.8.0-dev", PODMAN_MIN_VERSION), false);
   assert.equal(versionBelow("unknown", PODMAN_MIN_VERSION), true);
 });
 
@@ -1257,13 +1258,14 @@ test("parseSystemUsage reads the Docker verbose answer: one image for each id, i
 
 function podmanFixture(name: string): string {
   return readFileSync(
-    join(import.meta.dirname, "__fixtures__", "podman-6", name),
+    join(import.meta.dirname, "__fixtures__", "podman", name),
     "utf8",
   );
 }
 
 const PODMAN_SYSTEM_DF = podmanFixture("system-df-verbose.txt");
-const PODMAN_IMAGE_LIST = podmanFixture("image-ls-all.json");
+const PODMAN_IMAGE_LIST = podmanFixture("image-ls-all-6.1.3.json");
+const PODMAN_5_IMAGE_LIST = podmanFixture("image-ls-all-5.7.0.json");
 const REFUSED_CODE = 1;
 const BASE_PATH_ID =
   "sha256:59099780447be540a85daa4ad5248be3b941c28b750f054e16cdd5c978683b74";
@@ -1271,8 +1273,8 @@ const PODMAN_IMAGES: [string, string[], number, number, number][] = [
   [
     "59099780447be540a85daa4ad5248be3b941c28b750f054e16cdd5c978683b74",
     [
-      "localhost/kanthord-base-path:28.0.1",
       "localhost/kanthord-base-path:latest",
+      "localhost/kanthord-base-path:28.0.1",
     ],
     1791888738,
     4638,
@@ -1363,6 +1365,34 @@ test("parsePodmanUsage reads the Podman 6.1.3 verbose table and takes the id, re
   );
 });
 
+test("parsePodmanUsage reads the Podman 5.7.0 image list that holds no repository and no tag", () => {
+  assert.deepEqual(
+    parsePodmanUsage(PODMAN_SYSTEM_DF, PODMAN_5_IMAGE_LIST),
+    PODMAN_USAGE,
+  );
+});
+
+test("parsePodmanUsage takes the tagged names as references and drops the digest", () => {
+  const listed = JSON.parse(PODMAN_IMAGE_LIST) as { Id: string }[];
+  const named = listed.map((image) =>
+    `sha256:${image.Id}` === BASE_PATH_ID
+      ? {
+          ...image,
+          Names: [
+            "localhost:5000/kanthord-base-path",
+            "localhost:5000/kanthord-base-path@sha256:" + "a".repeat(64),
+            "localhost:5000/kanthord-base-path:28.0.1@sha256:" + "b".repeat(64),
+          ],
+        }
+      : image,
+  );
+  const usage = parsePodmanUsage(PODMAN_SYSTEM_DF, JSON.stringify(named));
+  assert.deepEqual(
+    usage.images.find((image) => image.id === BASE_PATH_ID)?.references,
+    ["localhost:5000/kanthord-base-path:28.0.1"],
+  );
+});
+
 test("parsePodmanUsage skips an image that only one of the two reads holds", () => {
   const listed = JSON.parse(PODMAN_IMAGE_LIST) as { Id: string }[];
   const kept = listed.filter((image) => `sha256:${image.Id}` !== BASE_PATH_ID);
@@ -1397,6 +1427,14 @@ test("parsePodmanUsage refuses an unknown table line or image entry and answers 
   assert.throws(() =>
     parsePodmanUsage(PODMAN_SYSTEM_DF, JSON.stringify([{ Id: "x" }])),
   );
+  const listed = JSON.parse(PODMAN_IMAGE_LIST) as object[];
+  for (const Names of ["localhost/a:1", [""], [1]])
+    assert.throws(() =>
+      parsePodmanUsage(
+        PODMAN_SYSTEM_DF,
+        JSON.stringify([{ ...listed[0], Names }]),
+      ),
+    );
 });
 
 test("parsePodmanUsage reads a volume named like a table header as a volume", () => {
