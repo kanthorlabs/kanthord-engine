@@ -105,33 +105,38 @@ The approval of the root pull request of plan 01. Start from `origin/main` of `k
   1. Copy the source rules of `src/apps/worker/instance-config.ts` for the machine configuration. Use the variable `KANTHORD_MACHINE_CONFIG` and the file `machines/<name>.yaml`.
   2. The file has mode `0600` in a directory with mode `0700`.
   3. Export `readMachineConfiguration(env, name)`. It answers `worker.machine.config_absent`, `worker.machine.config_conflict` or `worker.machine.config_invalid` by decision D5.
-  4. Export `writeMachineFile(env, configuration, force)`.
-  5. Add `KANTHORD_MACHINE_CONFIG` to the removed names of `childEnvironment` (`src/agent/environment.ts:15-30`). Add one assertion to its test.
+  4. Check `name` with `instanceNameSchema` before the function builds a path. A name that breaks it answers `worker.machine.config_invalid`.
+  5. Export `writeMachineFile(env, configuration, force)`.
+  6. Add `KANTHORD_MACHINE_CONFIG` to the removed names of `childEnvironment` (`src/agent/environment.ts:15-30`). Add one assertion to its test.
 - Cite: D5.
 - Verify: `PATH="$(node scripts/test-path.mjs)" node --test --test-timeout=60000 src/apps/worker/machine-config.test.ts src/agent/environment.test.ts` passes.
 
 ### 02.5 Add the CLI commands
 
-- Files: `src/apps/cli/worker-machine.ts` (new), `src/apps/cli/worker.ts`, `src/apps/cli/worker-instance.ts` (edit)
+- Files: `src/apps/cli/worker-machine.ts` (new), `src/apps/cli/worker.ts`, `src/apps/cli/worker-instance.ts`, `src/apps/cli/completeness.test.ts` (edit)
 - Do:
   1. Copy the commands of `worker-instance.ts` for `worker machine create <name> [--output] [--force]`, `list` and `get <name>`.
   2. Add `rotate <name> --expected-revision <n> [--output] [--force]`, `archive <name> --expected-revision <n>` and `join [--force]`.
   3. `create` and `rotate` generate the key pair on the computer that runs the CLI. They send only `public_key`.
-  4. With `--output`, they write the machine file through `writeMachineFile`. Without it, they print `machine_configuration`.
-  5. Register the group in `src/apps/cli/worker.ts:452`, beside `addWorkerInstanceCommands`.
-  6. Add `--machine <name>` to `worker instance create` and send it as `machine`.
+  4. With `--output`, they write the machine file through `writeMachineFile`. Without it, they print the answer JSON with `machine_configuration`.
+  5. Like `instance create`, they refuse a standard output that is no terminal (`src/apps/cli/worker-instance.ts:143`). `join` reads one configuration value from standard input.
+  6. Register the group in `src/apps/cli/worker.ts:452`, beside `addWorkerInstanceCommands`.
+  7. Add `--machine <name>` to `worker instance create` and send it as `machine`.
+  8. In `src/apps/cli/completeness.test.ts:118-148`, raise `PAGE_COUNTS.worker`, `DOCUMENTED_COUNT`, `IMPLEMENTED_COUNT` and `OPERATION_COUNT` by the added commands and operations.
 - Cite: D2, D5, D15.
 - Verify: `PATH="$(node scripts/test-path.mjs)" node --test --test-timeout=60000 src/apps/server/cli-worker.test.ts src/apps/cli/completeness.test.ts` passes.
 
 ### 02.6 Update the CLI page
 
-- Files: `docs/cli/worker.md` (edit)
+- Files: `docs/cli/worker.md`, `docs/cli/other.md` (edit)
 - Do:
-  1. Add the section "Worker machines" after "Worker instances" (`docs/cli/worker.md:563`). Add one subsection for each machine command, after the pattern of `instance create` to `join` (`:590-742`).
-  2. Add `--machine <name>` to `instance create` (`:590`). Add `machine` to the instance record and to the heartbeat answer.
-  3. Add each new code to the error table (`:877`) with its HTTP status and condition.
+  1. Add the six machine commands to `## Command inventory` (`docs/cli/worker.md:105`).
+  2. Add the section "Worker machines" after "Worker instances" (`docs/cli/worker.md:563`). Add one subsection for each machine command, after the pattern of `instance create` to `join` (`:590-742`).
+  3. Add `--machine <name>` to `instance create` (`:590`). Add `machine` to the instance record and to the heartbeat answer.
+  4. Add each new code to the error table (`:877`) with its HTTP status and condition. Extend the rows `worker.instance.name_conflict` and `worker.instance.key_conflict` (`:938-939`) to name a machine.
+  5. In `docs/cli/other.md`, section `serve worker` (`:717-760`), add the machine configuration to the source table (`:744-747`). Add `KANTHORD_MACHINE_CONFIG` to the child environment sentence (`:752-753`).
 - Cite: root `AGENTS.md` "Contracts" (every error code on the CLI page).
-- Verify: `pnpm exec prettier --check docs/cli/worker.md`.
+- Verify: `pnpm exec prettier --check docs/cli/worker.md docs/cli/other.md`.
 
 ### 02.7 Regenerate the OpenAPI document
 

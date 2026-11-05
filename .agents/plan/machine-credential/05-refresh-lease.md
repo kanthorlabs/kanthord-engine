@@ -59,28 +59,31 @@ The approval of the root pull request of plan 01. Start from `origin/main` of `k
   6. Execution store: `modify` calls the lease once, passes the leased value to the pi-ai function, and sends one report.
   7. Execution store: a function that answers `undefined` still sends one report. Two `modify` calls of one store run in order.
   8. Execution store: the store renews the lease before each retry of its report.
-  9. Worker application: two executions that pin one OAuth revision and refresh at once make one refresh call. The second execution reads the refreshed value and refreshes nothing.
-  10. Worker application: run the test of step 9 at the `server` placement with a plain item and at the `worker` placement with a sealed item.
-  11. Worker application: a `lease_held` answer retries with a new key until the lease ends. An abort of the `modify` signal ends the retry.
-  12. Worker application: a lease after the first envelope opens with the handover key. `discard()` zeroes the handover key.
+  9. `src/apps/server/handover-integration.test.ts`: call `setup(t, adapter, oauth, { instanceCount: 2 })`. Claim one execution on each server instance. Both pin one OAuth revision of `server` and refresh at once.
+  10. In the test of step 9, the provider receives one refresh call. The second execution reads the refreshed value and refreshes nothing.
+  11. `src/apps/worker/handover.test.ts`: give two views one sealed item and a fake lease API that answers `lease_held` until the first report. The two views make one refresh call. Before plan 03, two `worker` instances share no copy, so this case runs without a server.
+  12. Worker application: a `lease_held` answer retries with a new key until the lease ends. An abort of the `modify` signal ends the retry.
+  13. Worker application: a lease after the first envelope opens with the handover key. `discard()` zeroes the handover key.
 - Verify: each edited test file fails on the new tests only, with `PATH="$(node scripts/test-path.mjs)" node --test --test-timeout=60000 <file>`.
 
 ### 05.2 Declare the operation
 
-- Files: `src/worker/contract.ts`, `src/custody/contract.ts` (edit)
+- Files: `src/worker/contract.ts`, `src/custody/contract.ts`, `src/apps/cli/completeness.test.ts` (edit)
 - Do:
   1. Add `"credential.lease"` after `credential` (`src/worker/contract.ts:1683-1706`). Copy its fields.
-  2. Set `secret: true`, the output `handoverEnvelopeSchema`, and the body `{ execution_id, credential_id }`.
+  2. Set `secret: true`, the output `handoverEnvelopeSchema` (`src/kernel/handover.ts:17`), and the body `{ execution_id, credential_id }`.
   3. Add `CredentialLeaseHeld: "worker.credential.lease_held"` to `WorkerErrorCode` (`:928`).
   4. Add `CREDENTIAL_LEASE_MS = 30000` and `CUSTODY_LEASE_INVALID` to `src/custody/contract.ts`.
   5. Add `leasePayloadSchema` (`{ item, expires_at }`) to `src/custody/contract.ts`. `item` is a plain or a sealed handover item.
   6. Add `CredentialLeaseHeld` beside `CredentialRefreshInFlight` (`:638-645`).
+  7. Add `lease` to the port `CustodyHandover` (`src/worker/contract.ts:372`).
+  8. Add `worker.credential.lease` to `API_ONLY_OPERATIONS` (`src/apps/cli/completeness.test.ts:52-98`). Raise `OPERATION_COUNT` (`:124`) by one.
 - Cite: D14.
-- Verify: `pnpm run typecheck`.
+- Verify: `pnpm run typecheck`; `PATH="$(node scripts/test-path.mjs)" node --test --test-timeout=60000 src/apps/cli/completeness.test.ts` passes.
 
 ### 05.3 Keep the lease in custody
 
-- Files: `src/custody/service.ts`, `src/custody/handover.ts`, `src/worker/service.ts` (edit)
+- Files: `src/custody/service.ts`, `src/custody/handover.ts`, `src/worker/service.ts`, `src/apps/server/index.ts` (edit)
 - Do:
   1. Extract `itemOfRow(tx, row)` from `plainItem` (`src/custody/handover.ts:57-69`) and the item of `sealedItem` (`src/custody/service.ts:858-920`). The handover and the lease call it.
   2. Add `leases = new Map<string, { execution_id: string; expires_at: number }>()` beside `refreshes` (`src/custody/service.ts:570`).
@@ -90,6 +93,7 @@ The approval of the root pull request of plan 01. Start from `origin/main` of `k
   6. Set the lease, and seal `{ item: itemOfRow(tx, row), expires_at }` with the handover key.
   7. In `report` (`src/custody/service.ts:1393-1430`), delete the lease of the revision after `applyReport`. Do it only when the execution of the report holds the lease.
   8. In `src/worker/service.ts`, register `workerOperations["credential.lease"]` after the report handler (`:1143-1158`). Map `CredentialLeaseHeld` to 503 `worker.credential.lease_held`.
+  9. In `src/apps/server/index.ts:770-775`, add `lease: (...args) => custody.lease(...args)` to `custodyHandover`.
 - Cite: D14.
 - Verify: `PATH="$(node scripts/test-path.mjs)" node --test --test-timeout=60000 src/custody/handover.test.ts` passes.
 
@@ -126,7 +130,7 @@ The approval of the root pull request of plan 01. Start from `origin/main` of `k
 
 ## E2E
 
-No new row. The tests of task 05.1 steps 9 and 10 drive two executions through the operation registry at two placements.
+No new row. The tests of task 05.1 steps 9 to 11 drive two executions at the `server` placement and two views of one sealed item. Plan 03 tests two instances of one machine.
 
 ## Blockers
 

@@ -59,10 +59,12 @@ The machine configuration is `{ name, private_key }`. Its value is the unpadded 
 - The environment variable `KANTHORD_MACHINE_CONFIG` holds the value on a machine without a writable configuration.
 - `kanthord worker machine join [--force]` writes the machine file from the value on standard input.
 - The `worker` application reads the machine key at each use, by the holder name of the item. A Reset key of the machine thus needs no restart of an instance.
-- When the heartbeat answer names the machine, `kanthord serve worker` also reads the machine configuration. An absent configuration logs `worker.machine.config_absent` once.
-- While the configuration is absent, the instance claims no work. It claims work again after a heartbeat that reads the configuration.
+- The claim gate of `kanthord serve worker` is closed at the start. The instance claims no work before the first heartbeat answer.
+- When the heartbeat answer names the machine, `kanthord serve worker` also reads the machine configuration. An absent configuration closes the gate and logs `worker.machine.config_absent` once.
+- While the configuration is absent, the instance claims no work. A heartbeat that reads the configuration opens the gate again. The pull loop reads the gate before each claim.
 - Both sources for one name answer `worker.machine.config_conflict`. No source answers `worker.machine.config_absent`.
 - A value that fails the schema, or a file whose `name` differs from its file name, answers `worker.machine.config_invalid`.
+- A name that breaks the instance name form answers `worker.machine.config_invalid` before the read builds a path.
 - `childEnvironment` (`src/agent/environment.ts:15-30`) removes `KANTHORD_MACHINE_CONFIG` from each child process.
 - The additional authenticated data of a machine copy holds the machine name as `holder` and the machine fingerprint as `sealed_to` (`custody.impl.md:61`).
 

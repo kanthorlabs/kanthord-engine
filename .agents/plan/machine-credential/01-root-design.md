@@ -58,8 +58,9 @@ Each task edits the pages that it names. A task writes the decision and its cons
   12. State that `worker.instance.create` refuses a machine name with 409 `worker.instance.name_conflict`. State that `worker.instance.key_conflict` also covers each machine fingerprint.
   13. In "The instance exchange" (`:582-656`), add `machine` to the heartbeat answer.
   14. After "The instance configuration" (`:193-214`), add the section "The machine configuration" with D5. Write the value, the machine file, `KANTHORD_MACHINE_CONFIG` and `kanthord worker machine join`.
-  15. In that section, write the read at each use, the read at a heartbeat, the claim gate, the three codes and the child environment.
-  16. In "The copy blocks" (`:215-373`), add the step that writes the machine file with `kanthord worker machine join`. The step runs once for each machine. Each container host kind sets `KANTHORD_MACHINE_CONFIG` instead.
+  15. In that section, write the read at each use, the read at a heartbeat, the claim gate and the three codes. The gate stays closed until the first heartbeat answer.
+  16. In that section, write the name check before the path and the child environment.
+  17. In "The copy blocks" (`:215-373`), add the step that writes the machine file with `kanthord worker machine join`. The step runs once for each machine. Each container host kind sets `KANTHORD_MACHINE_CONFIG` instead.
 - Cite: D2, D3, D5, D11.
 - Verify: `rg -n 'worker machine' docs/brainstorm/worker-service*.md` lists the term, the section and the copy blocks.
 

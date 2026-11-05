@@ -42,11 +42,14 @@ Engine plan 02 merged. Start from `origin/main` of `kanthorlabs/kanthord-apps`.
 - Do:
   1. Copy the request tests of `worker-instances.test.ts` for each machine function.
   2. List: each row shows `<name> (v<revision>)`, the short fingerprint and the instance count, with a link to the machine page.
-  3. Form: the save sends `{ name }`. The answer shows `machine_configuration` once with `Copy`, the warning that it shows only once, and the machine copy block. The form validates the reserved names before it sends.
-  4. Machine page: the header, the instances with their connection line and a link to each instance page, and the danger zone. Reset key shows the instances and states the recovery text of plan 01. Archive stays disabled while a live instance names the machine, and lists them.
-  5. Add instance: at the `worker` placement, the `Machine` select lists the live machines and is required. With no live machine, it shows `Add machine`, a link to `/machines/new`. The save sends `machine`.
-  6. Instance page: a `worker` instance shows `Machine <name>` with a link to the machine page.
-  7. Each screen renders at 390 px with one column.
+  3. Form: the save sends `{ name }`. The answer shows `machine_configuration` once with `Copy`, the notice that it shows only once, and the machine copy block. The form validates the reserved names before it sends.
+  4. Machine page: the header, the instances with their connection line and a link to each instance page, and the danger zone.
+  5. Machine page: Reset key shows the instances and states the recovery text of plan 01. It follows the instance rules of root `architecture.impl.md:1287-1293`. The confirmation sends `worker.machine.rotate` with `expected_revision`. The answer shows `machine_configuration` once with `Copy` and the machine copy block.
+  6. Machine page: Archive stays disabled while a live instance names the machine, and lists them.
+  7. Machine page: the instances of the machine serve bindings of two or more projects. The page shows the notice of plan 01 step 01.6.8, which names each project. One project shows no notice.
+  8. Add instance: at the `worker` placement, the `Machine` select lists the live machines and is required. With no live machine, it shows `Add machine`, a link to `/machines/new`. The save sends `machine`.
+  9. Instance page: a `worker` instance shows `Machine <name>` with a link to the machine page.
+  10. Each screen renders at 390 px with one column.
 - Verify: `pnpm test` fails on the new tests only.
 
 ### 06.2 Add the resource and the types
@@ -68,8 +71,9 @@ Engine plan 02 merged. Start from `origin/main` of `kanthorlabs/kanthord-apps`.
   3. Copy the three screens of `src/features/credentials`. Put each read, each write and each error map in a hook beside its screen.
   4. Reuse `instance-configuration.tsx` for `machine_configuration`. Add the machine copy block of plan 01 as one block for every host kind.
   5. Reuse the Reset key and Archive pattern of `use-instance-reset.ts` and `use-instance-archive.tsx`.
+  6. Read `bindings` of `worker.instance.get` for each instance of the machine. Show the project notice when they name two or more projects.
 - Cite: D15; apps `AGENTS.md` "Resource screens".
-- Verify: `pnpm test` passes the tests of task 06.1 steps 1 to 4.
+- Verify: `pnpm test` passes the tests of task 06.1 steps 1 to 7.
 
 ### 06.4 Add the machine to the instance screens
 
@@ -79,7 +83,7 @@ Engine plan 02 merged. Start from `origin/main` of `kanthorlabs/kanthord-apps`.
   2. In the Add instance sheet, add the `Machine` select after **Placement**, with `Add machine` when no live machine exists.
   3. In the instance page header, add `Machine <name>` with a link to `/machines/<name>`.
 - Cite: D3, D15.
-- Verify: `pnpm test` passes the tests of task 06.1 steps 5 and 6.
+- Verify: `pnpm test` passes the tests of task 06.1 steps 8 and 9.
 
 ### 06.E Run the gate
 

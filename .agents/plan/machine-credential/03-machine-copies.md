@@ -55,14 +55,14 @@ Plans 02 and 05 merged. Start from `origin/main` of `kanthorlabs/kanthord-engine
 
 ### 03.1 Write the tests of the machine copy
 
-- Files: `src/custody/service.test.ts`, `src/custody/handover.test.ts`, `src/custody/resource-healthcheck.test.ts`, `src/llm/service.test.ts`, `src/llm/instance-login.test.ts`, `src/llm/copy-health.test.ts`, `src/agent/service.test.ts`, `src/worker/instances.test.ts`, `src/worker/machines.test.ts` (edit)
+- Files: `src/custody/service.test.ts`, `src/custody/handover.test.ts`, `src/custody/resource-healthcheck.test.ts`, `src/llm/service.test.ts`, `src/llm/instance-login.test.ts`, `src/llm/copy-health.test.ts`, `src/agent/service.test.ts`, `src/worker/instances.test.ts`, `src/worker/machines.test.ts`, `src/apps/server/handover-integration.test.ts` (edit)
 - Do:
   1. Custody: a human create with `holders: ["server", "<machine>"]` seals the machine copy to the machine key.
   2. Custody: `copyHolderOf` answers the instance with an own live copy, the machine without it, and the instance for a stale own copy.
   3. Custody: `sealed_current` of a machine copy turns false after a machine rotate.
   4. Handover at the `worker` placement: an instance with no own copy receives the machine copy, with `holder` the machine name. An instance with an own copy receives the own copy.
   5. Handover: a stale own copy refuses with `held_elsewhere`. An execution that pinned the machine copy keeps it after an own copy appears.
-  6. Lease: the lease answer of a pinned machine copy holds `holder` the machine name.
+  6. Lease: the lease answer of a pinned machine copy holds `holder` the machine name. In `src/apps/server/handover-integration.test.ts`, call `setup(t, adapter, oauth, { workerInstances: ["box-1", "box-2"] })` with one machine. Each instance claims one execution that pins the machine copy. A lease of the second execution answers `lease_held` until the report of the first ends it.
   7. Holds: a hold on the machine copy shows for each instance of the machine through `holdOf`. `listHolds` answers the machine name.
   8. Holds: a stop of an execution that pins the machine copy holds the machine copy, not a group of the instance.
   9. Archive: a machine copy refuses with the bindings of D10. An instance copy archives with no dependent when the machine holds a live current copy. A machine archive archives every machine copy.
@@ -103,7 +103,7 @@ Plans 02 and 05 merged. Start from `origin/main` of `kanthorlabs/kanthord-engine
   3. Compare `sealed_to` with the key of the row holder, not the key of the instance. Keep both refusal reasons.
   4. Set `holder` of the sealed item to the row holder in `itemOfRow` of plan 05. The handover and the lease answer both carry it.
 - Cite: D13.
-- Verify: `PATH="$(node scripts/test-path.mjs)" node --test --test-timeout=60000 src/custody/handover.test.ts` passes.
+- Verify: `PATH="$(node scripts/test-path.mjs)" node --test --test-timeout=60000 src/custody/handover.test.ts src/apps/server/handover-integration.test.ts` passes.
 
 ### 03.4 Write the archive dependents
 
