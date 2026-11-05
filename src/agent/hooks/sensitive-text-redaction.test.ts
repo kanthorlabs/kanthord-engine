@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test, type TestContext } from "node:test";
+import { beforeEach, test, type TestContext } from "node:test";
 import {
   fauxAssistantMessage,
   type FauxResponseStep,
@@ -46,7 +46,10 @@ import {
 
 const j = (...parts: string[]) => parts.join("");
 const AN = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-const { bytes } = seededText();
+let { bytes } = seededText();
+beforeEach(() => {
+  ({ bytes } = seededText());
+});
 const an = (n: number) =>
   [...bytes(n)].map((byte) => AN[byte % AN.length]).join("");
 const PASS = j("pass", "word");

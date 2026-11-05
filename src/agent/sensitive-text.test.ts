@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { test } from "node:test";
+import { beforeEach, test } from "node:test";
 import { getHeapStatistics, setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import {
@@ -33,7 +33,10 @@ import {
 } from "./sensitive-text-test-support.ts";
 
 const j = (...parts: string[]) => parts.join("");
-const { bytes } = seededText();
+let { bytes } = seededText();
+beforeEach(() => {
+  ({ bytes } = seededText());
+});
 const pick = (alphabet: string, n: number) =>
   [...bytes(n)].map((byte) => alphabet[byte % alphabet.length]).join("");
 const UP = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
