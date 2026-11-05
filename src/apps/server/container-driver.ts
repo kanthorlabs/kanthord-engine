@@ -54,9 +54,9 @@ import {
   ownedArguments,
   ownedVolumeArguments,
   parseRuntimeStore,
-  parseSystemUsage,
   parseVolume,
   presentVolume,
+  readSystemUsage,
   removeImageArguments,
   removeVolumeArguments,
   runArguments,
@@ -68,7 +68,6 @@ import {
   slotInstanceName,
   slotName,
   SUCCESS_CODE,
-  systemUsageArguments,
   unshareMarkerArguments,
   unshareMigrationArguments,
   unshareOwnerArguments,
@@ -592,10 +591,11 @@ export class ContainerDriver implements SlotDriver {
   async runtimeUsage(): Promise<RuntimeUsage | null> {
     const runtime = await this.answeringRuntime();
     if (runtime === null) return null;
-    const answer = await this.command(runtime, systemUsageArguments());
-    if (answer.code !== SUCCESS_CODE)
-      throw commandFailure("system df", answer.stderr);
-    return parseSystemUsage(runtime, answer.stdout);
+    return readSystemUsage(
+      runtime,
+      (args) => this.command(runtime, args),
+      (stderr) => commandFailure("system df", stderr),
+    );
   }
 
   async runtimeStore(): Promise<RuntimeStoreInfo | null> {

@@ -68,13 +68,12 @@ import {
   ownedImageArguments,
   OWNER_LABEL,
   parseCacheVolumes,
-  parseSystemUsage,
+  readSystemUsage,
   removeImageArguments,
   removeNamedVolumeArguments,
   type RuntimeHost,
   SLOT_HOME,
   SUCCESS_CODE,
-  systemUsageArguments,
 } from "./container-runtime.ts";
 
 export const EnvironmentImageFailure = {
@@ -641,11 +640,14 @@ export class EnvironmentImages implements Omit<
   async footprintUsage(signal: AbortSignal): Promise<EnvironmentUsage> {
     signal.throwIfAborted();
     const runtime = this.runtime();
-    const used = await this.answer(systemUsageArguments());
-    if (used.code !== SUCCESS_CODE)
-      throw new Error(
-        `The runtime usage read failed: ${used.stderr.slice(-OUTPUT_TAIL_BYTES)}`,
-      );
+    const usage = await readSystemUsage(
+      runtime,
+      (args) => this.answer(args),
+      (stderr) =>
+        new Error(
+          `The runtime usage read failed: ${stderr.slice(-OUTPUT_TAIL_BYTES)}`,
+        ),
+    );
     const owned = await this.answer(ownedImageArguments(this.options.owner));
     if (owned.code !== SUCCESS_CODE)
       throw new Error(
@@ -664,7 +666,7 @@ export class EnvironmentImages implements Omit<
       cacheVolumes = parseCacheVolumes(inspected.stdout);
     }
     return {
-      usage: parseSystemUsage(runtime, used.stdout),
+      usage,
       owned_image_ids: linesOf(owned.stdout).map(imageIdOf),
       cache_volumes: cacheVolumes,
     };

@@ -73,10 +73,11 @@ const PRIVATE_LABEL = ":Z";
 const VERSION_SEPARATOR = ".";
 const MIGRATE_MOUNT = "/migrate";
 const SHELL = "/bin/sh";
+const PRIVATE_MODE_TEXT = "700";
 const SESSION_SOURCE = `${SLOT_HOME}/state/kanthord/pi/sessions`;
-const HOST_DIRECTORY_SCRIPT = `src=${SESSION_SOURCE}; if [ -d "$src" ]; then cp -a "$src/." ${MIGRATE_MOUNT}/ && rm -rf "$src"; fi; mkdir -p "$src" && chown -R ${CONTAINER_UID}:${CONTAINER_UID} ${SLOT_HOME} ${MIGRATE_MOUNT}`;
-const FILE_SHARE_SCRIPT = `src=${SESSION_SOURCE}; if [ -d "$src" ]; then cp -R --preserve=mode,timestamps "$src/." ${MIGRATE_MOUNT}/ && rm -rf "$src"; fi; mkdir -p "$src" && chown -R ${CONTAINER_UID}:${CONTAINER_UID} ${SLOT_HOME}`;
-export const UNSHARE_MIGRATION_SCRIPT = `src="$1/state/kanthord/pi/sessions"; if [ -d "$src" ]; then cp -a "$src/." "$2/" && rm -rf "$src"; fi; mkdir -p "$src" && chown -R 0:0 "$1" "$2"`;
+const HOST_DIRECTORY_SCRIPT = `src=${SESSION_SOURCE}; if [ -d "$src" ]; then cp -a "$src/." ${MIGRATE_MOUNT}/ && rm -rf "$src"; fi; mkdir -p "$src" && chmod ${PRIVATE_MODE_TEXT} ${MIGRATE_MOUNT} && chown -R ${CONTAINER_UID}:${CONTAINER_UID} ${SLOT_HOME} ${MIGRATE_MOUNT}`;
+const FILE_SHARE_SCRIPT = `src=${SESSION_SOURCE}; if [ -d "$src" ]; then cp -R --preserve=mode,timestamps "$src/." ${MIGRATE_MOUNT}/ && rm -rf "$src"; fi; mkdir -p "$src" && chmod ${PRIVATE_MODE_TEXT} ${MIGRATE_MOUNT} && chown -R ${CONTAINER_UID}:${CONTAINER_UID} ${SLOT_HOME}`;
+export const UNSHARE_MIGRATION_SCRIPT = `src="$1/state/kanthord/pi/sessions"; if [ -d "$src" ]; then cp -a "$src/." "$2/" && rm -rf "$src"; fi; mkdir -p "$src" && chmod ${PRIVATE_MODE_TEXT} "$2" && chown -R 0:0 "$1" "$2"`;
 const CACHE_MARKER_PATH = `${CACHE_MOUNT}/${CACHE_OWNER_MARKER}`;
 const CACHE_OWNER_SCRIPT = `[ -e ${CACHE_MARKER_PATH} ] || { chown -R ${CONTAINER_UID}:${CONTAINER_UID} ${CACHE_MOUNT} && touch ${CACHE_MARKER_PATH} && chown ${CONTAINER_UID}:${CONTAINER_UID} ${CACHE_MARKER_PATH}; }`;
 const CARRIER_CAPABILITIES = [
@@ -331,10 +332,40 @@ const IMAGE_ID_HEX = /^[0-9a-f]+$/;
 const SECONDS_LIMIT = 1e11;
 const MS_PER_SECOND = 1000;
 const DOCKER_TIME_ZONE = / [A-Z]{2,5}$/;
+const TABLE_GAP = /\s+/;
+const FIRST_COLUMN = 0;
+const IMAGE_HEADER = "REPOSITORY";
+const VOLUME_HEADER = "VOLUME";
+const CONTAINER_HEADER = "CONTAINER";
+const TABLE_HEADERS = new Set([IMAGE_HEADER, CONTAINER_HEADER, VOLUME_HEADER]);
+const IMAGE_COLUMNS = 8;
+const VOLUME_COLUMNS = 3;
+const UNIQUE_SIZE_COLUMN = -2;
+const CONTAINERS_COLUMN = -1;
 const NO_SUCH_IMAGE = /no such image|image not known|image not found/i;
 
-export function systemUsageArguments(): string[] {
-  return ["system", "df", "--verbose", "--format", "json"];
+export function systemUsageArguments(runtime: ContainerRuntime): string[] {
+  return runtime === ContainerRuntime.Podman
+    ? ["system", "df", "--verbose"]
+    : ["system", "df", "--verbose", "--format", "json"];
+}
+
+export function imageListArguments(): string[] {
+  return ["image", "ls", "--all", "--format", "json"];
+}
+
+export async function readSystemUsage(
+  runtime: ContainerRuntime,
+  call: (args: readonly string[]) => Promise<RuntimeAnswer>,
+  failure: (stderr: string) => Error,
+): Promise<RuntimeUsage> {
+  const usage = await call(systemUsageArguments(runtime));
+  if (usage.code !== SUCCESS_CODE) throw failure(usage.stderr);
+  if (runtime !== ContainerRuntime.Podman)
+    return parseSystemUsage(runtime, usage.stdout);
+  const listed = await call(imageListArguments());
+  if (listed.code !== SUCCESS_CODE) throw failure(listed.stderr);
+  return parsePodmanUsage(usage.stdout, listed.stdout);
 }
 
 export function removeImageArguments(reference: string): string[] {
@@ -421,6 +452,31 @@ function sections(stdout: string): Record<string, unknown[]> {
   return merged;
 }
 
+function mergeImage(
+  images: Map<string, RuntimeImageUsage>,
+  image: RuntimeImageUsage,
+): void {
+  const previous = images.get(image.id);
+  images.set(image.id, {
+    ...image,
+    references: [
+      ...(previous?.references ?? []),
+      ...image.references.filter(
+        (reference) => !previous?.references.includes(reference),
+      ),
+    ],
+  });
+}
+
+function referenceOf(repository: unknown, tag: unknown): string[] {
+  return filled(repository) &&
+    filled(tag) &&
+    repository !== NO_REFERENCE &&
+    tag !== NO_REFERENCE
+    ? [`${repository}:${tag}`]
+    : [];
+}
+
 export function parseSystemUsage(
   runtime: ContainerRuntime,
   stdout: string,
@@ -428,35 +484,19 @@ export function parseSystemUsage(
   const found = sections(stdout);
   const images = new Map<string, RuntimeImageUsage>();
   for (const row of found.Images ?? []) {
-    const id = firstOf(row, "ID", "Id", "ImageID", "ImageId");
+    const id = firstOf(row, "ID", "Id", "ImageId");
     if (!filled(id)) continue;
-    const key = imageIdOf(id);
-    const repository = firstOf(row, "Repository");
-    const tag = firstOf(row, "Tag");
-    const reference =
-      filled(repository) &&
-      filled(tag) &&
-      repository !== NO_REFERENCE &&
-      tag !== NO_REFERENCE
-        ? `${repository}:${tag}`
-        : null;
-    const previous = images.get(key);
-    images.set(key, {
-      id: key,
-      references: [
-        ...(previous?.references ?? []),
-        ...(reference === null || previous?.references.includes(reference)
-          ? []
-          : [reference]),
-      ],
-      created_at: timeOf(firstOf(row, "CreatedAt", "Created")),
+    mergeImage(images, {
+      id: imageIdOf(id),
+      references: referenceOf(firstOf(row, "Repository"), firstOf(row, "Tag")),
+      created_at: timeOf(firstOf(row, "CreatedAt")),
       unique_bytes: bytesOf(firstOf(row, "UniqueSize")),
       containers: countOf(firstOf(row, "Containers")),
     });
   }
   const volumes: RuntimeVolumeUsage[] = [];
   for (const row of found.Volumes ?? []) {
-    const name = firstOf(row, "Name", "VolumeName");
+    const name = firstOf(row, "Name");
     if (!filled(name)) continue;
     volumes.push({
       name,
@@ -465,6 +505,52 @@ export function parseSystemUsage(
     });
   }
   return { runtime, images: [...images.values()], volumes };
+}
+
+export function parsePodmanUsage(
+  table: string,
+  imageList: string,
+): RuntimeUsage {
+  const listed: unknown = JSON.parse(imageList);
+  const created = new Map<string, unknown>();
+  for (const image of Array.isArray(listed) ? listed : []) {
+    const id = field(image, "Id");
+    if (filled(id)) created.set(imageIdOf(id), field(image, "Created"));
+  }
+  const images = new Map<string, RuntimeImageUsage>();
+  const volumes: RuntimeVolumeUsage[] = [];
+  let section: string | null = null;
+  for (const line of linesOf(table)) {
+    const columns = line.split(TABLE_GAP);
+    const header = columns[FIRST_COLUMN] ?? "";
+    if (TABLE_HEADERS.has(header)) {
+      section = header;
+      continue;
+    }
+    if (section === IMAGE_HEADER && columns.length >= IMAGE_COLUMNS) {
+      const [repository, tag, shortId] = columns;
+      const full = [...created.keys()].find((id) =>
+        sameImage(shortId ?? "", id),
+      );
+      const id = full ?? imageIdOf(shortId ?? "");
+      mergeImage(images, {
+        id,
+        references: referenceOf(repository, tag),
+        created_at: timeOf(created.get(id)),
+        unique_bytes: bytesOf(columns.at(UNIQUE_SIZE_COLUMN)),
+        containers: countOf(columns.at(CONTAINERS_COLUMN)),
+      });
+    } else if (section === VOLUME_HEADER && columns.length === VOLUME_COLUMNS) {
+      const [name, links, size] = columns;
+      if (filled(name))
+        volumes.push({ name, bytes: bytesOf(size), links: countOf(links) });
+    }
+  }
+  return {
+    runtime: ContainerRuntime.Podman,
+    images: [...images.values()],
+    volumes,
+  };
 }
 
 function numberOrNull(value: unknown): number | null {

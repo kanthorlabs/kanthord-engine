@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -56,6 +58,9 @@ const POLL_MS = 20;
 const POLL_ROUNDS = 500;
 const PRIVATE_DIRECTORY = 0o700;
 const PRIVATE_FILE = 0o600;
+const OPEN_DIRECTORY = 0o755;
+const STUB_MODE = 0o755;
+const SESSION_CONTENT = "{}\n";
 const PERMISSION_BITS = 0o777;
 const ONE_RUN = 1;
 const NO_RUNS = 0;
@@ -326,6 +331,35 @@ test("rootless Podman on Linux moves an earlier volume with podman unshare once 
   const again = f.launch("coder-1");
   await until(again.spawned, "The second slot container did not start.");
   assert.equal(f.migrations().length, ONE_RUN);
+});
+
+test("the unshare migration script leaves sessions at 0700 when the volume source is 0755", (t) => {
+  const root = temporaryDirectory();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const bin = join(root, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "chown"), "#!/bin/sh\nexit 0\n", {
+    mode: STUB_MODE,
+  });
+  const volume = join(root, "volume");
+  const source = join(volume, "state", "kanthord", "pi", "sessions");
+  mkdirSync(source, { recursive: true });
+  writeFileSync(join(source, "session.jsonl"), SESSION_CONTENT);
+  chmodSync(source, OPEN_DIRECTORY);
+  const sessions = join(root, "sessions");
+  mkdirSync(sessions, { mode: PRIVATE_DIRECTORY });
+  execFileSync(
+    "/bin/sh",
+    ["-c", UNSHARE_MIGRATION_SCRIPT, "sh", volume, sessions],
+    {
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` },
+    },
+  );
+  assert.equal(statSync(sessions).mode & PERMISSION_BITS, PRIVATE_DIRECTORY);
+  assert.equal(
+    readFileSync(join(sessions, "session.jsonl"), "utf8"),
+    SESSION_CONTENT,
+  );
 });
 
 test("rootless Podman runs the auto migration container for a new labeled volume and no full-map carrier", async (t) => {

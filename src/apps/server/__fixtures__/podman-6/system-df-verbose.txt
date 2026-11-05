@@ -1,0 +1,19 @@
+Images space usage:
+
+REPOSITORY                             TAG                     IMAGE ID      CREATED     SIZE        SHARED SIZE  UNIQUE SIZE  CONTAINERS
+docker.io/library/alpine               latest                  320994c3b997  6 weeks     8.716MB     0B           8.716MB      0
+<none>                                 <none>                  0d48ad089aab  3 weeks     1.283GB     1.092GB      191.8MB      0
+localhost/kanthord-base-path           latest                  59099780447b  3 weeks     348.2MB     348.2MB      4.638kB      1
+localhost/kanthord-base-path           28.0.1                  59099780447b  3 weeks     348.2MB     348.2MB      4.638kB      1
+
+Containers space usage:
+
+CONTAINER ID  IMAGE         COMMAND     LOCAL VOLUMES  SIZE        CREATED     STATUS      NAMES
+6da0578bf5a4  59099780447b  serve       1              11.31kB     3 weeks     running     kanthord-homelab
+
+Local Volumes space usage:
+
+VOLUME NAME                                                       LINKS       SIZE
+buildx_buildkit_default_state                                     0           2.726GB
+kanthord-homelab                                                  1           567.2kB
+kanthord_slot_coder-c1                                            0           0B
