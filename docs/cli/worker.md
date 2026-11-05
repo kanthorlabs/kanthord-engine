@@ -407,13 +407,17 @@ other fields. `container` answers the runtime check of the server:
 | `runtime_failed`      | The runtime does not answer, or it fails a check. `detail` states why and names the host action of a failed check. |
 | `runtime_rootful`     | The host is Linux, the runtime is rootful and the server user is not root. Docker Desktop is exempt.               |
 
+The `container` placement on Podman requires Podman 6.0.0 or later, rootless or
+rootful, on every platform. The check reads `version.Version` of `podman info`,
+the version of the Podman service. On macOS that is the Podman machine.
+
 The server reuses the newest runtime answer for 10 s.
 `runtime_failed` has two kinds. A runtime that does not answer is transient: a
 stopped Podman machine, Docker `ServerErrors`, a nonzero `info` exit, or a Podman
 answer with no `host`. A failed check stays until a human changes the host: the
 uid 10001 cover check, a Docker client below 23, a Docker answer with no server
 version (the `podman-docker` shim), rootless Docker on Linux and a Podman below
-`PODMAN_AUTO_UIDMAPPING_MIN_VERSION` (4.1.0). The pool host retries with a
+`PODMAN_MIN_VERSION` (6.0.0). The pool host retries with a
 backoff in both cases. The other reasons stay until a human changes the host.
 [`project binding apply`](./project.md#binding-resource-and-complete-set-edits)
 refuses a new `container` binding for the three stable reasons only.

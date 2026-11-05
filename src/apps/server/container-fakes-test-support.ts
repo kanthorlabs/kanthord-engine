@@ -37,7 +37,7 @@ const INFO_ANSWER: RuntimeAnswer = {
         ],
       },
     },
-    version: { Version: "5.4.2" },
+    version: { Version: "6.0.2" },
   }),
   stderr: "",
 };

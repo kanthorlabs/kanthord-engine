@@ -32,7 +32,7 @@ import {
   parseRuntimeStore,
   parseSystemUsage,
   parseVolume,
-  PODMAN_AUTO_UIDMAPPING_MIN_VERSION,
+  PODMAN_MIN_VERSION,
   removeArguments,
   removeImageArguments,
   runArguments,
@@ -200,7 +200,7 @@ function answer(info: unknown, code = SUCCESS, stderr = ""): RuntimeAnswer {
 function podmanInfo(
   rootless: boolean,
   uidmap: Array<{ container_id: number; host_id: number; size: number }>,
-  version = "5.4.2",
+  version = "6.0.2",
   extra: { selinuxEnabled?: boolean; serviceIsRemote?: boolean } = {},
 ) {
   return {
@@ -1046,7 +1046,7 @@ test("detectRuntime answers the facts of an available runtime and no facts other
   const podman = fakeHost({
     answers: {
       podman: answer(
-        podmanInfo(true, ROOTLESS_MAP, "5.4.2", {
+        podmanInfo(true, ROOTLESS_MAP, "6.0.2", {
           selinuxEnabled: true,
           serviceIsRemote: true,
         }),
@@ -1090,52 +1090,67 @@ test("detectRuntime answers the facts of an available runtime and no facts other
   assert.equal((await detectRuntime(rootful.host)).facts, null);
 });
 
-test("a rootless Podman below the auto uidmapping version answers runtime_failed with the version detail", async () => {
+test("a rootless Podman below the minimum version answers runtime_failed with the version detail", async () => {
   const { host } = fakeHost({
-    answers: { podman: answer(podmanInfo(true, ROOTLESS_MAP, "4.0.3")) },
+    answers: { podman: answer(podmanInfo(true, ROOTLESS_MAP, "5.4.2")) },
   });
   assert.deepEqual(await detectRuntime(host), {
     status: expected(
       PlacementIssue.RuntimeFailed,
       ContainerRuntime.Podman,
-      `podman 4.0.3 refuses --userns=auto:uidmapping=. Upgrade Podman to ${PODMAN_AUTO_UIDMAPPING_MIN_VERSION} or later.`,
+      "podman 5.4.2 is below the required version 6.0.0. Upgrade Podman to 6.0.0 or later.",
     ),
     facts: null,
   });
 });
 
-test("a rootful Podman below the auto uidmapping version with server uid 0 answers available", async () => {
+test("a rootful Podman below the minimum version with server uid 0 answers runtime_failed with the version detail", async () => {
   const { host } = fakeHost({
     uid: ROOT_UID,
-    answers: { podman: answer(podmanInfo(false, [], "4.0.3")) },
+    answers: { podman: answer(podmanInfo(false, [], "5.4.2")) },
   });
   assert.deepEqual(
     (await detectRuntime(host)).status,
-    expected(null, ContainerRuntime.Podman),
+    expected(
+      PlacementIssue.RuntimeFailed,
+      ContainerRuntime.Podman,
+      "podman 5.4.2 is below the required version 6.0.0. Upgrade Podman to 6.0.0 or later.",
+    ),
   );
 });
 
-test("the fixture Podman version meets the auto uidmapping version", () => {
-  assert.equal(
-    versionBelow("5.4.2", PODMAN_AUTO_UIDMAPPING_MIN_VERSION),
-    false,
-  );
-  assert.equal(
-    versionBelow(
-      PODMAN_AUTO_UIDMAPPING_MIN_VERSION,
-      PODMAN_AUTO_UIDMAPPING_MIN_VERSION,
+test("a Podman with no version answers runtime_failed with the unknown version detail", async () => {
+  const info: Record<string, unknown> = podmanInfo(true, ROOTLESS_MAP);
+  delete info["version"];
+  const { host } = fakeHost({ answers: { podman: answer(info) } });
+  assert.deepEqual(
+    (await detectRuntime(host)).status,
+    expected(
+      PlacementIssue.RuntimeFailed,
+      ContainerRuntime.Podman,
+      "podman unknown is below the required version 6.0.0. Upgrade Podman to 6.0.0 or later.",
     ),
-    false,
   );
-  assert.equal(versionBelow("4.0.3", PODMAN_AUTO_UIDMAPPING_MIN_VERSION), true);
-  assert.equal(
-    versionBelow("5.0.0-dev", PODMAN_AUTO_UIDMAPPING_MIN_VERSION),
-    false,
-  );
-  assert.equal(
-    versionBelow("unknown", PODMAN_AUTO_UIDMAPPING_MIN_VERSION),
-    true,
-  );
+});
+
+test("a Podman at or above the minimum version answers available", async () => {
+  for (const version of [PODMAN_MIN_VERSION, "6.1.3"]) {
+    const { host } = fakeHost({
+      answers: { podman: answer(podmanInfo(true, ROOTLESS_MAP, version)) },
+    });
+    assert.deepEqual(
+      (await detectRuntime(host)).status,
+      expected(null, ContainerRuntime.Podman),
+    );
+  }
+});
+
+test("versionBelow compares the Podman minimum version", () => {
+  assert.equal(versionBelow("5.4.2", PODMAN_MIN_VERSION), true);
+  assert.equal(versionBelow(PODMAN_MIN_VERSION, PODMAN_MIN_VERSION), false);
+  assert.equal(versionBelow("6.1.3", PODMAN_MIN_VERSION), false);
+  assert.equal(versionBelow("6.0.0-dev", PODMAN_MIN_VERSION), false);
+  assert.equal(versionBelow("unknown", PODMAN_MIN_VERSION), true);
 });
 
 const IMAGE_HEX = "a".repeat(64);
