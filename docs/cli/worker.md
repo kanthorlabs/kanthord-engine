@@ -409,7 +409,8 @@ other fields. `container` answers the runtime check of the server:
 
 The `container` placement on Podman requires Podman 6.0.0 or later, rootless or
 rootful, on every platform. The check reads `version.Version` of `podman info`,
-the version of the Podman service. On macOS that is the Podman machine.
+the version of the Podman service. On macOS that is the Podman machine. A
+pre-release of 6.0.0, for example `6.0.0-dev`, is below 6.0.0.
 
 The server reuses the newest runtime answer for 10 s.
 `runtime_failed` has two kinds. A runtime that does not answer is transient: a

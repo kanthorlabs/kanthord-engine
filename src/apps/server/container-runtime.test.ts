@@ -1149,7 +1149,9 @@ test("versionBelow compares the Podman minimum version", () => {
   assert.equal(versionBelow("5.4.2", PODMAN_MIN_VERSION), true);
   assert.equal(versionBelow(PODMAN_MIN_VERSION, PODMAN_MIN_VERSION), false);
   assert.equal(versionBelow("6.1.3", PODMAN_MIN_VERSION), false);
-  assert.equal(versionBelow("6.0.0-dev", PODMAN_MIN_VERSION), false);
+  assert.equal(versionBelow("6.0.0-dev", PODMAN_MIN_VERSION), true);
+  assert.equal(versionBelow("6.0.0-rc1", PODMAN_MIN_VERSION), true);
+  assert.equal(versionBelow("6.1.0-dev", PODMAN_MIN_VERSION), false);
   assert.equal(versionBelow("unknown", PODMAN_MIN_VERSION), true);
 });
 

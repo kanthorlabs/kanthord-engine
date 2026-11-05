@@ -860,9 +860,7 @@ function rootful(runtime: ContainerRuntime, info: Record<string, unknown>) {
 }
 
 function versionParts(version: string): number[] {
-  return version
-    .split(VERSION_SEPARATOR)
-    .map((part) => Number.parseInt(part, 10));
+  return version.split(VERSION_SEPARATOR).map(Number);
 }
 
 export function versionBelow(version: string, minimum: string): boolean {
