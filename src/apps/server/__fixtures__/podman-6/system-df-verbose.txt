@@ -1,0 +1,26 @@
+Images space usage:
+
+REPOSITORY                             TAG                     IMAGE ID      CREATED     SIZE        SHARED SIZE  UNIQUE SIZE  CONTAINERS
+docker.io/library/hello-world          latest                  1b44b5a3e06a  15 months   26.73kB     0B           26.73kB      0
+public.ecr.aws/supabase/vector         0.28.1-alpine           f0494e814793  3 years     125.7MB     0B           125.7MB      0
+public.ecr.aws/supabase/postgres       17.6.1.037              4851d2b598cb  12 months   3.021GB     0B           3.021GB      0
+docker.io/library/alpine               latest                  320994c3b997  6 weeks     8.716MB     0B           8.716MB      0
+<none>                                 <none>                  0d48ad089aab  3 weeks     1.283GB     1.092GB      191.8MB      0
+docker.io/library/node                 24.15.0-trixie-slim     8a210a6fcfc4  5 months    233MB       0B           233MB        0
+<none>                                 <none>                  3f314435c3f2  3 weeks     346.1MB     346.1MB      4.02kB       0
+localhost/kanthord-base-path           latest                  59099780447b  3 weeks     348.2MB     348.2MB      4.638kB      1
+localhost/kanthord-base-path           28.0.1                  59099780447b  3 weeks     348.2MB     348.2MB      4.638kB      1
+
+Containers space usage:
+
+CONTAINER ID  IMAGE         COMMAND     LOCAL VOLUMES  SIZE        CREATED     STATUS      NAMES
+6da0578bf5a4  59099780447b  serve       1              11.31kB     3 weeks     running     kanthord-homelab
+
+Local Volumes space usage:
+
+VOLUME NAME                                                       LINKS       SIZE
+buildx_buildkit_default_state                                     0           2.726GB
+e01704bbbdb4cc480bc4eec0f5beacf3c0e58f41261641bb9cfbfe013d1570ca  0           0B
+kanthord-homelab                                                  1           567.2kB
+b5f9eb7ae933df1ec4d2c583ba846c02444ba0f1d4dfbe082e156d7d88d0a4ce  0           4.553kB
+kanthord_slot_coder-c1                                            0           0B

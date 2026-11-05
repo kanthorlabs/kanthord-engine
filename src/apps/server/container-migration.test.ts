@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -28,9 +30,12 @@ import {
 import {
   cacheVolumeName,
   containerOwner,
+  FILE_SHARE_SCRIPT,
+  HOST_DIRECTORY_SCRIPT,
   ID_MAP_LABEL,
   type RuntimeAnswer,
   type RuntimeHost,
+  SLOT_HOME,
   SUCCESS_CODE,
   UNSHARE_MIGRATION_SCRIPT,
 } from "./container-runtime.ts";
@@ -56,6 +61,11 @@ const POLL_MS = 20;
 const POLL_ROUNDS = 500;
 const PRIVATE_DIRECTORY = 0o700;
 const PRIVATE_FILE = 0o600;
+const OPEN_DIRECTORY = 0o755;
+const STUB_MODE = 0o755;
+const SESSION_CONTENT = "{}\n";
+const SHELL = "/bin/sh";
+const MIGRATE_MOUNT = "/migrate";
 const PERMISSION_BITS = 0o777;
 const ONE_RUN = 1;
 const NO_RUNS = 0;
@@ -327,6 +337,69 @@ test("rootless Podman on Linux moves an earlier volume with podman unshare once 
   await until(again.spawned, "The second slot container did not start.");
   assert.equal(f.migrations().length, ONE_RUN);
 });
+
+const COPY_SHIM = `#!/bin/sh
+for argument; do
+  shift
+  if [ "$argument" = "--preserve=mode,timestamps" ]; then set -- "$@" -p; else set -- "$@" "$argument"; fi
+done
+exec /bin/cp "$@"
+`;
+
+function copiedSessions(
+  t: TestContext,
+  command: (volume: string, sessions: string) => string[],
+): string {
+  const root = temporaryDirectory();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const bin = join(root, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "chown"), "#!/bin/sh\nexit 0\n", {
+    mode: STUB_MODE,
+  });
+  writeFileSync(join(bin, "cp"), COPY_SHIM, { mode: STUB_MODE });
+  const volume = join(root, "volume");
+  const source = join(volume, "state", "kanthord", "pi", "sessions");
+  mkdirSync(source, { recursive: true });
+  writeFileSync(join(source, "session.jsonl"), SESSION_CONTENT);
+  chmodSync(source, OPEN_DIRECTORY);
+  const sessions = join(root, "sessions");
+  mkdirSync(sessions, { mode: PRIVATE_DIRECTORY });
+  execFileSync(SHELL, command(volume, sessions), {
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` },
+  });
+  assert.equal(
+    readFileSync(join(sessions, "session.jsonl"), "utf8"),
+    SESSION_CONTENT,
+  );
+  return sessions;
+}
+
+function containerScript(script: string) {
+  return (volume: string, sessions: string) => [
+    "-c",
+    script.replaceAll(SLOT_HOME, volume).replaceAll(MIGRATE_MOUNT, sessions),
+  ];
+}
+
+for (const [name, command] of [
+  ["host directory", containerScript(HOST_DIRECTORY_SCRIPT)],
+  ["file share", containerScript(FILE_SHARE_SCRIPT)],
+  [
+    "unshare",
+    (volume: string, sessions: string) => [
+      "-c",
+      UNSHARE_MIGRATION_SCRIPT,
+      "sh",
+      volume,
+      sessions,
+    ],
+  ],
+] as const)
+  test(`the ${name} migration script leaves sessions at 0700 when the volume source is 0755`, (t) => {
+    const sessions = copiedSessions(t, command);
+    assert.equal(statSync(sessions).mode & PERMISSION_BITS, PRIVATE_DIRECTORY);
+  });
 
 test("rootless Podman runs the auto migration container for a new labeled volume and no full-map carrier", async (t) => {
   const f = rig(t);

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import {
   ContainerRuntime,
@@ -20,6 +22,7 @@ import {
   IdMap,
   idMapOf,
   imageIdOf,
+  imageListArguments,
   infoArguments,
   inspectContainerArguments,
   inspectVolumeArguments,
@@ -29,10 +32,12 @@ import {
   ownedCacheVolumeArguments,
   ownedImageArguments,
   parseCacheVolumes,
+  parsePodmanUsage,
   parseRuntimeStore,
   parseSystemUsage,
   parseVolume,
   PODMAN_MIN_VERSION,
+  readSystemUsage,
   removeArguments,
   removeImageArguments,
   runArguments,
@@ -792,11 +797,11 @@ const MACOS_FACTS: RuntimeFacts = {
   remote: true,
 };
 const HOST_DIRECTORY_SCRIPT =
-  'src=/var/lib/kanthord/state/kanthord/pi/sessions; if [ -d "$src" ]; then cp -a "$src/." /migrate/ && rm -rf "$src"; fi; mkdir -p "$src" && chown -R 10001:10001 /var/lib/kanthord /migrate';
+  'src=/var/lib/kanthord/state/kanthord/pi/sessions; if [ -d "$src" ]; then cp -a "$src/." /migrate/ && rm -rf "$src"; fi; mkdir -p "$src" && chmod 700 /migrate && chown -R 10001:10001 /var/lib/kanthord /migrate';
 const FILE_SHARE_SCRIPT =
-  'src=/var/lib/kanthord/state/kanthord/pi/sessions; if [ -d "$src" ]; then cp -R --preserve=mode,timestamps "$src/." /migrate/ && rm -rf "$src"; fi; mkdir -p "$src" && chown -R 10001:10001 /var/lib/kanthord';
+  'src=/var/lib/kanthord/state/kanthord/pi/sessions; if [ -d "$src" ]; then cp -R --preserve=mode,timestamps "$src/." /migrate/ && rm -rf "$src"; fi; mkdir -p "$src" && chmod 700 /migrate && chown -R 10001:10001 /var/lib/kanthord';
 const UNSHARE_SCRIPT =
-  'src="$1/state/kanthord/pi/sessions"; if [ -d "$src" ]; then cp -a "$src/." "$2/" && rm -rf "$src"; fi; mkdir -p "$src" && chown -R 0:0 "$1" "$2"';
+  'src="$1/state/kanthord/pi/sessions"; if [ -d "$src" ]; then cp -a "$src/." "$2/" && rm -rf "$src"; fi; mkdir -p "$src" && chmod 700 "$2" && chown -R 0:0 "$1" "$2"';
 
 function userNamespaceOf(args: readonly string[]): string[] {
   return args.filter((arg) => arg.startsWith("--userns"));
@@ -1158,11 +1163,23 @@ test("versionBelow compares the Podman minimum version", () => {
 const IMAGE_HEX = "a".repeat(64);
 const OTHER_HEX = "b".repeat(64);
 
-test("systemUsageArguments reads the verbose usage as JSON and the image reads hold the owner label", () => {
-  assert.deepEqual(systemUsageArguments(), [
+test("systemUsageArguments reads the Docker verbose usage as JSON, the Podman verbose usage as a table, and the image reads hold the owner label", () => {
+  assert.deepEqual(systemUsageArguments(ContainerRuntime.Docker), [
     "system",
     "df",
     "--verbose",
+    "--format",
+    "json",
+  ]);
+  assert.deepEqual(systemUsageArguments(ContainerRuntime.Podman), [
+    "system",
+    "df",
+    "--verbose",
+  ]);
+  assert.deepEqual(imageListArguments(), [
+    "image",
+    "ls",
+    "--all",
     "--format",
     "json",
   ]);
@@ -1238,33 +1255,211 @@ test("parseSystemUsage reads the Docker verbose answer: one image for each id, i
   });
 });
 
-test("parseSystemUsage reads the Podman answer with numeric sizes, seconds and VolumeName", () => {
-  const stdout = JSON.stringify({
-    Images: [
-      {
-        ImageID: IMAGE_HEX,
-        Repository: "localhost/kanthord-env/x",
-        Tag: OTHER_HEX,
-        Created: 1790000000,
-        UniqueSize: 4096,
-        Containers: 0,
-      },
+function podmanFixture(name: string): string {
+  return readFileSync(
+    join(import.meta.dirname, "__fixtures__", "podman-6", name),
+    "utf8",
+  );
+}
+
+const PODMAN_SYSTEM_DF = podmanFixture("system-df-verbose.txt");
+const PODMAN_IMAGE_LIST = podmanFixture("image-ls-all.json");
+const REFUSED_CODE = 1;
+const BASE_PATH_ID =
+  "sha256:59099780447be540a85daa4ad5248be3b941c28b750f054e16cdd5c978683b74";
+const PODMAN_IMAGES: [string, string[], number, number, number][] = [
+  [
+    "59099780447be540a85daa4ad5248be3b941c28b750f054e16cdd5c978683b74",
+    [
+      "localhost/kanthord-base-path:28.0.1",
+      "localhost/kanthord-base-path:latest",
     ],
-    Volumes: [{ VolumeName: "kanthord_cache_y", Size: 10, Links: 0 }],
-  });
-  const usage = parseSystemUsage(ContainerRuntime.Podman, stdout);
-  assert.deepEqual(usage.images, [
+    1791888738,
+    4638,
+    1,
+  ],
+  [
+    "3f314435c3f2013e6e42e499361501684dba6bcc8610a6989bec7e7d9976919a",
+    [],
+    1791430470,
+    4020,
+    0,
+  ],
+  [
+    "0d48ad089aab9942ecc66590e6cf00165c8e6f8d1dd7c1b3acfefd9051a15ca6",
+    [],
+    1791429131,
+    191800000,
+    0,
+  ],
+  [
+    "320994c3b997e2ec6433f717f153e108023c5bec8fefa8d76b83451d16d05ea8",
+    ["docker.io/library/alpine:latest"],
+    1789677440,
+    8716000,
+    0,
+  ],
+  [
+    "8a210a6fcfc4300faac566229c246999492fb9e563afbdc3359b5dea2e360f9b",
+    ["docker.io/library/node:24.15.0-trixie-slim"],
+    1779233321,
+    233000000,
+    0,
+  ],
+  [
+    "4851d2b598cb9f0b875a88628c90b12c129b2286dbcd004193f140e353a7785f",
+    ["public.ecr.aws/supabase/postgres:17.6.1.037"],
+    1762173727,
+    3021000000,
+    0,
+  ],
+  [
+    "1b44b5a3e06a9aae883e7bf25e45c100be0bb81a0e01b32de604f3ac44711634",
+    ["docker.io/library/hello-world:latest"],
+    1754679917,
+    26730,
+    0,
+  ],
+  [
+    "f0494e814793db7c889d85e35d12cf5613a4e080a8cbe82d6f6ece79c9f2b4a6",
+    ["public.ecr.aws/supabase/vector:0.28.1-alpine"],
+    1678113227,
+    125700000,
+    0,
+  ],
+];
+const PODMAN_USAGE = {
+  runtime: ContainerRuntime.Podman,
+  images: PODMAN_IMAGES.map(
+    ([hex, references, created, unique_bytes, containers]) => ({
+      id: `sha256:${hex}`,
+      references,
+      created_at: created * 1000,
+      unique_bytes,
+      containers,
+    }),
+  ),
+  volumes: [
+    { name: "buildx_buildkit_default_state", bytes: 2726000000, links: 0 },
     {
-      id: `sha256:${IMAGE_HEX}`,
-      references: [`localhost/kanthord-env/x:${OTHER_HEX}`],
-      created_at: 1790000000000,
-      unique_bytes: 4096,
-      containers: 0,
+      name: "e01704bbbdb4cc480bc4eec0f5beacf3c0e58f41261641bb9cfbfe013d1570ca",
+      bytes: 0,
+      links: 0,
     },
+    { name: "kanthord-homelab", bytes: 567200, links: 1 },
+    {
+      name: "b5f9eb7ae933df1ec4d2c583ba846c02444ba0f1d4dfbe082e156d7d88d0a4ce",
+      bytes: 4553,
+      links: 0,
+    },
+    { name: "kanthord_slot_coder-c1", bytes: 0, links: 0 },
+  ],
+};
+
+test("parsePodmanUsage reads the Podman 6.1.3 verbose table and takes the id, references, creation time and containers from the image list", () => {
+  assert.deepEqual(
+    parsePodmanUsage(PODMAN_SYSTEM_DF, PODMAN_IMAGE_LIST),
+    PODMAN_USAGE,
+  );
+});
+
+test("parsePodmanUsage skips an image that only one of the two reads holds", () => {
+  const listed = JSON.parse(PODMAN_IMAGE_LIST) as { Id: string }[];
+  const kept = listed.filter((image) => `sha256:${image.Id}` !== BASE_PATH_ID);
+  const added = { ...listed[0], Id: "c".repeat(64), Containers: 0 };
+  const usage = parsePodmanUsage(
+    PODMAN_SYSTEM_DF,
+    JSON.stringify([...kept, added]),
+  );
+  assert.deepEqual(
+    usage.images.map((image) => image.id),
+    PODMAN_USAGE.images
+      .map((image) => image.id)
+      .filter((id) => id !== BASE_PATH_ID),
+  );
+});
+
+test("parsePodmanUsage refuses an unknown table line or image entry and answers no number", () => {
+  const variants = [
+    PODMAN_SYSTEM_DF.replace("4.02kB", "4,02kB"),
+    PODMAN_SYSTEM_DF.replace("2.726GB", "2.726EB"),
+    PODMAN_SYSTEM_DF.replace("2.726GB", "2.726GiB"),
+    PODMAN_SYSTEM_DF.replace("26.73kB      0", "26.73kB"),
+    PODMAN_SYSTEM_DF.replace("1b44b5a3e06a", "1b44b5a3e06"),
+    PODMAN_SYSTEM_DF.replace("VOLUME NAME", "VOLUME"),
+    PODMAN_SYSTEM_DF.replace("Local Volumes space usage:", "Volumes:"),
+    `Total reclaimable: 1GB\n${PODMAN_SYSTEM_DF}`,
+    `${PODMAN_SYSTEM_DF}kanthord_slot_coder-c2  0  0B  extra\n`,
+  ];
+  for (const table of variants)
+    assert.throws(() => parsePodmanUsage(table, PODMAN_IMAGE_LIST));
+  assert.throws(() => parsePodmanUsage(PODMAN_SYSTEM_DF, "{}"));
+  assert.throws(() =>
+    parsePodmanUsage(PODMAN_SYSTEM_DF, JSON.stringify([{ Id: "x" }])),
+  );
+});
+
+test("parsePodmanUsage reads a volume named like a table header as a volume", () => {
+  const usage = parsePodmanUsage(
+    `${PODMAN_SYSTEM_DF}REPOSITORY  2  1.5kB\n`,
+    PODMAN_IMAGE_LIST,
+  );
+  assert.deepEqual(usage.volumes.at(-1), {
+    name: "REPOSITORY",
+    bytes: 1500,
+    links: 2,
+  });
+  assert.deepEqual(usage.images, PODMAN_USAGE.images);
+});
+
+test("readSystemUsage runs the table and the image list on Podman and one JSON read on Docker", async () => {
+  const calls: string[][] = [];
+  const answers: Record<string, string> = {
+    system: PODMAN_SYSTEM_DF,
+    image: PODMAN_IMAGE_LIST,
+  };
+  const call = (args: readonly string[]) => {
+    calls.push([...args]);
+    return Promise.resolve({
+      code: SUCCESS_CODE,
+      stdout: answers[args[0] ?? ""] ?? "",
+      stderr: "",
+    });
+  };
+  const failure = (stderr: string) => new Error(stderr);
+  assert.deepEqual(
+    await readSystemUsage(ContainerRuntime.Podman, call, failure),
+    PODMAN_USAGE,
+  );
+  assert.deepEqual(calls, [
+    systemUsageArguments(ContainerRuntime.Podman),
+    imageListArguments(),
   ]);
-  assert.deepEqual(usage.volumes, [
-    { name: "kanthord_cache_y", bytes: 10, links: 0 },
-  ]);
+  calls.length = 0;
+  answers.system = JSON.stringify({ Images: [], Volumes: [] });
+  assert.deepEqual(
+    await readSystemUsage(ContainerRuntime.Docker, call, failure),
+    {
+      runtime: ContainerRuntime.Docker,
+      images: [],
+      volumes: [],
+    },
+  );
+  assert.deepEqual(calls, [systemUsageArguments(ContainerRuntime.Docker)]);
+  await assert.rejects(
+    readSystemUsage(
+      ContainerRuntime.Podman,
+      (args) =>
+        Promise.resolve({
+          code:
+            args[0] === imageListArguments()[0] ? REFUSED_CODE : SUCCESS_CODE,
+          stdout: PODMAN_SYSTEM_DF,
+          stderr: "image list refused",
+        }),
+      failure,
+    ),
+    /image list refused/,
+  );
 });
 
 test("bytesOf, timeOf and the image id helpers read the runtime value forms", () => {
