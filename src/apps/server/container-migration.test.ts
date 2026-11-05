@@ -120,7 +120,7 @@ function infoOf(scenario: Scenario): RuntimeAnswer {
           ],
         },
       },
-      version: { Version: "5.4.2" },
+      version: { Version: "6.0.2" },
     }),
   );
 }

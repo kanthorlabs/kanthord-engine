@@ -27,7 +27,7 @@ export const CACHE_PROJECT_LABEL = "io.kanthord.cache_project";
 export const CACHE_RESOURCE_LABEL = "io.kanthord.cache_resource";
 export const CONTAINER_SESSIONS_DIRECTORY = "sessions";
 export const SESSION_MOUNT = "/var/lib/kanthord/state/kanthord/pi/sessions";
-export const PODMAN_AUTO_UIDMAPPING_MIN_VERSION = "4.1.0";
+export const PODMAN_MIN_VERSION = "6.0.0";
 const ID_MAP_KEY = "io.kanthord.id_map";
 const ID_MAP_VALUE = "auto";
 export const ID_MAP_LABEL = `${ID_MAP_KEY}=${ID_MAP_VALUE}`;
@@ -860,9 +860,7 @@ function rootful(runtime: ContainerRuntime, info: Record<string, unknown>) {
 }
 
 function versionParts(version: string): number[] {
-  return version
-    .split(VERSION_SEPARATOR)
-    .map((part) => Number.parseInt(part, 10));
+  return version.split(VERSION_SEPARATOR).map(Number);
 }
 
 export function versionBelow(version: string, minimum: string): boolean {
@@ -897,11 +895,9 @@ function refusal(
   const version = field(info, "version", "Version");
   if (
     runtime === ContainerRuntime.Podman &&
-    rootlessPodman(info) &&
-    (!isString(version) ||
-      versionBelow(version, PODMAN_AUTO_UIDMAPPING_MIN_VERSION))
+    (!isString(version) || versionBelow(version, PODMAN_MIN_VERSION))
   )
-    return `podman ${isString(version) ? version : "unknown"} refuses --userns=auto:uidmapping=. Upgrade Podman to ${PODMAN_AUTO_UIDMAPPING_MIN_VERSION} or later.`;
+    return `podman ${isString(version) ? version : "unknown"} is below the required version ${PODMAN_MIN_VERSION}. Upgrade Podman to ${PODMAN_MIN_VERSION} or later.`;
   return null;
 }
 
