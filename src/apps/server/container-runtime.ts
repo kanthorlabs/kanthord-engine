@@ -75,8 +75,8 @@ const MIGRATE_MOUNT = "/migrate";
 const SHELL = "/bin/sh";
 const PRIVATE_MODE_TEXT = "700";
 const SESSION_SOURCE = `${SLOT_HOME}/state/kanthord/pi/sessions`;
-const HOST_DIRECTORY_SCRIPT = `src=${SESSION_SOURCE}; if [ -d "$src" ]; then cp -a "$src/." ${MIGRATE_MOUNT}/ && rm -rf "$src"; fi; mkdir -p "$src" && chmod ${PRIVATE_MODE_TEXT} ${MIGRATE_MOUNT} && chown -R ${CONTAINER_UID}:${CONTAINER_UID} ${SLOT_HOME} ${MIGRATE_MOUNT}`;
-const FILE_SHARE_SCRIPT = `src=${SESSION_SOURCE}; if [ -d "$src" ]; then cp -R --preserve=mode,timestamps "$src/." ${MIGRATE_MOUNT}/ && rm -rf "$src"; fi; mkdir -p "$src" && chmod ${PRIVATE_MODE_TEXT} ${MIGRATE_MOUNT} && chown -R ${CONTAINER_UID}:${CONTAINER_UID} ${SLOT_HOME}`;
+export const HOST_DIRECTORY_SCRIPT = `src=${SESSION_SOURCE}; if [ -d "$src" ]; then cp -a "$src/." ${MIGRATE_MOUNT}/ && rm -rf "$src"; fi; mkdir -p "$src" && chmod ${PRIVATE_MODE_TEXT} ${MIGRATE_MOUNT} && chown -R ${CONTAINER_UID}:${CONTAINER_UID} ${SLOT_HOME} ${MIGRATE_MOUNT}`;
+export const FILE_SHARE_SCRIPT = `src=${SESSION_SOURCE}; if [ -d "$src" ]; then cp -R --preserve=mode,timestamps "$src/." ${MIGRATE_MOUNT}/ && rm -rf "$src"; fi; mkdir -p "$src" && chmod ${PRIVATE_MODE_TEXT} ${MIGRATE_MOUNT} && chown -R ${CONTAINER_UID}:${CONTAINER_UID} ${SLOT_HOME}`;
 export const UNSHARE_MIGRATION_SCRIPT = `src="$1/state/kanthord/pi/sessions"; if [ -d "$src" ]; then cp -a "$src/." "$2/" && rm -rf "$src"; fi; mkdir -p "$src" && chmod ${PRIVATE_MODE_TEXT} "$2" && chown -R 0:0 "$1" "$2"`;
 const CACHE_MARKER_PATH = `${CACHE_MOUNT}/${CACHE_OWNER_MARKER}`;
 const CACHE_OWNER_SCRIPT = `[ -e ${CACHE_MARKER_PATH} ] || { chown -R ${CONTAINER_UID}:${CONTAINER_UID} ${CACHE_MOUNT} && touch ${CACHE_MARKER_PATH} && chown ${CONTAINER_UID}:${CONTAINER_UID} ${CACHE_MARKER_PATH}; }`;
@@ -333,15 +333,34 @@ const SECONDS_LIMIT = 1e11;
 const MS_PER_SECOND = 1000;
 const DOCKER_TIME_ZONE = / [A-Z]{2,5}$/;
 const TABLE_GAP = /\s+/;
-const FIRST_COLUMN = 0;
-const IMAGE_HEADER = "REPOSITORY";
-const VOLUME_HEADER = "VOLUME";
-const CONTAINER_HEADER = "CONTAINER";
-const TABLE_HEADERS = new Set([IMAGE_HEADER, CONTAINER_HEADER, VOLUME_HEADER]);
-const IMAGE_COLUMNS = 8;
-const VOLUME_COLUMNS = 3;
+const UsageSection = {
+  Images: "images",
+  Containers: "containers",
+  Volumes: "volumes",
+} as const;
+type UsageSection = (typeof UsageSection)[keyof typeof UsageSection];
+const SECTION_TITLES: ReadonlyMap<string, UsageSection> = new Map([
+  ["Images space usage:", UsageSection.Images],
+  ["Containers space usage:", UsageSection.Containers],
+  ["Local Volumes space usage:", UsageSection.Volumes],
+]);
+const SECTION_HEADERS: Readonly<Record<UsageSection, RegExp>> = {
+  [UsageSection.Images]:
+    /^REPOSITORY\s+TAG\s+IMAGE ID\s+CREATED\s+SIZE\s+SHARED SIZE\s+UNIQUE SIZE\s+CONTAINERS$/,
+  [UsageSection.Containers]:
+    /^CONTAINER ID\s+IMAGE\s+COMMAND\s+LOCAL VOLUMES\s+SIZE\s+CREATED\s+STATUS\s+NAMES$/,
+  [UsageSection.Volumes]: /^VOLUME NAME\s+LINKS\s+SIZE$/,
+};
+const TABLE_SIZE = /^(\d+(?:\.\d+)?)(B|kB|MB|GB|TB|PB)$/;
+const TABLE_COUNT = /^\d+$/;
+const SHORT_IMAGE_ID = /^[0-9a-f]{12}$/;
+const SHORT_IMAGE_HEX_LENGTH = 12;
+const SHORT_IMAGE_KEY_LENGTH = IMAGE_ID_PREFIX.length + SHORT_IMAGE_HEX_LENGTH;
+const IMAGE_ROW_COLUMNS = 8;
+const IMAGE_ID_COLUMN = 2;
 const UNIQUE_SIZE_COLUMN = -2;
 const CONTAINERS_COLUMN = -1;
+const VOLUME_ROW_COLUMNS = 3;
 const NO_SUCH_IMAGE = /no such image|image not known|image not found/i;
 
 export function systemUsageArguments(runtime: ContainerRuntime): string[] {
@@ -507,44 +526,103 @@ export function parseSystemUsage(
   return { runtime, images: [...images.values()], volumes };
 }
 
+function unknownLine(line: string): Error {
+  return new Error(`The Podman usage table holds an unknown line: ${line}`);
+}
+
+function tableBytesOf(value: string | undefined, line: string): number {
+  const match = TABLE_SIZE.exec(value ?? "");
+  const unit = SIZE_UNITS[match?.[2] ?? ""];
+  if (!match || unit === undefined) throw unknownLine(line);
+  return Math.round(Number(match[1]) * unit);
+}
+
+function podmanTable(table: string): {
+  unique: Map<string, number>;
+  volumes: RuntimeVolumeUsage[];
+} {
+  const unique = new Map<string, number>();
+  const volumes: RuntimeVolumeUsage[] = [];
+  const seen = new Set<UsageSection>();
+  let section: UsageSection | null = null;
+  let header = false;
+  for (const line of linesOf(table)) {
+    const titled = SECTION_TITLES.get(line);
+    if (titled !== undefined) {
+      section = titled;
+      header = true;
+      seen.add(titled);
+      continue;
+    }
+    if (section === null) throw unknownLine(line);
+    if (header) {
+      if (!SECTION_HEADERS[section].test(line)) throw unknownLine(line);
+      header = false;
+      continue;
+    }
+    const columns = line.split(TABLE_GAP);
+    if (section === UsageSection.Images) {
+      const id = columns[IMAGE_ID_COLUMN] ?? "";
+      if (
+        columns.length < IMAGE_ROW_COLUMNS ||
+        !SHORT_IMAGE_ID.test(id) ||
+        !TABLE_COUNT.test(columns.at(CONTAINERS_COLUMN) ?? "")
+      )
+        throw unknownLine(line);
+      unique.set(
+        imageIdOf(id),
+        tableBytesOf(columns.at(UNIQUE_SIZE_COLUMN), line),
+      );
+    } else if (section === UsageSection.Volumes) {
+      const [name, links, size] = columns;
+      if (
+        columns.length !== VOLUME_ROW_COLUMNS ||
+        !filled(name) ||
+        !TABLE_COUNT.test(links ?? "")
+      )
+        throw unknownLine(line);
+      volumes.push({
+        name,
+        bytes: tableBytesOf(size, line),
+        links: Number(links),
+      });
+    }
+  }
+  if (!seen.has(UsageSection.Images) || !seen.has(UsageSection.Volumes))
+    throw new Error("The Podman usage table holds no image or volume section.");
+  return { unique, volumes };
+}
+
 export function parsePodmanUsage(
   table: string,
   imageList: string,
 ): RuntimeUsage {
+  const { unique, volumes } = podmanTable(table);
   const listed: unknown = JSON.parse(imageList);
-  const created = new Map<string, unknown>();
-  for (const image of Array.isArray(listed) ? listed : []) {
-    const id = field(image, "Id");
-    if (filled(id)) created.set(imageIdOf(id), field(image, "Created"));
-  }
+  if (!Array.isArray(listed))
+    throw new Error("The Podman image list answers no list.");
   const images = new Map<string, RuntimeImageUsage>();
-  const volumes: RuntimeVolumeUsage[] = [];
-  let section: string | null = null;
-  for (const line of linesOf(table)) {
-    const columns = line.split(TABLE_GAP);
-    const header = columns[FIRST_COLUMN] ?? "";
-    if (TABLE_HEADERS.has(header)) {
-      section = header;
-      continue;
-    }
-    if (section === IMAGE_HEADER && columns.length >= IMAGE_COLUMNS) {
-      const [repository, tag, shortId] = columns;
-      const full = [...created.keys()].find((id) =>
-        sameImage(shortId ?? "", id),
-      );
-      const id = full ?? imageIdOf(shortId ?? "");
-      mergeImage(images, {
-        id,
-        references: referenceOf(repository, tag),
-        created_at: timeOf(created.get(id)),
-        unique_bytes: bytesOf(columns.at(UNIQUE_SIZE_COLUMN)),
-        containers: countOf(columns.at(CONTAINERS_COLUMN)),
-      });
-    } else if (section === VOLUME_HEADER && columns.length === VOLUME_COLUMNS) {
-      const [name, links, size] = columns;
-      if (filled(name))
-        volumes.push({ name, bytes: bytesOf(size), links: countOf(links) });
-    }
+  for (const image of listed) {
+    const id = field(image, "Id");
+    const containers = field(image, "Containers");
+    if (
+      !filled(id) ||
+      !IMAGE_ID_HEX.test(id) ||
+      !isNumber(containers) ||
+      !Number.isSafeInteger(containers) ||
+      containers < NO_COUNT
+    )
+      throw new Error("The Podman image list holds an unknown image.");
+    const key = imageIdOf(id);
+    const bytes = unique.get(key.slice(0, SHORT_IMAGE_KEY_LENGTH));
+    if (bytes === undefined) continue;
+    mergeImage(images, {
+      id: key,
+      references: referenceOf(field(image, "Repository"), field(image, "Tag")),
+      created_at: timeOf(field(image, "Created")),
+      unique_bytes: bytes,
+      containers,
+    });
   }
   return {
     runtime: ContainerRuntime.Podman,

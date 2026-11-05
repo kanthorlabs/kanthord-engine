@@ -1,0 +1,220 @@
+[
+    {
+        "Id": "59099780447be540a85daa4ad5248be3b941c28b750f054e16cdd5c978683b74",
+        "ParentId": "54c2eadc39c59c598a689a722062cde95686824eda928ad1ade4f15e39e8a750",
+        "RepoDigests": [
+            "localhost/kanthord-base-path@sha256:538547db61fa249f012b284ccbca55586cc8117f2a0890eb1d4756761e19de40"
+        ],
+        "Size": 348235294,
+        "SharedSize": 0,
+        "VirtualSize": 348235294,
+        "Labels": {
+            "io.buildah.version": "1.45.1"
+        },
+        "Containers": 1,
+        "Digest": "sha256:538547db61fa249f012b284ccbca55586cc8117f2a0890eb1d4756761e19de40",
+        "History": [
+            "localhost/kanthord-base-path:28.0.1",
+            "localhost/kanthord-base-path:latest"
+        ],
+        "Names": [
+            "localhost/kanthord-base-path:latest",
+            "localhost/kanthord-base-path:28.0.1"
+        ],
+        "Created": 1791888738,
+        "CreatedAt": "2026-10-13T10:52:18Z",
+        "Repository": "localhost/kanthord-base-path",
+        "Tag": "28.0.1"
+    },
+    {
+        "Id": "59099780447be540a85daa4ad5248be3b941c28b750f054e16cdd5c978683b74",
+        "ParentId": "54c2eadc39c59c598a689a722062cde95686824eda928ad1ade4f15e39e8a750",
+        "RepoDigests": [
+            "localhost/kanthord-base-path@sha256:538547db61fa249f012b284ccbca55586cc8117f2a0890eb1d4756761e19de40"
+        ],
+        "Size": 348235294,
+        "SharedSize": 0,
+        "VirtualSize": 348235294,
+        "Labels": {
+            "io.buildah.version": "1.45.1"
+        },
+        "Containers": 1,
+        "Digest": "sha256:538547db61fa249f012b284ccbca55586cc8117f2a0890eb1d4756761e19de40",
+        "History": [
+            "localhost/kanthord-base-path:28.0.1",
+            "localhost/kanthord-base-path:latest"
+        ],
+        "Names": [
+            "localhost/kanthord-base-path:latest",
+            "localhost/kanthord-base-path:28.0.1"
+        ],
+        "Created": 1791888738,
+        "CreatedAt": "2026-10-13T10:52:18Z",
+        "Repository": "localhost/kanthord-base-path",
+        "Tag": "latest"
+    },
+    {
+        "Id": "3f314435c3f2013e6e42e499361501684dba6bcc8610a6989bec7e7d9976919a",
+        "ParentId": "1e99ba3aa6d5fabe421286b1c534e2947ca062a4f2b5568635db6877df3cc5cf",
+        "RepoDigests": [],
+        "Size": 346137524,
+        "SharedSize": 0,
+        "VirtualSize": 346137524,
+        "Labels": {
+            "io.buildah.version": "1.45.1"
+        },
+        "Containers": 0,
+        "Digest": "sha256:cd2e3d363ad5b99202bedb118ec822d7ab15d07d3e30f819aef648ab59691be1",
+        "History": [
+            "docker.io/library/7fb6d0c01fbd97072a3f41361a65746624b5a20209b6e19c2297d3c13bcb3458-tmp:latest"
+        ],
+        "Created": 1791430470,
+        "CreatedAt": "2026-10-08T03:34:30Z",
+        "Repository": "<none>",
+        "Tag": "<none>"
+    },
+    {
+        "Id": "0d48ad089aab9942ecc66590e6cf00165c8e6f8d1dd7c1b3acfefd9051a15ca6",
+        "ParentId": "accd7689f10b45960c2cafa227de4b7adc7f293b8f6f0b3054f81eea0433418b",
+        "RepoDigests": [],
+        "Size": 1283359342,
+        "SharedSize": 0,
+        "VirtualSize": 1283359342,
+        "Labels": {
+            "io.buildah.version": "1.45.1"
+        },
+        "Containers": 0,
+        "Dangling": true,
+        "Digest": "sha256:fa4aefb6eba9cfc6524decfe4a96ce3c3c02fc0992a52ba6173205378ecea29a",
+        "History": [
+            "docker.io/library/760d9ae46c2c1577a0130bf3aef467864f81c91c14f59a8bb289c4b118d72dfa-tmp:latest"
+        ],
+        "Created": 1791429131,
+        "CreatedAt": "2026-10-08T03:12:11Z",
+        "Repository": "<none>",
+        "Tag": "<none>"
+    },
+    {
+        "Id": "320994c3b997e2ec6433f717f153e108023c5bec8fefa8d76b83451d16d05ea8",
+        "ParentId": "",
+        "RepoDigests": [
+            "docker.io/library/alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6",
+            "docker.io/library/alpine@sha256:d56c381f961d307a21b3ca004cf1e3910f106644aefb1f43e654c8a56c4fd395"
+        ],
+        "Size": 8715873,
+        "SharedSize": 0,
+        "VirtualSize": 8715873,
+        "Labels": null,
+        "Containers": 0,
+        "Digest": "sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6",
+        "History": [
+            "docker.io/library/alpine:latest"
+        ],
+        "Names": [
+            "docker.io/library/alpine:latest"
+        ],
+        "Created": 1789677440,
+        "CreatedAt": "2026-09-17T20:37:20Z",
+        "Repository": "docker.io/library/alpine",
+        "Tag": "latest"
+    },
+    {
+        "Id": "8a210a6fcfc4300faac566229c246999492fb9e563afbdc3359b5dea2e360f9b",
+        "ParentId": "",
+        "RepoDigests": [
+            "docker.io/library/node@sha256:291be77873bc04731968cacf82f0fcef17cee8cf200c6b6951e2bcab41560eb7",
+            "docker.io/library/node@sha256:c8eb4212dae0c84f4f52d7b0b258244ce13e075e32d8560bf40232ee941e81a9"
+        ],
+        "Size": 233037338,
+        "SharedSize": 0,
+        "VirtualSize": 233037338,
+        "Labels": null,
+        "Containers": 0,
+        "Digest": "sha256:291be77873bc04731968cacf82f0fcef17cee8cf200c6b6951e2bcab41560eb7",
+        "History": [
+            "docker.io/library/node:24.15.0-trixie-slim"
+        ],
+        "Names": [
+            "docker.io/library/node:24.15.0-trixie-slim"
+        ],
+        "Created": 1779233321,
+        "CreatedAt": "2026-05-19T23:28:41Z",
+        "Repository": "docker.io/library/node",
+        "Tag": "24.15.0-trixie-slim"
+    },
+    {
+        "Id": "4851d2b598cb9f0b875a88628c90b12c129b2286dbcd004193f140e353a7785f",
+        "ParentId": "",
+        "RepoDigests": [
+            "public.ecr.aws/supabase/postgres@sha256:36751ee6d7c3bb38fce0c5fe23c5804085de60fac62cfdff986aa94765b77043",
+            "public.ecr.aws/supabase/postgres@sha256:ebed9d70329b47b5ffc3400825c73fa92b581725624e759cea237693aa33e178"
+        ],
+        "Size": 3020987550,
+        "SharedSize": 0,
+        "VirtualSize": 3020987550,
+        "Labels": {
+            "org.opencontainers.image.ref.name": "ubuntu",
+            "org.opencontainers.image.version": "24.04"
+        },
+        "Containers": 0,
+        "Digest": "sha256:36751ee6d7c3bb38fce0c5fe23c5804085de60fac62cfdff986aa94765b77043",
+        "History": [
+            "public.ecr.aws/supabase/postgres:17.6.1.037"
+        ],
+        "Names": [
+            "public.ecr.aws/supabase/postgres:17.6.1.037"
+        ],
+        "Created": 1762173727,
+        "CreatedAt": "2025-11-03T12:42:07Z",
+        "Repository": "public.ecr.aws/supabase/postgres",
+        "Tag": "17.6.1.037"
+    },
+    {
+        "Id": "1b44b5a3e06a9aae883e7bf25e45c100be0bb81a0e01b32de604f3ac44711634",
+        "ParentId": "",
+        "RepoDigests": [
+            "docker.io/library/hello-world@sha256:2771e37a12b7bcb2902456ecf3f29bf9ee11ec348e66e8eb322d9780ad7fc2df",
+            "docker.io/library/hello-world@sha256:f7931603f70e13dbd844253370742c4fc4202d290c80442b2e68706d8f33ce26"
+        ],
+        "Size": 26734,
+        "SharedSize": 0,
+        "VirtualSize": 26734,
+        "Labels": null,
+        "Containers": 0,
+        "Digest": "sha256:f7931603f70e13dbd844253370742c4fc4202d290c80442b2e68706d8f33ce26",
+        "History": [
+            "docker.io/library/hello-world:latest"
+        ],
+        "Names": [
+            "docker.io/library/hello-world:latest"
+        ],
+        "Created": 1754679917,
+        "CreatedAt": "2025-08-08T19:05:17Z",
+        "Repository": "docker.io/library/hello-world",
+        "Tag": "latest"
+    },
+    {
+        "Id": "f0494e814793db7c889d85e35d12cf5613a4e080a8cbe82d6f6ece79c9f2b4a6",
+        "ParentId": "",
+        "RepoDigests": [
+            "public.ecr.aws/supabase/vector@sha256:4bc04aca94a44f04b427a490f346e7397ef7ce61fe589d718f744f7d92cb5c80",
+            "public.ecr.aws/supabase/vector@sha256:6d09a70bc65f8d6a71313aee54a90ed7eeb64bbc5ce83d9b4214f24090ab35a1"
+        ],
+        "Size": 125718757,
+        "SharedSize": 0,
+        "VirtualSize": 125718757,
+        "Labels": null,
+        "Containers": 0,
+        "Digest": "sha256:4bc04aca94a44f04b427a490f346e7397ef7ce61fe589d718f744f7d92cb5c80",
+        "History": [
+            "public.ecr.aws/supabase/vector:0.28.1-alpine"
+        ],
+        "Names": [
+            "public.ecr.aws/supabase/vector:0.28.1-alpine"
+        ],
+        "Created": 1678113227,
+        "CreatedAt": "2023-03-06T14:33:47Z",
+        "Repository": "public.ecr.aws/supabase/vector",
+        "Tag": "0.28.1-alpine"
+    }
+]
