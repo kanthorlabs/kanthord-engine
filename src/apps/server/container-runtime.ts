@@ -362,6 +362,9 @@ const UNIQUE_SIZE_COLUMN = -2;
 const CONTAINERS_COLUMN = -1;
 const VOLUME_ROW_COLUMNS = 3;
 const NO_SUCH_IMAGE = /no such image|image not known|image not found/i;
+const DIGEST_MARK = "@";
+const TAG_MARK = ":";
+const PATH_MARK = "/";
 
 export function systemUsageArguments(runtime: ContainerRuntime): string[] {
   return runtime === ContainerRuntime.Podman
@@ -605,12 +608,15 @@ export function parsePodmanUsage(
   for (const image of listed) {
     const id = field(image, "Id");
     const containers = field(image, "Containers");
+    const names = field(image, "Names") ?? [];
     if (
       !filled(id) ||
       !IMAGE_ID_HEX.test(id) ||
       !isNumber(containers) ||
       !Number.isSafeInteger(containers) ||
-      containers < NO_COUNT
+      containers < NO_COUNT ||
+      !Array.isArray(names) ||
+      !names.every(filled)
     )
       throw new Error("The Podman image list holds an unknown image.");
     const key = imageIdOf(id);
@@ -618,7 +624,7 @@ export function parsePodmanUsage(
     if (bytes === undefined) continue;
     mergeImage(images, {
       id: key,
-      references: referenceOf(field(image, "Repository"), field(image, "Tag")),
+      references: names.flatMap(taggedNameOf),
       created_at: timeOf(field(image, "Created")),
       unique_bytes: bytes,
       containers,
@@ -629,6 +635,13 @@ export function parsePodmanUsage(
     images: [...images.values()],
     volumes,
   };
+}
+
+function taggedNameOf(name: string): string[] {
+  const [named = ""] = name.split(DIGEST_MARK);
+  return named.lastIndexOf(TAG_MARK) > named.lastIndexOf(PATH_MARK)
+    ? [named]
+    : [];
 }
 
 function numberOrNull(value: unknown): number | null {
