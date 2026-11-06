@@ -84,9 +84,17 @@ export function testContext(t: TestContext): CancellationContext {
   return context;
 }
 
+const TEMPORARY_ROOT_MAX_LENGTH = 40;
+const SHORT_TEMPORARY_ROOT = "/tmp";
+
+export function shortTemporaryRoot(): string {
+  const root = tmpdir();
+  return root.length > TEMPORARY_ROOT_MAX_LENGTH ? SHORT_TEMPORARY_ROOT : root;
+}
+
 export function temporaryDirectory(): string {
   process.umask(0o077);
-  const parent = join(tmpdir(), "opencode");
+  const parent = join(shortTemporaryRoot(), "opencode");
   mkdirSync(parent, { recursive: true, mode: 0o700 });
   return mkdtempSync(join(parent, "kanthord-"));
 }
