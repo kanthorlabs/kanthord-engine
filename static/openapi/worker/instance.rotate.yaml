@@ -120,6 +120,11 @@ components:
             - server
             - container
             - worker
+        machine:
+          anyOf:
+            - type: string
+              minLength: 1
+            - type: "null"
         public_key:
           anyOf:
             - type: string

@@ -8,6 +8,7 @@ const CREATED_INDEX_ORIGIN = "c";
 const WORKER_REGISTRATION_TABLE = "worker_registration";
 const WORKER_REGISTRATION_INDEX = "worker_registration_live_client";
 const WORKER_INSTANCE_TABLE = "worker_instance";
+const WORKER_MACHINE_TABLE = "worker_machine";
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const RESOURCE_IDENTITY = "worker:kanthord:general";
 const CLIENT_ID = "client_identity_01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -16,7 +17,7 @@ const REGISTERED_AT = 1000;
 const ENDED_AT = 2000;
 const EXPECTED_REGISTRATIONS = 3;
 
-test("worker migrations end with the registration and the instance tables", () => {
+test("worker migrations end with the registration, the instance and the machine tables", () => {
   const store = new Store(IN_MEMORY_DATABASE);
   try {
     store.migrate([
@@ -29,7 +30,7 @@ test("worker migrations end with the registration and the instance tables", () =
         )
         .all()
         .map((row) => row.name),
-      [WORKER_REGISTRATION_TABLE, WORKER_INSTANCE_TABLE],
+      [WORKER_REGISTRATION_TABLE, WORKER_INSTANCE_TABLE, WORKER_MACHINE_TABLE],
     );
   } finally {
     store.close();
@@ -147,6 +148,7 @@ test("worker instance schema holds only the name revision and fingerprint unique
         { name: "worker", type: "TEXT", notnull: 1, pk: 0 },
         { name: "revision", type: "INTEGER", notnull: 1, pk: 0 },
         { name: "placement", type: "TEXT", notnull: 1, pk: 0 },
+        { name: "machine", type: "TEXT", notnull: 0, pk: 0 },
         { name: "public_key", type: "TEXT", notnull: 0, pk: 0 },
         { name: "fingerprint", type: "TEXT", notnull: 0, pk: 0 },
         { name: "created_at", type: "INTEGER", notnull: 1, pk: 0 },
@@ -172,6 +174,54 @@ test("worker instance schema holds only the name revision and fingerprint unique
         store.database
           .prepare("SELECT sql FROM sqlite_master WHERE name = ?")
           .get(WORKER_INSTANCE_TABLE)?.sql,
+      ),
+      /\bCHECK\s*\(/i,
+    );
+  } finally {
+    store.close();
+  }
+});
+
+test("worker machine schema holds only the name revision and fingerprint unique indexes", () => {
+  const store = new Store(IN_MEMORY_DATABASE);
+  try {
+    store.migrate([
+      { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
+    ]);
+    assert.deepEqual(
+      store.database
+        .prepare(`PRAGMA table_info(${WORKER_MACHINE_TABLE})`)
+        .all()
+        .map(({ name, type, notnull, pk }) => ({ name, type, notnull, pk })),
+      [
+        { name: "id", type: "TEXT", notnull: 1, pk: 1 },
+        { name: "name", type: "TEXT", notnull: 1, pk: 0 },
+        { name: "revision", type: "INTEGER", notnull: 1, pk: 0 },
+        { name: "public_key", type: "TEXT", notnull: 1, pk: 0 },
+        { name: "fingerprint", type: "TEXT", notnull: 1, pk: 0 },
+        { name: "created_at", type: "INTEGER", notnull: 1, pk: 0 },
+        { name: "ended_at", type: "INTEGER", notnull: 0, pk: 0 },
+      ],
+    );
+    assert.deepEqual(
+      store.database
+        .prepare(`PRAGMA index_list(${WORKER_MACHINE_TABLE})`)
+        .all()
+        .filter((row) => row.origin === CREATED_INDEX_ORIGIN)
+        .map(({ name, unique }) => ({ name, unique }))
+        .sort((left, right) =>
+          String(left.name).localeCompare(String(right.name)),
+        ),
+      [
+        { name: "worker_machine_fingerprint", unique: 1 },
+        { name: "worker_machine_name_revision", unique: 1 },
+      ],
+    );
+    assert.doesNotMatch(
+      String(
+        store.database
+          .prepare("SELECT sql FROM sqlite_master WHERE name = ?")
+          .get(WORKER_MACHINE_TABLE)?.sql,
       ),
       /\bCHECK\s*\(/i,
     );

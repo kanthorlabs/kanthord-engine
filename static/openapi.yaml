@@ -428,6 +428,14 @@ paths:
     $ref: ./openapi/worker/instance.work.yaml#/pathItem
   /api/worker/instance/{instance_name}/workspace/delete:
     $ref: ./openapi/worker/instance.workspace.delete.yaml#/pathItem
+  /api/worker/machine/{machine_name}/archive:
+    $ref: ./openapi/worker/machine.archive.yaml#/pathItem
+  /api/worker/machine:
+    $ref: ./openapi/worker/machine.create.yaml#/pathItem
+  /api/worker/machine/{machine_name}:
+    $ref: ./openapi/worker/machine.get.yaml#/pathItem
+  /api/worker/machine/{machine_name}/revision:
+    $ref: ./openapi/worker/machine.rotate.yaml#/pathItem
   /api/worker/placement:
     $ref: ./openapi/worker/placement.list.yaml#/pathItem
   /api/worker/register:

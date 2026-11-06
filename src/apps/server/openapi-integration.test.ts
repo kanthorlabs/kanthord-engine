@@ -739,6 +739,11 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["worker.instance.get", AccessPolicy.Human],
   ["worker.instance.rotate", AccessPolicy.Human],
   ["worker.instance.archive", AccessPolicy.Human],
+  ["worker.machine.create", AccessPolicy.Human],
+  ["worker.machine.list", AccessPolicy.Human],
+  ["worker.machine.get", AccessPolicy.Human],
+  ["worker.machine.rotate", AccessPolicy.Human],
+  ["worker.machine.archive", AccessPolicy.Human],
   ["worker.instance.token", AccessPolicy.Public],
   ["worker.instance.connect", AccessPolicy.Worker],
   ["worker.instance.heartbeat", AccessPolicy.Worker],
@@ -920,8 +925,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["footprint.measure.run", AccessPolicy.Human],
   ["footprint.backup.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 256;
-const ROUTED_OPERATION_COUNT = 244;
+const OPERATION_COUNT = 261;
+const ROUTED_OPERATION_COUNT = 249;
 const INTAKE_OPERATION_COUNT = 24;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = [

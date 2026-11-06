@@ -136,6 +136,10 @@ components:
               description: server, container or worker; required. A server or container
                 instance takes neither public_key nor endpoint.
               type: string
+            machine:
+              description: Name of the live worker machine of an instance at the worker
+                placement.
+              type: string
             public_key:
               description: base64url X25519 public key; never with endpoint.
               type: string
@@ -178,6 +182,11 @@ components:
             - server
             - container
             - worker
+        machine:
+          anyOf:
+            - type: string
+              minLength: 1
+            - type: "null"
         public_key:
           anyOf:
             - type: string
@@ -283,6 +292,11 @@ components:
                   - server
                   - container
                   - worker
+              machine:
+                anyOf:
+                  - type: string
+                    minLength: 1
+                  - type: "null"
               public_key:
                 anyOf:
                   - type: string

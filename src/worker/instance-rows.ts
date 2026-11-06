@@ -11,7 +11,7 @@ import {
 const NO_ROWS = 0;
 const FIRST_REVISION = 1;
 const COLUMNS =
-  "id, name, worker, revision, placement, public_key, fingerprint, created_at, ended_at";
+  "id, name, worker, revision, placement, machine, public_key, fingerprint, created_at, ended_at";
 
 function record(row: unknown): InstanceRecord {
   const value = row as InstanceRecord;
@@ -23,6 +23,7 @@ function record(row: unknown): InstanceRecord {
     worker: value.worker,
     revision: value.revision,
     placement: value.placement,
+    machine: value.machine,
     public_key: value.public_key,
     fingerprint: value.fingerprint,
     created_at: value.created_at,
@@ -100,9 +101,35 @@ export function fingerprintTaken(
   assert.ok(tx.database.isTransaction);
   return (
     tx.database
-      .prepare("SELECT 1 FROM worker_instance WHERE fingerprint = ?")
-      .get(fingerprint) !== undefined
+      .prepare(
+        "SELECT 1 FROM worker_instance WHERE fingerprint = ? UNION ALL SELECT 1 FROM worker_machine WHERE fingerprint = ?",
+      )
+      .get(fingerprint, fingerprint) !== undefined
   );
+}
+
+export function nameTaken(tx: Transaction, name: string): boolean {
+  assert.ok(tx.database.isTransaction);
+  return (
+    tx.database
+      .prepare(
+        "SELECT 1 FROM worker_instance WHERE name = ? UNION ALL SELECT 1 FROM worker_machine WHERE name = ?",
+      )
+      .get(name, name) !== undefined
+  );
+}
+
+export function readLiveInstancesOfMachine(
+  tx: Transaction,
+  machine: string,
+): InstanceRecord[] {
+  assert.ok(tx.database.isTransaction);
+  return tx.database
+    .prepare(
+      `SELECT ${COLUMNS} FROM worker_instance WHERE machine = ? AND ended_at IS NULL ORDER BY name`,
+    )
+    .all(machine)
+    .map(record);
 }
 
 export function countLiveServerInstances(tx: Transaction): number {
@@ -144,6 +171,7 @@ export function insertInstance(
     worker: string;
     revision?: number;
     placement: InstancePlacement;
+    machine?: string | null;
     public_key: string | null;
     fingerprint: string | null;
   },
@@ -157,6 +185,7 @@ export function insertInstance(
     worker: value.worker,
     revision: value.revision ?? FIRST_REVISION,
     placement: value.placement,
+    machine: value.machine ?? null,
     public_key: value.public_key,
     fingerprint: value.fingerprint,
     created_at: now,
@@ -164,7 +193,7 @@ export function insertInstance(
   };
   tx.database
     .prepare(
-      `INSERT INTO worker_instance (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+      `INSERT INTO worker_instance (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
     )
     .run(
       row.id,
@@ -172,6 +201,7 @@ export function insertInstance(
       row.worker,
       row.revision,
       row.placement,
+      row.machine ?? null,
       row.public_key,
       row.fingerprint,
       row.created_at,
