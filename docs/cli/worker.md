@@ -1,6 +1,6 @@
 # Worker CLI specification
 
-This specification for `kanthord worker` contains **16 command leaves, all implemented**.
+This specification for `kanthord worker` contains **22 command leaves, all implemented**.
 Requirements marked
 **target design** describe later runtime behavior and do not establish implementation.
 
@@ -26,6 +26,8 @@ The [instance implementation](../../src/worker/instances.ts) keeps the worker
 instance records, their key revisions and their connections.
 [`serve worker`](./other.md#serve-worker) starts from an instance configuration
 that `instance create` or `instance rotate` produces.
+The [machine implementation](../../src/worker/machines.ts) keeps the worker
+machine records and their key revisions.
 
 The [server composition](../../src/apps/server/index.ts) wires the real
 [Project binding resolver](../../src/project/service.ts), including group
@@ -45,12 +47,12 @@ separately from registration healthchecks.
 
 ## Shared input and output contract
 
-Every command below except `join` reaches the selected server through a published operation.
+Every command below except `join` and `machine join` reaches the selected server through a published operation.
 It reads no server database. A proposed CLI command ships only together with its
 operation declaration and generated OpenAPI route. All commands accept `--help`,
 which needs no server or token. Unknown arguments/options and invalid local
 inputs fail before a request. No command prompts or accepts `--config`.
-Only `join` reads standard input.
+Only `join` and `machine join` read standard input.
 
 Shared syntax, types, defaults, and validation are defined by each linked flag.
 Only applicability and Worker-specific requirements are listed here.
@@ -110,24 +112,30 @@ Worker and agent names and MCP session IDs retain their natural-key/protocol for
 Live registration and execution requirements appear per operation; registration
 and deregistration require no live registration.
 
-| Status | Command after `kanthord worker`                                    | Route                                                    | Operation ID                     | Access / registration                                                             |
-| ------ | ------------------------------------------------------------------ | -------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------------------------- |
-| I      | `register`                                                         | `POST /api/worker/register`                              | `worker.register`                | `client`; no live registration required                                           |
-| I      | `heartbeat [--token <jwt>]`                                        | `POST /api/worker/heartbeat`                             | `worker.heartbeat`               | `client`; live registration                                                       |
-| I      | `handover <execution-id> [M] [--token <jwt>]`                      | `POST /api/worker/handover`                              | `worker.handover`                | `client`; live registration and live execution                                    |
-| I      | `list`                                                             | `GET /api/worker/catalog`                                | `worker.catalog.list`            | `human`                                                                           |
-| I      | `get <worker-name>`                                                | `GET /api/worker/catalog/:worker_name`                   | `worker.catalog.get`             | `human`                                                                           |
-| I      | `placement list`                                                   | `GET /api/worker/placement`                              | `worker.placement.list`          | `human`                                                                           |
-| I      | `registration list`                                                | `GET /api/worker/registration`                           | `worker.registration.list`       | `human`                                                                           |
-| I      | `registration get <runtime-identity>`                              | `GET /api/worker/registration/:runtime_identity`         | `worker.registration.get`        | `human`                                                                           |
-| I      | `registration deregister <runtime-identity>`                       | `DELETE /api/worker/registration/:runtime_identity`      | `worker.registration.deregister` | `client`; no live registration required; ownership by client, binding and project |
-| I      | `registration resume <runtime-identity>`                           | `POST /api/worker/registration/:runtime_identity/resume` | `worker.registration.resume`     | `human`; mutation                                                                 |
-| I      | `instance create <name> --worker <worker> --placement <placement>` | `POST /api/worker/instance`                              | `worker.instance.create`         | `human`; mutation                                                                 |
-| I      | `instance list`                                                    | `GET /api/worker/instance`                               | `worker.instance.list`           | `human`                                                                           |
-| I      | `instance get <name>`                                              | `GET /api/worker/instance/:instance_name`                | `worker.instance.get`            | `human`                                                                           |
-| I      | `instance rotate <name> --expected-revision <n>`                   | `POST /api/worker/instance/:instance_name/revision`      | `worker.instance.rotate`         | `human`; mutation                                                                 |
-| I      | `instance archive <name> --expected-revision <n> [--force]`        | `POST /api/worker/instance/:instance_name/archive`       | `worker.instance.archive`        | `human`; mutation                                                                 |
-| I      | `join [--force]`                                                   | local                                                    | none                             | none; reads the instance configuration from standard input                        |
+| Status | Command after `kanthord worker`                                      | Route                                                    | Operation ID                     | Access / registration                                                             |
+| ------ | -------------------------------------------------------------------- | -------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------------------------- |
+| I      | `register`                                                           | `POST /api/worker/register`                              | `worker.register`                | `client`; no live registration required                                           |
+| I      | `heartbeat [--token <jwt>]`                                          | `POST /api/worker/heartbeat`                             | `worker.heartbeat`               | `client`; live registration                                                       |
+| I      | `handover <execution-id> [M] [--token <jwt>]`                        | `POST /api/worker/handover`                              | `worker.handover`                | `client`; live registration and live execution                                    |
+| I      | `list`                                                               | `GET /api/worker/catalog`                                | `worker.catalog.list`            | `human`                                                                           |
+| I      | `get <worker-name>`                                                  | `GET /api/worker/catalog/:worker_name`                   | `worker.catalog.get`             | `human`                                                                           |
+| I      | `placement list`                                                     | `GET /api/worker/placement`                              | `worker.placement.list`          | `human`                                                                           |
+| I      | `registration list`                                                  | `GET /api/worker/registration`                           | `worker.registration.list`       | `human`                                                                           |
+| I      | `registration get <runtime-identity>`                                | `GET /api/worker/registration/:runtime_identity`         | `worker.registration.get`        | `human`                                                                           |
+| I      | `registration deregister <runtime-identity>`                         | `DELETE /api/worker/registration/:runtime_identity`      | `worker.registration.deregister` | `client`; no live registration required; ownership by client, binding and project |
+| I      | `registration resume <runtime-identity>`                             | `POST /api/worker/registration/:runtime_identity/resume` | `worker.registration.resume`     | `human`; mutation                                                                 |
+| I      | `instance create <name> --worker <worker> --placement <placement>`   | `POST /api/worker/instance`                              | `worker.instance.create`         | `human`; mutation                                                                 |
+| I      | `instance list`                                                      | `GET /api/worker/instance`                               | `worker.instance.list`           | `human`                                                                           |
+| I      | `instance get <name>`                                                | `GET /api/worker/instance/:instance_name`                | `worker.instance.get`            | `human`                                                                           |
+| I      | `instance rotate <name> --expected-revision <n>`                     | `POST /api/worker/instance/:instance_name/revision`      | `worker.instance.rotate`         | `human`; mutation                                                                 |
+| I      | `instance archive <name> --expected-revision <n> [--force]`          | `POST /api/worker/instance/:instance_name/archive`       | `worker.instance.archive`        | `human`; mutation                                                                 |
+| I      | `join [--force]`                                                     | local                                                    | none                             | none; reads the instance configuration from standard input                        |
+| I      | `machine create <name> [--output] [--force]`                         | `POST /api/worker/machine`                               | `worker.machine.create`          | `human`; mutation                                                                 |
+| I      | `machine list`                                                       | `GET /api/worker/machine`                                | `worker.machine.list`            | `human`                                                                           |
+| I      | `machine get <name>`                                                 | `GET /api/worker/machine/:machine_name`                  | `worker.machine.get`             | `human`                                                                           |
+| I      | `machine rotate <name> --expected-revision <n> [--output] [--force]` | `POST /api/worker/machine/:machine_name/revision`        | `worker.machine.rotate`          | `human`; mutation                                                                 |
+| I      | `machine archive <name> --expected-revision <n>`                     | `POST /api/worker/machine/:machine_name/archive`         | `worker.machine.archive`         | `human`; mutation                                                                 |
+| I      | `machine join [--force]`                                             | local                                                    | none                             | none; reads the machine configuration from standard input                         |
 
 `credential` runs inside the `worker` application alone and is no CLI command.
 Its implemented operation is `worker.credential` at `POST /api/worker/credential`, with `client` access and a live execution requirement. Its body holds `execution_id`, `nonce` and `ciphertext`, the sealed refresh report, and it answers 204 with no HTTP body (`null` through the direct adapter). It is a mutation with a 30-second timeout and the 32 MiB body limit. The worker application caller is later Plan 09 work.
@@ -565,7 +573,7 @@ registration changes nothing. A lost execution is never revived.
 A worker instance is the unit of capacity of a hosted worker. It holds one placement: `server`, `container` or `worker`.
 An instance at the `server` or the `container` placement is a server instance. It holds no key.
 An instance at the `worker` placement is one host that serves the bindings at the `worker` placement that list it.
-An instance record holds the instance name, the hosted worker, the placement and, at the `worker` placement, one X25519 key revision.
+An instance record holds the instance name, the hosted worker, the placement and, at the `worker` placement, the worker machine and one X25519 key revision.
 [`serve worker`](./other.md#serve-worker) proves the instance with the private key of the live revision.
 The server keeps only the public key and its fingerprint.
 The create sets the placement, and no operation changes it.
@@ -582,7 +590,8 @@ The file has mode `0600`.
 | `InstanceId`   | `worker_instance_<ulid>`. Each key revision has its own identity.                                                                                                        |
 | `revision`     | Positive integer. `instance create` writes revision 1. Each `instance rotate` writes the next revision.                                                                  |
 
-The instance record contains `id`, `name`, `worker`, `revision`, `placement`, `public_key`, `fingerprint`, `created_at` and `ended_at`.
+The instance record contains `id`, `name`, `worker`, `revision`, `placement`, `machine`, `public_key`, `fingerprint`, `created_at` and `ended_at`.
+`machine` is the name of the [worker machine](#worker-machines) of an instance at the `worker` placement, and `null` for a server instance.
 `public_key` and `fingerprint` are `null` for a server instance.
 `ended_at` is `null` for the live revision.
 The five operations are `unary`, have the `human` access policy and a 30 s timeout.
@@ -590,25 +599,26 @@ The five operations are `unary`, have the `human` access policy and a 30 s timeo
 ### `instance create`
 
 ```text
-kanthord worker instance create <name> --worker <worker> --placement <placement> [--worker-endpoint <url>] [--output [--force]] [--idempotency-key <key>]
+kanthord worker instance create <name> --worker <worker> --placement <placement> [--machine <name>] [--worker-endpoint <url>] [--output [--force]] [--idempotency-key <key>]
 ```
 
-| Input                     | Requiredness / type / default                                                                           | Mapping and validation                                                                                           |
-| ------------------------- | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `<name>`                  | Required `InstanceName`                                                                                 | `body.name`. A name outside the form fails locally with `worker.instance.name_invalid`.                          |
-| `--worker <worker>`       | Required `WorkerName`                                                                                   | `body.worker`. The server accepts only a worker with the `kanthord` host.                                        |
-| `--placement <placement>` | Required. `server`, `container` or `worker`. `--output` and `--worker-endpoint` apply only at `worker`. | `body.placement`. An absent or invalid value fails locally with `cli.worker.instance.placement_invalid`.         |
-| `--worker-endpoint <url>` | Optional URL; default the resolved `--endpoint`                                                         | The `endpoint` of the instance configuration. It is not sent. It follows the `--endpoint` URL validation.        |
-| `--output`                | Optional flag                                                                                           | Writes the instance file on this host and prints no instance configuration.                                      |
-| `--force`                 | Optional flag; requires `--output`                                                                      | Replaces an existing instance file. Without `--output` it fails with `cli.worker.instance.force_without_output`. |
-| `--idempotency-key <key>` | Shared mutation key                                                                                     | `Idempotency-Key` header.                                                                                        |
+| Input                     | Requiredness / type / default                                                                           | Mapping and validation                                                                                                                      |
+| ------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<name>`                  | Required `InstanceName`                                                                                 | `body.name`. A name outside the form fails locally with `worker.instance.name_invalid`.                                                     |
+| `--worker <worker>`       | Required `WorkerName`                                                                                   | `body.worker`. The server accepts only a worker with the `kanthord` host.                                                                   |
+| `--placement <placement>` | Required. `server`, `container` or `worker`. `--output` and `--worker-endpoint` apply only at `worker`. | `body.placement`. An absent or invalid value fails locally with `cli.worker.instance.placement_invalid`.                                    |
+| `--machine <name>`        | Required at `worker`, refused at `server` and `container`                                               | `body.machine`. An absent or unknown machine at `worker`, or a machine at another placement, answers `400 worker.instance.machine_invalid`. |
+| `--worker-endpoint <url>` | Optional URL; default the resolved `--endpoint`                                                         | The `endpoint` of the instance configuration. It is not sent. It follows the `--endpoint` URL validation.                                   |
+| `--output`                | Optional flag                                                                                           | Writes the instance file on this host and prints no instance configuration.                                                                 |
+| `--force`                 | Optional flag; requires `--output`                                                                      | Replaces an existing instance file. Without `--output` it fails with `cli.worker.instance.force_without_output`.                            |
+| `--idempotency-key <key>` | Shared mutation key                                                                                     | `Idempotency-Key` header.                                                                                                                   |
 
 At the `worker` placement, the CLI generates the X25519 key pair on this host.
-It sends `{ name, worker, placement, public_key }` and never sends the private key.
+It sends `{ name, worker, placement, machine, public_key }` and never sends the private key.
 The operation also accepts `endpoint` instead of `public_key`.
 With `endpoint`, the server generates the key pair and answers the instance configuration once.
 The CLI does not use that form.
-At the `server` and the `container` placements, the CLI generates no key pair and sends `{ name, worker, placement }`.
+At the `server` and the `container` placements, the CLI generates no key pair and sends `{ name, worker, placement }`, and `machine` when `--machine` is given.
 A request with `public_key` or `endpoint` at these placements answers `400 worker.instance.key_forbidden`.
 The CLI prints the record as one JSON line, with no instance file and no instance configuration.
 A create at the `container` placement reads the placement status first.
@@ -629,7 +639,8 @@ The printed line holds no idempotency key.
 The operation is a secret mutation: a repeat of its key answers 409 with no body.
 An indeterminate result fails with `cli.worker.instance.create.indeterminate` and prints the key.
 Read the instance with `instance get` before a new attempt.
-A taken name answers `409 worker.instance.name_conflict`, also when an archived instance holds the name.
+A taken name answers `409 worker.instance.name_conflict`, also when an archived instance or a live or an archived machine holds the name.
+The machine of an instance never changes. `instance rotate` keeps it.
 
 ### `instance list`
 
@@ -740,6 +751,146 @@ kanthord worker join < instance.txt
 kanthord serve worker --instance <name>
 ```
 
+## Worker machines
+
+A worker machine is one computer. It is the credential holder of the instances at the `worker` placement that run on it.
+Each such instance names its machine in `machine`, and the machine of an instance never changes.
+A machine holds no token, no connection, no binding and no execution.
+A machine record holds `id`, `name`, `revision`, `public_key`, `fingerprint`, `created_at` and `ended_at`.
+`id` is `worker_machine_<ulid>`, and each key revision has its own identity.
+`ended_at` is `null` for the live revision.
+The server keeps only the public key and its fingerprint.
+
+A machine name follows `InstanceName`. A machine name and an instance name never match.
+No two revisions of any instance or any machine share one fingerprint.
+
+The machine configuration is the canonical JSON object `{ name, private_key }`.
+Its value is the unpadded base64url encoding of that JSON text, with no prefix.
+`private_key` is the base64url X25519 private key.
+The machine file `<XDG configuration directory>/kanthord/machines/<name>.yaml` holds the same two fields as YAML.
+The file has mode `0600`, and its directory has mode `0700`.
+On a computer without a writable configuration directory, the environment variable `KANTHORD_MACHINE_CONFIG` holds the value.
+The agent processes of the `worker` application never receive that variable.
+
+The five operations are `unary`, have the `human` access policy and a 30 s timeout.
+
+### `machine create`
+
+```text
+kanthord worker machine create <name> [--output] [--force] [--idempotency-key <key>]
+```
+
+| Input                     | Requiredness / type / default | Mapping and validation                                                                                                                          |
+| ------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<name>`                  | Required `InstanceName`       | `body.name`. A name outside the form fails locally with `worker.machine.name_invalid`, or with `worker.machine.config_invalid` with `--output`. |
+| `--output`                | Optional flag                 | Writes the machine file on this host and prints no machine configuration.                                                                       |
+| `--force`                 | Optional flag                 | Replaces an existing machine file. It applies with `--output` only.                                                                             |
+| `--idempotency-key <key>` | Shared mutation key           | `Idempotency-Key` header.                                                                                                                       |
+
+The CLI generates the X25519 key pair on this host.
+It sends `{ name, public_key }` and never sends the private key.
+The operation also accepts a body with no `public_key`.
+Then the server generates the key pair, keeps only the public key and answers `machine_configuration` once.
+The CLI does not use that form.
+
+The CLI checks the name, the token and the machine file before the request.
+With `--output`, an existing machine file fails with `cli.worker.machine.config_exists`, unless `--force` is given.
+Without `--output`, standard output must be a terminal, or the command fails with `cli.output.terminal_required`.
+
+HTTP `200` answers the machine record. The CLI prints one JSON line with the record.
+With `--output`, the line adds `created: <path of the machine file>`.
+Without `--output`, the line adds `machine_configuration`, the configuration value.
+Copy that value to the computer and run `machine join` there, or set it as `KANTHORD_MACHINE_CONFIG`.
+The printed line holds no idempotency key.
+
+The operation is a secret mutation: a repeat of its key answers 409 with no body, and the answer carries `Cache-Control: no-store`.
+An indeterminate result fails with `cli.worker.machine.create.indeterminate` and prints the key.
+Read the machine with `machine get` before a new attempt.
+A bad `public_key` answers `400 worker.machine.key_invalid`.
+A taken name answers `409 worker.machine.name_conflict`, also when an archived machine or a live or an archived instance holds the name.
+A key that a machine or an instance revision holds answers `409 worker.machine.key_conflict`.
+
+### `machine list`
+
+```text
+kanthord worker machine list [--limit <count>] [--cursor <opaque>]
+```
+
+| Input                                                                            | Requiredness / type / default | Mapping and validation |
+| -------------------------------------------------------------------------------- | ----------------------------- | ---------------------- |
+| [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | Shared pagination flags       | Shared query mapping.  |
+
+Required token: human JWT. Empty params, absent body. HTTP `200` returns one page of live machines in ascending name order.
+Each item holds the machine record and `instance_count`, the count of live instances that name the machine.
+
+### `machine get`
+
+```text
+kanthord worker machine get <name>
+```
+
+Required `<name>: InstanceName`, mapped to `params.machine_name`. Required token: human JWT.
+Empty query, absent body. HTTP `200` returns the live revision, or the latest revision of an archived machine.
+The answer adds `instances` to the machine record.
+Each item of `instances` is the instance record of a live instance that names the machine, with its `connection` as in `instance list`.
+An unknown name answers `404 worker.machine.not_found`.
+
+### `machine rotate`
+
+```text
+kanthord worker machine rotate <name> --expected-revision <n> [--output] [--force] [--idempotency-key <key>]
+```
+
+`<name>`, `--output`, `--force` and `--idempotency-key` follow [`machine create`](#machine-create).
+`--expected-revision <n>` is required and names the live revision as a positive integer.
+An absent or invalid value fails locally with `cli.worker.machine.revision_invalid`.
+The CLI generates a new key pair and sends `{ public_key, expected_revision }` to `params.machine_name`.
+With `--output`, the machine file exists, so the command needs `--force`.
+
+In one transaction, the server ends the live revision and writes the next revision with the new key.
+The answer, the output and the secret-mutation rule follow `machine create`.
+An indeterminate result fails with `cli.worker.machine.rotate.indeterminate`.
+A stale `--expected-revision` answers `409 worker.machine.revision_conflict` with `details.revision`.
+An archived machine answers `409 worker.machine.archived`.
+
+### `machine archive`
+
+```text
+kanthord worker machine archive <name> --expected-revision <n> [--idempotency-key <key>]
+```
+
+Required `<name>: InstanceName` and `--expected-revision <n>`, as in `machine rotate`.
+The request body is `{ expected_revision }`. HTTP `200` returns the archived machine record.
+The CLI prints one JSON line with the record and `idempotency_key`.
+In its transaction, the server archives the credential copies that the machine holds.
+A live instance that names the machine refuses the archive with `409 worker.machine.in_use`.
+`details.instances` lists the instance names.
+Archive those instances first.
+An archived name stays taken, and neither `machine create` nor `instance create` can use it again.
+An indeterminate result fails with `cli.worker.machine.archive.indeterminate` and prints the key.
+
+### `machine join`
+
+```text
+kanthord worker machine join [--force]
+```
+
+`machine join` is local. It calls no server and needs no token.
+It reads the machine configuration value from standard input, decodes it and validates it.
+An invalid value, or a `name` outside the form, fails with `worker.machine.config_invalid`.
+It writes the machine file `<XDG configuration directory>/kanthord/machines/<name>.yaml` with mode `0600`.
+An existing file fails with `cli.worker.machine.config_exists`, unless `--force` is given.
+On success stdout is exactly `created: <absolute path>\n`.
+
+```sh
+kanthord worker machine join < machine.txt
+```
+
+The reader of the configuration takes the machine name.
+No source fails with `worker.machine.config_absent`, which names the variable and the file path.
+The variable and the file for one name fail with `worker.machine.config_conflict`.
+A value that fails the schema, or whose `name` differs from the requested name, fails with `worker.machine.config_invalid`.
+
 ## MCP and repository actions
 
 The target server owns one MCP v2 server. Every client, native agent or external
@@ -755,7 +906,7 @@ execution identity, and the performer never dispatches an action twice.
 This revision projects no tool to a REST route and gives the CLI no command
 that calls a tool. Tools are reached through the MCP server.
 
-`worker.instance.heartbeat` is an API-only `worker` mutation at `POST /api/worker/instance/heartbeat` with the body `{ connection_id, connection_name }`. It is a liveness signal, reads no store and answers 200 with `{ server_version, binding_version, credential_version, work_version }`. `work_version` is an in-memory counter of each instance. A server start sets it to the start time in Unix milliseconds. It rises by one when a login of the instance starts, when a human submits its login code, when the login ends, when the server queues a session read of the instance and when the server queues a new footprint order of a `worker` placement instance. A footprint result does not change it. `worker.instance.work` is an API-only `worker` read at `POST /api/worker/instance/work` with the body `{ connection_id }`. The instance calls it after a heartbeat answer with another `work_version`. It answers 200 with `{ work_version, login_sessions, session_reads, footprint_orders }` and renews no liveness. A `connection_id` that is not current answers `409 worker.instance.connection_superseded`. [`serve worker`](./other.md#serve-worker) states the instance side.
+`worker.instance.heartbeat` is an API-only `worker` mutation at `POST /api/worker/instance/heartbeat` with the body `{ connection_id, connection_name }`. It is a liveness signal, reads no store and answers 200 with `{ server_version, binding_version, credential_version, work_version, machine }`. `machine` is the machine name of the instance, or `null` for a server instance. `work_version` is an in-memory counter of each instance. A server start sets it to the start time in Unix milliseconds. It rises by one when a login of the instance starts, when a human submits its login code, when the login ends, when the server queues a session read of the instance and when the server queues a new footprint order of a `worker` placement instance. A footprint result does not change it. `worker.instance.work` is an API-only `worker` read at `POST /api/worker/instance/work` with the body `{ connection_id }`. The instance calls it after a heartbeat answer with another `work_version`. It answers 200 with `{ work_version, login_sessions, session_reads, footprint_orders }` and renews no liveness. A `connection_id` that is not current answers `409 worker.instance.connection_superseded`. [`serve worker`](./other.md#serve-worker) states the instance side.
 
 A session read serves `tracking.session.entry.rebuild` for an execution of a `worker` instance. The server queues the read only while the instance holds a current connection, else the rebuild answers `503 tracking.entry.unreachable` with reason `offline` at once. Each item of `session_reads` holds `read_id` (`session_read_<ulid>`), `execution_id`, `session_id`, `entry_id` and `entry_type`. The server keeps at most 8 pending reads for each instance in memory. Two reads of the same entry share one pending read. A ninth distinct read answers reason `busy`. No read survives a server restart. `worker.session_read.report` is an API-only `worker` mutation at `POST /api/worker/session-read/:read_id/report`. Its body is one of `{ outcome: "resolved", entry }`, `{ outcome: "too_large", bytes }` and `{ outcome }` with `session_absent`, `entry_absent` or `unreadable`. Another body answers `400 gateway.request.validation_failed`. It answers 204. The server checks `id` and `type` of a resolved entry. Another entry answers the rebuild with `tracking.entry.unreadable`. No report within 25 s answers the rebuild with reason `timeout` and drops the read. A report of an unknown or dropped read, or of a read of another instance, answers `404 worker.session_read.not_found`.
 
@@ -935,9 +1086,25 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `worker.instance.server_limit`                                | A create of a server instance meets `worker.server_instance_limit`; `details: { limit }`.                                                                                                                                                                                                                                                          | instance create                                                                                                                                                             |
 | 409   | `worker.footprint.orders_full`                                | An instance delete meets 8 pending footprint orders of the instance.                                                                                                                                                                                                                                                                               | instance deletes (API only)                                                                                                                                                 |
 | 409   | `worker.instance.placement_unsupported`                       | A Reset key names a server instance; `details: { placement }`.                                                                                                                                                                                                                                                                                     | instance rotate                                                                                                                                                             |
-| 409   | `worker.instance.name_conflict`                               | A live or an archived instance holds the name.                                                                                                                                                                                                                                                                                                     | instance create                                                                                                                                                             |
-| 409   | `worker.instance.key_conflict`                                | An instance revision holds the same key.                                                                                                                                                                                                                                                                                                           | instance create, instance rotate                                                                                                                                            |
+| 409   | `worker.instance.name_conflict`                               | A live or an archived instance or machine holds the name.                                                                                                                                                                                                                                                                                          | instance create                                                                                                                                                             |
+| 409   | `worker.instance.key_conflict`                                | An instance or a machine revision holds the same key.                                                                                                                                                                                                                                                                                              | instance create, instance rotate                                                                                                                                            |
 | 409   | `worker.instance.revision_conflict`                           | `expected_revision` is not the live revision; `details.revision` names the live revision.                                                                                                                                                                                                                                                          | instance rotate, instance archive                                                                                                                                           |
+| 400   | `worker.instance.machine_invalid`                             | At the `worker` placement, `machine` is absent or names no live machine. At another placement, `machine` is present.                                                                                                                                                                                                                               | instance create                                                                                                                                                             |
+| 400   | `worker.machine.name_invalid`                                 | The machine name breaks the name form or is reserved. The CLI also checks it before the request.                                                                                                                                                                                                                                                   | machine create, machine get, machine rotate, machine archive                                                                                                                |
+| 400   | `worker.machine.key_invalid`                                  | `public_key` is no base64url 32-byte X25519 key.                                                                                                                                                                                                                                                                                                   | machine create, machine rotate                                                                                                                                              |
+| 404   | `worker.machine.not_found`                                    | The machine name or the machine revision is unknown, or the revision ended.                                                                                                                                                                                                                                                                        | machine get, machine rotate, machine archive                                                                                                                                |
+| 409   | `worker.machine.name_conflict`                                | A live or an archived machine or instance holds the name.                                                                                                                                                                                                                                                                                          | machine create                                                                                                                                                              |
+| 409   | `worker.machine.key_conflict`                                 | A machine or an instance revision holds the same key.                                                                                                                                                                                                                                                                                              | machine create, machine rotate                                                                                                                                              |
+| 409   | `worker.machine.revision_conflict`                            | `expected_revision` is not the live revision; `details.revision` names the live revision.                                                                                                                                                                                                                                                          | machine rotate, machine archive                                                                                                                                             |
+| 409   | `worker.machine.archived`                                     | The machine is archived.                                                                                                                                                                                                                                                                                                                           | machine rotate, machine archive                                                                                                                                             |
+| 409   | `worker.machine.in_use`                                       | A live instance names the machine; `details.instances` lists the instance names.                                                                                                                                                                                                                                                                   | machine archive                                                                                                                                                             |
+| local | `worker.machine.config_absent`                                | No `KANTHORD_MACHINE_CONFIG` value and no machine file for the name. The diagnostic names the variable and the file path.                                                                                                                                                                                                                          | machine configuration read                                                                                                                                                  |
+| local | `worker.machine.config_conflict`                              | The `KANTHORD_MACHINE_CONFIG` value and the machine file both hold a value for one name.                                                                                                                                                                                                                                                           | machine configuration read                                                                                                                                                  |
+| local | `worker.machine.config_invalid`                               | The value fails the schema, the name breaks the name form, or the value `name` differs from the requested name.                                                                                                                                                                                                                                    | machine join, machine create --output, machine rotate --output, machine configuration read                                                                                  |
+| local | `cli.worker.machine.config_exists`                            | The machine file exists and `--force` is not given.                                                                                                                                                                                                                                                                                                | machine join, machine create --output, machine rotate --output                                                                                                              |
+| local | `cli.worker.machine.revision_invalid`                         | `--expected-revision` is absent or is not a positive integer.                                                                                                                                                                                                                                                                                      | machine rotate, machine archive                                                                                                                                             |
+| local | `cli.worker.machine.<operation>.token_required`               | No option, environment variable or `cli.yaml` supplies a token. `<operation>` is `create`, `list`, `get`, `rotate` or `archive`.                                                                                                                                                                                                                   | machine create, machine list, machine get, machine rotate, machine archive                                                                                                  |
+| local | `cli.worker.machine.<operation>.indeterminate`                | The result is indeterminate. A mutation prints its key.                                                                                                                                                                                                                                                                                            | machine create, machine list, machine get, machine rotate, machine archive                                                                                                  |
 | 409   | `worker.instance.archived`                                    | The instance is archived.                                                                                                                                                                                                                                                                                                                          | instance rotate, instance archive                                                                                                                                           |
 | 409   | `worker.instance.in_use`                                      | A binding lists the instance, also with `--force`, or a registration of the instance holds a live execution and the archive has no `--force`; `details` hold `bindings` or `executions`.                                                                                                                                                           | instance archive                                                                                                                                                            |
 | 409   | `worker.instance.connection_superseded`                       | Another connection of the instance is current; `details.connection_name` names it. `serve worker` ends with `worker.instance.superseded`.                                                                                                                                                                                                          | worker.instance.connect, worker.instance.heartbeat, worker.instance.work (API only)                                                                                         |

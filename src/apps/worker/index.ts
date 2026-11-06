@@ -616,3 +616,11 @@ export {
   instanceSecret,
   type InstanceCredentialAccess,
 } from "./instance-credential.ts";
+export {
+  CONFIG_EXISTS as MACHINE_CONFIG_EXISTS,
+  CONFIG_INVALID as MACHINE_CONFIG_INVALID,
+  decodeMachineConfiguration,
+  machineFilePath,
+  readMachineConfiguration,
+  writeMachineFile,
+} from "./machine-config.ts";

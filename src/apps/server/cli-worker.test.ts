@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { test, type TestContext } from "node:test";
-import { join } from "node:path";
-import { existsSync, readFileSync } from "node:fs";
-import { stringify } from "yaml";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { parse, stringify } from "yaml";
 import { decode } from "hono/jwt";
 import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import {
@@ -16,12 +16,24 @@ import {
 } from "./test-support.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { directories } from "../../config/index.ts";
-import { kanthord as command, environment } from "./cli-test-support.ts";
+import {
+  kanthord as command,
+  environment,
+  kanthordTerminal,
+  spawnKanthord,
+} from "./cli-test-support.ts";
+import {
+  generateX25519KeyPair,
+  openJSON,
+  sealJSON,
+} from "../../kernel/hpke.ts";
 import {
   InstancePlacement,
+  machineConfigurationValue,
   WorkerMethod,
   workerOperations,
 } from "../../worker/contract.ts";
+import { decodeMachineConfiguration } from "../worker/index.ts";
 import { errorSchema } from "../../kernel/errors.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 
@@ -516,6 +528,9 @@ const INSTANCE_NAME = "coder-1";
 const OTHER_INSTANCE_NAME = "coder-2";
 const INSTANCE_WORKER = "coder@1";
 const MACHINE_NAME = "workstation";
+const OTHER_MACHINE_NAME = "build-box";
+const RESERVED_MACHINE_NAME = "server";
+const JOIN_TIMEOUT_MS = 60000;
 const SINGLE_SERVER_INSTANCE = 1;
 const CONFLICT_STATUS = /^status: +409$/m;
 
@@ -720,4 +735,210 @@ test("instance archive with --force sends force true", async (t) => {
 
 test("instance archive without --force sends no force", async (t) => {
   assert.deepEqual(await archiveBodies(t), [{ expected_revision: 1 }]);
+});
+
+const MACHINE_CONFIG_EXISTS = /^cli\.worker\.machine\.config_exists:/;
+const MACHINE_CONFIG_INVALID = /^worker\.machine\.config_invalid:/;
+const SEAL_INFO = "kanthord/test/machine";
+const SEAL_AAD = "machine";
+const FILE_MODE = 0o600;
+const DIRECTORY_MODE = 0o700;
+const PERMISSION_BITS = 0o777;
+const FIRST_MACHINE_REVISION = "1";
+const SECOND_MACHINE_REVISION = "2";
+const SINGLE_MACHINE = 1;
+
+async function machineHuman(t: TestContext) {
+  const fixture = await gatewayFixture(t);
+  const env = {
+    ...environment(temporary(t)),
+    KANTHORD_ENDPOINT: fixture.endpoint,
+    KANTHORD_TOKEN: fixture.token,
+  };
+  const file = (name = MACHINE_NAME) =>
+    join(directories(env).config, "machines", `${name}.yaml`);
+  const run = (...args: string[]) =>
+    command(["worker", "machine", ...args], env);
+  const terminal = (...args: string[]) =>
+    kanthordTerminal(["worker", "machine", ...args], env);
+  const succeeded = async (result: ReturnType<typeof run>) => {
+    const done = await result;
+    assert.equal(done.code, ExitCode.Success, done.stderr);
+    return JSON.parse(done.stdout);
+  };
+  return { env, file, run, terminal, succeeded };
+}
+
+async function opens(publicKey: string, privateKey: string) {
+  const sealed = await sealJSON(
+    Buffer.from(publicKey, "base64url"),
+    SEAL_INFO,
+    SEAL_AAD,
+    { name: MACHINE_NAME },
+  );
+  assert.deepEqual(
+    await openJSON(
+      Buffer.from(privateKey, "base64url"),
+      SEAL_INFO,
+      SEAL_AAD,
+      sealed,
+    ),
+    { name: MACHINE_NAME },
+  );
+}
+
+test("machine create with --output sends only the public key and writes the machine file", async (t) => {
+  const f = await machineHuman(t);
+  const record = await f.succeeded(f.run("create", MACHINE_NAME, "--output"));
+  assert.equal(record.name, MACHINE_NAME);
+  assert.equal(record.created, f.file());
+  assert.ok(!("machine_configuration" in record));
+  assert.equal(statSync(f.file()).mode & PERMISSION_BITS, FILE_MODE);
+  assert.equal(
+    statSync(dirname(f.file())).mode & PERMISSION_BITS,
+    DIRECTORY_MODE,
+  );
+  const written = parse(readFileSync(f.file(), "utf8"));
+  assert.deepEqual(Object.keys(written), ["name", "private_key"]);
+  await opens(record.public_key, written.private_key);
+});
+
+test("machine create without --output prints the answer with the machine configuration on a terminal only", async (t) => {
+  const f = await machineHuman(t);
+  const refused = await f.run("create", MACHINE_NAME);
+  assert.equal(refused.code, ExitCode.Failure);
+  assert.equal(refused.stdout, EMPTY_OUTPUT);
+  const record = await f.succeeded(f.terminal("create", MACHINE_NAME));
+  const configuration = decodeMachineConfiguration(
+    record.machine_configuration,
+  );
+  assert.equal(configuration.name, MACHINE_NAME);
+  await opens(record.public_key, configuration.private_key);
+  assert.ok(!existsSync(f.file()));
+});
+
+test("machine join writes the machine file from standard input", async (t) => {
+  const f = await machineHuman(t);
+  const record = await f.succeeded(f.terminal("create", MACHINE_NAME));
+  const joined = await spawnKanthord(
+    ["worker", "machine", "join"],
+    f.env,
+    AbortSignal.timeout(JOIN_TIMEOUT_MS),
+    record.machine_configuration,
+  );
+  assert.equal(joined.code, ExitCode.Success, joined.stderr);
+  assert.match(joined.stdout, /^created:\s/);
+  assert.equal(statSync(f.file()).mode & PERMISSION_BITS, FILE_MODE);
+  const written = parse(readFileSync(f.file(), "utf8"));
+  assert.equal(
+    machineConfigurationValue(written),
+    record.machine_configuration,
+  );
+});
+
+test("machine join of a name that breaks the name form refuses and writes no file", async (t) => {
+  const f = await machineHuman(t);
+  const pair = await generateX25519KeyPair();
+  const value = machineConfigurationValue({
+    name: RESERVED_MACHINE_NAME,
+    private_key: pair.private_key.toString("base64url"),
+  });
+  const joined = await spawnKanthord(
+    ["worker", "machine", "join"],
+    f.env,
+    AbortSignal.timeout(JOIN_TIMEOUT_MS),
+    value,
+  );
+  assert.equal(joined.code, ExitCode.Failure);
+  assert.match(joined.stderr, MACHINE_CONFIG_INVALID);
+  assert.ok(!existsSync(dirname(f.file())));
+});
+
+test("join, create --output and rotate --output refuse an existing machine file without --force", async (t) => {
+  const f = await machineHuman(t);
+  const record = await f.succeeded(f.terminal("create", MACHINE_NAME));
+  const join = () =>
+    spawnKanthord(
+      ["worker", "machine", "join"],
+      f.env,
+      AbortSignal.timeout(JOIN_TIMEOUT_MS),
+      record.machine_configuration,
+    );
+  assert.equal((await join()).code, ExitCode.Success);
+  const before = readFileSync(f.file(), "utf8");
+  const refusals = [
+    await join(),
+    await f.run("create", OTHER_MACHINE_NAME, "--output"),
+    await f.run(
+      "rotate",
+      MACHINE_NAME,
+      "--expected-revision",
+      FIRST_MACHINE_REVISION,
+      "--output",
+    ),
+  ];
+  assert.match(refusals[0]!.stderr, MACHINE_CONFIG_EXISTS);
+  assert.equal(refusals[1]!.code, ExitCode.Success, refusals[1]!.stderr);
+  assert.equal(refusals[2]!.code, ExitCode.Failure);
+  assert.match(refusals[2]!.stderr, MACHINE_CONFIG_EXISTS);
+  assert.equal(readFileSync(f.file(), "utf8"), before);
+  const created = await f.run("create", MACHINE_NAME, "--output");
+  assert.equal(created.code, ExitCode.Failure);
+  assert.match(created.stderr, MACHINE_CONFIG_EXISTS);
+});
+
+test("machine create --output refuses an existing machine file before any request", async (t) => {
+  const f = await machineHuman(t);
+  await f.succeeded(f.run("create", MACHINE_NAME, "--output"));
+  const again = await f.run("create", MACHINE_NAME, "--output");
+  assert.equal(again.code, ExitCode.Failure);
+  assert.match(again.stderr, MACHINE_CONFIG_EXISTS);
+  const listed = await f.succeeded(f.run("list"));
+  assert.equal(listed.items.length, SINGLE_MACHINE);
+});
+
+test("machine commands refuse a name that breaks the name form before the request", async (t) => {
+  const f = await machineHuman(t);
+  const invalid = await f.run("create", RESERVED_MACHINE_NAME);
+  assert.match(invalid.stderr, /^worker\.machine\.name_invalid:/);
+  const output = await f.run("create", RESERVED_MACHINE_NAME, "--output");
+  assert.match(output.stderr, MACHINE_CONFIG_INVALID);
+  const read = await f.run("get", RESERVED_MACHINE_NAME);
+  assert.match(read.stderr, /^worker\.machine\.name_invalid:/);
+});
+
+test("machine list, get, rotate and archive answer the machine records", async (t) => {
+  const f = await machineHuman(t);
+  await f.succeeded(f.run("create", MACHINE_NAME, "--output"));
+  const listed = await f.succeeded(f.run("list"));
+  assert.deepEqual(
+    listed.items.map((item: { name: string }) => item.name),
+    [MACHINE_NAME],
+  );
+  const read = await f.succeeded(f.run("get", MACHINE_NAME));
+  assert.deepEqual(read.instances, []);
+  const rotated = await f.succeeded(
+    f.run(
+      "rotate",
+      MACHINE_NAME,
+      "--expected-revision",
+      FIRST_MACHINE_REVISION,
+      "--output",
+      "--force",
+    ),
+  );
+  assert.equal(rotated.revision, Number(SECOND_MACHINE_REVISION));
+  const written = parse(readFileSync(f.file(), "utf8"));
+  await opens(rotated.public_key, written.private_key);
+  const archived = await f.succeeded(
+    f.run(
+      "archive",
+      MACHINE_NAME,
+      "--expected-revision",
+      SECOND_MACHINE_REVISION,
+    ),
+  );
+  assert.ok(archived.ended_at);
+  const missing = await f.run("archive", MACHINE_NAME);
+  assert.match(missing.stderr, /^cli\.worker\.machine\.revision_invalid:/);
 });
