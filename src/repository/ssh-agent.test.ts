@@ -10,7 +10,6 @@ import {
 } from "node:fs";
 import { mkdir, readdir, readFile, stat } from "node:fs/promises";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
 import { basename, delimiter, join } from "node:path";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
@@ -81,7 +80,7 @@ const MODULE_URLS = {
 
 delete process.env.SSH_AUTH_SOCK;
 delete process.env.SSH_AGENT_PID;
-const scratch = mkdtempSync(join(tmpdir(), "kdt-"));
+const scratch = mkdtempSync(join(SSH_AGENT_ROOT, "kdt-"));
 process.env.TMPDIR = scratch;
 process.on("exit", () => rmSync(scratch, { recursive: true, force: true }));
 

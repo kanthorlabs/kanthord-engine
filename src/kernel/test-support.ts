@@ -84,9 +84,13 @@ export function testContext(t: TestContext): CancellationContext {
   return context;
 }
 
+const WINDOWS: NodeJS.Platform = "win32";
+const POSIX_TEMPORARY_ROOT = "/tmp";
+
 export function temporaryDirectory(): string {
   process.umask(0o077);
-  const parent = join(tmpdir(), "opencode");
+  const root = process.platform === WINDOWS ? tmpdir() : POSIX_TEMPORARY_ROOT;
+  const parent = join(root, "opencode");
   mkdirSync(parent, { recursive: true, mode: 0o700 });
   return mkdtempSync(join(parent, "kanthord-"));
 }
