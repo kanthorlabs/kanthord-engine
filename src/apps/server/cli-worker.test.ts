@@ -10,13 +10,18 @@ import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import {
   fakeMachines,
   gatewayFixture,
+  humanCaller,
   TEST_PROJECT_ID,
   TEST_WORKER_BINDING,
 } from "./test-support.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { directories } from "../../config/index.ts";
 import { kanthord as command, environment } from "./cli-test-support.ts";
-import { InstancePlacement, WorkerMethod } from "../../worker/contract.ts";
+import {
+  InstancePlacement,
+  WorkerMethod,
+  workerOperations,
+} from "../../worker/contract.ts";
 import { errorSchema } from "../../kernel/errors.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 
@@ -510,6 +515,7 @@ test("worker register reports declared failures and indeterminate transport with
 const INSTANCE_NAME = "coder-1";
 const OTHER_INSTANCE_NAME = "coder-2";
 const INSTANCE_WORKER = "coder@1";
+const MACHINE_NAME = "workstation";
 const SINGLE_SERVER_INSTANCE = 1;
 const CONFLICT_STATUS = /^status: +409$/m;
 
@@ -539,7 +545,13 @@ async function instanceHuman(t: TestContext, serverInstanceLimit?: number) {
     assert.equal(result.code, ExitCode.Success, result.stderr);
     return JSON.parse(result.stdout).items as { name: string }[];
   };
-  return { env, create, listed, endpoint: fixture.endpoint };
+  const createMachine = () =>
+    humanCaller(fixture)(workerOperations["machine.create"], {
+      params: {},
+      query: {},
+      body: { name: MACHINE_NAME },
+    });
+  return { env, create, createMachine, listed, endpoint: fixture.endpoint };
 }
 
 test("instance create at the server placement sends no key and prints a record without an instance configuration", async (t) => {
@@ -564,10 +576,13 @@ test("instance create at the server placement sends no key and prints a record w
 
 test("instance create at the worker placement keeps the key pair, the output file and the worker endpoint", async (t) => {
   const f = await instanceHuman(t);
+  await f.createMachine();
   const created = await f.create(
     INSTANCE_NAME,
     "--placement",
     InstancePlacement.Worker,
+    "--machine",
+    MACHINE_NAME,
     "--output",
     "--worker-endpoint",
     f.endpoint,
@@ -575,10 +590,37 @@ test("instance create at the worker placement keeps the key pair, the output fil
   assert.equal(created.code, ExitCode.Success, created.stderr);
   const record = JSON.parse(created.stdout);
   assert.equal(record.placement, InstancePlacement.Worker);
+  assert.equal(record.machine, MACHINE_NAME);
   assert.equal(typeof record.public_key, STRING_TYPE);
   assert.equal(typeof record.fingerprint, STRING_TYPE);
   assert.ok(existsSync(record.created));
   assert.ok(!("instance_configuration" in record));
+});
+
+test("instance create at the worker placement refuses an absent machine and a machine at the server placement", async (t) => {
+  const f = await instanceHuman(t);
+  await f.createMachine();
+  const absent = await f.create(
+    INSTANCE_NAME,
+    "--placement",
+    InstancePlacement.Worker,
+    "--output",
+    "--worker-endpoint",
+    f.endpoint,
+  );
+  const server = await f.create(
+    INSTANCE_NAME,
+    "--placement",
+    InstancePlacement.Server,
+    "--machine",
+    MACHINE_NAME,
+  );
+  for (const result of [absent, server]) {
+    assert.equal(result.code, ExitCode.Failure);
+    assert.equal(result.stdout, EMPTY_OUTPUT);
+    assert.match(result.stderr, /^worker\.instance\.machine_invalid:/);
+  }
+  assert.deepEqual(await f.listed(), []);
 });
 
 test("instance create refuses a missing or invalid placement and a server placement with output locally", async (t) => {
@@ -630,6 +672,7 @@ const ARCHIVED_RECORD = {
   worker: INSTANCE_WORKER,
   revision: 1,
   placement: InstancePlacement.Server,
+  machine: null,
   public_key: null,
   fingerprint: null,
   created_at: 1,

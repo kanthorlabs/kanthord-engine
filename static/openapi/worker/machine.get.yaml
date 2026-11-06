@@ -190,6 +190,7 @@ components:
               - worker
               - revision
               - placement
+              - machine
               - public_key
               - fingerprint
               - created_at

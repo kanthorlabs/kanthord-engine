@@ -59,6 +59,9 @@ import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const WORKER = "coder@1";
 const INSTANCE = "laptop";
+const MACHINE = "workstation";
+const ARCHIVED_MACHINE = "retired";
+const UNKNOWN_MACHINE = "absent";
 const ENDPOINT = "http://127.0.0.1:31415";
 const CONNECTION_NAME = "host-a";
 const OTHER_CONNECTION_NAME = "host-b";
@@ -340,12 +343,20 @@ function instanceFixture(
         error.code === code,
     );
   }
+  const machines = new Set<string>();
+  async function machine(name = MACHINE) {
+    if (machines.has(name)) return name;
+    await invoke("machine.create", { name });
+    machines.add(name);
+    return name;
+  }
   async function created(name = INSTANCE) {
     const pair = await generateX25519KeyPair();
     const record = await invoke("instance.create", {
       name,
       worker: WORKER,
       placement: InstancePlacement.Worker,
+      machine: await machine(),
       public_key: pair.public_key.toString(BASE64URL),
     });
     return { record, pair };
@@ -424,6 +435,7 @@ function instanceFixture(
     footprint,
     invoke,
     refuses,
+    machine,
     created,
     createdAt,
     asWorker,
@@ -459,6 +471,7 @@ test("create with an endpoint answers an instance configuration of a generated k
     name: INSTANCE,
     worker: WORKER,
     placement: InstancePlacement.Worker,
+    machine: await f.machine(),
     endpoint: ENDPOINT,
   });
   assert.ok(record.instance_configuration);
@@ -499,6 +512,7 @@ test("create refuses each invalid input with its code", async (t) => {
         name: INSTANCE,
         worker: WORKER,
         placement: InstancePlacement.Worker,
+        machine: MACHINE,
         public_key: other,
       },
       HttpStatus.Conflict,
@@ -509,6 +523,7 @@ test("create refuses each invalid input with its code", async (t) => {
         name: "token",
         worker: WORKER,
         placement: InstancePlacement.Worker,
+        machine: MACHINE,
         public_key: other,
       },
       HttpStatus.BadRequest,
@@ -519,6 +534,7 @@ test("create refuses each invalid input with its code", async (t) => {
         name: "Upper",
         worker: WORKER,
         placement: InstancePlacement.Worker,
+        machine: MACHINE,
         public_key: other,
       },
       HttpStatus.BadRequest,
@@ -529,6 +545,7 @@ test("create refuses each invalid input with its code", async (t) => {
         name: "other",
         worker: "absent@1",
         placement: InstancePlacement.Worker,
+        machine: MACHINE,
         public_key: other,
       },
       HttpStatus.BadRequest,
@@ -539,13 +556,9 @@ test("create refuses each invalid input with its code", async (t) => {
         name: "other",
         worker: WORKER,
         placement: InstancePlacement.Worker,
+        machine: MACHINE,
         public_key: zero,
       },
-      HttpStatus.BadRequest,
-      WorkerErrorCode.InstanceKeyInvalid,
-    ],
-    [
-      { name: "other", worker: WORKER, placement: InstancePlacement.Worker },
       HttpStatus.BadRequest,
       WorkerErrorCode.InstanceKeyInvalid,
     ],
@@ -554,6 +567,17 @@ test("create refuses each invalid input with its code", async (t) => {
         name: "other",
         worker: WORKER,
         placement: InstancePlacement.Worker,
+        machine: MACHINE,
+      },
+      HttpStatus.BadRequest,
+      WorkerErrorCode.InstanceKeyInvalid,
+    ],
+    [
+      {
+        name: "other",
+        worker: WORKER,
+        placement: InstancePlacement.Worker,
+        machine: MACHINE,
         public_key: other,
         endpoint: ENDPOINT,
       },
@@ -565,6 +589,7 @@ test("create refuses each invalid input with its code", async (t) => {
         name: "other",
         worker: WORKER,
         placement: InstancePlacement.Worker,
+        machine: MACHINE,
         public_key: key,
       },
       HttpStatus.Conflict,
@@ -573,6 +598,70 @@ test("create refuses each invalid input with its code", async (t) => {
   ];
   for (const [body, status, code] of cases)
     await f.refuses(() => f.invoke("instance.create", body), status, code);
+});
+
+test("create at the worker placement refuses an absent, an unknown and an archived machine", async (t) => {
+  const f = instanceFixture(t);
+  const name = await f.machine();
+  const archived = await f.machine(ARCHIVED_MACHINE);
+  const key = async () =>
+    (await generateX25519KeyPair()).public_key.toString(BASE64URL);
+  const create = async (machine?: string) =>
+    f.invoke("instance.create", {
+      name: INSTANCE,
+      worker: WORKER,
+      placement: InstancePlacement.Worker,
+      machine,
+      public_key: await key(),
+    });
+  await f.invoke(
+    "machine.archive",
+    { expected_revision: FIRST_REVISION },
+    { machine_name: archived },
+  );
+  for (const machine of [undefined, UNKNOWN_MACHINE, archived])
+    await f.refuses(
+      () => create(machine),
+      HttpStatus.BadRequest,
+      WorkerErrorCode.InstanceMachineInvalid,
+    );
+  assert.equal((await create(name)).machine, name);
+});
+
+test("create at a server or a container placement refuses a machine", async (t) => {
+  const f = instanceFixture(t);
+  const machine = await f.machine();
+  for (const placement of [
+    InstancePlacement.Server,
+    InstancePlacement.Container,
+  ])
+    await f.refuses(
+      () => f.createdAt(INSTANCE, placement, { machine }),
+      HttpStatus.BadRequest,
+      WorkerErrorCode.InstanceMachineInvalid,
+    );
+});
+
+test("create stores the machine name and refuses the name of a machine", async (t) => {
+  const f = instanceFixture(t);
+  const { record } = await f.created();
+  assert.equal(record.machine, MACHINE);
+  const server = await f.createdAt("beta", InstancePlacement.Server);
+  assert.equal(server.machine, null);
+  const got = await f.invoke("instance.get", null, {
+    instance_name: INSTANCE,
+  });
+  assert.equal(got.machine, MACHINE);
+  await f.refuses(
+    () => f.createdAt(MACHINE, InstancePlacement.Server),
+    HttpStatus.Conflict,
+    WorkerErrorCode.InstanceNameConflict,
+  );
+  await f.refuses(
+    () => f.created(MACHINE),
+    HttpStatus.Conflict,
+    WorkerErrorCode.InstanceNameConflict,
+  );
 });
 
 test("create at a server or a container placement stores null key fields", async (t) => {
@@ -830,7 +919,7 @@ test("connect answers one sealed entry for each listing binding, and a second pr
   );
 });
 
-test("the heartbeat answers four versions, and the work version starts at the start time and rises by one", async (t) => {
+test("the heartbeat answers the versions and the machine, and the work version starts at the start time and rises by one", async (t) => {
   const before = Date.now();
   const f = instanceFixture(t);
   const after = Date.now();
@@ -849,9 +938,11 @@ test("the heartbeat answers four versions, and the work version starts at the st
   assert.deepEqual(Object.keys(first).sort(), [
     "binding_version",
     "credential_version",
+    "machine",
     "server_version",
     "work_version",
   ]);
+  assert.equal(first.machine, MACHINE);
   assert.ok(first.work_version >= before && first.work_version <= after);
   f.worker().raiseWorkVersion(INSTANCE);
   const raised = await beat();

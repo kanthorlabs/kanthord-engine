@@ -1009,7 +1009,7 @@ export const instanceRecordSchema = z.strictObject({
   worker: z.string().min(1),
   revision: z.number().int().positive(),
   placement: z.enum(InstancePlacement),
-  machine: z.string().min(1).nullable().optional(),
+  machine: z.string().min(1).nullable(),
   public_key: base64urlSchema.nullable(),
   fingerprint: z.string().min(1).nullable(),
   created_at: timestamp,
@@ -1373,7 +1373,7 @@ export const instanceOperations = {
           .string()
           .optional()
           .describe(
-            "Name of the live worker machine of an instance at the worker placement.",
+            "Name of the live worker machine; required at the worker placement, refused at the server and container placements.",
           ),
         ...instanceKeyFields,
       }),
@@ -1555,9 +1555,10 @@ export const instanceOperations = {
       binding_version: z.number().int().min(0),
       credential_version: z.number().int().min(0),
       work_version: z.number().int().min(0),
+      machine: z.string().min(1).nullable(),
     }),
     description:
-      "Renew the current connection of the instance and answer the server version, the binding version, the credential version and the work version.",
+      "Renew the current connection of the instance and answer the server version, the binding version, the credential version, the work version and the machine of the instance.",
   },
   "instance.work": {
     ...instanceOperation,

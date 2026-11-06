@@ -137,8 +137,8 @@ components:
                 instance takes neither public_key nor endpoint.
               type: string
             machine:
-              description: Name of the live worker machine of an instance at the worker
-                placement.
+              description: Name of the live worker machine; required at the worker placement,
+                refused at the server and container placements.
               type: string
             public_key:
               description: base64url X25519 public key; never with endpoint.
@@ -220,6 +220,7 @@ components:
         - worker
         - revision
         - placement
+        - machine
         - public_key
         - fingerprint
         - created_at
@@ -354,6 +355,7 @@ components:
               - worker
               - revision
               - placement
+              - machine
               - public_key
               - fingerprint
               - created_at

@@ -101,6 +101,7 @@ import {
   userAuthenticationData,
 } from "../../repository/sshd-test-support.ts";
 
+const WORKER_MACHINE = "workstation";
 const SECRET = "test_handover-integration-secret-one";
 const REFRESHED = "test_handover-integration-secret-two";
 const ROTATED = "test_handover-integration-secret-three";
@@ -537,6 +538,14 @@ async function setup(
     string,
     { id: string; private_key: Buffer; public_key: Buffer }
   >();
+  if (setupOptions.workerInstances?.length)
+    completed(
+      await call(workerOperations["machine.create"], {
+        params: {},
+        query: {},
+        body: { name: WORKER_MACHINE },
+      }),
+    );
   for (const name of setupOptions.workerInstances ?? []) {
     const pair = await generateX25519KeyPair();
     const record = completed(
@@ -547,6 +556,7 @@ async function setup(
           name,
           worker: "coder@1",
           placement: InstancePlacement.Worker,
+          machine: WORKER_MACHINE,
           public_key: pair.public_key.toString("base64url"),
         },
       }),

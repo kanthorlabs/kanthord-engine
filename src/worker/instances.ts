@@ -64,6 +64,7 @@ import {
   readLiveServerInstances,
   revisionIdsOf,
 } from "./instance-rows.ts";
+import { readLiveMachine } from "./machine-rows.ts";
 import {
   endOfInstances,
   readLiveOfInstances,
@@ -223,6 +224,35 @@ function refuseName(name: string): void {
       WorkerErrorCode.InstanceNameInvalid,
       "The instance name breaks the binding name form or is reserved.",
     );
+}
+
+function machineInvalid(message: string): OperationError {
+  return new OperationError(
+    HttpStatus.BadRequest,
+    WorkerErrorCode.InstanceMachineInvalid,
+    message,
+  );
+}
+
+function refuseMachineAt(
+  placement: InstancePlacement,
+  machine: string | undefined,
+): void {
+  if (placement !== InstancePlacement.Worker && machine !== undefined)
+    throw machineInvalid("A server or container instance takes no machine.");
+}
+
+function liveMachineOf(
+  tx: Transaction,
+  placement: InstancePlacement,
+  machine: string | undefined,
+): string | null {
+  if (placement !== InstancePlacement.Worker) return null;
+  if (machine === undefined || !readLiveMachine(tx, machine))
+    throw machineInvalid(
+      "A worker instance names a live worker machine in machine.",
+    );
+  return machine;
 }
 
 function refuseWorker(worker: string): void {
@@ -463,6 +493,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
     refuseName(input.name);
     refuseWorker(input.worker);
     const placement = refusePlacement(input.placement);
+    refuseMachineAt(placement, input.machine);
     const key = await this.prepareKeyAt(placement, input);
     await this.refuseUnavailableRuntime(placement);
     try {
@@ -473,6 +504,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
             WorkerErrorCode.InstanceNameConflict,
             "The instance name is taken by a live or an archived instance or machine.",
           );
+        const machine = liveMachineOf(tx, placement, input.machine);
         if (placement !== InstancePlacement.Worker) this.refuseServerLimit(tx);
         const record = this.insertKey(
           tx,
@@ -480,7 +512,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
             name: input.name,
             worker: input.worker,
             placement,
-            machine: input.machine,
+            machine,
           },
           key,
           null,
@@ -788,6 +820,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
     binding_version: number;
     credential_version: number;
     work_version: number;
+    machine: string | null;
   } {
     if (!this.holdConnection(instanceId, connectionId, connectionName))
       throw superseded(this.connections.get(instanceId));
@@ -797,6 +830,9 @@ export class WorkerInstances implements WorkerInstanceLookups {
       binding_version: this.bindingVersionOf(name),
       credential_version: this.dependencies.credentialVersionOf(name),
       work_version: this.workVersionOf(name),
+      machine:
+        readLiveInstanceById(this.dependencies.store, instanceId)?.machine ??
+        null,
     };
   }
 

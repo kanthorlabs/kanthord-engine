@@ -22,6 +22,7 @@ import {
 
 const TEST_TIMEOUT_MS = 60000;
 const INSTANCE = "laptop";
+const MACHINE = "workstation";
 const CREDENTIAL = "anthro-1";
 const PROVIDER_KEY = "footprint-provider-key";
 const WORKERS_DIRECTORY = "workers";
@@ -59,12 +60,17 @@ async function boundInstance(t: TestContext) {
     },
   );
   await provisionRepositoryCredentials(fixture);
+  await call(workerOperations["machine.create"], {
+    ...empty,
+    body: { name: MACHINE },
+  });
   const instance = await call(workerOperations["instance.create"], {
     ...empty,
     body: {
       name: INSTANCE,
       worker: "coder@1",
       placement: InstancePlacement.Worker,
+      machine: MACHINE,
       endpoint: fixture.endpoint,
     },
   });

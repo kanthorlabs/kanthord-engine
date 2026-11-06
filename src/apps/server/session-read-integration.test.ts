@@ -21,6 +21,7 @@ import { completed } from "./cli-test-support.ts";
 import { gatewayFixture } from "./test-support.ts";
 
 const INSTANCE = "laptop";
+const MACHINE = "workstation";
 const WORKERS_DIRECTORY = "workers";
 const SESSION_ID = "0123456789abcdef";
 const ENTRY_ID = "a1b2c3d4";
@@ -47,6 +48,13 @@ function sizedEntry(id: string, bytes: number): Record<string, unknown> {
 async function liveInstance(t: TestContext) {
   const f = await gatewayFixture(t);
   const worker = httpClient(workerOperations, f.endpoint, f.token);
+  completed(
+    await worker["machine.create"]({
+      params: {},
+      query: {},
+      body: { name: MACHINE },
+    }),
+  );
   const created = completed(
     await worker["instance.create"]({
       params: {},
@@ -55,6 +63,7 @@ async function liveInstance(t: TestContext) {
         name: INSTANCE,
         worker: "coder@1",
         placement: InstancePlacement.Worker,
+        machine: MACHINE,
         endpoint: f.endpoint,
       },
     }),
