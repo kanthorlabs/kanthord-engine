@@ -1106,6 +1106,21 @@ for (const state of [NodeState.Pending, NodeState.Completed]) {
   });
 }
 
+test("an import that adds a binding keeps the pin of the existing binding and pins the latest revision of the added one", (t) => {
+  const { entries, resolve } = fixture(t, [implement("o.md")]);
+  const id = item(entries, "o.md").id!;
+  const added = change(entries, "o.md", {
+    bindings: [REPOSITORY, SECOND_REPOSITORY],
+  });
+  const resolved = resolve(added, revisedBindings);
+  assert.deepEqual(resolved.violations, []);
+  assert.deepEqual(resolved.updates, [id]);
+  assert.deepEqual(resolved.resolved_entries[FIRST_ENTRY_INDEX]?.binding_ids, [
+    BINDING_ID,
+    NEXT_BINDING_ID,
+  ]);
+});
+
 const removedBindings: MissionBindings = {
   ...revisedBindings,
   getBindingRevision: (tx, bindingId) => {

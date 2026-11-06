@@ -4779,7 +4779,7 @@ test("resolveBinding selects the latest named group in its project after revisio
   });
 });
 
-test("resolveBindingIdentity pins the latest revision of a live binding of its project", (t) => {
+test("resolveBindingIdentity answers the submitted revision of a live binding of its project", (t) => {
   const f = fixture(t);
   f.store.transaction((tx) => {
     const first = insertProject(tx, PROJECT_NAME);
@@ -4797,11 +4797,14 @@ test("resolveBindingIdentity pins the latest revision of a live binding of its p
       },
     }).bindings[REPOSITORY_NAME]!;
     assert.notEqual(older.id, latest.id);
-    for (const id of [older.id, latest.id])
-      assert.deepEqual(f.project.resolveBindingIdentity(tx, first.id, id), {
-        binding_id: latest.id,
-        resource_identity: latest.resource_identity,
-      });
+    for (const revision of [older, latest])
+      assert.deepEqual(
+        f.project.resolveBindingIdentity(tx, first.id, revision.id),
+        {
+          binding_id: revision.id,
+          resource_identity: revision.resource_identity,
+        },
+      );
     assert.equal(
       f.project.resolveBindingIdentity(tx, first.id, other.id),
       null,
@@ -4852,11 +4855,14 @@ test("resolveBindingIdentity refuses an identity from before a removal of the bi
       f.project.resolveBindingIdentity(tx, project.id, before.id),
       null,
     );
-    for (const id of [added.id, latest.id])
-      assert.deepEqual(f.project.resolveBindingIdentity(tx, project.id, id), {
-        binding_id: latest.id,
-        resource_identity: latest.resource_identity,
-      });
+    for (const revision of [added, latest])
+      assert.deepEqual(
+        f.project.resolveBindingIdentity(tx, project.id, revision.id),
+        {
+          binding_id: revision.id,
+          resource_identity: revision.resource_identity,
+        },
+      );
   });
 });
 
