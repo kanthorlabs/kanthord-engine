@@ -176,6 +176,7 @@ test("parses the canonical node file and preserves every field", () => {
     id: "node_01ARZ3NDEKTSV4RRFFQ69G5FAV",
     intent: Intent.Implement,
     tags: [],
+    external_links: [],
     depends_on: [],
     bindings: ["api-repo"],
     verifications: ["npm run e2e", "npm run test:reset"],

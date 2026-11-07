@@ -4,7 +4,14 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import { Intent, MissionErrorCode, NodeState, TaskChange } from "./contract.ts";
+import {
+  ExternalLinkKind,
+  Intent,
+  MissionErrorCode,
+  NodeState,
+  TaskChange,
+} from "./contract.ts";
+import { ContentField } from "./content.ts";
 import { Act, ActAttribute } from "./act-telemetry.ts";
 import { ControlError } from "./control.ts";
 import { openAttempt } from "./record-store.ts";
@@ -21,6 +28,8 @@ const FIRST_ATTEMPT = 1;
 const SECOND_ATTEMPT = 2;
 const NO_ATTEMPT = 0;
 const NOW = 100;
+const ISSUE_NUMBER = 117;
+const CONVERSATION_IDENTITY = "conversation:github:acme/app";
 const ADDED_TASK_FILE = "added.md";
 const EXECUTIONS_LOST = "schedulerClaims.executionsLost";
 const NO_ACTS = 0;
@@ -742,6 +751,72 @@ test("unblock with a content change keeps the pinned older binding revision and 
   )!;
   assert.equal(stored.revision, SECOND_ATTEMPT);
   assert.deepEqual(JSON.parse(stored.bindings), [olderId]);
+});
+
+test("an unblock with a content change that adds a link pins the new revision to the new attempt", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  const conversationId = createIdentity("binding");
+  const link = {
+    kind: ExternalLinkKind.GitHubIssue,
+    resource_identity: CONVERSATION_IDENTITY,
+    number: ISSUE_NUMBER,
+  };
+  h.dependencies.bindings.getBindingRevision = () => ({
+    binding_id: conversationId,
+    project_id: h.project_id,
+    name: "issues",
+    resource_identity: CONVERSATION_IDENTITY,
+    revision: FIRST_ATTEMPT,
+    disabled: false,
+    tombstone: false,
+  });
+  h.dependencies.bindings.resolveBindingIdentity = (_tx, projectId, id) =>
+    projectId === h.project_id && id === conversationId
+      ? {
+          binding_id: conversationId,
+          resource_identity: CONVERSATION_IDENTITY,
+        }
+      : null;
+  h.store.transaction((tx) => {
+    openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+    setNodeState(tx, h.node_id, NodeState.Paused);
+  });
+  const blocked = await h.invoke("node.block", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(NodeState.Paused, FIRST_ATTEMPT),
+  });
+  assert.deepEqual(blocked.node.content.external_links, []);
+  const result = await h.invoke("node.unblock", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      blocked_attempt: FIRST_ATTEMPT,
+      expected_revision: FIRST_ATTEMPT,
+      expected_mission_version: FIRST_ATTEMPT,
+      change: {
+        content: {
+          ...blocked.node.content,
+          bindings: [conversationId],
+          external_links: [link],
+        },
+        tasks: [],
+        reason: "Follow the issue",
+      },
+    },
+  });
+  assert.equal(result.node.visible_revision, SECOND_ATTEMPT);
+  assert.equal(result.attempt?.node_revision, SECOND_ATTEMPT);
+  assert.deepEqual(result.node.content.external_links, [link]);
+  const stored = h.store.transaction((tx) =>
+    readCurrentRevision(tx, h.node_id),
+  )!;
+  assert.equal(stored.revision, SECOND_ATTEMPT);
+  assert.deepEqual(JSON.parse(stored.external_links), [link]);
+  assert.deepEqual(JSON.parse(stored.change).changed_fields, [
+    ContentField.Bindings,
+    ContentField.ExternalLinks,
+  ]);
 });
 
 test("unblock refuses an intent change after the first claim with mission.node.intent_locked", async (t) => {

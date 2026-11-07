@@ -46,7 +46,7 @@ function fixture(t: TestContext, intent: Intent = Intent.Implement) {
     });
     tx.database
       .prepare(
-        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, intent, tags, tasks, change, reason, actor, created_at) VALUES (?, ?, 'node.md', 'name', 'requirement', 'criterion', '[]', '[]', ?, '[]', '[]', '{}', 'reason', ?, ?)",
+        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, intent, tags, external_links, tasks, change, reason, actor, created_at) VALUES (?, ?, 'node.md', 'name', 'requirement', 'criterion', '[]', '[]', ?, '[]', '[]', '[]', '{}', 'reason', ?, ?)",
       )
       .run(nodeId, FIRST_ATTEMPT, intent, canonicalJSON(ACTOR), NOW);
     openAttempt(tx, nodeId, FIRST_ATTEMPT, ACTOR, NOW);
@@ -89,7 +89,7 @@ test("a later human revision and unrelated evidence preserve the pinned assessme
   h.store.transaction((tx) => {
     tx.database
       .prepare(
-        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, intent, tags, tasks, change, reason, actor, created_at) VALUES (?, ?, 'node.md', 'changed', 'requirement', 'criterion', '[]', '[]', 'implement', '[]', '[]', '{}', 'reason', ?, ?)",
+        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, intent, tags, external_links, tasks, change, reason, actor, created_at) VALUES (?, ?, 'node.md', 'changed', 'requirement', 'criterion', '[]', '[]', 'implement', '[]', '[]', '[]', '{}', 'reason', ?, ?)",
       )
       .run(h.node_id, SECOND_ATTEMPT, canonicalJSON(ACTOR), NOW);
     insertEvidence(

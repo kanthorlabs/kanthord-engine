@@ -54,6 +54,7 @@ const CONTENT_KEYS = [
   ContentField.Bindings,
   ContentField.Intent,
   ContentField.Tags,
+  ContentField.ExternalLinks,
   ContentField.CommitType,
 ] as const;
 

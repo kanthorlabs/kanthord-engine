@@ -65,6 +65,7 @@ function importNodeContent(item: ResolvedImportEntry): Owned<Content> {
       ...content,
       intent: entry.intent as Intent,
       tags: entry.tags,
+      external_links: entry.external_links,
       ...commitTypeField(entry.commit_type),
     },
   };

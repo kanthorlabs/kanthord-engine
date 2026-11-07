@@ -178,6 +178,7 @@ function entry(filename = "a.md", extra: EntryPatch = {}): NormalizedEntry {
     filename,
     intent: Intent.Examine,
     tags: [],
+    external_links: [],
     ...structuredClone(content),
     depends_on: [],
     ...extra,
@@ -244,6 +245,7 @@ function contentOf(item: NormalizedEntry): Content {
     ...bodyOf(item),
     intent: item.intent as Intent,
     tags: item.tags,
+    external_links: item.external_links,
   };
 }
 
@@ -357,7 +359,7 @@ test("Markdown is parsed and JSON content bypasses Markdown grammar", () => {
     TEXT_MAX_BYTES,
   );
   assert.deepEqual(result, {
-    entries: [parsePlanFile("a.md", markdown)],
+    entries: [{ ...parsePlanFile("a.md", markdown), external_links: [] }],
     violations: [],
   });
   const json = entry("json.md", {

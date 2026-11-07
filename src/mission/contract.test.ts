@@ -20,6 +20,8 @@ import {
   evidenceRequestSchema,
   evidenceSubmitSchema,
   executionContextSchema,
+  EXTERNAL_LINK_LIMIT,
+  ExternalLinkKind,
   FINDING_IDENTITY_PREFIX,
   FINDING_MAX,
   FINDING_TEXT_MAX_BYTES,
@@ -448,6 +450,70 @@ test("node content holds intent and a tags list that reads [] when absent", () =
   );
   assert.equal(
     taskBodySchema.safeParse({ ...CONTENT, intent: Intent.Implement }).success,
+    false,
+  );
+});
+
+const CONVERSATION_IDENTITY = "conversation:github:acme/app";
+const ISSUE_NUMBER = 117;
+const GITHUB_ISSUE = {
+  kind: ExternalLinkKind.GitHubIssue,
+  resource_identity: CONVERSATION_IDENTITY,
+  number: ISSUE_NUMBER,
+};
+const NON_POSITIVE_NUMBER = 0;
+
+test("node content holds external links that read [] when absent", () => {
+  assert.deepEqual(contentSchema.parse(NODE_CONTENT).external_links, []);
+  assert.deepEqual(
+    contentSchema.parse({ ...NODE_CONTENT, external_links: [GITHUB_ISSUE] })
+      .external_links,
+    [GITHUB_ISSUE],
+  );
+});
+
+test("node content refuses an invalid external link, a repeated link and more than 10 links", () => {
+  const refused: unknown[] = [
+    [{ ...GITHUB_ISSUE, kind: "jira_issue" }],
+    [{ ...GITHUB_ISSUE, number: NON_POSITIVE_NUMBER }],
+    [{ ...GITHUB_ISSUE, number: 1.5 }],
+    [{ ...GITHUB_ISSUE, resource_identity: "repository:github:acme/app" }],
+    [{ ...GITHUB_ISSUE, resource_identity: "conversation:github:acme" }],
+    [{ ...GITHUB_ISSUE, title: "extra" }],
+    [GITHUB_ISSUE, { ...GITHUB_ISSUE }],
+    Array.from({ length: EXTERNAL_LINK_LIMIT + 1 }, (_, index) => ({
+      ...GITHUB_ISSUE,
+      number: index + 1,
+    })),
+    GITHUB_ISSUE,
+  ];
+  for (const external_links of refused)
+    assert.equal(
+      contentSchema.safeParse({ ...NODE_CONTENT, external_links }).success,
+      false,
+    );
+  assert.equal(
+    contentSchema.safeParse({
+      ...NODE_CONTENT,
+      external_links: Array.from(
+        { length: EXTERNAL_LINK_LIMIT },
+        (_, index) => ({
+          ...GITHUB_ISSUE,
+          number: index + 1,
+        }),
+      ),
+    }).success,
+    true,
+  );
+});
+
+test("an external link reads its fields in any key order as one link", () => {
+  const { kind, resource_identity, number } = GITHUB_ISSUE;
+  assert.equal(
+    contentSchema.safeParse({
+      ...NODE_CONTENT,
+      external_links: [GITHUB_ISSUE, { number, resource_identity, kind }],
+    }).success,
     false,
   );
 });

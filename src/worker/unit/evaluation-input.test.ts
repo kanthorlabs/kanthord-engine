@@ -328,7 +328,12 @@ test("an examine node with no binding places the produced evidence privately and
   };
   assert.deepEqual(
     verificationCommands({
-      content: { ...content, intent: ExecutionIntent.Implement, tags: [] },
+      content: {
+        ...content,
+        intent: ExecutionIntent.Implement,
+        tags: [],
+        external_links: [],
+      },
       tasks: [
         {
           id: "task",

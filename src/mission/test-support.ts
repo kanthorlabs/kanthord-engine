@@ -291,6 +291,7 @@ export function controlHarness(
         bindings: [],
         intent: Intent.Examine,
         tags: [],
+        external_links: [],
       },
       tasks: [],
       change: {

@@ -21,6 +21,7 @@ import { requireMission } from "./write.ts";
 
 const EXPORT_MAX_BYTES = 10485760;
 const TEXT_ENCODING = "utf8";
+const NO_LINKS = 0;
 
 export function serializePlanFile(entry: ExportEntry): string {
   const front = stringify({
@@ -31,6 +32,9 @@ export function serializePlanFile(entry: ExportEntry): string {
           intent: entry.intent,
           depends_on: entry.depends_on,
           tags: entry.tags,
+          ...(entry.external_links.length === NO_LINKS
+            ? {}
+            : { external_links: entry.external_links }),
           ...(entry.commit_type === undefined
             ? {}
             : { commit_type: entry.commit_type }),
