@@ -31,6 +31,7 @@ import {
   type GitHubEventsAnswer,
   type GitHubEventsQuery,
   GitHubPlatform,
+  GitHubTargetKind,
 } from "../repository/github.ts";
 import type { IntakeCustody } from "./action-check.ts";
 import {
@@ -40,6 +41,7 @@ import {
   InboundPlatform,
   INTAKE_SERVICE_NAME,
   intakeOperations,
+  ResourceKind,
   ResultClass,
 } from "./contract.ts";
 import { commitInbound, credentialRefusal } from "./inbound-create.ts";
@@ -79,6 +81,7 @@ const UNKNOWN_CREDENTIAL = "missing";
 const POLL_TOKEN = "ghp_poll-token";
 const UNAUTHORIZED_STATUS = 401;
 const ETAG = '"etag-1"';
+const OTHER_RESOURCE_KIND = "issue";
 const CLOSED_LOCAL_PORT = "http://127.0.0.1:9";
 
 const WEBHOOK: InboundCreate = {
@@ -86,7 +89,7 @@ const WEBHOOK: InboundCreate = {
   kind: InboundKind.Webhook,
   platform: InboundPlatform.GitHub,
   consumer: Consumer.MissionDeliveryAdmit,
-  configuration: { resource: RESOURCE },
+  configuration: { resource_kind: ResourceKind.Repository, resource: RESOURCE },
 };
 
 function harness(
@@ -195,7 +198,10 @@ test("a webhook inbound inserts one row with no platform call and answers the al
   assert.equal(inbound.kind, InboundKind.Webhook);
   assert.equal(inbound.credential, null);
   assert.equal(inbound.checkpoint, null);
-  assert.deepEqual(inbound.configuration, { resource: RESOURCE });
+  assert.deepEqual(inbound.configuration, {
+    resource_kind: ResourceKind.Repository,
+    resource: RESOURCE,
+  });
   assert.deepEqual(
     h.rows().map((row) => ({ ...row })),
     [{ id: inbound.id, credential: null, checkpoint: null }],
@@ -262,7 +268,11 @@ test("an extra configuration field answers 400 with no project call and inserts 
   const error = await refusesWith(
     h.create({
       ...WEBHOOK,
-      configuration: { resource: RESOURCE, events: ["push"] },
+      configuration: {
+        resource_kind: ResourceKind.Repository,
+        resource: RESOURCE,
+        events: ["push"],
+      },
     }),
     HttpStatus.BadRequest,
     VALIDATION_FAILED,
@@ -361,6 +371,13 @@ const POLL: InboundCreate = {
   kind: InboundKind.Poll,
   credential: POLL_CREDENTIAL,
 };
+const CONVERSATION_POLL: InboundCreate = {
+  ...POLL,
+  configuration: {
+    resource_kind: ResourceKind.Conversation,
+    resource: RESOURCE,
+  },
+};
 
 type EventsAnswer = GitHubAnswer<GitHubEventsAnswer>;
 
@@ -427,6 +444,7 @@ function pollHarness(
     call: GitHubCall,
     query: GitHubEventsQuery,
   ) => Promise<EventsAnswer> = async () => modified,
+  commentsAnswer: () => Promise<EventsAnswer> = async () => modified,
 ) {
   const credentials = new Map([
     [POLL_CREDENTIAL, InboundPlatform.GitHub],
@@ -440,6 +458,11 @@ function pollHarness(
     "listClosedPullRequests",
     pullsAnswer,
   );
+  const listComments = t.mock.method(
+    github,
+    "listIssueComments",
+    commentsAnswer,
+  );
   const h = harness(t, { custody, github });
   h.store.transaction((tx) =>
     tx.database.exec("CREATE TABLE test_drain (credential TEXT NOT NULL)"),
@@ -450,7 +473,16 @@ function pollHarness(
       (tx) =>
         tx.database.prepare("SELECT credential FROM test_drain").all().length,
     );
-  return { ...h, credentials, drops, listEvents, listPulls, start, drained };
+  return {
+    ...h,
+    credentials,
+    drops,
+    listEvents,
+    listPulls,
+    listComments,
+    start,
+    drained,
+  };
 }
 
 const modified: EventsAnswer = {
@@ -478,8 +510,75 @@ test("a poll create performs the events read and the closed pull request read wi
   assert.equal(pullCall?.token, POLL_TOKEN);
   assert.equal(pullCall?.requester, h.identity);
   assert.deepEqual(pullQuery, { owner: "owner", repo: "repo", etag: null });
+  assert.equal(h.listComments.mock.callCount(), REQUESTS_AFTER_REFUSAL);
   assert.deepEqual(h.drops, [POLL_CREDENTIAL, POLL_CREDENTIAL]);
   assert.equal(h.drained(), DRAINS_PER_POLL_CREATE);
+});
+
+test("a conversation poll create performs only the issue comment read with the credential and inserts one row", async (t) => {
+  const h = pollHarness(t, async () => modified);
+  const inbound = await h.create(CONVERSATION_POLL);
+  assert.equal(inbound.checkpoint, null);
+  assert.deepEqual(
+    h.rows().map((row) => ({ ...row })),
+    [{ id: inbound.id, credential: POLL_CREDENTIAL, checkpoint: null }],
+  );
+  assert.equal(h.listComments.mock.callCount(), REQUESTS_PER_POLL_CREATE);
+  const [call, target, query] = h.listComments.mock.calls[0]?.arguments ?? [];
+  assert.equal(call?.token, POLL_TOKEN);
+  assert.equal(call?.requester, h.identity);
+  assert.deepEqual(target, {
+    kind: GitHubTargetKind.Inbound,
+    resource: RESOURCE,
+  });
+  assert.deepEqual(query, { etag: null });
+  assert.equal(h.listEvents.mock.callCount(), REQUESTS_AFTER_REFUSAL);
+  assert.equal(h.listPulls.mock.callCount(), REQUESTS_AFTER_REFUSAL);
+  assert.deepEqual(h.drops, [POLL_CREDENTIAL]);
+  assert.equal(h.drained(), DRAINS_OF_FAILED_FIRST_READ);
+});
+
+test("a failed issue comment read answers 422 platform_refused, inserts no row and starts no loop", async (t) => {
+  const h = pollHarness(
+    t,
+    async () => modified,
+    async () => modified,
+    async () => ({
+      ok: false,
+      class: ResultClass.FinalRefusal,
+      code: "repository.platform.github.final_refusal",
+      status: FORBIDDEN_STATUS,
+      message: "Resource not accessible by personal access token",
+    }),
+  );
+  const error = await refusesWith(
+    h.create(CONVERSATION_POLL),
+    CREDENTIAL_INVALID_STATUS,
+    PLATFORM_REFUSED,
+  );
+  assert.deepEqual(error.details, { status: FORBIDDEN_STATUS });
+  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
+  assert.equal(h.start.mock.callCount(), UNSTARTED_LOOP_COUNT);
+});
+
+test("an absent or another resource_kind answers 400 with no project call and inserts nothing", async (t) => {
+  const h = harness(t);
+  for (const configuration of [
+    { resource: RESOURCE },
+    { resource_kind: OTHER_RESOURCE_KIND, resource: RESOURCE },
+  ]) {
+    const error = await refusesWith(
+      h.create({ ...WEBHOOK, configuration }),
+      HttpStatus.BadRequest,
+      VALIDATION_FAILED,
+    );
+    assert.deepEqual(
+      (error.details as { path: string[] }[]).map((issue) => issue.path),
+      [["body", "configuration", "resource_kind"]],
+    );
+  }
+  assert.equal(h.projectCalls.length, PROJECT_CALLS_AFTER_REFUSAL);
+  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
 });
 
 test("a poll create starts one loop after the insert and a webhook starts none", async (t) => {

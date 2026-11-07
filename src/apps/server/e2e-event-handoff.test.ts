@@ -8,6 +8,7 @@ import {
   InboundKind,
   InboundPlatform,
   IntakeErrorCode,
+  ResourceKind,
 } from "../../intake/contract.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
@@ -208,7 +209,10 @@ async function setup(t: TestContext) {
       kind: InboundKind.Webhook,
       platform: InboundPlatform.GitHub,
       consumer: Consumer.MissionDeliveryAdmit,
-      configuration: { resource: RESOURCE },
+      configuration: {
+        resource_kind: ResourceKind.Repository,
+        resource: RESOURCE,
+      },
     }),
   );
   const W = (

@@ -9,6 +9,7 @@ import {
   InboundKind,
   InboundPlatform,
   IntakeErrorCode,
+  ResourceKind,
 } from "../../intake/contract.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import { HttpStatus } from "../../kernel/http.ts";
@@ -21,7 +22,12 @@ import {
   NodeState,
 } from "../../mission/contract.ts";
 import { ActionResultKind } from "../../worker/contract.ts";
-import { environment, kanthord, until } from "./cli-test-support.ts";
+import {
+  cliSession,
+  environment,
+  kanthord,
+  until,
+} from "./cli-test-support.ts";
 import {
   FIRST_INDEX,
   RESOURCE as GATED_REPOSITORY,
@@ -146,7 +152,10 @@ test("E07 poll acquisition journey", { timeout: TIMEOUT }, async (t) => {
     platform: InboundPlatform.GitHub,
     consumer: Consumer.MissionDeliveryAdmit,
     credential: CREDENTIAL,
-    configuration: { resource: RESOURCE },
+    configuration: {
+      resource_kind: ResourceKind.Repository,
+      resource: RESOURCE,
+    },
   });
   const inbound = (args: string[]) =>
     kanthord(["intake", "inbound", ...args], H);
@@ -346,7 +355,10 @@ test(
       platform: InboundPlatform.GitHub,
       consumer: Consumer.MissionDeliveryAdmit,
       credential: DELIVERY_CREDENTIAL,
-      configuration: { resource: GATED_REPOSITORY },
+      configuration: {
+        resource_kind: ResourceKind.Repository,
+        resource: GATED_REPOSITORY,
+      },
     });
     await until(
       async () => (await h.node(P.nodeId)).state,
@@ -393,5 +405,164 @@ test(
     const asset = landed[FIRST_INDEX]!.assets[FIRST_INDEX]!;
     assert.ok(asset.kind === AssetKind.Repository);
     assert.equal(asset.address.commit, MERGED_COMMIT);
+  },
+);
+
+const LINKED_ISSUE_NUMBER = 117;
+const COMMENT_ID = 4401;
+const COMMENT_AUTHOR_ID = 9;
+const COMMENT_CREATED_AT = "2026-11-07T04:00:00Z";
+const CONVERSATION_BINDING = "conversation";
+const FIRST_BINDING_SET = 1;
+const FIRST_ITEM = 0;
+const LINK_COUNT = 1;
+const NO_EVENT_READS = 0;
+const COMMENT_EVENT = "issue_comment_listed";
+const COMMENT_EVENT_ID = `issue_comment:${COMMENT_ID}`;
+const COMMENTS_PATH = /^\/repos\/owner\/repo\/issues\/comments(\?|$)/;
+const CONVERSATION_LINK = {
+  kind: "github_issue",
+  resource_identity: `conversation:github:${RESOURCE}`,
+  number: LINKED_ISSUE_NUMBER,
+};
+
+function listedComment() {
+  return {
+    id: COMMENT_ID,
+    user: { id: COMMENT_AUTHOR_ID, login: "reviewer", type: "User" },
+    body: "Please update the plan.",
+    created_at: COMMENT_CREATED_AT,
+    html_url: `https://github.com/${RESOURCE}/issues/${LINKED_ISSUE_NUMBER}#issuecomment-${COMMENT_ID}`,
+    issue_url: `https://api.github.com/repos/${RESOURCE}/issues/${LINKED_ISSUE_NUMBER}`,
+    performed_via_github_app: null,
+  };
+}
+
+test(
+  "E07.9 a conversation poll stores the listed comment of a linked issue and the mission records one update",
+  { timeout: TIMEOUT },
+  async (t) => {
+    const gitHub = await fakeGitHub(t);
+    const fixture = await gatewayFixture(t, {
+      github: { baseUrl: gitHub.endpoint },
+      intake: { pollIntervalMs: POLL_INTERVAL_MS },
+    });
+    const session = cliSession(t, fixture.endpoint, fixture.token, GITHUB_KEY);
+    await session.write(["repository", "credential", "create"], {
+      name: CREDENTIAL,
+      platform: InboundPlatform.GitHub,
+      metadata: null,
+      secret: { key: GITHUB_KEY },
+    });
+    const project = await session.read<{ id: string }>([
+      "project",
+      "create",
+      "--name",
+      "conversations",
+    ]);
+    const mission = await session.read<{ id: string; version: number }>([
+      "mission",
+      "get",
+      project.id,
+    ]);
+    await session.write(["project", "binding", "apply", project.id], {
+      version: FIRST_BINDING_SET,
+      bindings: {
+        harness: {
+          kind: "worker",
+          config: { worker: "claude-code@1", instance_count: 1 },
+        },
+        [CONVERSATION_BINDING]: {
+          kind: "conversation",
+          config: {
+            available: true,
+            platform: InboundPlatform.GitHub,
+            repository: RESOURCE,
+            credential: CREDENTIAL,
+            link_trust: { actor_ids: [String(COMMENT_AUTHOR_ID)] },
+          },
+        },
+      },
+    });
+    const bindings = await session.read<{
+      items: { id: string; name: string }[];
+    }>(["project", "binding", "list", project.id]);
+    const binding = bindings.items.find(
+      (item) => item.name === CONVERSATION_BINDING,
+    );
+    assert.ok(binding);
+    const created = await session.write<{ revisions: { node_id: string }[] }>(
+      ["mission", "node", "create", mission.id],
+      {
+        filename: "link.md",
+        content: {
+          name: "Follow the issue",
+          requirement: "Follow the issue",
+          criterion: "The issue is followed",
+          verifications: ["true"],
+          bindings: [binding.id],
+          intent: "examine",
+          external_links: [CONVERSATION_LINK],
+        },
+        tasks: [],
+        reason: "plan",
+        expected_mission_version: mission.version,
+      },
+    );
+    const nodeId = created.revisions[FIRST_ITEM]!.node_id;
+    const nodeState = () =>
+      fixture.store.database
+        .prepare("SELECT state FROM mission_node WHERE id = ?")
+        .get(nodeId) as { state: string };
+    const stateBefore = nodeState();
+    gitHub.issueComments(OWNER, REPO, [listedComment()]);
+    const commentsCalls = () =>
+      gitHub.calls.filter((call) => COMMENTS_PATH.test(call.path));
+    const poll = await session.write<Inbound>(["intake", "inbound", "create"], {
+      project_id: project.id,
+      kind: InboundKind.Poll,
+      platform: InboundPlatform.GitHub,
+      consumer: Consumer.MissionDeliveryAdmit,
+      credential: CREDENTIAL,
+      configuration: {
+        resource_kind: ResourceKind.Conversation,
+        resource: RESOURCE,
+      },
+    });
+    const items = await until(
+      async () =>
+        (
+          await session.read<{ items: Event[] }>([
+            "intake",
+            "event",
+            "list",
+            "--inbound",
+            poll.id,
+          ])
+        ).items,
+      (list) =>
+        list.length === LINK_COUNT &&
+        list.every((item) => item.state === InboundEventState.Succeeded),
+      t.signal,
+    );
+    assert.deepEqual(
+      items.map((item) => [item.event_id, item.metadata]),
+      [[COMMENT_EVENT_ID, { event: COMMENT_EVENT }]],
+    );
+    assert.ok(commentsCalls().length >= LINK_COUNT);
+    assert.equal(
+      gitHub.calls.filter((call) => EVENTS_PATH.test(call.path)).length,
+      NO_EVENT_READS,
+    );
+    const updates = fixture.store.database
+      .prepare(
+        "SELECT update_key FROM mission_link_update WHERE mission_id = ?",
+      )
+      .all(mission.id) as { update_key: string }[];
+    assert.deepEqual(
+      updates.map((row) => row.update_key),
+      [COMMENT_EVENT_ID],
+    );
+    assert.deepEqual(nodeState(), stateBefore);
   },
 );

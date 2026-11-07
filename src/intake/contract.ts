@@ -73,6 +73,11 @@ export const IntakeErrorCode = {
 
 export const InboundKind = { Webhook: "webhook", Poll: "poll" } as const;
 export const InboundPlatform = { GitHub: "github" } as const;
+export const ResourceKind = {
+  Repository: "repository",
+  Conversation: "conversation",
+} as const;
+export type ResourceKind = (typeof ResourceKind)[keyof typeof ResourceKind];
 export const Consumer = {
   MissionDeliveryAdmit: "mission.delivery.admit",
 } as const;
@@ -323,7 +328,7 @@ export type IntakeConsumers = Record<
 export type UnresolvedRequestCounter = (
   input: { project_id: string; resource_identity: string },
   options: ClientOptions,
-) => Promise<OperationResult<{ count: number }>>;
+) => Promise<OperationResult<{ count: number; link_count: number }>>;
 
 export type IntakeInventoryEntry = Omit<ResourceEntry, "project" | "scope"> & {
   project_id: string;

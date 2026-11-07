@@ -5,6 +5,7 @@ import { test, type TestContext } from "node:test";
 import {
   IntakeErrorCode,
   intakeOperations,
+  ResourceKind,
   webhookInboundSchema,
 } from "../../intake/contract.ts";
 import { errorSchema } from "../../kernel/errors.ts";
@@ -47,7 +48,10 @@ async function webhookInbound(fixture: Fixture) {
         kind: "webhook",
         platform: "github",
         consumer: "mission.delivery.admit",
-        configuration: { resource: "owner/repo" },
+        configuration: {
+          resource_kind: ResourceKind.Repository,
+          resource: "owner/repo",
+        },
       })
     ).json(),
   );

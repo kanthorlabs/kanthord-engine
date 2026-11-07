@@ -26,6 +26,7 @@ import {
   type InboundCreate,
   InboundKind,
   IntakeErrorCode,
+  type ResourceKind,
 } from "./contract.ts";
 import {
   allocateInboundId,
@@ -261,9 +262,14 @@ async function validateRead(
 async function validatePoll(
   dependencies: InboundCreateDependencies,
   caller: CallerContext,
-  inbound: { id: string; input: InboundCreate; resource: string },
+  inbound: {
+    id: string;
+    input: InboundCreate;
+    resource: string;
+    resourceKind: ResourceKind;
+  },
 ): Promise<void> {
-  for (const read of POLL_READS)
+  for (const read of POLL_READS[inbound.resourceKind])
     await validateRead(dependencies, caller, inbound, read);
 }
 
@@ -280,6 +286,7 @@ export async function createInbound(
       id,
       input,
       resource: configuration.resource,
+      resourceKind: configuration.resource_kind,
     });
   const inbound = caller.commit((tx) =>
     commitInbound(dependencies.custody, tx, id, input, null),

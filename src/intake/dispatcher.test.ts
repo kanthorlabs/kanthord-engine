@@ -25,6 +25,7 @@ import {
   InboundPlatform,
   INTAKE_SERVICE_NAME,
   type IntakeConsumers,
+  ResourceKind,
 } from "./contract.ts";
 import { Dispatcher, nextCandidate, reserve } from "./dispatcher.ts";
 import {
@@ -70,6 +71,7 @@ const CONSUMER_CALL_FAILED =
   "intake: the consumer call of an inbound event failed.";
 const WAKE_OFFSETS = 12;
 const EVENT_ENCODING = "base64";
+const CONVERSATION_IDENTITY = `conversation:github:${RESOURCE}`;
 
 interface Harness {
   store: Store;
@@ -86,7 +88,10 @@ function migrate(store: Store): void {
   ]);
 }
 
-function addInbound(store: Store): string {
+function addInbound(
+  store: Store,
+  resourceKind: ResourceKind = ResourceKind.Repository,
+): string {
   const id = allocateInboundId();
   store.transaction((tx) =>
     insertInbound(tx, id, {
@@ -95,7 +100,7 @@ function addInbound(store: Store): string {
       platform: InboundPlatform.GitHub,
       consumer: Consumer.MissionDeliveryAdmit,
       credential: null,
-      configuration: { resource: RESOURCE },
+      configuration: { resource_kind: resourceKind, resource: RESOURCE },
       checkpoint: null,
       created_at: CREATED_AT,
     }),
@@ -275,6 +280,15 @@ test("The handoff input holds the event row and its inbound, under the service i
   assert.equal(h.calls[0]?.options.context, background);
   assert.ok(h.calls[0]?.options.idempotencyKey);
   assert.equal(recordOf(h.store, id).error, null);
+});
+
+test("The handoff input of a conversation inbound holds the conversation identity as the resource", async (t) => {
+  const h = harness(t);
+  const inboundId = addInbound(h.store, ResourceKind.Conversation);
+  addEvent(h.store, inboundId, "d-1");
+  h.answers.push(completed({ disposition: "duplicate", reason: null }));
+  await handOver(h);
+  assert.equal(h.calls[0]?.input.resource, CONVERSATION_IDENTITY);
 });
 
 test("Repeated wakes during a handoff start no second handoff of the event", async (t) => {

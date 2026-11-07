@@ -42,6 +42,7 @@ import {
   INTAKE_SERVICE_NAME,
   type IntakeConsumers,
   intakeOperations,
+  ResourceKind,
 } from "./contract.ts";
 import { eventState, insertEvent } from "./event-store.ts";
 import { INBOUND_TARGET_KIND, InboundCapability } from "./health.ts";
@@ -178,7 +179,10 @@ function insertNaming(
       platform: InboundPlatform.GitHub,
       consumer: Consumer.MissionDeliveryAdmit,
       credential,
-      configuration: { resource: RESOURCE },
+      configuration: {
+        resource_kind: ResourceKind.Repository,
+        resource: RESOURCE,
+      },
       checkpoint,
       created_at: CREATED_AT,
     }),
@@ -264,7 +268,7 @@ const POLL: InboundCreate = {
   platform: InboundPlatform.GitHub,
   consumer: Consumer.MissionDeliveryAdmit,
   credential: CREDENTIAL,
-  configuration: { resource: RESOURCE },
+  configuration: { resource_kind: ResourceKind.Repository, resource: RESOURCE },
 };
 
 function modified(etag: string | null, events: GitHubEvent[]): EventsAnswer {
@@ -357,7 +361,7 @@ function pollService(t: TestContext, store: Store) {
     unresolvedRequests: async () => ({
       type: OperationResultType.Completed,
       status: HttpStatus.OK,
-      data: { count: DEMANDED_REQUESTS },
+      data: { count: DEMANDED_REQUESTS, link_count: DEMANDED_REQUESTS },
     }),
     projects: {
       get: async () => ({

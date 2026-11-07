@@ -44,6 +44,7 @@ import {
 import { workbenchOperations } from "../../workbench/contract.ts";
 import {
   intakeOperations,
+  ResourceKind,
   webhookInboundSchema,
 } from "../../intake/contract.ts";
 import {
@@ -2006,7 +2007,10 @@ test("inbound create answers 201, replays a repeated key, refuses an unknown con
     kind: "webhook",
     platform: "github",
     consumer: "mission.delivery.admit",
-    configuration: { resource: "owner/repo" },
+    configuration: {
+      resource_kind: ResourceKind.Repository,
+      resource: "owner/repo",
+    },
   } as const;
   const path = intakeOperations["inbound.create"].path;
   const key = createIdempotencyKey();
@@ -2107,7 +2111,10 @@ test("inbound get answers the webhook secret over HTTP, refuses another prefix a
         kind: "webhook",
         platform: "github",
         consumer: "mission.delivery.admit",
-        configuration: { resource: "owner/repo" },
+        configuration: {
+          resource_kind: ResourceKind.Repository,
+          resource: "owner/repo",
+        },
       }),
     },
   );
@@ -2194,7 +2201,10 @@ test("inbound delete answers 204 over HTTP and 404 for a repeat", async (t) => {
           kind: "webhook",
           platform: "github",
           consumer: "mission.delivery.admit",
-          configuration: { resource: "owner/repo" },
+          configuration: {
+            resource_kind: ResourceKind.Repository,
+            resource: "owner/repo",
+          },
         }),
       })
     ).json(),

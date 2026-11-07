@@ -5,6 +5,7 @@ import {
   Consumer,
   InboundKind,
   InboundPlatform,
+  ResourceKind,
   WEBHOOK_ADDRESS_PREFIX,
 } from "../../intake/contract.ts";
 import { writePrivate } from "../../kernel/files.ts";
@@ -72,7 +73,10 @@ test("E05 inbound store CLI journey", { timeout: TIMEOUT }, async (t) => {
     kind: InboundKind.Webhook,
     platform: InboundPlatform.GitHub,
     consumer: Consumer.MissionDeliveryAdmit,
-    configuration: { resource: RESOURCE },
+    configuration: {
+      resource_kind: ResourceKind.Repository,
+      resource: RESOURCE,
+    },
   };
   const webhookFile = file("webhook.json", webhook);
   let W = "";
@@ -86,7 +90,10 @@ test("E05 inbound store CLI journey", { timeout: TIMEOUT }, async (t) => {
     assert.equal(created.kind, InboundKind.Webhook);
     assert.equal(created.credential, null);
     assert.equal(created.checkpoint, null);
-    assert.deepEqual(created.configuration, { resource: RESOURCE });
+    assert.deepEqual(created.configuration, {
+      resource_kind: ResourceKind.Repository,
+      resource: RESOURCE,
+    });
     assert.ok(idempotencyKeySchema.safeParse(created.idempotency_key).success);
     W = created.id;
   });
@@ -143,7 +150,11 @@ test("E05 inbound store CLI journey", { timeout: TIMEOUT }, async (t) => {
         "--file",
         file("extra-field.json", {
           ...webhook,
-          configuration: { resource: RESOURCE, events: ["push"] },
+          configuration: {
+            resource_kind: ResourceKind.Repository,
+            resource: RESOURCE,
+            events: ["push"],
+          },
         }),
       ]),
       VALIDATION_FAILED,
