@@ -19,6 +19,11 @@ import {
   UNBLOCK_HELP,
 } from "./mission-help.ts";
 import { addMutationOptions, mutate } from "./mission-support.ts";
+import {
+  addPlanFileOptions,
+  planFilePathsOf,
+  unblockBody,
+} from "./plan-file.ts";
 
 const BLOCK = "block";
 const PAUSE_INVALID_NODE = "cli.mission.node.pause.invalid_node_id";
@@ -133,13 +138,21 @@ export function addControlCommands(node: Command): void {
 }
 
 function addUnblockCommand(node: Command): void {
-  addMutationOptions(
-    node
-      .command("unblock")
-      .description("Unblock a node")
-      .argument("<node-id>", "Node ID"),
-    { schema: unblockSchema, example: missionExamples.unblock },
+  addPlanFileOptions(
+    addMutationOptions(
+      node
+        .command("unblock")
+        .description("Unblock a node")
+        .argument("<node-id>", "Node ID"),
+      { schema: unblockSchema, example: missionExamples.unblock },
+      false,
+    ),
   )
+    .option(
+      "--start-point <point>",
+      "Start point of the next attempt with --plan-file: node_branch (default) or base_branch",
+      singleUse("--start-point"),
+    )
     .addHelpText("after", UNBLOCK_HELP)
     .action(async (nodeId: string, _options, command: Command) => {
       if (!identitySchema("node").safeParse(nodeId).success)
@@ -147,11 +160,19 @@ function addUnblockCommand(node: Command): void {
           "cli.mission.node.unblock.invalid_node_id",
           "invalid node ID",
         );
-      await mutate(command, "node.unblock", unblockSchema, (api, body, key) =>
-        api["node.unblock"](
-          { params: { node_id: nodeId }, query: {}, body },
-          { idempotencyKey: key },
-        ),
+      const planFiles = planFilePathsOf(command);
+      await mutate(
+        command,
+        "node.unblock",
+        unblockSchema,
+        (api, body, key) =>
+          api["node.unblock"](
+            { params: { node_id: nodeId }, query: {}, body },
+            { idempotencyKey: key },
+          ),
+        undefined,
+        planFiles &&
+          ((connection) => unblockBody(command, nodeId, planFiles, connection)),
       );
     });
 }

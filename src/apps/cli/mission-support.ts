@@ -71,12 +71,18 @@ export async function mutate<S extends z.ZodTypeAny, T extends object>(
     key: string,
   ) => Promise<OperationResult<T>>,
   after?: (data: T) => void,
+  bodyOf?: (connection: {
+    endpoint: string;
+    token: string;
+  }) => Promise<z.infer<S>>,
 ): Promise<void> {
   const options = command.optsWithGlobals();
   const { endpoint, token } = resolveClient(options);
   requireToken(token, `cli.mission.${name}.token_required`);
   const key = resolveKey(options);
-  const body = readJsonFileAs(options.file, schema);
+  const body = bodyOf
+    ? await bodyOf({ endpoint, token })
+    : readJsonFileAs(options.file, schema);
   const result = await invoke(
     httpClient(missionOperations, endpoint, token),
     body,
@@ -107,15 +113,18 @@ export function addPagination(command: Command): Command {
     );
 }
 
-export function addMutationOptions(command: Command, body: FileBody): Command {
+export function addMutationOptions(
+  command: Command,
+  body: FileBody,
+  fileRequired = true,
+): Command {
+  const fileOption = fileRequired ? "requiredOption" : "option";
   return addFileBodyHelp(
-    command
-      .requiredOption(
-        FILE_OPTION + " <path>",
-        "Request body JSON file",
-        singleUse(FILE_OPTION),
-      )
-      .option(KEY_OPTION + " <key>", "Mutation key", singleUse(KEY_OPTION)),
+    command[fileOption](
+      FILE_OPTION + " <path>",
+      "Request body JSON file",
+      singleUse(FILE_OPTION),
+    ).option(KEY_OPTION + " <key>", "Mutation key", singleUse(KEY_OPTION)),
     body,
   );
 }

@@ -52,6 +52,11 @@ import {
   retireSchema,
 } from "../../mission/contract.ts";
 import { CommandName, PROGRAM_NAME } from "./constants.ts";
+import {
+  addPlanFileOptions,
+  nodeUpdateBody,
+  planFilePathsOf,
+} from "./plan-file.ts";
 import { validateProjectId } from "./project.ts";
 import {
   handleReadResult,
@@ -208,6 +213,7 @@ async function nodeCreate(missionId: string, command: Command): Promise<void> {
 
 async function nodeUpdate(nodeId: string, command: Command): Promise<void> {
   validateNodeId(nodeId, NODE_UPDATE_INVALID_NODE_ID);
+  const planFiles = planFilePathsOf(command);
   await mutate(
     command,
     "node.update",
@@ -218,6 +224,8 @@ async function nodeUpdate(nodeId: string, command: Command): Promise<void> {
         { idempotencyKey: key },
       ),
     nodeChangeNotes,
+    planFiles &&
+      ((connection) => nodeUpdateBody(command, nodeId, planFiles, connection)),
   );
 }
 
@@ -678,12 +686,15 @@ function addNodeCommands(mission: Command): void {
   ).action((missionId: string, _options, command: Command) =>
     nodeCreate(missionId, command),
   );
-  addMutationOptions(
-    node
-      .command(UPDATE)
-      .description("Update a mission node as JSON")
-      .argument("<node-id>", "Node ID"),
-    { schema: nodeUpdateSchema, example: missionExamples.nodeUpdate },
+  addPlanFileOptions(
+    addMutationOptions(
+      node
+        .command(UPDATE)
+        .description("Update a mission node as JSON or plan files")
+        .argument("<node-id>", "Node ID"),
+      { schema: nodeUpdateSchema, example: missionExamples.nodeUpdate },
+      false,
+    ),
   )
     .addHelpText("after", REVISION_HELP)
     .action((nodeId: string, _options, command: Command) =>
