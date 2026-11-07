@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
-import { createIdentity } from "../../kernel/identity.ts";
+import { stopAfter, temporary } from "../../kernel/test-support.ts";
+import { llmOperations } from "../../llm/contract.ts";
 import {
   AssetKind,
   type Evidence,
@@ -14,22 +15,30 @@ import {
 import type { CredentialAnswer } from "../../custody/contract.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
+import { generateSshKey } from "../../repository/ssh-key.ts";
 import {
   DEFAULT_SSH_PORT,
   startTestSshd,
 } from "../../repository/sshd-test-support.ts";
 import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";
 import type { Span } from "../../tracking/contract.ts";
-import type { RepositoryTransport } from "../../worker/contract.ts";
+import {
+  InstancePlacement,
+  type RepositoryTransport,
+  workerOperations,
+} from "../../worker/contract.ts";
 import {
   fauxAssistantMessage,
   fauxToolCall,
   scriptedModelRuntime,
   scriptedProvider,
 } from "../../worker/unit/test-support.ts";
+import { Worker } from "../worker/index.ts";
 import {
+  createMachine,
   FAKE_GITHUB_HOST_KEY,
   FAKE_SSH_CREDENTIAL,
+  humanCaller,
   inProcessWorker,
 } from "./test-support.ts";
 import {
@@ -55,7 +64,9 @@ const READY = "Worker application ready";
 const CLAIMED = "credential handover received";
 const WORKER_STOPPED = "worker_stopped";
 const INSTANCE_ARCHIVED = "instance_archived";
-const INSTANCE_NAME = "server-1";
+const INSTANCE_NAME = "laptop";
+const MACHINE_NAME = "workstation";
+const FAST_HEARTBEAT_MS = 50;
 const STOPPED_FILE = "stopped.txt";
 const DECRYPTION_FAILED = "worker.handover.decryption_failed";
 const ENDED = "execution ended";
@@ -135,9 +146,13 @@ async function fixture(t: TestContext) {
   const sshd = await startTestSshd(t);
   await sshd.authorize(publicKey);
   const handed: SshAccess[] = [];
+  const localKey = generateSshKey("local");
+  await sshd.authorize(localKey.public_key);
   const routed = (ssh: SshAccess): SshAccess => {
     handed.push(ssh);
-    return { ...ssh, known_hosts: sshd.known_hosts, port: sshd.port };
+    return "relay" in ssh
+      ? { ...localKey, known_hosts: sshd.known_hosts, port: sshd.port }
+      : { ...ssh, known_hosts: sshd.known_hosts, port: sshd.port };
   };
   const origin = sshd.url(bare);
   const connector = new RepositoryComponent();
@@ -471,35 +486,65 @@ test(
             return fauxAssistantMessage("stopped");
           },
         ]);
-        const host = await inProcessWorker(t, {
-          endpoint: archiveSetup.fixture.endpoint,
-          ...archiveSetup.auth,
+        const call = humanCaller(archiveSetup.fixture);
+        const empty = { params: {}, query: {} };
+        await createMachine(archiveSetup.fixture, MACHINE_NAME);
+        const created = await call(workerOperations["instance.create"], {
+          ...empty,
+          body: {
+            name: INSTANCE_NAME,
+            worker: "coder@1",
+            placement: InstancePlacement.Worker,
+            machine: MACHINE_NAME,
+            endpoint: archiveSetup.fixture.endpoint,
+          },
+        });
+        assert.ok(created.instance_configuration);
+        await call(llmOperations.create, {
+          ...empty,
+          body: {
+            name: "anthro-1",
+            platform: "anthropic",
+            metadata: null,
+            holders: [INSTANCE_NAME],
+            secret: { key: WORKER_TEST_KEY },
+          },
+        });
+        const rebind = async (instances: string[]) => {
+          const exported = await archiveSetup.read<{
+            version: number;
+            bindings: { general: { config: { worker_instances: string[] } } };
+          }>(["project", "binding", "export", archiveSetup.project_id]);
+          exported.bindings.general.config.worker_instances = instances;
+          await archiveSetup.write(
+            ["project", "binding", "apply", archiveSetup.project_id],
+            exported,
+          );
+        };
+        await rebind([INSTANCE_NAME]);
+        const root = temporary(t);
+        const worker = new Worker({
+          env: {
+            ...process.env,
+            HOME: root,
+            XDG_CONFIG_HOME: join(root, "config"),
+            XDG_DATA_HOME: join(root, "data"),
+            XDG_STATE_HOME: join(root, "state"),
+            KANTHORD_WORKER_CONFIG: created.instance_configuration,
+          },
+          connectionName: "host-a",
+          heartbeatIntervalMs: FAST_HEARTBEAT_MS,
           modelRuntimeFactory: scriptedModelRuntime(provider),
           repositoryTransport: archiveSetup.transport,
+          log: () => {},
+        });
+        const running = worker.run();
+        stopAfter(t, async () => {
+          await worker.stop();
+          await running;
         });
         await entered.promise;
-        const exported = await archiveSetup.read<{
-          version: number;
-          bindings: { general: { config: { worker_instances: string[] } } };
-        }>(["project", "binding", "export", archiveSetup.project_id]);
-        exported.bindings.general.config.worker_instances = [];
-        await archiveSetup.write(
-          ["project", "binding", "apply", archiveSetup.project_id],
-          exported,
-        );
-        const instance = await archiveSetup.read<{ id: string }>([
-          "worker",
-          "instance",
-          "get",
-          INSTANCE_NAME,
-        ]);
-        const connectionId = createIdentity("connection");
-        assert.ok(
-          archiveSetup.fixture.worker.instances.holdConnection(
-            instance.id,
-            connectionId,
-          ),
-        );
+        await rebind([]);
         const archived = await archiveSetup.read<{
           ended_at: number | null;
           stopping?: string[];
@@ -514,15 +559,6 @@ test(
         ]);
         assert.equal(archived.ended_at, null);
         assert.equal(archived.stopping?.length, SINGLE_ITEM);
-        const work = archiveSetup.fixture.worker.instances.work(
-          instance.id,
-          INSTANCE_NAME,
-          connectionId,
-        );
-        assert.deepEqual(work.stop_orders, [
-          { execution_id: archived.stopping![0], reason: INSTANCE_ARCHIVED },
-        ]);
-        host.worker.stopOrders(work.stop_orders);
         resume.resolve();
         for (;;) {
           const current = await archiveSetup.read<{ ended_at: number | null }>([
