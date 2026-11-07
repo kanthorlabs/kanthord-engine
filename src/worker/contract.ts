@@ -14,6 +14,7 @@ import {
   TOOL_OUTPUT_NAME_PATTERN,
   WORKSPACE_KEY_PATTERN,
 } from "../kernel/cleanup.ts";
+import type { ExternalLink } from "../kernel/external-link.ts";
 import { canonicalJSON, timestamp } from "../kernel/json.ts";
 import { base64urlSchema, sealedObjectSchema } from "../kernel/hpke.ts";
 import {
@@ -266,7 +267,10 @@ export const RepositoryAction = {
   PullRequest: "pull_request",
   MergePush: "merge_push",
 } as const;
-export type FrozenAction = {
+export const ConversationAction = {
+  Reply: "reply",
+} as const;
+export type RepositoryFrozenAction = {
   key: string;
   binding_id: string;
   action: (typeof RepositoryAction)[keyof typeof RepositoryAction];
@@ -274,6 +278,19 @@ export type FrozenAction = {
   follows: string | null;
   configuration: { base_branch: string; landing: "human" | "kanthord" };
 };
+export type ReplyFrozenAction = {
+  key: string;
+  binding_id: string;
+  action: typeof ConversationAction.Reply;
+  expected_end_state: "posted";
+  follows: string | null;
+  configuration: { external_link: ExternalLink };
+};
+export type FrozenAction = RepositoryFrozenAction | ReplyFrozenAction;
+export type RepositoryActionEntry = Omit<
+  ActionContext["actions"][number],
+  "action"
+> & { action: RepositoryFrozenAction };
 export const ActionNodeState = {
   Pending: "Pending",
   Available: "Available",

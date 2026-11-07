@@ -3,8 +3,13 @@ import { test, type TestContext } from "node:test";
 import {
   INTAKE_SERVICE_NAME,
   IntakeErrorCode,
+  OutboundRequestState,
   ResultClass,
 } from "../intake/contract.ts";
+import {
+  type ExternalLink,
+  ExternalLinkKind,
+} from "../kernel/external-link.ts";
 import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -18,11 +23,13 @@ import {
   AssetKind,
   CheckEndState,
   ClosingEvent,
+  ConversationAction,
   type DecodedLinkUpdate,
   FindingCauseOwner,
   FindingKind,
   MissionErrorCode,
   NodeState,
+  PlatformAddressKind,
   RepositoryLanding,
   Resolution,
 } from "./contract.ts";
@@ -1001,4 +1008,190 @@ test("node check passes a failed link read on as the failure of the whole check"
       error.code ===
         `repository.platform.github.${ResultClass.RetryableRefusal}`,
   );
+});
+
+const REPLY_RESOURCE = "conversation:github:owner/repo";
+const REPLY_KEY = "conversation.reply.0";
+const REPLY_UPDATE_KEY = "issue_comment:4242";
+const REPLY_LINK_NUMBER = 7;
+
+async function replyFixture(t: TestContext) {
+  const h = await fixture(t);
+  const conversationId = createIdentity("binding");
+  const link: ExternalLink = {
+    kind: ExternalLinkKind.GitHubIssue,
+    resource_identity: REPLY_RESOURCE,
+    number: REPLY_LINK_NUMBER,
+  };
+  const revisionOf = h.dependencies.bindings.getBindingRevision;
+  h.dependencies.bindings.getBindingRevision = (tx, bindingId) =>
+    bindingId === conversationId
+      ? {
+          ...revisionOf(tx, h.repositoryId)!,
+          binding_id: conversationId,
+          name: "conversation",
+          resource_identity: REPLY_RESOURCE,
+        }
+      : revisionOf(tx, bindingId);
+  h.dependencies.bindings.conversationPolicyOf = (_tx, bindingId) => ({
+    binding_id: bindingId,
+    project_id: h.project_id,
+    name: "conversation",
+    key: "conversation.reply",
+    action: ConversationAction.Reply,
+  });
+  h.dependencies.intakeLinks.hasInbound = () => true;
+  h.dependencies.intakeLinks.read = async () => ({ items: [] });
+  h.dependencies.intakeLinks.releaseHeld = () => undefined;
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare(
+        "UPDATE mission_node_revision SET bindings = ?, external_links = ? WHERE node_id = ?",
+      )
+      .run(
+        JSON.stringify([h.repositoryId, conversationId, h.storageId]),
+        JSON.stringify([link]),
+        h.node_id,
+      ),
+  );
+  const replyId = createIdentity("evidence");
+  h.store.transaction((tx) =>
+    insertEvidence(
+      tx,
+      {
+        id: replyId,
+        node_id: h.node_id,
+        attempt: FIRST_ATTEMPT,
+        subject: "Reply",
+        requirement_key: REPLY_KEY,
+        end_state: null,
+        verification: null,
+        provenance: JSON.stringify(h.executionActor),
+        created_at: FIRST_ATTEMPT,
+      },
+      [
+        {
+          id: createIdentity("evidence_asset"),
+          evidence_id: replyId,
+          kind: AssetKind.Platform,
+          content: JSON.stringify({
+            kind: PlatformAddressKind.Comment,
+            resource_identity: REPLY_RESOURCE,
+            update_key: REPLY_UPDATE_KEY,
+          }),
+          published_at: FIRST_ATTEMPT,
+          expired_at: null,
+        },
+      ],
+    ),
+  );
+  const outbound = new Map<
+    string,
+    (typeof OutboundRequestState)[keyof typeof OutboundRequestState]
+  >([[replyId, OutboundRequestState.Pending]]);
+  let platformCalls = NO_REMOTE_CALLS;
+  h.dependencies.intakeCheck.check = async (_context, evidenceId) => {
+    if (evidenceId === h.request.id) {
+      platformCalls++;
+      return { end_state: CheckEndState.Expected, landed_commits: [COMMIT] };
+    }
+    return {
+      end_state:
+        outbound.get(evidenceId) === OutboundRequestState.Succeeded
+          ? CheckEndState.Expected
+          : CheckEndState.None,
+      landed_commits: [],
+    };
+  };
+  return {
+    ...h,
+    replyId,
+    outbound,
+    platformCalls: () => platformCalls,
+  };
+}
+
+function resolutionsOf(answer: {
+  results: { requirement_key: string; resolution: string }[];
+}) {
+  return answer.results
+    .map((result) => [result.requirement_key, result.resolution])
+    .sort();
+}
+
+test("a node with a pull request and a reply completes only when both reach their expected end states", async (t) => {
+  const h = await replyFixture(t);
+  assert.deepEqual(
+    resolutionsOf(await h.check()),
+    [
+      ["repo.pull_request", Resolution.ExpectedEnd],
+      [REPLY_KEY, Resolution.Unresolved],
+    ].sort(),
+  );
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+  h.outbound.set(h.replyId, OutboundRequestState.Succeeded);
+  assert.deepEqual(resolutionsOf(await h.check()), [
+    [REPLY_KEY, Resolution.ExpectedEnd],
+  ]);
+  assert.equal(h.node().state, NodeState.Completed);
+  h.store.transaction((tx) =>
+    assert.equal(
+      readLandedCommitEvidence(tx, h.node_id, FIRST_ATTEMPT).length,
+      SINGLE_LANDED_COMMIT,
+    ),
+  );
+});
+
+test("the check of a reply evidence answers posted from a succeeded outbound request and calls no platform", async (t) => {
+  const h = await replyFixture(t);
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare("UPDATE mission_evidence SET end_state = ? WHERE id = ?")
+      .run(CheckEndState.Expected, h.request.id),
+  );
+  h.outbound.set(h.replyId, OutboundRequestState.Succeeded);
+  assert.deepEqual(resolutionsOf(await h.check()), [
+    [REPLY_KEY, Resolution.ExpectedEnd],
+  ]);
+  assert.equal(h.platformCalls(), NO_REMOTE_CALLS);
+  assert.equal(
+    h.store.transaction((tx) => readEvidence(tx, h.replyId)?.end_state),
+    CheckEndState.Expected,
+  );
+});
+
+test("an expected answer for a reply evidence with a landed commit leaves the request unresolved", async (t) => {
+  const h = await replyFixture(t);
+  h.dependencies.intakeCheck.check = async (_context, evidenceId) => ({
+    end_state: CheckEndState.Expected,
+    landed_commits: evidenceId === h.replyId ? [COMMIT] : [],
+  });
+  const answer = await h.check();
+  assert.ok(
+    answer.failures.some((failure) => failure.evidence_id === h.replyId),
+  );
+  assert.equal(
+    h.store.transaction((tx) => readEvidence(tx, h.replyId)?.end_state),
+    null,
+  );
+});
+
+test("the deferred check resolves an unresolved comment evidence", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setImmediate"] });
+  const h = await replyFixture(t);
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare("UPDATE mission_evidence SET end_state = ? WHERE id = ?")
+      .run(CheckEndState.Expected, h.request.id),
+  );
+  h.outbound.set(h.replyId, OutboundRequestState.Succeeded);
+  scheduleDeferredCheck(h.dependencies, h.node_id, FIRST_ATTEMPT);
+  t.mock.timers.tick(FIRST_ROUND_DELAY_MS);
+  for (let turn = 0; turn < MICROTASK_TURNS; turn++) await Promise.resolve();
+  assert.equal(
+    h.store.transaction((tx) => readEvidence(tx, h.replyId)?.end_state),
+    CheckEndState.Expected,
+  );
+  assert.equal(h.node().state, NodeState.Completed);
+  assert.equal(h.platformCalls(), NO_REMOTE_CALLS);
 });

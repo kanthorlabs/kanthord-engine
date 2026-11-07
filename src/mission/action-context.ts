@@ -36,14 +36,16 @@ function candidatesOf(
     const next = requests.flatMap((request) =>
       readAssets(tx, request.id)
         .filter((asset) => asset.kind === AssetKind.Platform)
-        .map((asset) => ({
-          evidence_id: request.id,
-          attempt: earlier,
-          address: platformAddressSchema.parse(JSON.parse(asset.content)),
-        })),
+        .flatMap((asset) => {
+          const address = platformAddressSchema.parse(
+            JSON.parse(asset.content),
+          );
+          return address.kind === PlatformAddressKind.PullRequest
+            ? [{ evidence_id: request.id, attempt: earlier, address }]
+            : [];
+        }),
     );
     for (const candidate of next) {
-      if (candidate.address.kind !== PlatformAddressKind.PullRequest) continue;
       const address = canonicalJSON(candidate.address);
       if (!candidates.has(address)) candidates.set(address, candidate);
     }

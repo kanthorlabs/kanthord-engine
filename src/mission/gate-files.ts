@@ -4,6 +4,7 @@ import {
   AssessmentResult,
   type AssessmentSubmit,
   AssetKind,
+  ConversationAction,
   type GateFiles,
   gateFilesSchema,
 } from "./contract.ts";
@@ -44,7 +45,8 @@ export async function serverGateFiles(
       claim.nodeId,
       claim.pinnedRevision,
     ))
-      baseBranches.set(action.binding_id, action.configuration.base_branch);
+      if (action.action !== ConversationAction.Reply)
+        baseBranches.set(action.binding_id, action.configuration.base_branch);
   });
   const addresses = Array.isArray(body.tested_input)
     ? body.tested_input

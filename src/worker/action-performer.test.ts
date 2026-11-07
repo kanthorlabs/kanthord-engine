@@ -18,6 +18,7 @@ import {
   PlatformAddressKind,
   RefusalClass,
   RepositoryAction,
+  type RepositoryActionEntry,
   ResultClass,
   TestedInputKind,
   Uncertainty,
@@ -67,7 +68,7 @@ function actionable(t: TestContext) {
   assert.ok(
     !Array.isArray(snapshot) && snapshot.kind === TestedInputKind.Repository,
   );
-  const entry: ActionContext["actions"][number] = {
+  const entry: RepositoryActionEntry = {
     action: {
       key: "repo.pull_request",
       binding_id: snapshot.binding_id,
@@ -898,7 +899,7 @@ function reworkable(t: TestContext) {
     !Array.isArray(snapshot) && snapshot.kind === TestedInputKind.Repository,
   );
   const existingEvidenceId = createIdentity("evidence");
-  const entry: ActionContext["actions"][number] = {
+  const entry: RepositoryActionEntry = {
     action: {
       key: "repo.pull_request",
       binding_id: snapshot.binding_id,

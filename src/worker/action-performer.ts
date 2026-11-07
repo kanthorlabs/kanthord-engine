@@ -21,10 +21,12 @@ import {
   ActionResolution,
   type ActionResultItem,
   ActionResultKind,
+  ConversationAction,
   type IntakeActionCall,
   type PlatformAddress,
   PlatformAddressKind,
   RepositoryAction,
+  type RepositoryActionEntry,
   requiredCheckReadSchema,
   Uncertainty,
   WorkerErrorCode,
@@ -55,7 +57,7 @@ type PerformerDependencies = Pick<
 > & { logger: Pick<Logger, "warn"> | null };
 type PerformerCaller = { context: Context; identity: MachineIdentity };
 type Pending = {
-  entry: ActionContext["actions"][number];
+  entry: RepositoryActionEntry;
   key: ReservationKey;
   operands: ActionOperands;
   reservation: ReturnType<DispatchReservations["acquire"]>;
@@ -73,6 +75,12 @@ const CHECKS_PENDING_MESSAGE = "merge deferred: required checks pending";
 const CHECKS_FAILED_MESSAGE = "merge skipped: required checks failed";
 const CHECK_READ_FAILED_MESSAGE = "required check read failed";
 const MERGE_REFUSED_MESSAGE = "merge request refused";
+
+function isRepositoryEntry(
+  entry: ActionContext["actions"][number],
+): entry is RepositoryActionEntry {
+  return entry.action.action !== ConversationAction.Reply;
+}
 
 function landsByKanthorD(entry: Pending["entry"]): boolean {
   return (
@@ -196,6 +204,7 @@ export class ActionPerformer {
 
   private reserve(claim: ExecutionClaim, context: ActionContext): Pending[] {
     const entries = context.actions
+      .filter(isRepositoryEntry)
       .filter((entry) => entry.eligible)
       .sort((left, right) =>
         left.action.key < right.action.key
@@ -424,6 +433,7 @@ export class ActionPerformer {
   ): Promise<void> {
     for (const entry of context.actions) {
       if (
+        !isRepositoryEntry(entry) ||
         entry.resolution !== ActionResolution.Unresolved ||
         entry.action.action !== RepositoryAction.PullRequest ||
         entry.action.configuration.landing !== Landing.KanthorD ||

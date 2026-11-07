@@ -395,7 +395,7 @@ Its `config` holds these fields:
 - `platform`: **required**, the value `github`. A later platform adds one value.
 - `repository`: **required**, `<owner>/<repo>` of the GitHub repository.
 - `credential`: **required**, one `CredentialName` of platform `github`. Custody checks the platform at the write. The write makes no platform call.
-- `reply_policy`: **optional**, `{ "follows": { "type": "assessment_passed" } }`. Another value refuses the write as a validation failure. The write stores the key and derives no action from it.
+- `reply_policy`: **optional**, `{ "follows": { "type": "assessment_passed" } }`. Another value refuses the write as a validation failure. A `reply_policy` gives the binding the action `reply` and the key `<binding name>.reply`. A node derives one `reply` action for each link of its pinned revision that names the binding, with the key `<binding name>.reply.<position>`.
 - `link_trust`: **optional**, object `{ actor_ids }`. [Link trust](#link-trust) states the rules.
 
 The resource identity of a conversation binding is `conversation:github:<repository>`.

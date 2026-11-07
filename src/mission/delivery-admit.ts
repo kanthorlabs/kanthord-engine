@@ -14,6 +14,7 @@ import {
   type AdmissionAnswer,
   AdmissionRefusal,
   CONTENT_ENCODING,
+  ConversationAction,
   type DecodedLinkUpdate,
   type deliveryAdmitSchema,
   Disposition,
@@ -168,12 +169,14 @@ async function checkBase(
       tx,
       input.project_id,
       address.resource_identity,
-    ).filter(
-      (evidenceId) =>
-        evidenceId !== exactEvidenceId &&
-        requestContext(tx, dependencies, evidenceId).frozen_action.configuration
-          .base_branch === address.branch,
-    ),
+    ).filter((evidenceId) => {
+      if (evidenceId === exactEvidenceId) return false;
+      const action = requestContext(tx, dependencies, evidenceId).frozen_action;
+      return (
+        action.action !== ConversationAction.Reply &&
+        action.configuration.base_branch === address.branch
+      );
+    }),
   );
   const base: BaseCheck[] = [];
   for (const evidenceId of selected)

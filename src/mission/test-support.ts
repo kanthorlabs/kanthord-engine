@@ -387,6 +387,10 @@ export function missionHarness(
         record("bindings.repositoryPolicyOf", args);
         return null;
       },
+      conversationPolicyOf: (...args) => {
+        record("bindings.conversationPolicyOf", args);
+        return null;
+      },
     },
     workQueue: {
       insert: (...args) => record("workQueue.insert", args),

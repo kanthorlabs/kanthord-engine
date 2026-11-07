@@ -1088,6 +1088,7 @@ export function composeServices(options: {
         project.resolveBindingIdentity(tx, pid, bid),
       getBindingRevision: (tx, bid) => project.getBindingRevision(tx, bid),
       repositoryPolicyOf: (tx, bid) => project.repositoryPolicyOf(tx, bid),
+      conversationPolicyOf: (tx, bid) => project.conversationPolicyOf(tx, bid),
       storageBindingOf: (tx, bid) => project.storageBindingOf(tx, bid),
     },
     environments: {

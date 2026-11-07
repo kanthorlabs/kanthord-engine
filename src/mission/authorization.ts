@@ -16,6 +16,7 @@ import {
   AssessmentResult,
   AssetKind,
   type Authorized,
+  ConversationAction,
   type FrozenAction,
   MISSION_SERVICE_NAME,
   type MissionBindings,
@@ -28,6 +29,7 @@ import {
   type PullRequestAddress,
   RepositoryAction,
   type RepositoryFacts,
+  type RepositoryFrozenAction,
   RepositoryLanding,
   type RequestFacts,
   type StorageBinding,
@@ -205,7 +207,7 @@ const NO_GATE_FILES = 0;
 function repositoryOf(
   tx: Transaction,
   bindings: MissionBindings,
-  action: FrozenAction,
+  action: RepositoryFrozenAction,
 ) {
   const policy = bindings.repositoryPolicyOf(tx, action.binding_id);
   const revision = bindings.getBindingRevision(tx, action.binding_id);
@@ -302,6 +304,8 @@ export function authorizeFrozenAction(
   assert.equal(identity.kind, IdentityKind.Client);
   assert.equal(identity.projectId, claim.projectId);
   const action = authorizeAction(tx, dependencies, claim, input.key);
+  if (action.action === ConversationAction.Reply)
+    authorizationRefused(AuthorizationRefusal.NodeMismatch);
   const commit = assessedCommitOf(
     tx,
     claim.nodeId,
@@ -364,7 +368,9 @@ export function authorizeFrozenAction(
   };
 }
 
-function mergeLandingAdmitted(action: FrozenAction): void {
+function mergeLandingAdmitted(
+  action: FrozenAction,
+): asserts action is RepositoryFrozenAction {
   assert.ok(action.key);
   if (
     action.action !== RepositoryAction.PullRequest ||
@@ -530,12 +536,14 @@ export function authorizeRequestEvidence(
     evidenceId,
     claim,
   );
+  assert.ok(action.action !== ConversationAction.Reply);
   const { policy, repository, linkTrust } = repositoryOf(
     tx,
     dependencies.bindings,
     action,
   );
   const address = platformAddressOf(tx, evidenceId);
+  assert.ok(address.kind !== PlatformAddressKind.Comment);
   assert.equal(address.resource_identity, repository.resource_identity);
   const evidence = readEvidence(tx, evidenceId);
   assert.ok(evidence);

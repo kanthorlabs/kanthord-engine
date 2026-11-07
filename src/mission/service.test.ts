@@ -327,6 +327,9 @@ const bindings: MissionBindings = {
   repositoryPolicyOf() {
     throw new Error(UNEXPECTED_COLLABORATION);
   },
+  conversationPolicyOf() {
+    throw new Error(UNEXPECTED_COLLABORATION);
+  },
   resolveBinding() {
     throw new Error(UNEXPECTED_COLLABORATION);
   },

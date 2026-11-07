@@ -78,6 +78,8 @@ function coverageHarness(t: TestContext) {
       tombstone: false,
       disabled: false,
     }),
+    conversationPolicyOf: () =>
+      assert.fail("Coverage reads no conversation policy."),
     repositoryPolicyOf: (_tx, bindingId) => ({
       binding_id: bindingId,
       project_id: PROJECT_ID,

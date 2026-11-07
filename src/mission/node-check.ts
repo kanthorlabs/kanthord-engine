@@ -17,6 +17,8 @@ import {
   CheckEndState,
   checkEndStateSchema,
   commitSchema,
+  ConversationAction,
+  type FrozenAction,
   type IntakeCheck,
   MissionErrorCode,
   NodeState,
@@ -92,16 +94,18 @@ const MergeOutcome = {
 type MergeOutcome = (typeof MergeOutcome)[keyof typeof MergeOutcome];
 export const LANDED_COMMIT_SUBJECT = "Landed commit";
 type CheckAnswer = Awaited<ReturnType<IntakeCheck["check"]>>;
-const checkAnswerSchema = z
-  .strictObject({
-    end_state: checkEndStateSchema,
-    landed_commits: z.array(commitSchema),
-  })
-  .refine((answer) =>
-    answer.end_state === CheckEndState.Expected
-      ? answer.landed_commits.length > NO_LANDED_COMMITS
-      : answer.landed_commits.length === NO_LANDED_COMMITS,
-  );
+const checkAnswerSchemaOf = (action: FrozenAction) =>
+  z
+    .strictObject({
+      end_state: checkEndStateSchema,
+      landed_commits: z.array(commitSchema),
+    })
+    .refine((answer) =>
+      answer.end_state === CheckEndState.Expected &&
+      action.action !== ConversationAction.Reply
+        ? answer.landed_commits.length > NO_LANDED_COMMITS
+        : answer.landed_commits.length === NO_LANDED_COMMITS,
+    );
 
 export function changesNothing(endState: CheckAnswer["end_state"]): boolean {
   return (
@@ -163,7 +167,6 @@ export function applyEndState(
   now: number,
   admission?: { inboundEventId: string },
 ): void {
-  checkAnswerSchema.parse(answer);
   const provenance = actorSchema.parse({
     kind: ActorKind.Service,
     service: ActorService.Mission,
@@ -176,6 +179,7 @@ export function applyEndState(
     dependencies,
     evidenceId,
   );
+  checkAnswerSchemaOf(frozenAction).parse(answer);
   const node = requireNode(tx, request.node_id);
   const mission = requireMission(tx, node.mission_id);
   const before = claimableMap(tx, mission.id, dependencies.bindings);
@@ -303,7 +307,7 @@ export async function checkNode(
       dependencies.store.transaction((tx) =>
         authorizeRequest(tx, dependencies, item.request.id),
       );
-      answer = checkAnswerSchema.parse(
+      answer = checkAnswerSchemaOf(item.frozen_action).parse(
         await dependencies.intakeCheck.check(caller.context, item.request.id),
       );
     } catch (error) {
@@ -473,7 +477,7 @@ async function runDeferredCheck(
       dependencies.store.transaction((tx) =>
         authorizeRequest(tx, dependencies, item.request.id),
       );
-      answer = checkAnswerSchema.parse(
+      answer = checkAnswerSchemaOf(item.frozen_action).parse(
         await dependencies.intakeCheck.check(
           roundContext(dependencies),
           item.request.id,

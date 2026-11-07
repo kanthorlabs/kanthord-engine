@@ -145,6 +145,8 @@ const bindings: MissionBindings = {
     assert.fail("Import does not read storage configuration."),
   repositoryPolicyOf: () =>
     assert.fail("Import does not derive repository policies."),
+  conversationPolicyOf: () =>
+    assert.fail("Import does not derive conversation policies."),
   resolveBinding: (_tx, projectId, name) => {
     assert.equal(projectId, PROJECT_ID);
     if (name === SECOND_REPOSITORY)

@@ -133,6 +133,9 @@ export const GitHubAction = {
   PullRequest: "pull_request",
   MergePush: "merge_push",
 } as const;
+export const ConversationAction = {
+  Reply: "reply",
+} as const;
 export const Landing = {
   Human: "human",
   KanthorD: "kanthord",
@@ -740,6 +743,13 @@ export type ConversationBinding = {
   platform: string;
   repository: string;
   credential: string;
+};
+export type ConversationPolicy = {
+  binding_id: string;
+  project_id: string;
+  name: string;
+  key: string;
+  action: typeof ConversationAction.Reply;
 };
 export type RepositoryPolicy = {
   binding_id: string;

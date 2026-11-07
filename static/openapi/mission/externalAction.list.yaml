@@ -121,56 +121,112 @@ components:
                 minimum: 0
                 maximum: 9007199254740991
               action:
-                type: object
-                properties:
-                  key:
-                    type: string
-                    pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push)$
-                  binding_id:
-                    type: string
-                    minLength: 34
-                    maxLength: 34
-                    pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                    description: binding_ followed by a canonical 26-character uppercase ULID.
-                  action:
-                    type: string
-                    enum:
-                      - pull_request
-                      - merge_push
-                  expected_end_state:
-                    type: string
-                    enum:
-                      - pull_request_merged
-                      - base_branch_pushed
-                  follows:
-                    anyOf:
-                      - type: string
-                        pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push)$
-                      - type: "null"
-                  configuration:
-                    type: object
+                oneOf:
+                  - type: object
                     properties:
-                      base_branch:
+                      key:
                         type: string
-                        minLength: 1
-                      landing:
-                        default: human
+                        pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push|reply\.[0-9])$
+                      binding_id:
+                        type: string
+                        minLength: 34
+                        maxLength: 34
+                        pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: binding_ followed by a canonical 26-character uppercase ULID.
+                      follows:
+                        anyOf:
+                          - type: string
+                            pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push|reply\.[0-9])$
+                          - type: "null"
+                      action:
                         type: string
                         enum:
-                          - human
-                          - kanthord
+                          - pull_request
+                          - merge_push
+                      expected_end_state:
+                        type: string
+                        enum:
+                          - pull_request_merged
+                          - base_branch_pushed
+                      configuration:
+                        type: object
+                        properties:
+                          base_branch:
+                            type: string
+                            minLength: 1
+                          landing:
+                            default: human
+                            type: string
+                            enum:
+                              - human
+                              - kanthord
+                        required:
+                          - base_branch
+                          - landing
+                        additionalProperties: false
                     required:
-                      - base_branch
-                      - landing
+                      - key
+                      - binding_id
+                      - follows
+                      - action
+                      - expected_end_state
+                      - configuration
                     additionalProperties: false
-                required:
-                  - key
-                  - binding_id
-                  - action
-                  - expected_end_state
-                  - follows
-                  - configuration
-                additionalProperties: false
+                  - type: object
+                    properties:
+                      key:
+                        type: string
+                        pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push|reply\.[0-9])$
+                      binding_id:
+                        type: string
+                        minLength: 34
+                        maxLength: 34
+                        pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: binding_ followed by a canonical 26-character uppercase ULID.
+                      follows:
+                        anyOf:
+                          - type: string
+                            pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push|reply\.[0-9])$
+                          - type: "null"
+                      action:
+                        type: string
+                        const: reply
+                      expected_end_state:
+                        type: string
+                        const: posted
+                      configuration:
+                        type: object
+                        properties:
+                          external_link:
+                            oneOf:
+                              - type: object
+                                properties:
+                                  kind:
+                                    type: string
+                                    const: github_issue
+                                  resource_identity:
+                                    type: string
+                                    pattern: ^conversation:github:[^/\s:]+\/[^/\s:]+$
+                                  number:
+                                    type: integer
+                                    exclusiveMinimum: 0
+                                    maximum: 9007199254740991
+                                required:
+                                  - kind
+                                  - resource_identity
+                                  - number
+                                additionalProperties: false
+                        required:
+                          - external_link
+                        additionalProperties: false
+                    required:
+                      - key
+                      - binding_id
+                      - follows
+                      - action
+                      - expected_end_state
+                      - configuration
+                    additionalProperties: false
               requested:
                 type: boolean
               request_evidence_id:
