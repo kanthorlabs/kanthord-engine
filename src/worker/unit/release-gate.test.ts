@@ -29,6 +29,7 @@ import { COMMAND_LIMIT_MS } from "./budget.ts";
 import {
   advanceBase,
   affectedCommand,
+  commandLimitClock,
   commitOnNode,
   declareAffected,
   fauxAssistantMessage,
@@ -657,4 +658,30 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     const gate = await releaseGate(h);
     assert.equal(gate.kind, ReleaseGateKind.Routed);
   });
+});
+
+test("an affected command that reaches its time limit at the node head routes one revision to the node unit with the time limit and the output", async (t) => {
+  const marker = join(temporary(t), "affected-started");
+  const h = await fixture(t, [task("pass", "true")], []);
+  await declareAffected(h, t, `touch ${marker}; echo hung-output; sleep 1000`);
+  await commitOnNode(h.root, "changed");
+  h.checkouts[0]!.head = (await simpleGit(h.root).revparse(["HEAD"])).trim();
+  t.mock.method(
+    h.agent.budget,
+    "wallDeadline",
+    () => Date.now() + 2 * COMMAND_LIMIT_MS,
+  );
+  const clock = commandLimitClock(t, marker);
+  recordSpans(h, (batch) => clock.observe(batch));
+  const gate = await releaseGate(h);
+  await clock.elapsed();
+  assert.ok(gate.kind === ReleaseGateKind.Routed);
+  assert.equal(gate.unit.id, h.input.claim.node_id);
+  assert.ok(gate.instruction.startsWith("Revise the task work"));
+  assert.ok(
+    gate.instruction.includes(
+      `The affected tests reached their time limit of ${COMMAND_LIMIT_MS / 1000} s at ${h.checkouts[0]!.head}.`,
+    ),
+  );
+  assert.ok(gate.instruction.includes("hung-output"));
 });
