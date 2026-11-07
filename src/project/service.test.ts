@@ -3253,6 +3253,30 @@ test("a conversation binding of platform github stores with its resource identit
   ]);
 });
 
+test("conversationBindingOf answers the pinned revision of a conversation binding and null for another kind", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    const stored = persistBindings(tx, project.id, {
+      [CONVERSATION_NAME]: conversationBinding(),
+      [REPOSITORY_NAME]: repositoryBinding(),
+    }).bindings;
+    const conversation = stored[CONVERSATION_NAME]!;
+    assert.deepEqual(f.project.conversationBindingOf(tx, conversation.id), {
+      binding_id: conversation.id,
+      project_id: project.id,
+      resource_identity: CONVERSATION_IDENTITY,
+      platform: ConversationPlatform.GitHub,
+      repository: CONVERSATION_REPOSITORY,
+      credential: CONVERSATION_CREDENTIAL,
+    });
+    assert.equal(
+      f.project.conversationBindingOf(tx, stored[REPOSITORY_NAME]!.id),
+      null,
+    );
+  });
+});
+
 test("a conversation binding without repository or credential, or with an unknown key, fails the input schema", () => {
   const complete = conversationBinding().config;
   const without = (key: string) =>

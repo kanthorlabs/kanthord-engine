@@ -313,6 +313,26 @@ export interface IntakeGateFiles {
   ): Promise<{ paths: string[] }>;
 }
 
+export interface IntakeLinks {
+  hasInbound(
+    tx: Transaction,
+    projectId: string,
+    resourceIdentity: string,
+  ): boolean;
+  read(
+    context: Context,
+    input: {
+      project_id: string;
+      external_link: ExternalLink;
+      binding_id: string;
+    },
+  ): Promise<{ items: { inbound_event_id: string }[] }>;
+  handoff(
+    context: Context,
+    inboundEventId: string,
+  ): Promise<AdmissionAnswer | null>;
+}
+
 export interface DecodedLinkUpdate {
   external_link: ExternalLink;
   update_key: string;
@@ -1720,6 +1740,14 @@ export const nodeCheckResultSchema = z.strictObject({
       error: errorSchema,
     }),
   ),
+  link_updates: z.array(
+    z.strictObject({
+      external_link: externalLinkSchema,
+      admitted: z.number().int().nonnegative(),
+      duplicate: z.number().int().nonnegative(),
+      refused: z.number().int().nonnegative(),
+    }),
+  ),
 });
 export const Disposition = {
   AcceptedObservation: "accepted_observation",
@@ -2047,7 +2075,8 @@ export const missionOperations = {
       body: nodeCheckSchema,
     }),
     output: nodeCheckResultSchema,
-    description: "Check unresolved external requests on demand.",
+    description:
+      "Check unresolved external requests and read each external link of the current revision on demand.",
   },
   "delivery.admit": {
     ...writeOperation,

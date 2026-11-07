@@ -1,14 +1,24 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { ResultClass } from "../intake/contract.ts";
+import {
+  INTAKE_SERVICE_NAME,
+  IntakeErrorCode,
+  ResultClass,
+} from "../intake/contract.ts";
+import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import { testHumanIdentity } from "../kernel/test-identity.ts";
+import type { CallerContext } from "../kernel/operation.ts";
+import {
+  testHumanIdentity,
+  testServiceIdentity,
+} from "../kernel/test-identity.ts";
 import {
   AssessmentResult,
   AssetKind,
   CheckEndState,
   ClosingEvent,
+  type DecodedLinkUpdate,
   FindingCauseOwner,
   FindingKind,
   MissionErrorCode,
@@ -16,6 +26,17 @@ import {
   RepositoryLanding,
   Resolution,
 } from "./contract.ts";
+import { AdmissionQueue, admitDelivery } from "./delivery-admit.ts";
+import {
+  LINK_ACTOR,
+  LINK_RESOURCE,
+  linkOf,
+  linkUpdateHarness,
+  OTHER_ACTOR,
+  OTHER_LINK_NUMBER,
+  TRUSTED_ACTOR,
+  updateOf,
+} from "./link-update-test-support.ts";
 import {
   applyEndState,
   DEFERRED_CHECK_RETRY_MS,
@@ -29,11 +50,12 @@ import {
   readEvidence,
   readLandedCommitEvidence,
 } from "./record-store.ts";
-import { readMission, setNodeState } from "./store.ts";
+import { readMission, readNode, setNodeState } from "./store.ts";
 import { externalRequestHarness, revokedExecution } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const NO_REMOTE_CALLS = 0;
+const BAD_GATEWAY_STATUS = 502;
 const NO_RESULTS = 0;
 const FIRST_RESULT_INDEX = 0;
 const NO_LANDED_COMMITS = 0;
@@ -700,4 +722,258 @@ test("a forced revocation of a live evaluation claim during a deferred check lea
   assert.equal(revoked.live, false);
   assert.equal(revoked.end_state, CheckEndState.Expected);
   assert.equal(revoked.landed, SINGLE_LANDED_COMMIT);
+});
+
+const INTAKE_IDENTITY = testServiceIdentity(INTAKE_SERVICE_NAME);
+const OTHER_RESOURCE = "conversation:github:acme/other";
+const LISTED_EVENT = "issue_comment_listed";
+const PLATFORM = "github";
+const TWO_ITEMS = 2;
+const NO_ITEMS = 0;
+const NO_ATTEMPTS = 0;
+const CLOSED_ATTEMPTS = 2;
+const SINGLE_PROPOSAL = 1;
+const SINGLE_ROW = 1;
+const NO_READS = 0;
+const FIRST_LINK_INDEX = 0;
+const SECOND_LINK_INDEX = 1;
+
+function linkCheckFixture(
+  t: TestContext,
+  state: NodeState = NodeState.Available,
+  attempts = NO_ATTEMPTS,
+) {
+  const h = linkUpdateHarness(t, IDENTITY);
+  const bindingId = h.addBinding(LINK_RESOURCE, [TRUSTED_ACTOR]);
+  const otherBindingId = h.addBinding(OTHER_RESOURCE, [TRUSTED_ACTOR]);
+  const inbounds = new Set([LINK_RESOURCE, OTHER_RESOURCE]);
+  const nodeId = h.addNode([linkOf()], NodeState.Available, [bindingId]);
+  h.addAttempts(nodeId, attempts);
+  h.store.transaction((tx) => setNodeState(tx, nodeId, state));
+  const queue = new AdmissionQueue();
+  const intakeCaller: CallerContext = {
+    identity: INTAKE_IDENTITY,
+    context: background,
+    requestId: createIdentity("request"),
+    commit: (write) => h.store.transaction(write),
+  };
+  const updates = new Map<string, DecodedLinkUpdate>();
+  const items: string[] = [];
+  const handed = new Set<string>();
+  const reads: {
+    project_id: string;
+    external_link: ReturnType<typeof linkOf>;
+    binding_id: string;
+  }[] = [];
+  h.dependencies.decoder.decodeLinkUpdate = (input) =>
+    updates.get(Buffer.from(input.event).toString()) ?? null;
+  h.dependencies.intakeLinks = {
+    hasInbound: (_tx, _projectId, resourceIdentity) =>
+      inbounds.has(resourceIdentity),
+    read: async (_context, input) => {
+      reads.push(input);
+      return {
+        items: items.map((inbound_event_id) => ({ inbound_event_id })),
+      };
+    },
+    handoff: async (_context, inboundEventId) => {
+      if (handed.has(inboundEventId)) return null;
+      handed.add(inboundEventId);
+      return admitDelivery(queue, h.dependencies, intakeCaller, {
+        inbound_event_id: inboundEventId,
+        project_id: h.project_id,
+        platform: PLATFORM,
+        resource: LINK_RESOURCE,
+        event: Buffer.from(inboundEventId).toString("base64"),
+        metadata: { event: LISTED_EVENT },
+      });
+    },
+  };
+  const addItem = (update: DecodedLinkUpdate) => {
+    const id = createIdentity("inbound_event");
+    updates.set(id, update);
+    items.push(id);
+    return id;
+  };
+  const check = (id = nodeId) =>
+    h.invoke("node.check", {
+      params: { node_id: id },
+      query: {},
+      body: { expected_mission_version: FIRST_MISSION_VERSION },
+    });
+  const state_of = (id = nodeId) =>
+    h.store.transaction((tx) => readNode(tx, id)!.state);
+  return {
+    ...h,
+    nodeId,
+    bindingId,
+    otherBindingId,
+    inbounds,
+    reads,
+    addItem,
+    check,
+    state_of,
+  };
+}
+
+test("node check of a node with one link and no request admits two items and answers their counts", async (t) => {
+  const h = linkCheckFixture(t);
+  h.addItem(updateOf({ update_key: "issue_comment:1" }));
+  h.addItem(updateOf({ update_key: "issue_comment:2" }));
+  const result = await h.check();
+  assert.deepEqual(result.results, []);
+  assert.deepEqual(result.failures, []);
+  assert.deepEqual(result.link_updates, [
+    { external_link: linkOf(), admitted: TWO_ITEMS, duplicate: 0, refused: 0 },
+  ]);
+  assert.deepEqual(h.reads, [
+    {
+      project_id: h.project_id,
+      external_link: linkOf(),
+      binding_id: h.bindingId,
+    },
+  ]);
+  assert.equal(h.rows().length, TWO_ITEMS);
+});
+
+test("node check counts a refused item in refused and a repeat in duplicate", async (t) => {
+  const h = linkCheckFixture(t);
+  h.addItem(updateOf({ update_key: "issue_comment:1" }));
+  h.addItem(updateOf({ update_key: "issue_comment:2", actor_automated: true }));
+  const first = await h.check();
+  assert.deepEqual(first.link_updates, [
+    { external_link: linkOf(), admitted: 1, duplicate: 0, refused: 1 },
+  ]);
+  const second = await h.check();
+  assert.deepEqual(second.link_updates, [
+    { external_link: linkOf(), admitted: 0, duplicate: TWO_ITEMS, refused: 0 },
+  ]);
+  assert.equal(h.rows().length, SINGLE_ROW);
+});
+
+test("node check counts an item with a stored update key in duplicate", async (t) => {
+  const h = linkCheckFixture(t);
+  h.addItem(updateOf({ update_key: "issue_comment:1" }));
+  h.addItem(updateOf({ update_key: "issue_comment:1" }));
+  const result = await h.check();
+  assert.deepEqual(result.link_updates, [
+    { external_link: linkOf(), admitted: 1, duplicate: 1, refused: 0 },
+  ]);
+});
+
+test("node check of a Completed node with a link admits an item of a trusted actor and opens a follow-up proposal", async (t) => {
+  const h = linkCheckFixture(t, NodeState.Completed, CLOSED_ATTEMPTS);
+  h.addItem(
+    updateOf({ actor_id: TRUSTED_ACTOR, update_key: "issue_comment:1" }),
+  );
+  const result = await h.check();
+  assert.deepEqual(result.link_updates, [
+    { external_link: linkOf(), admitted: 1, duplicate: 0, refused: 0 },
+  ]);
+  assert.equal(h.proposals().length, SINGLE_PROPOSAL);
+  assert.equal(h.state_of(), NodeState.Completed);
+});
+
+test("node check of a node in Available with a link admits an item and keeps its state", async (t) => {
+  const h = linkCheckFixture(t, NodeState.Available);
+  h.addItem(updateOf({ actor_id: LINK_ACTOR, update_key: "issue_comment:1" }));
+  h.addItem(updateOf({ actor_id: OTHER_ACTOR, update_key: "issue_comment:2" }));
+  const result = await h.check();
+  assert.equal(result.link_updates[FIRST_LINK_INDEX]!.admitted, TWO_ITEMS);
+  assert.equal(h.state_of(), NodeState.Available);
+});
+
+test("node check answers one entry for each link in the order of the links", async (t) => {
+  const h = linkCheckFixture(t);
+  const nodeId = h.addNode(
+    [
+      { ...linkOf(), resource_identity: OTHER_RESOURCE },
+      linkOf(OTHER_LINK_NUMBER),
+    ],
+    NodeState.Available,
+    [h.bindingId, h.otherBindingId],
+  );
+  const result = await h.check(nodeId);
+  assert.deepEqual(
+    result.link_updates.map((entry) => entry.external_link),
+    [
+      { ...linkOf(), resource_identity: OTHER_RESOURCE },
+      linkOf(OTHER_LINK_NUMBER),
+    ],
+  );
+  assert.deepEqual(
+    h.reads.map((read) => read.binding_id),
+    [h.otherBindingId, h.bindingId],
+  );
+  assert.equal(result.link_updates[SECOND_LINK_INDEX]!.admitted, NO_ITEMS);
+});
+
+test("node check of a node with no request and no link answers 409 no_unresolved_request", async (t) => {
+  const h = linkCheckFixture(t);
+  await assert.rejects(
+    h.check(h.node_id),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === MissionErrorCode.NoUnresolvedRequest,
+  );
+  assert.equal(h.reads.length, NO_READS);
+});
+
+test("node check of a link with no inbound answers 409 and runs no read", async (t) => {
+  const h = linkCheckFixture(t);
+  const nodeId = h.addNode(
+    [linkOf(), { ...linkOf(), resource_identity: OTHER_RESOURCE }],
+    NodeState.Available,
+    [h.bindingId, h.otherBindingId],
+  );
+  h.addItem(updateOf());
+  h.inbounds.delete(OTHER_RESOURCE);
+  await assert.rejects(
+    h.check(nodeId),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === IntakeErrorCode.LinkInboundMissing &&
+      JSON.stringify(error.details) ===
+        JSON.stringify({
+          external_link: { ...linkOf(), resource_identity: OTHER_RESOURCE },
+        }),
+  );
+  assert.equal(h.reads.length, NO_READS);
+  assert.equal(h.rows().length, NO_ITEMS);
+});
+
+test("node check of a link whose binding is disabled answers 403 and runs no read", async (t) => {
+  const h = linkCheckFixture(t);
+  const original = h.dependencies.bindings.getBindingRevision;
+  h.dependencies.bindings.getBindingRevision = (tx, id) => ({
+    ...original(tx, id)!,
+    disabled: true,
+  });
+  await assert.rejects(
+    h.check(),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === MissionErrorCode.AuthorizationRefused,
+  );
+  assert.equal(h.reads.length, NO_READS);
+});
+
+test("node check passes a failed link read on as the failure of the whole check", async (t) => {
+  const h = linkCheckFixture(t);
+  h.dependencies.intakeLinks.read = async () => {
+    throw new OperationError(
+      BAD_GATEWAY_STATUS,
+      `repository.platform.github.${ResultClass.RetryableRefusal}`,
+      "refused",
+      { status: null },
+    );
+  };
+  await assert.rejects(
+    h.check(),
+    (error) =>
+      error instanceof OperationError &&
+      error.status === BAD_GATEWAY_STATUS &&
+      error.code ===
+        `repository.platform.github.${ResultClass.RetryableRefusal}`,
+  );
 });

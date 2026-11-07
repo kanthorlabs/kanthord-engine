@@ -56,6 +56,11 @@ interface Handoff {
 type Outcome =
   { succeeded: true } | { succeeded: false; code: string; message: string };
 
+interface Attempted {
+  outcome: Outcome;
+  result: OperationResult<unknown> | null;
+}
+
 const SUCCEEDED: Outcome = Object.freeze({ succeeded: true });
 const SKIPPED = Symbol("skipped");
 
@@ -164,10 +169,33 @@ export class Dispatcher {
     }
     this.drainTask = this.drain()
       .catch((error: unknown) => this.drainFailed(error))
-      .finally(() => {
-        this.drainTask = null;
-        if (this.again && !this.halted()) this.wake();
-      });
+      .finally(() => this.drained());
+  }
+
+  async handoff(id: string): Promise<OperationResult<unknown> | null> {
+    assert.ok(
+      id.length > EMPTY_TEXT_LENGTH,
+      "An event row identity is required.",
+    );
+    while (this.drainTask !== null) await this.drainTask;
+    if (this.halted()) return null;
+    const reserved = this.dependencies.store.transaction((tx) =>
+      reserve(tx, this.running, id),
+    );
+    if (!reserved) return null;
+    const task = this.handOver(id);
+    this.drainTask = task
+      .then(
+        () => undefined,
+        (error: unknown) => this.drainFailed(error),
+      )
+      .finally(() => this.drained());
+    return task;
+  }
+
+  private drained(): void {
+    this.drainTask = null;
+    if (this.again && !this.halted()) this.wake();
   }
 
   inFlight(id: string): boolean {
@@ -229,18 +257,19 @@ export class Dispatcher {
     return reserved ? candidate : SKIPPED;
   }
 
-  private async handOver(id: string): Promise<void> {
+  private async handOver(id: string): Promise<OperationResult<unknown> | null> {
     assert.ok(this.running.has(id), "A handoff owns its reservation.");
     const store = this.dependencies.store;
     try {
-      const outcome = await this.attempt(id);
+      const { outcome, result } = await this.attempt(id);
       store.transaction((tx) => settle(tx, id, outcome));
+      return result;
     } finally {
       this.running.delete(id);
     }
   }
 
-  private async attempt(id: string): Promise<Outcome> {
+  private async attempt(id: string): Promise<Attempted> {
     const { store, logger } = this.dependencies;
     let handoff: Handoff;
     try {
@@ -255,15 +284,18 @@ export class Dispatcher {
         "intake: the handoff input of an inbound event failed.",
       );
       return {
-        succeeded: false,
-        code: DEFECT_CODE,
-        message: INPUT_DEFECT_MESSAGE,
+        outcome: {
+          succeeded: false,
+          code: DEFECT_CODE,
+          message: INPUT_DEFECT_MESSAGE,
+        },
+        result: null,
       };
     }
     return this.call(handoff);
   }
 
-  private async call(handoff: Handoff): Promise<Outcome> {
+  private async call(handoff: Handoff): Promise<Attempted> {
     const { consumers, identity, context, logger } = this.dependencies;
     assert.equal(typeof consumers[handoff.consumer], ValueType.Function);
     try {
@@ -272,7 +304,7 @@ export class Dispatcher {
         idempotencyKey: createIdempotencyKey(),
         context,
       });
-      return outcomeOf(result);
+      return { outcome: outcomeOf(result), result };
     } catch (error) {
       logger.error(
         {
@@ -283,7 +315,14 @@ export class Dispatcher {
         },
         "intake: the consumer call of an inbound event failed.",
       );
-      return { succeeded: false, code: DEFECT_CODE, message: DEFECT_MESSAGE };
+      return {
+        outcome: {
+          succeeded: false,
+          code: DEFECT_CODE,
+          message: DEFECT_MESSAGE,
+        },
+        result: null,
+      };
     }
   }
 }

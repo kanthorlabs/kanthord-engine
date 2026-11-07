@@ -296,7 +296,7 @@ function foldBody(
   }
 }
 
-function platformFailure(failure: GitHubFailure): OperationError {
+export function platformFailure(failure: GitHubFailure): OperationError {
   assert.equal(failure.ok, false);
   assert.ok(Object.values(ResultClass).includes(failure.class));
   return new OperationError(

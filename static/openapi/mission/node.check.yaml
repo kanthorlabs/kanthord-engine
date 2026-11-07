@@ -4,7 +4,8 @@ pathItem:
     operationId: mission.node.check
     tags:
       - mission
-    description: Check unresolved external requests on demand.
+    description: Check unresolved external requests and read each external link of
+      the current revision on demand.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: true
@@ -164,9 +165,52 @@ components:
               - evidence_id
               - error
             additionalProperties: false
+        link_updates:
+          type: array
+          items:
+            type: object
+            properties:
+              external_link:
+                oneOf:
+                  - type: object
+                    properties:
+                      kind:
+                        type: string
+                        const: github_issue
+                      resource_identity:
+                        type: string
+                        pattern: ^conversation:github:[^/\s:]+\/[^/\s:]+$
+                      number:
+                        type: integer
+                        exclusiveMinimum: 0
+                        maximum: 9007199254740991
+                    required:
+                      - kind
+                      - resource_identity
+                      - number
+                    additionalProperties: false
+              admitted:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              duplicate:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              refused:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+            required:
+              - external_link
+              - admitted
+              - duplicate
+              - refused
+            additionalProperties: false
       required:
         - results
         - failures
+        - link_updates
       additionalProperties: false
       $defs:
         __schema0: {}
