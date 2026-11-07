@@ -72,7 +72,7 @@ export function completed<T>(result: OperationResult<T>): T {
 function sealedRefused(): Diagnostic {
   return new Diagnostic(
     "worker.handover.sealed_unopened",
-    "worker: the sealed credential copy cannot be opened with the instance key.",
+    "worker: the sealed credential copy cannot be opened with the key of the holder of the item.",
   );
 }
 
