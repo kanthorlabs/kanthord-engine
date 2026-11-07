@@ -44,6 +44,7 @@ import { ActionResultKind } from "../contract.ts";
 import {
   AssessmentResult,
   AssetKind,
+  FINDING_MAX,
   INLINE_BYTES_MAX,
   type ReviewRound,
 } from "../../mission/contract.ts";
@@ -928,6 +929,104 @@ test("a kill on the first review run and a pass on the rerun is a pass and not f
   assert.doesNotMatch(review.assessments[0]?.rationale ?? "", /flaky/);
 });
 
+const FLAKY_NAME = "Flaky verification";
+
+function flakyCommand(marker: string): string {
+  return `test -f ${marker} || { touch ${marker}; echo flaky-output; exit 1; }`;
+}
+
+function suggestionReply(labels: readonly string[]): string {
+  return `${JUDGEMENT_MARKER} ${JSON.stringify({
+    result: "success",
+    rationale: "met",
+    findings: labels.map((label) => ({
+      label,
+      action: "yes",
+      task_id: null,
+      ground: null,
+      name: "Suggestion",
+      description: "A suggestion.",
+      fix: "Change it.",
+      why: "It helps.",
+    })),
+  })}`;
+}
+
+test("a flaky review verification reaches the judgement and records one Flaky verification finding", async (t) => {
+  const marker = join(temporary(t), "flaky");
+  const command = flakyCommand(marker);
+  const review = await reviewOf(t, command);
+  assert.deepEqual(review.end, { kind: "closed", outcomeId: "outcome" });
+  assert.equal(review.opens(), ONE_OPEN);
+  assert.deepEqual(
+    review.verifications.map((verification) =>
+      verification.results.map((result) => result.exit_code),
+    ),
+    [[PASSED]],
+  );
+  const [assessment] = review.assessments;
+  assert.equal(assessment?.result, AssessmentResult.Success);
+  assert.equal(assessment?.findings.length, SINGLE_RELEASE);
+  const description = (assessment?.findings[0] as { description: string })
+    .description;
+  assert.deepEqual(assessment?.findings[0], {
+    label: "S1",
+    action: "no",
+    task_id: null,
+    ground: null,
+    name: FLAKY_NAME,
+    description,
+    fix: "Make the failed test deterministic in a separate node.",
+    why: "The command passed on a rerun of the same commit, so the failure is not caused by this change.",
+  });
+  assert.ok(description.includes(`Verification 1 \`${command}\``));
+  assert.match(description, /flaky-output/);
+});
+
+test("the Flaky verification label follows the highest suggestion label of the judgement", async (t) => {
+  const review = await reviewOf(
+    t,
+    flakyCommand(join(temporary(t), "flaky")),
+    undefined,
+    {
+      reply: suggestionReply(["S1", "S4"]),
+    },
+  );
+  const labels = review.assessments[0]?.findings.map(
+    (finding) => (finding as { label: string }).label,
+  );
+  assert.deepEqual(labels, ["S1", "S4", "S5"]);
+});
+
+test("a judgement with FINDING_MAX findings puts the flaky description into the rationale", async (t) => {
+  const labels = Array.from(
+    { length: FINDING_MAX },
+    (_, index) => `S${index + 1}`,
+  );
+  const review = await reviewOf(
+    t,
+    flakyCommand(join(temporary(t), "flaky")),
+    undefined,
+    {
+      reply: suggestionReply(labels),
+    },
+  );
+  const [assessment] = review.assessments;
+  assert.equal(assessment?.findings.length, FINDING_MAX);
+  assert.match(
+    assessment?.rationale ?? "",
+    /Verification 1 `.*` failed and passed on a rerun/,
+  );
+  assert.match(assessment?.rationale ?? "", /flaky-output/);
+});
+
+test("a review verification that fails on every rerun stays criterion-not-met at the verification stage", async (t) => {
+  const review = await reviewOf(t, "echo always-failing; exit 1");
+  assert.equal(review.opens(), NO_OPENS);
+  assert.equal(review.assessments[0]?.result, AssessmentResult.CriterionNotMet);
+  assert.deepEqual(review.assessments[0]?.findings, []);
+});
+
 test("exit 127 in a review verification stays criterion-not-met", async (t) => {
   const review = await reviewOf(t, "command-absent-x");
   assert.equal(review.opens(), NO_OPENS);
@@ -974,6 +1073,7 @@ test("a node-head setup failure of a review is criterion-not-met and names the s
       },
       outputs: ["npm ERR! missing lockfile"],
       flaky: [false],
+      flaky_failures: [],
       outcome: VerificationClass.CodeFailure,
     },
   });

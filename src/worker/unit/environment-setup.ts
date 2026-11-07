@@ -208,6 +208,7 @@ function trackedFailure(
         `The setup changed these tracked files: ${changed.join(", ")}. KanthorD restored them. Commit a change so that the setup leaves every tracked file unchanged, for example the updated lock file.`,
       ],
       flaky: [...run.flaky, false],
+      flaky_failures: run.flaky_failures,
       outcome: VerificationClass.CodeFailure,
     },
     commands: [...commands, TRACKED_CHECK],

@@ -13,7 +13,11 @@ import {
   type TaskContent,
 } from "../../mission/contract.ts";
 import type { WorkPrompt } from "../../agent/prompt-composer.ts";
-import type { Verification, VerificationRun } from "./verification.ts";
+import type {
+  FlakyFailure,
+  Verification,
+  VerificationRun,
+} from "./verification.ts";
 import {
   type AffectedResult,
   type AffectedRun,
@@ -32,6 +36,10 @@ const FIRST_ENTRY = 0;
 const RATIONALE_SEPARATOR = "\n\n";
 const ISSUE_PATH_SEPARATOR = ".";
 const BLOCKER_LABEL_PREFIX = "B";
+const SUGGESTION_LABEL_PREFIX = "S";
+const FLAKY_FINDING_NAME = "Flaky verification";
+const UTF8_CONTINUATION_MASK = 0xc0;
+const UTF8_CONTINUATION = 0x80;
 export const REQUESTED_CHANGES_MAX_BYTES = 4096;
 const AssessmentResult = {
   Success: "success",
@@ -217,6 +225,82 @@ export function judgementRationale(judgement: {
   return [judgement.rationale, ...blocks].join("\n");
 }
 
+function tailWithinBytes(text: string, limit: number): string {
+  const bytes = Buffer.from(text, "utf8");
+  if (bytes.length <= limit) return text;
+  const tail = bytes.subarray(bytes.length - limit);
+  const start = tail.findIndex(
+    (byte) => (byte & UTF8_CONTINUATION_MASK) !== UTF8_CONTINUATION,
+  );
+  return start < NO_ITEMS ? "" : tail.subarray(start).toString("utf8");
+}
+
+function flakyDescription(failures: readonly FlakyFailure[]): string {
+  const render = (outputOf: (failure: FlakyFailure) => string) =>
+    failures
+      .map((failure) => {
+        const output = outputOf(failure);
+        return [
+          `Verification ${failure.index + 1} \`${failure.command}\` failed and passed on a rerun of the same commit.`,
+          ...(output
+            ? [
+                `Output of the failed run (the last 4 KiB):\n\n\`\`\`text\n${output}\n\`\`\``,
+              ]
+            : []),
+        ].join(RATIONALE_SEPARATOR);
+      })
+      .join(RATIONALE_SEPARATOR);
+  const bare = render((failure) => (failure.output ? "-" : ""));
+  const share = Math.floor(
+    (FINDING_TEXT_MAX_BYTES - Buffer.byteLength(bare, "utf8")) /
+      failures.length,
+  );
+  return render((failure) =>
+    tailWithinBytes(failure.output, Math.max(share, NO_ITEMS)),
+  );
+}
+
+function nextSuggestionLabel(findings: readonly JudgementFinding[]): string {
+  const numbers = findings
+    .filter((finding) => finding.label.startsWith(SUGGESTION_LABEL_PREFIX))
+    .map((finding) =>
+      Number(finding.label.slice(SUGGESTION_LABEL_PREFIX.length)),
+    );
+  return `${SUGGESTION_LABEL_PREFIX}${Math.max(NO_ITEMS, ...numbers) + 1}`;
+}
+
+export function withFlakyVerification(
+  judged: { rationale: string; findings: JudgementFinding[] },
+  failures: readonly FlakyFailure[],
+): { rationale: string; findings: JudgementFinding[] } {
+  if (failures.length === NO_ITEMS) return judged;
+  const description = flakyDescription(failures);
+  if (judged.findings.length >= FINDING_MAX)
+    return {
+      rationale: [
+        judged.rationale,
+        `${FLAKY_FINDING_NAME}:\n${description}`,
+      ].join(RATIONALE_SEPARATOR),
+      findings: judged.findings,
+    };
+  return {
+    rationale: judged.rationale,
+    findings: [
+      ...judged.findings,
+      {
+        label: nextSuggestionLabel(judged.findings),
+        action: FindingAction.No,
+        task_id: null,
+        ground: null,
+        name: FLAKY_FINDING_NAME,
+        description,
+        fix: "Make the failed test deterministic in a separate node.",
+        why: "The command passed on a rerun of the same commit, so the failure is not caused by this change.",
+      },
+    ],
+  };
+}
+
 export interface JudgementIssue {
   path: string;
   message: string;
@@ -358,10 +442,6 @@ export function failedVerificationReport(
 ): string {
   const rationale = failedVerificationRationale(run.verification, commands);
   const parts = [rationale];
-  if (run.flaky.at(-1))
-    parts.push(
-      "The command passed on a rerun of the same commit, so the test is flaky. Make it deterministic.",
-    );
   const output = run.outputs.at(-1);
   if (output)
     parts.push(

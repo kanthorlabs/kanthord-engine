@@ -311,34 +311,73 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
 
   const FAILED_EXIT = 1;
   const NO_EXIT = -1;
+  const FIRST_COMMAND = 0;
+  const ONE_RESULT = 1;
 
-  test("a failed command that passes on a rerun is flaky and still fails", async (t) => {
+  test("a command that fails once and passes on a rerun passes as flaky and the next command runs", async (t) => {
     const directory = temporary(t);
     const input = {
       directory,
-      commands: ["test -f once || { touch once; echo first-failure; exit 1; }"],
+      commands: [
+        "test -f once || { touch once; echo first-failure; exit 1; }",
+        "echo next > next",
+      ],
       tested_input: { kind: "produced" as const, sha256: "hash" },
       deadline: Date.now() + 10000,
       context: background,
       env: hostEnvironment(),
       reruns: 2,
     };
-    const flaky = await runVerificationsWithOutput(input);
-    assert.deepEqual(flaky.flaky, [true]);
-    assert.equal(flaky.verification.results[0]?.exit_code, FAILED_EXIT);
-    assert.match(flaky.outputs[0] ?? "", /first-failure/);
-    assert.equal(verificationPassed(flaky.verification, input.commands), false);
-    const stable = await runVerificationsWithOutput({
-      ...input,
-      commands: ["false"],
+    const run = await runVerificationsWithOutput(input);
+    assert.equal(run.outcome, VerificationClass.Pass);
+    assert.deepEqual(run.flaky, [true, false]);
+    assert.deepEqual(
+      run.verification.results.map((result) => result.exit_code),
+      [0, 0],
+    );
+    assert.equal(verificationPassed(run.verification, input.commands), true);
+    assert.equal(run.flaky_failures.length, ONE_RESULT);
+    assert.equal(run.flaky_failures[0]?.index, FIRST_COMMAND);
+    assert.equal(run.flaky_failures[0]?.command, input.commands[0]);
+    assert.equal(run.flaky_failures[0]?.result.exit_code, FAILED_EXIT);
+    assert.match(run.flaky_failures[0]?.output ?? "", /first-failure/);
+    assert.ok(existsSync(join(directory, "next")));
+  });
+
+  test("a command that fails on every rerun stops the run with the failed result", async (t) => {
+    const run = await runVerificationsWithOutput({
+      directory: temporary(t),
+      commands: ["false", "true"],
+      tested_input: { kind: "produced", sha256: "hash" },
+      deadline: Date.now() + 10000,
+      context: background,
+      env: hostEnvironment(),
+      reruns: 2,
     });
-    assert.deepEqual(stable.flaky, [false]);
-    const unchecked = await runVerificationsWithOutput({
-      ...input,
-      commands: ["test -f twice || { touch twice; exit 1; }"],
+    assert.equal(run.outcome, VerificationClass.CodeFailure);
+    assert.deepEqual(run.flaky, [false]);
+    assert.deepEqual(run.flaky_failures, []);
+    assert.deepEqual(
+      run.verification.results.map((result) => result.exit_code),
+      [FAILED_EXIT],
+    );
+  });
+
+  test("a failed command with no reruns stops the run with the failed result", async (t) => {
+    const directory = temporary(t);
+    const run = await runVerificationsWithOutput({
+      directory,
+      commands: ["test -f twice || { touch twice; exit 1; }", "true"],
+      tested_input: { kind: "produced", sha256: "hash" },
+      deadline: Date.now() + 10000,
+      context: background,
+      env: hostEnvironment(),
       reruns: 0,
     });
-    assert.deepEqual(unchecked.flaky, [false]);
+    assert.equal(run.outcome, VerificationClass.CodeFailure);
+    assert.deepEqual(run.flaky, [false]);
+    assert.deepEqual(run.flaky_failures, []);
+    assert.equal(run.verification.results.length, ONE_RESULT);
   });
 
   test("the tested input is one address for one checkout and the list in binding order for two", () => {
@@ -573,6 +612,7 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(run.outcome, VerificationClass.Timeout);
     assert.equal(runs.length, SINGLE_RUN);
     assert.equal(run.verification.results[0]?.timed_out, true);
+    assert.deepEqual(run.flaky_failures, []);
   });
 
   const AFTER_PASS_LIMIT_MS = 3000;

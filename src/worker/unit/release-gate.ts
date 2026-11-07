@@ -195,6 +195,7 @@ function budgetEndRun(state: StepsState): VerificationRun {
     verification: { tested_input: testedInputOf(state.checkouts), results: [] },
     outputs: [],
     flaky: [],
+    flaky_failures: [],
     outcome: VerificationClass.BudgetEnd,
   };
 }
