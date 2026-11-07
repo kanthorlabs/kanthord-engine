@@ -172,6 +172,25 @@ test("assessment admission requires one passing verification with matching teste
   refusal(() => h.admit(), MissionErrorCode.AssessmentVerificationFailed);
 });
 
+test("a success with a verification whose results all pass is admitted with a no-action suggestion", (t) => {
+  const h = fixture(t);
+  const passing = { tested_input: INPUT, results: [RESULT] };
+  h.body.evidence_ids = [h.seed(passing)];
+  h.body.findings = [
+    {
+      label: "S1",
+      action: "no",
+      task_id: null,
+      ground: null,
+      name: "Flaky verification",
+      description: "Verification 1 failed and passed on a rerun.",
+      fix: "Make the failed test deterministic in a separate node.",
+      why: "The command passed on a rerun of the same commit, so the failure is not caused by this change.",
+    },
+  ];
+  h.admit();
+});
+
 test("assessment success counts only the verification that covers every required command", (t) => {
   const h = fixture(t);
   const partial = h.seed({ tested_input: INPUT, results: [RESULT] });

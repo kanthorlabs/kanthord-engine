@@ -597,6 +597,9 @@ Follow these steps. Each step names the fields to read.
   The submit refuses with 400 `gateway.request.validation_failed` and an issue at `findings` a bad label, a duplicate label, a blocker with `action: no` or with no ground, a suggestion with a ground, an unknown `task_id`, a blank or oversized text, more than 100 items, and a `success` with a blocker.
   It refuses with an issue at `fixed_finding_ids` a duplicate identity, an identity that names no open finding of the attempt with the route `fix`, and a `success` that leaves out an open blocker of the attempt.
   Only a current assessment writes `fixed_assessment_id` and changes the route of an earlier finding. A non-current assessment stores each of its findings with the route `record`.
+- A review verification that fails and passes on a rerun at the same commit passes.
+  The review keeps the passing result and records one suggestion `Flaky verification` with action `no`, which names each flaky command and the output of its failed run.
+  A verification that fails on every rerun fails the review at the stage `verification`.
 - The route of a finding states who acts on it: `fix` (KanthorD fixes it in a rework of the same attempt), `report` (a human reviews it) or `record` (information only).
   The status reads `fixed` when `fixed_assessment_id` names an assessment, and `open` otherwise.
   A finding waits for a human when its route is `report` and it holds no decision.

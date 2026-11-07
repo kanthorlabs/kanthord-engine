@@ -794,6 +794,7 @@ async function pendingSetup(state: StepsState): Promise<CheckedRun | null> {
       },
       outputs: [],
       flaky: [],
+      flaky_failures: [],
       outcome: VerificationClass.BudgetEnd,
       commands: setupCommandsOf(state.setup),
     };
