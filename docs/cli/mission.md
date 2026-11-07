@@ -480,7 +480,7 @@ tasks.
 
 To redirect an open attempt, a human pauses, blocks, then unblocks with the
 changed content. A simple update leaves the old attempt's revision pinned.
-All controls recheck admission at commit.
+All controls recheck admission at commit. Human-control race precedence remains **blocked** under [HANDOFF Mission Service E3](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#mission-service-1).
 
 #### Pinned revision, failure count and resume
 
@@ -500,7 +500,6 @@ To apply a new revision to a node with an open attempt, follow these steps:
 
 The unblock opens attempt N+1 on the new revision. The start point is `node_branch`, so the earlier work stays.
 The failure count of the new attempt starts at 0.
-Human-control race precedence remains **blocked** under [HANDOFF Mission Service E3](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#mission-service-1).
 
 ### Find why a node paused or blocked
 
