@@ -325,7 +325,10 @@ export const GrantKind = {
   EnvironmentSecret: "environment_secret",
 } as const;
 export type GrantKind = (typeof GrantKind)[keyof typeof GrantKind];
-export const InboundOperation = { Poll: "poll" } as const;
+export const InboundOperation = {
+  Poll: "poll",
+  LinkRead: "link_read",
+} as const;
 export type InboundOperation =
   (typeof InboundOperation)[keyof typeof InboundOperation];
 export type InboundGrantInput = {

@@ -51,7 +51,8 @@ import { getOutbound, listOutbound } from "./outbound-read.ts";
 import { receiveEvent } from "./receipt.ts";
 import { deleteOutbound, discardOutbound } from "./outbound-write.ts";
 import { type OutboundRun, runOutbound } from "./outbound.ts";
-import { pollInboundIds } from "./inbound-store.ts";
+import { newestInboundOf, pollInboundIds } from "./inbound-store.ts";
+import { type LinkBindings, readLink } from "./link-read.ts";
 import { PollLoops } from "./poll.ts";
 import { deleteStoredObject } from "./storage-delete.ts";
 import {
@@ -82,6 +83,7 @@ export interface Dependencies {
   masterKey: string;
   stateDirectory: string;
   projects: InboundProjects;
+  linkBindings: LinkBindings;
   consumers: IntakeConsumers;
   unresolvedRequests: UnresolvedRequestCounter;
   pendingEventLimit?: number;
@@ -228,6 +230,16 @@ export class IntakeService implements Service, IntakeCollaborations {
     registry.register(intakeOperations["action.check"], ({ body }, caller) =>
       checkAction(this.dependencies, caller, body.evidence_id),
     );
+    registry.register(intakeOperations["link.read"], ({ body }, caller) =>
+      readLink(
+        {
+          ...this.dependencies,
+          holdEvents: (ids) => this.dispatcher.hold(ids),
+        },
+        caller,
+        body,
+      ),
+    );
     registry.register(intakeOperations["action.merge"], ({ body }, caller) =>
       mergeAction(
         this.dependencies,
@@ -359,6 +371,23 @@ export class IntakeService implements Service, IntakeCollaborations {
     if (this.shutdown.signal.aborted) return;
     const ids = this.dependencies.store.transaction((tx) => pollInboundIds(tx));
     this.pollLoops.startAll(ids);
+  }
+
+  handoff(inboundEventId: string): ReturnType<Dispatcher["handoff"]> {
+    return this.dispatcher.handoff(inboundEventId);
+  }
+
+  releaseHeld(inboundEventIds: readonly string[]): void {
+    this.dispatcher.release(inboundEventIds);
+    this.wake();
+  }
+
+  hasInbound(
+    tx: Transaction,
+    projectId: string,
+    resourceIdentity: string,
+  ): boolean {
+    return newestInboundOf(tx, projectId, resourceIdentity) !== null;
   }
 
   inboundRemoved(inboundId: string): void {

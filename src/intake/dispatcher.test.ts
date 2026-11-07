@@ -52,6 +52,8 @@ const IDENTITY: ServiceIdentity = {
 };
 const SECRET = "ghp_fakeCredentialMaterialValue";
 const INDETERMINATE = "indeterminate";
+const DISPOSITION_DUPLICATE = "duplicate";
+const DISPOSITION_ACCEPTED = "accepted_observation";
 const DEFECT = "system.operation.unknown";
 const TIMEOUT = "gateway.invocation.timeout";
 const CLAIM_LIVE = "mission.node.claim_live";
@@ -59,6 +61,7 @@ const MATCH_CHANGED = "mission.delivery.match_changed";
 const REQUEST_ID = "request_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const RESERVATIONS_AFTER_LOST_RACE = 0;
 const HANDOFFS_AFTER_DISCARD = 0;
+const NO_HANDOFFS = 0;
 const LINE_START = 0;
 const HANDOFFS_PER_EVENT = 1;
 const ERROR_ITEMS_PER_FAILURE = 1;
@@ -327,6 +330,90 @@ test("A wake at any microtask of an ending drain hands the new event over", asyn
     assert.equal(recordOf(h.store, id).state, InboundEventState.Succeeded);
   }
   assert.equal(h.calls.length, WAKE_OFFSETS);
+});
+
+test("A direct handoff hands one pending event over, answers the consumer result and sets succeeded", async (t) => {
+  const h = harness(t);
+  const id = addEvent(h.store, h.inboundId, "d-1");
+  const answer = { disposition: DISPOSITION_DUPLICATE, reason: null };
+  h.answers.push(completed(answer));
+  const result = await h.dispatcher.handoff(id);
+  assert.deepEqual(result, {
+    type: OperationResultType.Completed,
+    status: HttpStatus.OK,
+    data: answer,
+  });
+  assert.equal(h.calls.length, HANDOFFS_PER_EVENT);
+  assert.equal(recordOf(h.store, id).state, InboundEventState.Succeeded);
+  assert.ok(!h.dispatcher.inFlight(id));
+});
+
+test("A direct handoff of a settled event answers null and calls no consumer", async (t) => {
+  const h = harness(t);
+  const id = addEvent(h.store, h.inboundId, "d-1");
+  h.answers.push(completed({}));
+  await h.dispatcher.handoff(id);
+  assert.equal(await h.dispatcher.handoff(id), null);
+  assert.equal(h.calls.length, HANDOFFS_PER_EVENT);
+});
+
+test("A held event stays out of the drain until a direct handoff hands it over", async (t) => {
+  const h = harness(t);
+  const id = addEvent(h.store, h.inboundId, "d-1");
+  h.dispatcher.hold([id]);
+  await handOver(h);
+  assert.equal(h.calls.length, NO_HANDOFFS);
+  assert.equal(recordOf(h.store, id).state, InboundEventState.Pending);
+  const answer = { disposition: DISPOSITION_ACCEPTED, reason: null };
+  h.answers.push(completed(answer));
+  const result = await h.dispatcher.handoff(id);
+  assert.equal(result?.type, OperationResultType.Completed);
+  assert.equal(h.calls.length, HANDOFFS_PER_EVENT);
+});
+
+test("A released event returns to the drain", async (t) => {
+  const h = harness(t);
+  const id = addEvent(h.store, h.inboundId, "d-1");
+  h.dispatcher.hold([id]);
+  h.dispatcher.release([id]);
+  h.answers.push(completed({}));
+  await handOver(h);
+  assert.equal(recordOf(h.store, id).state, InboundEventState.Succeeded);
+});
+
+test("A direct handoff of a failed answer sets failed and answers the failure", async (t) => {
+  const h = harness(t);
+  const id = addEvent(h.store, h.inboundId, "d-1");
+  h.answers.push(failure(HttpStatus.Conflict, CLAIM_LIVE, "claim live"));
+  const result = await h.dispatcher.handoff(id);
+  assert.equal(result?.type, OperationResultType.Failure);
+  assert.equal(recordOf(h.store, id).state, InboundEventState.Failed);
+});
+
+test("A wake during a direct handoff starts no second handoff, and the drain hands the other event after it", async (t) => {
+  const h = harness(t);
+  const first = addEvent(h.store, h.inboundId, "d-1");
+  const answer = Promise.withResolvers<OperationResult<unknown>>();
+  h.answers.push(() => answer.promise);
+  const handoff = h.dispatcher.handoff(first);
+  while (h.calls.length < HANDOFFS_PER_EVENT)
+    await tick(undefined, { signal: t.signal });
+  const second = addEvent(h.store, h.inboundId, "d-2");
+  h.dispatcher.wake();
+  await tick();
+  assert.equal(h.calls.length, HANDOFFS_PER_EVENT);
+  assert.ok(h.dispatcher.inFlight(first));
+  h.answers.push(completed({}));
+  answer.resolve({
+    type: OperationResultType.Completed,
+    status: HttpStatus.OK,
+    data: {},
+  });
+  await handoff;
+  await h.dispatcher.join();
+  assert.equal(h.calls.length, HANDOFFS_AFTER_RETRY);
+  assert.equal(recordOf(h.store, first).state, InboundEventState.Succeeded);
+  assert.equal(recordOf(h.store, second).state, InboundEventState.Succeeded);
 });
 
 test("A 409 claim_live or match_changed answer sets failed with that code", async (t) => {

@@ -979,6 +979,8 @@ const GITHUB_BODY_MAX = 1024 ** 2;
 const GITHUB_EVENTS_ROUTE = /^\/repos\/([^/]+)\/([^/]+)\/events$/;
 const GITHUB_ISSUE_COMMENTS_ROUTE =
   /^\/repos\/([^/]+)\/([^/]+)\/issues\/comments$/;
+const GITHUB_ISSUE_THREAD_COMMENTS_ROUTE =
+  /^\/repos\/([^/]+)\/([^/]+)\/issues\/[1-9][0-9]*\/comments$/;
 const GITHUB_NOT_MODIFIED_STATUS = 304;
 const NO_HOLD_PASS = 0;
 const HOLD_PASS_STEP = 1;
@@ -1451,7 +1453,8 @@ async function gitHubRequest(
   }
   const commentsRoute =
     method === HttpMethod.Get
-      ? GITHUB_ISSUE_COMMENTS_ROUTE.exec(url.pathname)
+      ? (GITHUB_ISSUE_COMMENTS_ROUTE.exec(url.pathname) ??
+        GITHUB_ISSUE_THREAD_COMMENTS_ROUTE.exec(url.pathname))
       : null;
   if (commentsRoute) {
     const [, owner, repo] = commentsRoute;

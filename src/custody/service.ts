@@ -710,7 +710,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     if (
       !isServiceIdentity(identity) ||
       identity.service !== this.intakeServiceName ||
-      operation !== InboundOperation.Poll
+      !Object.values(InboundOperation).includes(operation)
     )
       throw new FacilityError();
     const { credential, platform } = inbound;

@@ -50,6 +50,7 @@ import {
   uploadCheckSpan,
 } from "../../mission/index.ts";
 import {
+  admissionAnswerSchema,
   MISSION_SERVICE_NAME,
   missionOperations,
 } from "../../mission/contract.ts";
@@ -990,6 +991,24 @@ export function composeServices(options: {
       },
     },
     decoder: missionEventDecoder,
+    intakeLinks: {
+      hasInbound: (tx, projectId, resourceIdentity) =>
+        intake.hasInbound(tx, projectId, resourceIdentity),
+      read: async (context, input) =>
+        resultOf(
+          await intakeClient["link.read"](
+            { params: {}, query: {}, body: input },
+            { identity: missionIdentity, context },
+          ),
+        ),
+      handoff: async (_context, inboundEventId) => {
+        const result = await intake.handoff(inboundEventId);
+        return result === null
+          ? null
+          : admissionAnswerSchema.parse(resultOf(result));
+      },
+      releaseHeld: (inboundEventIds) => intake.releaseHeld(inboundEventIds),
+    },
     intakeCheck: {
       check: async (context, evidenceId) =>
         resultOf(
@@ -1178,6 +1197,10 @@ export function composeServices(options: {
     masterKey: options.config.master_key,
     stateDirectory: options.stateDirectory,
     projects: { get: projectClient.get },
+    linkBindings: {
+      conversationBindingOf: (tx, bindingId) =>
+        project.conversationBindingOf(tx, bindingId),
+    },
     consumers: {
       [Consumer.MissionDeliveryAdmit]: (input, consumerOptions) =>
         missionClient["delivery.admit"](

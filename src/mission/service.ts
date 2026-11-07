@@ -44,6 +44,7 @@ import {
   type ImportResult,
   type IntakeCheck,
   type IntakeGateFiles,
+  type IntakeLinks,
   type IntakeStorage,
   type Intent,
   type LinkUpdatePage,
@@ -267,6 +268,7 @@ export interface Dependencies {
   intakeStorage: IntakeStorage;
   intakeCheck: IntakeCheck;
   intakeGateFiles: IntakeGateFiles;
+  intakeLinks: IntakeLinks;
   decoder: EventDecoder;
   config: MissionConfig;
   health?: HealthRegistry;

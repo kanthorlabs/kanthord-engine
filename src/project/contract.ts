@@ -733,6 +733,14 @@ export type BindingRevisionResult = {
   disabled: boolean;
   link_trust?: z.infer<typeof pinnedLinkTrustSchema>;
 };
+export type ConversationBinding = {
+  binding_id: string;
+  project_id: string;
+  resource_identity: string;
+  platform: string;
+  repository: string;
+  credential: string;
+};
 export type RepositoryPolicy = {
   binding_id: string;
   resource_identity: string;

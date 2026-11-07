@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
+import { externalLinkSchema } from "../kernel/external-link.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import { timestamp } from "../kernel/json.ts";
 import {
@@ -69,6 +70,7 @@ export const IntakeErrorCode = {
   InboundEventFilterInvalid: "intake.inbound.event.filter_invalid",
   InboundEventSignatureInvalid: "intake.inbound.event.signature_invalid",
   InboundEventCapacityExceeded: "intake.inbound.event.capacity_exceeded",
+  LinkInboundMissing: "intake.link.inbound_missing",
 } as const;
 
 export const InboundKind = { Webhook: "webhook", Poll: "poll" } as const;
@@ -693,6 +695,29 @@ export const intakeOperations = {
     }),
     description:
       "Check the platform end state of a request evidence for the Mission Service.",
+  },
+  "link.read": {
+    ...serviceOperation,
+    id: "intake.link.read",
+    path: "/api/intake/link/read",
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: z.strictObject({}),
+      body: z.strictObject({
+        project_id: identitySchema("project"),
+        external_link: externalLinkSchema,
+        binding_id: identitySchema("binding"),
+      }),
+    }),
+    output: z.strictObject({
+      items: z.array(
+        z.strictObject({
+          inbound_event_id: identitySchema(INBOUND_EVENT_ID_PREFIX),
+        }),
+      ),
+    }),
+    description:
+      "Read the platform updates of an external link on demand, store each item as an inbound event and answer the event identities for the Mission Service.",
   },
   "action.perform": {
     ...performOperation,

@@ -56,16 +56,24 @@ interface Handoff {
 type Outcome =
   { succeeded: true } | { succeeded: false; code: string; message: string };
 
+interface Attempted {
+  outcome: Outcome;
+  result: OperationResult<unknown> | null;
+}
+
 const SUCCEEDED: Outcome = Object.freeze({ succeeded: true });
 const SKIPPED = Symbol("skipped");
+const NO_HELD: ReadonlySet<string> = new Set();
 
 export function nextCandidate(
   tx: Transaction,
   inFlight: ReadonlySet<string>,
+  held: ReadonlySet<string> = NO_HELD,
 ): string | null {
   assert.ok(inFlight.size <= MAX_IN_FLIGHT, "One handoff runs at a time.");
-  const id = oldestPendingEvent(tx, inFlight);
+  const id = oldestPendingEvent(tx, new Set([...inFlight, ...held]));
   assert.ok(id === null || !inFlight.has(id), "A candidate is not in flight.");
+  assert.ok(id === null || !held.has(id), "A candidate is not held.");
   return id;
 }
 
@@ -148,6 +156,7 @@ function settle(tx: Transaction, id: string, outcome: Outcome): void {
 export class Dispatcher {
   private readonly dependencies: DispatcherDependencies;
   private readonly running = new Set<string>();
+  private readonly held = new Set<string>();
   private drainTask: Promise<void> | null = null;
   private again = false;
   private quiescent = false;
@@ -164,10 +173,46 @@ export class Dispatcher {
     }
     this.drainTask = this.drain()
       .catch((error: unknown) => this.drainFailed(error))
-      .finally(() => {
-        this.drainTask = null;
-        if (this.again && !this.halted()) this.wake();
-      });
+      .finally(() => this.drained());
+  }
+
+  async handoff(id: string): Promise<OperationResult<unknown> | null> {
+    assert.ok(
+      id.length > EMPTY_TEXT_LENGTH,
+      "An event row identity is required.",
+    );
+    let reserved: boolean;
+    try {
+      while (this.drainTask !== null) await this.drainTask;
+      if (this.halted()) return null;
+      reserved = this.dependencies.store.transaction((tx) =>
+        reserve(tx, this.running, id),
+      );
+    } finally {
+      this.held.delete(id);
+    }
+    if (!reserved) return null;
+    const task = this.handOver(id);
+    this.drainTask = task
+      .then(
+        () => undefined,
+        (error: unknown) => this.drainFailed(error),
+      )
+      .finally(() => this.drained());
+    return task;
+  }
+
+  hold(ids: readonly string[]): void {
+    for (const id of ids) this.held.add(id);
+  }
+
+  release(ids: readonly string[]): void {
+    for (const id of ids) this.held.delete(id);
+  }
+
+  private drained(): void {
+    this.drainTask = null;
+    if (this.again && !this.halted()) this.wake();
   }
 
   inFlight(id: string): boolean {
@@ -220,7 +265,7 @@ export class Dispatcher {
   private select(): string | typeof SKIPPED | null {
     const store = this.dependencies.store;
     const candidate = store.transaction((tx) =>
-      nextCandidate(tx, this.running),
+      nextCandidate(tx, this.running, this.held),
     );
     if (candidate === null) return null;
     const reserved = store.transaction((tx) =>
@@ -229,18 +274,19 @@ export class Dispatcher {
     return reserved ? candidate : SKIPPED;
   }
 
-  private async handOver(id: string): Promise<void> {
+  private async handOver(id: string): Promise<OperationResult<unknown> | null> {
     assert.ok(this.running.has(id), "A handoff owns its reservation.");
     const store = this.dependencies.store;
     try {
-      const outcome = await this.attempt(id);
+      const { outcome, result } = await this.attempt(id);
       store.transaction((tx) => settle(tx, id, outcome));
+      return result;
     } finally {
       this.running.delete(id);
     }
   }
 
-  private async attempt(id: string): Promise<Outcome> {
+  private async attempt(id: string): Promise<Attempted> {
     const { store, logger } = this.dependencies;
     let handoff: Handoff;
     try {
@@ -255,15 +301,18 @@ export class Dispatcher {
         "intake: the handoff input of an inbound event failed.",
       );
       return {
-        succeeded: false,
-        code: DEFECT_CODE,
-        message: INPUT_DEFECT_MESSAGE,
+        outcome: {
+          succeeded: false,
+          code: DEFECT_CODE,
+          message: INPUT_DEFECT_MESSAGE,
+        },
+        result: null,
       };
     }
     return this.call(handoff);
   }
 
-  private async call(handoff: Handoff): Promise<Outcome> {
+  private async call(handoff: Handoff): Promise<Attempted> {
     const { consumers, identity, context, logger } = this.dependencies;
     assert.equal(typeof consumers[handoff.consumer], ValueType.Function);
     try {
@@ -272,7 +321,7 @@ export class Dispatcher {
         idempotencyKey: createIdempotencyKey(),
         context,
       });
-      return outcomeOf(result);
+      return { outcome: outcomeOf(result), result };
     } catch (error) {
       logger.error(
         {
@@ -283,7 +332,14 @@ export class Dispatcher {
         },
         "intake: the consumer call of an inbound event failed.",
       );
-      return { succeeded: false, code: DEFECT_CODE, message: DEFECT_MESSAGE };
+      return {
+        outcome: {
+          succeeded: false,
+          code: DEFECT_CODE,
+          message: DEFECT_MESSAGE,
+        },
+        result: null,
+      };
     }
   }
 }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { canonicalJSON } from "../kernel/json.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
-import { configurationSchemaOf } from "./configuration.ts";
+import { configurationSchemaOf, resourceIdentityOf } from "./configuration.ts";
 import {
   type ConsumerValue,
   type Inbound,
@@ -83,6 +83,34 @@ export function readInbound(tx: Transaction, id: string): InboundRow | null {
     (tx.database
       .prepare("SELECT * FROM intake_inbound WHERE id = ?")
       .get(id) as InboundRow | undefined) ?? null
+  );
+}
+
+export function newestInboundOf(
+  tx: Transaction,
+  projectId: string,
+  resourceIdentity: string,
+): InboundRow | null {
+  assert.ok(projectId.length > EMPTY_TEXT_LENGTH, "A project is required.");
+  assert.ok(
+    resourceIdentity.length > EMPTY_TEXT_LENGTH,
+    "A resource identity is required.",
+  );
+  const rows = tx.database
+    .prepare(
+      "SELECT * FROM intake_inbound WHERE project_id = ? ORDER BY id DESC",
+    )
+    .all(projectId) as unknown as InboundRow[];
+  return (
+    rows.find(
+      (row) =>
+        resourceIdentityOf(
+          row.platform,
+          configurationSchemaOf(row.kind, row.platform).parse(
+            JSON.parse(row.configuration),
+          ),
+        ) === resourceIdentity,
+    ) ?? null
   );
 }
 

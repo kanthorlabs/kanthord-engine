@@ -32,6 +32,11 @@ import {
 } from "./control.ts";
 import { actionStatesOf, requiredActionsOf } from "./frozen-action.ts";
 import { gateFilesOf } from "./gate-files.ts";
+import {
+  admitLinkUpdates,
+  pinnedLinksOf,
+  requireInbounds,
+} from "./link-check.ts";
 import { requireNode } from "./node-read.ts";
 import { recordNotFound } from "./record-list.ts";
 import {
@@ -44,7 +49,12 @@ import {
   readRequests,
 } from "./record-store.ts";
 import { claimableMap, reconcileMission } from "./routing.ts";
-import { type NodeRow, readNode, setNodeState } from "./store.ts";
+import {
+  type NodeRow,
+  readCurrentRevision,
+  readNode,
+  setNodeState,
+} from "./store.ts";
 import type { Dependencies } from "./service.ts";
 import { type DeferredRounds, IMMEDIATE_DELAY_MS } from "./deferred-rounds.ts";
 import { requireMission } from "./write.ts";
@@ -54,6 +64,7 @@ import { currentAssessmentOf } from "./currency.ts";
 const NO_LANDED_COMMITS = 0;
 const FIRST_ASSET_INDEX = 0;
 const NO_UNRESOLVED_REQUESTS = 0;
+const NO_LINKS = 0;
 const SINGLE_ASSET_COUNT = 1;
 const EXPECTED_ROW_CHANGE = 1;
 const NO_GATE_FILES = 0;
@@ -266,14 +277,24 @@ export async function checkNode(
             .filter((row) => row.end_state === null)
             .sort((a, b) => a.id.localeCompare(b.id))
             .map((row) => requestContext(tx, dependencies, row.id));
-    if (requests.length === NO_UNRESOLVED_REQUESTS)
+    const revision = readCurrentRevision(tx, nodeId);
+    assert.ok(revision, "A node has a revision.");
+    const links = pinnedLinksOf(tx, dependencies.bindings, revision);
+    if (requests.length === NO_UNRESOLVED_REQUESTS && links.length === NO_LINKS)
       throw new OperationError(
         HttpStatus.Conflict,
         MissionErrorCode.NoUnresolvedRequest,
         "The node has no unresolved request.",
       );
-    return { mission, requests };
+    requireInbounds(tx, dependencies, mission.project_id, links);
+    return { mission, requests, links };
   });
+  const linkUpdates = await admitLinkUpdates(
+    dependencies,
+    caller.context,
+    prepared.mission.project_id,
+    prepared.links,
+  );
   const failures: { evidence_id: string; error: ErrorBody }[] = [];
   const checked: string[] = [];
   for (const item of prepared.requests) {
@@ -340,6 +361,7 @@ export async function checkNode(
       };
     }),
     failures,
+    link_updates: linkUpdates,
   }));
   dependencies.wakeup.wake(prepared.mission.project_id);
   return result;

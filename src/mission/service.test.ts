@@ -385,6 +385,12 @@ function makeService(
       merge: unexpectedCollaboration,
     },
     intakeGateFiles: { read: unexpectedCollaboration },
+    intakeLinks: {
+      hasInbound: unexpectedCollaboration,
+      read: unexpectedCollaboration,
+      handoff: unexpectedCollaboration,
+      releaseHeld: unexpectedCollaboration,
+    },
     decoder: {
       decode: unexpectedCollaboration,
       decodeLinkUpdate: unexpectedCollaboration,

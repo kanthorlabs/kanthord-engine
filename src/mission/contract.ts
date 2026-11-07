@@ -14,6 +14,11 @@ import type { Transaction } from "../kernel/store.ts";
 import type { Context } from "../kernel/context.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
 import { errorSchema } from "../kernel/errors.ts";
+import {
+  type ExternalLink,
+  ExternalLinkKind,
+  externalLinkSchema,
+} from "../kernel/external-link.ts";
 import { tagSchema } from "../kernel/tag.ts";
 import { type FailureCause, failureCauseSchema } from "../kernel/cause.ts";
 import { CommitType } from "../kernel/commit-message.ts";
@@ -311,6 +316,27 @@ export interface IntakeGateFiles {
     call: IntakeExecutionCall,
     input: { binding_id: string; base_branch: string; commit: string },
   ): Promise<{ paths: string[] }>;
+}
+
+export interface IntakeLinks {
+  hasInbound(
+    tx: Transaction,
+    projectId: string,
+    resourceIdentity: string,
+  ): boolean;
+  read(
+    context: Context,
+    input: {
+      project_id: string;
+      external_link: ExternalLink;
+      binding_id: string;
+    },
+  ): Promise<{ items: { inbound_event_id: string }[] }>;
+  handoff(
+    context: Context,
+    inboundEventId: string,
+  ): Promise<AdmissionAnswer | null>;
+  releaseHeld(inboundEventIds: readonly string[]): void;
 }
 
 export interface DecodedLinkUpdate {
@@ -667,20 +693,8 @@ export const tagsSchema = z
   .refine((keys) => new Set(keys).size === keys.length, {
     message: "Tags must be unique.",
   });
-export const ExternalLinkKind = {
-  GitHubIssue: "github_issue",
-} as const;
 export const EXTERNAL_LINK_LIMIT = 10;
-const GITHUB_CONVERSATION_IDENTITY_PATTERN =
-  /^conversation:github:[^/\s:]+\/[^/\s:]+$/;
-export const externalLinkSchema = z.discriminatedUnion("kind", [
-  z.strictObject({
-    kind: z.literal(ExternalLinkKind.GitHubIssue),
-    resource_identity: z.string().regex(GITHUB_CONVERSATION_IDENTITY_PATTERN),
-    number: z.number().int().positive(),
-  }),
-]);
-export type ExternalLink = z.infer<typeof externalLinkSchema>;
+export { type ExternalLink, ExternalLinkKind, externalLinkSchema };
 export const linkUpdateRowSchema = z.strictObject({
   id: identitySchema(LINK_UPDATE_IDENTITY_PREFIX),
   mission_id: identitySchema(MISSION_IDENTITY_PREFIX),
@@ -1720,6 +1734,14 @@ export const nodeCheckResultSchema = z.strictObject({
       error: errorSchema,
     }),
   ),
+  link_updates: z.array(
+    z.strictObject({
+      external_link: externalLinkSchema,
+      admitted: z.number().int().nonnegative(),
+      duplicate: z.number().int().nonnegative(),
+      refused: z.number().int().nonnegative(),
+    }),
+  ),
 });
 export const Disposition = {
   AcceptedObservation: "accepted_observation",
@@ -2047,7 +2069,8 @@ export const missionOperations = {
       body: nodeCheckSchema,
     }),
     output: nodeCheckResultSchema,
-    description: "Check unresolved external requests on demand.",
+    description:
+      "Check unresolved external requests and read each external link of the current revision on demand.",
   },
   "delivery.admit": {
     ...writeOperation,

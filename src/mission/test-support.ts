@@ -353,6 +353,12 @@ export function missionHarness(
       merge: unexpectedCollaboration,
     },
     intakeGateFiles: { read: async () => ({ paths: [] }) },
+    intakeLinks: {
+      hasInbound: unexpectedCollaboration,
+      read: unexpectedCollaboration,
+      handoff: unexpectedCollaboration,
+      releaseHeld: unexpectedCollaboration,
+    },
     decoder: {
       decode: unexpectedCollaboration,
       decodeLinkUpdate: unexpectedCollaboration,

@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test } from "node:test";
+import {
+  Consumer,
+  InboundKind,
+  InboundPlatform,
+  ResourceKind,
+} from "../../intake/contract.ts";
 import { IdentityKind } from "../../kernel/caller.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { canonicalJSON } from "../../kernel/json.ts";
@@ -14,7 +20,7 @@ import {
   kanthord,
   spawnKanthord,
 } from "./cli-test-support.ts";
-import { gatewayFixture } from "./test-support.ts";
+import { fakeGitHub, gatewayFixture } from "./test-support.ts";
 
 const EXIT_SUCCESS = 0;
 const NO_OUTPUT = "";
@@ -402,4 +408,133 @@ test("kanthord mission followup list and decide reach their routes", async (t) =
     project.id,
   ]);
   assert.deepEqual(after.items, []);
+});
+
+const CHECK_MARKER = "node-check-link-marker";
+const COMMENT_ID = 4401;
+const COMMENT_CREATED_AT = "2026-11-07T04:00:00Z";
+const ONE_ITEM = 1;
+const NO_ITEMS = 0;
+
+test("kanthord mission node check prints the link counts", async (t) => {
+  const gitHub = await fakeGitHub(t);
+  const fixture = await gatewayFixture(t, {
+    github: { baseUrl: gitHub.endpoint },
+  });
+  const session = cliSession(t, fixture.endpoint, fixture.token, CHECK_MARKER);
+  await createCredentials(session, CHECK_MARKER);
+  const project = await session.read<{ id: string }>([
+    "project",
+    "create",
+    "--name",
+    "check-links",
+  ]);
+  const mission = await session.read<{ id: string; version: number }>([
+    "mission",
+    "get",
+    project.id,
+  ]);
+  await session.write(["project", "binding", "apply", project.id], {
+    version: FIRST_BINDING_SET,
+    bindings: {
+      harness: {
+        kind: "worker",
+        config: { worker: "claude-code@1", instance_count: 1 },
+      },
+      [CONVERSATION_BINDING]: {
+        kind: "conversation",
+        config: {
+          available: true,
+          platform: "github",
+          repository: CONVERSATION_REPOSITORY,
+          credential: "github",
+        },
+      },
+    },
+  });
+  const bindings = await session.read<{
+    items: { id: string; name: string }[];
+  }>(["project", "binding", "list", project.id]);
+  const binding = bindings.items.find(
+    (item) => item.name === CONVERSATION_BINDING,
+  );
+  assert.ok(binding);
+  const created = await session.write<{ revisions: { node_id: string }[] }>(
+    ["mission", "node", "create", mission.id],
+    {
+      filename: "link.md",
+      content: {
+        name: "Follow the thread",
+        requirement: "Follow the thread",
+        criterion: "The thread is followed",
+        verifications: ["true"],
+        bindings: [binding.id],
+        intent: "examine",
+        external_links: [LINK],
+      },
+      tasks: [],
+      reason: "plan",
+      expected_mission_version: mission.version,
+    },
+  );
+  const nodeId = created.revisions[FIRST_ITEM]!.node_id;
+  const [owner, repository] = CONVERSATION_REPOSITORY.split("/");
+  gitHub.issueComments(owner!, repository!, [
+    {
+      id: COMMENT_ID,
+      user: { id: Number(OTHER_ACTOR), login: "reviewer", type: "User" },
+      body: "Please update the plan.",
+      created_at: COMMENT_CREATED_AT,
+      html_url: `https://github.com/${CONVERSATION_REPOSITORY}/issues/${LINK.number}#issuecomment-${COMMENT_ID}`,
+      issue_url: `https://api.github.com/repos/${CONVERSATION_REPOSITORY}/issues/${LINK.number}`,
+      performed_via_github_app: null,
+    },
+  ]);
+  const check = async () => {
+    const current = await session.read<{ version: number }>([
+      "mission",
+      "get",
+      project.id,
+    ]);
+    return session.write<{
+      results: unknown[];
+      failures: unknown[];
+      link_updates: {
+        external_link: unknown;
+        admitted: number;
+        duplicate: number;
+        refused: number;
+      }[];
+    }>(["mission", "node", "check", nodeId], {
+      expected_mission_version: current.version,
+    });
+  };
+  await session.write(["intake", "inbound", "create"], {
+    project_id: project.id,
+    kind: InboundKind.Webhook,
+    platform: InboundPlatform.GitHub,
+    consumer: Consumer.MissionDeliveryAdmit,
+    configuration: {
+      resource_kind: ResourceKind.Conversation,
+      resource: CONVERSATION_REPOSITORY,
+    },
+  });
+  const first = await check();
+  assert.deepEqual(first.link_updates, [
+    {
+      external_link: LINK,
+      admitted: ONE_ITEM,
+      duplicate: NO_ITEMS,
+      refused: NO_ITEMS,
+    },
+  ]);
+  const second = await check();
+  assert.deepEqual(second.link_updates, [
+    {
+      external_link: LINK,
+      admitted: NO_ITEMS,
+      duplicate: ONE_ITEM,
+      refused: NO_ITEMS,
+    },
+  ]);
 });
