@@ -58,8 +58,13 @@ import {
   ExchangeFailure,
   InstanceExchange,
 } from "./instance-exchange.ts";
-import { copyKeys as copyKeysOf } from "./copy-keys.ts";
+import { type CopyKeys, copyKeys as copyKeysOf } from "./copy-keys.ts";
 import { InstanceLogins } from "./instance-login.ts";
+import {
+  CONFIG_ABSENT as MACHINE_CONFIG_ABSENT,
+  CONFIG_CONFLICT as MACHINE_CONFIG_CONFLICT,
+  CONFIG_INVALID as MACHINE_CONFIG_INVALID,
+} from "./machine-config.ts";
 import { SessionReads } from "./session-reads.ts";
 import { CopyChecks } from "./copy-checks.ts";
 
@@ -144,6 +149,9 @@ export class Worker implements Service {
   private logins?: InstanceLogins;
   private sessionReads?: SessionReads;
   private copyChecks?: CopyChecks;
+  private copyKeys?: CopyKeys;
+  private claimOpen = false;
+  private closeLogged = false;
   private connectionName = "";
   private operationalLog?: OperationalLog;
   private heartbeatTimer?: NodeJS.Timeout;
@@ -191,6 +199,7 @@ export class Worker implements Service {
       const exchange = new InstanceExchange(configuration, endpoint);
       this.exchange = exchange;
       const copyKeys = copyKeysOf(configuration, env);
+      this.copyKeys = copyKeys;
       this.logins = new InstanceLogins({
         copyKeys,
         providers: this.options.oauthProviders,
@@ -243,6 +252,7 @@ export class Worker implements Service {
         watchdog: armWatchdog,
         refused: (binding) => this.bindingRefused(binding),
         copy_keys: copyKeys,
+        claim_gate: () => this.claimOpen,
         footprint: { residue_root: temporary, worker_placement: true },
       });
       const error = await this.unit.start();
@@ -450,6 +460,7 @@ export class Worker implements Service {
       );
       if (answer.server_version !== packageVersion())
         return this.finish(versionMismatch(answer.server_version));
+      this.applyMachine(answer.machine);
       this.copyChecks!.observe(answer.credential_version);
       if (answer.binding_version !== this.connection.binding_version)
         await this.reconnect();
@@ -458,6 +469,38 @@ export class Worker implements Service {
     } catch (error) {
       await this.refused(error);
     }
+  }
+
+  private applyMachine(machine: string | null): void {
+    if (machine === null) return this.openClaims();
+    try {
+      if (this.copyKeys!.of(machine) !== null) return this.openClaims();
+    } catch (error) {
+      if (
+        !(error instanceof Diagnostic) ||
+        (error.code !== MACHINE_CONFIG_CONFLICT &&
+          error.code !== MACHINE_CONFIG_INVALID)
+      )
+        throw error;
+      return this.closeClaims(machine, error.code);
+    }
+    this.closeClaims(machine, MACHINE_CONFIG_ABSENT);
+  }
+
+  private openClaims(): void {
+    this.claimOpen = true;
+    this.closeLogged = false;
+  }
+
+  private closeClaims(machine: string, code: string): void {
+    this.claimOpen = false;
+    if (this.closeLogged) return;
+    this.closeLogged = true;
+    this.logRecord({
+      msg: "Worker machine configuration closed the claim gate",
+      machine,
+      code,
+    });
   }
 
   private async readWork(): Promise<void> {

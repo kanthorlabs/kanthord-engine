@@ -68,7 +68,7 @@ const JWT_SUPERSEDED_CODE = "gateway.jwt.connection_superseded";
 const REQUEST_ID = "request_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const TOKEN_LIFETIME_MS = 3600000;
 const LOOPBACK = "127.0.0.1";
-const FAKE_MACHINE = "workstation";
+export const FAKE_MACHINE = "workstation";
 const BEARER_PREFIX = "Bearer ";
 
 export interface FakeBinding {
@@ -106,6 +106,7 @@ export async function fakeInstanceServer(t: TestContext) {
     version: packageVersion(),
     bindingVersion: 0,
     workVersion: 0,
+    machine: null as string | null,
     loginSessions: [] as LoginSessionEntry[],
     footprintOrders: [] as FootprintOrder[],
     serial: 0,
@@ -221,7 +222,7 @@ export async function fakeInstanceServer(t: TestContext) {
           binding_version: state.bindingVersion,
           credential_version: 0,
           work_version: state.workVersion,
-          machine: FAKE_MACHINE,
+          machine: state.machine,
         },
       };
     }

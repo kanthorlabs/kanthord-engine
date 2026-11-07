@@ -88,6 +88,7 @@ export interface WorkerUnitOptions {
   resume_pull_wait_ms?: number;
   refused?: (binding: UnitBinding) => void;
   copy_keys?: CopyKeys;
+  claim_gate?: () => boolean;
   footprint?: UnitFootprintScope;
 }
 
@@ -475,6 +476,7 @@ export class WorkerUnit {
       registration: entry.registration!,
       backoff: new Backoff(),
       shutdown: resume ?? entry.pulls,
+      gate: this.options.claim_gate,
       idle: () => this.idle(),
       round: () => this.currentRound(),
       pulling: (task) => {
