@@ -63,6 +63,7 @@ const SCHEDULER_TABLES = [
   SCHEDULER_QUEUE_PLACE_TABLE,
   SCHEDULER_EXECUTION_TABLE,
 ];
+const MISSION_TABLE_PREFIX = "mission_";
 const MISSION_MISSION_TABLE = "mission_mission";
 const MISSION_NODE_TABLE = "mission_node";
 const MISSION_NODE_REVISION_TABLE = "mission_node_revision";
@@ -286,16 +287,33 @@ test("each service migration set applies alone to an empty store", () => {
         assert.deepEqual(
           store.database
             .prepare(
-              `SELECT name, type, "notnull" FROM pragma_table_info('${MISSION_NODE_REVISION_TABLE}') WHERE name IN ('intent', 'tags', 'tasks') ORDER BY name`,
+              `SELECT name, type, "notnull" FROM pragma_table_info('${MISSION_NODE_REVISION_TABLE}') WHERE name IN ('external_links', 'intent', 'tags', 'tasks') ORDER BY name`,
             )
             .all()
             .map((row) => ({ ...row })),
           [
+            { name: "external_links", type: "TEXT", notnull: 1 },
             { name: "intent", type: "TEXT", notnull: 1 },
             { name: "tags", type: "TEXT", notnull: 1 },
             { name: "tasks", type: "TEXT", notnull: 1 },
           ],
         );
+        for (const table of ALL_TABLES.filter((name) =>
+          name.startsWith(MISSION_TABLE_PREFIX),
+        )) {
+          assert.doesNotMatch(
+            String(
+              store.database
+                .prepare("SELECT sql FROM sqlite_master WHERE name = ?")
+                .get(table)?.sql,
+            ),
+            /\bCHECK\b/i,
+          );
+          for (const index of store.database
+            .prepare("SELECT * FROM pragma_index_list(?)")
+            .all(table))
+            assert.equal(index.unique, UNIQUE_INDEX, String(index.name));
+        }
       }
       if (service.service === AGENT_COMPONENT_NAME)
         assert.deepEqual(tables(store), [AGENT_ENABLEMENT_TABLE]);

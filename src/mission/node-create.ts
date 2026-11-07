@@ -11,6 +11,7 @@ import {
   resolveNodeBindings,
   TASK_CONTENT_FIELDS,
   TASKS_FIELD,
+  validateExternalLinkBindings,
   validateFilename,
   validateNodeContent,
   validatePlanContent,
@@ -91,11 +92,14 @@ export function resolveContent(
     intent,
     body.content.bindings,
   );
+  validateExternalLinkBindings(body.content.external_links, resolved);
   const { commit_type: commitType, ...content } = body.content;
   return {
     ...content,
     intent,
     tags: (body.content.tags ?? []) as Content["tags"],
+    external_links: (body.content.external_links ??
+      []) as Content["external_links"],
     ...commitTypeField(commitType),
     bindings: resolved.map((binding) => binding.binding_id),
   };

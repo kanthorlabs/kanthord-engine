@@ -96,7 +96,7 @@ test("an examine node with a repository binding requires no external action, and
       created_at: NOW,
     });
     const statement = tx.database.prepare(
-      "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, intent, tags, tasks, change, reason, actor, created_at) VALUES (?, ?, 'implement.md', 'name', 'requirement', 'criterion', '[]', ?, 'implement', '[]', '[]', '{}', 'reason', ?, ?)",
+      "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, intent, tags, external_links, tasks, change, reason, actor, created_at) VALUES (?, ?, 'implement.md', 'name', 'requirement', 'criterion', '[]', ?, 'implement', '[]', '[]', '[]', '{}', 'reason', ?, ?)",
     );
     statement.run(
       nodeId,
@@ -267,7 +267,7 @@ test("two bindings freeze one action each", (t) => {
     });
     tx.database
       .prepare(
-        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, intent, tags, tasks, change, reason, actor, created_at) VALUES (?, ?, 'implement.md', 'name', 'requirement', 'criterion', '[]', ?, 'implement', '[]', '[]', '{}', 'reason', ?, ?)",
+        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, intent, tags, external_links, tasks, change, reason, actor, created_at) VALUES (?, ?, 'implement.md', 'name', 'requirement', 'criterion', '[]', ?, 'implement', '[]', '[]', '[]', '{}', 'reason', ?, ?)",
       )
       .run(
         nodeId,
@@ -345,7 +345,7 @@ test("actionsOfRevision with a shared map answers the actions of a new map", (t)
       created_at: NOW,
     });
     const statement = tx.database.prepare(
-      "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, intent, tags, tasks, change, reason, actor, created_at) VALUES (?, ?, 'implement.md', 'name', 'requirement', 'criterion', '[]', ?, 'implement', '[]', '[]', '{}', 'reason', ?, ?)",
+      "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, intent, tags, external_links, tasks, change, reason, actor, created_at) VALUES (?, ?, 'implement.md', 'name', 'requirement', 'criterion', '[]', ?, 'implement', '[]', '[]', '[]', '{}', 'reason', ?, ?)",
     );
     statement.run(
       nodeId,

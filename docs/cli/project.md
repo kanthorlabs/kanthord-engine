@@ -219,10 +219,10 @@ Inputs:
 - `<binding-id>`: required `BindingId` on `get` and `revision list`;
   no default; path `binding_id`. It must belong to the named project.
 - `--kind <kind>`: optional, **repeatable scalar flag** on `binding list`.
-  Proposed wire enum `repository | worker | storage`.
+  Proposed wire enum `repository | worker | storage | conversation`.
   Absent means all supported kinds. Repeated values are ORed; reject duplicate
   values rather than changing their meaning. Maps to repeated query `kind`.
-  These are the three binding kinds.
+  These are the four binding kinds.
 - `--state <state>`: optional enum on `binding list`, proposed values
   `current | removed | all`, default `current`; query `state`.
   The Project Service keeps a removed binding and every revision for the life of the project; `removed` and `all` include retained bindings.
@@ -270,7 +270,7 @@ whose schemas are explicitly blocked below.
 
 Each `BindingEdit` value contains only:
 
-- `kind`: **required**, enum `repository | worker | storage`.
+- `kind`: **required**, enum `repository | worker | storage | conversation`.
 - `config`: **required**, the kind-specific object below.
 
 Every reference between bindings is a binding-name string of the same
@@ -320,7 +320,7 @@ The repository credential in this example is an `api_key` of GitHub. The SSH cre
 
 Common to every `config`:
 
-- `available` applies to the repository and storage kinds. It is a required boolean with no default.
+- `available` applies to the repository, storage and conversation kinds. It is a required boolean with no default.
 - `false` prevents subsequent resolution. It revokes no upstream authority and cancels no operation in flight.
 - A worker binding holds no `available`. An empty `worker_instances` list of a native worker, and `instance_count: 0` of an external harness, make it unavailable.
 
@@ -347,6 +347,7 @@ Common to every `config`:
   - Help of `agents["re@1"]`: "Put each rule that the reviewer judges into the Repository prompt, so the coder reads it too. Use this text only to relax the judgement of a rule."
 - `environment`: **optional**, one `devcontainer.json` document as a JSON object; absent by default. It is the stored environment of the repository binding. Its keys keep the names of the devcontainer specification, for example `image`, `build`, `features`, `containerEnv`, `remoteEnv`, `onCreateCommand`, `updateContentCommand` and `postCreateCommand`. A lifecycle command is a string, an array of strings, or an object of strings and arrays; another type refuses the write. A change of `environment` alone is a binding revision and runs no repository check. [Binding environment](#binding-environment) states how KanthorD uses it.
 - `environment_secrets`: **optional**, object that maps an environment variable name to one `CredentialName` of platform `environment_secret`; absent by default. A name matches `^[A-Z_][A-Z0-9_]*$`. The object holds at most 16 names. Each value names a live `environment_secret` credential. A name that does not match, a seventeenth name, or a value that names an absent, archived or other-platform credential refuses the write with `project.bindings.repository.environment_secret_invalid`. A value that is no string refuses the write as a validation failure. [Environment secrets](#environment-secrets) states how KanthorD uses the key.
+- `link_trust`: **optional**, object `{ actor_ids }`; absent by default. Only a repository binding of platform `github` takes it; a binding of another platform refuses it with reason `platform_unsupported`. [Link trust](#link-trust) states the rules.
 - Each text of `prompts.repository` and `prompts.agents` holds at most 32768 UTF-8 bytes and no control character other than a tab and a newline. Another text refuses the write with `project.bindings.repository.prompt_invalid` and `details: { prompt, reason }`. `prompt` is `instruction_file`, `repository` or an agent name. `reason` is `too_large` or `control_character` for a text, and `path_invalid` for the path. An instruction file that is invalid at the base head refuses the write with `details: { prompt: "instruction_file", reason }`, where `reason` is `too_large`, `not_utf8`, `unreadable` or `control_character`.
 - The JSON file holds the prompt text, not a client-side path.
 
@@ -382,6 +383,48 @@ Coverage and suitability follow [Repository configuration and policy](https://gi
 - Git operations use the private key of the `ssh` record and the pinned host key of the address host. The server reads no host SSH configuration, key or agent.
 - Custody checks that the credential has platform `github`, under [suitability](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#suitability).
 - These checks read no secret material and assert no narrower upstream scope.
+
+### Conversation configuration
+
+A `conversation` binding names one external conversation source of its project, which a node follows through its links.
+A project holds any number of conversation bindings.
+This version supports the platform `github`.
+Its `config` holds these fields:
+
+- `available`: **required** boolean, with no default.
+- `platform`: **required**, the value `github`. A later platform adds one value.
+- `repository`: **required**, `<owner>/<repo>` of the GitHub repository.
+- `credential`: **required**, one `CredentialName` of platform `github`. Custody checks the platform at the write. The write makes no platform call.
+- `reply_policy`: **optional**, `{ "follows": { "type": "assessment_passed" } }`. Another value refuses the write as a validation failure. The write stores the key and derives no action from it.
+- `link_trust`: **optional**, object `{ actor_ids }`. [Link trust](#link-trust) states the rules.
+
+The resource identity of a conversation binding is `conversation:github:<repository>`.
+
+```json
+{
+  "kind": "conversation",
+  "config": {
+    "available": true,
+    "platform": "github",
+    "repository": "acme/app",
+    "credential": "github-acme",
+    "reply_policy": { "follows": { "type": "assessment_passed" } },
+    "link_trust": { "actor_ids": ["583231", "9919"] }
+  }
+}
+```
+
+A node names a conversation binding beside its repository bindings. Both intents accept zero or more conversation bindings.
+
+### Link trust
+
+`link_trust` holds the accounts whose updates a node follows without a human decision. It is a key of a repository binding of platform `github` and of a conversation binding.
+
+- `actor_ids`: a list of at most 32 distinct immutable account ids. A GitHub id matches `^[1-9][0-9]{0,15}$`. A login such as `octocat` is no id.
+- A key outside `actor_ids` refuses the write as a validation failure.
+- An invalid value refuses the write with 400 `project.bindings.link_trust_invalid` and `details: { binding, field, reason, actor_id }`. `field` is `actor_ids`.
+- `reason` is `type_invalid` for a value that is no object, an `actor_ids` that is no list of strings, or an id that is no string. It is `too_many` for more than 32 ids, `duplicate` for a repeated id, `id_invalid` for an id that does not match the pattern, and `platform_unsupported` for a repository binding of a platform other than `github`.
+- `actor_id` holds the refused id for `duplicate` and `id_invalid`, and is null for the other reasons.
 
 ### Worker and agent configuration — proposed fields
 
@@ -482,8 +525,8 @@ Project transaction. It compares the supplied version with the current
 version and refuses a stale one. No network operation belongs in that
 transaction. The target rules are:
 
-- One binding per repository and per storage bucket; any number per worker.
-- Resource identity derives from configuration. A repository identity derives from the platform and from the owner and the repository of its SSH address, never from the host. A worker identity derives from its binding name, and a storage identity derives from its endpoint host and its bucket.
+- One binding per repository, per storage bucket and per conversation repository; any number per worker.
+- Resource identity derives from configuration. A repository identity derives from the platform and from the owner and the repository of its SSH address, never from the host. A worker identity derives from its binding name, a storage identity derives from its endpoint host and its bucket, and a conversation identity derives from its platform and its repository.
 - A save checks only a new or a changed repository binding. A binding is new when the saved set at the submitted version has no binding of its name. A binding is changed when its kind or a field of its configuration differs from the saved binding.
 - For each new or changed repository binding, the save checks that the address host is in the SSH host set of the platform. Another host refuses the write with `project.bindings.repository.address_invalid`.
 - Then the save releases the key of the `ssh_credential` under the human identity. It performs one `git ls-remote` with that key and a 30 s deadline before the transaction.
@@ -782,7 +825,7 @@ A complete file:
 }
 ```
 
-- It refuses a static violation with the code of `binding apply`: `credential_required`, `action_unsupported` and `address_invalid` for an address that does not have the form `git@<host>:<owner>/<repository>.git`, and the custody suitability codes of `ssh_credential` and `credential`.
+- It refuses a static violation with the code of `binding apply`: `credential_required`, `action_unsupported`, `link_trust_invalid` and `address_invalid` for an address that does not have the form `git@<host>:<owner>/<repository>.git`, and the custody suitability codes of `ssh_credential` and `credential`.
 - It refuses an invalid `prompts` text or path with `project.bindings.repository.prompt_invalid`.
 - Then it runs the checks of `binding verify` on the configuration and answers the same `{ address, ssh_credential, credential }`. A host outside the SSH host set answers the `address` entry `unhealthy` with `failure_reason: address_invalid`. A host with no pin answers `host_key_unknown`.
 - The answer also holds `instruction_file: { path, commit, state, reason }`, the state of the instruction file at the base head. It is null when the configuration names no instruction file. `state` is `present`, `absent`, `invalid` or `unreachable`. `reason` is null for `present` and `absent`. For `invalid`, `reason` is `too_large`, `not_utf8`, `unreadable` or `control_character`. For `unreachable`, `commit` is null and `reason` is `base_branch_absent` when the remote does not hold the base branch, else a value of the [failure reason list](#binding-verify), for example `address_invalid` for a host outside the SSH host set or `deadline_exceeded`.
@@ -931,6 +974,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `project.environment.run_active`                             | A run of the environment of the group is active.                                                                                                                                                                                                                                                                                                                                                                                 | environment rebuild                                                                                                                                                                                                                         |
 | 409   | `project.suite_pass.not_proposed`                            | The binding gets no suite pass proposal: its configuration holds no `pull_request` action with `landing: human`. An absent `landing` reads as `human`.                                                                                                                                                                                                                                                                           | environment suite-pass plan                                                                                                                                                                                                                 |
 | 400   | `project.bindings.duplicate_resource`                        | Two bindings use the same resource.                                                                                                                                                                                                                                                                                                                                                                                              | binding apply                                                                                                                                                                                                                               |
+| 400   | `project.bindings.link_trust_invalid`                        | The `link_trust` of a binding is invalid, or a repository binding of a platform other than `github` holds it; `details: { binding, field, reason, actor_id }`. `reason` is `type_invalid`, `too_many`, `duplicate`, `id_invalid` or `platform_unsupported`.                                                                                                                                                                      | binding apply, binding check                                                                                                                                                                                                                |
 | 400   | `project.bindings.repository.address_invalid`                | The repository address is invalid, or its host is outside the SSH host set of the platform. Binding check and binding verify answer a host outside the set as `failure_reason: address_invalid`.                                                                                                                                                                                                                                 | binding apply, binding check, environment show                                                                                                                                                                                              |
 | 400   | `project.bindings.repository.action_unsupported`             | A binding of the git-only platform `gitlab` or `bitbucket` names a `credential` or the action `pull_request`.                                                                                                                                                                                                                                                                                                                    | binding apply, binding check                                                                                                                                                                                                                |
 | 400   | `project.bindings.repository.environment_secret_invalid`     | An entry of `environment_secrets` holds a name that does not match `^[A-Z_][A-Z0-9_]*$`, is the seventeenth name, or names an absent, archived or non-`environment_secret` credential; `details: { binding, variable, credential }`.                                                                                                                                                                                             | binding apply, environment secret set                                                                                                                                                                                                       |

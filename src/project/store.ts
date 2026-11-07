@@ -13,6 +13,7 @@ import {
   BindingKind,
   BindingState,
   ChangeKind,
+  conversationConfigSchema,
   EMPTY_LENGTH,
   LIST_LIMIT_MAX,
   PROJECT_ID_PREFIX,
@@ -217,7 +218,8 @@ export function kindOf(
   if (
     kind !== BindingKind.Repository &&
     kind !== BindingKind.Worker &&
-    kind !== BindingKind.Storage
+    kind !== BindingKind.Storage &&
+    kind !== BindingKind.Conversation
   )
     throw new Error(
       `Unknown binding kind in resource identity: ${resourceIdentity}`,
@@ -259,6 +261,10 @@ export function deriveResourceIdentity(
         ? config.platform
         : REPOSITORY_PLATFORM;
     return `${BindingKind.Repository}:${platform}:${owner}/${repository}`;
+  }
+  if (kind === BindingKind.Conversation) {
+    const { platform, repository } = conversationConfigSchema.parse(config);
+    return `${BindingKind.Conversation}:${platform}:${repository}`;
   }
   if (kind !== BindingKind.Storage)
     throw new Error(`Unknown binding kind: ${kind}`);

@@ -86,7 +86,7 @@ function factsHarness(
   ) {
     tx.database
       .prepare(
-        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, intent, tags, tasks, change, reason, actor, created_at) VALUES (?, ?, ?, 'name', 'requirement', 'criterion', '[]', ?, ?, ?, '[]', '{}', 'reason', ?, ?)",
+        "INSERT INTO mission_node_revision (node_id, revision, filename, name, requirement, criterion, verifications, bindings, intent, tags, external_links, tasks, change, reason, actor, created_at) VALUES (?, ?, ?, 'name', 'requirement', 'criterion', '[]', ?, ?, ?, '[]', '[]', '{}', 'reason', ?, ?)",
       )
       .run(
         nodeId,

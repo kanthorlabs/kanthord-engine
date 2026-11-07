@@ -10,7 +10,7 @@ import {
   StoreName,
 } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
-import { isString } from "../kernel/values.ts";
+import { isObject, isString } from "../kernel/values.ts";
 import {
   CLEANUP_BATCH_ROWS,
   CLEANUP_SERVICES,
@@ -109,6 +109,25 @@ export const BindingKind = {
   Repository: "repository",
   Worker: "worker",
   Storage: "storage",
+  Conversation: "conversation",
+} as const;
+export const ConversationPlatform = {
+  GitHub: "github",
+} as const;
+export type ConversationPlatform =
+  (typeof ConversationPlatform)[keyof typeof ConversationPlatform];
+export const LINK_TRUST_ACTORS_MAX = 32;
+export const GITHUB_ACTOR_ID_PATTERN = /^[1-9][0-9]{0,15}$/;
+export const CONVERSATION_REPOSITORY_PATTERN = /^[^/\s:]+\/[^/\s:]+$/;
+export const LinkTrustField = {
+  ActorIds: "actor_ids",
+} as const;
+export const LinkTrustReason = {
+  TypeInvalid: "type_invalid",
+  TooMany: "too_many",
+  Duplicate: "duplicate",
+  IdInvalid: "id_invalid",
+  PlatformUnsupported: "platform_unsupported",
 } as const;
 export const GitHubAction = {
   PullRequest: "pull_request",
@@ -151,6 +170,7 @@ export const ProjectErrorCode = {
   RepositoryCredentialRequired:
     "project.bindings.repository.credential_required",
   RepositoryActionUnsupported: "project.bindings.repository.action_unsupported",
+  LinkTrustInvalid: "project.bindings.link_trust_invalid",
   EnvironmentSecretInvalid:
     "project.bindings.repository.environment_secret_invalid",
   WorkerAgentUnknown: "project.bindings.worker.agent_unknown",
@@ -252,6 +272,18 @@ export type InstructionFileOf = (
 export const ENVIRONMENT_SECRET_VARIABLE = /^[A-Z_][A-Z0-9_]*$/;
 export const ENVIRONMENT_SECRETS_MAX = 16;
 
+export const linkTrustSchema = z
+  .unknown()
+  .refine(
+    (value) =>
+      !isObject(value) ||
+      Array.isArray(value) ||
+      Object.keys(value).every((key) => key === LinkTrustField.ActorIds),
+    { message: "link_trust holds the key actor_ids only." },
+  );
+export const replyPolicySchema = z.strictObject({
+  follows: z.strictObject({ type: z.literal(FollowsType.AssessmentPassed) }),
+});
 export const repositoryConfigSchema = z.strictObject({
   available: z.boolean(),
   platform: z.enum(RepositoryPlatform),
@@ -286,7 +318,18 @@ export const repositoryConfigSchema = z.strictObject({
   prompts: bindingPromptsSchema.optional(),
   environment: environmentSchema.optional(),
   environment_secrets: z.record(z.string(), z.string().min(1)).optional(),
+  link_trust: linkTrustSchema.optional(),
 });
+export const conversationConfigSchema = z.discriminatedUnion("platform", [
+  z.strictObject({
+    available: z.boolean(),
+    platform: z.literal(ConversationPlatform.GitHub),
+    repository: z.string().regex(CONVERSATION_REPOSITORY_PATTERN),
+    credential: z.string().min(1),
+    reply_policy: replyPolicySchema.optional(),
+    link_trust: linkTrustSchema.optional(),
+  }),
+]);
 export const WorkerPlacement = {
   Server: "server",
   Container: "container",
@@ -384,6 +427,10 @@ export const bindingEditSchema = z.discriminatedUnion("kind", [
     kind: z.literal(BindingKind.Storage),
     config: storageConfigSchema,
   }),
+  z.strictObject({
+    kind: z.literal(BindingKind.Conversation),
+    config: conversationConfigSchema,
+  }),
 ]);
 export const bindingSchema = z.discriminatedUnion("kind", [
   z.strictObject({
@@ -397,6 +444,10 @@ export const bindingSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal(BindingKind.Storage),
     config: storageConfigSchema,
+  }),
+  z.strictObject({
+    kind: z.literal(BindingKind.Conversation),
+    config: conversationConfigSchema,
   }),
 ]);
 export const WorkerField = {

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import { Intent, MissionErrorCode } from "./contract.ts";
+import { ImportFormat, Intent, MissionErrorCode } from "./contract.ts";
+import { normalizeImportSnapshot } from "./import.ts";
 import { type ParsedNodeFile, parsePlanFile } from "./parser.ts";
 
 const FILENAME = "add-password-reset.md";
@@ -11,6 +12,9 @@ const FOUNDATION_RUNTIME_NAME = "Provide a reproducible Node 24 runtime";
 const TODO_API_NAME = "Deliver a secure, maintainable TODO REST API";
 const FOUNDATION_FILENAME = "foundation.md";
 const UNKNOWN_WORK = "task";
+const MISSION_ID = "mission_00000000000000000000000000";
+const TEXT_MAX_BYTES = 32768;
+const EXTERNAL_LINKS_VALUE = 7;
 const CRITERION =
   "A valid token permits one reset and an expired token permits none.";
 const EXAMPLE = `---
@@ -53,6 +57,14 @@ Accept a reset request for an account and send one reset token.
 ## Criterion
 
 A valid token permits one reset.
+`;
+const LINKED_BINDINGS = `bindings:
+  - engine
+  - acme-issues
+external_links:
+  - kind: github_issue
+    resource_identity: conversation:github:acme/app
+    number: 117
 `;
 const FOUNDATION = `---
 intent: implement
@@ -176,6 +188,7 @@ test("parses the canonical node file and preserves every field", () => {
     id: "node_01ARZ3NDEKTSV4RRFFQ69G5FAV",
     intent: Intent.Implement,
     tags: [],
+    external_links: [],
     depends_on: [],
     bindings: ["api-repo"],
     verifications: ["npm run e2e", "npm run test:reset"],
@@ -302,6 +315,85 @@ test("the parser passes a nontext intent and a nonlist or nontext tags field as 
     ) as ParsedNodeFile;
     assert.deepEqual(result[field], value);
   }
+});
+
+const LINKED_EXAMPLE = EXAMPLE.replace(
+  "bindings:\n  - api-repo\n",
+  LINKED_BINDINGS,
+);
+
+test("a node file with external links parses and holds the link", () => {
+  const result = parsePlanFile(FILENAME, LINKED_EXAMPLE) as ParsedNodeFile;
+  assert.deepEqual(result.bindings, ["engine", "acme-issues"]);
+  assert.deepEqual(result.external_links, [
+    {
+      kind: "github_issue",
+      resource_identity: "conversation:github:acme/app",
+      number: 117,
+    },
+  ]);
+});
+
+test("a node file without the key holds an empty external_links list", () => {
+  const result = parsePlanFile(FILENAME, EXAMPLE) as ParsedNodeFile;
+  assert.deepEqual(result.external_links, []);
+});
+
+test("the parser passes a nonlist external_links field as read", () => {
+  const result = parsePlanFile(
+    FILENAME,
+    EXAMPLE.replace("tags: []", "tags: []\nexternal_links: 7"),
+  ) as ParsedNodeFile;
+  assert.equal(result.external_links, EXTERNAL_LINKS_VALUE);
+});
+
+for (const [label, links] of [
+  ["a link that is no object", "external_links:\n  - 117\n"],
+  [
+    "a link with an unknown field",
+    "external_links:\n  - kind: github_issue\n    resource_identity: conversation:github:acme/app\n    number: 117\n    title: Reset\n",
+  ],
+  ["a value that is no list", "external_links: 7\n"],
+] as const) {
+  test(`an import of a node file with ${label} lists mission.node.content_invalid`, () => {
+    const result = normalizeImportSnapshot(
+      {
+        format: ImportFormat.Markdown,
+        mission_id: MISSION_ID,
+        mission_version: 1,
+        reason: "Import plan",
+        files: [
+          {
+            filename: FILENAME,
+            content: EXAMPLE.replace("bindings:\n", `${links}bindings:\n`),
+          },
+        ],
+      },
+      MISSION_ID,
+      TEXT_MAX_BYTES,
+    );
+    assert.deepEqual(
+      result.violations.map(({ code, filename, details }) => ({
+        code,
+        filename,
+        details,
+      })),
+      [
+        {
+          code: MissionErrorCode.ContentInvalid,
+          filename: FILENAME,
+          details: { field: "external_links" },
+        },
+      ],
+    );
+  });
+}
+
+test("refuses a task file with external_links", () => {
+  rejectedTask(
+    TASK_EXAMPLE.replace("bindings: []", "external_links: []\nbindings: []"),
+    "unknown_key",
+  );
 });
 
 for (const key of ["name", "requirement", "criterion", "extra", "kind"]) {

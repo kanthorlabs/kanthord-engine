@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { humanActorSchema } from "../kernel/actor.ts";
 import { identitySchema } from "../kernel/identity.ts";
-import { timestamp } from "../kernel/json.ts";
+import { canonicalJSON, timestamp } from "../kernel/json.ts";
 import { isString } from "../kernel/values.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
@@ -456,6 +456,7 @@ export const MissionBindingKind = {
   Repository: "repository",
   Worker: "worker",
   Storage: "storage",
+  Conversation: "conversation",
 } as const;
 
 export const Intent = {
@@ -649,10 +650,33 @@ export const tagsSchema = z
   .refine((keys) => new Set(keys).size === keys.length, {
     message: "Tags must be unique.",
   });
+export const ExternalLinkKind = {
+  GitHubIssue: "github_issue",
+} as const;
+export const EXTERNAL_LINK_LIMIT = 10;
+const GITHUB_CONVERSATION_IDENTITY_PATTERN =
+  /^conversation:github:[^/\s:]+\/[^/\s:]+$/;
+export const externalLinkSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal(ExternalLinkKind.GitHubIssue),
+    resource_identity: z.string().regex(GITHUB_CONVERSATION_IDENTITY_PATTERN),
+    number: z.number().int().positive(),
+  }),
+]);
+export type ExternalLink = z.infer<typeof externalLinkSchema>;
+export const externalLinksSchema = z
+  .array(externalLinkSchema)
+  .max(EXTERNAL_LINK_LIMIT)
+  .refine(
+    (links) =>
+      new Set(links.map((link) => canonicalJSON(link))).size === links.length,
+    { message: "External links must be unique." },
+  );
 export const contentSchema = z.strictObject({
   ...planContentFields,
   intent: intentSchema,
   tags: tagsSchema.default([]),
+  external_links: externalLinksSchema.default([]),
   commit_type: commitTypeSchema.optional(),
 });
 export type Content = z.infer<typeof contentSchema>;
@@ -660,6 +684,7 @@ export const contentWriteSchema = z.strictObject({
   ...planContentFields,
   intent: z.unknown().optional(),
   tags: z.unknown().optional(),
+  external_links: z.unknown().optional(),
   commit_type: z.unknown().optional(),
 });
 export const taskBodySchema = z.strictObject({
@@ -823,6 +848,7 @@ export const importNodeEntrySchema = z.strictObject({
   intent: z.unknown(),
   ...planEntryFields,
   tags: z.unknown().optional(),
+  external_links: z.unknown().optional(),
   commit_type: z.unknown().optional(),
   depends_on: z.array(z.string().min(1)).optional(),
 });
@@ -846,6 +872,7 @@ export const exportEntrySchema = z.union([
     intent: intentSchema,
     ...planEntryFields,
     tags: z.array(tagSchema),
+    external_links: z.array(externalLinkSchema),
     commit_type: commitTypeSchema.optional(),
     depends_on: z.array(planFileNameSchema),
   }),

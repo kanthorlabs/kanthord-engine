@@ -7,6 +7,7 @@ import { guardEnvironmentMix } from "./environment-mix.ts";
 import {
   commitTypeField,
   resolveNodeBindings,
+  validateExternalLinkBindings,
   validateFilename,
   validateNodeContent,
   validatePlanContent,
@@ -15,6 +16,7 @@ import {
 import {
   type Content,
   type Edge,
+  type ExternalLink,
   type ImportEntry,
   ImportFormat,
   type ImportPreview,
@@ -70,10 +72,14 @@ type Locator = Pick<NormalizedEntry, "filename" | "id">;
 
 export type NormalizedEntry =
   | ParsedTaskFile
-  | (Omit<ParsedNodeFile, "intent" | "tags" | "commit_type"> &
+  | (Omit<
+      ParsedNodeFile,
+      "intent" | "tags" | "external_links" | "commit_type"
+    > &
       Pick<Content, "commit_type"> & {
         intent: Intent;
         tags: string[];
+        external_links: ExternalLink[];
       });
 
 export function isTaskEntry(
@@ -191,6 +197,9 @@ function normalizeEntry(entry: ImportEntry): NormalizedEntry {
     ...shared,
     intent: entry.intent as Intent,
     tags: Array.isArray(entry.tags) ? [...entry.tags] : [],
+    external_links: Array.isArray(entry.external_links)
+      ? [...entry.external_links]
+      : [],
     ...commitTypeField(entry.commit_type),
     depends_on: [...(entry.depends_on ?? [])],
   };
@@ -412,6 +421,7 @@ function resolveBindings(
       intent,
       entry.bindings,
     );
+    validateExternalLinkBindings(entry.external_links, named);
     guardEnvironmentMix(
       tx,
       { bindings, environments },
@@ -548,6 +558,7 @@ function entryChanged(
     bindings: item.binding_ids,
     intent: entry.intent as Intent,
     tags: entry.tags,
+    external_links: entry.external_links,
     ...commitTypeField(entry.commit_type),
   };
   return (

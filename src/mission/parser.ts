@@ -28,6 +28,7 @@ const FIELD = {
   Node: "node",
   DependsOn: "depends_on",
   Tags: "tags",
+  ExternalLinks: "external_links",
   CommitType: "commit_type",
   Bindings: "bindings",
   Verifications: "verifications",
@@ -37,6 +38,7 @@ const NODE_FILE_FIELDS: readonly string[] = [
   FIELD.Intent,
   FIELD.DependsOn,
   FIELD.Tags,
+  FIELD.ExternalLinks,
   FIELD.CommitType,
   FIELD.Bindings,
   FIELD.Verifications,
@@ -79,6 +81,7 @@ interface ParsedPlanContent {
 export interface ParsedNodeFile extends ParsedPlanContent {
   intent: unknown;
   tags: unknown;
+  external_links?: unknown;
   commit_type?: unknown;
   depends_on: string[];
 }
@@ -182,11 +185,13 @@ function fields(
     return { ...shared, node: node as string };
   }
   const tags = mapping[FIELD.Tags];
+  const externalLinks = mapping[FIELD.ExternalLinks];
   const commitType = mapping[FIELD.CommitType];
   return {
     ...shared,
     intent: mapping[FIELD.Intent],
     tags: tags === undefined ? [] : tags,
+    external_links: externalLinks === undefined ? [] : externalLinks,
     ...(commitType === undefined ? {} : { commit_type: commitType }),
     depends_on: stringList(filename, mapping[FIELD.DependsOn], true),
   };

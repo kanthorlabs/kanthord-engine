@@ -20,6 +20,7 @@ export function revisionFromRow(tx: Transaction, row: RevisionRow): Revision {
       bindings: JSON.parse(row.bindings),
       intent: row.intent,
       tags: JSON.parse(row.tags),
+      external_links: JSON.parse(row.external_links),
       ...commitTypeField(row.commit_type),
     },
     tasks: JSON.parse(row.tasks),

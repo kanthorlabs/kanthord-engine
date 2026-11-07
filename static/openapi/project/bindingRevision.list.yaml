@@ -121,6 +121,7 @@ components:
                   - repository
                   - worker
                   - storage
+                  - conversation
               resource_identity:
                 type: string
               revision:

@@ -178,6 +178,7 @@ components:
                     type: string
                 intent: {}
                 tags: {}
+                external_links: {}
                 commit_type: {}
               required:
                 - name
@@ -384,6 +385,29 @@ components:
                       type: string
                       maxLength: 64
                       pattern: ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$
+                  external_links:
+                    default: []
+                    maxItems: 10
+                    type: array
+                    items:
+                      oneOf:
+                        - type: object
+                          properties:
+                            kind:
+                              type: string
+                              const: github_issue
+                            resource_identity:
+                              type: string
+                              pattern: ^conversation:github:[^/\s:]+\/[^/\s:]+$
+                            number:
+                              type: integer
+                              exclusiveMinimum: 0
+                              maximum: 9007199254740991
+                          required:
+                            - kind
+                            - resource_identity
+                            - number
+                          additionalProperties: false
                   commit_type:
                     type: string
                     enum:
@@ -402,6 +426,7 @@ components:
                   - bindings
                   - intent
                   - tags
+                  - external_links
                 additionalProperties: false
               tasks:
                 type: array
@@ -722,6 +747,29 @@ components:
                       type: string
                       maxLength: 64
                       pattern: ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$
+                  external_links:
+                    default: []
+                    maxItems: 10
+                    type: array
+                    items:
+                      oneOf:
+                        - type: object
+                          properties:
+                            kind:
+                              type: string
+                              const: github_issue
+                            resource_identity:
+                              type: string
+                              pattern: ^conversation:github:[^/\s:]+\/[^/\s:]+$
+                            number:
+                              type: integer
+                              exclusiveMinimum: 0
+                              maximum: 9007199254740991
+                          required:
+                            - kind
+                            - resource_identity
+                            - number
+                          additionalProperties: false
                   commit_type:
                     type: string
                     enum:
@@ -740,6 +788,7 @@ components:
                   - bindings
                   - intent
                   - tags
+                  - external_links
                 additionalProperties: false
               tasks:
                 type: array

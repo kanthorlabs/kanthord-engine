@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   type Intent,
@@ -43,6 +44,7 @@ export interface RevisionRow {
   bindings: string;
   intent: Intent;
   tags: string;
+  external_links: string;
   commit_type: string | null;
   tasks: string;
   change: string;
@@ -392,9 +394,9 @@ export function insertRevision(tx: Transaction, revision: Revision): void {
     .prepare(
       `INSERT INTO mission_node_revision
     (node_id, revision, filename, name, requirement, criterion, verifications,
-     bindings, intent, tags, commit_type, tasks, change, reason, actor,
-     created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     bindings, intent, tags, external_links, commit_type, tasks, change, reason,
+     actor, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       revision.node_id,
@@ -407,6 +409,7 @@ export function insertRevision(tx: Transaction, revision: Revision): void {
       JSON.stringify(revision.content.bindings),
       revision.content.intent,
       JSON.stringify(revision.content.tags),
+      canonicalJSON(revision.content.external_links),
       revision.content.commit_type ?? null,
       JSON.stringify(revision.tasks),
       JSON.stringify(revision.change),

@@ -280,6 +280,7 @@ components:
                   additionalProperties:
                     type: string
                     minLength: 1
+                link_trust: {}
               required:
                 - available
                 - platform

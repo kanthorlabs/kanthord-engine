@@ -6,6 +6,7 @@ import { isCommitSubject } from "../kernel/commit-message.ts";
 import {
   commitTypeSchema,
   type Content,
+  externalLinksSchema,
   Intent,
   intentSchema,
   MissionBindingKind,
@@ -23,6 +24,7 @@ export const ContentField = {
   Bindings: "bindings",
   Intent: "intent",
   Tags: "tags",
+  ExternalLinks: "external_links",
   CommitType: "commit_type",
 } as const;
 export const CONTENT_FIELDS = Object.values(ContentField);
@@ -63,6 +65,10 @@ const bindingRules: Record<Intent, Record<BindingKind, Range>> = {
       min: NO_BINDINGS,
       max: UNBOUNDED_BINDINGS,
     },
+    [MissionBindingKind.Conversation]: {
+      min: NO_BINDINGS,
+      max: UNBOUNDED_BINDINGS,
+    },
   },
   [Intent.Examine]: {
     [MissionBindingKind.Repository]: {
@@ -71,6 +77,10 @@ const bindingRules: Record<Intent, Record<BindingKind, Range>> = {
     },
     [MissionBindingKind.Worker]: { min: NO_BINDINGS, max: NO_BINDINGS },
     [MissionBindingKind.Storage]: {
+      min: NO_BINDINGS,
+      max: UNBOUNDED_BINDINGS,
+    },
+    [MissionBindingKind.Conversation]: {
       min: NO_BINDINGS,
       max: UNBOUNDED_BINDINGS,
     },
@@ -128,6 +138,12 @@ export function validateNodeContent(
   const tags = input[Field.Tags];
   if (tags !== undefined && !tagsSchema.safeParse(tags).success)
     invalidContent(Field.Tags);
+  const externalLinks = input[Field.ExternalLinks];
+  if (
+    externalLinks !== undefined &&
+    !externalLinksSchema.safeParse(externalLinks).success
+  )
+    invalidContent(Field.ExternalLinks);
   const commitType = input[Field.CommitType];
   if (
     commitType !== undefined &&
@@ -208,6 +224,18 @@ export function bindingKind(resolved: ResolvedBinding): BindingKind {
   return prefix as BindingKind;
 }
 
+export function validateExternalLinkBindings(
+  externalLinks: unknown,
+  resolved: ResolvedBinding[],
+): void {
+  const links = externalLinksSchema.parse(externalLinks ?? []);
+  const identities = new Set(
+    resolved.map((binding) => binding.resource_identity),
+  );
+  if (links.some((link) => !identities.has(link.resource_identity)))
+    invalidContent(Field.ExternalLinks);
+}
+
 export type BindingResolver = (
   tx: Transaction,
   projectId: string,
@@ -242,6 +270,7 @@ export function checkBindingRuleTable(
     [MissionBindingKind.Repository]: INITIAL_BINDING_COUNT,
     [MissionBindingKind.Worker]: INITIAL_BINDING_COUNT,
     [MissionBindingKind.Storage]: INITIAL_BINDING_COUNT,
+    [MissionBindingKind.Conversation]: INITIAL_BINDING_COUNT,
   };
   for (
     let index = LOOP_START, count = resolved.length;

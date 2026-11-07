@@ -32,6 +32,7 @@ import {
   edgeSchema,
   type ExportAnswer,
   exportAnswerSchema,
+  ExternalLinkKind,
   type ImportApply,
   type ImportEntry,
   ImportFormat,
@@ -487,9 +488,9 @@ function insertRevision(
     .prepare(
       `INSERT INTO mission_node_revision
        (node_id, revision, filename, name, requirement, criterion,
-        verifications, bindings, intent, tags, tasks, change, reason, actor,
-        created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]', ?, ?, ?, ?)`,
+        verifications, bindings, intent, tags, external_links, tasks, change,
+        reason, actor, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]', '[]', ?, ?, ?, ?)`,
     )
     .run(
       nodeId,
@@ -812,6 +813,18 @@ const THREE_COMMITS = 3;
 const THREE_REVISIONS = 3;
 const REPOSITORY_NAME = "api-repo";
 const STORAGE_NAME = "bucket";
+const CONVERSATION_NAME = "issues";
+const CONVERSATION_BINDING_ID = "binding_00000000000000000000000008";
+const CONVERSATION_IDENTITY = "conversation:github:acme/app";
+const OTHER_CONVERSATION_IDENTITY = "conversation:github:acme/other";
+const ISSUE_NUMBER = 117;
+const SECOND_ISSUE_NUMBER = 118;
+const GITHUB_ISSUE = {
+  kind: ExternalLinkKind.GitHubIssue,
+  resource_identity: CONVERSATION_IDENTITY,
+  number: ISSUE_NUMBER,
+};
+const SECOND_GITHUB_ISSUE = { ...GITHUB_ISSUE, number: SECOND_ISSUE_NUMBER };
 const WORKER_NAME = "worker";
 const UNKNOWN_NAME = "unknown";
 const REASON = "Create planned work";
@@ -846,6 +859,13 @@ const bindingMap = new Map([
   [
     WORKER_NAME,
     { binding_id: UNKNOWN_BINDING_ID, resource_identity: "worker:kanthord:w" },
+  ],
+  [
+    CONVERSATION_NAME,
+    {
+      binding_id: CONVERSATION_BINDING_ID,
+      resource_identity: CONVERSATION_IDENTITY,
+    },
   ],
 ]);
 
@@ -1086,6 +1106,7 @@ test("node.create of an examine node stores human attribution, pins, revision on
   assert.deepEqual(revision.content, {
     ...body.content,
     bindings: [OTHER_BINDING_ID],
+    external_links: [],
   });
   assert.deepEqual(revision.change, {
     write: RevisionWrite.NodeCreate,
@@ -1669,11 +1690,11 @@ test("node list filters intent on the pinned revision while an attempt is open",
       .prepare(
         `INSERT INTO mission_node_revision
          (node_id, revision, filename, name, requirement, criterion,
-          verifications, bindings, intent, tags, tasks, change, reason,
-          actor, created_at)
+          verifications, bindings, intent, tags, external_links, tasks, change,
+          reason, actor, created_at)
          SELECT node_id, ?, filename, name, requirement, criterion,
-          verifications, bindings, ?, tags, tasks, change, reason,
-          actor, created_at
+          verifications, bindings, ?, tags, external_links, tasks, change,
+          reason, actor, created_at
          FROM mission_node_revision WHERE node_id = ? AND revision = ?`,
       )
       .run(NEXT_REVISION, Intent.Implement, nodeId, FIRST_REVISION);
@@ -2416,6 +2437,7 @@ function updateBody(f: TaskFixture, id: string): NodeUpdate {
         bindings: JSON.parse(revision.bindings),
         intent: revision.intent,
         tags: JSON.parse(revision.tags),
+        external_links: JSON.parse(revision.external_links),
       },
       tasks: JSON.parse(revision.tasks),
       expected_revision: revision.revision,
@@ -2733,7 +2755,9 @@ test("node.update of an examine node lists only changed content fields in canoni
     previous_revision: FIRST_REVISION,
     changed_fields: CONTENT_FIELDS.filter(
       (field) =>
-        field !== ContentField.Filename && field !== ContentField.Intent,
+        field !== ContentField.Filename &&
+        field !== ContentField.Intent &&
+        field !== ContentField.ExternalLinks,
     ),
     tasks: [],
   });
@@ -2947,6 +2971,129 @@ test("a node update keeps the pinned revision of the open attempt, and the node 
   assert.equal(f.read(id).pinned_revision, null);
 });
 
+function linkedBody(f: ReturnType<typeof nodeFixture>, links: unknown[]) {
+  const body = f.body();
+  return {
+    ...body,
+    content: {
+      ...body.content,
+      bindings: [CONVERSATION_BINDING_ID],
+      external_links: links,
+    },
+  } as NodeCreate;
+}
+
+test("node create stores the external links of a node and node get answers them", (t) => {
+  const f = nodeFixture(t);
+  const result = f.create(linkedBody(f, [GITHUB_ISSUE, SECOND_GITHUB_ISSUE]));
+  const revision = result.revisions[FIRST_ELEMENT_INDEX]!;
+  assert.deepEqual(revision.content.external_links, [
+    GITHUB_ISSUE,
+    SECOND_GITHUB_ISSUE,
+  ]);
+  assert.deepEqual(f.read(revision.node_id).content.external_links, [
+    GITHUB_ISSUE,
+    SECOND_GITHUB_ISSUE,
+  ]);
+  const stored = f.store.transaction((tx) =>
+    readCurrentRevision(tx, revision.node_id),
+  )!;
+  assert.deepEqual(JSON.parse(stored.external_links), [
+    GITHUB_ISSUE,
+    SECOND_GITHUB_ISSUE,
+  ]);
+});
+
+test("node create reads an absent external links field as an empty list", (t) => {
+  const f = nodeFixture(t);
+  const id = f.examine();
+  assert.deepEqual(f.read(id).content.external_links, []);
+});
+
+test("node create refuses a link with no binding of its resource, a duplicate link and a link that names another conversation", (t) => {
+  const f = nodeFixture(t);
+  const refuse = (body: NodeCreate) =>
+    f.refuses(
+      body,
+      MissionErrorCode.ContentInvalid,
+      { field: ContentField.ExternalLinks },
+      HttpStatus.BadRequest,
+    );
+  const body = linkedBody(f, [GITHUB_ISSUE]);
+  refuse({ ...body, content: { ...body.content, bindings: [] } });
+  refuse({
+    ...body,
+    content: { ...body.content, bindings: [BINDING_ID] },
+  });
+  refuse(
+    linkedBody(f, [
+      { ...GITHUB_ISSUE, resource_identity: OTHER_CONVERSATION_IDENTITY },
+    ]),
+  );
+  refuse(linkedBody(f, [GITHUB_ISSUE, { ...GITHUB_ISSUE }]));
+  refuse(linkedBody(f, GITHUB_ISSUE as unknown as unknown[]));
+  refuse(linkedBody(f, [{ ...GITHUB_ISSUE, number: 0 }]));
+});
+
+test("node update that adds a link writes the next revision and one that reorders two links writes a revision", (t) => {
+  const f = nodeFixture(t);
+  const id = f.create(linkedBody(f, [GITHUB_ISSUE])).revisions[
+    FIRST_ELEMENT_INDEX
+  ]!.node_id;
+  const edit = (links: unknown[], expected: number) => {
+    const body = updateBody(f, id);
+    return f.update(id, {
+      ...body,
+      expected_revision: expected,
+      content: {
+        ...body.content,
+        bindings: [CONVERSATION_BINDING_ID],
+        external_links: links,
+      },
+    } as NodeUpdate);
+  };
+  const added = edit([GITHUB_ISSUE, SECOND_GITHUB_ISSUE], FIRST_REVISION);
+  const addedRevision = added.revisions[FIRST_ELEMENT_INDEX]!;
+  assert.equal(addedRevision.revision, NEXT_REVISION);
+  assert.deepEqual(addedRevision.change.changed_fields, [
+    ContentField.ExternalLinks,
+  ]);
+  const reordered = edit([SECOND_GITHUB_ISSUE, GITHUB_ISSUE], NEXT_REVISION);
+  const reorderedRevision = reordered.revisions[FIRST_ELEMENT_INDEX]!;
+  assert.equal(reorderedRevision.revision, THIRD_REVISION);
+  assert.deepEqual(reorderedRevision.change.changed_fields, [
+    ContentField.ExternalLinks,
+  ]);
+  assert.deepEqual(f.read(id).content.external_links, [
+    SECOND_GITHUB_ISSUE,
+    GITHUB_ISSUE,
+  ]);
+  assert.deepEqual(
+    edit([SECOND_GITHUB_ISSUE, GITHUB_ISSUE], THIRD_REVISION).revisions,
+    [],
+  );
+});
+
+test("node update refuses a duplicate link and a link with no binding with mission.node.content_invalid", (t) => {
+  const f = nodeFixture(t);
+  const id = f.create(linkedBody(f, [GITHUB_ISSUE])).revisions[
+    FIRST_ELEMENT_INDEX
+  ]!.node_id;
+  const body = updateBody(f, id);
+  for (const content of [
+    { ...body.content, external_links: [GITHUB_ISSUE, { ...GITHUB_ISSUE }] },
+    { ...body.content, bindings: [], external_links: [GITHUB_ISSUE] },
+  ])
+    updateRefuses(
+      f,
+      id,
+      { ...body, content } as NodeUpdate,
+      MissionErrorCode.ContentInvalid,
+      { field: ContentField.ExternalLinks },
+      HttpStatus.BadRequest,
+    );
+});
+
 for (const [label, field, value] of [
   ["an unknown intent", ContentField.Intent, "build"],
   ["a nonlist tags field", ContentField.Tags, "x"],
@@ -3158,6 +3305,7 @@ test("criterion.set no-op preserves mission and revision; changed criterion pres
     ...original.content,
     bindings: [BINDING_ID],
     criterion: "new criterion",
+    external_links: [],
   });
   assert.deepEqual(revision.tasks, []);
 });
@@ -5529,6 +5677,7 @@ test("serializePlanFile round-trips YAML-special verification strings", () => {
         id: UNKNOWN_NODE_ID,
         intent: Intent.Implement,
         tags: [],
+        external_links: [],
         depends_on: [],
         bindings: [REPOSITORY_NAME],
         verifications: ["echo key: value", "echo #hash", 'echo "quoted"'],
@@ -5684,6 +5833,7 @@ test("mission.node.rebind declares a human write and advances a pin without chan
     bindings: [NEXT_BINDING_ID],
     intent: Intent.Implement,
     tags: ["platform.macos"],
+    external_links: [],
   });
   assert.deepEqual(revision.actor, {
     kind: ActorKind.Human,

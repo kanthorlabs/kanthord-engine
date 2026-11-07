@@ -348,6 +348,7 @@ components:
                         additionalProperties:
                           type: string
                           minLength: 1
+                      link_trust: {}
                     required:
                       - available
                       - platform
@@ -486,6 +487,52 @@ components:
                       - prefix
                       - credential
                     additionalProperties: false
+                required:
+                  - kind
+                  - config
+                additionalProperties: false
+              - type: object
+                properties:
+                  kind:
+                    type: string
+                    const: conversation
+                  config:
+                    oneOf:
+                      - type: object
+                        properties:
+                          available:
+                            type: boolean
+                          platform:
+                            type: string
+                            const: github
+                          repository:
+                            type: string
+                            pattern: ^[^/\s:]+\/[^/\s:]+$
+                          credential:
+                            type: string
+                            minLength: 1
+                          reply_policy:
+                            type: object
+                            properties:
+                              follows:
+                                type: object
+                                properties:
+                                  type:
+                                    type: string
+                                    const: assessment_passed
+                                required:
+                                  - type
+                                additionalProperties: false
+                            required:
+                              - follows
+                            additionalProperties: false
+                          link_trust: {}
+                        required:
+                          - available
+                          - platform
+                          - repository
+                          - credential
+                        additionalProperties: false
                 required:
                   - kind
                   - config
@@ -736,6 +783,7 @@ components:
                             additionalProperties:
                               type: string
                               minLength: 1
+                          link_trust: {}
                         required:
                           - available
                           - platform
@@ -870,6 +918,52 @@ components:
                       - kind
                       - config
                     additionalProperties: false
+                  - type: object
+                    properties:
+                      kind:
+                        type: string
+                        const: conversation
+                      config:
+                        oneOf:
+                          - type: object
+                            properties:
+                              available:
+                                type: boolean
+                              platform:
+                                type: string
+                                const: github
+                              repository:
+                                type: string
+                                pattern: ^[^/\s:]+\/[^/\s:]+$
+                              credential:
+                                type: string
+                                minLength: 1
+                              reply_policy:
+                                type: object
+                                properties:
+                                  follows:
+                                    type: object
+                                    properties:
+                                      type:
+                                        type: string
+                                        const: assessment_passed
+                                    required:
+                                      - type
+                                    additionalProperties: false
+                                required:
+                                  - follows
+                                additionalProperties: false
+                              link_trust: {}
+                            required:
+                              - available
+                              - platform
+                              - repository
+                              - credential
+                            additionalProperties: false
+                    required:
+                      - kind
+                      - config
+                    additionalProperties: false
           required:
             - version
             - bindings
@@ -907,6 +1001,7 @@ components:
                   - repository
                   - worker
                   - storage
+                  - conversation
               resource_identity:
                 type: string
               revision:
