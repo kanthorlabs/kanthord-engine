@@ -750,6 +750,25 @@ test("a request evidence answers human_landing only for a merge push with a chan
   assert.equal(h.evidence(pullRequestId).facts.human_landing, false);
 });
 
+test("a request evidence answers the link_trust of the repository binding revision of the frozen action", (t) => {
+  const h = actionHarness(t);
+  const pullRequestId = h.request();
+  const revisionOf = h.dependencies.bindings.getBindingRevision;
+  assert.deepEqual(h.evidence(pullRequestId).facts.link_trust, {
+    actor_ids: [],
+  });
+  h.dependencies.bindings.getBindingRevision = (tx, id) => {
+    const revision = revisionOf(tx, id);
+    return revision === null || id !== h.repositoryId
+      ? revision
+      : { ...revision, link_trust: { actor_ids: TRUSTED_ACTOR_IDS } };
+  };
+  assert.deepEqual(h.evidence(pullRequestId).facts.link_trust, {
+    actor_ids: TRUSTED_ACTOR_IDS,
+  });
+});
+
+const TRUSTED_ACTOR_IDS = ["9", "10"];
 const SERVICE_MERGE_NUMBER = 42;
 const serviceMergePullRequest = {
   kind: PlatformAddressKind.PullRequest,

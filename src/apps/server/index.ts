@@ -25,6 +25,7 @@ import {
   SchedulerService,
 } from "../../scheduler/index.ts";
 import {
+  type AgentSelection,
   SCHEDULER_SERVICE_NAME,
   type WorkQueue,
 } from "../../scheduler/contract.ts";
@@ -58,7 +59,6 @@ import {
   projectOperations,
   type RepositoryConnector,
   type RepositoryFiles,
-  RepositoryPlatform,
 } from "../../project/contract.ts";
 import {
   type PoolPlacement,
@@ -145,6 +145,7 @@ import {
   WorkerService,
 } from "../../worker/index.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
+import { missionEventDecoder } from "./event-decoder.ts";
 import { ThreadDriver } from "./thread-driver.ts";
 import { ContainerDriver } from "./container-driver.ts";
 import { EnvironmentImages } from "./environment-image.ts";
@@ -173,7 +174,6 @@ import { loadPi } from "../../agent/pi.ts";
 import { PromptConsumer } from "../../agent/prompt-render.ts";
 import {
   checkServerRepositoryTools,
-  decodeGitHubEvent,
   type GitWriter,
   type HostKeySources,
   platformImplementations,
@@ -211,6 +211,18 @@ const TRACE_ID_BYTES = 16;
 const SPAN_ID_BYTES = 8;
 const STDERR_DESCRIPTOR = 2;
 const STOP_WATCHDOG_MS = 10000;
+
+function selectionsByHolder(
+  selections: readonly AgentSelection[],
+  holderOf: (credential: string) => string,
+): Array<[string, AgentSelection[]]> {
+  const groups = new Map<string, AgentSelection[]>();
+  for (const selection of selections) {
+    const holder = holderOf(selection.credential);
+    groups.set(holder, [...(groups.get(holder) ?? []), selection]);
+  }
+  return [...groups];
+}
 
 function resultOf<T>(result: OperationResult<T>): T {
   if (result.type === OperationResultType.Completed) return result.data;
@@ -428,6 +440,18 @@ export function composeServices(options: {
   const intakeClient = directClient(intakeOperations, invocation);
   const projectClient = directClient(projectOperations, invocation);
   const missionIdentity = mintServiceIdentity(MISSION_SERVICE_NAME);
+  const pinnedHolderOf = (
+    tx: Transaction,
+    runtimeIdentity: string,
+    executionId: string,
+    credential: string,
+  ) =>
+    custody.pinnedHolderOf(tx, executionId, credential) ??
+    custody.copyHolderOf(
+      tx,
+      credential,
+      worker.claimantHolder(tx, runtimeIdentity),
+    );
   const scheduler: SchedulerService = new SchedulerService({
     config: options.config.scheduler,
     store: options.store,
@@ -482,20 +506,33 @@ export function composeServices(options: {
       resolve: (tx, workerBindingId, pins) =>
         worker.agentSelectionsAt(tx, workerBindingId, pins),
       providerFailure: (tx, claimant, selections, code, executionId, now) =>
-        agent.recordProviderFailure(
-          tx,
-          selections,
-          worker.claimantHolder(tx, claimant.runtime_identity),
-          code,
-          executionId,
-          now,
+        selectionsByHolder(selections, (credential) =>
+          pinnedHolderOf(
+            tx,
+            claimant.runtime_identity,
+            executionId,
+            credential,
+          ),
+        ).flatMap(([holder, group]) =>
+          agent.recordProviderFailure(
+            tx,
+            group,
+            holder,
+            code,
+            executionId,
+            now,
+          ),
         ),
       success: (tx, claimant, selections, executionId) =>
-        agent.recordSuccess(
-          tx,
-          selections,
-          worker.claimantHolder(tx, claimant.runtime_identity),
-          executionId,
+        selectionsByHolder(selections, (credential) =>
+          pinnedHolderOf(
+            tx,
+            claimant.runtime_identity,
+            executionId,
+            credential,
+          ),
+        ).flatMap(([holder, group]) =>
+          agent.recordSuccess(tx, group, holder, executionId),
         ),
       selected: (selections, executionId) => {
         agent.recordSelection(selections, executionId);
@@ -603,8 +640,12 @@ export function composeServices(options: {
           .map(({ agent_name }) => agent_name),
       ),
     instanceKeys: {
-      keyOf: (tx, name) => worker.instanceKeyOf(tx, name),
+      keyOf: (tx, name) =>
+        worker.instanceKeyOf(tx, name) ?? worker.machineKeyOf(tx, name),
       nameOf: (tx, instanceId) => worker.instanceNameOf(tx, instanceId),
+      machineOf: (tx, instanceName) => worker.machineOf(tx, instanceName),
+      instancesOfMachine: (tx, machine) =>
+        worker.instancesOfMachine(tx, machine),
     },
     intakeServiceName: INTAKE_SERVICE_NAME,
     projectServiceName: PROJECT_SERVICE_NAME,
@@ -638,10 +679,16 @@ export function composeServices(options: {
       agent.enablementsDependentOnModel(tx, name, model),
     loadModelRuntime: options.loadModelRuntime ?? loadPi,
     instanceKeys: {
-      keyOf: (tx, name) => worker.instanceKeyOf(tx, name),
+      keyOf: (tx, name) =>
+        worker.instanceKeyOf(tx, name) ?? worker.machineKeyOf(tx, name),
       nameOf: (tx, instanceId) => worker.instanceNameOf(tx, instanceId),
+      machineOf: (tx, instanceName) => worker.machineOf(tx, instanceName),
+      instancesOfMachine: (tx, machine) =>
+        worker.instancesOfMachine(tx, machine),
     },
     instanceConnected: (holder) => worker.instanceConnected(holder),
+    connectedInstancesOf: (machine) =>
+      worker.connectedInstancesOf(machine).map(({ name }) => name),
     workChanged: (holder) => worker.raiseWorkVersion(holder),
   });
   const agent: AgentComponent = new AgentComponent({
@@ -770,6 +817,7 @@ export function composeServices(options: {
     custodyHandover: {
       handover: (...args) => custody.handover(...args),
       report: (...args) => custody.report(...args),
+      lease: (...args) => custody.lease(...args),
       sshSign: (...args) => custody.sshSign(...args),
       sshPublicKeyOf: (...args) => custody.sshPublicKeyOf(...args),
     },
@@ -845,6 +893,7 @@ export function composeServices(options: {
         custody.archiveHeld(tx, holder, now);
       },
       heldCopies: (tx, holder) => custody.heldCopies(tx, holder),
+      usedCopies: (tx, instanceName) => custody.usedCopies(tx, instanceName),
     },
     handoverRefreshWaitMs: options.handoverRefreshWaitMs,
     sessionReadWaitMs: SESSION_READ_WAIT_MS,
@@ -926,12 +975,7 @@ export function composeServices(options: {
         );
       },
     },
-    decoder: {
-      decode: ({ platform, resource, event, metadata }) =>
-        platform === RepositoryPlatform.GitHub
-          ? decodeGitHubEvent({ resource, event, metadata })
-          : null,
-    },
+    decoder: missionEventDecoder,
     intakeCheck: {
       check: async (context, evidenceId) =>
         resultOf(

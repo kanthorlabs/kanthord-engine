@@ -169,22 +169,24 @@ the code, the HTTP status and the `details` line with that identity. It never pr
 
 ## Instance copies
 
-A credential name holds one copy for each holder: `server` or a live [worker instance](worker.md) at the `worker` placement. A server instance, at the `server` or the `container` placement, holds no key and is no holder. Every copy of a name holds the same platform. A create of an existing name with another platform answers `409 credential.name.platform_conflict`.
-The server never opens an instance copy. It stores the copy as a sealed object to the X25519 key of the instance, and only the worker unit of that instance opens it.
+A credential name holds one copy for each holder: `server`, a live [worker machine](worker.md) or a live [worker instance](worker.md) at the `worker` placement. A server instance, at the `server` or the `container` placement, holds no key and is no holder. Every copy of a name holds the same platform. A create of an existing name with another platform answers `409 credential.name.platform_conflict`.
+The server never opens an instance copy or a machine copy. It stores the copy as a sealed object to the X25519 key of the instance or of the machine, and only the worker unit opens it.
+
+An instance with no own live copy of a name uses the copy of its machine. The copy holder of an instance for a name is the instance when the `(name, instance)` group holds a live revision, else the machine of the instance. A stale own copy, sealed to an ended key of the instance, does not fall back to the machine copy. An archive of the own copy returns the instance to the machine copy, and the archive stays final.
 
 `--holder <name>` on `create` and `rotate` selects the copy:
 
 - With the instance file `$XDG_CONFIG_HOME/kanthord/workers/<name>.yaml` on this host, the CLI seals locally. It exchanges the instance key for a worker token at the endpoint of the instance file, derives the public key from the private key of the file, and trusts no key that the server supplies. It sends `{ holder, sealed, sealed_to }` in place of `secret` under the worker token. The secret must be an `api_key` object within 32,768 bytes, else the CLI stops with `cli.llm.credential.secret_invalid` before any request. `rotate` first reads the platform of the copy under the worker token.
-- Without that file, the CLI sends the plaintext secret under the human token: `create` adds `holders: [<name>]` to the body, and `rotate` adds the query `holder`. The server seals the copy to the current key of the instance.
+- Without that file, the CLI sends the plaintext secret under the human token: `create` adds `holders: [<name>]` to the body, and `rotate` adds the query `holder`. The server seals the copy to the current key of the instance. A machine name takes the same path, and the server seals the copy to the current key of the machine.
 
-`--holder <name>` on `list`, `get`, `update-metadata`, `revoke` and `archive` maps to the query `holder`. Without it, `get`, `update-metadata`, `revoke` and `archive` act on the copy of `server`, and `list` lists every copy.
-A worker token reads and writes only the copies of its own instance; another holder answers `403 llm.credential.instance_forbidden`.
+`--holder <name>` on `list`, `get`, `update-metadata`, `revoke` and `archive` maps to the query `holder`. The name is an instance or a machine. Without it, `get`, `update-metadata`, `revoke` and `archive` act on the copy of `server`, and `list` lists every copy.
+A worker token reads the copies of its own instance and of its own machine. Without `holder`, a worker-token `get` answers the copy of the copy holder of the instance, and a worker-token `list` answers the copies that the instance uses: each own copy, and each machine copy of a name with no own copy. Each item holds `holder`. A worker-token `create` and `rotate` act only on the copy of the own instance, and `holder` must name it. Another holder, also the machine of the instance, answers `403 llm.credential.instance_forbidden`.
 `verify`, `provider check` and `model check` read only the copy of `server`. A name with no such copy answers `409 credential.credential.held_by_instance`.
 
 The instance checks its own copies, because the server holds no key of an instance copy. Two `worker` operations with no command serve that check:
 
-- `llm.credential.sealed`, `GET /api/llm/credential/:credential_name/sealed`, answers `{ name, platform, revision, metadata, sealed }` of the newest live revision of the copy of the instance of the token. A copy that is absent or sealed to an ended key answers `404 credential.credential.not_found`.
-- `llm.credential.report`, `POST /api/llm/credential/:credential_name/report`, takes `{ revision, status, capability, failure_reason, models }` and answers `204`. `revision` must be the newest live revision of the copy, else `409 credential.revision.conflict`. `failure_reason` is null only for `healthy` and is never `held_by_instance`, and `capability` is the capability of the platform, else `400 credential.input.invalid`. `models` holds at most 512 entries.
+- `llm.credential.sealed`, `GET /api/llm/credential/:credential_name/sealed`, answers `{ name, holder, platform, revision, metadata, sealed }` of the newest live revision of the copy of the copy holder of the instance of the token. A copy that is absent or sealed to an ended key answers `404 credential.credential.not_found`.
+- `llm.credential.report`, `POST /api/llm/credential/:credential_name/report`, takes `{ revision, status, capability, failure_reason, models }` and answers `204`. `revision` must be the newest live revision of the copy of the copy holder, else `409 credential.revision.conflict`. `failure_reason` is null only for `healthy` and is never `held_by_instance`, and `capability` is the capability of the platform, else `400 credential.input.invalid`. `models` holds at most 512 entries.
 
 `kanthord worker instance get` shows the last report of each copy in `credentials[].health`.
 
@@ -371,8 +373,8 @@ A failed or expired session stores nothing. The session holds no token; no
 answer exposes one. The login flow proves the OAuth record without an extra
 validation call.
 
-Optional `--holder` names the holder of the new copy: `server` or a live worker
-instance at the `worker` placement. It defaults to `server`. With an instance name, the
+Optional `--holder` names the holder of the new copy: `server`, a live worker
+machine or a live worker instance at the `worker` placement. It defaults to `server`. With an instance name, the
 [login of an instance](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/llm.impl.md#the-login-of-an-instance)
 runs the flow on that instance. The instance receives the session in its next
 work read, within 15 s, reports the address and the code, and seals the result to its own
@@ -380,9 +382,20 @@ key. The server stores only the sealed copy. An instance session uses
 `copy_code` mode for `anthropic-subscription` and `device` mode for
 `openai-codex` and `github-copilot`. `--mode browser` answers
 `400 credential.login.browser_unavailable`. An unknown instance answers
-`400 llm.credential.instance_unknown`. An instance with no current connection
+`400 llm.credential.holder_unknown`. An instance with no current connection
 answers `409 credential.login.instance_unavailable`. The instance reports
 through `llm.credential.login_report`, a `worker` operation with no command.
+With a machine name, a connected instance of the machine runs the session
+and seals the result to the key of the machine. The server picks that runner
+when the login starts: the connected instance of the machine with the newest
+heartbeat. A machine with no connected instance answers
+`409 credential.login.instance_unavailable`. The session record holds `holder`
+and `runner`. The work read of the runner lists the session, and each
+`login_sessions` item holds `holder`. The login raises the work version of the
+runner. Only the runner reports the session; a report of another instance
+answers `404 credential.login.not_found`. The `login-status` answer holds no
+`holder` and no `runner`. The name conflict, the archive refusal and the
+stale-key rule apply to the `(name, machine)` group.
 For an instance holder, the name conflict applies only to a copy that holds a
 live revision sealed to the current instance key. A copy sealed to an ended
 key takes the login, and the completion adds the next revision of that copy.
@@ -478,7 +491,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | ----- | -------------------------------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | 409   | `credential.login.value_not_awaited`         | The session does not await a code.                                                              | login-code                                                             |
 | 409   | `credential.login.pending`                   | Another login is pending for this platform and human.                                           | login                                                                  |
-| 409   | `credential.login.instance_unavailable`      | The `--holder` instance holds no current connection.                                            | login                                                                  |
+| 409   | `credential.login.instance_unavailable`      | The `--holder` instance, or no instance of the `--holder` machine, holds a current connection.  | login                                                                  |
 | 404   | `credential.login.not_found`                 | The login session does not exist.                                                               | login-code, login-status                                               |
 | 400   | `credential.login.mode_unsupported`          | The platform does not support the selected login mode.                                          | login                                                                  |
 | 400   | `credential.login.browser_unavailable`       | Browser mode is requested through a `Host` that is not a loopback name.                         | login                                                                  |
@@ -512,8 +525,8 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `credential.name.platform_conflict`          | Another copy of the name holds another platform. Details: `{ platform }`.                       | create, login                                                          |
 | 400   | `credential.sealed.invalid`                  | The sealed object fails its form or its budget, or `sealed_to` is not the current fingerprint.  | create, rotate                                                         |
 | 409   | `credential.credential.held_by_instance`     | The command needs the copy of `server`, and only an instance holds the name.                    | verify, provider check, model check                                    |
-| 400   | `llm.credential.instance_unknown`            | A holder names no live instance at the `worker` placement. A server instance is no holder.      | create, rotate, login                                                  |
-| 403   | `llm.credential.instance_forbidden`          | A worker token names a copy of another holder.                                                  | create, rotate, list, get                                              |
+| 400   | `llm.credential.holder_unknown`              | A holder names no live instance at the `worker` placement and no live machine.                  | create, rotate, login                                                  |
+| 403   | `llm.credential.instance_forbidden`          | A worker token names a holder that is not its instance or its machine, or writes another copy.  | create, rotate, list, get                                              |
 | local | `cli.llm.credential.secret_invalid`          | The local seal takes no `api_key` secret within 32,768 bytes.                                   | create, rotate                                                         |
 
 Errors contain no secret. Dependency refusals list dependents in `error.details`.

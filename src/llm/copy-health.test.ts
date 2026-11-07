@@ -38,6 +38,7 @@ import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const INSTANCE = "laptop";
 const OTHER_INSTANCE = "desktop";
+const MACHINE = "workstation";
 const CREDENTIAL_NAME = "team-openai";
 const BAD_KEY = { key: "bad-key" };
 const GOOD_KEY = { key: "good-key" };
@@ -88,12 +89,20 @@ async function pairOf(name: string): Promise<Pair> {
   };
 }
 
-async function fixture(t: TestContext) {
+async function fixture(
+  t: TestContext,
+  machines: ReadonlyMap<string, string> = new Map(),
+) {
   const pairs = new Map<string, Pair>();
-  for (const name of [INSTANCE, OTHER_INSTANCE])
+  for (const name of [INSTANCE, OTHER_INSTANCE, MACHINE])
     pairs.set(name, await pairOf(name));
   const instanceKeys = {
     keyOf: (_tx: unknown, name: string) => pairs.get(name)?.key ?? null,
+    machineOf: (_tx: unknown, name: string) => machines.get(name) ?? null,
+    instancesOfMachine: (_tx: unknown, machine: string) =>
+      [...machines]
+        .filter(([, value]) => value === machine)
+        .map(([name]) => name),
     nameOf: (_tx: unknown, instanceId: string) =>
       [...pairs.values()].find(({ id }) => id === instanceId)?.key.name ?? null,
   };
@@ -235,6 +244,8 @@ async function fixture(t: TestContext) {
     health,
     version: (holder = INSTANCE) =>
       server.component.credentialVersionOf(holder),
+    refreshed: (holder: string) =>
+      server.component.raiseCredentialVersion(holder),
     restart: () => {
       server = start();
     },
@@ -264,6 +275,7 @@ test("a bad key report shows unhealthy with the time of the report of the instan
     failure_reason: ResourceFailureReason.HeldByInstance,
     models: null,
     reported_at: null,
+    reported_by: null,
   });
   f.advance(REPORT_DELAY_MS);
   assert.equal(f.report(), null);
@@ -273,6 +285,7 @@ test("a bad key report shows unhealthy with the time of the report of the instan
     failure_reason: ResourceFailureReason.Unauthorized,
     models: null,
     reported_at: f.now(),
+    reported_by: INSTANCE,
   });
   assert.deepEqual(f.logs.at(-1), {
     credential_name: CREDENTIAL_NAME,
@@ -306,6 +319,7 @@ test("a server restart answers a new credential version and shows unknown until 
     failure_reason: null,
     models: [{ id: "gpt-5", owned_by: "openai", created: null }],
     reported_at: f.now(),
+    reported_by: INSTANCE,
   });
 });
 
@@ -458,4 +472,51 @@ test("the sealed read answers the copy of the instance of the token, which only 
   f.pairs.set(INSTANCE, { ...(await pairOf(INSTANCE)), id: pair.id });
   refuses(() => f.sealed(), HttpStatus.NotFound, Code.NotFound);
   refuses(() => f.report(), HttpStatus.NotFound, Code.NotFound);
+});
+
+const MACHINES = new Map([
+  [INSTANCE, MACHINE],
+  [OTHER_INSTANCE, MACHINE],
+]);
+
+test("a human write of a machine copy changes the credential version of each instance of the machine", async (t) => {
+  const f = await fixture(t, MACHINES);
+  const before = [f.version(INSTANCE), f.version(OTHER_INSTANCE)];
+  await f.create([MACHINE]);
+  assert.deepEqual(
+    [f.version(INSTANCE), f.version(OTHER_INSTANCE)],
+    before.map((version) => version + VERSION_STEP),
+  );
+  await f.rotate(MACHINE, FIRST_REVISION);
+  assert.deepEqual(
+    [f.version(INSTANCE), f.version(OTHER_INSTANCE)],
+    before.map((version) => version + VERSION_STEP + VERSION_STEP),
+  );
+  assert.equal(f.version(MACHINE), START_VERSION + VERSION_STEP + VERSION_STEP);
+});
+
+test("a refresh report of a machine copy changes the credential version of each instance of the machine", async (t) => {
+  const f = await fixture(t, MACHINES);
+  const before = [f.version(INSTANCE), f.version(OTHER_INSTANCE)];
+  f.refreshed(MACHINE);
+  assert.deepEqual(
+    [f.version(INSTANCE), f.version(OTHER_INSTANCE)],
+    before.map((version) => version + VERSION_STEP),
+  );
+  f.refreshed(INSTANCE);
+  assert.equal(f.version(INSTANCE), before[0]! + VERSION_STEP + VERSION_STEP);
+  assert.equal(f.version(OTHER_INSTANCE), before[1]! + VERSION_STEP);
+});
+
+test("a report of a machine copy holds the instance that reported it", async (t) => {
+  const f = await fixture(t, MACHINES);
+  await f.create([MACHINE]);
+  assert.equal(f.health(MACHINE).reported_by, null);
+  f.advance(REPORT_DELAY_MS);
+  assert.equal(f.report({}, OTHER_INSTANCE), null);
+  assert.deepEqual(
+    [f.health(MACHINE).reported_by, f.health(MACHINE).reported_at],
+    [OTHER_INSTANCE, f.now()],
+  );
+  assert.equal((f.sealed(INSTANCE) as { holder: string }).holder, MACHINE);
 });

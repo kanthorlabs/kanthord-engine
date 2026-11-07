@@ -298,6 +298,36 @@ Failure to read a published index or allowed fragment returns
 files. The liveness and OpenAPI routes are public. They skip the host check
 and stay subject to readiness, validation, and timeout checks.
 
+## Request log and CORS
+
+Each request writes one `Request finished` record at level `info`. The record
+holds these fields:
+
+| Field         | Value                                                                                                                                   |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `status`      | The status of the response. The status is `499` when the caller closed the request, as described below.                                 |
+| `wire_status` | The status that the server answers. The record holds the field only with `status: 499`. The value is `503`.                             |
+| `code`        | The `error.code` of the error body. The record holds the field only when the response is a failure.                                     |
+| `caller`      | The client identity or the human account name of the verified token. The record holds the field only when the request is authenticated. |
+| `latency`     | The time to answer, in milliseconds.                                                                                                    |
+
+The code `gateway.invocation.cancelled` has two causes. A client abort is a
+closed request or a cancel message of the parent port for the call. A server
+shutdown cancels the context of every open request. Only a client abort logs
+`status: 499` with `wire_status: 503`. A shutdown cancel logs `status: 503`.
+The answer on the wire is `503 gateway.invocation.cancelled` in both cases.
+Every other record has a `status` equal to the wire status and no
+`wire_status`.
+
+A preflight (`OPTIONS`) to a path that starts with `<base path>/api/` answers
+`204` with the CORS headers, whether or not the route exists. The answer
+carries `Access-Control-Max-Age: 600`. A preflight from an origin outside
+`gateway.allowed_origins` carries no `Access-Control-Allow-Origin`. A request
+after the preflight to an unknown route answers `404 gateway.routing.not_found`
+with the CORS headers. A preflight to a path outside `<base path>/api/` keeps
+its answer: `404 gateway.routing.not_found` when no route matches the
+requested method.
+
 ## Command scope
 
 The target Gateway command table holds the three commands above.

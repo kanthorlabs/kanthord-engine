@@ -221,7 +221,7 @@ test("a live worker instance signs in through a fake pi-ai copy_code flow, and t
 function refusedAsUnknownInstance(result: OperationResult<unknown>): void {
   assert.ok(result.type === OperationResultType.Failure);
   assert.equal(result.status, HttpStatus.BadRequest);
-  assert.equal(result.error.error.code, LlmErrorCode.InstanceUnknown);
+  assert.equal(result.error.error.code, LlmErrorCode.HolderUnknown);
 }
 
 test("a server instance is no credential holder and no instance login target", async (t) => {

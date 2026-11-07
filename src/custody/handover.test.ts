@@ -15,6 +15,7 @@ import {
   deriveHandoverKeys,
   deriveSshSignKeys,
   handoverAad,
+  type HandoverEnvelope,
   HandoverOpenError,
   openEnvelope,
   sealEnvelope,
@@ -31,16 +32,20 @@ import {
   SSH_SIGN_PLACEMENT_REFUSED,
 } from "./handover.ts";
 import {
+  CREDENTIAL_LEASE_MS,
   CREDENTIAL_SEAL_INFO,
+  CredentialLeaseHeld,
   type CredentialPlatformSet,
   CredentialRefreshInFlight,
   credentialSealAad,
+  CUSTODY_LEASE_INVALID,
   CUSTODY_SERVICE_NAME,
   type CustodyExecution,
   handoverPayloadSchema,
   HandoverPlacement,
   HolderRefusal,
   type InstanceKey,
+  leasePayloadSchema,
   LoginSessionMode,
   plainHandoverPayloadSchema,
   SecretShape,
@@ -49,6 +54,7 @@ import {
   sshSignAnswerSchema,
 } from "./contract.ts";
 import { CREDENTIAL_HELD_BY_INSTANCE } from "./secret.ts";
+import { piProviderId } from "../kernel/pi-provider.ts";
 import {
   type InstanceCopyKey,
   openSealedCopy,
@@ -81,6 +87,7 @@ const SECRET = Buffer.alloc(32, 9).toString("base64");
 const FIRST = { type: SecretShape.ApiKey, key: "private-first" };
 const SECOND = { type: SecretShape.ApiKey, key: "private-second" };
 const NOW = 1000;
+const NOT_RUNNING_CODE = "scheduler.execution.not_running";
 const REVISION_COUNT = 1;
 const TEST_PLATFORM = "key-platform";
 const OAUTH_PLATFORM = "oauth-platform";
@@ -161,6 +168,7 @@ function fixture(
   repositories: readonly string[] = [],
   instances: ReadonlyMap<string, InstancePair> = new Map(),
   oauthNames: readonly string[] = [],
+  machines: ReadonlyMap<string, string> = new Map(),
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
   stopAfter(t, () => store.close());
@@ -183,6 +191,20 @@ function fixture(
     resource_identity: "worker:kanthord:general",
     runtime_identity: createIdentity("worker_registration"),
     credentials: [],
+  };
+  const rivalRow: CustodyExecution = {
+    ...row,
+    execution_id: createIdentity("execution"),
+    runtime_identity: createIdentity("worker_registration"),
+    credentials: [],
+  };
+  const executions = [row, rivalRow];
+  const executionOf = (executionId: string) => {
+    const found = executions.find(
+      (value) => value.execution_id === executionId,
+    );
+    assert(found);
+    return found;
   };
   const identity = testMachineIdentity(
     {
@@ -207,6 +229,11 @@ function fixture(
     nodeBranch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     runtimeIdentity: row.runtime_identity,
     workerBindingId: row.worker_binding_id,
+  };
+  const rivalClaim: ExecutionClaim = {
+    ...claim,
+    executionId: rivalRow.execution_id,
+    runtimeIdentity: rivalRow.runtime_identity,
   };
   const bindings = new Map(
     repositories.map((credential) => [createIdentity("binding"), credential]),
@@ -251,21 +278,23 @@ function fixture(
     executions: {
       requireRunning: (tx, executionId, runtimeIdentity) => {
         assert(tx.database.isTransaction);
-        assert.equal(executionId, row.execution_id);
-        assert.equal(runtimeIdentity, row.runtime_identity);
+        const found = executionOf(executionId);
+        assert.equal(runtimeIdentity, found.runtime_identity);
         if (!running)
           throw new OperationError(
             HttpStatus.Conflict,
-            "scheduler.execution.not_running",
+            NOT_RUNNING_CODE,
             "Execution is not running.",
           );
-        return { ...row, credentials: [...row.credentials] };
+        return { ...found, credentials: [...found.credentials] };
       },
-      pinCredential: (_tx, _id, credentialId) => {
-        row.credentials.push(credentialId);
+      pinCredential: (_tx, executionId, credentialId) => {
+        executionOf(executionId).credentials.push(credentialId);
       },
       liveExecutionsPinning: (_tx, id) =>
-        row.credentials.includes(id) ? [row.execution_id] : [],
+        executions
+          .filter(({ credentials }) => credentials.includes(id))
+          .map(({ execution_id }) => execution_id),
     },
     authorization: {
       authorizeModelInference: () => {
@@ -318,6 +347,11 @@ function fixture(
       nameOf: (_tx, instanceId) =>
         [...instances.values()].find(({ id }) => id === instanceId)?.key.name ??
         null,
+      machineOf: (_tx, name) => machines.get(name) ?? null,
+      instancesOfMachine: (_tx, machine) =>
+        [...machines]
+          .filter(([, value]) => value === machine)
+          .map(([name]) => name),
     },
   });
   const credentialIds = names.map(
@@ -395,10 +429,25 @@ function fixture(
     store.transaction((tx) =>
       component.handover(tx, identity, claim, placement, bindingIds, NOW),
     );
-  const report = (envelope: ReturnType<typeof sealEnvelope>) =>
+  const report = (
+    envelope: ReturnType<typeof sealEnvelope>,
+    as: ExecutionClaim = claim,
+  ) =>
     store.transaction((tx) =>
-      component.report(tx, identity, claim, envelope, NOW),
+      component.report(tx, identity, as, envelope, NOW),
     );
+  const lease = (
+    credentialId: string,
+    as: ExecutionClaim = claim,
+    now: number = NOW,
+  ) =>
+    store.transaction((tx) =>
+      component.lease(tx, identity, as, credentialId, now),
+    );
+  const rivalAad = handoverAad(
+    rivalRow.execution_id,
+    rivalRow.runtime_identity,
+  );
   const signKeys = deriveSshSignKeys(SECRET);
   const sign = (
     request: unknown,
@@ -458,6 +507,10 @@ function fixture(
     aad,
     handover,
     report,
+    lease,
+    rivalRow,
+    rivalClaim,
+    rivalAad,
     sign,
     signKeys,
     publicKeyOf,
@@ -682,6 +735,7 @@ test("a worker placement handover answers the copy sealed to the instance key, p
   assert.ok(item && "sealed" in item);
   assert.equal(item.credential_id, copyId);
   assert.deepEqual([item.name, item.platform], ["anthro-1", TEST_PLATFORM]);
+  assert.equal(item.holder, relay.key.name);
   assert.deepEqual(f.row.credentials, [copyId]);
   const key = copyKeyOf(relay);
   const opened = await openSealedCopy(item, SecretShape.ApiKey, key);
@@ -1439,4 +1493,276 @@ test("a server placement handover of a revision with an in-flight refresh refuse
     ...ROTATED_SUBSCRIPTION,
   });
   assert.ok(f.row.credentials.includes(id));
+});
+
+const ONE_MS = 1;
+
+function leasePayloadOf(
+  f: ReturnType<typeof fixture>,
+  envelope: HandoverEnvelope,
+  aad: Buffer = f.aad,
+) {
+  return leasePayloadSchema.parse(openEnvelope(f.keys.handover, aad, envelope));
+}
+
+function leaseHeld(error: unknown): boolean {
+  return error instanceof CredentialLeaseHeld;
+}
+
+test("a lease of a pinned revision answers the stored value and expires_at at now plus the lease", (t) => {
+  const f = fixture(t);
+  f.handover();
+  assert.deepEqual(leasePayloadOf(f, f.lease(f.credentialId)), {
+    item: {
+      credential_id: f.credentialId,
+      provider_id: piProviderId(TEST_PLATFORM),
+      credential: FIRST,
+    },
+    expires_at: NOW + CREDENTIAL_LEASE_MS,
+  });
+});
+
+test("a lease of another execution answers lease_held until the first lease ends and a lease of the same execution renews", (t) => {
+  const f = fixture(t);
+  f.handover();
+  f.rivalRow.credentials.push(f.credentialId);
+  f.lease(f.credentialId);
+  assert.throws(() => f.lease(f.credentialId, f.rivalClaim), leaseHeld);
+  const renewedAt = NOW + CREDENTIAL_LEASE_MS - ONE_MS;
+  assert.equal(
+    leasePayloadOf(f, f.lease(f.credentialId, f.claim, renewedAt)).expires_at,
+    renewedAt + CREDENTIAL_LEASE_MS,
+  );
+  assert.throws(
+    () => f.lease(f.credentialId, f.rivalClaim, NOW + CREDENTIAL_LEASE_MS),
+    leaseHeld,
+  );
+});
+
+test("a lease during a check refresh of the revision answers lease_held", async (t) => {
+  const f = fixture(t, [], [], new Map(), [SUBSCRIPTION]);
+  const id = insertSubscription(f);
+  const refreshStore = f.store.transaction((tx) =>
+    f.component.checkMaterial(tx, TEST_SET, SUBSCRIPTION),
+  )!.refreshStore!;
+  const { gate, release } = gated();
+  const refreshing = refreshStore.modify(OAUTH_PLATFORM, async () => {
+    await gate;
+    return { type: SecretShape.OAuth, ...ROTATED_SUBSCRIPTION };
+  });
+  await tick();
+  f.row.credentials.push(id);
+  assert.throws(() => f.lease(id), leaseHeld);
+  f.row.credentials.splice(0);
+  release();
+  await refreshing;
+  f.row.credentials.push(id);
+  assert.deepEqual(leasePayloadOf(f, f.lease(id)).item, {
+    credential_id: id,
+    provider_id: piProviderId(OAUTH_PLATFORM),
+    credential: { type: SecretShape.OAuth, ...ROTATED_SUBSCRIPTION },
+  });
+});
+
+test("a lease of a revision that the execution does not pin answers lease_invalid and a lease of an ended revision answers revision_revoked", (t) => {
+  const f = fixture(t);
+  assert.throws(
+    () => f.lease(f.credentialId),
+    (error) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.BadRequest &&
+      error.code === CUSTODY_LEASE_INVALID,
+  );
+  f.handover();
+  f.store.database
+    .prepare("UPDATE credential SET ended_at = ? WHERE id = ?")
+    .run(NOW, f.credentialId);
+  assert.throws(
+    () => f.lease(f.credentialId),
+    (error) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.Conflict &&
+      error.code === REVISION_REVOKED,
+  );
+});
+
+test("a lease refuses an execution that is not running", (t) => {
+  const f = fixture(t);
+  f.handover();
+  f.setRunning(false);
+  assert.throws(
+    () => f.lease(f.credentialId),
+    (error) =>
+      error instanceof OperationError && error.code === NOT_RUNNING_CODE,
+  );
+});
+
+test("a report of the lease holder ends the lease and a report of another execution keeps it", (t) => {
+  const f = fixture(t);
+  f.handover();
+  f.rivalRow.credentials.push(f.credentialId);
+  f.lease(f.credentialId);
+  f.report(sealEnvelope(f.keys.report, f.rivalAad, f.refresh), f.rivalClaim);
+  assert.throws(() => f.lease(f.credentialId, f.rivalClaim), leaseHeld);
+  f.report(
+    sealEnvelope(f.keys.report, f.aad, {
+      credential_id: f.credentialId,
+      digest: digest(SECOND),
+      credential: SECOND,
+    }),
+  );
+  const { item } = leasePayloadOf(
+    f,
+    f.lease(f.credentialId, f.rivalClaim),
+    f.rivalAad,
+  );
+  assert.ok("credential" in item);
+  assert.deepEqual(item.credential, SECOND);
+});
+
+test("a lease past expires_at lets another execution take a new lease", (t) => {
+  const f = fixture(t);
+  f.handover();
+  f.rivalRow.credentials.push(f.credentialId);
+  f.lease(f.credentialId);
+  const later = NOW + CREDENTIAL_LEASE_MS + ONE_MS;
+  assert.equal(
+    leasePayloadOf(f, f.lease(f.credentialId, f.rivalClaim, later), f.rivalAad)
+      .expires_at,
+    later + CREDENTIAL_LEASE_MS,
+  );
+  assert.throws(() => f.lease(f.credentialId, f.claim, later), leaseHeld);
+});
+
+test("a lease of a revision of a worker instance answers a sealed item and a lease of a server revision answers a plain item", async (t) => {
+  const relay = await instancePair("relay-a");
+  const f = fixture(t, ["server-key"], [], new Map([["relay-a", relay]]));
+  const [copy] = await f.holdCopies("anthro-copy", ["relay-a"]);
+  const copyId = copy!.revisions[0]!.id;
+  const serverId = f.credentialId;
+  f.row.credentials.push(copyId, serverId);
+  const sealedItem = leasePayloadOf(f, f.lease(copyId)).item;
+  assert.ok("sealed" in sealedItem);
+  assert.equal(sealedItem.credential_id, copyId);
+  const opened = await openSealedCopy(
+    sealedItem,
+    SecretShape.ApiKey,
+    copyKeyOf(relay),
+  );
+  assert.deepEqual(opened?.credential, FIRST);
+  const plain = leasePayloadOf(f, f.lease(serverId)).item;
+  assert.ok("credential" in plain);
+  assert.deepEqual(plain.credential, FIRST);
+});
+
+const MACHINE = "machine-1";
+const BOX = "box-1";
+
+async function machineFixture(t: TestContext, names: readonly string[]) {
+  const box = await instancePair(BOX);
+  const machine = await instancePair(MACHINE);
+  const f = fixture(
+    t,
+    names,
+    [],
+    new Map([
+      [BOX, box],
+      [MACHINE, machine],
+    ]),
+    [],
+    new Map([[BOX, MACHINE]]),
+  );
+  f.store.database.prepare("DELETE FROM credential").run();
+  return { f, box, machine };
+}
+
+const sealedItemsOf = (f: Awaited<ReturnType<typeof machineFixture>>["f"]) =>
+  handoverPayloadSchema.parse(
+    openEnvelope(
+      f.keys.handover,
+      f.aad,
+      f.handover([], HandoverPlacement.Worker),
+    ),
+  ).items;
+
+test("a worker placement handover answers the machine copy for an instance with no own copy and the own copy otherwise", async (t) => {
+  const { f, machine } = await machineFixture(t, ["anthro-1"]);
+  const [machineCopy] = await f.holdCopies("anthro-1", [MACHINE]);
+  assert.equal(machineCopy!.holder, MACHINE);
+  assert.equal(machineCopy!.sealed_to, machine.key.fingerprint);
+  const [item] = sealedItemsOf(f);
+  assert.ok(item && "sealed" in item);
+  assert.equal(item.holder, MACHINE);
+  assert.equal(item.credential_id, machineCopy!.revisions[0]!.id);
+  const own = fixture(
+    t,
+    ["anthro-1"],
+    [],
+    new Map([
+      [BOX, await instancePair(BOX)],
+      [MACHINE, machine],
+    ]),
+    [],
+    new Map([[BOX, MACHINE]]),
+  );
+  own.store.database.prepare("DELETE FROM credential").run();
+  await own.holdCopies("anthro-1", [MACHINE, BOX]);
+  const [ownItem] = sealedItemsOf(own);
+  assert.ok(ownItem && "sealed" in ownItem);
+  assert.equal(ownItem.holder, BOX);
+});
+
+test("a stale own copy refuses with held_elsewhere and does not fall back to the machine copy", async (t) => {
+  const box = await instancePair(BOX);
+  const machine = await instancePair(MACHINE);
+  const instances = new Map([
+    [BOX, box],
+    [MACHINE, machine],
+  ]);
+  const f = fixture(
+    t,
+    ["anthro-1"],
+    [],
+    instances,
+    [],
+    new Map([[BOX, MACHINE]]),
+  );
+  f.store.database.prepare("DELETE FROM credential").run();
+  await f.holdCopies("anthro-1", [MACHINE, BOX]);
+  instances.set(BOX, { ...box, key: (await instancePair(BOX)).key });
+  assert.throws(
+    () => f.handover([], HandoverPlacement.Worker),
+    refusedHolder(HolderRefusal.HeldElsewhere),
+  );
+  assert.deepEqual(f.row.credentials, []);
+});
+
+test("an execution that pinned the machine copy keeps it after an own copy appears", async (t) => {
+  const { f } = await machineFixture(t, ["anthro-1"]);
+  const [machineCopy] = await f.holdCopies("anthro-1", [MACHINE]);
+  const machineCopyId = machineCopy!.revisions[0]!.id;
+  const [first] = sealedItemsOf(f);
+  assert.equal(first!.credential_id, machineCopyId);
+  await f.holdCopies("anthro-1", [BOX]);
+  const [second] = sealedItemsOf(f);
+  assert.ok(second && "sealed" in second);
+  assert.equal(second.credential_id, machineCopyId);
+  assert.equal(second.holder, MACHINE);
+  assert.deepEqual(f.row.credentials, [machineCopyId]);
+});
+
+test("a lease of a pinned machine copy answers a sealed item with the machine name as holder", async (t) => {
+  const { f, machine } = await machineFixture(t, ["anthro-1"]);
+  const [machineCopy] = await f.holdCopies("anthro-1", [MACHINE]);
+  const copyId = machineCopy!.revisions[0]!.id;
+  sealedItemsOf(f);
+  const item = leasePayloadOf(f, f.lease(copyId)).item;
+  assert.ok("sealed" in item);
+  assert.equal(item.holder, MACHINE);
+  const opened = await openSealedCopy(
+    item,
+    SecretShape.ApiKey,
+    copyKeyOf(machine),
+  );
+  assert.deepEqual(opened?.credential, FIRST);
 });

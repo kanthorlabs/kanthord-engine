@@ -26,6 +26,16 @@ import {
   REQUEST_NUMBER,
 } from "../../mission/test-support.ts";
 import { decodeGitHubEvent } from "../../repository/index.ts";
+import {
+  COMMENT_CREATED_AT_MS,
+  COMMENT_NUMBER,
+  COMMENT_UPDATE_KEY,
+  COMMENT_USER_ID,
+  commentBytes,
+  WEBHOOK_EVENT,
+  webhookComment,
+} from "../../repository/github-comment-test-support.ts";
+import { missionEventDecoder } from "./event-decoder.ts";
 
 const RESOURCE = "owner/repo";
 const MERGE_COMMIT = "e".repeat(40);
@@ -85,6 +95,7 @@ async function fixture(t: TestContext, nextRepository = false) {
   h.dependencies.decoder = {
     decode: ({ resource, event, metadata }) =>
       decodeGitHubEvent({ resource, event, metadata }),
+    decodeLinkUpdate: () => null,
   };
   const checks: string[] = [];
   const wakes: string[] = [];
@@ -739,4 +750,50 @@ test("an exact push match checks its request once", async (t) => {
   });
   assert.deepEqual(h.checks, [h.landing]);
   assert.equal(h.node().state, NodeState.Completed);
+});
+
+const CONVERSATION_RESOURCE = "conversation:github:acme/app";
+const REPOSITORY_RESOURCE = "repository:github:acme/app";
+const OTHER_PLATFORM = "gitlab";
+
+function commentInput(resource: string, platform = "github") {
+  return {
+    platform,
+    resource,
+    event: commentBytes(
+      webhookComment({}, { repository: { full_name: "acme/app" } }),
+    ),
+    metadata: { event: WEBHOOK_EVENT },
+  };
+}
+
+test("the composed decodeLinkUpdate answers the link update of a recorded issue_comment webhook", () => {
+  assert.deepEqual(
+    missionEventDecoder.decodeLinkUpdate(commentInput(CONVERSATION_RESOURCE)),
+    {
+      external_link: {
+        kind: "github_issue",
+        resource_identity: CONVERSATION_RESOURCE,
+        number: COMMENT_NUMBER,
+      },
+      update_key: COMMENT_UPDATE_KEY,
+      actor_id: String(COMMENT_USER_ID),
+      actor_automated: false,
+      occurred_at: COMMENT_CREATED_AT_MS,
+      mentions: [],
+    },
+  );
+});
+
+test("the composed decodeLinkUpdate answers null for a repository identity and another platform", () => {
+  assert.equal(
+    missionEventDecoder.decodeLinkUpdate(commentInput(REPOSITORY_RESOURCE)),
+    null,
+  );
+  assert.equal(
+    missionEventDecoder.decodeLinkUpdate(
+      commentInput(CONVERSATION_RESOURCE, OTHER_PLATFORM),
+    ),
+    null,
+  );
 });

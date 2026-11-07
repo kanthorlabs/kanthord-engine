@@ -26,6 +26,12 @@ import type { RecordedResponse } from "./idempotency.ts";
 import type { Invocation } from "./invocation.ts";
 import { parseJSON } from "./json.ts";
 import { resolveRequestId } from "./request-id.ts";
+import {
+  callerName,
+  failureCodeOf,
+  finishedFields,
+  type RequestOutcome,
+} from "./request-log.ts";
 
 const UNMATCHED_ROUTE = "/*";
 
@@ -76,6 +82,7 @@ async function invokeCall(
   requestId: string,
   context: CancellationContext,
   logger: Logger,
+  outcome: RequestOutcome,
 ): Promise<RecordedResponse> {
   if (
     call.body !== null &&
@@ -112,6 +119,9 @@ async function invokeCall(
       idempotencyKey: call.idempotency_key,
       requestId,
       context,
+      onIdentity: (identity) => {
+        outcome.caller = callerName(identity);
+      },
       rejection,
       traceparent: call.traceparent,
       tracestate: call.tracestate,
@@ -170,6 +180,7 @@ export function servePort(
     const start = performance.now();
     const context = new CancellationContext();
     contexts.set(call.call_id, context);
+    const outcome: RequestOutcome = { clientAborted: false };
     let response: RecordedResponse;
     try {
       response = operation
@@ -181,6 +192,7 @@ export function servePort(
             requestId,
             context,
             logger,
+            outcome,
           )
         : absentRoute(requestId);
     } catch (error) {
@@ -188,11 +200,17 @@ export function servePort(
         logger.error({ err: error, request_id: requestId }, "Request failed");
       response = failure(error, requestId);
     } finally {
+      outcome.clientAborted = context.signal.aborted;
       contexts.delete(call.call_id);
       context.cancel();
     }
     log.info(
-      { status: response.status, latency: performance.now() - start },
+      finishedFields(
+        outcome,
+        response.status,
+        failureCodeOf(response.status, response.body),
+        performance.now() - start,
+      ),
       "Request finished",
     );
     answer(call.call_id, response);

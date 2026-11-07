@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { SealedCopy } from "../custody/contract.ts";
@@ -50,6 +51,11 @@ export class InstanceLogin {
     this.ended = ended;
   }
 
+  get runner(): string {
+    assert(this.session.runner);
+    return this.session.runner;
+  }
+
   arm(): void {
     this.timer = setTimeout(
       () => this.expire(),
@@ -70,6 +76,7 @@ export class InstanceLogin {
       platform: this.session.platform,
       mode: this.session.mode as LoginSessionEntry["mode"],
       code: this.session.submitted,
+      holder: this.session.holder,
     };
   }
 

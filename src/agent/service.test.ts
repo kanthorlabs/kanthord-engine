@@ -2598,6 +2598,64 @@ function holdFixture(
   };
 }
 
+const MACHINE = "machine-1";
+const BOX_A = "box-1";
+const BOX_B = "box-2";
+
+function machineCredentialHolds(): Dependencies["credentialHolds"] {
+  const held = memoryCredentialHolds();
+  const resolved = (holder: string) =>
+    holder === BOX_A || holder === BOX_B ? MACHINE : holder;
+  return {
+    ...held,
+    holdOf: (tx, name, holder) => held.holdOf(tx, name, resolved(holder)),
+  };
+}
+
+test("a stop of an execution that pins the machine copy holds the machine copy and shows for each instance of the machine", (t) => {
+  const f = holdFixture(t, { credentialHolds: machineCredentialHolds() });
+  const head = f.selected();
+  const changes = f.store.transaction((tx) =>
+    f.agent.recordProviderFailure(
+      tx,
+      [head],
+      MACHINE,
+      AdvancingFailure.RateLimited,
+      EXECUTION_ID,
+      f.now(),
+    ),
+  );
+  assert.deepEqual(
+    changes.map((change) => change.holder),
+    [MACHINE],
+  );
+  const availableAt = f.now() + COOLDOWN_DEFAULTS.rate_limited_ms;
+  for (const instance of [BOX_A, BOX_B])
+    assert.deepEqual(
+      f.store.transaction((tx) =>
+        f.agent.agentView(tx, AGENT, null, {
+          holders: [instance],
+          claimant: instance,
+        }),
+      )?.chain[HEAD_POSITION]?.cooldown,
+      { strikes: FIRST_STRIKE, available_at: availableAt },
+    );
+  assert.deepEqual(
+    f.store.transaction((tx) =>
+      f.agent.recordSuccess(tx, [head], MACHINE, EXECUTION_ID),
+    ),
+    [
+      {
+        kind: CooldownChangeKind.Cleared,
+        execution_id: EXECUTION_ID,
+        credential: head.credential,
+        holder: MACHINE,
+      },
+    ],
+  );
+  assert.equal(f.view().chain[HEAD_POSITION]?.cooldown, null);
+});
+
 test("a provider failure cools every chain entry of its credential", (t) => {
   const f = holdFixture(t);
   const head = f.selected();
@@ -3319,6 +3377,32 @@ test("the holder rule refuses a holder without a live copy at the entry write, t
         code: AgentErrorCode.CredentialHolderMismatch,
       },
     ],
+  );
+});
+
+test("the holder rule passes an instance with no own copy and a live current machine copy and refuses a stale machine copy", (t) => {
+  const current = new Map([[MACHINE, true]]);
+  const f = enablementFixture(t, {
+    copyHeld: (_tx, _credential, holder) =>
+      current.get(holder === BOX_A ? MACHINE : holder) === true,
+  });
+  f.invoke("enablement.put", putBody);
+  const validate = () =>
+    f.store.transaction((tx) =>
+      f.agent.validateEntry(tx, AGENT, null, [BOX_A]),
+    );
+  validate();
+  current.set(MACHINE, false);
+  refuses(
+    validate,
+    AgentErrorCode.CredentialHolderMismatch,
+    HttpStatus.BadRequest,
+    {
+      agent: AGENT,
+      agent_provider: provider.name,
+      credential: provider.credential,
+      holder: BOX_A,
+    },
   );
 });
 

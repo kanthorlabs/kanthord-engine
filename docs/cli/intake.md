@@ -419,6 +419,13 @@ seconds between two cycles, and longer when GitHub names a wait through
 GitHub poll holds `etag` and `pulls_etag`, one ETag for each read. The create and the
 delete of a poll inbound are the only switch of its poll.
 
+The conversation poll of a GitHub repository reads one page of its issue
+comments, sorted by update time, newest first. The `checkpoint` of a GitHub
+conversation holds `comments_etag`, a text or `null`. The `metadata` of a
+comment from this read is `{ "event": "issue_comment_listed" }`, and its event
+id is `issue_comment:<comment id>`. A webhook comment has the `metadata` value
+`issue_comment` and the same key, so one comment makes one update.
+
 The API operations `intake.action.perform`, `intake.action.read`,
 `intake.storage.put`, `intake.storage.check`, `intake.storage.get`,
 `intake.execution.storage.get`, `intake.execution.gate_files.read` and
@@ -435,7 +442,13 @@ MCP server and the Mission Service reach them through the direct adapter.
   `{ head_commit, change_requests }`. A change request is the latest
   `APPROVED`, `CHANGES_REQUESTED` or `DISMISSED` review of its reviewer when it
   is `CHANGES_REQUESTED` and its `commit_id` is the head commit. This is the
-  rule of the pull request check. Each change request holds `review_id`,
+  rule of the pull request check. A review counts only when its author passes
+  the trust rule: `user.type` is `User`, and the account ID of the author is in
+  `link_trust.actor_ids` of the repository binding revision that the frozen
+  action of the request names. A binding with no `link_trust` trusts no
+  reviewer, and a review of a bot never counts. The pull request check applies
+  the same rule, so a change request of an untrusted reviewer gives no `other`
+  end state. Each change request holds `review_id`,
   `reviewer`, `body`, `submitted_at`, `commit_id` and the `comments` of that
   review, each with `path`, `line` and `body`. The read calls GitHub once for
   the pull request, once for each page of the reviews and once for each page of

@@ -188,6 +188,8 @@ paths:
     $ref: ./openapi/mission/import.apply.yaml#/pathItem
   /api/mission/{mission_id}/import/preview:
     $ref: ./openapi/mission/import.preview.yaml#/pathItem
+  /api/mission/node/{node_id}/link-update:
+    $ref: ./openapi/mission/link_update.list.yaml#/pathItem
   /api/mission/node/{node_id}/block:
     $ref: ./openapi/mission/node.block.yaml#/pathItem
   /api/mission/node/{node_id}/check:
@@ -394,6 +396,8 @@ paths:
     $ref: ./openapi/worker/catalog.list.yaml#/pathItem
   /api/worker/credential:
     $ref: ./openapi/worker/credential.yaml#/pathItem
+  /api/worker/credential/lease:
+    $ref: ./openapi/worker/credential.lease.yaml#/pathItem
   /api/worker/execution/{execution_id}/change-request:
     $ref: ./openapi/worker/execution.change_request.get.yaml#/pathItem
   /api/worker/execution/{execution_id}/failed-check:

@@ -14,6 +14,7 @@ import {
   type AdmissionAnswer,
   AdmissionRefusal,
   CONTENT_ENCODING,
+  type DecodedLinkUpdate,
   type deliveryAdmitSchema,
   Disposition,
   type IntakeCheck,
@@ -22,14 +23,17 @@ import {
   PlatformAddressKind,
   type unresolvedRequestCountSchema,
 } from "./contract.ts";
+import { recordRefusedLinkUpdate } from "./delivery-telemetry.ts";
 import {
+  linkDemandCount,
   MatchKind,
+  matchLinkUpdate,
   matchRequests,
   unresolvedBaseRequests,
   unresolvedRequestCount,
 } from "./delivery-match.ts";
 import { applyEndState, changesNothing, requestContext } from "./node-check.ts";
-import { readEvidence } from "./record-store.ts";
+import { insertLinkUpdate, readEvidence } from "./record-store.ts";
 import type { Dependencies } from "./service.ts";
 
 type AdmissionInput = z.output<typeof deliveryAdmitSchema>;
@@ -42,6 +46,8 @@ type Checked = BaseChecked & {
   address: PlatformAddress;
   check: CheckAnswer;
 };
+type LinkChecked = { update: DecodedLinkUpdate; actorId: string };
+type Prepared = AdmissionAnswer | Checked | BaseChecked | LinkChecked;
 type BranchPushAddress = Extract<
   PlatformAddress,
   { kind: typeof PlatformAddressKind.BranchPush }
@@ -63,22 +69,64 @@ function authorizeAdmission(caller: CallerContext): void {
     authorizationRefused(AuthorizationRefusal.ServiceMismatch);
 }
 
-async function prepareAdmission(
-  dependencies: Dependencies,
-  caller: CallerContext,
-  input: AdmissionInput,
-): Promise<AdmissionAnswer | Checked | BaseChecked> {
-  const address = dependencies.decoder.decode({
+function decoderInput(input: AdmissionInput) {
+  return {
     platform: input.platform,
     resource: input.resource,
     event: Buffer.from(input.event, CONTENT_ENCODING),
     metadata: input.metadata,
-  });
-  if (address === null)
+  };
+}
+
+function prepareLinkUpdate(
+  dependencies: Dependencies,
+  input: AdmissionInput,
+): AdmissionAnswer | LinkChecked {
+  const update = dependencies.decoder.decodeLinkUpdate(decoderInput(input));
+  if (update === null)
     return {
       disposition: Disposition.Refused,
       reason: AdmissionRefusal.Undecodable,
     };
+  if (!update.actor_automated && update.actor_id !== null)
+    return { update, actorId: update.actor_id };
+  recordRefusedLinkUpdate(dependencies, {
+    project_id: input.project_id,
+    actor_id: update.actor_id,
+    reason: AdmissionRefusal.ActorIgnored,
+    refused_at: Date.now(),
+  });
+  return {
+    disposition: Disposition.Refused,
+    reason: AdmissionRefusal.ActorIgnored,
+  };
+}
+
+function commitLinkUpdate(
+  tx: Transaction,
+  input: AdmissionInput,
+  checked: LinkChecked,
+): AdmissionAnswer {
+  const match = matchLinkUpdate(tx, input.project_id, checked.update);
+  if (match.kind === MatchKind.Answer) return match.answer;
+  insertLinkUpdate(tx, {
+    mission_id: match.mission_id,
+    external_link: match.external_link,
+    update_key: checked.update.update_key,
+    inbound_event_id: input.inbound_event_id,
+    actor_id: checked.actorId,
+    occurred_at: checked.update.occurred_at,
+  });
+  return ACCEPTED;
+}
+
+async function prepareAdmission(
+  dependencies: Dependencies,
+  caller: CallerContext,
+  input: AdmissionInput,
+): Promise<Prepared> {
+  const address = dependencies.decoder.decode(decoderInput(input));
+  if (address === null) return prepareLinkUpdate(dependencies, input);
   const match = dependencies.store.transaction((tx) =>
     matchRequests(tx, input.project_id, address),
   );
@@ -262,7 +310,7 @@ export function admitDelivery(
 export function countUnresolvedRequests(
   caller: CallerContext,
   input: CountInput,
-): { count: number } {
+): { count: number; link_count: number } {
   authorizeAdmission(caller);
   return caller.commit((tx) => ({
     count: unresolvedRequestCount(
@@ -270,7 +318,26 @@ export function countUnresolvedRequests(
       input.project_id,
       input.resource_identity,
     ),
+    link_count: linkDemandCount(
+      tx,
+      input.project_id,
+      input.resource_identity,
+      Date.now(),
+    ),
   }));
+}
+
+function commitPrepared(
+  tx: Transaction,
+  dependencies: Dependencies,
+  input: AdmissionInput,
+  prepared: Prepared,
+): AdmissionAnswer {
+  if ("disposition" in prepared) return prepared;
+  if ("update" in prepared) return commitLinkUpdate(tx, input, prepared);
+  if ("evidenceId" in prepared)
+    return commitAdmission(tx, dependencies, input, prepared);
+  return commitBaseAdmission(tx, dependencies, input, prepared);
 }
 
 async function admitOne(
@@ -281,12 +348,15 @@ async function admitOne(
   authorizeAdmission(caller);
   const prepared = await prepareAdmission(dependencies, caller, input);
   const answer = caller.commit((tx) =>
-    "disposition" in prepared
-      ? prepared
-      : "evidenceId" in prepared
-        ? commitAdmission(tx, dependencies, input, prepared)
-        : commitBaseAdmission(tx, dependencies, input, prepared),
+    commitPrepared(tx, dependencies, input, prepared),
   );
+  if ("update" in prepared && answer.disposition === Disposition.Refused)
+    recordRefusedLinkUpdate(dependencies, {
+      project_id: input.project_id,
+      actor_id: prepared.actorId,
+      reason: answer.reason,
+      refused_at: Date.now(),
+    });
   dependencies.wakeup.wake(input.project_id);
   return answer;
 }

@@ -24,6 +24,7 @@ export const NODE_IDENTITY_PREFIX = "node";
 export const TASK_IDENTITY_PREFIX = "task";
 export const PROPOSAL_IDENTITY_PREFIX = "proposal";
 export const FINDING_IDENTITY_PREFIX = "finding";
+export const LINK_UPDATE_IDENTITY_PREFIX = "link_update";
 export const MISSION_INITIAL_VERSION = 1;
 export const MISSION_OPERATION_TIMEOUT_MS = 30000;
 
@@ -71,6 +72,7 @@ export interface MissionBindings {
     revision: number;
     tombstone: boolean;
     disabled: boolean;
+    link_trust?: { actor_ids: string[] };
   } | null;
 }
 
@@ -311,6 +313,15 @@ export interface IntakeGateFiles {
   ): Promise<{ paths: string[] }>;
 }
 
+export interface DecodedLinkUpdate {
+  external_link: ExternalLink;
+  update_key: string;
+  actor_id: string | null;
+  actor_automated: boolean;
+  occurred_at: number;
+  mentions: string[];
+}
+
 export interface EventDecoder {
   decode(input: {
     platform: string;
@@ -318,6 +329,12 @@ export interface EventDecoder {
     event: Uint8Array;
     metadata: unknown;
   }): PlatformAddress | null;
+  decodeLinkUpdate(input: {
+    platform: string;
+    resource: string;
+    event: Uint8Array;
+    metadata: unknown;
+  }): DecodedLinkUpdate | null;
 }
 
 export interface SchedulerWakeup {
@@ -664,6 +681,30 @@ export const externalLinkSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 export type ExternalLink = z.infer<typeof externalLinkSchema>;
+export const linkUpdateRowSchema = z.strictObject({
+  id: identitySchema(LINK_UPDATE_IDENTITY_PREFIX),
+  mission_id: identitySchema(MISSION_IDENTITY_PREFIX),
+  external_link: z.string().min(1),
+  update_key: z.string().min(1),
+  inbound_event_id: identitySchema("inbound_event"),
+  actor_id: z.string().min(1),
+  occurred_at: z.number().int().nonnegative(),
+});
+export type LinkUpdateRow = z.infer<typeof linkUpdateRowSchema>;
+export const linkUpdateSchema = z.strictObject({
+  id: identitySchema(LINK_UPDATE_IDENTITY_PREFIX),
+  external_link: externalLinkSchema,
+  update_key: z.string().min(1),
+  inbound_event_id: identitySchema("inbound_event"),
+  actor_id: z.string().min(1),
+  occurred_at: timestamp,
+  new: z.boolean(),
+});
+export type LinkUpdate = z.infer<typeof linkUpdateSchema>;
+export interface LinkUpdatePage {
+  limit?: number;
+  cursor?: string;
+}
 export const externalLinksSchema = z
   .array(externalLinkSchema)
   .max(EXTERNAL_LINK_LIMIT)
@@ -1099,6 +1140,7 @@ export type RequestFacts = {
   address: PlatformAddress;
   repository: RepositoryFacts;
   human_landing: boolean;
+  link_trust: { actor_ids: string[] };
 };
 export type Authorized<F> = {
   credential: string | null;
@@ -1134,6 +1176,12 @@ export interface MissionActions {
     nodeId: string,
     attempt: number,
   ): ActionContext;
+  linkUpdatesOf(
+    tx: Transaction,
+    nodeId: string,
+    attempt: number,
+    page: LinkUpdatePage,
+  ): { items: LinkUpdate[]; next_cursor: string | null; total: number };
 }
 export const attemptSchema = z.strictObject({
   node_id: identitySchema("node"),
@@ -1648,6 +1696,7 @@ export const Disposition = {
 export const dispositionSchema = z.enum(Disposition);
 export type Disposition = z.infer<typeof dispositionSchema>;
 export const AdmissionRefusal = {
+  ActorIgnored: "actor_ignored",
   Ambiguous: "ambiguous",
   Unmatched: "unmatched",
   Undecodable: "undecodable",
@@ -1994,9 +2043,12 @@ export const missionOperations = {
       query: z.strictObject({}),
       body: unresolvedRequestCountSchema,
     }),
-    output: z.strictObject({ count: z.number().int().nonnegative() }),
+    output: z.strictObject({
+      count: z.number().int().nonnegative(),
+      link_count: z.number().int().nonnegative(),
+    }),
     description:
-      "Count the unresolved request evidences of a resource for the Intake Service.",
+      "Count the unresolved request evidences and the live links of a resource for the Intake Service.",
   },
   "assessment.submit": {
     ...writeOperation,
@@ -2234,6 +2286,19 @@ export const missionOperations = {
     ),
     output: pageOf(proposalSchema),
     description: "List the fix-node proposals of an examine proposer.",
+  },
+  "link_update.list": {
+    ...readOperation,
+    id: "mission.link_update.list",
+    method: HttpMethod.Get,
+    path: "/api/mission/node/:node_id/link-update",
+    input: readInput(
+      z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
+      z.strictObject(pageQuery),
+    ),
+    output: pageOf(linkUpdateSchema),
+    description:
+      "List the updates of the linked threads of a node from trusted actors, newest first.",
   },
   "proposal.decide": {
     ...writeOperation,

@@ -56,6 +56,12 @@ const INFO_LEVEL = 30;
 const ERROR_LEVEL = 50;
 const UNKNOWN_FAILURE = "gateway.invocation.unknown";
 const FAILED_MESSAGE = "Request failed";
+const FINISHED_MESSAGE = "Request finished";
+const CANCELLED_CODE = "gateway.invocation.cancelled";
+const CLIENT_CLOSED_STATUS = 499;
+const PREFLIGHT_MAX_AGE = "600";
+const CLOSE_POLL_ATTEMPTS = 100;
+const FORBIDDEN_CODE = "test.identity.forbidden";
 const HANDLER_BUG = "handler bug";
 const LOOPBACK_BIND_SENTENCE =
   "A loopback bind accepts connections from this host only.";
@@ -1089,4 +1095,171 @@ test("an HTTP request that fails with an unknown error answers 500 and logs the 
   assert.equal(failed[0].operation, protectedRead.id);
   assert.equal(failed[0].err.message, HANDLER_BUG);
   assert.doesNotMatch(JSON.stringify(failed[0]), new RegExp(fixture.token));
+});
+
+function finishedRecords(logs: string[]) {
+  return logs
+    .map((line) => JSON.parse(line))
+    .filter((record) => record.msg === FINISHED_MESSAGE);
+}
+
+test("a failed request logs its code and its caller, and a successful request logs no code and no wire status", async (t) => {
+  const registry = new OperationRegistry();
+  registry.register(protectedRead, () => {
+    throw new GatewayError(HttpStatus.Forbidden, FORBIDDEN_CODE, "Forbidden.");
+  });
+  registry.register(
+    { ...protectedRead, id: "test.fine", path: "/api/fine" },
+    () => ({ accountId: HUMAN_USERNAME }),
+  );
+  const fixture = await gatewayFixture(t, { registry });
+  const headers = { Authorization: `Bearer ${fixture.token}` };
+  const denied = await fixture.request(protectedRead.path, { headers });
+  assert.equal(denied.status, HttpStatus.Forbidden);
+  const anonymous = await fixture.request(protectedRead.path);
+  assert.equal(anonymous.status, HttpStatus.Unauthorized);
+  const fine = await fixture.request("/api/fine", { headers });
+  assert.equal(fine.status, HttpStatus.OK);
+  const [failed, unauthenticated, succeeded] = finishedRecords(fixture.logs);
+  assert.equal(failed.level, INFO_LEVEL);
+  assert.equal(failed.status, HttpStatus.Forbidden);
+  assert.equal(failed.code, FORBIDDEN_CODE);
+  assert.equal(failed.caller, fixture.accountId);
+  assert.equal(failed.wire_status, undefined);
+  assert.equal(unauthenticated.status, HttpStatus.Unauthorized);
+  assert.equal(unauthenticated.code, ExpectedErrorCode.Unauthorized);
+  assert.equal(unauthenticated.caller, undefined);
+  assert.equal(succeeded.status, HttpStatus.OK);
+  assert.equal(succeeded.code, undefined);
+  assert.equal(succeeded.wire_status, undefined);
+  assert.equal(succeeded.caller, fixture.accountId);
+});
+
+test("a client abort logs status 499 with the wire status 503, and the answer stays 503", async (t) => {
+  const registry = new OperationRegistry();
+  const entered = Promise.withResolvers<void>();
+  registry.register(protectedRead, async (_input, caller) => {
+    entered.resolve();
+    await aborted(caller.context.signal);
+    caller.context.signal.throwIfAborted();
+    return { accountId: HUMAN_USERNAME };
+  });
+  const fixture = await gatewayFixture(t, { registry });
+  const abort = new AbortController();
+  const answer = fixture.gateway.app.fetch(
+    new Request(`http://localhost${protectedRead.path}`, {
+      headers: {
+        Host: "localhost",
+        Authorization: `Bearer ${fixture.token}`,
+      },
+      signal: abort.signal,
+    }),
+  );
+  await entered.promise;
+  abort.abort();
+  const response = await answer;
+  assert.equal(response.status, HttpStatus.ServiceUnavailable);
+  assert.equal(
+    errorSchema.parse(await response.json()).error.code,
+    CANCELLED_CODE,
+  );
+  const [record] = finishedRecords(fixture.logs);
+  assert.equal(record.level, INFO_LEVEL);
+  assert.equal(record.status, CLIENT_CLOSED_STATUS);
+  assert.equal(record.wire_status, HttpStatus.ServiceUnavailable);
+  assert.equal(record.code, CANCELLED_CODE);
+  assert.equal(record.caller, fixture.accountId);
+});
+
+test("a cancel caused by a server shutdown logs status 503 and no wire status", async (t) => {
+  const registry = new OperationRegistry();
+  const entered = Promise.withResolvers<void>();
+  registry.register(protectedRead, async (_input, caller) => {
+    entered.resolve();
+    await aborted(caller.context.signal);
+    caller.context.signal.throwIfAborted();
+    return { accountId: HUMAN_USERNAME };
+  });
+  const fixture = await gatewayFixture(t, { registry });
+  const request = fixture.request(protectedRead.path, {
+    headers: { Authorization: `Bearer ${fixture.token}` },
+  });
+  await entered.promise;
+  assert.equal(await fixture.gateway.quiesce(), null);
+  const response = await request;
+  assert.equal(response.status, HttpStatus.ServiceUnavailable);
+  const [record] = finishedRecords(fixture.logs);
+  assert.equal(record.status, HttpStatus.ServiceUnavailable);
+  assert.equal(record.wire_status, undefined);
+  assert.equal(record.code, CANCELLED_CODE);
+});
+
+test("every API preflight from an allowed origin answers the CORS headers and the max age, and an unknown origin gets no allow-origin", async (t) => {
+  const registry = new OperationRegistry();
+  registry.register(protectedRead, () => ({ accountId: HUMAN_USERNAME }));
+  const fixture = await gatewayFixture(t, { registry });
+  const origin = fixture.config.gateway.allowed_origins[0]!;
+  const preflight = (path: string, from: string) =>
+    fixture.request(path, {
+      method: "OPTIONS",
+      headers: {
+        Origin: from,
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "authorization",
+      },
+    });
+  for (const path of [protectedRead.path, "/api/unknown/item"]) {
+    const response = await preflight(path, origin);
+    assert.equal(response.status, HttpStatus.NoContent);
+    assert.equal(response.headers.get("access-control-allow-origin"), origin);
+    assert.equal(
+      response.headers.get("access-control-max-age"),
+      PREFLIGHT_MAX_AGE,
+    );
+  }
+  const foreign = await preflight("/api/unknown/item", "http://evil.example");
+  assert.equal(foreign.headers.get("access-control-allow-origin"), null);
+  const outside = await preflight("/outside", origin);
+  assert.equal(outside.status, HttpStatus.NotFound);
+  const missing = await fixture.request("/api/unknown/item", {
+    headers: { Origin: origin },
+  });
+  assert.equal(missing.status, HttpStatus.NotFound);
+  assert.equal(
+    (await errorSchema.parseAsync(await missing.json())).error.code,
+    ExpectedErrorCode.RouteNotFound,
+  );
+  assert.equal(missing.headers.get("access-control-allow-origin"), origin);
+});
+
+test("a closed HTTP connection logs status 499 with the wire status 503", async (t) => {
+  const registry = new OperationRegistry();
+  const entered = Promise.withResolvers<void>();
+  registry.register(protectedRead, async (_input, caller) => {
+    entered.resolve();
+    await aborted(caller.context.signal);
+    caller.context.signal.throwIfAborted();
+    return { accountId: HUMAN_USERNAME };
+  });
+  const fixture = await gatewayFixture(t, { registry });
+  const abort = new AbortController();
+  const request = fixture
+    .request(protectedRead.path, {
+      signal: abort.signal,
+      headers: { Authorization: `Bearer ${fixture.token}` },
+    })
+    .catch(() => {});
+  await entered.promise;
+  abort.abort();
+  await request;
+  for (
+    let attempt = 0;
+    attempt < CLOSE_POLL_ATTEMPTS && !finishedRecords(fixture.logs).length;
+    attempt++
+  )
+    await delay(KEEP_ALIVE_POLL_MS);
+  const [record] = finishedRecords(fixture.logs);
+  assert.equal(record.status, CLIENT_CLOSED_STATUS);
+  assert.equal(record.wire_status, HttpStatus.ServiceUnavailable);
+  assert.equal(record.code, CANCELLED_CODE);
 });

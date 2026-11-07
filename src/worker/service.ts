@@ -82,6 +82,7 @@ import {
 } from "../agent/contract.ts";
 import { bindingHolders } from "../project/contract.ts";
 import {
+  CredentialLeaseHeld,
   CredentialRefreshInFlight,
   type HeldCopy,
   type InstanceKey,
@@ -257,6 +258,7 @@ export interface Dependencies {
   instanceCopies?: {
     archiveHeld(tx: Transaction, holder: string, now: number): void;
     heldCopies(tx: Transaction, holder: string): HeldCopy[];
+    usedCopies(tx: Transaction, instanceName: string): HeldCopy[];
   };
   loginSessionsOf?: (holder: string) => LoginSessionEntry[];
   credentialVersionOf?: (holder: string) => number;
@@ -299,6 +301,14 @@ function refreshInFlight(): OperationError {
     HttpStatus.ServiceUnavailable,
     WorkerErrorCode.HandoverRefreshInFlight,
     "A credential refresh is in flight; retry the handover.",
+  );
+}
+
+function leaseHeld(): OperationError {
+  return new OperationError(
+    HttpStatus.ServiceUnavailable,
+    WorkerErrorCode.CredentialLeaseHeld,
+    "Another execution holds the refresh lease; retry the lease.",
   );
 }
 
@@ -351,6 +361,16 @@ export class WorkerService implements Service {
       this.claimantHolder(tx, runtimeIdentity),
     );
   }
+  private withHealth(
+    copies: HeldCopy[],
+  ): Array<HeldCopy & { health: CopyHealth }> {
+    return copies.map((copy) => ({
+      ...copy,
+      health:
+        this.dependencies.copyHealthOf?.(copy.holder, copy) ??
+        unreportedHealth(copy.platform),
+    }));
+  }
   claimantHolder(tx: Transaction, runtimeIdentity: string): string {
     return claimantOf(tx, runtimeIdentity);
   }
@@ -398,6 +418,9 @@ export class WorkerService implements Service {
     return instance?.placement === InstancePlacement.Worker
       ? (instance.machine ?? null)
       : null;
+  }
+  instancesOfMachine(tx: Transaction, machine: string): string[] {
+    return readLiveInstancesOfMachine(tx, machine).map(({ name }) => name);
   }
   connectedInstancesOf(name: string): InstanceRecord[] {
     return this.instances.connectedAmong(
@@ -481,6 +504,10 @@ export class WorkerService implements Service {
     this.machines = new WorkerMachines({
       archiveHeld: (tx, holder, now) =>
         dependencies.instanceCopies?.archiveHeld(tx, holder, now),
+      heldCopies: (tx, machine) =>
+        this.withHealth(
+          dependencies.instanceCopies?.heldCopies(tx, machine) ?? [],
+        ),
       connectionOf: (instanceId) => this.instances.connectionOf(instanceId),
     });
     this.instances = new WorkerInstances({
@@ -1189,6 +1216,29 @@ export class WorkerService implements Service {
         return null;
       });
     });
+    registry.register(
+      workerOperations["credential.lease"],
+      ({ body }, caller) => {
+        const identity = caller.identity;
+        assert(isMachineIdentity(identity));
+        const execution = caller.execution;
+        assert(execution);
+        try {
+          return caller.commit((tx) =>
+            this.dependencies.custodyHandover.lease(
+              tx,
+              identity,
+              execution,
+              body.credential_id,
+              Date.now(),
+            ),
+          );
+        } catch (error) {
+          if (error instanceof CredentialLeaseHeld) throw leaseHeld();
+          throw error;
+        }
+      },
+    );
     registry.register(workerOperations["ssh.sign"], ({ body }, caller) => {
       const identity = caller.identity;
       assert(isMachineIdentity(identity));
@@ -1544,14 +1594,9 @@ export class WorkerService implements Service {
       instancesChanged: () => this.instancesChanged(),
       registrationRecordOf: (tx, row) =>
         registrationRecord(tx, this.recordDependencies(), row, Date.now()),
-      heldCopies: (tx, holder) =>
-        (this.dependencies.instanceCopies?.heldCopies(tx, holder) ?? []).map(
-          (copy) => ({
-            ...copy,
-            health:
-              this.dependencies.copyHealthOf?.(holder, copy) ??
-              unreportedHealth(copy.platform),
-          }),
+      usedCopies: (tx, instanceName) =>
+        this.withHealth(
+          this.dependencies.instanceCopies?.usedCopies(tx, instanceName) ?? [],
         ),
     });
     declareMachines(registry, { machines: this.machines });

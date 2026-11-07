@@ -97,6 +97,7 @@ export const sealedHandoverItemSchema = z.strictObject({
   provider_id: z.string().min(1),
   name: z.string().min(1),
   platform: z.string().min(1),
+  holder: z.string().min(1),
   sealed: sealedObjectSchema,
 });
 export type SealedHandoverItem = z.infer<typeof sealedHandoverItemSchema>;
@@ -239,6 +240,7 @@ export type RequestFacts = {
   address: PlatformAddressFacts;
   repository: RepositoryFacts;
   human_landing: boolean;
+  link_trust: { actor_ids: string[] };
 };
 export type AssetFacts = {
   storage: {
@@ -475,6 +477,8 @@ export type Material = {
 export const CUSTODY_SERVICE_NAME = "custody";
 export const CREDENTIAL_TIMEOUT_MS = 30000;
 export const CREDENTIAL_CHECK_TIMEOUT_MS = 10000;
+export const CREDENTIAL_LEASE_MS = 30000;
+export const CUSTODY_LEASE_INVALID = "custody.handover.lease_invalid";
 export const LIST_LIMIT_DEFAULT = 100;
 export const LIST_LIMIT_MAX = 1000;
 
@@ -596,6 +600,11 @@ export const handoverPayloadSchema = z.strictObject({
   ),
 });
 export type HandoverPayload = z.infer<typeof handoverPayloadSchema>;
+export const leasePayloadSchema = z.strictObject({
+  item: z.union([handoverItemSchema, sealedHandoverItemSchema]),
+  expires_at: z.int().min(0),
+});
+export type LeasePayload = z.infer<typeof leasePayloadSchema>;
 export const plainHandoverPayloadSchema = handoverItemsSchema.extend({
   ssh_identities: handoverPayloadSchema.shape.ssh_identities,
 });
@@ -642,6 +651,15 @@ export class CredentialRefreshInFlight extends Error {
     super("A refresh of the credential revision is in flight.");
     this.name = "CredentialRefreshInFlight";
     this.settled = settled;
+  }
+}
+
+export class CredentialLeaseHeld extends Error {
+  constructor() {
+    super(
+      "Another execution holds the refresh lease of the credential revision.",
+    );
+    this.name = "CredentialLeaseHeld";
   }
 }
 
@@ -845,6 +863,8 @@ export type InstanceKey = {
 export interface InstanceKeys {
   keyOf(tx: Transaction, name: string): InstanceKey | null;
   nameOf(tx: Transaction, instanceId: string): string | null;
+  machineOf(tx: Transaction, instanceName: string): string | null;
+  instancesOfMachine(tx: Transaction, machine: string): string[];
 }
 export type SealedCopy = {
   holder: string;
@@ -866,12 +886,14 @@ export type SealedRotateBody = {
 };
 export type HeldCopy = {
   name: string;
+  holder: string;
   revision: number;
   platform: string;
   sealed_current: boolean;
 };
 export const sealedCopyAnswerSchema = z.strictObject({
   name: z.string(),
+  holder: z.string().min(1),
   platform: z.string(),
   revision: z.number().int().positive(),
   metadata: z.record(z.string(), z.unknown()).nullable(),
@@ -904,7 +926,7 @@ export interface CredentialRecords {
   list(
     tx: Transaction,
     set: CredentialPlatformSet,
-    query: CredentialListQuery & { holder?: string },
+    query: CredentialListQuery & { holder?: string; machine?: string },
   ): CredentialListAnswer;
   copyPlatform(
     tx: Transaction,
@@ -1008,6 +1030,7 @@ export interface CredentialRecords {
   ): CredentialMetadata | null;
   copiesMetadata(tx: Transaction, credentialName: string): CredentialMetadata[];
   copyHeld(tx: Transaction, credentialName: string, holder: string): boolean;
+  copyHolderOf(tx: Transaction, credentialName: string, holder: string): string;
   heldCopy(
     tx: Transaction,
     set: CredentialPlatformSet,
