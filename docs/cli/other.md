@@ -795,14 +795,17 @@ server version ends it with `worker.version.mismatch`. A rotated or archived
 instance answers `404 worker.instance.not_found` and ends the process.
 
 The heartbeat is a liveness signal. Its answer holds `server_version`,
-`binding_version`, `credential_version` and `work_version`. When
+`binding_version`, `credential_version`, `work_version` and `machine`. When
 `work_version` differs from the version of the last successful work read, the
 instance calls `worker.instance.work`. The work read answers `work_version`
 and the pending OAuth login sessions of the instance in `login_sessions`. A
 failed work read keeps the old version, so the next heartbeat reads the work
 again. The instance runs each session with pi-ai in `copy_code` or `device`
 mode, reports its address and code through `llm.credential.login_report`, and
-seals the result to its own key. A lost pending report repeats at each
+seals the result to the key of the holder of the session: its own key for an
+instance holder, and the machine key for a machine holder. A machine holder with no
+machine configuration fails the session with `failure_reason:
+worker.machine.config_absent`. A lost pending report repeats at each
 heartbeat while its session runs. The heartbeat interval stays 15 s while a
 session is pending, so a human login code reaches the instance within 15 s.
 
@@ -821,7 +824,7 @@ error code, and never the entry content.
 The first heartbeat answer and each new `credential_version` start a check of
 the copies of the instance. The instance lists its copies with
 `llm.credential.list` and reads each live copy sealed to its current key with
-`llm.credential.sealed`. It opens the copy with its own key, runs the provider
+`llm.credential.sealed`. It opens the copy with the key of its `holder`, runs the provider
 check of the platform with a 10-second deadline, and reports the result
 through `llm.credential.report`. A report holds `revision`, `status`,
 `capability`, `failure_reason` and `models`. The server never calls the
@@ -829,7 +832,30 @@ provider with the key of an instance copy. A failed check or report logs
 `Worker instance credential check failed` or `Worker instance credential report
 failed` with no secret. The record holds the credential name, or `null` for a
 failed list. After an indeterminate answer or a server failure, the next
-heartbeat starts the check again.
+heartbeat starts the check again. A machine copy with no machine configuration
+is skipped: the instance logs `Worker instance credential check skipped` with
+`credential_name`, `holder` and `code: worker.machine.config_absent`, and sends no report.
+
+The instance reads the machine key at each use, by the `holder` name of the
+item, and caches no machine key. It opens and seals the handover item, the
+refresh report, the copy check and the login with that key. An instance that
+reads the machine file needs no restart after a `worker machine rotate`. An
+instance that reads `KANTHORD_MACHINE_CONFIG` takes the new value only in a new
+container. An item of a machine with no machine configuration fails with
+`worker.handover.sealed_unopened`.
+
+The machine claim gate decides whether the instance sends a claim. The gate is
+closed at the start and stays closed until the first heartbeat answer, so the
+first pull sends no claim before that answer. Each heartbeat answer sets the
+gate from `machine`. A `null` `machine` opens the gate. For a `machine` name,
+the instance reads the machine configuration. A valid configuration opens the
+gate. `worker.machine.config_absent`, `worker.machine.config_conflict` or
+`worker.machine.config_invalid` closes the gate. The pull loop reads the gate
+before each claim. A closed gate sends no claim and reads the gate again after
+250 ms. When the gate closes, the instance logs one record
+`Worker machine configuration closed the claim gate` with `machine` and the
+code. It logs again only after the gate opened in between. A running execution
+continues while the gate is closed.
 
 One connection of an instance is current. A second process of the same
 instance takes the connection. The first process then gets

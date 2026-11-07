@@ -33,6 +33,11 @@ import { HttpStatus } from "../../kernel/http.ts";
 import { LLM_PROVIDERS, Platform } from "../../llm/platforms.ts";
 import type { LlmProvider } from "../../llm/provider.ts";
 import { CopyChecks } from "./copy-checks.ts";
+import {
+  copyKeysFixture,
+  TEST_MACHINE_NAME,
+} from "./copy-keys-test-support.ts";
+import type { CopyKeys } from "./copy-keys.ts";
 import { EXCHANGE_UNAVAILABLE, ExchangeFailure } from "./instance-exchange.ts";
 
 const INSTANCE = "laptop";
@@ -53,6 +58,8 @@ const HEARTBEATS = 5;
 const SERVER_FAILURE_CODE = "gateway.invocation.invalid_response";
 const RUNS_FOR_A_CHANGE_DURING_A_RUN = 2;
 const RUNS_FOR_THREE_VERSIONS = 3;
+const ONE_REPORT = 1;
+const CONFIG_ABSENT = "worker.machine.config_absent";
 
 async function instanceKey(): Promise<InstanceCopyKey> {
   const pair = await generateX25519KeyPair();
@@ -62,6 +69,10 @@ async function instanceKey(): Promise<InstanceCopyKey> {
     public_key: pair.public_key,
     private_key: () => Buffer.from(pair.private_key),
   };
+}
+
+function keysOf(key: InstanceCopyKey): CopyKeys {
+  return { own: key, of: (holder) => (holder === key.holder ? key : null) };
 }
 
 function record(
@@ -98,14 +109,16 @@ async function fixture(
     reportFails?: boolean;
     timeoutMs?: number;
     providers?: Readonly<Record<string, LlmProvider>>;
+    sealTo?: InstanceCopyKey;
+    copyKeys?: CopyKeys;
   } = {},
 ) {
-  const key = await instanceKey();
+  const key = options.sealTo ?? (await instanceKey());
   const sealed = new Map<string, SealedCopyAnswer>();
   for (const copy of copies)
     sealed.set(copy.name, {
       name: copy.name,
-      holder: INSTANCE,
+      holder: key.holder,
       platform: copy.platform,
       revision: FIRST_REVISION,
       metadata: null,
@@ -115,7 +128,7 @@ async function fixture(
         credentialSealAad({
           name: copy.name,
           platform: copy.platform,
-          holder: INSTANCE,
+          holder: key.holder,
           sealed_to: key.sealed_to,
         }),
         copy.secret,
@@ -125,7 +138,7 @@ async function fixture(
   const logs: Record<string, unknown>[] = [];
   let lists = 0;
   const checks = new CopyChecks({
-    key,
+    copyKeys: options.copyKeys ?? keysOf(key),
     context: background,
     timeoutMs: options.timeoutMs,
     providers: options.providers ?? {
@@ -302,7 +315,7 @@ test("a refused report logs its code and a stopped instance checks nothing more"
   const context = new CancellationContext();
   context.cancel();
   const stopped = new CopyChecks({
-    key: await instanceKey(),
+    copyKeys: keysOf(await instanceKey()),
     context,
     exchange: {
       copies: async () => [record("team-openai", OPENAI)],
@@ -327,7 +340,7 @@ test("a run that ends on an indeterminate or server failure runs again at the ne
   ];
   let lists = 0;
   const checks = new CopyChecks({
-    key: await instanceKey(),
+    copyKeys: keysOf(await instanceKey()),
     context: background,
     exchange: {
       copies: async () => {
@@ -398,4 +411,44 @@ test("the copy check of an OAuth copy inside the pi-ai refresh window answers un
     f.reports[0]?.body.failure_reason,
     ResourceFailureReason.Unauthorized,
   );
+});
+
+test("a copy of a machine opens with the machine key and reports", async (t) => {
+  const keys = await copyKeysFixture(t);
+  const opened: unknown[] = [];
+  const f = await fixture(
+    [{ name: "team-openai", platform: OPENAI, secret: { key: "machine" } }],
+    async (secret) => {
+      opened.push(secret);
+      return { connection: Connection.Ok, models: null };
+    },
+    { sealTo: keys.machine.key, copyKeys: keys.keys },
+  );
+  f.checks.observe(NO_CREDENTIAL_VERSION);
+  await f.checks.idle();
+  assert.deepEqual(opened, [{ key: "machine" }]);
+  assert.equal(f.reports.length, ONE_REPORT);
+  assert.equal(f.reports[0]!.body.status, ResourceStatus.Healthy);
+  assert.deepEqual(f.logs, []);
+});
+
+test("a copy of a machine with no machine key sends no report and logs one skipped record", async (t) => {
+  const keys = await copyKeysFixture(t);
+  const absent = await copyKeysFixture(t, { machineInEnv: false });
+  const f = await fixture(
+    [{ name: "team-openai", platform: OPENAI, secret: { key: "machine" } }],
+    async () => assert.fail("no check without the machine key"),
+    { sealTo: keys.machine.key, copyKeys: absent.keys },
+  );
+  f.checks.observe(NO_CREDENTIAL_VERSION);
+  await f.checks.idle();
+  assert.deepEqual(f.reports, []);
+  assert.deepEqual(f.logs, [
+    {
+      msg: "Worker instance credential check skipped",
+      credential_name: "team-openai",
+      holder: TEST_MACHINE_NAME,
+      code: CONFIG_ABSENT,
+    },
+  ]);
 });

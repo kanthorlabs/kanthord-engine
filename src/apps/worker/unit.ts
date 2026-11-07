@@ -47,7 +47,7 @@ import {
   WorkspaceRoot,
 } from "../../worker/unit/index.ts";
 import { hostExecution } from "./execution.ts";
-import type { InstanceCopyKey } from "../../custody/client.ts";
+import type { CopyKeys } from "./copy-keys.ts";
 import { readServerVersion } from "../../gateway/client.ts";
 import { homedir } from "node:os";
 import { pullLoop, SETUP_UNAVAILABLE } from "./pull-loop.ts";
@@ -87,7 +87,8 @@ export interface WorkerUnitOptions {
   watchdog?: () => () => void;
   resume_pull_wait_ms?: number;
   refused?: (binding: UnitBinding) => void;
-  instance_key?: InstanceCopyKey;
+  copy_keys?: CopyKeys;
+  claim_gate?: () => boolean;
   footprint?: UnitFootprintScope;
 }
 
@@ -475,6 +476,7 @@ export class WorkerUnit {
       registration: entry.registration!,
       backoff: new Backoff(),
       shutdown: resume ?? entry.pulls,
+      gate: this.options.claim_gate,
       idle: () => this.idle(),
       round: () => this.currentRound(),
       pulling: (task) => {
@@ -650,7 +652,7 @@ export class WorkerUnit {
       claim,
       api: entry.binding.transport,
       clientSecret: entry.secret.toString("base64"),
-      instanceKey: this.options.instance_key,
+      copyKeys: this.options.copy_keys,
       workspaces: this.workspaces!,
       transport: this.repository!,
       modelRuntimeFactory:
