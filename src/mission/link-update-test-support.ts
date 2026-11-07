@@ -1,4 +1,5 @@
 import { createIdentity } from "../kernel/identity.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
 import type { TestContext } from "node:test";
 import {
@@ -10,9 +11,15 @@ import {
   NodeState,
   RevisionWrite,
 } from "./contract.ts";
-import { openAttempt } from "./record-store.ts";
-import { insertNode, insertRevision, setNodeState } from "./store.ts";
+import { insertLinkUpdate, openAttempt } from "./record-store.ts";
+import {
+  insertNode,
+  insertRevision,
+  readCurrentRevision,
+  setNodeState,
+} from "./store.ts";
 import { controlHarness } from "./test-support.ts";
+import type { MissionBindings } from "./contract.ts";
 
 export const LINK_RESOURCE = "conversation:github:acme/app";
 export const LINK_NUMBER = 7;
@@ -24,6 +31,11 @@ export const LINK_EVENT_BODY = "COMMENT BODY OF THE UPDATE";
 export const LINK_MENTION = "reviewer";
 const NODE_TIME = 100;
 const FIRST_REVISION = 1;
+export const TRUSTED_ACTOR = "9";
+export const OTHER_ACTOR = "7";
+type BindingRevision = NonNullable<
+  ReturnType<MissionBindings["getBindingRevision"]>
+>;
 
 export function linkOf(number = LINK_NUMBER): ExternalLink {
   return {
@@ -73,9 +85,10 @@ export function linkUpdateHarness(t: TestContext, identity: CallerIdentity) {
   const addNode = (
     links: ExternalLink[],
     state: NodeState = NodeState.Available,
-    filename = `${createIdentity("task")}.md`.toLowerCase(),
+    bindings: string[] = [],
   ) => {
     const nodeId = createIdentity("node");
+    const filename = `${nodeId.toLowerCase()}.md`;
     h.store.transaction((tx) => {
       insertNode(tx, {
         id: nodeId,
@@ -95,7 +108,7 @@ export function linkUpdateHarness(t: TestContext, identity: CallerIdentity) {
           requirement: "Requirement",
           criterion: "Criterion",
           verifications: ["true"],
-          bindings: [],
+          bindings,
           intent: Intent.Examine,
           tags: [],
           external_links: links,
@@ -120,6 +133,62 @@ export function linkUpdateHarness(t: TestContext, identity: CallerIdentity) {
     });
     return nodeId;
   };
+  const pinned: BindingRevision[] = [];
+  const reads: string[] = [];
+  h.dependencies.bindings.getBindingRevision = (_tx, bindingId) => {
+    reads.push(bindingId);
+    return pinned.find((binding) => binding.binding_id === bindingId) ?? null;
+  };
+  const addBinding = (
+    resource: string,
+    actorIds: string[] | undefined,
+    revision = FIRST_REVISION,
+  ) => {
+    const bindingId = createIdentity("binding");
+    pinned.push({
+      project_id: h.project_id,
+      binding_id: bindingId,
+      name: `binding_${pinned.length}`,
+      resource_identity: resource,
+      revision,
+      tombstone: false,
+      disabled: false,
+      ...(actorIds === undefined
+        ? {}
+        : { link_trust: { actor_ids: actorIds } }),
+    });
+    return bindingId;
+  };
+  const insertUpdate = (
+    link: ExternalLink,
+    actorId: string,
+    occurredAt: number,
+    updateKey = `issue_comment:${occurredAt}:${actorId}`,
+  ) =>
+    h.store.transaction((tx) =>
+      insertLinkUpdate(tx, {
+        mission_id: h.mission_id,
+        external_link: canonicalJSON(link),
+        update_key: updateKey,
+        inbound_event_id: createIdentity("inbound_event"),
+        actor_id: actorId,
+        occurred_at: occurredAt,
+      }),
+    );
+  const listed = () =>
+    h.invoke("link_update.list", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: null,
+    });
+  const listedOf = (nodeId: string, query: object = {}) =>
+    h.invoke("link_update.list", {
+      params: { node_id: nodeId },
+      query,
+      body: null,
+    });
+  const currentRevision = (nodeId: string) =>
+    h.store.transaction((tx) => readCurrentRevision(tx, nodeId)!.revision);
   const retire = (nodeId: string) =>
     h.store.transaction((tx) =>
       tx.database
@@ -149,6 +218,12 @@ export function linkUpdateHarness(t: TestContext, identity: CallerIdentity) {
     decoding,
     intakeChecks,
     addNode,
+    addBinding,
+    insertUpdate,
+    listed,
+    listedOf,
+    currentRevision,
+    reads,
     retire,
     admit,
     rows,

@@ -25,6 +25,7 @@ import {
 } from "./contract.ts";
 import { recordRefusedLinkUpdate } from "./delivery-telemetry.ts";
 import {
+  linkDemandCount,
   MatchKind,
   matchLinkUpdate,
   matchRequests,
@@ -309,13 +310,19 @@ export function admitDelivery(
 export function countUnresolvedRequests(
   caller: CallerContext,
   input: CountInput,
-): { count: number } {
+): { count: number; link_count: number } {
   authorizeAdmission(caller);
   return caller.commit((tx) => ({
     count: unresolvedRequestCount(
       tx,
       input.project_id,
       input.resource_identity,
+    ),
+    link_count: linkDemandCount(
+      tx,
+      input.project_id,
+      input.resource_identity,
+      Date.now(),
     ),
   }));
 }

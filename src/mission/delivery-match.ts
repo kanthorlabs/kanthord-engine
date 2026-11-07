@@ -10,11 +10,15 @@ import {
   type DecodedLinkUpdate,
   Disposition,
   externalLinkSchema,
+  NodeState,
   type PlatformAddress,
   PlatformAddressKind,
   platformAddressSchema,
 } from "./contract.ts";
 
+const MS_PER_DAY = 86400000;
+const TERMINAL_LINK_DEMAND_DAYS = 14;
+export const TERMINAL_LINK_DEMAND_MS = TERMINAL_LINK_DEMAND_DAYS * MS_PER_DAY;
 const SINGLE_MATCH = 1;
 const NO_MATCH = 0;
 const projectIdSchema = identitySchema("project");
@@ -166,6 +170,43 @@ export function unresolvedRequestCount(
   return unresolvedRequestAddresses(tx, projectId).filter(
     ({ address }) => address.resource_identity === resourceIdentity,
   ).length;
+}
+
+export function linkDemandCount(
+  tx: Transaction,
+  projectId: string,
+  resourceIdentity: string,
+  now: number,
+): number {
+  assert.ok(projectIdSchema.safeParse(projectId).success);
+  assert.ok(resourceIdentity.length);
+  const row = tx.database
+    .prepare(
+      `SELECT COUNT(*) AS link_count FROM mission_mission m
+       JOIN mission_node n ON n.mission_id = m.id AND n.retired_at IS NULL
+       JOIN mission_node_revision r ON r.node_id = n.id
+         AND r.revision = (
+           SELECT MAX(latest.revision) FROM mission_node_revision latest
+           WHERE latest.node_id = n.id
+         )
+       JOIN json_each(r.external_links) link
+       WHERE m.project_id = ?
+         AND json_extract(link.value, '$.resource_identity') = ?
+         AND (n.state NOT IN (?, ?) OR EXISTS (
+           SELECT 1 FROM mission_attempt a
+           WHERE a.node_id = n.id AND a.attempt = n.attempt
+             AND a.closed_at IS NOT NULL AND ? - a.closed_at < ?
+         ))`,
+    )
+    .get(
+      projectId,
+      resourceIdentity,
+      NodeState.Completed,
+      NodeState.Discarded,
+      now,
+      TERMINAL_LINK_DEMAND_MS,
+    ) as { link_count: number };
+  return row.link_count;
 }
 
 function refused(reason: AdmissionRefusal): {

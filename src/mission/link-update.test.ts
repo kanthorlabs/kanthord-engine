@@ -3,7 +3,10 @@ import { test } from "node:test";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 import { createIdentity, identityTime } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
-import { testServiceIdentity } from "../kernel/test-identity.ts";
+import {
+  testHumanIdentity,
+  testServiceIdentity,
+} from "../kernel/test-identity.ts";
 import {
   AdmissionRefusal,
   Disposition,
@@ -18,14 +21,18 @@ import {
   LINK_EVENT_BODY,
   LINK_MENTION,
   LINK_OCCURRED_AT,
+  LINK_RESOURCE,
   LINK_UPDATE_KEY,
   linkOf,
   linkUpdateHarness,
+  OTHER_ACTOR,
   OTHER_LINK_NUMBER,
+  TRUSTED_ACTOR,
   updateOf,
 } from "./link-update-test-support.ts";
 import { actCalls, databaseSnapshot } from "./test-support.ts";
 
+const HUMAN_IDENTITY = testHumanIdentity("ulrich", "Ulrich", "jti_ulrich");
 const INTAKE_IDENTITY = testServiceIdentity(INTAKE_SERVICE_NAME);
 const NO_ROWS = 0;
 const NO_CALLS = 0;
@@ -301,4 +308,107 @@ test("admission calls no Intake check for a link update", async (t) => {
   await h.admit();
   assert.equal(h.intakeChecks.length, NO_CALLS);
   assert.equal(h.rows().length, SINGLE_ROW + SINGLE_ROW);
+});
+
+const FIRST_OCCURRED_AT = 1700000001000;
+const SECOND_OCCURRED_AT = 1700000002000;
+const THIRD_OCCURRED_AT = 1700000003000;
+const BINDING_REVISION_TWO = 2;
+const SECOND_MISSION_VERSION = 1;
+const BOTH_ROWS = 2;
+const OTHER_RESOURCE = "conversation:github:acme/other";
+
+function actorsOf(page: { items: { actor_id: string }[] }) {
+  return page.items.map((item) => item.actor_id);
+}
+
+test("a node reads the row of a trusted actor and not the row of another actor", async (t) => {
+  const h = linkUpdateHarness(t, HUMAN_IDENTITY);
+  const binding = h.addBinding(LINK_RESOURCE, [TRUSTED_ACTOR]);
+  h.addNode([linkOf()], NodeState.Available, [binding]);
+  const nodeId = h.addNode([linkOf()], NodeState.Available, [binding]);
+  h.insertUpdate(linkOf(), OTHER_ACTOR, FIRST_OCCURRED_AT);
+  h.insertUpdate(linkOf(), TRUSTED_ACTOR, SECOND_OCCURRED_AT);
+  assert.deepEqual(actorsOf(await h.listedOf(nodeId)), [TRUSTED_ACTOR]);
+});
+
+test("a binding write does not change a pinned node and a rebind reads the older row too", async (t) => {
+  const h = linkUpdateHarness(t, HUMAN_IDENTITY);
+  const pinned = h.addBinding(LINK_RESOURCE, [TRUSTED_ACTOR]);
+  const written = h.addBinding(
+    LINK_RESOURCE,
+    [TRUSTED_ACTOR, OTHER_ACTOR],
+    BINDING_REVISION_TWO,
+  );
+  const nodeId = h.addNode([linkOf()], NodeState.Available, [pinned]);
+  h.insertUpdate(linkOf(), OTHER_ACTOR, FIRST_OCCURRED_AT);
+  h.insertUpdate(linkOf(), TRUSTED_ACTOR, SECOND_OCCURRED_AT);
+  assert.deepEqual(actorsOf(await h.listedOf(nodeId)), [TRUSTED_ACTOR]);
+  const revisionBefore = h.currentRevision(nodeId);
+  await h.invoke("node.rebind", {
+    params: { mission_id: h.mission_id },
+    query: {},
+    body: {
+      binding_id: written,
+      node_id: nodeId,
+      reason: "Trust the second actor",
+      expected_mission_version: SECOND_MISSION_VERSION,
+    },
+  });
+  assert.ok(h.currentRevision(nodeId) > revisionBefore);
+  assert.deepEqual(actorsOf(await h.listedOf(nodeId)), [
+    TRUSTED_ACTOR,
+    OTHER_ACTOR,
+  ]);
+});
+
+test("a revision that pins no binding of the link resource reads no row", async (t) => {
+  const h = linkUpdateHarness(t, HUMAN_IDENTITY);
+  const other = h.addBinding(OTHER_RESOURCE, [TRUSTED_ACTOR]);
+  const nodeId = h.addNode([linkOf()], NodeState.Available, [other]);
+  const unpinned = h.addNode([linkOf()]);
+  h.insertUpdate(linkOf(), TRUSTED_ACTOR, FIRST_OCCURRED_AT);
+  assert.deepEqual((await h.listedOf(nodeId)).items, []);
+  assert.deepEqual((await h.listedOf(unpinned)).items, []);
+});
+
+test("a binding with no link_trust trusts nobody", async (t) => {
+  const h = linkUpdateHarness(t, HUMAN_IDENTITY);
+  const binding = h.addBinding(LINK_RESOURCE, undefined);
+  const nodeId = h.addNode([linkOf()], NodeState.Available, [binding]);
+  h.insertUpdate(linkOf(), TRUSTED_ACTOR, FIRST_OCCURRED_AT);
+  assert.deepEqual((await h.listedOf(nodeId)).items, []);
+});
+
+test("a node with two links reads both threads newest first by occurred_at", async (t) => {
+  const h = linkUpdateHarness(t, HUMAN_IDENTITY);
+  const binding = h.addBinding(LINK_RESOURCE, [TRUSTED_ACTOR]);
+  const nodeId = h.addNode(
+    [linkOf(), linkOf(OTHER_LINK_NUMBER)],
+    NodeState.Available,
+    [binding],
+  );
+  h.insertUpdate(linkOf(), TRUSTED_ACTOR, SECOND_OCCURRED_AT);
+  h.insertUpdate(linkOf(OTHER_LINK_NUMBER), TRUSTED_ACTOR, THIRD_OCCURRED_AT);
+  h.insertUpdate(linkOf(), TRUSTED_ACTOR, FIRST_OCCURRED_AT);
+  const page = await h.listedOf(nodeId);
+  assert.deepEqual(
+    page.items.map((item) => item.occurred_at),
+    [THIRD_OCCURRED_AT, SECOND_OCCURRED_AT, FIRST_OCCURRED_AT],
+  );
+  assert.equal(page.items.length, BOTH_ROWS + SINGLE_ROW);
+});
+
+test("a read takes each pinned binding revision once", async (t) => {
+  const h = linkUpdateHarness(t, HUMAN_IDENTITY);
+  const binding = h.addBinding(LINK_RESOURCE, [TRUSTED_ACTOR]);
+  const nodeId = h.addNode(
+    [linkOf(), linkOf(OTHER_LINK_NUMBER)],
+    NodeState.Available,
+    [binding],
+  );
+  h.insertUpdate(linkOf(), TRUSTED_ACTOR, FIRST_OCCURRED_AT);
+  h.reads.length = NO_CALLS;
+  await h.listedOf(nodeId);
+  assert.deepEqual(h.reads, [binding]);
 });
