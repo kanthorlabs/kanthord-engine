@@ -1309,7 +1309,7 @@ function deferredBranchPushFixture(
     ssh_credential: "github-ssh",
     credential: "github",
     base_branch: "main",
-    action: RepositoryAction.MergePush,
+    action: RepositoryAction.Push,
     landing: "human",
   });
   h.store.transaction((tx) =>
@@ -1345,7 +1345,7 @@ function deferredBranchPushFixture(
         node_id: h.node_id,
         attempt: FIRST_ATTEMPT,
         subject: "Request",
-        requirement_key: "repo.merge_push",
+        requirement_key: "repo.push",
         end_state: null,
         verification: null,
         provenance: JSON.stringify(h.opener),

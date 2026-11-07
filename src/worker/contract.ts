@@ -220,7 +220,7 @@ export const actionRequestResultSchema = z.strictObject({
 export type ActionRequestResult = z.infer<typeof actionRequestResultSchema>;
 export const RepositoryAction = {
   PullRequest: "pull_request",
-  MergePush: "merge_push",
+  Push: "push",
 } as const;
 export type FrozenAction = {
   key: string;

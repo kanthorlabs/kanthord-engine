@@ -282,8 +282,7 @@ export function landsByHuman(
   gateFiles: readonly string[],
 ): boolean {
   return (
-    action.action === RepositoryAction.MergePush &&
-    gateFiles.length > NO_GATE_FILES
+    action.action === RepositoryAction.Push && gateFiles.length > NO_GATE_FILES
   );
 }
 

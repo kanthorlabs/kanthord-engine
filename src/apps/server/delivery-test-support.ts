@@ -37,7 +37,7 @@ const FIRST_REVISION = 1;
 const WORKER_INSTANCE_COUNT = 1;
 const SECRET = "test-secret";
 const GATED = "gated";
-export const MERGE_KEY = "gated.merge_push";
+export const MERGE_KEY = "gated.push";
 const BASE_BRANCH = "main";
 const PULL_REQUEST_ACTION = "pull_request";
 export const GATED_KEY = "gated.pull_request";
@@ -232,7 +232,7 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
         { idempotencyKey: createIdempotencyKey() },
       ),
     );
-  const requestMergePush = async (x: ExecutionRecord, commit: string) =>
+  const requestPush = async (x: ExecutionRecord, commit: string) =>
     completed(
       await worker["evidence.request"](
         {
@@ -308,7 +308,7 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
     node,
     release,
     requestPullRequest,
-    requestMergePush,
+    requestPush,
     actionRequest,
     check,
     admit,

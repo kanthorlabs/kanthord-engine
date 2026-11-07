@@ -874,7 +874,7 @@ function landingHarness(
 
 const HUMAN_LANDING: LandingSpec = {
   name: "repo",
-  action: RepositoryAction.MergePush,
+  action: RepositoryAction.Push,
   gateFiles: true,
   address: PlatformAddressKind.BranchPush,
 };

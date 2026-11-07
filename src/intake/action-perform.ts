@@ -172,7 +172,7 @@ function authorizePerform(
     operation,
     project_id: granted.project_id,
     credential:
-      operation === OutboundOperation.GitMergePush
+      operation === OutboundOperation.GitPush
         ? sshCredentialOf(ssh)
         : granted.credential,
     material,
@@ -257,7 +257,7 @@ async function callAction(
       material,
       scope,
     });
-  assert.equal(action.operation, OutboundOperation.GitMergePush);
+  assert.equal(action.operation, OutboundOperation.GitPush);
   assert.equal(material, null, "A merge push holds no material.");
   return mergePush(dependencies, action, scope);
 }
@@ -397,7 +397,7 @@ function readBackAction(
       material,
       scope,
     });
-  assert.equal(action.operation, OutboundOperation.GitMergePush);
+  assert.equal(action.operation, OutboundOperation.GitPush);
   assert.equal(material, null, "A merge push holds no material.");
   return landedMerge(dependencies, action, scope);
 }
@@ -517,7 +517,7 @@ function resultCodeOf(action: Bound, resultClass: ResultClassValue): string {
   if (reusesPullRequest(action)) return GIT_FAILED_CODE;
   if (action.operation === OutboundOperation.GitHubPullRequest)
     return GITHUB_RESULT_CODE_PREFIX + resultClass;
-  assert.equal(action.operation, OutboundOperation.GitMergePush);
+  assert.equal(action.operation, OutboundOperation.GitPush);
   return GIT_FAILED_CODE;
 }
 

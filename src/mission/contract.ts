@@ -48,7 +48,7 @@ export interface MissionBindings {
     ssh_credential: string;
     credential: string | null;
     base_branch: string;
-    action: "pull_request" | "merge_push" | null;
+    action: "pull_request" | "push" | null;
     landing: "human" | "kanthord";
   } | null;
   resolveBinding(
@@ -648,7 +648,7 @@ export const closingEventSchema = z.enum(ClosingEvent);
 export type ClosingEvent = z.infer<typeof closingEventSchema>;
 export const RepositoryAction = {
   PullRequest: "pull_request",
-  MergePush: "merge_push",
+  Push: "push",
 } as const;
 export const repositoryActionSchema = z.enum(RepositoryAction);
 export type RepositoryAction = z.infer<typeof repositoryActionSchema>;
@@ -698,7 +698,7 @@ export const commitSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 export const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 export const actionKeySchema = z
   .string()
-  .regex(/^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push)$/);
+  .regex(/^[a-z][a-z0-9-]{0,62}\.(pull_request|push)$/);
 export const textSchema = z.string().min(1);
 
 export const intentSchema = z.enum(Intent);

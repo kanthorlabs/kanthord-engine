@@ -329,7 +329,7 @@ Common to every `config`:
 - `platform`: **required**, supported platform-name string; no default and no
   inference from the address. The values are `github`, `gitlab` and `bitbucket`.
   `gitlab` and `bitbucket` are git-only platforms: they take no `credential` and
-  permit `merge_push` only. The platform set is extensible, not an arbitrary accepted string.
+  permit `push` only. The platform set is extensible, not an arbitrary accepted string.
 - `address`: **required**, SSH repository address `git@<host>:<owner>/<repository>.git`; no default. The server connects on port 443 for `ssh.github.com`, `altssh.gitlab.com` and `altssh.bitbucket.org`, and on port 22 for every other host. The address takes no port. An HTTPS address fails. The host must be an SSH host of the platform: `github.com` or `ssh.github.com` for `github`, `gitlab.com` or `altssh.gitlab.com` for `gitlab`, and `bitbucket.org` or `altssh.bitbucket.org` for `bitbucket`. The server reads no SSH configuration, so an SSH alias such as `git@kanthorlabs.github.com:` fails. The host must hold a pin of `kanthord repository host-key pin`.
 - Unsupported addresses and contradictory platform/address combinations fail.
 - `strategy`: **required**, `RepositoryStrategy` object below. It has no inferred base branch, action or trigger.
@@ -365,7 +365,7 @@ Common to every `config`:
 
 Each `PolicyAction` holds only:
 
-- `name`: **required**, enum `pull_request | merge_push`; no default.
+- `name`: **required**, enum `pull_request | push`; no default.
 - `follows`: **required**, one of two closed shapes; no default:
   - `type: "assessment_passed"`, with no other members.
   - `type: "action_end_state"` and a required `binding` as a binding-name string, with no other members.
@@ -378,7 +378,7 @@ The key of the action is `<binding name>.<name>`, which the Mission Service free
 - The binding write refuses the `action_end_state` shape until a retry-safe claim-source contract exists, under the [frozen action rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-attempt). The refusal is one issue of the validation failure of `binding apply`, at the `follows` path.
 - Absent references and invalid dependency cycles fail validation.
 - `pull_request` opens a pull request from the node branch into the base branch. It requires the platform action capability and expects the merge of that pull request.
-- `merge_push` merges the node branch into the base branch and pushes. It requires the network git write capability and expects the push to the base branch. A change that touches a gate file of the binding gets no push; a human lands it. The Intake Service computes the changed gate files on the server.
+- `push` merges the node branch into the base branch and pushes. It requires the network git write capability and expects the push to the base branch. A change that touches a gate file of the binding gets no push; a human lands it. The Intake Service computes the changed gate files on the server.
 - Each action implies its expected end state and takes no parameter.
 - The Mission Service stores the changed gate files that the Intake Service computes at the assessment of a node. Find the binding of the repository before you add a path to `gate_files` in its `.kanthord/affected-tests.json`. Find each node that holds a required action of that binding. Pause each such node in `Evaluating` or `External.Requested`. Then block and unblock it, so that a new assessment reads the new declaration. A human can also land or close the open pull request of a node in `External.Requested`.
 

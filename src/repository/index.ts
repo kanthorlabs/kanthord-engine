@@ -73,7 +73,7 @@ export {
   type BranchCommitInput,
   type GateFilesInput,
   type Landing,
-  type MergePushInput,
+  type PushInput,
 } from "./connector.ts";
 
 export interface GitWriter {

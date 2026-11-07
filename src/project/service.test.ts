@@ -3147,7 +3147,7 @@ test("a binding prompt key outside the three keys or the agent catalog fails the
     );
 });
 
-test("a git-only platform accepts merge_push and refuses a credential or pull_request", async (t) => {
+test("a git-only platform accepts push and refuses a credential or pull_request", async (t) => {
   const address = "git@gitlab.com:acme/api.git";
   const f = writeFixture(t);
   const config = withoutCredential(repositoryBinding(address).config);
@@ -3180,7 +3180,7 @@ test("a git-only platform accepts merge_push and refuses a credential or pull_re
         strategy: {
           ...gitlab.strategy,
           action: {
-            name: GitHubAction.MergePush,
+            name: GitHubAction.Push,
             follows: { type: FollowsType.AssessmentPassed },
           },
         },
@@ -3195,6 +3195,37 @@ test("a git-only platform accepts merge_push and refuses a credential or pull_re
     f.ssh.map((call) => call.address),
     [address],
   );
+});
+
+const RETIRED_ACTION_NAME = ["merge", "push"].join("_");
+
+test("binding apply refuses the retired merge-push action name and accepts push", () => {
+  const config = repositoryBinding().config;
+  const withAction = (name: string) => ({
+    [REPOSITORY_NAME]: {
+      ...repositoryBinding(),
+      config: {
+        ...config,
+        strategy: {
+          ...config.strategy,
+          action: {
+            name,
+            follows: { type: FollowsType.AssessmentPassed },
+          },
+        },
+      },
+    },
+  });
+  assert.ok(Array.isArray(schemaIssues(withAction(RETIRED_ACTION_NAME))));
+  const accepted = projectOperations["bindingSet.write"].input.safeParse({
+    params: { project_id: "project" },
+    query: EMPTY_QUERY,
+    body: {
+      version: BINDING_SET_INITIAL_VERSION,
+      bindings: withAction(GitHubAction.Push),
+    },
+  });
+  assert.equal(accepted.success, true);
 });
 
 const CONVERSATION_NAME = "conversation";
@@ -5319,7 +5350,7 @@ test("repositoryPolicyOf preserves the named revision after a strategy change", 
           strategy: {
             base_branch: baseBranch,
             action: {
-              name: GitHubAction.MergePush,
+              name: GitHubAction.Push,
               follows: { type: FollowsType.AssessmentPassed },
             },
           },
@@ -5344,7 +5375,7 @@ test("repositoryPolicyOf preserves the named revision after a strategy change", 
       repository_environment: true,
     });
     const latest = f.project.repositoryPolicyOf(tx, later.id);
-    assert.equal(latest?.action, GitHubAction.MergePush);
+    assert.equal(latest?.action, GitHubAction.Push);
     assert.equal(latest?.base_branch, baseBranch);
   });
 });
@@ -6703,10 +6734,7 @@ test("a pull request strategy holds a landing choice and other actions refuse on
     true,
   );
   assert.equal(strategy(GitHubAction.PullRequest).success, true);
-  assert.equal(
-    strategy(GitHubAction.MergePush, Landing.KanthorD).success,
-    false,
-  );
+  assert.equal(strategy(GitHubAction.Push, Landing.KanthorD).success, false);
   assert.equal(strategy(GitHubAction.PullRequest, "robot").success, false);
 });
 
@@ -7013,7 +7041,7 @@ test("binding.suite_pass.plan.get answers the node create body of the setup node
 test("binding.suite_pass.plan.get refuses a binding with no human landing", (t) => {
   for (const action of [
     { name: GitHubAction.PullRequest, landing: Landing.KanthorD },
-    { name: GitHubAction.MergePush },
+    { name: GitHubAction.Push },
   ]) {
     const { f, params } = setupPlanFixture(t, action);
     refuses(
