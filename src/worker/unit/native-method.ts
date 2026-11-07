@@ -172,6 +172,7 @@ export async function runNativeExecution(
         verdict: prior.verdict,
         cleared: prior.cleared,
         unchangedTurns: 0,
+        refreshed: null,
         lastVerification: null,
         revisionCount: 0,
         memo: new VerificationMemo(),
