@@ -33,6 +33,7 @@ import { nodeRecord, requireNode } from "./node-read.ts";
 import { kindOfLabel } from "./finding-admit.ts";
 import {
   insertFinding,
+  markEarlierReportFindingsFixed,
   markFindingsFixed,
   routeOpenFixFindings,
 } from "./finding-store.ts";
@@ -168,6 +169,12 @@ export function submitAssessment(
       decided_at: null,
     });
   if (current) markFindingsFixed(tx, body.fixed_finding_ids, assessment.id);
+  if (
+    current &&
+    body.result === AssessmentResult.Success &&
+    intent === Intent.Implement
+  )
+    markEarlierReportFindingsFixed(tx, node.id, attempt.attempt, assessment.id);
   if (current && !reworkDue)
     routeOpenFixFindings(tx, node.id, attempt.attempt, FindingRoute.Report);
   if (reworkDue) {

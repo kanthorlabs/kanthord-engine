@@ -641,13 +641,14 @@ Follow these steps. Each step names the fields to read.
   A release verification that fails on every rerun gives the coder a revision turn with the failed output.
 - The route of a finding states who acts on it: `fix` (KanthorD fixes it in a rework of the same attempt), `report` (a human reviews it) or `record` (information only).
   The status reads `fixed` when `fixed_assessment_id` names an assessment, and `open` otherwise.
-  A finding waits for a human when its route is `report` and it holds no decision.
+  A finding waits for a human when its route is `report`, it holds no decision and its status is `open`.
+  A current `success` of an `implement` node marks each reviewer finding of an earlier attempt of the node as fixed by that assessment, when the finding has the route `report`, no decision and no `fixed_assessment_id`. The mark keeps the route and writes no decision. An `examine` node keeps every `report` finding, and a human finding keeps its decision flow.
 - Finding list accepts `<node-id>` and returns `Page<Finding>`.
   `--attempt` accepts a nonnegative safe integer and selects the findings of that attempt through their assessment.
   `--round` accepts a positive safe integer and selects the findings of that round.
   The list orders by the attempt, then by the round with a human finding last, then by the kind with `blocker` first, then by the label number, then by the identity. The cursor follows the same order.
 - Finding get accepts `<finding-id>` and returns `Finding`.
-- Finding undecided list accepts `<project-id>` and returns `Page<Finding>` of the findings of the project that wait for a human, in descending identity order.
+- Finding undecided list accepts `<project-id>` and returns `Page<Finding>` of the findings of the project that wait for a human (route `report`, no decision, status `open`), in descending identity order.
 - Finding decide accepts `<finding-id>` and `FindingDecide`, and returns `Finding`.
   `accepted` means that the human agrees that the finding is a defect and owns its fix outside KanthorD. `dismissed` means that the human judges that the finding is no defect.
   The act writes only the finding, so it admits a finding of a `Completed` node.
