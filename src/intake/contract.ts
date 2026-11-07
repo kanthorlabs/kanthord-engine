@@ -697,7 +697,7 @@ export const intakeOperations = {
     }),
     output: z.union([platformAddressSchema, resultClassAnswerSchema]),
     description:
-      "Merge the pull request of a request evidence for the Mission Service and answer its platform address or its result class.",
+      "Land the pull request or the branch push of a request evidence for the Mission Service and answer its platform address or its result class.",
   },
   "action.read": {
     ...actionReadOperation,

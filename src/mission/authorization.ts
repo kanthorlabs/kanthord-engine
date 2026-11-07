@@ -352,6 +352,7 @@ export function authorizeFrozenAction(
       frozen_action: action,
       repository,
       node: {
+        id: claim.nodeId,
         name: content.name,
         commit_type: commitTypeOf(content.commit_type),
       },
@@ -365,6 +366,7 @@ export function authorizeFrozenAction(
 
 function mergeLandingAdmitted(action: FrozenAction): void {
   assert.ok(action.key);
+  if (action.action === RepositoryAction.Push) return;
   if (
     action.action !== RepositoryAction.PullRequest ||
     action.configuration.landing !== RepositoryLanding.KanthorD
@@ -385,17 +387,19 @@ function gateFilesUnchanged(
     authorizationRefused(AuthorizationRefusal.GateFileChanged);
 }
 
-function pullRequestAddressOf(
+function landingAddressOf(
   tx: Transaction,
+  action: FrozenAction,
   evidenceId: string,
   resourceIdentity: string,
-): PullRequestAddress {
+): PlatformAddress {
   assert.ok(resourceIdentity);
   const address = platformAddressOf(tx, evidenceId);
-  if (
-    address.kind !== PlatformAddressKind.PullRequest ||
-    address.resource_identity !== resourceIdentity
-  )
+  const kind =
+    action.action === RepositoryAction.Push
+      ? PlatformAddressKind.BranchPush
+      : PlatformAddressKind.PullRequest;
+  if (address.kind !== kind || address.resource_identity !== resourceIdentity)
     authorizationRefused(AuthorizationRefusal.NodeMismatch);
   return address;
 }
@@ -407,7 +411,7 @@ function mergeAddressOf(
   action: FrozenAction,
   evidenceId: string,
   resourceIdentity: string,
-): PullRequestAddress {
+): PlatformAddress {
   mergeLandingAdmitted(action);
   gateFilesUnchanged(tx, nodeId, attempt, action.binding_id);
   const evidence = readEvidence(tx, evidenceId);
@@ -419,7 +423,7 @@ function mergeAddressOf(
     evidence.end_state !== null
   )
     authorizationRefused(AuthorizationRefusal.NodeMismatch);
-  return pullRequestAddressOf(tx, evidenceId, resourceIdentity);
+  return landingAddressOf(tx, action, evidenceId, resourceIdentity);
 }
 
 export function authorizeServiceMerge(
@@ -457,8 +461,9 @@ export function authorizeServiceMerge(
     dependencies.bindings,
     action.binding_id,
   );
-  const address = pullRequestAddressOf(
+  const address = landingAddressOf(
     tx,
+    action,
     evidence.id,
     revision.resource_identity,
   );
@@ -475,13 +480,17 @@ export function authorizeServiceMerge(
     authorizationRefused(AuthorizationRefusal.ClaimNotLive);
   const { content } = getRevision(tx, node.id, open.node_revision);
   return {
-    credential: policy.credential,
+    credential:
+      address.kind === PlatformAddressKind.PullRequest
+        ? policy.credential
+        : null,
     platform: policy.platform,
     project_id: policy.project_id,
     facts: {
       frozen_action: action,
       repository,
       node: {
+        id: node.id,
         name: content.name,
         commit_type: commitTypeOf(content.commit_type),
       },
@@ -545,6 +554,17 @@ export function authorizeRequestEvidence(
       action.binding_id,
     ),
   );
+  const assessed =
+    address.kind === PlatformAddressKind.BranchPush &&
+    currentAssessmentOf(tx, evidence.node_id, evidence.attempt)?.result ===
+      AssessmentResult.Success
+      ? assessedCommitOf(
+          tx,
+          evidence.node_id,
+          evidence.attempt,
+          action.binding_id,
+        )
+      : null;
   return {
     credential:
       address.kind === PlatformAddressKind.PullRequest
@@ -557,6 +577,7 @@ export function authorizeRequestEvidence(
       address,
       repository,
       human_landing: humanLanding,
+      assessed_commit: assessed,
       link_trust: linkTrust,
     },
   };

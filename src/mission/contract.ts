@@ -1200,10 +1200,10 @@ export type RepositoryFacts = {
 export type ActionFacts = {
   frozen_action: FrozenAction;
   repository: RepositoryFacts;
-  node: { name: string; commit_type: CommitType };
+  node: { id: string; name: string; commit_type: CommitType };
   snapshot_commit: string;
   reused_address: PullRequestAddress | null;
-  merge_address: PullRequestAddress | null;
+  merge_address: PlatformAddress | null;
   gate_files: string[];
 };
 export type RequestFacts = {
@@ -1211,6 +1211,7 @@ export type RequestFacts = {
   address: PlatformAddress;
   repository: RepositoryFacts;
   human_landing: boolean;
+  assessed_commit: string | null;
   link_trust: { actor_ids: string[] };
 };
 export type Authorized<F> = {

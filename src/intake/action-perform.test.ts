@@ -126,7 +126,7 @@ function actionFacts(
       resource_identity: RESOURCE_IDENTITY,
       base_branch: "main",
     },
-    node: { name: "Ship accounts", commit_type: "feat" },
+    node: { id: NODE_ID, name: "Ship accounts", commit_type: "feat" },
     snapshot_commit: SNAPSHOT,
     reused_address: null,
     merge_address: null,
@@ -166,7 +166,7 @@ function harness(t: TestContext, options: Options) {
   });
   const git: { call: GitCall; ssh: SshAccess | undefined }[] = [];
   const gitWriter: GitWriter = {
-    mergePushFresh: async (_input, _context, _deadline, ssh) => {
+    squashPushFresh: async (_input, _context, _deadline, ssh) => {
       git.push({ call: GitCall.Push, ssh });
       return (options.mergePush ?? (async () => ({ commit: MERGED })))();
     },
@@ -177,8 +177,8 @@ function harness(t: TestContext, options: Options) {
       git.push({ call: GitCall.Landing, ssh });
       if (options.landingFailure !== undefined) throw options.landingFailure;
       return options.landed
-        ? { landed: true, first_parent: MERGED }
-        : { landed: false, first_parent: null };
+        ? { landed: true, first_parent: MERGED, base_moved: false }
+        : { landed: false, first_parent: null, base_moved: false };
     },
     changedGateFiles: () => {
       throw new Error("A perform computes no gate file.");

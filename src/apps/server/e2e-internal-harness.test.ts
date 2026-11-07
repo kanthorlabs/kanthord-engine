@@ -139,6 +139,7 @@ async function setupInternal(t: TestContext) {
   fixture.gitWriter.landedOn = async () => ({
     landed: false,
     first_parent: null,
+    base_moved: false,
   });
   const cli = journeyClient(t, fixture.endpoint, fixture.token);
   for (const [group, name, platform, key] of [

@@ -62,6 +62,7 @@ const REVISION_COUNT_ATTRIBUTE = "kanthord.task.revision_count";
 const WALL_DEADLINE_MS = 300;
 const FETCH_DEADLINE_MS = 20000;
 const MAIN_CHANGE = "main change";
+const MERGE_PARENT_FIELDS = 3;
 const VERDICT_PLANNED = "verdict planned";
 const FAILING_RUNS_LAST = 1 + VERIFICATION_RERUNS + 1;
 
@@ -899,6 +900,39 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
     ).trim();
     assert.equal(pushed, h.checkouts[0]!.head);
     assert.equal((await simpleGit(h.root).revparse(["HEAD"])).trim(), pushed);
+  });
+
+  test("a conflict rework merges the new base at the claim, runs no agent turn and releases the merged head", async (t) => {
+    const h = await reworkHarness(t, VerdictSource.FailedChecks, true, []);
+    h.verdict = null;
+    const instruct = t.mock.method(h.agent, "instruct");
+    acceptEvidence(h);
+    recordReleases(h);
+    assert.deepEqual(await runStepsImplement(h), {
+      kind: "released",
+      furtherWork: false,
+    });
+    assert.equal(instruct.mock.calls.length, NO_PROVIDER_CALLS);
+    assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
+    const pushed = (
+      await simpleGit(h.bare).revparse([`refs/heads/${h.nodeBranch}`])
+    ).trim();
+    assert.equal(pushed, h.checkouts[0]!.head);
+    assert.equal((await simpleGit(h.root).revparse(["HEAD"])).trim(), pushed);
+    assert.equal(
+      (
+        await simpleGit(h.root).raw([
+          "rev-list",
+          "--parents",
+          "-n",
+          "1",
+          "HEAD",
+        ])
+      )
+        .trim()
+        .split(" ").length,
+      MERGE_PARENT_FIELDS,
+    );
   });
 
   test("a failed-check verdict on a current base sends the criterion-revision instruction", async (t) => {

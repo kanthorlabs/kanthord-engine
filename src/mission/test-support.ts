@@ -706,6 +706,7 @@ export async function externalRequestHarness(
   t: TestContext,
   identity: CallerIdentity,
   nextRepository = false,
+  action: RepositoryAction = RepositoryAction.PullRequest,
 ) {
   const h = evidenceHarness(t, identity);
   const nextId = createIdentity("binding");
@@ -731,7 +732,7 @@ export async function externalRequestHarness(
     ssh_credential: "github-ssh",
     credential: "github",
     base_branch: "main",
-    action: RepositoryAction.PullRequest,
+    action,
     landing: "human" as const,
   });
   const testedInput = {
@@ -781,17 +782,25 @@ export async function externalRequestHarness(
       )
       .run(JSON.stringify([...repositories, h.storageId]), h.node_id),
   );
-  const address: PlatformAddress = {
-    kind: PlatformAddressKind.PullRequest,
-    resource_identity: REQUEST_RESOURCE,
-    number: REQUEST_NUMBER,
-  };
+  const address: PlatformAddress =
+    action === RepositoryAction.Push
+      ? {
+          kind: PlatformAddressKind.BranchPush,
+          resource_identity: REQUEST_RESOURCE,
+          branch: "main",
+          commit: ASSESSED_COMMIT,
+        }
+      : {
+          kind: PlatformAddressKind.PullRequest,
+          resource_identity: REQUEST_RESOURCE,
+          number: REQUEST_NUMBER,
+        };
   const request = await h.invoke("evidence.request", {
     params: { node_id: h.node_id },
     query: {},
     body: {
       ...h.context,
-      requirement_key: "repo.pull_request",
+      requirement_key: `repo.${action}`,
       subject: "PR",
       address,
     },

@@ -5,10 +5,13 @@ import {
   apiKeySecretSchema,
   GrantKind,
   type Material,
+  SshIdentitySubjectKind,
 } from "../custody/contract.ts";
 import { type CallerIdentity, isServiceIdentity } from "../kernel/caller.ts";
+import { commitHeader } from "../kernel/commit-message.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
+import type { SshAccess } from "../repository/index.ts";
 import {
   GITHUB_RESULT_CODE_PREFIX,
   type GitHubCall,
@@ -17,10 +20,15 @@ import {
 } from "../repository/github.ts";
 import {
   type ActionCheckDependencies,
+  GIT_FAILED_CODE,
   GIT_TRANSPORT_CODES,
+  gitFailure,
+  releaseSshAccess,
 } from "./action-check.ts";
 import { addressCodec, decodeAddress } from "./address-codec.ts";
 import {
+  AddressKind,
+  GIT_WRITE_DEADLINE_MS,
   OutboundOperation,
   PLATFORM_CALL_DEADLINE_MS,
   type PlatformAddress,
@@ -53,6 +61,11 @@ export type MergeRunner = (
   request: OutboundRun<MergeAnswer>,
 ) => Promise<MergeAnswer>;
 
+interface Held {
+  facts: Readonly<ActionFacts> | null;
+  ssh: SshAccess | null;
+}
+
 export function mergeAction(
   dependencies: ActionCheckDependencies,
   run: MergeRunner,
@@ -64,32 +77,61 @@ export function mergeAction(
     identity && isServiceIdentity(identity),
     "The Mission Service merges.",
   );
-  const held: { facts: Readonly<ActionFacts> | null } = { facts: null };
+  const held: Held = { facts: null, ssh: null };
   return run({
     requestKey: SERVICE_MERGE_REQUEST_KEY_PREFIX + body.request_key,
-    deadlineMs: PLATFORM_CALL_DEADLINE_MS,
+    deadlineMs: GIT_WRITE_DEADLINE_MS,
     resultCodec: addressCodec,
     authorize: (tx, now) =>
       authorizeMerge(dependencies, tx, now, { identity, body, held }),
-    call: (material, scope) =>
-      callMergePullRequest(dependencies, identity, factsOf(held), {
-        material,
-        scope,
-      }),
-    readBack: (material, scope) =>
-      readBackMergePullRequest(dependencies, identity, factsOf(held), {
-        material,
-        scope,
-      }),
-    finalize: (answer) => finalizeMerge(answer, factsOf(held)),
+    call: (material, scope) => {
+      const facts = factsOf(held);
+      return landsByPush(facts)
+        ? callSquashPush(dependencies, facts, sshOf(held), scope)
+        : callMergePullRequest(dependencies, identity, facts, {
+            material,
+            scope,
+          });
+    },
+    readBack: (material, scope) => {
+      const facts = factsOf(held);
+      return landsByPush(facts)
+        ? readBackSquashPush(dependencies, facts, sshOf(held), scope)
+        : readBackMergePullRequest(dependencies, identity, facts, {
+            material,
+            scope,
+          });
+    },
+    finalize: (answer) => {
+      const facts = factsOf(held);
+      return landsByPush(facts)
+        ? finalizeSquashPush(answer)
+        : finalizeMerge(answer, facts);
+    },
   });
 }
 
-function factsOf(held: {
-  facts: Readonly<ActionFacts> | null;
-}): Readonly<ActionFacts> {
+function factsOf(held: Held): Readonly<ActionFacts> {
   assert.ok(held.facts !== null, "The authorization holds the facts.");
   return held.facts;
+}
+
+function sshOf(held: Held): SshAccess {
+  assert.ok(held.ssh !== null, "A branch push merge holds its SSH access.");
+  return held.ssh;
+}
+
+function landsByPush(facts: Readonly<ActionFacts>): boolean {
+  assert.ok(facts.merge_address !== null, "A merge names its address.");
+  return facts.merge_address.kind === AddressKind.BranchPush;
+}
+
+function pullRequestOf(facts: Readonly<ActionFacts>) {
+  assert.ok(
+    facts.merge_address?.kind === AddressKind.PullRequest,
+    "A pull request merge names its pull request.",
+  );
+  return facts.merge_address;
 }
 
 function authorizeMerge(
@@ -99,7 +141,7 @@ function authorizeMerge(
   request: {
     identity: CallerIdentity;
     body: MergeBody;
-    held: { facts: Readonly<ActionFacts> | null };
+    held: Held;
   },
 ): OutboundAuthorization {
   const { identity, body, held } = request;
@@ -118,13 +160,113 @@ function authorizeMerge(
     now,
   );
   const granted = custody.grantFacts(grant);
-  assert.ok(granted.credential !== null, "A merge holds a credential.");
   held.facts = granted.facts;
+  if (landsByPush(granted.facts)) {
+    custody.consume(grant);
+    const ssh = releaseSshAccess(dependencies, tx, now, {
+      identity,
+      claim: null,
+      subject: {
+        kind: SshIdentitySubjectKind.RequestEvidence,
+        evidence_id: body.evidence_id,
+      },
+    });
+    assert.equal(ssh.binding_id, granted.facts.repository.binding_id);
+    assert.equal(ssh.address, granted.facts.repository.address);
+    held.ssh = ssh.access;
+    return {
+      operation: OutboundOperation.GitPush,
+      project_id: granted.project_id,
+      credential: ssh.credential,
+      material: null,
+    };
+  }
+  assert.ok(granted.credential !== null, "A merge holds a credential.");
   return {
     operation: OutboundOperation.GitHubPullRequestMerge,
     project_id: granted.project_id,
     credential: granted.credential,
     material: custody.release(tx, grant, now),
+  };
+}
+
+export async function callSquashPush(
+  dependencies: ActionCheckDependencies,
+  facts: Readonly<ActionFacts>,
+  ssh: SshAccess,
+  scope: OutboundScope,
+): Promise<CallAnswer> {
+  try {
+    const { commit } = await dependencies.gitWriter.squashPushFresh(
+      {
+        address: facts.repository.address,
+        base_branch: facts.frozen_action.configuration.base_branch,
+        commit: facts.snapshot_commit,
+        node_id: facts.node.id,
+        header: commitHeader(facts.node.commit_type, facts.node.name),
+      },
+      scope.context,
+      deadlineOf(scope, GIT_WRITE_DEADLINE_MS),
+      ssh,
+    );
+    return { ok: true, result: branchPushAddress(facts, commit) };
+  } catch (error) {
+    return gitFailure(error);
+  }
+}
+
+async function readBackSquashPush(
+  dependencies: ActionCheckDependencies,
+  facts: Readonly<ActionFacts>,
+  ssh: SshAccess,
+  scope: OutboundScope,
+): Promise<ReadBack> {
+  const landing = await dependencies.gitWriter.landedOn(
+    {
+      address: facts.repository.address,
+      branch: facts.frozen_action.configuration.base_branch,
+      commit: facts.snapshot_commit,
+    },
+    scope.context,
+    deadlineOf(scope, GIT_WRITE_DEADLINE_MS),
+    ssh,
+  );
+  if (!landing.landed) return { match: false };
+  assert.ok(landing.first_parent !== null, "A landing names its commit.");
+  return {
+    match: true,
+    result: branchPushAddress(facts, landing.first_parent),
+  };
+}
+
+function finalizeSquashPush(answer: OutboundAnswer): Finalization<MergeAnswer> {
+  if (answer.ok)
+    return {
+      kind: FinalizationKind.Answer,
+      body: decodeAddress(answer.result),
+    };
+  return {
+    kind: FinalizationKind.Answer,
+    body: {
+      class: answer.class,
+      code: GIT_TRANSPORT_CODES.includes(answer.code)
+        ? answer.code
+        : GIT_FAILED_CODE,
+      message: answer.message,
+    },
+  };
+}
+
+export function branchPushAddress(
+  facts: Readonly<ActionFacts>,
+  commit: string,
+): PlatformAddress {
+  assert.ok(commit.length, "A branch push names its commit.");
+  return {
+    kind: AddressKind.BranchPush,
+    resource_identity: facts.repository.resource_identity,
+    branch: facts.frozen_action.configuration.base_branch,
+    commit,
   };
 }
 
@@ -134,7 +276,7 @@ export async function callMergePullRequest(
   facts: Readonly<ActionFacts>,
   held: { material: Material | null; scope: OutboundScope },
 ): Promise<CallAnswer> {
-  assert.ok(facts.merge_address !== null, "A merge call names its address.");
+  const merge = pullRequestOf(facts);
   const call = gitHubCall(requester, held.material, held.scope);
   const method = await dependencies.github.mergeMethodOf(call, targetOf(facts));
   if (!method.ok)
@@ -155,7 +297,7 @@ export async function callMergePullRequest(
     call,
     targetOf(facts),
     {
-      number: facts.merge_address.number,
+      number: merge.number,
       sha: facts.snapshot_commit,
       merge_method: method.value,
     },
@@ -167,7 +309,7 @@ export async function callMergePullRequest(
       code: answer.code,
       message: answer.message,
     };
-  return { ok: true, result: facts.merge_address };
+  return { ok: true, result: merge };
 }
 
 export async function readBackMergePullRequest(
@@ -176,28 +318,25 @@ export async function readBackMergePullRequest(
   facts: Readonly<ActionFacts>,
   held: { material: Material | null; scope: OutboundScope },
 ): Promise<ReadBack> {
-  assert.ok(
-    facts.merge_address !== null,
-    "A merge read-back names its address.",
-  );
+  const merge = pullRequestOf(facts);
   const call = gitHubCall(requester, held.material, held.scope);
   const answer = await dependencies.github.pullRequestMergedAt(
     call,
     targetOf(facts),
-    { number: facts.merge_address.number, sha: facts.snapshot_commit },
+    { number: merge.number, sha: facts.snapshot_commit },
   );
   if (!answer.ok || !answer.value) return { match: false };
-  return { match: true, result: facts.merge_address };
+  return { match: true, result: merge };
 }
 
 function finalizeMerge(
   answer: OutboundAnswer,
   facts: Readonly<ActionFacts>,
 ): Finalization<MergeAnswer> {
-  assert.ok(facts.merge_address !== null, "A merge names its address.");
+  const merge = pullRequestOf(facts);
   if (answer.ok) {
     const address = decodeAddress(answer.result);
-    if (!isDeepStrictEqual(address, facts.merge_address))
+    if (!isDeepStrictEqual(address, merge))
       return {
         kind: FinalizationKind.Answer,
         body: {

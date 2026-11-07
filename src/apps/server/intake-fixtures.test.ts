@@ -466,10 +466,17 @@ test("mapped transport maps the address of the fresh git writes and the landing 
     {
       landed: false,
       first_parent: null,
+      base_moved: false,
     },
   );
-  const merged = await transport.mergePushFresh(
-    { address: ADDRESS, base_branch: "main", commit },
+  const merged = await transport.squashPushFresh(
+    {
+      address: ADDRESS,
+      base_branch: "main",
+      commit,
+      node_id: "node_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      header: "feat: ship accounts",
+    },
     background,
     deadline(),
     LOCAL_GIT_SSH_ACCESS,
@@ -482,7 +489,7 @@ test("mapped transport maps the address of the fresh git writes and the landing 
     "1",
     merged.commit,
   ]);
-  assert.deepEqual(parents.trim().split(" ").slice(1), [repo.head, commit]);
+  assert.deepEqual(parents.trim().split(" ").slice(1), [repo.head]);
   assert.deepEqual(
     await transport.landedOn(
       before,
@@ -493,6 +500,7 @@ test("mapped transport maps the address of the fresh git writes and the landing 
     {
       landed: true,
       first_parent: merged.commit,
+      base_moved: false,
     },
   );
   await transport.pushSnapshotFresh(

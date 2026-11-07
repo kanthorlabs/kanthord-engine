@@ -34,8 +34,10 @@ import {
   SshAgentErrorCode,
   withSshAgent,
 } from "./ssh-agent.ts";
+import { sshLoginOf } from "./ssh-login.ts";
 
 const GIT_FAILED = "repository.connector.git_failed";
+export const GIT_BASE_MOVED = "git.base_moved";
 export const NODE_BRANCH_MISSING = "repository.node_branch.missing";
 export const GATE_DECLARATION_INVALID = "repository.gate_declaration.invalid";
 const EMPTY_STRING = "";
@@ -99,6 +101,9 @@ const NON_BLANK_PATTERN = /\S/;
 const GATE_PATH_SEPARATOR = "/";
 const GATE_PATH_CURRENT_PREFIX = "./";
 const PARENT_SEGMENT = "..";
+const NODE_TRAILER = "KanthorD-Node";
+const TESTED_TRAILER = "KanthorD-Tested";
+const NOREPLY_EMAIL_SUFFIX = "@users.noreply.github.com";
 
 function isCanonicalGatePath(path: string): boolean {
   return (
@@ -146,10 +151,19 @@ export class GitWriteError extends Diagnostic {
   }
 }
 
+export class BaseMovedError extends Error {
+  constructor(branch: string) {
+    super(`The base branch ${branch} moved after the assessment.`);
+    this.name = "BaseMovedError";
+  }
+}
+
 export interface PushInput {
   address: string;
   base_branch: string;
   commit: string;
+  node_id: string;
+  header: string;
 }
 
 export interface BranchCommitInput {
@@ -168,6 +182,7 @@ export interface GateFilesInput {
 export interface Landing {
   landed: boolean;
   first_parent: string | null;
+  base_moved: boolean;
 }
 
 interface GitOptions {
@@ -637,30 +652,32 @@ function gitIn(
     ).output;
 }
 
-export async function mergePushFresh(
+export async function squashPushFresh(
   input: PushInput,
   context: Context,
   deadlineAt: number,
   ssh: SshAccess,
 ): Promise<{ commit: string }> {
   assert.match(input.commit, COMMIT_PATTERN);
-  assert.ok(!input.base_branch.startsWith("-"));
+  assert.ok(!input.base_branch.startsWith(OPTION_PREFIX));
+  assert.ok(input.node_id);
+  assert.ok(input.header);
   return beforePush(() =>
     withAccess(ssh, context, remainingMs(deadlineAt), (agent) =>
-      mergePushWith(input, context, deadlineAt, agent),
+      squashPushWith(input, context, deadlineAt, agent),
     ),
   );
 }
 
-async function mergePushWith(
+async function squashPushWith(
   input: PushInput,
   context: Context,
   deadlineAt: number,
   agent: AgentVariables,
 ): Promise<{ commit: string }> {
   return inFreshDirectory(freshWriteDirectory, async (directory) => {
-    const git = gitIn(directory, context, deadlineAt, "merge push", agent);
-    await atStage(GitStage.BeforePush, async () => {
+    const git = gitIn(directory, context, deadlineAt, "squash push", agent);
+    const commit = await atStage(GitStage.BeforePush, async () => {
       await cloneWith(
         input.address,
         directory,
@@ -670,24 +687,86 @@ async function mergePushWith(
       );
       await git(["check-ref-format", "--branch", input.base_branch]);
       await git(["fetch", "origin", input.commit]);
-      await git([
-        "checkout",
-        "--force",
-        "-B",
-        input.base_branch,
-        `origin/${input.base_branch}`,
-        "--",
-      ]);
-      await git(["merge", "--no-ff", "--no-edit", input.commit], {
-        PATH: process.env.PATH,
-        HOME: process.env.HOME,
+      const base = `origin/${input.base_branch}`;
+      const { exitCode } = await runGitExit(
+        directory,
+        ["merge-base", "--is-ancestor", base, input.commit],
+        context,
+        remainingMs(deadlineAt),
+        "squash push",
+        [EXIT_SUCCESS, EXIT_NOT_ANCESTOR],
+      );
+      if (exitCode === EXIT_NOT_ANCESTOR)
+        throw new BaseMovedError(input.base_branch);
+      const author = await authorOf(git, input, context, {
+        deadlineAt,
+        agent,
       });
+      return (
+        await git(
+          [
+            "commit-tree",
+            `${input.commit}^{tree}`,
+            "-p",
+            base,
+            "-m",
+            squashMessage(input),
+          ],
+          {
+            PATH: process.env.PATH,
+            HOME: process.env.HOME,
+            GIT_AUTHOR_NAME: author.name,
+            GIT_AUTHOR_EMAIL: author.email,
+            GIT_COMMITTER_NAME: author.name,
+            GIT_COMMITTER_EMAIL: author.email,
+          },
+        )
+      ).trim();
     });
     return atStage(GitStage.Push, async () => {
-      await git(["push", "origin", `HEAD:refs/heads/${input.base_branch}`]);
-      return { commit: (await git(["rev-parse", "HEAD"])).trim() };
+      await git([
+        "push",
+        "origin",
+        `${commit}:refs/heads/${input.base_branch}`,
+      ]);
+      return { commit };
     });
   });
+}
+
+function squashMessage(input: PushInput): string {
+  return [
+    input.header,
+    EMPTY_STRING,
+    `${NODE_TRAILER}: ${input.node_id}`,
+    `${TESTED_TRAILER}: ${input.commit}`,
+  ].join(BATCH_LINE_END);
+}
+
+async function authorOf(
+  git: (args: string[]) => Promise<string>,
+  input: PushInput,
+  context: Context,
+  access: { deadlineAt: number; agent: AgentVariables },
+): Promise<{ name: string; email: string }> {
+  assert.ok(access.agent.GIT_SSH_COMMAND);
+  const login = await sshLoginOf(
+    { address: input.address, command: access.agent.GIT_SSH_COMMAND },
+    context,
+    remainingMs(access.deadlineAt),
+  ).catch((error: unknown) => {
+    context.signal.throwIfAborted();
+    throw new Diagnostic(GIT_FAILED, "ssh login: git failed.", {
+      cause: new Error(gitFailureText("ssh login", error)),
+    });
+  });
+  if (login !== null)
+    return { name: login, email: `${login}${NOREPLY_EMAIL_SUFFIX}` };
+  const [name, email] = (
+    await git(["log", "-1", "--format=%an%n%ae", input.commit])
+  ).split(BATCH_LINE_END);
+  assert.ok(name !== undefined && email !== undefined);
+  return { name, email };
 }
 
 export async function pushSnapshotFresh(
@@ -752,6 +831,17 @@ async function landedOnWith(
   return inFreshDirectory(freshDirectory, async (directory) => {
     const operation = "landed on";
     const git = gitIn(directory, context, deadlineAt, operation, agent);
+    const isAncestor = async (ancestor: string, descendant: string) =>
+      (
+        await runGitExit(
+          directory,
+          ["merge-base", "--is-ancestor", ancestor, descendant],
+          context,
+          remainingMs(deadlineAt),
+          operation,
+          [EXIT_SUCCESS, EXIT_NOT_ANCESTOR],
+        )
+      ).exitCode === EXIT_SUCCESS;
     await cloneWith(
       input.address,
       directory,
@@ -760,20 +850,28 @@ async function landedOnWith(
       agent,
     );
     await git(["check-ref-format", "--branch", input.branch]);
+    await git(["fetch", "origin", input.commit]);
     const ref = `refs/remotes/origin/${input.branch}`;
-    const { exitCode } = await runGitExit(
-      directory,
-      ["merge-base", "--is-ancestor", input.commit, ref],
-      context,
-      remainingMs(deadlineAt),
-      operation,
-      [EXIT_SUCCESS, EXIT_NOT_ANCESTOR],
-    );
-    if (exitCode === EXIT_NOT_ANCESTOR)
-      return { landed: false, first_parent: null };
+    if (await isAncestor(input.commit, ref))
+      return {
+        landed: true,
+        first_parent: await oldestFirstParent(git, input.commit, ref),
+        base_moved: false,
+      };
+    const squashed = (
+      await git([
+        "rev-list",
+        "--max-count=1",
+        `--grep=^${TESTED_TRAILER}: ${input.commit}$`,
+        ref,
+      ])
+    ).trim();
+    if (squashed !== EMPTY_STRING)
+      return { landed: true, first_parent: squashed, base_moved: false };
     return {
-      landed: true,
-      first_parent: await oldestFirstParent(git, input.commit, ref),
+      landed: false,
+      first_parent: null,
+      base_moved: !(await isAncestor(ref, input.commit)),
     };
   });
 }
@@ -799,8 +897,7 @@ async function oldestFirstParent(
 }
 
 export function foldBranchPush(
-  landed: boolean,
-  commit: string,
+  landing: Landing,
   expectedEndState: ExpectedEndState,
   humanLanding: boolean,
 ): CheckFold {
@@ -808,13 +905,20 @@ export function foldBranchPush(
     expectedEndState === ExpectedEndState.BaseBranchPushed ||
       expectedEndState === ExpectedEndState.PullRequestMerged,
   );
-  assert.match(commit, COMMIT_PATTERN);
-  if (!landed)
+  if (landing.landed) {
+    assert.ok(landing.first_parent !== null, "A landing names its commit.");
     return {
-      end_state: humanLanding ? CheckEndState.None : CheckEndState.Other,
-      landed_commits: [],
+      end_state: CheckEndState.Expected,
+      landed_commits: [landing.first_parent],
     };
-  return { end_state: CheckEndState.Expected, landed_commits: [commit] };
+  }
+  return {
+    end_state:
+      landing.base_moved && !humanLanding
+        ? CheckEndState.Conflict
+        : CheckEndState.None,
+    landed_commits: [],
+  };
 }
 
 export async function resolveBranchCommit(

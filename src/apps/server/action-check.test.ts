@@ -464,7 +464,7 @@ test(
     );
 
     await t.test(
-      "a branch push answers expected while landed and other after a rewrite",
+      "a branch push answers expected while landed and conflict after a rewrite",
       async () => {
         const before = h.materials.length;
         assert.deepEqual(completed<Fold>(await branchPush()), {
@@ -473,7 +473,7 @@ test(
         });
         await rewriteMain(t, h.pushed.bare);
         assert.deepEqual(completed<Fold>(await branchPush()), {
-          end_state: CheckEndState.Other,
+          end_state: CheckEndState.Conflict,
           landed_commits: [],
         });
         assert.equal(h.materials.length, before + TWO_SSH_RELEASES);

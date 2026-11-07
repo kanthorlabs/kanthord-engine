@@ -37,7 +37,6 @@ import {
   type PlatformAddress,
   PlatformAddressKind,
   RefusalClass,
-  Uncertainty,
   WorkerErrorCode,
   workerOperations,
 } from "../../worker/contract.ts";
@@ -85,7 +84,6 @@ const TIMEOUT = 180000;
 const GATED = "gated";
 const PUSHED = "pushed";
 const GATED_KEY = "gated.pull_request";
-const PUSHED_KEY = "pushed.push";
 const GITHUB_KEY = "test-secret";
 const FINAL_REFUSAL_CODE = "repository.platform.github.final_refusal";
 const PULL_REQUEST_OPERATION = "github.pull_request";
@@ -812,70 +810,46 @@ suite("E06 action performer", { concurrency: SUITE_CONCURRENCY }, () => {
         NodeState.Evaluating,
       );
     });
-    await t.test("E06.15 unknown effect is not redispatched", async () => {
-      rejectPushes(h.pushedBare.bare);
-      const expected = {
-        kind: ActionResultKind.Uncertain,
-        action: { key: PUSHED_KEY, binding_id: h.pushed.id },
-        uncertainty: Uncertainty.Effect,
-      };
-      assert.deepEqual(completed(await h.request(e6)).items, [expected]);
-      assert.deepEqual(completed(await h.request(e6)).items, [expected]);
-      assert.equal(rejectedPushes(h.pushedBare.bare), SINGLE_CALL);
-      assert.equal(
-        await remoteHead(h.pushedBare.bare, MAIN_REF),
-        h.pushedBare.head,
+    await t.test(
+      "E06.15 a push records the assessed commit and performs no git write",
+      async () => {
+        rejectPushes(h.pushedBare.bare);
+        const [item] = completed(await h.request(e6)).items;
+        assert.ok(
+          item?.kind === ActionResultKind.Submitted,
+          JSON.stringify(item),
+        );
+        assert.deepEqual(
+          (item.evidence as Evidence).assets[FIRST_INDEX]?.address,
+          {
+            kind: PlatformAddressKind.BranchPush,
+            resource_identity: h.pushed.resource_identity,
+            branch: "main",
+            commit: h.E,
+          },
+        );
+        assert.deepEqual(completed(await h.request(e6)).items, []);
+        assert.equal(rejectedPushes(h.pushedBare.bare), NO_CALLS);
+        assert.equal(
+          await remoteHead(h.pushedBare.bare, MAIN_REF),
+          h.pushedBare.head,
+        );
+      },
+    );
+    await t.test(
+      "E06.16 a recorded push lets the reviewer release externally",
+      async () => {
+        await h.release(e6);
+        assert.equal((await h.node(h.P)).state, NodeState.ExternalRequested);
+      },
+    );
+    await t.test("E06.17 a stale proof is refused", async () => {
+      refused(
+        await h.request(e1),
+        HttpStatus.Forbidden,
+        "gateway.invocation.execution_proof_failed",
       );
     });
-    await t.test(
-      "E06.16 uncertain action cannot satisfy reviewer release",
-      async () => {
-        const result = await kanthord(
-          [
-            "scheduler",
-            "execution",
-            "release",
-            e6.execution_id,
-            "--file",
-            h.file({ further_work: false }),
-          ],
-          h.W,
-        );
-        assert.equal(result.code, FAILURE_EXIT);
-        assert.ok(
-          result.stderr.startsWith("mission.release.obligation_unmet:"),
-          result.stderr,
-        );
-        assert.equal(result.stdout, NO_OUTPUT);
-      },
-    );
-    await t.test(
-      "E06.17 reservation survives execution replacement and stale proof is refused",
-      async () => {
-        const act = {
-          reason: "hold",
-          expected_mission_version: h.M,
-          expected_state: NodeState.Evaluating,
-          expected_attempt: FIRST_ATTEMPT,
-        };
-        await h.write(["mission", "node", "pause", h.P], act);
-        await h.write(["mission", "node", "resume", h.P], {
-          ...act,
-          expected_state: NodeState.Paused,
-          target: NodeState.Waiting,
-        });
-        const e7 = await h.pull(h.P, FIRST_ATTEMPT);
-        const item = completed(await h.request(e7)).items[0];
-        assert.ok(item?.kind === ActionResultKind.Uncertain);
-        assert.equal(item.uncertainty, Uncertainty.Effect);
-        assert.equal(rejectedPushes(h.pushedBare.bare), SINGLE_CALL);
-        refused(
-          await h.request(e1),
-          HttpStatus.Forbidden,
-          "gateway.invocation.execution_proof_failed",
-        );
-      },
-    );
   });
 
   test(
@@ -1023,7 +997,7 @@ suite("E06 action performer", { concurrency: SUITE_CONCURRENCY }, () => {
   );
 
   test(
-    "a merge push with a changed gate file waits for a human landing",
+    "a push with a changed gate file waits for a human landing",
     { timeout: TIMEOUT },
     async (t) => {
       const h = await setup(t);

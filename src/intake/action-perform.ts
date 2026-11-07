@@ -11,13 +11,11 @@ import { OperationError } from "../kernel/errors.ts";
 import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { GITHUB_RESULT_CODE_PREFIX } from "../repository/github.ts";
+import type { SshAccess } from "../repository/index.ts";
 import {
-  GitStage,
-  GitWriteError,
-  type SshAccess,
-} from "../repository/index.ts";
-import {
+  branchPushAddress,
   callMergePullRequest,
+  callSquashPush,
   deadlineOf,
   gitHubCall,
   readBackMergePullRequest,
@@ -25,7 +23,9 @@ import {
 } from "./action-merge.ts";
 import {
   type ActionCheckDependencies,
+  GIT_FAILED_CODE,
   GIT_TRANSPORT_CODES,
+  gitFailure,
   isGitTransportFailure,
   releaseSshAccess,
   type SshRelease,
@@ -54,7 +54,6 @@ import {
   type ReadBack,
 } from "./outbound.ts";
 
-const GIT_FAILED_CODE = "repository.connector.git_failed";
 const ACTION_UNMAPPED_STATUS = 422;
 const MATCHED_PULL_REQUEST_COUNT = 1;
 const PULL_NUMBER_FLOOR = 0;
@@ -259,7 +258,7 @@ async function callAction(
     });
   assert.equal(action.operation, OutboundOperation.GitPush);
   assert.equal(material, null, "A merge push holds no material.");
-  return mergePush(dependencies, action, scope);
+  return callSquashPush(dependencies, action.facts, sshOf(action), scope);
 }
 
 async function createPullRequest(
@@ -310,31 +309,6 @@ function gateFileBodyOf(facts: Readonly<ActionFacts>): { body?: string } {
   };
 }
 
-async function mergePush(
-  dependencies: ActionCheckDependencies,
-  action: Bound,
-  scope: OutboundScope,
-): Promise<CallAnswer> {
-  const facts = action.facts;
-  const baseBranch = facts.frozen_action.configuration.base_branch;
-  assert.ok(baseBranch.length, "A merge push names its base branch.");
-  try {
-    const { commit } = await dependencies.gitWriter.mergePushFresh(
-      {
-        address: facts.repository.address,
-        base_branch: baseBranch,
-        commit: facts.snapshot_commit,
-      },
-      scope.context,
-      deadlineOf(scope, GIT_WRITE_DEADLINE_MS),
-      sshOf(action),
-    );
-    return { ok: true, result: branchPushAddress(facts, commit) };
-  } catch (error) {
-    return gitFailure(error);
-  }
-}
-
 async function pushSnapshot(
   dependencies: ActionCheckDependencies,
   performer: Performer,
@@ -358,19 +332,6 @@ async function pushSnapshot(
   } catch (error) {
     return gitFailure(error);
   }
-}
-
-function gitFailure(error: unknown): CallAnswer {
-  if (!(error instanceof GitWriteError)) throw error;
-  return {
-    ok: false,
-    class:
-      error.stage === GitStage.BeforePush
-        ? ResultClass.ConfirmedFailure
-        : ResultClass.UnknownOutcome,
-    code: error.code,
-    message: error.message,
-  };
 }
 
 function readBackAction(
@@ -538,17 +499,4 @@ function reusedAddressOf(facts: Readonly<ActionFacts>): PlatformAddress {
   assert.ok(reused !== null, "A reuse names its pull request.");
   assert.equal(reused.resource_identity, facts.repository.resource_identity);
   return pullRequestAddress(facts, reused.number);
-}
-
-function branchPushAddress(
-  facts: Readonly<ActionFacts>,
-  commit: string,
-): PlatformAddress {
-  assert.ok(commit.length, "A branch push names its commit.");
-  return {
-    kind: AddressKind.BranchPush,
-    resource_identity: facts.repository.resource_identity,
-    branch: facts.frozen_action.configuration.base_branch,
-    commit,
-  };
 }

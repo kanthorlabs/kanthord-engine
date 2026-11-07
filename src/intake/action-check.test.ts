@@ -25,7 +25,12 @@ import {
   GITHUB_RESULT_CODE_PREFIX,
   GitHubPlatform,
 } from "../repository/github.ts";
-import type { GitWriter, SshAccess } from "../repository/index.ts";
+import type {
+  BranchCommitInput,
+  GitWriter,
+  Landing,
+  SshAccess,
+} from "../repository/index.ts";
 import { SshAgentErrorCode } from "../repository/ssh-agent.ts";
 import { checkAction } from "./action-check.ts";
 import { ResultClass } from "./contract.ts";
@@ -39,11 +44,28 @@ const ADDRESS = `git@${SSH_HOST}:owner/pushed.git`;
 const OTHER_ADDRESS = `git@${SSH_HOST}:owner/other.git`;
 const RESOURCE_IDENTITY = "repository:github:owner/pushed";
 const PUSHED = "0123456789abcdef0123456789abcdef01234567";
+const ASSESSED = "89abcdef0123456789abcdef0123456789abcdef";
+const LANDED = "fedcba9876543210fedcba9876543210fedcba98";
 const PULL_NUMBER = 7;
 type ResultClassValue = (typeof ResultClass)[keyof typeof ResultClass];
 const BAD_GATEWAY_STATUS = 502;
 
 const ONE_LANDING = 1;
+const LANDED_COMMIT: Landing = {
+  landed: true,
+  first_parent: LANDED,
+  base_moved: false,
+};
+const NOT_LANDED: Landing = {
+  landed: false,
+  first_parent: null,
+  base_moved: false,
+};
+const BASE_MOVED: Landing = {
+  landed: false,
+  first_parent: null,
+  base_moved: true,
+};
 const mission: ServiceIdentity = {
   kind: IdentityKind.Service,
   service: MISSION_SERVICE_NAME,
@@ -77,6 +99,8 @@ function requestFacts(
       base_branch: "main",
     },
     human_landing: humanLanding,
+    assessed_commit:
+      address.kind === PlatformAddressKind.BranchPush ? ASSESSED : null,
     link_trust: { actor_ids: trustedActorIds },
   };
 }
@@ -118,7 +142,7 @@ function harness(
     credential?: string;
     pinned?: boolean;
     landingFailure?: Error;
-    landed?: boolean;
+    landing?: Landing;
     checksFailure?: ResultClassValue;
     reviews?: unknown[];
     sshFacts?: { binding_id: string; address: string };
@@ -137,13 +161,15 @@ function harness(
     sshFacts: options.sshFacts,
   });
   const landings: (SshAccess | undefined)[] = [];
+  const landingInputs: BranchCommitInput[] = [];
   const gitWriter: GitWriter = {
-    mergePushFresh: () => assert.fail("A check pushes nothing."),
+    squashPushFresh: () => assert.fail("A check pushes nothing."),
     pushSnapshotFresh: () => assert.fail("A check pushes nothing."),
-    landedOn: async (_input, _context, _deadline, ssh) => {
+    landedOn: async (input, _context, _deadline, ssh) => {
       landings.push(ssh);
+      landingInputs.push(input);
       if (options.landingFailure !== undefined) throw options.landingFailure;
-      return { landed: options.landed ?? true, first_parent: PUSHED };
+      return options.landing ?? LANDED_COMMIT;
     },
     changedGateFiles: () => assert.fail("A check pushes nothing."),
     sshAccessOf: sshAccessOf(),
@@ -187,7 +213,7 @@ function harness(
     );
   const sshRequests = () =>
     fake.requests.filter((request) => request.kind === GrantKind.SshIdentity);
-  return { ...fake, knownHosts, landings, check, sshRequests };
+  return { ...fake, knownHosts, landings, landingInputs, check, sshRequests };
 }
 
 test("a branch push check reads the landing with an SSH release of the request evidence under the Mission identity and no claim", async (t) => {
@@ -214,10 +240,37 @@ test("a branch push check reads the landing with an SSH release of the request e
   assert.ok(h.materials.every((material) => material.dropped));
 });
 
-test("a human landing branch push check answers none when the commit did not land", async (t) => {
-  const h = harness(t, {
+test("a branch push check reads the assessed commit and not the request commit", async (t) => {
+  const h = await harness(t, { facts: requestFacts(branchPush) });
+  await h.check();
+  assert.deepEqual(h.landingInputs, [
+    { address: ADDRESS, branch: "main", commit: ASSESSED },
+  ]);
+});
+
+test("a branch push check answers expected with the landed commit", async (t) => {
+  const h = await harness(t, { facts: requestFacts(branchPush) });
+  assert.deepEqual(await h.check(), {
+    end_state: CheckEndState.Expected,
+    landed_commits: [LANDED],
+  });
+});
+
+test("a branch push check answers conflict when the base moved", async (t) => {
+  const h = await harness(t, {
+    facts: requestFacts(branchPush),
+    landing: BASE_MOVED,
+  });
+  assert.deepEqual(await h.check(), {
+    end_state: CheckEndState.Conflict,
+    landed_commits: [],
+  });
+});
+
+test("a branch push check answers none when nothing landed and the base did not move", async (t) => {
+  const h = await harness(t, {
     facts: requestFacts(branchPush, true),
-    landed: false,
+    landing: NOT_LANDED,
   });
   assert.deepEqual(await h.check(), {
     end_state: CheckEndState.None,
@@ -225,11 +278,14 @@ test("a human landing branch push check answers none when the commit did not lan
   });
 });
 
-test("a human landing branch push check answers expected when the commit landed", async (t) => {
-  const h = harness(t, { facts: requestFacts(branchPush, true) });
+test("a human landing branch push check answers none when the base moved", async (t) => {
+  const h = await harness(t, {
+    facts: requestFacts(branchPush, true),
+    landing: BASE_MOVED,
+  });
   assert.deepEqual(await h.check(), {
-    end_state: CheckEndState.Expected,
-    landed_commits: [PUSHED],
+    end_state: CheckEndState.None,
+    landed_commits: [],
   });
 });
 
