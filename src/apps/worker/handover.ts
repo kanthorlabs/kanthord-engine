@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { CancellationContext, type Context } from "../../kernel/context.ts";
+import {
+  CancellationContext,
+  type Context,
+  joined,
+} from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import {
   deriveHandoverKeys,
@@ -15,6 +19,7 @@ import {
 import {
   type HandoverPayload,
   handoverPayloadSchema,
+  leasePayloadSchema,
   type SealedHandoverItem,
   type WireReport,
 } from "../../custody/contract.ts";
@@ -84,6 +89,19 @@ async function openSealedItem(
   return opened;
 }
 
+type LeaseItem = HandoverPayload["items"][number];
+type LeaseOf = (
+  credentialId: string,
+  signal: AbortSignal | undefined,
+) => Promise<LeaseItem>;
+
+function leaseMismatch(): Diagnostic {
+  return new Diagnostic(
+    "worker.credential.lease_mismatch",
+    "worker: the lease answer does not match the credential item.",
+  );
+}
+
 type ExecutionItemView = {
   item: Pick<SealedHandoverItem, "credential_id" | "provider_id">;
   view: ReturnType<typeof executionCredentialStore>;
@@ -93,13 +111,22 @@ async function executionItems(
   items: HandoverPayload["items"],
   key: InstanceCopyKey | undefined,
   send: (report: WireReport) => Promise<void>,
+  leaseOf: LeaseOf,
   views: ExecutionItemView[],
 ) {
   for (const item of items) {
     if ("credential" in item) {
       views.push({
         item,
-        view: executionCredentialStore({ items: [item] }, send),
+        view: executionCredentialStore(
+          { items: [item] },
+          send,
+          async (signal) => {
+            const leased = await leaseOf(item.credential_id, signal);
+            if (!("credential" in leased)) throw leaseMismatch();
+            return leased.credential;
+          },
+        ),
       });
       continue;
     }
@@ -110,11 +137,19 @@ async function executionItems(
       provider_id: item.provider_id,
       credential: opened.credential,
     };
+    const reporter = sealedCopyReporter(item, opened, key, send);
     views.push({
       item: plain,
       view: executionCredentialStore(
         { items: [plain] },
-        sealedCopyReporter(item, opened, key, send),
+        reporter,
+        async (signal) => {
+          const leased = await leaseOf(item.credential_id, signal);
+          if (!("sealed" in leased)) throw leaseMismatch();
+          const adopted = await openSealedItem(leased, key);
+          reporter.adopt(leased.sealed, adopted);
+          return adopted.credential;
+        },
       ),
     });
   }
@@ -132,6 +167,27 @@ export function retryableRefreshInFlight<T>(
       idempotencyKey: result.idempotencyKey,
     };
   return result;
+}
+
+export function retryableLeaseHeld<T>(
+  result: OperationResult<T>,
+): OperationResult<T> {
+  if (
+    result.type === OperationResultType.Failure &&
+    result.error.error.code === WorkerErrorCode.CredentialLeaseHeld
+  )
+    return {
+      type: OperationResultType.Indeterminate,
+      idempotencyKey: result.idempotencyKey,
+    };
+  return result;
+}
+
+function undecryptable(): Diagnostic {
+  return new Diagnostic(
+    "worker.handover.decryption_failed",
+    "worker: credential handover could not be decrypted.",
+  );
 }
 
 export async function takeHandover(input: {
@@ -187,8 +243,49 @@ export async function takeHandover(input: {
         ),
       );
     };
-    keys.handover.fill(0);
-    await executionItems(payload.items, input.instanceKey, report, views);
+    const leaseOf: LeaseOf = async (credentialId, signal) => {
+      const leaseContext =
+        signal === undefined
+          ? context
+          : joined(context, { signal, deadline: null });
+      const answer = completed(
+        await retryIndeterminate(
+          async (key) =>
+            retryableLeaseHeld(
+              await api.worker["credential.lease"](
+                {
+                  params: {},
+                  query: {},
+                  body: {
+                    execution_id: claim.execution_id,
+                    credential_id: credentialId,
+                  },
+                },
+                { context: leaseContext, idempotencyKey: key },
+              ),
+            ),
+          claim.expired_at,
+          leaseContext,
+        ),
+      );
+      try {
+        const lease = leasePayloadSchema.parse(
+          openEnvelope(keys.handover, aad, answer),
+        );
+        if (lease.item.credential_id !== credentialId) throw leaseMismatch();
+        return lease.item;
+      } catch (error) {
+        if (error instanceof HandoverOpenError) throw undecryptable();
+        throw error;
+      }
+    };
+    await executionItems(
+      payload.items,
+      input.instanceKey,
+      report,
+      leaseOf,
+      views,
+    );
     const sshIdentities = payload.ssh_identities;
     return {
       sshIdentities,
@@ -204,6 +301,7 @@ export async function takeHandover(input: {
         discard() {
           for (const { view } of views) view.discard();
           sshIdentities.length = 0;
+          keys.handover.fill(0);
           keys.report.fill(0);
           context.cancel();
         },
@@ -214,11 +312,7 @@ export async function takeHandover(input: {
     context.cancel();
     keys.handover.fill(0);
     keys.report.fill(0);
-    if (error instanceof HandoverOpenError)
-      throw new Diagnostic(
-        "worker.handover.decryption_failed",
-        "worker: credential handover could not be decrypted.",
-      );
+    if (error instanceof HandoverOpenError) throw undecryptable();
     throw error;
   }
 }

@@ -30,11 +30,14 @@ class ExecutionCredentialView implements ExecutionCredentials {
   #chain: Promise<void> = Promise.resolve();
   readonly #credentialId: string;
   readonly #providerId: string;
+  #unacknowledged = false;
   readonly #report: (report: RefreshReport) => Promise<void>;
+  readonly #lease: (signal?: AbortSignal) => Promise<Credential>;
 
   constructor(
     payload: HandoverItems,
     report: (report: RefreshReport) => Promise<void>,
+    lease: (signal?: AbortSignal) => Promise<Credential>,
   ) {
     const parsed = handoverItemsSchema.parse(payload);
     assert.equal(parsed.items.length, EXECUTION_CREDENTIAL_COUNT);
@@ -45,6 +48,7 @@ class ExecutionCredentialView implements ExecutionCredentials {
     this.#current = normalizeCredential(item.credential);
     this.#reported = normalizeCredential(item.credential);
     this.#report = report;
+    this.#lease = lease;
   }
 
   #live(): Credential {
@@ -65,8 +69,10 @@ class ExecutionCredentialView implements ExecutionCredentials {
   }
 
   async #send(): Promise<void> {
+    if (this.#unacknowledged) await this.#lease();
     const credential = piCredentialSchema.parse(this.#live());
     assert(this.#reported);
+    this.#unacknowledged = true;
     await this.#report({
       credential_id: this.#credentialId,
       digest: digest(this.#reported),
@@ -74,6 +80,7 @@ class ExecutionCredentialView implements ExecutionCredentials {
     });
     this.#live();
     this.#reported = normalizeCredential(credential);
+    this.#unacknowledged = false;
   }
 
   readonly store: CredentialStore = {
@@ -85,23 +92,32 @@ class ExecutionCredentialView implements ExecutionCredentials {
       this.#current
         ? [{ providerId: this.#providerId, type: this.#current.type }]
         : [],
-    modify: (providerId, fn) =>
+    modify: (providerId, fn, options) =>
       this.#enqueue(async () => {
         const current = this.#live();
         if (providerId !== this.#providerId)
           throw new ExecutionStoreError(
             "The provider is outside the execution credential store.",
           );
-        const answer = await fn(normalizeCredential(current));
+        const leased = normalizeCredential(await this.#lease(options?.signal));
         this.#live();
-        if (answer === undefined) return normalizeCredential(current);
-        const next = normalizeCredential(answer);
-        if (next.type !== current.type)
+        if (leased.type !== current.type)
           throw new ExecutionStoreError(
             "The execution credential type cannot change.",
           );
-        this.#current = next;
-        if (digest(next) !== digest(this.#reported)) await this.#send();
+        this.#current = leased;
+        this.#reported = normalizeCredential(leased);
+        const answer = await fn(normalizeCredential(leased));
+        this.#live();
+        if (answer !== undefined) {
+          const next = normalizeCredential(answer);
+          if (next.type !== leased.type)
+            throw new ExecutionStoreError(
+              "The execution credential type cannot change.",
+            );
+          this.#current = next;
+        }
+        await this.#send();
         return normalizeCredential(this.#live());
       }),
     delete: async () => {
@@ -124,6 +140,7 @@ class ExecutionCredentialView implements ExecutionCredentials {
 export function executionCredentialStore(
   payload: HandoverItems,
   report: (report: RefreshReport) => Promise<void>,
+  lease: (signal?: AbortSignal) => Promise<Credential>,
 ): ExecutionCredentials {
-  return new ExecutionCredentialView(payload, report);
+  return new ExecutionCredentialView(payload, report, lease);
 }

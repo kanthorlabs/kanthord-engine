@@ -323,6 +323,9 @@ test(
         async () => {
           throw new Error("Unexpected refresh");
         },
+        async () => {
+          throw new Error("Unexpected lease");
+        },
       );
       stopAfter(t, () => credentials.discard());
       const setup = completed(
