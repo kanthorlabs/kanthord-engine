@@ -63,6 +63,7 @@ export interface NativeExecutionInput {
   sessionRoot?: string;
   hostTools: (workspace: string) => HostTools;
   context: Context;
+  stop?: Context;
   log?: (record: Record<string, unknown>) => void;
   telemetry?: TelemetrySink;
 }

@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
-import { Diagnostic } from "../../kernel/errors.ts";
 import {
   AssetKind,
   type Evidence,
@@ -53,9 +52,11 @@ const TOOL_RESULT = "toolResult";
 const UPLOAD = "evidence-upload";
 const READY = "Worker application ready";
 const CLAIMED = "credential handover received";
-const LIVE_STOP = "worker.stop.execution_live";
+const WORKER_STOPPED = "worker_stopped";
+const STOPPED_FILE = "stopped.txt";
 const DECRYPTION_FAILED = "worker.handover.decryption_failed";
 const ENDED = "execution ended";
+const ENDED_KIND = "ended";
 const PATH_REFUSED = "worker.evidence_upload.path_refused";
 const PHASES = ["finish", "prepare", "start", "tasks"];
 const TASK_LOOP_PHASE = "tasks";
@@ -391,12 +392,13 @@ test(
     );
     const stopSetup = await fixture(t);
     await t.test(
-      "E09.15 SIGTERM preserves a live claim and registration",
+      "E09.15 SIGTERM releases a live execution with worker_stopped after a checkpoint push",
       { timeout: JOURNEY_TIMEOUT },
       async (t) => {
         const entered = Promise.withResolvers<void>();
         const resume = Promise.withResolvers<void>();
         const provider = scriptedProvider([
+          tool("bash", { command: `printf ${HELLO} > ${STOPPED_FILE}` }),
           async () => {
             entered.resolve();
             await resume.promise;
@@ -412,10 +414,43 @@ test(
         await entered.promise;
         process.emit("SIGTERM");
         resume.resolve();
-        const error = await host.running;
-        assert.ok(error instanceof Diagnostic);
-        assert.equal(error.code, LIVE_STOP);
-        await assertLive(stopSetup, host.logs);
+        assert.equal(await host.running, null);
+        assert.equal(await host.worker.stop(), null);
+        const executions = await stopSetup.read<{ items: ExecutionRecord[] }>([
+          "scheduler",
+          "execution",
+          "list",
+          stopSetup.project_id,
+          "--node",
+          stopSetup.node_id,
+        ]);
+        assert.equal(executions.items.length, SINGLE_ITEM);
+        const claim = executions.items[0]!;
+        assert.equal(claim.claim_state, ClaimState.Finished);
+        assert.equal(claim.stop?.reason, WORKER_STOPPED);
+        assert.equal(claim.stop?.code, null);
+        const branch = `refs/heads/kanthord/${stopSetup.node_id}`;
+        assert.match(
+          await stopSetup.git.listRemote([stopSetup.bare, branch]),
+          /^[a-f0-9]{40}\s/,
+        );
+        assert.equal(
+          await simpleGit(stopSetup.bare).show([`${branch}:${STOPPED_FILE}`]),
+          HELLO,
+        );
+        const node = await stopSetup.read<{ state: NodeState }>([
+          "mission",
+          "node",
+          "get",
+          stopSetup.node_id,
+        ]);
+        assert.equal(node.state, NodeState.Available);
+        assert.ok(
+          !host.logs.some(
+            (record) => record.msg === ENDED && record.kind === ENDED_KIND,
+          ),
+          JSON.stringify(host.logs),
+        );
       },
     );
     const handoverSetup = await fixture(t);
@@ -461,34 +496,3 @@ test(
     );
   },
 );
-
-async function assertLive(
-  setup: Awaited<ReturnType<typeof fixture>>,
-  logs: Record<string, unknown>[],
-) {
-  const executions = await setup.read<{ items: ExecutionRecord[] }>([
-    "scheduler",
-    "execution",
-    "list",
-    setup.project_id,
-    "--node",
-    setup.node_id,
-  ]);
-  assert.equal(executions.items.length, SINGLE_ITEM);
-  const claim = await setup.read<ExecutionRecord>(
-    ["scheduler", "claim", "get", executions.items[0]!.execution_id],
-    { ...setup.human, KANTHORD_TOKEN: setup.auth.token },
-  );
-  assert.equal(claim.claim_state, ClaimState.Running);
-  const list = await setup.read<{
-    items: { runtime_identity: string; registered: boolean }[];
-  }>(["worker", "registration", "list", "--project", setup.project_id]);
-  const identity = logs.find(
-    (record) => record.msg === READY,
-  )!.runtime_identity;
-  assert.ok(
-    list.items.some(
-      (item) => item.runtime_identity === identity && item.registered,
-    ),
-  );
-}

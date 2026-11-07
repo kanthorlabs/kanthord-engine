@@ -871,8 +871,12 @@ worker until its lease expires, and settlement then declares it lost. The
 application deregisters only a registration whose runtime identity it knows. It
 exits `0` after a successful deregistration or after the `404` that ends its
 registration, and exits `1` on any other deregistration or cleanup failure,
-without a retry. A 10-second watchdog applies only when no execution is live and
-no registration waits for its answer. `SIGHUP` reopens nothing.
+without a retry. A stop with a live execution first pushes the coder checkpoint
+and releases the execution with `worker_stopped`; a review ends with no
+assessment. The application then deregisters and exits as for an idle stop. A
+failed release exits `1` with `worker.stop.execution_live`. A 10-second watchdog
+applies only when no execution is live and no registration waits for its answer.
+`SIGHUP` reopens nothing.
 
 The [Worker sibling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-worker-application) rules the application, credential handover, workspace, prompt configuration, heartbeat expiry and containment.
 Shutdown during a live execution or a registration with no answer, and a stop
