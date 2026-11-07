@@ -321,6 +321,17 @@ export interface ExecutionAttribution {
     worker_name: string;
   } | null;
 }
+export interface PauseFactsRecord {
+  consecutive_failures: number;
+  consecutive_stalls: number;
+  last_stop: {
+    execution_id: string;
+    reason: string;
+    code: string | null;
+    detail: string | null;
+    trace_id: string;
+  } | null;
+}
 export interface MissionTransitions {
   claim(
     tx: Transaction,

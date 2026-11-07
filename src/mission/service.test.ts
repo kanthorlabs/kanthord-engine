@@ -70,6 +70,7 @@ import {
 } from "./contract.ts";
 import { missionMigrations } from "./migrations.ts";
 import { nodeRecord } from "./node-read.ts";
+import type { PausedDependencies } from "./record-read.ts";
 import { getRevision } from "./node-read.ts";
 import {
   closeAttempt,
@@ -322,6 +323,20 @@ const HUMAN_ACTOR = {
   name: "name",
 } as const;
 
+const pausedDependencies: PausedDependencies = {
+  pauseFacts: {
+    of: () => ({
+      consecutive_failures: 0,
+      consecutive_stalls: 0,
+      last_stop: null,
+    }),
+  },
+  config: {
+    consecutive_failure_limit: CONSECUTIVE_FAILURE_LIMIT,
+    further_work_limit: FURTHER_WORK_LIMIT,
+  },
+};
+
 const bindings: MissionBindings = {
   storageBindingOf: unexpectedCollaboration,
   repositoryPolicyOf() {
@@ -411,6 +426,13 @@ function makeService(
       of: () => {
         throw new Error(UNEXPECTED_COLLABORATION);
       },
+    },
+    pauseFacts: {
+      of: () => ({
+        consecutive_failures: 0,
+        consecutive_stalls: 0,
+        last_stop: null,
+      }),
     },
     telemetry: { uploadCheckFailed: () => {} },
     acts: { act: () => {} },
@@ -3951,7 +3973,7 @@ function importPreviewFixture(t: TestContext) {
   const entries: ImportEntry[] = f.store.transaction((tx) => {
     const nodes = readMissionNodes(tx, f.mission_id);
     return nodes.flatMap((node) => {
-      const record = nodeRecord(tx, node, bindings);
+      const record = nodeRecord(tx, node, bindings, pausedDependencies);
       return [
         {
           id: node.id,
@@ -5932,7 +5954,7 @@ test("mission rebind reports only terminal and retired earlier pins and keeps sk
         .run(RETIRED_AT, nodeId);
     return {
       node: f.store.transaction((tx) =>
-        nodeRecord(tx, readNode(tx, nodeId)!, bindings),
+        nodeRecord(tx, readNode(tx, nodeId)!, bindings, pausedDependencies),
       ),
       condition:
         state === NodeState.Available

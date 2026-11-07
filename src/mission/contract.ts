@@ -156,6 +156,14 @@ export const TransitionRule = {
 export const transitionRuleSchema = z.enum(TransitionRule);
 export type TransitionRule = z.infer<typeof transitionRuleSchema>;
 
+export const PauseRule = {
+  FailureLimit: TransitionRule.FailureLimit,
+  FurtherWorkLimit: TransitionRule.FurtherWorkLimit,
+  Human: "human",
+} as const;
+export const pauseRuleSchema = z.enum(PauseRule);
+export type PauseRule = z.infer<typeof pauseRuleSchema>;
+
 export interface NodeTransition {
   from: string;
   to: string;
@@ -350,6 +358,22 @@ export interface ExecutionAttribution {
     name: string | null;
     worker_name: string;
   } | null;
+}
+
+export interface PauseFactsRecord {
+  consecutive_failures: number;
+  consecutive_stalls: number;
+  last_stop: {
+    execution_id: string;
+    reason: string;
+    code: string | null;
+    detail: string | null;
+    trace_id: string;
+  } | null;
+}
+
+export interface PauseFacts {
+  of(tx: Transaction, nodeId: string, attempt: number): PauseFactsRecord;
 }
 
 export const UploadCheckSpan = {
@@ -1292,6 +1316,21 @@ export const blockedContextSchema = z.strictObject({
   requests: z.array(evidenceSchema),
 });
 export type BlockedContext = z.infer<typeof blockedContextSchema>;
+export const pausedContextSchema = z.strictObject({
+  rule: pauseRuleSchema,
+  count: z.number().int().nonnegative().nullable(),
+  limit: z.number().int().nonnegative().nullable(),
+  last_stop: z
+    .strictObject({
+      execution_id: identitySchema("execution"),
+      reason: textSchema,
+      code: textSchema.nullable(),
+      detail: textSchema.nullable(),
+      trace_id: textSchema,
+    })
+    .nullable(),
+});
+export type PausedContext = z.infer<typeof pausedContextSchema>;
 export const humanActSchema = z.strictObject({
   reason: textSchema,
   expected_mission_version: z.number().int().positive(),
@@ -1336,6 +1375,7 @@ const nodeBase = {
 };
 const runnableNodeFields = {
   blocked_context: blockedContextSchema.optional(),
+  paused_context: pausedContextSchema.optional(),
   state: nodeStateSchema,
   attempt: z.number().int().nonnegative(),
   pinned_revision: z.number().int().positive().nullable(),

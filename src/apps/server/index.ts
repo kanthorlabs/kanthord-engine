@@ -1028,6 +1028,9 @@ export function composeServices(options: {
     executionAttribution: {
       of: (...args) => scheduler.executionAttribution(...args),
     },
+    pauseFacts: {
+      of: (...args) => scheduler.pauseFacts(...args),
+    },
     telemetry: {
       uploadCheckFailed: (failure) => {
         const row = scheduler.executionOf(failure.execution_id);

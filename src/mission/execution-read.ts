@@ -119,7 +119,7 @@ export function executionDependencies(
       const record = outcomeRecord(tx, dependencies.bindings, outcome);
       const revision = getRevision(tx, dependency.id, record.node_revision);
       return {
-        ...nodeRecord(tx, dependency, dependencies.bindings),
+        ...nodeRecord(tx, dependency, dependencies.bindings, dependencies),
         filename: revision.filename,
         content: revision.content,
         intent: revision.content.intent,
