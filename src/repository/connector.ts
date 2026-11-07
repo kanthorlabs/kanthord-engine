@@ -146,7 +146,7 @@ export class GitWriteError extends Diagnostic {
   }
 }
 
-export interface MergePushInput {
+export interface PushInput {
   address: string;
   base_branch: string;
   commit: string;
@@ -638,7 +638,7 @@ function gitIn(
 }
 
 export async function mergePushFresh(
-  input: MergePushInput,
+  input: PushInput,
   context: Context,
   deadlineAt: number,
   ssh: SshAccess,
@@ -653,7 +653,7 @@ export async function mergePushFresh(
 }
 
 async function mergePushWith(
-  input: MergePushInput,
+  input: PushInput,
   context: Context,
   deadlineAt: number,
   agent: AgentVariables,

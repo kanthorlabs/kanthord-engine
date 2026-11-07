@@ -344,11 +344,11 @@ suite("E08 delivery admission", { concurrency: SUITE_CONCURRENCY }, () => {
     "E08.10 a deferred check resolves the merge push; a merged pull request resolves the sibling and conflicts the other",
     { timeout: TIMEOUT },
     async (t) => {
-      const h = await setup(t, { action: "merge_push" });
+      const h = await setup(t, { action: "push" });
       const E = await h.create("examine-1.md");
       const A = await h.implement("implement-a.md", E);
       const landed = h.gatedBare.head;
-      const request = await h.requestMergePush(A.x2, landed);
+      const request = await h.requestPush(A.x2, landed);
       assert.equal(request.requirement_key, MERGE_KEY);
       await h.release(A.x2.execution_id);
       await h.rebind("pull_request");

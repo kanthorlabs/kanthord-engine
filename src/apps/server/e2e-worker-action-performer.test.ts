@@ -85,7 +85,7 @@ const TIMEOUT = 180000;
 const GATED = "gated";
 const PUSHED = "pushed";
 const GATED_KEY = "gated.pull_request";
-const PUSHED_KEY = "pushed.merge_push";
+const PUSHED_KEY = "pushed.push";
 const GITHUB_KEY = "test-secret";
 const FINAL_REFUSAL_CODE = "repository.platform.github.final_refusal";
 const PULL_REQUEST_OPERATION = "github.pull_request";
@@ -329,7 +329,7 @@ async function setup(t: TestContext, landing?: string) {
     version: FIRST_REVISION,
     bindings: {
       gated: repository(GATED, "pull_request", landing),
-      pushed: repository(PUSHED, "merge_push"),
+      pushed: repository(PUSHED, "push"),
       harness: {
         kind: "worker",
         config: { worker: "claude-code@1", instance_count: SINGLE_INSTANCE },

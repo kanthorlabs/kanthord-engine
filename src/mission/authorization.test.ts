@@ -113,7 +113,7 @@ test("Mission proves live claim, node, open attempt and binding before granting 
 const OTHER_COMMIT = "b".repeat(40);
 const PULL_REQUEST_KEY = HARNESS_ACTION_KEY;
 const ISSUED_AT = 100;
-const MERGE_PUSH_KEY = "repo.merge_push";
+const MERGE_PUSH_KEY = "repo.push";
 
 function refuses(fn: () => unknown, reason: string) {
   assert.throws(fn, {
@@ -205,14 +205,11 @@ test("Mission authorizes a pull request action with the assessed snapshot and th
 
 test("Mission authorizes a merge push action without a credential", (t) => {
   const h = actionHarness(t);
-  h.policy.action = RepositoryAction.MergePush;
+  h.policy.action = RepositoryAction.Push;
   h.assess();
   const authorized = h.frozen({ key: MERGE_PUSH_KEY });
   assert.equal(authorized.credential, null);
-  assert.equal(
-    authorized.facts.frozen_action.action,
-    RepositoryAction.MergePush,
-  );
+  assert.equal(authorized.facts.frozen_action.action, RepositoryAction.Push);
 });
 
 test("a frozen action refuses a steps claim and an evaluation claim without a current passing assessment", (t) => {
@@ -275,7 +272,7 @@ test("a frozen action reuses only a pull request of the same node and resource",
       commit: ASSESSED_COMMIT,
     },
     h.node_id,
-    "branch.merge_push",
+    "branch.push",
   );
   const foreign = h.request(
     { ...h.pullRequest, resource_identity: "repository:github:other/repo" },
@@ -295,7 +292,7 @@ test("a request evidence answers the credential of a pull request and none for a
   assert.deepEqual(pullRequest.facts.address, h.pullRequest);
   assert.equal(pullRequest.facts.frozen_action.key, PULL_REQUEST_KEY);
   assert.equal(pullRequest.facts.repository.binding_id, h.repositoryId);
-  h.policy.action = RepositoryAction.MergePush;
+  h.policy.action = RepositoryAction.Push;
   const push = h.evidence(
     h.request({
       kind: PlatformAddressKind.BranchPush,
@@ -671,7 +668,7 @@ test("a merge address refuses evidence from another resource", (t) => {
 
 test("a merge address refuses a non-pull-request action with node_mismatch", (t) => {
   const h = actionHarness(t);
-  h.policy.action = RepositoryAction.MergePush;
+  h.policy.action = RepositoryAction.Push;
   h.policy.landing = RepositoryLanding.KanthorD;
   h.assess();
   const id = h.request(
@@ -722,7 +719,7 @@ test("a merge request refuses a binding with a changed gate file", (t) => {
 
 test("a merge push refuses a binding with a changed gate file", (t) => {
   const h = actionHarness(t);
-  h.policy.action = RepositoryAction.MergePush;
+  h.policy.action = RepositoryAction.Push;
   h.assess();
   assert.deepEqual(h.frozen({ key: MERGE_PUSH_KEY }).facts.gate_files, []);
   h.assess(AssessmentResult.Success, ASSESSED_COMMIT, [
@@ -734,7 +731,7 @@ test("a merge push refuses a binding with a changed gate file", (t) => {
 test("a request evidence answers human_landing only for a merge push with a changed gate file", (t) => {
   const h = actionHarness(t);
   const pullRequestId = h.request();
-  h.policy.action = RepositoryAction.MergePush;
+  h.policy.action = RepositoryAction.Push;
   const pushId = h.request({
     kind: PlatformAddressKind.BranchPush,
     resource_identity: h.resourceIdentity,

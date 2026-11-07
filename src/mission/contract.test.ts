@@ -94,7 +94,7 @@ const REASON = "Hold the work";
 const UNKNOWN_KEY = "unexpected";
 const INVALID_RESULT = "failure";
 const VALID_ACTION_KEY = "repo.pull_request";
-const INVALID_ACTION_KEY = "repo.push";
+const INVALID_ACTION_KEY = "repo.merge";
 const HUMAN = { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" };
 const CONTEXT = {
   execution_id: createIdentity("execution"),

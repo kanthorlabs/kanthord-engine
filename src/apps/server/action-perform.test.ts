@@ -254,7 +254,7 @@ async function setup(t: TestContext, landing = "human") {
     version: FIRST_REVISION,
     bindings: {
       gated: repository(GATED_ADDRESS, "pull_request", { landing }),
-      pushed: repository(PUSHED_ADDRESS, "merge_push"),
+      pushed: repository(PUSHED_ADDRESS, "push"),
       harness: {
         kind: "worker",
         config: { worker: "claude-code@1", instance_count: SINGLE_INSTANCE },
@@ -577,7 +577,7 @@ test(
       async () => {
         failed(
           await h.perform(gated, {
-            key: "pushed.merge_push",
+            key: "pushed.push",
             commit: h.pushed.head,
             request_key: "refused",
           }),
@@ -770,13 +770,13 @@ test(
     await h.requested(h.nodes.gated, gated, "gated.pull_request", created);
     const merged = await h.evaluated(h.nodes.pushed, "pushed", h.snapshot);
     const mergeBody = (requestKey: string) => ({
-      key: "pushed.merge_push",
+      key: "pushed.push",
       commit: h.snapshot,
       request_key: requestKey,
     });
 
     await t.test(
-      "git.merge_push merges the snapshot and leaves no clone",
+      "git.push merges the snapshot and leaves no clone",
       async () => {
         const before = h.materials.length;
         const scratch = mkdtempSync(join(tmpdir(), "kd-perform-"));
@@ -809,7 +809,7 @@ test(
           commit: head,
         });
         const stored = h.row("merge");
-        assert.equal(stored?.operation, OutboundOperation.GitMergePush);
+        assert.equal(stored?.operation, OutboundOperation.GitPush);
         assert.equal(stored?.credential, FAKE_SSH_CREDENTIAL);
         assert.equal(stored?.state, OutboundRequestState.Succeeded);
         assert.deepEqual(JSON.parse(stored!.result!), answer);
@@ -845,7 +845,7 @@ test(
           commit: await remoteHead(h.pushed.bare, MAIN_REF),
         });
         const stored = h.row("gitlab");
-        assert.equal(stored?.operation, OutboundOperation.GitMergePush);
+        assert.equal(stored?.operation, OutboundOperation.GitPush);
         assert.equal(stored?.state, OutboundRequestState.Succeeded);
       },
     );

@@ -131,7 +131,7 @@ export const LinkTrustReason = {
 } as const;
 export const GitHubAction = {
   PullRequest: "pull_request",
-  MergePush: "merge_push",
+  Push: "push",
 } as const;
 export const Landing = {
   Human: "human",

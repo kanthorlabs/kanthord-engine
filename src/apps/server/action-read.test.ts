@@ -160,7 +160,7 @@ async function setup(t: TestContext) {
     version: FIRST_REVISION,
     bindings: {
       gated: repository(GATED_ADDRESS, "pull_request"),
-      pushed: repository(PUSHED_ADDRESS, "merge_push"),
+      pushed: repository(PUSHED_ADDRESS, "push"),
       harness: {
         kind: "worker",
         config: { worker: "claude-code@1", instance_count: SINGLE_INSTANCE },
@@ -629,17 +629,12 @@ test(
     });
 
     await h.release(gated.evaluation);
-    const pushed = await h.requested(
-      h.nodes.pushed,
-      "pushed",
-      "pushed.merge_push",
-      {
-        kind: PlatformAddressKind.BranchPush,
-        resource_identity: h.resource("pushed"),
-        branch: "main",
-        commit: "a".repeat(40),
-      },
-    );
+    const pushed = await h.requested(h.nodes.pushed, "pushed", "pushed.push", {
+      kind: PlatformAddressKind.BranchPush,
+      resource_identity: h.resource("pushed"),
+      branch: "main",
+      commit: "a".repeat(40),
+    });
 
     await t.test("another node refuses before the release", async () => {
       const materials = h.materials.length;

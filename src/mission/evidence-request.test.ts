@@ -214,7 +214,7 @@ test("a pull request request admits a branch push address of its binding", async
   assert.equal(states[FIRST_INDEX]!.resolution, Resolution.Unresolved);
 });
 
-const MERGE_PUSH_KEY = "repo.merge_push";
+const MERGE_PUSH_KEY = "repo.push";
 const TESTED_COMMIT = "a".repeat(40);
 const OTHER_COMMIT = "b".repeat(40);
 const GATE_FILE_PATHS = ["package.json"];
@@ -226,7 +226,7 @@ function mergePushFixture(t: TestContext, gateFiles: string[]) {
   const policy = h.dependencies.bindings.repositoryPolicyOf;
   h.dependencies.bindings.repositoryPolicyOf = (...args) => ({
     ...policy(...args)!,
-    action: RepositoryAction.MergePush,
+    action: RepositoryAction.Push,
   });
   h.store.transaction((tx) =>
     insertAssessment(tx, {
