@@ -186,6 +186,8 @@ function proof(
             "user.name=test",
             "-c",
             "user.email=test@example.com",
+            "-c",
+            "maintenance.auto=false",
             ...args,
           ],
           { stdio: "ignore" },
