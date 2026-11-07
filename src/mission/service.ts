@@ -60,6 +60,7 @@ import {
   type NodeBody,
   type NodeStateFact,
   nodeStateSchema,
+  type PauseFacts,
   type SchedulerClaims,
   type SchedulerMatch,
   type SchedulerWakeup,
@@ -272,6 +273,7 @@ export interface Dependencies {
   schedulerMatch: SchedulerMatch;
   wakeup: SchedulerWakeup;
   executionAttribution: ExecutionAttribution;
+  pauseFacts: PauseFacts;
   telemetry: MissionTelemetry;
   acts: ActTelemetry;
   logger: Logger;
@@ -957,13 +959,19 @@ export class MissionService
               after,
             },
             query.limit,
+            this.dependencies,
           ),
         );
       },
     );
     registry.register(missionOperations["node.get"], ({ params }, caller) =>
       caller.commit((tx) =>
-        getNode(tx, params.node_id, this.dependencies.bindings),
+        getNode(
+          tx,
+          params.node_id,
+          this.dependencies.bindings,
+          this.dependencies,
+        ),
       ),
     );
     registry.register(
@@ -1051,6 +1059,7 @@ export class MissionService
             tx,
             { ...node, priority: body.value },
             this.dependencies.bindings,
+            this.dependencies,
           );
         }),
     );

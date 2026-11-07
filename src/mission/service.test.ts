@@ -412,6 +412,13 @@ function makeService(
         throw new Error(UNEXPECTED_COLLABORATION);
       },
     },
+    pauseFacts: {
+      of: () => ({
+        consecutive_failures: 0,
+        consecutive_stalls: 0,
+        last_stop: null,
+      }),
+    },
     telemetry: { uploadCheckFailed: () => {} },
     acts: { act: () => {} },
     logger: pino({ enabled: false }),

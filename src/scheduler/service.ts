@@ -215,6 +215,9 @@ export class SchedulerService implements Service, WorkQueue {
   executionAttribution(tx: Transaction, executionId: string) {
     return settlement.executionAttribution(tx, this.dependencies, executionId);
   }
+  pauseFacts(tx: Transaction, nodeId: string, attempt: number) {
+    return settlement.pauseFacts(tx, nodeId, attempt);
+  }
   wake(projectId: string): void {
     this.waiting.wake(projectId);
   }

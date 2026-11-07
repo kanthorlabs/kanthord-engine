@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
-import { ClaimState, ExecutionStopReason, TransitionRule } from "./contract.ts";
+import {
+  BudgetLimit,
+  ClaimState,
+  ExecutionStopReason,
+  TransitionRule,
+} from "./contract.ts";
 import {
   executionFixture,
   FIRST_LOSS_WITHOUT_JOB,
@@ -13,6 +18,7 @@ import {
 import { executionTrace } from "./telemetry.ts";
 import {
   claimStateOf,
+  consecutiveStalls,
   endExecution,
   insertExecution,
   readExecution,
@@ -26,6 +32,7 @@ import {
   settleRuntime,
 } from "./settlement.ts";
 
+const NO_FAILURES = 0;
 const ONE_LOSS = 1;
 const SECOND_LOSS = 2;
 const THIRD_FAILURE = 3;
@@ -265,6 +272,73 @@ test("lost and stopped rows count together until a finished row with no stop", (
     insertExecution(tx, after);
     endExecution(tx, after.execution_id, FIXTURE_DEADLINE + 102, STOP);
     assert.equal(consecutiveFailures(tx, after), ONE_LOSS);
+  });
+});
+
+test("pause facts answer the counts of the count functions and the last stop of the attempt", (t) => {
+  const h = schedulerHarness(t);
+  const nodeId = createIdentity("node");
+  const at = (offset: number, overrides = {}) =>
+    executionFixture({
+      node_id: nodeId,
+      expired_at: FIXTURE_DEADLINE + 100,
+      ...overrides,
+      created_at: FIXTURE_NOW + offset,
+    });
+  const detailed = { ...STOP, detail: "boom" };
+  const stalled = {
+    reason: ExecutionStopReason.BudgetEnd,
+    code: BudgetLimit.Turns,
+  };
+  h.store.transaction((tx) => {
+    assert.deepEqual(h.service.pauseFacts(tx, nodeId, 1), {
+      consecutive_failures: 0,
+      consecutive_stalls: 0,
+      last_stop: null,
+    });
+    const lost = at(1);
+    insertExecution(tx, lost);
+    endExecution(tx, lost.execution_id, FIXTURE_DEADLINE + 100);
+    const first = at(2);
+    insertExecution(tx, first);
+    endExecution(tx, first.execution_id, FIXTURE_DEADLINE, STOP);
+    const last = at(3);
+    insertExecution(tx, last);
+    endExecution(tx, last.execution_id, FIXTURE_DEADLINE, detailed);
+    const other = at(4, { attempt: 2 });
+    insertExecution(tx, other);
+    endExecution(tx, other.execution_id, FIXTURE_DEADLINE, STOP);
+    const facts = h.service.pauseFacts(tx, nodeId, 1);
+    assert.equal(facts.consecutive_failures, THIRD_FAILURE);
+    assert.equal(facts.consecutive_failures, consecutiveFailures(tx, last));
+    assert.equal(facts.consecutive_stalls, consecutiveStalls(tx, nodeId, 1));
+    assert.deepEqual(facts.last_stop, {
+      execution_id: last.execution_id,
+      reason: detailed.reason,
+      code: null,
+      detail: "boom",
+      trace_id: last.trace_id,
+    });
+    const released = at(5);
+    insertExecution(tx, released);
+    endExecution(tx, released.execution_id, FIXTURE_DEADLINE);
+    assert.deepEqual(h.service.pauseFacts(tx, nodeId, 1), {
+      consecutive_failures: 0,
+      consecutive_stalls: 0,
+      last_stop: null,
+    });
+    for (const offset of [6, 7]) {
+      const row = at(offset);
+      insertExecution(tx, row);
+      endExecution(tx, row.execution_id, FIXTURE_DEADLINE, stalled);
+    }
+    const stalls = h.service.pauseFacts(tx, nodeId, 1);
+    assert.equal(stalls.consecutive_stalls, SECOND_LOSS);
+    assert.equal(stalls.consecutive_stalls, consecutiveStalls(tx, nodeId, 1));
+    assert.equal(stalls.consecutive_failures, NO_FAILURES);
+    assert.equal(stalls.last_stop?.reason, stalled.reason);
+    assert.equal(stalls.last_stop?.code, BudgetLimit.Turns);
+    assert.equal(stalls.last_stop?.detail, null);
   });
 });
 

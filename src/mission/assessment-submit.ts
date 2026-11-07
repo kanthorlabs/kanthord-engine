@@ -260,7 +260,12 @@ export function submitAssessment(
   assert.equal(assessment.execution_id, claim.executionId);
   return {
     assessment: assessmentRecord(tx, dependencies, assessment),
-    node: nodeRecord(tx, requireNode(tx, node.id), dependencies.bindings),
+    node: nodeRecord(
+      tx,
+      requireNode(tx, node.id),
+      dependencies.bindings,
+      dependencies,
+    ),
     outcome:
       outcome === null
         ? null

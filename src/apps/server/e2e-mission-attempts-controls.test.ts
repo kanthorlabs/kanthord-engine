@@ -18,6 +18,7 @@ import {
   type NodeChange,
   NodeState,
   type Outcome,
+  PauseRule,
   RepositoryAction,
   Resolution,
   StartPoint,
@@ -260,6 +261,32 @@ test(
         assert.equal(answer.attempt?.closed_at, null);
         assert.ok(
           !(await queue()).items.some((item) => item.node_id === h.implementId),
+        );
+        const paused = {
+          rule: PauseRule.Human,
+          count: null,
+          limit: null,
+          last_stop: null,
+        };
+        assert.deepEqual(answer.node.paused_context, paused);
+        const node = await h.read<Node>([
+          "mission",
+          "node",
+          "get",
+          h.implementId,
+        ]);
+        assert.deepEqual(node.paused_context, paused);
+        const listed = await h.read<Page<Node>>([
+          "mission",
+          "node",
+          "list",
+          h.mission_id,
+          "--state",
+          NodeState.Paused,
+        ]);
+        assert.deepEqual(
+          listed.items.map((item) => item.paused_context),
+          [paused],
         );
       },
     );

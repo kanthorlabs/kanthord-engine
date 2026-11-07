@@ -419,6 +419,16 @@ export function missionHarness(
         return null;
       },
     },
+    pauseFacts: {
+      of: (...args) => {
+        record("pauseFacts.of", args);
+        return {
+          consecutive_failures: 0,
+          consecutive_stalls: 0,
+          last_stop: null,
+        };
+      },
+    },
     telemetry: {
       uploadCheckFailed: (...args) =>
         record("telemetry.uploadCheckFailed", args),
