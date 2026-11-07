@@ -1769,8 +1769,8 @@ export class ProjectService implements Service, ProjectBindings {
     assert.ok(latest, "A retained binding must have a latest revision.");
     assert.equal(latest.removed_at, null);
     return {
-      binding_id: latest.id,
-      resource_identity: latest.resource_identity,
+      binding_id: binding.id,
+      resource_identity: binding.resource_identity,
     };
   }
   getBindingRevision(

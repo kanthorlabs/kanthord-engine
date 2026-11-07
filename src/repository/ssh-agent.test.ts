@@ -37,7 +37,6 @@ import {
 } from "./ssh-agent.ts";
 import { generateSshKey } from "./ssh-key.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
-import { shortTemporaryRoot } from "../kernel/test-support.ts";
 
 const execFileAsync = promisify(execFile);
 const DEADLINE_MS = 30_000;
@@ -81,7 +80,7 @@ const MODULE_URLS = {
 
 delete process.env.SSH_AUTH_SOCK;
 delete process.env.SSH_AGENT_PID;
-const scratch = mkdtempSync(join(shortTemporaryRoot(), "kdt-"));
+const scratch = mkdtempSync(join(SSH_AGENT_ROOT, "kdt-"));
 process.env.TMPDIR = scratch;
 process.on("exit", () => rmSync(scratch, { recursive: true, force: true }));
 

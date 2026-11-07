@@ -899,12 +899,11 @@ function nodeFixture(
         },
         resolveBindingIdentity: (_tx, projectId, id) => {
           assert.equal(projectId, PROJECT_ID);
-          const latest = id === OLDER_BINDING_ID ? BINDING_ID : id;
-          return (
-            [...bindingMap.values()].find(
-              (value) => value.binding_id === latest,
-            ) ?? null
+          const revision = id === OLDER_BINDING_ID ? BINDING_ID : id;
+          const live = [...bindingMap.values()].find(
+            (value) => value.binding_id === revision,
           );
+          return live === undefined ? null : { ...live, binding_id: id };
         },
         getBindingRevision: bindingRevision,
       },
@@ -1348,13 +1347,35 @@ for (const binding of [MISSING_BINDING_ID, STORAGE_NAME]) {
   });
 }
 
-test("node.create pins the latest revision for an older binding revision identity", (t) => {
+test("node.create keeps the submitted older binding revision as its pin", (t) => {
   const f = nodeFixture(t);
   const body = f.body(Intent.Implement);
   body.content.bindings = [OLDER_BINDING_ID];
   const revision = f.create(body).revisions[FIRST_ELEMENT_INDEX]!;
-  assert.deepEqual(revision.content.bindings, [BINDING_ID]);
-  assert.deepEqual(f.read(revision.node_id).content.bindings, [BINDING_ID]);
+  assert.deepEqual(revision.content.bindings, [OLDER_BINDING_ID]);
+  assert.deepEqual(f.read(revision.node_id).content.bindings, [
+    OLDER_BINDING_ID,
+  ]);
+});
+
+test("node.update that submits the pinned older binding revision keeps the pin", (t) => {
+  const f = nodeFixture(t);
+  const body = f.body(Intent.Implement);
+  body.content.bindings = [OLDER_BINDING_ID];
+  const id = f.create(body).revisions[FIRST_ELEMENT_INDEX]!.node_id;
+  const update = updateBody(f, id);
+  const changed = f.update(id, {
+    ...update,
+    content: {
+      ...update.content,
+      name: "updated",
+      bindings: [OLDER_BINDING_ID],
+    },
+  });
+  const revision = changed.revisions[FIRST_ELEMENT_INDEX]!;
+  assert.equal(revision.revision, NEXT_REVISION);
+  assert.deepEqual(revision.content.bindings, [OLDER_BINDING_ID]);
+  assert.deepEqual(f.read(id).content.bindings, [OLDER_BINDING_ID]);
 });
 
 for (const kind of Object.values(Intent)) {
