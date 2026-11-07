@@ -361,6 +361,7 @@ export function missionHarness(
     intakeLinks: {
       hasInbound: unexpectedCollaboration,
       read: unexpectedCollaboration,
+      replyMatch: unexpectedCollaboration,
       handoff: unexpectedCollaboration,
       releaseHeld: unexpectedCollaboration,
     },

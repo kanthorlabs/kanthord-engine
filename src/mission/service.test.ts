@@ -391,6 +391,7 @@ function makeService(
     intakeLinks: {
       hasInbound: unexpectedCollaboration,
       read: unexpectedCollaboration,
+      replyMatch: unexpectedCollaboration,
       handoff: unexpectedCollaboration,
       releaseHeld: unexpectedCollaboration,
     },

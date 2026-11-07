@@ -1,17 +1,26 @@
+import type { z } from "zod";
 import { OperationError } from "../kernel/errors.ts";
+import type { ExternalLink } from "../kernel/external-link.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { identitySchema } from "../kernel/identity.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   IntakeErrorCode,
   OUTBOUND_LIST_LIMIT_DEFAULT,
   OUTBOUND_REQUEST_ID_PREFIX,
+  OutboundOperation,
   type OutboundOperationValue,
   type OutboundRequest,
+  OutboundRequestState,
   type OutboundRequestStateValue,
+  replyAccountSchema,
+  type replyMatchSchema,
+  replyResultSchema,
 } from "./contract.ts";
 import {
   findById,
+  findByKeySuffix,
   outboundRecord,
   type OutboundRow,
 } from "./outbound-store.ts";
@@ -21,6 +30,7 @@ const TEXT_ENCODING = "utf8";
 const LOOKAHEAD = 1;
 const SLICE_START = 0;
 const LAST_OFFSET = 1;
+const NO_PENDING = 0;
 
 export interface OutboundListQuery {
   project_id?: string;
@@ -95,4 +105,52 @@ export function getOutbound(tx: Transaction, id: string): OutboundRequest {
       "Outbound request not found.",
     );
   return outboundRecord(row);
+}
+
+function accountOf(row: OutboundRow): string | null {
+  if (row.result === null) return null;
+  const result = JSON.parse(row.result);
+  const posted = replyResultSchema.safeParse(result);
+  if (posted.success) return posted.data.actor_id;
+  const recorded = replyAccountSchema.safeParse(result);
+  return recorded.success ? recorded.data.actor_id : null;
+}
+
+function byCreation(left: OutboundRow, right: OutboundRow): number {
+  return left.created_at - right.created_at || (left.id < right.id ? -1 : 1);
+}
+
+export function matchReply(
+  tx: Transaction,
+  input: { update_key: string; external_link: ExternalLink },
+): z.output<typeof replyMatchSchema> {
+  const succeeded =
+    tx.database
+      .prepare(
+        "SELECT 1 AS found FROM intake_outbound_request WHERE operation = ? AND state = ? AND json_extract(result, '$.update_key') = ? LIMIT 1",
+      )
+      .get(
+        OutboundOperation.GitHubIssueComment,
+        OutboundRequestState.Succeeded,
+        input.update_key,
+      ) !== undefined;
+  const link = findByKeySuffix(
+    tx,
+    OutboundOperation.GitHubIssueComment,
+    `:${canonicalJSON(input.external_link)}`,
+  ).sort(byCreation);
+  const pending = link.filter(
+    (row) => row.state === OutboundRequestState.Pending,
+  );
+  const account = link
+    .filter((row) => row.state === OutboundRequestState.Succeeded)
+    .map(accountOf)
+    .at(-LAST_OFFSET);
+  const actors =
+    pending.length === NO_PENDING
+      ? []
+      : account !== undefined && account !== null
+        ? [account]
+        : pending.map(accountOf).filter((actor) => actor !== null);
+  return { succeeded, pending_actor_ids: [...new Set(actors)] };
 }

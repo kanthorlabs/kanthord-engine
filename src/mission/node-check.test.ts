@@ -62,6 +62,7 @@ import { externalRequestHarness, revokedExecution } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const NO_REMOTE_CALLS = 0;
+const NO_REPLY_MATCH = { succeeded: false, pending_actor_ids: [] };
 const BAD_GATEWAY_STATUS = 502;
 const NO_RESULTS = 0;
 const FIRST_RESULT_INDEX = 0;
@@ -785,6 +786,7 @@ function linkCheckFixture(
       };
     },
     releaseHeld: (inboundEventIds) => released.push(...inboundEventIds),
+    replyMatch: async () => NO_REPLY_MATCH,
     handoff: async (_context, inboundEventId) => {
       if (handed.has(inboundEventId)) return null;
       handed.add(inboundEventId);

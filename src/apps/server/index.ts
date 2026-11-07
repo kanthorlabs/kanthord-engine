@@ -1009,6 +1009,13 @@ export function composeServices(options: {
             { identity: missionIdentity, context },
           ),
         ),
+      replyMatch: async (context, input) =>
+        resultOf(
+          await intakeClient["outbound.reply.match"](
+            { params: {}, query: {}, body: input },
+            { identity: missionIdentity, context },
+          ),
+        ),
       handoff: async (_context, inboundEventId) => {
         const result = await intake.handoff(inboundEventId);
         return result === null

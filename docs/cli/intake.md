@@ -510,6 +510,19 @@ marker. A call that ends with no answer sets the request `failed`. A repeat of a
 posts again. A repeat of a `succeeded` request answers the stored address and
 posts nothing.
 
+`intake.outbound.reply.match` is a `service` operation with no CLI command and
+no HTTP route. Only the Mission Service calls it; another caller fails an
+assertion. It takes `{ update_key, external_link }` and answers
+`{ succeeded, pending_actor_ids }`. It reads the `github.issue_comment` requests
+of every project and finds the requests of a link by the suffix
+`:<canonical link>` of the request key. `succeeded` is true when the `update_key`
+of the result of a `succeeded` reply request equals `update_key`, on any link.
+`pending_actor_ids` is empty while no reply request of the link is `pending`.
+Otherwise it holds the reply account: `actor_id` of the last `succeeded` reply
+on the link, else the `actor_id` that each `pending` request recorded. It writes
+no row and calls no platform. Admission of the Mission Service uses it to refuse
+the own reply and the reply account during a pending reply.
+
 `intake.action.check` answers a `comment` request evidence with `expected` when
 its outbound request is `succeeded`, and with `none` while the request is
 `pending` or `failed`. It calls no platform.

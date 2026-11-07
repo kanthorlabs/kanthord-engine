@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { z } from "zod";
 import type {
   ActionFacts,
   Material,
@@ -20,6 +19,8 @@ import {
   OutboundOperation,
   OutboundRequestState,
   type PlatformAddress,
+  replyAccountSchema,
+  replyResultSchema,
   type ResultClassAnswer,
 } from "./contract.ts";
 import {
@@ -34,12 +35,6 @@ import { findByKey, findByKeySuffix, recordResult } from "./outbound-store.ts";
 
 const REPLY_KEY_PATTERN = /\.reply\.[0-9]$/;
 const EMPTY_TEXT_LENGTH = 0;
-
-const accountSchema = z.strictObject({ actor_id: z.string().min(1) });
-const replyResultSchema = z.strictObject({
-  update_key: z.string().min(1),
-  actor_id: z.string().min(1).nullable(),
-});
 
 export type ReplyHeld = {
   facts: Readonly<ReplyActionFacts>;
@@ -82,7 +77,7 @@ function recordedAccountOf(
     const recorded =
       row.result === null
         ? null
-        : accountSchema.safeParse(JSON.parse(row.result));
+        : replyAccountSchema.safeParse(JSON.parse(row.result));
     const succeeded = findByKeySuffix(
       tx,
       OutboundOperation.GitHubIssueComment,

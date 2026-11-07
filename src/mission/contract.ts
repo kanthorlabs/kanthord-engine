@@ -345,6 +345,10 @@ export interface IntakeLinks {
       binding_id: string;
     },
   ): Promise<{ items: { inbound_event_id: string }[] }>;
+  replyMatch(
+    context: Context,
+    input: { update_key: string; external_link: ExternalLink },
+  ): Promise<{ succeeded: boolean; pending_actor_ids: string[] }>;
   handoff(
     context: Context,
     inboundEventId: string,

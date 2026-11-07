@@ -182,6 +182,18 @@ export const actionReadMethodSchema = z.enum(ActionReadMethod);
 export const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 export const commitSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 
+export const replyAccountSchema = z.strictObject({
+  actor_id: z.string().min(1),
+});
+export const replyResultSchema = z.strictObject({
+  update_key: z.string().min(1),
+  actor_id: z.string().min(1).nullable(),
+});
+export const replyMatchSchema = z.strictObject({
+  succeeded: z.boolean(),
+  pending_actor_ids: z.array(z.string().min(1)),
+});
+
 export function replyRequestKey(
   nodeId: string,
   attempt: number,
@@ -720,6 +732,22 @@ export const intakeOperations = {
     }),
     description:
       "Check the platform end state of a request evidence for the Mission Service.",
+  },
+  "outbound.reply.match": {
+    ...serviceOperation,
+    id: "intake.outbound.reply.match",
+    path: "/api/intake/outbound/reply/match",
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: z.strictObject({}),
+      body: z.strictObject({
+        update_key: z.string().min(1),
+        external_link: externalLinkSchema,
+      }),
+    }),
+    output: replyMatchSchema,
+    description:
+      "Tell the Mission Service whether an update is the succeeded reply of any project and name the reply accounts of the pending replies on a link.",
   },
   "link.read": {
     ...serviceOperation,

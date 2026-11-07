@@ -1,7 +1,7 @@
 import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import type { Logger } from "pino";
-import type { ServiceIdentity } from "../kernel/caller.ts";
+import { isServiceIdentity, type ServiceIdentity } from "../kernel/caller.ts";
 import {
   background,
   CancellationContext,
@@ -20,6 +20,7 @@ import {
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { ValueType } from "../kernel/values.ts";
+import { MISSION_SERVICE_NAME } from "../mission/contract.ts";
 import type { GitHubPlatform } from "../repository/github.ts";
 import type { GitWriter } from "../repository/index.ts";
 import type { S3Platform } from "../storage/index.ts";
@@ -47,7 +48,7 @@ import { describeEvent } from "./event-describe.ts";
 import { getEvent, listEvents } from "./event-read.ts";
 import { deleteEvents, discardEvent, retryEvent } from "./event-write.ts";
 import { getInbound, listInbound } from "./inbound-read.ts";
-import { getOutbound, listOutbound } from "./outbound-read.ts";
+import { getOutbound, listOutbound, matchReply } from "./outbound-read.ts";
 import { receiveEvent } from "./receipt.ts";
 import { deleteOutbound, discardOutbound } from "./outbound-write.ts";
 import { type OutboundRun, runOutbound } from "./outbound.ts";
@@ -229,6 +230,18 @@ export class IntakeService implements Service, IntakeCollaborations {
     );
     registry.register(intakeOperations["action.check"], ({ body }, caller) =>
       checkAction(this.dependencies, caller, body.evidence_id),
+    );
+    registry.register(
+      intakeOperations["outbound.reply.match"],
+      ({ body }, caller) => {
+        assert.ok(
+          caller.identity &&
+            isServiceIdentity(caller.identity) &&
+            caller.identity.service === MISSION_SERVICE_NAME,
+          "The Mission Service matches a reply.",
+        );
+        return caller.commit((tx) => matchReply(tx, body));
+      },
     );
     registry.register(intakeOperations["link.read"], ({ body }, caller) =>
       readLink(
