@@ -24,6 +24,7 @@ export interface LoginSession {
   human_identity: string;
   credential_name: string;
   holder: string;
+  runner?: string;
   state: LoginSessionState;
   address: string | null;
   code: string | null;
@@ -43,6 +44,7 @@ export class LoginSessionStore {
     credentialName: string,
     now: number,
     holder: string = SERVER_HOLDER,
+    runner: string = holder,
   ): LoginSession {
     if (this.pendingForPlatformAndHuman(platform, humanIdentity, now)) {
       throw new OperationError(
@@ -59,6 +61,7 @@ export class LoginSessionStore {
       human_identity: humanIdentity,
       credential_name: credentialName,
       holder,
+      runner,
       state: LoginSessionState.Pending,
       address: null,
       code: null,
@@ -79,10 +82,10 @@ export class LoginSessionStore {
     this.sessions.delete(id);
   }
 
-  pendingOfHolder(holder: string, now: number): LoginSession[] {
+  pendingOfRunner(runner: string, now: number): LoginSession[] {
     return [...this.sessions.values()].filter(
       (session) =>
-        session.holder === holder &&
+        session.runner === runner &&
         session.state === LoginSessionState.Pending &&
         session.expires_at > now,
     );

@@ -688,6 +688,8 @@ export function composeServices(options: {
         worker.instancesOfMachine(tx, machine),
     },
     instanceConnected: (holder) => worker.instanceConnected(holder),
+    connectedInstancesOf: (machine) =>
+      worker.connectedInstancesOf(machine).map(({ name }) => name),
     workChanged: (holder) => worker.raiseWorkVersion(holder),
   });
   const agent: AgentComponent = new AgentComponent({

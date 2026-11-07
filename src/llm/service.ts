@@ -103,6 +103,7 @@ export interface Dependencies {
   loadModelRuntime: () => Promise<ModelRuntimeModule>;
   instanceKeys?: InstanceKeys;
   instanceConnected?: (holder: string) => boolean;
+  connectedInstancesOf?: (machine: string) => string[];
   workChanged?: (holder: string) => void;
 }
 
@@ -192,6 +193,7 @@ export class LlmComponent implements Service {
   private readonly platformSet: CredentialPlatformSet;
   private readonly instanceKeys: InstanceKeys;
   private readonly instanceConnected: (holder: string) => boolean;
+  private readonly connectedInstancesOf: (machine: string) => string[];
   private readonly workChanged: (holder: string) => void;
 
   constructor(dependencies: Dependencies) {
@@ -213,6 +215,7 @@ export class LlmComponent implements Service {
     this.loadModelRuntime = dependencies.loadModelRuntime;
     this.instanceKeys = dependencies.instanceKeys ?? NO_INSTANCE_KEYS;
     this.instanceConnected = dependencies.instanceConnected ?? (() => false);
+    this.connectedInstancesOf = dependencies.connectedInstancesOf ?? (() => []);
     this.workChanged = dependencies.workChanged ?? (() => {});
     this.platformSet = {
       platforms: LLM_PLATFORMS,
@@ -229,21 +232,35 @@ export class LlmComponent implements Service {
       this.create(input.body, caller),
     );
     registry.register(llmOperations.list, (input, caller) =>
-      caller.commit((tx) =>
-        this.records.list(tx, this.platformSet, {
-          ...input.query,
-          holder: this.readHolder(tx, caller, input.query.holder),
-        }),
-      ),
+      caller.commit((tx) => {
+        const holder = this.readHolder(tx, caller, input.query.holder);
+        const instance = this.callerInstance(tx, caller);
+        return this.records.list(
+          tx,
+          this.platformSet,
+          holder === undefined && instance !== null
+            ? {
+                ...input.query,
+                holder: instance,
+                machine: this.instanceKeys.machineOf(tx, instance) ?? undefined,
+              }
+            : { ...input.query, holder },
+        );
+      }),
     );
     registry.register(llmOperations.get, (input, caller) =>
-      caller.commit((tx) =>
-        this.get(
-          tx,
-          input.params.credential_name,
-          this.readHolder(tx, caller, input.query.holder) ?? SERVER_HOLDER,
-        ),
-      ),
+      caller.commit((tx) => {
+        const name = input.params.credential_name;
+        const holder = this.readHolder(tx, caller, input.query.holder);
+        const instance = this.callerInstance(tx, caller);
+        if (holder === undefined && instance !== null)
+          return this.get(
+            tx,
+            name,
+            this.records.copyHolderOf(tx, name, instance),
+          );
+        return this.get(tx, name, holder ?? SERVER_HOLDER);
+      }),
     );
     registry.register(llmOperations.rotate, (input, caller) =>
       this.rotate(
@@ -337,7 +354,11 @@ export class LlmComponent implements Service {
           tx,
           this.platformSet,
           input.params.credential_name,
-          this.callerHolder(tx, caller),
+          this.records.copyHolderOf(
+            tx,
+            input.params.credential_name,
+            this.callerHolder(tx, caller),
+          ),
         ),
       ),
     );
@@ -381,7 +402,11 @@ export class LlmComponent implements Service {
     if (reportInvalid(report)) throw invalidInput();
     let holder = SERVER_HOLDER;
     caller.commit((tx) => {
-      holder = this.callerHolder(tx, caller);
+      holder = this.records.copyHolderOf(
+        tx,
+        name,
+        this.callerHolder(tx, caller),
+      );
       const copy = this.records.heldCopy(tx, this.platformSet, name, holder);
       if (!copy?.sealed_current)
         throw new OperationError(
@@ -456,10 +481,21 @@ export class LlmComponent implements Service {
     caller: CallerContext,
     requested: string | undefined,
   ): string | undefined {
-    if (!isWorkerIdentity(caller.identity)) return requested;
+    if (!isWorkerIdentity(caller.identity) || requested === undefined)
+      return requested;
     const own = this.workerHolder(tx, caller.identity);
-    if (requested !== undefined && requested !== own) throw instanceForbidden();
-    return own;
+    if (requested !== own && requested !== this.instanceKeys.machineOf(tx, own))
+      throw instanceForbidden();
+    return requested;
+  }
+
+  private callerInstance(
+    tx: Transaction,
+    caller: CallerContext,
+  ): string | null {
+    return isWorkerIdentity(caller.identity)
+      ? this.workerHolder(tx, caller.identity)
+      : null;
   }
 
   private instanceKey(tx: Transaction, holder: string): InstanceKey {
@@ -467,8 +503,8 @@ export class LlmComponent implements Service {
     if (key === null)
       throw new OperationError(
         HttpStatus.BadRequest,
-        LlmErrorCode.InstanceUnknown,
-        "The holder names no live worker instance.",
+        LlmErrorCode.HolderUnknown,
+        "The holder names no live worker instance and no live machine.",
         { holder },
       );
     return key;
@@ -637,13 +673,13 @@ export class LlmComponent implements Service {
     caller: CallerContext,
   ): Promise<typeof llmOperations.rotate.output._output> {
     const { key, platform } = this.store.transaction((tx) => ({
+      key: this.instanceKey(tx, holder),
       platform: this.records.copyPlatform(
         tx,
         this.platformSet,
         credentialName,
         holder,
       ),
-      key: this.instanceKey(tx, holder),
     }));
     const [copy] = await this.records.sealCopies(this.platformSet, {
       name: credentialName,
@@ -934,11 +970,14 @@ export class LlmComponent implements Service {
     });
     const mode = loginMode(platform, requested, false);
     if (caller.identity?.kind !== IdentityKind.Human) throw invalidInput();
-    if (!this.instanceConnected(holder))
+    const runner =
+      this.connectedInstancesOf(holder)[0] ??
+      (this.instanceConnected(holder) ? holder : null);
+    if (runner === null)
       throw new OperationError(
         HttpStatus.Conflict,
         LOGIN_INSTANCE_UNAVAILABLE,
-        "The worker instance holds no current connection.",
+        "The worker instance or machine holds no current connection.",
         { holder },
       );
     const session = this.sessions.start(
@@ -948,14 +987,15 @@ export class LlmComponent implements Service {
       name,
       this.now(),
       holder,
+      runner,
     );
     const flow = new InstanceLogin(session, this.sessions, this.now, () => {
       this.instanceLogins.delete(session.id);
-      this.workChanged(holder);
+      this.workChanged(runner);
     });
     this.instanceLogins.set(session.id, flow);
     flow.arm();
-    this.workChanged(holder);
+    this.workChanged(runner);
     using cancellation = addAbortListener(caller.context.signal, () =>
       flow.fail(LOGIN_FAILED_REASON),
     );
@@ -970,11 +1010,11 @@ export class LlmComponent implements Service {
     }));
   }
 
-  loginSessionsOf(holder: string): LoginSessionEntry[] {
+  loginSessionsOf(runner: string): LoginSessionEntry[] {
     const entries: LoginSessionEntry[] = [];
     for (const [id, flow] of this.instanceLogins) {
       if (!flow.pending()) this.instanceLogins.delete(id);
-      else if (flow.session.holder === holder) entries.push(flow.entry());
+      else if (flow.session.runner === runner) entries.push(flow.entry());
     }
     return entries;
   }
@@ -990,7 +1030,7 @@ export class LlmComponent implements Service {
     caller.commit((tx) => {
       const holder = this.workerHolder(tx, identity);
       flow = this.instanceLogins.get(input.params.session_id);
-      if (!flow || flow.session.holder !== holder) throw loginNotFound();
+      if (!flow || flow.session.runner !== holder) throw loginNotFound();
       const { session } = flow;
       apply = flow.report(input.body, (copy) =>
         this.records.createLoginRevision(
@@ -1035,7 +1075,7 @@ export class LlmComponent implements Service {
       const instance = this.instanceLogins.get(session.id);
       if (instance) {
         instance.supply(input.body.value);
-        this.workChanged(instance.session.holder);
+        this.workChanged(instance.runner);
         return { session_id: session.id };
       }
       const flow = this.logins.get(session.id);

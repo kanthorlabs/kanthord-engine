@@ -892,6 +892,7 @@ export type HeldCopy = {
 };
 export const sealedCopyAnswerSchema = z.strictObject({
   name: z.string(),
+  holder: z.string().min(1),
   platform: z.string(),
   revision: z.number().int().positive(),
   metadata: z.record(z.string(), z.unknown()).nullable(),
@@ -924,7 +925,7 @@ export interface CredentialRecords {
   list(
     tx: Transaction,
     set: CredentialPlatformSet,
-    query: CredentialListQuery & { holder?: string },
+    query: CredentialListQuery & { holder?: string; machine?: string },
   ): CredentialListAnswer;
   copyPlatform(
     tx: Transaction,
@@ -1028,6 +1029,7 @@ export interface CredentialRecords {
   ): CredentialMetadata | null;
   copiesMetadata(tx: Transaction, credentialName: string): CredentialMetadata[];
   copyHeld(tx: Transaction, credentialName: string, holder: string): boolean;
+  copyHolderOf(tx: Transaction, credentialName: string, holder: string): string;
   heldCopy(
     tx: Transaction,
     set: CredentialPlatformSet,

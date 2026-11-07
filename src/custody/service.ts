@@ -1689,6 +1689,7 @@ export class CustodyComponent implements Service, CredentialRecords {
       throw notFound();
     return {
       name: row.name,
+      holder,
       platform: row.platform,
       revision: row.revision,
       metadata: row.metadata === null ? null : JSON.parse(row.metadata),
@@ -2190,11 +2191,12 @@ export class CustodyComponent implements Service, CredentialRecords {
   list(
     tx: Transaction,
     set: CredentialPlatformSet,
-    query: CredentialListQuery & { holder?: string },
+    query: CredentialListQuery & { holder?: string; machine?: string },
   ): CredentialListAnswer {
     const {
       platform,
       holder,
+      machine,
       include_archived: includeArchived,
       limit: requestedLimit,
       cursor,
@@ -2204,7 +2206,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     const limit = requestedLimit ?? LIST_LIMIT_DEFAULT;
     const groups = tx.database
       .prepare(
-        "SELECT name, holder FROM credential WHERE (name > ? OR (name = ? AND holder > ?)) AND (? IS NULL OR platform = ?) AND (? IS NULL OR holder = ?) AND platform IN (SELECT value FROM json_each(?)) GROUP BY name, holder HAVING (? = 1 OR MAX(ended_at IS NULL) = 1) ORDER BY name ASC, holder ASC LIMIT ?",
+        "SELECT name, holder FROM credential WHERE (name > ? OR (name = ? AND holder > ?)) AND (? IS NULL OR platform = ?) AND (? IS NULL OR holder = ? OR (holder = ? AND NOT EXISTS (SELECT 1 FROM credential AS own WHERE own.name = credential.name AND own.holder = ? AND own.ended_at IS NULL))) AND platform IN (SELECT value FROM json_each(?)) GROUP BY name, holder HAVING (? = 1 OR MAX(ended_at IS NULL) = 1) ORDER BY name ASC, holder ASC LIMIT ?",
       )
       .all(
         after.name,
@@ -2213,6 +2215,8 @@ export class CustodyComponent implements Service, CredentialRecords {
         platform ?? null,
         platform ?? null,
         holder ?? null,
+        holder ?? null,
+        machine ?? null,
         holder ?? null,
         JSON.stringify(Object.keys(set.platforms)),
         includeArchived === QUERY_TRUE ? INCLUDE : EXCLUDE,

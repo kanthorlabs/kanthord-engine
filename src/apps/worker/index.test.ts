@@ -683,6 +683,7 @@ test("the heartbeat interval stays the same while a login runs", async (t) => {
       platform: Platform.AnthropicSubscription,
       mode: LoginSessionMode.CopyCode,
       code: null,
+      holder: "relay-a",
     },
   ];
   const worker = new Worker(

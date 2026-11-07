@@ -97,6 +97,7 @@ const LOGIN_ENTRY: LoginSessionEntry = {
   platform: "anthropic-subscription",
   mode: "copy_code",
   code: null,
+  holder: "relay-a",
 };
 const SINGLE_CALL = 1;
 const SHORT_SESSION_READ_WAIT_MS = 20;

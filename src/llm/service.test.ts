@@ -2528,15 +2528,20 @@ const CONTAINER_INSTANCE = "boxed";
 const ROTATED_REVISIONS = 2;
 const HUMAN_ROTATED_REVISIONS = 3;
 const SEALED_INVALID_CODE = "credential.sealed.invalid";
-const INSTANCE_UNKNOWN_CODE = "llm.credential.instance_unknown";
+const HOLDER_UNKNOWN_CODE = "llm.credential.holder_unknown";
 const INSTANCE_FORBIDDEN_CODE = "llm.credential.instance_forbidden";
 
-async function instanceFixture() {
+const MACHINE = "workstation";
+const RELAY_B = "relay-b";
+
+async function instanceFixture(
+  machines: ReadonlyMap<string, string> = new Map(),
+) {
   const pairs = new Map<
     string,
     { id: string; key: InstanceKey; private_key: Buffer }
   >();
-  for (const name of ["relay-a", "relay-b"]) {
+  for (const name of ["relay-a", "relay-b", MACHINE]) {
     const pair = await generateX25519KeyPair();
     pairs.set(name, {
       id: createIdentity("worker_instance"),
@@ -2551,8 +2556,11 @@ async function instanceFixture() {
   const f = fixture({
     instanceKeys: {
       keyOf: (_tx, name) => pairs.get(name)?.key ?? null,
-      machineOf: () => null,
-      instancesOfMachine: () => [],
+      machineOf: (_tx, name) => machines.get(name) ?? null,
+      instancesOfMachine: (_tx, machine) =>
+        [...machines]
+          .filter(([, value]) => value === machine)
+          .map(([name]) => name),
       nameOf: (_tx, instanceId) =>
         [...pairs.values()].find(({ id }) => id === instanceId)?.key.name ??
         null,
@@ -2638,7 +2646,7 @@ test("a human create seals one copy per instance holder on the server and stores
           holders: ["relay-z"],
         }),
       HttpStatus.BadRequest,
-      INSTANCE_UNKNOWN_CODE,
+      HOLDER_UNKNOWN_CODE,
     );
     fails(
       () =>
@@ -2804,7 +2812,7 @@ test("a key rotation between the server seal and the commit refuses the create a
   }
 });
 
-test("an instance archive between the server seal and the commit refuses the create and the rotate with llm.credential.instance_unknown", async () => {
+test("an instance archive between the server seal and the commit refuses the create and the rotate with llm.credential.holder_unknown", async () => {
   const pair = await generateX25519KeyPair();
   const live: InstanceKey = {
     name: RELAY_A,
@@ -2837,7 +2845,7 @@ test("an instance archive between the server seal and the commit refuses the cre
     await failsAsync(
       async () => f.create(body),
       HttpStatus.BadRequest,
-      INSTANCE_UNKNOWN_CODE,
+      HOLDER_UNKNOWN_CODE,
     );
     assert.equal(credentialCount(f), NO_CREDENTIALS);
     archiveAfter = Number.POSITIVE_INFINITY;
@@ -2851,14 +2859,14 @@ test("an instance archive between the server seal and the commit refuses the cre
           body: { expected_revision: 1, secret: apiSecret },
         }),
       HttpStatus.BadRequest,
-      INSTANCE_UNKNOWN_CODE,
+      HOLDER_UNKNOWN_CODE,
     );
   } finally {
     f.store.close();
   }
 });
 
-test("a holder that names a server or a container instance refuses the create with llm.credential.instance_unknown", async () => {
+test("a holder that names a server or a container instance refuses the create with llm.credential.holder_unknown", async () => {
   const pair = await generateX25519KeyPair();
   const live: InstanceKey = {
     name: RELAY_A,
@@ -2889,7 +2897,7 @@ test("a holder that names a server or a container instance refuses the create wi
             holders,
           }),
         HttpStatus.BadRequest,
-        INSTANCE_UNKNOWN_CODE,
+        HOLDER_UNKNOWN_CODE,
       );
     assert.equal(credentialCount(f), NO_CREDENTIALS);
   } finally {
@@ -3194,4 +3202,223 @@ test("a pin that commits after the health inventory and before the refresh makes
     revision: FIRST_REVISION,
     secret: STORED_OAUTH,
   });
+});
+
+const MACHINES = new Map([
+  [RELAY_A, MACHINE],
+  [RELAY_B, MACHINE],
+]);
+const MACHINE_COPY_COUNT = 2;
+const REVISION_NOT_FOUND_CODE = "credential.revision.not_found";
+const NOT_FOUND_CODE = "credential.credential.not_found";
+const GHOST = "ghost";
+const CAPABILITY_READ = "model-list read";
+
+async function machineCopies() {
+  const m = await instanceFixture(MACHINES);
+  const create = (name: string, holders: string[]) =>
+    m.f.create({
+      name,
+      platform: Platform.Anthropic,
+      metadata: null,
+      secret: apiSecret,
+      holders,
+    });
+  await create("alpha", [MACHINE]);
+  await create("beta", [MACHINE, RELAY_A]);
+  await create("gamma", [RELAY_A]);
+  return { ...m, create };
+}
+
+test("a human create, rotate and login answer holder_unknown for a name that is no instance and no machine, and the other operations answer not_found", async () => {
+  const { f, create } = await machineCopies();
+  try {
+    await create("shared", [SERVER_HOLDER, MACHINE]);
+    await failsAsync(
+      async () => create("fresh", [GHOST]),
+      HttpStatus.BadRequest,
+      HOLDER_UNKNOWN_CODE,
+    );
+    await failsAsync(
+      async () =>
+        f.invoke(llmOperations.rotate, {
+          params: { credential_name: "shared" },
+          query: { holder: GHOST },
+          body: { expected_revision: 1, secret: apiSecret },
+        }),
+      HttpStatus.BadRequest,
+      HOLDER_UNKNOWN_CODE,
+    );
+    await failsAsync(
+      async () =>
+        f.login({
+          platform: Platform.AnthropicSubscription,
+          name: "login",
+          holder: GHOST,
+        }),
+      HttpStatus.BadRequest,
+      HOLDER_UNKNOWN_CODE,
+    );
+    const query = { holder: GHOST };
+    for (const [operation, params, body, code] of [
+      [llmOperations.get, { credential_name: "shared" }, null, NOT_FOUND_CODE],
+      [
+        llmOperations.update_metadata,
+        { credential_name: "shared" },
+        { expected_revision: 1, metadata: null },
+        NOT_FOUND_CODE,
+      ],
+      [
+        llmOperations.revoke,
+        { credential_name: "shared", revision: 1 },
+        null,
+        REVISION_NOT_FOUND_CODE,
+      ],
+      [
+        llmOperations.archive,
+        { credential_name: "shared" },
+        null,
+        NOT_FOUND_CODE,
+      ],
+    ] as const)
+      fails(
+        () => f.invoke(operation, { params, query, body }),
+        HttpStatus.NotFound,
+        code,
+      );
+  } finally {
+    f.store.close();
+  }
+});
+
+test("a worker token lists its own copies and the machine copies of names with no own copy, each with its holder", async () => {
+  const { f, worker } = await machineCopies();
+  try {
+    const listOf = (name: string) =>
+      (
+        f.invokeAs(worker(name), llmOperations.list, {
+          params: {},
+          query: {},
+          body: null,
+        }) as { items: CredentialAnswer[] }
+      ).items.map((item) => [item.name, item.holder]);
+    assert.deepEqual(listOf(RELAY_A), [
+      ["alpha", MACHINE],
+      ["beta", RELAY_A],
+      ["gamma", RELAY_A],
+    ]);
+    assert.deepEqual(listOf(RELAY_B), [
+      ["alpha", MACHINE],
+      ["beta", MACHINE],
+    ]);
+    const named = f.invokeAs(worker(RELAY_B), llmOperations.list, {
+      params: {},
+      query: { holder: MACHINE },
+      body: null,
+    }) as { items: CredentialAnswer[] };
+    assert.equal(named.items.length, MACHINE_COPY_COUNT);
+    fails(
+      () =>
+        f.invokeAs(worker(RELAY_B), llmOperations.list, {
+          params: {},
+          query: { holder: RELAY_A },
+          body: null,
+        }),
+      HttpStatus.Forbidden,
+      INSTANCE_FORBIDDEN_CODE,
+    );
+  } finally {
+    f.store.close();
+  }
+});
+
+test("a worker token get, sealed and report act on the copy of the copy holder", async () => {
+  const { f, worker } = await machineCopies();
+  try {
+    const as = (name: string) => worker(name);
+    const get = (instance: string, name: string) =>
+      f.invokeAs(as(instance), llmOperations.get, {
+        params: { credential_name: name },
+        query: {},
+        body: null,
+      }) as CredentialAnswer;
+    const sealed = (instance: string, name: string) =>
+      f.invokeAs(as(instance), llmOperations.sealed, {
+        params: { credential_name: name },
+        query: {},
+        body: null,
+      }) as { holder: string };
+    assert.equal(get(RELAY_B, "alpha").holder, MACHINE);
+    assert.equal(get(RELAY_A, "beta").holder, RELAY_A);
+    assert.equal(sealed(RELAY_B, "beta").holder, MACHINE);
+    assert.equal(sealed(RELAY_A, "beta").holder, RELAY_A);
+    fails(() => get(RELAY_B, "gamma"), HttpStatus.NotFound, NOT_FOUND_CODE);
+    const report = (instance: string, name: string) =>
+      f.invokeAs(as(instance), llmOperations.report, {
+        params: { credential_name: name },
+        query: {},
+        body: {
+          revision: 1,
+          status: ResourceStatus.Healthy,
+          capability: CAPABILITY_READ,
+          failure_reason: null,
+          models: null,
+        },
+      });
+    assert.equal(report(RELAY_B, "alpha"), null);
+    const copy = {
+      name: "alpha",
+      holder: MACHINE,
+      revision: 1,
+      platform: Platform.Anthropic,
+      sealed_current: true,
+    };
+    assert.equal(
+      f.component.copyHealthOf(MACHINE, copy).status,
+      ResourceStatus.Healthy,
+    );
+    assert.equal(
+      f.component.copyHealthOf(RELAY_B, copy).status,
+      ResourceStatus.Unknown,
+    );
+    fails(() => report(RELAY_B, "gamma"), HttpStatus.NotFound, NOT_FOUND_CODE);
+  } finally {
+    f.store.close();
+  }
+});
+
+test("a worker token create or rotate for the machine of its instance answers instance_forbidden", async () => {
+  const { f, worker, sealFor } = await machineCopies();
+  try {
+    const relayA = worker(RELAY_A);
+    const sealedMachine = await sealFor("alpha", MACHINE, apiSecret);
+    fails(
+      () =>
+        f.invokeAs(relayA, llmOperations.create, {
+          params: {},
+          query: {},
+          body: {
+            name: "fresh",
+            platform: Platform.Anthropic,
+            metadata: null,
+            holder: MACHINE,
+            ...sealedMachine,
+          },
+        }),
+      HttpStatus.Forbidden,
+      INSTANCE_FORBIDDEN_CODE,
+    );
+    fails(
+      () =>
+        f.invokeAs(relayA, llmOperations.rotate, {
+          params: { credential_name: "alpha" },
+          query: {},
+          body: { expected_revision: 1, holder: MACHINE, ...sealedMachine },
+        }),
+      HttpStatus.Forbidden,
+      INSTANCE_FORBIDDEN_CODE,
+    );
+  } finally {
+    f.store.close();
+  }
 });
