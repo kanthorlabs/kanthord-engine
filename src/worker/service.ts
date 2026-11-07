@@ -45,6 +45,7 @@ import {
   type CustodyHandover,
   type EvidenceRequests,
   HANDOVER_REFRESH_WAIT_MS,
+  INSTANCE_HEARTBEAT_INTERVAL_MS,
   type InstanceIssuer,
   InstancePlacement,
   type InstanceRecord,
@@ -64,6 +65,7 @@ import {
   type SessionRead,
   SessionRemoval,
   type SshHostKeysOf,
+  type StopOrderReason,
   WORKER_SERVICE_NAME,
   type WorkerAgentView,
   type WorkerBindingOf,
@@ -435,6 +437,15 @@ export class WorkerService implements Service {
   raiseWorkVersion(name: string): void {
     this.instances.raiseWorkVersion(name);
   }
+  stopOrderOf(executionId: string): StopOrderReason | null {
+    return this.instances.stopOrderOf(executionId);
+  }
+  executionReleased(executionId: string): void {
+    this.instances.executionReleased(executionId);
+  }
+  archiving(tx: Transaction, runtimeIdentity: string): boolean {
+    return this.instances.archiving(tx, runtimeIdentity);
+  }
   instanceNameOf(tx: Transaction, instanceId: string): string | null {
     const instance = readInstanceById(tx, instanceId);
     return instance?.ended_at === null ? instance.name : null;
@@ -471,6 +482,7 @@ export class WorkerService implements Service {
   readonly registrations: WorkerRegistrations;
   readonly heartbeatClock: HeartbeatClock;
   private heartbeatTimer?: ReturnType<typeof setInterval>;
+  private stopOrderTimer?: ReturnType<typeof setInterval>;
   private quiesced = false;
   private runError: Error | null = null;
   private readonly dependencies: Dependencies;
@@ -537,6 +549,12 @@ export class WorkerService implements Service {
       sessionReadWaitMs: dependencies.sessionReadWaitMs,
       instanceArchived: (tx, name) =>
         dependencies.footprint?.instanceArchived(tx, name),
+      instanceEnded: (ended) => {
+        for (const runtimeIdentity of ended)
+          this.heartbeatClock.drop(runtimeIdentity);
+        this.instancesChanged();
+      },
+      logger: dependencies.pool?.logger ?? pino({ level: "silent" }),
     });
     if (dependencies.pool) this.pool = new Pool(dependencies.pool.host);
     this.performer = new ActionPerformer({
@@ -584,6 +602,8 @@ export class WorkerService implements Service {
     this.quiesced = true;
     clearInterval(this.heartbeatTimer);
     this.heartbeatTimer = undefined;
+    clearInterval(this.stopOrderTimer);
+    this.stopOrderTimer = undefined;
     return this.quiesceTask;
   }
   stop(): Promise<Error | null> {
@@ -610,6 +630,11 @@ export class WorkerService implements Service {
           void this.stop();
         }
       }, HEARTBEAT_SWEEP_INTERVAL_MS).unref();
+    if (!this.quiesced)
+      this.stopOrderTimer ??= setInterval(
+        () => this.instances.sweepStopOrders(),
+        INSTANCE_HEARTBEAT_INTERVAL_MS,
+      ).unref();
     await cancelled(this.shutdown.signal);
     return (await this.stop()) ?? this.runError ?? reasonOf(context.signal);
   }

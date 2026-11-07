@@ -8,6 +8,7 @@ import {
   reasonOf,
 } from "../kernel/context.ts";
 import { asError, Diagnostic, OperationError } from "../kernel/errors.ts";
+import type { Logger } from "pino";
 import type { HealthRegistry } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
@@ -59,6 +60,7 @@ import {
   type EndedExecution,
   type EnvironmentGate,
   EXECUTION_IDENTITY_PREFIX,
+  type ExecutionStopReason,
   type Job,
   JOB_IDENTITY_PREFIX,
   LOSS_SWEEP_INTERVAL_MS,
@@ -171,6 +173,10 @@ export interface Dependencies {
   agentChains: AgentChains;
   traceIdentity: TraceIdentity;
   telemetry: ExecutionTelemetry;
+  logger: Logger;
+  stopOrderOf(executionId: string): ExecutionStopReason | null;
+  executionReleased(executionId: string, stop: ReleaseStop | null): void;
+  archiving(tx: Transaction, runtimeIdentity: string): boolean;
   health?: HealthRegistry;
 }
 

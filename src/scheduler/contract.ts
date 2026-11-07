@@ -103,6 +103,9 @@ export function isAdvancingStop(stop: ReleaseStop | null): boolean {
 }
 export const executionStopReasonSchema = z.enum(ExecutionStopReason);
 export type ExecutionStopReason = z.infer<typeof executionStopReasonSchema>;
+export const ORDERED_STOP_REASONS: readonly ExecutionStopReason[] = [
+  ExecutionStopReason.InstanceArchived,
+];
 
 function stopCodeFits(stop: {
   reason: ExecutionStopReason;

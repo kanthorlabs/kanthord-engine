@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { unattributed } from "../kernel/cause.ts";
-import { OperationError } from "../kernel/errors.ts";
+import { asError, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import {
@@ -12,6 +12,8 @@ import {
   type FailureHold,
   isAdvancingProviderFailure,
   type NodeTransition,
+  ORDERED_STOP_REASONS,
+  type ReleaseStop,
 } from "./contract.ts";
 import { ExecutionEnd } from "../tracking/contract.ts";
 import { executionTrace, executionTransition } from "./telemetry.ts";
@@ -28,6 +30,7 @@ import {
 
 const NO_STALLS = 0;
 export const STOP_UNORDERED = "scheduler.execution.stop_unordered";
+const EXECUTION_RELEASED_FAILED = "scheduler.execution.released_hook_failed";
 
 function reportEnvironmentFailure(
   dependencies: Dependencies,
@@ -45,6 +48,21 @@ function reportEnvironmentFailure(
   });
 }
 
+function notifyReleased(
+  dependencies: Dependencies,
+  executionId: string,
+  stop: ReleaseStop | null,
+): void {
+  try {
+    dependencies.executionReleased(executionId, stop);
+  } catch (error) {
+    dependencies.logger.error(
+      { err: asError(error), execution_id: executionId },
+      EXECUTION_RELEASED_FAILED,
+    );
+  }
+}
+
 export function release(
   dependencies: Dependencies,
   executionId: string,
@@ -55,11 +73,15 @@ export function release(
   const proof = caller.execution;
   assert.ok(proof, "release requires an execution proof");
   assert.equal(proof.executionId, executionId);
-  if (body.stop?.reason === ExecutionStopReason.InstanceArchived)
+  if (
+    body.stop &&
+    ORDERED_STOP_REASONS.includes(body.stop.reason) &&
+    dependencies.stopOrderOf(executionId) !== body.stop.reason
+  )
     throw new OperationError(
       HttpStatus.Conflict,
       STOP_UNORDERED,
-      "A worker release cannot send an operator stop.",
+      "A worker release with this stop needs a stop order of the execution.",
       { execution_id: executionId, reason: body.stop.reason },
     );
   let released: ExecutionRow | undefined;
@@ -147,6 +169,7 @@ export function release(
     stop: body.stop,
     cause: body.stop === null ? null : (body.stop.cause ?? unattributed([])),
   });
+  notifyReleased(dependencies, executionId, body.stop);
   dependencies.telemetry.executionTransition(
     executionTrace(released),
     executionTransition(transition, result.ended_at, hold),

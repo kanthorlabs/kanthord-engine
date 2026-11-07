@@ -209,6 +209,41 @@ test("pull rolls back its probe, rechecks health, and commits exactly one claim"
   );
 });
 
+test("a pull of a runtime that archiving names answers no work and claims nothing", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let monotonic = 0;
+  t.mock.method(performance, "now", () => monotonic);
+  const h = harness(t);
+  const asked: string[] = [];
+  h.dependencies.archiving = (tx, runtimeIdentity) => {
+    assert.ok(tx.database.isTransaction);
+    asked.push(runtimeIdentity);
+    return true;
+  };
+  h.enqueue();
+  const waiting = h.pull();
+  monotonic = WORK_PULL_WAIT_MS;
+  t.mock.timers.tick(WORK_PULL_WAIT_MS);
+  assert.deepEqual(await waiting, { kind: WorkPullKind.NoWork });
+  assert.ok(asked.length);
+  assert.ok(asked.every((identity) => identity === h.row.runtime_identity));
+  assert.equal(
+    Number(
+      h.store.database.prepare("SELECT count(*) AS count FROM attempts").get()!
+        .count,
+    ),
+    NO_CLAIMS,
+  );
+});
+
+test("a pull of a runtime that archiving does not name claims as before", async (t) => {
+  const h = harness(t);
+  h.dependencies.archiving = () => false;
+  h.enqueue();
+  const result = await h.pull();
+  assert.equal(result.kind, WorkPullKind.Claimed);
+});
+
 const SELECTION: AgentSelection = {
   agent_name: "swe@1",
   position: 1,

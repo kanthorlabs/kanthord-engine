@@ -6,13 +6,16 @@ import type { OperationRegistry } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import type { HeldCopy } from "../custody/contract.ts";
 import type { CopyHealth } from "../llm/contract.ts";
-import type { ExecutionEnds } from "../mission/contract.ts";
 import {
   instanceOperations,
   type registrationRecordSchema,
 } from "./contract.ts";
 import type { HeartbeatClock } from "./heartbeat.ts";
-import type { WorkerInstances } from "./instances.ts";
+import {
+  type ArchiveResult,
+  INSTANCE_ARCHIVED_LOG,
+  type WorkerInstances,
+} from "./instances.ts";
 import type { RegistrationRow } from "./registration-rows.ts";
 
 export interface InstanceOperationDependencies {
@@ -29,8 +32,6 @@ export interface InstanceOperationDependencies {
     instanceName: string,
   ) => (HeldCopy & { health: CopyHealth })[];
 }
-
-const INSTANCE_ARCHIVED = "worker.instance.archived";
 
 function dropEnded(clock: HeartbeatClock, ended: readonly string[]): void {
   for (const runtimeIdentity of ended) clock.drop(runtimeIdentity);
@@ -116,31 +117,35 @@ function declareHumanWrites(
         account: identity.accountId,
         name: identity.name,
       };
-      let ended: string[] = [];
-      let executionEnds: ExecutionEnds[] = [];
-      let executionIds: string[] = [];
-      const record = caller.commit((tx) => {
-        const result = instances.archive(tx, params.instance_name, body, actor);
-        ended = result.ended;
-        executionEnds = result.executionEnds;
-        executionIds = result.executionIds;
-        return result.record;
+      let result: ArchiveResult | undefined;
+      const answer = caller.commit((tx) => {
+        result = instances.archive(tx, params.instance_name, body, actor);
+        return result.stopping === null
+          ? result.record
+          : { ...result.record, stopping: result.stopping };
       });
+      assert.ok(result);
+      if (result.pending)
+        instances.beginPendingArchive(result.pending, result.orders);
+      if (result.stopping !== null) {
+        instancesChanged();
+        return answer;
+      }
       logger.info(
         {
-          operation: INSTANCE_ARCHIVED,
+          operation: INSTANCE_ARCHIVED_LOG,
           instance: params.instance_name,
           actor: actor.name,
           force: body.force === true,
-          execution_ids: executionIds,
+          execution_ids: result.executionIds,
         },
-        INSTANCE_ARCHIVED,
+        INSTANCE_ARCHIVED_LOG,
       );
-      instances.reportExecutionEnds(executionEnds);
-      instances.dropConnection(record.id);
-      dropEnded(heartbeatClock, ended);
+      instances.reportExecutionEnds(result.executionEnds);
+      instances.dropConnection(result.record.id);
+      dropEnded(heartbeatClock, result.ended);
       instancesChanged();
-      return record;
+      return answer;
     },
   );
 }

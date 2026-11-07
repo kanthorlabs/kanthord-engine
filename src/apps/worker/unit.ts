@@ -24,6 +24,7 @@ import {
   type FootprintMeasurement,
   type FootprintOrder,
   type FootprintResult,
+  type StopOrderEntry,
   WorkerErrorCode,
 } from "../../worker/contract.ts";
 import { packageVersion } from "../../kernel/version.ts";
@@ -242,6 +243,14 @@ export class WorkerUnit {
   footprintOrders(orders: readonly FootprintOrder[]): Promise<void> {
     if (!this.footprint || !orders.length) return Promise.resolve();
     return this.serializeFootprint(() => this.runFootprintOrders(orders));
+  }
+
+  stopOrders(orders: readonly StopOrderEntry[]): void {
+    const execution = this.execution;
+    if (!this.executionLive || !execution) return;
+    for (const order of orders)
+      if (order.execution_id === execution.claim.execution_id)
+        execution.stopWith(new ExecutionStop(order.reason, null, null));
   }
 
   private async reportFootprint(
