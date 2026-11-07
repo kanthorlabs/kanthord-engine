@@ -63,6 +63,10 @@ const FIRST_REVISION = 1;
 const SINGLE_INSTANCE = 1;
 const FIRST_ATTEMPT = 1;
 const REVIEWER = 1;
+const UNTRUSTED_REVIEWER = 2;
+const BOT_REVIEWER = 3;
+const BOT_TYPE = "Bot";
+const SINGLE_CHANGE_REQUEST = 1;
 const SINGLE_CALL = 1;
 const SINGLE_ITEM = 1;
 const FAILURE_EXIT = 1;
@@ -310,6 +314,7 @@ async function setup(t: TestContext, landing?: string) {
       address: `git@github.com:owner/${name}.git`,
       ssh_credential: FAKE_SSH_CREDENTIAL,
       credential: "github",
+      link_trust: { actor_ids: [String(REVIEWER)] },
       strategy: {
         base_branch: "main",
         action: {
@@ -672,6 +677,17 @@ suite("E06 action performer", { concurrency: SUITE_CONCURRENCY }, () => {
           body: REQUESTED_CHANGE,
           comments: [REQUESTED_COMMENT],
         });
+        h.gitHub.review(pr.number, {
+          reviewer: UNTRUSTED_REVIEWER,
+          state: ReviewState.ChangesRequested,
+          body: "untrusted change",
+        });
+        h.gitHub.review(pr.number, {
+          reviewer: BOT_REVIEWER,
+          type: BOT_TYPE,
+          state: ReviewState.ChangesRequested,
+          body: "bot change",
+        });
         const check = await h.write<{ results: { resolution: string }[] }>(
           ["mission", "node", "check", h.G],
           { expected_mission_version: h.M },
@@ -699,6 +715,10 @@ suite("E06 action performer", { concurrency: SUITE_CONCURRENCY }, () => {
         assert.deepEqual(
           read.items.map((item) => item.evidence_id),
           [request1.id],
+        );
+        assert.equal(
+          read.items[FIRST_INDEX]!.change_requests.length,
+          SINGLE_CHANGE_REQUEST,
         );
         const [change] = read.items[FIRST_INDEX]!.change_requests;
         assert.equal(change?.reviewer, `reviewer-${REVIEWER}`);

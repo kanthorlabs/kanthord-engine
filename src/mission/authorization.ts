@@ -218,7 +218,11 @@ function repositoryOf(
     resource_identity: revision.resource_identity,
     base_branch: policy.base_branch,
   };
-  return { policy, repository };
+  return {
+    policy,
+    repository,
+    linkTrust: { actor_ids: revision.link_trust?.actor_ids ?? [] },
+  };
 }
 
 function platformAddressOf(
@@ -526,7 +530,7 @@ export function authorizeRequestEvidence(
     evidenceId,
     claim,
   );
-  const { policy, repository } = repositoryOf(
+  const { policy, repository, linkTrust } = repositoryOf(
     tx,
     dependencies.bindings,
     action,
@@ -554,6 +558,7 @@ export function authorizeRequestEvidence(
       address,
       repository,
       human_landing: humanLanding,
+      link_trust: linkTrust,
     },
   };
 }

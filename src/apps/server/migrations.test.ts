@@ -80,6 +80,8 @@ const MISSION_ASSESSMENT_TABLE = "mission_assessment";
 const MISSION_OUTCOME_TABLE = "mission_outcome";
 const MISSION_PROPOSAL_TABLE = "mission_proposal";
 const MISSION_FINDING_TABLE = "mission_finding";
+const MISSION_LINK_UPDATE_TABLE = "mission_link_update";
+const MISSION_LINK_UPDATE_KEY_INDEX = "mission_link_update_key";
 const MISSION_ATTEMPT_OPEN_INDEX = "mission_attempt_open";
 const MISSION_EVIDENCE_REQUEST_INDEX = "mission_evidence_request";
 const MISSION_ASSESSMENT_SEQUENCE_INDEX = "mission_assessment_sequence";
@@ -104,6 +106,7 @@ const MISSION_TABLES = [
   MISSION_NODE_REVISION_TABLE,
   MISSION_DEPENDENCY_TABLE,
   ...ERD2_MISSION_TABLES,
+  MISSION_LINK_UPDATE_TABLE,
 ];
 const INTAKE_INBOUND_TABLE = "intake_inbound";
 const INTAKE_INBOUND_EVENT_TABLE = "intake_inbound_event";
@@ -131,6 +134,7 @@ const ALL_TABLES = [
   MISSION_EVIDENCE_TABLE,
   MISSION_EVIDENCE_ASSET_TABLE,
   MISSION_FINDING_TABLE,
+  MISSION_LINK_UPDATE_TABLE,
   MISSION_MISSION_TABLE,
   MISSION_NODE_TABLE,
   MISSION_NODE_REVISION_TABLE,
@@ -159,6 +163,7 @@ const ALL_INDEXES = [
   MISSION_FINDING_HUMAN_LABEL_INDEX,
   MISSION_FINDING_LABEL_INDEX,
   MISSION_FINDING_NODE_INDEX,
+  MISSION_LINK_UPDATE_KEY_INDEX,
   "mission_node_filename_active",
   "mission_node_mission",
   MISSION_OUTCOME_SEQUENCE_INDEX,
@@ -772,6 +777,57 @@ test("Mission execution records have exactly nine unique indexes with the ruled 
   } finally {
     store.close();
   }
+});
+
+test("Mission link updates hold seven columns and one unique index", (t) => {
+  const store = new Store(IN_MEMORY_DATABASE);
+  stopAfter(t, () => store.close());
+  store.migrate([
+    { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
+  ]);
+  assert.deepEqual(
+    store.database
+      .prepare(`PRAGMA table_info('${MISSION_LINK_UPDATE_TABLE}')`)
+      .all()
+      .map((row) => [row.name, row.type, row.notnull, row.pk]),
+    [
+      ["id", "TEXT", 1, 1],
+      ["mission_id", "TEXT", 1, 0],
+      ["external_link", "TEXT", 1, 0],
+      ["update_key", "TEXT", 1, 0],
+      ["inbound_event_id", "TEXT", 1, 0],
+      ["actor_id", "TEXT", 1, 0],
+      ["occurred_at", "INTEGER", 1, 0],
+    ],
+  );
+  const indexes = store.database
+    .prepare(
+      "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL",
+    )
+    .all(MISSION_LINK_UPDATE_TABLE);
+  assert.deepEqual(
+    indexes.map((row) => row.name),
+    [MISSION_LINK_UPDATE_KEY_INDEX],
+  );
+  assert.match(
+    String(indexes[0]?.sql),
+    /^CREATE UNIQUE INDEX mission_link_update_key ON mission_link_update \(mission_id, external_link, update_key\)$/,
+  );
+  assert.deepEqual(
+    store.database
+      .prepare(`PRAGMA foreign_key_list('${MISSION_LINK_UPDATE_TABLE}')`)
+      .all()
+      .map((row) => [row.from, row.table, row.to]),
+    [["mission_id", MISSION_MISSION_TABLE, "id"]],
+  );
+  assert.doesNotMatch(
+    String(
+      store.database
+        .prepare("SELECT sql FROM sqlite_master WHERE name = ?")
+        .get(MISSION_LINK_UPDATE_TABLE)?.sql,
+    ),
+    /\bCHECK\b/i,
+  );
 });
 
 test("Mission lookups search the lookup indexes", (t) => {

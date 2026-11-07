@@ -5486,6 +5486,34 @@ test("getBindingRevision keeps pinned fields and derives disablement from the la
   });
 });
 
+test("getBindingRevision answers the link_trust of the pinned revision and omits it when absent", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    const first = persistBindings(tx, project.id, {
+      [REPOSITORY_NAME]: repositoryBinding(),
+      [CONVERSATION_NAME]: conversationBinding({
+        link_trust: linkTrustOf([ACTOR_ID]),
+      }),
+    }).bindings;
+    persistBindings(tx, project.id, {
+      [REPOSITORY_NAME]: repositoryBinding(),
+      [CONVERSATION_NAME]: conversationBinding({
+        link_trust: linkTrustOf([ACTOR_ID, SECOND_ACTOR_ID]),
+      }),
+    });
+    assert.deepEqual(
+      f.project.getBindingRevision(tx, first[CONVERSATION_NAME]!.id)
+        ?.link_trust,
+      linkTrustOf([ACTOR_ID]),
+    );
+    assert.equal(
+      f.project.getBindingRevision(tx, first[REPOSITORY_NAME]!.id)?.link_trust,
+      undefined,
+    );
+  });
+});
+
 test("getBindingRevision marks removed rows and preceding pins without reviving them on rebind or affecting another project", (t) => {
   const f = fixture(t);
   f.store.transaction((tx) => {

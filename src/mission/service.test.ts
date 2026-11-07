@@ -97,6 +97,14 @@ import {
 import { ControlError } from "./control.ts";
 import { revisionFromRow } from "./revision.ts";
 import {
+  linkOf,
+  linkUpdateHarness,
+  OTHER_ACTOR,
+  OTHER_LINK_NUMBER,
+  TRUSTED_ACTOR,
+} from "./link-update-test-support.ts";
+import {
+  codedAs,
   databaseSnapshot,
   executionHarness,
   lostHold,
@@ -377,7 +385,10 @@ function makeService(
       merge: unexpectedCollaboration,
     },
     intakeGateFiles: { read: unexpectedCollaboration },
-    decoder: { decode: unexpectedCollaboration },
+    decoder: {
+      decode: unexpectedCollaboration,
+      decodeLinkUpdate: unexpectedCollaboration,
+    },
     config: {
       consecutive_failure_limit: CONSECUTIVE_FAILURE_LIMIT,
       further_work_limit: FURTHER_WORK_LIMIT,
@@ -6476,4 +6487,182 @@ test("attemptPromptStackOf refuses an absent attempt and an absent node", (t) =>
         error.code === MissionErrorCode.NodeNotFound,
     );
   });
+});
+
+const LINK_BASE_TIME = Date.parse("2026-11-07T00:00:00Z");
+const LINK_TICK_MS = 10;
+const LINK_UPDATE_PATH = "/api/mission/node/:node_id/link-update";
+const LINK_RESOURCE_IDENTITY = linkOf().resource_identity;
+const PAGE_OF_TWO = 2;
+const THREE_ROWS = 3;
+const FIRST_ATTEMPT_NUMBER = 1;
+const THIRD_ATTEMPT_NUMBER = 3;
+const LINK_OPENER = {
+  kind: ActorKind.Human,
+  account: ACCOUNT_ID,
+  name: DISPLAY_NAME,
+} as const;
+
+function linkReadFixture(t: TestContext) {
+  t.mock.timers.enable({ apis: ["Date"], now: LINK_BASE_TIME });
+  const h = linkUpdateHarness(
+    t,
+    testHumanIdentity(ACCOUNT_ID, DISPLAY_NAME, TOKEN_ID),
+  );
+  const binding = h.addBinding(LINK_RESOURCE_IDENTITY, [TRUSTED_ACTOR]);
+  const nodeId = h.addNode([linkOf(), linkOf(OTHER_LINK_NUMBER)], undefined, [
+    binding,
+  ]);
+  const tick = () => t.mock.timers.tick(LINK_TICK_MS);
+  const open = () =>
+    h.store.transaction((tx) =>
+      openAttempt(tx, nodeId, FIRST_REVISION, LINK_OPENER, Date.now()),
+    );
+  const close = (attempt: number) =>
+    h.store.transaction((tx) => closeAttempt(tx, nodeId, attempt, Date.now()));
+  const linkUpdatesOf = (attempt: number, page = {}) =>
+    h.store.transaction((tx) =>
+      h.service.linkUpdatesOf(tx, nodeId, attempt, page),
+    );
+  return { ...h, nodeId, tick, open, close, linkUpdatesOf };
+}
+
+test("mission.link_update.list declares a human read of the trusted rows of a node", () => {
+  const operation = missionOperations["link_update.list"];
+  assert.equal(operation.method, HttpMethod.Get);
+  assert.equal(operation.path, LINK_UPDATE_PATH);
+  assert.equal(operation.access, AccessPolicy.Human);
+  assert.equal(operation.mutation, false);
+});
+
+test("mission.link_update.list answers the trusted rows newest first with limit and cursor", async (t) => {
+  const h = linkReadFixture(t);
+  h.insertUpdate(linkOf(), OTHER_ACTOR, LINK_BASE_TIME);
+  const oldest = h.insertUpdate(linkOf(), TRUSTED_ACTOR, LINK_BASE_TIME + 1);
+  const middle = h.insertUpdate(
+    linkOf(OTHER_LINK_NUMBER),
+    TRUSTED_ACTOR,
+    LINK_BASE_TIME + PAGE_OF_TWO,
+  );
+  const newest = h.insertUpdate(
+    linkOf(),
+    TRUSTED_ACTOR,
+    LINK_BASE_TIME + THREE_ROWS,
+  );
+  const first = await h.listedOf(h.nodeId, { limit: PAGE_OF_TWO });
+  assert.deepEqual(
+    first.items.map((item) => item.id),
+    [newest, middle],
+  );
+  assert.ok(first.next_cursor !== null);
+  const second = await h.listedOf(h.nodeId, {
+    limit: PAGE_OF_TWO,
+    cursor: first.next_cursor,
+  });
+  assert.deepEqual(
+    second.items.map((item) => item.id),
+    [oldest],
+  );
+  assert.equal(second.next_cursor, null);
+  assert.deepEqual(first.items[0]?.external_link, linkOf());
+});
+
+test("mission.link_update.list refuses an invalid cursor and an unknown node", async (t) => {
+  const h = linkReadFixture(t);
+  await assert.rejects(
+    h.listedOf(h.nodeId, { cursor: "bm90LWEtY3Vyc29y" }),
+    codedAs(MissionErrorCode.CursorInvalid),
+  );
+  await assert.rejects(
+    h.listedOf(createIdentity(NODE_IDENTITY_PREFIX)),
+    codedAs(MissionErrorCode.NodeNotFound),
+  );
+});
+
+test("mission.link_update.list marks every row new at attempt 0 and later only the rows of the latest attempt", async (t) => {
+  const h = linkReadFixture(t);
+  const before = h.insertUpdate(linkOf(), TRUSTED_ACTOR, LINK_BASE_TIME);
+  const marks = async () =>
+    new Map(
+      (await h.listedOf(h.nodeId)).items.map((item) => [item.id, item.new]),
+    );
+  assert.deepEqual(await marks(), new Map([[before, true]]));
+  h.tick();
+  h.open();
+  const atOpening = h.insertUpdate(linkOf(), TRUSTED_ACTOR, LINK_BASE_TIME + 1);
+  h.tick();
+  const after = h.insertUpdate(
+    linkOf(),
+    TRUSTED_ACTOR,
+    LINK_BASE_TIME + PAGE_OF_TWO,
+  );
+  assert.deepEqual(
+    await marks(),
+    new Map([
+      [before, false],
+      [atOpening, true],
+      [after, true],
+    ]),
+  );
+});
+
+test("linkUpdatesOf marks every row new at attempt 1 and at attempt 3 only the rows since attempt 2 opened", (t) => {
+  const h = linkReadFixture(t);
+  const first = h.insertUpdate(linkOf(), TRUSTED_ACTOR, LINK_BASE_TIME);
+  h.tick();
+  h.open();
+  h.tick();
+  h.close(FIRST_ATTEMPT_NUMBER);
+  const second = h.insertUpdate(linkOf(), TRUSTED_ACTOR, LINK_BASE_TIME + 1);
+  h.tick();
+  h.open();
+  h.tick();
+  const third = h.insertUpdate(
+    linkOf(),
+    TRUSTED_ACTOR,
+    LINK_BASE_TIME + PAGE_OF_TWO,
+  );
+  h.close(FIRST_ATTEMPT_NUMBER + 1);
+  h.tick();
+  h.open();
+  const atFirst = h.linkUpdatesOf(FIRST_ATTEMPT_NUMBER);
+  assert.deepEqual(
+    atFirst.items.map((item) => [item.id, item.new]),
+    [
+      [third, true],
+      [second, true],
+      [first, true],
+    ],
+  );
+  assert.equal(atFirst.total, THREE_ROWS);
+  const atThird = h.linkUpdatesOf(THIRD_ATTEMPT_NUMBER);
+  assert.deepEqual(
+    atThird.items.map((item) => [item.id, item.new]),
+    [
+      [third, true],
+      [second, false],
+      [first, false],
+    ],
+  );
+});
+
+test("linkUpdatesOf answers next_cursor and the total of the trusted rows", (t) => {
+  const h = linkReadFixture(t);
+  h.insertUpdate(linkOf(), OTHER_ACTOR, LINK_BASE_TIME);
+  h.insertUpdate(linkOf(), TRUSTED_ACTOR, LINK_BASE_TIME + 1);
+  h.insertUpdate(linkOf(), TRUSTED_ACTOR, LINK_BASE_TIME + PAGE_OF_TWO);
+  h.tick();
+  h.open();
+  const first = h.linkUpdatesOf(FIRST_ATTEMPT_NUMBER, { limit: 1 });
+  assert.equal(first.items.length, SINGLE_ITEM);
+  assert.equal(first.total, PAGE_OF_TWO);
+  assert.ok(first.next_cursor !== null);
+  const second = h.linkUpdatesOf(FIRST_ATTEMPT_NUMBER, {
+    limit: 1,
+    cursor: first.next_cursor,
+  });
+  assert.equal(second.items.length, SINGLE_ITEM);
+  assert.equal(second.next_cursor, null);
+  assert.equal(second.total, PAGE_OF_TWO);
+  assert.notEqual(second.items[0]?.id, first.items[0]?.id);
 });

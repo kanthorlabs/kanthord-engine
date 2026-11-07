@@ -717,6 +717,12 @@ export type WorkerAgentView = {
   valid: boolean;
   issues: Array<{ path: string[]; code: string }>;
 };
+export const pinnedLinkTrustSchema = z.strictObject({
+  actor_ids: z.array(z.string()),
+});
+export const pinnedConfigSchema = z.looseObject({
+  link_trust: pinnedLinkTrustSchema.optional(),
+});
 export type BindingRevisionResult = {
   project_id: string;
   binding_id: string;
@@ -725,6 +731,7 @@ export type BindingRevisionResult = {
   revision: number;
   tombstone: boolean;
   disabled: boolean;
+  link_trust?: z.infer<typeof pinnedLinkTrustSchema>;
 };
 export type RepositoryPolicy = {
   binding_id: string;

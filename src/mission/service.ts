@@ -46,6 +46,7 @@ import {
   type IntakeGateFiles,
   type IntakeStorage,
   type Intent,
+  type LinkUpdatePage,
   MISSION_SERVICE_NAME,
   type MissionActions,
   type MissionBindings,
@@ -120,6 +121,7 @@ import {
 } from "./execution-read.ts";
 import { claim, failure, nodeBranchesOf, release } from "./transitions.ts";
 import { actionContextOf } from "./action-context.ts";
+import { linkUpdatePage, linkUpdatesOf } from "./link-update-read.ts";
 import { claimFacts, claimFactsOf, openingFacts } from "./claim-facts.ts";
 import { guardCoverage } from "./coverage.ts";
 import {
@@ -618,6 +620,13 @@ export class MissionService
       missionOperations["proposal.list"],
       ({ params, query }, caller) =>
         caller.commit((tx) => proposalPage(tx, params.node_id, query)),
+    );
+    registry.register(
+      missionOperations["link_update.list"],
+      ({ params, query }, caller) =>
+        caller.commit((tx) =>
+          linkUpdatePage(tx, this.dependencies.bindings, params.node_id, query),
+        ),
     );
     registry.register(
       missionOperations["proposal.decide"],
@@ -1279,6 +1288,14 @@ export class MissionService
 
   actionContextOf(tx: Transaction, nodeId: string, attempt: number) {
     return actionContextOf(tx, this.dependencies, nodeId, attempt);
+  }
+  linkUpdatesOf(
+    tx: Transaction,
+    nodeId: string,
+    attempt: number,
+    page: LinkUpdatePage,
+  ) {
+    return linkUpdatesOf(tx, this.dependencies.bindings, nodeId, attempt, page);
   }
   authorizeRequest(
     tx: Transaction,

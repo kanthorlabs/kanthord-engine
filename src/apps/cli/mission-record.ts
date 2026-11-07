@@ -75,6 +75,26 @@ export function addRecordCommands(mission: Command): void {
         );
       },
     );
+  const linkUpdates = mission
+    .command("link-update")
+    .description("Mission link update records");
+  linkUpdates.action(() => linkUpdates.help());
+  addPagination(
+    linkUpdates
+      .command("list")
+      .description("List the trusted link updates of a node as JSON")
+      .argument("<node-id>", "Node ID"),
+  ).action(async (nodeId: string, _options, command: Command) => {
+    validateNode(nodeId, "cli.mission.link_update.list.invalid_node_id");
+    printResult(
+      await client(command, "link_update.list")["link_update.list"]({
+        params: { node_id: nodeId },
+        query: pagination(command.optsWithGlobals()),
+        body: null,
+      }),
+      "link_update.list",
+    );
+  });
   addExternalCommands(mission);
 }
 
