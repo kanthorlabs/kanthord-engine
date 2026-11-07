@@ -195,6 +195,7 @@ export async function readRequestedChanges(
   );
   if (text === null) return null;
   return {
+    source: VerdictSource.Rework,
     text,
     judged: latestRequestCommits(read.items),
     findings: [],
@@ -227,6 +228,7 @@ async function readFailedChecks(
   );
   if (text === null) return null;
   return {
+    source: VerdictSource.FailedChecks,
     text,
     judged: read.items.map((item) => ({
       binding_id: item.binding_id,
@@ -276,7 +278,14 @@ export interface JudgedCommit {
   commit: string;
 }
 
+export const VerdictSource = {
+  FailedChecks: "failed_checks",
+  Rework: "rework",
+} as const;
+export type VerdictSource = (typeof VerdictSource)[keyof typeof VerdictSource];
+
 export interface Verdict {
+  source: VerdictSource;
   text: string;
   judged: JudgedCommit[];
   findings: Finding[];
@@ -299,6 +308,7 @@ export async function readPrior(
   if (failed !== null)
     return {
       verdict: {
+        source: rework ? VerdictSource.Rework : failed.source,
         text: rework
           ? `${failed.text}${VERDICT_SEPARATOR}${rework.rationale}`
           : failed.text,
@@ -311,6 +321,7 @@ export async function readPrior(
   if (rework)
     return {
       verdict: {
+        source: VerdictSource.Rework,
         text: rework.rationale,
         judged: testedCommits(rework.tested_input),
         findings,

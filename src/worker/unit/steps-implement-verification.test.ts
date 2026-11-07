@@ -1,3 +1,4 @@
+import { VerdictSource } from "./node-reads.ts";
 import assert from "node:assert/strict";
 import {
   attributed,
@@ -146,6 +147,7 @@ suite(
       );
       await recordDone(h, passing);
       h.verdict = {
+        source: VerdictSource.Rework,
         text: "The verdict names no task.",
         findings: [],
         round: null,

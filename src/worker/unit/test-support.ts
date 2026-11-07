@@ -57,6 +57,7 @@ import { ExecutionRun, type MethodClaim } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import { prepareStepsWorkspace } from "./steps-implement.ts";
+import type { RefreshResult } from "./base-refresh.ts";
 import type { Verdict } from "./node-reads.ts";
 import type { VerificationFacts } from "./progress-rule.ts";
 import { doneTrailerOf } from "./done-record.ts";
@@ -367,6 +368,7 @@ async function openExecution(
     verdict: null as Verdict | null,
     cleared: null as string | null,
     unchangedTurns: 0,
+    refreshed: null as RefreshResult | null,
     lastVerification: null as VerificationFacts,
     revisionCount: 0,
     memo: new VerificationMemo(),
