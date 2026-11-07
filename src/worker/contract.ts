@@ -1151,7 +1151,10 @@ export const connectionPayloadSchema = z.strictObject({
 export type ConnectionPayload = z.infer<typeof connectionPayloadSchema>;
 export type ConnectionBinding = ConnectionPayload["bindings"][number];
 
-export const HostTool = { EvidenceUpload: "evidence-upload" } as const;
+export const HostTool = {
+  EvidenceUpload: "evidence-upload",
+  LinkUpdateList: "link_update_list",
+} as const;
 export type HostTool = (typeof HostTool)[keyof typeof HostTool];
 export const uploadResultSchema = z.strictObject({
   evidence_id: identitySchema("evidence"),
@@ -1164,6 +1167,10 @@ export interface HostTools {
     path: string,
     signal: AbortSignal | undefined,
   ): Promise<UploadResult>;
+  linkUpdateList(
+    page: LinkUpdatePageQuery,
+    signal: AbortSignal | undefined,
+  ): Promise<LinkUpdateRead>;
 }
 export const SetupRefusal = {
   ModelUnknown: "model_unknown",

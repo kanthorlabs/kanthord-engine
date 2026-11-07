@@ -41,6 +41,7 @@ const ENDED_RECORD = "execution ended";
 const SESSION_ROOT = "/test/session-root";
 const NO_ENTRIES = 0;
 const ONE_ENTRY = 1;
+const LINK_UPDATE_PAGE_LIMIT = 20;
 const REGISTRATION = {
   runtime_identity: "worker_registration_01ARZ3NDEKTSV4RRFFQ69G5FAA",
   resource_identity: "worker:kanthord:test",
@@ -384,6 +385,65 @@ test("host takes handover before setup and method, discards on every method end"
       );
       assert.equal(held?.size, NO_ENTRIES);
     }
+  }
+  const linkUpdates = { items: [], next_cursor: null, total: NO_ENTRIES };
+  const linkUpdateRequests: unknown[] = [];
+  t.mock.method(
+    api.worker,
+    "execution.link_update.get",
+    async (request: unknown) => {
+      linkUpdateRequests.push(request);
+      return {
+        type: OperationResultType.Completed,
+        status: 200,
+        data: linkUpdates,
+      };
+    },
+  );
+  assert.equal(
+    await hostExecution(input, async (native) => {
+      assert.deepEqual(
+        await native
+          .hostTools(workspace)
+          .linkUpdateList({ limit: LINK_UPDATE_PAGE_LIMIT }, undefined),
+        linkUpdates,
+      );
+      return { kind: "released", furtherWork: false };
+    }),
+    null,
+  );
+  assert.deepEqual(linkUpdateRequests, [
+    {
+      params: { execution_id: claim.execution_id },
+      query: { limit: LINK_UPDATE_PAGE_LIMIT },
+      body: null,
+    },
+  ]);
+  for (const [status, code] of [
+    [403, "gateway.invocation.execution_proof_failed"],
+    [409, "scheduler.execution.not_running"],
+  ] as const) {
+    t.mock.method(api.worker, "execution.link_update.get", async () => ({
+      type: OperationResultType.Failure,
+      status,
+      error: {
+        request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+        error: { code, message: "Ended", details: null },
+      },
+    }));
+    assert.equal(
+      await hostExecution(input, async (native) => {
+        await assert.rejects(
+          native
+            .hostTools(workspace)
+            .linkUpdateList({ limit: LINK_UPDATE_PAGE_LIMIT }, undefined),
+          { code },
+        );
+        assert.ok(native.context.signal.aborted);
+        return { kind: "released", furtherWork: false };
+      }),
+      null,
+    );
   }
   t.mock.method(api.worker, "execution.setup.get", async () => ({
     type: OperationResultType.Failure,
