@@ -16,6 +16,11 @@ import {
 } from "../kernel/operation.ts";
 import type { RecordedResponse } from "./idempotency.ts";
 import { createIdempotencyKey } from "../kernel/identity.ts";
+export class PortClosedError extends Error {
+  constructor() {
+    super("The port is closed.");
+  }
+}
 export function inputValidationFailure(error: z.ZodError): RecordedResponse {
   assert.ok(error instanceof z.ZodError);
   const none = 0;
@@ -72,8 +77,14 @@ export function createClient<T extends Record<string, Operation>>(
             ...options,
             idempotencyKey,
           });
-        } catch {
-          return { type: OperationResultType.Indeterminate, idempotencyKey };
+        } catch (error) {
+          return error instanceof PortClosedError
+            ? {
+                type: OperationResultType.Indeterminate,
+                idempotencyKey,
+                closed: true,
+              }
+            : { type: OperationResultType.Indeterminate, idempotencyKey };
         }
         if (result.status === operation.status) {
           if (

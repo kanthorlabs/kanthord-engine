@@ -266,7 +266,11 @@ export type OperationResult<T> =
       error: ErrorBody;
       idempotencyKey?: string;
     }
-  | { type: typeof OperationResultType.Indeterminate; idempotencyKey?: string };
+  | {
+      type: typeof OperationResultType.Indeterminate;
+      idempotencyKey?: string;
+      closed?: true;
+    };
 export interface ClientOptions {
   identity?: CallerIdentity;
   idempotencyKey?: string;
