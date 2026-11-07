@@ -550,3 +550,101 @@ for (const state of [
     assert.deepEqual(withoutLinkRows(databaseSnapshot(h.store)), before);
   });
 }
+
+const REPLY_UPDATE_KEY = "issue_comment:6001";
+const OWN_REPLY_UPDATE_KEY = "issue_comment:6002";
+const REPLY_ACCOUNT = "2002";
+
+test("an update whose update_key equals a succeeded reply answers actor_ignored and records nothing, also for a listed actor", async (t) => {
+  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
+  const binding = h.addBinding(LINK_RESOURCE, [REPLY_ACCOUNT]);
+  h.addNode([linkOf()], NodeState.Available, [binding]);
+  h.replies.answer = { succeeded: true, pending_actor_ids: [] };
+  h.decoding.update = updateOf({
+    update_key: REPLY_UPDATE_KEY,
+    actor_id: REPLY_ACCOUNT,
+  });
+  const answer = await h.admit();
+  assert.deepEqual(answer, {
+    disposition: Disposition.Refused,
+    reason: AdmissionRefusal.ActorIgnored,
+  });
+  assert.equal(h.rows().length, NO_ROWS);
+  assert.deepEqual(h.replies.inputs, [
+    { update_key: REPLY_UPDATE_KEY, external_link: linkOf() },
+  ]);
+  assert.equal(h.node().state, NodeState.Available);
+});
+
+test("the reply of another project answers actor_ignored in the mission of this project and records nothing", async (t) => {
+  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
+  h.addNode([linkOf()]);
+  const otherProjectReplies = new Set([OWN_REPLY_UPDATE_KEY]);
+  h.dependencies.intakeLinks.replyMatch = async (_context, input) => ({
+    succeeded: otherProjectReplies.has(input.update_key),
+    pending_actor_ids: [],
+  });
+  h.decoding.update = updateOf({ update_key: OWN_REPLY_UPDATE_KEY });
+  assert.deepEqual(await h.admit(), {
+    disposition: Disposition.Refused,
+    reason: AdmissionRefusal.ActorIgnored,
+  });
+  assert.equal(h.rows().length, NO_ROWS);
+  h.decoding.update = updateOf({ update_key: REPLY_UPDATE_KEY });
+  assert.equal((await h.admit()).disposition, Disposition.AcceptedObservation);
+  assert.equal(h.rows().length, SINGLE_ROW);
+});
+
+test("an update of the reply account while a reply on the link is pending answers actor_ignored and records nothing", async (t) => {
+  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
+  h.addNode([linkOf()]);
+  h.replies.answer = { succeeded: false, pending_actor_ids: [REPLY_ACCOUNT] };
+  h.decoding.update = updateOf({ actor_id: REPLY_ACCOUNT });
+  assert.deepEqual(await h.admit(), {
+    disposition: Disposition.Refused,
+    reason: AdmissionRefusal.ActorIgnored,
+  });
+  assert.equal(h.rows().length, NO_ROWS);
+  const [call] = actCalls(h);
+  assert.ok(Object.values(call![1].attributes).includes(REPLY_ACCOUNT));
+});
+
+test("an update of another human actor while the reply is pending records its row and keeps the state of the node", async (t) => {
+  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
+  const nodeId = h.addNode([linkOf()], NodeState.Executing);
+  h.replies.answer = { succeeded: false, pending_actor_ids: [REPLY_ACCOUNT] };
+  h.decoding.update = updateOf({ actor_id: OTHER_ACTOR });
+  const before = withoutLinkRows(databaseSnapshot(h.store));
+  assert.equal((await h.admit()).disposition, Disposition.AcceptedObservation);
+  assert.equal(h.rows().length, SINGLE_ROW);
+  assert.deepEqual(withoutLinkRows(databaseSnapshot(h.store)), before);
+  assert.equal(
+    h.store.database
+      .prepare("SELECT state FROM mission_node WHERE id = ?")
+      .get(nodeId)?.state,
+    NodeState.Executing,
+  );
+});
+
+test("an update of the reply account after the reply succeeded with another update_key records its row", async (t) => {
+  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
+  h.addNode([linkOf()]);
+  h.replies.answer = { succeeded: false, pending_actor_ids: [] };
+  h.decoding.update = updateOf({
+    update_key: REPLY_UPDATE_KEY,
+    actor_id: REPLY_ACCOUNT,
+  });
+  assert.equal((await h.admit()).disposition, Disposition.AcceptedObservation);
+  assert.equal(h.rows().length, SINGLE_ROW);
+  assert.equal(h.rows()[0]?.actor_id, REPLY_ACCOUNT);
+});
+
+test("an automated actor and a null actor_id ask Intake nothing about replies", async (t) => {
+  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
+  h.addNode([linkOf()]);
+  h.decoding.update = updateOf({ actor_automated: true });
+  await h.admit();
+  h.decoding.update = updateOf({ actor_id: null });
+  await h.admit();
+  assert.deepEqual(h.replies.inputs, []);
+});

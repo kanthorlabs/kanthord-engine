@@ -75,6 +75,7 @@ import {
   bindingSetWriteInputSchema,
   BindingState,
   ChangeKind,
+  ConversationAction,
   ConversationPlatform,
   ENVIRONMENT_SECRETS_MAX,
   EnvironmentSource,
@@ -3197,6 +3198,8 @@ test("a git-only platform accepts merge_push and refuses a credential or pull_re
 });
 
 const CONVERSATION_NAME = "conversation";
+const OTHER_CONVERSATION_NAME = "other_conversation";
+const OTHER_CONVERSATION_REPOSITORY = "acme/other";
 const CONVERSATION_REPOSITORY = "acme/app";
 const CONVERSATION_IDENTITY = "conversation:github:acme/app";
 const CONVERSATION_CREDENTIAL = "github-conversation";
@@ -3272,6 +3275,41 @@ test("conversationBindingOf answers the pinned revision of a conversation bindin
     });
     assert.equal(
       f.project.conversationBindingOf(tx, stored[REPOSITORY_NAME]!.id),
+      null,
+    );
+  });
+});
+
+test("conversationPolicyOf answers the action reply and its key for a binding with reply_policy, and null for another binding", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    const stored = persistBindings(tx, project.id, {
+      [CONVERSATION_NAME]: conversationBinding({
+        reply_policy: { follows: { type: FollowsType.AssessmentPassed } },
+      }),
+      [OTHER_CONVERSATION_NAME]: conversationBinding({
+        repository: OTHER_CONVERSATION_REPOSITORY,
+      }),
+      [REPOSITORY_NAME]: repositoryBinding(),
+    }).bindings;
+    const conversation = stored[CONVERSATION_NAME]!;
+    assert.deepEqual(f.project.conversationPolicyOf(tx, conversation.id), {
+      binding_id: conversation.id,
+      project_id: project.id,
+      name: CONVERSATION_NAME,
+      key: `${CONVERSATION_NAME}.${ConversationAction.Reply}`,
+      platform: ConversationPlatform.GitHub,
+      repository: CONVERSATION_REPOSITORY,
+      credential: CONVERSATION_CREDENTIAL,
+      action: ConversationAction.Reply,
+    });
+    assert.equal(
+      f.project.conversationPolicyOf(tx, stored[OTHER_CONVERSATION_NAME]!.id),
+      null,
+    );
+    assert.equal(
+      f.project.conversationPolicyOf(tx, stored[REPOSITORY_NAME]!.id),
       null,
     );
   });

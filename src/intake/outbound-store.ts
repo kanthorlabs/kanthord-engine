@@ -217,3 +217,39 @@ export function discard(tx: Transaction, id: string): boolean {
     ).changes;
   return Number(changes) === ROWS_PER_WRITE;
 }
+
+export function findByKeySuffix(
+  tx: Transaction,
+  operation: OutboundOperationValue,
+  suffix: string,
+): OutboundRow[] {
+  assert.ok(suffix.length > EMPTY_TEXT_LENGTH, "A key suffix is required.");
+  return tx.database
+    .prepare(
+      "SELECT * FROM intake_outbound_request WHERE operation = ? AND substr(request_key, -length(?)) = ? ORDER BY id",
+    )
+    .all(operation, suffix, suffix) as unknown as OutboundRow[];
+}
+
+export function recordResult(
+  tx: Transaction,
+  id: string,
+  result: unknown,
+): boolean {
+  const stored = canonicalJSON(result);
+  assert.ok(
+    Buffer.byteLength(stored, "utf8") <= RESULT_MAX_BYTES,
+    "A result must fit its byte bound.",
+  );
+  const changes = tx.database
+    .prepare(
+      "UPDATE intake_outbound_request SET result = ? WHERE id = ? AND state IN (?, ?)",
+    )
+    .run(
+      stored,
+      id,
+      OutboundRequestState.Pending,
+      OutboundRequestState.Failed,
+    ).changes;
+  return Number(changes) === ROWS_PER_WRITE;
+}

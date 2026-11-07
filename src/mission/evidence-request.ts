@@ -7,7 +7,9 @@ import type { ExecutionClaim } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   AssetKind,
+  ConversationAction,
   type EvidenceRequest,
+  type FrozenAction,
   MissionErrorCode,
   PlatformAddressKind,
   RepositoryAction,
@@ -24,6 +26,14 @@ import { gateFilesOf } from "./gate-files.ts";
 import { evidenceRecord } from "./record-read.ts";
 import { insertEvidence, readEvidence, readRequests } from "./record-store.ts";
 import type { Dependencies } from "./service.ts";
+
+function addressKindOf(action: FrozenAction) {
+  if (action.action === ConversationAction.Reply)
+    return PlatformAddressKind.Comment;
+  return action.action === RepositoryAction.PullRequest
+    ? PlatformAddressKind.PullRequest
+    : PlatformAddressKind.BranchPush;
+}
 
 export function requestEvidence(
   tx: Transaction,
@@ -53,14 +63,15 @@ export function requestEvidence(
     action.binding_id,
   );
   assert.ok(binding);
-  const kind =
-    action.action === RepositoryAction.PullRequest
-      ? PlatformAddressKind.PullRequest
-      : PlatformAddressKind.BranchPush;
+  const kind = addressKindOf(action);
+  const baseBranch =
+    action.action === ConversationAction.Reply
+      ? null
+      : action.configuration.base_branch;
   const containedLanding =
     action.action === RepositoryAction.PullRequest &&
     body.address.kind === PlatformAddressKind.BranchPush &&
-    body.address.branch === action.configuration.base_branch;
+    body.address.branch === baseBranch;
   const humanLanding = landsByHuman(
     action,
     gateFilesOf(
@@ -71,7 +82,7 @@ export function requestEvidence(
   const humanLandingMismatch =
     humanLanding &&
     body.address.kind === PlatformAddressKind.BranchPush &&
-    (body.address.branch !== action.configuration.base_branch ||
+    (body.address.branch !== baseBranch ||
       body.address.commit !==
         assessedCommitOf(tx, nodeId, claim.attempt, action.binding_id));
   if (

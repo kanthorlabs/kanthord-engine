@@ -14,6 +14,7 @@ import {
   type AdmissionAnswer,
   AdmissionRefusal,
   CONTENT_ENCODING,
+  ConversationAction,
   type DecodedLinkUpdate,
   type deliveryAdmitSchema,
   Disposition,
@@ -79,21 +80,14 @@ function decoderInput(input: AdmissionInput) {
   };
 }
 
-function prepareLinkUpdate(
+function ignoreActor(
   dependencies: Dependencies,
   input: AdmissionInput,
-): AdmissionAnswer | LinkChecked {
-  const update = dependencies.decoder.decodeLinkUpdate(decoderInput(input));
-  if (update === null)
-    return {
-      disposition: Disposition.Refused,
-      reason: AdmissionRefusal.Undecodable,
-    };
-  if (!update.actor_automated && update.actor_id !== null)
-    return { update, actorId: update.actor_id };
+  actorId: string | null,
+): AdmissionAnswer {
   recordRefusedLinkUpdate(dependencies, {
     project_id: input.project_id,
-    actor_id: update.actor_id,
+    actor_id: actorId,
     reason: AdmissionRefusal.ActorIgnored,
     refused_at: Date.now(),
   });
@@ -101,6 +95,28 @@ function prepareLinkUpdate(
     disposition: Disposition.Refused,
     reason: AdmissionRefusal.ActorIgnored,
   };
+}
+
+async function prepareLinkUpdate(
+  dependencies: Dependencies,
+  caller: CallerContext,
+  input: AdmissionInput,
+): Promise<AdmissionAnswer | LinkChecked> {
+  const update = dependencies.decoder.decodeLinkUpdate(decoderInput(input));
+  if (update === null)
+    return {
+      disposition: Disposition.Refused,
+      reason: AdmissionRefusal.Undecodable,
+    };
+  if (update.actor_automated || update.actor_id === null)
+    return ignoreActor(dependencies, input, update.actor_id);
+  const replies = await dependencies.intakeLinks.replyMatch(caller.context, {
+    update_key: update.update_key,
+    external_link: update.external_link,
+  });
+  if (replies.succeeded || replies.pending_actor_ids.includes(update.actor_id))
+    return ignoreActor(dependencies, input, update.actor_id);
+  return { update, actorId: update.actor_id };
 }
 
 function commitLinkUpdate(
@@ -136,7 +152,7 @@ async function prepareAdmission(
   input: AdmissionInput,
 ): Promise<Prepared> {
   const address = dependencies.decoder.decode(decoderInput(input));
-  if (address === null) return prepareLinkUpdate(dependencies, input);
+  if (address === null) return prepareLinkUpdate(dependencies, caller, input);
   const match = dependencies.store.transaction((tx) =>
     matchRequests(tx, input.project_id, address),
   );
@@ -168,12 +184,14 @@ async function checkBase(
       tx,
       input.project_id,
       address.resource_identity,
-    ).filter(
-      (evidenceId) =>
-        evidenceId !== exactEvidenceId &&
-        requestContext(tx, dependencies, evidenceId).frozen_action.configuration
-          .base_branch === address.branch,
-    ),
+    ).filter((evidenceId) => {
+      if (evidenceId === exactEvidenceId) return false;
+      const action = requestContext(tx, dependencies, evidenceId).frozen_action;
+      return (
+        action.action !== ConversationAction.Reply &&
+        action.configuration.base_branch === address.branch
+      );
+    }),
   );
   const base: BaseCheck[] = [];
   for (const evidenceId of selected)

@@ -34,6 +34,7 @@ function harness(answer: boolean) {
       resolveBinding: () => assert.fail("The guard resolves no name."),
       resolveBindingIdentity: () => assert.fail("The guard resolves no pin."),
       repositoryPolicyOf: () => assert.fail("The guard reads no policy."),
+      conversationPolicyOf: () => assert.fail("The guard reads no policy."),
       getBindingRevision: (_tx: Transaction, bindingId: string) => {
         reads.push(bindingId);
         return {

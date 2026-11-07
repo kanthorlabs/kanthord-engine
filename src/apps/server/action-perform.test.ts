@@ -444,6 +444,7 @@ async function setup(t: TestContext, landing = "human") {
         query: {},
         body: {
           ...body,
+          comment: null,
           reused_evidence_id: reusedEvidenceId,
           merge_evidence_id: mergeEvidenceId,
         },
@@ -527,6 +528,7 @@ test(
     const body = (requestKey: string) => ({
       key: "gated.pull_request",
       commit: h.gatedSnapshot,
+      comment: null,
       reused_evidence_id: null,
       merge_evidence_id: null,
       request_key: requestKey,

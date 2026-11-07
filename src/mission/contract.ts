@@ -56,6 +56,19 @@ export interface MissionBindings {
     action: "pull_request" | "merge_push" | null;
     landing: "human" | "kanthord";
   } | null;
+  conversationPolicyOf(
+    tx: Transaction,
+    bindingId: string,
+  ): {
+    binding_id: string;
+    project_id: string;
+    name: string;
+    key: string;
+    platform: string;
+    repository: string;
+    credential: string;
+    action: "reply";
+  } | null;
   resolveBinding(
     tx: Transaction,
     projectId: string,
@@ -332,6 +345,10 @@ export interface IntakeLinks {
       binding_id: string;
     },
   ): Promise<{ items: { inbound_event_id: string }[] }>;
+  replyMatch(
+    context: Context,
+    input: { update_key: string; external_link: ExternalLink },
+  ): Promise<{ succeeded: boolean; pending_actor_ids: string[] }>;
   handoff(
     context: Context,
     inboundEventId: string,
@@ -612,6 +629,9 @@ export const RepositoryAction = {
   PullRequest: "pull_request",
   MergePush: "merge_push",
 } as const;
+export const ConversationAction = {
+  Reply: "reply",
+} as const;
 export const repositoryActionSchema = z.enum(RepositoryAction);
 export type RepositoryAction = z.infer<typeof repositoryActionSchema>;
 export const RepositoryLanding = {
@@ -621,12 +641,14 @@ export const RepositoryLanding = {
 export const ExpectedEndState = {
   PullRequestMerged: "pull_request_merged",
   BaseBranchPushed: "base_branch_pushed",
+  Posted: "posted",
 } as const;
 export const expectedEndStateSchema = z.enum(ExpectedEndState);
 export type ExpectedEndState = z.infer<typeof expectedEndStateSchema>;
 export const PlatformAddressKind = {
   PullRequest: "pull_request",
   BranchPush: "branch_push",
+  Comment: "comment",
 } as const;
 export const platformAddressKindSchema = z.enum(PlatformAddressKind);
 export type PlatformAddressKind = z.infer<typeof platformAddressKindSchema>;
@@ -660,7 +682,7 @@ export const commitSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 export const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 export const actionKeySchema = z
   .string()
-  .regex(/^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push)$/);
+  .regex(/^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push|reply\.[0-9])$/);
 export const textSchema = z.string().min(1);
 
 export const intentSchema = z.enum(Intent);
@@ -1089,8 +1111,17 @@ export const platformAddressSchema = z.discriminatedUnion("kind", [
     branch: textSchema,
     commit: commitSchema,
   }),
+  z.strictObject({
+    kind: z.literal(PlatformAddressKind.Comment),
+    resource_identity: textSchema,
+    update_key: textSchema,
+  }),
 ]);
 export type PlatformAddress = z.infer<typeof platformAddressSchema>;
+export type RepositoryPlatformAddress = Exclude<
+  PlatformAddress,
+  { kind: typeof PlatformAddressKind.Comment }
+>;
 export const addressSchema = z.discriminatedUnion("kind", [
   repositoryAddressSchema,
   producedAddressSchema,
@@ -1118,18 +1149,40 @@ export const verificationSchema = z.strictObject({
   ),
 });
 export type Verification = z.infer<typeof verificationSchema>;
-export const frozenActionSchema = z.strictObject({
+const frozenActionFields = {
   key: actionKeySchema,
   binding_id: identitySchema("binding"),
-  action: repositoryActionSchema,
-  expected_end_state: expectedEndStateSchema,
   follows: actionKeySchema.nullable(),
-  configuration: z.strictObject({
-    base_branch: textSchema,
-    landing: z.enum(RepositoryLanding).default(RepositoryLanding.Human),
+};
+export const frozenActionSchema = z.discriminatedUnion("action", [
+  z.strictObject({
+    ...frozenActionFields,
+    action: repositoryActionSchema,
+    expected_end_state: z.enum([
+      ExpectedEndState.PullRequestMerged,
+      ExpectedEndState.BaseBranchPushed,
+    ]),
+    configuration: z.strictObject({
+      base_branch: textSchema,
+      landing: z.enum(RepositoryLanding).default(RepositoryLanding.Human),
+    }),
   }),
-});
+  z.strictObject({
+    ...frozenActionFields,
+    action: z.literal(ConversationAction.Reply),
+    expected_end_state: z.literal(ExpectedEndState.Posted),
+    configuration: z.strictObject({ external_link: externalLinkSchema }),
+  }),
+]);
 export type FrozenAction = z.infer<typeof frozenActionSchema>;
+export type RepositoryFrozenAction = Extract<
+  FrozenAction,
+  { action: RepositoryAction }
+>;
+export type ReplyFrozenAction = Extract<
+  FrozenAction,
+  { action: typeof ConversationAction.Reply }
+>;
 export type PullRequestAddress = Extract<
   PlatformAddress,
   { kind: typeof PlatformAddressKind.PullRequest }
@@ -1141,7 +1194,7 @@ export type RepositoryFacts = {
   base_branch: string;
 };
 export type ActionFacts = {
-  frozen_action: FrozenAction;
+  frozen_action: RepositoryFrozenAction;
   repository: RepositoryFacts;
   node: { name: string; commit_type: CommitType };
   snapshot_commit: string;
@@ -1150,11 +1203,30 @@ export type ActionFacts = {
   gate_files: string[];
 };
 export type RequestFacts = {
-  frozen_action: FrozenAction;
-  address: PlatformAddress;
+  frozen_action: RepositoryFrozenAction;
+  address: RepositoryPlatformAddress;
   repository: RepositoryFacts;
   human_landing: boolean;
   link_trust: { actor_ids: string[] };
+};
+export type ReplyActionFacts = {
+  frozen_action: ReplyFrozenAction;
+  conversation: {
+    binding_id: string;
+    resource_identity: string;
+    repository: string;
+  };
+  node_id: string;
+  attempt: number;
+};
+export type ReplyRequestFacts = {
+  frozen_action: ReplyFrozenAction;
+  address: Extract<
+    PlatformAddress,
+    { kind: typeof PlatformAddressKind.Comment }
+  >;
+  node_id: string;
+  attempt: number;
 };
 export type Authorized<F> = {
   credential: string | null;
@@ -1164,6 +1236,8 @@ export type Authorized<F> = {
 };
 export type ActionContext = {
   state: NodeState;
+  node_name: string;
+  request_addresses: RepositoryPlatformAddress[];
   current_assessment: {
     result: AssessmentResult;
     tested_input: TestedInput;
@@ -1178,7 +1252,7 @@ export type ActionContext = {
     reuse_candidates: {
       evidence_id: string;
       attempt: number;
-      address: PlatformAddress;
+      address: PullRequestAddress;
     }[];
   }[];
 };

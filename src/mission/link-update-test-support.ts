@@ -68,6 +68,14 @@ export function linkUpdateHarness(t: TestContext, identity: CallerIdentity) {
     updateCalls: 0,
   };
   const intakeChecks: string[] = [];
+  const replies = {
+    answer: { succeeded: false, pending_actor_ids: [] as string[] },
+    inputs: [] as { update_key: string; external_link: ExternalLink }[],
+  };
+  h.dependencies.intakeLinks.replyMatch = async (_context, input) => {
+    replies.inputs.push(input);
+    return replies.answer;
+  };
   h.dependencies.decoder = {
     decode: () => {
       decoding.addressCalls++;
@@ -234,6 +242,7 @@ export function linkUpdateHarness(t: TestContext, identity: CallerIdentity) {
   return {
     ...h,
     decoding,
+    replies,
     intakeChecks,
     addNode,
     addAttempts,

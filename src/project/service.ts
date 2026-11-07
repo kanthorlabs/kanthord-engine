@@ -85,8 +85,10 @@ import {
   bindingScope,
   BindingState,
   ChangeKind,
+  ConversationAction,
   type ConversationBinding,
   conversationConfigSchema,
+  type ConversationPolicy,
   type CreateMission,
   type CurrentNodePins,
   type CustodySuitability,
@@ -1954,6 +1956,30 @@ export class ProjectService implements Service, ProjectBindings {
       prompts: config.prompts ?? {},
       environment: currentEnvironmentOf(tx, binding),
       repository_environment: noStoredEnvironment(tx, binding.project_id),
+    };
+  }
+  conversationPolicyOf(
+    tx: Transaction,
+    bindingId: string,
+  ): ConversationPolicy | null {
+    assert.ok(tx.database.isTransaction);
+    const binding = readBindingRevision(tx, bindingId);
+    if (
+      !binding ||
+      kindOf(binding.resource_identity) !== BindingKind.Conversation
+    )
+      return null;
+    const config = conversationConfigSchema.parse(binding.config);
+    if (!config.reply_policy) return null;
+    return {
+      binding_id: binding.id,
+      project_id: binding.project_id,
+      name: binding.name,
+      key: `${binding.name}.${ConversationAction.Reply}`,
+      platform: config.platform,
+      repository: config.repository,
+      credential: config.credential,
+      action: ConversationAction.Reply,
     };
   }
   conversationBindingOf(

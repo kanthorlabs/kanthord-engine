@@ -327,6 +327,9 @@ const bindings: MissionBindings = {
   repositoryPolicyOf() {
     throw new Error(UNEXPECTED_COLLABORATION);
   },
+  conversationPolicyOf() {
+    throw new Error(UNEXPECTED_COLLABORATION);
+  },
   resolveBinding() {
     throw new Error(UNEXPECTED_COLLABORATION);
   },
@@ -388,6 +391,7 @@ function makeService(
     intakeLinks: {
       hasInbound: unexpectedCollaboration,
       read: unexpectedCollaboration,
+      replyMatch: unexpectedCollaboration,
       handoff: unexpectedCollaboration,
       releaseHeld: unexpectedCollaboration,
     },

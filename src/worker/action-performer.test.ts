@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { background } from "../kernel/context.ts";
+import {
+  type ExternalLink,
+  ExternalLinkKind,
+} from "../kernel/external-link.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -15,9 +20,11 @@ import {
   ActionReadMethod,
   ActionResolution,
   ActionResultKind,
+  ConversationAction,
   PlatformAddressKind,
   RefusalClass,
   RepositoryAction,
+  type RepositoryActionEntry,
   ResultClass,
   TestedInputKind,
   Uncertainty,
@@ -30,6 +37,7 @@ const FIRST_ATTEMPT = 1;
 const SINGLE_CALL_COUNT = 1;
 const NO_CALLS = 0;
 const COMMIT = "b".repeat(40);
+const NODE_NAME = "Ship accounts";
 const NOT_RUNNING = "scheduler.execution.not_running";
 const MERGE_REFUSED = "merge.request.refused";
 const SECOND_ATTEMPT = 2;
@@ -67,7 +75,7 @@ function actionable(t: TestContext) {
   assert.ok(
     !Array.isArray(snapshot) && snapshot.kind === TestedInputKind.Repository,
   );
-  const entry: ActionContext["actions"][number] = {
+  const entry: RepositoryActionEntry = {
     action: {
       key: "repo.pull_request",
       binding_id: snapshot.binding_id,
@@ -126,6 +134,8 @@ function harness(t: TestContext) {
   );
   const context: ActionContext = {
     state: ActionNodeState.Evaluating,
+    node_name: NODE_NAME,
+    request_addresses: [],
     current_assessment: {
       result: ActionAssessmentResult.Success,
       tested_input: {
@@ -898,7 +908,7 @@ function reworkable(t: TestContext) {
     !Array.isArray(snapshot) && snapshot.kind === TestedInputKind.Repository,
   );
   const existingEvidenceId = createIdentity("evidence");
-  const entry: ActionContext["actions"][number] = {
+  const entry: RepositoryActionEntry = {
     action: {
       key: "repo.pull_request",
       binding_id: snapshot.binding_id,
@@ -1028,7 +1038,7 @@ test("one reviewer execution requests both actions", async (t) => {
   };
   const performed: string[][] = [];
   h.dependencies.intakeActions.perform = async (_call, action) => {
-    performed.push([action.key, action.commit]);
+    performed.push([action.key, String(action.commit)]);
     return action.key === h.entry.action.key ? PR : pushed;
   };
   const request = t.mock.method(h.dependencies.evidenceRequests, "request");
@@ -1328,4 +1338,105 @@ test("rework: a pending required check requests no merge and warns once", async 
       CHECKS_PENDING_MESSAGE,
     ],
   ]);
+});
+
+const CONVERSATION_RESOURCE = "conversation:github:owner/repo";
+const REPLY_KEY = "conversation.reply.0";
+const REPLY_UPDATE_KEY = "issue_comment:4242";
+const REPLY_LINK: ExternalLink = {
+  kind: ExternalLinkKind.GitHubIssue,
+  resource_identity: CONVERSATION_RESOURCE,
+  number: 7,
+};
+const COMMENT = {
+  kind: PlatformAddressKind.Comment,
+  resource_identity: CONVERSATION_RESOURCE,
+  update_key: REPLY_UPDATE_KEY,
+};
+
+function repliable(t: TestContext) {
+  const h = actionable(t);
+  const entry: ActionContext["actions"][number] = {
+    action: {
+      key: REPLY_KEY,
+      binding_id: createIdentity("binding"),
+      action: ConversationAction.Reply,
+      expected_end_state: "posted",
+      follows: null,
+      configuration: { external_link: REPLY_LINK },
+    },
+    resource_identity: CONVERSATION_RESOURCE,
+    resolution: ActionResolution.Unrequested,
+    request_evidence_id: null,
+    eligible: true,
+    gate_files: [],
+    reuse_candidates: [],
+  };
+  h.context.actions.push(entry);
+  const performed: {
+    action: Parameters<typeof h.dependencies.intakeActions.perform>[1];
+    requestKey: string;
+  }[] = [];
+  const requested: unknown[] = [];
+  h.dependencies.evidenceRequests.request = async (input) => {
+    requested.push(input.body);
+    if (input.body.address.kind === PlatformAddressKind.PullRequest)
+      h.context.request_addresses = [PR];
+    return {
+      type: OperationResultType.Completed,
+      status: HttpStatus.OK,
+      data: h.evidence,
+    };
+  };
+  return { ...h, performed, requested };
+}
+
+test("the request key of a reply is the node, the attempt and the canonical link, and its body holds the node name, the attempt and the addresses of the attempt", async (t) => {
+  const h = repliable(t);
+  h.dependencies.intakeActions.perform = async (_call, action, requestKey) => {
+    h.performed.push({ action, requestKey });
+    return action.key === REPLY_KEY ? COMMENT : PR;
+  };
+  const { items } = await h.perform();
+  assert.ok(items.every((item) => item.kind === ActionResultKind.Submitted));
+  assert.deepEqual(
+    h.performed.map(({ action }) => action.key),
+    ["repo.pull_request", REPLY_KEY],
+  );
+  const reply = h.performed[1]!;
+  assert.equal(
+    reply.requestKey,
+    `${h.claim.nodeId}:${h.claim.attempt}:${canonicalJSON(REPLY_LINK)}`,
+  );
+  assert.deepEqual(reply.action, {
+    key: REPLY_KEY,
+    commit: null,
+    comment: [
+      `KanthorD: the review of node ${NODE_NAME} passed at attempt ${h.claim.attempt}.`,
+      `${RESOURCE} pull request #${PR.number}`,
+    ].join("\n"),
+    reusedEvidenceId: null,
+  });
+  assert.deepEqual(
+    h.requested.map((body) => (body as { address: unknown }).address),
+    [PR, COMMENT],
+  );
+});
+
+test("a reply that ends with no answer holds no reservation and a repeat asks Intake again", async (t) => {
+  const h = repliable(t);
+  h.context.actions.shift();
+  h.dependencies.intakeActions.perform = async (_call, action, requestKey) => {
+    h.performed.push({ action, requestKey });
+    return {
+      class: ResultClass.UnknownOutcome,
+      code: "unknown_outcome",
+      message: "no answer",
+    };
+  };
+  const first = await h.perform();
+  assert.equal(first.items[0]?.kind, ActionResultKind.Uncertain);
+  await h.perform();
+  assert.equal(h.performed.length, DUAL_CALL_COUNT);
+  assert.equal(h.performed[0]?.requestKey, h.performed[1]?.requestKey);
 });

@@ -14,6 +14,7 @@ import {
   TOOL_OUTPUT_NAME_PATTERN,
   WORKSPACE_KEY_PATTERN,
 } from "../kernel/cleanup.ts";
+import type { ExternalLink } from "../kernel/external-link.ts";
 import { canonicalJSON, timestamp } from "../kernel/json.ts";
 import { base64urlSchema, sealedObjectSchema } from "../kernel/hpke.ts";
 import {
@@ -114,6 +115,7 @@ export type ActionReadMethod = z.infer<typeof actionReadMethodSchema>;
 export const PlatformAddressKind = {
   PullRequest: "pull_request",
   BranchPush: "branch_push",
+  Comment: "comment",
 } as const;
 export const platformAddressSchema = z.discriminatedUnion("kind", [
   z.strictObject({
@@ -126,6 +128,11 @@ export const platformAddressSchema = z.discriminatedUnion("kind", [
     resource_identity: z.string().min(1),
     branch: z.string().min(1),
     commit: z.string().min(1),
+  }),
+  z.strictObject({
+    kind: z.literal(PlatformAddressKind.Comment),
+    resource_identity: z.string().min(1),
+    update_key: z.string().min(1),
   }),
 ]);
 export type PlatformAddress = z.infer<typeof platformAddressSchema>;
@@ -266,7 +273,10 @@ export const RepositoryAction = {
   PullRequest: "pull_request",
   MergePush: "merge_push",
 } as const;
-export type FrozenAction = {
+export const ConversationAction = {
+  Reply: "reply",
+} as const;
+export type RepositoryFrozenAction = {
   key: string;
   binding_id: string;
   action: (typeof RepositoryAction)[keyof typeof RepositoryAction];
@@ -274,6 +284,19 @@ export type FrozenAction = {
   follows: string | null;
   configuration: { base_branch: string; landing: "human" | "kanthord" };
 };
+export type ReplyFrozenAction = {
+  key: string;
+  binding_id: string;
+  action: typeof ConversationAction.Reply;
+  expected_end_state: "posted";
+  follows: string | null;
+  configuration: { external_link: ExternalLink };
+};
+export type FrozenAction = RepositoryFrozenAction | ReplyFrozenAction;
+export type RepositoryActionEntry = Omit<
+  ActionContext["actions"][number],
+  "action"
+> & { action: RepositoryFrozenAction };
 export const ActionNodeState = {
   Pending: "Pending",
   Available: "Available",
@@ -321,6 +344,8 @@ export type TestedInput =
     };
 export type ActionContext = {
   state: (typeof ActionNodeState)[keyof typeof ActionNodeState];
+  node_name: string;
+  request_addresses: PlatformAddress[];
   current_assessment: {
     result: (typeof ActionAssessmentResult)[keyof typeof ActionAssessmentResult];
     tested_input: TestedInput;
@@ -376,7 +401,8 @@ export type ActionOperands = {
 };
 export type ActionPerformInput = {
   key: string;
-  commit: string;
+  commit: string | null;
+  comment?: string | null;
   reusedEvidenceId: string | null;
   mergeEvidenceId?: string | null;
 };

@@ -58,6 +58,8 @@ function factsHarness(
       tombstone: false,
       disabled: false,
     }),
+    conversationPolicyOf: () =>
+      assert.fail("Claim facts read no conversation policy."),
     repositoryPolicyOf: (_tx, bindingId) => ({
       binding_id: bindingId,
       project_id: projectId,

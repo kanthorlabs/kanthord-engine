@@ -1349,7 +1349,7 @@ export class MissionService
     claim: ExecutionClaim,
     input: {
       key: string;
-      commit: string;
+      commit: string | null;
       reusedEvidenceId: string | null;
       mergeEvidenceId: string | null;
     },
