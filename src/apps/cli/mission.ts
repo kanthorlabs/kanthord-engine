@@ -29,6 +29,7 @@ import { IMPORT_MARKDOWN_NOTE, missionExamples } from "./mission-examples.ts";
 import { addFileBodyHelp } from "./file-body.ts";
 import { addControlCommands } from "./mission-control.ts";
 import { addRecordCommands } from "./mission-record.ts";
+import { addFollowupCommands } from "./mission-followup.ts";
 import { addProposalCommands } from "./mission-proposal.ts";
 import { addFindingCommands } from "./mission-finding.ts";
 import { addEvidenceCommands } from "./mission-evidence.ts";
@@ -573,6 +574,7 @@ export function addMissionCommand(program: Command): void {
   addNodeCommands(mission);
   addRecordCommands(mission);
   addProposalCommands(mission);
+  addFollowupCommands(mission);
   addFindingCommands(mission);
   addEvidenceCommands(mission);
   addExecutionCommands(mission);

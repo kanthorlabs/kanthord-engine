@@ -79,7 +79,7 @@ export function markProposalsRejected(
   assert.ok(tx.database.isTransaction);
   const rows = tx.database
     .prepare(
-      "UPDATE mission_proposal SET rejected_at = ? WHERE node_id = ? AND attempt = ? AND approved_at IS NULL AND rejected_at IS NULL RETURNING id",
+      "UPDATE mission_proposal SET rejected_at = ? WHERE node_id = ? AND attempt = ? AND assessment_id IS NOT NULL AND approved_at IS NULL AND rejected_at IS NULL RETURNING id",
     )
     .all(rejectedAt, nodeId, attempt) as unknown as { id: string }[];
   return rows.map((row) => row.id).sort();
@@ -140,4 +140,44 @@ export function holdsFollowupLink(tx: Transaction, nodeId: string): boolean {
     )
     .get(nodeId);
   return row !== undefined;
+}
+
+export function readOpenFollowup(
+  tx: Transaction,
+  nodeId: string,
+): ProposalRow | null {
+  return (
+    (tx.database
+      .prepare(
+        "SELECT * FROM mission_proposal WHERE node_id = ? AND assessment_id IS NULL AND approved_at IS NULL AND rejected_at IS NULL ORDER BY id DESC LIMIT 1",
+      )
+      .get(nodeId) as unknown as ProposalRow | undefined) ?? null
+  );
+}
+
+export function markFollowupRejected(
+  tx: Transaction,
+  id: string,
+  rejectedAt: number,
+): void {
+  assert.ok(tx.database.isTransaction);
+  const result = tx.database
+    .prepare(
+      "UPDATE mission_proposal SET rejected_at = ? WHERE id = ? AND assessment_id IS NULL AND approved_at IS NULL AND rejected_at IS NULL",
+    )
+    .run(rejectedAt, id);
+  assert.equal(result.changes, EXPECTED_ROW_CHANGE);
+}
+
+export function listOpenFollowups(
+  tx: Transaction,
+  missionId: string,
+  after: string | null,
+  count: number,
+): ProposalRow[] {
+  return tx.database
+    .prepare(
+      "SELECT p.* FROM mission_proposal p JOIN mission_node n ON n.id = p.node_id WHERE n.mission_id = ? AND p.assessment_id IS NULL AND p.approved_at IS NULL AND p.rejected_at IS NULL AND (? IS NULL OR p.id < ?) ORDER BY p.id DESC LIMIT ?",
+    )
+    .all(missionId, after, after, count) as unknown as ProposalRow[];
 }

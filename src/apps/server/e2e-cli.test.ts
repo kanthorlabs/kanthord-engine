@@ -5,6 +5,7 @@ import { IdentityKind } from "../../kernel/caller.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { canonicalJSON } from "../../kernel/json.ts";
 import { temporary } from "../../kernel/test-support.ts";
+import { NodeState } from "../../mission/contract.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import {
   cliSession,
@@ -116,6 +117,8 @@ const cases = [
   { id: "E08.14", args: ["mission", "import"], names: ["preview", "apply"] },
   { id: "E08.15", args: ["mission"], names: ["link-update"] },
   { id: "E08.16", args: ["mission", "link-update"], names: ["list"] },
+  { id: "E08.17", args: ["mission"], names: ["followup"] },
+  { id: "E08.18", args: ["mission", "followup"], names: ["list", "decide"] },
 ];
 
 function commandNames(stdout: string): string[] {
@@ -205,6 +208,8 @@ const TRUSTED_ACTOR = "9";
 const OTHER_ACTOR = "7";
 const FIRST_BINDING_SET = 1;
 const FIRST_ITEM = 0;
+const NO_ATTEMPT = 0;
+const FIRST_REVISION = 1;
 const CONVERSATION_BINDING = "conversation";
 const CONVERSATION_REPOSITORY = "acme/app";
 const LINK = {
@@ -302,4 +307,99 @@ test("kanthord mission link-update list prints the rows of the trusted actors of
   assert.deepEqual(page.items[FIRST_ITEM]?.external_link, LINK);
   assert.equal(page.items[FIRST_ITEM]?.new, true);
   assert.equal(page.next_cursor, null);
+});
+
+const FOLLOWUP_MARKER = "followup-marker";
+
+test("kanthord mission followup list and decide reach their routes", async (t) => {
+  const fixture = await gatewayFixture(t);
+  const session = cliSession(
+    t,
+    fixture.endpoint,
+    fixture.token,
+    FOLLOWUP_MARKER,
+  );
+  await createCredentials(session, FOLLOWUP_MARKER);
+  const project = await session.read<{ id: string }>([
+    "project",
+    "create",
+    "--name",
+    "followups",
+  ]);
+  const mission = await session.read<{ id: string; version: number }>([
+    "mission",
+    "get",
+    project.id,
+  ]);
+  await session.write(["project", "binding", "apply", project.id], {
+    version: FIRST_BINDING_SET,
+    bindings: {
+      harness: {
+        kind: "worker",
+        config: { worker: "claude-code@1", instance_count: 1 },
+      },
+    },
+  });
+  const created = await session.write<{ revisions: { node_id: string }[] }>(
+    ["mission", "node", "create", mission.id],
+    {
+      filename: "origin.md",
+      content: {
+        name: "Origin",
+        requirement: "Origin requirement",
+        criterion: "Origin criterion",
+        verifications: ["true"],
+        bindings: [],
+        intent: "examine",
+      },
+      tasks: [],
+      reason: "plan",
+      expected_mission_version: mission.version,
+    },
+  );
+  const nodeId = created.revisions[FIRST_ITEM]!.node_id;
+  const proposalId = createIdentity("proposal");
+  fixture.store.database
+    .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+    .run(NodeState.Completed, nodeId);
+  fixture.store.database
+    .prepare(
+      "INSERT INTO mission_proposal (id, node_id, attempt, assessment_id, content, created_node_id, approved_at, rejected_at, created_at) VALUES (?, ?, ?, NULL, ?, NULL, NULL, NULL, ?)",
+    )
+    .run(
+      proposalId,
+      nodeId,
+      NO_ATTEMPT,
+      canonicalJSON({ node_revision: FIRST_REVISION }),
+      FIRST_OCCURRED_AT,
+    );
+  const listed = await session.read<{
+    items: { id: string; node_id: string; assessment_id: string | null }[];
+  }>(["mission", "followup", "list", project.id]);
+  assert.deepEqual(
+    listed.items.map((item) => [item.id, item.node_id, item.assessment_id]),
+    [[proposalId, nodeId, null]],
+  );
+  const current = await session.read<{ id: string; version: number }>([
+    "mission",
+    "get",
+    project.id,
+  ]);
+  const decided = await session.write<{
+    id: string;
+    created_node_id: string | null;
+  }>(["mission", "followup", "decide", nodeId], {
+    expected_mission_version: current.version,
+    approve: true,
+    requirement: "Follow-up requirement",
+  });
+  assert.equal(decided.id, proposalId);
+  assert.match(String(decided.created_node_id), /^node_/);
+  const after = await session.read<{ items: unknown[] }>([
+    "mission",
+    "followup",
+    "list",
+    project.id,
+  ]);
+  assert.deepEqual(after.items, []);
 });

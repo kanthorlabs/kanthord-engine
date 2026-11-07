@@ -1439,6 +1439,7 @@ export const followupProposalSchema = z.strictObject({
   assessment_id: z.null(),
   content: followupContentSchema,
 });
+export type FollowupProposal = z.infer<typeof followupProposalSchema>;
 export const proposalSchema = z.union([
   fixProposalSchema,
   followupProposalSchema,
@@ -1460,6 +1461,21 @@ export const proposalDecideResultSchema = z.strictObject({
   proposer: controlResultSchema,
 });
 export type ProposalDecideResult = z.infer<typeof proposalDecideResultSchema>;
+export const followupDecideSchema = z
+  .strictObject({
+    expected_mission_version: z.number().int().positive(),
+    approve: z.boolean(),
+    requirement: textSchema.optional(),
+    criterion: textSchema.optional(),
+    reason: textSchema.optional(),
+  })
+  .refine(
+    (body) =>
+      body.approve ||
+      (body.requirement === undefined && body.criterion === undefined),
+    { path: ["approve"] },
+  );
+export type FollowupDecide = z.infer<typeof followupDecideSchema>;
 export const FindingKind = {
   Blocker: "blocker",
   Suggestion: "suggestion",
@@ -2332,6 +2348,33 @@ export const missionOperations = {
     output: proposalDecideResultSchema,
     description:
       "Decide every fix-node proposal of one assessment: create a fix node for each approved proposal, reject the other open proposals and unblock the proposer once.",
+  },
+  "followup.list": {
+    ...readOperation,
+    id: "mission.followup.list",
+    method: HttpMethod.Get,
+    path: "/api/mission/project/:project_id/followup",
+    input: readInput(
+      z.strictObject({ project_id: identitySchema("project") }),
+      z.strictObject(pageQuery),
+    ),
+    output: pageOf(followupProposalSchema),
+    description:
+      "List the open follow-up proposals of the terminal nodes of a project.",
+  },
+  "followup.decide": {
+    ...writeOperation,
+    id: "mission.followup.decide",
+    method: HttpMethod.Post,
+    path: "/api/mission/node/:node_id/followup/decide",
+    input: z.strictObject({
+      params: z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
+      query: z.strictObject({}),
+      body: followupDecideSchema,
+    }),
+    output: followupProposalSchema,
+    description:
+      "Decide the open follow-up proposal of a terminal node: approve it into a follow-up node with a copy of the revision, or reject it. The answer is the decided proposal.",
   },
   "finding.list": {
     ...readOperation,
