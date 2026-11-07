@@ -721,6 +721,12 @@ const BASE_MOVED = {
   message: "moved",
 };
 
+const PUSH_REFUSED = {
+  class: ResultClass.FinalRefusal,
+  code: "git.push_refused",
+  message: "remote: error: GH013: Repository rule violations found",
+};
+
 function landedAddress(commit: string) {
   return {
     kind: "branch_push",
@@ -930,4 +936,47 @@ test("a live claim or a gate file blocks the land of a push request", async (t) 
   scheduleDeferredCheck(h.dependencies, h.node_id, FIRST_ATTEMPT);
   await advance(FIRST_ROUND_DELAY_MS);
   assert.equal(merges, NO_MERGES);
+});
+
+test("a push refused by a branch rule stops the rounds and a human land with node check completes the node", async (t) => {
+  const { advance } = pushHarness(t);
+  const h = await externalRequestHarness(
+    t,
+    IDENTITY,
+    false,
+    RepositoryAction.Push,
+  );
+  let humanLanded = false;
+  let merges = NO_MERGES;
+  let checks = NO_REMOTE_CALLS;
+  h.dependencies.intakeCheck.check = async () => {
+    checks++;
+    return humanLanded
+      ? { end_state: CheckEndState.Expected, landed_commits: [LANDED] }
+      : { end_state: CheckEndState.None, landed_commits: [] };
+  };
+  h.dependencies.intakeCheck.merge = async () => {
+    merges++;
+    return PUSH_REFUSED;
+  };
+  scheduleDeferredCheck(h.dependencies, h.node_id, FIRST_ATTEMPT);
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(merges, ONE_MERGE);
+  assert.equal(checks, ONE_ROUND);
+  await advance(DEFERRED_CHECK_RETRY_MS);
+  await advance(DEFERRED_CHECK_RETRY_MS);
+  assert.equal(merges, ONE_MERGE);
+  assert.equal(checks, ONE_ROUND);
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+  humanLanded = true;
+  const answer = await h.invoke("node.check", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: { expected_mission_version: FIRST_MISSION_VERSION },
+  });
+  assert.equal(
+    answer.results[FIRST_RESULT_INDEX]!.resolution,
+    Resolution.ExpectedEnd,
+  );
+  assert.equal(h.node().state, NodeState.Completed);
 });

@@ -72,6 +72,7 @@ const TWO_RELEASES = 2;
 const NO_MATERIALS = 0;
 const REVOKED_CODE = "credential.revision.revoked";
 const GIT_FAILED_CODE = "repository.connector.git_failed";
+const GIT_PUSH_REFUSED = "git.push_refused";
 const MERGE_EVIDENCE_ID = "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const REUSED_EVIDENCE_ID = "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAW";
 
@@ -466,6 +467,43 @@ test("an SSH agent failure of the base landing read of a pull request create ans
   assert.deepEqual(h.githubCalls, []);
   assert.ok(h.materials.every((material) => material.dropped));
 });
+
+const PUSH_FAILURES = [
+  {
+    stderr: " ! [rejected]        abc -> main (non-fast-forward)",
+    class: ResultClass.RetryableRefusal,
+    code: GIT_FAILED_CODE,
+  },
+  {
+    stderr: "remote: error: GH013: Repository rule violations found.\nTo host",
+    class: ResultClass.FinalRefusal,
+    code: GIT_PUSH_REFUSED,
+  },
+  {
+    stderr: "fatal: the remote end hung up unexpectedly",
+    class: ResultClass.UnknownOutcome,
+    code: GIT_FAILED_CODE,
+  },
+];
+
+for (const failure of PUSH_FAILURES)
+  test(`a merge push whose stderr is ${failure.class} answers ${failure.class}`, async (t) => {
+    const h = harness(t, {
+      facts: actionFacts(MERGE_PUSH_ACTION),
+      mergePush: async () => {
+        throw new GitWriteError(
+          GitStage.Push,
+          new Diagnostic(GIT_FAILED_CODE, "push: git failed.", {
+            cause: new Error(`push: git exited with 1: ${failure.stderr}`),
+          }),
+        );
+      },
+    });
+    const answer = await h.perform();
+    assert.ok("class" in answer, JSON.stringify(answer));
+    assert.equal(answer.class, failure.class);
+    assert.equal(answer.code, failure.code);
+  });
 
 test("a deadline of a merge push answers confirmed_failure with the deadline code", async (t) => {
   const h = harness(t, {

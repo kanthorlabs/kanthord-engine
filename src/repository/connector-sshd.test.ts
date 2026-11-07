@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { readFile, symlink, writeFile } from "node:fs/promises";
+import { chmod, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { promisify } from "node:util";
@@ -26,7 +26,11 @@ import {
   squashPushFresh,
 } from "./connector.ts";
 import { RepositoryFileState } from "./contract.ts";
-import { gitFailureReason } from "./git-failure.ts";
+import {
+  gitFailureReason,
+  PushRefusalKind,
+  pushRefusalOf,
+} from "./git-failure.ts";
 import { type SshAccess, SshAgentErrorCode } from "./ssh-agent.ts";
 import { generateSshKey } from "./ssh-key.ts";
 import {
@@ -47,6 +51,7 @@ const ABSENT_FILE = "absent.md";
 const LINK_FILE = "link.md";
 const UNPARSABLE_KEY = "not an SSH key\n";
 const MAX_BYTES = 1024;
+const HOOK_MODE = 0o755;
 const deadlineAt = () => Date.now() + DEADLINE_MS;
 const NODE_ID = "node_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const HEADER = "feat: ship accounts";
@@ -249,6 +254,31 @@ test("a base that moved after the assessment answers base_moved and pushes nothi
     (error) => error instanceof BaseMovedError,
   );
   assert.equal(await git(bare, ["rev-parse", BASE_BRANCH]), moved);
+});
+
+test("a pre-receive hook that prints GH013 is a rule refusal of the land", async (t) => {
+  const { address, bare, ssh } = await sshRemote(t);
+  const { commit } = await nodeCommit(t, address, ssh);
+  const hook = join(bare, "hooks", "pre-receive");
+  await writeFile(
+    hook,
+    "#!/bin/sh\necho 'GH013: Repository rule violations found for refs/heads/main.' >&2\nexit 1\n",
+  );
+  await chmod(hook, HOOK_MODE);
+  const failure = await squashPushFresh(
+    squashInput(address, commit),
+    background,
+    deadlineAt(),
+    ssh,
+  ).then(
+    () => assert.fail("A refused push must fail."),
+    (error: unknown) => error,
+  );
+  assert.ok(failure instanceof GitWriteError);
+  assert.equal(failure.stage, GitStage.Push);
+  const refusal = pushRefusalOf(failure);
+  assert.equal(refusal?.kind, PushRefusalKind.Rule);
+  assert.match(refusal.detail, /GH013: Repository rule violations/);
 });
 
 test("landedOn finds a commit by its KanthorD-Tested trailer", async (t) => {

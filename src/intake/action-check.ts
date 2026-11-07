@@ -34,6 +34,8 @@ import {
   GitStage,
   GitWriteError,
   type GitWriter,
+  PushRefusalKind,
+  pushRefusalOf,
   type SshAccess,
   type SshKeyAccess,
 } from "../repository/index.ts";
@@ -43,6 +45,7 @@ import type { CallAnswer } from "./outbound.ts";
 
 const BAD_GATEWAY_STATUS = 502;
 export const GIT_FAILED_CODE = "repository.connector.git_failed";
+export const GIT_PUSH_REFUSED = "git.push_refused";
 const UNEXPECTED_BODY_MESSAGE = "the GitHub answer holds an unexpected body";
 const PULL_REQUEST_STATE_OPEN = "open";
 const NO_CHECKS = { head_commit: "", pending: [], failed: [] };
@@ -57,6 +60,7 @@ export const GIT_TRANSPORT_CODES: readonly string[] = [
   SshAgentErrorCode.Failed,
   DEADLINE_EXCEEDED_CODE,
   GIT_BASE_MOVED,
+  GIT_PUSH_REFUSED,
 ];
 
 export function isGitTransportFailure(error: unknown): error is CodedError {
@@ -74,11 +78,30 @@ export function gitFailure(error: unknown): CallAnswer {
       message: error.message,
     };
   if (!(error instanceof GitWriteError)) throw error;
+  if (error.stage === GitStage.BeforePush)
+    return {
+      ok: false,
+      class: ResultClass.ConfirmedFailure,
+      code: error.code,
+      message: error.message,
+    };
+  return pushFailure(error);
+}
+
+function pushFailure(error: GitWriteError): CallAnswer {
+  const refusal = pushRefusalOf(error);
+  if (refusal?.kind === PushRefusalKind.Rule)
+    return {
+      ok: false,
+      class: ResultClass.FinalRefusal,
+      code: GIT_PUSH_REFUSED,
+      message: refusal.detail,
+    };
   return {
     ok: false,
     class:
-      error.stage === GitStage.BeforePush
-        ? ResultClass.ConfirmedFailure
+      refusal?.kind === PushRefusalKind.NonFastForward
+        ? ResultClass.RetryableRefusal
         : ResultClass.UnknownOutcome,
     code: error.code,
     message: error.message,

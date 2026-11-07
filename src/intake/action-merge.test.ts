@@ -20,6 +20,7 @@ import {
   GITHUB_RESULT_CODE_PREFIX,
   GitHubPlatform,
 } from "../repository/github.ts";
+import { GIT_FAILED_CODE, GIT_PUSH_REFUSED } from "./action-check.ts";
 import {
   FOREIGN_MERGE_ANSWER_MESSAGE,
   mergeAction,
@@ -470,4 +471,72 @@ test("a moved base answers confirmed_failure with git.base_moved and a lost push
     ...branchPushAddress,
     commit: LANDED_COMMIT,
   });
+});
+
+const NON_FAST_FORWARD_STDERR = [
+  "To ssh://git@host/repo.git",
+  " ! [rejected]        abc -> main (fetch first)",
+  "error: failed to push some refs",
+].join("\n");
+const RULE_REFUSAL_FIRST_LINE =
+  "remote: error: GH013: Repository rule violations found for refs/heads/main.";
+const RULE_REFUSAL_STDERR = [
+  RULE_REFUSAL_FIRST_LINE,
+  "remote: - Changes must be made through a pull request.",
+  " ! [remote rejected] abc -> main (push declined due to repository rule violations)",
+].join("\n");
+
+function pushRefusal(stderr: string): GitWriteError {
+  return new GitWriteError(
+    GitStage.Push,
+    new Diagnostic(
+      "repository.connector.git_failed",
+      "squash push: git failed.",
+      {
+        cause: new Error(`squash push: git exited with 1: ${stderr}`),
+      },
+    ),
+  );
+}
+
+async function pushLandAnswer(t: TestContext, failure: GitWriteError) {
+  const h = await harness(t, {
+    platform: Platform.Merges,
+    facts: pushFacts,
+    credential: null,
+    gitWriter: {
+      ...gitWriter,
+      sshAccessOf: sshAccessOf(),
+      squashPushFresh: async () => {
+        throw failure;
+      },
+    },
+  });
+  return h.merge();
+}
+
+test("a push land answers retryable_refusal for a non-fast-forward rejection", async (t) => {
+  const answer = await pushLandAnswer(t, pushRefusal(NON_FAST_FORWARD_STDERR));
+  assert.ok("class" in answer, JSON.stringify(answer));
+  assert.equal(answer.class, ResultClass.RetryableRefusal);
+  assert.equal(answer.code, GIT_FAILED_CODE);
+});
+
+test("a push land answers final_refusal with git.push_refused and the first stderr line for GH013", async (t) => {
+  const answer = await pushLandAnswer(t, pushRefusal(RULE_REFUSAL_STDERR));
+  assert.deepEqual(answer, {
+    class: ResultClass.FinalRefusal,
+    code: GIT_PUSH_REFUSED,
+    message: RULE_REFUSAL_FIRST_LINE,
+  });
+});
+
+test("a push land answers unknown_outcome for another push failure", async (t) => {
+  const answer = await pushLandAnswer(
+    t,
+    pushRefusal("fatal: the remote end hung up unexpectedly"),
+  );
+  assert.ok("class" in answer, JSON.stringify(answer));
+  assert.equal(answer.class, ResultClass.UnknownOutcome);
+  assert.equal(answer.code, GIT_FAILED_CODE);
 });

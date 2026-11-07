@@ -17,6 +17,7 @@ import type { SshAccess } from "../../repository/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import { generateSshKey } from "../../repository/ssh-key.ts";
 import {
+  createBareRepository,
   DEFAULT_SSH_PORT,
   startTestSshd,
 } from "../../repository/sshd-test-support.ts";
@@ -34,7 +35,9 @@ import {
   scriptedProvider,
 } from "../../worker/unit/test-support.ts";
 import { Worker } from "../worker/index.ts";
+import { until } from "./cli-test-support.ts";
 import {
+  createInstancesByCli,
   createMachine,
   FAKE_GITHUB_HOST_KEY,
   FAKE_SSH_CREDENTIAL,
@@ -42,10 +45,14 @@ import {
   inProcessWorker,
 } from "./test-support.ts";
 import {
+  WORKER_DEFAULTS,
   WORKER_TEST_KEY,
   workerAcceptance,
 } from "./worker-acceptance-test-support.ts";
 
+const RACE_TIMEOUT = 300000;
+const RACING_CODERS = 2;
+const RACE_SCRIPT_STEPS = 12;
 const FIRST_REVISION = 1;
 const SINGLE_ITEM = 1;
 const SECOND_REVISION = 2;
@@ -938,5 +945,237 @@ test(
         );
       },
     );
+  },
+);
+
+const RACE_NODES = [
+  { name: "Write alpha", file: "alpha.txt" },
+  { name: "Write beta", file: "beta.txt" },
+];
+const PUSH_STRATEGY = {
+  base_branch: "main",
+  action: { name: "push", follows: { type: "assessment_passed" } },
+};
+
+async function raceRemote(t: TestContext) {
+  const sshd = await startTestSshd(t);
+  const bare = await createBareRepository(t);
+  const git = simpleGit(bare);
+  await git.addConfig("uploadpack.allowFilter", "true");
+  await git.addConfig("uploadpack.allowAnySHA1InWant", "true");
+  const localKey = generateSshKey("local");
+  await sshd.authorize(localKey.public_key);
+  const origin = sshd.url(bare);
+  const routed = (ssh: SshAccess): SshAccess =>
+    "relay" in ssh
+      ? { ...localKey, known_hosts: sshd.known_hosts, port: sshd.port }
+      : { ...ssh, known_hosts: sshd.known_hosts, port: sshd.port };
+  const component = new RepositoryComponent();
+  const { squashPushFresh, landedOn } = component;
+  component.gitLsRemote = async () => {};
+  component.squashPushFresh = (input, context, deadline, ssh) =>
+    squashPushFresh(
+      { ...input, address: origin },
+      context,
+      deadline,
+      routed(ssh),
+    );
+  component.landedOn = (input, context, deadline, ssh) =>
+    landedOn({ ...input, address: origin }, context, deadline, routed(ssh));
+  const transport: RepositoryTransport = {
+    clone: (_address, directory, context, deadline, ssh) =>
+      component.clone(origin, directory, context, deadline, routed(ssh)),
+    cloneSnapshot: (_address, revision, directory, context, deadline, ssh) =>
+      component.cloneSnapshot(
+        origin,
+        revision,
+        directory,
+        context,
+        deadline,
+        routed(ssh),
+      ),
+    fetchAndCheckout: (
+      directory,
+      branch,
+      base,
+      pushed,
+      context,
+      deadline,
+      ssh,
+    ) =>
+      component.fetchAndCheckout(
+        directory,
+        branch,
+        base,
+        pushed,
+        context,
+        deadline,
+        routed(ssh),
+      ),
+    fetchBase: (directory, base, context, deadline, ssh) =>
+      component.fetchBase(directory, base, context, deadline, routed(ssh)),
+    pushNodeBranch: (directory, branch, context, deadline, ssh) =>
+      component.pushNodeBranch(
+        directory,
+        branch,
+        context,
+        deadline,
+        routed(ssh),
+      ),
+  };
+  return { sshd, bare, git, component, transport };
+}
+
+function racingCoder(barrier: () => Promise<void>) {
+  const fileOf = (context: { messages: unknown[] }) => {
+    const text = JSON.stringify(context.messages);
+    const node = RACE_NODES.find(({ file }) => text.includes(file));
+    assert.ok(node, text);
+    return node.file;
+  };
+  const step = async (context: { messages: { role: string }[] }) => {
+    if (context.messages.at(-1)?.role === TOOL_RESULT)
+      return fauxAssistantMessage("wrote");
+    await barrier();
+    const file = fileOf(context);
+    return tool("write", { path: file, content: file });
+  };
+  return scriptedProvider(
+    Array.from({ length: RACE_SCRIPT_STEPS }, () => step),
+  );
+}
+
+test(
+  "E09.17 two nodes from two workspace roots land on one base, one after a rework, with a linear history",
+  { timeout: RACE_TIMEOUT },
+  async (t) => {
+    const remote = await raceRemote(t);
+    const setup = await workerAcceptance(t, true, {
+      fakeSlots: true,
+      fixtureOptions: { repositoryConnector: remote.component },
+    });
+    const sshKey = await setup.read<CredentialAnswer>([
+      "repository",
+      "credential",
+      "get",
+      FAKE_SSH_CREDENTIAL,
+    ]);
+    await remote.sshd.authorize(
+      String(sshKey.revisions[0]?.metadata?.public_key),
+    );
+    await createInstancesByCli(setup.read, ["server-2"]);
+    await createInstancesByCli(
+      setup.read,
+      ["server-3"],
+      InstancePlacement.Server,
+      "reviewer@1",
+    );
+    const exported = await setup.read<{
+      bindings: Record<string, { config: Record<string, unknown> }>;
+    }>(["project", "binding", "export", setup.project_id]);
+    exported.bindings.repo!.config.strategy = PUSH_STRATEGY;
+    exported.bindings.general!.config.worker_instances = [
+      "server-1",
+      "server-2",
+    ];
+    exported.bindings.reviewer!.config = {
+      worker: "reviewer@1",
+      worker_instances: ["server-3"],
+      tags: [],
+      entries: [{ agent: "re@1", ...WORKER_DEFAULTS }],
+    };
+    const applied = await setup.write<{
+      bindings: Record<string, { id: string }>;
+    }>(["project", "binding", "apply", setup.project_id], exported);
+    const arrivals = Promise.withResolvers<void>();
+    let arrived = 0;
+    const barrier = async () => {
+      if (++arrived === RACING_CODERS) arrivals.resolve();
+      if (arrived <= RACING_CODERS) await arrivals.promise;
+    };
+    for (const index of [0, 1]) {
+      const auth = await setup.fixture.slotClient(
+        setup.project_id,
+        "general",
+        index,
+      );
+      await inProcessWorker(t, {
+        endpoint: setup.fixture.endpoint,
+        ...auth,
+        modelRuntimeFactory: scriptedModelRuntime(racingCoder(barrier)),
+        repositoryTransport: remote.transport,
+      });
+    }
+    const approval = async () =>
+      fauxAssistantMessage(
+        `kanthord-judgement: ${JSON.stringify({ rationale: "judged", result: "success" })}`,
+      );
+    await inProcessWorker(t, {
+      endpoint: setup.fixture.endpoint,
+      ...(await setup.fixture.slotClient(setup.project_id, "reviewer", 0)),
+      modelRuntimeFactory: scriptedModelRuntime(
+        scriptedProvider(
+          Array.from({ length: RACE_SCRIPT_STEPS }, () => approval),
+        ),
+      ),
+      repositoryTransport: remote.transport,
+    });
+    const mission = await setup.read<{ id: string }>([
+      "mission",
+      "get",
+      setup.project_id,
+    ]);
+    const nodes: string[] = [];
+    for (const [index, { name, file }] of RACE_NODES.entries()) {
+      const { version } = await setup.read<{ version: number }>([
+        "mission",
+        "get",
+        setup.project_id,
+      ]);
+      const created = await setup.write<{ revisions: { node_id: string }[] }>(
+        ["mission", "node", "create", mission.id],
+        {
+          filename: `race-${index}.md`,
+          content: {
+            name,
+            requirement: `Write ${file}`,
+            criterion: `${file} exists`,
+            verifications: [`test -f ${file}`],
+            bindings: [applied.bindings.repo!.id],
+            intent: Intent.Implement,
+          },
+          tasks: [],
+          reason: "plan",
+          expected_mission_version: version,
+        },
+      );
+      nodes.push(created.revisions[0]!.node_id);
+    }
+    await until(
+      () =>
+        Promise.all(
+          nodes.map((id) =>
+            setup.read<{ state: NodeState }>(["mission", "node", "get", id]),
+          ),
+        ),
+      (states) => states.every(({ state }) => state === NodeState.Completed),
+      t.signal,
+    );
+    const history = await remote.git.raw(["log", "--format=%P|%s", "main"]);
+    const commits = history.trim().split("\n");
+    assert.equal(commits.length, nodes.length + SINGLE_ITEM);
+    for (const commit of commits.slice(FIRST_INDEX, nodes.length))
+      assert.equal(commit.split("|")[0]!.split(" ").length, SINGLE_ITEM);
+    for (const { file } of RACE_NODES)
+      assert.equal(await remote.git.show([`main:${file}`]), file);
+    const assessments = await Promise.all(
+      nodes.map((id) =>
+        setup.read<{ items: unknown[] }>(["mission", "assessment", "list", id]),
+      ),
+    );
+    assert.deepEqual(assessments.map(({ items }) => items.length).sort(), [
+      SINGLE_ITEM,
+      TWO_RESULTS,
+    ]);
   },
 );

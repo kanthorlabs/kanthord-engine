@@ -378,9 +378,27 @@ The key of the action is `<binding name>.<name>`, which the Mission Service free
 - The binding write refuses the `action_end_state` shape until a retry-safe claim-source contract exists, under the [frozen action rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-attempt). The refusal is one issue of the validation failure of `binding apply`, at the `follows` path.
 - Absent references and invalid dependency cycles fail validation.
 - `pull_request` opens a pull request from the node branch into the base branch. It requires the platform action capability and expects the merge of that pull request.
-- `push` lands the node on the base branch as one squash commit. The action performer only records a `branch_push` request. The deferred round of the Mission Service lands the tested tree through the Intake Service as a child of the base tip, with the trailers `KanthorD-Node` and `KanthorD-Tested`, by a plain push. The author and the committer are the account behind the SSH key of the binding, or the author of the tested commit when the key has no account. When the base branch moved after the assessment, the check answers `conflict`, the node returns to `Available`, and the rework merges the new base and runs a new review. A change that touches a gate file of the binding gets no push; a human lands it. The Intake Service computes the changed gate files on the server.
+- `push` lands the node on the base branch. The action performer only records a `branch_push` request. The deferred round of the Mission Service lands the tested tree through the Intake Service. A change that touches a gate file of the binding gets no push; a human lands it. The Intake Service computes the changed gate files on the server.
+  - Commit: the land writes one squash commit for each node. The commit holds the tree of the tested commit and has the base tip as its only parent. The push is a plain push, never a force push.
+  - Trailers: the message of the commit ends with `KanthorD-Node: <node-id>` and `KanthorD-Tested: <sha>`. The sha is the tested commit.
+  - Identity: the author and the committer are the account behind the SSH key of the binding. When the key is a deploy key, the key has no account, and the author is the author of the tested commit.
+  - Up to date: the base tip must be an ancestor of the tested commit. When the base branch moved after the assessment, the land pushes nothing and answers `git.base_moved`. The check then answers `conflict`, the node returns to `Available`, and the rework merges the new base and runs a new review. The next land uses the new tested commit.
+  - No lock: nothing serializes the lands of two nodes. The remote accepts one push and refuses the other. The refused node follows the up-to-date rule.
+  - Refusals: the land reads the stderr of a failed push.
+    - A non-fast-forward rejection (`! [rejected]` with `fetch first` or `non-fast-forward`) answers `retryable_refusal`. The rounds of the Mission Service retry it.
+    - A refusal by a branch rule (`GH006`, `GH013` or `protected branch`) answers `final_refusal` with the code `git.push_refused` and the first stderr line in the detail. The rounds stop, and the node stays in `External.Requested`.
+    - Any other push failure answers `unknown_outcome`. The read-back decides whether the push landed.
+  - Ruleset: the ruleset of a `push` target blocks only deletion and force push. A `pull_request` rule or a required check refuses every push. For such a branch, use the action `pull_request` with `landing: kanthord`.
+  - Human land: after `git.push_refused`, a human lands the change on the base branch. The human uses a fast-forward of the tested commit, or a commit with the trailer `KanthorD-Tested: <sha>`. Then the human runs `kanthord mission node check <node-id>`. The check finds the tested commit as an ancestor of the base branch, or the trailer, and answers `expected`.
 - Each action implies its expected end state and takes no parameter.
 - The Mission Service stores the changed gate files that the Intake Service computes at the assessment of a node. Find the binding of the repository before you add a path to `gate_files` in its `.kanthord/affected-tests.json`. Find each node that holds a required action of that binding. Pause each such node in `Evaluating` or `External.Requested`. Then block and unblock it, so that a new assessment reads the new declaration. A human can also land or close the open pull request of a node in `External.Requested`.
+
+Cross-host facts, for a project whose worker instances run on more than one host:
+
+- The remote repository is the only shared git state. Hosts share no checkout and no node branch. A host reads the work of another host only through the remote.
+- Landing runs only on the server. The Intake Service lands through a fresh clone of the remote, with the SSH key of the binding. No worker host lands a node.
+- The SSH relay signs for the key of the binding on any branch of the repository. A key limits no branch, so a branch rule of the remote is the only guard of a branch.
+- A workspace stays on the host of its instance. Each instance measures its own workspace, and footprint cleanup runs for each instance.
 
 Coverage and suitability follow [Repository configuration and policy](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.md#repository-configuration-and-policy).
 
