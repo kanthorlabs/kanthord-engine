@@ -178,11 +178,11 @@ export async function readLink(
       hold.material,
       input.external_link.number,
     );
-    return caller.commit((tx) => {
-      const items = storeItems(tx, target.inboundId, events);
-      dependencies.holdEvents(items.map((item) => item.inbound_event_id));
-      return { items };
-    });
+    const answer = caller.commit((tx) => ({
+      items: storeItems(tx, target.inboundId, events),
+    }));
+    dependencies.holdEvents(answer.items.map((item) => item.inbound_event_id));
+    return answer;
   } finally {
     hold.material?.drop();
   }

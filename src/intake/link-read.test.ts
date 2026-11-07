@@ -293,7 +293,7 @@ test("a read takes one release of the credential of the binding and records no o
   assert.equal(h.outbound().total, NO_ROWS);
 });
 
-test("a read holds the identities of its items in the commit of the rows", async (t) => {
+test("a read holds the identities of its items after the commit of the rows", async (t) => {
   const h = harness(t);
   h.addInbound(createIdentity("inbound"));
   const { items } = await h.read();
