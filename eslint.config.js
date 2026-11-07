@@ -443,6 +443,12 @@ export default tseslint.config(
                     fileInternalPath: "{client.ts,local.ts,auth/jwt.ts}",
                   }),
                 },
+                {
+                  to: element("service", {
+                    captured: { name: "mission" },
+                    fileInternalPath: "parser.ts",
+                  }),
+                },
               ],
             },
             {
