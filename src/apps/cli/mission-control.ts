@@ -11,8 +11,16 @@ import {
 } from "../../mission/contract.ts";
 import { singleUse } from "./shared.ts";
 import { missionExamples } from "./mission-examples.ts";
+import {
+  BLOCK_HELP,
+  OVERRIDE_HELP,
+  RESUME_HELP,
+  resumeNote,
+  UNBLOCK_HELP,
+} from "./mission-help.ts";
 import { addMutationOptions, mutate } from "./mission-support.ts";
 
+const BLOCK = "block";
 const PAUSE_INVALID_NODE = "cli.mission.node.pause.invalid_node_id";
 const OVERRIDE_FILE_SCHEMA = overrideSchema.omit({ result: true });
 
@@ -42,13 +50,15 @@ export function addControlCommands(node: Command): void {
     ["block", "node.block", "cli.mission.node.block.invalid_node_id"],
     ["discard", "node.discard", "cli.mission.node.discard.invalid_node_id"],
   ] as const) {
-    addMutationOptions(
+    const added = addMutationOptions(
       node
         .command(name)
         .description(`${name[0]!.toUpperCase()}${name.slice(1)} a mission node`)
         .argument("<node-id>", "Node ID"),
       { schema: humanActSchema, example: missionExamples[name] },
-    ).action(async (nodeId: string, _options, command: Command) => {
+    );
+    if (name === BLOCK) added.addHelpText("after", BLOCK_HELP);
+    added.action(async (nodeId: string, _options, command: Command) => {
       if (!identitySchema("node").safeParse(nodeId).success)
         throw new Diagnostic(code, "invalid node ID");
       await mutate(command, operation, humanActSchema, (api, body, key) =>
@@ -84,19 +94,26 @@ export function addControlCommands(node: Command): void {
       .description("Resume a paused node")
       .argument("<node-id>", "Node ID"),
     { schema: resumeSchema, example: missionExamples.resume },
-  ).action(async (nodeId: string, _options, command: Command) => {
-    if (!identitySchema("node").safeParse(nodeId).success)
-      throw new Diagnostic(
-        "cli.mission.node.resume.invalid_node_id",
-        "invalid node ID",
+  )
+    .addHelpText("after", RESUME_HELP)
+    .action(async (nodeId: string, _options, command: Command) => {
+      if (!identitySchema("node").safeParse(nodeId).success)
+        throw new Diagnostic(
+          "cli.mission.node.resume.invalid_node_id",
+          "invalid node ID",
+        );
+      await mutate(
+        command,
+        "node.resume",
+        resumeSchema,
+        (api, body, key) =>
+          api["node.resume"](
+            { params: { node_id: nodeId }, query: {}, body },
+            { idempotencyKey: key },
+          ),
+        resumeNote,
       );
-    await mutate(command, "node.resume", resumeSchema, (api, body, key) =>
-      api["node.resume"](
-        { params: { node_id: nodeId }, query: {}, body },
-        { idempotencyKey: key },
-      ),
-    );
-  });
+    });
   addMutationOptions(
     node
       .command("pause")
@@ -122,19 +139,21 @@ function addUnblockCommand(node: Command): void {
       .description("Unblock a node")
       .argument("<node-id>", "Node ID"),
     { schema: unblockSchema, example: missionExamples.unblock },
-  ).action(async (nodeId: string, _options, command: Command) => {
-    if (!identitySchema("node").safeParse(nodeId).success)
-      throw new Diagnostic(
-        "cli.mission.node.unblock.invalid_node_id",
-        "invalid node ID",
+  )
+    .addHelpText("after", UNBLOCK_HELP)
+    .action(async (nodeId: string, _options, command: Command) => {
+      if (!identitySchema("node").safeParse(nodeId).success)
+        throw new Diagnostic(
+          "cli.mission.node.unblock.invalid_node_id",
+          "invalid node ID",
+        );
+      await mutate(command, "node.unblock", unblockSchema, (api, body, key) =>
+        api["node.unblock"](
+          { params: { node_id: nodeId }, query: {}, body },
+          { idempotencyKey: key },
+        ),
       );
-    await mutate(command, "node.unblock", unblockSchema, (api, body, key) =>
-      api["node.unblock"](
-        { params: { node_id: nodeId }, query: {}, body },
-        { idempotencyKey: key },
-      ),
-    );
-  });
+    });
 }
 
 function addOverrideCommand(node: Command): void {
@@ -148,30 +167,32 @@ function addOverrideCommand(node: Command): void {
       schema: OVERRIDE_FILE_SCHEMA,
       example: missionExamples.override,
     },
-  ).action(async (nodeId: string, _options, command: Command) => {
-    if (!identitySchema("node").safeParse(nodeId).success)
-      throw new Diagnostic(
-        "cli.mission.node.override.invalid_node_id",
-        "invalid node ID",
+  )
+    .addHelpText("after", OVERRIDE_HELP)
+    .action(async (nodeId: string, _options, command: Command) => {
+      if (!identitySchema("node").safeParse(nodeId).success)
+        throw new Diagnostic(
+          "cli.mission.node.override.invalid_node_id",
+          "invalid node ID",
+        );
+      if (command.optsWithGlobals().result !== AssessmentResult.Success)
+        throw new Diagnostic(
+          "cli.mission.node.override.invalid_result",
+          "result must be success",
+        );
+      await mutate(
+        command,
+        "node.override",
+        OVERRIDE_FILE_SCHEMA,
+        (api, body, key) =>
+          api["node.override"](
+            {
+              params: { node_id: nodeId },
+              query: {},
+              body: { ...body, result: AssessmentResult.Success },
+            },
+            { idempotencyKey: key },
+          ),
       );
-    if (command.optsWithGlobals().result !== AssessmentResult.Success)
-      throw new Diagnostic(
-        "cli.mission.node.override.invalid_result",
-        "result must be success",
-      );
-    await mutate(
-      command,
-      "node.override",
-      OVERRIDE_FILE_SCHEMA,
-      (api, body, key) =>
-        api["node.override"](
-          {
-            params: { node_id: nodeId },
-            query: {},
-            body: { ...body, result: AssessmentResult.Success },
-          },
-          { idempotencyKey: key },
-        ),
-    );
-  });
+    });
 }

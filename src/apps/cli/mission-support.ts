@@ -70,6 +70,7 @@ export async function mutate<S extends z.ZodTypeAny, T extends object>(
     body: z.infer<S>,
     key: string,
   ) => Promise<OperationResult<T>>,
+  after?: (data: T) => void,
 ): Promise<void> {
   const options = command.optsWithGlobals();
   const { endpoint, token } = resolveClient(options);
@@ -89,6 +90,7 @@ export async function mutate<S extends z.ZodTypeAny, T extends object>(
   process.stdout.write(
     `${JSON.stringify({ ...data, idempotency_key: key })}\n`,
   );
+  after?.(data);
 }
 
 export function addPagination(command: Command): Command {
