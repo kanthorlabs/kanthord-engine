@@ -17,6 +17,8 @@ import {
   type GitHubAnswer,
   type GitHubCheckpoint,
   githubCheckpointSchema,
+  type GitHubConversationCheckpoint,
+  githubConversationCheckpointSchema,
   type GitHubEvent,
   type GitHubEventsAnswer,
   type GitHubFailure,
@@ -32,6 +34,7 @@ import {
   PLATFORM_CALL_DEADLINE_MS,
   POLL_BACKOFF_MAX_MS,
   POLL_WAIT_MAX_MS,
+  ResourceKind,
   type UnresolvedRequestCounter,
 } from "./contract.ts";
 import { findEvent, insertEvent, pendingCount } from "./event-store.ts";
@@ -58,35 +61,59 @@ const NO_UNRESOLVED_REQUESTS = 0;
 const REQUEST_FAILURE_MESSAGE = "intake: a poll request of an inbound failed.";
 const DEMAND_FAILURE_MESSAGE =
   "intake: the demand check of a poll inbound failed.";
-const EMPTY_CHECKPOINT: GitHubCheckpoint = { etag: null, pulls_etag: null };
+const EMPTY_CHECKPOINTS = {
+  [ResourceKind.Repository]: { etag: null, pulls_etag: null },
+  [ResourceKind.Conversation]: { comments_etag: null },
+} as const satisfies Record<
+  ResourceKind,
+  GitHubCheckpoint | GitHubConversationCheckpoint
+>;
+const CHECKPOINT_SCHEMAS = {
+  [ResourceKind.Repository]: githubCheckpointSchema,
+  [ResourceKind.Conversation]: githubConversationCheckpointSchema,
+} as const;
 const NO_WAIT_MS = 0;
+const RESOURCE_SEPARATOR = "/";
 
 export type PollGitHub = Pick<
   GitHubPlatform,
-  "listEvents" | "listClosedPullRequests"
+  "listEvents" | "listClosedPullRequests" | "listIssueComments"
 >;
+
+export type PollCheckpoint = GitHubCheckpoint | GitHubConversationCheckpoint;
 
 export const PollRead = {
   Events: "events",
   ClosedPullRequests: "closed_pull_requests",
+  IssueComments: "issue_comments",
 } as const;
 export type PollRead = (typeof PollRead)[keyof typeof PollRead];
 
-export const POLL_READS: readonly PollRead[] = [
-  PollRead.Events,
-  PollRead.ClosedPullRequests,
-];
+export const POLL_READS = {
+  [ResourceKind.Repository]: [PollRead.Events, PollRead.ClosedPullRequests],
+  [ResourceKind.Conversation]: [PollRead.IssueComments],
+} as const satisfies Record<ResourceKind, readonly PollRead[]>;
 
 const CHECKPOINT_FIELD = {
   [PollRead.Events]: "etag",
   [PollRead.ClosedPullRequests]: "pulls_etag",
-} as const satisfies Record<PollRead, keyof GitHubCheckpoint>;
+  [PollRead.IssueComments]: "comments_etag",
+} as const satisfies Record<PollRead, string>;
+
+const RESOURCE_KIND_OF_READ = {
+  [PollRead.Events]: ResourceKind.Repository,
+  [PollRead.ClosedPullRequests]: ResourceKind.Repository,
+  [PollRead.IssueComments]: ResourceKind.Conversation,
+} as const satisfies Record<PollRead, ResourceKind>;
 
 export function etagOf(
-  checkpoint: GitHubCheckpoint,
+  checkpoint: PollCheckpoint,
   read: PollRead,
 ): string | null {
-  return checkpoint[CHECKPOINT_FIELD[read]];
+  const fields: Readonly<Record<string, string | null>> = checkpoint;
+  const etag = fields[CHECKPOINT_FIELD[read]];
+  assert.ok(etag !== undefined, "A checkpoint holds the field of its read.");
+  return etag;
 }
 
 export interface PollCycleDependencies {
@@ -137,7 +164,8 @@ export interface PollTarget {
   facts: InboundGrantInput;
   owner: string;
   repo: string;
-  checkpoint: GitHubCheckpoint;
+  resourceKind: ResourceKind;
+  checkpoint: PollCheckpoint;
 }
 
 type Preparation =
@@ -147,9 +175,12 @@ export interface Hold {
   material: Material | null;
 }
 
-export function checkpointOf(text: string | null): GitHubCheckpoint {
-  if (text === null) return EMPTY_CHECKPOINT;
-  return githubCheckpointSchema.parse(JSON.parse(text));
+export function checkpointOf(
+  text: string | null,
+  resourceKind: ResourceKind,
+): PollCheckpoint {
+  if (text === null) return EMPTY_CHECKPOINTS[resourceKind];
+  return CHECKPOINT_SCHEMAS[resourceKind].parse(JSON.parse(text));
 }
 
 export function pollTargetOf(row: InboundRow): PollTarget {
@@ -160,9 +191,10 @@ export function pollTargetOf(row: InboundRow): PollTarget {
   );
   assert.equal(row.platform, InboundPlatform.GitHub);
   assert.ok(row.credential !== null, "A poll names a credential.");
-  const { resource } = configurationSchemaOf(row.kind, row.platform).parse(
-    JSON.parse(row.configuration),
-  );
+  const { resource, resource_kind: resourceKind } = configurationSchemaOf(
+    row.kind,
+    row.platform,
+  ).parse(JSON.parse(row.configuration));
   const { owner, repo } = repositoryOf({
     kind: GitHubTargetKind.Inbound,
     resource,
@@ -177,7 +209,8 @@ export function pollTargetOf(row: InboundRow): PollTarget {
     },
     owner,
     repo,
-    checkpoint: checkpointOf(row.checkpoint),
+    resourceKind,
+    checkpoint: checkpointOf(row.checkpoint, resourceKind),
   };
 }
 
@@ -250,9 +283,17 @@ export async function requestPollRead(
     repo: request.repo,
     etag: request.etag,
   };
-  return read === PollRead.Events
-    ? await github.listEvents(call, query)
-    : await github.listClosedPullRequests(call, query);
+  if (read === PollRead.Events) return await github.listEvents(call, query);
+  if (read === PollRead.ClosedPullRequests)
+    return await github.listClosedPullRequests(call, query);
+  return await github.listIssueComments(
+    call,
+    {
+      kind: GitHubTargetKind.Inbound,
+      resource: `${request.owner}${RESOURCE_SEPARATOR}${request.repo}`,
+    },
+    { etag: request.etag },
+  );
 }
 
 const SKIPPED_CYCLE: CycleResult = {
@@ -347,6 +388,15 @@ function releaseCycle(
   return true;
 }
 
+function demandOf(
+  data: { count: number; link_count: number },
+  resourceKind: ResourceKind,
+): number {
+  return resourceKind === ResourceKind.Conversation
+    ? data.link_count
+    : data.count;
+}
+
 async function hasDemand(
   dependencies: PollCycleDependencies,
   target: PollTarget,
@@ -356,13 +406,14 @@ async function hasDemand(
     {
       project_id: target.facts.projectId,
       resource_identity: resourceIdentityOf(InboundPlatform.GitHub, {
+        resource_kind: target.resourceKind,
         resource: target.facts.resource,
       }),
     },
     { identity: dependencies.identity, context },
   );
   if (result.type === OperationResultType.Completed)
-    return result.data.count > NO_UNRESOLVED_REQUESTS;
+    return demandOf(result.data, target.resourceKind) > NO_UNRESOLVED_REQUESTS;
   logFailure(
     dependencies.logger,
     target.facts.inboundId,
@@ -388,6 +439,7 @@ export function storeBatch(
   );
   const row = readInbound(tx, inboundId);
   if (row === null) return false;
+  const resourceKind = RESOURCE_KIND_OF_READ[read];
   let room = pendingEventLimit - pendingCount(tx);
   let unstored = false;
   for (const event of [...answer.events].reverse()) {
@@ -409,8 +461,8 @@ export function storeBatch(
     tx,
     inboundId,
     canonicalJSON(
-      githubCheckpointSchema.parse({
-        ...checkpointOf(row.checkpoint),
+      CHECKPOINT_SCHEMAS[resourceKind].parse({
+        ...checkpointOf(row.checkpoint, resourceKind),
         [CHECKPOINT_FIELD[read]]: unstored ? null : answer.etag,
       }),
     ),
@@ -521,6 +573,10 @@ export async function pollCycle(
       : SKIPPED_CYCLE;
   const { target } = preparation;
   if (!(await hasDemand(dependencies, target, context))) return SKIPPED_CYCLE;
+  if (target.resourceKind === ResourceKind.Conversation)
+    return (
+      await pollRead(dependencies, target, PollRead.IssueComments, context)
+    ).cycle;
   const events = await pollRead(dependencies, target, PollRead.Events, context);
   if (events.endsCycle) return events.cycle;
   const pulls = await pollRead(

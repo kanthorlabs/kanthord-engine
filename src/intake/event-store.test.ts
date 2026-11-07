@@ -9,6 +9,7 @@ import {
   InboundKind,
   InboundPlatform,
   INTAKE_SERVICE_NAME,
+  ResourceKind,
 } from "./contract.ts";
 import {
   eventRecord,
@@ -54,7 +55,10 @@ function addInbound(store: Store): string {
       platform: InboundPlatform.GitHub,
       consumer: Consumer.MissionDeliveryAdmit,
       credential: null,
-      configuration: { resource: "acme/app" },
+      configuration: {
+        resource_kind: ResourceKind.Repository,
+        resource: "acme/app",
+      },
       checkpoint: null,
       created_at: CREATED_AT,
     }),

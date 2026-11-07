@@ -110,7 +110,7 @@ function pollCheck(
       target.repo.length > EMPTY_IDENTIFIER_LENGTH,
       "A target names a repository.",
     );
-    for (const read of POLL_READS) {
+    for (const read of POLL_READS[target.resourceKind]) {
       const failure = await readFailure(dependencies, target, read, context);
       if (failure === null) continue;
       observe?.(failure, ResourceFailureReason.Unclassified);
