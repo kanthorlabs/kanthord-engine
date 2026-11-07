@@ -763,6 +763,9 @@ function refusedSetupHost(
 ) {
   const api = httpTransport("http://127.0.0.1:1");
   const shutdown = new CancellationContext();
+  const realNow = Date.now.bind(Date);
+  let clockJump = 0;
+  t.mock.method(Date, "now", () => realNow() + clockJump);
   const claim = {
     ...testClaim(),
     ...(entry.lifetime === undefined
@@ -813,6 +816,7 @@ function refusedSetupHost(
     "execution.setup.get",
     async (request: { params: unknown }) => {
       setups.push(request.params);
+      clockJump = entry.lifetime ?? 0;
       return entry.setup ?? failureAnswer(refusal);
     },
   );
@@ -931,7 +935,7 @@ test("a refused setup whose release fails ends the pull loop with the setup code
 });
 
 const SETUP_UNAVAILABLE_RECORD = "worker.execution.setup_unavailable";
-const SHORT_LIFETIME_MS = 300;
+const CLAIM_LIFETIME_MS = 60_000;
 const GATEWAY_ANSWERS = [
   { status: 504, code: "gateway.invocation.timeout", details: null },
   { status: 500, code: "gateway.invocation.unknown", details: null },
@@ -966,7 +970,7 @@ test("a gateway answer of the setup ends only the execution and the pull loop ta
 test("a setup read that stays indeterminate until expired_at ends only the execution and the pull loop takes the next work", async (t) => {
   const host = refusedSetupHost(t, GATEWAY_ANSWERS[0]!, undefined, {
     setup: { type: OperationResultType.Indeterminate },
-    lifetime: SHORT_LIFETIME_MS,
+    lifetime: CLAIM_LIFETIME_MS,
   });
   assert.equal(await host.running, null);
   assert.equal(host.pulls(), TWO_PULLS);
