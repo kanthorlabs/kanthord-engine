@@ -91,7 +91,7 @@ export const OutboundRequestState = {
 export const OutboundOperation = {
   GitHubPullRequest: "github.pull_request",
   GitHubPullRequestMerge: "github.pull_request_merge",
-  GitMergePush: "git.merge_push",
+  GitPush: "git.push",
   S3DeleteObject: "s3.delete_object",
 } as const;
 export const ResultClass = {
@@ -111,7 +111,7 @@ export const CheckEndState = {
 
 export const ActionTableAction = {
   PullRequest: "pull_request",
-  MergePush: "merge_push",
+  Push: "push",
 } as const;
 export const ActionTablePlatform = {
   GitHub: "github",
@@ -125,19 +125,19 @@ export const ACTION_TABLE = [
     operation: OutboundOperation.GitHubPullRequest,
   },
   {
-    action: ActionTableAction.MergePush,
+    action: ActionTableAction.Push,
     platform: ActionTablePlatform.GitHub,
-    operation: OutboundOperation.GitMergePush,
+    operation: OutboundOperation.GitPush,
   },
   {
-    action: ActionTableAction.MergePush,
+    action: ActionTableAction.Push,
     platform: ActionTablePlatform.GitLab,
-    operation: OutboundOperation.GitMergePush,
+    operation: OutboundOperation.GitPush,
   },
   {
-    action: ActionTableAction.MergePush,
+    action: ActionTableAction.Push,
     platform: ActionTablePlatform.Bitbucket,
-    operation: OutboundOperation.GitMergePush,
+    operation: OutboundOperation.GitPush,
   },
 ] as const;
 export const ActionReadMethod = {
@@ -165,7 +165,7 @@ export const commitSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 
 export const actionKeySchema = z
   .string()
-  .regex(/^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push)$/);
+  .regex(/^[a-z][a-z0-9-]{0,62}\.(pull_request|push)$/);
 export const platformAddressSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal(AddressKind.PullRequest),

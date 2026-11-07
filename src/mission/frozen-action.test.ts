@@ -63,7 +63,7 @@ test("an examine node with a repository binding requires no external action, and
         ssh_credential: "github-ssh",
         credential: "github",
         base_branch: "develop",
-        action: RepositoryAction.MergePush,
+        action: RepositoryAction.Push,
         landing: "human" as const,
       },
     ],
@@ -252,7 +252,7 @@ test("two bindings freeze one action each", (t) => {
       action:
         bindingId === appId
           ? RepositoryAction.PullRequest
-          : RepositoryAction.MergePush,
+          : RepositoryAction.Push,
       landing: "human" as const,
     }),
   };
@@ -281,7 +281,7 @@ test("two bindings freeze one action each", (t) => {
     assert.deepEqual(
       actions.map((action) => [action.key, action.binding_id, action.follows]),
       [
-        ["api.merge_push", apiId, null],
+        ["api.push", apiId, null],
         ["app.pull_request", appId, null],
       ],
     );
@@ -289,7 +289,7 @@ test("two bindings freeze one action each", (t) => {
       eligibleUnrequested(
         actionStatesOf(tx, bindings, nodeId, FIRST_ATTEMPT),
       ).map((state) => state.action.key),
-      ["api.merge_push", "app.pull_request"],
+      ["api.push", "app.pull_request"],
     );
   });
 });
@@ -331,7 +331,7 @@ test("actionsOfRevision with a shared map answers the actions of a new map", (t)
       action:
         bindingId === appId
           ? RepositoryAction.PullRequest
-          : RepositoryAction.MergePush,
+          : RepositoryAction.Push,
       landing: "human" as const,
     }),
   };
@@ -374,7 +374,7 @@ test("actionsOfRevision with a shared map answers the actions of a new map", (t)
     assert.deepEqual(fromShared, fromNew);
     assert.deepEqual(
       fromShared.map((actions) => actions.map((action) => action.key)),
-      [["api.merge_push", "app.pull_request"], ["api.merge_push"]],
+      [["api.push", "app.pull_request"], ["api.push"]],
     );
     assert.equal(shared.size, names.size);
   });

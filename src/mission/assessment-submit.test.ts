@@ -371,7 +371,7 @@ function storedGateFiles(
 }
 
 test("an assessment stores the server gate files", async (t) => {
-  const h = await fixture(t, RepositoryAction.MergePush);
+  const h = await fixture(t, RepositoryAction.Push);
   answerGateFiles(h, [OTHER_GATE_PATH]);
   const result = await h.submit();
   assert.equal(
@@ -383,7 +383,7 @@ test("an assessment stores the server gate files", async (t) => {
 });
 
 test("a server gate file keeps the human landing of a merge push", async (t) => {
-  const h = await fixture(t, RepositoryAction.MergePush);
+  const h = await fixture(t, RepositoryAction.Push);
   answerGateFiles(h, [GATE_PATH]);
   const result = await h.submit();
   const [action] = h.store.transaction((tx) =>
@@ -429,7 +429,7 @@ test("a change with no gate file stores null and keeps the service merge open", 
 });
 
 test("a failed gate file read refuses the assessment and stores none", async (t) => {
-  const h = await fixture(t, RepositoryAction.MergePush);
+  const h = await fixture(t, RepositoryAction.Push);
   h.dependencies.intakeGateFiles.read = async () => {
     throw new OperationError(BAD_GATEWAY, GIT_FAILED, "The git read fails.");
   };
@@ -447,7 +447,7 @@ test("a failed gate file read refuses the assessment and stores none", async (t)
 });
 
 test("a gate file read receives the binding, the base branch, the tested commit and the execution caller", async (t) => {
-  const h = await fixture(t, RepositoryAction.MergePush);
+  const h = await fixture(t, RepositoryAction.Push);
   const reads: unknown[][] = [];
   h.dependencies.intakeGateFiles.read = async (...args) => {
     reads.push(args);

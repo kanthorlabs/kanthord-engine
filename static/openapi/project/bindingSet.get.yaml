@@ -173,7 +173,7 @@ components:
                                 type: string
                                 enum:
                                   - pull_request
-                                  - merge_push
+                                  - push
                               follows:
                                 oneOf:
                                   - type: object
@@ -611,7 +611,7 @@ components:
                                     type: string
                                     enum:
                                       - pull_request
-                                      - merge_push
+                                      - push
                                   follows:
                                     oneOf:
                                       - type: object

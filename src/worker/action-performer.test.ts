@@ -290,7 +290,7 @@ test("dispatch forwards identity, derived operands and the returned address to M
 
 test("merge push records the address and commit returned by Intake", async (t) => {
   const h = actionable(t);
-  h.entry.action.action = RepositoryAction.MergePush;
+  h.entry.action.action = RepositoryAction.Push;
   const pushed = {
     kind: PlatformAddressKind.BranchPush,
     resource_identity: RESOURCE,
@@ -380,7 +380,7 @@ test("refused or thrown recording retains the known address as recording uncerta
 
 function humanLanding(t: TestContext) {
   const h = actionable(t);
-  h.entry.action.action = RepositoryAction.MergePush;
+  h.entry.action.action = RepositoryAction.Push;
   h.entry.gate_files = GATE_FILE_PATHS;
   const address = {
     kind: PlatformAddressKind.BranchPush,
@@ -575,7 +575,7 @@ test("read refusal and unknown read outcome dispatch nothing and release the res
 
 test("merge push and foreign repository candidates never call read", async (t) => {
   const h = reusable(t);
-  h.entry.action.action = RepositoryAction.MergePush;
+  h.entry.action.action = RepositoryAction.Push;
   await h.perform();
   assert.equal(
     h.performSpy.mock.calls[0]?.arguments[1]?.reusedEvidenceId,
@@ -1011,9 +1011,9 @@ test("one reviewer execution requests both actions", async (t) => {
     ...h.entry,
     action: {
       ...h.entry.action,
-      key: "other.merge_push",
+      key: "other.push",
       binding_id: other.binding_id,
-      action: RepositoryAction.MergePush,
+      action: RepositoryAction.Push,
       expected_end_state: "base_branch_pushed",
     },
     resource_identity: otherResource,
@@ -1036,7 +1036,7 @@ test("one reviewer execution requests both actions", async (t) => {
   assert.deepEqual(
     performed.sort(),
     [
-      ["other.merge_push", otherCommit],
+      ["other.push", otherCommit],
       [h.entry.action.key, COMMIT],
     ].sort(),
   );

@@ -121,7 +121,7 @@ test("A second insert of one key throws OutboundKeyConflict", (t) => {
   const other = store.transaction((tx) =>
     insertPending(tx, {
       ...pending(),
-      operation: OutboundOperation.GitMergePush,
+      operation: OutboundOperation.GitPush,
       credential: null,
     }),
   );

@@ -65,7 +65,7 @@ const GATE_FILE_BODY = [
   "- `package.json`\n- `scripts/affected-tests.mjs`",
   "A human reviews and merges this pull request.",
 ].join("\n\n");
-const MERGE_PUSH_ACTION = "merge_push";
+const MERGE_PUSH_ACTION = "push";
 const PULL_REQUEST_ACTION = "pull_request";
 const ONE_RELEASE = 1;
 const TWO_RELEASES = 2;
@@ -76,7 +76,7 @@ const MERGE_EVIDENCE_ID = "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const REUSED_EVIDENCE_ID = "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAW";
 
 const GitCall = {
-  MergePush: "merge_push",
+  Push: "push",
   SnapshotPush: "snapshot_push",
   Landing: "landing",
 } as const;
@@ -167,7 +167,7 @@ function harness(t: TestContext, options: Options) {
   const git: { call: GitCall; ssh: SshAccess | undefined }[] = [];
   const gitWriter: GitWriter = {
     mergePushFresh: async (_input, _context, _deadline, ssh) => {
-      git.push({ call: GitCall.MergePush, ssh });
+      git.push({ call: GitCall.Push, ssh });
       return (options.mergePush ?? (async () => ({ commit: MERGED })))();
     },
     pushSnapshotFresh: async (_input, _context, _deadline, ssh) => {
@@ -284,7 +284,7 @@ function assertBindingRelease(h: ReturnType<typeof harness>) {
     });
 }
 
-test("git.merge_push releases the SSH identity of the binding under the execution claim and records the ssh_credential name", async (t) => {
+test("git.push releases the SSH identity of the binding under the execution claim and records the ssh_credential name", async (t) => {
   const h = harness(t, { facts: actionFacts(MERGE_PUSH_ACTION) });
   const answer = await h.perform();
   assert.deepEqual(answer, {
@@ -297,12 +297,12 @@ test("git.merge_push releases the SSH identity of the binding under the executio
   assertBindingRelease(h);
   assert.deepEqual(
     h.git.map((item) => item.call),
-    [GitCall.MergePush],
+    [GitCall.Push],
   );
   assertAccess(h, h.git[0]?.ssh);
   assert.deepEqual(h.rows(), [
     {
-      operation: OutboundOperation.GitMergePush,
+      operation: OutboundOperation.GitPush,
       state: OutboundRequestState.Succeeded,
       credential: SSH_CREDENTIAL,
     },
@@ -328,7 +328,7 @@ test("the read-back of a merge push takes its own SSH release under the executio
   assert.equal("kind" in found && found.kind, AddressKind.BranchPush);
   assert.deepEqual(
     h.git.map((item) => item.call),
-    [GitCall.MergePush, GitCall.Landing],
+    [GitCall.Push, GitCall.Landing],
   );
   for (const item of h.git) assertAccess(h, item.ssh);
   assert.equal(h.sshRequests().length, TWO_RELEASES);

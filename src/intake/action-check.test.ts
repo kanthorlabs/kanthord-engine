@@ -56,11 +56,11 @@ function requestFacts(
 ): RequestFacts {
   return {
     frozen_action: {
-      key: "pushed.merge_push",
+      key: "pushed.push",
       binding_id: BINDING_ID,
       action:
         address.kind === PlatformAddressKind.BranchPush
-          ? "merge_push"
+          ? "push"
           : "pull_request",
       expected_end_state:
         address.kind === PlatformAddressKind.BranchPush

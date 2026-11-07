@@ -52,11 +52,11 @@ const SECRET = "test-secret";
 const GATED = "gated";
 const MERGE = "merge";
 const GATED_KEY = "gated.pull_request";
-const MERGE_KEY = "merge.merge_push";
+const MERGE_KEY = "merge.push";
 const GATED_RESOURCE = "repository:github:owner/gated";
 const MERGE_RESOURCE = "repository:github:owner/merge";
 const PULL_REQUEST_OPERATION = "github.pull_request";
-const MERGE_PUSH_OPERATION = "git.merge_push";
+const MERGE_PUSH_OPERATION = "git.push";
 const MAIN_REF = "refs/heads/main";
 const MERGED_COMMIT = "e".repeat(40);
 const COMMIT_RULE =
@@ -113,7 +113,7 @@ async function setup(t: TestContext) {
     version: FIRST_REVISION,
     bindings: {
       gated: repositoryBinding(GATED, "pull_request"),
-      merge: repositoryBinding(MERGE, "merge_push"),
+      merge: repositoryBinding(MERGE, "push"),
       harness: {
         kind: "worker",
         config: {

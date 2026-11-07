@@ -83,7 +83,7 @@ function landsByKanthorD(entry: Pending["entry"]): boolean {
 
 function landsByHuman(entry: Pending["entry"]): boolean {
   return (
-    entry.action.action === RepositoryAction.MergePush &&
+    entry.action.action === RepositoryAction.Push &&
     entry.gate_files.length > NO_GATE_FILES
   );
 }
@@ -101,7 +101,7 @@ function provesNoWrite(error: unknown): boolean {
 
 function requestKeyOf(pending: Pending): string {
   const base = `${pending.key.nodeId}/${pending.key.attempt}/${pending.entry.action.key}`;
-  if (pending.entry.action.action === RepositoryAction.MergePush)
+  if (pending.entry.action.action === RepositoryAction.Push)
     return `${base}/${pending.operands.commit}`;
   const reused = pending.operands.reusedAddress;
   if (reused?.kind === PlatformAddressKind.PullRequest)

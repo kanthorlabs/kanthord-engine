@@ -648,7 +648,7 @@ test(
             "get",
             h.implementId,
             String(SECOND_ATTEMPT),
-            "repo.push",
+            "repo.merge",
           ],
           "cli.mission.external_action.get.invalid_action_key",
         );

@@ -184,7 +184,7 @@ async function setup(t: TestContext) {
     version: FIRST_REVISION,
     bindings: {
       gated: repository(GATED_ADDRESS, "pull_request"),
-      pushed: repository(PUSHED_ADDRESS, "merge_push"),
+      pushed: repository(PUSHED_ADDRESS, "push"),
       harness: {
         kind: "worker",
         config: { worker: "claude-code@1", instance_count: SINGLE_INSTANCE },
@@ -352,17 +352,12 @@ async function setup(t: TestContext) {
       number,
     },
   );
-  const branchPushId = await requested(
-    pushedNode,
-    "pushed",
-    "pushed.merge_push",
-    {
-      kind: PlatformAddressKind.BranchPush,
-      resource_identity: binding("pushed").resource_identity,
-      branch: "main",
-      commit: pushed.head,
-    },
-  );
+  const branchPushId = await requested(pushedNode, "pushed", "pushed.push", {
+    kind: PlatformAddressKind.BranchPush,
+    resource_identity: binding("pushed").resource_identity,
+    branch: "main",
+    commit: pushed.head,
+  });
   while (gitHub.calls.length < DEFERRED_GITHUB_CALLS)
     await setImmediate(undefined, { signal: t.signal });
   for (;;) {

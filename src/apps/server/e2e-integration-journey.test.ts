@@ -83,7 +83,7 @@ const OBJECT_BODY = "hello";
 const OBJECT_MEDIA = "text/plain";
 const SIGNATURE_PARAMETER = "X-Amz-Signature";
 const PULL_REQUEST_OPERATION = "github.pull_request";
-const MERGE_PUSH_OPERATION = "git.merge_push";
+const MERGE_PUSH_OPERATION = "git.push";
 const DELETE_OBJECT_OPERATION = "s3.delete_object";
 const EVENTS_PATH = /^\/repos\/owner\/merge\/events(\?|$)/;
 const UNOBSERVED_REQUEST_COUNT = 0;
@@ -150,7 +150,7 @@ async function setup(t: TestContext) {
     version: FIRST_REVISION,
     bindings: {
       gated: repositoryBinding(GATED, "pull_request"),
-      merge: repositoryBinding(MERGE, "merge_push"),
+      merge: repositoryBinding(MERGE, "push"),
       store: {
         kind: "storage",
         config: {
