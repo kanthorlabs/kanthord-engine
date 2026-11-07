@@ -750,6 +750,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["worker.instance.work", AccessPolicy.Worker],
   ["worker.session_read.report", AccessPolicy.Worker],
   ["worker.credential", AccessPolicy.Client],
+  ["worker.credential.lease", AccessPolicy.Client],
   ["worker.ssh.sign", AccessPolicy.Client],
   ["worker.registration.deregister", AccessPolicy.Client],
   ["worker.action.request", AccessPolicy.Client],

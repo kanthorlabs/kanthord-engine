@@ -104,6 +104,7 @@ function machineFixture(t: TestContext) {
     custodyHandover: {
       handover: unexpected,
       report: unexpected,
+      lease: unexpected,
       sshSign: unexpected,
       sshPublicKeyOf: unexpected,
     },

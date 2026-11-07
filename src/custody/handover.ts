@@ -11,7 +11,6 @@ import {
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { digest } from "../kernel/json.ts";
-import { piProviderId } from "../kernel/pi-provider.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { sealedObjectSchema } from "../kernel/hpke.ts";
 import {
@@ -20,7 +19,7 @@ import {
   type HandoverPayload,
   type HandoverSshIdentity,
   type InstanceKeys,
-  type Material,
+  type LeasePayload,
   SEALED_CIPHERTEXT_MAX_BYTES,
   SERVER_HOLDER,
   type SshSignAnswer,
@@ -54,33 +53,13 @@ function invalidReport(): OperationError {
   );
 }
 
-export function plainItem(
-  material: Material,
-  platforms: CredentialPlatforms,
-): HandoverPayload["items"][number] {
-  assert(Object.hasOwn(platforms, material.platform));
-  const shape = platforms[material.platform]!.secret_shape;
-  assert(material.credential_id.length);
-  return {
-    credential_id: material.credential_id,
-    provider_id: piProviderId(material.platform),
-    credential: credentialOfSecret(shape, material.value()),
-  };
-}
-
-export function sealMaterial(
+export function sealPayload(
   secret: string,
   execution: CustodyExecution,
-  items: HandoverPayload["items"],
-  sshIdentities: readonly HandoverSshIdentity[],
+  payload: HandoverPayload | LeasePayload,
 ): HandoverEnvelope {
   const keys = deriveHandoverKeys(secret);
   try {
-    assert(items.length > NO_ITEMS);
-    const payload: HandoverPayload = {
-      items,
-      ssh_identities: [...sshIdentities],
-    };
     return sealEnvelope(
       keys.handover,
       handoverAad(execution.execution_id, execution.runtime_identity),
@@ -90,6 +69,19 @@ export function sealMaterial(
     keys.handover.fill(0);
     keys.report.fill(0);
   }
+}
+
+export function sealMaterial(
+  secret: string,
+  execution: CustodyExecution,
+  items: HandoverPayload["items"],
+  sshIdentities: readonly HandoverSshIdentity[],
+): HandoverEnvelope {
+  assert(items.length > NO_ITEMS);
+  return sealPayload(secret, execution, {
+    items,
+    ssh_identities: [...sshIdentities],
+  });
 }
 
 export function openReport(

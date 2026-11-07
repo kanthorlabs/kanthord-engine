@@ -46,6 +46,7 @@ import {
   type BindingsNamingFn,
   type CheckMaterial,
   CREDENTIAL_CHECK_TIMEOUT_MS,
+  CREDENTIAL_LEASE_MS,
   CREDENTIAL_SEAL_INFO,
   type CredentialAnswer,
   type CredentialCheckAnswer,
@@ -55,6 +56,7 @@ import {
   type CredentialEntry,
   type CredentialHoldItem,
   type CredentialHolds,
+  CredentialLeaseHeld,
   type CredentialListAnswer,
   type CredentialListQuery,
   type CredentialMetadata,
@@ -67,6 +69,7 @@ import {
   credentialSealAad,
   credentialSealedToSchema,
   type CredentialUpdateMetadataBody,
+  CUSTODY_LEASE_INVALID,
   type CustodyAuthorization,
   type CustodyExecution,
   type CustodyExecutions,
@@ -77,6 +80,7 @@ import {
   GrantKind,
   type GrantOf,
   type GrantRequest,
+  type HandoverPayload,
   HandoverPlacement,
   type HandoverSshIdentity,
   type HeldCopy,
@@ -95,7 +99,6 @@ import {
   SEALED_PLAINTEXT_MAX_BYTES,
   type SealedCopy,
   type SealedCopyAnswer,
-  type SealedHandoverItem,
   type SealedRotateBody,
   secretSchemas,
   SecretShape,
@@ -127,9 +130,9 @@ import {
   CUSTODY_HOLDER_REFUSED,
   openReport,
   openSignRequest,
-  plainItem,
   REVISION_REVOKED,
   sealMaterial,
+  sealPayload,
   sealSignAnswer,
   SSH_SIGN_PLACEMENT_REFUSED,
 } from "./handover.ts";
@@ -214,6 +217,8 @@ type CredentialRow = {
 };
 
 type LiveRow = CredentialRow & { nonce: Buffer; ciphertext: Buffer };
+
+type HandoverItem = HandoverPayload["items"][number];
 
 function capturedResourceCheck(
   row: LiveRow,
@@ -568,6 +573,10 @@ export class CustodyComponent implements Service, CredentialRecords {
   private readonly bindingsListingInstance: BindingsListingInstanceFn;
   private readonly instanceCopyRefreshed: (holder: string) => void;
   private readonly refreshes = new Map<string, Promise<void>>();
+  private readonly leases = new Map<
+    string,
+    { execution_id: string; expires_at: number }
+  >();
 
   constructor(dependencies: Dependencies) {
     this.executions = dependencies.executions;
@@ -860,7 +869,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     grant: Grant,
     holder: string | null,
     now: number,
-  ): SealedHandoverItem {
+  ): HandoverItem {
     assert(tx.database.isTransaction);
     if (grant.credential === null) throw new FacilityError();
     consumeGrant(grant);
@@ -902,12 +911,36 @@ export class CustodyComponent implements Service, CredentialRecords {
     if (!pinned && grant.execution)
       this.executions.pinCredential(tx, grant.execution.execution_id, row.id);
     this.drainRevisions(tx, row.name, row.holder, now);
+    return this.itemOfRow(tx, row);
+  }
+
+  private revisionById(tx: Transaction, id: string): CredentialRow {
+    const row = tx.database
+      .prepare(`SELECT ${ROW_COLUMNS} FROM credential WHERE id = ?`)
+      .get(id) as CredentialRow | undefined;
+    assert(row);
+    return row;
+  }
+
+  private itemOfRow(tx: Transaction, row: CredentialRow): HandoverItem {
+    assert(tx.database.isTransaction);
+    const stored = this.storedRowOf(tx, row);
+    if (row.holder !== SERVER_HOLDER)
+      return {
+        credential_id: row.id,
+        provider_id: piProviderId(row.platform),
+        name: row.name,
+        platform: row.platform,
+        sealed: storedSealed(this.envelopeKey, stored),
+      };
+    assert(Object.hasOwn(this.platforms, row.platform));
     return {
       credential_id: row.id,
       provider_id: piProviderId(row.platform),
-      name: row.name,
-      platform: row.platform,
-      sealed: storedSealed(this.envelopeKey, this.storedRowOf(tx, row)),
+      credential: credentialOfSecret(
+        this.platforms[row.platform]!.secret_shape,
+        openSecret(this.envelopeKey, stored),
+      ),
     };
   }
 
@@ -1191,7 +1224,9 @@ export class CustodyComponent implements Service, CredentialRecords {
       const envelope = sealMaterial(
         this.clientSecret(identity.clientId),
         row,
-        materials.map((material) => plainItem(material, this.platforms)),
+        materials.map((material) =>
+          this.itemOfRow(tx, this.revisionById(tx, material.credential_id)),
+        ),
         sshIdentities,
       );
       for (const material of materials)
@@ -1424,9 +1459,69 @@ export class CustodyComponent implements Service, CredentialRecords {
       },
       written ? "credential report" : "credential report stale",
     );
+    if (
+      this.leases.get(report.credential_id)?.execution_id === row.execution_id
+    )
+      this.leases.delete(report.credential_id);
     const holder = written ? holderOfRow(tx, report.credential_id) : null;
     if (holder !== null && holder !== SERVER_HOLDER)
       this.instanceCopyRefreshed(holder);
+  }
+
+  lease(
+    tx: Transaction,
+    identity: MachineIdentity,
+    claim: ExecutionClaim,
+    credentialId: string,
+    now: number,
+  ): HandoverEnvelope {
+    const execution = this.executions.requireRunning(
+      tx,
+      claim.executionId,
+      claim.runtimeIdentity,
+      now,
+    );
+    if (!execution.credentials.includes(credentialId))
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        CUSTODY_LEASE_INVALID,
+        "The execution does not pin the credential revision.",
+      );
+    const row = this.revisionById(tx, credentialId);
+    if (row.ended_at !== null)
+      throw new OperationError(
+        HttpStatus.Conflict,
+        CustodyErrorCode.RevisionRevoked,
+        "The pinned credential revision is revoked.",
+      );
+    const held = this.leases.get(credentialId);
+    if (
+      this.refreshes.has(credentialId) ||
+      (held !== undefined &&
+        held.execution_id !== execution.execution_id &&
+        held.expires_at > now)
+    )
+      throw new CredentialLeaseHeld();
+    const expiresAt = now + CREDENTIAL_LEASE_MS;
+    const envelope = sealPayload(
+      this.clientSecret(identity.clientId),
+      execution,
+      { item: this.itemOfRow(tx, row), expires_at: expiresAt },
+    );
+    this.leases.set(credentialId, {
+      execution_id: execution.execution_id,
+      expires_at: expiresAt,
+    });
+    this.logger.info(
+      {
+        execution_id: execution.execution_id,
+        credential_id: credentialId,
+        client_id: identity.clientId,
+        runtime_identity: execution.runtime_identity,
+      },
+      "credential lease",
+    );
+    return envelope;
   }
 
   custodySuitability(

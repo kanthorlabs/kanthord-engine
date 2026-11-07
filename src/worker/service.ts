@@ -82,6 +82,7 @@ import {
 } from "../agent/contract.ts";
 import { bindingHolders } from "../project/contract.ts";
 import {
+  CredentialLeaseHeld,
   CredentialRefreshInFlight,
   type HeldCopy,
   type InstanceKey,
@@ -299,6 +300,14 @@ function refreshInFlight(): OperationError {
     HttpStatus.ServiceUnavailable,
     WorkerErrorCode.HandoverRefreshInFlight,
     "A credential refresh is in flight; retry the handover.",
+  );
+}
+
+function leaseHeld(): OperationError {
+  return new OperationError(
+    HttpStatus.ServiceUnavailable,
+    WorkerErrorCode.CredentialLeaseHeld,
+    "Another execution holds the refresh lease; retry the lease.",
   );
 }
 
@@ -1189,6 +1198,29 @@ export class WorkerService implements Service {
         return null;
       });
     });
+    registry.register(
+      workerOperations["credential.lease"],
+      ({ body }, caller) => {
+        const identity = caller.identity;
+        assert(isMachineIdentity(identity));
+        const execution = caller.execution;
+        assert(execution);
+        try {
+          return caller.commit((tx) =>
+            this.dependencies.custodyHandover.lease(
+              tx,
+              identity,
+              execution,
+              body.credential_id,
+              Date.now(),
+            ),
+          );
+        } catch (error) {
+          if (error instanceof CredentialLeaseHeld) throw leaseHeld();
+          throw error;
+        }
+      },
+    );
     registry.register(workerOperations["ssh.sign"], ({ body }, caller) => {
       const identity = caller.identity;
       assert(isMachineIdentity(identity));

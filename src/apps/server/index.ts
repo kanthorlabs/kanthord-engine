@@ -769,6 +769,7 @@ export function composeServices(options: {
     custodyHandover: {
       handover: (...args) => custody.handover(...args),
       report: (...args) => custody.report(...args),
+      lease: (...args) => custody.lease(...args),
       sshSign: (...args) => custody.sshSign(...args),
       sshPublicKeyOf: (...args) => custody.sshPublicKeyOf(...args),
     },
