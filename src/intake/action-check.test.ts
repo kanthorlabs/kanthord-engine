@@ -23,7 +23,7 @@ import {
   CheckEndState,
   ExpectedEndState,
   GITHUB_RESULT_CODE_PREFIX,
-  type GitHubPlatform,
+  GitHubPlatform,
 } from "../repository/github.ts";
 import type { GitWriter, SshAccess } from "../repository/index.ts";
 import { SshAgentErrorCode } from "../repository/ssh-agent.ts";
@@ -52,6 +52,7 @@ const mission: ServiceIdentity = {
 function requestFacts(
   address: RequestFacts["address"],
   humanLanding = false,
+  trustedActorIds: string[] = [],
 ): RequestFacts {
   return {
     frozen_action: {
@@ -76,6 +77,23 @@ function requestFacts(
       base_branch: "main",
     },
     human_landing: humanLanding,
+    link_trust: { actor_ids: trustedActorIds },
+  };
+}
+
+const SETTLED_CHECKS = { head_commit: PUSHED, pending: [], failed: [] };
+const TRUSTED_ID = 9;
+const UNTRUSTED_ID = 7;
+const CHANGES_REQUESTED = "CHANGES_REQUESTED";
+const USER_TYPE = "User";
+const BOT_TYPE = "Bot";
+
+function changeRequest(reviewer: number, type = USER_TYPE) {
+  return {
+    id: reviewer,
+    user: { id: reviewer, type },
+    state: CHANGES_REQUESTED,
+    commit_id: PUSHED,
   };
 }
 
@@ -102,6 +120,7 @@ function harness(
     landingFailure?: Error;
     landed?: boolean;
     checksFailure?: ResultClassValue;
+    reviews?: unknown[];
     sshFacts?: { binding_id: string; address: string };
   },
 ) {
@@ -136,14 +155,23 @@ function harness(
     status: null,
     message: "refused",
   });
+  const pullRequest = new GitHubPlatform();
   const github = {
     getSettledPullRequest: async () =>
-      options.checksFailure === undefined
+      options.checksFailure === undefined && options.reviews === undefined
         ? refusal(ResultClass.FinalRefusal)
         : { ok: true as const, value: OPEN_PULL_REQUEST },
-    listReviews: async () => ({ ok: true as const, value: [] }),
+    listReviews: async () => ({
+      ok: true as const,
+      value: options.reviews ?? [],
+    }),
     getRequiredChecks: async () =>
-      refusal(options.checksFailure ?? ResultClass.FinalRefusal),
+      options.reviews === undefined
+        ? refusal(options.checksFailure ?? ResultClass.FinalRefusal)
+        : { ok: true as const, value: SETTLED_CHECKS },
+    foldPullRequest: (
+      ...input: Parameters<GitHubPlatform["foldPullRequest"]>
+    ) => pullRequest.foldPullRequest(...input),
   } as unknown as GitHubPlatform;
   const caller: CallerContext = {
     identity: mission,
@@ -297,4 +325,52 @@ test("a branch push check fails closed before git when the SSH key names another
     assert.deepEqual(h.landings, []);
     assert.ok(h.materials.every((material) => material.dropped));
   }
+});
+
+const pullRequestAddress = {
+  kind: PlatformAddressKind.PullRequest,
+  resource_identity: RESOURCE_IDENTITY,
+  number: PULL_NUMBER,
+} as const;
+
+async function endStateOf(
+  t: TestContext,
+  reviews: unknown[],
+  trusted: string[],
+) {
+  const h = harness(t, {
+    facts: requestFacts(pullRequestAddress, false, trusted),
+    credential: "github",
+    reviews,
+  });
+  return (await h.check()).end_state;
+}
+
+test("a change request of a trusted reviewer answers the end state other", async (t) => {
+  assert.equal(
+    await endStateOf(t, [changeRequest(TRUSTED_ID)], [String(TRUSTED_ID)]),
+    CheckEndState.Other,
+  );
+});
+
+test("a change request of an untrusted reviewer answers no other end state", async (t) => {
+  assert.equal(
+    await endStateOf(t, [changeRequest(UNTRUSTED_ID)], [String(TRUSTED_ID)]),
+    CheckEndState.None,
+  );
+  assert.equal(
+    await endStateOf(t, [changeRequest(TRUSTED_ID)], []),
+    CheckEndState.None,
+  );
+});
+
+test("a change request of a bot never answers the end state other", async (t) => {
+  assert.equal(
+    await endStateOf(
+      t,
+      [changeRequest(TRUSTED_ID, BOT_TYPE)],
+      [String(TRUSTED_ID)],
+    ),
+    CheckEndState.None,
+  );
 });

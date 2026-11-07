@@ -2,9 +2,17 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test } from "node:test";
 import { IdentityKind } from "../../kernel/caller.ts";
+import { createIdentity } from "../../kernel/identity.ts";
+import { canonicalJSON } from "../../kernel/json.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { packageVersion } from "../../kernel/version.ts";
-import { environment, kanthord, spawnKanthord } from "./cli-test-support.ts";
+import {
+  cliSession,
+  createCredentials,
+  environment,
+  kanthord,
+  spawnKanthord,
+} from "./cli-test-support.ts";
 import { gatewayFixture } from "./test-support.ts";
 
 const EXIT_SUCCESS = 0;
@@ -106,6 +114,8 @@ const cases = [
     ],
   },
   { id: "E08.14", args: ["mission", "import"], names: ["preview", "apply"] },
+  { id: "E08.15", args: ["mission"], names: ["link-update"] },
+  { id: "E08.16", args: ["mission", "link-update"], names: ["list"] },
 ];
 
 function commandNames(stdout: string): string[] {
@@ -188,4 +198,108 @@ test("the real process sends an authenticated request to the server", async (t) 
     (JSON.parse(result.stdout) as { kind: string }).kind,
     IdentityKind.Human,
   );
+});
+
+const LINK_MARKER = "link-update-marker";
+const TRUSTED_ACTOR = "9";
+const OTHER_ACTOR = "7";
+const FIRST_BINDING_SET = 1;
+const FIRST_ITEM = 0;
+const CONVERSATION_BINDING = "conversation";
+const CONVERSATION_REPOSITORY = "acme/app";
+const LINK = {
+  kind: "github_issue",
+  resource_identity: `conversation:github:${CONVERSATION_REPOSITORY}`,
+  number: 7,
+};
+const FIRST_OCCURRED_AT = 1700000001000;
+const SECOND_OCCURRED_AT = 1700000002000;
+
+test("kanthord mission link-update list prints the rows of the trusted actors of a node", async (t) => {
+  const fixture = await gatewayFixture(t);
+  const session = cliSession(t, fixture.endpoint, fixture.token, LINK_MARKER);
+  await createCredentials(session, LINK_MARKER);
+  const project = await session.read<{ id: string }>([
+    "project",
+    "create",
+    "--name",
+    "links",
+  ]);
+  const mission = await session.read<{ id: string; version: number }>([
+    "mission",
+    "get",
+    project.id,
+  ]);
+  await session.write(["project", "binding", "apply", project.id], {
+    version: FIRST_BINDING_SET,
+    bindings: {
+      harness: {
+        kind: "worker",
+        config: { worker: "claude-code@1", instance_count: 1 },
+      },
+      [CONVERSATION_BINDING]: {
+        kind: "conversation",
+        config: {
+          available: true,
+          platform: "github",
+          repository: CONVERSATION_REPOSITORY,
+          credential: "github",
+          link_trust: { actor_ids: [TRUSTED_ACTOR] },
+        },
+      },
+    },
+  });
+  const bindings = await session.read<{
+    items: { id: string; name: string }[];
+  }>(["project", "binding", "list", project.id]);
+  const binding = bindings.items.find(
+    (item) => item.name === CONVERSATION_BINDING,
+  );
+  assert.ok(binding);
+  const created = await session.write<{ revisions: { node_id: string }[] }>(
+    ["mission", "node", "create", mission.id],
+    {
+      filename: "link.md",
+      content: {
+        name: "Follow the thread",
+        requirement: "Follow the thread",
+        criterion: "The thread is followed",
+        verifications: ["true"],
+        bindings: [binding.id],
+        intent: "examine",
+        external_links: [LINK],
+      },
+      tasks: [],
+      reason: "plan",
+      expected_mission_version: mission.version,
+    },
+  );
+  const nodeId = created.revisions[FIRST_ITEM]!.node_id;
+  const insert = fixture.store.database.prepare(
+    "INSERT INTO mission_link_update (id, mission_id, external_link, update_key, inbound_event_id, actor_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  );
+  for (const [actor, occurredAt] of [
+    [OTHER_ACTOR, FIRST_OCCURRED_AT],
+    [TRUSTED_ACTOR, SECOND_OCCURRED_AT],
+  ] as const)
+    insert.run(
+      createIdentity("link_update"),
+      mission.id,
+      canonicalJSON(LINK),
+      `issue_comment:${occurredAt}`,
+      createIdentity("inbound_event"),
+      actor,
+      occurredAt,
+    );
+  const page = await session.read<{
+    items: { actor_id: string; external_link: unknown; new: boolean }[];
+    next_cursor: string | null;
+  }>(["mission", "link-update", "list", nodeId]);
+  assert.deepEqual(
+    page.items.map((item) => item.actor_id),
+    [TRUSTED_ACTOR],
+  );
+  assert.deepEqual(page.items[FIRST_ITEM]?.external_link, LINK);
+  assert.equal(page.items[FIRST_ITEM]?.new, true);
+  assert.equal(page.next_cursor, null);
 });

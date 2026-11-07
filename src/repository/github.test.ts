@@ -653,6 +653,8 @@ test("the token reaches no failure and no log record", async (t) => {
 const HEAD_SHA = "89abcdef0123456789abcdef0123456789abcdef";
 const OLDER_SHA = "fedcba9876543210fedcba9876543210fedcba98";
 const NO_REVIEWS: unknown[] = [];
+const NO_TRUSTED: string[] = [];
+const TRUSTED_REVIEWERS = ["1", "2", "3"];
 const NO_CHECKS = { head_commit: HEAD_SHA, pending: [], failed: [] };
 const FAILED_AT_HEAD = {
   head_commit: HEAD_SHA,
@@ -916,6 +918,7 @@ test("foldPullRequest folds the three states of a pull request", () => {
       NO_REVIEWS,
       NO_CHECKS,
       merged,
+      NO_TRUSTED,
     ),
     { end_state: CheckEndState.Expected, landed_commits: [MERGE_COMMIT] },
   );
@@ -925,11 +928,18 @@ test("foldPullRequest folds the three states of a pull request", () => {
       NO_REVIEWS,
       NO_CHECKS,
       merged,
+      NO_TRUSTED,
     ),
     { end_state: CheckEndState.Other, landed_commits: [] },
   );
   assert.deepEqual(
-    github.foldPullRequest(PULL_REQUEST_BODY, NO_REVIEWS, NO_CHECKS, merged),
+    github.foldPullRequest(
+      PULL_REQUEST_BODY,
+      NO_REVIEWS,
+      NO_CHECKS,
+      merged,
+      NO_TRUSTED,
+    ),
     {
       end_state: CheckEndState.None,
       landed_commits: [],
@@ -941,10 +951,17 @@ test("foldPullRequest folds the three states of a pull request", () => {
       NO_REVIEWS,
       NO_CHECKS,
       ExpectedEndState.BaseBranchPushed,
+      NO_TRUSTED,
     ),
   );
   assert.throws(() =>
-    github.foldPullRequest({ number: 7 }, NO_REVIEWS, NO_CHECKS, merged),
+    github.foldPullRequest(
+      { number: 7 },
+      NO_REVIEWS,
+      NO_CHECKS,
+      merged,
+      NO_TRUSTED,
+    ),
   );
   assert.throws(
     () =>
@@ -953,6 +970,7 @@ test("foldPullRequest folds the three states of a pull request", () => {
         NO_REVIEWS,
         NO_CHECKS,
         merged,
+        NO_TRUSTED,
       ),
     { name: "ZodError" },
   );
@@ -1605,6 +1623,7 @@ test("an open pull request with merge conflicts folds to the conflict end state"
       NO_REVIEWS,
       NO_CHECKS,
       ExpectedEndState.PullRequestMerged,
+      NO_TRUSTED,
     ).end_state,
     CheckEndState.Conflict,
   );
@@ -1614,6 +1633,7 @@ test("an open pull request with merge conflicts folds to the conflict end state"
       NO_REVIEWS,
       NO_CHECKS,
       ExpectedEndState.PullRequestMerged,
+      NO_TRUSTED,
     ).end_state,
     CheckEndState.None,
   );
@@ -1623,6 +1643,7 @@ test("an open pull request with merge conflicts folds to the conflict end state"
       NO_REVIEWS,
       NO_CHECKS,
       ExpectedEndState.PullRequestMerged,
+      NO_TRUSTED,
     ).end_state,
     CheckEndState.None,
   );
@@ -1677,6 +1698,7 @@ test("a pull request whose first read holds a null mergeable and whose second re
       NO_REVIEWS,
       NO_CHECKS,
       ExpectedEndState.PullRequestMerged,
+      NO_TRUSTED,
     ).end_state,
     CheckEndState.Conflict,
   );
@@ -1697,6 +1719,7 @@ test("a null mergeable after the third read folds to none", async (t) => {
       NO_REVIEWS,
       NO_CHECKS,
       ExpectedEndState.PullRequestMerged,
+      NO_TRUSTED,
     ).end_state,
     CheckEndState.None,
   );
@@ -1731,7 +1754,12 @@ test("a deadline that leaves less time than the delay ends the reads", async (t)
 });
 
 function review(reviewer: number, state: string, commit = HEAD_SHA) {
-  return { id: reviewer, user: { id: reviewer }, state, commit_id: commit };
+  return {
+    id: reviewer,
+    user: { id: reviewer, type: "User" },
+    state,
+    commit_id: commit,
+  };
 }
 
 function decision(reviews: unknown[], body: object = PULL_REQUEST_BODY) {
@@ -1740,6 +1768,7 @@ function decision(reviews: unknown[], body: object = PULL_REQUEST_BODY) {
     reviews,
     NO_CHECKS,
     ExpectedEndState.PullRequestMerged,
+    TRUSTED_REVIEWERS,
   ).end_state;
 }
 
@@ -1753,6 +1782,7 @@ function foldWithChecks(
     reviews,
     checks,
     ExpectedEndState.PullRequestMerged,
+    TRUSTED_REVIEWERS,
   ).end_state;
 }
 
@@ -1870,6 +1900,7 @@ test("an open pull request without a head commit or with a malformed review list
         {},
         NO_CHECKS,
         ExpectedEndState.PullRequestMerged,
+        NO_TRUSTED,
       ),
     { name: "ZodError" },
   );
@@ -1948,7 +1979,7 @@ function changeRequestServer(
 test("getChangeRequests answers the current change requests with their review comments", async (t) => {
   const login = (reviewer: number) => ({
     ...review(reviewer, ReviewState.ChangesRequested),
-    user: { id: reviewer, login: `reviewer-${reviewer}` },
+    user: { id: reviewer, login: `reviewer-${reviewer}`, type: "User" },
     body: `fix ${reviewer}`,
     submitted_at: "2026-10-12T00:00:00Z",
   });
@@ -1970,7 +2001,12 @@ test("getChangeRequests answers the current change requests with their review co
     ),
   );
   const github = new GitHubPlatform({ baseUrl: server.baseUrl });
-  const result = await github.getChangeRequests(call(), TARGET, { number: 7 });
+  const result = await github.getChangeRequests(
+    call(),
+    TARGET,
+    { number: 7 },
+    TRUSTED_REVIEWERS,
+  );
   assert.deepEqual(result, {
     ok: true,
     value: {
@@ -2005,11 +2041,11 @@ test("getChangeRequests answers a failure for a failed call or an unreadable bod
   );
   const refused = await new GitHubPlatform({
     baseUrl: failing.baseUrl,
-  }).getChangeRequests(call(), TARGET, { number: 7 });
+  }).getChangeRequests(call(), TARGET, { number: 7 }, TRUSTED_REVIEWERS);
   assert.equal(!refused.ok && refused.class, ResultClass.FinalRefusal);
   const changes = {
     ...review(1, ReviewState.ChangesRequested),
-    user: { id: 1, login: "reviewer-1" },
+    user: { id: 1, login: "reviewer-1", type: "User" },
   };
   for (const [reviews, comments] of [
     [[{ ...changes, id: "one" }], {}],
@@ -2022,7 +2058,7 @@ test("getChangeRequests answers a failure for a failed call or an unreadable bod
     );
     const unread = await new GitHubPlatform({
       baseUrl: server.baseUrl,
-    }).getChangeRequests(call(), TARGET, { number: 7 });
+    }).getChangeRequests(call(), TARGET, { number: 7 }, TRUSTED_REVIEWERS);
     assert.equal(unread.ok, false);
   }
 });
@@ -2794,5 +2830,93 @@ test("githubConversationCheckpointSchema loads a missing comments_etag as null",
   );
   assert.ok(
     !githubConversationCheckpointSchema.safeParse({ comments_etag: 1 }).success,
+  );
+});
+
+const TRUSTED_ID = 9;
+const UNTRUSTED_ID = 7;
+const BOT_ID = 5;
+const TRUSTED_ONLY = [String(TRUSTED_ID)];
+const USER_TYPE = "User";
+const BOT_TYPE = "Bot";
+
+function reviewOf(reviewer: number, type: string) {
+  return {
+    ...review(reviewer, ReviewState.ChangesRequested),
+    user: { id: reviewer, login: `user-${reviewer}`, type },
+    body: `fix ${reviewer}`,
+    submitted_at: "2026-10-12T00:00:00Z",
+  };
+}
+
+async function reviewersOf(
+  t: TestContext,
+  reviews: object[],
+  trusted: string[],
+) {
+  const server = await platform(
+    t,
+    changeRequestServer(reviews, {
+      [`${REVIEWS_PATH}/${TRUSTED_ID}/comments`]: [],
+    }),
+  );
+  const result = await new GitHubPlatform({
+    baseUrl: server.baseUrl,
+  }).getChangeRequests(call(), TARGET, { number: 7 }, trusted);
+  assert.ok(result.ok);
+  return result.value.change_requests.map((item) => item.reviewer);
+}
+
+test("getChangeRequests keeps the change request of a trusted user and drops an untrusted user and a bot", async (t) => {
+  assert.deepEqual(
+    await reviewersOf(
+      t,
+      [
+        reviewOf(TRUSTED_ID, USER_TYPE),
+        reviewOf(UNTRUSTED_ID, USER_TYPE),
+        reviewOf(BOT_ID, BOT_TYPE),
+      ],
+      TRUSTED_ONLY,
+    ),
+    [`user-${TRUSTED_ID}`],
+  );
+});
+
+test("getChangeRequests drops a bot review of a trusted id and trusts nobody without link_trust", async (t) => {
+  assert.deepEqual(
+    await reviewersOf(t, [reviewOf(TRUSTED_ID, BOT_TYPE)], TRUSTED_ONLY),
+    [],
+  );
+  assert.deepEqual(
+    await reviewersOf(t, [reviewOf(TRUSTED_ID, USER_TYPE)], NO_TRUSTED),
+    [],
+  );
+});
+
+test("foldPullRequest counts the change request of a trusted user and ignores an untrusted user and a bot", () => {
+  const github = new GitHubPlatform();
+  const fold = (reviews: unknown[], trusted: string[]) =>
+    github.foldPullRequest(
+      PULL_REQUEST_BODY,
+      reviews,
+      NO_CHECKS,
+      ExpectedEndState.PullRequestMerged,
+      trusted,
+    ).end_state;
+  assert.equal(
+    fold([reviewOf(TRUSTED_ID, USER_TYPE)], TRUSTED_ONLY),
+    CheckEndState.Other,
+  );
+  assert.equal(
+    fold([reviewOf(UNTRUSTED_ID, USER_TYPE)], TRUSTED_ONLY),
+    CheckEndState.None,
+  );
+  assert.equal(
+    fold([reviewOf(TRUSTED_ID, BOT_TYPE)], TRUSTED_ONLY),
+    CheckEndState.None,
+  );
+  assert.equal(
+    fold([reviewOf(TRUSTED_ID, USER_TYPE)], NO_TRUSTED),
+    CheckEndState.None,
   );
 });

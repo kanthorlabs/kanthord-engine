@@ -240,6 +240,7 @@ export type RequestFacts = {
   address: PlatformAddressFacts;
   repository: RepositoryFacts;
   human_landing: boolean;
+  link_trust: { actor_ids: string[] };
 };
 export type AssetFacts = {
   storage: {

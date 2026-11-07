@@ -28,6 +28,8 @@ import { ResultClass } from "../../worker/contract.ts";
 import { S3Platform } from "../../storage/s3.ts";
 import { createHash } from "node:crypto";
 
+const NO_TRUSTED: string[] = [];
+const TRUSTED_REVIEWERS = ["1"];
 const KEY = "prefix#tag?query%2F space/é/project/mission/node/1/asset";
 const BYTES = "hello";
 const LIFETIME = 3600000;
@@ -111,6 +113,7 @@ test("fake GitHub serves the pull-request routes and records each call", async (
       [],
       NO_CHECKS,
       "pull_request_merged",
+      NO_TRUSTED,
     ),
     {
       end_state: CheckEndState.Expected,
@@ -168,8 +171,13 @@ test("fake GitHub closes a pull request and scripts the failures", async (t) => 
   });
   assert.ok(closed.ok);
   assert.equal(
-    platform.foldPullRequest(closed.value, [], NO_CHECKS, "pull_request_merged")
-      .end_state,
+    platform.foldPullRequest(
+      closed.value,
+      [],
+      NO_CHECKS,
+      "pull_request_merged",
+      NO_TRUSTED,
+    ).end_state,
     CheckEndState.Other,
   );
   gitHub.failPulls(HttpStatus.ServiceUnavailable);
@@ -196,8 +204,13 @@ test("fake GitHub opens a pull request without a recorded call", async (t) => {
   });
   assert.ok(opened.ok);
   assert.equal(
-    platform.foldPullRequest(opened.value, [], NO_CHECKS, "pull_request_merged")
-      .end_state,
+    platform.foldPullRequest(
+      opened.value,
+      [],
+      NO_CHECKS,
+      "pull_request_merged",
+      NO_TRUSTED,
+    ).end_state,
     CheckEndState.ChecksPending,
   );
   assert.equal(gitHub.calls.length, ONE_CALL);
@@ -223,6 +236,7 @@ test("fake GitHub serves the reviews of a pull request at its head commit", asyn
       reviews.value,
       checks.value,
       "pull_request_merged",
+      TRUSTED_REVIEWERS,
     ).end_state;
   };
   assert.equal(await fold(), CheckEndState.None);
@@ -247,9 +261,12 @@ test("fake GitHub serves the comments of a review for the change request read", 
     body: "fix the name",
     comments,
   });
-  const read = await platform.getChangeRequests(gitHubCall(), target, {
-    number,
-  });
+  const read = await platform.getChangeRequests(
+    gitHubCall(),
+    target,
+    { number },
+    TRUSTED_REVIEWERS,
+  );
   assert.ok(read.ok);
   assert.equal(read.value.change_requests.length, ONE_CHANGE_REQUEST);
   assert.deepEqual(read.value.change_requests[0], {

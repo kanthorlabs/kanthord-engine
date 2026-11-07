@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
+import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
@@ -9,6 +10,9 @@ import {
   type AssessmentResult,
   type AssetKind,
   type EndState,
+  LINK_UPDATE_IDENTITY_PREFIX,
+  type LinkUpdateRow,
+  linkUpdateRowSchema,
   NodeState,
   type PromptCommits,
   promptCommitsSchema,
@@ -76,6 +80,31 @@ export interface OutcomeRow {
   assessment_id: string;
   evidence_ids: string;
   created_at: number;
+}
+
+export function insertLinkUpdate(
+  tx: Transaction,
+  update: Omit<LinkUpdateRow, "id">,
+): string {
+  assert.ok(tx.database.isTransaction);
+  const row = linkUpdateRowSchema.parse({
+    id: createIdentity(LINK_UPDATE_IDENTITY_PREFIX),
+    ...update,
+  });
+  tx.database
+    .prepare(
+      "INSERT INTO mission_link_update (id, mission_id, external_link, update_key, inbound_event_id, actor_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(
+      row.id,
+      row.mission_id,
+      row.external_link,
+      row.update_key,
+      row.inbound_event_id,
+      row.actor_id,
+      row.occurred_at,
+    );
+  return row.id;
 }
 
 function canonicalSet(value: string): string {
