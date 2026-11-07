@@ -44,6 +44,12 @@ const NOT_MODIFIED_STATUS = 304;
 const EVENT_PAGE_SIZE = 100;
 const CLOSED_PULL_REQUEST_PAGE_SIZE = 100;
 const CLOSED_PULL_REQUEST_EVENT_TYPE = "pull_request_closed";
+const ISSUE_COMMENT_PAGE_SIZE = 100;
+const ISSUE_COMMENT_LISTED_EVENT_TYPE = "issue_comment_listed";
+const ISSUE_COMMENT_KEY_PREFIX = "issue_comment:";
+const MIN_POSITIVE_ID = 1;
+const LAST_LINK_PATTERN =
+  /<[^>]*[?&]page=([1-9][0-9]*)(?:&[^>]*)?>\s*;\s*rel="last"/;
 const REVIEW_PAGE_SIZE = 100;
 const REVIEW_PAGE_LIMIT = 30;
 const NO_CHANGE_REQUESTS = 0;
@@ -55,6 +61,8 @@ const BRANCH_RULES_ROUTE = "GET /repos/{owner}/{repo}/rules/branches/{branch}";
 const CHECK_RUNS_ROUTE = "GET /repos/{owner}/{repo}/commits/{ref}/check-runs";
 const COMMIT_STATUSES_ROUTE =
   "GET /repos/{owner}/{repo}/commits/{ref}/statuses";
+const ISSUE_COMMENTS_ROUTE =
+  "GET /repos/{owner}/{repo}/issues/{issue_number}/comments";
 const REQUIRED_STATUS_CHECKS_RULE = "required_status_checks";
 const EVENT_ID_PATTERN = /^(0|[1-9][0-9]*)$/;
 const MIN_JSON_LENGTH = 1;
@@ -153,6 +161,13 @@ export const githubCheckpointSchema = z.object({
   pulls_etag: z.string().nullable().default(null),
 });
 export type GitHubCheckpoint = z.infer<typeof githubCheckpointSchema>;
+
+export const githubConversationCheckpointSchema = z.object({
+  comments_etag: z.string().nullable().default(null),
+});
+export type GitHubConversationCheckpoint = z.infer<
+  typeof githubConversationCheckpointSchema
+>;
 
 export interface GitHubEvent {
   id: string;
@@ -287,6 +302,18 @@ const closedPullRequestListSchema = z.array(
     closed_at: z.string().min(MIN_JSON_LENGTH),
   }),
 );
+
+const listedIssueCommentListSchema = z.array(
+  z.looseObject({
+    id: z.int().min(MIN_POSITIVE_ID),
+    issue_url: z.string(),
+  }),
+);
+const postedIssueCommentSchema = z.looseObject({
+  id: z.int().min(MIN_POSITIVE_ID),
+  user: z.looseObject({ id: z.int() }).nullish(),
+});
+const tokenAccountSchema = z.looseObject({ id: z.int().min(MIN_POSITIVE_ID) });
 
 const createdPullRequestSchema = z.looseObject({ number: z.int() });
 const pullRequestListSchema = z.array(z.looseObject({ number: z.int() }));
@@ -702,6 +729,37 @@ function canonicalEventBody(event: object): Uint8Array | null {
     }
     throw error;
   }
+}
+
+function issueCommentEventsOf(data: unknown): GitHubEvent[] | null {
+  const listed = listedIssueCommentListSchema.safeParse(data);
+  if (!listed.success) {
+    return null;
+  }
+  const events: GitHubEvent[] = [];
+  for (const item of listed.data) {
+    const body = canonicalEventBody(item);
+    if (body === null) {
+      return null;
+    }
+    events.push({
+      id: ISSUE_COMMENT_KEY_PREFIX + item.id,
+      type: ISSUE_COMMENT_LISTED_EVENT_TYPE,
+      body,
+    });
+  }
+  assert.equal(events.length, listed.data.length);
+  return events;
+}
+
+function lastPageOf(link: string | null): number | null {
+  assert.ok(link === null || isString(link));
+  if (link === null) return null;
+  for (const part of link.split(",")) {
+    const page = LAST_LINK_PATTERN.exec(part)?.[1];
+    if (page !== undefined) return Number(page);
+  }
+  return null;
 }
 
 function currentChangeRequests<R extends Review>(
@@ -1218,6 +1276,106 @@ export class GitHubPlatform {
       : answer;
   }
 
+  async listIssueComments(
+    call: GitHubCall,
+    target: GitHubTarget,
+    query: { etag: string | null },
+  ): Promise<GitHubAnswer<GitHubEventsAnswer>> {
+    assert.ok(call.token.length >= MIN_TOKEN_LENGTH);
+    assert.ok(Number.isFinite(call.deadlineAt));
+    const answer = await this.#exchange(call, target, {
+      kind: CallKind.Read,
+      route: "GET /repos/{owner}/{repo}/issues/comments",
+      parameters: {
+        sort: "updated",
+        direction: "desc",
+        per_page: ISSUE_COMMENT_PAGE_SIZE,
+      },
+      headers:
+        query.etag === null ? {} : { [IF_NONE_MATCH_HEADER]: query.etag },
+    });
+    return answer.ok
+      ? batchAnswerOf(answer.value, issueCommentEventsOf)
+      : answer;
+  }
+
+  async listIssueCommentsOf(
+    call: GitHubCall,
+    target: GitHubTarget,
+    number: number,
+  ): Promise<GitHubAnswer<GitHubEvent[]>> {
+    assert.ok(
+      Number.isSafeInteger(number) && number >= MIN_PULL_REQUEST_NUMBER,
+    );
+    const read = (page: number) =>
+      this.#exchange(call, target, {
+        kind: CallKind.Read,
+        route: ISSUE_COMMENTS_ROUTE,
+        parameters: {
+          issue_number: number,
+          per_page: ISSUE_COMMENT_PAGE_SIZE,
+          ...(page === FIRST_PAGE ? {} : { page }),
+        },
+      });
+    const first = await read(FIRST_PAGE);
+    if (!first.ok) return first;
+    const last = lastPageOf(first.value.link);
+    const second =
+      last === null || last <= FIRST_PAGE ? null : await read(last);
+    if (second !== null && !second.ok) return second;
+    const pages = [first.value, ...(second === null ? [] : [second.value])];
+    if (!pages.every((page) => Array.isArray(page.data)))
+      return unreadableBody(CallKind.Read);
+    const events = issueCommentEventsOf(
+      pages.flatMap((page) => page.data as unknown[]),
+    );
+    return events === null
+      ? unreadableBody(CallKind.Read)
+      : { ok: true, value: events };
+  }
+
+  async postIssueComment(
+    call: GitHubCall,
+    target: GitHubTarget,
+    number: number,
+    body: string,
+  ): Promise<GitHubAnswer<{ update_key: string; actor_id: string | null }>> {
+    assert.ok(
+      Number.isSafeInteger(number) && number >= MIN_PULL_REQUEST_NUMBER,
+    );
+    const answer = await this.send(call, target, {
+      kind: CallKind.Write,
+      route: "POST /repos/{owner}/{repo}/issues/{issue_number}/comments",
+      parameters: { issue_number: number, body },
+    });
+    if (!answer.ok) return answer;
+    const posted = postedIssueCommentSchema.safeParse(answer.value);
+    if (!posted.success) return unreadableBody(CallKind.Write);
+    const actor = posted.data.user?.id;
+    return {
+      ok: true,
+      value: {
+        update_key: ISSUE_COMMENT_KEY_PREFIX + posted.data.id,
+        actor_id: actor === undefined ? null : String(actor),
+      },
+    };
+  }
+
+  async readTokenAccount(call: GitHubCall): Promise<GitHubAnswer<string>> {
+    assert.ok(call.token.length >= MIN_TOKEN_LENGTH);
+    assert.ok(Number.isFinite(call.deadlineAt));
+    const answer = await this.#read(call, null, {
+      kind: CallKind.Read,
+      route: "GET /user",
+      parameters: {},
+    });
+    if (!answer.ok) return answer;
+    const account = tokenAccountSchema.safeParse(answer.value.data);
+    return account.success
+      ? { ok: true, value: String(account.data.id) }
+      : unreadableBody(CallKind.Read);
+  }
+
   foldPullRequest(
     body: unknown,
     reviews: unknown,
@@ -1261,7 +1419,7 @@ export class GitHubPlatform {
 
   async #read(
     call: GitHubCall,
-    repository: GitHubRepository,
+    repository: GitHubRepository | null,
     request: GitHubRequest,
   ): Promise<GitHubAnswer<Exchange>> {
     let attempt: Attempt = await this.#attempt(call, repository, request);
@@ -1283,7 +1441,7 @@ export class GitHubPlatform {
 
   async #attempt(
     call: GitHubCall,
-    repository: GitHubRepository,
+    repository: GitHubRepository | null,
     request: GitHubRequest,
   ): Promise<Attempt> {
     const remaining = call.deadlineAt - Date.now();
@@ -1553,5 +1711,221 @@ function branchPushAddress(
     resource_identity: RESOURCE_IDENTITY_PREFIX + resource,
     branch,
     commit,
+  };
+}
+
+export const DecodedLinkKind = {
+  GitHubIssue: "github_issue",
+} as const;
+
+export interface DecodedExternalLink {
+  kind: typeof DecodedLinkKind.GitHubIssue;
+  resource_identity: string;
+  number: number;
+}
+
+export interface DecodedLinkUpdate {
+  external_link: DecodedExternalLink;
+  update_key: string;
+  actor_id: string | null;
+  actor_automated: boolean;
+  occurred_at: number;
+  mentions: string[];
+}
+
+export interface DescribedGitHubEvent {
+  author: string;
+  body: string;
+  url: string;
+  occurred_at: number;
+}
+
+export interface GitHubLinkUpdateInput {
+  resource_identity: string;
+  event: Uint8Array;
+  metadata: unknown;
+}
+
+const CONVERSATION_IDENTITY_PREFIX = "conversation:github:";
+const ISSUE_COMMENT_CREATED_ACTION = "created";
+const USER_ACCOUNT_TYPE = "User";
+const BOT_LOGIN_SUFFIX = "[bot]";
+const MENTION_LIMIT = 50;
+const ISSUE_URL_PATH_PATTERN =
+  /^\/repos\/([^/]+\/[^/]+)\/issues\/([1-9][0-9]*)(?![\s\S])/;
+const MENTION_PATTERN =
+  /(?<![A-Za-z0-9_])@([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))(?![A-Za-z0-9_-])/g;
+const FENCE_PATTERN = /^ {0,3}(`{3,}|~{3,})/;
+const CODE_SPAN_PATTERN = /(`+)(?:(?!\1)[\s\S])*?(?<!`)\1(?!`)/g;
+const LINE_BREAK = "\n";
+
+const IssueCommentEventType = {
+  Webhook: "issue_comment",
+  Listed: ISSUE_COMMENT_LISTED_EVENT_TYPE,
+} as const;
+
+const issueCommentSchema = z.looseObject({
+  id: z.int().min(MIN_POSITIVE_ID),
+  user: z
+    .looseObject({
+      id: z.int().nullish(),
+      login: z.string().optional(),
+      type: z.string().optional(),
+    })
+    .nullish(),
+  body: z.string().nullish(),
+  created_at: z.iso.datetime({ offset: true }),
+  html_url: z.string().optional(),
+  performed_via_github_app: z.unknown(),
+});
+type IssueComment = z.infer<typeof issueCommentSchema>;
+
+const issueCommentWebhookSchema = z.looseObject({
+  action: z.string(),
+  issue: z.looseObject({ number: z.int().min(MIN_POSITIVE_ID) }),
+  comment: issueCommentSchema,
+  repository: webhookRepositorySchema,
+});
+const listedIssueCommentSchema = issueCommentSchema.extend({
+  issue_url: z.string(),
+});
+
+interface ParsedIssueComment {
+  repository: string;
+  number: number;
+  comment: IssueComment;
+}
+
+function issueOfUrl(
+  url: string,
+): { repository: string; number: number } | null {
+  assert.ok(isString(url));
+  if (!URL.canParse(url)) return null;
+  const match = ISSUE_URL_PATH_PATTERN.exec(new URL(url).pathname);
+  const repository = match?.[1];
+  const number = Number(match?.[2]);
+  if (repository === undefined || !Number.isSafeInteger(number)) return null;
+  return { repository, number };
+}
+
+function webhookIssueComment(body: unknown): ParsedIssueComment | null {
+  const parsed = issueCommentWebhookSchema.safeParse(body);
+  if (!parsed.success || parsed.data.action !== ISSUE_COMMENT_CREATED_ACTION) {
+    return null;
+  }
+  return {
+    repository: parsed.data.repository.full_name,
+    number: parsed.data.issue.number,
+    comment: parsed.data.comment,
+  };
+}
+
+function listedIssueComment(body: unknown): ParsedIssueComment | null {
+  const parsed = listedIssueCommentSchema.safeParse(body);
+  if (!parsed.success) return null;
+  const issue = issueOfUrl(parsed.data.issue_url);
+  return issue === null ? null : { ...issue, comment: parsed.data };
+}
+
+const ISSUE_COMMENT_DECODERS: ReadonlyMap<
+  string,
+  (body: unknown) => ParsedIssueComment | null
+> = new Map([
+  [IssueCommentEventType.Webhook, webhookIssueComment],
+  [IssueCommentEventType.Listed, listedIssueComment],
+]);
+
+function parsedIssueCommentOf(
+  event: Uint8Array,
+  metadata: unknown,
+): ParsedIssueComment | null {
+  assert.ok(event instanceof Uint8Array);
+  const parsedMetadata = eventMetadataSchema.safeParse(metadata);
+  if (!parsedMetadata.success) return null;
+  const decoder = ISSUE_COMMENT_DECODERS.get(parsedMetadata.data.event);
+  const body = decoder === undefined ? null : eventBodyOf(event);
+  if (decoder === undefined || body === null) return null;
+  return decoder(body.value);
+}
+
+function withoutFencedBlocks(text: string): string {
+  const kept: string[] = [];
+  let fence: string | null = null;
+  for (const line of text.split(LINE_BREAK)) {
+    const marker = FENCE_PATTERN.exec(line)?.[1];
+    if (fence === null) {
+      if (marker === undefined) kept.push(line);
+      else fence = marker;
+      continue;
+    }
+    const closes =
+      marker !== undefined &&
+      marker.startsWith(fence.charAt(0)) &&
+      marker.length >= fence.length;
+    if (closes) fence = null;
+  }
+  return kept.join(LINE_BREAK);
+}
+
+function mentionsOf(body: string): string[] {
+  assert.ok(isString(body));
+  const prose = withoutFencedBlocks(body).replace(CODE_SPAN_PATTERN, " ");
+  const logins = new Set<string>();
+  for (const match of prose.matchAll(MENTION_PATTERN)) {
+    if (logins.size >= MENTION_LIMIT) break;
+    logins.add((match[1] ?? "").toLowerCase());
+  }
+  return [...logins];
+}
+
+function isAutomated(comment: IssueComment): boolean {
+  const { user } = comment;
+  return (
+    user?.type !== USER_ACCOUNT_TYPE ||
+    (user.login ?? "").endsWith(BOT_LOGIN_SUFFIX) ||
+    (comment.performed_via_github_app ?? null) !== null
+  );
+}
+
+export function decodeGitHubLinkUpdate(
+  input: GitHubLinkUpdateInput,
+): DecodedLinkUpdate | null {
+  assert.ok(isString(input.resource_identity));
+  if (!input.resource_identity.startsWith(CONVERSATION_IDENTITY_PREFIX))
+    return null;
+  const resource = input.resource_identity.slice(
+    CONVERSATION_IDENTITY_PREFIX.length,
+  );
+  const parsed = parsedIssueCommentOf(input.event, input.metadata);
+  if (parsed === null || parsed.repository !== resource) return null;
+  const { comment } = parsed;
+  const actor = comment.user?.id;
+  return {
+    external_link: {
+      kind: DecodedLinkKind.GitHubIssue,
+      resource_identity: input.resource_identity,
+      number: parsed.number,
+    },
+    update_key: ISSUE_COMMENT_KEY_PREFIX + comment.id,
+    actor_id: actor == null ? null : String(actor),
+    actor_automated: isAutomated(comment),
+    occurred_at: Date.parse(comment.created_at),
+    mentions: mentionsOf(comment.body ?? ""),
+  };
+}
+
+export function describeGitHubEvent(input: {
+  event: Uint8Array;
+  metadata: unknown;
+}): DescribedGitHubEvent | null {
+  const parsed = parsedIssueCommentOf(input.event, input.metadata);
+  const author = parsed?.comment.user?.login;
+  const url = parsed?.comment.html_url;
+  if (parsed === null || author === undefined || url === undefined) return null;
+  return {
+    author,
+    body: parsed.comment.body ?? "",
+    url,
+    occurred_at: Date.parse(parsed.comment.created_at),
   };
 }
