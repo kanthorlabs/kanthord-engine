@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { identitySchema } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
+import { readMissionByProject } from "./store.ts";
 import {
   type AdmissionAnswer,
   AdmissionRefusal,
   AssetKind,
+  type DecodedLinkUpdate,
   Disposition,
+  externalLinkSchema,
   type PlatformAddress,
   PlatformAddressKind,
   platformAddressSchema,
@@ -19,10 +22,15 @@ const projectIdSchema = identitySchema("project");
 export const MatchKind = {
   Request: "request",
   Answer: "answer",
+  Link: "link",
 } as const;
 
 export type RequestMatch =
   | { kind: typeof MatchKind.Request; evidence_id: string }
+  | { kind: typeof MatchKind.Answer; answer: AdmissionAnswer };
+
+export type LinkUpdateMatch =
+  | { kind: typeof MatchKind.Link; mission_id: string; external_link: string }
   | { kind: typeof MatchKind.Answer; answer: AdmissionAnswer };
 
 interface MatchRow {
@@ -71,6 +79,49 @@ export function matchRequests(
   return refused(AdmissionRefusal.Unmatched);
 }
 
+export function matchLinkUpdate(
+  tx: Transaction,
+  projectId: string,
+  update: DecodedLinkUpdate,
+): LinkUpdateMatch {
+  assert.ok(projectIdSchema.safeParse(projectId).success);
+  const mission = readMissionByProject(tx, projectId);
+  if (mission === null) return refused(AdmissionRefusal.Unmatched);
+  const externalLink = canonicalJSON(
+    externalLinkSchema.parse(update.external_link),
+  );
+  const recorded = tx.database
+    .prepare(
+      "SELECT 1 FROM mission_link_update WHERE mission_id = ? AND external_link = ? AND update_key = ?",
+    )
+    .get(mission.id, externalLink, update.update_key);
+  if (recorded !== undefined)
+    return {
+      kind: MatchKind.Answer,
+      answer: { disposition: Disposition.Duplicate, reason: null },
+    };
+  const linked = tx.database
+    .prepare(
+      `SELECT 1 FROM mission_node n
+       JOIN mission_node_revision r ON r.node_id = n.id
+         AND r.revision = (
+           SELECT MAX(latest.revision) FROM mission_node_revision latest
+           WHERE latest.node_id = n.id
+         )
+       WHERE n.mission_id = ? AND n.retired_at IS NULL
+         AND EXISTS (
+           SELECT 1 FROM json_each(r.external_links) link WHERE link.value = ?
+         )`,
+    )
+    .get(mission.id, externalLink);
+  if (linked === undefined) return refused(AdmissionRefusal.Unmatched);
+  return {
+    kind: MatchKind.Link,
+    mission_id: mission.id,
+    external_link: externalLink,
+  };
+}
+
 function unresolvedRequestAddresses(
   tx: Transaction,
   projectId: string,
@@ -117,7 +168,10 @@ export function unresolvedRequestCount(
   ).length;
 }
 
-function refused(reason: AdmissionRefusal): RequestMatch {
+function refused(reason: AdmissionRefusal): {
+  kind: typeof MatchKind.Answer;
+  answer: AdmissionAnswer;
+} {
   assert.ok(Object.values(AdmissionRefusal).includes(reason));
   return {
     kind: MatchKind.Answer,

@@ -353,7 +353,10 @@ export function missionHarness(
       merge: unexpectedCollaboration,
     },
     intakeGateFiles: { read: async () => ({ paths: [] }) },
-    decoder: { decode: unexpectedCollaboration },
+    decoder: {
+      decode: unexpectedCollaboration,
+      decodeLinkUpdate: unexpectedCollaboration,
+    },
     config: {
       consecutive_failure_limit: CONSECUTIVE_FAILURE_LIMIT,
       further_work_limit: FURTHER_WORK_LIMIT,

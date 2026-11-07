@@ -58,7 +58,6 @@ import {
   projectOperations,
   type RepositoryConnector,
   type RepositoryFiles,
-  RepositoryPlatform,
 } from "../../project/contract.ts";
 import {
   type PoolPlacement,
@@ -145,6 +144,7 @@ import {
   WorkerService,
 } from "../../worker/index.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
+import { missionEventDecoder } from "./event-decoder.ts";
 import { ThreadDriver } from "./thread-driver.ts";
 import { ContainerDriver } from "./container-driver.ts";
 import { EnvironmentImages } from "./environment-image.ts";
@@ -173,7 +173,6 @@ import { loadPi } from "../../agent/pi.ts";
 import { PromptConsumer } from "../../agent/prompt-render.ts";
 import {
   checkServerRepositoryTools,
-  decodeGitHubEvent,
   type GitWriter,
   type HostKeySources,
   platformImplementations,
@@ -926,12 +925,7 @@ export function composeServices(options: {
         );
       },
     },
-    decoder: {
-      decode: ({ platform, resource, event, metadata }) =>
-        platform === RepositoryPlatform.GitHub
-          ? decodeGitHubEvent({ resource, event, metadata })
-          : null,
-    },
+    decoder: missionEventDecoder,
     intakeCheck: {
       check: async (context, evidenceId) =>
         resultOf(
