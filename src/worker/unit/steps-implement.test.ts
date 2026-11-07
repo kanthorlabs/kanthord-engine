@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { VERIFICATION_RERUNS } from "./verification.ts";
 import {
   SensitiveRule,
   SESSION_MARKER_PATTERN,
@@ -55,6 +56,7 @@ import { REPORT_MEDIA_TYPE } from "./steps-examine.ts";
 const TASK_VERIFIED = "task verified";
 const REVISION_COUNT_ATTRIBUTE = "kanthord.task.revision_count";
 const WALL_DEADLINE_MS = 300;
+const FAILING_RUNS_LAST = 1 + VERIFICATION_RERUNS + 1;
 
 function writeFile(content: string) {
   return fauxAssistantMessage(
@@ -105,7 +107,7 @@ async function rerouteReportOf(
   const count = join(temporary(t), "count");
   const routed = task(
     "routed",
-    `echo x >> ${count}; test "$(wc -l < ${count} | tr -d ' ')" != 2`,
+    `echo x >> ${count}; runs="$(wc -l < ${count} | tr -d ' ')"; test "$runs" -lt 2 || test "$runs" -gt ${FAILING_RUNS_LAST}`,
   );
   const other = task("other", "true");
   const h = await fixture(

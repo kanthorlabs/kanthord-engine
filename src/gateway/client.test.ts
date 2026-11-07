@@ -133,6 +133,7 @@ test("a closed port answers a new call as indeterminate at once", async () => {
     {
       type: OperationResultType.Indeterminate,
       idempotencyKey: IDEMPOTENCY_KEY,
+      closed: true,
     },
   );
 });

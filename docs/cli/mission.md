@@ -611,6 +611,8 @@ Follow these steps. Each step names the fields to read.
 - A review verification that fails and passes on a rerun at the same commit passes.
   The review keeps the passing result and records one suggestion `Flaky verification` with action `no`, which names each flaky command and the output of its failed run.
   A verification that fails on every rerun fails the review at the stage `verification`.
+  The coder release also passes a verification that fails and passes on a rerun at the same commit, and continues with the next command.
+  A release verification that fails on every rerun gives the coder a revision turn with the failed output.
 - The route of a finding states who acts on it: `fix` (KanthorD fixes it in a rework of the same attempt), `report` (a human reviews it) or `record` (information only).
   The status reads `fixed` when `fixed_assessment_id` names an assessment, and `open` otherwise.
   A finding waits for a human when its route is `report` and it holds no decision.

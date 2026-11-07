@@ -25,6 +25,7 @@ export {
   isExecutionEnd,
   EndReason,
   ExecutionEndKind,
+  ExecutionStop,
   type ExecutionEnd,
 } from "./execution-run.ts";
 export type { MethodClients } from "./method-clients.ts";

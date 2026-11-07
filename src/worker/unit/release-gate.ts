@@ -32,6 +32,7 @@ import {
   infrastructureStop,
   runVerificationsWithOutput,
   testedInputOf,
+  VERIFICATION_RERUNS,
   VerificationClass,
   verificationPassed,
   type VerificationRun,
@@ -43,6 +44,7 @@ import { SetupEnd, type SetupEntry, setUpHeads } from "./environment-setup.ts";
 
 const EXIT_SUCCESS = 0;
 const NOT_FOUND = -1;
+const NO_ITEMS = 0;
 const PARENT = "..";
 const RELEASE_GATE_RESULT = "kanthord.release_gate.result";
 const RELEASE_GATE_UNIT_ID = "kanthord.release_gate.unit_id";
@@ -130,6 +132,13 @@ async function gateRelease(
   }
   const stop = infrastructureStop(run) ?? environmentStop(run);
   if (stop) throw stop;
+  if (run.flaky_failures.length > NO_ITEMS)
+    state.run.log("verification flaky", {
+      flaky: run.flaky_failures.map((failure) => ({
+        index: failure.index,
+        command: failure.command,
+      })),
+    });
   const affected = checked.affected;
   note.verdict = affected?.verdict ?? null;
   const passed =
@@ -266,6 +275,7 @@ async function verifyInReleaseClones(
       directory,
       commands,
       copyRepeated: true,
+      reruns: VERIFICATION_RERUNS,
       tested_input: testedInput,
       deadline: state.agent.budget.wallDeadline(),
       context: state.run.operationContext,
