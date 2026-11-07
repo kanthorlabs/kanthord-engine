@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { background } from "../../kernel/context.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { ClosingEvent } from "../../mission/contract.ts";
+import { linkUpdatesText } from "./judgement.ts";
 import { ExecutionRun, ExecutionStop } from "./execution-run.ts";
 import {
   READ_PAGE_LIMIT,
@@ -11,6 +12,7 @@ import {
   readPrior,
   readRequestedChanges,
   readReworkAssessment,
+  VERDICT_LINK_UPDATE_LIMIT,
 } from "./node-reads.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { stopAfter } from "../../kernel/stop-test-support.ts";
@@ -24,7 +26,16 @@ const REPOSITORIES = [
   { binding_id: "binding_web", name: "web" },
 ];
 
+const NO_LINK_UPDATES = {
+  "execution.link_update.get": async () => ({
+    type: OperationResultType.Completed,
+    status: 200,
+    data: { items: [], next_cursor: null, total: 0 },
+  }),
+};
+
 const NO_FAILED_CHECKS = {
+  ...NO_LINK_UPDATES,
   "execution.failed_check.get": async () => ({
     type: OperationResultType.Completed,
     status: 200,
@@ -492,6 +503,7 @@ test("a cleared assessment with the result success is not instruction text", asy
 
 function failedCheckRead(failed: string[]) {
   return {
+    ...NO_LINK_UPDATES,
     "execution.failed_check.get": async () => ({
       type: OperationResultType.Completed,
       status: 200,
@@ -626,4 +638,120 @@ test("readPrior adds the open findings of the review round and the round of a re
     else assert.deepEqual(prior, { verdict: null, cleared: null });
   }
   assert.equal(reads, ONE_READ);
+});
+
+const LINK_UPDATE_READ = {
+  items: [
+    {
+      id: "link_update_1",
+      external_link: {
+        kind: "github_issue",
+        resource_identity: "conversation:github:octo/widgets",
+        number: 7,
+      },
+      update_key: "issue_comment:1",
+      occurred_at: 1760000000000,
+      new: true,
+      content: {
+        author: "octocat",
+        body: "Please also handle the empty list.",
+        url: "https://github.com/octo/widgets/issues/7#issuecomment-1",
+        occurred_at: 1760000000000,
+      },
+    },
+  ],
+  next_cursor: null,
+  total: 1,
+};
+
+function linkUpdateRead(requests: unknown[] = []) {
+  return {
+    "execution.link_update.get": async (input: unknown) => {
+      requests.push(input);
+      return {
+        type: OperationResultType.Completed,
+        status: 200,
+        data: LINK_UPDATE_READ,
+      };
+    },
+  };
+}
+
+test("a rework assessment and one update give the rationale, the separator and the link updates text", async (t) => {
+  const run = fixture(SECOND_ATTEMPT);
+  stopAfter(t, () => run.dispose());
+  const requests: unknown[] = [];
+  run.clients.mission = {
+    "execution.review_round.get": async () => reviewRound([]),
+    "execution.rework_assessment.get": async () => reworkRead(null),
+  } as unknown as MethodClients["mission"];
+  run.clients.worker = {
+    ...NO_FAILED_CHECKS,
+    ...linkUpdateRead(requests),
+  } as unknown as MethodClients["worker"];
+  const prior = await readPrior(run, REPOSITORIES);
+  assert.equal(
+    prior.verdict?.text,
+    `rework\n\n${linkUpdatesText(LINK_UPDATE_READ)}`,
+  );
+  assert.deepEqual(prior.verdict?.judged, []);
+  assert.deepEqual(requests, [
+    {
+      params: { execution_id: "execution" },
+      query: { limit: VERDICT_LINK_UPDATE_LIMIT },
+      body: null,
+    },
+  ]);
+});
+
+test("only an update gives a verdict with no judged commit", async (t) => {
+  const run = fixture(SECOND_ATTEMPT);
+  stopAfter(t, () => run.dispose());
+  run.clients.mission = {
+    "execution.review_round.get": async () => reviewRound([]),
+    "execution.rework_assessment.get": async () => NOT_FOUND,
+    "execution.clearedOutcome.get": async () => NOT_FOUND,
+    "execution.cleared_assessment.get": async () => NOT_FOUND,
+  } as unknown as MethodClients["mission"];
+  run.clients.worker = {
+    ...NO_FAILED_CHECKS,
+    ...linkUpdateRead(),
+  } as unknown as MethodClients["worker"];
+  assert.deepEqual(await readPrior(run, REPOSITORIES), {
+    verdict: {
+      text: linkUpdatesText(LINK_UPDATE_READ),
+      judged: [],
+      findings: [],
+      round: null,
+    },
+    cleared: null,
+  });
+});
+
+test("attempt 1 with one update gives a verdict", async (t) => {
+  const run = fixture();
+  stopAfter(t, () => run.dispose());
+  run.clients.mission = {
+    "execution.rework_assessment.get": async () => NOT_FOUND,
+  } as unknown as MethodClients["mission"];
+  run.clients.worker = {
+    ...NO_FAILED_CHECKS,
+    ...linkUpdateRead(),
+  } as unknown as MethodClients["worker"];
+  const prior = await readPrior(run, REPOSITORIES);
+  assert.equal(prior.verdict?.text, linkUpdatesText(LINK_UPDATE_READ));
+  assert.deepEqual(prior.verdict?.judged, []);
+});
+
+test("no update keeps the verdict absent at attempt 1", async (t) => {
+  const run = fixture();
+  stopAfter(t, () => run.dispose());
+  run.clients.mission = {
+    "execution.rework_assessment.get": async () => NOT_FOUND,
+  } as unknown as MethodClients["mission"];
+  run.clients.worker = NO_FAILED_CHECKS as unknown as MethodClients["worker"];
+  assert.deepEqual(await readPrior(run, REPOSITORIES), {
+    verdict: null,
+    cleared: null,
+  });
 });

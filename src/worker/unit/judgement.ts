@@ -19,7 +19,11 @@ import {
   type AffectedRun,
   AffectedVerdict,
 } from "./affected.ts";
-import type { ChangeRequestRead, FailedChecks } from "../contract.ts";
+import type {
+  ChangeRequestRead,
+  FailedChecks,
+  LinkUpdateRead,
+} from "../contract.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import { PromptTemplate, type PromptTemplates } from "../../agent/contract.ts";
 import { renderTemplate } from "../../agent/prompt-templates.ts";
@@ -32,6 +36,10 @@ const FIRST_ENTRY = 0;
 const RATIONALE_SEPARATOR = "\n\n";
 const ISSUE_PATH_SEPARATOR = ".";
 const BLOCKER_LABEL_PREFIX = "B";
+const LINK_UPDATES_HEADING = "Updates of the external links of this node";
+const LINK_UPDATE_NEW_PREFIX = "New: ";
+const LINK_UPDATE_MISSING_LINE = "An update is no longer stored.";
+const LINK_UPDATE_SEPARATOR = "\n\n";
 export const REQUESTED_CHANGES_MAX_BYTES = 4096;
 const AssessmentResult = {
   Success: "success",
@@ -309,6 +317,29 @@ export function requestedChangesText(
     `The pull request reviewers request these changes:\n${lines.join("\n")}`,
     "requested changes",
   );
+}
+
+export function linkUpdatesText(read: LinkUpdateRead): string | null {
+  if (read.items.length === NO_ITEMS) return null;
+  const stored = read.items.flatMap((item) =>
+    item.content === null
+      ? []
+      : [
+          `${item.new ? LINK_UPDATE_NEW_PREFIX : ""}${item.external_link.resource_identity}#${item.external_link.number} by ${item.content.author} at ${new Date(item.content.occurred_at).toISOString()}, ${item.content.url}\n${item.content.body}`,
+        ],
+  );
+  const missing = read.items
+    .filter((item) => item.content === null)
+    .map(() => LINK_UPDATE_MISSING_LINE);
+  const older = read.total - read.items.length;
+  return [
+    LINK_UPDATES_HEADING,
+    ...stored,
+    ...missing,
+    ...(older > NO_ITEMS
+      ? [`${older} older updates. Read them with the tool link_update_list.`]
+      : []),
+  ].join(LINK_UPDATE_SEPARATOR);
 }
 
 export function failedChecksText(

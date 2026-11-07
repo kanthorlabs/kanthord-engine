@@ -758,6 +758,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["worker.execution.setup.get", AccessPolicy.Client],
   ["worker.execution.change_request.get", AccessPolicy.Client],
   ["worker.execution.failed_check.get", AccessPolicy.Client],
+  ["worker.execution.link_update.get", AccessPolicy.Client],
   ["scheduler.queue.list", AccessPolicy.Human],
   ["scheduler.queue.peek", AccessPolicy.Human],
   ["scheduler.execution.list", AccessPolicy.Human],
@@ -929,8 +930,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["footprint.measure.run", AccessPolicy.Human],
   ["footprint.backup.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 264;
-const ROUTED_OPERATION_COUNT = 251;
+const OPERATION_COUNT = 265;
+const ROUTED_OPERATION_COUNT = 252;
 const INTAKE_OPERATION_COUNT = 25;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = [

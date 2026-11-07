@@ -1,8 +1,7 @@
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { identitySchema } from "../kernel/identity.ts";
-import type { CallerContext } from "../kernel/operation.ts";
-import type { Transaction } from "../kernel/store.ts";
+import type { Store, Transaction } from "../kernel/store.ts";
 import {
   INBOUND_EVENT_ID_PREFIX,
   INBOUND_EVENT_LIST_LIMIT_DEFAULT,
@@ -97,10 +96,7 @@ function readStoredEvent(
   return { record: eventRecord(row), event: row.event };
 }
 
-export function getEvent(
-  caller: CallerContext,
-  id: string,
-): InboundEventDetail {
-  const stored = caller.commit((tx) => readStoredEvent(tx, id));
+export function getEvent(store: Store, id: string): InboundEventDetail {
+  const stored = store.transaction((tx) => readStoredEvent(tx, id));
   return { ...stored.record, event: redactedText(eventText(stored.event)) };
 }

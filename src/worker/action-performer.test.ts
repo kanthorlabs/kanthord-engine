@@ -186,10 +186,12 @@ function harness(t: TestContext) {
         calls.push("mission");
         return context;
       },
+      linkUpdatesOf: () => assert.fail("unexpected read"),
     },
     intakeActions: {
       perform: async () => assert.fail("unexpected dispatch"),
       read: async () => assert.fail("unexpected read"),
+      describe: async () => assert.fail("unexpected read"),
     },
     evidenceRequests: {
       request: async () => assert.fail("unexpected request"),

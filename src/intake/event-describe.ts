@@ -3,7 +3,7 @@ import { isServiceIdentity } from "../kernel/caller.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
-import type { Transaction } from "../kernel/store.ts";
+import type { Store, Transaction } from "../kernel/store.ts";
 import { describeGitHubEvent } from "../repository/github.ts";
 import { WORKER_SERVICE_NAME } from "../worker/contract.ts";
 import {
@@ -56,6 +56,7 @@ function readStored(tx: Transaction, id: string): StoredEvent {
 }
 
 export async function describeEvent(
+  store: Store,
   caller: CallerContext,
   inboundEventId: string,
 ): Promise<DescribedEvent> {
@@ -66,7 +67,7 @@ export async function describeEvent(
       identity.service === WORKER_SERVICE_NAME,
     "The Worker Service describes an event.",
   );
-  const stored = caller.commit((tx) => readStored(tx, inboundEventId));
+  const stored = store.transaction((tx) => readStored(tx, inboundEventId));
   const described = DESCRIBERS[stored.platform](stored);
   if (described === null) return NO_DESCRIPTION;
   return { ...described, body: redactedText(described.body) };

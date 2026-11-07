@@ -364,6 +364,8 @@ test("the end of the prepare phase span holds the shape of the pinned revision",
     scheduler: { executionRelease: async () => complete({}) },
     worker: {
       "execution.failed_check.get": async () => complete({ items: [] }),
+      "execution.link_update.get": async () =>
+        complete({ items: [], next_cursor: null, total: 0 }),
     },
   } as unknown as MethodClients;
   const written: TelemetryRecord[] = [];

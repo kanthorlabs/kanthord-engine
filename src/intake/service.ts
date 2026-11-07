@@ -177,13 +177,13 @@ export class IntakeService implements Service, IntakeCollaborations {
       intakeOperations["inbound.event.list"],
       ({ query }, caller) => caller.commit((tx) => listEvents(tx, query)),
     );
-    registry.register(
-      intakeOperations["inbound.event.get"],
-      ({ params }, caller) => getEvent(caller, params.inbound_event_id),
+    registry.register(intakeOperations["inbound.event.get"], ({ params }) =>
+      getEvent(this.dependencies.store, params.inbound_event_id),
     );
     registry.register(
       intakeOperations["inbound.event.describe"],
-      ({ body }, caller) => describeEvent(caller, body.inbound_event_id),
+      ({ body }, caller) =>
+        describeEvent(this.dependencies.store, caller, body.inbound_event_id),
     );
     registry.register(
       intakeOperations["inbound.event.retry"],

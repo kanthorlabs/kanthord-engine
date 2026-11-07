@@ -63,6 +63,7 @@ import {
 import {
   type PoolPlacement,
   type PromptBase,
+  WORKER_SERVICE_NAME,
   workerOperations,
   type WorkerRegistrations,
 } from "../../worker/contract.ts";
@@ -440,6 +441,7 @@ export function composeServices(options: {
   const intakeClient = directClient(intakeOperations, invocation);
   const projectClient = directClient(projectOperations, invocation);
   const missionIdentity = mintServiceIdentity(MISSION_SERVICE_NAME);
+  const workerIdentity = mintServiceIdentity(WORKER_SERVICE_NAME);
   const pinnedHolderOf = (
     tx: Transaction,
     runtimeIdentity: string,
@@ -755,6 +757,7 @@ export function composeServices(options: {
       authorizeRequest: (...args) => mission.authorizeRequest(...args),
       authorizeAction: (...args) => mission.authorizeAction(...args),
       actionContextOf: (...args) => mission.actionContextOf(...args),
+      linkUpdatesOf: (...args) => mission.linkUpdatesOf(...args),
     },
     missionPromptPins: {
       attemptPromptCommits: (...args) => mission.attemptPromptCommits(...args),
@@ -811,6 +814,17 @@ export function composeServices(options: {
               body: null,
             },
             { identity: call.identity, context: call.context },
+          ),
+        ),
+      describe: async (call, inboundEventId) =>
+        resultOf(
+          await intakeClient["inbound.event.describe"](
+            {
+              params: {},
+              query: {},
+              body: { inbound_event_id: inboundEventId },
+            },
+            { identity: workerIdentity, context: call.context },
           ),
         ),
     },

@@ -1,0 +1,181 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: worker.execution.link_update.get
+    tags:
+      - worker
+    description: Read a page of the trusted link updates of the node of the claimed
+      attempt, newest first, with the redacted text of each update.
+    x-access-policy: client
+    x-timeout-ms: 60000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: execution_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/worker.execution.link_update.get.Input/properties/p\
+            arams/properties/execution_id"
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/worker.execution.link_update.get.Input/properties/q\
+            uery/properties/cursor"
+      - name: limit
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/worker.execution.link_update.get.Input/properties/q\
+            uery/properties/limit"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/worker.execution.link_update.get.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    worker.execution.link_update.get.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            execution_id:
+              type: string
+              minLength: 36
+              maxLength: 36
+              pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: execution_ followed by a canonical 26-character uppercase ULID.
+          required:
+            - execution_id
+          additionalProperties: false
+        query:
+          type: object
+          properties:
+            cursor:
+              type: string
+            limit:
+              default: 20
+              type: integer
+              minimum: 1
+              maximum: 100
+          required: []
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    worker.execution.link_update.get.Output:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                minLength: 38
+                maxLength: 38
+                pattern: ^link_update_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: link_update_ followed by a canonical 26-character uppercase ULID.
+              external_link:
+                type: object
+                properties:
+                  kind:
+                    type: string
+                    minLength: 1
+                  resource_identity:
+                    type: string
+                    minLength: 1
+                  number:
+                    type: integer
+                    exclusiveMinimum: 0
+                    maximum: 9007199254740991
+                required:
+                  - kind
+                  - resource_identity
+                  - number
+                additionalProperties: false
+              update_key:
+                type: string
+                minLength: 1
+              occurred_at:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+                description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+              new:
+                type: boolean
+              content:
+                anyOf:
+                  - type: object
+                    properties:
+                      author:
+                        type: string
+                      body:
+                        type: string
+                      url:
+                        type: string
+                      occurred_at:
+                        type: integer
+                        minimum: 0
+                        maximum: 9007199254740991
+                        description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                    required:
+                      - author
+                      - body
+                      - url
+                      - occurred_at
+                    additionalProperties: false
+                  - type: "null"
+            required:
+              - id
+              - external_link
+              - update_key
+              - occurred_at
+              - new
+              - content
+            additionalProperties: false
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+        total:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+      required:
+        - items
+        - next_cursor
+        - total
+      additionalProperties: false

@@ -65,7 +65,7 @@ function harness(t: TestContext) {
     identity: testServiceIdentity(service),
     context: background,
     requestId: createIdentity("request"),
-    commit: (write) => store.transaction(write),
+    commit: () => assert.fail("A read opens its own transaction."),
   });
   const describe = async (
     id: string,
