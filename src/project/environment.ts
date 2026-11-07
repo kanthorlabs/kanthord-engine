@@ -639,23 +639,33 @@ export class ProjectEnvironments {
     try {
       const access = accessOf();
       const { address, ssh } = access;
-      let commit: string | null;
-      try {
-        commit = await this.dependencies.repositoryFiles.resolveBranchCommit(
-          address,
-          config.strategy.base_branch,
-          deadline,
-          end - Date.now(),
-          ssh,
-        );
-      } catch (error) {
-        refuseUnreadable(caller.context, error);
-      }
+      const resolve = async (branch: string) => {
+        try {
+          return await this.dependencies.repositoryFiles.resolveBranchCommit(
+            address,
+            branch,
+            deadline,
+            end - Date.now(),
+            ssh,
+          );
+        } catch (error) {
+          refuseUnreadable(caller.context, error);
+        }
+      };
+      const commit = await resolve(config.strategy.base_branch);
       if (commit === null)
         throw new OperationError(
           SSH_UNREACHABLE_STATUS,
           ProjectErrorCode.RepositoryBaseBranchAbsent,
           "The base branch is absent on the remote.",
+        );
+      const upstream = config.strategy.upstream_branch;
+      if (upstream !== undefined && (await resolve(upstream)) === null)
+        throw new OperationError(
+          SSH_UNREACHABLE_STATUS,
+          ProjectErrorCode.RepositoryBaseBranchAbsent,
+          "The upstream branch is absent on the remote.",
+          { branch: upstream },
         );
       const files = paths.length
         ? await this.readFilesWith(access, commit, paths, maxBytes, deadline)

@@ -163,6 +163,9 @@ components:
                           base_branch:
                             type: string
                             minLength: 1
+                          upstream_branch:
+                            type: string
+                            minLength: 1
                           action:
                             type: object
                             properties:
@@ -596,6 +599,9 @@ components:
                             type: object
                             properties:
                               base_branch:
+                                type: string
+                                minLength: 1
+                              upstream_branch:
                                 type: string
                                 minLength: 1
                               action:

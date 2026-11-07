@@ -6304,6 +6304,58 @@ test("a write without an instruction file refuses an absent base branch and writ
   assert.deepEqual(f.snapshot(), before);
 });
 
+const UPSTREAM_BRANCH = "main";
+
+function upstreamBinding(base = "fix/x", upstream = UPSTREAM_BRANCH) {
+  const binding = repositoryBinding();
+  return {
+    ...binding,
+    config: {
+      ...binding.config,
+      strategy: { base_branch: base, upstream_branch: upstream },
+    },
+  };
+}
+
+test("a write accepts upstream_branch, resolves both heads and stores it", async (t) => {
+  const { repositoryFiles, heads } = instructionRepositoryFiles(null);
+  const f = writeFixture(t, { repositoryFiles });
+  const result = await f.write({ [REPOSITORY_NAME]: upstreamBinding() });
+  assert.deepEqual(heads, ["fix/x", "main"]);
+  assert.deepEqual(
+    repositoryConfigSchema.parse(result.bindings[REPOSITORY_NAME]?.config)
+      .strategy,
+    { base_branch: "fix/x", upstream_branch: "main" },
+  );
+});
+
+test("an upstream_branch equal to base_branch or blank refuses", () => {
+  const strategy = (upstream_branch: string) =>
+    repositoryConfigSchema.shape.strategy.safeParse({
+      base_branch: "main",
+      upstream_branch,
+    });
+  assert.equal(strategy("main").success, false);
+  assert.equal(strategy("  ").success, false);
+  assert.equal(strategy("").success, false);
+  assert.equal(strategy("develop").success, true);
+});
+
+test("a write refuses a missing upstream branch with its name and writes nothing", async (t) => {
+  const { repositoryFiles } = instructionRepositoryFiles(null);
+  repositoryFiles.resolveBranchCommit = async (_address, branch) =>
+    branch === UPSTREAM_BRANCH ? null : INSTRUCTION_COMMIT;
+  const f = writeFixture(t, { repositoryFiles });
+  const before = f.snapshot();
+  await rejectsWrite(
+    f.write({ [REPOSITORY_NAME]: upstreamBinding() }),
+    SSH_FAILURE_STATUS,
+    ProjectErrorCode.RepositoryBaseBranchAbsent,
+    { branch: "main" },
+  );
+  assert.deepEqual(f.snapshot(), before);
+});
+
 test("a write that keeps an unchanged repository binding makes no base read for it", async (t) => {
   const { repositoryFiles, heads } = instructionRepositoryFiles(null);
   const f = writeFixture(t, { repositoryFiles });
