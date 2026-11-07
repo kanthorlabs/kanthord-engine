@@ -241,7 +241,7 @@ function keyedOptions(command: Command): Command {
   return command
     .option(
       "--output",
-      "Write the machine file machines/<name>.yaml on this host instead of printing the machine configuration",
+      "Write the machine file machines/<name>.yaml on this computer instead of printing the machine configuration",
     )
     .option("--force", "Overwrite an existing machine file (with --output)")
     .option("--idempotency-key <key>", "Mutation key", singleUse(KEY_OPTION));
@@ -256,7 +256,7 @@ export function addWorkerMachineCommands(worker: Command): void {
     machine
       .command("create")
       .description(
-        "Create a worker machine with a key pair generated on this host",
+        "Create a worker machine with a key pair generated on this computer",
       )
       .argument("<name>", "Machine name"),
   ).action((name: string, _options, command: Command) =>
@@ -281,7 +281,7 @@ export function addWorkerMachineCommands(worker: Command): void {
     machine
       .command("rotate")
       .description(
-        "Reset the key of a worker machine with a key pair generated on this host",
+        "Reset the key of a worker machine with a key pair generated on this computer",
       )
       .argument("<name>", "Machine name")
       .option(
