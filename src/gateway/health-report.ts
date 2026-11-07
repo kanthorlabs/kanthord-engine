@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { addAbortListener } from "node:events";
 import type { Logger } from "pino";
 import type { z } from "zod";
 import { isHumanIdentity } from "../kernel/caller.ts";
@@ -60,6 +61,7 @@ interface ReportLimits {
   maxConcurrent: number;
   checkDeadlineMs: number;
   reportBudgetMs: number;
+  checkDeadline?: AbortSignal;
 }
 type Report = z.output<typeof gatewayOperations.healthcheck.output>;
 type OwnerReport = Report["shared"]["llm"];
@@ -136,12 +138,20 @@ async function checkResource(
   checkDeadlineMs: number,
   reportAt: number,
   observe: ResourceObserver,
+  injectedDeadline?: AbortSignal,
 ): Promise<ResourceStatusValue> {
-  const deadline = Date.now() + checkDeadlineMs;
+  const deadline =
+    injectedDeadline === undefined ? Date.now() + checkDeadlineMs : null;
   const context = new CancellationContext(
     joined(parent, reportContext),
     deadline,
   );
+  using firing =
+    injectedDeadline === undefined
+      ? undefined
+      : addAbortListener(injectedDeadline, () =>
+          context.cancel(new DeadlineExceeded()),
+        );
   try {
     const result = await Promise.race([
       Promise.resolve()
@@ -153,7 +163,7 @@ async function checkResource(
         .catch(() => ResourceStatus.Unknown),
       cancelled(context.signal).then(() => ResourceStatus.Unknown),
     ]);
-    if (Date.now() >= deadline || Date.now() >= reportAt)
+    if ((deadline !== null && Date.now() >= deadline) || Date.now() >= reportAt)
       context.cancel(new DeadlineExceeded());
     if (context.signal.aborted) {
       observeDeadline(context, observe);
@@ -205,6 +215,7 @@ async function runChecks(
           reasons.set(item.entry.target, reason);
           failureReasons.set(item.entry.target, failureReason);
         },
+        limits.checkDeadline,
       );
       statuses.set(item.entry.target, status);
     }

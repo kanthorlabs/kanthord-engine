@@ -9,6 +9,7 @@ import {
 import { join } from "node:path";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
+import type { Diagnostic } from "../../kernel/errors.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
   type ProofInput,
@@ -25,6 +26,7 @@ import {
 } from "./container-runtime.ts";
 import { ContainerDriver } from "./container-driver.ts";
 import {
+  ENVIRONMENT_PROOF_FAILED,
   type ProofContainers,
   type ProofOptions,
   proveInImage,
@@ -70,6 +72,8 @@ const POLL_STEP_MS = 50;
 const POLL_ROUNDS = 100;
 const BUNDLE_HEADER = "# v";
 const REMOVE_REFUSED = 125;
+const START_REFUSED = 126;
+const START_REFUSAL = "Error: the runtime refused the start";
 const NETAVARK_ERROR =
   'Error: netavark (exit code 1): nftables error: "nft" did not return successfully while applying ruleset';
 const INSPECT_ARGUMENTS = inspectContainerArguments(NAME);
@@ -117,7 +121,6 @@ function input(overrides: Partial<ProofInput> = {}): ProofInput & {
 function proof(
   directory: string,
   overrides: {
-    hostCode?: number;
     commandLimitMs?: number;
     environmentMemoryMb?: number;
     existingCache?: boolean;
@@ -161,7 +164,7 @@ function proof(
           stderr: `Error: volume with name ${CACHE_VOLUME} already exists: volume already exists`,
         });
       return Promise.resolve({
-        code: overrides.hostCode ?? 0,
+        code: 0,
         stdout: "",
         stderr: "",
       });
@@ -477,9 +480,19 @@ test("an abort of the signal ends the proof and removes the container, the volum
 });
 
 test("a refused container start fails the proof and still removes what exists", async (t) => {
-  const { options, lines, runDirectory } = proof(temporary(t), { hostCode: 1 });
+  const { options, lines, runDirectory } = proof(temporary(t), {
+    answerOf: (args) =>
+      args[0] === START
+        ? { code: START_REFUSED, stdout: "", stderr: START_REFUSAL }
+        : null,
+  });
   await assert.rejects(
     proveInImage(options, input(), new AbortController().signal),
+    (error: Diagnostic) => {
+      assert.equal(error.code, ENVIRONMENT_PROOF_FAILED);
+      assert.match(error.message, /failed at start: .*refused the start/);
+      return true;
+    },
   );
   assert.equal(cleaned(lines()), true);
   assert.equal(existsSync(runDirectory), false);
