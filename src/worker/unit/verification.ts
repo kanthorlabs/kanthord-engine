@@ -92,6 +92,7 @@ export type CommandObserver = (
   attempt: CommandAttempt,
   execute: () => Promise<CommandRun>,
 ) => Promise<CommandRun>;
+export const VERIFICATION_RERUNS = 2;
 const FIRST_RUN = 1;
 const FIRST_RERUN = 2;
 export interface VerificationInput {

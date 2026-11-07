@@ -44,6 +44,7 @@ import {
   environmentStop,
   infrastructureStop,
   runVerificationsWithOutput,
+  VERIFICATION_RERUNS,
   VerificationClass,
   verificationPassed,
   type VerificationRun,
@@ -102,7 +103,6 @@ export async function requestAndRelease(
 }
 
 const NO_ITEMS = 0;
-const VERIFICATION_RERUNS = 2;
 export const VERIFICATION_SUBJECT = "Evaluation verification results";
 type OpenAgent = (directory: string) => Promise<NativeAgent>;
 

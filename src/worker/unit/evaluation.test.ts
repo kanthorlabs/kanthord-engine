@@ -68,7 +68,10 @@ import { EvaluationAttribute } from "./method-telemetry.ts";
 import { EvaluationStage } from "./evaluation.ts";
 import { JUDGEMENT_MARKER, repairInstruction } from "./judgement.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
-import { VERIFICATION_INFRASTRUCTURE_FAILED } from "./verification.ts";
+import {
+  VERIFICATION_INFRASTRUCTURE_FAILED,
+  VERIFICATION_RERUNS,
+} from "./verification.ts";
 
 const NO_RELEASES = 0;
 const SINGLE_RELEASE = 1;
@@ -927,6 +930,25 @@ test("a kill on the first review run and a pass on the rerun is a pass and not f
   assert.equal(review.assessments.length, SINGLE_RELEASE);
   assert.equal(review.assessments[0]?.result, AssessmentResult.Success);
   assert.doesNotMatch(review.assessments[0]?.rationale ?? "", /flaky/);
+});
+
+test("a review verification that passes on the last rerun of VERIFICATION_RERUNS is a pass", async (t) => {
+  const count = join(temporary(t), "count");
+  const review = await reviewOf(
+    t,
+    `echo x >> ${count}; test $(wc -l < ${count}) -gt ${VERIFICATION_RERUNS}`,
+  );
+  assert.deepEqual(review.end, { kind: "closed", outcomeId: "outcome" });
+  assert.deepEqual(
+    review.verifications.map((verification) =>
+      verification.results.map((result) => result.exit_code),
+    ),
+    [[PASSED]],
+  );
+  assert.equal(
+    readFileSync(count, "utf8").trim().split("\n").length,
+    VERIFICATION_RERUNS + 1,
+  );
 });
 
 const FLAKY_NAME = "Flaky verification";
