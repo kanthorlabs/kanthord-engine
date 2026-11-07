@@ -1002,6 +1002,7 @@ export class MissionService
               this.dependencies.bindings,
               this.dependencies.environments,
               this.dependencies.config.text_max_bytes,
+              this.dependencies,
             ),
           ),
         ),

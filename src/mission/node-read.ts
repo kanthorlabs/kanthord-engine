@@ -94,7 +94,7 @@ export function nodeRecord(
   tx: Transaction,
   node: NodeRow,
   bindings: MissionBindings,
-  paused?: PausedDependencies,
+  paused: PausedDependencies,
 ): Node {
   const current = readCurrentRevision(tx, node.id);
   assert.ok(current, "Node must have a revision.");
@@ -119,7 +119,7 @@ export function nodeRecord(
     ...(node.state === NodeState.Blocked
       ? { blocked_context: blockedContextOf(tx, bindings, node) }
       : {}),
-    ...(node.state === NodeState.Paused && paused
+    ...(node.state === NodeState.Paused
       ? { paused_context: pausedContextOf(tx, paused, node) }
       : {}),
   };
@@ -129,7 +129,7 @@ export function getNode(
   tx: Transaction,
   nodeId: string,
   bindings: MissionBindings,
-  paused?: PausedDependencies,
+  paused: PausedDependencies,
 ): Node {
   return nodeRecord(tx, requireNode(tx, nodeId), bindings, paused);
 }
@@ -150,7 +150,7 @@ export function nodePage(
   missionId: string,
   filter: NodeListFilter,
   limit = NODE_LIST_LIMIT_DEFAULT,
-  paused?: PausedDependencies,
+  paused: PausedDependencies,
 ) {
   if (!readMission(tx, missionId)) notFound(MissionErrorCode.MissionNotFound);
   const rows = listNodes(tx, missionId, filter, limit + EXTRA_ROW);

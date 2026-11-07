@@ -36,7 +36,6 @@ import {
 import { ControlError } from "./control.ts";
 import { dependencyEditGuarded } from "./dependency.ts";
 import { type DepEdge, hasDependencyCycle } from "./graph.ts";
-import { nodeRecord } from "./node-read.ts";
 import {
   type ParsedNodeFile,
   type ParsedTaskFile,
@@ -447,6 +446,12 @@ function terminalOwner(
   return owner !== undefined && isTerminal(owner.state);
 }
 
+function currentContentOf(tx: Transaction, nodeId: string): Content {
+  const row = readCurrentRevision(tx, nodeId);
+  assert.ok(row, "A current node has a revision.");
+  return revisionFromRow(tx, row).content;
+}
+
 function storedContent(
   tx: Transaction,
   identity: Pick<ResolvedImportEntry, "current" | "task">,
@@ -454,9 +459,7 @@ function storedContent(
   if (identity.task !== null)
     return { binding_ids: identity.task.content.bindings, intent: null };
   assert.ok(identity.current, "A terminal entry has an identity.");
-  const row = readCurrentRevision(tx, identity.current.id);
-  assert.ok(row, "A current node has a revision.");
-  const { content } = revisionFromRow(tx, row);
+  const content = currentContentOf(tx, identity.current.id);
   return { binding_ids: content.bindings, intent: content.intent };
 }
 
@@ -540,11 +543,7 @@ function resolveGraph(result: ResolvedImport): void {
     );
 }
 
-function entryChanged(
-  tx: Transaction,
-  item: ResolvedImportEntry,
-  bindings: MissionBindings,
-): boolean {
+function entryChanged(tx: Transaction, item: ResolvedImportEntry): boolean {
   const { entry, current } = item;
   assert.ok(current, "Only an existing identity can be compared.");
   assert.equal(current.retired_at, null, "Compared identity is current.");
@@ -563,8 +562,7 @@ function entryChanged(
   };
   return (
     current.filename !== entry.filename ||
-    canonicalJSON(nodeRecord(tx, current, bindings).content) !==
-      canonicalJSON(content)
+    canonicalJSON(currentContentOf(tx, current.id)) !== canonicalJSON(content)
   );
 }
 
@@ -604,11 +602,7 @@ function droppedEdges(result: ResolvedImport): Edge[] {
   return dependencies;
 }
 
-function classify(
-  tx: Transaction,
-  result: ResolvedImport,
-  bindings: MissionBindings,
-): void {
+function classify(tx: Transaction, result: ResolvedImport): void {
   assert.equal(
     result.violations.length,
     NO_VIOLATIONS,
@@ -642,7 +636,7 @@ function classify(
     );
     kept.add(item.current.id);
     const contentChanged =
-      entryChanged(tx, item, bindings) || owners.has(item.current.id);
+      entryChanged(tx, item) || owners.has(item.current.id);
     if (contentChanged) result.content_updates.push(item.current.id);
     const previous = result.current_dependencies
       .filter((edge) => edge.dependent === item.key)
@@ -743,8 +737,7 @@ export function resolveImportSet(
     });
   }
   resolveGraph(result);
-  if (result.violations.length === NO_VIOLATIONS)
-    classify(tx, result, bindings);
+  if (result.violations.length === NO_VIOLATIONS) classify(tx, result);
   return result;
 }
 

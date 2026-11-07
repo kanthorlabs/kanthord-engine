@@ -18,6 +18,7 @@ import {
 } from "./contract.ts";
 import { guardEnvironmentMix } from "./environment-mix.ts";
 import { nodeRecord, requireNode } from "./node-read.ts";
+import type { PausedDependencies } from "./record-read.ts";
 import { revisionFromRow } from "./revision.ts";
 import { openAttemptsOf } from "./store.ts";
 import {
@@ -168,6 +169,7 @@ export function rebindNodes(
   bindings: MissionBindings,
   environments: MissionEnvironments,
   textMaxBytes: number,
+  paused: PausedDependencies,
 ): RebindResult {
   const mission = requireMission(tx, missionId, body.expected_mission_version);
   validateText(REASON_FIELD, body.reason, textMaxBytes);
@@ -191,7 +193,7 @@ export function rebindNodes(
           ? RebindSkipCondition.Terminal
           : null;
     if (condition !== null) {
-      skipped.push({ node: nodeRecord(tx, node, bindings), condition });
+      skipped.push({ node: nodeRecord(tx, node, bindings, paused), condition });
       continue;
     }
     guardEnvironmentMix(

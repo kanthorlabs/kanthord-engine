@@ -254,7 +254,9 @@ test("blocked node projection includes its attempt-zero human outcome and no req
     assert.equal(context.outcome.id, outcome.id);
     assert.equal(context.outcome.attempt, NO_ATTEMPT);
     assert.deepEqual(context.requests, []);
-    const node = nodeSchema.parse(nodeRecord(tx, row, h.bindings));
+    const node = nodeSchema.parse(
+      nodeRecord(tx, row, h.bindings, h.dependencies),
+    );
     assert.deepEqual(node.blocked_context, context);
     assert.deepEqual(
       externalActionRecords(tx, h.bindings, h.node_id, NO_ATTEMPT),
