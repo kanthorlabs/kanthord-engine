@@ -123,12 +123,12 @@ const TOP_LEVEL_NAMES = new Set([
 const OTHER_PAGE = "other";
 const MACHINE_JOIN_PATH = "worker machine join";
 const NO_ITEMS = 0;
-const DOCUMENTED_COUNT = 223;
+const DOCUMENTED_COUNT = 225;
 const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
-const IMPLEMENTED_COUNT = 218;
-const OPERATION_COUNT = 261;
+const IMPLEMENTED_COUNT = 220;
+const OPERATION_COUNT = 263;
 const INTAKE_LEAVES = [
   "intake event delete",
   "intake event discard",
@@ -150,7 +150,7 @@ const PAGE_COUNTS = {
   storage: 10,
   agent: 15,
   project: 23,
-  mission: 67,
+  mission: 69,
   intake: 13,
   scheduler: 8,
   worker: 22,

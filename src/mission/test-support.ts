@@ -364,6 +364,7 @@ export function missionHarness(
       replyMatch: unexpectedCollaboration,
       handoff: unexpectedCollaboration,
       releaseHeld: unexpectedCollaboration,
+      describe: unexpectedCollaboration,
     },
     decoder: {
       decode: unexpectedCollaboration,

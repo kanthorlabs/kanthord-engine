@@ -653,7 +653,7 @@ export const intakeOperations = {
     }),
     output: describedEventSchema,
     description:
-      "Describe a stored inbound event with the redacted text of its platform implementation for the Worker Service.",
+      "Describe a stored inbound event with the redacted text of its platform implementation for the Worker Service and the Mission Service.",
   },
   "inbound.event.retry": {
     ...mutationOperation,

@@ -85,6 +85,8 @@ import {
 import { blockNode, discardNode, overrideNode } from "./control-close.ts";
 import { unblockNode } from "./control-unblock.ts";
 import { decideFollowup } from "./followup-decide.ts";
+import { withContent } from "./inbox-item-content.ts";
+import { inboxItemPage, markInboxItem } from "./inbox-item.ts";
 import { decideProposals } from "./proposal-decide.ts";
 import {
   followupPage,
@@ -635,6 +637,41 @@ export class MissionService
         caller.commit((tx) =>
           linkUpdatePage(tx, this.dependencies.bindings, params.node_id, query),
         ),
+    );
+    registry.register(
+      missionOperations["inbox_item.list"],
+      async ({ query }, caller) => {
+        const page = this.dependencies.store.transaction((tx) =>
+          inboxItemPage(tx, this.dependencies.bindings, query, Date.now()),
+        );
+        const items = await withContent(
+          this.dependencies.intakeLinks,
+          caller.context,
+          page.items,
+        );
+        return caller.commit(() => ({ ...page, items }));
+      },
+    );
+    registry.register(
+      missionOperations["inbox_item.done"],
+      async ({ params, body }, caller) => {
+        const thread = this.dependencies.store.transaction((tx) =>
+          markInboxItem(
+            tx,
+            this.dependencies.bindings,
+            params.link_update_id,
+            body,
+            Date.now(),
+          ),
+        );
+        const [item] = await withContent(
+          this.dependencies.intakeLinks,
+          caller.context,
+          [thread],
+        );
+        assert.ok(item);
+        return caller.commit(() => item);
+      },
     );
     registry.register(
       missionOperations["proposal.decide"],

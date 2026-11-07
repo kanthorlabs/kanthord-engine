@@ -11,7 +11,11 @@ import { IdentityKind } from "../../kernel/caller.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { canonicalJSON } from "../../kernel/json.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { InboxReason, NodeState } from "../../mission/contract.ts";
+import {
+  InboxItemState,
+  InboxReason,
+  NodeState,
+} from "../../mission/contract.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import {
   cliSession,
@@ -316,6 +320,117 @@ test("kanthord mission link-update list prints the rows of the trusted actors of
   assert.equal(page.next_cursor, null);
 });
 
+const INBOX_MARKER = "inbox-item-marker";
+const INBOX_ACTOR = "583231";
+const INBOX_HANDLE = "ulrich";
+const NO_ITEMS = 0;
+const ONE_ITEM = 1;
+
+test("kanthord mission inbox-item list and done reach their routes", async (t) => {
+  const fixture = await gatewayFixture(t);
+  const session = cliSession(t, fixture.endpoint, fixture.token, INBOX_MARKER);
+  await createCredentials(session, INBOX_MARKER);
+  const project = await session.read<{ id: string }>([
+    "project",
+    "create",
+    "--name",
+    "inbox",
+  ]);
+  const mission = await session.read<{ id: string; version: number }>([
+    "mission",
+    "get",
+    project.id,
+  ]);
+  await session.write(["project", "binding", "apply", project.id], {
+    version: FIRST_BINDING_SET,
+    bindings: {
+      harness: {
+        kind: "worker",
+        config: { worker: "claude-code@1", instance_count: 1 },
+      },
+      [CONVERSATION_BINDING]: {
+        kind: "conversation",
+        config: {
+          available: true,
+          platform: "github",
+          repository: CONVERSATION_REPOSITORY,
+          credential: "github",
+          link_trust: { actor_ids: [TRUSTED_ACTOR] },
+          inbox: { actor_id: INBOX_ACTOR, handle: INBOX_HANDLE },
+        },
+      },
+    },
+  });
+  const bindings = await session.read<{
+    items: { id: string; name: string }[];
+  }>(["project", "binding", "list", project.id]);
+  const binding = bindings.items.find(
+    (item) => item.name === CONVERSATION_BINDING,
+  );
+  assert.ok(binding);
+  const linkUpdateId = createIdentity("link_update");
+  fixture.store.database
+    .prepare(
+      "INSERT INTO mission_link_update (id, mission_id, external_link, update_key, inbound_event_id, actor_id, occurred_at, reason, binding_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(
+      linkUpdateId,
+      mission.id,
+      canonicalJSON(LINK),
+      `issue_comment:${FIRST_OCCURRED_AT}`,
+      createIdentity("inbound_event"),
+      TRUSTED_ACTOR,
+      FIRST_OCCURRED_AT,
+      InboxReason.Mentioned,
+      binding.id,
+    );
+  type Listed = {
+    items: {
+      link_update_id: string;
+      state: string;
+      reason: string;
+      trusted: boolean;
+      content: unknown;
+    }[];
+    counts: { open: number; snoozed: number };
+  };
+  const listed = await session.read<Listed>([
+    "mission",
+    "inbox-item",
+    "list",
+    "--project",
+    project.id,
+  ]);
+  assert.equal(listed.items.length, ONE_ITEM);
+  assert.equal(listed.items[FIRST_ITEM]?.link_update_id, linkUpdateId);
+  assert.equal(listed.items[FIRST_ITEM]?.state, InboxItemState.Open);
+  assert.equal(listed.items[FIRST_ITEM]?.reason, InboxReason.Mentioned);
+  assert.equal(listed.items[FIRST_ITEM]?.trusted, true);
+  assert.equal(listed.items[FIRST_ITEM]?.content, null);
+  assert.deepEqual(listed.counts, { open: ONE_ITEM, snoozed: NO_ITEMS });
+  const done = await session.write<{ state: string }>(
+    ["mission", "inbox-item", "done", linkUpdateId],
+    { snoozed_until: null },
+  );
+  assert.equal(done.state, InboxItemState.Done);
+  const closed = await session.read<Listed>([
+    "mission",
+    "inbox-item",
+    "list",
+    "--state",
+    InboxItemState.Done,
+  ]);
+  assert.equal(closed.items.length, ONE_ITEM);
+  const reopened = await session.read<Listed>([
+    "mission",
+    "inbox-item",
+    "list",
+    "--project",
+    project.id,
+  ]);
+  assert.equal(reopened.items.length, NO_ITEMS);
+});
+
 const FOLLOWUP_MARKER = "followup-marker";
 
 test("kanthord mission followup list and decide reach their routes", async (t) => {
@@ -414,8 +529,6 @@ test("kanthord mission followup list and decide reach their routes", async (t) =
 const CHECK_MARKER = "node-check-link-marker";
 const COMMENT_ID = 4401;
 const COMMENT_CREATED_AT = "2026-11-07T04:00:00Z";
-const ONE_ITEM = 1;
-const NO_ITEMS = 0;
 
 test("kanthord mission node check prints the link counts", async (t) => {
   const gitHub = await fakeGitHub(t);

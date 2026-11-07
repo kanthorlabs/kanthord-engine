@@ -787,6 +787,7 @@ function linkCheckFixture(
     },
     releaseHeld: (inboundEventIds) => released.push(...inboundEventIds),
     replyMatch: async () => NO_REPLY_MATCH,
+    describe: () => assert.fail("The node check describes no event."),
     handoff: async (_context, inboundEventId) => {
       if (handed.has(inboundEventId)) return null;
       handed.add(inboundEventId);

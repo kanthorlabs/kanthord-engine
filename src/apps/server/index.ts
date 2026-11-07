@@ -1023,6 +1023,17 @@ export function composeServices(options: {
           : admissionAnswerSchema.parse(resultOf(result));
       },
       releaseHeld: (inboundEventIds) => intake.releaseHeld(inboundEventIds),
+      describe: async (context, inboundEventId) =>
+        resultOf(
+          await intakeClient["inbound.event.describe"](
+            {
+              params: {},
+              query: {},
+              body: { inbound_event_id: inboundEventId },
+            },
+            { identity: missionIdentity, context },
+          ),
+        ),
     },
     intakeCheck: {
       check: async (context, evidenceId) =>

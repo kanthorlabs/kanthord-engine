@@ -5,6 +5,7 @@ import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { describeGitHubEvent } from "../repository/github.ts";
+import { MISSION_SERVICE_NAME } from "../mission/contract.ts";
 import { WORKER_SERVICE_NAME } from "../worker/contract.ts";
 import {
   type DescribedEvent,
@@ -64,8 +65,9 @@ export async function describeEvent(
   assert.ok(
     identity &&
       isServiceIdentity(identity) &&
-      identity.service === WORKER_SERVICE_NAME,
-    "The Worker Service describes an event.",
+      (identity.service === WORKER_SERVICE_NAME ||
+        identity.service === MISSION_SERVICE_NAME),
+    "The Worker Service or the Mission Service describes an event.",
   );
   const stored = store.transaction((tx) => readStored(tx, inboundEventId));
   const described = DESCRIBERS[stored.platform](stored);
