@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import type { Transaction } from "../kernel/store.ts";
+import { NodeState } from "./contract.ts";
 
 const EXPECTED_ROW_CHANGE = 1;
 
@@ -7,7 +8,7 @@ export interface ProposalRow {
   id: string;
   node_id: string;
   attempt: number;
-  assessment_id: string;
+  assessment_id: string | null;
   content: string;
   created_node_id: string | null;
   approved_at: number | null;
@@ -97,4 +98,46 @@ export function markProposalApproved(
     )
     .run(createdNodeId, approvedAt, id);
   assert.equal(result.changes, EXPECTED_ROW_CHANGE);
+}
+
+export function listTerminalNodesLinking(
+  tx: Transaction,
+  missionId: string,
+  externalLink: string,
+): { id: string; attempt: number }[] {
+  return tx.database
+    .prepare(
+      `SELECT n.id, n.attempt FROM mission_node n
+       JOIN mission_node_revision r ON r.node_id = n.id
+         AND r.revision = (
+           SELECT MAX(latest.revision) FROM mission_node_revision latest
+           WHERE latest.node_id = n.id
+         )
+       WHERE n.mission_id = ? AND n.retired_at IS NULL AND n.state IN (?, ?)
+         AND EXISTS (
+           SELECT 1 FROM json_each(r.external_links) link WHERE link.value = ?
+         )
+       ORDER BY n.id`,
+    )
+    .all(
+      missionId,
+      NodeState.Completed,
+      NodeState.Discarded,
+      externalLink,
+    ) as unknown as { id: string; attempt: number }[];
+}
+
+export function holdsFollowupLink(tx: Transaction, nodeId: string): boolean {
+  const row = tx.database
+    .prepare(
+      `SELECT 1 FROM mission_proposal p
+       WHERE p.node_id = ? AND p.assessment_id IS NULL AND (
+         (p.approved_at IS NULL AND p.rejected_at IS NULL)
+         OR EXISTS (
+           SELECT 1 FROM mission_node created
+           WHERE created.id = p.created_node_id AND created.retired_at IS NULL
+         ))`,
+    )
+    .get(nodeId);
+  return row !== undefined;
 }

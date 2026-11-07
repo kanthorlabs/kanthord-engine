@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 import { createIdentity, identityTime } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
@@ -30,6 +30,7 @@ import {
   TRUSTED_ACTOR,
   updateOf,
 } from "./link-update-test-support.ts";
+import { setNodeState } from "./store.ts";
 import { actCalls, databaseSnapshot } from "./test-support.ts";
 
 const HUMAN_IDENTITY = testHumanIdentity("ulrich", "Ulrich", "jti_ulrich");
@@ -37,6 +38,7 @@ const INTAKE_IDENTITY = testServiceIdentity(INTAKE_SERVICE_NAME);
 const NO_ROWS = 0;
 const NO_CALLS = 0;
 const SINGLE_ROW = 1;
+const TWO_ROWS = 2;
 const CLOCK_TOLERANCE_MS = 60000;
 const LINK_TABLE = "mission_link_update";
 const CLAIM_CALLS = new Set([
@@ -412,3 +414,139 @@ test("a read takes each pinned binding revision once", async (t) => {
   await h.listedOf(nodeId);
   assert.deepEqual(h.reads, [binding]);
 });
+
+const LAST_ATTEMPT = 2;
+const NODE_TIME = 100;
+const NO_ATTEMPT = 0;
+const FIRST_REVISION = 1;
+const TERMINAL_STATES = [NodeState.Completed, NodeState.Discarded] as const;
+
+function trustedHarness(
+  t: TestContext,
+  state: NodeState,
+  attempts = LAST_ATTEMPT,
+) {
+  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
+  const bindingId = h.addBinding(LINK_RESOURCE, [TRUSTED_ACTOR]);
+  const nodeId = h.addNode([linkOf()], NodeState.Available, [bindingId]);
+  h.addAttempts(nodeId, attempts);
+  h.store.transaction((tx) => setNodeState(tx, nodeId, state));
+  let sequence = 0;
+  const update = async (actorId = TRUSTED_ACTOR) => {
+    sequence++;
+    h.decoding.update = updateOf({
+      actor_id: actorId,
+      update_key: `issue_comment:${sequence}`,
+    });
+    return h.admit();
+  };
+  const settle = (column: "rejected_at" | "approved_at", createdId?: string) =>
+    h.store.database
+      .prepare(
+        `UPDATE mission_proposal SET ${column} = ?, created_node_id = ? WHERE node_id = ? AND ${column} IS NULL`,
+      )
+      .run(NODE_TIME, createdId ?? null, nodeId);
+  return { ...h, nodeId, update, settle };
+}
+
+for (const state of TERMINAL_STATES) {
+  test(`a trusted update of a ${state} node opens one follow-up proposal`, async (t) => {
+    const h = trustedHarness(t, state);
+    const answer = await h.update();
+    assert.equal(answer.disposition, Disposition.AcceptedObservation);
+    assert.equal(h.rows().length, SINGLE_ROW);
+    const [proposal] = h.proposals();
+    assert.equal(h.proposals().length, SINGLE_ROW);
+    assert.match(String(proposal?.id), /^proposal_/);
+    assert.equal(proposal?.node_id, h.nodeId);
+    assert.equal(proposal?.attempt, LAST_ATTEMPT);
+    assert.equal(proposal?.assessment_id, null);
+    assert.equal(
+      proposal?.content,
+      canonicalJSON({ node_revision: FIRST_REVISION }),
+    );
+    assert.equal(proposal?.created_node_id, null);
+    assert.equal(proposal?.approved_at, null);
+    assert.equal(proposal?.rejected_at, null);
+    assert.equal(
+      h.store.database
+        .prepare("SELECT state FROM mission_node WHERE id = ?")
+        .get(h.nodeId)?.state,
+      state,
+    );
+  });
+}
+
+test("a trusted update of a node discarded at attempt 0 opens one proposal of attempt 0", async (t) => {
+  const h = trustedHarness(t, NodeState.Discarded, NO_ATTEMPT);
+  await h.update();
+  const [proposal] = h.proposals();
+  assert.equal(h.proposals().length, SINGLE_ROW);
+  assert.equal(proposal?.attempt, NO_ATTEMPT);
+  assert.equal(proposal?.assessment_id, null);
+});
+
+for (const state of TERMINAL_STATES) {
+  test(`an update of an actor outside link_trust of a ${state} node opens nothing`, async (t) => {
+    const h = trustedHarness(t, state);
+    await h.update(OTHER_ACTOR);
+    assert.equal(h.rows().length, SINGLE_ROW);
+    assert.equal(h.proposals().length, NO_ROWS);
+  });
+}
+
+test("a second update while the proposal is open opens nothing", async (t) => {
+  const h = trustedHarness(t, NodeState.Completed);
+  await h.update();
+  await h.update();
+  assert.equal(h.rows().length, TWO_ROWS);
+  assert.equal(h.proposals().length, SINGLE_ROW);
+});
+
+test("an update after a rejection opens a new proposal", async (t) => {
+  const h = trustedHarness(t, NodeState.Completed);
+  await h.update();
+  h.settle("rejected_at");
+  await h.update();
+  assert.equal(h.proposals().length, TWO_ROWS);
+  assert.equal(
+    h.proposals().filter((row) => row.rejected_at === null).length,
+    SINGLE_ROW,
+  );
+});
+
+test("an update opens nothing while the created node of an approval is not retired", async (t) => {
+  const h = trustedHarness(t, NodeState.Completed);
+  await h.update();
+  const created = h.addNode([linkOf()]);
+  h.settle("approved_at", created);
+  await h.update();
+  assert.equal(h.proposals().length, SINGLE_ROW);
+  h.retire(created);
+  await h.update();
+  assert.equal(h.proposals().length, TWO_ROWS);
+});
+
+test("an update of a retired terminal node opens nothing", async (t) => {
+  const h = trustedHarness(t, NodeState.Completed);
+  h.addNode([linkOf()]);
+  h.retire(h.nodeId);
+  await h.update();
+  assert.equal(h.rows().length, SINGLE_ROW);
+  assert.equal(h.proposals().length, NO_ROWS);
+});
+
+for (const state of [
+  NodeState.Available,
+  NodeState.Executing,
+  NodeState.Blocked,
+]) {
+  test(`a trusted update of a ${state} node opens nothing and keeps its state`, async (t) => {
+    const h = trustedHarness(t, state, SINGLE_ROW);
+    const before = withoutLinkRows(databaseSnapshot(h.store));
+    await h.update();
+    assert.equal(h.rows().length, SINGLE_ROW);
+    assert.equal(h.proposals().length, NO_ROWS);
+    assert.deepEqual(withoutLinkRows(databaseSnapshot(h.store)), before);
+  });
+}

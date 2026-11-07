@@ -282,6 +282,15 @@ test("each service migration set applies alone to an empty store", () => {
         assert.deepEqual(
           store.database
             .prepare(
+              `SELECT name, "notnull" FROM pragma_table_info('${MISSION_PROPOSAL_TABLE}') WHERE name = 'assessment_id'`,
+            )
+            .all()
+            .map((row) => ({ ...row })),
+          [{ name: "assessment_id", notnull: 0 }],
+        );
+        assert.deepEqual(
+          store.database
+            .prepare(
               `SELECT name FROM pragma_table_info('${MISSION_NODE_TABLE}') ORDER BY cid`,
             )
             .all()

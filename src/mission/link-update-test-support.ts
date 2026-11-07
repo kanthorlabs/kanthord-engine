@@ -11,7 +11,7 @@ import {
   NodeState,
   RevisionWrite,
 } from "./contract.ts";
-import { insertLinkUpdate, openAttempt } from "./record-store.ts";
+import { closeAttempt, insertLinkUpdate, openAttempt } from "./record-store.ts";
 import {
   insertNode,
   insertRevision,
@@ -133,6 +133,24 @@ export function linkUpdateHarness(t: TestContext, identity: CallerIdentity) {
     });
     return nodeId;
   };
+  const addAttempts = (nodeId: string, count: number) =>
+    h.store.transaction((tx) => {
+      for (let attempt = 1; attempt <= count; attempt++) {
+        openAttempt(
+          tx,
+          nodeId,
+          FIRST_REVISION,
+          { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" },
+          NODE_TIME,
+        );
+        closeAttempt(tx, nodeId, attempt, NODE_TIME);
+      }
+    });
+  const proposals = () =>
+    h.store.database
+      .prepare("SELECT * FROM mission_proposal ORDER BY id")
+      .all()
+      .map((row) => ({ ...row }));
   const pinned: BindingRevision[] = [];
   const reads: string[] = [];
   h.dependencies.bindings.getBindingRevision = (_tx, bindingId) => {
@@ -218,6 +236,8 @@ export function linkUpdateHarness(t: TestContext, identity: CallerIdentity) {
     decoding,
     intakeChecks,
     addNode,
+    addAttempts,
+    proposals,
     addBinding,
     insertUpdate,
     listed,

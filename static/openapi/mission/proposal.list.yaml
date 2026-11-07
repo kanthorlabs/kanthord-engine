@@ -108,51 +108,67 @@ components:
         items:
           type: array
           items:
-            type: object
-            properties:
-              id:
-                type: string
-                minLength: 35
-                maxLength: 35
-                pattern: ^proposal_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                description: proposal_ followed by a canonical 26-character uppercase ULID.
-              node_id:
-                type: string
-                minLength: 31
-                maxLength: 31
-                pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                description: node_ followed by a canonical 26-character uppercase ULID.
-              attempt:
-                type: integer
-                minimum: 0
-                maximum: 9007199254740991
-              assessment_id:
-                type: string
-                minLength: 37
-                maxLength: 37
-                pattern: ^assessment_[0-7][0-9A-HJKMNP-TV-Z]{25}$
-                description: assessment_ followed by a canonical 26-character uppercase ULID.
-              content:
-                type: object
+            anyOf:
+              - type: object
                 properties:
-                  dependency_id:
+                  id:
+                    type: string
+                    minLength: 35
+                    maxLength: 35
+                    pattern: ^proposal_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: proposal_ followed by a canonical 26-character uppercase ULID.
+                  node_id:
                     type: string
                     minLength: 31
                     maxLength: 31
                     pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                     description: node_ followed by a canonical 26-character uppercase ULID.
-                  name:
+                  attempt:
+                    type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                  created_node_id:
+                    anyOf:
+                      - type: string
+                        minLength: 31
+                        maxLength: 31
+                        pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: node_ followed by a canonical 26-character uppercase ULID.
+                      - type: "null"
+                  approved_at:
+                    anyOf:
+                      - type: integer
+                        minimum: 0
+                        maximum: 9007199254740991
+                        description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                      - type: "null"
+                  rejected_at:
+                    anyOf:
+                      - type: integer
+                        minimum: 0
+                        maximum: 9007199254740991
+                        description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                      - type: "null"
+                  created_at:
+                    type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                    description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                  assessment_id:
                     type: string
-                    minLength: 1
-                  requirement:
-                    type: string
-                    minLength: 1
-                  criterion:
-                    type: string
-                    minLength: 1
-                  task:
+                    minLength: 37
+                    maxLength: 37
+                    pattern: ^assessment_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: assessment_ followed by a canonical 26-character uppercase ULID.
+                  content:
                     type: object
                     properties:
+                      dependency_id:
+                        type: string
+                        minLength: 31
+                        maxLength: 31
+                        pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: node_ followed by a canonical 26-character uppercase ULID.
                       name:
                         type: string
                         minLength: 1
@@ -162,63 +178,116 @@ components:
                       criterion:
                         type: string
                         minLength: 1
-                      verifications:
-                        minItems: 1
-                        type: array
-                        items:
-                          type: string
-                          minLength: 1
+                      task:
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                            minLength: 1
+                          requirement:
+                            type: string
+                            minLength: 1
+                          criterion:
+                            type: string
+                            minLength: 1
+                          verifications:
+                            minItems: 1
+                            type: array
+                            items:
+                              type: string
+                              minLength: 1
+                        required:
+                          - name
+                          - requirement
+                          - criterion
+                          - verifications
+                        additionalProperties: false
                     required:
+                      - dependency_id
                       - name
                       - requirement
                       - criterion
-                      - verifications
+                      - task
                     additionalProperties: false
                 required:
-                  - dependency_id
-                  - name
-                  - requirement
-                  - criterion
-                  - task
+                  - id
+                  - node_id
+                  - attempt
+                  - created_node_id
+                  - approved_at
+                  - rejected_at
+                  - created_at
+                  - assessment_id
+                  - content
                 additionalProperties: false
-              created_node_id:
-                anyOf:
-                  - type: string
+              - type: object
+                properties:
+                  id:
+                    type: string
+                    minLength: 35
+                    maxLength: 35
+                    pattern: ^proposal_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: proposal_ followed by a canonical 26-character uppercase ULID.
+                  node_id:
+                    type: string
                     minLength: 31
                     maxLength: 31
                     pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                     description: node_ followed by a canonical 26-character uppercase ULID.
-                  - type: "null"
-              approved_at:
-                anyOf:
-                  - type: integer
+                  attempt:
+                    type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                  created_node_id:
+                    anyOf:
+                      - type: string
+                        minLength: 31
+                        maxLength: 31
+                        pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: node_ followed by a canonical 26-character uppercase ULID.
+                      - type: "null"
+                  approved_at:
+                    anyOf:
+                      - type: integer
+                        minimum: 0
+                        maximum: 9007199254740991
+                        description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                      - type: "null"
+                  rejected_at:
+                    anyOf:
+                      - type: integer
+                        minimum: 0
+                        maximum: 9007199254740991
+                        description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                      - type: "null"
+                  created_at:
+                    type: integer
                     minimum: 0
                     maximum: 9007199254740991
                     description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
-                  - type: "null"
-              rejected_at:
-                anyOf:
-                  - type: integer
-                    minimum: 0
-                    maximum: 9007199254740991
-                    description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
-                  - type: "null"
-              created_at:
-                type: integer
-                minimum: 0
-                maximum: 9007199254740991
-                description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
-            required:
-              - id
-              - node_id
-              - attempt
-              - assessment_id
-              - content
-              - created_node_id
-              - approved_at
-              - rejected_at
-              - created_at
-            additionalProperties: false
+                  assessment_id:
+                    type: "null"
+                  content:
+                    type: object
+                    properties:
+                      node_revision:
+                        type: integer
+                        exclusiveMinimum: 0
+                        maximum: 9007199254740991
+                    required:
+                      - node_revision
+                    additionalProperties: false
+                required:
+                  - id
+                  - node_id
+                  - attempt
+                  - created_node_id
+                  - approved_at
+                  - rejected_at
+                  - created_at
+                  - assessment_id
+                  - content
+                additionalProperties: false
         next_cursor:
           anyOf:
             - type: string

@@ -1,6 +1,8 @@
 import { identitySchema } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  type FixProposal,
+  fixProposalSchema,
   NODE_LIST_LIMIT_DEFAULT,
   type Proposal,
   PROPOSAL_IDENTITY_PREFIX,
@@ -17,11 +19,15 @@ const SLICE_FROM_START = 0;
 const PAGINATION_LOOKAHEAD = 1;
 const LAST_ITEM_OFFSET = 1;
 
-export function proposalRecord(row: ProposalRow): Proposal {
-  return proposalSchema.parse({
+export function fixProposalRecord(row: ProposalRow): FixProposal {
+  return fixProposalSchema.parse({
     ...row,
     content: proposalContentSchema.parse(JSON.parse(row.content)),
   });
+}
+
+export function proposalRecord(row: ProposalRow): Proposal {
+  return proposalSchema.parse({ ...row, content: JSON.parse(row.content) });
 }
 
 export function requireAssessment(tx: Transaction, id: string): AssessmentRow {

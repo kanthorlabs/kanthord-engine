@@ -1415,17 +1415,34 @@ export const proposalContentSchema = z.strictObject({
   task: proposalTaskSchema,
 });
 export type ProposalContent = z.infer<typeof proposalContentSchema>;
-export const proposalSchema = z.strictObject({
+export const followupContentSchema = z.strictObject({
+  node_revision: z.number().int().positive(),
+});
+export type FollowupContent = z.infer<typeof followupContentSchema>;
+const proposalFields = {
   id: identitySchema(PROPOSAL_IDENTITY_PREFIX),
   node_id: identitySchema(NODE_IDENTITY_PREFIX),
   attempt: z.number().int().nonnegative(),
-  assessment_id: identitySchema("assessment"),
-  content: proposalContentSchema,
   created_node_id: identitySchema(NODE_IDENTITY_PREFIX).nullable(),
   approved_at: timestamp.nullable(),
   rejected_at: timestamp.nullable(),
   created_at: timestamp,
+};
+export const fixProposalSchema = z.strictObject({
+  ...proposalFields,
+  assessment_id: identitySchema("assessment"),
+  content: proposalContentSchema,
 });
+export type FixProposal = z.infer<typeof fixProposalSchema>;
+export const followupProposalSchema = z.strictObject({
+  ...proposalFields,
+  assessment_id: z.null(),
+  content: followupContentSchema,
+});
+export const proposalSchema = z.union([
+  fixProposalSchema,
+  followupProposalSchema,
+]);
 export type Proposal = z.infer<typeof proposalSchema>;
 export const proposalDecideSchema = z.strictObject({
   expected_mission_version: z.number().int().positive(),
