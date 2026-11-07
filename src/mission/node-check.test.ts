@@ -13,6 +13,7 @@ import {
   FindingKind,
   MissionErrorCode,
   NodeState,
+  RepositoryAction,
   RepositoryLanding,
   Resolution,
 } from "./contract.ts";
@@ -30,7 +31,11 @@ import {
   readLandedCommitEvidence,
 } from "./record-store.ts";
 import { readMission, setNodeState } from "./store.ts";
-import { externalRequestHarness, revokedExecution } from "./test-support.ts";
+import {
+  ASSESSED_COMMIT,
+  externalRequestHarness,
+  revokedExecution,
+} from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const ACTOR = { kind: "human", account: "ulrich", name: "Ulrich" } as const;
@@ -706,4 +711,223 @@ test("a forced revocation of a live evaluation claim during a deferred check lea
   assert.equal(revoked.live, false);
   assert.equal(revoked.end_state, CheckEndState.Expected);
   assert.equal(revoked.landed, SINGLE_LANDED_COMMIT);
+});
+
+const NEW_COMMIT = "b".repeat(40);
+const LANDED = "c".repeat(40);
+const BASE_MOVED = {
+  class: ResultClass.ConfirmedFailure,
+  code: "git.base_moved",
+  message: "moved",
+};
+
+function landedAddress(commit: string) {
+  return {
+    kind: "branch_push",
+    resource_identity: "repository:github:owner/repo",
+    branch: "main",
+    commit,
+  };
+}
+
+function pushHarness(t: TestContext) {
+  t.mock.timers.enable({ apis: ["setTimeout", "setImmediate"] });
+  const advance = async (ms: number) => {
+    t.mock.timers.tick(ms);
+    for (let turn = 0; turn < MICROTASK_TURNS; turn++) await Promise.resolve();
+  };
+  return { advance };
+}
+
+function reassess(
+  h: Awaited<ReturnType<typeof externalRequestHarness>>,
+  commit: string,
+): void {
+  h.store.database
+    .prepare("UPDATE mission_assessment SET tested_input = ? WHERE node_id = ?")
+    .run(
+      JSON.stringify({
+        kind: AssetKind.Repository,
+        binding_id: h.repositoryId,
+        commit,
+      }),
+      h.node_id,
+    );
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.ExternalRequested),
+  );
+}
+
+test("a push request lands in the round with the assessed commit and ends External.Success", async (t) => {
+  const { advance } = pushHarness(t);
+  const h = await externalRequestHarness(
+    t,
+    IDENTITY,
+    false,
+    RepositoryAction.Push,
+  );
+  const merged: string[] = [];
+  h.dependencies.intakeCheck.check = async () =>
+    merged.length === NO_MERGES
+      ? { end_state: CheckEndState.None, landed_commits: [] }
+      : { end_state: CheckEndState.Expected, landed_commits: [LANDED] };
+  h.dependencies.intakeCheck.merge = async (_context, body) => {
+    merged.push(body.commit);
+    return landedAddress(LANDED) as never;
+  };
+  scheduleDeferredCheck(h.dependencies, h.node_id, FIRST_ATTEMPT);
+  await advance(FIRST_ROUND_DELAY_MS);
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.deepEqual(merged, [ASSESSED_COMMIT]);
+  assert.equal(h.node().state, NodeState.Completed);
+  h.store.transaction((tx) =>
+    assert.equal(
+      readLandedCommitEvidence(tx, h.node_id, FIRST_ATTEMPT).length,
+      SINGLE_LANDED_COMMIT,
+    ),
+  );
+});
+
+test("two nodes on one base: one lands and the other answers conflict and returns to Available", async (t) => {
+  const { advance } = pushHarness(t);
+  const first = await externalRequestHarness(
+    t,
+    IDENTITY,
+    false,
+    RepositoryAction.Push,
+  );
+  const second = await externalRequestHarness(
+    t,
+    IDENTITY,
+    false,
+    RepositoryAction.Push,
+  );
+  const remote = { moved: false };
+  for (const [h, lands] of [
+    [first, true],
+    [second, false],
+  ] as const) {
+    h.dependencies.intakeCheck.check = async () => {
+      if (
+        h.node().state === NodeState.ExternalRequested &&
+        lands &&
+        remote.moved
+      )
+        return { end_state: CheckEndState.Expected, landed_commits: [LANDED] };
+      return remote.moved
+        ? { end_state: CheckEndState.Conflict, landed_commits: [] }
+        : { end_state: CheckEndState.None, landed_commits: [] };
+    };
+    h.dependencies.intakeCheck.merge = async () => {
+      if (remote.moved) return BASE_MOVED;
+      remote.moved = true;
+      return landedAddress(LANDED) as never;
+    };
+  }
+  scheduleDeferredCheck(first.dependencies, first.node_id, FIRST_ATTEMPT);
+  await advance(FIRST_ROUND_DELAY_MS);
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(first.node().state, NodeState.Completed);
+  scheduleDeferredCheck(second.dependencies, second.node_id, FIRST_ATTEMPT);
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(second.node().state, NodeState.Available);
+  assert.equal(
+    second.store.transaction(
+      (tx) => readEvidence(tx, second.request.id)!.end_state,
+    ),
+    null,
+  );
+});
+
+test("a base that moves between the check and the land retries and the next round answers conflict", async (t) => {
+  const { advance } = pushHarness(t);
+  const h = await externalRequestHarness(
+    t,
+    IDENTITY,
+    false,
+    RepositoryAction.Push,
+  );
+  let moved = false;
+  const keys: string[] = [];
+  h.dependencies.intakeCheck.check = async () =>
+    moved
+      ? { end_state: CheckEndState.Conflict, landed_commits: [] }
+      : { end_state: CheckEndState.None, landed_commits: [] };
+  h.dependencies.intakeCheck.merge = async (_context, body) => {
+    keys.push(body.request_key);
+    moved = true;
+    return BASE_MOVED;
+  };
+  scheduleDeferredCheck(h.dependencies, h.node_id, FIRST_ATTEMPT);
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+  await advance(DEFERRED_CHECK_RETRY_MS);
+  assert.equal(keys.length, ONE_MERGE);
+  assert.equal(h.node().state, NodeState.Available);
+});
+
+test("after its rework and a new success the same request lands the new commit", async (t) => {
+  const { advance } = pushHarness(t);
+  const h = await externalRequestHarness(
+    t,
+    IDENTITY,
+    false,
+    RepositoryAction.Push,
+  );
+  const merges: string[] = [];
+  let conflict = true;
+  h.dependencies.intakeCheck.check = async () =>
+    conflict
+      ? { end_state: CheckEndState.Conflict, landed_commits: [] }
+      : merges.length === NO_MERGES
+        ? { end_state: CheckEndState.None, landed_commits: [] }
+        : { end_state: CheckEndState.Expected, landed_commits: [LANDED] };
+  h.dependencies.intakeCheck.merge = async (_context, body) => {
+    merges.push(body.commit);
+    return landedAddress(LANDED) as never;
+  };
+  scheduleDeferredCheck(h.dependencies, h.node_id, FIRST_ATTEMPT);
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(h.node().state, NodeState.Available);
+  conflict = false;
+  reassess(h, NEW_COMMIT);
+  scheduleDeferredCheck(h.dependencies, h.node_id, FIRST_ATTEMPT);
+  await advance(FIRST_ROUND_DELAY_MS);
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.deepEqual(merges, [NEW_COMMIT]);
+  assert.equal(h.node().state, NodeState.Completed);
+});
+
+test("a live claim or a gate file blocks the land of a push request", async (t) => {
+  const { advance } = pushHarness(t);
+  const h = await externalRequestHarness(
+    t,
+    IDENTITY,
+    false,
+    RepositoryAction.Push,
+  );
+  let merges = NO_MERGES;
+  h.dependencies.intakeCheck.check = async () => ({
+    end_state: CheckEndState.None,
+    landed_commits: [],
+  });
+  h.dependencies.intakeCheck.merge = async () => {
+    merges++;
+    return landedAddress(LANDED) as never;
+  };
+  const free = h.dependencies.schedulerClaims.liveExecutionOf;
+  h.dependencies.schedulerClaims.liveExecutionOf = h.claim;
+  scheduleDeferredCheck(h.dependencies, h.node_id, FIRST_ATTEMPT);
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(merges, NO_MERGES);
+  h.dependencies.schedulerClaims.liveExecutionOf = free;
+  h.store.database
+    .prepare("UPDATE mission_assessment SET gate_files = ? WHERE node_id = ?")
+    .run(
+      JSON.stringify([{ binding_id: h.repositoryId, paths: ["package.json"] }]),
+      h.node_id,
+    );
+  scheduleDeferredCheck(h.dependencies, h.node_id, FIRST_ATTEMPT);
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(merges, NO_MERGES);
 });

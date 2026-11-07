@@ -382,7 +382,7 @@ test("an assessment stores the server gate files", async (t) => {
   );
 });
 
-test("a server gate file keeps the human landing of a merge push", async (t) => {
+test("a server gate file keeps the human landing of a push", async (t) => {
   const h = await fixture(t, RepositoryAction.Push);
   answerGateFiles(h, [GATE_PATH]);
   const result = await h.submit();

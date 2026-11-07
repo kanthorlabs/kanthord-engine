@@ -8,9 +8,10 @@ import {
   type ActionFacts,
   GrantKind,
   type GrantRequest,
+  SshIdentitySubjectKind,
 } from "../custody/contract.ts";
 import { background } from "../kernel/context.ts";
-import { OperationError } from "../kernel/errors.ts";
+import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import { testServiceIdentity } from "../kernel/test-identity.ts";
@@ -33,13 +34,27 @@ import {
 } from "./contract.ts";
 import { insertPending, succeed } from "./outbound-store.ts";
 import { runOutbound } from "./outbound.ts";
-import { SSH_HOST, sshCustody, sshStore } from "./test-support.ts";
-import type { GitWriter } from "../repository/index.ts";
+import {
+  SSH_CREDENTIAL,
+  SSH_HOST,
+  sshAccessOf,
+  sshCustody,
+  sshStore,
+} from "./test-support.ts";
+import {
+  BaseMovedError,
+  GIT_BASE_MOVED,
+  GitStage,
+  GitWriteError,
+  type GitWriter,
+} from "../repository/index.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const BINDING_ID = "binding_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const EVIDENCE_ID = "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const NODE_ID = "node_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const LANDED_COMMIT = "89abcdef0123456789abcdef0123456789abcdef";
 const ADDRESS = `git@${SSH_HOST}:owner/pushed.git`;
 const RESOURCE_IDENTITY = "repository:github:owner/pushed";
 const TESTED_COMMIT = "0123456789abcdef0123456789abcdef01234567";
@@ -85,18 +100,36 @@ const facts: ActionFacts = {
     resource_identity: RESOURCE_IDENTITY,
     base_branch: "main",
   },
-  node: { name: "Ship accounts", commit_type: "feat" },
+  node: { id: NODE_ID, name: "Ship accounts", commit_type: "feat" },
   snapshot_commit: TESTED_COMMIT,
   reused_address: null,
   merge_address: mergeAddress,
   gate_files: [],
 };
 
+const branchPushAddress = {
+  kind: AddressKind.BranchPush,
+  resource_identity: RESOURCE_IDENTITY,
+  branch: "main",
+  commit: TESTED_COMMIT,
+} as const;
+
+const pushFacts: ActionFacts = {
+  ...facts,
+  frozen_action: {
+    ...facts.frozen_action,
+    key: "pushed.push",
+    action: "push",
+    expected_end_state: ExpectedEndState.BaseBranchPushed,
+  },
+  merge_address: branchPushAddress,
+};
+
 const unexpectedGit = (): never => {
   throw new Error("A merge touches no git remote.");
 };
 const gitWriter: GitWriter = {
-  mergePushFresh: unexpectedGit,
+  squashPushFresh: unexpectedGit,
   pushSnapshotFresh: unexpectedGit,
   landedOn: unexpectedGit,
   changedGateFiles: unexpectedGit,
@@ -156,16 +189,25 @@ async function gitHubServer(
 
 async function harness(
   t: TestContext,
-  options: { platform: Platform; head?: string; refusal?: Error },
+  options: {
+    platform: Platform;
+    head?: string;
+    refusal?: Error;
+    facts?: ActionFacts;
+    credential?: string | null;
+    gitWriter?: GitWriter;
+  },
 ) {
-  const { store } = sshStore(t);
+  const { store, pin } = sshStore(t);
+  pin(SSH_HOST);
   const gitHub = await gitHubServer(t, {
     platform: options.platform,
     head: options.head ?? TESTED_COMMIT,
   });
   const fake = sshCustody({
-    facts,
-    credential: API_CREDENTIAL,
+    facts: options.facts ?? facts,
+    credential:
+      options.credential === undefined ? API_CREDENTIAL : options.credential,
     platform: "github",
     project_id: PROJECT_ID,
     execution: null as never,
@@ -186,7 +228,7 @@ async function harness(
         store,
         custody: fake.custody,
         github: new GitHubPlatform({ baseUrl: gitHub.baseUrl }),
-        gitWriter,
+        gitWriter: options.gitWriter ?? gitWriter,
       },
       (request) => runOutbound({ store, logger, inFlight }, caller, request),
       caller,
@@ -336,4 +378,96 @@ test("a pull request whose head differs from the tested commit answers final_ref
   );
   assert.equal(h.gitHub.merges(), ONE_REQUEST);
   assert.equal(h.gitHub.state.merged, false);
+});
+
+test("a branch push land squashes through the SSH release of the request evidence and uses no API credential", async (t) => {
+  const pushes: { input: unknown; ssh: unknown }[] = [];
+  const h = await harness(t, {
+    platform: Platform.Merges,
+    facts: pushFacts,
+    credential: null,
+    gitWriter: {
+      ...gitWriter,
+      sshAccessOf: sshAccessOf(),
+      squashPushFresh: async (input, _context, _deadline, ssh) => {
+        pushes.push({ input, ssh });
+        return { commit: LANDED_COMMIT };
+      },
+    },
+  });
+  assert.deepEqual(await h.merge(), {
+    ...branchPushAddress,
+    commit: LANDED_COMMIT,
+  });
+  assert.equal(pushes.length, ONE_REQUEST);
+  assert.deepEqual(pushes[0]?.input, {
+    address: ADDRESS,
+    base_branch: "main",
+    commit: TESTED_COMMIT,
+    node_id: NODE_ID,
+    header: "feat: ship accounts",
+  });
+  const ssh = pushes[0]?.ssh as { private_key: string };
+  assert.equal(ssh.private_key, h.privateKey);
+  assert.deepEqual(
+    h.requests.filter((request) => request.kind === GrantKind.SshIdentity),
+    [
+      {
+        kind: GrantKind.SshIdentity,
+        identity: testServiceIdentity("mission"),
+        subject: {
+          kind: SshIdentitySubjectKind.RequestEvidence,
+          evidence_id: EVIDENCE_ID,
+        },
+        claim: null,
+      },
+    ],
+  );
+  assert.deepEqual(h.gitHub.calls(), []);
+  assert.deepEqual(h.rows(), [
+    {
+      operation: OutboundOperation.GitPush,
+      request_key: SERVICE_MERGE_REQUEST_KEY_PREFIX + REQUEST_KEY,
+      state: OutboundRequestState.Succeeded,
+      credential: SSH_CREDENTIAL,
+    },
+  ]);
+  assert.ok(h.materials.every((material) => material.dropped));
+});
+
+test("a moved base answers confirmed_failure with git.base_moved and a lost push reads the landing back", async (t) => {
+  const moved = new BaseMovedError("main");
+  const lost = new GitWriteError(
+    GitStage.Push,
+    new Diagnostic("repository.connector.git_failed", "push lost."),
+  );
+  const failures = [moved, lost];
+  const h = await harness(t, {
+    platform: Platform.Merges,
+    facts: pushFacts,
+    credential: null,
+    gitWriter: {
+      ...gitWriter,
+      sshAccessOf: sshAccessOf(),
+      squashPushFresh: async () => {
+        throw failures.shift();
+      },
+      landedOn: async () => ({
+        landed: true,
+        first_parent: LANDED_COMMIT,
+        base_moved: false,
+      }),
+    },
+  });
+  assert.deepEqual(await h.merge({ request_key: "first" }), {
+    class: ResultClass.ConfirmedFailure,
+    code: GIT_BASE_MOVED,
+    message: moved.message,
+  });
+  const unknown = await h.merge({ request_key: "second" });
+  assert.equal("class" in unknown && unknown.class, ResultClass.UnknownOutcome);
+  assert.deepEqual(await h.merge({ request_key: "second" }), {
+    ...branchPushAddress,
+    commit: LANDED_COMMIT,
+  });
 });

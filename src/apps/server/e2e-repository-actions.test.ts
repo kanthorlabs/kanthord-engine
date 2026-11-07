@@ -3,7 +3,10 @@ import { test, type TestContext } from "node:test";
 import { simpleGit } from "simple-git";
 import { httpClient } from "../../gateway/client.ts";
 import { HttpMethod } from "../../kernel/http.ts";
-import { OutboundRequestState } from "../../intake/contract.ts";
+import {
+  OutboundRequestState,
+  SERVICE_MERGE_REQUEST_KEY_PREFIX,
+} from "../../intake/contract.ts";
 import {
   ActorKind,
   ActorService,
@@ -56,7 +59,8 @@ const MERGE_KEY = "merge.push";
 const GATED_RESOURCE = "repository:github:owner/gated";
 const MERGE_RESOURCE = "repository:github:owner/merge";
 const PULL_REQUEST_OPERATION = "github.pull_request";
-const MERGE_PUSH_OPERATION = "git.push";
+const PUSH_OPERATION = "git.push";
+const SINGLE_ROW = 1;
 const MAIN_REF = "refs/heads/main";
 const MERGED_COMMIT = "e".repeat(40);
 const COMMIT_RULE =
@@ -310,34 +314,52 @@ test("E03 repository actions CLI journey", { timeout: TIMEOUT }, async (t) => {
   const Q = await h.create("implement-q.md", Intent.Implement, [MERGE], h.I);
   const q = await pushNodeBranch(h.t, h.mergeBare.bare, Q, "implement q\n");
   const e4 = await h.passingEvaluation(Q, h.merge.id, q);
-  await t.test("E03.7 a merge push lands Q on main", async () => {
-    const result = await h.request(e4);
-    const c = await remoteHead(h.mergeBare.bare, MAIN_REF);
-    assert.ok(c && c !== h.mergeBare.head);
-    const item = result.items[FIRST_INDEX];
-    assert.ok(item?.kind === ActionResultKind.Submitted, JSON.stringify(item));
-    assert.deepEqual((item.evidence as Evidence).assets[FIRST_INDEX]?.address, {
-      kind: PlatformAddressKind.BranchPush,
-      resource_identity: MERGE_RESOURCE,
-      branch: "main",
-      commit: c,
-    });
-    await h.release(e4.execution_id);
-    const page = await h.outbound(MERGE_PUSH_OPERATION);
-    assert.deepEqual(
-      page.items.map((row) => [row.request_key, row.state]),
-      [
-        [
-          `${Q}/${FIRST_ATTEMPT}/${MERGE_KEY}/${q}`,
-          OutboundRequestState.Succeeded,
-        ],
-      ],
-    );
-    const parent = (
-      await simpleGit(h.mergeBare.bare).raw(["rev-parse", `${c}^2`])
-    ).trim();
-    assert.equal(parent, q);
-  });
+  await t.test(
+    "E03.7 a push records the assessed commit and the round lands Q on main",
+    async (t) => {
+      const result = await h.request(e4);
+      const item = result.items[FIRST_INDEX];
+      assert.ok(
+        item?.kind === ActionResultKind.Submitted,
+        JSON.stringify(item),
+      );
+      assert.deepEqual(
+        (item.evidence as Evidence).assets[FIRST_INDEX]?.address,
+        {
+          kind: PlatformAddressKind.BranchPush,
+          resource_identity: MERGE_RESOURCE,
+          branch: "main",
+          commit: q,
+        },
+      );
+      await h.release(e4.execution_id);
+      const page = await until(
+        () => h.outbound(PUSH_OPERATION),
+        (rows) =>
+          rows.items.length === SINGLE_ROW &&
+          rows.items[FIRST_INDEX]!.state !== OutboundRequestState.Pending,
+        t.signal,
+      );
+      const [row] = page.items;
+      assert.ok(
+        row!.request_key.startsWith(
+          `${SERVICE_MERGE_REQUEST_KEY_PREFIX}${Q}/${FIRST_ATTEMPT}/${MERGE_KEY}/merge/${q}/service/`,
+        ),
+      );
+      assert.equal(row!.state, OutboundRequestState.Succeeded);
+      const c = await remoteHead(h.mergeBare.bare, MAIN_REF);
+      assert.ok(c && c !== h.mergeBare.head);
+      const git = simpleGit(h.mergeBare.bare);
+      assert.equal(
+        (await git.raw(["rev-parse", `${c}^@`])).trim(),
+        h.mergeBare.head,
+      );
+      assert.equal(
+        (await git.raw(["rev-parse", `${c}^{tree}`])).trim(),
+        (await git.raw(["rev-parse", `${q}^{tree}`])).trim(),
+      );
+    },
+  );
   await t.test(
     "E03.8 the deferred check completes Q after landing",
     async (t) => {

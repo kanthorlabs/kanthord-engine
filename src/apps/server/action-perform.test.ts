@@ -594,6 +594,11 @@ test(
     await t.test(
       "an unmapped action answers 422 and records no request",
       async () => {
+        await simpleGit(h.pushed.bare).raw([
+          "update-ref",
+          MAIN_REF,
+          h.pushed.head,
+        ]);
         const authorize = h.fixture.mission.authorizeFrozenAction;
         h.fixture.mission.authorizeFrozenAction = (...args) => ({
           ...authorize.apply(h.fixture.mission, args),
@@ -776,7 +781,7 @@ test(
     });
 
     await t.test(
-      "git.push merges the snapshot and leaves no clone",
+      "git.push squashes the snapshot and leaves no clone",
       async () => {
         const before = h.materials.length;
         const scratch = mkdtempSync(join(tmpdir(), "kd-perform-"));
@@ -784,11 +789,11 @@ test(
         const previous = process.env.TMPDIR;
         process.env.TMPDIR = scratch;
         const writer = h.fixture.gitWriter;
-        const mergePushFresh = writer.mergePushFresh;
+        const squashPushFresh = writer.squashPushFresh;
         const roots: string[] = [];
-        writer.mergePushFresh = (...args) => {
+        writer.squashPushFresh = (...args) => {
           roots.push(tmpdir());
-          return mergePushFresh(...args);
+          return squashPushFresh(...args);
         };
         let answer: Answer;
         try {
@@ -796,7 +801,7 @@ test(
         } finally {
           if (previous === undefined) delete process.env.TMPDIR;
           else process.env.TMPDIR = previous;
-          writer.mergePushFresh = mergePushFresh;
+          writer.squashPushFresh = squashPushFresh;
         }
         assert.deepEqual(roots, [scratch]);
         assert.deepEqual(readdirSync(scratch), []);
@@ -825,8 +830,13 @@ test(
     );
 
     await t.test(
-      "a merge push on a gitlab binding answers a branch_push address",
+      "a push on a gitlab binding answers a branch_push address",
       async () => {
+        await simpleGit(h.pushed.bare).raw([
+          "update-ref",
+          MAIN_REF,
+          h.pushed.head,
+        ]);
         const authorize = h.fixture.mission.authorizeFrozenAction;
         h.fixture.mission.authorizeFrozenAction = (...args) => ({
           ...authorize.apply(h.fixture.mission, args),
@@ -886,11 +896,11 @@ test(
           String(FIRST_REVISION),
         ]);
         const writer = h.fixture.gitWriter;
-        const mergePushFresh = writer.mergePushFresh;
+        const squashPushFresh = writer.squashPushFresh;
         let pushes = 0;
-        writer.mergePushFresh = (...args) => {
+        writer.squashPushFresh = (...args) => {
           pushes += ONE_PUSH;
-          return mergePushFresh(...args);
+          return squashPushFresh(...args);
         };
         try {
           failed(
@@ -899,7 +909,7 @@ test(
             SSH_REVISION_REVOKED,
           );
         } finally {
-          writer.mergePushFresh = mergePushFresh;
+          writer.squashPushFresh = squashPushFresh;
         }
         assert.equal(pushes, NO_PUSHES);
         assert.equal(h.row("revoked"), undefined);

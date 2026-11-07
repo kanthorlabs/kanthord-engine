@@ -98,7 +98,7 @@ function harness(t: TestContext, answer: GateAnswer) {
   const calls: GateCall[] = [];
   const unexpected = () => assert.fail("A gate file read pushes nothing.");
   const gitWriter: GitWriter = {
-    mergePushFresh: unexpected,
+    squashPushFresh: unexpected,
     pushSnapshotFresh: unexpected,
     landedOn: unexpected,
     changedGateFiles: async (input, _context, _deadline, ssh) => {

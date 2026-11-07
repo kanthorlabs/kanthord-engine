@@ -305,6 +305,23 @@ test("a request evidence answers the credential of a pull request and none for a
   assert.equal(push.facts.address.kind, PlatformAddressKind.BranchPush);
 });
 
+test("a request evidence answers the assessed commit for a branch push only", (t) => {
+  const h = actionHarness(t);
+  h.assess();
+  assert.equal(h.evidence(h.request()).facts.assessed_commit, null);
+  h.policy.action = RepositoryAction.Push;
+  const pushId = h.request({
+    kind: PlatformAddressKind.BranchPush,
+    resource_identity: h.resourceIdentity,
+    branch: "main",
+    commit: OTHER_COMMIT,
+  });
+  h.assess(AssessmentResult.CriterionNotMet);
+  assert.equal(h.evidence(pushId).facts.assessed_commit, null);
+  h.assess();
+  assert.equal(h.evidence(pushId).facts.assessed_commit, ASSESSED_COMMIT);
+});
+
 test("a request evidence refuses another node, a missing claim, a dead claim and a disabled or removed binding", (t) => {
   const h = actionHarness(t);
   const id = h.request();
@@ -666,24 +683,21 @@ test("a merge address refuses evidence from another resource", (t) => {
   refuses(() => h.frozen({ mergeEvidenceId: foreignId }), "node_mismatch");
 });
 
-test("a merge address refuses a non-pull-request action with node_mismatch", (t) => {
+test("a merge address admits a branch push of a push action", (t) => {
   const h = actionHarness(t);
   h.policy.action = RepositoryAction.Push;
   h.policy.landing = RepositoryLanding.KanthorD;
   h.assess();
-  const id = h.request(
-    {
-      kind: PlatformAddressKind.BranchPush,
-      resource_identity: h.resourceIdentity,
-      branch: "main",
-      commit: ASSESSED_COMMIT,
-    },
-    h.node_id,
-    MERGE_PUSH_KEY,
-  );
-  refuses(
-    () => h.frozen({ key: MERGE_PUSH_KEY, mergeEvidenceId: id }),
-    "node_mismatch",
+  const address = {
+    kind: PlatformAddressKind.BranchPush,
+    resource_identity: h.resourceIdentity,
+    branch: "main",
+    commit: ASSESSED_COMMIT,
+  };
+  const id = h.request(address, h.node_id, MERGE_PUSH_KEY);
+  assert.deepEqual(
+    h.frozen({ key: MERGE_PUSH_KEY, mergeEvidenceId: id }).facts.merge_address,
+    address,
   );
 });
 
@@ -944,4 +958,57 @@ test("a service merge refuses a paused project", (t) => {
     return true;
   };
   refuses(() => h.merge(), "claim_not_live");
+});
+
+function pushMergeHarness(t: TestContext) {
+  const h = kanthordHarness(t);
+  h.policy.action = RepositoryAction.Push;
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.ExternalRequested),
+  );
+  const evidenceId = h.request({
+    kind: PlatformAddressKind.BranchPush,
+    resource_identity: h.resourceIdentity,
+    branch: "main",
+    commit: OTHER_COMMIT,
+  });
+  const merge = (input: Partial<{ commit: string }> = {}) =>
+    h.store.transaction((tx) =>
+      h.service.authorizeServiceMerge(
+        tx,
+        testServiceIdentity(MISSION_SERVICE_NAME),
+        { evidenceId, commit: ASSESSED_COMMIT, ...input },
+      ),
+    );
+  return { ...h, evidenceId, merge };
+}
+
+test("a service merge of a push action admits its branch push with no credential and the node identity", (t) => {
+  const h = pushMergeHarness(t);
+  const authorized = h.merge();
+  assert.equal(authorized.credential, null);
+  assert.equal(authorized.facts.frozen_action.action, RepositoryAction.Push);
+  assert.equal(authorized.facts.snapshot_commit, ASSESSED_COMMIT);
+  assert.equal(
+    authorized.facts.merge_address?.kind,
+    PlatformAddressKind.BranchPush,
+  );
+  assert.equal(authorized.facts.node.id, h.node_id);
+});
+
+test("a service merge of a push action refuses a pull request address, a changed gate file and another commit", (t) => {
+  const h = pushMergeHarness(t);
+  refuses(() => h.merge({ commit: OTHER_COMMIT }), "node_mismatch");
+  h.assess(AssessmentResult.Success, ASSESSED_COMMIT, [
+    { binding_id: h.repositoryId, paths: GATE_FILE_PATHS },
+  ]);
+  refuses(() => h.merge(), GATE_FILE_CHANGED);
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare(
+        "UPDATE mission_evidence_asset SET content = ? WHERE evidence_id = ?",
+      )
+      .run(canonicalJSON(h.pullRequest), h.evidenceId),
+  );
+  refuses(() => h.merge(), "node_mismatch");
 });

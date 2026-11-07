@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { suite, test } from "node:test";
+import { simpleGit } from "simple-git";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
@@ -18,6 +19,7 @@ import {
   Resolution,
 } from "../../mission/contract.ts";
 import { ActionResultKind } from "../../worker/contract.ts";
+import { remoteHead } from "./test-support.ts";
 import {
   completed,
   pushNextNodeBranchCommit,
@@ -26,7 +28,6 @@ import {
 import {
   FIRST_INDEX,
   GATED_KEY,
-  MERGE_KEY,
   type Page,
   RESOURCE,
   setup,
@@ -45,6 +46,7 @@ const TIMEOUT = 300000;
 const MERGED_COMMIT = "e".repeat(40);
 const PUSHED_COMMIT = "a".repeat(40);
 const BASE_BRANCH = "main";
+const MAIN_REF = "refs/heads/main";
 const SECOND_PULL_REQUEST = 2;
 const CLOSED_AT = "2026-10-15T03:57:51Z";
 const PULL_READS_WITH_REQUIRED_CHECKS = 3;
@@ -341,51 +343,37 @@ suite("E08 delivery admission", { concurrency: SUITE_CONCURRENCY }, () => {
   );
 
   test(
-    "E08.10 a deferred check resolves the merge push; a merged pull request resolves the sibling and conflicts the other",
+    "E08.10 a push node lands one squash commit in the deferred round and completes",
     { timeout: TIMEOUT },
     async (t) => {
       const h = await setup(t, { action: "push" });
       const E = await h.create("examine-1.md");
       const A = await h.implement("implement-a.md", E);
-      const landed = h.gatedBare.head;
-      const request = await h.requestPush(A.x2, landed);
-      assert.equal(request.requirement_key, MERGE_KEY);
+      const before = h.gatedBare.head;
+      const action = await h.actionRequest(A.x2);
+      assert.equal(action.items[FIRST_INDEX]?.kind, ActionResultKind.Submitted);
       await h.release(A.x2.execution_id);
-      await h.rebind("pull_request");
-      const P = await requested(h, E, "implement-p.md");
-      const Q = await requested(h, E, "implement-q.md");
-      h.gitHub.merge(FIRST_PULL_REQUEST, landed);
-      h.gitHub.mergeability(SECOND_PULL_REQUEST, [DIRTY]);
-      const inboundEventId = createIdentity("inbound_event");
-      const answer = completed(
-        await h.admit(mergedItem(FIRST_PULL_REQUEST, landed), inboundEventId),
+      await until(
+        () => h.node(A.nodeId),
+        (node) => node.state === NodeState.Completed,
+        t.signal,
       );
-      assert.deepEqual(answer, {
-        disposition: Disposition.AcceptedObservation,
-        reason: null,
-      });
-      assert.equal((await h.node(A.nodeId)).state, NodeState.Completed);
-      assert.equal((await h.node(P.nodeId)).state, NodeState.Completed);
-      assert.equal((await h.node(Q.nodeId)).state, NodeState.Available);
-      const pEvidence = await h.read<Page<Evidence>>([
-        "mission",
-        "evidence",
-        "list",
-        P.nodeId,
-        "--attempt",
-        String(FIRST_ATTEMPT),
-      ]);
-      const pProvenance = pEvidence.items
-        .filter((item) => item.provenance.kind === ActorKind.Service)
-        .map((item) => item.provenance);
-      assert.deepEqual(pProvenance, [
-        {
-          kind: ActorKind.Service,
-          service: ActorService.Mission,
-          inbound_event_id: inboundEventId,
-        },
-      ]);
-      const aEvidence = await h.read<Page<Evidence>>([
+      const landed = await remoteHead(h.gatedBare.bare, MAIN_REF);
+      assert.ok(landed && landed !== before);
+      const git = simpleGit(h.gatedBare.bare);
+      assert.equal(
+        (await git.raw(["rev-parse", `${landed}^@`])).trim(),
+        before,
+      );
+      assert.equal(
+        (await git.raw(["rev-parse", `${landed}^{tree}`])).trim(),
+        (await git.raw(["rev-parse", `${A.head}^{tree}`])).trim(),
+      );
+      assert.match(
+        await git.raw(["log", "-1", "--format=%B", landed]),
+        new RegExp(`KanthorD-Node: ${A.nodeId}\\nKanthorD-Tested: ${A.head}`),
+      );
+      const evidence = await h.read<Page<Evidence>>([
         "mission",
         "evidence",
         "list",
@@ -393,15 +381,12 @@ suite("E08 delivery admission", { concurrency: SUITE_CONCURRENCY }, () => {
         "--attempt",
         String(FIRST_ATTEMPT),
       ]);
-      const aProvenance = aEvidence.items
-        .filter((item) => item.provenance.kind === ActorKind.Service)
-        .map((item) => item.provenance);
-      assert.deepEqual(aProvenance, [
-        {
-          kind: ActorKind.Service,
-          service: ActorService.Mission,
-        },
-      ]);
+      assert.deepEqual(
+        evidence.items
+          .filter((item) => item.provenance.kind === ActorKind.Service)
+          .map((item) => item.provenance),
+        [{ kind: ActorKind.Service, service: ActorService.Mission }],
+      );
     },
   );
 
