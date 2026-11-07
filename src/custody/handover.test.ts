@@ -168,6 +168,7 @@ function fixture(
   repositories: readonly string[] = [],
   instances: ReadonlyMap<string, InstancePair> = new Map(),
   oauthNames: readonly string[] = [],
+  machines: ReadonlyMap<string, string> = new Map(),
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
   stopAfter(t, () => store.close());
@@ -346,6 +347,11 @@ function fixture(
       nameOf: (_tx, instanceId) =>
         [...instances.values()].find(({ id }) => id === instanceId)?.key.name ??
         null,
+      machineOf: (_tx, name) => machines.get(name) ?? null,
+      instancesOfMachine: (_tx, machine) =>
+        [...machines]
+          .filter(([, value]) => value === machine)
+          .map(([name]) => name),
     },
   });
   const credentialIds = names.map(
@@ -729,6 +735,7 @@ test("a worker placement handover answers the copy sealed to the instance key, p
   assert.ok(item && "sealed" in item);
   assert.equal(item.credential_id, copyId);
   assert.deepEqual([item.name, item.platform], ["anthro-1", TEST_PLATFORM]);
+  assert.equal(item.holder, relay.key.name);
   assert.deepEqual(f.row.credentials, [copyId]);
   const key = copyKeyOf(relay);
   const opened = await openSealedCopy(item, SecretShape.ApiKey, key);
@@ -1646,4 +1653,116 @@ test("a lease of a revision of a worker instance answers a sealed item and a lea
   const plain = leasePayloadOf(f, f.lease(serverId)).item;
   assert.ok("credential" in plain);
   assert.deepEqual(plain.credential, FIRST);
+});
+
+const MACHINE = "machine-1";
+const BOX = "box-1";
+
+async function machineFixture(t: TestContext, names: readonly string[]) {
+  const box = await instancePair(BOX);
+  const machine = await instancePair(MACHINE);
+  const f = fixture(
+    t,
+    names,
+    [],
+    new Map([
+      [BOX, box],
+      [MACHINE, machine],
+    ]),
+    [],
+    new Map([[BOX, MACHINE]]),
+  );
+  f.store.database.prepare("DELETE FROM credential").run();
+  return { f, box, machine };
+}
+
+const sealedItemsOf = (f: Awaited<ReturnType<typeof machineFixture>>["f"]) =>
+  handoverPayloadSchema.parse(
+    openEnvelope(
+      f.keys.handover,
+      f.aad,
+      f.handover([], HandoverPlacement.Worker),
+    ),
+  ).items;
+
+test("a worker placement handover answers the machine copy for an instance with no own copy and the own copy otherwise", async (t) => {
+  const { f, machine } = await machineFixture(t, ["anthro-1"]);
+  const [machineCopy] = await f.holdCopies("anthro-1", [MACHINE]);
+  assert.equal(machineCopy!.holder, MACHINE);
+  assert.equal(machineCopy!.sealed_to, machine.key.fingerprint);
+  const [item] = sealedItemsOf(f);
+  assert.ok(item && "sealed" in item);
+  assert.equal(item.holder, MACHINE);
+  assert.equal(item.credential_id, machineCopy!.revisions[0]!.id);
+  const own = fixture(
+    t,
+    ["anthro-1"],
+    [],
+    new Map([
+      [BOX, await instancePair(BOX)],
+      [MACHINE, machine],
+    ]),
+    [],
+    new Map([[BOX, MACHINE]]),
+  );
+  own.store.database.prepare("DELETE FROM credential").run();
+  await own.holdCopies("anthro-1", [MACHINE, BOX]);
+  const [ownItem] = sealedItemsOf(own);
+  assert.ok(ownItem && "sealed" in ownItem);
+  assert.equal(ownItem.holder, BOX);
+});
+
+test("a stale own copy refuses with held_elsewhere and does not fall back to the machine copy", async (t) => {
+  const box = await instancePair(BOX);
+  const machine = await instancePair(MACHINE);
+  const instances = new Map([
+    [BOX, box],
+    [MACHINE, machine],
+  ]);
+  const f = fixture(
+    t,
+    ["anthro-1"],
+    [],
+    instances,
+    [],
+    new Map([[BOX, MACHINE]]),
+  );
+  f.store.database.prepare("DELETE FROM credential").run();
+  await f.holdCopies("anthro-1", [MACHINE, BOX]);
+  instances.set(BOX, { ...box, key: (await instancePair(BOX)).key });
+  assert.throws(
+    () => f.handover([], HandoverPlacement.Worker),
+    refusedHolder(HolderRefusal.HeldElsewhere),
+  );
+  assert.deepEqual(f.row.credentials, []);
+});
+
+test("an execution that pinned the machine copy keeps it after an own copy appears", async (t) => {
+  const { f } = await machineFixture(t, ["anthro-1"]);
+  const [machineCopy] = await f.holdCopies("anthro-1", [MACHINE]);
+  const machineCopyId = machineCopy!.revisions[0]!.id;
+  const [first] = sealedItemsOf(f);
+  assert.equal(first!.credential_id, machineCopyId);
+  await f.holdCopies("anthro-1", [BOX]);
+  const [second] = sealedItemsOf(f);
+  assert.ok(second && "sealed" in second);
+  assert.equal(second.credential_id, machineCopyId);
+  assert.equal(second.holder, MACHINE);
+  assert.deepEqual(f.row.credentials, [machineCopyId]);
+});
+
+test("a lease of a pinned machine copy answers a sealed item with the machine name as holder", async (t) => {
+  const { f, machine } = await machineFixture(t, ["anthro-1"]);
+  const [machineCopy] = await f.holdCopies("anthro-1", [MACHINE]);
+  const copyId = machineCopy!.revisions[0]!.id;
+  sealedItemsOf(f);
+  const item = leasePayloadOf(f, f.lease(copyId)).item;
+  assert.ok("sealed" in item);
+  assert.equal(item.holder, MACHINE);
+  const opened = await openSealedCopy(
+    item,
+    SecretShape.ApiKey,
+    copyKeyOf(machine),
+  );
+  assert.deepEqual(opened?.credential, FIRST);
 });

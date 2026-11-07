@@ -97,6 +97,7 @@ export const sealedHandoverItemSchema = z.strictObject({
   provider_id: z.string().min(1),
   name: z.string().min(1),
   platform: z.string().min(1),
+  holder: z.string().min(1),
   sealed: sealedObjectSchema,
 });
 export type SealedHandoverItem = z.infer<typeof sealedHandoverItemSchema>;
@@ -861,6 +862,8 @@ export type InstanceKey = {
 export interface InstanceKeys {
   keyOf(tx: Transaction, name: string): InstanceKey | null;
   nameOf(tx: Transaction, instanceId: string): string | null;
+  machineOf(tx: Transaction, instanceName: string): string | null;
+  instancesOfMachine(tx: Transaction, machine: string): string[];
 }
 export type SealedCopy = {
   holder: string;
@@ -882,6 +885,7 @@ export type SealedRotateBody = {
 };
 export type HeldCopy = {
   name: string;
+  holder: string;
   revision: number;
   platform: string;
   sealed_current: boolean;

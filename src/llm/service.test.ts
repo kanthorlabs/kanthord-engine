@@ -2551,6 +2551,8 @@ async function instanceFixture() {
   const f = fixture({
     instanceKeys: {
       keyOf: (_tx, name) => pairs.get(name)?.key ?? null,
+      machineOf: () => null,
+      instancesOfMachine: () => [],
       nameOf: (_tx, instanceId) =>
         [...pairs.values()].find(({ id }) => id === instanceId)?.key.name ??
         null,
@@ -2764,6 +2766,8 @@ test("a key rotation between the server seal and the commit refuses the create a
         reads += 1;
         return reads > rotateAfter ? rotated : current;
       },
+      machineOf: () => null,
+      instancesOfMachine: () => [],
       nameOf: () => null,
     },
   });
@@ -2816,6 +2820,8 @@ test("an instance archive between the server seal and the commit refuses the cre
         reads += 1;
         return reads > archiveAfter ? null : live;
       },
+      machineOf: () => null,
+      instancesOfMachine: () => [],
       nameOf: () => null,
     },
   });
@@ -2862,6 +2868,8 @@ test("a holder that names a server or a container instance refuses the create wi
   const f = fixture({
     instanceKeys: {
       keyOf: (_tx, name) => (name === RELAY_A ? live : null),
+      machineOf: () => null,
+      instancesOfMachine: () => [],
       nameOf: () => null,
     },
   });

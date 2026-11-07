@@ -24,7 +24,7 @@ export interface InstanceOperationDependencies {
   heldCopies: (
     tx: Transaction,
     holder: string,
-  ) => (HeldCopy & { health: CopyHealth })[];
+  ) => (Omit<HeldCopy, "holder"> & { health: CopyHealth })[];
 }
 
 function dropEnded(clock: HeartbeatClock, ended: readonly string[]): void {

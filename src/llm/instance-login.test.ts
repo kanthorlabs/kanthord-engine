@@ -100,6 +100,8 @@ async function fixture(t: TestContext) {
   }
   const instanceKeys = {
     keyOf: (_tx: unknown, name: string) => pairs.get(name)?.key ?? null,
+    machineOf: () => null,
+    instancesOfMachine: () => [],
     nameOf: (_tx: unknown, instanceId: string) =>
       [...pairs.values()].find(({ id }) => id === instanceId)?.key.name ?? null,
   };

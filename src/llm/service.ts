@@ -109,6 +109,8 @@ export interface Dependencies {
 const NO_INSTANCE_KEYS: InstanceKeys = {
   keyOf: () => null,
   nameOf: () => null,
+  machineOf: () => null,
+  instancesOfMachine: () => [],
 };
 
 const CredentialErrorCode = {

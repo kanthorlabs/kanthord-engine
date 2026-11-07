@@ -408,6 +408,9 @@ export class WorkerService implements Service {
       ? (instance.machine ?? null)
       : null;
   }
+  instancesOfMachine(tx: Transaction, machine: string): string[] {
+    return readLiveInstancesOfMachine(tx, machine).map(({ name }) => name);
+  }
   connectedInstancesOf(name: string): InstanceRecord[] {
     return this.instances.connectedAmong(
       this.dependencies.store.transaction((tx) =>
@@ -1579,7 +1582,10 @@ export class WorkerService implements Service {
       heldCopies: (tx, holder) =>
         (this.dependencies.instanceCopies?.heldCopies(tx, holder) ?? []).map(
           (copy) => ({
-            ...copy,
+            name: copy.name,
+            revision: copy.revision,
+            platform: copy.platform,
+            sealed_current: copy.sealed_current,
             health:
               this.dependencies.copyHealthOf?.(holder, copy) ??
               unreportedHealth(copy.platform),
