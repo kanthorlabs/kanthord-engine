@@ -404,14 +404,14 @@ export class ProjectEnvironments {
     context: Context,
   ): Promise<InstructionFile | null> {
     const path = config.prompts?.instruction_file;
-    if (path === undefined) return null;
     const read = await this.readBaseWith(
       () => this.dependencies.sshAccess(config.platform, release),
       config,
-      [path],
+      path === undefined ? [] : [path],
       PROMPT_SOURCE_MAX_BYTES,
       { context },
     );
+    if (path === undefined) return null;
     const [file] = read.files;
     assert.ok(file);
     const answer = instructionFileFrom(file, read.commit);

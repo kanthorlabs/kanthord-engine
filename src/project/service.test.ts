@@ -432,7 +432,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     custodySuitability: unexpected,
     repositoryConnector: { gitLsRemote: unexpected },
     repositoryFiles: {
-      resolveBranchCommit: unexpected,
+      resolveBranchCommit: async () => INSTRUCTION_COMMIT,
       readFilesAtCommit: unexpected,
       listFilesAtCommit: async () => [],
       readObjectIds: unexpected,
@@ -1882,6 +1882,8 @@ test("binding write probes every repository outside and before commit, validates
     sshSuitability,
     sshSuitability,
     sshSuitability,
+    sshSuitability,
+    sshSuitability,
     keySuitability,
     sshSuitability,
     keySuitability,
@@ -2869,21 +2871,20 @@ test("a new binding releases the key of its SSH credential under the human draft
   f.project.cancelEnvironmentRuns();
   await f.write({ [REPOSITORY_NAME]: repositoryBinding() });
   const credential = sshCredentialOf(REPOSITORY_ADDRESS);
-  assert.deepEqual(f.releases, [
-    {
-      identity: f.caller.identity,
-      subject: {
-        kind: SshIdentitySubjectKind.Draft,
-        project_id: f.params.project_id,
-        credential,
-        address: REPOSITORY_ADDRESS,
-      },
+  const release = {
+    identity: f.caller.identity,
+    subject: {
+      kind: SshIdentitySubjectKind.Draft,
+      project_id: f.params.project_id,
       credential,
       address: REPOSITORY_ADDRESS,
-      transaction: true,
     },
-  ]);
-  assert.deepEqual(f.dropped, [credential]);
+    credential,
+    address: REPOSITORY_ADDRESS,
+    transaction: true,
+  };
+  assert.deepEqual(f.releases, [release, release]);
+  assert.deepEqual(f.dropped, [credential, credential]);
   assert.deepEqual(reads, [
     {
       address: REPOSITORY_ADDRESS,
@@ -6287,6 +6288,35 @@ test("a write refuses an instruction file that is invalid at the base head with 
     );
     assert.deepEqual(f.snapshot(), before);
   }
+});
+
+test("a write without an instruction file refuses an absent base branch and writes nothing", async (t) => {
+  const { repositoryFiles } = instructionRepositoryFiles(null, null);
+  const f = writeFixture(t, { repositoryFiles });
+  const before = f.snapshot();
+  const commits = f.commits();
+  await rejectsWrite(
+    f.write({ [REPOSITORY_NAME]: repositoryBinding() }),
+    SSH_FAILURE_STATUS,
+    ProjectErrorCode.RepositoryBaseBranchAbsent,
+  );
+  assert.equal(f.commits(), commits);
+  assert.deepEqual(f.snapshot(), before);
+});
+
+test("a write that keeps an unchanged repository binding makes no base read for it", async (t) => {
+  const { repositoryFiles, heads } = instructionRepositoryFiles(null);
+  const f = writeFixture(t, { repositoryFiles });
+  const first = await f.write({ [REPOSITORY_NAME]: repositoryBinding() });
+  assert.equal(heads.length, ONE_CALL);
+  await f.write(
+    {
+      [REPOSITORY_NAME]: repositoryBinding(),
+      [SECOND_REPOSITORY_NAME]: repositoryBinding(SECOND_REPOSITORY_ADDRESS),
+    },
+    first.binding_set_version,
+  );
+  assert.equal(heads.length, TWO_CALLS);
 });
 
 test("a write with an instruction file refuses an absent base branch and a failed read", async (t) => {

@@ -229,7 +229,7 @@ suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(process.env.GIT_SSH, undefined);
   });
 
-  test("fetchAndCheckout keeps the unpushed commits of the local node branch when the remote node branch is missing", async (t) => {
+  test("fetchAndCheckout starts from origin/<base>, not the unpushed commits of the local node branch, when the remote node branch is missing", async (t) => {
     const root = temporary(t);
     const origin = join(root, "origin");
     const seed = join(root, "seed");
@@ -252,7 +252,8 @@ suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
       ]);
       return (await simpleGit(directory).revparse(["HEAD"])).trim();
     };
-    const base = await commit(seed, "base");
+    const baseContent = "base";
+    const base = await commit(seed, baseContent);
     await simpleGit(seed).addRemote("origin", origin);
     await simpleGit(seed).push("origin", "main");
     const branch = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
@@ -275,8 +276,7 @@ suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
       ),
       base,
     );
-    const unpushedContent = "unpushed";
-    const unpushed = await commit(workspace, unpushedContent);
+    await commit(workspace, "unpushed");
     writeFileSync(join(workspace, "untracked"), "scratch");
     assert.equal(
       await fetchAndCheckout(
@@ -288,12 +288,9 @@ suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
         DEADLINE_MS,
         LOCAL_GIT_SSH_ACCESS,
       ),
-      unpushed,
+      base,
     );
-    assert.equal(
-      readFileSync(join(workspace, "file"), "utf8"),
-      unpushedContent,
-    );
+    assert.equal(readFileSync(join(workspace, "file"), "utf8"), baseContent);
     assert.deepEqual(readdirSync(workspace).sort(), [".git", "file"]);
   });
 });
