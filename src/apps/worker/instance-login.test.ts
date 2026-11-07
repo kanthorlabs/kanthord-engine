@@ -23,8 +23,14 @@ import {
 } from "../../llm/contract.ts";
 import { piProviderId, Platform } from "../../llm/platforms.ts";
 import { LoginSessionMode } from "../../llm/sessions.ts";
+import type { InstanceCopyKey } from "../../custody/client.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { EXCHANGE_UNAVAILABLE } from "./instance-exchange.ts";
+import {
+  copyKeysFixture,
+  TEST_MACHINE_NAME,
+} from "./copy-keys-test-support.ts";
+import type { CopyKeys } from "./copy-keys.ts";
 import { InstanceLogins } from "./instance-login.ts";
 
 const INSTANCE = "laptop";
@@ -35,6 +41,7 @@ const DEVICE_URL = "https://auth.openai.com/codex/device";
 const DEVICE_CODE = "ABCD-EFGH";
 const COPY_CODE_VALUE = "authorization-code#state-value";
 const NO_REPORTS = 0;
+const CONFIG_ABSENT = "worker.machine.config_absent";
 const ONE_REPORT = 1;
 const RETRY_MS = 1;
 const DEVICE_OPTION = "device_code";
@@ -74,22 +81,47 @@ function fakeProvider(
   });
 }
 
+interface Target {
+  key: InstanceCopyKey;
+  private_key: Buffer;
+  copyKeys: CopyKeys;
+}
+
+function targetOf(key: InstanceCopyKey, private_key: Buffer): Target {
+  return {
+    key,
+    private_key,
+    copyKeys: {
+      own: key,
+      of: (holder) => (holder === key.holder ? key : null),
+    },
+  };
+}
+
+async function instanceTarget(): Promise<Target> {
+  const pair = await generateX25519KeyPair();
+  return targetOf(
+    {
+      holder: INSTANCE,
+      sealed_to: keyFingerprint(pair.public_key),
+      public_key: pair.public_key,
+      private_key: () => Buffer.from(pair.private_key),
+    },
+    pair.private_key,
+  );
+}
+
 async function fixture(
   provider: Provider,
   lose: (body: LoginReportBody) => boolean = () => false,
+  target?: Target,
 ) {
-  const pair = await generateX25519KeyPair();
-  const key = {
-    holder: INSTANCE,
-    sealed_to: keyFingerprint(pair.public_key),
-    public_key: pair.public_key,
-    private_key: () => Buffer.from(pair.private_key),
-  };
+  const { key, copyKeys, private_key } = target ?? (await instanceTarget());
   const reports: LoginReportBody[] = [];
   const keys: string[] = [];
   let lost = false;
   const logins = new InstanceLogins({
-    key,
+    copyKeys,
     providers: () => [provider],
     report: async (sessionId, body, idempotencyKey) => {
       assert.equal(sessionId, SESSION_ID);
@@ -108,12 +140,12 @@ async function fixture(
   };
   const opened = (body: LoginReportBody, platform: string) =>
     openJSON(
-      pair.private_key,
+      private_key,
       CREDENTIAL_SEAL_INFO,
       credentialSealAad({
         name: CREDENTIAL_NAME,
         platform,
-        holder: INSTANCE,
+        holder: key.holder,
         sealed_to: key.sealed_to,
       }),
       body.sealed!,
@@ -125,6 +157,7 @@ function entry(
   platform: string,
   mode: LoginSessionEntry["mode"],
   code: string | null = null,
+  holder: string = INSTANCE,
 ): LoginSessionEntry {
   return {
     session_id: SESSION_ID,
@@ -132,7 +165,7 @@ function entry(
     platform,
     mode,
     code,
-    holder: INSTANCE,
+    holder,
   };
 }
 
@@ -344,4 +377,73 @@ test("a stopped instance starts no login flow", async () => {
   await setImmediate();
   assert.equal(started, false);
   assert.equal(f.reports.length, NO_REPORTS);
+});
+
+test("a session entry of a machine completes sealed to the machine key and sends the machine fingerprint", async (t) => {
+  const keys = await copyKeysFixture(t);
+  const f = await fixture(
+    copyCodeProvider(),
+    () => false,
+    targetOf(keys.machine.key, keys.machine.pair.private_key),
+  );
+  const listed = (code: string | null) => [
+    entry(
+      Platform.AnthropicSubscription,
+      LoginSessionMode.CopyCode,
+      code,
+      TEST_MACHINE_NAME,
+    ),
+  ];
+  f.logins.sync(listed(null));
+  await f.until(() => f.reports.length > NO_REPORTS, t.signal);
+  f.logins.sync(listed(COPY_CODE_VALUE));
+  await f.until(
+    () => f.reports.at(-1)?.state === InstanceLoginState.Completed,
+    t.signal,
+  );
+  const completed = f.reports.at(-1)!;
+  assert.equal(completed.sealed_to, keys.machine.key.sealed_to);
+  assert.deepEqual(
+    await f.opened(completed, Platform.AnthropicSubscription),
+    OAUTH_SECRET,
+  );
+});
+
+test("a session entry of a machine with no machine key fails the session with the absent code", async (t) => {
+  const keys = await copyKeysFixture(t);
+  const absent = await copyKeysFixture(t, { machineInEnv: false });
+  const f = await fixture(
+    copyCodeProvider(),
+    () => false,
+    targetOf(keys.machine.key, keys.machine.pair.private_key),
+  );
+  const logins = new InstanceLogins({
+    copyKeys: absent.keys,
+    providers: () => [copyCodeProvider()],
+    report: async (_sessionId, body) => {
+      f.reports.push(body);
+    },
+    log: () => {},
+  });
+  const listed = (code: string | null) => [
+    entry(
+      Platform.AnthropicSubscription,
+      LoginSessionMode.CopyCode,
+      code,
+      TEST_MACHINE_NAME,
+    ),
+  ];
+  logins.sync(listed(null));
+  await f.until(() => f.reports.length > NO_REPORTS, t.signal);
+  logins.sync(listed(COPY_CODE_VALUE));
+  await f.until(
+    () => f.reports.at(-1)?.state === InstanceLoginState.Failed,
+    t.signal,
+  );
+  const failed = f.reports.at(-1)!;
+  assert.equal(failed.failure_reason, CONFIG_ABSENT);
+  assert.equal(
+    f.reports.some((report) => report.state === InstanceLoginState.Completed),
+    false,
+  );
 });

@@ -58,7 +58,7 @@ import {
   ExchangeFailure,
   InstanceExchange,
 } from "./instance-exchange.ts";
-import { instanceCopyKey } from "./instance-credential.ts";
+import { copyKeys as copyKeysOf } from "./copy-keys.ts";
 import { InstanceLogins } from "./instance-login.ts";
 import { SessionReads } from "./session-reads.ts";
 import { CopyChecks } from "./copy-checks.ts";
@@ -190,9 +190,9 @@ export class Worker implements Service {
       this.endpoint = endpoint;
       const exchange = new InstanceExchange(configuration, endpoint);
       this.exchange = exchange;
-      const instanceKey = instanceCopyKey(configuration);
+      const copyKeys = copyKeysOf(configuration, env);
       this.logins = new InstanceLogins({
-        key: instanceKey,
+        copyKeys,
         providers: this.options.oauthProviders,
         report: (sessionId, body, idempotencyKey) =>
           exchange.loginReport(sessionId, body, idempotencyKey, this.shutdown),
@@ -211,7 +211,7 @@ export class Worker implements Service {
         log: (record) => this.logRecord(record),
       });
       this.copyChecks = new CopyChecks({
-        key: instanceKey,
+        copyKeys,
         exchange,
         context: this.shutdown,
         providers: this.options.llmProviders,
@@ -242,7 +242,7 @@ export class Worker implements Service {
         repository_transport: this.options.repositoryTransport,
         watchdog: armWatchdog,
         refused: (binding) => this.bindingRefused(binding),
-        instance_key: instanceKey,
+        copy_keys: copyKeys,
         footprint: { residue_root: temporary, worker_placement: true },
       });
       const error = await this.unit.start();

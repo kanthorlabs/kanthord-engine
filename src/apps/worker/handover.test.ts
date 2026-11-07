@@ -23,7 +23,15 @@ import {
   credentialSealAad,
   type WireReport,
 } from "../../custody/contract.ts";
-import { executionCredentialStore } from "../../custody/client.ts";
+import {
+  executionCredentialStore,
+  type InstanceCopyKey,
+} from "../../custody/client.ts";
+import {
+  copyKeysFixture,
+  TEST_MACHINE_NAME,
+} from "./copy-keys-test-support.ts";
+import type { CopyKeys } from "./copy-keys.ts";
 import { httpTransport } from "./transport.ts";
 import { takeHandover } from "./handover.ts";
 import { testClaim } from "./test-support.ts";
@@ -47,6 +55,10 @@ const SECOND_EXECUTION = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAB";
 const SETTLE_ROUNDS = 200;
 const BACKOFF_STEP_MS = 1000;
 const TICK_ROUNDS = 5;
+
+function keysOf(key: InstanceCopyKey): CopyKeys {
+  return { own: key, of: (holder) => (holder === key.holder ? key : null) };
+}
 
 function leaseAnswer(
   keys: ReturnType<typeof deriveHandoverKeys>,
@@ -328,7 +340,7 @@ test("a unit opens a sealed handover item with the instance key, reports a seale
     api,
     claim,
     clientSecret: SECRET,
-    instanceKey,
+    copyKeys: keysOf(instanceKey),
     context: background,
   });
   assert.deepEqual(
@@ -353,6 +365,97 @@ test("a unit opens a sealed handover item with the instance key, reports a seale
   );
   assert.equal(JSON.stringify(reports).includes(refreshed.key), false);
   result.credentials.discard();
+});
+
+test("a unit opens a sealed item of a machine with the machine key, seals the refresh to it and refuses the item without the machine key", async (t) => {
+  const api = httpTransport("http://127.0.0.1:1");
+  const claim = testClaim();
+  const keys = deriveHandoverKeys(SECRET);
+  const aad = handoverAad(claim.execution_id, claim.claimant.runtime_identity);
+  const f = await copyKeysFixture(t);
+  const sealAad = credentialSealAad({
+    name: "anthro-1",
+    platform: "anthropic",
+    holder: TEST_MACHINE_NAME,
+    sealed_to: f.machine.key.sealed_to,
+  });
+  const sealed = await sealJSON(
+    f.machine.pair.public_key,
+    CREDENTIAL_SEAL_INFO,
+    sealAad,
+    { key: CREDENTIAL.key },
+  );
+  const item = {
+    credential_id: ITEM.credential_id,
+    provider_id: ITEM.provider_id,
+    name: "anthro-1",
+    platform: "anthropic",
+    holder: TEST_MACHINE_NAME,
+    sealed,
+  };
+  t.mock.method(api.worker, "handover", async () => ({
+    type: OperationResultType.Completed,
+    status: 200,
+    data: sealEnvelope(keys.handover, aad, {
+      items: [item],
+      ssh_identities: [],
+    }),
+  }));
+  const reports: { digest: string; sealed: unknown }[] = [];
+  t.mock.method(
+    api.worker,
+    "credential",
+    async (input: Parameters<typeof api.worker.credential>[0]) => {
+      reports.push(
+        openEnvelope(keys.report, aad, {
+          nonce: input.body.nonce,
+          ciphertext: input.body.ciphertext,
+        }) as { digest: string; sealed: unknown },
+      );
+      return { type: OperationResultType.Completed, status: 204, data: null };
+    },
+  );
+  t.mock.method(api.worker, "credential.lease", async () =>
+    leaseAnswer(keys, aad, item),
+  );
+  const result = await takeHandover({
+    api,
+    claim,
+    clientSecret: SECRET,
+    copyKeys: f.keys,
+    context: background,
+  });
+  assert.deepEqual(
+    await result.credentials.items[0]!.store.read(ITEM.provider_id),
+    CREDENTIAL,
+  );
+  await result.credentials.items[0]!.store.modify(
+    ITEM.provider_id,
+    async () => REFRESHED,
+  );
+  assert.equal(reports.length, ONCE);
+  assert.equal(reports[0]!.digest, digest(sealed));
+  assert.deepEqual(
+    await openJSON(
+      f.machine.pair.private_key,
+      CREDENTIAL_SEAL_INFO,
+      sealAad,
+      sealedObjectSchema.parse(reports[0]!.sealed),
+    ),
+    { key: REFRESHED.key },
+  );
+  result.credentials.discard();
+  const absent = await copyKeysFixture(t, { machineInEnv: false });
+  await assert.rejects(
+    takeHandover({
+      api,
+      claim,
+      clientSecret: SECRET,
+      copyKeys: absent.keys,
+      context: background,
+    }),
+    { code: "worker.handover.sealed_unopened" },
+  );
 });
 
 test("handover retries a refresh-in-flight refusal until the envelope arrives", async (t) => {
@@ -811,7 +914,7 @@ test("two views of one sealed item make one refresh call", async (t) => {
         api,
         claim,
         clientSecret: SECRET,
-        instanceKey,
+        copyKeys: keysOf(instanceKey),
         context: background,
       }),
     ),
@@ -892,7 +995,7 @@ test("the renewal before a report retry does not adopt the stored sealed object"
     api,
     claim,
     clientSecret: SECRET,
-    instanceKey,
+    copyKeys: keysOf(instanceKey),
     context: background,
   });
   server.state.failReports = ONCE;

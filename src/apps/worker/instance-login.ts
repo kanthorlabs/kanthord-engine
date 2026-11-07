@@ -10,7 +10,7 @@ import {
   CREDENTIAL_SEAL_INFO,
   credentialSealAad,
 } from "../../custody/contract.ts";
-import type { InstanceCopyKey } from "../../custody/client.ts";
+import { HttpStatus } from "../../kernel/http.ts";
 import {
   InstanceLoginState,
   type LoginReportBody,
@@ -23,10 +23,12 @@ import {
   LoginSessionStore,
   SESSION_EXPIRY_MS,
 } from "../../llm/sessions.ts";
+import type { CopyKeys } from "./copy-keys.ts";
 import {
   EXCHANGE_UNAVAILABLE,
   INSTANCE_REPORT_RETRY_MS,
 } from "./instance-exchange.ts";
+import { CONFIG_ABSENT } from "./machine-config.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const LOGIN_FAILED = "login failed";
@@ -40,7 +42,7 @@ export type LoginReporter = (
 ) => Promise<void>;
 
 export interface InstanceLoginsOptions {
-  key: InstanceCopyKey;
+  copyKeys: CopyKeys;
   report: LoginReporter;
   providers?: () => readonly Provider[];
   now?: () => number;
@@ -113,7 +115,7 @@ export class InstanceLogins {
       mode: entry.mode,
       human_identity: INSTANCE_HUMAN,
       credential_name: entry.name,
-      holder: this.options.key.holder,
+      holder: entry.holder,
       state: LoginSessionState.Pending,
       address: null,
       code: null,
@@ -175,7 +177,13 @@ export class InstanceLogins {
 
   private async complete(running: Running, secret: OAuthSecret): Promise<void> {
     const { session } = running;
-    const { key } = this.options;
+    const key = this.options.copyKeys.of(session.holder);
+    if (key === null)
+      throw new OperationError(
+        HttpStatus.ServiceUnavailable,
+        CONFIG_ABSENT,
+        "worker machine: the machine configuration is absent.",
+      );
     const sealed = await sealJSON(
       key.public_key,
       CREDENTIAL_SEAL_INFO,

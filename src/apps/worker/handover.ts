@@ -34,6 +34,7 @@ import { isLlmPlatform, LLM_PLATFORMS } from "../../llm/platforms.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
 import { WorkerErrorCode } from "../../worker/contract.ts";
 import { retryIndeterminate } from "./api.ts";
+import type { CopyKeys } from "./copy-keys.ts";
 import type { WorkerTransport } from "./transport.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 
@@ -77,16 +78,17 @@ function sealedRefused(): Diagnostic {
 
 async function openSealedItem(
   item: SealedHandoverItem,
-  key: InstanceCopyKey | undefined,
-): Promise<OpenedCopy> {
-  if (key === undefined || !isLlmPlatform(item.platform)) throw sealedRefused();
+  copyKeys: CopyKeys | undefined,
+): Promise<{ opened: OpenedCopy; key: InstanceCopyKey }> {
+  const key = copyKeys?.of(item.holder) ?? null;
+  if (key === null || !isLlmPlatform(item.platform)) throw sealedRefused();
   const opened = await openSealedCopy(
     item,
     LLM_PLATFORMS[item.platform].secret_shape,
     key,
   );
   if (opened === null) throw sealedRefused();
-  return opened;
+  return { opened, key };
 }
 
 type LeaseItem = HandoverPayload["items"][number];
@@ -109,7 +111,7 @@ type ExecutionItemView = {
 
 async function executionItems(
   items: HandoverPayload["items"],
-  key: InstanceCopyKey | undefined,
+  copyKeys: CopyKeys | undefined,
   send: (report: WireReport) => Promise<void>,
   leaseOf: LeaseOf,
   views: ExecutionItemView[],
@@ -130,8 +132,7 @@ async function executionItems(
       });
       continue;
     }
-    const opened = await openSealedItem(item, key);
-    assert.ok(key);
+    const { opened, key } = await openSealedItem(item, copyKeys);
     const plain = {
       credential_id: item.credential_id,
       provider_id: item.provider_id,
@@ -146,9 +147,9 @@ async function executionItems(
         async (signal, renewal) => {
           const leased = await leaseOf(item.credential_id, signal);
           if (!("sealed" in leased)) throw leaseMismatch();
-          const adopted = await openSealedItem(leased, key);
-          if (!renewal) reporter.adopt(leased.sealed, adopted);
-          return adopted.credential;
+          const adopted = await openSealedItem(leased, copyKeys);
+          if (!renewal) reporter.adopt(leased.sealed, adopted.opened);
+          return adopted.opened.credential;
         },
       ),
     });
@@ -194,7 +195,7 @@ export async function takeHandover(input: {
   api: WorkerTransport;
   claim: ExecutionRecord;
   clientSecret: string;
-  instanceKey?: InstanceCopyKey;
+  copyKeys?: CopyKeys;
   context: Context;
 }) {
   const { api, claim } = input;
@@ -279,13 +280,7 @@ export async function takeHandover(input: {
         throw error;
       }
     };
-    await executionItems(
-      payload.items,
-      input.instanceKey,
-      report,
-      leaseOf,
-      views,
-    );
+    await executionItems(payload.items, input.copyKeys, report, leaseOf, views);
     const sshIdentities = payload.ssh_identities;
     return {
       sshIdentities,

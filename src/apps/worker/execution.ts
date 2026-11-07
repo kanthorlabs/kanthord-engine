@@ -20,7 +20,7 @@ import {
   type WorkspaceRoot,
 } from "../../worker/unit/index.ts";
 import { completed, HandoverRefused, takeHandover } from "./handover.ts";
-import type { InstanceCopyKey } from "../../custody/client.ts";
+import type { CopyKeys } from "./copy-keys.ts";
 import { retryIndeterminate } from "./api.ts";
 import type { WorkerTransport } from "./transport.ts";
 import { uploadEvidence } from "./evidence-upload.ts";
@@ -32,7 +32,7 @@ export interface HostExecutionInput {
   claim: ExecutionRecord;
   api: WorkerTransport;
   clientSecret: string;
-  instanceKey?: InstanceCopyKey;
+  copyKeys?: CopyKeys;
   workspaces: WorkspaceRoot;
   transport: RepositoryTransport;
   modelRuntimeFactory: ModelRuntimeFactory;
