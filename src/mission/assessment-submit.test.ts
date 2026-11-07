@@ -1355,7 +1355,14 @@ async function examineFixture(t: TestContext, earlierReport = false) {
       setNodeState(tx, childId, NodeState.Completed);
       return outcome.id;
     });
-  return { ...h, submit, findings, completeChild, earlierFindingId };
+  return {
+    ...h,
+    submit,
+    findings,
+    completeChild,
+    earlierFindingId,
+    childId,
+  };
 }
 
 test("a non-current submit stores its findings as records and changes no earlier finding", async (t) => {
@@ -1632,4 +1639,98 @@ test("a success of a later attempt keeps its own report finding open", async (t)
     (await h.byLabel("B1")).fixed_assessment_id,
     answer.assessment.id,
   );
+});
+
+function fixProposal(dependencyId: string, findingLabels: string[]) {
+  return {
+    dependency_id: dependencyId,
+    name: "Fix",
+    requirement: "Repair the defect",
+    criterion: "The defect is gone",
+    task: {
+      name: "Repair",
+      requirement: "Change the code",
+      criterion: "The test passes",
+      verifications: ["pnpm test"],
+    },
+    finding_labels: findingLabels,
+  };
+}
+
+function undecidedOf(h: Awaited<ReturnType<typeof examineFixture>>) {
+  return h.invoke("finding.undecided.list", {
+    params: { project_id: h.project_id },
+    query: {},
+    body: null,
+  });
+}
+
+test("a blocker that a proposal names gets the route record and waits for no human", async (t) => {
+  const h = await examineFixture(t);
+  const outcomeId = h.completeChild();
+  await h.submit({
+    result: AssessmentResult.Undetermined,
+    dependency_outcome_ids: [outcomeId],
+    findings: [reviewerFinding("B1"), reviewerFinding("B2")],
+    proposals: [fixProposal(h.childId, ["B1", "B2"])],
+  });
+  assert.deepEqual(
+    (await h.findings()).map((item) => [item.label, item.route]),
+    [
+      ["B1", FindingRoute.Record],
+      ["B2", FindingRoute.Record],
+    ],
+  );
+  assert.deepEqual((await undecidedOf(h)).items, []);
+});
+
+test("a blocker that no proposal names keeps the route report", async (t) => {
+  const h = await examineFixture(t);
+  const outcomeId = h.completeChild();
+  await h.submit({
+    result: AssessmentResult.Undetermined,
+    dependency_outcome_ids: [outcomeId],
+    findings: [reviewerFinding("B1"), reviewerFinding("B2")],
+    proposals: [fixProposal(h.childId, ["B1"])],
+  });
+  assert.deepEqual(
+    (await h.findings()).map((item) => [item.label, item.route]),
+    [
+      ["B1", FindingRoute.Record],
+      ["B2", FindingRoute.Report],
+    ],
+  );
+  assert.deepEqual(
+    (await undecidedOf(h)).items.map((item) => item.label),
+    ["B2"],
+  );
+});
+
+test("a finding label that names no blocker, repeats or two proposals name refuses the submit", async (t) => {
+  const h = await examineFixture(t);
+  const outcomeId = h.completeChild();
+  const refused = (proposals: ReturnType<typeof fixProposal>[]) =>
+    assert.rejects(
+      h.submit({
+        result: AssessmentResult.Undetermined,
+        dependency_outcome_ids: [outcomeId],
+        findings: [reviewerFinding("B1"), reviewerFinding("S1")],
+        proposals,
+      }),
+      (error) =>
+        error instanceof ZodError &&
+        error.issues.some(
+          (issue) =>
+            issue.path.join(".") ===
+            `body.proposals.${proposals.length - 1}.finding_labels`,
+        ),
+    );
+  await refused([fixProposal(h.childId, ["B9"])]);
+  await refused([fixProposal(h.childId, ["S1"])]);
+  await refused([fixProposal(h.childId, ["B1", "B1"])]);
+  await refused([
+    fixProposal(h.childId, ["B1"]),
+    fixProposal(h.childId, ["B1"]),
+  ]);
+  assert.deepEqual(await h.findings(), []);
 });

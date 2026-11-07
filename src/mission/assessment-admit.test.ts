@@ -412,6 +412,7 @@ test("proposals refuse an implement node with no dependency edge and an examine 
           criterion: "Changed",
           verifications: ["true"],
         },
+        finding_labels: [],
       },
     ],
   });
@@ -434,6 +435,7 @@ test("proposals are admitted only for an undetermined examine node with an imple
       criterion: "Changed",
       verifications: ["true"],
     },
+    finding_labels: [],
   };
   const undetermined = {
     ...h.body,

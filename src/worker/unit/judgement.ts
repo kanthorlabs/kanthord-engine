@@ -79,6 +79,7 @@ const proposalSchema = z.strictObject({
     criterion: proposalTextSchema,
     verifications: z.array(proposalTextSchema).min(MIN_VERIFICATIONS),
   }),
+  finding_labels: z.array(z.string()).default([]),
 });
 
 function isBlockerLabel(label: string): boolean {
