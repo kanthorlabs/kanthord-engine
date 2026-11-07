@@ -84,6 +84,7 @@ import {
   type IntakeInventoryEntry,
   intakeOperations,
 } from "../../intake/contract.ts";
+import { ActorKind } from "../../mission/contract.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
 import {
   EnvironmentStatus,
@@ -611,6 +612,8 @@ test("composed Worker revokes and reports the live execution of a forced instanc
   assert.equal(archived.status, HttpStatus.OK, await archived.text());
   assert.equal(revoke.mock.callCount(), SINGLE_CALL);
   assert.equal(revoke.mock.calls[0]!.arguments[1], executionId);
+  assert.equal(revoke.mock.calls[0]!.arguments[2], INSTANCE_NAME);
+  assert.equal(revoke.mock.calls[0]!.arguments[3]?.kind, ActorKind.Human);
   assert.equal(report.mock.callCount(), SINGLE_CALL);
   assert.deepEqual(report.mock.calls[0]!.arguments, [ENDED_EXECUTIONS]);
 });

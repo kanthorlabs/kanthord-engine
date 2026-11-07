@@ -316,3 +316,14 @@ test("a stop that no row names is unattributed with no suspects", () => {
     unattributed([]),
   );
 });
+
+test("an operator stop maps to the human intervention", () => {
+  for (const reason of [
+    ExecutionStopReason.InstanceArchived,
+    ExecutionStopReason.WorkerStopped,
+  ])
+    assert.deepEqual(
+      stopCauseOf(reason, null, null, QUIET),
+      attributed(CauseCategory.Human, CauseSubcategory.Intervention),
+    );
+});

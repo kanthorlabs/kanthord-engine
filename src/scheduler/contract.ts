@@ -54,6 +54,8 @@ export const ExecutionStopReason = {
   ProviderFailed: "provider_failed",
   NoProgress: "no_progress",
   EnvironmentFailed: "environment_failed",
+  InstanceArchived: "instance_archived",
+  WorkerStopped: "worker_stopped",
 } as const;
 export const BudgetLimit = {
   Turns: "turns",
@@ -119,7 +121,12 @@ function stopCodeFits(stop: {
   if (stop.reason === ExecutionStopReason.ProviderFailed) return providerCode;
   if (stop.reason === ExecutionStopReason.EnvironmentFailed)
     return environmentCode;
-  if (stop.reason === ExecutionStopReason.NoProgress) return stop.code === null;
+  if (
+    stop.reason === ExecutionStopReason.NoProgress ||
+    stop.reason === ExecutionStopReason.InstanceArchived ||
+    stop.reason === ExecutionStopReason.WorkerStopped
+  )
+    return stop.code === null;
   return !budgetCode && !providerCode && !environmentCode;
 }
 
@@ -270,17 +277,23 @@ export interface RevokedExecution {
     root_span_id: string;
   };
   ended_at: number;
+  stop: ReleaseStop | null;
 }
 export interface FailureHold {
   failure_count: number;
   available_at: number | null;
 }
-export interface EndedExecution extends RevokedExecution {
+export interface EndedExecution extends Omit<RevokedExecution, "stop"> {
   transition: NodeTransition;
   hold: FailureHold;
 }
 export interface SchedulerClaims {
-  revoke(tx: Transaction, nodeId: string, now: number): RevokedExecution | null;
+  revoke(
+    tx: Transaction,
+    nodeId: string,
+    now: number,
+    stop?: ReleaseStop,
+  ): RevokedExecution | null;
   settle(tx: Transaction, nodeId: string, now: number): EndedExecution[];
   liveExecutionOf(
     tx: Transaction,
@@ -364,6 +377,7 @@ export interface MissionTransitions {
     consecutiveFailures: number,
     now: number,
   ): NodeTransition;
+  stopped(tx: Transaction, nodeId: string, now: number): NodeTransition;
 }
 export interface NodeAttemptKey {
   node_id: string;

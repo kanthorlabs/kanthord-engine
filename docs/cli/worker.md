@@ -730,6 +730,8 @@ Both refusals answer `409 worker.instance.in_use`.
 `details.bindings` lists the bindings, or `details.executions` lists the executions.
 With `--force`, the archive revokes each live execution of the instance through Mission in the transaction of the archive. Mission reports the revocation after the commit.
 The `worker` process of the instance learns of the end at its next call, which the Gateway refuses. It ends its tools and stops the execution.
+Each revoked execution ends with the stop `instance_archived`, the code `null` and a `detail` JSON object `{ "instance", "actor" }`. `actor` is the name of the account that archived. `scheduler execution list` and `scheduler execution get` answer this stop. It counts as no failure and resets no failure count.
+After the commit, the server writes one info log record `worker.instance.archived` with `instance`, `actor`, `force` and `execution_ids`.
 The archive ends the registrations of the instance.
 An archived name stays taken, and `instance create` cannot use it again.
 An indeterminate result fails with `cli.worker.instance.archive.indeterminate` and prints the key.

@@ -17,7 +17,11 @@ import {
   NodeState,
 } from "../../mission/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
-import { ClaimState, schedulerOperations } from "../../scheduler/contract.ts";
+import {
+  ClaimState,
+  ExecutionStopReason,
+  schedulerOperations,
+} from "../../scheduler/contract.ts";
 import {
   ExecutionEnd,
   RevokeCause,
@@ -857,7 +861,12 @@ test(
     const [revoked] = await s.executions(project, nodeId);
     assert.equal(revoked?.execution_id, claim!.execution_id);
     assert.equal(revoked?.claim_state, ClaimState.Finished);
-    assert.equal(revoked?.stop, null);
+    assert.equal(revoked?.stop?.reason, ExecutionStopReason.InstanceArchived);
+    assert.equal(revoked?.stop?.code, null);
+    assert.deepEqual(JSON.parse(revoked?.stop?.detail ?? "null"), {
+      instance: FIRST_INSTANCE,
+      actor: s.fixture.accountId,
+    });
     const node = await s.nodeOf(nodeId);
     assert.equal(node.state, NodeState.Available);
     assert.equal(node.attempt, attempt);

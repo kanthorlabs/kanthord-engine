@@ -200,6 +200,9 @@ export function stopCauseOf(
     case ExecutionStopReason.BudgetEnd:
     case ExecutionStopReason.AssessmentAbsent:
       return budgetCauseOf(isTimedOut(detail, signals));
+    case ExecutionStopReason.InstanceArchived:
+    case ExecutionStopReason.WorkerStopped:
+      return attributed(CauseCategory.Human, CauseSubcategory.Intervention);
     case ExecutionStopReason.JudgementInvalid:
     case ExecutionStopReason.ReportAbsent:
       return unattributed([CauseCategory.Model, CauseCategory.Prompt]);

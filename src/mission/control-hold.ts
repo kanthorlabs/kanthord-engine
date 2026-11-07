@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import type { Transaction } from "../kernel/store.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import {
   type ExecutionEnds,
   type HumanAct,
@@ -210,6 +211,8 @@ export function revokeForInstanceArchive(
   tx: Transaction,
   dependencies: Dependencies,
   executionId: string,
+  instance: string,
+  actor: HumanActor,
   now: number,
 ): ExecutionEnds | null {
   const node = claimedNodeOf(tx, dependencies, executionId, now);
@@ -223,6 +226,11 @@ export function revokeForInstanceArchive(
     RevokeCause.Human,
     null,
     ends,
+    {
+      reason: "instance_archived",
+      code: null,
+      detail: canonicalJSON({ instance, actor: actor.name }),
+    },
   );
   assert.ok(claim);
   transition(

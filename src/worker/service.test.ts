@@ -2281,6 +2281,7 @@ test("a forced archive of a busy server instance revokes its execution and stops
   const registration = f.register(FIRST_INSTANCE);
   f.state.executing.add(registration.runtime_identity);
   f.unlist(FIRST_INSTANCE);
+  f.caller.identity = FOOTPRINT_HUMAN;
   const archive = (force?: boolean) =>
     f.invoke(
       "instance.archive",

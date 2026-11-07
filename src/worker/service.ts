@@ -520,8 +520,13 @@ export class WorkerService implements Service {
         dependencies.schedulerClaims.unendedExecutionOf(tx, runtimeIdentity),
       archiveHeld: (tx, holder, now) =>
         dependencies.instanceCopies?.archiveHeld(tx, holder, now),
-      revokeForInstanceArchive: (tx, executionId) =>
-        dependencies.instanceArchive.revokeForInstanceArchive(tx, executionId),
+      revokeForInstanceArchive: (tx, executionId, instance, actor) =>
+        dependencies.instanceArchive.revokeForInstanceArchive(
+          tx,
+          executionId,
+          instance,
+          actor,
+        ),
       reportExecutionEnds: (ends) =>
         dependencies.instanceArchive.reportExecutionEnds(ends),
       holderMismatch: (tx, instanceName, bindings) =>
@@ -1591,6 +1596,7 @@ export class WorkerService implements Service {
     declareInstances(registry, {
       instances: this.instances,
       heartbeatClock: this.heartbeatClock,
+      logger: this.dependencies.pool?.logger ?? pino({ level: "silent" }),
       instancesChanged: () => this.instancesChanged(),
       registrationRecordOf: (tx, row) =>
         registrationRecord(tx, this.recordDependencies(), row, Date.now()),

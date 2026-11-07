@@ -229,6 +229,8 @@ components:
                     - provider_failed
                     - no_progress
                     - environment_failed
+                    - instance_archived
+                    - worker_stopped
                 code:
                   anyOf:
                     - type: string

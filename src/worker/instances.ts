@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
+import type { HumanActor } from "../kernel/actor.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -612,10 +613,12 @@ export class WorkerInstances implements WorkerInstanceLookups {
     tx: Transaction,
     name: string,
     input: { expected_revision: number; force?: boolean },
+    actor: HumanActor,
   ): {
     record: InstanceRecord;
     ended: string[];
     executionEnds: ExecutionEnds[];
+    executionIds: string[];
   } {
     const live = this.requireLive(tx, name, input.expected_revision);
     this.refuseListed(tx, name);
@@ -629,7 +632,12 @@ export class WorkerInstances implements WorkerInstanceLookups {
         { executions },
       );
     const executionEnds = executions.flatMap((executionId) => {
-      const ends = this.dependencies.revokeForInstanceArchive(tx, executionId);
+      const ends = this.dependencies.revokeForInstanceArchive(
+        tx,
+        executionId,
+        name,
+        actor,
+      );
       return ends ? [ends] : [];
     });
     const now = Date.now();
@@ -640,7 +648,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
     this.footprintOrders.delete(live.id);
     const record = readInstanceById(tx, live.id);
     assert.ok(record);
-    return { record, ended, executionEnds };
+    return { record, ended, executionEnds, executionIds: executions };
   }
 
   reportExecutionEnds(ends: readonly ExecutionEnds[]): void {
