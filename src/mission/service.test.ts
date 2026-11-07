@@ -108,6 +108,7 @@ import {
   codedAs,
   databaseSnapshot,
   executionHarness,
+  keptClaimHarness,
   lostHold,
   lostTransition,
   unexpectedCollaboration,
@@ -6692,4 +6693,37 @@ test("linkUpdatesOf answers next_cursor and the total of the trusted rows", (t) 
   assert.equal(second.next_cursor, null);
   assert.equal(second.total, PAGE_OF_TWO);
   assert.notEqual(second.items[0]?.id, first.items[0]?.id);
+});
+
+test("the executionReleased hook runs the pending close of its execution once", async (t) => {
+  const k = keptClaimHarness(
+    t,
+    testHumanIdentity(ACCOUNT_ID, DISPLAY_NAME, TOKEN_ID),
+    NodeState.Executing,
+  );
+  await k.h.invoke("node.discard", {
+    params: { node_id: k.h.node_id },
+    query: {},
+    body: k.h.body(NodeState.Executing, SINGLE_ITEM),
+  });
+  assert.equal(k.h.node().state, NodeState.Paused);
+  k.keep.live = false;
+  k.h.service.executionReleased(k.executionId, null);
+  assert.equal(k.h.node().state, NodeState.Discarded);
+  const snapshot = databaseSnapshot(k.h.store);
+  k.h.service.executionReleased(k.executionId, null);
+  assert.deepEqual(databaseSnapshot(k.h.store), snapshot);
+});
+
+test("the executionReleased hook of an execution with no pending close does nothing", (t) => {
+  const k = keptClaimHarness(
+    t,
+    testHumanIdentity(ACCOUNT_ID, DISPLAY_NAME, TOKEN_ID),
+    NodeState.Paused,
+  );
+  const snapshot = databaseSnapshot(k.h.store);
+  k.h.service.executionReleased(k.executionId, null);
+  k.h.service.executionReleased(createIdentity("execution"), null);
+  assert.deepEqual(databaseSnapshot(k.h.store), snapshot);
+  assert.deepEqual(k.logs, []);
 });

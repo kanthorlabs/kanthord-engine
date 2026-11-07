@@ -216,7 +216,10 @@ export interface Dependencies {
   promptBase?: PromptBase;
   instanceArchive: Pick<
     MissionCollaborations,
-    "revokeForInstanceArchive" | "revokePausedClaim" | "reportExecutionEnds"
+    | "revokeForInstanceArchive"
+    | "revokePausedClaim"
+    | "executionReleased"
+    | "reportExecutionEnds"
   >;
   intakeActions: IntakeActions;
   evidenceRequests: EvidenceRequests;
@@ -554,6 +557,8 @@ export class WorkerService implements Service {
         ),
       revokePausedClaim: (executionId) =>
         dependencies.instanceArchive.revokePausedClaim(executionId),
+      executionReleased: (executionId, stop) =>
+        dependencies.instanceArchive.executionReleased(executionId, stop),
       reportExecutionEnds: (ends) =>
         dependencies.instanceArchive.reportExecutionEnds(ends),
       holderMismatch: (tx, instanceName, bindings) =>

@@ -214,6 +214,26 @@ export function endLiveClaim(
   return claim;
 }
 
+export function keptExecution(
+  tx: Transaction,
+  dependencies: Dependencies,
+  node: NodeRow,
+  now: number,
+) {
+  const live = dependencies.schedulerClaims.liveExecutionOf(tx, node.id, now);
+  if (
+    live === null ||
+    !dependencies.workerStopOrders.connected(tx, live.runtime_identity)
+  )
+    return null;
+  if (
+    node.state === NodeState.Paused &&
+    dependencies.workerStopOrders.orderOf(live.execution_id) === null
+  )
+    return null;
+  return live;
+}
+
 export function executionEnds(): ExecutionEnds {
   return { lost: [], revoked: [] };
 }

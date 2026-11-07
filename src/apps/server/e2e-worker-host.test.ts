@@ -749,6 +749,154 @@ test(
         );
       },
     );
+    const discardSetup = await fixture(t);
+    await t.test(
+      "E09.15c a discard of a connected execution lets the coder push its checkpoint before the node reaches Discarded",
+      { timeout: JOURNEY_TIMEOUT },
+      async (t) => {
+        const entered = Promise.withResolvers<void>();
+        const resume = Promise.withResolvers<void>();
+        const provider = scriptedProvider([
+          tool("bash", { command: `printf ${HELLO} > ${STOPPED_FILE}` }),
+          async () => {
+            entered.resolve();
+            await resume.promise;
+            return fauxAssistantMessage("stopped");
+          },
+        ]);
+        const call = humanCaller(discardSetup.fixture);
+        const empty = { params: {}, query: {} };
+        await createMachine(discardSetup.fixture, MACHINE_NAME);
+        const created = await call(workerOperations["instance.create"], {
+          ...empty,
+          body: {
+            name: INSTANCE_NAME,
+            worker: "coder@1",
+            placement: InstancePlacement.Worker,
+            machine: MACHINE_NAME,
+            endpoint: discardSetup.fixture.endpoint,
+          },
+        });
+        assert.ok(created.instance_configuration);
+        await call(llmOperations.create, {
+          ...empty,
+          body: {
+            name: "anthro-1",
+            platform: "anthropic",
+            metadata: null,
+            holders: [INSTANCE_NAME],
+            secret: { key: WORKER_TEST_KEY },
+          },
+        });
+        const exported = await discardSetup.read<{
+          version: number;
+          bindings: { general: { config: { worker_instances: string[] } } };
+        }>(["project", "binding", "export", discardSetup.project_id]);
+        exported.bindings.general.config.worker_instances = [INSTANCE_NAME];
+        await discardSetup.write(
+          ["project", "binding", "apply", discardSetup.project_id],
+          exported,
+        );
+        const root = temporary(t);
+        const worker = new Worker({
+          env: {
+            ...process.env,
+            HOME: root,
+            XDG_CONFIG_HOME: join(root, "config"),
+            XDG_DATA_HOME: join(root, "data"),
+            XDG_STATE_HOME: join(root, "state"),
+            KANTHORD_WORKER_CONFIG: created.instance_configuration,
+          },
+          connectionName: "host-a",
+          heartbeatIntervalMs: FAST_HEARTBEAT_MS,
+          modelRuntimeFactory: scriptedModelRuntime(provider),
+          repositoryTransport: discardSetup.transport,
+          log: () => {},
+        });
+        const running = worker.run();
+        stopAfter(t, async () => {
+          await worker.stop();
+          await running;
+        });
+        await entered.promise;
+        const mission = await discardSetup.read<{ version: number }>([
+          "mission",
+          "get",
+          discardSetup.project_id,
+        ]);
+        const before = await discardSetup.read<{
+          state: NodeState;
+          attempt: number;
+        }>(["mission", "node", "get", discardSetup.node_id]);
+        const discarded = await discardSetup.write<{
+          node: { state: NodeState };
+        }>(["mission", "node", "discard", discardSetup.node_id], {
+          reason: "hold",
+          expected_mission_version: mission.version,
+          expected_state: before.state,
+          expected_attempt: before.attempt,
+        });
+        assert.equal(discarded.node.state, NodeState.Paused);
+        const live = await discardSetup.read<{ items: ExecutionRecord[] }>([
+          "scheduler",
+          "execution",
+          "list",
+          discardSetup.project_id,
+          "--node",
+          discardSetup.node_id,
+        ]);
+        assert.equal(live.items.length, SINGLE_ITEM);
+        assert.notEqual(live.items[0]!.claim_state, ClaimState.Finished);
+        resume.resolve();
+        for (;;) {
+          const page = await discardSetup.read<{ items: ExecutionRecord[] }>([
+            "scheduler",
+            "execution",
+            "list",
+            discardSetup.project_id,
+            "--node",
+            discardSetup.node_id,
+          ]);
+          if (page.items[0]!.claim_state === ClaimState.Finished) break;
+          await delay(POLL_INTERVAL_MS, undefined, { signal: t.signal });
+        }
+        const executions = await discardSetup.read<{
+          items: ExecutionRecord[];
+        }>([
+          "scheduler",
+          "execution",
+          "list",
+          discardSetup.project_id,
+          "--node",
+          discardSetup.node_id,
+        ]);
+        const claim = executions.items[0]!;
+        assert.equal(claim.stop?.reason, HUMAN_PAUSED);
+        assert.equal(claim.stop?.code, null);
+        const branch = `refs/heads/kanthord/${discardSetup.node_id}`;
+        assert.equal(
+          await simpleGit(discardSetup.bare).show([
+            `${branch}:${STOPPED_FILE}`,
+          ]),
+          HELLO,
+        );
+        let node: { state: NodeState };
+        do {
+          await delay(POLL_INTERVAL_MS, undefined, { signal: t.signal });
+          node = await discardSetup.read<{ state: NodeState }>([
+            "mission",
+            "node",
+            "get",
+            discardSetup.node_id,
+          ]);
+        } while (node.state !== NodeState.Discarded);
+        assert.equal(node.state, NodeState.Discarded);
+        assert.equal(
+          discardSetup.fixture.worker.stopOrderOf(claim.execution_id),
+          null,
+        );
+      },
+    );
     const handoverSetup = await fixture(t);
     const other = await handoverSetup.machine("general-b");
     await t.test(

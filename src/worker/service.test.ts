@@ -184,6 +184,9 @@ const fakeCollaborations = {
     revokePausedClaim: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
+    executionReleased: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
     reportExecutionEnds: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
@@ -2071,6 +2074,7 @@ function poolFixture(
         return { lost: [], revoked: [] };
       },
       revokePausedClaim: () => null,
+      executionReleased: () => {},
       reportExecutionEnds: () => {
         state.reported++;
       },

@@ -7,6 +7,7 @@ import { canonicalJSON } from "../kernel/json.ts";
 import {
   AssessmentResult,
   AssetKind,
+  type ControlResult,
   EndState,
   type ExecutionEnds,
   FindingRoute,
@@ -22,6 +23,7 @@ import {
   RevokeCause,
 } from "./contract.ts";
 import type { ExecutionTrace } from "../tracking/contract.ts";
+import type { Acted } from "./act-telemetry.ts";
 import type { Dependencies } from "./service.ts";
 import type { NodeRow } from "./store.ts";
 import { getRevision } from "./node-read.ts";
@@ -47,6 +49,8 @@ import {
   admitControl,
   controlResult,
   endLiveClaim,
+  HUMAN_PAUSED_STOP,
+  keptExecution,
   requireNoUnresolvedAction,
   transition,
   writeHumanRecords,
@@ -57,17 +61,13 @@ const NO_REQUESTS = 0;
 const BINDING_MISMATCH = "mission.evidence.binding_mismatch";
 const LANDED_COMMIT_FIELD = "landed_commit";
 
-function landedEvidence(
+function requireLandable(
   tx: Transaction,
   dependencies: Dependencies,
   node: NodeRow,
   landed: RepositoryAddress | RepositoryAddress[],
-  reason: string,
-  actor: HumanActor,
-  now: number,
-): string {
+): RepositoryAddress[] {
   const revision = getRevision(tx, node.id, actRevision(tx, node));
-  assert.ok(node.attempt !== null);
   const addresses = Array.isArray(landed) ? landed : [landed];
   const [first] = addresses;
   assert.ok(first);
@@ -85,6 +85,20 @@ function landedEvidence(
     landed,
     LANDED_COMMIT_FIELD,
   );
+  return addresses;
+}
+
+function landedEvidence(
+  tx: Transaction,
+  dependencies: Dependencies,
+  node: NodeRow,
+  landed: RepositoryAddress | RepositoryAddress[],
+  reason: string,
+  actor: HumanActor,
+  now: number,
+): string {
+  assert.ok(node.attempt !== null);
+  const addresses = requireLandable(tx, dependencies, node, landed);
   const id = createIdentity("evidence");
   insertEvidence(
     tx,
@@ -114,6 +128,42 @@ function landedEvidence(
   return id;
 }
 
+function holdForStop(
+  tx: Transaction,
+  dependencies: Dependencies,
+  mission: Mission,
+  node: NodeRow,
+  body: HumanAct,
+  actor: HumanActor,
+  now: number,
+  live: { execution_id: string; runtime_identity: string },
+): Acted<ControlResult> {
+  const paused = node.state === NodeState.Paused;
+  if (!paused)
+    transition(tx, dependencies, mission, node, NodeState.Paused, now);
+  const acted = actedOn(
+    tx,
+    mission,
+    node,
+    body.reason,
+    now,
+    controlResult(tx, dependencies, node.id, null, actor, now),
+    null,
+  );
+  return {
+    ...acted,
+    ...(paused
+      ? {}
+      : {
+          stopOrder: {
+            execution_id: live.execution_id,
+            runtime_identity: live.runtime_identity,
+          },
+        }),
+    pendingClose: { execution_id: live.execution_id, result: acted.result },
+  };
+}
+
 export function overrideNode(
   tx: Transaction,
   dependencies: Dependencies,
@@ -133,6 +183,12 @@ export function overrideNode(
     ends,
   );
   requireNoUnresolvedAction(tx, node);
+  const live = keptExecution(tx, dependencies, node, now);
+  if (live !== null) {
+    if (body.landed_commit !== undefined)
+      requireLandable(tx, dependencies, node, body.landed_commit);
+    return holdForStop(tx, dependencies, mission, node, body, actor, now, live);
+  }
   const claim = endLiveClaim(
     tx,
     dependencies,
@@ -141,7 +197,7 @@ export function overrideNode(
     RevokeCause.Human,
     null,
     ends,
-    null,
+    HUMAN_PAUSED_STOP,
   );
   assert.ok(node.attempt !== null);
   const evidenceIds =
@@ -345,6 +401,9 @@ export function discardNode(
   for (const evidenceId of landing ?? [])
     writeEndState(tx, evidenceId, EndState.Other);
   requireNoUnresolvedAction(tx, node);
+  const live = keptExecution(tx, dependencies, node, now);
+  if (live !== null)
+    return holdForStop(tx, dependencies, mission, node, body, actor, now, live);
   const claim = endLiveClaim(
     tx,
     dependencies,
@@ -353,7 +412,7 @@ export function discardNode(
     RevokeCause.Human,
     null,
     ends,
-    null,
+    HUMAN_PAUSED_STOP,
   );
   if (node.state === NodeState.Blocked) {
     assert.ok(node.attempt !== null);

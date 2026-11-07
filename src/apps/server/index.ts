@@ -563,7 +563,10 @@ export function composeServices(options: {
     },
     logger: options.logger,
     stopOrderOf: (executionId) => worker.stopOrderOf(executionId),
-    executionReleased: (executionId) => worker.executionReleased(executionId),
+    executionReleased: (executionId, stop) => {
+      worker.executionReleased(executionId);
+      mission.executionReleased(executionId, stop);
+    },
     archiving: (tx, runtimeIdentity) => worker.archiving(tx, runtimeIdentity),
     health: options.health,
   });
@@ -783,6 +786,7 @@ export function composeServices(options: {
       revokeForInstanceArchive: (...args) =>
         mission.revokeForInstanceArchive(...args),
       revokePausedClaim: (...args) => mission.revokePausedClaim(...args),
+      executionReleased: (...args) => mission.executionReleased(...args),
       reportExecutionEnds: (...args) => mission.reportExecutionEnds(...args),
     },
     evidenceRequests: {

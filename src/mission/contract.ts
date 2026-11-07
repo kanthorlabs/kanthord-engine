@@ -130,6 +130,7 @@ export interface MissionCollaborations {
     actor: HumanActor,
   ): ExecutionEnds | null;
   revokePausedClaim(executionId: string): RevokedExecution["trace"] | null;
+  executionReleased(executionId: string, stop: ReleaseStop | null): void;
   reportExecutionEnds(ends: ExecutionEnds): void;
 }
 

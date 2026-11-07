@@ -29,11 +29,13 @@ import {
   type Service,
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
+import type { ServerTrace } from "../tracking/contract.ts";
 import { isTerminal } from "./admission.ts";
 import type { MissionConfig } from "./config.ts";
 import {
   ActorKind,
   type AttemptPromptStack,
+  type ControlResult,
   type CurrentNodePin,
   type EventDecoder,
   type ExecutionAttribution,
@@ -61,6 +63,7 @@ import {
   type NodeStateFact,
   nodeStateSchema,
   type PauseFacts,
+  type ReleaseStop,
   type SchedulerClaims,
   type SchedulerMatch,
   type SchedulerWakeup,
@@ -76,6 +79,8 @@ import {
 } from "./act-telemetry.ts";
 import { type ImportFacts, recordImport } from "./import-telemetry.ts";
 import { executionEnds, reportEnds } from "./control.ts";
+import { executionReleased } from "./close-release.ts";
+import { type PendingClose, PendingCloses } from "./pending-close.ts";
 import { addDependency, removeDependency } from "./dependency.ts";
 import {
   pauseNode,
@@ -149,6 +154,7 @@ import {
   listAttempts,
   pinPromptCommits,
   readAttempt,
+  readEvidence,
   readOpenAttempt,
   readPromptCommits,
 } from "./record-store.ts";
@@ -252,6 +258,15 @@ export function nodeBodyOf(filename: string, text: string): NodeBody {
   };
 }
 
+function claimLiveRefusal(pending: PendingClose): OperationError {
+  return new OperationError(
+    HttpStatus.Conflict,
+    MissionErrorCode.ClaimLive,
+    "The node keeps a live claim that waits for its stop.",
+    { node_id: pending.node_id, execution_id: pending.execution_id },
+  );
+}
+
 type WriteScope =
   { mission_id: string } | { node_id: string } | { assessment_id: string };
 
@@ -330,6 +345,7 @@ export class MissionService
   private started = false;
   private readonly dependencies: Dependencies;
   private readonly admissions = new AdmissionQueue();
+  private readonly closes = new PendingCloses();
 
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
@@ -451,8 +467,28 @@ export class MissionService
     );
     registry.register(
       missionOperations["evidence.delete"],
-      ({ params, body }, caller) =>
-        removeEvidence(this.dependencies, caller, params.evidence_id, body),
+      ({ params, body }, caller) => {
+        const nodeId = this.dependencies.store.transaction(
+          (tx) => readEvidence(tx, params.evidence_id)?.node_id,
+        );
+        const pending =
+          nodeId === undefined ? null : this.closes.ofNode(nodeId);
+        if (pending === null)
+          return removeEvidence(
+            this.dependencies,
+            caller,
+            params.evidence_id,
+            body,
+            humanActor(caller),
+            this.closes,
+          );
+        if (
+          pending.act === Act.DeleteEvidence &&
+          pending.evidence_id === params.evidence_id
+        )
+          return caller.commit(() => null);
+        throw claimLiveRefusal(pending);
+      },
     );
     registry.register(
       missionOperations["evidence.asset.delete"],
@@ -738,6 +774,7 @@ export class MissionService
     registry.register(
       missionOperations["node.override"],
       ({ params, body }, caller) =>
+        this.repeatedClose(caller, params.node_id, Act.Override) ??
         this.commitAct(
           Act.Override,
           caller,
@@ -752,6 +789,16 @@ export class MissionService
               Date.now(),
               ends,
             ),
+          (held, trace, attempt) => ({
+            act: Act.Override,
+            execution_id: held.execution_id,
+            node_id: params.node_id,
+            attempt,
+            actor: humanActor(caller),
+            trace,
+            body,
+            result: held.result,
+          }),
         ),
     );
     registry.register(
@@ -776,6 +823,7 @@ export class MissionService
     registry.register(
       missionOperations["node.discard"],
       ({ params, body }, caller) =>
+        this.repeatedClose(caller, params.node_id, Act.Discard) ??
         this.commitAct(
           Act.Discard,
           caller,
@@ -790,6 +838,16 @@ export class MissionService
               Date.now(),
               ends,
             ),
+          (held, trace, attempt) => ({
+            act: Act.Discard,
+            execution_id: held.execution_id,
+            node_id: params.node_id,
+            attempt,
+            actor: humanActor(caller),
+            trace,
+            body,
+            result: held.result,
+          }),
         ),
     );
     registry.register(
@@ -1215,14 +1273,36 @@ export class MissionService
     return result;
   }
 
+  private repeatedClose(
+    caller: CallerContext,
+    nodeId: string,
+    act: PendingClose["act"],
+  ): ControlResult | null {
+    const pending = this.closes.ofNode(nodeId);
+    if (pending === null) return null;
+    if (pending.act !== act || pending.act === Act.DeleteEvidence)
+      throw claimLiveRefusal(pending);
+    return caller.commit(() => pending.result);
+  }
+
   private commitAct<T>(
     act: Act,
     caller: CallerContext,
     scope: WriteScope,
     write: (tx: Transaction, ends: ExecutionEnds) => Acted<T>,
+    pendingOf?: (
+      held: NonNullable<Acted<T>["pendingClose"]>,
+      trace: ServerTrace | null,
+      attempt: number,
+    ) => PendingClose,
   ): T {
+    if ("node_id" in scope) {
+      const pending = this.closes.ofNode(scope.node_id);
+      if (pending !== null) throw claimLiveRefusal(pending);
+    }
     let facts: ActFacts | null = null;
     let stopOrder: Acted<T>["stopOrder"];
+    let pendingClose: Acted<T>["pendingClose"];
     return this.commitGraph(
       caller,
       scope,
@@ -1230,11 +1310,16 @@ export class MissionService
         const acted = write(tx, ends);
         facts = acted.act;
         stopOrder = acted.stopOrder;
+        pendingClose = acted.pendingClose;
         return acted.result;
       },
       () => {
         assert.ok(facts);
-        recordAct(this.dependencies, act, facts);
+        const trace = recordAct(this.dependencies, act, facts);
+        if (pendingClose) {
+          assert.ok(pendingOf);
+          this.closes.add(pendingOf(pendingClose, trace, facts.attempt));
+        }
         if (stopOrder)
           this.dependencies.workerStopOrders.sendStopOrder(
             stopOrder.execution_id,
@@ -1319,6 +1404,10 @@ export class MissionService
       actor,
       Date.now(),
     );
+  }
+
+  executionReleased(executionId: string, stop: ReleaseStop | null): void {
+    executionReleased(this.dependencies, this.closes, executionId, stop);
   }
 
   revokePausedClaim(executionId: string) {
