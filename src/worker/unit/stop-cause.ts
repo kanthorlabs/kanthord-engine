@@ -46,6 +46,7 @@ const environmentSubcategories: Readonly<Record<string, CauseSubcategory>> = {
   [EnvironmentFailure.CommandAbsent]: CauseSubcategory.CommandAbsent,
   [EnvironmentFailure.AffectedInvalid]: CauseSubcategory.AffectedInvalid,
   [EnvironmentFailure.AffectedTimeout]: CauseSubcategory.AffectedTimeout,
+  [EnvironmentFailure.VerificationTimeout]: CauseSubcategory.VerificationHang,
 };
 
 const promptRecordCodes: readonly string[] = [

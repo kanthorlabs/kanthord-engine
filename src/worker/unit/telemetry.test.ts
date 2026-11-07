@@ -36,6 +36,7 @@ import {
 } from "./method-telemetry.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { noProgressDetail, NoProgressRule } from "./progress-rule.ts";
+import { COMMAND_LIMIT_MS } from "./budget.ts";
 import type { TaskContent } from "../../mission/contract.ts";
 import {
   CommandEnd,
@@ -65,6 +66,8 @@ const ONE_FAULT = 1;
 const NO_PROGRESS_COUNT = 2;
 const FAILED_EXIT = 1;
 const TWO_COMMANDS = 2;
+const LAST_INDEX = 1;
+const LAST_COMMAND = "npm test";
 const NO_SENT = 0;
 const ONE_ENTRY = 1;
 const TWO_ENTRIES = 2;
@@ -363,6 +366,9 @@ test("a no_progress stop ends the task span with the rule, the counts and the ve
         verification: {
           passed: false,
           ran: TWO_COMMANDS,
+          index: LAST_INDEX,
+          command: LAST_COMMAND,
+          limit_ms: COMMAND_LIMIT_MS,
           exit_code: FAILED_EXIT,
           timed_out: false,
         },
@@ -376,6 +382,9 @@ test("a no_progress stop ends the task span with the rule, the counts and the ve
     "kanthord.stop.count": NO_PROGRESS_COUNT,
     "kanthord.stop.limit": NO_PROGRESS_COUNT,
     "kanthord.stop.verification.passed": false,
+    "kanthord.stop.verification.timed_out": false,
+    "kanthord.stop.verification.index": LAST_INDEX,
+    "kanthord.stop.verification.exit_code": FAILED_EXIT,
     [REVISION_COUNT_ATTRIBUTE]: NO_REVISIONS,
   });
 });

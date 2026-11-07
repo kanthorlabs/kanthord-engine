@@ -25,6 +25,7 @@ import { refreshAtRelease } from "./base-refresh.ts";
 import { nodeUnitOf, releaseGate, ReleaseGateKind } from "./release-gate.ts";
 import { noProgressDetail, NoProgressRule } from "./progress-rule.ts";
 import { RELEASE_DIRECTORY, WorkspaceKind } from "./workspace.ts";
+import { COMMAND_LIMIT_MS } from "./budget.ts";
 import {
   advanceBase,
   affectedCommand,
@@ -49,6 +50,7 @@ const NOTHING = fauxAssistantMessage("nothing");
 const NO_PROGRESS_LIMIT = 2;
 const RELEASE_COMMANDS_RAN = 2;
 const FAILED_EXIT_CODE = 1;
+const LAST_COMMAND_INDEX = 1;
 const REVISION_TEXT = "Revise the task work";
 const RELEASE_CLONE_TEXT =
   "The release clone holds only tracked files and the setup commands of the environment.";
@@ -158,6 +160,9 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
           verification: {
             passed: false,
             ran: RELEASE_COMMANDS_RAN,
+            index: LAST_COMMAND_INDEX,
+            command: `test -e ${SECRET}`,
+            limit_ms: COMMAND_LIMIT_MS,
             exit_code: FAILED_EXIT_CODE,
             timed_out: false,
           },
@@ -182,6 +187,9 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
             verification: {
               passed: false,
               ran: RELEASE_COMMANDS_RAN,
+              index: LAST_COMMAND_INDEX,
+              command: `test -e ${SECRET}`,
+              limit_ms: COMMAND_LIMIT_MS,
               exit_code: FAILED_EXIT_CODE,
               timed_out: false,
             },
@@ -313,6 +321,9 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
       verification: {
         passed: false,
         ran: ONE_SPAN,
+        index: 0,
+        command: `test -e ${SECRET}`,
+        limit_ms: COMMAND_LIMIT_MS,
         exit_code: FAILED_EXIT_CODE,
         timed_out: false,
       },
@@ -481,6 +492,9 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.deepEqual(h.lastVerification, {
       passed: true,
       ran: RELEASE_COMMANDS_RAN,
+      index: LAST_COMMAND_INDEX,
+      command: shared,
+      limit_ms: COMMAND_LIMIT_MS,
       exit_code: 0,
       timed_out: false,
     });

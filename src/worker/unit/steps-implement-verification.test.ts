@@ -15,6 +15,7 @@ import { EndReason, type ExecutionEnd } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { VERIFICATION_INFRASTRUCTURE_FAILED } from "./verification.ts";
+import { COMMAND_LIMIT_MS } from "./budget.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { VerificationContext } from "./method-telemetry.ts";
 import {
@@ -23,6 +24,7 @@ import {
   TaskResultKind,
 } from "./steps-implement.ts";
 import {
+  commandLimitClock,
   fauxAssistantMessage,
   fauxToolCall,
   implementFixture as fixture,
@@ -418,3 +420,42 @@ suite(
     });
   },
 );
+
+test("a task verification at the command limit stops with verification_timeout and runs no further agent turn", async (t) => {
+  const marker = join(temporary(t), "started");
+  const command = `touch ${marker}; sleep 1000`;
+  const h = await fixture(
+    t,
+    [task("hung", command)],
+    [fauxAssistantMessage("work"), fauxAssistantMessage("revised")],
+  );
+  t.mock.method(
+    h.agent.budget,
+    "wallDeadline",
+    () => Date.now() + 2 * COMMAND_LIMIT_MS,
+  );
+  const bodies = recordReleases(h);
+  const clock = commandLimitClock(t, marker);
+  recordSpans(h, (batch) => clock.observe(batch));
+  const end = await executionBoundary(h.run, () => runStepsImplement(h));
+  await clock.elapsed();
+  assert.ok("stop" in end);
+  const stop = {
+    reason: EndReason.EnvironmentFailed,
+    code: EnvironmentFailure.VerificationTimeout,
+    detail: end.stop?.detail ?? "",
+    cause: attributed(
+      CauseCategory.Environment,
+      CauseSubcategory.VerificationHang,
+    ),
+  };
+  assert.deepEqual(end, { kind: "released", furtherWork: true, stop });
+  assert.deepEqual(bodies, [{ further_work: true, stop }]);
+  assert.deepEqual(JSON.parse(stop.detail), {
+    index: 0,
+    limit_ms: COMMAND_LIMIT_MS,
+    exit_code: null,
+    command,
+  });
+  assert.equal(h.provider.calls.length, ONE_TURN);
+});

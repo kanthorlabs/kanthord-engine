@@ -54,6 +54,7 @@ import {
   missionOperations,
 } from "../../mission/contract.ts";
 import {
+  environmentFailureClassSchema,
   PROJECT_SERVICE_NAME,
   type ProjectBindings,
   projectOperations,
@@ -488,11 +489,16 @@ export function composeServices(options: {
     environments: {
       environmentsClaimable: (projectId, ids) =>
         project.environmentsClaimable(projectId, ids),
-      environmentFailed: (input) =>
+      environmentFailed: (input) => {
+        const failureClass = environmentFailureClassSchema.safeParse(
+          input.stop.code,
+        );
+        if (!failureClass.success) return;
         project.environmentFailed({
           ...input,
-          stop: { ...input.stop, detail: input.stop.detail ?? "" },
-        }),
+          stop: { code: failureClass.data, detail: input.stop.detail ?? "" },
+        });
+      },
     },
     branches: {
       nodeBranchesOf: (tx, keys) => mission.nodeBranchesOf(tx, keys),

@@ -4,6 +4,7 @@ import { createIdentity } from "../kernel/identity.ts";
 import {
   BudgetLimit,
   ClaimState,
+  EnvironmentFailure,
   ExecutionStopReason,
   TransitionRule,
 } from "./contract.ts";
@@ -25,6 +26,7 @@ import {
 } from "./execution-store.ts";
 import {
   consecutiveFailures,
+  countsFailure,
   EXECUTION_NOT_RUNNING,
   requireRunning,
   revoke,
@@ -37,6 +39,16 @@ const ONE_LOSS = 1;
 const SECOND_LOSS = 2;
 const THIRD_FAILURE = 3;
 const STOP = { reason: ExecutionStopReason.OperationFailed, code: null };
+const VERIFICATION_TIMEOUT_STOP = {
+  reason: ExecutionStopReason.EnvironmentFailed,
+  code: EnvironmentFailure.VerificationTimeout,
+  detail: JSON.stringify({
+    index: 0,
+    limit_ms: 600000,
+    exit_code: null,
+    command: "sleep 1000",
+  }),
+};
 
 test("credential pins append once in order, retain after end and select only unended executions", (t) => {
   const h = schedulerHarness(t);
@@ -435,4 +447,49 @@ test("a failed Mission loss rolls back the terminal write", (t) => {
     h.store.transaction((tx) => readExecution(tx, row.execution_id))?.ended_at,
     null,
   );
+});
+
+test("a verification_timeout stop counts as a failure and the third in a row pauses the node with failure_limit", (t) => {
+  const h = schedulerHarness(t);
+  assert.equal(countsFailure(VERIFICATION_TIMEOUT_STOP), true);
+  const paused = transitionFixture({
+    to: "Paused",
+    rule: TransitionRule.FailureLimit,
+    count: THIRD_FAILURE,
+    limit: THIRD_FAILURE,
+  });
+  h.dependencies.transitions.failure = (_tx, _nodeId, count) =>
+    count >= THIRD_FAILURE ? paused : transitionFixture();
+  const nodeId = createIdentity("node");
+  const at = (offset: number) =>
+    executionFixture({
+      node_id: nodeId,
+      expired_at: FIXTURE_DEADLINE + 100,
+      created_at: FIXTURE_NOW + offset,
+    });
+  h.store.transaction((tx) => {
+    const counts = [];
+    for (const offset of [1, 2, 3]) {
+      const row = at(offset);
+      insertExecution(tx, row);
+      endExecution(
+        tx,
+        row.execution_id,
+        FIXTURE_DEADLINE,
+        VERIFICATION_TIMEOUT_STOP,
+      );
+      counts.push(consecutiveFailures(tx, row));
+    }
+    assert.deepEqual(counts, [ONE_LOSS, SECOND_LOSS, THIRD_FAILURE]);
+    assert.equal(
+      h.service.pauseFacts(tx, nodeId, 1).consecutive_failures,
+      THIRD_FAILURE,
+    );
+    const failure = h.dependencies.transitions.failure;
+    assert.deepEqual(
+      failure(tx, nodeId, counts[0]!, FIXTURE_DEADLINE),
+      transitionFixture(),
+    );
+    assert.deepEqual(failure(tx, nodeId, counts[2]!, FIXTURE_DEADLINE), paused);
+  });
 });
