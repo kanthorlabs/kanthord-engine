@@ -32,12 +32,15 @@ class ExecutionCredentialView implements ExecutionCredentials {
   readonly #providerId: string;
   #unacknowledged = false;
   readonly #report: (report: RefreshReport) => Promise<void>;
-  readonly #lease: (signal?: AbortSignal) => Promise<Credential>;
+  readonly #lease: (
+    signal?: AbortSignal,
+    renewal?: boolean,
+  ) => Promise<Credential>;
 
   constructor(
     payload: HandoverItems,
     report: (report: RefreshReport) => Promise<void>,
-    lease: (signal?: AbortSignal) => Promise<Credential>,
+    lease: (signal?: AbortSignal, renewal?: boolean) => Promise<Credential>,
   ) {
     const parsed = handoverItemsSchema.parse(payload);
     assert.equal(parsed.items.length, EXECUTION_CREDENTIAL_COUNT);
@@ -69,7 +72,7 @@ class ExecutionCredentialView implements ExecutionCredentials {
   }
 
   async #send(): Promise<void> {
-    if (this.#unacknowledged) await this.#lease();
+    if (this.#unacknowledged) await this.#lease(undefined, true);
     const credential = piCredentialSchema.parse(this.#live());
     assert(this.#reported);
     this.#unacknowledged = true;
@@ -140,7 +143,7 @@ class ExecutionCredentialView implements ExecutionCredentials {
 export function executionCredentialStore(
   payload: HandoverItems,
   report: (report: RefreshReport) => Promise<void>,
-  lease: (signal?: AbortSignal) => Promise<Credential>,
+  lease: (signal?: AbortSignal, renewal?: boolean) => Promise<Credential>,
 ): ExecutionCredentials {
   return new ExecutionCredentialView(payload, report, lease);
 }

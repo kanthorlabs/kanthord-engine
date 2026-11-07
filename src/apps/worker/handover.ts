@@ -143,11 +143,11 @@ async function executionItems(
       view: executionCredentialStore(
         { items: [plain] },
         reporter,
-        async (signal) => {
+        async (signal, renewal) => {
           const leased = await leaseOf(item.credential_id, signal);
           if (!("sealed" in leased)) throw leaseMismatch();
           const adopted = await openSealedItem(leased, key);
-          reporter.adopt(leased.sealed, adopted);
+          if (!renewal) reporter.adopt(leased.sealed, adopted);
           return adopted.credential;
         },
       ),

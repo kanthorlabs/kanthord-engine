@@ -78,6 +78,21 @@ function leaseHeldFailure() {
   };
 }
 
+function reportFailure() {
+  return {
+    type: OperationResultType.Failure,
+    status: HttpStatus.InternalServerError,
+    error: {
+      error: {
+        code: WorkerErrorCode.CredentialLeaseHeld,
+        message: "The report failed.",
+        details: null,
+      },
+      request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAW",
+    },
+  };
+}
+
 async function settled(done: () => boolean): Promise<void> {
   for (let round = 0; round < SETTLE_ROUNDS && !done(); round++)
     await nextTurn();
@@ -696,6 +711,7 @@ function sharedSealedServer(
     holder: null as string | null,
     leases: 0,
     leaseHeld: 0,
+    failReports: 0,
   };
   const attach = (
     api: ReturnType<typeof httpTransport>,
@@ -725,6 +741,10 @@ function sharedSealedServer(
           ciphertext: input.body.ciphertext,
         }) as WireReport;
         assert.ok("sealed" in report);
+        if (state.failReports > NO_REPORTS) {
+          state.failReports--;
+          return reportFailure();
+        }
         if (digest(state.stored) === report.digest)
           state.stored = report.sealed as typeof sealed;
         if (state.holder === claim.execution_id) state.holder = null;
@@ -832,4 +852,50 @@ test("two views of one sealed item make one refresh call", async (t) => {
     { key: REFRESHED.key },
   );
   for (const { credentials } of views) credentials.discard();
+});
+
+test("the renewal before a report retry does not adopt the stored sealed object", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 10000 });
+  const pair = await generateX25519KeyPair();
+  const instanceKey = {
+    holder: "relay-a",
+    sealed_to: keyFingerprint(pair.public_key),
+    public_key: pair.public_key,
+    private_key: () => Buffer.from(pair.private_key),
+  };
+  const sealAad = credentialSealAad({
+    name: "anthro-1",
+    platform: "anthropic",
+    holder: instanceKey.holder,
+    sealed_to: instanceKey.sealed_to,
+  });
+  const sealOf = (key: string) =>
+    sealJSON(pair.public_key, CREDENTIAL_SEAL_INFO, sealAad, { key });
+  const sealed = await sealOf(CREDENTIAL.key);
+  const other = await sealOf("test_other_execution_key");
+  const server = sharedSealedServer(t, sealed);
+  const api = httpTransport("http://127.0.0.1:1");
+  const claim = testClaim();
+  server.attach(api, claim, (stored) => ({
+    credential_id: ITEM.credential_id,
+    provider_id: ITEM.provider_id,
+    name: "anthro-1",
+    platform: "anthropic",
+    sealed: stored,
+  }));
+  const { credentials } = await takeHandover({
+    api,
+    claim,
+    clientSecret: SECRET,
+    instanceKey,
+    context: background,
+  });
+  server.state.failReports = ONCE;
+  await assert.rejects(
+    credentials.items[0]!.store.modify(ITEM.provider_id, async () => REFRESHED),
+  );
+  server.state.stored = other;
+  await credentials.release();
+  assert.equal(server.state.stored, other);
+  credentials.discard();
 });

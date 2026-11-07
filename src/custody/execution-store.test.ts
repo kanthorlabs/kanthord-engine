@@ -163,6 +163,7 @@ test("a function that answers undefined still sends one report of the leased val
 test("the store renews the lease before each retry of its report and keeps the value of the report", async () => {
   let leases = NO_CALLS;
   let failures = TWO_CALLS;
+  const renewals: (boolean | undefined)[] = [];
   const reports: RefreshReport[] = [];
   const view = executionCredentialStore(
     payload(),
@@ -170,8 +171,9 @@ test("the store renews the lease before each retry of its report and keeps the v
       reports.push(report);
       if (failures-- > NO_CALLS) throw new Error("report unavailable");
     },
-    async () => {
+    async (_signal, renewal) => {
       leases++;
+      renewals.push(renewal);
       return { ...LEASED };
     },
   );
@@ -181,6 +183,7 @@ test("the store renews the lease before each retry of its report and keeps the v
   assert.equal(leases, TWO_CALLS);
   await view.release();
   assert.equal(leases, THREE_CALLS);
+  assert.deepEqual(renewals, [undefined, true, true]);
   assert.deepEqual(
     reports.map(({ credential }) => credential),
     [SECOND, SECOND, SECOND],
