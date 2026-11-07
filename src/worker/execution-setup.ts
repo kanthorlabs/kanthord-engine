@@ -411,7 +411,12 @@ async function setupWithin(
         ),
       },
       ssh_public_key: sshPublicKeyOf(repository.ssh_credential),
-      strategy: { base_branch: repository.base_branch },
+      strategy: {
+        base_branch: repository.base_branch,
+        ...(repository.upstream_branch !== undefined && {
+          upstream_branch: repository.upstream_branch,
+        }),
+      },
       environment: executionEnvironment(
         repository.environment,
         repository.repository_environment,

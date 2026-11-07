@@ -510,6 +510,7 @@ export type RepositoryPolicyOf = (
   platform: string;
   ssh_credential: string;
   base_branch: string;
+  upstream_branch?: string;
   prompts: {
     instruction_file?: string;
     repository?: string;
@@ -1227,7 +1228,10 @@ export const executionSetupSchema = z.strictObject({
       address: z.string(),
       ssh_host_key: sshHostKeySchema,
       ssh_public_key: z.string().min(1),
-      strategy: z.strictObject({ base_branch: z.string() }),
+      strategy: z.strictObject({
+        base_branch: z.string(),
+        upstream_branch: z.string().min(1).optional(),
+      }),
       environment: executionEnvironmentSchema,
     }),
   ),

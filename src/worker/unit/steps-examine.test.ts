@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
+import { simpleGit } from "simple-git";
 import {
   hostEnvironment,
   stopAfter,
@@ -16,6 +23,7 @@ import {
   anthropicSetup,
   everyBindingSshAccess,
   repositorySetup,
+  transport,
 } from "./test-support.ts";
 import { CHECKOUTS_DIRECTORY, WorkspaceRoot } from "./workspace.ts";
 import type { MethodClients } from "./method-clients.ts";
@@ -507,5 +515,45 @@ test("an examine verification that the wall deadline cuts gives a later assessme
       CauseCategory.Plan,
       CauseCategory.Model,
     ]),
+  );
+});
+
+test("an examine checkout resolves origin/<upstream_branch>", async (t) => {
+  const state = temporary(t);
+  const origin = join(state, "origin");
+  mkdirSync(origin);
+  const git = simpleGit(origin);
+  await git.init();
+  await git.raw(["checkout", "-b", "main"]);
+  writeFileSync(join(origin, "file"), "base");
+  await git.add("file");
+  await git.raw([
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.invalid",
+    "commit",
+    "-m",
+    "base",
+  ]);
+  await git.raw(["branch", "feat", "main"]);
+  const upstreamHead = (await git.revparse(["feat"])).trim();
+  const repository = {
+    binding_id: createIdentity("binding"),
+    name: "repo",
+    address: origin,
+    strategy: { base_branch: "main", upstream_branch: "feat" },
+  };
+  const examine = await WorkspaceRoot.open(state).prepareExamine({
+    transport,
+    sshAccess: everyBindingSshAccess,
+    context: background,
+    deadlineMs: 60_000,
+    executionId: createIdentity("execution"),
+    repositories: [repository],
+  });
+  assert.equal(
+    (await simpleGit(examine.directory).revparse(["origin/feat"])).trim(),
+    upstreamHead,
   );
 });

@@ -49,7 +49,7 @@ const SETUP_RESULT = "kanthord.setup.result";
 export interface SetupRepository {
   binding_id: string;
   name: string;
-  strategy: { base_branch: string };
+  strategy: { base_branch: string; upstream_branch?: string };
   environment: ExecutionEnvironment;
 }
 

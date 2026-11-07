@@ -1128,6 +1128,9 @@ A list that misses, repeats, reorders or adds a binding answers `mission.evidenc
 Another form answers 400 `gateway.request.validation_failed`.
 An `examine` node names zero or more repository bindings of its own.
 The reviewer of an `examine` node checks out each base-branch head under `checkouts/<binding name>/`.
+The verification root of an `examine` node depends on its repository bindings.
+With one repository binding, the root is that checkout.
+With two or more, the root is the `checkouts` directory, which holds one directory for each binding name.
 When an `examine` node names no repository, the reviewer places the produced evidence in the workspace.
 
 The [verification run](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-verifications) uses list order, one item at a time, never in parallel.
