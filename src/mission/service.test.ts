@@ -389,6 +389,7 @@ function makeService(
       hasInbound: unexpectedCollaboration,
       read: unexpectedCollaboration,
       handoff: unexpectedCollaboration,
+      releaseHeld: unexpectedCollaboration,
     },
     decoder: {
       decode: unexpectedCollaboration,

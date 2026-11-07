@@ -231,7 +231,14 @@ export class IntakeService implements Service, IntakeCollaborations {
       checkAction(this.dependencies, caller, body.evidence_id),
     );
     registry.register(intakeOperations["link.read"], ({ body }, caller) =>
-      readLink(this.dependencies, caller, body),
+      readLink(
+        {
+          ...this.dependencies,
+          holdEvents: (ids) => this.dispatcher.hold(ids),
+        },
+        caller,
+        body,
+      ),
     );
     registry.register(intakeOperations["action.merge"], ({ body }, caller) =>
       mergeAction(
@@ -368,6 +375,11 @@ export class IntakeService implements Service, IntakeCollaborations {
 
   handoff(inboundEventId: string): ReturnType<Dispatcher["handoff"]> {
     return this.dispatcher.handoff(inboundEventId);
+  }
+
+  releaseHeld(inboundEventIds: readonly string[]): void {
+    this.dispatcher.release(inboundEventIds);
+    this.wake();
   }
 
   hasInbound(

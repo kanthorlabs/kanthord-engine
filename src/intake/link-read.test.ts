@@ -5,6 +5,7 @@ import {
   GrantKind,
   type GrantOf,
   type GrantRequest,
+  InboundOperation,
   type Material,
 } from "../custody/contract.ts";
 import { background } from "../kernel/context.ts";
@@ -95,6 +96,7 @@ function harness(
   ]);
   const grants: GrantRequest[] = [];
   const drops: string[] = [];
+  const held: string[][] = [];
   const reads: { call: GitHubCall; target: GitHubTarget; number: number }[] =
     [];
   const script = {
@@ -145,6 +147,7 @@ function harness(
       },
     },
     linkBindings: { conversationBindingOf: () => binding },
+    holdEvents: (ids) => held.push([...ids]),
   };
   const caller: CallerContext = {
     identity: IDENTITY,
@@ -190,6 +193,7 @@ function harness(
     store,
     grants,
     drops,
+    held,
     reads,
     script,
     addInbound,
@@ -284,8 +288,16 @@ test("a read takes one release of the credential of the binding and records no o
   assert.equal(grant.inbound.credential, CREDENTIAL);
   assert.equal(grant.inbound.inboundId, inbound);
   assert.equal(grant.inbound.resource, REPOSITORY);
+  assert.equal(grant.operation, InboundOperation.LinkRead);
   assert.deepEqual(h.drops, [CREDENTIAL]);
   assert.equal(h.outbound().total, NO_ROWS);
+});
+
+test("a read holds the identities of its items in the commit of the rows", async (t) => {
+  const h = harness(t);
+  h.addInbound(createIdentity("inbound"));
+  const { items } = await h.read();
+  assert.deepEqual(h.held, [items.map((item) => item.inbound_event_id)]);
 });
 
 test("a binding of another resource refuses the read before any release", async (t) => {

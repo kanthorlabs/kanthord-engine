@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
+import { externalLinkSchema } from "../kernel/external-link.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import { timestamp } from "../kernel/json.ts";
 import {
@@ -166,14 +167,6 @@ export const outboundOperationSchema = z.enum(OutboundOperation);
 export const resultClassSchema = z.enum(ResultClass);
 export const checkEndStateSchema = z.enum(CheckEndState);
 export const actionReadMethodSchema = z.enum(ActionReadMethod);
-export const LinkKind = { GitHubIssue: "github_issue" } as const;
-export const linkReadExternalLinkSchema = z.strictObject({
-  kind: z.literal(LinkKind.GitHubIssue),
-  resource_identity: z
-    .string()
-    .regex(/^conversation:github:[^/\s:]+\/[^/\s:]+$/),
-  number: z.number().int().positive(),
-});
 export const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 export const commitSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 
@@ -712,7 +705,7 @@ export const intakeOperations = {
       query: z.strictObject({}),
       body: z.strictObject({
         project_id: identitySchema("project"),
-        external_link: linkReadExternalLinkSchema,
+        external_link: externalLinkSchema,
         binding_id: identitySchema("binding"),
       }),
     }),

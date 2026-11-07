@@ -228,10 +228,11 @@ export interface PollReadRequest {
   etag: string | null;
 }
 
-export function releasePollGrant(
+export function releaseInboundGrant(
   dependencies: PollReleaseDependencies,
   tx: Transaction,
   facts: InboundGrantInput,
+  operation: InboundOperation,
 ): Material {
   assert.ok(
     facts.inboundId.length > EMPTY_TEXT_LENGTH,
@@ -248,12 +249,20 @@ export function releasePollGrant(
       kind: GrantKind.Inbound,
       identity: dependencies.identity,
       inbound: facts,
-      operation: InboundOperation.Poll,
+      operation,
     },
     now,
   );
   assert.equal(grant.execution, null, "A poll release pins nothing.");
   return dependencies.custody.release(tx, grant, now);
+}
+
+export function releasePollGrant(
+  dependencies: PollReleaseDependencies,
+  tx: Transaction,
+  facts: InboundGrantInput,
+): Material {
+  return releaseInboundGrant(dependencies, tx, facts, InboundOperation.Poll);
 }
 
 export async function requestPollRead(

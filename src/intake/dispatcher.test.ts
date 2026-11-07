@@ -53,6 +53,7 @@ const IDENTITY: ServiceIdentity = {
 const SECRET = "ghp_fakeCredentialMaterialValue";
 const INDETERMINATE = "indeterminate";
 const DISPOSITION_DUPLICATE = "duplicate";
+const DISPOSITION_ACCEPTED = "accepted_observation";
 const DEFECT = "system.operation.unknown";
 const TIMEOUT = "gateway.invocation.timeout";
 const CLAIM_LIVE = "mission.node.claim_live";
@@ -60,6 +61,7 @@ const MATCH_CHANGED = "mission.delivery.match_changed";
 const REQUEST_ID = "request_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const RESERVATIONS_AFTER_LOST_RACE = 0;
 const HANDOFFS_AFTER_DISCARD = 0;
+const NO_HANDOFFS = 0;
 const LINE_START = 0;
 const HANDOFFS_PER_EVENT = 1;
 const ERROR_ITEMS_PER_FAILURE = 1;
@@ -353,6 +355,30 @@ test("A direct handoff of a settled event answers null and calls no consumer", a
   await h.dispatcher.handoff(id);
   assert.equal(await h.dispatcher.handoff(id), null);
   assert.equal(h.calls.length, HANDOFFS_PER_EVENT);
+});
+
+test("A held event stays out of the drain until a direct handoff hands it over", async (t) => {
+  const h = harness(t);
+  const id = addEvent(h.store, h.inboundId, "d-1");
+  h.dispatcher.hold([id]);
+  await handOver(h);
+  assert.equal(h.calls.length, NO_HANDOFFS);
+  assert.equal(recordOf(h.store, id).state, InboundEventState.Pending);
+  const answer = { disposition: DISPOSITION_ACCEPTED, reason: null };
+  h.answers.push(completed(answer));
+  const result = await h.dispatcher.handoff(id);
+  assert.equal(result?.type, OperationResultType.Completed);
+  assert.equal(h.calls.length, HANDOFFS_PER_EVENT);
+});
+
+test("A released event returns to the drain", async (t) => {
+  const h = harness(t);
+  const id = addEvent(h.store, h.inboundId, "d-1");
+  h.dispatcher.hold([id]);
+  h.dispatcher.release([id]);
+  h.answers.push(completed({}));
+  await handOver(h);
+  assert.equal(recordOf(h.store, id).state, InboundEventState.Succeeded);
 });
 
 test("A direct handoff of a failed answer sets failed and answers the failure", async (t) => {

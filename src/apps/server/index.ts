@@ -1007,6 +1007,7 @@ export function composeServices(options: {
           ? null
           : admissionAnswerSchema.parse(resultOf(result));
       },
+      releaseHeld: (inboundEventIds) => intake.releaseHeld(inboundEventIds),
     },
     intakeCheck: {
       check: async (context, evidenceId) =>

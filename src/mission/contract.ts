@@ -14,6 +14,11 @@ import type { Transaction } from "../kernel/store.ts";
 import type { Context } from "../kernel/context.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
 import { errorSchema } from "../kernel/errors.ts";
+import {
+  type ExternalLink,
+  ExternalLinkKind,
+  externalLinkSchema,
+} from "../kernel/external-link.ts";
 import { tagSchema } from "../kernel/tag.ts";
 import { type FailureCause, failureCauseSchema } from "../kernel/cause.ts";
 import { CommitType } from "../kernel/commit-message.ts";
@@ -331,6 +336,7 @@ export interface IntakeLinks {
     context: Context,
     inboundEventId: string,
   ): Promise<AdmissionAnswer | null>;
+  releaseHeld(inboundEventIds: readonly string[]): void;
 }
 
 export interface DecodedLinkUpdate {
@@ -687,20 +693,8 @@ export const tagsSchema = z
   .refine((keys) => new Set(keys).size === keys.length, {
     message: "Tags must be unique.",
   });
-export const ExternalLinkKind = {
-  GitHubIssue: "github_issue",
-} as const;
 export const EXTERNAL_LINK_LIMIT = 10;
-const GITHUB_CONVERSATION_IDENTITY_PATTERN =
-  /^conversation:github:[^/\s:]+\/[^/\s:]+$/;
-export const externalLinkSchema = z.discriminatedUnion("kind", [
-  z.strictObject({
-    kind: z.literal(ExternalLinkKind.GitHubIssue),
-    resource_identity: z.string().regex(GITHUB_CONVERSATION_IDENTITY_PATTERN),
-    number: z.number().int().positive(),
-  }),
-]);
-export type ExternalLink = z.infer<typeof externalLinkSchema>;
+export { type ExternalLink, ExternalLinkKind, externalLinkSchema };
 export const linkUpdateRowSchema = z.strictObject({
   id: identitySchema(LINK_UPDATE_IDENTITY_PREFIX),
   mission_id: identitySchema(MISSION_IDENTITY_PREFIX),

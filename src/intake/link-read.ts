@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import type { z } from "zod";
-import { apiKeySecretSchema, type Material } from "../custody/contract.ts";
+import {
+  apiKeySecretSchema,
+  InboundOperation,
+  type Material,
+} from "../custody/contract.ts";
 import { isServiceIdentity, type ServiceIdentity } from "../kernel/caller.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -22,7 +26,7 @@ import {
 } from "./contract.ts";
 import { findEvent, insertEvent } from "./event-store.ts";
 import { newestInboundOf } from "./inbound-store.ts";
-import { releasePollGrant } from "./poll.ts";
+import { releaseInboundGrant } from "./poll.ts";
 
 const VALIDATION_FAILED_CODE = "gateway.request.validation_failed";
 
@@ -43,6 +47,7 @@ export interface LinkReadDependencies {
   custody: Pick<IntakeCustody, "authorizeOperation" | "release">;
   github: Pick<GitHubPlatform, "listIssueCommentsOf">;
   linkBindings: LinkBindings;
+  holdEvents(inboundEventIds: readonly string[]): void;
 }
 
 interface Hold {
@@ -99,13 +104,18 @@ function releaseLinkTarget(
       "The link resource has no inbound.",
       { external_link: input.external_link },
     );
-  hold.material = releasePollGrant(dependencies, tx, {
-    inboundId: inbound.id,
-    projectId: input.project_id,
-    credential: binding.credential,
-    platform: binding.platform,
-    resource: binding.repository,
-  });
+  hold.material = releaseInboundGrant(
+    dependencies,
+    tx,
+    {
+      inboundId: inbound.id,
+      projectId: input.project_id,
+      credential: binding.credential,
+      platform: binding.platform,
+      resource: binding.repository,
+    },
+    InboundOperation.LinkRead,
+  );
   return { inboundId: inbound.id, repository: binding.repository };
 }
 
@@ -168,9 +178,11 @@ export async function readLink(
       hold.material,
       input.external_link.number,
     );
-    return caller.commit((tx) => ({
-      items: storeItems(tx, target.inboundId, events),
-    }));
+    return caller.commit((tx) => {
+      const items = storeItems(tx, target.inboundId, events);
+      dependencies.holdEvents(items.map((item) => item.inbound_event_id));
+      return { items };
+    });
   } finally {
     hold.material?.drop();
   }

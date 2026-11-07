@@ -102,11 +102,13 @@ export async function admitLinkUpdates(
       duplicate: NO_COUNT,
       refused: NO_COUNT,
     };
-    for (const item of items)
-      countOf(
-        count,
-        await dependencies.intakeLinks.handoff(context, item.inbound_event_id),
-      );
+    const ids = items.map((item) => item.inbound_event_id);
+    try {
+      for (const id of ids)
+        countOf(count, await dependencies.intakeLinks.handoff(context, id));
+    } finally {
+      dependencies.intakeLinks.releaseHeld(ids);
+    }
     counts.push(count);
   }
   return counts;

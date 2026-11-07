@@ -760,6 +760,7 @@ function linkCheckFixture(
   const updates = new Map<string, DecodedLinkUpdate>();
   const items: string[] = [];
   const handed = new Set<string>();
+  const released: string[] = [];
   const reads: {
     project_id: string;
     external_link: ReturnType<typeof linkOf>;
@@ -776,6 +777,7 @@ function linkCheckFixture(
         items: items.map((inbound_event_id) => ({ inbound_event_id })),
       };
     },
+    releaseHeld: (inboundEventIds) => released.push(...inboundEventIds),
     handoff: async (_context, inboundEventId) => {
       if (handed.has(inboundEventId)) return null;
       handed.add(inboundEventId);
@@ -810,11 +812,34 @@ function linkCheckFixture(
     otherBindingId,
     inbounds,
     reads,
+    released,
     addItem,
     check,
     state_of,
   };
 }
+
+test("node check releases the hold of each item of a link after the handoff", async (t) => {
+  const h = linkCheckFixture(t);
+  const first = h.addItem(updateOf({ update_key: "issue_comment:1" }));
+  const second = h.addItem(updateOf({ update_key: "issue_comment:2" }));
+  await h.check();
+  assert.deepEqual(h.released, [first, second]);
+});
+
+test("node check releases the hold of each item when a handoff fails", async (t) => {
+  const h = linkCheckFixture(t);
+  const first = h.addItem(updateOf({ update_key: "issue_comment:1" }));
+  h.dependencies.intakeLinks.handoff = async () => {
+    throw new OperationError(
+      BAD_GATEWAY_STATUS,
+      "intake.handoff.failed",
+      "failed",
+    );
+  };
+  await assert.rejects(h.check(), OperationError);
+  assert.deepEqual(h.released, [first]);
+});
 
 test("node check of a node with one link and no request admits two items and answers their counts", async (t) => {
   const h = linkCheckFixture(t);
