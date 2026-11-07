@@ -589,6 +589,8 @@ test("an order_unknown answer drops only its own result and the other result rea
 const STOPPED_FILE = "stopped.txt";
 const STOPPED_CONTENT = "stopped";
 const WORKER_STOPPED = "worker_stopped";
+const INSTANCE_ARCHIVED = "instance_archived";
+const RELEASE_WAIT_MS = 30000;
 const LIVE_STOP = "worker.stop.execution_live";
 const REVIEWER = "reviewer@1";
 const RELEASE_FAILED = {
@@ -648,6 +650,7 @@ async function liveStopUnit(
   );
   const events: string[] = [];
   const releases: unknown[] = [];
+  const released = Promise.withResolvers<void>();
   const assessments: unknown[] = [];
   let pulls = 0;
   const content = {
@@ -698,6 +701,7 @@ async function liveStopUnit(
       executionRelease: async (input: { body: unknown }) => {
         events.push("release");
         releases.push(input.body);
+        released.resolve();
         return options.release ?? completed({});
       },
     },
@@ -787,6 +791,7 @@ async function liveStopUnit(
     claim,
     events,
     releases,
+    released: released.promise,
     assessments,
   };
 }
@@ -812,6 +817,50 @@ test("a stop during a live steps execution pushes the checkpoint, releases with 
       `refs/heads/${live.claim.node_branch}:${STOPPED_FILE}`,
     ]),
     STOPPED_CONTENT,
+  );
+});
+
+test(
+  "an instance_archived stop order pushes the checkpoint and releases with instance_archived",
+  { timeout: RELEASE_WAIT_MS * 2 },
+  async (t) => {
+    const live = await liveStopUnit(t, { evaluation: false });
+    live.unit.stopOrders([
+      { execution_id: live.claim.execution_id, reason: INSTANCE_ARCHIVED },
+    ]);
+    live.resume();
+    await live.released;
+    assert.deepEqual(live.events, ["push", "release"]);
+    assert.deepEqual(live.releases[0], {
+      further_work: true,
+      stop: {
+        reason: INSTANCE_ARCHIVED,
+        code: null,
+        cause: (live.releases[0] as { stop: { cause: unknown } }).stop.cause,
+      },
+    });
+    assert.equal(
+      await simpleGit(live.bare).show([
+        `refs/heads/${live.claim.node_branch}:${STOPPED_FILE}`,
+      ]),
+      STOPPED_CONTENT,
+    );
+    assert.equal(await live.unit.stop(), null);
+    assert.equal(await live.running, null);
+  },
+);
+
+test("a stop order of another execution leaves the live execution running", async (t) => {
+  const live = await liveStopUnit(t, { evaluation: false });
+  live.unit.stopOrders([
+    { execution_id: createIdentity("execution"), reason: INSTANCE_ARCHIVED },
+  ]);
+  live.resume();
+  assert.equal(await live.unit.stop(), null);
+  assert.equal(await live.running, null);
+  assert.equal(
+    (live.releases[0] as { stop: { reason: string } }).stop.reason,
+    WORKER_STOPPED,
   );
 });
 

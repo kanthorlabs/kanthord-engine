@@ -23,6 +23,7 @@ import { WorkPullKind } from "../../scheduler/contract.ts";
 import { piProviderId, Platform } from "../../llm/platforms.ts";
 import { LoginSessionMode } from "../../llm/sessions.ts";
 import { runWorker, Worker, type WorkerOptions } from "./index.ts";
+import { WorkerUnit } from "./unit.ts";
 import {
   FAKE_INSTANCE_NAME,
   FAKE_WORKER,
@@ -645,6 +646,31 @@ test("the first heartbeat reads the work, a new work_version reads it once, and 
   const changed = beats();
   await until(() => beats() >= changed + OBSERVED_BEATS, t.signal);
   assert.equal(reads(), TWO_READS);
+  assert.equal(await worker.stop(), null);
+  assert.equal(await running, null);
+});
+
+test("a work read passes the stop orders to the unit", async (t) => {
+  const stopOrders = [
+    {
+      execution_id: "execution_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      reason: "instance_archived" as const,
+    },
+  ];
+  const received: unknown[] = [];
+  t.mock.method(WorkerUnit.prototype, "stopOrders", (orders: unknown) => {
+    received.push(orders);
+  });
+  const f = await fixture(t, SINGLE);
+  f.server.state.stopOrders = stopOrders;
+  const worker = new Worker(
+    f.options({ heartbeatIntervalMs: FAST_HEARTBEAT_MS }),
+  );
+  stopAfter(t, () => worker.stop());
+  const running = worker.run();
+  await f.ready();
+  await until(() => received.length === SINGLE, t.signal);
+  assert.deepEqual(received, [stopOrders]);
   assert.equal(await worker.stop(), null);
   assert.equal(await running, null);
 });

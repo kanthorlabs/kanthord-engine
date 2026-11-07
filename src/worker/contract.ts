@@ -1310,6 +1310,22 @@ export const footprintOrderSchema = z.strictObject({
   keys: footprintKeysField.min(1),
 });
 export type FootprintOrder = z.infer<typeof footprintOrderSchema>;
+export const StopOrderReason = {
+  InstanceArchived: "instance_archived",
+} as const;
+export type StopOrderReason =
+  (typeof StopOrderReason)[keyof typeof StopOrderReason];
+export const stopOrderEntrySchema = z.strictObject({
+  execution_id: identitySchema("execution"),
+  reason: z.enum(StopOrderReason),
+});
+export type StopOrderEntry = z.infer<typeof stopOrderEntrySchema>;
+export interface StopOrder {
+  execution_id: string;
+  runtime_identity: string;
+  reason: StopOrderReason;
+  created_at: number;
+}
 export const sessionDeleteResultSchema = z.strictObject({
   removed: z.int().min(0),
   removed_bytes: z.int().min(0),
@@ -1492,9 +1508,16 @@ export const instanceOperations = {
         force: z.boolean().optional(),
       }),
     }),
-    output: instanceRecordSchema,
+    output: instanceRecordSchema.extend({
+      stopping: z
+        .array(identitySchema("execution"))
+        .optional()
+        .describe(
+          "Executions that the pending archive still waits for; present only while ended_at is null.",
+        ),
+    }),
     description:
-      "Archive a worker instance that no binding lists, and end its registrations. A live execution of the instance refuses the archive, unless force is true: force revokes the execution first.",
+      "Archive a worker instance that no binding lists, and end its registrations. A live execution of the instance refuses the archive, unless force is true. With force and no current connection, the archive revokes the execution and ends the instance. With force and a current connection, the archive orders each live execution to stop, answers ended_at null with stopping, and ends the instance when the last execution releases or after the deadline.",
   },
   "instance.token": {
     ...instanceOperation,
@@ -1590,9 +1613,10 @@ export const instanceOperations = {
       footprint_orders: z
         .array(footprintOrderSchema)
         .max(FOOTPRINT_ORDERS_PENDING_MAX),
+      stop_orders: z.array(stopOrderEntrySchema),
     }),
     description:
-      "Answer the work version, the open login sessions, the pending session reads and the footprint cleanup orders of the current connection of the instance. The call renews no liveness.",
+      "Answer the work version, the open login sessions, the pending session reads, the footprint cleanup orders and the stop orders of the current connection of the instance. The call renews no liveness.",
   },
   "session_read.report": {
     ...instanceOperation,

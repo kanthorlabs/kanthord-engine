@@ -4,9 +4,13 @@ pathItem:
     operationId: worker.instance.archive
     tags:
       - worker
-    description: "Archive a worker instance that no binding lists, and end its
+    description: Archive a worker instance that no binding lists, and end its
       registrations. A live execution of the instance refuses the archive,
-      unless force is true: force revokes the execution first."
+      unless force is true. With force and no current connection, the archive
+      revokes the execution and ends the instance. With force and a current
+      connection, the archive orders each live execution to stop, answers
+      ended_at null with stopping, and ends the instance when the last execution
+      releases or after the deadline.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: true
@@ -142,6 +146,16 @@ components:
               maximum: 9007199254740991
               description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
             - type: "null"
+        stopping:
+          description: Executions that the pending archive still waits for; present only
+            while ended_at is null.
+          type: array
+          items:
+            type: string
+            minLength: 36
+            maxLength: 36
+            pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+            description: execution_ followed by a canonical 26-character uppercase ULID.
       required:
         - id
         - name

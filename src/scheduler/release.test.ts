@@ -5,6 +5,7 @@ import { HttpStatus } from "../kernel/http.ts";
 import { ExecutionEnd } from "../tracking/contract.ts";
 import { executionTrace, executionTransition } from "./telemetry.ts";
 import { test, type TestContext } from "node:test";
+import pino from "pino";
 import { background } from "../kernel/context.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
@@ -48,6 +49,8 @@ import { DEFAULT_STOP_BACKOFF_SECONDS } from "./config.ts";
 import { STOP_UNORDERED } from "./release.ts";
 
 const WAKE_CALL_COUNT = 1;
+const HOOK_FAILURE = "hook failed";
+const TELEMETRY_RECORDS = 2;
 const NO_STALLS = 0;
 const NO_FAILURES = 0;
 const NO_CALLS = 0;
@@ -683,6 +686,82 @@ test("an instance_archived release refuses with stop_unordered and writes nothin
   assert.equal(h.calls.length, NO_CALLS);
   assert.equal(h.telemetry.length, NO_CALLS);
   assert.equal(wake.mock.callCount(), NO_CALLS);
+});
+
+test("an instance_archived release with a stop order calls stopped, not failure", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  t.mock.method(h.service, "wake", () => {});
+  h.dependencies.stopOrderOf = (executionId) =>
+    executionId === h.row.execution_id
+      ? ExecutionStopReason.InstanceArchived
+      : null;
+  await h.release(true, INSTANCE_ARCHIVED);
+  assert.deepEqual(
+    h.calls.map((call) => call.method),
+    [STOPPED_CALL],
+  );
+  assert.deepEqual(h.read().stop, INSTANCE_ARCHIVED);
+});
+
+test("an instance_archived release whose order names another reason refuses with stop_unordered", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  h.dependencies.stopOrderOf = () => ExecutionStopReason.WorkerStopped;
+  await assert.rejects(
+    h.release(true, INSTANCE_ARCHIVED),
+    (error: unknown) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.Conflict &&
+      error.code === STOP_UNORDERED,
+  );
+  assert.equal(h.read().ended_at, null);
+});
+
+test("executionReleased runs after the commit with the execution id and the stop", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  t.mock.method(h.service, "wake", () => {});
+  const hooked: { ended: number | null; arguments: unknown[] }[] = [];
+  h.dependencies.stopOrderOf = () => ExecutionStopReason.InstanceArchived;
+  h.dependencies.executionReleased = (...args) => {
+    hooked.push({ ended: h.read().ended_at, arguments: args });
+  };
+  await h.release(true, INSTANCE_ARCHIVED);
+  assert.deepEqual(hooked, [
+    {
+      ended: FIXTURE_NOW,
+      arguments: [h.row.execution_id, INSTANCE_ARCHIVED],
+    },
+  ]);
+  assert.deepEqual(
+    h.telemetry.map((entry) => entry.method),
+    ["executionEnded", "executionTransition"],
+  );
+});
+
+test("an executionReleased that throws is logged and the release answers its result", async (t) => {
+  const lines: string[] = [];
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  const wake = t.mock.method(h.service, "wake", () => {});
+  h.dependencies.logger = pino(
+    { level: "info" },
+    { write: (line) => lines.push(line) },
+  );
+  h.dependencies.executionReleased = () => {
+    throw new Error(HOOK_FAILURE);
+  };
+  assert.deepEqual(await h.release(true), {
+    execution_id: h.row.execution_id,
+    ended_at: FIXTURE_NOW,
+  });
+  const records = lines.map((line) => JSON.parse(line));
+  assert.equal(records.length, ONE_CALL);
+  assert.equal(records[0].execution_id, h.row.execution_id);
+  assert.equal(records[0].err.message, HOOK_FAILURE);
+  assert.equal(h.telemetry.length, TELEMETRY_RECORDS);
+  assert.equal(wake.mock.callCount(), ONE_CALL);
 });
 
 const API = "repository:github:acme/api";

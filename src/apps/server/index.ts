@@ -561,6 +561,10 @@ export function composeServices(options: {
       executionTransition: (trace, transition) =>
         tracking.executionTransition(trace, transition),
     },
+    logger: options.logger,
+    stopOrderOf: (executionId) => worker.stopOrderOf(executionId),
+    executionReleased: (executionId) => worker.executionReleased(executionId),
+    archiving: (tx, runtimeIdentity) => worker.archiving(tx, runtimeIdentity),
     health: options.health,
   });
   const tracking = new TrackingService({

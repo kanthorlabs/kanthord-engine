@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
+import { createIdentity } from "../../kernel/identity.ts";
 import {
   AssetKind,
   type Evidence,
@@ -53,6 +54,8 @@ const UPLOAD = "evidence-upload";
 const READY = "Worker application ready";
 const CLAIMED = "credential handover received";
 const WORKER_STOPPED = "worker_stopped";
+const INSTANCE_ARCHIVED = "instance_archived";
+const INSTANCE_NAME = "server-1";
 const STOPPED_FILE = "stopped.txt";
 const DECRYPTION_FAILED = "worker.handover.decryption_failed";
 const ENDED = "execution ended";
@@ -450,6 +453,119 @@ test(
             (record) => record.msg === ENDED && record.kind === ENDED_KIND,
           ),
           JSON.stringify(host.logs),
+        );
+      },
+    );
+    const archiveSetup = await fixture(t);
+    await t.test(
+      "E09.15a a forced archive of a connected instance lets the coder push its checkpoint before the instance ends",
+      { timeout: JOURNEY_TIMEOUT },
+      async (t) => {
+        const entered = Promise.withResolvers<void>();
+        const resume = Promise.withResolvers<void>();
+        const provider = scriptedProvider([
+          tool("bash", { command: `printf ${HELLO} > ${STOPPED_FILE}` }),
+          async () => {
+            entered.resolve();
+            await resume.promise;
+            return fauxAssistantMessage("stopped");
+          },
+        ]);
+        const host = await inProcessWorker(t, {
+          endpoint: archiveSetup.fixture.endpoint,
+          ...archiveSetup.auth,
+          modelRuntimeFactory: scriptedModelRuntime(provider),
+          repositoryTransport: archiveSetup.transport,
+        });
+        await entered.promise;
+        const exported = await archiveSetup.read<{
+          version: number;
+          bindings: { general: { config: { worker_instances: string[] } } };
+        }>(["project", "binding", "export", archiveSetup.project_id]);
+        exported.bindings.general.config.worker_instances = [];
+        await archiveSetup.write(
+          ["project", "binding", "apply", archiveSetup.project_id],
+          exported,
+        );
+        const instance = await archiveSetup.read<{ id: string }>([
+          "worker",
+          "instance",
+          "get",
+          INSTANCE_NAME,
+        ]);
+        const connectionId = createIdentity("connection");
+        assert.ok(
+          archiveSetup.fixture.worker.instances.holdConnection(
+            instance.id,
+            connectionId,
+          ),
+        );
+        const archived = await archiveSetup.read<{
+          ended_at: number | null;
+          stopping?: string[];
+        }>([
+          "worker",
+          "instance",
+          "archive",
+          INSTANCE_NAME,
+          "--expected-revision",
+          String(FIRST_REVISION),
+          "--force",
+        ]);
+        assert.equal(archived.ended_at, null);
+        assert.equal(archived.stopping?.length, SINGLE_ITEM);
+        const work = archiveSetup.fixture.worker.instances.work(
+          instance.id,
+          INSTANCE_NAME,
+          connectionId,
+        );
+        assert.deepEqual(work.stop_orders, [
+          { execution_id: archived.stopping![0], reason: INSTANCE_ARCHIVED },
+        ]);
+        host.worker.stopOrders(work.stop_orders);
+        resume.resolve();
+        for (;;) {
+          const current = await archiveSetup.read<{ ended_at: number | null }>([
+            "worker",
+            "instance",
+            "get",
+            INSTANCE_NAME,
+          ]);
+          if (current.ended_at !== null) break;
+          await delay(POLL_INTERVAL_MS, undefined, { signal: t.signal });
+        }
+        const executions = await archiveSetup.read<{
+          items: ExecutionRecord[];
+        }>([
+          "scheduler",
+          "execution",
+          "list",
+          archiveSetup.project_id,
+          "--node",
+          archiveSetup.node_id,
+        ]);
+        assert.equal(executions.items.length, SINGLE_ITEM);
+        const claim = executions.items[0]!;
+        assert.equal(claim.claim_state, ClaimState.Finished);
+        assert.equal(claim.stop?.reason, INSTANCE_ARCHIVED);
+        assert.equal(claim.stop?.code, null);
+        const branch = `refs/heads/kanthord/${archiveSetup.node_id}`;
+        assert.equal(
+          await simpleGit(archiveSetup.bare).show([
+            `${branch}:${STOPPED_FILE}`,
+          ]),
+          HELLO,
+        );
+        const node = await archiveSetup.read<{ state: NodeState }>([
+          "mission",
+          "node",
+          "get",
+          archiveSetup.node_id,
+        ]);
+        assert.equal(node.state, NodeState.Available);
+        assert.equal(
+          archiveSetup.fixture.worker.stopOrderOf(claim.execution_id),
+          null,
         );
       },
     );
