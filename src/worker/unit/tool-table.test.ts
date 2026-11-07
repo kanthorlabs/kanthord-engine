@@ -17,6 +17,8 @@ import {
   survivingProcesses,
 } from "../../agent/test-support.ts";
 import { childEnvironment, sessionTools, ToolProcesses } from "./tool-table.ts";
+import { HOST_TOOL_PARAMETERS } from "../../agent/catalog.ts";
+import { HostTool } from "../contract.ts";
 
 const MILLISECONDS_PER_SECOND = 1000;
 const MODEL_TIMEOUT_SECONDS = 30;
@@ -141,6 +143,43 @@ test("child environment removes provider keys and bash timeout stays below the b
   assert.deepEqual(output, { exitCode: 0 });
   assert.equal(processes.take(TOOL_CALL)?.killed, false);
   assert.equal(processes.take(TOOL_CALL), undefined);
+});
+
+test("sessionTools of swe@1 holds both host tools under their own names and re@1 holds none", async (t) => {
+  const pi = await loadPi();
+  const processes = new ToolProcesses(pi.getShellConfig());
+  const now = Date.now();
+  const budget = new ExecutionBudget({
+    created_at: now,
+    expired_at: now + 10000,
+    resource_budget: { wall_time_ms: 5000 },
+  });
+  const tools = (agent: string) =>
+    sessionTools(
+      pi,
+      agent,
+      temporary(t),
+      budget,
+      unusedHostTools,
+      hostEnvironment(),
+      processes,
+    );
+  const names = Object.values(HostTool);
+  const swe = tools("swe@1");
+  for (const name of names) assert.ok(swe.allowlist.includes(name), name);
+  const hosts = swe.customTools.filter((tool) =>
+    (names as string[]).includes(tool.name),
+  );
+  assert.deepEqual(hosts.map((tool) => tool.name).sort(), [...names].sort());
+  for (const tool of hosts)
+    assert.deepEqual(
+      JSON.stringify(tool.parameters),
+      JSON.stringify(HOST_TOOL_PARAMETERS[tool.name as HostTool]),
+    );
+  const reviewer = tools("re@1");
+  assert.deepEqual(reviewer.customTools, []);
+  for (const name of names)
+    assert.equal(reviewer.allowlist.includes(name), false);
 });
 
 test("bash records the requested and the applied timeout once and records nothing for a rejected exec", async (t) => {

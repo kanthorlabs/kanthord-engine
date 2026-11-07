@@ -385,6 +385,7 @@ test(
             }),
           ),
           { name: "evidence-upload", source: "host" },
+          { name: "link_update_list", source: "host" },
         ],
       );
       assert.equal(

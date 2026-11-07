@@ -7,8 +7,8 @@ import type {
 import { COMMAND_LIMIT_MS, type ExecutionBudget } from "./budget.ts";
 import { BuiltinTool, getAgentDeclaration } from "../../agent/catalog.ts";
 import type { PiCodingAgent } from "../../agent/pi.ts";
-import type { HostTools } from "../contract.ts";
-import { evidenceUploadTool } from "./host-tools.ts";
+import { HostTool, type HostTools } from "../contract.ts";
+import { evidenceUploadTool, linkUpdateListTool } from "./host-tools.ts";
 export { ToolSource } from "../../agent/contract.ts";
 import { childEnvironment } from "../../agent/environment.ts";
 import {
@@ -21,6 +21,13 @@ export { childEnvironment } from "../../agent/environment.ts";
 const MINIMUM_SECONDS = 1;
 const MILLISECONDS_PER_SECOND = 1000;
 const PROCESSES_MAX = 1024;
+
+const HOST_TOOLS: Readonly<
+  Record<HostTool, (hostTools: HostTools) => ToolDefinition>
+> = {
+  [HostTool.EvidenceUpload]: evidenceUploadTool,
+  [HostTool.LinkUpdateList]: linkUpdateListTool,
+};
 
 export interface ToolTimeout {
   requestedMs: number | null;
@@ -77,8 +84,8 @@ export function sessionTools(
   assert.ok(agent);
   assert.ok(cwd);
   const allowlist: string[] = [...agent.tools, ...agent.host_tools];
-  const customTools: ToolDefinition[] = agent.host_tools.map(() =>
-    evidenceUploadTool(hostTools),
+  const customTools: ToolDefinition[] = agent.host_tools.map((name) =>
+    HOST_TOOLS[name](hostTools),
   );
   if (!agent.tools.includes(BuiltinTool.Bash))
     return { allowlist, customTools };

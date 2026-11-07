@@ -21,7 +21,7 @@ test("static agent declarations", () => {
   assert.deepEqual(getAgentDeclaration("swe@1"), {
     agent_name: "swe@1",
     agent_prompt: SWE_AGENT_PROMPT,
-    host_tools: ["evidence-upload"],
+    host_tools: ["evidence-upload", "link_update_list"],
     tools: ["read", "edit", "write", "grep", "find", "ls", "bash"],
     overridable_fields: [
       "agent_provider",

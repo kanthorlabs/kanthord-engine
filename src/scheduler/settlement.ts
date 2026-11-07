@@ -7,6 +7,7 @@ import { identitySchema } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   type EndedExecution,
+  EXECUTION_NOT_RUNNING,
   type ExecutionRow,
   ExecutionStopReason,
   type FailureHold,
@@ -28,7 +29,7 @@ import {
 } from "./execution-store.ts";
 import type { SchedulerConfig } from "./config.ts";
 
-export const EXECUTION_NOT_RUNNING = "scheduler.execution.not_running";
+export { EXECUTION_NOT_RUNNING };
 const NO_FAILURES = 0;
 const ENDING_FAILURE = 1;
 const ONE_JOB = 1;

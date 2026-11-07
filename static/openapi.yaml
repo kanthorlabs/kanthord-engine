@@ -402,6 +402,8 @@ paths:
     $ref: ./openapi/worker/execution.change_request.get.yaml#/pathItem
   /api/worker/execution/{execution_id}/failed-check:
     $ref: ./openapi/worker/execution.failed_check.get.yaml#/pathItem
+  /api/worker/execution/{execution_id}/link-update:
+    $ref: ./openapi/worker/execution.link_update.get.yaml#/pathItem
   /api/worker/execution/{execution_id}/setup:
     $ref: ./openapi/worker/execution.setup.get.yaml#/pathItem
   /api/worker/footprint:

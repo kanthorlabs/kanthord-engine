@@ -1,11 +1,12 @@
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { identitySchema } from "../kernel/identity.ts";
-import type { Transaction } from "../kernel/store.ts";
+import type { Store, Transaction } from "../kernel/store.ts";
 import {
   INBOUND_EVENT_ID_PREFIX,
   INBOUND_EVENT_LIST_LIMIT_DEFAULT,
   type InboundEvent,
+  type InboundEventDetail,
   type InboundEventStateValue,
   IntakeErrorCode,
 } from "./contract.ts";
@@ -13,8 +14,9 @@ import {
   EVENT_PROJECTION_COLUMNS,
   eventRecord,
   type InboundEventProjectionRow,
-  readEventProjection,
+  readEvent,
 } from "./event-store.ts";
+import { eventText, redactedText } from "./event-text.ts";
 
 const CURSOR_ENCODING = "base64url";
 const TEXT_ENCODING = "utf8";
@@ -80,13 +82,21 @@ export function listEvents(tx: Transaction, query: EventListQuery): EventPage {
   };
 }
 
-export function getEvent(tx: Transaction, id: string): InboundEvent {
-  const row = readEventProjection(tx, id);
+function readStoredEvent(
+  tx: Transaction,
+  id: string,
+): { record: InboundEvent; event: Uint8Array } {
+  const row = readEvent(tx, id);
   if (row === null)
     throw new OperationError(
       HttpStatus.NotFound,
       IntakeErrorCode.InboundEventNotFound,
       "Inbound event not found.",
     );
-  return eventRecord(row);
+  return { record: eventRecord(row), event: row.event };
+}
+
+export function getEvent(store: Store, id: string): InboundEventDetail {
+  const stored = store.transaction((tx) => readStoredEvent(tx, id));
+  return { ...stored.record, event: redactedText(eventText(stored.event)) };
 }

@@ -169,6 +169,9 @@ const fakeCollaborations = {
     actionContextOf: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
+    linkUpdatesOf: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
   },
   missionPromptPins: {
     attemptPromptCommits: () => [],
@@ -189,6 +192,9 @@ const fakeCollaborations = {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
     read: async () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+    describe: async () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
   },

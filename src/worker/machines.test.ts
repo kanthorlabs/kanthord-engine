@@ -89,6 +89,7 @@ function machineFixture(t: TestContext) {
       authorizeRequest: unexpected,
       authorizeAction: unexpected,
       actionContextOf: unexpected,
+      linkUpdatesOf: unexpected,
     },
     missionPromptPins: {
       attemptPromptCommits: unexpected,
@@ -114,7 +115,11 @@ function machineFixture(t: TestContext) {
       reported_by: holder,
     }),
 
-    intakeActions: { perform: unexpected, read: unexpected },
+    intakeActions: {
+      perform: unexpected,
+      read: unexpected,
+      describe: unexpected,
+    },
     evidenceRequests: { request: unexpected },
     custodyHandover: {
       handover: unexpected,

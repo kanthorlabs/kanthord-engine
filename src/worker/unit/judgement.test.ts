@@ -13,6 +13,7 @@ import {
   JUDGEMENT_MARKER,
   judgementBlockers,
   judgementRationale,
+  linkUpdatesText,
   parseJudgement,
   parseRepaired,
   releaseRevisionInstruction,
@@ -24,6 +25,8 @@ import {
   UnmetGround,
   unmetGroundSchema,
 } from "./judgement.ts";
+import type { LinkUpdateRead } from "../contract.ts";
+import { VERDICT_LINK_UPDATE_LIMIT } from "./node-reads.ts";
 import {
   affectedFailureText,
   type AffectedRun,
@@ -35,6 +38,17 @@ import type { NativeAgent } from "./native-agent.ts";
 import { PromptTemplate } from "../../agent/contract.ts";
 import type { WorkPrompt } from "../../agent/prompt-composer.ts";
 import { type Finding, FindingKind } from "../../mission/contract.ts";
+
+const LINK_UPDATES_HEADING = "Updates of the external links of this node";
+const MISSING_LINE = "An update is no longer stored.";
+const LINK_NUMBER = 7;
+const LINK_TIME = 1760000000000;
+const NEW_UPDATES = 3;
+const MISSING_INDEX = 5;
+const ONE_MISSING = 1;
+const FIRST_UPDATE = 1;
+const TOTAL_UPDATES = 25;
+const LONG_BODY_FACTOR = 4;
 
 const evaluationJudgementSchema = evaluationJudgementSchemaOf({
   priorIds: [],
@@ -999,5 +1013,90 @@ test("the criterion revision lists each open finding with its id and asks for an
       `- ${PRIOR_BLOCKER_ID} (B1, round 1) name B1: defect B1 fix: fix B1 why: why B1`,
       `- ${PRIOR_SUGGESTION_ID} (S1, round 2) name S1: defect S1 fix: fix S1 why: why S1`,
     ].join("\n"),
+  );
+});
+
+function linkUpdate(index: number, overrides: object = {}) {
+  return {
+    id: `link_update_${String(index).padStart(2, "0")}`,
+    external_link: {
+      kind: "github_issue",
+      resource_identity: "conversation:github:octo/widgets",
+      number: LINK_NUMBER,
+    },
+    update_key: `issue_comment:${index}`,
+    occurred_at: LINK_TIME + index,
+    new: false,
+    content: {
+      author: `author${index}`,
+      body: `body ${index}.`,
+      url: `https://github.com/octo/widgets/issues/7#issuecomment-${index}`,
+      occurred_at: LINK_TIME + index,
+    },
+    ...overrides,
+  };
+}
+
+test("the link updates text lists the newest updates with New marks, one line for each missing update and the count of older updates", () => {
+  const items: LinkUpdateRead["items"] = Array.from(
+    { length: VERDICT_LINK_UPDATE_LIMIT },
+    (_, index) =>
+      linkUpdate(VERDICT_LINK_UPDATE_LIMIT - index, {
+        new: index < NEW_UPDATES,
+      }),
+  );
+  items[MISSING_INDEX] = { ...items[MISSING_INDEX]!, content: null };
+  const text = linkUpdatesText({
+    items,
+    next_cursor: "next",
+    total: TOTAL_UPDATES,
+  });
+  assert.ok(text);
+  const lines = text.split("\n");
+  assert.equal(lines[0], LINK_UPDATES_HEADING);
+  assert.equal(
+    lines.filter((line) => line === MISSING_LINE).length,
+    ONE_MISSING,
+  );
+  assert.equal(
+    lines.filter((line) => line.startsWith("New")).length,
+    NEW_UPDATES,
+  );
+  assert.ok(
+    text.indexOf(`body ${VERDICT_LINK_UPDATE_LIMIT}.`) <
+      text.indexOf(`body ${FIRST_UPDATE}.`),
+  );
+  assert.ok(text.includes("octo/widgets"));
+  assert.ok(text.includes(new Date(LINK_TIME + FIRST_UPDATE).toISOString()));
+  assert.ok(
+    text.includes("https://github.com/octo/widgets/issues/7#issuecomment-1"),
+  );
+  assert.equal(
+    lines.at(-1),
+    `${TOTAL_UPDATES - VERDICT_LINK_UPDATE_LIMIT} older updates. Read them with the tool link_update_list.`,
+  );
+});
+
+test("the link updates text cuts no body and states no older updates when the page holds all", () => {
+  const body = "x".repeat(REQUESTED_CHANGES_MAX_BYTES * LONG_BODY_FACTOR);
+  const text = linkUpdatesText({
+    items: [
+      linkUpdate(FIRST_UPDATE, {
+        content: {
+          author: "octocat",
+          body,
+          url: "https://example.test/u",
+          occurred_at: LINK_TIME,
+        },
+      }),
+    ],
+    next_cursor: null,
+    total: ONE_MISSING,
+  });
+  assert.ok(text?.includes(body));
+  assert.equal(text?.includes("older updates"), false);
+  assert.equal(
+    linkUpdatesText({ items: [], next_cursor: null, total: 0 }),
+    null,
   );
 });

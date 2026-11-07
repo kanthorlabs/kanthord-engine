@@ -17,6 +17,7 @@ import {
 } from "./steps-implement.ts";
 import type { WorkspaceCheckout } from "./workspace.ts";
 import { NoProgressRule } from "./progress-rule.ts";
+import { linkUpdatesText } from "./judgement.ts";
 import { readPrior } from "./node-reads.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
@@ -50,6 +51,9 @@ const ONE_RUN = 1;
 const WALL_DEADLINE_MS = 300;
 const FIXED_ROUND = 2;
 const NO_INDEX = 0;
+const LINK_NUMBER = 7;
+const LINK_TIME = 1760000000000;
+const LINK_BODY = "Please also handle the empty list.";
 const ROUND_ATTRIBUTE = "kanthord.evaluation.round";
 
 type Harness = Awaited<ReturnType<typeof fixture>>;
@@ -551,6 +555,8 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
     h.run.clients.worker = {
       ...h.run.clients.worker,
       "execution.failed_check.get": async () => completed({ items: [] }),
+      "execution.link_update.get": async () =>
+        completed({ items: [], next_cursor: null, total: NO_INDEX }),
     } as unknown as MethodClients["worker"];
     const prior = await readPrior(h.run, h.input.setup.repositories);
     h.verdict = prior.verdict;
@@ -564,5 +570,55 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
         ),
         finding.id,
       );
+  });
+
+  test("an attempt with only a link update plans the node unit with the link updates text and no verdict rule", async (t) => {
+    const { h } = await verdictHarness(t, [fauxAssistantMessage("never")]);
+    const completed = (data: unknown) => ({
+      type: "completed",
+      status: 200,
+      data,
+    });
+    const read = {
+      items: [
+        {
+          id: "link_update_1",
+          external_link: {
+            kind: "github_issue",
+            resource_identity: "conversation:github:octo/widgets",
+            number: LINK_NUMBER,
+          },
+          update_key: "issue_comment:1",
+          occurred_at: LINK_TIME,
+          new: true,
+          content: {
+            author: "octocat",
+            body: LINK_BODY,
+            url: "https://github.com/octo/widgets/issues/7#issuecomment-1",
+            occurred_at: LINK_TIME,
+          },
+        },
+      ],
+      next_cursor: null,
+      total: ONE_RUN,
+    };
+    h.run.clients.mission = {
+      ...h.run.clients.mission,
+      "execution.rework_assessment.get": async () => completed(null),
+    } as unknown as MethodClients["mission"];
+    h.run.clients.worker = {
+      ...h.run.clients.worker,
+      "execution.failed_check.get": async () => completed({ items: [] }),
+      "execution.link_update.get": async () => completed(read),
+    } as unknown as MethodClients["worker"];
+    const prior = await readPrior(h.run, h.input.setup.repositories);
+    assert.deepEqual(prior.verdict?.judged, []);
+    h.verdict = prior.verdict;
+    const { node } = await startCheck(h);
+    assert.ok(node);
+    assert.ok(node.text.includes(LINK_BODY));
+    assert.ok(node.text.includes(linkUpdatesText(read)!));
+    assert.deepEqual(node.judged, []);
+    assert.equal(node.round, null);
   });
 });
