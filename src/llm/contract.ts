@@ -39,7 +39,7 @@ export const LlmErrorCode = {
   ModelCredentialNotFound: "llm.model.credential_not_found",
   ModelUnknown: "llm.model.model_unknown",
   ModelReasoningUnsupported: "llm.model.reasoning_unsupported",
-  InstanceUnknown: "llm.credential.instance_unknown",
+  HolderUnknown: "llm.credential.holder_unknown",
   InstanceForbidden: "llm.credential.instance_forbidden",
 } as const;
 
@@ -95,6 +95,7 @@ export const loginSessionEntrySchema = z.strictObject({
   platform: z.string().min(1),
   mode: z.enum(INSTANCE_LOGIN_MODES),
   code: z.string().nullable(),
+  holder: z.string().min(1),
 });
 export type LoginSessionEntry = z.infer<typeof loginSessionEntrySchema>;
 export const LOGIN_REPORT_ADDRESS_MAX_LENGTH = 2048;
@@ -178,6 +179,7 @@ export const copyHealthSchema = z.strictObject({
   failure_reason: resourceFailureReasonSchema,
   models: reportedModelsSchema,
   reported_at: z.number().int().nullable(),
+  reported_by: z.string().min(1).nullable(),
 });
 export type CopyHealth = z.infer<typeof copyHealthSchema>;
 export const modelCheckBodySchema = z.strictObject({
@@ -244,7 +246,7 @@ export const llmOperations = {
     }),
     output: credentialAnswerSchema,
     description:
-      "Create an LLM credential with the first revision of each copy. A human sends the secret and the holders, and the server seals each instance copy to the current key of its instance. A worker instance sends one copy sealed to its own key.",
+      "Create an LLM credential with the first revision of each copy. A human sends the secret and the holders, and the server seals each instance copy and each machine copy to the current key of its holder. A worker instance sends one copy sealed to its own key.",
   },
   list: {
     id: "llm.credential.list",
@@ -267,7 +269,7 @@ export const llmOperations = {
     }),
     output: credentialListAnswerSchema,
     description:
-      "List the copies of LLM credentials with optional platform and holder filtering and pagination. A worker instance lists only its own copies.",
+      "List the copies of LLM credentials with optional platform and holder filtering and pagination. A worker instance lists the copies that it uses: each own copy, and each machine copy of a name with no own copy.",
   },
   get: {
     id: "llm.credential.get",
@@ -288,7 +290,7 @@ export const llmOperations = {
     }),
     output: llmCredentialAnswerSchema,
     description:
-      "Get one copy of an LLM credential, all its revisions and the agent providers that name it. The holder defaults to server for a human and to the instance of a worker token.",
+      "Get one copy of an LLM credential, all its revisions and the agent providers that name it. The holder defaults to server for a human and to the copy holder of the instance for a worker token.",
   },
   rotate: {
     id: "llm.credential.rotate",
@@ -438,7 +440,7 @@ export const llmOperations = {
     }),
     output: loginAnswerSchema,
     description:
-      "Start an OAuth credential login session. The holder defaults to server. A login of a worker instance runs on that instance in copy_code or device mode. A login of an instance copy that is sealed to an ended key adds the next revision of that copy.",
+      "Start an OAuth credential login session. The holder defaults to server. A login of a worker instance runs on that instance, and a login of a worker machine runs on its connected instance with the newest heartbeat, in copy_code or device mode. A login of an instance copy that is sealed to an ended key adds the next revision of that copy.",
   },
   login_code: {
     id: "llm.credential.login_code",
@@ -501,7 +503,7 @@ export const llmOperations = {
     }),
     output: z.null(),
     description:
-      "Report the state of an OAuth login session that runs on the worker instance of the token. The completed report carries the credential sealed to the instance key, and the server stores revision 1 of the copy of that instance.",
+      "Report the state of an OAuth login session that runs on the worker instance of the token. The completed report carries the credential sealed to the key of the holder of the session, and the server stores the copy of that holder.",
   },
   report: {
     id: "llm.credential.report",
@@ -522,7 +524,7 @@ export const llmOperations = {
     }),
     output: z.null(),
     description:
-      "Report the check result of the newest live revision of a copy that the worker instance of the token holds. The server keeps the last report of each copy in memory.",
+      "Report the check result of the newest live revision of the copy of the copy holder of the worker instance of the token. The server keeps the last report of each copy in memory.",
   },
   sealed: {
     id: "llm.credential.sealed",
@@ -544,7 +546,7 @@ export const llmOperations = {
     }),
     output: sealedCopyAnswerSchema,
     description:
-      "Answer the sealed object of the newest live revision of a copy that the worker instance of the token holds, when the copy is sealed to the current key of the instance.",
+      "Answer the sealed object of the newest live revision of the copy of the copy holder of the worker instance of the token, when the copy is sealed to the current key of its holder.",
   },
   provider_check: {
     id: "llm.provider.check",

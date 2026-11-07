@@ -15,6 +15,7 @@ import {
 import type { CallerIdentity, ServiceIdentity } from "../kernel/caller.ts";
 import {
   type AgentProvidersDependentOnFn,
+  type BindingRevision,
   type BindingsNamingFn,
   type CredentialAnswer,
   type CredentialMetadataFn,
@@ -275,6 +276,7 @@ function fixture(
     missionAuthorization?: Dependencies["missionAuthorization"];
     executions?: Dependencies["executions"];
     instanceKeys?: Dependencies["instanceKeys"];
+    bindingsListingInstance?: Dependencies["bindingsListingInstance"];
   } = {},
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -314,6 +316,7 @@ function fixture(
     intakeServiceName: INTAKE_SERVICE_NAME,
     projectServiceName: PROJECT_SERVICE_NAME,
     instanceKeys: collaborations.instanceKeys,
+    bindingsListingInstance: collaborations.bindingsListingInstance,
   });
   let lastTransaction: Transaction | undefined;
   const commit = <T>(write: (tx: Transaction) => T): T =>
@@ -2405,6 +2408,8 @@ test("instance copies share a name and a platform, keep separate holds and archi
   const f = fixture({
     instanceKeys: {
       keyOf: (_tx, name) => keys.get(name) ?? null,
+      machineOf: () => null,
+      instancesOfMachine: () => [],
       nameOf: () => null,
     },
   });
@@ -2537,6 +2542,7 @@ test("instance copies share a name and a platform, keep separate holds and archi
       [
         {
           name: "github",
+          holder: "relay-b",
           revision: 1,
           platform: TestPlatform.Key,
           sealed_current: false,
@@ -2728,4 +2734,266 @@ test("environment secret grant refuses an archived credential and a credential o
   } finally {
     f.store.close();
   }
+});
+
+const MACHINE = "machine-1";
+const BOX_A = "box-1";
+const BOX_B = "box-2";
+const MACHINE_COPY_NAME = "github";
+const MACHINE_COPY_COUNT = 2;
+const MACHINE_SEALED_SET = { ...TEST_SET, instance_copies: true };
+
+async function keyOf(name: string): Promise<InstanceKey> {
+  const pair = await generateX25519KeyPair();
+  return {
+    name,
+    public_key: pair.public_key.toString("base64url"),
+    fingerprint: keyFingerprint(pair.public_key),
+  };
+}
+
+async function machineFixture(
+  listed: ReadonlyMap<string, BindingRevision[]> = new Map(),
+) {
+  const keys = new Map<string, InstanceKey>();
+  for (const name of [BOX_A, BOX_B, MACHINE]) keys.set(name, await keyOf(name));
+  const machines = new Map([
+    [BOX_A, MACHINE],
+    [BOX_B, MACHINE],
+  ]);
+  const f = fixture({
+    instanceKeys: {
+      keyOf: (_tx, name) => keys.get(name) ?? null,
+      nameOf: () => null,
+      machineOf: (_tx, name) => machines.get(name) ?? null,
+      instancesOfMachine: (_tx, machine) =>
+        [...machines]
+          .filter(([, value]) => value === machine)
+          .map(([name]) => name),
+    },
+    bindingsListingInstance: (_tx, instance) => listed.get(instance) ?? [],
+  });
+  const hold = async (holders: string[], name = MACHINE_COPY_NAME) => {
+    const copies = await f.component.sealCopies(MACHINE_SEALED_SET, {
+      name,
+      platform: TestPlatform.Key,
+      secret: { key: "copy-secret" },
+      keys: holders.map((holder) => keys.get(holder)!),
+    });
+    return f.store.transaction((tx) =>
+      f.component.createCopies(
+        tx,
+        MACHINE_SEALED_SET,
+        { name, platform: TestPlatform.Key, metadata: null, copies },
+        HUMAN_ACCOUNT_ID,
+      ),
+    );
+  };
+  const inTransaction = <T>(read: (tx: Transaction) => T): T =>
+    f.store.transaction(read);
+  return { f, keys, hold, inTransaction };
+}
+
+test("a create with the server and a machine as holders seals the machine copy to the machine key", async (t) => {
+  const m = await machineFixture();
+  stopAfter(t, () => m.f.store.close());
+  m.f.create({
+    name: MACHINE_COPY_NAME,
+    platform: TestPlatform.Key,
+    metadata: null,
+    secret: { key: "server-secret" },
+  });
+  const [copy] = await m.hold([MACHINE]);
+  assert.equal(copy!.holder, MACHINE);
+  assert.equal(copy!.sealed_to, m.keys.get(MACHINE)!.fingerprint);
+  assert.equal(copy!.sealed_current, true);
+  const holders = m.f.list({}) as { items: CredentialAnswer[] };
+  assert.deepEqual(
+    holders.items.map(({ holder }) => holder),
+    [MACHINE, SERVER_HOLDER],
+  );
+});
+
+test("copyHolderOf answers the instance with an own live copy, the machine without it and the instance for a stale own copy", async (t) => {
+  const m = await machineFixture();
+  stopAfter(t, () => m.f.store.close());
+  await m.hold([MACHINE]);
+  const holderOf = (holder: string) =>
+    m.inTransaction((tx) =>
+      m.f.component.copyHolderOf(tx, MACHINE_COPY_NAME, holder),
+    );
+  assert.equal(holderOf(BOX_A), MACHINE);
+  assert.equal(holderOf(MACHINE), MACHINE);
+  assert.equal(holderOf(SERVER_HOLDER), SERVER_HOLDER);
+  await m.hold([BOX_A]);
+  assert.equal(holderOf(BOX_A), BOX_A);
+  assert.equal(holderOf(BOX_B), MACHINE);
+  m.keys.set(BOX_A, await keyOf(BOX_A));
+  assert.equal(holderOf(BOX_A), BOX_A);
+  assert.equal(
+    m.inTransaction((tx) =>
+      m.f.component.copyHeld(tx, MACHINE_COPY_NAME, BOX_A),
+    ),
+    false,
+  );
+  assert.equal(
+    m.inTransaction((tx) =>
+      m.f.component.copyHeld(tx, MACHINE_COPY_NAME, BOX_B),
+    ),
+    true,
+  );
+});
+
+test("usedCopies answers each own copy and each machine copy of a name with no own copy", async (t) => {
+  const m = await machineFixture();
+  stopAfter(t, () => m.f.store.close());
+  await m.hold([MACHINE], "alpha");
+  await m.hold([MACHINE, BOX_A], "beta");
+  await m.hold([BOX_A], "gamma");
+  const used = m.inTransaction((tx) => m.f.component.usedCopies(tx, BOX_A));
+  assert.deepEqual(
+    used.map(({ name, holder }) => [name, holder]),
+    [
+      ["alpha", MACHINE],
+      ["beta", BOX_A],
+      ["gamma", BOX_A],
+    ],
+  );
+  assert.deepEqual(
+    m
+      .inTransaction((tx) => m.f.component.usedCopies(tx, BOX_B))
+      .map(({ name, holder }) => [name, holder]),
+    [
+      ["alpha", MACHINE],
+      ["beta", MACHINE],
+    ],
+  );
+});
+
+test("sealed_current of a machine copy turns false after a machine rotate", async (t) => {
+  const m = await machineFixture();
+  stopAfter(t, () => m.f.store.close());
+  await m.hold([MACHINE]);
+  const current = () =>
+    m.inTransaction((tx) =>
+      m.f.component.get(tx, MACHINE_SEALED_SET, MACHINE_COPY_NAME, MACHINE),
+    ).sealed_current;
+  assert.equal(current(), true);
+  m.keys.set(MACHINE, await keyOf(MACHINE));
+  assert.equal(current(), false);
+  assert.equal(
+    m.inTransaction((tx) =>
+      m.f.component.copyHeld(tx, MACHINE_COPY_NAME, BOX_A),
+    ),
+    false,
+  );
+});
+
+test("a hold on the machine copy shows for each instance of the machine and listHolds answers the machine name", async (t) => {
+  const m = await machineFixture();
+  stopAfter(t, () => m.f.store.close());
+  await m.hold([MACHINE]);
+  await m.hold([BOX_B]);
+  const { holds } = m.f.component;
+  m.inTransaction((tx) =>
+    holds.hold(tx, MACHINE_COPY_NAME, MACHINE, HOLD_AVAILABLE_AT, HOLD_STRIKES),
+  );
+  const holdOf = (holder: string) =>
+    m.inTransaction((tx) => holds.holdOf(tx, MACHINE_COPY_NAME, holder));
+  assert.equal(holdOf(BOX_A)?.strikes, HOLD_STRIKES);
+  assert.equal(holdOf(MACHINE)?.available_at, HOLD_AVAILABLE_AT);
+  assert.equal(holdOf(BOX_B), null);
+  assert.deepEqual(
+    m
+      .inTransaction((tx) => holds.listHolds(tx))
+      .map(({ credential, holder }) => [credential, holder]),
+    [[MACHINE_COPY_NAME, MACHINE]],
+  );
+});
+
+test("a machine copy archive refuses with the bindings of an instance with no own copy", async (t) => {
+  const listed = new Map<string, BindingRevision[]>([
+    [BOX_A, [{ binding_id: "binding-a", project_id: "project-a" }]],
+    [BOX_B, [{ binding_id: "binding-b", project_id: "project-b" }]],
+  ]);
+  const m = await machineFixture(listed);
+  stopAfter(t, () => m.f.store.close());
+  await m.hold([MACHINE]);
+  await m.hold([BOX_B]);
+  assert.throws(
+    () =>
+      m.inTransaction((tx) =>
+        m.f.component.archive(
+          tx,
+          MACHINE_SEALED_SET,
+          MACHINE_COPY_NAME,
+          MACHINE,
+        ),
+      ),
+    (error) => {
+      assert(error instanceof OperationError);
+      assert.equal(error.status, HttpStatus.Conflict);
+      assert.equal(error.code, IN_USE_CODE);
+      assert.deepEqual(
+        (error.details as { bindings: BindingRevision[] }).bindings,
+        [{ binding_id: "binding-a", project_id: "project-a" }],
+      );
+      return true;
+    },
+  );
+});
+
+test("an instance copy archives with no dependent while the machine holds a live current copy", async (t) => {
+  const listed = new Map<string, BindingRevision[]>([
+    [BOX_A, [{ binding_id: "binding-a", project_id: "project-a" }]],
+  ]);
+  const m = await machineFixture(listed);
+  stopAfter(t, () => m.f.store.close());
+  await m.hold([MACHINE, BOX_A]);
+  const archived = m.inTransaction((tx) =>
+    m.f.component.archive(tx, MACHINE_SEALED_SET, MACHINE_COPY_NAME, BOX_A),
+  );
+  assert.equal(archived.holder, BOX_A);
+  assert.notEqual(archived.revisions[0]!.ended_at, null);
+  assert.equal(
+    m.inTransaction((tx) =>
+      m.f.component.copyHolderOf(tx, MACHINE_COPY_NAME, BOX_A),
+    ),
+    MACHINE,
+  );
+});
+
+test("an instance copy archive keeps the bindings as dependents when the machine copy is stale", async (t) => {
+  const listed = new Map<string, BindingRevision[]>([
+    [BOX_A, [{ binding_id: "binding-a", project_id: "project-a" }]],
+  ]);
+  const m = await machineFixture(listed);
+  stopAfter(t, () => m.f.store.close());
+  await m.hold([MACHINE, BOX_A]);
+  m.keys.set(MACHINE, await keyOf(MACHINE));
+  fails(
+    () =>
+      m.inTransaction((tx) =>
+        m.f.component.archive(tx, MACHINE_SEALED_SET, MACHINE_COPY_NAME, BOX_A),
+      ),
+    HttpStatus.Conflict,
+    IN_USE_CODE,
+  );
+});
+
+test("a machine archive archives every machine copy", async (t) => {
+  const m = await machineFixture();
+  stopAfter(t, () => m.f.store.close());
+  await m.hold([MACHINE], "alpha");
+  await m.hold([MACHINE], "beta");
+  assert.equal(
+    m.inTransaction((tx) =>
+      m.f.component.archiveHeld(tx, MACHINE, HOLD_AVAILABLE_AT),
+    ),
+    MACHINE_COPY_COUNT,
+  );
+  assert.deepEqual(
+    m.inTransaction((tx) => m.f.component.heldCopies(tx, MACHINE)),
+    [],
+  );
 });

@@ -202,6 +202,8 @@ const ROW_COLUMNS =
 const NO_INSTANCE_KEYS: InstanceKeys = {
   keyOf: () => null,
   nameOf: () => null,
+  machineOf: () => null,
+  instancesOfMachine: () => [],
 };
 
 type CredentialRow = {
@@ -290,6 +292,18 @@ function liveHoldersOf(tx: Transaction, name: string): string[] {
       )
       .all(name, SERVER_HOLDER) as { holder: string }[]
   ).map(({ holder }) => holder);
+}
+
+function pinnedRowOf(
+  tx: Transaction,
+  name: string,
+  credentialIds: readonly string[],
+): CredentialRow | undefined {
+  return tx.database
+    .prepare(
+      `SELECT ${ROW_COLUMNS} FROM credential WHERE name = ? AND id IN (SELECT value FROM json_each(?))`,
+    )
+    .get(name, JSON.stringify(credentialIds)) as CredentialRow | undefined;
 }
 
 function holderOfRow(tx: Transaction, id: string): string | null {
@@ -481,14 +495,16 @@ function decodeCursor(cursor: string): { name: string; holder: string } {
 const NO_STRIKES = 0;
 const ONE_ROW = 1;
 
-function credentialHolds(): CredentialHolds {
+function credentialHolds(
+  copyHolderOf: (tx: Transaction, name: string, holder: string) => string,
+): CredentialHolds {
   return {
     holdOf: (tx, name, holder) => {
       const row = tx.database
         .prepare(
           "SELECT available_at, strikes FROM credential WHERE name = ? AND holder = ? AND revision = ?",
         )
-        .get(name, holder, FIRST_REVISION) as
+        .get(name, copyHolderOf(tx, name, holder), FIRST_REVISION) as
         { available_at: number | null; strikes: number } | undefined;
       return row === undefined || row.available_at === null
         ? null
@@ -546,7 +562,9 @@ function copiesMetadataOf(
 }
 
 export class CustodyComponent implements Service, CredentialRecords {
-  readonly holds: CredentialHolds = credentialHolds();
+  readonly holds: CredentialHolds = credentialHolds((tx, name, holder) =>
+    this.copyHolderOf(tx, name, holder),
+  );
   private readonly shutdown = new CancellationContext();
   private startTask?: Promise<Error | null>;
   private stopTask?: Promise<Error | null>;
@@ -874,21 +892,26 @@ export class CustodyComponent implements Service, CredentialRecords {
     if (grant.credential === null) throw new FacilityError();
     consumeGrant(grant);
     const credential = grant.credential;
-    const key = holder === null ? null : this.instanceKeys.keyOf(tx, holder);
-    const rows =
-      holder === null || key === null
-        ? []
-        : rowsForName(tx, credential, holder);
-    const pinned = rows.find(({ id }) =>
-      grant.execution?.credentials.includes(id),
-    );
+    const pinned =
+      holder === null
+        ? undefined
+        : pinnedRowOf(tx, credential, grant.execution?.credentials ?? []);
     if (pinned && pinned.ended_at !== null)
       throw new OperationError(
         HttpStatus.Conflict,
         CustodyErrorCode.RevisionRevoked,
         "The pinned credential revision is revoked.",
       );
-    const row = pinned ?? rows.find(({ ended_at }) => ended_at === null);
+    const row =
+      pinned ??
+      (holder === null
+        ? undefined
+        : newestLive(
+            tx,
+            credential,
+            this.copyHolderOf(tx, credential, holder),
+          ));
+    const key = row ? this.instanceKeys.keyOf(tx, row.holder) : null;
     if (!row || row.sealed_to !== key?.fingerprint)
       throw new OperationError(
         HttpStatus.Forbidden,
@@ -931,6 +954,7 @@ export class CustodyComponent implements Service, CredentialRecords {
         provider_id: piProviderId(row.platform),
         name: row.name,
         platform: row.platform,
+        holder: row.holder,
         sealed: storedSealed(this.envelopeKey, stored),
       };
     assert(Object.hasOwn(this.platforms, row.platform));
@@ -1597,9 +1621,38 @@ export class CustodyComponent implements Service, CredentialRecords {
     return copiesMetadataOf(tx, credentialName);
   }
 
+  copyHolderOf(
+    tx: Transaction,
+    credentialName: string,
+    holder: string,
+  ): string {
+    const machine = this.instanceKeys.machineOf(tx, holder);
+    if (machine === null) return holder;
+    return newestLive(tx, credentialName, holder) === undefined
+      ? machine
+      : holder;
+  }
+
+  pinnedHolderOf(
+    tx: Transaction,
+    executionId: string,
+    credentialName: string,
+  ): string | null {
+    const rows = tx.database
+      .prepare("SELECT id, holder FROM credential WHERE name = ?")
+      .all(credentialName) as { id: string; holder: string }[];
+    const pinned = rows.find(({ id }) =>
+      this.executions.liveExecutionsPinning(tx, id).includes(executionId),
+    );
+    return pinned?.holder ?? null;
+  }
+
   copyHeld(tx: Transaction, credentialName: string, holder: string): boolean {
-    const row = newestLive(tx, credentialName, holder);
-    return row !== undefined && this.sealedCurrent(tx, holder, row.sealed_to);
+    const copyHolder = this.copyHolderOf(tx, credentialName, holder);
+    const row = newestLive(tx, credentialName, copyHolder);
+    return (
+      row !== undefined && this.sealedCurrent(tx, copyHolder, row.sealed_to)
+    );
   }
 
   heldCopy(
@@ -1613,6 +1666,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     if (!row || !ownedPlatform(set, row.platform)) return null;
     return {
       name: row.name,
+      holder,
       revision: row.revision,
       platform: row.platform,
       sealed_current: this.sealedCurrent(tx, holder, row.sealed_to),
@@ -1635,6 +1689,7 @@ export class CustodyComponent implements Service, CredentialRecords {
       throw notFound();
     return {
       name: row.name,
+      holder,
       platform: row.platform,
       revision: row.revision,
       metadata: row.metadata === null ? null : JSON.parse(row.metadata),
@@ -1652,10 +1707,22 @@ export class CustodyComponent implements Service, CredentialRecords {
         .all(holder) as CredentialRow[]
     ).map((row) => ({
       name: row.name,
+      holder,
       revision: row.revision,
       platform: row.platform,
       sealed_current: this.sealedCurrent(tx, holder, row.sealed_to),
     }));
+  }
+
+  usedCopies(tx: Transaction, instanceName: string): HeldCopy[] {
+    const own = this.heldCopies(tx, instanceName);
+    const machine = this.instanceKeys.machineOf(tx, instanceName);
+    if (machine === null) return own;
+    const ownNames = new Set(own.map(({ name }) => name));
+    return [
+      ...own,
+      ...this.heldCopies(tx, machine).filter(({ name }) => !ownNames.has(name)),
+    ].sort((a, b) => a.name.localeCompare(b.name));
   }
 
   archiveHeld(tx: Transaction, holder: string, now: number): number {
@@ -2124,11 +2191,12 @@ export class CustodyComponent implements Service, CredentialRecords {
   list(
     tx: Transaction,
     set: CredentialPlatformSet,
-    query: CredentialListQuery & { holder?: string },
+    query: CredentialListQuery & { holder?: string; machine?: string },
   ): CredentialListAnswer {
     const {
       platform,
       holder,
+      machine,
       include_archived: includeArchived,
       limit: requestedLimit,
       cursor,
@@ -2138,7 +2206,7 @@ export class CustodyComponent implements Service, CredentialRecords {
     const limit = requestedLimit ?? LIST_LIMIT_DEFAULT;
     const groups = tx.database
       .prepare(
-        "SELECT name, holder FROM credential WHERE (name > ? OR (name = ? AND holder > ?)) AND (? IS NULL OR platform = ?) AND (? IS NULL OR holder = ?) AND platform IN (SELECT value FROM json_each(?)) GROUP BY name, holder HAVING (? = 1 OR MAX(ended_at IS NULL) = 1) ORDER BY name ASC, holder ASC LIMIT ?",
+        "SELECT name, holder FROM credential WHERE (name > ? OR (name = ? AND holder > ?)) AND (? IS NULL OR platform = ?) AND (? IS NULL OR holder = ? OR (holder = ? AND NOT EXISTS (SELECT 1 FROM credential AS own WHERE own.name = credential.name AND own.holder = ? AND own.ended_at IS NULL))) AND platform IN (SELECT value FROM json_each(?)) GROUP BY name, holder HAVING (? = 1 OR MAX(ended_at IS NULL) = 1) ORDER BY name ASC, holder ASC LIMIT ?",
       )
       .all(
         after.name,
@@ -2147,6 +2215,8 @@ export class CustodyComponent implements Service, CredentialRecords {
         platform ?? null,
         platform ?? null,
         holder ?? null,
+        holder ?? null,
+        machine ?? null,
         holder ?? null,
         JSON.stringify(Object.keys(set.platforms)),
         includeArchived === QUERY_TRUE ? INCLUDE : EXCLUDE,
@@ -2416,7 +2486,7 @@ export class CustodyComponent implements Service, CredentialRecords {
         ? this.credentialDependents(tx, credentialName)
         : {
             agent_providers: [],
-            bindings: this.bindingsListingInstance(tx, holder, credentialName),
+            bindings: this.copyBindings(tx, credentialName, holder),
             inbounds: [],
           };
     if (
@@ -2437,6 +2507,40 @@ export class CustodyComponent implements Service, CredentialRecords {
       )
       .run(Date.now(), credentialName, holder);
     return this.answerOf(tx, credentialName, holder)!;
+  }
+
+  private copyBindings(
+    tx: Transaction,
+    credentialName: string,
+    holder: string,
+  ): BindingRevision[] {
+    const instances = this.instanceKeys.instancesOfMachine(tx, holder);
+    if (instances.length !== NO_ROWS) {
+      const bindings = instances
+        .filter(
+          (instance) =>
+            this.copyHolderOf(tx, credentialName, instance) === holder,
+        )
+        .flatMap((instance) =>
+          this.bindingsListingInstance(tx, instance, credentialName),
+        );
+      return bindings.filter(
+        (binding, index) =>
+          bindings.findIndex(
+            ({ binding_id }) => binding_id === binding.binding_id,
+          ) === index,
+      );
+    }
+    const machine = this.instanceKeys.machineOf(tx, holder);
+    const machineRow =
+      machine === null ? undefined : newestLive(tx, credentialName, machine);
+    if (
+      machine !== null &&
+      machineRow !== undefined &&
+      this.sealedCurrent(tx, machine, machineRow.sealed_to)
+    )
+      return [];
+    return this.bindingsListingInstance(tx, holder, credentialName);
   }
 
   requireAvailableName(

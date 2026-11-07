@@ -378,7 +378,7 @@ credential that does not suit the provider kind answers `400`
 
 ## Cooldown commands
 
-A cooldown belongs to one copy of a credential: the credential name and its holder, `server` or a worker instance. A claim cools and releases the copy of its claimant holder: the instance of the registration at the `worker` placement, else `server`. It cools every model of that copy in
+A cooldown belongs to one copy of a credential: the credential name and its holder, `server`, a worker machine or a worker instance. A machine copy holds one cooldown, and every instance that uses the copy shares it. A claim reads the copy of the copy holder of its claimant: the instance of the registration at the `worker` placement when it holds a live own copy of the name, else its machine, else `server`. A stop cools and releases the copy of the revision that the execution pins, so a stop on a machine copy holds the machine. It cools every model of that copy in
 the [fallback chain](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/agent.md#fallback-chain).
 A success on any model of the credential releases it. Both commands are `unary` and use
 `human` access. The server logs `agent.fallback.cooldown_started` when it writes a
@@ -388,13 +388,13 @@ removes one.
 ### `cooldown list`
 
 Uses no positional argument, no query and no body. HTTP `200` returns `{ items }`.
-Each item holds `credential`, `holder`, `strikes` and `available_at`. The list holds the
+Each item holds `credential`, `holder`, `strikes` and `available_at`. `holder` is the holder of the copy: the machine name for a machine copy. The list holds the
 copies with `strikes` above 0, live and expired, ordered by credential name and holder.
 An entry of the chain is selectable again at `available_at`.
 
 ### `cooldown clear <credential> [--holder <name>] [M]`
 
-`<credential>` maps to `params.credential`, and `--holder` maps to the query `holder`, which defaults to `server`. The command sends no body and the
+`<credential>` maps to `params.credential`, and `--holder` maps to the query `holder`, which defaults to `server`. `--holder` names a worker instance or a worker machine, and a machine name clears the cooldown that every instance of the machine shares. The command sends no body and the
 shared replay key. HTTP `204` clears the cooldown and the strikes of the copy, and
 the CLI prints `{ idempotency_key }`. The next claim of that holder can select the chain entries
 of the credential again. A copy with no cooldown answers

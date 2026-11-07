@@ -670,16 +670,17 @@ Required `<name>: InstanceName`, mapped to `params.instance_name`. Required toke
 Empty query, absent body. HTTP `200` returns the live revision, or the latest revision of an archived instance.
 The answer adds these fields to the instance record:
 
-| Field           | Type and presence                                                                                                   |
-| --------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `connection`    | The current connection, as in `instance list`, or `null`.                                                           |
-| `bindings`      | Array of `{ project_id, binding }`, one item for each binding that lists the instance.                              |
-| `registrations` | Array of the live registration records of the instance.                                                             |
-| `credentials`   | Array of `{ name, revision, platform, sealed_current, health }`, one item for each credential copy of the instance. |
+| Field           | Type and presence                                                                                                                  |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `connection`    | The current connection, as in `instance list`, or `null`.                                                                          |
+| `bindings`      | Array of `{ project_id, binding }`, one item for each binding that lists the instance.                                             |
+| `registrations` | Array of the live registration records of the instance.                                                                            |
+| `credentials`   | Array of `{ name, holder, revision, platform, sealed_current, health }`, one item for each credential copy that the instance uses. |
 
-`health` is `{ status, capability, failure_reason, models, reported_at }`, the last check that the instance reported for the newest live revision of the copy.
-The server keeps the report in memory. `reported_at` is the Unix time in milliseconds of the report.
-A copy with no report since the server start, a copy of another revision, or a copy sealed to an ended key answers `status: unknown`, `failure_reason: held_by_instance`, `models: null` and `reported_at: null`.
+The instance uses each own copy, and each live machine copy of a name with no own copy. `holder` is the instance name for an own copy and the machine name for a machine copy.
+`health` is `{ status, capability, failure_reason, models, reported_at, reported_by }`, the last check that an instance reported for the newest live revision of the copy.
+The server keeps one report for each copy, keyed by `(holder, name)`, in memory. `reported_at` is the Unix time in milliseconds of the report. `reported_by` is the name of the instance that sent the report.
+A copy with no report since the server start, a copy of another revision, or a copy sealed to an ended key answers `status: unknown`, `failure_reason: held_by_instance`, `models: null`, `reported_at: null` and `reported_by: null`.
 `models` holds the model list of a check that reads one, else `null`.
 
 An unknown name answers `404 worker.instance.not_found`.
@@ -831,8 +832,9 @@ kanthord worker machine get <name>
 
 Required `<name>: InstanceName`, mapped to `params.machine_name`. Required token: human JWT.
 Empty query, absent body. HTTP `200` returns the live revision, or the latest revision of an archived machine.
-The answer adds `instances` to the machine record.
+The answer adds `instances` and `credentials` to the machine record.
 Each item of `instances` is the instance record of a live instance that names the machine, with its `connection` as in `instance list`.
+Each item of `credentials` is a live copy of the machine, with the shape of the `credentials` item of [`instance get`](#instance-get): `{ name, holder, revision, platform, sealed_current, health }`, where `holder` is the machine name. An archived machine answers `[]`.
 An unknown name answers `404 worker.machine.not_found`.
 
 ### `machine rotate`
@@ -906,7 +908,7 @@ execution identity, and the performer never dispatches an action twice.
 This revision projects no tool to a REST route and gives the CLI no command
 that calls a tool. Tools are reached through the MCP server.
 
-`worker.instance.heartbeat` is an API-only `worker` mutation at `POST /api/worker/instance/heartbeat` with the body `{ connection_id, connection_name }`. It is a liveness signal. It reads the live instance row to answer `machine` and answers 200 with `{ server_version, binding_version, credential_version, work_version, machine }`. `machine` is the machine name of the instance, or `null` for a server or container instance. `work_version` is an in-memory counter of each instance. A server start sets it to the start time in Unix milliseconds. It rises by one when a login of the instance starts, when a human submits its login code, when the login ends, when the server queues a session read of the instance and when the server queues a new footprint order of a `worker` placement instance. A footprint result does not change it. `worker.instance.work` is an API-only `worker` read at `POST /api/worker/instance/work` with the body `{ connection_id }`. The instance calls it after a heartbeat answer with another `work_version`. It answers 200 with `{ work_version, login_sessions, session_reads, footprint_orders }` and renews no liveness. A `connection_id` that is not current answers `409 worker.instance.connection_superseded`. [`serve worker`](./other.md#serve-worker) states the instance side.
+`worker.instance.heartbeat` is an API-only `worker` mutation at `POST /api/worker/instance/heartbeat` with the body `{ connection_id, connection_name }`. It is a liveness signal. It reads the live instance row to answer `machine` and answers 200 with `{ server_version, binding_version, credential_version, work_version, machine }`. `credential_version` is the counter of the instance plus the counter of its machine. Each write of a copy raises the counter of the holder of the copy, also of a machine: a create, a rotation, a metadata edit, a revoke, an archive, a login completion and a refresh report. A write of a machine copy thus changes the `credential_version` of each instance of the machine. `machine` is the machine name of the instance, or `null` for a server or container instance. `work_version` is an in-memory counter of each instance. A server start sets it to the start time in Unix milliseconds. It rises by one when a login that the instance runs starts, when a human submits its login code, when the login ends, when the server queues a session read of the instance and when the server queues a new footprint order of a `worker` placement instance. A footprint result does not change it. `worker.instance.work` is an API-only `worker` read at `POST /api/worker/instance/work` with the body `{ connection_id }`. The instance calls it after a heartbeat answer with another `work_version`. It answers 200 with `{ work_version, login_sessions, session_reads, footprint_orders }` and renews no liveness. Each `login_sessions` item holds `{ session_id, name, platform, mode, code, holder }`: `holder` is the instance or the machine that takes the new copy. The runner of a machine login reads the session. A `connection_id` that is not current answers `409 worker.instance.connection_superseded`. [`serve worker`](./other.md#serve-worker) states the instance side.
 
 A session read serves `tracking.session.entry.rebuild` for an execution of a `worker` instance. The server queues the read only while the instance holds a current connection, else the rebuild answers `503 tracking.entry.unreachable` with reason `offline` at once. Each item of `session_reads` holds `read_id` (`session_read_<ulid>`), `execution_id`, `session_id`, `entry_id` and `entry_type`. The server keeps at most 8 pending reads for each instance in memory. Two reads of the same entry share one pending read. A ninth distinct read answers reason `busy`. No read survives a server restart. `worker.session_read.report` is an API-only `worker` mutation at `POST /api/worker/session-read/:read_id/report`. Its body is one of `{ outcome: "resolved", entry }`, `{ outcome: "too_large", bytes }` and `{ outcome }` with `session_absent`, `entry_absent` or `unreadable`. Another body answers `400 gateway.request.validation_failed`. It answers 204. The server checks `id` and `type` of a resolved entry. Another entry answers the rebuild with `tracking.entry.unreadable`. No report within 25 s answers the rebuild with reason `timeout` and drops the read. A report of an unknown or dropped read, or of a read of another instance, answers `404 worker.session_read.not_found`.
 

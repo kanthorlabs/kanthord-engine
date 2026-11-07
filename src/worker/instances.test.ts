@@ -29,6 +29,9 @@ import { AgentErrorCode, type HolderScope } from "../agent/contract.ts";
 import { InstanceCleanableKind } from "../kernel/cleanup.ts";
 import type { ExecutionEnds } from "../mission/contract.ts";
 import type { LoginSessionEntry } from "../llm/contract.ts";
+import type { HeldCopy } from "../custody/contract.ts";
+import { ResourceStatus } from "../kernel/health.ts";
+import { CAPABILITY_MODEL_LIST_READ } from "../llm/platforms.ts";
 import {
   SESSION_READ_WAIT_MS,
   UnreachableReason,
@@ -57,6 +60,7 @@ import {
 import { packageVersion } from "../kernel/version.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
 
+const REPORTED_AT = 1700000000000;
 const WORKER = "coder@1";
 const INSTANCE = "laptop";
 const MACHINE = "workstation";
@@ -97,6 +101,7 @@ const LOGIN_ENTRY: LoginSessionEntry = {
   platform: "anthropic-subscription",
   mode: "copy_code",
   code: null,
+  holder: "relay-a",
 };
 const SINGLE_CALL = 1;
 const SHORT_SESSION_READ_WAIT_MS = 20;
@@ -185,6 +190,7 @@ function instanceFixture(
   const reports: { ends: ExecutionEnds; inTransaction: boolean }[] = [];
   const revocation = { failure: null as Error | null };
   const logins = new Map<string, LoginSessionEntry[]>();
+  const used = new Map<string, HeldCopy[]>();
   const footprint = {
     stored: new Set<string>(),
     measured: [] as string[],
@@ -210,6 +216,19 @@ function instanceFixture(
       },
     },
     loginSessionsOf: (holder) => logins.get(holder) ?? [],
+    instanceCopies: {
+      archiveHeld: () => {},
+      heldCopies: () => [],
+      usedCopies: (_tx, name) => used.get(name) ?? [],
+    },
+    copyHealthOf: (holder) => ({
+      status: ResourceStatus.Healthy,
+      capability: CAPABILITY_MODEL_LIST_READ,
+      failure_reason: null,
+      models: null,
+      reported_at: REPORTED_AT,
+      reported_by: holder,
+    }),
     sessionReadWaitMs,
     missionActions: {
       authorizeRequest: unexpected,
@@ -433,6 +452,7 @@ function instanceFixture(
     reports,
     revocation,
     logins,
+    used,
     footprint,
     invoke,
     refuses,
@@ -662,6 +682,31 @@ test("create stores the machine name and refuses the name of a machine", async (
     () => f.created(MACHINE),
     HttpStatus.Conflict,
     WorkerErrorCode.InstanceNameConflict,
+  );
+});
+
+test("get answers the own copies and the machine copies of names with no own copy, each with its holder and the health of its holder", async (t) => {
+  const f = instanceFixture(t);
+  await f.created();
+  const copyOf = (name: string, holder: string): HeldCopy => ({
+    name,
+    holder,
+    revision: FIRST_REVISION,
+    platform: "anthropic",
+    sealed_current: true,
+  });
+  f.used.set(INSTANCE, [copyOf("alpha", MACHINE), copyOf("beta", INSTANCE)]);
+  const got = await f.invoke("instance.get", null, { instance_name: INSTANCE });
+  assert.deepEqual(
+    got.credentials.map(({ name, holder, health }) => [
+      name,
+      holder,
+      health.reported_by,
+    ]),
+    [
+      ["alpha", MACHINE, MACHINE],
+      ["beta", INSTANCE, INSTANCE],
+    ],
   );
 });
 

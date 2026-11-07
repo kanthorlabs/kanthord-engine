@@ -144,7 +144,9 @@ test("a live worker instance checks its own bad key and the instance page answer
     failure_reason: ResourceFailureReason.Unauthorized,
     models: null,
     reported_at: unhealthy!.health.reported_at,
+    reported_by: INSTANCE,
   });
+  assert.equal(unhealthy!.holder, INSTANCE);
   assert.ok(unhealthy!.health.reported_at! >= started);
   assert.equal(unhealthy!.revision, FIRST_REVISION);
   completed(

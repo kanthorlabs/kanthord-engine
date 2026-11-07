@@ -1356,6 +1356,14 @@ const instanceOperation = {
   timeoutMs: HUMAN_TIMEOUT_MS,
   status: HttpStatus.OK,
 } as const;
+const copyCredentialSchema = z.strictObject({
+  name: z.string().min(1),
+  holder: z.string().min(1),
+  revision: z.number().int().positive(),
+  platform: z.string().min(1),
+  sealed_current: z.boolean(),
+  health: copyHealthSchema,
+});
 export const instanceOperations = {
   "instance.create": {
     ...humanOperation,
@@ -1444,18 +1452,10 @@ export const instanceOperations = {
         }),
       ),
       registrations: z.array(registrationRecordSchema),
-      credentials: z.array(
-        z.strictObject({
-          name: z.string().min(1),
-          revision: z.number().int().positive(),
-          platform: z.string().min(1),
-          sealed_current: z.boolean(),
-          health: copyHealthSchema,
-        }),
-      ),
+      credentials: z.array(copyCredentialSchema),
     }),
     description:
-      "Read the live or latest revision of a worker instance with the bindings that list it, its connection, its live registrations and its credential copies with the last health report of each copy.",
+      "Read the live or latest revision of a worker instance with the bindings that list it, its connection, its live registrations and the credential copies that it uses, each with its holder and the last health report of the copy.",
   },
   "instance.rotate": {
     ...humanOperation,
@@ -1697,9 +1697,10 @@ export const machineOperations = {
       instances: z.array(
         instanceRecordSchema.extend({ connection: instanceConnectionSchema }),
       ),
+      credentials: z.array(copyCredentialSchema),
     }),
     description:
-      "Read the live or latest revision of a worker machine with its live instances and the connection of each instance.",
+      "Read the live or latest revision of a worker machine with its live instances, the connection of each instance and its live credential copies, each with the last health report of the copy.",
   },
   "machine.rotate": {
     ...humanOperation,

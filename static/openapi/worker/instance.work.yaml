@@ -106,12 +106,16 @@ components:
                 anyOf:
                   - type: string
                   - type: "null"
+              holder:
+                type: string
+                minLength: 1
             required:
               - session_id
               - name
               - platform
               - mode
               - code
+              - holder
             additionalProperties: false
         session_reads:
           maxItems: 8

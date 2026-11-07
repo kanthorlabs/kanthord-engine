@@ -97,6 +97,7 @@ export const sealedHandoverItemSchema = z.strictObject({
   provider_id: z.string().min(1),
   name: z.string().min(1),
   platform: z.string().min(1),
+  holder: z.string().min(1),
   sealed: sealedObjectSchema,
 });
 export type SealedHandoverItem = z.infer<typeof sealedHandoverItemSchema>;
@@ -862,6 +863,8 @@ export type InstanceKey = {
 export interface InstanceKeys {
   keyOf(tx: Transaction, name: string): InstanceKey | null;
   nameOf(tx: Transaction, instanceId: string): string | null;
+  machineOf(tx: Transaction, instanceName: string): string | null;
+  instancesOfMachine(tx: Transaction, machine: string): string[];
 }
 export type SealedCopy = {
   holder: string;
@@ -883,12 +886,14 @@ export type SealedRotateBody = {
 };
 export type HeldCopy = {
   name: string;
+  holder: string;
   revision: number;
   platform: string;
   sealed_current: boolean;
 };
 export const sealedCopyAnswerSchema = z.strictObject({
   name: z.string(),
+  holder: z.string().min(1),
   platform: z.string(),
   revision: z.number().int().positive(),
   metadata: z.record(z.string(), z.unknown()).nullable(),
@@ -921,7 +926,7 @@ export interface CredentialRecords {
   list(
     tx: Transaction,
     set: CredentialPlatformSet,
-    query: CredentialListQuery & { holder?: string },
+    query: CredentialListQuery & { holder?: string; machine?: string },
   ): CredentialListAnswer;
   copyPlatform(
     tx: Transaction,
@@ -1025,6 +1030,7 @@ export interface CredentialRecords {
   ): CredentialMetadata | null;
   copiesMetadata(tx: Transaction, credentialName: string): CredentialMetadata[];
   copyHeld(tx: Transaction, credentialName: string, holder: string): boolean;
+  copyHolderOf(tx: Transaction, credentialName: string, holder: string): string;
   heldCopy(
     tx: Transaction,
     set: CredentialPlatformSet,

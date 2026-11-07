@@ -27,7 +27,11 @@ import {
   testWorkerIdentity,
 } from "../kernel/test-identity.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
+import type { HeldCopy } from "../custody/contract.ts";
+import { ResourceStatus } from "../kernel/health.ts";
+import { CAPABILITY_MODEL_LIST_READ } from "../llm/platforms.ts";
 
+const REPORTED_AT = 1700000000000;
 const WORKER = "coder@1";
 const MACHINE = "workstation";
 const OTHER_MACHINE = "build-box";
@@ -69,6 +73,7 @@ function machineFixture(t: TestContext) {
     { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
   ]);
   const archivedHolders: string[] = [];
+  const held = new Map<string, HeldCopy[]>();
   const dependencies: Dependencies = {
     config: WORKER_CONFIG,
     store,
@@ -97,8 +102,18 @@ function machineFixture(t: TestContext) {
       archiveHeld: (_tx, holder) => {
         archivedHolders.push(holder);
       },
-      heldCopies: () => [],
+      heldCopies: (_tx, holder) => held.get(holder) ?? [],
+      usedCopies: () => [],
     },
+    copyHealthOf: (holder) => ({
+      status: ResourceStatus.Healthy,
+      capability: CAPABILITY_MODEL_LIST_READ,
+      failure_reason: null,
+      models: null,
+      reported_at: REPORTED_AT,
+      reported_by: holder,
+    }),
+
     intakeActions: { perform: unexpected, read: unexpected },
     evidenceRequests: { request: unexpected },
     custodyHandover: {
@@ -225,6 +240,7 @@ function machineFixture(t: TestContext) {
     store,
     worker,
     archivedHolders,
+    held,
     invoke,
     refuses,
     createdMachine,
@@ -463,6 +479,38 @@ test("get answers the live instances with their connection and refuses an unknow
     HttpStatus.NotFound,
     WorkerErrorCode.MachineNotFound,
   );
+});
+
+test("get answers the live copies of the machine with the health of each copy by its holder", async (t) => {
+  const f = machineFixture(t);
+  await f.createdMachine();
+  const copy: HeldCopy = {
+    name: "alpha",
+    holder: MACHINE,
+    revision: FIRST_REVISION,
+    platform: "anthropic",
+    sealed_current: true,
+  };
+  assert.deepEqual(
+    (await f.invoke("machine.get", null, { machine_name: MACHINE }))
+      .credentials,
+    [],
+  );
+  f.held.set(MACHINE, [copy]);
+  const read = await f.invoke("machine.get", null, { machine_name: MACHINE });
+  assert.deepEqual(read.credentials, [
+    {
+      ...copy,
+      health: {
+        status: ResourceStatus.Healthy,
+        capability: CAPABILITY_MODEL_LIST_READ,
+        failure_reason: null,
+        models: null,
+        reported_at: REPORTED_AT,
+        reported_by: MACHINE,
+      },
+    },
+  ]);
 });
 
 test("rotate ends the live revision, stores the next key and answers a generated configuration", async (t) => {

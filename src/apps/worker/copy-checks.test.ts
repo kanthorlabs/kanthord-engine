@@ -105,6 +105,7 @@ async function fixture(
   for (const copy of copies)
     sealed.set(copy.name, {
       name: copy.name,
+      holder: INSTANCE,
       platform: copy.platform,
       revision: FIRST_REVISION,
       metadata: null,

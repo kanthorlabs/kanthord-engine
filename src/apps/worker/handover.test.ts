@@ -292,6 +292,7 @@ test("a unit opens a sealed handover item with the instance key, reports a seale
     provider_id: ITEM.provider_id,
     name: "anthro-1",
     platform: "anthropic",
+    holder: "relay-a",
     sealed,
   };
   t.mock.method(api.worker, "handover", async () => ({
@@ -464,6 +465,7 @@ test("a refused sealed item discards every credential view that the handover ope
           provider_id: ITEM.provider_id,
           name: "anthro-1",
           platform: "anthropic",
+          holder: "relay-a",
           sealed,
         },
       ],
@@ -679,6 +681,7 @@ test("the error path zeroes the handover key", async (t) => {
           provider_id: ITEM.provider_id,
           name: "anthro-1",
           platform: "anthropic",
+          holder: "relay-a",
           sealed,
         },
       ],
@@ -789,6 +792,7 @@ test("two views of one sealed item make one refresh call", async (t) => {
     provider_id: ITEM.provider_id,
     name: "anthro-1",
     platform: "anthropic",
+    holder: "relay-a",
     sealed: stored,
   });
   const server = sharedSealedServer(t, sealed);
@@ -881,6 +885,7 @@ test("the renewal before a report retry does not adopt the stored sealed object"
     provider_id: ITEM.provider_id,
     name: "anthro-1",
     platform: "anthropic",
+    holder: "relay-a",
     sealed: stored,
   }));
   const { credentials } = await takeHandover({
