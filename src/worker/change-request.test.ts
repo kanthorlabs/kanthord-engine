@@ -171,3 +171,47 @@ test("a platform failure of the read answers 502 with its result code", async ()
       error.code === RETRYABLE_CODE,
   );
 });
+
+test("the read carries no trust list from the worker and answers what Intake answers", async () => {
+  const queries: unknown[] = [];
+  const base = dependencies(
+    [
+      entry(
+        RepositoryAction.PullRequest,
+        ActionResolution.OtherEnd,
+        "evidence_1",
+      ),
+    ],
+    { body: BODY, next_cursor: null },
+    { attempt: null, evidenceIds: [] },
+  );
+  const answer = await clearedChangeRequests(
+    {
+      ...base,
+      intakeActions: {
+        ...base.intakeActions,
+        read: async (
+          readCall: IntakeActionCall,
+          method: string,
+          evidenceId: string,
+          query: unknown,
+        ) => {
+          queries.push(query);
+          return base.intakeActions.read(
+            readCall,
+            method as never,
+            evidenceId,
+            query as never,
+          );
+        },
+      },
+    },
+    call(SECOND_ATTEMPT),
+    claim(SECOND_ATTEMPT),
+  );
+  assert.deepEqual(queries, [{}]);
+  assert.deepEqual(
+    answer.items.map((item) => item.change_requests),
+    [BODY.change_requests],
+  );
+});

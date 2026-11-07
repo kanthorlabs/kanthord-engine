@@ -263,6 +263,7 @@ async function inspectPullRequest(
     reviews.value,
     checks.value,
     request.expected,
+    request.facts.link_trust.actor_ids,
   );
 }
 
@@ -272,10 +273,17 @@ function foldBody(
   reviews: unknown,
   checks: Pick<RequiredCheckRead, "head_commit" | "pending" | "failed">,
   expected: ExpectedEndState,
+  trustedActorIds: readonly string[],
 ): CheckFold {
   assert.equal(expected, ExpectedEndState.PullRequestMerged);
   try {
-    return github.foldPullRequest(body, reviews, checks, expected);
+    return github.foldPullRequest(
+      body,
+      reviews,
+      checks,
+      expected,
+      trustedActorIds,
+    );
   } catch (error) {
     if (!(error instanceof z.ZodError)) throw error;
     throw platformFailure({

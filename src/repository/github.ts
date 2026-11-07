@@ -374,7 +374,9 @@ const commitStatusListSchema = z.array(
 );
 const reviewListSchema = z.array(
   z.looseObject({
-    user: z.looseObject({ id: z.int() }).nullable(),
+    user: z
+      .looseObject({ id: z.int(), type: z.string().optional() })
+      .nullable(),
     state: z.string(),
     commit_id: z.string().nullable().optional(),
   }),
@@ -383,7 +385,13 @@ type Review = z.infer<typeof reviewListSchema>[number];
 const changeRequestReviewListSchema = z.array(
   z.looseObject({
     id: z.int(),
-    user: z.looseObject({ id: z.int(), login: z.string() }).nullable(),
+    user: z
+      .looseObject({
+        id: z.int(),
+        login: z.string(),
+        type: z.string().optional(),
+      })
+      .nullable(),
     state: z.string(),
     commit_id: z.string().nullable().optional(),
     body: z.string().nullable().optional(),
@@ -765,11 +773,17 @@ function lastPageOf(link: string | null): number | null {
 function currentChangeRequests<R extends Review>(
   reviews: readonly R[],
   head: string,
+  trustedActorIds: readonly string[],
 ): R[] {
   assert.ok(head.length >= MIN_SEGMENT_LENGTH);
   const latest = new Map<number, R>();
   for (const review of reviews) {
-    if (review.user !== null && DECISIVE_REVIEW_STATES.has(review.state))
+    if (
+      review.user !== null &&
+      review.user.type === USER_ACCOUNT_TYPE &&
+      trustedActorIds.includes(String(review.user.id)) &&
+      DECISIVE_REVIEW_STATES.has(review.state)
+    )
       latest.set(review.user.id, review);
   }
   return [...latest.values()].filter(
@@ -872,10 +886,14 @@ function openEndState(
   reviews: unknown,
   checks: Pick<RequiredCheckRead, "head_commit" | "pending" | "failed">,
   headCommit: string,
+  trustedActorIds: readonly string[],
 ): CheckEndState {
   if (
-    currentChangeRequests(reviewListSchema.parse(reviews), headCommit).length >
-    NO_CHANGE_REQUESTS
+    currentChangeRequests(
+      reviewListSchema.parse(reviews),
+      headCommit,
+      trustedActorIds,
+    ).length > NO_CHANGE_REQUESTS
   )
     return CheckEndState.Other;
   if (pullRequest.mergeable_state === MERGEABLE_STATE_CONFLICT)
@@ -1110,6 +1128,7 @@ export class GitHubPlatform {
     call: GitHubCall,
     target: GitHubTarget,
     pullRequest: { number: number },
+    trustedActorIds: readonly string[],
   ): Promise<GitHubAnswer<ChangeRequestRead>> {
     assert.ok(Number.isInteger(pullRequest.number));
     assert.ok(pullRequest.number >= MIN_PULL_REQUEST_NUMBER);
@@ -1125,6 +1144,7 @@ export class GitHubPlatform {
     for (const review of currentChangeRequests(
       reviews.data,
       head.data.head.sha,
+      trustedActorIds,
     )) {
       const comments = await this.#listPages(
         call,
@@ -1381,6 +1401,7 @@ export class GitHubPlatform {
     reviews: unknown,
     checks: Pick<RequiredCheckRead, "head_commit" | "pending" | "failed">,
     expectedEndState: ExpectedEndState,
+    trustedActorIds: readonly string[],
   ): CheckFold {
     assert.equal(expectedEndState, ExpectedEndState.PullRequestMerged);
     const pullRequest = pullRequestStateSchema.parse(body);
@@ -1395,7 +1416,13 @@ export class GitHubPlatform {
       return { end_state: CheckEndState.Other, landed_commits: [] };
     const { head } = pullRequestHeadSchema.parse(body);
     return {
-      end_state: openEndState(pullRequest, reviews, checks, head.sha),
+      end_state: openEndState(
+        pullRequest,
+        reviews,
+        checks,
+        head.sha,
+        trustedActorIds,
+      ),
       landed_commits: [],
     };
   }

@@ -1140,6 +1140,7 @@ export type RequestFacts = {
   address: PlatformAddress;
   repository: RepositoryFacts;
   human_landing: boolean;
+  link_trust: { actor_ids: string[] };
 };
 export type Authorized<F> = {
   credential: string | null;
