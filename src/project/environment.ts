@@ -410,6 +410,7 @@ export class ProjectEnvironments {
       path === undefined ? [] : [path],
       PROMPT_SOURCE_MAX_BYTES,
       { context },
+      true,
     );
     if (path === undefined) return null;
     const [file] = read.files;
@@ -629,6 +630,7 @@ export class ProjectEnvironments {
     paths: readonly string[],
     maxBytes: number,
     caller: Pick<CallerContext, "context">,
+    checkUpstream = false,
   ): Promise<BaseRead> {
     refuseAborted(caller.context);
     const deadline = new CancellationContext(
@@ -660,7 +662,11 @@ export class ProjectEnvironments {
           "The base branch is absent on the remote.",
         );
       const upstream = config.strategy.upstream_branch;
-      if (upstream !== undefined && (await resolve(upstream)) === null)
+      if (
+        checkUpstream &&
+        upstream !== undefined &&
+        (await resolve(upstream)) === null
+      )
         throw new OperationError(
           SSH_UNREACHABLE_STATUS,
           ProjectErrorCode.RepositoryBaseBranchAbsent,
