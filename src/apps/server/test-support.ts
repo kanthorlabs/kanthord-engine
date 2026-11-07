@@ -977,6 +977,8 @@ export async function deliver(
 const GITHUB_VERSION_HEADER = "x-github-api-version";
 const GITHUB_BODY_MAX = 1024 ** 2;
 const GITHUB_EVENTS_ROUTE = /^\/repos\/([^/]+)\/([^/]+)\/events$/;
+const GITHUB_ISSUE_COMMENTS_ROUTE =
+  /^\/repos\/([^/]+)\/([^/]+)\/issues\/comments$/;
 const GITHUB_NOT_MODIFIED_STATUS = 304;
 const NO_HOLD_PASS = 0;
 const HOLD_PASS_STEP = 1;
@@ -1089,6 +1091,7 @@ interface FakeGitHubState {
   dropNext: boolean;
   gate: Promise<void> | null;
   events: Map<string, unknown[]>;
+  issueComments: Map<string, unknown[]>;
   failEvents: number | null;
   eventsHold: FakeEventsHold | null;
   refuseMerge: number | null;
@@ -1345,7 +1348,25 @@ function listEvents(
   repo: string,
   ifNoneMatch: string | null,
 ): FakeGitHubAnswer & { etag: string } {
-  const events = state.events.get(eventsKey(owner, repo)) ?? [];
+  return listItems(state.events.get(eventsKey(owner, repo)) ?? [], ifNoneMatch);
+}
+
+function listIssueComments(
+  state: FakeGitHubState,
+  owner: string,
+  repo: string,
+  ifNoneMatch: string | null,
+): FakeGitHubAnswer & { etag: string } {
+  return listItems(
+    state.issueComments.get(eventsKey(owner, repo)) ?? [],
+    ifNoneMatch,
+  );
+}
+
+function listItems(
+  events: unknown[],
+  ifNoneMatch: string | null,
+): FakeGitHubAnswer & { etag: string } {
   const etag = eventsEtag(events);
   return ifNoneMatch === etag
     ? { status: GITHUB_NOT_MODIFIED_STATUS, body: null, etag }
@@ -1426,6 +1447,16 @@ async function gitHubRequest(
     if (state.failEvents !== null)
       return reply({ status: state.failEvents, body: GITHUB_SCRIPTED_FAILURE });
     const listed = listEvents(state, owner, repo, call.if_none_match);
+    return reply(listed, { etag: listed.etag });
+  }
+  const commentsRoute =
+    method === HttpMethod.Get
+      ? GITHUB_ISSUE_COMMENTS_ROUTE.exec(url.pathname)
+      : null;
+  if (commentsRoute) {
+    const [, owner, repo] = commentsRoute;
+    assert.ok(owner && repo);
+    const listed = listIssueComments(state, owner, repo, call.if_none_match);
     return reply(listed, { etag: listed.etag });
   }
   if (method === HttpMethod.Get && state.failPulls !== null)
@@ -1516,6 +1547,7 @@ export async function fakeGitHub(
     dropNext: false,
     gate: null,
     events: new Map(),
+    issueComments: new Map(),
     failEvents: null,
     eventsHold: null,
     refuseMerge: null,
@@ -1655,6 +1687,13 @@ export async function fakeGitHub(
     },
     events(owner: string, repo: string, events: readonly unknown[]): void {
       state.events.set(eventsKey(owner, repo), [...events]);
+    },
+    issueComments(
+      owner: string,
+      repo: string,
+      comments: readonly unknown[],
+    ): void {
+      state.issueComments.set(eventsKey(owner, repo), [...comments]);
     },
     failEvents(status: number | null): void {
       assert.ok(status === null || Number.isInteger(status));

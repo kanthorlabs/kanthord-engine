@@ -33,7 +33,7 @@ const CREATE_EXAMPLE = {
   platform: "github",
   consumer: "mission.delivery.admit",
   credential: "github-main",
-  configuration: { resource: "owner/repository" },
+  configuration: { resource_kind: "repository", resource: "owner/repository" },
 };
 const LIMIT_INVALID = "cli.pagination.limit_invalid";
 const LIMIT_OUT_OF_RANGE = "cli.pagination.limit_out_of_range";

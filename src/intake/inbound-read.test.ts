@@ -16,6 +16,7 @@ import {
   InboundPlatform,
   INTAKE_SERVICE_NAME,
   intakeOperations,
+  ResourceKind,
 } from "./contract.ts";
 import { IntakeService } from "./index.ts";
 import { allocateInboundId, insertInbound } from "./inbound-store.ts";
@@ -103,7 +104,10 @@ function harness(t: TestContext) {
         platform: InboundPlatform.GitHub,
         consumer: Consumer.MissionDeliveryAdmit,
         credential: kind === InboundKind.Poll ? CREDENTIAL : null,
-        configuration: { resource: RESOURCE },
+        configuration: {
+          resource_kind: ResourceKind.Repository,
+          resource: RESOURCE,
+        },
         checkpoint: null,
         created_at: CREATED_AT,
       });

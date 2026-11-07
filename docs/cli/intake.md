@@ -187,14 +187,14 @@ the Mission Service stays in the span of its admission.
 The file supplies the request body, with no path or query parameters. The
 shared file rules apply. The schema is closed.
 
-| File field      | Requiredness and type                             | Default | Validation and meaning                                                                                                                                                              |
-| --------------- | ------------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `project_id`    | Required project identity.                        | None    | Must name a project of the Project Service.                                                                                                                                         |
-| `kind`          | Required enum string.                             | None    | Closed set `webhook`, `poll`.                                                                                                                                                       |
-| `platform`      | Required enum string.                             | None    | Closed set of supported platforms, today `github`.                                                                                                                                  |
-| `consumer`      | Required enum string.                             | None    | Closed set of admission operations, today `mission.delivery.admit`.                                                                                                                 |
-| `credential`    | Credential name string, or absent.                | Absent  | Required for a poll, refused for a webhook. The name must exist, and its platform must suit `platform`.                                                                             |
-| `configuration` | Required object, validated per kind and platform. | None    | Holds `resource` and the options of the kind and the platform. Every property name is snake_case, the stored form. Every field beyond `resource` is **[blocked][intake-contract]**. |
+| File field      | Requiredness and type                             | Default | Validation and meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| --------------- | ------------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project_id`    | Required project identity.                        | None    | Must name a project of the Project Service.                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `kind`          | Required enum string.                             | None    | Closed set `webhook`, `poll`.                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `platform`      | Required enum string.                             | None    | Closed set of supported platforms, today `github`.                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `consumer`      | Required enum string.                             | None    | Closed set of admission operations, today `mission.delivery.admit`.                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `credential`    | Credential name string, or absent.                | Absent  | Required for a poll, refused for a webhook. The name must exist, and its platform must suit `platform`.                                                                                                                                                                                                                                                                                                                                                                 |
+| `configuration` | Required object, validated per kind and platform. | None    | Holds the required `resource_kind`, the required `resource` and the options of the kind and the platform. `resource_kind` has no default and takes `repository` or `conversation`. An absent or another value answers `400` `gateway.request.validation_failed`. The resource identity is `<resource_kind>:github:<resource>`. Every property name is snake_case, the stored form. Every field beyond `resource_kind` and `resource` is **[blocked][intake-contract]**. |
 
 The file accepts no verification secret, checkpoint,
 state, error or arbitrary consumer operation.
@@ -209,10 +209,12 @@ The inbound read projection contains `id`, `project_id`, `kind`, `platform`,
 
 **Request and validation:** send the file object described above. Validate
 the fields and the configuration schema, then perform the remote validation of
-the kind: one poll cycle for a poll, nothing for a webhook. A GitHub poll
-cycle reads the events and the closed pull requests of the resource, so a
-credential without pull request read access refuses the create. The insert
-transaction checks the credential name and its platform.
+the kind: one poll cycle for a poll, nothing for a webhook. A GitHub
+repository poll cycle reads the events and the closed pull requests of the
+resource, so a credential without pull request read access refuses the create.
+A GitHub conversation poll cycle reads the issue comments of the resource, so
+a credential without the fine-grained permission "Issues: read" refuses the
+create. The insert transaction checks the credential name and its platform.
 
 **Effects and idempotency:** a success inserts exactly one inbound. A platform
 refusal inserts nothing.
@@ -402,6 +404,8 @@ The order is verification, then durable storage, then acknowledgement to the
 platform. A redelivery inside one inbound stores nothing new and answers `2xx`.
 A verified handshake answers from the request alone and stores nothing: a
 GitHub `ping` answers `204`. A handshake skips the capacity bound.
+A GitHub webhook inbound with `resource_kind: conversation` stores its
+`issue_comment` deliveries under the same receipt.
 The receipt answers `404` `intake.inbound.not_found` for an unknown inbound or
 a poll inbound, `401` `intake.inbound.event.signature_invalid` for a failed
 verification, and `503` `intake.inbound.event.capacity_exceeded` beyond the
@@ -411,16 +415,23 @@ simulates a platform signature with a human JWT.
 The check of an open pull request reads the rules of its base branch, the check runs and the statuses of its head commit. A fine-grained token needs `Checks: read` and `Commit statuses: read`.
 
 A poll has no receipt route because the Intake Service initiates it. A poll
-pauses beyond the capacity bound. A poll requests GitHub only while its project
-holds an unresolved request evidence on its resource. Each cycle reads the
-events, then the closed pull requests of the resource. It waits at least 60
-seconds between two cycles, and longer when GitHub names a wait through
-`X-Poll-Interval`, `Retry-After` or `x-ratelimit-reset`. The `checkpoint` of a
-GitHub poll holds `etag` and `pulls_etag`, one ETag for each read. The create and the
-delete of a poll inbound are the only switch of its poll.
+pauses beyond the capacity bound. A repository poll requests GitHub only while
+its project holds an unresolved request evidence on its resource. Each cycle
+reads the events, then the closed pull requests of the resource. It waits at
+least 60 seconds between two cycles, and longer when GitHub names a wait
+through `X-Poll-Interval`, `Retry-After` or `x-ratelimit-reset`. The
+`checkpoint` of a GitHub repository poll holds `etag` and `pulls_etag`, one
+ETag for each read. The create and the delete of a poll inbound are the only
+switch of its poll.
 
-The conversation poll of a GitHub repository reads one page of its issue
-comments, sorted by update time, newest first. The `checkpoint` of a GitHub
+The conversation poll of a GitHub repository requests GitHub only while a node
+of its project links an issue of the repository. Each cycle runs one read: one
+page of the issue comments, sorted by update time, newest first. It follows
+the same wait rules as the repository poll. The credential of a conversation
+inbound needs the fine-grained permission "Issues: read". The batch and the
+`comments_etag` commit in one transaction. A page that exceeds the room below
+the capacity bound stores the items that fit and writes a `null`
+`comments_etag`. The `checkpoint` of a GitHub
 conversation holds `comments_etag`, a text or `null`. The `metadata` of a
 comment from this read is `{ "event": "issue_comment_listed" }`, and its event
 id is `issue_comment:<comment id>`. A webhook comment has the `metadata` value

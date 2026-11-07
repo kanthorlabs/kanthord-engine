@@ -17,6 +17,7 @@ import {
   InboundPlatform,
   INTAKE_SERVICE_NAME,
   intakeOperations,
+  ResourceKind,
 } from "./contract.ts";
 import { IntakeService } from "./index.ts";
 import { insertEvent } from "./event-store.ts";
@@ -96,7 +97,10 @@ function harness(t: TestContext) {
         platform: InboundPlatform.GitHub,
         consumer: Consumer.MissionDeliveryAdmit,
         credential: null,
-        configuration: { resource: "acme/app" },
+        configuration: {
+          resource_kind: ResourceKind.Repository,
+          resource: "acme/app",
+        },
         checkpoint: null,
         created_at: CREATED_AT,
       }),

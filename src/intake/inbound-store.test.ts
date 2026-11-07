@@ -9,6 +9,7 @@ import {
   InboundKind,
   InboundPlatform,
   INTAKE_SERVICE_NAME,
+  ResourceKind,
 } from "./contract.ts";
 import {
   allocateInboundId,
@@ -43,7 +44,10 @@ function migratedStore(t: TestContext): Store {
 }
 
 function newInbound(
-  configuration: unknown = { resource: RESOURCE },
+  configuration: unknown = {
+    resource_kind: ResourceKind.Repository,
+    resource: RESOURCE,
+  },
 ): NewInbound {
   return {
     project_id: PROJECT_ID,
@@ -105,7 +109,10 @@ test("the projection answers the row with parsed columns and no secret", (t) => 
     platform: InboundPlatform.GitHub,
     consumer: Consumer.MissionDeliveryAdmit,
     credential: null,
-    configuration: { resource: RESOURCE },
+    configuration: {
+      resource_kind: ResourceKind.Repository,
+      resource: RESOURCE,
+    },
     checkpoint: CHECKPOINT,
     created_at: CREATED_AT,
   });

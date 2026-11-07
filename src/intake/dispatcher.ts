@@ -9,11 +9,12 @@ import {
 } from "../kernel/operation.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { ValueType } from "../kernel/values.ts";
-import { configurationSchemaOf } from "./configuration.ts";
+import { configurationSchemaOf, resourceIdentityOf } from "./configuration.ts";
 import {
   type ConsumerValue,
   InboundEventState,
   type IntakeConsumers,
+  ResourceKind,
 } from "./contract.ts";
 import {
   eventState,
@@ -98,7 +99,10 @@ function handoffOf(tx: Transaction, id: string): Handoff {
       inbound_event_id: event.id,
       project_id: inbound.project_id,
       platform: inbound.platform,
-      resource: configuration.resource,
+      resource:
+        configuration.resource_kind === ResourceKind.Conversation
+          ? resourceIdentityOf(inbound.platform, configuration)
+          : configuration.resource,
       event: Buffer.from(event.event).toString(EVENT_ENCODING),
       metadata: JSON.parse(event.metadata) as Record<string, unknown>,
     },
