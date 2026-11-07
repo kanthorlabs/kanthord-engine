@@ -79,6 +79,7 @@ const API_ONLY_OPERATIONS = [
   "mission.delivery.unresolved_request.count",
   "intake.inbound.event.describe",
   "intake.link.read",
+  "intake.outbound.reply.match",
   "intake.action.check",
   "intake.action.merge",
   "intake.action.perform",
@@ -127,7 +128,7 @@ const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
 const IMPLEMENTED_COUNT = 218;
-const OPERATION_COUNT = 260;
+const OPERATION_COUNT = 261;
 const INTAKE_LEAVES = [
   "intake event delete",
   "intake event discard",
