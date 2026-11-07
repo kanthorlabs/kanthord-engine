@@ -4,17 +4,25 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import {
+  AssessmentResult,
   ExternalLinkKind,
+  FindingAction,
+  FindingKind,
+  FindingRoute,
   Intent,
   MissionErrorCode,
   NodeState,
+  PROPOSAL_IDENTITY_PREFIX,
   TaskChange,
 } from "./contract.ts";
+import { insertFinding, readFinding } from "./finding-store.ts";
+import { insertProposal } from "./proposal-store.ts";
 import { ContentField } from "./content.ts";
 import { Act, ActAttribute } from "./act-telemetry.ts";
 import { ControlError } from "./control.ts";
-import { openAttempt } from "./record-store.ts";
+import { insertAssessment, openAttempt } from "./record-store.ts";
 import {
   insertDependency,
   insertNode,
@@ -1120,4 +1128,91 @@ test("a refused unblock writes no act trace", async (t) => {
       error instanceof OperationError && error.code === ControlError.Refused,
   );
   assert.equal(actCalls(h).length, NO_ACTS);
+});
+
+test("an unblock that rejects an open proposal moves its linked findings to report", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  const findingId = createIdentity("finding");
+  const assessmentId = createIdentity("assessment");
+  h.store.transaction((tx) => {
+    setNodeState(tx, h.node_id, NodeState.Paused);
+    insertAssessment(tx, {
+      id: assessmentId,
+      node_id: h.node_id,
+      attempt: NO_ATTEMPT,
+      result: AssessmentResult.Undetermined,
+      rationale: "Defect found",
+      evidence_ids: "[]",
+      dependency_outcome_ids: "[]",
+      tested_input: null,
+      gate_files: null,
+      execution_id: null,
+      actor: canonicalJSON(h.actor),
+      node_revision: FIRST_ATTEMPT,
+      created_at: NOW,
+    });
+    insertFinding(tx, {
+      id: findingId,
+      node_id: h.node_id,
+      assessment_id: assessmentId,
+      label: "B1",
+      kind: FindingKind.Blocker,
+      action: FindingAction.Yes,
+      task_id: null,
+      ground: null,
+      name: "Name",
+      description: "Description",
+      fix: "Fix",
+      why: "Why",
+      route: FindingRoute.Record,
+      fixed_assessment_id: null,
+      cause_owner: null,
+      created_by: null,
+      decision: null,
+      decision_reason: null,
+      decided_by: null,
+      decided_at: null,
+    });
+    insertProposal(tx, {
+      id: createIdentity(PROPOSAL_IDENTITY_PREFIX),
+      node_id: h.node_id,
+      attempt: NO_ATTEMPT,
+      assessment_id: assessmentId,
+      content: canonicalJSON({
+        dependency_id: createIdentity("node"),
+        name: "Fix",
+        requirement: "Repair the defect",
+        criterion: "The defect is gone",
+        task: {
+          name: "Repair",
+          requirement: "Change the code",
+          criterion: "The test passes",
+          verifications: ["pnpm test"],
+        },
+        finding_labels: ["B1"],
+      }),
+      created_node_id: null,
+      approved_at: null,
+      rejected_at: null,
+      created_at: NOW,
+    });
+  });
+  await h.invoke("node.block", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(NodeState.Paused),
+  });
+  const route = () =>
+    h.store.transaction((tx) => readFinding(tx, findingId)?.route);
+  assert.equal(route(), FindingRoute.Record);
+  await h.invoke("node.unblock", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      blocked_attempt: NO_ATTEMPT,
+      expected_revision: FIRST_ATTEMPT,
+      expected_mission_version: FIRST_ATTEMPT,
+    },
+  });
+  assert.equal(route(), FindingRoute.Report);
 });

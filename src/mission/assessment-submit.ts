@@ -62,8 +62,13 @@ function routeOf(
   current: boolean,
   reworkDue: boolean,
   intent: Intent,
+  proposed: ReadonlySet<string>,
 ): FindingRoute {
-  if (finding.action === FindingAction.No || !current)
+  if (
+    finding.action === FindingAction.No ||
+    !current ||
+    proposed.has(finding.label)
+  )
     return FindingRoute.Record;
   if (!reworkDue) return FindingRoute.Report;
   return intent === Intent.Implement ? FindingRoute.Fix : FindingRoute.Record;
@@ -145,6 +150,9 @@ export function submitAssessment(
           limit: reworkLimit,
         }
       : null;
+  const proposed = new Set(
+    body.proposals.flatMap((proposal) => proposal.finding_labels),
+  );
   for (const finding of body.findings)
     insertFinding(tx, {
       id: createIdentity(FINDING_IDENTITY_PREFIX),
@@ -159,7 +167,7 @@ export function submitAssessment(
       description: finding.description,
       fix: finding.fix,
       why: finding.why,
-      route: routeOf(finding, current, reworkDue, intent),
+      route: routeOf(finding, current, reworkDue, intent, proposed),
       fixed_assessment_id: null,
       cause_owner: null,
       created_by: null,

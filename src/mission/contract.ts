@@ -1500,6 +1500,7 @@ export const proposalContentSchema = z.strictObject({
   ...contentSchema.pick({ name: true, requirement: true, criterion: true })
     .shape,
   task: proposalTaskSchema,
+  finding_labels: z.array(z.string()).default([]),
 });
 export type ProposalContent = z.infer<typeof proposalContentSchema>;
 export const proposalSchema = z.strictObject({
@@ -1580,6 +1581,7 @@ export const findingDecisionSchema = z.enum(FindingDecision);
 export type FindingDecision = z.infer<typeof findingDecisionSchema>;
 export const FINDING_MAX = 100;
 export const FINDING_TEXT_MAX_BYTES = 8192;
+const BLOCKER_LABEL_PREFIX = "B";
 export const REVIEWER_FINDING_LABEL_PATTERN = /^[BS][1-9][0-9]{0,2}$/;
 export const findingSubmitSchema = z.strictObject({
   label: z.string().regex(REVIEWER_FINDING_LABEL_PATTERN),
@@ -1692,7 +1694,32 @@ export const assessmentSubmitSchema = executionContextSchema
       (body.cause !== undefined) ===
       (body.result === AssessmentResult.CriterionNotMet),
     { path: ["cause"] },
-  );
+  )
+  .superRefine((body, context) => {
+    const blockers = new Set(
+      body.findings
+        .map((finding) => finding.label)
+        .filter((label) => label.startsWith(BLOCKER_LABEL_PREFIX)),
+    );
+    const named = new Set<string>();
+    body.proposals.forEach((proposal, index) => {
+      const own = new Set<string>();
+      const refused = proposal.finding_labels.some((label) => {
+        const refusal =
+          !blockers.has(label) || own.has(label) || named.has(label);
+        own.add(label);
+        return refusal;
+      });
+      proposal.finding_labels.forEach((label) => named.add(label));
+      if (refused)
+        context.addIssue({
+          code: "custom",
+          path: ["proposals", index, "finding_labels"],
+          message:
+            "A finding label names a blocker of this submit, once, in one proposal.",
+        });
+    });
+  });
 export type AssessmentSubmit = z.infer<typeof assessmentSubmitSchema>;
 export const evidenceRequestSchema = executionContextSchema.extend({
   requirement_key: actionKeySchema,

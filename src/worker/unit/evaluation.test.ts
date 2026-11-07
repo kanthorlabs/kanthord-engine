@@ -260,7 +260,7 @@ test("evaluation writes failed-verification assessments without inference and ga
       result: "undetermined",
       opens: 1,
       examine: true,
-      proposals: [PROPOSAL],
+      proposals: [{ ...PROPOSAL, finding_labels: [] }],
     },
     {
       command: "true",
