@@ -45,6 +45,7 @@ export const VerificationClass = {
   Environment: "environment",
   Infrastructure: "infrastructure",
   Pass: "pass",
+  Timeout: "timeout",
 } as const;
 export type VerificationClass =
   (typeof VerificationClass)[keyof typeof VerificationClass];
@@ -225,8 +226,8 @@ function signalExit(exitCode: number | null): boolean {
 function classOf(ran: CommandRun, exhausted: boolean): VerificationClass {
   if (exhausted || ran.end === CommandEnd.WallDeadline)
     return VerificationClass.BudgetEnd;
-  if (ran.end === CommandEnd.CommandLimit || ran.end === CommandEnd.Cancelled)
-    return VerificationClass.CodeFailure;
+  if (ran.end === CommandEnd.CommandLimit) return VerificationClass.Timeout;
+  if (ran.end === CommandEnd.Cancelled) return VerificationClass.CodeFailure;
   if (
     ran.end === CommandEnd.SpawnError ||
     ran.result.signal !== null ||
@@ -405,7 +406,25 @@ export function infrastructureStop(run: VerificationRun): ExecutionStop | null {
   );
 }
 
+function timeoutStop(run: VerificationRun): ExecutionStop {
+  const result = run.verification.results.at(-1);
+  assert.ok(result);
+  return new ExecutionStop(
+    EndReason.EnvironmentFailed,
+    EnvironmentFailure.VerificationTimeout,
+    redactReason(
+      JSON.stringify({
+        index: run.verification.results.length - 1,
+        limit_ms: COMMAND_LIMIT_MS,
+        exit_code: result.exit_code,
+        command: result.command,
+      }),
+    ),
+  );
+}
+
 export function environmentStop(run: VerificationRun): ExecutionStop | null {
+  if (run.outcome === VerificationClass.Timeout) return timeoutStop(run);
   if (run.outcome !== VerificationClass.Environment) return null;
   const result = run.verification.results.at(-1);
   assert.ok(result);

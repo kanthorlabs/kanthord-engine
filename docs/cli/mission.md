@@ -1080,6 +1080,7 @@ When an `examine` node names no repository, the reviewer places the produced evi
 The [verification run](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-verifications) uses list order, one item at a time, never in parallel.
 Each verification runs through `bash -c` in the execution workspace root.
 The run stops at the first failed item.
+A command that reaches the command limit stops the execution as `environment_failed` with the code `verification_timeout`; the agent gets no revision turn.
 The `verification` records each started command, its exit code, signal and timeout fact.
 A run passes when `results` hold one entry per verification and every entry has `exit_code` 0.
 The start refuses a host without bash.

@@ -74,6 +74,7 @@ export const EnvironmentFailure = {
   CommandAbsent: "command_absent",
   AffectedInvalid: "affected_invalid",
   AffectedTimeout: "affected_timeout",
+  VerificationTimeout: "verification_timeout",
 } as const;
 export type EnvironmentFailure =
   (typeof EnvironmentFailure)[keyof typeof EnvironmentFailure];

@@ -17,6 +17,7 @@ import {
 } from "./steps-implement.ts";
 import type { WorkspaceCheckout } from "./workspace.ts";
 import { NoProgressRule } from "./progress-rule.ts";
+import { COMMAND_LIMIT_MS } from "./budget.ts";
 import { readPrior } from "./node-reads.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
@@ -184,6 +185,9 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
       verification: {
         passed: true,
         ran: ONE_COMMAND,
+        index: NO_INDEX,
+        command: "true && true",
+        limit_ms: COMMAND_LIMIT_MS,
         exit_code: PASSED_EXIT_CODE,
         timed_out: false,
       },

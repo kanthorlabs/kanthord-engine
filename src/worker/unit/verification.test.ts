@@ -29,7 +29,17 @@ import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { VerificationContext } from "./method-telemetry.ts";
 import { VerificationMemo } from "./verification-memo.ts";
 import { REASON_MAX_LENGTH } from "../../kernel/probe.ts";
-import { EnvironmentFailure } from "../../scheduler/contract.ts";
+import {
+  EnvironmentFailure,
+  STOP_DETAIL_MAX_LENGTH,
+} from "../../scheduler/contract.ts";
+import { COMMAND_LIMIT_MS } from "./budget.ts";
+import {
+  noProgressAttributes,
+  noProgressDetail,
+  NoProgressRule,
+  verificationFactsOf,
+} from "./progress-rule.ts";
 import {
   pidsIn,
   PROCESS_TREE_PIDS,
@@ -446,6 +456,21 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(commandClassOf(commandRun(0, null)), VerificationClass.Pass);
   });
 
+  test("commandClassOf answers timeout for the command limit and code_failure for a cancel", () => {
+    const ended = (end: CommandEnd) => ({
+      ...commandRun(null, KILL_SIGNAL),
+      end,
+    });
+    assert.equal(
+      commandClassOf(ended(CommandEnd.CommandLimit)),
+      VerificationClass.Timeout,
+    );
+    assert.equal(
+      commandClassOf(ended(CommandEnd.Cancelled)),
+      VerificationClass.CodeFailure,
+    );
+  });
+
   const EXIT_KILL = "sh -c 'kill -9 $$'; exit $?";
   const KILLED_EXIT = 137;
   const KILL_SIGNAL = "SIGKILL";
@@ -539,15 +564,61 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(run.verification.results.length, SINGLE_RUN);
   });
 
-  test("a command over the command limit is a code failure with no rerun", async (t) => {
+  test("a command over the command limit is a timeout with no rerun", async (t) => {
     const { input, runs } = countedInput(temporary(t), ["sleep 30"]);
     const run = await runVerificationsWithOutput({
       ...input,
       commandLimitMs: 500,
     });
-    assert.equal(run.outcome, VerificationClass.CodeFailure);
+    assert.equal(run.outcome, VerificationClass.Timeout);
     assert.equal(runs.length, SINGLE_RUN);
     assert.equal(run.verification.results[0]?.timed_out, true);
+  });
+
+  const AFTER_PASS_LIMIT_MS = 3000;
+
+  test("a command over the command limit stops with environment_failed and verification_timeout", async (t) => {
+    const { input } = countedInput(temporary(t), ["true", "sleep 30"]);
+    const run = await runVerificationsWithOutput({
+      ...input,
+      commandLimitMs: AFTER_PASS_LIMIT_MS,
+    });
+    const stop = environmentStop(run);
+    assert.ok(stop instanceof ExecutionStop);
+    assert.equal(stop.reason, EndReason.EnvironmentFailed);
+    assert.equal(stop.code, EnvironmentFailure.VerificationTimeout);
+    assert.deepEqual(JSON.parse(stop.detail ?? ""), {
+      index: 1,
+      limit_ms: COMMAND_LIMIT_MS,
+      exit_code: null,
+      command: "sleep 30",
+    });
+    assert.equal(infrastructureStop(run), null);
+  });
+
+  test("a timeout stop detail redacts a secret and keeps the facts before a long command", async (t) => {
+    const token = "A".repeat(REASON_MAX_LENGTH);
+    const command = `sleep 30 #${token}`;
+    const { input } = countedInput(temporary(t), [command]);
+    const stop = environmentStop(
+      await runVerificationsWithOutput({ ...input, commandLimitMs: 500 }),
+    );
+    assert.ok(stop);
+    const detail = stop.detail ?? "";
+    assert.ok(detail.length <= REASON_MAX_LENGTH);
+    assert.ok(!detail.includes(token));
+    assert.match(detail, /"index":0/);
+    assert.match(detail, /"exit_code":null/);
+  });
+
+  test("a verification that passes or fails by exit code has no environment stop", async (t) => {
+    for (const command of ["true", "false"]) {
+      const { input } = countedInput(temporary(t), [command]);
+      assert.equal(
+        environmentStop(await runVerificationsWithOutput(input)),
+        null,
+      );
+    }
   });
 
   test("a kill at the wall deadline and a command after the deadline are a budget end", async (t) => {
@@ -787,11 +858,7 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
         ...input,
         commandLimitMs: MEMO_LIMIT_MS,
       });
-      assert.equal(
-        run.outcome,
-        VerificationClass.CodeFailure,
-        `round ${round}`,
-      );
+      assert.equal(run.outcome, VerificationClass.Timeout, `round ${round}`);
       assert.equal(run.verification.results[0]?.timed_out, true);
       assert.equal(runs.length, SINGLE_RUN);
     }
@@ -848,5 +915,85 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
     });
     assert.equal(run.outcome, VerificationClass.BudgetEnd);
     assert.deepEqual(run.verification.results, []);
+  });
+
+  const FACTS_COMMAND_LENGTH = 5000;
+  const FACTS_COMMAND_LIMIT = 2048;
+  const NO_PROGRESS_COUNT = 2;
+  const SECOND_INDEX = 1;
+  const NO_COMMAND = 0;
+  const SHORT_COMMAND = "npm test";
+
+  function factsOfResults(
+    commands: readonly string[],
+    exitCode: number | null,
+  ) {
+    return verificationFactsOf(false, {
+      tested_input: { kind: "produced", sha256: "hash" },
+      results: commands.map((command) => ({
+        command,
+        exit_code: exitCode,
+        signal: null,
+        timed_out: exitCode === null,
+      })),
+    });
+  }
+
+  function noProgressStop(verification: ReturnType<typeof factsOfResults>) {
+    return new ExecutionStop(
+      EndReason.NoProgress,
+      null,
+      noProgressDetail({
+        rule: NoProgressRule.UnchangedRevision,
+        count: NO_PROGRESS_COUNT,
+        limit: NO_PROGRESS_COUNT,
+        verification,
+      }),
+    );
+  }
+
+  test("the no-progress detail holds the index, a command trimmed to fit the stop detail and the limit", () => {
+    const command = "x".repeat(FACTS_COMMAND_LENGTH);
+    const facts = factsOfResults(["true", command], null);
+    assert.equal(facts?.command?.length, FACTS_COMMAND_LIMIT);
+    const detail = noProgressStop(facts).detail ?? "";
+    assert.ok(detail.length <= STOP_DETAIL_MAX_LENGTH);
+    const held = JSON.parse(detail).verification;
+    assert.equal(held.index, SECOND_INDEX);
+    assert.equal(held.limit_ms, COMMAND_LIMIT_MS);
+    assert.ok(held.command.length > NO_COMMAND);
+    assert.ok(command.startsWith(held.command));
+  });
+
+  test("the no-progress detail keeps a short command whole", () => {
+    const detail =
+      noProgressStop(factsOfResults([SHORT_COMMAND], FAILED_EXIT)).detail ?? "";
+    assert.equal(JSON.parse(detail).verification.command, SHORT_COMMAND);
+  });
+
+  test("the no-progress attributes hold timed_out, index and exit_code", () => {
+    const failed = noProgressAttributes(
+      noProgressStop(factsOfResults(["true", SHORT_COMMAND], FAILED_EXIT)),
+    );
+    assert.equal(failed["kanthord.stop.verification.passed"], false);
+    assert.equal(failed["kanthord.stop.verification.timed_out"], false);
+    assert.equal(failed["kanthord.stop.verification.index"], SECOND_INDEX);
+    assert.equal(failed["kanthord.stop.verification.exit_code"], FAILED_EXIT);
+    const hung = noProgressAttributes(
+      noProgressStop(factsOfResults(["true", "sleep 30"], null)),
+    );
+    assert.equal(hung["kanthord.stop.verification.timed_out"], true);
+    assert.equal(hung["kanthord.stop.verification.index"], SECOND_INDEX);
+    assert.ok(!("kanthord.stop.verification.exit_code" in hung));
+  });
+
+  test("the no-progress attributes hold no verification attribute for no verification", () => {
+    const attributes = noProgressAttributes(noProgressStop(null));
+    assert.deepEqual(Object.keys(attributes).sort(), [
+      "kanthord.stop.count",
+      "kanthord.stop.limit",
+      "kanthord.stop.reason",
+      "kanthord.stop.rule",
+    ]);
   });
 });

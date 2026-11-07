@@ -18,6 +18,7 @@ import {
   spanEnds,
 } from "./test-support.ts";
 import { SpanOperation } from "./telemetry.ts";
+import { COMMAND_LIMIT_MS } from "./budget.ts";
 import { VerificationContext } from "./method-telemetry.ts";
 import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
@@ -340,6 +341,7 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
   const NO_PROGRESS_LIMIT = 2;
   const FAILED_EXIT_CODE = 1;
   const ONE_COMMAND = 1;
+  const FIRST_COMMAND_INDEX = 0;
 
   async function stopOf(work: Promise<unknown>): Promise<ExecutionStop> {
     try {
@@ -373,6 +375,9 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
       verification: {
         passed: false,
         ran: ONE_COMMAND,
+        index: FIRST_COMMAND_INDEX,
+        command: "false",
+        limit_ms: COMMAND_LIMIT_MS,
         exit_code: FAILED_EXIT_CODE,
         timed_out: false,
       },

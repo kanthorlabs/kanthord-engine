@@ -14,13 +14,14 @@ import {
   type CancellationContext,
   DeadlineExceeded,
 } from "../../kernel/context.ts";
-import { ExecutionBudget } from "./budget.ts";
+import { COMMAND_LIMIT_MS, ExecutionBudget } from "./budget.ts";
 import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
 import { ExecutionIntent } from "../contract.ts";
 import {
   affectedCommand,
   anthropicSetup,
+  commandLimitClock,
   everyBindingSshAccess,
   transport as localTransport,
   repositorySetup,
@@ -38,6 +39,7 @@ import {
 } from "./evaluation.ts";
 import { SetupEnd } from "./environment-setup.ts";
 import { VerificationClass } from "./verification.ts";
+import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import { ActionResultKind } from "../contract.ts";
 import {
   AssessmentResult,
@@ -645,6 +647,8 @@ interface ReviewOptions {
   transport?: RepositoryTransport;
   round?: ReviewRound;
   answer?: unknown;
+  lifetimeMs?: number;
+  observe?: (batch: readonly TelemetryRecord[]) => void;
 }
 
 async function reviewOf(
@@ -674,7 +678,7 @@ async function reviewOf(
     pinned_revision: 1,
     node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     created_at: Date.now(),
-    expired_at: Date.now() + 60000,
+    expired_at: Date.now() + (options.lifetimeMs ?? 60000),
     trace_id: "trace",
     root_span_id: "1".repeat(16),
   };
@@ -800,7 +804,10 @@ async function reviewOf(
     credentials: { release: async () => {} },
     context: background,
     telemetry: {
-      write: (batch) => records.push(...batch),
+      write: (batch) => {
+        records.push(...batch);
+        options.observe?.(batch);
+      },
       flush: async () => {},
     },
   });
@@ -873,6 +880,33 @@ test("a persistent kill in a review verification stops with the infrastructure c
     assert.equal(body?.stop.code, VERIFICATION_INFRASTRUCTURE_FAILED);
     assert.ok(body?.stop.detail.includes(command));
   }
+});
+
+test("a review verification at the command limit stops with verification_timeout and submits no assessment", async (t) => {
+  const marker = join(temporary(t), "started");
+  const command = `touch ${marker}; sleep 1000`;
+  const clock = commandLimitClock(t, marker);
+  const review = await reviewOf(t, command, COMMAND_LIMIT_MS * 2, {
+    lifetimeMs: COMMAND_LIMIT_MS * 2,
+    observe: (batch) => clock.observe(batch),
+  });
+  await clock.elapsed();
+  assert.deepEqual(review.assessments, []);
+  assert.equal(review.opens(), NO_OPENS);
+  assert.equal(review.releases.length, SINGLE_RELEASE);
+  const [body] = review.releases as {
+    further_work: boolean;
+    stop: { reason: string; code: string; detail: string };
+  }[];
+  assert.equal(body?.further_work, true);
+  assert.equal(body?.stop.reason, EndReason.EnvironmentFailed);
+  assert.equal(body?.stop.code, EnvironmentFailure.VerificationTimeout);
+  assert.deepEqual(JSON.parse(body?.stop.detail ?? ""), {
+    index: 0,
+    limit_ms: COMMAND_LIMIT_MS,
+    exit_code: null,
+    command,
+  });
 });
 
 test("a kill on the first review run and a pass on the rerun is a pass and not flaky", async (t) => {
