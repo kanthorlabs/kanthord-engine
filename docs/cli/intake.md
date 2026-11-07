@@ -419,6 +419,13 @@ seconds between two cycles, and longer when GitHub names a wait through
 GitHub poll holds `etag` and `pulls_etag`, one ETag for each read. The create and the
 delete of a poll inbound are the only switch of its poll.
 
+The conversation poll of a GitHub repository reads one page of its issue
+comments, sorted by update time, newest first. The `checkpoint` of a GitHub
+conversation holds `comments_etag`, a text or `null`. The `metadata` of a
+comment from this read is `{ "event": "issue_comment_listed" }`, and its event
+id is `issue_comment:<comment id>`. A webhook comment has the `metadata` value
+`issue_comment` and the same key, so one comment makes one update.
+
 The API operations `intake.action.perform`, `intake.action.read`,
 `intake.storage.put`, `intake.storage.check`, `intake.storage.get`,
 `intake.execution.storage.get`, `intake.execution.gate_files.read` and
