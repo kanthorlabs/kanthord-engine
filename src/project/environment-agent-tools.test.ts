@@ -212,6 +212,8 @@ function submission(storagePrefix: string) {
   );
 }
 
+const BASE_COMMIT = "a".repeat(40);
+
 function storeFixture(t: TestContext, beforeWrite: () => void = () => {}) {
   const store = new Store(IN_MEMORY_DATABASE);
   stopAfter(t, () => store.close());
@@ -238,7 +240,7 @@ function storeFixture(t: TestContext, beforeWrite: () => void = () => {}) {
     custodySuitability: () => {},
     repositoryConnector: { gitLsRemote: () => Promise.resolve() },
     repositoryFiles: {
-      resolveBranchCommit: unexpected,
+      resolveBranchCommit: async () => BASE_COMMIT,
       readFilesAtCommit: unexpected,
       listFilesAtCommit: async () => [],
       readObjectIds: unexpected,
