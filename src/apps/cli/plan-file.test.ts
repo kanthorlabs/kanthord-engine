@@ -12,6 +12,7 @@ import type {
   ControlResult,
   Node,
   NodeChange,
+  Revision,
   TaskContent,
 } from "../../mission/contract.ts";
 import { ExitCode } from "./constants.ts";
@@ -113,6 +114,10 @@ function node(tasks: TaskContent[]): Node {
   };
 }
 
+function pinnedNode(tasks: TaskContent[]): Node {
+  return { ...node(tasks), pinned_revision: VISIBLE_REVISION - 1 };
+}
+
 function controlResult(current: Node): ControlResult {
   return {
     node: current,
@@ -142,7 +147,34 @@ The task is done.
 `;
 }
 
-function answerOf(current: Node, request: Request): unknown {
+function revisionOf(tasks: TaskContent[]): Revision {
+  return {
+    node_id: NODE_ID,
+    filename: NODE_FILENAME,
+    revision: VISIBLE_REVISION,
+    reason: REASON,
+    actor: ACTOR,
+    created_at: 1,
+    content: CONTENT,
+    tasks,
+    change: {
+      write: "node.update",
+      previous_revision: null,
+      changed_fields: [],
+    },
+    pinned_by_attempts: [],
+  };
+}
+
+function answerOf(
+  current: Node,
+  visibleTasks: TaskContent[],
+  request: Request,
+): unknown {
+  if (
+    request.path === `/api/mission/node/${NODE_ID}/revision/${VISIBLE_REVISION}`
+  )
+    return revisionOf(visibleTasks);
   if (request.path === `/api/mission/node/${NODE_ID}`)
     return request.method === GET ? current : NODE_CHANGE;
   if (request.path === `/api/mission/node/${NODE_ID}/unblock`)
@@ -172,6 +204,7 @@ async function stubServer(
   t: TestContext,
   current: Node,
   requests: Request[],
+  visibleTasks: TaskContent[],
 ): Promise<string> {
   const server = createServer((incoming, response) => {
     const chunks: Buffer[] = [];
@@ -185,7 +218,7 @@ async function stubServer(
       };
       requests.push(request);
       response.writeHead(200, { "Content-Type": "application/json" });
-      response.end(JSON.stringify(answerOf(current, request)));
+      response.end(JSON.stringify(answerOf(current, visibleTasks, request)));
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -205,10 +238,11 @@ async function run(
   current: Node,
   files: [string, string][],
   extra: string[] = [],
+  visibleTasks: TaskContent[] = [],
 ) {
   const directory = temporary(t);
   const requests: Request[] = [];
-  const endpoint = await stubServer(t, current, requests);
+  const endpoint = await stubServer(t, current, requests, visibleTasks);
   const paths = files.flatMap(([name, text]) => [
     "--plan-file",
     write(directory, name, text),
@@ -354,7 +388,7 @@ test("node unblock sends the attempt, the expected versions and the change", asy
 test("--file with --plan-file refuses and sends nothing", async (t) => {
   const directory = temporary(t);
   const requests: Request[] = [];
-  const endpoint = await stubServer(t, node([]), requests);
+  const endpoint = await stubServer(t, node([]), requests, []);
   const result = await runKanthord(
     [
       "mission",
@@ -414,6 +448,58 @@ test("a parser failure refuses with the file name and sends nothing", async (t) 
   assert.match(
     result.stderr,
     new RegExp(`${FORM_FILENAME}.*front_matter_missing`),
+  );
+  assert.deepEqual(requests, []);
+});
+
+test("node update reads the tasks at the visible revision when an attempt pins an older one", async (t) => {
+  const { result, requests } = await run(
+    t,
+    "update",
+    pinnedNode([taskContent(DROPPED_TASK_ID, FORM_FILENAME)]),
+    [
+      [NODE_FILENAME, NODE_TEXT],
+      [FORM_FILENAME, taskText(NODE_FILENAME)],
+    ],
+    [],
+    [taskContent(FORM_TASK_ID, FORM_FILENAME)],
+  );
+  assert.equal(result.code, ExitCode.Success, result.stderr);
+  const body = writes(requests)[0]!.body as { tasks: { id: string }[] };
+  assert.deepEqual(
+    body.tasks.map((task) => task.id),
+    [FORM_TASK_ID],
+  );
+});
+
+test("--project, --reason and --start-point with --file refuse and send nothing", async (t) => {
+  const directory = temporary(t);
+  const requests: Request[] = [];
+  const endpoint = await stubServer(t, node([]), requests, []);
+  const result = await runKanthord(
+    [
+      "mission",
+      "node",
+      "unblock",
+      NODE_ID,
+      "--file",
+      write(directory, "body.json", "{}"),
+      "--reason",
+      REASON,
+      "--start-point",
+      "base_branch",
+      "--endpoint",
+      endpoint,
+      "--token",
+      "t",
+    ],
+    process.env,
+    t.signal,
+  );
+  assert.equal(result.code, ExitCode.Failure);
+  assert.match(
+    result.stderr,
+    /^cli\.mission\.node\.plan_file_options_alone: --reason, --start-point need --plan-file/,
   );
   assert.deepEqual(requests, []);
 });

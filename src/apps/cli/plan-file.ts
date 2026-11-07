@@ -7,6 +7,7 @@ import {
   type Node,
   type NodeUpdate,
   startPointSchema,
+  type TaskContent,
   type TaskWrite,
   type Unblock,
   type UnblockChange,
@@ -32,7 +33,13 @@ const PLAN_FILE_INVALID = "cli.mission.node.plan_file_invalid";
 const REASON_REQUIRED = "cli.mission.node.reason_required";
 const PROJECT_REQUIRED = "cli.mission.node.project_required";
 const PROJECT_INVALID = "cli.mission.node.invalid_project_id";
+const PLAN_FILE_OPTIONS_ALONE = "cli.mission.node.plan_file_options_alone";
 const PROJECT_MISMATCH = "cli.mission.node.project_mismatch";
+const PLAN_FILE_ONLY_OPTIONS: [string, string][] = [
+  ["project", "--project"],
+  ["reason", "--reason"],
+  ["startPoint", "--start-point"],
+];
 const START_POINT_INVALID = "cli.mission.node.unblock.invalid_start_point";
 const BINDING_PAGE_LIMIT = 100;
 const NO_FILES = 0;
@@ -82,6 +89,18 @@ export function addPlanFileOptions(command: Command): Command {
     );
 }
 
+function refuseOptionsWithoutPlanFile(command: Command): void {
+  const local = command.opts();
+  const flags = PLAN_FILE_ONLY_OPTIONS.filter(
+    ([name]) => local[name] !== undefined,
+  ).map(([, flag]) => flag);
+  if (flags.length === NO_FILES) return;
+  throw new Diagnostic(
+    PLAN_FILE_OPTIONS_ALONE,
+    `${flags.join(", ")} need ${PLAN_FILE_OPTION}`,
+  );
+}
+
 export function planFilePathsOf(command: Command): string[] | undefined {
   const options = command.optsWithGlobals();
   const paths: string[] = options.planFile ?? [];
@@ -90,6 +109,7 @@ export function planFilePathsOf(command: Command): string[] | undefined {
       command.error(`required option '${FILE_OPTION} <path>' not specified`, {
         code: MISSING_FILE_OPTION,
       });
+    refuseOptionsWithoutPlanFile(command);
     return undefined;
   }
   if (options.file !== undefined)
@@ -188,10 +208,10 @@ function resolved(
 
 function taskWrites(
   files: PlanFiles,
-  node: Node,
+  tasks: TaskContent[],
   ids: Map<string, string>,
 ): TaskWrite[] {
-  const current = new Map(node.tasks.map((task) => [task.filename, task.id]));
+  const current = new Map(tasks.map((task) => [task.filename, task.id]));
   return files.tasks.map((task) => {
     const id = current.get(task.filename);
     return {
@@ -210,7 +230,7 @@ function taskWrites(
 
 function changeOf(
   files: PlanFiles,
-  node: Node,
+  tasks: TaskContent[],
   ids: Map<string, string>,
   reason: string,
 ): UnblockChange {
@@ -229,9 +249,28 @@ function changeOf(
         ? {}
         : { commit_type: file.commit_type }),
     },
-    tasks: taskWrites(files, node, ids),
+    tasks: taskWrites(files, tasks, ids),
     reason,
   };
+}
+
+async function visibleTasksOf(
+  api: ReturnType<typeof httpClient<typeof missionOperations>>,
+  node: Node,
+): Promise<TaskContent[]> {
+  if (
+    node.pinned_revision === null ||
+    node.pinned_revision === node.visible_revision
+  )
+    return node.tasks;
+  return handleReadResult(
+    await api["node.revision.get"]({
+      params: { node_id: node.id, revision: node.visible_revision },
+      query: {},
+      body: null,
+    }),
+    "cli.mission.node.revision.get.indeterminate",
+  ).tasks;
 }
 
 async function planRead(
@@ -269,10 +308,11 @@ async function planRead(
       "the node belongs to a mission of another project",
     );
   const ids = await bindingIdsOf(connection, options.project);
+  const tasks = await visibleTasksOf(api, node);
   return {
     node,
     missionVersion: mission.version,
-    change: changeOf(files, node, ids, options.reason),
+    change: changeOf(files, tasks, ids, options.reason),
     filename: files.node.filename,
   };
 }
