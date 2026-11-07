@@ -782,6 +782,7 @@ export function composeServices(options: {
     instanceArchive: {
       revokeForInstanceArchive: (...args) =>
         mission.revokeForInstanceArchive(...args),
+      revokePausedClaim: (...args) => mission.revokePausedClaim(...args),
       reportExecutionEnds: (...args) => mission.reportExecutionEnds(...args),
     },
     evidenceRequests: {
@@ -1038,6 +1039,11 @@ export function composeServices(options: {
     wakeup: { wake: (projectId) => scheduler.wake(projectId) },
     executionAttribution: {
       of: (...args) => scheduler.executionAttribution(...args),
+    },
+    workerStopOrders: {
+      connected: (...args) => worker.executionConnected(...args),
+      sendStopOrder: (...args) => worker.sendStopOrder(...args),
+      orderOf: (...args) => worker.orderOf(...args),
     },
     pauseFacts: {
       of: (...args) => scheduler.pauseFacts(...args),

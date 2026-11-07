@@ -216,7 +216,7 @@ export interface Dependencies {
   promptBase?: PromptBase;
   instanceArchive: Pick<
     MissionCollaborations,
-    "revokeForInstanceArchive" | "reportExecutionEnds"
+    "revokeForInstanceArchive" | "revokePausedClaim" | "reportExecutionEnds"
   >;
   intakeActions: IntakeActions;
   evidenceRequests: EvidenceRequests;
@@ -443,6 +443,19 @@ export class WorkerService implements Service {
   executionReleased(executionId: string): void {
     this.instances.executionReleased(executionId);
   }
+  executionConnected(tx: Transaction, runtimeIdentity: string): boolean {
+    return this.instances.executionConnected(tx, runtimeIdentity);
+  }
+  sendStopOrder(
+    executionId: string,
+    runtimeIdentity: string,
+    reason: StopOrderReason,
+  ): void {
+    this.instances.sendStopOrder(executionId, runtimeIdentity, reason);
+  }
+  orderOf(executionId: string): StopOrderReason | null {
+    return this.instances.orderOf(executionId);
+  }
   archiving(tx: Transaction, runtimeIdentity: string): boolean {
     return this.instances.archiving(tx, runtimeIdentity);
   }
@@ -539,6 +552,8 @@ export class WorkerService implements Service {
           instance,
           actor,
         ),
+      revokePausedClaim: (executionId) =>
+        dependencies.instanceArchive.revokePausedClaim(executionId),
       reportExecutionEnds: (ends) =>
         dependencies.instanceArchive.reportExecutionEnds(ends),
       holderMismatch: (tx, instanceName, bindings) =>

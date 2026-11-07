@@ -19,6 +19,7 @@ import {
   SESSION_READS_PENDING_MAX,
   type SessionRead,
   SessionReadOutcome,
+  stopOrderEntrySchema,
   StopOrderReason,
   WORKER_SERVICE_NAME,
   WORKER_TOKEN_INFO,
@@ -32,6 +33,7 @@ import { AgentErrorCode, type HolderScope } from "../agent/contract.ts";
 import { InstanceCleanableKind } from "../kernel/cleanup.ts";
 import type { HumanActor } from "../kernel/actor.ts";
 import type { ExecutionEnds } from "../mission/contract.ts";
+import type { ExecutionTrace } from "../tracking/contract.ts";
 import type { LoginSessionEntry } from "../llm/contract.ts";
 import type { HeldCopy } from "../custody/contract.ts";
 import { ResourceStatus } from "../kernel/health.ts";
@@ -216,6 +218,10 @@ function instanceFixture(
   const revoked: string[] = [];
   const archivers: { instance: string; actor: HumanActor }[] = [];
   const reports: { ends: ExecutionEnds; inTransaction: boolean }[] = [];
+  const pausedRevocation = {
+    revoked: [] as string[],
+    answer: null as ExecutionTrace | null,
+  };
   const revocation = {
     failure: null as Error | null,
     archiveFailure: null as Error | null,
@@ -288,6 +294,10 @@ function instanceFixture(
         revoked.push(executionId);
         archivers.push({ instance, actor });
         return ANSWERED_ENDS;
+      },
+      revokePausedClaim: (executionId) => {
+        pausedRevocation.revoked.push(executionId);
+        return pausedRevocation.answer;
       },
       reportExecutionEnds: (ends) => {
         reports.push({ ends, inTransaction: store.database.isTransaction });
@@ -496,6 +506,7 @@ function instanceFixture(
     archivers,
     reports,
     revocation,
+    pausedRevocation,
     archivedHolders,
     logins,
     used,
@@ -2264,4 +2275,117 @@ test("the order timer retries a deferred end that failed and left an empty stopp
     ),
     false,
   );
+});
+
+const PAUSED_TRACE: ExecutionTrace = {
+  execution_id: createIdentity("execution"),
+  project_id: createIdentity("project"),
+  node_id: createIdentity("node"),
+  attempt: 1,
+  trace_id: "a".repeat(32),
+  root_span_id: "b".repeat(16),
+};
+
+function sendPause(f: ReturnType<typeof instanceFixture>, box: Busy) {
+  f.worker().sendStopOrder(
+    box.executionId,
+    box.registration.runtime_identity,
+    StopOrderReason.HumanPaused,
+  );
+}
+
+type Busy = Awaited<ReturnType<typeof connectedBusy>>;
+
+test("a pause order is connected, raises the work version and appears in the work answer as a parsed entry", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  const version = f.worker().instances.workVersionOf(INSTANCE);
+  assert.equal(
+    f.store.transaction((tx) =>
+      f.worker().executionConnected(tx, box.registration.runtime_identity),
+    ),
+    true,
+  );
+  assert.equal(f.worker().orderOf(box.executionId), null);
+  sendPause(f, box);
+  assert.ok(f.worker().instances.workVersionOf(INSTANCE) > version);
+  assert.equal(
+    f.worker().orderOf(box.executionId),
+    StopOrderReason.HumanPaused,
+  );
+  const orders = (await box.work()).stop_orders;
+  assert.deepEqual(
+    orders.map((order) => stopOrderEntrySchema.parse(order)),
+    [{ execution_id: box.executionId, reason: StopOrderReason.HumanPaused }],
+  );
+});
+
+test("a registration of an instance with no connection is not connected", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  f.worker().instances.dropConnection(box.record.id);
+  assert.equal(
+    f.store.transaction((tx) =>
+      f.worker().executionConnected(tx, box.registration.runtime_identity),
+    ),
+    false,
+  );
+});
+
+test("a pause order past the deadline revokes the paused claim, removes the order and runs the hook for a non-null answer", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  const released = t.mock.method(f.worker().instances, "executionReleased");
+  f.pausedRevocation.answer = PAUSED_TRACE;
+  sendPause(f, box);
+  f.worker().instances.sweepStopOrders();
+  assert.deepEqual(f.pausedRevocation.revoked, []);
+  const later = Date.now() + INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  t.mock.method(Date, "now", () => later);
+  f.worker().instances.sweepStopOrders();
+  assert.deepEqual(f.pausedRevocation.revoked, [box.executionId]);
+  assert.equal(released.mock.callCount(), SINGLE_CALL);
+  assert.equal(f.worker().orderOf(box.executionId), null);
+  assert.deepEqual(f.revoked, []);
+  assert.equal(f.reports.length, NO_CALLS);
+});
+
+test("a pause order past the deadline with an ended claim removes the order and runs no hook", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  const released = t.mock.method(f.worker().instances, "executionReleased");
+  sendPause(f, box);
+  const later = Date.now() + INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  t.mock.method(Date, "now", () => later);
+  f.worker().instances.sweepStopOrders();
+  assert.deepEqual(f.pausedRevocation.revoked, [box.executionId]);
+  assert.equal(released.mock.callCount(), NO_CALLS);
+  assert.equal(f.worker().orderOf(box.executionId), null);
+  assert.deepEqual(box.orders(), []);
+});
+
+test("a pause order past the deadline ends a pending archive of its instance when it empties stopping", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  sendPause(f, box);
+  await box.archive();
+  const later = Date.now() + INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  t.mock.method(Date, "now", () => later);
+  f.worker().instances.sweepStopOrders();
+  assert.equal(f.worker().instances.liveInstance(box.record.id), null);
+  assert.equal(f.worker().orderOf(box.executionId), null);
+});
+
+test("a pause order and then an archive order of one execution keep one order with human_paused and the release ends the instance", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  sendPause(f, box);
+  const archived = await box.archive();
+  assert.deepEqual(archived.stopping, [box.executionId]);
+  assert.deepEqual(box.orders(), [
+    { execution_id: box.executionId, reason: StopOrderReason.HumanPaused },
+  ]);
+  f.worker().executionReleased(box.executionId);
+  assert.equal(f.worker().instances.liveInstance(box.record.id), null);
+  assert.equal(f.worker().orderOf(box.executionId), null);
 });

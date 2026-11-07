@@ -51,6 +51,7 @@ import type { MissionConfig } from "./config.ts";
 const NO_REQUIRED_ACTIONS = 0;
 const NO_ATTEMPT = 0;
 const NO_LIMIT = 0;
+const HUMAN_PAUSED = "human_paused";
 const stringSet = z.array(z.string());
 const assetContent = z.record(z.string(), z.unknown());
 
@@ -257,6 +258,13 @@ export function pausedContextOf(
   const facts = dependencies.pauseFacts.of(tx, node.id, node.attempt);
   const { consecutive_failure_limit: failureLimit, further_work_limit } =
     dependencies.config;
+  if (facts.last_stop?.reason === HUMAN_PAUSED)
+    return {
+      rule: PauseRule.Human,
+      count: null,
+      limit: null,
+      last_stop: facts.last_stop,
+    };
   if (facts.consecutive_failures >= failureLimit)
     return {
       rule: PauseRule.FailureLimit,

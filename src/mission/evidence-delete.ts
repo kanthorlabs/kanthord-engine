@@ -214,6 +214,7 @@ export async function removeEvidence(
           RevokeCause.Human,
           null,
           ends,
+          null,
         )?.execution.trace ?? null;
       transition(tx, dependencies, mission, settled, NodeState.Paused, now);
     }

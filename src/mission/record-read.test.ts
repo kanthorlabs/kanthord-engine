@@ -427,6 +427,21 @@ for (const stop of [lastStop(), null]) {
   });
 }
 
+test("a node paused after a resume from failure_limit whose last stop is human_paused answers human", (t) => {
+  const stop = { ...lastStop(), reason: "human_paused" };
+  const h = pausedNode(t, {
+    consecutive_failures: FAILURE_LIMIT,
+    consecutive_stalls: ONE_STALL,
+    last_stop: stop,
+  });
+  assert.deepEqual(pausedRecord(h).paused_context, {
+    rule: PauseRule.Human,
+    count: null,
+    limit: null,
+    last_stop: stop,
+  });
+});
+
 test("a node in another state answers no paused_context", (t) => {
   const h = fixture(t);
   h.dependencies.pauseFacts.of = () => {

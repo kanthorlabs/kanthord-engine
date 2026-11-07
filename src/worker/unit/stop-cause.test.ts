@@ -321,6 +321,7 @@ test("an operator stop maps to the human intervention", () => {
   for (const reason of [
     ExecutionStopReason.InstanceArchived,
     ExecutionStopReason.WorkerStopped,
+    ExecutionStopReason.HumanPaused,
   ])
     assert.deepEqual(
       stopCauseOf(reason, null, null, QUIET),

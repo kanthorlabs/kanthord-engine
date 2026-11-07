@@ -165,7 +165,9 @@ export function release(
 ): NodeTransition {
   const node = requireNode(tx, execution.node_id);
   assert.ok(
-    node.state === NodeState.Executing || node.state === NodeState.Evaluating,
+    node.state === NodeState.Executing ||
+      node.state === NodeState.Evaluating ||
+      node.state === NodeState.Paused,
   );
   assert.equal(node.attempt, execution.attempt);
   assert.equal(readOpenAttempt(tx, node.id)?.attempt, execution.attempt);
@@ -192,13 +194,15 @@ export function release(
   const stalledOut =
     furtherWork && limit > NO_FURTHER_WORK_LIMIT && stalledReleases >= limit;
   const state =
-    node.state === NodeState.Evaluating
-      ? NodeState.ExternalRequested
-      : stalledOut
-        ? NodeState.Paused
-        : furtherWork
-          ? NodeState.Available
-          : NodeState.Waiting;
+    node.state === NodeState.Paused
+      ? NodeState.Paused
+      : node.state === NodeState.Evaluating
+        ? NodeState.ExternalRequested
+        : stalledOut
+          ? NodeState.Paused
+          : furtherWork
+            ? NodeState.Available
+            : NodeState.Waiting;
   transition(
     tx,
     dependencies,
@@ -222,7 +226,7 @@ export function release(
     dependencies.workQueue,
     node.id,
     node.state,
-    state === NodeState.Paused
+    state === NodeState.Paused && node.state !== NodeState.Paused
       ? { rule: TransitionRule.FurtherWorkLimit, count: stalledReleases, limit }
       : null,
   );
@@ -237,7 +241,9 @@ export function failure(
 ): NodeTransition {
   const node = requireNode(tx, nodeId);
   assert.ok(
-    node.state === NodeState.Executing || node.state === NodeState.Evaluating,
+    node.state === NodeState.Executing ||
+      node.state === NodeState.Evaluating ||
+      node.state === NodeState.Paused,
   );
   assert.ok(
     Number.isSafeInteger(consecutiveFailures) &&
@@ -245,7 +251,7 @@ export function failure(
   );
   const limit = dependencies.config.consecutive_failure_limit;
   const state =
-    consecutiveFailures >= limit
+    node.state === NodeState.Paused || consecutiveFailures >= limit
       ? NodeState.Paused
       : node.state === NodeState.Executing
         ? NodeState.Available
@@ -263,7 +269,7 @@ export function failure(
     dependencies.workQueue,
     node.id,
     node.state,
-    state === NodeState.Paused
+    state === NodeState.Paused && node.state !== NodeState.Paused
       ? {
           rule: TransitionRule.FailureLimit,
           count: consecutiveFailures,
@@ -281,12 +287,16 @@ export function stopped(
 ): NodeTransition {
   const node = requireNode(tx, nodeId);
   assert.ok(
-    node.state === NodeState.Executing || node.state === NodeState.Evaluating,
+    node.state === NodeState.Executing ||
+      node.state === NodeState.Evaluating ||
+      node.state === NodeState.Paused,
   );
   const state =
-    node.state === NodeState.Executing
-      ? NodeState.Available
-      : NodeState.Waiting;
+    node.state === NodeState.Paused
+      ? NodeState.Paused
+      : node.state === NodeState.Executing
+        ? NodeState.Available
+        : NodeState.Waiting;
   transition(
     tx,
     dependencies,

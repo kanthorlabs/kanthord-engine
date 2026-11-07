@@ -751,6 +751,7 @@ components:
                   - environment_failed
                   - instance_archived
                   - worker_stopped
+                  - human_paused
                   - lost
                   - budget_end
             rows:
@@ -768,6 +769,7 @@ components:
                   - environment_failed
                   - instance_archived
                   - worker_stopped
+                  - human_paused
                   - lost
                   - budget_end
               additionalProperties:
@@ -787,6 +789,7 @@ components:
                 - environment_failed
                 - instance_archived
                 - worker_stopped
+                - human_paused
                 - lost
                 - budget_end
             previous_totals:
@@ -805,6 +808,7 @@ components:
                       - environment_failed
                       - instance_archived
                       - worker_stopped
+                      - human_paused
                       - lost
                       - budget_end
                   additionalProperties:
@@ -822,6 +826,7 @@ components:
                     - environment_failed
                     - instance_archived
                     - worker_stopped
+                    - human_paused
                     - lost
                     - budget_end
                 - type: "null"

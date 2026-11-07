@@ -917,3 +917,107 @@ test("a budget-end release calls environmentFailed never", async (t) => {
   await h.release(true, BUDGET_END);
   assert.deepEqual(h.failed, []);
 });
+
+const HUMAN_PAUSED: ReleaseStop = {
+  reason: ExecutionStopReason.HumanPaused,
+  code: null,
+};
+
+test("a human_paused release with an order calls stopped, counts no failure and sets no hold", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  t.mock.method(h.service, "wake", () => {});
+  h.store.transaction((tx) =>
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+  );
+  h.dependencies.stopOrderOf = (executionId) =>
+    executionId === h.row.execution_id ? ExecutionStopReason.HumanPaused : null;
+  await h.release(true, HUMAN_PAUSED);
+  assert.deepEqual(
+    h.calls.map((call) => call.method),
+    [STOPPED_CALL],
+  );
+  assert.deepEqual(h.read().stop, HUMAN_PAUSED);
+  const job = h.store.transaction(
+    (tx) =>
+      tx.database
+        .prepare("SELECT available_at FROM scheduler_job WHERE node_id = ?")
+        .get(h.row.node_id) as { available_at: number | null },
+  );
+  assert.equal(job.available_at, null);
+  const ended = h.read();
+  assert.equal(
+    h.store.transaction((tx) => consecutiveFailures(tx, ended, false)),
+    NO_FAILURES,
+  );
+});
+
+test("a human_paused release with no order refuses with stop_unordered and writes nothing", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  await assert.rejects(
+    h.release(true, HUMAN_PAUSED),
+    (error: unknown) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.Conflict &&
+      error.code === STOP_UNORDERED &&
+      isDeepStrictEqual(error.details, {
+        execution_id: h.row.execution_id,
+        reason: ExecutionStopReason.HumanPaused,
+      }),
+  );
+  assert.equal(h.read().ended_at, null);
+  assert.equal(h.calls.length, NO_CALLS);
+});
+
+test("a human_paused release resets the budget-end stall count", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  t.mock.method(h.service, "wake", () => {});
+  h.store.transaction((tx) => {
+    tx.database
+      .prepare("DELETE FROM scheduler_execution WHERE id = ?")
+      .run(h.row.execution_id);
+    for (const stop of [BUDGET_END, BUDGET_END, HUMAN_PAUSED])
+      insertExecution(
+        tx,
+        executionFixture({
+          node_id: h.row.node_id,
+          project_id: h.row.project_id,
+          attempt: h.row.attempt,
+          ended_at: FIXTURE_NOW,
+          stop,
+        }),
+      );
+    insertExecution(tx, h.row);
+  });
+  await h.release(true, BUDGET_END);
+  assert.equal(h.calls[0]!.arguments[3], CURRENT_STALL);
+});
+
+test("an environment_failed release of a Paused node that stays Paused sets no hold", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  t.mock.method(h.service, "wake", () => {});
+  h.dependencies.environments.environmentFailed = () => {};
+  const kept = transitionFixture({ from: "Paused", to: "Paused" });
+  h.store.transaction((tx) =>
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+  );
+  h.dependencies.transitions.failure = () => kept;
+  await h.release(true, {
+    reason: ExecutionStopReason.EnvironmentFailed,
+    code: EnvironmentFailure.SetupFailed,
+  });
+  const job = h.store.transaction(
+    (tx) =>
+      tx.database
+        .prepare("SELECT available_at FROM scheduler_job WHERE node_id = ?")
+        .get(h.row.node_id) as { available_at: number | null },
+  );
+  assert.equal(job.available_at, null);
+  assert.deepEqual(
+    h.telemetry[1]!.arguments[1],
+    executionTransition(kept, FIXTURE_NOW, FIRST_FAILURE_WITHOUT_JOB),
+  );
+});

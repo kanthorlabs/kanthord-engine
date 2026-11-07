@@ -1322,6 +1322,7 @@ export const StopOrderReason = {
   EnvironmentFailed: "environment_failed",
   InstanceArchived: "instance_archived",
   WorkerStopped: "worker_stopped",
+  HumanPaused: "human_paused",
 } as const;
 export type StopOrderReason =
   (typeof StopOrderReason)[keyof typeof StopOrderReason];

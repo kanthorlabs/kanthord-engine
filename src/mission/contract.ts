@@ -129,6 +129,7 @@ export interface MissionCollaborations {
     instance: string,
     actor: HumanActor,
   ): ExecutionEnds | null;
+  revokePausedClaim(executionId: string): RevokedExecution["trace"] | null;
   reportExecutionEnds(ends: ExecutionEnds): void;
 }
 
@@ -187,7 +188,8 @@ export interface ReleaseStop {
     | "no_progress"
     | "environment_failed"
     | "instance_archived"
-    | "worker_stopped";
+    | "worker_stopped"
+    | "human_paused";
   code: string | null;
   detail?: string;
   cause?: FailureCause;
@@ -384,6 +386,16 @@ export interface ExecutionAttribution {
     name: string | null;
     worker_name: string;
   } | null;
+}
+
+export interface WorkerStopOrders {
+  connected(tx: Transaction, runtimeIdentity: string): boolean;
+  sendStopOrder(
+    executionId: string,
+    runtimeIdentity: string,
+    reason: ReleaseStop["reason"],
+  ): void;
+  orderOf(executionId: string): ReleaseStop["reason"] | null;
 }
 
 export interface PauseFactsRecord {

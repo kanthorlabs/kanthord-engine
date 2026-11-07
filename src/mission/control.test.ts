@@ -29,10 +29,15 @@ import {
 } from "./record-store.ts";
 import { requireMission } from "./write.ts";
 import { setNodeState } from "./store.ts";
-import { controlHarness, settlesExpired } from "./test-support.ts";
+import {
+  controlHarness,
+  revokedExecution,
+  settlesExpired,
+} from "./test-support.ts";
 
 const NOW = 100;
 const FIRST_ATTEMPT = 1;
+const ONE_REVOKED = 1;
 const NO_ATTEMPT = 0;
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const KEY = "repo.pull_request";
@@ -271,6 +276,7 @@ test("transition replaces a claimable job and revokes only active claims", (t) =
       RevokeCause.Human,
       null,
       executionEnds(),
+      null,
     );
     endLiveClaim(
       tx,
@@ -280,15 +286,17 @@ test("transition replaces a claimable job and revokes only active claims", (t) =
       RevokeCause.Human,
       null,
       executionEnds(),
+      null,
     );
     endLiveClaim(
       tx,
       h.dependencies,
-      { ...node, state: NodeState.Paused },
+      { ...node, state: NodeState.Waiting },
       NOW,
       RevokeCause.Human,
       null,
       executionEnds(),
+      null,
     );
   });
   assert.deepEqual(
@@ -300,6 +308,56 @@ test("transition replaces a claimable job and revokes only active claims", (t) =
       "schedulerClaims.revoke",
     ],
   );
+});
+
+test("endLiveClaim stores a given stop on the revoked execution and none for null", (t) => {
+  const h = controlHarness(t, IDENTITY);
+  const node = h.node();
+  const stops: unknown[] = [];
+  h.dependencies.schedulerClaims.revoke = (_tx, nodeId, now, stop) => {
+    stops.push(stop);
+    return revokedExecution(createIdentity("execution"), nodeId, now);
+  };
+  const given = { reason: "instance_archived", code: null } as const;
+  h.store.transaction((tx) => {
+    for (const stop of [given, null])
+      endLiveClaim(
+        tx,
+        h.dependencies,
+        { ...node, state: NodeState.Executing },
+        NOW,
+        RevokeCause.Human,
+        null,
+        executionEnds(),
+        stop,
+      );
+  });
+  assert.deepEqual(stops, [given, undefined]);
+});
+
+test("endLiveClaim revokes the kept claim of a Paused node with the stop human_paused", (t) => {
+  const h = controlHarness(t, IDENTITY);
+  const node = h.node();
+  const stops: unknown[] = [];
+  h.dependencies.schedulerClaims.revoke = (_tx, nodeId, now, stop) => {
+    stops.push(stop);
+    return revokedExecution(createIdentity("execution"), nodeId, now);
+  };
+  const ends = executionEnds();
+  h.store.transaction((tx) => {
+    endLiveClaim(
+      tx,
+      h.dependencies,
+      { ...node, state: NodeState.Paused },
+      NOW,
+      RevokeCause.Human,
+      null,
+      ends,
+      null,
+    );
+  });
+  assert.deepEqual(stops, [{ reason: "human_paused", code: null }]);
+  assert.equal(ends.revoked.length, ONE_REVOKED);
 });
 
 for (const state of [NodeState.ExternalSuccess, NodeState.ExternalFailed]) {

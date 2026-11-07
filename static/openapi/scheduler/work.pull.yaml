@@ -246,6 +246,7 @@ components:
                             - environment_failed
                             - instance_archived
                             - worker_stopped
+                            - human_paused
                         code:
                           anyOf:
                             - type: string

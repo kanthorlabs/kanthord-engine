@@ -188,3 +188,22 @@ test("a call for an unknown execution answers null", (t) => {
   assert.deepEqual(databaseSnapshot(h.store), before);
   assert.equal(h.execution.ended_at, null);
 });
+
+test("a forced archive of a Paused node with a kept claim revokes it with instance_archived and keeps Paused", (t) => {
+  const h = fixture(t, NodeState.Paused);
+  const jobs = h.jobs().length;
+  const ends = h.revoke();
+  assert.ok(ends);
+  assert.equal(h.node().state, NodeState.Paused);
+  assert.equal(h.stops.length, ONE_CALL);
+  const stop = h.stops[0] as { reason: string; code: null; detail: string };
+  assert.equal(stop.reason, STOP_REASON);
+  assert.deepEqual(JSON.parse(stop.detail), {
+    instance: INSTANCE,
+    actor: ACTOR.name,
+  });
+  assert.equal(ends.revoked.length, ONE_CALL);
+  assert.equal(ends.revoked[0]!.execution.execution_id, h.executionId);
+  assert.equal(h.jobs().length, jobs);
+  assert.equal(h.revoke(), null);
+});

@@ -38,6 +38,7 @@ const ENDING_FAILURE = 1;
 const ONE_JOB = 1;
 const EXPIRED = 1;
 const NO_DIGESTS = 0;
+const PAUSED = "Paused";
 const digestsDetailSchema = z.looseObject({
   digests: z.record(z.string(), z.string()),
 });
@@ -80,7 +81,10 @@ export function recordFailure(
     now,
   );
   const until = heldUntil(failures, now, dependencies.config.stop_backoff);
-  if (until === null)
+  if (
+    until === null ||
+    (transition.from === PAUSED && transition.to === PAUSED)
+  )
     return {
       transition,
       hold: { failure_count: failures, available_at: null },
@@ -175,6 +179,7 @@ export function digestsOf(detail: string | null): Record<string, string> {
 export const NO_FAILURE_STOPS: readonly ExecutionStopReason[] = [
   ExecutionStopReason.InstanceArchived,
   ExecutionStopReason.WorkerStopped,
+  ExecutionStopReason.HumanPaused,
 ];
 
 export function countsFailure(stop: ReleaseStop | null): boolean {

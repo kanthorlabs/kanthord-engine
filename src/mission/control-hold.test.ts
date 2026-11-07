@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { isDeepStrictEqual } from "node:util";
 import { test } from "node:test";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import {
   EndState,
@@ -536,4 +538,215 @@ test("an act telemetry that throws changes no answer and no state", async (t) =>
   assert.equal(result.node.state, NodeState.Paused);
   assert.equal(h.node().state, NodeState.Paused);
   assert.equal(h.calls.at(-1)?.method, WAKE);
+});
+
+const RUNTIME_IDENTITY = "runtime-1";
+const HUMAN_PAUSED = "human_paused";
+const CLAIM_LIVE = "mission.node.claim_live";
+
+function pausedClaim(
+  t: Parameters<typeof controlHarness>[0],
+  state: NodeState,
+) {
+  const h = controlHarness(t, IDENTITY);
+  const executionId = createIdentity("execution");
+  const keep = { live: true, connected: true, order: null as string | null };
+  const sent: unknown[][] = [];
+  const stops: unknown[] = [];
+  h.dependencies.schedulerClaims.liveExecutionOf = () =>
+    keep.live
+      ? {
+          execution_id: executionId,
+          runtime_identity: RUNTIME_IDENTITY,
+          attempt: FIRST_ATTEMPT,
+          pinned_revision: FIRST_ATTEMPT,
+        }
+      : null;
+  h.dependencies.schedulerClaims.revoke = (_tx, nodeId, now, stop) => {
+    stops.push(stop);
+    keep.live = false;
+    return revokedExecution(executionId, nodeId, now);
+  };
+  h.dependencies.workerStopOrders.connected = () => keep.connected;
+  h.dependencies.workerStopOrders.orderOf = () =>
+    keep.order as ReturnType<typeof h.dependencies.workerStopOrders.orderOf>;
+  h.dependencies.workerStopOrders.sendStopOrder = (...args) => {
+    sent.push([...args, h.store.database.isTransaction]);
+  };
+  h.store.transaction((tx) => {
+    openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+    setNodeState(tx, h.node_id, state);
+  });
+  return { h, executionId, keep, sent, stops };
+}
+
+test("a pause of a connected execution keeps the claim and sends one stop order after the commit", async (t) => {
+  const { h, executionId, sent, stops } = pausedClaim(t, NodeState.Executing);
+  const result = await h.invoke("node.pause", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(NodeState.Executing, FIRST_ATTEMPT),
+  });
+  assert.equal(result.node.state, NodeState.Paused);
+  assert.deepEqual(stops, []);
+  assert.equal(
+    h.calls.some((call) => call.method === EXECUTION_REVOKED),
+    false,
+  );
+  assert.deepEqual(sent, [
+    [executionId, RUNTIME_IDENTITY, HUMAN_PAUSED, false],
+  ]);
+});
+
+test("a pause rolled back sends no stop order", async (t) => {
+  const { h, sent } = pausedClaim(t, NodeState.Executing);
+  h.caller.commit = (write) =>
+    h.store.transaction((tx) => {
+      write(tx);
+      throw new Error(ROLLBACK);
+    });
+  await assert.rejects(
+    h.invoke("node.pause", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: h.body(NodeState.Executing, FIRST_ATTEMPT),
+    }),
+    { message: ROLLBACK },
+  );
+  assert.deepEqual(sent, []);
+});
+
+test("a pause of an execution with no connection revokes the claim at once with the stop human_paused", async (t) => {
+  const { h, keep, sent, stops } = pausedClaim(t, NodeState.Executing);
+  keep.connected = false;
+  const result = await h.invoke("node.pause", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(NodeState.Executing, FIRST_ATTEMPT),
+  });
+  assert.equal(result.node.state, NodeState.Paused);
+  assert.deepEqual(stops, [{ reason: HUMAN_PAUSED, code: null }]);
+  assert.equal(
+    h.calls.filter((call) => call.method === EXECUTION_REVOKED).length,
+    ONE_ACT,
+  );
+  assert.deepEqual(sent, []);
+});
+
+test("a block of a Paused node with a pending pause stop revokes the claim", async (t) => {
+  const { h, keep, stops } = pausedClaim(t, NodeState.Paused);
+  keep.order = HUMAN_PAUSED;
+  const blocked = await h.invoke("node.block", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(NodeState.Paused, FIRST_ATTEMPT),
+  });
+  assert.equal(blocked.node.state, NodeState.Blocked);
+  assert.deepEqual(stops, [{ reason: HUMAN_PAUSED, code: null }]);
+});
+
+test("a resume of a Paused node with a kept claim and an order refuses until the release", async (t) => {
+  const { h, executionId, keep, stops } = pausedClaim(t, NodeState.Paused);
+  keep.order = HUMAN_PAUSED;
+  const resume = () =>
+    h.invoke("node.resume", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: {
+        ...h.body(NodeState.Paused, FIRST_ATTEMPT),
+        target: ResumeTarget.Waiting,
+      },
+    });
+  await assert.rejects(
+    resume(),
+    (error) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.Conflict &&
+      error.code === CLAIM_LIVE &&
+      isDeepStrictEqual(error.details, {
+        node_id: h.node_id,
+        execution_id: executionId,
+      }),
+  );
+  assert.equal(h.node().state, NodeState.Paused);
+  assert.deepEqual(stops, []);
+  keep.live = false;
+  keep.order = null;
+  const resumed = await resume();
+  assert.equal(resumed.node.state, NodeState.Waiting);
+});
+
+test("a resume of a Paused node with a kept claim and no order revokes the claim and resumes", async (t) => {
+  const { h, stops } = pausedClaim(t, NodeState.Paused);
+  const resumed = await h.invoke("node.resume", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      ...h.body(NodeState.Paused, FIRST_ATTEMPT),
+      target: ResumeTarget.Waiting,
+    },
+  });
+  assert.equal(resumed.node.state, NodeState.Waiting);
+  assert.deepEqual(stops, [{ reason: HUMAN_PAUSED, code: null }]);
+  assert.equal(
+    h.calls.filter((call) => call.method === EXECUTION_REVOKED).length,
+    ONE_ACT,
+  );
+});
+
+test("revokePausedClaim revokes the kept claim with human_paused, keeps Paused and answers null on a second call", (t) => {
+  const { h, executionId, stops } = pausedClaim(t, NodeState.Paused);
+  const trace = h.service.revokePausedClaim(executionId);
+  assert.equal(trace?.execution_id, executionId);
+  assert.deepEqual(stops, [{ reason: HUMAN_PAUSED, code: null }]);
+  assert.equal(h.node().state, NodeState.Paused);
+  const reported = h.calls.filter((call) => call.method === EXECUTION_REVOKED);
+  assert.equal(reported.length, ONE_ACT);
+  assert.equal(
+    (reported[0]!.arguments[0] as RevokedExecution).execution_id,
+    executionId,
+  );
+  assert.equal(h.service.revokePausedClaim(executionId), null);
+  assert.equal(
+    h.calls.filter((call) => call.method === EXECUTION_REVOKED).length,
+    ONE_ACT,
+  );
+});
+
+test("revokePausedClaim ignores a node that is not Paused", (t) => {
+  const { h, executionId, stops } = pausedClaim(t, NodeState.Executing);
+  assert.equal(h.service.revokePausedClaim(executionId), null);
+  assert.deepEqual(stops, []);
+  assert.equal(h.node().state, NodeState.Executing);
+});
+
+test("a control on a Paused node passes after the loss of its expired kept claim", async (t) => {
+  const { h, keep } = pausedClaim(t, NodeState.Paused);
+  const limit = h.dependencies.config.consecutive_failure_limit;
+  const answers: unknown[] = [];
+  h.dependencies.schedulerClaims.settle = (tx, nodeId, now) => {
+    if (!keep.live) return [];
+    keep.live = false;
+    answers.push(h.service.failure(tx, nodeId, limit, now));
+    return [];
+  };
+  const resumed = await h.invoke("node.resume", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      ...h.body(NodeState.Paused, FIRST_ATTEMPT),
+      target: ResumeTarget.Waiting,
+    },
+  });
+  assert.equal(resumed.node.state, NodeState.Waiting);
+  assert.deepEqual(answers, [
+    {
+      from: NodeState.Paused,
+      to: NodeState.Paused,
+      rule: "none",
+      count: null,
+      limit: null,
+      first_available_at: null,
+    },
+  ]);
 });

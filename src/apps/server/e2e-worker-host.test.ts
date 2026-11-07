@@ -64,6 +64,7 @@ const READY = "Worker application ready";
 const CLAIMED = "credential handover received";
 const WORKER_STOPPED = "worker_stopped";
 const INSTANCE_ARCHIVED = "instance_archived";
+const HUMAN_PAUSED = "human_paused";
 const INSTANCE_NAME = "laptop";
 const MACHINE_NAME = "workstation";
 const FAST_HEARTBEAT_MS = 50;
@@ -601,6 +602,149 @@ test(
         assert.equal(node.state, NodeState.Available);
         assert.equal(
           archiveSetup.fixture.worker.stopOrderOf(claim.execution_id),
+          null,
+        );
+      },
+    );
+    const pauseSetup = await fixture(t);
+    await t.test(
+      "E09.15b a pause of a connected execution lets the coder push its checkpoint and leaves the node Paused",
+      { timeout: JOURNEY_TIMEOUT },
+      async (t) => {
+        const entered = Promise.withResolvers<void>();
+        const resume = Promise.withResolvers<void>();
+        const provider = scriptedProvider([
+          tool("bash", { command: `printf ${HELLO} > ${STOPPED_FILE}` }),
+          async () => {
+            entered.resolve();
+            await resume.promise;
+            return fauxAssistantMessage("stopped");
+          },
+        ]);
+        const call = humanCaller(pauseSetup.fixture);
+        const empty = { params: {}, query: {} };
+        await createMachine(pauseSetup.fixture, MACHINE_NAME);
+        const created = await call(workerOperations["instance.create"], {
+          ...empty,
+          body: {
+            name: INSTANCE_NAME,
+            worker: "coder@1",
+            placement: InstancePlacement.Worker,
+            machine: MACHINE_NAME,
+            endpoint: pauseSetup.fixture.endpoint,
+          },
+        });
+        assert.ok(created.instance_configuration);
+        await call(llmOperations.create, {
+          ...empty,
+          body: {
+            name: "anthro-1",
+            platform: "anthropic",
+            metadata: null,
+            holders: [INSTANCE_NAME],
+            secret: { key: WORKER_TEST_KEY },
+          },
+        });
+        const exported = await pauseSetup.read<{
+          version: number;
+          bindings: { general: { config: { worker_instances: string[] } } };
+        }>(["project", "binding", "export", pauseSetup.project_id]);
+        exported.bindings.general.config.worker_instances = [INSTANCE_NAME];
+        await pauseSetup.write(
+          ["project", "binding", "apply", pauseSetup.project_id],
+          exported,
+        );
+        const root = temporary(t);
+        const worker = new Worker({
+          env: {
+            ...process.env,
+            HOME: root,
+            XDG_CONFIG_HOME: join(root, "config"),
+            XDG_DATA_HOME: join(root, "data"),
+            XDG_STATE_HOME: join(root, "state"),
+            KANTHORD_WORKER_CONFIG: created.instance_configuration,
+          },
+          connectionName: "host-a",
+          heartbeatIntervalMs: FAST_HEARTBEAT_MS,
+          modelRuntimeFactory: scriptedModelRuntime(provider),
+          repositoryTransport: pauseSetup.transport,
+          log: () => {},
+        });
+        const running = worker.run();
+        stopAfter(t, async () => {
+          await worker.stop();
+          await running;
+        });
+        await entered.promise;
+        const mission = await pauseSetup.read<{ version: number }>([
+          "mission",
+          "get",
+          pauseSetup.project_id,
+        ]);
+        const before = await pauseSetup.read<{
+          state: NodeState;
+          attempt: number;
+        }>(["mission", "node", "get", pauseSetup.node_id]);
+        const paused = await pauseSetup.write<{ node: { state: NodeState } }>(
+          ["mission", "node", "pause", pauseSetup.node_id],
+          {
+            reason: "hold",
+            expected_mission_version: mission.version,
+            expected_state: before.state,
+            expected_attempt: before.attempt,
+          },
+        );
+        assert.equal(paused.node.state, NodeState.Paused);
+        const live = await pauseSetup.read<{ items: ExecutionRecord[] }>([
+          "scheduler",
+          "execution",
+          "list",
+          pauseSetup.project_id,
+          "--node",
+          pauseSetup.node_id,
+        ]);
+        assert.equal(live.items.length, SINGLE_ITEM);
+        assert.notEqual(live.items[0]!.claim_state, ClaimState.Finished);
+        resume.resolve();
+        for (;;) {
+          const page = await pauseSetup.read<{ items: ExecutionRecord[] }>([
+            "scheduler",
+            "execution",
+            "list",
+            pauseSetup.project_id,
+            "--node",
+            pauseSetup.node_id,
+          ]);
+          if (page.items[0]!.claim_state === ClaimState.Finished) break;
+          await delay(POLL_INTERVAL_MS, undefined, { signal: t.signal });
+        }
+        const executions = await pauseSetup.read<{
+          items: ExecutionRecord[];
+        }>([
+          "scheduler",
+          "execution",
+          "list",
+          pauseSetup.project_id,
+          "--node",
+          pauseSetup.node_id,
+        ]);
+        const claim = executions.items[0]!;
+        assert.equal(claim.stop?.reason, HUMAN_PAUSED);
+        assert.equal(claim.stop?.code, null);
+        const branch = `refs/heads/kanthord/${pauseSetup.node_id}`;
+        assert.equal(
+          await simpleGit(pauseSetup.bare).show([`${branch}:${STOPPED_FILE}`]),
+          HELLO,
+        );
+        const node = await pauseSetup.read<{ state: NodeState }>([
+          "mission",
+          "node",
+          "get",
+          pauseSetup.node_id,
+        ]);
+        assert.equal(node.state, NodeState.Paused);
+        assert.equal(
+          pauseSetup.fixture.worker.stopOrderOf(claim.execution_id),
           null,
         );
       },

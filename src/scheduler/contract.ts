@@ -56,6 +56,7 @@ export const ExecutionStopReason = {
   EnvironmentFailed: "environment_failed",
   InstanceArchived: "instance_archived",
   WorkerStopped: "worker_stopped",
+  HumanPaused: "human_paused",
 } as const;
 export const BudgetLimit = {
   Turns: "turns",
@@ -105,6 +106,7 @@ export const executionStopReasonSchema = z.enum(ExecutionStopReason);
 export type ExecutionStopReason = z.infer<typeof executionStopReasonSchema>;
 export const ORDERED_STOP_REASONS: readonly ExecutionStopReason[] = [
   ExecutionStopReason.InstanceArchived,
+  ExecutionStopReason.HumanPaused,
 ];
 
 function stopCodeFits(stop: {
@@ -127,7 +129,8 @@ function stopCodeFits(stop: {
   if (
     stop.reason === ExecutionStopReason.NoProgress ||
     stop.reason === ExecutionStopReason.InstanceArchived ||
-    stop.reason === ExecutionStopReason.WorkerStopped
+    stop.reason === ExecutionStopReason.WorkerStopped ||
+    stop.reason === ExecutionStopReason.HumanPaused
   )
     return stop.code === null;
   return !budgetCode && !providerCode && !environmentCode;
