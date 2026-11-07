@@ -166,8 +166,17 @@ test("a prefixed gateway answers a preflight against the unprefixed route path",
     method: "OPTIONS",
     headers,
   });
-  assert.equal(missing.status, HttpStatus.NotFound);
-  assert.equal(await errorCode(missing), ROUTE_NOT_FOUND);
+  assert.equal(missing.status, HttpStatus.NoContent);
+  assert.equal(
+    missing.headers.get("access-control-allow-origin"),
+    ALLOWED_ORIGIN,
+  );
+  const dashboard = await request(`${BASE_PATH}/assets/index-abc.js`, {
+    method: "OPTIONS",
+    headers,
+  });
+  assert.equal(dashboard.status, HttpStatus.NotFound);
+  assert.equal(await errorCode(dashboard), ROUTE_NOT_FOUND);
 });
 
 test("a prefixed gateway answers its root with the prefixed base", async (t) => {
