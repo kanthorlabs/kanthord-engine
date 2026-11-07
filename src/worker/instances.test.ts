@@ -19,7 +19,7 @@ import {
   SESSION_READS_PENDING_MAX,
   type SessionRead,
   SessionReadOutcome,
-  type StopOrder,
+  StopOrderReason,
   WORKER_SERVICE_NAME,
   WORKER_TOKEN_INFO,
   type WorkerAgentView,
@@ -2210,7 +2210,7 @@ test("the order timer logs the error of one order and still handles the next ord
 test("a second order for an execution keeps the first reason and a pending archive ends when that execution releases", async (t) => {
   const f = instanceFixture(t);
   const box = await connectedBusy(f);
-  const paused = "human_paused" as unknown as StopOrder["reason"];
+  const paused = StopOrderReason.WorkerStopped;
   f.worker().instances.queueStopOrder(
     { name: INSTANCE },
     {

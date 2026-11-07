@@ -1311,7 +1311,17 @@ export const footprintOrderSchema = z.strictObject({
 });
 export type FootprintOrder = z.infer<typeof footprintOrderSchema>;
 export const StopOrderReason = {
+  OperationFailed: "operation_failed",
+  JudgementInvalid: "judgement_invalid",
+  ReportAbsent: "report_absent",
+  ActionUnsettled: "action_unsettled",
+  AssessmentAbsent: "assessment_absent",
+  BudgetEnd: "budget_end",
+  ProviderFailed: "provider_failed",
+  NoProgress: "no_progress",
+  EnvironmentFailed: "environment_failed",
   InstanceArchived: "instance_archived",
+  WorkerStopped: "worker_stopped",
 } as const;
 export type StopOrderReason =
   (typeof StopOrderReason)[keyof typeof StopOrderReason];

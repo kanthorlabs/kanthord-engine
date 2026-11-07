@@ -196,7 +196,17 @@ components:
               reason:
                 type: string
                 enum:
+                  - operation_failed
+                  - judgement_invalid
+                  - report_absent
+                  - action_unsettled
+                  - assessment_absent
+                  - budget_end
+                  - provider_failed
+                  - no_progress
+                  - environment_failed
                   - instance_archived
+                  - worker_stopped
             required:
               - execution_id
               - reason
