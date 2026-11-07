@@ -244,6 +244,24 @@ const parentsOf = async (directory: string, commit: string) =>
     .split(" ")
     .slice(1);
 
+test("a claim refresh keeps the merge commit of the base", async (t) => {
+  const { h, web, webBare } = await fixture(t);
+  const before = web.head;
+  await advanceBase({ bare: webBare }, t, BASE_CHANGE, "web-base");
+  await h.input.transport.fetchBase(
+    web.directory,
+    "main",
+    background,
+    DEADLINE_MS,
+    sshAccessOf(h.input.sshAccess, web.binding_id),
+  );
+  assert.equal(await refreshAtClaim(h), RefreshResult.Merged);
+  const parents = await parentsOf(web.directory, web.head);
+  assert.equal(parents.length, TWO_PARENTS);
+  assert.equal(parents[0], before);
+  assert.equal(web.head, await headOf(web.directory));
+});
+
 test("a claim with upstream_branch merges the base, then the upstream, and the head has two merge commits", async (t) => {
   const { h, web, webBare } = await fixture(t);
   followUpstream(h);

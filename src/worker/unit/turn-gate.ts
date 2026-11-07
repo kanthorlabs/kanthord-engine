@@ -30,6 +30,7 @@ import {
   headCommit,
   isCommitted,
   MERGE_HEAD,
+  mergeCommitsSince,
   mergeHeadOf,
   operationsInProgress,
   quitOperations,
@@ -322,6 +323,18 @@ async function violationOf(
     return {
       code: TurnViolation.HistoryRewritten,
       detail: `The HEAD of checkout ${checkout.name} does not contain ${before}.`,
+    };
+  const foreign = (
+    await mergeCommitsSince(env, directory, before, context, remaining())
+  ).find(
+    ({ parents }) =>
+      merge === null ||
+      parents.some((parent) => parent !== before && parent !== merge.commit),
+  );
+  if (foreign !== undefined)
+    return {
+      code: TurnViolation.ForeignMerge,
+      detail: `Checkout ${checkout.name} holds merge commit ${foreign.commit}. A turn merges no branch; the worker merges the base itself.`,
     };
   const operations = (
     await operationsInProgress(env, directory, context, remaining())

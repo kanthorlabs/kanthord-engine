@@ -416,3 +416,26 @@ test("a reference accepts a SHA-1 or a SHA-256 commit and refuses another length
       false,
     );
 });
+
+test("the resolved swe@1 prompt forbids a merge of another branch and the resolved re@1 prompt blocks content outside the requirement", async () => {
+  const roleText = async (agentName: string) => {
+    const parts = await resolveAgentPrompt({
+      agent: getAgentDeclaration(agentName)!,
+      directory: null,
+      workbench: false,
+      context: background,
+    });
+    const role = await resolveReference(referenceOf(parts[1]!), readers());
+    return role.text;
+  };
+  assert.ok(
+    (await roleText("swe@1"))!.includes(
+      "**Merge no branch.** Merge, rebase or cherry-pick no other branch into the node branch. The worker merges the base branch itself.",
+    ),
+  );
+  assert.ok(
+    (await roleText("re@1"))!.includes(
+      "A change in the diff that the requirement and the tasks do not ask for is a blocker, also when a merge of another branch brings it in.",
+    ),
+  );
+});
