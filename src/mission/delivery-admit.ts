@@ -32,6 +32,7 @@ import {
   unresolvedBaseRequests,
   unresolvedRequestCount,
 } from "./delivery-match.ts";
+import { openFollowups } from "./followup-open.ts";
 import { applyEndState, changesNothing, requestContext } from "./node-check.ts";
 import { insertLinkUpdate, readEvidence } from "./record-store.ts";
 import type { Dependencies } from "./service.ts";
@@ -104,6 +105,7 @@ function prepareLinkUpdate(
 
 function commitLinkUpdate(
   tx: Transaction,
+  dependencies: Dependencies,
   input: AdmissionInput,
   checked: LinkChecked,
 ): AdmissionAnswer {
@@ -117,6 +119,14 @@ function commitLinkUpdate(
     actor_id: checked.actorId,
     occurred_at: checked.update.occurred_at,
   });
+  openFollowups(
+    tx,
+    dependencies,
+    match.mission_id,
+    match.external_link,
+    checked.actorId,
+    Date.now(),
+  );
   return ACCEPTED;
 }
 
@@ -334,7 +344,8 @@ function commitPrepared(
   prepared: Prepared,
 ): AdmissionAnswer {
   if ("disposition" in prepared) return prepared;
-  if ("update" in prepared) return commitLinkUpdate(tx, input, prepared);
+  if ("update" in prepared)
+    return commitLinkUpdate(tx, dependencies, input, prepared);
   if ("evidenceId" in prepared)
     return commitAdmission(tx, dependencies, input, prepared);
   return commitBaseAdmission(tx, dependencies, input, prepared);

@@ -83,8 +83,13 @@ import {
 } from "./control-hold.ts";
 import { blockNode, discardNode, overrideNode } from "./control-close.ts";
 import { unblockNode } from "./control-unblock.ts";
+import { decideFollowup } from "./followup-decide.ts";
 import { decideProposals } from "./proposal-decide.ts";
-import { proposalPage, requireAssessment } from "./proposal-read.ts";
+import {
+  followupPage,
+  proposalPage,
+  requireAssessment,
+} from "./proposal-read.ts";
 import { decideFinding } from "./finding-decide.ts";
 import {
   findingPage,
@@ -645,6 +650,31 @@ export class MissionService
                 humanActor(caller),
                 Date.now(),
                 ends,
+              ),
+            ),
+        ),
+    );
+    registry.register(
+      missionOperations["followup.list"],
+      ({ params, query }, caller) =>
+        caller.commit((tx) => followupPage(tx, params.project_id, query)),
+    );
+    registry.register(
+      missionOperations["followup.decide"],
+      ({ params, body }, caller) =>
+        this.commitAct(
+          Act.DecideFollowup,
+          caller,
+          { node_id: params.node_id },
+          (tx) =>
+            this.covered(tx, { node_id: params.node_id }, (tx) =>
+              decideFollowup(
+                tx,
+                this.dependencies,
+                params.node_id,
+                body,
+                humanActor(caller),
+                Date.now(),
               ),
             ),
         ),

@@ -182,6 +182,10 @@ paths:
     $ref: ./openapi/mission/finding.get.yaml#/pathItem
   /api/mission/project/{project_id}/undecided-finding:
     $ref: ./openapi/mission/finding.undecided.list.yaml#/pathItem
+  /api/mission/node/{node_id}/followup/decide:
+    $ref: ./openapi/mission/followup.decide.yaml#/pathItem
+  /api/mission/project/{project_id}/followup:
+    $ref: ./openapi/mission/followup.list.yaml#/pathItem
   /api/mission/project/{project_id}:
     $ref: ./openapi/mission/get.yaml#/pathItem
   /api/mission/{mission_id}/import:

@@ -123,6 +123,11 @@ export const missionExamples = {
     expected_mission_version: MISSION_VERSION,
     approved_proposal_ids: ["proposal_01ARZ3NDEKTSV4RRFFQ69G5FAV"],
   },
+  followupDecide: {
+    expected_mission_version: MISSION_VERSION,
+    approve: true,
+    requirement: "Describe the new requirement of the follow-up node.",
+  },
   findingDecide: {
     decision: "accepted",
     decision_reason: "Describe why the finding is a defect.",

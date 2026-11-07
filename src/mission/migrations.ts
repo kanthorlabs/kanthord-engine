@@ -109,7 +109,7 @@ const createMissionTables: Migration = (database) => {
       id TEXT NOT NULL PRIMARY KEY,
       node_id TEXT NOT NULL REFERENCES mission_node(id),
       attempt INTEGER NOT NULL,
-      assessment_id TEXT NOT NULL REFERENCES mission_assessment(id),
+      assessment_id TEXT REFERENCES mission_assessment(id),
       content TEXT NOT NULL,
       created_node_id TEXT REFERENCES mission_node(id),
       approved_at INTEGER,
