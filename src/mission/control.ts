@@ -287,7 +287,7 @@ export function controlResult(
     node.attempt === NO_ATTEMPT ? null : readAttempt(tx, nodeId, node.attempt);
   assert.ok(attempt !== null || node.attempt === NO_ATTEMPT);
   return {
-    node: nodeRecord(tx, node, dependencies.bindings),
+    node: nodeRecord(tx, node, dependencies.bindings, dependencies),
     attempt:
       attempt === null
         ? null

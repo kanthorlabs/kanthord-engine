@@ -825,6 +825,67 @@ components:
             - outcome
             - requests
           additionalProperties: false
+        paused_context:
+          type: object
+          properties:
+            rule:
+              type: string
+              enum:
+                - failure_limit
+                - further_work_limit
+                - human
+            count:
+              anyOf:
+                - type: integer
+                  minimum: 0
+                  maximum: 9007199254740991
+                - type: "null"
+            limit:
+              anyOf:
+                - type: integer
+                  minimum: 0
+                  maximum: 9007199254740991
+                - type: "null"
+            last_stop:
+              anyOf:
+                - type: object
+                  properties:
+                    execution_id:
+                      type: string
+                      minLength: 36
+                      maxLength: 36
+                      pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                      description: execution_ followed by a canonical 26-character uppercase ULID.
+                    reason:
+                      type: string
+                      minLength: 1
+                    code:
+                      anyOf:
+                        - type: string
+                          minLength: 1
+                        - type: "null"
+                    detail:
+                      anyOf:
+                        - type: string
+                          minLength: 1
+                        - type: "null"
+                    trace_id:
+                      type: string
+                      minLength: 1
+                  required:
+                    - execution_id
+                    - reason
+                    - code
+                    - detail
+                    - trace_id
+                  additionalProperties: false
+                - type: "null"
+          required:
+            - rule
+            - count
+            - limit
+            - last_stop
+          additionalProperties: false
         state:
           type: string
           enum:

@@ -22,6 +22,9 @@ import {
   NodeState,
   type Outcome,
   outcomeSchema,
+  type PausedContext,
+  type PauseFacts,
+  PauseRule,
   testedInputSchema,
   verificationSchema,
 } from "./contract.ts";
@@ -43,9 +46,11 @@ import {
 } from "./record-store.ts";
 import { type NodeRow, readNode } from "./store.ts";
 import { currencyOf } from "./currency.ts";
+import type { MissionConfig } from "./config.ts";
 
 const NO_REQUIRED_ACTIONS = 0;
 const NO_ATTEMPT = 0;
+const NO_LIMIT = 0;
 const stringSet = z.array(z.string());
 const assetContent = z.record(z.string(), z.unknown());
 
@@ -232,6 +237,48 @@ export function blockedContextOf(
         : readRequests(tx, node.id, outcome.attempt).map((row) =>
             evidenceRecord(tx, row),
           ),
+  };
+}
+
+export interface PausedDependencies {
+  pauseFacts: PauseFacts;
+  config: Pick<
+    MissionConfig,
+    "consecutive_failure_limit" | "further_work_limit"
+  >;
+}
+
+export function pausedContextOf(
+  tx: Transaction,
+  dependencies: PausedDependencies,
+  node: NodeRow,
+): PausedContext {
+  assert.equal(node.state, NodeState.Paused);
+  const facts = dependencies.pauseFacts.of(tx, node.id, node.attempt);
+  const { consecutive_failure_limit: failureLimit, further_work_limit } =
+    dependencies.config;
+  if (facts.consecutive_failures >= failureLimit)
+    return {
+      rule: PauseRule.FailureLimit,
+      count: facts.consecutive_failures,
+      limit: failureLimit,
+      last_stop: facts.last_stop,
+    };
+  if (
+    further_work_limit > NO_LIMIT &&
+    facts.consecutive_stalls >= further_work_limit
+  )
+    return {
+      rule: PauseRule.FurtherWorkLimit,
+      count: facts.consecutive_stalls,
+      limit: further_work_limit,
+      last_stop: facts.last_stop,
+    };
+  return {
+    rule: PauseRule.Human,
+    count: null,
+    limit: null,
+    last_stop: facts.last_stop,
   };
 }
 

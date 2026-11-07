@@ -114,6 +114,21 @@ export function readUnendedOfNode(
 ): ExecutionRow | null {
   return readBy(tx, "node_id", nodeId, true);
 }
+export function readLastEndedOfAttempt(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number,
+): ExecutionRow | null {
+  assert.ok(nodeId.length > NO_ROWS);
+  const row = tx.database
+    .prepare(
+      `SELECT ${COLUMNS} FROM scheduler_execution
+    WHERE node_id = ? AND attempt = ? AND ended_at IS NOT NULL
+    ORDER BY rowid DESC LIMIT 1`,
+    )
+    .get(nodeId, attempt) as StoredRow | undefined;
+  return row ? decode(row) : null;
+}
 export function readEndTimes(
   tx: Transaction,
   executionIds: readonly string[],

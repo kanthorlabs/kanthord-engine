@@ -13,6 +13,7 @@ import {
   isAdvancingStop,
   type MissionTransitions,
   type NodeTransition,
+  type PauseFactsRecord,
   type Registrations,
   type ReleaseStop,
   type RevokedExecution,
@@ -20,8 +21,10 @@ import {
 } from "./contract.ts";
 import { executionTrace } from "./telemetry.ts";
 import {
+  consecutiveStalls,
   endExecution,
   readExecution,
+  readLastEndedOfAttempt,
   readUnendedOfNode,
   readUnendedOfRuntime,
   storedStop,
@@ -211,6 +214,37 @@ export function consecutiveFailures(
   const count = previous + (endingCounts ? ENDING_FAILURE : NO_FAILURES);
   assert.ok(Number.isSafeInteger(count) && count >= NO_FAILURES);
   return count;
+}
+
+export function pauseFacts(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number,
+): PauseFactsRecord {
+  assert.ok(tx.database.isTransaction);
+  const ending = readLastEndedOfAttempt(tx, nodeId, attempt);
+  const stop = ending?.stop ?? null;
+  return {
+    consecutive_failures:
+      ending === null
+        ? NO_FAILURES
+        : consecutiveFailures(
+            tx,
+            ending,
+            ending.ended_at! >= ending.expired_at || countsFailure(stop),
+          ),
+    consecutive_stalls: consecutiveStalls(tx, nodeId, attempt),
+    last_stop:
+      ending === null || stop === null
+        ? null
+        : {
+            execution_id: ending.execution_id,
+            reason: stop.reason,
+            code: stop.code,
+            detail: stop.detail ?? null,
+            trace_id: ending.trace_id,
+          },
+  };
 }
 
 export function declareLoss(
