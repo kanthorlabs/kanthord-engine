@@ -315,6 +315,29 @@ components:
             maxLength: 31
             pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
             description: node_ followed by a canonical 26-character uppercase ULID.
+        drifts:
+          type: array
+          items:
+            type: object
+            properties:
+              node_id:
+                type: string
+                minLength: 31
+                maxLength: 31
+                pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: node_ followed by a canonical 26-character uppercase ULID.
+              filename:
+                type: string
+                pattern: ^[a-z][a-z0-9_-]*\.md$
+              visible_revision:
+                type: integer
+                exclusiveMinimum: 0
+                maximum: 9007199254740991
+            required:
+              - node_id
+              - filename
+              - visible_revision
+            additionalProperties: false
         violations:
           type: array
           items:
@@ -356,5 +379,6 @@ components:
         - retirements
         - removed_edges
         - no_ops
+        - drifts
         - violations
       additionalProperties: false
