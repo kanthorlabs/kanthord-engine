@@ -234,6 +234,20 @@ export function routeOpenFixFindings(
     .run(route, nodeId, FindingRoute.Fix, nodeId, attempt);
 }
 
+export function routeFindingsByLabel(
+  tx: Transaction,
+  assessmentId: string,
+  labels: readonly string[],
+  from: FindingRoute,
+  to: FindingRoute,
+): void {
+  assert.ok(tx.database.isTransaction);
+  const statement = tx.database.prepare(
+    "UPDATE mission_finding SET route = ? WHERE assessment_id = ? AND label = ? AND route = ? AND decision IS NULL",
+  );
+  for (const label of labels) statement.run(to, assessmentId, label, from);
+}
+
 export function updateFindingReport(
   tx: Transaction,
   id: string,

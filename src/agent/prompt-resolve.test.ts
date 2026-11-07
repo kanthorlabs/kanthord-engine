@@ -14,6 +14,7 @@ import {
   PromptPartState,
   type PromptReference,
   promptReferenceSchema,
+  PromptTemplate,
 } from "./contract.ts";
 import { WORKBENCH_PROMPT } from "./prompt-assets.ts";
 import { digest } from "./prompt-composer.ts";
@@ -31,6 +32,7 @@ import {
   resolveReference,
 } from "./prompt-resolve.ts";
 import {
+  renderTemplate,
   resolveTemplateSet,
   SHIPPED_TEMPLATE_SET,
 } from "./prompt-templates.ts";
@@ -437,5 +439,36 @@ test("the resolved swe@1 prompt forbids a merge of another branch and the resolv
     (await roleText("re@1"))!.includes(
       "A change in the diff that the requirement and the tasks do not ask for is a blocker, also when a merge of another branch brings it in.",
     ),
+  );
+});
+
+test("the examine evaluation prompt asks for finding_labels and the other evaluation prompt does not", () => {
+  const values = {
+    tasks: [],
+    tested_input: null,
+    results: [],
+    evidence: null,
+    dependencies: null,
+    affected: null,
+    marker: "kanthord-judgement:",
+    round: { number: 1, review_base: null },
+    prior_findings: [],
+  };
+  const examine = renderTemplate(
+    SHIPPED_TEMPLATE_SET.templates,
+    PromptTemplate.Evaluation,
+    { ...values, examine: true },
+  );
+  assert.ok(
+    examine.includes(
+      "Put in finding_labels the label of each blocker that the proposal fixes. Name each blocker in at most one proposal.",
+    ),
+  );
+  assert.ok(examine.includes('"finding_labels": ["B1"]'));
+  assert.ok(
+    !renderTemplate(SHIPPED_TEMPLATE_SET.templates, PromptTemplate.Evaluation, {
+      ...values,
+      examine: false,
+    }).includes("finding_labels"),
   );
 });

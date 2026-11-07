@@ -634,6 +634,13 @@ Follow these steps. Each step names the fields to read.
   The submit refuses with 400 `gateway.request.validation_failed` and an issue at `findings` a bad label, a duplicate label, a blocker with `action: no` or with no ground, a suggestion with a ground, an unknown `task_id`, a blank or oversized text, more than 100 items, and a `success` with a blocker.
   It refuses with an issue at `fixed_finding_ids` a duplicate identity, an identity that names no open finding of the attempt with the route `fix`, and a `success` that leaves out an open blocker of the attempt.
   Only a current assessment writes `fixed_assessment_id` and changes the route of an earlier finding. A non-current assessment stores each of its findings with the route `record`.
+- A fix-node proposal of an `examine` node names in `finding_labels` the blockers of the same submit that it fixes.
+  `finding_labels` is a list of labels and defaults to `[]`.
+  The submit refuses with an issue at `proposals.<i>.finding_labels` a label that names no blocker of the same submit, a duplicate label inside one proposal, and a label that two proposals name.
+  A blocker that a proposal names gets the route `record`, so it waits for no human beside the proposal.
+  A blocker that no proposal names keeps its route.
+  An approval of the proposal keeps the route `record`.
+  A rejection of the proposal moves each linked blocker that holds no decision to the route `report`. A rejection is a proposal that a decision leaves out, an unblock, an override or a discard.
 - A review verification that fails and passes on a rerun at the same commit passes.
   The review keeps the passing result and records one suggestion `Flaky verification` with action `no`, which names each flaky command and the output of its failed run.
   A verification that fails on every rerun fails the review at the stage `verification`.

@@ -259,6 +259,12 @@ test("failed and unrun rationale names the command and cause", () => {
     /A defect inside a completed implement dependency gets one proposal with dependency_id, name, requirement, criterion and one task, and proposals replace criterion-not-met for such defects\./,
   );
   assert.match(examineEvaluation, /"proposals": \[\{"dependency_id"/);
+  assert.match(examineEvaluation, /"finding_labels": \["B1"\]/);
+  assert.match(
+    examineEvaluation,
+    /Put in finding_labels the label of each blocker that the proposal fixes\. Name each blocker in at most one proposal\./,
+  );
+  assert.doesNotMatch(instruction, /finding_labels/);
   assert.match(instruction, /distinct criterion/);
   assert.match(
     instruction,
@@ -1022,5 +1028,35 @@ test("the criterion revision lists each open finding with its id and asks for an
       `- ${PRIOR_BLOCKER_ID} (B1, round 1) name B1: defect B1 fix: fix B1 why: why B1`,
       `- ${PRIOR_SUGGESTION_ID} (S1, round 2) name S1: defect S1 fix: fix S1 why: why S1`,
     ].join("\n"),
+  );
+});
+
+test("a proposal parses finding_labels and reads [] when the field is absent", () => {
+  const proposal = {
+    dependency_id: "node_x",
+    name: "Fix",
+    requirement: "Repair",
+    criterion: "Repaired",
+    task: {
+      name: "Task",
+      requirement: "Change",
+      criterion: "Done",
+      verifications: ["command"],
+    },
+  };
+  const reply = (value: unknown) =>
+    parseJudgement(
+      `kanthord-judgement: ${JSON.stringify({
+        result: "criterion-not-met",
+        rationale: "r",
+        proposals: [value],
+      })}`,
+      evaluationJudgementSchema,
+    ).reply;
+  assert.deepEqual(reply(proposal)?.proposals[0]?.finding_labels, []);
+  assert.deepEqual(
+    reply({ ...proposal, finding_labels: ["B1", "B2"] })?.proposals[0]
+      ?.finding_labels,
+    ["B1", "B2"],
   );
 });
