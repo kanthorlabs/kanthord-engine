@@ -58,6 +58,7 @@ const NO_CREDENTIALS = 0;
 const ONE_ROW = 1;
 const KEPT_METADATA = { note: "kept" };
 const VERSION_STEP = 1;
+const INSTANCE_START_VERSION = CLOCK_START + CLOCK_START;
 const OAUTH_SECRET = {
   refresh: "private-refresh-token",
   access: "private-access-token",
@@ -375,7 +376,10 @@ test("an instance login in copy_code mode runs on the instance, takes the code t
     { code: Code.InvalidInput },
   );
   assert.equal(f.rows().length, NO_CREDENTIALS);
-  assert.equal(f.component.credentialVersionOf(INSTANCE), CLOCK_START);
+  assert.equal(
+    f.component.credentialVersionOf(INSTANCE),
+    INSTANCE_START_VERSION,
+  );
   const sealed = await f.sealFor(Platform.AnthropicSubscription);
   f.report(entry.session_id, {
     state: InstanceLoginState.Completed,
@@ -389,7 +393,7 @@ test("an instance login in copy_code mode runs on the instance, takes the code t
   assert.deepEqual(f.component.loginSessionsOf(INSTANCE), []);
   assert.equal(
     f.component.credentialVersionOf(INSTANCE),
-    CLOCK_START + VERSION_STEP,
+    INSTANCE_START_VERSION + VERSION_STEP,
   );
   const [row] = f.rows();
   assert.ok(row);
@@ -783,7 +787,9 @@ test("only the runner reports a machine login, the status answer holds no holder
     "session_id",
     "state",
   ]);
-  const version = f.component.credentialVersionOf(MACHINE);
+  const versions = [INSTANCE, OTHER_INSTANCE].map((instance) =>
+    f.component.credentialVersionOf(instance),
+  );
   f.report(
     entry.session_id,
     {
@@ -799,9 +805,11 @@ test("only the runner reports a machine login, the status answer holds no holder
     f.loginStatus(entry.session_id).state,
     LoginSessionState.Completed,
   );
-  assert.equal(
-    f.component.credentialVersionOf(MACHINE),
-    version + VERSION_STEP,
+  assert.deepEqual(
+    [INSTANCE, OTHER_INSTANCE].map((instance) =>
+      f.component.credentialVersionOf(instance),
+    ),
+    versions.map((version) => version + VERSION_STEP),
   );
   assert.deepEqual(f.component.loginSessionsOf(OTHER_INSTANCE), []);
 });

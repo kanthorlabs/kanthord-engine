@@ -21,10 +21,10 @@ export interface InstanceOperationDependencies {
     tx: Transaction,
     row: RegistrationRow,
   ) => typeof registrationRecordSchema._output;
-  heldCopies: (
+  usedCopies: (
     tx: Transaction,
-    holder: string,
-  ) => (Omit<HeldCopy, "holder"> & { health: CopyHealth })[];
+    instanceName: string,
+  ) => (HeldCopy & { health: CopyHealth })[];
 }
 
 function dropEnded(clock: HeartbeatClock, ended: readonly string[]): void {
@@ -36,7 +36,7 @@ function declareHumanReads(
   {
     instances,
     registrationRecordOf,
-    heldCopies,
+    usedCopies,
   }: InstanceOperationDependencies,
 ): void {
   registry.register(instanceOperations["instance.list"], ({ query }, caller) =>
@@ -55,7 +55,7 @@ function declareHumanReads(
         registrations: instances
           .liveRegistrationsOf(tx, record.name)
           .map((row) => registrationRecordOf(tx, row)),
-        credentials: heldCopies(tx, record.name),
+        credentials: usedCopies(tx, record.name),
       };
     }),
   );

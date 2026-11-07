@@ -258,6 +258,7 @@ export interface Dependencies {
   instanceCopies?: {
     archiveHeld(tx: Transaction, holder: string, now: number): void;
     heldCopies(tx: Transaction, holder: string): HeldCopy[];
+    usedCopies(tx: Transaction, instanceName: string): HeldCopy[];
   };
   loginSessionsOf?: (holder: string) => LoginSessionEntry[];
   credentialVersionOf?: (holder: string) => number;
@@ -359,6 +360,16 @@ export class WorkerService implements Service {
       workerBindingId,
       this.claimantHolder(tx, runtimeIdentity),
     );
+  }
+  private withHealth(
+    copies: HeldCopy[],
+  ): Array<HeldCopy & { health: CopyHealth }> {
+    return copies.map((copy) => ({
+      ...copy,
+      health:
+        this.dependencies.copyHealthOf?.(copy.holder, copy) ??
+        unreportedHealth(copy.platform),
+    }));
   }
   claimantHolder(tx: Transaction, runtimeIdentity: string): string {
     return claimantOf(tx, runtimeIdentity);
@@ -493,6 +504,10 @@ export class WorkerService implements Service {
     this.machines = new WorkerMachines({
       archiveHeld: (tx, holder, now) =>
         dependencies.instanceCopies?.archiveHeld(tx, holder, now),
+      heldCopies: (tx, machine) =>
+        this.withHealth(
+          dependencies.instanceCopies?.heldCopies(tx, machine) ?? [],
+        ),
       connectionOf: (instanceId) => this.instances.connectionOf(instanceId),
     });
     this.instances = new WorkerInstances({
@@ -1579,17 +1594,9 @@ export class WorkerService implements Service {
       instancesChanged: () => this.instancesChanged(),
       registrationRecordOf: (tx, row) =>
         registrationRecord(tx, this.recordDependencies(), row, Date.now()),
-      heldCopies: (tx, holder) =>
-        (this.dependencies.instanceCopies?.heldCopies(tx, holder) ?? []).map(
-          (copy) => ({
-            name: copy.name,
-            revision: copy.revision,
-            platform: copy.platform,
-            sealed_current: copy.sealed_current,
-            health:
-              this.dependencies.copyHealthOf?.(holder, copy) ??
-              unreportedHealth(copy.platform),
-          }),
+      usedCopies: (tx, instanceName) =>
+        this.withHealth(
+          this.dependencies.instanceCopies?.usedCopies(tx, instanceName) ?? [],
         ),
     });
     declareMachines(registry, { machines: this.machines });

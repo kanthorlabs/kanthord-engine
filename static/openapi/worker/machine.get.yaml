@@ -5,7 +5,8 @@ pathItem:
     tags:
       - worker
     description: Read the live or latest revision of a worker machine with its live
-      instances and the connection of each instance.
+      instances, the connection of each instance and its live credential copies,
+      each with the last health report of the copy.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: false
@@ -197,6 +198,113 @@ components:
               - ended_at
               - connection
             additionalProperties: false
+        credentials:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                minLength: 1
+              holder:
+                type: string
+                minLength: 1
+              revision:
+                type: integer
+                exclusiveMinimum: 0
+                maximum: 9007199254740991
+              platform:
+                type: string
+                minLength: 1
+              sealed_current:
+                type: boolean
+              health:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum:
+                      - healthy
+                      - unhealthy
+                      - unknown
+                  capability:
+                    type: string
+                    minLength: 1
+                  failure_reason:
+                    anyOf:
+                      - type: string
+                        enum:
+                          - host_key_unknown
+                          - key_refused
+                          - repository_not_found
+                          - host_unreachable
+                          - address_invalid
+                          - unauthorized
+                          - forbidden
+                          - rate_limited
+                          - unreachable
+                          - invalid_response
+                          - host_key_changed
+                          - identity_unavailable
+                          - held_by_instance
+                          - deadline_exceeded
+                          - unclassified
+                      - type: "null"
+                  models:
+                    anyOf:
+                      - maxItems: 512
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                              minLength: 1
+                              maxLength: 256
+                            owned_by:
+                              anyOf:
+                                - type: string
+                                  maxLength: 256
+                                - type: "null"
+                            created:
+                              anyOf:
+                                - type: integer
+                                  minimum: -9007199254740991
+                                  maximum: 9007199254740991
+                                - type: "null"
+                          required:
+                            - id
+                            - owned_by
+                            - created
+                          additionalProperties: false
+                      - type: "null"
+                  reported_at:
+                    anyOf:
+                      - type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      - type: "null"
+                  reported_by:
+                    anyOf:
+                      - type: string
+                        minLength: 1
+                      - type: "null"
+                required:
+                  - status
+                  - capability
+                  - failure_reason
+                  - models
+                  - reported_at
+                  - reported_by
+                additionalProperties: false
+            required:
+              - name
+              - holder
+              - revision
+              - platform
+              - sealed_current
+              - health
+            additionalProperties: false
       required:
         - id
         - name
@@ -206,4 +314,5 @@ components:
         - created_at
         - ended_at
         - instances
+        - credentials
       additionalProperties: false

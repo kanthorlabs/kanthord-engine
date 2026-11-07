@@ -179,6 +179,7 @@ export const copyHealthSchema = z.strictObject({
   failure_reason: resourceFailureReasonSchema,
   models: reportedModelsSchema,
   reported_at: z.number().int().nullable(),
+  reported_by: z.string().min(1).nullable(),
 });
 export type CopyHealth = z.infer<typeof copyHealthSchema>;
 export const modelCheckBodySchema = z.strictObject({

@@ -894,6 +894,7 @@ export function composeServices(options: {
         custody.archiveHeld(tx, holder, now);
       },
       heldCopies: (tx, holder) => custody.heldCopies(tx, holder),
+      usedCopies: (tx, instanceName) => custody.usedCopies(tx, instanceName),
     },
     handoverRefreshWaitMs: options.handoverRefreshWaitMs,
     sessionReadWaitMs: SESSION_READ_WAIT_MS,

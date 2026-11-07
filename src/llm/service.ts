@@ -209,7 +209,9 @@ export class LlmComponent implements Service {
         anthropicProvider(),
       ]);
     this.now = dependencies.now ?? Date.now;
-    this.copyHealth = new CopyHealthBook(this.now());
+    this.copyHealth = new CopyHealthBook(this.now(), (instance) =>
+      this.store.transaction((tx) => this.instanceKeys.machineOf(tx, instance)),
+    );
     this.agentProvidersDependentOn = dependencies.agentProvidersDependentOn;
     this.enablementsDependentOnModel = dependencies.enablementsDependentOnModel;
     this.loadModelRuntime = dependencies.loadModelRuntime;
@@ -401,12 +403,10 @@ export class LlmComponent implements Service {
     const report = input.body;
     if (reportInvalid(report)) throw invalidInput();
     let holder = SERVER_HOLDER;
+    let reporter = SERVER_HOLDER;
     caller.commit((tx) => {
-      holder = this.records.copyHolderOf(
-        tx,
-        name,
-        this.callerHolder(tx, caller),
-      );
+      reporter = this.callerHolder(tx, caller);
+      holder = this.records.copyHolderOf(tx, name, reporter);
       const copy = this.records.heldCopy(tx, this.platformSet, name, holder);
       if (!copy?.sealed_current)
         throw new OperationError(
@@ -428,7 +428,7 @@ export class LlmComponent implements Service {
         throw invalidInput();
       return null;
     });
-    this.copyHealth.record(holder, name, report, this.now());
+    this.copyHealth.record(holder, name, report, this.now(), reporter);
     this.logger.info(
       {
         credential_name: name,
