@@ -30,6 +30,8 @@ const LAST_ITEM_OFFSET = 1;
 const CURSOR_SEPARATOR = ":";
 const NO_ACTORS = 0;
 const NO_ROWS = 0;
+const NO_TRUSTED_LINKS = 0;
+const SEPARATOR_LENGTH = 1;
 
 interface TrustedLink {
   external_link: string;
@@ -72,7 +74,7 @@ function cursorOf(cursor: string): { occurred_at: number; id: string } {
   const value = decode(cursor);
   const separator = value.indexOf(CURSOR_SEPARATOR);
   const occurredAt = Number(value.slice(FIRST_INDEX, separator));
-  const id = value.slice(separator + PAGINATION_LOOKAHEAD);
+  const id = value.slice(separator + SEPARATOR_LENGTH);
   if (
     separator < FIRST_INDEX ||
     !Number.isSafeInteger(occurredAt) ||
@@ -103,7 +105,7 @@ function readLinkUpdates(
   page: LinkUpdatePage,
 ): LinkUpdateRows {
   const trusted = trustedLinksOf(tx, bindings, revision);
-  if (trusted.length === NO_ACTORS)
+  if (trusted.length === NO_TRUSTED_LINKS)
     return { items: [], next_cursor: null, total: NO_ROWS };
   const trust = trusted
     .map(
