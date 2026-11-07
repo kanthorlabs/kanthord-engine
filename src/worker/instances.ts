@@ -55,6 +55,7 @@ import {
   fingerprintTaken,
   insertInstance,
   listInstances,
+  nameTaken,
   readArchivedServerInstanceNames,
   readInstanceById,
   readLatestInstance,
@@ -63,6 +64,7 @@ import {
   readLiveServerInstances,
   revisionIdsOf,
 } from "./instance-rows.ts";
+import { readLiveMachine } from "./machine-rows.ts";
 import {
   endOfInstances,
   readLiveOfInstances,
@@ -224,6 +226,35 @@ function refuseName(name: string): void {
     );
 }
 
+function machineInvalid(message: string): OperationError {
+  return new OperationError(
+    HttpStatus.BadRequest,
+    WorkerErrorCode.InstanceMachineInvalid,
+    message,
+  );
+}
+
+function refuseMachineAt(
+  placement: InstancePlacement,
+  machine: string | undefined,
+): void {
+  if (placement !== InstancePlacement.Worker && machine !== undefined)
+    throw machineInvalid("A server or container instance takes no machine.");
+}
+
+function liveMachineOf(
+  tx: Transaction,
+  placement: InstancePlacement,
+  machine: string | undefined,
+): string | null {
+  if (placement !== InstancePlacement.Worker) return null;
+  if (machine === undefined || !readLiveMachine(tx, machine))
+    throw machineInvalid(
+      "A worker instance names a live worker machine in machine.",
+    );
+  return machine;
+}
+
 function refuseWorker(worker: string): void {
   if (getWorkerDeclaration(worker)?.host !== WorkerHost.Kanthord)
     throw new OperationError(
@@ -254,7 +285,7 @@ async function prepareKey(input: InstanceKeyInput): Promise<PreparedKey> {
   };
 }
 
-function decodeCursor(cursor: string): string {
+export function decodeCursor(cursor: string): string {
   const decoded = Buffer.from(cursor, BASE64URL).toString(UTF8);
   if (
     !CURSOR_PATTERN.test(cursor) ||
@@ -416,6 +447,22 @@ export class WorkerInstances implements WorkerInstanceLookups {
     );
   }
 
+  connectedAmong(records: readonly InstanceRecord[]): InstanceRecord[] {
+    return records
+      .flatMap((record) => {
+        const connection = this.connectionOf(record.id);
+        return connection
+          ? [{ record, heartbeat: connection.last_heartbeat_at }]
+          : [];
+      })
+      .sort(
+        (left, right) =>
+          right.heartbeat - left.heartbeat ||
+          left.record.name.localeCompare(right.record.name),
+      )
+      .map(({ record }) => record);
+  }
+
   dropConnection(instanceId: string): void {
     this.connections.delete(instanceId);
   }
@@ -440,25 +487,33 @@ export class WorkerInstances implements WorkerInstanceLookups {
       name: string;
       worker: string;
       placement?: string;
+      machine?: string;
     },
   ): Promise<InstanceRecord & { instance_configuration?: string }> {
     refuseName(input.name);
     refuseWorker(input.worker);
     const placement = refusePlacement(input.placement);
+    refuseMachineAt(placement, input.machine);
     const key = await this.prepareKeyAt(placement, input);
     await this.refuseUnavailableRuntime(placement);
     try {
       return commit((tx) => {
-        if (readLatestInstance(tx, input.name))
+        if (nameTaken(tx, input.name))
           throw new OperationError(
             HttpStatus.Conflict,
             WorkerErrorCode.InstanceNameConflict,
-            "The instance name is taken by a live or an archived instance.",
+            "The instance name is taken by a live or an archived instance or machine.",
           );
+        const machine = liveMachineOf(tx, placement, input.machine);
         if (placement !== InstancePlacement.Worker) this.refuseServerLimit(tx);
         const record = this.insertKey(
           tx,
-          { name: input.name, worker: input.worker, placement },
+          {
+            name: input.name,
+            worker: input.worker,
+            placement,
+            machine,
+          },
           key,
           null,
         );
@@ -536,7 +591,12 @@ export class WorkerInstances implements WorkerInstanceLookups {
         const registrations = endOfInstances(tx, [live.id], now);
         const record = this.insertKey(
           tx,
-          { name: live.name, worker: live.worker, placement: live.placement },
+          {
+            name: live.name,
+            worker: live.worker,
+            placement: live.placement,
+            machine: live.machine,
+          },
           key,
           live,
         );
@@ -760,6 +820,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
     binding_version: number;
     credential_version: number;
     work_version: number;
+    machine: string | null;
   } {
     if (!this.holdConnection(instanceId, connectionId, connectionName))
       throw superseded(this.connections.get(instanceId));
@@ -769,6 +830,9 @@ export class WorkerInstances implements WorkerInstanceLookups {
       binding_version: this.bindingVersionOf(name),
       credential_version: this.dependencies.credentialVersionOf(name),
       work_version: this.workVersionOf(name),
+      machine:
+        readLiveInstanceById(this.dependencies.store, instanceId)?.machine ??
+        null,
     };
   }
 
@@ -961,7 +1025,12 @@ export class WorkerInstances implements WorkerInstanceLookups {
 
   private insertKey(
     tx: Transaction,
-    instance: { name: string; worker: string; placement: InstancePlacement },
+    instance: {
+      name: string;
+      worker: string;
+      placement: InstancePlacement;
+      machine?: string | null;
+    },
     key: PreparedKey | null,
     previous: InstanceRecord | null,
   ): InstanceRecord {
@@ -970,7 +1039,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
       throw new OperationError(
         HttpStatus.Conflict,
         WorkerErrorCode.InstanceKeyConflict,
-        "An instance revision holds this key.",
+        "An instance or a machine revision holds this key.",
       );
     return insertInstance(
       tx,

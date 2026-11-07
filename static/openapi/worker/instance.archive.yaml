@@ -114,6 +114,11 @@ components:
             - server
             - container
             - worker
+        machine:
+          anyOf:
+            - type: string
+              minLength: 1
+            - type: "null"
         public_key:
           anyOf:
             - type: string
@@ -143,6 +148,7 @@ components:
         - worker
         - revision
         - placement
+        - machine
         - public_key
         - fingerprint
         - created_at

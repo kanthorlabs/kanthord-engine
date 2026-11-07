@@ -63,8 +63,9 @@ export async function spawnKanthord(
   args: string[],
   env: NodeJS.ProcessEnv,
   signal: AbortSignal,
+  input?: string,
 ): Promise<CliResult> {
-  return (await cliTestSupport()).spawnKanthord(args, env, signal);
+  return (await cliTestSupport()).spawnKanthord(args, env, signal, input);
 }
 
 export async function kanthordTerminal(

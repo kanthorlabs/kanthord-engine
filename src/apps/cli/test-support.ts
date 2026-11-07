@@ -151,12 +151,13 @@ export function spawnKanthord(
   args: string[],
   env: NodeJS.ProcessEnv,
   signal: AbortSignal,
+  input?: string,
 ): Promise<CliResult> {
   assert.ok(args.length > EMPTY_ARGUMENT_COUNT);
   assert.ok(env.XDG_CONFIG_HOME);
   const entry = new URL("../../main.ts", import.meta.url).href;
   return new Promise<CliResult>((resolve, reject) => {
-    execFile(
+    const child = execFile(
       process.execPath,
       [
         "--input-type=module",
@@ -174,6 +175,7 @@ export function spawnKanthord(
         });
       },
     );
+    if (input !== undefined) child.stdin?.end(input);
   });
 }
 

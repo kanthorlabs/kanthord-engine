@@ -958,12 +958,22 @@ export const WorkerErrorCode = {
   InstancePlacementUnavailable: "worker.instance.placement_unavailable",
   InstanceServerLimit: "worker.instance.server_limit",
   InstancePlacementUnsupported: "worker.instance.placement_unsupported",
+  InstanceMachineInvalid: "worker.instance.machine_invalid",
+  MachineNameInvalid: "worker.machine.name_invalid",
+  MachineKeyInvalid: "worker.machine.key_invalid",
+  MachineNotFound: "worker.machine.not_found",
+  MachineNameConflict: "worker.machine.name_conflict",
+  MachineKeyConflict: "worker.machine.key_conflict",
+  MachineRevisionConflict: "worker.machine.revision_conflict",
+  MachineArchived: "worker.machine.archived",
+  MachineInUse: "worker.machine.in_use",
   SessionReadNotFound: "worker.session_read.not_found",
   FootprintOrderUnknown: "worker.footprint.order_unknown",
   FootprintOrdersFull: "worker.footprint.orders_full",
 } as const;
 
 export const WORKER_INSTANCE_ID_PREFIX = "worker_instance";
+export const WORKER_MACHINE_ID_PREFIX = "worker_machine";
 export const CONNECTION_ID_PREFIX = "connection";
 export const RESERVED_INSTANCE_NAMES: readonly string[] = [
   "server",
@@ -985,6 +995,7 @@ export const BindingEntryState = {
 export type BindingEntryState =
   (typeof BindingEntryState)[keyof typeof BindingEntryState];
 export const instanceIdSchema = identitySchema(WORKER_INSTANCE_ID_PREFIX);
+export const machineIdSchema = identitySchema(WORKER_MACHINE_ID_PREFIX);
 export const connectionIdSchema = identitySchema(CONNECTION_ID_PREFIX);
 export const instanceNameSchema = z
   .string()
@@ -998,12 +1009,23 @@ export const instanceRecordSchema = z.strictObject({
   worker: z.string().min(1),
   revision: z.number().int().positive(),
   placement: z.enum(InstancePlacement),
+  machine: z.string().min(1).nullable(),
   public_key: base64urlSchema.nullable(),
   fingerprint: z.string().min(1).nullable(),
   created_at: timestamp,
   ended_at: timestamp.nullable(),
 });
 export type InstanceRecord = z.infer<typeof instanceRecordSchema>;
+export const machineRecordSchema = z.strictObject({
+  id: machineIdSchema,
+  name: z.string().min(1),
+  revision: z.number().int().positive(),
+  public_key: base64urlSchema,
+  fingerprint: z.string().min(1),
+  created_at: timestamp,
+  ended_at: timestamp.nullable(),
+});
+export type MachineRecord = z.infer<typeof machineRecordSchema>;
 export const instanceConnectionSchema = z
   .strictObject({
     connection_name: z.string(),
@@ -1021,6 +1043,18 @@ export const instanceConfigurationSchema = z.strictObject({
 export type InstanceConfiguration = z.infer<typeof instanceConfigurationSchema>;
 export function instanceConfigurationValue(
   configuration: InstanceConfiguration,
+): string {
+  return Buffer.from(canonicalJSON(configuration), "utf8").toString(
+    "base64url",
+  );
+}
+export const machineConfigurationSchema = z.strictObject({
+  name: instanceNameSchema,
+  private_key: base64urlSchema,
+});
+export type MachineConfiguration = z.infer<typeof machineConfigurationSchema>;
+export function machineConfigurationValue(
+  configuration: MachineConfiguration,
 ): string {
   return Buffer.from(canonicalJSON(configuration), "utf8").toString(
     "base64url",
@@ -1335,6 +1369,12 @@ export const instanceOperations = {
           .describe(
             "server, container or worker; required. A server or container instance takes neither public_key nor endpoint.",
           ),
+        machine: z
+          .string()
+          .optional()
+          .describe(
+            "Name of the live worker machine; required at the worker placement, refused at the server and container placements.",
+          ),
         ...instanceKeyFields,
       }),
     }),
@@ -1515,9 +1555,10 @@ export const instanceOperations = {
       binding_version: z.number().int().min(0),
       credential_version: z.number().int().min(0),
       work_version: z.number().int().min(0),
+      machine: z.string().min(1).nullable(),
     }),
     description:
-      "Renew the current connection of the instance and answer the server version, the binding version, the credential version and the work version.",
+      "Renew the current connection of the instance and answer the server version, the binding version, the credential version, the work version and the machine of the instance.",
   },
   "instance.work": {
     ...instanceOperation,
@@ -1565,8 +1606,136 @@ export const instanceOperations = {
   },
 } as const satisfies Record<string, Operation>;
 
+const machineParams = z.strictObject({ machine_name: z.string().min(1) });
+const machineKeyField = {
+  public_key: z
+    .string()
+    .optional()
+    .describe(
+      "base64url X25519 public key; without it the server generates the key pair.",
+    ),
+};
+const machineWriteAnswer = machineRecordSchema.extend({
+  machine_configuration: z
+    .string()
+    .optional()
+    .describe(
+      "Machine configuration, answered once when the server generates the key pair.",
+    ),
+});
+export const machineOperations = {
+  "machine.create": {
+    ...humanOperation,
+    id: "worker.machine.create",
+    body: true,
+    method: HttpMethod.Post,
+    path: "/api/worker/machine",
+    mutation: true,
+    secret: true,
+    input: z.strictObject({
+      params: emptyFields,
+      query: emptyFields,
+      body: z.strictObject({
+        name: z.string(),
+        ...machineKeyField,
+      }),
+    }),
+    output: machineWriteAnswer,
+    description:
+      "Register a worker machine, the credential holder of the instances of one computer. Without public_key, the server generates the key pair, keeps only the public key and answers the machine configuration once.",
+  },
+  "machine.list": {
+    ...humanOperation,
+    id: "worker.machine.list",
+    method: HttpMethod.Get,
+    path: "/api/worker/machine",
+    mutation: false,
+    input: z.strictObject({
+      params: emptyFields,
+      query: z.strictObject({
+        limit: z.coerce
+          .number()
+          .int()
+          .min(1)
+          .max(LIST_LIMIT_MAX)
+          .default(LIST_LIMIT_DEFAULT),
+        cursor: z.string().min(1).optional(),
+      }),
+      body: z.null(),
+    }),
+    output: z.strictObject({
+      items: z.array(
+        machineRecordSchema.extend({
+          instance_count: z.number().int().min(0),
+        }),
+      ),
+      next_cursor: z.string().nullable(),
+    }),
+    description:
+      "Page the live worker machines in ascending name order with the count of live instances that name each machine.",
+  },
+  "machine.get": {
+    ...humanOperation,
+    id: "worker.machine.get",
+    method: HttpMethod.Get,
+    path: "/api/worker/machine/:machine_name",
+    mutation: false,
+    input: z.strictObject({
+      params: machineParams,
+      query: emptyFields,
+      body: z.null(),
+    }),
+    output: machineRecordSchema.extend({
+      instances: z.array(
+        instanceRecordSchema.extend({ connection: instanceConnectionSchema }),
+      ),
+    }),
+    description:
+      "Read the live or latest revision of a worker machine with its live instances and the connection of each instance.",
+  },
+  "machine.rotate": {
+    ...humanOperation,
+    id: "worker.machine.rotate",
+    body: true,
+    method: HttpMethod.Post,
+    path: "/api/worker/machine/:machine_name/revision",
+    mutation: true,
+    secret: true,
+    input: z.strictObject({
+      params: machineParams,
+      query: emptyFields,
+      body: z.strictObject({
+        ...machineKeyField,
+        expected_revision: z.number().int().positive(),
+      }),
+    }),
+    output: machineWriteAnswer,
+    description:
+      "Reset the key of a worker machine: end the live revision and insert the next revision with the new key in one transaction.",
+  },
+  "machine.archive": {
+    ...humanOperation,
+    id: "worker.machine.archive",
+    body: true,
+    method: HttpMethod.Post,
+    path: "/api/worker/machine/:machine_name/archive",
+    mutation: true,
+    input: z.strictObject({
+      params: machineParams,
+      query: emptyFields,
+      body: z.strictObject({
+        expected_revision: z.number().int().positive(),
+      }),
+    }),
+    output: machineRecordSchema,
+    description:
+      "Archive a worker machine that no live instance names, and archive the credential copies that it holds.",
+  },
+} as const satisfies Record<string, Operation>;
+
 export const workerOperations = {
   ...instanceOperations,
+  ...machineOperations,
   "execution.setup.get": {
     service: WORKER_SERVICE_NAME,
     store: StoreName.Operational,

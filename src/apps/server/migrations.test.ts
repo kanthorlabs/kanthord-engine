@@ -52,7 +52,12 @@ const CUSTODY_MASTER_KEY_TABLE = "custody_master_key";
 const AGENT_ENABLEMENT_TABLE = "agent_enablement";
 const WORKER_REGISTRATION_TABLE = "worker_registration";
 const WORKER_INSTANCE_TABLE = "worker_instance";
-const ERD2_WORKER_TABLES = [WORKER_REGISTRATION_TABLE, WORKER_INSTANCE_TABLE];
+const WORKER_MACHINE_TABLE = "worker_machine";
+const ERD2_WORKER_TABLES = [
+  WORKER_REGISTRATION_TABLE,
+  WORKER_INSTANCE_TABLE,
+  WORKER_MACHINE_TABLE,
+];
 const PROJECT_PROJECT_TABLE = "project_project";
 const PROJECT_BINDING_TABLE = "project_binding";
 const SCHEDULER_JOB_TABLE = "scheduler_job";
@@ -138,6 +143,7 @@ const ALL_TABLES = [
   SCHEDULER_JOB_TABLE,
   SCHEDULER_QUEUE_PLACE_TABLE,
   WORKER_INSTANCE_TABLE,
+  WORKER_MACHINE_TABLE,
   WORKER_REGISTRATION_TABLE,
 ];
 const ALL_INDEXES = [
@@ -164,6 +170,8 @@ const ALL_INDEXES = [
   "scheduler_job_node_id",
   "worker_instance_fingerprint",
   "worker_instance_name_revision",
+  "worker_machine_fingerprint",
+  "worker_machine_name_revision",
   "worker_registration_live_client",
 ];
 
@@ -471,7 +479,7 @@ test("each service migration set applies alone to an empty store", () => {
   }
 });
 
-test("all ERD 1, ERD 2 and ERD 3 migrations produce exactly the twenty-four tables", () => {
+test("all ERD 1, ERD 2 and ERD 3 migrations produce exactly the twenty-five tables", () => {
   const allServices: Migrations = [
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
     { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },

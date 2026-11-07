@@ -55,6 +55,7 @@ type KeyOperation = (typeof KeyOperation)[keyof typeof KeyOperation];
 
 interface KeyedOptions {
   placement?: string;
+  machine?: string;
   workerEndpoint?: string;
   output?: boolean;
   force?: boolean;
@@ -199,7 +200,12 @@ async function createKeyless(
     {
       params: {},
       query: {},
-      body: { name, worker: options.worker!, placement },
+      body: {
+        name,
+        worker: options.worker!,
+        placement,
+        machine: options.machine,
+      },
     },
     { idempotencyKey: key },
   );
@@ -219,6 +225,7 @@ function create(name: string, command: Command): Promise<void> {
     name,
     worker: command.optsWithGlobals().worker,
     placement,
+    machine: command.optsWithGlobals().machine,
     public_key: publicKey,
   }));
 }
@@ -349,6 +356,11 @@ export function addWorkerInstanceCommands(worker: Command): void {
         "--placement <placement>",
         "Placement of the instance: server, container or worker (required)",
         singleUse("--placement"),
+      )
+      .option(
+        "--machine <name>",
+        "Worker machine of the instance (required at the worker placement)",
+        singleUse("--machine"),
       ),
   ).action((name: string, _options, command: Command) => create(name, command));
   instance

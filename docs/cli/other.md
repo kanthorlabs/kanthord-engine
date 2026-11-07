@@ -739,18 +739,26 @@ only, and it opens no database. It reads no server configuration and no `cli.yam
 
 No other option exists. [`worker instance create`](./worker.md#instance-create)
 or [`worker instance rotate`](./worker.md#instance-rotate) produces the instance
-configuration. Startup reads it from one of two sources:
+configuration. Startup reads it from one of two sources. The machine
+configuration of the machine of the instance is a third source:
 
-| Source                   | Form                                                                                                                                  |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `KANTHORD_WORKER_CONFIG` | The unpadded base64url encoding of the canonical JSON `{ name, endpoint, instance_id, private_key }`.                                 |
-| Instance file            | `<XDG configuration directory>/kanthord/workers/<name>.yaml` with the same four fields, written by [`worker join`](./worker.md#join). |
+| Source                    | Form                                                                                                                                                  |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `KANTHORD_WORKER_CONFIG`  | The unpadded base64url encoding of the canonical JSON `{ name, endpoint, instance_id, private_key }`.                                                 |
+| Instance file             | `<XDG configuration directory>/kanthord/workers/<name>.yaml` with the same four fields, written by [`worker join`](./worker.md#join).                 |
+| `KANTHORD_MACHINE_CONFIG` | The unpadded base64url encoding of the canonical JSON `{ name, private_key }` of the worker machine.                                                  |
+| Machine file              | `<XDG configuration directory>/kanthord/machines/<name>.yaml` with the same two fields, written by [`worker machine join`](./worker.md#machine-join). |
 
 A set variable and an existing instance file of the same name fail with
 `worker.start.instance_config_conflict`. No source fails with
 `worker.start.instance_config_absent`. An invalid configuration fails with
-`worker.instance.config_invalid`. The agent processes of the instance do not
-receive `KANTHORD_WORKER_CONFIG`, `KANTHORD_TOKEN` or `KANTHORD_ENDPOINT`.
+`worker.instance.config_invalid`. A set `KANTHORD_MACHINE_CONFIG` and an
+existing machine file of the same name fail with `worker.machine.config_conflict`.
+No machine source fails with `worker.machine.config_absent`. An invalid machine
+configuration, or one whose `name` differs from the requested machine, fails with
+`worker.machine.config_invalid`. The agent processes of the instance do not
+receive `KANTHORD_WORKER_CONFIG`, `KANTHORD_MACHINE_CONFIG`, `KANTHORD_TOKEN` or
+`KANTHORD_ENDPOINT`.
 
 The data directory of the instance is `<XDG data directory>/kanthord/workers/<name>`.
 The log directory is `<XDG state directory>/kanthord/workers/<name>`.

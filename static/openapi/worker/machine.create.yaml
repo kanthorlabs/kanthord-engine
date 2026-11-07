@@ -1,0 +1,270 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: worker.machine.create
+    tags:
+      - worker
+    description: Register a worker machine, the credential holder of the instances
+      of one computer. Without public_key, the server generates the key pair,
+      keeps only the public key and answers the machine configuration once.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/worker.machine.create.Input/properties/body"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/worker.machine.create.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+  get:
+    operationId: worker.machine.list
+    tags:
+      - worker
+    description: Page the live worker machines in ascending name order with the
+      count of live instances that name each machine.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/worker.machine.list.Input/properties/query/properti\
+            es/limit"
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/worker.machine.list.Input/properties/query/properti\
+            es/cursor"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/worker.machine.list.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    worker.machine.create.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            name:
+              type: string
+            public_key:
+              description: base64url X25519 public key; without it the server generates the
+                key pair.
+              type: string
+          required:
+            - name
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    worker.machine.create.Output:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 41
+          maxLength: 41
+          pattern: ^worker_machine_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: worker_machine_ followed by a canonical 26-character uppercase ULID.
+        name:
+          type: string
+          minLength: 1
+        revision:
+          type: integer
+          exclusiveMinimum: 0
+          maximum: 9007199254740991
+        public_key:
+          type: string
+          minLength: 1
+          pattern: ^[A-Za-z0-9_-]+$
+        fingerprint:
+          type: string
+          minLength: 1
+        created_at:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+        ended_at:
+          anyOf:
+            - type: integer
+              minimum: 0
+              maximum: 9007199254740991
+              description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+            - type: "null"
+        machine_configuration:
+          description: Machine configuration, answered once when the server generates the
+            key pair.
+          type: string
+      required:
+        - id
+        - name
+        - revision
+        - public_key
+        - fingerprint
+        - created_at
+        - ended_at
+      additionalProperties: false
+    worker.machine.list.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties:
+            limit:
+              default: 100
+              type: integer
+              minimum: 1
+              maximum: 1000
+            cursor:
+              type: string
+              minLength: 1
+          required: []
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    worker.machine.list.Output:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                minLength: 41
+                maxLength: 41
+                pattern: ^worker_machine_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: worker_machine_ followed by a canonical 26-character uppercase
+                  ULID.
+              name:
+                type: string
+                minLength: 1
+              revision:
+                type: integer
+                exclusiveMinimum: 0
+                maximum: 9007199254740991
+              public_key:
+                type: string
+                minLength: 1
+                pattern: ^[A-Za-z0-9_-]+$
+              fingerprint:
+                type: string
+                minLength: 1
+              created_at:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+                description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+              ended_at:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                    description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                  - type: "null"
+              instance_count:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+            required:
+              - id
+              - name
+              - revision
+              - public_key
+              - fingerprint
+              - created_at
+              - ended_at
+              - instance_count
+            additionalProperties: false
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+      required:
+        - items
+        - next_cursor
+      additionalProperties: false

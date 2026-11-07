@@ -10,6 +10,7 @@ import { agentChoice, agentSelectionsAt } from "./agent-selection.ts";
 import { TWO_AGENT_WORKER, twoAgentDeclarationOf } from "./test-support.ts";
 import { InstancePlacement, type WorkerEntry } from "./contract.ts";
 import { insertInstance } from "./instance-rows.ts";
+import { insertMachineFor } from "./machine-test-support.ts";
 import { workerMigrations } from "./migrations.ts";
 
 const SWE = "swe@1";
@@ -50,6 +51,10 @@ function withInstances<T>(
             name,
             worker: "coder@1",
             placement,
+            machine:
+              placement === InstancePlacement.Worker
+                ? insertMachineFor(transaction, name, 1)
+                : null,
             public_key: null,
             fingerprint: null,
           },

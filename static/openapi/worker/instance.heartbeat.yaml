@@ -5,7 +5,8 @@ pathItem:
     tags:
       - worker
     description: Renew the current connection of the instance and answer the server
-      version, the binding version, the credential version and the work version.
+      version, the binding version, the credential version, the work version and
+      the machine of the instance.
     x-access-policy: worker
     x-timeout-ms: 30000
     x-mutation: true
@@ -99,9 +100,15 @@ components:
           type: integer
           minimum: 0
           maximum: 9007199254740991
+        machine:
+          anyOf:
+            - type: string
+              minLength: 1
+            - type: "null"
       required:
         - server_version
         - binding_version
         - credential_version
         - work_version
+        - machine
       additionalProperties: false

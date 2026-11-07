@@ -7,7 +7,7 @@ import { gatewayOperations } from "../../gateway/contract.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
 import { storageOperations } from "../../storage/contract.ts";
-import { workerOperations } from "../../worker/contract.ts";
+import { machineOperations, workerOperations } from "../../worker/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
 import { schedulerOperations } from "../../scheduler/contract.ts";
 import {
@@ -116,13 +116,14 @@ const TOP_LEVEL_NAMES = new Set([
   "agent",
 ]);
 const OTHER_PAGE = "other";
+const MACHINE_JOIN_PATH = "worker machine join";
 const NO_ITEMS = 0;
-const DOCUMENTED_COUNT = 214;
+const DOCUMENTED_COUNT = 220;
 const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
-const IMPLEMENTED_COUNT = 209;
-const OPERATION_COUNT = 248;
+const IMPLEMENTED_COUNT = 215;
+const OPERATION_COUNT = 253;
 const INTAKE_LEAVES = [
   "intake event delete",
   "intake event discard",
@@ -147,7 +148,7 @@ const PAGE_COUNTS = {
   mission: 64,
   intake: 13,
   scheduler: 8,
-  worker: 16,
+  worker: 22,
   gateway: 3,
   other: 9,
   tracking: 12,
@@ -202,7 +203,7 @@ function programLeaves(program: Command): string[] {
     depth: 1,
   }));
   const leaves: string[] = [];
-  const MAX_COMMANDS = 300;
+  const MAX_COMMANDS = 400;
   for (let index = 0; index < pending.length && index < MAX_COMMANDS; index++) {
     const { command, path, depth } = pending[index]!;
     assert.ok(depth <= MAX_COMMANDS);
@@ -295,4 +296,24 @@ test("documented ERD 2 and ERD 3 CLI leaves and API-only operations exactly cove
     [...documentedOperations, ...API_ONLY_OPERATIONS].sort(),
     expected,
   );
+});
+
+test("each worker machine operation maps to its documented command", () => {
+  const rows = inventory("worker", PAGE_INVENTORIES.worker);
+  const commands = new Map(
+    rows.flatMap((row) =>
+      row.operations.map((operation) => [operation, row.path] as const),
+    ),
+  );
+  assert.deepEqual(
+    Object.values(machineOperations).map(({ id }) => [id, commands.get(id)]),
+    [
+      ["worker.machine.create", "worker machine create"],
+      ["worker.machine.list", "worker machine list"],
+      ["worker.machine.get", "worker machine get"],
+      ["worker.machine.rotate", "worker machine rotate"],
+      ["worker.machine.archive", "worker machine archive"],
+    ],
+  );
+  assert.ok(rows.some((row) => row.path === MACHINE_JOIN_PATH));
 });

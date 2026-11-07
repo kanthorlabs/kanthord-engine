@@ -19,6 +19,7 @@ const createWorkerTables: Migration = (database) => {
       worker TEXT NOT NULL,
       revision INTEGER NOT NULL,
       placement TEXT NOT NULL,
+      machine TEXT,
       public_key TEXT,
       fingerprint TEXT,
       created_at INTEGER NOT NULL,
@@ -26,6 +27,17 @@ const createWorkerTables: Migration = (database) => {
     );
     CREATE UNIQUE INDEX worker_instance_name_revision ON worker_instance (name, revision);
     CREATE UNIQUE INDEX worker_instance_fingerprint ON worker_instance (fingerprint);
+    CREATE TABLE worker_machine (
+      id TEXT NOT NULL PRIMARY KEY,
+      name TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      public_key TEXT NOT NULL,
+      fingerprint TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      ended_at INTEGER
+    );
+    CREATE UNIQUE INDEX worker_machine_name_revision ON worker_machine (name, revision);
+    CREATE UNIQUE INDEX worker_machine_fingerprint ON worker_machine (fingerprint);
   `);
 };
 

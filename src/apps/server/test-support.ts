@@ -2420,13 +2420,33 @@ export async function createInstances(
   worker = "coder@1",
 ): Promise<string[]> {
   const call = humanCaller(fixture);
+  const machine =
+    placement === InstancePlacement.Worker ? `${names[0]}-machine` : undefined;
+  if (machine !== undefined)
+    await call(workerOperations["machine.create"], {
+      params: {},
+      query: {},
+      body: { name: machine },
+    });
   for (const name of names)
     await call(workerOperations["instance.create"], {
       params: {},
       query: {},
-      body: { name, worker, placement },
+      body: { name, worker, placement, machine },
     });
   return [...names];
+}
+
+export async function createMachine(
+  fixture: Parameters<typeof humanCaller>[0],
+  name: string,
+): Promise<string> {
+  await humanCaller(fixture)(workerOperations["machine.create"], {
+    params: {},
+    query: {},
+    body: { name },
+  });
+  return name;
 }
 
 export async function createInstancesByCli(
@@ -2434,6 +2454,7 @@ export async function createInstancesByCli(
   names: readonly string[],
   placement: InstancePlacement = InstancePlacement.Server,
   worker = "coder@1",
+  machine?: string,
 ): Promise<string[]> {
   for (const name of names)
     await read([
@@ -2445,6 +2466,7 @@ export async function createInstancesByCli(
       worker,
       "--placement",
       placement,
+      ...(machine === undefined ? [] : ["--machine", machine]),
     ]);
   return [...names];
 }
