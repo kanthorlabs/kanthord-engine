@@ -381,6 +381,9 @@ async function methodsFixture(t: TestContext) {
           }),
         );
       },
+      async () => {
+        throw new Error("Unexpected lease");
+      },
     );
     const setup = completed(
       await workerClient["execution.setup.get"]({

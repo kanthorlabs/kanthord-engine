@@ -385,6 +385,13 @@ export interface CustodyHandover {
     envelope: HandoverEnvelope,
     now: number,
   ): void;
+  lease(
+    tx: Transaction,
+    identity: MachineIdentity,
+    claim: ExecutionClaim,
+    credentialId: string,
+    now: number,
+  ): HandoverEnvelope;
   sshSign(
     tx: Transaction,
     identity: MachineIdentity,
@@ -926,6 +933,7 @@ export const LIST_LIMIT_MAX = 1000;
 export const WorkerErrorCode = {
   AuthorizationRefused: "worker.authorization.refused",
   HandoverRefreshInFlight: "worker.handover.refresh_in_flight",
+  CredentialLeaseHeld: "worker.credential.lease_held",
   ExecutionNoNativeAgent: "worker.execution.no_native_agent",
   ExecutionCredentialNotPinned: "worker.execution.credential_not_pinned",
   ExecutionPromptNotPinned: "worker.execution.prompt_not_pinned",
@@ -1869,6 +1877,32 @@ export const workerOperations = {
     output: z.null(),
     description:
       "Apply an authenticated refresh report to the live execution's pinned revision when the replaced credential digest still matches.",
+  },
+  "credential.lease": {
+    service: WORKER_SERVICE_NAME,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    id: "worker.credential.lease",
+    method: HttpMethod.Post,
+    path: "/api/worker/credential/lease",
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    timeoutMs: HANDOVER_TIMEOUT_MS,
+    mutation: true,
+    secret: true,
+    body: true,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: emptyFields,
+      query: emptyFields,
+      body: z.strictObject({
+        execution_id: identitySchema("execution"),
+        credential_id: identitySchema("credential"),
+      }),
+    }),
+    output: handoverEnvelopeSchema,
+    description:
+      "Take or renew the refresh lease of a pinned credential revision for the live execution and seal the stored value with the expiry of the lease. A held lease or an in-flight check refresh answers 503 worker.credential.lease_held; a report of the holder ends the lease.",
   },
   "ssh.sign": {
     service: WORKER_SERVICE_NAME,

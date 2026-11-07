@@ -26,7 +26,9 @@ import { llmOperations } from "../../llm/contract.ts";
 import { LLM_PLATFORMS } from "../../llm/platforms.ts";
 import { background } from "../../kernel/context.ts";
 import { takeHandover } from "../worker/handover.ts";
-import { httpTransport } from "../worker/transport.ts";
+import { httpTransport, observedTransport } from "../worker/transport.ts";
+import { setTimeout as sleep } from "node:timers/promises";
+import { stopAfter } from "../../kernel/stop-test-support.ts";
 import {
   RepositoryFileState,
   repositoryOperations,
@@ -423,6 +425,7 @@ async function setup(
     repositoryFiles?: ReturnType<typeof fakeRepositoryFiles>;
     instructionFile?: string;
     implementBindsOther?: boolean;
+    secondNode?: boolean;
   } = {},
 ) {
   const oauth = boundary?.type === SecretShape.OAuth ? boundary : undefined;
@@ -713,7 +716,7 @@ async function setup(
       },
     }),
   );
-  completed(
+  const dependency = completed(
     await call(missionOperations["dependency.add"], {
       params: {
         node_id: examine.revisions[0]!.node_id,
@@ -726,6 +729,24 @@ async function setup(
       },
     }),
   );
+  if (setupOptions.secondNode)
+    completed(
+      await call(missionOperations["node.create"], {
+        params: { mission_id: mission.id },
+        query: {},
+        body: {
+          filename: "implement-2.md",
+          content: {
+            ...CONTENT,
+            intent: Intent.Implement,
+            bindings: [bindingSet.bindings.repo!.id],
+          },
+          tasks: [],
+          reason: "plan",
+          expected_mission_version: dependency.mission_version,
+        },
+      }),
+    );
   const instanceTokens: string[] = [];
   for (const [name, key] of instanceKeys) {
     const worker = workerTokenPayloadSchema.parse(
@@ -931,10 +952,42 @@ async function setup(
       copyAad(holder),
       secret,
     );
+  const clientSecretOf = (bearer: string) =>
+    deriveClientSecret(
+      f.config.master_key,
+      f.config.gateway.auth.version,
+      JSON.parse(
+        Buffer.from(bearer.split(".")[1]!, "base64url").toString("utf8"),
+      ).sub,
+    );
+  const claimSecond = async () => {
+    const other = (await f.slotClient(projectId, "general", SECOND_SLOT)).token;
+    const registered = completed(
+      await call(workerOperations.register, NO_INPUT, other),
+    );
+    const pulled = completed(
+      await call(
+        schedulerOperations.workPull,
+        {
+          params: {},
+          query: {},
+          body: {
+            resource_identity: GENERAL_RESOURCE,
+            runtime_identity: registered.runtime_identity,
+          },
+        },
+        other,
+      ),
+    );
+    assert(pulled.kind === WorkPullKind.Claimed);
+    return { token: other, execution: pulled.execution };
+  };
   return {
     f,
     call,
     token,
+    clientSecretOf,
+    claimSecond,
     keys,
     openSealed,
     openCopy,
@@ -1879,4 +1932,86 @@ test("http handover answers a retryable refusal before the route timer while a r
   assert.deepEqual(await item.store.read(item.provider_id), ROTATED_OAUTH);
   assert.notDeepEqual(pins(), before);
   taken.credentials.discard();
+});
+
+const NO_HELD = 0;
+const LEASE_POLL_MS = 10;
+const LEASE_POLL_ROUNDS = 1000;
+const OAUTH_STORED: OAuthCredential = {
+  type: SecretShape.OAuth,
+  refresh: "test_refresh_one",
+  access: "test_access_one",
+  expires: 1,
+};
+const OAUTH_REFRESHED: OAuthCredential = {
+  type: SecretShape.OAuth,
+  refresh: "test_refresh_two",
+  access: "test_access_two",
+  expires: 4102444800000,
+};
+
+async function polled(done: () => boolean): Promise<void> {
+  for (let round = 0; round < LEASE_POLL_ROUNDS && !done(); round++)
+    await sleep(LEASE_POLL_MS);
+  assert.ok(done());
+}
+
+test("two executions of two server instances that pin one OAuth revision make one refresh call", async (t) => {
+  const h = await setup(t, HTTP, OAUTH_STORED, {
+    instanceCount: 2,
+    secondNode: true,
+  });
+  const second = await h.claimSecond();
+  assert.notEqual(second.execution.execution_id, h.execution.execution_id);
+  let held = 0;
+  const open = (
+    token: string,
+    claim: typeof h.execution,
+    observe: (result: OperationResult<unknown>) => void,
+  ) =>
+    takeHandover({
+      api: observedTransport(httpTransport(h.f.endpoint, token), observe),
+      claim,
+      clientSecret: h.clientSecretOf(token),
+      context: background,
+    });
+  const firstView = await open(h.token, h.execution, () => {});
+  const secondView = await open(second.token, second.execution, (result) => {
+    if (
+      result.type === OperationResultType.Failure &&
+      result.error.error.code === WorkerErrorCode.CredentialLeaseHeld
+    )
+      held++;
+  });
+  stopAfter(t, () => firstView.credentials.discard());
+  stopAfter(t, () => secondView.credentials.discard());
+  const [firstItem, secondItem] = [firstView, secondView].map(
+    ({ credentials }) => credentials.items[0]!,
+  );
+  assert.equal(firstItem!.credential_id, h.credentialId);
+  assert.equal(secondItem!.credential_id, h.credentialId);
+  let refreshCalls = 0;
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const refresh = async (current: Credential | undefined) => {
+    if (current?.type === SecretShape.OAuth && current.expires > Date.now())
+      return undefined;
+    refreshCalls++;
+    await gate;
+    return OAUTH_REFRESHED;
+  };
+  const firstDone = firstItem!.store.modify(firstItem!.provider_id, refresh);
+  await polled(() => refreshCalls === FIRST_REVISION);
+  const secondDone = secondItem!.store.modify(secondItem!.provider_id, refresh);
+  await polled(() => held > NO_HELD);
+  release();
+  assert.deepEqual(await firstDone, OAUTH_REFRESHED);
+  assert.deepEqual(await secondDone, OAUTH_REFRESHED);
+  assert.equal(refreshCalls, FIRST_REVISION);
+  assert.deepEqual(
+    h.open(completed(await h.handover())).items[0]!.credential,
+    OAUTH_REFRESHED,
+  );
 });

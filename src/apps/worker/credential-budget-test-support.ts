@@ -61,6 +61,9 @@ try {
       assert.ok(result.type === OperationResultType.Completed);
       assert.equal(result.data, null);
     },
+    async () => {
+      throw new Error("Unexpected lease");
+    },
   );
   try {
     await view.release();

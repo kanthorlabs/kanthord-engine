@@ -58,6 +58,7 @@ const API_ONLY_OPERATIONS = [
   "project.credential.verify",
   "project.credential.check",
   "worker.credential",
+  "worker.credential.lease",
   "worker.ssh.sign",
   "worker.instance.token",
   "worker.instance.connect",
@@ -123,7 +124,7 @@ const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
 const IMPLEMENTED_COUNT = 215;
-const OPERATION_COUNT = 253;
+const OPERATION_COUNT = 254;
 const INTAKE_LEAVES = [
   "intake event delete",
   "intake event discard",
