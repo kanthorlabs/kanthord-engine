@@ -16,6 +16,7 @@ import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { VERIFICATION_INFRASTRUCTURE_FAILED } from "./verification.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
+import { RELEASE_DIRECTORY } from "./workspace.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { VerificationContext } from "./method-telemetry.ts";
 import {
@@ -400,6 +401,29 @@ suite(
       );
       assert.equal(runsOf(join(directory, "node")), ONE_RUN);
       assert.deepEqual(liveCommands(records, VerificationContext.Node), []);
+    });
+
+    test("a flaky release verification gives no revision turn and no unchanged_revision count", async (t) => {
+      const marker = join(temporary(t), "flaky");
+      const command = `case "$PWD" in */${RELEASE_DIRECTORY}/*) test -f ${marker} || { touch ${marker}; exit 1; };; esac`;
+      const h = await fixture(
+        t,
+        [task("plain", "true")],
+        [writeTurn("work"), fauxAssistantMessage("work")],
+      );
+      h.revision = {
+        ...h.revision,
+        content: { ...h.revision.content, verifications: [command] },
+      };
+      const bodies = recordReleases(h);
+      acceptEvidence(h);
+      assert.deepEqual(
+        await executionBoundary(h.run, () => runStepsImplement(h)),
+        { kind: "released", furtherWork: false },
+      );
+      assert.deepEqual(bodies, [{ further_work: false, stop: null }]);
+      assert.equal(existsSync(marker), true);
+      assert.equal(h.provider.calls.length, ONE_TOOL_TURN);
     });
 
     test("a passing own command at a budget end releases further work with no operation_failed stop", async (t) => {
