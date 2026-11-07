@@ -66,7 +66,11 @@ for (const type of [SecretShape.ApiKey, SecretShape.OAuth] as const) {
         items: [{ credential_id: ID, provider_id: PROVIDER, credential }],
       });
       assert.throws(() =>
-        executionCredentialStore(payload(oversized), async () => {}),
+        executionCredentialStore(
+          payload(oversized),
+          async () => {},
+          async () => maximum,
+        ),
       );
       const reports: RefreshReport[] = [];
       const view = executionCredentialStore(
@@ -74,6 +78,7 @@ for (const type of [SecretShape.ApiKey, SecretShape.OAuth] as const) {
         async (report) => {
           reports.push(report);
         },
+        async () => maximum,
       );
       try {
         await assert.rejects(
@@ -129,6 +134,7 @@ for (const field of ["key", "refresh", "access"] as const) {
       async (report) => {
         reports.push(report);
       },
+      async () => valid,
     );
     try {
       for (const surrogate of ["\ud800", "\udc00"]) {

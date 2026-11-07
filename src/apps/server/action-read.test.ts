@@ -56,6 +56,9 @@ const TIMEOUT = 180000;
 const GITHUB_KEY = "test-secret";
 const GATED_ADDRESS = "git@github.com:owner/gated.git";
 const GATED_NAME = "gated";
+const REVIEWER = 1;
+const UNTRUSTED_REVIEWER = 2;
+const BOT_REVIEWER = 3;
 const PUSHED_ADDRESS = "git@github.com:owner/pushed.git";
 const GITHUB_PREFIX = "repository.platform.github.";
 const UNKNOWN_CODE = "gateway.invocation.unknown";
@@ -146,6 +149,7 @@ async function setup(t: TestContext) {
       address,
       ssh_credential: FAKE_SSH_CREDENTIAL,
       credential: "github",
+      link_trust: { actor_ids: [String(REVIEWER)] },
       strategy: {
         base_branch: "main",
         action: { name: action, follows: { type: "assessment_passed" } },
@@ -467,7 +471,7 @@ test(
         const before = h.gitHub.calls.length;
         const materials = h.materials.length;
         const reviewId = h.gitHub.review(number, {
-          reviewer: 1,
+          reviewer: REVIEWER,
           state: "CHANGES_REQUESTED",
           body: "rename the route",
           comments: [{ path: "src/route.ts", line: 4, body: "use /api" }],
@@ -496,6 +500,28 @@ test(
         );
         assert.equal(h.pins(gated.evaluation).length, ONE_PIN);
         dropped(h.materials, materials + ONE_PIN);
+      },
+    );
+
+    await t.test(
+      "a change request get drops the change request of an untrusted user and of a bot",
+      async () => {
+        h.gitHub.review(number, {
+          reviewer: UNTRUSTED_REVIEWER,
+          state: "CHANGES_REQUESTED",
+        });
+        h.gitHub.review(number, {
+          reviewer: BOT_REVIEWER,
+          type: "Bot",
+          state: "CHANGES_REQUESTED",
+        });
+        const answer = completed(await changeRequests());
+        assert.ok("body" in answer, JSON.stringify(answer));
+        const body = answer.body as { change_requests: { reviewer: string }[] };
+        assert.deepEqual(
+          body.change_requests.map((item) => item.reviewer),
+          [`reviewer-${REVIEWER}`],
+        );
       },
     );
 

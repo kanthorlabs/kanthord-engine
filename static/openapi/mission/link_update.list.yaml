@@ -1,0 +1,164 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: mission.link_update.list
+    tags:
+      - mission
+    description: List the updates of the linked threads of a node from trusted
+      actors, newest first.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: node_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/mission.link_update.list.Input/properties/params/pr\
+            operties/node_id"
+      - name: limit
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/mission.link_update.list.Input/properties/query/pro\
+            perties/limit"
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/mission.link_update.list.Input/properties/query/pro\
+            perties/cursor"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/mission.link_update.list.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    mission.link_update.list.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            node_id:
+              type: string
+              minLength: 31
+              maxLength: 31
+              pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: node_ followed by a canonical 26-character uppercase ULID.
+          required:
+            - node_id
+          additionalProperties: false
+        query:
+          type: object
+          properties:
+            limit:
+              default: 100
+              type: integer
+              minimum: 1
+              maximum: 1000
+            cursor:
+              type: string
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    mission.link_update.list.Output:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                minLength: 38
+                maxLength: 38
+                pattern: ^link_update_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: link_update_ followed by a canonical 26-character uppercase ULID.
+              external_link:
+                oneOf:
+                  - type: object
+                    properties:
+                      kind:
+                        type: string
+                        const: github_issue
+                      resource_identity:
+                        type: string
+                        pattern: ^conversation:github:[^/\s:]+\/[^/\s:]+$
+                      number:
+                        type: integer
+                        exclusiveMinimum: 0
+                        maximum: 9007199254740991
+                    required:
+                      - kind
+                      - resource_identity
+                      - number
+                    additionalProperties: false
+              update_key:
+                type: string
+                minLength: 1
+              inbound_event_id:
+                type: string
+                minLength: 40
+                maxLength: 40
+                pattern: ^inbound_event_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: inbound_event_ followed by a canonical 26-character uppercase ULID.
+              actor_id:
+                type: string
+                minLength: 1
+              occurred_at:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+                description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+              new:
+                type: boolean
+            required:
+              - id
+              - external_link
+              - update_key
+              - inbound_event_id
+              - actor_id
+              - occurred_at
+              - new
+            additionalProperties: false
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+      required:
+        - items
+        - next_cursor
+      additionalProperties: false

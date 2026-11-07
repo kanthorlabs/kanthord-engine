@@ -109,6 +109,7 @@ import {
   LIST_LIMIT_MAX,
   type LiveNodesPinning,
   LS_REMOTE_TIMEOUT_MS,
+  pinnedConfigSchema,
   type ProjectBindings,
   ProjectErrorCode,
   projectOperations,
@@ -1848,6 +1849,7 @@ export class ProjectService implements Service, ProjectBindings {
       current.kind === BindingKind.Worker
         ? effectiveInstanceCount(current.config) === INSTANCE_COUNT_MIN
         : current.config.available === false;
+    const { link_trust } = pinnedConfigSchema.parse(binding.config);
     return {
       project_id: binding.project_id,
       binding_id: binding.id,
@@ -1856,6 +1858,7 @@ export class ProjectService implements Service, ProjectBindings {
       revision: binding.revision,
       tombstone: hasBindingTombstone(tx, binding),
       disabled,
+      ...(link_trust === undefined ? {} : { link_trust }),
     };
   }
   workerBindingRowOf(tx: Transaction, bindingId: string) {

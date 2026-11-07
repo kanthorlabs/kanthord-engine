@@ -138,6 +138,16 @@ const createMissionTables: Migration = (database) => {
       decided_by TEXT,
       decided_at INTEGER
     );
+    CREATE TABLE mission_link_update (
+      id TEXT NOT NULL PRIMARY KEY,
+      mission_id TEXT NOT NULL REFERENCES mission_mission(id),
+      external_link TEXT NOT NULL,
+      update_key TEXT NOT NULL,
+      inbound_event_id TEXT NOT NULL,
+      actor_id TEXT NOT NULL,
+      occurred_at INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX mission_link_update_key ON mission_link_update (mission_id, external_link, update_key);
     CREATE UNIQUE INDEX mission_finding_label ON mission_finding (assessment_id, label);
     CREATE UNIQUE INDEX mission_finding_node ON mission_finding (node_id, id);
     CREATE UNIQUE INDEX mission_finding_human_label ON mission_finding (node_id, label) WHERE created_by IS NOT NULL;

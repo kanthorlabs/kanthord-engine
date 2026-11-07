@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { COOLDOWN_DEFAULTS } from "../agent/config.ts";
 import {
+  CredentialLeaseHeld,
   CredentialRefreshInFlight,
   SERVER_HOLDER,
 } from "../custody/contract.ts";
@@ -201,6 +202,9 @@ const fakeCollaborations = {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
     report: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+    lease: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
     sshSign: () => {
@@ -1450,6 +1454,9 @@ test("handover handlers pass the proven execution and one transactional clock re
         assert.equal(actualExecution, execution);
         assert.deepEqual(actualEnvelope, envelope);
         assert.equal(actualNow, now);
+      },
+      lease: () => {
+        throw new Error("UNEXPECTED_COLLABORATION");
       },
       sshSign: (
         tx,
@@ -2765,6 +2772,70 @@ test("a handover whose credential refresh outlasts the wait answers 503 worker.h
       error.code === WorkerErrorCode.HandoverRefreshInFlight,
   );
   assert.equal(attempts, FIRST_HANDOVER_ATTEMPT);
+});
+
+test("the credential lease operation maps CredentialLeaseHeld to 503 worker.credential.lease_held and answers the lease envelope otherwise", async (t) => {
+  const credentialId = createIdentity("credential");
+  const envelope = { nonce: "nonce", ciphertext: "ciphertext" };
+  const execution = {
+    executionId: createIdentity("execution"),
+    projectId: createIdentity("project"),
+    nodeId: createIdentity("node"),
+    attempt: 1,
+    pinnedRevision: 1,
+    nodeBranch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    runtimeIdentity: createIdentity("worker_registration"),
+    workerBindingId: createIdentity("binding"),
+  };
+  const identity = testMachineIdentity(
+    {
+      clientId: createIdentity("client_identity"),
+      name: "machine",
+      projectId: execution.projectId,
+      resourceIdentity: "worker:kanthord:general",
+      issuedAt: 0,
+    },
+    "jti",
+    execution.runtimeIdentity,
+  );
+  const now = 1000;
+  t.mock.method(Date, "now", () => now);
+  let held = true;
+  const f = enablementFixture(t, {
+    custodyHandover: {
+      ...fakeCollaborations.custodyHandover,
+      lease: (tx, actualIdentity, actualClaim, actualCredential, actualNow) => {
+        assert(tx.database.isTransaction);
+        assert.equal(actualIdentity, identity);
+        assert.equal(actualClaim, execution);
+        assert.equal(actualCredential, credentialId);
+        assert.equal(actualNow, now);
+        if (held) throw new CredentialLeaseHeld();
+        return envelope;
+      },
+    },
+  });
+  const invoke = () =>
+    f.registry.get(workerOperations["credential.lease"].id).handler(
+      {
+        params: {},
+        query: {},
+        body: {
+          execution_id: execution.executionId,
+          credential_id: credentialId,
+        },
+      },
+      { ...f.caller, identity, execution },
+    );
+  await assert.rejects(
+    async () => invoke(),
+    (error: unknown) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.ServiceUnavailable &&
+      error.code === WorkerErrorCode.CredentialLeaseHeld,
+  );
+  held = false;
+  assert.deepEqual(await invoke(), envelope);
 });
 
 test("the handover refresh wait ends before the route timeout with a margin", () => {

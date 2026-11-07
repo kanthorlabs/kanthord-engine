@@ -88,6 +88,9 @@ const publicKeyCustody = {
   report: () => {
     throw new Error("UNEXPECTED_COLLABORATION");
   },
+  lease: () => {
+    throw new Error("UNEXPECTED_COLLABORATION");
+  },
   sshSign: () => {
     throw new Error("UNEXPECTED_COLLABORATION");
   },

@@ -7,6 +7,8 @@ import {
   keyFingerprint,
 } from "../kernel/hpke.ts";
 import type { Transaction } from "../kernel/store.ts";
+import type { HeldCopy } from "../custody/contract.ts";
+import type { CopyHealth } from "../llm/contract.ts";
 import {
   type InstanceConnection,
   instanceNameSchema,
@@ -40,6 +42,10 @@ export interface MachineKeyInput {
 
 export interface MachineDependencies {
   archiveHeld: (tx: Transaction, holder: string, now: number) => void;
+  heldCopies: (
+    tx: Transaction,
+    machine: string,
+  ) => (HeldCopy & { health: CopyHealth })[];
   connectionOf: (instanceId: string) => InstanceConnection;
 }
 
@@ -180,6 +186,7 @@ export class WorkerMachines {
         ...instance,
         connection: this.dependencies.connectionOf(instance.id),
       })),
+      credentials: this.dependencies.heldCopies(tx, name),
     };
   }
 

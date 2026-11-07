@@ -1003,6 +1003,7 @@ const GITHUB_SCRIPTED_FAILURE = { message: "scripted failure" };
 const GITHUB_FIRST_PULL_NUMBER = 1;
 const GITHUB_FIRST_MERGEABILITY = 0;
 const GITHUB_LAST_MERGEABILITY = 1;
+const GITHUB_USER_TYPE = "User";
 const GITHUB_NEXT_PULL_STEP = 1;
 const GITHUB_CREATED_STATUS = 201;
 const GITHUB_EMPTY_BODY = "";
@@ -1040,7 +1041,7 @@ export interface FakeMergeability {
 
 export interface FakeReview {
   id: number;
-  user: { id: number; login: string };
+  user: { id: number; login: string; type: string };
   state: string;
   commit_id: string;
   body: string;
@@ -1583,6 +1584,7 @@ export async function fakeGitHub(
       number: number,
       review: {
         reviewer: number;
+        type?: string;
         state: string;
         commit_id?: string;
         body?: string;
@@ -1595,7 +1597,11 @@ export async function fakeGitHub(
         GITHUB_NEXT_PULL_STEP;
       pull.reviews.push({
         id,
-        user: { id: review.reviewer, login: `reviewer-${review.reviewer}` },
+        user: {
+          id: review.reviewer,
+          login: `reviewer-${review.reviewer}`,
+          type: review.type ?? GITHUB_USER_TYPE,
+        },
         state: review.state,
         commit_id: review.commit_id ?? pull.head_sha,
         body: review.body ?? "",
