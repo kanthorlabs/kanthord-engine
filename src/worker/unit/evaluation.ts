@@ -59,6 +59,7 @@ import {
   judgementRationale,
   parseRepaired,
   ReplyRepair,
+  withFlakyVerification,
 } from "./judgement.ts";
 import {
   type EvaluationFacts,
@@ -257,17 +258,24 @@ async function judge(
     fixed: judgement.fixed_finding_ids,
   });
   const proposals = examine ? judgement.proposals : [];
+  const recorded = withFlakyVerification(
+    {
+      rationale: judgementRationale({
+        rationale: judgement.rationale,
+        blockers,
+      }),
+      findings: judgement.findings,
+    },
+    verificationRun.flaky_failures,
+  );
   return {
     result:
       proposals.length > NO_ITEMS
         ? AssessmentResult.Undetermined
         : judgement.result,
-    rationale: judgementRationale({
-      rationale: judgement.rationale,
-      blockers,
-    }),
+    rationale: recorded.rationale,
     proposals,
-    findings: judgement.findings,
+    findings: recorded.findings,
     fixed_finding_ids: judgement.fixed_finding_ids,
     facts: factsOf(
       EvaluationStage.Judgement,

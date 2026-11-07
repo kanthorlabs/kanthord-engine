@@ -23,6 +23,7 @@ import {
   taskRevisionInstruction,
   UnmetGround,
   unmetGroundSchema,
+  withFlakyVerification,
 } from "./judgement.ts";
 import {
   affectedFailureText,
@@ -34,8 +35,13 @@ import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import { PromptTemplate } from "../../agent/contract.ts";
 import type { WorkPrompt } from "../../agent/prompt-composer.ts";
-import { type Finding, FindingKind } from "../../mission/contract.ts";
+import {
+  type Finding,
+  FINDING_TEXT_MAX_BYTES,
+  FindingKind,
+} from "../../mission/contract.ts";
 
+const FLAKY_OUTPUT_CHARS = 2048;
 const evaluationJudgementSchema = evaluationJudgementSchemaOf({
   priorIds: [],
   priorBlockerIds: [],
@@ -428,7 +434,7 @@ test("only the release revision names the content of the release clone", () => {
   );
 });
 
-test("a failed verification report names a flaky command and carries its output", () => {
+test("a failed verification report carries the output and no flaky sentence", () => {
   const run = {
     verification: {
       tested_input: { kind: "produced" as const, sha256: "hash" },
@@ -438,19 +444,36 @@ test("a failed verification report names a flaky command and carries its output"
     },
     outputs: ["✖ order is created_at DESC"],
     flaky: [true],
+    flaky_failures: [],
     outcome: VerificationClass.CodeFailure,
   };
   const report = failedVerificationReport(run, ["npm test"]);
   assert.match(report, /^Verification 1 `npm test` failed with exit code 1\./);
-  assert.match(
-    report,
-    /passed on a rerun of the same commit, so the test is flaky/,
-  );
+  assert.doesNotMatch(report, /flaky/);
   assert.match(report, /```text\n✖ order is created_at DESC\n```$/);
-  assert.doesNotMatch(
-    failedVerificationReport({ ...run, flaky: [false] }, ["npm test"]),
-    /flaky/,
-  );
+});
+
+test("the Flaky verification description keeps the finding text bound for several large outputs", () => {
+  const failure = (index: number) => ({
+    index,
+    command: `npm test ${index}`,
+    result: {
+      command: "npm test",
+      exit_code: 1,
+      signal: null,
+      timed_out: false,
+    },
+    output: "é".repeat(FLAKY_OUTPUT_CHARS),
+  });
+  const judged = withFlakyVerification({ rationale: "met", findings: [] }, [
+    failure(0),
+    failure(1),
+    failure(2),
+  ]);
+  const description = judged.findings[0]?.description ?? "";
+  assert.ok(Buffer.byteLength(description, "utf8") <= FINDING_TEXT_MAX_BYTES);
+  assert.match(description, /Verification 3 `npm test 2`/);
+  assert.doesNotMatch(description, /\uFFFD/);
 });
 
 test("the requested changes text is null without a change request and stops at 4 KiB", () => {
