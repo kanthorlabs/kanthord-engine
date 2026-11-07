@@ -4205,7 +4205,13 @@ for (const [state, attempt] of [
         {
           code: MissionErrorCode.ConditionFailed,
           node_id: f.implementId,
-          details: { state, attempt },
+          details: {
+            state,
+            attempt,
+            visible_revision: NEXT_REVISION,
+            reason: REASON,
+            remedy: "mission export",
+          },
         },
       ],
     );
@@ -4895,7 +4901,13 @@ for (const [state, code] of [
         }),
       retirementError(code, {
         ...(code === MissionErrorCode.ConditionFailed
-          ? { state, attempt: NO_ATTEMPT }
+          ? {
+              state,
+              attempt: NO_ATTEMPT,
+              visible_revision: FIRST_REVISION,
+              reason: REASON,
+              remedy: "mission export",
+            }
           : {}),
         filename: IMPLEMENT_FILENAME,
         node_id: implement.id,

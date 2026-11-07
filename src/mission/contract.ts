@@ -1053,6 +1053,12 @@ export const violationSchema = z.strictObject({
   details: z.unknown().nullable(),
 });
 export type Violation = z.infer<typeof violationSchema>;
+export const driftSchema = z.strictObject({
+  node_id: identitySchema("node"),
+  filename: planFileNameSchema,
+  visible_revision: z.number().int().positive(),
+});
+export type Drift = z.infer<typeof driftSchema>;
 export const importPreviewSchema = z.strictObject({
   mission_id: identitySchema("mission"),
   expected_mission_version: z.number().int().positive(),
@@ -1062,6 +1068,7 @@ export const importPreviewSchema = z.strictObject({
   retirements: z.array(identitySchema("node")),
   removed_edges: z.array(edgeSchema),
   no_ops: z.array(identitySchema("node")),
+  drifts: z.array(driftSchema),
   violations: z.array(violationSchema),
 });
 export type ImportPreview = z.infer<typeof importPreviewSchema>;
