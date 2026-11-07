@@ -42,6 +42,12 @@ const OAUTH_SECRET = {
   expires: Date.now() + 3600000,
 };
 
+const unpooledFetch: typeof fetch = (input, init) => {
+  const headers = new Headers(init?.headers);
+  headers.set("Connection", "close");
+  return fetch(input, { ...init, headers });
+};
+
 async function until<T>(
   read: () => Promise<T | undefined | false>,
   signal: AbortSignal,
@@ -55,8 +61,13 @@ async function until<T>(
 
 test("a live worker instance signs in through a fake pi-ai copy_code flow, and the server stores only the copy sealed to the instance key", async (t) => {
   const f = await gatewayFixture(t);
-  const worker = httpClient(workerOperations, f.endpoint, f.token);
-  const llm = httpClient(llmOperations, f.endpoint, f.token);
+  const worker = httpClient(
+    workerOperations,
+    f.endpoint,
+    f.token,
+    unpooledFetch,
+  );
+  const llm = httpClient(llmOperations, f.endpoint, f.token, unpooledFetch);
   completed(
     await worker["machine.create"]({
       params: {},

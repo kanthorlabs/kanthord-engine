@@ -88,6 +88,7 @@ type SetupDependencies = Pick<
   | "promptBase"
 > & {
   schedulerClaims: Pick<SchedulerClaims, "agentSelectionsOf" | "agentPinsOf">;
+  clock?: () => number;
 };
 
 type SetupPrompt = { final: string; sources: AgentSetup["prompt"]["sources"] };
@@ -207,7 +208,7 @@ export async function executionSetup(
 ): Promise<ExecutionSetup> {
   const reads = new CancellationContext(
     caller.context,
-    Date.now() + PROMPT_SOURCE_READ_MS,
+    (dependencies.clock ?? Date.now)() + PROMPT_SOURCE_READ_MS,
   );
   try {
     return await setupWithin(dependencies, worker, caller, reads);
