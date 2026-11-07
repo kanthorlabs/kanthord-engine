@@ -1,8 +1,11 @@
 import { z } from "zod";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
-import { externalLinkSchema } from "../kernel/external-link.ts";
+import {
+  type ExternalLink,
+  externalLinkSchema,
+} from "../kernel/external-link.ts";
 import { identitySchema } from "../kernel/identity.ts";
-import { timestamp } from "../kernel/json.ts";
+import { canonicalJSON, timestamp } from "../kernel/json.ts";
 import {
   AccessPolicy,
   type ClientOptions,
@@ -30,6 +33,7 @@ export const PENDING_EVENT_LIMIT = 10000;
 export const ERROR_ARRAY_MAX_BYTES = 16384;
 export const ERROR_MESSAGE_MAX_BYTES = 1024;
 export const RESULT_MAX_BYTES = 65536;
+export const COMMENT_MAX_LENGTH = 65536;
 export const DELETE_IDS_MAX = 1000;
 export const PLATFORM_CALL_DEADLINE_MS = 30000;
 export const SERVICE_MERGE_REQUEST_KEY_PREFIX = "service_merge/";
@@ -99,6 +103,7 @@ export const OutboundOperation = {
   GitHubPullRequest: "github.pull_request",
   GitHubPullRequestMerge: "github.pull_request_merge",
   GitMergePush: "git.merge_push",
+  GitHubIssueComment: "github.issue_comment",
   S3DeleteObject: "s3.delete_object",
 } as const;
 export const ResultClass = {
@@ -119,6 +124,7 @@ export const CheckEndState = {
 export const ActionTableAction = {
   PullRequest: "pull_request",
   MergePush: "merge_push",
+  Reply: "reply",
 } as const;
 export const ActionTablePlatform = {
   GitHub: "github",
@@ -146,6 +152,11 @@ export const ACTION_TABLE = [
     platform: ActionTablePlatform.Bitbucket,
     operation: OutboundOperation.GitMergePush,
   },
+  {
+    action: ActionTableAction.Reply,
+    platform: ActionTablePlatform.GitHub,
+    operation: OutboundOperation.GitHubIssueComment,
+  },
 ] as const;
 export const ActionReadMethod = {
   PullRequestGet: "github-pull-request-get",
@@ -156,6 +167,7 @@ export const ActionReadMethod = {
 export const AddressKind = {
   PullRequest: "pull_request",
   BranchPush: "branch_push",
+  Comment: "comment",
 } as const;
 
 export const inboundKindSchema = z.enum(InboundKind);
@@ -170,9 +182,17 @@ export const actionReadMethodSchema = z.enum(ActionReadMethod);
 export const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 export const commitSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 
+export function replyRequestKey(
+  nodeId: string,
+  attempt: number,
+  link: ExternalLink,
+): string {
+  return `${nodeId}:${attempt}:${canonicalJSON(link)}`;
+}
+
 export const actionKeySchema = z
   .string()
-  .regex(/^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push)$/);
+  .regex(/^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push|reply\.[0-9])$/);
 export const platformAddressSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal(AddressKind.PullRequest),
@@ -184,6 +204,11 @@ export const platformAddressSchema = z.discriminatedUnion("kind", [
     resource_identity: z.string().min(1),
     branch: z.string().min(1),
     commit: commitSchema,
+  }),
+  z.strictObject({
+    kind: z.literal(AddressKind.Comment),
+    resource_identity: z.string().min(1),
+    update_key: z.string().min(1),
   }),
 ]);
 export const resultClassAnswerSchema = z.strictObject({
@@ -728,7 +753,8 @@ export const intakeOperations = {
       query: z.strictObject({}),
       body: z.strictObject({
         key: actionKeySchema,
-        commit: commitSchema,
+        commit: commitSchema.nullable(),
+        comment: z.string().min(1).max(COMMENT_MAX_LENGTH).nullable(),
         reused_evidence_id: identitySchema("evidence").nullable(),
         merge_evidence_id: identitySchema("evidence").nullable(),
         request_key: z

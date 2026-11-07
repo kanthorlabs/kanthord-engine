@@ -8,6 +8,7 @@ import {
   type GrantOf,
   type GrantRequest,
   type Material,
+  type ReplyRequestFacts,
   type RequestFacts,
   type SshIdentitySubject,
   SshIdentitySubjectKind,
@@ -19,6 +20,7 @@ import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { PlatformAddressKind } from "../mission/contract.ts";
 import {
+  CheckEndState,
   type CheckFold,
   ExpectedEndState,
   GITHUB_RESULT_CODE_PREFIX,
@@ -34,7 +36,14 @@ import {
   type SshKeyAccess,
 } from "../repository/index.ts";
 import { SshAgentErrorCode } from "../repository/ssh-agent.ts";
-import { PLATFORM_CALL_DEADLINE_MS, ResultClass } from "./contract.ts";
+import {
+  OutboundOperation,
+  OutboundRequestState,
+  PLATFORM_CALL_DEADLINE_MS,
+  replyRequestKey,
+  ResultClass,
+} from "./contract.ts";
+import { findByKey } from "./outbound-store.ts";
 
 const BAD_GATEWAY_STATUS = 502;
 const GIT_FAILED_CODE = "repository.connector.git_failed";
@@ -103,10 +112,13 @@ export async function checkAction(
   const identity = caller.identity;
   const hold: Hold = { material: null, ssh: null };
   try {
-    const facts = dependencies.store.transaction((tx) =>
+    const checked = dependencies.store.transaction((tx) =>
       authorizeCheck(dependencies, tx, identity, evidenceId, hold),
     );
-    const fold = await inspect(dependencies, caller, facts, hold);
+    const fold =
+      "fold" in checked
+        ? checked.fold
+        : await inspect(dependencies, caller, checked.facts, hold);
     return caller.commit(() => fold);
   } finally {
     hold.material?.drop();
@@ -152,7 +164,7 @@ function authorizeCheck(
   identity: CallerIdentity,
   evidenceId: string,
   hold: Hold,
-): Readonly<RequestFacts> {
+): { facts: Readonly<RequestFacts> } | { fold: CheckFold } {
   assert.equal(hold.material, null);
   assert.equal(hold.ssh, null);
   const custody = dependencies.custody;
@@ -164,9 +176,13 @@ function authorizeCheck(
   );
   const { facts } = custody.grantFacts(grant);
   assert.equal(grant.execution, null, "A service check pins nothing.");
+  if (!("repository" in facts)) {
+    custody.consume(grant);
+    return { fold: foldReply(tx, grant.project_id, facts) };
+  }
   if (facts.address.kind === PlatformAddressKind.PullRequest) {
     hold.material = custody.release(tx, grant, now);
-    return facts;
+    return { facts };
   }
   custody.consume(grant);
   const ssh = releaseSshAccess(dependencies, tx, now, {
@@ -180,7 +196,31 @@ function authorizeCheck(
   assert.equal(ssh.binding_id, facts.repository.binding_id);
   assert.equal(ssh.address, facts.repository.address);
   hold.ssh = ssh.access;
-  return facts;
+  return { facts };
+}
+
+function foldReply(
+  tx: Transaction,
+  projectId: string,
+  facts: Readonly<ReplyRequestFacts>,
+): CheckFold {
+  const request = findByKey(
+    tx,
+    projectId,
+    OutboundOperation.GitHubIssueComment,
+    replyRequestKey(
+      facts.node_id,
+      facts.attempt,
+      facts.frozen_action.configuration.external_link,
+    ),
+  );
+  return {
+    end_state:
+      request?.state === OutboundRequestState.Succeeded
+        ? CheckEndState.Expected
+        : CheckEndState.None,
+    landed_commits: [],
+  };
 }
 
 async function inspect(

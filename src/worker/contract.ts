@@ -115,6 +115,7 @@ export type ActionReadMethod = z.infer<typeof actionReadMethodSchema>;
 export const PlatformAddressKind = {
   PullRequest: "pull_request",
   BranchPush: "branch_push",
+  Comment: "comment",
 } as const;
 export const platformAddressSchema = z.discriminatedUnion("kind", [
   z.strictObject({
@@ -127,6 +128,11 @@ export const platformAddressSchema = z.discriminatedUnion("kind", [
     resource_identity: z.string().min(1),
     branch: z.string().min(1),
     commit: z.string().min(1),
+  }),
+  z.strictObject({
+    kind: z.literal(PlatformAddressKind.Comment),
+    resource_identity: z.string().min(1),
+    update_key: z.string().min(1),
   }),
 ]);
 export type PlatformAddress = z.infer<typeof platformAddressSchema>;
@@ -338,6 +344,8 @@ export type TestedInput =
     };
 export type ActionContext = {
   state: (typeof ActionNodeState)[keyof typeof ActionNodeState];
+  node_name: string;
+  request_addresses: PlatformAddress[];
   current_assessment: {
     result: (typeof ActionAssessmentResult)[keyof typeof ActionAssessmentResult];
     tested_input: TestedInput;
@@ -393,7 +401,8 @@ export type ActionOperands = {
 };
 export type ActionPerformInput = {
   key: string;
-  commit: string;
+  commit: string | null;
+  comment?: string | null;
   reusedEvidenceId: string | null;
   mergeEvidenceId?: string | null;
 };

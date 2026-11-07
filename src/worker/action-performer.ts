@@ -17,6 +17,7 @@ import {
   ActionNodeState,
   type ActionOperands,
   ActionReadMethod,
+  type ActionRef,
   type ActionRequestResult,
   ActionResolution,
   type ActionResultItem,
@@ -37,6 +38,12 @@ import {
   type ReservationKey,
 } from "./action-reservations.ts";
 import { operandsOf } from "./action-operands.ts";
+import {
+  isReplyEntry,
+  replyBodyOf,
+  type ReplyEntry,
+  replyKeyOf,
+} from "./action-reply.ts";
 import {
   isResultClass,
   performedItem,
@@ -188,6 +195,7 @@ export class ActionPerformer {
           claim,
           context,
         );
+        items.push(...(await this.performReplies(caller, claim, context)));
         return { tool_name: ACTION_REQUEST_TOOL_NAME, items };
       } finally {
         for (const action of pending) {
@@ -200,6 +208,67 @@ export class ActionPerformer {
         }
       }
     });
+  }
+
+  private async performReplies(
+    caller: PerformerCaller,
+    claim: ExecutionClaim,
+    context: ActionContext,
+  ): Promise<ActionResultItem[]> {
+    if (!context.actions.some((entry) => isReplyEntry(entry) && entry.eligible))
+      return [];
+    const fresh = this.admit(claim);
+    const items: ActionResultItem[] = [];
+    const entries = fresh.actions
+      .filter(isReplyEntry)
+      .filter((entry) => entry.eligible)
+      .sort((left, right) =>
+        left.action.key < right.action.key
+          ? -1
+          : left.action.key > right.action.key
+            ? 1
+            : 0,
+      );
+    for (const entry of entries)
+      items.push(await this.reply(caller, claim, fresh, entry));
+    return items;
+  }
+
+  private async reply(
+    caller: PerformerCaller,
+    claim: ExecutionClaim,
+    context: ActionContext,
+    entry: ReplyEntry,
+  ): Promise<ActionResultItem> {
+    const ref = {
+      key: entry.action.key,
+      binding_id: entry.action.binding_id,
+    };
+    const key = { nodeId: claim.nodeId, attempt: claim.attempt, action: ref };
+    const reservation = this.reservations.acquire(key);
+    if ("held" in reservation) return reservation.held;
+    try {
+      const authorized = this.dependencies.store.transaction((tx) =>
+        this.dependencies.missionActions.authorizeAction(tx, claim, ref.key),
+      );
+      assert.deepEqual(authorized, entry.action);
+      const answer = await this.dependencies.intakeActions.perform(
+        { ...caller, executionId: claim.executionId },
+        {
+          key: ref.key,
+          commit: null,
+          comment: replyBodyOf(context, claim.attempt),
+          reusedEvidenceId: null,
+        },
+        replyKeyOf(claim.nodeId, claim.attempt, entry.action),
+      );
+      const item = performedItem(ref, answer);
+      if (item) return item;
+      assert.ok(!isResultClass(answer));
+      return await this.record(caller, claim, { key: ref.key, ref }, answer);
+    } finally {
+      this.reservations.settle(key, reservation.owner, null);
+    }
   }
 
   private reserve(claim: ExecutionClaim, context: ActionContext): Pending[] {
@@ -271,7 +340,12 @@ export class ActionPerformer {
           uncertainty: Uncertainty.Recording,
           address,
         };
-        const landing = await this.record(caller, claim, pending, address);
+        const landing = await this.record(
+          caller,
+          claim,
+          { key: pending.entry.action.key, ref: pending.key.action },
+          address,
+        );
         settlement =
           landing.kind === ActionResultKind.Uncertain ? landing : null;
         if (landing.kind === ActionResultKind.Submitted)
@@ -301,7 +375,12 @@ export class ActionPerformer {
         uncertainty: Uncertainty.Recording,
         address: answer,
       };
-      const recorded = await this.record(caller, claim, pending, answer);
+      const recorded = await this.record(
+        caller,
+        claim,
+        { key: pending.entry.action.key, ref: pending.key.action },
+        answer,
+      );
       settlement =
         recorded.kind === ActionResultKind.Uncertain ? recorded : null;
       if (
@@ -400,7 +479,7 @@ export class ActionPerformer {
   private async record(
     caller: PerformerCaller,
     claim: ExecutionClaim,
-    pending: Pending,
+    pending: { key: string; ref: ActionRef },
     address: PlatformAddress,
   ): Promise<ActionResultItem> {
     let result: OperationResult<unknown>;
@@ -413,8 +492,8 @@ export class ActionPerformer {
             execution_id: claim.executionId,
             attempt: claim.attempt,
             node_revision: claim.pinnedRevision,
-            requirement_key: pending.entry.action.key,
-            subject: pending.entry.action.key,
+            requirement_key: pending.key,
+            subject: pending.key,
             address,
           },
         },
@@ -423,7 +502,7 @@ export class ActionPerformer {
     } catch {
       result = { type: OperationResultType.Indeterminate };
     }
-    return recordedItem(pending.key.action, address, result);
+    return recordedItem(pending.ref, address, result);
   }
 
   private async requestReworkMerges(

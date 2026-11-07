@@ -16,6 +16,7 @@ import { operandsOf } from "./action-operands.ts";
 const NODE_BRANCH = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAV-a2";
 const BINDING = "binding_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const COMMIT = "b".repeat(40);
+const NODE_NAME = "Ship accounts";
 const entry: RepositoryActionEntry = {
   action: {
     key: "gated.pull_request",
@@ -40,6 +41,8 @@ const snapshot = {
 function context(testedInput: TestedInput): ActionContext {
   return {
     state: ActionNodeState.Evaluating,
+    node_name: NODE_NAME,
+    request_addresses: [],
     current_assessment: {
       result: ActionAssessmentResult.Success,
       tested_input: testedInput,

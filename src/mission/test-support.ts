@@ -25,11 +25,13 @@ import {
   type Transaction,
 } from "../kernel/store.ts";
 import {
+  type ActionFacts,
   ActorKind,
   ActorService,
   AssessmentResult,
   type AssessmentSubmit,
   AssetKind,
+  type Authorized,
   type FailureHold,
   FindingAction,
   FindingGround,
@@ -43,8 +45,11 @@ import {
   type NodeTransition,
   type PlatformAddress,
   PlatformAddressKind,
+  type ReplyActionFacts,
+  type ReplyRequestFacts,
   RepositoryAction,
   RepositoryLanding,
+  type RequestFacts,
   RevisionWrite,
   type RevokedExecution,
   TransitionRule,
@@ -900,4 +905,20 @@ export async function reviewHarness(
     reviewRound,
     revokes: () => revokes,
   };
+}
+
+export function repositoryActionOf(
+  authorized: Authorized<ActionFacts | ReplyActionFacts>,
+): Authorized<ActionFacts> {
+  const { facts } = authorized;
+  assert.ok("repository" in facts);
+  return { ...authorized, facts };
+}
+
+export function repositoryRequestOf(
+  authorized: Authorized<RequestFacts | ReplyRequestFacts>,
+): Authorized<RequestFacts> {
+  const { facts } = authorized;
+  assert.ok("repository" in facts);
+  return { ...authorized, facts };
 }

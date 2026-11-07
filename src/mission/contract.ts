@@ -64,6 +64,9 @@ export interface MissionBindings {
     project_id: string;
     name: string;
     key: string;
+    platform: string;
+    repository: string;
+    credential: string;
     action: "reply";
   } | null;
   resolveBinding(
@@ -1172,6 +1175,10 @@ export type RepositoryFrozenAction = Extract<
   FrozenAction,
   { action: RepositoryAction }
 >;
+export type ReplyFrozenAction = Extract<
+  FrozenAction,
+  { action: typeof ConversationAction.Reply }
+>;
 export type PullRequestAddress = Extract<
   PlatformAddress,
   { kind: typeof PlatformAddressKind.PullRequest }
@@ -1198,6 +1205,25 @@ export type RequestFacts = {
   human_landing: boolean;
   link_trust: { actor_ids: string[] };
 };
+export type ReplyActionFacts = {
+  frozen_action: ReplyFrozenAction;
+  conversation: {
+    binding_id: string;
+    resource_identity: string;
+    repository: string;
+  };
+  node_id: string;
+  attempt: number;
+};
+export type ReplyRequestFacts = {
+  frozen_action: ReplyFrozenAction;
+  address: Extract<
+    PlatformAddress,
+    { kind: typeof PlatformAddressKind.Comment }
+  >;
+  node_id: string;
+  attempt: number;
+};
 export type Authorized<F> = {
   credential: string | null;
   platform: string;
@@ -1206,6 +1232,8 @@ export type Authorized<F> = {
 };
 export type ActionContext = {
   state: NodeState;
+  node_name: string;
+  request_addresses: RepositoryPlatformAddress[];
   current_assessment: {
     result: AssessmentResult;
     tested_input: TestedInput;

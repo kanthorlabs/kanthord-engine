@@ -13,6 +13,7 @@ import {
   HARNESS_ACTION_KEY,
   HARNESS_CREDENTIAL,
   HARNESS_PLATFORM,
+  repositoryRequestOf,
 } from "../../mission/test-support.ts";
 
 function refuses(fn: () => unknown, reason: string) {
@@ -31,11 +32,13 @@ function serviceHarness(t: TestContext) {
   const evidenceId = h.request();
   const authorize = (service: string) =>
     h.store.transaction((tx) =>
-      h.service.authorizeRequestEvidence(
-        tx,
-        mintServiceIdentity(service),
-        evidenceId,
-        null,
+      repositoryRequestOf(
+        h.service.authorizeRequestEvidence(
+          tx,
+          mintServiceIdentity(service),
+          evidenceId,
+          null,
+        ),
       ),
     );
   return { ...h, evidenceId, authorize };

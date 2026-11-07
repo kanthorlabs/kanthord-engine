@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import {
   type ActionFacts,
+  type GrantFacts,
   GrantKind,
+  type GrantOf,
   type Material,
+  type ReplyActionFacts,
   SshIdentitySubjectKind,
 } from "../custody/contract.ts";
 import { isMachineIdentity, type MachineIdentity } from "../kernel/caller.ts";
 import { commitHeader } from "../kernel/commit-message.ts";
 import { OperationError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { GITHUB_RESULT_CODE_PREFIX } from "../repository/github.ts";
@@ -30,6 +34,14 @@ import {
   releaseSshAccess,
   type SshRelease,
 } from "./action-check.ts";
+import {
+  callReply,
+  finalizeReply,
+  isReplyFacts,
+  isReplyKey,
+  replyCodec,
+  type ReplyHeld,
+} from "./action-reply.ts";
 import { addressCodec, decodeAddress } from "./address-codec.ts";
 import {
   ACTION_TABLE,
@@ -39,6 +51,7 @@ import {
   OutboundOperation,
   type OutboundOperationValue,
   type PlatformAddress,
+  replyRequestKey,
   ResultClass,
   type ResultClassAnswer,
   type ResultClassValue,
@@ -55,6 +68,7 @@ import {
 } from "./outbound.ts";
 
 const GIT_FAILED_CODE = "repository.connector.git_failed";
+const VALIDATION_FAILED_CODE = "gateway.request.validation_failed";
 const ACTION_UNMAPPED_STATUS = 422;
 const MATCHED_PULL_REQUEST_COUNT = 1;
 const PULL_NUMBER_FLOOR = 0;
@@ -67,7 +81,8 @@ const GATE_FILE_LINE_SEPARATOR = "\n";
 
 export type PerformBody = {
   key: string;
-  commit: string;
+  commit: string | null;
+  comment: string | null;
   reused_evidence_id: string | null;
   merge_evidence_id: string | null;
   request_key: string;
@@ -85,6 +100,7 @@ interface Performer {
 interface Held {
   operation: OutboundOperationValue | null;
   facts: Readonly<ActionFacts> | null;
+  reply: ReplyHeld | null;
   ssh: SshAccess | null;
 }
 
@@ -105,11 +121,12 @@ export function performAction(
   assert.ok(identity && isMachineIdentity(identity), "A client performs.");
   assert.ok(claim, "A perform holds a proven execution claim.");
   const performer: Performer = { identity, claim };
-  const held: Held = { operation: null, facts: null, ssh: null };
+  const held: Held = { operation: null, facts: null, reply: null, ssh: null };
+  const replies = isReplyKey(body.key);
   return run({
     requestKey: body.request_key,
     deadlineMs: GIT_WRITE_DEADLINE_MS,
-    resultCodec: addressCodec,
+    resultCodec: replies ? replyCodec : addressCodec,
     authorize: (tx, now) =>
       authorizePerform(dependencies, tx, now, {
         performer,
@@ -117,10 +134,20 @@ export function performAction(
         held,
       }),
     call: (material, scope) =>
-      callAction(dependencies, performer, bound(held), material, scope),
-    readBack: (material, scope) =>
-      readBackAction(dependencies, performer, bound(held), material, scope),
-    finalize: (answer) => finalizePerform(bound(held), answer),
+      held.reply === null
+        ? callAction(dependencies, performer, bound(held), material, scope)
+        : callReply(dependencies, performer.identity, held.reply, {
+            material,
+            scope,
+          }),
+    readBack: replies
+      ? null
+      : (material, scope) =>
+          readBackAction(dependencies, performer, bound(held), material, scope),
+    finalize: (answer) =>
+      held.reply === null
+        ? finalizePerform(bound(held), answer)
+        : finalizeReply(held.reply, answer),
   });
 }
 
@@ -153,6 +180,14 @@ function authorizePerform(
     now,
   );
   const granted = custody.grantFacts(grant);
+  if (isReplyFacts(granted.facts))
+    return authorizeReplyPerform(custody, tx, now, {
+      grant,
+      granted: { ...granted, facts: granted.facts },
+      body,
+      held,
+    });
+  assert.ok(!isReplyKey(body.key), "A reply key names a reply action.");
   const operation =
     body.merge_evidence_id !== null
       ? OutboundOperation.GitHubPullRequestMerge
@@ -176,6 +211,49 @@ function authorizePerform(
         ? sshCredentialOf(ssh)
         : granted.credential,
     material,
+  };
+}
+
+function authorizeReplyPerform(
+  custody: ActionCheckDependencies["custody"],
+  tx: Transaction,
+  now: number,
+  request: {
+    grant: GrantOf<typeof GrantKind.FrozenAction>;
+    granted: GrantFacts<GrantOf<typeof GrantKind.FrozenAction>> & {
+      facts: ReplyActionFacts;
+    };
+    body: PerformBody;
+    held: Held;
+  },
+): OutboundAuthorization {
+  const { grant, granted, body, held } = request;
+  const { facts } = granted;
+  const operation = operationOf(facts.frozen_action.action, grant.platform);
+  assert.equal(operation, OutboundOperation.GitHubIssueComment);
+  assert.ok(granted.credential !== null, "A reply names its credential.");
+  const link = facts.frozen_action.configuration.external_link;
+  if (
+    body.comment === null ||
+    body.request_key !== replyRequestKey(facts.node_id, facts.attempt, link)
+  )
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      VALIDATION_FAILED_CODE,
+      "Request validation failed.",
+    );
+  held.operation = operation;
+  held.reply = {
+    facts,
+    project_id: granted.project_id,
+    request_key: body.request_key,
+    comment: body.comment,
+  };
+  return {
+    operation,
+    project_id: granted.project_id,
+    credential: granted.credential,
+    material: custody.release(tx, grant, now),
   };
 }
 

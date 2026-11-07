@@ -3299,6 +3299,9 @@ test("conversationPolicyOf answers the action reply and its key for a binding wi
       project_id: project.id,
       name: CONVERSATION_NAME,
       key: `${CONVERSATION_NAME}.${ConversationAction.Reply}`,
+      platform: ConversationPlatform.GitHub,
+      repository: CONVERSATION_REPOSITORY,
+      credential: CONVERSATION_CREDENTIAL,
       action: ConversationAction.Reply,
     });
     assert.equal(

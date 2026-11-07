@@ -1021,6 +1021,7 @@ harnesses use HTTP and their machine JWT.
 A tool runs under a session context; disconnect ends the response stream only.
 The Gateway cancels session contexts in shutdown phase 1.
 The action performer derives the request key of its write, and the Intake outbound request holds the idempotency of that key.
+For a `reply` action, the action performer posts after it performs the repository actions of the same call. It asks `intake.action.perform` with `commit: null`, the request key `<node_id>:<attempt>:<link>` (the canonical JSON of the external link) and the body `KanthorD: the review of node <name> passed at attempt <n>.`, followed by one line for each platform address of a request evidence of the attempt. It records the answered `comment` address as the request evidence of the action. A reply that ends with no answer holds no reservation, so a repeat asks Intake again with the same request key. No agent tool writes to a link.
 MCP bodies follow the MCP specification; tool schemas live in `tools/list`.
 
 Target transport is MCP v2 Streamable HTTP mounted on the Gateway listener:

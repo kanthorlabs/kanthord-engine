@@ -1038,6 +1038,9 @@ async function replyFixture(t: TestContext) {
     project_id: h.project_id,
     name: "conversation",
     key: "conversation.reply",
+    platform: "github",
+    repository: "owner/repo",
+    credential: "github",
     action: ConversationAction.Reply,
   });
   h.dependencies.intakeLinks.hasInbound = () => true;

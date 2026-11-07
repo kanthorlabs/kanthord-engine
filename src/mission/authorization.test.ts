@@ -8,11 +8,17 @@ import {
 import { createIdentity } from "../kernel/identity.ts";
 import type { ExecutionClaim } from "../kernel/operation.ts";
 import { canonicalJSON } from "../kernel/json.ts";
+import {
+  type ExternalLink,
+  ExternalLinkKind,
+} from "../kernel/external-link.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
 import {
   AssessmentResult,
   AssetKind,
+  ConversationAction,
   EndState,
+  ExpectedEndState,
   MISSION_SERVICE_NAME,
   MissionErrorCode,
   NodeState,
@@ -43,6 +49,8 @@ import {
   HARNESS_ACTION_KEY,
   HARNESS_CREDENTIAL,
   HARNESS_PLATFORM,
+  repositoryActionOf,
+  repositoryRequestOf,
 } from "./test-support.ts";
 
 test("Mission proves live claim, node, open attempt and binding before granting a frozen action", (t) => {
@@ -148,20 +156,24 @@ function actionHarness(t: TestContext) {
     }> = {},
   ) =>
     h.store.transaction((tx) =>
-      h.service.authorizeFrozenAction(tx, machine, h.claim, {
-        key: PULL_REQUEST_KEY,
-        commit: ASSESSED_COMMIT,
-        reusedEvidenceId: null,
-        mergeEvidenceId: null,
-        ...input,
-      }),
+      repositoryActionOf(
+        h.service.authorizeFrozenAction(tx, machine, h.claim, {
+          key: PULL_REQUEST_KEY,
+          commit: ASSESSED_COMMIT,
+          reusedEvidenceId: null,
+          mergeEvidenceId: null,
+          ...input,
+        }),
+      ),
     );
   const evidence = (
     evidenceId: string,
     claim: ExecutionClaim | null = h.claim,
   ) =>
     h.store.transaction((tx) =>
-      h.service.authorizeRequestEvidence(tx, machine, evidenceId, claim),
+      repositoryRequestOf(
+        h.service.authorizeRequestEvidence(tx, machine, evidenceId, claim),
+      ),
     );
   const otherNode = () => h.examine_id;
   return { ...h, machine, frozen, evidence, otherNode };
@@ -947,4 +959,159 @@ test("a service merge refuses a paused project", (t) => {
     return true;
   };
   refuses(() => h.merge(), "claim_not_live");
+});
+
+const REPLY_RESOURCE = "conversation:github:owner/repo";
+const REPLY_KEY = "conversation.reply.0";
+const REPLY_CREDENTIAL = "conversation-token";
+const REPLY_UPDATE_KEY = "issue_comment:4242";
+const REPLY_LINK_NUMBER = 7;
+
+function replyHarness(t: TestContext) {
+  const h = actionHarness(t);
+  const conversationId = createIdentity("binding");
+  const link: ExternalLink = {
+    kind: ExternalLinkKind.GitHubIssue,
+    resource_identity: REPLY_RESOURCE,
+    number: REPLY_LINK_NUMBER,
+  };
+  const revisionOf = h.dependencies.bindings.getBindingRevision;
+  h.dependencies.bindings.getBindingRevision = (tx, bindingId) =>
+    bindingId === conversationId
+      ? {
+          ...revisionOf(tx, h.repositoryId)!,
+          binding_id: conversationId,
+          name: "conversation",
+          resource_identity: REPLY_RESOURCE,
+        }
+      : revisionOf(tx, bindingId);
+  h.dependencies.bindings.conversationPolicyOf = (_tx, bindingId) => ({
+    binding_id: bindingId,
+    project_id: h.project_id,
+    name: "conversation",
+    key: "conversation.reply",
+    platform: HARNESS_PLATFORM,
+    repository: "owner/repo",
+    credential: REPLY_CREDENTIAL,
+    action: ConversationAction.Reply,
+  });
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare(
+        "UPDATE mission_node_revision SET bindings = ?, external_links = ? WHERE node_id = ?",
+      )
+      .run(
+        JSON.stringify([h.repositoryId, conversationId, h.storageId]),
+        JSON.stringify([link]),
+        h.node_id,
+      ),
+  );
+  const reply = (
+    input: Partial<{
+      commit: string | null;
+      reusedEvidenceId: string | null;
+      mergeEvidenceId: string | null;
+    }> = {},
+  ) =>
+    h.store.transaction((tx) =>
+      h.service.authorizeFrozenAction(tx, h.machine, h.claim, {
+        key: REPLY_KEY,
+        commit: null,
+        reusedEvidenceId: null,
+        mergeEvidenceId: null,
+        ...input,
+      }),
+    );
+  return { ...h, conversationId, link, reply };
+}
+
+test("Mission authorizes a reply action with the conversation credential, the repository and the node attempt", (t) => {
+  const h = replyHarness(t);
+  h.assess();
+  assert.deepEqual(h.reply(), {
+    credential: REPLY_CREDENTIAL,
+    platform: HARNESS_PLATFORM,
+    project_id: h.project_id,
+    facts: {
+      frozen_action: {
+        key: REPLY_KEY,
+        binding_id: h.conversationId,
+        action: ConversationAction.Reply,
+        expected_end_state: ExpectedEndState.Posted,
+        follows: null,
+        configuration: { external_link: h.link },
+      },
+      conversation: {
+        binding_id: h.conversationId,
+        resource_identity: REPLY_RESOURCE,
+        repository: "owner/repo",
+      },
+      node_id: h.node_id,
+      attempt: h.claim.attempt,
+    },
+  });
+});
+
+test("a reply action refuses without a passing assessment and with a commit or a reuse", (t) => {
+  const h = replyHarness(t);
+  refuses(() => h.reply(), "claim_not_live");
+  h.assess();
+  h.assess(AssessmentResult.CriterionNotMet);
+  refuses(() => h.reply(), "claim_not_live");
+  h.assess();
+  refuses(() => h.reply({ commit: ASSESSED_COMMIT }), "node_mismatch");
+  refuses(
+    () => h.reply({ reusedEvidenceId: createIdentity("evidence") }),
+    "node_mismatch",
+  );
+  refuses(
+    () => h.reply({ mergeEvidenceId: createIdentity("evidence") }),
+    "node_mismatch",
+  );
+});
+
+test("a reply request evidence answers no credential and names its node, attempt and comment", (t) => {
+  const h = replyHarness(t);
+  const address = {
+    kind: PlatformAddressKind.Comment,
+    resource_identity: REPLY_RESOURCE,
+    update_key: REPLY_UPDATE_KEY,
+  };
+  const evidenceId = h.request(address, h.node_id, REPLY_KEY);
+  const authorized = h.store.transaction((tx) =>
+    h.service.authorizeRequestEvidence(tx, h.machine, evidenceId, h.claim),
+  );
+  assert.equal(authorized.credential, null);
+  assert.equal(authorized.project_id, h.project_id);
+  assert.deepEqual(authorized.facts, {
+    frozen_action: {
+      key: REPLY_KEY,
+      binding_id: h.conversationId,
+      action: ConversationAction.Reply,
+      expected_end_state: ExpectedEndState.Posted,
+      follows: null,
+      configuration: { external_link: h.link },
+    },
+    address,
+    node_id: h.node_id,
+    attempt: h.claim.attempt,
+  });
+  const other = replyHarness(t);
+  const foreign = other.request(
+    { ...address, resource_identity: "conversation:github:owner/other" },
+    other.node_id,
+    REPLY_KEY,
+  );
+  refuses(
+    () =>
+      other.store.transaction((tx) =>
+        other.service.authorizeRequestEvidence(
+          tx,
+          other.machine,
+          foreign,
+          other.claim,
+        ),
+      ),
+    "node_mismatch",
+  );
 });

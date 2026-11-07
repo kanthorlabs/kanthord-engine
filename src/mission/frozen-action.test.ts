@@ -439,6 +439,9 @@ function replyHarness(
             project_id: projectId,
             name: CONVERSATION_NAME,
             key: `${CONVERSATION_NAME}.${ConversationAction.Reply}`,
+            platform: "github",
+            repository: "owner/repo",
+            credential: "github",
             action: ConversationAction.Reply,
           }
         : null,

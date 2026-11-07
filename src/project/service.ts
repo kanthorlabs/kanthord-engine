@@ -1976,6 +1976,9 @@ export class ProjectService implements Service, ProjectBindings {
       project_id: binding.project_id,
       name: binding.name,
       key: `${binding.name}.${ConversationAction.Reply}`,
+      platform: config.platform,
+      repository: config.repository,
+      credential: config.credential,
       action: ConversationAction.Reply,
     };
   }

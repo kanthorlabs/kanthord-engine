@@ -104,7 +104,9 @@ export interface OutboundRun<TBody> {
   resultCodec: ResultCodec;
   authorize(tx: Transaction, now: number): OutboundAuthorization;
   call(material: Material | null, scope: OutboundScope): Promise<CallAnswer>;
-  readBack(material: Material | null, scope: OutboundScope): Promise<ReadBack>;
+  readBack:
+    | ((material: Material | null, scope: OutboundScope) => Promise<ReadBack>)
+    | null;
   finalize(answer: OutboundAnswer): Finalization<TBody>;
 }
 
@@ -126,7 +128,12 @@ type Admission =
 
 type Outcome =
   | { kind: typeof OutcomeKind.None }
-  | { kind: typeof OutcomeKind.Success; id: string; result: unknown }
+  | {
+      kind: typeof OutcomeKind.Success;
+      id: string;
+      result: unknown;
+      sources: readonly OutboundRequestStateValue[];
+    }
   | { kind: typeof OutcomeKind.Failure; id: string; item: OutboundFailure }
   | { kind: typeof OutcomeKind.Match; id: string; result: unknown };
 
@@ -275,7 +282,15 @@ async function settle<TBody>(
       answer: { ok: true, result: admission.result },
     };
   if (admission.kind === AdmissionKind.Fresh)
-    return callOnce(context, request, material, admission.id);
+    return callOnce(context, request, material, {
+      id: admission.id,
+      sources: PENDING_SOURCES,
+    });
+  if (request.readBack === null)
+    return callOnce(context, request, material, {
+      id: admission.row.id,
+      sources: MATCH_SOURCES,
+    });
   return readBackOnce(logger, context, request, material, admission.row);
 }
 
@@ -283,8 +298,9 @@ async function callOnce<TBody>(
   context: Context,
   request: OutboundRun<TBody>,
   material: Material | null,
-  id: string,
+  target: { id: string; sources: readonly OutboundRequestStateValue[] },
 ): Promise<Settlement> {
+  const { id, sources } = target;
   const race = await withDeadline(context, request.deadlineMs, (scope) =>
     request.call(material, scope),
   );
@@ -293,7 +309,12 @@ async function callOnce<TBody>(
   const answer = race.value;
   if (answer.ok)
     return {
-      outcome: { kind: OutcomeKind.Success, id, result: answer.result },
+      outcome: {
+        kind: OutcomeKind.Success,
+        id,
+        result: answer.result,
+        sources,
+      },
       answer,
     };
   return refused(id, answer);
@@ -347,8 +368,10 @@ async function readBackOnce<TBody>(
   row: OutboundRow,
 ): Promise<Settlement> {
   assert.ok(MATCH_SOURCES.includes(row.state), "A read-back needs a repeat.");
+  const { readBack } = request;
+  assert.ok(readBack !== null, "A read-back names its reader.");
   const race = await withDeadline(context, request.deadlineMs, (scope) =>
-    request.readBack(material, scope),
+    readBack(material, scope),
   );
   if (race.kind === RaceKind.Settled && race.value.match) {
     const result = race.value.result;
@@ -458,7 +481,7 @@ function writeState(tx: Transaction, codec: ResultCodec, outcome: Outcome) {
     return;
   }
   const sources =
-    outcome.kind === OutcomeKind.Success ? PENDING_SOURCES : MATCH_SOURCES;
+    outcome.kind === OutcomeKind.Success ? outcome.sources : MATCH_SOURCES;
   const stored = encodeResult(codec, outcome.result);
   if (!succeed(tx, outcome.id, stored, sources))
     confirmUnchanged(tx, outcome.id, sources);

@@ -749,6 +749,9 @@ export type ConversationPolicy = {
   project_id: string;
   name: string;
   key: string;
+  platform: string;
+  repository: string;
+  credential: string;
   action: typeof ConversationAction.Reply;
 };
 export type RepositoryPolicy = {
