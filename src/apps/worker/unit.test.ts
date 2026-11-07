@@ -24,6 +24,23 @@ import { spawnSync } from "node:child_process";
 import { createIdentity } from "../../kernel/identity.ts";
 import { InstanceCleanableKind } from "../../kernel/cleanup.ts";
 import { WorkerErrorCode } from "../../worker/contract.ts";
+import { simpleGit } from "simple-git";
+import {
+  deriveHandoverKeys,
+  handoverAad,
+  sealEnvelope,
+} from "../../kernel/handover.ts";
+import { Diagnostic } from "../../kernel/errors.ts";
+import {
+  fauxAssistantMessage,
+  fauxToolCall,
+  implementFixture,
+  transport as localTransport,
+  scriptedModelRuntime,
+  scriptedProvider,
+  STEPS_KEY,
+  task,
+} from "../../worker/unit/test-support.ts";
 
 const CLIENT_SECRET_BYTES = 32;
 const SETTLE_WAIT_MS = 50;
@@ -34,6 +51,8 @@ const ZOMBIE = "Z";
 const LINE_END = "\n";
 const GONE_POLL_MS = 10;
 const FIRST_PULL = 1;
+const SINGLE_RELEASE = 1;
+const REMOTE_ADDRESS = "git@github.com:owner/repo.git";
 const REGISTRATION = {
   runtime_identity: "worker_registration_01ARZ3NDEKTSV4RRFFQ69G5FAA",
   resource_identity: "worker:kanthord:test",
@@ -565,4 +584,262 @@ test("an order_unknown answer drops only its own result and the other result rea
     toolOutputOrder(known),
   ]);
   assert.deepEqual(reported(), [[], [unknown], [known]]);
+});
+
+const STOPPED_FILE = "stopped.txt";
+const STOPPED_CONTENT = "stopped";
+const WORKER_STOPPED = "worker_stopped";
+const LIVE_STOP = "worker.stop.execution_live";
+const REVIEWER = "reviewer@1";
+const RELEASE_FAILED = {
+  type: OperationResultType.Failure,
+  status: HttpStatus.InternalServerError,
+  error: {
+    error: { code: "scheduler.release.failed", message: "Release failed." },
+    request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+  },
+};
+
+async function liveStopUnit(
+  t: TestContext,
+  options: { evaluation: boolean; release?: unknown },
+) {
+  const h = await implementFixture(t, [task("a", "true")], []);
+  const repository = h.input.setup.repositories[0]!;
+  const snapshot = (
+    await simpleGit(h.bare).revparse(["refs/heads/main"])
+  ).trim();
+  const setup = {
+    ...h.input.setup,
+    worker_name: options.evaluation ? REVIEWER : h.input.setup.worker_name,
+    repositories: [{ ...repository, address: REMOTE_ADDRESS }],
+  };
+  const claim = {
+    ...testClaim(),
+    execution_id: setup.execution_id,
+    node_id: h.input.claim.node_id,
+    node_branch: h.input.claim.node_branch,
+  };
+  const secret = randomBytes(CLIENT_SECRET_BYTES).toString("base64");
+  const credential = {
+    credential_id: setup.agents[0]!.credential_id,
+    provider_id: "anthropic",
+    credential: { type: "api_key", key: STEPS_KEY },
+  };
+  const entered = Promise.withResolvers<void>();
+  const resume = Promise.withResolvers<void>();
+  const blocked = async () => {
+    entered.resolve();
+    await resume.promise;
+    return fauxAssistantMessage("stopped");
+  };
+  const provider = scriptedProvider(
+    options.evaluation
+      ? [blocked]
+      : [
+          fauxAssistantMessage(
+            fauxToolCall("bash", {
+              command: `printf ${STOPPED_CONTENT} > ${STOPPED_FILE}`,
+            }),
+            { stopReason: "toolUse" },
+          ),
+          blocked,
+        ],
+  );
+  const events: string[] = [];
+  const releases: unknown[] = [];
+  const assessments: unknown[] = [];
+  let pulls = 0;
+  const content = {
+    name: "node",
+    requirement: "work",
+    criterion: "met",
+    verifications: ["true"],
+    bindings: [repository.binding_id],
+  };
+  const assetId = "evidence_asset_01ARZ3NDEKTSV4RRFFQ69G5FAA";
+  const address = { kind: "produced", sha256: "a".repeat(64) };
+  const transport = {
+    gateway: {
+      openapi: async () =>
+        completed(stringify({ info: { version: packageVersion() } })),
+    },
+    worker: {
+      register: async () => completed(REGISTRATION),
+      heartbeat: async () => completed(null),
+      handover: async () =>
+        completed(
+          sealEnvelope(
+            deriveHandoverKeys(secret).handover,
+            handoverAad(claim.execution_id, claim.claimant.runtime_identity),
+            { items: [credential], ssh_identities: [] },
+          ),
+        ),
+      "execution.setup.get": async () => completed(setup),
+      "action.request": async () => completed({ items: [] }),
+      "execution.failed_check.get": async () => completed({ items: [] }),
+      credential: async () => completed({}),
+      "registration.deregister": async (input: {
+        params: { runtime_identity: string };
+      }) => {
+        events.push("deregister");
+        return completed({
+          runtime_identity: input.params.runtime_identity,
+          registered: false,
+        });
+      },
+    },
+    scheduler: {
+      workPull: async (_input: unknown, call: { context?: Context }) => {
+        if (++pulls > FIRST_PULL) return cancelled(call.context);
+        return completed({ kind: WorkPullKind.Claimed, execution: claim });
+      },
+      claimGet: async () => completed({ claim_state: "running" }),
+      executionRelease: async (input: { body: unknown }) => {
+        events.push("release");
+        releases.push(input.body);
+        return options.release ?? completed({});
+      },
+    },
+    mission: {
+      "execution.pinnedRevision.get": async () =>
+        completed({ content, tasks: h.revision.tasks }),
+      "execution.evidence.list": async () =>
+        completed({
+          items: options.evaluation
+            ? [
+                {
+                  id: "placed",
+                  assets: [{ id: assetId, kind: "produced", address }],
+                },
+                {
+                  id: "snapshot",
+                  assets: [
+                    {
+                      id: "evidence_asset_01ARZ3NDEKTSV4RRFFQ69G5FAB",
+                      kind: "repository",
+                      address: {
+                        kind: "repository",
+                        binding_id: repository.binding_id,
+                        commit: snapshot,
+                      },
+                    },
+                  ],
+                },
+              ]
+            : [],
+          next_cursor: null,
+        }),
+      "execution.evidence.asset.content.get": async () =>
+        completed({
+          asset_id: assetId,
+          address,
+          data: Buffer.from("report").toString("base64"),
+          encoding: "base64",
+          media_type: "text/markdown",
+        }),
+      "execution.rework_assessment.get": async () => completed(null),
+      "execution.review_round.get": async () =>
+        completed({ round: 1, final: false, review_base: null, findings: [] }),
+      "evidence.submit": async () =>
+        completed({ evidence: { id: "verification" } }),
+      "assessment.submit": async (input: { body: unknown }) => {
+        assessments.push(input.body);
+        return completed({ outcome: { id: "outcome" } });
+      },
+    },
+    tracking: { telemetryWrite: async () => completed({}) },
+  } as unknown as WorkerTransport;
+  const env = environmentOf(t);
+  const unit = new WorkerUnit({
+    bindings: [{ transport, client_secret: secret }],
+    directories: directoriesOf(env),
+    env,
+    log: () => {},
+    model_runtime_factory: scriptedModelRuntime(provider),
+    repository_transport: {
+      ...localTransport,
+      clone: (_address, ...input) => localTransport.clone(h.bare, ...input),
+      cloneSnapshot: (_address, ...input) =>
+        localTransport.cloneSnapshot(h.bare, ...input),
+      pushNodeBranch: async (...input) => {
+        events.push("push");
+        return localTransport.pushNodeBranch(...input);
+      },
+    },
+  });
+  const running = unit.run();
+  t.after(async () => {
+    resume.resolve();
+    await unit.abandon();
+  });
+  await Promise.race([
+    entered.promise,
+    running.then((error) => {
+      throw error ?? new Error("Unit ended before the execution blocked");
+    }),
+  ]);
+  return {
+    unit,
+    running,
+    resume: () => resume.resolve(),
+    bare: h.bare,
+    claim,
+    events,
+    releases,
+    assessments,
+  };
+}
+
+test("a stop during a live steps execution pushes the checkpoint, releases with worker_stopped and then deregisters", async (t) => {
+  const live = await liveStopUnit(t, { evaluation: false });
+  const stopping = live.unit.stop();
+  live.resume();
+  assert.equal(await stopping, null);
+  assert.equal(await live.running, null);
+  assert.deepEqual(live.events, ["push", "release", "deregister"]);
+  assert.equal(live.releases.length, SINGLE_RELEASE);
+  assert.deepEqual(live.releases[0], {
+    further_work: true,
+    stop: {
+      reason: WORKER_STOPPED,
+      code: null,
+      cause: (live.releases[0] as { stop: { cause: unknown } }).stop.cause,
+    },
+  });
+  assert.equal(
+    await simpleGit(live.bare).show([
+      `refs/heads/${live.claim.node_branch}:${STOPPED_FILE}`,
+    ]),
+    STOPPED_CONTENT,
+  );
+});
+
+test("a stop during a live evaluation releases with worker_stopped and submits no assessment", async (t) => {
+  const live = await liveStopUnit(t, { evaluation: true });
+  const stopping = live.unit.stop();
+  live.resume();
+  assert.equal(await stopping, null);
+  assert.equal(await live.running, null);
+  assert.deepEqual(live.events, ["release", "deregister"]);
+  assert.equal(
+    (live.releases[0] as { stop: { reason: string } }).stop.reason,
+    WORKER_STOPPED,
+  );
+  assert.deepEqual(live.assessments, []);
+});
+
+test("a stop whose release fails answers worker.stop.execution_live with the execution id and deregisters nothing", async (t) => {
+  const live = await liveStopUnit(t, {
+    evaluation: false,
+    release: RELEASE_FAILED,
+  });
+  const stopping = live.unit.stop();
+  live.resume();
+  const error = await stopping;
+  assert.ok(error instanceof Diagnostic);
+  assert.equal(error.code, LIVE_STOP);
+  assert.ok(error.message.includes(live.claim.execution_id));
+  await live.running;
+  assert.deepEqual(live.events, ["push", "release"]);
 });

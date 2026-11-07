@@ -351,6 +351,33 @@ test("an archive row neither counts nor resets the failure count and a null stop
   assert.equal(sequence(null), ONE_LOSS);
 });
 
+test("a worker_stopped row leaves the failure count unchanged also at the failure limit", (t) => {
+  const h = schedulerHarness(t);
+  const node = createIdentity("node");
+  h.store.transaction((tx) => {
+    const at = (offset: number) =>
+      executionFixture({
+        node_id: node,
+        expired_at: FIXTURE_DEADLINE + 100,
+        created_at: FIXTURE_NOW + offset,
+      });
+    for (let index = 0; index < THIRD_FAILURE; index++) {
+      const failed = at(index + 1);
+      insertExecution(tx, failed);
+      endExecution(tx, failed.execution_id, FIXTURE_NOW + index + 1, STOP);
+    }
+    const stopped = at(THIRD_FAILURE + 1);
+    insertExecution(tx, stopped);
+    endExecution(tx, stopped.execution_id, FIXTURE_NOW + 10, {
+      reason: ExecutionStopReason.WorkerStopped,
+      code: null,
+    });
+    const next = at(THIRD_FAILURE + 2);
+    insertExecution(tx, next);
+    assert.equal(consecutiveFailures(tx, next, false), THIRD_FAILURE);
+  });
+});
+
 test("pause facts answer the counts of the count functions and the last stop of the attempt", (t) => {
   const h = schedulerHarness(t);
   const nodeId = createIdentity("node");

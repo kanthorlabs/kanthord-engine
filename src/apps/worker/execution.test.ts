@@ -5,7 +5,11 @@ import { writeFile } from "node:fs/promises";
 import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
-import { background, CancellationContext } from "../../kernel/context.ts";
+import {
+  background,
+  CancellationContext,
+  cancelled,
+} from "../../kernel/context.ts";
 import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
 import {
   deriveHandoverKeys,
@@ -18,6 +22,7 @@ import type { Diagnostic } from "../../kernel/errors.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import {
   EndReason,
+  ExecutionStop,
   type NativeExecutionInput,
   WorkspaceRoot,
 } from "../../worker/unit/index.ts";
@@ -1060,4 +1065,72 @@ test("a host that reaches setup resets the pull backoff", async (t) => {
   });
   assert.equal(await host.running, null);
   assert.equal(reset.mock.callCount(), ONE_ENTRY);
+});
+
+test("a stop context reaches the execution with the given stop and keeps the context of the execution open", async (t) => {
+  const api = httpTransport("http://127.0.0.1:1");
+  const claim = testClaim();
+  const credential = {
+    credential_id: "credential_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    provider_id: "anthropic",
+    credential: { type: "api_key", key: "test_host_key" },
+  };
+  t.mock.method(api.worker, "handover", async () => ({
+    type: OperationResultType.Completed,
+    status: 200,
+    data: sealEnvelope(
+      deriveHandoverKeys(SECRET).handover,
+      handoverAad(claim.execution_id, claim.claimant.runtime_identity),
+      { items: [credential], ssh_identities: [] },
+    ),
+  }));
+  t.mock.method(api.worker, "execution.setup.get", async () => ({
+    type: OperationResultType.Completed,
+    status: 200,
+    data: {
+      execution_id: claim.execution_id,
+      worker_name: "coder@1",
+      agents: [],
+      templates: SHIPPED_TEMPLATES,
+      resource_budget: { turns: 200, wall_time_ms: 7200000 },
+      intent: ExecutionIntent.Implement,
+      repositories: [],
+    },
+  }));
+  const context = new CancellationContext();
+  const stops = new CancellationContext();
+  const entered = Promise.withResolvers<void>();
+  const requested = new ExecutionStop(EndReason.WorkerStopped, null, null);
+  const seen: { reason: unknown; contextOpen: boolean }[] = [];
+  const hosted = hostExecution(
+    {
+      api,
+      claim,
+      clientSecret: SECRET,
+      context,
+      stop: stops,
+      workspaces: WorkspaceRoot.open(temporary(t)),
+      transport: new RepositoryComponent(),
+      modelRuntimeFactory: async () => {
+        throw new Error("Unexpected inference");
+      },
+      hostHome: temporary(t),
+      env: hostEnvironment(),
+      log: () => {},
+    },
+    async (native) => {
+      entered.resolve();
+      await cancelled(native.stop!.signal);
+      seen.push({
+        reason: native.stop!.signal.reason,
+        contextOpen: !native.context.signal.aborted,
+      });
+      return { kind: "released", furtherWork: true };
+    },
+  );
+  await entered.promise;
+  stops.cancel(requested);
+  assert.equal(await hosted, null);
+  context.cancel();
+  assert.deepEqual(seen, [{ reason: requested, contextOpen: true }]);
 });

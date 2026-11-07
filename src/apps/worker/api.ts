@@ -65,7 +65,8 @@ export async function retryIndeterminate<T>(
     attempt++
   ) {
     result = await call(createIdempotencyKey());
-    if (result.type !== OperationResultType.Indeterminate) return result;
+    if (result.type !== OperationResultType.Indeterminate || result.closed)
+      return result;
     const delay = backoff.next();
     if (Date.now() + delay >= deadline) return result;
     await sleep(delay, context);
