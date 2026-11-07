@@ -39,6 +39,7 @@ const TARGET_COUNT = 12;
 const REPORT_BUDGET_MS = 40;
 const ONE_MS = 1;
 const CHECK_DEADLINE_MS = 20;
+const UNFIRED_FACTOR = 3;
 const ACCOUNT = "health-reader";
 const SICK_REASON = "status=500";
 const SICK_TARGET = "sick";
@@ -456,6 +457,61 @@ test("a never-settling check expires, releases its slot and retains its unknown 
     ResourceStatus.Healthy,
   );
   assert.ok(contexts.every((context) => context.signal.reason));
+});
+
+test("an injected check deadline ends a check with deadline_exceeded only when it fires", async (t) => {
+  const deadline = new AbortController();
+  const started = Promise.withResolvers<Context>();
+  const f = fixture(t, [
+    {
+      owner: OWNER_LLM,
+      entry: entry("held", {
+        check: (context) => {
+          started.resolve(context);
+          return new Promise(() => {});
+        },
+      }),
+    },
+  ]);
+  const limits = {
+    ...LIMITS,
+    checkDeadlineMs: CHECK_DEADLINE_MS,
+    checkDeadline: deadline.signal,
+  };
+  const pending = f.report(limits);
+  const context = await started.promise;
+  await delay(CHECK_DEADLINE_MS * UNFIRED_FACTOR);
+  assert.equal(context.signal.aborted, false);
+  deadline.abort();
+  const report = await pending;
+  assert.deepEqual(report.shared.llm.global.held, {
+    status: ResourceStatus.Unknown,
+    capability: CAPABILITY,
+    failure_reason: ResourceFailureReason.DeadlineExceeded,
+  });
+  assert.equal(context.signal.aborted, true);
+});
+
+test("an injected check deadline that never fires replaces checkDeadlineMs", async (t) => {
+  const deadline = new AbortController();
+  const f = fixture(t, [
+    {
+      owner: OWNER_LLM,
+      entry: entry("slow", {
+        check: async () => {
+          await delay(CHECK_DEADLINE_MS * UNFIRED_FACTOR);
+          return ResourceStatus.Healthy;
+        },
+      }),
+    },
+  ]);
+  const limits = {
+    ...LIMITS,
+    checkDeadlineMs: CHECK_DEADLINE_MS,
+    checkDeadline: deadline.signal,
+  };
+  const report = await f.report(limits);
+  assert.equal(report.shared.llm.global.slow?.status, ResourceStatus.Healthy);
 });
 
 test("a check of every owner that exceeds its deadline carries deadline_exceeded over its observed reason", async (t) => {

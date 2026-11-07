@@ -624,7 +624,8 @@ function framedRuntime(t: TestContext) {
     readFileSync(stdinFile, "utf8")
       .split("\n")
       .filter(Boolean)
-      .map((line) => serverFrameSchema.parse(JSON.parse(line)));
+      .map((line) => serverFrameSchema.parse(JSON.parse(line)))
+      .filter((frame) => frame.kind !== FrameKind.Ping);
   const framesCount = async (count: number) => {
     for (let round = 0; round < POLL_ROUNDS; round++) {
       if (frames().length >= count) return frames();
