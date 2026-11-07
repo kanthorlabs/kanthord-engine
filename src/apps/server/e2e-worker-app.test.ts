@@ -15,6 +15,7 @@ import {
 } from "../../worker/contract.ts";
 import { environment, kanthord, spawnKanthord } from "./cli-test-support.ts";
 import {
+  createMachine,
   enableCoveringAgents,
   gatewayFixture,
   holdCoveringCredential,
@@ -39,6 +40,7 @@ const WORKER_ARGS = ["serve", "worker"];
 const INSTANCE_CONFIG_VARIABLE = "KANTHORD_WORKER_CONFIG";
 const INSTANCE_NAME = "laptop";
 const INSTANCE_WORKER = "coder@1";
+const MACHINE_NAME = "workstation";
 const ROTATED_REVISIONS = 2;
 const INSTANCE_BINDING = "laptop-coder";
 const PROJECT_NAMES = ["instance-a", "instance-b"];
@@ -265,6 +267,7 @@ async function liveInstance(t: TestContext) {
     assert.equal(result.code, EXIT_SUCCESS, result.stderr);
     return JSON.parse(result.stdout) as T;
   };
+  await createMachine(fixture, MACHINE_NAME);
   const created = await run<{ id: string; created: string }>(
     [
       "worker",
@@ -275,6 +278,8 @@ async function liveInstance(t: TestContext) {
       INSTANCE_WORKER,
       "--placement",
       InstancePlacement.Worker,
+      "--machine",
+      MACHINE_NAME,
       "--output",
     ],
     { ...human, XDG_CONFIG_HOME: env.XDG_CONFIG_HOME },
@@ -479,6 +484,7 @@ test("llm credential create and rotate with --holder seal locally with the insta
     assert.equal(result.code, EXIT_SUCCESS, result.stderr);
     return JSON.parse(result.stdout);
   };
+  await createMachine(fixture, MACHINE_NAME);
   await run(
     [
       "worker",
@@ -489,6 +495,8 @@ test("llm credential create and rotate with --holder seal locally with the insta
       INSTANCE_WORKER,
       "--placement",
       InstancePlacement.Worker,
+      "--machine",
+      MACHINE_NAME,
       "--output",
     ],
     { ...human, XDG_CONFIG_HOME: env.XDG_CONFIG_HOME },

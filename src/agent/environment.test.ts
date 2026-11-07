@@ -21,3 +21,11 @@ test("the child environment holds no instance configuration, token or endpoint",
   });
   assert.deepEqual(env, { PATH: "/bin" });
 });
+
+test("the child environment holds no machine configuration", () => {
+  const env = childEnvironment({
+    PATH: "/bin",
+    KANTHORD_MACHINE_CONFIG: "eyJuYW1lIjoid29ya3N0YXRpb24ifQ",
+  });
+  assert.deepEqual(env, { PATH: "/bin" });
+});

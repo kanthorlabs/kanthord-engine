@@ -16,6 +16,7 @@ import { completed } from "./cli-test-support.ts";
 import { gatewayFixture } from "./test-support.ts";
 
 const INSTANCE = "laptop";
+const MACHINE = "workstation";
 const CREDENTIAL_NAME = "team-openai";
 const PLATFORM = "openai";
 const CAPABILITY = "model-list read";
@@ -43,6 +44,13 @@ test("a live worker instance checks its own bad key and the instance page answer
   const f = await gatewayFixture(t);
   const worker = httpClient(workerOperations, f.endpoint, f.token);
   const llm = httpClient(llmOperations, f.endpoint, f.token);
+  completed(
+    await worker["machine.create"]({
+      params: {},
+      query: {},
+      body: { name: MACHINE },
+    }),
+  );
   const created = completed(
     await worker["instance.create"]({
       params: {},
@@ -51,6 +59,7 @@ test("a live worker instance checks its own bad key and the instance page answer
         name: INSTANCE,
         worker: "coder@1",
         placement: InstancePlacement.Worker,
+        machine: MACHINE,
         endpoint: f.endpoint,
       },
     }),

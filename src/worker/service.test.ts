@@ -40,6 +40,7 @@ import {
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
 import { approvedModels, Platform } from "../llm/platforms.ts";
 import { endInstance, insertInstance } from "./instance-rows.ts";
+import { insertMachineFor } from "./machine-test-support.ts";
 import { workerMigrations } from "./migrations.ts";
 import {
   AgentComponent,
@@ -2079,6 +2080,10 @@ function poolFixture(
             name,
             worker: WORKER,
             placement,
+            machine:
+              placement === InstancePlacement.Worker
+                ? insertMachineFor(tx, name, clock)
+                : null,
             public_key: null,
             fingerprint: null,
           },
@@ -2198,6 +2203,7 @@ test("startPool sweeps with the name of each archived server and container insta
         worker: WORKER,
         revision: FIRST_REVISION + 1,
         placement: InstancePlacement.Worker,
+        machine: insertMachineFor(tx, f.nameOf(FIRST_INSTANCE), ARCHIVED_AT),
         public_key: null,
         fingerprint: null,
       },
@@ -3054,6 +3060,7 @@ test("instanceOf answers the placement of a live instance and instanceKeyOf answ
         name: "laptop",
         worker: WORKER_NAME,
         placement: InstancePlacement.Worker,
+        machine: insertMachineFor(tx, "laptop", NOW),
         public_key: KEY,
         fingerprint: FINGERPRINT,
       },

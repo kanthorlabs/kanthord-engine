@@ -44,6 +44,7 @@ import {
 
 const TEST_TIMEOUT_MS = 180000;
 const INSTANCE = "laptop";
+const MACHINE = "workstation";
 const CONNECTION_A = "host-a";
 const CONNECTION_B = "host-b";
 const SUPERSEDED_CODE = "worker.instance.superseded";
@@ -166,12 +167,17 @@ async function instanceProject(t: TestContext) {
     },
   );
   await provisionRepositoryCredentials(fixture);
+  await call(workerOperations["machine.create"], {
+    ...empty,
+    body: { name: MACHINE },
+  });
   const instance = await call(workerOperations["instance.create"], {
     ...empty,
     body: {
       name: INSTANCE,
       worker: "coder@1",
       placement: InstancePlacement.Worker,
+      machine: MACHINE,
       endpoint: fixture.endpoint,
     },
   });

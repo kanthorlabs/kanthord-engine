@@ -21,6 +21,7 @@ import { completed } from "./cli-test-support.ts";
 import { gatewayFixture } from "./test-support.ts";
 
 const INSTANCE = "laptop";
+const MACHINE = "workstation";
 const SERVER_INSTANCE = "hosted";
 const SERVER_SECRET = "server-instance-secret";
 const CREDENTIAL_NAME = "claude";
@@ -56,6 +57,13 @@ test("a live worker instance signs in through a fake pi-ai copy_code flow, and t
   const f = await gatewayFixture(t);
   const worker = httpClient(workerOperations, f.endpoint, f.token);
   const llm = httpClient(llmOperations, f.endpoint, f.token);
+  completed(
+    await worker["machine.create"]({
+      params: {},
+      query: {},
+      body: { name: MACHINE },
+    }),
+  );
   const created = completed(
     await worker["instance.create"]({
       params: {},
@@ -64,6 +72,7 @@ test("a live worker instance signs in through a fake pi-ai copy_code flow, and t
         name: INSTANCE,
         worker: "coder@1",
         placement: InstancePlacement.Worker,
+        machine: MACHINE,
         endpoint: f.endpoint,
       },
     }),

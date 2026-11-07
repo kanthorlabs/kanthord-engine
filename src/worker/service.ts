@@ -47,6 +47,7 @@ import {
   HANDOVER_REFRESH_WAIT_MS,
   type InstanceIssuer,
   InstancePlacement,
+  type InstanceRecord,
   type IntakeActions,
   type IntentOf,
   type MissionActions,
@@ -138,6 +139,7 @@ import {
   readLatestInstance,
   readLiveInstance,
   readLiveInstances,
+  readLiveInstancesOfMachine,
   readLiveServerInstances,
 } from "./instance-rows.ts";
 import { WorkerFootprint } from "./footprint.ts";
@@ -149,6 +151,9 @@ import {
 } from "../kernel/cleanup.ts";
 import { packageVersion } from "../kernel/version.ts";
 import { declareInstances } from "./instance-operations.ts";
+import { declareMachines } from "./machine-operations.ts";
+import { WorkerMachines } from "./machines.ts";
+import { readLiveMachine } from "./machine-rows.ts";
 import type { AgentPromptFacts } from "./prompt-telemetry.ts";
 import { unpinnedPromptCommits } from "./prompt-pin.ts";
 
@@ -379,6 +384,28 @@ export class WorkerService implements Service {
       fingerprint: instance.fingerprint,
     };
   }
+  machineKeyOf(tx: Transaction, name: string): InstanceKey | null {
+    const machine = readLiveMachine(tx, name);
+    if (!machine) return null;
+    return {
+      name: machine.name,
+      public_key: machine.public_key,
+      fingerprint: machine.fingerprint,
+    };
+  }
+  machineOf(tx: Transaction, instanceName: string): string | null {
+    const instance = readLiveInstance(tx, instanceName);
+    return instance?.placement === InstancePlacement.Worker
+      ? (instance.machine ?? null)
+      : null;
+  }
+  connectedInstancesOf(name: string): InstanceRecord[] {
+    return this.instances.connectedAmong(
+      this.dependencies.store.transaction((tx) =>
+        readLiveInstancesOfMachine(tx, name),
+      ),
+    );
+  }
   instanceConnected(name: string): boolean {
     return this.instances.connected(name);
   }
@@ -428,6 +455,7 @@ export class WorkerService implements Service {
   private readonly pool?: Pool;
   private poolStarted = false;
   readonly instances: WorkerInstances;
+  readonly machines: WorkerMachines;
   readonly footprint: WorkerFootprint;
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
@@ -449,6 +477,11 @@ export class WorkerService implements Service {
       stateDevice: dependencies.stateDevice,
       platform: process.platform,
       logger: dependencies.pool?.logger ?? pino({ level: "silent" }),
+    });
+    this.machines = new WorkerMachines({
+      archiveHeld: (tx, holder, now) =>
+        dependencies.instanceCopies?.archiveHeld(tx, holder, now),
+      connectionOf: (instanceId) => this.instances.connectionOf(instanceId),
     });
     this.instances = new WorkerInstances({
       store: dependencies.store,
@@ -1521,6 +1554,7 @@ export class WorkerService implements Service {
           }),
         ),
     });
+    declareMachines(registry, { machines: this.machines });
     const worker = this.registrations;
     assert.equal(workerOperations.register.service, WORKER_SERVICE_NAME);
     assert.equal(workerOperations.register.access, AccessPolicy.Client);
