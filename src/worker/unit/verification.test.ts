@@ -575,11 +575,13 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(run.verification.results[0]?.timed_out, true);
   });
 
+  const AFTER_PASS_LIMIT_MS = 3000;
+
   test("a command over the command limit stops with environment_failed and verification_timeout", async (t) => {
     const { input } = countedInput(temporary(t), ["true", "sleep 30"]);
     const run = await runVerificationsWithOutput({
       ...input,
-      commandLimitMs: 500,
+      commandLimitMs: AFTER_PASS_LIMIT_MS,
     });
     const stop = environmentStop(run);
     assert.ok(stop instanceof ExecutionStop);
