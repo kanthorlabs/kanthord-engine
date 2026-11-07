@@ -189,6 +189,12 @@ generated OpenAPI.
 | `execution get <execution-id>`                                                                         | `scheduler.execution.get`     | `GET /api/scheduler/execution/:execution_id`                  | `human`; read                           |
 | `execution release <execution-id> --file <path> [--idempotency-key <key>]`                             | `scheduler.execution.release` | `POST /api/scheduler/execution/:execution_id/release`         | `client`; owned live execution mutation |
 
+A worker unit runs one `work pull` loop for each registration, and the loops
+share one round. A claim by one registration of the unit cancels the open pulls
+of the other registrations of that unit. The server answers each cancelled pull
+with `503 gateway.invocation.cancelled` and writes no claim. The `Request
+finished` record of such a pull holds `status: 499` and `wire_status: 503`.
+
 These read operations provide operational visibility through the invocation
 chain, with no authorization to inspect service tables directly. `claim get` provides a
 machine-scoped view of the claim held in an execution record; it introduces

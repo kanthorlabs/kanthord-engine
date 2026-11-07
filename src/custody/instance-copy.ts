@@ -71,7 +71,7 @@ export function sealedCopyReporter(
 ) {
   let stored: SealedObject = item.sealed;
   let held = normalizeCredential(opened.credential);
-  return async (refresh: { credential: Credential }) => {
+  const refreshed = async (refresh: { credential: Credential }) => {
     const next = normalizeCredential(refresh.credential);
     const sealed =
       digest(next) === digest(held)
@@ -90,4 +90,9 @@ export function sealedCopyReporter(
     stored = sealed;
     held = next;
   };
+  const adopt = (sealed: SealedObject, adopted: OpenedCopy) => {
+    stored = sealed;
+    held = normalizeCredential(adopted.credential);
+  };
+  return Object.assign(refreshed, { adopt });
 }

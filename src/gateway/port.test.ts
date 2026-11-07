@@ -15,11 +15,14 @@ import {
   StoreName,
 } from "../kernel/operation.ts";
 import { Store } from "../kernel/store.ts";
+import { mintMachineIdentity } from "../kernel/caller-mint.ts";
+import { createIdentity } from "../kernel/identity.ts";
 import { intakeOperations } from "../intake/contract.ts";
 import { workerOperations } from "../worker/contract.ts";
 import type { PortAnswer } from "./client.ts";
 import type { RecordedResponse } from "./idempotency.ts";
 import { createInvocation, gatewayMigrations, servePort } from "./index.ts";
+import { TEST_PROJECT_ID } from "./test-support.ts";
 import type { Invocation, InvocationOptions } from "./invocation.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
 
@@ -37,6 +40,13 @@ const BODY_TOO_LARGE = "gateway.request.body_too_large";
 const INVALID_JSON = "gateway.request.invalid_json";
 const UNKNOWN_FAILURE = "gateway.invocation.unknown";
 const FAILED_MESSAGE = "Request failed";
+const FINISHED_MESSAGE = "Request finished";
+const CANCELLED_CODE = "gateway.invocation.cancelled";
+const FORBIDDEN_CODE = "test.forbidden";
+const CLIENT_CLOSED_STATUS = 499;
+const CLIENT_NAME = "dashboard";
+const RESOURCE_IDENTITY = "worker:kanthord:binding";
+const ISSUED_AT = 1;
 
 interface Recorded {
   id: string;
@@ -290,4 +300,107 @@ test("a port call passes its logger and logs an unknown failure at the error lev
     (failed[0]!.err as { message: string }).message,
     failure.message,
   );
+});
+
+function failedWith(status: number, code: string): RecordedResponse {
+  return {
+    status,
+    body: { error: { code, message: code, details: null }, request_id: "r" },
+  };
+}
+
+function loggedConnection(t: TestContext, invocation: Invocation) {
+  const records: Record<string, unknown>[] = [];
+  const { port1, port2 } = new MessageChannel();
+  servePort(
+    port1,
+    invocation,
+    () => TOKEN,
+    pino(
+      { level: "info" },
+      { write: (line) => records.push(JSON.parse(line)) },
+    ),
+  );
+  const answers: PortAnswer[] = [];
+  port2.on("message", (answer: PortAnswer) => answers.push(answer));
+  stopAfter(t, () => {
+    port1.close();
+    port2.close();
+  });
+  const finished = () =>
+    records.filter((record) => record.msg === FINISHED_MESSAGE);
+  return { port: port2, answers, finished };
+}
+
+test("a failed port call logs its code and its caller, and a successful call logs no code and no wire status", async (t) => {
+  const clientId = createIdentity("client_identity");
+  const identity = mintMachineIdentity(
+    {
+      clientId,
+      name: CLIENT_NAME,
+      resourceIdentity: RESOURCE_IDENTITY,
+      issuedAt: ISSUED_AT,
+      projectId: TEST_PROJECT_ID,
+    },
+    createIdentity("jti"),
+  );
+  let denied = true;
+  const { invocation } = fakeInvocation(async (options) => {
+    options.onIdentity?.(identity);
+    const response = denied
+      ? failedWith(HttpStatus.Forbidden, FORBIDDEN_CODE)
+      : { status: HttpStatus.OK, body: {} };
+    denied = false;
+    return response;
+  });
+  const { port, answers, finished } = loggedConnection(t, invocation);
+  for (const callId of ["call-1", "call-2"]) {
+    port.postMessage(callOf(workerOperations.heartbeat, callId, null));
+    await answerOf(answers, callId, t.signal);
+  }
+  const [failed, succeeded] = finished();
+  assert.equal(failed!.level, pino.levels.values.info);
+  assert.equal(failed!.status, HttpStatus.Forbidden);
+  assert.equal(failed!.code, FORBIDDEN_CODE);
+  assert.equal(failed!.caller, clientId);
+  assert.equal(failed!.wire_status, undefined);
+  assert.equal(succeeded!.status, HttpStatus.OK);
+  assert.equal(succeeded!.code, undefined);
+  assert.equal(succeeded!.wire_status, undefined);
+});
+
+test("a port cancel logs status 499 with the wire status 503, and the answer stays 503", async (t) => {
+  const { invocation, calls } = fakeInvocation(
+    (options) =>
+      new Promise((resolve) => {
+        if (options.context)
+          addAbortListener(options.context.signal, () =>
+            resolve(failedWith(HttpStatus.ServiceUnavailable, CANCELLED_CODE)),
+          );
+      }),
+  );
+  const { port, answers, finished } = loggedConnection(t, invocation);
+  port.postMessage(callOf(workerOperations.heartbeat, "call-1", null));
+  await eventually(() => calls[0], t.signal);
+  port.postMessage({ call_id: "call-1", cancel: true });
+  const answer = await answerOf(answers, "call-1", t.signal);
+  assert.equal(answer.status, HttpStatus.ServiceUnavailable);
+  assert.equal(errorCode(answer), CANCELLED_CODE);
+  const [record] = finished();
+  assert.equal(record!.status, CLIENT_CLOSED_STATUS);
+  assert.equal(record!.wire_status, HttpStatus.ServiceUnavailable);
+  assert.equal(record!.code, CANCELLED_CODE);
+});
+
+test("a cancel that the invocation raises without a port cancel logs status 503 and no wire status", async (t) => {
+  const { invocation } = fakeInvocation(async () =>
+    failedWith(HttpStatus.ServiceUnavailable, CANCELLED_CODE),
+  );
+  const { port, answers, finished } = loggedConnection(t, invocation);
+  port.postMessage(callOf(workerOperations.heartbeat, "call-1", null));
+  await answerOf(answers, "call-1", t.signal);
+  const [record] = finished();
+  assert.equal(record!.status, HttpStatus.ServiceUnavailable);
+  assert.equal(record!.wire_status, undefined);
+  assert.equal(record!.code, CANCELLED_CODE);
 });

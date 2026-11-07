@@ -22,7 +22,9 @@ import {
   CURSOR_PAGE_SIZE_MISMATCH_CODE,
   decodeCursor,
   decodeGitHubEvent,
+  decodeGitHubLinkUpdate,
   DeliveryKind,
+  describeGitHubEvent,
   DispatchPhase,
   encodeCursor,
   ExpectedEndState,
@@ -30,6 +32,7 @@ import {
   GITHUB_API_VERSION,
   type GitHubCall,
   githubCheckpointSchema,
+  githubConversationCheckpointSchema,
   GitHubPlatform,
   type GitHubRequest,
   type GitHubTarget,
@@ -37,6 +40,22 @@ import {
   repositoryOf,
   ReviewState,
 } from "./github.ts";
+import {
+  COMMENT_CREATED_AT_MS,
+  COMMENT_ID,
+  COMMENT_LOGIN,
+  COMMENT_NUMBER,
+  COMMENT_RESOURCE_IDENTITY,
+  COMMENT_UPDATE_KEY,
+  COMMENT_URL,
+  COMMENT_USER_ID,
+  commentBytes,
+  commentUser,
+  LISTED_EVENT,
+  listedComment,
+  WEBHOOK_EVENT,
+  webhookComment,
+} from "./github-comment-test-support.ts";
 import { platformImplementations } from "./index.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
 
@@ -634,6 +653,8 @@ test("the token reaches no failure and no log record", async (t) => {
 const HEAD_SHA = "89abcdef0123456789abcdef0123456789abcdef";
 const OLDER_SHA = "fedcba9876543210fedcba9876543210fedcba98";
 const NO_REVIEWS: unknown[] = [];
+const NO_TRUSTED: string[] = [];
+const TRUSTED_REVIEWERS = ["1", "2", "3"];
 const NO_CHECKS = { head_commit: HEAD_SHA, pending: [], failed: [] };
 const FAILED_AT_HEAD = {
   head_commit: HEAD_SHA,
@@ -897,6 +918,7 @@ test("foldPullRequest folds the three states of a pull request", () => {
       NO_REVIEWS,
       NO_CHECKS,
       merged,
+      NO_TRUSTED,
     ),
     { end_state: CheckEndState.Expected, landed_commits: [MERGE_COMMIT] },
   );
@@ -906,11 +928,18 @@ test("foldPullRequest folds the three states of a pull request", () => {
       NO_REVIEWS,
       NO_CHECKS,
       merged,
+      NO_TRUSTED,
     ),
     { end_state: CheckEndState.Other, landed_commits: [] },
   );
   assert.deepEqual(
-    github.foldPullRequest(PULL_REQUEST_BODY, NO_REVIEWS, NO_CHECKS, merged),
+    github.foldPullRequest(
+      PULL_REQUEST_BODY,
+      NO_REVIEWS,
+      NO_CHECKS,
+      merged,
+      NO_TRUSTED,
+    ),
     {
       end_state: CheckEndState.None,
       landed_commits: [],
@@ -922,10 +951,17 @@ test("foldPullRequest folds the three states of a pull request", () => {
       NO_REVIEWS,
       NO_CHECKS,
       ExpectedEndState.BaseBranchPushed,
+      NO_TRUSTED,
     ),
   );
   assert.throws(() =>
-    github.foldPullRequest({ number: 7 }, NO_REVIEWS, NO_CHECKS, merged),
+    github.foldPullRequest(
+      { number: 7 },
+      NO_REVIEWS,
+      NO_CHECKS,
+      merged,
+      NO_TRUSTED,
+    ),
   );
   assert.throws(
     () =>
@@ -934,6 +970,7 @@ test("foldPullRequest folds the three states of a pull request", () => {
         NO_REVIEWS,
         NO_CHECKS,
         merged,
+        NO_TRUSTED,
       ),
     { name: "ZodError" },
   );
@@ -1586,6 +1623,7 @@ test("an open pull request with merge conflicts folds to the conflict end state"
       NO_REVIEWS,
       NO_CHECKS,
       ExpectedEndState.PullRequestMerged,
+      NO_TRUSTED,
     ).end_state,
     CheckEndState.Conflict,
   );
@@ -1595,6 +1633,7 @@ test("an open pull request with merge conflicts folds to the conflict end state"
       NO_REVIEWS,
       NO_CHECKS,
       ExpectedEndState.PullRequestMerged,
+      NO_TRUSTED,
     ).end_state,
     CheckEndState.None,
   );
@@ -1604,6 +1643,7 @@ test("an open pull request with merge conflicts folds to the conflict end state"
       NO_REVIEWS,
       NO_CHECKS,
       ExpectedEndState.PullRequestMerged,
+      NO_TRUSTED,
     ).end_state,
     CheckEndState.None,
   );
@@ -1658,6 +1698,7 @@ test("a pull request whose first read holds a null mergeable and whose second re
       NO_REVIEWS,
       NO_CHECKS,
       ExpectedEndState.PullRequestMerged,
+      NO_TRUSTED,
     ).end_state,
     CheckEndState.Conflict,
   );
@@ -1678,6 +1719,7 @@ test("a null mergeable after the third read folds to none", async (t) => {
       NO_REVIEWS,
       NO_CHECKS,
       ExpectedEndState.PullRequestMerged,
+      NO_TRUSTED,
     ).end_state,
     CheckEndState.None,
   );
@@ -1712,7 +1754,12 @@ test("a deadline that leaves less time than the delay ends the reads", async (t)
 });
 
 function review(reviewer: number, state: string, commit = HEAD_SHA) {
-  return { id: reviewer, user: { id: reviewer }, state, commit_id: commit };
+  return {
+    id: reviewer,
+    user: { id: reviewer, type: "User" },
+    state,
+    commit_id: commit,
+  };
 }
 
 function decision(reviews: unknown[], body: object = PULL_REQUEST_BODY) {
@@ -1721,6 +1768,7 @@ function decision(reviews: unknown[], body: object = PULL_REQUEST_BODY) {
     reviews,
     NO_CHECKS,
     ExpectedEndState.PullRequestMerged,
+    TRUSTED_REVIEWERS,
   ).end_state;
 }
 
@@ -1734,6 +1782,7 @@ function foldWithChecks(
     reviews,
     checks,
     ExpectedEndState.PullRequestMerged,
+    TRUSTED_REVIEWERS,
   ).end_state;
 }
 
@@ -1851,6 +1900,7 @@ test("an open pull request without a head commit or with a malformed review list
         {},
         NO_CHECKS,
         ExpectedEndState.PullRequestMerged,
+        NO_TRUSTED,
       ),
     { name: "ZodError" },
   );
@@ -1929,7 +1979,7 @@ function changeRequestServer(
 test("getChangeRequests answers the current change requests with their review comments", async (t) => {
   const login = (reviewer: number) => ({
     ...review(reviewer, ReviewState.ChangesRequested),
-    user: { id: reviewer, login: `reviewer-${reviewer}` },
+    user: { id: reviewer, login: `reviewer-${reviewer}`, type: "User" },
     body: `fix ${reviewer}`,
     submitted_at: "2026-10-12T00:00:00Z",
   });
@@ -1951,7 +2001,12 @@ test("getChangeRequests answers the current change requests with their review co
     ),
   );
   const github = new GitHubPlatform({ baseUrl: server.baseUrl });
-  const result = await github.getChangeRequests(call(), TARGET, { number: 7 });
+  const result = await github.getChangeRequests(
+    call(),
+    TARGET,
+    { number: 7 },
+    TRUSTED_REVIEWERS,
+  );
   assert.deepEqual(result, {
     ok: true,
     value: {
@@ -1986,11 +2041,11 @@ test("getChangeRequests answers a failure for a failed call or an unreadable bod
   );
   const refused = await new GitHubPlatform({
     baseUrl: failing.baseUrl,
-  }).getChangeRequests(call(), TARGET, { number: 7 });
+  }).getChangeRequests(call(), TARGET, { number: 7 }, TRUSTED_REVIEWERS);
   assert.equal(!refused.ok && refused.class, ResultClass.FinalRefusal);
   const changes = {
     ...review(1, ReviewState.ChangesRequested),
-    user: { id: 1, login: "reviewer-1" },
+    user: { id: 1, login: "reviewer-1", type: "User" },
   };
   for (const [reviews, comments] of [
     [[{ ...changes, id: "one" }], {}],
@@ -2003,7 +2058,7 @@ test("getChangeRequests answers a failure for a failed call or an unreadable bod
     );
     const unread = await new GitHubPlatform({
       baseUrl: server.baseUrl,
-    }).getChangeRequests(call(), TARGET, { number: 7 });
+    }).getChangeRequests(call(), TARGET, { number: 7 }, TRUSTED_REVIEWERS);
     assert.equal(unread.ok, false);
   }
 });
@@ -2282,4 +2337,586 @@ test("getRequiredChecks answers an unreadable body for a body of an unexpected s
     baseUrl: server.baseUrl,
   }).getRequiredChecks(call(), TARGET, { number: 7 });
   assert.equal(!result.ok && result.class, ResultClass.RetryableRefusal);
+});
+
+interface LinkInput {
+  resource_identity?: string;
+  event: Uint8Array;
+  metadata: unknown;
+}
+
+function linkOf(input: LinkInput): unknown {
+  return decodeGitHubLinkUpdate({
+    resource_identity: COMMENT_RESOURCE_IDENTITY,
+    ...input,
+  });
+}
+
+function webhookLink(body: unknown): unknown {
+  return linkOf({
+    event: commentBytes(body),
+    metadata: { event: WEBHOOK_EVENT },
+  });
+}
+
+function listedLink(body: unknown): unknown {
+  return linkOf({
+    event: commentBytes(body),
+    metadata: { event: LISTED_EVENT },
+  });
+}
+
+const EXPECTED_LINK = {
+  kind: "github_issue",
+  resource_identity: COMMENT_RESOURCE_IDENTITY,
+  number: COMMENT_NUMBER,
+};
+const EXPECTED_UPDATE = {
+  external_link: EXPECTED_LINK,
+  update_key: COMMENT_UPDATE_KEY,
+  actor_id: String(COMMENT_USER_ID),
+  actor_automated: false,
+  occurred_at: COMMENT_CREATED_AT_MS,
+  mentions: [],
+};
+const MENTION_LIMIT = 50;
+const OTHER_ISSUE_NUMBER = 88;
+const FIRST_MENTION = "user0";
+const USER_PATH = "/user";
+const ISSUE_COMMENT_PAGE_SIZE = 100;
+const EXCESS_MENTIONS = 60;
+
+function mentionsIn(body: string): unknown {
+  const update = webhookLink(webhookComment({ body })) as {
+    mentions: string[];
+  };
+  return update.mentions;
+}
+
+test("decodeGitHubLinkUpdate decodes a created webhook comment and a listed comment to the same link, key and facts", () => {
+  assert.deepEqual(webhookLink(webhookComment()), EXPECTED_UPDATE);
+  assert.deepEqual(listedLink(listedComment()), EXPECTED_UPDATE);
+});
+
+test("decodeGitHubLinkUpdate takes the number of a listed comment from the last segment of issue_url", () => {
+  const update = listedLink(
+    listedComment({
+      issue_url: `https://api.github.com/repos/octo/widgets/issues/${OTHER_ISSUE_NUMBER}`,
+    }),
+  ) as { external_link: { number: number } };
+  assert.equal(update.external_link.number, OTHER_ISSUE_NUMBER);
+});
+
+test("decodeGitHubLinkUpdate answers null for an edited and a deleted comment, a closed issue and a broken body", () => {
+  assert.equal(webhookLink(webhookComment({}, { action: "edited" })), null);
+  assert.equal(webhookLink(webhookComment({}, { action: "deleted" })), null);
+  assert.equal(
+    linkOf({
+      event: commentBytes(webhookComment({}, { action: "closed" })),
+      metadata: { event: "issues" },
+    }),
+    null,
+  );
+  assert.equal(
+    linkOf({
+      event: commentBytes(listedComment()),
+      metadata: { event: "IssueCommentEvent" },
+    }),
+    null,
+  );
+  assert.equal(
+    linkOf({
+      event: new Uint8Array(Buffer.from("{broken", "utf8")),
+      metadata: { event: WEBHOOK_EVENT },
+    }),
+    null,
+  );
+  assert.equal(webhookLink(webhookComment({ id: 0 })), null);
+  assert.equal(webhookLink(webhookComment({ created_at: "yesterday" })), null);
+  assert.equal(webhookLink(webhookComment({ created_at: undefined })), null);
+  assert.equal(listedLink(listedComment({ created_at: undefined })), null);
+});
+
+test("decodeGitHubLinkUpdate answers null for another repository and for a repository resource", () => {
+  assert.equal(
+    webhookLink(
+      webhookComment({}, { repository: { full_name: "octo/other" } }),
+    ),
+    null,
+  );
+  assert.equal(
+    listedLink(
+      listedComment({
+        issue_url: "https://api.github.com/repos/octo/other/issues/7",
+      }),
+    ),
+    null,
+  );
+  assert.equal(
+    listedLink(listedComment({ issue_url: "https://api.github.com/user" })),
+    null,
+  );
+  assert.equal(
+    linkOf({
+      resource_identity: "repository:github:octo/widgets",
+      event: commentBytes(webhookComment()),
+      metadata: { event: WEBHOOK_EVENT },
+    }),
+    null,
+  );
+});
+
+test("decodeGitHubLinkUpdate marks a Bot user, a [bot] login and an app comment as automated", () => {
+  const automated = [
+    { user: commentUser({ type: "Bot" }) },
+    { user: commentUser({ login: "dependabot[bot]" }) },
+    { performed_via_github_app: { id: 5 } },
+  ];
+  for (const comment of automated) {
+    const update = webhookLink(webhookComment(comment)) as {
+      actor_automated: boolean;
+    };
+    assert.equal(update.actor_automated, true);
+  }
+});
+
+test("decodeGitHubLinkUpdate answers a null actor_id when user.id is absent", () => {
+  const update = webhookLink(
+    webhookComment({ user: commentUser({ id: undefined }) }),
+  ) as { actor_id: string | null; actor_automated: boolean };
+  assert.equal(update.actor_id, null);
+  assert.equal(update.actor_automated, false);
+});
+
+test("decodeGitHubLinkUpdate decodes a comment on a pull request to a github_issue link", () => {
+  const update = webhookLink(
+    webhookComment(
+      {},
+      { issue: { number: COMMENT_NUMBER, pull_request: { url: "x" } } },
+    ),
+  );
+  assert.deepEqual(update, EXPECTED_UPDATE);
+});
+
+test("decodeGitHubLinkUpdate answers the lower-case distinct logins of the mentions", () => {
+  assert.deepEqual(mentionsIn("hi @Ulrich and @octo-cat"), [
+    "ulrich",
+    "octo-cat",
+  ]);
+  assert.deepEqual(mentionsIn("@ulrich @Ulrich @ULRICH"), ["ulrich"]);
+  assert.deepEqual(mentionsIn("mail me at a@example.com"), []);
+  assert.deepEqual(mentionsIn(`@${"a".repeat(40)}`), []);
+});
+
+test("decodeGitHubLinkUpdate ignores a mention inside a code span and a fenced block", () => {
+  assert.deepEqual(mentionsIn("run `@ulrich` now"), []);
+  assert.deepEqual(mentionsIn("run ``a ` @ulrich`` now"), []);
+  assert.deepEqual(mentionsIn("```\n@ulrich\n```"), []);
+  assert.deepEqual(mentionsIn("~~~sh\n@ulrich\n~~~\n@octo"), ["octo"]);
+  assert.deepEqual(mentionsIn("```\n@ulrich"), []);
+  assert.deepEqual(mentionsIn("`code` @ulrich"), ["ulrich"]);
+});
+
+test("decodeGitHubLinkUpdate keeps at most 50 mentions", () => {
+  const body = Array.from(
+    { length: EXCESS_MENTIONS },
+    (_, index) => `@user${index}`,
+  ).join(" ");
+  const mentions = mentionsIn(body) as string[];
+  assert.equal(mentions.length, MENTION_LIMIT);
+  assert.equal(mentions[0], FIRST_MENTION);
+});
+
+test("describeGitHubEvent answers the author, the whole body, the URL and the time of a comment of each source", () => {
+  const body = "x".repeat(3000);
+  const expected = {
+    author: COMMENT_LOGIN,
+    body,
+    url: COMMENT_URL,
+    occurred_at: COMMENT_CREATED_AT_MS,
+  };
+  assert.deepEqual(
+    describeGitHubEvent({
+      event: commentBytes(webhookComment({ body })),
+      metadata: { event: WEBHOOK_EVENT },
+    }),
+    expected,
+  );
+  assert.deepEqual(
+    describeGitHubEvent({
+      event: commentBytes(listedComment({ body })),
+      metadata: { event: LISTED_EVENT },
+    }),
+    expected,
+  );
+});
+
+test("describeGitHubEvent answers null for an edited comment, another event and a broken body", () => {
+  assert.equal(
+    describeGitHubEvent({
+      event: commentBytes(webhookComment({}, { action: "edited" })),
+      metadata: { event: WEBHOOK_EVENT },
+    }),
+    null,
+  );
+  assert.equal(
+    describeGitHubEvent({
+      event: commentBytes(webhookComment()),
+      metadata: { event: "issues" },
+    }),
+    null,
+  );
+  assert.equal(
+    describeGitHubEvent({
+      event: new Uint8Array(Buffer.from("{broken", "utf8")),
+      metadata: { event: LISTED_EVENT },
+    }),
+    null,
+  );
+});
+
+const COMMENTS_PATH = "/repos/octo/widgets/issues/comments";
+const ISSUE_COMMENTS_PATH = "/repos/octo/widgets/issues/7/comments";
+const POST_ID = 5005;
+const LAST_PAGE = 3;
+const TWO_REQUESTS = 2;
+
+test("listIssueComments sends the query and the ETag, reads one page and answers the items and the ETag", async (t) => {
+  const server = await platform(
+    t,
+    answer(200, [listedComment(), listedComment({ id: COMMENT_ID + 1 })], {
+      etag: SECOND_ETAG,
+      link: '<http://127.0.0.1/repos/octo/widgets/issues/comments?page=2>; rel="next"',
+    }),
+  );
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const result = await github.listIssueComments(call(), TARGET, {
+    etag: FIRST_ETAG,
+  });
+  assert.equal(server.requests.length, SINGLE_REQUEST);
+  const request = server.requests[0];
+  assert.equal(request?.method, HttpMethod.Get);
+  assert.equal(request?.headers["if-none-match"], FIRST_ETAG);
+  assert.equal(request?.headers.authorization, `token ${TOKEN}`);
+  const url = new URL(request?.url ?? "", "http://127.0.0.1");
+  assert.equal(url.pathname, COMMENTS_PATH);
+  assert.deepEqual(Object.fromEntries(url.searchParams), {
+    sort: "updated",
+    direction: "desc",
+    per_page: "100",
+  });
+  assert.ok(result.ok && !result.value.notModified);
+  assert.equal(result.value.etag, SECOND_ETAG);
+  assert.deepEqual(
+    result.value.events.map((event) => [event.id, event.type]),
+    [
+      [COMMENT_UPDATE_KEY, LISTED_EVENT],
+      ["issue_comment:1002", LISTED_EVENT],
+    ],
+  );
+  assert.deepEqual(
+    JSON.parse(bodyText(result.value.events[0]?.body ?? new Uint8Array())),
+    listedComment(),
+  );
+});
+
+test("listIssueComments sends no ETag for a null ETag and answers notModified for a 304", async (t) => {
+  const first = await platform(t, answer(200, [], { etag: FIRST_ETAG }));
+  await new GitHubPlatform({ baseUrl: first.baseUrl }).listIssueComments(
+    call(),
+    TARGET,
+    { etag: null },
+  );
+  assert.equal(first.requests[0]?.headers["if-none-match"], undefined);
+  const unchanged = await platform(t, (_request, response) => {
+    response.writeHead(NOT_MODIFIED, {
+      etag: FIRST_ETAG,
+      "x-poll-interval": "75",
+    });
+    response.end();
+  });
+  const result = await new GitHubPlatform({
+    baseUrl: unchanged.baseUrl,
+  }).listIssueComments(call(), TARGET, { etag: FIRST_ETAG });
+  assert.deepEqual(result, {
+    ok: true,
+    value: { notModified: true, poll_interval_ms: 75_000 },
+  });
+});
+
+test("listIssueComments fails an item without a positive id or an issue_url with the unreadable-body class", async (t) => {
+  const bodies: unknown[] = [
+    [listedComment({ id: undefined })],
+    [listedComment({ id: 0 })],
+    [listedComment({ id: "1001" })],
+    [listedComment({ issue_url: undefined })],
+    { id: COMMENT_ID },
+  ];
+  const server = await platform(t, (request, response, count) => {
+    answer(200, bodies[count - SINGLE_REQUEST])(request, response, count);
+  });
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  for (let index = 0; index < bodies.length; index += 1) {
+    const result = await github.listIssueComments(call(), TARGET, {
+      etag: null,
+    });
+    assert.equal(!result.ok && result.class, ResultClass.RetryableRefusal);
+    assert.equal(!result.ok && result.status, null);
+  }
+});
+
+test("listIssueComments answers the waits of a 429 and a 403 with no remaining requests", async (t) => {
+  const limited = await platform(
+    t,
+    answer(429, { message: "slow down" }, { "retry-after": "7" }),
+  );
+  const limitedResult = await new GitHubPlatform({
+    baseUrl: limited.baseUrl,
+  }).listIssueComments(call(), TARGET, { etag: null });
+  assert.equal(
+    !limitedResult.ok && limitedResult.class,
+    ResultClass.RetryableRefusal,
+  );
+  assert.deepEqual(rateLimitOf(limitedResult), { wait_ms: 7000 });
+  t.mock.timers.enable({ apis: ["Date"], now: RESET_NOW_MS });
+  const exhausted = await platform(
+    t,
+    answer(
+      403,
+      { message: "API rate limit exceeded" },
+      {
+        "x-ratelimit-remaining": "0",
+        "x-ratelimit-reset": String(RESET_NOW_MS / MS_PER_SECOND + 90),
+      },
+    ),
+  );
+  const exhaustedResult = await new GitHubPlatform({
+    baseUrl: exhausted.baseUrl,
+  }).listIssueComments(call(), TARGET, { etag: null });
+  assert.deepEqual(rateLimitOf(exhaustedResult), { wait_ms: 90_000 });
+});
+
+test("listIssueCommentsOf reads one page when the answer holds no last link", async (t) => {
+  const server = await platform(
+    t,
+    answer(200, [listedComment(), listedComment({ id: COMMENT_ID + 1 })]),
+  );
+  const result = await new GitHubPlatform({
+    baseUrl: server.baseUrl,
+  }).listIssueCommentsOf(call(), TARGET, COMMENT_NUMBER);
+  assert.equal(server.requests.length, SINGLE_REQUEST);
+  const url = new URL(server.requests[0]?.url ?? "", "http://127.0.0.1");
+  assert.equal(url.pathname, ISSUE_COMMENTS_PATH);
+  assert.deepEqual(Object.fromEntries(url.searchParams), { per_page: "100" });
+  assert.ok(result.ok);
+  assert.deepEqual(
+    result.value.map((event) => [event.id, event.type]),
+    [
+      [COMMENT_UPDATE_KEY, LISTED_EVENT],
+      ["issue_comment:1002", LISTED_EVENT],
+    ],
+  );
+});
+
+test("listIssueCommentsOf reads the last page too and makes at most two requests", async (t) => {
+  const server = await platform(t, (request, response, count) => {
+    const first = count === SINGLE_REQUEST;
+    answer(
+      200,
+      [listedComment({ id: first ? COMMENT_ID : POST_ID })],
+      first
+        ? {
+            link: `<http://127.0.0.1/repositories/1/issues/7/comments?per_page=100&page=2>; rel="next", <http://127.0.0.1/repositories/1/issues/7/comments?per_page=100&page=${LAST_PAGE}>; rel="last"`,
+          }
+        : {},
+    )(request, response, count);
+  });
+  const result = await new GitHubPlatform({
+    baseUrl: server.baseUrl,
+  }).listIssueCommentsOf(call(), TARGET, COMMENT_NUMBER);
+  assert.equal(server.requests.length, TWO_REQUESTS);
+  assert.equal(query(server.requests[1]).get("page"), String(LAST_PAGE));
+  assert.equal(
+    query(server.requests[1]).get("per_page"),
+    String(ISSUE_COMMENT_PAGE_SIZE),
+  );
+  assert.ok(result.ok);
+  assert.deepEqual(
+    result.value.map((event) => event.id),
+    [COMMENT_UPDATE_KEY, `issue_comment:${POST_ID}`],
+  );
+});
+
+test("listIssueCommentsOf fails an item without an id with the unreadable-body class", async (t) => {
+  const server = await platform(
+    t,
+    answer(200, [listedComment({ id: undefined })]),
+  );
+  const result = await new GitHubPlatform({
+    baseUrl: server.baseUrl,
+  }).listIssueCommentsOf(call(), TARGET, COMMENT_NUMBER);
+  assert.equal(!result.ok && result.class, ResultClass.RetryableRefusal);
+});
+
+test("postIssueComment posts the body and answers the update key and the actor id", async (t) => {
+  const server = await platform(
+    t,
+    answer(201, { id: POST_ID, user: { id: COMMENT_USER_ID }, body: "ok" }),
+  );
+  const result = await new GitHubPlatform({
+    baseUrl: server.baseUrl,
+  }).postIssueComment(call(), TARGET, COMMENT_NUMBER, "thanks");
+  assert.equal(server.requests.length, SINGLE_REQUEST);
+  assert.equal(server.requests[0]?.method, HttpMethod.Post);
+  assert.equal(server.requests[0]?.url, ISSUE_COMMENTS_PATH);
+  assert.deepEqual(JSON.parse(server.bodies[0] ?? ""), { body: "thanks" });
+  assert.deepEqual(result, {
+    ok: true,
+    value: {
+      update_key: `issue_comment:${POST_ID}`,
+      actor_id: String(COMMENT_USER_ID),
+    },
+  });
+});
+
+test("postIssueComment answers an unknown outcome for an answer without an id and a final refusal for a 404", async (t) => {
+  const unreadable = await platform(t, answer(201, { body: "ok" }));
+  const unreadableResult = await new GitHubPlatform({
+    baseUrl: unreadable.baseUrl,
+  }).postIssueComment(call(), TARGET, COMMENT_NUMBER, "thanks");
+  assert.equal(
+    !unreadableResult.ok && unreadableResult.class,
+    ResultClass.UnknownOutcome,
+  );
+  const missing = await platform(t, answer(404, { message: "Not Found" }));
+  const missingResult = await new GitHubPlatform({
+    baseUrl: missing.baseUrl,
+  }).postIssueComment(call(), TARGET, COMMENT_NUMBER, "thanks");
+  assert.equal(
+    !missingResult.ok && missingResult.class,
+    ResultClass.FinalRefusal,
+  );
+});
+
+test("readTokenAccount reads the user and answers the decimal text of its id", async (t) => {
+  const server = await platform(
+    t,
+    answer(200, { id: COMMENT_USER_ID, login: COMMENT_LOGIN }),
+  );
+  const result = await new GitHubPlatform({
+    baseUrl: server.baseUrl,
+  }).readTokenAccount(call());
+  assert.equal(server.requests.length, SINGLE_REQUEST);
+  assert.equal(server.requests[0]?.method, HttpMethod.Get);
+  assert.equal(server.requests[0]?.url, USER_PATH);
+  assert.deepEqual(result, { ok: true, value: String(COMMENT_USER_ID) });
+});
+
+test("readTokenAccount answers the unreadable-body class for an answer without an id", async (t) => {
+  const server = await platform(t, answer(200, { login: COMMENT_LOGIN }));
+  const result = await new GitHubPlatform({
+    baseUrl: server.baseUrl,
+  }).readTokenAccount(call());
+  assert.equal(!result.ok && result.class, ResultClass.RetryableRefusal);
+});
+
+test("githubConversationCheckpointSchema loads a missing comments_etag as null", () => {
+  assert.deepEqual(githubConversationCheckpointSchema.parse({}), {
+    comments_etag: null,
+  });
+  assert.deepEqual(
+    githubConversationCheckpointSchema.parse({ comments_etag: FIRST_ETAG }),
+    { comments_etag: FIRST_ETAG },
+  );
+  assert.ok(
+    !githubConversationCheckpointSchema.safeParse({ comments_etag: 1 }).success,
+  );
+});
+
+const TRUSTED_ID = 9;
+const UNTRUSTED_ID = 7;
+const BOT_ID = 5;
+const TRUSTED_ONLY = [String(TRUSTED_ID)];
+const USER_TYPE = "User";
+const BOT_TYPE = "Bot";
+
+function reviewOf(reviewer: number, type: string) {
+  return {
+    ...review(reviewer, ReviewState.ChangesRequested),
+    user: { id: reviewer, login: `user-${reviewer}`, type },
+    body: `fix ${reviewer}`,
+    submitted_at: "2026-10-12T00:00:00Z",
+  };
+}
+
+async function reviewersOf(
+  t: TestContext,
+  reviews: object[],
+  trusted: string[],
+) {
+  const server = await platform(
+    t,
+    changeRequestServer(reviews, {
+      [`${REVIEWS_PATH}/${TRUSTED_ID}/comments`]: [],
+    }),
+  );
+  const result = await new GitHubPlatform({
+    baseUrl: server.baseUrl,
+  }).getChangeRequests(call(), TARGET, { number: 7 }, trusted);
+  assert.ok(result.ok);
+  return result.value.change_requests.map((item) => item.reviewer);
+}
+
+test("getChangeRequests keeps the change request of a trusted user and drops an untrusted user and a bot", async (t) => {
+  assert.deepEqual(
+    await reviewersOf(
+      t,
+      [
+        reviewOf(TRUSTED_ID, USER_TYPE),
+        reviewOf(UNTRUSTED_ID, USER_TYPE),
+        reviewOf(BOT_ID, BOT_TYPE),
+      ],
+      TRUSTED_ONLY,
+    ),
+    [`user-${TRUSTED_ID}`],
+  );
+});
+
+test("getChangeRequests drops a bot review of a trusted id and trusts nobody without link_trust", async (t) => {
+  assert.deepEqual(
+    await reviewersOf(t, [reviewOf(TRUSTED_ID, BOT_TYPE)], TRUSTED_ONLY),
+    [],
+  );
+  assert.deepEqual(
+    await reviewersOf(t, [reviewOf(TRUSTED_ID, USER_TYPE)], NO_TRUSTED),
+    [],
+  );
+});
+
+test("foldPullRequest counts the change request of a trusted user and ignores an untrusted user and a bot", () => {
+  const github = new GitHubPlatform();
+  const fold = (reviews: unknown[], trusted: string[]) =>
+    github.foldPullRequest(
+      PULL_REQUEST_BODY,
+      reviews,
+      NO_CHECKS,
+      ExpectedEndState.PullRequestMerged,
+      trusted,
+    ).end_state;
+  assert.equal(
+    fold([reviewOf(TRUSTED_ID, USER_TYPE)], TRUSTED_ONLY),
+    CheckEndState.Other,
+  );
+  assert.equal(
+    fold([reviewOf(UNTRUSTED_ID, USER_TYPE)], TRUSTED_ONLY),
+    CheckEndState.None,
+  );
+  assert.equal(
+    fold([reviewOf(TRUSTED_ID, BOT_TYPE)], TRUSTED_ONLY),
+    CheckEndState.None,
+  );
+  assert.equal(
+    fold([reviewOf(TRUSTED_ID, USER_TYPE)], NO_TRUSTED),
+    CheckEndState.None,
+  );
 });

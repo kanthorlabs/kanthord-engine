@@ -43,6 +43,7 @@ import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const INSTANCE = "laptop";
 const OTHER_INSTANCE = "desktop";
+const MACHINE = "workstation";
 const SERVER_INSTANCE = "hosted";
 const CONTAINER_INSTANCE = "boxed";
 const CREDENTIAL_NAME = "claude";
@@ -57,6 +58,7 @@ const NO_CREDENTIALS = 0;
 const ONE_ROW = 1;
 const KEPT_METADATA = { note: "kept" };
 const VERSION_STEP = 1;
+const INSTANCE_START_VERSION = CLOCK_START + CLOCK_START;
 const OAUTH_SECRET = {
   refresh: "private-refresh-token",
   access: "private-access-token",
@@ -64,7 +66,7 @@ const OAUTH_SECRET = {
 };
 const Code = {
   InstanceUnavailable: "credential.login.instance_unavailable",
-  InstanceUnknown: "llm.credential.instance_unknown",
+  HolderUnknown: "llm.credential.holder_unknown",
   LoginPending: "credential.login.pending",
   BrowserUnavailable: "credential.login.browser_unavailable",
   NotFound: "credential.login.not_found",
@@ -85,7 +87,7 @@ async function fixture(t: TestContext) {
     string,
     { id: string; key: InstanceKey; private_key: Buffer; public_key: Buffer }
   >();
-  for (const name of [INSTANCE, OTHER_INSTANCE]) {
+  for (const name of [INSTANCE, OTHER_INSTANCE, MACHINE]) {
     const pair = await generateX25519KeyPair();
     pairs.set(name, {
       id: createIdentity("worker_instance"),
@@ -98,12 +100,22 @@ async function fixture(t: TestContext) {
       public_key: pair.public_key,
     });
   }
+  const machines = new Map([
+    [INSTANCE, MACHINE],
+    [OTHER_INSTANCE, MACHINE],
+  ]);
   const instanceKeys = {
     keyOf: (_tx: unknown, name: string) => pairs.get(name)?.key ?? null,
+    machineOf: (_tx: unknown, name: string) => machines.get(name) ?? null,
+    instancesOfMachine: (_tx: unknown, machine: string) =>
+      [...machines]
+        .filter(([, value]) => value === machine)
+        .map(([name]) => name),
     nameOf: (_tx: unknown, instanceId: string) =>
       [...pairs.values()].find(({ id }) => id === instanceId)?.key.name ?? null,
   };
   const connected = new Set([INSTANCE, OTHER_INSTANCE]);
+  const heartbeatOrder = [OTHER_INSTANCE, INSTANCE];
   const workChanges: string[] = [];
   const pinned = new Set<string>();
   let now = CLOCK_START;
@@ -156,6 +168,10 @@ async function fixture(t: TestContext) {
     loadModelRuntime: unexpectedCollaboration,
     instanceKeys,
     instanceConnected: (holder) => connected.has(holder),
+    connectedInstancesOf: (machine) =>
+      heartbeatOrder.filter(
+        (name) => connected.has(name) && machines.get(name) === machine,
+      ),
     workChanged: (holder) => workChanges.push(holder),
   });
   stopAfter(t, async () => {
@@ -291,6 +307,7 @@ async function fixture(t: TestContext) {
     store,
     pairs,
     connected,
+    heartbeatOrder,
     workChanges,
     logs,
     human,
@@ -324,6 +341,7 @@ test("an instance login in copy_code mode runs on the instance, takes the code t
       platform: Platform.AnthropicSubscription,
       mode: LoginSessionMode.CopyCode,
       code: null,
+      holder: INSTANCE,
     },
   );
   assert.deepEqual(f.component.loginSessionsOf(OTHER_INSTANCE), []);
@@ -358,7 +376,10 @@ test("an instance login in copy_code mode runs on the instance, takes the code t
     { code: Code.InvalidInput },
   );
   assert.equal(f.rows().length, NO_CREDENTIALS);
-  assert.equal(f.component.credentialVersionOf(INSTANCE), CLOCK_START);
+  assert.equal(
+    f.component.credentialVersionOf(INSTANCE),
+    INSTANCE_START_VERSION,
+  );
   const sealed = await f.sealFor(Platform.AnthropicSubscription);
   f.report(entry.session_id, {
     state: InstanceLoginState.Completed,
@@ -372,7 +393,7 @@ test("an instance login in copy_code mode runs on the instance, takes the code t
   assert.deepEqual(f.component.loginSessionsOf(INSTANCE), []);
   assert.equal(
     f.component.credentialVersionOf(INSTANCE),
-    CLOCK_START + VERSION_STEP,
+    INSTANCE_START_VERSION + VERSION_STEP,
   );
   const [row] = f.rows();
   assert.ok(row);
@@ -458,7 +479,7 @@ test("an instance login refuses an unknown holder and an instance with no curren
   const f = await fixture(t);
   await assert.rejects(
     f.login({ platform: Platform.AnthropicSubscription, holder: "absent" }),
-    { code: Code.InstanceUnknown, status: HttpStatus.BadRequest },
+    { code: Code.HolderUnknown, status: HttpStatus.BadRequest },
   );
   f.connected.delete(INSTANCE);
   await assert.rejects(f.login({ platform: Platform.AnthropicSubscription }), {
@@ -468,12 +489,12 @@ test("an instance login refuses an unknown holder and an instance with no curren
   assert.deepEqual(f.component.loginSessionsOf(INSTANCE), []);
 });
 
-test("an instance login of a server or a container instance answers llm.credential.instance_unknown", async (t) => {
+test("an instance login of a server or a container instance answers llm.credential.holder_unknown", async (t) => {
   const f = await fixture(t);
   for (const holder of [SERVER_INSTANCE, CONTAINER_INSTANCE])
     await assert.rejects(
       f.login({ platform: Platform.AnthropicSubscription, holder }),
-      { code: Code.InstanceUnknown, status: HttpStatus.BadRequest },
+      { code: Code.HolderUnknown, status: HttpStatus.BadRequest },
     );
   assert.deepEqual(f.component.loginSessionsOf(INSTANCE), []);
 });
@@ -709,4 +730,86 @@ test("a completed report fails when the copy turns live and current during the s
   );
   assert.equal(f.loginStatus(entry.session_id).state, LoginSessionState.Failed);
   assert.equal(f.rows().length, ONE_ROW);
+});
+
+test("a login on a machine picks the connected instance with the newest heartbeat", async (t) => {
+  const f = await fixture(t);
+  const started = f.login({
+    platform: Platform.AnthropicSubscription,
+    holder: MACHINE,
+  });
+  const entry = await f.listed(OTHER_INSTANCE);
+  assert.equal(entry.holder, MACHINE);
+  assert.deepEqual(f.component.loginSessionsOf(INSTANCE), []);
+  assert.deepEqual(f.workChanges, [OTHER_INSTANCE]);
+  f.report(entry.session_id, { address: AUTHORIZATION_URL }, OTHER_INSTANCE);
+  await started;
+  f.heartbeatOrder.reverse();
+  const next = f.login({
+    platform: Platform.OpenAICodex,
+    holder: MACHINE,
+    name: "codex",
+  });
+  assert.equal((await f.listed(INSTANCE)).holder, MACHINE);
+  await assert.rejects(
+    f.login({ platform: Platform.OpenAICodex, holder: MACHINE }),
+    { code: Code.LoginPending },
+  );
+  next.catch(() => {});
+});
+
+test("a login on a machine with no connected instance answers instance_unavailable", async (t) => {
+  const f = await fixture(t);
+  f.connected.clear();
+  await assert.rejects(
+    f.login({ platform: Platform.AnthropicSubscription, holder: MACHINE }),
+    { code: Code.InstanceUnavailable, status: HttpStatus.Conflict },
+  );
+  assert.deepEqual(f.workChanges, []);
+});
+
+test("only the runner reports a machine login, the status answer holds no holder and no runner, and a completed report writes the machine copy", async (t) => {
+  const f = await fixture(t);
+  const started = f.login({
+    platform: Platform.AnthropicSubscription,
+    holder: MACHINE,
+  });
+  const entry = await f.listed(OTHER_INSTANCE);
+  assert.throws(
+    () => f.report(entry.session_id, { address: AUTHORIZATION_URL }, INSTANCE),
+    { code: Code.NotFound, status: HttpStatus.NotFound },
+  );
+  f.report(entry.session_id, { address: AUTHORIZATION_URL }, OTHER_INSTANCE);
+  await started;
+  assert.deepEqual(Object.keys(f.loginStatus(entry.session_id)).sort(), [
+    "failure_reason",
+    "last_message",
+    "session_id",
+    "state",
+  ]);
+  const versions = [INSTANCE, OTHER_INSTANCE].map((instance) =>
+    f.component.credentialVersionOf(instance),
+  );
+  f.report(
+    entry.session_id,
+    {
+      state: InstanceLoginState.Completed,
+      address: AUTHORIZATION_URL,
+      ...(await f.sealFor(Platform.AnthropicSubscription, MACHINE)),
+    },
+    OTHER_INSTANCE,
+  );
+  assert.equal(f.rows()[0]?.holder, MACHINE);
+  assert.equal(f.rows().length, ONE_ROW);
+  assert.equal(
+    f.loginStatus(entry.session_id).state,
+    LoginSessionState.Completed,
+  );
+  assert.deepEqual(
+    [INSTANCE, OTHER_INSTANCE].map((instance) =>
+      f.component.credentialVersionOf(instance),
+    ),
+    versions.map((version) => version + VERSION_STEP),
+  );
+  assert.deepEqual(f.component.loginSessionsOf(OTHER_INSTANCE), []);
 });

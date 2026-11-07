@@ -47,6 +47,7 @@ interface Reader {
 interface ReadTarget {
   target: GitHubTarget;
   number: number;
+  trustedActorIds: readonly string[];
 }
 
 interface Hold {
@@ -117,6 +118,7 @@ function authorizeRead(
       address: facts.repository.address,
     },
     number: address.number,
+    trustedActorIds: facts.link_trust.actor_ids,
   };
 }
 
@@ -166,9 +168,12 @@ async function changeRequests(
   read: ReadTarget,
 ): Promise<ReadAnswer> {
   assert.ok(call.token.length);
-  const answer = await github.getChangeRequests(call, read.target, {
-    number: read.number,
-  });
+  const answer = await github.getChangeRequests(
+    call,
+    read.target,
+    { number: read.number },
+    read.trustedActorIds,
+  );
   if (!answer.ok) return resultClassAnswer(answer);
   return { body: answer.value, next_cursor: null };
 }

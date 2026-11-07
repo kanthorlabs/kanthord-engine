@@ -331,6 +331,9 @@ async function roundsFixture(t: TestContext, reworkLimit?: number) {
           }),
         );
       },
+      async () => {
+        throw new Error("Unexpected lease");
+      },
     );
     const setup = completed(
       await workerClient["execution.setup.get"]({

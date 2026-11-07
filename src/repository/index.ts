@@ -55,7 +55,16 @@ export type {
   SshRelayAccess,
   SshSigner,
 } from "./ssh-agent.ts";
-export { decodeGitHubEvent } from "./github.ts";
+export {
+  decodeGitHubEvent,
+  decodeGitHubLinkUpdate,
+  describeGitHubEvent,
+  githubConversationCheckpointSchema,
+  type DecodedExternalLink,
+  type DecodedLinkUpdate,
+  type DescribedGitHubEvent,
+  type GitHubConversationCheckpoint,
+} from "./github.ts";
 export {
   foldBranchPush,
   GitStage,

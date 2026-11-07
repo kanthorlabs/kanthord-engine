@@ -132,6 +132,7 @@ function entry(
     platform,
     mode,
     code,
+    holder: INSTANCE,
   };
 }
 
