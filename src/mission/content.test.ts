@@ -251,8 +251,20 @@ const rules = [
     forbidden: [],
   },
   {
+    intent: Intent.Implement,
+    binding: MissionBindingKind.Conversation,
+    allowed: [NO_BINDINGS, SINGLE_BINDING, TWO_BINDINGS],
+    forbidden: [],
+  },
+  {
     intent: Intent.Examine,
     binding: MissionBindingKind.Repository,
+    allowed: [NO_BINDINGS, SINGLE_BINDING, TWO_BINDINGS],
+    forbidden: [],
+  },
+  {
+    intent: Intent.Examine,
+    binding: MissionBindingKind.Conversation,
     allowed: [NO_BINDINGS, SINGLE_BINDING, TWO_BINDINGS],
     forbidden: [],
   },
@@ -312,6 +324,7 @@ const catalog = new Map<string, ResolvedBinding>([
   ["web-repo", resolved(MissionBindingKind.Repository, 2)],
   ["archive", resolved(MissionBindingKind.Storage, 3)],
   ["reports", resolved(MissionBindingKind.Storage, 4)],
+  ["issues", resolved(MissionBindingKind.Conversation, 5)],
 ]);
 const lookups: string[] = [];
 const resolve = (_tx: Transaction, projectId: string, named: string) => {
@@ -353,6 +366,16 @@ test("an examine node accepts zero, one and two repository bindings", () => {
     assert.deepEqual(
       resolveNamed(Intent.Examine, named).map((binding) => binding.binding_id),
       named.map((name) => catalog.get(name)!.binding_id),
+    );
+});
+
+test("a node names a conversation binding beside a repository binding for both intents", () => {
+  for (const intent of [Intent.Implement, Intent.Examine])
+    assert.deepEqual(
+      resolveNamed(intent, ["api-repo", "issues"]).map(
+        (binding) => binding.binding_id,
+      ),
+      ["api-repo", "issues"].map((name) => catalog.get(name)!.binding_id),
     );
 });
 

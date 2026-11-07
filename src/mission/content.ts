@@ -63,6 +63,10 @@ const bindingRules: Record<Intent, Record<BindingKind, Range>> = {
       min: NO_BINDINGS,
       max: UNBOUNDED_BINDINGS,
     },
+    [MissionBindingKind.Conversation]: {
+      min: NO_BINDINGS,
+      max: UNBOUNDED_BINDINGS,
+    },
   },
   [Intent.Examine]: {
     [MissionBindingKind.Repository]: {
@@ -71,6 +75,10 @@ const bindingRules: Record<Intent, Record<BindingKind, Range>> = {
     },
     [MissionBindingKind.Worker]: { min: NO_BINDINGS, max: NO_BINDINGS },
     [MissionBindingKind.Storage]: {
+      min: NO_BINDINGS,
+      max: UNBOUNDED_BINDINGS,
+    },
+    [MissionBindingKind.Conversation]: {
       min: NO_BINDINGS,
       max: UNBOUNDED_BINDINGS,
     },
@@ -242,6 +250,7 @@ export function checkBindingRuleTable(
     [MissionBindingKind.Repository]: INITIAL_BINDING_COUNT,
     [MissionBindingKind.Worker]: INITIAL_BINDING_COUNT,
     [MissionBindingKind.Storage]: INITIAL_BINDING_COUNT,
+    [MissionBindingKind.Conversation]: INITIAL_BINDING_COUNT,
   };
   for (
     let index = LOOP_START, count = resolved.length;

@@ -94,6 +94,7 @@ import {
   ENVIRONMENT_SECRET_PLATFORM,
   ENVIRONMENT_SECRET_VARIABLE,
   ENVIRONMENT_SECRETS_MAX,
+  GITHUB_ACTOR_ID_PATTERN,
   GitHubAction,
   INSTANCE_COUNT_MAX,
   INSTANCE_COUNT_MIN,
@@ -102,6 +103,9 @@ import {
   type InstructionFileCheck,
   InstructionFileReason,
   Landing,
+  LINK_TRUST_ACTORS_MAX,
+  LinkTrustField,
+  LinkTrustReason,
   LIST_LIMIT_MAX,
   type LiveNodesPinning,
   LS_REMOTE_TIMEOUT_MS,
@@ -112,6 +116,7 @@ import {
   repositoryConfigSchema,
   type RepositoryConnector,
   type RepositoryFiles,
+  RepositoryPlatform,
   type RepositoryPolicy,
   RESOURCE_CAPABILITY_NETWORK_GIT_READ,
   RESOURCE_TARGET_KIND_REPOSITORY,
@@ -244,6 +249,45 @@ function refuseRepositoryAction(
       ProjectErrorCode.RepositoryCredentialRequired,
       "The pull_request action requires a credential.",
     );
+}
+function refuseLinkTrust(
+  binding: string,
+  reason: string,
+  actorId: string | null = null,
+): never {
+  throw new OperationError(
+    HttpStatus.BadRequest,
+    ProjectErrorCode.LinkTrustInvalid,
+    "link_trust must hold a list of at most 32 distinct account ids.",
+    { binding, field: LinkTrustField.ActorIds, reason, actor_id: actorId },
+  );
+}
+function refuseInvalidLinkTrust(binding: string, linkTrust: unknown): void {
+  if (linkTrust === undefined) return;
+  const actorIds = isObject(linkTrust)
+    ? (linkTrust as Record<string, unknown>)[LinkTrustField.ActorIds]
+    : undefined;
+  if (!Array.isArray(actorIds) || !actorIds.every(isString))
+    refuseLinkTrust(binding, LinkTrustReason.TypeInvalid);
+  if (actorIds.length > LINK_TRUST_ACTORS_MAX)
+    refuseLinkTrust(binding, LinkTrustReason.TooMany);
+  const seen = new Set<string>();
+  for (const actorId of actorIds) {
+    if (!GITHUB_ACTOR_ID_PATTERN.test(actorId))
+      refuseLinkTrust(binding, LinkTrustReason.IdInvalid, actorId);
+    if (seen.has(actorId))
+      refuseLinkTrust(binding, LinkTrustReason.Duplicate, actorId);
+    seen.add(actorId);
+  }
+}
+function refuseRepositoryLinkTrust(
+  binding: string,
+  config: typeof repositoryConfigSchema._output,
+): void {
+  if (config.link_trust === undefined) return;
+  if (config.platform !== RepositoryPlatform.GitHub)
+    refuseLinkTrust(binding, LinkTrustReason.PlatformUnsupported);
+  refuseInvalidLinkTrust(binding, config.link_trust);
 }
 const ENVIRONMENT_KEY = "environment";
 function withoutEnvironment(config: unknown): unknown {
@@ -1090,6 +1134,7 @@ export class ProjectService implements Service, ProjectBindings {
     caller: CallerContext,
   ) {
     refuseRepositoryAction(config);
+    refuseRepositoryLinkTrust(CHECKED_BINDING_NAME, config);
     refuseAddressForm(config.address);
     this.operationalStore.transaction((tx) => {
       requireProject(tx, params.project_id);
@@ -1299,6 +1344,7 @@ export class ProjectService implements Service, ProjectBindings {
     for (const [name, binding] of submission) {
       if (binding.kind !== BindingKind.Repository) continue;
       refuseRepositoryAction(binding.config);
+      refuseRepositoryLinkTrust(name, binding.config);
       refuseEnvironment(binding.config.environment);
       validatePrompts(binding.config.prompts ?? {});
       if (bindingUnchanged(name, binding, saved.get(name))) continue;
@@ -1560,6 +1606,14 @@ export class ProjectService implements Service, ProjectBindings {
       this.custodySuitability(tx, {
         credential: binding.config.credential,
         platform: STORAGE_PLATFORM,
+      });
+      return;
+    }
+    if (binding.kind === BindingKind.Conversation) {
+      refuseInvalidLinkTrust(name, binding.config.link_trust);
+      this.custodySuitability(tx, {
+        credential: binding.config.credential,
+        platform: binding.config.platform,
       });
       return;
     }

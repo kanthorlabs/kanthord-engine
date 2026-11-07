@@ -94,6 +94,7 @@ components:
                   - repository
                   - worker
                   - storage
+                  - conversation
             state:
               type: string
               enum:
@@ -137,6 +138,7 @@ components:
                   - repository
                   - worker
                   - storage
+                  - conversation
               resource_identity:
                 type: string
               revision:

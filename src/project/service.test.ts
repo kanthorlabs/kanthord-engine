@@ -75,6 +75,7 @@ import {
   bindingSetWriteInputSchema,
   BindingState,
   ChangeKind,
+  ConversationPlatform,
   ENVIRONMENT_SECRETS_MAX,
   EnvironmentSource,
   FollowsType,
@@ -85,6 +86,8 @@ import {
   INSTRUCTION_FILE_PATH_MAX_BYTES,
   InstructionFileReason,
   Landing,
+  LinkTrustField,
+  LinkTrustReason,
   LS_REMOTE_TIMEOUT_MS,
   PROJECT_ID_PREFIX,
   PROJECT_SERVICE_NAME,
@@ -3040,6 +3043,9 @@ test("an unchanged alias-model binding does not block a worker save and its chec
 });
 
 const GITLAB_IDENTITY = "repository:gitlab:acme/api";
+const EMPTY_ISSUES = 0;
+const FIRST_INDEX = 0;
+const LONGEST_ACTOR_ID = "9999999999999999";
 
 function withoutCredential<T extends { credential?: string }>(
   config: T,
@@ -3187,6 +3193,308 @@ test("a git-only platform accepts merge_push and refuses a credential or pull_re
   assert.deepEqual(
     f.ssh.map((call) => call.address),
     [address],
+  );
+});
+
+const CONVERSATION_NAME = "conversation";
+const CONVERSATION_REPOSITORY = "acme/app";
+const CONVERSATION_IDENTITY = "conversation:github:acme/app";
+const CONVERSATION_CREDENTIAL = "github-conversation";
+const FOREIGN_CREDENTIAL = "s3-foreign";
+const ACTOR_ID = "583231";
+const SECOND_ACTOR_ID = "9919";
+const LOGIN_ACTOR = "octocat";
+const LINK_TRUST_MAX = 32;
+const CONFIG_PATH = ["body", "bindings", CONVERSATION_NAME, "config"];
+
+function conversationBinding(
+  overrides: Record<string, unknown> = {},
+): Extract<Bindings[string], { kind: typeof BindingKind.Conversation }> {
+  return {
+    kind: BindingKind.Conversation,
+    config: {
+      available: true,
+      platform: ConversationPlatform.GitHub,
+      repository: CONVERSATION_REPOSITORY,
+      credential: CONVERSATION_CREDENTIAL,
+      ...overrides,
+    },
+  };
+}
+
+function linkTrustOf(actorIds: unknown) {
+  return { actor_ids: actorIds };
+}
+
+function linkTrustDetails(
+  binding: string,
+  reason: string,
+  actorId: string | null,
+) {
+  return { binding, field: LinkTrustField.ActorIds, reason, actor_id: actorId };
+}
+
+test("a conversation binding of platform github stores with its resource identity and keys", async (t) => {
+  const f = writeFixture(t);
+  const config = conversationBinding({
+    reply_policy: { follows: { type: FollowsType.AssessmentPassed } },
+    link_trust: linkTrustOf([ACTOR_ID, SECOND_ACTOR_ID]),
+  }).config;
+  const result = await f.write({
+    [CONVERSATION_NAME]: { kind: BindingKind.Conversation, config },
+  });
+  const stored = result.bindings[CONVERSATION_NAME];
+  assert.equal(stored?.kind, BindingKind.Conversation);
+  assert.equal(stored?.resource_identity, CONVERSATION_IDENTITY);
+  assert.deepEqual(stored?.config, config);
+  assert.deepEqual(f.ssh, []);
+  assert.deepEqual(f.custody, [
+    { credential: CONVERSATION_CREDENTIAL, platform: REPOSITORY_PLATFORM },
+  ]);
+});
+
+test("a conversation binding without repository or credential, or with an unknown key, fails the input schema", () => {
+  const complete = conversationBinding().config;
+  const without = (key: string) =>
+    Object.fromEntries(Object.entries(complete).filter(([k]) => k !== key));
+  for (const [config, code] of [
+    [without("repository"), "invalid_type"],
+    [without("credential"), "invalid_type"],
+    [{ ...complete, members: [] }, "unrecognized_keys"],
+  ] as const)
+    assert.deepEqual(
+      schemaIssues({
+        [CONVERSATION_NAME]: { kind: BindingKind.Conversation, config },
+      }).map((issue) => issue.code),
+      [code],
+    );
+});
+
+test("a conversation binding refuses a repository outside the owner and repository form", () => {
+  for (const repository of ["acme", "acme/app/extra", "acme/app:1", ""])
+    assert.ok(
+      schemaIssues({
+        [CONVERSATION_NAME]: conversationBinding({ repository }),
+      }).length > EMPTY_ISSUES,
+    );
+});
+
+test("a conversation binding refuses a credential of another platform", async (t) => {
+  const failure = new OperationError(
+    HttpStatus.BadRequest,
+    "custody.credential.platform_mismatch",
+    "Mismatch",
+  );
+  const f = writeFixture(t, {
+    custodySuitability: (_tx, { credential, platform }) => {
+      if (credential === FOREIGN_CREDENTIAL && platform === REPOSITORY_PLATFORM)
+        throw failure;
+    },
+  });
+  const before = f.snapshot();
+  await assert.rejects(
+    f.write({
+      [CONVERSATION_NAME]: conversationBinding({
+        credential: FOREIGN_CREDENTIAL,
+      }),
+    }),
+    (error) => error === failure,
+  );
+  assert.deepEqual(f.snapshot(), before);
+});
+
+test("reply_policy stores the passing assessment and refuses another value", async (t) => {
+  const f = writeFixture(t);
+  const refused = [
+    { follows: { type: FollowsType.ActionEndState, binding: REPOSITORY_NAME } },
+    { follows: { type: FollowsType.AssessmentPassed }, extra: true },
+    { follows: {} },
+    {},
+  ];
+  for (const reply_policy of refused) {
+    const paths = schemaIssues({
+      [CONVERSATION_NAME]: conversationBinding({ reply_policy }),
+    }).map(({ path }) => path.slice(0, CONFIG_PATH.length + 1));
+    assert.ok(paths.length > EMPTY_ISSUES);
+    for (const path of paths)
+      assert.deepEqual(path, [...CONFIG_PATH, "reply_policy"]);
+  }
+  const result = await f.write({
+    [CONVERSATION_NAME]: conversationBinding({
+      reply_policy: { follows: { type: FollowsType.AssessmentPassed } },
+    }),
+  });
+  assert.deepEqual(
+    (result.bindings[CONVERSATION_NAME]?.config as Record<string, unknown>)
+      .reply_policy,
+    { follows: { type: FollowsType.AssessmentPassed } },
+  );
+});
+
+test("link_trust with two ids stores on a repository binding and a conversation binding", async (t) => {
+  const f = writeFixture(t);
+  const link_trust = linkTrustOf([ACTOR_ID, SECOND_ACTOR_ID]);
+  const result = await f.write({
+    [REPOSITORY_NAME]: {
+      kind: BindingKind.Repository,
+      config: { ...repositoryBinding().config, link_trust },
+    },
+    [CONVERSATION_NAME]: conversationBinding({ link_trust }),
+  });
+  for (const name of [REPOSITORY_NAME, CONVERSATION_NAME])
+    assert.deepEqual(
+      (result.bindings[name]?.config as Record<string, unknown>).link_trust,
+      link_trust,
+    );
+});
+
+test("link_trust refuses a wrong list with its reason and the refused id", async (t) => {
+  const f = writeFixture(t);
+  const before = f.snapshot();
+  const cases: Array<{
+    link_trust: unknown;
+    reason: string;
+    actor_id: string | null;
+  }> = [
+    {
+      link_trust: linkTrustOf(
+        Array.from({ length: LINK_TRUST_MAX + 1 }, (_, index) =>
+          String(index + 1),
+        ),
+      ),
+      reason: LinkTrustReason.TooMany,
+      actor_id: null,
+    },
+    {
+      link_trust: linkTrustOf([ACTOR_ID, SECOND_ACTOR_ID, ACTOR_ID]),
+      reason: LinkTrustReason.Duplicate,
+      actor_id: ACTOR_ID,
+    },
+    {
+      link_trust: linkTrustOf([ACTOR_ID, LOGIN_ACTOR]),
+      reason: LinkTrustReason.IdInvalid,
+      actor_id: LOGIN_ACTOR,
+    },
+    {
+      link_trust: linkTrustOf(["0"]),
+      reason: LinkTrustReason.IdInvalid,
+      actor_id: "0",
+    },
+    {
+      link_trust: linkTrustOf([583231]),
+      reason: LinkTrustReason.TypeInvalid,
+      actor_id: null,
+    },
+    {
+      link_trust: linkTrustOf(ACTOR_ID),
+      reason: LinkTrustReason.TypeInvalid,
+      actor_id: null,
+    },
+    {
+      link_trust: [ACTOR_ID],
+      reason: LinkTrustReason.TypeInvalid,
+      actor_id: null,
+    },
+    { link_trust: {}, reason: LinkTrustReason.TypeInvalid, actor_id: null },
+    { link_trust: null, reason: LinkTrustReason.TypeInvalid, actor_id: null },
+  ];
+  for (const { link_trust, reason, actor_id } of cases) {
+    await rejectsWrite(
+      f.write({ [CONVERSATION_NAME]: conversationBinding({ link_trust }) }),
+      HttpStatus.BadRequest,
+      ProjectErrorCode.LinkTrustInvalid,
+      linkTrustDetails(CONVERSATION_NAME, reason, actor_id),
+    );
+    await rejectsWrite(
+      f.write({
+        [REPOSITORY_NAME]: {
+          kind: BindingKind.Repository,
+          config: { ...repositoryBinding().config, link_trust },
+        },
+      }),
+      HttpStatus.BadRequest,
+      ProjectErrorCode.LinkTrustInvalid,
+      linkTrustDetails(REPOSITORY_NAME, reason, actor_id),
+    );
+  }
+  assert.deepEqual(f.ssh, []);
+  assert.deepEqual(f.snapshot(), before);
+});
+
+test("link_trust accepts a list of 32 ids and an id of 16 digits", async (t) => {
+  const f = writeFixture(t);
+  const actorIds = Array.from({ length: LINK_TRUST_MAX }, (_, index) =>
+    String(index + 1),
+  );
+  actorIds[FIRST_INDEX] = LONGEST_ACTOR_ID;
+  await f.write({
+    [CONVERSATION_NAME]: conversationBinding({
+      link_trust: linkTrustOf(actorIds),
+    }),
+  });
+});
+
+test("a link_trust key outside actor_ids fails the input schema", () => {
+  for (const kind of [BindingKind.Conversation, BindingKind.Repository]) {
+    const link_trust = { actor_ids: [ACTOR_ID], members: [ACTOR_ID] };
+    const binding =
+      kind === BindingKind.Conversation
+        ? conversationBinding({ link_trust })
+        : {
+            kind,
+            config: { ...repositoryBinding().config, link_trust },
+          };
+    assert.deepEqual(
+      schemaIssues({ [CONVERSATION_NAME]: binding }).map(({ path }) => path),
+      [[...CONFIG_PATH, "link_trust"]],
+    );
+  }
+});
+
+test("link_trust on a repository binding of platform gitlab refuses with platform_unsupported", async (t) => {
+  const f = writeFixture(t);
+  const address = "git@gitlab.com:acme/api.git";
+  const config = withoutCredential(repositoryBinding(address).config);
+  await rejectsWrite(
+    f.write({
+      [REPOSITORY_NAME]: {
+        kind: BindingKind.Repository,
+        config: {
+          ...config,
+          platform: RepositoryPlatform.GitLab,
+          link_trust: linkTrustOf([ACTOR_ID]),
+        },
+      },
+    }),
+    HttpStatus.BadRequest,
+    ProjectErrorCode.LinkTrustInvalid,
+    linkTrustDetails(
+      REPOSITORY_NAME,
+      LinkTrustReason.PlatformUnsupported,
+      null,
+    ),
+  );
+  assert.deepEqual(f.ssh, []);
+});
+
+test("a binding check refuses an invalid link_trust before any read", async (t) => {
+  const f = fixture(t, {
+    createMission: allowMission,
+    repositoryConnector: {
+      async gitLsRemote() {
+        assert.fail("The read must not run.");
+      },
+    },
+  });
+  const project = f.invoke("create", { name: PROJECT_NAME });
+  await rejectsWrite(
+    checkBinding(f, project.id, {
+      ...repositoryBinding().config,
+      link_trust: linkTrustOf([LOGIN_ACTOR]),
+    }),
+    HttpStatus.BadRequest,
+    ProjectErrorCode.LinkTrustInvalid,
+    linkTrustDetails("check", LinkTrustReason.IdInvalid, LOGIN_ACTOR),
   );
 });
 

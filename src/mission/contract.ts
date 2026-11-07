@@ -456,6 +456,7 @@ export const MissionBindingKind = {
   Repository: "repository",
   Worker: "worker",
   Storage: "storage",
+  Conversation: "conversation",
 } as const;
 
 export const Intent = {
