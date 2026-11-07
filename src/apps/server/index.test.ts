@@ -384,7 +384,11 @@ function releasedMaterials(t: TestContext, fixture: Fixture) {
   return released;
 }
 
-function intakeOnlyReport(t: TestContext, fixture: Fixture) {
+function intakeOnlyReport(
+  t: TestContext,
+  fixture: Fixture,
+  checkDeadline: AbortSignal,
+) {
   const collect = () =>
     fixture.store.transaction((tx) =>
       collectInventories(tx, {
@@ -406,12 +410,10 @@ function intakeOnlyReport(t: TestContext, fixture: Fixture) {
     commit: <T>(write: (tx: Transaction) => T) =>
       fixture.store.transaction(write),
   };
-  return resourceHealthReport(
-    caller,
-    collect,
-    pino({ level: "silent" }),
-    DEADLINE_LIMITS,
-  );
+  return resourceHealthReport(caller, collect, pino({ level: "silent" }), {
+    ...DEADLINE_LIMITS,
+    checkDeadline,
+  });
 }
 
 test("the check deadline of a poll inbound answers unknown with deadline_exceeded through the report, drops the material and changes no inbound", async (t) => {
@@ -424,7 +426,15 @@ test("the check deadline of a poll inbound answers unknown with deadline_exceede
   const releaseEvents = gitHub.holdEvents({ pass: HELD_EVENTS_PASS });
   stopAfter(t, () => releaseEvents());
   const released = releasedMaterials(t, fixture);
-  const report = await intakeOnlyReport(t, fixture);
+  const checkDeadline = new AbortController();
+  const pending = intakeOnlyReport(t, fixture, checkDeadline.signal);
+  await until(
+    eventsCalls,
+    (calls) => calls === calledBefore + HELD_CHECK_RELEASES,
+    t.signal,
+  );
+  checkDeadline.abort();
+  const report = await pending;
   assert.deepEqual(report.services.intake, {
     global: {},
     projects: {
