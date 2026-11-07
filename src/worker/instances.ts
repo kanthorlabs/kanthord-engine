@@ -108,6 +108,7 @@ export interface InstanceDependencies {
   ) => { execution_id: string } | null;
   archiveHeld: (tx: Transaction, holder: string, now: number) => void;
   revokeForInstanceArchive: MissionCollaborations["revokeForInstanceArchive"];
+  revokePausedClaim: MissionCollaborations["revokePausedClaim"];
   reportExecutionEnds: MissionCollaborations["reportExecutionEnds"];
   holderMismatch: (
     tx: Transaction,
@@ -483,6 +484,11 @@ export class WorkerInstances implements WorkerInstanceLookups {
     );
   }
 
+  executionConnected(tx: Transaction, runtimeIdentity: string): boolean {
+    const instanceId = readRow(tx, runtimeIdentity)?.instance_id;
+    return !!instanceId && this.connectionOf(instanceId) !== null;
+  }
+
   connectedAmong(records: readonly InstanceRecord[]): InstanceRecord[] {
     return records
       .flatMap((record) => {
@@ -760,6 +766,26 @@ export class WorkerInstances implements WorkerInstanceLookups {
     return this.stopOrders.get(executionId)?.reason ?? null;
   }
 
+  orderOf(executionId: string): StopOrderReason | null {
+    return this.stopOrders.get(executionId)?.reason ?? null;
+  }
+
+  sendStopOrder(
+    executionId: string,
+    runtimeIdentity: string,
+    reason: StopOrderReason,
+  ): void {
+    const name = this.dependencies.store.transaction((tx) => {
+      const instanceId = readRow(tx, runtimeIdentity)?.instance_id;
+      return instanceId ? readInstanceById(tx, instanceId)?.name : undefined;
+    });
+    assert.ok(name, "a stop order names a registration of an instance");
+    this.queueStopOrder(
+      { name },
+      { execution_id: executionId, runtime_identity: runtimeIdentity, reason },
+    );
+  }
+
   stopOrdersOf(
     tx: Transaction,
     instanceId: string,
@@ -778,6 +804,10 @@ export class WorkerInstances implements WorkerInstanceLookups {
   }
 
   executionReleased(executionId: string): void {
+    this.dropOrder(executionId);
+  }
+
+  private dropOrder(executionId: string): void {
     this.stopOrders.delete(executionId);
     for (const pending of [...this.pendingArchives.values()]) {
       const index = pending.stopping.indexOf(executionId);
@@ -817,7 +847,15 @@ export class WorkerInstances implements WorkerInstanceLookups {
     }
   }
 
+  private expirePauseOrder(order: StopOrder): void {
+    const trace = this.dependencies.revokePausedClaim(order.execution_id);
+    if (trace === null) this.dropOrder(order.execution_id);
+    else this.executionReleased(order.execution_id);
+  }
+
   private expireStopOrder(order: StopOrder): void {
+    if (order.reason === StopOrderReason.HumanPaused)
+      return this.expirePauseOrder(order);
     const pending = [...this.pendingArchives.values()].find((candidate) =>
       candidate.execution_ids.includes(order.execution_id),
     );

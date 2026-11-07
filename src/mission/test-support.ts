@@ -420,6 +420,18 @@ export function missionHarness(
         return null;
       },
     },
+    workerStopOrders: {
+      connected: (...args) => {
+        record("workerStopOrders.connected", args);
+        return false;
+      },
+      sendStopOrder: (...args) =>
+        record("workerStopOrders.sendStopOrder", args),
+      orderOf: (...args) => {
+        record("workerStopOrders.orderOf", args);
+        return null;
+      },
+    },
     pauseFacts: {
       of: (...args) => {
         record("pauseFacts.of", args);

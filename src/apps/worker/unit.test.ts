@@ -590,6 +590,7 @@ const STOPPED_FILE = "stopped.txt";
 const STOPPED_CONTENT = "stopped";
 const WORKER_STOPPED = "worker_stopped";
 const INSTANCE_ARCHIVED = "instance_archived";
+const HUMAN_PAUSED = "human_paused";
 const RELEASE_WAIT_MS = 30000;
 const LIVE_STOP = "worker.stop.execution_live";
 const REVIEWER = "reviewer@1";
@@ -835,6 +836,36 @@ test(
       further_work: true,
       stop: {
         reason: INSTANCE_ARCHIVED,
+        code: null,
+        cause: (live.releases[0] as { stop: { cause: unknown } }).stop.cause,
+      },
+    });
+    assert.equal(
+      await simpleGit(live.bare).show([
+        `refs/heads/${live.claim.node_branch}:${STOPPED_FILE}`,
+      ]),
+      STOPPED_CONTENT,
+    );
+    assert.equal(await live.unit.stop(), null);
+    assert.equal(await live.running, null);
+  },
+);
+
+test(
+  "a human_paused stop order pushes the checkpoint and releases with human_paused",
+  { timeout: RELEASE_WAIT_MS * 2 },
+  async (t) => {
+    const live = await liveStopUnit(t, { evaluation: false });
+    live.unit.stopOrders([
+      { execution_id: live.claim.execution_id, reason: HUMAN_PAUSED },
+    ]);
+    live.resume();
+    await live.released;
+    assert.deepEqual(live.events, ["push", "release"]);
+    assert.deepEqual(live.releases[0], {
+      further_work: true,
+      stop: {
+        reason: HUMAN_PAUSED,
         code: null,
         cause: (live.releases[0] as { stop: { cause: unknown } }).stop.cause,
       },

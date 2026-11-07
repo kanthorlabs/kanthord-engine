@@ -592,6 +592,23 @@ test("a revocation of a forced archive writes the stored stop in the root end", 
   );
 });
 
+test("a revocation of a paused claim writes the stop human_paused in the root end", (t) => {
+  const h = schedulerHarness(t);
+  const row = executionFixture();
+  const stop = { reason: ExecutionStopReason.HumanPaused, code: null };
+  h.store.transaction((tx) => insertExecution(tx, row));
+  const revoked = h.store.transaction((tx) =>
+    h.service.revoke(tx, row.node_id, FIXTURE_NOW, stop),
+  );
+  assert.ok(revoked);
+  h.service.executionRevoked(revoked, RevokeCause.Human, null, null);
+  assert.equal(h.telemetry.length, ONE_ROW);
+  assert.deepEqual(
+    (h.telemetry[0]!.arguments[0] as { stop: unknown }).stop,
+    stop,
+  );
+});
+
 test("a revocation by an assessment writes the root end and then one transition span", (t) => {
   const h = schedulerHarness(t);
   const row = executionFixture();

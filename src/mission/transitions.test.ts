@@ -1741,3 +1741,52 @@ test("resume ignores a node in another state", async (t) => {
   assert.equal(h.checkCalls(), NO_CALLS);
   assert.equal(h.node().state, NodeState.Evaluating);
 });
+
+const PAUSED_ANSWER = {
+  from: NodeState.Paused,
+  to: NodeState.Paused,
+  rule: TransitionRule.None,
+  count: null,
+  limit: null,
+  first_available_at: null,
+};
+
+function pausedWithClaim(t: TestContext) {
+  const h = fixture(t);
+  h.claim();
+  h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Paused));
+  return h;
+}
+
+test("a release of a Paused node with a kept claim leaves it Paused for each further_work and stall count", (t) => {
+  for (const [furtherWork, stalled] of [
+    [false, NO_STALLS],
+    [true, NO_STALLS],
+    [true, FURTHER_WORK_LIMIT],
+  ] as const) {
+    const h = pausedWithClaim(t);
+    assert.deepEqual(h.release(furtherWork, stalled), PAUSED_ANSWER);
+    assert.equal(h.node().state, NodeState.Paused);
+  }
+});
+
+test("a failure of a Paused node keeps it Paused below and at the limit", (t) => {
+  const limit = fixture(t).dependencies.config.consecutive_failure_limit;
+  for (const count of [FIRST_ATTEMPT, limit]) {
+    const h = pausedWithClaim(t);
+    assert.deepEqual(
+      h.store.transaction((tx) => h.service.failure(tx, h.node_id, count, NOW)),
+      PAUSED_ANSWER,
+    );
+    assert.equal(h.node().state, NodeState.Paused);
+  }
+});
+
+test("stopped keeps a Paused node Paused and writes no count", (t) => {
+  const h = pausedWithClaim(t);
+  assert.deepEqual(
+    h.store.transaction((tx) => h.service.stopped(tx, h.node_id, NOW)),
+    PAUSED_ANSWER,
+  );
+  assert.equal(h.node().state, NodeState.Paused);
+});

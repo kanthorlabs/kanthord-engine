@@ -141,6 +141,7 @@ export function overrideNode(
     RevokeCause.Human,
     null,
     ends,
+    null,
   );
   assert.ok(node.attempt !== null);
   const evidenceIds =
@@ -264,6 +265,16 @@ export function blockNode(
     now,
     ends,
   );
+  const claim = endLiveClaim(
+    tx,
+    dependencies,
+    node,
+    now,
+    RevokeCause.Human,
+    null,
+    ends,
+    null,
+  );
   return closeHuman(
     tx,
     dependencies,
@@ -274,7 +285,7 @@ export function blockNode(
     NodeState.Blocked,
     FindingRoute.Report,
     now,
-    null,
+    claim?.execution.trace ?? null,
   );
 }
 
@@ -342,6 +353,7 @@ export function discardNode(
     RevokeCause.Human,
     null,
     ends,
+    null,
   );
   if (node.state === NodeState.Blocked) {
     assert.ok(node.attempt !== null);

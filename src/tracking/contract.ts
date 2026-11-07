@@ -558,6 +558,7 @@ export const FlowStopReason = {
   EnvironmentFailed: "environment_failed",
   InstanceArchived: "instance_archived",
   WorkerStopped: "worker_stopped",
+  HumanPaused: "human_paused",
   Lost: "lost",
   BudgetEnd: "budget_end",
 } as const;

@@ -78,6 +78,7 @@ export interface ActTelemetry {
 export interface Acted<T> {
   result: T;
   act: ActFacts;
+  stopOrder?: { execution_id: string; runtime_identity: string };
 }
 
 function attemptOf(facts: ActFacts): number | null {

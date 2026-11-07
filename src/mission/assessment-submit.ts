@@ -179,6 +179,7 @@ export function submitAssessment(
       RevokeCause.Assessment,
       body.cause ?? null,
       ends,
+      null,
     );
     transition(
       tx,
@@ -211,6 +212,7 @@ export function submitAssessment(
       RevokeCause.Assessment,
       body.cause ?? null,
       ends,
+      null,
     );
     closeAttempt(tx, node.id, attempt.attempt, now);
     outcome = insertOutcome(tx, {

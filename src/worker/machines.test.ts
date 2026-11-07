@@ -96,6 +96,7 @@ function machineFixture(t: TestContext) {
     },
     instanceArchive: {
       revokeForInstanceArchive: unexpected,
+      revokePausedClaim: unexpected,
       reportExecutionEnds: unexpected,
     },
     instanceCopies: {

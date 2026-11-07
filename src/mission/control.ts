@@ -46,6 +46,10 @@ import { validateText } from "./content.ts";
 const NO_ATTEMPT = 0;
 const NO_ENDS = 0;
 const NO_REQUIREMENT_KEYS = 0;
+export const HUMAN_PAUSED_STOP: ReleaseStop = {
+  reason: "human_paused",
+  code: null,
+};
 export const ControlError = {
   Refused: "mission.node.control_refused",
   Unresolved: "mission.node.action_unresolved",
@@ -184,12 +188,21 @@ export function endLiveClaim(
   cause: RevokeCause,
   failureCause: FailureCause | null,
   ends: ExecutionEnds,
-  stop?: ReleaseStop,
+  stop: ReleaseStop | null,
 ): RevokedClaim | null {
   assert.ok(tx.database.isTransaction);
-  if (node.state !== NodeState.Executing && node.state !== NodeState.Evaluating)
+  if (
+    node.state !== NodeState.Executing &&
+    node.state !== NodeState.Evaluating &&
+    node.state !== NodeState.Paused
+  )
     return null;
-  const execution = dependencies.schedulerClaims.revoke(tx, node.id, now, stop);
+  const execution = dependencies.schedulerClaims.revoke(
+    tx,
+    node.id,
+    now,
+    stop ?? (node.state === NodeState.Paused ? HUMAN_PAUSED_STOP : undefined),
+  );
   if (execution === null) return null;
   const claim = {
     execution,

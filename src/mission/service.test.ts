@@ -427,6 +427,11 @@ function makeService(
         throw new Error(UNEXPECTED_COLLABORATION);
       },
     },
+    workerStopOrders: {
+      connected: () => false,
+      sendStopOrder: () => undefined,
+      orderOf: () => null,
+    },
     pauseFacts: {
       of: () => ({
         consecutive_failures: 0,

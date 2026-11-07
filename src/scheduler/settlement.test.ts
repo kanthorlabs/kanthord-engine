@@ -289,10 +289,11 @@ test("lost and stopped rows count together until a finished row with no stop", (
   });
 });
 
-test("neither operator stop reason counts as a failure", () => {
+test("no operator stop reason counts as a failure", () => {
   for (const reason of [
     ExecutionStopReason.InstanceArchived,
     ExecutionStopReason.WorkerStopped,
+    ExecutionStopReason.HumanPaused,
   ])
     assert.equal(countsFailure({ reason, code: null }), false);
 });
@@ -582,5 +583,59 @@ test("a verification_timeout stop counts as a failure and the third in a row pau
       transitionFixture(),
     );
     assert.deepEqual(failure(tx, nodeId, counts[2]!, FIXTURE_DEADLINE), paused);
+  });
+});
+
+test("a loss of an expired kept claim of a Paused node ends the claim, keeps Paused and sets no hold", (t) => {
+  const h = schedulerHarness(t);
+  const kept = transitionFixture({ from: "Paused", to: "Paused" });
+  h.dependencies.transitions.failure = () => kept;
+  const row = executionFixture();
+  h.store.transaction((tx) => {
+    insertExecution(tx, row);
+    h.service.insert(tx, row.node_id, row.project_id, 0);
+    const lost = settleNode(tx, h.dependencies, row.node_id, FIXTURE_DEADLINE);
+    assert.deepEqual(lost?.transition, kept);
+    assert.deepEqual(lost?.hold, FIRST_LOSS_WITHOUT_JOB);
+    assert.equal(
+      readExecution(tx, row.execution_id)?.ended_at,
+      FIXTURE_DEADLINE,
+    );
+    const job = tx.database
+      .prepare("SELECT available_at FROM scheduler_job WHERE node_id = ?")
+      .get(row.node_id) as { available_at: number | null };
+    assert.equal(job.available_at, null);
+    const next = executionFixture({
+      node_id: row.node_id,
+      project_id: row.project_id,
+      attempt: row.attempt,
+    });
+    insertExecution(tx, next);
+    assert.equal(consecutiveFailures(tx, next, false), ONE_LOSS);
+  });
+});
+
+test("a human_paused row counts no failure and is no reset point", (t) => {
+  const h = schedulerHarness(t);
+  const node = createIdentity("node");
+  h.store.transaction((tx) => {
+    const at = (offset: number) =>
+      executionFixture({
+        node_id: node,
+        expired_at: FIXTURE_DEADLINE + 100,
+        created_at: FIXTURE_NOW + offset,
+      });
+    const failed = at(1);
+    insertExecution(tx, failed);
+    endExecution(tx, failed.execution_id, FIXTURE_NOW + 2, STOP);
+    const paused = at(3);
+    insertExecution(tx, paused);
+    endExecution(tx, paused.execution_id, FIXTURE_NOW + 4, {
+      reason: ExecutionStopReason.HumanPaused,
+      code: null,
+    });
+    const next = at(5);
+    insertExecution(tx, next);
+    assert.equal(consecutiveFailures(tx, next, false), ONE_LOSS);
   });
 });

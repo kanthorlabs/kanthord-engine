@@ -64,6 +64,7 @@ import {
   type SchedulerClaims,
   type SchedulerMatch,
   type SchedulerWakeup,
+  type WorkerStopOrders,
   type WorkQueue,
 } from "./contract.ts";
 import {
@@ -81,6 +82,7 @@ import {
   readyNode,
   resumeNode,
   revokeForInstanceArchive,
+  revokePausedClaim,
 } from "./control-hold.ts";
 import { blockNode, discardNode, overrideNode } from "./control-close.ts";
 import { unblockNode } from "./control-unblock.ts";
@@ -279,6 +281,7 @@ export interface Dependencies {
   schedulerMatch: SchedulerMatch;
   wakeup: SchedulerWakeup;
   executionAttribution: ExecutionAttribution;
+  workerStopOrders: WorkerStopOrders;
   pauseFacts: PauseFacts;
   telemetry: MissionTelemetry;
   acts: ActTelemetry;
@@ -1219,17 +1222,25 @@ export class MissionService
     write: (tx: Transaction, ends: ExecutionEnds) => Acted<T>,
   ): T {
     let facts: ActFacts | null = null;
+    let stopOrder: Acted<T>["stopOrder"];
     return this.commitGraph(
       caller,
       scope,
       (tx, ends) => {
         const acted = write(tx, ends);
         facts = acted.act;
+        stopOrder = acted.stopOrder;
         return acted.result;
       },
       () => {
         assert.ok(facts);
         recordAct(this.dependencies, act, facts);
+        if (stopOrder)
+          this.dependencies.workerStopOrders.sendStopOrder(
+            stopOrder.execution_id,
+            stopOrder.runtime_identity,
+            "human_paused",
+          );
       },
     );
   }
@@ -1308,6 +1319,10 @@ export class MissionService
       actor,
       Date.now(),
     );
+  }
+
+  revokePausedClaim(executionId: string) {
+    return revokePausedClaim(this.dependencies, executionId, Date.now());
   }
 
   reportExecutionEnds(ends: ExecutionEnds): void {
