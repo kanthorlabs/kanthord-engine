@@ -642,7 +642,11 @@ Follow these steps. Each step names the fields to read.
 - The route of a finding states who acts on it: `fix` (KanthorD fixes it in a rework of the same attempt), `report` (a human reviews it) or `record` (information only).
   The status reads `fixed` when `fixed_assessment_id` names an assessment, and `open` otherwise.
   A finding waits for a human when its route is `report`, it holds no decision and its status is `open`.
-  A current `success` of an `implement` node marks each reviewer finding of an earlier attempt of the node as fixed by that assessment, when the finding has the route `report`, no decision and no `fixed_assessment_id`. The mark keeps the route and writes no decision. An `examine` node keeps every `report` finding, and a human finding keeps its decision flow.
+  When an `implement` node gets a current `success`, the assessment fixes each earlier reviewer finding of the node.
+  The finding must have the route `report`, no decision and no `fixed_assessment_id`.
+  The mark keeps the route and writes no decision.
+  An `examine` node keeps every `report` finding.
+  A human finding keeps its decision flow.
 - Finding list accepts `<node-id>` and returns `Page<Finding>`.
   `--attempt` accepts a nonnegative safe integer and selects the findings of that attempt through their assessment.
   `--round` accepts a positive safe integer and selects the findings of that round.
