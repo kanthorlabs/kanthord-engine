@@ -1923,7 +1923,7 @@ export class ProjectService implements Service, ProjectBindings {
       current.kind === BindingKind.Worker
         ? effectiveInstanceCount(current.config) === INSTANCE_COUNT_MIN
         : current.config.available === false;
-    const { link_trust } = pinnedConfigSchema.parse(binding.config);
+    const { link_trust, inbox } = pinnedConfigSchema.parse(binding.config);
     return {
       project_id: binding.project_id,
       binding_id: binding.id,
@@ -1933,7 +1933,22 @@ export class ProjectService implements Service, ProjectBindings {
       tombstone: hasBindingTombstone(tx, binding),
       disabled,
       ...(link_trust === undefined ? {} : { link_trust }),
+      ...(inbox === undefined ? {} : { inbox }),
     };
+  }
+  conversationInboxOf(
+    tx: Transaction,
+    projectId: string,
+    resourceIdentity: string,
+  ): {
+    binding_id: string;
+    inbox: { actor_id: string; handle: string };
+  } | null {
+    assert.ok(tx.database.isTransaction);
+    const latest = readLatestBinding(tx, projectId, resourceIdentity);
+    if (!latest || latest.removed_at !== null) return null;
+    const { inbox } = pinnedConfigSchema.parse(latest.config);
+    return inbox === undefined ? null : { binding_id: latest.id, inbox };
   }
   workerBindingRowOf(tx: Transaction, bindingId: string) {
     assert.ok(tx.database.isTransaction);

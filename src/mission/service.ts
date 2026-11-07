@@ -465,7 +465,8 @@ export class MissionService
     );
     registry.register(
       missionOperations["delivery.unresolved_request.count"],
-      ({ body }, caller) => countUnresolvedRequests(caller, body),
+      ({ body }, caller) =>
+        countUnresolvedRequests(this.dependencies, caller, body),
     );
     registry.register(
       missionOperations["assessment.submit"],

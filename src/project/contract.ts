@@ -750,8 +750,13 @@ export type WorkerAgentView = {
 export const pinnedLinkTrustSchema = z.strictObject({
   actor_ids: z.array(z.string()),
 });
+export const pinnedInboxSchema = z.strictObject({
+  actor_id: z.string(),
+  handle: z.string(),
+});
 export const pinnedConfigSchema = z.looseObject({
   link_trust: pinnedLinkTrustSchema.optional(),
+  inbox: pinnedInboxSchema.optional(),
 });
 export type BindingRevisionResult = {
   project_id: string;
@@ -762,6 +767,7 @@ export type BindingRevisionResult = {
   tombstone: boolean;
   disabled: boolean;
   link_trust?: z.infer<typeof pinnedLinkTrustSchema>;
+  inbox?: z.infer<typeof pinnedInboxSchema>;
 };
 export type ConversationBinding = {
   binding_id: string;

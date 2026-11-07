@@ -324,6 +324,7 @@ const HUMAN_ACTOR = {
 
 const bindings: MissionBindings = {
   storageBindingOf: unexpectedCollaboration,
+  conversationInboxOf: unexpectedCollaboration,
   repositoryPolicyOf() {
     throw new Error(UNEXPECTED_COLLABORATION);
   },

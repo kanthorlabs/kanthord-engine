@@ -11,7 +11,7 @@ import { IdentityKind } from "../../kernel/caller.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { canonicalJSON } from "../../kernel/json.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { NodeState } from "../../mission/contract.ts";
+import { InboxReason, NodeState } from "../../mission/contract.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import {
   cliSession,
@@ -287,7 +287,7 @@ test("kanthord mission link-update list prints the rows of the trusted actors of
   );
   const nodeId = created.revisions[FIRST_ITEM]!.node_id;
   const insert = fixture.store.database.prepare(
-    "INSERT INTO mission_link_update (id, mission_id, external_link, update_key, inbound_event_id, actor_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO mission_link_update (id, mission_id, external_link, update_key, inbound_event_id, actor_id, occurred_at, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
   );
   for (const [actor, occurredAt] of [
     [OTHER_ACTOR, FIRST_OCCURRED_AT],
@@ -301,6 +301,7 @@ test("kanthord mission link-update list prints the rows of the trusted actors of
       createIdentity("inbound_event"),
       actor,
       occurredAt,
+      InboxReason.Linked,
     );
   const page = await session.read<{
     items: { actor_id: string; external_link: unknown; new: boolean }[];

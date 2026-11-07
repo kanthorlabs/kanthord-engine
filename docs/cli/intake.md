@@ -427,7 +427,10 @@ ETag for each read. The create and the delete of a poll inbound are the only
 switch of its poll.
 
 The conversation poll of a GitHub repository requests GitHub only while a node
-of its project links an issue of the repository. Each cycle runs one read: one
+of its project links an issue of the repository, or while the current revision
+of the conversation binding of the resource holds `inbox`. The demand answer of
+the Mission Service is `{ count, link_count, inbox }`, and the poll requests
+while `link_count` is above zero or `inbox` is true. Each cycle runs one read: one
 page of the issue comments, sorted by update time, newest first. It follows
 the same wait rules as the repository poll. The credential of a conversation
 inbound needs the fine-grained permission "Issues: read". The batch and the

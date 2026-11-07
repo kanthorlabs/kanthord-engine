@@ -10,6 +10,7 @@ import {
 import {
   AdmissionRefusal,
   Disposition,
+  InboxReason,
   linkUpdateRowSchema,
   NodeState,
   type PlatformAddress,
@@ -17,6 +18,8 @@ import {
 } from "./contract.ts";
 import { DELIVERY_ADMIT_OPERATION } from "./delivery-telemetry.ts";
 import {
+  INBOX_ACTOR,
+  INBOX_HANDLE,
   LINK_ACTOR,
   LINK_EVENT_BODY,
   LINK_MENTION,
@@ -84,6 +87,10 @@ test("a human update on a linked thread inserts one row and changes no node", as
       inbound_event_id: inboundEventId,
       actor_id: LINK_ACTOR,
       occurred_at: LINK_OCCURRED_AT,
+      reason: InboxReason.Linked,
+      binding_id: null,
+      done_at: null,
+      snoozed_until: null,
     },
   );
   assert.ok(
@@ -192,7 +199,7 @@ test("a duplicate answers before the match check", async (t) => {
   h.decoding.update = updateOf();
   h.store.database
     .prepare(
-      "INSERT INTO mission_link_update (id, mission_id, external_link, update_key, inbound_event_id, actor_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO mission_link_update (id, mission_id, external_link, update_key, inbound_event_id, actor_id, occurred_at, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .run(
       createIdentity("link_update"),
@@ -202,6 +209,7 @@ test("a duplicate answers before the match check", async (t) => {
       createIdentity("inbound_event"),
       LINK_ACTOR,
       LINK_OCCURRED_AT,
+      InboxReason.Linked,
     );
   const answer = await h.admit();
   assert.equal(answer.disposition, Disposition.Duplicate);
@@ -647,4 +655,236 @@ test("an automated actor and a null actor_id ask Intake nothing about replies", 
   h.decoding.update = updateOf({ actor_id: null });
   await h.admit();
   assert.deepEqual(h.replies.inputs, []);
+});
+
+const BOB_ACTOR = "2002";
+const CAROL_ACTOR = "2003";
+const SECOND_INBOX_HANDLE = "ulrich-two";
+const FIRST_COMMENT_KEY = "issue_comment:6001";
+const SECOND_COMMENT_KEY = "issue_comment:6002";
+const THIRD_COMMENT_KEY = "issue_comment:6003";
+const INBOX_IDENTITY = { actor_id: INBOX_ACTOR, handle: INBOX_HANDLE };
+
+function lastRow(h: ReturnType<typeof linkUpdateHarness>) {
+  const row = h.rows().at(-1);
+  assert.ok(row);
+  return row;
+}
+
+test("a mention of the handle on a thread that no node links inserts a mentioned row with the pin", async (t) => {
+  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
+  const pin = h.writeInbox(INBOX_IDENTITY);
+  h.decoding.update = updateOf({
+    actor_id: BOB_ACTOR,
+    update_key: FIRST_COMMENT_KEY,
+    mentions: [INBOX_HANDLE],
+  });
+  const answer = await h.admit();
+  assert.equal(answer.disposition, Disposition.AcceptedObservation);
+  const row = lastRow(h);
+  assert.ok(linkUpdateRowSchema.safeParse(row).success);
+  assert.equal(row.reason, InboxReason.Mentioned);
+  assert.equal(row.binding_id, pin);
+  assert.equal(row.done_at, null);
+  assert.equal(row.snoozed_until, null);
+});
+
+test("a mention of the actor id inserts a mentioned row", async (t) => {
+  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
+  h.writeInbox(INBOX_IDENTITY);
+  h.decoding.update = updateOf({
+    actor_id: BOB_ACTOR,
+    update_key: FIRST_COMMENT_KEY,
+    mentions: [INBOX_ACTOR],
+  });
+  await h.admit();
+  assert.equal(lastRow(h).reason, InboxReason.Mentioned);
+});
+
+test("a later comment with no mention on a thread that holds a row inserts a participating row", async (t) => {
+  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
+  const pin = h.writeInbox(INBOX_IDENTITY);
+  h.decoding.update = updateOf({
+    actor_id: BOB_ACTOR,
+    update_key: FIRST_COMMENT_KEY,
+    mentions: [INBOX_HANDLE],
+  });
+  await h.admit();
+  h.decoding.update = updateOf({
+    actor_id: CAROL_ACTOR,
+    update_key: SECOND_COMMENT_KEY,
+    mentions: [],
+  });
+  const answer = await h.admit();
+  assert.equal(answer.disposition, Disposition.AcceptedObservation);
+  const row = lastRow(h);
+  assert.equal(row.reason, InboxReason.Participating);
+  assert.equal(row.binding_id, pin);
+  assert.equal(row.done_at, null);
+});
+
+test("an update of the inbox actor inserts a participating row with done_at and closes nothing else", async (t) => {
+  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
+  const pin = h.writeInbox(INBOX_IDENTITY);
+  h.decoding.update = updateOf({
+    actor_id: BOB_ACTOR,
+    update_key: FIRST_COMMENT_KEY,
+    mentions: [INBOX_HANDLE],
+  });
+  await h.admit();
+  h.decoding.update = updateOf({
+    actor_id: INBOX_ACTOR,
+    update_key: SECOND_COMMENT_KEY,
+    mentions: [],
+  });
+  const started = Date.now();
+  await h.admit();
+  const [first, own] = h.rows();
+  assert.equal(first?.done_at, null);
+  assert.equal(own?.reason, InboxReason.Participating);
+  assert.equal(own?.binding_id, pin);
+  assert.ok(Math.abs(Number(own?.done_at) - started) < CLOCK_TOLERANCE_MS);
+});
+
+test("an own update with no row on the thread is admitted and done", async (t) => {
+  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
+  h.writeInbox(INBOX_IDENTITY);
+  h.decoding.update = updateOf({
+    actor_id: INBOX_ACTOR,
+    update_key: FIRST_COMMENT_KEY,
+    mentions: [],
+  });
+  const answer = await h.admit();
+  assert.equal(answer.disposition, Disposition.AcceptedObservation);
+  assert.notEqual(lastRow(h).done_at, null);
+});
+
+test("a comment on a linked thread inserts a linked row with the pin and keeps the node state", async (t) => {
+  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
+  const pin = h.writeInbox(INBOX_IDENTITY);
+  const nodeId = h.addNode([linkOf()]);
+  const before = withoutLinkRows(databaseSnapshot(h.store));
+  h.decoding.update = updateOf({
+    actor_id: BOB_ACTOR,
+    update_key: FIRST_COMMENT_KEY,
+    mentions: [],
+  });
+  const answer = await h.admit();
+  assert.equal(answer.disposition, Disposition.AcceptedObservation);
+  const row = lastRow(h);
+  assert.equal(row.reason, InboxReason.Linked);
+  assert.equal(row.binding_id, pin);
+  assert.deepEqual(withoutLinkRows(databaseSnapshot(h.store)), before);
+  assert.equal(
+    h.store.database
+      .prepare("SELECT state FROM mission_node WHERE id = ?")
+      .get(nodeId)?.state,
+    NodeState.Available,
+  );
+});
+
+test("a linked thread that mentions the handle takes linked, the highest rank", async (t) => {
+  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
+  h.writeInbox(INBOX_IDENTITY);
+  h.addNode([linkOf()]);
+  h.decoding.update = updateOf({
+    actor_id: BOB_ACTOR,
+    update_key: FIRST_COMMENT_KEY,
+    mentions: [INBOX_HANDLE],
+  });
+  await h.admit();
+  assert.equal(lastRow(h).reason, InboxReason.Linked);
+});
+
+test("a comment with no mention on an unlinked thread with no row answers unmatched", async (t) => {
+  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
+  h.writeInbox(INBOX_IDENTITY);
+  h.decoding.update = updateOf({
+    actor_id: BOB_ACTOR,
+    update_key: FIRST_COMMENT_KEY,
+    mentions: [],
+  });
+  const answer = await h.admit();
+  assert.deepEqual(answer, {
+    disposition: Disposition.Refused,
+    reason: AdmissionRefusal.Unmatched,
+  });
+  assert.equal(h.rows().length, NO_ROWS);
+});
+
+test("a binding without inbox inserts a linked row with a null binding_id and refuses a mention", async (t) => {
+  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
+  h.writeInbox(null);
+  h.addNode([linkOf()]);
+  h.decoding.update = updateOf({
+    actor_id: BOB_ACTOR,
+    update_key: FIRST_COMMENT_KEY,
+    mentions: [],
+  });
+  await h.admit();
+  const row = lastRow(h);
+  assert.equal(row.reason, InboxReason.Linked);
+  assert.equal(row.binding_id, null);
+  h.decoding.update = updateOf({
+    external_link: linkOf(OTHER_LINK_NUMBER),
+    actor_id: BOB_ACTOR,
+    update_key: SECOND_COMMENT_KEY,
+    mentions: [INBOX_HANDLE],
+  });
+  const answer = await h.admit();
+  assert.deepEqual(answer, {
+    disposition: Disposition.Refused,
+    reason: AdmissionRefusal.Unmatched,
+  });
+  assert.equal(h.rows().length, SINGLE_ROW);
+});
+
+test("a change of inbox.handle keeps the pin of a pinned thread and a thread with no pin takes the new revision", async (t) => {
+  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
+  const first = h.writeInbox(INBOX_IDENTITY);
+  h.decoding.update = updateOf({
+    actor_id: BOB_ACTOR,
+    update_key: FIRST_COMMENT_KEY,
+    mentions: [INBOX_HANDLE],
+  });
+  await h.admit();
+  const second = h.writeInbox(
+    { actor_id: INBOX_ACTOR, handle: SECOND_INBOX_HANDLE },
+    BINDING_REVISION_TWO,
+  );
+  assert.notEqual(first, second);
+  h.decoding.update = updateOf({
+    actor_id: CAROL_ACTOR,
+    update_key: SECOND_COMMENT_KEY,
+    mentions: [],
+  });
+  await h.admit();
+  assert.equal(lastRow(h).binding_id, first);
+  h.decoding.update = updateOf({
+    external_link: linkOf(OTHER_LINK_NUMBER),
+    actor_id: BOB_ACTOR,
+    update_key: THIRD_COMMENT_KEY,
+    mentions: [SECOND_INBOX_HANDLE],
+  });
+  await h.admit();
+  const row = lastRow(h);
+  assert.equal(row.reason, InboxReason.Mentioned);
+  assert.equal(row.binding_id, second);
+});
+
+test("a mention by an automated actor answers actor_ignored and inserts nothing", async (t) => {
+  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
+  h.writeInbox(INBOX_IDENTITY);
+  h.decoding.update = updateOf({
+    actor_id: BOB_ACTOR,
+    actor_automated: true,
+    update_key: FIRST_COMMENT_KEY,
+    mentions: [INBOX_HANDLE],
+  });
+  const answer = await h.admit();
+  assert.deepEqual(answer, {
+    disposition: Disposition.Refused,
+    reason: AdmissionRefusal.ActorIgnored,
+  });
+  assert.equal(h.rows().length, NO_ROWS);
 });

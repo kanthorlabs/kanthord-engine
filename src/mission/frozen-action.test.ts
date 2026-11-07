@@ -81,6 +81,7 @@ test("an examine node with a repository binding requires no external action, and
       assert.fail("Pinned reads never resolve the latest name."),
     resolveBindingIdentity: () =>
       assert.fail("Pinned reads never resolve the latest revision."),
+    conversationInboxOf: () => assert.fail("Pinned reads never read an inbox."),
     getBindingRevision: (_tx, bindingId) => ({
       binding_id: bindingId,
       project_id: projectId,
@@ -239,6 +240,7 @@ test("two bindings freeze one action each", (t) => {
       assert.fail("Pinned reads never resolve the latest name."),
     resolveBindingIdentity: () =>
       assert.fail("Pinned reads never resolve the latest revision."),
+    conversationInboxOf: () => assert.fail("Pinned reads never read an inbox."),
     getBindingRevision: (_tx, bindingId) => ({
       binding_id: bindingId,
       project_id: projectId,
@@ -320,6 +322,7 @@ test("actionsOfRevision with a shared map answers the actions of a new map", (t)
       assert.fail("Pinned reads never resolve the latest name."),
     resolveBindingIdentity: () =>
       assert.fail("Pinned reads never resolve the latest revision."),
+    conversationInboxOf: () => assert.fail("Pinned reads never read an inbox."),
     getBindingRevision: (_tx, bindingId) => ({
       binding_id: bindingId,
       project_id: projectId,
@@ -421,6 +424,7 @@ function replyHarness(
       assert.fail("Pinned reads never resolve the latest name."),
     resolveBindingIdentity: () =>
       assert.fail("Pinned reads never resolve the latest revision."),
+    conversationInboxOf: () => assert.fail("Pinned reads never read an inbox."),
     getBindingRevision: (_tx, bindingId) => ({
       binding_id: bindingId,
       project_id: projectId,

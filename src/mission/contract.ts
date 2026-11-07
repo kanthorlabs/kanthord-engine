@@ -91,6 +91,15 @@ export interface MissionBindings {
     tombstone: boolean;
     disabled: boolean;
     link_trust?: { actor_ids: string[] };
+    inbox?: { actor_id: string; handle: string };
+  } | null;
+  conversationInboxOf(
+    tx: Transaction,
+    projectId: string,
+    resourceIdentity: string,
+  ): {
+    binding_id: string;
+    inbox: { actor_id: string; handle: string };
   } | null;
 }
 
@@ -717,6 +726,17 @@ export const tagsSchema = z
   });
 export const EXTERNAL_LINK_LIMIT = 10;
 export { type ExternalLink, ExternalLinkKind, externalLinkSchema };
+export const InboxReason = {
+  Linked: "linked",
+  Mentioned: "mentioned",
+  Participating: "participating",
+} as const;
+export type InboxReason = (typeof InboxReason)[keyof typeof InboxReason];
+export const INBOX_REASONS_BY_RANK: readonly InboxReason[] = [
+  InboxReason.Linked,
+  InboxReason.Mentioned,
+  InboxReason.Participating,
+];
 export const linkUpdateRowSchema = z.strictObject({
   id: identitySchema(LINK_UPDATE_IDENTITY_PREFIX),
   mission_id: identitySchema(MISSION_IDENTITY_PREFIX),
@@ -725,6 +745,10 @@ export const linkUpdateRowSchema = z.strictObject({
   inbound_event_id: identitySchema("inbound_event"),
   actor_id: z.string().min(1),
   occurred_at: z.number().int().nonnegative(),
+  reason: z.enum(InboxReason),
+  binding_id: identitySchema("binding").nullable(),
+  done_at: z.number().int().nonnegative().nullable(),
+  snoozed_until: z.number().int().nonnegative().nullable(),
 });
 export type LinkUpdateRow = z.infer<typeof linkUpdateRowSchema>;
 export const linkUpdateSchema = z.strictObject({
@@ -2176,6 +2200,7 @@ export const missionOperations = {
     output: z.strictObject({
       count: z.number().int().nonnegative(),
       link_count: z.number().int().nonnegative(),
+      inbox: z.boolean(),
     }),
     description:
       "Count the unresolved request evidences and the live links of a resource for the Intake Service.",

@@ -389,6 +389,10 @@ export function missionHarness(
         record("bindings.getBindingRevision", args);
         return null;
       },
+      conversationInboxOf: (...args) => {
+        record("bindings.conversationInboxOf", args);
+        return null;
+      },
       repositoryPolicyOf: (...args) => {
         record("bindings.repositoryPolicyOf", args);
         return null;

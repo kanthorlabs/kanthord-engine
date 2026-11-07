@@ -643,10 +643,12 @@ test(
         assert.deepEqual(completed(await count(GATED_RESOURCE)), {
           count: ONE_REQUEST,
           link_count: NO_ROWS,
+          inbox: false,
         });
         assert.deepEqual(completed(await count(PUSHED_RESOURCE)), {
           count: NO_ROWS,
           link_count: NO_ROWS,
+          inbox: false,
         });
       },
     );
@@ -657,10 +659,11 @@ test(
         assert.deepEqual(completed(await count(OTHER_RESOURCE)), {
           count: NO_ROWS,
           link_count: NO_ROWS,
+          inbox: false,
         });
         assert.deepEqual(
           completed(await count(GATED_RESOURCE, OTHER_PROJECT)),
-          { count: NO_ROWS, link_count: NO_ROWS },
+          { count: NO_ROWS, link_count: NO_ROWS, inbox: false },
         );
       },
     );
@@ -672,6 +675,7 @@ test(
       assert.deepEqual(completed(await count(GATED_RESOURCE)), {
         count: NO_ROWS,
         link_count: NO_ROWS,
+        inbox: false,
       });
     });
 
