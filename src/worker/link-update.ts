@@ -5,6 +5,7 @@ import type { ExecutionClaim } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { IntakeErrorCode } from "../intake/contract.ts";
 import { MissionErrorCode } from "../mission/contract.ts";
+import { EXECUTION_NOT_RUNNING } from "../scheduler/contract.ts";
 import {
   type IntakeActionCall,
   type LinkUpdateContent,
@@ -16,7 +17,6 @@ import {
 import type { Dependencies } from "./service.ts";
 
 const CLAIM_NOT_LIVE = "claim_not_live";
-const EXECUTION_NOT_RUNNING = "scheduler.execution.not_running";
 
 type LinkUpdateDependencies = Pick<
   Dependencies,
@@ -69,8 +69,14 @@ async function contentOf(
       call,
       inboundEventId,
     );
-    const content = linkUpdateContentSchema.safeParse(described);
-    return content.success ? content.data : null;
+    if (
+      described.author === null &&
+      described.body === null &&
+      described.url === null &&
+      described.occurred_at === null
+    )
+      return null;
+    return linkUpdateContentSchema.parse(described);
   } catch (error) {
     if (isEventNotFound(error)) return null;
     throw error;

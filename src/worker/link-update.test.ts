@@ -47,6 +47,13 @@ const LINK = {
   number: 7,
 };
 
+interface Described {
+  author: string | null;
+  body: string | null;
+  url: string | null;
+  occurred_at: number | null;
+}
+
 function row(occurredAt: number, insertedAt: number, trusted = true): Row {
   return {
     id: createIdentity("link_update"),
@@ -79,6 +86,7 @@ function callOf(held: ExecutionClaim): IntakeActionCall {
 function harness(
   rows: readonly Row[],
   missing: ReadonlySet<string> = new Set(),
+  answer?: Described,
 ) {
   const calls = { linkUpdatesOf: 0, describe: 0, live: true };
   const dependencies = {
@@ -145,6 +153,7 @@ function harness(
             IntakeErrorCode.InboundEventNotFound,
             "Inbound event not found.",
           );
+        if (answer !== undefined) return answer;
         return {
           author: AUTHOR,
           body: `body of ${inboundEventId}`,
@@ -280,4 +289,29 @@ test("a claim that is not live answers 403 claim_not_live and calls nothing", as
   assert.deepEqual(error.details, { reason: CLAIM_NOT_LIVE });
   assert.equal(h.calls.linkUpdatesOf, NO_CALLS);
   assert.equal(h.calls.describe, NO_CALLS);
+});
+
+test("an answer of four null fields answers content null", async () => {
+  const h = harness([row(100, 1)], new Set(), {
+    author: null,
+    body: null,
+    url: null,
+    occurred_at: null,
+  });
+  const held = claim(FIRST_ATTEMPT);
+  const answer = await linkUpdatePage(h.dependencies, callOf(held), held, page);
+  assert.equal(answer.items[0]!.content, null);
+});
+
+test("a partly null answer fails and hides nothing behind null", async () => {
+  const h = harness([row(100, 1)], new Set(), {
+    author: AUTHOR,
+    body: null,
+    url: null,
+    occurred_at: EVENT_TIME,
+  });
+  const held = claim(FIRST_ATTEMPT);
+  await assert.rejects(
+    linkUpdatePage(h.dependencies, callOf(held), held, page),
+  );
 });
