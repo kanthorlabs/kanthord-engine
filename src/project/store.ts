@@ -38,6 +38,7 @@ const RESOURCE_SEPARATOR = ":";
 const CREDENTIAL_KEY = "credential";
 const SSH_CREDENTIAL_KEY = "ssh_credential";
 const ENVIRONMENT_SECRETS_PATH = '$."environment_secrets"';
+const INBOX_PATH = "$.inbox";
 const CURSOR_ENCODING = "base64url";
 const TEXT_ENCODING = "utf8";
 const REPOSITORY_ADDRESS_PATTERN =
@@ -418,6 +419,23 @@ export function readCredentialBindings(
       current: row.revision === row.latest_revision,
     };
   });
+}
+
+export function readInboxHolder(
+  tx: Transaction,
+  projectId: string,
+  resourceIdentity: string,
+): StoredBinding | null {
+  const row = tx.database
+    .prepare(
+      `SELECT b.* FROM project_binding b
+      WHERE b.project_id != ? AND b.resource_identity = ?
+        AND b.revision = (${latestRevisionQuery}) AND b.removed_at IS NULL
+        AND json_type(b.config, ?) IS NOT NULL
+      ORDER BY b.created_at ASC, b.id ASC LIMIT 1`,
+    )
+    .get(projectId, resourceIdentity, INBOX_PATH) as BindingRow | undefined;
+  return row ? toBinding(row) : null;
 }
 
 export function hasBindingTombstone(

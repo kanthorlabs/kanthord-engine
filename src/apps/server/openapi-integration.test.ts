@@ -30,7 +30,11 @@ import {
 } from "../../agent/contract.ts";
 import { schedulerOperations } from "../../scheduler/contract.ts";
 import {
+  BINDING_SET_INITIAL_VERSION,
   environmentSecretOperations,
+  InboxField,
+  InboxInvalidReason,
+  ProjectErrorCode,
   projectOperations,
 } from "../../project/contract.ts";
 import {
@@ -2105,6 +2109,88 @@ test("inbound create answers 201, replays a repeated key, refuses an unknown con
   assert.equal(machine.status, HttpStatus.Unauthorized);
   assert.equal(machine.error.error.code, INBOUND_UNAUTHORIZED);
   assert.equal(inboundCount(), INBOUND_ONE_ROW);
+});
+
+const INBOX_CREDENTIAL = "github-inbox";
+const INBOX_REPOSITORY = "acme/inbox";
+const INBOX_ACTOR_ID = "583231";
+const INBOX_HANDLE = "ulrich";
+const INBOX_BAD_HANDLE = "-ulrich";
+const INBOX_BINDING = "conversation";
+const INBOX_IDENTITY = `conversation:github:${INBOX_REPOSITORY}`;
+
+test("the binding write answers inbox_invalid and inbox_taken through the gateway", async (t) => {
+  const fixture = await gatewayFixture(t);
+  const send = (method: string, path: string, body: unknown) =>
+    fixture.request(path, {
+      method,
+      headers: {
+        Authorization: `Bearer ${fixture.token}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": createIdempotencyKey(),
+      },
+      body: JSON.stringify(body),
+    });
+  const created = await send("POST", repositoryOperations.create.path, {
+    name: INBOX_CREDENTIAL,
+    platform: "github",
+    metadata: null,
+    secret: { key: "inbox-test-key" },
+  });
+  assert.equal(created.status, HttpStatus.OK);
+  const projectOf = async (name: string) =>
+    projectOperations.create.output.parse(
+      await (
+        await send("POST", projectOperations.create.path, { name })
+      ).json(),
+    );
+  const writeBindings = (projectId: string, inbox: unknown) =>
+    send(
+      "PUT",
+      projectOperations["bindingSet.write"].path.replace(
+        ":project_id",
+        projectId,
+      ),
+      {
+        version: BINDING_SET_INITIAL_VERSION,
+        bindings: {
+          [INBOX_BINDING]: {
+            kind: "conversation",
+            config: {
+              available: true,
+              platform: "github",
+              repository: INBOX_REPOSITORY,
+              credential: INBOX_CREDENTIAL,
+              inbox,
+            },
+          },
+        },
+      },
+    );
+  const first = await projectOf("inbox-first");
+  const second = await projectOf("inbox-second");
+  const invalid = await writeBindings(first.id, {
+    actor_id: INBOX_ACTOR_ID,
+    handle: INBOX_BAD_HANDLE,
+  });
+  assert.equal(invalid.status, HttpStatus.BadRequest);
+  const invalidError = errorSchema.parse(await invalid.json()).error;
+  assert.equal(invalidError.code, ProjectErrorCode.InboxInvalid);
+  assert.deepEqual(invalidError.details, {
+    binding: INBOX_BINDING,
+    field: InboxField.Handle,
+    reason: InboxInvalidReason.HandleInvalid,
+  });
+  const inbox = { actor_id: INBOX_ACTOR_ID, handle: INBOX_HANDLE };
+  assert.equal((await writeBindings(first.id, inbox)).status, HttpStatus.OK);
+  const taken = await writeBindings(second.id, inbox);
+  assert.equal(taken.status, HttpStatus.Conflict);
+  const takenError = errorSchema.parse(await taken.json()).error;
+  assert.equal(takenError.code, ProjectErrorCode.InboxTaken);
+  assert.deepEqual(takenError.details, {
+    resource_identity: INBOX_IDENTITY,
+    project_id: first.id,
+  });
 });
 
 test("published inbound reads are human unary routes", async () => {
