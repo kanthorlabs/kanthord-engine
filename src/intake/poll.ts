@@ -398,12 +398,12 @@ function releaseCycle(
 }
 
 function demandOf(
-  data: { count: number; link_count: number },
+  data: { count: number; link_count: number; inbox: boolean },
   resourceKind: ResourceKind,
-): number {
-  return resourceKind === ResourceKind.Conversation
-    ? data.link_count
-    : data.count;
+): boolean {
+  if (resourceKind !== ResourceKind.Conversation)
+    return data.count > NO_UNRESOLVED_REQUESTS;
+  return data.link_count > NO_UNRESOLVED_REQUESTS || data.inbox;
 }
 
 async function hasDemand(
@@ -422,7 +422,7 @@ async function hasDemand(
     { identity: dependencies.identity, context },
   );
   if (result.type === OperationResultType.Completed)
-    return demandOf(result.data, target.resourceKind) > NO_UNRESOLVED_REQUESTS;
+    return demandOf(result.data, target.resourceKind);
   logFailure(
     dependencies.logger,
     target.facts.inboundId,

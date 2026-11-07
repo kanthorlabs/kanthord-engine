@@ -10,6 +10,7 @@ import { Act, ActAttribute } from "./act-telemetry.ts";
 import {
   ActorKind,
   AssessmentResult,
+  InboxReason,
   Intent,
   MissionErrorCode,
   NodeState,
@@ -21,6 +22,7 @@ import {
   LINK_RESOURCE,
   linkOf,
   linkUpdateHarness,
+  OTHER_LINK_NUMBER,
   TRUSTED_ACTOR,
 } from "./link-update-test-support.ts";
 import { linkUpdatesOf } from "./link-update-read.ts";
@@ -479,4 +481,68 @@ test("followup list of a project with no mission answers mission not found", asy
     h.list(createIdentity("project")),
     refusedWith(MissionErrorCode.MissionNotFound),
   );
+});
+
+const THIRD_OCCURRED_AT = 1700000003000;
+const FOURTH_OCCURRED_AT = 1700000004000;
+const DECISIONS = [
+  { name: "an approval", body: { approve: true } },
+  { name: "a rejection", body: { approve: false } },
+] as const;
+
+function doneAtOf(h: ReturnType<typeof fixture>, id: string) {
+  return (
+    h.store.database
+      .prepare("SELECT done_at FROM mission_link_update WHERE id = ?")
+      .get(id) as { done_at: number | null }
+  ).done_at;
+}
+
+for (const { name, body } of DECISIONS) {
+  test(`${name} sets done_at of the newest inbox row of each linked thread only`, async (t) => {
+    const h = fixture(t, NodeState.Completed);
+    const inbox = {
+      reason: InboxReason.Mentioned,
+      binding_id: h.conversationId,
+    };
+    const older = h.insertUpdate(
+      linkOf(),
+      TRUSTED_ACTOR,
+      FIRST_OCCURRED_AT,
+      undefined,
+      inbox,
+    );
+    const newest = h.insertUpdate(
+      linkOf(),
+      TRUSTED_ACTOR,
+      SECOND_OCCURRED_AT,
+      undefined,
+      inbox,
+    );
+    const outside = h.insertUpdate(linkOf(), TRUSTED_ACTOR, THIRD_OCCURRED_AT);
+    const other = h.insertUpdate(
+      linkOf(OTHER_LINK_NUMBER),
+      TRUSTED_ACTOR,
+      FOURTH_OCCURRED_AT,
+      undefined,
+      inbox,
+    );
+    h.openProposal();
+    const started = Date.now();
+    await h.decide(body);
+    assert.ok(Number(doneAtOf(h, newest)) >= started);
+    assert.equal(doneAtOf(h, older), null);
+    assert.equal(doneAtOf(h, outside), null);
+    assert.equal(doneAtOf(h, other), null);
+  });
+}
+
+test("a thread with no inbox row stays unchanged by a decision", async (t) => {
+  const h = fixture(t, NodeState.Completed);
+  const outside = h.insertUpdate(linkOf(), TRUSTED_ACTOR, FIRST_OCCURRED_AT);
+  h.openProposal();
+  const before = h.rows();
+  await h.decide({ approve: true });
+  assert.deepEqual(h.rows(), before);
+  assert.equal(doneAtOf(h, outside), null);
 });

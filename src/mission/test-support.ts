@@ -364,6 +364,7 @@ export function missionHarness(
       replyMatch: unexpectedCollaboration,
       handoff: unexpectedCollaboration,
       releaseHeld: unexpectedCollaboration,
+      describe: unexpectedCollaboration,
     },
     decoder: {
       decode: unexpectedCollaboration,
@@ -387,6 +388,10 @@ export function missionHarness(
       },
       getBindingRevision: (...args) => {
         record("bindings.getBindingRevision", args);
+        return null;
+      },
+      conversationInboxOf: (...args) => {
+        record("bindings.conversationInboxOf", args);
         return null;
       },
       repositoryPolicyOf: (...args) => {

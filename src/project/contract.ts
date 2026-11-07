@@ -129,6 +129,18 @@ export const LinkTrustReason = {
   IdInvalid: "id_invalid",
   PlatformUnsupported: "platform_unsupported",
 } as const;
+export const INBOX_HANDLE_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+export const InboxField = {
+  Inbox: "inbox",
+  ActorId: "actor_id",
+  Handle: "handle",
+} as const;
+export const InboxInvalidReason = {
+  TypeInvalid: "type_invalid",
+  IdInvalid: "id_invalid",
+  HandleInvalid: "handle_invalid",
+  PlatformUnsupported: "platform_unsupported",
+} as const;
 export const GitHubAction = {
   PullRequest: "pull_request",
   MergePush: "merge_push",
@@ -174,6 +186,8 @@ export const ProjectErrorCode = {
     "project.bindings.repository.credential_required",
   RepositoryActionUnsupported: "project.bindings.repository.action_unsupported",
   LinkTrustInvalid: "project.bindings.link_trust_invalid",
+  InboxInvalid: "project.bindings.inbox_invalid",
+  InboxTaken: "project.bindings.inbox_taken",
   EnvironmentSecretInvalid:
     "project.bindings.repository.environment_secret_invalid",
   WorkerAgentUnknown: "project.bindings.worker.agent_unknown",
@@ -284,6 +298,17 @@ export const linkTrustSchema = z
       Object.keys(value).every((key) => key === LinkTrustField.ActorIds),
     { message: "link_trust holds the key actor_ids only." },
   );
+export const inboxSchema = z
+  .unknown()
+  .refine(
+    (value) =>
+      !isObject(value) ||
+      Array.isArray(value) ||
+      Object.keys(value).every(
+        (key) => key === InboxField.ActorId || key === InboxField.Handle,
+      ),
+    { message: "inbox holds the keys actor_id and handle only." },
+  );
 export const replyPolicySchema = z.strictObject({
   follows: z.strictObject({ type: z.literal(FollowsType.AssessmentPassed) }),
 });
@@ -322,6 +347,7 @@ export const repositoryConfigSchema = z.strictObject({
   environment: environmentSchema.optional(),
   environment_secrets: z.record(z.string(), z.string().min(1)).optional(),
   link_trust: linkTrustSchema.optional(),
+  inbox: z.unknown().optional(),
 });
 export const conversationConfigSchema = z.discriminatedUnion("platform", [
   z.strictObject({
@@ -331,6 +357,7 @@ export const conversationConfigSchema = z.discriminatedUnion("platform", [
     credential: z.string().min(1),
     reply_policy: replyPolicySchema.optional(),
     link_trust: linkTrustSchema.optional(),
+    inbox: inboxSchema.optional(),
   }),
 ]);
 export const WorkerPlacement = {
@@ -723,8 +750,13 @@ export type WorkerAgentView = {
 export const pinnedLinkTrustSchema = z.strictObject({
   actor_ids: z.array(z.string()),
 });
+export const pinnedInboxSchema = z.strictObject({
+  actor_id: z.string(),
+  handle: z.string(),
+});
 export const pinnedConfigSchema = z.looseObject({
   link_trust: pinnedLinkTrustSchema.optional(),
+  inbox: pinnedInboxSchema.optional(),
 });
 export type BindingRevisionResult = {
   project_id: string;
@@ -735,6 +767,7 @@ export type BindingRevisionResult = {
   tombstone: boolean;
   disabled: boolean;
   link_trust?: z.infer<typeof pinnedLinkTrustSchema>;
+  inbox?: z.infer<typeof pinnedInboxSchema>;
 };
 export type ConversationBinding = {
   binding_id: string;

@@ -192,6 +192,10 @@ paths:
     $ref: ./openapi/mission/import.apply.yaml#/pathItem
   /api/mission/{mission_id}/import/preview:
     $ref: ./openapi/mission/import.preview.yaml#/pathItem
+  /api/mission/inbox-item/{link_update_id}/done:
+    $ref: ./openapi/mission/inbox_item.done.yaml#/pathItem
+  /api/mission/inbox-item:
+    $ref: ./openapi/mission/inbox_item.list.yaml#/pathItem
   /api/mission/node/{node_id}/link-update:
     $ref: ./openapi/mission/link_update.list.yaml#/pathItem
   /api/mission/node/{node_id}/block:

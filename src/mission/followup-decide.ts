@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { OperationError } from "../kernel/errors.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
 import type { Acted, ActFacts } from "./act-telemetry.ts";
 import {
+  externalLinksSchema,
+  followupContentSchema,
   type FollowupDecide,
   type FollowupProposal,
   type HumanActor,
@@ -12,6 +15,7 @@ import {
   PROPOSAL_IDENTITY_PREFIX,
   type TaskContent,
 } from "./contract.ts";
+import { markThreadDone } from "./inbox-item.ts";
 import { createNode } from "./node-create.ts";
 import { requireNode } from "./node-read.ts";
 import { followupRecord } from "./proposal-read.ts";
@@ -23,7 +27,11 @@ import {
 } from "./proposal-store.ts";
 import { revisionFromRow } from "./revision.ts";
 import type { Dependencies } from "./service.ts";
-import { insertDependency, readCurrentRevision } from "./store.ts";
+import {
+  insertDependency,
+  readCurrentRevision,
+  readRevision,
+} from "./store.ts";
 import { requireActive, requireMission } from "./write.ts";
 
 const IDENTITY_SEPARATOR_LENGTH = 1;
@@ -97,6 +105,24 @@ function approveFollowup(
   return createdId;
 }
 
+function markFollowupThreadsDone(
+  tx: Transaction,
+  missionId: string,
+  nodeId: string,
+  proposal: ProposalRow,
+  now: number,
+): void {
+  const { node_revision } = followupContentSchema.parse(
+    JSON.parse(proposal.content),
+  );
+  const revision = readRevision(tx, nodeId, node_revision);
+  assert.ok(revision, "A proposal names an existing revision.");
+  for (const link of externalLinksSchema.parse(
+    JSON.parse(revision.external_links),
+  ))
+    markThreadDone(tx, missionId, canonicalJSON(link), now);
+}
+
 export function decideFollowup(
   tx: Transaction,
   dependencies: Dependencies,
@@ -128,6 +154,7 @@ export function decideFollowup(
       )
     : null;
   if (createdNodeId === null) markFollowupRejected(tx, proposal.id, now);
+  markFollowupThreadsDone(tx, node.mission_id, node.id, proposal, now);
   const settled = followupRecord({
     ...proposal,
     created_node_id: createdNodeId,

@@ -26,6 +26,7 @@ import {
 } from "./contract.ts";
 import { recordRefusedLinkUpdate } from "./delivery-telemetry.ts";
 import {
+  inboxDemand,
   linkDemandCount,
   MatchKind,
   matchLinkUpdate,
@@ -33,6 +34,7 @@ import {
   unresolvedBaseRequests,
   unresolvedRequestCount,
 } from "./delivery-match.ts";
+import { admitInboxReason } from "./link-inbox.ts";
 import { openFollowups } from "./followup-open.ts";
 import { applyEndState, changesNothing, requestContext } from "./node-check.ts";
 import { insertLinkUpdate, readEvidence } from "./record-store.ts";
@@ -58,6 +60,10 @@ type BranchPushAddress = Extract<
 const ACCEPTED: AdmissionAnswer = {
   disposition: Disposition.AcceptedObservation,
   reason: null,
+};
+const UNMATCHED: AdmissionAnswer = {
+  disposition: Disposition.Refused,
+  reason: AdmissionRefusal.Unmatched,
 };
 const DUPLICATE: AdmissionAnswer = {
   disposition: Disposition.Duplicate,
@@ -127,6 +133,17 @@ function commitLinkUpdate(
 ): AdmissionAnswer {
   const match = matchLinkUpdate(tx, input.project_id, checked.update);
   if (match.kind === MatchKind.Answer) return match.answer;
+  const now = Date.now();
+  const admission = admitInboxReason(tx, dependencies, {
+    project_id: input.project_id,
+    mission_id: match.mission_id,
+    external_link: match.external_link,
+    update: checked.update,
+    actor_id: checked.actorId,
+    linked: match.linked,
+    now,
+  });
+  if (admission === null) return UNMATCHED;
   insertLinkUpdate(tx, {
     mission_id: match.mission_id,
     external_link: match.external_link,
@@ -134,6 +151,10 @@ function commitLinkUpdate(
     inbound_event_id: input.inbound_event_id,
     actor_id: checked.actorId,
     occurred_at: checked.update.occurred_at,
+    reason: admission.reason,
+    binding_id: admission.binding_id,
+    done_at: admission.done_at,
+    snoozed_until: null,
   });
   openFollowups(
     tx,
@@ -141,7 +162,7 @@ function commitLinkUpdate(
     match.mission_id,
     match.external_link,
     checked.actorId,
-    Date.now(),
+    now,
   );
   return ACCEPTED;
 }
@@ -336,9 +357,10 @@ export function admitDelivery(
 }
 
 export function countUnresolvedRequests(
+  dependencies: Dependencies,
   caller: CallerContext,
   input: CountInput,
-): { count: number; link_count: number } {
+): { count: number; link_count: number; inbox: boolean } {
   authorizeAdmission(caller);
   return caller.commit((tx) => ({
     count: unresolvedRequestCount(
@@ -351,6 +373,12 @@ export function countUnresolvedRequests(
       input.project_id,
       input.resource_identity,
       Date.now(),
+    ),
+    inbox: inboxDemand(
+      tx,
+      dependencies.bindings,
+      input.project_id,
+      input.resource_identity,
     ),
   }));
 }

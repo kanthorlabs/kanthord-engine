@@ -461,11 +461,12 @@ function modified(etag: string | null, events: GitHubEvent[]): EventsAnswer {
 function counted(
   count: number,
   linkCount = NO_REQUESTS,
-): OperationResult<{ count: number; link_count: number }> {
+  inbox = false,
+): OperationResult<{ count: number; link_count: number; inbox: boolean }> {
   return {
     type: OperationResultType.Completed,
     status: HttpStatus.OK,
-    data: { count, link_count: linkCount },
+    data: { count, link_count: linkCount, inbox },
   };
 }
 
@@ -529,7 +530,9 @@ function cycleHarness(t: TestContext, options: HarnessOptions = {}) {
   const demands: {
     inputs: { project_id: string; resource_identity: string }[];
     options: ClientOptions[];
-    next: () => Promise<OperationResult<{ count: number; link_count: number }>>;
+    next: () => Promise<
+      OperationResult<{ count: number; link_count: number; inbox: boolean }>
+    >;
   } = {
     inputs: [],
     options: [],

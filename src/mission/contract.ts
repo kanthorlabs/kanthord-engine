@@ -91,6 +91,15 @@ export interface MissionBindings {
     tombstone: boolean;
     disabled: boolean;
     link_trust?: { actor_ids: string[] };
+    inbox?: { actor_id: string; handle: string };
+  } | null;
+  conversationInboxOf(
+    tx: Transaction,
+    projectId: string,
+    resourceIdentity: string,
+  ): {
+    binding_id: string;
+    inbox: { actor_id: string; handle: string };
   } | null;
 }
 
@@ -354,6 +363,15 @@ export interface IntakeLinks {
     inboundEventId: string,
   ): Promise<AdmissionAnswer | null>;
   releaseHeld(inboundEventIds: readonly string[]): void;
+  describe(
+    context: Context,
+    inboundEventId: string,
+  ): Promise<{
+    author: string | null;
+    body: string | null;
+    url: string | null;
+    occurred_at: number | null;
+  }>;
 }
 
 export interface DecodedLinkUpdate {
@@ -474,6 +492,8 @@ export const MissionErrorCode = {
   ClaimLive: "mission.node.claim_live",
   DeliveryMatchChanged: "mission.delivery.match_changed",
   MissionNotFound: "mission.mission.not_found",
+  InboxItemNotFound: "mission.inbox_item.not_found",
+  InboxItemSnoozeInvalid: "mission.inbox_item.snooze_invalid",
   NodeNotFound: "mission.node.not_found",
   VersionConflict: "mission.version.conflict",
   RevisionConflict: "mission.revision.conflict",
@@ -717,6 +737,17 @@ export const tagsSchema = z
   });
 export const EXTERNAL_LINK_LIMIT = 10;
 export { type ExternalLink, ExternalLinkKind, externalLinkSchema };
+export const InboxReason = {
+  Linked: "linked",
+  Mentioned: "mentioned",
+  Participating: "participating",
+} as const;
+export type InboxReason = (typeof InboxReason)[keyof typeof InboxReason];
+export const INBOX_REASONS_BY_RANK: readonly InboxReason[] = [
+  InboxReason.Linked,
+  InboxReason.Mentioned,
+  InboxReason.Participating,
+];
 export const linkUpdateRowSchema = z.strictObject({
   id: identitySchema(LINK_UPDATE_IDENTITY_PREFIX),
   mission_id: identitySchema(MISSION_IDENTITY_PREFIX),
@@ -725,6 +756,10 @@ export const linkUpdateRowSchema = z.strictObject({
   inbound_event_id: identitySchema("inbound_event"),
   actor_id: z.string().min(1),
   occurred_at: z.number().int().nonnegative(),
+  reason: z.enum(InboxReason),
+  binding_id: identitySchema("binding").nullable(),
+  done_at: z.number().int().nonnegative().nullable(),
+  snoozed_until: z.number().int().nonnegative().nullable(),
 });
 export type LinkUpdateRow = z.infer<typeof linkUpdateRowSchema>;
 export const linkUpdateSchema = z.strictObject({
@@ -741,6 +776,50 @@ export interface LinkUpdatePage {
   limit?: number;
   cursor?: string;
 }
+export const InboxItemState = {
+  Open: "open",
+  Snoozed: "snoozed",
+  Done: "done",
+} as const;
+export type InboxItemState =
+  (typeof InboxItemState)[keyof typeof InboxItemState];
+export const INBOX_ITEM_LIMIT_MAX = 100;
+export const inboxContentSchema = z.strictObject({
+  author: z.string(),
+  body: z.string(),
+  url: z.string(),
+  occurred_at: timestamp,
+});
+export type InboxContent = z.infer<typeof inboxContentSchema>;
+export const inboxItemSchema = z.strictObject({
+  link_update_id: identitySchema(LINK_UPDATE_IDENTITY_PREFIX),
+  project_id: identitySchema("project"),
+  external_link: externalLinkSchema,
+  reason: z.enum(InboxReason),
+  state: z.enum(InboxItemState),
+  occurred_at: timestamp,
+  done_at: timestamp.nullable(),
+  snoozed_until: timestamp.nullable(),
+  inbound_event_id: identitySchema("inbound_event"),
+  actor_id: z.string().min(1),
+  trusted: z.boolean(),
+  linked_node_ids: z.array(identitySchema(NODE_IDENTITY_PREFIX)),
+  content: inboxContentSchema.nullable(),
+});
+export type InboxItem = z.infer<typeof inboxItemSchema>;
+export const inboxItemListSchema = z.strictObject({
+  items: z.array(inboxItemSchema),
+  next_cursor: z.string().nullable(),
+  counts: z.strictObject({
+    open: z.number().int().nonnegative(),
+    snoozed: z.number().int().nonnegative(),
+  }),
+});
+export type InboxItemList = z.infer<typeof inboxItemListSchema>;
+export const inboxItemDoneSchema = z.strictObject({
+  snoozed_until: timestamp.nullable().optional(),
+});
+export type InboxItemDone = z.infer<typeof inboxItemDoneSchema>;
 export const externalLinksSchema = z
   .array(externalLinkSchema)
   .max(EXTERNAL_LINK_LIMIT)
@@ -1921,6 +2000,19 @@ const pageQuery = {
     .optional(),
   cursor: z.string().optional(),
 };
+export const inboxItemQuerySchema = z.strictObject({
+  project_id: identitySchema("project").optional(),
+  state: z.enum(InboxItemState).default(InboxItemState.Open).optional(),
+  cursor: z.string().optional(),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(NODE_LIST_LIMIT_MIN)
+    .max(INBOX_ITEM_LIMIT_MAX)
+    .default(NODE_LIST_LIMIT_DEFAULT)
+    .optional(),
+});
+export type InboxItemQuery = z.infer<typeof inboxItemQuerySchema>;
 const attemptSelector = (minimum: number) =>
   z.preprocess(
     (value) =>
@@ -2176,6 +2268,7 @@ export const missionOperations = {
     output: z.strictObject({
       count: z.number().int().nonnegative(),
       link_count: z.number().int().nonnegative(),
+      inbox: z.boolean(),
     }),
     description:
       "Count the unresolved request evidences and the live links of a resource for the Intake Service.",
@@ -2429,6 +2522,32 @@ export const missionOperations = {
     output: pageOf(linkUpdateSchema),
     description:
       "List the updates of the linked threads of a node from trusted actors, newest first.",
+  },
+  "inbox_item.list": {
+    ...readOperation,
+    id: "mission.inbox_item.list",
+    method: HttpMethod.Get,
+    path: "/api/mission/inbox-item",
+    input: readInput(z.strictObject({}), inboxItemQuerySchema),
+    output: inboxItemListSchema,
+    description:
+      "List the inbox threads of the developer with their state, reason, trust and content, oldest first.",
+  },
+  "inbox_item.done": {
+    ...writeOperation,
+    id: "mission.inbox_item.done",
+    method: HttpMethod.Post,
+    path: "/api/mission/inbox-item/:link_update_id/done",
+    input: z.strictObject({
+      params: z.strictObject({
+        link_update_id: identitySchema(LINK_UPDATE_IDENTITY_PREFIX),
+      }),
+      query: z.strictObject({}),
+      body: inboxItemDoneSchema,
+    }),
+    output: inboxItemSchema,
+    description:
+      "Mark an inbox row done, or snooze it until a time. The answer is the item of its thread.",
   },
   "proposal.decide": {
     ...writeOperation,

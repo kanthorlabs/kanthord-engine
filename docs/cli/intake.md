@@ -427,7 +427,10 @@ ETag for each read. The create and the delete of a poll inbound are the only
 switch of its poll.
 
 The conversation poll of a GitHub repository requests GitHub only while a node
-of its project links an issue of the repository. Each cycle runs one read: one
+of its project links an issue of the repository, or while the current revision
+of the conversation binding of the resource holds `inbox`. The demand answer of
+the Mission Service is `{ count, link_count, inbox }`, and the poll requests
+while `link_count` is above zero or `inbox` is true. Each cycle runs one read: one
 page of the issue comments, sorted by update time, newest first. It follows
 the same wait rules as the repository poll. The credential of a conversation
 inbound needs the fine-grained permission "Issues: read". The batch and the
@@ -544,8 +547,9 @@ Before the merge, the action performer reads the required checks with `github-pu
 Only the Mission Service calls it, for the execution caller of `mission.assessment.submit`. `intake.execution.gate_files.read` runs for an execution caller and takes `{ binding_id, base_branch, commit }`. Intake keeps one bare repository for each binding at `intake/repositories/<binding id>.git` of the server state directory and reuses it. It fetches the commits of the base branch and the commit with `--filter=tree:0` and the SSH identity of the binding. It fetches each tree and blob that a read needs on demand. It reads `.kanthord/affected-tests.json` at the base branch. A path of its `gate_files` is changed when its mode or its object at the merge base differs from its mode or its object at the commit. A new path and a removed path are changed. A declared directory is changed when any entry below it changes. The answer is `{ paths }`. A git failure answers `502` with the git code and removes the bare repository, except after a deadline. A declaration that does not match the declaration shape of the worker, or that holds a path of `gate_files` that is not canonical, answers `502` `repository.gate_declaration.invalid`. The Intake Service keeps the bare repository for this error.
 
 `intake.inbound.event.describe` is a `service` operation with no CLI command
-and no HTTP route. Only the Worker Service calls it; another caller fails an
-assertion. It takes `{ inbound_event_id }`, reads the stored event and its
+and no HTTP route. The Worker Service and the Mission Service call it; another
+caller fails an assertion. The Mission Service calls it for `mission inbox-item
+list` and `mission inbox-item done`, outside its own transaction. It takes `{ inbound_event_id }`, reads the stored event and its
 inbound in one read transaction, and calls the description of the platform
 implementation of the inbound: `describeGitHubEvent` for `github`. It answers
 `{ author, body, url, occurred_at }`. It applies the sensitive text rule set of

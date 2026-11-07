@@ -70,7 +70,7 @@ export function trustedLinksOf(
     .filter((trusted) => trusted.actor_ids.length > NO_ACTORS);
 }
 
-function cursorOf(cursor: string): { occurred_at: number; id: string } {
+export function cursorOf(cursor: string): { occurred_at: number; id: string } {
   const value = decode(cursor);
   const separator = value.indexOf(CURSOR_SEPARATOR);
   const occurredAt = Number(value.slice(FIRST_INDEX, separator));

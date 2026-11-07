@@ -123,6 +123,7 @@ export const missionExamples = {
     expected_mission_version: MISSION_VERSION,
     approved_proposal_ids: ["proposal_01ARZ3NDEKTSV4RRFFQ69G5FAV"],
   },
+  inboxItemDone: { snoozed_until: null },
   followupDecide: {
     expected_mission_version: MISSION_VERSION,
     approve: true,

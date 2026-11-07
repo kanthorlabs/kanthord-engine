@@ -20,6 +20,7 @@ import {
   LISTED_EVENT,
   listedComment,
 } from "../repository/github-comment-test-support.ts";
+import { SCHEDULER_SERVICE_NAME } from "../scheduler/contract.ts";
 import { WORKER_SERVICE_NAME } from "../worker/contract.ts";
 import { MISSION_SERVICE_NAME } from "../mission/contract.ts";
 import {
@@ -183,11 +184,26 @@ test("the operation writes no row, releases no custody and calls no platform", a
   assert.equal(fetched.mock.callCount(), NO_CHANGES);
 });
 
-test("a call under the service identity of the Mission Service fails the assertion", async (t) => {
+test("a call under the service identity of the Mission Service answers the content", async (t) => {
+  const h = harness(t);
+  const body = "mission reads this";
+  const answer = await h.describe(
+    h.addEvent(commentBytes(listedComment({ body })), LISTED_EVENT),
+    MISSION_SERVICE_NAME,
+  );
+  assert.deepEqual(answer, {
+    author: COMMENT_LOGIN,
+    body,
+    url: COMMENT_URL,
+    occurred_at: COMMENT_CREATED_AT_MS,
+  });
+});
+
+test("a call under another service identity fails the assertion", async (t) => {
   const h = harness(t);
   const id = h.addEvent(commentBytes(listedComment()), LISTED_EVENT);
   await assert.rejects(
-    h.describe(id, MISSION_SERVICE_NAME),
+    h.describe(id, SCHEDULER_SERVICE_NAME),
     assert.AssertionError,
   );
 });

@@ -100,6 +100,9 @@ import {
   ENVIRONMENT_SECRETS_MAX,
   GITHUB_ACTOR_ID_PATTERN,
   GitHubAction,
+  INBOX_HANDLE_PATTERN,
+  InboxField,
+  InboxInvalidReason,
   INSTANCE_COUNT_MAX,
   INSTANCE_COUNT_MIN,
   type InstanceOf,
@@ -161,6 +164,7 @@ import {
   readCurrentBindingSet,
   readCurrentRepositories,
   readGeneration,
+  readInboxHolder,
   readLatestBinding,
   readLatestTombstone,
   readOlderRevisions,
@@ -293,6 +297,68 @@ function refuseRepositoryLinkTrust(
   if (config.platform !== RepositoryPlatform.GitHub)
     refuseLinkTrust(binding, LinkTrustReason.PlatformUnsupported);
   refuseInvalidLinkTrust(binding, config.link_trust);
+}
+function refuseInbox(binding: string, field: string, reason: string): never {
+  throw new OperationError(
+    HttpStatus.BadRequest,
+    ProjectErrorCode.InboxInvalid,
+    "inbox must hold a numeric actor_id and a GitHub handle.",
+    { binding, field, reason },
+  );
+}
+function refuseInvalidInbox(binding: string, inbox: unknown): void {
+  if (inbox === undefined) return;
+  if (!isObject(inbox) || Array.isArray(inbox))
+    refuseInbox(binding, InboxField.Inbox, InboxInvalidReason.TypeInvalid);
+  const { actor_id, handle } = inbox as Record<string, unknown>;
+  if (!isString(actor_id))
+    refuseInbox(binding, InboxField.ActorId, InboxInvalidReason.TypeInvalid);
+  if (!isString(handle))
+    refuseInbox(binding, InboxField.Handle, InboxInvalidReason.TypeInvalid);
+  if (!GITHUB_ACTOR_ID_PATTERN.test(actor_id))
+    refuseInbox(binding, InboxField.ActorId, InboxInvalidReason.IdInvalid);
+  if (!INBOX_HANDLE_PATTERN.test(handle))
+    refuseInbox(binding, InboxField.Handle, InboxInvalidReason.HandleInvalid);
+}
+function refuseRepositoryInbox(
+  binding: string,
+  config: typeof repositoryConfigSchema._output,
+): void {
+  if (config.inbox === undefined) return;
+  refuseInbox(
+    binding,
+    InboxField.Inbox,
+    InboxInvalidReason.PlatformUnsupported,
+  );
+}
+function refuseTakenInbox(
+  tx: Transaction,
+  projectId: string,
+  submission: Map<string, BindingEdit>,
+): void {
+  for (const [name, binding] of submission) {
+    if (
+      binding.kind !== BindingKind.Conversation ||
+      binding.config.inbox === undefined
+    )
+      continue;
+    const resourceIdentity = deriveResourceIdentity(
+      binding.kind,
+      name,
+      binding.config,
+    );
+    const holder = readInboxHolder(tx, projectId, resourceIdentity);
+    if (holder)
+      throw new OperationError(
+        HttpStatus.Conflict,
+        ProjectErrorCode.InboxTaken,
+        "Another project holds the inbox of this resource.",
+        {
+          resource_identity: resourceIdentity,
+          project_id: holder.project_id,
+        },
+      );
+  }
 }
 const ENVIRONMENT_KEY = "environment";
 function withoutEnvironment(config: unknown): unknown {
@@ -1140,6 +1206,7 @@ export class ProjectService implements Service, ProjectBindings {
   ) {
     refuseRepositoryAction(config);
     refuseRepositoryLinkTrust(CHECKED_BINDING_NAME, config);
+    refuseRepositoryInbox(CHECKED_BINDING_NAME, config);
     refuseAddressForm(config.address);
     this.operationalStore.transaction((tx) => {
       requireProject(tx, params.project_id);
@@ -1350,6 +1417,7 @@ export class ProjectService implements Service, ProjectBindings {
       if (binding.kind !== BindingKind.Repository) continue;
       refuseRepositoryAction(binding.config);
       refuseRepositoryLinkTrust(name, binding.config);
+      refuseRepositoryInbox(name, binding.config);
       refuseEnvironment(binding.config.environment);
       validatePrompts(binding.config.prompts ?? {});
       if (bindingUnchanged(name, binding, saved.get(name))) continue;
@@ -1364,6 +1432,7 @@ export class ProjectService implements Service, ProjectBindings {
       assert.equal(submission.size, Object.keys(body.bindings).length);
       for (const [name, binding] of submission)
         this.validateBinding(tx, name, binding);
+      refuseTakenInbox(tx, projectId, submission);
       refuseWorkerEnvironments(tx, this.instanceOf, submission);
       refuseSharedContainerInstances(
         tx,
@@ -1616,6 +1685,7 @@ export class ProjectService implements Service, ProjectBindings {
     }
     if (binding.kind === BindingKind.Conversation) {
       refuseInvalidLinkTrust(name, binding.config.link_trust);
+      refuseInvalidInbox(name, binding.config.inbox);
       this.custodySuitability(tx, {
         credential: binding.config.credential,
         platform: binding.config.platform,
@@ -1853,7 +1923,7 @@ export class ProjectService implements Service, ProjectBindings {
       current.kind === BindingKind.Worker
         ? effectiveInstanceCount(current.config) === INSTANCE_COUNT_MIN
         : current.config.available === false;
-    const { link_trust } = pinnedConfigSchema.parse(binding.config);
+    const { link_trust, inbox } = pinnedConfigSchema.parse(binding.config);
     return {
       project_id: binding.project_id,
       binding_id: binding.id,
@@ -1863,7 +1933,22 @@ export class ProjectService implements Service, ProjectBindings {
       tombstone: hasBindingTombstone(tx, binding),
       disabled,
       ...(link_trust === undefined ? {} : { link_trust }),
+      ...(inbox === undefined ? {} : { inbox }),
     };
+  }
+  conversationInboxOf(
+    tx: Transaction,
+    projectId: string,
+    resourceIdentity: string,
+  ): {
+    binding_id: string;
+    inbox: { actor_id: string; handle: string };
+  } | null {
+    assert.ok(tx.database.isTransaction);
+    const latest = readLatestBinding(tx, projectId, resourceIdentity);
+    if (!latest || latest.removed_at !== null) return null;
+    const { inbox } = pinnedConfigSchema.parse(latest.config);
+    return inbox === undefined ? null : { binding_id: latest.id, inbox };
   }
   workerBindingRowOf(tx: Transaction, bindingId: string) {
     assert.ok(tx.database.isTransaction);

@@ -1023,6 +1023,17 @@ export function composeServices(options: {
           : admissionAnswerSchema.parse(resultOf(result));
       },
       releaseHeld: (inboundEventIds) => intake.releaseHeld(inboundEventIds),
+      describe: async (context, inboundEventId) =>
+        resultOf(
+          await intakeClient["inbound.event.describe"](
+            {
+              params: {},
+              query: {},
+              body: { inbound_event_id: inboundEventId },
+            },
+            { identity: missionIdentity, context },
+          ),
+        ),
     },
     intakeCheck: {
       check: async (context, evidenceId) =>
@@ -1102,6 +1113,8 @@ export function composeServices(options: {
       resolveBindingIdentity: (tx, pid, bid) =>
         project.resolveBindingIdentity(tx, pid, bid),
       getBindingRevision: (tx, bid) => project.getBindingRevision(tx, bid),
+      conversationInboxOf: (tx, pid, identity) =>
+        project.conversationInboxOf(tx, pid, identity),
       repositoryPolicyOf: (tx, bid) => project.repositoryPolicyOf(tx, bid),
       conversationPolicyOf: (tx, bid) => project.conversationPolicyOf(tx, bid),
       storageBindingOf: (tx, bid) => project.storageBindingOf(tx, bid),

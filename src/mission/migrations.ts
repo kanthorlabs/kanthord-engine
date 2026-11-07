@@ -145,7 +145,11 @@ const createMissionTables: Migration = (database) => {
       update_key TEXT NOT NULL,
       inbound_event_id TEXT NOT NULL,
       actor_id TEXT NOT NULL,
-      occurred_at INTEGER NOT NULL
+      occurred_at INTEGER NOT NULL,
+      reason TEXT NOT NULL,
+      binding_id TEXT,
+      done_at INTEGER,
+      snoozed_until INTEGER
     );
     CREATE UNIQUE INDEX mission_link_update_key ON mission_link_update (mission_id, external_link, update_key);
     CREATE UNIQUE INDEX mission_finding_label ON mission_finding (assessment_id, label);
