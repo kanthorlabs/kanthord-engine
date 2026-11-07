@@ -218,6 +218,7 @@ function instanceFixture(
   const reports: { ends: ExecutionEnds; inTransaction: boolean }[] = [];
   const revocation = {
     failure: null as Error | null,
+    archiveFailure: null as Error | null,
     only: null as string | null,
   };
   const archivedHolders: string[] = [];
@@ -253,6 +254,7 @@ function instanceFixture(
     loginSessionsOf: (holder) => logins.get(holder) ?? [],
     instanceCopies: {
       archiveHeld: (_tx, holder) => {
+        if (revocation.archiveFailure) throw revocation.archiveFailure;
         archivedHolders.push(holder);
       },
       heldCopies: () => [],
@@ -2236,4 +2238,30 @@ test("the archive keeps the connection while stopping is not empty and drops it 
   assert.notEqual(f.worker().instances.connectionOf(box.record.id), null);
   f.worker().executionReleased(box.executionId);
   assert.equal(f.worker().instances.connectionOf(box.record.id), null);
+});
+
+test("the order timer retries a deferred end that failed and left an empty stopping list", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  await box.archive();
+  f.revocation.archiveFailure = new Error(REVOKE_FAILURE);
+  assert.throws(() => f.worker().executionReleased(box.executionId), {
+    message: REVOKE_FAILURE,
+  });
+  assert.ok(f.worker().instances.liveInstance(box.record.id));
+  assert.equal(
+    f.store.transaction((tx) =>
+      f.worker().archiving(tx, box.registration.runtime_identity),
+    ),
+    true,
+  );
+  f.revocation.archiveFailure = null;
+  f.worker().instances.sweepStopOrders();
+  assert.equal(f.worker().instances.liveInstance(box.record.id), null);
+  assert.equal(
+    f.store.transaction((tx) =>
+      f.worker().archiving(tx, box.registration.runtime_identity),
+    ),
+    false,
+  );
 });

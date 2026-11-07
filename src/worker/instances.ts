@@ -800,6 +800,21 @@ export class WorkerInstances implements WorkerInstanceLookups {
         );
       }
     }
+    this.retryEmptyPendingArchives();
+  }
+
+  private retryEmptyPendingArchives(): void {
+    for (const pending of [...this.pendingArchives.values()]) {
+      if (pending.stopping.length) continue;
+      try {
+        this.endPendingArchive(pending);
+      } catch (error) {
+        this.dependencies.logger.error(
+          { err: asError(error), instance: pending.name },
+          STOP_ORDER_FAILED,
+        );
+      }
+    }
   }
 
   private expireStopOrder(order: StopOrder): void {
