@@ -33,6 +33,7 @@ import { readMission, setNodeState } from "./store.ts";
 import { externalRequestHarness, revokedExecution } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
+const ACTOR = { kind: "human", account: "ulrich", name: "Ulrich" } as const;
 const NO_REMOTE_CALLS = 0;
 const NO_RESULTS = 0;
 const FIRST_RESULT_INDEX = 0;
@@ -673,7 +674,12 @@ async function deferredCheckAfter(
     });
     h.store.transaction((tx) => {
       if (ended === EndedClaim.Revoked)
-        return h.service.revokeForInstanceArchive(tx, executionId);
+        return h.service.revokeForInstanceArchive(
+          tx,
+          executionId,
+          "relay",
+          ACTOR,
+        );
       live = false;
       return h.service.failure(tx, h.node_id, FIRST_ATTEMPT, Date.now());
     });

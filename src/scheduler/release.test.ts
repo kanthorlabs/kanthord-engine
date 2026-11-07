@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { isDeepStrictEqual } from "node:util";
+import { OperationError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import { ExecutionEnd } from "../tracking/contract.ts";
 import { executionTrace, executionTransition } from "./telemetry.ts";
 import { test, type TestContext } from "node:test";
@@ -42,10 +45,14 @@ import {
   heldUntil,
 } from "./settlement.ts";
 import { DEFAULT_STOP_BACKOFF_SECONDS } from "./config.ts";
+import { STOP_UNORDERED } from "./release.ts";
 
 const WAKE_CALL_COUNT = 1;
 const NO_STALLS = 0;
 const NO_FAILURES = 0;
+const NO_CALLS = 0;
+const FAILURE_CALL = "failure";
+const STOPPED_CALL = "stopped";
 const ONE_CALL = 1;
 const PRIOR_STALLS = 2;
 const FAILURE_LIMIT = 3;
@@ -571,6 +578,111 @@ test("a stop at the failure limit that pauses the node writes no hold end", asyn
     h.telemetry[1]!.arguments[1],
     executionTransition(paused, FIXTURE_NOW, FIRST_FAILURE_WITHOUT_JOB),
   );
+});
+
+const WORKER_STOPPED: ReleaseStop = {
+  reason: ExecutionStopReason.WorkerStopped,
+  code: null,
+};
+const INSTANCE_ARCHIVED: ReleaseStop = {
+  reason: ExecutionStopReason.InstanceArchived,
+  code: null,
+};
+
+test("a worker_stopped release calls stopped, not failure, and sets no hold", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  t.mock.method(h.service, "wake", () => {});
+  h.store.transaction((tx) => {
+    for (let index = 0; index < FAILURE_LIMIT; index++)
+      insertExecution(
+        tx,
+        executionFixture({
+          node_id: h.row.node_id,
+          project_id: h.row.project_id,
+          attempt: h.row.attempt,
+          ended_at: FIXTURE_NOW,
+          stop: STOP,
+        }),
+      );
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0);
+  });
+  await h.release(true, WORKER_STOPPED);
+  assert.deepEqual(
+    h.calls.map((call) => call.method),
+    [STOPPED_CALL],
+  );
+  assert.deepEqual(h.calls[0]!.arguments.slice(1), [
+    h.row.node_id,
+    FIXTURE_NOW,
+  ]);
+  assert.deepEqual(h.read().stop, WORKER_STOPPED);
+  const job = h.store.transaction(
+    (tx) =>
+      tx.database
+        .prepare("SELECT available_at FROM scheduler_job WHERE node_id = ?")
+        .get(h.row.node_id) as { available_at: number | null },
+  );
+  assert.equal(job.available_at, null);
+});
+
+test("an environment_failed release keeps the failure path", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  t.mock.method(h.service, "wake", () => {});
+  h.dependencies.environments.environmentFailed = () => {};
+  await h.release(true, {
+    reason: ExecutionStopReason.EnvironmentFailed,
+    code: EnvironmentFailure.SetupFailed,
+  });
+  assert.ok(h.calls.some((call) => call.method === FAILURE_CALL));
+  assert.ok(h.calls.every((call) => call.method !== STOPPED_CALL));
+});
+
+test("a worker_stopped release resets the budget-end stall count", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  t.mock.method(h.service, "wake", () => {});
+  h.store.transaction((tx) => {
+    tx.database
+      .prepare("DELETE FROM scheduler_execution WHERE id = ?")
+      .run(h.row.execution_id);
+    for (const stop of [BUDGET_END, BUDGET_END, WORKER_STOPPED])
+      insertExecution(
+        tx,
+        executionFixture({
+          node_id: h.row.node_id,
+          project_id: h.row.project_id,
+          attempt: h.row.attempt,
+          ended_at: FIXTURE_NOW,
+          stop,
+        }),
+      );
+    insertExecution(tx, h.row);
+  });
+  await h.release(true, BUDGET_END);
+  assert.equal(h.calls[0]!.arguments[3], CURRENT_STALL);
+});
+
+test("an instance_archived release refuses with stop_unordered and writes nothing", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  const wake = t.mock.method(h.service, "wake", () => {});
+  await assert.rejects(
+    h.release(true, INSTANCE_ARCHIVED),
+    (error: unknown) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.Conflict &&
+      error.code === STOP_UNORDERED &&
+      isDeepStrictEqual(error.details, {
+        execution_id: h.row.execution_id,
+        reason: ExecutionStopReason.InstanceArchived,
+      }),
+  );
+  assert.equal(h.read().ended_at, null);
+  assert.equal(h.calls.length, NO_CALLS);
+  assert.equal(h.telemetry.length, NO_CALLS);
+  assert.equal(wake.mock.callCount(), NO_CALLS);
 });
 
 const API = "repository:github:acme/api";

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { test, type TestContext } from "node:test";
+import pino, { type Logger } from "pino";
 import { type Dependencies, WorkerService } from "./service.ts";
 import { workerMigrations } from "./migrations.ts";
 import {
@@ -14,6 +15,7 @@ import {
   instanceConfigurationSchema,
   InstancePlacement,
   PlacementIssue,
+  type PoolHost,
   SESSION_READS_PENDING_MAX,
   type SessionRead,
   SessionReadOutcome,
@@ -27,6 +29,7 @@ import {
 } from "./contract.ts";
 import { AgentErrorCode, type HolderScope } from "../agent/contract.ts";
 import { InstanceCleanableKind } from "../kernel/cleanup.ts";
+import type { HumanActor } from "../kernel/actor.ts";
 import type { ExecutionEnds } from "../mission/contract.ts";
 import type { LoginSessionEntry } from "../llm/contract.ts";
 import type { HeldCopy } from "../custody/contract.ts";
@@ -104,6 +107,9 @@ const LOGIN_ENTRY: LoginSessionEntry = {
   holder: "relay-a",
 };
 const SINGLE_CALL = 1;
+const INFO_LEVEL = 30;
+const ARCHIVED_RECORD = "worker.instance.archived";
+const ACTOR_NAME = "Alice";
 const SHORT_SESSION_READ_WAIT_MS = 20;
 const SESSION_READ_ID_PATTERN = /^session_read_[0-9A-HJKMNP-TV-Z]{26}$/;
 const SESSION_READ: SessionRead = {
@@ -136,6 +142,25 @@ const HOLDER_MISMATCH_VIEW: WorkerAgentView = {
   issues: [
     { path: ["placement"], code: AgentErrorCode.CredentialHolderMismatch },
   ],
+};
+
+const IDLE_POOL_HOST: PoolHost = {
+  prepare: unexpected,
+  start: unexpected,
+  update: unexpected,
+  restart: unexpected,
+  imageOf: unexpected,
+  archive: unexpected,
+  sweep: unexpected,
+  stop: async () => {},
+  placementStatus: unexpected,
+  readSessionEntry: unexpected,
+  runtimeUsage: unexpected,
+  runtimeStore: unexpected,
+  removeImage: unexpected,
+  sessionItems: unexpected,
+  removeSession: unexpected,
+  logItem: unexpected,
 };
 
 function unexpected(): never {
@@ -177,6 +202,7 @@ function instanceFixture(
   t: TestContext,
   config: Partial<typeof WORKER_CONFIG> = {},
   sessionReadWaitMs = SESSION_READ_WAIT_MS,
+  logger?: Logger,
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
   stopAfter(t, () => store.close());
@@ -187,6 +213,7 @@ function instanceFixture(
   const scopes: HolderScope[] = [];
   const unended = new Map<string, string>();
   const revoked: string[] = [];
+  const archivers: { instance: string; actor: HumanActor }[] = [];
   const reports: { ends: ExecutionEnds; inTransaction: boolean }[] = [];
   const revocation = { failure: null as Error | null };
   const logins = new Map<string, LoginSessionEntry[]>();
@@ -200,6 +227,9 @@ function instanceFixture(
   const dependencies: Dependencies = {
     config: { ...WORKER_CONFIG, ...config },
     store,
+    ...(logger && {
+      pool: { host: IDLE_POOL_HOST, workerBindingsOf: () => [], logger },
+    }),
     footprint: {
       recordMeasurement: (_tx, name) => {
         footprint.measured.push(name);
@@ -240,9 +270,10 @@ function instanceFixture(
       pinPromptCommits: unexpected,
     },
     instanceArchive: {
-      revokeForInstanceArchive: (_tx, executionId) => {
+      revokeForInstanceArchive: (_tx, executionId, instance, actor) => {
         if (revocation.failure) throw revocation.failure;
         revoked.push(executionId);
+        archivers.push({ instance, actor });
         return ANSWERED_ENDS;
       },
       reportExecutionEnds: (ends) => {
@@ -449,6 +480,7 @@ function instanceFixture(
     scopes,
     unended,
     revoked,
+    archivers,
     reports,
     revocation,
     logins,
@@ -1303,6 +1335,37 @@ test("an archive with force revokes the live execution, ends the instance in one
   assert.equal(f.reports.length, SINGLE_CALL);
   assert.deepEqual(f.reports[0]!.ends, ANSWERED_ENDS);
   assert.equal(f.reports[0]!.inTransaction, false);
+});
+
+test("an archive with force logs worker.instance.archived with the actor and the execution ids", async (t) => {
+  const lines: string[] = [];
+  const f = instanceFixture(
+    t,
+    {},
+    SESSION_READ_WAIT_MS,
+    pino({ level: "info" }, { write: (line) => lines.push(line) }),
+  );
+  const { binding, registration } = await busyInstance(f);
+  const { archive } = archiveFixture(f);
+  binding.worker_instances = [];
+  const executionId = createIdentity("execution");
+  f.unended.set(registration.runtime_identity, executionId);
+  await archive(true);
+  assert.deepEqual(f.archivers, [
+    {
+      instance: INSTANCE,
+      actor: { kind: "human", account: "alice", name: ACTOR_NAME },
+    },
+  ]);
+  const records = lines
+    .map((line) => JSON.parse(line))
+    .filter((record) => record.msg === ARCHIVED_RECORD);
+  assert.equal(records.length, SINGLE_CALL);
+  assert.equal(records[0].level, INFO_LEVEL);
+  assert.equal(records[0].instance, INSTANCE);
+  assert.equal(records[0].actor, ACTOR_NAME);
+  assert.equal(records[0].force, true);
+  assert.deepEqual(records[0].execution_ids, [executionId]);
 });
 
 test("a failure of the revocation rolls the archive back and reports nothing", async (t) => {

@@ -126,6 +126,8 @@ export interface MissionCollaborations {
   revokeForInstanceArchive(
     tx: Transaction,
     executionId: string,
+    instance: string,
+    actor: HumanActor,
   ): ExecutionEnds | null;
   reportExecutionEnds(ends: ExecutionEnds): void;
 }
@@ -173,6 +175,24 @@ export interface NodeTransition {
   first_available_at: number | null;
 }
 
+export interface ReleaseStop {
+  reason:
+    | "operation_failed"
+    | "judgement_invalid"
+    | "report_absent"
+    | "action_unsettled"
+    | "assessment_absent"
+    | "budget_end"
+    | "provider_failed"
+    | "no_progress"
+    | "environment_failed"
+    | "instance_archived"
+    | "worker_stopped";
+  code: string | null;
+  detail?: string;
+  cause?: FailureCause;
+}
+
 export interface RevokedExecution {
   execution_id: string;
   trace: {
@@ -184,6 +204,7 @@ export interface RevokedExecution {
     root_span_id: string;
   };
   ended_at: number;
+  stop: ReleaseStop | null;
 }
 
 export interface FailureHold {
@@ -191,7 +212,7 @@ export interface FailureHold {
   available_at: number | null;
 }
 
-export interface EndedExecution extends RevokedExecution {
+export interface EndedExecution extends Omit<RevokedExecution, "stop"> {
   transition: NodeTransition;
   hold: FailureHold;
 }
@@ -209,7 +230,12 @@ export interface ExecutionEnds {
 }
 
 export interface SchedulerClaims {
-  revoke(tx: Transaction, nodeId: string, now: number): RevokedExecution | null;
+  revoke(
+    tx: Transaction,
+    nodeId: string,
+    now: number,
+    stop?: ReleaseStop,
+  ): RevokedExecution | null;
   executionRevoked(
     execution: RevokedExecution,
     cause: RevokeCause,
@@ -422,6 +448,7 @@ export interface MissionTransitions {
     consecutiveFailures: number,
     now: number,
   ): NodeTransition;
+  stopped(tx: Transaction, nodeId: string, now: number): NodeTransition;
 }
 
 export const MissionErrorCode = {

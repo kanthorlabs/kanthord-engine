@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { isWorkerIdentity } from "../kernel/caller.ts";
+import type { Logger } from "pino";
+import type { HumanActor } from "../kernel/actor.ts";
+import { IdentityKind, isWorkerIdentity } from "../kernel/caller.ts";
 import type { OperationRegistry } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import type { HeldCopy } from "../custody/contract.ts";
@@ -16,6 +18,7 @@ import type { RegistrationRow } from "./registration-rows.ts";
 export interface InstanceOperationDependencies {
   instances: WorkerInstances;
   heartbeatClock: HeartbeatClock;
+  logger: Logger;
   instancesChanged: () => void;
   registrationRecordOf: (
     tx: Transaction,
@@ -26,6 +29,8 @@ export interface InstanceOperationDependencies {
     instanceName: string,
   ) => (HeldCopy & { health: CopyHealth })[];
 }
+
+const INSTANCE_ARCHIVED = "worker.instance.archived";
 
 function dropEnded(clock: HeartbeatClock, ended: readonly string[]): void {
   for (const runtimeIdentity of ended) clock.drop(runtimeIdentity);
@@ -66,6 +71,7 @@ function declareHumanWrites(
   {
     instances,
     heartbeatClock,
+    logger,
     instancesChanged,
   }: InstanceOperationDependencies,
 ): void {
@@ -103,14 +109,33 @@ function declareHumanWrites(
   registry.register(
     instanceOperations["instance.archive"],
     ({ params, body }, caller) => {
+      const identity = caller.identity;
+      assert.equal(identity?.kind, IdentityKind.Human);
+      const actor: HumanActor = {
+        kind: "human",
+        account: identity.accountId,
+        name: identity.name,
+      };
       let ended: string[] = [];
       let executionEnds: ExecutionEnds[] = [];
+      let executionIds: string[] = [];
       const record = caller.commit((tx) => {
-        const result = instances.archive(tx, params.instance_name, body);
+        const result = instances.archive(tx, params.instance_name, body, actor);
         ended = result.ended;
         executionEnds = result.executionEnds;
+        executionIds = result.executionIds;
         return result.record;
       });
+      logger.info(
+        {
+          operation: INSTANCE_ARCHIVED,
+          instance: params.instance_name,
+          actor: actor.name,
+          force: body.force === true,
+          execution_ids: executionIds,
+        },
+        INSTANCE_ARCHIVED,
+      );
       instances.reportExecutionEnds(executionEnds);
       instances.dropConnection(record.id);
       dropEnded(heartbeatClock, ended);

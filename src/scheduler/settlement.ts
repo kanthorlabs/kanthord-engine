@@ -28,6 +28,7 @@ import {
   readUnendedOfNode,
   readUnendedOfRuntime,
   storedStop,
+  storedStopOf,
 } from "./execution-store.ts";
 import type { SchedulerConfig } from "./config.ts";
 
@@ -171,9 +172,15 @@ export function digestsOf(detail: string | null): Record<string, string> {
   return parsed.success ? parsed.data.digests : {};
 }
 
+export const NO_FAILURE_STOPS: readonly ExecutionStopReason[] = [
+  ExecutionStopReason.InstanceArchived,
+  ExecutionStopReason.WorkerStopped,
+];
+
 export function countsFailure(stop: ReleaseStop | null): boolean {
   if (stop === null || stop.reason === ExecutionStopReason.BudgetEnd)
     return false;
+  if (NO_FAILURE_STOPS.includes(stop.reason)) return false;
   if (isAdvancingStop(stop)) return false;
   return (
     stop.reason !== ExecutionStopReason.EnvironmentFailed ||
@@ -295,14 +302,16 @@ export function revoke(
   tx: Transaction,
   nodeId: string,
   now: number,
+  stop?: ReleaseStop,
 ): RevokedExecution | null {
   const row = liveExecutionOf(tx, nodeId, now);
   if (!row) return null;
-  endExecution(tx, row.execution_id, now);
+  endExecution(tx, row.execution_id, now, stop);
   return {
     execution_id: row.execution_id,
     trace: executionTrace(row),
     ended_at: now,
+    stop: stop === undefined ? null : storedStopOf(stop),
   };
 }
 export function liveExecutionOf(

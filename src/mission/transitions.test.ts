@@ -520,6 +520,32 @@ test("a failure routes below the limit, pauses at the limit and resume permits a
   assert.equal(h.node().state, NodeState.Waiting);
 });
 
+test("stopped moves Executing to Available and Evaluating to Waiting and writes no count", (t) => {
+  const h = fixture(t);
+  h.claim();
+  const first = h.store.transaction((tx) =>
+    h.service.stopped(tx, h.node_id, NOW),
+  );
+  assert.equal(h.node().state, NodeState.Available);
+  assert.equal(first.from, NodeState.Executing);
+  assert.equal(first.to, NodeState.Available);
+  h.claim();
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
+  const second = h.store.transaction((tx) =>
+    h.service.stopped(tx, h.node_id, NOW),
+  );
+  assert.equal(h.node().state, NodeState.Waiting);
+  assert.equal(second.from, NodeState.Evaluating);
+  assert.equal(second.to, NodeState.Waiting);
+  for (const transition of [first, second]) {
+    assert.equal(transition.rule, TransitionRule.None);
+    assert.equal(transition.count, null);
+    assert.equal(transition.limit, null);
+  }
+});
+
 test("an unblock from the base branch starts a new node branch that later attempts continue", async (t) => {
   const h = fixture(t);
   const restartBranch = `kanthord/${h.node_id}-a2`;

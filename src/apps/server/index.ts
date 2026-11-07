@@ -461,6 +461,7 @@ export function composeServices(options: {
         mission.claim(...args),
       release: (...args) => mission.release(...args),
       failure: (...args) => mission.failure(...args),
+      stopped: (...args) => mission.stopped(...args),
     },
     registrations: {
       clientAttributionOf: (tx, runtimeIdentity) =>

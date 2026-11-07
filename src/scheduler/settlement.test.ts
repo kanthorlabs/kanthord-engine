@@ -232,7 +232,9 @@ test("consecutive losses reset after a finished row or revocation and isolate at
       execution_id: revoked.execution_id,
       trace: executionTrace(revoked),
       ended_at: FIXTURE_DEADLINE + 2,
+      stop: null,
     });
+    assert.equal(readExecution(tx, revoked.execution_id)?.stop, null);
     assert.equal(
       claimStateOf(
         readExecution(tx, revoked.execution_id)!,
@@ -285,6 +287,68 @@ test("lost and stopped rows count together until a finished row with no stop", (
     endExecution(tx, after.execution_id, FIXTURE_DEADLINE + 102, STOP);
     assert.equal(consecutiveFailures(tx, after), ONE_LOSS);
   });
+});
+
+test("neither operator stop reason counts as a failure", () => {
+  for (const reason of [
+    ExecutionStopReason.InstanceArchived,
+    ExecutionStopReason.WorkerStopped,
+  ])
+    assert.equal(countsFailure({ reason, code: null }), false);
+});
+
+test("a revocation stores the stop it receives", (t) => {
+  const h = schedulerHarness(t);
+  const row = executionFixture({ expired_at: FIXTURE_DEADLINE + 100 });
+  const stop = {
+    reason: ExecutionStopReason.InstanceArchived,
+    code: null,
+    detail: JSON.stringify({ instance: "relay-a", actor: "Ulrich" }),
+  };
+  h.store.transaction((tx) => {
+    insertExecution(tx, row);
+    const revoked = revoke(tx, row.node_id, FIXTURE_NOW + 1, stop);
+    assert.deepEqual(revoked?.stop, stop);
+    assert.deepEqual(readExecution(tx, row.execution_id)?.stop, stop);
+  });
+});
+
+test("an archive row neither counts nor resets the failure count and a null stop row resets it", (t) => {
+  const h = schedulerHarness(t);
+  const node = createIdentity("node");
+  const archived = {
+    reason: ExecutionStopReason.InstanceArchived,
+    code: null,
+  };
+  const sequence = (middle: typeof archived | null) => {
+    let count = NO_FAILURES;
+    h.store.transaction((tx) => {
+      const at = (offset: number) =>
+        executionFixture({
+          node_id: node,
+          expired_at: FIXTURE_DEADLINE + 100,
+          created_at: FIXTURE_NOW + offset,
+        });
+      const first = at(1);
+      insertExecution(tx, first);
+      endExecution(tx, first.execution_id, FIXTURE_NOW + 2, STOP);
+      const revoked = at(3);
+      insertExecution(tx, revoked);
+      endExecution(
+        tx,
+        revoked.execution_id,
+        FIXTURE_NOW + 4,
+        middle ?? undefined,
+      );
+      const last = at(5);
+      insertExecution(tx, last);
+      endExecution(tx, last.execution_id, FIXTURE_NOW + 6, STOP);
+      count = consecutiveFailures(tx, last);
+    });
+    return count;
+  };
+  assert.equal(sequence(archived), SECOND_LOSS);
+  assert.equal(sequence(null), ONE_LOSS);
 });
 
 test("pause facts answer the counts of the count functions and the last stop of the attempt", (t) => {

@@ -272,3 +272,28 @@ export function failure(
       : null,
   );
 }
+
+export function stopped(
+  tx: Transaction,
+  dependencies: Dependencies,
+  nodeId: string,
+  now: number,
+): NodeTransition {
+  const node = requireNode(tx, nodeId);
+  assert.ok(
+    node.state === NodeState.Executing || node.state === NodeState.Evaluating,
+  );
+  const state =
+    node.state === NodeState.Executing
+      ? NodeState.Available
+      : NodeState.Waiting;
+  transition(
+    tx,
+    dependencies,
+    requireMission(tx, node.mission_id),
+    node,
+    state,
+    now,
+  );
+  return nodeTransition(tx, dependencies.workQueue, node.id, node.state, null);
+}

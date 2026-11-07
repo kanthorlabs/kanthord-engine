@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { unattributed } from "../kernel/cause.ts";
+import { OperationError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import {
   type CooldownChange,
@@ -19,11 +21,13 @@ import {
   consecutiveFailures,
   countsFailure,
   digestsOf,
+  NO_FAILURE_STOPS,
   recordFailure,
   requireRunning,
 } from "./settlement.ts";
 
 const NO_STALLS = 0;
+export const STOP_UNORDERED = "scheduler.execution.stop_unordered";
 
 function reportEnvironmentFailure(
   dependencies: Dependencies,
@@ -51,6 +55,13 @@ export function release(
   const proof = caller.execution;
   assert.ok(proof, "release requires an execution proof");
   assert.equal(proof.executionId, executionId);
+  if (body.stop?.reason === ExecutionStopReason.InstanceArchived)
+    throw new OperationError(
+      HttpStatus.Conflict,
+      STOP_UNORDERED,
+      "A worker release cannot send an operator stop.",
+      { execution_id: executionId, reason: body.stop.reason },
+    );
   let released: ExecutionRow | undefined;
   let transition: NodeTransition | undefined;
   let hold: FailureHold | null = null;
@@ -96,6 +107,10 @@ export function release(
     ) {
       assert.ok(body.further_work);
       endExecution(tx, executionId, now, body.stop);
+      if (NO_FAILURE_STOPS.includes(body.stop.reason)) {
+        transition = dependencies.transitions.stopped(tx, row.node_id, now);
+        return { execution_id: executionId, ended_at: now };
+      }
       if (body.stop.reason === ExecutionStopReason.EnvironmentFailed)
         environmentRepositories = [
           ...(dependencies.facts.claimFacts(tx, row.node_id)?.repositories ??

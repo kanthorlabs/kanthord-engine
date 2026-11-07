@@ -120,7 +120,13 @@ import {
   reviewRound,
   reworkAssessment,
 } from "./execution-read.ts";
-import { claim, failure, nodeBranchesOf, release } from "./transitions.ts";
+import {
+  claim,
+  failure,
+  nodeBranchesOf,
+  release,
+  stopped,
+} from "./transitions.ts";
 import { actionContextOf } from "./action-context.ts";
 import { linkUpdatePage, linkUpdatesOf } from "./link-update-read.ts";
 import { claimFacts, claimFactsOf, openingFacts } from "./claim-facts.ts";
@@ -303,6 +309,11 @@ export class MissionService
   failure(...args: Parameters<MissionTransitions["failure"]>) {
     const [tx, ...rest] = args;
     return failure(tx, this.dependencies, ...rest);
+  }
+
+  stopped(...args: Parameters<MissionTransitions["stopped"]>) {
+    const [tx, ...rest] = args;
+    return stopped(tx, this.dependencies, ...rest);
   }
 
   nodeBranchesOf(...args: Parameters<typeof nodeBranchesOf>) {
@@ -1283,11 +1294,18 @@ export class MissionService
     return claimFactsOf(tx, this.dependencies.bindings, projectId);
   }
 
-  revokeForInstanceArchive(tx: Transaction, executionId: string) {
+  revokeForInstanceArchive(
+    tx: Transaction,
+    executionId: string,
+    instance: string,
+    actor: HumanActor,
+  ) {
     return revokeForInstanceArchive(
       tx,
       this.dependencies,
       executionId,
+      instance,
+      actor,
       Date.now(),
     );
   }

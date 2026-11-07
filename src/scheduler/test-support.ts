@@ -117,6 +117,10 @@ export function schedulerHarness(
         record("failure", args);
         return transitionFixture();
       },
+      stopped: (...args) => {
+        record("stopped", args);
+        return transitionFixture();
+      },
     },
     registrations: {
       clientAttributionOf: (...args) => {

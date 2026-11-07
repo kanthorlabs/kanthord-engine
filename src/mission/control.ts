@@ -16,6 +16,7 @@ import {
   type Mission,
   NodeState,
   type NodeTransition,
+  type ReleaseStop,
   type RevokedClaim,
   type SchedulerClaims,
   TransitionRule,
@@ -183,11 +184,12 @@ export function endLiveClaim(
   cause: RevokeCause,
   failureCause: FailureCause | null,
   ends: ExecutionEnds,
+  stop?: ReleaseStop,
 ): RevokedClaim | null {
   assert.ok(tx.database.isTransaction);
   if (node.state !== NodeState.Executing && node.state !== NodeState.Evaluating)
     return null;
-  const execution = dependencies.schedulerClaims.revoke(tx, node.id, now);
+  const execution = dependencies.schedulerClaims.revoke(tx, node.id, now, stop);
   if (execution === null) return null;
   const claim = {
     execution,

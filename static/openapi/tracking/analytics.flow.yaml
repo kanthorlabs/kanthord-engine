@@ -749,6 +749,8 @@ components:
                   - provider_failed
                   - no_progress
                   - environment_failed
+                  - instance_archived
+                  - worker_stopped
                   - lost
                   - budget_end
             rows:
@@ -764,6 +766,8 @@ components:
                   - provider_failed
                   - no_progress
                   - environment_failed
+                  - instance_archived
+                  - worker_stopped
                   - lost
                   - budget_end
               additionalProperties:
@@ -781,6 +785,8 @@ components:
                 - provider_failed
                 - no_progress
                 - environment_failed
+                - instance_archived
+                - worker_stopped
                 - lost
                 - budget_end
             previous_totals:
@@ -797,6 +803,8 @@ components:
                       - provider_failed
                       - no_progress
                       - environment_failed
+                      - instance_archived
+                      - worker_stopped
                       - lost
                       - budget_end
                   additionalProperties:
@@ -812,6 +820,8 @@ components:
                     - provider_failed
                     - no_progress
                     - environment_failed
+                    - instance_archived
+                    - worker_stopped
                     - lost
                     - budget_end
                 - type: "null"

@@ -126,6 +126,7 @@ export function revokedExecution(
       root_span_id: "b".repeat(16),
     },
     ended_at: endedAt,
+    stop: null,
   };
 }
 
