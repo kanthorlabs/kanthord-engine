@@ -1,0 +1,73 @@
+import assert from "node:assert/strict";
+import { isServiceIdentity } from "../kernel/caller.ts";
+import { OperationError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
+import type { CallerContext } from "../kernel/operation.ts";
+import type { Transaction } from "../kernel/store.ts";
+import { describeGitHubEvent } from "../repository/github.ts";
+import { WORKER_SERVICE_NAME } from "../worker/contract.ts";
+import {
+  type DescribedEvent,
+  InboundPlatform,
+  type InboundPlatformValue,
+  IntakeErrorCode,
+} from "./contract.ts";
+import { readEvent } from "./event-store.ts";
+import { redactedText } from "./event-text.ts";
+import { readInbound } from "./inbound-store.ts";
+
+interface StoredEvent {
+  event: Uint8Array;
+  metadata: unknown;
+  platform: InboundPlatformValue;
+}
+
+type Describer = typeof describeGitHubEvent;
+
+const DESCRIBERS: Readonly<Record<InboundPlatformValue, Describer>> = {
+  [InboundPlatform.GitHub]: describeGitHubEvent,
+};
+
+const NO_DESCRIPTION: DescribedEvent = {
+  author: null,
+  body: null,
+  url: null,
+  occurred_at: null,
+};
+
+function notFound(): never {
+  throw new OperationError(
+    HttpStatus.NotFound,
+    IntakeErrorCode.InboundEventNotFound,
+    "Inbound event not found.",
+  );
+}
+
+function readStored(tx: Transaction, id: string): StoredEvent {
+  const row = readEvent(tx, id);
+  if (row === null) notFound();
+  const inbound = readInbound(tx, row.inbound_id);
+  if (inbound === null) notFound();
+  return {
+    event: row.event,
+    metadata: JSON.parse(row.metadata),
+    platform: inbound.platform,
+  };
+}
+
+export async function describeEvent(
+  caller: CallerContext,
+  inboundEventId: string,
+): Promise<DescribedEvent> {
+  const identity = caller.identity;
+  assert.ok(
+    identity &&
+      isServiceIdentity(identity) &&
+      identity.service === WORKER_SERVICE_NAME,
+    "The Worker Service describes an event.",
+  );
+  const stored = caller.commit((tx) => readStored(tx, inboundEventId));
+  const described = DESCRIBERS[stored.platform](stored);
+  if (described === null) return NO_DESCRIPTION;
+  return { ...described, body: redactedText(described.body) };
+}

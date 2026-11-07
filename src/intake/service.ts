@@ -43,6 +43,7 @@ import { Dispatcher } from "./dispatcher.ts";
 import { inboundInventory } from "./health.ts";
 import { createInbound, type InboundProjects } from "./inbound-create.ts";
 import { removeInbound } from "./inbound-delete.ts";
+import { describeEvent } from "./event-describe.ts";
 import { getEvent, listEvents } from "./event-read.ts";
 import { deleteEvents, discardEvent, retryEvent } from "./event-write.ts";
 import { getInbound, listInbound } from "./inbound-read.ts";
@@ -178,8 +179,11 @@ export class IntakeService implements Service, IntakeCollaborations {
     );
     registry.register(
       intakeOperations["inbound.event.get"],
-      ({ params }, caller) =>
-        caller.commit((tx) => getEvent(tx, params.inbound_event_id)),
+      ({ params }, caller) => getEvent(caller, params.inbound_event_id),
+    );
+    registry.register(
+      intakeOperations["inbound.event.describe"],
+      ({ body }, caller) => describeEvent(caller, body.inbound_event_id),
     );
     registry.register(
       intakeOperations["inbound.event.retry"],

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
+import { SensitiveRule, tracerMarker } from "../agent/sensitive-text.ts";
 import { IdentityKind } from "../kernel/caller.ts";
 import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -34,6 +35,8 @@ const PAGE_SIZE = 2;
 const FIRST_ROW = 0;
 const SECOND_ROW = 1;
 const UNOBSERVED_READ_COUNT = 0;
+const EMPTY_EVENT = "{}";
+const AWS_KEY = "AK" + "IA" + "A".repeat(16);
 const PROJECTION_KEYS = [
   "created_at",
   "error",
@@ -43,6 +46,7 @@ const PROJECTION_KEYS = [
   "metadata",
   "state",
 ];
+const DETAIL_KEYS = [...PROJECTION_KEYS, "event"].sort();
 
 function harness(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -108,12 +112,12 @@ function harness(t: TestContext) {
     return id;
   };
   let sequence = 0;
-  const addEvent = (inboundId: string) =>
+  const addEvent = (inboundId: string, event: string = EMPTY_EVENT) =>
     store.transaction((tx) =>
       insertEvent(tx, {
         inbound_id: inboundId,
         event_id: `delivery-${(sequence += 1)}`,
-        event: Buffer.from("{}"),
+        event: Buffer.from(event),
         metadata: { event: "push" },
         created_at: CREATED_AT,
       }),
@@ -196,12 +200,11 @@ function recordReadRows(t: TestContext, store: Store): object[] {
   return rows;
 }
 
-test("the list and the get read no event content", async (t) => {
+test("the list reads no event content", async (t) => {
   const h = harness(t);
-  const id = h.addEvent(h.addInbound());
+  h.addEvent(h.addInbound());
   const rows = recordReadRows(t, h.store);
   await h.list();
-  await h.get(id);
   assert.ok(rows.length > UNOBSERVED_READ_COUNT);
   assert.equal(
     rows.some((row) => "event" in row),
@@ -247,7 +250,19 @@ test("a get answers the projection of the event", async (t) => {
   assert.equal(record.id, id);
   assert.equal(record.inbound_id, inbound);
   assert.equal(record.state, InboundEventState.Pending);
-  assert.deepEqual(Object.keys(record).sort(), PROJECTION_KEYS);
+  assert.deepEqual(Object.keys(record).sort(), DETAIL_KEYS);
+});
+
+test("a get answers the event as UTF-8 text with the sensitive text redacted", async (t) => {
+  const h = harness(t);
+  const text = `{"note":"héllo ${AWS_KEY}"}`;
+  const id = h.addEvent(h.addInbound(), text);
+  assert.equal(
+    (await h.get(id)).event,
+    `{"note":"héllo ${tracerMarker(SensitiveRule.AwsAccessKeyId)}"}`,
+  );
+  const plain = h.addEvent(h.addInbound(), EMPTY_EVENT);
+  assert.equal((await h.get(plain)).event, EMPTY_EVENT);
 });
 
 test("an unknown event identity answers 404", async (t) => {

@@ -883,6 +883,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.inbound.event.discard", AccessPolicy.Human],
   ["intake.inbound.event.delete", AccessPolicy.Human],
   ["intake.inbound.event.receive", AccessPolicy.Delivery],
+  ["intake.inbound.event.describe", AccessPolicy.Service],
   ["intake.action.check", AccessPolicy.Service],
   ["intake.action.merge", AccessPolicy.Service],
   ["intake.action.perform", AccessPolicy.Client],
@@ -928,13 +929,14 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["footprint.measure.run", AccessPolicy.Human],
   ["footprint.backup.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 263;
+const OPERATION_COUNT = 264;
 const ROUTED_OPERATION_COUNT = 251;
-const INTAKE_OPERATION_COUNT = 24;
+const INTAKE_OPERATION_COUNT = 25;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = [
   "intake.action.check",
   "intake.action.merge",
+  "intake.inbound.event.describe",
   "mission.delivery.admit",
   "mission.delivery.unresolved_request.count",
 ];
@@ -1879,6 +1881,35 @@ test("the direct intake operations have no OpenAPI path", async () => {
   assert.equal(
     Object.keys(resolved.paths ?? {}).some((path) =>
       path.startsWith("/api/intake/storage/"),
+    ),
+    false,
+  );
+});
+
+test("no route reaches intake.inbound.event.describe", async () => {
+  const resolved = await SwaggerParser.dereference(openapiPath());
+  const describeId = intakeOperations["inbound.event.describe"].id;
+  const published = Object.values(resolved.paths ?? {}).flatMap((path) =>
+    Object.values(path ?? {}).filter(
+      (item) => isObject(item) && "operationId" in item,
+    ),
+  );
+  assert.ok(published.length);
+  assert.equal(
+    published.some(
+      (item) => (item as ResolvedOperation).operationId === describeId,
+    ),
+    false,
+  );
+  assert.equal(
+    Object.keys(resolved.paths ?? {}).some((path) =>
+      path.endsWith("/describe"),
+    ),
+    false,
+  );
+  assert.equal(
+    apiOperations.some(
+      (operation) => operation.id === describeId && hasHttpRoute(operation),
     ),
     false,
   );

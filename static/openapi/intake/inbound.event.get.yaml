@@ -4,7 +4,8 @@ pathItem:
     operationId: intake.inbound.event.get
     tags:
       - intake
-    description: Get one inbound event projection.
+    description: Get one inbound event projection with its stored event as redacted
+      UTF-8 text.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: false
@@ -130,6 +131,8 @@ components:
           minimum: 0
           maximum: 9007199254740991
           description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+        event:
+          type: string
       required:
         - id
         - inbound_id
@@ -138,4 +141,5 @@ components:
         - state
         - error
         - created_at
+        - event
       additionalProperties: false

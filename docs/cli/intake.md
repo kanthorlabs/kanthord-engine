@@ -53,7 +53,7 @@ authorizes no Intake command.
 | `inbound get <inbound-id>`               | `intake.inbound.get`              | `GET /api/intake/inbound/:inbound_id`                    | `human` | One inbound; for a webhook, its address and its secret, whose display is **[blocked][intake-contract]**. |
 | `inbound delete <inbound-id>`            | `intake.inbound.delete`           | `DELETE /api/intake/inbound/:inbound_id`                 | `human` | Mutation; deletes the inbound and its events, and calls no platform.                                     |
 | `event list`                             | `intake.inbound.event.list`       | `GET /api/intake/event`                                  | `human` | Bounded page, optionally filtered by inbound and state.                                                  |
-| `event get <inbound-event-id>`           | `intake.inbound.event.get`        | `GET /api/intake/event/:inbound_event_id`                | `human` | One event with its state and errors; content inclusion is **[blocked][intake-contract]**.                |
+| `event get <inbound-event-id>`           | `intake.inbound.event.get`        | `GET /api/intake/event/:inbound_event_id`                | `human` | One event with its state, errors and redacted `event` text.                                              |
 | `event retry <inbound-event-id>`         | `intake.inbound.event.retry`      | `POST /api/intake/event/:inbound_event_id/retry`         | `human` | Mutation; turns a failed event back to `pending`.                                                        |
 | `event discard <inbound-event-id>`       | `intake.inbound.event.discard`    | `POST /api/intake/event/:inbound_event_id/discard`       | `human` | Mutation; turns a pending or a failed event to `discarded`.                                              |
 | `event delete`                           | `intake.inbound.event.delete`     | `POST /api/intake/event/delete`                          | `human` | Mutation; deletes the succeeded, failed and discarded events that a filter names.                        |
@@ -268,8 +268,9 @@ pending event exists.
 ## Event commands
 
 The event read projection contains `id`, `inbound_id`, `event_id`, `metadata`,
-`state`, `error` and `created_at`. Content inclusion and its size and redaction
-remain **[blocked][intake-contract]**. No output contains a credential.
+`state`, `error` and `created_at`. `event get` adds `event`, the stored event
+bytes as UTF-8 text. The sensitive text rule set of the engine redacts `event`;
+no read cuts it. No output contains a credential.
 Each item of `error` holds `{ code, message, created_at }`. `code` is the error
 code of a declared failure of the consumer, or `indeterminate` when the handoff
 ends with no answer.
@@ -289,7 +290,8 @@ Read only. The `limit` accepts 1 to 1000 and defaults to 100.
 **Request and validation:** map the identity to `params.inbound_event_id`. A
 platform event identity is not a substitute for that identity.
 
-**Effects and idempotency:** return one event projection. Read only.
+**Effects and idempotency:** return one event projection with the redacted
+`event` text. Read only.
 
 **Statuses:** `200`; `400` for an invalid identity; `404`
 `intake.inbound.event.not_found`.
@@ -507,6 +509,17 @@ Before the merge, the action performer reads the required checks with `github-pu
 
 Only the Mission Service calls it, for the execution caller of `mission.assessment.submit`. `intake.execution.gate_files.read` runs for an execution caller and takes `{ binding_id, base_branch, commit }`. Intake keeps one bare repository for each binding at `intake/repositories/<binding id>.git` of the server state directory and reuses it. It fetches the commits of the base branch and the commit with `--filter=tree:0` and the SSH identity of the binding. It fetches each tree and blob that a read needs on demand. It reads `.kanthord/affected-tests.json` at the base branch. A path of its `gate_files` is changed when its mode or its object at the merge base differs from its mode or its object at the commit. A new path and a removed path are changed. A declared directory is changed when any entry below it changes. The answer is `{ paths }`. A git failure answers `502` with the git code and removes the bare repository, except after a deadline. A declaration that does not match the declaration shape of the worker, or that holds a path of `gate_files` that is not canonical, answers `502` `repository.gate_declaration.invalid`. The Intake Service keeps the bare repository for this error.
 
+`intake.inbound.event.describe` is a `service` operation with no CLI command
+and no HTTP route. Only the Worker Service calls it; another caller fails an
+assertion. It takes `{ inbound_event_id }`, reads the stored event and its
+inbound in one read transaction, and calls the description of the platform
+implementation of the inbound: `describeGitHubEvent` for `github`. It answers
+`{ author, body, url, occurred_at }`. It applies the sensitive text rule set of
+the engine to `body` and cuts no text. It takes no credential, calls no platform
+and writes no row. An event that the platform implementation does not describe
+answers four `null` fields. An unknown or deleted event answers `404`
+`intake.inbound.event.not_found`.
+
 ## Output and failure conventions
 
 The commands follow [shared output and exit behavior](./other.md#output-and-exit-behavior):
@@ -540,7 +553,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 400   | `repository.platform.github.cursor_page_size_mismatch` | A review comment read names another `limit` than its cursor.                                                                                                                                         | `intake.action.read`                                                                                                                                                                              |
 | 401   | `intake.inbound.event.signature_invalid`               | The webhook post fails verification.                                                                                                                                                                 | receipt route                                                                                                                                                                                     |
 | 403   | `mission.authorization.refused`                        | The Mission Service refuses the protected facility chain; details `{ reason }`.                                                                                                                      | `intake.action.merge`, `intake.action.perform`, `intake.action.read`, `intake.storage.put`, `intake.storage.check`, `intake.storage.get`, `intake.execution.storage.get`, `intake.storage.delete` |
-| 404   | `intake.inbound.event.not_found`                       | No inbound event has that identity.                                                                                                                                                                  | event get, event retry, event discard                                                                                                                                                             |
+| 404   | `intake.inbound.event.not_found`                       | No inbound event has that identity.                                                                                                                                                                  | event get, event retry, event discard, `intake.inbound.event.describe`                                                                                                                            |
 | 404   | `intake.inbound.not_found`                             | No inbound has that identity, or the receipt names a poll inbound.                                                                                                                                   | inbound get, inbound delete, receipt route                                                                                                                                                        |
 | 404   | `intake.inbound.project_not_found`                     | The project of the create does not exist.                                                                                                                                                            | inbound create                                                                                                                                                                                    |
 | 404   | `intake.outbound.request.not_found`                    | No outbound request has that identity.                                                                                                                                                               | outbound get, outbound discard                                                                                                                                                                    |
