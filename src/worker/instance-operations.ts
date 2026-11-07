@@ -142,6 +142,7 @@ function declareHumanWrites(
         INSTANCE_ARCHIVED_LOG,
       );
       instances.reportExecutionEnds(result.executionEnds);
+      instances.archiveReleased(result.executionEnds);
       instances.dropConnection(result.record.id);
       dropEnded(heartbeatClock, result.ended);
       instancesChanged();

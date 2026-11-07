@@ -32,7 +32,11 @@ import {
 import { AgentErrorCode, type HolderScope } from "../agent/contract.ts";
 import { InstanceCleanableKind } from "../kernel/cleanup.ts";
 import type { HumanActor } from "../kernel/actor.ts";
-import type { ExecutionEnds } from "../mission/contract.ts";
+import {
+  type ExecutionEnds,
+  type ReleaseStop,
+  RevokeCause,
+} from "../mission/contract.ts";
 import type { ExecutionTrace } from "../tracking/contract.ts";
 import type { LoginSessionEntry } from "../llm/contract.ts";
 import type { HeldCopy } from "../custody/contract.ts";
@@ -98,6 +102,27 @@ const SERVER_INSTANCE_LIMIT = 2;
 const INVALID_PLACEMENT = "thread";
 
 const ANSWERED_ENDS: ExecutionEnds = { lost: [], revoked: [] };
+
+function revokedClaimOf(executionId: string): ExecutionEnds["revoked"][number] {
+  return {
+    execution: {
+      execution_id: executionId,
+      trace: {
+        execution_id: executionId,
+        project_id: createIdentity("project"),
+        node_id: createIdentity("node"),
+        attempt: 1,
+        trace_id: "c".repeat(32),
+        root_span_id: "d".repeat(16),
+      },
+      ended_at: 1,
+      stop: null,
+    },
+    cause: RevokeCause.Human,
+    transition: null,
+    failure_cause: null,
+  };
+}
 const REVOKE_FAILURE = "revoke failed";
 const NO_CALLS = 0;
 const LIVENESS_GAP_MS = 5;
@@ -218,6 +243,7 @@ function instanceFixture(
   const revoked: string[] = [];
   const archivers: { instance: string; actor: HumanActor }[] = [];
   const reports: { ends: ExecutionEnds; inTransaction: boolean }[] = [];
+  const released: { executionId: string; stop: ReleaseStop | null }[] = [];
   const pausedRevocation = {
     revoked: [] as string[],
     answer: null as ExecutionTrace | null,
@@ -226,6 +252,7 @@ function instanceFixture(
     failure: null as Error | null,
     archiveFailure: null as Error | null,
     only: null as string | null,
+    claims: false,
   };
   const archivedHolders: string[] = [];
   const logins = new Map<string, LoginSessionEntry[]>();
@@ -293,11 +320,16 @@ function instanceFixture(
           throw revocation.failure;
         revoked.push(executionId);
         archivers.push({ instance, actor });
-        return ANSWERED_ENDS;
+        return revocation.claims
+          ? { lost: [], revoked: [revokedClaimOf(executionId)] }
+          : ANSWERED_ENDS;
       },
       revokePausedClaim: (executionId) => {
         pausedRevocation.revoked.push(executionId);
         return pausedRevocation.answer;
+      },
+      executionReleased: (executionId, stop) => {
+        released.push({ executionId, stop });
       },
       reportExecutionEnds: (ends) => {
         reports.push({ ends, inTransaction: store.database.isTransaction });
@@ -507,6 +539,7 @@ function instanceFixture(
     reports,
     revocation,
     pausedRevocation,
+    released,
     archivedHolders,
     logins,
     used,
@@ -2348,6 +2381,56 @@ test("a pause order past the deadline revokes the paused claim, removes the orde
   assert.equal(f.worker().orderOf(box.executionId), null);
   assert.deepEqual(f.revoked, []);
   assert.equal(f.reports.length, NO_CALLS);
+});
+
+test("a pause order past the deadline calls the Mission hook once for a non-null answer and for a null answer", async (t) => {
+  for (const answer of [PAUSED_TRACE, null]) {
+    const f = instanceFixture(t);
+    const box = await connectedBusy(f);
+    const released = t.mock.method(f.worker().instances, "executionReleased");
+    f.pausedRevocation.answer = answer;
+    sendPause(f, box);
+    const later = Date.now() + INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+    t.mock.method(Date, "now", () => later);
+    f.worker().instances.sweepStopOrders();
+    assert.deepEqual(f.released, [
+      { executionId: box.executionId, stop: null },
+    ]);
+    assert.equal(
+      released.mock.callCount(),
+      answer === null ? NO_CALLS : SINGLE_CALL,
+    );
+    t.mock.restoreAll();
+  }
+});
+
+test("an archive order past the deadline calls the Mission hook once after the archive revoke", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  await box.archive();
+  const later = Date.now() + INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  t.mock.method(Date, "now", () => later);
+  f.worker().instances.sweepStopOrders();
+  assert.deepEqual(f.revoked, [box.executionId]);
+  assert.deepEqual(f.released, [{ executionId: box.executionId, stop: null }]);
+});
+
+test("a forced archive of a disconnected instance calls the Mission hook for each revoked execution after the commit", async (t) => {
+  const f = instanceFixture(t);
+  f.revocation.claims = true;
+  const box = await connectedBusy(f);
+  f.worker().instances.dropConnection(box.record.id);
+  await box.archive();
+  assert.deepEqual(f.revoked, [box.executionId]);
+  assert.deepEqual(f.released, [{ executionId: box.executionId, stop: null }]);
+});
+
+test("a forced archive that revokes no claim calls no Mission hook", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  f.worker().instances.dropConnection(box.record.id);
+  await box.archive();
+  assert.deepEqual(f.released, []);
 });
 
 test("a pause order past the deadline with an ended claim removes the order and runs no hook", async (t) => {

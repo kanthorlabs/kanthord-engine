@@ -109,6 +109,7 @@ export interface InstanceDependencies {
   archiveHeld: (tx: Transaction, holder: string, now: number) => void;
   revokeForInstanceArchive: MissionCollaborations["revokeForInstanceArchive"];
   revokePausedClaim: MissionCollaborations["revokePausedClaim"];
+  executionReleased: MissionCollaborations["executionReleased"];
   reportExecutionEnds: MissionCollaborations["reportExecutionEnds"];
   holderMismatch: (
     tx: Transaction,
@@ -849,6 +850,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
 
   private expirePauseOrder(order: StopOrder): void {
     const trace = this.dependencies.revokePausedClaim(order.execution_id);
+    this.dependencies.executionReleased(order.execution_id, null);
     if (trace === null) this.dropOrder(order.execution_id);
     else this.executionReleased(order.execution_id);
   }
@@ -870,6 +872,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
       );
       if (ends) this.reportExecutionEnds([ends]);
     }
+    this.dependencies.executionReleased(order.execution_id, null);
     this.executionReleased(order.execution_id);
   }
 
@@ -904,6 +907,12 @@ export class WorkerInstances implements WorkerInstanceLookups {
       lost: ends.flatMap((end) => end.lost),
       revoked: ends.flatMap((end) => end.revoked),
     });
+  }
+
+  archiveReleased(ends: readonly ExecutionEnds[]): void {
+    for (const end of ends)
+      for (const claim of end.revoked)
+        this.dependencies.executionReleased(claim.execution.execution_id, null);
   }
 
   private refusePending(instanceId: string): void {

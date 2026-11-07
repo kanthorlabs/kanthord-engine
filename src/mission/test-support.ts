@@ -43,6 +43,7 @@ import {
   type NodeTransition,
   type PlatformAddress,
   PlatformAddressKind,
+  type ReleaseStop,
   RepositoryAction,
   RepositoryLanding,
   RevisionWrite,
@@ -324,6 +325,62 @@ export function controlHarness(
     body,
     node,
   };
+}
+
+export function keepsClaim(
+  h: ReturnType<typeof controlHarness>,
+  claim: { executionId: string; runtimeIdentity: string },
+) {
+  const keep = {
+    live: true,
+    connected: true,
+    order: null as ReleaseStop["reason"] | null,
+  };
+  const sent: unknown[][] = [];
+  const stops: unknown[] = [];
+  const logs: Record<string, unknown>[] = [];
+  h.dependencies.logger = pino(
+    { level: "warn" },
+    {
+      write: (line: string) => logs.push(JSON.parse(line)),
+    },
+  );
+  h.dependencies.schedulerClaims.liveExecutionOf = () =>
+    keep.live
+      ? {
+          execution_id: claim.executionId,
+          runtime_identity: claim.runtimeIdentity,
+          attempt: FIRST_REVISION,
+          pinned_revision: FIRST_REVISION,
+        }
+      : null;
+  h.dependencies.schedulerClaims.revoke = (_tx, nodeId, now, stop) => {
+    stops.push(stop);
+    keep.live = false;
+    return revokedExecution(claim.executionId, nodeId, now);
+  };
+  h.dependencies.workerStopOrders.connected = () => keep.connected;
+  h.dependencies.workerStopOrders.orderOf = () => keep.order;
+  h.dependencies.workerStopOrders.sendStopOrder = (...args) => {
+    sent.push([...args, h.store.database.isTransaction]);
+    keep.order ??= args[2];
+  };
+  return { keep, sent, stops, logs };
+}
+
+export function keptClaimHarness(
+  t: TestContext,
+  identity: CallerIdentity,
+  state: NodeState,
+) {
+  const h = controlHarness(t, identity);
+  const executionId = createIdentity("execution");
+  const kept = keepsClaim(h, { executionId, runtimeIdentity: "runtime-1" });
+  h.store.transaction((tx) => {
+    openAttempt(tx, h.node_id, FIRST_REVISION, h.actor, FIXTURE_TIME);
+    setNodeState(tx, h.node_id, state);
+  });
+  return { h, executionId, ...kept };
 }
 
 export function missionHarness(
