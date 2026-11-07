@@ -336,6 +336,12 @@ The execution reads that dependency at the revision that its current outcome pin
 - A task file names an `implement` node in `node`. A node file names its `intent`, its `depends_on` list, its `tags` list, an optional `external_links` list and an optional `commit_type`. A task file refuses `external_links` with `mission.import.plan_invalid` and the reason `unknown_key`.
 - The import compares `external_links` by canonical JSON, in list order. A file with another list writes the next revision of the node, and a file with an equal list is a no-op. A file without the key holds `[]`.
 - A link of a plan file follows the `external_links` rules of `Content`. An invalid list, a duplicate, more than 10 links or a link with no binding of the node lists `mission.node.content_invalid` with `details: { field: "external_links" }` for the node file.
+- Each plan verification command and each setup command runs with a limit of 600 s. The limit is fixed.
+  A command that runs longer than the limit fails. A plan author splits a long command into several commands.
+- A mission on two repositories follows a plan rule. A dashboard (apps) node that reads an engine route depends on the engine node that adds the route.
+- Otherwise both repositories land on one feature branch until the final check. A human creates the same branch name in each repository from `main`.
+  Each repository binding names that branch as `base_branch`. A final examine node checks both branch heads.
+  A human then opens one pull request to `main` in each repository, the engine first. A dashboard node never lands on `main` before its engine route.
 - A stale mission version fails. A preview reserves no node against subsequent work.
 - An apply records a trace with the root operation `mission.import` and the attributes `kanthord.project.id`, `kanthord.mission.id`, `kanthord.mission.version.from`, `kanthord.mission.version.to`, `kanthord.import.creates`, `kanthord.import.updates`, `kanthord.import.retirements`, `kanthord.import.removed_edges` and `kanthord.human.username`.
   A refused apply records it with status `Error`, `error.type` and `kanthord.import.violation_codes`.
@@ -474,7 +480,40 @@ tasks.
 
 To redirect an open attempt, a human pauses, blocks, then unblocks with the
 changed content. A simple update leaves the old attempt's revision pinned.
-All controls recheck admission at commit. Human-control race precedence remains **blocked** under [HANDOFF Mission Service E3](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#mission-service-1).
+All controls recheck admission at commit.
+
+#### Pinned revision, failure count and resume
+
+- An attempt pins the node revision when it opens. Every execution of that attempt runs the pinned revision.
+- `node update` and `criterion set` write a new revision. They change no open attempt.
+- The answer field `open_attempts_unchanged` lists each open attempt that keeps its old revision. Each item holds `node_id` and `attempt`.
+- A `node update` on a Paused node with an open attempt does not reach the next execution. The next execution still runs the pinned revision.
+- `node resume` moves only the state. It keeps the pinned revision and the consecutive failure count.
+- After a resume from `failure_limit`, one more failed execution pauses the node again. The count has not reset.
+- `node resume` with `target: "Waiting"` sends a Paused node to review with no coder run. It uses one rework round of `rework_limit`.
+
+To apply a new revision to a node with an open attempt, follow these steps:
+
+1. Run `node pause` when the node is not Paused.
+2. Run `node block`.
+3. Run `node unblock` with `change`.
+
+The unblock opens attempt N+1 on the new revision. The start point is `node_branch`, so the earlier work stays.
+The failure count of the new attempt starts at 0.
+Human-control race precedence remains **blocked** under [HANDOFF Mission Service E3](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#mission-service-1).
+
+### Find why a node paused or blocked
+
+Follow these steps. Each step names the fields to read.
+
+1. Run `kanthord mission node get <node-id>`. Read `state`, `attempt`, `pinned_revision`, `visible_revision` and `blocked_context`.
+2. Run `kanthord scheduler execution list <project-id> --node <node-id> --attempt <attempt>`. Read `stop` of the last executions and `trace_id`.
+3. Run `kanthord tracking span list <trace-id>`. Read the verification spans for the command, the index, `timed_out` and the output tail.
+4. Run `kanthord mission assessment list <node-id>`. Read the rationale and the unmet criterion of a review failure.
+5. Choose the act:
+   - `resume` keeps the same revision.
+   - `resume` with `target: "Waiting"` reviews the node again.
+   - Block and unblock with `change` writes a new revision.
 
 ### Fix-node proposals — 2 commands
 
