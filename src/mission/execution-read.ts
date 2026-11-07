@@ -242,22 +242,23 @@ export function reworkAssessment(
   claim: ExecutionClaim,
 ) {
   executionRead(tx, dependencies, claim);
-  const results =
+  const latestOf = (result: AssessmentResult) =>
+    readExecutionAssessmentsOfAttempt(tx, claim.nodeId, claim.attempt, result)
+      .sort((left, right) => left.sequence - right.sequence)
+      .at(-1);
+  const success = latestOf(AssessmentResult.Success);
+  const rejected = latestOf(AssessmentResult.CriterionNotMet);
+  const hasOpenFindings =
     readOpenFixFindings(tx, claim.nodeId, claim.attempt).length >
-    NO_OPEN_FINDINGS
-      ? [AssessmentResult.CriterionNotMet, AssessmentResult.Success]
-      : [AssessmentResult.CriterionNotMet];
-  const assessment = results
-    .flatMap((result) =>
-      readExecutionAssessmentsOfAttempt(
-        tx,
-        claim.nodeId,
-        claim.attempt,
-        result,
-      ),
-    )
-    .sort((left, right) => left.sequence - right.sequence)
-    .at(-1);
+    NO_OPEN_FINDINGS;
+  const assessment =
+    hasOpenFindings &&
+    success &&
+    (!rejected || success.sequence > rejected.sequence)
+      ? success
+      : rejected && (!success || rejected.sequence > success.sequence)
+        ? rejected
+        : undefined;
   if (!assessment) recordNotFound();
   return assessmentRecord(tx, dependencies, assessment);
 }
