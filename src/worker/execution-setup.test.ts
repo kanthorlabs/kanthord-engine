@@ -866,6 +866,7 @@ interface TwoAgentOptions {
   compose?: (agentName: string) => PromptPartAnswer[];
   everyBindingNamesFile?: boolean;
   composeDelayMs?: number;
+  clock?: () => number;
 }
 
 async function twoAgentAnswer(
@@ -950,6 +951,7 @@ function twoAgentFixture(t: TestContext, options: TwoAgentOptions = {}) {
       {
         store,
         promptTelemetry,
+        clock: options.clock,
         missionPromptPins: {
           attemptPromptCommits: (_tx, nodeId, pinnedAttempt) => {
             assert.deepEqual([nodeId, pinnedAttempt], [claim.nodeId, attempt]);
@@ -1489,17 +1491,19 @@ function barrierReader(deadlines: (number | null)[]): InstructionFileReader {
 test("one setup reads every instruction file in parallel under one deadline that starts with the setup", async (t) => {
   const deadlines: (number | null)[] = [];
   let reader = barrierReader(deadlines);
+  let setupStart = Date.now();
   const f = twoAgentFixture(t, {
     instructionFile: INSTRUCTION_PATH,
     everyBindingNamesFile: true,
     composeDelayMs: READ_DELAY_MS,
+    clock: () => setupStart,
     compose: shippedRole,
     pins: () =>
       f.bindingIds.map((binding_id) => ({ binding_id, commit: PINNED_COMMIT })),
     readFile: (bindingId, commit, context) =>
       reader(bindingId, commit, context),
   });
-  const composedStart = Date.now();
+  const composedStart = setupStart;
   await f.run();
   assert.equal(deadlines.length, BOTH_READS);
   for (const deadline of deadlines) {
@@ -1521,7 +1525,8 @@ test("one setup reads every instruction file in parallel under one deadline that
       text: PINNED_TEXT,
     };
   };
-  const retryStart = Date.now();
+  setupStart += 1;
+  const retryStart = setupStart;
   await f.run();
   assert.ok(deadlines.length > BOTH_READS);
   for (const deadline of deadlines) {
