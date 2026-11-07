@@ -26,6 +26,11 @@ const EXECUTION_CONTEXT = {
   attempt: 1,
   node_revision: REVISION,
 };
+const EXTERNAL_LINK = {
+  kind: "github_issue",
+  resource_identity: "conversation:github:acme/app",
+  number: 117,
+};
 const IMPORT_SNAPSHOT = {
   format: "json",
   mission_version: MISSION_VERSION,
@@ -34,6 +39,8 @@ const IMPORT_SNAPSHOT = {
     {
       filename: PLAN_FILENAME,
       ...PLAN_CONTENT,
+      bindings: [...PLAN_CONTENT.bindings, "acme-issues"],
+      external_links: [EXTERNAL_LINK],
       intent: "implement",
       commit_type: "feat",
     },

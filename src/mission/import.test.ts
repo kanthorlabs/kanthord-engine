@@ -15,6 +15,7 @@ import {
   ActorKind,
   ClaimableState,
   type Content,
+  ExternalLinkKind,
   importApplySchema,
   type ImportEntry,
   ImportFormat,
@@ -35,6 +36,7 @@ import {
   TaskChange,
   type WorkQueue,
 } from "./contract.ts";
+import { ContentField } from "./content.ts";
 import { exportMission } from "./export.ts";
 import { applyImport } from "./import-apply.ts";
 import { executionEnds } from "./control.ts";
@@ -87,6 +89,17 @@ const UNKNOWN_ID = "node_00000000000000000000000000";
 const BINDING_ID = "binding_00000000000000000000000000";
 const NEXT_BINDING_ID = "binding_00000000000000000000000001";
 const REVISED_BINDING_ID = "binding_00000000000000000000000002";
+const CONVERSATION_BINDING_ID = "binding_00000000000000000000000003";
+const CONVERSATION = "issues";
+const CONVERSATION_IDENTITY = "conversation:github:acme/app";
+const ISSUE_NUMBER = 117;
+const SECOND_ISSUE_NUMBER = 118;
+const ISSUE_LINK = {
+  kind: ExternalLinkKind.GitHubIssue,
+  resource_identity: CONVERSATION_IDENTITY,
+  number: ISSUE_NUMBER,
+};
+const SECOND_ISSUE_LINK = { ...ISSUE_LINK, number: SECOND_ISSUE_NUMBER };
 const REPOSITORY = "repo";
 const MISSING_BINDING = "missing";
 const INVALID_FILENAME = "../Bad.md";
@@ -109,10 +122,12 @@ const SECOND_REPOSITORY = "repo_two";
 const IDENTITIES: Record<string, string> = {
   [BINDING_ID]: "repository:example",
   [NEXT_BINDING_ID]: "repository:other",
+  [CONVERSATION_BINDING_ID]: CONVERSATION_IDENTITY,
 };
 const BINDING_NAMES: Record<string, string> = {
   [BINDING_ID]: REPOSITORY,
   [NEXT_BINDING_ID]: SECOND_REPOSITORY,
+  [CONVERSATION_BINDING_ID]: CONVERSATION,
 };
 let mixedAnswer = false;
 const environments: MissionEnvironments = {
@@ -136,6 +151,11 @@ const bindings: MissionBindings = {
       return {
         binding_id: NEXT_BINDING_ID,
         resource_identity: IDENTITIES[NEXT_BINDING_ID]!,
+      };
+    if (name === CONVERSATION)
+      return {
+        binding_id: CONVERSATION_BINDING_ID,
+        resource_identity: CONVERSATION_IDENTITY,
       };
     return name === REPOSITORY
       ? { binding_id: BINDING_ID, resource_identity: "repository:example" }
@@ -1914,13 +1934,20 @@ const exportBindings: MissionBindings = {
   getBindingRevision: (_tx, bindingId) => ({
     binding_id: bindingId,
     project_id: PROJECT_ID,
-    name: REPOSITORY,
-    resource_identity: "repository:example",
+    name: BINDING_NAMES[bindingId] ?? REPOSITORY,
+    resource_identity: IDENTITIES[bindingId] ?? "repository:example",
     revision: VERSION,
     tombstone: false,
     disabled: false,
   }),
 };
+
+function linkedPlan(links: unknown[] = []): NormalizedEntry[] {
+  return change(plan(), ROOT_FILENAME, {
+    bindings: [CONVERSATION],
+    external_links: links as ParsedNodeFile["external_links"],
+  });
+}
 
 function plan(): NormalizedEntry[] {
   return [
@@ -2193,6 +2220,127 @@ test("an import that retires a node keeps its tasks in the last revision", (t) =
       details: { id },
     })),
   );
+});
+
+test("an import that adds a link writes a revision and an unchanged file is a no-op", (t) => {
+  const { apply, identified, store } = importer(t);
+  const first = apply(linkedPlan());
+  const entries = linkedPlan().map((value) => ({
+    ...value,
+    id: identified(first).find((known) => known.filename === value.filename)!
+      .id,
+  }));
+  const unchanged = apply(entries);
+  assert.deepEqual(unchanged.changes.revisions, []);
+  assert.equal(unchanged.mission_version, first.mission_version);
+  const added = apply(
+    change(entries, ROOT_FILENAME, { external_links: [ISSUE_LINK] }),
+  );
+  const [revision] = added.changes.revisions;
+  assert.equal(added.changes.revisions.length, SINGLE_ENTRY);
+  assert.deepEqual(revision!.content.external_links, [ISSUE_LINK]);
+  assert.deepEqual(revision!.change.changed_fields, [
+    ContentField.ExternalLinks,
+  ]);
+  const stored = store.transaction((tx) =>
+    readCurrentRevision(tx, revision!.node_id),
+  )!;
+  assert.deepEqual(JSON.parse(stored.external_links), [ISSUE_LINK]);
+});
+
+test("an import compares the links in order", (t) => {
+  const links = [ISSUE_LINK, SECOND_ISSUE_LINK];
+  const { entries, resolve } = fixture(t, [
+    entry(ROOT_FILENAME, {
+      bindings: [CONVERSATION],
+      external_links: links as ParsedNodeFile["external_links"],
+    }),
+  ]);
+  assert.deepEqual(resolve(entries).updates, []);
+  const reordered = resolve(
+    change(entries, ROOT_FILENAME, {
+      external_links: [...links].reverse(),
+    } as EntryPatch),
+  );
+  assert.deepEqual(reordered.updates, [item(entries, ROOT_FILENAME).id]);
+  const removed = resolve(
+    change(entries, ROOT_FILENAME, {
+      external_links: [ISSUE_LINK],
+    } as EntryPatch),
+  );
+  assert.deepEqual(removed.updates, [item(entries, ROOT_FILENAME).id]);
+});
+
+test("an import refuses a link with no binding of its resource", (t) => {
+  const { entries, resolve } = fixture(t, hierarchy());
+  const result = resolve(
+    change(entries, ROOT_FILENAME, {
+      external_links: [ISSUE_LINK],
+    } as EntryPatch),
+  );
+  assert.deepEqual(
+    result.violations.map(({ code, filename, details }) => ({
+      code,
+      filename,
+      details,
+    })),
+    [
+      {
+        code: MissionErrorCode.ContentInvalid,
+        filename: ROOT_FILENAME,
+        details: { field: ContentField.ExternalLinks },
+      },
+    ],
+  );
+});
+
+test("export and import both formats unchanged for a node with a link and for a node without one", (t) => {
+  const { mission, store, apply } = importer(t);
+  const first = apply(linkedPlan([ISSUE_LINK, SECOND_ISSUE_LINK]));
+  for (const format of [ImportFormat.Json, ImportFormat.Markdown]) {
+    const exported = store.transaction((tx) =>
+      exportMission(tx, mission.id, format, exportBindings),
+    );
+    if ("files" in exported) {
+      for (const file of exported.files)
+        assert.equal(
+          /^external_links:/m.test(file.content),
+          file.filename === ROOT_FILENAME,
+          file.filename,
+        );
+      const root = exported.files.find(
+        (file) => file.filename === ROOT_FILENAME,
+      )!;
+      assert.ok(
+        root.content.indexOf("\ntags:") <
+          root.content.indexOf("\nexternal_links:"),
+      );
+    } else
+      assert.deepEqual(
+        exported.entries.map((value) =>
+          "node" in value
+            ? [value.filename]
+            : [value.filename, value.external_links],
+        ),
+        [
+          [ROOT_FILENAME, [ISSUE_LINK, SECOND_ISSUE_LINK]],
+          [IMPLEMENT_FILENAME, []],
+          [PEER_FILENAME, []],
+          [SIBLING_TASK_FILENAME],
+          [TASK_FILENAME],
+        ],
+      );
+    const entries =
+      "entries" in exported
+        ? exported.entries
+        : exported.files.map((file) =>
+            parsePlanFile(file.filename, file.content),
+          );
+    const again = apply(entries);
+    assert.deepEqual(again.assigned_ids, first.assigned_ids);
+    assert.deepEqual(again.changes.revisions, []);
+    assert.equal(again.mission_version, first.mission_version);
+  }
 });
 
 test("export and import both formats unchanged", (t) => {
