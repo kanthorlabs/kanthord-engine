@@ -1434,6 +1434,38 @@ test("an affected test that fails at the head and passes at the base answers cri
   );
 });
 
+test("an affected command that reaches its time limit at the head answers criterion-not-met at the stage affected with no agent turn", async (t) => {
+  const marker = join(temporary(t), "affected-started");
+  const clock = commandLimitClock(t, marker);
+  const review = await reviewOf(t, "true", COMMAND_LIMIT_MS * 2, {
+    ...(await affectedSnapshot(
+      t,
+      `touch ${marker}; echo hung-output; sleep 1000`,
+      "changed",
+    )),
+    lifetimeMs: COMMAND_LIMIT_MS * 2,
+    observe: (batch) => clock.observe(batch),
+  });
+  await clock.elapsed();
+  assert.equal(review.opens(), NO_OPENS);
+  assert.equal(review.instructions.length, NO_OPENS);
+  const [assessment] = review.assessments;
+  assert.equal(assessment?.result, AssessmentResult.CriterionNotMet);
+  assert.match(
+    assessment?.rationale ?? "",
+    new RegExp(
+      `^The affected tests reached their time limit of ${COMMAND_LIMIT_MS / 1000} s at [0-9a-f]{40}\\.`,
+    ),
+  );
+  assert.match(assessment?.rationale ?? "", /hung-output/);
+  const attributes = evaluationEndOf(review.records).attributes;
+  assert.equal(attributes[EvaluationAttribute.Stage], EvaluationStage.Affected);
+  assert.equal(
+    attributes[EvaluationAttribute.Affected],
+    AffectedVerdict.Failed,
+  );
+});
+
 test("an affected test that fails at both heads goes to the reviewer with base_red", async (t) => {
   const review = await affectedReview(t, affectedCommand("true"), "changed");
   assert.equal(review.opens(), ONE_OPEN);

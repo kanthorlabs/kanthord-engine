@@ -854,6 +854,13 @@ the record adds the `reason` and the `code` of that `stop`. When the stop has a
 cause text, the record also adds `detail`. The `detail` holds the provider error
 text or the thrown error text, with secrets removed and cut to 300 characters.
 
+An execution ends with the `stop` code `affected_timeout` only when the
+affected command of the base head reaches its time limit. A time limit at the
+head commit is a failed affected verdict that the agent sees: the coder gets a
+revision turn, and the reviewer assesses `criterion_not_met`. The text holds the
+time limit, the commit and the last 4 KiB of the output. The execution does not
+end `environment_failed`.
+
 An execution that ends with a release or a closure leaves the binding
 registered, and the application pulls again. A release with a `stop` is a
 release. An execution that ends with no release and no closure exits `1`.
