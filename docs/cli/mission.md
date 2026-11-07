@@ -276,6 +276,7 @@ The execution reads that dependency at the revision that its current outcome pin
   conditions do not govern this human update. A change of `intent` while the
   attempt reads 1 or more answers 409 `mission.node.intent_locked` with
   `details: { node_id, attempt }`.
+  After a successful call, when `open_attempts_unchanged` is not empty, the CLI writes `note: attempt <n> of <node-id> keeps revision <r>; block, then unblock with change, to apply revision <v>` to stderr for each entry. Stdout stays unchanged.
 - `node rebind` accepts `Rebind` and returns `RebindResult`, with `node_change` and the skipped nodes. It moves the pinned binding revision of one node, or of every node of the mission, to `<binding-id>`, a later revision of the same binding, under [the rebind](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-rebind). A mission rebind returns `skipped: { node: Node, condition: "terminal" \| "retired" }[]`. A pin from before a removal of its binding is not an earlier revision of that binding. A named node with such a pin answers 409 `mission.binding.mismatch`. A mission rebind leaves such a node unchanged and does not list it in `skipped`. A named retired node answers 409 `mission.node.retired`; a named terminal node answers 409 `mission.node.terminal`. A target from another project answers 404 `mission.binding.not_found`. The new revision applies at the next attempt. A node write and an unblock keep the submitted pin, so the rebind is the only path that moves a pin.
 - `node retire preview` returns `RetirePreview`; `node retire` accepts `Retire` and returns `NodeChange` under the [node retire ruling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#node-retire).
   The retirement set holds the node alone. `mission.node.retire_refused` and `mission.node.retire_has_dependents` refuse inadmissible acts.
@@ -298,6 +299,7 @@ The execution reads that dependency at the revision that its current outcome pin
 - `criterion list` returns `Page<Text>` with the single criterion text and its content-owner revision.
   `criterion set` accepts `CriterionSet`, returns `NodeChange`, and replaces the criterion and verifications as one human revision.
   It creates no independent criterion revision, state or opaque criterion ID.
+  After a successful call, when `open_attempts_unchanged` is not empty, the CLI writes `note: attempt <n> of <node-id> keeps revision <r>; block, then unblock with change, to apply revision <v>` to stderr for each entry. Stdout stays unchanged.
 
 ### Import — 2 commands
 
@@ -421,6 +423,7 @@ tasks.
   `Waiting` opens the attempt when the node holds none, as `node ready` does;
   an open attempt stays open. Every other target opens no attempt.
   It resets no failure count and never invalidates a passing assessment merely by resuming.
+  After a successful call, when the `node_revision` of the answer attempt is lower than the `visible_revision` of the node, the CLI writes `note: attempt <n> of <node-id> keeps revision <r>; block, then unblock with change, to apply revision <v>` to stderr. Stdout stays unchanged.
   A complete `Resume` file:
 
   ```json

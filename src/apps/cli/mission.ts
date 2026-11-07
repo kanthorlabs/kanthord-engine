@@ -28,6 +28,7 @@ import {
 import { IMPORT_MARKDOWN_NOTE, missionExamples } from "./mission-examples.ts";
 import { addFileBodyHelp } from "./file-body.ts";
 import { addControlCommands } from "./mission-control.ts";
+import { nodeChangeNotes, REVISION_HELP } from "./mission-help.ts";
 import { addRecordCommands } from "./mission-record.ts";
 import { addProposalCommands } from "./mission-proposal.ts";
 import { addFindingCommands } from "./mission-finding.ts";
@@ -207,11 +208,16 @@ async function nodeCreate(missionId: string, command: Command): Promise<void> {
 
 async function nodeUpdate(nodeId: string, command: Command): Promise<void> {
   validateNodeId(nodeId, NODE_UPDATE_INVALID_NODE_ID);
-  await mutate(command, "node.update", nodeUpdateSchema, (api, body, key) =>
-    api["node.update"](
-      { params: { node_id: nodeId }, query: {}, body },
-      { idempotencyKey: key },
-    ),
+  await mutate(
+    command,
+    "node.update",
+    nodeUpdateSchema,
+    (api, body, key) =>
+      api["node.update"](
+        { params: { node_id: nodeId }, query: {}, body },
+        { idempotencyKey: key },
+      ),
+    nodeChangeNotes,
   );
 }
 
@@ -248,11 +254,16 @@ async function dependencyEdit(
 
 async function criterionSet(nodeId: string, command: Command): Promise<void> {
   validateNodeId(nodeId, CRITERION_SET_INVALID_NODE_ID);
-  await mutate(command, "criterion.set", criterionSetSchema, (api, body, key) =>
-    api["criterion.set"](
-      { params: { node_id: nodeId }, query: {}, body },
-      { idempotencyKey: key },
-    ),
+  await mutate(
+    command,
+    "criterion.set",
+    criterionSetSchema,
+    (api, body, key) =>
+      api["criterion.set"](
+        { params: { node_id: nodeId }, query: {}, body },
+        { idempotencyKey: key },
+      ),
+    nodeChangeNotes,
   );
 }
 
@@ -673,9 +684,11 @@ function addNodeCommands(mission: Command): void {
       .description("Update a mission node as JSON")
       .argument("<node-id>", "Node ID"),
     { schema: nodeUpdateSchema, example: missionExamples.nodeUpdate },
-  ).action((nodeId: string, _options, command: Command) =>
-    nodeUpdate(nodeId, command),
-  );
+  )
+    .addHelpText("after", REVISION_HELP)
+    .action((nodeId: string, _options, command: Command) =>
+      nodeUpdate(nodeId, command),
+    );
   const retire = addFileBodyHelp(
     node
       .command(RETIRE)
@@ -797,9 +810,11 @@ function addCriterionCommands(mission: Command): void {
       .description("Set node criterion")
       .argument("<node-id>", "Node ID"),
     { schema: criterionSetSchema, example: missionExamples.criterionSet },
-  ).action((nodeId: string, _options, command: Command) =>
-    criterionSet(nodeId, command),
-  );
+  )
+    .addHelpText("after", REVISION_HELP)
+    .action((nodeId: string, _options, command: Command) =>
+      criterionSet(nodeId, command),
+    );
 }
 
 function addEdgeCommands(mission: Command): void {
