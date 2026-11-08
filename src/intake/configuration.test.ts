@@ -3,9 +3,16 @@ import { test } from "node:test";
 import {
   configurationSchemaOf,
   GITHUB_RESOURCE_PATTERN,
+  inboundCredentialPlatform,
+  inboundSupported,
   resourceIdentityOf,
 } from "./configuration.ts";
 import { InboundKind, InboundPlatform, ResourceKind } from "./contract.ts";
+import { Platform } from "./credential-platform.ts";
+import {
+  SLACK_RESOURCE_IDENTITY,
+  SLACK_TEAM_ID,
+} from "./slack-test-support.ts";
 
 const RESOURCE = "acme/app";
 const IDENTITY = "repository:github:acme/app";
@@ -74,4 +81,45 @@ test("an absent resource_kind and another value refuse for both kinds", () => {
       false,
     );
   }
+});
+
+test("slack takes the webhook kind alone with a team id of a conversation", () => {
+  assert.equal(
+    inboundSupported(InboundKind.Webhook, InboundPlatform.Slack),
+    true,
+  );
+  assert.equal(
+    inboundSupported(InboundKind.Poll, InboundPlatform.Slack),
+    false,
+  );
+  const configuration = {
+    resource_kind: ResourceKind.Conversation,
+    resource: SLACK_TEAM_ID,
+  };
+  assert.deepEqual(
+    configurationSchemaOf(InboundKind.Webhook, InboundPlatform.Slack).parse(
+      configuration,
+    ),
+    configuration,
+  );
+  assert.equal(
+    resourceIdentityOf(InboundPlatform.Slack, configuration),
+    SLACK_RESOURCE_IDENTITY,
+  );
+});
+
+test("only a slack webhook and a github poll name a credential platform", () => {
+  assert.equal(
+    inboundCredentialPlatform(InboundKind.Webhook, InboundPlatform.Slack),
+    Platform.SlackSigningSecret,
+  );
+  assert.equal(
+    inboundCredentialPlatform(InboundKind.Poll, InboundPlatform.GitHub),
+    InboundPlatform.GitHub,
+  );
+  for (const platform of [InboundPlatform.GitHub, InboundPlatform.Jira])
+    assert.equal(
+      inboundCredentialPlatform(InboundKind.Webhook, platform),
+      null,
+    );
 });

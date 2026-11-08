@@ -404,13 +404,19 @@ export function requestedChangesText(
   );
 }
 
+function linkAnchor(link: LinkUpdateRead["items"][number]["external_link"]) {
+  if ("key" in link) return link.key;
+  if ("channel" in link) return `${link.channel}/${link.thread_ts}`;
+  return link.number;
+}
+
 export function linkUpdatesText(read: LinkUpdateRead): string | null {
   if (read.items.length === NO_ITEMS) return null;
   const stored = read.items.flatMap((item) =>
     item.content === null
       ? []
       : [
-          `${item.new ? LINK_UPDATE_NEW_PREFIX : ""}${item.external_link.resource_identity}#${"key" in item.external_link ? item.external_link.key : item.external_link.number} by ${item.content.author} at ${new Date(item.content.occurred_at).toISOString()}, ${item.content.url}\n${item.content.body}`,
+          `${item.new ? LINK_UPDATE_NEW_PREFIX : ""}${item.external_link.resource_identity}#${linkAnchor(item.external_link)} by ${item.content.author} at ${new Date(item.content.occurred_at).toISOString()}, ${item.content.url}\n${item.content.body}`,
         ],
   );
   const missing = read.items

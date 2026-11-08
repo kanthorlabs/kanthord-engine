@@ -149,6 +149,7 @@ components:
               enum:
                 - github
                 - jira
+                - slack
             consumer:
               type: string
               enum:
@@ -198,6 +199,7 @@ components:
           enum:
             - github
             - jira
+            - slack
         consumer:
           type: string
           enum:
@@ -258,6 +260,7 @@ components:
               enum:
                 - github
                 - jira
+                - slack
             limit:
               default: 100
               type: integer
@@ -303,6 +306,7 @@ components:
                 enum:
                   - github
                   - jira
+                  - slack
               consumer:
                 type: string
                 enum:

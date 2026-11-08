@@ -143,6 +143,26 @@ components:
                       - resource_identity
                       - key
                     additionalProperties: false
+                  - type: object
+                    properties:
+                      kind:
+                        type: string
+                        minLength: 1
+                      resource_identity:
+                        type: string
+                        minLength: 1
+                      channel:
+                        type: string
+                        minLength: 1
+                      thread_ts:
+                        type: string
+                        minLength: 1
+                    required:
+                      - kind
+                      - resource_identity
+                      - channel
+                      - thread_ts
+                    additionalProperties: false
               update_key:
                 type: string
                 minLength: 1

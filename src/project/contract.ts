@@ -114,6 +114,7 @@ export const BindingKind = {
 export const ConversationPlatform = {
   GitHub: "github",
   Jira: "jira",
+  Slack: "slack",
 } as const;
 export type ConversationPlatform =
   (typeof ConversationPlatform)[keyof typeof ConversationPlatform];
@@ -124,11 +125,14 @@ export const JIRA_SITE_PATTERN =
   /^[A-Za-z0-9][A-Za-z0-9-]*\.[Aa][Tt][Ll][Aa][Ss][Ss][Ii][Aa][Nn]\.[Nn][Ee][Tt]$/;
 export const JIRA_PROJECT_KEY_PATTERN = /^[A-Z][A-Z0-9_]{1,9}$/;
 export const JIRA_ACCOUNT_ID_PATTERN = /^[A-Za-z0-9:_-]{1,128}$/;
+export const SLACK_TEAM_ID_PATTERN = /^T[A-Z0-9]{2,31}$/;
+export const SLACK_ACTOR_ID_PATTERN = /^[UW][A-Z0-9]{2,31}$/;
 export const CONVERSATION_ACTOR_ID_PATTERNS: Readonly<
   Record<ConversationPlatform, RegExp>
 > = {
   [ConversationPlatform.GitHub]: GITHUB_ACTOR_ID_PATTERN,
   [ConversationPlatform.Jira]: JIRA_ACCOUNT_ID_PATTERN,
+  [ConversationPlatform.Slack]: SLACK_ACTOR_ID_PATTERN,
 };
 export const LinkTrustField = {
   ActorIds: "actor_ids",
@@ -386,12 +390,21 @@ export const conversationConfigSchema = z.discriminatedUnion("platform", [
     link_trust: linkTrustSchema.optional(),
     inbox: inboxSchema.optional(),
   }),
+  z.strictObject({
+    available: z.boolean(),
+    platform: z.literal(ConversationPlatform.Slack),
+    team_id: z.string().regex(SLACK_TEAM_ID_PATTERN),
+    credential: z.string().min(1),
+    reply_policy: replyPolicySchema.optional(),
+    link_trust: linkTrustSchema.optional(),
+    inbox: inboxSchema.optional(),
+  }),
 ]);
 export type ConversationConfig = z.infer<typeof conversationConfigSchema>;
 export function conversationResourceOf(config: ConversationConfig): string {
-  return config.platform === ConversationPlatform.GitHub
-    ? config.repository
-    : `${config.site.toLowerCase()}/${config.project_key}`;
+  if (config.platform === ConversationPlatform.GitHub) return config.repository;
+  if (config.platform === ConversationPlatform.Slack) return config.team_id;
+  return `${config.site.toLowerCase()}/${config.project_key}`;
 }
 export const WorkerPlacement = {
   Server: "server",

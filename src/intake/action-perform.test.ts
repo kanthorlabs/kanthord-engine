@@ -57,6 +57,25 @@ import {
   okResponse,
 } from "./jira-test-support.ts";
 import { runOutbound } from "./outbound.ts";
+import {
+  mockSlackFetch,
+  SLACK_AUTH_TEST_URL,
+  SLACK_CHANNEL,
+  SLACK_POST_URL,
+  SLACK_REPLY_TS,
+  SLACK_RESOURCE_IDENTITY,
+  SLACK_SECOND_REPLY_TS,
+  SLACK_SECOND_UPDATE_KEY,
+  SLACK_TEAM_ID,
+  SLACK_THREAD_TS,
+  SLACK_TOKEN_ACCOUNT_ID,
+  SLACK_UPDATE_KEY,
+  SLACK_USER_TOKEN,
+  slackErrorResponse,
+  slackOkResponse,
+  slackPostedMessage,
+  slackResponse,
+} from "./slack-test-support.ts";
 import { insertPending, recordResult } from "./outbound-store.ts";
 import {
   SSH_CREDENTIAL,
@@ -1087,6 +1106,244 @@ test("a Jira reply call with no answer sets the request failed and answers the J
     h.rows().map((row) => row.state),
     [OutboundRequestState.Succeeded],
   );
+});
+
+const SLACK_CREDENTIAL = "slack-conversation";
+const SLACK_REPLY_LINK = {
+  kind: ExternalLinkKind.SlackThread,
+  resource_identity: SLACK_RESOURCE_IDENTITY,
+  channel: SLACK_CHANNEL,
+  thread_ts: SLACK_THREAD_TS,
+};
+const SLACK_SERVER_ERROR = 503;
+const SLACK_BEARER = `Bearer ${SLACK_USER_TOKEN}`;
+const SLACK_JSON_CONTENT_TYPE = "application/json; charset=utf-8";
+
+function slackReplyFacts(attempt: number): ReplyActionFacts {
+  return {
+    ...replyFacts(attempt),
+    frozen_action: {
+      ...replyFacts(attempt).frozen_action,
+      configuration: { external_link: SLACK_REPLY_LINK },
+    },
+    conversation: {
+      binding_id: BINDING_ID,
+      resource_identity: SLACK_RESOURCE_IDENTITY,
+      repository: SLACK_TEAM_ID,
+    },
+  };
+}
+
+function slackReplyHarness(t: TestContext) {
+  const { store } = sshStore(t);
+  const script = {
+    facts: slackReplyFacts(FIRST_REVISION),
+    credential: SLACK_CREDENTIAL,
+    platform: "slack",
+    project_id: PROJECT_ID,
+    execution: {
+      execution_id: EXECUTION_ID,
+      project_id: PROJECT_ID,
+      worker_binding_id: WORKER_BINDING_ID,
+      resource_identity: "worker:kanthord:general",
+      runtime_identity: RUNTIME_IDENTITY,
+      credentials: [],
+    },
+    secret: { key: SLACK_USER_TOKEN },
+    metadata: null,
+    refusal: null,
+  };
+  const fake = sshCustody(script);
+  const posts: (() => Response | Promise<Response>)[] = [];
+  const fetched = mockSlackFetch(t, (request) => {
+    if (request.url === SLACK_AUTH_TEST_URL)
+      return slackOkResponse({ user_id: SLACK_TOKEN_ACCOUNT_ID });
+    assert.equal(request.url, SLACK_POST_URL);
+    const answer = posts.shift();
+    assert.ok(answer !== undefined, "Each post has a scripted answer.");
+    return answer();
+  });
+  const caller: CallerContext = {
+    identity: machine,
+    execution: claim,
+    context: background,
+    requestId: "request_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    commit: (write) => store.transaction(write),
+  };
+  const inFlight = new Set<string>();
+  const logger = pino({ enabled: false });
+  const unexpected = () => assert.fail("A Slack reply calls no GitHub.");
+  const perform = (attempt = FIRST_REVISION) => {
+    script.facts = slackReplyFacts(attempt);
+    return performAction(
+      {
+        store,
+        custody: fake.custody,
+        github: {
+          readTokenAccount: unexpected,
+          postIssueComment: unexpected,
+        } as unknown as GitHubPlatform,
+        gitWriter: {
+          squashPushFresh: unexpected,
+          pushSnapshotFresh: unexpected,
+          landedOn: unexpected,
+          changedGateFiles: unexpected,
+          sshAccessOf: unexpected,
+        },
+      },
+      (request) => runOutbound({ store, logger, inFlight }, caller, request),
+      caller,
+      {
+        key: REPLY_KEY,
+        commit: null,
+        comment: REPLY_BODY,
+        reused_evidence_id: null,
+        merge_evidence_id: null,
+        request_key: replyRequestKey(NODE_ID, attempt, SLACK_REPLY_LINK),
+      },
+    );
+  };
+  const rows = () =>
+    store.transaction((tx) =>
+      (
+        tx.database
+          .prepare(
+            "SELECT operation, state, credential, result FROM intake_outbound_request ORDER BY created_at, id",
+          )
+          .all() as {
+          operation: string;
+          state: string;
+          credential: string;
+          result: string | null;
+        }[]
+      ).map((row) => ({
+        ...row,
+        result: row.result === null ? null : JSON.parse(row.result),
+      })),
+    );
+  const posted = (ts: string, user?: string) => () =>
+    slackOkResponse(slackPostedMessage(ts, user));
+  return {
+    ...fake,
+    posts,
+    requests: fetched.requests,
+    perform,
+    rows,
+    posted,
+  };
+}
+
+test("a reply action of a slack binding posts one message with the thread and the user token and answers its comment address", async (t) => {
+  const h = slackReplyHarness(t);
+  h.posts.push(h.posted(SLACK_REPLY_TS, SLACK_TOKEN_ACCOUNT_ID));
+  assert.deepEqual(await h.perform(), {
+    kind: AddressKind.Comment,
+    resource_identity: SLACK_RESOURCE_IDENTITY,
+    update_key: SLACK_UPDATE_KEY,
+  });
+  assert.deepEqual(
+    h.requests.map(({ method, url, authorization }) => [
+      method,
+      url,
+      authorization,
+    ]),
+    [
+      ["POST", SLACK_AUTH_TEST_URL, SLACK_BEARER],
+      ["POST", SLACK_POST_URL, SLACK_BEARER],
+    ],
+  );
+  assert.equal(h.requests[1]!.contentType, SLACK_JSON_CONTENT_TYPE);
+  assert.deepEqual(h.requests[1]!.body, {
+    channel: SLACK_CHANNEL,
+    thread_ts: SLACK_THREAD_TS,
+    text: REPLY_BODY,
+  });
+  assert.deepEqual(h.rows(), [
+    {
+      operation: OutboundOperation.SlackThreadReply,
+      state: OutboundRequestState.Succeeded,
+      credential: SLACK_CREDENTIAL,
+      result: {
+        update_key: SLACK_UPDATE_KEY,
+        actor_id: SLACK_TOKEN_ACCOUNT_ID,
+      },
+    },
+  ]);
+  assert.ok(h.materials.every((material) => material.dropped));
+});
+
+test("a Slack post answer without a user keeps the account of auth.test as the actor", async (t) => {
+  const h = slackReplyHarness(t);
+  h.posts.push(h.posted(SLACK_REPLY_TS));
+  await h.perform();
+  assert.deepEqual(
+    h.rows().map((row) => row.result),
+    [{ update_key: SLACK_UPDATE_KEY, actor_id: SLACK_TOKEN_ACCOUNT_ID }],
+  );
+});
+
+test("the first Slack reply on a link reads the user_id of auth.test once and a later reply reads it no more", async (t) => {
+  const h = slackReplyHarness(t);
+  h.posts.push(h.posted(SLACK_REPLY_TS), h.posted(SLACK_SECOND_REPLY_TS));
+  await h.perform();
+  const second = await h.perform(SECOND_ATTEMPT);
+  assert.equal(
+    "update_key" in second && second.update_key,
+    SLACK_SECOND_UPDATE_KEY,
+  );
+  assert.deepEqual(
+    h.requests.map(({ method, url }) => `${method} ${url}`),
+    [
+      `POST ${SLACK_AUTH_TEST_URL}`,
+      `POST ${SLACK_POST_URL}`,
+      `POST ${SLACK_POST_URL}`,
+    ],
+  );
+});
+
+test("a Slack reply call with no answer sets the request failed and answers the Slack result code, and a repeat posts again", async (t) => {
+  const h = slackReplyHarness(t);
+  h.posts.push(
+    () => slackResponse(SLACK_SERVER_ERROR, {}),
+    h.posted(SLACK_REPLY_TS),
+  );
+  const lost = await h.perform();
+  assert.ok("class" in lost);
+  assert.equal(lost.class, ResultClass.UnknownOutcome);
+  assert.equal(
+    lost.code,
+    `intake.platform.slack.${ResultClass.UnknownOutcome}`,
+  );
+  assert.deepEqual(
+    h.rows().map((row) => row.state),
+    [OutboundRequestState.Failed],
+  );
+  const repeated = await h.perform();
+  assert.equal("kind" in repeated && repeated.kind, AddressKind.Comment);
+  assert.deepEqual(
+    h.requests.map(({ method }) => method),
+    ["POST", "POST", "POST"],
+  );
+  assert.deepEqual(
+    h.rows().map((row) => row.state),
+    [OutboundRequestState.Succeeded],
+  );
+});
+
+test("a Slack refusal with ok false answers the Slack result code and a lost server answer stays unknown", async (t) => {
+  const h = slackReplyHarness(t);
+  h.posts.push(() => slackErrorResponse("channel_not_found"));
+  const refused = await h.perform();
+  assert.ok("class" in refused);
+  assert.equal(refused.class, ResultClass.FinalRefusal);
+  assert.equal(
+    refused.code,
+    `intake.platform.slack.${ResultClass.FinalRefusal}`,
+  );
+  h.posts.push(() => slackErrorResponse("internal_error"));
+  const lost = await h.perform();
+  assert.ok("class" in lost);
+  assert.equal(lost.class, ResultClass.UnknownOutcome);
 });
 
 const REPLY_REQUESTS = 2;

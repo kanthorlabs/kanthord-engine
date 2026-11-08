@@ -3,11 +3,16 @@ import { z } from "zod";
 export const ExternalLinkKind = {
   GitHubIssue: "github_issue",
   JiraIssue: "jira_issue",
+  SlackThread: "slack_thread",
 } as const;
 const GITHUB_CONVERSATION_IDENTITY_PATTERN =
   /^conversation:github:[^/\s:]+\/[^/\s:]+$/;
 const JIRA_CONVERSATION_IDENTITY_PATTERN =
   /^conversation:jira:[a-z0-9][a-z0-9-]*\.atlassian\.net\/[A-Z][A-Z0-9_]{1,9}$/;
+const SLACK_CONVERSATION_IDENTITY_PATTERN =
+  /^conversation:slack:T[A-Z0-9]{2,31}$/;
+const SLACK_CHANNEL_PATTERN = /^[CG][A-Z0-9]{2,31}$/;
+const SLACK_THREAD_TS_PATTERN = /^[0-9]+\.[0-9]{6}$/;
 const JIRA_ISSUE_NUMBER_PATTERN = /^[1-9][0-9]*$/;
 const JIRA_KEY_SEPARATOR = "-";
 const IDENTITY_KEY_SEPARATOR = "/";
@@ -38,5 +43,11 @@ export const externalLinkSchema = z.discriminatedUnion("kind", [
     .refine((link) => isKeyOfIdentity(link.resource_identity, link.key), {
       path: ["key"],
     }),
+  z.strictObject({
+    kind: z.literal(ExternalLinkKind.SlackThread),
+    resource_identity: z.string().regex(SLACK_CONVERSATION_IDENTITY_PATTERN),
+    channel: z.string().regex(SLACK_CHANNEL_PATTERN),
+    thread_ts: z.string().regex(SLACK_THREAD_TS_PATTERN),
+  }),
 ]);
 export type ExternalLink = z.infer<typeof externalLinkSchema>;

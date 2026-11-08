@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import type {
-  ActionFacts,
-  Material,
-  ReplyActionFacts,
+import {
+  type ActionFacts,
+  apiKeySecretSchema,
+  type Material,
+  type ReplyActionFacts,
 } from "../custody/contract.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
 import { ExternalLinkKind } from "../kernel/external-link.ts";
@@ -37,6 +38,12 @@ import {
   readJiraAccount,
 } from "./jira.ts";
 import { platformFailureCode } from "./platform-failure.ts";
+import {
+  postSlackReply,
+  readSlackAccount,
+  type SlackAnswer,
+  type SlackCall,
+} from "./slack.ts";
 import {
   type CallAnswer,
   type Finalization,
@@ -181,17 +188,54 @@ function jiraReply(
   };
 }
 
+function slackReply(
+  held: ReplyHeld,
+  release: { material: Material | null; scope: OutboundScope },
+  link: { channel: string; thread_ts: string },
+): ReplyPlatform {
+  assert.ok(release.material, "A Slack reply holds a released material.");
+  const call: SlackCall = {
+    token: apiKeySecretSchema.parse(release.material.value()).key,
+    signal: release.scope.signal,
+    deadlineAt: deadlineOf(release.scope, PLATFORM_CALL_DEADLINE_MS),
+  };
+  const target = {
+    team_id: held.facts.conversation.repository,
+    channel: link.channel,
+    thread_ts: link.thread_ts,
+  };
+  const coded = <T>(answer: SlackAnswer<T>): ReplyAnswer<T> =>
+    answer.ok
+      ? answer
+      : { ...answer, code: platformFailureCode(Platform.Slack, answer.class) };
+  return {
+    readAccount: async () => coded(await readSlackAccount(call)),
+    postComment: async () =>
+      coded(await postSlackReply(call, target, held.comment)),
+  };
+}
+
+function replyPlatformOf(
+  dependencies: ActionCheckDependencies,
+  requester: CallerIdentity,
+  held: ReplyHeld,
+  release: { material: Material | null; scope: OutboundScope },
+): ReplyPlatform {
+  const link = held.facts.frozen_action.configuration.external_link;
+  if (link.kind === ExternalLinkKind.SlackThread)
+    return slackReply(held, release, link);
+  if (link.kind === ExternalLinkKind.JiraIssue)
+    return jiraReply(held, release, link.key);
+  return gitHubReply(dependencies, requester, held, release, link.number);
+}
+
 export async function callReply(
   dependencies: ActionCheckDependencies,
   requester: CallerIdentity,
   held: ReplyHeld,
   release: { material: Material | null; scope: OutboundScope },
 ): Promise<CallAnswer> {
-  const link = held.facts.frozen_action.configuration.external_link;
-  const platform =
-    link.kind === ExternalLinkKind.JiraIssue
-      ? jiraReply(held, release, link.key)
-      : gitHubReply(dependencies, requester, held, release, link.number);
+  const platform = replyPlatformOf(dependencies, requester, held, release);
   const known = recordedAccountOf(dependencies.store, held);
   let actorId = known.actor_id;
   if (actorId === null && !known.succeeded) {
@@ -213,10 +257,18 @@ export async function callReply(
   };
 }
 
+const PLATFORM_OF_OPERATION: Readonly<
+  Partial<Record<OutboundOperationValue, Platform>>
+> = {
+  [OutboundOperation.JiraIssueComment]: Platform.Jira,
+  [OutboundOperation.SlackThreadReply]: Platform.Slack,
+};
+
 function resultCodeOf(held: ReplyHeld, resultClass: ResultClassValue): string {
-  return held.operation === OutboundOperation.JiraIssueComment
-    ? platformFailureCode(Platform.Jira, resultClass)
-    : GITHUB_RESULT_CODE_PREFIX + resultClass;
+  const platform = PLATFORM_OF_OPERATION[held.operation];
+  return platform === undefined
+    ? GITHUB_RESULT_CODE_PREFIX + resultClass
+    : platformFailureCode(platform, resultClass);
 }
 
 export function finalizeReply(

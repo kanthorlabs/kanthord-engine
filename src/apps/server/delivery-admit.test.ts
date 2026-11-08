@@ -997,3 +997,150 @@ test("a Jira comment of an app account answers actor_ignored and another event a
   });
   assert.equal(h.rows().length, NO_CALLS);
 });
+
+const SLACK_TEAM_ID = "T01ABCDEF";
+const SLACK_RESOURCE_IDENTITY = `conversation:slack:${SLACK_TEAM_ID}`;
+const SLACK_CHANNEL = "C01ABCDEF";
+const SLACK_THREAD_TS = "1700000000.000100";
+const SLACK_REPLY_TS = "1700000100.123456";
+const SLACK_USER_ID = "U01ABCDEF";
+const SLACK_UPDATE_KEY = `slack_message:${SLACK_TEAM_ID}:${SLACK_CHANNEL}:${SLACK_REPLY_TS}`;
+const SLACK_REPLY_MS = 1700000100123;
+const SLACK_MESSAGE_EVENT = "message";
+
+function slackReplyDelivery(eventOverrides: object = {}): Buffer {
+  return Buffer.from(
+    JSON.stringify({
+      type: "event_callback",
+      team_id: SLACK_TEAM_ID,
+      event_id: "Ev01ABCDEF",
+      event: {
+        type: SLACK_MESSAGE_EVENT,
+        channel: SLACK_CHANNEL,
+        user: SLACK_USER_ID,
+        text: "looks good to me",
+        ts: SLACK_REPLY_TS,
+        thread_ts: SLACK_THREAD_TS,
+        ...eventOverrides,
+      },
+    }),
+  );
+}
+
+async function slackLinkedFixture(t: TestContext) {
+  const h = await fixture(t);
+  h.dependencies.decoder = {
+    decode: () => null,
+    decodeLinkUpdate: (input) => missionEventDecoder.decodeLinkUpdate(input),
+  };
+  h.dependencies.intakeLinks.replyMatch = async () => ({
+    succeeded: false,
+    pending_actor_ids: [],
+  });
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare(
+        "UPDATE mission_node_revision SET external_links = ? WHERE node_id = ?",
+      )
+      .run(
+        canonicalJSON([
+          {
+            kind: ExternalLinkKind.SlackThread,
+            resource_identity: SLACK_RESOURCE_IDENTITY,
+            channel: SLACK_CHANNEL,
+            thread_ts: SLACK_THREAD_TS,
+          },
+        ]),
+        h.node_id,
+      ),
+  );
+  const admit = (event: Buffer) =>
+    h.invoke("delivery.admit", {
+      params: {},
+      query: {},
+      body: {
+        inbound_event_id: createIdentity("inbound_event"),
+        project_id: h.project_id,
+        platform: "slack",
+        resource: SLACK_RESOURCE_IDENTITY,
+        event: event.toString("base64"),
+        metadata: { event: SLACK_MESSAGE_EVENT },
+      },
+    });
+  const rows = () =>
+    h.store.transaction(
+      (tx) =>
+        tx.database
+          .prepare(
+            "SELECT external_link, update_key, actor_id, occurred_at FROM mission_link_update",
+          )
+          .all() as {
+          external_link: string;
+          update_key: string;
+          actor_id: string;
+          occurred_at: number;
+        }[],
+    );
+  return { ...h, admit, rows };
+}
+
+test("the composed decodeLinkUpdate answers the link update of a Slack thread reply", () => {
+  assert.deepEqual(
+    missionEventDecoder.decodeLinkUpdate({
+      platform: "slack",
+      resource: SLACK_RESOURCE_IDENTITY,
+      event: slackReplyDelivery(),
+      metadata: { event: SLACK_MESSAGE_EVENT },
+    }),
+    {
+      external_link: {
+        kind: "slack_thread",
+        resource_identity: SLACK_RESOURCE_IDENTITY,
+        channel: SLACK_CHANNEL,
+        thread_ts: SLACK_THREAD_TS,
+      },
+      update_key: SLACK_UPDATE_KEY,
+      actor_id: SLACK_USER_ID,
+      actor_automated: false,
+      occurred_at: SLACK_REPLY_MS,
+      mentions: [],
+    },
+  );
+});
+
+test("a signed thread reply of a listed actor records one link update of a node that links the thread", async (t) => {
+  const h = await slackLinkedFixture(t);
+  assert.equal(
+    (await h.admit(slackReplyDelivery())).disposition,
+    Disposition.AcceptedObservation,
+  );
+  const [row, ...others] = h.rows();
+  assert.deepEqual(others, []);
+  assert.deepEqual(JSON.parse(row!.external_link), {
+    kind: ExternalLinkKind.SlackThread,
+    resource_identity: SLACK_RESOURCE_IDENTITY,
+    channel: SLACK_CHANNEL,
+    thread_ts: SLACK_THREAD_TS,
+  });
+  assert.equal(row!.update_key, SLACK_UPDATE_KEY);
+  assert.equal(row!.actor_id, SLACK_USER_ID);
+  assert.equal(row!.occurred_at, SLACK_REPLY_MS);
+  assert.deepEqual(await h.admit(slackReplyDelivery()), {
+    disposition: Disposition.Duplicate,
+    reason: null,
+  });
+  assert.equal(h.rows().length, SINGLE_CALL);
+});
+
+test("a Slack reply of a bot answers actor_ignored and a parent message answers undecodable", async (t) => {
+  const h = await slackLinkedFixture(t);
+  assert.deepEqual(await h.admit(slackReplyDelivery({ bot_id: "B01ABCDEF" })), {
+    disposition: Disposition.Refused,
+    reason: AdmissionRefusal.ActorIgnored,
+  });
+  assert.deepEqual(await h.admit(slackReplyDelivery({ ts: SLACK_THREAD_TS })), {
+    disposition: Disposition.Refused,
+    reason: AdmissionRefusal.Undecodable,
+  });
+  assert.equal(h.rows().length, NO_CALLS);
+});

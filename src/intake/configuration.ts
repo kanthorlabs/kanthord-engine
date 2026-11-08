@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
+import { Platform } from "./credential-platform.ts";
 import {
   InboundKind,
   type InboundKindValue,
@@ -12,9 +13,11 @@ export const GITHUB_RESOURCE_PATTERN = /^[^/\s:]+\/[^/\s:]+$/;
 const RESOURCE_IDENTITY_SEPARATOR = ":";
 export const JIRA_RESOURCE_PATTERN =
   /^[a-z0-9][a-z0-9-]*\.atlassian\.net\/[A-Z][A-Z0-9_]{1,9}$/;
+export const SLACK_RESOURCE_PATTERN = /^T[A-Z0-9]{2,31}$/;
 const PLATFORM_SEGMENTS = {
   [InboundPlatform.GitHub]: "github",
   [InboundPlatform.Jira]: "jira",
+  [InboundPlatform.Slack]: "slack",
 } as const;
 
 export const githubConfigurationSchema = z.strictObject({
@@ -29,6 +32,11 @@ export const jiraConfigurationSchema = z.strictObject({
   resource: z.string().regex(JIRA_RESOURCE_PATTERN),
 });
 
+export const slackConfigurationSchema = z.strictObject({
+  resource_kind: z.literal(ResourceKind.Conversation),
+  resource: z.string().regex(SLACK_RESOURCE_PATTERN),
+});
+
 const CONFIGURATION_SCHEMAS: Readonly<
   Record<
     InboundKindValue,
@@ -38,9 +46,26 @@ const CONFIGURATION_SCHEMAS: Readonly<
   [InboundKind.Webhook]: {
     [InboundPlatform.GitHub]: githubConfigurationSchema,
     [InboundPlatform.Jira]: jiraConfigurationSchema,
+    [InboundPlatform.Slack]: slackConfigurationSchema,
   },
   [InboundKind.Poll]: { [InboundPlatform.GitHub]: githubConfigurationSchema },
 };
+
+const CREDENTIAL_PLATFORMS: Readonly<
+  Record<InboundKindValue, Partial<Record<InboundPlatformValue, string>>>
+> = {
+  [InboundKind.Webhook]: {
+    [InboundPlatform.Slack]: Platform.SlackSigningSecret,
+  },
+  [InboundKind.Poll]: { [InboundPlatform.GitHub]: InboundPlatform.GitHub },
+};
+
+export function inboundCredentialPlatform(
+  kind: InboundKindValue,
+  platform: InboundPlatformValue,
+): string | null {
+  return CREDENTIAL_PLATFORMS[kind][platform] ?? null;
+}
 
 export function inboundSupported(
   kind: InboundKindValue,

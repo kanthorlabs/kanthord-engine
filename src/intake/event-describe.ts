@@ -18,6 +18,7 @@ import { readEvent } from "./event-store.ts";
 import { redactedText } from "./event-text.ts";
 import { readInbound } from "./inbound-store.ts";
 import { describeJiraEvent } from "./jira.ts";
+import { describeSlackEvent } from "./slack.ts";
 
 interface StoredEvent {
   event: Uint8Array;
@@ -36,6 +37,7 @@ type Describer = (input: StoredEvent) => {
 const DESCRIBERS: Readonly<Record<InboundPlatformValue, Describer>> = {
   [InboundPlatform.GitHub]: describeGitHubEvent,
   [InboundPlatform.Jira]: describeJiraEvent,
+  [InboundPlatform.Slack]: describeSlackEvent,
 };
 
 const NO_DESCRIPTION: DescribedEvent = {
