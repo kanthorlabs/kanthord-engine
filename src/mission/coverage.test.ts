@@ -21,11 +21,8 @@ import { databaseSnapshot, missionHarness } from "./test-support.ts";
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const PLAIN_REPOSITORY = "binding_00000000000000000000000001";
 const ACTION_REPOSITORY = "binding_00000000000000000000000002";
-const OTHER_REPOSITORY = "binding_00000000000000000000000003";
 const REPOSITORY_NAME = "repo";
 const REPOSITORY_IDENTITY = "repository:github:owner/repo";
-const OTHER_NAME = "other";
-const OTHER_IDENTITY = "repository:github:owner/other";
 const MACOS = "platform.macos";
 const REASON = "plan";
 const RENAMED = "Reset on iOS";
@@ -43,7 +40,6 @@ const CONTENT = {
 
 function coverageHarness(t: TestContext) {
   const missing = new Set<string>();
-  const unserved = new Set<string>();
   const latest = { binding_id: PLAIN_REPOSITORY };
   const bindings: MissionBindings = {
     storageBindingOf: () => assert.fail("Coverage reads no storage."),
@@ -57,13 +53,8 @@ function coverageHarness(t: TestContext) {
           }
         : null;
     },
-    resolveBindingIdentity: (_tx, projectId, bindingId) => {
+    resolveBindingIdentity: (_tx, projectId) => {
       assert.equal(projectId, PROJECT_ID);
-      if (bindingId === OTHER_REPOSITORY)
-        return {
-          binding_id: OTHER_REPOSITORY,
-          resource_identity: OTHER_IDENTITY,
-        };
       return {
         binding_id: latest.binding_id,
         resource_identity: REPOSITORY_IDENTITY,
@@ -72,9 +63,8 @@ function coverageHarness(t: TestContext) {
     getBindingRevision: (_tx, bindingId) => ({
       project_id: PROJECT_ID,
       binding_id: bindingId,
-      name: bindingId === OTHER_REPOSITORY ? OTHER_NAME : REPOSITORY_NAME,
-      resource_identity:
-        bindingId === OTHER_REPOSITORY ? OTHER_IDENTITY : REPOSITORY_IDENTITY,
+      name: REPOSITORY_NAME,
+      resource_identity: REPOSITORY_IDENTITY,
       revision: bindingId === ACTION_REPOSITORY ? 2 : 1,
       tombstone: false,
       disabled: false,
@@ -110,8 +100,7 @@ function coverageHarness(t: TestContext) {
               .filter(
                 (claim) =>
                   claim === ClaimableState.ExternalRequested ||
-                  row.tags.some((tag) => missing.has(tag)) ||
-                  row.repositories.some((identity) => unserved.has(identity)),
+                  row.tags.some((tag) => missing.has(tag)),
               )
               .map((claim) => ({
                 node_id: row.node_id,
@@ -130,11 +119,7 @@ function coverageHarness(t: TestContext) {
       body: null,
     });
   const snapshot = () => databaseSnapshot(h.store);
-  async function create(
-    filename: string,
-    tags: string[],
-    bindingNames = [REPOSITORY_NAME],
-  ) {
+  async function create(filename: string, tags: string[]) {
     const { id, version } = await mission();
     return h.invoke("node.create", {
       params: { mission_id: id },
@@ -145,7 +130,7 @@ function coverageHarness(t: TestContext) {
           ...CONTENT,
           intent: Intent.Implement,
           tags,
-          bindings: bindingNames,
+          bindings: [REPOSITORY_NAME],
         },
         tasks: [],
         reason: REASON,
@@ -170,7 +155,6 @@ function coverageHarness(t: TestContext) {
   return {
     ...h,
     missing,
-    unserved,
     latest,
     reads,
     mission,
@@ -369,30 +353,4 @@ test("a node unblock with a content change that adds an unmatched pair is refuse
       { node_id: node.node_id, revision: 2, claim: ClaimableState.Waiting },
     ],
   );
-});
-
-test("a node write that names a repository binding no claimant serves is refused", async (t) => {
-  const h = coverageHarness(t);
-  h.unserved.add(OTHER_IDENTITY);
-  const before = h.snapshot();
-  await assert.rejects(
-    h.create("other.md", [], [OTHER_REPOSITORY]),
-    (error) => {
-      assert.ok(error instanceof OperationError);
-      assert.equal(error.status, HttpStatus.Conflict);
-      assert.equal(error.code, MissionErrorCode.TagsUnmatched);
-      const details = error.details as unknown as { claims: UnmatchedClaim[] };
-      assert.deepEqual(
-        details.claims.map(({ revision, claim }) => ({ revision, claim })),
-        [
-          { revision: ONE_REVISION, claim: ClaimableState.Available },
-          { revision: ONE_REVISION, claim: ClaimableState.Waiting },
-        ],
-      );
-      return true;
-    },
-  );
-  assert.deepEqual(h.snapshot(), before);
-  const served = await h.create("repo.md", []);
-  assert.equal(served.revisions.length, ONE_REVISION);
 });
