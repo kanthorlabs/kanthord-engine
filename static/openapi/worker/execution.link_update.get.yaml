@@ -109,23 +109,40 @@ components:
                 pattern: ^link_update_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                 description: link_update_ followed by a canonical 26-character uppercase ULID.
               external_link:
-                type: object
-                properties:
-                  kind:
-                    type: string
-                    minLength: 1
-                  resource_identity:
-                    type: string
-                    minLength: 1
-                  number:
-                    type: integer
-                    exclusiveMinimum: 0
-                    maximum: 9007199254740991
-                required:
-                  - kind
-                  - resource_identity
-                  - number
-                additionalProperties: false
+                anyOf:
+                  - type: object
+                    properties:
+                      kind:
+                        type: string
+                        minLength: 1
+                      resource_identity:
+                        type: string
+                        minLength: 1
+                      number:
+                        type: integer
+                        exclusiveMinimum: 0
+                        maximum: 9007199254740991
+                    required:
+                      - kind
+                      - resource_identity
+                      - number
+                    additionalProperties: false
+                  - type: object
+                    properties:
+                      kind:
+                        type: string
+                        minLength: 1
+                      resource_identity:
+                        type: string
+                        minLength: 1
+                      key:
+                        type: string
+                        minLength: 1
+                    required:
+                      - kind
+                      - resource_identity
+                      - key
+                    additionalProperties: false
               update_key:
                 type: string
                 minLength: 1

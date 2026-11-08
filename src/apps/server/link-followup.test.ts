@@ -516,7 +516,11 @@ test(
           query: { project_id: project.id, state },
           body: null,
         }),
-      ).items.find((item) => item.external_link.number === number);
+      ).items.find(
+        (item) =>
+          "number" in item.external_link &&
+          item.external_link.number === number,
+      );
     const nodeState = async () =>
       completed(
         await mission["node.get"]({

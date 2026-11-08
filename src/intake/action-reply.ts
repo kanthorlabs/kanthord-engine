@@ -5,24 +5,37 @@ import type {
   ReplyActionFacts,
 } from "../custody/contract.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
+import { ExternalLinkKind } from "../kernel/external-link.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { Store } from "../kernel/store.ts";
 import {
   GITHUB_RESULT_CODE_PREFIX,
-  type GitHubFailure,
   GitHubTargetKind,
 } from "../repository/github.ts";
 import type { ActionCheckDependencies } from "./action-check.ts";
-import { gitHubCall } from "./action-merge.ts";
+import { deadlineOf, gitHubCall } from "./action-merge.ts";
 import {
   AddressKind,
   OutboundOperation,
+  type OutboundOperationValue,
   OutboundRequestState,
+  PLATFORM_CALL_DEADLINE_MS,
   type PlatformAddress,
   replyAccountSchema,
   replyResultSchema,
   type ResultClassAnswer,
+  type ResultClassValue,
 } from "./contract.ts";
+import { Platform } from "./credential-platform.ts";
+import {
+  type JiraAnswer,
+  type JiraCall,
+  jiraCredentialsOf,
+  jiraSiteOf,
+  postJiraComment,
+  readJiraAccount,
+} from "./jira.ts";
+import { platformFailureCode } from "./platform-failure.ts";
 import {
   type CallAnswer,
   type Finalization,
@@ -41,6 +54,8 @@ export type ReplyHeld = {
   project_id: string;
   request_key: string;
   comment: string;
+  operation: OutboundOperationValue;
+  metadata: unknown;
 };
 
 export function isReplyKey(key: string): boolean {
@@ -70,7 +85,7 @@ function recordedAccountOf(
     const row = findByKey(
       tx,
       held.project_id,
-      OutboundOperation.GitHubIssueComment,
+      held.operation,
       held.request_key,
     );
     assert.ok(row !== null, "A reply call runs on its request row.");
@@ -80,7 +95,7 @@ function recordedAccountOf(
         : replyAccountSchema.safeParse(JSON.parse(row.result));
     const succeeded = findByKeySuffix(
       tx,
-      OutboundOperation.GitHubIssueComment,
+      held.operation,
       replyLinkSuffix(held.facts),
     ).some((item) => item.state === OutboundRequestState.Succeeded);
     return {
@@ -91,12 +106,76 @@ function recordedAccountOf(
   });
 }
 
-function refusal(failure: GitHubFailure): CallAnswer {
+type ReplyAnswer<T> =
+  | { ok: true; value: T }
+  | { ok: false; class: ResultClassValue; code: string; message: string };
+
+interface ReplyPlatform {
+  readAccount(): Promise<ReplyAnswer<string>>;
+  postComment(): Promise<
+    ReplyAnswer<{ update_key: string; actor_id: string | null }>
+  >;
+}
+
+function refusal(failure: {
+  class: ResultClassValue;
+  code: string;
+  message: string;
+}): CallAnswer {
   return {
     ok: false,
     class: failure.class,
     code: failure.code,
     message: failure.message,
+  };
+}
+
+function gitHubReply(
+  dependencies: ActionCheckDependencies,
+  requester: CallerIdentity,
+  held: ReplyHeld,
+  release: { material: Material | null; scope: OutboundScope },
+  number: number,
+): ReplyPlatform {
+  const call = gitHubCall(requester, release.material, release.scope);
+  return {
+    readAccount: () => dependencies.github.readTokenAccount(call),
+    postComment: () =>
+      dependencies.github.postIssueComment(
+        call,
+        {
+          kind: GitHubTargetKind.Inbound,
+          resource: held.facts.conversation.repository,
+        },
+        number,
+        held.comment,
+      ),
+  };
+}
+
+function jiraReply(
+  held: ReplyHeld,
+  release: { material: Material | null; scope: OutboundScope },
+  key: string,
+): ReplyPlatform {
+  assert.ok(release.material, "A Jira reply holds a released material.");
+  const call: JiraCall = {
+    credentials: jiraCredentialsOf(held.metadata, release.material.value()),
+    signal: release.scope.signal,
+    deadlineAt: deadlineOf(release.scope, PLATFORM_CALL_DEADLINE_MS),
+  };
+  const target = {
+    site: jiraSiteOf(held.facts.conversation.repository),
+    key,
+  };
+  const coded = <T>(answer: JiraAnswer<T>): ReplyAnswer<T> =>
+    answer.ok
+      ? answer
+      : { ...answer, code: platformFailureCode(Platform.Jira, answer.class) };
+  return {
+    readAccount: async () => coded(await readJiraAccount(call)),
+    postComment: async () =>
+      coded(await postJiraComment(call, target, held.comment)),
   };
 }
 
@@ -106,27 +185,22 @@ export async function callReply(
   held: ReplyHeld,
   release: { material: Material | null; scope: OutboundScope },
 ): Promise<CallAnswer> {
-  const call = gitHubCall(requester, release.material, release.scope);
   const link = held.facts.frozen_action.configuration.external_link;
+  const platform =
+    link.kind === ExternalLinkKind.JiraIssue
+      ? jiraReply(held, release, link.key)
+      : gitHubReply(dependencies, requester, held, release, link.number);
   const known = recordedAccountOf(dependencies.store, held);
   let actorId = known.actor_id;
   if (actorId === null && !known.succeeded) {
-    const account = await dependencies.github.readTokenAccount(call);
+    const account = await platform.readAccount();
     if (!account.ok) return refusal(account);
     actorId = account.value;
     dependencies.store.transaction((tx) =>
       recordResult(tx, known.id, { actor_id: actorId }),
     );
   }
-  const posted = await dependencies.github.postIssueComment(
-    call,
-    {
-      kind: GitHubTargetKind.Inbound,
-      resource: held.facts.conversation.repository,
-    },
-    link.number,
-    held.comment,
-  );
+  const posted = await platform.postComment();
   if (!posted.ok) return refusal(posted);
   return {
     ok: true,
@@ -135,6 +209,12 @@ export async function callReply(
       actor_id: posted.value.actor_id ?? actorId,
     },
   };
+}
+
+function resultCodeOf(held: ReplyHeld, resultClass: ResultClassValue): string {
+  return held.operation === OutboundOperation.JiraIssueComment
+    ? platformFailureCode(Platform.Jira, resultClass)
+    : GITHUB_RESULT_CODE_PREFIX + resultClass;
 }
 
 export function finalizeReply(
@@ -146,7 +226,7 @@ export function finalizeReply(
       kind: FinalizationKind.Answer,
       body: {
         class: answer.class,
-        code: GITHUB_RESULT_CODE_PREFIX + answer.class,
+        code: resultCodeOf(held, answer.class),
         message: answer.message,
       },
     };

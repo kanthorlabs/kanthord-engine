@@ -114,6 +114,8 @@ import {
   projectSshIdentityAuthorization,
 } from "../../project/index.ts";
 import {
+  INTAKE_PLATFORMS,
+  IntakeCredentials,
   IntakeFootprint,
   intakeMigrations,
   IntakeService,
@@ -616,6 +618,7 @@ export function composeServices(options: {
       ...REPOSITORY_PLATFORMS,
       ...STORAGE_PLATFORMS,
       ...ENVIRONMENT_SECRET_PLATFORMS,
+      ...INTAKE_PLATFORMS,
     },
     executions: {
       requireRunning: (...args) => scheduler.requireRunning(...args),
@@ -753,6 +756,10 @@ export function composeServices(options: {
   });
   const repositoryCredentials = new RepositoryCredentials({
     store: options.store,
+    records: custody,
+    bindingsNaming: (tx, name) => project.bindingsNaming(tx, name),
+  });
+  const intakeCredentials = new IntakeCredentials({
     records: custody,
     bindingsNaming: (tx, name) => project.bindingsNaming(tx, name),
   });
@@ -1243,6 +1250,8 @@ export function composeServices(options: {
       consume: (...args) => custody.consume(...args),
       grantFacts,
       custodySuitability: (...args) => custody.custodySuitability(...args),
+      credentialMetadata: (tx, name) =>
+        custody.credentialMetadata(tx, name, SERVER_HOLDER),
     },
     github,
     gitWriter,
@@ -1408,6 +1417,7 @@ export function composeServices(options: {
   mission.declare(registry);
   project.declare(registry);
   intake.declare(registry);
+  intakeCredentials.declare(registry);
   workbench.declare(registry);
   footprint.declare(registry);
   const gateway = new GatewayService({
@@ -1442,7 +1452,10 @@ export function composeServices(options: {
             ((tx) => project.resourceInventory(tx)),
           intake:
             options.inventoryOverrides?.intake ??
-            projectScopedIntakeInventory(intake, project),
+            ((tx) => [
+              ...projectScopedIntakeInventory(intake, project)(tx),
+              ...intakeCredentials.resourceInventory(tx),
+            ]),
         }),
       ),
     options.logger,

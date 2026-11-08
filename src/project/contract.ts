@@ -113,12 +113,22 @@ export const BindingKind = {
 } as const;
 export const ConversationPlatform = {
   GitHub: "github",
+  Jira: "jira",
 } as const;
 export type ConversationPlatform =
   (typeof ConversationPlatform)[keyof typeof ConversationPlatform];
 export const LINK_TRUST_ACTORS_MAX = 32;
 export const GITHUB_ACTOR_ID_PATTERN = /^[1-9][0-9]{0,15}$/;
 export const CONVERSATION_REPOSITORY_PATTERN = /^[^/\s:]+\/[^/\s:]+$/;
+export const JIRA_SITE_PATTERN = /^[a-z0-9][a-z0-9-]*\.atlassian\.net$/i;
+export const JIRA_PROJECT_KEY_PATTERN = /^[A-Z][A-Z0-9_]{1,9}$/;
+export const JIRA_ACCOUNT_ID_PATTERN = /^[A-Za-z0-9:_-]{1,128}$/;
+export const CONVERSATION_ACTOR_ID_PATTERNS: Readonly<
+  Record<ConversationPlatform, RegExp>
+> = {
+  [ConversationPlatform.GitHub]: GITHUB_ACTOR_ID_PATTERN,
+  [ConversationPlatform.Jira]: JIRA_ACCOUNT_ID_PATTERN,
+};
 export const LinkTrustField = {
   ActorIds: "actor_ids",
 } as const;
@@ -365,7 +375,23 @@ export const conversationConfigSchema = z.discriminatedUnion("platform", [
     link_trust: linkTrustSchema.optional(),
     inbox: inboxSchema.optional(),
   }),
+  z.strictObject({
+    available: z.boolean(),
+    platform: z.literal(ConversationPlatform.Jira),
+    site: z.string().regex(JIRA_SITE_PATTERN),
+    project_key: z.string().regex(JIRA_PROJECT_KEY_PATTERN),
+    credential: z.string().min(1),
+    reply_policy: replyPolicySchema.optional(),
+    link_trust: linkTrustSchema.optional(),
+    inbox: inboxSchema.optional(),
+  }),
 ]);
+export type ConversationConfig = z.infer<typeof conversationConfigSchema>;
+export function conversationResourceOf(config: ConversationConfig): string {
+  return config.platform === ConversationPlatform.GitHub
+    ? config.repository
+    : `${config.site.toLowerCase()}/${config.project_key}`;
+}
 export const WorkerPlacement = {
   Server: "server",
   Container: "container",

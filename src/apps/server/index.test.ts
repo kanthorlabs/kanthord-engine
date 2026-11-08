@@ -129,9 +129,10 @@ const POLL_REPO = "repo";
 const MALFORMED_CONFIGURATION = "{";
 const HELD_EVENTS_PASS = 0;
 const HELD_CHECK_RELEASES = 1;
+const HELD_CHECK_DEADLINE_MS = 500;
 const DEADLINE_LIMITS = {
   maxConcurrent: 1,
-  checkDeadlineMs: 50,
+  checkDeadlineMs: HELD_CHECK_DEADLINE_MS,
   reportBudgetMs: 5000,
 };
 const execFileAsync = promisify(execFile);

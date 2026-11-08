@@ -39,6 +39,23 @@ import {
   ResultClass,
 } from "./contract.ts";
 import { performAction, type PerformBody } from "./action-perform.ts";
+import {
+  JIRA_API_ORIGIN,
+  JIRA_BASIC_AUTHORIZATION,
+  JIRA_COMMENT_ID,
+  JIRA_ISSUE_KEY,
+  JIRA_METADATA,
+  JIRA_MYSELF_URL,
+  JIRA_POST_URL,
+  JIRA_RESOURCE,
+  JIRA_RESOURCE_IDENTITY,
+  JIRA_TOKEN,
+  JIRA_TOKEN_ACCOUNT_ID,
+  JIRA_UPDATE_KEY,
+  jsonResponse,
+  mockJiraFetch,
+  okResponse,
+} from "./jira-test-support.ts";
 import { runOutbound } from "./outbound.ts";
 import { insertPending, recordResult } from "./outbound-store.ts";
 import {
@@ -853,4 +870,218 @@ test("a reply request key that does not name its node, attempt and link refuses 
   );
   assert.deepEqual(h.posts, []);
   assert.deepEqual(h.rows(), []);
+});
+
+const JIRA_CREDENTIAL = "jira-conversation";
+const JIRA_REPLY_LINK = {
+  kind: ExternalLinkKind.JiraIssue,
+  resource_identity: JIRA_RESOURCE_IDENTITY,
+  key: JIRA_ISSUE_KEY,
+};
+const JIRA_SECOND_UPDATE_KEY = "jira_comment:acme.atlassian.net:10044";
+const JIRA_SERVER_ERROR = 503;
+const JIRA_CREATED = 201;
+
+function jiraReplyFacts(attempt: number): ReplyActionFacts {
+  return {
+    ...replyFacts(attempt),
+    frozen_action: {
+      ...replyFacts(attempt).frozen_action,
+      configuration: { external_link: JIRA_REPLY_LINK },
+    },
+    conversation: {
+      binding_id: BINDING_ID,
+      resource_identity: JIRA_RESOURCE_IDENTITY,
+      repository: JIRA_RESOURCE,
+    },
+  };
+}
+
+function jiraReplyHarness(t: TestContext) {
+  const { store } = sshStore(t);
+  const script = {
+    facts: jiraReplyFacts(FIRST_REVISION),
+    credential: JIRA_CREDENTIAL,
+    platform: "jira",
+    project_id: PROJECT_ID,
+    execution: {
+      execution_id: EXECUTION_ID,
+      project_id: PROJECT_ID,
+      worker_binding_id: WORKER_BINDING_ID,
+      resource_identity: "worker:kanthord:general",
+      runtime_identity: RUNTIME_IDENTITY,
+      credentials: [],
+    },
+    secret: { key: JIRA_TOKEN },
+    metadata: JIRA_METADATA,
+    refusal: null,
+  };
+  const fake = sshCustody(script);
+  const script_ = {
+    posts: [] as (() => Response | Promise<Response>)[],
+  };
+  const fetched = mockJiraFetch(t, (request) => {
+    if (request.url === JIRA_MYSELF_URL)
+      return okResponse({ accountId: JIRA_TOKEN_ACCOUNT_ID });
+    assert.equal(request.url, JIRA_POST_URL);
+    const answer = script_.posts.shift();
+    assert.ok(answer !== undefined, "Each post has a scripted answer.");
+    return answer();
+  });
+  const caller: CallerContext = {
+    identity: machine,
+    execution: claim,
+    context: background,
+    requestId: "request_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    commit: (write) => store.transaction(write),
+  };
+  const inFlight = new Set<string>();
+  const logger = pino({ enabled: false });
+  const unexpected = () => assert.fail("A Jira reply calls no GitHub.");
+  const perform = (attempt = FIRST_REVISION) => {
+    script.facts = jiraReplyFacts(attempt);
+    return performAction(
+      {
+        store,
+        custody: fake.custody,
+        github: {
+          readTokenAccount: unexpected,
+          postIssueComment: unexpected,
+        } as unknown as GitHubPlatform,
+        gitWriter: {
+          squashPushFresh: unexpected,
+          pushSnapshotFresh: unexpected,
+          landedOn: unexpected,
+          changedGateFiles: unexpected,
+          sshAccessOf: unexpected,
+        },
+      },
+      (request) => runOutbound({ store, logger, inFlight }, caller, request),
+      caller,
+      {
+        key: REPLY_KEY,
+        commit: null,
+        comment: REPLY_BODY,
+        reused_evidence_id: null,
+        merge_evidence_id: null,
+        request_key: replyRequestKey(NODE_ID, attempt, JIRA_REPLY_LINK),
+      },
+    );
+  };
+  const rows = () =>
+    store.transaction((tx) =>
+      (
+        tx.database
+          .prepare(
+            "SELECT operation, state, credential, result FROM intake_outbound_request ORDER BY created_at, id",
+          )
+          .all() as {
+          operation: string;
+          state: string;
+          credential: string;
+          result: string | null;
+        }[]
+      ).map((row) => ({
+        ...row,
+        result: row.result === null ? null : JSON.parse(row.result),
+      })),
+    );
+  const posted = (id: string) => () =>
+    jsonResponse(JIRA_CREATED, {
+      id,
+      author: { accountId: JIRA_TOKEN_ACCOUNT_ID },
+    });
+  return {
+    ...fake,
+    posts: script_.posts,
+    requests: fetched.requests,
+    perform,
+    rows,
+    posted,
+  };
+}
+
+test("a reply action of a jira binding posts one ADF comment and answers its comment address", async (t) => {
+  const h = jiraReplyHarness(t);
+  h.posts.push(h.posted(JIRA_COMMENT_ID));
+  assert.deepEqual(await h.perform(), {
+    kind: AddressKind.Comment,
+    resource_identity: JIRA_RESOURCE_IDENTITY,
+    update_key: JIRA_UPDATE_KEY,
+  });
+  assert.deepEqual(
+    h.requests.map(({ method, url, authorization }) => [
+      method,
+      url,
+      authorization,
+    ]),
+    [
+      ["GET", JIRA_MYSELF_URL, JIRA_BASIC_AUTHORIZATION],
+      ["POST", JIRA_POST_URL, JIRA_BASIC_AUTHORIZATION],
+    ],
+  );
+  assert.deepEqual(h.requests[1]!.body, {
+    body: {
+      type: "doc",
+      version: 1,
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: REPLY_BODY }] },
+      ],
+    },
+  });
+  assert.ok(h.requests.every(({ url }) => url.startsWith(JIRA_API_ORIGIN)));
+  assert.deepEqual(h.rows(), [
+    {
+      operation: OutboundOperation.JiraIssueComment,
+      state: OutboundRequestState.Succeeded,
+      credential: JIRA_CREDENTIAL,
+      result: { update_key: JIRA_UPDATE_KEY, actor_id: JIRA_TOKEN_ACCOUNT_ID },
+    },
+  ]);
+  assert.ok(h.materials.every((material) => material.dropped));
+});
+
+test("the first Jira reply on a link reads the accountId of myself once and a later reply reads it no more", async (t) => {
+  const h = jiraReplyHarness(t);
+  h.posts.push(h.posted(JIRA_COMMENT_ID), h.posted("10044"));
+  await h.perform();
+  const second = await h.perform(SECOND_ATTEMPT);
+  assert.equal(
+    "update_key" in second && second.update_key,
+    JIRA_SECOND_UPDATE_KEY,
+  );
+  assert.deepEqual(
+    h.requests.map(({ method, url }) => `${method} ${url}`),
+    [
+      `GET ${JIRA_MYSELF_URL}`,
+      `POST ${JIRA_POST_URL}`,
+      `POST ${JIRA_POST_URL}`,
+    ],
+  );
+});
+
+test("a Jira reply call with no answer sets the request failed and answers the Jira result code, and a repeat posts again", async (t) => {
+  const h = jiraReplyHarness(t);
+  h.posts.push(
+    () => jsonResponse(JIRA_SERVER_ERROR, {}),
+    h.posted(JIRA_COMMENT_ID),
+  );
+  const lost = await h.perform();
+  assert.ok("class" in lost);
+  assert.equal(lost.class, ResultClass.UnknownOutcome);
+  assert.equal(lost.code, `intake.platform.jira.${ResultClass.UnknownOutcome}`);
+  assert.deepEqual(
+    h.rows().map((row) => row.state),
+    [OutboundRequestState.Failed],
+  );
+  const repeated = await h.perform();
+  assert.equal("kind" in repeated && repeated.kind, AddressKind.Comment);
+  assert.deepEqual(
+    h.requests.map(({ method }) => method),
+    ["GET", "POST", "POST"],
+  );
+  assert.deepEqual(
+    h.rows().map((row) => row.state),
+    [OutboundRequestState.Succeeded],
+  );
 });

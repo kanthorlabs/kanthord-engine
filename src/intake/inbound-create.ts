@@ -20,6 +20,7 @@ import type { IntakeCustody } from "./action-check.ts";
 import {
   configurationSchemaOf,
   type GitHubConfiguration,
+  inboundSupported,
 } from "./configuration.ts";
 import {
   type Inbound,
@@ -106,6 +107,8 @@ function configurationIssues(error: z.ZodError): OperationError {
 }
 
 function admitInbound(input: InboundCreate): GitHubConfiguration {
+  if (!inboundSupported(input.kind, input.platform))
+    throw validationFailed([{ path: [BODY_PATH, "platform"], code: "custom" }]);
   const credentialRequired = input.kind === InboundKind.Poll;
   if (credentialRequired !== (input.credential !== undefined))
     throw validationFailed([

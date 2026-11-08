@@ -3701,6 +3701,222 @@ test("an inbox key outside actor_id and handle fails the input schema", () => {
   );
 });
 
+const JIRA_SITE = "acme.atlassian.net";
+const JIRA_MIXED_CASE_SITE = "Acme.Atlassian.Net";
+const JIRA_PROJECT_KEY = "KD";
+const JIRA_IDENTITY = "conversation:jira:acme.atlassian.net/KD";
+const JIRA_CREDENTIAL = "jira-conversation";
+const JIRA_ACCOUNT_ID = "712020:0a1b2c3d-4e5f";
+const JIRA_SECOND_ACCOUNT_ID = "5b10a2844c20165700ede21g";
+const JIRA_ACCOUNT_ID_MAX_LENGTH = 128;
+
+function jiraBinding(
+  overrides: Record<string, unknown> = {},
+): Extract<Bindings[string], { kind: typeof BindingKind.Conversation }> {
+  return {
+    kind: BindingKind.Conversation,
+    config: {
+      available: true,
+      platform: ConversationPlatform.Jira,
+      site: JIRA_SITE,
+      project_key: JIRA_PROJECT_KEY,
+      credential: JIRA_CREDENTIAL,
+      ...overrides,
+    },
+  };
+}
+
+test("a conversation binding of platform jira stores with its resource identity and checks a jira credential", async (t) => {
+  const f = writeFixture(t);
+  const config = jiraBinding({
+    reply_policy: { follows: { type: FollowsType.AssessmentPassed } },
+    link_trust: linkTrustOf([JIRA_ACCOUNT_ID, JIRA_SECOND_ACCOUNT_ID]),
+  }).config;
+  const result = await f.write({
+    [CONVERSATION_NAME]: { kind: BindingKind.Conversation, config },
+  });
+  const stored = result.bindings[CONVERSATION_NAME];
+  assert.equal(stored?.kind, BindingKind.Conversation);
+  assert.equal(stored?.resource_identity, JIRA_IDENTITY);
+  assert.deepEqual(stored?.config, config);
+  assert.deepEqual(f.ssh, []);
+  assert.deepEqual(f.custody, [
+    { credential: JIRA_CREDENTIAL, platform: ConversationPlatform.Jira },
+  ]);
+});
+
+test("a jira site in mixed case stores under a lower-case site in the resource identity", async (t) => {
+  const f = writeFixture(t);
+  const result = await f.write({
+    [CONVERSATION_NAME]: jiraBinding({ site: JIRA_MIXED_CASE_SITE }),
+  });
+  assert.equal(
+    result.bindings[CONVERSATION_NAME]?.resource_identity,
+    JIRA_IDENTITY,
+  );
+});
+
+test("conversationBindingOf and conversationPolicyOf answer the jira resource of a jira binding", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    const stored = persistBindings(tx, project.id, {
+      [CONVERSATION_NAME]: jiraBinding({
+        reply_policy: { follows: { type: FollowsType.AssessmentPassed } },
+      }),
+    }).bindings;
+    const id = stored[CONVERSATION_NAME]!.id;
+    assert.deepEqual(f.project.conversationBindingOf(tx, id), {
+      binding_id: id,
+      project_id: project.id,
+      resource_identity: JIRA_IDENTITY,
+      platform: ConversationPlatform.Jira,
+      repository: `${JIRA_SITE}/${JIRA_PROJECT_KEY}`,
+      credential: JIRA_CREDENTIAL,
+    });
+    assert.equal(
+      f.project.conversationPolicyOf(tx, id)?.repository,
+      `${JIRA_SITE}/${JIRA_PROJECT_KEY}`,
+    );
+  });
+});
+
+test("a jira binding refuses a site of another domain, a key outside its form and a missing field", () => {
+  const complete = jiraBinding().config;
+  const without = (key: string) =>
+    Object.fromEntries(Object.entries(complete).filter(([k]) => k !== key));
+  for (const site of [
+    "acme.example.com",
+    "acme.atlassian.net.example.com",
+    "atlassian.net",
+    "acme/x.atlassian.net",
+    "",
+  ])
+    assert.ok(
+      schemaIssues({ [CONVERSATION_NAME]: jiraBinding({ site }) }).length >
+        EMPTY_ISSUES,
+      site,
+    );
+  for (const project_key of ["kd", "K", "1KD", "K-D", "KDKDKDKDKDK", ""])
+    assert.ok(
+      schemaIssues({ [CONVERSATION_NAME]: jiraBinding({ project_key }) })
+        .length > EMPTY_ISSUES,
+      project_key,
+    );
+  for (const key of ["site", "project_key", "credential"])
+    assert.ok(
+      schemaIssues({
+        [CONVERSATION_NAME]: {
+          kind: BindingKind.Conversation,
+          config: without(key),
+        },
+      }).length > EMPTY_ISSUES,
+      key,
+    );
+  assert.ok(
+    schemaIssues({
+      [CONVERSATION_NAME]: jiraBinding({ repository: CONVERSATION_REPOSITORY }),
+    }).length > EMPTY_ISSUES,
+  );
+});
+
+test("a jira binding refuses a credential of platform github", async (t) => {
+  const failure = new OperationError(
+    HttpStatus.BadRequest,
+    "custody.credential.platform_mismatch",
+    "Mismatch",
+  );
+  const f = writeFixture(t, {
+    custodySuitability: (_tx, { credential, platform }) => {
+      if (
+        credential === CONVERSATION_CREDENTIAL &&
+        platform === ConversationPlatform.Jira
+      )
+        throw failure;
+    },
+  });
+  const before = f.snapshot();
+  await assert.rejects(
+    f.write({
+      [CONVERSATION_NAME]: jiraBinding({ credential: CONVERSATION_CREDENTIAL }),
+    }),
+    (error) => error === failure,
+  );
+  assert.deepEqual(f.snapshot(), before);
+});
+
+test("jira link_trust accepts Jira account ids up to 128 characters", async (t) => {
+  const f = writeFixture(t);
+  const link_trust = linkTrustOf([
+    JIRA_ACCOUNT_ID,
+    JIRA_SECOND_ACCOUNT_ID,
+    "a".repeat(JIRA_ACCOUNT_ID_MAX_LENGTH),
+    "1",
+  ]);
+  const result = await f.write({
+    [CONVERSATION_NAME]: jiraBinding({ link_trust }),
+  });
+  assert.deepEqual(
+    (result.bindings[CONVERSATION_NAME]?.config as Record<string, unknown>)
+      .link_trust,
+    link_trust,
+  );
+});
+
+test("jira link_trust refuses an invalid Jira id with id_invalid and the refused id", async (t) => {
+  const f = writeFixture(t);
+  const before = f.snapshot();
+  for (const actorId of [
+    "",
+    "has space",
+    "a/b",
+    "a.b",
+    "a".repeat(JIRA_ACCOUNT_ID_MAX_LENGTH + 1),
+  ])
+    await rejectsWrite(
+      f.write({
+        [CONVERSATION_NAME]: jiraBinding({
+          link_trust: linkTrustOf([JIRA_ACCOUNT_ID, actorId]),
+        }),
+      }),
+      HttpStatus.BadRequest,
+      ProjectErrorCode.LinkTrustInvalid,
+      linkTrustDetails(CONVERSATION_NAME, LinkTrustReason.IdInvalid, actorId),
+    );
+  await rejectsWrite(
+    f.write({
+      [CONVERSATION_NAME]: jiraBinding({
+        link_trust: linkTrustOf([JIRA_ACCOUNT_ID, JIRA_ACCOUNT_ID]),
+      }),
+    }),
+    HttpStatus.BadRequest,
+    ProjectErrorCode.LinkTrustInvalid,
+    linkTrustDetails(
+      CONVERSATION_NAME,
+      LinkTrustReason.Duplicate,
+      JIRA_ACCOUNT_ID,
+    ),
+  );
+  assert.deepEqual(f.snapshot(), before);
+});
+
+test("the key inbox on a jira binding refuses with platform_unsupported", async (t) => {
+  const f = writeFixture(t);
+  const before = f.snapshot();
+  for (const inbox of [inboxOf(ACTOR_ID, INBOX_HANDLE), {}])
+    await rejectsWrite(
+      f.write({ [CONVERSATION_NAME]: jiraBinding({ inbox }) }),
+      HttpStatus.BadRequest,
+      ProjectErrorCode.InboxInvalid,
+      inboxDetails(
+        CONVERSATION_NAME,
+        InboxField.Inbox,
+        InboxInvalidReason.PlatformUnsupported,
+      ),
+    );
+  assert.deepEqual(f.snapshot(), before);
+});
+
 test("an inbox on a repository binding refuses with platform_unsupported", async (t) => {
   const f = writeFixture(t);
   const inbox = inboxOf(ACTOR_ID, INBOX_HANDLE);

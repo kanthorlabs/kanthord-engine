@@ -45,6 +45,7 @@ import {
   ResultClass,
 } from "./contract.ts";
 import { commitInbound, credentialRefusal } from "./inbound-create.ts";
+import { JIRA_RESOURCE } from "./jira-test-support.ts";
 import { IntakeService } from "./index.ts";
 import { intakeMigrations } from "./migrations.ts";
 import type { Dependencies } from "./service.ts";
@@ -396,6 +397,7 @@ function fakeCustody(credentials: Map<string, string>) {
   };
   const custody: IntakeCustody = {
     custodySuitability,
+    credentialMetadata: () => null,
     authorizeOperation<R extends GrantRequest>(
       tx: Transaction,
       request: R,
@@ -683,4 +685,66 @@ test("a failure after the release keeps the committed drain and drops the materi
   assert.equal(h.drained(), DRAINS_OF_FAILED_FIRST_READ);
   assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
   assert.deepEqual(h.drops, [POLL_CREDENTIAL]);
+});
+
+const JIRA_WEBHOOK: InboundCreate = {
+  ...WEBHOOK,
+  platform: InboundPlatform.Jira,
+  configuration: {
+    resource_kind: ResourceKind.Conversation,
+    resource: JIRA_RESOURCE,
+  },
+};
+
+test("a Jira webhook inbound inserts one row that names no credential", async (t) => {
+  const h = harness(t);
+  const inbound = await h.create(JIRA_WEBHOOK);
+  assert.equal(inbound.platform, InboundPlatform.Jira);
+  assert.equal(inbound.credential, null);
+  assert.deepEqual(inbound.configuration, JIRA_WEBHOOK.configuration);
+  assert.equal(h.rows().length, ROWS_PER_CREATE);
+});
+
+test("a Jira poll create answers 400 and inserts nothing", async (t) => {
+  const h = harness(t);
+  for (const credential of [undefined, "jira-token"]) {
+    const error = await refusesWith(
+      h.create({
+        ...JIRA_WEBHOOK,
+        kind: InboundKind.Poll,
+        ...(credential === undefined ? {} : { credential }),
+      }),
+      HttpStatus.BadRequest,
+      VALIDATION_FAILED,
+    );
+    assert.deepEqual(error.details, [
+      { path: ["body", "platform"], code: "custom" },
+    ]);
+  }
+  assert.equal(h.projectCalls.length, PROJECT_CALLS_AFTER_REFUSAL);
+  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
+});
+
+test("a Jira webhook with a credential, a repository resource kind or a resource outside the form answers 400", async (t) => {
+  const h = harness(t);
+  for (const body of [
+    { ...JIRA_WEBHOOK, credential: "jira-token" },
+    {
+      ...JIRA_WEBHOOK,
+      configuration: {
+        resource_kind: ResourceKind.Repository,
+        resource: JIRA_RESOURCE,
+      },
+    },
+    ...[
+      "acme.example.com/KD",
+      "acme.atlassian.net/kd",
+      "acme.atlassian.net",
+    ].map((resource) => ({
+      ...JIRA_WEBHOOK,
+      configuration: { resource_kind: ResourceKind.Conversation, resource },
+    })),
+  ])
+    await refusesWith(h.create(body), HttpStatus.BadRequest, VALIDATION_FAILED);
+  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
 });

@@ -14,6 +14,7 @@ import {
   BindingState,
   ChangeKind,
   conversationConfigSchema,
+  conversationResourceOf,
   EMPTY_LENGTH,
   LIST_LIMIT_MAX,
   PROJECT_ID_PREFIX,
@@ -264,8 +265,8 @@ export function deriveResourceIdentity(
     return `${BindingKind.Repository}:${platform}:${owner}/${repository}`;
   }
   if (kind === BindingKind.Conversation) {
-    const { platform, repository } = conversationConfigSchema.parse(config);
-    return `${BindingKind.Conversation}:${platform}:${repository}`;
+    const parsed = conversationConfigSchema.parse(config);
+    return `${BindingKind.Conversation}:${parsed.platform}:${conversationResourceOf(parsed)}`;
   }
   if (kind !== BindingKind.Storage)
     throw new Error(`Unknown binding kind: ${kind}`);

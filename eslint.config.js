@@ -407,6 +407,12 @@ export default tseslint.config(
                     fileInternalPath: "test-support.ts",
                   }),
                 },
+                {
+                  to: element("service", {
+                    captured: { name: "intake" },
+                    fileInternalPath: "jira-test-support.ts",
+                  }),
+                },
               ],
             },
             {

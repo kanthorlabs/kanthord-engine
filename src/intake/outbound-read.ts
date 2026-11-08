@@ -9,11 +9,11 @@ import {
   IntakeErrorCode,
   OUTBOUND_LIST_LIMIT_DEFAULT,
   OUTBOUND_REQUEST_ID_PREFIX,
-  OutboundOperation,
   type OutboundOperationValue,
   type OutboundRequest,
   OutboundRequestState,
   type OutboundRequestStateValue,
+  REPLY_OPERATIONS,
   replyAccountSchema,
   type replyMatchSchema,
   replyResultSchema,
@@ -127,17 +127,15 @@ export function matchReply(
   const succeeded =
     tx.database
       .prepare(
-        "SELECT 1 AS found FROM intake_outbound_request WHERE operation = ? AND state = ? AND json_extract(result, '$.update_key') = ? LIMIT 1",
+        "SELECT 1 AS found FROM intake_outbound_request WHERE operation IN (SELECT value FROM json_each(?)) AND state = ? AND json_extract(result, '$.update_key') = ? LIMIT 1",
       )
       .get(
-        OutboundOperation.GitHubIssueComment,
+        JSON.stringify(REPLY_OPERATIONS),
         OutboundRequestState.Succeeded,
         input.update_key,
       ) !== undefined;
-  const link = findByKeySuffix(
-    tx,
-    OutboundOperation.GitHubIssueComment,
-    `:${canonicalJSON(input.external_link)}`,
+  const link = REPLY_OPERATIONS.flatMap((operation) =>
+    findByKeySuffix(tx, operation, `:${canonicalJSON(input.external_link)}`),
   ).sort(byCreation);
   const pending = link.filter(
     (row) => row.state === OutboundRequestState.Pending,

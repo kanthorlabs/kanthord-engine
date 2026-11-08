@@ -39,6 +39,24 @@ import {
   ResultClass,
 } from "./contract.ts";
 import { insertInbound } from "./inbound-store.ts";
+import {
+  JIRA_BASIC_AUTHORIZATION,
+  JIRA_ISSUE_KEY,
+  JIRA_LIST_URL,
+  JIRA_LISTED_EVENT,
+  JIRA_METADATA,
+  JIRA_RESOURCE,
+  JIRA_RESOURCE_IDENTITY,
+  JIRA_SECOND_COMMENT_ID,
+  JIRA_SITE,
+  JIRA_TOKEN,
+  JIRA_UPDATE_KEY,
+  jiraListedComment,
+  jiraListedPage,
+  jsonResponse,
+  mockJiraFetch,
+  okResponse,
+} from "./jira-test-support.ts";
 import { type LinkReadDependencies, readLink } from "./link-read.ts";
 import { intakeMigrations } from "./migrations.ts";
 
@@ -129,13 +147,21 @@ function harness(
         };
         return grant as GrantOf<R["kind"]>;
       },
+      credentialMetadata: () => ({
+        id: createIdentity("credential"),
+        name: CREDENTIAL,
+        platform: InboundPlatform.Jira,
+        metadata: JIRA_METADATA,
+      }),
       release(_tx, grant): Material {
         const credential = grant.credential;
         assert.ok(credential !== null);
         return {
           credential_id: createIdentity("credential"),
           platform: grant.platform,
-          value: () => ({ key: TOKEN }),
+          value: () => ({
+            key: grant.platform === InboundPlatform.Jira ? JIRA_TOKEN : TOKEN,
+          }),
           drop: () => drops.push(credential),
         };
       },
@@ -171,6 +197,22 @@ function harness(
         created_at: 1,
       }),
     );
+  const addJiraInbound = (id: string) =>
+    store.transaction((tx) =>
+      insertInbound(tx, id, {
+        project_id: PROJECT_ID,
+        kind: InboundKind.Webhook,
+        platform: InboundPlatform.Jira,
+        consumer: Consumer.MissionDeliveryAdmit,
+        credential: null,
+        configuration: {
+          resource_kind: ResourceKind.Conversation,
+          resource: JIRA_RESOURCE,
+        },
+        checkpoint: null,
+        created_at: 1,
+      }),
+    );
   const read = (input: Partial<Parameters<typeof readLink>[2]> = {}) =>
     readLink(dependencies, caller, {
       project_id: PROJECT_ID,
@@ -197,6 +239,7 @@ function harness(
     reads,
     script,
     addInbound,
+    addJiraInbound,
     read,
     events,
     outbound,
@@ -332,6 +375,129 @@ test("a failed platform call answers 502, stores no row and drops the material",
       error.code ===
         `repository.platform.github.${ResultClass.RetryableRefusal}`,
   );
+  assert.equal(h.events().length, NO_ROWS);
+  assert.deepEqual(h.drops, [CREDENTIAL]);
+});
+
+const JIRA_LINK: ExternalLink = {
+  kind: ExternalLinkKind.JiraIssue,
+  resource_identity: JIRA_RESOURCE_IDENTITY,
+  key: JIRA_ISSUE_KEY,
+};
+const JIRA_BINDING: ConversationBinding = {
+  binding_id: BINDING_ID,
+  project_id: PROJECT_ID,
+  resource_identity: JIRA_RESOURCE_IDENTITY,
+  platform: InboundPlatform.Jira,
+  repository: JIRA_RESOURCE,
+  credential: CREDENTIAL,
+};
+const JIRA_UNAUTHORIZED = 401;
+const SECOND_JIRA_UPDATE_KEY = `jira_comment:${JIRA_SITE}:${JIRA_SECOND_COMMENT_ID}`;
+
+function jiraList(t: TestContext) {
+  return mockJiraFetch(t, () =>
+    okResponse(
+      jiraListedPage(
+        jiraListedComment(),
+        jiraListedComment({ id: JIRA_SECOND_COMMENT_ID }),
+      ),
+    ),
+  );
+}
+
+test("a Jira link read stores each comment as jira_comment under the newest jira inbound of the resource", async (t) => {
+  const h = harness(t, JIRA_BINDING);
+  const fetched = jiraList(t);
+  h.addJiraInbound(olderInboundId());
+  const newest = createIdentity("inbound");
+  h.addJiraInbound(newest);
+  const answer = await h.read({ external_link: JIRA_LINK });
+  const rows = h.events();
+  assert.deepEqual(
+    rows.map((row) => [row.inbound_id, row.event_id]),
+    [
+      [newest, JIRA_UPDATE_KEY],
+      [newest, SECOND_JIRA_UPDATE_KEY],
+    ],
+  );
+  assert.deepEqual(
+    rows.map((row) => JSON.parse(String(row.metadata))),
+    [{ event: JIRA_LISTED_EVENT }, { event: JIRA_LISTED_EVENT }],
+  );
+  assert.deepEqual(answer, {
+    items: [
+      { inbound_event_id: rows[FIRST_INDEX]!.id },
+      { inbound_event_id: rows[SECOND_INDEX]!.id },
+    ],
+  });
+  assert.deepEqual(fetched.requests, [
+    {
+      method: "GET",
+      url: JIRA_LIST_URL,
+      authorization: JIRA_BASIC_AUTHORIZATION,
+      body: undefined,
+    },
+  ]);
+  assert.equal(h.reads.length, NO_CALLS);
+  assert.deepEqual(h.held, [answer.items.map((item) => item.inbound_event_id)]);
+  assert.deepEqual(h.drops, [CREDENTIAL]);
+  assert.equal(h.outbound().total, NO_ROWS);
+});
+
+test("a Jira link read takes one release of the binding credential for the resource of the binding", async (t) => {
+  const h = harness(t, JIRA_BINDING);
+  jiraList(t);
+  const inbound = createIdentity("inbound");
+  h.addJiraInbound(inbound);
+  await h.read({ external_link: JIRA_LINK });
+  assert.equal(h.grants.length, SINGLE_CALL);
+  const grant = h.grants[FIRST_INDEX]!;
+  assert.ok(grant.kind === GrantKind.Inbound);
+  assert.equal(grant.inbound.credential, CREDENTIAL);
+  assert.equal(grant.inbound.platform, InboundPlatform.Jira);
+  assert.equal(grant.inbound.inboundId, inbound);
+  assert.equal(grant.inbound.resource, JIRA_RESOURCE);
+  assert.equal(grant.operation, InboundOperation.LinkRead);
+});
+
+test("a second Jira read stores no second row and answers the stored identities", async (t) => {
+  const h = harness(t, JIRA_BINDING);
+  jiraList(t);
+  h.addJiraInbound(createIdentity("inbound"));
+  const first = await h.read({ external_link: JIRA_LINK });
+  const second = await h.read({ external_link: JIRA_LINK });
+  assert.equal(h.events().length, TWO_ITEMS);
+  assert.deepEqual(second, first);
+});
+
+test("a Jira link with no inbound answers 409 and calls no platform", async (t) => {
+  const h = harness(t, JIRA_BINDING);
+  const fetched = jiraList(t);
+  await assert.rejects(
+    h.read({ external_link: JIRA_LINK }),
+    (error) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.Conflict &&
+      error.code === IntakeErrorCode.LinkInboundMissing,
+  );
+  assert.equal(fetched.requests.length, NO_CALLS);
+});
+
+test("a Jira 401 answers 502 with the Jira result class, stores no row and drops the material", async (t) => {
+  const h = harness(t, JIRA_BINDING);
+  mockJiraFetch(t, () => jsonResponse(JIRA_UNAUTHORIZED, {}));
+  h.addJiraInbound(createIdentity("inbound"));
+  await assert.rejects(h.read({ external_link: JIRA_LINK }), (error) => {
+    assert.ok(error instanceof OperationError);
+    assert.equal(error.status, BAD_GATEWAY_STATUS);
+    assert.equal(
+      error.code,
+      `intake.platform.jira.${ResultClass.FinalRefusal}`,
+    );
+    assert.deepEqual(error.details, { status: JIRA_UNAUTHORIZED });
+    return true;
+  });
   assert.equal(h.events().length, NO_ROWS);
   assert.deepEqual(h.drops, [CREDENTIAL]);
 });

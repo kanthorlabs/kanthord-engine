@@ -24,6 +24,13 @@ import {
 import { IntakeService } from "./index.ts";
 import { allocateInboundId, insertInbound } from "./inbound-store.ts";
 import { intakeMigrations } from "./migrations.ts";
+import {
+  JIRA_ISSUE_UPDATED_DELIVERY_TEXT,
+  JIRA_ISSUE_UPDATED_EVENT,
+  JIRA_RESOURCE,
+  JIRA_WEBHOOK_EVENT,
+  jiraWebhookComment,
+} from "./jira-test-support.ts";
 import { unusedActionDependencies } from "./test-support.ts";
 import { webhookSecret } from "./webhook-secret.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
@@ -105,6 +112,25 @@ function harness(t: TestContext) {
     );
     return { id, secret: webhookSecret(dependencies.masterKey, id) };
   };
+  const addJiraInbound = () => {
+    const id = allocateInboundId();
+    store.transaction((tx) =>
+      insertInbound(tx, id, {
+        project_id: PROJECT_ID,
+        kind: InboundKind.Webhook,
+        platform: InboundPlatform.Jira,
+        consumer: Consumer.MissionDeliveryAdmit,
+        credential: null,
+        configuration: {
+          resource_kind: ResourceKind.Conversation,
+          resource: JIRA_RESOURCE,
+        },
+        checkpoint: null,
+        created_at: CREATED_AT,
+      }),
+    );
+    return { id, secret: webhookSecret(dependencies.masterKey, id) };
+  };
   const receive = async (
     inboundId: string,
     headers: Headers,
@@ -164,6 +190,13 @@ function harness(t: TestContext) {
     if (signature !== undefined) headers.set("x-hub-signature-256", signature);
     return headers;
   };
+  const jira = (identifier: string | null, signature?: string) => {
+    const headers = new Headers({ "content-type": "application/json" });
+    if (identifier !== null)
+      headers.set("x-atlassian-webhook-identifier", identifier);
+    if (signature !== undefined) headers.set("x-hub-signature", signature);
+    return headers;
+  };
   const rows = (inboundId: string) =>
     store.transaction(
       (tx) =>
@@ -175,6 +208,8 @@ function harness(t: TestContext) {
     );
   return {
     addInbound,
+    addJiraInbound,
+    jira,
     receive,
     remove,
     github,
@@ -375,4 +410,125 @@ test("a commit failure answers no acknowledgement and stores nothing", async (t)
   );
   assert.equal(h.rows(id).length, UNSTORED_ROW_COUNT);
   assert.equal(h.wakes(), WAKES_AFTER_REFUSAL);
+});
+
+const JIRA_COMMENT = JSON.stringify(jiraWebhookComment());
+const JIRA_IDENTIFIER = "jira-hook-1";
+
+test("a valid Jira signature stores one event under the webhook identifier with the webhook event as metadata", async (t) => {
+  const h = harness(t);
+  const { id, secret } = h.addJiraInbound();
+  assert.deepEqual(
+    await h.receive(
+      id,
+      h.jira(JIRA_IDENTIFIER, sign(secret, JIRA_COMMENT)),
+      JIRA_COMMENT,
+    ),
+    { status: HttpStatus.Accepted, code: null },
+  );
+  const stored = h.rows(id);
+  assert.equal(stored.length, ROWS_PER_DELIVERY);
+  assert.equal(stored[0]!.event_id, JIRA_IDENTIFIER);
+  assert.equal(Buffer.from(stored[0]!.event).toString(), JIRA_COMMENT);
+  assert.deepEqual(JSON.parse(stored[0]!.metadata), {
+    event: JIRA_WEBHOOK_EVENT,
+  });
+  assert.equal(stored[0]!.state, InboundEventState.Pending);
+  assert.equal(h.wakes(), WAKES_PER_DELIVERY);
+});
+
+test("a Jira delivery of another event stores its event name", async (t) => {
+  const h = harness(t);
+  const { id, secret } = h.addJiraInbound();
+  const body = JIRA_ISSUE_UPDATED_DELIVERY_TEXT;
+  await h.receive(id, h.jira(JIRA_IDENTIFIER, sign(secret, body)), body);
+  assert.deepEqual(JSON.parse(h.rows(id)[0]!.metadata), {
+    event: JIRA_ISSUE_UPDATED_EVENT,
+  });
+});
+
+test("a missing, duplicate, malformed, wrong-length or wrong Jira signature answers 401 and stores nothing", async (t) => {
+  const h = harness(t);
+  const { id, secret } = h.addJiraInbound();
+  const valid = sign(secret, JIRA_COMMENT);
+  const duplicate = h.jira(JIRA_IDENTIFIER, valid);
+  duplicate.append("x-hub-signature", valid);
+  const refusals = [
+    h.jira(JIRA_IDENTIFIER),
+    duplicate,
+    h.jira(JIRA_IDENTIFIER, valid.slice("sha256=".length)),
+    h.jira(JIRA_IDENTIFIER, `sha1=${valid.slice("sha256=".length)}`),
+    h.jira(JIRA_IDENTIFIER, `sha256=${NON_HEX_DIGEST}`),
+    h.jira(JIRA_IDENTIFIER, `sha256=${SHORT_DIGEST}`),
+    h.jira(JIRA_IDENTIFIER, `${valid}00`),
+    h.jira(JIRA_IDENTIFIER, `sha256=${ZERO_DIGEST}`),
+  ];
+  for (const headers of refusals)
+    assert.deepEqual(
+      await h.receive(id, headers, JIRA_COMMENT),
+      SIGNATURE_INVALID,
+    );
+  assert.deepEqual(
+    await h.receive(id, h.jira(JIRA_IDENTIFIER, valid), `${JIRA_COMMENT} `),
+    SIGNATURE_INVALID,
+  );
+  const gitHubForm = h.jira(JIRA_IDENTIFIER);
+  gitHubForm.set("x-hub-signature-256", valid);
+  assert.deepEqual(
+    await h.receive(id, gitHubForm, JIRA_COMMENT),
+    SIGNATURE_INVALID,
+  );
+  assert.equal(h.rows(id).length, UNSTORED_ROW_COUNT);
+  assert.equal(h.wakes(), WAKES_AFTER_REFUSAL);
+});
+
+test("a signed Jira delivery without a webhook identifier or without a webhook event answers 400 and stores nothing", async (t) => {
+  const h = harness(t);
+  const { id, secret } = h.addJiraInbound();
+  const refused = {
+    status: HttpStatus.BadRequest,
+    code: VALIDATION_FAILED,
+  };
+  assert.deepEqual(
+    await h.receive(id, h.jira(null, sign(secret, JIRA_COMMENT)), JIRA_COMMENT),
+    refused,
+  );
+  assert.deepEqual(
+    await h.receive(id, h.jira("", sign(secret, JIRA_COMMENT)), JIRA_COMMENT),
+    refused,
+  );
+  for (const body of ["{}", "not json", "[]"])
+    assert.deepEqual(
+      await h.receive(id, h.jira(JIRA_IDENTIFIER, sign(secret, body)), body),
+      refused,
+    );
+  assert.equal(h.rows(id).length, UNSTORED_ROW_COUNT);
+});
+
+test("a repeated Jira identity stores one row", async (t) => {
+  const h = harness(t);
+  const { id, secret } = h.addJiraInbound();
+  const accepted = { status: HttpStatus.Accepted, code: null };
+  const deliver = (body: string) =>
+    h.receive(id, h.jira(JIRA_IDENTIFIER, sign(secret, body)), body);
+  assert.deepEqual(await deliver(JIRA_COMMENT), accepted);
+  assert.deepEqual(await deliver(`${JIRA_COMMENT}\n`), accepted);
+  const stored = h.rows(id);
+  assert.equal(stored.length, ROWS_PER_DELIVERY);
+  assert.equal(Buffer.from(stored[0]!.event).toString(), JIRA_COMMENT);
+});
+
+test("a Jira inbound verifies with its derived secret only", async (t) => {
+  const h = harness(t);
+  const jira = h.addJiraInbound();
+  const github = h.addInbound();
+  assert.deepEqual(
+    await h.receive(
+      jira.id,
+      h.jira(JIRA_IDENTIFIER, sign(github.secret, JIRA_COMMENT)),
+      JIRA_COMMENT,
+    ),
+    SIGNATURE_INVALID,
+  );
+  assert.equal(h.rows(jira.id).length, UNSTORED_ROW_COUNT);
 });

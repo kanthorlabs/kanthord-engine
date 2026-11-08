@@ -876,6 +876,12 @@ const GITHUB_ISSUE = {
   number: ISSUE_NUMBER,
 };
 const SECOND_GITHUB_ISSUE = { ...GITHUB_ISSUE, number: SECOND_ISSUE_NUMBER };
+const JIRA_IDENTITY = "conversation:jira:acme.atlassian.net/KD";
+const JIRA_ISSUE = {
+  kind: ExternalLinkKind.JiraIssue,
+  resource_identity: JIRA_IDENTITY,
+  key: "KD-42",
+};
 const WORKER_NAME = "worker";
 const UNKNOWN_NAME = "unknown";
 const REASON = "Create planned work";
@@ -3084,6 +3090,22 @@ test("node create refuses a link with no binding of its resource, a duplicate li
   refuse(linkedBody(f, [GITHUB_ISSUE, { ...GITHUB_ISSUE }]));
   refuse(linkedBody(f, GITHUB_ISSUE as unknown as unknown[]));
   refuse(linkedBody(f, [{ ...GITHUB_ISSUE, number: 0 }]));
+});
+
+test("node create refuses a jira_issue link with no Jira binding with the field external_links", (t) => {
+  const f = nodeFixture(t);
+  const refuse = (body: NodeCreate) =>
+    f.refuses(
+      body,
+      MissionErrorCode.ContentInvalid,
+      { field: ContentField.ExternalLinks },
+      HttpStatus.BadRequest,
+    );
+  refuse(linkedBody(f, [JIRA_ISSUE]));
+  const body = linkedBody(f, [JIRA_ISSUE]);
+  refuse({ ...body, content: { ...body.content, bindings: [] } });
+  refuse(linkedBody(f, [{ ...JIRA_ISSUE, key: "OTHER-1" }]));
+  refuse(linkedBody(f, [JIRA_ISSUE, GITHUB_ISSUE]));
 });
 
 test("node update that adds a link writes the next revision and one that reorders two links writes a revision", (t) => {

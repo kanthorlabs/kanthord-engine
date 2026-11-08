@@ -98,6 +98,7 @@ components:
             - github.pull_request_merge
             - git.push
             - github.issue_comment
+            - jira.issue_comment
             - s3.delete_object
         request_key:
           type: string

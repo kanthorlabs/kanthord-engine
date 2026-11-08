@@ -148,6 +148,7 @@ components:
               type: string
               enum:
                 - github
+                - jira
             consumer:
               type: string
               enum:
@@ -196,6 +197,7 @@ components:
           type: string
           enum:
             - github
+            - jira
         consumer:
           type: string
           enum:
@@ -255,6 +257,7 @@ components:
               type: string
               enum:
                 - github
+                - jira
             limit:
               default: 100
               type: integer
@@ -299,6 +302,7 @@ components:
                 type: string
                 enum:
                   - github
+                  - jira
               consumer:
                 type: string
                 enum:

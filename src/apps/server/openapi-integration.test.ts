@@ -47,6 +47,7 @@ import {
 } from "../../mission/contract.ts";
 import { workbenchOperations } from "../../workbench/contract.ts";
 import {
+  intakeCredentialOperations,
   intakeOperations,
   ResourceKind,
   webhookInboundSchema,
@@ -664,6 +665,7 @@ const apiOperations = [
   ...Object.values(missionOperations),
   ...Object.values(workbenchOperations),
   ...Object.values(intakeOperations),
+  ...Object.values(intakeCredentialOperations),
   ...Object.values(trackingOperations),
   ...Object.values(footprintOperations),
 ];
@@ -905,6 +907,16 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.execution.gate_files.read", AccessPolicy.Client],
   ["intake.storage.get", AccessPolicy.Human],
   ["intake.storage.delete", AccessPolicy.Human],
+  ["intake.credential.create", AccessPolicy.Human],
+  ["intake.credential.list", AccessPolicy.Human],
+  ["intake.credential.get", AccessPolicy.Human],
+  ["intake.credential.rotate", AccessPolicy.Human],
+  ["intake.credential.update_metadata", AccessPolicy.Human],
+  ["intake.credential.revoke", AccessPolicy.Human],
+  ["intake.credential.archive", AccessPolicy.Human],
+  ["intake.credential.platform_list", AccessPolicy.Human],
+  ["intake.credential.check", AccessPolicy.Human],
+  ["intake.credential.verify", AccessPolicy.Human],
   ["tracking.telemetry.write", AccessPolicy.Client],
   ["tracking.trace.get", AccessPolicy.Human],
   ["tracking.span.list", AccessPolicy.Human],
@@ -940,10 +952,10 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["footprint.measure.run", AccessPolicy.Human],
   ["footprint.backup.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 271;
-const ROUTED_OPERATION_COUNT = 256;
-const INTAKE_OPERATION_COUNT = 27;
-const INTAKE_ROUTED_OPERATION_COUNT = 14;
+const OPERATION_COUNT = 281;
+const ROUTED_OPERATION_COUNT = 266;
+const INTAKE_OPERATION_COUNT = 37;
+const INTAKE_ROUTED_OPERATION_COUNT = 24;
 const SERVICE_OPERATION_IDS = [
   "intake.action.check",
   "intake.action.merge",
@@ -1399,7 +1411,12 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
   const files = emitOpenAPIFiles(apiOperations);
   const emitted = files["openapi.yaml"];
   const credentialPaths = new Set(
-    [llmOperations, repositoryOperations, storageOperations]
+    [
+      llmOperations,
+      repositoryOperations,
+      storageOperations,
+      intakeCredentialOperations,
+    ]
       .flatMap((operations) => Object.values(operations))
       .map(({ path }) => path.replace(/:([^/]+)/g, "{$1}")),
   );
@@ -1609,6 +1626,7 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     llmOperations,
     repositoryOperations,
     storageOperations,
+    intakeCredentialOperations,
   ].flatMap((operations) => Object.values(operations))) {
     const path = operation.path.replace(/:([^/]+)/g, "{$1}");
     const method = operation.method.toLowerCase() as "get" | "post" | "put";

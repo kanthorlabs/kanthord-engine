@@ -46,21 +46,31 @@ authenticated human holds the same server-owner authority over every inbound;
 the Intake Service adds no project-membership or role model. A machine token
 authorizes no Intake command.
 
-| Command after `kanthord intake`          | Operation                         | Proposed HTTP route                                      | Access  | Output and effects                                                                                       |
-| ---------------------------------------- | --------------------------------- | -------------------------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------- |
-| `inbound create`                         | `intake.inbound.create`           | `POST /api/intake/inbound`                               | `human` | Mutation; validates at the platform, then inserts one inbound.                                           |
-| `inbound list`                           | `intake.inbound.list`             | `GET /api/intake/inbound`                                | `human` | Bounded page, optionally filtered by project, kind and platform.                                         |
-| `inbound get <inbound-id>`               | `intake.inbound.get`              | `GET /api/intake/inbound/:inbound_id`                    | `human` | One inbound; for a webhook, its address and its secret, whose display is **[blocked][intake-contract]**. |
-| `inbound delete <inbound-id>`            | `intake.inbound.delete`           | `DELETE /api/intake/inbound/:inbound_id`                 | `human` | Mutation; deletes the inbound and its events, and calls no platform.                                     |
-| `event list`                             | `intake.inbound.event.list`       | `GET /api/intake/event`                                  | `human` | Bounded page, optionally filtered by inbound and state.                                                  |
-| `event get <inbound-event-id>`           | `intake.inbound.event.get`        | `GET /api/intake/event/:inbound_event_id`                | `human` | One event with its state, errors and redacted `event` text.                                              |
-| `event retry <inbound-event-id>`         | `intake.inbound.event.retry`      | `POST /api/intake/event/:inbound_event_id/retry`         | `human` | Mutation; turns a failed event back to `pending`.                                                        |
-| `event discard <inbound-event-id>`       | `intake.inbound.event.discard`    | `POST /api/intake/event/:inbound_event_id/discard`       | `human` | Mutation; turns a pending or a failed event to `discarded`.                                              |
-| `event delete`                           | `intake.inbound.event.delete`     | `POST /api/intake/event/delete`                          | `human` | Mutation; deletes the succeeded, failed and discarded events that a filter names.                        |
-| `outbound list`                          | `intake.outbound.request.list`    | `GET /api/intake/outbound`                               | `human` | Bounded page, optionally filtered by project, state and operation.                                       |
-| `outbound get <outbound-request-id>`     | `intake.outbound.request.get`     | `GET /api/intake/outbound/:outbound_request_id`          | `human` | One outbound request with its state, result and errors.                                                  |
-| `outbound discard <outbound-request-id>` | `intake.outbound.request.discard` | `POST /api/intake/outbound/:outbound_request_id/discard` | `human` | Mutation; turns a pending request with no running call to `discarded`.                                   |
-| `outbound delete`                        | `intake.outbound.request.delete`  | `POST /api/intake/outbound/delete`                       | `human` | Mutation with `--force`; deletes the succeeded, failed and discarded requests that a filter names.       |
+| Command after `kanthord intake`                                | Operation                           | Proposed HTTP route                                                      | Access  | Output and effects                                                                                       |
+| -------------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------ | ------- | -------------------------------------------------------------------------------------------------------- |
+| `inbound create`                                               | `intake.inbound.create`             | `POST /api/intake/inbound`                                               | `human` | Mutation; validates at the platform, then inserts one inbound.                                           |
+| `inbound list`                                                 | `intake.inbound.list`               | `GET /api/intake/inbound`                                                | `human` | Bounded page, optionally filtered by project, kind and platform.                                         |
+| `inbound get <inbound-id>`                                     | `intake.inbound.get`                | `GET /api/intake/inbound/:inbound_id`                                    | `human` | One inbound; for a webhook, its address and its secret, whose display is **[blocked][intake-contract]**. |
+| `inbound delete <inbound-id>`                                  | `intake.inbound.delete`             | `DELETE /api/intake/inbound/:inbound_id`                                 | `human` | Mutation; deletes the inbound and its events, and calls no platform.                                     |
+| `event list`                                                   | `intake.inbound.event.list`         | `GET /api/intake/event`                                                  | `human` | Bounded page, optionally filtered by inbound and state.                                                  |
+| `event get <inbound-event-id>`                                 | `intake.inbound.event.get`          | `GET /api/intake/event/:inbound_event_id`                                | `human` | One event with its state, errors and redacted `event` text.                                              |
+| `event retry <inbound-event-id>`                               | `intake.inbound.event.retry`        | `POST /api/intake/event/:inbound_event_id/retry`                         | `human` | Mutation; turns a failed event back to `pending`.                                                        |
+| `event discard <inbound-event-id>`                             | `intake.inbound.event.discard`      | `POST /api/intake/event/:inbound_event_id/discard`                       | `human` | Mutation; turns a pending or a failed event to `discarded`.                                              |
+| `event delete`                                                 | `intake.inbound.event.delete`       | `POST /api/intake/event/delete`                                          | `human` | Mutation; deletes the succeeded, failed and discarded events that a filter names.                        |
+| `outbound list`                                                | `intake.outbound.request.list`      | `GET /api/intake/outbound`                                               | `human` | Bounded page, optionally filtered by project, state and operation.                                       |
+| `outbound get <outbound-request-id>`                           | `intake.outbound.request.get`       | `GET /api/intake/outbound/:outbound_request_id`                          | `human` | One outbound request with its state, result and errors.                                                  |
+| `outbound discard <outbound-request-id>`                       | `intake.outbound.request.discard`   | `POST /api/intake/outbound/:outbound_request_id/discard`                 | `human` | Mutation; turns a pending request with no running call to `discarded`.                                   |
+| `outbound delete`                                              | `intake.outbound.request.delete`    | `POST /api/intake/outbound/delete`                                       | `human` | Mutation with `--force`; deletes the succeeded, failed and discarded requests that a filter names.       |
+| `credential create --file <path>`                              | `intake.credential.create`          | `POST /api/intake/credential`                                            | `human` | Mutation; stores a credential with its first revision.                                                   |
+| `credential list [--platform <platform>] [--include-archived]` | `intake.credential.list`            | `GET /api/intake/credential`                                             | `human` | Bounded page of the credentials of the Intake Service.                                                   |
+| `credential get <credential-name>`                             | `intake.credential.get`             | `GET /api/intake/credential/:credential_name`                            | `human` | One credential with its revisions and the bindings that name it.                                         |
+| `credential rotate <credential-name> --file <path>`            | `intake.credential.rotate`          | `POST /api/intake/credential/:credential_name/revision`                  | `human` | Mutation; adds the next revision with a new secret.                                                      |
+| `credential update-metadata <credential-name> --file <path>`   | `intake.credential.update_metadata` | `PUT /api/intake/credential/:credential_name/metadata`                   | `human` | Mutation; adds the next revision with new metadata.                                                      |
+| `credential revoke <credential-name> <revision>`               | `intake.credential.revoke`          | `POST /api/intake/credential/:credential_name/revision/:revision/revoke` | `human` | Mutation; ends an older revision.                                                                        |
+| `credential archive <credential-name>`                         | `intake.credential.archive`         | `POST /api/intake/credential/:credential_name/archive`                   | `human` | Mutation; archives a credential that no dependent names.                                                 |
+| `credential platforms`                                         | `intake.credential.platform_list`   | `GET /api/intake/credential/platform`                                    | `human` | The credential platforms of the Intake Service.                                                          |
+| `credential check --file <path>`                               | `intake.credential.check`           | `POST /api/intake/credential/check`                                      | `human` | Read; checks a typed secret before the save, stores nothing.                                             |
+| `credential verify <credential-name>`                          | `intake.credential.verify`          | `POST /api/intake/credential/:credential_name/verify`                    | `human` | Read; checks one stored credential at the platform.                                                      |
 
 Every command declares a `unary` lifetime: one request and one answer. The
 create, delete, retry, discard, event delete, outbound discard and outbound
@@ -125,6 +135,46 @@ kanthord intake outbound discard <outbound-request-id> [M] [R]
 kanthord intake outbound delete --force (--state <state> --from <outbound-request-id> --to <outbound-request-id> | --id <outbound-request-id> ...) [M] [R]
 ```
 
+```text
+kanthord intake credential create --file <path> [M] [R]
+```
+
+```text
+kanthord intake credential list [--platform <platform>] [--include-archived] [L] [R]
+```
+
+```text
+kanthord intake credential get <credential-name> [R]
+```
+
+```text
+kanthord intake credential rotate <credential-name> --file <path> [M] [R]
+```
+
+```text
+kanthord intake credential update-metadata <credential-name> --file <path> [M] [R]
+```
+
+```text
+kanthord intake credential revoke <credential-name> <revision> [M] [R]
+```
+
+```text
+kanthord intake credential archive <credential-name> [M] [R]
+```
+
+```text
+kanthord intake credential platforms [R]
+```
+
+```text
+kanthord intake credential check --file <path> [R]
+```
+
+```text
+kanthord intake credential verify <credential-name> [R]
+```
+
 Every group and leaf supports help without a server or credential. The
 commands reject unknown arguments and options, missing required values, and
 `--config` before work. They read no prompt or implicit standard input. There
@@ -138,29 +188,29 @@ is no `inbound update`, `inbound enable`, `inbound disable`, `poll now` or
 | [`--endpoint`](./common-flags.md#--endpoint)                                     | Every remote command.                                                                                                                                               |
 | [`--token`](./common-flags.md#--token)                                           | Every command requires a resolved human JWT; reject a missing or blank token before dispatch. A machine token authorizes no Intake command. Help requires no token. |
 | [`--help`](./common-flags.md#--help)                                             | Every group and leaf.                                                                                                                                               |
-| [`--file`](./common-flags.md#--file)                                             | Required on `inbound create` only; the schema appears below.                                                                                                        |
+| [`--file`](./common-flags.md#--file)                                             | Required on `inbound create`, `credential create`, `credential rotate`, `credential update-metadata` and `credential check`; the inbound schema appears below.      |
 | [`--idempotency-key`](./common-flags.md#--idempotency-key)                       | Every mutation.                                                                                                                                                     |
-| [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | The inbound, event and outbound lists only.                                                                                                                         |
+| [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | The inbound, event, outbound and credential lists only.                                                                                                             |
 | [`--force`](./common-flags.md#--force)                                           | Required on `outbound delete` only. It accepts that a repeat of a deleted request key calls the write again.                                                        |
 
-| Argument or flag                                           | Requiredness and type                                                                | Default                      | Validation and request mapping                                                                                    |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------ | ---------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `<inbound-id>`                                             | Required inbound identity on get and delete.                                         | None                         | Map to `params.inbound_id`. Prefix `inbound_`.                                                                    |
-| `<inbound-event-id>`                                       | Required inbound event identity on get, retry and discard.                           | None                         | Map to `params.inbound_event_id`. Prefix `inbound_event_`.                                                        |
-| `--project <id>`                                           | Optional project identity on `inbound list`.                                         | Absent: no project filter    | Send `query.project_id`; Project owns the prefix declaration.                                                     |
-| `--kind <kind>`                                            | Optional inbound kind on `inbound list`.                                             | Absent: all kinds            | Send `query.kind`; closed set `webhook`, `poll`.                                                                  |
-| `--platform <platform>`                                    | Optional platform on `inbound list`.                                                 | Absent: all platforms        | Send `query.platform`; closed set of supported platforms, today `github`.                                         |
-| `--inbound <id>`                                           | Optional inbound identity on `event list`.                                           | Absent: no inbound filter    | Send `query.inbound_id`.                                                                                          |
-| `--state <state>`                                          | Optional on `event list`; required with `--from` and `--to` on `event delete`.       | Absent on a list: all states | Send `query.state` or `body.state`; closed set `pending`, `succeeded`, `failed`, `discarded`.                     |
-| `--from`, `--to`                                           | Required together with `--state` on `event delete`.                                  | None                         | Send `body.from` and `body.to`, an inclusive range of inbound event identities.                                   |
-| `--id <inbound-event-id>`                                  | Repeatable on `event delete`; excludes `--state`, `--from` and `--to`.               | None                         | Send `body.ids`, a nonempty list of at most 1000 identities.                                                      |
-| `<outbound-request-id>`                                    | Required outbound request identity on `outbound get` and `outbound discard`.         | None                         | Map to `params.outbound_request_id`. Prefix `outbound_request_`.                                                  |
-| `--project <id>` on `outbound list`                        | Optional project identity.                                                           | Absent: no project filter    | Send `query.project_id`.                                                                                          |
-| `--state <state>` on `outbound list` and `outbound delete` | Optional on `outbound list`; required with `--from` and `--to` on `outbound delete`. | Absent on a list: all states | Send `query.state` or `body.state`; closed set `pending`, `succeeded`, `failed`, `discarded`.                     |
-| `--operation <operation>`                                  | Optional on `outbound list`.                                                         | Absent: all operations       | Send `query.operation`; closed set `github.pull_request`, `git.push`, `github.issue_comment`, `s3.delete_object`. |
-| `--from`, `--to` on `outbound delete`                      | Required together with `--state`.                                                    | None                         | Send `body.from` and `body.to`, an inclusive range of outbound request identities.                                |
-| `--id <outbound-request-id>`                               | Repeatable on `outbound delete`; excludes `--state`, `--from` and `--to`.            | None                         | Send `body.ids`, a nonempty list of at most 1000 identities.                                                      |
-| `--force` on `outbound delete`                             | Required boolean switch.                                                             | `false`                      | Send `body.force`. Without it the server answers `400` `intake.outbound.request.force_required`.                  |
+| Argument or flag                                           | Requiredness and type                                                                | Default                      | Validation and request mapping                                                                                                          |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------ | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `<inbound-id>`                                             | Required inbound identity on get and delete.                                         | None                         | Map to `params.inbound_id`. Prefix `inbound_`.                                                                                          |
+| `<inbound-event-id>`                                       | Required inbound event identity on get, retry and discard.                           | None                         | Map to `params.inbound_event_id`. Prefix `inbound_event_`.                                                                              |
+| `--project <id>`                                           | Optional project identity on `inbound list`.                                         | Absent: no project filter    | Send `query.project_id`; Project owns the prefix declaration.                                                                           |
+| `--kind <kind>`                                            | Optional inbound kind on `inbound list`.                                             | Absent: all kinds            | Send `query.kind`; closed set `webhook`, `poll`.                                                                                        |
+| `--platform <platform>`                                    | Optional platform on `inbound list`.                                                 | Absent: all platforms        | Send `query.platform`; closed set of supported platforms, `github` and `jira`.                                                          |
+| `--inbound <id>`                                           | Optional inbound identity on `event list`.                                           | Absent: no inbound filter    | Send `query.inbound_id`.                                                                                                                |
+| `--state <state>`                                          | Optional on `event list`; required with `--from` and `--to` on `event delete`.       | Absent on a list: all states | Send `query.state` or `body.state`; closed set `pending`, `succeeded`, `failed`, `discarded`.                                           |
+| `--from`, `--to`                                           | Required together with `--state` on `event delete`.                                  | None                         | Send `body.from` and `body.to`, an inclusive range of inbound event identities.                                                         |
+| `--id <inbound-event-id>`                                  | Repeatable on `event delete`; excludes `--state`, `--from` and `--to`.               | None                         | Send `body.ids`, a nonempty list of at most 1000 identities.                                                                            |
+| `<outbound-request-id>`                                    | Required outbound request identity on `outbound get` and `outbound discard`.         | None                         | Map to `params.outbound_request_id`. Prefix `outbound_request_`.                                                                        |
+| `--project <id>` on `outbound list`                        | Optional project identity.                                                           | Absent: no project filter    | Send `query.project_id`.                                                                                                                |
+| `--state <state>` on `outbound list` and `outbound delete` | Optional on `outbound list`; required with `--from` and `--to` on `outbound delete`. | Absent on a list: all states | Send `query.state` or `body.state`; closed set `pending`, `succeeded`, `failed`, `discarded`.                                           |
+| `--operation <operation>`                                  | Optional on `outbound list`.                                                         | Absent: all operations       | Send `query.operation`; closed set `github.pull_request`, `git.push`, `github.issue_comment`, `jira.issue_comment`, `s3.delete_object`. |
+| `--from`, `--to` on `outbound delete`                      | Required together with `--state`.                                                    | None                         | Send `body.from` and `body.to`, an inclusive range of outbound request identities.                                                      |
+| `--id <outbound-request-id>`                               | Repeatable on `outbound delete`; excludes `--state`, `--from` and `--to`.            | None                         | Send `body.ids`, a nonempty list of at most 1000 identities.                                                                            |
+| `--force` on `outbound delete`                             | Required boolean switch.                                                             | `false`                      | Send `body.force`. Without it the server answers `400` `intake.outbound.request.force_required`.                                        |
 
 Supplied list filters combine by AND. A filter grants no authority. An omitted
 optional filter stays absent rather than becoming `null`. The commands follow
@@ -187,14 +237,14 @@ the Mission Service stays in the span of its admission.
 The file supplies the request body, with no path or query parameters. The
 shared file rules apply. The schema is closed.
 
-| File field      | Requiredness and type                             | Default | Validation and meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| --------------- | ------------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `project_id`    | Required project identity.                        | None    | Must name a project of the Project Service.                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `kind`          | Required enum string.                             | None    | Closed set `webhook`, `poll`.                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `platform`      | Required enum string.                             | None    | Closed set of supported platforms, today `github`.                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `consumer`      | Required enum string.                             | None    | Closed set of admission operations, today `mission.delivery.admit`.                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `credential`    | Credential name string, or absent.                | Absent  | Required for a poll, refused for a webhook. The name must exist, and its platform must suit `platform`.                                                                                                                                                                                                                                                                                                                                                                 |
-| `configuration` | Required object, validated per kind and platform. | None    | Holds the required `resource_kind`, the required `resource` and the options of the kind and the platform. `resource_kind` has no default and takes `repository` or `conversation`. An absent or another value answers `400` `gateway.request.validation_failed`. The resource identity is `<resource_kind>:github:<resource>`. Every property name is snake_case, the stored form. Every field beyond `resource_kind` and `resource` is **[blocked][intake-contract]**. |
+| File field      | Requiredness and type                             | Default | Validation and meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------- | ------------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project_id`    | Required project identity.                        | None    | Must name a project of the Project Service.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `kind`          | Required enum string.                             | None    | Closed set `webhook`, `poll`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `platform`      | Required enum string.                             | None    | Closed set of supported platforms, `github` and `jira`. `jira` takes the kind `webhook` only.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `consumer`      | Required enum string.                             | None    | Closed set of admission operations, today `mission.delivery.admit`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `credential`    | Credential name string, or absent.                | Absent  | Required for a poll, refused for a webhook. The name must exist, and its platform must suit `platform`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `configuration` | Required object, validated per kind and platform. | None    | Holds the required `resource_kind`, the required `resource` and the options of the kind and the platform. `resource_kind` has no default and takes `repository` or `conversation`. An absent or another value answers `400` `gateway.request.validation_failed`. The resource identity is `<resource_kind>:<platform>:<resource>`. A `jira` inbound takes `resource_kind: conversation` and the `resource` `<site>/<project_key>`, with a lower-case site that ends with `.atlassian.net` and an upper-case key that matches `^[A-Z][A-Z0-9_]{1,9}$`, for example `acme.atlassian.net/KD`. Every property name is snake_case, the stored form. Every field beyond `resource_kind` and `resource` is **[blocked][intake-contract]**. |
 
 The file accepts no verification secret, checkpoint,
 state, error or arbitrary consumer operation.
@@ -221,6 +271,8 @@ refusal inserts nothing.
 A repeat with the same `--idempotency-key` returns the recorded answer within
 the process-local replay TTL. A new invocation creates another inbound: no
 natural key prevents a duplicate, because a duplicate serves a rotation.
+
+A `jira` inbound is a webhook that names no credential. A `jira` poll create answers `400` `gateway.request.validation_failed` with the issue path `body.platform`, and inserts nothing. A Jira administrator registers an admin webhook at the platform with the address `/hooks/<inbound id>` and the derived secret of the inbound.
 
 **Statuses:** `201` with the inbound projection; `400` for invalid input;
 `404` `intake.inbound.project_not_found` for an unknown project; `422`
@@ -390,6 +442,52 @@ narrows the range. No process deletes an outbound request.
 `intake.outbound.request.state_conflict` for a list that names a pending
 request.
 
+## Credential commands
+
+The Intake Service declares the credential route group `/api/intake/credential`
+with the ten commands of `kanthord intake credential`, as the
+[storage credential page](./storage.md) describes them for the Storage
+component. The operation IDs have the form `intake.credential.<operation>`. The
+route group has no project identity. A credential belongs to no project. The
+module `src/intake/credential-platform.ts` declares the platforms. Custody
+declares no route and keeps the record functions that these routes call.
+
+Every command uses `human` access. The file rules, the secret-file mode `0600`,
+the mutation key, the pagination, the reserved names, the pre-save check, the
+record verify and the archive rules of the
+[storage credential page](./storage.md) apply without change. A name whose
+platform belongs to another component answers `404 credential.credential.not_found`
+on every command that takes a name. A `create` with a platform of another
+component answers `400 credential.platform.unsupported`.
+
+The platforms of the Intake Service:
+
+| Platform | Secret shape | Metadata                                                          |
+| -------- | ------------ | ----------------------------------------------------------------- |
+| `jira`   | `api_key`    | Required `{ site, cloud_id, email }`, all strings; closed object. |
+
+The `jira` credential holds a scoped Jira API token with the scopes
+`read:jira-work`, `write:jira-work` and `read:jira-user`. The secret is
+`{ key }`. `site` names the Jira Cloud site, for example `example.atlassian.net`.
+`cloud_id` is the cloud identity of the site; it holds letters, digits and
+hyphens only. `email` is the account of the token. `platforms` answers
+`metadata_fields` `["site", "cloud_id", "email"]` and `verifiable: true`.
+
+Each call of the platform goes to `https://api.atlassian.com/ex/jira/<cloud_id>`
+with the header `Authorization: Basic` and the value `email:token` in base64.
+The validator of `check`, `verify` and the health report calls
+`GET /rest/api/3/myself` there. Its capability is `myself read`. HTTP `200`
+answers `healthy`, `401` answers `unhealthy` with `unauthorized`, and `403`
+answers `unknown` with `forbidden`. The Intake Service owns the healthcheck of
+its records: the health report lists each live `jira` record under the owner
+`intake`, in the global scope. `create` and `rotate` make no remote call.
+
+A platform call of the Intake Service that fails answers `502` with the code
+`intake.platform.<platform>.<class>`. `<class>` is `confirmed_failure`,
+`retryable_refusal`, `final_refusal` or `unknown_outcome`. `details.status`
+holds the HTTP status of the platform when the failure carries one, otherwise
+null.
+
 ## Routes without a command
 
 The webhook receipt `intake.inbound.event.receive` uses `POST /hooks/<inbound id>`
@@ -408,9 +506,20 @@ A verified handshake answers from the request alone and stores nothing: a
 GitHub `ping` answers `204`. A handshake skips the capacity bound.
 A GitHub webhook inbound with `resource_kind: conversation` stores its
 `issue_comment` deliveries under the same receipt.
+A `jira` webhook inbound takes the signature from the header `X-Hub-Signature`.
+The receipt requires exactly one such header of the form `sha256=<64 hex>`. It
+computes HMAC SHA-256 over the exact bytes with the derived secret and compares two
+32-byte digests with `timingSafeEqual`. A missing header, a repeated header, a
+header of another form and a wrong digest answer `401`
+`intake.inbound.event.signature_invalid` and store nothing. The event identity is
+the header `X-Atlassian-Webhook-Identifier`. A signed delivery with no such
+header, or with a body that holds no `webhookEvent`, answers `400`
+`gateway.request.validation_failed` and stores nothing. The stored `metadata` is
+`{ "event": <webhookEvent> }`. A Jira `ping` handshake does not exist, so every
+verified delivery stores one event, and a repeated identity stores one row.
 The receipt answers `404` `intake.inbound.not_found` for an unknown inbound or
 a poll inbound, `401` `intake.inbound.event.signature_invalid` for a failed
-verification, and `503` `intake.inbound.event.capacity_exceeded` beyond the
+verification, `400` `gateway.request.validation_failed` for a Jira delivery with no identity, and `503` `intake.inbound.event.capacity_exceeded` beyond the
 capacity bound of pending events. No CLI command calls the receipt route or
 simulates a platform signature with a human JWT.
 
@@ -513,10 +622,24 @@ marker. A call that ends with no answer sets the request `failed`. A repeat of a
 posts again. A repeat of a `succeeded` request answers the stored address and
 posts nothing.
 
+For a `reply` action of a conversation binding of platform `jira`,
+`intake.action.perform` runs the outbound operation `jira.issue_comment`. The
+request key, the input and the repeat rules are those of `github.issue_comment`.
+Intake posts `comment` as an Atlassian document body with `POST
+/rest/api/3/issue/{key}/comment`, where `key` is the `key` of the `jira_issue`
+link, and it uses the credential of the conversation binding revision. The stored
+result is `{ update_key, actor_id }`, where `update_key` is `jira_comment:<site>:<id>`
+of the created comment. Before the first post on a link with no succeeded reply of
+any project, Intake reads `accountId` with `GET /rest/api/3/myself` and records
+`{ actor_id }` in the result of the pending request. A reply has no read-back, and
+its body holds no hidden marker. A call that ends with no answer sets the request
+`failed`. A failed call answers a result class with the code
+`intake.platform.jira.<class>`.
+
 `intake.outbound.reply.match` is a `service` operation with no CLI command and
 no HTTP route. Only the Mission Service calls it; another caller fails an
 assertion. It takes `{ update_key, external_link }` and answers
-`{ succeeded, pending_actor_ids }`. It reads the `github.issue_comment` requests
+`{ succeeded, pending_actor_ids }`. It reads the `github.issue_comment` and `jira.issue_comment` requests
 of every project and finds the requests of a link by the suffix
 `:<canonical link>` of the request key. `succeeded` is true when the `update_key`
 of the result of a `succeeded` reply request equals `update_key`, on any link.
@@ -551,12 +674,24 @@ and no HTTP route. The Worker Service and the Mission Service call it; another
 caller fails an assertion. The Mission Service calls it for `mission inbox-item
 list` and `mission inbox-item done`, outside its own transaction. It takes `{ inbound_event_id }`, reads the stored event and its
 inbound in one read transaction, and calls the description of the platform
-implementation of the inbound: `describeGitHubEvent` for `github`. It answers
+implementation of the inbound: `describeGitHubEvent` for `github` and `describeJiraEvent` for `jira`. It answers
 `{ author, body, url, occurred_at }`. It applies the sensitive text rule set of
 the engine to `body` and cuts no text. It takes no credential, calls no platform
-and writes no row. An event that the platform implementation does not describe
-answers four `null` fields. An unknown or deleted event answers `404`
+and writes no row. A `jira` description answers `comment.author.displayName` as `author`, the body of the
+comment as plain text, `https://<site>/browse/<key>` as `url` and `comment.created`
+as `occurred_at`. A text body stays as it is. An Atlassian document body becomes the
+text of its text nodes, with a newline between blocks. An event that the platform
+implementation does not describe answers four `null` fields. An unknown or deleted event answers `404`
 `intake.inbound.event.not_found`.
+
+The Jira decoder of `src/intake/jira.ts` decodes only the event `comment_created`.
+It answers the link `{ kind: "jira_issue", resource_identity, key }` with the key
+`issue.key` of the issue, the `update_key` `jira_comment:<site>:<comment.id>`, the
+`actor_id` `comment.author.accountId`, `actor_automated` true when `accountType` is
+`app`, `occurred_at` as the Unix milliseconds of `comment.created`, and an empty
+`mentions` list. A comment without a valid `comment.created`, another event, a
+comment of another project and a broken body decode to null, and admission refuses
+such an event with the reason `undecodable`.
 
 `intake.link.read` is a `service` operation with no CLI command and no HTTP
 route. Only the Mission Service calls it, for `mission.node.check`. It takes
@@ -572,7 +707,12 @@ its stored row, and the answer holds the `inbound_event_id` of that row. A link
 resource with no inbound in the project answers `409`
 `intake.link.inbound_missing` with details `{ external_link }` before any
 release. A failed GitHub call answers `502` `repository.platform.github.<class>`
-and stores no row. The Mission Service hands each item to
+and stores no row. For `jira_issue` it calls `GET /rest/api/3/issue/{key}/comment`
+with `orderBy=-created` and `maxResults=100`, one page, with the credential
+metadata `{ site, cloud_id, email }`. Each item maps to the event id
+`jira_comment:<site>:<id>` and the metadata `{ "event": "comment_listed" }`. A
+failed Jira call answers `502` `intake.platform.jira.<class>` and stores no row.
+The Mission Service hands each item to
 `mission.delivery.admit` through the handoff of the Intake Service. The event
 state records the result, and the dispatcher hands no item twice.
 
@@ -601,19 +741,30 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 
 | HTTP  | Code                                                   | Condition                                                                                                                                                                                            | Commands                                                                                                                                                                                          |
 | ----- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 400   | `credential.check.unsupported`                         | The platform has `verifiable: false` or the secret shape `oauth`.                                                                                                                                    | credential check, credential verify                                                                                                                                                               |
+| 400   | `credential.input.invalid`                             | Secret or metadata validation fails, or the name is reserved.                                                                                                                                        | credential create, credential rotate, credential update-metadata, credential check                                                                                                                |
 | 400   | `credential.platform.mismatch`                         | The requested platform differs from the stored platform.                                                                                                                                             | `intake.action.perform`, `intake.action.read`, `intake.storage.put`, `intake.storage.check`, `intake.storage.get`, `intake.execution.storage.get`, `intake.storage.delete`                        |
+| 400   | `credential.platform.unsupported`                      | The platform is not a platform of the Intake Service.                                                                                                                                                | credential create, credential check                                                                                                                                                               |
 | 400   | `intake.inbound.event.filter_invalid`                  | The delete names no filter, both filters or the state `pending`, or its range matches more than 1000 rows.                                                                                           | event delete                                                                                                                                                                                      |
 | 400   | `intake.outbound.request.filter_invalid`               | The delete names no filter, both filters or the state `pending`, or its range matches more than 1000 rows.                                                                                           | outbound delete                                                                                                                                                                                   |
 | 400   | `intake.outbound.request.force_required`               | The delete omits `force: true`.                                                                                                                                                                      | outbound delete                                                                                                                                                                                   |
 | 400   | `project.bindings.repository.address_invalid`          | The repository address does not have the form `git@<host>:<owner>/<repository>.git`. No git process starts.                                                                                          | `intake.action.check`, `intake.action.perform`                                                                                                                                                    |
 | 400   | `repository.platform.github.cursor_page_size_mismatch` | A review comment read names another `limit` than its cursor.                                                                                                                                         | `intake.action.read`                                                                                                                                                                              |
-| 401   | `intake.inbound.event.signature_invalid`               | The webhook post fails verification.                                                                                                                                                                 | receipt route                                                                                                                                                                                     |
+| 401   | `intake.inbound.event.signature_invalid`               | The webhook post fails verification; for a `jira` inbound, the header `X-Hub-Signature` is missing, repeated, malformed or wrong.                                                                    | receipt route                                                                                                                                                                                     |
 | 403   | `mission.authorization.refused`                        | The Mission Service refuses the protected facility chain; details `{ reason }`.                                                                                                                      | `intake.action.merge`, `intake.action.perform`, `intake.action.read`, `intake.storage.put`, `intake.storage.check`, `intake.storage.get`, `intake.execution.storage.get`, `intake.storage.delete` |
+| 404   | `credential.credential.not_found`                      | The credential does not exist, or its platform is not a platform of the Intake Service.                                                                                                              | credential get, credential rotate, credential update-metadata, credential revoke, credential archive, credential verify                                                                           |
+| 404   | `credential.revision.not_found`                        | The revision does not exist, or the credential name is unknown.                                                                                                                                      | credential revoke                                                                                                                                                                                 |
 | 404   | `intake.inbound.event.not_found`                       | No inbound event has that identity.                                                                                                                                                                  | event get, event retry, event discard, `intake.inbound.event.describe`                                                                                                                            |
 | 404   | `intake.inbound.not_found`                             | No inbound has that identity, or the receipt names a poll inbound.                                                                                                                                   | inbound get, inbound delete, receipt route                                                                                                                                                        |
 | 404   | `intake.inbound.project_not_found`                     | The project of the create does not exist.                                                                                                                                                            | inbound create                                                                                                                                                                                    |
 | 404   | `intake.outbound.request.not_found`                    | No outbound request has that identity.                                                                                                                                                               | outbound get, outbound discard                                                                                                                                                                    |
 | 404   | `mission.record.not_found`                             | The evidence asset of a storage operation does not exist.                                                                                                                                            | `intake.storage.put`, `intake.storage.check`, `intake.storage.get`, `intake.execution.storage.get`, `intake.storage.delete`                                                                       |
+| 409   | `credential.credential.archived`                       | The credential is archived; an archive is final.                                                                                                                                                     | credential rotate, credential update-metadata, credential archive, credential verify                                                                                                              |
+| 409   | `credential.credential.in_use`                         | A dependent names the credential; `details` holds `agent_providers`, `bindings` and `inbounds`.                                                                                                      | credential archive                                                                                                                                                                                |
+| 409   | `credential.name.conflict`                             | A credential already has this name; details identify the holder.                                                                                                                                     | credential create                                                                                                                                                                                 |
+| 409   | `credential.revision.conflict`                         | The expected revision is stale.                                                                                                                                                                      | credential rotate, credential update-metadata                                                                                                                                                     |
+| 409   | `credential.revision.ended`                            | The revision is already ended, by a revoke or by a drain.                                                                                                                                            | credential revoke                                                                                                                                                                                 |
+| 409   | `credential.revision.newest_live`                      | The revoke names the newest live revision.                                                                                                                                                           | credential revoke                                                                                                                                                                                 |
 | 409   | `credential.revision.revoked`                          | A pinned use names a revoked revision.                                                                                                                                                               | `intake.action.merge`, `intake.action.perform`, `intake.action.read`                                                                                                                              |
 | 409   | `intake.inbound.event.in_flight`                       | The handoff of the pending event runs.                                                                                                                                                               | event discard                                                                                                                                                                                     |
 | 409   | `intake.inbound.event.state_conflict`                  | The event state permits no such transition, or a list names a pending event.                                                                                                                         | event retry, event discard, event delete                                                                                                                                                          |
@@ -630,6 +781,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 422   | `intake.inbound.credential_invalid`                    | The credential name does not exist, or its platform does not suit the inbound.                                                                                                                       | inbound create                                                                                                                                                                                    |
 | 422   | `intake.inbound.platform_refused`                      | The platform refuses a validation request of a poll create.                                                                                                                                          | inbound create                                                                                                                                                                                    |
 | 422   | `intake.outbound.request.action_unmapped`              | The configured action has no row in the action table.                                                                                                                                                | `intake.action.perform`                                                                                                                                                                           |
+| 502   | `intake.platform.<platform>.<class>`                   | A call to a platform of the Intake Service answers a result class; `details.status` holds the HTTP status of the platform when the failure carries one, otherwise null.                              | a command that calls Jira                                                                                                                                                                         |
 | 502   | `repository.connector.git_failed`                      | A git operation fails, is aborted or reaches its deadline. `intake.action.perform` answers it with `200` and stores it in the request `error` message.                                               | `intake.action.check`, `intake.action.perform`, `intake.execution.gate_files.read`                                                                                                                |
 | 502   | `repository.connector.ssh_agent_failed`                | The private SSH agent of a git operation does not start, or `ssh-add` refuses the key. `intake.action.perform` answers it with `200` and stores it in the request `error` message.                   | `intake.action.check`, `intake.action.perform`, `intake.execution.gate_files.read`                                                                                                                |
 | 502   | `system.context.deadline_exceeded`                     | The SSH agent of a git operation reaches its deadline before the git work starts. `intake.action.perform` answers it with `200` and stores it in the request `error` message.                        | `intake.action.check`, `intake.action.perform`, `intake.execution.gate_files.read`                                                                                                                |
@@ -639,6 +791,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 503   | `intake.inbound.event.capacity_exceeded`               | The count of pending events is at its bound.                                                                                                                                                         | receipt route                                                                                                                                                                                     |
 | 503   | `intake.outbound.request.cli_unavailable`              | The binary of a CLI operation is missing or below its minimum version.                                                                                                                               | a CLI write                                                                                                                                                                                       |
 | local | `cli.intake.<command>.invalid_<argument>`              | A positional identity fails its prefix or ULID form, for example `cli.intake.inbound.get.invalid_inbound_id`.                                                                                        | every leaf with a positional identity                                                                                                                                                             |
+| local | `cli.intake.credential.revoke.invalid_revision`        | The `<revision>` argument is not a positive safe integer.                                                                                                                                            | credential revoke                                                                                                                                                                                 |
 
 ## Optional design provenance
 

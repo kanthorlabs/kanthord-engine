@@ -441,18 +441,32 @@ An agent cannot keep a merge commit, because each agent turn becomes one ordinar
 
 A `conversation` binding names one external conversation source of its project, which a node follows through its links.
 A project holds any number of conversation bindings.
-This version supports the platform `github`.
-Its `config` holds these fields:
+This version supports the platforms `github` and `jira`.
+A `github` binding holds these fields:
 
 - `available`: **required** boolean, with no default.
-- `platform`: **required**, the value `github`. A later platform adds one value.
+- `platform`: **required**, the value `github`.
 - `repository`: **required**, `<owner>/<repo>` of the GitHub repository.
 - `credential`: **required**, one `CredentialName` of platform `github`. Custody checks the platform at the write. The write makes no platform call.
 - `reply_policy`: **optional**, `{ "follows": { "type": "assessment_passed" } }`. Another value refuses the write as a validation failure. A `reply_policy` gives the binding the action `reply` and the key `<binding name>.reply`. A node derives one `reply` action for each link of its pinned revision that names the binding, with the key `<binding name>.reply.<position>`.
 - `link_trust`: **optional**, object `{ actor_ids }`. [Link trust](#link-trust) states the rules.
 - `inbox`: **optional**, object `{ actor_id, handle }`; absent by default. [Inbox](#inbox) states the rules.
 
-The resource identity of a conversation binding is `conversation:github:<repository>`.
+The resource identity of a `github` conversation binding is `conversation:github:<repository>`.
+
+A `jira` binding names one Jira Cloud project. Its `config` holds these fields:
+
+- `available`: **required** boolean, with no default.
+- `platform`: **required**, the value `jira`.
+- `site`: **required**, the Jira Cloud site. It ends with `.atlassian.net`: one host label of letters, digits and hyphens, then `.atlassian.net`. The match ignores case. Another domain refuses the write as a validation failure.
+- `project_key`: **required**, the key of the Jira project. It matches `^[A-Z][A-Z0-9_]{1,9}$`. A lower-case key refuses the write as a validation failure.
+- `credential`: **required**, one `CredentialName` of platform `jira`. Custody checks the platform at the write, so a credential of platform `github` refuses the write with the custody suitability code. The write makes no platform call.
+- `reply_policy`: **optional**, as for `github`.
+- `link_trust`: **optional**, object `{ actor_ids }`. [Link trust](#link-trust) states the rules.
+
+The key `inbox` is no field of a `jira` binding. A `jira` binding that holds it refuses the write with 400 `project.bindings.inbox_invalid` and reason `platform_unsupported`.
+
+The resource identity of a `jira` binding is `conversation:jira:<site>/<project_key>`, with the site in lower case and the key in upper case. The conversation resource that a link and an inbound name is `<site>/<project_key>`.
 
 ```json
 {
@@ -469,28 +483,43 @@ The resource identity of a conversation binding is `conversation:github:<reposit
 }
 ```
 
+```json
+{
+  "kind": "conversation",
+  "config": {
+    "available": true,
+    "platform": "jira",
+    "site": "acme.atlassian.net",
+    "project_key": "KD",
+    "credential": "jira-acme",
+    "reply_policy": { "follows": { "type": "assessment_passed" } },
+    "link_trust": { "actor_ids": ["712020:0a1b2c3d-4e5f"] }
+  }
+}
+```
+
 A node names a conversation binding beside its repository bindings. Both intents accept zero or more conversation bindings.
 
 ### Link trust
 
 `link_trust` holds the accounts whose updates a node follows without a human decision. It is a key of a repository binding of platform `github` and of a conversation binding.
 
-- `actor_ids`: a list of at most 32 distinct immutable account ids. A GitHub id matches `^[1-9][0-9]{0,15}$`. A login such as `octocat` is no id.
+- `actor_ids`: a list of at most 32 distinct immutable account ids. A GitHub id matches `^[1-9][0-9]{0,15}$`. A login such as `octocat` is no id. A Jira id is an Atlassian account id and matches `^[A-Za-z0-9:_-]{1,128}$`. The platform of the binding picks the pattern.
 - A key outside `actor_ids` refuses the write as a validation failure.
 - An invalid value refuses the write with 400 `project.bindings.link_trust_invalid` and `details: { binding, field, reason, actor_id }`. `field` is `actor_ids`.
-- `reason` is `type_invalid` for a value that is no object, an `actor_ids` that is no list of strings, or an id that is no string. It is `too_many` for more than 32 ids, `duplicate` for a repeated id, `id_invalid` for an id that does not match the pattern, and `platform_unsupported` for a repository binding of a platform other than `github`.
+- `reason` is `type_invalid` for a value that is no object, an `actor_ids` that is no list of strings, or an id that is no string. It is `too_many` for more than 32 ids, `duplicate` for a repeated id, `id_invalid` for an id that does not match the pattern of its platform, and `platform_unsupported` for a repository binding of a platform other than `github`.
 - `actor_id` holds the refused id for `duplicate` and `id_invalid`, and is null for the other reasons.
 
 ### Inbox
 
-`inbox` names the developer whose threads the inbox of the project holds. It is a key of a conversation binding of platform `github`.
+`inbox` names the developer whose threads the inbox of the project holds. It is a key of a conversation binding of platform `github`. A conversation binding of platform `jira` refuses it with 400 `project.bindings.inbox_invalid` and reason `platform_unsupported`.
 
 - `actor_id`: **required**, the numeric GitHub user id of the developer, as a string. It matches `^[1-9][0-9]{0,15}$`, the id form of `link_trust`. A login such as `octocat` is no id.
 - `handle`: **required**, the GitHub login of the developer. It matches `^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$`.
 - A key outside `actor_id` and `handle` refuses the write as a validation failure.
 - A repository binding refuses the key with 400 `project.bindings.inbox_invalid` and reason `platform_unsupported`.
 - An invalid value refuses the write with 400 `project.bindings.inbox_invalid` and `details: { binding, field, reason }`. `field` is `inbox` for a value that is no object or a refused binding, `actor_id` or `handle` for the named member.
-- `reason` is `type_invalid` for a value that is no object, or an `actor_id` or `handle` that is no string. It is `id_invalid` for an `actor_id` that does not match the pattern, `handle_invalid` for a `handle` that does not match the pattern, and `platform_unsupported` for a repository binding.
+- `reason` is `type_invalid` for a value that is no object, or an `actor_id` or `handle` that is no string. It is `id_invalid` for an `actor_id` that does not match the pattern, `handle_invalid` for a `handle` that does not match the pattern, and `platform_unsupported` for a repository binding or a `jira` conversation binding.
 - A resource that a binding with `inbox` of another project names refuses the write with 409 `project.bindings.inbox_taken` and `details: { resource_identity, project_id }`. `project_id` is the other project. The same resource without `inbox` stores.
 - A change of `inbox` creates the next binding revision, as every binding write does.
 
@@ -593,8 +622,8 @@ Project transaction. It compares the supplied version with the current
 version and refuses a stale one. No network operation belongs in that
 transaction. The target rules are:
 
-- One binding per repository, per storage bucket and per conversation repository; any number per worker.
-- Resource identity derives from configuration. A repository identity derives from the platform and from the owner and the repository of its SSH address, never from the host. A worker identity derives from its binding name, a storage identity derives from its endpoint host and its bucket, and a conversation identity derives from its platform and its repository.
+- One binding per repository, per storage bucket and per conversation resource; any number per worker.
+- Resource identity derives from configuration. A repository identity derives from the platform and from the owner and the repository of its SSH address, never from the host. A worker identity derives from its binding name, a storage identity derives from its endpoint host and its bucket, and a conversation identity derives from its platform and its resource: the repository of a `github` binding, and the lower-case site with the upper-case project key of a `jira` binding.
 - A save checks only a new or a changed repository binding. A binding is new when the saved set at the submitted version has no binding of its name. A binding is changed when its kind or a field of its configuration differs from the saved binding.
 - For each new or changed repository binding, the save checks that the address host is in the SSH host set of the platform. Another host refuses the write with `project.bindings.repository.address_invalid`.
 - Then the save releases the key of the `ssh_credential` under the human identity. It performs one `git ls-remote` with that key and a 30 s deadline before the transaction.
@@ -1043,7 +1072,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `project.suite_pass.not_proposed`                            | The binding gets no suite pass proposal: its configuration holds no `pull_request` action with `landing: human`. An absent `landing` reads as `human`.                                                                                                                                                                                                                                                                           | environment suite-pass plan                                                                                                                                                                                                                 |
 | 400   | `project.bindings.duplicate_resource`                        | Two bindings use the same resource.                                                                                                                                                                                                                                                                                                                                                                                              | binding apply                                                                                                                                                                                                                               |
 | 400   | `project.bindings.link_trust_invalid`                        | The `link_trust` of a binding is invalid, or a repository binding of a platform other than `github` holds it; `details: { binding, field, reason, actor_id }`. `reason` is `type_invalid`, `too_many`, `duplicate`, `id_invalid` or `platform_unsupported`.                                                                                                                                                                      | binding apply, binding check                                                                                                                                                                                                                |
-| 400   | `project.bindings.inbox_invalid`                             | The `inbox` of a binding is invalid, or a repository binding holds it; `details: { binding, field, reason }`. `field` is `inbox`, `actor_id` or `handle`. `reason` is `type_invalid`, `id_invalid`, `handle_invalid` or `platform_unsupported`.                                                                                                                                                                                  | binding apply, binding check                                                                                                                                                                                                                |
+| 400   | `project.bindings.inbox_invalid`                             | The `inbox` of a binding is invalid, or a repository binding or a `jira` conversation binding holds it; `details: { binding, field, reason }`. `field` is `inbox`, `actor_id` or `handle`. `reason` is `type_invalid`, `id_invalid`, `handle_invalid` or `platform_unsupported`.                                                                                                                                                 | binding apply, binding check                                                                                                                                                                                                                |
 | 409   | `project.bindings.inbox_taken`                               | A binding with `inbox` of another project names the same resource; `details: { resource_identity, project_id }`. `project_id` is the other project.                                                                                                                                                                                                                                                                              | binding apply                                                                                                                                                                                                                               |
 | 400   | `project.bindings.repository.address_invalid`                | The repository address is invalid, or its host is outside the SSH host set of the platform. Binding check and binding verify answer a host outside the set as `failure_reason: address_invalid`.                                                                                                                                                                                                                                 | binding apply, binding check, environment show                                                                                                                                                                                              |
 | 400   | `project.bindings.repository.action_unsupported`             | A binding of the git-only platform `gitlab` or `bitbucket` names a `credential` or the action `pull_request`.                                                                                                                                                                                                                                                                                                                    | binding apply, binding check                                                                                                                                                                                                                |

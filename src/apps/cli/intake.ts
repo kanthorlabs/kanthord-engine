@@ -5,11 +5,13 @@ import { identitySchema } from "../../kernel/identity.ts";
 import { AccessPolicy } from "../../kernel/operation.ts";
 import { httpClient, resolveClient } from "../../gateway/client.ts";
 import {
+  intakeCredentialOperations,
   intakeOperations,
   OUTBOUND_LIST_LIMIT_MAX,
   OUTBOUND_REQUEST_ID_PREFIX,
 } from "../../intake/contract.ts";
 import { CommandName, PROGRAM_NAME } from "./constants.ts";
+import { addCredentialGroup } from "./credential.ts";
 import { addEventCommands } from "./intake-event.ts";
 import { addInboundCommands } from "./intake-inbound.ts";
 import {
@@ -182,6 +184,20 @@ export function addIntakeCommand(program: Command): void {
       singleUse("--token"),
     );
   intake.action(() => intake.help());
+  addCredentialGroup(intake, {
+    name: CommandName.Intake,
+    description: "Intake credential commands",
+    operations: intakeCredentialOperations,
+    example: {
+      platform: "jira",
+      metadata: {
+        site: "example.atlassian.net",
+        cloud_id: "<cloud-id>",
+        email: "<account-email>",
+      },
+      secret: { key: "<scoped-api-token>" },
+    },
+  });
   addInboundCommands(intake);
   addEventCommands(intake);
   const outbound = intake

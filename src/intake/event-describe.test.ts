@@ -36,6 +36,17 @@ import {
 import { insertEvent } from "./event-store.ts";
 import { IntakeService } from "./index.ts";
 import { allocateInboundId, insertInbound } from "./inbound-store.ts";
+import {
+  adfDocument,
+  adfParagraph,
+  JIRA_CREATED_MS,
+  JIRA_DISPLAY_NAME,
+  JIRA_ISSUE_URL,
+  JIRA_RESOURCE,
+  JIRA_WEBHOOK_EVENT,
+  jiraBytes,
+  jiraWebhookComment,
+} from "./jira-test-support.ts";
 import { intakeMigrations } from "./migrations.ts";
 import { unusedActionDependencies } from "./test-support.ts";
 
@@ -46,6 +57,7 @@ const NO_CHANGES = 0;
 const AWS_KEY = "AK" + "IA" + "A".repeat(16);
 const BODY_PREFIX = "key ";
 const BODY_SUFFIX = " end";
+const ADF_TEXT = "one\ntwo";
 
 function harness(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -109,6 +121,32 @@ function harness(t: TestContext) {
         created_at: CREATED_AT,
       }),
     );
+  const jiraInboundId = allocateInboundId();
+  store.transaction((tx) =>
+    insertInbound(tx, jiraInboundId, {
+      project_id: PROJECT_ID,
+      kind: InboundKind.Webhook,
+      platform: InboundPlatform.Jira,
+      consumer: Consumer.MissionDeliveryAdmit,
+      credential: null,
+      configuration: {
+        resource_kind: ResourceKind.Conversation,
+        resource: JIRA_RESOURCE,
+      },
+      checkpoint: null,
+      created_at: CREATED_AT,
+    }),
+  );
+  const addJiraEvent = (event: Uint8Array) =>
+    store.transaction((tx) =>
+      insertEvent(tx, {
+        inbound_id: jiraInboundId,
+        event_id: `event-${(sequence += 1)}`,
+        event,
+        metadata: { event: JIRA_WEBHOOK_EVENT },
+        created_at: CREATED_AT,
+      }),
+    );
   const changes = () =>
     Number(
       (
@@ -117,7 +155,7 @@ function harness(t: TestContext) {
         }
       ).total,
     );
-  return { describe, addEvent, changes };
+  return { describe, addEvent, addJiraEvent, changes };
 }
 
 async function refusal(promise: Promise<unknown>): Promise<OperationError> {
@@ -206,4 +244,50 @@ test("a call under another service identity fails the assertion", async (t) => {
     h.describe(id, SCHEDULER_SERVICE_NAME),
     assert.AssertionError,
   );
+});
+
+test("a stored Jira comment answers the display name, the whole text, the issue URL and the time", async (t) => {
+  const h = harness(t);
+  const body = "y".repeat(70000);
+  const id = h.addJiraEvent(jiraBytes(jiraWebhookComment({ body })));
+  assert.deepEqual(await h.describe(id), {
+    author: JIRA_DISPLAY_NAME,
+    body,
+    url: JIRA_ISSUE_URL,
+    occurred_at: JIRA_CREATED_MS,
+  });
+});
+
+test("a stored Jira comment with an ADF body answers plain text", async (t) => {
+  const h = harness(t);
+  const body = adfDocument(adfParagraph("one"), adfParagraph("two"));
+  const answer = (await h.describe(
+    h.addJiraEvent(jiraBytes(jiraWebhookComment({ body }))),
+  )) as { body: string };
+  assert.equal(answer.body, ADF_TEXT);
+});
+
+test("a Jira body with a token answers the marker of its rule in place of the token", async (t) => {
+  const h = harness(t);
+  const id = h.addJiraEvent(
+    jiraBytes(
+      jiraWebhookComment({ body: BODY_PREFIX + AWS_KEY + BODY_SUFFIX }),
+    ),
+  );
+  const answer = (await h.describe(id)) as { body: string };
+  assert.equal(
+    answer.body,
+    BODY_PREFIX + tracerMarker(SensitiveRule.AwsAccessKeyId) + BODY_SUFFIX,
+  );
+});
+
+test("a stored Jira event of another kind answers four null fields", async (t) => {
+  const h = harness(t);
+  const id = h.addJiraEvent(Buffer.from("{}"));
+  assert.deepEqual(await h.describe(id), {
+    author: null,
+    body: null,
+    url: null,
+    occurred_at: null,
+  });
 });
