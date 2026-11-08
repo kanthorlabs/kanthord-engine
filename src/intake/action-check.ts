@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import {
   apiKeySecretSchema,
+  type CredentialMetadataFn,
   type Grant,
   type GrantFacts,
   GrantKind,
@@ -37,9 +38,9 @@ import {
 } from "../repository/index.ts";
 import { SshAgentErrorCode } from "../repository/ssh-agent.ts";
 import {
-  OutboundOperation,
   OutboundRequestState,
   PLATFORM_CALL_DEADLINE_MS,
+  REPLY_OPERATIONS,
   replyRequestKey,
   ResultClass,
 } from "./contract.ts";
@@ -81,6 +82,7 @@ export interface IntakeCustody {
     tx: Transaction,
     request: { credential: string; platform: string },
   ): void;
+  credentialMetadata: CredentialMetadataFn;
 }
 
 export interface ActionCheckDependencies {
@@ -204,16 +206,14 @@ function foldReply(
   projectId: string,
   facts: Readonly<ReplyRequestFacts>,
 ): CheckFold {
-  const request = findByKey(
-    tx,
-    projectId,
-    OutboundOperation.GitHubIssueComment,
-    replyRequestKey(
-      facts.node_id,
-      facts.attempt,
-      facts.frozen_action.configuration.external_link,
-    ),
+  const requestKey = replyRequestKey(
+    facts.node_id,
+    facts.attempt,
+    facts.frozen_action.configuration.external_link,
   );
+  const request = REPLY_OPERATIONS.map((operation) =>
+    findByKey(tx, projectId, operation, requestKey),
+  ).find((found) => found !== null);
   return {
     end_state:
       request?.state === OutboundRequestState.Succeeded

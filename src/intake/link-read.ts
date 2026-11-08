@@ -10,7 +10,10 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
-import { ExternalLinkKind } from "../kernel/external-link.ts";
+import {
+  type ExternalLink,
+  ExternalLinkKind,
+} from "../kernel/external-link.ts";
 import { MISSION_SERVICE_NAME } from "../mission/contract.ts";
 import type { ConversationBinding } from "../project/contract.ts";
 import {
@@ -21,12 +24,21 @@ import {
 } from "../repository/github.ts";
 import { type IntakeCustody, platformFailure } from "./action-check.ts";
 import {
+  InboundPlatform,
   IntakeErrorCode,
   type intakeOperations,
   PLATFORM_CALL_DEADLINE_MS,
 } from "./contract.ts";
+import { Platform } from "./credential-platform.ts";
 import { findEvent, insertEvent } from "./event-store.ts";
 import { newestInboundOf } from "./inbound-store.ts";
+import {
+  type JiraCall,
+  jiraCredentialsOf,
+  jiraSiteOf,
+  listJiraComments,
+} from "./jira.ts";
+import { platformFailure as jiraPlatformFailure } from "./platform-failure.ts";
 import { releaseInboundGrant } from "./poll.ts";
 
 const VALIDATION_FAILED_CODE = "gateway.request.validation_failed";
@@ -45,7 +57,10 @@ export interface LinkBindings {
 export interface LinkReadDependencies {
   store: Store;
   identity: ServiceIdentity;
-  custody: Pick<IntakeCustody, "authorizeOperation" | "release">;
+  custody: Pick<
+    IntakeCustody,
+    "authorizeOperation" | "release" | "credentialMetadata"
+  >;
   github: Pick<GitHubPlatform, "listIssueCommentsOf">;
   linkBindings: LinkBindings;
   holdEvents(inboundEventIds: readonly string[]): void;
@@ -58,6 +73,13 @@ interface Hold {
 interface LinkTarget {
   inboundId: string;
   repository: string;
+  metadata: unknown;
+}
+
+interface ListedItem {
+  id: string;
+  type: string;
+  body: Uint8Array;
 }
 
 function authorizeLinkRead(caller: CallerContext): void {
@@ -117,10 +139,49 @@ function releaseLinkTarget(
     },
     InboundOperation.LinkRead,
   );
-  return { inboundId: inbound.id, repository: binding.repository };
+  return {
+    inboundId: inbound.id,
+    repository: binding.repository,
+    metadata:
+      binding.platform === InboundPlatform.Jira
+        ? (dependencies.custody.credentialMetadata(tx, binding.credential)
+            ?.metadata ?? null)
+        : null,
+  };
+}
+
+async function listJiraItems(
+  caller: CallerContext,
+  target: LinkTarget,
+  material: Material,
+  key: string,
+): Promise<ListedItem[]> {
+  const call: JiraCall = {
+    credentials: jiraCredentialsOf(target.metadata, material.value()),
+    signal: caller.context.signal,
+    deadlineAt: Date.now() + PLATFORM_CALL_DEADLINE_MS,
+  };
+  const answer = await listJiraComments(call, {
+    site: jiraSiteOf(target.repository),
+    key,
+  });
+  if (!answer.ok) throw jiraPlatformFailure(Platform.Jira, answer);
+  return answer.value;
 }
 
 async function listItems(
+  dependencies: LinkReadDependencies,
+  caller: CallerContext,
+  target: LinkTarget,
+  material: Material,
+  link: ExternalLink,
+): Promise<ListedItem[]> {
+  if (link.kind === ExternalLinkKind.JiraIssue)
+    return listJiraItems(caller, target, material, link.key);
+  return listGitHubItems(dependencies, caller, target, material, link.number);
+}
+
+async function listGitHubItems(
   dependencies: LinkReadDependencies,
   caller: CallerContext,
   target: LinkTarget,
@@ -145,7 +206,7 @@ async function listItems(
 function storeItems(
   tx: Transaction,
   inboundId: string,
-  events: GitHubEvent[],
+  events: ListedItem[],
 ): { inbound_event_id: string }[] {
   return events.map((event) => ({
     inbound_event_id:
@@ -172,16 +233,12 @@ export async function readLink(
       releaseLinkTarget(dependencies, tx, input, hold),
     );
     assert.ok(hold.material, "A committed release holds the material.");
-    assert.ok(
-      input.external_link.kind === ExternalLinkKind.GitHubIssue,
-      "Only a GitHub issue link has a link read.",
-    );
     const events = await listItems(
       dependencies,
       caller,
       target,
       hold.material,
-      input.external_link.number,
+      input.external_link,
     );
     const answer = caller.commit((tx) => ({
       items: storeItems(tx, target.inboundId, events),

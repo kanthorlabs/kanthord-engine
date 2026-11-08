@@ -51,6 +51,7 @@ import {
   OutboundOperation,
   type OutboundOperationValue,
   type PlatformAddress,
+  REPLY_OPERATIONS,
   replyRequestKey,
   ResultClass,
   type ResultClassAnswer,
@@ -230,7 +231,10 @@ function authorizeReplyPerform(
   const { grant, granted, body, held } = request;
   const { facts } = granted;
   const operation = operationOf(facts.frozen_action.action, grant.platform);
-  assert.equal(operation, OutboundOperation.GitHubIssueComment);
+  assert.ok(
+    REPLY_OPERATIONS.some((candidate) => candidate === operation),
+    "A reply maps to a comment operation.",
+  );
   assert.ok(granted.credential !== null, "A reply names its credential.");
   const link = facts.frozen_action.configuration.external_link;
   if (
@@ -248,6 +252,11 @@ function authorizeReplyPerform(
     project_id: granted.project_id,
     request_key: body.request_key,
     comment: body.comment,
+    operation,
+    metadata:
+      operation === OutboundOperation.JiraIssueComment
+        ? (custody.credentialMetadata(tx, granted.credential)?.metadata ?? null)
+        : null,
   };
   return {
     operation,

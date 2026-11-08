@@ -397,6 +397,7 @@ function fakeCustody(credentials: Map<string, string>) {
   };
   const custody: IntakeCustody = {
     custodySuitability,
+    credentialMetadata: () => null,
     authorizeOperation<R extends GrantRequest>(
       tx: Transaction,
       request: R,

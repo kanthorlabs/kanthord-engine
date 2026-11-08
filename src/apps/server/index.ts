@@ -1226,6 +1226,8 @@ export function composeServices(options: {
       consume: (...args) => custody.consume(...args),
       grantFacts,
       custodySuitability: (...args) => custody.custodySuitability(...args),
+      credentialMetadata: (tx, name) =>
+        custody.credentialMetadata(tx, name, SERVER_HOLDER),
     },
     github,
     gitWriter,

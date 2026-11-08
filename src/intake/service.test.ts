@@ -306,6 +306,7 @@ async function reaches(
 function pollCustody(): IntakeCustody {
   return {
     custodySuitability: () => {},
+    credentialMetadata: () => null,
     authorizeOperation<R extends GrantRequest>(
       _tx: unknown,
       request: R,

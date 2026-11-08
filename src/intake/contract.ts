@@ -106,6 +106,7 @@ export const OutboundOperation = {
   GitHubPullRequestMerge: "github.pull_request_merge",
   GitMergePush: "git.merge_push",
   GitHubIssueComment: "github.issue_comment",
+  JiraIssueComment: "jira.issue_comment",
   S3DeleteObject: "s3.delete_object",
 } as const;
 export const ResultClass = {
@@ -132,6 +133,7 @@ export const ActionTablePlatform = {
   GitHub: "github",
   GitLab: "gitlab",
   Bitbucket: "bitbucket",
+  Jira: "jira",
 } as const;
 export const ACTION_TABLE = [
   {
@@ -159,6 +161,15 @@ export const ACTION_TABLE = [
     platform: ActionTablePlatform.GitHub,
     operation: OutboundOperation.GitHubIssueComment,
   },
+  {
+    action: ActionTableAction.Reply,
+    platform: ActionTablePlatform.Jira,
+    operation: OutboundOperation.JiraIssueComment,
+  },
+] as const;
+export const REPLY_OPERATIONS = [
+  OutboundOperation.GitHubIssueComment,
+  OutboundOperation.JiraIssueComment,
 ] as const;
 export const ActionReadMethod = {
   PullRequestGet: "github-pull-request-get",

@@ -106,6 +106,7 @@ export function unusedActionDependencies(): Pick<
       consume: unexpectedCollaboration,
       grantFacts: unexpectedCollaboration,
       custodySuitability: unexpectedCollaboration,
+      credentialMetadata: unexpectedCollaboration,
     },
     github: new GitHubPlatform({ baseUrl: CLOSED_LOCAL_PORT }),
     gitWriter: {
@@ -190,6 +191,7 @@ export interface SshCustodyScript {
   secret: unknown;
   refusal: Error | null;
   sshFacts?: { binding_id: string; address: string };
+  metadata?: Record<string, unknown> | null;
 }
 
 export function sshCustody(script: SshCustodyScript): {
@@ -256,6 +258,12 @@ export function sshCustody(script: SshCustodyScript): {
         facts: grant.facts,
       })) as IntakeCustody["grantFacts"],
     custodySuitability: unexpectedCollaboration,
+    credentialMetadata: (_tx, name) => ({
+      id: name,
+      name,
+      platform: script.platform,
+      metadata: script.metadata ?? null,
+    }),
   };
   return { custody, requests, materials, privateKey };
 }

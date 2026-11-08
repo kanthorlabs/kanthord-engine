@@ -412,7 +412,13 @@ function linkTo(resourceIdentity: string, number: number): ExternalLink {
 
 function replyHarness(
   t: TestContext,
-  options: { replyPolicy: boolean; links: ExternalLink[]; intent?: Intent },
+  options: {
+    replyPolicy: boolean;
+    links: ExternalLink[];
+    intent?: Intent;
+    resource?: string;
+    platform?: string;
+  },
 ) {
   const h = missionHarness(t, testHumanIdentity("ulrich", "Ulrich", "token"));
   const projectId = createIdentity("project");
@@ -429,7 +435,7 @@ function replyHarness(
       binding_id: bindingId,
       project_id: projectId,
       name: CONVERSATION_NAME,
-      resource_identity: CONVERSATION_RESOURCE,
+      resource_identity: options.resource ?? CONVERSATION_RESOURCE,
       revision: FIRST_ATTEMPT,
       tombstone: false,
       disabled: false,
@@ -443,7 +449,7 @@ function replyHarness(
             project_id: projectId,
             name: CONVERSATION_NAME,
             key: `${CONVERSATION_NAME}.${ConversationAction.Reply}`,
-            platform: "github",
+            platform: options.platform ?? "github",
             repository: "owner/repo",
             credential: "github",
             action: ConversationAction.Reply,
@@ -535,4 +541,60 @@ test("a conversation binding without a reply policy, an examine revision and a l
   ];
   for (const options of cases)
     assert.deepEqual(replyHarness(t, options).actions(), []);
+});
+
+const JIRA_RESOURCE_IDENTITY = "conversation:jira:acme.atlassian.net/KD";
+const OTHER_JIRA_RESOURCE_IDENTITY = "conversation:jira:acme.atlassian.net/OPS";
+
+function jiraLinkTo(resourceIdentity: string, key: string): ExternalLink {
+  return {
+    kind: ExternalLinkKind.JiraIssue,
+    resource_identity: resourceIdentity,
+    key,
+  };
+}
+
+test("a jira binding with a reply policy freezes one reply action for each jira_issue link", (t) => {
+  const first = jiraLinkTo(JIRA_RESOURCE_IDENTITY, "KD-1");
+  const other = jiraLinkTo(OTHER_JIRA_RESOURCE_IDENTITY, "OPS-1");
+  const second = jiraLinkTo(JIRA_RESOURCE_IDENTITY, "KD-2");
+  const h = replyHarness(t, {
+    replyPolicy: true,
+    links: [first, other, second],
+    resource: JIRA_RESOURCE_IDENTITY,
+    platform: "jira",
+  });
+  const actions = h.actions();
+  assert.deepEqual(actions, [
+    {
+      key: `${CONVERSATION_NAME}.reply.0`,
+      binding_id: h.conversationId,
+      action: ConversationAction.Reply,
+      expected_end_state: ExpectedEndState.Posted,
+      follows: null,
+      configuration: { external_link: first },
+    },
+    {
+      key: `${CONVERSATION_NAME}.reply.2`,
+      binding_id: h.conversationId,
+      action: ConversationAction.Reply,
+      expected_end_state: ExpectedEndState.Posted,
+      follows: null,
+      configuration: { external_link: second },
+    },
+  ]);
+  for (const action of actions)
+    assert.ok(actionKeySchema.safeParse(action.key).success);
+});
+
+test("a jira binding without a reply policy derives no reply action", (t) => {
+  assert.deepEqual(
+    replyHarness(t, {
+      replyPolicy: false,
+      links: [jiraLinkTo(JIRA_RESOURCE_IDENTITY, "KD-1")],
+      resource: JIRA_RESOURCE_IDENTITY,
+      platform: "jira",
+    }).actions(),
+    [],
+  );
 });

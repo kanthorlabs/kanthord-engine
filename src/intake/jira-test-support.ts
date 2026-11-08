@@ -1,3 +1,6 @@
+import type { TestContext } from "node:test";
+import { isString } from "../kernel/values.ts";
+
 export const JIRA_SITE = "acme.atlassian.net";
 export const JIRA_PROJECT_KEY = "KD";
 export const JIRA_RESOURCE = `${JIRA_SITE}/${JIRA_PROJECT_KEY}`;
@@ -72,4 +75,80 @@ export function adfParagraph(...texts: string[]): object {
 
 export function jiraBytes(value: unknown): Uint8Array {
   return new Uint8Array(Buffer.from(JSON.stringify(value), "utf8"));
+}
+
+export const JIRA_LISTED_EVENT = "comment_listed";
+export const JIRA_CLOUD_ID = "0b6e1f2c-7a41-4d6f-9b53-3c1f0a9d8e21";
+export const JIRA_EMAIL = "bot@example.com";
+export const JIRA_TOKEN = "test_private-jira-token";
+export const JIRA_METADATA = {
+  site: JIRA_SITE,
+  cloud_id: JIRA_CLOUD_ID,
+  email: JIRA_EMAIL,
+};
+export const JIRA_API_ORIGIN = `https://api.atlassian.com/ex/jira/${JIRA_CLOUD_ID}`;
+export const JIRA_BASIC_AUTHORIZATION = `Basic ${Buffer.from(`${JIRA_EMAIL}:${JIRA_TOKEN}`).toString("base64")}`;
+export const JIRA_TOKEN_ACCOUNT_ID = "5b10ac8d82e05b22cc7d4ef5";
+export const JIRA_SECOND_COMMENT_ID = "10043";
+export const JIRA_COMMENTS_PATH = `/rest/api/3/issue/${JIRA_ISSUE_KEY}/comment`;
+export const JIRA_LIST_URL = `${JIRA_API_ORIGIN}${JIRA_COMMENTS_PATH}?orderBy=-created&maxResults=100`;
+export const JIRA_POST_URL = `${JIRA_API_ORIGIN}${JIRA_COMMENTS_PATH}`;
+export const JIRA_MYSELF_URL = `${JIRA_API_ORIGIN}/rest/api/3/myself`;
+const OK_STATUS = 200;
+
+export interface JiraRequest {
+  method: string;
+  url: string;
+  authorization: string | null;
+  body: unknown;
+}
+
+export function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+export function okResponse(body: unknown): Response {
+  return jsonResponse(OK_STATUS, body);
+}
+
+export function jiraListedPage(...comments: object[]): object {
+  return {
+    startAt: 0,
+    maxResults: comments.length,
+    total: comments.length,
+    comments,
+  };
+}
+
+export function jiraListedComment(overrides: object = {}): object {
+  return {
+    self: `https://${JIRA_SITE}/rest/api/3/issue/10001/comment/${JIRA_COMMENT_ID}`,
+    ...jiraCommentFacts(overrides),
+  };
+}
+
+export function mockJiraFetch(
+  t: TestContext,
+  answer: (request: JiraRequest) => Response | Promise<Response>,
+): { requests: JiraRequest[] } {
+  const requests: JiraRequest[] = [];
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async (url: Parameters<typeof globalThis.fetch>[0], init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      const request: JiraRequest = {
+        method: init?.method ?? "GET",
+        url: String(url),
+        authorization: headers.get("authorization"),
+        body: isString(init?.body) ? JSON.parse(init.body) : undefined,
+      };
+      requests.push(request);
+      return answer(request);
+    },
+  );
+  return { requests };
 }
