@@ -193,24 +193,24 @@ is no `inbound update`, `inbound enable`, `inbound disable`, `poll now` or
 | [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | The inbound, event, outbound and credential lists only.                                                                                                             |
 | [`--force`](./common-flags.md#--force)                                           | Required on `outbound delete` only. It accepts that a repeat of a deleted request key calls the write again.                                                        |
 
-| Argument or flag                                           | Requiredness and type                                                                | Default                      | Validation and request mapping                                                                                          |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------ | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `<inbound-id>`                                             | Required inbound identity on get and delete.                                         | None                         | Map to `params.inbound_id`. Prefix `inbound_`.                                                                          |
-| `<inbound-event-id>`                                       | Required inbound event identity on get, retry and discard.                           | None                         | Map to `params.inbound_event_id`. Prefix `inbound_event_`.                                                              |
-| `--project <id>`                                           | Optional project identity on `inbound list`.                                         | Absent: no project filter    | Send `query.project_id`; Project owns the prefix declaration.                                                           |
-| `--kind <kind>`                                            | Optional inbound kind on `inbound list`.                                             | Absent: all kinds            | Send `query.kind`; closed set `webhook`, `poll`.                                                                        |
-| `--platform <platform>`                                    | Optional platform on `inbound list`.                                                 | Absent: all platforms        | Send `query.platform`; closed set of supported platforms, `github` and `jira`.                                          |
-| `--inbound <id>`                                           | Optional inbound identity on `event list`.                                           | Absent: no inbound filter    | Send `query.inbound_id`.                                                                                                |
-| `--state <state>`                                          | Optional on `event list`; required with `--from` and `--to` on `event delete`.       | Absent on a list: all states | Send `query.state` or `body.state`; closed set `pending`, `succeeded`, `failed`, `discarded`.                           |
-| `--from`, `--to`                                           | Required together with `--state` on `event delete`.                                  | None                         | Send `body.from` and `body.to`, an inclusive range of inbound event identities.                                         |
-| `--id <inbound-event-id>`                                  | Repeatable on `event delete`; excludes `--state`, `--from` and `--to`.               | None                         | Send `body.ids`, a nonempty list of at most 1000 identities.                                                            |
-| `<outbound-request-id>`                                    | Required outbound request identity on `outbound get` and `outbound discard`.         | None                         | Map to `params.outbound_request_id`. Prefix `outbound_request_`.                                                        |
-| `--project <id>` on `outbound list`                        | Optional project identity.                                                           | Absent: no project filter    | Send `query.project_id`.                                                                                                |
-| `--state <state>` on `outbound list` and `outbound delete` | Optional on `outbound list`; required with `--from` and `--to` on `outbound delete`. | Absent on a list: all states | Send `query.state` or `body.state`; closed set `pending`, `succeeded`, `failed`, `discarded`.                           |
-| `--operation <operation>`                                  | Optional on `outbound list`.                                                         | Absent: all operations       | Send `query.operation`; closed set `github.pull_request`, `git.merge_push`, `github.issue_comment`, `s3.delete_object`. |
-| `--from`, `--to` on `outbound delete`                      | Required together with `--state`.                                                    | None                         | Send `body.from` and `body.to`, an inclusive range of outbound request identities.                                      |
-| `--id <outbound-request-id>`                               | Repeatable on `outbound delete`; excludes `--state`, `--from` and `--to`.            | None                         | Send `body.ids`, a nonempty list of at most 1000 identities.                                                            |
-| `--force` on `outbound delete`                             | Required boolean switch.                                                             | `false`                      | Send `body.force`. Without it the server answers `400` `intake.outbound.request.force_required`.                        |
+| Argument or flag                                           | Requiredness and type                                                                | Default                      | Validation and request mapping                                                                                                                |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------ | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<inbound-id>`                                             | Required inbound identity on get and delete.                                         | None                         | Map to `params.inbound_id`. Prefix `inbound_`.                                                                                                |
+| `<inbound-event-id>`                                       | Required inbound event identity on get, retry and discard.                           | None                         | Map to `params.inbound_event_id`. Prefix `inbound_event_`.                                                                                    |
+| `--project <id>`                                           | Optional project identity on `inbound list`.                                         | Absent: no project filter    | Send `query.project_id`; Project owns the prefix declaration.                                                                                 |
+| `--kind <kind>`                                            | Optional inbound kind on `inbound list`.                                             | Absent: all kinds            | Send `query.kind`; closed set `webhook`, `poll`.                                                                                              |
+| `--platform <platform>`                                    | Optional platform on `inbound list`.                                                 | Absent: all platforms        | Send `query.platform`; closed set of supported platforms, `github` and `jira`.                                                                |
+| `--inbound <id>`                                           | Optional inbound identity on `event list`.                                           | Absent: no inbound filter    | Send `query.inbound_id`.                                                                                                                      |
+| `--state <state>`                                          | Optional on `event list`; required with `--from` and `--to` on `event delete`.       | Absent on a list: all states | Send `query.state` or `body.state`; closed set `pending`, `succeeded`, `failed`, `discarded`.                                                 |
+| `--from`, `--to`                                           | Required together with `--state` on `event delete`.                                  | None                         | Send `body.from` and `body.to`, an inclusive range of inbound event identities.                                                               |
+| `--id <inbound-event-id>`                                  | Repeatable on `event delete`; excludes `--state`, `--from` and `--to`.               | None                         | Send `body.ids`, a nonempty list of at most 1000 identities.                                                                                  |
+| `<outbound-request-id>`                                    | Required outbound request identity on `outbound get` and `outbound discard`.         | None                         | Map to `params.outbound_request_id`. Prefix `outbound_request_`.                                                                              |
+| `--project <id>` on `outbound list`                        | Optional project identity.                                                           | Absent: no project filter    | Send `query.project_id`.                                                                                                                      |
+| `--state <state>` on `outbound list` and `outbound delete` | Optional on `outbound list`; required with `--from` and `--to` on `outbound delete`. | Absent on a list: all states | Send `query.state` or `body.state`; closed set `pending`, `succeeded`, `failed`, `discarded`.                                                 |
+| `--operation <operation>`                                  | Optional on `outbound list`.                                                         | Absent: all operations       | Send `query.operation`; closed set `github.pull_request`, `git.merge_push`, `github.issue_comment`, `jira.issue_comment`, `s3.delete_object`. |
+| `--from`, `--to` on `outbound delete`                      | Required together with `--state`.                                                    | None                         | Send `body.from` and `body.to`, an inclusive range of outbound request identities.                                                            |
+| `--id <outbound-request-id>`                               | Repeatable on `outbound delete`; excludes `--state`, `--from` and `--to`.            | None                         | Send `body.ids`, a nonempty list of at most 1000 identities.                                                                                  |
+| `--force` on `outbound delete`                             | Required boolean switch.                                                             | `false`                      | Send `body.force`. Without it the server answers `400` `intake.outbound.request.force_required`.                                              |
 
 Supplied list filters combine by AND. A filter grants no authority. An omitted
 optional filter stays absent rather than becoming `null`. The commands follow
@@ -622,10 +622,24 @@ marker. A call that ends with no answer sets the request `failed`. A repeat of a
 posts again. A repeat of a `succeeded` request answers the stored address and
 posts nothing.
 
+For a `reply` action of a conversation binding of platform `jira`,
+`intake.action.perform` runs the outbound operation `jira.issue_comment`. The
+request key, the input and the repeat rules are those of `github.issue_comment`.
+Intake posts `comment` as an Atlassian document body with `POST
+/rest/api/3/issue/{key}/comment`, where `key` is the `key` of the `jira_issue`
+link, and it uses the credential of the conversation binding revision. The stored
+result is `{ update_key, actor_id }`, where `update_key` is `jira_comment:<site>:<id>`
+of the created comment. Before the first post on a link with no succeeded reply of
+any project, Intake reads `accountId` with `GET /rest/api/3/myself` and records
+`{ actor_id }` in the result of the pending request. A reply has no read-back, and
+its body holds no hidden marker. A call that ends with no answer sets the request
+`failed`. A failed call answers a result class with the code
+`intake.platform.jira.<class>`.
+
 `intake.outbound.reply.match` is a `service` operation with no CLI command and
 no HTTP route. Only the Mission Service calls it; another caller fails an
 assertion. It takes `{ update_key, external_link }` and answers
-`{ succeeded, pending_actor_ids }`. It reads the `github.issue_comment` requests
+`{ succeeded, pending_actor_ids }`. It reads the `github.issue_comment` and `jira.issue_comment` requests
 of every project and finds the requests of a link by the suffix
 `:<canonical link>` of the request key. `succeeded` is true when the `update_key`
 of the result of a `succeeded` reply request equals `update_key`, on any link.
@@ -693,7 +707,12 @@ its stored row, and the answer holds the `inbound_event_id` of that row. A link
 resource with no inbound in the project answers `409`
 `intake.link.inbound_missing` with details `{ external_link }` before any
 release. A failed GitHub call answers `502` `repository.platform.github.<class>`
-and stores no row. The Mission Service hands each item to
+and stores no row. For `jira_issue` it calls `GET /rest/api/3/issue/{key}/comment`
+with `orderBy=-created` and `maxResults=100`, one page, with the credential
+metadata `{ site, cloud_id, email }`. Each item maps to the event id
+`jira_comment:<site>:<id>` and the metadata `{ "event": "comment_listed" }`. A
+failed Jira call answers `502` `intake.platform.jira.<class>` and stores no row.
+The Mission Service hands each item to
 `mission.delivery.admit` through the handoff of the Intake Service. The event
 state records the result, and the dispatcher hands no item twice.
 

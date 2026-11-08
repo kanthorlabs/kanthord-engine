@@ -49,6 +49,7 @@ import {
   JIRA_RESOURCE_IDENTITY,
   JIRA_SECOND_COMMENT_ID,
   JIRA_SITE,
+  JIRA_TOKEN,
   JIRA_UPDATE_KEY,
   jiraListedComment,
   jiraListedPage,
@@ -158,7 +159,9 @@ function harness(
         return {
           credential_id: createIdentity("credential"),
           platform: grant.platform,
-          value: () => ({ key: TOKEN }),
+          value: () => ({
+            key: grant.platform === InboundPlatform.Jira ? JIRA_TOKEN : TOKEN,
+          }),
           drop: () => drops.push(credential),
         };
       },
