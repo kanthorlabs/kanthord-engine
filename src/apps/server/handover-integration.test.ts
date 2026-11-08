@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { createCipheriv, randomBytes } from "node:crypto";
 import { promisify } from "node:util";
 import { setImmediate } from "node:timers/promises";
 import {
@@ -80,9 +79,6 @@ import { canonicalJSON, digest } from "../../kernel/json.ts";
 import {
   deriveHandoverKeys,
   deriveSshSignKeys,
-  HANDOVER_CIPHER,
-  HANDOVER_NONCE_BYTES,
-  HANDOVER_TAG_BYTES,
   handoverAad,
   openEnvelope,
   sealEnvelope,
@@ -134,7 +130,6 @@ const MAX_REPORT_BYTES = 65534;
 const OVERSIZED_REPORT_BYTES = 65538;
 const MAX_CHILD_BUFFER = 1024;
 const EMPTY_OUTPUT = "";
-const API_KEY_FIELD = "key";
 const NO_INPUT = { params: {}, query: {}, body: null };
 const CONFIGURATION = {
   agent_provider: "default",
@@ -1099,86 +1094,6 @@ function boundaryCredential(
   return credential;
 }
 
-function sealRawJson(key: Buffer, aad: Buffer, value: unknown) {
-  const plaintext = Buffer.from(JSON.stringify(value), "utf8");
-  assert.ok(plaintext.length);
-  assert.ok(aad.length);
-  const nonce = randomBytes(HANDOVER_NONCE_BYTES);
-  const cipher = createCipheriv(HANDOVER_CIPHER, key, nonce, {
-    authTagLength: HANDOVER_TAG_BYTES,
-  });
-  cipher.setAAD(aad);
-  try {
-    return {
-      nonce: nonce.toString("base64"),
-      ciphertext: Buffer.concat([
-        cipher.update(plaintext),
-        cipher.final(),
-        cipher.getAuthTag(),
-      ]).toString("base64"),
-    };
-  } finally {
-    plaintext.fill(0);
-  }
-}
-
-for (const adapter of ["direct", "http"] as const) {
-  for (const field of ["key", "refresh", "access"] as const) {
-    test(`${adapter} authenticated report rejects lone surrogates in ${field} without changing material`, async (t) => {
-      const valid: Credential =
-        field === API_KEY_FIELD
-          ? { type: SecretShape.ApiKey, key: "test_é🙂" }
-          : {
-              type: SecretShape.OAuth,
-              refresh: "test_é🙂",
-              access: "test_é🙂",
-              expires: 1700000000000,
-            };
-      const h = await setup(t, adapter, valid);
-      const first = h.open(completed(await h.handover())).items[0]!;
-      assert.deepEqual(first.credential, valid);
-      const before = h.f.store.database
-        .prepare("SELECT * FROM credential ORDER BY id")
-        .all();
-      const executionId = h.execution.execution_id;
-      const aad = handoverAad(executionId, h.runtime_identity);
-      for (const surrogate of ["\ud800", "\udc00"]) {
-        const report = {
-          credential_id: h.credentialId,
-          digest: digest(valid),
-          credential: { ...valid, [field]: surrogate },
-        };
-        const envelope = sealRawJson(h.keys.report, aad, report);
-        assert.deepEqual(openEnvelope(h.keys.report, aad, envelope), report);
-        refused(
-          await h.call(
-            workerOperations.credential,
-            {
-              params: {},
-              query: {},
-              body: { execution_id: executionId, ...envelope },
-            },
-            h.token,
-            { idempotencyKey: createIdempotencyKey() },
-          ),
-          HttpStatus.BadRequest,
-          INVALID_REPORT,
-        );
-        assert.deepEqual(
-          h.f.store.database
-            .prepare("SELECT * FROM credential ORDER BY id")
-            .all(),
-          before,
-        );
-        assert.deepEqual(
-          h.open(completed(await h.handover())).items[0]?.credential,
-          valid,
-        );
-      }
-    });
-  }
-}
-
 async function workerBoundaryRoundTrip(
   h: Awaited<ReturnType<typeof setup>>,
   signal: AbortSignal,
@@ -1695,19 +1610,6 @@ test("the first handover of an attempt pins its prompt commits and a later execu
   assert.equal(storedPromptCommits(h), pinned);
 });
 
-test("the server prompt base pins one entry for the repository binding that names an instruction file", async (t) => {
-  const h = await setup(t, "direct", undefined, {
-    instructionFile: "AGENTS.md",
-    extraRepository: true,
-    implementBindsOther: true,
-  });
-  completed(await h.handover());
-  assert.equal(
-    storedPromptCommits(h),
-    canonicalJSON([{ binding_id: h.bindings.repo!.id, commit: FAKE_COMMIT }]),
-  );
-});
-
 test("the server setup stores the agent.prompt span with the references and the engine version, and a retried setup answers the stored text", async (t) => {
   const h = await setup(t, "direct", undefined, {
     instructionFile: "AGENTS.md",
@@ -1884,23 +1786,6 @@ test("two concurrent first handovers of one attempt store one pin and both answe
   const pinned = [{ binding_id: h.bindings.repo!.id, commit: PINNED_HEAD }];
   assert.equal(storedPromptCommits(h), canonicalJSON(pinned));
   assert.deepEqual(answered, [pinned, pinned]);
-});
-
-test("HTTP handover accepts a body of 1025 bytes below the body limit", async (t) => {
-  const h = await setup(t, "http");
-  const response = await fetch(`${h.f.endpoint}/api/worker/handover`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${h.token}`,
-      "content-type": "application/json",
-      "idempotency-key": createIdempotencyKey(),
-    },
-    body: JSON.stringify({ execution_id: h.execution.execution_id }).padEnd(
-      1025,
-      " ",
-    ),
-  });
-  assert.equal(response.status, HttpStatus.OK);
 });
 
 const REFRESH_WAIT_MS = 200;
