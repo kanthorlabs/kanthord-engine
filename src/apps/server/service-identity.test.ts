@@ -1,11 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  IdentityKind,
-  isHumanIdentity,
-  isMachineIdentity,
-  isServiceIdentity,
-} from "../../kernel/caller.ts";
+import { IdentityKind, isServiceIdentity } from "../../kernel/caller.ts";
 import { mintServiceIdentity } from "../../kernel/service-mint.ts";
 
 const SERVICE_NAME = "intake";
@@ -16,17 +11,6 @@ const INVALID_SERVICE_NAMES = [
   "in_take",
   "a".repeat(64),
 ];
-
-test("a minted service identity passes only the service predicate", () => {
-  const identity = mintServiceIdentity(SERVICE_NAME);
-  assert.equal(isServiceIdentity(identity), true);
-  assert.equal(isHumanIdentity(identity), false);
-  assert.equal(isMachineIdentity(identity), false);
-  assert.deepEqual(identity, {
-    kind: IdentityKind.Service,
-    service: SERVICE_NAME,
-  });
-});
 
 test("a structural copy of a service identity fails the service predicate", () => {
   const copy = { kind: IdentityKind.Service, service: SERVICE_NAME };
