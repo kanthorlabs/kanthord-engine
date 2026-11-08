@@ -42,6 +42,7 @@ const TEST_SCRIPTS = new Set([
   "scripts/test-path.test.mjs",
   "scripts/affected-tests.test.mjs",
   "scripts/suite-pass.test.mjs",
+  "scripts/pi-tools.test.mjs",
 ]);
 const DATA_TABLE = [
   { prefix: "static/openapi/", importer: "static/openapi.yaml" },

@@ -16,7 +16,9 @@ document.
 ## Validate
 
 - In a new worktree, run `pnpm run pi-tools:fetch` after `pnpm install`. The
-  tests fail when the `fd` and `rg` tools are absent.
+  tests fail when the `fd` and `rg` tools are absent. The fetch reads
+  `$XDG_CACHE_HOME/kanthord/pi-tools/` before a download, and writes a
+  downloaded tool to it.
 - Run `pnpm run verify` before handoff. Report each failure and each check
   that did not run.
 - Run one test file with
