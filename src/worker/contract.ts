@@ -168,11 +168,18 @@ export type ClearedChangeRequests = z.infer<typeof clearedChangeRequestsSchema>;
 export const LINK_UPDATE_LIMIT_MIN = 1;
 export const LINK_UPDATE_LIMIT_MAX = 100;
 export const LINK_UPDATE_LIMIT_DEFAULT = 20;
-export const linkUpdateExternalLinkSchema = z.strictObject({
-  kind: z.string().min(1),
-  resource_identity: z.string().min(1),
-  number: z.number().int().positive(),
-});
+export const linkUpdateExternalLinkSchema = z.union([
+  z.strictObject({
+    kind: z.string().min(1),
+    resource_identity: z.string().min(1),
+    number: z.number().int().positive(),
+  }),
+  z.strictObject({
+    kind: z.string().min(1),
+    resource_identity: z.string().min(1),
+    key: z.string().min(1),
+  }),
+]);
 export const linkUpdateContentSchema = z.strictObject({
   author: z.string(),
   body: z.string(),

@@ -472,9 +472,68 @@ test("node content holds external links that read [] when absent", () => {
   );
 });
 
+const JIRA_IDENTITY = "conversation:jira:acme.atlassian.net/KD";
+const JIRA_ISSUE = {
+  kind: ExternalLinkKind.JiraIssue,
+  resource_identity: JIRA_IDENTITY,
+  key: "KD-42",
+};
+
+test("node content holds a jira_issue link next to a github_issue link", () => {
+  assert.deepEqual(
+    contentSchema.parse({
+      ...NODE_CONTENT,
+      external_links: [JIRA_ISSUE, GITHUB_ISSUE],
+    }).external_links,
+    [JIRA_ISSUE, GITHUB_ISSUE],
+  );
+});
+
+test("node content refuses a jira_issue link with a key of another project or outside its form", () => {
+  const refused: unknown[] = [
+    { ...JIRA_ISSUE, key: "OTHER-1" },
+    { ...JIRA_ISSUE, key: "KDX-1" },
+    { ...JIRA_ISSUE, key: "KD-0" },
+    { ...JIRA_ISSUE, key: "KD-01" },
+    { ...JIRA_ISSUE, key: "KD-" },
+    { ...JIRA_ISSUE, key: "KD42" },
+    { ...JIRA_ISSUE, key: "kd-42" },
+    { ...JIRA_ISSUE, key: "KD-42 " },
+    { ...JIRA_ISSUE, number: ISSUE_NUMBER },
+    { ...JIRA_ISSUE, resource_identity: CONVERSATION_IDENTITY },
+    {
+      ...JIRA_ISSUE,
+      resource_identity: "conversation:jira:acme.example.com/KD",
+    },
+    {
+      ...JIRA_ISSUE,
+      resource_identity: "conversation:jira:acme.atlassian.net/kd",
+    },
+    {
+      ...JIRA_ISSUE,
+      resource_identity: "repository:jira:acme.atlassian.net/KD",
+    },
+    { ...GITHUB_ISSUE, key: "KD-42" },
+  ];
+  for (const link of refused)
+    assert.equal(
+      contentSchema.safeParse({ ...NODE_CONTENT, external_links: [link] })
+        .success,
+      false,
+      JSON.stringify(link),
+    );
+  assert.equal(
+    contentSchema.safeParse({
+      ...NODE_CONTENT,
+      external_links: [JIRA_ISSUE, { ...JIRA_ISSUE }],
+    }).success,
+    false,
+  );
+});
+
 test("node content refuses an invalid external link, a repeated link and more than 10 links", () => {
   const refused: unknown[] = [
-    [{ ...GITHUB_ISSUE, kind: "jira_issue" }],
+    [{ ...GITHUB_ISSUE, kind: ExternalLinkKind.JiraIssue }],
     [{ ...GITHUB_ISSUE, number: NON_POSITIVE_NUMBER }],
     [{ ...GITHUB_ISSUE, number: 1.5 }],
     [{ ...GITHUB_ISSUE, resource_identity: "repository:github:acme/app" }],

@@ -85,10 +85,13 @@ import {
   bindingScope,
   BindingState,
   ChangeKind,
+  CONVERSATION_ACTOR_ID_PATTERNS,
   ConversationAction,
   type ConversationBinding,
   conversationConfigSchema,
+  ConversationPlatform,
   type ConversationPolicy,
+  conversationResourceOf,
   type CreateMission,
   type CurrentNodePins,
   type CustodySuitability,
@@ -271,7 +274,11 @@ function refuseLinkTrust(
     { binding, field: LinkTrustField.ActorIds, reason, actor_id: actorId },
   );
 }
-function refuseInvalidLinkTrust(binding: string, linkTrust: unknown): void {
+function refuseInvalidLinkTrust(
+  binding: string,
+  linkTrust: unknown,
+  idPattern: RegExp = GITHUB_ACTOR_ID_PATTERN,
+): void {
   if (linkTrust === undefined) return;
   const actorIds = isObject(linkTrust)
     ? (linkTrust as Record<string, unknown>)[LinkTrustField.ActorIds]
@@ -282,7 +289,7 @@ function refuseInvalidLinkTrust(binding: string, linkTrust: unknown): void {
     refuseLinkTrust(binding, LinkTrustReason.TooMany);
   const seen = new Set<string>();
   for (const actorId of actorIds) {
-    if (!GITHUB_ACTOR_ID_PATTERN.test(actorId))
+    if (!idPattern.test(actorId))
       refuseLinkTrust(binding, LinkTrustReason.IdInvalid, actorId);
     if (seen.has(actorId))
       refuseLinkTrust(binding, LinkTrustReason.Duplicate, actorId);
@@ -306,8 +313,18 @@ function refuseInbox(binding: string, field: string, reason: string): never {
     { binding, field, reason },
   );
 }
-function refuseInvalidInbox(binding: string, inbox: unknown): void {
+function refuseInvalidInbox(
+  binding: string,
+  platform: ConversationPlatform,
+  inbox: unknown,
+): void {
   if (inbox === undefined) return;
+  if (platform !== ConversationPlatform.GitHub)
+    refuseInbox(
+      binding,
+      InboxField.Inbox,
+      InboxInvalidReason.PlatformUnsupported,
+    );
   if (!isObject(inbox) || Array.isArray(inbox))
     refuseInbox(binding, InboxField.Inbox, InboxInvalidReason.TypeInvalid);
   const { actor_id, handle } = inbox as Record<string, unknown>;
@@ -1684,8 +1701,12 @@ export class ProjectService implements Service, ProjectBindings {
       return;
     }
     if (binding.kind === BindingKind.Conversation) {
-      refuseInvalidLinkTrust(name, binding.config.link_trust);
-      refuseInvalidInbox(name, binding.config.inbox);
+      refuseInvalidLinkTrust(
+        name,
+        binding.config.link_trust,
+        CONVERSATION_ACTOR_ID_PATTERNS[binding.config.platform],
+      );
+      refuseInvalidInbox(name, binding.config.platform, binding.config.inbox);
       this.custodySuitability(tx, {
         credential: binding.config.credential,
         platform: binding.config.platform,
@@ -2062,7 +2083,7 @@ export class ProjectService implements Service, ProjectBindings {
       name: binding.name,
       key: `${binding.name}.${ConversationAction.Reply}`,
       platform: config.platform,
-      repository: config.repository,
+      repository: conversationResourceOf(config),
       credential: config.credential,
       action: ConversationAction.Reply,
     };
@@ -2084,7 +2105,7 @@ export class ProjectService implements Service, ProjectBindings {
       project_id: binding.project_id,
       resource_identity: binding.resource_identity,
       platform: config.platform,
-      repository: config.repository,
+      repository: conversationResourceOf(config),
       credential: config.credential,
     };
   }

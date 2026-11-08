@@ -325,7 +325,7 @@ export function linkUpdatesText(read: LinkUpdateRead): string | null {
     item.content === null
       ? []
       : [
-          `${item.new ? LINK_UPDATE_NEW_PREFIX : ""}${item.external_link.resource_identity}#${item.external_link.number} by ${item.content.author} at ${new Date(item.content.occurred_at).toISOString()}, ${item.content.url}\n${item.content.body}`,
+          `${item.new ? LINK_UPDATE_NEW_PREFIX : ""}${item.external_link.resource_identity}#${"key" in item.external_link ? item.external_link.key : item.external_link.number} by ${item.content.author} at ${new Date(item.content.occurred_at).toISOString()}, ${item.content.url}\n${item.content.body}`,
         ],
   );
   const missing = read.items

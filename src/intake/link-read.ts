@@ -10,6 +10,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
+import { ExternalLinkKind } from "../kernel/external-link.ts";
 import { MISSION_SERVICE_NAME } from "../mission/contract.ts";
 import type { ConversationBinding } from "../project/contract.ts";
 import {
@@ -171,6 +172,10 @@ export async function readLink(
       releaseLinkTarget(dependencies, tx, input, hold),
     );
     assert.ok(hold.material, "A committed release holds the material.");
+    assert.ok(
+      input.external_link.kind === ExternalLinkKind.GitHubIssue,
+      "Only a GitHub issue link has a link read.",
+    );
     const events = await listItems(
       dependencies,
       caller,

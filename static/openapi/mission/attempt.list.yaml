@@ -217,6 +217,21 @@ components:
                                     - resource_identity
                                     - number
                                   additionalProperties: false
+                                - type: object
+                                  properties:
+                                    kind:
+                                      type: string
+                                      const: jira_issue
+                                    resource_identity:
+                                      type: string
+                                      pattern: ^conversation:jira:[a-z0-9][a-z0-9-]*\.atlassian\.net\/[A-Z][A-Z0-9_]{1,9}$
+                                    key:
+                                      type: string
+                                  required:
+                                    - kind
+                                    - resource_identity
+                                    - key
+                                  additionalProperties: false
                           required:
                             - external_link
                           additionalProperties: false

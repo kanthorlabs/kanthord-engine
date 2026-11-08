@@ -5,6 +5,7 @@ import type {
   ReplyActionFacts,
 } from "../custody/contract.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
+import { ExternalLinkKind } from "../kernel/external-link.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { Store } from "../kernel/store.ts";
 import {
@@ -108,6 +109,10 @@ export async function callReply(
 ): Promise<CallAnswer> {
   const call = gitHubCall(requester, release.material, release.scope);
   const link = held.facts.frozen_action.configuration.external_link;
+  assert.ok(
+    link.kind === ExternalLinkKind.GitHubIssue,
+    "Only a GitHub issue link has a reply.",
+  );
   const known = recordedAccountOf(dependencies.store, held);
   let actorId = known.actor_id;
   if (actorId === null && !known.succeeded) {
