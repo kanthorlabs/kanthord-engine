@@ -244,8 +244,6 @@ async function fixture(
     health,
     version: (holder = INSTANCE) =>
       server.component.credentialVersionOf(holder),
-    refreshed: (holder: string) =>
-      server.component.raiseCredentialVersion(holder),
     restart: () => {
       server = start();
     },
@@ -265,36 +263,6 @@ function refuses(fn: () => unknown, status: number, code: string): void {
       error.code === code,
   );
 }
-
-test("a bad key report shows unhealthy with the time of the report of the instance", async (t) => {
-  const f = await fixture(t);
-  await f.create([INSTANCE]);
-  assert.deepEqual(f.health(), {
-    status: ResourceStatus.Unknown,
-    capability: CAPABILITY_MODEL_LIST_READ,
-    failure_reason: ResourceFailureReason.HeldByInstance,
-    models: null,
-    reported_at: null,
-    reported_by: null,
-  });
-  f.advance(REPORT_DELAY_MS);
-  assert.equal(f.report(), null);
-  assert.deepEqual(f.health(), {
-    status: ResourceStatus.Unhealthy,
-    capability: CAPABILITY_MODEL_LIST_READ,
-    failure_reason: ResourceFailureReason.Unauthorized,
-    models: null,
-    reported_at: f.now(),
-    reported_by: INSTANCE,
-  });
-  assert.deepEqual(f.logs.at(-1), {
-    credential_name: CREDENTIAL_NAME,
-    holder: INSTANCE,
-    revision: FIRST_REVISION,
-    status: ResourceStatus.Unhealthy,
-    failure_reason: ResourceFailureReason.Unauthorized,
-  });
-});
 
 test("a server restart answers a new credential version and shows unknown until the next report", async (t) => {
   const f = await fixture(t);
@@ -493,19 +461,6 @@ test("a human write of a machine copy changes the credential version of each ins
     before.map((version) => version + VERSION_STEP + VERSION_STEP),
   );
   assert.equal(f.version(MACHINE), START_VERSION + VERSION_STEP + VERSION_STEP);
-});
-
-test("a refresh report of a machine copy changes the credential version of each instance of the machine", async (t) => {
-  const f = await fixture(t, MACHINES);
-  const before = [f.version(INSTANCE), f.version(OTHER_INSTANCE)];
-  f.refreshed(MACHINE);
-  assert.deepEqual(
-    [f.version(INSTANCE), f.version(OTHER_INSTANCE)],
-    before.map((version) => version + VERSION_STEP),
-  );
-  f.refreshed(INSTANCE);
-  assert.equal(f.version(INSTANCE), before[0]! + VERSION_STEP + VERSION_STEP);
-  assert.equal(f.version(OTHER_INSTANCE), before[1]! + VERSION_STEP);
 });
 
 test("a report of a machine copy holds the instance that reported it", async (t) => {

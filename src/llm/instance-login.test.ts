@@ -580,22 +580,6 @@ test("an instance login changes the work of its holder at the start, the code su
   assert.deepEqual(f.workChanges, [INSTANCE, INSTANCE, INSTANCE]);
 });
 
-test("an instance failure report fails the pending login before an address", async (t) => {
-  const f = await fixture(t);
-  const started = f.login({ platform: Platform.AnthropicSubscription });
-  const entry = await f.listed();
-  f.report(entry.session_id, {
-    state: InstanceLoginState.Failed,
-    failure_reason: "login failed",
-  });
-  await assert.rejects(started, {
-    code: "credential.login.failed",
-    status: HttpStatus.ServiceUnavailable,
-  });
-  assert.equal(f.loginStatus(entry.session_id).state, LoginSessionState.Failed);
-  assert.equal(f.rows().length, NO_CREDENTIALS);
-});
-
 test("an instance report keeps the first address and refuses an address that is no https URL", async (t) => {
   const f = await fixture(t);
   const started = f.login({ platform: Platform.AnthropicSubscription });

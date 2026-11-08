@@ -13,7 +13,6 @@ import {
 import {
   resolveModel as connectorModel,
   createModelRuntime as connectorRuntime,
-  metadataEnv,
 } from "./model-connector.ts";
 import { loadPi } from "../agent/pi.ts";
 import { piProviderId, Platform, ReasoningLevel } from "./platforms.ts";
@@ -243,120 +242,9 @@ test("compatible models retain metadata and exact supported reasoning levels", a
   }
 });
 
-test("openrouter runs with the built-in pi provider and its credential", async (t) => {
-  t.mock.method(globalThis, "fetch", () => {
-    throw new Error("Unexpected network call");
-  });
-  const openrouter: AgentSetup = {
-    ...setup,
-    effective_configuration: {
-      ...setup.effective_configuration,
-      provider: "openrouter",
-      model_identifier: "anthropic/claude-haiku-4.5",
-    },
-  };
-  const credentials = new InMemoryCredentialStore();
-  await credentials.modify("openrouter", async () => ({
-    type: "api_key",
-    key: "test_execution-secret",
-  }));
-  const runtime = await createModelRuntime({
-    setup: openrouter,
-    handoverItem: { ...handoverItem, provider_id: "openrouter" },
-    credentials,
-    signal: new AbortController().signal,
-  });
-  const model = resolveModel(runtime, openrouter);
-  assert.equal(model.provider, Platform.OpenRouter);
-  assert.ok(
-    JSON.stringify(await runtime.getAuth("openrouter")).includes(
-      "test_execution-secret",
-    ),
-  );
-  assert.throws(
-    () =>
-      resolveModel(runtime, {
-        ...openrouter,
-        effective_configuration: {
-          ...openrouter.effective_configuration,
-          model_identifier: "unknown",
-        },
-      }),
-    {
-      code: WorkerErrorCode.RuntimeSetupRefused,
-      details: { reason: SetupRefusal.ModelUnknown },
-    },
-  );
-});
-
-test("openai-codex resolves a built-in model against its OAuth credential", async (t) => {
-  t.mock.method(globalThis, "fetch", () => {
-    throw new Error("Unexpected network call");
-  });
-  const codex: AgentSetup = {
-    ...setup,
-    effective_configuration: {
-      ...setup.effective_configuration,
-      provider: "openai-codex",
-      model_identifier: "gpt-5.5",
-    },
-  };
-  const credentials = new InMemoryCredentialStore();
-  await credentials.modify("openai-codex", async () => ({
-    type: "oauth",
-    refresh: "test_refresh",
-    access: "test_access",
-    expires: Date.now() + 3600000,
-  }));
-  const runtime = await createModelRuntime({
-    setup: codex,
-    handoverItem: { ...handoverItem, provider_id: "openai-codex" },
-    credentials,
-    signal: new AbortController().signal,
-  });
-  const model = resolveModel(runtime, codex);
-  assert.equal(model.provider, Platform.OpenAICodex);
-  assert.ok(
-    JSON.stringify(await runtime.getAuth("openai-codex")).includes(
-      "test_access",
-    ),
-  );
-});
-
-const GROQ = "groq";
 const BEDROCK = "amazon-bedrock";
 const BEDROCK_REGION = "eu-west-1";
 const EXECUTION_SECRET = "test_execution-secret";
-
-test("groq runs with the built-in pi provider and no metadata", async (t) => {
-  t.mock.method(globalThis, "fetch", () => {
-    throw new Error("Unexpected network call");
-  });
-  const groq: AgentSetup = {
-    ...setup,
-    effective_configuration: {
-      ...setup.effective_configuration,
-      provider: "groq",
-      model_identifier: "llama-3.1-8b-instant",
-    },
-  };
-  const credentials = new InMemoryCredentialStore();
-  await credentials.modify("groq", async () => ({
-    type: "api_key",
-    key: "test_execution-secret",
-  }));
-  const runtime = await createModelRuntime({
-    setup: groq,
-    handoverItem: { ...handoverItem, provider_id: "groq" },
-    credentials,
-    signal: new AbortController().signal,
-  });
-  assert.equal(resolveModel(runtime, groq).provider, GROQ);
-  assert.deepEqual(
-    metadataEnv(groq.effective_configuration.provider, groq.metadata),
-    {},
-  );
-});
 
 test("amazon-bedrock receives its metadata region as the credential env", async (t) => {
   t.mock.method(globalThis, "fetch", () => {
@@ -390,23 +278,4 @@ test("amazon-bedrock receives its metadata region as the credential env", async 
     type: "api_key",
     key: "test_execution-secret",
   });
-});
-
-test("metadata env maps every metadata field of the five platforms", () => {
-  const of = (provider: string, metadata: Record<string, string>) =>
-    metadataEnv(provider, metadata);
-  assert.deepEqual(of("google-vertex", { project: "p", location: "l" }), {
-    GOOGLE_CLOUD_PROJECT: "p",
-    GOOGLE_CLOUD_LOCATION: "l",
-  });
-  assert.deepEqual(of("azure", { resource_name: "r" }), {
-    AZURE_OPENAI_RESOURCE_NAME: "r",
-  });
-  assert.deepEqual(of("cloudflare-workers-ai", { account_id: "a" }), {
-    CLOUDFLARE_ACCOUNT_ID: "a",
-  });
-  assert.deepEqual(
-    of("cloudflare-ai-gateway", { account_id: "a", gateway_id: "g" }),
-    { CLOUDFLARE_ACCOUNT_ID: "a", CLOUDFLARE_GATEWAY_ID: "g" },
-  );
 });

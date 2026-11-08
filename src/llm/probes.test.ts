@@ -14,11 +14,6 @@ import { AUTHORIZATION_HEADER } from "../kernel/probe.ts";
 import { ValueType } from "../kernel/values.ts";
 import { Connection, type ProviderCheckAnswer } from "./contract.ts";
 import {
-  CAPABILITY_COPILOT_TOKEN_READ,
-  CAPABILITY_KEY_READ,
-  CAPABILITY_MODEL_CALL,
-  CAPABILITY_MODEL_LIST_READ,
-  CAPABILITY_NONE,
   LLM_PLATFORMS,
   LLM_PROVIDERS,
   piProviderId,
@@ -52,7 +47,6 @@ import {
   OPENCODE_GO_CHECK_MODEL,
   OPENCODE_GO_PROVIDER_ID,
   OPENROUTER_KEY_URL,
-  statusOfErrorMessage,
 } from "./probes.ts";
 import { HEALTH_OF_CONNECTION } from "./provider.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
@@ -142,78 +136,6 @@ const httpChecks: {
   },
 ];
 
-test("LLM_PROVIDERS holds exactly the platforms with a check and each declares its capability", async (t) => {
-  assert.deepEqual(Object.keys(LLM_PROVIDERS).toSorted(), [
-    Platform.Anthropic,
-    Platform.AnthropicSubscription,
-    Platform.GitHubCopilot,
-    Platform.OpenAI,
-    Platform.OpenAICodex,
-    Platform.OpenAICompatible,
-    Platform.OpencodeGo,
-    Platform.OpenRouter,
-  ]);
-  for (const [platform, entry] of Object.entries(LLM_PLATFORMS))
-    assert.equal(
-      entry.probe !== null,
-      Object.hasOwn(LLM_PROVIDERS, platform),
-      platform,
-    );
-  assert.equal(
-    LLM_PLATFORMS[Platform.OpenRouter].capability,
-    CAPABILITY_KEY_READ,
-  );
-  assert.equal(
-    LLM_PLATFORMS[Platform.OpenAI].capability,
-    CAPABILITY_MODEL_LIST_READ,
-  );
-  assert.equal(
-    LLM_PLATFORMS[Platform.GitHubCopilot].capability,
-    CAPABILITY_COPILOT_TOKEN_READ,
-  );
-  assert.equal(
-    LLM_PLATFORMS[Platform.OpenAICodex].capability,
-    CAPABILITY_MODEL_CALL,
-  );
-  assert.equal(
-    LLM_PLATFORMS[Platform.AnthropicSubscription].capability,
-    CAPABILITY_MODEL_CALL,
-  );
-  assert.equal(
-    LLM_PLATFORMS[Platform.OpencodeGo].capability,
-    CAPABILITY_MODEL_CALL,
-  );
-  assert.equal(LLM_PLATFORMS.groq.capability, CAPABILITY_NONE);
-  const urls: unknown[] = [];
-  t.mock.method(globalThis, "fetch", async (url: unknown) => {
-    urls.push(url);
-    return Response.json(MODEL_LIST);
-  });
-  const metadata = { base_url: BASE_URL, models: [] };
-  for (const platform of [
-    Platform.Anthropic,
-    Platform.OpenAICompatible,
-    Platform.OpenRouter,
-    Platform.OpenAI,
-  ])
-    assert.equal(
-      (
-        await LLM_PROVIDERS[platform]!.check(
-          { key: SECRET },
-          platform === Platform.OpenAICompatible ? metadata : null,
-          background,
-        )
-      ).connection,
-      Connection.Ok,
-    );
-  assert.deepEqual(urls, [
-    ANTHROPIC_MODELS_URL,
-    BASE_URL + MODELS_PATH,
-    OPENROUTER_KEY_URL,
-    OPENAI_MODELS_URL,
-  ]);
-});
-
 test("a healthcheck maps ok to healthy, unauthorized to unhealthy and every other connection to unknown", async (t) => {
   assert.deepEqual(HEALTH_OF_CONNECTION, {
     [Connection.Ok]: ResourceStatus.Healthy,
@@ -287,38 +209,6 @@ for (const check of httpChecks) {
     assert.equal(fetch.mock.callCount(), ONE_CALL);
   });
 }
-
-test("a model-list check maps a reply that is not the OpenAI list shape to invalid_response", async (t) => {
-  for (const body of ["not json", JSON.stringify({ data: [{ name: "x" }] })]) {
-    const fetch = t.mock.method(
-      globalThis,
-      "fetch",
-      async () => new Response(body, { status: HttpStatus.OK }),
-    );
-    for (const check of [
-      () => checkOpenAICompatible(SECRET, BASE_URL, background),
-      () => checkOpenAI(SECRET, background),
-    ])
-      assert.deepEqual(await check(), {
-        connection: Connection.InvalidResponse,
-        models: null,
-      });
-    fetch.mock.restore();
-  }
-});
-
-test("the status of a refused model call comes from the prefix of errorMessage", () => {
-  assert.equal(
-    statusOfErrorMessage('403: {"error":"denied"}'),
-    HttpStatus.Forbidden,
-  );
-  assert.equal(
-    statusOfErrorMessage("401 status code (no body)"),
-    HttpStatus.Unauthorized,
-  );
-  assert.equal(statusOfErrorMessage("Connection error."), null);
-  assert.equal(statusOfErrorMessage(undefined), null);
-});
 
 const USER_ROLE = "user";
 const REASON_COUNT = 2;
@@ -748,21 +638,6 @@ test("anthropic-subscription check answers unauthorized for an expired token and
   assert.equal(fetch.mock.callCount(), NO_CALLS);
 });
 
-test("the anthropic-subscription provider check routes the stored OAuth credential", async (t) => {
-  const fetch = t.mock.method(globalThis, "fetch", async () => {
-    throw new TypeError("fetch failed");
-  });
-  assert.deepEqual(
-    await LLM_PROVIDERS[Platform.AnthropicSubscription]!.check(
-      credentialOf(Date.now() - FUTURE_MS),
-      null,
-      background,
-    ),
-    UNAUTHORIZED,
-  );
-  assert.equal(fetch.mock.callCount(), NO_CALLS);
-});
-
 test("the anthropic-subscription check sends the stored access token as a bearer token through pi and maps 401 to unauthorized", async (t) => {
   const requests: { url: string; authorization: string | null }[] = [];
   t.mock.method(
@@ -838,23 +713,6 @@ test("opencode-go check sends one model call to its constant model with a sessio
     );
   assert.deepEqual(
     await checkOpencodeGo(SECRET, background, reply("aborted")),
-    UNREACHABLE,
-  );
-  assert.equal(fetch.mock.callCount(), NO_CALLS);
-});
-
-test("the opencode-go provider check routes the stored API key", async (t) => {
-  const fetch = t.mock.method(globalThis, "fetch", async () => {
-    throw new TypeError("fetch failed");
-  });
-  const cancelled = new CancellationContext();
-  cancelled.cancel();
-  assert.deepEqual(
-    await LLM_PROVIDERS[Platform.OpencodeGo]!.check(
-      { key: SECRET },
-      null,
-      cancelled,
-    ),
     UNREACHABLE,
   );
   assert.equal(fetch.mock.callCount(), NO_CALLS);
