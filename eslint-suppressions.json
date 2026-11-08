@@ -1,0 +1,1825 @@
+{
+  "src/agent/bash-process.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/agent/configuration.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 6
+    }
+  },
+  "src/agent/enablements.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/agent/hooks/sensitive-text-redaction.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/agent/hooks/tool-approval.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/agent/instruction-files.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/agent/pi-tools.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/agent/prompt-composer.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/agent/prompt-files.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/agent/prompt-render.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/agent/prompt-source.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/agent/prompt-templates.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/agent/sensitive-text.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    },
+    "complexity": {
+      "count": 6
+    }
+  },
+  "src/agent/service.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 11
+    },
+    "complexity": {
+      "count": 2
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 2
+    }
+  },
+  "src/apps/cli/agent.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/apps/cli/credential.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/apps/cli/footprint.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/apps/cli/index.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/apps/cli/intake-event.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/apps/cli/llm.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/apps/cli/mission-evidence.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/apps/cli/mission-execution.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/apps/cli/mission-help.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/apps/cli/mission-record.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/apps/cli/mission-support.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/apps/cli/mission.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 6
+    }
+  },
+  "src/apps/cli/plan-file.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    }
+  },
+  "src/apps/cli/project.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 15
+    }
+  },
+  "src/apps/cli/shared.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/apps/cli/tracking.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 5
+    }
+  },
+  "src/apps/cli/upgrade.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/apps/cli/worker-instance.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/apps/server/container-driver.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 5
+    }
+  },
+  "src/apps/server/container-runtime.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "complexity": {
+      "count": 3
+    }
+  },
+  "src/apps/server/environment-host-proof.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/apps/server/environment-image.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    },
+    "complexity": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 3
+    }
+  },
+  "src/apps/server/environment-probe.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/apps/server/environment-proof.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    }
+  },
+  "src/apps/server/index.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 22
+    },
+    "complexity": {
+      "count": 2
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/apps/server/instance-issuer.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/apps/worker/evidence-upload.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    },
+    "complexity": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/apps/worker/execution.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/apps/worker/handover.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/apps/worker/index.ts": {
+    "complexity": {
+      "count": 2
+    }
+  },
+  "src/apps/worker/instance-config.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/apps/worker/instance-exchange.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 3
+    }
+  },
+  "src/apps/worker/pull-loop.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/apps/worker/slot.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/apps/worker/telemetry-sink.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/apps/worker/unit.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/config/convict.d.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 3
+    }
+  },
+  "src/config/index.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/custody/contract.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 4
+    }
+  },
+  "src/custody/envelope.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/custody/handover.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    }
+  },
+  "src/custody/instance-copy.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/custody/key-check.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/custody/service.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 33
+    },
+    "complexity": {
+      "count": 2
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 7
+    }
+  },
+  "src/footprint/alert-store.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/footprint/alerts.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/footprint/candidates.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/footprint/cleanup-store.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/footprint/cleanup-task.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/footprint/contract.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/footprint/service.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 5
+    },
+    "complexity": {
+      "count": 6
+    }
+  },
+  "src/gateway/auth/authentication.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "complexity": {
+      "count": 3
+    }
+  },
+  "src/gateway/auth/jwt.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 3
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 5
+    }
+  },
+  "src/gateway/client-result.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/gateway/client.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/gateway/dashboard.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/gateway/declarations.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/gateway/health-report.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 3
+    }
+  },
+  "src/gateway/idempotency.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/gateway/index.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/gateway/invocation.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "complexity": {
+      "count": 3
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/gateway/json.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/gateway/openapi.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/gateway/port.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/gateway/request-log.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/gateway/service.ts": {
+    "complexity": {
+      "count": 2
+    }
+  },
+  "src/intake/action-check.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 5
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 4
+    }
+  },
+  "src/intake/action-merge.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 6
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 3
+    }
+  },
+  "src/intake/action-perform.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 10
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 5
+    }
+  },
+  "src/intake/action-read.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 2
+    }
+  },
+  "src/intake/action-reply.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 3
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 7
+    }
+  },
+  "src/intake/credential-platform.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/intake/event-store.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/intake/event-write.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/intake/gate-files.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/intake/health.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/intake/inbound-create.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 2
+    }
+  },
+  "src/intake/jira.ts": {
+    "complexity": {
+      "count": 2
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 4
+    }
+  },
+  "src/intake/link-read.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 5
+    }
+  },
+  "src/intake/outbound-read.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/intake/outbound-store.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 3
+    }
+  },
+  "src/intake/outbound-write.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/intake/outbound.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 7
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/intake/poll.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 5
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 2
+    }
+  },
+  "src/intake/receipt.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/intake/slack.ts": {
+    "complexity": {
+      "count": 3
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 4
+    }
+  },
+  "src/intake/storage-delete.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/intake/storage.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/kernel/assets.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/kernel/context.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/kernel/devcontainer.ts": {
+    "complexity": {
+      "count": 2
+    }
+  },
+  "src/kernel/errors.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/kernel/files.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/kernel/footprint-walk.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/kernel/hpke.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    }
+  },
+  "src/kernel/json.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/kernel/operation.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/kernel/probe.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/kernel/process-group.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/kernel/yaml.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/llm/copy-health.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/llm/instance-login.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/llm/model-check.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/llm/platforms.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 9
+    }
+  },
+  "src/llm/probes.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 8
+    },
+    "complexity": {
+      "count": 2
+    }
+  },
+  "src/llm/service.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    },
+    "complexity": {
+      "count": 2
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 2
+    }
+  },
+  "src/llm/sessions.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/mission/act-telemetry.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/mission/action-context.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/mission/admission.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/mission/assessment-admit.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 3
+    }
+  },
+  "src/mission/assessment-submit.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/mission/authorization.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 18
+    },
+    "complexity": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 5
+    }
+  },
+  "src/mission/claim-facts.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/mission/close-release.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/mission/content.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/mission/contract.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 8
+    }
+  },
+  "src/mission/control-close.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 7
+    },
+    "complexity": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/mission/control-hold.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 6
+    }
+  },
+  "src/mission/control-unblock.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/mission/control.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 10
+    }
+  },
+  "src/mission/coverage.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/mission/delivery-admit.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 8
+    }
+  },
+  "src/mission/delivery-match.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/mission/delivery-telemetry.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/mission/dependency.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    }
+  },
+  "src/mission/edge-read.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/mission/environment-mix.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/mission/evidence-complete.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/mission/evidence-content-read.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/mission/evidence-content.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 7
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/mission/evidence-delete.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 5
+    }
+  },
+  "src/mission/evidence-read.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/mission/evidence-request.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/mission/evidence-submit.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    }
+  },
+  "src/mission/execution-read.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 6
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 6
+    }
+  },
+  "src/mission/execution.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/mission/export.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/mission/finding-admit.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/mission/finding-decide.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/mission/finding-read.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 2
+    }
+  },
+  "src/mission/finding-report.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/mission/finding-store.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 5
+    }
+  },
+  "src/mission/followup-decide.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 3
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/mission/followup-open.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/mission/frozen-action.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    }
+  },
+  "src/mission/gate-files.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/mission/import-apply.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 7
+    }
+  },
+  "src/mission/import-revisions.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/mission/import-telemetry.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/mission/import.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 7
+    },
+    "complexity": {
+      "count": 4
+    }
+  },
+  "src/mission/inbox-item.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/mission/link-check.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/mission/link-update-read.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 3
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/mission/node-check.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 8
+    },
+    "complexity": {
+      "count": 2
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/mission/node-create.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/mission/node-read.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    }
+  },
+  "src/mission/node-rebind.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    }
+  },
+  "src/mission/node-retire.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/mission/node-update.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 5
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/mission/parser.ts": {
+    "complexity": {
+      "count": 3
+    }
+  },
+  "src/mission/proposal-decide.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/mission/proposal-read.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 2
+    }
+  },
+  "src/mission/proposal-store.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    }
+  },
+  "src/mission/record-list.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 7
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 2
+    }
+  },
+  "src/mission/record-read.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    },
+    "complexity": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/mission/record-store.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 11
+    }
+  },
+  "src/mission/routing.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/mission/service.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 8
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 2
+    }
+  },
+  "src/mission/store.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 5
+    }
+  },
+  "src/mission/transitions.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 5
+    },
+    "complexity": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/project/contract.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 3
+    },
+    "complexity": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/project/environment-agent-tools.ts": {
+    "complexity": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/project/environment-agent.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/project/environment-probe-contract.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/project/environment.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 12
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 3
+    }
+  },
+  "src/project/footprint.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/project/onboarding.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 8
+    },
+    "complexity": {
+      "count": 6
+    }
+  },
+  "src/project/service.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 8
+    },
+    "complexity": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 10
+    }
+  },
+  "src/project/ssh-authorization.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    }
+  },
+  "src/project/store.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    },
+    "complexity": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 2
+    }
+  },
+  "src/repository/connector.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 33
+    },
+    "complexity": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 2
+    }
+  },
+  "src/repository/credential-platform.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/repository/github.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 6
+    },
+    "complexity": {
+      "count": 2
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 14
+    }
+  },
+  "src/repository/index.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/repository/ssh-agent.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/repository/ssh-key.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/repository/ssh-login.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/repository/ssh-relay-agent.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/scheduler/claim.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 5
+    },
+    "complexity": {
+      "count": 2
+    }
+  },
+  "src/scheduler/contract.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 4
+    }
+  },
+  "src/scheduler/execution-read.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/scheduler/execution-store.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 7
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/scheduler/release.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/scheduler/service.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/scheduler/settlement.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 7
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/scheduler/telemetry.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/scheduler/wakeup.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/scheduler/work-pull.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 3
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/storage/platforms.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/storage/probe.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    },
+    "complexity": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/storage/s3.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/tracking/admission.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/tracking/analytics-cost.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/tracking/analytics-duration.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 11
+    }
+  },
+  "src/tracking/analytics-walk.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/tracking/cause-label.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/tracking/flow-admission.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/tracking/flow-backfill.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/tracking/flow-facts.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/tracking/flow-model.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/tracking/flow-read.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 3
+    }
+  },
+  "src/tracking/flow-relabel.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/tracking/flow-rollup.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 3
+    }
+  },
+  "src/tracking/flow-sections.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/tracking/flow-stages.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    }
+  },
+  "src/tracking/flow-window.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/tracking/service.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "complexity": {
+      "count": 2
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 10
+    }
+  },
+  "src/tracking/timeline.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/tracking/trace-list.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/tracking/trace-store.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 2
+    }
+  },
+  "src/tracking/trace-summary.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/workbench/service.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/worker/action-performer.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 3
+    },
+    "complexity": {
+      "count": 2
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/worker/agent-selection.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/worker/authorization.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "complexity": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/worker/contract.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 6
+    }
+  },
+  "src/worker/execution-setup.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 3
+    }
+  },
+  "src/worker/footprint.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/worker/instance-rows.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 2
+    }
+  },
+  "src/worker/instances.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 5
+    },
+    "complexity": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 6
+    }
+  },
+  "src/worker/link-update.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/worker/machine-rows.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 2
+    }
+  },
+  "src/worker/machines.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 2
+    }
+  },
+  "src/worker/prompt-pin.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/worker/registration-record.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    },
+    "complexity": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/worker/registration-rows.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/worker/registrations.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/worker/service.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 8
+    },
+    "complexity": {
+      "count": 2
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 4
+    }
+  },
+  "src/worker/session-read.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/worker/unit/affected.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    },
+    "complexity": {
+      "count": 2
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/worker/unit/agent-telemetry.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/worker/unit/base-refresh.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/worker/unit/budget.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/worker/unit/environment-setup.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/worker/unit/evaluation-input.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 5
+    },
+    "complexity": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 2
+    }
+  },
+  "src/worker/unit/evaluation.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 5
+    },
+    "complexity": {
+      "count": 2
+    }
+  },
+  "src/worker/unit/execution-run.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 3
+    },
+    "complexity": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/worker/unit/footprint.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/worker/unit/judgement.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 5
+    }
+  },
+  "src/worker/unit/local-git.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 49
+    }
+  },
+  "src/worker/unit/method-telemetry.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "complexity": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 3
+    }
+  },
+  "src/worker/unit/native-agent.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/worker/unit/node-reads.ts": {
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/worker/unit/release-gate.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/worker/unit/session-entries.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/worker/unit/session-store.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 4
+    },
+    "complexity": {
+      "count": 2
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/worker/unit/steps-examine.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    },
+    "complexity": {
+      "count": 1
+    },
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  },
+  "src/worker/unit/steps-implement.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    },
+    "complexity": {
+      "count": 2
+    }
+  },
+  "src/worker/unit/stop-cause.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "complexity": {
+      "count": 2
+    }
+  },
+  "src/worker/unit/telemetry.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/worker/unit/tool-table.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 2
+    }
+  },
+  "src/worker/unit/turn-gate.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 9
+    }
+  },
+  "src/worker/unit/verdict-rule.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    }
+  },
+  "src/worker/unit/verification.ts": {
+    "@typescript-eslint/max-params": {
+      "count": 1
+    },
+    "complexity": {
+      "count": 1
+    }
+  },
+  "src/worker/unit/workspace.ts": {
+    "kanthord/no-inline-param-type": {
+      "count": 1
+    }
+  }
+}
