@@ -15,6 +15,7 @@ import { HttpStatus } from "../../kernel/http.ts";
 import type { ServiceIdentity } from "../../kernel/caller.ts";
 import { mintServiceIdentity } from "../../kernel/service-mint.ts";
 import { MISSION_SERVICE_NAME } from "../../mission/contract.ts";
+import { INTAKE_PLATFORMS } from "../../intake/index.ts";
 import { REPOSITORY_PLATFORMS } from "../../repository/credential-platform.ts";
 import { sshKeyRevision } from "../../repository/credential.ts";
 import {
@@ -187,6 +188,112 @@ test("credential.archive of a credential that a poll inbound names answers 409 w
   );
   const response = await h.request(
     `/api/repository/credential/${CREDENTIAL}/archive`,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${h.token}`,
+        "Idempotency-Key": createIdempotencyKey(),
+      },
+    },
+  );
+  assert.equal(response.status, HttpStatus.Conflict);
+  const body = (await response.json()) as {
+    error: { code: string; details: unknown };
+  };
+  assert.equal(body.error.code, IN_USE_CODE);
+  assert.deepEqual(body.error.details, {
+    agent_providers: [],
+    bindings: [],
+    inbounds: [{ inbound_id: INBOUND_ID }],
+  });
+});
+
+const SIGNING_CREDENTIAL = "slack-signing";
+const SIGNING_SECRET = "test_private-slack-signing-secret";
+const SIGNING_PLATFORM = "slack_signing_secret";
+const SLACK_TEAM_ID = "T01ABCDEF";
+const SIGNING_SET: CredentialPlatformSet = { platforms: INTAKE_PLATFORMS };
+
+async function signingFixture(t: TestContext) {
+  const fixture = await gatewayFixture(t);
+  const { custody, store } = fixture;
+  store.transaction((tx) =>
+    custody.create(
+      tx,
+      SIGNING_SET,
+      {
+        name: SIGNING_CREDENTIAL,
+        platform: SIGNING_PLATFORM,
+        metadata: null,
+        secret: { key: SIGNING_SECRET },
+      },
+      HUMAN,
+    ),
+  );
+  return fixture;
+}
+
+test("a receipt release of the signing secret succeeds under the Intake service identity and pins nothing", async (t) => {
+  const h = await signingFixture(t);
+  const pin = t.mock.method(h.scheduler, "pinCredential");
+  const grant = h.store.transaction((tx) =>
+    h.custody.authorizeOperation(
+      tx,
+      {
+        kind: GrantKind.Inbound,
+        identity: mintServiceIdentity(INTAKE_SERVICE_NAME),
+        inbound: {
+          inboundId: INBOUND_ID,
+          projectId: TEST_PROJECT_ID,
+          credential: SIGNING_CREDENTIAL,
+          platform: SIGNING_PLATFORM,
+          resource: SLACK_TEAM_ID,
+        },
+        operation: InboundOperation.Receipt,
+      },
+      Date.now(),
+    ),
+  );
+  assert.equal(grant.kind, GrantKind.Inbound);
+  assert.equal(grant.credential, SIGNING_CREDENTIAL);
+  assert.deepEqual(grant.facts, {
+    inbound_id: INBOUND_ID,
+    resource: SLACK_TEAM_ID,
+  });
+  const material = h.store.transaction((tx) =>
+    h.custody.release(tx, grant, Date.now()),
+  );
+  try {
+    assert.equal(material.platform, SIGNING_PLATFORM);
+    assert.deepEqual(material.value(), { key: SIGNING_SECRET });
+  } finally {
+    material.drop();
+  }
+  assert.equal(pin.mock.callCount(), NO_CALLS);
+});
+
+test("credential.archive of the signing secret that a Slack inbound names answers 409 with the inbound", async (t) => {
+  const h = await signingFixture(t);
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare(
+        `INSERT INTO intake_inbound
+        (id, project_id, kind, platform, consumer, credential, configuration, checkpoint, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+      )
+      .run(
+        INBOUND_ID,
+        TEST_PROJECT_ID,
+        InboundKind.Webhook,
+        InboundPlatform.Slack,
+        Consumer.MissionDeliveryAdmit,
+        SIGNING_CREDENTIAL,
+        JSON.stringify({ resource: SLACK_TEAM_ID }),
+        CREATED_AT,
+      ),
+  );
+  const response = await h.request(
+    `/api/intake/credential/${SIGNING_CREDENTIAL}/archive`,
     {
       method: "POST",
       headers: {

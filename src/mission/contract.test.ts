@@ -531,6 +531,65 @@ test("node content refuses a jira_issue link with a key of another project or ou
   );
 });
 
+const SLACK_IDENTITY = "conversation:slack:T01ABCDEF";
+const SLACK_THREAD = {
+  kind: ExternalLinkKind.SlackThread,
+  resource_identity: SLACK_IDENTITY,
+  channel: "C01ABCDEF",
+  thread_ts: "1700000000.000100",
+};
+
+test("node content holds a slack_thread link next to the other links", () => {
+  assert.deepEqual(
+    contentSchema.parse({
+      ...NODE_CONTENT,
+      external_links: [SLACK_THREAD, JIRA_ISSUE, GITHUB_ISSUE],
+    }).external_links,
+    [SLACK_THREAD, JIRA_ISSUE, GITHUB_ISSUE],
+  );
+  assert.equal(
+    contentSchema.safeParse({
+      ...NODE_CONTENT,
+      external_links: [{ ...SLACK_THREAD, channel: "G01ABCDEF" }],
+    }).success,
+    true,
+  );
+});
+
+test("node content refuses a slack_thread link outside its form", () => {
+  const refused: unknown[] = [
+    { ...SLACK_THREAD, channel: "D01ABCDEF" },
+    { ...SLACK_THREAD, channel: "c01abcdef" },
+    { ...SLACK_THREAD, channel: "C0" },
+    { ...SLACK_THREAD, thread_ts: "1700000000" },
+    { ...SLACK_THREAD, thread_ts: "1700000000.0001" },
+    { ...SLACK_THREAD, thread_ts: "1700000000.0001000" },
+    { ...SLACK_THREAD, thread_ts: ".000100" },
+    { ...SLACK_THREAD, thread_ts: "1700000000.00010a" },
+    { ...SLACK_THREAD, resource_identity: CONVERSATION_IDENTITY },
+    { ...SLACK_THREAD, resource_identity: JIRA_IDENTITY },
+    { ...SLACK_THREAD, resource_identity: "conversation:slack:t01abcdef" },
+    { ...SLACK_THREAD, resource_identity: "repository:slack:T01ABCDEF" },
+    { ...SLACK_THREAD, number: ISSUE_NUMBER },
+    { ...SLACK_THREAD, key: "KD-42" },
+    { ...GITHUB_ISSUE, channel: SLACK_THREAD.channel },
+  ];
+  for (const link of refused)
+    assert.equal(
+      contentSchema.safeParse({ ...NODE_CONTENT, external_links: [link] })
+        .success,
+      false,
+      JSON.stringify(link),
+    );
+  assert.equal(
+    contentSchema.safeParse({
+      ...NODE_CONTENT,
+      external_links: [SLACK_THREAD, { ...SLACK_THREAD }],
+    }).success,
+    false,
+  );
+});
+
 test("node content refuses an invalid external link, a repeated link and more than 10 links", () => {
   const refused: unknown[] = [
     [{ ...GITHUB_ISSUE, kind: ExternalLinkKind.JiraIssue }],

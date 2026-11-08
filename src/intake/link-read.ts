@@ -176,6 +176,10 @@ async function listItems(
   material: Material,
   link: ExternalLink,
 ): Promise<ListedItem[]> {
+  assert.ok(
+    link.kind !== ExternalLinkKind.SlackThread,
+    "A Slack thread has no link reader.",
+  );
   if (link.kind === ExternalLinkKind.JiraIssue)
     return listJiraItems(caller, target, material, link.key);
   return listGitHubItems(dependencies, caller, target, material, link.number);

@@ -179,6 +179,12 @@ export const linkUpdateExternalLinkSchema = z.union([
     resource_identity: z.string().min(1),
     key: z.string().min(1),
   }),
+  z.strictObject({
+    kind: z.string().min(1),
+    resource_identity: z.string().min(1),
+    channel: z.string().min(1),
+    thread_ts: z.string().min(1),
+  }),
 ]);
 export const linkUpdateContentSchema = z.strictObject({
   author: z.string(),

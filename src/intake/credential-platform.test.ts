@@ -11,11 +11,20 @@ import { ResourceStatus } from "../kernel/health.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import { AUTHORIZATION_HEADER } from "../kernel/probe.ts";
 import {
+  CAPABILITY_AUTH_TEST,
   CAPABILITY_MYSELF_READ,
+  CAPABILITY_SIGNING_SECRET,
   INTAKE_PLATFORMS,
   jiraMetadataSchema,
   Platform,
 } from "./credential-platform.ts";
+import {
+  SLACK_AUTH_TEST_URL,
+  SLACK_NOT_OK_ANSWER,
+  SLACK_OK_ANSWER,
+  SLACK_SIGNING_SECRET,
+  SLACK_USER_TOKEN,
+} from "./slack-test-support.ts";
 
 const TOKEN = "test_private-jira-token";
 const SITE = "example.atlassian.net";
@@ -44,7 +53,7 @@ function mockMyself(t: TestContext, status: number) {
   );
 }
 
-test("the platform list holds jira alone with its api key shape and metadata fields", () => {
+test("the platform list holds jira, slack and slack_signing_secret with their api key shape and metadata fields", () => {
   assert.deepEqual(credentialPlatformList(INTAKE_PLATFORMS), {
     items: [
       {
@@ -53,6 +62,20 @@ test("the platform list holds jira alone with its api key shape and metadata fie
         login_modes: [],
         metadata_fields: ["site", "cloud_id", "email"],
         verifiable: true,
+      },
+      {
+        platform: Platform.Slack,
+        secret_shape: SecretShape.ApiKey,
+        login_modes: [],
+        metadata_fields: [],
+        verifiable: true,
+      },
+      {
+        platform: Platform.SlackSigningSecret,
+        secret_shape: SecretShape.ApiKey,
+        login_modes: [],
+        metadata_fields: [],
+        verifiable: false,
       },
     ],
   });
@@ -107,4 +130,66 @@ test("the validator answers unhealthy for a 401", async (t) => {
   );
   assert.equal(status, ResourceStatus.Unhealthy);
   assert.equal(fetch.mock.callCount(), ONE_CALL);
+});
+
+function mockAuthTest(t: TestContext, answer: string) {
+  return t.mock.method(
+    globalThis,
+    "fetch",
+    async (
+      url: Parameters<typeof globalThis.fetch>[0],
+      options?: RequestInit,
+    ) => {
+      assert.equal(url, SLACK_AUTH_TEST_URL);
+      assert.equal(options?.method, HttpMethod.Post);
+      assert.deepEqual(options?.headers, {
+        [AUTHORIZATION_HEADER]: `Bearer ${SLACK_USER_TOKEN}`,
+      });
+      return new Response(answer, { status: HttpStatus.OK });
+    },
+  );
+}
+
+test("a slack credential and a slack_signing_secret credential store an api key with no metadata", () => {
+  for (const platform of [Platform.Slack, Platform.SlackSigningSecret]) {
+    assert.equal(INTAKE_PLATFORMS[platform].metadata_schema, null);
+    assert.equal(
+      secretSchemas[INTAKE_PLATFORMS[platform].secret_shape],
+      apiKeySecretSchema,
+    );
+  }
+  assert.equal(INTAKE_PLATFORMS.slack.capability, CAPABILITY_AUTH_TEST);
+  assert.equal(
+    INTAKE_PLATFORMS.slack_signing_secret.capability,
+    CAPABILITY_SIGNING_SECRET,
+  );
+  assert.deepEqual(apiKeySecretSchema.parse({ key: SLACK_SIGNING_SECRET }), {
+    key: SLACK_SIGNING_SECRET,
+  });
+});
+
+test("the slack validator posts auth.test with Bearer and answers healthy for ok true", async (t) => {
+  const fetch = mockAuthTest(t, SLACK_OK_ANSWER);
+  const status = await INTAKE_PLATFORMS.slack.probe!(
+    { key: SLACK_USER_TOKEN },
+    null,
+    background,
+  );
+  assert.equal(status, ResourceStatus.Healthy);
+  assert.equal(fetch.mock.callCount(), ONE_CALL);
+});
+
+test("the slack validator answers unhealthy for ok false", async (t) => {
+  const fetch = mockAuthTest(t, SLACK_NOT_OK_ANSWER);
+  const status = await INTAKE_PLATFORMS.slack.probe!(
+    { key: SLACK_USER_TOKEN },
+    null,
+    background,
+  );
+  assert.equal(status, ResourceStatus.Unhealthy);
+  assert.equal(fetch.mock.callCount(), ONE_CALL);
+});
+
+test("a slack_signing_secret credential is not verifiable and its healthcheck reports unknown", () => {
+  assert.equal(INTAKE_PLATFORMS.slack_signing_secret.probe, null);
 });

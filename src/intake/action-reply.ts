@@ -186,6 +186,10 @@ export async function callReply(
   release: { material: Material | null; scope: OutboundScope },
 ): Promise<CallAnswer> {
   const link = held.facts.frozen_action.configuration.external_link;
+  assert.ok(
+    link.kind !== ExternalLinkKind.SlackThread,
+    "A Slack thread has no reply operation.",
+  );
   const platform =
     link.kind === ExternalLinkKind.JiraIssue
       ? jiraReply(held, release, link.key)

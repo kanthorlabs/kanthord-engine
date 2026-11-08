@@ -36,6 +36,7 @@ type Describer = (input: StoredEvent) => {
 const DESCRIBERS: Readonly<Record<InboundPlatformValue, Describer>> = {
   [InboundPlatform.GitHub]: describeGitHubEvent,
   [InboundPlatform.Jira]: describeJiraEvent,
+  [InboundPlatform.Slack]: () => null,
 };
 
 const NO_DESCRIPTION: DescribedEvent = {

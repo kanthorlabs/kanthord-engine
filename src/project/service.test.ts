@@ -3917,6 +3917,210 @@ test("the key inbox on a jira binding refuses with platform_unsupported", async 
   assert.deepEqual(f.snapshot(), before);
 });
 
+const SLACK_TEAM_ID = "T01ABCDEF";
+const SLACK_IDENTITY = "conversation:slack:T01ABCDEF";
+const SLACK_CREDENTIAL = "slack-conversation";
+const SLACK_USER_ID = "U01ABCDEF";
+const SLACK_WORKSPACE_USER_ID = "W02GHIJKL";
+const SLACK_ID_MAX_LENGTH = 32;
+
+function slackBinding(
+  overrides: Record<string, unknown> = {},
+): Extract<Bindings[string], { kind: typeof BindingKind.Conversation }> {
+  return {
+    kind: BindingKind.Conversation,
+    config: {
+      available: true,
+      platform: ConversationPlatform.Slack,
+      team_id: SLACK_TEAM_ID,
+      credential: SLACK_CREDENTIAL,
+      ...overrides,
+    },
+  };
+}
+
+test("a conversation binding of platform slack stores with its resource identity and checks a slack credential", async (t) => {
+  const f = writeFixture(t);
+  const config = slackBinding({
+    reply_policy: { follows: { type: FollowsType.AssessmentPassed } },
+    link_trust: linkTrustOf([SLACK_USER_ID, SLACK_WORKSPACE_USER_ID]),
+  }).config;
+  const result = await f.write({
+    [CONVERSATION_NAME]: { kind: BindingKind.Conversation, config },
+  });
+  const stored = result.bindings[CONVERSATION_NAME];
+  assert.equal(stored?.kind, BindingKind.Conversation);
+  assert.equal(stored?.resource_identity, SLACK_IDENTITY);
+  assert.deepEqual(stored?.config, config);
+  assert.deepEqual(f.ssh, []);
+  assert.deepEqual(f.custody, [
+    { credential: SLACK_CREDENTIAL, platform: ConversationPlatform.Slack },
+  ]);
+});
+
+test("conversationBindingOf and conversationPolicyOf answer the team id of a slack binding", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    const stored = persistBindings(tx, project.id, {
+      [CONVERSATION_NAME]: slackBinding({
+        reply_policy: { follows: { type: FollowsType.AssessmentPassed } },
+      }),
+    }).bindings;
+    const id = stored[CONVERSATION_NAME]!.id;
+    assert.deepEqual(f.project.conversationBindingOf(tx, id), {
+      binding_id: id,
+      project_id: project.id,
+      resource_identity: SLACK_IDENTITY,
+      platform: ConversationPlatform.Slack,
+      repository: SLACK_TEAM_ID,
+      credential: SLACK_CREDENTIAL,
+    });
+    assert.equal(
+      f.project.conversationPolicyOf(tx, id)?.repository,
+      SLACK_TEAM_ID,
+    );
+  });
+});
+
+test("a slack binding refuses a credential of platform github", async (t) => {
+  const failure = new OperationError(
+    HttpStatus.BadRequest,
+    "custody.credential.platform_mismatch",
+    "Mismatch",
+  );
+  const f = writeFixture(t, {
+    custodySuitability: (_tx, { credential, platform }) => {
+      if (
+        credential === CONVERSATION_CREDENTIAL &&
+        platform === ConversationPlatform.Slack
+      )
+        throw failure;
+    },
+  });
+  const before = f.snapshot();
+  await assert.rejects(
+    f.write({
+      [CONVERSATION_NAME]: slackBinding({
+        credential: CONVERSATION_CREDENTIAL,
+      }),
+    }),
+    (error) => error === failure,
+  );
+  assert.deepEqual(f.snapshot(), before);
+});
+
+test("a slack binding refuses a team id outside its form, a missing field and a foreign field", () => {
+  const complete = slackBinding().config;
+  const without = (key: string) =>
+    Object.fromEntries(Object.entries(complete).filter(([k]) => k !== key));
+  for (const team_id of [
+    "",
+    "t01abcdef",
+    "T0",
+    "U01ABCDEF",
+    "T01ABC-EF",
+    `T${"A".repeat(SLACK_ID_MAX_LENGTH)}`,
+  ])
+    assert.ok(
+      schemaIssues({ [CONVERSATION_NAME]: slackBinding({ team_id }) }).length >
+        EMPTY_ISSUES,
+      team_id,
+    );
+  for (const key of ["team_id", "credential"])
+    assert.ok(
+      schemaIssues({
+        [CONVERSATION_NAME]: {
+          kind: BindingKind.Conversation,
+          config: without(key),
+        },
+      }).length > EMPTY_ISSUES,
+      key,
+    );
+  for (const foreign of [
+    { repository: CONVERSATION_REPOSITORY },
+    { site: JIRA_SITE },
+  ])
+    assert.ok(
+      schemaIssues({ [CONVERSATION_NAME]: slackBinding(foreign) }).length >
+        EMPTY_ISSUES,
+    );
+});
+
+test("slack link_trust accepts Slack user ids of both forms up to 32 characters", async (t) => {
+  const f = writeFixture(t);
+  const link_trust = linkTrustOf([
+    SLACK_USER_ID,
+    SLACK_WORKSPACE_USER_ID,
+    `U${"A".repeat(SLACK_ID_MAX_LENGTH - 1)}`,
+  ]);
+  const result = await f.write({
+    [CONVERSATION_NAME]: slackBinding({ link_trust }),
+  });
+  assert.deepEqual(
+    (result.bindings[CONVERSATION_NAME]?.config as Record<string, unknown>)
+      .link_trust,
+    link_trust,
+  );
+});
+
+test("slack link_trust refuses an id outside its form with id_invalid and the refused id", async (t) => {
+  const f = writeFixture(t);
+  const before = f.snapshot();
+  for (const actorId of [
+    "",
+    "u01abcdef",
+    "A01ABCDEF",
+    "U1",
+    "U01-ABCDEF",
+    ACTOR_ID,
+    JIRA_ACCOUNT_ID,
+    `U${"A".repeat(SLACK_ID_MAX_LENGTH)}`,
+  ])
+    await rejectsWrite(
+      f.write({
+        [CONVERSATION_NAME]: slackBinding({
+          link_trust: linkTrustOf([SLACK_USER_ID, actorId]),
+        }),
+      }),
+      HttpStatus.BadRequest,
+      ProjectErrorCode.LinkTrustInvalid,
+      linkTrustDetails(CONVERSATION_NAME, LinkTrustReason.IdInvalid, actorId),
+    );
+  await rejectsWrite(
+    f.write({
+      [CONVERSATION_NAME]: slackBinding({
+        link_trust: linkTrustOf([SLACK_USER_ID, SLACK_USER_ID]),
+      }),
+    }),
+    HttpStatus.BadRequest,
+    ProjectErrorCode.LinkTrustInvalid,
+    linkTrustDetails(
+      CONVERSATION_NAME,
+      LinkTrustReason.Duplicate,
+      SLACK_USER_ID,
+    ),
+  );
+  assert.deepEqual(f.snapshot(), before);
+});
+
+test("the key inbox on a slack binding refuses with platform_unsupported", async (t) => {
+  const f = writeFixture(t);
+  const before = f.snapshot();
+  for (const inbox of [inboxOf(ACTOR_ID, INBOX_HANDLE), {}])
+    await rejectsWrite(
+      f.write({ [CONVERSATION_NAME]: slackBinding({ inbox }) }),
+      HttpStatus.BadRequest,
+      ProjectErrorCode.InboxInvalid,
+      inboxDetails(
+        CONVERSATION_NAME,
+        InboxField.Inbox,
+        InboxInvalidReason.PlatformUnsupported,
+      ),
+    );
+  assert.deepEqual(f.snapshot(), before);
+});
+
 test("an inbox on a repository binding refuses with platform_unsupported", async (t) => {
   const f = writeFixture(t);
   const inbox = inboxOf(ACTOR_ID, INBOX_HANDLE);

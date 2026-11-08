@@ -20,6 +20,7 @@ import type { IntakeCustody } from "./action-check.ts";
 import {
   configurationSchemaOf,
   type GitHubConfiguration,
+  inboundCredentialPlatform,
   inboundSupported,
 } from "./configuration.ts";
 import {
@@ -109,8 +110,11 @@ function configurationIssues(error: z.ZodError): OperationError {
 function admitInbound(input: InboundCreate): GitHubConfiguration {
   if (!inboundSupported(input.kind, input.platform))
     throw validationFailed([{ path: [BODY_PATH, "platform"], code: "custom" }]);
-  const credentialRequired = input.kind === InboundKind.Poll;
-  if (credentialRequired !== (input.credential !== undefined))
+  const credentialNamed = input.credential !== undefined;
+  const credentialAllowed =
+    inboundCredentialPlatform(input.kind, input.platform) !== null;
+  const credentialMissing = input.kind === InboundKind.Poll && !credentialNamed;
+  if (credentialMissing || (credentialNamed && !credentialAllowed))
     throw validationFailed([
       { path: [BODY_PATH, "credential"], code: "custom" },
     ]);
@@ -152,9 +156,7 @@ async function requireProject(
   );
 }
 
-export function credentialRefusal(error: unknown): unknown {
-  if (!(error instanceof OperationError)) return error;
-  if (!CREDENTIAL_REFUSAL_CODES.has(error.code)) return error;
+function credentialInvalid(): OperationError {
   return new OperationError(
     CREDENTIAL_INVALID_STATUS,
     IntakeErrorCode.InboundCredentialInvalid,
@@ -162,17 +164,22 @@ export function credentialRefusal(error: unknown): unknown {
   );
 }
 
+export function credentialRefusal(error: unknown): unknown {
+  if (!(error instanceof OperationError)) return error;
+  if (!CREDENTIAL_REFUSAL_CODES.has(error.code)) return error;
+  return credentialInvalid();
+}
+
 function checkCredential(
   custody: InboundSuitability,
   tx: Transaction,
   input: InboundCreate,
 ): void {
-  if (input.credential === undefined) return;
+  const platform = inboundCredentialPlatform(input.kind, input.platform);
+  if (platform === null) return;
+  if (input.credential === undefined) throw credentialInvalid();
   try {
-    custody.custodySuitability(tx, {
-      credential: input.credential,
-      platform: input.platform,
-    });
+    custody.custodySuitability(tx, { credential: input.credential, platform });
   } catch (error) {
     throw credentialRefusal(error);
   }

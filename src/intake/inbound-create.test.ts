@@ -45,10 +45,12 @@ import {
   ResultClass,
 } from "./contract.ts";
 import { commitInbound, credentialRefusal } from "./inbound-create.ts";
+import { Platform } from "./credential-platform.ts";
 import { JIRA_RESOURCE } from "./jira-test-support.ts";
 import { IntakeService } from "./index.ts";
 import { intakeMigrations } from "./migrations.ts";
 import type { Dependencies } from "./service.ts";
+import { SLACK_TEAM_ID } from "./slack-test-support.ts";
 import { unusedActionDependencies } from "./test-support.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
 
@@ -78,6 +80,8 @@ const CREDENTIAL_NAME = "token";
 const PLATFORM_REFUSED = "intake.inbound.platform_refused";
 const POLL_CREDENTIAL = "github-poll";
 const OTHER_PLATFORM_CREDENTIAL = "s3-store";
+const SIGNING_CREDENTIAL = "slack-signing";
+const SLACK_USER_CREDENTIAL = "slack-user";
 const UNKNOWN_CREDENTIAL = "missing";
 const POLL_TOKEN = "ghp_poll-token";
 const UNAUTHORIZED_STATUS = 401;
@@ -451,6 +455,8 @@ function pollHarness(
   const credentials = new Map([
     [POLL_CREDENTIAL, InboundPlatform.GitHub],
     [OTHER_PLATFORM_CREDENTIAL, "s3"],
+    [SIGNING_CREDENTIAL, Platform.SlackSigningSecret],
+    [SLACK_USER_CREDENTIAL, Platform.Slack],
   ]);
   const { custody, drops } = fakeCustody(credentials);
   const github = new GitHubPlatform({ baseUrl: CLOSED_LOCAL_PORT });
@@ -746,5 +752,93 @@ test("a Jira webhook with a credential, a repository resource kind or a resource
     })),
   ])
     await refusesWith(h.create(body), HttpStatus.BadRequest, VALIDATION_FAILED);
+  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
+});
+
+const SLACK_WEBHOOK: InboundCreate = {
+  ...WEBHOOK,
+  platform: InboundPlatform.Slack,
+  credential: SIGNING_CREDENTIAL,
+  configuration: {
+    resource_kind: ResourceKind.Conversation,
+    resource: SLACK_TEAM_ID,
+  },
+};
+
+test("a Slack webhook inbound with a live signing secret credential stores with no platform call", async (t) => {
+  const h = pollHarness(t, async () => modified);
+  const inbound = await h.create(SLACK_WEBHOOK);
+  assert.equal(inbound.platform, InboundPlatform.Slack);
+  assert.equal(inbound.kind, InboundKind.Webhook);
+  assert.equal(inbound.credential, SIGNING_CREDENTIAL);
+  assert.equal(inbound.checkpoint, null);
+  assert.deepEqual(inbound.configuration, SLACK_WEBHOOK.configuration);
+  assert.equal(h.rows().length, ROWS_PER_CREATE);
+  assert.equal(h.listEvents.mock.callCount(), REQUESTS_AFTER_REFUSAL);
+  assert.equal(h.listPulls.mock.callCount(), REQUESTS_AFTER_REFUSAL);
+  assert.equal(h.listComments.mock.callCount(), REQUESTS_AFTER_REFUSAL);
+  assert.equal(h.drained(), DRAINS_AFTER_REFUSAL);
+  assert.equal(h.start.mock.callCount(), UNSTARTED_LOOP_COUNT);
+});
+
+test("a Slack webhook with no credential, a user token credential or an unknown credential answers 422", async (t) => {
+  const h = pollHarness(t, async () => modified);
+  for (const body of [
+    { ...SLACK_WEBHOOK, credential: undefined },
+    { ...SLACK_WEBHOOK, credential: SLACK_USER_CREDENTIAL },
+    { ...SLACK_WEBHOOK, credential: UNKNOWN_CREDENTIAL },
+  ])
+    await refusesWith(
+      h.create(body),
+      CREDENTIAL_INVALID_STATUS,
+      CREDENTIAL_INVALID,
+    );
+  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
+  assert.equal(h.drained(), DRAINS_AFTER_REFUSAL);
+});
+
+test("a Slack webhook with a team outside the form or a repository resource kind answers 400", async (t) => {
+  const h = pollHarness(t, async () => modified);
+  for (const configuration of [
+    ...["t01abcdef", "T0", "U01ABCDEF", "T01ABC-EF"].map((resource) => ({
+      resource_kind: ResourceKind.Conversation,
+      resource,
+    })),
+    { resource_kind: ResourceKind.Repository, resource: SLACK_TEAM_ID },
+  ])
+    await refusesWith(
+      h.create({ ...SLACK_WEBHOOK, configuration }),
+      HttpStatus.BadRequest,
+      VALIDATION_FAILED,
+    );
+  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
+});
+
+test("a Slack poll create answers 400 and inserts nothing", async (t) => {
+  const h = pollHarness(t, async () => modified);
+  for (const credential of [SIGNING_CREDENTIAL, SLACK_USER_CREDENTIAL]) {
+    const error = await refusesWith(
+      h.create({ ...SLACK_WEBHOOK, kind: InboundKind.Poll, credential }),
+      HttpStatus.BadRequest,
+      VALIDATION_FAILED,
+    );
+    assert.deepEqual(error.details, [
+      { path: ["body", "platform"], code: "custom" },
+    ]);
+  }
+  assert.equal(h.projectCalls.length, PROJECT_CALLS_AFTER_REFUSAL);
+  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
+});
+
+test("a GitHub webhook that names a credential answers 400 and inserts nothing", async (t) => {
+  const h = pollHarness(t, async () => modified);
+  const error = await refusesWith(
+    h.create({ ...WEBHOOK, credential: POLL_CREDENTIAL }),
+    HttpStatus.BadRequest,
+    VALIDATION_FAILED,
+  );
+  assert.deepEqual(error.details, [
+    { path: ["body", "credential"], code: "custom" },
+  ]);
   assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
 });

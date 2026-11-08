@@ -359,6 +359,7 @@ export type GrantKind = (typeof GrantKind)[keyof typeof GrantKind];
 export const InboundOperation = {
   Poll: "poll",
   LinkRead: "link_read",
+  Receipt: "receipt",
 } as const;
 export type InboundOperation =
   (typeof InboundOperation)[keyof typeof InboundOperation];

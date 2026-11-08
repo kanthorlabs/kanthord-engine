@@ -26,12 +26,14 @@ import {
 } from "./event-store.ts";
 import { readInbound } from "./inbound-store.ts";
 import { classifyJiraDelivery, JIRA_SIGNATURE_HEADER } from "./jira.ts";
+import { SLACK_SIGNATURE_HEADER } from "./slack.ts";
 import { webhookSecret } from "./webhook-secret.ts";
 
 const GITHUB_SIGNATURE_HEADER = "x-hub-signature-256";
 const SIGNATURE_HEADERS: Readonly<Record<InboundPlatformValue, string>> = {
   [InboundPlatform.GitHub]: GITHUB_SIGNATURE_HEADER,
   [InboundPlatform.Jira]: JIRA_SIGNATURE_HEADER,
+  [InboundPlatform.Slack]: SLACK_SIGNATURE_HEADER,
 };
 const SIGNATURE_PREFIX = "sha256=";
 const SIGNATURE_DIGEST_PATTERN = /^[0-9a-fA-F]{64}$/;

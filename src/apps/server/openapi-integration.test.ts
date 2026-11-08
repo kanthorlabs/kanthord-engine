@@ -65,6 +65,7 @@ import {
 } from "../../kernel/cause.ts";
 import { errorSchema } from "../../kernel/errors.ts";
 import { createIdempotencyKey, createIdentity } from "../../kernel/identity.ts";
+import { ExternalLinkKind } from "../../kernel/external-link.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
   AccessPolicy,
@@ -451,6 +452,12 @@ const LEGACY_FRAGMENT_EXCEPTIONS = [
   "openapi/mission/import.apply.yaml",
   "openapi/project/bindingSet.get.yaml",
 ];
+const EXTERNAL_LINK_FRAGMENT_EXCEPTIONS = [
+  "openapi/mission/criterion.set.yaml",
+  "openapi/mission/node.retire.yaml",
+];
+const EXTERNAL_LINKS_PROPERTY = "external_links";
+const NO_EXTERNAL_LINK_LISTS = 0;
 const AGENT_PROVIDER_FRAGMENT_EXCEPTION = "openapi/agent/enablement.get.yaml";
 const EXECUTION_SETUP_FRAGMENT_EXCEPTION =
   "openapi/worker/execution.setup.get.yaml";
@@ -478,6 +485,7 @@ const NAMED_FRAGMENT_EXCEPTIONS = new Set([
   ),
   "openapi/mission/execution.dependency.list.yaml",
   ...LEGACY_FRAGMENT_EXCEPTIONS,
+  ...EXTERNAL_LINK_FRAGMENT_EXCEPTIONS,
   AGENT_PROVIDER_FRAGMENT_EXCEPTION,
   EXECUTION_SETUP_FRAGMENT_EXCEPTION,
   TRACE_LIST_FRAGMENT_EXCEPTION,
@@ -1295,6 +1303,31 @@ test("named Mission fragment size exceptions retain the complete blocked context
       schema = (schema as Record<string, unknown>)[key];
     }
     assertBlockedNode(schema);
+  }
+});
+test("the external link fragments exceed the soft limit only through the external link variants", () => {
+  const files = emitOpenAPIFiles(apiOperations);
+  for (const name of EXTERNAL_LINK_FRAGMENT_EXCEPTIONS) {
+    const lists: unknown[] = [];
+    const collect = (value: unknown): void => {
+      if (Array.isArray(value)) return value.forEach(collect);
+      if (!isObject(value)) return;
+      for (const [key, entry] of Object.entries(value)) {
+        if (key === EXTERNAL_LINKS_PROPERTY) lists.push(entry);
+        collect(entry);
+      }
+    };
+    collect(files[name]);
+    assert.ok(lists.length > NO_EXTERNAL_LINK_LISTS, name);
+    for (const list of lists) {
+      const { items } = list as {
+        items: { oneOf: { properties: { kind: { const: string } } }[] };
+      };
+      assert.deepEqual(
+        items.oneOf.map((variant) => variant.properties.kind.const),
+        Object.values(ExternalLinkKind),
+      );
+    }
   }
 });
 test("the agent enablement fragment exceeds the soft limit only through the agent provider enum", () => {
