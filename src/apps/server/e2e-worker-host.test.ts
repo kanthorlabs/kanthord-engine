@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
-import { stopAfter, temporary } from "../../kernel/test-support.ts";
+import {
+  hostEnvironment,
+  overrideEnvironment,
+  stopAfter,
+  temporary,
+} from "../../kernel/test-support.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import {
   AssetKind,
@@ -536,6 +541,7 @@ test(
         };
         await rebind([INSTANCE_NAME]);
         const root = temporary(t);
+        overrideEnvironment(t, { TMPDIR: hostEnvironment().TMPDIR });
         const worker = new Worker({
           env: {
             ...process.env,
@@ -672,6 +678,7 @@ test(
           exported,
         );
         const root = temporary(t);
+        overrideEnvironment(t, { TMPDIR: hostEnvironment().TMPDIR });
         const worker = new Worker({
           env: {
             ...process.env,
@@ -820,6 +827,7 @@ test(
           exported,
         );
         const root = temporary(t);
+        overrideEnvironment(t, { TMPDIR: hostEnvironment().TMPDIR });
         const worker = new Worker({
           env: {
             ...process.env,
