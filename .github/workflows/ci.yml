@@ -47,7 +47,7 @@ jobs:
         run: |
           git ls-files 'src/*.test.ts' | grep -vxF -f <(git grep -l startTestSshd -- 'src/*.test.ts') > "$RUNNER_TEMP/tests"
           wc -l < "$RUNNER_TEMP/tests"
-          node scripts/suite-pass.mjs run --job check --write ${{ github.event_name == 'schedule' && '--full' || '' }} --concurrency "$TEST_CONCURRENCY" $(cat "$RUNNER_TEMP/tests") scripts/test-reporter.test.mjs scripts/test-path.test.mjs scripts/affected-tests.test.mjs scripts/suite-pass.test.mjs scripts/pi-tools.test.mjs
+          node scripts/suite-pass.mjs run --job check --write ${{ github.event_name == 'schedule' && '--full' || '' }} --concurrency "$TEST_CONCURRENCY" $(cat "$RUNNER_TEMP/tests") scripts/test-reporter.test.mjs scripts/test-path.test.mjs scripts/affected-tests.test.mjs scripts/suite-pass.test.mjs scripts/pi-tools.test.mjs scripts/health.test.mjs
       - uses: actions/cache/save@v6
         if: always()
         with:
