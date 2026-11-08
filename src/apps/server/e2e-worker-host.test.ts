@@ -52,6 +52,8 @@ import {
 
 const RACE_TIMEOUT = 300000;
 const RACING_CODERS = 2;
+const BARRIER_TIMEOUT_MS = 90000;
+const RACE_LAND_TIMEOUT_MS = 240000;
 const RACE_SCRIPT_STEPS = 12;
 const FIRST_REVISION = 1;
 const SINGLE_ITEM = 1;
@@ -1026,6 +1028,29 @@ async function raceRemote(t: TestContext) {
   return { sshd, bare, git, component, transport };
 }
 
+function racingBarrier(signal: AbortSignal) {
+  const arrivals = Promise.withResolvers<void>();
+  let arrived = 0;
+  const barrier = async () => {
+    if (++arrived === RACING_CODERS) arrivals.resolve();
+    if (arrived > RACING_CODERS) return;
+    const stop = new AbortController();
+    const expired = delay(BARRIER_TIMEOUT_MS, undefined, {
+      signal: AbortSignal.any([signal, stop.signal]),
+    }).then(() => {
+      throw new Error(
+        `race barrier: ${arrived} of ${RACING_CODERS} coders arrived within ${BARRIER_TIMEOUT_MS} ms`,
+      );
+    });
+    try {
+      await Promise.race([arrivals.promise, expired]);
+    } finally {
+      stop.abort();
+    }
+  };
+  return { barrier, arrivedCount: () => arrived };
+}
+
 function racingCoder(barrier: () => Promise<void>) {
   const fileOf = (context: { messages: unknown[] }) => {
     const text = JSON.stringify(context.messages);
@@ -1087,12 +1112,7 @@ test(
     const applied = await setup.write<{
       bindings: Record<string, { id: string }>;
     }>(["project", "binding", "apply", setup.project_id], exported);
-    const arrivals = Promise.withResolvers<void>();
-    let arrived = 0;
-    const barrier = async () => {
-      if (++arrived === RACING_CODERS) arrivals.resolve();
-      if (arrived <= RACING_CODERS) await arrivals.promise;
-    };
+    const { barrier, arrivedCount } = racingBarrier(t.signal);
     for (const index of [0, 1]) {
       const auth = await setup.fixture.slotClient(
         setup.project_id,
@@ -1151,16 +1171,40 @@ test(
       );
       nodes.push(created.revisions[0]!.node_id);
     }
-    await until(
-      () =>
-        Promise.all(
-          nodes.map((id) =>
-            setup.read<{ state: NodeState }>(["mission", "node", "get", id]),
-          ),
+    const readNodes = () =>
+      Promise.all(
+        nodes.map((id) =>
+          setup.read<{
+            state: NodeState;
+            attempt: number;
+            paused_context?: { last_stop: unknown };
+          }>(["mission", "node", "get", id]),
         ),
-      (states) => states.every(({ state }) => state === NodeState.Completed),
+      );
+    const landed = AbortSignal.any([
       t.signal,
-    );
+      AbortSignal.timeout(RACE_LAND_TIMEOUT_MS),
+    ]);
+    try {
+      await until(
+        readNodes,
+        (states) => states.every(({ state }) => state === NodeState.Completed),
+        landed,
+      );
+    } catch (error) {
+      assert.ok(landed.aborted, String(error));
+      const report = (await readNodes()).map(
+        ({ state, attempt, paused_context }) => ({
+          state,
+          attempt,
+          last_stop: paused_context?.last_stop ?? null,
+        }),
+      );
+      throw new Error(
+        `nodes not completed within ${RACE_LAND_TIMEOUT_MS} ms: ${JSON.stringify({ arrived: arrivedCount(), nodes: report })}`,
+        { cause: error },
+      );
+    }
     const history = await remote.git.raw(["log", "--format=%P|%s", "main"]);
     const commits = history.trim().split("\n");
     assert.equal(commits.length, nodes.length + SINGLE_ITEM);
