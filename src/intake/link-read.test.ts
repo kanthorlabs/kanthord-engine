@@ -106,6 +106,7 @@ function comment(id: number): GitHubEvent {
 function harness(
   t: TestContext,
   binding: ConversationBinding | null = BINDING,
+  metadata: Record<string, unknown> = JIRA_METADATA,
 ) {
   const store = new Store(IN_MEMORY_DATABASE);
   stopAfter(t, () => store.close());
@@ -151,7 +152,7 @@ function harness(
         id: createIdentity("credential"),
         name: CREDENTIAL,
         platform: InboundPlatform.Jira,
-        metadata: JIRA_METADATA,
+        metadata,
       }),
       release(_tx, grant): Material {
         const credential = grant.credential;
@@ -500,4 +501,40 @@ test("a Jira 401 answers 502 with the Jira result class, stores no row and drops
   });
   assert.equal(h.events().length, NO_ROWS);
   assert.deepEqual(h.drops, [CREDENTIAL]);
+});
+
+const OTHER_JIRA_SITE = "other.atlassian.net";
+const UPPER_CASE_JIRA_SITE = "ACME.atlassian.net";
+
+test("a Jira link read with a credential of another site calls no Jira URL and answers the final refusal", async (t) => {
+  const h = harness(t, JIRA_BINDING, {
+    ...JIRA_METADATA,
+    site: OTHER_JIRA_SITE,
+  });
+  const fetched = jiraList(t);
+  h.addJiraInbound(createIdentity("inbound"));
+  await assert.rejects(h.read({ external_link: JIRA_LINK }), (error) => {
+    assert.ok(error instanceof OperationError);
+    assert.equal(error.status, BAD_GATEWAY_STATUS);
+    assert.equal(
+      error.code,
+      `intake.platform.jira.${ResultClass.FinalRefusal}`,
+    );
+    return true;
+  });
+  assert.equal(fetched.requests.length, NO_CALLS);
+  assert.equal(h.events().length, NO_ROWS);
+  assert.deepEqual(h.drops, [CREDENTIAL]);
+});
+
+test("a Jira link read with a credential of the same site in upper case reads", async (t) => {
+  const h = harness(t, JIRA_BINDING, {
+    ...JIRA_METADATA,
+    site: UPPER_CASE_JIRA_SITE,
+  });
+  const fetched = jiraList(t);
+  h.addJiraInbound(createIdentity("inbound"));
+  const answer = await h.read({ external_link: JIRA_LINK });
+  assert.equal(answer.items.length, TWO_ITEMS);
+  assert.equal(fetched.requests.length, SINGLE_CALL);
 });

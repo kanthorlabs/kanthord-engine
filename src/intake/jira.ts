@@ -300,6 +300,7 @@ const JiraCallKind = { Read: "read", Write: "write" } as const;
 type JiraCallKind = (typeof JiraCallKind)[keyof typeof JiraCallKind];
 
 const accountMetadataSchema = z.looseObject({
+  site: z.string().min(1),
   cloud_id: z.string().min(1),
   email: z.string().min(1),
 });
@@ -326,6 +327,19 @@ export function jiraCredentialsOf(
 ): JiraCredentials {
   const { cloud_id, email } = accountMetadataSchema.parse(metadata);
   return { cloud_id, email, token: apiKeySecretSchema.parse(secret).key };
+}
+
+export function jiraSiteRefusal(
+  metadata: unknown,
+  site: string,
+): JiraFailure | null {
+  const credentialSite = accountMetadataSchema.parse(metadata).site;
+  if (credentialSite.toLowerCase() === site.toLowerCase()) return null;
+  return failure(
+    ResultClass.FinalRefusal,
+    null,
+    "the site of the Jira credential differs from the site of the binding",
+  );
 }
 
 function failure(
