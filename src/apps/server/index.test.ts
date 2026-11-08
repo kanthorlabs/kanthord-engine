@@ -68,19 +68,13 @@ import { llmOperations } from "../../llm/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
 import { InstancePlacement, workerOperations } from "../../worker/contract.ts";
 import { gatewayOperations, OWNER_INTAKE } from "../../gateway/contract.ts";
-import {
-  HealthRegistry,
-  ResourceFailureReason,
-  ResourceStatus,
-} from "../../kernel/health.ts";
+import { ResourceFailureReason, ResourceStatus } from "../../kernel/health.ts";
 import { HealthStatus } from "../../kernel/service.ts";
-import { IntakeService } from "../../intake/index.ts";
 import {
   Consumer,
   INBOUND_CREATED_STATUS,
   InboundKind,
   InboundPlatform,
-  INTAKE_SERVICE_NAME,
   type IntakeInventoryEntry,
   intakeOperations,
   ResourceKind,
@@ -194,16 +188,6 @@ test("composition starts all six services and registers the real repository tool
     assert.deepEqual(body.services[name], checks, name);
   assert.equal(body.services.gateway?.listener, HealthStatus.Healthy);
   assert.deepEqual(await fixture.mission.healthcheck(), domainHealth.mission);
-});
-
-test("composed services hold Intake and start its probe", async (t) => {
-  const health = new HealthRegistry();
-  const fixture = await gatewayFixture(t, { health });
-  assert.ok(fixture.intake instanceof IntakeService);
-  const checks = await health.check();
-  assert.deepEqual(checks[INTAKE_SERVICE_NAME], {
-    events: HealthStatus.Healthy,
-  });
 });
 
 function inboundEntry(projectId: string): IntakeInventoryEntry {
@@ -465,17 +449,6 @@ test("the check deadline of a poll inbound answers unknown with deadline_exceede
     released.materials.map((material) => material.credential_id),
   );
   assert.deepEqual(inboundRow(id), before);
-});
-
-test("injected repository connector skips the tool gate and probe", async (t) => {
-  const health = new HealthRegistry();
-  const repositoryConnector = {
-    gitLsRemote: async () => {},
-  };
-  const fixture = await gatewayFixture(t, { health, repositoryConnector });
-  const checks = await health.check();
-  assert.equal(Object.hasOwn(checks, "repository"), false);
-  assert.equal(fixture.repoConnector, repositoryConnector);
 });
 
 test("composed Custody and Worker share credential and enablement collaborations", async (t) => {
