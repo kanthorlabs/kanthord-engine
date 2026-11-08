@@ -62,6 +62,18 @@ export function jiraWebhookComment(
   };
 }
 
+export function jiraCommentDelivery(accountType = "atlassian"): Buffer {
+  return Buffer.from(
+    JSON.stringify(jiraWebhookComment({ author: jiraAuthor({ accountType }) })),
+  );
+}
+
+export const JIRA_COMMENT_DELIVERY_TEXT = JSON.stringify({
+  webhookEvent: JIRA_WEBHOOK_EVENT,
+  issue: { key: JIRA_ISSUE_KEY },
+  comment: { id: JIRA_COMMENT_ID, created: JIRA_CREATED },
+});
+
 export function adfDocument(...blocks: object[]): object {
   return { type: "doc", version: 1, content: blocks };
 }

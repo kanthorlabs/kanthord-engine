@@ -26,6 +26,7 @@ import {
   externalRequestHarness,
   REQUEST_NUMBER,
 } from "../../mission/test-support.ts";
+import { jiraCommentDelivery } from "../../intake/jira-test-support.ts";
 import { decodeGitHubEvent } from "../../repository/index.ts";
 import {
   COMMENT_CREATED_AT_MS,
@@ -881,25 +882,6 @@ const JIRA_ISSUE_KEY = "KD-42";
 const JIRA_ACCOUNT_ID = "712020:0a1b2c3d-4e5f";
 const JIRA_UPDATE_KEY = "jira_comment:acme.atlassian.net:10042";
 const JIRA_CREATED_MS = Date.UTC(2026, 9, 15, 3, 57, 51, 123);
-
-function jiraCommentDelivery(accountType = "atlassian") {
-  return Buffer.from(
-    JSON.stringify({
-      webhookEvent: "comment_created",
-      issue: { key: JIRA_ISSUE_KEY, fields: { project: { key: "KD" } } },
-      comment: {
-        id: "10042",
-        author: {
-          accountId: JIRA_ACCOUNT_ID,
-          accountType,
-          displayName: "Ada Lovelace",
-        },
-        body: "looks good",
-        created: "2026-10-15T03:57:51.123+0000",
-      },
-    }),
-  );
-}
 
 async function jiraLinkedFixture(t: TestContext) {
   const h = await fixture(t);

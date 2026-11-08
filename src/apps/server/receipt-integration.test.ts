@@ -8,6 +8,7 @@ import {
   ResourceKind,
   webhookInboundSchema,
 } from "../../intake/contract.ts";
+import { JIRA_COMMENT_DELIVERY_TEXT } from "../../intake/jira-test-support.ts";
 import { errorSchema } from "../../kernel/errors.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { projectOperations } from "../../project/contract.ts";
@@ -197,11 +198,6 @@ test("a commit failure over HTTP answers 500 and stores nothing", async (t: Test
   assert.equal(storedEvents(fixture, inbound.id).length, NO_ROWS);
 });
 
-const JIRA_COMMENT = JSON.stringify({
-  webhookEvent: "comment_created",
-  issue: { key: "KD-42" },
-  comment: { id: "10042", created: "2026-10-15T03:57:51.123+0000" },
-});
 const JIRA_IDENTIFIER = "jira-hook-1";
 const JIRA_RESOURCE = "acme.atlassian.net/KD";
 
@@ -251,7 +247,7 @@ function postJira(
   return fixture.request(`/hooks/${inbound.id}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...headers },
-    body: JIRA_COMMENT,
+    body: JIRA_COMMENT_DELIVERY_TEXT,
   });
 }
 
@@ -259,7 +255,7 @@ test("a signed Jira delivery over HTTP stores once under the webhook identifier"
   const fixture = await gatewayFixture(t);
   fixture.intake.dispatcher.quiesce();
   const inbound = await jiraWebhookInbound(fixture);
-  const signature = `sha256=${createHmac("sha256", inbound.secret).update(JIRA_COMMENT).digest("hex")}`;
+  const signature = `sha256=${createHmac("sha256", inbound.secret).update(JIRA_COMMENT_DELIVERY_TEXT).digest("hex")}`;
   const headers = {
     "X-Atlassian-Webhook-Identifier": JIRA_IDENTIFIER,
     "X-Hub-Signature": signature,
@@ -286,7 +282,10 @@ test("a signed Jira delivery over HTTP stores once under the webhook identifier"
   const stored = storedEvents(fixture, inbound.id);
   assert.equal(stored.length, ONE_ROW);
   assert.equal(stored[0]!.event_id, JIRA_IDENTIFIER);
-  assert.equal(Buffer.from(stored[0]!.event).toString(), JIRA_COMMENT);
+  assert.equal(
+    Buffer.from(stored[0]!.event).toString(),
+    JIRA_COMMENT_DELIVERY_TEXT,
+  );
   assert.deepEqual(JSON.parse(stored[0]!.metadata), {
     event: "comment_created",
   });
