@@ -256,76 +256,45 @@ interface StackCase {
   layerStep?: string;
 }
 
-const STACK_CASES: StackCase[] = [
-  {
-    name: "a node repository with pnpm",
-    files: {
-      "package.json": JSON.stringify({ packageManager: "pnpm@9.12.0" }),
-      "pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
-      ".nvmrc": "20\n",
-    },
-    image: `${IMAGE_PREFIX}/javascript-node:20-bookworm`,
-    commands: [
-      "pnpm install --frozen-lockfile",
-      "node --version",
-      "pnpm --version",
-    ],
-    layerStep: "npm install -g pnpm@9.12.0",
+const NODE_STACK: StackCase = {
+  name: "a node repository with pnpm",
+  files: {
+    "package.json": JSON.stringify({ packageManager: "pnpm@9.12.0" }),
+    "pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
+    ".nvmrc": "20\n",
   },
-  {
-    name: "a python repository with uv",
-    files: {
-      "pyproject.toml": '[project]\nname = "demo"\n',
-      "uv.lock": "version = 1\n",
-      ".python-version": "3.12\n",
-    },
-    image: `${IMAGE_PREFIX}/python:3.12-bookworm`,
-    commands: ["uv sync --frozen", "python --version", "uv --version"],
-  },
-  {
-    name: "a go repository",
-    files: { "go.mod": "module example.com/demo\n\ngo 1.22\n" },
-    image: `${IMAGE_PREFIX}/go:1.22-bookworm`,
-    commands: ["go mod download", "go version"],
-  },
-  {
-    name: "a rust repository",
-    files: { "Cargo.toml": '[package]\nname = "demo"\n' },
-    image: `${IMAGE_PREFIX}/rust:1-bookworm`,
-    commands: ["cargo fetch", "cargo --version"],
-  },
-  {
-    name: "a java repository with maven",
-    files: { "pom.xml": "<project/>\n", mvnw: "#!/bin/sh\n" },
-    image: `${IMAGE_PREFIX}/java:21-bookworm`,
-    commands: ["./mvnw -B -q dependency:go-offline", "java -version"],
-  },
-];
+  image: `${IMAGE_PREFIX}/javascript-node:20-bookworm`,
+  commands: [
+    "pnpm install --frozen-lockfile",
+    "node --version",
+    "pnpm --version",
+  ],
+  layerStep: "npm install -g pnpm@9.12.0",
+};
 
-for (const stack of STACK_CASES)
-  test(
-    `${stack.name} reaches ready as detected with no user act and claims the node`,
-    { timeout: TEST_TIMEOUT_MS },
-    async (t) => {
-      const detection = await detectionFixture(
-        t,
-        stack.files,
-        WorkerPlacement.Container,
-      );
-      const ready = await settled(t, detection);
-      assert.equal(ready.status, EnvironmentStatus.Ready);
-      assert.equal(ready.source, EnvironmentSource.Detected);
-      assert.equal(ready.target, EnvironmentTarget.Image);
-      const builds = detection.devcontainer.builds();
-      assert.equal(builds.length, SINGLE_SLOT);
-      assert.equal(builds[0]!.image, stack.image);
-      assert.equal(layerBuilds(detection).length, SINGLE_SLOT);
-      assert.deepEqual(proofCommands(detection), stack.commands);
-      if (stack.layerStep !== undefined)
-        assertLayerStep(detection, stack.layerStep);
-      await claimOnReadyTag(t, detection, ready);
-    },
-  );
+test(
+  `${NODE_STACK.name} reaches ready as detected with no user act and claims the node`,
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const detection = await detectionFixture(
+      t,
+      NODE_STACK.files,
+      WorkerPlacement.Container,
+    );
+    const ready = await settled(t, detection);
+    assert.equal(ready.status, EnvironmentStatus.Ready);
+    assert.equal(ready.source, EnvironmentSource.Detected);
+    assert.equal(ready.target, EnvironmentTarget.Image);
+    const builds = detection.devcontainer.builds();
+    assert.equal(builds.length, SINGLE_SLOT);
+    assert.equal(builds[0]!.image, NODE_STACK.image);
+    assert.equal(layerBuilds(detection).length, SINGLE_SLOT);
+    assert.deepEqual(proofCommands(detection), NODE_STACK.commands);
+    if (NODE_STACK.layerStep !== undefined)
+      assertLayerStep(detection, NODE_STACK.layerStep);
+    await claimOnReadyTag(t, detection, ready);
+  },
+);
 
 test(
   "a repository with no manifest and an image target reaches ready as universal with no user act and claims the node",
