@@ -680,7 +680,7 @@ const LINK_UPDATE_READ = {
     },
   ],
   next_cursor: null,
-  total: 1,
+  total: 3,
 };
 
 function linkUpdateRead(requests: unknown[] = []) {
