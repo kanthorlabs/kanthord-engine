@@ -32,6 +32,7 @@ import {
   type JiraCall,
   jiraCredentialsOf,
   jiraSiteOf,
+  jiraSiteRefusal,
   postJiraComment,
   readJiraAccount,
 } from "./jira.ts";
@@ -168,14 +169,15 @@ function jiraReply(
     site: jiraSiteOf(held.facts.conversation.repository),
     key,
   };
+  const refusal = jiraSiteRefusal(held.metadata, target.site);
   const coded = <T>(answer: JiraAnswer<T>): ReplyAnswer<T> =>
     answer.ok
       ? answer
       : { ...answer, code: platformFailureCode(Platform.Jira, answer.class) };
   return {
-    readAccount: async () => coded(await readJiraAccount(call)),
+    readAccount: async () => coded(refusal ?? (await readJiraAccount(call))),
     postComment: async () =>
-      coded(await postJiraComment(call, target, held.comment)),
+      coded(refusal ?? (await postJiraComment(call, target, held.comment))),
   };
 }
 

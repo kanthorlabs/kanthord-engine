@@ -88,6 +88,7 @@ import {
   type InstanceOf,
   INSTRUCTION_FILE_PATH_MAX_BYTES,
   InstructionFileReason,
+  JIRA_SITE_PATTERN,
   Landing,
   LinkTrustField,
   LinkTrustReason,
@@ -3703,6 +3704,7 @@ test("an inbox key outside actor_id and handle fails the input schema", () => {
 
 const JIRA_SITE = "acme.atlassian.net";
 const JIRA_MIXED_CASE_SITE = "Acme.Atlassian.Net";
+const NO_FLAGS = "";
 const JIRA_PROJECT_KEY = "KD";
 const JIRA_IDENTITY = "conversation:jira:acme.atlassian.net/KD";
 const JIRA_CREDENTIAL = "jira-conversation";
@@ -3754,6 +3756,13 @@ test("a jira site in mixed case stores under a lower-case site in the resource i
     result.bindings[CONVERSATION_NAME]?.resource_identity,
     JIRA_IDENTITY,
   );
+});
+
+test("the jira site pattern accepts a site in mixed case and refuses a site outside atlassian.net", () => {
+  assert.equal(JIRA_SITE_PATTERN.flags, NO_FLAGS);
+  assert.ok(JIRA_SITE_PATTERN.test(JIRA_MIXED_CASE_SITE));
+  assert.ok(JIRA_SITE_PATTERN.test(JIRA_SITE));
+  assert.equal(JIRA_SITE_PATTERN.test("acme.example.com"), false);
 });
 
 test("conversationBindingOf and conversationPolicyOf answer the jira resource of a jira binding", (t) => {

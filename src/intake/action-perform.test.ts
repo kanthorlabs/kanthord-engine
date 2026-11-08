@@ -897,7 +897,10 @@ function jiraReplyFacts(attempt: number): ReplyActionFacts {
   };
 }
 
-function jiraReplyHarness(t: TestContext) {
+function jiraReplyHarness(
+  t: TestContext,
+  metadata: Record<string, unknown> = JIRA_METADATA,
+) {
   const { store } = sshStore(t);
   const script = {
     facts: jiraReplyFacts(FIRST_REVISION),
@@ -913,7 +916,7 @@ function jiraReplyHarness(t: TestContext) {
       credentials: [],
     },
     secret: { key: JIRA_TOKEN },
-    metadata: JIRA_METADATA,
+    metadata,
     refusal: null,
   };
   const fake = sshCustody(script);
@@ -1084,4 +1087,32 @@ test("a Jira reply call with no answer sets the request failed and answers the J
     h.rows().map((row) => row.state),
     [OutboundRequestState.Succeeded],
   );
+});
+
+const REPLY_REQUESTS = 2;
+const OTHER_JIRA_SITE = "other.atlassian.net";
+const UPPER_CASE_JIRA_SITE = "ACME.atlassian.net";
+
+test("a Jira reply with a credential of another site calls no Jira URL and answers the final refusal", async (t) => {
+  const h = jiraReplyHarness(t, { ...JIRA_METADATA, site: OTHER_JIRA_SITE });
+  const refused = await h.perform();
+  assert.ok("class" in refused);
+  assert.equal(refused.class, ResultClass.FinalRefusal);
+  assert.equal(
+    refused.code,
+    `intake.platform.jira.${ResultClass.FinalRefusal}`,
+  );
+  assert.deepEqual(h.requests, []);
+  assert.ok(h.materials.every((material) => material.dropped));
+});
+
+test("a Jira reply with a credential of the same site in upper case posts", async (t) => {
+  const h = jiraReplyHarness(t, {
+    ...JIRA_METADATA,
+    site: UPPER_CASE_JIRA_SITE,
+  });
+  h.posts.push(h.posted(JIRA_COMMENT_ID));
+  const answer = await h.perform();
+  assert.equal("kind" in answer && answer.kind, AddressKind.Comment);
+  assert.equal(h.requests.length, REPLY_REQUESTS);
 });

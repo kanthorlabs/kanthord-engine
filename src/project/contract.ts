@@ -120,7 +120,8 @@ export type ConversationPlatform =
 export const LINK_TRUST_ACTORS_MAX = 32;
 export const GITHUB_ACTOR_ID_PATTERN = /^[1-9][0-9]{0,15}$/;
 export const CONVERSATION_REPOSITORY_PATTERN = /^[^/\s:]+\/[^/\s:]+$/;
-export const JIRA_SITE_PATTERN = /^[a-z0-9][a-z0-9-]*\.atlassian\.net$/i;
+export const JIRA_SITE_PATTERN =
+  /^[A-Za-z0-9][A-Za-z0-9-]*\.[Aa][Tt][Ll][Aa][Ss][Ss][Ii][Aa][Nn]\.[Nn][Ee][Tt]$/;
 export const JIRA_PROJECT_KEY_PATTERN = /^[A-Z][A-Z0-9_]{1,9}$/;
 export const JIRA_ACCOUNT_ID_PATTERN = /^[A-Za-z0-9:_-]{1,128}$/;
 export const CONVERSATION_ACTOR_ID_PATTERNS: Readonly<
