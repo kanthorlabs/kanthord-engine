@@ -428,6 +428,35 @@ export async function hasWorkSince(
   return output.trim() !== CLEAN_STATUS;
 }
 
+export interface MergeCommit {
+  commit: string;
+  parents: string[];
+}
+
+export async function mergeCommitsSince(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  commit: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<MergeCommit[]> {
+  assert.match(commit, /^[a-f0-9]{40,64}$/);
+  const output = await run(
+    env,
+    directory,
+    ["rev-list", "--merges", "--parents", `${commit}..HEAD`],
+    context,
+    deadlineMs,
+  );
+  return output
+    .split(NEWLINE)
+    .filter((line) => line.trim() !== CLEAN_STATUS)
+    .map((line) => {
+      const [merged, ...parents] = line.trim().split(" ");
+      return { commit: merged!, parents };
+    });
+}
+
 export async function softReset(
   env: NodeJS.ProcessEnv,
   directory: string,

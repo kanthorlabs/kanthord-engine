@@ -331,7 +331,7 @@ test("reordered nested JSON is canonical-equal and creates no revision", (t) => 
     address: "git@github.com:owner/first.git",
     strategy: {
       base_branch: "main",
-      action: { name: "merge_push", follows: { type: "assessment_passed" } },
+      action: { name: "push", follows: { type: "assessment_passed" } },
     },
     available: true,
   };
@@ -343,7 +343,7 @@ test("reordered nested JSON is canonical-equal and creates no revision", (t) => 
   const reordered = {
     available: true,
     strategy: {
-      action: { follows: { type: "assessment_passed" }, name: "merge_push" },
+      action: { follows: { type: "assessment_passed" }, name: "push" },
       base_branch: "main",
     },
     address: config.address,

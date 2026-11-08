@@ -102,7 +102,7 @@ export const OutboundRequestState = {
 export const OutboundOperation = {
   GitHubPullRequest: "github.pull_request",
   GitHubPullRequestMerge: "github.pull_request_merge",
-  GitMergePush: "git.merge_push",
+  GitPush: "git.push",
   GitHubIssueComment: "github.issue_comment",
   S3DeleteObject: "s3.delete_object",
 } as const;
@@ -123,7 +123,7 @@ export const CheckEndState = {
 
 export const ActionTableAction = {
   PullRequest: "pull_request",
-  MergePush: "merge_push",
+  Push: "push",
   Reply: "reply",
 } as const;
 export const ActionTablePlatform = {
@@ -138,19 +138,19 @@ export const ACTION_TABLE = [
     operation: OutboundOperation.GitHubPullRequest,
   },
   {
-    action: ActionTableAction.MergePush,
+    action: ActionTableAction.Push,
     platform: ActionTablePlatform.GitHub,
-    operation: OutboundOperation.GitMergePush,
+    operation: OutboundOperation.GitPush,
   },
   {
-    action: ActionTableAction.MergePush,
+    action: ActionTableAction.Push,
     platform: ActionTablePlatform.GitLab,
-    operation: OutboundOperation.GitMergePush,
+    operation: OutboundOperation.GitPush,
   },
   {
-    action: ActionTableAction.MergePush,
+    action: ActionTableAction.Push,
     platform: ActionTablePlatform.Bitbucket,
-    operation: OutboundOperation.GitMergePush,
+    operation: OutboundOperation.GitPush,
   },
   {
     action: ActionTableAction.Reply,
@@ -204,7 +204,7 @@ export function replyRequestKey(
 
 export const actionKeySchema = z
   .string()
-  .regex(/^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push|reply\.[0-9])$/);
+  .regex(/^[a-z][a-z0-9-]{0,62}\.(pull_request|push|reply\.[0-9])$/);
 export const platformAddressSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal(AddressKind.PullRequest),
@@ -812,7 +812,7 @@ export const intakeOperations = {
     }),
     output: z.union([platformAddressSchema, resultClassAnswerSchema]),
     description:
-      "Merge the pull request of a request evidence for the Mission Service and answer its platform address or its result class.",
+      "Land the pull request or the branch push of a request evidence for the Mission Service and answer its platform address or its result class.",
   },
   "action.read": {
     ...actionReadOperation,

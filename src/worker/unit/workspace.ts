@@ -68,7 +68,7 @@ interface WorkspaceRepository {
   binding_id: string;
   name: string;
   address: string;
-  strategy: { base_branch: string };
+  strategy: { base_branch: string; upstream_branch?: string };
 }
 
 export function handedSshAccess(

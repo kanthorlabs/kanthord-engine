@@ -865,7 +865,7 @@ interface TwoAgentOptions {
   readFile?: InstructionFileReader;
   compose?: (agentName: string) => PromptPartAnswer[];
   everyBindingNamesFile?: boolean;
-  composeDelayMs?: number;
+  clock?: () => number;
 }
 
 async function twoAgentAnswer(
@@ -950,6 +950,7 @@ function twoAgentFixture(t: TestContext, options: TwoAgentOptions = {}) {
       {
         store,
         promptTelemetry,
+        clock: options.clock,
         missionPromptPins: {
           attemptPromptCommits: (_tx, nodeId, pinnedAttempt) => {
             assert.deepEqual([nodeId, pinnedAttempt], [claim.nodeId, attempt]);
@@ -976,8 +977,6 @@ function twoAgentFixture(t: TestContext, options: TwoAgentOptions = {}) {
           framing: async () => shippedFraming(),
           compose: async (agentName: string) => {
             composed.push(agentName);
-            if (options.composeDelayMs !== undefined)
-              await delay(options.composeDelayMs);
             return (
               options.compose?.(agentName) ?? [
                 partOf(PromptPart.Role, `${agentName}.md`, agentName),
@@ -1489,22 +1488,27 @@ function barrierReader(deadlines: (number | null)[]): InstructionFileReader {
 test("one setup reads every instruction file in parallel under one deadline that starts with the setup", async (t) => {
   const deadlines: (number | null)[] = [];
   let reader = barrierReader(deadlines);
+  let fakeNow = Date.now();
   const f = twoAgentFixture(t, {
     instructionFile: INSTRUCTION_PATH,
     everyBindingNamesFile: true,
-    composeDelayMs: READ_DELAY_MS,
-    compose: shippedRole,
+    clock: () => fakeNow,
+    compose: (agentName) => {
+      fakeNow += READ_DELAY_MS;
+      return shippedRole(agentName);
+    },
     pins: () =>
       f.bindingIds.map((binding_id) => ({ binding_id, commit: PINNED_COMMIT })),
     readFile: (bindingId, commit, context) =>
       reader(bindingId, commit, context),
   });
-  const composedStart = Date.now();
+  const setupStart = fakeNow;
   await f.run();
+  assert.ok(fakeNow > setupStart);
   assert.equal(deadlines.length, BOTH_READS);
   for (const deadline of deadlines) {
     assert.ok(deadline !== null);
-    assert.ok(deadline <= composedStart + PROMPT_SOURCE_READ_MS);
+    assert.ok(deadline <= setupStart + PROMPT_SOURCE_READ_MS);
   }
   deadlines.length = 0;
   let retried = 0;
@@ -1521,7 +1525,8 @@ test("one setup reads every instruction file in parallel under one deadline that
       text: PINNED_TEXT,
     };
   };
-  const retryStart = Date.now();
+  fakeNow += 1;
+  const retryStart = fakeNow;
   await f.run();
   assert.ok(deadlines.length > BOTH_READS);
   for (const deadline of deadlines) {
@@ -1587,7 +1592,12 @@ function bindingOf(f: { bindingIds: string[] }): string {
   return bindingId;
 }
 
-async function repositorySetup(t: TestContext, address: string, pin: boolean) {
+async function repositorySetup(
+  t: TestContext,
+  address: string,
+  pin: boolean,
+  upstream_branch?: string,
+) {
   const store = new Store(":memory:");
   stopAfter(t, () => store.close());
   store.migrate([{ service: "repository", migrations: repositoryMigrations }]);
@@ -1662,6 +1672,7 @@ async function repositorySetup(t: TestContext, address: string, pin: boolean) {
         platform: RepositoryPlatform.GitHub,
         ssh_credential: SSH_CREDENTIAL,
         base_branch: "main",
+        ...(upstream_branch !== undefined && { upstream_branch }),
         prompts: {},
         environment: null,
         repository_environment: true,
@@ -1708,6 +1719,17 @@ test("setup answers the pinned host key line of each repository and no secret", 
   const text = JSON.stringify(answer);
   assert.equal(text.includes("PRIVATE KEY"), false);
   assert.equal(text.includes(SSH_CREDENTIAL), false);
+});
+
+test("the setup of a claim holds strategy.upstream_branch when the binding sets it", async (t) => {
+  const address = "git@github.com:kanthorlabs/kanthord.git";
+  const withUpstream = await repositorySetup(t, address, true, "develop");
+  assert.deepEqual(withUpstream.repositories[0]?.strategy, {
+    base_branch: "main",
+    upstream_branch: "develop",
+  });
+  const without = await repositorySetup(t, address, true);
+  assert.deepEqual(without.repositories[0]?.strategy, { base_branch: "main" });
 });
 
 test("setup refuses an unpinned host and an alias host before any answer", async (t) => {

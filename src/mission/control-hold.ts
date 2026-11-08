@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import type { Transaction } from "../kernel/store.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import {
   type ExecutionEnds,
   type HumanAct,
@@ -28,13 +29,17 @@ import {
   controlResult,
   endLiveClaim,
   executionEnds,
+  HUMAN_PAUSED_STOP,
+  reportEnds,
   transition,
 } from "./control.ts";
+import type { ExecutionTrace } from "../tracking/contract.ts";
 import type { Dependencies } from "./service.ts";
 import { requireMission } from "./write.ts";
 
 const NO_ATTEMPT = 0;
 const NOT_READY = "mission.node.not_ready";
+const CLAIM_LIVE = "mission.node.claim_live";
 
 function requireReady(tx: Transaction, node: NodeRow): void {
   const readiness = readinessOf(tx, node);
@@ -109,6 +114,27 @@ export function resumeNode(
     ends,
   );
   assert.ok(node.attempt !== null);
+  const claim = dependencies.schedulerClaims.liveExecutionOf(tx, nodeId, now);
+  if (
+    claim !== null &&
+    dependencies.workerStopOrders.orderOf(claim.execution_id) !== null
+  )
+    throw new OperationError(
+      HttpStatus.Conflict,
+      CLAIM_LIVE,
+      "The paused node keeps a live claim that waits for its stop.",
+      { node_id: nodeId, execution_id: claim.execution_id },
+    );
+  endLiveClaim(
+    tx,
+    dependencies,
+    node,
+    now,
+    RevokeCause.Human,
+    null,
+    ends,
+    null,
+  );
   const actions =
     node.attempt === NO_ATTEMPT
       ? []
@@ -170,6 +196,28 @@ export function pauseNode(
     now,
     ends,
   );
+  const live = dependencies.schedulerClaims.liveExecutionOf(tx, nodeId, now);
+  if (
+    live !== null &&
+    dependencies.workerStopOrders.connected(tx, live.runtime_identity)
+  ) {
+    transition(tx, dependencies, mission, node, NodeState.Paused, now);
+    return {
+      ...actedOn(
+        tx,
+        mission,
+        node,
+        body.reason,
+        now,
+        controlResult(tx, dependencies, nodeId, null, actor, now),
+        null,
+      ),
+      stopOrder: {
+        execution_id: live.execution_id,
+        runtime_identity: live.runtime_identity,
+      },
+    };
+  }
   const claim = endLiveClaim(
     tx,
     dependencies,
@@ -178,6 +226,7 @@ export function pauseNode(
     RevokeCause.Human,
     null,
     ends,
+    HUMAN_PAUSED_STOP,
   );
   transition(tx, dependencies, mission, node, NodeState.Paused, now);
   return actedOn(
@@ -210,6 +259,8 @@ export function revokeForInstanceArchive(
   tx: Transaction,
   dependencies: Dependencies,
   executionId: string,
+  instance: string,
+  actor: HumanActor,
   now: number,
 ): ExecutionEnds | null {
   const node = claimedNodeOf(tx, dependencies, executionId, now);
@@ -223,8 +274,14 @@ export function revokeForInstanceArchive(
     RevokeCause.Human,
     null,
     ends,
+    {
+      reason: "instance_archived",
+      code: null,
+      detail: canonicalJSON({ instance, actor: actor.name }),
+    },
   );
   assert.ok(claim);
+  if (node.state === NodeState.Paused) return ends;
   transition(
     tx,
     dependencies,
@@ -236,4 +293,28 @@ export function revokeForInstanceArchive(
     now,
   );
   return ends;
+}
+
+export function revokePausedClaim(
+  dependencies: Dependencies,
+  executionId: string,
+  now: number,
+): ExecutionTrace | null {
+  const ends = executionEnds();
+  dependencies.store.transaction((tx) => {
+    const node = claimedNodeOf(tx, dependencies, executionId, now);
+    if (node?.state !== NodeState.Paused) return;
+    endLiveClaim(
+      tx,
+      dependencies,
+      node,
+      now,
+      RevokeCause.Human,
+      null,
+      ends,
+      HUMAN_PAUSED_STOP,
+    );
+  });
+  reportEnds(dependencies, ends);
+  return ends.revoked[0]?.execution.trace ?? null;
 }

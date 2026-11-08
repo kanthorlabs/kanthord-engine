@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
+import type { Logger } from "pino";
 import { z } from "zod";
-import { OperationError } from "../kernel/errors.ts";
+import type { HumanActor } from "../kernel/actor.ts";
+import { asError, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import {
@@ -43,6 +45,8 @@ import {
   type SessionRead,
   type SessionReadEntry,
   type SessionReadResult,
+  type StopOrder,
+  StopOrderReason,
   WORKER_TOKEN_INFO,
   type WorkerBindingsOf,
   WorkerErrorCode,
@@ -72,6 +76,8 @@ import {
   registrationIdsOfInstance,
 } from "./registration-rows.ts";
 
+export const INSTANCE_ARCHIVED_LOG = "worker.instance.archived";
+const STOP_ORDER_FAILED = "worker.instance.stop_order_failed";
 const BASE64URL = "base64url";
 const UTF8 = "utf8";
 const ZERO_BYTE = 0;
@@ -79,6 +85,8 @@ const NO_VERSION = 0;
 const VERSION_STEP = 1;
 const NO_WAITERS = 0;
 const NO_PENDING_READS = 0;
+const NOT_FOUND = -1;
+const ONE_ITEM = 1;
 const FIRST_ITEM = 0;
 const QUERY_TRUE = "true";
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]+$/;
@@ -100,6 +108,8 @@ export interface InstanceDependencies {
   ) => { execution_id: string } | null;
   archiveHeld: (tx: Transaction, holder: string, now: number) => void;
   revokeForInstanceArchive: MissionCollaborations["revokeForInstanceArchive"];
+  revokePausedClaim: MissionCollaborations["revokePausedClaim"];
+  executionReleased: MissionCollaborations["executionReleased"];
   reportExecutionEnds: MissionCollaborations["reportExecutionEnds"];
   holderMismatch: (
     tx: Transaction,
@@ -110,6 +120,32 @@ export interface InstanceDependencies {
   credentialVersionOf: (holder: string) => number;
   sessionReadWaitMs: number;
   instanceArchived?: (tx: Transaction, name: string) => void;
+  instanceEnded: (ended: readonly string[]) => void;
+  logger: Logger;
+}
+
+export interface PendingArchive {
+  instance_id: string;
+  name: string;
+  actor: HumanActor;
+  force: boolean;
+  execution_ids: string[];
+  stopping: string[];
+}
+
+export interface LiveExecution {
+  execution_id: string;
+  runtime_identity: string;
+}
+
+export interface ArchiveResult {
+  record: InstanceRecord;
+  ended: string[];
+  executionEnds: ExecutionEnds[];
+  executionIds: string[];
+  stopping: string[] | null;
+  pending: PendingArchive | null;
+  orders: LiveExecution[];
 }
 
 export interface SessionReadTarget {
@@ -312,6 +348,8 @@ export class WorkerInstances implements WorkerInstanceLookups {
     string,
     Map<string, FootprintOrder>
   >();
+  private readonly stopOrders = new Map<string, StopOrder>();
+  private readonly pendingArchives = new Map<string, PendingArchive>();
   private readonly listedByProject = new Map<string, Set<string>>();
   private readonly startedAt = Date.now();
 
@@ -445,6 +483,11 @@ export class WorkerInstances implements WorkerInstanceLookups {
       current !== undefined &&
       Date.now() - current.last_heartbeat_at <= INSTANCE_CONNECTED_WINDOW_MS
     );
+  }
+
+  executionConnected(tx: Transaction, runtimeIdentity: string): boolean {
+    const instanceId = readRow(tx, runtimeIdentity)?.instance_id;
+    return !!instanceId && this.connectionOf(instanceId) !== null;
   }
 
   connectedAmong(records: readonly InstanceRecord[]): InstanceRecord[] {
@@ -586,6 +629,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
     try {
       return commit((tx) => {
         const live = this.requireLive(tx, name, input.expected_revision);
+        this.refusePending(live.id);
         const now = Date.now();
         endInstance(tx, live.id, now);
         const registrations = endOfInstances(tx, [live.id], now);
@@ -612,35 +656,249 @@ export class WorkerInstances implements WorkerInstanceLookups {
     tx: Transaction,
     name: string,
     input: { expected_revision: number; force?: boolean },
-  ): {
-    record: InstanceRecord;
-    ended: string[];
-    executionEnds: ExecutionEnds[];
-  } {
+    actor: HumanActor,
+  ): ArchiveResult {
     const live = this.requireLive(tx, name, input.expected_revision);
     this.refuseListed(tx, name);
     const revisions = revisionIdsOf(tx, name);
     const executions = this.liveExecutionsOf(tx, revisions);
+    const executionIds = executions.map(({ execution_id }) => execution_id);
     if (executions.length && !input.force)
       throw new OperationError(
         HttpStatus.Conflict,
         WorkerErrorCode.InstanceInUse,
         "A registration of the worker instance holds a live execution.",
-        { executions },
+        { executions: executionIds },
       );
-    const executionEnds = executions.flatMap((executionId) => {
-      const ends = this.dependencies.revokeForInstanceArchive(tx, executionId);
+    const record = readInstanceById(tx, live.id);
+    assert.ok(record);
+    const pending = this.pendingArchives.get(live.id);
+    if (pending)
+      return {
+        record,
+        ended: [],
+        executionEnds: [],
+        executionIds: [],
+        stopping: [...pending.stopping],
+        pending: null,
+        orders: [],
+      };
+    if (executions.length && this.connectionOf(live.id) !== null)
+      return {
+        record,
+        ended: [],
+        executionEnds: [],
+        executionIds,
+        stopping: [...executionIds],
+        pending: {
+          instance_id: live.id,
+          name,
+          actor,
+          force: true,
+          execution_ids: executionIds,
+          stopping: [...executionIds],
+        },
+        orders: executions,
+      };
+    const executionEnds = executionIds.flatMap((executionId) => {
+      const ends = this.dependencies.revokeForInstanceArchive(
+        tx,
+        executionId,
+        name,
+        actor,
+      );
       return ends ? [ends] : [];
     });
+    const ended = this.endArchived(tx, live.id, name, revisions);
+    this.footprintOrders.delete(live.id);
+    const archived = readInstanceById(tx, live.id);
+    assert.ok(archived);
+    return {
+      record: archived,
+      ended,
+      executionEnds,
+      executionIds,
+      stopping: null,
+      pending: null,
+      orders: [],
+    };
+  }
+
+  private endArchived(
+    tx: Transaction,
+    instanceId: string,
+    name: string,
+    revisions: readonly string[],
+  ): string[] {
     const now = Date.now();
-    endInstance(tx, live.id, now);
+    endInstance(tx, instanceId, now);
     const ended = endOfInstances(tx, revisions, now);
     this.dependencies.archiveHeld(tx, name, now);
     this.dependencies.instanceArchived?.(tx, name);
-    this.footprintOrders.delete(live.id);
-    const record = readInstanceById(tx, live.id);
-    assert.ok(record);
-    return { record, ended, executionEnds };
+    return ended;
+  }
+
+  beginPendingArchive(
+    pending: PendingArchive,
+    orders: readonly LiveExecution[],
+  ): void {
+    this.pendingArchives.set(pending.instance_id, pending);
+    for (const order of orders)
+      this.queueStopOrder(pending, {
+        execution_id: order.execution_id,
+        runtime_identity: order.runtime_identity,
+        reason: StopOrderReason.InstanceArchived,
+      });
+  }
+
+  queueStopOrder(
+    instance: { name: string },
+    order: Omit<StopOrder, "created_at">,
+  ): void {
+    if (this.stopOrders.has(order.execution_id)) return;
+    this.stopOrders.set(order.execution_id, {
+      ...order,
+      created_at: Date.now(),
+    });
+    this.raiseWorkVersion(instance.name);
+  }
+
+  stopOrderOf(executionId: string): StopOrderReason | null {
+    return this.stopOrders.get(executionId)?.reason ?? null;
+  }
+
+  orderOf(executionId: string): StopOrderReason | null {
+    return this.stopOrders.get(executionId)?.reason ?? null;
+  }
+
+  sendStopOrder(
+    executionId: string,
+    runtimeIdentity: string,
+    reason: StopOrderReason,
+  ): void {
+    const name = this.dependencies.store.transaction((tx) => {
+      const instanceId = readRow(tx, runtimeIdentity)?.instance_id;
+      return instanceId ? readInstanceById(tx, instanceId)?.name : undefined;
+    });
+    assert.ok(name, "a stop order names a registration of an instance");
+    this.queueStopOrder(
+      { name },
+      { execution_id: executionId, runtime_identity: runtimeIdentity, reason },
+    );
+  }
+
+  stopOrdersOf(
+    tx: Transaction,
+    instanceId: string,
+  ): { execution_id: string; reason: StopOrderReason }[] {
+    return [...this.stopOrders.values()]
+      .filter(
+        (order) =>
+          readRow(tx, order.runtime_identity)?.instance_id === instanceId,
+      )
+      .map(({ execution_id, reason }) => ({ execution_id, reason }));
+  }
+
+  archiving(tx: Transaction, runtimeIdentity: string): boolean {
+    const instanceId = readRow(tx, runtimeIdentity)?.instance_id;
+    return !!instanceId && this.pendingArchives.has(instanceId);
+  }
+
+  executionReleased(executionId: string): void {
+    this.dropOrder(executionId);
+  }
+
+  private dropOrder(executionId: string): void {
+    this.stopOrders.delete(executionId);
+    for (const pending of [...this.pendingArchives.values()]) {
+      const index = pending.stopping.indexOf(executionId);
+      if (index === NOT_FOUND) continue;
+      pending.stopping.splice(index, ONE_ITEM);
+      if (!pending.stopping.length) this.endPendingArchive(pending);
+    }
+  }
+
+  sweepStopOrders(): void {
+    const now = Date.now();
+    for (const order of [...this.stopOrders.values()]) {
+      if (now - order.created_at <= INSTANCE_CONNECTED_WINDOW_MS) continue;
+      try {
+        this.expireStopOrder(order);
+      } catch (error) {
+        this.dependencies.logger.error(
+          { err: asError(error), execution_id: order.execution_id },
+          STOP_ORDER_FAILED,
+        );
+      }
+    }
+    this.retryEmptyPendingArchives();
+  }
+
+  private retryEmptyPendingArchives(): void {
+    for (const pending of [...this.pendingArchives.values()]) {
+      if (pending.stopping.length) continue;
+      try {
+        this.endPendingArchive(pending);
+      } catch (error) {
+        this.dependencies.logger.error(
+          { err: asError(error), instance: pending.name },
+          STOP_ORDER_FAILED,
+        );
+      }
+    }
+  }
+
+  private expirePauseOrder(order: StopOrder): void {
+    const trace = this.dependencies.revokePausedClaim(order.execution_id);
+    this.dependencies.executionReleased(order.execution_id, null);
+    if (trace === null) this.dropOrder(order.execution_id);
+    else this.executionReleased(order.execution_id);
+  }
+
+  private expireStopOrder(order: StopOrder): void {
+    if (order.reason === StopOrderReason.HumanPaused)
+      return this.expirePauseOrder(order);
+    const pending = [...this.pendingArchives.values()].find((candidate) =>
+      candidate.execution_ids.includes(order.execution_id),
+    );
+    if (order.reason === StopOrderReason.InstanceArchived && pending) {
+      const ends = this.dependencies.store.transaction((tx) =>
+        this.dependencies.revokeForInstanceArchive(
+          tx,
+          order.execution_id,
+          pending.name,
+          pending.actor,
+        ),
+      );
+      if (ends) this.reportExecutionEnds([ends]);
+    }
+    this.dependencies.executionReleased(order.execution_id, null);
+    this.executionReleased(order.execution_id);
+  }
+
+  private endPendingArchive(pending: PendingArchive): void {
+    const ended = this.dependencies.store.transaction((tx) =>
+      this.endArchived(
+        tx,
+        pending.instance_id,
+        pending.name,
+        revisionIdsOf(tx, pending.name),
+      ),
+    );
+    this.footprintOrders.delete(pending.instance_id);
+    this.pendingArchives.delete(pending.instance_id);
+    this.dropConnection(pending.instance_id);
+    this.dependencies.logger.info(
+      {
+        operation: INSTANCE_ARCHIVED_LOG,
+        instance: pending.name,
+        actor: pending.actor.name,
+        force: pending.force,
+        execution_ids: pending.execution_ids,
+      },
+      INSTANCE_ARCHIVED_LOG,
+    );
+    this.dependencies.instanceEnded(ended);
   }
 
   reportExecutionEnds(ends: readonly ExecutionEnds[]): void {
@@ -649,6 +907,23 @@ export class WorkerInstances implements WorkerInstanceLookups {
       lost: ends.flatMap((end) => end.lost),
       revoked: ends.flatMap((end) => end.revoked),
     });
+  }
+
+  archiveReleased(ends: readonly ExecutionEnds[]): void {
+    for (const end of ends)
+      for (const claim of end.revoked)
+        this.dependencies.executionReleased(claim.execution.execution_id, null);
+  }
+
+  private refusePending(instanceId: string): void {
+    const pending = this.pendingArchives.get(instanceId);
+    if (!pending) return;
+    throw new OperationError(
+      HttpStatus.Conflict,
+      WorkerErrorCode.InstanceInUse,
+      "A pending archive of the worker instance waits for its executions to stop.",
+      { stopping: [...pending.stopping] },
+    );
   }
 
   private refuseListed(tx: Transaction, name: string): void {
@@ -670,11 +945,13 @@ export class WorkerInstances implements WorkerInstanceLookups {
   private liveExecutionsOf(
     tx: Transaction,
     revisions: readonly string[],
-  ): string[] {
+  ): LiveExecution[] {
     return revisions.flatMap((instanceId) =>
       registrationIdsOfInstance(tx, instanceId).flatMap((id) => {
         const execution = this.dependencies.unendedExecutionOf(tx, id);
-        return execution ? [execution.execution_id] : [];
+        return execution
+          ? [{ execution_id: execution.execution_id, runtime_identity: id }]
+          : [];
       }),
     );
   }
@@ -845,6 +1122,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
     login_sessions: LoginSessionEntry[];
     session_reads: SessionReadEntry[];
     footprint_orders: FootprintOrder[];
+    stop_orders: { execution_id: string; reason: StopOrderReason }[];
   } {
     const current = this.connections.get(instanceId);
     if (current?.connection_id !== connectionId) throw superseded(current);
@@ -856,6 +1134,9 @@ export class WorkerInstances implements WorkerInstanceLookups {
         ...(this.sessionReads.get(instanceId)?.values() ?? []),
       ].map((pending) => ({ read_id: pending.read_id, ...pending.read })),
       footprint_orders: this.footprintOrdersOf(instanceId),
+      stop_orders: this.dependencies.store.transaction((tx) =>
+        this.stopOrdersOf(tx, instanceId),
+      ),
     };
   }
 

@@ -25,9 +25,11 @@ import { refreshAtRelease } from "./base-refresh.ts";
 import { nodeUnitOf, releaseGate, ReleaseGateKind } from "./release-gate.ts";
 import { noProgressDetail, NoProgressRule } from "./progress-rule.ts";
 import { RELEASE_DIRECTORY, WorkspaceKind } from "./workspace.ts";
+import { COMMAND_LIMIT_MS } from "./budget.ts";
 import {
   advanceBase,
   affectedCommand,
+  commandLimitClock,
   commitOnNode,
   declareAffected,
   fauxAssistantMessage,
@@ -42,6 +44,7 @@ import {
 import { RecordKind, SpanStatus } from "../../tracking/contract.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { VerificationContext } from "./method-telemetry.ts";
+import { VERIFICATION_RERUNS } from "./verification.ts";
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
@@ -49,6 +52,7 @@ const NOTHING = fauxAssistantMessage("nothing");
 const NO_PROGRESS_LIMIT = 2;
 const RELEASE_COMMANDS_RAN = 2;
 const FAILED_EXIT_CODE = 1;
+const LAST_COMMAND_INDEX = 1;
 const REVISION_TEXT = "Revise the task work";
 const RELEASE_CLONE_TEXT =
   "The release clone holds only tracked files and the setup commands of the environment.";
@@ -56,6 +60,8 @@ const REVISED_CONTENT = "base two";
 const SECRET = "secret";
 const MARKER = "release-directory";
 const ONE_SPAN = 1;
+const NO_LOGS = 0;
+const FLAKY_LOG = "verification flaky";
 const TAG = "x";
 const CONFIG_KEY = "a.b";
 const BASE_CHANGE = "base change";
@@ -158,6 +164,9 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
           verification: {
             passed: false,
             ran: RELEASE_COMMANDS_RAN,
+            index: LAST_COMMAND_INDEX,
+            command: `test -e ${SECRET}`,
+            limit_ms: COMMAND_LIMIT_MS,
             exit_code: FAILED_EXIT_CODE,
             timed_out: false,
           },
@@ -182,6 +191,9 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
             verification: {
               passed: false,
               ran: RELEASE_COMMANDS_RAN,
+              index: LAST_COMMAND_INDEX,
+              command: `test -e ${SECRET}`,
+              limit_ms: COMMAND_LIMIT_MS,
               exit_code: FAILED_EXIT_CODE,
               timed_out: false,
             },
@@ -313,6 +325,9 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
       verification: {
         passed: false,
         ran: ONE_SPAN,
+        index: 0,
+        command: `test -e ${SECRET}`,
+        limit_ms: COMMAND_LIMIT_MS,
         exit_code: FAILED_EXIT_CODE,
         timed_out: false,
       },
@@ -325,7 +340,7 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(
       spans.filter((span) => span.context === VerificationContext.Release)
         .length,
-      ONE_SPAN,
+      ONE_SPAN + VERIFICATION_RERUNS,
     );
   });
 
@@ -481,6 +496,9 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.deepEqual(h.lastVerification, {
       passed: true,
       ran: RELEASE_COMMANDS_RAN,
+      index: LAST_COMMAND_INDEX,
+      command: shared,
+      limit_ms: COMMAND_LIMIT_MS,
       exit_code: 0,
       timed_out: false,
     });
@@ -578,6 +596,55 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     );
   });
 
+  function flakyInRelease(marker: string): string {
+    return `case "$PWD" in */${RELEASE_DIRECTORY}/*) test -f ${marker} || { touch ${marker}; echo flaky-output; exit 1; };; esac`;
+  }
+
+  test("a release verification that fails once and passes on a rerun releases, logs verification flaky and runs the affected step", async (t) => {
+    const directory = temporary(t);
+    const command = flakyInRelease(join(directory, "flaky"));
+    const affectedMarker = join(directory, "affected-ran");
+    const h = await fixture(t, [task("pass", "true")], []);
+    h.revision = {
+      ...h.revision,
+      content: { ...h.revision.content, verifications: [command] },
+    };
+    await declareAffected(
+      h,
+      t,
+      affectedCommand(`touch ${affectedMarker}; ${ALWAYS_FAILS}`),
+    );
+    await changeNode(h, "changed");
+    const events = t.mock.method(h.run, "log");
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    assert.equal(existsSync(affectedMarker), true);
+    const flaky = events.mock.calls
+      .filter((call) => call.arguments[0] === FLAKY_LOG)
+      .map((call) => call.arguments[1]);
+    assert.deepEqual(flaky, [{ flaky: [{ index: 0, command }] }]);
+  });
+
+  test("a release verification that fails on every rerun returns the failed run", async (t) => {
+    const h = await fixture(t, [task("owner", "true")], []);
+    h.revision = {
+      ...h.revision,
+      content: {
+        ...h.revision.content,
+        verifications: [FAILS_IN_RELEASE],
+      },
+    };
+    const events = t.mock.method(h.run, "log");
+    const gate = await releaseGate(h);
+    assert.ok(gate.kind === ReleaseGateKind.Routed);
+    assert.equal(gate.unit.id, h.input.claim.node_id);
+    assert.ok(gate.instruction.includes(RELEASE_CLONE_TEXT));
+    assert.equal(
+      events.mock.calls.filter((call) => call.arguments[0] === FLAKY_LOG)
+        .length,
+      NO_LOGS,
+    );
+  });
+
   test("a node change that edits the declaration does not change the command that judges it", async (t) => {
     const h = await fixture(t, [task("pass", "true")], []);
     await declareAffected(h, t, affectedCommand(FAILS_WHEN_BROKEN));
@@ -591,4 +658,30 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     const gate = await releaseGate(h);
     assert.equal(gate.kind, ReleaseGateKind.Routed);
   });
+});
+
+test("an affected command that reaches its time limit at the node head routes one revision to the node unit with the time limit and the output", async (t) => {
+  const marker = join(temporary(t), "affected-started");
+  const h = await fixture(t, [task("pass", "true")], []);
+  await declareAffected(h, t, `touch ${marker}; echo hung-output; sleep 1000`);
+  await commitOnNode(h.root, "changed");
+  h.checkouts[0]!.head = (await simpleGit(h.root).revparse(["HEAD"])).trim();
+  t.mock.method(
+    h.agent.budget,
+    "wallDeadline",
+    () => Date.now() + 2 * COMMAND_LIMIT_MS,
+  );
+  const clock = commandLimitClock(t, marker);
+  recordSpans(h, (batch) => clock.observe(batch));
+  const gate = await releaseGate(h);
+  await clock.elapsed();
+  assert.ok(gate.kind === ReleaseGateKind.Routed);
+  assert.equal(gate.unit.id, h.input.claim.node_id);
+  assert.ok(gate.instruction.startsWith("Revise the task work"));
+  assert.ok(
+    gate.instruction.includes(
+      `The affected tests reached their time limit of ${COMMAND_LIMIT_MS / 1000} s at ${h.checkouts[0]!.head}.`,
+    ),
+  );
+  assert.ok(gate.instruction.includes("hung-output"));
 });

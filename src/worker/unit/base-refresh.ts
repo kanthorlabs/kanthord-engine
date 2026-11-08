@@ -22,11 +22,17 @@ export const RefreshResult = {
 } as const;
 export type RefreshResult = (typeof RefreshResult)[keyof typeof RefreshResult];
 
-function baseBranchOf(
+function mergedBranchesOf(
   state: Pick<StepsState, "input">,
   checkout: WorkspaceCheckout,
-): string {
-  return repositoryOf(state, checkout).strategy.base_branch;
+): string[] {
+  const { base_branch, upstream_branch } = repositoryOf(
+    state,
+    checkout,
+  ).strategy;
+  return upstream_branch === undefined
+    ? [base_branch]
+    : [base_branch, upstream_branch];
 }
 
 export function conflictInstruction(
@@ -71,7 +77,13 @@ async function mergeAtClaim(
 ): Promise<RefreshResult> {
   const context = state.agent.budget.cleanupContext(state.run.operationContext);
   try {
-    return await mergeUnder(state, checkout, context);
+    let result: RefreshResult = RefreshResult.Current;
+    for (const branch of mergedBranchesOf(state, checkout)) {
+      const merged = await mergeUnder(state, checkout, branch, context);
+      if (merged === RefreshResult.BudgetEnd) return merged;
+      if (merged === RefreshResult.Merged) result = merged;
+    }
+    return result;
   } finally {
     context.cancel();
   }
@@ -80,12 +92,12 @@ async function mergeAtClaim(
 async function mergeUnder(
   state: StepsState,
   checkout: WorkspaceCheckout,
+  base: string,
   context: Context,
 ): Promise<RefreshResult> {
   const env = state.input.env;
   const directory = checkout.directory;
   const remaining = () => state.input.claim.expired_at - Date.now();
-  const base = baseBranchOf(state, checkout);
   const ref = `origin/${base}`;
   if (await isAncestor(env, directory, ref, context, remaining()))
     return RefreshResult.Current;
@@ -130,15 +142,16 @@ export async function refreshAtRelease(
   const remaining = () => state.input.claim.expired_at - Date.now();
   try {
     for (const checkout of state.checkouts)
-      await withinGit(state.run.spans, GitStep.FetchBase, () =>
-        state.input.transport.fetchBase(
-          checkout.directory,
-          baseBranchOf(state, checkout),
-          context,
-          remaining(),
-          sshAccessOf(state.input.sshAccess, checkout.binding_id),
-        ),
-      );
+      for (const branch of mergedBranchesOf(state, checkout))
+        await withinGit(state.run.spans, GitStep.FetchBase, () =>
+          state.input.transport.fetchBase(
+            checkout.directory,
+            branch,
+            context,
+            remaining(),
+            sshAccessOf(state.input.sshAccess, checkout.binding_id),
+          ),
+        );
   } finally {
     context.cancel();
   }

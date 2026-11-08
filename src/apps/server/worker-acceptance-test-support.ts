@@ -41,14 +41,14 @@ export async function workerAcceptance(
 ) {
   const s3 = host ? await fakeS3(t) : undefined;
   const fixture = await gatewayFixture(t, {
+    repositoryConnector: {
+      gitLsRemote: async () => {},
+    },
     ...options.fixtureOptions,
     stateDirectory: options.stateDirectory,
     serverInstanceLimit: options.instanceLimit,
     containerImage: options.containerImage,
     fakeSlots: options.fakeSlots,
-    repositoryConnector: {
-      gitLsRemote: async () => {},
-    },
   });
   const directory = temporary(t);
   const human = {

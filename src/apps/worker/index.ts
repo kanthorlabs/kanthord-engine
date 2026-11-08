@@ -511,6 +511,7 @@ export class Worker implements Service {
     this.logins!.sync(work.login_sessions);
     this.sessionReads!.sync(work.session_reads);
     void this.unit?.footprintOrders(work.footprint_orders);
+    this.unit?.stopOrders(work.stop_orders);
     this.workVersion = work.work_version;
   }
 

@@ -143,7 +143,7 @@ export const InboxInvalidReason = {
 } as const;
 export const GitHubAction = {
   PullRequest: "pull_request",
-  MergePush: "merge_push",
+  Push: "push",
 } as const;
 export const ConversationAction = {
   Reply: "reply",
@@ -316,31 +316,37 @@ export const repositoryConfigSchema = z.strictObject({
   available: z.boolean(),
   platform: z.enum(RepositoryPlatform),
   address: z.string().min(1).refine(isNonblank),
-  strategy: z.strictObject({
-    base_branch: z.string().min(1).refine(isNonblank),
-    action: z
-      .strictObject({
-        name: z.enum(GitHubAction),
-        follows: z.discriminatedUnion("type", [
-          z.strictObject({ type: z.literal(FollowsType.AssessmentPassed) }),
-          z.strictObject({
-            type: z.literal(FollowsType.ActionEndState),
-            binding: bindingNameSchema,
-          }),
-        ]),
-        landing: z.enum(Landing).optional(),
-      })
-      .refine(
-        (action) =>
-          action.landing === undefined ||
-          action.name === GitHubAction.PullRequest,
-        {
-          path: ["landing"],
-          message: "Only a pull_request action holds a landing choice.",
-        },
-      )
-      .optional(),
-  }),
+  strategy: z
+    .strictObject({
+      base_branch: z.string().min(1).refine(isNonblank),
+      upstream_branch: z.string().min(1).refine(isNonblank).optional(),
+      action: z
+        .strictObject({
+          name: z.enum(GitHubAction),
+          follows: z.discriminatedUnion("type", [
+            z.strictObject({ type: z.literal(FollowsType.AssessmentPassed) }),
+            z.strictObject({
+              type: z.literal(FollowsType.ActionEndState),
+              binding: bindingNameSchema,
+            }),
+          ]),
+          landing: z.enum(Landing).optional(),
+        })
+        .refine(
+          (action) =>
+            action.landing === undefined ||
+            action.name === GitHubAction.PullRequest,
+          {
+            path: ["landing"],
+            message: "Only a pull_request action holds a landing choice.",
+          },
+        )
+        .optional(),
+    })
+    .refine((strategy) => strategy.upstream_branch !== strategy.base_branch, {
+      path: ["upstream_branch"],
+      message: "The upstream branch differs from the base branch.",
+    }),
   ssh_credential: z.string().min(1),
   credential: z.string().min(1).optional(),
   prompts: bindingPromptsSchema.optional(),
@@ -797,6 +803,7 @@ export type RepositoryPolicy = {
   ssh_credential: string;
   credential: string | null;
   base_branch: string;
+  upstream_branch?: string;
   action: (typeof GitHubAction)[keyof typeof GitHubAction] | null;
   landing: Landing;
   prompts: BindingPrompts;

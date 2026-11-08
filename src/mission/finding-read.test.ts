@@ -29,6 +29,7 @@ const FIRST_REVISION = 1;
 const CLOSED_AT = 200;
 const PAGE_SIZE = "2";
 const SINGLE = "1";
+const REWORK_OFF = 0;
 
 async function twoAttempts(t: Parameters<typeof reviewHarness>[0]) {
   const h = await reviewHarness(t, IDENTITY);
@@ -228,4 +229,32 @@ test("the undecided list holds the human findings of the project in identity ord
     }),
     codedAs(MissionErrorCode.MissionNotFound),
   );
+});
+
+test("the undecided list leaves out a report finding with a fixed_assessment_id", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  h.dependencies.config.rework_limit = REWORK_OFF;
+  const answer = await h.submit({
+    findings: [reviewerFinding("S1"), reviewerFinding("S2")],
+  });
+  const fixed = await h.byLabel("S1");
+  const open = await h.byLabel("S2");
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare(
+        "UPDATE mission_finding SET fixed_assessment_id = ? WHERE id = ?",
+      )
+      .run(answer.assessment.id, fixed.id),
+  );
+  const undecided = await h.invoke("finding.undecided.list", {
+    params: { project_id: h.project_id },
+    query: {},
+    body: null,
+  });
+  assert.deepEqual(
+    undecided.items.map((item) => item.id),
+    [open.id],
+  );
+  assert.equal(undecided.items[0]?.status, FindingStatus.Open);
+  assert.equal((await h.byLabel("S1")).status, FindingStatus.Fixed);
 });

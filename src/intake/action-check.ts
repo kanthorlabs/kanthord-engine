@@ -30,8 +30,14 @@ import {
   type RequiredCheckRead,
 } from "../repository/github.ts";
 import {
+  BaseMovedError,
   foldBranchPush,
+  GIT_BASE_MOVED,
+  GitStage,
+  GitWriteError,
   type GitWriter,
+  PushRefusalKind,
+  pushRefusalOf,
   type SshAccess,
   type SshKeyAccess,
 } from "../repository/index.ts";
@@ -43,10 +49,12 @@ import {
   replyRequestKey,
   ResultClass,
 } from "./contract.ts";
+import type { CallAnswer } from "./outbound.ts";
 import { findByKey } from "./outbound-store.ts";
 
 const BAD_GATEWAY_STATUS = 502;
-const GIT_FAILED_CODE = "repository.connector.git_failed";
+export const GIT_FAILED_CODE = "repository.connector.git_failed";
+export const GIT_PUSH_REFUSED = "git.push_refused";
 const UNEXPECTED_BODY_MESSAGE = "the GitHub answer holds an unexpected body";
 const PULL_REQUEST_STATE_OPEN = "open";
 const NO_CHECKS = { head_commit: "", pending: [], failed: [] };
@@ -60,12 +68,53 @@ export const GIT_TRANSPORT_CODES: readonly string[] = [
   GIT_FAILED_CODE,
   SshAgentErrorCode.Failed,
   DEADLINE_EXCEEDED_CODE,
+  GIT_BASE_MOVED,
+  GIT_PUSH_REFUSED,
 ];
 
 export function isGitTransportFailure(error: unknown): error is CodedError {
   return (
     error instanceof CodedError && GIT_TRANSPORT_CODES.includes(error.code)
   );
+}
+
+export function gitFailure(error: unknown): CallAnswer {
+  if (error instanceof BaseMovedError)
+    return {
+      ok: false,
+      class: ResultClass.ConfirmedFailure,
+      code: GIT_BASE_MOVED,
+      message: error.message,
+    };
+  if (!(error instanceof GitWriteError)) throw error;
+  if (error.stage === GitStage.BeforePush)
+    return {
+      ok: false,
+      class: ResultClass.ConfirmedFailure,
+      code: error.code,
+      message: error.message,
+    };
+  return pushFailure(error);
+}
+
+function pushFailure(error: GitWriteError): CallAnswer {
+  const refusal = pushRefusalOf(error);
+  if (refusal?.kind === PushRefusalKind.Rule)
+    return {
+      ok: false,
+      class: ResultClass.FinalRefusal,
+      code: GIT_PUSH_REFUSED,
+      message: refusal.detail,
+    };
+  return {
+    ok: false,
+    class:
+      refusal?.kind === PushRefusalKind.NonFastForward
+        ? ResultClass.RetryableRefusal
+        : ResultClass.UnknownOutcome,
+    code: error.code,
+    message: error.message,
+  };
 }
 
 export interface IntakeCustody {
@@ -246,19 +295,15 @@ async function inspect(
   }
   assert.equal(material, null, "A branch push check holds no material.");
   assert.ok(ssh, "A branch push check holds the SSH access.");
+  assert.ok(facts.assessed_commit, "A branch push check names its commit.");
   const landing = await landedOn(dependencies.gitWriter, caller.context, {
     address: facts.repository.address,
     branch: facts.frozen_action.configuration.base_branch,
-    commit: address.commit,
+    commit: facts.assessed_commit,
     deadlineAt,
     ssh,
   });
-  return foldBranchPush(
-    landing.landed,
-    address.commit,
-    expected,
-    facts.human_landing,
-  );
+  return foldBranchPush(landing, expected, facts.human_landing);
 }
 
 async function inspectPullRequest(

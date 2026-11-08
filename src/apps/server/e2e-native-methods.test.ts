@@ -119,6 +119,7 @@ async function methodsFixture(t: TestContext) {
   f.gitWriter.landedOn = async () => ({
     landed: false,
     first_parent: null,
+    base_moved: false,
   });
   const directory = temporary(t);
   const human = {

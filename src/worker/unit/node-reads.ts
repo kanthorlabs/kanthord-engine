@@ -200,6 +200,7 @@ export async function readRequestedChanges(
   );
   if (text === null) return null;
   return {
+    source: VerdictSource.Rework,
     text,
     judged: latestRequestCommits(read.items),
     findings: [],
@@ -232,6 +233,7 @@ async function readFailedChecks(
   );
   if (text === null) return null;
   return {
+    source: VerdictSource.FailedChecks,
     text,
     judged: read.items.map((item) => ({
       binding_id: item.binding_id,
@@ -281,11 +283,19 @@ export interface JudgedCommit {
   commit: string;
 }
 
+export const VerdictSource = {
+  FailedChecks: "failed_checks",
+  Rework: "rework",
+} as const;
+export type VerdictSource = (typeof VerdictSource)[keyof typeof VerdictSource];
+
 export interface Verdict {
+  source: VerdictSource;
   text: string;
   judged: JudgedCommit[];
   findings: Finding[];
   round: number | null;
+  linkUpdates?: number;
 }
 
 export interface Prior {
@@ -293,7 +303,9 @@ export interface Prior {
   cleared: string | null;
 }
 
-async function readLinkUpdatesText(run: ExecutionRun): Promise<string | null> {
+async function readLinkUpdates(
+  run: ExecutionRun,
+): Promise<{ text: string; count: number } | null> {
   const read = await run.call((options) =>
     run.clients.worker["execution.link_update.get"](
       {
@@ -304,7 +316,8 @@ async function readLinkUpdatesText(run: ExecutionRun): Promise<string | null> {
       options,
     ),
   );
-  return linkUpdatesText(read);
+  const text = linkUpdatesText(read);
+  return text === null ? null : { text, count: read.total };
 }
 
 export async function readPrior(
@@ -312,18 +325,26 @@ export async function readPrior(
   repositories: readonly RepositoryName[],
 ): Promise<Prior> {
   const prior = await readUnblockPrior(run, repositories);
-  const updates = await readLinkUpdatesText(run);
+  const updates = await readLinkUpdates(run);
   if (updates === null) return prior;
   if (prior.verdict === null)
     return {
-      verdict: { text: updates, judged: [], findings: [], round: null },
+      verdict: {
+        source: VerdictSource.Rework,
+        text: updates.text,
+        judged: [],
+        findings: [],
+        round: null,
+        linkUpdates: updates.count,
+      },
       cleared: prior.cleared,
     };
   return {
     ...prior,
     verdict: {
       ...prior.verdict,
-      text: `${prior.verdict.text}${VERDICT_SEPARATOR}${updates}`,
+      text: `${prior.verdict.text}${VERDICT_SEPARATOR}${updates.text}`,
+      linkUpdates: updates.count,
     },
   };
 }
@@ -339,6 +360,7 @@ async function readUnblockPrior(
   if (failed !== null)
     return {
       verdict: {
+        source: rework ? VerdictSource.Rework : failed.source,
         text: rework
           ? `${failed.text}${VERDICT_SEPARATOR}${rework.rationale}`
           : failed.text,
@@ -351,6 +373,7 @@ async function readUnblockPrior(
   if (rework)
     return {
       verdict: {
+        source: VerdictSource.Rework,
         text: rework.rationale,
         judged: testedCommits(rework.tested_input),
         findings,

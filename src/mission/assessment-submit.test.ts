@@ -18,6 +18,7 @@ import {
   ClosingEvent,
   FindingAction,
   FindingCauseOwner,
+  FindingDecision,
   FindingKind,
   FindingRoute,
   FindingStatus,
@@ -32,6 +33,7 @@ import {
   TransitionRule,
 } from "./contract.ts";
 import {
+  closeAttempt,
   deleteEvidence,
   insertAssessment,
   insertOutcome,
@@ -369,7 +371,7 @@ function storedGateFiles(
 }
 
 test("an assessment stores the server gate files", async (t) => {
-  const h = await fixture(t, RepositoryAction.MergePush);
+  const h = await fixture(t, RepositoryAction.Push);
   answerGateFiles(h, [OTHER_GATE_PATH]);
   const result = await h.submit();
   assert.equal(
@@ -380,8 +382,8 @@ test("an assessment stores the server gate files", async (t) => {
   );
 });
 
-test("a server gate file keeps the human landing of a merge push", async (t) => {
-  const h = await fixture(t, RepositoryAction.MergePush);
+test("a server gate file keeps the human landing of a push", async (t) => {
+  const h = await fixture(t, RepositoryAction.Push);
   answerGateFiles(h, [GATE_PATH]);
   const result = await h.submit();
   const [action] = h.store.transaction((tx) =>
@@ -427,7 +429,7 @@ test("a change with no gate file stores null and keeps the service merge open", 
 });
 
 test("a failed gate file read refuses the assessment and stores none", async (t) => {
-  const h = await fixture(t, RepositoryAction.MergePush);
+  const h = await fixture(t, RepositoryAction.Push);
   h.dependencies.intakeGateFiles.read = async () => {
     throw new OperationError(BAD_GATEWAY, GIT_FAILED, "The git read fails.");
   };
@@ -445,7 +447,7 @@ test("a failed gate file read refuses the assessment and stores none", async (t)
 });
 
 test("a gate file read receives the binding, the base branch, the tested commit and the execution caller", async (t) => {
-  const h = await fixture(t, RepositoryAction.MergePush);
+  const h = await fixture(t, RepositoryAction.Push);
   const reads: unknown[][] = [];
   h.dependencies.intakeGateFiles.read = async (...args) => {
     reads.push(args);
@@ -1196,8 +1198,9 @@ async function requestPullRequest(
   });
 }
 
-async function examineFixture(t: TestContext) {
+async function examineFixture(t: TestContext, earlierReport = false) {
   const h = executionHarness(t, IDENTITY);
+  const earlierFindingId = createIdentity("finding");
   const childId = createIdentity("node");
   h.store.transaction((tx) => {
     const base = getRevision(tx, h.node_id, FIRST_REVISION);
@@ -1216,7 +1219,58 @@ async function examineFixture(t: TestContext) {
       tasks: [],
     });
     setNodeState(tx, h.node_id, NodeState.Evaluating);
+    if (!earlierReport) return;
+    const earlierAssessmentId = createIdentity("assessment");
+    insertAssessment(tx, {
+      id: earlierAssessmentId,
+      node_id: h.node_id,
+      attempt: FIRST_ATTEMPT,
+      result: AssessmentResult.CriterionNotMet,
+      rationale: "Earlier",
+      evidence_ids: "[]",
+      dependency_outcome_ids: "[]",
+      tested_input: null,
+      gate_files: null,
+      execution_id: null,
+      actor: canonicalJSON(h.actor),
+      node_revision: FIRST_REVISION,
+      created_at: FIRST_REVISION,
+    });
+    insertFinding(tx, {
+      id: earlierFindingId,
+      node_id: h.node_id,
+      assessment_id: earlierAssessmentId,
+      label: "S1",
+      kind: FindingKind.Suggestion,
+      action: FindingAction.Yes,
+      task_id: null,
+      ground: null,
+      name: "Earlier",
+      description: "Earlier",
+      fix: "Earlier",
+      why: "Earlier",
+      route: FindingRoute.Report,
+      fixed_assessment_id: null,
+      cause_owner: null,
+      created_by: null,
+      decision: null,
+      decision_reason: null,
+      decided_by: null,
+      decided_at: null,
+    });
+    closeAttempt(tx, h.node_id, FIRST_ATTEMPT, FIRST_REVISION);
+    openAttempt(
+      tx,
+      h.node_id,
+      FIRST_REVISION,
+      h.executionActor,
+      FIRST_REVISION,
+    );
   });
+  if (earlierReport) {
+    h.claim.attempt = SECOND_ATTEMPT;
+    h.context.attempt = SECOND_ATTEMPT;
+  }
   const input = { kind: AssetKind.Produced, sha256: "a".repeat(64) } as const;
   const evidence = await h.invoke("evidence.submit", {
     params: { node_id: h.node_id },
@@ -1301,7 +1355,14 @@ async function examineFixture(t: TestContext) {
       setNodeState(tx, childId, NodeState.Completed);
       return outcome.id;
     });
-  return { ...h, submit, findings, completeChild };
+  return {
+    ...h,
+    submit,
+    findings,
+    completeChild,
+    earlierFindingId,
+    childId,
+  };
 }
 
 test("a non-current submit stores its findings as records and changes no earlier finding", async (t) => {
@@ -1413,4 +1474,263 @@ test("an examine finding never gets the route fix, causes no rework and is repor
     ["S1", FindingRoute.Record],
     ["S2", FindingRoute.Report],
   ]);
+});
+
+test("a success of an examine node in a later attempt leaves the earlier report findings open", async (t) => {
+  const h = await examineFixture(t, true);
+  const outcomeId = h.completeChild();
+  const answer = await h.submit({ dependency_outcome_ids: [outcomeId] });
+  assert.ok("state" in answer.node);
+  assert.equal(answer.node.state, NodeState.Completed);
+  const earlier = (await h.findings()).find(
+    (item) => item.id === h.earlierFindingId,
+  );
+  assert.equal(earlier?.route, FindingRoute.Report);
+  assert.equal(earlier?.fixed_assessment_id, null);
+  assert.equal(earlier?.status, FindingStatus.Open);
+});
+
+async function blockedFirstAttempt(
+  h: Awaited<ReturnType<typeof reviewHarness>>,
+) {
+  await h.submit({ ...h.notMet, findings: [reviewerFinding("B1")] });
+  const b1 = await h.byLabel("B1");
+  assert.equal(b1.route, FindingRoute.Fix);
+  h.dependencies.bindings.resolveBindingIdentity = (_tx, _project, id) => ({
+    binding_id: id,
+    resource_identity:
+      id === h.repositoryId
+        ? "repository:github:owner/repo"
+        : "storage:s3:bucket",
+  });
+  h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Paused));
+  const blocked = await h.invoke("node.block", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      reason: HUMAN_REASON,
+      expected_mission_version: FIRST_REVISION,
+      expected_state: NodeState.Paused,
+      expected_attempt: FIRST_ATTEMPT,
+    },
+  });
+  const reported = await h.byLabel("B1");
+  assert.equal(reported.route, FindingRoute.Report);
+  await h.invoke("node.unblock", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      blocked_attempt: FIRST_ATTEMPT,
+      expected_revision: FIRST_REVISION,
+      expected_mission_version: FIRST_REVISION,
+      change: { content: blocked.node.content, reason: "Redirect", tasks: [] },
+    },
+  });
+  h.claim.attempt = SECOND_ATTEMPT;
+  h.context.attempt = SECOND_ATTEMPT;
+  h.evaluate();
+  const evidence = await h.invoke("evidence.submit", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      ...h.context,
+      subject: "Verified",
+      assets: [{ kind: AssetKind.Repository, address: h.address }],
+      verification: {
+        tested_input: h.address,
+        results: [
+          {
+            command: "true",
+            exit_code: SUCCESSFUL_EXIT_CODE,
+            signal: null,
+            timed_out: false,
+          },
+        ],
+      },
+    },
+  });
+  return {
+    b1: reported,
+    submitSecond: (input: Partial<AssessmentSubmit> = {}) =>
+      h.submit({
+        ...h.context,
+        evidence_ids: [evidence.evidence.id],
+        ...input,
+      }),
+  };
+}
+
+test("a success of a later attempt marks the earlier report findings of the node fixed by that assessment", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  const { b1, submitSecond } = await blockedFirstAttempt(h);
+  const undecided = () =>
+    h.invoke("finding.undecided.list", {
+      params: { project_id: h.project_id },
+      query: {},
+      body: null,
+    });
+  assert.deepEqual(
+    (await undecided()).items.map((item) => item.id),
+    [b1.id],
+  );
+  const answer = await submitSecond();
+  assert.ok("state" in answer.node);
+  assert.equal(answer.node.state, NodeState.Completed);
+  const fixed = await h.byLabel("B1");
+  assert.equal(fixed.fixed_assessment_id, answer.assessment.id);
+  assert.equal(fixed.status, FindingStatus.Fixed);
+  assert.equal(fixed.route, FindingRoute.Report);
+  assert.equal(fixed.decision, null);
+  assert.deepEqual((await undecided()).items, []);
+});
+
+test("a criterion-not-met assessment of a later attempt changes no earlier finding", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  const { b1, submitSecond } = await blockedFirstAttempt(h);
+  await submitSecond(h.notMet);
+  assert.deepEqual(await h.byLabel("B1"), b1);
+});
+
+test("a success of a later attempt keeps the decision of an earlier finding", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  const { b1, submitSecond } = await blockedFirstAttempt(h);
+  await h.invoke("finding.decide", {
+    params: { finding_id: b1.id },
+    query: {},
+    body: { decision: FindingDecision.Accepted, decision_reason: "Real" },
+  });
+  await submitSecond();
+  const kept = await h.byLabel("B1");
+  assert.equal(kept.fixed_assessment_id, null);
+  assert.equal(kept.decision, FindingDecision.Accepted);
+});
+
+test("a success of a later attempt keeps a human finding of an earlier attempt open", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  const { b1, submitSecond } = await blockedFirstAttempt(h);
+  const humanId = createIdentity("finding");
+  h.store.transaction((tx) =>
+    insertFinding(tx, {
+      ...b1,
+      id: humanId,
+      decided_by: null,
+      label: FIRST_HUMAN_LABEL,
+      route: FindingRoute.Report,
+      created_by: canonicalJSON(h.actor),
+    }),
+  );
+  await submitSecond();
+  const human = (await h.findings()).find((item) => item.id === humanId);
+  assert.equal(human?.fixed_assessment_id, null);
+  assert.equal(human?.status, FindingStatus.Open);
+});
+
+test("a success of a later attempt keeps its own report finding open", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  const { submitSecond } = await blockedFirstAttempt(h);
+  h.dependencies.config.rework_limit = REWORK_OFF;
+  const answer = await submitSecond({ findings: [reviewerFinding("S1")] });
+  assert.ok("state" in answer.node);
+  assert.equal(answer.node.state, NodeState.Completed);
+  const own = await h.byLabel("S1");
+  assert.equal(own.route, FindingRoute.Report);
+  assert.equal(own.fixed_assessment_id, null);
+  assert.equal(
+    (await h.byLabel("B1")).fixed_assessment_id,
+    answer.assessment.id,
+  );
+});
+
+function fixProposal(dependencyId: string, findingLabels: string[]) {
+  return {
+    dependency_id: dependencyId,
+    name: "Fix",
+    requirement: "Repair the defect",
+    criterion: "The defect is gone",
+    task: {
+      name: "Repair",
+      requirement: "Change the code",
+      criterion: "The test passes",
+      verifications: ["pnpm test"],
+    },
+    finding_labels: findingLabels,
+  };
+}
+
+function undecidedOf(h: Awaited<ReturnType<typeof examineFixture>>) {
+  return h.invoke("finding.undecided.list", {
+    params: { project_id: h.project_id },
+    query: {},
+    body: null,
+  });
+}
+
+test("a blocker that a proposal names gets the route record and waits for no human", async (t) => {
+  const h = await examineFixture(t);
+  const outcomeId = h.completeChild();
+  await h.submit({
+    result: AssessmentResult.Undetermined,
+    dependency_outcome_ids: [outcomeId],
+    findings: [reviewerFinding("B1"), reviewerFinding("B2")],
+    proposals: [fixProposal(h.childId, ["B1", "B2"])],
+  });
+  assert.deepEqual(
+    (await h.findings()).map((item) => [item.label, item.route]),
+    [
+      ["B1", FindingRoute.Record],
+      ["B2", FindingRoute.Record],
+    ],
+  );
+  assert.deepEqual((await undecidedOf(h)).items, []);
+});
+
+test("a blocker that no proposal names keeps the route report", async (t) => {
+  const h = await examineFixture(t);
+  const outcomeId = h.completeChild();
+  await h.submit({
+    result: AssessmentResult.Undetermined,
+    dependency_outcome_ids: [outcomeId],
+    findings: [reviewerFinding("B1"), reviewerFinding("B2")],
+    proposals: [fixProposal(h.childId, ["B1"])],
+  });
+  assert.deepEqual(
+    (await h.findings()).map((item) => [item.label, item.route]),
+    [
+      ["B1", FindingRoute.Record],
+      ["B2", FindingRoute.Report],
+    ],
+  );
+  assert.deepEqual(
+    (await undecidedOf(h)).items.map((item) => item.label),
+    ["B2"],
+  );
+});
+
+test("a finding label that names no blocker, repeats or two proposals name refuses the submit", async (t) => {
+  const h = await examineFixture(t);
+  const outcomeId = h.completeChild();
+  const refused = (proposals: ReturnType<typeof fixProposal>[]) =>
+    assert.rejects(
+      h.submit({
+        result: AssessmentResult.Undetermined,
+        dependency_outcome_ids: [outcomeId],
+        findings: [reviewerFinding("B1"), reviewerFinding("S1")],
+        proposals,
+      }),
+      (error) =>
+        error instanceof ZodError &&
+        error.issues.some(
+          (issue) =>
+            issue.path.join(".") ===
+            `body.proposals.${proposals.length - 1}.finding_labels`,
+        ),
+    );
+  await refused([fixProposal(h.childId, ["B9"])]);
+  await refused([fixProposal(h.childId, ["S1"])]);
+  await refused([fixProposal(h.childId, ["B1", "B1"])]);
+  await refused([
+    fixProposal(h.childId, ["B1"]),
+    fixProposal(h.childId, ["B1"]),
+  ]);
+  assert.deepEqual(await h.findings(), []);
 });

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { VERIFICATION_RERUNS } from "./verification.ts";
 import {
   SensitiveRule,
   SESSION_MARKER_PATTERN,
@@ -18,6 +19,7 @@ import {
   spanEnds,
 } from "./test-support.ts";
 import { SpanOperation } from "./telemetry.ts";
+import { COMMAND_LIMIT_MS } from "./budget.ts";
 import { VerificationContext } from "./method-telemetry.ts";
 import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
@@ -35,17 +37,21 @@ import {
   verifyTaskRun,
 } from "./steps-implement.ts";
 import { nodeWork } from "./base-refresh.ts";
+import { VerdictSource } from "./node-reads.ts";
 import { nodeUnitOf } from "./release-gate.ts";
 import { ProviderFailure } from "../../scheduler/contract.ts";
 import { NoProgressRule } from "./progress-rule.ts";
 import {
+  advanceBase,
   implementFixture as fixture,
   NO_PROVIDER_CALLS,
   recordDone,
   recordReleases,
   STEPS_KEY,
   task,
+  TEST_SSH_ACCESS,
 } from "./test-support.ts";
+import { background } from "../../kernel/context.ts";
 import { PromptTemplate } from "../../agent/contract.ts";
 import { AssetKind, type Revision } from "../../mission/contract.ts";
 import { executionBoundary } from "./native-method.ts";
@@ -54,6 +60,12 @@ import { REPORT_MEDIA_TYPE } from "./steps-examine.ts";
 const TASK_VERIFIED = "task verified";
 const REVISION_COUNT_ATTRIBUTE = "kanthord.task.revision_count";
 const WALL_DEADLINE_MS = 300;
+const FETCH_DEADLINE_MS = 20000;
+const MAIN_CHANGE = "main change";
+const MERGE_PARENT_FIELDS = 3;
+const VERDICT_PLANNED = "verdict planned";
+const LINK_UPDATE_COUNT = 3;
+const FAILING_RUNS_LAST = 1 + VERIFICATION_RERUNS + 1;
 
 function writeFile(content: string) {
   return fauxAssistantMessage(
@@ -104,7 +116,7 @@ async function rerouteReportOf(
   const count = join(temporary(t), "count");
   const routed = task(
     "routed",
-    `echo x >> ${count}; test "$(wc -l < ${count} | tr -d ' ')" != 2`,
+    `echo x >> ${count}; runs="$(wc -l < ${count} | tr -d ' ')"; test "$runs" -lt 2 || test "$runs" -gt ${FAILING_RUNS_LAST}`,
   );
   const other = task("other", "true");
   const h = await fixture(
@@ -210,6 +222,7 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
     } as unknown as Revision;
     await recordDone(h, done);
     h.verdict = {
+      source: VerdictSource.Rework,
       text: "Rework the node.",
       judged: [],
       findings: [],
@@ -340,6 +353,7 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
   const NO_PROGRESS_LIMIT = 2;
   const FAILED_EXIT_CODE = 1;
   const ONE_COMMAND = 1;
+  const FIRST_COMMAND_INDEX = 0;
 
   async function stopOf(work: Promise<unknown>): Promise<ExecutionStop> {
     try {
@@ -373,6 +387,9 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
       verification: {
         passed: false,
         ran: ONE_COMMAND,
+        index: FIRST_COMMAND_INDEX,
+        command: "false",
+        limit_ms: COMMAND_LIMIT_MS,
         exit_code: FAILED_EXIT_CODE,
         timed_out: false,
       },
@@ -815,6 +832,149 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.deepEqual(
       h.checkouts.map((checkout) => checkout.head),
       heads,
+    );
+  });
+
+  async function reworkHarness(
+    t: Parameters<typeof fixture>[0],
+    source: VerdictSource,
+    baseMoved: boolean,
+    script: Parameters<typeof fixture>[2],
+  ) {
+    const h = await fixture(t, [], script);
+    h.revision = {
+      ...h.revision,
+      content: {
+        ...h.revision.content,
+        verifications: [baseMoved ? "test -f other" : "true"],
+      },
+    };
+    await recordDone(h, nodeUnitOf(h.input.claim.node_id, h.revision));
+    const judged = h.checkouts.map((checkout) => ({
+      binding_id: checkout.binding_id,
+      commit: checkout.head,
+    }));
+    if (baseMoved) {
+      await advanceBase(h, t, MAIN_CHANGE, "other");
+      await h.input.transport.fetchBase(
+        h.root,
+        "main",
+        background,
+        FETCH_DEADLINE_MS,
+        TEST_SSH_ACCESS,
+      );
+    }
+    h.verdict = {
+      source,
+      text: "Rework the node.",
+      judged,
+      findings: [],
+      round: null,
+    };
+    return h;
+  }
+
+  for (const linkUpdates of [undefined, LINK_UPDATE_COUNT])
+    test(`a failed-check verdict with ${linkUpdates ?? 0} link updates on a merged base releases with no agent turn, logs the count and pushes the merged head`, async (t) => {
+      const h = await reworkHarness(t, VerdictSource.FailedChecks, true, []);
+      if (linkUpdates !== undefined) h.verdict = { ...h.verdict!, linkUpdates };
+      const instruct = t.mock.method(h.agent, "instruct");
+      const events = t.mock.method(h.run, "log");
+      acceptEvidence(h);
+      recordReleases(h);
+      assert.deepEqual(await runStepsImplement(h), {
+        kind: "released",
+        furtherWork: false,
+      });
+      assert.equal(instruct.mock.calls.length, NO_PROVIDER_CALLS);
+      assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
+      const planned = events.mock.calls
+        .filter((call) => call.arguments[0] === VERDICT_PLANNED)
+        .map((call) => call.arguments[1]);
+      assert.deepEqual(
+        planned.map((fields) => {
+          const { holds, skipped, link_updates } = fields as {
+            holds: boolean;
+            skipped: string;
+            link_updates: number;
+          };
+          return [holds, skipped, link_updates];
+        }),
+        [[false, "base_merged", linkUpdates ?? 0]],
+      );
+      const pushed = (
+        await simpleGit(h.bare).revparse([`refs/heads/${h.nodeBranch}`])
+      ).trim();
+      assert.equal(pushed, h.checkouts[0]!.head);
+      assert.equal((await simpleGit(h.root).revparse(["HEAD"])).trim(), pushed);
+    });
+
+  test("a conflict rework merges the new base at the claim, runs no agent turn and releases the merged head", async (t) => {
+    const h = await reworkHarness(t, VerdictSource.FailedChecks, true, []);
+    h.verdict = null;
+    const instruct = t.mock.method(h.agent, "instruct");
+    acceptEvidence(h);
+    recordReleases(h);
+    assert.deepEqual(await runStepsImplement(h), {
+      kind: "released",
+      furtherWork: false,
+    });
+    assert.equal(instruct.mock.calls.length, NO_PROVIDER_CALLS);
+    assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
+    const pushed = (
+      await simpleGit(h.bare).revparse([`refs/heads/${h.nodeBranch}`])
+    ).trim();
+    assert.equal(pushed, h.checkouts[0]!.head);
+    assert.equal((await simpleGit(h.root).revparse(["HEAD"])).trim(), pushed);
+    assert.equal(
+      (
+        await simpleGit(h.root).raw([
+          "rev-list",
+          "--parents",
+          "-n",
+          "1",
+          "HEAD",
+        ])
+      )
+        .trim()
+        .split(" ").length,
+      MERGE_PARENT_FIELDS,
+    );
+  });
+
+  test("a failed-check verdict on a current base sends the criterion-revision instruction", async (t) => {
+    const h = await reworkHarness(t, VerdictSource.FailedChecks, false, [
+      writeFile("revised"),
+      fauxAssistantMessage("revised"),
+    ]);
+    const instruct = t.mock.method(h.agent, "instruct");
+    acceptEvidence(h);
+    recordReleases(h);
+    await runStepsImplement(h);
+    assert.deepEqual(
+      instruct.mock.calls.map((call) => call.arguments[2]),
+      [PromptTemplate.CriterionRevision],
+    );
+  });
+
+  test("a rework verdict on a merged base still applies the verdict rule and sends the instruction", async (t) => {
+    const h = await reworkHarness(t, VerdictSource.Rework, true, [
+      fauxAssistantMessage("nothing"),
+      fauxAssistantMessage("nothing again"),
+      fauxAssistantMessage("never"),
+    ]);
+    const instruct = t.mock.method(h.agent, "instruct");
+    recordReleases(h);
+    const end = await executionBoundary(h.run, () => runStepsImplement(h));
+    assert.ok("stop" in end && end.stop);
+    assert.equal(end.stop.reason, EndReason.NoProgress);
+    assert.equal(
+      JSON.parse(end.stop.detail!).rule,
+      NoProgressRule.VerdictRuleUnmet,
+    );
+    assert.deepEqual(
+      instruct.mock.calls.map((call) => call.arguments[2]),
+      [PromptTemplate.CriterionRevision, PromptTemplate.CriterionRevision],
     );
   });
 

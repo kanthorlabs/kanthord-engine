@@ -22,13 +22,14 @@ import {
   gitLsRemote,
   landedOn,
   listFilesAtCommit,
-  mergePushFresh,
   pushNodeBranch,
   pushSnapshotFresh,
   readFilesAtCommit,
   readObjectIds,
   resolveBranchCommit,
+  squashPushFresh,
 } from "./connector.ts";
+export { pushRefusalOf, PushRefusalKind } from "./git-failure.ts";
 import { RepositoryErrorCode } from "./contract.ts";
 import { GitHubPlatform } from "./github.ts";
 import { knownHostsLine } from "./host-key.ts";
@@ -66,18 +67,20 @@ export {
   type GitHubConversationCheckpoint,
 } from "./github.ts";
 export {
+  BaseMovedError,
   foldBranchPush,
+  GIT_BASE_MOVED,
   GitStage,
   GATE_DECLARATION_INVALID,
   GitWriteError,
   type BranchCommitInput,
   type GateFilesInput,
   type Landing,
-  type MergePushInput,
+  type PushInput,
 } from "./connector.ts";
 
 export interface GitWriter {
-  mergePushFresh: typeof mergePushFresh;
+  squashPushFresh: typeof squashPushFresh;
   pushSnapshotFresh: typeof pushSnapshotFresh;
   landedOn: typeof landedOn;
   changedGateFiles: typeof changedGateFiles;
@@ -149,7 +152,7 @@ export class RepositoryComponent implements GitWriter {
   fetchAndCheckout = fetchAndCheckout;
   fetchBase = fetchBase;
   pushNodeBranch = pushNodeBranch;
-  mergePushFresh = mergePushFresh;
+  squashPushFresh = squashPushFresh;
   pushSnapshotFresh = pushSnapshotFresh;
   landedOn = landedOn;
   changedGateFiles = changedGateFiles;

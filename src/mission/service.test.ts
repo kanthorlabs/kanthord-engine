@@ -70,6 +70,7 @@ import {
 } from "./contract.ts";
 import { missionMigrations } from "./migrations.ts";
 import { nodeRecord } from "./node-read.ts";
+import type { PausedDependencies } from "./record-read.ts";
 import { getRevision } from "./node-read.ts";
 import {
   closeAttempt,
@@ -107,6 +108,7 @@ import {
   codedAs,
   databaseSnapshot,
   executionHarness,
+  keptClaimHarness,
   lostHold,
   lostTransition,
   unexpectedCollaboration,
@@ -322,6 +324,20 @@ const HUMAN_ACTOR = {
   name: "name",
 } as const;
 
+const pausedDependencies: PausedDependencies = {
+  pauseFacts: {
+    of: () => ({
+      consecutive_failures: 0,
+      consecutive_stalls: 0,
+      last_stop: null,
+    }),
+  },
+  config: {
+    consecutive_failure_limit: CONSECUTIVE_FAILURE_LIMIT,
+    further_work_limit: FURTHER_WORK_LIMIT,
+  },
+};
+
 const bindings: MissionBindings = {
   storageBindingOf: unexpectedCollaboration,
   conversationInboxOf: unexpectedCollaboration,
@@ -423,6 +439,18 @@ function makeService(
       of: () => {
         throw new Error(UNEXPECTED_COLLABORATION);
       },
+    },
+    workerStopOrders: {
+      connected: () => false,
+      sendStopOrder: () => undefined,
+      orderOf: () => null,
+    },
+    pauseFacts: {
+      of: () => ({
+        consecutive_failures: 0,
+        consecutive_stalls: 0,
+        last_stop: null,
+      }),
     },
     telemetry: { uploadCheckFailed: () => {} },
     acts: { act: () => {} },
@@ -3963,7 +3991,7 @@ function importPreviewFixture(t: TestContext) {
   const entries: ImportEntry[] = f.store.transaction((tx) => {
     const nodes = readMissionNodes(tx, f.mission_id);
     return nodes.flatMap((node) => {
-      const record = nodeRecord(tx, node, bindings);
+      const record = nodeRecord(tx, node, bindings, pausedDependencies);
       return [
         {
           id: node.id,
@@ -4189,7 +4217,13 @@ for (const [state, attempt] of [
         {
           code: MissionErrorCode.ConditionFailed,
           node_id: f.implementId,
-          details: { state, attempt },
+          details: {
+            state,
+            attempt,
+            visible_revision: NEXT_REVISION,
+            reason: REASON,
+            remedy: "mission export",
+          },
         },
       ],
     );
@@ -4879,7 +4913,13 @@ for (const [state, code] of [
         }),
       retirementError(code, {
         ...(code === MissionErrorCode.ConditionFailed
-          ? { state, attempt: NO_ATTEMPT }
+          ? {
+              state,
+              attempt: NO_ATTEMPT,
+              visible_revision: FIRST_REVISION,
+              reason: REASON,
+              remedy: "mission export",
+            }
           : {}),
         filename: IMPLEMENT_FILENAME,
         node_id: implement.id,
@@ -5944,7 +5984,7 @@ test("mission rebind reports only terminal and retired earlier pins and keeps sk
         .run(RETIRED_AT, nodeId);
     return {
       node: f.store.transaction((tx) =>
-        nodeRecord(tx, readNode(tx, nodeId)!, bindings),
+        nodeRecord(tx, readNode(tx, nodeId)!, bindings, pausedDependencies),
       ),
       condition:
         state === NodeState.Available
@@ -6677,4 +6717,37 @@ test("linkUpdatesOf answers next_cursor and the total of the trusted rows", (t) 
   assert.equal(second.next_cursor, null);
   assert.equal(second.total, PAGE_OF_TWO);
   assert.notEqual(second.items[0]?.id, first.items[0]?.id);
+});
+
+test("the executionReleased hook runs the pending close of its execution once", async (t) => {
+  const k = keptClaimHarness(
+    t,
+    testHumanIdentity(ACCOUNT_ID, DISPLAY_NAME, TOKEN_ID),
+    NodeState.Executing,
+  );
+  await k.h.invoke("node.discard", {
+    params: { node_id: k.h.node_id },
+    query: {},
+    body: k.h.body(NodeState.Executing, SINGLE_ITEM),
+  });
+  assert.equal(k.h.node().state, NodeState.Paused);
+  k.keep.live = false;
+  k.h.service.executionReleased(k.executionId, null);
+  assert.equal(k.h.node().state, NodeState.Discarded);
+  const snapshot = databaseSnapshot(k.h.store);
+  k.h.service.executionReleased(k.executionId, null);
+  assert.deepEqual(databaseSnapshot(k.h.store), snapshot);
+});
+
+test("the executionReleased hook of an execution with no pending close does nothing", (t) => {
+  const k = keptClaimHarness(
+    t,
+    testHumanIdentity(ACCOUNT_ID, DISPLAY_NAME, TOKEN_ID),
+    NodeState.Paused,
+  );
+  const snapshot = databaseSnapshot(k.h.store);
+  k.h.service.executionReleased(k.executionId, null);
+  k.h.service.executionReleased(createIdentity("execution"), null);
+  assert.deepEqual(databaseSnapshot(k.h.store), snapshot);
+  assert.deepEqual(k.logs, []);
 });

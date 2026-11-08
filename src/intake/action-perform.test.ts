@@ -69,18 +69,19 @@ const GATE_FILE_BODY = [
   "- `package.json`\n- `scripts/affected-tests.mjs`",
   "A human reviews and merges this pull request.",
 ].join("\n\n");
-const MERGE_PUSH_ACTION = "merge_push";
+const MERGE_PUSH_ACTION = "push";
 const PULL_REQUEST_ACTION = "pull_request";
 const ONE_RELEASE = 1;
 const TWO_RELEASES = 2;
 const NO_MATERIALS = 0;
 const REVOKED_CODE = "credential.revision.revoked";
 const GIT_FAILED_CODE = "repository.connector.git_failed";
+const GIT_PUSH_REFUSED = "git.push_refused";
 const MERGE_EVIDENCE_ID = "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const REUSED_EVIDENCE_ID = "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAW";
 
 const GitCall = {
-  MergePush: "merge_push",
+  Push: "push",
   SnapshotPush: "snapshot_push",
   Landing: "landing",
 } as const;
@@ -130,7 +131,7 @@ function actionFacts(
       resource_identity: RESOURCE_IDENTITY,
       base_branch: "main",
     },
-    node: { name: "Ship accounts", commit_type: "feat" },
+    node: { id: NODE_ID, name: "Ship accounts", commit_type: "feat" },
     snapshot_commit: SNAPSHOT,
     reused_address: null,
     merge_address: null,
@@ -170,8 +171,8 @@ function harness(t: TestContext, options: Options) {
   });
   const git: { call: GitCall; ssh: SshAccess | undefined }[] = [];
   const gitWriter: GitWriter = {
-    mergePushFresh: async (_input, _context, _deadline, ssh) => {
-      git.push({ call: GitCall.MergePush, ssh });
+    squashPushFresh: async (_input, _context, _deadline, ssh) => {
+      git.push({ call: GitCall.Push, ssh });
       return (options.mergePush ?? (async () => ({ commit: MERGED })))();
     },
     pushSnapshotFresh: async (_input, _context, _deadline, ssh) => {
@@ -181,8 +182,8 @@ function harness(t: TestContext, options: Options) {
       git.push({ call: GitCall.Landing, ssh });
       if (options.landingFailure !== undefined) throw options.landingFailure;
       return options.landed
-        ? { landed: true, first_parent: MERGED }
-        : { landed: false, first_parent: null };
+        ? { landed: true, first_parent: MERGED, base_moved: false }
+        : { landed: false, first_parent: null, base_moved: false };
     },
     changedGateFiles: () => {
       throw new Error("A perform computes no gate file.");
@@ -289,7 +290,7 @@ function assertBindingRelease(h: ReturnType<typeof harness>) {
     });
 }
 
-test("git.merge_push releases the SSH identity of the binding under the execution claim and records the ssh_credential name", async (t) => {
+test("git.push releases the SSH identity of the binding under the execution claim and records the ssh_credential name", async (t) => {
   const h = harness(t, { facts: actionFacts(MERGE_PUSH_ACTION) });
   const answer = await h.perform();
   assert.deepEqual(answer, {
@@ -302,12 +303,12 @@ test("git.merge_push releases the SSH identity of the binding under the executio
   assertBindingRelease(h);
   assert.deepEqual(
     h.git.map((item) => item.call),
-    [GitCall.MergePush],
+    [GitCall.Push],
   );
   assertAccess(h, h.git[0]?.ssh);
   assert.deepEqual(h.rows(), [
     {
-      operation: OutboundOperation.GitMergePush,
+      operation: OutboundOperation.GitPush,
       state: OutboundRequestState.Succeeded,
       credential: SSH_CREDENTIAL,
     },
@@ -333,7 +334,7 @@ test("the read-back of a merge push takes its own SSH release under the executio
   assert.equal("kind" in found && found.kind, AddressKind.BranchPush);
   assert.deepEqual(
     h.git.map((item) => item.call),
-    [GitCall.MergePush, GitCall.Landing],
+    [GitCall.Push, GitCall.Landing],
   );
   for (const item of h.git) assertAccess(h, item.ssh);
   assert.equal(h.sshRequests().length, TWO_RELEASES);
@@ -471,6 +472,43 @@ test("an SSH agent failure of the base landing read of a pull request create ans
   assert.deepEqual(h.githubCalls, []);
   assert.ok(h.materials.every((material) => material.dropped));
 });
+
+const PUSH_FAILURES = [
+  {
+    stderr: " ! [rejected]        abc -> main (non-fast-forward)",
+    class: ResultClass.RetryableRefusal,
+    code: GIT_FAILED_CODE,
+  },
+  {
+    stderr: "remote: error: GH013: Repository rule violations found.\nTo host",
+    class: ResultClass.FinalRefusal,
+    code: GIT_PUSH_REFUSED,
+  },
+  {
+    stderr: "fatal: the remote end hung up unexpectedly",
+    class: ResultClass.UnknownOutcome,
+    code: GIT_FAILED_CODE,
+  },
+];
+
+for (const failure of PUSH_FAILURES)
+  test(`a merge push whose stderr is ${failure.class} answers ${failure.class}`, async (t) => {
+    const h = harness(t, {
+      facts: actionFacts(MERGE_PUSH_ACTION),
+      mergePush: async () => {
+        throw new GitWriteError(
+          GitStage.Push,
+          new Diagnostic(GIT_FAILED_CODE, "push: git failed.", {
+            cause: new Error(`push: git exited with 1: ${failure.stderr}`),
+          }),
+        );
+      },
+    });
+    const answer = await h.perform();
+    assert.ok("class" in answer, JSON.stringify(answer));
+    assert.equal(answer.class, failure.class);
+    assert.equal(answer.code, failure.code);
+  });
 
 test("a deadline of a merge push answers confirmed_failure with the deadline code", async (t) => {
   const h = harness(t, {
@@ -648,7 +686,7 @@ function replyHarness(t: TestContext) {
         custody: fake.custody,
         github,
         gitWriter: {
-          mergePushFresh: () => assert.fail("A reply pushes nothing."),
+          squashPushFresh: () => assert.fail("A reply pushes nothing."),
           pushSnapshotFresh: () => assert.fail("A reply pushes nothing."),
           landedOn: () => assert.fail("A reply pushes nothing."),
           changedGateFiles: () => assert.fail("A reply pushes nothing."),

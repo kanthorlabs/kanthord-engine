@@ -12,7 +12,6 @@ import {
   REQUEST_BODY_MAX_BYTES,
 } from "../../kernel/operation.ts";
 import { isObject, isString } from "../../kernel/values.ts";
-import { HttpStatus } from "../../kernel/http.ts";
 import { missionOperations } from "../../mission/contract.ts";
 import { schedulerOperations } from "../../scheduler/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
@@ -79,6 +78,8 @@ const PARKED_PULL_DEADLINE_MS = 500;
 const OVERSIZED_BODY_PADDING = 1;
 const PROVISIONING_ROUTE_PREFIX = "/api/project/";
 const FINISHED_MESSAGE = "Request finished";
+const CLIENT_CLOSED_STATUS = 499;
+const CANCELLED_CODE = "gateway.invocation.cancelled";
 const ID_PATTERN = /\b([a-z_]+)_[0-9A-HJKMNP-TV-Z]{26}\b/g;
 const VOLATILE_SUFFIX = /(_at|_span_id|^trace_id)$/;
 const VOLATILE_KEYS = new Set(["request_id", "idempotencyKey"]);
@@ -456,7 +457,8 @@ async function run(t: TestContext, side: Side, scenario: Scenario) {
       records.some(
         (entry) =>
           entry.route === schedulerOperations.workPull.path &&
-          entry.status === HttpStatus.ServiceUnavailable,
+          entry.status === CLIENT_CLOSED_STATUS &&
+          entry.code === CANCELLED_CODE,
       ),
     t.signal,
   );
@@ -549,7 +551,11 @@ function requestRecords(lines: Record<string, unknown>[]) {
         line.msg === FINISHED_MESSAGE &&
         !String(line.route).startsWith(PROVISIONING_ROUTE_PREFIX),
     )
-    .map((line) => ({ route: line.route, status: line.status }));
+    .map((line) => ({
+      route: line.route,
+      status: line.status,
+      code: line.code,
+    }));
 }
 
 test("the port transport, the bridged port transport and the HTTP transport answer the same through the Gateway", async (t) => {

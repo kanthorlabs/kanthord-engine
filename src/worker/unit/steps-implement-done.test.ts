@@ -1,3 +1,4 @@
+import { VerdictSource } from "./node-reads.ts";
 import assert from "node:assert/strict";
 import { suite, test } from "node:test";
 import { existsSync } from "node:fs";
@@ -333,6 +334,7 @@ suite(
 
     function verdictAtHead(h: Harness) {
       return {
+        source: VerdictSource.Rework,
         text: VERDICT,
         findings: [],
         round: null,

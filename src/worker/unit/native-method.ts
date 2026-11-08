@@ -63,6 +63,7 @@ export interface NativeExecutionInput {
   sessionRoot?: string;
   hostTools: (workspace: string) => HostTools;
   context: Context;
+  stop?: Context;
   log?: (record: Record<string, unknown>) => void;
   telemetry?: TelemetrySink;
 }
@@ -171,6 +172,7 @@ export async function runNativeExecution(
         verdict: prior.verdict,
         cleared: prior.cleared,
         unchangedTurns: 0,
+        refreshed: null,
         lastVerification: null,
         revisionCount: 0,
         memo: new VerificationMemo(),

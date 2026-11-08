@@ -55,6 +55,7 @@ import {
   missionOperations,
 } from "../../mission/contract.ts";
 import {
+  environmentFailureClassSchema,
   PROJECT_SERVICE_NAME,
   type ProjectBindings,
   projectOperations,
@@ -463,6 +464,7 @@ export function composeServices(options: {
         mission.claim(...args),
       release: (...args) => mission.release(...args),
       failure: (...args) => mission.failure(...args),
+      stopped: (...args) => mission.stopped(...args),
     },
     registrations: {
       clientAttributionOf: (tx, runtimeIdentity) =>
@@ -491,11 +493,16 @@ export function composeServices(options: {
     environments: {
       environmentsClaimable: (projectId, ids) =>
         project.environmentsClaimable(projectId, ids),
-      environmentFailed: (input) =>
+      environmentFailed: (input) => {
+        const failureClass = environmentFailureClassSchema.safeParse(
+          input.stop.code,
+        );
+        if (!failureClass.success) return;
         project.environmentFailed({
           ...input,
-          stop: { ...input.stop, detail: input.stop.detail ?? "" },
-        }),
+          stop: { code: failureClass.data, detail: input.stop.detail ?? "" },
+        });
+      },
     },
     branches: {
       nodeBranchesOf: (tx, keys) => mission.nodeBranchesOf(tx, keys),
@@ -557,6 +564,13 @@ export function composeServices(options: {
       executionTransition: (trace, transition) =>
         tracking.executionTransition(trace, transition),
     },
+    logger: options.logger,
+    stopOrderOf: (executionId) => worker.stopOrderOf(executionId),
+    executionReleased: (executionId, stop) => {
+      worker.executionReleased(executionId);
+      mission.executionReleased(executionId, stop);
+    },
+    archiving: (tx, runtimeIdentity) => worker.archiving(tx, runtimeIdentity),
     health: options.health,
   });
   const tracking = new TrackingService({
@@ -782,6 +796,8 @@ export function composeServices(options: {
     instanceArchive: {
       revokeForInstanceArchive: (...args) =>
         mission.revokeForInstanceArchive(...args),
+      revokePausedClaim: (...args) => mission.revokePausedClaim(...args),
+      executionReleased: (...args) => mission.executionReleased(...args),
       reportExecutionEnds: (...args) => mission.reportExecutionEnds(...args),
     },
     evidenceRequests: {
@@ -1086,6 +1102,14 @@ export function composeServices(options: {
     wakeup: { wake: (projectId) => scheduler.wake(projectId) },
     executionAttribution: {
       of: (...args) => scheduler.executionAttribution(...args),
+    },
+    workerStopOrders: {
+      connected: (...args) => worker.executionConnected(...args),
+      sendStopOrder: (...args) => worker.sendStopOrder(...args),
+      orderOf: (...args) => worker.orderOf(...args),
+    },
+    pauseFacts: {
+      of: (...args) => scheduler.pauseFacts(...args),
     },
     telemetry: {
       uploadCheckFailed: (failure) => {

@@ -85,6 +85,7 @@ import {
   intakeOperations,
   ResourceKind,
 } from "../../intake/contract.ts";
+import { ActorKind } from "../../mission/contract.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
 import {
   EnvironmentStatus,
@@ -388,7 +389,11 @@ function releasedMaterials(t: TestContext, fixture: Fixture) {
   return released;
 }
 
-function intakeOnlyReport(t: TestContext, fixture: Fixture) {
+function intakeOnlyReport(
+  t: TestContext,
+  fixture: Fixture,
+  checkDeadline: AbortSignal,
+) {
   const collect = () =>
     fixture.store.transaction((tx) =>
       collectInventories(tx, {
@@ -410,12 +415,10 @@ function intakeOnlyReport(t: TestContext, fixture: Fixture) {
     commit: <T>(write: (tx: Transaction) => T) =>
       fixture.store.transaction(write),
   };
-  return resourceHealthReport(
-    caller,
-    collect,
-    pino({ level: "silent" }),
-    DEADLINE_LIMITS,
-  );
+  return resourceHealthReport(caller, collect, pino({ level: "silent" }), {
+    ...DEADLINE_LIMITS,
+    checkDeadline,
+  });
 }
 
 test("the check deadline of a poll inbound answers unknown with deadline_exceeded through the report, drops the material and changes no inbound", async (t) => {
@@ -428,7 +431,15 @@ test("the check deadline of a poll inbound answers unknown with deadline_exceede
   const releaseEvents = gitHub.holdEvents({ pass: HELD_EVENTS_PASS });
   stopAfter(t, () => releaseEvents());
   const released = releasedMaterials(t, fixture);
-  const report = await intakeOnlyReport(t, fixture);
+  const checkDeadline = new AbortController();
+  const pending = intakeOnlyReport(t, fixture, checkDeadline.signal);
+  await until(
+    eventsCalls,
+    (calls) => calls === calledBefore + HELD_CHECK_RELEASES,
+    t.signal,
+  );
+  checkDeadline.abort();
+  const report = await pending;
   assert.deepEqual(report.services.intake, {
     global: {},
     projects: {
@@ -605,6 +616,8 @@ test("composed Worker revokes and reports the live execution of a forced instanc
   assert.equal(archived.status, HttpStatus.OK, await archived.text());
   assert.equal(revoke.mock.callCount(), SINGLE_CALL);
   assert.equal(revoke.mock.calls[0]!.arguments[1], executionId);
+  assert.equal(revoke.mock.calls[0]!.arguments[2], INSTANCE_NAME);
+  assert.equal(revoke.mock.calls[0]!.arguments[3]?.kind, ActorKind.Human);
   assert.equal(report.mock.callCount(), SINGLE_CALL);
   assert.deepEqual(report.mock.calls[0]!.arguments, [ENDED_EXECUTIONS]);
 });

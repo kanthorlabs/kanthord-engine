@@ -16,6 +16,7 @@ import {
   type Mission,
   NodeState,
   type NodeTransition,
+  type ReleaseStop,
   type RevokedClaim,
   type SchedulerClaims,
   TransitionRule,
@@ -45,6 +46,10 @@ import { validateText } from "./content.ts";
 const NO_ATTEMPT = 0;
 const NO_ENDS = 0;
 const NO_REQUIREMENT_KEYS = 0;
+export const HUMAN_PAUSED_STOP: ReleaseStop = {
+  reason: "human_paused",
+  code: null,
+};
 export const ControlError = {
   Refused: "mission.node.control_refused",
   Unresolved: "mission.node.action_unresolved",
@@ -183,11 +188,21 @@ export function endLiveClaim(
   cause: RevokeCause,
   failureCause: FailureCause | null,
   ends: ExecutionEnds,
+  stop: ReleaseStop | null,
 ): RevokedClaim | null {
   assert.ok(tx.database.isTransaction);
-  if (node.state !== NodeState.Executing && node.state !== NodeState.Evaluating)
+  if (
+    node.state !== NodeState.Executing &&
+    node.state !== NodeState.Evaluating &&
+    node.state !== NodeState.Paused
+  )
     return null;
-  const execution = dependencies.schedulerClaims.revoke(tx, node.id, now);
+  const execution = dependencies.schedulerClaims.revoke(
+    tx,
+    node.id,
+    now,
+    stop ?? (node.state === NodeState.Paused ? HUMAN_PAUSED_STOP : undefined),
+  );
   if (execution === null) return null;
   const claim = {
     execution,
@@ -197,6 +212,26 @@ export function endLiveClaim(
   };
   ends.revoked.push(claim);
   return claim;
+}
+
+export function keptExecution(
+  tx: Transaction,
+  dependencies: Dependencies,
+  node: NodeRow,
+  now: number,
+) {
+  const live = dependencies.schedulerClaims.liveExecutionOf(tx, node.id, now);
+  if (
+    live === null ||
+    !dependencies.workerStopOrders.connected(tx, live.runtime_identity)
+  )
+    return null;
+  if (
+    node.state === NodeState.Paused &&
+    dependencies.workerStopOrders.orderOf(live.execution_id) === null
+  )
+    return null;
+  return live;
 }
 
 export function executionEnds(): ExecutionEnds {
@@ -287,7 +322,7 @@ export function controlResult(
     node.attempt === NO_ATTEMPT ? null : readAttempt(tx, nodeId, node.attempt);
   assert.ok(attempt !== null || node.attempt === NO_ATTEMPT);
   return {
-    node: nodeRecord(tx, node, dependencies.bindings),
+    node: nodeRecord(tx, node, dependencies.bindings, dependencies),
     attempt:
       attempt === null
         ? null

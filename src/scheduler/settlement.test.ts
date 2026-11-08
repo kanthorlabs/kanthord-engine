@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
-import { ClaimState, ExecutionStopReason, TransitionRule } from "./contract.ts";
+import {
+  BudgetLimit,
+  ClaimState,
+  EnvironmentFailure,
+  ExecutionStopReason,
+  TransitionRule,
+} from "./contract.ts";
 import {
   executionFixture,
   FIRST_LOSS_WITHOUT_JOB,
@@ -13,12 +19,14 @@ import {
 import { executionTrace } from "./telemetry.ts";
 import {
   claimStateOf,
+  consecutiveStalls,
   endExecution,
   insertExecution,
   readExecution,
 } from "./execution-store.ts";
 import {
   consecutiveFailures,
+  countsFailure,
   EXECUTION_NOT_RUNNING,
   requireRunning,
   revoke,
@@ -26,10 +34,21 @@ import {
   settleRuntime,
 } from "./settlement.ts";
 
+const NO_FAILURES = 0;
 const ONE_LOSS = 1;
 const SECOND_LOSS = 2;
 const THIRD_FAILURE = 3;
 const STOP = { reason: ExecutionStopReason.OperationFailed, code: null };
+const VERIFICATION_TIMEOUT_STOP = {
+  reason: ExecutionStopReason.EnvironmentFailed,
+  code: EnvironmentFailure.VerificationTimeout,
+  detail: JSON.stringify({
+    index: 0,
+    limit_ms: 600000,
+    exit_code: null,
+    command: "sleep 1000",
+  }),
+};
 
 test("credential pins append once in order, retain after end and select only unended executions", (t) => {
   const h = schedulerHarness(t);
@@ -213,7 +232,9 @@ test("consecutive losses reset after a finished row or revocation and isolate at
       execution_id: revoked.execution_id,
       trace: executionTrace(revoked),
       ended_at: FIXTURE_DEADLINE + 2,
+      stop: null,
     });
+    assert.equal(readExecution(tx, revoked.execution_id)?.stop, null);
     assert.equal(
       claimStateOf(
         readExecution(tx, revoked.execution_id)!,
@@ -265,6 +286,163 @@ test("lost and stopped rows count together until a finished row with no stop", (
     insertExecution(tx, after);
     endExecution(tx, after.execution_id, FIXTURE_DEADLINE + 102, STOP);
     assert.equal(consecutiveFailures(tx, after), ONE_LOSS);
+  });
+});
+
+test("no operator stop reason counts as a failure", () => {
+  for (const reason of [
+    ExecutionStopReason.InstanceArchived,
+    ExecutionStopReason.WorkerStopped,
+    ExecutionStopReason.HumanPaused,
+  ])
+    assert.equal(countsFailure({ reason, code: null }), false);
+});
+
+test("a revocation stores the stop it receives", (t) => {
+  const h = schedulerHarness(t);
+  const row = executionFixture({ expired_at: FIXTURE_DEADLINE + 100 });
+  const stop = {
+    reason: ExecutionStopReason.InstanceArchived,
+    code: null,
+    detail: JSON.stringify({ instance: "relay-a", actor: "Ulrich" }),
+  };
+  h.store.transaction((tx) => {
+    insertExecution(tx, row);
+    const revoked = revoke(tx, row.node_id, FIXTURE_NOW + 1, stop);
+    assert.deepEqual(revoked?.stop, stop);
+    assert.deepEqual(readExecution(tx, row.execution_id)?.stop, stop);
+  });
+});
+
+test("an archive row neither counts nor resets the failure count and a null stop row resets it", (t) => {
+  const h = schedulerHarness(t);
+  const node = createIdentity("node");
+  const archived = {
+    reason: ExecutionStopReason.InstanceArchived,
+    code: null,
+  };
+  const sequence = (middle: typeof archived | null) => {
+    let count = NO_FAILURES;
+    h.store.transaction((tx) => {
+      const at = (offset: number) =>
+        executionFixture({
+          node_id: node,
+          expired_at: FIXTURE_DEADLINE + 100,
+          created_at: FIXTURE_NOW + offset,
+        });
+      const first = at(1);
+      insertExecution(tx, first);
+      endExecution(tx, first.execution_id, FIXTURE_NOW + 2, STOP);
+      const revoked = at(3);
+      insertExecution(tx, revoked);
+      endExecution(
+        tx,
+        revoked.execution_id,
+        FIXTURE_NOW + 4,
+        middle ?? undefined,
+      );
+      const last = at(5);
+      insertExecution(tx, last);
+      endExecution(tx, last.execution_id, FIXTURE_NOW + 6, STOP);
+      count = consecutiveFailures(tx, last);
+    });
+    return count;
+  };
+  assert.equal(sequence(archived), SECOND_LOSS);
+  assert.equal(sequence(null), ONE_LOSS);
+});
+
+test("a worker_stopped row leaves the failure count unchanged also at the failure limit", (t) => {
+  const h = schedulerHarness(t);
+  const node = createIdentity("node");
+  h.store.transaction((tx) => {
+    const at = (offset: number) =>
+      executionFixture({
+        node_id: node,
+        expired_at: FIXTURE_DEADLINE + 100,
+        created_at: FIXTURE_NOW + offset,
+      });
+    for (let index = 0; index < THIRD_FAILURE; index++) {
+      const failed = at(index + 1);
+      insertExecution(tx, failed);
+      endExecution(tx, failed.execution_id, FIXTURE_NOW + index + 1, STOP);
+    }
+    const stopped = at(THIRD_FAILURE + 1);
+    insertExecution(tx, stopped);
+    endExecution(tx, stopped.execution_id, FIXTURE_NOW + 10, {
+      reason: ExecutionStopReason.WorkerStopped,
+      code: null,
+    });
+    const next = at(THIRD_FAILURE + 2);
+    insertExecution(tx, next);
+    assert.equal(consecutiveFailures(tx, next, false), THIRD_FAILURE);
+  });
+});
+
+test("pause facts answer the counts of the count functions and the last stop of the attempt", (t) => {
+  const h = schedulerHarness(t);
+  const nodeId = createIdentity("node");
+  const at = (offset: number, overrides = {}) =>
+    executionFixture({
+      node_id: nodeId,
+      expired_at: FIXTURE_DEADLINE + 100,
+      ...overrides,
+      created_at: FIXTURE_NOW + offset,
+    });
+  const detailed = { ...STOP, detail: "boom" };
+  const stalled = {
+    reason: ExecutionStopReason.BudgetEnd,
+    code: BudgetLimit.Turns,
+  };
+  h.store.transaction((tx) => {
+    assert.deepEqual(h.service.pauseFacts(tx, nodeId, 1), {
+      consecutive_failures: 0,
+      consecutive_stalls: 0,
+      last_stop: null,
+    });
+    const lost = at(1);
+    insertExecution(tx, lost);
+    endExecution(tx, lost.execution_id, FIXTURE_DEADLINE + 100);
+    const first = at(2);
+    insertExecution(tx, first);
+    endExecution(tx, first.execution_id, FIXTURE_DEADLINE, STOP);
+    const last = at(3);
+    insertExecution(tx, last);
+    endExecution(tx, last.execution_id, FIXTURE_DEADLINE, detailed);
+    const other = at(4, { attempt: 2 });
+    insertExecution(tx, other);
+    endExecution(tx, other.execution_id, FIXTURE_DEADLINE, STOP);
+    const facts = h.service.pauseFacts(tx, nodeId, 1);
+    assert.equal(facts.consecutive_failures, THIRD_FAILURE);
+    assert.equal(facts.consecutive_failures, consecutiveFailures(tx, last));
+    assert.equal(facts.consecutive_stalls, consecutiveStalls(tx, nodeId, 1));
+    assert.deepEqual(facts.last_stop, {
+      execution_id: last.execution_id,
+      reason: detailed.reason,
+      code: null,
+      detail: "boom",
+      trace_id: last.trace_id,
+    });
+    const released = at(5);
+    insertExecution(tx, released);
+    endExecution(tx, released.execution_id, FIXTURE_DEADLINE);
+    assert.deepEqual(h.service.pauseFacts(tx, nodeId, 1), {
+      consecutive_failures: 0,
+      consecutive_stalls: 0,
+      last_stop: null,
+    });
+    for (const offset of [6, 7]) {
+      const row = at(offset);
+      insertExecution(tx, row);
+      endExecution(tx, row.execution_id, FIXTURE_DEADLINE, stalled);
+    }
+    const stalls = h.service.pauseFacts(tx, nodeId, 1);
+    assert.equal(stalls.consecutive_stalls, SECOND_LOSS);
+    assert.equal(stalls.consecutive_stalls, consecutiveStalls(tx, nodeId, 1));
+    assert.equal(stalls.consecutive_failures, NO_FAILURES);
+    assert.equal(stalls.last_stop?.reason, stalled.reason);
+    assert.equal(stalls.last_stop?.code, BudgetLimit.Turns);
+    assert.equal(stalls.last_stop?.detail, null);
   });
 });
 
@@ -361,4 +539,103 @@ test("a failed Mission loss rolls back the terminal write", (t) => {
     h.store.transaction((tx) => readExecution(tx, row.execution_id))?.ended_at,
     null,
   );
+});
+
+test("a verification_timeout stop counts as a failure and the third in a row pauses the node with failure_limit", (t) => {
+  const h = schedulerHarness(t);
+  assert.equal(countsFailure(VERIFICATION_TIMEOUT_STOP), true);
+  const paused = transitionFixture({
+    to: "Paused",
+    rule: TransitionRule.FailureLimit,
+    count: THIRD_FAILURE,
+    limit: THIRD_FAILURE,
+  });
+  h.dependencies.transitions.failure = (_tx, _nodeId, count) =>
+    count >= THIRD_FAILURE ? paused : transitionFixture();
+  const nodeId = createIdentity("node");
+  const at = (offset: number) =>
+    executionFixture({
+      node_id: nodeId,
+      expired_at: FIXTURE_DEADLINE + 100,
+      created_at: FIXTURE_NOW + offset,
+    });
+  h.store.transaction((tx) => {
+    const counts = [];
+    for (const offset of [1, 2, 3]) {
+      const row = at(offset);
+      insertExecution(tx, row);
+      endExecution(
+        tx,
+        row.execution_id,
+        FIXTURE_DEADLINE,
+        VERIFICATION_TIMEOUT_STOP,
+      );
+      counts.push(consecutiveFailures(tx, row));
+    }
+    assert.deepEqual(counts, [ONE_LOSS, SECOND_LOSS, THIRD_FAILURE]);
+    assert.equal(
+      h.service.pauseFacts(tx, nodeId, 1).consecutive_failures,
+      THIRD_FAILURE,
+    );
+    const failure = h.dependencies.transitions.failure;
+    assert.deepEqual(
+      failure(tx, nodeId, counts[0]!, FIXTURE_DEADLINE),
+      transitionFixture(),
+    );
+    assert.deepEqual(failure(tx, nodeId, counts[2]!, FIXTURE_DEADLINE), paused);
+  });
+});
+
+test("a loss of an expired kept claim of a Paused node ends the claim, keeps Paused and sets no hold", (t) => {
+  const h = schedulerHarness(t);
+  const kept = transitionFixture({ from: "Paused", to: "Paused" });
+  h.dependencies.transitions.failure = () => kept;
+  const row = executionFixture();
+  h.store.transaction((tx) => {
+    insertExecution(tx, row);
+    h.service.insert(tx, row.node_id, row.project_id, 0);
+    const lost = settleNode(tx, h.dependencies, row.node_id, FIXTURE_DEADLINE);
+    assert.deepEqual(lost?.transition, kept);
+    assert.deepEqual(lost?.hold, FIRST_LOSS_WITHOUT_JOB);
+    assert.equal(
+      readExecution(tx, row.execution_id)?.ended_at,
+      FIXTURE_DEADLINE,
+    );
+    const job = tx.database
+      .prepare("SELECT available_at FROM scheduler_job WHERE node_id = ?")
+      .get(row.node_id) as { available_at: number | null };
+    assert.equal(job.available_at, null);
+    const next = executionFixture({
+      node_id: row.node_id,
+      project_id: row.project_id,
+      attempt: row.attempt,
+    });
+    insertExecution(tx, next);
+    assert.equal(consecutiveFailures(tx, next, false), ONE_LOSS);
+  });
+});
+
+test("a human_paused row counts no failure and is no reset point", (t) => {
+  const h = schedulerHarness(t);
+  const node = createIdentity("node");
+  h.store.transaction((tx) => {
+    const at = (offset: number) =>
+      executionFixture({
+        node_id: node,
+        expired_at: FIXTURE_DEADLINE + 100,
+        created_at: FIXTURE_NOW + offset,
+      });
+    const failed = at(1);
+    insertExecution(tx, failed);
+    endExecution(tx, failed.execution_id, FIXTURE_NOW + 2, STOP);
+    const paused = at(3);
+    insertExecution(tx, paused);
+    endExecution(tx, paused.execution_id, FIXTURE_NOW + 4, {
+      reason: ExecutionStopReason.HumanPaused,
+      code: null,
+    });
+    const next = at(5);
+    insertExecution(tx, next);
+    assert.equal(consecutiveFailures(tx, next, false), ONE_LOSS);
+  });
 });

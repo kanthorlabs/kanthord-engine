@@ -18,7 +18,11 @@ import {
   type ServiceClient,
 } from "../kernel/operation.ts";
 import { background, CancellationContext } from "../kernel/context.ts";
-import { createClient, inputValidationFailure } from "./client-result.ts";
+import {
+  createClient,
+  inputValidationFailure,
+  PortClosedError,
+} from "./client-result.ts";
 import type { RecordedResponse } from "./idempotency.ts";
 
 const DEADLINE_GRACE_MS = 1000;
@@ -231,7 +235,6 @@ export const portAnswerSchema = z.strictObject({
 export type PortAnswer = z.infer<typeof portAnswerSchema>;
 
 const SINGLE_QUERY_VALUE_COUNT = 1;
-const PORT_CLOSED = "The port is closed.";
 
 function wireQuery(query: Record<string, unknown>): PortCall["query"] {
   const wire: PortCall["query"] = {};
@@ -265,7 +268,7 @@ export function portCaller(port: MessagePort) {
   port.on("close", () => {
     closed = true;
     for (const waiting of pending.values())
-      waiting.reject(new Error(PORT_CLOSED));
+      waiting.reject(new PortClosedError());
     pending.clear();
   });
   return (
@@ -273,7 +276,7 @@ export function portCaller(port: MessagePort) {
     raw: unknown,
     options: ClientOptions,
   ): Promise<RecordedResponse> => {
-    if (closed) return Promise.reject(new Error(PORT_CLOSED));
+    if (closed) return Promise.reject(new PortClosedError());
     const parsed = operation.input.safeParse(raw);
     if (!parsed.success)
       return Promise.resolve(inputValidationFailure(parsed.error));

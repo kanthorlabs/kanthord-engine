@@ -202,12 +202,18 @@ components:
                           - criterion
                           - verifications
                         additionalProperties: false
+                      finding_labels:
+                        default: []
+                        type: array
+                        items:
+                          type: string
                     required:
                       - dependency_id
                       - name
                       - requirement
                       - criterion
                       - task
+                      - finding_labels
                     additionalProperties: false
                 required:
                   - id

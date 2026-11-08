@@ -53,7 +53,7 @@ export interface MissionBindings {
     ssh_credential: string;
     credential: string | null;
     base_branch: string;
-    action: "pull_request" | "merge_push" | null;
+    action: "pull_request" | "push" | null;
     landing: "human" | "kanthord";
   } | null;
   conversationPolicyOf(
@@ -153,7 +153,11 @@ export interface MissionCollaborations {
   revokeForInstanceArchive(
     tx: Transaction,
     executionId: string,
+    instance: string,
+    actor: HumanActor,
   ): ExecutionEnds | null;
+  revokePausedClaim(executionId: string): RevokedExecution["trace"] | null;
+  executionReleased(executionId: string, stop: ReleaseStop | null): void;
   reportExecutionEnds(ends: ExecutionEnds): void;
 }
 
@@ -183,6 +187,14 @@ export const TransitionRule = {
 export const transitionRuleSchema = z.enum(TransitionRule);
 export type TransitionRule = z.infer<typeof transitionRuleSchema>;
 
+export const PauseRule = {
+  FailureLimit: TransitionRule.FailureLimit,
+  FurtherWorkLimit: TransitionRule.FurtherWorkLimit,
+  Human: "human",
+} as const;
+export const pauseRuleSchema = z.enum(PauseRule);
+export type PauseRule = z.infer<typeof pauseRuleSchema>;
+
 export interface NodeTransition {
   from: string;
   to: string;
@@ -190,6 +202,25 @@ export interface NodeTransition {
   count: number | null;
   limit: number | null;
   first_available_at: number | null;
+}
+
+export interface ReleaseStop {
+  reason:
+    | "operation_failed"
+    | "judgement_invalid"
+    | "report_absent"
+    | "action_unsettled"
+    | "assessment_absent"
+    | "budget_end"
+    | "provider_failed"
+    | "no_progress"
+    | "environment_failed"
+    | "instance_archived"
+    | "worker_stopped"
+    | "human_paused";
+  code: string | null;
+  detail?: string;
+  cause?: FailureCause;
 }
 
 export interface RevokedExecution {
@@ -203,6 +234,7 @@ export interface RevokedExecution {
     root_span_id: string;
   };
   ended_at: number;
+  stop: ReleaseStop | null;
 }
 
 export interface FailureHold {
@@ -210,7 +242,7 @@ export interface FailureHold {
   available_at: number | null;
 }
 
-export interface EndedExecution extends RevokedExecution {
+export interface EndedExecution extends Omit<RevokedExecution, "stop"> {
   transition: NodeTransition;
   hold: FailureHold;
 }
@@ -228,7 +260,12 @@ export interface ExecutionEnds {
 }
 
 export interface SchedulerClaims {
-  revoke(tx: Transaction, nodeId: string, now: number): RevokedExecution | null;
+  revoke(
+    tx: Transaction,
+    nodeId: string,
+    now: number,
+    stop?: ReleaseStop,
+  ): RevokedExecution | null;
   executionRevoked(
     execution: RevokedExecution,
     cause: RevokeCause,
@@ -413,6 +450,32 @@ export interface ExecutionAttribution {
   } | null;
 }
 
+export interface WorkerStopOrders {
+  connected(tx: Transaction, runtimeIdentity: string): boolean;
+  sendStopOrder(
+    executionId: string,
+    runtimeIdentity: string,
+    reason: ReleaseStop["reason"],
+  ): void;
+  orderOf(executionId: string): ReleaseStop["reason"] | null;
+}
+
+export interface PauseFactsRecord {
+  consecutive_failures: number;
+  consecutive_stalls: number;
+  last_stop: {
+    execution_id: string;
+    reason: string;
+    code: string | null;
+    detail: string | null;
+    trace_id: string;
+  } | null;
+}
+
+export interface PauseFacts {
+  of(tx: Transaction, nodeId: string, attempt: number): PauseFactsRecord;
+}
+
 export const UploadCheckSpan = {
   Operation: "mission.evidence.asset.complete",
   AssetId: "kanthord.evidence_asset.id",
@@ -459,6 +522,7 @@ export interface MissionTransitions {
     consecutiveFailures: number,
     now: number,
   ): NodeTransition;
+  stopped(tx: Transaction, nodeId: string, now: number): NodeTransition;
 }
 
 export const MissionErrorCode = {
@@ -647,7 +711,7 @@ export const closingEventSchema = z.enum(ClosingEvent);
 export type ClosingEvent = z.infer<typeof closingEventSchema>;
 export const RepositoryAction = {
   PullRequest: "pull_request",
-  MergePush: "merge_push",
+  Push: "push",
 } as const;
 export const ConversationAction = {
   Reply: "reply",
@@ -702,7 +766,7 @@ export const commitSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 export const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 export const actionKeySchema = z
   .string()
-  .regex(/^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push|reply\.[0-9])$/);
+  .regex(/^[a-z][a-z0-9-]{0,62}\.(pull_request|push|reply\.[0-9])$/);
 export const textSchema = z.string().min(1);
 
 export const intentSchema = z.enum(Intent);
@@ -1104,6 +1168,12 @@ export const violationSchema = z.strictObject({
   details: z.unknown().nullable(),
 });
 export type Violation = z.infer<typeof violationSchema>;
+export const driftSchema = z.strictObject({
+  node_id: identitySchema("node"),
+  filename: planFileNameSchema,
+  visible_revision: z.number().int().positive(),
+});
+export type Drift = z.infer<typeof driftSchema>;
 export const importPreviewSchema = z.strictObject({
   mission_id: identitySchema("mission"),
   expected_mission_version: z.number().int().positive(),
@@ -1113,6 +1183,7 @@ export const importPreviewSchema = z.strictObject({
   retirements: z.array(identitySchema("node")),
   removed_edges: z.array(edgeSchema),
   no_ops: z.array(identitySchema("node")),
+  drifts: z.array(driftSchema),
   violations: z.array(violationSchema),
 });
 export type ImportPreview = z.infer<typeof importPreviewSchema>;
@@ -1275,10 +1346,10 @@ export type RepositoryFacts = {
 export type ActionFacts = {
   frozen_action: RepositoryFrozenAction;
   repository: RepositoryFacts;
-  node: { name: string; commit_type: CommitType };
+  node: { id: string; name: string; commit_type: CommitType };
   snapshot_commit: string;
   reused_address: PullRequestAddress | null;
-  merge_address: PullRequestAddress | null;
+  merge_address: RepositoryPlatformAddress | null;
   gate_files: string[];
 };
 export type RequestFacts = {
@@ -1286,6 +1357,7 @@ export type RequestFacts = {
   address: RepositoryPlatformAddress;
   repository: RepositoryFacts;
   human_landing: boolean;
+  assessed_commit: string | null;
   link_trust: { actor_ids: string[] };
 };
 export type ReplyActionFacts = {
@@ -1459,6 +1531,21 @@ export const blockedContextSchema = z.strictObject({
   requests: z.array(evidenceSchema),
 });
 export type BlockedContext = z.infer<typeof blockedContextSchema>;
+export const pausedContextSchema = z.strictObject({
+  rule: pauseRuleSchema,
+  count: z.number().int().nonnegative().nullable(),
+  limit: z.number().int().nonnegative().nullable(),
+  last_stop: z
+    .strictObject({
+      execution_id: identitySchema("execution"),
+      reason: textSchema,
+      code: textSchema.nullable(),
+      detail: textSchema.nullable(),
+      trace_id: textSchema,
+    })
+    .nullable(),
+});
+export type PausedContext = z.infer<typeof pausedContextSchema>;
 export const humanActSchema = z.strictObject({
   reason: textSchema,
   expected_mission_version: z.number().int().positive(),
@@ -1503,6 +1590,7 @@ const nodeBase = {
 };
 const runnableNodeFields = {
   blocked_context: blockedContextSchema.optional(),
+  paused_context: pausedContextSchema.optional(),
   state: nodeStateSchema,
   attempt: z.number().int().nonnegative(),
   pinned_revision: z.number().int().positive().nullable(),
@@ -1580,6 +1668,7 @@ export const proposalContentSchema = z.strictObject({
   ...contentSchema.pick({ name: true, requirement: true, criterion: true })
     .shape,
   task: proposalTaskSchema,
+  finding_labels: z.array(z.string()).default([]),
 });
 export type ProposalContent = z.infer<typeof proposalContentSchema>;
 export const followupContentSchema = z.strictObject({
@@ -1693,6 +1782,7 @@ export const findingDecisionSchema = z.enum(FindingDecision);
 export type FindingDecision = z.infer<typeof findingDecisionSchema>;
 export const FINDING_MAX = 100;
 export const FINDING_TEXT_MAX_BYTES = 8192;
+const BLOCKER_LABEL_PREFIX = "B";
 export const REVIEWER_FINDING_LABEL_PATTERN = /^[BS][1-9][0-9]{0,2}$/;
 export const findingSubmitSchema = z.strictObject({
   label: z.string().regex(REVIEWER_FINDING_LABEL_PATTERN),
@@ -1805,7 +1895,32 @@ export const assessmentSubmitSchema = executionContextSchema
       (body.cause !== undefined) ===
       (body.result === AssessmentResult.CriterionNotMet),
     { path: ["cause"] },
-  );
+  )
+  .superRefine((body, context) => {
+    const blockers = new Set(
+      body.findings
+        .map((finding) => finding.label)
+        .filter((label) => label.startsWith(BLOCKER_LABEL_PREFIX)),
+    );
+    const named = new Set<string>();
+    body.proposals.forEach((proposal, index) => {
+      const own = new Set<string>();
+      const refused = proposal.finding_labels.some((label) => {
+        const refusal =
+          !blockers.has(label) || own.has(label) || named.has(label);
+        own.add(label);
+        return refusal;
+      });
+      proposal.finding_labels.forEach((label) => named.add(label));
+      if (refused)
+        context.addIssue({
+          code: "custom",
+          path: ["proposals", index, "finding_labels"],
+          message:
+            "A finding label names a blocker of this submit, once, in one proposal.",
+        });
+    });
+  });
 export type AssessmentSubmit = z.infer<typeof assessmentSubmitSchema>;
 export const evidenceRequestSchema = executionContextSchema.extend({
   requirement_key: actionKeySchema,

@@ -1,7 +1,11 @@
 import { addAbortListener } from "node:events";
 import { z } from "zod";
 import assert from "node:assert/strict";
-import { CancellationContext, type Context } from "../../kernel/context.ts";
+import {
+  CancellationContext,
+  type Context,
+  joined,
+} from "../../kernel/context.ts";
 import { CodedError } from "../../kernel/errors.ts";
 import { thrownReason } from "../../kernel/probe.ts";
 import { HttpStatus } from "../../kernel/http.ts";
@@ -154,6 +158,7 @@ export class ExecutionRun {
     clients: MethodClients;
     credentials: { release(): Promise<void> };
     context: Context;
+    stop?: Context;
     log?: (record: Record<string, unknown>) => void;
     telemetry?: TelemetrySink;
     workerName?: string;
@@ -175,7 +180,7 @@ export class ExecutionRun {
     this.parent = input.context;
     this.logSink = input.log ?? (() => {});
     this.operationContext = new CancellationContext(
-      input.context,
+      input.stop ? joined(input.context, input.stop) : input.context,
       input.claim.expired_at,
     );
   }
@@ -274,9 +279,21 @@ export class ExecutionRun {
     detail: string | null = null,
     gitStep: GitStep | null = null,
   ): ExecutionStop {
-    this.stopped ??= this.stopWith(reason, code, detail, gitStep);
+    this.stopped ??=
+      this.requestedStop() ?? this.stopWith(reason, code, detail, gitStep);
     this.operationContext.cancel(this.stopped);
     return this.stopped;
+  }
+
+  private requestedStop(): ExecutionStop | null {
+    const requested = this.operationContext.signal.reason;
+    if (!(requested instanceof ExecutionStop)) return null;
+    return this.stopWith(
+      requested.reason,
+      requested.code,
+      requested.detail,
+      null,
+    );
   }
 
   private stopWith(

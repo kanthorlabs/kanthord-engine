@@ -37,8 +37,6 @@ const FIRST_REVISION = 1;
 const WORKER_INSTANCE_COUNT = 1;
 const SECRET = "test-secret";
 const GATED = "gated";
-export const MERGE_KEY = "gated.merge_push";
-const BASE_BRANCH = "main";
 const PULL_REQUEST_ACTION = "pull_request";
 export const GATED_KEY = "gated.pull_request";
 const GATED_RESOURCE = "repository:github:owner/gated";
@@ -232,27 +230,6 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
         { idempotencyKey: createIdempotencyKey() },
       ),
     );
-  const requestMergePush = async (x: ExecutionRecord, commit: string) =>
-    completed(
-      await worker["evidence.request"](
-        {
-          params: { node_id: x.node_id },
-          query: {},
-          body: {
-            ...executionContext(x),
-            requirement_key: MERGE_KEY,
-            subject: MERGE_KEY,
-            address: {
-              kind: PlatformAddressKind.BranchPush,
-              resource_identity: GATED_RESOURCE,
-              branch: BASE_BRANCH,
-              commit,
-            },
-          },
-        },
-        { idempotencyKey: createIdempotencyKey() },
-      ),
-    );
   const performer = httpClient(workerOperations, c.fixture.endpoint, token);
   const actionRequest = async (x: ExecutionRecord) =>
     completed(
@@ -308,7 +285,6 @@ export async function setup(t: TestContext, options: SetupOptions = {}) {
     node,
     release,
     requestPullRequest,
-    requestMergePush,
     actionRequest,
     check,
     admit,

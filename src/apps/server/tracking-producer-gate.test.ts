@@ -466,7 +466,7 @@ test(
     const assertPause = async () => {
       const trace = await o.executionTrace(paused);
       assert.equal(trace.summary.state, TraceState.Error);
-      assert.equal(trace.summary.stop_reason, null);
+      assert.equal(trace.summary.stop_reason, ExecutionStopReason.HumanPaused);
       assert.equal(trace.root.attributes[END_ATTRIBUTE], ExecutionEnd.Revoked);
       assert.equal(trace.root.attributes[CAUSE_ATTRIBUTE], RevokeCause.Human);
       assert.deepEqual(trace.transitions, []);

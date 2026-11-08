@@ -50,6 +50,12 @@ import { HttpMethod, HttpStatus, MediaType } from "../kernel/http.ts";
 import { isString } from "../kernel/values.ts";
 import type { OperationRegistry } from "../kernel/operation.ts";
 import { resolveRequestId } from "./request-id.ts";
+import {
+  callerName,
+  failureCodeOfResponse,
+  finishedFields,
+  type RequestOutcome,
+} from "./request-log.ts";
 
 const SERVER_NOT_RUNNING = "ERR_SERVER_NOT_RUNNING";
 const SINGLE_QUERY_VALUE_COUNT = 1;
@@ -93,6 +99,13 @@ const NO_STORE_HEADERS = { "Cache-Control": "no-store" };
 const CONNECTION_HEADER = "Connection";
 const CONNECTION_CLOSE = "close";
 const FIRST_ROUTE = 0;
+const API_PREFIX = "/api/";
+const PREFLIGHT_MAX_AGE_SECONDS = 600;
+
+interface ServiceEnv {
+  Bindings: HttpBindings;
+  Variables: { outcome: RequestOutcome };
+}
 
 export function compareRouteSpecificity(left: string, right: string): number {
   const leftParts = left.split("/");
@@ -126,7 +139,7 @@ const HOST_CHECK_FREE_POLICIES: readonly AccessPolicy[] = [
 ];
 
 export class GatewayService implements Service {
-  readonly app: Hono<{ Bindings: HttpBindings }>;
+  readonly app: Hono<ServiceEnv>;
   readonly registry: OperationRegistry;
   readonly health: HealthRegistry;
   readonly invocation: Invocation;
@@ -358,9 +371,9 @@ export class GatewayService implements Service {
     };
   }
 
-  private createApp(): Hono<{ Bindings: HttpBindings }> {
+  private createApp(): Hono<ServiceEnv> {
     const basePath = this.options.config.base_path;
-    const app = new Hono<{ Bindings: HttpBindings }>({
+    const app = new Hono<ServiceEnv>({
       getPath: (request) => {
         const path = getPath(request);
         return stripBasePath(basePath, path) ?? path;
@@ -387,13 +400,20 @@ export class GatewayService implements Service {
         method: context.req.method,
         route: matchedRoutes(context).at(-1)?.path ?? "unmatched",
       });
+      const outcome: RequestOutcome = { clientAborted: false };
+      context.set("outcome", outcome);
       const start = performance.now();
       logger.info("Request started");
       try {
         await next();
       } finally {
         logger.info(
-          { status: context.res.status, latency: performance.now() - start },
+          finishedFields(
+            outcome,
+            context.res.status,
+            await failureCodeOfResponse(context.res),
+            performance.now() - start,
+          ),
           "Request finished",
         );
       }
@@ -453,7 +473,10 @@ export class GatewayService implements Service {
     app.use("*", async (context, next) => {
       if (context.req.method === HttpMethod.Options) {
         const method = context.req.header("access-control-request-method");
-        if (!method || !this.routeOf(method, context.req.path))
+        if (
+          !context.req.path.startsWith(API_PREFIX) &&
+          (!method || !this.routeOf(method, context.req.path))
+        )
           return respondError(
             new GatewayError(
               HttpStatus.NotFound,
@@ -476,6 +499,7 @@ export class GatewayService implements Service {
           "tracestate",
         ],
         exposeHeaders: ["X-Request-Id"],
+        maxAge: PREFLIGHT_MAX_AGE_SECONDS,
       })(context, next);
     });
     app.onError((error, context) => {
@@ -545,7 +569,14 @@ export class GatewayService implements Service {
         async (context) => {
           const requestContext = new CancellationContext(this.shutdown);
           const outgoing = context.env?.outgoing;
-          const onAbort = () => requestContext.cancel();
+          const outcome = context.get("outcome");
+          const markClientAborted = () => {
+            if (!this.shutdown.signal.aborted) outcome.clientAborted = true;
+          };
+          const onAbort = () => {
+            markClientAborted();
+            requestContext.cancel();
+          };
           context.req.raw.signal.addEventListener("abort", onAbort, {
             once: true,
           });
@@ -556,6 +587,7 @@ export class GatewayService implements Service {
             requestContext.cancel();
           };
           const onClose = () => {
+            markClientAborted();
             cleanup();
           };
           outgoing?.once("close", onClose);
@@ -616,6 +648,9 @@ export class GatewayService implements Service {
                 idempotencyKey: context.req.header("idempotency-key"),
                 requestId: context.get("requestId"),
                 context: requestContext,
+                onIdentity: (identity) => {
+                  outcome.caller = callerName(identity);
+                },
                 delivery,
                 rejection,
                 request: context.req.raw,

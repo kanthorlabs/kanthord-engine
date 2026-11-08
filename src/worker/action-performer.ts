@@ -96,11 +96,8 @@ function landsByKanthorD(entry: Pending["entry"]): boolean {
   );
 }
 
-function landsByHuman(entry: Pending["entry"]): boolean {
-  return (
-    entry.action.action === RepositoryAction.MergePush &&
-    entry.gate_files.length > NO_GATE_FILES
-  );
+function recordsOnly(entry: Pending["entry"]): boolean {
+  return entry.action.action === RepositoryAction.Push;
 }
 
 function provesNoWrite(error: unknown): boolean {
@@ -116,7 +113,7 @@ function provesNoWrite(error: unknown): boolean {
 
 function requestKeyOf(pending: Pending): string {
   const base = `${pending.key.nodeId}/${pending.key.attempt}/${pending.entry.action.key}`;
-  if (pending.entry.action.action === RepositoryAction.MergePush)
+  if (pending.entry.action.action === RepositoryAction.Push)
     return `${base}/${pending.operands.commit}`;
   const reused = pending.operands.reusedAddress;
   if (reused?.kind === PlatformAddressKind.PullRequest)
@@ -327,7 +324,7 @@ export class ActionPerformer {
           pending.entry.action.key,
         ),
       );
-      if (landsByHuman(pending.entry)) {
+      if (recordsOnly(pending.entry)) {
         const address: PlatformAddress = {
           kind: PlatformAddressKind.BranchPush,
           resource_identity: pending.entry.resource_identity,
@@ -348,7 +345,10 @@ export class ActionPerformer {
         );
         settlement =
           landing.kind === ActionResultKind.Uncertain ? landing : null;
-        if (landing.kind === ActionResultKind.Submitted)
+        if (
+          landing.kind === ActionResultKind.Submitted &&
+          pending.entry.gate_files.length > NO_GATE_FILES
+        )
           this.warnMergeSkipped(
             landing.evidence.id as string,
             pending.entry.gate_files,

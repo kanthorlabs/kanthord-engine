@@ -65,7 +65,11 @@ import {
   taskRevisionInstruction,
 } from "./judgement.ts";
 import { isDone, readDoneRecords, writeDoneRecord } from "./done-record.ts";
-import { readAttemptEvidence, type Verdict } from "./node-reads.ts";
+import {
+  readAttemptEvidence,
+  type Verdict,
+  VerdictSource,
+} from "./node-reads.ts";
 import {
   type JudgedCheckout,
   judgedCheckouts,
@@ -99,8 +103,10 @@ import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
 const NO_TASKS = 0;
 const NO_CHECKOUTS = 0;
+const NO_LINK_UPDATES = 0;
 const NO_PROGRESS_LIMIT = 2;
 const SINGLE_CHECKOUT = 1;
+const BASE_MERGED = "base_merged";
 
 export function workUnitsOf(
   nodeId: string,
@@ -325,7 +331,8 @@ export async function runStepsImplement(
 
 async function startImplement(state: StepsState): Promise<StartCheck> {
   assert.ok(state.checkouts.length > NO_CHECKOUTS);
-  if ((await refreshAtClaim(state)) === RefreshResult.BudgetEnd)
+  state.refreshed = await refreshAtClaim(state);
+  if (state.refreshed === RefreshResult.BudgetEnd)
     return {
       pending: [],
       node: null,
@@ -598,6 +605,7 @@ export interface StepsState {
   verdict: Verdict | null;
   cleared: string | null;
   unchangedTurns: number;
+  refreshed: RefreshResult | null;
   lastVerification: VerificationFacts;
   revisionCount: number;
   setup: SetupEntry[];
@@ -794,6 +802,7 @@ async function pendingSetup(state: StepsState): Promise<CheckedRun | null> {
       },
       outputs: [],
       flaky: [],
+      flaky_failures: [],
       outcome: VerificationClass.BudgetEnd,
       commands: setupCommandsOf(state.setup),
     };
@@ -892,6 +901,19 @@ async function nodeInstructionOf(
       ? null
       : { text: state.cleared, judged: [], round: null };
   const judged = await judgedCheckouts(state, state.verdict.judged);
+  if (
+    state.verdict.source === VerdictSource.FailedChecks &&
+    state.refreshed === RefreshResult.Merged
+  ) {
+    state.run.log("verdict planned", {
+      commit: headSetOf(state.checkouts),
+      judged: judged.map(({ checkout }) => checkout.name),
+      holds: false,
+      skipped: BASE_MERGED,
+      link_updates: state.verdict.linkUpdates ?? NO_LINK_UPDATES,
+    });
+    return null;
+  }
   const holds =
     judged.length > NO_CHECKOUTS && (await verdictRuleHolds(state, judged));
   state.run.log("verdict planned", {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import type { Transaction } from "../kernel/store.ts";
-import { NodeState } from "./contract.ts";
+import { FindingRoute, NodeState, proposalContentSchema } from "./contract.ts";
+import { routeFindingsByLabel } from "./finding-store.ts";
 
 const EXPECTED_ROW_CHANGE = 1;
 
@@ -79,9 +80,21 @@ export function markProposalsRejected(
   assert.ok(tx.database.isTransaction);
   const rows = tx.database
     .prepare(
-      "UPDATE mission_proposal SET rejected_at = ? WHERE node_id = ? AND attempt = ? AND assessment_id IS NOT NULL AND approved_at IS NULL AND rejected_at IS NULL RETURNING id",
+      "UPDATE mission_proposal SET rejected_at = ? WHERE node_id = ? AND attempt = ? AND assessment_id IS NOT NULL AND approved_at IS NULL AND rejected_at IS NULL RETURNING id, assessment_id, content",
     )
-    .all(rejectedAt, nodeId, attempt) as unknown as { id: string }[];
+    .all(rejectedAt, nodeId, attempt) as unknown as {
+    id: string;
+    assessment_id: string;
+    content: string;
+  }[];
+  for (const row of rows)
+    routeFindingsByLabel(
+      tx,
+      row.assessment_id,
+      proposalContentSchema.parse(JSON.parse(row.content)).finding_labels,
+      FindingRoute.Record,
+      FindingRoute.Report,
+    );
   return rows.map((row) => row.id).sort();
 }
 

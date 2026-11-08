@@ -1953,8 +1953,8 @@ export function mappedTransport(
         deadlineMs,
         LOCAL_GIT_SSH_ACCESS,
       ),
-    mergePushFresh: (input, ...args) =>
-      connector.mergePushFresh(
+    squashPushFresh: (input, ...args) =>
+      connector.squashPushFresh(
         { ...input, address: mapped(input.address) },
         ...args,
       ),

@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { Logger } from "pino";
 import { z } from "zod";
+import type { ControlResult } from "./contract.ts";
 import {
   type Attributes,
   type ExecutionTrace,
@@ -79,6 +80,8 @@ export interface ActTelemetry {
 export interface Acted<T> {
   result: T;
   act: ActFacts;
+  stopOrder?: { execution_id: string; runtime_identity: string };
+  pendingClose?: { execution_id: string; result: ControlResult };
 }
 
 function attemptOf(facts: ActFacts): number | null {
@@ -149,14 +152,16 @@ export function recordAct(
   dependencies: { acts: ActTelemetry; logger: Logger },
   act: Act,
   facts: ActFacts,
-): void {
+): ServerTrace | null {
   try {
     const { trace, contribution } = actTrace(act, facts);
     dependencies.acts.act(trace, contribution);
+    return trace;
   } catch (error) {
     dependencies.logger.warn(
       { error, act, node_id: facts.node_id },
       "Act trace failed.",
     );
+    return null;
   }
 }

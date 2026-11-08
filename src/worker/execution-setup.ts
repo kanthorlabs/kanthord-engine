@@ -88,6 +88,7 @@ type SetupDependencies = Pick<
   | "promptBase"
 > & {
   schedulerClaims: Pick<SchedulerClaims, "agentSelectionsOf" | "agentPinsOf">;
+  clock?: () => number;
 };
 
 type SetupPrompt = { final: string; sources: AgentSetup["prompt"]["sources"] };
@@ -207,7 +208,7 @@ export async function executionSetup(
 ): Promise<ExecutionSetup> {
   const reads = new CancellationContext(
     caller.context,
-    Date.now() + PROMPT_SOURCE_READ_MS,
+    (dependencies.clock ?? Date.now)() + PROMPT_SOURCE_READ_MS,
   );
   try {
     return await setupWithin(dependencies, worker, caller, reads);
@@ -410,7 +411,12 @@ async function setupWithin(
         ),
       },
       ssh_public_key: sshPublicKeyOf(repository.ssh_credential),
-      strategy: { base_branch: repository.base_branch },
+      strategy: {
+        base_branch: repository.base_branch,
+        ...(repository.upstream_branch !== undefined && {
+          upstream_branch: repository.upstream_branch,
+        }),
+      },
       environment: executionEnvironment(
         repository.environment,
         repository.repository_environment,

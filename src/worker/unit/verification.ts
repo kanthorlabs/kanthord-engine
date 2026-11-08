@@ -45,6 +45,7 @@ export const VerificationClass = {
   Environment: "environment",
   Infrastructure: "infrastructure",
   Pass: "pass",
+  Timeout: "timeout",
 } as const;
 export type VerificationClass =
   (typeof VerificationClass)[keyof typeof VerificationClass];
@@ -53,7 +54,14 @@ export interface VerificationRun {
   verification: Verification;
   outputs: string[];
   flaky: boolean[];
+  flaky_failures: FlakyFailure[];
   outcome: VerificationClass;
+}
+export interface FlakyFailure {
+  index: number;
+  command: string;
+  result: Verification["results"][number];
+  output: string;
 }
 const SUCCESS = 0;
 const COMMAND_ABSENT_EXIT = 127;
@@ -84,6 +92,7 @@ export type CommandObserver = (
   attempt: CommandAttempt,
   execute: () => Promise<CommandRun>,
 ) => Promise<CommandRun>;
+export const VERIFICATION_RERUNS = 2;
 const FIRST_RUN = 1;
 const FIRST_RERUN = 2;
 export interface VerificationInput {
@@ -225,8 +234,8 @@ function signalExit(exitCode: number | null): boolean {
 function classOf(ran: CommandRun, exhausted: boolean): VerificationClass {
   if (exhausted || ran.end === CommandEnd.WallDeadline)
     return VerificationClass.BudgetEnd;
-  if (ran.end === CommandEnd.CommandLimit || ran.end === CommandEnd.Cancelled)
-    return VerificationClass.CodeFailure;
+  if (ran.end === CommandEnd.CommandLimit) return VerificationClass.Timeout;
+  if (ran.end === CommandEnd.Cancelled) return VerificationClass.CodeFailure;
   if (
     ran.end === CommandEnd.SpawnError ||
     ran.result.signal !== null ||
@@ -309,6 +318,7 @@ export async function runVerificationsWithOutput(
   const results: Verification["results"] = [];
   const outputs: string[] = [];
   const flaky: boolean[] = [];
+  const flakyFailures: FlakyFailure[] = [];
   const firstPass = new Map<string, number>();
   let outcome: VerificationClass = VerificationClass.Pass;
   for (const [index, command] of input.commands.entries()) {
@@ -325,26 +335,34 @@ export async function runVerificationsWithOutput(
       continue;
     }
     const classified = await classifiedCommand(command, index, input);
-    input.memo?.ran(command, classified.ran, classified.outcome);
-    results.push(classified.ran.result);
-    outputs.push(classified.ran.output);
+    let ran = classified.ran;
     outcome = classified.outcome;
-    if (outcome === VerificationClass.Pass) {
-      flaky.push(false);
-      if (!firstPass.has(command)) firstPass.set(command, index);
-      continue;
+    const passing =
+      outcome === VerificationClass.CodeFailure && !ran.result.timed_out
+        ? await passesOnRerun(command, index, input, classified.runs)
+        : null;
+    if (passing !== null) {
+      flakyFailures.push({
+        index,
+        command,
+        result: ran.result,
+        output: ran.output,
+      });
+      ran = passing;
+      outcome = VerificationClass.Pass;
     }
-    flaky.push(
-      outcome === VerificationClass.CodeFailure &&
-        !classified.ran.result.timed_out &&
-        (await passesOnRerun(command, index, input, classified.runs)),
-    );
-    break;
+    input.memo?.ran(command, ran, outcome);
+    results.push(ran.result);
+    outputs.push(ran.output);
+    flaky.push(passing !== null);
+    if (outcome !== VerificationClass.Pass) break;
+    if (!firstPass.has(command)) firstPass.set(command, index);
   }
   return {
     verification: { tested_input: input.tested_input, results },
     outputs,
     flaky,
+    flaky_failures: flakyFailures,
     outcome,
   };
 }
@@ -362,6 +380,7 @@ function replayedRun(
     },
     outputs: entries.map((entry) => entry.output),
     flaky: entries.map(() => false),
+    flaky_failures: [],
     outcome: last.outcome,
   };
 }
@@ -371,20 +390,20 @@ async function passesOnRerun(
   index: number,
   input: VerificationInput,
   runs: number,
-): Promise<boolean> {
+): Promise<CommandRun | null> {
   for (let rerun = 0; rerun < (input.reruns ?? 0); rerun++) {
     if (Date.now() >= input.deadline || input.context.signal.aborted)
-      return false;
+      return null;
     const attempt = {
       command,
       index,
       run: runs + FIRST_RUN + rerun,
       flaky_check: true,
     };
-    if ((await observedCommand(attempt, input)).result.exit_code === SUCCESS)
-      return true;
+    const ran = await observedCommand(attempt, input);
+    if (ran.result.exit_code === SUCCESS) return ran;
   }
-  return false;
+  return null;
 }
 
 export function infrastructureStop(run: VerificationRun): ExecutionStop | null {
@@ -405,7 +424,25 @@ export function infrastructureStop(run: VerificationRun): ExecutionStop | null {
   );
 }
 
+function timeoutStop(run: VerificationRun): ExecutionStop {
+  const result = run.verification.results.at(-1);
+  assert.ok(result);
+  return new ExecutionStop(
+    EndReason.EnvironmentFailed,
+    EnvironmentFailure.VerificationTimeout,
+    redactReason(
+      JSON.stringify({
+        index: run.verification.results.length - 1,
+        limit_ms: COMMAND_LIMIT_MS,
+        exit_code: result.exit_code,
+        command: result.command,
+      }),
+    ),
+  );
+}
+
 export function environmentStop(run: VerificationRun): ExecutionStop | null {
+  if (run.outcome === VerificationClass.Timeout) return timeoutStop(run);
   if (run.outcome !== VerificationClass.Environment) return null;
   const result = run.verification.results.at(-1);
   assert.ok(result);

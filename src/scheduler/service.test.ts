@@ -10,6 +10,7 @@ import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { HealthStatus } from "../kernel/service.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
+  ExecutionStopReason,
   LOSS_SWEEP_INTERVAL_MS,
   QUEUE_LIST_LIMIT_DEFAULT,
   SCHEDULER_SERVICE_NAME,
@@ -568,6 +569,44 @@ test("a revocation writes one root end after the commit and a rolled back revoca
       ],
     },
   ]);
+});
+
+test("a revocation of a forced archive writes the stored stop in the root end", (t) => {
+  const h = schedulerHarness(t);
+  const row = executionFixture();
+  const stop = {
+    reason: ExecutionStopReason.InstanceArchived,
+    code: null,
+    detail: JSON.stringify({ instance: "relay-a", actor: "Ulrich" }),
+  };
+  h.store.transaction((tx) => insertExecution(tx, row));
+  const revoked = h.store.transaction((tx) =>
+    h.service.revoke(tx, row.node_id, FIXTURE_NOW, stop),
+  );
+  assert.ok(revoked);
+  h.service.executionRevoked(revoked, RevokeCause.Human, null, null);
+  assert.deepEqual(h.telemetry.length, ONE_ROW);
+  assert.deepEqual(
+    (h.telemetry[0]!.arguments[0] as { stop: unknown }).stop,
+    stop,
+  );
+});
+
+test("a revocation of a paused claim writes the stop human_paused in the root end", (t) => {
+  const h = schedulerHarness(t);
+  const row = executionFixture();
+  const stop = { reason: ExecutionStopReason.HumanPaused, code: null };
+  h.store.transaction((tx) => insertExecution(tx, row));
+  const revoked = h.store.transaction((tx) =>
+    h.service.revoke(tx, row.node_id, FIXTURE_NOW, stop),
+  );
+  assert.ok(revoked);
+  h.service.executionRevoked(revoked, RevokeCause.Human, null, null);
+  assert.equal(h.telemetry.length, ONE_ROW);
+  assert.deepEqual(
+    (h.telemetry[0]!.arguments[0] as { stop: unknown }).stop,
+    stop,
+  );
 });
 
 test("a revocation by an assessment writes the root end and then one transition span", (t) => {

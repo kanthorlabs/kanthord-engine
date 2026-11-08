@@ -520,6 +520,32 @@ test("a failure routes below the limit, pauses at the limit and resume permits a
   assert.equal(h.node().state, NodeState.Waiting);
 });
 
+test("stopped moves Executing to Available and Evaluating to Waiting and writes no count", (t) => {
+  const h = fixture(t);
+  h.claim();
+  const first = h.store.transaction((tx) =>
+    h.service.stopped(tx, h.node_id, NOW),
+  );
+  assert.equal(h.node().state, NodeState.Available);
+  assert.equal(first.from, NodeState.Executing);
+  assert.equal(first.to, NodeState.Available);
+  h.claim();
+  h.store.transaction((tx) =>
+    setNodeState(tx, h.node_id, NodeState.Evaluating),
+  );
+  const second = h.store.transaction((tx) =>
+    h.service.stopped(tx, h.node_id, NOW),
+  );
+  assert.equal(h.node().state, NodeState.Waiting);
+  assert.equal(second.from, NodeState.Evaluating);
+  assert.equal(second.to, NodeState.Waiting);
+  for (const transition of [first, second]) {
+    assert.equal(transition.rule, TransitionRule.None);
+    assert.equal(transition.count, null);
+    assert.equal(transition.limit, null);
+  }
+});
+
 test("an unblock from the base branch starts a new node branch that later attempts continue", async (t) => {
   const h = fixture(t);
   const restartBranch = `kanthord/${h.node_id}-a2`;
@@ -1283,7 +1309,7 @@ function deferredBranchPushFixture(
     ssh_credential: "github-ssh",
     credential: "github",
     base_branch: "main",
-    action: RepositoryAction.MergePush,
+    action: RepositoryAction.Push,
     landing: "human",
   });
   h.store.transaction((tx) =>
@@ -1319,7 +1345,7 @@ function deferredBranchPushFixture(
         node_id: h.node_id,
         attempt: FIRST_ATTEMPT,
         subject: "Request",
-        requirement_key: "repo.merge_push",
+        requirement_key: "repo.push",
         end_state: null,
         verification: null,
         provenance: JSON.stringify(h.opener),
@@ -1714,4 +1740,53 @@ test("resume ignores a node in another state", async (t) => {
   await turn(undefined, { signal: t.signal });
   assert.equal(h.checkCalls(), NO_CALLS);
   assert.equal(h.node().state, NodeState.Evaluating);
+});
+
+const PAUSED_ANSWER = {
+  from: NodeState.Paused,
+  to: NodeState.Paused,
+  rule: TransitionRule.None,
+  count: null,
+  limit: null,
+  first_available_at: null,
+};
+
+function pausedWithClaim(t: TestContext) {
+  const h = fixture(t);
+  h.claim();
+  h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Paused));
+  return h;
+}
+
+test("a release of a Paused node with a kept claim leaves it Paused for each further_work and stall count", (t) => {
+  for (const [furtherWork, stalled] of [
+    [false, NO_STALLS],
+    [true, NO_STALLS],
+    [true, FURTHER_WORK_LIMIT],
+  ] as const) {
+    const h = pausedWithClaim(t);
+    assert.deepEqual(h.release(furtherWork, stalled), PAUSED_ANSWER);
+    assert.equal(h.node().state, NodeState.Paused);
+  }
+});
+
+test("a failure of a Paused node keeps it Paused below and at the limit", (t) => {
+  const limit = fixture(t).dependencies.config.consecutive_failure_limit;
+  for (const count of [FIRST_ATTEMPT, limit]) {
+    const h = pausedWithClaim(t);
+    assert.deepEqual(
+      h.store.transaction((tx) => h.service.failure(tx, h.node_id, count, NOW)),
+      PAUSED_ANSWER,
+    );
+    assert.equal(h.node().state, NodeState.Paused);
+  }
+});
+
+test("stopped keeps a Paused node Paused and writes no count", (t) => {
+  const h = pausedWithClaim(t);
+  assert.deepEqual(
+    h.store.transaction((tx) => h.service.stopped(tx, h.node_id, NOW)),
+    PAUSED_ANSWER,
+  );
+  assert.equal(h.node().state, NodeState.Paused);
 });

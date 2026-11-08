@@ -430,7 +430,7 @@ permission() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
   tr -d '\\n' < "$KANTHORD_CHANGES"; echo
 } >> "$probe"
 case "$mode" in
-  slow) sleep 30; exit 0;;
+  slow) echo hung-output; sleep 30; exit 0;;
   absent) exit 127;;
   invalid) echo 'not json' > "$KANTHORD_AFFECTED_REPORT"; exit 0;;
   fail) cp "reports/$mode.json" "$KANTHORD_AFFECTED_REPORT"; exit 1;;
@@ -767,31 +767,42 @@ test("an invalid report at both heads stops with affected_invalid", async (t) =>
   assert.match(stop.detail.error, /invalid JSON/);
 });
 
-test("a time-limit end at both heads stops with affected_timeout", async (t) => {
-  const f = await fixture(t, { base: "slow", head: "slow" });
-  const stop = await stopOf(runOf(f, { commandLimitMs: SHORT_LIMIT_MS }));
-  assert.equal(stop.code, EnvironmentFailure.AffectedTimeout);
-  assert.equal(stop.detail.commit, f.head);
-  assert.equal(stop.detail.time_limit_s, SHORT_LIMIT_S);
+test("a time-limit end at the head answers failed with the time limit, the commit and the output tail, and runs no base check", async (t) => {
+  const f = await fixture(t, { base: "pass", head: "slow" });
+  const result = await ran(f, { commandLimitMs: SHORT_LIMIT_MS });
+  assert.equal(result.verdict, AffectedVerdict.Failed);
+  assert.equal(result.base_run, null);
+  assert.equal(result.head.timed_out, true);
+  assert.equal(
+    result.failure_text,
+    `The affected tests reached their time limit of ${SHORT_LIMIT_S} s at ${f.head}.\n\nhung-output\n`,
+  );
+  assert.equal(
+    readFileSync(f.probe, "utf8").split("\n").length - 1,
+    PROBE_LINES,
+  );
 });
 
-test("a time-limit end at the head stops with affected_timeout before the base check", async (t) => {
-  const f = await fixture(t, { base: "pass", head: "slow" });
+test("a time-limit end at the head answers failed also when the base times out", async (t) => {
+  const f = await fixture(t, { base: "slow", head: "slow" });
+  const result = await ran(f, { commandLimitMs: SHORT_LIMIT_MS });
+  assert.equal(result.verdict, AffectedVerdict.Failed);
+  assert.match(result.failure_text ?? "", /reached their time limit/);
+});
+
+test("a time-limit end at the base with an invalid head report stops with affected_timeout", async (t) => {
+  const f = await fixture(t, { base: "slow", head: "invalid" });
   const stop = await stopOf(runOf(f, { commandLimitMs: SHORT_LIMIT_MS }));
   assert.equal(stop.code, EnvironmentFailure.AffectedTimeout);
   assert.deepEqual(Object.keys(stop.detail), [
     "binding_id",
     "commit",
     "command",
+    "exit_code",
     "time_limit_s",
   ]);
-  assert.equal(stop.detail.binding_id, BINDING);
-  assert.equal(stop.detail.commit, f.head);
+  assert.equal(stop.detail.commit, f.mergeBase);
   assert.equal(stop.detail.time_limit_s, SHORT_LIMIT_S);
-  assert.equal(
-    readFileSync(f.probe, "utf8").split("\n").length - 1,
-    PROBE_LINES,
-  );
 });
 
 test("exit 127 at both heads stops with command_absent", async (t) => {

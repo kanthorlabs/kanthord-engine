@@ -45,6 +45,7 @@ import {
   type NodeTransition,
   type PlatformAddress,
   PlatformAddressKind,
+  type ReleaseStop,
   type ReplyActionFacts,
   type ReplyRequestFacts,
   RepositoryAction,
@@ -131,6 +132,7 @@ export function revokedExecution(
       root_span_id: "b".repeat(16),
     },
     ended_at: endedAt,
+    stop: null,
   };
 }
 
@@ -330,6 +332,62 @@ export function controlHarness(
   };
 }
 
+export function keepsClaim(
+  h: ReturnType<typeof controlHarness>,
+  claim: { executionId: string; runtimeIdentity: string },
+) {
+  const keep = {
+    live: true,
+    connected: true,
+    order: null as ReleaseStop["reason"] | null,
+  };
+  const sent: unknown[][] = [];
+  const stops: unknown[] = [];
+  const logs: Record<string, unknown>[] = [];
+  h.dependencies.logger = pino(
+    { level: "warn" },
+    {
+      write: (line: string) => logs.push(JSON.parse(line)),
+    },
+  );
+  h.dependencies.schedulerClaims.liveExecutionOf = () =>
+    keep.live
+      ? {
+          execution_id: claim.executionId,
+          runtime_identity: claim.runtimeIdentity,
+          attempt: FIRST_REVISION,
+          pinned_revision: FIRST_REVISION,
+        }
+      : null;
+  h.dependencies.schedulerClaims.revoke = (_tx, nodeId, now, stop) => {
+    stops.push(stop);
+    keep.live = false;
+    return revokedExecution(claim.executionId, nodeId, now);
+  };
+  h.dependencies.workerStopOrders.connected = () => keep.connected;
+  h.dependencies.workerStopOrders.orderOf = () => keep.order;
+  h.dependencies.workerStopOrders.sendStopOrder = (...args) => {
+    sent.push([...args, h.store.database.isTransaction]);
+    keep.order ??= args[2];
+  };
+  return { keep, sent, stops, logs };
+}
+
+export function keptClaimHarness(
+  t: TestContext,
+  identity: CallerIdentity,
+  state: NodeState,
+) {
+  const h = controlHarness(t, identity);
+  const executionId = createIdentity("execution");
+  const kept = keepsClaim(h, { executionId, runtimeIdentity: "runtime-1" });
+  h.store.transaction((tx) => {
+    openAttempt(tx, h.node_id, FIRST_REVISION, h.actor, FIXTURE_TIME);
+    setNodeState(tx, h.node_id, state);
+  });
+  return { h, executionId, ...kept };
+}
+
 export function missionHarness(
   t: TestContext,
   identity: CallerIdentity,
@@ -438,6 +496,28 @@ export function missionHarness(
       of: (...args) => {
         record("executionAttribution.of", args);
         return null;
+      },
+    },
+    workerStopOrders: {
+      connected: (...args) => {
+        record("workerStopOrders.connected", args);
+        return false;
+      },
+      sendStopOrder: (...args) =>
+        record("workerStopOrders.sendStopOrder", args),
+      orderOf: (...args) => {
+        record("workerStopOrders.orderOf", args);
+        return null;
+      },
+    },
+    pauseFacts: {
+      of: (...args) => {
+        record("pauseFacts.of", args);
+        return {
+          consecutive_failures: 0,
+          consecutive_stalls: 0,
+          last_stop: null,
+        };
       },
     },
     telemetry: {
@@ -647,6 +727,7 @@ export async function externalRequestHarness(
   t: TestContext,
   identity: CallerIdentity,
   nextRepository = false,
+  action: RepositoryAction = RepositoryAction.PullRequest,
 ) {
   const h = evidenceHarness(t, identity);
   const nextId = createIdentity("binding");
@@ -672,7 +753,7 @@ export async function externalRequestHarness(
     ssh_credential: "github-ssh",
     credential: "github",
     base_branch: "main",
-    action: RepositoryAction.PullRequest,
+    action,
     landing: "human" as const,
   });
   const testedInput = {
@@ -722,17 +803,25 @@ export async function externalRequestHarness(
       )
       .run(JSON.stringify([...repositories, h.storageId]), h.node_id),
   );
-  const address: PlatformAddress = {
-    kind: PlatformAddressKind.PullRequest,
-    resource_identity: REQUEST_RESOURCE,
-    number: REQUEST_NUMBER,
-  };
+  const address: PlatformAddress =
+    action === RepositoryAction.Push
+      ? {
+          kind: PlatformAddressKind.BranchPush,
+          resource_identity: REQUEST_RESOURCE,
+          branch: "main",
+          commit: ASSESSED_COMMIT,
+        }
+      : {
+          kind: PlatformAddressKind.PullRequest,
+          resource_identity: REQUEST_RESOURCE,
+          number: REQUEST_NUMBER,
+        };
   const request = await h.invoke("evidence.request", {
     params: { node_id: h.node_id },
     query: {},
     body: {
       ...h.context,
-      requirement_key: "repo.pull_request",
+      requirement_key: `repo.${action}`,
       subject: "PR",
       address,
     },

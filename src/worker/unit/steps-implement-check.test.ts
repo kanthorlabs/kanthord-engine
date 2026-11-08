@@ -1,3 +1,4 @@
+import { VerdictSource } from "./node-reads.ts";
 import assert from "node:assert/strict";
 import { suite, test, type TestContext } from "node:test";
 import { existsSync, readFileSync } from "node:fs";
@@ -97,6 +98,7 @@ suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.deepEqual((await startCheck(h)).pending, []);
     assert.deepEqual((await startCheck(h)).pending, []);
     h.verdict = {
+      source: VerdictSource.Rework,
       text: `Unmet:\n- ${current.id}: still open`,
       findings: [],
       round: null,
@@ -130,6 +132,7 @@ suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
     const h = await fixture(t, [current], []);
     await recordDone(h, current);
     h.verdict = {
+      source: VerdictSource.Rework,
       text: requested,
       findings: [],
       round: null,
@@ -170,6 +173,7 @@ suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
     } as unknown as Revision;
     for (const current of tasks) await recordDone(h, current);
     h.verdict = {
+      source: VerdictSource.Rework,
       text: "The route stays unhandled.",
       findings: [],
       round: null,

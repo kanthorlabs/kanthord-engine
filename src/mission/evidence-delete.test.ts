@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { isDeepStrictEqual } from "node:util";
 import { test, type TestContext } from "node:test";
+import { setImmediate as turn } from "node:timers/promises";
 import { OperationError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
@@ -29,6 +32,7 @@ import { Act, ActAttribute } from "./act-telemetry.ts";
 import {
   actCalls,
   evidenceHarness,
+  keepsClaim,
   revokedExecution,
   settlesExpired,
 } from "./test-support.ts";
@@ -554,4 +558,169 @@ test("a delete with an act telemetry that throws keeps its answer", async (t) =>
     null,
   );
   assert.equal(h.node().state, NodeState.Paused);
+});
+
+const HUMAN_PAUSED = "human_paused";
+const CLOSE_DROPPED = "mission.node.close_dropped";
+const OBJECT_ASSETS = 2;
+
+function connectedFixture(t: TestContext) {
+  const h = fixture(t, true);
+  const kept = keepsClaim(h, h.claim);
+  const objectId = createIdentity("evidence_asset");
+  h.store.database
+    .prepare(
+      "INSERT INTO mission_evidence_asset (id, evidence_id, kind, content, published_at, expired_at) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .run(
+      objectId,
+      h.evidence_id,
+      AssetKind.Object,
+      canonicalJSON({
+        location: "s3://bucket/key",
+        size: FIRST_ATTEMPT,
+        media_type: "text/plain",
+        storage_binding_id: h.storageId,
+        object_version: VERSION,
+      }),
+      null,
+      FIRST_ATTEMPT,
+    );
+  const deleted: string[] = [];
+  h.dependencies.intakeStorage.delete = async (_call, assetId) => {
+    deleted.push(assetId);
+  };
+  const forced = () =>
+    h.invoke("evidence.delete", {
+      params: { evidence_id: h.evidence_id },
+      query: {},
+      body: {
+        expected_mission_version: FIRST_ATTEMPT,
+        force: true,
+        reason: "Remove request",
+      },
+    });
+  const recorded = () =>
+    h.store.transaction((tx) => ({
+      evidence: Boolean(readEvidence(tx, h.evidence_id)),
+      assets: readAssets(tx, h.evidence_id).length,
+    }));
+  return { h, kept, objectId, deleted, forced, recorded };
+}
+
+async function settled(): Promise<void> {
+  await turn();
+  await turn();
+}
+
+test("a forced delete of a connected execution answers 204, pauses the node and keeps the evidence until the release", async (t) => {
+  const { h, kept, deleted, forced, recorded } = connectedFixture(t);
+  assert.equal(await forced(), null);
+  assert.equal(h.node().state, NodeState.Paused);
+  assert.deepEqual(kept.stops, []);
+  assert.deepEqual(recorded(), { evidence: true, assets: OBJECT_ASSETS });
+  assert.deepEqual(deleted, []);
+  assert.deepEqual(kept.sent, [
+    [h.claim.executionId, h.claim.runtimeIdentity, HUMAN_PAUSED, false],
+  ]);
+  assert.equal(actCalls(h).length, ONE_ACT);
+  assert.equal(await forced(), null);
+  assert.equal(kept.sent.length, ONE_ACT);
+  assert.deepEqual(recorded(), { evidence: true, assets: OBJECT_ASSETS });
+});
+
+test("the release of a held forced delete deletes the assets and then the evidence record", async (t) => {
+  const { h, kept, objectId, deleted, forced, recorded } = connectedFixture(t);
+  await forced();
+  kept.keep.live = false;
+  h.service.executionReleased(h.claim.executionId, null);
+  await settled();
+  assert.deepEqual(deleted, [objectId]);
+  assert.deepEqual(recorded(), { evidence: false, assets: NO_CALLS });
+  assert.equal(h.node().state, NodeState.Paused);
+  assert.equal(actCalls(h).length, SECOND_VERSION);
+  h.service.executionReleased(h.claim.executionId, null);
+  await settled();
+  assert.deepEqual(deleted, [objectId]);
+});
+
+test("another evidence delete on the node refuses with claim_live while a close is pending", async (t) => {
+  const { h, kept, forced } = connectedFixture(t);
+  await forced();
+  const otherId = createIdentity("evidence");
+  h.store.transaction((tx) =>
+    insertEvidence(
+      tx,
+      {
+        id: otherId,
+        node_id: h.node_id,
+        attempt: FIRST_ATTEMPT,
+        subject: "Other",
+        requirement_key: null,
+        end_state: null,
+        verification: null,
+        provenance: canonicalJSON(h.executionActor),
+        created_at: FIRST_ATTEMPT,
+      },
+      [],
+    ),
+  );
+  await assert.rejects(
+    h.invoke("evidence.delete", {
+      params: { evidence_id: otherId },
+      query: {},
+      body: {
+        expected_mission_version: FIRST_ATTEMPT,
+        force: true,
+        reason: "Remove other",
+      },
+    }),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === MissionErrorCode.ClaimLive &&
+      error.status === HttpStatus.Conflict &&
+      isDeepStrictEqual(error.details, {
+        node_id: h.node_id,
+        execution_id: h.claim.executionId,
+      }),
+  );
+  assert.equal(kept.sent.length, ONE_ACT);
+});
+
+test("a forced delete of a disconnected execution deletes at once with the stop human_paused", async (t) => {
+  const { h, kept, deleted, objectId, forced, recorded } = connectedFixture(t);
+  kept.keep.connected = false;
+  assert.equal(await forced(), null);
+  assert.equal(h.node().state, NodeState.Paused);
+  assert.deepEqual(kept.stops, [{ reason: HUMAN_PAUSED, code: null }]);
+  assert.deepEqual(kept.sent, []);
+  assert.deepEqual(deleted, [objectId]);
+  assert.deepEqual(recorded(), { evidence: false, assets: NO_CALLS });
+});
+
+test("an asset delete failure in step two logs close_dropped, removes the pending close and leaves no unhandled rejection", async (t) => {
+  const { h, kept, forced, recorded } = connectedFixture(t);
+  const unhandled: unknown[] = [];
+  const listener = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", listener);
+  t.after(() => process.off("unhandledRejection", listener));
+  await forced();
+  h.dependencies.intakeStorage.delete = async () => {
+    throw new Error("delete failed");
+  };
+  kept.keep.live = false;
+  h.service.executionReleased(h.claim.executionId, null);
+  await settled();
+  const dropped = kept.logs.filter((line) => line.msg === CLOSE_DROPPED);
+  assert.equal(dropped.length, ONE_ACT);
+  assert.equal(dropped[0]?.node_id, h.node_id);
+  assert.equal(dropped[0]?.act, Act.DeleteEvidence);
+  assert.deepEqual(recorded(), { evidence: true, assets: OBJECT_ASSETS });
+  assert.deepEqual(unhandled, []);
+  h.service.executionReleased(h.claim.executionId, null);
+  await settled();
+  assert.equal(
+    kept.logs.filter((line) => line.msg === CLOSE_DROPPED).length,
+    ONE_ACT,
+  );
 });

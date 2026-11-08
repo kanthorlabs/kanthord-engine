@@ -624,7 +624,7 @@ function pushRequestOf(h: Harness): {
 test("a live claim on the exact push request refuses the admission and leaves a conflicting pull request untouched", async (t) => {
   const h = await fixture(t);
   const push = pushRequestOf(h);
-  const exact = insertRequest(h, "repo.merge_push", push.nodeId, push.address);
+  const exact = insertRequest(h, "repo.push", push.nodeId, push.address);
   h.dependencies.schedulerClaims.liveExecutionOf = (tx, nodeId, now) =>
     nodeId === push.nodeId ? h.claim(tx, nodeId, now) : null;
   h.dependencies.intakeCheck.check = async (_context, evidenceId) => {
@@ -649,7 +649,7 @@ test("a live claim on the exact push request refuses the admission and leaves a 
 test("an exact push request that becomes ambiguous during the check leaves a conflicting pull request untouched", async (t) => {
   const h = await fixture(t, true);
   const push = pushRequestOf(h);
-  const exact = insertRequest(h, "repo.merge_push", push.nodeId, push.address);
+  const exact = insertRequest(h, "repo.push", push.nodeId, push.address);
   let next = "";
   h.dependencies.intakeCheck.check = async (_context, evidenceId) => {
     h.checks.push(evidenceId);
@@ -690,12 +690,12 @@ async function humanLandingFixture(t: TestContext, commit: string) {
   const policyOf = h.dependencies.bindings.repositoryPolicyOf;
   h.dependencies.bindings.repositoryPolicyOf = (tx, bindingId) => ({
     ...policyOf(tx, bindingId)!,
-    action: RepositoryAction.MergePush,
+    action: RepositoryAction.Push,
   });
   deleteRequest(h);
   const landing = insertRequest(
     h,
-    "repo.merge_push",
+    "repo.push",
     h.node_id,
     branchPushOf(commit),
   );

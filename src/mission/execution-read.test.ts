@@ -425,6 +425,39 @@ test("the rework assessment selects a success while the attempt holds an open fi
   assert.equal(rework.round, FIRST_ATTEMPT);
 });
 
+test("the rework assessment ignores a rejected round that a later success follows", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  await h.submit(h.notMet);
+  h.evaluate();
+  h.store.transaction((tx) =>
+    insertAssessment(tx, {
+      id: createIdentity("assessment"),
+      node_id: h.node_id,
+      attempt: h.claim.attempt,
+      result: AssessmentResult.Success,
+      rationale: "Accepted",
+      evidence_ids: "[]",
+      dependency_outcome_ids: "[]",
+      tested_input: null,
+      gate_files: null,
+      execution_id: h.claim.executionId,
+      actor: null,
+      node_revision: h.claim.pinnedRevision,
+      created_at: CREATED_AT,
+    }),
+  );
+  await assert.rejects(
+    h.invoke("execution.rework_assessment.get", {
+      params: { execution_id: h.claim.executionId },
+      query: {},
+      body: null,
+    }),
+    (error) =>
+      error instanceof OperationError &&
+      error.code === MissionErrorCode.RecordNotFound,
+  );
+});
+
 test("a request evidence makes round 1 final", async (t) => {
   const h = await reviewHarness(t, IDENTITY);
   h.store.transaction((tx) =>

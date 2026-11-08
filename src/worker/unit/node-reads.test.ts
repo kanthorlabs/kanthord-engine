@@ -13,6 +13,7 @@ import {
   readRequestedChanges,
   readReworkAssessment,
   VERDICT_LINK_UPDATE_LIMIT,
+  VerdictSource,
 } from "./node-reads.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { stopAfter } from "../../kernel/stop-test-support.ts";
@@ -167,7 +168,13 @@ test("the prior is the rework verdict, else the cleared rationale, else null", a
       rework === notFound
         ? { verdict: null, cleared: expected }
         : {
-            verdict: { text: expected, judged: [], findings: [], round: null },
+            verdict: {
+              source: VerdictSource.Rework,
+              text: expected,
+              judged: [],
+              findings: [],
+              round: null,
+            },
             cleared: null,
           },
     );
@@ -361,7 +368,9 @@ test("each change request names its binding", async (t) => {
       },
     }),
   } as unknown as MethodClients["worker"];
-  const text = (await readRequestedChanges(run, REPOSITORIES))?.text;
+  const requested = await readRequestedChanges(run, REPOSITORIES);
+  assert.equal(requested?.source, VerdictSource.Rework);
+  const text = requested?.text;
   assert.ok(text);
   assert.deepEqual(
     text.split("\n").slice(1),
@@ -427,6 +436,7 @@ test("the judged commits of a rework are the repository commits of its tested in
     } as unknown as MethodClients["mission"];
     run.clients.worker = NO_FAILED_CHECKS as unknown as MethodClients["worker"];
     assert.deepEqual((await readPrior(run, REPOSITORIES)).verdict, {
+      source: VerdictSource.Rework,
       text: "rework",
       judged: judged.map(({ binding_id, commit }) => ({ binding_id, commit })),
       findings: [],
@@ -541,6 +551,7 @@ test("a failed check comes before a rework assessment and the text holds both", 
   ]) as unknown as MethodClients["worker"];
   assert.deepEqual(await readPrior(run, REPOSITORIES), {
     verdict: {
+      source: VerdictSource.Rework,
       text: [
         "The pull request cannot merge:",
         `The required checks lint, unit failed on api at commit ${"c".repeat(40)}.`,
@@ -567,6 +578,7 @@ test("a failed check without a rework assessment is the whole verdict", async (t
   ]) as unknown as MethodClients["worker"];
   assert.deepEqual(await readPrior(run, REPOSITORIES), {
     verdict: {
+      source: VerdictSource.FailedChecks,
       text: [
         "The pull request cannot merge:",
         `The required checks lint failed on api at commit ${"c".repeat(40)}.`,
@@ -590,7 +602,13 @@ test("an empty failed check answer keeps the current verdict", async (t) => {
     [],
   ) as unknown as MethodClients["worker"];
   assert.deepEqual(await readPrior(run, REPOSITORIES), {
-    verdict: { text: "rework", judged: [], findings: [], round: null },
+    verdict: {
+      source: VerdictSource.Rework,
+      text: "rework",
+      judged: [],
+      findings: [],
+      round: null,
+    },
     cleared: null,
   });
 });
@@ -630,6 +648,7 @@ test("readPrior adds the open findings of the review round and the round of a re
     const prior = await readPrior(run, REPOSITORIES);
     if (rework)
       assert.deepEqual(prior.verdict, {
+        source: VerdictSource.Rework,
         text: "rework",
         judged: [],
         findings,
@@ -661,7 +680,7 @@ const LINK_UPDATE_READ = {
     },
   ],
   next_cursor: null,
-  total: 1,
+  total: 3,
 };
 
 function linkUpdateRead(requests: unknown[] = []) {
@@ -695,6 +714,7 @@ test("a rework assessment and one update give the rationale, the separator and t
     `rework\n\n${linkUpdatesText(LINK_UPDATE_READ)}`,
   );
   assert.deepEqual(prior.verdict?.judged, []);
+  assert.equal(prior.verdict?.linkUpdates, LINK_UPDATE_READ.total);
   assert.deepEqual(requests, [
     {
       params: { execution_id: "execution" },
@@ -719,10 +739,12 @@ test("only an update gives a verdict with no judged commit", async (t) => {
   } as unknown as MethodClients["worker"];
   assert.deepEqual(await readPrior(run, REPOSITORIES), {
     verdict: {
+      source: VerdictSource.Rework,
       text: linkUpdatesText(LINK_UPDATE_READ),
       judged: [],
       findings: [],
       round: null,
+      linkUpdates: LINK_UPDATE_READ.total,
     },
     cleared: null,
   });

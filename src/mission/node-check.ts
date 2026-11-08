@@ -398,8 +398,9 @@ function mergeCommitOf(
 ): string | null {
   const action = item.frozen_action;
   if (
-    action.action !== RepositoryAction.PullRequest ||
-    action.configuration.landing !== RepositoryLanding.KanthorD
+    action.action !== RepositoryAction.Push &&
+    (action.action !== RepositoryAction.PullRequest ||
+      action.configuration.landing !== RepositoryLanding.KanthorD)
   )
     return null;
   const { node_id: nodeId, attempt } = item.request;

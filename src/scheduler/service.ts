@@ -8,6 +8,7 @@ import {
   reasonOf,
 } from "../kernel/context.ts";
 import { asError, Diagnostic, OperationError } from "../kernel/errors.ts";
+import type { Logger } from "pino";
 import type { HealthRegistry } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
@@ -59,6 +60,7 @@ import {
   type EndedExecution,
   type EnvironmentGate,
   EXECUTION_IDENTITY_PREFIX,
+  type ExecutionStopReason,
   type Job,
   JOB_IDENTITY_PREFIX,
   LOSS_SWEEP_INTERVAL_MS,
@@ -69,6 +71,7 @@ import {
   type ProjectPauses,
   QUEUE_LIST_LIMIT_DEFAULT,
   type Registrations,
+  type ReleaseStop,
   type RevokedExecution,
   SCHEDULER_SERVICE_NAME,
   schedulerOperations,
@@ -170,6 +173,10 @@ export interface Dependencies {
   agentChains: AgentChains;
   traceIdentity: TraceIdentity;
   telemetry: ExecutionTelemetry;
+  logger: Logger;
+  stopOrderOf(executionId: string): ExecutionStopReason | null;
+  executionReleased(executionId: string, stop: ReleaseStop | null): void;
+  archiving(tx: Transaction, runtimeIdentity: string): boolean;
   health?: HealthRegistry;
 }
 
@@ -215,6 +222,9 @@ export class SchedulerService implements Service, WorkQueue {
   executionAttribution(tx: Transaction, executionId: string) {
     return settlement.executionAttribution(tx, this.dependencies, executionId);
   }
+  pauseFacts(tx: Transaction, nodeId: string, attempt: number) {
+    return settlement.pauseFacts(tx, nodeId, attempt);
+  }
   wake(projectId: string): void {
     this.waiting.wake(projectId);
   }
@@ -246,8 +256,9 @@ export class SchedulerService implements Service, WorkQueue {
     tx: Transaction,
     nodeId: string,
     now: number,
+    stop?: ReleaseStop,
   ): RevokedExecution | null {
-    return settlement.revoke(tx, nodeId, now);
+    return settlement.revoke(tx, nodeId, now, stop);
   }
   executionRevoked(
     execution: RevokedExecution,
@@ -260,7 +271,7 @@ export class SchedulerService implements Service, WorkQueue {
       ended_at: execution.ended_at,
       end: ExecutionEnd.Revoked,
       revoke_cause: cause,
-      stop: null,
+      stop: execution.stop,
       cause:
         cause === RevokeCause.Human
           ? attributed(CauseCategory.Human, CauseSubcategory.Intervention)

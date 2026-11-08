@@ -230,10 +230,10 @@ export type RepositoryFacts = {
 export type ActionFacts = {
   frozen_action: FrozenActionFacts;
   repository: RepositoryFacts;
-  node: { name: string; commit_type: CommitType };
+  node: { id: string; name: string; commit_type: CommitType };
   snapshot_commit: string;
   reused_address: PullRequestAddressFacts | null;
-  merge_address: PullRequestAddressFacts | null;
+  merge_address: PlatformAddressFacts | null;
   gate_files: string[];
 };
 export type ReplyFrozenActionFacts = {
@@ -270,6 +270,7 @@ export type RequestFacts = {
   address: PlatformAddressFacts;
   repository: RepositoryFacts;
   human_landing: boolean;
+  assessed_commit: string | null;
   link_trust: { actor_ids: string[] };
 };
 export type AssetFacts = {
