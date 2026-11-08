@@ -253,7 +253,7 @@ interface StackCase {
   files: Record<string, string>;
   image: string;
   commands: string[];
-  layerStep?: string;
+  layerStep: string;
 }
 
 const NODE_STACK: StackCase = {
@@ -290,8 +290,7 @@ test(
     assert.equal(builds[0]!.image, NODE_STACK.image);
     assert.equal(layerBuilds(detection).length, SINGLE_SLOT);
     assert.deepEqual(proofCommands(detection), NODE_STACK.commands);
-    if (NODE_STACK.layerStep !== undefined)
-      assertLayerStep(detection, NODE_STACK.layerStep);
+    assertLayerStep(detection, NODE_STACK.layerStep);
     await claimOnReadyTag(t, detection, ready);
   },
 );
