@@ -166,8 +166,31 @@ const noComments = {
   }),
 };
 
+const inlineParamTypeMessage =
+  "Give the options object a named interface or type.";
+const inlineParamTypeSelectors = [
+  ":function > :matches(Identifier, ObjectPattern) > TSTypeAnnotation > TSTypeLiteral",
+  ":function > AssignmentPattern > :matches(Identifier, ObjectPattern) > TSTypeAnnotation > TSTypeLiteral",
+  "TSMethodSignature > :matches(Identifier, ObjectPattern) > TSTypeAnnotation > TSTypeLiteral",
+];
+
+const noInlineParamType = {
+  meta: { type: "problem", schema: [] },
+  create: (context) =>
+    Object.fromEntries(
+      inlineParamTypeSelectors.map((selector) => [
+        selector,
+        (node) => context.report({ node, message: inlineParamTypeMessage }),
+      ]),
+    ),
+};
+
 const kanthordPlugin = {
-  rules: { "no-cwd-data-read": noCwdDataRead, "no-comments": noComments },
+  rules: {
+    "no-cwd-data-read": noCwdDataRead,
+    "no-comments": noComments,
+    "no-inline-param-type": noInlineParamType,
+  },
 };
 
 const productionImportPatterns = [
@@ -1015,6 +1038,15 @@ export default tseslint.config(
           ignoreTypeIndexes: true,
         },
       ],
+    },
+  },
+  {
+    files: ["src/**/*.ts"],
+    ignores: ["**/*.test.ts", "**/*test-support.ts", "**/__fixtures__/**"],
+    rules: {
+      complexity: ["error", 10],
+      "@typescript-eslint/max-params": ["error", { max: 3 }],
+      "kanthord/no-inline-param-type": "error",
     },
   },
 );
