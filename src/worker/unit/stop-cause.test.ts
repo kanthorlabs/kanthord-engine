@@ -112,6 +112,15 @@ test("an environment failure maps to the environment with its code", () => {
     ),
     attributed(CauseCategory.Environment, CauseSubcategory.AffectedTimeout),
   );
+  assert.deepEqual(
+    stopCauseOf(
+      ExecutionStopReason.EnvironmentFailed,
+      EnvironmentFailure.VerificationTimeout,
+      null,
+      QUIET,
+    ),
+    attributed(CauseCategory.Environment, CauseSubcategory.VerificationHang),
+  );
 });
 
 test("an operation failure with a git step maps to the suspects of the step", () => {
@@ -306,4 +315,16 @@ test("a stop that no row names is unattributed with no suspects", () => {
     stopCauseOf(ExecutionStopReason.EnvironmentFailed, "other", null, QUIET),
     unattributed([]),
   );
+});
+
+test("an operator stop maps to the human intervention", () => {
+  for (const reason of [
+    ExecutionStopReason.InstanceArchived,
+    ExecutionStopReason.WorkerStopped,
+    ExecutionStopReason.HumanPaused,
+  ])
+    assert.deepEqual(
+      stopCauseOf(reason, null, null, QUIET),
+      attributed(CauseCategory.Human, CauseSubcategory.Intervention),
+    );
 });

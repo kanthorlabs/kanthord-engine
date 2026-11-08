@@ -15,6 +15,7 @@ import {
 } from "./content.ts";
 import {
   type Content,
+  type Drift,
   type Edge,
   type ExternalLink,
   type ImportEntry,
@@ -36,7 +37,6 @@ import {
 import { ControlError } from "./control.ts";
 import { dependencyEditGuarded } from "./dependency.ts";
 import { type DepEdge, hasDependencyCycle } from "./graph.ts";
-import { nodeRecord } from "./node-read.ts";
 import {
   type ParsedNodeFile,
   type ParsedTaskFile,
@@ -60,6 +60,7 @@ const SORT_EQUAL = 0;
 const SORT_BEFORE = -1;
 const SORT_AFTER = 1;
 const REASON_FIELD = "reason";
+const EXPORT_REMEDY = "mission export";
 const TEMPORARY_KEY_PREFIX = "file:";
 const REFERENCE = { Node: "node", DependsOn: "depends_on" } as const;
 const PLAN_REASON = {
@@ -115,6 +116,7 @@ export interface ResolvedImport {
   no_ops: string[];
   retirements: string[];
   removed_edges: Edge[];
+  drifts: Drift[];
   resolved_entries: ResolvedImportEntry[];
   current_nodes: Map<string, NodeRow>;
   current_tasks: Map<string, CurrentTask>;
@@ -447,6 +449,12 @@ function terminalOwner(
   return owner !== undefined && isTerminal(owner.state);
 }
 
+function currentContentOf(tx: Transaction, nodeId: string): Content {
+  const row = readCurrentRevision(tx, nodeId);
+  assert.ok(row, "A current node has a revision.");
+  return revisionFromRow(tx, row).content;
+}
+
 function storedContent(
   tx: Transaction,
   identity: Pick<ResolvedImportEntry, "current" | "task">,
@@ -454,9 +462,7 @@ function storedContent(
   if (identity.task !== null)
     return { binding_ids: identity.task.content.bindings, intent: null };
   assert.ok(identity.current, "A terminal entry has an identity.");
-  const row = readCurrentRevision(tx, identity.current.id);
-  assert.ok(row, "A current node has a revision.");
-  const { content } = revisionFromRow(tx, row);
+  const content = currentContentOf(tx, identity.current.id);
   return { binding_ids: content.bindings, intent: content.intent };
 }
 
@@ -540,16 +546,10 @@ function resolveGraph(result: ResolvedImport): void {
     );
 }
 
-function entryChanged(
-  tx: Transaction,
-  item: ResolvedImportEntry,
-  bindings: MissionBindings,
-): boolean {
+function contentDiffers(tx: Transaction, item: ResolvedImportEntry): boolean {
   const { entry, current } = item;
   assert.ok(current, "Only an existing identity can be compared.");
-  assert.equal(current.retired_at, null, "Compared identity is current.");
   assert.ok(!isTaskEntry(entry), "Only a node file is compared to a node.");
-  if (item.terminal) return current.filename !== entry.filename;
   const content: Content = {
     name: entry.name,
     requirement: entry.requirement,
@@ -562,10 +562,62 @@ function entryChanged(
     ...commitTypeField(entry.commit_type),
   };
   return (
-    current.filename !== entry.filename ||
-    canonicalJSON(nodeRecord(tx, current, bindings).content) !==
-      canonicalJSON(content)
+    canonicalJSON(currentContentOf(tx, current.id)) !== canonicalJSON(content)
   );
+}
+
+function entryChanged(tx: Transaction, item: ResolvedImportEntry): boolean {
+  const { entry, current } = item;
+  assert.ok(current, "Only an existing identity can be compared.");
+  assert.equal(current.retired_at, null, "Compared identity is current.");
+  assert.ok(!isTaskEntry(entry), "Only a node file is compared to a node.");
+  if (item.terminal) return current.filename !== entry.filename;
+  return current.filename !== entry.filename || contentDiffers(tx, item);
+}
+
+type NodeEntry = Exclude<NormalizedEntry, ParsedTaskFile>;
+
+function serverEntry(entry: NodeEntry, server: Content): NodeEntry {
+  const base = { ...entry };
+  delete base.commit_type;
+  return {
+    ...base,
+    name: server.name,
+    requirement: server.requirement,
+    criterion: server.criterion,
+    verifications: server.verifications,
+    intent: server.intent,
+    tags: server.tags,
+    external_links: server.external_links,
+    ...commitTypeField(server.commit_type),
+  };
+}
+
+function digestEntries(
+  tx: Transaction,
+  resolved: ResolvedImport,
+): NormalizedEntry[] {
+  const drifted = new Set(resolved.drifts.map((drift) => drift.node_id));
+  return resolved.resolved_entries.map((item) =>
+    item.current !== null &&
+    drifted.has(item.current.id) &&
+    !isTaskEntry(item.entry)
+      ? serverEntry(item.entry, currentContentOf(tx, item.current.id))
+      : item.entry,
+  );
+}
+
+function driftOf(tx: Transaction, item: ResolvedImportEntry): Drift | null {
+  const { entry, current } = item;
+  if (!item.terminal || current === null || isTaskEntry(entry)) return null;
+  if (!contentDiffers(tx, item)) return null;
+  const row = readCurrentRevision(tx, current.id);
+  assert.ok(row, "A current node has a revision.");
+  return {
+    node_id: current.id,
+    filename: current.filename,
+    visible_revision: row.revision,
+  };
 }
 
 function taskChanged(item: ResolvedImportEntry): boolean {
@@ -604,11 +656,7 @@ function droppedEdges(result: ResolvedImport): Edge[] {
   return dependencies;
 }
 
-function classify(
-  tx: Transaction,
-  result: ResolvedImport,
-  bindings: MissionBindings,
-): void {
+function classify(tx: Transaction, result: ResolvedImport): void {
   assert.equal(
     result.violations.length,
     NO_VIOLATIONS,
@@ -642,7 +690,7 @@ function classify(
     );
     kept.add(item.current.id);
     const contentChanged =
-      entryChanged(tx, item, bindings) || owners.has(item.current.id);
+      entryChanged(tx, item) || owners.has(item.current.id);
     if (contentChanged) result.content_updates.push(item.current.id);
     const previous = result.current_dependencies
       .filter((edge) => edge.dependent === item.key)
@@ -655,6 +703,9 @@ function classify(
         : result.no_ops;
     target.push(item.current.id);
   }
+  result.drifts = result.resolved_entries
+    .flatMap((item) => driftOf(tx, item) ?? [])
+    .sort((a, b) => a.filename.localeCompare(b.filename));
   result.retirements = [...result.current_nodes.keys()]
     .filter((id) => !kept.has(id))
     .sort();
@@ -699,6 +750,7 @@ export function resolveImportSet(
     no_ops: [],
     retirements: [],
     removed_edges: [],
+    drifts: [],
     resolved_entries: [],
     current_nodes: currentNodes,
     current_tasks: currentTasks,
@@ -743,8 +795,7 @@ export function resolveImportSet(
     });
   }
   resolveGraph(result);
-  if (result.violations.length === NO_VIOLATIONS)
-    classify(tx, result, bindings);
+  if (result.violations.length === NO_VIOLATIONS) classify(tx, result);
   return result;
 }
 
@@ -782,6 +833,15 @@ function modifiedNodes(resolved: ResolvedImport): Set<string> {
   return modified;
 }
 
+function visibleRevisionOf(
+  tx: Transaction,
+  nodeId: string,
+): { visible_revision: number; reason: string } {
+  const row = readCurrentRevision(tx, nodeId);
+  assert.ok(row, "A current node has a revision.");
+  return { visible_revision: row.revision, reason: row.reason };
+}
+
 export function checkImportCondition(
   tx: Transaction,
   resolved: ResolvedImport,
@@ -813,8 +873,15 @@ export function checkImportCondition(
           MissionErrorCode.ConditionFailed,
           retiring.has(id)
             ? "Import cannot retire a node that holds an attempt. Discard the node, then keep its unchanged file in the plan."
-            : "Node does not satisfy the import condition.",
-          { state: node.state, attempt: node.attempt },
+            : "Node holds an attempt and its server revision differs. Run mission export and copy this node file into the plan.",
+          retiring.has(id)
+            ? { state: node.state, attempt: node.attempt }
+            : {
+                state: node.state,
+                attempt: node.attempt,
+                ...visibleRevisionOf(tx, id),
+                remedy: EXPORT_REMEDY,
+              },
           locator,
         ),
       );
@@ -891,7 +958,7 @@ export function prepareImport(
       preview_digest: importDigest(
         mission.id,
         snapshot.mission_version,
-        normalized.entries,
+        resolved === null ? normalized.entries : digestEntries(tx, resolved),
         {
           creates: resolved?.creates ?? [],
           updates: resolved?.updates ?? [],
@@ -903,6 +970,7 @@ export function prepareImport(
       retirements,
       removed_edges: resolved?.removed_edges ?? [],
       no_ops: resolved?.no_ops ?? [],
+      drifts: resolved?.drifts ?? [],
       violations,
     },
   };

@@ -123,11 +123,7 @@ test("the read covers each pull request of the cleared attempt that ended with o
           ActionResolution.ExpectedEnd,
           "evidence_2",
         ),
-        entry(
-          RepositoryAction.MergePush,
-          ActionResolution.OtherEnd,
-          "evidence_3",
-        ),
+        entry(RepositoryAction.Push, ActionResolution.OtherEnd, "evidence_3"),
         entry(RepositoryAction.PullRequest, ActionResolution.Unrequested, null),
       ],
       { body: BODY, next_cursor: null },

@@ -13,7 +13,11 @@ import {
   type Revision,
 } from "./contract.ts";
 import { revisionFromRow } from "./revision.ts";
-import { blockedContextOf } from "./record-read.ts";
+import {
+  blockedContextOf,
+  pausedContextOf,
+  type PausedDependencies,
+} from "./record-read.ts";
 import { readOpenAttempt } from "./record-store.ts";
 import {
   claimRevisionOf,
@@ -90,6 +94,7 @@ export function nodeRecord(
   tx: Transaction,
   node: NodeRow,
   bindings: MissionBindings,
+  paused: PausedDependencies,
 ): Node {
   const current = readCurrentRevision(tx, node.id);
   assert.ok(current, "Node must have a revision.");
@@ -114,6 +119,9 @@ export function nodeRecord(
     ...(node.state === NodeState.Blocked
       ? { blocked_context: blockedContextOf(tx, bindings, node) }
       : {}),
+    ...(node.state === NodeState.Paused
+      ? { paused_context: pausedContextOf(tx, paused, node) }
+      : {}),
   };
 }
 
@@ -121,8 +129,9 @@ export function getNode(
   tx: Transaction,
   nodeId: string,
   bindings: MissionBindings,
+  paused: PausedDependencies,
 ): Node {
-  return nodeRecord(tx, requireNode(tx, nodeId), bindings);
+  return nodeRecord(tx, requireNode(tx, nodeId), bindings, paused);
 }
 
 export function getRevision(
@@ -141,12 +150,13 @@ export function nodePage(
   missionId: string,
   filter: NodeListFilter,
   limit = NODE_LIST_LIMIT_DEFAULT,
+  paused: PausedDependencies,
 ) {
   if (!readMission(tx, missionId)) notFound(MissionErrorCode.MissionNotFound);
   const rows = listNodes(tx, missionId, filter, limit + EXTRA_ROW);
   const items = rows
     .slice(FIRST_ROW, limit)
-    .map((row) => nodeRecord(tx, row, bindings));
+    .map((row) => nodeRecord(tx, row, bindings, paused));
   return {
     items,
     next_cursor: rows.length > limit ? encode(items.at(-1)!.id) : null,

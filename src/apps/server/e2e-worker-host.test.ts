@@ -4,7 +4,13 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
-import { Diagnostic } from "../../kernel/errors.ts";
+import {
+  hostEnvironment,
+  overrideEnvironment,
+  stopAfter,
+  temporary,
+} from "../../kernel/test-support.ts";
+import { llmOperations } from "../../llm/contract.ts";
 import {
   AssetKind,
   type Evidence,
@@ -14,29 +20,45 @@ import {
 import type { CredentialAnswer } from "../../custody/contract.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
+import { generateSshKey } from "../../repository/ssh-key.ts";
 import {
+  createBareRepository,
   DEFAULT_SSH_PORT,
   startTestSshd,
 } from "../../repository/sshd-test-support.ts";
 import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";
 import type { Span } from "../../tracking/contract.ts";
-import type { RepositoryTransport } from "../../worker/contract.ts";
+import {
+  InstancePlacement,
+  type RepositoryTransport,
+  workerOperations,
+} from "../../worker/contract.ts";
 import {
   fauxAssistantMessage,
   fauxToolCall,
   scriptedModelRuntime,
   scriptedProvider,
 } from "../../worker/unit/test-support.ts";
+import { Worker } from "../worker/index.ts";
+import { until } from "./cli-test-support.ts";
 import {
+  createInstancesByCli,
   FAKE_GITHUB_HOST_KEY,
   FAKE_SSH_CREDENTIAL,
+  humanCaller,
   inProcessWorker,
 } from "./test-support.ts";
 import {
+  WORKER_DEFAULTS,
   WORKER_TEST_KEY,
   workerAcceptance,
 } from "./worker-acceptance-test-support.ts";
 
+const RACE_TIMEOUT = 300000;
+const LAND_GATE_TIMEOUT_MS = 90000;
+const SECOND_LAND = 2;
+const RACE_LAND_TIMEOUT_MS = 240000;
+const RACE_SCRIPT_STEPS = 12;
 const FIRST_REVISION = 1;
 const SINGLE_ITEM = 1;
 const SECOND_REVISION = 2;
@@ -53,9 +75,16 @@ const TOOL_RESULT = "toolResult";
 const UPLOAD = "evidence-upload";
 const READY = "Worker application ready";
 const CLAIMED = "credential handover received";
-const LIVE_STOP = "worker.stop.execution_live";
+const WORKER_STOPPED = "worker_stopped";
+const INSTANCE_ARCHIVED = "instance_archived";
+const HUMAN_PAUSED = "human_paused";
+const INSTANCE_NAME = "laptop";
+const MACHINE_NAME = "workstation";
+const FAST_HEARTBEAT_MS = 50;
+const STOPPED_FILE = "stopped.txt";
 const DECRYPTION_FAILED = "worker.handover.decryption_failed";
 const ENDED = "execution ended";
+const ENDED_KIND = "ended";
 const PATH_REFUSED = "worker.evidence_upload.path_refused";
 const PHASES = ["finish", "prepare", "start", "tasks"];
 const TASK_LOOP_PHASE = "tasks";
@@ -131,9 +160,13 @@ async function fixture(t: TestContext) {
   const sshd = await startTestSshd(t);
   await sshd.authorize(publicKey);
   const handed: SshAccess[] = [];
+  const localKey = generateSshKey("local");
+  await sshd.authorize(localKey.public_key);
   const routed = (ssh: SshAccess): SshAccess => {
     handed.push(ssh);
-    return { ...ssh, known_hosts: sshd.known_hosts, port: sshd.port };
+    return "relay" in ssh
+      ? { ...localKey, known_hosts: sshd.known_hosts, port: sshd.port }
+      : { ...ssh, known_hosts: sshd.known_hosts, port: sshd.port };
   };
   const origin = sshd.url(bare);
   const connector = new RepositoryComponent();
@@ -391,12 +424,13 @@ test(
     );
     const stopSetup = await fixture(t);
     await t.test(
-      "E09.15 SIGTERM preserves a live claim and registration",
+      "E09.15 SIGTERM releases a live execution with worker_stopped after a checkpoint push",
       { timeout: JOURNEY_TIMEOUT },
       async (t) => {
         const entered = Promise.withResolvers<void>();
         const resume = Promise.withResolvers<void>();
         const provider = scriptedProvider([
+          tool("bash", { command: `printf ${HELLO} > ${STOPPED_FILE}` }),
           async () => {
             entered.resolve();
             await resume.promise;
@@ -412,10 +446,486 @@ test(
         await entered.promise;
         process.emit("SIGTERM");
         resume.resolve();
-        const error = await host.running;
-        assert.ok(error instanceof Diagnostic);
-        assert.equal(error.code, LIVE_STOP);
-        await assertLive(stopSetup, host.logs);
+        assert.equal(await host.running, null);
+        assert.equal(await host.worker.stop(), null);
+        const executions = await stopSetup.read<{ items: ExecutionRecord[] }>([
+          "scheduler",
+          "execution",
+          "list",
+          stopSetup.project_id,
+          "--node",
+          stopSetup.node_id,
+        ]);
+        assert.equal(executions.items.length, SINGLE_ITEM);
+        const claim = executions.items[0]!;
+        assert.equal(claim.claim_state, ClaimState.Finished);
+        assert.equal(claim.stop?.reason, WORKER_STOPPED);
+        assert.equal(claim.stop?.code, null);
+        const branch = `refs/heads/kanthord/${stopSetup.node_id}`;
+        assert.match(
+          await stopSetup.git.listRemote([stopSetup.bare, branch]),
+          /^[a-f0-9]{40}\s/,
+        );
+        assert.equal(
+          await simpleGit(stopSetup.bare).show([`${branch}:${STOPPED_FILE}`]),
+          HELLO,
+        );
+        const node = await stopSetup.read<{ state: NodeState }>([
+          "mission",
+          "node",
+          "get",
+          stopSetup.node_id,
+        ]);
+        assert.equal(node.state, NodeState.Available);
+        assert.ok(
+          !host.logs.some(
+            (record) => record.msg === ENDED && record.kind === ENDED_KIND,
+          ),
+          JSON.stringify(host.logs),
+        );
+      },
+    );
+    const archiveSetup = await fixture(t);
+    await t.test(
+      "E09.15a a forced archive of a connected instance lets the coder push its checkpoint before the instance ends",
+      { timeout: JOURNEY_TIMEOUT },
+      async (t) => {
+        const entered = Promise.withResolvers<void>();
+        const resume = Promise.withResolvers<void>();
+        const provider = scriptedProvider([
+          tool("bash", { command: `printf ${HELLO} > ${STOPPED_FILE}` }),
+          async () => {
+            entered.resolve();
+            await resume.promise;
+            return fauxAssistantMessage("stopped");
+          },
+        ]);
+        const call = humanCaller(archiveSetup.fixture);
+        const empty = { params: {}, query: {} };
+        const machine = await call(workerOperations["machine.create"], {
+          ...empty,
+          body: { name: MACHINE_NAME },
+        });
+        assert.ok(machine.machine_configuration);
+        const created = await call(workerOperations["instance.create"], {
+          ...empty,
+          body: {
+            name: INSTANCE_NAME,
+            worker: "coder@1",
+            placement: InstancePlacement.Worker,
+            machine: MACHINE_NAME,
+            endpoint: archiveSetup.fixture.endpoint,
+          },
+        });
+        assert.ok(created.instance_configuration);
+        await call(llmOperations.create, {
+          ...empty,
+          body: {
+            name: "anthro-1",
+            platform: "anthropic",
+            metadata: null,
+            holders: [INSTANCE_NAME],
+            secret: { key: WORKER_TEST_KEY },
+          },
+        });
+        const rebind = async (instances: string[]) => {
+          const exported = await archiveSetup.read<{
+            version: number;
+            bindings: { general: { config: { worker_instances: string[] } } };
+          }>(["project", "binding", "export", archiveSetup.project_id]);
+          exported.bindings.general.config.worker_instances = instances;
+          await archiveSetup.write(
+            ["project", "binding", "apply", archiveSetup.project_id],
+            exported,
+          );
+        };
+        await rebind([INSTANCE_NAME]);
+        const root = temporary(t);
+        overrideEnvironment(t, { TMPDIR: hostEnvironment().TMPDIR });
+        const worker = new Worker({
+          env: {
+            ...process.env,
+            HOME: root,
+            XDG_CONFIG_HOME: join(root, "config"),
+            XDG_DATA_HOME: join(root, "data"),
+            XDG_STATE_HOME: join(root, "state"),
+            KANTHORD_WORKER_CONFIG: created.instance_configuration,
+            KANTHORD_MACHINE_CONFIG: machine.machine_configuration,
+          },
+          connectionName: "host-a",
+          heartbeatIntervalMs: FAST_HEARTBEAT_MS,
+          modelRuntimeFactory: scriptedModelRuntime(provider),
+          repositoryTransport: archiveSetup.transport,
+          log: () => {},
+        });
+        const running = worker.run();
+        stopAfter(t, async () => {
+          await worker.stop();
+          await running;
+        });
+        await entered.promise;
+        await rebind([]);
+        const archived = await archiveSetup.read<{
+          ended_at: number | null;
+          stopping?: string[];
+        }>([
+          "worker",
+          "instance",
+          "archive",
+          INSTANCE_NAME,
+          "--expected-revision",
+          String(FIRST_REVISION),
+          "--force",
+        ]);
+        assert.equal(archived.ended_at, null);
+        assert.equal(archived.stopping?.length, SINGLE_ITEM);
+        resume.resolve();
+        for (;;) {
+          const current = await archiveSetup.read<{ ended_at: number | null }>([
+            "worker",
+            "instance",
+            "get",
+            INSTANCE_NAME,
+          ]);
+          if (current.ended_at !== null) break;
+          await delay(POLL_INTERVAL_MS, undefined, { signal: t.signal });
+        }
+        const executions = await archiveSetup.read<{
+          items: ExecutionRecord[];
+        }>([
+          "scheduler",
+          "execution",
+          "list",
+          archiveSetup.project_id,
+          "--node",
+          archiveSetup.node_id,
+        ]);
+        assert.equal(executions.items.length, SINGLE_ITEM);
+        const claim = executions.items[0]!;
+        assert.equal(claim.claim_state, ClaimState.Finished);
+        assert.equal(claim.stop?.reason, INSTANCE_ARCHIVED);
+        assert.equal(claim.stop?.code, null);
+        const branch = `refs/heads/kanthord/${archiveSetup.node_id}`;
+        assert.equal(
+          await simpleGit(archiveSetup.bare).show([
+            `${branch}:${STOPPED_FILE}`,
+          ]),
+          HELLO,
+        );
+        const node = await archiveSetup.read<{ state: NodeState }>([
+          "mission",
+          "node",
+          "get",
+          archiveSetup.node_id,
+        ]);
+        assert.equal(node.state, NodeState.Available);
+        assert.equal(
+          archiveSetup.fixture.worker.stopOrderOf(claim.execution_id),
+          null,
+        );
+      },
+    );
+    const pauseSetup = await fixture(t);
+    await t.test(
+      "E09.15b a pause of a connected execution lets the coder push its checkpoint and leaves the node Paused",
+      { timeout: JOURNEY_TIMEOUT },
+      async (t) => {
+        const entered = Promise.withResolvers<void>();
+        const resume = Promise.withResolvers<void>();
+        const provider = scriptedProvider([
+          tool("bash", { command: `printf ${HELLO} > ${STOPPED_FILE}` }),
+          async () => {
+            entered.resolve();
+            await resume.promise;
+            return fauxAssistantMessage("stopped");
+          },
+        ]);
+        const call = humanCaller(pauseSetup.fixture);
+        const empty = { params: {}, query: {} };
+        const machine = await call(workerOperations["machine.create"], {
+          ...empty,
+          body: { name: MACHINE_NAME },
+        });
+        assert.ok(machine.machine_configuration);
+        const created = await call(workerOperations["instance.create"], {
+          ...empty,
+          body: {
+            name: INSTANCE_NAME,
+            worker: "coder@1",
+            placement: InstancePlacement.Worker,
+            machine: MACHINE_NAME,
+            endpoint: pauseSetup.fixture.endpoint,
+          },
+        });
+        assert.ok(created.instance_configuration);
+        await call(llmOperations.create, {
+          ...empty,
+          body: {
+            name: "anthro-1",
+            platform: "anthropic",
+            metadata: null,
+            holders: [INSTANCE_NAME],
+            secret: { key: WORKER_TEST_KEY },
+          },
+        });
+        const exported = await pauseSetup.read<{
+          version: number;
+          bindings: { general: { config: { worker_instances: string[] } } };
+        }>(["project", "binding", "export", pauseSetup.project_id]);
+        exported.bindings.general.config.worker_instances = [INSTANCE_NAME];
+        await pauseSetup.write(
+          ["project", "binding", "apply", pauseSetup.project_id],
+          exported,
+        );
+        const root = temporary(t);
+        overrideEnvironment(t, { TMPDIR: hostEnvironment().TMPDIR });
+        const worker = new Worker({
+          env: {
+            ...process.env,
+            HOME: root,
+            XDG_CONFIG_HOME: join(root, "config"),
+            XDG_DATA_HOME: join(root, "data"),
+            XDG_STATE_HOME: join(root, "state"),
+            KANTHORD_WORKER_CONFIG: created.instance_configuration,
+            KANTHORD_MACHINE_CONFIG: machine.machine_configuration,
+          },
+          connectionName: "host-a",
+          heartbeatIntervalMs: FAST_HEARTBEAT_MS,
+          modelRuntimeFactory: scriptedModelRuntime(provider),
+          repositoryTransport: pauseSetup.transport,
+          log: () => {},
+        });
+        const running = worker.run();
+        stopAfter(t, async () => {
+          await worker.stop();
+          await running;
+        });
+        await entered.promise;
+        const mission = await pauseSetup.read<{ version: number }>([
+          "mission",
+          "get",
+          pauseSetup.project_id,
+        ]);
+        const before = await pauseSetup.read<{
+          state: NodeState;
+          attempt: number;
+        }>(["mission", "node", "get", pauseSetup.node_id]);
+        const paused = await pauseSetup.write<{ node: { state: NodeState } }>(
+          ["mission", "node", "pause", pauseSetup.node_id],
+          {
+            reason: "hold",
+            expected_mission_version: mission.version,
+            expected_state: before.state,
+            expected_attempt: before.attempt,
+          },
+        );
+        assert.equal(paused.node.state, NodeState.Paused);
+        const live = await pauseSetup.read<{ items: ExecutionRecord[] }>([
+          "scheduler",
+          "execution",
+          "list",
+          pauseSetup.project_id,
+          "--node",
+          pauseSetup.node_id,
+        ]);
+        assert.equal(live.items.length, SINGLE_ITEM);
+        assert.notEqual(live.items[0]!.claim_state, ClaimState.Finished);
+        resume.resolve();
+        for (;;) {
+          const page = await pauseSetup.read<{ items: ExecutionRecord[] }>([
+            "scheduler",
+            "execution",
+            "list",
+            pauseSetup.project_id,
+            "--node",
+            pauseSetup.node_id,
+          ]);
+          if (page.items[0]!.claim_state === ClaimState.Finished) break;
+          await delay(POLL_INTERVAL_MS, undefined, { signal: t.signal });
+        }
+        const executions = await pauseSetup.read<{
+          items: ExecutionRecord[];
+        }>([
+          "scheduler",
+          "execution",
+          "list",
+          pauseSetup.project_id,
+          "--node",
+          pauseSetup.node_id,
+        ]);
+        const claim = executions.items[0]!;
+        assert.equal(claim.stop?.reason, HUMAN_PAUSED);
+        assert.equal(claim.stop?.code, null);
+        const branch = `refs/heads/kanthord/${pauseSetup.node_id}`;
+        assert.equal(
+          await simpleGit(pauseSetup.bare).show([`${branch}:${STOPPED_FILE}`]),
+          HELLO,
+        );
+        const node = await pauseSetup.read<{ state: NodeState }>([
+          "mission",
+          "node",
+          "get",
+          pauseSetup.node_id,
+        ]);
+        assert.equal(node.state, NodeState.Paused);
+        assert.equal(
+          pauseSetup.fixture.worker.stopOrderOf(claim.execution_id),
+          null,
+        );
+      },
+    );
+    const discardSetup = await fixture(t);
+    await t.test(
+      "E09.15c a discard of a connected execution lets the coder push its checkpoint before the node reaches Discarded",
+      { timeout: JOURNEY_TIMEOUT },
+      async (t) => {
+        const entered = Promise.withResolvers<void>();
+        const resume = Promise.withResolvers<void>();
+        const provider = scriptedProvider([
+          tool("bash", { command: `printf ${HELLO} > ${STOPPED_FILE}` }),
+          async () => {
+            entered.resolve();
+            await resume.promise;
+            return fauxAssistantMessage("stopped");
+          },
+        ]);
+        const call = humanCaller(discardSetup.fixture);
+        const empty = { params: {}, query: {} };
+        const machine = await call(workerOperations["machine.create"], {
+          ...empty,
+          body: { name: MACHINE_NAME },
+        });
+        assert.ok(machine.machine_configuration);
+        const created = await call(workerOperations["instance.create"], {
+          ...empty,
+          body: {
+            name: INSTANCE_NAME,
+            worker: "coder@1",
+            placement: InstancePlacement.Worker,
+            machine: MACHINE_NAME,
+            endpoint: discardSetup.fixture.endpoint,
+          },
+        });
+        assert.ok(created.instance_configuration);
+        await call(llmOperations.create, {
+          ...empty,
+          body: {
+            name: "anthro-1",
+            platform: "anthropic",
+            metadata: null,
+            holders: [INSTANCE_NAME],
+            secret: { key: WORKER_TEST_KEY },
+          },
+        });
+        const exported = await discardSetup.read<{
+          version: number;
+          bindings: { general: { config: { worker_instances: string[] } } };
+        }>(["project", "binding", "export", discardSetup.project_id]);
+        exported.bindings.general.config.worker_instances = [INSTANCE_NAME];
+        await discardSetup.write(
+          ["project", "binding", "apply", discardSetup.project_id],
+          exported,
+        );
+        const root = temporary(t);
+        overrideEnvironment(t, { TMPDIR: hostEnvironment().TMPDIR });
+        const worker = new Worker({
+          env: {
+            ...process.env,
+            HOME: root,
+            XDG_CONFIG_HOME: join(root, "config"),
+            XDG_DATA_HOME: join(root, "data"),
+            XDG_STATE_HOME: join(root, "state"),
+            KANTHORD_WORKER_CONFIG: created.instance_configuration,
+            KANTHORD_MACHINE_CONFIG: machine.machine_configuration,
+          },
+          connectionName: "host-a",
+          heartbeatIntervalMs: FAST_HEARTBEAT_MS,
+          modelRuntimeFactory: scriptedModelRuntime(provider),
+          repositoryTransport: discardSetup.transport,
+          log: () => {},
+        });
+        const running = worker.run();
+        stopAfter(t, async () => {
+          await worker.stop();
+          await running;
+        });
+        await entered.promise;
+        const mission = await discardSetup.read<{ version: number }>([
+          "mission",
+          "get",
+          discardSetup.project_id,
+        ]);
+        const before = await discardSetup.read<{
+          state: NodeState;
+          attempt: number;
+        }>(["mission", "node", "get", discardSetup.node_id]);
+        const discarded = await discardSetup.write<{
+          node: { state: NodeState };
+        }>(["mission", "node", "discard", discardSetup.node_id], {
+          reason: "hold",
+          expected_mission_version: mission.version,
+          expected_state: before.state,
+          expected_attempt: before.attempt,
+        });
+        assert.equal(discarded.node.state, NodeState.Paused);
+        const live = await discardSetup.read<{ items: ExecutionRecord[] }>([
+          "scheduler",
+          "execution",
+          "list",
+          discardSetup.project_id,
+          "--node",
+          discardSetup.node_id,
+        ]);
+        assert.equal(live.items.length, SINGLE_ITEM);
+        assert.notEqual(live.items[0]!.claim_state, ClaimState.Finished);
+        resume.resolve();
+        for (;;) {
+          const page = await discardSetup.read<{ items: ExecutionRecord[] }>([
+            "scheduler",
+            "execution",
+            "list",
+            discardSetup.project_id,
+            "--node",
+            discardSetup.node_id,
+          ]);
+          if (page.items[0]!.claim_state === ClaimState.Finished) break;
+          await delay(POLL_INTERVAL_MS, undefined, { signal: t.signal });
+        }
+        const executions = await discardSetup.read<{
+          items: ExecutionRecord[];
+        }>([
+          "scheduler",
+          "execution",
+          "list",
+          discardSetup.project_id,
+          "--node",
+          discardSetup.node_id,
+        ]);
+        const claim = executions.items[0]!;
+        assert.equal(claim.stop?.reason, HUMAN_PAUSED);
+        assert.equal(claim.stop?.code, null);
+        const branch = `refs/heads/kanthord/${discardSetup.node_id}`;
+        assert.equal(
+          await simpleGit(discardSetup.bare).show([
+            `${branch}:${STOPPED_FILE}`,
+          ]),
+          HELLO,
+        );
+        let node: { state: NodeState };
+        do {
+          await delay(POLL_INTERVAL_MS, undefined, { signal: t.signal });
+          node = await discardSetup.read<{ state: NodeState }>([
+            "mission",
+            "node",
+            "get",
+            discardSetup.node_id,
+          ]);
+        } while (node.state !== NodeState.Discarded);
+        assert.equal(node.state, NodeState.Discarded);
+        assert.equal(
+          discardSetup.fixture.worker.stopOrderOf(claim.execution_id),
+          null,
+        );
       },
     );
     const handoverSetup = await fixture(t);
@@ -462,33 +972,300 @@ test(
   },
 );
 
-async function assertLive(
-  setup: Awaited<ReturnType<typeof fixture>>,
-  logs: Record<string, unknown>[],
-) {
-  const executions = await setup.read<{ items: ExecutionRecord[] }>([
-    "scheduler",
-    "execution",
-    "list",
-    setup.project_id,
-    "--node",
-    setup.node_id,
-  ]);
-  assert.equal(executions.items.length, SINGLE_ITEM);
-  const claim = await setup.read<ExecutionRecord>(
-    ["scheduler", "claim", "get", executions.items[0]!.execution_id],
-    { ...setup.human, KANTHORD_TOKEN: setup.auth.token },
-  );
-  assert.equal(claim.claim_state, ClaimState.Running);
-  const list = await setup.read<{
-    items: { runtime_identity: string; registered: boolean }[];
-  }>(["worker", "registration", "list", "--project", setup.project_id]);
-  const identity = logs.find(
-    (record) => record.msg === READY,
-  )!.runtime_identity;
-  assert.ok(
-    list.items.some(
-      (item) => item.runtime_identity === identity && item.registered,
-    ),
+const RACE_NODES = [
+  { name: "Write alpha", file: "alpha.txt" },
+  { name: "Write beta", file: "beta.txt" },
+];
+const PUSH_STRATEGY = {
+  base_branch: "main",
+  action: { name: "push", follows: { type: "assessment_passed" } },
+};
+
+async function raceRemote(t: TestContext, gate: ReturnType<typeof landGate>) {
+  const sshd = await startTestSshd(t);
+  const bare = await createBareRepository(t);
+  const git = simpleGit(bare);
+  await git.addConfig("uploadpack.allowFilter", "true");
+  await git.addConfig("uploadpack.allowAnySHA1InWant", "true");
+  const localKey = generateSshKey("local");
+  await sshd.authorize(localKey.public_key);
+  const origin = sshd.url(bare);
+  const routed = (ssh: SshAccess): SshAccess =>
+    "relay" in ssh
+      ? { ...localKey, known_hosts: sshd.known_hosts, port: sshd.port }
+      : { ...ssh, known_hosts: sshd.known_hosts, port: sshd.port };
+  const component = new RepositoryComponent();
+  const { squashPushFresh, landedOn } = component;
+  component.gitLsRemote = async () => {};
+  component.squashPushFresh = (input, context, deadline, ssh) =>
+    gate.hold(() =>
+      squashPushFresh(
+        { ...input, address: origin },
+        context,
+        deadline,
+        routed(ssh),
+      ),
+    );
+  component.landedOn = (input, context, deadline, ssh) =>
+    landedOn({ ...input, address: origin }, context, deadline, routed(ssh));
+  const transport: RepositoryTransport = {
+    clone: (_address, directory, context, deadline, ssh) =>
+      component.clone(origin, directory, context, deadline, routed(ssh)),
+    cloneSnapshot: (_address, revision, directory, context, deadline, ssh) =>
+      component.cloneSnapshot(
+        origin,
+        revision,
+        directory,
+        context,
+        deadline,
+        routed(ssh),
+      ),
+    fetchAndCheckout: (
+      directory,
+      branch,
+      base,
+      pushed,
+      context,
+      deadline,
+      ssh,
+    ) =>
+      component.fetchAndCheckout(
+        directory,
+        branch,
+        base,
+        pushed,
+        context,
+        deadline,
+        routed(ssh),
+      ),
+    fetchBase: (directory, base, context, deadline, ssh) =>
+      component.fetchBase(directory, base, context, deadline, routed(ssh)),
+    pushNodeBranch: (directory, branch, context, deadline, ssh) =>
+      component.pushNodeBranch(
+        directory,
+        branch,
+        context,
+        deadline,
+        routed(ssh),
+      ),
+  };
+  return { sshd, bare, git, component, transport };
+}
+
+function landGate() {
+  const secondLand = Promise.withResolvers<void>();
+  const firstLanded = Promise.withResolvers<void>();
+  let lands = 0;
+  let failure: Error | null = null;
+  const within = async (event: Promise<void>, waiting: string) => {
+    const stop = new AbortController();
+    const expired = delay(LAND_GATE_TIMEOUT_MS, undefined, {
+      signal: stop.signal,
+    }).then(() => {
+      failure = new Error(
+        `land gate: ${waiting} within ${LAND_GATE_TIMEOUT_MS} ms, ${lands} lands arrived`,
+      );
+      throw failure;
+    });
+    try {
+      await Promise.race([event, expired]);
+    } finally {
+      stop.abort();
+    }
+  };
+  const hold = async <T>(land: () => Promise<T>): Promise<T> => {
+    const order = ++lands;
+    if (order > SECOND_LAND) return land();
+    if (order === SECOND_LAND) {
+      secondLand.resolve();
+      await within(firstLanded.promise, "the first land did not finish");
+      return land();
+    }
+    await within(secondLand.promise, "the second land did not arrive");
+    try {
+      return await land();
+    } finally {
+      firstLanded.resolve();
+    }
+  };
+  return {
+    hold,
+    failure: () => failure,
+    landCount: () => lands,
+  };
+}
+
+function racingCoder() {
+  const fileOf = (context: { messages: unknown[] }) => {
+    const text = JSON.stringify(context.messages);
+    const node = RACE_NODES.find(({ file }) => text.includes(file));
+    assert.ok(node, text);
+    return node.file;
+  };
+  const step = async (context: { messages: { role: string }[] }) => {
+    if (context.messages.at(-1)?.role === TOOL_RESULT)
+      return fauxAssistantMessage("wrote");
+    const file = fileOf(context);
+    return tool("write", { path: file, content: file });
+  };
+  return scriptedProvider(
+    Array.from({ length: RACE_SCRIPT_STEPS }, () => step),
   );
 }
+
+test(
+  "E09.17 two nodes from two workspace roots land on one base, one after a rework, with a linear history",
+  { timeout: RACE_TIMEOUT },
+  async (t) => {
+    const gate = landGate();
+    const remote = await raceRemote(t, gate);
+    const setup = await workerAcceptance(t, true, {
+      fakeSlots: true,
+      fixtureOptions: { repositoryConnector: remote.component },
+    });
+    const sshKey = await setup.read<CredentialAnswer>([
+      "repository",
+      "credential",
+      "get",
+      FAKE_SSH_CREDENTIAL,
+    ]);
+    await remote.sshd.authorize(
+      String(sshKey.revisions[0]?.metadata?.public_key),
+    );
+    await createInstancesByCli(setup.read, ["server-2"]);
+    await createInstancesByCli(
+      setup.read,
+      ["server-3"],
+      InstancePlacement.Server,
+      "reviewer@1",
+    );
+    const exported = await setup.read<{
+      bindings: Record<string, { config: Record<string, unknown> }>;
+    }>(["project", "binding", "export", setup.project_id]);
+    exported.bindings.repo!.config.strategy = PUSH_STRATEGY;
+    exported.bindings.general!.config.worker_instances = [
+      "server-1",
+      "server-2",
+    ];
+    exported.bindings.reviewer!.config = {
+      worker: "reviewer@1",
+      worker_instances: ["server-3"],
+      tags: [],
+      entries: [{ agent: "re@1", ...WORKER_DEFAULTS }],
+    };
+    const applied = await setup.write<{
+      bindings: Record<string, { id: string }>;
+    }>(["project", "binding", "apply", setup.project_id], exported);
+    for (const index of [0, 1]) {
+      const auth = await setup.fixture.slotClient(
+        setup.project_id,
+        "general",
+        index,
+      );
+      await inProcessWorker(t, {
+        endpoint: setup.fixture.endpoint,
+        ...auth,
+        modelRuntimeFactory: scriptedModelRuntime(racingCoder()),
+        repositoryTransport: remote.transport,
+      });
+    }
+    const approval = async () =>
+      fauxAssistantMessage(
+        `kanthord-judgement: ${JSON.stringify({ rationale: "judged", result: "success" })}`,
+      );
+    await inProcessWorker(t, {
+      endpoint: setup.fixture.endpoint,
+      ...(await setup.fixture.slotClient(setup.project_id, "reviewer", 0)),
+      modelRuntimeFactory: scriptedModelRuntime(
+        scriptedProvider(
+          Array.from({ length: RACE_SCRIPT_STEPS }, () => approval),
+        ),
+      ),
+      repositoryTransport: remote.transport,
+    });
+    const mission = await setup.read<{ id: string }>([
+      "mission",
+      "get",
+      setup.project_id,
+    ]);
+    const nodes: string[] = [];
+    for (const [index, { name, file }] of RACE_NODES.entries()) {
+      const { version } = await setup.read<{ version: number }>([
+        "mission",
+        "get",
+        setup.project_id,
+      ]);
+      const created = await setup.write<{ revisions: { node_id: string }[] }>(
+        ["mission", "node", "create", mission.id],
+        {
+          filename: `race-${index}.md`,
+          content: {
+            name,
+            requirement: `Write ${file}`,
+            criterion: `${file} exists`,
+            verifications: [`test -f ${file}`],
+            bindings: [applied.bindings.repo!.id],
+            intent: Intent.Implement,
+          },
+          tasks: [],
+          reason: "plan",
+          expected_mission_version: version,
+        },
+      );
+      nodes.push(created.revisions[0]!.node_id);
+    }
+    const readNodes = () =>
+      Promise.all(
+        nodes.map((id) =>
+          setup.read<{
+            state: NodeState;
+            attempt: number;
+            paused_context?: { last_stop: unknown };
+          }>(["mission", "node", "get", id]),
+        ),
+      );
+    const landed = AbortSignal.any([
+      t.signal,
+      AbortSignal.timeout(RACE_LAND_TIMEOUT_MS),
+    ]);
+    try {
+      await until(
+        readNodes,
+        (states) => {
+          const failure = gate.failure();
+          if (failure) throw failure;
+          return states.every(({ state }) => state === NodeState.Completed);
+        },
+        landed,
+      );
+    } catch (error) {
+      const report = (await readNodes()).map(
+        ({ state, attempt, paused_context }) => ({
+          state,
+          attempt,
+          last_stop: paused_context?.last_stop ?? null,
+        }),
+      );
+      throw new Error(
+        `nodes not completed within ${RACE_LAND_TIMEOUT_MS} ms: ${String(error)} ${JSON.stringify({ lands: gate.landCount(), nodes: report })}`,
+        { cause: error },
+      );
+    }
+    const history = await remote.git.raw(["log", "--format=%P|%s", "main"]);
+    const commits = history.trim().split("\n");
+    assert.equal(commits.length, nodes.length + SINGLE_ITEM);
+    for (const commit of commits.slice(FIRST_INDEX, nodes.length))
+      assert.equal(commit.split("|")[0]!.split(" ").length, SINGLE_ITEM);
+    for (const { file } of RACE_NODES)
+      assert.equal(await remote.git.show([`main:${file}`]), file);
+    const assessments = await Promise.all(
+      nodes.map((id) =>
+        setup.read<{ items: unknown[] }>(["mission", "assessment", "list", id]),
+      ),
+    );
+    assert.deepEqual(assessments.map(({ items }) => items.length).sort(), [
+      SINGLE_ITEM,
+      TWO_RESULTS,
+    ]);
+  },
+);

@@ -14,6 +14,7 @@ import {
   isAdvancingStop,
   type MissionTransitions,
   type NodeTransition,
+  type PauseFactsRecord,
   type Registrations,
   type ReleaseStop,
   type RevokedExecution,
@@ -21,11 +22,14 @@ import {
 } from "./contract.ts";
 import { executionTrace } from "./telemetry.ts";
 import {
+  consecutiveStalls,
   endExecution,
   readExecution,
+  readLastEndedOfAttempt,
   readUnendedOfNode,
   readUnendedOfRuntime,
   storedStop,
+  storedStopOf,
 } from "./execution-store.ts";
 import type { SchedulerConfig } from "./config.ts";
 
@@ -35,6 +39,7 @@ const ENDING_FAILURE = 1;
 const ONE_JOB = 1;
 const EXPIRED = 1;
 const NO_DIGESTS = 0;
+const PAUSED = "Paused";
 const digestsDetailSchema = z.looseObject({
   digests: z.record(z.string(), z.string()),
 });
@@ -77,7 +82,10 @@ export function recordFailure(
     now,
   );
   const until = heldUntil(failures, now, dependencies.config.stop_backoff);
-  if (until === null)
+  if (
+    until === null ||
+    (transition.from === PAUSED && transition.to === PAUSED)
+  )
     return {
       transition,
       hold: { failure_count: failures, available_at: null },
@@ -169,9 +177,16 @@ export function digestsOf(detail: string | null): Record<string, string> {
   return parsed.success ? parsed.data.digests : {};
 }
 
+export const NO_FAILURE_STOPS: readonly ExecutionStopReason[] = [
+  ExecutionStopReason.InstanceArchived,
+  ExecutionStopReason.WorkerStopped,
+  ExecutionStopReason.HumanPaused,
+];
+
 export function countsFailure(stop: ReleaseStop | null): boolean {
   if (stop === null || stop.reason === ExecutionStopReason.BudgetEnd)
     return false;
+  if (NO_FAILURE_STOPS.includes(stop.reason)) return false;
   if (isAdvancingStop(stop)) return false;
   return (
     stop.reason !== ExecutionStopReason.EnvironmentFailed ||
@@ -212,6 +227,37 @@ export function consecutiveFailures(
   const count = previous + (endingCounts ? ENDING_FAILURE : NO_FAILURES);
   assert.ok(Number.isSafeInteger(count) && count >= NO_FAILURES);
   return count;
+}
+
+export function pauseFacts(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number,
+): PauseFactsRecord {
+  assert.ok(tx.database.isTransaction);
+  const ending = readLastEndedOfAttempt(tx, nodeId, attempt);
+  const stop = ending?.stop ?? null;
+  return {
+    consecutive_failures:
+      ending === null
+        ? NO_FAILURES
+        : consecutiveFailures(
+            tx,
+            ending,
+            ending.ended_at! >= ending.expired_at || countsFailure(stop),
+          ),
+    consecutive_stalls: consecutiveStalls(tx, nodeId, attempt),
+    last_stop:
+      ending === null || stop === null
+        ? null
+        : {
+            execution_id: ending.execution_id,
+            reason: stop.reason,
+            code: stop.code,
+            detail: stop.detail ?? null,
+            trace_id: ending.trace_id,
+          },
+  };
 }
 
 export function declareLoss(
@@ -262,14 +308,16 @@ export function revoke(
   tx: Transaction,
   nodeId: string,
   now: number,
+  stop?: ReleaseStop,
 ): RevokedExecution | null {
   const row = liveExecutionOf(tx, nodeId, now);
   if (!row) return null;
-  endExecution(tx, row.execution_id, now);
+  endExecution(tx, row.execution_id, now, stop);
   return {
     execution_id: row.execution_id,
     trace: executionTrace(row),
     ended_at: now,
+    stop: stop === undefined ? null : storedStopOf(stop),
   };
 }
 export function liveExecutionOf(

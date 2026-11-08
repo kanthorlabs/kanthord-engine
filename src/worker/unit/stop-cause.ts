@@ -46,6 +46,7 @@ const environmentSubcategories: Readonly<Record<string, CauseSubcategory>> = {
   [EnvironmentFailure.CommandAbsent]: CauseSubcategory.CommandAbsent,
   [EnvironmentFailure.AffectedInvalid]: CauseSubcategory.AffectedInvalid,
   [EnvironmentFailure.AffectedTimeout]: CauseSubcategory.AffectedTimeout,
+  [EnvironmentFailure.VerificationTimeout]: CauseSubcategory.VerificationHang,
 };
 
 const promptRecordCodes: readonly string[] = [
@@ -199,6 +200,10 @@ export function stopCauseOf(
     case ExecutionStopReason.BudgetEnd:
     case ExecutionStopReason.AssessmentAbsent:
       return budgetCauseOf(isTimedOut(detail, signals));
+    case ExecutionStopReason.InstanceArchived:
+    case ExecutionStopReason.WorkerStopped:
+    case ExecutionStopReason.HumanPaused:
+      return attributed(CauseCategory.Human, CauseSubcategory.Intervention);
     case ExecutionStopReason.JudgementInvalid:
     case ExecutionStopReason.ReportAbsent:
       return unattributed([CauseCategory.Model, CauseCategory.Prompt]);

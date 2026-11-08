@@ -30,6 +30,7 @@ const MIN_FILE_COMMANDS = 30;
 const EXAMPLE_INDENT = /^ {2}/gm;
 const MAX_COMMANDS = 400;
 const WHITESPACE = /\s+/g;
+const NOTES_MARKER = "\nNotes:\n";
 
 type FileCommand = { path: string[]; command: Command };
 
@@ -137,6 +138,7 @@ test("every command with a --file option prints a body example that its schema a
     assert.notEqual(marker, NOT_FOUND, `${label}: no example in help`);
     const printed = help.stdout
       .slice(marker + EXAMPLE_MARKER.length + 1)
+      .split(NOTES_MARKER)[0]!
       .replace(EXAMPLE_INDENT, "");
     if (body.schema === undefined) {
       assert.equal(printed.trim(), body.example, label);

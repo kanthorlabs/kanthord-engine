@@ -70,6 +70,7 @@ const AUTHENTICATED_POLICIES: Partial<
 export interface InvocationOptions {
   authorization?: string;
   identity?: CallerIdentity;
+  onIdentity?: (identity: CallerIdentity) => void;
   idempotencyKey?: string;
   context?: Context;
   requestId?: string;
@@ -307,8 +308,9 @@ export class Invocation {
           options.authorization,
           context,
         );
+        options.onIdentity?.(identity);
         if (!admits(identity, operation)) throw unauthorized();
-      }
+      } else if (identity) options.onIdentity?.(identity);
       return identity;
     } catch (thrown) {
       if (!(thrown instanceof WorkerGroupEnded) || !operation.endedGroup)

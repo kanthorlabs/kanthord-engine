@@ -99,7 +99,7 @@ components:
               enum:
                 - github.pull_request
                 - github.pull_request_merge
-                - git.merge_push
+                - git.push
                 - github.issue_comment
                 - jira.issue_comment
                 - s3.delete_object
@@ -144,7 +144,7 @@ components:
                 enum:
                   - github.pull_request
                   - github.pull_request_merge
-                  - git.merge_push
+                  - git.push
                   - github.issue_comment
                   - jira.issue_comment
                   - s3.delete_object

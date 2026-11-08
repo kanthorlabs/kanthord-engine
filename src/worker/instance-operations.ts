@@ -1,21 +1,27 @@
 import assert from "node:assert/strict";
-import { isWorkerIdentity } from "../kernel/caller.ts";
+import type { Logger } from "pino";
+import type { HumanActor } from "../kernel/actor.ts";
+import { IdentityKind, isWorkerIdentity } from "../kernel/caller.ts";
 import type { OperationRegistry } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import type { HeldCopy } from "../custody/contract.ts";
 import type { CopyHealth } from "../llm/contract.ts";
-import type { ExecutionEnds } from "../mission/contract.ts";
 import {
   instanceOperations,
   type registrationRecordSchema,
 } from "./contract.ts";
 import type { HeartbeatClock } from "./heartbeat.ts";
-import type { WorkerInstances } from "./instances.ts";
+import {
+  type ArchiveResult,
+  INSTANCE_ARCHIVED_LOG,
+  type WorkerInstances,
+} from "./instances.ts";
 import type { RegistrationRow } from "./registration-rows.ts";
 
 export interface InstanceOperationDependencies {
   instances: WorkerInstances;
   heartbeatClock: HeartbeatClock;
+  logger: Logger;
   instancesChanged: () => void;
   registrationRecordOf: (
     tx: Transaction,
@@ -66,6 +72,7 @@ function declareHumanWrites(
   {
     instances,
     heartbeatClock,
+    logger,
     instancesChanged,
   }: InstanceOperationDependencies,
 ): void {
@@ -103,19 +110,43 @@ function declareHumanWrites(
   registry.register(
     instanceOperations["instance.archive"],
     ({ params, body }, caller) => {
-      let ended: string[] = [];
-      let executionEnds: ExecutionEnds[] = [];
-      const record = caller.commit((tx) => {
-        const result = instances.archive(tx, params.instance_name, body);
-        ended = result.ended;
-        executionEnds = result.executionEnds;
-        return result.record;
+      const identity = caller.identity;
+      assert.equal(identity?.kind, IdentityKind.Human);
+      const actor: HumanActor = {
+        kind: "human",
+        account: identity.accountId,
+        name: identity.name,
+      };
+      let result: ArchiveResult | undefined;
+      const answer = caller.commit((tx) => {
+        result = instances.archive(tx, params.instance_name, body, actor);
+        return result.stopping === null
+          ? result.record
+          : { ...result.record, stopping: result.stopping };
       });
-      instances.reportExecutionEnds(executionEnds);
-      instances.dropConnection(record.id);
-      dropEnded(heartbeatClock, ended);
+      assert.ok(result);
+      if (result.pending)
+        instances.beginPendingArchive(result.pending, result.orders);
+      if (result.stopping !== null) {
+        instancesChanged();
+        return answer;
+      }
+      logger.info(
+        {
+          operation: INSTANCE_ARCHIVED_LOG,
+          instance: params.instance_name,
+          actor: actor.name,
+          force: body.force === true,
+          execution_ids: result.executionIds,
+        },
+        INSTANCE_ARCHIVED_LOG,
+      );
+      instances.reportExecutionEnds(result.executionEnds);
+      instances.archiveReleased(result.executionEnds);
+      instances.dropConnection(result.record.id);
+      dropEnded(heartbeatClock, result.ended);
       instancesChanged();
-      return record;
+      return answer;
     },
   );
 }

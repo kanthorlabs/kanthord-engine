@@ -33,6 +33,7 @@ import { nodeRecord, requireNode } from "./node-read.ts";
 import { kindOfLabel } from "./finding-admit.ts";
 import {
   insertFinding,
+  markEarlierReportFindingsFixed,
   markFindingsFixed,
   routeOpenFixFindings,
 } from "./finding-store.ts";
@@ -61,8 +62,13 @@ function routeOf(
   current: boolean,
   reworkDue: boolean,
   intent: Intent,
+  proposed: ReadonlySet<string>,
 ): FindingRoute {
-  if (finding.action === FindingAction.No || !current)
+  if (
+    finding.action === FindingAction.No ||
+    !current ||
+    proposed.has(finding.label)
+  )
     return FindingRoute.Record;
   if (!reworkDue) return FindingRoute.Report;
   return intent === Intent.Implement ? FindingRoute.Fix : FindingRoute.Record;
@@ -144,6 +150,9 @@ export function submitAssessment(
           limit: reworkLimit,
         }
       : null;
+  const proposed = new Set(
+    body.proposals.flatMap((proposal) => proposal.finding_labels),
+  );
   for (const finding of body.findings)
     insertFinding(tx, {
       id: createIdentity(FINDING_IDENTITY_PREFIX),
@@ -158,7 +167,7 @@ export function submitAssessment(
       description: finding.description,
       fix: finding.fix,
       why: finding.why,
-      route: routeOf(finding, current, reworkDue, intent),
+      route: routeOf(finding, current, reworkDue, intent, proposed),
       fixed_assessment_id: null,
       cause_owner: null,
       created_by: null,
@@ -168,6 +177,12 @@ export function submitAssessment(
       decided_at: null,
     });
   if (current) markFindingsFixed(tx, body.fixed_finding_ids, assessment.id);
+  if (
+    current &&
+    body.result === AssessmentResult.Success &&
+    intent === Intent.Implement
+  )
+    markEarlierReportFindingsFixed(tx, node.id, attempt.attempt, assessment.id);
   if (current && !reworkDue)
     routeOpenFixFindings(tx, node.id, attempt.attempt, FindingRoute.Report);
   if (reworkDue) {
@@ -179,6 +194,7 @@ export function submitAssessment(
       RevokeCause.Assessment,
       body.cause ?? null,
       ends,
+      null,
     );
     transition(
       tx,
@@ -211,6 +227,7 @@ export function submitAssessment(
       RevokeCause.Assessment,
       body.cause ?? null,
       ends,
+      null,
     );
     closeAttempt(tx, node.id, attempt.attempt, now);
     outcome = insertOutcome(tx, {
@@ -260,7 +277,12 @@ export function submitAssessment(
   assert.equal(assessment.execution_id, claim.executionId);
   return {
     assessment: assessmentRecord(tx, dependencies, assessment),
-    node: nodeRecord(tx, requireNode(tx, node.id), dependencies.bindings),
+    node: nodeRecord(
+      tx,
+      requireNode(tx, node.id),
+      dependencies.bindings,
+      dependencies,
+    ),
     outcome:
       outcome === null
         ? null

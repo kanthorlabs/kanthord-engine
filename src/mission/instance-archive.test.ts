@@ -16,6 +16,9 @@ const FIRST_ATTEMPT = 1;
 const NO_CALLS = 0;
 const ONE_CALL = 1;
 const ENDED_AT = 500;
+const INSTANCE = "relay-a";
+const STOP_REASON = "instance_archived";
+const ACTOR = { kind: "human", account: "ulrich", name: "Ulrich" } as const;
 const INSERT = "workQueue.insert";
 const LOST = "schedulerClaims.executionsLost";
 const ACT = "acts.act";
@@ -29,6 +32,7 @@ function fixture(t: TestContext, claim: NodeState) {
   const executionId = createIdentity("execution");
   const execution = { ended_at: null as number | null };
   const reported: unknown[][] = [];
+  const stops: unknown[] = [];
   const claims = h.dependencies.schedulerClaims;
   claims.liveExecutionOf = (_tx, nodeId) =>
     nodeId === h.node_id && execution.ended_at === null
@@ -39,22 +43,28 @@ function fixture(t: TestContext, claim: NodeState) {
           pinned_revision: FIRST_ATTEMPT,
         }
       : null;
-  claims.revoke = (_tx, nodeId, now) => {
+  claims.revoke = (_tx, nodeId, now, stop) => {
     assert.equal(execution.ended_at, null);
     execution.ended_at = now;
-    return revokedExecution(executionId, nodeId, now);
+    stops.push(stop);
+    return {
+      ...revokedExecution(executionId, nodeId, now),
+      stop: stop ?? null,
+    };
   };
   claims.executionRevoked = (...args) => {
     reported.push(args);
   };
   h.store.transaction((tx) => setNodeState(tx, h.node_id, claim));
   const revoke = (id = executionId) =>
-    h.store.transaction((tx) => h.service.revokeForInstanceArchive(tx, id));
+    h.store.transaction((tx) =>
+      h.service.revokeForInstanceArchive(tx, id, INSTANCE, ACTOR),
+    );
   const jobs = () =>
     h.calls.filter(
       (call) => call.method === INSERT && call.arguments[1] === h.node_id,
     );
-  return { ...h, executionId, execution, reported, revoke, jobs };
+  return { ...h, executionId, execution, reported, stops, revoke, jobs };
 }
 
 for (const { claim, after } of KINDS) {
@@ -84,10 +94,32 @@ for (const { claim, after } of KINDS) {
   });
 }
 
+test("a forced archive of a live claim stores the stop instance_archived with the instance and the actor and counts no failure", (t) => {
+  const h = fixture(t, NodeState.Executing);
+  const failure = t.mock.method(h.service, "failure");
+  const ends = h.revoke();
+  assert.ok(ends);
+  assert.equal(h.stops.length, ONE_CALL);
+  const stop = h.stops[0] as { reason: string; code: null; detail: string };
+  assert.equal(stop.reason, STOP_REASON);
+  assert.equal(stop.code, null);
+  assert.deepEqual(JSON.parse(stop.detail), {
+    instance: INSTANCE,
+    actor: ACTOR.name,
+  });
+  assert.deepEqual(ends.revoked[0]!.execution.stop, stop);
+  assert.equal(failure.mock.callCount(), NO_CALLS);
+});
+
 test("the call answers the revoked claim with the human cause and reports nothing before the commit", (t) => {
   const h = fixture(t, NodeState.Executing);
   const ends = h.store.transaction((tx) => {
-    const ends = h.service.revokeForInstanceArchive(tx, h.executionId);
+    const ends = h.service.revokeForInstanceArchive(
+      tx,
+      h.executionId,
+      INSTANCE,
+      ACTOR,
+    );
     assert.equal(h.reported.length, NO_CALLS);
     return ends;
   });
@@ -155,4 +187,23 @@ test("a call for an unknown execution answers null", (t) => {
   assert.equal(h.revoke(createIdentity("execution")), null);
   assert.deepEqual(databaseSnapshot(h.store), before);
   assert.equal(h.execution.ended_at, null);
+});
+
+test("a forced archive of a Paused node with a kept claim revokes it with instance_archived and keeps Paused", (t) => {
+  const h = fixture(t, NodeState.Paused);
+  const jobs = h.jobs().length;
+  const ends = h.revoke();
+  assert.ok(ends);
+  assert.equal(h.node().state, NodeState.Paused);
+  assert.equal(h.stops.length, ONE_CALL);
+  const stop = h.stops[0] as { reason: string; code: null; detail: string };
+  assert.equal(stop.reason, STOP_REASON);
+  assert.deepEqual(JSON.parse(stop.detail), {
+    instance: INSTANCE,
+    actor: ACTOR.name,
+  });
+  assert.equal(ends.revoked.length, ONE_CALL);
+  assert.equal(ends.revoked[0]!.execution.execution_id, h.executionId);
+  assert.equal(h.jobs().length, jobs);
+  assert.equal(h.revoke(), null);
 });

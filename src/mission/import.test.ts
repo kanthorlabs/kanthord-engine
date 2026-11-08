@@ -1674,10 +1674,18 @@ for (const scenario of CONDITION_CASES) {
     );
     for (const value of violations) {
       assert.equal(value.code, MissionErrorCode.ConditionFailed);
-      assert.deepEqual(value.details, {
-        state: NodeState.Executing,
-        attempt: NO_ATTEMPT,
-      });
+      assert.deepEqual(
+        value.details,
+        value.message.startsWith("Import cannot retire")
+          ? { state: NodeState.Executing, attempt: NO_ATTEMPT }
+          : {
+              state: NodeState.Executing,
+              attempt: NO_ATTEMPT,
+              visible_revision: VERSION,
+              reason: REASON,
+              remedy: "mission export",
+            },
+      );
     }
   });
 }
@@ -1753,6 +1761,9 @@ for (const state of [NodeState.Pending, NodeState.Available]) {
     assert.deepEqual(violations[FIRST_ENTRY_INDEX]?.details, {
       state,
       attempt: FIRST_ATTEMPT,
+      visible_revision: VERSION,
+      reason: REASON,
+      remedy: "mission export",
     });
   });
 }
@@ -1793,13 +1804,126 @@ test("retiring a discarded node names the keep-file exit", (t) => {
   );
 });
 
-test("a content change of a node at attempt one keeps the condition message", (t) => {
+test("a content change of a node at attempt one names the export remedy", (t) => {
   assert.deepEqual(
     messagesAfter(t, NodeState.Pending, FIRST_ATTEMPT, (entries) =>
       change(entries, "a.md", { name: "Changed" }),
     ),
-    ["Node does not satisfy the import condition."],
+    [
+      "Node holds an attempt and its server revision differs. Run mission export and copy this node file into the plan.",
+    ],
   );
+});
+
+test("a changed file of a node with attempt one answers the visible revision, its reason and the remedy", (t) => {
+  const { store, mission, entries } = fixture(t);
+  const id = entries[FIRST_ENTRY_INDEX]!.id!;
+  store.database
+    .prepare("UPDATE mission_node SET state = ?, attempt = ? WHERE id = ?")
+    .run(NodeState.Executing, FIRST_ATTEMPT, id);
+  const { preview } = store.transaction((tx) =>
+    prepareImport(
+      tx,
+      mission,
+      snapshot(change(entries, "a.md", { name: "Changed" }), mission.id),
+      mission.id,
+      bindings,
+      environments,
+      TEXT_MAX_BYTES,
+    ),
+  );
+  assert.deepEqual(
+    preview.violations.map(({ code, message, node_id, details }) => ({
+      code,
+      message,
+      node_id,
+      details,
+    })),
+    [
+      {
+        code: MissionErrorCode.ConditionFailed,
+        message:
+          "Node holds an attempt and its server revision differs. Run mission export and copy this node file into the plan.",
+        node_id: id,
+        details: {
+          state: NodeState.Executing,
+          attempt: FIRST_ATTEMPT,
+          visible_revision: VERSION,
+          reason: REASON,
+          remedy: "mission export",
+        },
+      },
+    ],
+  );
+});
+
+function completedPreviews(t: TestContext) {
+  const { store, mission, entries } = fixture(t);
+  const id = entries[FIRST_ENTRY_INDEX]!.id!;
+  store.database
+    .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+    .run(NodeState.Completed, id);
+  const preview = (
+    transform: (value: NormalizedEntry[]) => NormalizedEntry[],
+  ) =>
+    store.transaction(
+      (tx) =>
+        prepareImport(
+          tx,
+          mission,
+          snapshot(transform(entries), mission.id),
+          mission.id,
+          bindings,
+          environments,
+          TEXT_MAX_BYTES,
+        ).preview,
+    );
+  return { id, preview };
+}
+
+test("a changed file of a Completed node answers one drift and no violation", (t) => {
+  const { id, preview } = completedPreviews(t);
+  const answer = preview((entries) =>
+    change(entries, "a.md", { name: "Changed" }),
+  );
+  assert.deepEqual(answer.violations, []);
+  assert.deepEqual(answer.updates, []);
+  assert.deepEqual(answer.drifts, [
+    { node_id: id, filename: "a.md", visible_revision: VERSION },
+  ]);
+});
+
+test("an unchanged file of a Completed node answers no drift", (t) => {
+  const { preview } = completedPreviews(t);
+  assert.deepEqual(preview((entries) => entries).drifts, []);
+});
+
+test("a drift does not change the preview digest", (t) => {
+  const { preview } = completedPreviews(t);
+  const drifted = preview((entries) =>
+    change(entries, "a.md", { name: "Changed" }),
+  );
+  const server = preview((entries) => entries);
+  assert.equal(drifted.drifts.length, SINGLE_ENTRY);
+  assert.equal(drifted.preview_digest, server.preview_digest);
+});
+
+test("the apply of a drifted Completed node writes nothing", (t) => {
+  const { store, apply, assigned, identified } = importer(t);
+  const first = apply(plan());
+  const id = assigned(first, "o.md");
+  store.database
+    .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+    .run(NodeState.Completed, id);
+  const again = apply(
+    identified(first).map((value) =>
+      value.filename === IMPLEMENT_FILENAME
+        ? { ...value, name: "Changed" }
+        : value,
+    ),
+  );
+  assert.deepEqual(again.changes.revisions, []);
+  assert.equal(again.mission_version, first.mission_version);
 });
 
 test("a new filename of a terminal node keeps the change message", (t) => {

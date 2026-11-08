@@ -6,6 +6,24 @@ import { SshAgentErrorCode } from "./ssh-agent.ts";
 
 export const GIT_DEADLINE_EXCEEDED = "Git deadline exceeded";
 
+export const PushRefusalKind = {
+  NonFastForward: "non_fast_forward",
+  Rule: "rule",
+} as const;
+export type PushRefusalKind =
+  (typeof PushRefusalKind)[keyof typeof PushRefusalKind];
+export interface PushRefusal {
+  kind: PushRefusalKind;
+  detail: string;
+}
+
+const NON_FAST_FORWARD_STDERR =
+  /! \[rejected\][^\n]*(fetch first|non-fast-forward)/;
+const RULE_REFUSAL_STDERR = /GH006|GH013|protected branch/;
+const GIT_EXIT_PREFIX = /^.*?git exited with \d+: /;
+const MAX_CAUSE_DEPTH = 8;
+const NO_CHARACTERS = 0;
+
 const GIT_FAILURE_LINES: readonly (readonly [RegExp, ResourceFailureReason])[] =
   [
     [
@@ -55,4 +73,37 @@ export function gitFailureReason(error: unknown): ResourceFailureReason {
   if (!(error instanceof Diagnostic) || !(error.cause instanceof Error))
     return ResourceFailureReason.Unclassified;
   return classifyGitFailure(error.cause.message);
+}
+
+function stderrOf(error: unknown): string {
+  let failure = error;
+  for (
+    let depth = 0;
+    depth < MAX_CAUSE_DEPTH && failure instanceof Error && failure.cause;
+    depth++
+  )
+    failure = failure.cause;
+  return failure instanceof Error ? failure.message : "";
+}
+
+function firstLineOf(stderr: string): string {
+  return (
+    stderr
+      .replace(GIT_EXIT_PREFIX, "")
+      .split("\n")
+      .find((line) => line.trim().length > NO_CHARACTERS)
+      ?.trim() ?? ""
+  );
+}
+
+export function pushRefusalOf(error: unknown): PushRefusal | null {
+  const stderr = stderrOf(error);
+  if (RULE_REFUSAL_STDERR.test(stderr))
+    return { kind: PushRefusalKind.Rule, detail: firstLineOf(stderr) };
+  if (NON_FAST_FORWARD_STDERR.test(stderr))
+    return {
+      kind: PushRefusalKind.NonFastForward,
+      detail: firstLineOf(stderr),
+    };
+  return null;
 }

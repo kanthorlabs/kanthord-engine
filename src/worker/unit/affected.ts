@@ -365,6 +365,15 @@ export function affectedFailureText(input: AffectedFailureInput): string {
   return `${head}. The run selected ${input.tests} test files, and ${input.failed.length} ${noun} failed: ${failedIdsText(input.failed)}. Each selected test imports a changed file directly or through other files. Change the code or the test so that every selected test passes.`;
 }
 
+export function affectedTimeoutText(
+  timeLimitS: number,
+  commit: string,
+  output: string,
+): string {
+  const head = `The affected tests reached their time limit of ${timeLimitS} s at ${commit}.`;
+  return output ? `${head}\n\n${output}` : head;
+}
+
 type CommandResult = CommandRun["result"];
 
 export interface BaseRunResult {
@@ -688,13 +697,6 @@ async function decide(
     prepared,
   );
   if (head === null) return { budgetEnd: true };
-  if ("failure" in head && head.failure.kind === HeadFailureKind.TimedOut)
-    throw environmentStop(EnvironmentFailure.AffectedTimeout, {
-      binding_id: checkout.binding_id,
-      commit: checkout.head,
-      command: declaration.command,
-      time_limit_s: head.failure.time_limit_s,
-    });
   const report = "report" in head ? head.report : null;
   const failedIds = report ? headFailed(report, files) : [];
   const result: AffectedRun = {
@@ -715,6 +717,16 @@ async function decide(
     failure_text: null,
   };
   if (report && failedIds.length === EMPTY_LENGTH) return result;
+  if ("failure" in head && head.failure.kind === HeadFailureKind.TimedOut)
+    return {
+      ...result,
+      verdict: AffectedVerdict.Failed,
+      failure_text: affectedTimeoutText(
+        head.failure.time_limit_s,
+        checkout.head,
+        result.output,
+      ),
+    };
   const base = await runBase(input, prepared);
   if (base === null) return { budgetEnd: true };
   if (!report && !("report" in base.outcome))

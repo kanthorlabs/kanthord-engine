@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { credentialSecrets } from "../../agent/hooks/sensitive-text-redaction.ts";
 import type { TestContext } from "node:test";
-import { appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { simpleGit } from "simple-git";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
@@ -44,13 +50,14 @@ import {
 } from "../contract.ts";
 import { RecordKind, type TelemetryRecord } from "../../tracking/contract.ts";
 import { AFFECTED_DECLARATION_FILE } from "./affected.ts";
-import { ExecutionBudget } from "./budget.ts";
+import { COMMAND_LIMIT_MS, ExecutionBudget } from "./budget.ts";
 import { SpanOperation, SpanRecorder } from "./telemetry.ts";
 import { openNativeAgent } from "./native-agent.ts";
 import { ExecutionRun, type MethodClaim } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import { prepareStepsWorkspace } from "./steps-implement.ts";
+import type { RefreshResult } from "./base-refresh.ts";
 import type { Verdict } from "./node-reads.ts";
 import type { VerificationFacts } from "./progress-rule.ts";
 import { doneTrailerOf } from "./done-record.ts";
@@ -361,6 +368,7 @@ async function openExecution(
     verdict: null as Verdict | null,
     cleared: null as string | null,
     unchangedTurns: 0,
+    refreshed: null as RefreshResult | null,
     lastVerification: null as VerificationFacts,
     revisionCount: 0,
     memo: new VerificationMemo(),
@@ -464,12 +472,19 @@ export function recordReleases(
 
 export function recordSpans(
   h: Awaited<ReturnType<typeof implementFixture>>,
+  observe?: (batch: readonly TelemetryRecord[]) => void,
 ): TelemetryRecord[] {
   const records: TelemetryRecord[] = [];
   (h.run as { spans: SpanRecorder }).spans = new SpanRecorder(
     h.run.claim,
     "coder-1",
-    { write: (batch) => records.push(...batch), flush: async () => {} },
+    {
+      write: (batch) => {
+        records.push(...batch);
+        observe?.(batch);
+      },
+      flush: async () => {},
+    },
   );
   return records;
 }
@@ -503,4 +518,39 @@ export function listedVerificationSpans(records: readonly TelemetryRecord[]) {
         ]
       : [],
   );
+}
+
+const COMMAND_START_WAIT_MS = 30000;
+
+async function tickCommandLimit(
+  t: TestContext,
+  startedMarker: string,
+): Promise<void> {
+  const giveUp = Date.now() + COMMAND_START_WAIT_MS;
+  while (!existsSync(startedMarker) && Date.now() < giveUp)
+    await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(existsSync(startedMarker), "the command started");
+  t.mock.timers.tick(COMMAND_LIMIT_MS);
+  t.mock.timers.reset();
+}
+
+export function commandLimitClock(t: TestContext, startedMarker: string) {
+  let ticked: Promise<void> | null = null;
+  return {
+    observe(batch: readonly TelemetryRecord[]): void {
+      const started = batch.some(
+        (record) =>
+          record.kind === RecordKind.Span &&
+          record.operation === SpanOperation.Verification &&
+          record.start_time !== undefined,
+      );
+      if (!started || ticked !== null) return;
+      t.mock.timers.enable({ apis: ["setTimeout"] });
+      ticked = tickCommandLimit(t, startedMarker);
+    },
+    async elapsed(): Promise<void> {
+      assert.ok(ticked, "a verification started");
+      await ticked;
+    },
+  };
 }

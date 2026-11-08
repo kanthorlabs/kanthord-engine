@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import type { z } from "zod";
+import type { HumanActor } from "../kernel/actor.ts";
 import { isHumanIdentity } from "../kernel/caller.ts";
+import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
@@ -15,6 +17,11 @@ import {
 } from "./contract.ts";
 import { isTerminal } from "./admission.ts";
 import { Act, type ActFacts, recordAct } from "./act-telemetry.ts";
+import {
+  holdsStepOne,
+  type PendingClose,
+  type PendingCloses,
+} from "./pending-close.ts";
 import type { ExecutionTrace } from "../tracking/contract.ts";
 import { objectContentSchema } from "./evidence-content-read.ts";
 import { requireTextBound } from "./execution.ts";
@@ -31,8 +38,11 @@ import {
 import {
   endLiveClaim,
   executionEnds,
+  HUMAN_PAUSED_STOP,
+  keptExecution,
   reportEnds,
   settleClaim,
+  stateConflict,
   transition,
 } from "./control.ts";
 import {
@@ -49,7 +59,10 @@ const NO_ATTEMPT = 0;
 
 export type EvidenceDelete = z.infer<typeof evidenceDeleteSchema>;
 
-function deletion(caller: CallerContext, body: EvidenceDelete) {
+function deletion(
+  caller: Pick<CallerContext, "identity">,
+  body: EvidenceDelete,
+) {
   assert.ok(isHumanIdentity(caller.identity));
   return {
     account: caller.identity.accountId,
@@ -113,7 +126,7 @@ export function prepareAssetDelete(
 
 export async function deleteObject(
   dependencies: Dependencies,
-  caller: CallerContext,
+  caller: Pick<CallerContext, "context" | "identity">,
   asset: AssetRow,
 ): Promise<void> {
   assert.ok(caller.identity);
@@ -171,19 +184,44 @@ export function prepareEvidenceDelete(
   return { evidence, node, mission, assets: readAssets(tx, evidenceId) };
 }
 
+function holdsOpenAttempt(
+  tx: Transaction,
+  body: EvidenceDelete,
+  evidence: NonNullable<ReturnType<typeof readEvidence>>,
+  node: NodeRow,
+): boolean {
+  return (
+    body.force &&
+    evidence.requirement_key !== null &&
+    readOpenAttempt(tx, node.id)?.attempt === evidence.attempt &&
+    node.state !== NodeState.Paused &&
+    !isTerminal(node.state)
+  );
+}
+
 export async function removeEvidence(
   dependencies: Dependencies,
   caller: CallerContext,
   evidenceId: string,
   body: EvidenceDelete,
+  actor: HumanActor,
+  closes: PendingCloses,
 ) {
-  const prepared = dependencies.store.transaction((tx) =>
-    prepareEvidenceDelete(tx, dependencies, evidenceId, body),
-  );
-  for (const asset of prepared.assets)
-    await deleteObject(dependencies, caller, asset);
+  const prepared = dependencies.store.transaction((tx) => {
+    const found = prepareEvidenceDelete(tx, dependencies, evidenceId, body);
+    const held =
+      holdsOpenAttempt(tx, body, found.evidence, found.node) &&
+      keptExecution(tx, dependencies, found.node, Date.now()) !== null;
+    return { ...found, held };
+  });
+  if (!prepared.held)
+    for (const asset of prepared.assets)
+      await deleteObject(dependencies, caller, asset);
   const ends = executionEnds();
-  let facts: ActFacts | null = null;
+  const kept: {
+    facts: ActFacts | null;
+    held: { execution_id: string; runtime_identity: string } | null;
+  } = { facts: null, held: null };
   const result = caller.commit((tx) => {
     const now = Date.now();
     const { evidence, node, mission } = prepareEvidenceDelete(
@@ -192,34 +230,32 @@ export async function removeEvidence(
       evidenceId,
       body,
     );
-    const hold =
-      body.force &&
-      evidence.requirement_key !== null &&
-      readOpenAttempt(tx, node.id)?.attempt === evidence.attempt &&
-      node.state !== NodeState.Paused &&
-      !isTerminal(node.state);
-    deleteEvidence(tx, evidenceId);
+    const hold = holdsOpenAttempt(tx, body, evidence, node);
     let from = node.state;
     let revoked: ExecutionTrace | null = null;
     if (hold) {
       settleClaim(tx, dependencies.schedulerClaims, node.id, now, ends);
       const settled = requireNode(tx, node.id);
       from = settled.state;
-      revoked =
-        endLiveClaim(
-          tx,
-          dependencies,
-          settled,
-          now,
-          RevokeCause.Human,
-          null,
-          ends,
-        )?.execution.trace ?? null;
+      kept.held = keptExecution(tx, dependencies, settled, now);
+      if (kept.held === null)
+        revoked =
+          endLiveClaim(
+            tx,
+            dependencies,
+            settled,
+            now,
+            RevokeCause.Human,
+            null,
+            ends,
+            HUMAN_PAUSED_STOP,
+          )?.execution.trace ?? null;
       transition(tx, dependencies, mission, settled, NodeState.Paused, now);
     }
+    if (kept.held === null) deleteEvidence(tx, evidenceId);
     const current = requireNode(tx, node.id);
     assert.ok(from && current.state);
-    facts = {
+    kept.facts = {
       project_id: mission.project_id,
       node_id: node.id,
       attempt: current.attempt ?? NO_ATTEMPT,
@@ -234,13 +270,101 @@ export async function removeEvidence(
     };
     return null;
   });
+  const { facts, held } = kept;
   assert.ok(facts);
   reportEnds(dependencies, ends);
+  const trace = recordAct(dependencies, Act.DeleteEvidence, facts);
+  if (held === null)
+    dependencies.logger.info(
+      { evidence_id: evidenceId, ...deletion(caller, body) },
+      "evidence deleted",
+    );
+  else {
+    assert.ok(caller.identity);
+    closes.add({
+      act: Act.DeleteEvidence,
+      execution_id: held.execution_id,
+      node_id: facts.node_id,
+      attempt: facts.attempt,
+      actor,
+      trace,
+      body,
+      evidence_id: evidenceId,
+      identity: caller.identity,
+    });
+    dependencies.workerStopOrders.sendStopOrder(
+      held.execution_id,
+      held.runtime_identity,
+      "human_paused",
+    );
+  }
+  dependencies.wakeup.wake(prepared.mission.project_id);
+  return result;
+}
+
+type PendingEvidenceDelete = Extract<
+  PendingClose,
+  { act: typeof Act.DeleteEvidence }
+>;
+
+function currentBody(
+  tx: Transaction,
+  pending: PendingEvidenceDelete,
+): EvidenceDelete {
+  const node = requireNode(tx, pending.node_id);
+  return {
+    ...pending.body,
+    expected_mission_version: requireMission(tx, node.mission_id).version,
+  };
+}
+
+export async function finishEvidenceDelete(
+  dependencies: Dependencies,
+  pending: PendingEvidenceDelete,
+): Promise<void> {
+  const caller = {
+    context: dependencies.shutdown ?? background,
+    identity: pending.identity,
+  };
+  const prepared = dependencies.store.transaction((tx) =>
+    prepareEvidenceDelete(
+      tx,
+      dependencies,
+      pending.evidence_id,
+      currentBody(tx, pending),
+    ),
+  );
+  for (const asset of prepared.assets)
+    await deleteObject(dependencies, caller, asset);
+  const now = Date.now();
+  const facts = dependencies.store.transaction((tx) => {
+    if (!holdsStepOne(tx, pending))
+      stateConflict(requireNode(tx, pending.node_id));
+    prepareEvidenceDelete(
+      tx,
+      dependencies,
+      pending.evidence_id,
+      currentBody(tx, pending),
+    );
+    deleteEvidence(tx, pending.evidence_id);
+    return {
+      project_id: prepared.mission.project_id,
+      node_id: pending.node_id,
+      attempt: pending.attempt,
+      acted_at: now,
+      mission_version: requireMission(tx, prepared.mission.id).version,
+      from: NodeState.Paused,
+      to: NodeState.Paused,
+      reason: pending.body.reason ?? null,
+      revoked: null,
+      evidence_id: pending.evidence_id,
+      lead_time_ms: null,
+    };
+  });
   recordAct(dependencies, Act.DeleteEvidence, facts);
   dependencies.logger.info(
-    { evidence_id: evidenceId, ...deletion(caller, body) },
+    { evidence_id: pending.evidence_id, ...deletion(caller, pending.body) },
     "evidence deleted",
   );
   dependencies.wakeup.wake(prepared.mission.project_id);
-  return result;
 }

@@ -26,6 +26,7 @@ import {
 } from "../kernel/context.ts";
 import { RepositoryFileState } from "./contract.ts";
 import {
+  BaseMovedError,
   changedGateFiles,
   clone,
   cloneSnapshot,
@@ -37,12 +38,12 @@ import {
   GitWriteError,
   landedOn,
   listFilesAtCommit,
-  mergePushFresh,
   pushNodeBranch,
   pushSnapshotFresh,
   readFilesAtCommit,
   readObjectIds,
   resolveBranchCommit,
+  squashPushFresh,
 } from "./connector.ts";
 import { CheckEndState, ExpectedEndState } from "./github.ts";
 import { isString } from "../kernel/values.ts";
@@ -229,7 +230,7 @@ suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(process.env.GIT_SSH, undefined);
   });
 
-  test("fetchAndCheckout keeps the unpushed commits of the local node branch when the remote node branch is missing", async (t) => {
+  test("fetchAndCheckout starts from origin/<base>, not the unpushed commits of the local node branch, when the remote node branch is missing", async (t) => {
     const root = temporary(t);
     const origin = join(root, "origin");
     const seed = join(root, "seed");
@@ -252,7 +253,8 @@ suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
       ]);
       return (await simpleGit(directory).revparse(["HEAD"])).trim();
     };
-    const base = await commit(seed, "base");
+    const baseContent = "base";
+    const base = await commit(seed, baseContent);
     await simpleGit(seed).addRemote("origin", origin);
     await simpleGit(seed).push("origin", "main");
     const branch = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
@@ -275,8 +277,7 @@ suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
       ),
       base,
     );
-    const unpushedContent = "unpushed";
-    const unpushed = await commit(workspace, unpushedContent);
+    await commit(workspace, "unpushed");
     writeFileSync(join(workspace, "untracked"), "scratch");
     assert.equal(
       await fetchAndCheckout(
@@ -288,12 +289,9 @@ suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
         DEADLINE_MS,
         LOCAL_GIT_SSH_ACCESS,
       ),
-      unpushed,
+      base,
     );
-    assert.equal(
-      readFileSync(join(workspace, "file"), "utf8"),
-      unpushedContent,
-    );
+    assert.equal(readFileSync(join(workspace, "file"), "utf8"), baseContent);
     assert.deepEqual(readdirSync(workspace).sort(), [".git", "file"]);
   });
 });
@@ -302,8 +300,8 @@ const GIT_FAILED = "repository.connector.git_failed";
 const SHORT_TEMPORARY_ROOT = "/tmp";
 const NODE_BRANCH = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const BASE_BRANCH = "main";
-const MERGE_SIGNATURE =
-  "kanthord <kanthord@localhost> kanthord <kanthord@localhost>";
+const NODE_ID = "node_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const HEADER = "feat: ship accounts";
 const IDENTITY = ["-c", "user.name=Test", "-c", "user.email=t@example.invalid"];
 
 interface Remote {
@@ -539,60 +537,73 @@ test("every git caller ignores the global git configuration of the host", async 
   );
 });
 
-test("mergePushFresh lands a merge commit whose second parent is the snapshot", async (t) => {
+function squashInput(origin: string, commit: string, node_id = NODE_ID) {
+  return {
+    address: origin,
+    base_branch: BASE_BRANCH,
+    commit,
+    node_id,
+    header: HEADER,
+  };
+}
+
+test("squashPushFresh lands one commit with the assessed tree, the base tip as parent and both trailers", async (t) => {
   const { origin, base, snapshot, scratch, head } = await remote(t);
-  const { commit } = await mergePushFresh(
-    { address: origin, base_branch: BASE_BRANCH, commit: snapshot },
+  const { commit } = await squashPushFresh(
+    squashInput(origin, snapshot),
     background,
     deadlineAt(),
     LOCAL_GIT_SSH_ACCESS,
   );
   assert.equal(await head(BASE_BRANCH), commit);
-  const parents = await simpleGit(origin).raw(["rev-parse", `${commit}^@`]);
-  assert.deepEqual(parents.trim().split("\n"), [base, snapshot]);
-  const author = await simpleGit(origin).raw([
-    "log",
-    "-1",
-    "--format=%an <%ae> %cn <%ce>",
-    commit,
-  ]);
-  assert.equal(author.trim(), MERGE_SIGNATURE);
+  const git = simpleGit(origin);
+  assert.equal(
+    (await git.raw(["rev-parse", `${commit}^{tree}`])).trim(),
+    (await git.raw(["rev-parse", `${snapshot}^{tree}`])).trim(),
+  );
+  assert.equal((await git.raw(["rev-parse", `${commit}^@`])).trim(), base);
+  assert.equal(
+    (await git.raw(["log", "-1", "--format=%B", commit])).trim(),
+    `${HEADER}\n\nKanthorD-Node: ${NODE_ID}\nKanthorD-Tested: ${snapshot}`,
+  );
+  const author = (
+    await git.raw(["log", "-1", "--format=%an <%ae>", snapshot])
+  ).trim();
+  assert.equal(
+    (
+      await git.raw(["log", "-1", "--format=%an <%ae> %cn <%ce>", commit])
+    ).trim(),
+    `${author} ${author}`,
+  );
   assertNoClone(scratch);
 });
 
-test("mergePushFresh throws before_push on a conflict and leaves the base unchanged", async (t) => {
-  const { origin, seed, scratch, commit, head } = await remote(t);
-  await simpleGit(seed).raw(["checkout", NODE_BRANCH]);
-  const conflicting = await commit("base", "node side");
-  await simpleGit(seed).push("origin", NODE_BRANCH);
-  await simpleGit(seed).raw(["checkout", BASE_BRANCH]);
-  await commit("base", "base side");
+test("squashPushFresh throws BaseMovedError and pushes nothing when the base moved after the assessment", async (t) => {
+  const { origin, seed, scratch, snapshot, commit, head } = await remote(t);
+  await commit("other", "base side");
   await simpleGit(seed).push("origin", BASE_BRANCH);
   const before = await head(BASE_BRANCH);
   await assert.rejects(
-    mergePushFresh(
-      { address: origin, base_branch: BASE_BRANCH, commit: conflicting },
+    squashPushFresh(
+      squashInput(origin, snapshot),
       background,
       deadlineAt(),
       LOCAL_GIT_SSH_ACCESS,
     ),
-    (error) =>
-      error instanceof GitWriteError &&
-      error.stage === GitStage.BeforePush &&
-      error.code === GIT_FAILED,
+    (error) => error instanceof BaseMovedError,
   );
   assert.equal(await head(BASE_BRANCH), before);
   assertNoClone(scratch);
 });
 
-test("mergePushFresh throws push when the remote rejects the push", async (t) => {
+test("squashPushFresh throws push when the remote rejects the push", async (t) => {
   const { origin, base, snapshot, scratch, head } = await remote(t);
   writeFileSync(join(origin, "hooks", "pre-receive"), "#!/bin/sh\nexit 1\n", {
     mode: 0o755,
   });
   await assert.rejects(
-    mergePushFresh(
-      { address: origin, base_branch: BASE_BRANCH, commit: snapshot },
+    squashPushFresh(
+      squashInput(origin, snapshot),
       background,
       deadlineAt(),
       LOCAL_GIT_SSH_ACCESS,
@@ -658,8 +669,8 @@ test("a missing temporary directory throws before_push for both git writes", asy
     error.stage === GitStage.BeforePush &&
     error.code === GIT_FAILED;
   await assert.rejects(
-    mergePushFresh(
-      { address: origin, base_branch: BASE_BRANCH, commit: snapshot },
+    squashPushFresh(
+      squashInput(origin, snapshot),
       background,
       deadlineAt(),
       LOCAL_GIT_SSH_ACCESS,
@@ -680,8 +691,43 @@ test("a missing temporary directory throws before_push for both git writes", asy
 
 test("landedOn answers the oldest first-parent commit that contains the snapshot", async (t) => {
   const { origin, seed, snapshot, scratch, commit } = await remote(t);
-  const { commit: merge } = await mergePushFresh(
-    { address: origin, base_branch: BASE_BRANCH, commit: snapshot },
+  await simpleGit(seed).raw([
+    ...IDENTITY,
+    "merge",
+    "--no-ff",
+    "-m",
+    "merge",
+    snapshot,
+  ]);
+  const merge = (await simpleGit(seed).revparse(["HEAD"])).trim();
+  await simpleGit(seed).push("origin", BASE_BRANCH);
+  await commit("later", "later");
+  await simpleGit(seed).push("origin", BASE_BRANCH);
+  assert.deepEqual(
+    await landedOn(
+      { address: origin, branch: BASE_BRANCH, commit: snapshot },
+      background,
+      deadlineAt(),
+      LOCAL_GIT_SSH_ACCESS,
+    ),
+    { landed: true, first_parent: merge, base_moved: false },
+  );
+  assert.deepEqual(
+    await landedOn(
+      { address: origin, branch: NODE_BRANCH, commit: snapshot },
+      background,
+      deadlineAt(),
+      LOCAL_GIT_SSH_ACCESS,
+    ),
+    { landed: true, first_parent: snapshot, base_moved: false },
+  );
+  assertNoClone(scratch);
+});
+
+test("landedOn finds the squash commit by its KanthorD-Tested trailer", async (t) => {
+  const { origin, seed, snapshot, scratch, commit } = await remote(t);
+  const { commit: squashed } = await squashPushFresh(
+    squashInput(origin, snapshot),
     background,
     deadlineAt(),
     LOCAL_GIT_SSH_ACCESS,
@@ -696,24 +742,31 @@ test("landedOn answers the oldest first-parent commit that contains the snapshot
       deadlineAt(),
       LOCAL_GIT_SSH_ACCESS,
     ),
-    { landed: true, first_parent: merge },
+    { landed: true, first_parent: squashed, base_moved: false },
   );
+  assertNoClone(scratch);
+});
+
+test("landedOn answers base_moved when the base is not an ancestor of the commit", async (t) => {
+  const { origin, seed, snapshot, scratch, commit } = await remote(t);
+  await commit("other", "base side");
+  await simpleGit(seed).push("origin", BASE_BRANCH);
   assert.deepEqual(
     await landedOn(
-      { address: origin, branch: NODE_BRANCH, commit: snapshot },
+      { address: origin, branch: BASE_BRANCH, commit: snapshot },
       background,
       deadlineAt(),
       LOCAL_GIT_SSH_ACCESS,
     ),
-    { landed: true, first_parent: snapshot },
+    { landed: false, first_parent: null, base_moved: true },
   );
   assertNoClone(scratch);
 });
 
 test("landedOn answers landed false for a rewritten branch", async (t) => {
   const { origin, base, snapshot, scratch } = await remote(t);
-  await mergePushFresh(
-    { address: origin, base_branch: BASE_BRANCH, commit: snapshot },
+  await squashPushFresh(
+    squashInput(origin, snapshot),
     background,
     deadlineAt(),
     LOCAL_GIT_SSH_ACCESS,
@@ -730,7 +783,7 @@ test("landedOn answers landed false for a rewritten branch", async (t) => {
       deadlineAt(),
       LOCAL_GIT_SSH_ACCESS,
     ),
-    { landed: false, first_parent: null },
+    { landed: false, first_parent: null, base_moved: false },
   );
   assertNoClone(scratch);
 });
@@ -768,8 +821,8 @@ test("an abort ends every git write and the landing read", async (t) => {
   const context = new CancellationContext();
   context.cancel();
   await assert.rejects(
-    mergePushFresh(
-      { address: origin, base_branch: BASE_BRANCH, commit: snapshot },
+    squashPushFresh(
+      squashInput(origin, snapshot),
       context,
       deadlineAt(),
       LOCAL_GIT_SSH_ACCESS,
@@ -795,8 +848,8 @@ test("an abort ends every git write and the landing read", async (t) => {
     (error) => error === context.signal.reason,
   );
   await assert.rejects(
-    mergePushFresh(
-      { address: origin, base_branch: BASE_BRANCH, commit: snapshot },
+    squashPushFresh(
+      squashInput(origin, snapshot),
       background,
       Date.now(),
       LOCAL_GIT_SSH_ACCESS,
@@ -808,40 +861,45 @@ test("an abort ends every git write and the landing read", async (t) => {
   assertNoClone(scratch);
 });
 
-test("foldBranchPush folds a landing against base_branch_pushed", () => {
+test("foldBranchPush answers expected with the landed commit, conflict for a moved base and none otherwise", () => {
   const commit = "a".repeat(40);
-  assert.deepEqual(
-    foldBranchPush(true, commit, ExpectedEndState.BaseBranchPushed, false),
-    { end_state: CheckEndState.Expected, landed_commits: [commit] },
-  );
-  assert.deepEqual(
-    foldBranchPush(false, commit, ExpectedEndState.BaseBranchPushed, false),
-    { end_state: CheckEndState.Other, landed_commits: [] },
-  );
-});
-
-test("foldBranchPush answers none for a human landing that did not land", () => {
-  const commit = "a".repeat(40);
-  assert.deepEqual(
-    foldBranchPush(false, commit, ExpectedEndState.BaseBranchPushed, true),
-    { end_state: CheckEndState.None, landed_commits: [] },
-  );
-  assert.deepEqual(
-    foldBranchPush(true, commit, ExpectedEndState.BaseBranchPushed, true),
-    { end_state: CheckEndState.Expected, landed_commits: [commit] },
-  );
-});
-
-test("the check folds that address to pull_request_merged with the landed commit", () => {
-  const commit = "a".repeat(40);
-  assert.deepEqual(
-    foldBranchPush(true, commit, ExpectedEndState.PullRequestMerged, false),
-    { end_state: CheckEndState.Expected, landed_commits: [commit] },
-  );
-  assert.deepEqual(
-    foldBranchPush(false, commit, ExpectedEndState.PullRequestMerged, false),
-    { end_state: CheckEndState.Other, landed_commits: [] },
-  );
+  for (const expected of [
+    ExpectedEndState.BaseBranchPushed,
+    ExpectedEndState.PullRequestMerged,
+  ]) {
+    assert.deepEqual(
+      foldBranchPush(
+        { landed: true, first_parent: commit, base_moved: false },
+        expected,
+        false,
+      ),
+      { end_state: CheckEndState.Expected, landed_commits: [commit] },
+    );
+    assert.deepEqual(
+      foldBranchPush(
+        { landed: false, first_parent: null, base_moved: true },
+        expected,
+        false,
+      ),
+      { end_state: CheckEndState.Conflict, landed_commits: [] },
+    );
+    assert.deepEqual(
+      foldBranchPush(
+        { landed: false, first_parent: null, base_moved: true },
+        expected,
+        true,
+      ),
+      { end_state: CheckEndState.None, landed_commits: [] },
+    );
+    assert.deepEqual(
+      foldBranchPush(
+        { landed: false, first_parent: null, base_moved: false },
+        expected,
+        false,
+      ),
+      { end_state: CheckEndState.None, landed_commits: [] },
+    );
+  }
 });
 
 const INSTRUCTION_PATHS = [

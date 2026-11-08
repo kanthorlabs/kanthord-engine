@@ -14,13 +14,14 @@ import {
   type CancellationContext,
   DeadlineExceeded,
 } from "../../kernel/context.ts";
-import { ExecutionBudget } from "./budget.ts";
+import { COMMAND_LIMIT_MS, ExecutionBudget } from "./budget.ts";
 import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
 import { ExecutionIntent } from "../contract.ts";
 import {
   affectedCommand,
   anthropicSetup,
+  commandLimitClock,
   everyBindingSshAccess,
   transport as localTransport,
   repositorySetup,
@@ -38,10 +39,12 @@ import {
 } from "./evaluation.ts";
 import { SetupEnd } from "./environment-setup.ts";
 import { VerificationClass } from "./verification.ts";
+import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import { ActionResultKind } from "../contract.ts";
 import {
   AssessmentResult,
   AssetKind,
+  FINDING_MAX,
   INLINE_BYTES_MAX,
   type ReviewRound,
 } from "../../mission/contract.ts";
@@ -65,7 +68,10 @@ import { EvaluationAttribute } from "./method-telemetry.ts";
 import { EvaluationStage } from "./evaluation.ts";
 import { JUDGEMENT_MARKER, repairInstruction } from "./judgement.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
-import { VERIFICATION_INFRASTRUCTURE_FAILED } from "./verification.ts";
+import {
+  VERIFICATION_INFRASTRUCTURE_FAILED,
+  VERIFICATION_RERUNS,
+} from "./verification.ts";
 
 const NO_RELEASES = 0;
 const SINGLE_RELEASE = 1;
@@ -254,7 +260,7 @@ test("evaluation writes failed-verification assessments without inference and ga
       result: "undetermined",
       opens: 1,
       examine: true,
-      proposals: [PROPOSAL],
+      proposals: [{ ...PROPOSAL, finding_labels: [] }],
     },
     {
       command: "true",
@@ -645,6 +651,8 @@ interface ReviewOptions {
   transport?: RepositoryTransport;
   round?: ReviewRound;
   answer?: unknown;
+  lifetimeMs?: number;
+  observe?: (batch: readonly TelemetryRecord[]) => void;
 }
 
 async function reviewOf(
@@ -674,7 +682,7 @@ async function reviewOf(
     pinned_revision: 1,
     node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
     created_at: Date.now(),
-    expired_at: Date.now() + 60000,
+    expired_at: Date.now() + (options.lifetimeMs ?? 60000),
     trace_id: "trace",
     root_span_id: "1".repeat(16),
   };
@@ -800,7 +808,10 @@ async function reviewOf(
     credentials: { release: async () => {} },
     context: background,
     telemetry: {
-      write: (batch) => records.push(...batch),
+      write: (batch) => {
+        records.push(...batch);
+        options.observe?.(batch);
+      },
       flush: async () => {},
     },
   });
@@ -875,6 +886,33 @@ test("a persistent kill in a review verification stops with the infrastructure c
   }
 });
 
+test("a review verification at the command limit stops with verification_timeout and submits no assessment", async (t) => {
+  const marker = join(temporary(t), "started");
+  const command = `touch ${marker}; sleep 1000`;
+  const clock = commandLimitClock(t, marker);
+  const review = await reviewOf(t, command, COMMAND_LIMIT_MS * 2, {
+    lifetimeMs: COMMAND_LIMIT_MS * 2,
+    observe: (batch) => clock.observe(batch),
+  });
+  await clock.elapsed();
+  assert.deepEqual(review.assessments, []);
+  assert.equal(review.opens(), NO_OPENS);
+  assert.equal(review.releases.length, SINGLE_RELEASE);
+  const [body] = review.releases as {
+    further_work: boolean;
+    stop: { reason: string; code: string; detail: string };
+  }[];
+  assert.equal(body?.further_work, true);
+  assert.equal(body?.stop.reason, EndReason.EnvironmentFailed);
+  assert.equal(body?.stop.code, EnvironmentFailure.VerificationTimeout);
+  assert.deepEqual(JSON.parse(body?.stop.detail ?? ""), {
+    index: 0,
+    limit_ms: COMMAND_LIMIT_MS,
+    exit_code: null,
+    command,
+  });
+});
+
 test("a kill on the first review run and a pass on the rerun is a pass and not flaky", async (t) => {
   const marker = join(temporary(t), "killed");
   const review = await reviewOf(
@@ -892,6 +930,123 @@ test("a kill on the first review run and a pass on the rerun is a pass and not f
   assert.equal(review.assessments.length, SINGLE_RELEASE);
   assert.equal(review.assessments[0]?.result, AssessmentResult.Success);
   assert.doesNotMatch(review.assessments[0]?.rationale ?? "", /flaky/);
+});
+
+test("a review verification that passes on the last rerun of VERIFICATION_RERUNS is a pass", async (t) => {
+  const count = join(temporary(t), "count");
+  const review = await reviewOf(
+    t,
+    `echo x >> ${count}; test $(wc -l < ${count}) -gt ${VERIFICATION_RERUNS}`,
+  );
+  assert.deepEqual(review.end, { kind: "closed", outcomeId: "outcome" });
+  assert.deepEqual(
+    review.verifications.map((verification) =>
+      verification.results.map((result) => result.exit_code),
+    ),
+    [[PASSED]],
+  );
+  assert.equal(
+    readFileSync(count, "utf8").trim().split("\n").length,
+    VERIFICATION_RERUNS + 1,
+  );
+});
+
+const FLAKY_NAME = "Flaky verification";
+
+function flakyCommand(marker: string): string {
+  return `test -f ${marker} || { touch ${marker}; echo flaky-output; exit 1; }`;
+}
+
+function suggestionReply(labels: readonly string[]): string {
+  return `${JUDGEMENT_MARKER} ${JSON.stringify({
+    result: "success",
+    rationale: "met",
+    findings: labels.map((label) => ({
+      label,
+      action: "yes",
+      task_id: null,
+      ground: null,
+      name: "Suggestion",
+      description: "A suggestion.",
+      fix: "Change it.",
+      why: "It helps.",
+    })),
+  })}`;
+}
+
+test("a flaky review verification reaches the judgement and records one Flaky verification finding", async (t) => {
+  const marker = join(temporary(t), "flaky");
+  const command = flakyCommand(marker);
+  const review = await reviewOf(t, command);
+  assert.deepEqual(review.end, { kind: "closed", outcomeId: "outcome" });
+  assert.equal(review.opens(), ONE_OPEN);
+  assert.deepEqual(
+    review.verifications.map((verification) =>
+      verification.results.map((result) => result.exit_code),
+    ),
+    [[PASSED]],
+  );
+  const [assessment] = review.assessments;
+  assert.equal(assessment?.result, AssessmentResult.Success);
+  assert.equal(assessment?.findings.length, SINGLE_RELEASE);
+  const description = (assessment?.findings[0] as { description: string })
+    .description;
+  assert.deepEqual(assessment?.findings[0], {
+    label: "S1",
+    action: "no",
+    task_id: null,
+    ground: null,
+    name: FLAKY_NAME,
+    description,
+    fix: "Make the failed test deterministic in a separate node.",
+    why: "The command passed on a rerun of the same commit, so the failure is not caused by this change.",
+  });
+  assert.ok(description.includes(`Verification 1 \`${command}\``));
+  assert.match(description, /flaky-output/);
+});
+
+test("the Flaky verification label follows the highest suggestion label of the judgement", async (t) => {
+  const review = await reviewOf(
+    t,
+    flakyCommand(join(temporary(t), "flaky")),
+    undefined,
+    {
+      reply: suggestionReply(["S1", "S4"]),
+    },
+  );
+  const labels = review.assessments[0]?.findings.map(
+    (finding) => (finding as { label: string }).label,
+  );
+  assert.deepEqual(labels, ["S1", "S4", "S5"]);
+});
+
+test("a judgement with FINDING_MAX findings puts the flaky description into the rationale", async (t) => {
+  const labels = Array.from(
+    { length: FINDING_MAX },
+    (_, index) => `S${index + 1}`,
+  );
+  const review = await reviewOf(
+    t,
+    flakyCommand(join(temporary(t), "flaky")),
+    undefined,
+    {
+      reply: suggestionReply(labels),
+    },
+  );
+  const [assessment] = review.assessments;
+  assert.equal(assessment?.findings.length, FINDING_MAX);
+  assert.match(
+    assessment?.rationale ?? "",
+    /Verification 1 `.*` failed and passed on a rerun/,
+  );
+  assert.match(assessment?.rationale ?? "", /flaky-output/);
+});
+
+test("a review verification that fails on every rerun stays criterion-not-met at the verification stage", async (t) => {
+  const review = await reviewOf(t, "echo always-failing; exit 1");
+  assert.equal(review.opens(), NO_OPENS);
+  assert.equal(review.assessments[0]?.result, AssessmentResult.CriterionNotMet);
+  assert.deepEqual(review.assessments[0]?.findings, []);
 });
 
 test("exit 127 in a review verification stays criterion-not-met", async (t) => {
@@ -940,6 +1095,7 @@ test("a node-head setup failure of a review is criterion-not-met and names the s
       },
       outputs: ["npm ERR! missing lockfile"],
       flaky: [false],
+      flaky_failures: [],
       outcome: VerificationClass.CodeFailure,
     },
   });
@@ -1270,6 +1426,38 @@ test("an affected test that fails at the head and passes at the base answers cri
     "snapshot",
     "placed",
   ]);
+  const attributes = evaluationEndOf(review.records).attributes;
+  assert.equal(attributes[EvaluationAttribute.Stage], EvaluationStage.Affected);
+  assert.equal(
+    attributes[EvaluationAttribute.Affected],
+    AffectedVerdict.Failed,
+  );
+});
+
+test("an affected command that reaches its time limit at the head answers criterion-not-met at the stage affected with no agent turn", async (t) => {
+  const marker = join(temporary(t), "affected-started");
+  const clock = commandLimitClock(t, marker);
+  const review = await reviewOf(t, "true", COMMAND_LIMIT_MS * 2, {
+    ...(await affectedSnapshot(
+      t,
+      `echo hung-output; touch ${marker}; sleep 1000`,
+      "changed",
+    )),
+    lifetimeMs: COMMAND_LIMIT_MS * 2,
+    observe: (batch) => clock.observe(batch),
+  });
+  await clock.elapsed();
+  assert.equal(review.opens(), NO_OPENS);
+  assert.equal(review.instructions.length, NO_OPENS);
+  const [assessment] = review.assessments;
+  assert.equal(assessment?.result, AssessmentResult.CriterionNotMet);
+  assert.match(
+    assessment?.rationale ?? "",
+    new RegExp(
+      `^The affected tests reached their time limit of ${COMMAND_LIMIT_MS / 1000} s at [0-9a-f]{40}\\.`,
+    ),
+  );
+  assert.match(assessment?.rationale ?? "", /hung-output/);
   const attributes = evaluationEndOf(review.records).attributes;
   assert.equal(attributes[EvaluationAttribute.Stage], EvaluationStage.Affected);
   assert.equal(

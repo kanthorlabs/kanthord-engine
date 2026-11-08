@@ -163,6 +163,9 @@ components:
                           base_branch:
                             type: string
                             minLength: 1
+                          upstream_branch:
+                            type: string
+                            minLength: 1
                           action:
                             type: object
                             properties:
@@ -170,7 +173,7 @@ components:
                                 type: string
                                 enum:
                                   - pull_request
-                                  - merge_push
+                                  - push
                               follows:
                                 oneOf:
                                   - type: object
@@ -640,6 +643,9 @@ components:
                               base_branch:
                                 type: string
                                 minLength: 1
+                              upstream_branch:
+                                type: string
+                                minLength: 1
                               action:
                                 type: object
                                 properties:
@@ -647,7 +653,7 @@ components:
                                     type: string
                                     enum:
                                       - pull_request
-                                      - merge_push
+                                      - push
                                   follows:
                                     oneOf:
                                       - type: object

@@ -84,7 +84,7 @@ const OBJECT_BODY = "hello";
 const OBJECT_MEDIA = "text/plain";
 const SIGNATURE_PARAMETER = "X-Amz-Signature";
 const PULL_REQUEST_OPERATION = "github.pull_request";
-const MERGE_PUSH_OPERATION = "git.merge_push";
+const PUSH_OPERATION = "git.push";
 const DELETE_OBJECT_OPERATION = "s3.delete_object";
 const EVENTS_PATH = /^\/repos\/owner\/merge\/events(\?|$)/;
 const UNOBSERVED_REQUEST_COUNT = 0;
@@ -151,7 +151,7 @@ async function setup(t: TestContext) {
     version: FIRST_REVISION,
     bindings: {
       gated: repositoryBinding(GATED, "pull_request"),
-      merge: repositoryBinding(MERGE, "merge_push"),
+      merge: repositoryBinding(MERGE, "push"),
       store: {
         kind: "storage",
         config: {
@@ -523,23 +523,32 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
     bindingId: h.merge.id,
     commit: q,
   });
-  await t.test("EJ10.4 a merge push lands Q on main", async () => {
-    await j.request(eQ);
-    const rows = await j.outbound(MERGE_PUSH_OPERATION);
-    assert.equal(rows.length, JOURNEY_MATCH_COUNT);
-    const [row] = rows;
-    assert.equal(row!.state, OutboundRequestState.Succeeded);
-    c = (row!.result as { commit: string }).commit;
-    assert.deepEqual(row!.result, {
-      kind: PlatformAddressKind.BranchPush,
-      branch: MAIN_BRANCH,
-      commit: c,
-      resource_identity: MERGE_IDENTITY,
-    });
-    assert.equal(await remoteHead(h.mergeBare.bare, MAIN_REF), c);
-  });
   await t.test(
-    "EJ10.5 the deferred check completes Q after the merge push",
+    "EJ10.4 a push lands Q on main in the deferred round",
+    async () => {
+      await j.request(eQ);
+      const rows = await until(
+        () => j.outbound(PUSH_OPERATION),
+        (list) =>
+          list.length === JOURNEY_MATCH_COUNT &&
+          list[FIRST_INDEX]!.state !== OutboundRequestState.Pending,
+        t.signal,
+      );
+      assert.equal(rows.length, JOURNEY_MATCH_COUNT);
+      const [row] = rows;
+      assert.equal(row!.state, OutboundRequestState.Succeeded);
+      c = (row!.result as { commit: string }).commit;
+      assert.deepEqual(row!.result, {
+        kind: PlatformAddressKind.BranchPush,
+        branch: MAIN_BRANCH,
+        commit: c,
+        resource_identity: MERGE_IDENTITY,
+      });
+      assert.equal(await remoteHead(h.mergeBare.bare, MAIN_REF), c);
+    },
+  );
+  await t.test(
+    "EJ10.5 the deferred check completes Q after the push",
     async () => {
       await until(
         () => j.state(Q),

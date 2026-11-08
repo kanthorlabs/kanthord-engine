@@ -18,6 +18,7 @@ import {
   type ExecutionSetup,
   HANDOVER_REFRESH_WAIT_MS,
   HANDOVER_TIMEOUT_MS,
+  INSTANCE_HEARTBEAT_INTERVAL_MS,
   InstancePlacement,
   type MissionPromptPins,
   PlacementIssue,
@@ -181,6 +182,12 @@ const fakeCollaborations = {
   },
   instanceArchive: {
     revokeForInstanceArchive: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+    revokePausedClaim: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
+    executionReleased: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
     reportExecutionEnds: () => {
@@ -895,6 +902,23 @@ test("run owns the heartbeat interval and quiescence stops it", async (t) => {
   assert.equal(sweep.mock.calls.length, once);
   await f.worker.quiesce();
   t.mock.timers.tick(HEARTBEAT_SWEEP_INTERVAL_MS);
+  assert.equal(sweep.mock.calls.length, once);
+  context.cancel();
+  await running;
+});
+
+test("run owns the stop order interval and quiescence stops it", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const f = enablementFixture(t);
+  const context = new CancellationContext();
+  const sweep = t.mock.method(f.worker.instances, "sweepStopOrders", () => {});
+  const running = f.worker.run(context);
+  await f.worker.start();
+  t.mock.timers.tick(INSTANCE_HEARTBEAT_INTERVAL_MS);
+  const once = 1;
+  assert.equal(sweep.mock.calls.length, once);
+  await f.worker.quiesce();
+  t.mock.timers.tick(INSTANCE_HEARTBEAT_INTERVAL_MS);
   assert.equal(sweep.mock.calls.length, once);
   context.cancel();
   await running;
@@ -2055,6 +2079,8 @@ function poolFixture(
         state.revoked.push(executionId);
         return { lost: [], revoked: [] };
       },
+      revokePausedClaim: () => null,
+      executionReleased: () => {},
       reportExecutionEnds: () => {
         state.reported++;
       },
@@ -2287,6 +2313,7 @@ test("a forced archive of a busy server instance revokes its execution and stops
   const registration = f.register(FIRST_INSTANCE);
   f.state.executing.add(registration.runtime_identity);
   f.unlist(FIRST_INSTANCE);
+  f.caller.identity = FOOTPRINT_HUMAN;
   const archive = (force?: boolean) =>
     f.invoke(
       "instance.archive",
@@ -2304,6 +2331,47 @@ test("a forced archive of a busy server instance revokes its execution and stops
   archive(true);
   assert.deepEqual(f.state.revoked, [POOL_EXECUTION]);
   assert.equal(f.state.reported, POOL_ONE_START);
+  await changesApplied();
+  assert.deepEqual(
+    f.host.archived.map(({ name }) => name),
+    [f.nameOf(FIRST_INSTANCE)],
+  );
+});
+
+test("a deferred archive end drops the heartbeat entries of the ended registrations and schedules a reconcile", async (t) => {
+  const f = poolFixture(t, 1);
+  f.worker.startPool();
+  const registration = f.register(FIRST_INSTANCE);
+  f.state.executing.add(registration.runtime_identity);
+  f.unlist(FIRST_INSTANCE);
+  f.caller.identity = FOOTPRINT_HUMAN;
+  assert.ok(
+    f.worker.instances.holdConnection(
+      f.instanceIdOf(FIRST_INSTANCE),
+      createIdentity("connection"),
+    ),
+  );
+  const archived = f.invoke(
+    "instance.archive",
+    { expected_revision: FIRST_REVISION, force: true },
+    { instance_name: f.nameOf(FIRST_INSTANCE) },
+  );
+  assert.deepEqual(archived.stopping, [POOL_EXECUTION]);
+  assert.deepEqual(f.state.revoked, []);
+  await changesApplied();
+  assert.deepEqual(f.host.archived, []);
+  assert.ok(
+    f.worker.heartbeatClock
+      .identities()
+      .includes(registration.runtime_identity),
+  );
+  f.worker.executionReleased(POOL_EXECUTION);
+  assert.equal(
+    f.worker.heartbeatClock
+      .identities()
+      .includes(registration.runtime_identity),
+    false,
+  );
   await changesApplied();
   assert.deepEqual(
     f.host.archived.map(({ name }) => name),

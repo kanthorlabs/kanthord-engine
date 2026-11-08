@@ -77,7 +77,7 @@ components:
               maximum: 9007199254740991
             action_key:
               type: string
-              pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push|reply\.[0-9])$
+              pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|push|reply\.[0-9])$
           required:
             - node_id
             - attempt
@@ -113,7 +113,7 @@ components:
               properties:
                 key:
                   type: string
-                  pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push|reply\.[0-9])$
+                  pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|push|reply\.[0-9])$
                 binding_id:
                   type: string
                   minLength: 34
@@ -123,13 +123,13 @@ components:
                 follows:
                   anyOf:
                     - type: string
-                      pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push|reply\.[0-9])$
+                      pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|push|reply\.[0-9])$
                     - type: "null"
                 action:
                   type: string
                   enum:
                     - pull_request
-                    - merge_push
+                    - push
                 expected_end_state:
                   type: string
                   enum:
@@ -163,7 +163,7 @@ components:
               properties:
                 key:
                   type: string
-                  pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push|reply\.[0-9])$
+                  pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|push|reply\.[0-9])$
                 binding_id:
                   type: string
                   minLength: 34
@@ -173,7 +173,7 @@ components:
                 follows:
                   anyOf:
                     - type: string
-                      pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|merge_push|reply\.[0-9])$
+                      pattern: ^[a-z][a-z0-9-]{0,62}\.(pull_request|push|reply\.[0-9])$
                     - type: "null"
                 action:
                   type: string

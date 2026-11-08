@@ -9,6 +9,8 @@ import {
   AssessmentResult,
   AssetKind,
   ClaimableState,
+  FindingRoute,
+  type FindingSubmit,
   Intent,
   MissionErrorCode,
   NodeState,
@@ -39,6 +41,7 @@ import {
   actCalls,
   databaseSnapshot,
   executionHarness,
+  reviewerFinding,
 } from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
@@ -46,6 +49,7 @@ const FIRST_REVISION = 1;
 const FIRST_ATTEMPT = 1;
 const SECOND_ATTEMPT = 2;
 const NO_ATTEMPT = 0;
+const APPROVED_NAME = "First";
 const NO_PROPOSALS = 0;
 const SINGLE_PROPOSAL = 1;
 const TWO_PROPOSALS = 2;
@@ -155,7 +159,11 @@ async function fixture(t: TestContext) {
       },
     },
   });
-  const proposal = (dependencyId = childId, name = "Fix"): ProposalContent => ({
+  const proposal = (
+    dependencyId = childId,
+    name = "Fix",
+    findingLabels: string[] = [],
+  ): ProposalContent => ({
     dependency_id: dependencyId,
     name,
     requirement: "Repair the defect",
@@ -166,10 +174,12 @@ async function fixture(t: TestContext) {
       criterion: "The test passes",
       verifications: ["pnpm test"],
     },
+    finding_labels: findingLabels,
   });
   const body = (
     proposals: ProposalContent[],
     result: AssessmentResult = AssessmentResult.Undetermined,
+    findings: FindingSubmit[] = [],
   ) => ({
     ...h.context,
     evidence_ids: [evidence.evidence.id],
@@ -178,13 +188,26 @@ async function fixture(t: TestContext) {
     rationale: "Defect found",
     tested_input: input,
     proposals,
+    findings,
   });
-  const submit = (proposals: ProposalContent[], result?: AssessmentResult) =>
+  const submit = (
+    proposals: ProposalContent[],
+    result?: AssessmentResult,
+    findings?: FindingSubmit[],
+  ) =>
     h.invoke("assessment.submit", {
       params: { node_id: h.node_id },
       query: {},
-      body: body(proposals, result),
+      body: body(proposals, result, findings),
     });
+  const routes = async () =>
+    (
+      await h.invoke("finding.list", {
+        params: { node_id: h.node_id },
+        query: {},
+        body: null,
+      })
+    ).items.map((item) => [item.label, item.route]);
   const list = (attempt?: number) =>
     h.invoke("proposal.list", {
       params: { node_id: h.node_id },
@@ -211,6 +234,7 @@ async function fixture(t: TestContext) {
     dependencyAssessmentId,
     proposal,
     submit,
+    routes,
     list,
     decide,
   };
@@ -744,3 +768,29 @@ for (const act of proposerActs)
       assert.equal(item.approved_at, null);
     }
   });
+
+test("an approval keeps the linked findings on record and a proposal that the decision leaves out moves its linked findings to report", async (t) => {
+  const h = await fixture(t);
+  const submitted = await h.submit(
+    [
+      h.proposal(h.childId, APPROVED_NAME, ["B1"]),
+      h.proposal(h.childId, "Second", ["B2"]),
+    ],
+    undefined,
+    [reviewerFinding("B1"), reviewerFinding("B2"), reviewerFinding("B3")],
+  );
+  assert.deepEqual(await h.routes(), [
+    ["B1", FindingRoute.Record],
+    ["B2", FindingRoute.Record],
+    ["B3", FindingRoute.Report],
+  ]);
+  const first = (await h.list()).items.find(
+    (item) => "name" in item.content && item.content.name === APPROVED_NAME,
+  )!;
+  await h.decide(submitted.assessment.id, [first.id]);
+  assert.deepEqual(await h.routes(), [
+    ["B1", FindingRoute.Record],
+    ["B2", FindingRoute.Report],
+    ["B3", FindingRoute.Report],
+  ]);
+});

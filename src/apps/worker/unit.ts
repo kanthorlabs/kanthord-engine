@@ -24,6 +24,7 @@ import {
   type FootprintMeasurement,
   type FootprintOrder,
   type FootprintResult,
+  type StopOrderEntry,
   WorkerErrorCode,
 } from "../../worker/contract.ts";
 import { packageVersion } from "../../kernel/version.ts";
@@ -39,7 +40,9 @@ import {
 } from "./registration.ts";
 import {
   defaultModelRuntimeFactory,
+  EndReason,
   executionSessionRoot,
+  ExecutionStop,
   installPiTools,
   type ModelRuntimeFactory,
   type RepositoryTransport,
@@ -108,6 +111,7 @@ interface Execution {
   claim: ExecutionRecord;
   entry: Entry;
   context: CancellationContext;
+  stopWith(stop: ExecutionStop): void;
   task: Promise<Diagnostic | null | typeof SETUP_UNAVAILABLE>;
 }
 
@@ -130,6 +134,7 @@ export class WorkerUnit {
   private execution?: Execution;
   private executionLive = false;
   private draining = false;
+  private abandoning = false;
   private pullStarted = false;
   private failure?: Diagnostic;
   private changed = Promise.withResolvers<void>();
@@ -241,6 +246,14 @@ export class WorkerUnit {
     return this.serializeFootprint(() => this.runFootprintOrders(orders));
   }
 
+  stopOrders(orders: readonly StopOrderEntry[]): void {
+    const execution = this.execution;
+    if (!this.executionLive || !execution) return;
+    for (const order of orders)
+      if (order.execution_id === execution.claim.execution_id)
+        execution.stopWith(new ExecutionStop(order.reason, null, null));
+  }
+
   private async reportFootprint(
     measurement: FootprintMeasurement | null,
   ): Promise<void> {
@@ -325,14 +338,7 @@ export class WorkerUnit {
           await entry.registering;
         }
         if (error) throw error;
-        if (this.executionLive) {
-          this.execution?.context.cancel();
-          await this.execution?.task;
-          throw new Diagnostic(
-            "worker.stop.execution_live",
-            "worker: stop during a live execution.",
-          );
-        }
+        if (this.executionLive) await this.endLiveExecution();
         clearInterval(this.footprintTimer);
         await this.footprintTask;
         disarm = this.options.watchdog?.();
@@ -354,7 +360,23 @@ export class WorkerUnit {
     return this.stopTask;
   }
 
+  private async endLiveExecution(): Promise<void> {
+    const execution = this.execution!;
+    if (this.abandoning) execution.context.cancel();
+    else
+      execution.stopWith(
+        new ExecutionStop(EndReason.WorkerStopped, null, null),
+      );
+    const result = await execution.task;
+    if (result === null && !this.abandoning) return;
+    throw new Diagnostic(
+      "worker.stop.execution_live",
+      `worker: stop during a live execution ${execution.claim.execution_id}.`,
+    );
+  }
+
   abandon(): Promise<Error | null> {
+    this.abandoning = true;
     for (const entry of this.entries) entry.kept = true;
     return this.stop();
   }
@@ -631,7 +653,8 @@ export class WorkerUnit {
     this.round?.cancel();
     const context = new CancellationContext(background, claim.expired_at);
     if (this.shutdown.signal.aborted) context.cancel();
-    const task = this.execute(entry, claim, context)
+    const stops = new CancellationContext();
+    const task = this.execute(entry, claim, context, stops)
       .then((result) => {
         if (result === null || result === SETUP_UNAVAILABLE) {
           this.executionLive = false;
@@ -640,13 +663,20 @@ export class WorkerUnit {
         return result;
       })
       .finally(() => context.cancel());
-    this.execution = { claim, entry, context, task };
+    this.execution = {
+      claim,
+      entry,
+      context,
+      stopWith: (stop) => stops.cancel(stop),
+      task,
+    };
   }
 
   private async execute(
     entry: Entry,
     claim: ExecutionRecord,
     context: Context,
+    stop: Context,
   ): Promise<Diagnostic | null | typeof SETUP_UNAVAILABLE> {
     return hostExecution({
       claim,
@@ -660,6 +690,7 @@ export class WorkerUnit {
       hostHome: this.options.env.HOME ?? homedir(),
       env: this.options.env,
       context,
+      stop,
       sessionRoot: executionSessionRoot(this.options.directories.data),
       log: (record) => this.logRecord(record),
     });

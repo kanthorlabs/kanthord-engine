@@ -96,7 +96,7 @@ test("a release result that is not a plain exit failure is not stored", () => {
           timed_out: true,
         },
       }),
-      VerificationClass.CodeFailure,
+      VerificationClass.Timeout,
     ],
     [
       commandRun(TEST, null, { end: CommandEnd.Cancelled }),

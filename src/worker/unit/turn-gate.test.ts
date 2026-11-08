@@ -68,6 +68,8 @@ const MARKER_FILE = "notes";
 const DEADLINE_MS = 20000;
 const MERGE_COMMIT_FIELDS = 3;
 const ONE_RELEASE = 1;
+const ONE_COMMIT = 1;
+const ONE_PARENT_FIELDS = 2;
 const COUNTED_TURNS = 4;
 const CRLF_FILE = "f.txt";
 const CRLF_CONTENT = "a\r\nb\r\n";
@@ -257,6 +259,56 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(h.checkouts[0]!.head, await headOf(h.root));
   });
 
+  test("a write turn that commits a merge of another branch stops with foreign_merge and leaves the node ref at before", async (t) => {
+    const h = await fixture(
+      t,
+      [task("merge", "false")],
+      [
+        bash(
+          `git checkout -q -b ${OTHER_BRANCH} && echo side > ${STRAY_FILE} && git add ${STRAY_FILE} && git commit -qm side && git checkout -q - && git merge -q --no-ff -m merged ${OTHER_BRANCH}`,
+        ),
+        fauxAssistantMessage("merged"),
+      ],
+    );
+    const before = h.checkouts[0]!.head;
+    const bodies = recordReleases(h);
+    const end = await executionBoundary(h.run, () => runStepsImplement(h));
+    const detail = violationEnd(end, bodies, TurnViolation.ForeignMerge);
+    assert.ok(
+      detail.includes(
+        "A turn merges no branch; the worker merges the base itself.",
+      ),
+    );
+    await assertAtBefore(h, before);
+    assert.equal(existsSync(join(h.root, STRAY_FILE)), false);
+  });
+
+  test("a write turn that commits ordinary commits settles as one commit", async (t) => {
+    const current = task("commits", `test -f ${WORK_FILE}`);
+    const h = await fixture(
+      t,
+      [current],
+      [
+        bash(
+          `echo one > ${WORK_FILE} && git add ${WORK_FILE} && git commit -qm one && echo two >> ${WORK_FILE} && git commit -qam two`,
+        ),
+        fauxAssistantMessage("committed"),
+      ],
+    );
+    const before = h.checkouts[0]!.head;
+    assert.deepEqual(await runTask(h, current), {
+      kind: TaskResultKind.Complete,
+      recorded: true,
+    });
+    const commits = await simpleGit(h.root).raw([
+      "rev-list",
+      "--parents",
+      `${before}..HEAD`,
+    ]);
+    assert.equal(commits.trim().split("\n").length, ONE_COMMIT);
+    assert.equal(commits.trim().split(" ").length, ONE_PARENT_FIELDS);
+  });
+
   test("the unchanged-turn counter spans the tasks of one execution", async (t) => {
     const first = task(
       "first",
@@ -393,6 +445,44 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(parents.trim().split(" ").length, MERGE_COMMIT_FIELDS);
     assert.equal(h.checkouts[0]!.head, await headOf(h.root));
     assert.equal(existsSync(gitPath(h, "MERGE_HEAD")), false);
+  });
+
+  test("a conflict turn that concludes the merge of the base settles with two parents", async (t) => {
+    const h = await conflictFixture(t, [
+      write("file", RESOLVED),
+      fauxAssistantMessage(RESOLVED),
+    ]);
+    await fetchBase(h);
+    const before = h.checkouts[0]!.head;
+    const base = await headOf(h.root, "origin/main");
+    assert.equal(await refreshAtClaim(h), RefreshResult.Merged);
+    const parents = (
+      await simpleGit(h.root).raw(["rev-list", "--parents", "-n", "1", "HEAD"])
+    )
+      .trim()
+      .split(" ")
+      .slice(1);
+    assert.deepEqual(parents, [before, base]);
+    assert.equal(h.checkouts[0]!.head, await headOf(h.root));
+  });
+
+  test("a conflict turn that also merges a third commit stops with foreign_merge and leaves the node ref at before", async (t) => {
+    const h = await conflictFixture(t, [
+      bash(
+        `echo ${RESOLVED} > file && git commit -qam ${RESOLVED} && git merge -q --no-ff -m third $(git commit-tree -p origin/main -m side 'origin/main^{tree}')`,
+      ),
+      fauxAssistantMessage(RESOLVED),
+    ]);
+    await fetchBase(h);
+    const before = h.checkouts[0]!.head;
+    await assert.rejects(refreshAtClaim(h), {
+      reason: EndReason.OperationFailed,
+      code: TurnViolation.ForeignMerge,
+    });
+    assert.equal(await headOf(h.root), before);
+    assert.equal(h.checkouts[0]!.head, before);
+    assert.equal(existsSync(gitPath(h, "MERGE_HEAD")), false);
+    assert.equal((await simpleGit(h.root).status()).isClean(), true);
   });
 
   test("a budget end during a verification that writes build output leaves no build output in the checkpoint", async (t) => {

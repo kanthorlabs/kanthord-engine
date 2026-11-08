@@ -2057,6 +2057,9 @@ export class ProjectService implements Service, ProjectBindings {
       ssh_credential: config.ssh_credential,
       credential: config.credential ?? null,
       base_branch: config.strategy.base_branch,
+      ...(config.strategy.upstream_branch !== undefined && {
+        upstream_branch: config.strategy.upstream_branch,
+      }),
       action: config.strategy.action?.name ?? null,
       landing: config.strategy.action?.landing ?? Landing.Human,
       prompts: config.prompts ?? {},

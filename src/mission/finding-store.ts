@@ -168,7 +168,7 @@ export function listUndecidedFindings(
 ): FindingRow[] {
   return tx.database
     .prepare(
-      "SELECT f.* FROM mission_finding f JOIN mission_node n ON n.id = f.node_id WHERE n.mission_id = ? AND f.route = ? AND f.decision IS NULL AND (? IS NULL OR f.id < ?) ORDER BY f.id DESC LIMIT ?",
+      "SELECT f.* FROM mission_finding f JOIN mission_node n ON n.id = f.node_id WHERE n.mission_id = ? AND f.route = ? AND f.decision IS NULL AND f.fixed_assessment_id IS NULL AND (? IS NULL OR f.id < ?) ORDER BY f.id DESC LIMIT ?",
     )
     .all(
       missionId,
@@ -205,6 +205,20 @@ export function markFindingsFixed(
     );
 }
 
+export function markEarlierReportFindingsFixed(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number,
+  assessmentId: string,
+): void {
+  assert.ok(tx.database.isTransaction);
+  tx.database
+    .prepare(
+      "UPDATE mission_finding SET fixed_assessment_id = ? WHERE node_id = ? AND route = ? AND decision IS NULL AND fixed_assessment_id IS NULL AND created_by IS NULL AND assessment_id IN (SELECT id FROM mission_assessment WHERE node_id = ? AND attempt < ?)",
+    )
+    .run(assessmentId, nodeId, FindingRoute.Report, nodeId, attempt);
+}
+
 export function routeOpenFixFindings(
   tx: Transaction,
   nodeId: string,
@@ -218,6 +232,20 @@ export function routeOpenFixFindings(
       "UPDATE mission_finding SET route = ? WHERE node_id = ? AND route = ? AND fixed_assessment_id IS NULL AND assessment_id IN (SELECT id FROM mission_assessment WHERE node_id = ? AND attempt = ?)",
     )
     .run(route, nodeId, FindingRoute.Fix, nodeId, attempt);
+}
+
+export function routeFindingsByLabel(
+  tx: Transaction,
+  assessmentId: string,
+  labels: readonly string[],
+  from: FindingRoute,
+  to: FindingRoute,
+): void {
+  assert.ok(tx.database.isTransaction);
+  const statement = tx.database.prepare(
+    "UPDATE mission_finding SET route = ? WHERE assessment_id = ? AND label = ? AND route = ? AND decision IS NULL",
+  );
+  for (const label of labels) statement.run(to, assessmentId, label, from);
 }
 
 export function updateFindingReport(

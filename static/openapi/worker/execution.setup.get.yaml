@@ -365,6 +365,9 @@ components:
                 properties:
                   base_branch:
                     type: string
+                  upstream_branch:
+                    type: string
+                    minLength: 1
                 required:
                   - base_branch
                 additionalProperties: false

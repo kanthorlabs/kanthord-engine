@@ -1,3 +1,4 @@
+import { VerdictSource } from "./node-reads.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { test, type TestContext } from "node:test";
@@ -149,6 +150,7 @@ test("a verdict commit takes the node name", async (t) => {
   );
   await recordDone(h, current);
   h.verdict = {
+    source: VerdictSource.Rework,
     text: "The edge case stays unhandled.",
     findings: [],
     round: null,

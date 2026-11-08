@@ -435,7 +435,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     custodySuitability: unexpected,
     repositoryConnector: { gitLsRemote: unexpected },
     repositoryFiles: {
-      resolveBranchCommit: unexpected,
+      resolveBranchCommit: async () => INSTRUCTION_COMMIT,
       readFilesAtCommit: unexpected,
       listFilesAtCommit: async () => [],
       readObjectIds: unexpected,
@@ -1885,6 +1885,8 @@ test("binding write probes every repository outside and before commit, validates
     sshSuitability,
     sshSuitability,
     sshSuitability,
+    sshSuitability,
+    sshSuitability,
     keySuitability,
     sshSuitability,
     keySuitability,
@@ -2872,21 +2874,20 @@ test("a new binding releases the key of its SSH credential under the human draft
   f.project.cancelEnvironmentRuns();
   await f.write({ [REPOSITORY_NAME]: repositoryBinding() });
   const credential = sshCredentialOf(REPOSITORY_ADDRESS);
-  assert.deepEqual(f.releases, [
-    {
-      identity: f.caller.identity,
-      subject: {
-        kind: SshIdentitySubjectKind.Draft,
-        project_id: f.params.project_id,
-        credential,
-        address: REPOSITORY_ADDRESS,
-      },
+  const release = {
+    identity: f.caller.identity,
+    subject: {
+      kind: SshIdentitySubjectKind.Draft,
+      project_id: f.params.project_id,
       credential,
       address: REPOSITORY_ADDRESS,
-      transaction: true,
     },
-  ]);
-  assert.deepEqual(f.dropped, [credential]);
+    credential,
+    address: REPOSITORY_ADDRESS,
+    transaction: true,
+  };
+  assert.deepEqual(f.releases, [release, release]);
+  assert.deepEqual(f.dropped, [credential, credential]);
   assert.deepEqual(reads, [
     {
       address: REPOSITORY_ADDRESS,
@@ -3149,7 +3150,7 @@ test("a binding prompt key outside the three keys or the agent catalog fails the
     );
 });
 
-test("a git-only platform accepts merge_push and refuses a credential or pull_request", async (t) => {
+test("a git-only platform accepts push and refuses a credential or pull_request", async (t) => {
   const address = "git@gitlab.com:acme/api.git";
   const f = writeFixture(t);
   const config = withoutCredential(repositoryBinding(address).config);
@@ -3182,7 +3183,7 @@ test("a git-only platform accepts merge_push and refuses a credential or pull_re
         strategy: {
           ...gitlab.strategy,
           action: {
-            name: GitHubAction.MergePush,
+            name: GitHubAction.Push,
             follows: { type: FollowsType.AssessmentPassed },
           },
         },
@@ -3197,6 +3198,37 @@ test("a git-only platform accepts merge_push and refuses a credential or pull_re
     f.ssh.map((call) => call.address),
     [address],
   );
+});
+
+const RETIRED_ACTION_NAME = ["merge", "push"].join("_");
+
+test("binding apply refuses the retired merge-push action name and accepts push", () => {
+  const config = repositoryBinding().config;
+  const withAction = (name: string) => ({
+    [REPOSITORY_NAME]: {
+      ...repositoryBinding(),
+      config: {
+        ...config,
+        strategy: {
+          ...config.strategy,
+          action: {
+            name,
+            follows: { type: FollowsType.AssessmentPassed },
+          },
+        },
+      },
+    },
+  });
+  assert.ok(Array.isArray(schemaIssues(withAction(RETIRED_ACTION_NAME))));
+  const accepted = projectOperations["bindingSet.write"].input.safeParse({
+    params: { project_id: "project" },
+    query: EMPTY_QUERY,
+    body: {
+      version: BINDING_SET_INITIAL_VERSION,
+      bindings: withAction(GitHubAction.Push),
+    },
+  });
+  assert.equal(accepted.success, true);
 });
 
 const CONVERSATION_NAME = "conversation";
@@ -5781,7 +5813,7 @@ test("repositoryPolicyOf preserves the named revision after a strategy change", 
           strategy: {
             base_branch: baseBranch,
             action: {
-              name: GitHubAction.MergePush,
+              name: GitHubAction.Push,
               follows: { type: FollowsType.AssessmentPassed },
             },
           },
@@ -5806,7 +5838,7 @@ test("repositoryPolicyOf preserves the named revision after a strategy change", 
       repository_environment: true,
     });
     const latest = f.project.repositoryPolicyOf(tx, later.id);
-    assert.equal(latest?.action, GitHubAction.MergePush);
+    assert.equal(latest?.action, GitHubAction.Push);
     assert.equal(latest?.base_branch, baseBranch);
   });
 });
@@ -6752,6 +6784,87 @@ test("a write refuses an instruction file that is invalid at the base head with 
   }
 });
 
+test("a write without an instruction file refuses an absent base branch and writes nothing", async (t) => {
+  const { repositoryFiles } = instructionRepositoryFiles(null, null);
+  const f = writeFixture(t, { repositoryFiles });
+  const before = f.snapshot();
+  const commits = f.commits();
+  await rejectsWrite(
+    f.write({ [REPOSITORY_NAME]: repositoryBinding() }),
+    SSH_FAILURE_STATUS,
+    ProjectErrorCode.RepositoryBaseBranchAbsent,
+  );
+  assert.equal(f.commits(), commits);
+  assert.deepEqual(f.snapshot(), before);
+});
+
+const UPSTREAM_BRANCH = "main";
+
+function upstreamBinding(base = "fix/x", upstream = UPSTREAM_BRANCH) {
+  const binding = repositoryBinding();
+  return {
+    ...binding,
+    config: {
+      ...binding.config,
+      strategy: { base_branch: base, upstream_branch: upstream },
+    },
+  };
+}
+
+test("a write accepts upstream_branch, resolves both heads and stores it", async (t) => {
+  const { repositoryFiles, heads } = instructionRepositoryFiles(null);
+  const f = writeFixture(t, { repositoryFiles });
+  const result = await f.write({ [REPOSITORY_NAME]: upstreamBinding() });
+  assert.deepEqual(heads, ["fix/x", "main"]);
+  assert.deepEqual(
+    repositoryConfigSchema.parse(result.bindings[REPOSITORY_NAME]?.config)
+      .strategy,
+    { base_branch: "fix/x", upstream_branch: "main" },
+  );
+});
+
+test("an upstream_branch equal to base_branch or blank refuses", () => {
+  const strategy = (upstream_branch: string) =>
+    repositoryConfigSchema.shape.strategy.safeParse({
+      base_branch: "main",
+      upstream_branch,
+    });
+  assert.equal(strategy("main").success, false);
+  assert.equal(strategy("  ").success, false);
+  assert.equal(strategy("").success, false);
+  assert.equal(strategy("develop").success, true);
+});
+
+test("a write refuses a missing upstream branch with its name and writes nothing", async (t) => {
+  const { repositoryFiles } = instructionRepositoryFiles(null);
+  repositoryFiles.resolveBranchCommit = async (_address, branch) =>
+    branch === UPSTREAM_BRANCH ? null : INSTRUCTION_COMMIT;
+  const f = writeFixture(t, { repositoryFiles });
+  const before = f.snapshot();
+  await rejectsWrite(
+    f.write({ [REPOSITORY_NAME]: upstreamBinding() }),
+    SSH_FAILURE_STATUS,
+    ProjectErrorCode.RepositoryBaseBranchAbsent,
+    { branch: "main" },
+  );
+  assert.deepEqual(f.snapshot(), before);
+});
+
+test("a write that keeps an unchanged repository binding makes no base read for it", async (t) => {
+  const { repositoryFiles, heads } = instructionRepositoryFiles(null);
+  const f = writeFixture(t, { repositoryFiles });
+  const first = await f.write({ [REPOSITORY_NAME]: repositoryBinding() });
+  assert.equal(heads.length, ONE_CALL);
+  await f.write(
+    {
+      [REPOSITORY_NAME]: repositoryBinding(),
+      [SECOND_REPOSITORY_NAME]: repositoryBinding(SECOND_REPOSITORY_ADDRESS),
+    },
+    first.binding_set_version,
+  );
+  assert.equal(heads.length, TWO_CALLS);
+});
+
 test("a write with an instruction file refuses an absent base branch and a failed read", async (t) => {
   const absent = writeFixture(t, {
     repositoryFiles: instructionRepositoryFiles(null, null).repositoryFiles,
@@ -7084,10 +7197,7 @@ test("a pull request strategy holds a landing choice and other actions refuse on
     true,
   );
   assert.equal(strategy(GitHubAction.PullRequest).success, true);
-  assert.equal(
-    strategy(GitHubAction.MergePush, Landing.KanthorD).success,
-    false,
-  );
+  assert.equal(strategy(GitHubAction.Push, Landing.KanthorD).success, false);
   assert.equal(strategy(GitHubAction.PullRequest, "robot").success, false);
 });
 
@@ -7394,7 +7504,7 @@ test("binding.suite_pass.plan.get answers the node create body of the setup node
 test("binding.suite_pass.plan.get refuses a binding with no human landing", (t) => {
   for (const action of [
     { name: GitHubAction.PullRequest, landing: Landing.KanthorD },
-    { name: GitHubAction.MergePush },
+    { name: GitHubAction.Push },
   ]) {
     const { f, params } = setupPlanFixture(t, action);
     refuses(

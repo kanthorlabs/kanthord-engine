@@ -329,7 +329,7 @@ Common to every `config`:
 - `platform`: **required**, supported platform-name string; no default and no
   inference from the address. The values are `github`, `gitlab` and `bitbucket`.
   `gitlab` and `bitbucket` are git-only platforms: they take no `credential` and
-  permit `merge_push` only. The platform set is extensible, not an arbitrary accepted string.
+  permit `push` only. The platform set is extensible, not an arbitrary accepted string.
 - `address`: **required**, SSH repository address `git@<host>:<owner>/<repository>.git`; no default. The server connects on port 443 for `ssh.github.com`, `altssh.gitlab.com` and `altssh.bitbucket.org`, and on port 22 for every other host. The address takes no port. An HTTPS address fails. The host must be an SSH host of the platform: `github.com` or `ssh.github.com` for `github`, `gitlab.com` or `altssh.gitlab.com` for `gitlab`, and `bitbucket.org` or `altssh.bitbucket.org` for `bitbucket`. The server reads no SSH configuration, so an SSH alias such as `git@kanthorlabs.github.com:` fails. The host must hold a pin of `kanthord repository host-key pin`.
 - Unsupported addresses and contradictory platform/address combinations fail.
 - `strategy`: **required**, `RepositoryStrategy` object below. It has no inferred base branch, action or trigger.
@@ -356,11 +356,16 @@ Common to every `config`:
 - `base_branch`: **required**, nonblank string accepted as a branch by the
   repository adapter; no default such as `main`. It is the node-branch origin
   and the merge/push target of the configured action.
-- `action`: **optional**, one `PolicyAction` object; absence means no repository action. A repository strategy holds at most one action.
+- `upstream_branch`: **optional**, nonblank string; absent by default. It names the branch that the base branch follows, for example `main` when `base_branch` is a feature branch. A value equal to `base_branch` refuses the write as a validation failure (`gateway.request.validation_failed`) at the `upstream_branch` path. The field lives in the `config` JSON of the binding; no column and no migration hold it.
+  - `binding apply` resolves the head of the upstream branch on the remote with the same check as the base branch. A missing upstream branch refuses the write with `project.bindings.repository.base_branch_absent` and `details: { branch }`, where `branch` is the upstream branch.
+  - The worker setup carries the field in `repositories[].strategy`.
+  - The base refresh of an `implement` node merges `origin/<base_branch>` and then `origin/<upstream_branch>` into the node branch, at the claim and at the release. Each merge is its own merge commit. A conflict runs a conflict turn with the agent, and the conflict instruction names the branch that conflicts. The release first fetches both branches.
+  - With no `upstream_branch`, the base refresh merges only the base branch.
+  - An `examine` checkout is a full clone, so `origin/<upstream_branch>` resolves in it.
 
 Each `PolicyAction` holds only:
 
-- `name`: **required**, enum `pull_request | merge_push`; no default.
+- `name`: **required**, enum `pull_request | push`; no default.
 - `follows`: **required**, one of two closed shapes; no default:
   - `type: "assessment_passed"`, with no other members.
   - `type: "action_end_state"` and a required `binding` as a binding-name string, with no other members.
@@ -373,9 +378,27 @@ The key of the action is `<binding name>.<name>`, which the Mission Service free
 - The binding write refuses the `action_end_state` shape until a retry-safe claim-source contract exists, under the [frozen action rule](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-attempt). The refusal is one issue of the validation failure of `binding apply`, at the `follows` path.
 - Absent references and invalid dependency cycles fail validation.
 - `pull_request` opens a pull request from the node branch into the base branch. It requires the platform action capability and expects the merge of that pull request.
-- `merge_push` merges the node branch into the base branch and pushes. It requires the network git write capability and expects the push to the base branch. A change that touches a gate file of the binding gets no push; a human lands it. The Intake Service computes the changed gate files on the server.
+- `push` lands the node on the base branch. The action performer only records a `branch_push` request. The deferred round of the Mission Service lands the tested tree through the Intake Service. A change that touches a gate file of the binding gets no push; a human lands it. The Intake Service computes the changed gate files on the server.
+  - Commit: the land writes one squash commit for each node. The commit holds the tree of the tested commit and has the base tip as its only parent. The push is a plain push, never a force push.
+  - Trailers: the message of the commit ends with `KanthorD-Node: <node-id>` and `KanthorD-Tested: <sha>`. The sha is the tested commit.
+  - Identity: the author and the committer are the account behind the SSH key of the binding. When the key is a deploy key, the key has no account, and the author is the author of the tested commit.
+  - Up to date: the base tip must be an ancestor of the tested commit. When the base branch moved after the assessment, the land pushes nothing and answers `git.base_moved`. The check then answers `conflict`, the node returns to `Available`, and the rework merges the new base and runs a new review. The next land uses the new tested commit.
+  - No lock: nothing serializes the lands of two nodes. The remote accepts one push and refuses the other. The refused node follows the up-to-date rule.
+  - Refusals: the land reads the stderr of a failed push.
+    - A non-fast-forward rejection (`! [rejected]` with `fetch first` or `non-fast-forward`) answers `retryable_refusal`. The rounds of the Mission Service retry it.
+    - A refusal by a branch rule (`GH006`, `GH013` or `protected branch`) answers `final_refusal` with the code `git.push_refused` and the first stderr line in the detail. The rounds stop, and the node stays in `External.Requested`.
+    - Any other push failure answers `unknown_outcome`. The read-back decides whether the push landed.
+  - Ruleset: the ruleset of a `push` target blocks only deletion and force push. A `pull_request` rule or a required check refuses every push. For such a branch, use the action `pull_request` with `landing: kanthord`.
+  - Human land: after `git.push_refused`, a human lands the change on the base branch. The human uses a fast-forward of the tested commit, or a commit with the trailer `KanthorD-Tested: <sha>`. Then the human runs `kanthord mission node check <node-id>`. The check finds the tested commit as an ancestor of the base branch, or the trailer, and answers `expected`.
 - Each action implies its expected end state and takes no parameter.
 - The Mission Service stores the changed gate files that the Intake Service computes at the assessment of a node. Find the binding of the repository before you add a path to `gate_files` in its `.kanthord/affected-tests.json`. Find each node that holds a required action of that binding. Pause each such node in `Evaluating` or `External.Requested`. Then block and unblock it, so that a new assessment reads the new declaration. A human can also land or close the open pull request of a node in `External.Requested`.
+
+Cross-host facts, for a project whose worker instances run on more than one host:
+
+- The remote repository is the only shared git state. Hosts share no checkout and no node branch. A host reads the work of another host only through the remote.
+- Landing runs only on the server. The Intake Service lands through a fresh clone of the remote, with the SSH key of the binding. No worker host lands a node.
+- The SSH relay signs for the key of the binding on any branch of the repository. A key limits no branch, so a branch rule of the remote is the only guard of a branch.
+- A workspace stays on the host of its instance. Each instance measures its own workspace, and footprint cleanup runs for each instance.
 
 Coverage and suitability follow [Repository configuration and policy](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.md#repository-configuration-and-policy).
 
@@ -383,6 +406,36 @@ Coverage and suitability follow [Repository configuration and policy](https://gi
 - Git operations use the private key of the `ssh` record and the pinned host key of the address host. The server reads no host SSH configuration, key or agent.
 - Custody checks that the credential has platform `github`, under [suitability](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/custody.impl.md#suitability).
 - These checks read no secret material and assert no narrower upstream scope.
+
+### Run a mission on a feature branch
+
+Use this recipe when a mission lands each node into a feature branch (`fix/x`) and the branch must stay current with `main` until the final pull request.
+An agent cannot keep a merge commit, because each agent turn becomes one ordinary commit. Only the base refresh of the engine keeps a merge, so the binding names `main` as `upstream_branch`.
+
+1. A human creates the branch from `origin/main` and keeps a permanent ruleset on `feat/*` and `fix/*`: no deletion, no force push and a required check.
+2. The binding sets `base_branch` to the feature branch, `upstream_branch: main`, a `pull_request` action and `landing: kanthord`:
+
+   ```json
+   {
+     "strategy": {
+       "base_branch": "fix/x",
+       "upstream_branch": "main",
+       "action": {
+         "name": "pull_request",
+         "follows": { "type": "assessment_passed" },
+         "landing": "kanthord"
+       }
+     }
+   }
+   ```
+
+3. Each node merges `main` into its node branch at the claim and at the release, after it merges the feature branch. Each node lands into the feature branch.
+4. One final `examine` node depends on every `implement` node. Its verifications are, each under the 600 s command limit:
+   - `git merge-base --is-ancestor origin/main HEAD`. With two or more bindings, the root is the `checkouts` directory, so run `git -C <binding> merge-base --is-ancestor origin/main HEAD` for each binding.
+   - The local CI commands of the repository, one command for each verification.
+5. A defect that the examine node finds becomes a fix-node proposal. A human decides the proposal.
+6. A human opens one pull request from the feature branch to `main` and merges it with squash after CI.
+7. Nobody rebases or force-pushes the feature branch.
 
 ### Conversation configuration
 
@@ -1028,7 +1081,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `repository.host_key.unpinned`                               | The address host of a new or changed repository binding holds no pin; `details: { host }`. Binding check and binding verify answer it as `failure_reason: host_key_unknown`.                                                                                                                                                                                                                                                     | binding apply, environment show                                                                                                                                                                                                             |
 | 409   | `repository.credential.ssh_key_legacy`                       | The `ssh_credential` holds no generated key; `details: { credential }`. Binding check and binding verify answer it as `failure_reason: identity_unavailable`.                                                                                                                                                                                                                                                                    | binding apply, environment show                                                                                                                                                                                                             |
 | 400   | `project.bindings.repository.prompt_invalid`                 | A text of `prompts.repository` or `prompts.agents` exceeds 32768 UTF-8 bytes or holds a control character, or the `prompts.instruction_file` path is invalid; `details: { prompt, reason }`. Binding apply also refuses an instruction file that is invalid at the base head. Binding check refuses only an invalid text or path, and answers an invalid head file as `instruction_file.state: invalid`.                         | binding apply, binding check                                                                                                                                                                                                                |
-| 422   | `project.bindings.repository.base_branch_absent`             | The remote does not hold the base branch of the binding. For binding apply and `worker.handover`, the binding names an instruction file.                                                                                                                                                                                                                                                                                         | binding apply, environment show, `worker.handover` (first handover of an attempt that pins its prompt commits)                                                                                                                              |
+| 422   | `project.bindings.repository.base_branch_absent`             | The remote does not hold the base branch of the binding, or the upstream branch (`details: { branch }`). Every binding apply of a changed repository binding checks both branches, with or without an instruction file. For `worker.handover`, the binding names an instruction file.                                                                                                                                            | binding apply, environment show, `worker.handover` (first handover of an attempt that pins its prompt commits)                                                                                                                              |
 | 422   | `project.bindings.repository.ssh_unreachable`                | The repository SSH read fails. For binding apply, the read of the instruction file at the base head also fails or exceeds its deadline. For `worker.handover`, the read of the base head of a binding that names an instruction file fails or exceeds its 20 s deadline. For environment show, the read of the commit or of the files fails or exceeds its deadline. `details: { failure_reason }` names the git failure reason. | binding apply, environment show, `worker.handover` (first handover of an attempt that pins its prompt commits)                                                                                                                              |
 | 400   | `project.bindings.worker.agent_unknown`                      | An entry names an agent the worker does not declare.                                                                                                                                                                                                                                                                                                                                                                             | binding apply                                                                                                                                                                                                                               |
 | 400   | `project.bindings.worker.environment_required`               | A worker binding lists a `container` instance, states no `environment` and the project holds two or more repository bindings; details `{ binding }`.                                                                                                                                                                                                                                                                             | binding apply                                                                                                                                                                                                                               |

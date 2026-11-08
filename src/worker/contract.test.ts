@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { WorkerPlacement } from "../project/contract.ts";
 import { EnvironmentSource } from "../kernel/devcontainer.ts";
+import { ExecutionStopReason } from "../scheduler/contract.ts";
 import {
   ACTION_REQUEST_TOOL_NAME,
   actionRequestResultSchema,
@@ -19,6 +20,7 @@ import {
   POOL_PLACEMENTS,
   RefusalClass,
   ResultClass,
+  StopOrderReason,
   Uncertainty,
 } from "./contract.ts";
 
@@ -184,5 +186,12 @@ test("an execution environment refuses a stored or a repository source with no d
       digest: "",
     }).success,
     false,
+  );
+});
+
+test("the stop order reasons are the execution stop reasons", () => {
+  assert.deepEqual(
+    Object.values(StopOrderReason).sort(),
+    Object.values(ExecutionStopReason).sort(),
   );
 });

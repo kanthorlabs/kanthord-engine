@@ -17,6 +17,7 @@ import {
   INSTANCE_CONNECTION_INFO,
   type InstanceConfiguration,
   instanceConfigurationValue,
+  type StopOrderEntry,
   WORKER_TOKEN_INFO,
 } from "../../worker/contract.ts";
 import type { ExecutionRecord } from "../../scheduler/contract.ts";
@@ -109,6 +110,7 @@ export async function fakeInstanceServer(t: TestContext) {
     machine: null as string | null,
     loginSessions: [] as LoginSessionEntry[],
     footprintOrders: [] as FootprintOrder[],
+    stopOrders: [] as StopOrderEntry[],
     serial: 0,
     current: null as { id: string; name: string } | null,
     workerTokens: new Set<string>(),
@@ -239,6 +241,7 @@ export async function fakeInstanceServer(t: TestContext) {
           login_sessions: state.loginSessions,
           session_reads: [],
           footprint_orders: state.footprintOrders,
+          stop_orders: state.stopOrders,
         },
       };
     }

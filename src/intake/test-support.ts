@@ -110,7 +110,7 @@ export function unusedActionDependencies(): Pick<
     },
     github: new GitHubPlatform({ baseUrl: CLOSED_LOCAL_PORT }),
     gitWriter: {
-      mergePushFresh: unexpectedCollaboration,
+      squashPushFresh: unexpectedCollaboration,
       pushSnapshotFresh: unexpectedCollaboration,
       landedOn: unexpectedCollaboration,
       changedGateFiles: unexpectedCollaboration,

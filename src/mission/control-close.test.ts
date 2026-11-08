@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { isDeepStrictEqual } from "node:util";
 import { test, type TestContext } from "node:test";
+import type { HumanActor } from "../kernel/actor.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -13,6 +15,7 @@ import {
   NodeState,
   PlatformAddressKind,
   RepositoryAction,
+  ResumeTarget,
   RevokeCause,
   type RevokedExecution,
 } from "./contract.ts";
@@ -35,6 +38,8 @@ import {
 import {
   actCalls,
   controlHarness,
+  databaseSnapshot,
+  keptClaimHarness,
   reviewerFinding,
   reviewHarness,
   revokedExecution,
@@ -869,7 +874,7 @@ function landingHarness(
 
 const HUMAN_LANDING: LandingSpec = {
   name: "repo",
-  action: RepositoryAction.MergePush,
+  action: RepositoryAction.Push,
   gateFiles: true,
   address: PlatformAddressKind.BranchPush,
 };
@@ -991,4 +996,251 @@ test("an override or a discard of a Blocked node changes no route", async (t) =>
       });
     assert.equal((await h.byLabel("S1")).route, FindingRoute.Fix);
   }
+});
+
+const HUMAN_PAUSED = "human_paused";
+const CONFLICT = 409;
+const TWO_ACTS = 2;
+const WAKEUP = "wakeup.wake";
+const OVERRIDE = "override";
+const RESUME = "resume";
+const INSTANCE_ARCHIVED = "instance_archived";
+const CLAIM_LIVE = "mission.node.claim_live";
+const CLOSE_DROPPED = "mission.node.close_dropped";
+const ONE_ORDER = 1;
+const NO_ORDERS = 0;
+
+type Kept = ReturnType<typeof keptClaimHarness>;
+
+function overrideBody(k: Kept, state: NodeState) {
+  return {
+    ...k.h.body(state, FIRST_ATTEMPT),
+    result: AssessmentResult.Success,
+  };
+}
+
+function act(k: Kept, name: "override" | "discard", state: NodeState) {
+  return k.h.invoke(`node.${name}`, {
+    params: { node_id: k.h.node_id },
+    query: {},
+    body:
+      name === OVERRIDE
+        ? overrideBody(k, state)
+        : k.h.body(state, FIRST_ATTEMPT),
+  });
+}
+
+function acts(k: Kept, name: "block" | "resume" | "pause" | "ready") {
+  return k.h.invoke(`node.${name}`, {
+    params: { node_id: k.h.node_id },
+    query: {},
+    body: {
+      ...k.h.body(NodeState.Paused, FIRST_ATTEMPT),
+      ...(name === RESUME ? { target: ResumeTarget.Waiting } : {}),
+    },
+  });
+}
+
+function assessments(k: Kept) {
+  return k.h.store.database
+    .prepare("SELECT result FROM mission_assessment WHERE node_id = ?")
+    .all(k.h.node_id)
+    .map((row) => (row as { result: string }).result);
+}
+
+function claimLive(k: Kept) {
+  return (error: unknown) =>
+    error instanceof OperationError &&
+    error.status === CONFLICT &&
+    error.code === CLAIM_LIVE &&
+    isDeepStrictEqual(error.details, {
+      node_id: k.h.node_id,
+      execution_id: k.executionId,
+    });
+}
+
+test("an override of a connected live execution pauses the node, keeps the claim, sends one order and completes after the release", async (t) => {
+  const k = keptClaimHarness(t, IDENTITY, NodeState.Executing);
+  const result = await act(k, "override", NodeState.Executing);
+  assert.equal(result.node.state, NodeState.Paused);
+  assert.equal(k.h.node().state, NodeState.Paused);
+  assert.deepEqual(k.stops, []);
+  assert.equal(
+    k.h.calls.some((call) => call.method === EXECUTION_REVOKED),
+    false,
+  );
+  assert.deepEqual(k.sent, [[k.executionId, "runtime-1", HUMAN_PAUSED, false]]);
+  assert.deepEqual(assessments(k), []);
+  k.keep.live = false;
+  k.h.service.executionReleased(k.executionId, null);
+  assert.equal(k.h.node().state, NodeState.Completed);
+  assert.deepEqual(assessments(k), [AssessmentResult.Success]);
+  assert.equal(actCalls(k.h).length, TWO_ACTS);
+  assert.equal(
+    k.h.calls.filter((call) => call.method === WAKEUP).length,
+    TWO_ACTS,
+  );
+});
+
+test("a discard of a connected live execution reaches Discarded after the release", async (t) => {
+  const k = keptClaimHarness(t, IDENTITY, NodeState.Evaluating);
+  const result = await act(k, "discard", NodeState.Evaluating);
+  assert.equal(result.node.state, NodeState.Paused);
+  assert.equal(k.sent.length, ONE_ORDER);
+  k.keep.live = false;
+  k.h.service.executionReleased(k.executionId, null);
+  assert.equal(k.h.node().state, NodeState.Discarded);
+  assert.deepEqual(assessments(k), [AssessmentResult.Undetermined]);
+});
+
+test("the order deadline revokes the claim with human_paused and the hook ends the override", async (t) => {
+  const k = keptClaimHarness(t, IDENTITY, NodeState.Executing);
+  await act(k, "override", NodeState.Executing);
+  const trace = k.h.service.revokePausedClaim(k.executionId);
+  assert.equal(trace?.execution_id, k.executionId);
+  assert.deepEqual(k.stops, [{ reason: HUMAN_PAUSED, code: null }]);
+  assert.equal(k.h.node().state, NodeState.Paused);
+  k.h.service.executionReleased(k.executionId, null);
+  assert.equal(k.h.node().state, NodeState.Completed);
+});
+
+test("an override of an execution that holds an archive order completes after the archive deadline revoke", async (t) => {
+  const k = keptClaimHarness(t, IDENTITY, NodeState.Executing);
+  k.keep.order = INSTANCE_ARCHIVED;
+  await act(k, "override", NodeState.Executing);
+  assert.equal(k.h.node().state, NodeState.Paused);
+  const ends = k.h.store.transaction((tx) =>
+    k.h.service.revokeForInstanceArchive(
+      tx,
+      k.executionId,
+      "instance",
+      k.h.actor as HumanActor,
+    ),
+  );
+  assert.ok(ends);
+  assert.equal(k.stops.length, ONE_ORDER);
+  assert.equal((k.stops[0] as { reason: string }).reason, INSTANCE_ARCHIVED);
+  assert.equal(k.h.node().state, NodeState.Paused);
+  k.h.service.executionReleased(k.executionId, null);
+  assert.equal(k.h.node().state, NodeState.Completed);
+});
+
+test("an override whose kept claim expires completes when the hook runs after a null deadline revoke", async (t) => {
+  const k = keptClaimHarness(t, IDENTITY, NodeState.Executing);
+  await act(k, "override", NodeState.Executing);
+  k.keep.live = false;
+  assert.equal(k.h.service.revokePausedClaim(k.executionId), null);
+  assert.equal(k.h.node().state, NodeState.Paused);
+  k.h.service.executionReleased(k.executionId, null);
+  assert.equal(k.h.node().state, NodeState.Completed);
+});
+
+test("a discard with a pending close reaches Discarded after a forced archive of a disconnected instance", async (t) => {
+  const k = keptClaimHarness(t, IDENTITY, NodeState.Executing);
+  await act(k, "discard", NodeState.Executing);
+  k.keep.connected = false;
+  const ends = k.h.store.transaction((tx) =>
+    k.h.service.revokeForInstanceArchive(
+      tx,
+      k.executionId,
+      "instance",
+      k.h.actor as HumanActor,
+    ),
+  );
+  assert.ok(ends);
+  assert.equal(k.keep.live, false);
+  assert.equal(k.h.node().state, NodeState.Paused);
+  k.h.service.executionReleased(k.executionId, null);
+  assert.equal(k.h.node().state, NodeState.Discarded);
+});
+
+test("an override and a discard of a disconnected execution revoke at once with the stop human_paused", async (t) => {
+  for (const name of ["override", "discard"] as const) {
+    const k = keptClaimHarness(t, IDENTITY, NodeState.Executing);
+    k.keep.connected = false;
+    const result = await act(k, name, NodeState.Executing);
+    assert.equal(
+      result.node.state,
+      name === OVERRIDE ? NodeState.Completed : NodeState.Discarded,
+    );
+    assert.deepEqual(k.stops, [{ reason: HUMAN_PAUSED, code: null }]);
+    assert.deepEqual(k.sent, []);
+    assert.equal(
+      k.h.calls.filter((call) => call.method === EXECUTION_REVOKED).length,
+      ONE_ACT,
+    );
+  }
+});
+
+test("a repeated override answers the step one result and sends no second order", async (t) => {
+  const k = keptClaimHarness(t, IDENTITY, NodeState.Executing);
+  const first = await act(k, "override", NodeState.Executing);
+  const commits = k.h.commits();
+  const repeated = await act(k, "override", NodeState.Executing);
+  assert.deepEqual(repeated, first);
+  assert.equal(k.sent.length, ONE_ORDER);
+  assert.equal(actCalls(k.h).length, ONE_ACT);
+  assert.equal(k.h.commits(), commits + ONE_ACT);
+});
+
+test("an override during a pending pause stop records the close on the same order and completes after the release", async (t) => {
+  const k = keptClaimHarness(t, IDENTITY, NodeState.Paused);
+  k.keep.order = HUMAN_PAUSED;
+  const result = await act(k, "override", NodeState.Paused);
+  assert.equal(result.node.state, NodeState.Paused);
+  assert.deepEqual(k.stops, []);
+  assert.equal(k.sent.length, NO_ORDERS);
+  k.keep.live = false;
+  k.h.service.executionReleased(k.executionId, null);
+  assert.equal(k.h.node().state, NodeState.Completed);
+});
+
+test("an override of a Paused node with a kept claim and no order revokes at once", async (t) => {
+  const k = keptClaimHarness(t, IDENTITY, NodeState.Paused);
+  const result = await act(k, "override", NodeState.Paused);
+  assert.equal(result.node.state, NodeState.Completed);
+  assert.deepEqual(k.stops, [{ reason: HUMAN_PAUSED, code: null }]);
+});
+
+test("every other control during a pending override refuses with claim_live", async (t) => {
+  const k = keptClaimHarness(t, IDENTITY, NodeState.Executing);
+  await act(k, "override", NodeState.Executing);
+  for (const name of ["block", "resume", "pause", "ready"] as const)
+    await assert.rejects(acts(k, name), claimLive(k));
+  await assert.rejects(act(k, "discard", NodeState.Paused), claimLive(k));
+  assert.equal(k.h.node().state, NodeState.Paused);
+  assert.equal(k.sent.length, ONE_ORDER);
+});
+
+test("step two writes nothing and logs close_dropped when the node left Paused", async (t) => {
+  const k = keptClaimHarness(t, IDENTITY, NodeState.Executing);
+  await act(k, "override", NodeState.Executing);
+  k.h.store.transaction((tx) =>
+    setNodeState(tx, k.h.node_id, NodeState.Waiting),
+  );
+  const before = databaseSnapshot(k.h.store);
+  k.h.service.executionReleased(k.executionId, null);
+  assert.deepEqual(databaseSnapshot(k.h.store), before);
+  const dropped = k.logs.filter((line) => line.msg === CLOSE_DROPPED);
+  assert.equal(dropped.length, ONE_ACT);
+  assert.equal(dropped[0]?.node_id, k.h.node_id);
+  assert.equal(dropped[0]?.act, Act.Override);
+});
+
+test("step two of a rejected act logs close_dropped and removes the pending close", async (t) => {
+  const k = keptClaimHarness(t, IDENTITY, NodeState.Executing);
+  await act(k, "discard", NodeState.Executing);
+  k.h.dependencies.config.text_max_bytes = 1;
+  k.keep.live = false;
+  k.h.service.executionReleased(k.executionId, null);
+  assert.equal(k.h.node().state, NodeState.Paused);
+  assert.equal(
+    k.logs.filter((line) => line.msg === CLOSE_DROPPED).length,
+    ONE_ACT,
+  );
+  k.h.service.executionReleased(k.executionId, null);
+  assert.equal(
+    k.logs.filter((line) => line.msg === CLOSE_DROPPED).length,
+    ONE_ACT,
+  );
 });

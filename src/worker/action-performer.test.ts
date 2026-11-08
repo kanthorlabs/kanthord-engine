@@ -300,30 +300,19 @@ test("dispatch forwards identity, derived operands and the returned address to M
   );
 });
 
-test("merge push records the address and commit returned by Intake", async (t) => {
+test("a push records the branch push of the assessed commit and performs no git write", async (t) => {
   const h = actionable(t);
-  h.entry.action.action = RepositoryAction.MergePush;
-  const pushed = {
+  h.entry.action.action = RepositoryAction.Push;
+  const perform = t.mock.method(h.dependencies.intakeActions, "perform");
+  const request = t.mock.method(h.dependencies.evidenceRequests, "request");
+  assert.equal((await h.perform()).items[0]?.kind, ActionResultKind.Submitted);
+  assert.equal(perform.mock.callCount(), NO_CALLS);
+  assert.deepEqual(request.mock.calls[0]?.arguments[0].body.address, {
     kind: PlatformAddressKind.BranchPush,
     resource_identity: RESOURCE,
     branch: "main",
-    commit: "d".repeat(40),
-  };
-  h.dependencies.intakeActions.perform = async (_call, action, requestKey) => {
-    assert.equal(
-      requestKey,
-      `${h.claim.nodeId}/${FIRST_ATTEMPT}/${h.entry.action.key}/${COMMIT}`,
-    );
-    assert.deepEqual(action, {
-      key: h.entry.action.key,
-      commit: COMMIT,
-      reusedEvidenceId: null,
-    });
-    return pushed;
-  };
-  const request = t.mock.method(h.dependencies.evidenceRequests, "request");
-  assert.equal((await h.perform()).items[0]?.kind, ActionResultKind.Submitted);
-  assert.deepEqual(request.mock.calls[0]?.arguments[0].body.address, pushed);
+    commit: COMMIT,
+  });
 });
 
 test("no-effect refusal releases the reservation for a later invocation", async (t) => {
@@ -392,7 +381,7 @@ test("refused or thrown recording retains the known address as recording uncerta
 
 function humanLanding(t: TestContext) {
   const h = actionable(t);
-  h.entry.action.action = RepositoryAction.MergePush;
+  h.entry.action.action = RepositoryAction.Push;
   h.entry.gate_files = GATE_FILE_PATHS;
   const address = {
     kind: PlatformAddressKind.BranchPush,
@@ -404,7 +393,7 @@ function humanLanding(t: TestContext) {
   return { ...h, address, pushes };
 }
 
-test("a merge push with a gate file records the branch push of the tested commit and pushes nothing", async (t) => {
+test("a push with a gate file records the branch push of the tested commit and pushes nothing", async (t) => {
   const h = humanLanding(t);
   const warned: unknown[][] = [];
   h.dependencies.logger = {
@@ -585,14 +574,12 @@ test("read refusal and unknown read outcome dispatch nothing and release the res
   assert.equal(h.performSpy.mock.callCount(), NO_CALLS);
 });
 
-test("merge push and foreign repository candidates never call read", async (t) => {
+test("push and foreign repository candidates never call read", async (t) => {
   const h = reusable(t);
-  h.entry.action.action = RepositoryAction.MergePush;
+  const read = t.mock.method(h.dependencies.intakeActions, "read");
+  h.entry.action.action = RepositoryAction.Push;
   await h.perform();
-  assert.equal(
-    h.performSpy.mock.calls[0]?.arguments[1]?.reusedEvidenceId,
-    null,
-  );
+  assert.equal(h.performSpy.mock.callCount(), NO_CALLS);
   h.entry.action.action = RepositoryAction.PullRequest;
   h.entry.reuse_candidates[0]!.address = {
     ...PR,
@@ -600,9 +587,10 @@ test("merge push and foreign repository candidates never call read", async (t) =
   };
   await h.perform();
   assert.equal(
-    h.performSpy.mock.calls[1]?.arguments[1]?.reusedEvidenceId,
+    h.performSpy.mock.calls[0]?.arguments[1]?.reusedEvidenceId,
     null,
   );
+  assert.equal(read.mock.callCount(), NO_CALLS);
 });
 
 test("concurrent calls of one execution take a new snapshot after submission", async (t) => {
@@ -1023,9 +1011,9 @@ test("one reviewer execution requests both actions", async (t) => {
     ...h.entry,
     action: {
       ...h.entry.action,
-      key: "other.merge_push",
+      key: "other.push",
       binding_id: other.binding_id,
-      action: RepositoryAction.MergePush,
+      action: RepositoryAction.Push,
       expected_end_state: "base_branch_pushed",
     },
     resource_identity: otherResource,
@@ -1039,24 +1027,18 @@ test("one reviewer execution requests both actions", async (t) => {
   const performed: string[][] = [];
   h.dependencies.intakeActions.perform = async (_call, action) => {
     performed.push([action.key, String(action.commit)]);
-    return action.key === h.entry.action.key ? PR : pushed;
+    return PR;
   };
   const request = t.mock.method(h.dependencies.evidenceRequests, "request");
   const items = (await h.perform()).items;
   assert.equal(items.length, DUAL_CALL_COUNT);
   assert.ok(items.every((item) => item.kind === ActionResultKind.Submitted));
-  assert.deepEqual(
-    performed.sort(),
-    [
-      ["other.merge_push", otherCommit],
-      [h.entry.action.key, COMMIT],
-    ].sort(),
-  );
+  assert.deepEqual(performed, [[h.entry.action.key, COMMIT]]);
   assert.deepEqual(
     request.mock.calls
-      .map((call) => call.arguments[0].body.address.kind)
-      .sort(),
-    [PlatformAddressKind.BranchPush, PlatformAddressKind.PullRequest].sort(),
+      .map((call) => call.arguments[0].body.address)
+      .sort((left, right) => left.kind.localeCompare(right.kind)),
+    [pushed, PR],
   );
 });
 

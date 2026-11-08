@@ -127,14 +127,17 @@ if (args[0] === "build") {
       return answerOf(args);
     },
   };
-  const commands = (): string[][] =>
-    readFileSync(log, "utf8")
+  const commands = (): string[][] => {
+    const written = readFileSync(log, "utf8");
+    return written
+      .slice(0, written.lastIndexOf("\n") + 1)
       .split("\n")
       .filter(Boolean)
       .map((line) => JSON.parse(line) as string[]);
+  };
   const containerfile = (tag: string): string =>
     readFileSync(join(captured, tag.replaceAll("/", "_")), "utf8");
-  return { host, calls, cli, commands, containerfile };
+  return { host, calls, cli, log, commands, containerfile };
 }
 
 export function fakeRepositoryFiles(): RepositoryFiles {

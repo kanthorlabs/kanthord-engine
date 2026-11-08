@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { background } from "../../kernel/context.ts";
+import { background, CancellationContext } from "../../kernel/context.ts";
 import {
   type OperationResult,
   OperationResultType,
@@ -810,4 +810,47 @@ test("a source_invalid operation failure gives its details reason as the stop de
         JSON.stringify(error.cause) === JSON.stringify(cause),
     );
   }
+});
+
+test("a stop context stops the run with the requested stop and a later cancel of the parent changes nothing", async (t) => {
+  const parent = new CancellationContext();
+  const stops = new CancellationContext();
+  const run = new ExecutionRun({
+    claim: CLAIM,
+    clients: {} as MethodClients,
+    credentials: { release: async () => {} },
+    context: parent,
+    stop: stops,
+  });
+  stopAfter(t, () => run.dispose());
+  const requested = new ExecutionStop(EndReason.WorkerStopped, null);
+  stops.cancel(requested);
+  const stopped = await run.checkClaim().catch((error: unknown) => error);
+  assert.ok(stopped instanceof ExecutionStop);
+  assert.equal(stopped.reason, EndReason.WorkerStopped);
+  assert.equal(stopped.code, null);
+  parent.cancel();
+  assert.equal(await run.stopOf(new Error("later")), stopped);
+  assert.equal(
+    await run.stopOf(new ExecutionStop(EndReason.OperationFailed, null)),
+    stopped,
+  );
+  assert.equal(run.cleanupContext().signal.aborted, true);
+});
+
+test("a stop context leaves the cleanup context of the run open", async (t) => {
+  const stops = new CancellationContext();
+  const run = new ExecutionRun({
+    claim: CLAIM,
+    clients: {} as MethodClients,
+    credentials: { release: async () => {} },
+    context: background,
+    stop: stops,
+  });
+  stopAfter(t, () => run.dispose());
+  stops.cancel(new ExecutionStop(EndReason.WorkerStopped, null));
+  assert.equal(run.operationContext.signal.aborted, true);
+  const cleanup = run.cleanupContext();
+  stopAfter(t, () => cleanup.cancel());
+  assert.equal(cleanup.signal.aborted, false);
 });

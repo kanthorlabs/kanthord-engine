@@ -55,6 +55,9 @@ export const ExecutionStopReason = {
   ProviderFailed: "provider_failed",
   NoProgress: "no_progress",
   EnvironmentFailed: "environment_failed",
+  InstanceArchived: "instance_archived",
+  WorkerStopped: "worker_stopped",
+  HumanPaused: "human_paused",
 } as const;
 export const BudgetLimit = {
   Turns: "turns",
@@ -75,6 +78,7 @@ export const EnvironmentFailure = {
   CommandAbsent: "command_absent",
   AffectedInvalid: "affected_invalid",
   AffectedTimeout: "affected_timeout",
+  VerificationTimeout: "verification_timeout",
 } as const;
 export type EnvironmentFailure =
   (typeof EnvironmentFailure)[keyof typeof EnvironmentFailure];
@@ -101,6 +105,10 @@ export function isAdvancingStop(stop: ReleaseStop | null): boolean {
 }
 export const executionStopReasonSchema = z.enum(ExecutionStopReason);
 export type ExecutionStopReason = z.infer<typeof executionStopReasonSchema>;
+export const ORDERED_STOP_REASONS: readonly ExecutionStopReason[] = [
+  ExecutionStopReason.InstanceArchived,
+  ExecutionStopReason.HumanPaused,
+];
 
 function stopCodeFits(stop: {
   reason: ExecutionStopReason;
@@ -119,7 +127,13 @@ function stopCodeFits(stop: {
   if (stop.reason === ExecutionStopReason.ProviderFailed) return providerCode;
   if (stop.reason === ExecutionStopReason.EnvironmentFailed)
     return environmentCode;
-  if (stop.reason === ExecutionStopReason.NoProgress) return stop.code === null;
+  if (
+    stop.reason === ExecutionStopReason.NoProgress ||
+    stop.reason === ExecutionStopReason.InstanceArchived ||
+    stop.reason === ExecutionStopReason.WorkerStopped ||
+    stop.reason === ExecutionStopReason.HumanPaused
+  )
+    return stop.code === null;
   return !budgetCode && !providerCode && !environmentCode;
 }
 
@@ -270,17 +284,23 @@ export interface RevokedExecution {
     root_span_id: string;
   };
   ended_at: number;
+  stop: ReleaseStop | null;
 }
 export interface FailureHold {
   failure_count: number;
   available_at: number | null;
 }
-export interface EndedExecution extends RevokedExecution {
+export interface EndedExecution extends Omit<RevokedExecution, "stop"> {
   transition: NodeTransition;
   hold: FailureHold;
 }
 export interface SchedulerClaims {
-  revoke(tx: Transaction, nodeId: string, now: number): RevokedExecution | null;
+  revoke(
+    tx: Transaction,
+    nodeId: string,
+    now: number,
+    stop?: ReleaseStop,
+  ): RevokedExecution | null;
   settle(tx: Transaction, nodeId: string, now: number): EndedExecution[];
   liveExecutionOf(
     tx: Transaction,
@@ -322,6 +342,17 @@ export interface ExecutionAttribution {
     worker_name: string;
   } | null;
 }
+export interface PauseFactsRecord {
+  consecutive_failures: number;
+  consecutive_stalls: number;
+  last_stop: {
+    execution_id: string;
+    reason: string;
+    code: string | null;
+    detail: string | null;
+    trace_id: string;
+  } | null;
+}
 export interface MissionTransitions {
   claim(
     tx: Transaction,
@@ -353,6 +384,7 @@ export interface MissionTransitions {
     consecutiveFailures: number,
     now: number,
   ): NodeTransition;
+  stopped(tx: Transaction, nodeId: string, now: number): NodeTransition;
 }
 export interface NodeAttemptKey {
   node_id: string;

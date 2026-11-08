@@ -880,6 +880,13 @@ the record adds the `reason` and the `code` of that `stop`. When the stop has a
 cause text, the record also adds `detail`. The `detail` holds the provider error
 text or the thrown error text, with secrets removed and cut to 300 characters.
 
+An execution ends with the `stop` code `affected_timeout` only when the
+affected command of the base head reaches its time limit. A time limit at the
+head commit is a failed affected verdict that the agent sees: the coder gets a
+revision turn, and the reviewer assesses `criterion_not_met`. The text holds the
+time limit, the commit and the last 4 KiB of the output. The execution does not
+end `environment_failed`.
+
 An execution that ends with a release or a closure leaves the binding
 registered, and the application pulls again. A release with a `stop` is a
 release. An execution that ends with no release and no closure exits `1`.
@@ -897,8 +904,12 @@ worker until its lease expires, and settlement then declares it lost. The
 application deregisters only a registration whose runtime identity it knows. It
 exits `0` after a successful deregistration or after the `404` that ends its
 registration, and exits `1` on any other deregistration or cleanup failure,
-without a retry. A 10-second watchdog applies only when no execution is live and
-no registration waits for its answer. `SIGHUP` reopens nothing.
+without a retry. A stop with a live execution first pushes the coder checkpoint
+and releases the execution with `worker_stopped`; a review ends with no
+assessment. The application then deregisters and exits as for an idle stop. A
+failed release exits `1` with `worker.stop.execution_live`. A 10-second watchdog
+applies only when no execution is live and no registration waits for its answer.
+`SIGHUP` reopens nothing.
 
 The [Worker sibling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#the-worker-application) rules the application, credential handover, workspace, prompt configuration, heartbeat expiry and containment.
 Shutdown during a live execution or a registration with no answer, and a stop
@@ -1297,6 +1308,7 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `worker.turn.history_rewritten`                  | An agent turn moves the head of a checkout to a commit that does not contain the head before the turn; the worker restores that head and the steps execution stops.                                                                                                                                                                                                | serve worker                                                               |
 | local           | `worker.turn.git_in_progress`                    | An agent turn leaves a merge, rebase, am, cherry-pick or revert in progress; the worker restores the head before the turn and the steps execution stops.                                                                                                                                                                                                           | serve worker                                                               |
 | local           | `worker.turn.merge_missing`                      | A conflict turn ends with no open merge of the base; the worker restores the head before the turn and the steps execution stops.                                                                                                                                                                                                                                   | serve worker                                                               |
+| local           | `worker.turn.foreign_merge`                      | An agent turn commits a merge of another branch; the worker restores the head before the turn and the steps execution stops.                                                                                                                                                                                                                                       | serve worker                                                               |
 | local           | `worker.git.commit_failed`                       | A gate G commit fails; the steps execution stops with `operation_failed`, and the stop detail holds the redacted git stderr cut to 300 characters.                                                                                                                                                                                                                 | serve worker                                                               |
 
 The internal error `system.composition.unwired` means that the composition root's

@@ -27,6 +27,7 @@ const NO_LOSSES = 0;
 export interface PullDependencies extends ClaimDependencies {
   waiting: WaitingPulls;
   accepting(): boolean;
+  archiving(tx: Transaction, runtimeIdentity: string): boolean;
 }
 
 class Probe {
@@ -45,7 +46,10 @@ function decide(
 ): ClaimResult {
   assert.equal(identity.runtimeIdentity, pull.runtime_identity);
   assert.equal(identity.resourceIdentity, pull.resource_identity);
-  if (dependencies.accepting())
+  if (
+    dependencies.accepting() &&
+    !dependencies.archiving(tx, pull.runtime_identity)
+  )
     return claimOnce(tx, dependencies, identity, pull, now);
   const ended = settleRuntime(tx, dependencies, pull.runtime_identity, now);
   return {

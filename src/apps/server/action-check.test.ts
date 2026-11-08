@@ -184,7 +184,7 @@ async function setup(t: TestContext) {
     version: FIRST_REVISION,
     bindings: {
       gated: repository(GATED_ADDRESS, "pull_request"),
-      pushed: repository(PUSHED_ADDRESS, "merge_push"),
+      pushed: repository(PUSHED_ADDRESS, "push"),
       harness: {
         kind: "worker",
         config: { worker: "claude-code@1", instance_count: SINGLE_INSTANCE },
@@ -352,17 +352,12 @@ async function setup(t: TestContext) {
       number,
     },
   );
-  const branchPushId = await requested(
-    pushedNode,
-    "pushed",
-    "pushed.merge_push",
-    {
-      kind: PlatformAddressKind.BranchPush,
-      resource_identity: binding("pushed").resource_identity,
-      branch: "main",
-      commit: pushed.head,
-    },
-  );
+  const branchPushId = await requested(pushedNode, "pushed", "pushed.push", {
+    kind: PlatformAddressKind.BranchPush,
+    resource_identity: binding("pushed").resource_identity,
+    branch: "main",
+    commit: pushed.head,
+  });
   while (gitHub.calls.length < DEFERRED_GITHUB_CALLS)
     await setImmediate(undefined, { signal: t.signal });
   for (;;) {
@@ -469,7 +464,7 @@ test(
     );
 
     await t.test(
-      "a branch push answers expected while landed and other after a rewrite",
+      "a branch push answers expected while landed and conflict after a rewrite",
       async () => {
         const before = h.materials.length;
         assert.deepEqual(completed<Fold>(await branchPush()), {
@@ -478,7 +473,7 @@ test(
         });
         await rewriteMain(t, h.pushed.bare);
         assert.deepEqual(completed<Fold>(await branchPush()), {
-          end_state: CheckEndState.Other,
+          end_state: CheckEndState.Conflict,
           landed_commits: [],
         });
         assert.equal(h.materials.length, before + TWO_SSH_RELEASES);

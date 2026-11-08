@@ -39,6 +39,7 @@ export interface HostExecutionInput {
   hostHome: string;
   env: NodeJS.ProcessEnv;
   context: Context;
+  stop?: Context;
   sessionRoot?: string;
   log(record: Record<string, unknown>): void;
 }

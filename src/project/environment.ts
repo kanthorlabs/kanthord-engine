@@ -404,14 +404,15 @@ export class ProjectEnvironments {
     context: Context,
   ): Promise<InstructionFile | null> {
     const path = config.prompts?.instruction_file;
-    if (path === undefined) return null;
     const read = await this.readBaseWith(
       () => this.dependencies.sshAccess(config.platform, release),
       config,
-      [path],
+      path === undefined ? [] : [path],
       PROMPT_SOURCE_MAX_BYTES,
       { context },
+      true,
     );
+    if (path === undefined) return null;
     const [file] = read.files;
     assert.ok(file);
     const answer = instructionFileFrom(file, read.commit);
@@ -629,6 +630,7 @@ export class ProjectEnvironments {
     paths: readonly string[],
     maxBytes: number,
     caller: Pick<CallerContext, "context">,
+    checkUpstream = false,
   ): Promise<BaseRead> {
     refuseAborted(caller.context);
     const deadline = new CancellationContext(
@@ -639,23 +641,37 @@ export class ProjectEnvironments {
     try {
       const access = accessOf();
       const { address, ssh } = access;
-      let commit: string | null;
-      try {
-        commit = await this.dependencies.repositoryFiles.resolveBranchCommit(
-          address,
-          config.strategy.base_branch,
-          deadline,
-          end - Date.now(),
-          ssh,
-        );
-      } catch (error) {
-        refuseUnreadable(caller.context, error);
-      }
+      const resolve = async (branch: string) => {
+        try {
+          return await this.dependencies.repositoryFiles.resolveBranchCommit(
+            address,
+            branch,
+            deadline,
+            end - Date.now(),
+            ssh,
+          );
+        } catch (error) {
+          refuseUnreadable(caller.context, error);
+        }
+      };
+      const commit = await resolve(config.strategy.base_branch);
       if (commit === null)
         throw new OperationError(
           SSH_UNREACHABLE_STATUS,
           ProjectErrorCode.RepositoryBaseBranchAbsent,
           "The base branch is absent on the remote.",
+        );
+      const upstream = config.strategy.upstream_branch;
+      if (
+        checkUpstream &&
+        upstream !== undefined &&
+        (await resolve(upstream)) === null
+      )
+        throw new OperationError(
+          SSH_UNREACHABLE_STATUS,
+          ProjectErrorCode.RepositoryBaseBranchAbsent,
+          "The upstream branch is absent on the remote.",
+          { branch: upstream },
         );
       const files = paths.length
         ? await this.readFilesWith(access, commit, paths, maxBytes, deadline)

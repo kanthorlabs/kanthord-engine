@@ -17,8 +17,9 @@ import {
 } from "./steps-implement.ts";
 import type { WorkspaceCheckout } from "./workspace.ts";
 import { NoProgressRule } from "./progress-rule.ts";
+import { COMMAND_LIMIT_MS } from "./budget.ts";
 import { linkUpdatesText } from "./judgement.ts";
-import { readPrior } from "./node-reads.ts";
+import { readPrior, VerdictSource } from "./node-reads.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
 import {
@@ -60,6 +61,7 @@ type Harness = Awaited<ReturnType<typeof fixture>>;
 
 function verdictAt(text: string, checkouts: readonly WorkspaceCheckout[]) {
   return {
+    source: VerdictSource.Rework,
     text,
     findings: [],
     round: null,
@@ -188,6 +190,9 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
       verification: {
         passed: true,
         ran: ONE_COMMAND,
+        index: NO_INDEX,
+        command: "true && true",
+        limit_ms: COMMAND_LIMIT_MS,
         exit_code: PASSED_EXIT_CODE,
         timed_out: false,
       },
@@ -359,6 +364,7 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
     await git.raw(["branch", "-D", SIDE_BRANCH]);
     await headOf(h);
     h.verdict = {
+      source: VerdictSource.Rework,
       text: VERDICT,
       findings: [],
       round: null,

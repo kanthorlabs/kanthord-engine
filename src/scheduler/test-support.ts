@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import type { TestContext } from "node:test";
+import pino from "pino";
 import type { z } from "zod";
 import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
@@ -117,6 +118,10 @@ export function schedulerHarness(
         record("failure", args);
         return transitionFixture();
       },
+      stopped: (...args) => {
+        record("stopped", args);
+        return transitionFixture();
+      },
     },
     registrations: {
       clientAttributionOf: (...args) => {
@@ -203,6 +208,10 @@ export function schedulerHarness(
       executionTransition: (...args) =>
         telemetry.push({ method: "executionTransition", arguments: args }),
     },
+    logger: pino({ level: "silent" }),
+    stopOrderOf: () => null,
+    executionReleased: () => {},
+    archiving: () => false,
     ...overrides,
   };
   const service = new SchedulerService(dependencies);

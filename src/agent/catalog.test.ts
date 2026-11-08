@@ -126,7 +126,7 @@ test("agent prompts are valid published UTF-8 assets", () => {
   );
   assert.ok(
     RE_AGENT_PROMPT.includes(
-      "A finding that violates the default standard is a blocker. A rule of a repository prompt or a binding prompt about the method, the tools, the repository operations or the release is no ground for a blocker. Give a finding on such a rule `action: no`. Every other finding is a suggestion.",
+      "A finding that violates the default standard is a blocker. A rule of a repository prompt or a binding prompt about the method, the tools, the repository operations or the release is no ground for a blocker. A change in the diff that the requirement and the tasks do not ask for is a blocker, also when a merge of another branch brings it in. Give a finding on such a rule `action: no`. Every other finding is a suggestion.",
     ),
   );
   const instructionFileHeading = headingOf({

@@ -71,3 +71,21 @@ test("sleep and retry stop when cancelled", async () => {
   assert.deepEqual(result, { type: OperationResultType.Indeterminate });
   assert.equal(calls, NO_CALLS);
 });
+
+test("retry stops at once when the transport is closed", async () => {
+  let calls = 0;
+  const closed = {
+    type: OperationResultType.Indeterminate,
+    closed: true,
+  } as const;
+  const result = await retryIndeterminate(
+    async () => {
+      calls++;
+      return closed;
+    },
+    Date.now() + 60000,
+    background,
+  );
+  assert.deepEqual(result, closed);
+  assert.equal(calls, FIRST_ATTEMPT);
+});
