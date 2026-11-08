@@ -671,6 +671,9 @@ any project, Intake reads `accountId` with `GET /rest/api/3/myself` and records
 its body holds no hidden marker. A call that ends with no answer sets the request
 `failed`. A failed call answers a result class with the code
 `intake.platform.jira.<class>`.
+A Jira reply refuses a credential whose `site` differs from the `site` of the
+binding, compared with no regard to case. It calls no Jira URL and answers the
+result class `final_refusal` with the code `intake.platform.jira.final_refusal`.
 
 For a `reply` action of a conversation binding of platform `slack`,
 `intake.action.perform` runs the outbound operation `slack.thread_reply`. The
@@ -776,6 +779,9 @@ with `orderBy=-created` and `maxResults=100`, one page, with the credential
 metadata `{ site, cloud_id, email }`. Each item maps to the event id
 `jira_comment:<site>:<id>` and the metadata `{ "event": "comment_listed" }`. A
 failed Jira call answers `502` `intake.platform.jira.<class>` and stores no row.
+A Jira read refuses a credential whose `site` differs from the `site` of the
+binding, compared with no regard to case. It calls no Jira URL, answers `502`
+`intake.platform.jira.final_refusal` and stores no row.
 For `slack_thread` it calls `GET https://slack.com/api/conversations.replies` with `channel`, `ts` set to
 `thread_ts` and `limit=200`, one page, with the user token of the credential of the binding revision.
 It stores each reply other than the parent, the message whose `ts` equals `thread_ts`, as the event id

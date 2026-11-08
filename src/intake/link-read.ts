@@ -36,6 +36,7 @@ import {
   type JiraCall,
   jiraCredentialsOf,
   jiraSiteOf,
+  jiraSiteRefusal,
   listJiraComments,
 } from "./jira.ts";
 import { platformFailure as jiraPlatformFailure } from "./platform-failure.ts";
@@ -157,15 +158,15 @@ async function listJiraItems(
   material: Material,
   key: string,
 ): Promise<ListedItem[]> {
+  const site = jiraSiteOf(target.repository);
+  const refusal = jiraSiteRefusal(target.metadata, site);
+  if (refusal !== null) throw jiraPlatformFailure(Platform.Jira, refusal);
   const call: JiraCall = {
     credentials: jiraCredentialsOf(target.metadata, material.value()),
     signal: caller.context.signal,
     deadlineAt: Date.now() + PLATFORM_CALL_DEADLINE_MS,
   };
-  const answer = await listJiraComments(call, {
-    site: jiraSiteOf(target.repository),
-    key,
-  });
+  const answer = await listJiraComments(call, { site, key });
   if (!answer.ok) throw jiraPlatformFailure(Platform.Jira, answer);
   return answer.value;
 }

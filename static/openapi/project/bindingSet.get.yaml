@@ -547,7 +547,7 @@ components:
                             const: jira
                           site:
                             type: string
-                            pattern: ^[a-z0-9][a-z0-9-]*\.atlassian\.net$
+                            pattern: ^[A-Za-z0-9][A-Za-z0-9-]*\.[Aa][Tt][Ll][Aa][Ss][Ss][Ii][Aa][Nn]\.[Nn][Ee][Tt]$
                           project_key:
                             type: string
                             pattern: ^[A-Z][A-Z0-9_]{1,9}$
@@ -1055,7 +1055,7 @@ components:
                                 const: jira
                               site:
                                 type: string
-                                pattern: ^[a-z0-9][a-z0-9-]*\.atlassian\.net$
+                                pattern: ^[A-Za-z0-9][A-Za-z0-9-]*\.[Aa][Tt][Ll][Aa][Ss][Ss][Ii][Aa][Nn]\.[Nn][Ee][Tt]$
                               project_key:
                                 type: string
                                 pattern: ^[A-Z][A-Z0-9_]{1,9}$

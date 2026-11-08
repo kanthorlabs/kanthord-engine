@@ -8,7 +8,9 @@ import { temporary } from "../kernel/test-support.ts";
 import { gatewayOperations, HEALTHCHECK_OK } from "./contract.ts";
 import { HealthStatus } from "../kernel/service.ts";
 import { HttpStatus } from "../kernel/http.ts";
+import { isObject, isString } from "../kernel/values.ts";
 import { workerOperations } from "../worker/contract.ts";
+import { JIRA_SITE_PATTERN, projectOperations } from "../project/contract.ts";
 import {
   AccessPolicy,
   emptyInput,
@@ -17,6 +19,7 @@ import {
 import { emitOpenAPIFiles, openAPIFileNames, writeOpenAPI } from "./openapi.ts";
 
 const PROJECT_PATH_REFERENCE = "./openapi/project/read.yaml#/pathItem";
+const JIRA_MIXED_CASE_SITE = "Acme.Atlassian.Net";
 const HANDWRITTEN_DOCUMENT = "description: operator-owned\n";
 
 test("OpenAPI projection validates service scopes without making the kernel registry depend on the emitter", () => {
@@ -124,6 +127,24 @@ test("a no-content operation publishes no response content", () => {
   assert.deepEqual(path.post.responses[HttpStatus.NoContent], {
     description: "Completed result",
   });
+});
+
+const PATTERN_KEY = "pattern";
+
+function publishedPatterns(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(publishedPatterns);
+  if (!isObject(value)) return [];
+  return Object.entries(value).flatMap(([key, item]) =>
+    key === PATTERN_KEY && isString(item) ? [item] : publishedPatterns(item),
+  );
+}
+
+test("the published Jira site pattern equals the source of JIRA_SITE_PATTERN", () => {
+  const files = emitOpenAPIFiles([projectOperations["bindingSet.get"]]);
+  const published = publishedPatterns(files).filter((pattern) =>
+    new RegExp(pattern).test(JIRA_MIXED_CASE_SITE),
+  );
+  assert.ok(published.includes(JIRA_SITE_PATTERN.source));
 });
 
 test("the emitter excludes a service operation and a direct operation", () => {
