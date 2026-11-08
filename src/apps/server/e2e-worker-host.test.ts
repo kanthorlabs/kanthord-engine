@@ -51,8 +51,8 @@ import {
 } from "./worker-acceptance-test-support.ts";
 
 const RACE_TIMEOUT = 300000;
-const RACING_CODERS = 2;
-const BARRIER_TIMEOUT_MS = 90000;
+const LAND_GATE_TIMEOUT_MS = 90000;
+const SECOND_LAND = 2;
 const RACE_LAND_TIMEOUT_MS = 240000;
 const RACE_SCRIPT_STEPS = 12;
 const FIRST_REVISION = 1;
@@ -959,7 +959,7 @@ const PUSH_STRATEGY = {
   action: { name: "push", follows: { type: "assessment_passed" } },
 };
 
-async function raceRemote(t: TestContext) {
+async function raceRemote(t: TestContext, gate: ReturnType<typeof landGate>) {
   const sshd = await startTestSshd(t);
   const bare = await createBareRepository(t);
   const git = simpleGit(bare);
@@ -976,11 +976,13 @@ async function raceRemote(t: TestContext) {
   const { squashPushFresh, landedOn } = component;
   component.gitLsRemote = async () => {};
   component.squashPushFresh = (input, context, deadline, ssh) =>
-    squashPushFresh(
-      { ...input, address: origin },
-      context,
-      deadline,
-      routed(ssh),
+    gate.hold(() =>
+      squashPushFresh(
+        { ...input, address: origin },
+        context,
+        deadline,
+        routed(ssh),
+      ),
     );
   component.landedOn = (input, context, deadline, ssh) =>
     landedOn({ ...input, address: origin }, context, deadline, routed(ssh));
@@ -1028,30 +1030,50 @@ async function raceRemote(t: TestContext) {
   return { sshd, bare, git, component, transport };
 }
 
-function racingBarrier(signal: AbortSignal) {
-  const arrivals = Promise.withResolvers<void>();
-  let arrived = 0;
-  const barrier = async () => {
-    if (++arrived === RACING_CODERS) arrivals.resolve();
-    if (arrived > RACING_CODERS) return;
+function landGate() {
+  const secondLand = Promise.withResolvers<void>();
+  const firstLanded = Promise.withResolvers<void>();
+  let lands = 0;
+  let failure: Error | null = null;
+  const within = async (event: Promise<void>, waiting: string) => {
     const stop = new AbortController();
-    const expired = delay(BARRIER_TIMEOUT_MS, undefined, {
-      signal: AbortSignal.any([signal, stop.signal]),
+    const expired = delay(LAND_GATE_TIMEOUT_MS, undefined, {
+      signal: stop.signal,
     }).then(() => {
-      throw new Error(
-        `race barrier: ${arrived} of ${RACING_CODERS} coders arrived within ${BARRIER_TIMEOUT_MS} ms`,
+      failure = new Error(
+        `land gate: ${waiting} within ${LAND_GATE_TIMEOUT_MS} ms, ${lands} lands arrived`,
       );
+      throw failure;
     });
     try {
-      await Promise.race([arrivals.promise, expired]);
+      await Promise.race([event, expired]);
     } finally {
       stop.abort();
     }
   };
-  return { barrier, arrivedCount: () => arrived };
+  const hold = async <T>(land: () => Promise<T>): Promise<T> => {
+    const order = ++lands;
+    if (order > SECOND_LAND) return land();
+    if (order === SECOND_LAND) {
+      secondLand.resolve();
+      await within(firstLanded.promise, "the first land did not finish");
+      return land();
+    }
+    await within(secondLand.promise, "the second land did not arrive");
+    try {
+      return await land();
+    } finally {
+      firstLanded.resolve();
+    }
+  };
+  return {
+    hold,
+    failure: () => failure,
+    landCount: () => lands,
+  };
 }
 
-function racingCoder(barrier: () => Promise<void>) {
+function racingCoder() {
   const fileOf = (context: { messages: unknown[] }) => {
     const text = JSON.stringify(context.messages);
     const node = RACE_NODES.find(({ file }) => text.includes(file));
@@ -1061,7 +1083,6 @@ function racingCoder(barrier: () => Promise<void>) {
   const step = async (context: { messages: { role: string }[] }) => {
     if (context.messages.at(-1)?.role === TOOL_RESULT)
       return fauxAssistantMessage("wrote");
-    await barrier();
     const file = fileOf(context);
     return tool("write", { path: file, content: file });
   };
@@ -1074,7 +1095,8 @@ test(
   "E09.17 two nodes from two workspace roots land on one base, one after a rework, with a linear history",
   { timeout: RACE_TIMEOUT },
   async (t) => {
-    const remote = await raceRemote(t);
+    const gate = landGate();
+    const remote = await raceRemote(t, gate);
     const setup = await workerAcceptance(t, true, {
       fakeSlots: true,
       fixtureOptions: { repositoryConnector: remote.component },
@@ -1112,7 +1134,6 @@ test(
     const applied = await setup.write<{
       bindings: Record<string, { id: string }>;
     }>(["project", "binding", "apply", setup.project_id], exported);
-    const { barrier, arrivedCount } = racingBarrier(t.signal);
     for (const index of [0, 1]) {
       const auth = await setup.fixture.slotClient(
         setup.project_id,
@@ -1122,7 +1143,7 @@ test(
       await inProcessWorker(t, {
         endpoint: setup.fixture.endpoint,
         ...auth,
-        modelRuntimeFactory: scriptedModelRuntime(racingCoder(barrier)),
+        modelRuntimeFactory: scriptedModelRuntime(racingCoder()),
         repositoryTransport: remote.transport,
       });
     }
@@ -1188,11 +1209,14 @@ test(
     try {
       await until(
         readNodes,
-        (states) => states.every(({ state }) => state === NodeState.Completed),
+        (states) => {
+          const failure = gate.failure();
+          if (failure) throw failure;
+          return states.every(({ state }) => state === NodeState.Completed);
+        },
         landed,
       );
     } catch (error) {
-      assert.ok(landed.aborted, String(error));
       const report = (await readNodes()).map(
         ({ state, attempt, paused_context }) => ({
           state,
@@ -1201,7 +1225,7 @@ test(
         }),
       );
       throw new Error(
-        `nodes not completed within ${RACE_LAND_TIMEOUT_MS} ms: ${JSON.stringify({ arrived: arrivedCount(), nodes: report })}`,
+        `nodes not completed within ${RACE_LAND_TIMEOUT_MS} ms: ${String(error)} ${JSON.stringify({ lands: gate.landCount(), nodes: report })}`,
         { cause: error },
       );
     }
