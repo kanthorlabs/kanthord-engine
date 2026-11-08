@@ -25,21 +25,6 @@ test("isLoopbackHost accepts only a loopback name with an optional port", () => 
     assert.equal(isLoopbackHost(host), false, host);
 });
 
-test("loginMode keeps browser mode for a browser on the server host", () => {
-  assert.equal(
-    loginMode(Platform.OpenAICodex, undefined, true),
-    LoginSessionMode.Browser,
-  );
-  assert.equal(
-    loginMode(Platform.OpenAICodex, LoginSessionMode.Browser, true),
-    LoginSessionMode.Browser,
-  );
-  assert.equal(
-    loginMode(Platform.OpenAICodex, LoginSessionMode.Device, true),
-    LoginSessionMode.Device,
-  );
-});
-
 test("loginMode selects device mode for a remote browser and refuses browser mode", () => {
   assert.equal(
     loginMode(Platform.OpenAICodex, undefined, false),

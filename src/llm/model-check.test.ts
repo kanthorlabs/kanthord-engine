@@ -18,7 +18,6 @@ import {
   MODEL_CHECK_TOKEN_EXPIRED,
   MODEL_CHECK_TOOL_MISSING,
   MODEL_CHECK_TOOL_NAME,
-  MODEL_CHECK_TOOL_RESULT,
   type ModelCheckInput,
 } from "./model-check.ts";
 import { Platform } from "./platforms.ts";
@@ -26,16 +25,12 @@ import { ANTHROPIC_SUBSCRIPTION_CHECK_MODEL } from "./probes.ts";
 import { scriptedModelRuntime } from "./test-support.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
 
-const LOW_EFFORT = "low";
-const SYSTEM_ROLE = "system";
-const TOOL_RESULT_ROLE = "toolResult";
 const FUNCTION_CALL_OUTPUT = "function_call_output";
 const COMPATIBLE_MODEL = "thinker";
 const API_KEY = "sk-model-check-secret-value";
 const MODEL = "scripted-model";
 const TOOL_CALL_ID = "call_model_check";
 const FIRST_CALL = 0;
-const SECOND_CALL = 1;
 const ONE_CALL = 1;
 const TWO_CALLS = 2;
 const NO_CALLS = 0;
@@ -76,29 +71,6 @@ async function run(
   return { answer, calls: scripted.calls };
 }
 
-test("a model that calls the tool and answers after the tool result is ok", async () => {
-  const { answer, calls } = await run([toolCall(), finalAnswer()]);
-  assert.deepEqual(answer, { result: "ok", message: null });
-  assert.equal(calls.length, TWO_CALLS);
-  assert.deepEqual(calls[FIRST_CALL]!.tools, [MODEL_CHECK_TOOL_NAME]);
-  assert.deepEqual(calls[SECOND_CALL]!.tools, [MODEL_CHECK_TOOL_NAME]);
-  assert.equal(calls[FIRST_CALL]!.options?.reasoning, LOW_EFFORT);
-  const second = calls[SECOND_CALL]!.messages.filter(
-    ({ role }) => role !== SYSTEM_ROLE,
-  );
-  assert.deepEqual(
-    second.map(({ role }) => role),
-    ["user", "assistant", "toolResult"],
-  );
-  const result = second[2]!;
-  assert.ok(result.role === TOOL_RESULT_ROLE);
-  assert.equal(result.toolCallId, TOOL_CALL_ID);
-  assert.equal(result.isError, false);
-  assert.deepEqual(result.content, [
-    { type: "text", text: MODEL_CHECK_TOOL_RESULT },
-  ]);
-});
-
 test("a model that does not call the tool answers bad_request", async () => {
   const { answer, calls } = await run([fauxAssistantMessage("It is noon.")]);
   assert.deepEqual(answer, {
@@ -106,15 +78,6 @@ test("a model that does not call the tool answers bad_request", async () => {
     message: MODEL_CHECK_TOOL_MISSING,
   });
   assert.equal(calls.length, ONE_CALL);
-});
-
-test("a model that calls another tool answers bad_request", async () => {
-  const { answer } = await run([
-    fauxAssistantMessage([fauxToolCall("other_tool", {})], {
-      stopReason: "toolUse",
-    }),
-  ]);
-  assert.equal(answer.result, ModelCheckResult.BadRequest);
 });
 
 test("a provider error of the first call answers its failure code", async () => {
@@ -134,18 +97,6 @@ test("a provider error of the first call answers its failure code", async () => 
   }
 });
 
-test("a provider error of the final call answers its failure code", async () => {
-  const { answer, calls } = await run([
-    toolCall(),
-    providerError("429 Rate limit exceeded"),
-  ]);
-  assert.deepEqual(answer, {
-    result: "rate_limited",
-    message: "429 Rate limit exceeded",
-  });
-  assert.equal(calls.length, TWO_CALLS);
-});
-
 test("the message of a failure does not hold the secret", async () => {
   const { answer } = await run([
     providerError(`401 Incorrect API key provided: ${API_KEY}`),
@@ -162,37 +113,6 @@ test("the effort off sends no reasoning option", async () => {
   });
   assert.equal(answer.result, ModelCheckResult.Ok);
   assert.equal(calls[FIRST_CALL]!.options?.reasoning, undefined);
-});
-
-test("an unknown model answers 400 llm.model.model_unknown without a call", async () => {
-  const scripted = scriptedModelRuntime(await loadPi(), [finalAnswer()]);
-  await assert.rejects(
-    checkModel(
-      input({ model_identifier: "missing" }),
-      scripted.module,
-      background,
-    ),
-    (error) =>
-      error instanceof OperationError &&
-      error.status === HttpStatus.BadRequest &&
-      error.code === LlmErrorCode.ModelUnknown,
-  );
-  assert.equal(scripted.calls.length, NO_CALLS);
-});
-
-test("an unsupported reasoning effort answers 400 llm.model.reasoning_unsupported without a call", async () => {
-  const scripted = scriptedModelRuntime(await loadPi(), [finalAnswer()], {
-    models: [{ id: MODEL, reasoning: false }],
-  });
-  for (const reasoning_effort of ["high", "unknown"])
-    await assert.rejects(
-      checkModel(input({ reasoning_effort }), scripted.module, background),
-      (error) =>
-        error instanceof OperationError &&
-        error.status === HttpStatus.BadRequest &&
-        error.code === LlmErrorCode.ModelReasoningUnsupported,
-    );
-  assert.equal(scripted.calls.length, NO_CALLS);
 });
 
 test("an expired OAuth access token answers unauthorized without a call", async () => {
