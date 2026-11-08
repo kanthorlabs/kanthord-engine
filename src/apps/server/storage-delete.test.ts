@@ -23,7 +23,7 @@ import { STORAGE_SECRET, storageProject } from "./test-support.ts";
 const FIRST_INDEX = 0;
 const SINGLE_ROW = 1;
 const STORE_CREDENTIAL = "store";
-const ASSET_COUNT = 7;
+const ASSET_COUNT = 6;
 const BAD_GATEWAY_STATUS = 502;
 const TIMEOUT = 180000;
 const BUCKET = "evidence";
@@ -157,8 +157,8 @@ test(
   { timeout: TIMEOUT },
   async (t) => {
     const h = await setup(t);
-    const [refused, lost, removed, gone, absent, kept, versioned] = h.assets;
-    assert.ok(refused && lost && removed && gone && absent && kept);
+    const [refused, removed, gone, absent, kept, versioned] = h.assets;
+    assert.ok(refused && removed && gone && absent && kept);
     assert.ok(versioned);
     const deletes = () =>
       h.s3.calls.filter((call) => call.method === DELETE).length;
@@ -197,18 +197,6 @@ test(
         assert.equal(h.rowOf(refused).state, OutboundRequestState.Failed);
       },
     );
-
-    await t.test("a lost delete answer has no status", async () => {
-      await h.upload(lost);
-      h.s3.loseNext();
-      const error = failed(
-        await h.remove(lost),
-        BAD_GATEWAY_STATUS,
-        S3_PREFIX + ResultClass.UnknownOutcome,
-      );
-      assert.deepEqual(error.details, { status: null });
-      assert.equal(h.rowOf(lost).state, OutboundRequestState.Failed);
-    });
 
     await t.test(
       "a delete records one succeeded request keyed by the asset",

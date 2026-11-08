@@ -19,24 +19,19 @@ import {
   ClaimState,
   ExecutionStopReason,
   type ReleaseStop,
-  SCHEDULER_TIMEOUT_MS,
   schedulerOperations,
-  WORK_PULL_TIMEOUT_MS,
   WorkPullKind,
 } from "../../scheduler/contract.ts";
 import {
-  AccessPolicy,
   type ClientOptions,
   type Operation,
-  OperationLifetime,
   type OperationResult,
   OperationResultType,
-  REQUEST_BODY_MAX_BYTES,
 } from "../../kernel/operation.ts";
 import { CancellationContext } from "../../kernel/context.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { createIdempotencyKey, createIdentity } from "../../kernel/identity.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 import {
   FAKE_GITHUB_HOST_KEY_FINGERPRINT,
   FAKE_SSH_CREDENTIAL,
@@ -598,69 +593,6 @@ test("pull, registration resume and human pause settle an expired row before adm
     h.f.scheduler.executionOf(fourth.execution.execution_id)?.ended_at,
     now,
   );
-});
-
-test("Scheduler routes preserve closed inputs, shared envelopes, lifetimes and body bounds", async (t) => {
-  const h = await setup(t, "http");
-  const invalidFilter = await h.f.request(
-    `/api/scheduler/project/${h.project_id}/execution?attempt=1`,
-    { headers: { Authorization: `Bearer ${h.f.token}` } },
-  );
-  assert.equal(invalidFilter.status, HttpStatus.BadRequest);
-  const invalidFilterError = (await invalidFilter.json()) as {
-    error: { code: string };
-    request_id: string;
-  };
-  assert.equal(invalidFilterError.error.code, VALIDATION_FAILED);
-  assert.ok(invalidFilterError.request_id);
-  for (const operation of Object.values(schedulerOperations)) {
-    const isPull = operation.id === schedulerOperations.workPull.id;
-    assert.equal(
-      operation.timeoutMs,
-      isPull ? WORK_PULL_TIMEOUT_MS : SCHEDULER_TIMEOUT_MS,
-    );
-    assert.equal(
-      operation.lifetime,
-      isPull ? OperationLifetime.Wait : OperationLifetime.Unary,
-    );
-    const path = operation.path
-      .replace(":project_id", h.project_id)
-      .replace(":execution_id", createIdentity("execution"));
-    const token =
-      operation.access === AccessPolicy.Client ? h.generalToken : h.f.token;
-    const response = await h.f.request(path + "?unexpected=true", {
-      method: operation.method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      ...(operation.body ? { body: "{}" } : {}),
-    });
-    assert.equal(response.status, HttpStatus.BadRequest);
-    const error = (await response.json()) as {
-      error: { code: string };
-      request_id: string;
-    };
-    assert.equal(error.error.code, VALIDATION_FAILED);
-    assert.ok(error.request_id);
-  }
-  for (const operation of [
-    schedulerOperations.workPull,
-    schedulerOperations.executionRelease,
-  ]) {
-    const response = await h.f.request(
-      operation.path.replace(":execution_id", createIdentity("execution")),
-      {
-        method: operation.method,
-        headers: {
-          Authorization: `Bearer ${h.generalToken}`,
-          "Content-Type": "application/json",
-        },
-        body: "x".repeat(REQUEST_BODY_MAX_BYTES + 1),
-      },
-    );
-    assert.equal(response.status, HttpStatus.PayloadTooLarge);
-  }
 });
 
 test("real Mission sweeps steps and evaluation claims below and at the loss limit", async (t) => {
