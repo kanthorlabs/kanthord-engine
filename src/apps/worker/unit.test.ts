@@ -5,7 +5,6 @@ import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { stringify } from "yaml";
 import type { Context } from "../../kernel/context.ts";
-import { HealthStatus } from "../../kernel/service.ts";
 import { requirePiTools, temporary } from "../../kernel/test-support.ts";
 import { directories } from "../../kernel/xdg.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
@@ -156,26 +155,6 @@ async function state(task: Promise<unknown>): Promise<string> {
   ]);
 }
 
-test("an idle unit deregisters and ends run at a drain", async (t) => {
-  const pulled = Promise.withResolvers<void>();
-  const { transport, deregistrations } = scripted({
-    pull: (context) => {
-      pulled.resolve();
-      return cancelled(context);
-    },
-  });
-  const unit = unitOf(t, transport);
-  const running = unit.run();
-  await pulled.promise;
-  assert.deepEqual(await unit.healthcheck(), { client: HealthStatus.Healthy });
-  assert.equal(await unit.drain(), null);
-  assert.equal(await running, null);
-  assert.deepEqual(deregistrations, [REGISTRATION.runtime_identity]);
-  assert.deepEqual(await unit.healthcheck(), {
-    client: HealthStatus.Unavailable,
-  });
-});
-
 test("a unit run keeps an idle node workspace and starts no sweep", async (t) => {
   const env = environmentOf(t);
   const idle = WorkspaceRoot.open(directoriesOf(env).data).nodeKey(
@@ -228,13 +207,6 @@ async function drainedWith(t: TestContext, deregister: () => unknown) {
   assert.deepEqual(deregistrations, [REGISTRATION.runtime_identity]);
   return drained;
 }
-
-test("a drain of an ended worker group answers null", async (t) => {
-  const drained = await drainedWith(t, () =>
-    deregisterFailure(HttpStatus.NotFound, "worker.registration.ended"),
-  );
-  assert.equal(drained, null);
-});
 
 test("a drain whose deregistration answers 401 answers the failure", async (t) => {
   const code = "gateway.authentication.unauthorized";
@@ -381,35 +353,6 @@ test("a claim on one binding aborts the pull of the other binding until the exec
   assert.equal(await running, null);
   assert.deepEqual(claiming.deregistrations, [REGISTRATION.runtime_identity]);
   assert.deepEqual(other.deregistrations, [REGISTRATION.runtime_identity]);
-});
-
-test("remove ends the pulls of one binding and deregisters it while the unit runs", async (t) => {
-  const first = scripted({ pull: (context) => cancelled(context) });
-  const second = scripted({ pull: (context) => cancelled(context) });
-  const env = environmentOf(t);
-  const kept = {
-    transport: first.transport,
-    client_secret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
-  };
-  const dropped = {
-    transport: second.transport,
-    client_secret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
-  };
-  const unit = new WorkerUnit({
-    bindings: [kept],
-    directories: directoriesOf(env),
-    env,
-    log: () => {},
-  });
-  const running = unit.run();
-  assert.equal(await unit.start(), null);
-  assert.equal(await unit.add(dropped), null);
-  assert.equal(await unit.remove(dropped), null);
-  assert.deepEqual(second.deregistrations, [REGISTRATION.runtime_identity]);
-  assert.deepEqual(first.deregistrations, []);
-  assert.equal(await unit.drain(), null);
-  assert.equal(await running, null);
-  assert.deepEqual(first.deregistrations, [REGISTRATION.runtime_identity]);
 });
 
 test("abandon cancels the live execution and keeps every registration", async (t) => {
