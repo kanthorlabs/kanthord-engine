@@ -714,6 +714,7 @@ test("a rework assessment and one update give the rationale, the separator and t
     `rework\n\n${linkUpdatesText(LINK_UPDATE_READ)}`,
   );
   assert.deepEqual(prior.verdict?.judged, []);
+  assert.equal(prior.verdict?.linkUpdates, LINK_UPDATE_READ.total);
   assert.deepEqual(requests, [
     {
       params: { execution_id: "execution" },
@@ -743,6 +744,7 @@ test("only an update gives a verdict with no judged commit", async (t) => {
       judged: [],
       findings: [],
       round: null,
+      linkUpdates: LINK_UPDATE_READ.total,
     },
     cleared: null,
   });

@@ -64,6 +64,7 @@ const FETCH_DEADLINE_MS = 20000;
 const MAIN_CHANGE = "main change";
 const MERGE_PARENT_FIELDS = 3;
 const VERDICT_PLANNED = "verdict planned";
+const LINK_UPDATE_COUNT = 3;
 const FAILING_RUNS_LAST = 1 + VERIFICATION_RERUNS + 1;
 
 function writeFile(content: string) {
@@ -873,34 +874,40 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
     return h;
   }
 
-  test("a failed-check verdict on a merged base releases with no agent turn and pushes the merged head", async (t) => {
-    const h = await reworkHarness(t, VerdictSource.FailedChecks, true, []);
-    const instruct = t.mock.method(h.agent, "instruct");
-    const events = t.mock.method(h.run, "log");
-    acceptEvidence(h);
-    recordReleases(h);
-    assert.deepEqual(await runStepsImplement(h), {
-      kind: "released",
-      furtherWork: false,
+  for (const linkUpdates of [undefined, LINK_UPDATE_COUNT])
+    test(`a failed-check verdict with ${linkUpdates ?? 0} link updates on a merged base releases with no agent turn, logs the count and pushes the merged head`, async (t) => {
+      const h = await reworkHarness(t, VerdictSource.FailedChecks, true, []);
+      if (linkUpdates !== undefined) h.verdict = { ...h.verdict!, linkUpdates };
+      const instruct = t.mock.method(h.agent, "instruct");
+      const events = t.mock.method(h.run, "log");
+      acceptEvidence(h);
+      recordReleases(h);
+      assert.deepEqual(await runStepsImplement(h), {
+        kind: "released",
+        furtherWork: false,
+      });
+      assert.equal(instruct.mock.calls.length, NO_PROVIDER_CALLS);
+      assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
+      const planned = events.mock.calls
+        .filter((call) => call.arguments[0] === VERDICT_PLANNED)
+        .map((call) => call.arguments[1]);
+      assert.deepEqual(
+        planned.map((fields) => {
+          const { holds, skipped, link_updates } = fields as {
+            holds: boolean;
+            skipped: string;
+            link_updates: number;
+          };
+          return [holds, skipped, link_updates];
+        }),
+        [[false, "base_merged", linkUpdates ?? 0]],
+      );
+      const pushed = (
+        await simpleGit(h.bare).revparse([`refs/heads/${h.nodeBranch}`])
+      ).trim();
+      assert.equal(pushed, h.checkouts[0]!.head);
+      assert.equal((await simpleGit(h.root).revparse(["HEAD"])).trim(), pushed);
     });
-    assert.equal(instruct.mock.calls.length, NO_PROVIDER_CALLS);
-    assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
-    const planned = events.mock.calls
-      .filter((call) => call.arguments[0] === VERDICT_PLANNED)
-      .map((call) => call.arguments[1]);
-    assert.deepEqual(
-      planned.map((fields) => [
-        (fields as { holds: boolean }).holds,
-        (fields as { skipped: string }).skipped,
-      ]),
-      [[false, "base_merged"]],
-    );
-    const pushed = (
-      await simpleGit(h.bare).revparse([`refs/heads/${h.nodeBranch}`])
-    ).trim();
-    assert.equal(pushed, h.checkouts[0]!.head);
-    assert.equal((await simpleGit(h.root).revparse(["HEAD"])).trim(), pushed);
-  });
 
   test("a conflict rework merges the new base at the claim, runs no agent turn and releases the merged head", async (t) => {
     const h = await reworkHarness(t, VerdictSource.FailedChecks, true, []);
