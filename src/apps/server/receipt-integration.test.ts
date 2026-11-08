@@ -8,6 +8,7 @@ import {
   ResourceKind,
   webhookInboundSchema,
 } from "../../intake/contract.ts";
+import { INTAKE_PLATFORMS } from "../../intake/index.ts";
 import { JIRA_COMMENT_DELIVERY_TEXT } from "../../intake/jira-test-support.ts";
 import { errorSchema } from "../../kernel/errors.ts";
 import { HttpStatus } from "../../kernel/http.ts";
@@ -289,4 +290,129 @@ test("a signed Jira delivery over HTTP stores once under the webhook identifier"
   assert.deepEqual(JSON.parse(stored[0]!.metadata), {
     event: "comment_created",
   });
+});
+
+const SLACK_CREDENTIAL = "slack-signing";
+const SLACK_SIGNING_PLATFORM = "slack_signing_secret";
+const SLACK_FORGED_KEY = "test_private-forged-signing-secret";
+const SLACK_SIGNING_KEY = "test_private-slack-signing-secret";
+const SLACK_TEAM_ID = "T01ABCDEF";
+const SLACK_EVENT_ID = "Ev01ABCDEF";
+const SLACK_CHALLENGE = "challenge-token-1";
+const SLACK_FIRST_REVISION_HUMAN = "ulrich";
+const MS_PER_SECOND = 1000;
+const SLACK_REPLY_TEXT = JSON.stringify({
+  type: "event_callback",
+  team_id: SLACK_TEAM_ID,
+  event_id: SLACK_EVENT_ID,
+  event: {
+    type: "message",
+    channel: "C01ABCDEF",
+    user: "U01ABCDEF",
+    text: "looks good to me",
+    ts: "1700000100.123456",
+    thread_ts: "1700000000.000100",
+  },
+});
+const SLACK_CHALLENGE_TEXT = JSON.stringify({
+  type: "url_verification",
+  challenge: SLACK_CHALLENGE,
+});
+
+async function slackWebhookInbound(fixture: Fixture) {
+  fixture.store.transaction((tx) =>
+    fixture.custody.create(
+      tx,
+      { platforms: INTAKE_PLATFORMS },
+      {
+        name: SLACK_CREDENTIAL,
+        platform: SLACK_SIGNING_PLATFORM,
+        metadata: null,
+        secret: { key: SLACK_SIGNING_KEY },
+      },
+      SLACK_FIRST_REVISION_HUMAN,
+    ),
+  );
+  const authorization = `Bearer ${fixture.token}`;
+  const mutation = (path: string, body: unknown) =>
+    fixture.request(path, {
+      method: "POST",
+      headers: {
+        Authorization: authorization,
+        "Content-Type": "application/json",
+        "Idempotency-Key": createIdempotencyKey(),
+      },
+      body: JSON.stringify(body),
+    });
+  const project = projectOperations.create.output.parse(
+    await (
+      await mutation(projectOperations.create.path, { name: "slack-receipts" })
+    ).json(),
+  );
+  const created = await mutation(intakeOperations["inbound.create"].path, {
+    project_id: project.id,
+    kind: "webhook",
+    platform: "slack",
+    consumer: "mission.delivery.admit",
+    credential: SLACK_CREDENTIAL,
+    configuration: {
+      resource_kind: ResourceKind.Conversation,
+      resource: SLACK_TEAM_ID,
+    },
+  });
+  assert.equal(created.status, HttpStatus.Created);
+  return intakeOperations["inbound.create"].output.parse(await created.json());
+}
+
+function postSlack(
+  fixture: Fixture,
+  inboundId: string,
+  body: string,
+  secret: string = SLACK_SIGNING_KEY,
+) {
+  const timestamp = String(Math.floor(Date.now() / MS_PER_SECOND));
+  const digest = createHmac("sha256", secret)
+    .update(`v0:${timestamp}:${body}`)
+    .digest("hex");
+  return fixture.request(`/hooks/${inboundId}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Slack-Request-Timestamp": timestamp,
+      "X-Slack-Signature": `v0=${digest}`,
+    },
+    body,
+  });
+}
+
+test("a signed Slack delivery over HTTP answers the challenge, stores one event and refuses a wrong signature", async (t: TestContext) => {
+  const fixture = await gatewayFixture(t);
+  fixture.intake.dispatcher.quiesce();
+  const inbound = await slackWebhookInbound(fixture);
+  const challenge = await postSlack(fixture, inbound.id, SLACK_CHALLENGE_TEXT);
+  assert.equal(challenge.status, HttpStatus.OK);
+  assert.deepEqual(await challenge.json(), { challenge: SLACK_CHALLENGE });
+  const forged = await postSlack(
+    fixture,
+    inbound.id,
+    SLACK_REPLY_TEXT,
+    SLACK_FORGED_KEY,
+  );
+  assert.equal(forged.status, HttpStatus.Unauthorized);
+  assert.equal(
+    codeOf(await forged.json()),
+    IntakeErrorCode.InboundEventSignatureInvalid,
+  );
+  assert.equal(storedEvents(fixture, inbound.id).length, NO_ROWS);
+  for (const attempt of [FIRST_DELIVERY, FIRST_DELIVERY])
+    assert.equal(
+      (await postSlack(fixture, inbound.id, SLACK_REPLY_TEXT)).status,
+      HttpStatus.Accepted,
+      attempt,
+    );
+  const stored = storedEvents(fixture, inbound.id);
+  assert.equal(stored.length, ONE_ROW);
+  assert.equal(stored[0]!.event_id, SLACK_EVENT_ID);
+  assert.equal(Buffer.from(stored[0]!.event).toString(), SLACK_REPLY_TEXT);
+  assert.deepEqual(JSON.parse(stored[0]!.metadata), { event: "message" });
 });

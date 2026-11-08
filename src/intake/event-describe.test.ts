@@ -48,6 +48,18 @@ import {
   jiraWebhookComment,
 } from "./jira-test-support.ts";
 import { intakeMigrations } from "./migrations.ts";
+import {
+  SLACK_MESSAGE_EVENT,
+  SLACK_PERMALINK,
+  SLACK_REPLY_MS,
+  SLACK_REPLY_TEXT,
+  SLACK_TEAM_ID,
+  SLACK_THREAD_TS,
+  SLACK_USER_ID,
+  slackBytes,
+  slackEventCallback,
+  slackMessage,
+} from "./slack-test-support.ts";
 import { unusedActionDependencies } from "./test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -147,6 +159,32 @@ function harness(t: TestContext) {
         created_at: CREATED_AT,
       }),
     );
+  const slackInboundId = allocateInboundId();
+  store.transaction((tx) =>
+    insertInbound(tx, slackInboundId, {
+      project_id: PROJECT_ID,
+      kind: InboundKind.Webhook,
+      platform: InboundPlatform.Slack,
+      consumer: Consumer.MissionDeliveryAdmit,
+      credential: "slack-signing",
+      configuration: {
+        resource_kind: ResourceKind.Conversation,
+        resource: SLACK_TEAM_ID,
+      },
+      checkpoint: null,
+      created_at: CREATED_AT,
+    }),
+  );
+  const addSlackEvent = (event: Uint8Array) =>
+    store.transaction((tx) =>
+      insertEvent(tx, {
+        inbound_id: slackInboundId,
+        event_id: `event-${(sequence += 1)}`,
+        event,
+        metadata: { event: SLACK_MESSAGE_EVENT },
+        created_at: CREATED_AT,
+      }),
+    );
   const changes = () =>
     Number(
       (
@@ -155,7 +193,7 @@ function harness(t: TestContext) {
         }
       ).total,
     );
-  return { describe, addEvent, addJiraEvent, changes };
+  return { describe, addEvent, addJiraEvent, addSlackEvent, changes };
 }
 
 async function refusal(promise: Promise<unknown>): Promise<OperationError> {
@@ -284,6 +322,54 @@ test("a Jira body with a token answers the marker of its rule in place of the to
 test("a stored Jira event of another kind answers four null fields", async (t) => {
   const h = harness(t);
   const id = h.addJiraEvent(Buffer.from("{}"));
+  assert.deepEqual(await h.describe(id), {
+    author: null,
+    body: null,
+    url: null,
+    occurred_at: null,
+  });
+});
+
+test("a stored Slack thread reply answers the user, the whole text, the permalink and the time", async (t) => {
+  const h = harness(t);
+  const text = "x".repeat(5000);
+  const id = h.addSlackEvent(
+    slackBytes(slackEventCallback(slackMessage({ text }))),
+  );
+  assert.deepEqual(await h.describe(id), {
+    author: SLACK_USER_ID,
+    body: text,
+    url: SLACK_PERMALINK,
+    occurred_at: SLACK_REPLY_MS,
+  });
+  const short = h.addSlackEvent(slackBytes(slackEventCallback()));
+  assert.equal(
+    ((await h.describe(short)) as { body: string }).body,
+    SLACK_REPLY_TEXT,
+  );
+});
+
+test("a Slack body with a token answers the marker of its rule in place of the token", async (t) => {
+  const h = harness(t);
+  const id = h.addSlackEvent(
+    slackBytes(
+      slackEventCallback(
+        slackMessage({ text: BODY_PREFIX + AWS_KEY + BODY_SUFFIX }),
+      ),
+    ),
+  );
+  const answer = (await h.describe(id)) as { body: string };
+  assert.equal(
+    answer.body,
+    BODY_PREFIX + tracerMarker(SensitiveRule.AwsAccessKeyId) + BODY_SUFFIX,
+  );
+});
+
+test("a stored Slack parent message answers four null fields", async (t) => {
+  const h = harness(t);
+  const id = h.addSlackEvent(
+    slackBytes(slackEventCallback(slackMessage({ ts: SLACK_THREAD_TS }))),
+  );
   assert.deepEqual(await h.describe(id), {
     author: null,
     body: null,

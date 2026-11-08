@@ -2,6 +2,13 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
+import {
+  GrantKind,
+  type GrantOf,
+  type GrantRequest,
+  InboundOperation,
+  type Material,
+} from "../custody/contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
 import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -9,7 +16,11 @@ import { HealthRegistry } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
-import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
+import {
+  IN_MEMORY_DATABASE,
+  Store,
+  type Transaction,
+} from "../kernel/store.ts";
 import {
   Consumer,
   InboundEventState,
@@ -21,6 +32,8 @@ import {
   intakeOperations,
   ResourceKind,
 } from "./contract.ts";
+import type { IntakeCustody } from "./action-check.ts";
+import { Platform } from "./credential-platform.ts";
 import { IntakeService } from "./index.ts";
 import { allocateInboundId, insertInbound } from "./inbound-store.ts";
 import { intakeMigrations } from "./migrations.ts";
@@ -31,6 +44,23 @@ import {
   JIRA_WEBHOOK_EVENT,
   jiraWebhookComment,
 } from "./jira-test-support.ts";
+import {
+  SLACK_CHALLENGE,
+  SLACK_EVENT_ID,
+  SLACK_MESSAGE_EVENT,
+  SLACK_OTHER_TEAM_ID,
+  SLACK_PARENT_DELIVERY_TEXT,
+  SLACK_REPLY_DELIVERY_TEXT,
+  SLACK_SIGNATURE_HEADER_NAME,
+  SLACK_SIGNING_SECRET,
+  SLACK_TEAM_ID,
+  SLACK_TIMESTAMP_HEADER_NAME,
+  SLACK_URL_VERIFICATION_TEXT,
+  slackEventCallback,
+  slackMessage,
+  slackSignature,
+  slackTimestamp,
+} from "./slack-test-support.ts";
 import { unusedActionDependencies } from "./test-support.ts";
 import { webhookSecret } from "./webhook-secret.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
@@ -70,6 +100,61 @@ function sign(secret: string, body: string): string {
   return `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
 }
 
+const SIGNING_CREDENTIAL = "slack-signing";
+const SIGNING_CREDENTIAL_ID = "credential_1";
+
+interface SlackRelease {
+  operation: InboundOperation;
+  credential: string;
+  platform: string;
+  resource: string;
+}
+
+function signingCustody(base: IntakeCustody) {
+  const releases: SlackRelease[] = [];
+  let drops = 0;
+  const custody: IntakeCustody = {
+    ...base,
+    authorizeOperation<R extends GrantRequest>(
+      _tx: Transaction,
+      request: R,
+    ): GrantOf<R["kind"]> {
+      const inbound: GrantRequest = request;
+      assert.ok(inbound.kind === GrantKind.Inbound);
+      assert.equal(inbound.identity.service, INTAKE_SERVICE_NAME);
+      releases.push({
+        operation: inbound.operation,
+        credential: inbound.inbound.credential,
+        platform: inbound.inbound.platform,
+        resource: inbound.inbound.resource,
+      });
+      const grant: GrantOf<typeof GrantKind.Inbound> = {
+        kind: GrantKind.Inbound,
+        credential: inbound.inbound.credential,
+        platform: inbound.inbound.platform,
+        project_id: inbound.inbound.projectId,
+        execution: null,
+        facts: {
+          inbound_id: inbound.inbound.inboundId,
+          resource: inbound.inbound.resource,
+        },
+      };
+      return grant as GrantOf<R["kind"]>;
+    },
+    release(_tx, grant): Material {
+      return {
+        credential_id: SIGNING_CREDENTIAL_ID,
+        platform: grant.platform,
+        value: () => ({ key: SLACK_SIGNING_SECRET }),
+        drop: () => {
+          drops += 1;
+        },
+      };
+    },
+  };
+  return { custody, releases, drops: () => drops };
+}
+
 function harness(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);
   stopAfter(t, () => store.close());
@@ -78,12 +163,14 @@ function harness(t: TestContext) {
   ]);
   const logs: string[] = [];
   const dependencies = unusedActionDependencies();
+  const signing = signingCustody(dependencies.custody);
   const intake = new IntakeService({
     store,
     logger: pino({ level: "trace" }, { write: (line) => logs.push(line) }),
     health: new HealthRegistry(),
     identity: { kind: IdentityKind.Service, service: INTAKE_SERVICE_NAME },
     ...dependencies,
+    custody: signing.custody,
     pendingEventLimit: PENDING_EVENT_LIMIT,
   });
   let wakes = 0;
@@ -131,11 +218,27 @@ function harness(t: TestContext) {
     );
     return { id, secret: webhookSecret(dependencies.masterKey, id) };
   };
-  const receive = async (
+  const addSlackInbound = (resource: string = SLACK_TEAM_ID) => {
+    const id = allocateInboundId();
+    store.transaction((tx) =>
+      insertInbound(tx, id, {
+        project_id: PROJECT_ID,
+        kind: InboundKind.Webhook,
+        platform: InboundPlatform.Slack,
+        consumer: Consumer.MissionDeliveryAdmit,
+        credential: SIGNING_CREDENTIAL,
+        configuration: { resource_kind: ResourceKind.Conversation, resource },
+        checkpoint: null,
+        created_at: CREATED_AT,
+      }),
+    );
+    return { id };
+  };
+  const deliver = async (
     inboundId: string,
     headers: Headers,
     body: string | Uint8Array,
-  ): Promise<Outcome> => {
+  ): Promise<Outcome & { text: string }> => {
     const caller: CallerContext = {
       context: background,
       requestId: createIdentity("request"),
@@ -154,12 +257,20 @@ function harness(t: TestContext) {
           caller,
         );
       assert.ok(answer instanceof Response);
-      assert.equal(await answer.text(), ACKNOWLEDGEMENT_BODY);
-      return { status: answer.status, code: null };
+      return { status: answer.status, code: null, text: await answer.text() };
     } catch (error) {
       if (!(error instanceof OperationError)) throw error;
-      return { status: error.status, code: error.code };
+      return { status: error.status, code: error.code, text: "" };
     }
+  };
+  const receive = async (
+    inboundId: string,
+    headers: Headers,
+    body: string | Uint8Array,
+  ): Promise<Outcome> => {
+    const { text, ...outcome } = await deliver(inboundId, headers, body);
+    assert.equal(text, ACKNOWLEDGEMENT_BODY);
+    return outcome;
   };
   const remove = async (inboundId: string): Promise<Outcome> => {
     const operation = intakeOperations["inbound.delete"];
@@ -197,6 +308,23 @@ function harness(t: TestContext) {
     if (signature !== undefined) headers.set("x-hub-signature", signature);
     return headers;
   };
+  const slack = (
+    body: string,
+    overrides: { secret?: string; timestamp?: string; signature?: string } = {},
+  ) => {
+    const timestamp = overrides.timestamp ?? slackTimestamp();
+    return new Headers({
+      "content-type": "application/json",
+      [SLACK_TIMESTAMP_HEADER_NAME]: timestamp,
+      [SLACK_SIGNATURE_HEADER_NAME]:
+        overrides.signature ??
+        slackSignature(
+          overrides.secret ?? SLACK_SIGNING_SECRET,
+          timestamp,
+          body,
+        ),
+    });
+  };
   const rows = (inboundId: string) =>
     store.transaction(
       (tx) =>
@@ -209,7 +337,11 @@ function harness(t: TestContext) {
   return {
     addInbound,
     addJiraInbound,
+    addSlackInbound,
     jira,
+    slack,
+    signing,
+    deliver,
     receive,
     remove,
     github,
@@ -531,4 +663,214 @@ test("a Jira inbound verifies with its derived secret only", async (t) => {
     SIGNATURE_INVALID,
   );
   assert.equal(h.rows(jira.id).length, UNSTORED_ROW_COUNT);
+});
+
+const STALE_SECONDS = 301;
+const WRONG_SECRET = "test_private-wrong-signing-secret";
+const SLACK_ATTEMPT_COUNT_ONE = 1;
+const OTHER_TEAM_DELIVERY_TEXT = JSON.stringify(
+  slackEventCallback(slackMessage(), { team_id: SLACK_OTHER_TEAM_ID }),
+);
+const SLACK_ACCEPTED = { status: HttpStatus.Accepted, code: null };
+
+test("a valid v0 signature with a fresh timestamp stores one event under event_id and releases the signing secret once", async (t) => {
+  const h = harness(t);
+  const { id } = h.addSlackInbound();
+  assert.deepEqual(
+    await h.receive(
+      id,
+      h.slack(SLACK_REPLY_DELIVERY_TEXT),
+      SLACK_REPLY_DELIVERY_TEXT,
+    ),
+    SLACK_ACCEPTED,
+  );
+  const stored = h.rows(id);
+  assert.equal(stored.length, ROWS_PER_DELIVERY);
+  assert.equal(stored[0]!.event_id, SLACK_EVENT_ID);
+  assert.equal(
+    Buffer.from(stored[0]!.event).toString(),
+    SLACK_REPLY_DELIVERY_TEXT,
+  );
+  assert.deepEqual(JSON.parse(stored[0]!.metadata), {
+    event: SLACK_MESSAGE_EVENT,
+  });
+  assert.equal(stored[0]!.state, InboundEventState.Pending);
+  assert.equal(h.wakes(), WAKES_PER_DELIVERY);
+  assert.deepEqual(h.signing.releases, [
+    {
+      operation: InboundOperation.Receipt,
+      credential: SIGNING_CREDENTIAL,
+      platform: Platform.SlackSigningSecret,
+      resource: SLACK_TEAM_ID,
+    },
+  ]);
+  assert.equal(h.signing.drops(), SLACK_ATTEMPT_COUNT_ONE);
+});
+
+test("a stale or future timestamp, a missing or duplicate header, a malformed and a wrong signature answer 401 and store nothing", async (t) => {
+  const h = harness(t);
+  const { id } = h.addSlackInbound();
+  const body = SLACK_REPLY_DELIVERY_TEXT;
+  const valid = h.slack(body);
+  const validSignature = valid.get(SLACK_SIGNATURE_HEADER_NAME)!;
+  const digest = validSignature.slice("v0=".length);
+  const withoutSignature = h.slack(body);
+  withoutSignature.delete(SLACK_SIGNATURE_HEADER_NAME);
+  const withoutTimestamp = h.slack(body);
+  withoutTimestamp.delete(SLACK_TIMESTAMP_HEADER_NAME);
+  const duplicateSignature = h.slack(body);
+  duplicateSignature.append(SLACK_SIGNATURE_HEADER_NAME, validSignature);
+  const duplicateTimestamp = h.slack(body);
+  duplicateTimestamp.append(
+    SLACK_TIMESTAMP_HEADER_NAME,
+    valid.get(SLACK_TIMESTAMP_HEADER_NAME)!,
+  );
+  const refusals = [
+    h.slack(body, { timestamp: slackTimestamp(-STALE_SECONDS) }),
+    h.slack(body, { timestamp: slackTimestamp(STALE_SECONDS) }),
+    withoutSignature,
+    withoutTimestamp,
+    duplicateSignature,
+    duplicateTimestamp,
+    h.slack(body, { signature: digest }),
+    h.slack(body, { signature: `sha256=${digest}` }),
+    h.slack(body, { signature: `v0=${NON_HEX_DIGEST}` }),
+    h.slack(body, { signature: `v0=${SHORT_DIGEST}` }),
+    h.slack(body, { signature: `${validSignature}00` }),
+    h.slack(body, { signature: `v0=${ZERO_DIGEST}` }),
+    h.slack(body, { secret: WRONG_SECRET }),
+    h.slack(body, { timestamp: "1e9" }),
+    h.slack(body, { timestamp: `-${slackTimestamp()}` }),
+  ];
+  for (const headers of refusals)
+    assert.deepEqual(await h.receive(id, headers, body), SIGNATURE_INVALID);
+  assert.deepEqual(await h.receive(id, valid, `${body} `), SIGNATURE_INVALID);
+  assert.equal(h.rows(id).length, UNSTORED_ROW_COUNT);
+  assert.equal(h.wakes(), WAKES_AFTER_REFUSAL);
+  assert.equal(
+    h.signing.releases.length,
+    refusals.length + SLACK_ATTEMPT_COUNT_ONE,
+  );
+  assert.equal(h.signing.drops(), h.signing.releases.length);
+});
+
+test("a signed url_verification answers the challenge and stores nothing", async (t) => {
+  const h = harness(t);
+  const { id } = h.addSlackInbound();
+  const answer = await h.deliver(
+    id,
+    h.slack(SLACK_URL_VERIFICATION_TEXT),
+    SLACK_URL_VERIFICATION_TEXT,
+  );
+  assert.equal(answer.status, HttpStatus.OK);
+  assert.deepEqual(JSON.parse(answer.text), { challenge: SLACK_CHALLENGE });
+  assert.equal(h.rows(id).length, UNSTORED_ROW_COUNT);
+  assert.equal(h.wakes(), WAKES_AFTER_REFUSAL);
+  assert.equal(h.signing.drops(), SLACK_ATTEMPT_COUNT_ONE);
+  const forged = await h.deliver(
+    id,
+    h.slack(SLACK_URL_VERIFICATION_TEXT, { secret: WRONG_SECRET }),
+    SLACK_URL_VERIFICATION_TEXT,
+  );
+  assert.deepEqual(
+    { status: forged.status, code: forged.code },
+    SIGNATURE_INVALID,
+  );
+});
+
+test("a repeated event_id stores one row and a body of another team is stored", async (t) => {
+  const h = harness(t);
+  const { id } = h.addSlackInbound();
+  const deliver = (body: string) => h.receive(id, h.slack(body), body);
+  assert.deepEqual(await deliver(SLACK_REPLY_DELIVERY_TEXT), SLACK_ACCEPTED);
+  assert.deepEqual(
+    await deliver(`${SLACK_REPLY_DELIVERY_TEXT}\n`),
+    SLACK_ACCEPTED,
+  );
+  const stored = h.rows(id);
+  assert.equal(stored.length, ROWS_PER_DELIVERY);
+  assert.equal(
+    Buffer.from(stored[0]!.event).toString(),
+    SLACK_REPLY_DELIVERY_TEXT,
+  );
+  const other = h.addSlackInbound();
+  assert.deepEqual(
+    await h.receive(
+      other.id,
+      h.slack(OTHER_TEAM_DELIVERY_TEXT),
+      OTHER_TEAM_DELIVERY_TEXT,
+    ),
+    SLACK_ACCEPTED,
+  );
+  assert.equal(h.rows(other.id).length, ROWS_PER_DELIVERY);
+});
+
+test("a signed delivery of another shape answers 400 and stores nothing", async (t) => {
+  const h = harness(t);
+  const { id } = h.addSlackInbound();
+  const noEventId = JSON.stringify({
+    type: "event_callback",
+    event: { type: SLACK_MESSAGE_EVENT },
+  });
+  const noChallenge = JSON.stringify({ type: "url_verification" });
+  const rateLimited = JSON.stringify({ type: "app_rate_limited" });
+  for (const body of [
+    "{}",
+    "not json",
+    "[]",
+    noEventId,
+    noChallenge,
+    rateLimited,
+  ])
+    assert.deepEqual(await h.receive(id, h.slack(body), body), {
+      status: HttpStatus.BadRequest,
+      code: VALIDATION_FAILED,
+    });
+  assert.equal(h.rows(id).length, UNSTORED_ROW_COUNT);
+  assert.equal(h.signing.drops(), h.signing.releases.length);
+});
+
+test("a parent message is stored at the receipt", async (t) => {
+  const h = harness(t);
+  const { id } = h.addSlackInbound();
+  assert.deepEqual(
+    await h.receive(
+      id,
+      h.slack(SLACK_PARENT_DELIVERY_TEXT),
+      SLACK_PARENT_DELIVERY_TEXT,
+    ),
+    SLACK_ACCEPTED,
+  );
+  assert.equal(h.rows(id).length, ROWS_PER_DELIVERY);
+});
+
+test("a commit failure after a verified delivery stores nothing and still drops the material", async (t) => {
+  const h = harness(t);
+  const { id } = h.addSlackInbound();
+  h.failCommits();
+  await assert.rejects(
+    h.receive(
+      id,
+      h.slack(SLACK_REPLY_DELIVERY_TEXT),
+      SLACK_REPLY_DELIVERY_TEXT,
+    ),
+    { message: "commit refused" },
+  );
+  assert.equal(h.rows(id).length, UNSTORED_ROW_COUNT);
+  assert.equal(h.signing.releases.length, SLACK_ATTEMPT_COUNT_ONE);
+  assert.equal(h.signing.drops(), SLACK_ATTEMPT_COUNT_ONE);
+});
+
+test("a Slack inbound does not verify with its derived webhook secret", async (t) => {
+  const h = harness(t);
+  const { id } = h.addSlackInbound();
+  const derived = h.addInbound().secret;
+  assert.deepEqual(
+    await h.receive(
+      id,
+      h.slack(SLACK_REPLY_DELIVERY_TEXT, { secret: derived }),
+      SLACK_REPLY_DELIVERY_TEXT,
+    ),
+    SIGNATURE_INVALID,
+  );
 });

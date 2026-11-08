@@ -219,6 +219,8 @@ export class IntakeService implements Service, IntakeCollaborations {
         receiveEvent(
           {
             store: this.dependencies.store,
+            identity: this.dependencies.identity,
+            custody: this.dependencies.custody,
             masterKey: this.dependencies.masterKey,
             pendingEventLimit:
               this.dependencies.pendingEventLimit ?? PENDING_EVENT_LIMIT,

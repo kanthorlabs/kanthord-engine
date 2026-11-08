@@ -1,5 +1,8 @@
 import { InboundPlatform } from "../../intake/contract.ts";
-import { decodeJiraLinkUpdate } from "../../intake/index.ts";
+import {
+  decodeJiraLinkUpdate,
+  decodeSlackLinkUpdate,
+} from "../../intake/index.ts";
 import type { EventDecoder } from "../../mission/contract.ts";
 import { RepositoryPlatform } from "../../project/contract.ts";
 import {
@@ -21,6 +24,12 @@ export const missionEventDecoder: EventDecoder = {
       });
     if (platform === InboundPlatform.Jira)
       return decodeJiraLinkUpdate({
+        resource_identity: resource,
+        event,
+        metadata,
+      });
+    if (platform === InboundPlatform.Slack)
+      return decodeSlackLinkUpdate({
         resource_identity: resource,
         event,
         metadata,
