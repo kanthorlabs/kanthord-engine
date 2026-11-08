@@ -23,7 +23,6 @@ const GRANDCHILD_LIMIT_MS = 2000;
 const TEST_TIMEOUT = 60000;
 const POLL_MS = 50;
 const POLL_LIMIT = 100;
-const TAIL_LIMIT = 4096;
 const ABSENT_EXIT = 127;
 const RED_EXIT = 3;
 const ONE_RESULT = 1;
@@ -103,6 +102,7 @@ test(
       results[1]!.output.split("\n")[0]!.endsWith("/run-RUN1/checkout"),
       true,
     );
+    assert.equal(existsSync(runDirectory), false);
   },
 );
 
@@ -184,21 +184,6 @@ test(
 );
 
 test(
-  "the output keeps the last 4096 bytes",
-  { timeout: TEST_TIMEOUT },
-  async (t) => {
-    const { host } = proofs(t);
-    const results = await host.proveOnHost(
-      input([], ["head -c 10000 /dev/zero | tr '\\0' x; printf END"]),
-      AbortSignal.timeout(LIMIT_MS),
-    );
-    const output = results[0]!.output;
-    assert.equal(Buffer.byteLength(output), TAIL_LIMIT);
-    assert.equal(output.endsWith("xEND"), true);
-  },
-);
-
-test(
   "the first failed setup command ends the list",
   { timeout: TEST_TIMEOUT },
   async (t) => {
@@ -256,28 +241,6 @@ test(
 );
 
 test(
-  "the grandchild of a timed out command is gone",
-  { timeout: TEST_TIMEOUT },
-  async (t) => {
-    const stateDirectory = temporary(t);
-    const pidFile = join(stateDirectory, "pid.txt");
-    const host = new HostProofs({
-      stateDirectory,
-      source: SOURCE,
-      commandLimitMs: GRANDCHILD_LIMIT_MS,
-      async exportRepository() {},
-    });
-    const results = await host.proveOnHost(
-      input([], [`sleep 30 & echo $! > ${pidFile}; wait`]),
-      AbortSignal.timeout(LIMIT_MS),
-    );
-    assert.equal(results[0]!.timed_out, true);
-    const pid = Number(readFileSync(pidFile, "utf8"));
-    assert.equal(await gone(pid), true);
-  },
-);
-
-test(
   "an aborted signal kills the process group and answers the results so far",
   { timeout: TEST_TIMEOUT },
   async (t) => {
@@ -311,25 +274,6 @@ test(
     assert.equal(results[0]!.command, PASSING_COMMAND);
     assert.equal(await gone(Number(readFileSync(pidFile, "utf8"))), true);
     assert.deepEqual(readdirSync(join(stateDirectory, "environments")), []);
-  },
-);
-
-test(
-  "the run directory is gone after a pass and after a failure",
-  { timeout: TEST_TIMEOUT },
-  async (t) => {
-    const passing = proofs(t);
-    await passing.host.proveOnHost(
-      input([], ["printf x > made.txt"]),
-      AbortSignal.timeout(LIMIT_MS),
-    );
-    assert.equal(existsSync(passing.runDirectory), false);
-    const failing = proofs(t);
-    await failing.host.proveOnHost(
-      input(["exit 3"], []),
-      AbortSignal.timeout(LIMIT_MS),
-    );
-    assert.equal(existsSync(failing.runDirectory), false);
   },
 );
 

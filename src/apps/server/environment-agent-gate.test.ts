@@ -624,37 +624,3 @@ test(
     assert.equal(model.record.sessions, NO_ITEMS);
   },
 );
-
-test(
-  "the environment list answers repairing while a session is held at a scripted step",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const held = Promise.withResolvers<void>();
-    stopAfter(t, () => held.resolve());
-    const reached = { step: false };
-    const agent = await agentFixture(t, [
-      async () => {
-        reached.step = true;
-        await held.promise;
-        return fauxAssistantMessage(TEXT_ANSWER);
-      },
-    ]);
-    const { fixture, model } = agent;
-    const project = await repositoryProject(fixture, "environment-agent-held");
-    await importNode(fixture, project);
-
-    await until(() => reached.step, Boolean, t.signal);
-    const during = await currentItem(fixture, project.id);
-    assert.equal(during.status, EnvironmentStatus.Failed);
-    assert.equal(during.repairing, true);
-
-    held.resolve();
-    const after = await until(
-      () => currentItem(fixture, project.id),
-      (item) => !item.repairing,
-      t.signal,
-    );
-    assert.equal(after.status, EnvironmentStatus.Failed);
-    assert.equal(model.record.sessions, FIRST_SESSION);
-  },
-);

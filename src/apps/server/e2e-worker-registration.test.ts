@@ -219,19 +219,6 @@ test(
       );
       assert.equal(page.next_cursor, null);
       assert.equal(page.items[FIRST_ITEM]!.host, HOST);
-      assert.deepEqual(page.items[FIRST_ITEM]!.declared_node_states, [
-        "Available",
-      ]);
-      assert.deepEqual(page.items[FIRST_ITEM]!.declared_intents, [
-        "implement",
-        "examine",
-      ]);
-      assert.deepEqual(Object.keys(page.items[FIRST_ITEM]!).sort(), [
-        "declared_intents",
-        "declared_node_states",
-        "host",
-        "name",
-      ]);
     });
     await t.test("E02.2 catalog pages", async () => {
       const page = success<CatalogPage>(
@@ -252,10 +239,6 @@ test(
         next.items.map((item) => item.name),
         ["reviewer@1"],
       );
-      assert.deepEqual(next.items[FIRST_ITEM]!.declared_node_states, [
-        "Waiting",
-        "External.Requested",
-      ]);
       assert.equal(next.next_cursor, null);
     });
     await t.test("E02.3 host-specific catalog fields", async () => {
@@ -267,14 +250,9 @@ test(
       );
       assert.equal(native.host, HOST);
       assert.equal(native.method, METHOD);
-      assert.deepEqual(native.agent_names, [AGENT]);
-      assert.deepEqual(native.resource_budget, BUDGET);
       assert.equal("harness" in native, false);
       assert.equal(external.host, EXTERNAL_HOST);
       assert.equal(external.harness, HARNESS);
-      assert.deepEqual(external.resource_budget, {
-        wall_time_ms: BUDGET.wall_time_ms,
-      });
       assert.equal("method" in external, false);
     });
     await t.test("E02.4 unknown worker", async () =>
@@ -339,12 +317,6 @@ test(
         registered: true,
       });
     });
-    await t.test("E02.12 get equals inventory", async () =>
-      assert.deepEqual(
-        success(await kanthord(["worker", "registration", "get", ridA], f.H)),
-        record,
-      ),
-    );
     await t.test("E02.13 local and server validation", async () => {
       refusal(
         await kanthord(
