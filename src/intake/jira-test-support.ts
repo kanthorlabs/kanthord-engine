@@ -74,6 +74,10 @@ export const JIRA_COMMENT_DELIVERY_TEXT = JSON.stringify({
   comment: { id: JIRA_COMMENT_ID, created: JIRA_CREATED },
 });
 
+export const JIRA_ISSUE_UPDATED_DELIVERY_TEXT = JSON.stringify({
+  webhookEvent: JIRA_ISSUE_UPDATED_EVENT,
+});
+
 export function adfDocument(...blocks: object[]): object {
   return { type: "doc", version: 1, content: blocks };
 }

@@ -25,6 +25,7 @@ import { IntakeService } from "./index.ts";
 import { allocateInboundId, insertInbound } from "./inbound-store.ts";
 import { intakeMigrations } from "./migrations.ts";
 import {
+  JIRA_ISSUE_UPDATED_DELIVERY_TEXT,
   JIRA_ISSUE_UPDATED_EVENT,
   JIRA_RESOURCE,
   JIRA_WEBHOOK_EVENT,
@@ -439,7 +440,7 @@ test("a valid Jira signature stores one event under the webhook identifier with 
 test("a Jira delivery of another event stores its event name", async (t) => {
   const h = harness(t);
   const { id, secret } = h.addJiraInbound();
-  const body = JSON.stringify({ webhookEvent: JIRA_ISSUE_UPDATED_EVENT });
+  const body = JIRA_ISSUE_UPDATED_DELIVERY_TEXT;
   await h.receive(id, h.jira(JIRA_IDENTIFIER, sign(secret, body)), body);
   assert.deepEqual(JSON.parse(h.rows(id)[0]!.metadata), {
     event: JIRA_ISSUE_UPDATED_EVENT,
