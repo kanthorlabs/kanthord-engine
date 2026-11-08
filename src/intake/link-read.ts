@@ -40,6 +40,7 @@ import {
 } from "./jira.ts";
 import { platformFailure as jiraPlatformFailure } from "./platform-failure.ts";
 import { releaseInboundGrant } from "./poll.ts";
+import { listSlackReplies, type SlackCall } from "./slack.ts";
 
 const VALIDATION_FAILED_CODE = "gateway.request.validation_failed";
 
@@ -169,6 +170,26 @@ async function listJiraItems(
   return answer.value;
 }
 
+async function listSlackItems(
+  caller: CallerContext,
+  target: LinkTarget,
+  material: Material,
+  link: Extract<ExternalLink, { kind: typeof ExternalLinkKind.SlackThread }>,
+): Promise<ListedItem[]> {
+  const call: SlackCall = {
+    token: apiKeySecretSchema.parse(material.value()).key,
+    signal: caller.context.signal,
+    deadlineAt: Date.now() + PLATFORM_CALL_DEADLINE_MS,
+  };
+  const answer = await listSlackReplies(call, {
+    team_id: target.repository,
+    channel: link.channel,
+    thread_ts: link.thread_ts,
+  });
+  if (!answer.ok) throw jiraPlatformFailure(Platform.Slack, answer);
+  return answer.value;
+}
+
 async function listItems(
   dependencies: LinkReadDependencies,
   caller: CallerContext,
@@ -176,10 +197,8 @@ async function listItems(
   material: Material,
   link: ExternalLink,
 ): Promise<ListedItem[]> {
-  assert.ok(
-    link.kind !== ExternalLinkKind.SlackThread,
-    "A Slack thread has no link reader.",
-  );
+  if (link.kind === ExternalLinkKind.SlackThread)
+    return listSlackItems(caller, target, material, link);
   if (link.kind === ExternalLinkKind.JiraIssue)
     return listJiraItems(caller, target, material, link.key);
   return listGitHubItems(dependencies, caller, target, material, link.number);

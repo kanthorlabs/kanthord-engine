@@ -21,6 +21,7 @@ import {
   thrownFailureReason,
   thrownReason,
 } from "../kernel/probe.ts";
+import { ResultClass, type ResultClassValue } from "./contract.ts";
 
 export const SLACK_AUTH_TEST_URL = "https://slack.com/api/auth.test";
 
@@ -240,9 +241,7 @@ export function decodeSlackLinkUpdate(input: {
   const { event, link } = reply;
   return {
     external_link: link,
-    update_key: [`${UPDATE_KEY_PREFIX}${teamId}`, link.channel, event.ts].join(
-      UPDATE_KEY_SEPARATOR,
-    ),
+    update_key: updateKeyOf(teamId, link.channel, event.ts),
     actor_id: event.user ?? null,
     actor_automated: isAutomated(event),
     occurred_at: occurredAtOf(reply),
@@ -304,4 +303,262 @@ export async function probeSlackToken(
     );
     return ResourceStatus.Unknown;
   }
+}
+
+export interface SlackCall {
+  token: string;
+  signal: AbortSignal;
+  deadlineAt: number;
+}
+
+export interface SlackTarget {
+  team_id: string;
+  channel: string;
+  thread_ts: string;
+}
+
+export interface SlackFailure {
+  ok: false;
+  class: ResultClassValue;
+  status: number | null;
+  message: string;
+}
+
+export type SlackAnswer<T> = { ok: true; value: T } | SlackFailure;
+
+export interface ListedSlackReply {
+  id: string;
+  type: string;
+  body: Uint8Array;
+}
+
+const SlackCallKind = { Read: "read", Write: "write" } as const;
+type SlackCallKind = (typeof SlackCallKind)[keyof typeof SlackCallKind];
+
+const API_ORIGIN = "https://slack.com/api";
+const REPLIES_METHOD = "conversations.replies";
+const POST_MESSAGE_METHOD = "chat.postMessage";
+const REPLIES_LIMIT = "200";
+const CONTENT_TYPE_JSON = "application/json; charset=utf-8";
+const NO_TIME_LEFT_MS = 0;
+const REPLY_LISTED_EVENT = "reply_listed";
+const ERROR_CODE_PATTERN = /^[a-z0-9_]+$/;
+const RATE_LIMITED_ERROR = "ratelimited";
+const SERVER_ERRORS: ReadonlySet<string> = new Set([
+  "fatal_error",
+  "internal_error",
+  "service_unavailable",
+  "request_timeout",
+]);
+
+const answerSchema = z.looseObject({
+  ok: z.boolean(),
+  error: z.string().optional(),
+});
+const repliesSchema = z.looseObject({
+  messages: z.array(z.looseObject({ ts: z.string().min(1) })),
+});
+const accountSchema = z.looseObject({ user_id: z.string().min(1) });
+const postedSchema = z.looseObject({
+  ts: z.string().min(1),
+  message: z.looseObject({ user: z.string().min(1).nullish() }).nullish(),
+});
+
+function failure(
+  resultClass: ResultClassValue,
+  status: number | null,
+  message: string,
+): SlackFailure {
+  return { ok: false, class: resultClass, status, message };
+}
+
+function transportClass(kind: SlackCallKind): ResultClassValue {
+  return kind === SlackCallKind.Read
+    ? ResultClass.RetryableRefusal
+    : ResultClass.UnknownOutcome;
+}
+
+function statusClass(status: number, kind: SlackCallKind): ResultClassValue {
+  if (status >= HttpStatus.InternalServerError) return transportClass(kind);
+  if (
+    status === HttpStatus.TooManyRequests ||
+    status === HttpStatus.RequestTimeout
+  )
+    return ResultClass.RetryableRefusal;
+  return ResultClass.FinalRefusal;
+}
+
+function errorClass(error: string, kind: SlackCallKind): ResultClassValue {
+  if (error === RATE_LIMITED_ERROR) return ResultClass.RetryableRefusal;
+  if (SERVER_ERRORS.has(error)) return transportClass(kind);
+  return ResultClass.FinalRefusal;
+}
+
+function unreadable(kind: SlackCallKind): SlackFailure {
+  return failure(
+    transportClass(kind),
+    null,
+    "the Slack answer holds an unexpected body",
+  );
+}
+
+async function exchange(
+  call: SlackCall,
+  request: {
+    kind: SlackCallKind;
+    method: string;
+    url: string;
+    body?: unknown;
+  },
+): Promise<SlackAnswer<unknown>> {
+  const remaining = call.deadlineAt - Date.now();
+  if (call.signal.aborted || remaining <= NO_TIME_LEFT_MS)
+    return failure(
+      request.kind === SlackCallKind.Read
+        ? ResultClass.RetryableRefusal
+        : ResultClass.ConfirmedFailure,
+      null,
+      "the deadline of the Slack call passed before dispatch",
+    );
+  const signal = AbortSignal.any([call.signal, AbortSignal.timeout(remaining)]);
+  let status: number;
+  let accepted: boolean;
+  let text: string;
+  try {
+    const response = await globalThis.fetch(request.url, {
+      method: request.method,
+      headers: {
+        [AUTHORIZATION_HEADER]: `Bearer ${call.token}`,
+        ...(request.body === undefined
+          ? {}
+          : { "Content-Type": CONTENT_TYPE_JSON }),
+      },
+      ...(request.body === undefined
+        ? {}
+        : { body: JSON.stringify(request.body) }),
+      signal,
+      redirect: "manual",
+    });
+    status = response.status;
+    accepted = response.ok;
+    text = await response.text();
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    return failure(
+      transportClass(request.kind),
+      null,
+      "the Slack call ended before an answer",
+    );
+  }
+  if (!accepted)
+    return failure(
+      statusClass(status, request.kind),
+      status,
+      "the Slack answer refuses the call",
+    );
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    return unreadable(request.kind);
+  }
+  const answer = answerSchema.safeParse(body);
+  if (!answer.success) return unreadable(request.kind);
+  if (answer.data.ok) return { ok: true, value: body };
+  const { error } = answer.data;
+  const code =
+    error !== undefined && ERROR_CODE_PATTERN.test(error) ? error : null;
+  return failure(
+    code === null ? ResultClass.FinalRefusal : errorClass(code, request.kind),
+    null,
+    code === null
+      ? "the Slack answer refuses the call"
+      : `the Slack answer refuses the call: ${code}`,
+  );
+}
+
+function updateKeyOf(teamId: string, channel: string, ts: string): string {
+  return [`${UPDATE_KEY_PREFIX}${teamId}`, channel, ts].join(
+    UPDATE_KEY_SEPARATOR,
+  );
+}
+
+export async function listSlackReplies(
+  call: SlackCall,
+  target: SlackTarget,
+): Promise<SlackAnswer<ListedSlackReply[]>> {
+  const query = new URLSearchParams({
+    channel: target.channel,
+    ts: target.thread_ts,
+    limit: REPLIES_LIMIT,
+  });
+  const answer = await exchange(call, {
+    kind: SlackCallKind.Read,
+    method: HttpMethod.Get,
+    url: `${API_ORIGIN}/${REPLIES_METHOD}?${query.toString()}`,
+  });
+  if (!answer.ok) return answer;
+  const page = repliesSchema.safeParse(answer.value);
+  if (!page.success) return unreadable(SlackCallKind.Read);
+  return {
+    ok: true,
+    value: page.data.messages
+      .filter((message) => message.ts !== target.thread_ts)
+      .map((message) => ({
+        id: updateKeyOf(target.team_id, target.channel, message.ts),
+        type: REPLY_LISTED_EVENT,
+        body: new Uint8Array(
+          Buffer.from(
+            JSON.stringify({
+              type: BodyType.EventCallback,
+              team_id: target.team_id,
+              event: {
+                ...message,
+                type: MESSAGE_EVENT,
+                channel: target.channel,
+              },
+            }),
+          ),
+        ),
+      })),
+  };
+}
+
+export async function readSlackAccount(
+  call: SlackCall,
+): Promise<SlackAnswer<string>> {
+  const answer = await exchange(call, {
+    kind: SlackCallKind.Read,
+    method: HttpMethod.Post,
+    url: SLACK_AUTH_TEST_URL,
+  });
+  if (!answer.ok) return answer;
+  const account = accountSchema.safeParse(answer.value);
+  return account.success
+    ? { ok: true, value: account.data.user_id }
+    : unreadable(SlackCallKind.Read);
+}
+
+export async function postSlackReply(
+  call: SlackCall,
+  target: SlackTarget,
+  text: string,
+): Promise<SlackAnswer<{ update_key: string; actor_id: string | null }>> {
+  const answer = await exchange(call, {
+    kind: SlackCallKind.Write,
+    method: HttpMethod.Post,
+    url: `${API_ORIGIN}/${POST_MESSAGE_METHOD}`,
+    body: { channel: target.channel, thread_ts: target.thread_ts, text },
+  });
+  if (!answer.ok) return answer;
+  const posted = postedSchema.safeParse(answer.value);
+  if (!posted.success) return unreadable(SlackCallKind.Write);
+  return {
+    ok: true,
+    value: {
+      update_key: updateKeyOf(target.team_id, target.channel, posted.data.ts),
+      actor_id: posted.data.message?.user ?? null,
+    },
+  };
 }

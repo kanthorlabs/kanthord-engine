@@ -1,3 +1,5 @@
+import type { TestContext } from "node:test";
+import { isString } from "../kernel/values.ts";
 import { createHmac } from "node:crypto";
 
 export const SLACK_TEAM_ID = "T01ABCDEF";
@@ -74,4 +76,91 @@ export function slackSignature(
   body: string,
 ): string {
   return `v0=${createHmac("sha256", secret).update(`v0:${timestamp}:${body}`).digest("hex")}`;
+}
+
+export const SLACK_API_ORIGIN = "https://slack.com/api";
+export const SLACK_REPLIES_URL = `${SLACK_API_ORIGIN}/conversations.replies?channel=${SLACK_CHANNEL}&ts=${SLACK_THREAD_TS}&limit=200`;
+export const SLACK_POST_URL = `${SLACK_API_ORIGIN}/chat.postMessage`;
+export const SLACK_TOKEN_ACCOUNT_ID = "U09TOKEN01";
+export const SLACK_SECOND_REPLY_TS = "1700000200.000300";
+export const SLACK_SECOND_UPDATE_KEY = `slack_message:${SLACK_TEAM_ID}:${SLACK_CHANNEL}:${SLACK_SECOND_REPLY_TS}`;
+export const SLACK_REPLY_LISTED_EVENT = "reply_listed";
+const SLACK_OK_STATUS = 200;
+
+export interface SlackRequest {
+  method: string;
+  url: string;
+  authorization: string | null;
+  contentType: string | null;
+  body: unknown;
+}
+
+export function slackResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+export function slackOkResponse(body: object = {}): Response {
+  return slackResponse(SLACK_OK_STATUS, { ok: true, ...body });
+}
+
+export function slackErrorResponse(error: string): Response {
+  return slackResponse(SLACK_OK_STATUS, { ok: false, error });
+}
+
+export function slackListedMessage(overrides: object = {}): object {
+  return {
+    type: SLACK_MESSAGE_EVENT,
+    user: SLACK_USER_ID,
+    text: SLACK_REPLY_TEXT,
+    ts: SLACK_REPLY_TS,
+    thread_ts: SLACK_THREAD_TS,
+    ...overrides,
+  };
+}
+
+export function slackParentMessage(): object {
+  return slackListedMessage({
+    text: "the parent",
+    ts: SLACK_THREAD_TS,
+    reply_count: 2,
+  });
+}
+
+export function slackRepliesPage(...messages: object[]): object {
+  return { messages, has_more: false };
+}
+
+export function slackPostedMessage(ts: string, user?: string): object {
+  return {
+    channel: SLACK_CHANNEL,
+    ts,
+    message: { type: SLACK_MESSAGE_EVENT, ts, ...(user ? { user } : {}) },
+  };
+}
+
+export function mockSlackFetch(
+  t: TestContext,
+  answer: (request: SlackRequest) => Response | Promise<Response>,
+): { requests: SlackRequest[] } {
+  const requests: SlackRequest[] = [];
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async (url: Parameters<typeof globalThis.fetch>[0], init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      const request: SlackRequest = {
+        method: init?.method ?? "GET",
+        url: String(url),
+        authorization: headers.get("authorization"),
+        contentType: headers.get("content-type"),
+        body: isString(init?.body) ? JSON.parse(init.body) : undefined,
+      };
+      requests.push(request);
+      return answer(request);
+    },
+  );
+  return { requests };
 }

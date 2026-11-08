@@ -111,6 +111,7 @@ export const OutboundOperation = {
   GitPush: "git.push",
   GitHubIssueComment: "github.issue_comment",
   JiraIssueComment: "jira.issue_comment",
+  SlackThreadReply: "slack.thread_reply",
   S3DeleteObject: "s3.delete_object",
 } as const;
 export const ResultClass = {
@@ -138,6 +139,7 @@ export const ActionTablePlatform = {
   GitLab: "gitlab",
   Bitbucket: "bitbucket",
   Jira: "jira",
+  Slack: "slack",
 } as const;
 export const ACTION_TABLE = [
   {
@@ -170,10 +172,16 @@ export const ACTION_TABLE = [
     platform: ActionTablePlatform.Jira,
     operation: OutboundOperation.JiraIssueComment,
   },
+  {
+    action: ActionTableAction.Reply,
+    platform: ActionTablePlatform.Slack,
+    operation: OutboundOperation.SlackThreadReply,
+  },
 ] as const;
 export const REPLY_OPERATIONS = [
   OutboundOperation.GitHubIssueComment,
   OutboundOperation.JiraIssueComment,
+  OutboundOperation.SlackThreadReply,
 ] as const;
 export const ActionReadMethod = {
   PullRequestGet: "github-pull-request-get",

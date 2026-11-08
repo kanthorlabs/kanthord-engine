@@ -98,6 +98,7 @@ components:
             - git.push
             - github.issue_comment
             - jira.issue_comment
+            - slack.thread_reply
             - s3.delete_object
         request_key:
           type: string

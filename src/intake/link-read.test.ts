@@ -59,6 +59,26 @@ import {
 } from "./jira-test-support.ts";
 import { type LinkReadDependencies, readLink } from "./link-read.ts";
 import { intakeMigrations } from "./migrations.ts";
+import { decodeSlackLinkUpdate } from "./slack.ts";
+import {
+  mockSlackFetch,
+  SLACK_CHANNEL,
+  SLACK_REPLIES_URL,
+  SLACK_REPLY_LISTED_EVENT,
+  SLACK_RESOURCE_IDENTITY,
+  SLACK_SECOND_REPLY_TS,
+  SLACK_SECOND_UPDATE_KEY,
+  SLACK_TEAM_ID,
+  SLACK_THREAD_TS,
+  SLACK_UPDATE_KEY,
+  SLACK_USER_TOKEN,
+  slackErrorResponse,
+  slackListedMessage,
+  slackOkResponse,
+  slackParentMessage,
+  slackRepliesPage,
+  slackResponse,
+} from "./slack-test-support.ts";
 
 const PROJECT_ID = createIdentity("project");
 const BINDING_ID = createIdentity("binding");
@@ -80,6 +100,7 @@ const SINGLE_CALL = 1;
 const TWO_ITEMS = 2;
 const SECOND_INDEX = 1;
 const FIRST_INDEX = 0;
+const SLACK_SIGNING_CREDENTIAL = "slack-signing";
 const IDENTITY = testServiceIdentity(MISSION_SERVICE_NAME);
 const LINK: ExternalLink = {
   kind: ExternalLinkKind.GitHubIssue,
@@ -160,7 +181,12 @@ function harness(
           credential_id: createIdentity("credential"),
           platform: grant.platform,
           value: () => ({
-            key: grant.platform === InboundPlatform.Jira ? JIRA_TOKEN : TOKEN,
+            key:
+              grant.platform === InboundPlatform.Jira
+                ? JIRA_TOKEN
+                : grant.platform === InboundPlatform.Slack
+                  ? SLACK_USER_TOKEN
+                  : TOKEN,
           }),
           drop: () => drops.push(credential),
         };
@@ -213,6 +239,22 @@ function harness(
         created_at: 1,
       }),
     );
+  const addSlackInbound = (id: string) =>
+    store.transaction((tx) =>
+      insertInbound(tx, id, {
+        project_id: PROJECT_ID,
+        kind: InboundKind.Webhook,
+        platform: InboundPlatform.Slack,
+        consumer: Consumer.MissionDeliveryAdmit,
+        credential: SLACK_SIGNING_CREDENTIAL,
+        configuration: {
+          resource_kind: ResourceKind.Conversation,
+          resource: SLACK_TEAM_ID,
+        },
+        checkpoint: null,
+        created_at: 1,
+      }),
+    );
   const read = (input: Partial<Parameters<typeof readLink>[2]> = {}) =>
     readLink(dependencies, caller, {
       project_id: PROJECT_ID,
@@ -240,6 +282,7 @@ function harness(
     script,
     addInbound,
     addJiraInbound,
+    addSlackInbound,
     read,
     events,
     outbound,
@@ -500,4 +543,172 @@ test("a Jira 401 answers 502 with the Jira result class, stores no row and drops
   });
   assert.equal(h.events().length, NO_ROWS);
   assert.deepEqual(h.drops, [CREDENTIAL]);
+});
+
+const SLACK_LINK: ExternalLink = {
+  kind: ExternalLinkKind.SlackThread,
+  resource_identity: SLACK_RESOURCE_IDENTITY,
+  channel: SLACK_CHANNEL,
+  thread_ts: SLACK_THREAD_TS,
+};
+const SLACK_BINDING: ConversationBinding = {
+  binding_id: BINDING_ID,
+  project_id: PROJECT_ID,
+  resource_identity: SLACK_RESOURCE_IDENTITY,
+  platform: InboundPlatform.Slack,
+  repository: SLACK_TEAM_ID,
+  credential: CREDENTIAL,
+};
+const SLACK_RATE_LIMITED_STATUS = 429;
+
+function slackList(t: TestContext) {
+  return mockSlackFetch(t, () =>
+    slackOkResponse(
+      slackRepliesPage(
+        slackParentMessage(),
+        slackListedMessage(),
+        slackListedMessage({ ts: SLACK_SECOND_REPLY_TS }),
+      ),
+    ),
+  );
+}
+
+test("a Slack link read stores each reply other than the parent as slack_message under the newest slack inbound of the resource", async (t) => {
+  const h = harness(t, SLACK_BINDING);
+  const fetched = slackList(t);
+  h.addSlackInbound(olderInboundId());
+  const newest = createIdentity("inbound");
+  h.addSlackInbound(newest);
+  const answer = await h.read({ external_link: SLACK_LINK });
+  const rows = h.events();
+  assert.deepEqual(
+    rows.map((row) => [row.inbound_id, row.event_id]),
+    [
+      [newest, SLACK_UPDATE_KEY],
+      [newest, SLACK_SECOND_UPDATE_KEY],
+    ],
+  );
+  assert.deepEqual(
+    rows.map((row) => JSON.parse(String(row.metadata))),
+    [{ event: SLACK_REPLY_LISTED_EVENT }, { event: SLACK_REPLY_LISTED_EVENT }],
+  );
+  assert.deepEqual(answer, {
+    items: [
+      { inbound_event_id: rows[FIRST_INDEX]!.id },
+      { inbound_event_id: rows[SECOND_INDEX]!.id },
+    ],
+  });
+  assert.deepEqual(
+    fetched.requests.map(({ method, url, authorization }) => [
+      method,
+      url,
+      authorization,
+    ]),
+    [["GET", SLACK_REPLIES_URL, `Bearer ${SLACK_USER_TOKEN}`]],
+  );
+  assert.equal(h.reads.length, NO_CALLS);
+  assert.deepEqual(h.held, [answer.items.map((item) => item.inbound_event_id)]);
+  assert.deepEqual(h.drops, [CREDENTIAL]);
+  assert.equal(h.outbound().total, NO_ROWS);
+});
+
+test("a stored Slack reply decodes to the link update of its thread", async (t) => {
+  const h = harness(t, SLACK_BINDING);
+  slackList(t);
+  h.addSlackInbound(createIdentity("inbound"));
+  await h.read({ external_link: SLACK_LINK });
+  const stored = h.store.database
+    .prepare("SELECT event FROM intake_inbound_event ORDER BY rowid")
+    .all() as { event: Uint8Array }[];
+  const decoded = stored.map((row) =>
+    decodeSlackLinkUpdate({
+      resource_identity: SLACK_RESOURCE_IDENTITY,
+      event: row.event,
+      metadata: { event: SLACK_REPLY_LISTED_EVENT },
+    }),
+  );
+  assert.deepEqual(
+    decoded.map((update) => [update?.external_link, update?.update_key]),
+    [
+      [SLACK_LINK, SLACK_UPDATE_KEY],
+      [SLACK_LINK, SLACK_SECOND_UPDATE_KEY],
+    ],
+  );
+  assert.equal(decoded[FIRST_INDEX]?.actor_automated, false);
+});
+
+test("a Slack link read takes one release of the binding credential for the team of the binding", async (t) => {
+  const h = harness(t, SLACK_BINDING);
+  slackList(t);
+  const inbound = createIdentity("inbound");
+  h.addSlackInbound(inbound);
+  await h.read({ external_link: SLACK_LINK });
+  assert.equal(h.grants.length, SINGLE_CALL);
+  const grant = h.grants[FIRST_INDEX]!;
+  assert.ok(grant.kind === GrantKind.Inbound);
+  assert.equal(grant.inbound.credential, CREDENTIAL);
+  assert.equal(grant.inbound.platform, InboundPlatform.Slack);
+  assert.equal(grant.inbound.inboundId, inbound);
+  assert.equal(grant.inbound.resource, SLACK_TEAM_ID);
+  assert.equal(grant.operation, InboundOperation.LinkRead);
+});
+
+test("a second Slack read stores no second row and answers the stored identities", async (t) => {
+  const h = harness(t, SLACK_BINDING);
+  slackList(t);
+  h.addSlackInbound(createIdentity("inbound"));
+  const first = await h.read({ external_link: SLACK_LINK });
+  const second = await h.read({ external_link: SLACK_LINK });
+  assert.equal(h.events().length, TWO_ITEMS);
+  assert.deepEqual(second, first);
+});
+
+test("a Slack link with no inbound answers 409 and calls no platform", async (t) => {
+  const h = harness(t, SLACK_BINDING);
+  const fetched = slackList(t);
+  await assert.rejects(
+    h.read({ external_link: SLACK_LINK }),
+    (error) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.Conflict &&
+      error.code === IntakeErrorCode.LinkInboundMissing,
+  );
+  assert.equal(fetched.requests.length, NO_CALLS);
+});
+
+test("a Slack answer with ok false answers 502 with the Slack result class, stores no row and drops the material", async (t) => {
+  const h = harness(t, SLACK_BINDING);
+  mockSlackFetch(t, () => slackErrorResponse("invalid_auth"));
+  h.addSlackInbound(createIdentity("inbound"));
+  await assert.rejects(h.read({ external_link: SLACK_LINK }), (error) => {
+    assert.ok(error instanceof OperationError);
+    assert.equal(error.status, BAD_GATEWAY_STATUS);
+    assert.equal(
+      error.code,
+      `intake.platform.slack.${ResultClass.FinalRefusal}`,
+    );
+    assert.deepEqual(error.details, { status: null });
+    return true;
+  });
+  assert.equal(h.events().length, NO_ROWS);
+  assert.deepEqual(h.drops, [CREDENTIAL]);
+});
+
+test("a rate limit of Slack answers 502 retryable_refusal", async (t) => {
+  const h = harness(t, SLACK_BINDING);
+  h.addSlackInbound(createIdentity("inbound"));
+  const answers = [
+    () => slackResponse(SLACK_RATE_LIMITED_STATUS, {}),
+    () => slackErrorResponse("ratelimited"),
+  ];
+  mockSlackFetch(t, () => answers.shift()!());
+  for (let attempt = NO_CALLS; attempt < TWO_ITEMS; attempt += SINGLE_CALL) {
+    await assert.rejects(
+      h.read({ external_link: SLACK_LINK }),
+      (error) =>
+        error instanceof OperationError &&
+        error.code === `intake.platform.slack.${ResultClass.RetryableRefusal}`,
+    );
+  }
+  assert.equal(h.events().length, NO_ROWS);
 });
