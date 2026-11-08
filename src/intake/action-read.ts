@@ -111,6 +111,7 @@ function authorizeRead(
       VALIDATION_FAILED_CODE,
       "A branch push request evidence has no platform read.",
     );
+  assert.ok("repository" in facts, "A pull request evidence names a binding.");
   hold.material = custody.release(tx, grant, now);
   return {
     target: {

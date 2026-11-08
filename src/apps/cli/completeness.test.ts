@@ -72,10 +72,14 @@ const API_ONLY_OPERATIONS = [
   "worker.execution.setup.get",
   "worker.execution.change_request.get",
   "worker.execution.failed_check.get",
+  "worker.execution.link_update.get",
   "mission.evidence.asset.complete",
   "mission.evidence.request",
   "mission.delivery.admit",
   "mission.delivery.unresolved_request.count",
+  "intake.inbound.event.describe",
+  "intake.link.read",
+  "intake.outbound.reply.match",
   "intake.action.check",
   "intake.action.merge",
   "intake.action.perform",
@@ -119,12 +123,12 @@ const TOP_LEVEL_NAMES = new Set([
 const OTHER_PAGE = "other";
 const MACHINE_JOIN_PATH = "worker machine join";
 const NO_ITEMS = 0;
-const DOCUMENTED_COUNT = 221;
+const DOCUMENTED_COUNT = 225;
 const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
-const IMPLEMENTED_COUNT = 216;
-const OPERATION_COUNT = 255;
+const IMPLEMENTED_COUNT = 220;
+const OPERATION_COUNT = 263;
 const INTAKE_LEAVES = [
   "intake event delete",
   "intake event discard",
@@ -146,7 +150,7 @@ const PAGE_COUNTS = {
   storage: 10,
   agent: 15,
   project: 23,
-  mission: 65,
+  mission: 69,
   intake: 13,
   scheduler: 8,
   worker: 22,

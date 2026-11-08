@@ -25,11 +25,13 @@ import {
   type Transaction,
 } from "../kernel/store.ts";
 import {
+  type ActionFacts,
   ActorKind,
   ActorService,
   AssessmentResult,
   type AssessmentSubmit,
   AssetKind,
+  type Authorized,
   type FailureHold,
   FindingAction,
   FindingGround,
@@ -44,8 +46,11 @@ import {
   type PlatformAddress,
   PlatformAddressKind,
   type ReleaseStop,
+  type ReplyActionFacts,
+  type ReplyRequestFacts,
   RepositoryAction,
   RepositoryLanding,
+  type RequestFacts,
   RevisionWrite,
   type RevokedExecution,
   TransitionRule,
@@ -411,6 +416,14 @@ export function missionHarness(
       merge: unexpectedCollaboration,
     },
     intakeGateFiles: { read: async () => ({ paths: [] }) },
+    intakeLinks: {
+      hasInbound: unexpectedCollaboration,
+      read: unexpectedCollaboration,
+      replyMatch: unexpectedCollaboration,
+      handoff: unexpectedCollaboration,
+      releaseHeld: unexpectedCollaboration,
+      describe: unexpectedCollaboration,
+    },
     decoder: {
       decode: unexpectedCollaboration,
       decodeLinkUpdate: unexpectedCollaboration,
@@ -435,8 +448,16 @@ export function missionHarness(
         record("bindings.getBindingRevision", args);
         return null;
       },
+      conversationInboxOf: (...args) => {
+        record("bindings.conversationInboxOf", args);
+        return null;
+      },
       repositoryPolicyOf: (...args) => {
         record("bindings.repositoryPolicyOf", args);
+        return null;
+      },
+      conversationPolicyOf: (...args) => {
+        record("bindings.conversationPolicyOf", args);
         return null;
       },
     },
@@ -979,4 +1000,20 @@ export async function reviewHarness(
     reviewRound,
     revokes: () => revokes,
   };
+}
+
+export function repositoryActionOf(
+  authorized: Authorized<ActionFacts | ReplyActionFacts>,
+): Authorized<ActionFacts> {
+  const { facts } = authorized;
+  assert.ok("repository" in facts);
+  return { ...authorized, facts };
+}
+
+export function repositoryRequestOf(
+  authorized: Authorized<RequestFacts | ReplyRequestFacts>,
+): Authorized<RequestFacts> {
+  const { facts } = authorized;
+  assert.ok("repository" in facts);
+  return { ...authorized, facts };
 }

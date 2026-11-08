@@ -11,7 +11,7 @@ import {
 } from "../../scheduler/contract.ts";
 import { Backoff, BACKOFF_INITIAL_MS } from "./api.ts";
 import { httpTransport } from "./transport.ts";
-import { pullLoop, SETUP_UNAVAILABLE } from "./pull-loop.ts";
+import { GATE_POLL_MS, pullLoop, SETUP_UNAVAILABLE } from "./pull-loop.ts";
 import { testClaim } from "./test-support.ts";
 
 const REGISTRATION = {
@@ -20,6 +20,7 @@ const REGISTRATION = {
   worker_name: "coder@1",
 };
 const ONCE = 1;
+const NO_PULLS = 0;
 const SETTLE_ROUNDS = 5;
 const ANSWER_INVALID = "gateway.client.answer_invalid";
 test("claim admission precedes hosting even when shutdown races the pull", async (t) => {
@@ -294,4 +295,55 @@ test("a setup unavailable host waits the growing pull backoff before the next pu
   assert.ok(hosted.every((claim) => claim === execution));
   shutdown.cancel();
   assert.equal(await running, null);
+});
+
+test("a closed gate sends no claim, and an open gate sends the claim", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const api = httpTransport("http://127.0.0.1:1");
+  const shutdown = new CancellationContext();
+  let open = false;
+  let reads = 0;
+  let pulls = 0;
+  t.mock.method(api.scheduler, "workPull", async () => {
+    pulls++;
+    shutdown.cancel();
+    return {
+      type: OperationResultType.Completed,
+      status: 200,
+      data: { kind: "no-work" },
+    };
+  });
+  const running = pullLoop({
+    api,
+    registration: REGISTRATION,
+    backoff: new Backoff(),
+    shutdown,
+    gate: () => {
+      reads++;
+      return open;
+    },
+    host: async () => {
+      assert.fail("Unexpected claim");
+    },
+    register: async () => {
+      assert.fail("Unexpected registration");
+    },
+    pulling: () => {},
+    claimed: () => assert.fail("Unexpected claim"),
+  });
+  const turns = 10;
+  const readsWhileClosed = 3;
+  for (let index = 0; index < turns; index++) await turn();
+  assert.equal(pulls, NO_PULLS);
+  assert.equal(reads, ONCE);
+  for (let round = 1; round < readsWhileClosed; round++) {
+    t.mock.timers.tick(GATE_POLL_MS);
+    for (let index = 0; index < turns; index++) await turn();
+  }
+  assert.equal(pulls, NO_PULLS);
+  assert.equal(reads, readsWhileClosed);
+  open = true;
+  t.mock.timers.tick(GATE_POLL_MS);
+  assert.equal(await running, null);
+  assert.equal(pulls, ONCE);
 });

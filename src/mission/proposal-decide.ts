@@ -4,11 +4,11 @@ import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   type ExecutionEnds,
+  type FixProposal,
   type HumanActor,
   Intent,
   MissionErrorCode,
   NodeState,
-  type Proposal,
   PROPOSAL_IDENTITY_PREFIX,
   type ProposalDecide,
 } from "./contract.ts";
@@ -20,7 +20,7 @@ import {
   listProposalsOfAssessment,
   markProposalApproved,
 } from "./proposal-store.ts";
-import { proposalRecord, requireAssessment } from "./proposal-read.ts";
+import { fixProposalRecord, requireAssessment } from "./proposal-read.ts";
 import { revisionFromRow } from "./revision.ts";
 import type { Dependencies } from "./service.ts";
 import { insertDependency, intentOf, readCurrentRevision } from "./store.ts";
@@ -49,7 +49,7 @@ function decided(assessmentId: string): never {
   );
 }
 
-function isOpen(item: Proposal): boolean {
+function isOpen(item: FixProposal): boolean {
   return item.approved_at === null && item.rejected_at === null;
 }
 
@@ -64,7 +64,7 @@ export function decideProposals(
 ) {
   const assessment = requireAssessment(tx, assessmentId);
   const proposals = listProposalsOfAssessment(tx, assessment.id).map(
-    proposalRecord,
+    fixProposalRecord,
   );
   const open = proposals.filter(isOpen);
   if (open.length === NO_PROPOSALS) decided(assessment.id);

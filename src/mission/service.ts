@@ -46,6 +46,7 @@ import {
   type ImportResult,
   type IntakeCheck,
   type IntakeGateFiles,
+  type IntakeLinks,
   type IntakeStorage,
   type Intent,
   type LinkUpdatePage,
@@ -91,8 +92,15 @@ import {
 } from "./control-hold.ts";
 import { blockNode, discardNode, overrideNode } from "./control-close.ts";
 import { unblockNode } from "./control-unblock.ts";
+import { decideFollowup } from "./followup-decide.ts";
+import { withContent } from "./inbox-item-content.ts";
+import { inboxItemPage, markInboxItem } from "./inbox-item.ts";
 import { decideProposals } from "./proposal-decide.ts";
-import { proposalPage, requireAssessment } from "./proposal-read.ts";
+import {
+  followupPage,
+  proposalPage,
+  requireAssessment,
+} from "./proposal-read.ts";
 import { decideFinding } from "./finding-decide.ts";
 import {
   findingPage,
@@ -286,6 +294,7 @@ export interface Dependencies {
   intakeStorage: IntakeStorage;
   intakeCheck: IntakeCheck;
   intakeGateFiles: IntakeGateFiles;
+  intakeLinks: IntakeLinks;
   decoder: EventDecoder;
   config: MissionConfig;
   health?: HealthRegistry;
@@ -510,7 +519,8 @@ export class MissionService
     );
     registry.register(
       missionOperations["delivery.unresolved_request.count"],
-      ({ body }, caller) => countUnresolvedRequests(caller, body),
+      ({ body }, caller) =>
+        countUnresolvedRequests(this.dependencies, caller, body),
     );
     registry.register(
       missionOperations["assessment.submit"],
@@ -681,6 +691,41 @@ export class MissionService
         ),
     );
     registry.register(
+      missionOperations["inbox_item.list"],
+      async ({ query }, caller) => {
+        const page = this.dependencies.store.transaction((tx) =>
+          inboxItemPage(tx, this.dependencies.bindings, query, Date.now()),
+        );
+        const items = await withContent(
+          this.dependencies.intakeLinks,
+          caller.context,
+          page.items,
+        );
+        return caller.commit(() => ({ ...page, items }));
+      },
+    );
+    registry.register(
+      missionOperations["inbox_item.done"],
+      async ({ params, body }, caller) => {
+        const thread = this.dependencies.store.transaction((tx) =>
+          markInboxItem(
+            tx,
+            this.dependencies.bindings,
+            params.link_update_id,
+            body,
+            Date.now(),
+          ),
+        );
+        const [item] = await withContent(
+          this.dependencies.intakeLinks,
+          caller.context,
+          [thread],
+        );
+        assert.ok(item);
+        return caller.commit(() => item);
+      },
+    );
+    registry.register(
       missionOperations["proposal.decide"],
       ({ params, body }, caller) =>
         this.commitAct(
@@ -697,6 +742,31 @@ export class MissionService
                 humanActor(caller),
                 Date.now(),
                 ends,
+              ),
+            ),
+        ),
+    );
+    registry.register(
+      missionOperations["followup.list"],
+      ({ params, query }, caller) =>
+        caller.commit((tx) => followupPage(tx, params.project_id, query)),
+    );
+    registry.register(
+      missionOperations["followup.decide"],
+      ({ params, body }, caller) =>
+        this.commitAct(
+          Act.DecideFollowup,
+          caller,
+          { node_id: params.node_id },
+          (tx) =>
+            this.covered(tx, { node_id: params.node_id }, (tx) =>
+              decideFollowup(
+                tx,
+                this.dependencies,
+                params.node_id,
+                body,
+                humanActor(caller),
+                Date.now(),
               ),
             ),
         ),
@@ -1449,7 +1519,7 @@ export class MissionService
     claim: ExecutionClaim,
     input: {
       key: string;
-      commit: string;
+      commit: string | null;
       reusedEvidenceId: string | null;
       mergeEvidenceId: string | null;
     },

@@ -406,6 +406,12 @@ async function setup(t: TestContext, landing?: string) {
       query: {},
       body: null,
     });
+  const linkUpdate = (execution: ExecutionRecord) =>
+    client["execution.link_update.get"]({
+      params: { execution_id: execution.execution_id },
+      query: {},
+      body: null,
+    });
   const context = (execution: ExecutionRecord) => ({
     execution_id: execution.execution_id,
     attempt: execution.attempt,
@@ -506,6 +512,7 @@ async function setup(t: TestContext, landing?: string) {
     pull,
     request,
     changeRequest,
+    linkUpdate,
     work,
     run,
     pass,
@@ -529,6 +536,11 @@ suite("E06 action performer", { concurrency: SUITE_CONCURRENCY }, () => {
     await t.test("E06.1 steps claim selects G attempt 1", async () => {
       e1 = await h.pull(h.G, FIRST_ATTEMPT);
       assert.deepEqual(completed(await h.changeRequest(e1)), { items: [] });
+      assert.deepEqual(completed(await h.linkUpdate(e1)), {
+        items: [],
+        next_cursor: null,
+        total: NO_CALLS,
+      });
     });
     await t.test("E06.2 steps claim cannot request actions", async () => {
       refused(

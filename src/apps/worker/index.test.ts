@@ -22,10 +22,14 @@ import { packageVersion } from "../../kernel/version.ts";
 import { WorkPullKind } from "../../scheduler/contract.ts";
 import { piProviderId, Platform } from "../../llm/platforms.ts";
 import { LoginSessionMode } from "../../llm/sessions.ts";
+import { generateX25519KeyPair } from "../../kernel/hpke.ts";
+import { machineConfigurationValue } from "../../worker/contract.ts";
 import { runWorker, Worker, type WorkerOptions } from "./index.ts";
 import { WorkerUnit } from "./unit.ts";
+import { MACHINE_CONFIG_VARIABLE, writeMachineFile } from "./machine-config.ts";
 import {
   FAKE_INSTANCE_NAME,
+  FAKE_MACHINE,
   FAKE_WORKER,
   fakeInstanceServer,
   FakePath,
@@ -74,6 +78,13 @@ const WORK_UNAVAILABLE = {
   },
 };
 const SINGLE = 1;
+const NO_PULLS = 0;
+const OTHER_MACHINE = "build-box";
+const MACHINE_CONFIG_ABSENT = "worker.machine.config_absent";
+const MACHINE_CONFIG_CONFLICT = "worker.machine.config_conflict";
+const MACHINE_CONFIG_INVALID = "worker.machine.config_invalid";
+const GATE_CLOSED = "Worker machine configuration closed the claim gate";
+const HELD_MS = 200;
 const EXIT_SUCCESS = 0;
 const WORKER_STOP_WATCHDOG_MS = 10000;
 const AFTER_WATCHDOG_MS = WORKER_STOP_WATCHDOG_MS + 1;
@@ -862,4 +873,103 @@ test("the healthcheck is unavailable before the start", async () => {
     client: HealthStatus.Unavailable,
   });
   assert.equal(await worker.stop(), null);
+});
+
+async function machineConfiguration(name: string) {
+  const pair = await generateX25519KeyPair();
+  return { name, private_key: pair.private_key.toString("base64url") };
+}
+
+async function machineFixture(
+  t: TestContext,
+  prepare: (env: NodeJS.ProcessEnv) => Promise<void> = async () => {},
+) {
+  const f = await fixture(t, SINGLE);
+  await prepare(f.env);
+  f.server.state.machine = FAKE_MACHINE;
+  const worker = new Worker(
+    f.options({ heartbeatIntervalMs: FAST_HEARTBEAT_MS }),
+  );
+  stopAfter(t, () => worker.stop());
+  const running = worker.run();
+  await f.ready();
+  const beats = () => f.server.requestsTo(FakePath.InstanceHeartbeat).length;
+  const pulls = () => f.server.requestsTo(FakePath.Pull).length;
+  const closes = (code: string) =>
+    f.records.filter(
+      (record) =>
+        record.msg === GATE_CLOSED &&
+        record.code === code &&
+        record.machine === FAKE_MACHINE,
+    ).length;
+  const stop = async () => {
+    assert.equal(await worker.stop(), null);
+    assert.equal(await running, null);
+  };
+  return { ...f, beats, pulls, closes, stop };
+}
+
+test("no claim goes to the server before the first heartbeat answer", async (t) => {
+  const f = await fixture(t, SINGLE);
+  const release = Promise.withResolvers<void>();
+  f.server.state.intercept = async (request) => {
+    if (request.path === FakePath.InstanceHeartbeat) await release.promise;
+    return undefined;
+  };
+  const worker = new Worker(f.options());
+  stopAfter(t, () => worker.stop());
+  const running = worker.run();
+  await f.ready();
+  const pulls = () => f.server.requestsTo(FakePath.Pull).length;
+  await until(
+    () => f.server.requestsTo(FakePath.InstanceHeartbeat).length === SINGLE,
+    t.signal,
+  );
+  await delay(HELD_MS, undefined, { signal: t.signal });
+  assert.equal(pulls(), NO_PULLS);
+  release.resolve();
+  await until(() => pulls() > NO_PULLS, t.signal);
+  assert.equal(await worker.stop(), null);
+  assert.equal(await running, null);
+});
+
+test("an absent machine configuration sends no claim and logs once, and the instance claims after the configuration appears", async (t) => {
+  const f = await machineFixture(t);
+  await until(() => f.beats() >= TWO_READS, t.signal);
+  const first = f.beats();
+  await until(() => f.beats() >= first + TWO_READS, t.signal);
+  assert.equal(f.pulls(), NO_PULLS);
+  assert.equal(f.closes(MACHINE_CONFIG_ABSENT), SINGLE);
+  writeMachineFile(f.env, await machineConfiguration(FAKE_MACHINE), false);
+  await until(() => f.pulls() > NO_PULLS, t.signal);
+  assert.equal(f.closes(MACHINE_CONFIG_ABSENT), SINGLE);
+  await f.stop();
+});
+
+test("a machine configuration in conflict sends no claim and logs its code once", async (t) => {
+  const f = await machineFixture(t, async (env) => {
+    const configuration = await machineConfiguration(FAKE_MACHINE);
+    writeMachineFile(env, configuration, false);
+    env[MACHINE_CONFIG_VARIABLE] = machineConfigurationValue(configuration);
+  });
+  await until(() => f.closes(MACHINE_CONFIG_CONFLICT) > NO_PULLS, t.signal);
+  const first = f.beats();
+  await until(() => f.beats() >= first + TWO_READS, t.signal);
+  assert.equal(f.pulls(), NO_PULLS);
+  assert.equal(f.closes(MACHINE_CONFIG_CONFLICT), SINGLE);
+  await f.stop();
+});
+
+test("an invalid machine configuration sends no claim and logs its code once", async (t) => {
+  const f = await machineFixture(t, async (env) => {
+    env[MACHINE_CONFIG_VARIABLE] = machineConfigurationValue(
+      await machineConfiguration(OTHER_MACHINE),
+    );
+  });
+  await until(() => f.closes(MACHINE_CONFIG_INVALID) > NO_PULLS, t.signal);
+  const first = f.beats();
+  await until(() => f.beats() >= first + TWO_READS, t.signal);
+  assert.equal(f.pulls(), NO_PULLS);
+  assert.equal(f.closes(MACHINE_CONFIG_INVALID), SINGLE);
+  await f.stop();
 });

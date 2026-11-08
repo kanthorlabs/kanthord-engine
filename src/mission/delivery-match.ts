@@ -10,6 +10,7 @@ import {
   type DecodedLinkUpdate,
   Disposition,
   externalLinkSchema,
+  type MissionBindings,
   NodeState,
   type PlatformAddress,
   PlatformAddressKind,
@@ -34,7 +35,12 @@ export type RequestMatch =
   | { kind: typeof MatchKind.Answer; answer: AdmissionAnswer };
 
 export type LinkUpdateMatch =
-  | { kind: typeof MatchKind.Link; mission_id: string; external_link: string }
+  | {
+      kind: typeof MatchKind.Link;
+      mission_id: string;
+      external_link: string;
+      linked: boolean;
+    }
   | { kind: typeof MatchKind.Answer; answer: AdmissionAnswer };
 
 interface MatchRow {
@@ -118,11 +124,11 @@ export function matchLinkUpdate(
          )`,
     )
     .get(mission.id, externalLink);
-  if (linked === undefined) return refused(AdmissionRefusal.Unmatched);
   return {
     kind: MatchKind.Link,
     mission_id: mission.id,
     external_link: externalLink,
+    linked: linked !== undefined,
   };
 }
 
@@ -170,6 +176,17 @@ export function unresolvedRequestCount(
   return unresolvedRequestAddresses(tx, projectId).filter(
     ({ address }) => address.resource_identity === resourceIdentity,
   ).length;
+}
+
+export function inboxDemand(
+  tx: Transaction,
+  bindings: Pick<MissionBindings, "conversationInboxOf">,
+  projectId: string,
+  resourceIdentity: string,
+): boolean {
+  assert.ok(projectIdSchema.safeParse(projectId).success);
+  assert.ok(resourceIdentity.length);
+  return bindings.conversationInboxOf(tx, projectId, resourceIdentity) !== null;
 }
 
 export function linkDemandCount(

@@ -19,6 +19,7 @@ import {
   INTAKE_SERVICE_NAME,
   IntakeErrorCode,
   intakeOperations,
+  ResourceKind,
 } from "./contract.ts";
 import { IntakeService } from "./index.ts";
 import { allocateInboundId, insertInbound } from "./inbound-store.ts";
@@ -32,6 +33,8 @@ const UNKNOWN_INBOUND_ID = "inbound_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const CREATED_AT = 100;
 const PENDING_EVENT_LIMIT = 2;
 const PUSH = '{"ref":"refs/heads/main","repository":{"full_name":"acme/app"}}';
+const ISSUE_COMMENT =
+  '{"action":"created","issue":{"number":117},"comment":{"id":7001}}';
 const PING = "{}";
 const VALIDATION_FAILED = "gateway.request.validation_failed";
 const ZERO_DIGEST = "0".repeat(64);
@@ -83,7 +86,10 @@ function harness(t: TestContext) {
   let failCommit = false;
   const registry = new OperationRegistry();
   intake.declare(registry);
-  const addInbound = (kind: InboundKindValue = InboundKind.Webhook) => {
+  const addInbound = (
+    kind: InboundKindValue = InboundKind.Webhook,
+    resourceKind: ResourceKind = ResourceKind.Repository,
+  ) => {
     const id = allocateInboundId();
     store.transaction((tx) =>
       insertInbound(tx, id, {
@@ -92,7 +98,7 @@ function harness(t: TestContext) {
         platform: InboundPlatform.GitHub,
         consumer: Consumer.MissionDeliveryAdmit,
         credential: kind === InboundKind.Poll ? "github-token" : null,
-        configuration: { resource: "acme/app" },
+        configuration: { resource_kind: resourceKind, resource: "acme/app" },
         checkpoint: null,
         created_at: CREATED_AT,
       }),
@@ -228,6 +234,30 @@ test("a valid signature over the exact bytes stores one pending row and wakes af
   assert.equal(stored[0]!.state, InboundEventState.Pending);
   assert.equal(h.wakes(), WAKES_PER_DELIVERY);
   assert.ok(h.logs.every((line) => !line.includes(secret)));
+});
+
+test("a conversation webhook inbound stores an issue_comment delivery under the receipt", async (t) => {
+  const h = harness(t);
+  const { id, secret } = h.addInbound(
+    InboundKind.Webhook,
+    ResourceKind.Conversation,
+  );
+  assert.deepEqual(
+    await h.receive(
+      id,
+      h.github("issue_comment", FIRST_DELIVERY, sign(secret, ISSUE_COMMENT)),
+      ISSUE_COMMENT,
+    ),
+    { status: HttpStatus.Accepted, code: null },
+  );
+  const stored = h.rows(id);
+  assert.equal(stored.length, ROWS_PER_DELIVERY);
+  assert.equal(stored[0]!.event_id, FIRST_DELIVERY);
+  assert.deepEqual(JSON.parse(stored[0]!.metadata), {
+    event: "issue_comment",
+  });
+  assert.equal(stored[0]!.state, InboundEventState.Pending);
+  assert.equal(h.wakes(), WAKES_PER_DELIVERY);
 });
 
 test("a redelivery answers 202 and keeps one unchanged row, also at the bound", async (t) => {

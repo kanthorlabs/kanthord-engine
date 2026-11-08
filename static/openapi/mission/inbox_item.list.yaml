@@ -1,0 +1,256 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: mission.inbox_item.list
+    tags:
+      - mission
+    description: List the inbox threads of the developer with their state, reason,
+      trust and content, oldest first.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: project_id
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/mission.inbox_item.list.Input/properties/query/prop\
+            erties/project_id"
+      - name: state
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/mission.inbox_item.list.Input/properties/query/prop\
+            erties/state"
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/mission.inbox_item.list.Input/properties/query/prop\
+            erties/cursor"
+      - name: limit
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/mission.inbox_item.list.Input/properties/query/prop\
+            erties/limit"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/mission.inbox_item.list.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    mission.inbox_item.list.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties:
+            project_id:
+              type: string
+              minLength: 34
+              maxLength: 34
+              pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: project_ followed by a canonical 26-character uppercase ULID.
+            state:
+              default: open
+              type: string
+              enum:
+                - open
+                - snoozed
+                - done
+            cursor:
+              type: string
+            limit:
+              default: 100
+              type: integer
+              minimum: 1
+              maximum: 100
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    mission.inbox_item.list.Output:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              link_update_id:
+                type: string
+                minLength: 38
+                maxLength: 38
+                pattern: ^link_update_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: link_update_ followed by a canonical 26-character uppercase ULID.
+              project_id:
+                type: string
+                minLength: 34
+                maxLength: 34
+                pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: project_ followed by a canonical 26-character uppercase ULID.
+              external_link:
+                oneOf:
+                  - type: object
+                    properties:
+                      kind:
+                        type: string
+                        const: github_issue
+                      resource_identity:
+                        type: string
+                        pattern: ^conversation:github:[^/\s:]+\/[^/\s:]+$
+                      number:
+                        type: integer
+                        exclusiveMinimum: 0
+                        maximum: 9007199254740991
+                    required:
+                      - kind
+                      - resource_identity
+                      - number
+                    additionalProperties: false
+              reason:
+                type: string
+                enum:
+                  - linked
+                  - mentioned
+                  - participating
+              state:
+                type: string
+                enum:
+                  - open
+                  - snoozed
+                  - done
+              occurred_at:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+                description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+              done_at:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                    description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                  - type: "null"
+              snoozed_until:
+                anyOf:
+                  - type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                    description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                  - type: "null"
+              inbound_event_id:
+                type: string
+                minLength: 40
+                maxLength: 40
+                pattern: ^inbound_event_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: inbound_event_ followed by a canonical 26-character uppercase ULID.
+              actor_id:
+                type: string
+                minLength: 1
+              trusted:
+                type: boolean
+              linked_node_ids:
+                type: array
+                items:
+                  type: string
+                  minLength: 31
+                  maxLength: 31
+                  pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                  description: node_ followed by a canonical 26-character uppercase ULID.
+              content:
+                anyOf:
+                  - type: object
+                    properties:
+                      author:
+                        type: string
+                      body:
+                        type: string
+                      url:
+                        type: string
+                      occurred_at:
+                        type: integer
+                        minimum: 0
+                        maximum: 9007199254740991
+                        description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+                    required:
+                      - author
+                      - body
+                      - url
+                      - occurred_at
+                    additionalProperties: false
+                  - type: "null"
+            required:
+              - link_update_id
+              - project_id
+              - external_link
+              - reason
+              - state
+              - occurred_at
+              - done_at
+              - snoozed_until
+              - inbound_event_id
+              - actor_id
+              - trusted
+              - linked_node_ids
+              - content
+            additionalProperties: false
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+        counts:
+          type: object
+          properties:
+            open:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            snoozed:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+          required:
+            - open
+            - snoozed
+          additionalProperties: false
+      required:
+        - items
+        - next_cursor
+        - counts
+      additionalProperties: false

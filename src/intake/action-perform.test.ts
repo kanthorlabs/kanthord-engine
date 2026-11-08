@@ -5,6 +5,7 @@ import {
   type ActionFacts,
   GrantKind,
   type GrantRequest,
+  type ReplyActionFacts,
   SshIdentitySubjectKind,
 } from "../custody/contract.ts";
 import {
@@ -16,6 +17,7 @@ import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
 import { testMachineIdentity } from "../kernel/test-identity.ts";
+import { ExternalLinkKind } from "../kernel/external-link.ts";
 import { HostKeyErrorCode } from "../repository/contract.ts";
 import { SshAgentErrorCode } from "../repository/ssh-agent.ts";
 import {
@@ -33,10 +35,12 @@ import {
   AddressKind,
   OutboundOperation,
   OutboundRequestState,
+  replyRequestKey,
   ResultClass,
 } from "./contract.ts";
 import { performAction, type PerformBody } from "./action-perform.ts";
 import { runOutbound } from "./outbound.ts";
+import { insertPending, recordResult } from "./outbound-store.ts";
 import {
   SSH_CREDENTIAL,
   SSH_HOST,
@@ -227,6 +231,7 @@ function harness(t: TestContext, options: Options) {
       {
         key: options.facts.frozen_action.key,
         commit: SNAPSHOT,
+        comment: null,
         reused_evidence_id: null,
         merge_evidence_id: null,
         request_key: "request-key",
@@ -557,4 +562,295 @@ test("a pull request create without gate files sends no body", async (t) => {
   await h.perform();
   assert.equal(h.pullRequests.length, ONE_RELEASE);
   assert.equal(Object.hasOwn(h.pullRequests[0] as object, "body"), false);
+});
+
+const REPLY_RESOURCE_IDENTITY = "conversation:github:owner/pushed";
+const REPLY_REPOSITORY = "owner/pushed";
+const REPLY_ACTION = "reply";
+const REPLY_KEY = "conversation.reply.0";
+const REPLY_LINK = {
+  kind: ExternalLinkKind.GitHubIssue,
+  resource_identity: REPLY_RESOURCE_IDENTITY,
+  number: 12,
+};
+const REPLY_BODY =
+  "KanthorD: the review of node Ship accounts passed at attempt 1.";
+const FIRST_UPDATE_KEY = "issue_comment:101";
+const SECOND_UPDATE_KEY = "issue_comment:102";
+const REPLY_ACTOR_ID = "4242";
+const SECOND_ATTEMPT = 2;
+const ONE_POST = 1;
+const TWO_POSTS = 2;
+const NO_READS = 0;
+const ONE_READ = 1;
+
+function replyFacts(attempt: number): ReplyActionFacts {
+  return {
+    frozen_action: {
+      key: REPLY_KEY,
+      binding_id: BINDING_ID,
+      action: REPLY_ACTION,
+      expected_end_state: "posted",
+      follows: null,
+      configuration: { external_link: REPLY_LINK },
+    },
+    conversation: {
+      binding_id: BINDING_ID,
+      resource_identity: REPLY_RESOURCE_IDENTITY,
+      repository: REPLY_REPOSITORY,
+    },
+    node_id: NODE_ID,
+    attempt,
+  };
+}
+
+type Post = {
+  number: number;
+  body: string;
+  resource: string;
+  pending: unknown;
+};
+
+function replyHarness(t: TestContext) {
+  const { store } = sshStore(t);
+  const script = {
+    facts: replyFacts(FIRST_REVISION),
+    credential: API_CREDENTIAL,
+    platform: "github",
+    project_id: PROJECT_ID,
+    execution: {
+      execution_id: EXECUTION_ID,
+      project_id: PROJECT_ID,
+      worker_binding_id: WORKER_BINDING_ID,
+      resource_identity: "worker:kanthord:general",
+      runtime_identity: RUNTIME_IDENTITY,
+      credentials: [],
+    },
+    secret: { key: API_KEY },
+    refusal: null,
+  };
+  const fake = sshCustody(script);
+  const posts: Post[] = [];
+  const answers: (() => unknown)[] = [];
+  let accountReads = NO_READS;
+  const pendingResult = () =>
+    store.transaction(
+      (tx) =>
+        (
+          tx.database
+            .prepare(
+              "SELECT result FROM intake_outbound_request WHERE state != 'succeeded' ORDER BY created_at DESC",
+            )
+            .get() as { result: string | null } | undefined
+        )?.result ?? null,
+    );
+  const github = {
+    readTokenAccount: async () => {
+      accountReads++;
+      return { ok: true as const, value: REPLY_ACTOR_ID };
+    },
+    postIssueComment: async (
+      _call: unknown,
+      target: { resource: string },
+      number: number,
+      body: string,
+    ) => {
+      posts.push({
+        number,
+        body,
+        resource: target.resource,
+        pending: pendingResult(),
+      });
+      const answer = answers.shift();
+      assert.ok(answer !== undefined, "Each post has a scripted answer.");
+      return answer();
+    },
+  } as unknown as GitHubPlatform;
+  const caller: CallerContext = {
+    identity: machine,
+    execution: claim,
+    context: background,
+    requestId: "request_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    commit: (write) => store.transaction(write),
+  };
+  const inFlight = new Set<string>();
+  const logger = pino({ enabled: false });
+  const perform = (
+    attempt = FIRST_REVISION,
+    requestKey = replyRequestKey(NODE_ID, attempt, REPLY_LINK),
+  ) => {
+    script.facts = replyFacts(attempt);
+    return performAction(
+      {
+        store,
+        custody: fake.custody,
+        github,
+        gitWriter: {
+          squashPushFresh: () => assert.fail("A reply pushes nothing."),
+          pushSnapshotFresh: () => assert.fail("A reply pushes nothing."),
+          landedOn: () => assert.fail("A reply pushes nothing."),
+          changedGateFiles: () => assert.fail("A reply pushes nothing."),
+          sshAccessOf: () => assert.fail("A reply holds no SSH access."),
+        },
+      },
+      (request) => runOutbound({ store, logger, inFlight }, caller, request),
+      caller,
+      {
+        key: REPLY_KEY,
+        commit: null,
+        comment: REPLY_BODY,
+        reused_evidence_id: null,
+        merge_evidence_id: null,
+        request_key: requestKey,
+      },
+    );
+  };
+  const rows = () =>
+    store.transaction((tx) =>
+      (
+        tx.database
+          .prepare(
+            "SELECT operation, state, credential, result FROM intake_outbound_request ORDER BY created_at, id",
+          )
+          .all() as {
+          operation: string;
+          state: string;
+          credential: string;
+          result: string | null;
+        }[]
+      ).map((row) => ({
+        ...row,
+        result: row.result === null ? null : JSON.parse(row.result),
+      })),
+    );
+  const posted = (update_key: string) => () => ({
+    ok: true as const,
+    value: { update_key, actor_id: REPLY_ACTOR_ID },
+  });
+  return {
+    ...fake,
+    store,
+    posts,
+    answers,
+    accountReads: () => accountReads,
+    perform,
+    rows,
+    posted,
+  };
+}
+
+test("a reply action of a github conversation binding posts one comment and answers its comment address", async (t) => {
+  const h = replyHarness(t);
+  h.answers.push(h.posted(FIRST_UPDATE_KEY));
+  assert.deepEqual(await h.perform(), {
+    kind: AddressKind.Comment,
+    resource_identity: REPLY_RESOURCE_IDENTITY,
+    update_key: FIRST_UPDATE_KEY,
+  });
+  assert.deepEqual(
+    h.posts.map(({ number, body, resource }) => ({ number, body, resource })),
+    [
+      {
+        number: REPLY_LINK.number,
+        body: REPLY_BODY,
+        resource: REPLY_REPOSITORY,
+      },
+    ],
+  );
+  assert.deepEqual(h.rows(), [
+    {
+      operation: OutboundOperation.GitHubIssueComment,
+      state: OutboundRequestState.Succeeded,
+      credential: API_CREDENTIAL,
+      result: { update_key: FIRST_UPDATE_KEY, actor_id: REPLY_ACTOR_ID },
+    },
+  ]);
+  assert.ok(h.materials.every((material) => material.dropped));
+});
+
+test("the first reply on a link reads the token account once and records it in the pending row, and a later reply on the link reads it no more", async (t) => {
+  const h = replyHarness(t);
+  h.answers.push(h.posted(FIRST_UPDATE_KEY), h.posted(SECOND_UPDATE_KEY));
+  await h.perform();
+  assert.equal(h.accountReads(), ONE_READ);
+  assert.deepEqual(JSON.parse(h.posts[0]!.pending as string), {
+    actor_id: REPLY_ACTOR_ID,
+  });
+  await h.perform(SECOND_ATTEMPT);
+  assert.equal(h.accountReads(), ONE_READ);
+  assert.equal(h.posts.length, TWO_POSTS);
+  assert.equal(h.posts[1]!.pending, null);
+  assert.deepEqual(
+    h.rows().map((row) => row.state),
+    [OutboundRequestState.Succeeded, OutboundRequestState.Succeeded],
+  );
+});
+
+test("a reply call with no answer sets the request failed, and a repeat posts again", async (t) => {
+  const h = replyHarness(t);
+  h.answers.push(
+    () => ({
+      ok: false,
+      class: ResultClass.UnknownOutcome,
+      code: GITHUB_RESULT_CODE_PREFIX + ResultClass.UnknownOutcome,
+      status: null,
+      message: "no answer",
+    }),
+    h.posted(FIRST_UPDATE_KEY),
+  );
+  const lost = await h.perform();
+  assert.equal("class" in lost && lost.class, ResultClass.UnknownOutcome);
+  assert.deepEqual(
+    h.rows().map((row) => row.state),
+    [OutboundRequestState.Failed],
+  );
+  const repeated = await h.perform();
+  assert.equal("kind" in repeated && repeated.kind, AddressKind.Comment);
+  assert.equal(h.posts.length, TWO_POSTS);
+  assert.equal(h.accountReads(), ONE_READ);
+  assert.deepEqual(h.rows(), [
+    {
+      operation: OutboundOperation.GitHubIssueComment,
+      state: OutboundRequestState.Succeeded,
+      credential: API_CREDENTIAL,
+      result: { update_key: FIRST_UPDATE_KEY, actor_id: REPLY_ACTOR_ID },
+    },
+  ]);
+});
+
+test("a pending reply request with no running call posts again on a repeat without reading the account again", async (t) => {
+  const h = replyHarness(t);
+  h.store.transaction((tx) => {
+    const id = insertPending(tx, {
+      project_id: PROJECT_ID,
+      operation: OutboundOperation.GitHubIssueComment,
+      request_key: replyRequestKey(NODE_ID, FIRST_REVISION, REPLY_LINK),
+      credential: API_CREDENTIAL,
+      created_at: Date.now(),
+    });
+    assert.ok(recordResult(tx, id, { actor_id: REPLY_ACTOR_ID }));
+  });
+  h.answers.push(h.posted(FIRST_UPDATE_KEY));
+  const answer = await h.perform();
+  assert.equal("kind" in answer && answer.kind, AddressKind.Comment);
+  assert.equal(h.posts.length, ONE_POST);
+  assert.equal(h.accountReads(), NO_READS);
+  assert.deepEqual(
+    h.rows().map((row) => row.state),
+    [OutboundRequestState.Succeeded],
+  );
+});
+
+test("a reply request key that does not name its node, attempt and link refuses before any call", async (t) => {
+  const h = replyHarness(t);
+  await assert.rejects(
+    h.perform(
+      FIRST_REVISION,
+      replyRequestKey(NODE_ID, SECOND_ATTEMPT, REPLY_LINK),
+    ),
+    (error) =>
+      error instanceof OperationError && error.status === HttpStatus.BadRequest,
+  );
+  assert.deepEqual(h.posts, []);
+  assert.deepEqual(h.rows(), []);
 });

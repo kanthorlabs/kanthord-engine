@@ -8,6 +8,7 @@ import {
   InboundKind,
   InboundPlatform,
   IntakeErrorCode,
+  ResourceKind,
   WEBHOOK_ADDRESS_PREFIX,
 } from "../../intake/contract.ts";
 import { errorSchema } from "../../kernel/errors.ts";
@@ -82,7 +83,10 @@ test("E06 webhook acquisition journey", { timeout: TIMEOUT }, async (t) => {
       kind: InboundKind.Webhook,
       platform: InboundPlatform.GitHub,
       consumer: Consumer.MissionDeliveryAdmit,
-      configuration: { resource: RESOURCE },
+      configuration: {
+        resource_kind: ResourceKind.Repository,
+        resource: RESOURCE,
+      },
     }),
   );
   const inbound = (args: string[]) =>

@@ -3,6 +3,7 @@ import { identitySchema } from "../kernel/identity.ts";
 import { type SealedObject, sealedObjectSchema } from "../kernel/hpke.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { CommitType } from "../kernel/commit-message.ts";
+import type { ExternalLink } from "../kernel/external-link.ts";
 import type { CredentialStore } from "@earendil-works/pi-ai";
 import type {
   CallerIdentity,
@@ -235,6 +236,35 @@ export type ActionFacts = {
   merge_address: PlatformAddressFacts | null;
   gate_files: string[];
 };
+export type ReplyFrozenActionFacts = {
+  key: string;
+  binding_id: string;
+  action: string;
+  expected_end_state: string;
+  follows: string | null;
+  configuration: { external_link: ExternalLink };
+};
+export type ReplyActionFacts = {
+  frozen_action: ReplyFrozenActionFacts;
+  conversation: {
+    binding_id: string;
+    resource_identity: string;
+    repository: string;
+  };
+  node_id: string;
+  attempt: number;
+};
+export type CommentAddressFacts = {
+  kind: "comment";
+  resource_identity: string;
+  update_key: string;
+};
+export type ReplyRequestFacts = {
+  frozen_action: ReplyFrozenActionFacts;
+  address: CommentAddressFacts;
+  node_id: string;
+  attempt: number;
+};
 export type RequestFacts = {
   frozen_action: FrozenActionFacts;
   address: PlatformAddressFacts;
@@ -283,11 +313,11 @@ export interface MissionAuthorization {
     claim: ExecutionClaim,
     input: {
       key: string;
-      commit: string;
+      commit: string | null;
       reusedEvidenceId: string | null;
       mergeEvidenceId: string | null;
     },
-  ): Authorized<ActionFacts>;
+  ): Authorized<ActionFacts | ReplyActionFacts>;
   serviceMerge(
     tx: Transaction,
     identity: ServiceIdentity,
@@ -298,7 +328,7 @@ export interface MissionAuthorization {
     identity: CallerIdentity,
     evidenceId: string,
     claim: ExecutionClaim | null,
-  ): Authorized<RequestFacts>;
+  ): Authorized<RequestFacts | ReplyRequestFacts>;
   evidenceAsset(
     tx: Transaction,
     identity: CallerIdentity,
@@ -326,7 +356,10 @@ export const GrantKind = {
   EnvironmentSecret: "environment_secret",
 } as const;
 export type GrantKind = (typeof GrantKind)[keyof typeof GrantKind];
-export const InboundOperation = { Poll: "poll" } as const;
+export const InboundOperation = {
+  Poll: "poll",
+  LinkRead: "link_read",
+} as const;
 export type InboundOperation =
   (typeof InboundOperation)[keyof typeof InboundOperation];
 export type InboundGrantInput = {
@@ -387,7 +420,7 @@ export type GrantRequest =
       identity: MachineIdentity;
       claim: ExecutionClaim;
       key: string;
-      commit: string;
+      commit: string | null;
       reusedEvidenceId: string | null;
       mergeEvidenceId?: string | null;
     }
@@ -442,9 +475,9 @@ export type ModelInferenceFacts = {
 };
 type GrantFactsOfKind = {
   [GrantKind.ModelInference]: ModelInferenceFacts;
-  [GrantKind.FrozenAction]: ActionFacts;
+  [GrantKind.FrozenAction]: ActionFacts | ReplyActionFacts;
   [GrantKind.ServiceMerge]: ActionFacts;
-  [GrantKind.RequestEvidence]: RequestFacts;
+  [GrantKind.RequestEvidence]: RequestFacts | ReplyRequestFacts;
   [GrantKind.EvidenceAsset]: AssetFacts;
   [GrantKind.ObjectPut]: AssetFacts;
   [GrantKind.Inbound]: InboundFacts;

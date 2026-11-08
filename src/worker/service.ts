@@ -94,6 +94,7 @@ import type { Store, Transaction } from "../kernel/store.ts";
 import { ActionPerformer } from "./action-performer.ts";
 import { executionSetup } from "./execution-setup.ts";
 import { clearedChangeRequests } from "./change-request.ts";
+import { linkUpdatePage } from "./link-update.ts";
 import { failedChecks } from "./failed-check.ts";
 import { authorizeModelInference } from "./authorization.ts";
 import { agentChoice, agentSelectionsAt, entryOf } from "./agent-selection.ts";
@@ -1586,6 +1587,25 @@ export class WorkerService implements Service {
             executionId: caller.execution.executionId,
           },
           caller.execution,
+        );
+        return caller.commit(() => answer);
+      },
+    );
+    registry.register(
+      workerOperations["execution.link_update.get"],
+      async ({ query }, caller) => {
+        const identity = caller.identity;
+        assert.ok(isMachineIdentity(identity));
+        assert.ok(caller.execution);
+        const answer = await linkUpdatePage(
+          this.dependencies,
+          {
+            context: caller.context,
+            identity,
+            executionId: caller.execution.executionId,
+          },
+          caller.execution,
+          query,
         );
         return caller.commit(() => answer);
       },

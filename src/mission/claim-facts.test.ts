@@ -49,6 +49,7 @@ function factsHarness(
     resolveBinding: () => assert.fail("Claim facts resolve no name."),
     resolveBindingIdentity: () =>
       assert.fail("Claim facts resolve no revision."),
+    conversationInboxOf: () => assert.fail("Claim facts read no inbox."),
     getBindingRevision: (_tx, bindingId) => ({
       binding_id: bindingId,
       project_id: projectId,
@@ -58,6 +59,8 @@ function factsHarness(
       tombstone: false,
       disabled: false,
     }),
+    conversationPolicyOf: () =>
+      assert.fail("Claim facts read no conversation policy."),
     repositoryPolicyOf: (_tx, bindingId) => ({
       binding_id: bindingId,
       project_id: projectId,

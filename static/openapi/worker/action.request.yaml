@@ -254,6 +254,22 @@ components:
                           - branch
                           - commit
                         additionalProperties: false
+                      - type: object
+                        properties:
+                          kind:
+                            type: string
+                            const: comment
+                          resource_identity:
+                            type: string
+                            minLength: 1
+                          update_key:
+                            type: string
+                            minLength: 1
+                        required:
+                          - kind
+                          - resource_identity
+                          - update_key
+                        additionalProperties: false
                 required:
                   - kind
                   - action

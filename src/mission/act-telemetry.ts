@@ -25,6 +25,7 @@ export const Act = {
   Block: "mission.node.block",
   Discard: "mission.node.discard",
   DecideProposals: "mission.proposal.decide",
+  DecideFollowup: "mission.followup.decide",
   DeleteEvidence: "mission.evidence.delete",
   CreateFinding: "mission.finding.create",
   UpdateFinding: "mission.finding.update",

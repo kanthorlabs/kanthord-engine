@@ -15,7 +15,11 @@ import {
   type TestedInput,
 } from "../../mission/contract.ts";
 import type { ChangeRequest, ChangeRequestRead } from "../contract.ts";
-import { failedChecksText, requestedChangesText } from "./judgement.ts";
+import {
+  failedChecksText,
+  linkUpdatesText,
+  requestedChangesText,
+} from "./judgement.ts";
 import type { ExecutionRun } from "./execution-run.ts";
 import { EndReason } from "./execution-run.ts";
 
@@ -23,6 +27,7 @@ export const READ_PAGE_LIMIT = 1000;
 const FIRST_ATTEMPT = 1;
 const NO_TIME = "";
 const VERDICT_SEPARATOR = "\n\n";
+export const VERDICT_LINK_UPDATE_LIMIT = 20;
 
 export async function readAllPages<T>(
   run: ExecutionRun,
@@ -297,7 +302,48 @@ export interface Prior {
   cleared: string | null;
 }
 
+async function readLinkUpdatesText(run: ExecutionRun): Promise<string | null> {
+  const read = await run.call((options) =>
+    run.clients.worker["execution.link_update.get"](
+      {
+        params: { execution_id: run.claim.execution_id },
+        query: { limit: VERDICT_LINK_UPDATE_LIMIT },
+        body: null,
+      },
+      options,
+    ),
+  );
+  return linkUpdatesText(read);
+}
+
 export async function readPrior(
+  run: ExecutionRun,
+  repositories: readonly RepositoryName[],
+): Promise<Prior> {
+  const prior = await readUnblockPrior(run, repositories);
+  const updates = await readLinkUpdatesText(run);
+  if (updates === null) return prior;
+  if (prior.verdict === null)
+    return {
+      verdict: {
+        source: VerdictSource.Rework,
+        text: updates,
+        judged: [],
+        findings: [],
+        round: null,
+      },
+      cleared: prior.cleared,
+    };
+  return {
+    ...prior,
+    verdict: {
+      ...prior.verdict,
+      text: `${prior.verdict.text}${VERDICT_SEPARATOR}${updates}`,
+    },
+  };
+}
+
+async function readUnblockPrior(
   run: ExecutionRun,
   repositories: readonly RepositoryName[],
 ): Promise<Prior> {

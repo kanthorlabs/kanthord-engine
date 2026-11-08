@@ -143,8 +143,11 @@ const environments: MissionEnvironments = {
 const bindings: MissionBindings = {
   storageBindingOf: () =>
     assert.fail("Import does not read storage configuration."),
+  conversationInboxOf: () => assert.fail("Import does not read an inbox."),
   repositoryPolicyOf: () =>
     assert.fail("Import does not derive repository policies."),
+  conversationPolicyOf: () =>
+    assert.fail("Import does not derive conversation policies."),
   resolveBinding: (_tx, projectId, name) => {
     assert.equal(projectId, PROJECT_ID);
     if (name === SECOND_REPOSITORY)

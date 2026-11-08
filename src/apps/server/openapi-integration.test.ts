@@ -30,7 +30,11 @@ import {
 } from "../../agent/contract.ts";
 import { schedulerOperations } from "../../scheduler/contract.ts";
 import {
+  BINDING_SET_INITIAL_VERSION,
   environmentSecretOperations,
+  InboxField,
+  InboxInvalidReason,
+  ProjectErrorCode,
   projectOperations,
 } from "../../project/contract.ts";
 import {
@@ -44,6 +48,7 @@ import {
 import { workbenchOperations } from "../../workbench/contract.ts";
 import {
   intakeOperations,
+  ResourceKind,
   webhookInboundSchema,
 } from "../../intake/contract.ts";
 import {
@@ -757,6 +762,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["worker.execution.setup.get", AccessPolicy.Client],
   ["worker.execution.change_request.get", AccessPolicy.Client],
   ["worker.execution.failed_check.get", AccessPolicy.Client],
+  ["worker.execution.link_update.get", AccessPolicy.Client],
   ["scheduler.queue.list", AccessPolicy.Human],
   ["scheduler.queue.peek", AccessPolicy.Human],
   ["scheduler.execution.list", AccessPolicy.Human],
@@ -818,7 +824,11 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["mission.node.unblock", AccessPolicy.Human],
   ["mission.proposal.list", AccessPolicy.Human],
   ["mission.link_update.list", AccessPolicy.Human],
+  ["mission.inbox_item.list", AccessPolicy.Human],
+  ["mission.inbox_item.done", AccessPolicy.Human],
   ["mission.proposal.decide", AccessPolicy.Human],
+  ["mission.followup.list", AccessPolicy.Human],
+  ["mission.followup.decide", AccessPolicy.Human],
   ["mission.finding.list", AccessPolicy.Human],
   ["mission.finding.get", AccessPolicy.Human],
   ["mission.finding.undecided.list", AccessPolicy.Human],
@@ -882,6 +892,9 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["intake.inbound.event.discard", AccessPolicy.Human],
   ["intake.inbound.event.delete", AccessPolicy.Human],
   ["intake.inbound.event.receive", AccessPolicy.Delivery],
+  ["intake.inbound.event.describe", AccessPolicy.Service],
+  ["intake.link.read", AccessPolicy.Service],
+  ["intake.outbound.reply.match", AccessPolicy.Service],
   ["intake.action.check", AccessPolicy.Service],
   ["intake.action.merge", AccessPolicy.Service],
   ["intake.action.perform", AccessPolicy.Client],
@@ -927,13 +940,16 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["footprint.measure.run", AccessPolicy.Human],
   ["footprint.backup.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 263;
-const ROUTED_OPERATION_COUNT = 251;
-const INTAKE_OPERATION_COUNT = 24;
+const OPERATION_COUNT = 271;
+const ROUTED_OPERATION_COUNT = 256;
+const INTAKE_OPERATION_COUNT = 27;
 const INTAKE_ROUTED_OPERATION_COUNT = 14;
 const SERVICE_OPERATION_IDS = [
   "intake.action.check",
   "intake.action.merge",
+  "intake.inbound.event.describe",
+  "intake.link.read",
+  "intake.outbound.reply.match",
   "mission.delivery.admit",
   "mission.delivery.unresolved_request.count",
 ];
@@ -1883,6 +1899,35 @@ test("the direct intake operations have no OpenAPI path", async () => {
   );
 });
 
+test("no route reaches intake.inbound.event.describe", async () => {
+  const resolved = await SwaggerParser.dereference(openapiPath());
+  const describeId = intakeOperations["inbound.event.describe"].id;
+  const published = Object.values(resolved.paths ?? {}).flatMap((path) =>
+    Object.values(path ?? {}).filter(
+      (item) => isObject(item) && "operationId" in item,
+    ),
+  );
+  assert.ok(published.length);
+  assert.equal(
+    published.some(
+      (item) => (item as ResolvedOperation).operationId === describeId,
+    ),
+    false,
+  );
+  assert.equal(
+    Object.keys(resolved.paths ?? {}).some((path) =>
+      path.endsWith("/describe"),
+    ),
+    false,
+  );
+  assert.equal(
+    apiOperations.some(
+      (operation) => operation.id === describeId && hasHttpRoute(operation),
+    ),
+    false,
+  );
+});
+
 test("published outbound request reads are human unary routes", async () => {
   const resolved = await SwaggerParser.dereference(openapiPath());
   const list = resolved.paths?.["/api/intake/outbound"]?.get as
@@ -2006,7 +2051,10 @@ test("inbound create answers 201, replays a repeated key, refuses an unknown con
     kind: "webhook",
     platform: "github",
     consumer: "mission.delivery.admit",
-    configuration: { resource: "owner/repo" },
+    configuration: {
+      resource_kind: ResourceKind.Repository,
+      resource: "owner/repo",
+    },
   } as const;
   const path = intakeOperations["inbound.create"].path;
   const key = createIdempotencyKey();
@@ -2065,6 +2113,88 @@ test("inbound create answers 201, replays a repeated key, refuses an unknown con
   assert.equal(inboundCount(), INBOUND_ONE_ROW);
 });
 
+const INBOX_CREDENTIAL = "github-inbox";
+const INBOX_REPOSITORY = "acme/inbox";
+const INBOX_ACTOR_ID = "583231";
+const INBOX_HANDLE = "ulrich";
+const INBOX_BAD_HANDLE = "-ulrich";
+const INBOX_BINDING = "conversation";
+const INBOX_IDENTITY = `conversation:github:${INBOX_REPOSITORY}`;
+
+test("the binding write answers inbox_invalid and inbox_taken through the gateway", async (t) => {
+  const fixture = await gatewayFixture(t);
+  const send = (method: string, path: string, body: unknown) =>
+    fixture.request(path, {
+      method,
+      headers: {
+        Authorization: `Bearer ${fixture.token}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": createIdempotencyKey(),
+      },
+      body: JSON.stringify(body),
+    });
+  const created = await send("POST", repositoryOperations.create.path, {
+    name: INBOX_CREDENTIAL,
+    platform: "github",
+    metadata: null,
+    secret: { key: "inbox-test-key" },
+  });
+  assert.equal(created.status, HttpStatus.OK);
+  const projectOf = async (name: string) =>
+    projectOperations.create.output.parse(
+      await (
+        await send("POST", projectOperations.create.path, { name })
+      ).json(),
+    );
+  const writeBindings = (projectId: string, inbox: unknown) =>
+    send(
+      "PUT",
+      projectOperations["bindingSet.write"].path.replace(
+        ":project_id",
+        projectId,
+      ),
+      {
+        version: BINDING_SET_INITIAL_VERSION,
+        bindings: {
+          [INBOX_BINDING]: {
+            kind: "conversation",
+            config: {
+              available: true,
+              platform: "github",
+              repository: INBOX_REPOSITORY,
+              credential: INBOX_CREDENTIAL,
+              inbox,
+            },
+          },
+        },
+      },
+    );
+  const first = await projectOf("inbox-first");
+  const second = await projectOf("inbox-second");
+  const invalid = await writeBindings(first.id, {
+    actor_id: INBOX_ACTOR_ID,
+    handle: INBOX_BAD_HANDLE,
+  });
+  assert.equal(invalid.status, HttpStatus.BadRequest);
+  const invalidError = errorSchema.parse(await invalid.json()).error;
+  assert.equal(invalidError.code, ProjectErrorCode.InboxInvalid);
+  assert.deepEqual(invalidError.details, {
+    binding: INBOX_BINDING,
+    field: InboxField.Handle,
+    reason: InboxInvalidReason.HandleInvalid,
+  });
+  const inbox = { actor_id: INBOX_ACTOR_ID, handle: INBOX_HANDLE };
+  assert.equal((await writeBindings(first.id, inbox)).status, HttpStatus.OK);
+  const taken = await writeBindings(second.id, inbox);
+  assert.equal(taken.status, HttpStatus.Conflict);
+  const takenError = errorSchema.parse(await taken.json()).error;
+  assert.equal(takenError.code, ProjectErrorCode.InboxTaken);
+  assert.deepEqual(takenError.details, {
+    resource_identity: INBOX_IDENTITY,
+    project_id: first.id,
+  });
+});
+
 test("published inbound reads are human unary routes", async () => {
   const resolved = await SwaggerParser.dereference(openapiPath());
   const list = resolved.paths?.["/api/intake/inbound"]?.get as
@@ -2107,7 +2237,10 @@ test("inbound get answers the webhook secret over HTTP, refuses another prefix a
         kind: "webhook",
         platform: "github",
         consumer: "mission.delivery.admit",
-        configuration: { resource: "owner/repo" },
+        configuration: {
+          resource_kind: ResourceKind.Repository,
+          resource: "owner/repo",
+        },
       }),
     },
   );
@@ -2194,7 +2327,10 @@ test("inbound delete answers 204 over HTTP and 404 for a repeat", async (t) => {
           kind: "webhook",
           platform: "github",
           consumer: "mission.delivery.admit",
-          configuration: { resource: "owner/repo" },
+          configuration: {
+            resource_kind: ResourceKind.Repository,
+            resource: "owner/repo",
+          },
         }),
       })
     ).json(),

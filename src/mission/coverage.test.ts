@@ -47,6 +47,7 @@ function coverageHarness(t: TestContext) {
   const latest = { binding_id: PLAIN_REPOSITORY };
   const bindings: MissionBindings = {
     storageBindingOf: () => assert.fail("Coverage reads no storage."),
+    conversationInboxOf: () => assert.fail("Coverage reads no inbox."),
     resolveBinding: (_tx, projectId, name) => {
       assert.equal(projectId, PROJECT_ID);
       return name === REPOSITORY_NAME
@@ -78,6 +79,8 @@ function coverageHarness(t: TestContext) {
       tombstone: false,
       disabled: false,
     }),
+    conversationPolicyOf: () =>
+      assert.fail("Coverage reads no conversation policy."),
     repositoryPolicyOf: (_tx, bindingId) => ({
       binding_id: bindingId,
       project_id: PROJECT_ID,

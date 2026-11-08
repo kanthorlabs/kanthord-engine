@@ -14,6 +14,7 @@ import {
   TOOL_OUTPUT_NAME_PATTERN,
   WORKSPACE_KEY_PATTERN,
 } from "../kernel/cleanup.ts";
+import type { ExternalLink } from "../kernel/external-link.ts";
 import { canonicalJSON, timestamp } from "../kernel/json.ts";
 import { base64urlSchema, sealedObjectSchema } from "../kernel/hpke.ts";
 import {
@@ -114,6 +115,7 @@ export type ActionReadMethod = z.infer<typeof actionReadMethodSchema>;
 export const PlatformAddressKind = {
   PullRequest: "pull_request",
   BranchPush: "branch_push",
+  Comment: "comment",
 } as const;
 export const platformAddressSchema = z.discriminatedUnion("kind", [
   z.strictObject({
@@ -126,6 +128,11 @@ export const platformAddressSchema = z.discriminatedUnion("kind", [
     resource_identity: z.string().min(1),
     branch: z.string().min(1),
     commit: z.string().min(1),
+  }),
+  z.strictObject({
+    kind: z.literal(PlatformAddressKind.Comment),
+    resource_identity: z.string().min(1),
+    update_key: z.string().min(1),
   }),
 ]);
 export type PlatformAddress = z.infer<typeof platformAddressSchema>;
@@ -158,6 +165,50 @@ export const clearedChangeRequestsSchema = z.strictObject({
   ),
 });
 export type ClearedChangeRequests = z.infer<typeof clearedChangeRequestsSchema>;
+export const LINK_UPDATE_LIMIT_MIN = 1;
+export const LINK_UPDATE_LIMIT_MAX = 100;
+export const LINK_UPDATE_LIMIT_DEFAULT = 20;
+export const linkUpdateExternalLinkSchema = z.strictObject({
+  kind: z.string().min(1),
+  resource_identity: z.string().min(1),
+  number: z.number().int().positive(),
+});
+export const linkUpdateContentSchema = z.strictObject({
+  author: z.string(),
+  body: z.string(),
+  url: z.string(),
+  occurred_at: timestamp,
+});
+export type LinkUpdateContent = z.infer<typeof linkUpdateContentSchema>;
+export const linkUpdateReadSchema = z.strictObject({
+  items: z.array(
+    z.strictObject({
+      id: identitySchema("link_update"),
+      external_link: linkUpdateExternalLinkSchema,
+      update_key: z.string().min(1),
+      occurred_at: timestamp,
+      new: z.boolean(),
+      content: linkUpdateContentSchema.nullable(),
+    }),
+  ),
+  next_cursor: z.string().nullable(),
+  total: z.number().int().nonnegative(),
+});
+export type LinkUpdateRead = z.infer<typeof linkUpdateReadSchema>;
+export type LinkUpdatePageQuery = { cursor?: string; limit: number };
+export type MissionLinkUpdates = {
+  items: {
+    id: string;
+    external_link: z.infer<typeof linkUpdateExternalLinkSchema>;
+    update_key: string;
+    inbound_event_id: string;
+    actor_id: string;
+    occurred_at: number;
+    new: boolean;
+  }[];
+  next_cursor: string | null;
+  total: number;
+};
 export const requiredCheckReadSchema = z.strictObject({
   head_commit: z.string().min(1),
   base_branch: z.string().min(1),
@@ -222,7 +273,10 @@ export const RepositoryAction = {
   PullRequest: "pull_request",
   Push: "push",
 } as const;
-export type FrozenAction = {
+export const ConversationAction = {
+  Reply: "reply",
+} as const;
+export type RepositoryFrozenAction = {
   key: string;
   binding_id: string;
   action: (typeof RepositoryAction)[keyof typeof RepositoryAction];
@@ -230,6 +284,19 @@ export type FrozenAction = {
   follows: string | null;
   configuration: { base_branch: string; landing: "human" | "kanthord" };
 };
+export type ReplyFrozenAction = {
+  key: string;
+  binding_id: string;
+  action: typeof ConversationAction.Reply;
+  expected_end_state: "posted";
+  follows: string | null;
+  configuration: { external_link: ExternalLink };
+};
+export type FrozenAction = RepositoryFrozenAction | ReplyFrozenAction;
+export type RepositoryActionEntry = Omit<
+  ActionContext["actions"][number],
+  "action"
+> & { action: RepositoryFrozenAction };
 export const ActionNodeState = {
   Pending: "Pending",
   Available: "Available",
@@ -277,6 +344,8 @@ export type TestedInput =
     };
 export type ActionContext = {
   state: (typeof ActionNodeState)[keyof typeof ActionNodeState];
+  node_name: string;
+  request_addresses: PlatformAddress[];
   current_assessment: {
     result: (typeof ActionAssessmentResult)[keyof typeof ActionAssessmentResult];
     tested_input: TestedInput;
@@ -311,6 +380,12 @@ export interface MissionActions {
     nodeId: string,
     attempt: number,
   ): ActionContext;
+  linkUpdatesOf(
+    tx: Transaction,
+    nodeId: string,
+    attempt: number,
+    page: { cursor?: string; limit?: number },
+  ): MissionLinkUpdates;
 }
 export type IntakeActionCall = {
   context: Context;
@@ -326,7 +401,8 @@ export type ActionOperands = {
 };
 export type ActionPerformInput = {
   key: string;
-  commit: string;
+  commit: string | null;
+  comment?: string | null;
   reusedEvidenceId: string | null;
   mergeEvidenceId?: string | null;
 };
@@ -348,6 +424,15 @@ export interface IntakeActions {
     evidenceId: string,
     page: ActionReadPage,
   ): Promise<{ body: unknown; next_cursor: string | null } | ResultClassAnswer>;
+  describe(
+    call: IntakeActionCall,
+    inboundEventId: string,
+  ): Promise<{
+    author: string | null;
+    body: string | null;
+    url: string | null;
+    occurred_at: number | null;
+  }>;
 }
 export interface EvidenceRequests {
   request(
@@ -1093,7 +1178,10 @@ export const connectionPayloadSchema = z.strictObject({
 export type ConnectionPayload = z.infer<typeof connectionPayloadSchema>;
 export type ConnectionBinding = ConnectionPayload["bindings"][number];
 
-export const HostTool = { EvidenceUpload: "evidence-upload" } as const;
+export const HostTool = {
+  EvidenceUpload: "evidence-upload",
+  LinkUpdateList: "link_update_list",
+} as const;
 export type HostTool = (typeof HostTool)[keyof typeof HostTool];
 export const uploadResultSchema = z.strictObject({
   evidence_id: identitySchema("evidence"),
@@ -1106,6 +1194,10 @@ export interface HostTools {
     path: string,
     signal: AbortSignal | undefined,
   ): Promise<UploadResult>;
+  linkUpdateList(
+    page: LinkUpdatePageQuery,
+    signal: AbortSignal | undefined,
+  ): Promise<LinkUpdateRead>;
 }
 export const SetupRefusal = {
   ModelUnknown: "model_unknown",
@@ -1848,6 +1940,36 @@ export const workerOperations = {
     output: clearedChangeRequestsSchema,
     description:
       "Read the current change requests on each pull request that ended with other in the attempt that an unblock cleared before the claimed attempt.",
+  },
+  "execution.link_update.get": {
+    service: WORKER_SERVICE_NAME,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    id: "worker.execution.link_update.get",
+    method: HttpMethod.Get,
+    path: "/api/worker/execution/:execution_id/link-update",
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    timeoutMs: CHANGE_REQUEST_TIMEOUT_MS,
+    mutation: false,
+    body: false,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: z.strictObject({ execution_id: identitySchema("execution") }),
+      query: z.strictObject({
+        cursor: z.string().optional(),
+        limit: z.coerce
+          .number()
+          .int()
+          .min(LINK_UPDATE_LIMIT_MIN)
+          .max(LINK_UPDATE_LIMIT_MAX)
+          .default(LINK_UPDATE_LIMIT_DEFAULT),
+      }),
+      body: z.null(),
+    }),
+    output: linkUpdateReadSchema,
+    description:
+      "Read a page of the trusted link updates of the node of the claimed attempt, newest first, with the redacted text of each update.",
   },
   "execution.failed_check.get": {
     service: WORKER_SERVICE_NAME,

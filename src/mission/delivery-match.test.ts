@@ -21,6 +21,7 @@ import {
   StartPoint,
 } from "./contract.ts";
 import {
+  inboxDemand,
   linkDemandCount,
   MatchKind,
   matchRequests,
@@ -424,3 +425,39 @@ test("count keeps its value beside link_count", (t) => {
   assert.equal(h.demand(ADDRESS.resource_identity), NO_LINKS);
   assert.equal(h.demand(), SINGLE_LINK);
 });
+
+const INBOX_RESOURCE = "conversation:github:acme/app";
+const INBOX_IDENTITY = { actor_id: "583231", handle: "ulrich" };
+
+for (const { name, holder, expected } of [
+  {
+    name: "the count answers inbox true for a resource whose current conversation binding holds inbox",
+    holder: { binding_id: createIdentity("binding"), inbox: INBOX_IDENTITY },
+    expected: true,
+  },
+  {
+    name: "the count answers inbox false for a resource whose current conversation binding holds no inbox",
+    holder: null,
+    expected: false,
+  },
+]) {
+  test(name, (t) => {
+    const h = fixture(t);
+    const reads: string[][] = [];
+    const answer = h.store.transaction((tx) =>
+      inboxDemand(
+        tx,
+        {
+          conversationInboxOf: (_tx, project, resource) => {
+            reads.push([project, resource]);
+            return holder;
+          },
+        },
+        h.projectId,
+        INBOX_RESOURCE,
+      ),
+    );
+    assert.equal(answer, expected);
+    assert.deepEqual(reads, [[h.projectId, INBOX_RESOURCE]]);
+  });
+}

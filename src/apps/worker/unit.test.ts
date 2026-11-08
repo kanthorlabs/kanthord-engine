@@ -682,6 +682,8 @@ async function liveStopUnit(
       "execution.setup.get": async () => completed(setup),
       "action.request": async () => completed({ items: [] }),
       "execution.failed_check.get": async () => completed({ items: [] }),
+      "execution.link_update.get": async () =>
+        completed({ items: [], next_cursor: null, total: 0 }),
       credential: async () => completed({}),
       "registration.deregister": async (input: {
         params: { runtime_identity: string };

@@ -50,6 +50,7 @@ import {
   uploadCheckSpan,
 } from "../../mission/index.ts";
 import {
+  admissionAnswerSchema,
   MISSION_SERVICE_NAME,
   missionOperations,
 } from "../../mission/contract.ts";
@@ -64,6 +65,7 @@ import {
 import {
   type PoolPlacement,
   type PromptBase,
+  WORKER_SERVICE_NAME,
   workerOperations,
   type WorkerRegistrations,
 } from "../../worker/contract.ts";
@@ -441,6 +443,7 @@ export function composeServices(options: {
   const intakeClient = directClient(intakeOperations, invocation);
   const projectClient = directClient(projectOperations, invocation);
   const missionIdentity = mintServiceIdentity(MISSION_SERVICE_NAME);
+  const workerIdentity = mintServiceIdentity(WORKER_SERVICE_NAME);
   const pinnedHolderOf = (
     tx: Transaction,
     runtimeIdentity: string,
@@ -667,9 +670,16 @@ export function composeServices(options: {
       custodySuitability: (tx, req) => custody.custodySuitability(tx, req),
       repositoryBindingIdsOf: (tx, nodeId, revision) =>
         mission.repositoryBindingIdsOf(tx, nodeId, revision),
-      requestEvidenceBindingOf: (tx, identity, evidenceId) =>
-        mission.authorizeRequestEvidence(tx, identity, evidenceId, null).facts
-          .repository.binding_id,
+      requestEvidenceBindingOf: (tx, identity, evidenceId) => {
+        const { facts } = mission.authorizeRequestEvidence(
+          tx,
+          identity,
+          evidenceId,
+          null,
+        );
+        assert.ok("repository" in facts);
+        return facts.repository.binding_id;
+      },
     }),
     sshAccessOf: (tx, granted, material) =>
       repositoryComponent.sshAccessOf(tx, granted, material),
@@ -769,6 +779,7 @@ export function composeServices(options: {
       authorizeRequest: (...args) => mission.authorizeRequest(...args),
       authorizeAction: (...args) => mission.authorizeAction(...args),
       actionContextOf: (...args) => mission.actionContextOf(...args),
+      linkUpdatesOf: (...args) => mission.linkUpdatesOf(...args),
     },
     missionPromptPins: {
       attemptPromptCommits: (...args) => mission.attemptPromptCommits(...args),
@@ -803,6 +814,7 @@ export function composeServices(options: {
               body: {
                 key: action.key,
                 commit: action.commit,
+                comment: action.comment ?? null,
                 reused_evidence_id: action.reusedEvidenceId,
                 merge_evidence_id: action.mergeEvidenceId ?? null,
                 request_key: requestKey,
@@ -827,6 +839,17 @@ export function composeServices(options: {
               body: null,
             },
             { identity: call.identity, context: call.context },
+          ),
+        ),
+      describe: async (call, inboundEventId) =>
+        resultOf(
+          await intakeClient["inbound.event.describe"](
+            {
+              params: {},
+              query: {},
+              body: { inbound_event_id: inboundEventId },
+            },
+            { identity: workerIdentity, context: call.context },
           ),
         ),
     },
@@ -992,6 +1015,42 @@ export function composeServices(options: {
       },
     },
     decoder: missionEventDecoder,
+    intakeLinks: {
+      hasInbound: (tx, projectId, resourceIdentity) =>
+        intake.hasInbound(tx, projectId, resourceIdentity),
+      read: async (context, input) =>
+        resultOf(
+          await intakeClient["link.read"](
+            { params: {}, query: {}, body: input },
+            { identity: missionIdentity, context },
+          ),
+        ),
+      replyMatch: async (context, input) =>
+        resultOf(
+          await intakeClient["outbound.reply.match"](
+            { params: {}, query: {}, body: input },
+            { identity: missionIdentity, context },
+          ),
+        ),
+      handoff: async (_context, inboundEventId) => {
+        const result = await intake.handoff(inboundEventId);
+        return result === null
+          ? null
+          : admissionAnswerSchema.parse(resultOf(result));
+      },
+      releaseHeld: (inboundEventIds) => intake.releaseHeld(inboundEventIds),
+      describe: async (context, inboundEventId) =>
+        resultOf(
+          await intakeClient["inbound.event.describe"](
+            {
+              params: {},
+              query: {},
+              body: { inbound_event_id: inboundEventId },
+            },
+            { identity: missionIdentity, context },
+          ),
+        ),
+    },
     intakeCheck: {
       check: async (context, evidenceId) =>
         resultOf(
@@ -1078,7 +1137,10 @@ export function composeServices(options: {
       resolveBindingIdentity: (tx, pid, bid) =>
         project.resolveBindingIdentity(tx, pid, bid),
       getBindingRevision: (tx, bid) => project.getBindingRevision(tx, bid),
+      conversationInboxOf: (tx, pid, identity) =>
+        project.conversationInboxOf(tx, pid, identity),
       repositoryPolicyOf: (tx, bid) => project.repositoryPolicyOf(tx, bid),
+      conversationPolicyOf: (tx, bid) => project.conversationPolicyOf(tx, bid),
       storageBindingOf: (tx, bid) => project.storageBindingOf(tx, bid),
     },
     environments: {
@@ -1188,6 +1250,10 @@ export function composeServices(options: {
     masterKey: options.config.master_key,
     stateDirectory: options.stateDirectory,
     projects: { get: projectClient.get },
+    linkBindings: {
+      conversationBindingOf: (tx, bindingId) =>
+        project.conversationBindingOf(tx, bindingId),
+    },
     consumers: {
       [Consumer.MissionDeliveryAdmit]: (input, consumerOptions) =>
         missionClient["delivery.admit"](

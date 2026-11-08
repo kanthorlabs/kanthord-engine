@@ -30,6 +30,7 @@ import {
   type InboundKindValue,
   InboundPlatform,
   INTAKE_SERVICE_NAME,
+  ResourceKind,
   ResultClass,
 } from "./contract.ts";
 import {
@@ -54,6 +55,9 @@ const CHECKPOINT: GitHubCheckpoint = {
   etag: ETAG_STORED,
   pulls_etag: PULLS_ETAG_STORED,
 };
+const COMMENTS_ETAG_STORED = '"comments-0"';
+const COMMENTS_ETAG_ANSWERED = '"comments-1"';
+const CONVERSATION_CHECKPOINT = { comments_etag: COMMENTS_ETAG_STORED };
 const POLL_READS_PER_CHECK = 2;
 const REQUESTS_PER_READ = 1;
 const REFUSAL_CODE = "credential.credential.archived";
@@ -134,6 +138,12 @@ function fakeCustody(options: HarnessOptions) {
   return { custody, grants, drops };
 }
 
+function checkpointOf(resourceKind: ResourceKind) {
+  return resourceKind === ResourceKind.Conversation
+    ? CONVERSATION_CHECKPOINT
+    : CHECKPOINT;
+}
+
 function harness(t: TestContext, options: HarnessOptions = {}) {
   const store = new Store(IN_MEMORY_DATABASE);
   stopAfter(t, () => store.close());
@@ -155,6 +165,14 @@ function harness(t: TestContext, options: HarnessOptions = {}) {
       value: { notModified: false, etag: PULLS_ETAG_ANSWERED, events: [] },
     }),
   };
+  const commentCalls: { call: GitHubCall; query: { etag: string | null } }[] =
+    [];
+  const commentAnswers: { next: EventsCall } = {
+    next: async () => ({
+      ok: true,
+      value: { notModified: false, etag: COMMENTS_ETAG_ANSWERED, events: [] },
+    }),
+  };
   const dependencies: InboundHealthDependencies = {
     store,
     identity: SERVICE_IDENTITY,
@@ -168,9 +186,16 @@ function harness(t: TestContext, options: HarnessOptions = {}) {
         pullCalls.push({ call, query });
         return pullAnswers.next(call);
       },
+      listIssueComments: async (call, _target, query) => {
+        commentCalls.push({ call, query });
+        return commentAnswers.next(call);
+      },
     },
   };
-  const insert = (kind: InboundKindValue) => {
+  const insert = (
+    kind: InboundKindValue,
+    resourceKind: ResourceKind = ResourceKind.Repository,
+  ) => {
     const id = allocateInboundId();
     const poll = kind === InboundKind.Poll;
     store.transaction((tx) =>
@@ -180,8 +205,8 @@ function harness(t: TestContext, options: HarnessOptions = {}) {
         platform: InboundPlatform.GitHub,
         consumer: Consumer.MissionDeliveryAdmit,
         credential: poll ? CREDENTIAL : null,
-        configuration: { resource: RESOURCE },
-        checkpoint: poll ? CHECKPOINT : null,
+        configuration: { resource_kind: resourceKind, resource: RESOURCE },
+        checkpoint: poll ? checkpointOf(resourceKind) : null,
         created_at: CREATED_AT,
       }),
     );
@@ -215,8 +240,10 @@ function harness(t: TestContext, options: HarnessOptions = {}) {
     drops,
     calls,
     pullCalls,
+    commentCalls,
     answers,
     pullAnswers,
+    commentAnswers,
     insert,
     corrupt,
     inventory,
@@ -309,7 +336,45 @@ test("a poll check releases one poll grant for each read, sends the stored ETag 
     ],
   );
   assert.deepEqual(h.drops, [CREDENTIAL, CREDENTIAL]);
+  assert.equal(h.commentCalls.length, UNCALLED_PLATFORM_COUNT);
   assert.deepEqual(h.stored(), before);
+});
+
+test("a conversation poll check makes only the issue comment read with the stored ETag and answers healthy for a 200", async (t) => {
+  const h = harness(t);
+  const id = h.insert(InboundKind.Poll, ResourceKind.Conversation);
+  const entry = h.entryOf(id);
+  const before = h.stored();
+  assert.equal(await entry.check(checkContext(t)), ResourceStatus.Healthy);
+  assert.equal(h.grants.length, REQUESTS_PER_READ);
+  assert.deepEqual(
+    h.commentCalls.map(({ call, query }) => ({ token: call.token, query })),
+    [{ token: TOKEN, query: { etag: COMMENTS_ETAG_STORED } }],
+  );
+  assert.equal(h.calls.length, UNCALLED_PLATFORM_COUNT);
+  assert.equal(h.pullCalls.length, UNCALLED_PLATFORM_COUNT);
+  assert.deepEqual(h.drops, [CREDENTIAL]);
+  assert.deepEqual(h.stored(), before);
+});
+
+test("a conversation poll check answers unhealthy for a failed issue comment read and observes its code", async (t) => {
+  const h = harness(t);
+  const entry = h.entryOf(
+    h.insert(InboundKind.Poll, ResourceKind.Conversation),
+  );
+  h.commentAnswers.next = async () => ({
+    ok: false,
+    class: ResultClass.FinalRefusal,
+    code: FINAL_REFUSAL_CODE,
+    status: FORBIDDEN_STATUS,
+    message: "Resource not accessible by personal access token",
+  });
+  const reasons: string[] = [];
+  assert.equal(
+    await entry.check(checkContext(t), (reason) => reasons.push(reason)),
+    ResourceStatus.Unhealthy,
+  );
+  assert.deepEqual(reasons, [FINAL_REFUSAL_CODE]);
 });
 
 test("a poll check answers healthy for a 304 and changes no inbound", async (t) => {

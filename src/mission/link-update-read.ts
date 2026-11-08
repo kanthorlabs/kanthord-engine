@@ -33,7 +33,7 @@ const NO_ROWS = 0;
 const NO_TRUSTED_LINKS = 0;
 const SEPARATOR_LENGTH = 1;
 
-interface TrustedLink {
+export interface TrustedLink {
   external_link: string;
   actor_ids: string[];
 }
@@ -44,7 +44,7 @@ export interface LinkUpdateRows {
   total: number;
 }
 
-function trustedLinksOf(
+export function trustedLinksOf(
   tx: Transaction,
   bindings: MissionBindings,
   revision: RevisionRow,
@@ -70,7 +70,7 @@ function trustedLinksOf(
     .filter((trusted) => trusted.actor_ids.length > NO_ACTORS);
 }
 
-function cursorOf(cursor: string): { occurred_at: number; id: string } {
+export function cursorOf(cursor: string): { occurred_at: number; id: string } {
   const value = decode(cursor);
   const separator = value.indexOf(CURSOR_SEPARATOR);
   const occurredAt = Number(value.slice(FIRST_INDEX, separator));

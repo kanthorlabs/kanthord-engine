@@ -1,7 +1,11 @@
 import { z } from "zod";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
+import {
+  type ExternalLink,
+  externalLinkSchema,
+} from "../kernel/external-link.ts";
 import { identitySchema } from "../kernel/identity.ts";
-import { timestamp } from "../kernel/json.ts";
+import { canonicalJSON, timestamp } from "../kernel/json.ts";
 import {
   AccessPolicy,
   type ClientOptions,
@@ -29,6 +33,7 @@ export const PENDING_EVENT_LIMIT = 10000;
 export const ERROR_ARRAY_MAX_BYTES = 16384;
 export const ERROR_MESSAGE_MAX_BYTES = 1024;
 export const RESULT_MAX_BYTES = 65536;
+export const COMMENT_MAX_LENGTH = 65536;
 export const DELETE_IDS_MAX = 1000;
 export const PLATFORM_CALL_DEADLINE_MS = 30000;
 export const SERVICE_MERGE_REQUEST_KEY_PREFIX = "service_merge/";
@@ -69,10 +74,16 @@ export const IntakeErrorCode = {
   InboundEventFilterInvalid: "intake.inbound.event.filter_invalid",
   InboundEventSignatureInvalid: "intake.inbound.event.signature_invalid",
   InboundEventCapacityExceeded: "intake.inbound.event.capacity_exceeded",
+  LinkInboundMissing: "intake.link.inbound_missing",
 } as const;
 
 export const InboundKind = { Webhook: "webhook", Poll: "poll" } as const;
 export const InboundPlatform = { GitHub: "github" } as const;
+export const ResourceKind = {
+  Repository: "repository",
+  Conversation: "conversation",
+} as const;
+export type ResourceKind = (typeof ResourceKind)[keyof typeof ResourceKind];
 export const Consumer = {
   MissionDeliveryAdmit: "mission.delivery.admit",
 } as const;
@@ -92,6 +103,7 @@ export const OutboundOperation = {
   GitHubPullRequest: "github.pull_request",
   GitHubPullRequestMerge: "github.pull_request_merge",
   GitPush: "git.push",
+  GitHubIssueComment: "github.issue_comment",
   S3DeleteObject: "s3.delete_object",
 } as const;
 export const ResultClass = {
@@ -112,6 +124,7 @@ export const CheckEndState = {
 export const ActionTableAction = {
   PullRequest: "pull_request",
   Push: "push",
+  Reply: "reply",
 } as const;
 export const ActionTablePlatform = {
   GitHub: "github",
@@ -139,6 +152,11 @@ export const ACTION_TABLE = [
     platform: ActionTablePlatform.Bitbucket,
     operation: OutboundOperation.GitPush,
   },
+  {
+    action: ActionTableAction.Reply,
+    platform: ActionTablePlatform.GitHub,
+    operation: OutboundOperation.GitHubIssueComment,
+  },
 ] as const;
 export const ActionReadMethod = {
   PullRequestGet: "github-pull-request-get",
@@ -149,6 +167,7 @@ export const ActionReadMethod = {
 export const AddressKind = {
   PullRequest: "pull_request",
   BranchPush: "branch_push",
+  Comment: "comment",
 } as const;
 
 export const inboundKindSchema = z.enum(InboundKind);
@@ -163,9 +182,29 @@ export const actionReadMethodSchema = z.enum(ActionReadMethod);
 export const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 export const commitSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 
+export const replyAccountSchema = z.strictObject({
+  actor_id: z.string().min(1),
+});
+export const replyResultSchema = z.strictObject({
+  update_key: z.string().min(1),
+  actor_id: z.string().min(1).nullable(),
+});
+export const replyMatchSchema = z.strictObject({
+  succeeded: z.boolean(),
+  pending_actor_ids: z.array(z.string().min(1)),
+});
+
+export function replyRequestKey(
+  nodeId: string,
+  attempt: number,
+  link: ExternalLink,
+): string {
+  return `${nodeId}:${attempt}:${canonicalJSON(link)}`;
+}
+
 export const actionKeySchema = z
   .string()
-  .regex(/^[a-z][a-z0-9-]{0,62}\.(pull_request|push)$/);
+  .regex(/^[a-z][a-z0-9-]{0,62}\.(pull_request|push|reply\.[0-9])$/);
 export const platformAddressSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal(AddressKind.PullRequest),
@@ -177,6 +216,11 @@ export const platformAddressSchema = z.discriminatedUnion("kind", [
     resource_identity: z.string().min(1),
     branch: z.string().min(1),
     commit: commitSchema,
+  }),
+  z.strictObject({
+    kind: z.literal(AddressKind.Comment),
+    resource_identity: z.string().min(1),
+    update_key: z.string().min(1),
   }),
 ]);
 export const resultClassAnswerSchema = z.strictObject({
@@ -230,6 +274,17 @@ export const inboundEventSchema = z.strictObject({
   state: inboundEventStateSchema,
   error: errorItemSchema.array().nullable(),
   created_at: timestamp,
+});
+
+export const inboundEventDetailSchema = inboundEventSchema.extend({
+  event: z.string(),
+});
+
+export const describedEventSchema = z.strictObject({
+  author: z.string().nullable(),
+  body: z.string().nullable(),
+  url: z.string().nullable(),
+  occurred_at: timestamp.nullable(),
 });
 
 export const inboundSchema = z.strictObject({
@@ -292,6 +347,8 @@ export type OutboundOperationValue = z.infer<typeof outboundOperationSchema>;
 export type ResultClassValue = z.infer<typeof resultClassSchema>;
 export type OutboundRequest = z.infer<typeof outboundRequestSchema>;
 export type InboundEvent = z.infer<typeof inboundEventSchema>;
+export type InboundEventDetail = z.infer<typeof inboundEventDetailSchema>;
+export type DescribedEvent = z.infer<typeof describedEventSchema>;
 export type Inbound = z.infer<typeof inboundSchema>;
 export type WebhookInbound = z.infer<typeof webhookInboundSchema>;
 export type InboundCreate = z.infer<typeof inboundCreateSchema>;
@@ -323,7 +380,9 @@ export type IntakeConsumers = Record<
 export type UnresolvedRequestCounter = (
   input: { project_id: string; resource_identity: string },
   options: ClientOptions,
-) => Promise<OperationResult<{ count: number }>>;
+) => Promise<
+  OperationResult<{ count: number; link_count: number; inbox: boolean }>
+>;
 
 export type IntakeInventoryEntry = Omit<ResourceEntry, "project" | "scope"> & {
   project_id: string;
@@ -577,8 +636,24 @@ export const intakeOperations = {
       }),
       z.strictObject({}),
     ),
-    output: inboundEventSchema,
-    description: "Get one inbound event projection.",
+    output: inboundEventDetailSchema,
+    description:
+      "Get one inbound event projection with its stored event as redacted UTF-8 text.",
+  },
+  "inbound.event.describe": {
+    ...serviceOperation,
+    id: "intake.inbound.event.describe",
+    path: "/api/intake/event/describe",
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: z.strictObject({}),
+      body: z.strictObject({
+        inbound_event_id: identitySchema(INBOUND_EVENT_ID_PREFIX),
+      }),
+    }),
+    output: describedEventSchema,
+    description:
+      "Describe a stored inbound event with the redacted text of its platform implementation for the Worker Service and the Mission Service.",
   },
   "inbound.event.retry": {
     ...mutationOperation,
@@ -660,6 +735,45 @@ export const intakeOperations = {
     description:
       "Check the platform end state of a request evidence for the Mission Service.",
   },
+  "outbound.reply.match": {
+    ...serviceOperation,
+    id: "intake.outbound.reply.match",
+    path: "/api/intake/outbound/reply/match",
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: z.strictObject({}),
+      body: z.strictObject({
+        update_key: z.string().min(1),
+        external_link: externalLinkSchema,
+      }),
+    }),
+    output: replyMatchSchema,
+    description:
+      "Tell the Mission Service whether an update is the succeeded reply of any project and name the reply accounts of the pending replies on a link.",
+  },
+  "link.read": {
+    ...serviceOperation,
+    id: "intake.link.read",
+    path: "/api/intake/link/read",
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: z.strictObject({}),
+      body: z.strictObject({
+        project_id: identitySchema("project"),
+        external_link: externalLinkSchema,
+        binding_id: identitySchema("binding"),
+      }),
+    }),
+    output: z.strictObject({
+      items: z.array(
+        z.strictObject({
+          inbound_event_id: identitySchema(INBOUND_EVENT_ID_PREFIX),
+        }),
+      ),
+    }),
+    description:
+      "Read the platform updates of an external link on demand, store each item as an inbound event and answer the event identities for the Mission Service.",
+  },
   "action.perform": {
     ...performOperation,
     id: "intake.action.perform",
@@ -669,7 +783,8 @@ export const intakeOperations = {
       query: z.strictObject({}),
       body: z.strictObject({
         key: actionKeySchema,
-        commit: commitSchema,
+        commit: commitSchema.nullable(),
+        comment: z.string().min(1).max(COMMENT_MAX_LENGTH).nullable(),
         reused_evidence_id: identitySchema("evidence").nullable(),
         merge_evidence_id: identitySchema("evidence").nullable(),
         request_key: z

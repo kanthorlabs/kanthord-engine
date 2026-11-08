@@ -243,17 +243,27 @@ test("a descendant that forks into new groups during the kill leaves no process"
 
 test("a descendant whose parent exited before the kill is no longer a descendant of the leader and survives the kill", async (t) => {
   const seconds = uniqueSeconds();
+  const parked = seconds.replace(
+    `${ESCAPED_SECONDS}`,
+    `${ESCAPED_SECONDS + 1}`,
+  );
   const orphan = `require("node:child_process").spawn("sleep",["${seconds}"],{detached:true,stdio:"ignore"}).unref()`;
   const leader = detachedLeader(
     t,
-    `"${process.execPath}" -e '${orphan}'; sleep ${ESCAPED_SECONDS}`,
+    `"${process.execPath}" -e '${orphan}'; sleep ${parked}`,
   );
   stopAfter(t, () => markedPids(seconds).forEach(killIfPresent));
+  stopAfter(t, () => markedPids(parked).forEach(killIfPresent));
   for (let poll = 0; poll < START_POLLS; poll += 1) {
-    if (markedPids(seconds).length === ONE_ORPHAN) break;
+    if (
+      markedPids(seconds).length === ONE_ORPHAN &&
+      markedPids(parked).length > NO_PROCESSES
+    )
+      break;
     await delay(POLL_MS);
   }
   assert.equal(markedPids(seconds).length, ONE_ORPHAN);
+  assert.ok(markedPids(parked).length > NO_PROCESSES);
   killProcessTree(leader);
   await delay(POLL_MS * 5);
   assert.equal(markedPids(seconds).length, ONE_ORPHAN);

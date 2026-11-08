@@ -31,9 +31,11 @@ function harness(answer: boolean) {
   const dependencies = {
     bindings: {
       storageBindingOf: () => assert.fail("The guard reads no storage."),
+      conversationInboxOf: () => assert.fail("The guard reads no inbox."),
       resolveBinding: () => assert.fail("The guard resolves no name."),
       resolveBindingIdentity: () => assert.fail("The guard resolves no pin."),
       repositoryPolicyOf: () => assert.fail("The guard reads no policy."),
+      conversationPolicyOf: () => assert.fail("The guard reads no policy."),
       getBindingRevision: (_tx: Transaction, bindingId: string) => {
         reads.push(bindingId);
         return {

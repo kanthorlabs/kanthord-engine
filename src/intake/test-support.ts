@@ -95,6 +95,7 @@ export function unusedActionDependencies(): Pick<
   | "masterKey"
   | "stateDirectory"
   | "projects"
+  | "linkBindings"
   | "consumers"
   | "unresolvedRequests"
 > {
@@ -118,6 +119,7 @@ export function unusedActionDependencies(): Pick<
     masterKey: randomBytes(MASTER_KEY_BYTES).toString("base64"),
     stateDirectory: CLOSED_STATE_DIRECTORY,
     projects: { get: unexpectedCollaboration },
+    linkBindings: { conversationBindingOf: unexpectedCollaboration },
     consumers: recordingConsumers().consumers,
     unresolvedRequests: unexpectedCollaboration,
   };

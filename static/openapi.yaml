@@ -182,12 +182,20 @@ paths:
     $ref: ./openapi/mission/finding.get.yaml#/pathItem
   /api/mission/project/{project_id}/undecided-finding:
     $ref: ./openapi/mission/finding.undecided.list.yaml#/pathItem
+  /api/mission/node/{node_id}/followup/decide:
+    $ref: ./openapi/mission/followup.decide.yaml#/pathItem
+  /api/mission/project/{project_id}/followup:
+    $ref: ./openapi/mission/followup.list.yaml#/pathItem
   /api/mission/project/{project_id}:
     $ref: ./openapi/mission/get.yaml#/pathItem
   /api/mission/{mission_id}/import:
     $ref: ./openapi/mission/import.apply.yaml#/pathItem
   /api/mission/{mission_id}/import/preview:
     $ref: ./openapi/mission/import.preview.yaml#/pathItem
+  /api/mission/inbox-item/{link_update_id}/done:
+    $ref: ./openapi/mission/inbox_item.done.yaml#/pathItem
+  /api/mission/inbox-item:
+    $ref: ./openapi/mission/inbox_item.list.yaml#/pathItem
   /api/mission/node/{node_id}/link-update:
     $ref: ./openapi/mission/link_update.list.yaml#/pathItem
   /api/mission/node/{node_id}/block:
@@ -402,6 +410,8 @@ paths:
     $ref: ./openapi/worker/execution.change_request.get.yaml#/pathItem
   /api/worker/execution/{execution_id}/failed-check:
     $ref: ./openapi/worker/execution.failed_check.get.yaml#/pathItem
+  /api/worker/execution/{execution_id}/link-update:
+    $ref: ./openapi/worker/execution.link_update.get.yaml#/pathItem
   /api/worker/execution/{execution_id}/setup:
     $ref: ./openapi/worker/execution.setup.get.yaml#/pathItem
   /api/worker/footprint:

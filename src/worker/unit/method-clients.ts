@@ -27,6 +27,7 @@ export interface MethodClients {
     ServiceClient<typeof workerOperations>,
     | "action.request"
     | "execution.change_request.get"
+    | "execution.link_update.get"
     | "execution.failed_check.get"
   >;
 }

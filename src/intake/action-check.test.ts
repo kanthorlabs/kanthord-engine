@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import {
   GrantKind,
+  type ReplyRequestFacts,
   type RequestFacts,
   SshIdentitySubjectKind,
 } from "../custody/contract.ts";
 import { IdentityKind, type ServiceIdentity } from "../kernel/caller.ts";
+import { ExternalLinkKind } from "../kernel/external-link.ts";
 import {
   background,
   DEADLINE_EXCEEDED_CODE,
@@ -33,7 +35,13 @@ import type {
 } from "../repository/index.ts";
 import { SshAgentErrorCode } from "../repository/ssh-agent.ts";
 import { checkAction } from "./action-check.ts";
-import { ResultClass } from "./contract.ts";
+import {
+  OutboundOperation,
+  OutboundRequestState,
+  replyRequestKey,
+  ResultClass,
+} from "./contract.ts";
+import { insertPending, succeed } from "./outbound-store.ts";
 import { SSH_HOST, sshAccessOf, sshCustody, sshStore } from "./test-support.ts";
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -66,6 +74,7 @@ const BASE_MOVED: Landing = {
   first_parent: null,
   base_moved: true,
 };
+const NO_MATERIALS = 0;
 const mission: ServiceIdentity = {
   kind: IdentityKind.Service,
   service: MISSION_SERVICE_NAME,
@@ -138,7 +147,7 @@ const branchPush: RequestFacts["address"] = {
 function harness(
   t: TestContext,
   options: {
-    facts: RequestFacts;
+    facts: RequestFacts | ReplyRequestFacts;
     credential?: string;
     pinned?: boolean;
     landingFailure?: Error;
@@ -213,7 +222,15 @@ function harness(
     );
   const sshRequests = () =>
     fake.requests.filter((request) => request.kind === GrantKind.SshIdentity);
-  return { ...fake, knownHosts, landings, landingInputs, check, sshRequests };
+  return {
+    ...fake,
+    store,
+    knownHosts,
+    landings,
+    landingInputs,
+    check,
+    sshRequests,
+  };
 }
 
 test("a branch push check reads the landing with an SSH release of the request evidence under the Mission identity and no claim", async (t) => {
@@ -429,4 +446,76 @@ test("a change request of a bot never answers the end state other", async (t) =>
     ),
     CheckEndState.None,
   );
+});
+
+const NODE_ID = "node_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const REPLY_ATTEMPT = 1;
+const REPLY_RESOURCE_IDENTITY = "conversation:github:owner/pushed";
+const REPLY_UPDATE_KEY = "issue_comment:4242";
+const REPLY_LINK = {
+  kind: ExternalLinkKind.GitHubIssue,
+  resource_identity: REPLY_RESOURCE_IDENTITY,
+  number: 12,
+};
+const REPLY_REQUEST_KEY = replyRequestKey(NODE_ID, REPLY_ATTEMPT, REPLY_LINK);
+const POSTED_RESULT = { update_key: REPLY_UPDATE_KEY, actor_id: "4242" };
+
+const replyFacts: ReplyRequestFacts = {
+  frozen_action: {
+    key: "conversation.reply.0",
+    binding_id: BINDING_ID,
+    action: "reply",
+    expected_end_state: "posted",
+    follows: null,
+    configuration: { external_link: REPLY_LINK },
+  },
+  address: {
+    kind: PlatformAddressKind.Comment,
+    resource_identity: REPLY_RESOURCE_IDENTITY,
+    update_key: REPLY_UPDATE_KEY,
+  },
+  node_id: NODE_ID,
+  attempt: REPLY_ATTEMPT,
+};
+
+function replyHarness(t: TestContext, settled: boolean) {
+  const h = harness(t, { facts: replyFacts });
+  h.store.transaction((tx) => {
+    const id = insertPending(tx, {
+      project_id: PROJECT_ID,
+      operation: OutboundOperation.GitHubIssueComment,
+      request_key: REPLY_REQUEST_KEY,
+      credential: "github",
+      created_at: Date.now(),
+    });
+    if (settled)
+      assert.ok(succeed(tx, id, POSTED_RESULT, [OutboundRequestState.Pending]));
+  });
+  return h;
+}
+
+test("a reply evidence check answers expected when its outbound request succeeded and calls no platform", async (t) => {
+  const h = replyHarness(t, true);
+  assert.deepEqual(await h.check(), {
+    end_state: CheckEndState.Expected,
+    landed_commits: [],
+  });
+  assert.deepEqual(h.sshRequests(), []);
+  assert.deepEqual(h.landings, []);
+  assert.equal(h.materials.length, NO_MATERIALS);
+});
+
+test("a reply evidence check answers none while its outbound request is pending", async (t) => {
+  const h = replyHarness(t, false);
+  assert.deepEqual(await h.check(), {
+    end_state: CheckEndState.None,
+    landed_commits: [],
+  });
+  assert.deepEqual(h.sshRequests(), []);
+  assert.equal(h.materials.length, NO_MATERIALS);
+});
+
+test("a reply evidence check answers none when its outbound request is absent", async (t) => {
+  const h = harness(t, { facts: replyFacts });
+  assert.equal((await h.check()).end_state, CheckEndState.None);
 });

@@ -1,7 +1,7 @@
 import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import type { Logger } from "pino";
-import type { ServiceIdentity } from "../kernel/caller.ts";
+import { isServiceIdentity, type ServiceIdentity } from "../kernel/caller.ts";
 import {
   background,
   CancellationContext,
@@ -20,6 +20,7 @@ import {
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { ValueType } from "../kernel/values.ts";
+import { MISSION_SERVICE_NAME } from "../mission/contract.ts";
 import type { GitHubPlatform } from "../repository/github.ts";
 import type { GitWriter } from "../repository/index.ts";
 import type { S3Platform } from "../storage/index.ts";
@@ -43,14 +44,16 @@ import { Dispatcher } from "./dispatcher.ts";
 import { inboundInventory } from "./health.ts";
 import { createInbound, type InboundProjects } from "./inbound-create.ts";
 import { removeInbound } from "./inbound-delete.ts";
+import { describeEvent } from "./event-describe.ts";
 import { getEvent, listEvents } from "./event-read.ts";
 import { deleteEvents, discardEvent, retryEvent } from "./event-write.ts";
 import { getInbound, listInbound } from "./inbound-read.ts";
-import { getOutbound, listOutbound } from "./outbound-read.ts";
+import { getOutbound, listOutbound, matchReply } from "./outbound-read.ts";
 import { receiveEvent } from "./receipt.ts";
 import { deleteOutbound, discardOutbound } from "./outbound-write.ts";
 import { type OutboundRun, runOutbound } from "./outbound.ts";
-import { pollInboundIds } from "./inbound-store.ts";
+import { newestInboundOf, pollInboundIds } from "./inbound-store.ts";
+import { type LinkBindings, readLink } from "./link-read.ts";
 import { PollLoops } from "./poll.ts";
 import { deleteStoredObject } from "./storage-delete.ts";
 import {
@@ -81,6 +84,7 @@ export interface Dependencies {
   masterKey: string;
   stateDirectory: string;
   projects: InboundProjects;
+  linkBindings: LinkBindings;
   consumers: IntakeConsumers;
   unresolvedRequests: UnresolvedRequestCounter;
   pendingEventLimit?: number;
@@ -176,10 +180,13 @@ export class IntakeService implements Service, IntakeCollaborations {
       intakeOperations["inbound.event.list"],
       ({ query }, caller) => caller.commit((tx) => listEvents(tx, query)),
     );
+    registry.register(intakeOperations["inbound.event.get"], ({ params }) =>
+      getEvent(this.dependencies.store, params.inbound_event_id),
+    );
     registry.register(
-      intakeOperations["inbound.event.get"],
-      ({ params }, caller) =>
-        caller.commit((tx) => getEvent(tx, params.inbound_event_id)),
+      intakeOperations["inbound.event.describe"],
+      ({ body }, caller) =>
+        describeEvent(this.dependencies.store, caller, body.inbound_event_id),
     );
     registry.register(
       intakeOperations["inbound.event.retry"],
@@ -223,6 +230,28 @@ export class IntakeService implements Service, IntakeCollaborations {
     );
     registry.register(intakeOperations["action.check"], ({ body }, caller) =>
       checkAction(this.dependencies, caller, body.evidence_id),
+    );
+    registry.register(
+      intakeOperations["outbound.reply.match"],
+      ({ body }, caller) => {
+        assert.ok(
+          caller.identity &&
+            isServiceIdentity(caller.identity) &&
+            caller.identity.service === MISSION_SERVICE_NAME,
+          "The Mission Service matches a reply.",
+        );
+        return caller.commit((tx) => matchReply(tx, body));
+      },
+    );
+    registry.register(intakeOperations["link.read"], ({ body }, caller) =>
+      readLink(
+        {
+          ...this.dependencies,
+          holdEvents: (ids) => this.dispatcher.hold(ids),
+        },
+        caller,
+        body,
+      ),
     );
     registry.register(intakeOperations["action.merge"], ({ body }, caller) =>
       mergeAction(
@@ -355,6 +384,23 @@ export class IntakeService implements Service, IntakeCollaborations {
     if (this.shutdown.signal.aborted) return;
     const ids = this.dependencies.store.transaction((tx) => pollInboundIds(tx));
     this.pollLoops.startAll(ids);
+  }
+
+  handoff(inboundEventId: string): ReturnType<Dispatcher["handoff"]> {
+    return this.dispatcher.handoff(inboundEventId);
+  }
+
+  releaseHeld(inboundEventIds: readonly string[]): void {
+    this.dispatcher.release(inboundEventIds);
+    this.wake();
+  }
+
+  hasInbound(
+    tx: Transaction,
+    projectId: string,
+    resourceIdentity: string,
+  ): boolean {
+    return newestInboundOf(tx, projectId, resourceIdentity) !== null;
   }
 
   inboundRemoved(inboundId: string): void {

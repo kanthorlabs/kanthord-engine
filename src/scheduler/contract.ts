@@ -13,6 +13,7 @@ import type { Transaction } from "../kernel/store.ts";
 
 export const SCHEDULER_SERVICE_NAME = "scheduler";
 export const JOB_IDENTITY_PREFIX = "job";
+export const EXECUTION_NOT_RUNNING = "scheduler.execution.not_running";
 export const SCHEDULER_TIMEOUT_MS = 30000;
 export const EXECUTION_IDENTITY_PREFIX = "execution";
 export const WORKER_REGISTRATION_IDENTITY_PREFIX = "worker_registration";
