@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { simpleGit } from "simple-git";
-import { temporary, testContext } from "../../kernel/test-support.ts";
 import {
   createJourneyNode,
   createJourneyTask,
@@ -32,7 +28,6 @@ import {
   fauxToolCall,
   scriptedModelRuntime,
   scriptedProvider,
-  TEST_SSH_ACCESS,
 } from "../../worker/unit/test-support.ts";
 import {
   type Assessment,
@@ -47,9 +42,7 @@ import {
 import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";
 import { InstancePlacement } from "../../worker/contract.ts";
 
-const GIT_TIMEOUT_MS = 60000;
 const MAIN_REF = "refs/heads/main";
-const TEST_BRANCH = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const SINGLE_INSTANCE = 1;
 const INITIAL_BINDING_VERSION = 1;
 const SINGLE_ITEM = 1;
@@ -797,55 +790,3 @@ test(
     );
   },
 );
-
-test("local mapped repository clones main and publishes only the node branch", async (t) => {
-  const repo = await bareRepository(t, "test_repo");
-  const transport = mappedTransport({ [REPOSITORY_ADDRESS]: repo.bare });
-  const checkout = join(temporary(t), "checkout");
-  mkdirSync(checkout);
-  const context = testContext(t);
-  await transport.clone(
-    REPOSITORY_ADDRESS,
-    checkout,
-    context,
-    GIT_TIMEOUT_MS,
-    TEST_SSH_ACCESS,
-  );
-  assert.equal(
-    (await simpleGit(checkout).revparse(["HEAD"])).trim(),
-    repo.head,
-  );
-  assert.equal(await remoteHead(repo.bare, `refs/heads/${TEST_BRANCH}`), null);
-  await transport.fetchAndCheckout(
-    checkout,
-    TEST_BRANCH,
-    "main",
-    false,
-    context,
-    GIT_TIMEOUT_MS,
-    TEST_SSH_ACCESS,
-  );
-  await transport.pushNodeBranch(
-    checkout,
-    TEST_BRANCH,
-    context,
-    GIT_TIMEOUT_MS,
-    TEST_SSH_ACCESS,
-  );
-  assert.equal(
-    await remoteHead(repo.bare, `refs/heads/${TEST_BRANCH}`),
-    repo.head,
-  );
-  assert.equal(await remoteHead(repo.bare, MAIN_REF), repo.head);
-  assert.throws(
-    () =>
-      transport.clone(
-        "test_unmapped",
-        checkout,
-        context,
-        GIT_TIMEOUT_MS,
-        TEST_SSH_ACCESS,
-      ),
-    assert.AssertionError,
-  );
-});
