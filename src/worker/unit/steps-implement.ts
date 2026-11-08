@@ -103,6 +103,7 @@ import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
 const NO_TASKS = 0;
 const NO_CHECKOUTS = 0;
+const NO_LINK_UPDATES = 0;
 const NO_PROGRESS_LIMIT = 2;
 const SINGLE_CHECKOUT = 1;
 const BASE_MERGED = "base_merged";
@@ -909,6 +910,7 @@ async function nodeInstructionOf(
       judged: judged.map(({ checkout }) => checkout.name),
       holds: false,
       skipped: BASE_MERGED,
+      link_updates: state.verdict.linkUpdates ?? NO_LINK_UPDATES,
     });
     return null;
   }

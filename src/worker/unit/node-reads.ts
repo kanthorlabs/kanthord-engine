@@ -295,6 +295,7 @@ export interface Verdict {
   judged: JudgedCommit[];
   findings: Finding[];
   round: number | null;
+  linkUpdates?: number;
 }
 
 export interface Prior {
@@ -302,7 +303,9 @@ export interface Prior {
   cleared: string | null;
 }
 
-async function readLinkUpdatesText(run: ExecutionRun): Promise<string | null> {
+async function readLinkUpdates(
+  run: ExecutionRun,
+): Promise<{ text: string; count: number } | null> {
   const read = await run.call((options) =>
     run.clients.worker["execution.link_update.get"](
       {
@@ -313,7 +316,8 @@ async function readLinkUpdatesText(run: ExecutionRun): Promise<string | null> {
       options,
     ),
   );
-  return linkUpdatesText(read);
+  const text = linkUpdatesText(read);
+  return text === null ? null : { text, count: read.total };
 }
 
 export async function readPrior(
@@ -321,16 +325,17 @@ export async function readPrior(
   repositories: readonly RepositoryName[],
 ): Promise<Prior> {
   const prior = await readUnblockPrior(run, repositories);
-  const updates = await readLinkUpdatesText(run);
+  const updates = await readLinkUpdates(run);
   if (updates === null) return prior;
   if (prior.verdict === null)
     return {
       verdict: {
         source: VerdictSource.Rework,
-        text: updates,
+        text: updates.text,
         judged: [],
         findings: [],
         round: null,
+        linkUpdates: updates.count,
       },
       cleared: prior.cleared,
     };
@@ -338,7 +343,8 @@ export async function readPrior(
     ...prior,
     verdict: {
       ...prior.verdict,
-      text: `${prior.verdict.text}${VERDICT_SEPARATOR}${updates}`,
+      text: `${prior.verdict.text}${VERDICT_SEPARATOR}${updates.text}`,
+      linkUpdates: updates.count,
     },
   };
 }
