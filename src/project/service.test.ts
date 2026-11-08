@@ -75,11 +75,14 @@ import {
   bindingSetWriteInputSchema,
   BindingState,
   ChangeKind,
+  ConversationAction,
   ConversationPlatform,
   ENVIRONMENT_SECRETS_MAX,
   EnvironmentSource,
   FollowsType,
   GitHubAction,
+  InboxField,
+  InboxInvalidReason,
   INSTANCE_COUNT_MAX,
   INSTANCE_COUNT_MIN,
   type InstanceOf,
@@ -3229,6 +3232,8 @@ test("binding apply refuses the retired merge-push action name and accepts push"
 });
 
 const CONVERSATION_NAME = "conversation";
+const OTHER_CONVERSATION_NAME = "other_conversation";
+const OTHER_CONVERSATION_REPOSITORY = "acme/other";
 const CONVERSATION_REPOSITORY = "acme/app";
 const CONVERSATION_IDENTITY = "conversation:github:acme/app";
 const CONVERSATION_CREDENTIAL = "github-conversation";
@@ -3237,6 +3242,7 @@ const ACTOR_ID = "583231";
 const SECOND_ACTOR_ID = "9919";
 const LOGIN_ACTOR = "octocat";
 const LINK_TRUST_MAX = 32;
+const INBOX_HANDLE_MAX_LENGTH = 39;
 const CONFIG_PATH = ["body", "bindings", CONVERSATION_NAME, "config"];
 
 function conversationBinding(
@@ -3283,6 +3289,65 @@ test("a conversation binding of platform github stores with its resource identit
   assert.deepEqual(f.custody, [
     { credential: CONVERSATION_CREDENTIAL, platform: REPOSITORY_PLATFORM },
   ]);
+});
+
+test("conversationBindingOf answers the pinned revision of a conversation binding and null for another kind", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    const stored = persistBindings(tx, project.id, {
+      [CONVERSATION_NAME]: conversationBinding(),
+      [REPOSITORY_NAME]: repositoryBinding(),
+    }).bindings;
+    const conversation = stored[CONVERSATION_NAME]!;
+    assert.deepEqual(f.project.conversationBindingOf(tx, conversation.id), {
+      binding_id: conversation.id,
+      project_id: project.id,
+      resource_identity: CONVERSATION_IDENTITY,
+      platform: ConversationPlatform.GitHub,
+      repository: CONVERSATION_REPOSITORY,
+      credential: CONVERSATION_CREDENTIAL,
+    });
+    assert.equal(
+      f.project.conversationBindingOf(tx, stored[REPOSITORY_NAME]!.id),
+      null,
+    );
+  });
+});
+
+test("conversationPolicyOf answers the action reply and its key for a binding with reply_policy, and null for another binding", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    const stored = persistBindings(tx, project.id, {
+      [CONVERSATION_NAME]: conversationBinding({
+        reply_policy: { follows: { type: FollowsType.AssessmentPassed } },
+      }),
+      [OTHER_CONVERSATION_NAME]: conversationBinding({
+        repository: OTHER_CONVERSATION_REPOSITORY,
+      }),
+      [REPOSITORY_NAME]: repositoryBinding(),
+    }).bindings;
+    const conversation = stored[CONVERSATION_NAME]!;
+    assert.deepEqual(f.project.conversationPolicyOf(tx, conversation.id), {
+      binding_id: conversation.id,
+      project_id: project.id,
+      name: CONVERSATION_NAME,
+      key: `${CONVERSATION_NAME}.${ConversationAction.Reply}`,
+      platform: ConversationPlatform.GitHub,
+      repository: CONVERSATION_REPOSITORY,
+      credential: CONVERSATION_CREDENTIAL,
+      action: ConversationAction.Reply,
+    });
+    assert.equal(
+      f.project.conversationPolicyOf(tx, stored[OTHER_CONVERSATION_NAME]!.id),
+      null,
+    );
+    assert.equal(
+      f.project.conversationPolicyOf(tx, stored[REPOSITORY_NAME]!.id),
+      null,
+    );
+  });
 });
 
 test("a conversation binding without repository or credential, or with an unknown key, fails the input schema", () => {
@@ -3507,6 +3572,188 @@ test("link_trust on a repository binding of platform gitlab refuses with platfor
     ),
   );
   assert.deepEqual(f.ssh, []);
+});
+
+const INBOX_HANDLE = "ulrich";
+const INBOX_HANDLE_LEADING_DASH = "-ulrich";
+const OTHER_PROJECT_NAME = "other-project";
+const INBOX_LONGEST_HANDLE = "a".repeat(INBOX_HANDLE_MAX_LENGTH);
+const INBOX_LONG_HANDLE = "a".repeat(INBOX_HANDLE_MAX_LENGTH + 1);
+
+function inboxOf(actor_id: unknown, handle: unknown) {
+  return { actor_id, handle };
+}
+
+function inboxDetails(binding: string, field: string, reason: string) {
+  return { binding, field, reason };
+}
+
+function bindingRevisions(f: ReturnType<typeof writeFixture>) {
+  return (
+    f.store.database
+      .prepare(
+        "SELECT revision FROM project_binding WHERE project_id = ? ORDER BY revision",
+      )
+      .all(f.params.project_id) as Array<{ revision: number }>
+  ).map((row) => row.revision);
+}
+
+test("an inbox with an actor id and a handle stores and a change of it writes the next revision", async (t) => {
+  const f = writeFixture(t);
+  const inbox = inboxOf(ACTOR_ID, INBOX_HANDLE);
+  const first = await f.write({
+    [CONVERSATION_NAME]: conversationBinding({ inbox }),
+  });
+  assert.deepEqual(
+    (first.bindings[CONVERSATION_NAME]?.config as Record<string, unknown>)
+      .inbox,
+    inbox,
+  );
+  assert.deepEqual(bindingRevisions(f), [REVISION_ONE]);
+  const changed = inboxOf(SECOND_ACTOR_ID, INBOX_HANDLE);
+  const second = await f.write(
+    { [CONVERSATION_NAME]: conversationBinding({ inbox: changed }) },
+    first.binding_set_version,
+  );
+  assert.deepEqual(
+    (second.bindings[CONVERSATION_NAME]?.config as Record<string, unknown>)
+      .inbox,
+    changed,
+  );
+  assert.deepEqual(bindingRevisions(f), [REVISION_ONE, REVISION_TWO]);
+});
+
+test("an inbox handle of one character and of 39 characters stores", async (t) => {
+  const f = writeFixture(t);
+  for (const handle of ["a", INBOX_LONGEST_HANDLE]) {
+    const inbox = inboxOf(ACTOR_ID, handle);
+    await f.write(
+      { [CONVERSATION_NAME]: conversationBinding({ inbox }) },
+      f.store.transaction(
+        (tx) => requireProject(tx, f.params.project_id).binding_set_version,
+      ),
+    );
+  }
+});
+
+test("an invalid inbox refuses with its field and reason", async (t) => {
+  const f = writeFixture(t);
+  const before = f.snapshot();
+  const cases: Array<{ inbox: unknown; field: string; reason: string }> = [
+    {
+      inbox: inboxOf(583231, INBOX_HANDLE),
+      field: InboxField.ActorId,
+      reason: InboxInvalidReason.TypeInvalid,
+    },
+    {
+      inbox: inboxOf(ACTOR_ID, INBOX_HANDLE.length),
+      field: InboxField.Handle,
+      reason: InboxInvalidReason.TypeInvalid,
+    },
+    {
+      inbox: { handle: INBOX_HANDLE },
+      field: InboxField.ActorId,
+      reason: InboxInvalidReason.TypeInvalid,
+    },
+    {
+      inbox: [ACTOR_ID],
+      field: InboxField.Inbox,
+      reason: InboxInvalidReason.TypeInvalid,
+    },
+    {
+      inbox: null,
+      field: InboxField.Inbox,
+      reason: InboxInvalidReason.TypeInvalid,
+    },
+    {
+      inbox: inboxOf(LOGIN_ACTOR, INBOX_HANDLE),
+      field: InboxField.ActorId,
+      reason: InboxInvalidReason.IdInvalid,
+    },
+    {
+      inbox: inboxOf(ACTOR_ID, INBOX_HANDLE_LEADING_DASH),
+      field: InboxField.Handle,
+      reason: InboxInvalidReason.HandleInvalid,
+    },
+    {
+      inbox: inboxOf(ACTOR_ID, INBOX_LONG_HANDLE),
+      field: InboxField.Handle,
+      reason: InboxInvalidReason.HandleInvalid,
+    },
+  ];
+  for (const { inbox, field, reason } of cases)
+    await rejectsWrite(
+      f.write({ [CONVERSATION_NAME]: conversationBinding({ inbox }) }),
+      HttpStatus.BadRequest,
+      ProjectErrorCode.InboxInvalid,
+      inboxDetails(CONVERSATION_NAME, field, reason),
+    );
+  assert.deepEqual(f.snapshot(), before);
+});
+
+test("an inbox key outside actor_id and handle fails the input schema", () => {
+  const inbox = { ...inboxOf(ACTOR_ID, INBOX_HANDLE), members: [ACTOR_ID] };
+  assert.deepEqual(
+    schemaIssues({ [CONVERSATION_NAME]: conversationBinding({ inbox }) }).map(
+      ({ path }) => path,
+    ),
+    [[...CONFIG_PATH, "inbox"]],
+  );
+});
+
+test("an inbox on a repository binding refuses with platform_unsupported", async (t) => {
+  const f = writeFixture(t);
+  const inbox = inboxOf(ACTOR_ID, INBOX_HANDLE);
+  await rejectsWrite(
+    f.write({
+      [REPOSITORY_NAME]: {
+        kind: BindingKind.Repository,
+        config: { ...repositoryBinding().config, inbox },
+      },
+    }),
+    HttpStatus.BadRequest,
+    ProjectErrorCode.InboxInvalid,
+    inboxDetails(
+      REPOSITORY_NAME,
+      InboxField.Inbox,
+      InboxInvalidReason.PlatformUnsupported,
+    ),
+  );
+  assert.deepEqual(f.ssh, []);
+});
+
+test("a second project that binds the resource with an inbox answers inbox_taken", async (t) => {
+  const f = writeFixture(t);
+  const inbox = inboxOf(ACTOR_ID, INBOX_HANDLE);
+  await f.write({ [CONVERSATION_NAME]: conversationBinding({ inbox }) });
+  const other = f.invoke("create", { name: OTHER_PROJECT_NAME });
+  const writeOther = async (bindings: Bindings) => {
+    const operation = projectOperations["bindingSet.write"];
+    const input = operation.input.parse({
+      params: { project_id: other.id },
+      query: EMPTY_QUERY,
+      body: { version: BINDING_SET_INITIAL_VERSION, bindings },
+    });
+    return f.registry.get(operation.id).handler(input, f.caller);
+  };
+  const before = f.snapshot();
+  await rejectsWrite(
+    writeOther({ [CONVERSATION_NAME]: conversationBinding({ inbox }) }),
+    HttpStatus.Conflict,
+    ProjectErrorCode.InboxTaken,
+    {
+      resource_identity: CONVERSATION_IDENTITY,
+      project_id: f.params.project_id,
+    },
+  );
+  assert.deepEqual(f.snapshot(), before);
+  const stored = projectOperations["bindingSet.write"].output.parse(
+    await writeOther({ [CONVERSATION_NAME]: conversationBinding() }),
+  );
+  assert.equal(
+    stored.bindings[CONVERSATION_NAME]?.kind,
+    BindingKind.Conversation,
+  );
 });
 
 test("a binding check refuses an invalid link_trust before any read", async (t) => {

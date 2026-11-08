@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import {
   BuiltinTool,
-  EVIDENCE_UPLOAD_PARAMETERS,
   getAgentDeclaration,
+  HOST_TOOL_PARAMETERS,
 } from "../agent/catalog.ts";
 import { ToolSource } from "../agent/contract.ts";
 import { loadPi, piAgentDirectory } from "../agent/pi.ts";
@@ -44,7 +44,7 @@ export async function toolDeclarations(agentName: string): Promise<
       name,
       source: ToolSource.Host,
       input_schema: JSON.parse(
-        JSON.stringify(EVIDENCE_UPLOAD_PARAMETERS),
+        JSON.stringify(HOST_TOOL_PARAMETERS[name]),
       ) as Record<string, unknown>,
     })),
   ];

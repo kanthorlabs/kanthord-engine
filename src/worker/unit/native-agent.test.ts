@@ -808,6 +808,7 @@ test("host upload is declared only for the software agent and validates argument
   };
   const paths: string[] = [];
   const hostTools: HostTools = {
+    ...unusedHostTools,
     evidenceUpload: async (path) => {
       paths.push(path);
       return result;
@@ -861,6 +862,7 @@ test("host upload rejection becomes a tool error without error details", async (
     [tool("evidence-upload", { path: "a.txt" }), fauxAssistantMessage("done")],
     {},
     {
+      ...unusedHostTools,
       evidenceUpload: async () => {
         throw Object.assign(
           new Diagnostic("worker.evidence_upload.path_refused", message),

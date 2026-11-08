@@ -83,6 +83,7 @@ import {
   INTAKE_SERVICE_NAME,
   type IntakeInventoryEntry,
   intakeOperations,
+  ResourceKind,
 } from "../../intake/contract.ts";
 import { ActorKind } from "../../mission/contract.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
@@ -318,7 +319,10 @@ async function pollFixture(t: TestContext) {
           platform: InboundPlatform.GitHub,
           consumer: Consumer.MissionDeliveryAdmit,
           credential: POLL_CREDENTIAL,
-          configuration: { resource: `${POLL_OWNER}/${POLL_REPO}` },
+          configuration: {
+            resource_kind: ResourceKind.Repository,
+            resource: `${POLL_OWNER}/${POLL_REPO}`,
+          },
         },
       ),
     ).id;

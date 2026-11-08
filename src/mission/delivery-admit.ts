@@ -14,6 +14,7 @@ import {
   type AdmissionAnswer,
   AdmissionRefusal,
   CONTENT_ENCODING,
+  ConversationAction,
   type DecodedLinkUpdate,
   type deliveryAdmitSchema,
   Disposition,
@@ -25,6 +26,7 @@ import {
 } from "./contract.ts";
 import { recordRefusedLinkUpdate } from "./delivery-telemetry.ts";
 import {
+  inboxDemand,
   linkDemandCount,
   MatchKind,
   matchLinkUpdate,
@@ -32,6 +34,8 @@ import {
   unresolvedBaseRequests,
   unresolvedRequestCount,
 } from "./delivery-match.ts";
+import { admitInboxReason } from "./link-inbox.ts";
+import { openFollowups } from "./followup-open.ts";
 import { applyEndState, changesNothing, requestContext } from "./node-check.ts";
 import { insertLinkUpdate, readEvidence } from "./record-store.ts";
 import type { Dependencies } from "./service.ts";
@@ -57,6 +61,10 @@ const ACCEPTED: AdmissionAnswer = {
   disposition: Disposition.AcceptedObservation,
   reason: null,
 };
+const UNMATCHED: AdmissionAnswer = {
+  disposition: Disposition.Refused,
+  reason: AdmissionRefusal.Unmatched,
+};
 const DUPLICATE: AdmissionAnswer = {
   disposition: Disposition.Duplicate,
   reason: null,
@@ -78,21 +86,14 @@ function decoderInput(input: AdmissionInput) {
   };
 }
 
-function prepareLinkUpdate(
+function ignoreActor(
   dependencies: Dependencies,
   input: AdmissionInput,
-): AdmissionAnswer | LinkChecked {
-  const update = dependencies.decoder.decodeLinkUpdate(decoderInput(input));
-  if (update === null)
-    return {
-      disposition: Disposition.Refused,
-      reason: AdmissionRefusal.Undecodable,
-    };
-  if (!update.actor_automated && update.actor_id !== null)
-    return { update, actorId: update.actor_id };
+  actorId: string | null,
+): AdmissionAnswer {
   recordRefusedLinkUpdate(dependencies, {
     project_id: input.project_id,
-    actor_id: update.actor_id,
+    actor_id: actorId,
     reason: AdmissionRefusal.ActorIgnored,
     refused_at: Date.now(),
   });
@@ -102,13 +103,47 @@ function prepareLinkUpdate(
   };
 }
 
+async function prepareLinkUpdate(
+  dependencies: Dependencies,
+  caller: CallerContext,
+  input: AdmissionInput,
+): Promise<AdmissionAnswer | LinkChecked> {
+  const update = dependencies.decoder.decodeLinkUpdate(decoderInput(input));
+  if (update === null)
+    return {
+      disposition: Disposition.Refused,
+      reason: AdmissionRefusal.Undecodable,
+    };
+  if (update.actor_automated || update.actor_id === null)
+    return ignoreActor(dependencies, input, update.actor_id);
+  const replies = await dependencies.intakeLinks.replyMatch(caller.context, {
+    update_key: update.update_key,
+    external_link: update.external_link,
+  });
+  if (replies.succeeded || replies.pending_actor_ids.includes(update.actor_id))
+    return ignoreActor(dependencies, input, update.actor_id);
+  return { update, actorId: update.actor_id };
+}
+
 function commitLinkUpdate(
   tx: Transaction,
+  dependencies: Dependencies,
   input: AdmissionInput,
   checked: LinkChecked,
 ): AdmissionAnswer {
   const match = matchLinkUpdate(tx, input.project_id, checked.update);
   if (match.kind === MatchKind.Answer) return match.answer;
+  const now = Date.now();
+  const admission = admitInboxReason(tx, dependencies, {
+    project_id: input.project_id,
+    mission_id: match.mission_id,
+    external_link: match.external_link,
+    update: checked.update,
+    actor_id: checked.actorId,
+    linked: match.linked,
+    now,
+  });
+  if (admission === null) return UNMATCHED;
   insertLinkUpdate(tx, {
     mission_id: match.mission_id,
     external_link: match.external_link,
@@ -116,7 +151,19 @@ function commitLinkUpdate(
     inbound_event_id: input.inbound_event_id,
     actor_id: checked.actorId,
     occurred_at: checked.update.occurred_at,
+    reason: admission.reason,
+    binding_id: admission.binding_id,
+    done_at: admission.done_at,
+    snoozed_until: null,
   });
+  openFollowups(
+    tx,
+    dependencies,
+    match.mission_id,
+    match.external_link,
+    checked.actorId,
+    now,
+  );
   return ACCEPTED;
 }
 
@@ -126,7 +173,7 @@ async function prepareAdmission(
   input: AdmissionInput,
 ): Promise<Prepared> {
   const address = dependencies.decoder.decode(decoderInput(input));
-  if (address === null) return prepareLinkUpdate(dependencies, input);
+  if (address === null) return prepareLinkUpdate(dependencies, caller, input);
   const match = dependencies.store.transaction((tx) =>
     matchRequests(tx, input.project_id, address),
   );
@@ -158,12 +205,14 @@ async function checkBase(
       tx,
       input.project_id,
       address.resource_identity,
-    ).filter(
-      (evidenceId) =>
-        evidenceId !== exactEvidenceId &&
-        requestContext(tx, dependencies, evidenceId).frozen_action.configuration
-          .base_branch === address.branch,
-    ),
+    ).filter((evidenceId) => {
+      if (evidenceId === exactEvidenceId) return false;
+      const action = requestContext(tx, dependencies, evidenceId).frozen_action;
+      return (
+        action.action !== ConversationAction.Reply &&
+        action.configuration.base_branch === address.branch
+      );
+    }),
   );
   const base: BaseCheck[] = [];
   for (const evidenceId of selected)
@@ -308,9 +357,10 @@ export function admitDelivery(
 }
 
 export function countUnresolvedRequests(
+  dependencies: Dependencies,
   caller: CallerContext,
   input: CountInput,
-): { count: number; link_count: number } {
+): { count: number; link_count: number; inbox: boolean } {
   authorizeAdmission(caller);
   return caller.commit((tx) => ({
     count: unresolvedRequestCount(
@@ -324,6 +374,12 @@ export function countUnresolvedRequests(
       input.resource_identity,
       Date.now(),
     ),
+    inbox: inboxDemand(
+      tx,
+      dependencies.bindings,
+      input.project_id,
+      input.resource_identity,
+    ),
   }));
 }
 
@@ -334,7 +390,8 @@ function commitPrepared(
   prepared: Prepared,
 ): AdmissionAnswer {
   if ("disposition" in prepared) return prepared;
-  if ("update" in prepared) return commitLinkUpdate(tx, input, prepared);
+  if ("update" in prepared)
+    return commitLinkUpdate(tx, dependencies, input, prepared);
   if ("evidenceId" in prepared)
     return commitAdmission(tx, dependencies, input, prepared);
   return commitBaseAdmission(tx, dependencies, input, prepared);

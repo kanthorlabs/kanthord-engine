@@ -2,8 +2,17 @@ import assert from "node:assert/strict";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { canonicalJSON } from "../../kernel/json.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
-import { EVIDENCE_UPLOAD_PARAMETERS } from "../../agent/catalog.ts";
-import { HostTool, type HostTools, uploadResultSchema } from "../contract.ts";
+import {
+  EVIDENCE_UPLOAD_PARAMETERS,
+  LINK_UPDATE_LIST_PARAMETERS,
+} from "../../agent/catalog.ts";
+import {
+  HostTool,
+  type HostTools,
+  LINK_UPDATE_LIMIT_DEFAULT,
+  linkUpdateReadSchema,
+  uploadResultSchema,
+} from "../contract.ts";
 
 export function evidenceUploadTool(
   hostTools: HostTools,
@@ -19,7 +28,7 @@ export function evidenceUploadTool(
     async execute(_id, params, signal) {
       assert.ok(params.path);
       const result = uploadResultSchema.parse(
-        await invokeUpload(hostTools, params.path, signal),
+        await asToolError(() => hostTools.evidenceUpload(params.path, signal)),
       );
       assert.ok(result.uri);
       return {
@@ -30,15 +39,40 @@ export function evidenceUploadTool(
   };
 }
 
-async function invokeUpload(
+export function linkUpdateListTool(
   hostTools: HostTools,
-  path: string,
-  signal: AbortSignal | undefined,
-) {
-  assert.ok(path);
-  assert.ok(hostTools.evidenceUpload);
+): ToolDefinition<typeof LINK_UPDATE_LIST_PARAMETERS> {
+  assert.ok(hostTools);
+  assert.ok(hostTools.linkUpdateList);
+  return {
+    name: HostTool.LinkUpdateList,
+    label: "List link updates",
+    description:
+      "List a page of the updates of the external links of this node, newest first. Pass the cursor of a page to read the next page.",
+    parameters: LINK_UPDATE_LIST_PARAMETERS,
+    async execute(_id, params, signal) {
+      const result = linkUpdateReadSchema.parse(
+        await asToolError(() =>
+          hostTools.linkUpdateList(
+            {
+              ...(params.cursor === undefined ? {} : { cursor: params.cursor }),
+              limit: params.limit ?? LINK_UPDATE_LIMIT_DEFAULT,
+            },
+            signal,
+          ),
+        ),
+      );
+      return {
+        content: [{ type: "text", text: canonicalJSON(result) }],
+        details: result,
+      };
+    },
+  };
+}
+
+async function asToolError<T>(call: () => Promise<T>): Promise<T> {
   try {
-    return await hostTools.evidenceUpload(path, signal);
+    return await call();
   } catch (error) {
     if (error instanceof Diagnostic)
       throw new Error(`${error.code}: ${error.message}`, { cause: error });

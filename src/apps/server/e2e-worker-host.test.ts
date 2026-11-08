@@ -38,7 +38,6 @@ import { Worker } from "../worker/index.ts";
 import { until } from "./cli-test-support.ts";
 import {
   createInstancesByCli,
-  createMachine,
   FAKE_GITHUB_HOST_KEY,
   FAKE_SSH_CREDENTIAL,
   humanCaller,
@@ -498,7 +497,11 @@ test(
         ]);
         const call = humanCaller(archiveSetup.fixture);
         const empty = { params: {}, query: {} };
-        await createMachine(archiveSetup.fixture, MACHINE_NAME);
+        const machine = await call(workerOperations["machine.create"], {
+          ...empty,
+          body: { name: MACHINE_NAME },
+        });
+        assert.ok(machine.machine_configuration);
         const created = await call(workerOperations["instance.create"], {
           ...empty,
           body: {
@@ -541,6 +544,7 @@ test(
             XDG_DATA_HOME: join(root, "data"),
             XDG_STATE_HOME: join(root, "state"),
             KANTHORD_WORKER_CONFIG: created.instance_configuration,
+            KANTHORD_MACHINE_CONFIG: machine.machine_configuration,
           },
           connectionName: "host-a",
           heartbeatIntervalMs: FAST_HEARTBEAT_MS,
@@ -632,7 +636,11 @@ test(
         ]);
         const call = humanCaller(pauseSetup.fixture);
         const empty = { params: {}, query: {} };
-        await createMachine(pauseSetup.fixture, MACHINE_NAME);
+        const machine = await call(workerOperations["machine.create"], {
+          ...empty,
+          body: { name: MACHINE_NAME },
+        });
+        assert.ok(machine.machine_configuration);
         const created = await call(workerOperations["instance.create"], {
           ...empty,
           body: {
@@ -672,6 +680,7 @@ test(
             XDG_DATA_HOME: join(root, "data"),
             XDG_STATE_HOME: join(root, "state"),
             KANTHORD_WORKER_CONFIG: created.instance_configuration,
+            KANTHORD_MACHINE_CONFIG: machine.machine_configuration,
           },
           connectionName: "host-a",
           heartbeatIntervalMs: FAST_HEARTBEAT_MS,
@@ -775,7 +784,11 @@ test(
         ]);
         const call = humanCaller(discardSetup.fixture);
         const empty = { params: {}, query: {} };
-        await createMachine(discardSetup.fixture, MACHINE_NAME);
+        const machine = await call(workerOperations["machine.create"], {
+          ...empty,
+          body: { name: MACHINE_NAME },
+        });
+        assert.ok(machine.machine_configuration);
         const created = await call(workerOperations["instance.create"], {
           ...empty,
           body: {
@@ -815,6 +828,7 @@ test(
             XDG_DATA_HOME: join(root, "data"),
             XDG_STATE_HOME: join(root, "state"),
             KANTHORD_WORKER_CONFIG: created.instance_configuration,
+            KANTHORD_MACHINE_CONFIG: machine.machine_configuration,
           },
           connectionName: "host-a",
           heartbeatIntervalMs: FAST_HEARTBEAT_MS,

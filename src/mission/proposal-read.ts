@@ -1,6 +1,13 @@
+import { OperationError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  type FixProposal,
+  fixProposalSchema,
+  type FollowupProposal,
+  followupProposalSchema,
+  MissionErrorCode,
   NODE_LIST_LIMIT_DEFAULT,
   type Proposal,
   PROPOSAL_IDENTITY_PREFIX,
@@ -10,24 +17,78 @@ import {
 import { requireRunnable } from "./control.ts";
 import { decode, encode, invalidCursor, requireNode } from "./node-read.ts";
 import { recordNotFound } from "./record-list.ts";
-import { listProposals, type ProposalRow } from "./proposal-store.ts";
+import {
+  listOpenFollowups,
+  listProposals,
+  type ProposalRow,
+} from "./proposal-store.ts";
 import { type AssessmentRow, readAssessment } from "./record-store.ts";
+import { readMissionByProject } from "./store.ts";
 
 const SLICE_FROM_START = 0;
 const PAGINATION_LOOKAHEAD = 1;
 const LAST_ITEM_OFFSET = 1;
 
-export function proposalRecord(row: ProposalRow): Proposal {
-  return proposalSchema.parse({
+export function fixProposalRecord(row: ProposalRow): FixProposal {
+  return fixProposalSchema.parse({
     ...row,
     content: proposalContentSchema.parse(JSON.parse(row.content)),
   });
+}
+
+export function followupRecord(row: ProposalRow): FollowupProposal {
+  return followupProposalSchema.parse({
+    ...row,
+    content: JSON.parse(row.content),
+  });
+}
+
+export function proposalRecord(row: ProposalRow): Proposal {
+  return proposalSchema.parse({ ...row, content: JSON.parse(row.content) });
 }
 
 export function requireAssessment(tx: Transaction, id: string): AssessmentRow {
   const row = readAssessment(tx, id);
   if (row === null) recordNotFound();
   return row;
+}
+
+function proposalCursor(cursor: string | undefined): string | null {
+  const after = cursor === undefined ? null : decode(cursor);
+  if (
+    after !== null &&
+    !identitySchema(PROPOSAL_IDENTITY_PREFIX).safeParse(after).success
+  )
+    invalidCursor();
+  return after;
+}
+
+export function followupPage(
+  tx: Transaction,
+  projectId: string,
+  query: { limit?: number; cursor?: string },
+) {
+  const mission = readMissionByProject(tx, projectId);
+  if (mission === null)
+    throw new OperationError(
+      HttpStatus.NotFound,
+      MissionErrorCode.MissionNotFound,
+      "Mission not found.",
+    );
+  const after = proposalCursor(query.cursor);
+  const limit = query.limit ?? NODE_LIST_LIMIT_DEFAULT;
+  const rows = listOpenFollowups(
+    tx,
+    mission.id,
+    after,
+    limit + PAGINATION_LOOKAHEAD,
+  );
+  const items = rows.slice(SLICE_FROM_START, limit).map(followupRecord);
+  return {
+    items,
+    next_cursor:
+      rows.length > limit ? encode(items.at(-LAST_ITEM_OFFSET)!.id) : null,
+  };
 }
 
 export function proposalPage(

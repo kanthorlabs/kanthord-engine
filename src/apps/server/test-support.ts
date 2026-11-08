@@ -977,6 +977,13 @@ export async function deliver(
 const GITHUB_VERSION_HEADER = "x-github-api-version";
 const GITHUB_BODY_MAX = 1024 ** 2;
 const GITHUB_EVENTS_ROUTE = /^\/repos\/([^/]+)\/([^/]+)\/events$/;
+const GITHUB_ISSUE_COMMENTS_ROUTE =
+  /^\/repos\/([^/]+)\/([^/]+)\/issues\/comments$/;
+const GITHUB_ISSUE_THREAD_COMMENTS_ROUTE =
+  /^\/repos\/([^/]+)\/([^/]+)\/issues\/([1-9][0-9]*)\/comments$/;
+const GITHUB_USER_ROUTE = /^\/user$/;
+const GITHUB_FIRST_COMMENT_ID = 9001;
+const GITHUB_DEFAULT_ACCOUNT = { id: 1, login: "kanthord-reply" };
 const GITHUB_NOT_MODIFIED_STATUS = 304;
 const NO_HOLD_PASS = 0;
 const HOLD_PASS_STEP = 1;
@@ -1089,6 +1096,9 @@ interface FakeGitHubState {
   dropNext: boolean;
   gate: Promise<void> | null;
   events: Map<string, unknown[]>;
+  issueComments: Map<string, unknown[]>;
+  account: { id: number; login: string };
+  nextCommentId: number;
   failEvents: number | null;
   eventsHold: FakeEventsHold | null;
   refuseMerge: number | null;
@@ -1345,7 +1355,62 @@ function listEvents(
   repo: string,
   ifNoneMatch: string | null,
 ): FakeGitHubAnswer & { etag: string } {
-  const events = state.events.get(eventsKey(owner, repo)) ?? [];
+  return listItems(state.events.get(eventsKey(owner, repo)) ?? [], ifNoneMatch);
+}
+
+const postCommentSchema = z.looseObject({ body: z.string() });
+const commentThreadSchema = z.looseObject({ issue_url: z.string().optional() });
+
+function listIssueComments(
+  state: FakeGitHubState,
+  owner: string,
+  repo: string,
+  ifNoneMatch: string | null,
+  number?: string,
+): FakeGitHubAnswer & { etag: string } {
+  const comments = state.issueComments.get(eventsKey(owner, repo)) ?? [];
+  return listItems(
+    number === undefined
+      ? comments
+      : comments.filter((comment) => {
+          const { issue_url } = commentThreadSchema.parse(comment);
+          return (
+            issue_url === undefined || issue_url.endsWith(`/issues/${number}`)
+          );
+        }),
+    ifNoneMatch,
+  );
+}
+
+function postIssueComment(
+  state: FakeGitHubState,
+  owner: string,
+  repo: string,
+  number: string,
+  body: unknown,
+): FakeGitHubAnswer {
+  const key = eventsKey(owner, repo);
+  const comment = {
+    id: state.nextCommentId,
+    user: { ...state.account, type: GITHUB_USER_TYPE },
+    body: postCommentSchema.parse(body).body,
+    created_at: new Date().toISOString(),
+    html_url: `https://github.com/${key}/issues/${number}#issuecomment-${state.nextCommentId}`,
+    issue_url: `https://api.github.com/repos/${key}/issues/${number}`,
+    performed_via_github_app: null,
+  };
+  state.nextCommentId += GITHUB_NEXT_PULL_STEP;
+  state.issueComments.set(key, [
+    comment,
+    ...(state.issueComments.get(key) ?? []),
+  ]);
+  return { status: GITHUB_CREATED_STATUS, body: comment };
+}
+
+function listItems(
+  events: unknown[],
+  ifNoneMatch: string | null,
+): FakeGitHubAnswer & { etag: string } {
   const etag = eventsEtag(events);
   return ifNoneMatch === etag
     ? { status: GITHUB_NOT_MODIFIED_STATUS, body: null, etag }
@@ -1426,6 +1491,30 @@ async function gitHubRequest(
     if (state.failEvents !== null)
       return reply({ status: state.failEvents, body: GITHUB_SCRIPTED_FAILURE });
     const listed = listEvents(state, owner, repo, call.if_none_match);
+    return reply(listed, { etag: listed.etag });
+  }
+  const threadRoute = GITHUB_ISSUE_THREAD_COMMENTS_ROUTE.exec(url.pathname);
+  if (method === HttpMethod.Post && threadRoute) {
+    const [, owner, repo, number] = threadRoute;
+    assert.ok(owner && repo && number);
+    return reply(postIssueComment(state, owner, repo, number, body));
+  }
+  if (method === HttpMethod.Get && GITHUB_USER_ROUTE.test(url.pathname))
+    return reply({ status: HttpStatus.OK, body: state.account });
+  const commentsRoute =
+    method === HttpMethod.Get
+      ? (GITHUB_ISSUE_COMMENTS_ROUTE.exec(url.pathname) ?? threadRoute)
+      : null;
+  if (commentsRoute) {
+    const [, owner, repo, number] = commentsRoute;
+    assert.ok(owner && repo);
+    const listed = listIssueComments(
+      state,
+      owner,
+      repo,
+      call.if_none_match,
+      number,
+    );
     return reply(listed, { etag: listed.etag });
   }
   if (method === HttpMethod.Get && state.failPulls !== null)
@@ -1516,6 +1605,9 @@ export async function fakeGitHub(
     dropNext: false,
     gate: null,
     events: new Map(),
+    issueComments: new Map(),
+    account: GITHUB_DEFAULT_ACCOUNT,
+    nextCommentId: GITHUB_FIRST_COMMENT_ID,
     failEvents: null,
     eventsHold: null,
     refuseMerge: null,
@@ -1655,6 +1747,24 @@ export async function fakeGitHub(
     },
     events(owner: string, repo: string, events: readonly unknown[]): void {
       state.events.set(eventsKey(owner, repo), [...events]);
+    },
+    issueComments(
+      owner: string,
+      repo: string,
+      comments: readonly unknown[],
+    ): void {
+      state.issueComments.set(eventsKey(owner, repo), [...comments]);
+    },
+    addIssueComment(owner: string, repo: string, comment: unknown): void {
+      const key = eventsKey(owner, repo);
+      state.issueComments.set(key, [
+        comment,
+        ...(state.issueComments.get(key) ?? []),
+      ]);
+    },
+    replyAccount(id: number, login: string): void {
+      assert.ok(Number.isInteger(id) && login.length);
+      state.account = { id, login };
     },
     failEvents(status: number | null): void {
       assert.ok(status === null || Number.isInteger(status));

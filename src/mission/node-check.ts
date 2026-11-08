@@ -17,6 +17,8 @@ import {
   CheckEndState,
   checkEndStateSchema,
   commitSchema,
+  ConversationAction,
+  type FrozenAction,
   type IntakeCheck,
   MissionErrorCode,
   NodeState,
@@ -32,6 +34,11 @@ import {
 } from "./control.ts";
 import { actionStatesOf, requiredActionsOf } from "./frozen-action.ts";
 import { gateFilesOf } from "./gate-files.ts";
+import {
+  admitLinkUpdates,
+  pinnedLinksOf,
+  requireInbounds,
+} from "./link-check.ts";
 import { requireNode } from "./node-read.ts";
 import { recordNotFound } from "./record-list.ts";
 import {
@@ -44,7 +51,12 @@ import {
   readRequests,
 } from "./record-store.ts";
 import { claimableMap, reconcileMission } from "./routing.ts";
-import { type NodeRow, readNode, setNodeState } from "./store.ts";
+import {
+  type NodeRow,
+  readCurrentRevision,
+  readNode,
+  setNodeState,
+} from "./store.ts";
 import type { Dependencies } from "./service.ts";
 import { type DeferredRounds, IMMEDIATE_DELAY_MS } from "./deferred-rounds.ts";
 import { requireMission } from "./write.ts";
@@ -54,6 +66,7 @@ import { currentAssessmentOf } from "./currency.ts";
 const NO_LANDED_COMMITS = 0;
 const FIRST_ASSET_INDEX = 0;
 const NO_UNRESOLVED_REQUESTS = 0;
+const NO_LINKS = 0;
 const SINGLE_ASSET_COUNT = 1;
 const EXPECTED_ROW_CHANGE = 1;
 const NO_GATE_FILES = 0;
@@ -81,16 +94,18 @@ const MergeOutcome = {
 type MergeOutcome = (typeof MergeOutcome)[keyof typeof MergeOutcome];
 export const LANDED_COMMIT_SUBJECT = "Landed commit";
 type CheckAnswer = Awaited<ReturnType<IntakeCheck["check"]>>;
-const checkAnswerSchema = z
-  .strictObject({
-    end_state: checkEndStateSchema,
-    landed_commits: z.array(commitSchema),
-  })
-  .refine((answer) =>
-    answer.end_state === CheckEndState.Expected
-      ? answer.landed_commits.length > NO_LANDED_COMMITS
-      : answer.landed_commits.length === NO_LANDED_COMMITS,
-  );
+const checkAnswerSchemaOf = (action: FrozenAction) =>
+  z
+    .strictObject({
+      end_state: checkEndStateSchema,
+      landed_commits: z.array(commitSchema),
+    })
+    .refine((answer) =>
+      answer.end_state === CheckEndState.Expected &&
+      action.action !== ConversationAction.Reply
+        ? answer.landed_commits.length > NO_LANDED_COMMITS
+        : answer.landed_commits.length === NO_LANDED_COMMITS,
+    );
 
 export function changesNothing(endState: CheckAnswer["end_state"]): boolean {
   return (
@@ -152,7 +167,6 @@ export function applyEndState(
   now: number,
   admission?: { inboundEventId: string },
 ): void {
-  checkAnswerSchema.parse(answer);
   const provenance = actorSchema.parse({
     kind: ActorKind.Service,
     service: ActorService.Mission,
@@ -165,6 +179,7 @@ export function applyEndState(
     dependencies,
     evidenceId,
   );
+  checkAnswerSchemaOf(frozenAction).parse(answer);
   const node = requireNode(tx, request.node_id);
   const mission = requireMission(tx, node.mission_id);
   const before = claimableMap(tx, mission.id, dependencies.bindings);
@@ -266,14 +281,24 @@ export async function checkNode(
             .filter((row) => row.end_state === null)
             .sort((a, b) => a.id.localeCompare(b.id))
             .map((row) => requestContext(tx, dependencies, row.id));
-    if (requests.length === NO_UNRESOLVED_REQUESTS)
+    const revision = readCurrentRevision(tx, nodeId);
+    assert.ok(revision, "A node has a revision.");
+    const links = pinnedLinksOf(tx, dependencies.bindings, revision);
+    if (requests.length === NO_UNRESOLVED_REQUESTS && links.length === NO_LINKS)
       throw new OperationError(
         HttpStatus.Conflict,
         MissionErrorCode.NoUnresolvedRequest,
         "The node has no unresolved request.",
       );
-    return { mission, requests };
+    requireInbounds(tx, dependencies, mission.project_id, links);
+    return { mission, requests, links };
   });
+  const linkUpdates = await admitLinkUpdates(
+    dependencies,
+    caller.context,
+    prepared.mission.project_id,
+    prepared.links,
+  );
   const failures: { evidence_id: string; error: ErrorBody }[] = [];
   const checked: string[] = [];
   for (const item of prepared.requests) {
@@ -282,7 +307,7 @@ export async function checkNode(
       dependencies.store.transaction((tx) =>
         authorizeRequest(tx, dependencies, item.request.id),
       );
-      answer = checkAnswerSchema.parse(
+      answer = checkAnswerSchemaOf(item.frozen_action).parse(
         await dependencies.intakeCheck.check(caller.context, item.request.id),
       );
     } catch (error) {
@@ -340,6 +365,7 @@ export async function checkNode(
       };
     }),
     failures,
+    link_updates: linkUpdates,
   }));
   dependencies.wakeup.wake(prepared.mission.project_id);
   return result;
@@ -452,7 +478,7 @@ async function runDeferredCheck(
       dependencies.store.transaction((tx) =>
         authorizeRequest(tx, dependencies, item.request.id),
       );
-      answer = checkAnswerSchema.parse(
+      answer = checkAnswerSchemaOf(item.frozen_action).parse(
         await dependencies.intakeCheck.check(
           roundContext(dependencies),
           item.request.id,

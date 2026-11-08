@@ -20,6 +20,8 @@ import { getWorkerDeclaration, type WorkerDeclaration } from "./catalog.ts";
 export const unusedHostTools: HostTools = {
   evidenceUpload: () =>
     Promise.reject(new Error("Unexpected evidence upload in fixture")),
+  linkUpdateList: () =>
+    Promise.reject(new Error("Unexpected link update list in fixture")),
 };
 import { ChainLevel, type PromptPartAnswer } from "../agent/contract.ts";
 import { framingPart } from "../agent/prompt-files.ts";

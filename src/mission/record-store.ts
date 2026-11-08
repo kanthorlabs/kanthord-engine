@@ -93,7 +93,7 @@ export function insertLinkUpdate(
   });
   tx.database
     .prepare(
-      "INSERT INTO mission_link_update (id, mission_id, external_link, update_key, inbound_event_id, actor_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO mission_link_update (id, mission_id, external_link, update_key, inbound_event_id, actor_id, occurred_at, reason, binding_id, done_at, snoozed_until) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .run(
       row.id,
@@ -103,6 +103,10 @@ export function insertLinkUpdate(
       row.inbound_event_id,
       row.actor_id,
       row.occurred_at,
+      row.reason,
+      row.binding_id,
+      row.done_at,
+      row.snoozed_until,
     );
   return row.id;
 }

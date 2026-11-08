@@ -17,6 +17,7 @@ import {
   insertEvidence,
   openAttempt,
 } from "./record-store.ts";
+import { readRevision } from "./store.ts";
 import { evidenceHarness, executionHarness } from "./test-support.ts";
 
 const NOW = 100;
@@ -206,4 +207,16 @@ test("an action holds the gate files of its binding in the current assessment", 
   assert.deepEqual(h.read().actions[0]?.gate_files, GATE_FILE_PATHS);
   assess([{ binding_id: createIdentity("binding"), paths: GATE_FILE_PATHS }]);
   assert.deepEqual(h.read().actions[0]?.gate_files, []);
+});
+
+test("the context names the node and the platform addresses of the attempt", (t) => {
+  const h = harness(t);
+  const name = h.store.transaction(
+    (tx) => readRevision(tx, h.node_id, FIRST_ATTEMPT)?.name,
+  );
+  assert.ok(name);
+  assert.equal(h.read().node_name, name);
+  assert.deepEqual(h.read().request_addresses, []);
+  h.request(FIRST_ATTEMPT);
+  assert.deepEqual(h.read().request_addresses, [PR]);
 });

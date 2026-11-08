@@ -260,7 +260,12 @@ async function setup(t: TestContext, proposalNames: string[]) {
 }
 
 function proposalsByName(page: Page<Proposal>): Map<string, Proposal> {
-  return new Map(page.items.map((item) => [item.content.name, item]));
+  return new Map(
+    page.items.map((item) => {
+      assert.ok("name" in item.content);
+      return [item.content.name, item];
+    }),
+  );
 }
 
 test(

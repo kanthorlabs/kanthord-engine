@@ -20,7 +20,7 @@ import {
   type WorkspaceRoot,
 } from "../../worker/unit/index.ts";
 import { completed, HandoverRefused, takeHandover } from "./handover.ts";
-import type { InstanceCopyKey } from "../../custody/client.ts";
+import type { CopyKeys } from "./copy-keys.ts";
 import { retryIndeterminate } from "./api.ts";
 import type { WorkerTransport } from "./transport.ts";
 import { uploadEvidence } from "./evidence-upload.ts";
@@ -32,7 +32,7 @@ export interface HostExecutionInput {
   claim: ExecutionRecord;
   api: WorkerTransport;
   clientSecret: string;
-  instanceKey?: InstanceCopyKey;
+  copyKeys?: CopyKeys;
   workspaces: WorkspaceRoot;
   transport: RepositoryTransport;
   modelRuntimeFactory: ModelRuntimeFactory;
@@ -115,6 +115,31 @@ export async function hostExecution(
     input.context,
     input.claim.expired_at,
   );
+  const hostToolCall = async <T>(
+    signal: AbortSignal | undefined,
+    work: (callContext: CancellationContext) => Promise<T>,
+  ): Promise<T> => {
+    const callContext = new CancellationContext(context);
+    const abort = () => callContext.cancel();
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+    try {
+      return await work(callContext);
+    } catch (error) {
+      if (
+        error instanceof HandoverRefused &&
+        error.result &&
+        isExecutionEnd(error.result)
+      ) {
+        revoked = true;
+        context.cancel();
+      }
+      throw error;
+    } finally {
+      signal?.removeEventListener("abort", abort);
+      callContext.cancel();
+    }
+  };
   const telemetry = new HttpTelemetrySink({
     executionId: input.claim.execution_id,
     send: (request, options) =>
@@ -192,34 +217,29 @@ export async function hostExecution(
         context,
         telemetry,
         hostTools: (workspace) => ({
-          evidenceUpload: async (path, signal) => {
-            const uploadContext = new CancellationContext(context);
-            const abort = () => uploadContext.cancel();
-            signal?.addEventListener("abort", abort, { once: true });
-            if (signal?.aborted) abort();
-            try {
-              return await uploadEvidence({
+          evidenceUpload: (path, signal) =>
+            hostToolCall(signal, (callContext) =>
+              uploadEvidence({
                 workspace,
                 path,
                 claim: input.claim,
                 api: input.api,
-                context: uploadContext,
-              });
-            } catch (error) {
-              if (
-                error instanceof HandoverRefused &&
-                error.result &&
-                isExecutionEnd(error.result)
-              ) {
-                revoked = true;
-                context.cancel();
-              }
-              throw error;
-            } finally {
-              signal?.removeEventListener("abort", abort);
-              uploadContext.cancel();
-            }
-          },
+                context: callContext,
+              }),
+            ),
+          linkUpdateList: (page, signal) =>
+            hostToolCall(signal, async (callContext) =>
+              completed(
+                await input.api.worker["execution.link_update.get"](
+                  {
+                    params: { execution_id: input.claim.execution_id },
+                    query: page,
+                    body: null,
+                  },
+                  { context: callContext },
+                ),
+              ),
+            ),
         }),
       });
     }

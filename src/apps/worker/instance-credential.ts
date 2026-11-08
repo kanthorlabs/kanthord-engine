@@ -14,7 +14,10 @@ import {
   SEALED_PLAINTEXT_MAX_BYTES,
 } from "../../custody/contract.ts";
 import type { InstanceCopyKey } from "../../custody/client.ts";
-import type { InstanceConfiguration } from "../../worker/contract.ts";
+import type {
+  InstanceConfiguration,
+  MachineConfiguration,
+} from "../../worker/contract.ts";
 import { refuseInsecureEndpoint } from "./endpoint-check.ts";
 import { InstanceExchange } from "./instance-exchange.ts";
 
@@ -53,16 +56,14 @@ export function instanceSecret(secret: unknown): { key: string } {
   return parsed.data;
 }
 
-export function instanceCopyKey(
-  configuration: InstanceConfiguration,
-): InstanceCopyKey {
+function copyKeyOf(name: string, encodedPrivateKey: string): InstanceCopyKey {
   const privateKey = () =>
-    Buffer.from(configuration.private_key, INSTANCE_KEY_ENCODING);
+    Buffer.from(encodedPrivateKey, INSTANCE_KEY_ENCODING);
   const key = privateKey();
   try {
     const publicKey = x25519PublicKeyOf(key);
     return {
-      holder: configuration.name,
+      holder: name,
       sealed_to: keyFingerprint(publicKey),
       public_key: publicKey,
       private_key: privateKey,
@@ -70,6 +71,18 @@ export function instanceCopyKey(
   } finally {
     key.fill(ZERO_BYTE);
   }
+}
+
+export function instanceCopyKey(
+  configuration: InstanceConfiguration,
+): InstanceCopyKey {
+  return copyKeyOf(configuration.name, configuration.private_key);
+}
+
+export function machineCopyKey(
+  configuration: MachineConfiguration,
+): InstanceCopyKey {
+  return copyKeyOf(configuration.name, configuration.private_key);
 }
 
 export async function instanceCredentialAccess(

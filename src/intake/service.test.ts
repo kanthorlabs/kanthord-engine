@@ -42,6 +42,7 @@ import {
   INTAKE_SERVICE_NAME,
   type IntakeConsumers,
   intakeOperations,
+  ResourceKind,
 } from "./contract.ts";
 import { eventState, insertEvent } from "./event-store.ts";
 import { INBOUND_TARGET_KIND, InboundCapability } from "./health.ts";
@@ -76,6 +77,7 @@ const ARMS_OF_TWO_LOOPS = 2;
 const SETTLE_TURNS = 20;
 const POLL_TOKEN = "ghp_poll-token";
 const DEMANDED_REQUESTS = 1;
+const NO_LINKS = 0;
 const RESOURCE = "acme/app";
 const ETAG_STORED = '"etag-0"';
 const PULLS_ETAG_STORED = '"pulls-0"';
@@ -169,6 +171,7 @@ function insertNaming(
   kind: InboundKindValue,
   credential: string | null,
   checkpoint: GitHubCheckpoint | null = null,
+  resourceKind: ResourceKind = ResourceKind.Repository,
 ): string {
   const id = allocateInboundId();
   store.transaction((tx) =>
@@ -178,7 +181,10 @@ function insertNaming(
       platform: InboundPlatform.GitHub,
       consumer: Consumer.MissionDeliveryAdmit,
       credential,
-      configuration: { resource: RESOURCE },
+      configuration: {
+        resource_kind: resourceKind,
+        resource: RESOURCE,
+      },
       checkpoint,
       created_at: CREATED_AT,
     }),
@@ -264,7 +270,7 @@ const POLL: InboundCreate = {
   platform: InboundPlatform.GitHub,
   consumer: Consumer.MissionDeliveryAdmit,
   credential: CREDENTIAL,
-  configuration: { resource: RESOURCE },
+  configuration: { resource_kind: ResourceKind.Repository, resource: RESOURCE },
 };
 
 function modified(etag: string | null, events: GitHubEvent[]): EventsAnswer {
@@ -332,12 +338,27 @@ function pollCustody(): IntakeCustody {
   };
 }
 
-function pollService(t: TestContext, store: Store) {
+function pollService(
+  t: TestContext,
+  store: Store,
+  demand: { link_count: number; inbox: boolean } = {
+    link_count: DEMANDED_REQUESTS,
+    inbox: false,
+  },
+) {
   const github = new GitHubPlatform({ baseUrl: CLOSED_LOCAL_PORT });
   const answers: { next: () => Promise<EventsAnswer> } = {
     next: async () => modified(ETAG_FIRST, []),
   };
   const listEvents = t.mock.method(github, "listEvents", () => answers.next());
+  const listComments = t.mock.method(
+    github,
+    "listIssueComments",
+    async (): Promise<EventsAnswer> => ({
+      ok: true,
+      value: { notModified: true },
+    }),
+  );
   const listPulls = t.mock.method(
     github,
     "listClosedPullRequests",
@@ -357,7 +378,7 @@ function pollService(t: TestContext, store: Store) {
     unresolvedRequests: async () => ({
       type: OperationResultType.Completed,
       status: HttpStatus.OK,
-      data: { count: DEMANDED_REQUESTS },
+      data: { count: DEMANDED_REQUESTS, ...demand },
     }),
     projects: {
       get: async () => ({
@@ -416,6 +437,7 @@ function pollService(t: TestContext, store: Store) {
     answers,
     listEvents,
     listPulls,
+    listComments,
     create,
     remove,
     interval,
@@ -493,6 +515,39 @@ test("run starts one poll loop per poll inbound and none for a webhook", async (
   );
   await shutDown(s.intake, running);
 });
+
+for (const { name, demand, reads } of [
+  {
+    name: "a conversation poll with no link and an inbox reads the issue comments",
+    demand: { link_count: NO_LINKS, inbox: true },
+    reads: REQUESTS_PER_LOOP,
+  },
+  {
+    name: "a conversation poll with no link and no inbox makes no request",
+    demand: { link_count: NO_LINKS, inbox: false },
+    reads: UNSENT_REQUEST_COUNT,
+  },
+]) {
+  test(name, async (t) => {
+    const store = pollStore(t);
+    insertNaming(
+      store,
+      InboundKind.Poll,
+      CREDENTIAL,
+      null,
+      ResourceKind.Conversation,
+    );
+    const arms = timerArms(t);
+    const s = pollService(t, store, demand);
+    const running = s.intake.run();
+    await reaches(arms, ARMS_PER_LOOP, t.signal);
+    s.interval();
+    await settle();
+    await reaches(() => s.listComments.mock.callCount(), reads, t.signal);
+    assert.equal(s.listEvents.mock.callCount(), UNSENT_REQUEST_COUNT);
+    await shutDown(s.intake, running);
+  });
+}
 
 test("an inbound delete stops its poll loop", async (t) => {
   const store = pollStore(t);

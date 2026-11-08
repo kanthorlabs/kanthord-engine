@@ -448,8 +448,9 @@ Its `config` holds these fields:
 - `platform`: **required**, the value `github`. A later platform adds one value.
 - `repository`: **required**, `<owner>/<repo>` of the GitHub repository.
 - `credential`: **required**, one `CredentialName` of platform `github`. Custody checks the platform at the write. The write makes no platform call.
-- `reply_policy`: **optional**, `{ "follows": { "type": "assessment_passed" } }`. Another value refuses the write as a validation failure. The write stores the key and derives no action from it.
+- `reply_policy`: **optional**, `{ "follows": { "type": "assessment_passed" } }`. Another value refuses the write as a validation failure. A `reply_policy` gives the binding the action `reply` and the key `<binding name>.reply`. A node derives one `reply` action for each link of its pinned revision that names the binding, with the key `<binding name>.reply.<position>`.
 - `link_trust`: **optional**, object `{ actor_ids }`. [Link trust](#link-trust) states the rules.
+- `inbox`: **optional**, object `{ actor_id, handle }`; absent by default. [Inbox](#inbox) states the rules.
 
 The resource identity of a conversation binding is `conversation:github:<repository>`.
 
@@ -462,7 +463,8 @@ The resource identity of a conversation binding is `conversation:github:<reposit
     "repository": "acme/app",
     "credential": "github-acme",
     "reply_policy": { "follows": { "type": "assessment_passed" } },
-    "link_trust": { "actor_ids": ["583231", "9919"] }
+    "link_trust": { "actor_ids": ["583231", "9919"] },
+    "inbox": { "actor_id": "583231", "handle": "ulrich" }
   }
 }
 ```
@@ -478,6 +480,19 @@ A node names a conversation binding beside its repository bindings. Both intents
 - An invalid value refuses the write with 400 `project.bindings.link_trust_invalid` and `details: { binding, field, reason, actor_id }`. `field` is `actor_ids`.
 - `reason` is `type_invalid` for a value that is no object, an `actor_ids` that is no list of strings, or an id that is no string. It is `too_many` for more than 32 ids, `duplicate` for a repeated id, `id_invalid` for an id that does not match the pattern, and `platform_unsupported` for a repository binding of a platform other than `github`.
 - `actor_id` holds the refused id for `duplicate` and `id_invalid`, and is null for the other reasons.
+
+### Inbox
+
+`inbox` names the developer whose threads the inbox of the project holds. It is a key of a conversation binding of platform `github`.
+
+- `actor_id`: **required**, the numeric GitHub user id of the developer, as a string. It matches `^[1-9][0-9]{0,15}$`, the id form of `link_trust`. A login such as `octocat` is no id.
+- `handle`: **required**, the GitHub login of the developer. It matches `^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$`.
+- A key outside `actor_id` and `handle` refuses the write as a validation failure.
+- A repository binding refuses the key with 400 `project.bindings.inbox_invalid` and reason `platform_unsupported`.
+- An invalid value refuses the write with 400 `project.bindings.inbox_invalid` and `details: { binding, field, reason }`. `field` is `inbox` for a value that is no object or a refused binding, `actor_id` or `handle` for the named member.
+- `reason` is `type_invalid` for a value that is no object, or an `actor_id` or `handle` that is no string. It is `id_invalid` for an `actor_id` that does not match the pattern, `handle_invalid` for a `handle` that does not match the pattern, and `platform_unsupported` for a repository binding.
+- A resource that a binding with `inbox` of another project names refuses the write with 409 `project.bindings.inbox_taken` and `details: { resource_identity, project_id }`. `project_id` is the other project. The same resource without `inbox` stores.
+- A change of `inbox` creates the next binding revision, as every binding write does.
 
 ### Worker and agent configuration — proposed fields
 
@@ -878,7 +893,7 @@ A complete file:
 }
 ```
 
-- It refuses a static violation with the code of `binding apply`: `credential_required`, `action_unsupported`, `link_trust_invalid` and `address_invalid` for an address that does not have the form `git@<host>:<owner>/<repository>.git`, and the custody suitability codes of `ssh_credential` and `credential`.
+- It refuses a static violation with the code of `binding apply`: `credential_required`, `action_unsupported`, `link_trust_invalid`, `inbox_invalid` and `address_invalid` for an address that does not have the form `git@<host>:<owner>/<repository>.git`, and the custody suitability codes of `ssh_credential` and `credential`.
 - It refuses an invalid `prompts` text or path with `project.bindings.repository.prompt_invalid`.
 - Then it runs the checks of `binding verify` on the configuration and answers the same `{ address, ssh_credential, credential }`. A host outside the SSH host set answers the `address` entry `unhealthy` with `failure_reason: address_invalid`. A host with no pin answers `host_key_unknown`.
 - The answer also holds `instruction_file: { path, commit, state, reason }`, the state of the instruction file at the base head. It is null when the configuration names no instruction file. `state` is `present`, `absent`, `invalid` or `unreachable`. `reason` is null for `present` and `absent`. For `invalid`, `reason` is `too_large`, `not_utf8`, `unreadable` or `control_character`. For `unreachable`, `commit` is null and `reason` is `base_branch_absent` when the remote does not hold the base branch, else a value of the [failure reason list](#binding-verify), for example `address_invalid` for a host outside the SSH host set or `deadline_exceeded`.
@@ -1028,6 +1043,8 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `project.suite_pass.not_proposed`                            | The binding gets no suite pass proposal: its configuration holds no `pull_request` action with `landing: human`. An absent `landing` reads as `human`.                                                                                                                                                                                                                                                                           | environment suite-pass plan                                                                                                                                                                                                                 |
 | 400   | `project.bindings.duplicate_resource`                        | Two bindings use the same resource.                                                                                                                                                                                                                                                                                                                                                                                              | binding apply                                                                                                                                                                                                                               |
 | 400   | `project.bindings.link_trust_invalid`                        | The `link_trust` of a binding is invalid, or a repository binding of a platform other than `github` holds it; `details: { binding, field, reason, actor_id }`. `reason` is `type_invalid`, `too_many`, `duplicate`, `id_invalid` or `platform_unsupported`.                                                                                                                                                                      | binding apply, binding check                                                                                                                                                                                                                |
+| 400   | `project.bindings.inbox_invalid`                             | The `inbox` of a binding is invalid, or a repository binding holds it; `details: { binding, field, reason }`. `field` is `inbox`, `actor_id` or `handle`. `reason` is `type_invalid`, `id_invalid`, `handle_invalid` or `platform_unsupported`.                                                                                                                                                                                  | binding apply, binding check                                                                                                                                                                                                                |
+| 409   | `project.bindings.inbox_taken`                               | A binding with `inbox` of another project names the same resource; `details: { resource_identity, project_id }`. `project_id` is the other project.                                                                                                                                                                                                                                                                              | binding apply                                                                                                                                                                                                                               |
 | 400   | `project.bindings.repository.address_invalid`                | The repository address is invalid, or its host is outside the SSH host set of the platform. Binding check and binding verify answer a host outside the set as `failure_reason: address_invalid`.                                                                                                                                                                                                                                 | binding apply, binding check, environment show                                                                                                                                                                                              |
 | 400   | `project.bindings.repository.action_unsupported`             | A binding of the git-only platform `gitlab` or `bitbucket` names a `credential` or the action `pull_request`.                                                                                                                                                                                                                                                                                                                    | binding apply, binding check                                                                                                                                                                                                                |
 | 400   | `project.bindings.repository.environment_secret_invalid`     | An entry of `environment_secrets` holds a name that does not match `^[A-Z_][A-Z0-9_]*$`, is the seventeenth name, or names an absent, archived or non-`environment_secret` credential; `details: { binding, variable, credential }`.                                                                                                                                                                                             | binding apply, environment secret set                                                                                                                                                                                                       |

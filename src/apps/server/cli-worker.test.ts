@@ -33,7 +33,10 @@ import {
   WorkerMethod,
   workerOperations,
 } from "../../worker/contract.ts";
-import { decodeMachineConfiguration } from "../worker/index.ts";
+import {
+  decodeMachineConfiguration,
+  writeMachineFile,
+} from "../worker/index.ts";
 import { errorSchema } from "../../kernel/errors.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 
@@ -941,4 +944,74 @@ test("machine list, get, rotate and archive answer the machine records", async (
   assert.ok(archived.ended_at);
   const missing = await f.run("archive", MACHINE_NAME);
   assert.match(missing.stderr, /^cli\.worker\.machine\.revision_invalid:/);
+});
+
+const CREDENTIAL_PATH = "/api/llm/credential";
+const BEARER_PREFIX = "Bearer ";
+const HUMAN_TOKEN = "human";
+const CREDENTIAL_ANSWER = {
+  name: "machine-llm",
+  platform: "anthropic",
+  holder: MACHINE_NAME,
+  sealed_to: "fingerprint",
+  sealed_current: true,
+  revisions: [],
+};
+
+test("llm credential create with a machine holder sends the plaintext under the human token", async (t) => {
+  const requests: {
+    method: string | undefined;
+    path: string | undefined;
+    authorization: string | undefined;
+    body: unknown;
+  }[] = [];
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      requests.push({
+        method: request.method,
+        path: request.url,
+        authorization: request.headers.authorization,
+        body: JSON.parse(Buffer.concat(chunks).toString()),
+      });
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(CREDENTIAL_ANSWER));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  stopAfter(t, () => server.close());
+  const env: NodeJS.ProcessEnv = {
+    ...environment(temporary(t)),
+    KANTHORD_ENDPOINT: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    KANTHORD_TOKEN: HUMAN_TOKEN,
+  };
+  const pair = await generateX25519KeyPair();
+  writeMachineFile(
+    env,
+    { name: MACHINE_NAME, private_key: pair.private_key.toString("base64url") },
+    false,
+  );
+  const body = {
+    name: CREDENTIAL_ANSWER.name,
+    platform: CREDENTIAL_ANSWER.platform,
+    metadata: null,
+    secret: { key: "machine-provider-key" },
+  };
+  const file = join(temporary(t), "credential.json");
+  writePrivate(file, JSON.stringify(body));
+  const result = await command(
+    ["llm", "credential", "create", "--file", file, "--holder", MACHINE_NAME],
+    env,
+  );
+  assert.equal(result.code, ExitCode.Success, result.stderr);
+  assert.deepEqual(requests, [
+    {
+      method: "POST",
+      path: CREDENTIAL_PATH,
+      authorization: `${BEARER_PREFIX}${HUMAN_TOKEN}`,
+      body: { ...body, holders: [MACHINE_NAME] },
+    },
+  ]);
+  assert.equal(JSON.parse(result.stdout).holder, MACHINE_NAME);
 });

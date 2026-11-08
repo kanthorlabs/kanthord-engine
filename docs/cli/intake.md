@@ -53,7 +53,7 @@ authorizes no Intake command.
 | `inbound get <inbound-id>`               | `intake.inbound.get`              | `GET /api/intake/inbound/:inbound_id`                    | `human` | One inbound; for a webhook, its address and its secret, whose display is **[blocked][intake-contract]**. |
 | `inbound delete <inbound-id>`            | `intake.inbound.delete`           | `DELETE /api/intake/inbound/:inbound_id`                 | `human` | Mutation; deletes the inbound and its events, and calls no platform.                                     |
 | `event list`                             | `intake.inbound.event.list`       | `GET /api/intake/event`                                  | `human` | Bounded page, optionally filtered by inbound and state.                                                  |
-| `event get <inbound-event-id>`           | `intake.inbound.event.get`        | `GET /api/intake/event/:inbound_event_id`                | `human` | One event with its state and errors; content inclusion is **[blocked][intake-contract]**.                |
+| `event get <inbound-event-id>`           | `intake.inbound.event.get`        | `GET /api/intake/event/:inbound_event_id`                | `human` | One event with its state, errors and redacted `event` text.                                              |
 | `event retry <inbound-event-id>`         | `intake.inbound.event.retry`      | `POST /api/intake/event/:inbound_event_id/retry`         | `human` | Mutation; turns a failed event back to `pending`.                                                        |
 | `event discard <inbound-event-id>`       | `intake.inbound.event.discard`    | `POST /api/intake/event/:inbound_event_id/discard`       | `human` | Mutation; turns a pending or a failed event to `discarded`.                                              |
 | `event delete`                           | `intake.inbound.event.delete`     | `POST /api/intake/event/delete`                          | `human` | Mutation; deletes the succeeded, failed and discarded events that a filter names.                        |
@@ -143,24 +143,24 @@ is no `inbound update`, `inbound enable`, `inbound disable`, `poll now` or
 | [`--limit`](./common-flags.md#--limit), [`--cursor`](./common-flags.md#--cursor) | The inbound, event and outbound lists only.                                                                                                                         |
 | [`--force`](./common-flags.md#--force)                                           | Required on `outbound delete` only. It accepts that a repeat of a deleted request key calls the write again.                                                        |
 
-| Argument or flag                                           | Requiredness and type                                                                | Default                      | Validation and request mapping                                                                   |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------ |
-| `<inbound-id>`                                             | Required inbound identity on get and delete.                                         | None                         | Map to `params.inbound_id`. Prefix `inbound_`.                                                   |
-| `<inbound-event-id>`                                       | Required inbound event identity on get, retry and discard.                           | None                         | Map to `params.inbound_event_id`. Prefix `inbound_event_`.                                       |
-| `--project <id>`                                           | Optional project identity on `inbound list`.                                         | Absent: no project filter    | Send `query.project_id`; Project owns the prefix declaration.                                    |
-| `--kind <kind>`                                            | Optional inbound kind on `inbound list`.                                             | Absent: all kinds            | Send `query.kind`; closed set `webhook`, `poll`.                                                 |
-| `--platform <platform>`                                    | Optional platform on `inbound list`.                                                 | Absent: all platforms        | Send `query.platform`; closed set of supported platforms, today `github`.                        |
-| `--inbound <id>`                                           | Optional inbound identity on `event list`.                                           | Absent: no inbound filter    | Send `query.inbound_id`.                                                                         |
-| `--state <state>`                                          | Optional on `event list`; required with `--from` and `--to` on `event delete`.       | Absent on a list: all states | Send `query.state` or `body.state`; closed set `pending`, `succeeded`, `failed`, `discarded`.    |
-| `--from`, `--to`                                           | Required together with `--state` on `event delete`.                                  | None                         | Send `body.from` and `body.to`, an inclusive range of inbound event identities.                  |
-| `--id <inbound-event-id>`                                  | Repeatable on `event delete`; excludes `--state`, `--from` and `--to`.               | None                         | Send `body.ids`, a nonempty list of at most 1000 identities.                                     |
-| `<outbound-request-id>`                                    | Required outbound request identity on `outbound get` and `outbound discard`.         | None                         | Map to `params.outbound_request_id`. Prefix `outbound_request_`.                                 |
-| `--project <id>` on `outbound list`                        | Optional project identity.                                                           | Absent: no project filter    | Send `query.project_id`.                                                                         |
-| `--state <state>` on `outbound list` and `outbound delete` | Optional on `outbound list`; required with `--from` and `--to` on `outbound delete`. | Absent on a list: all states | Send `query.state` or `body.state`; closed set `pending`, `succeeded`, `failed`, `discarded`.    |
-| `--operation <operation>`                                  | Optional on `outbound list`.                                                         | Absent: all operations       | Send `query.operation`; closed set `github.pull_request`, `git.push`, `s3.delete_object`.        |
-| `--from`, `--to` on `outbound delete`                      | Required together with `--state`.                                                    | None                         | Send `body.from` and `body.to`, an inclusive range of outbound request identities.               |
-| `--id <outbound-request-id>`                               | Repeatable on `outbound delete`; excludes `--state`, `--from` and `--to`.            | None                         | Send `body.ids`, a nonempty list of at most 1000 identities.                                     |
-| `--force` on `outbound delete`                             | Required boolean switch.                                                             | `false`                      | Send `body.force`. Without it the server answers `400` `intake.outbound.request.force_required`. |
+| Argument or flag                                           | Requiredness and type                                                                | Default                      | Validation and request mapping                                                                                    |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------ | ---------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `<inbound-id>`                                             | Required inbound identity on get and delete.                                         | None                         | Map to `params.inbound_id`. Prefix `inbound_`.                                                                    |
+| `<inbound-event-id>`                                       | Required inbound event identity on get, retry and discard.                           | None                         | Map to `params.inbound_event_id`. Prefix `inbound_event_`.                                                        |
+| `--project <id>`                                           | Optional project identity on `inbound list`.                                         | Absent: no project filter    | Send `query.project_id`; Project owns the prefix declaration.                                                     |
+| `--kind <kind>`                                            | Optional inbound kind on `inbound list`.                                             | Absent: all kinds            | Send `query.kind`; closed set `webhook`, `poll`.                                                                  |
+| `--platform <platform>`                                    | Optional platform on `inbound list`.                                                 | Absent: all platforms        | Send `query.platform`; closed set of supported platforms, today `github`.                                         |
+| `--inbound <id>`                                           | Optional inbound identity on `event list`.                                           | Absent: no inbound filter    | Send `query.inbound_id`.                                                                                          |
+| `--state <state>`                                          | Optional on `event list`; required with `--from` and `--to` on `event delete`.       | Absent on a list: all states | Send `query.state` or `body.state`; closed set `pending`, `succeeded`, `failed`, `discarded`.                     |
+| `--from`, `--to`                                           | Required together with `--state` on `event delete`.                                  | None                         | Send `body.from` and `body.to`, an inclusive range of inbound event identities.                                   |
+| `--id <inbound-event-id>`                                  | Repeatable on `event delete`; excludes `--state`, `--from` and `--to`.               | None                         | Send `body.ids`, a nonempty list of at most 1000 identities.                                                      |
+| `<outbound-request-id>`                                    | Required outbound request identity on `outbound get` and `outbound discard`.         | None                         | Map to `params.outbound_request_id`. Prefix `outbound_request_`.                                                  |
+| `--project <id>` on `outbound list`                        | Optional project identity.                                                           | Absent: no project filter    | Send `query.project_id`.                                                                                          |
+| `--state <state>` on `outbound list` and `outbound delete` | Optional on `outbound list`; required with `--from` and `--to` on `outbound delete`. | Absent on a list: all states | Send `query.state` or `body.state`; closed set `pending`, `succeeded`, `failed`, `discarded`.                     |
+| `--operation <operation>`                                  | Optional on `outbound list`.                                                         | Absent: all operations       | Send `query.operation`; closed set `github.pull_request`, `git.push`, `github.issue_comment`, `s3.delete_object`. |
+| `--from`, `--to` on `outbound delete`                      | Required together with `--state`.                                                    | None                         | Send `body.from` and `body.to`, an inclusive range of outbound request identities.                                |
+| `--id <outbound-request-id>`                               | Repeatable on `outbound delete`; excludes `--state`, `--from` and `--to`.            | None                         | Send `body.ids`, a nonempty list of at most 1000 identities.                                                      |
+| `--force` on `outbound delete`                             | Required boolean switch.                                                             | `false`                      | Send `body.force`. Without it the server answers `400` `intake.outbound.request.force_required`.                  |
 
 Supplied list filters combine by AND. A filter grants no authority. An omitted
 optional filter stays absent rather than becoming `null`. The commands follow
@@ -187,14 +187,14 @@ the Mission Service stays in the span of its admission.
 The file supplies the request body, with no path or query parameters. The
 shared file rules apply. The schema is closed.
 
-| File field      | Requiredness and type                             | Default | Validation and meaning                                                                                                                                                              |
-| --------------- | ------------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `project_id`    | Required project identity.                        | None    | Must name a project of the Project Service.                                                                                                                                         |
-| `kind`          | Required enum string.                             | None    | Closed set `webhook`, `poll`.                                                                                                                                                       |
-| `platform`      | Required enum string.                             | None    | Closed set of supported platforms, today `github`.                                                                                                                                  |
-| `consumer`      | Required enum string.                             | None    | Closed set of admission operations, today `mission.delivery.admit`.                                                                                                                 |
-| `credential`    | Credential name string, or absent.                | Absent  | Required for a poll, refused for a webhook. The name must exist, and its platform must suit `platform`.                                                                             |
-| `configuration` | Required object, validated per kind and platform. | None    | Holds `resource` and the options of the kind and the platform. Every property name is snake_case, the stored form. Every field beyond `resource` is **[blocked][intake-contract]**. |
+| File field      | Requiredness and type                             | Default | Validation and meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| --------------- | ------------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project_id`    | Required project identity.                        | None    | Must name a project of the Project Service.                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `kind`          | Required enum string.                             | None    | Closed set `webhook`, `poll`.                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `platform`      | Required enum string.                             | None    | Closed set of supported platforms, today `github`.                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `consumer`      | Required enum string.                             | None    | Closed set of admission operations, today `mission.delivery.admit`.                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `credential`    | Credential name string, or absent.                | Absent  | Required for a poll, refused for a webhook. The name must exist, and its platform must suit `platform`.                                                                                                                                                                                                                                                                                                                                                                 |
+| `configuration` | Required object, validated per kind and platform. | None    | Holds the required `resource_kind`, the required `resource` and the options of the kind and the platform. `resource_kind` has no default and takes `repository` or `conversation`. An absent or another value answers `400` `gateway.request.validation_failed`. The resource identity is `<resource_kind>:github:<resource>`. Every property name is snake_case, the stored form. Every field beyond `resource_kind` and `resource` is **[blocked][intake-contract]**. |
 
 The file accepts no verification secret, checkpoint,
 state, error or arbitrary consumer operation.
@@ -209,10 +209,12 @@ The inbound read projection contains `id`, `project_id`, `kind`, `platform`,
 
 **Request and validation:** send the file object described above. Validate
 the fields and the configuration schema, then perform the remote validation of
-the kind: one poll cycle for a poll, nothing for a webhook. A GitHub poll
-cycle reads the events and the closed pull requests of the resource, so a
-credential without pull request read access refuses the create. The insert
-transaction checks the credential name and its platform.
+the kind: one poll cycle for a poll, nothing for a webhook. A GitHub
+repository poll cycle reads the events and the closed pull requests of the
+resource, so a credential without pull request read access refuses the create.
+A GitHub conversation poll cycle reads the issue comments of the resource, so
+a credential without the fine-grained permission "Issues: read" refuses the
+create. The insert transaction checks the credential name and its platform.
 
 **Effects and idempotency:** a success inserts exactly one inbound. A platform
 refusal inserts nothing.
@@ -266,8 +268,9 @@ pending event exists.
 ## Event commands
 
 The event read projection contains `id`, `inbound_id`, `event_id`, `metadata`,
-`state`, `error` and `created_at`. Content inclusion and its size and redaction
-remain **[blocked][intake-contract]**. No output contains a credential.
+`state`, `error` and `created_at`. `event get` adds `event`, the stored event
+bytes as UTF-8 text. The sensitive text rule set of the engine redacts `event`;
+no read cuts it. No output contains a credential.
 Each item of `error` holds `{ code, message, created_at }`. `code` is the error
 code of a declared failure of the consumer, or `indeterminate` when the handoff
 ends with no answer.
@@ -287,7 +290,8 @@ Read only. The `limit` accepts 1 to 1000 and defaults to 100.
 **Request and validation:** map the identity to `params.inbound_event_id`. A
 platform event identity is not a substitute for that identity.
 
-**Effects and idempotency:** return one event projection. Read only.
+**Effects and idempotency:** return one event projection with the redacted
+`event` text. Read only.
 
 **Statuses:** `200`; `400` for an invalid identity; `404`
 `intake.inbound.event.not_found`.
@@ -402,6 +406,8 @@ The order is verification, then durable storage, then acknowledgement to the
 platform. A redelivery inside one inbound stores nothing new and answers `2xx`.
 A verified handshake answers from the request alone and stores nothing: a
 GitHub `ping` answers `204`. A handshake skips the capacity bound.
+A GitHub webhook inbound with `resource_kind: conversation` stores its
+`issue_comment` deliveries under the same receipt.
 The receipt answers `404` `intake.inbound.not_found` for an unknown inbound or
 a poll inbound, `401` `intake.inbound.event.signature_invalid` for a failed
 verification, and `503` `intake.inbound.event.capacity_exceeded` beyond the
@@ -411,16 +417,26 @@ simulates a platform signature with a human JWT.
 The check of an open pull request reads the rules of its base branch, the check runs and the statuses of its head commit. A fine-grained token needs `Checks: read` and `Commit statuses: read`.
 
 A poll has no receipt route because the Intake Service initiates it. A poll
-pauses beyond the capacity bound. A poll requests GitHub only while its project
-holds an unresolved request evidence on its resource. Each cycle reads the
-events, then the closed pull requests of the resource. It waits at least 60
-seconds between two cycles, and longer when GitHub names a wait through
-`X-Poll-Interval`, `Retry-After` or `x-ratelimit-reset`. The `checkpoint` of a
-GitHub poll holds `etag` and `pulls_etag`, one ETag for each read. The create and the
-delete of a poll inbound are the only switch of its poll.
+pauses beyond the capacity bound. A repository poll requests GitHub only while
+its project holds an unresolved request evidence on its resource. Each cycle
+reads the events, then the closed pull requests of the resource. It waits at
+least 60 seconds between two cycles, and longer when GitHub names a wait
+through `X-Poll-Interval`, `Retry-After` or `x-ratelimit-reset`. The
+`checkpoint` of a GitHub repository poll holds `etag` and `pulls_etag`, one
+ETag for each read. The create and the delete of a poll inbound are the only
+switch of its poll.
 
-The conversation poll of a GitHub repository reads one page of its issue
-comments, sorted by update time, newest first. The `checkpoint` of a GitHub
+The conversation poll of a GitHub repository requests GitHub only while a node
+of its project links an issue of the repository, or while the current revision
+of the conversation binding of the resource holds `inbox`. The demand answer of
+the Mission Service is `{ count, link_count, inbox }`, and the poll requests
+while `link_count` is above zero or `inbox` is true. Each cycle runs one read: one
+page of the issue comments, sorted by update time, newest first. It follows
+the same wait rules as the repository poll. The credential of a conversation
+inbound needs the fine-grained permission "Issues: read". The batch and the
+`comments_etag` commit in one transaction. A page that exceeds the room below
+the capacity bound stores the items that fit and writes a `null`
+`comments_etag`. The `checkpoint` of a GitHub
 conversation holds `comments_etag`, a text or `null`. The `metadata` of a
 comment from this read is `{ "event": "issue_comment_listed" }`, and its event
 id is `issue_comment:<comment id>`. A webhook comment has the `metadata` value
@@ -480,6 +496,40 @@ The merge uses the first method that the repository allows, in the order
 `merge`, `squash`, `rebase`. A refused or failed merge leaves the pull request
 open and changes no answer.
 
+For a `reply` action of a conversation binding of platform `github`,
+`intake.action.perform` runs the outbound operation `github.issue_comment`. The
+input carries `commit: null` and `comment`, the body that the action performer
+composes. The request key is `<node_id>:<attempt>:<link>`, where `<link>` is the
+canonical JSON of the external link. A request key of another form answers
+`400` `gateway.request.validation_failed`. Intake posts `comment` to the issue of
+the link with `postIssueComment` and the credential of the conversation binding
+revision, and it answers the address `{ kind: "comment", resource_identity,
+update_key }`. The stored result is `{ update_key, actor_id }`. Before the first
+post on a link with no succeeded reply of any project, Intake reads the token
+account once with `readTokenAccount` and records `{ actor_id }` in the result of
+the pending request. A reply has no read-back, and its body holds no hidden
+marker. A call that ends with no answer sets the request `failed`. A repeat of a
+`failed` request, and a repeat of a `pending` request with no running call,
+posts again. A repeat of a `succeeded` request answers the stored address and
+posts nothing.
+
+`intake.outbound.reply.match` is a `service` operation with no CLI command and
+no HTTP route. Only the Mission Service calls it; another caller fails an
+assertion. It takes `{ update_key, external_link }` and answers
+`{ succeeded, pending_actor_ids }`. It reads the `github.issue_comment` requests
+of every project and finds the requests of a link by the suffix
+`:<canonical link>` of the request key. `succeeded` is true when the `update_key`
+of the result of a `succeeded` reply request equals `update_key`, on any link.
+`pending_actor_ids` is empty while no reply request of the link is `pending`.
+Otherwise it holds the reply account: `actor_id` of the last `succeeded` reply
+on the link, else the `actor_id` that each `pending` request recorded. It writes
+no row and calls no platform. Admission of the Mission Service uses it to refuse
+the own reply and the reply account during a pending reply.
+
+`intake.action.check` answers a `comment` request evidence with `expected` when
+its outbound request is `succeeded`, and with `none` while the request is
+`pending` or `failed`. It calls no platform.
+
 `intake.action.merge` is a service operation that only the Mission Service
 calls. It takes `{ evidence_id, commit, request_key }` and merges the pull
 request of the request evidence with no execution claim. It merges only while
@@ -495,6 +545,36 @@ It answers the pull request address, or a result class answer with the code
 Before the merge, the action performer reads the required checks with `github-pull-request-required-check-get`. While a required check of the head commit is pending or failed, it requests no merge. When the read fails or answers an unexpected body, it requests no merge. The deferred check of the Mission Service can then request the merge.
 
 Only the Mission Service calls it, for the execution caller of `mission.assessment.submit`. `intake.execution.gate_files.read` runs for an execution caller and takes `{ binding_id, base_branch, commit }`. Intake keeps one bare repository for each binding at `intake/repositories/<binding id>.git` of the server state directory and reuses it. It fetches the commits of the base branch and the commit with `--filter=tree:0` and the SSH identity of the binding. It fetches each tree and blob that a read needs on demand. It reads `.kanthord/affected-tests.json` at the base branch. A path of its `gate_files` is changed when its mode or its object at the merge base differs from its mode or its object at the commit. A new path and a removed path are changed. A declared directory is changed when any entry below it changes. The answer is `{ paths }`. A git failure answers `502` with the git code and removes the bare repository, except after a deadline. A declaration that does not match the declaration shape of the worker, or that holds a path of `gate_files` that is not canonical, answers `502` `repository.gate_declaration.invalid`. The Intake Service keeps the bare repository for this error.
+
+`intake.inbound.event.describe` is a `service` operation with no CLI command
+and no HTTP route. The Worker Service and the Mission Service call it; another
+caller fails an assertion. The Mission Service calls it for `mission inbox-item
+list` and `mission inbox-item done`, outside its own transaction. It takes `{ inbound_event_id }`, reads the stored event and its
+inbound in one read transaction, and calls the description of the platform
+implementation of the inbound: `describeGitHubEvent` for `github`. It answers
+`{ author, body, url, occurred_at }`. It applies the sensitive text rule set of
+the engine to `body` and cuts no text. It takes no credential, calls no platform
+and writes no row. An event that the platform implementation does not describe
+answers four `null` fields. An unknown or deleted event answers `404`
+`intake.inbound.event.not_found`.
+
+`intake.link.read` is a `service` operation with no CLI command and no HTTP
+route. Only the Mission Service calls it, for `mission.node.check`. It takes
+`{ project_id, external_link, binding_id }`, where `binding_id` is the binding
+revision that the node pins for the link resource. It stores each item under
+the newest inbound of the link resource in the project and answers
+`{ items: { inbound_event_id }[] }`. The call takes one custody release of the
+`credential` of that binding revision and records no outbound request. For
+`github_issue` it calls `listIssueCommentsOf` of the GitHub implementation.
+Each item maps to the event id `issue_comment:<id>` and the metadata
+`{ "event": "issue_comment_listed" }`. An item with an existing event id keeps
+its stored row, and the answer holds the `inbound_event_id` of that row. A link
+resource with no inbound in the project answers `409`
+`intake.link.inbound_missing` with details `{ external_link }` before any
+release. A failed GitHub call answers `502` `repository.platform.github.<class>`
+and stores no row. The Mission Service hands each item to
+`mission.delivery.admit` through the handoff of the Intake Service. The event
+state records the result, and the dispatcher hands no item twice.
 
 ## Output and failure conventions
 
@@ -529,7 +609,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 400   | `repository.platform.github.cursor_page_size_mismatch` | A review comment read names another `limit` than its cursor.                                                                                                                                         | `intake.action.read`                                                                                                                                                                              |
 | 401   | `intake.inbound.event.signature_invalid`               | The webhook post fails verification.                                                                                                                                                                 | receipt route                                                                                                                                                                                     |
 | 403   | `mission.authorization.refused`                        | The Mission Service refuses the protected facility chain; details `{ reason }`.                                                                                                                      | `intake.action.merge`, `intake.action.perform`, `intake.action.read`, `intake.storage.put`, `intake.storage.check`, `intake.storage.get`, `intake.execution.storage.get`, `intake.storage.delete` |
-| 404   | `intake.inbound.event.not_found`                       | No inbound event has that identity.                                                                                                                                                                  | event get, event retry, event discard                                                                                                                                                             |
+| 404   | `intake.inbound.event.not_found`                       | No inbound event has that identity.                                                                                                                                                                  | event get, event retry, event discard, `intake.inbound.event.describe`                                                                                                                            |
 | 404   | `intake.inbound.not_found`                             | No inbound has that identity, or the receipt names a poll inbound.                                                                                                                                   | inbound get, inbound delete, receipt route                                                                                                                                                        |
 | 404   | `intake.inbound.project_not_found`                     | The project of the create does not exist.                                                                                                                                                            | inbound create                                                                                                                                                                                    |
 | 404   | `intake.outbound.request.not_found`                    | No outbound request has that identity.                                                                                                                                                               | outbound get, outbound discard                                                                                                                                                                    |
@@ -538,6 +618,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 409   | `intake.inbound.event.in_flight`                       | The handoff of the pending event runs.                                                                                                                                                               | event discard                                                                                                                                                                                     |
 | 409   | `intake.inbound.event.state_conflict`                  | The event state permits no such transition, or a list names a pending event.                                                                                                                         | event retry, event discard, event delete                                                                                                                                                          |
 | 409   | `intake.inbound.events_pending`                        | The inbound holds a pending event.                                                                                                                                                                   | inbound delete                                                                                                                                                                                    |
+| 409   | `intake.link.inbound_missing`                          | The project holds no inbound of the link resource; details `{ external_link }`.                                                                                                                      | `intake.link.read`, `mission.node.check`                                                                                                                                                          |
 | 409   | `intake.outbound.request.discarded`                    | A repeat names a discarded request.                                                                                                                                                                  | `intake.action.merge`, `intake.action.perform`, `intake.storage.delete`                                                                                                                           |
 | 409   | `intake.outbound.request.in_flight`                    | The call of the request runs.                                                                                                                                                                        | outbound discard, `intake.action.merge`, `intake.action.perform`, `intake.storage.delete`                                                                                                         |
 | 409   | `intake.outbound.request.state_conflict`               | The request is not `pending`, or a delete list names a pending request.                                                                                                                              | outbound discard, outbound delete                                                                                                                                                                 |
@@ -553,7 +634,7 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | 502   | `repository.connector.ssh_agent_failed`                | The private SSH agent of a git operation does not start, or `ssh-add` refuses the key. `intake.action.perform` answers it with `200` and stores it in the request `error` message.                   | `intake.action.check`, `intake.action.perform`, `intake.execution.gate_files.read`                                                                                                                |
 | 502   | `system.context.deadline_exceeded`                     | The SSH agent of a git operation reaches its deadline before the git work starts. `intake.action.perform` answers it with `200` and stores it in the request `error` message.                        | `intake.action.check`, `intake.action.perform`, `intake.execution.gate_files.read`                                                                                                                |
 | 502   | `repository.gate_declaration.invalid`                  | The gate declaration of the base branch does not match the declaration shape of the worker, or a path of `gate_files` is not canonical. The Intake Service keeps the bare repository for this error. | `intake.execution.gate_files.read`                                                                                                                                                                |
-| 502   | `repository.platform.github.<class>`                   | A GitHub call of the check answers a result class; `details.status` holds the GitHub HTTP status when the failure carries one, otherwise null.                                                       | `intake.action.check`                                                                                                                                                                             |
+| 502   | `repository.platform.github.<class>`                   | A GitHub call of the check answers a result class; `details.status` holds the GitHub HTTP status when the failure carries one, otherwise null.                                                       | `intake.action.check`, `intake.link.read`                                                                                                                                                         |
 | 502   | `storage.platform.s3.<class>`                          | An S3 call of the object check or the object delete answers a result class; `details.status` holds the S3 HTTP status when the failure carries one, otherwise null.                                  | `intake.storage.check`, `intake.storage.delete`                                                                                                                                                   |
 | 503   | `intake.inbound.event.capacity_exceeded`               | The count of pending events is at its bound.                                                                                                                                                         | receipt route                                                                                                                                                                                     |
 | 503   | `intake.outbound.request.cli_unavailable`              | The binary of a CLI operation is missing or below its minimum version.                                                                                                                               | a CLI write                                                                                                                                                                                       |

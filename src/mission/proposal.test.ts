@@ -240,6 +240,11 @@ async function fixture(t: TestContext) {
   };
 }
 
+function fixNameOf(item: { content: object }): string {
+  assert.ok("name" in item.content);
+  return String(item.content.name);
+}
+
 function refusal(promise: Promise<unknown>, code: string, field?: string) {
   return assert.rejects(promise, (error) => {
     assert.ok(error instanceof OperationError);
@@ -281,11 +286,34 @@ test("an undetermined proposer assessment records one row per proposal", async (
     assert.equal(item.created_node_id, null);
     assert.equal(item.approved_at, null);
   }
-  assert.deepEqual(page.items.map((item) => item.content.name).sort(), [
+  assert.deepEqual(page.items.map((item) => fixNameOf(item)).sort(), [
     "Fix",
     "Other",
   ]);
   assert.equal((await h.list(SECOND_ATTEMPT)).items.length, NO_PROPOSALS);
+});
+
+test("a follow-up proposal lists with a null assessment_id", async (t) => {
+  const h = await fixture(t);
+  const proposalId = createIdentity("proposal");
+  h.store.transaction((tx) =>
+    insertProposal(tx, {
+      id: proposalId,
+      node_id: h.node_id,
+      attempt: NO_ATTEMPT,
+      assessment_id: null,
+      content: canonicalJSON({ node_revision: FIRST_REVISION }),
+      created_node_id: null,
+      approved_at: null,
+      rejected_at: null,
+      created_at: NOW,
+    }),
+  );
+  const [item] = (await h.list()).items;
+  assert.equal(item?.id, proposalId);
+  assert.equal(item?.assessment_id, null);
+  assert.deepEqual(item?.content, { node_revision: FIRST_REVISION });
+  assert.equal(item?.attempt, NO_ATTEMPT);
 });
 
 test("a decision adds a dependency of the proposer on the created node and routes the proposer to Pending", async (t) => {
@@ -350,7 +378,7 @@ test("a decision approves two of three proposals, rejects the third and unblocks
     h.proposal(h.childId, "Third"),
   ]);
   const byName = new Map(
-    (await h.list()).items.map((item) => [item.content.name, item.id]),
+    (await h.list()).items.map((item) => [fixNameOf(item), item.id]),
   );
   const first = byName.get("First")!;
   const second = byName.get("Second")!;
@@ -491,7 +519,7 @@ test("a decision that takes a used filename is refused and writes nothing", asyn
     h.proposal(h.childId, "Second"),
   ]);
   const byName = new Map(
-    (await h.list()).items.map((item) => [item.content.name, item.id]),
+    (await h.list()).items.map((item) => [fixNameOf(item), item.id]),
   );
   const first = byName.get("First")!;
   const second = byName.get("Second")!;
@@ -757,7 +785,7 @@ test("an approval keeps the linked findings on record and a proposal that the de
     ["B3", FindingRoute.Report],
   ]);
   const first = (await h.list()).items.find(
-    (item) => item.content.name === APPROVED_NAME,
+    (item) => "name" in item.content && item.content.name === APPROVED_NAME,
   )!;
   await h.decide(submitted.assessment.id, [first.id]);
   assert.deepEqual(await h.routes(), [

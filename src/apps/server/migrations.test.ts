@@ -282,6 +282,15 @@ test("each service migration set applies alone to an empty store", () => {
         assert.deepEqual(
           store.database
             .prepare(
+              `SELECT name, "notnull" FROM pragma_table_info('${MISSION_PROPOSAL_TABLE}') WHERE name = 'assessment_id'`,
+            )
+            .all()
+            .map((row) => ({ ...row })),
+          [{ name: "assessment_id", notnull: 0 }],
+        );
+        assert.deepEqual(
+          store.database
+            .prepare(
               `SELECT name FROM pragma_table_info('${MISSION_NODE_TABLE}') ORDER BY cid`,
             )
             .all()
@@ -779,7 +788,7 @@ test("Mission execution records have exactly nine unique indexes with the ruled 
   }
 });
 
-test("Mission link updates hold seven columns and one unique index", (t) => {
+test("Mission link updates hold eleven columns and one unique index", (t) => {
   const store = new Store(IN_MEMORY_DATABASE);
   stopAfter(t, () => store.close());
   store.migrate([
@@ -798,6 +807,10 @@ test("Mission link updates hold seven columns and one unique index", (t) => {
       ["inbound_event_id", "TEXT", 1, 0],
       ["actor_id", "TEXT", 1, 0],
       ["occurred_at", "INTEGER", 1, 0],
+      ["reason", "TEXT", 1, 0],
+      ["binding_id", "TEXT", 0, 0],
+      ["done_at", "INTEGER", 0, 0],
+      ["snoozed_until", "INTEGER", 0, 0],
     ],
   );
   const indexes = store.database

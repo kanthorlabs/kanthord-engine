@@ -20,12 +20,14 @@ import {
   OperationResultType,
 } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
-import type {
-  GitHubAnswer,
-  GitHubCall,
-  GitHubEvent,
-  GitHubEventsAnswer,
-  GitHubEventsQuery,
+import {
+  type GitHubAnswer,
+  type GitHubCall,
+  type GitHubEvent,
+  type GitHubEventsAnswer,
+  type GitHubEventsQuery,
+  type GitHubTarget,
+  GitHubTargetKind,
 } from "../repository/github.ts";
 import {
   Consumer,
@@ -35,6 +37,7 @@ import {
   INTAKE_SERVICE_NAME,
   IntakeErrorCode,
   PLATFORM_CALL_DEADLINE_MS,
+  ResourceKind,
   ResultClass,
 } from "./contract.ts";
 import { insertEvent } from "./event-store.ts";
@@ -66,6 +69,13 @@ const ETAG_FIRST = '"etag-1"';
 const ETAG_SECOND = '"etag-2"';
 const PULLS_ETAG_STORED = '"pulls-0"';
 const PULLS_ETAG_FIRST = '"pulls-1"';
+const COMMENTS_ETAG_STORED = '"comments-0"';
+const COMMENTS_ETAG_FIRST = '"comments-1"';
+const CONVERSATION_IDENTITY = "conversation:github:owner/repo";
+const LINKED_ISSUES = 1;
+const COMMENT_ID_FIRST = 7001;
+const COMMENT_ID_SECOND = 7002;
+const COMMENT_ID_THIRD = 7003;
 const CLOSED_AT = "2026-10-15T03:57:51Z";
 const LATER_CLOSED_AT = "2026-10-15T04:10:00Z";
 const SMALL_LIMIT = 2;
@@ -111,6 +121,7 @@ interface HarnessOptions {
   limit?: number;
   checkpoint?: unknown;
   intervalMs?: number;
+  resourceKind?: ResourceKind;
 }
 
 function ev(id: string, type: string): GitHubEvent {
@@ -118,6 +129,14 @@ function ev(id: string, type: string): GitHubEvent {
     id,
     type,
     body: new Uint8Array(Buffer.from(JSON.stringify({ id, type }))),
+  };
+}
+
+function listedComment(id: number): GitHubEvent {
+  return {
+    id: `issue_comment:${id}`,
+    type: "issue_comment_listed",
+    body: new Uint8Array(Buffer.from(JSON.stringify({ id }))),
   };
 }
 
@@ -145,7 +164,10 @@ function harness(t: TestContext, options: HarnessOptions = {}) {
       platform: InboundPlatform.GitHub,
       consumer: Consumer.MissionDeliveryAdmit,
       credential: CREDENTIAL,
-      configuration: { resource: RESOURCE },
+      configuration: {
+        resource_kind: options.resourceKind ?? ResourceKind.Repository,
+        resource: RESOURCE,
+      },
       checkpoint: options.checkpoint ?? null,
       created_at: 1,
     }),
@@ -436,11 +458,15 @@ function modified(etag: string | null, events: GitHubEvent[]): EventsAnswer {
   return { ok: true, value: { notModified: false, etag, events } };
 }
 
-function counted(count: number): OperationResult<{ count: number }> {
+function counted(
+  count: number,
+  linkCount = NO_REQUESTS,
+  inbox = false,
+): OperationResult<{ count: number; link_count: number; inbox: boolean }> {
   return {
     type: OperationResultType.Completed,
     status: HttpStatus.OK,
-    data: { count },
+    data: { count, link_count: linkCount, inbox },
   };
 }
 
@@ -487,8 +513,16 @@ function cycleHarness(t: TestContext, options: HarnessOptions = {}) {
   const { custody, grants, drops } = fakeCustody();
   const calls: { call: GitHubCall; query: GitHubEventsQuery }[] = [];
   const pullCalls: { call: GitHubCall; query: GitHubEventsQuery }[] = [];
+  const commentCalls: {
+    call: GitHubCall;
+    target: GitHubTarget;
+    query: { etag: string | null };
+  }[] = [];
   const answers: { next: () => Promise<EventsAnswer> } = {
     next: async () => modified(ETAG_FIRST, []),
+  };
+  const commentAnswers: { next: () => Promise<EventsAnswer> } = {
+    next: async () => modified(COMMENTS_ETAG_FIRST, []),
   };
   const pullAnswers: { next: () => Promise<EventsAnswer> } = {
     next: async () => ({ ok: true, value: { notModified: true } }),
@@ -496,7 +530,9 @@ function cycleHarness(t: TestContext, options: HarnessOptions = {}) {
   const demands: {
     inputs: { project_id: string; resource_identity: string }[];
     options: ClientOptions[];
-    next: () => Promise<OperationResult<{ count: number }>>;
+    next: () => Promise<
+      OperationResult<{ count: number; link_count: number; inbox: boolean }>
+    >;
   } = {
     inputs: [],
     options: [],
@@ -519,6 +555,10 @@ function cycleHarness(t: TestContext, options: HarnessOptions = {}) {
         pullCalls.push({ call, query });
         return pullAnswers.next();
       },
+      listIssueComments: async (call, target, query) => {
+        commentCalls.push({ call, target, query });
+        return commentAnswers.next();
+      },
     },
     unresolvedRequests: async (input, options) => {
       demands.inputs.push(input);
@@ -538,8 +578,10 @@ function cycleHarness(t: TestContext, options: HarnessOptions = {}) {
     drops,
     calls,
     pullCalls,
+    commentCalls,
     answers,
     pullAnswers,
+    commentAnswers,
     demands,
     warn,
     wakes,
@@ -755,7 +797,20 @@ function loopHarness(t: TestContext, options: HarnessOptions = {}) {
     h.pullAnswers.next = async () =>
       answers.shift() ?? { ok: true, value: { notModified: true } };
   };
-  return { ...h, loops, interval, elapse, rearmed, script, scriptPulls };
+  const scriptComments = (answers: EventsAnswer[]) => {
+    h.commentAnswers.next = async () =>
+      answers.shift() ?? { ok: true, value: { notModified: true } };
+  };
+  return {
+    ...h,
+    loops,
+    interval,
+    elapse,
+    rearmed,
+    script,
+    scriptPulls,
+    scriptComments,
+  };
 }
 
 function limited(waitMs: number | null): EventsAnswer {
@@ -805,7 +860,10 @@ test("startAll spreads the first cycles of the loops across one interval", async
         platform: InboundPlatform.GitHub,
         consumer: Consumer.MissionDeliveryAdmit,
         credential: CREDENTIAL,
-        configuration: { resource: RESOURCE },
+        configuration: {
+          resource_kind: ResourceKind.Repository,
+          resource: RESOURCE,
+        },
         checkpoint: null,
         created_at: 1,
       }),
@@ -1367,4 +1425,169 @@ test("a count of zero makes neither read", async (t) => {
   await h.cycle();
   assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
   assert.equal(h.pullCalls.length, UNSENT_REQUEST_COUNT);
+});
+
+test("a repository poll with a count of zero makes no request even while a link is counted", async (t) => {
+  const h = cycleHarness(t);
+  h.demands.next = async () => counted(NO_REQUESTS, LINKED_ISSUES);
+  const result = await h.cycle();
+  assert.equal(result.answer, CycleAnswer.Skipped);
+  assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
+  assert.equal(h.pullCalls.length, UNSENT_REQUEST_COUNT);
+  assert.equal(h.commentCalls.length, UNSENT_REQUEST_COUNT);
+  assert.deepEqual(h.grants, []);
+});
+
+test("a repository poll with a count of one makes the two existing reads and no issue comment read", async (t) => {
+  const h = cycleHarness(t);
+  h.demands.next = async () => counted(LINKED_ISSUES, NO_REQUESTS);
+  assert.equal((await h.cycle()).answer, CycleAnswer.Answered);
+  assert.equal(h.calls.length, REQUESTS_PER_CYCLE);
+  assert.equal(h.pullCalls.length, REQUESTS_PER_CYCLE);
+  assert.equal(h.commentCalls.length, UNSENT_REQUEST_COUNT);
+});
+
+test("a conversation poll with a link count of zero makes no request even while a request is counted", async (t) => {
+  const h = cycleHarness(t, { resourceKind: ResourceKind.Conversation });
+  h.demands.next = async () => counted(UNRESOLVED_REQUESTS, NO_REQUESTS);
+  const result = await h.cycle();
+  assert.equal(result.outcome, CycleOutcome.Continue);
+  assert.equal(result.answer, CycleAnswer.Skipped);
+  assert.deepEqual(h.demands.inputs, [
+    { project_id: PROJECT_ID, resource_identity: CONVERSATION_IDENTITY },
+  ]);
+  assert.equal(h.commentCalls.length, UNSENT_REQUEST_COUNT);
+  assert.deepEqual(h.grants, []);
+  assert.equal(h.checkpoint(), null);
+});
+
+test("a conversation poll with a link count of one makes only the issue comment read with the stored ETag", async (t) => {
+  const h = cycleHarness(t, {
+    resourceKind: ResourceKind.Conversation,
+    checkpoint: { comments_etag: COMMENTS_ETAG_STORED },
+  });
+  h.demands.next = async () => counted(NO_REQUESTS, LINKED_ISSUES);
+  assert.equal((await h.cycle()).answer, CycleAnswer.Answered);
+  assert.equal(h.calls.length, UNSENT_REQUEST_COUNT);
+  assert.equal(h.pullCalls.length, UNSENT_REQUEST_COUNT);
+  assert.equal(h.commentCalls.length, REQUESTS_PER_CYCLE);
+  const [{ call, target, query }] = h.commentCalls as [
+    (typeof h.commentCalls)[number],
+  ];
+  assert.deepEqual(target, {
+    kind: GitHubTargetKind.Inbound,
+    resource: RESOURCE,
+  });
+  assert.deepEqual(query, { etag: COMMENTS_ETAG_STORED });
+  assert.equal(call.token, TOKEN);
+  assert.equal(call.requester, SERVICE_IDENTITY);
+  assert.equal(h.grants.length, REQUESTS_PER_CYCLE);
+  assert.deepEqual(h.drops, [CREDENTIAL]);
+});
+
+test("a 200 issue comment read stores one event for each new item, writes comments_etag and wakes", async (t) => {
+  const h = cycleHarness(t, { resourceKind: ResourceKind.Conversation });
+  h.demands.next = async () => counted(NO_REQUESTS, LINKED_ISSUES);
+  h.commentAnswers.next = async () =>
+    modified(COMMENTS_ETAG_FIRST, [
+      listedComment(COMMENT_ID_SECOND),
+      listedComment(COMMENT_ID_FIRST),
+    ]);
+  await h.cycle();
+  assert.deepEqual(h.insertOrder(), [
+    `issue_comment:${COMMENT_ID_FIRST}`,
+    `issue_comment:${COMMENT_ID_SECOND}`,
+  ]);
+  assert.deepEqual(
+    h.events().map((row) => row.metadata),
+    [{ event: "issue_comment_listed" }, { event: "issue_comment_listed" }],
+  );
+  assert.deepEqual(h.checkpoint(), { comments_etag: COMMENTS_ETAG_FIRST });
+  assert.equal(h.wakes.count, WAKES_PER_BATCH);
+});
+
+test("a stored issue comment inserts no second row", async (t) => {
+  const h = cycleHarness(t, { resourceKind: ResourceKind.Conversation });
+  h.demands.next = async () => counted(NO_REQUESTS, LINKED_ISSUES);
+  h.commentAnswers.next = async () =>
+    modified(COMMENTS_ETAG_FIRST, [listedComment(COMMENT_ID_FIRST)]);
+  await h.cycle();
+  const stored = h.insertOrder();
+  h.commentAnswers.next = async () =>
+    modified(COMMENTS_ETAG_STORED, [
+      listedComment(COMMENT_ID_SECOND),
+      listedComment(COMMENT_ID_FIRST),
+    ]);
+  await h.cycle();
+  assert.deepEqual(h.insertOrder(), [
+    ...stored,
+    `issue_comment:${COMMENT_ID_SECOND}`,
+  ]);
+  assert.deepEqual(h.checkpoint(), { comments_etag: COMMENTS_ETAG_STORED });
+});
+
+test("a 304 issue comment read stores nothing", async (t) => {
+  const stored = { comments_etag: COMMENTS_ETAG_STORED };
+  const h = cycleHarness(t, {
+    resourceKind: ResourceKind.Conversation,
+    checkpoint: stored,
+  });
+  h.demands.next = async () => counted(NO_REQUESTS, LINKED_ISSUES);
+  h.commentAnswers.next = async () => unchanged();
+  assert.equal((await h.cycle()).answer, CycleAnswer.Answered);
+  assert.deepEqual(h.eventIds(), []);
+  assert.deepEqual(h.checkpoint(), stored);
+  assert.equal(h.wakes.count, WAKES_WITHOUT_EVENTS);
+});
+
+test("an issue comment page that exceeds the room stores the items that fit and writes a null comments_etag", (t) => {
+  const h = harness(t, {
+    resourceKind: ResourceKind.Conversation,
+    limit: SMALL_LIMIT,
+    checkpoint: { comments_etag: COMMENTS_ETAG_STORED },
+  });
+  h.batch(
+    COMMENTS_ETAG_FIRST,
+    [
+      listedComment(COMMENT_ID_THIRD),
+      listedComment(COMMENT_ID_SECOND),
+      listedComment(COMMENT_ID_FIRST),
+    ],
+    PollRead.IssueComments,
+  );
+  assert.deepEqual(h.insertOrder(), [
+    `issue_comment:${COMMENT_ID_FIRST}`,
+    `issue_comment:${COMMENT_ID_SECOND}`,
+  ]);
+  assert.deepEqual(h.checkpoint(), { comments_etag: null });
+});
+
+test("a secondary rate limit refusal of the issue comment read doubles the wait", async (t) => {
+  const h = loopHarness(t, { resourceKind: ResourceKind.Conversation });
+  h.demands.next = async () => counted(NO_REQUESTS, LINKED_ISSUES);
+  h.scriptComments([limited(null)]);
+  h.loops.start(h.inboundId);
+  h.interval();
+  await reaches(() => h.commentCalls.length, REQUESTS_PER_CYCLE, t.signal);
+  await h.rearmed(REARMS_PER_CYCLE);
+  h.elapse(2 * INTERVAL_MS - TICK_MS);
+  await settle();
+  assert.equal(h.commentCalls.length, REQUESTS_PER_CYCLE);
+  h.elapse(TICK_MS);
+  await reaches(() => h.commentCalls.length, REQUESTS_AFTER_REARM, t.signal);
+});
+
+test("a refusal of the issue comment read that names a wait delays the next cycle until that wait", async (t) => {
+  const h = loopHarness(t, { resourceKind: ResourceKind.Conversation });
+  h.demands.next = async () => counted(NO_REQUESTS, LINKED_ISSUES);
+  h.scriptComments([limited(3 * INTERVAL_MS)]);
+  h.loops.start(h.inboundId);
+  h.interval();
+  await reaches(() => h.commentCalls.length, REQUESTS_PER_CYCLE, t.signal);
+  await h.rearmed(REARMS_PER_CYCLE);
+  h.elapse(3 * INTERVAL_MS - TICK_MS);
+  await settle();
+  assert.equal(h.commentCalls.length, REQUESTS_PER_CYCLE);
+  h.elapse(TICK_MS);
+  await reaches(() => h.commentCalls.length, REQUESTS_AFTER_REARM, t.signal);
 });

@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
@@ -7,11 +8,12 @@ import {
   type DecodedLinkUpdate,
   type ExternalLink,
   ExternalLinkKind,
+  InboxReason,
   Intent,
   NodeState,
   RevisionWrite,
 } from "./contract.ts";
-import { insertLinkUpdate, openAttempt } from "./record-store.ts";
+import { closeAttempt, insertLinkUpdate, openAttempt } from "./record-store.ts";
 import {
   insertNode,
   insertRevision,
@@ -32,6 +34,9 @@ export const LINK_MENTION = "reviewer";
 const NODE_TIME = 100;
 const FIRST_REVISION = 1;
 export const TRUSTED_ACTOR = "9";
+export const INBOX_ACTOR = "583231";
+export const INBOX_HANDLE = "ulrich";
+type Inbox = { actor_id: string; handle: string };
 export const OTHER_ACTOR = "7";
 type BindingRevision = NonNullable<
   ReturnType<MissionBindings["getBindingRevision"]>
@@ -68,6 +73,14 @@ export function linkUpdateHarness(t: TestContext, identity: CallerIdentity) {
     updateCalls: 0,
   };
   const intakeChecks: string[] = [];
+  const replies = {
+    answer: { succeeded: false, pending_actor_ids: [] as string[] },
+    inputs: [] as { update_key: string; external_link: ExternalLink }[],
+  };
+  h.dependencies.intakeLinks.replyMatch = async (_context, input) => {
+    replies.inputs.push(input);
+    return replies.answer;
+  };
   h.dependencies.decoder = {
     decode: () => {
       decoding.addressCalls++;
@@ -133,6 +146,24 @@ export function linkUpdateHarness(t: TestContext, identity: CallerIdentity) {
     });
     return nodeId;
   };
+  const addAttempts = (nodeId: string, count: number) =>
+    h.store.transaction((tx) => {
+      for (let attempt = 1; attempt <= count; attempt++) {
+        openAttempt(
+          tx,
+          nodeId,
+          FIRST_REVISION,
+          { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" },
+          NODE_TIME,
+        );
+        closeAttempt(tx, nodeId, attempt, NODE_TIME);
+      }
+    });
+  const proposals = () =>
+    h.store.database
+      .prepare("SELECT * FROM mission_proposal ORDER BY id")
+      .all()
+      .map((row) => ({ ...row }));
   const pinned: BindingRevision[] = [];
   const reads: string[] = [];
   h.dependencies.bindings.getBindingRevision = (_tx, bindingId) => {
@@ -143,6 +174,7 @@ export function linkUpdateHarness(t: TestContext, identity: CallerIdentity) {
     resource: string,
     actorIds: string[] | undefined,
     revision = FIRST_REVISION,
+    inbox?: Inbox,
   ) => {
     const bindingId = createIdentity("binding");
     pinned.push({
@@ -156,7 +188,25 @@ export function linkUpdateHarness(t: TestContext, identity: CallerIdentity) {
       ...(actorIds === undefined
         ? {}
         : { link_trust: { actor_ids: actorIds } }),
+      ...(inbox === undefined ? {} : { inbox }),
     });
+    return bindingId;
+  };
+  const current: { value: { binding_id: string; inbox: Inbox } | null } = {
+    value: null,
+  };
+  h.dependencies.bindings.conversationInboxOf = (_tx, projectId, resource) => {
+    assert.equal(projectId, h.project_id);
+    return resource === LINK_RESOURCE ? current.value : null;
+  };
+  const writeInbox = (inbox: Inbox | null, revision = FIRST_REVISION) => {
+    const bindingId = addBinding(
+      LINK_RESOURCE,
+      undefined,
+      revision,
+      inbox ?? undefined,
+    );
+    current.value = inbox === null ? null : { binding_id: bindingId, inbox };
     return bindingId;
   };
   const insertUpdate = (
@@ -164,6 +214,10 @@ export function linkUpdateHarness(t: TestContext, identity: CallerIdentity) {
     actorId: string,
     occurredAt: number,
     updateKey = `issue_comment:${occurredAt}:${actorId}`,
+    inbox: { reason: InboxReason; binding_id: string | null } = {
+      reason: InboxReason.Linked,
+      binding_id: null,
+    },
   ) =>
     h.store.transaction((tx) =>
       insertLinkUpdate(tx, {
@@ -173,6 +227,9 @@ export function linkUpdateHarness(t: TestContext, identity: CallerIdentity) {
         inbound_event_id: createIdentity("inbound_event"),
         actor_id: actorId,
         occurred_at: occurredAt,
+        ...inbox,
+        done_at: null,
+        snoozed_until: null,
       }),
     );
   const listed = () =>
@@ -216,9 +273,13 @@ export function linkUpdateHarness(t: TestContext, identity: CallerIdentity) {
   return {
     ...h,
     decoding,
+    replies,
     intakeChecks,
     addNode,
+    addAttempts,
+    proposals,
     addBinding,
+    writeInbox,
     insertUpdate,
     listed,
     listedOf,

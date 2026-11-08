@@ -4,6 +4,7 @@ import { HttpStatus } from "../kernel/http.ts";
 import {
   type ActionContext,
   type ActionOperands,
+  type RepositoryActionEntry,
   TestedInputKind,
   WorkerErrorCode,
 } from "./contract.ts";
@@ -11,7 +12,7 @@ import {
 export function operandsOf(
   nodeBranch: string,
   context: ActionContext,
-  entry: ActionContext["actions"][number],
+  entry: RepositoryActionEntry,
 ): ActionOperands {
   assert.ok(entry.action.key);
   assert.ok(entry.action.configuration.base_branch);

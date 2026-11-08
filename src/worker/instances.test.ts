@@ -306,6 +306,7 @@ function instanceFixture(
       authorizeRequest: unexpected,
       authorizeAction: unexpected,
       actionContextOf: unexpected,
+      linkUpdatesOf: unexpected,
     },
     missionPromptPins: {
       attemptPromptCommits: unexpected,
@@ -335,7 +336,11 @@ function instanceFixture(
         reports.push({ ends, inTransaction: store.database.isTransaction });
       },
     },
-    intakeActions: { perform: unexpected, read: unexpected },
+    intakeActions: {
+      perform: unexpected,
+      read: unexpected,
+      describe: unexpected,
+    },
     evidenceRequests: { request: unexpected },
     custodyHandover: {
       handover: unexpected,

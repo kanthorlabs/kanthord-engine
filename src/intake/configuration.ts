@@ -4,14 +4,17 @@ import {
   type InboundKindValue,
   InboundPlatform,
   type InboundPlatformValue,
+  ResourceKind,
 } from "./contract.ts";
 
 export const GITHUB_RESOURCE_PATTERN = /^[^/\s:]+\/[^/\s:]+$/;
-const RESOURCE_PREFIXES = {
-  [InboundPlatform.GitHub]: "repository:github:",
+const RESOURCE_IDENTITY_SEPARATOR = ":";
+const PLATFORM_SEGMENTS = {
+  [InboundPlatform.GitHub]: "github",
 } as const;
 
 export const githubConfigurationSchema = z.strictObject({
+  resource_kind: z.enum(ResourceKind),
   resource: z.string().regex(GITHUB_RESOURCE_PATTERN),
 });
 
@@ -35,5 +38,9 @@ export function resourceIdentityOf(
   platform: InboundPlatformValue,
   configuration: GitHubConfiguration,
 ): string {
-  return RESOURCE_PREFIXES[platform] + configuration.resource;
+  return [
+    configuration.resource_kind,
+    PLATFORM_SEGMENTS[platform],
+    configuration.resource,
+  ].join(RESOURCE_IDENTITY_SEPARATOR);
 }

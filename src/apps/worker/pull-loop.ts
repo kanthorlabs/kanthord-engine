@@ -20,6 +20,7 @@ import { createIdempotencyKey } from "../../kernel/identity.ts";
 const REGISTRATION_REQUIRED = "gateway.registration.required";
 const CONNECTION_SUPERSEDED = "gateway.jwt.connection_superseded";
 const NO_DELAY = 0;
+export const GATE_POLL_MS = 250;
 export const SETUP_UNAVAILABLE = "setup_unavailable";
 export interface PullLoopInput {
   api: WorkerTransport;
@@ -32,6 +33,7 @@ export interface PullLoopInput {
   register(): Promise<Registration>;
   pulling(task: Promise<unknown>): void;
   claimed(execution: ExecutionRecord): void;
+  gate?(): boolean;
   idle?(): Promise<void>;
   round?(): Context;
 }
@@ -46,6 +48,10 @@ export async function pullLoop(
     if (input.idle) {
       await input.idle();
       if (input.shutdown.signal.aborted) break;
+    }
+    if (input.gate && !input.gate()) {
+      await sleep(GATE_POLL_MS, input.shutdown);
+      continue;
     }
     const round = input.round?.();
     const started = performance.now();

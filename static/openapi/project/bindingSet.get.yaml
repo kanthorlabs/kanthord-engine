@@ -352,6 +352,7 @@ components:
                           type: string
                           minLength: 1
                       link_trust: {}
+                      inbox: {}
                     required:
                       - available
                       - platform
@@ -530,6 +531,7 @@ components:
                               - follows
                             additionalProperties: false
                           link_trust: {}
+                          inbox: {}
                         required:
                           - available
                           - platform
@@ -790,6 +792,7 @@ components:
                               type: string
                               minLength: 1
                           link_trust: {}
+                          inbox: {}
                         required:
                           - available
                           - platform
@@ -960,6 +963,7 @@ components:
                                   - follows
                                 additionalProperties: false
                               link_trust: {}
+                              inbox: {}
                             required:
                               - available
                               - platform

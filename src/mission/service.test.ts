@@ -340,7 +340,11 @@ const pausedDependencies: PausedDependencies = {
 
 const bindings: MissionBindings = {
   storageBindingOf: unexpectedCollaboration,
+  conversationInboxOf: unexpectedCollaboration,
   repositoryPolicyOf() {
+    throw new Error(UNEXPECTED_COLLABORATION);
+  },
+  conversationPolicyOf() {
     throw new Error(UNEXPECTED_COLLABORATION);
   },
   resolveBinding() {
@@ -401,6 +405,14 @@ function makeService(
       merge: unexpectedCollaboration,
     },
     intakeGateFiles: { read: unexpectedCollaboration },
+    intakeLinks: {
+      hasInbound: unexpectedCollaboration,
+      read: unexpectedCollaboration,
+      replyMatch: unexpectedCollaboration,
+      handoff: unexpectedCollaboration,
+      releaseHeld: unexpectedCollaboration,
+      describe: unexpectedCollaboration,
+    },
     decoder: {
       decode: unexpectedCollaboration,
       decodeLinkUpdate: unexpectedCollaboration,

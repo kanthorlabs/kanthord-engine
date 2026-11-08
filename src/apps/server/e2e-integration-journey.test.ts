@@ -8,6 +8,7 @@ import {
   InboundKind,
   InboundPlatform,
   OutboundRequestState,
+  ResourceKind,
 } from "../../intake/contract.ts";
 import { ResourceFailureReason, ResourceStatus } from "../../kernel/health.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
@@ -227,7 +228,7 @@ async function setup(t: TestContext) {
         platform: InboundPlatform.GitHub,
         consumer: Consumer.MissionDeliveryAdmit,
         ...(kind === InboundKind.Poll ? { credential: "github" } : {}),
-        configuration: { resource },
+        configuration: { resource_kind: ResourceKind.Repository, resource },
       },
     );
     return { id: created.id, output: JSON.stringify(created) };

@@ -16,6 +16,7 @@ import {
   AssessmentResult,
   AssetKind,
   type Authorized,
+  ConversationAction,
   type FrozenAction,
   MISSION_SERVICE_NAME,
   type MissionBindings,
@@ -26,9 +27,14 @@ import {
   PlatformAddressKind,
   platformAddressSchema,
   type PullRequestAddress,
+  type ReplyActionFacts,
+  type ReplyFrozenAction,
+  type ReplyRequestFacts,
   RepositoryAction,
   type RepositoryFacts,
+  type RepositoryFrozenAction,
   RepositoryLanding,
+  type RepositoryPlatformAddress,
   type RequestFacts,
   type StorageBinding,
   testedInputSchema,
@@ -205,7 +211,7 @@ const NO_GATE_FILES = 0;
 function repositoryOf(
   tx: Transaction,
   bindings: MissionBindings,
-  action: FrozenAction,
+  action: RepositoryFrozenAction,
 ) {
   const policy = bindings.repositoryPolicyOf(tx, action.binding_id);
   const revision = bindings.getBindingRevision(tx, action.binding_id);
@@ -286,6 +292,62 @@ export function landsByHuman(
   );
 }
 
+function conversationOf(
+  tx: Transaction,
+  bindings: MissionBindings,
+  action: ReplyFrozenAction,
+) {
+  const policy = bindings.conversationPolicyOf(tx, action.binding_id);
+  const revision = bindings.getBindingRevision(tx, action.binding_id);
+  assert.ok(policy && revision);
+  assert.equal(policy.binding_id, action.binding_id);
+  assert.equal(
+    revision.resource_identity,
+    action.configuration.external_link.resource_identity,
+  );
+  return { policy, revision };
+}
+
+function authorizeReply(
+  tx: Transaction,
+  bindings: MissionBindings,
+  claim: ExecutionClaim,
+  action: ReplyFrozenAction,
+  input: {
+    commit: string | null;
+    reusedEvidenceId: string | null;
+    mergeEvidenceId: string | null;
+  },
+): Authorized<ReplyActionFacts> {
+  if (
+    input.commit !== null ||
+    input.reusedEvidenceId !== null ||
+    input.mergeEvidenceId !== null
+  )
+    authorizationRefused(AuthorizationRefusal.NodeMismatch);
+  if (
+    currentAssessmentOf(tx, claim.nodeId, claim.attempt)?.result !==
+    AssessmentResult.Success
+  )
+    authorizationRefused(AuthorizationRefusal.ClaimNotLive);
+  const { policy, revision } = conversationOf(tx, bindings, action);
+  return {
+    credential: policy.credential,
+    platform: policy.platform,
+    project_id: policy.project_id,
+    facts: {
+      frozen_action: action,
+      conversation: {
+        binding_id: policy.binding_id,
+        resource_identity: revision.resource_identity,
+        repository: policy.repository,
+      },
+      node_id: claim.nodeId,
+      attempt: claim.attempt,
+    },
+  };
+}
+
 export function authorizeFrozenAction(
   tx: Transaction,
   dependencies: AuthorizationDependencies,
@@ -293,14 +355,16 @@ export function authorizeFrozenAction(
   claim: ExecutionClaim,
   input: {
     key: string;
-    commit: string;
+    commit: string | null;
     reusedEvidenceId: string | null;
     mergeEvidenceId: string | null;
   },
-): Authorized<ActionFacts> {
+): Authorized<ActionFacts | ReplyActionFacts> {
   assert.equal(identity.kind, IdentityKind.Client);
   assert.equal(identity.projectId, claim.projectId);
   const action = authorizeAction(tx, dependencies, claim, input.key);
+  if (action.action === ConversationAction.Reply)
+    return authorizeReply(tx, dependencies.bindings, claim, action, input);
   const commit = assessedCommitOf(
     tx,
     claim.nodeId,
@@ -364,7 +428,9 @@ export function authorizeFrozenAction(
   };
 }
 
-function mergeLandingAdmitted(action: FrozenAction): void {
+function mergeLandingAdmitted(
+  action: FrozenAction,
+): asserts action is RepositoryFrozenAction {
   assert.ok(action.key);
   if (action.action === RepositoryAction.Push) return;
   if (
@@ -392,14 +458,18 @@ function landingAddressOf(
   action: FrozenAction,
   evidenceId: string,
   resourceIdentity: string,
-): PlatformAddress {
+): RepositoryPlatformAddress {
   assert.ok(resourceIdentity);
   const address = platformAddressOf(tx, evidenceId);
   const kind =
     action.action === RepositoryAction.Push
       ? PlatformAddressKind.BranchPush
       : PlatformAddressKind.PullRequest;
-  if (address.kind !== kind || address.resource_identity !== resourceIdentity)
+  if (
+    address.kind === PlatformAddressKind.Comment ||
+    address.kind !== kind ||
+    address.resource_identity !== resourceIdentity
+  )
     authorizationRefused(AuthorizationRefusal.NodeMismatch);
   return address;
 }
@@ -411,7 +481,7 @@ function mergeAddressOf(
   action: FrozenAction,
   evidenceId: string,
   resourceIdentity: string,
-): PlatformAddress {
+): RepositoryPlatformAddress {
   mergeLandingAdmitted(action);
   gateFilesUnchanged(tx, nodeId, attempt, action.binding_id);
   const evidence = readEvidence(tx, evidenceId);
@@ -522,13 +592,41 @@ function authorizeRequestOf(
   return authorizeRequest(tx, dependencies, evidenceId, claim);
 }
 
+function authorizeReplyRequest(
+  tx: Transaction,
+  bindings: MissionBindings,
+  evidenceId: string,
+  action: ReplyFrozenAction,
+): Authorized<ReplyRequestFacts> {
+  const { policy, revision } = conversationOf(tx, bindings, action);
+  const address = platformAddressOf(tx, evidenceId);
+  const evidence = readEvidence(tx, evidenceId);
+  assert.ok(evidence);
+  if (
+    address.kind !== PlatformAddressKind.Comment ||
+    address.resource_identity !== revision.resource_identity
+  )
+    authorizationRefused(AuthorizationRefusal.NodeMismatch);
+  return {
+    credential: null,
+    platform: policy.platform,
+    project_id: policy.project_id,
+    facts: {
+      frozen_action: action,
+      address,
+      node_id: evidence.node_id,
+      attempt: evidence.attempt,
+    },
+  };
+}
+
 export function authorizeRequestEvidence(
   tx: Transaction,
   dependencies: AuthorizationDependencies,
   identity: CallerIdentity,
   evidenceId: string,
   claim: ExecutionClaim | null,
-): Authorized<RequestFacts> {
+): Authorized<RequestFacts | ReplyRequestFacts> {
   assert.ok(tx.database.isTransaction);
   assert.ok(evidenceId);
   const action = authorizeRequestOf(
@@ -538,12 +636,15 @@ export function authorizeRequestEvidence(
     evidenceId,
     claim,
   );
+  if (action.action === ConversationAction.Reply)
+    return authorizeReplyRequest(tx, dependencies.bindings, evidenceId, action);
   const { policy, repository, linkTrust } = repositoryOf(
     tx,
     dependencies.bindings,
     action,
   );
   const address = platformAddressOf(tx, evidenceId);
+  assert.ok(address.kind !== PlatformAddressKind.Comment);
   assert.equal(address.resource_identity, repository.resource_identity);
   const evidence = readEvidence(tx, evidenceId);
   assert.ok(evidence);

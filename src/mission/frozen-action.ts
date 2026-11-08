@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  ConversationAction,
   EndState,
   ExpectedEndState,
+  type ExternalLink,
+  externalLinksSchema,
   type FrozenAction,
   frozenActionSchema,
   Intent,
@@ -17,6 +20,7 @@ import { readRevision, type RevisionRow } from "./store.ts";
 
 const bindingIdsSchema = z.array(z.string());
 const RESOURCE_KIND_SEPARATOR = ":";
+const NO_LINKS = 0;
 
 export function requiredActionsOf(
   tx: Transaction,
@@ -60,6 +64,38 @@ function bindingActionOf(
   });
 }
 
+function replyActionsOf(
+  tx: Transaction,
+  bindings: MissionBindings,
+  bindingId: string,
+  links: readonly ExternalLink[],
+): FrozenAction[] {
+  const binding = bindings.getBindingRevision(tx, bindingId);
+  assert.ok(binding);
+  if (
+    binding.resource_identity.split(RESOURCE_KIND_SEPARATOR)[0] !==
+    MissionBindingKind.Conversation
+  )
+    return [];
+  const policy = bindings.conversationPolicyOf(tx, bindingId);
+  if (!policy) return [];
+  assert.equal(policy.binding_id, bindingId);
+  return links.flatMap((link, position) =>
+    link.resource_identity === binding.resource_identity
+      ? [
+          frozenActionSchema.parse({
+            key: `${policy.key}.${position}`,
+            binding_id: bindingId,
+            action: ConversationAction.Reply,
+            expected_end_state: ExpectedEndState.Posted,
+            follows: null,
+            configuration: { external_link: link },
+          }),
+        ]
+      : [],
+  );
+}
+
 export function actionsOfRevision(
   tx: Transaction,
   bindings: MissionBindings,
@@ -68,6 +104,7 @@ export function actionsOfRevision(
 ): FrozenAction[] {
   if (revision.intent === Intent.Examine) return [];
   const found: FrozenAction[] = [];
+  const links = externalLinksSchema.parse(JSON.parse(revision.external_links));
   for (const bindingId of bindingIdsSchema.parse(
     JSON.parse(revision.bindings),
   )) {
@@ -77,6 +114,8 @@ export function actionsOfRevision(
       actions.set(bindingId, action);
     }
     if (action !== null) found.push(action);
+    if (links.length > NO_LINKS)
+      found.push(...replyActionsOf(tx, bindings, bindingId, links));
   }
   return found.sort((left, right) =>
     left.key < right.key ? -1 : left.key > right.key ? 1 : 0,

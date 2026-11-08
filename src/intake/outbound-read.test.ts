@@ -4,7 +4,13 @@ import pino from "pino";
 import { IdentityKind } from "../kernel/caller.ts";
 import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
+import {
+  type ExternalLink,
+  ExternalLinkKind,
+} from "../kernel/external-link.ts";
 import { HealthRegistry } from "../kernel/health.ts";
+import { testServiceIdentity } from "../kernel/test-identity.ts";
+import { MISSION_SERVICE_NAME } from "../mission/contract.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
@@ -16,10 +22,16 @@ import {
   type OutboundOperationValue,
   OutboundRequestState,
   type OutboundRequestStateValue,
+  replyRequestKey,
 } from "./contract.ts";
 import { IntakeService } from "./index.ts";
 import { intakeMigrations } from "./migrations.ts";
-import { discard, insertPending } from "./outbound-store.ts";
+import {
+  discard,
+  insertPending,
+  recordResult,
+  succeed,
+} from "./outbound-store.ts";
 import { unusedActionDependencies } from "./test-support.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
 
@@ -95,7 +107,53 @@ function harness(t: TestContext) {
       if (options.state === OutboundRequestState.Discarded) discard(tx, id);
       return id;
     });
-  return { list, get, insert };
+  const missionCaller: CallerContext = {
+    ...caller,
+    identity: testServiceIdentity(MISSION_SERVICE_NAME),
+  };
+  const match = async (
+    update_key: string,
+    external_link: ExternalLink = LINK,
+    from: CallerContext = missionCaller,
+  ) => {
+    const operation = intakeOperations["outbound.reply.match"];
+    return operation.output.parse(
+      await registry.get(operation.id).handler(
+        operation.input.parse({
+          params: {},
+          query: {},
+          body: { update_key, external_link },
+        }),
+        from,
+      ),
+    );
+  };
+  const reply = (
+    link: ExternalLink,
+    options: {
+      project_id?: string;
+      attempt: number;
+      result?: unknown;
+      succeeded?: boolean;
+    },
+  ) =>
+    store.transaction((tx) => {
+      const id = insertPending(tx, {
+        project_id: options.project_id ?? PROJECT_ID,
+        operation: OutboundOperation.GitHubIssueComment,
+        request_key: replyRequestKey(NODE_ID, options.attempt, link),
+        credential: null,
+        created_at: CREATED_AT + options.attempt,
+      });
+      if (options.succeeded === true)
+        assert.ok(
+          succeed(tx, id, options.result, [OutboundRequestState.Pending]),
+        );
+      else if (options.result !== undefined)
+        assert.ok(recordResult(tx, id, options.result));
+      return id;
+    });
+  return { list, get, insert, match, reply, caller };
 }
 
 async function refusal(promise: Promise<unknown>): Promise<OperationError> {
@@ -194,4 +252,105 @@ test("a get answers the projection and 404 for an unknown identity", async (t) =
   const error = await refusal(h.get(createIdentity("outbound_request")));
   assert.equal(error.status, HttpStatus.NotFound);
   assert.equal(error.code, NOT_FOUND);
+});
+
+const NODE_ID = "node_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const LINK: ExternalLink = {
+  kind: ExternalLinkKind.GitHubIssue,
+  resource_identity: "conversation:github:acme/app",
+  number: 7,
+};
+const OTHER_LINK: ExternalLink = { ...LINK, number: 8 };
+const REPLY_UPDATE_KEY = "issue_comment:5001";
+const OTHER_UPDATE_KEY = "issue_comment:5002";
+const REPLY_ACCOUNT = "4242";
+const NEWER_ACCOUNT = "4343";
+const PENDING_ACCOUNT = "4444";
+const FIRST_ATTEMPT = 1;
+const SECOND_ATTEMPT = 2;
+const THIRD_ATTEMPT = 3;
+
+function posted(updateKey: string, actorId: string | null) {
+  return { update_key: updateKey, actor_id: actorId };
+}
+
+test("reply match answers succeeded for the update key of a succeeded reply of any project", async (t) => {
+  const h = harness(t);
+  h.reply(LINK, {
+    project_id: OTHER_PROJECT_ID,
+    attempt: FIRST_ATTEMPT,
+    succeeded: true,
+    result: posted(REPLY_UPDATE_KEY, REPLY_ACCOUNT),
+  });
+  assert.deepEqual(await h.match(REPLY_UPDATE_KEY), {
+    succeeded: true,
+    pending_actor_ids: [],
+  });
+  assert.deepEqual(await h.match(REPLY_UPDATE_KEY, OTHER_LINK), {
+    succeeded: true,
+    pending_actor_ids: [],
+  });
+  assert.deepEqual(await h.match(OTHER_UPDATE_KEY), {
+    succeeded: false,
+    pending_actor_ids: [],
+  });
+});
+
+test("reply match answers the recorded account of a pending reply on the same link", async (t) => {
+  const h = harness(t);
+  h.reply(LINK, {
+    attempt: FIRST_ATTEMPT,
+    result: { actor_id: PENDING_ACCOUNT },
+  });
+  h.reply(OTHER_LINK, {
+    attempt: SECOND_ATTEMPT,
+    result: { actor_id: REPLY_ACCOUNT },
+  });
+  assert.deepEqual(await h.match(OTHER_UPDATE_KEY), {
+    succeeded: false,
+    pending_actor_ids: [PENDING_ACCOUNT],
+  });
+  assert.deepEqual(await h.match(OTHER_UPDATE_KEY, OTHER_LINK), {
+    succeeded: false,
+    pending_actor_ids: [REPLY_ACCOUNT],
+  });
+});
+
+test("reply match prefers the account of the last succeeded reply of the link and sees a pending reply of another project", async (t) => {
+  const h = harness(t);
+  h.reply(LINK, {
+    attempt: FIRST_ATTEMPT,
+    succeeded: true,
+    result: posted(REPLY_UPDATE_KEY, REPLY_ACCOUNT),
+  });
+  h.reply(LINK, {
+    project_id: OTHER_PROJECT_ID,
+    attempt: SECOND_ATTEMPT,
+    succeeded: true,
+    result: posted(OTHER_UPDATE_KEY, NEWER_ACCOUNT),
+  });
+  assert.deepEqual((await h.match("issue_comment:1")).pending_actor_ids, []);
+  h.reply(LINK, {
+    project_id: OTHER_PROJECT_ID,
+    attempt: THIRD_ATTEMPT,
+    result: { actor_id: PENDING_ACCOUNT },
+  });
+  assert.deepEqual(await h.match("issue_comment:1"), {
+    succeeded: false,
+    pending_actor_ids: [NEWER_ACCOUNT],
+  });
+});
+
+test("reply match names no account for a pending reply that recorded none and for a failed reply", async (t) => {
+  const h = harness(t);
+  h.reply(LINK, { attempt: FIRST_ATTEMPT });
+  assert.deepEqual(await h.match(REPLY_UPDATE_KEY), {
+    succeeded: false,
+    pending_actor_ids: [],
+  });
+});
+
+test("reply match refuses a caller that is not the Mission Service", async (t) => {
+  const h = harness(t);
+  await assert.rejects(async () => h.match(REPLY_UPDATE_KEY, LINK, h.caller));
 });

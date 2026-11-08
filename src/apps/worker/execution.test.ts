@@ -46,6 +46,7 @@ const ENDED_RECORD = "execution ended";
 const SESSION_ROOT = "/test/session-root";
 const NO_ENTRIES = 0;
 const ONE_ENTRY = 1;
+const LINK_UPDATE_PAGE_LIMIT = 20;
 const REGISTRATION = {
   runtime_identity: "worker_registration_01ARZ3NDEKTSV4RRFFQ69G5FAA",
   resource_identity: "worker:kanthord:test",
@@ -389,6 +390,65 @@ test("host takes handover before setup and method, discards on every method end"
       );
       assert.equal(held?.size, NO_ENTRIES);
     }
+  }
+  const linkUpdates = { items: [], next_cursor: null, total: NO_ENTRIES };
+  const linkUpdateRequests: unknown[] = [];
+  t.mock.method(
+    api.worker,
+    "execution.link_update.get",
+    async (request: unknown) => {
+      linkUpdateRequests.push(request);
+      return {
+        type: OperationResultType.Completed,
+        status: 200,
+        data: linkUpdates,
+      };
+    },
+  );
+  assert.equal(
+    await hostExecution(input, async (native) => {
+      assert.deepEqual(
+        await native
+          .hostTools(workspace)
+          .linkUpdateList({ limit: LINK_UPDATE_PAGE_LIMIT }, undefined),
+        linkUpdates,
+      );
+      return { kind: "released", furtherWork: false };
+    }),
+    null,
+  );
+  assert.deepEqual(linkUpdateRequests, [
+    {
+      params: { execution_id: claim.execution_id },
+      query: { limit: LINK_UPDATE_PAGE_LIMIT },
+      body: null,
+    },
+  ]);
+  for (const [status, code] of [
+    [403, "gateway.invocation.execution_proof_failed"],
+    [409, "scheduler.execution.not_running"],
+  ] as const) {
+    t.mock.method(api.worker, "execution.link_update.get", async () => ({
+      type: OperationResultType.Failure,
+      status,
+      error: {
+        request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+        error: { code, message: "Ended", details: null },
+      },
+    }));
+    assert.equal(
+      await hostExecution(input, async (native) => {
+        await assert.rejects(
+          native
+            .hostTools(workspace)
+            .linkUpdateList({ limit: LINK_UPDATE_PAGE_LIMIT }, undefined),
+          { code },
+        );
+        assert.ok(native.context.signal.aborted);
+        return { kind: "released", furtherWork: false };
+      }),
+      null,
+    );
   }
   t.mock.method(api.worker, "execution.setup.get", async () => ({
     type: OperationResultType.Failure,
@@ -768,6 +828,9 @@ function refusedSetupHost(
 ) {
   const api = httpTransport("http://127.0.0.1:1");
   const shutdown = new CancellationContext();
+  const realNow = Date.now.bind(Date);
+  let clockJump = 0;
+  t.mock.method(Date, "now", () => realNow() + clockJump);
   const claim = {
     ...testClaim(),
     ...(entry.lifetime === undefined
@@ -818,6 +881,7 @@ function refusedSetupHost(
     "execution.setup.get",
     async (request: { params: unknown }) => {
       setups.push(request.params);
+      clockJump = entry.lifetime ?? 0;
       return entry.setup ?? failureAnswer(refusal);
     },
   );
@@ -936,7 +1000,7 @@ test("a refused setup whose release fails ends the pull loop with the setup code
 });
 
 const SETUP_UNAVAILABLE_RECORD = "worker.execution.setup_unavailable";
-const SHORT_LIFETIME_MS = 300;
+const CLAIM_LIFETIME_MS = 60_000;
 const GATEWAY_ANSWERS = [
   { status: 504, code: "gateway.invocation.timeout", details: null },
   { status: 500, code: "gateway.invocation.unknown", details: null },
@@ -971,7 +1035,7 @@ test("a gateway answer of the setup ends only the execution and the pull loop ta
 test("a setup read that stays indeterminate until expired_at ends only the execution and the pull loop takes the next work", async (t) => {
   const host = refusedSetupHost(t, GATEWAY_ANSWERS[0]!, undefined, {
     setup: { type: OperationResultType.Indeterminate },
-    lifetime: SHORT_LIFETIME_MS,
+    lifetime: CLAIM_LIFETIME_MS,
   });
   assert.equal(await host.running, null);
   assert.equal(host.pulls(), TWO_PULLS);

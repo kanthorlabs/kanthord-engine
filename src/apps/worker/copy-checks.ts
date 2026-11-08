@@ -36,7 +36,9 @@ import {
   LLM_PROVIDERS,
 } from "../../llm/platforms.ts";
 
+import type { CopyKeys } from "./copy-keys.ts";
 import { ExchangeFailure } from "./instance-exchange.ts";
+import { CONFIG_ABSENT } from "./machine-config.ts";
 
 const ZERO_BYTE = 0;
 const NO_TEXT_LENGTH = 0;
@@ -52,7 +54,7 @@ export interface CopyExchange {
 }
 
 export interface CopyChecksOptions {
-  key: InstanceCopyKey;
+  copyKeys: CopyKeys;
   exchange: CopyExchange;
   context: Context;
   providers?: Readonly<Partial<Record<string, LlmProvider>>>;
@@ -141,7 +143,17 @@ export class CopyChecks {
     const { context, exchange } = this.options;
     try {
       const copy = await exchange.sealedCopy(name, context);
-      const report = await this.check(copy);
+      const key = this.options.copyKeys.of(copy.holder);
+      if (key === null) {
+        this.options.log({
+          msg: "Worker instance credential check skipped",
+          credential_name: copy.name,
+          holder: copy.holder,
+          code: CONFIG_ABSENT,
+        });
+        return;
+      }
+      const report = await this.check(copy, key);
       if (context.signal.aborted) return;
       await exchange.copyReport(name, report, context);
     } catch (error) {
@@ -149,12 +161,15 @@ export class CopyChecks {
     }
   }
 
-  private async check(copy: SealedCopyAnswer): Promise<CopyReportBody> {
+  private async check(
+    copy: SealedCopyAnswer,
+    key: InstanceCopyKey,
+  ): Promise<CopyReportBody> {
     const capability = isLlmPlatform(copy.platform)
       ? LLM_PLATFORMS[copy.platform].capability
       : CAPABILITY_NONE;
     let failureReason: ResourceFailureReason | null = null;
-    const checked = await this.probe(copy, (reason, observed) => {
+    const checked = await this.probe(copy, key, (reason, observed) => {
       failureReason = observed;
       this.options.log({
         msg: "Worker instance credential check failed",
@@ -174,6 +189,7 @@ export class CopyChecks {
 
   private async probe(
     copy: SealedCopyAnswer,
+    key: InstanceCopyKey,
     observe: (reason: string, observed: ResourceFailureReason) => void,
   ): Promise<Checked> {
     const unknown: Checked = {
@@ -189,7 +205,7 @@ export class CopyChecks {
       Date.now() + (this.options.timeoutMs ?? PROVIDER_CHECK_TIMEOUT_MS),
     );
     try {
-      const secret = await this.open(copy);
+      const secret = await this.open(copy, key);
       const answer = await Promise.race([
         provider.check(secret, copy.metadata, deadline, observe),
         cancelled(deadline.signal).then(() => unknown.answer),
@@ -211,8 +227,10 @@ export class CopyChecks {
     }
   }
 
-  private async open(copy: SealedCopyAnswer): Promise<unknown> {
-    const { key } = this.options;
+  private async open(
+    copy: SealedCopyAnswer,
+    key: InstanceCopyKey,
+  ): Promise<unknown> {
     const privateKey = key.private_key();
     try {
       return await openJSON(

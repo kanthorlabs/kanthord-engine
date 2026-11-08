@@ -167,10 +167,11 @@ async function instanceProject(t: TestContext) {
     },
   );
   await provisionRepositoryCredentials(fixture);
-  await call(workerOperations["machine.create"], {
+  const machine = await call(workerOperations["machine.create"], {
     ...empty,
     body: { name: MACHINE },
   });
+  assert.ok(machine.machine_configuration);
   const instance = await call(workerOperations["instance.create"], {
     ...empty,
     body: {
@@ -256,6 +257,7 @@ async function instanceProject(t: TestContext) {
     );
   return {
     configuration: instance.instance_configuration,
+    machineConfiguration: machine.machine_configuration,
     endpoint: fixture.endpoint,
     running,
   };
@@ -288,6 +290,7 @@ test(
         XDG_DATA_HOME: join(root, "data"),
         XDG_STATE_HOME: join(root, "state"),
         KANTHORD_WORKER_CONFIG: project.configuration,
+        KANTHORD_MACHINE_CONFIG: project.machineConfiguration,
       },
       connectionName: CONNECTION_A,
       heartbeatIntervalMs: FAST_HEARTBEAT_MS,

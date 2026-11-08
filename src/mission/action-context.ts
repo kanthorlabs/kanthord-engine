@@ -7,13 +7,14 @@ import {
   type MissionBindings,
   PlatformAddressKind,
   platformAddressSchema,
+  type RepositoryPlatformAddress,
   testedInputSchema,
 } from "./contract.ts";
 import { currentAssessmentOf } from "./currency.ts";
 import { actionStatesOf, eligibleUnrequested } from "./frozen-action.ts";
 import { gateFilesOf } from "./gate-files.ts";
-import { readAssets, readRequests } from "./record-store.ts";
-import { readNode } from "./store.ts";
+import { readAssets, readAttempt, readRequests } from "./record-store.ts";
+import { readNode, readRevision } from "./store.ts";
 
 type Candidate = ActionContext["actions"][number]["reuse_candidates"][number];
 const MINIMUM_ATTEMPT = 0;
@@ -36,19 +37,36 @@ function candidatesOf(
     const next = requests.flatMap((request) =>
       readAssets(tx, request.id)
         .filter((asset) => asset.kind === AssetKind.Platform)
-        .map((asset) => ({
-          evidence_id: request.id,
-          attempt: earlier,
-          address: platformAddressSchema.parse(JSON.parse(asset.content)),
-        })),
+        .flatMap((asset) => {
+          const address = platformAddressSchema.parse(
+            JSON.parse(asset.content),
+          );
+          return address.kind === PlatformAddressKind.PullRequest
+            ? [{ evidence_id: request.id, attempt: earlier, address }]
+            : [];
+        }),
     );
     for (const candidate of next) {
-      if (candidate.address.kind !== PlatformAddressKind.PullRequest) continue;
       const address = canonicalJSON(candidate.address);
       if (!candidates.has(address)) candidates.set(address, candidate);
     }
   }
   return [...candidates.values()];
+}
+
+function requestAddressesOf(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number,
+): RepositoryPlatformAddress[] {
+  return readRequests(tx, nodeId, attempt).flatMap((request) =>
+    readAssets(tx, request.id)
+      .filter((asset) => asset.kind === AssetKind.Platform)
+      .flatMap((asset) => {
+        const address = platformAddressSchema.parse(JSON.parse(asset.content));
+        return address.kind === PlatformAddressKind.Comment ? [] : [address];
+      }),
+  );
 }
 
 export function actionContextOf(
@@ -62,12 +80,18 @@ export function actionContextOf(
   assert.ok(Number.isSafeInteger(attempt) && attempt > MINIMUM_ATTEMPT);
   const assessment = currentAssessmentOf(tx, nodeId, attempt);
   assert.ok(assessment === null || assessment.tested_input !== null);
+  const pinned = readAttempt(tx, nodeId, attempt);
+  assert.ok(pinned);
+  const revision = readRevision(tx, nodeId, pinned.node_revision);
+  assert.ok(revision);
   const states = actionStatesOf(tx, dependencies.bindings, nodeId, attempt);
   const eligible = new Set(
     eligibleUnrequested(states).map(({ action }) => action.key),
   );
   return {
     state: node.state,
+    node_name: revision.name,
+    request_addresses: requestAddressesOf(tx, nodeId, attempt),
     current_assessment:
       assessment === null
         ? null

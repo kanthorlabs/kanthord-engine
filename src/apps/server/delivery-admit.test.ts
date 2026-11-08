@@ -3,6 +3,7 @@ import { test, type TestContext } from "node:test";
 import { INTAKE_SERVICE_NAME } from "../../intake/contract.ts";
 import { OperationError } from "../../kernel/errors.ts";
 import { createIdentity } from "../../kernel/identity.ts";
+import { ExternalLinkKind } from "../../kernel/external-link.ts";
 import { canonicalJSON } from "../../kernel/json.ts";
 import { mintServiceIdentity } from "../../kernel/service-mint.ts";
 import {
@@ -796,4 +797,81 @@ test("the composed decodeLinkUpdate answers null for a repository identity and a
     ),
     null,
   );
+});
+
+async function linkedFixture(t: TestContext) {
+  const h = await fixture(t);
+  h.dependencies.decoder = {
+    decode: () => null,
+    decodeLinkUpdate: (input) => missionEventDecoder.decodeLinkUpdate(input),
+  };
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare(
+        "UPDATE mission_node_revision SET external_links = ? WHERE node_id = ?",
+      )
+      .run(
+        canonicalJSON([
+          {
+            kind: ExternalLinkKind.GitHubIssue,
+            resource_identity: CONVERSATION_RESOURCE,
+            number: COMMENT_NUMBER,
+          },
+        ]),
+        h.node_id,
+      ),
+  );
+  const input = commentInput(CONVERSATION_RESOURCE);
+  const admitComment = () =>
+    h.invoke("delivery.admit", {
+      params: {},
+      query: {},
+      body: {
+        inbound_event_id: createIdentity("inbound_event"),
+        project_id: h.project_id,
+        platform: input.platform,
+        resource: input.resource,
+        event: Buffer.from(input.event).toString("base64"),
+        metadata: input.metadata,
+      },
+    });
+  const rows = () =>
+    h.store.transaction(
+      (tx) =>
+        tx.database.prepare("SELECT * FROM mission_link_update").all().length,
+    );
+  return { ...h, admitComment, rows };
+}
+
+test("the listed comment of the own reply reaches admission and answers actor_ignored", async (t) => {
+  const h = await linkedFixture(t);
+  const replies = new Set([COMMENT_UPDATE_KEY]);
+  h.dependencies.intakeLinks.replyMatch = async (_context, input) => ({
+    succeeded: replies.has(input.update_key),
+    pending_actor_ids: [],
+  });
+  assert.deepEqual(await h.admitComment(), {
+    disposition: Disposition.Refused,
+    reason: AdmissionRefusal.ActorIgnored,
+  });
+  assert.equal(h.rows(), NO_CALLS);
+  replies.clear();
+  assert.equal(
+    (await h.admitComment()).disposition,
+    Disposition.AcceptedObservation,
+  );
+  assert.equal(h.rows(), SINGLE_CALL);
+});
+
+test("a comment of the pending reply account answers actor_ignored", async (t) => {
+  const h = await linkedFixture(t);
+  h.dependencies.intakeLinks.replyMatch = async () => ({
+    succeeded: false,
+    pending_actor_ids: [String(COMMENT_USER_ID)],
+  });
+  assert.deepEqual(await h.admitComment(), {
+    disposition: Disposition.Refused,
+    reason: AdmissionRefusal.ActorIgnored,
+  });
+  assert.equal(h.rows(), NO_CALLS);
 });

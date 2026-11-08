@@ -14,6 +14,11 @@ import type { Transaction } from "../kernel/store.ts";
 import type { Context } from "../kernel/context.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
 import { errorSchema } from "../kernel/errors.ts";
+import {
+  type ExternalLink,
+  ExternalLinkKind,
+  externalLinkSchema,
+} from "../kernel/external-link.ts";
 import { tagSchema } from "../kernel/tag.ts";
 import { type FailureCause, failureCauseSchema } from "../kernel/cause.ts";
 import { CommitType } from "../kernel/commit-message.ts";
@@ -51,6 +56,19 @@ export interface MissionBindings {
     action: "pull_request" | "push" | null;
     landing: "human" | "kanthord";
   } | null;
+  conversationPolicyOf(
+    tx: Transaction,
+    bindingId: string,
+  ): {
+    binding_id: string;
+    project_id: string;
+    name: string;
+    key: string;
+    platform: string;
+    repository: string;
+    credential: string;
+    action: "reply";
+  } | null;
   resolveBinding(
     tx: Transaction,
     projectId: string,
@@ -73,6 +91,15 @@ export interface MissionBindings {
     tombstone: boolean;
     disabled: boolean;
     link_trust?: { actor_ids: string[] };
+    inbox?: { actor_id: string; handle: string };
+  } | null;
+  conversationInboxOf(
+    tx: Transaction,
+    projectId: string,
+    resourceIdentity: string,
+  ): {
+    binding_id: string;
+    inbox: { actor_id: string; handle: string };
   } | null;
 }
 
@@ -350,6 +377,40 @@ export interface IntakeGateFiles {
   ): Promise<{ paths: string[] }>;
 }
 
+export interface IntakeLinks {
+  hasInbound(
+    tx: Transaction,
+    projectId: string,
+    resourceIdentity: string,
+  ): boolean;
+  read(
+    context: Context,
+    input: {
+      project_id: string;
+      external_link: ExternalLink;
+      binding_id: string;
+    },
+  ): Promise<{ items: { inbound_event_id: string }[] }>;
+  replyMatch(
+    context: Context,
+    input: { update_key: string; external_link: ExternalLink },
+  ): Promise<{ succeeded: boolean; pending_actor_ids: string[] }>;
+  handoff(
+    context: Context,
+    inboundEventId: string,
+  ): Promise<AdmissionAnswer | null>;
+  releaseHeld(inboundEventIds: readonly string[]): void;
+  describe(
+    context: Context,
+    inboundEventId: string,
+  ): Promise<{
+    author: string | null;
+    body: string | null;
+    url: string | null;
+    occurred_at: number | null;
+  }>;
+}
+
 export interface DecodedLinkUpdate {
   external_link: ExternalLink;
   update_key: string;
@@ -495,6 +556,8 @@ export const MissionErrorCode = {
   ClaimLive: "mission.node.claim_live",
   DeliveryMatchChanged: "mission.delivery.match_changed",
   MissionNotFound: "mission.mission.not_found",
+  InboxItemNotFound: "mission.inbox_item.not_found",
+  InboxItemSnoozeInvalid: "mission.inbox_item.snooze_invalid",
   NodeNotFound: "mission.node.not_found",
   VersionConflict: "mission.version.conflict",
   RevisionConflict: "mission.revision.conflict",
@@ -650,6 +713,9 @@ export const RepositoryAction = {
   PullRequest: "pull_request",
   Push: "push",
 } as const;
+export const ConversationAction = {
+  Reply: "reply",
+} as const;
 export const repositoryActionSchema = z.enum(RepositoryAction);
 export type RepositoryAction = z.infer<typeof repositoryActionSchema>;
 export const RepositoryLanding = {
@@ -659,12 +725,14 @@ export const RepositoryLanding = {
 export const ExpectedEndState = {
   PullRequestMerged: "pull_request_merged",
   BaseBranchPushed: "base_branch_pushed",
+  Posted: "posted",
 } as const;
 export const expectedEndStateSchema = z.enum(ExpectedEndState);
 export type ExpectedEndState = z.infer<typeof expectedEndStateSchema>;
 export const PlatformAddressKind = {
   PullRequest: "pull_request",
   BranchPush: "branch_push",
+  Comment: "comment",
 } as const;
 export const platformAddressKindSchema = z.enum(PlatformAddressKind);
 export type PlatformAddressKind = z.infer<typeof platformAddressKindSchema>;
@@ -698,7 +766,7 @@ export const commitSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 export const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
 export const actionKeySchema = z
   .string()
-  .regex(/^[a-z][a-z0-9-]{0,62}\.(pull_request|push)$/);
+  .regex(/^[a-z][a-z0-9-]{0,62}\.(pull_request|push|reply\.[0-9])$/);
 export const textSchema = z.string().min(1);
 
 export const intentSchema = z.enum(Intent);
@@ -731,20 +799,19 @@ export const tagsSchema = z
   .refine((keys) => new Set(keys).size === keys.length, {
     message: "Tags must be unique.",
   });
-export const ExternalLinkKind = {
-  GitHubIssue: "github_issue",
-} as const;
 export const EXTERNAL_LINK_LIMIT = 10;
-const GITHUB_CONVERSATION_IDENTITY_PATTERN =
-  /^conversation:github:[^/\s:]+\/[^/\s:]+$/;
-export const externalLinkSchema = z.discriminatedUnion("kind", [
-  z.strictObject({
-    kind: z.literal(ExternalLinkKind.GitHubIssue),
-    resource_identity: z.string().regex(GITHUB_CONVERSATION_IDENTITY_PATTERN),
-    number: z.number().int().positive(),
-  }),
-]);
-export type ExternalLink = z.infer<typeof externalLinkSchema>;
+export { type ExternalLink, ExternalLinkKind, externalLinkSchema };
+export const InboxReason = {
+  Linked: "linked",
+  Mentioned: "mentioned",
+  Participating: "participating",
+} as const;
+export type InboxReason = (typeof InboxReason)[keyof typeof InboxReason];
+export const INBOX_REASONS_BY_RANK: readonly InboxReason[] = [
+  InboxReason.Linked,
+  InboxReason.Mentioned,
+  InboxReason.Participating,
+];
 export const linkUpdateRowSchema = z.strictObject({
   id: identitySchema(LINK_UPDATE_IDENTITY_PREFIX),
   mission_id: identitySchema(MISSION_IDENTITY_PREFIX),
@@ -753,6 +820,10 @@ export const linkUpdateRowSchema = z.strictObject({
   inbound_event_id: identitySchema("inbound_event"),
   actor_id: z.string().min(1),
   occurred_at: z.number().int().nonnegative(),
+  reason: z.enum(InboxReason),
+  binding_id: identitySchema("binding").nullable(),
+  done_at: z.number().int().nonnegative().nullable(),
+  snoozed_until: z.number().int().nonnegative().nullable(),
 });
 export type LinkUpdateRow = z.infer<typeof linkUpdateRowSchema>;
 export const linkUpdateSchema = z.strictObject({
@@ -769,6 +840,50 @@ export interface LinkUpdatePage {
   limit?: number;
   cursor?: string;
 }
+export const InboxItemState = {
+  Open: "open",
+  Snoozed: "snoozed",
+  Done: "done",
+} as const;
+export type InboxItemState =
+  (typeof InboxItemState)[keyof typeof InboxItemState];
+export const INBOX_ITEM_LIMIT_MAX = 100;
+export const inboxContentSchema = z.strictObject({
+  author: z.string(),
+  body: z.string(),
+  url: z.string(),
+  occurred_at: timestamp,
+});
+export type InboxContent = z.infer<typeof inboxContentSchema>;
+export const inboxItemSchema = z.strictObject({
+  link_update_id: identitySchema(LINK_UPDATE_IDENTITY_PREFIX),
+  project_id: identitySchema("project"),
+  external_link: externalLinkSchema,
+  reason: z.enum(InboxReason),
+  state: z.enum(InboxItemState),
+  occurred_at: timestamp,
+  done_at: timestamp.nullable(),
+  snoozed_until: timestamp.nullable(),
+  inbound_event_id: identitySchema("inbound_event"),
+  actor_id: z.string().min(1),
+  trusted: z.boolean(),
+  linked_node_ids: z.array(identitySchema(NODE_IDENTITY_PREFIX)),
+  content: inboxContentSchema.nullable(),
+});
+export type InboxItem = z.infer<typeof inboxItemSchema>;
+export const inboxItemListSchema = z.strictObject({
+  items: z.array(inboxItemSchema),
+  next_cursor: z.string().nullable(),
+  counts: z.strictObject({
+    open: z.number().int().nonnegative(),
+    snoozed: z.number().int().nonnegative(),
+  }),
+});
+export type InboxItemList = z.infer<typeof inboxItemListSchema>;
+export const inboxItemDoneSchema = z.strictObject({
+  snoozed_until: timestamp.nullable().optional(),
+});
+export type InboxItemDone = z.infer<typeof inboxItemDoneSchema>;
 export const externalLinksSchema = z
   .array(externalLinkSchema)
   .max(EXTERNAL_LINK_LIMIT)
@@ -1146,8 +1261,17 @@ export const platformAddressSchema = z.discriminatedUnion("kind", [
     branch: textSchema,
     commit: commitSchema,
   }),
+  z.strictObject({
+    kind: z.literal(PlatformAddressKind.Comment),
+    resource_identity: textSchema,
+    update_key: textSchema,
+  }),
 ]);
 export type PlatformAddress = z.infer<typeof platformAddressSchema>;
+export type RepositoryPlatformAddress = Exclude<
+  PlatformAddress,
+  { kind: typeof PlatformAddressKind.Comment }
+>;
 export const addressSchema = z.discriminatedUnion("kind", [
   repositoryAddressSchema,
   producedAddressSchema,
@@ -1175,18 +1299,40 @@ export const verificationSchema = z.strictObject({
   ),
 });
 export type Verification = z.infer<typeof verificationSchema>;
-export const frozenActionSchema = z.strictObject({
+const frozenActionFields = {
   key: actionKeySchema,
   binding_id: identitySchema("binding"),
-  action: repositoryActionSchema,
-  expected_end_state: expectedEndStateSchema,
   follows: actionKeySchema.nullable(),
-  configuration: z.strictObject({
-    base_branch: textSchema,
-    landing: z.enum(RepositoryLanding).default(RepositoryLanding.Human),
+};
+export const frozenActionSchema = z.discriminatedUnion("action", [
+  z.strictObject({
+    ...frozenActionFields,
+    action: repositoryActionSchema,
+    expected_end_state: z.enum([
+      ExpectedEndState.PullRequestMerged,
+      ExpectedEndState.BaseBranchPushed,
+    ]),
+    configuration: z.strictObject({
+      base_branch: textSchema,
+      landing: z.enum(RepositoryLanding).default(RepositoryLanding.Human),
+    }),
   }),
-});
+  z.strictObject({
+    ...frozenActionFields,
+    action: z.literal(ConversationAction.Reply),
+    expected_end_state: z.literal(ExpectedEndState.Posted),
+    configuration: z.strictObject({ external_link: externalLinkSchema }),
+  }),
+]);
 export type FrozenAction = z.infer<typeof frozenActionSchema>;
+export type RepositoryFrozenAction = Extract<
+  FrozenAction,
+  { action: RepositoryAction }
+>;
+export type ReplyFrozenAction = Extract<
+  FrozenAction,
+  { action: typeof ConversationAction.Reply }
+>;
 export type PullRequestAddress = Extract<
   PlatformAddress,
   { kind: typeof PlatformAddressKind.PullRequest }
@@ -1198,21 +1344,40 @@ export type RepositoryFacts = {
   base_branch: string;
 };
 export type ActionFacts = {
-  frozen_action: FrozenAction;
+  frozen_action: RepositoryFrozenAction;
   repository: RepositoryFacts;
   node: { id: string; name: string; commit_type: CommitType };
   snapshot_commit: string;
   reused_address: PullRequestAddress | null;
-  merge_address: PlatformAddress | null;
+  merge_address: RepositoryPlatformAddress | null;
   gate_files: string[];
 };
 export type RequestFacts = {
-  frozen_action: FrozenAction;
-  address: PlatformAddress;
+  frozen_action: RepositoryFrozenAction;
+  address: RepositoryPlatformAddress;
   repository: RepositoryFacts;
   human_landing: boolean;
   assessed_commit: string | null;
   link_trust: { actor_ids: string[] };
+};
+export type ReplyActionFacts = {
+  frozen_action: ReplyFrozenAction;
+  conversation: {
+    binding_id: string;
+    resource_identity: string;
+    repository: string;
+  };
+  node_id: string;
+  attempt: number;
+};
+export type ReplyRequestFacts = {
+  frozen_action: ReplyFrozenAction;
+  address: Extract<
+    PlatformAddress,
+    { kind: typeof PlatformAddressKind.Comment }
+  >;
+  node_id: string;
+  attempt: number;
 };
 export type Authorized<F> = {
   credential: string | null;
@@ -1222,6 +1387,8 @@ export type Authorized<F> = {
 };
 export type ActionContext = {
   state: NodeState;
+  node_name: string;
+  request_addresses: RepositoryPlatformAddress[];
   current_assessment: {
     result: AssessmentResult;
     tested_input: TestedInput;
@@ -1236,7 +1403,7 @@ export type ActionContext = {
     reuse_candidates: {
       evidence_id: string;
       attempt: number;
-      address: PlatformAddress;
+      address: PullRequestAddress;
     }[];
   }[];
 };
@@ -1504,17 +1671,35 @@ export const proposalContentSchema = z.strictObject({
   finding_labels: z.array(z.string()).default([]),
 });
 export type ProposalContent = z.infer<typeof proposalContentSchema>;
-export const proposalSchema = z.strictObject({
+export const followupContentSchema = z.strictObject({
+  node_revision: z.number().int().positive(),
+});
+export type FollowupContent = z.infer<typeof followupContentSchema>;
+const proposalFields = {
   id: identitySchema(PROPOSAL_IDENTITY_PREFIX),
   node_id: identitySchema(NODE_IDENTITY_PREFIX),
   attempt: z.number().int().nonnegative(),
-  assessment_id: identitySchema("assessment"),
-  content: proposalContentSchema,
   created_node_id: identitySchema(NODE_IDENTITY_PREFIX).nullable(),
   approved_at: timestamp.nullable(),
   rejected_at: timestamp.nullable(),
   created_at: timestamp,
+};
+export const fixProposalSchema = z.strictObject({
+  ...proposalFields,
+  assessment_id: identitySchema("assessment"),
+  content: proposalContentSchema,
 });
+export type FixProposal = z.infer<typeof fixProposalSchema>;
+export const followupProposalSchema = z.strictObject({
+  ...proposalFields,
+  assessment_id: z.null(),
+  content: followupContentSchema,
+});
+export type FollowupProposal = z.infer<typeof followupProposalSchema>;
+export const proposalSchema = z.union([
+  fixProposalSchema,
+  followupProposalSchema,
+]);
 export type Proposal = z.infer<typeof proposalSchema>;
 export const proposalDecideSchema = z.strictObject({
   expected_mission_version: z.number().int().positive(),
@@ -1532,6 +1717,21 @@ export const proposalDecideResultSchema = z.strictObject({
   proposer: controlResultSchema,
 });
 export type ProposalDecideResult = z.infer<typeof proposalDecideResultSchema>;
+export const followupDecideSchema = z
+  .strictObject({
+    expected_mission_version: z.number().int().positive(),
+    approve: z.boolean(),
+    requirement: textSchema.optional(),
+    criterion: textSchema.optional(),
+    reason: textSchema.optional(),
+  })
+  .refine(
+    (body) =>
+      body.approve ||
+      (body.requirement === undefined && body.criterion === undefined),
+    { path: ["approve"] },
+  );
+export type FollowupDecide = z.infer<typeof followupDecideSchema>;
 export const FindingKind = {
   Blocker: "blocker",
   Suggestion: "suggestion",
@@ -1802,6 +2002,14 @@ export const nodeCheckResultSchema = z.strictObject({
       error: errorSchema,
     }),
   ),
+  link_updates: z.array(
+    z.strictObject({
+      external_link: externalLinkSchema,
+      admitted: z.number().int().nonnegative(),
+      duplicate: z.number().int().nonnegative(),
+      refused: z.number().int().nonnegative(),
+    }),
+  ),
 });
 export const Disposition = {
   AcceptedObservation: "accepted_observation",
@@ -1907,6 +2115,19 @@ const pageQuery = {
     .optional(),
   cursor: z.string().optional(),
 };
+export const inboxItemQuerySchema = z.strictObject({
+  project_id: identitySchema("project").optional(),
+  state: z.enum(InboxItemState).default(InboxItemState.Open).optional(),
+  cursor: z.string().optional(),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(NODE_LIST_LIMIT_MIN)
+    .max(INBOX_ITEM_LIMIT_MAX)
+    .default(NODE_LIST_LIMIT_DEFAULT)
+    .optional(),
+});
+export type InboxItemQuery = z.infer<typeof inboxItemQuerySchema>;
 const attemptSelector = (minimum: number) =>
   z.preprocess(
     (value) =>
@@ -2129,7 +2350,8 @@ export const missionOperations = {
       body: nodeCheckSchema,
     }),
     output: nodeCheckResultSchema,
-    description: "Check unresolved external requests on demand.",
+    description:
+      "Check unresolved external requests and read each external link of the current revision on demand.",
   },
   "delivery.admit": {
     ...writeOperation,
@@ -2161,6 +2383,7 @@ export const missionOperations = {
     output: z.strictObject({
       count: z.number().int().nonnegative(),
       link_count: z.number().int().nonnegative(),
+      inbox: z.boolean(),
     }),
     description:
       "Count the unresolved request evidences and the live links of a resource for the Intake Service.",
@@ -2415,6 +2638,32 @@ export const missionOperations = {
     description:
       "List the updates of the linked threads of a node from trusted actors, newest first.",
   },
+  "inbox_item.list": {
+    ...readOperation,
+    id: "mission.inbox_item.list",
+    method: HttpMethod.Get,
+    path: "/api/mission/inbox-item",
+    input: readInput(z.strictObject({}), inboxItemQuerySchema),
+    output: inboxItemListSchema,
+    description:
+      "List the inbox threads of the developer with their state, reason, trust and content, oldest first.",
+  },
+  "inbox_item.done": {
+    ...writeOperation,
+    id: "mission.inbox_item.done",
+    method: HttpMethod.Post,
+    path: "/api/mission/inbox-item/:link_update_id/done",
+    input: z.strictObject({
+      params: z.strictObject({
+        link_update_id: identitySchema(LINK_UPDATE_IDENTITY_PREFIX),
+      }),
+      query: z.strictObject({}),
+      body: inboxItemDoneSchema,
+    }),
+    output: inboxItemSchema,
+    description:
+      "Mark an inbox row done, or snooze it until a time. The answer is the item of its thread.",
+  },
   "proposal.decide": {
     ...writeOperation,
     id: "mission.proposal.decide",
@@ -2430,6 +2679,33 @@ export const missionOperations = {
     output: proposalDecideResultSchema,
     description:
       "Decide every fix-node proposal of one assessment: create a fix node for each approved proposal, reject the other open proposals and unblock the proposer once.",
+  },
+  "followup.list": {
+    ...readOperation,
+    id: "mission.followup.list",
+    method: HttpMethod.Get,
+    path: "/api/mission/project/:project_id/followup",
+    input: readInput(
+      z.strictObject({ project_id: identitySchema("project") }),
+      z.strictObject(pageQuery),
+    ),
+    output: pageOf(followupProposalSchema),
+    description:
+      "List the open follow-up proposals of the terminal nodes of a project.",
+  },
+  "followup.decide": {
+    ...writeOperation,
+    id: "mission.followup.decide",
+    method: HttpMethod.Post,
+    path: "/api/mission/node/:node_id/followup/decide",
+    input: z.strictObject({
+      params: z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
+      query: z.strictObject({}),
+      body: followupDecideSchema,
+    }),
+    output: followupProposalSchema,
+    description:
+      "Decide the open follow-up proposal of a terminal node: approve it into a follow-up node with a copy of the revision, or reject it. The answer is the decided proposal.",
   },
   "finding.list": {
     ...readOperation,
