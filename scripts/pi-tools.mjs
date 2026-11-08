@@ -10,8 +10,8 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { basename, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 
@@ -60,9 +60,14 @@ function writeManifest(manifest) {
 }
 
 async function download(url, headers = {}) {
-  const response = await fetch(url, {
-    headers: { "User-Agent": USER_AGENT, ...headers },
-  });
+  let response;
+  try {
+    response = await fetch(url, {
+      headers: { "User-Agent": USER_AGENT, ...headers },
+    });
+  } catch (error) {
+    throw new PiToolsError(`${url}: download failed: ${error.message}`);
+  }
   if (!response.ok)
     throw new PiToolsError(`${url}: download failed with ${response.status}`);
   return Buffer.from(await response.arrayBuffer());
@@ -123,18 +128,66 @@ function hostTarget() {
   return target;
 }
 
+function hostCacheRoot(target) {
+  const configured = process.env.XDG_CACHE_HOME;
+  const base =
+    configured && isAbsolute(configured)
+      ? configured
+      : join(homedir(), ".cache");
+  return join(base, "kanthord", "pi-tools", target);
+}
+
+function toolFiles(root, tool, entry) {
+  return {
+    binary: join(root, "bin", tool),
+    licenses: entry.license_paths.map((path) =>
+      join(root, "licenses", tool, basename(path)),
+    ),
+  };
+}
+
+function isComplete(files, entry) {
+  return (
+    existsSync(files.binary) &&
+    sha256(readFileSync(files.binary)) === entry.binary_sha256 &&
+    files.licenses.every((path) => existsSync(path))
+  );
+}
+
+function publishTool(files, binaryBytes, licenseBytes) {
+  publish(files.binary, binaryBytes, BINARY_MODE);
+  files.licenses.forEach((path, index) =>
+    publish(path, licenseBytes[index], LICENSE_MODE),
+  );
+}
+
+function copyTool(source, destination) {
+  publishTool(
+    destination,
+    readFileSync(source.binary),
+    source.licenses.map((path) => readFileSync(path)),
+  );
+}
+
+function cacheTool(files, binaryBytes, licenseBytes) {
+  try {
+    publishTool(files, binaryBytes, licenseBytes);
+  } catch (error) {
+    console.warn(`pi-tools: host cache not written: ${error.message}`);
+  }
+}
+
 async function fetchTool(tool, entry, target) {
   const root = fileURLToPath(new URL(`${target}/`, OUTPUT_DIRECTORY));
-  const binary = join(root, "bin", tool);
-  const licenses = entry.license_paths.map((path) =>
-    join(root, "licenses", tool, basename(path)),
-  );
-  if (
-    existsSync(binary) &&
-    sha256(readFileSync(binary)) === entry.binary_sha256 &&
-    licenses.every((path) => existsSync(path))
-  ) {
+  const files = toolFiles(root, tool, entry);
+  if (isComplete(files, entry)) {
     console.log(`${tool}: present`);
+    return;
+  }
+  const cached = toolFiles(hostCacheRoot(target), tool, entry);
+  if (isComplete(cached, entry)) {
+    copyTool(cached, files);
+    console.log(`${tool}: cached`);
     return;
   }
   const archive = await download(entry.url);
@@ -146,10 +199,8 @@ async function fetchTool(tool, entry, target) {
   ]);
   if (sha256(binaryBytes) !== entry.binary_sha256)
     throw new PiToolsError(`${tool}: binary digest mismatch`);
-  publish(binary, binaryBytes, BINARY_MODE);
-  licenses.forEach((path, index) =>
-    publish(path, licenseBytes[index], LICENSE_MODE),
-  );
+  publishTool(files, binaryBytes, licenseBytes);
+  cacheTool(cached, binaryBytes, licenseBytes);
   console.log(`${tool}: fetched ${entry.url}`);
 }
 
