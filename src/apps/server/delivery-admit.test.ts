@@ -875,3 +875,143 @@ test("a comment of the pending reply account answers actor_ignored", async (t) =
   });
   assert.equal(h.rows(), NO_CALLS);
 });
+
+const JIRA_RESOURCE_IDENTITY = "conversation:jira:acme.atlassian.net/KD";
+const JIRA_ISSUE_KEY = "KD-42";
+const JIRA_ACCOUNT_ID = "712020:0a1b2c3d-4e5f";
+const JIRA_UPDATE_KEY = "jira_comment:acme.atlassian.net:10042";
+const JIRA_CREATED_MS = Date.UTC(2026, 9, 15, 3, 57, 51, 123);
+
+function jiraCommentDelivery(accountType = "atlassian") {
+  return Buffer.from(
+    JSON.stringify({
+      webhookEvent: "comment_created",
+      issue: { key: JIRA_ISSUE_KEY, fields: { project: { key: "KD" } } },
+      comment: {
+        id: "10042",
+        author: {
+          accountId: JIRA_ACCOUNT_ID,
+          accountType,
+          displayName: "Ada Lovelace",
+        },
+        body: "looks good",
+        created: "2026-10-15T03:57:51.123+0000",
+      },
+    }),
+  );
+}
+
+async function jiraLinkedFixture(t: TestContext) {
+  const h = await fixture(t);
+  h.dependencies.decoder = {
+    decode: () => null,
+    decodeLinkUpdate: (input) => missionEventDecoder.decodeLinkUpdate(input),
+  };
+  h.dependencies.intakeLinks.replyMatch = async () => ({
+    succeeded: false,
+    pending_actor_ids: [],
+  });
+  h.store.transaction((tx) =>
+    tx.database
+      .prepare(
+        "UPDATE mission_node_revision SET external_links = ? WHERE node_id = ?",
+      )
+      .run(
+        canonicalJSON([
+          {
+            kind: ExternalLinkKind.JiraIssue,
+            resource_identity: JIRA_RESOURCE_IDENTITY,
+            key: JIRA_ISSUE_KEY,
+          },
+        ]),
+        h.node_id,
+      ),
+  );
+  const admit = (event: Buffer, eventName = "comment_created") =>
+    h.invoke("delivery.admit", {
+      params: {},
+      query: {},
+      body: {
+        inbound_event_id: createIdentity("inbound_event"),
+        project_id: h.project_id,
+        platform: "jira",
+        resource: JIRA_RESOURCE_IDENTITY,
+        event: event.toString("base64"),
+        metadata: { event: eventName },
+      },
+    });
+  const rows = () =>
+    h.store.transaction(
+      (tx) =>
+        tx.database
+          .prepare(
+            "SELECT external_link, update_key, actor_id, occurred_at FROM mission_link_update",
+          )
+          .all() as {
+          external_link: string;
+          update_key: string;
+          actor_id: string;
+          occurred_at: number;
+        }[],
+    );
+  return { ...h, admit, rows };
+}
+
+test("the composed decodeLinkUpdate answers the link update of a Jira comment_created delivery", () => {
+  assert.deepEqual(
+    missionEventDecoder.decodeLinkUpdate({
+      platform: "jira",
+      resource: JIRA_RESOURCE_IDENTITY,
+      event: jiraCommentDelivery(),
+      metadata: { event: "comment_created" },
+    }),
+    {
+      external_link: {
+        kind: "jira_issue",
+        resource_identity: JIRA_RESOURCE_IDENTITY,
+        key: JIRA_ISSUE_KEY,
+      },
+      update_key: JIRA_UPDATE_KEY,
+      actor_id: JIRA_ACCOUNT_ID,
+      actor_automated: false,
+      occurred_at: JIRA_CREATED_MS,
+      mentions: [],
+    },
+  );
+});
+
+test("a signed comment_created delivery of a listed actor records one link update of a node that links the issue", async (t) => {
+  const h = await jiraLinkedFixture(t);
+  assert.equal(
+    (await h.admit(jiraCommentDelivery())).disposition,
+    Disposition.AcceptedObservation,
+  );
+  const [row, ...others] = h.rows();
+  assert.deepEqual(others, []);
+  assert.deepEqual(JSON.parse(row!.external_link), {
+    kind: ExternalLinkKind.JiraIssue,
+    resource_identity: JIRA_RESOURCE_IDENTITY,
+    key: JIRA_ISSUE_KEY,
+  });
+  assert.equal(row!.update_key, JIRA_UPDATE_KEY);
+  assert.equal(row!.actor_id, JIRA_ACCOUNT_ID);
+  assert.equal(row!.occurred_at, JIRA_CREATED_MS);
+  assert.deepEqual(await h.admit(jiraCommentDelivery()), {
+    disposition: Disposition.Duplicate,
+    reason: null,
+  });
+  assert.equal(h.rows().length, SINGLE_CALL);
+});
+
+test("a Jira comment of an app account answers actor_ignored and another event answers undecodable", async (t) => {
+  const h = await jiraLinkedFixture(t);
+  assert.deepEqual(await h.admit(jiraCommentDelivery("app")), {
+    disposition: Disposition.Refused,
+    reason: AdmissionRefusal.ActorIgnored,
+  });
+  assert.deepEqual(await h.admit(jiraCommentDelivery(), "jira:issue_updated"), {
+    disposition: Disposition.Refused,
+    reason: AdmissionRefusal.Undecodable,
+  });
+  assert.equal(h.rows().length, NO_CALLS);
+});

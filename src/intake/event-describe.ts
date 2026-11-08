@@ -13,20 +13,29 @@ import {
   type InboundPlatformValue,
   IntakeErrorCode,
 } from "./contract.ts";
+import { configurationSchemaOf } from "./configuration.ts";
 import { readEvent } from "./event-store.ts";
 import { redactedText } from "./event-text.ts";
 import { readInbound } from "./inbound-store.ts";
+import { describeJiraEvent } from "./jira.ts";
 
 interface StoredEvent {
   event: Uint8Array;
   metadata: unknown;
   platform: InboundPlatformValue;
+  resource: string;
 }
 
-type Describer = typeof describeGitHubEvent;
+type Describer = (input: StoredEvent) => {
+  author: string;
+  body: string;
+  url: string;
+  occurred_at: number;
+} | null;
 
 const DESCRIBERS: Readonly<Record<InboundPlatformValue, Describer>> = {
   [InboundPlatform.GitHub]: describeGitHubEvent,
+  [InboundPlatform.Jira]: describeJiraEvent,
 };
 
 const NO_DESCRIPTION: DescribedEvent = {
@@ -53,6 +62,9 @@ function readStored(tx: Transaction, id: string): StoredEvent {
     event: row.event,
     metadata: JSON.parse(row.metadata),
     platform: inbound.platform,
+    resource: configurationSchemaOf(inbound.kind, inbound.platform).parse(
+      JSON.parse(inbound.configuration),
+    ).resource,
   };
 }
 

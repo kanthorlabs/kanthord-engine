@@ -6,11 +6,16 @@ import { HttpStatus } from "../kernel/http.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
-import { classifyDelivery, DeliveryKind } from "../repository/github.ts";
+import {
+  classifyDelivery,
+  type DeliveryClassification,
+  DeliveryKind,
+} from "../repository/github.ts";
 import {
   INBOUND_ID_PREFIX,
   InboundKind,
   InboundPlatform,
+  type InboundPlatformValue,
   IntakeErrorCode,
 } from "./contract.ts";
 import {
@@ -20,9 +25,14 @@ import {
   pendingCount,
 } from "./event-store.ts";
 import { readInbound } from "./inbound-store.ts";
+import { classifyJiraDelivery, JIRA_SIGNATURE_HEADER } from "./jira.ts";
 import { webhookSecret } from "./webhook-secret.ts";
 
-const SIGNATURE_HEADER = "x-hub-signature-256";
+const GITHUB_SIGNATURE_HEADER = "x-hub-signature-256";
+const SIGNATURE_HEADERS: Readonly<Record<InboundPlatformValue, string>> = {
+  [InboundPlatform.GitHub]: GITHUB_SIGNATURE_HEADER,
+  [InboundPlatform.Jira]: JIRA_SIGNATURE_HEADER,
+};
 const SIGNATURE_PREFIX = "sha256=";
 const SIGNATURE_DIGEST_PATTERN = /^[0-9a-fA-F]{64}$/;
 const SIGNATURE_ALGORITHM = "sha256";
@@ -52,18 +62,22 @@ function inboundNotFound(): OperationError {
   );
 }
 
-function webhookInboundOf(store: Store, params: unknown): string {
+interface WebhookInbound {
+  id: string;
+  platform: InboundPlatformValue;
+}
+
+function webhookInboundOf(store: Store, params: unknown): WebhookInbound {
   const parsed = receiptParamsSchema.safeParse(params);
   if (!parsed.success) throw inboundNotFound();
   const inboundId = parsed.data.inbound_id;
   const row = store.transaction((tx) => readInbound(tx, inboundId));
   if (row === null || row.kind !== InboundKind.Webhook) throw inboundNotFound();
-  assert.equal(row.platform, InboundPlatform.GitHub);
-  return inboundId;
+  return { id: inboundId, platform: row.platform };
 }
 
-function claimedDigest(headers: Headers): Buffer | null {
-  const value = headers.get(SIGNATURE_HEADER);
+function claimedDigest(headers: Headers, header: string): Buffer | null {
+  const value = headers.get(header);
   if (value === null || value.includes(HEADER_VALUE_SEPARATOR)) return null;
   if (!value.startsWith(SIGNATURE_PREFIX)) return null;
   const digest = value.slice(SIGNATURE_PREFIX.length);
@@ -77,12 +91,13 @@ function verifySignature(
   secret: string,
   bytes: Uint8Array,
   headers: Headers,
+  header: string,
 ): void {
   assert.ok(
     secret.length > EMPTY_TEXT_LENGTH,
     "A verification secret is required.",
   );
-  const claimed = claimedDigest(headers);
+  const claimed = claimedDigest(headers, header);
   const computed = createHmac(SIGNATURE_ALGORITHM, secret)
     .update(bytes)
     .digest();
@@ -115,6 +130,18 @@ function storeEvent(
   return null;
 }
 
+function classifyOf(
+  platform: InboundPlatformValue,
+  headers: Headers,
+  bytes: Uint8Array,
+): DeliveryClassification {
+  if (platform === InboundPlatform.GitHub) return classifyDelivery(headers);
+  const jira = classifyJiraDelivery(headers, bytes);
+  return jira === null
+    ? { kind: DeliveryKind.Invalid }
+    : { kind: DeliveryKind.Event, ...jira };
+}
+
 export function receiveEvent(
   dependencies: ReceiptDependencies,
   caller: CallerContext,
@@ -123,14 +150,15 @@ export function receiveEvent(
   const delivery = caller.delivery;
   assert.ok(delivery, "A receipt requires the exact delivery bytes.");
   assert.equal(caller.identity, undefined);
-  const inboundId = webhookInboundOf(dependencies.store, params);
+  const inbound = webhookInboundOf(dependencies.store, params);
   const bytes = new Uint8Array(delivery.bytes);
   verifySignature(
-    webhookSecret(dependencies.masterKey, inboundId),
+    webhookSecret(dependencies.masterKey, inbound.id),
     bytes,
     delivery.headers,
+    SIGNATURE_HEADERS[inbound.platform],
   );
-  const classification = classifyDelivery(delivery.headers);
+  const classification = classifyOf(inbound.platform, delivery.headers, bytes);
   if (classification.kind === DeliveryKind.Handshake)
     return new Response(null, { status: classification.status });
   if (classification.kind === DeliveryKind.Invalid)
@@ -141,7 +169,7 @@ export function receiveEvent(
     );
   caller.commit((tx) =>
     storeEvent(tx, dependencies.pendingEventLimit, {
-      inbound_id: inboundId,
+      inbound_id: inbound.id,
       event_id: classification.event_id,
       event: bytes,
       metadata: classification.metadata,

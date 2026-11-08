@@ -170,6 +170,7 @@ components:
               type: string
               enum:
                 - github
+                - jira
             consumer:
               type: string
               enum:
@@ -235,6 +236,7 @@ components:
               type: string
               enum:
                 - github
+                - jira
             consumer:
               type: string
               enum:

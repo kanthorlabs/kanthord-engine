@@ -196,3 +196,98 @@ test("a commit failure over HTTP answers 500 and stores nothing", async (t: Test
   assert.equal(codeOf(refused.body), INVOCATION_UNKNOWN);
   assert.equal(storedEvents(fixture, inbound.id).length, NO_ROWS);
 });
+
+const JIRA_COMMENT = JSON.stringify({
+  webhookEvent: "comment_created",
+  issue: { key: "KD-42" },
+  comment: { id: "10042", created: "2026-10-15T03:57:51.123+0000" },
+});
+const JIRA_IDENTIFIER = "jira-hook-1";
+const JIRA_RESOURCE = "acme.atlassian.net/KD";
+
+async function jiraWebhookInbound(fixture: Fixture) {
+  const authorization = `Bearer ${fixture.token}`;
+  const mutation = (path: string, body: unknown) =>
+    fixture.request(path, {
+      method: "POST",
+      headers: {
+        Authorization: authorization,
+        "Content-Type": "application/json",
+        "Idempotency-Key": createIdempotencyKey(),
+      },
+      body: JSON.stringify(body),
+    });
+  const project = projectOperations.create.output.parse(
+    await (
+      await mutation(projectOperations.create.path, { name: "jira-receipts" })
+    ).json(),
+  );
+  const created = intakeOperations["inbound.create"].output.parse(
+    await (
+      await mutation(intakeOperations["inbound.create"].path, {
+        project_id: project.id,
+        kind: "webhook",
+        platform: "jira",
+        consumer: "mission.delivery.admit",
+        configuration: {
+          resource_kind: ResourceKind.Conversation,
+          resource: JIRA_RESOURCE,
+        },
+      })
+    ).json(),
+  );
+  const answer = await fixture.request(`/api/intake/inbound/${created.id}`, {
+    headers: { Authorization: authorization },
+  });
+  assert.equal(answer.status, HttpStatus.OK);
+  return webhookInboundSchema.parse(await answer.json());
+}
+
+function postJira(
+  fixture: Fixture,
+  inbound: { id: string; secret: string },
+  headers: Record<string, string>,
+) {
+  return fixture.request(`/hooks/${inbound.id}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers },
+    body: JIRA_COMMENT,
+  });
+}
+
+test("a signed Jira delivery over HTTP stores once under the webhook identifier", async (t: TestContext) => {
+  const fixture = await gatewayFixture(t);
+  fixture.intake.dispatcher.quiesce();
+  const inbound = await jiraWebhookInbound(fixture);
+  const signature = `sha256=${createHmac("sha256", inbound.secret).update(JIRA_COMMENT).digest("hex")}`;
+  const headers = {
+    "X-Atlassian-Webhook-Identifier": JIRA_IDENTIFIER,
+    "X-Hub-Signature": signature,
+  };
+  const unsigned = await postJira(fixture, inbound, {
+    "X-Atlassian-Webhook-Identifier": JIRA_IDENTIFIER,
+  });
+  assert.equal(unsigned.status, HttpStatus.Unauthorized);
+  assert.equal(
+    codeOf(await unsigned.json()),
+    IntakeErrorCode.InboundEventSignatureInvalid,
+  );
+  const unidentified = await postJira(fixture, inbound, {
+    "X-Hub-Signature": signature,
+  });
+  assert.equal(unidentified.status, HttpStatus.BadRequest);
+  assert.equal(storedEvents(fixture, inbound.id).length, NO_ROWS);
+  for (const attempt of [FIRST_DELIVERY, FIRST_DELIVERY])
+    assert.equal(
+      (await postJira(fixture, inbound, headers)).status,
+      HttpStatus.Accepted,
+      attempt,
+    );
+  const stored = storedEvents(fixture, inbound.id);
+  assert.equal(stored.length, ONE_ROW);
+  assert.equal(stored[0]!.event_id, JIRA_IDENTIFIER);
+  assert.equal(Buffer.from(stored[0]!.event).toString(), JIRA_COMMENT);
+  assert.deepEqual(JSON.parse(stored[0]!.metadata), {
+    event: "comment_created",
+  });
+});

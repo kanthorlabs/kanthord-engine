@@ -80,7 +80,7 @@ export const IntakeErrorCode = {
 } as const;
 
 export const InboundKind = { Webhook: "webhook", Poll: "poll" } as const;
-export const InboundPlatform = { GitHub: "github" } as const;
+export const InboundPlatform = { GitHub: "github", Jira: "jira" } as const;
 export const ResourceKind = {
   Repository: "repository",
   Conversation: "conversation",

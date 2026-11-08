@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { z } from "zod";
 import {
   InboundKind,
@@ -9,8 +10,11 @@ import {
 
 export const GITHUB_RESOURCE_PATTERN = /^[^/\s:]+\/[^/\s:]+$/;
 const RESOURCE_IDENTITY_SEPARATOR = ":";
+export const JIRA_RESOURCE_PATTERN =
+  /^[a-z0-9][a-z0-9-]*\.atlassian\.net\/[A-Z][A-Z0-9_]{1,9}$/;
 const PLATFORM_SEGMENTS = {
   [InboundPlatform.GitHub]: "github",
+  [InboundPlatform.Jira]: "jira",
 } as const;
 
 export const githubConfigurationSchema = z.strictObject({
@@ -20,18 +24,38 @@ export const githubConfigurationSchema = z.strictObject({
 
 export type GitHubConfiguration = z.infer<typeof githubConfigurationSchema>;
 
-const CONFIGURATION_SCHEMAS = {
+export const jiraConfigurationSchema = z.strictObject({
+  resource_kind: z.literal(ResourceKind.Conversation),
+  resource: z.string().regex(JIRA_RESOURCE_PATTERN),
+});
+
+const CONFIGURATION_SCHEMAS: Readonly<
+  Record<
+    InboundKindValue,
+    Partial<Record<InboundPlatformValue, z.ZodType<GitHubConfiguration>>>
+  >
+> = {
   [InboundKind.Webhook]: {
     [InboundPlatform.GitHub]: githubConfigurationSchema,
+    [InboundPlatform.Jira]: jiraConfigurationSchema,
   },
   [InboundKind.Poll]: { [InboundPlatform.GitHub]: githubConfigurationSchema },
-} as const;
+};
+
+export function inboundSupported(
+  kind: InboundKindValue,
+  platform: InboundPlatformValue,
+): boolean {
+  return CONFIGURATION_SCHEMAS[kind][platform] !== undefined;
+}
 
 export function configurationSchemaOf(
   kind: InboundKindValue,
   platform: InboundPlatformValue,
-): typeof githubConfigurationSchema {
-  return CONFIGURATION_SCHEMAS[kind][platform];
+): z.ZodType<GitHubConfiguration> {
+  const schema = CONFIGURATION_SCHEMAS[kind][platform];
+  assert.ok(schema, "The platform supports the inbound kind.");
+  return schema;
 }
 
 export function resourceIdentityOf(
