@@ -949,7 +949,7 @@ function jiraReplyHarness(t: TestContext) {
           postIssueComment: unexpected,
         } as unknown as GitHubPlatform,
         gitWriter: {
-          mergePushFresh: unexpected,
+          squashPushFresh: unexpected,
           pushSnapshotFresh: unexpected,
           landedOn: unexpected,
           changedGateFiles: unexpected,
