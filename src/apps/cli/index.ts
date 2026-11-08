@@ -13,7 +13,10 @@ import {
 } from "../../project/contract.ts";
 import { missionOperations } from "../../mission/contract.ts";
 import { workbenchOperations } from "../../workbench/contract.ts";
-import { intakeOperations } from "../../intake/contract.ts";
+import {
+  intakeCredentialOperations,
+  intakeOperations,
+} from "../../intake/contract.ts";
 import assert from "node:assert/strict";
 import { Command, CommanderError, Option } from "commander";
 import { dirname } from "node:path";
@@ -425,6 +428,7 @@ const apiOperations = [
   ...Object.values(missionOperations),
   ...Object.values(workbenchOperations),
   ...Object.values(intakeOperations),
+  ...Object.values(intakeCredentialOperations),
   ...Object.values(trackingOperations),
   ...Object.values(footprintOperations),
 ];

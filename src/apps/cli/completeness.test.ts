@@ -15,7 +15,10 @@ import {
   projectOperations,
 } from "../../project/contract.ts";
 import { missionOperations } from "../../mission/contract.ts";
-import { intakeOperations } from "../../intake/contract.ts";
+import {
+  intakeCredentialOperations,
+  intakeOperations,
+} from "../../intake/contract.ts";
 import { trackingOperations } from "../../tracking/contract.ts";
 import { footprintOperations } from "../../footprint/contract.ts";
 
@@ -123,13 +126,26 @@ const TOP_LEVEL_NAMES = new Set([
 const OTHER_PAGE = "other";
 const MACHINE_JOIN_PATH = "worker machine join";
 const NO_ITEMS = 0;
-const DOCUMENTED_COUNT = 225;
+const DOCUMENTED_COUNT = 235;
 const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
-const IMPLEMENTED_COUNT = 220;
-const OPERATION_COUNT = 263;
+const IMPLEMENTED_COUNT = 230;
+const OPERATION_COUNT = 273;
+const INTAKE_CREDENTIAL_LEAVES = [
+  "intake credential archive",
+  "intake credential check",
+  "intake credential create",
+  "intake credential get",
+  "intake credential list",
+  "intake credential platforms",
+  "intake credential revoke",
+  "intake credential rotate",
+  "intake credential update-metadata",
+  "intake credential verify",
+];
 const INTAKE_LEAVES = [
+  ...INTAKE_CREDENTIAL_LEAVES,
   "intake event delete",
   "intake event discard",
   "intake event get",
@@ -151,7 +167,7 @@ const PAGE_COUNTS = {
   agent: 15,
   project: 23,
   mission: 69,
-  intake: 13,
+  intake: 23,
   scheduler: 8,
   worker: 22,
   gateway: 3,
@@ -291,6 +307,7 @@ test("documented ERD 2 and ERD 3 CLI leaves and API-only operations exactly cove
     environmentSecretOperations,
     missionOperations,
     intakeOperations,
+    intakeCredentialOperations,
     trackingOperations,
     footprintOperations,
   ]
@@ -300,6 +317,19 @@ test("documented ERD 2 and ERD 3 CLI leaves and API-only operations exactly cove
   assert.deepEqual(
     [...documentedOperations, ...API_ONLY_OPERATIONS].sort(),
     expected,
+  );
+});
+
+test("kanthord intake credential has the ten credential commands", () => {
+  assert.deepEqual(
+    programLeaves(createProgram()).filter((path) =>
+      path.startsWith(`${INTAKE_GROUP} credential `),
+    ),
+    INTAKE_CREDENTIAL_LEAVES,
+  );
+  assert.equal(
+    Object.keys(intakeCredentialOperations).length,
+    INTAKE_CREDENTIAL_LEAVES.length,
   );
 });
 

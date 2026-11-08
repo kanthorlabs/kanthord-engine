@@ -9,6 +9,7 @@ import {
   LIST_LIMIT_MAX,
 } from "../../custody/contract.ts";
 import type { z } from "zod";
+import type { intakeCredentialOperations } from "../../intake/contract.ts";
 import type { llmOperations } from "../../llm/contract.ts";
 import type { repositoryOperations } from "../../repository/contract.ts";
 import type { storageOperations } from "../../storage/contract.ts";
@@ -47,7 +48,10 @@ const LIMIT_INVALID = "cli.pagination.limit_invalid";
 const LIMIT_OUT_OF_RANGE = "cli.pagination.limit_out_of_range";
 
 type CredentialOperations =
-  typeof llmOperations | typeof repositoryOperations | typeof storageOperations;
+  | typeof llmOperations
+  | typeof repositoryOperations
+  | typeof storageOperations
+  | typeof intakeCredentialOperations;
 export type CredentialGroup = {
   name: string;
   description: string;
@@ -469,6 +473,13 @@ export function addCredentialCommand(
       singleUse("--token"),
     );
   component.action(() => component.help());
+  return addCredentialGroup(component, group);
+}
+
+export function addCredentialGroup(
+  component: Command,
+  group: CredentialGroup,
+): Command {
   const credential = component
     .command(CREDENTIAL_GROUP)
     .description("Credential commands");

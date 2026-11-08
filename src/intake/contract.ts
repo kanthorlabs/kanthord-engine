@@ -9,12 +9,14 @@ import { canonicalJSON, timestamp } from "../kernel/json.ts";
 import {
   AccessPolicy,
   type ClientOptions,
+  type Operation,
   OperationLifetime,
   type OperationResult,
   StoreName,
 } from "../kernel/operation.ts";
 import type { ResourceEntry } from "../kernel/health.ts";
 import type { Transaction } from "../kernel/store.ts";
+import { storageOperations } from "../storage/contract.ts";
 
 export const INTAKE_SERVICE_NAME = "intake";
 export const INBOUND_ID_PREFIX = "inbound";
@@ -946,3 +948,81 @@ export const intakeOperations = {
       "Delete the stored object of an evidence asset at its recorded version for a human.",
   },
 } as const;
+
+export const intakeCredentialOperations = {
+  platform_list: {
+    ...storageOperations.platform_list,
+    id: "intake.credential.platform_list",
+    service: INTAKE_SERVICE_NAME,
+    path: "/api/intake/credential/platform",
+    description: "List the intake credential platforms.",
+  },
+  create: {
+    ...storageOperations.create,
+    id: "intake.credential.create",
+    service: INTAKE_SERVICE_NAME,
+    path: "/api/intake/credential",
+    description: "Create an intake credential with its first revision.",
+  },
+  list: {
+    ...storageOperations.list,
+    id: "intake.credential.list",
+    service: INTAKE_SERVICE_NAME,
+    path: "/api/intake/credential",
+    description:
+      "List intake credentials with optional platform filtering and pagination.",
+  },
+  get: {
+    ...storageOperations.get,
+    id: "intake.credential.get",
+    service: INTAKE_SERVICE_NAME,
+    path: "/api/intake/credential/:credential_name",
+    description:
+      "Get an intake credential, all its revisions and the bindings that name it.",
+  },
+  rotate: {
+    ...storageOperations.rotate,
+    id: "intake.credential.rotate",
+    service: INTAKE_SERVICE_NAME,
+    path: "/api/intake/credential/:credential_name/revision",
+    description: "Rotate an intake credential secret into a new revision.",
+  },
+  update_metadata: {
+    ...storageOperations.update_metadata,
+    id: "intake.credential.update_metadata",
+    service: INTAKE_SERVICE_NAME,
+    path: "/api/intake/credential/:credential_name/metadata",
+    description: "Update intake credential metadata in a new revision.",
+  },
+  revoke: {
+    ...storageOperations.revoke,
+    id: "intake.credential.revoke",
+    service: INTAKE_SERVICE_NAME,
+    path: "/api/intake/credential/:credential_name/revision/:revision/revoke",
+    description: "End an older intake credential revision.",
+  },
+  archive: {
+    ...storageOperations.archive,
+    id: "intake.credential.archive",
+    service: INTAKE_SERVICE_NAME,
+    path: "/api/intake/credential/:credential_name/archive",
+    description: "Archive an intake credential that no dependent names.",
+  },
+  check: {
+    ...storageOperations.check,
+    id: "intake.credential.check",
+    service: INTAKE_SERVICE_NAME,
+    path: "/api/intake/credential/check",
+    description: "Check a typed intake credential secret before it is saved.",
+  },
+  verify: {
+    ...storageOperations.verify,
+    id: "intake.credential.verify",
+    service: INTAKE_SERVICE_NAME,
+    path: "/api/intake/credential/:credential_name/verify",
+    description: "Verify one stored intake credential record.",
+  },
+} as const satisfies Record<string, Operation>;
+export type IntakeCredentialAnswer = z.infer<
+  (typeof intakeCredentialOperations)["get"]["output"]
+>;
