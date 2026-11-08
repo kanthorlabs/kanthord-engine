@@ -29,6 +29,7 @@ import {
   resolveBranchCommit,
   squashPushFresh,
 } from "./connector.ts";
+export { pushRefusalOf, PushRefusalKind } from "./git-failure.ts";
 import { RepositoryErrorCode } from "./contract.ts";
 import { GitHubPlatform } from "./github.ts";
 import { knownHostsLine } from "./host-key.ts";

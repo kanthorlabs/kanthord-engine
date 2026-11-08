@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { once } from "node:events";
+import { chmod, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { join } from "node:path";
 import { test, type TestContext } from "node:test";
+import { promisify } from "node:util";
 import pino from "pino";
 import {
   type ActionFacts,
@@ -14,12 +18,21 @@ import { background } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
+import { isolatedGitEnvironment } from "../kernel/git-environment.ts";
 import { testServiceIdentity } from "../kernel/test-identity.ts";
+import { temporary } from "../kernel/test-support.ts";
+import {
+  clone,
+  fetchAndCheckout,
+  pushNodeBranch,
+  squashPushFresh,
+} from "../repository/connector.ts";
 import {
   ExpectedEndState,
   GITHUB_RESULT_CODE_PREFIX,
   GitHubPlatform,
 } from "../repository/github.ts";
+import { GIT_FAILED_CODE, GIT_PUSH_REFUSED } from "./action-check.ts";
 import {
   FOREIGN_MERGE_ANSWER_MESSAGE,
   mergeAction,
@@ -41,6 +54,12 @@ import {
   sshCustody,
   sshStore,
 } from "./test-support.ts";
+import type { SshAccess } from "../repository/ssh-agent.ts";
+import { generateSshKey } from "../repository/ssh-key.ts";
+import {
+  createBareRepository,
+  startTestSshd,
+} from "../repository/sshd-test-support.ts";
 import {
   BaseMovedError,
   GIT_BASE_MOVED,
@@ -70,6 +89,10 @@ const HTTP_OK = 200;
 const HTTP_METHOD_NOT_ALLOWED = 405;
 const HTTP_CONFLICT = 409;
 const ONE_REQUEST = 1;
+const REAL_GIT_DEADLINE_MS = 30_000;
+const REAL_NODE_BRANCH = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const EXECUTABLE_MODE = 0o755;
+const execFileAsync = promisify(execFile);
 const REQUEST_KEY = "request-key";
 
 const Platform = {
@@ -470,4 +493,141 @@ test("a moved base answers confirmed_failure with git.base_moved and a lost push
     ...branchPushAddress,
     commit: LANDED_COMMIT,
   });
+});
+
+const NON_FAST_FORWARD_STDERR = [
+  "To ssh://git@host/repo.git",
+  " ! [rejected]        abc -> main (fetch first)",
+  "error: failed to push some refs",
+].join("\n");
+const RULE_REFUSAL_FIRST_LINE =
+  "remote: error: GH013: Repository rule violations found for refs/heads/main.";
+const RULE_REFUSAL_STDERR = [
+  RULE_REFUSAL_FIRST_LINE,
+  "remote: - Changes must be made through a pull request.",
+  " ! [remote rejected] abc -> main (push declined due to repository rule violations)",
+].join("\n");
+
+function pushRefusal(stderr: string): GitWriteError {
+  return new GitWriteError(
+    GitStage.Push,
+    new Diagnostic(
+      "repository.connector.git_failed",
+      "squash push: git failed.",
+      {
+        cause: new Error(`squash push: git exited with 1: ${stderr}`),
+      },
+    ),
+  );
+}
+
+async function pushLandAnswer(t: TestContext, failure: GitWriteError) {
+  const h = await harness(t, {
+    platform: Platform.Merges,
+    facts: pushFacts,
+    credential: null,
+    gitWriter: {
+      ...gitWriter,
+      sshAccessOf: sshAccessOf(),
+      squashPushFresh: async () => {
+        throw failure;
+      },
+    },
+  });
+  return h.merge();
+}
+
+test("a push land answers retryable_refusal for a non-fast-forward rejection", async (t) => {
+  const answer = await pushLandAnswer(t, pushRefusal(NON_FAST_FORWARD_STDERR));
+  assert.ok("class" in answer, JSON.stringify(answer));
+  assert.equal(answer.class, ResultClass.RetryableRefusal);
+  assert.equal(answer.code, GIT_FAILED_CODE);
+});
+
+test("a push land answers final_refusal with git.push_refused and the first stderr line for GH013", async (t) => {
+  const answer = await pushLandAnswer(t, pushRefusal(RULE_REFUSAL_STDERR));
+  assert.deepEqual(answer, {
+    class: ResultClass.FinalRefusal,
+    code: GIT_PUSH_REFUSED,
+    message: RULE_REFUSAL_FIRST_LINE,
+  });
+});
+
+test("a push land answers final_refusal for a real pre-receive hook that prints GH013", async (t) => {
+  const sshd = await startTestSshd(t);
+  const bare = await createBareRepository(t);
+  const key = generateSshKey("merge");
+  await sshd.authorize(key.public_key);
+  const ssh: SshAccess = {
+    ...key,
+    known_hosts: sshd.known_hosts,
+    port: sshd.port,
+  };
+  const address = sshd.url(bare);
+  const work = join(temporary(t), "work");
+  const deadlineAt = () => Date.now() + REAL_GIT_DEADLINE_MS;
+  const git = (args: string[]) =>
+    execFileAsync("git", args, {
+      cwd: work,
+      env: isolatedGitEnvironment(process.env),
+    });
+  await execFileAsync("mkdir", [work]);
+  await clone(address, work, background, REAL_GIT_DEADLINE_MS, ssh);
+  await fetchAndCheckout(
+    work,
+    REAL_NODE_BRANCH,
+    "main",
+    false,
+    background,
+    REAL_GIT_DEADLINE_MS,
+    ssh,
+  );
+  await writeFile(join(work, "node.md"), "node\n");
+  await git(["add", "node.md"]);
+  await git(["commit", "-q", "-m", "node"]);
+  await pushNodeBranch(
+    work,
+    REAL_NODE_BRANCH,
+    background,
+    REAL_GIT_DEADLINE_MS,
+    ssh,
+  );
+  const commit = (await git(["rev-parse", "HEAD"])).stdout.trim();
+  const hook = join(bare, "hooks", "pre-receive");
+  await writeFile(
+    hook,
+    `#!/bin/sh\necho '${RULE_REFUSAL_FIRST_LINE}' >&2\nexit 1\n`,
+  );
+  await chmod(hook, EXECUTABLE_MODE);
+  const failure = await squashPushFresh(
+    {
+      address,
+      base_branch: "main",
+      commit,
+      node_id: NODE_ID,
+      header: "feat: ship accounts",
+    },
+    background,
+    deadlineAt(),
+    ssh,
+  ).then(
+    () => assert.fail("A refused push must fail."),
+    (error: unknown) => error,
+  );
+  assert.ok(failure instanceof GitWriteError);
+  const answer = await pushLandAnswer(t, failure);
+  assert.ok("class" in answer, JSON.stringify(answer));
+  assert.equal(answer.class, ResultClass.FinalRefusal);
+  assert.equal(answer.code, GIT_PUSH_REFUSED);
+  assert.match(answer.message, /GH013: Repository rule violations/);
+});
+
+test("a push land answers unknown_outcome for another push failure", async (t) => {
+  const answer = await pushLandAnswer(
+    t,
+    pushRefusal("fatal: the remote end hung up unexpectedly"),
+  );
+  assert.ok("class" in answer, JSON.stringify(answer));
+  assert.equal(answer.class, ResultClass.UnknownOutcome);
+  assert.equal(answer.code, GIT_FAILED_CODE);
 });

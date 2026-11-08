@@ -1440,7 +1440,7 @@ test("an affected command that reaches its time limit at the head answers criter
   const review = await reviewOf(t, "true", COMMAND_LIMIT_MS * 2, {
     ...(await affectedSnapshot(
       t,
-      `touch ${marker}; echo hung-output; sleep 1000`,
+      `echo hung-output; touch ${marker}; sleep 1000`,
       "changed",
     )),
     lifetimeMs: COMMAND_LIMIT_MS * 2,
