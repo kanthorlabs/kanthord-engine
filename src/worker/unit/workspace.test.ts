@@ -795,6 +795,8 @@ test("a repository binding without a handed SSH identity takes the relay with th
 
 const ONE_TREE = 1;
 const NEXT_FILE = "next";
+const TRUNK_BRANCH = "trunk";
+const DETACHED_HEAD = "HEAD";
 
 async function reviewFixture(t: test.TestContext) {
   const h = await restartFixture(t);
@@ -923,4 +925,57 @@ test("a review preparation removes residue at the top of the review directory", 
   for (const path of residue) assert.equal(existsSync(path), false);
   assert.deepEqual(readdirSync(key).sort(), [CHECKOUTS_DIRECTORY]);
   h.workspace.release(prepared.key, prepared.kind);
+});
+
+test("a reused review tree holds the local default branch and the current origin/HEAD, as a fresh clone does", async (t) => {
+  const h = await reviewFixture(t);
+  await simpleGit(h.origin).raw(["symbolic-ref", "HEAD", "refs/heads/main"]);
+  const first = await h.review(createIdentity("node"), h.base);
+  h.workspace.release(first.key, first.kind);
+  await h.git.raw(["checkout", "-b", TRUNK_BRANCH]);
+  const trunk = await commit(h.seed, TRUNK_BRANCH, TRUNK_BRANCH);
+  await h.git.push("origin", TRUNK_BRANCH);
+  await simpleGit(h.origin).raw([
+    "symbolic-ref",
+    "HEAD",
+    `refs/heads/${TRUNK_BRANCH}`,
+  ]);
+  const second = await h.review(createIdentity("node"), h.base);
+  assert.deepEqual(
+    h.logs.map(({ fields }) => fields.source),
+    ["clone", "pool"],
+  );
+  const fresh = join(temporary(t), "fresh");
+  await simpleGit().raw(["clone", "--no-checkout", "--", h.origin, fresh]);
+  const refsOf = async (directory: string) => ({
+    heads: (
+      await simpleGit(directory).raw([
+        "for-each-ref",
+        "--format=%(refname) %(objectname) %(upstream)",
+        "refs/heads",
+      ])
+    ).trim(),
+    origin: (
+      await simpleGit(directory).raw([
+        "symbolic-ref",
+        "refs/remotes/origin/HEAD",
+      ])
+    ).trim(),
+  });
+  assert.deepEqual(await refsOf(second.directory), await refsOf(fresh));
+  assert.deepEqual(await refsOf(second.directory), {
+    heads: `refs/heads/${TRUNK_BRANCH} ${trunk} refs/remotes/origin/${TRUNK_BRANCH}`,
+    origin: `refs/remotes/origin/${TRUNK_BRANCH}`,
+  });
+  assert.equal(
+    (await simpleGit(second.directory).revparse(["HEAD"])).trim(),
+    h.base,
+  );
+  assert.equal(
+    (
+      await simpleGit(second.directory).revparse(["--abbrev-ref", "HEAD"])
+    ).trim(),
+    DETACHED_HEAD,
+  );
+  h.workspace.release(second.key, second.kind);
 });

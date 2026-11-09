@@ -50,6 +50,9 @@ const EXCLUDE_PAIR = 2;
 const NO_REMAINDER = 0;
 const ROOT_PREFIX = "/";
 const EXPIRED = 0;
+const REMOTE_HEAD_PATTERN = /^ref: refs\/heads\/(\S+)\tHEAD$/m;
+const ORIGIN_REFS = "refs/remotes/origin/";
+const ORIGIN_HEAD = "refs/remotes/origin/HEAD";
 const TIMEOUT_PLUGIN = "timeout";
 const EMPTY_BYTES = 0;
 const REPOSITORY_FILES_DIRECTORY_PREFIX = "kanthord-repository-files-";
@@ -598,6 +601,7 @@ export async function refreshSnapshot(input: SnapshotRefresh): Promise<string> {
       "+refs/heads/*:refs/remotes/origin/*",
     ]);
     await run(["fetch", "--prune", "--prune-tags", "--tags", "origin"]);
+    await refreshDefaultBranch(run);
     const commit = (
       await run(["rev-parse", "--verify", `${revision}^{commit}`])
     ).trim();
@@ -616,6 +620,28 @@ export async function refreshSnapshot(input: SnapshotRefresh): Promise<string> {
       );
     return commit;
   });
+}
+
+async function refreshDefaultBranch(
+  run: (args: string[]) => Promise<string>,
+): Promise<void> {
+  const branch = REMOTE_HEAD_PATTERN.exec(
+    await run(["ls-remote", "--symref", "origin", "HEAD"]),
+  )?.[1];
+  const tracking = `${ORIGIN_REFS}${branch}`;
+  if (
+    branch === undefined ||
+    !(await run(["for-each-ref", "--format=%(refname)", tracking]))
+      .trim()
+      .split("\n")
+      .includes(tracking)
+  ) {
+    await run(["update-ref", "-d", ORIGIN_HEAD]);
+    return;
+  }
+  await run(["check-ref-format", "--branch", branch]);
+  await run(["symbolic-ref", ORIGIN_HEAD, tracking]);
+  await run(["branch", "--force", "--track", "--", branch, tracking]);
 }
 
 async function runGitExit(

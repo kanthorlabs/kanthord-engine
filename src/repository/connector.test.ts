@@ -2163,6 +2163,25 @@ suite("connector snapshot refresh", { concurrency: SUITE_CONCURRENCY }, () => {
     );
   });
 
+  test("refreshSnapshot drops origin/HEAD and makes no local branch when the remote HEAD names a missing branch", async (t) => {
+    const { origin, snapshot } = await remoteRepository(t);
+    const directory = temporary(t);
+    await simpleGit(origin).raw(["symbolic-ref", "HEAD", "refs/heads/main"]);
+    await snapshotOf(origin, snapshot, directory);
+    await simpleGit(origin).raw(["symbolic-ref", "HEAD", "refs/heads/gone"]);
+    assert.equal(await refresh(origin, snapshot, directory), snapshot);
+    assert.equal(
+      (
+        await simpleGit(directory).raw([
+          "for-each-ref",
+          "--format=%(refname)",
+          "refs/remotes/origin/HEAD",
+        ])
+      ).trim(),
+      EMPTY_REFS,
+    );
+  });
+
   test("refreshSnapshot follows the remote tags and proves a commit that only a tag holds", async (t) => {
     const { origin, seed, base } = await remoteRepository(t);
     const git = simpleGit(seed);
