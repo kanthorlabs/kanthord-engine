@@ -10,27 +10,21 @@ export const timestamp = z
   .max(Number.MAX_SAFE_INTEGER)
   .describe("Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).");
 
-/** RFC 8785: emit members directly, including numeric-looking names. */
-export function canonicalJSON(value: unknown): string {
-  if (value === null) return "null";
-  if (isString(value)) {
-    if (!value.isWellFormed()) throw new TypeError("Invalid Unicode.");
-    return JSON.stringify(value);
+function canonicalString(value: string): string {
+  if (!value.isWellFormed()) throw new TypeError("Invalid Unicode.");
+  return JSON.stringify(value);
+}
+
+function canonicalArray(value: readonly unknown[]): string {
+  const entries: string[] = [];
+  for (let index = 0; index < value.length; index++) {
+    if (!(index in value)) throw new TypeError("Sparse array.");
+    entries.push(canonicalJSON(value[index]));
   }
-  if (typeof value === ValueType.Boolean) return JSON.stringify(value);
-  if (typeof value === ValueType.Number && Number.isFinite(value))
-    return JSON.stringify(value);
-  if (!isObject(value)) throw new TypeError("Expected JSON data.");
-  if ("toJSON" in value)
-    throw new TypeError("Custom serialization is forbidden.");
-  if (Array.isArray(value)) {
-    const entries: string[] = [];
-    for (let index = 0; index < value.length; index++) {
-      if (!(index in value)) throw new TypeError("Sparse array.");
-      entries.push(canonicalJSON(value[index]));
-    }
-    return `[${entries.join(",")}]`;
-  }
+  return `[${entries.join(",")}]`;
+}
+
+function canonicalObject(value: object): string {
   if (
     Object.getPrototypeOf(value) !== Object.prototype &&
     Object.getPrototypeOf(value) !== null
@@ -43,6 +37,20 @@ export function canonicalJSON(value: unknown): string {
         `${canonicalJSON(key)}:${canonicalJSON((value as Record<string, unknown>)[key])}`,
     )
     .join(",")}}`;
+}
+
+/** RFC 8785: emit members directly, including numeric-looking names. */
+export function canonicalJSON(value: unknown): string {
+  if (value === null) return "null";
+  if (isString(value)) return canonicalString(value);
+  if (typeof value === ValueType.Boolean) return JSON.stringify(value);
+  if (typeof value === ValueType.Number && Number.isFinite(value))
+    return JSON.stringify(value);
+  if (!isObject(value)) throw new TypeError("Expected JSON data.");
+  if ("toJSON" in value)
+    throw new TypeError("Custom serialization is forbidden.");
+  if (Array.isArray(value)) return canonicalArray(value);
+  return canonicalObject(value);
 }
 
 export function digest(value: unknown): string {
