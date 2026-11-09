@@ -896,7 +896,6 @@ test("a review preparation removes residue at the top of the review directory", 
 
 test("a reused review tree holds the local default branch and the current origin/HEAD, as a fresh clone does", async (t) => {
   const h = await reviewFixture(t);
-  await simpleGit(h.origin).raw(["symbolic-ref", "HEAD", "refs/heads/main"]);
   const first = await h.review(createIdentity("node"), h.base);
   h.workspace.release(first.key, first.kind);
   await h.git.raw(["checkout", "-b", TRUNK_BRANCH]);
@@ -1383,7 +1382,6 @@ async function refsOf(directory: string, exclude: string) {
 
 test("a pool tree with a commit after the confirmed push starts at the same head and default branch as a fresh clone", async (t) => {
   const h = await coderFixture(t);
-  await simpleGit(h.origin).raw(["symbolic-ref", "HEAD", "refs/heads/main"]);
   const nodeId = createIdentity("node");
   const first = await h.prepare(nodeId);
   await h.commit(first.directory, "work", "pushed");
