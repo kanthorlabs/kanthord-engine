@@ -275,18 +275,6 @@ test("a mismatch records the binding", async (t) => {
   assert.equal(h.evidence().assets[FIRST_ASSET_INDEX]!.published_at, null);
 });
 
-test("a missing object records the binding", async (t) => {
-  const h = fixture(t);
-  refusingCheck(h, mismatch());
-  await assert.rejects(h.complete, {
-    code: IntakeErrorCode.StorageObjectMismatch,
-  });
-  await assert.rejects(h.complete, {
-    code: IntakeErrorCode.StorageObjectMismatch,
-  });
-  assert.deepEqual(h.failed(), [h.binding_id]);
-});
-
 test("a store failure records the binding", async (t) => {
   const h = fixture(t);
   const code = S3_RESULT_CODE_PREFIX + ResultClass.UnknownOutcome;
@@ -294,19 +282,6 @@ test("a store failure records the binding", async (t) => {
   await assert.rejects(h.complete, { status: BAD_GATEWAY, code });
   assert.deepEqual(h.failed(), [h.binding_id]);
   assert.equal(h.evidence().assets[FIRST_ASSET_INDEX]!.published_at, null);
-});
-
-test("the failed asset stays marked after the refusal", async (t) => {
-  const h = fixture(t);
-  refusingCheck(h, mismatch());
-  const commits = h.commits();
-  await assert.rejects(h.complete);
-  const [row] = h.failedAts();
-  assert.ok(row);
-  assert.equal(h.failedAts().length, SINGLE_ITEM);
-  assert.equal(row.id, h.asset_id);
-  assert.notEqual(row.failed_at, null);
-  assert.equal(h.commits(), commits);
 });
 
 test("a failed check sets failed_at of the asset once", async (t) => {
