@@ -74,24 +74,33 @@ export function openFlow(
   };
 }
 
-function addedUsage(
-  state: FlowState,
-  usage: NonNullable<ReturnType<typeof flowFactsOf>["usage"]>,
-): void {
-  const held = state.usage.get(usage.model);
-  const priced = usage.cost_usd > NO_COUNT;
-  const unpriced =
-    !priced && (usage.input_tokens > NO_COUNT || usage.output_tokens > NO_COUNT)
-      ? usage.input_tokens + usage.output_tokens
-      : NO_COUNT;
+const NO_USAGE: FlowUsageSum = {
+  turn_count: NO_COUNT,
+  input_tokens: NO_COUNT,
+  output_tokens: NO_COUNT,
+  cache_read_tokens: NO_COUNT,
+  cost_usd: NO_COUNT,
+  unpriced_tokens: NO_COUNT,
+};
+
+type FlowUsage = NonNullable<ReturnType<typeof flowFactsOf>["usage"]>;
+
+function unpricedTokensOf(usage: FlowUsage): number {
+  if (usage.cost_usd > NO_COUNT) return NO_COUNT;
+  if (usage.input_tokens > NO_COUNT || usage.output_tokens > NO_COUNT)
+    return usage.input_tokens + usage.output_tokens;
+  return NO_COUNT;
+}
+
+function addedUsage(state: FlowState, usage: FlowUsage): void {
+  const held = state.usage.get(usage.model) ?? NO_USAGE;
   state.usage.set(usage.model, {
-    turn_count: (held?.turn_count ?? NO_COUNT) + ONE_COUNT,
-    input_tokens: (held?.input_tokens ?? NO_COUNT) + usage.input_tokens,
-    output_tokens: (held?.output_tokens ?? NO_COUNT) + usage.output_tokens,
-    cache_read_tokens:
-      (held?.cache_read_tokens ?? NO_COUNT) + usage.cache_read_tokens,
-    cost_usd: (held?.cost_usd ?? NO_COUNT) + usage.cost_usd,
-    unpriced_tokens: (held?.unpriced_tokens ?? NO_COUNT) + unpriced,
+    turn_count: held.turn_count + ONE_COUNT,
+    input_tokens: held.input_tokens + usage.input_tokens,
+    output_tokens: held.output_tokens + usage.output_tokens,
+    cache_read_tokens: held.cache_read_tokens + usage.cache_read_tokens,
+    cost_usd: held.cost_usd + usage.cost_usd,
+    unpriced_tokens: held.unpriced_tokens + unpricedTokensOf(usage),
   });
 }
 

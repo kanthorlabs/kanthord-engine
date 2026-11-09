@@ -189,8 +189,7 @@ function isAssessedEnd(trace: FlowTrace): boolean {
   return trace.root_end === ExecutionEnd.Finished && trace.stop_reason === null;
 }
 
-export function exitOf(trace: FlowTrace): FlowExit {
-  if (trace.root_end === null) return FlowExit.Open;
+function assessedExitOf(trace: FlowTrace): FlowExit | null {
   if (
     trace.root_end === ExecutionEnd.Revoked &&
     trace.revoke_cause === RevokeCause.Human
@@ -199,14 +198,27 @@ export function exitOf(trace: FlowTrace): FlowExit {
   if (trace.transition_to === NodeState.Paused) return FlowExit.Paused;
   const outcome = OUTCOME_TRANSITIONS[trace.transition_to ?? NO_VALUE];
   if (isAssessedEnd(trace) && outcome !== undefined) return outcome;
+  return null;
+}
+
+function stoppedExitOf(trace: FlowTrace): FlowExit | null {
   if (trace.stop_reason === FlowStopReason.BudgetEnd) return FlowExit.Budget;
   if (trace.stop_reason !== null || trace.root_end === ExecutionEnd.Lost)
     return FlowExit.Stopped;
+  return null;
+}
+
+function finishedExitOf(trace: FlowTrace): FlowExit {
   if (trace.kind !== FlowKind.Steps || trace.root_end !== ExecutionEnd.Finished)
     return FlowExit.Unknown;
   if (trace.transition_to === NodeState.Available) return FlowExit.FurtherWork;
   if (trace.transition_to === NodeState.Waiting) return FlowExit.HandedOn;
   return FlowExit.Unknown;
+}
+
+export function exitOf(trace: FlowTrace): FlowExit {
+  if (trace.root_end === null) return FlowExit.Open;
+  return assessedExitOf(trace) ?? stoppedExitOf(trace) ?? finishedExitOf(trace);
 }
 
 function isUnobserved(trace: FlowTrace, exit: FlowExit): boolean {
