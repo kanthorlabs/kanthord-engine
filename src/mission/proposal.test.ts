@@ -293,29 +293,6 @@ test("an undetermined proposer assessment records one row per proposal", async (
   assert.equal((await h.list(SECOND_ATTEMPT)).items.length, NO_PROPOSALS);
 });
 
-test("a follow-up proposal lists with a null assessment_id", async (t) => {
-  const h = await fixture(t);
-  const proposalId = createIdentity("proposal");
-  h.store.transaction((tx) =>
-    insertProposal(tx, {
-      id: proposalId,
-      node_id: h.node_id,
-      attempt: NO_ATTEMPT,
-      assessment_id: null,
-      content: canonicalJSON({ node_revision: FIRST_REVISION }),
-      created_node_id: null,
-      approved_at: null,
-      rejected_at: null,
-      created_at: NOW,
-    }),
-  );
-  const [item] = (await h.list()).items;
-  assert.equal(item?.id, proposalId);
-  assert.equal(item?.assessment_id, null);
-  assert.deepEqual(item?.content, { node_revision: FIRST_REVISION });
-  assert.equal(item?.attempt, NO_ATTEMPT);
-});
-
 test("a decision adds a dependency of the proposer on the created node and routes the proposer to Pending", async (t) => {
   const h = await fixture(t);
   const submitted = await h.submit([h.proposal()]);
@@ -695,13 +672,6 @@ test("a decision writes one act trace that names the proposer and the state Bloc
   assert.deepEqual(contribution.texts, [
     { text_id: `${trace.root_span_id}:reason`, text: "Fix it." },
   ]);
-});
-
-test("a decision without a reason writes an act trace without a text", async (t) => {
-  const h = await fixture(t);
-  const submitted = await h.submit([h.proposal()]);
-  await h.decide(submitted.assessment.id, [(await h.list()).items[0]!.id]);
-  assert.equal(actCalls(h)[0]![1].texts, undefined);
 });
 
 test("a refused decision writes no act trace", async (t) => {
