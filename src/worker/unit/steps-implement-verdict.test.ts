@@ -579,6 +579,53 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
       );
   });
 
+  test("regression: K110 a success rework whose turn changes no file completes the node unit with no verdict rule", async (t) => {
+    const { h } = await verdictHarness(t, [fauxAssistantMessage("nothing")]);
+    const head = h.checkouts[0]!.head;
+    const completed = (data: unknown) => ({
+      type: "completed",
+      status: 200,
+      data,
+    });
+    h.run.clients.mission = {
+      ...h.run.clients.mission,
+      "execution.rework_assessment.get": async () =>
+        completed({
+          id: "assessment",
+          result: "success",
+          rationale: VERDICT,
+          round: FIXED_ROUND,
+          tested_input: h.checkouts.map((checkout) => ({
+            kind: "repository",
+            binding_id: checkout.binding_id,
+            commit: checkout.head,
+          })),
+        }),
+      "execution.review_round.get": async () =>
+        completed({
+          round: FIXED_ROUND + 1,
+          final: false,
+          review_base: null,
+          findings: [],
+        }),
+    } as unknown as MethodClients["mission"];
+    h.run.clients.worker = {
+      ...h.run.clients.worker,
+      "execution.failed_check.get": async () => completed({ items: [] }),
+      "execution.link_update.get": async () =>
+        completed({ items: [], next_cursor: null, total: NO_INDEX }),
+    } as unknown as MethodClients["worker"];
+    h.verdict = (await readPrior(h.run, h.input.setup.repositories)).verdict;
+    recordReleases(h);
+    const evidence = recordEvidence(h);
+    assert.deepEqual(
+      await executionBoundary(h.run, () => runStepsImplement(h)),
+      { kind: "released", furtherWork: false },
+    );
+    assert.equal(h.provider.calls.length, ONE_TURN);
+    assert.deepEqual(evidence, [[head]]);
+  });
+
   test("an attempt with only a link update plans the node unit with the link updates text and no verdict rule", async (t) => {
     const { h } = await verdictHarness(t, [fauxAssistantMessage("never")]);
     const completed = (data: unknown) => ({
