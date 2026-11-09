@@ -62,10 +62,14 @@ function usageAttributes(usage: AssistantMessage["usage"]): Attributes {
   };
 }
 
+interface TurnTiming {
+  entryId: string | null;
+  modelDurationMs: number | null;
+}
+
 function turnOptionalAttributes(
   message: AssistantMessage,
-  entryId: string | null,
-  modelDurationMs: number | null,
+  { entryId, modelDurationMs }: TurnTiming,
 ): Attributes {
   const failure =
     message.stopReason === ERROR_STOP
@@ -95,7 +99,7 @@ function turnAttributes(
     "gen_ai.provider.name": message.provider,
     ...usageAttributes(message.usage),
     "gen_ai.response.finish_reasons": [message.stopReason],
-    ...turnOptionalAttributes(message, entryId, modelDurationMs),
+    ...turnOptionalAttributes(message, { entryId, modelDurationMs }),
   };
 }
 
