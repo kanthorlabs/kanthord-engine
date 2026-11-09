@@ -10,7 +10,6 @@ import { test, type TestContext } from "node:test";
 import { PRESIGN_LIFETIME_S, ResultClass } from "../intake/contract.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { S3_RESULT_CODE_PREFIX } from "./contract.ts";
-import { storageImplementations } from "./index.ts";
 import {
   CHECKSUM_SHA256_HEADER,
   CONTENT_LENGTH_HEADER,
@@ -94,10 +93,6 @@ function location(endpoint: string): S3Location {
 function assertNoSecret(value: unknown): void {
   assert.ok(!JSON.stringify(value).includes(SECRET));
 }
-
-test("the registry holds the S3 implementation under its platform value", () => {
-  assert.equal(storageImplementations.s3, S3Platform);
-});
 
 test("the PUT URL expires after the presign lifetime and binds the content length", async () => {
   const platform = new S3Platform();

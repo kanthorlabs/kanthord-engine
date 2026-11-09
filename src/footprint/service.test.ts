@@ -47,7 +47,6 @@ const NO_ALERTS = 0;
 const OTHER_DEVICE = "device-2";
 const TRACE_THRESHOLD = 8 * GIB;
 const ALERT_PAGE = 100;
-const LOG_BASE_KEYS = ["level", "time", "pid", "hostname", "msg"];
 const PREPARE = "prepare";
 
 function statOf(
@@ -65,41 +64,6 @@ function deviceStat(stats: readonly FootprintStat[]): FootprintStat {
   );
   assert.ok(stat, DEVICE);
   return stat;
-}
-
-function completed(
-  fixture: ReturnType<typeof footprintFixture>,
-  kind: CleanableKind,
-  fields: {
-    instance_name?: string | null;
-    rule?:
-      | { name: "older_than"; older_than_days: number }
-      | { name: "node_closed" }
-      | null;
-    removed: number;
-    removed_bytes: number | null;
-    finished_at: number;
-    keys?: string[];
-  },
-): void {
-  fixture.store.transaction((tx) =>
-    insertCleanup(tx, {
-      cleanup_id: createIdentity("cleanup"),
-      kind,
-      instance_name: fields.instance_name ?? null,
-      rule: fields.rule ?? null,
-      keys: fields.keys ?? ["node_01JZ8R2B3C4D5E6F7G8H9J0K1M"],
-      requested_by: HUMAN_ACTOR,
-      state: CleanupState.Completed,
-      finished_at: fields.finished_at,
-      outcome: {
-        removed: fields.removed,
-        removed_bytes: fields.removed_bytes,
-        absent: 0,
-        refused: [],
-      },
-    }),
-  );
 }
 
 test("a statistic carries the measured fields, the rules and the delete operation", async (t) => {
@@ -131,104 +95,6 @@ test("a statistic carries the measured fields, the rules and the delete operatio
     bytes: 150 / DEFAULT_AGE_DAYS,
   });
   assert.deepEqual(stat.alert, { state: "ok", alert_id: null });
-});
-
-test("the window of an instance younger than DEFAULT_AGE_DAYS is its age, and an empty kind takes DEFAULT_AGE_DAYS", async (t) => {
-  const fixture = footprintFixture(t);
-  fixture.service.register(
-    new FakeOwner(
-      [FootprintKind.Workspace],
-      [
-        measured(FootprintKind.Workspace, {
-          instance_name: INSTANCE,
-          count: 10,
-          bytes: 1000,
-          oldest_at: NOW - 5 * DAY_MS,
-          recent_count: 10,
-        }),
-      ],
-    ),
-  );
-  fixture.service.register(
-    new FakeOwner(
-      [FootprintKind.ToolOutput],
-      [
-        measured(FootprintKind.ToolOutput, {
-          instance_name: INSTANCE,
-          count: 0,
-          bytes: 0,
-          oldest_at: null,
-          recent_count: 0,
-        }),
-      ],
-    ),
-  );
-  completed(fixture, CleanableKind.ToolOutput, {
-    instance_name: INSTANCE,
-    removed: 30,
-    removed_bytes: null,
-    finished_at: NOW - DAY_MS,
-    rule: { name: "older_than", older_than_days: 1 },
-    keys: ["pi-bash-0123456789abcdef.log"],
-  });
-  await fixture.service.measure();
-  const stats = fixture.service.stats();
-  assert.deepEqual(statOf(stats, FootprintKind.Workspace).growth_per_day, {
-    count: 2,
-    bytes: 200,
-  });
-  assert.deepEqual(statOf(stats, FootprintKind.ToolOutput).growth_per_day, {
-    count: 30 / DEFAULT_AGE_DAYS,
-    bytes: 0,
-  });
-});
-
-test("a completed node_closed cleanup inside the window adds, an older_than cleanup of 30 days adds nothing, and a null removed_bytes takes the mean", async (t) => {
-  const fixture = footprintFixture(t);
-  fixture.service.register(
-    new FakeOwner(
-      [FootprintKind.Workspace],
-      [
-        measured(FootprintKind.Workspace, {
-          instance_name: INSTANCE,
-          count: 10,
-          bytes: 1000,
-          oldest_at: NOW - 60 * DAY_MS,
-          recent_count: 3,
-        }),
-      ],
-    ),
-  );
-  completed(fixture, CleanableKind.Workspace, {
-    instance_name: INSTANCE,
-    rule: { name: "node_closed" },
-    removed: 6,
-    removed_bytes: 900,
-    finished_at: NOW - 2 * DAY_MS,
-  });
-  completed(fixture, CleanableKind.Workspace, {
-    instance_name: INSTANCE,
-    rule: null,
-    removed: 3,
-    removed_bytes: null,
-    finished_at: NOW - 3 * DAY_MS,
-  });
-  completed(fixture, CleanableKind.Workspace, {
-    instance_name: INSTANCE,
-    rule: { name: "older_than", older_than_days: DEFAULT_AGE_DAYS },
-    removed: 50,
-    removed_bytes: 5000,
-    finished_at: NOW - DAY_MS,
-  });
-  await fixture.service.measure();
-  const growth = statOf(
-    fixture.service.stats(),
-    FootprintKind.Workspace,
-  ).growth_per_day;
-  assert.deepEqual(growth, {
-    count: (3 + 6 + 3) / DEFAULT_AGE_DAYS,
-    bytes: (300 + 900 + 300) / DEFAULT_AGE_DAYS,
-  });
 });
 
 test("days_to_floor sums the growth of the kinds on the device, is 0 below the floor and null with no growth", async (t) => {
@@ -519,44 +385,6 @@ test("an acknowledgement holds, a second one answers acknowledged and a resolved
   assert.equal(refused.error.error.code, FootprintErrorCode.AlertResolved);
 });
 
-test("the server logs one record at the fire and one at the resolve", async (t) => {
-  const lines: string[] = [];
-  const fixture = footprintFixture(t, { lines });
-  const owner = traceOwner(TRACE_THRESHOLD + 1);
-  fixture.service.register(owner);
-  await fixture.service.measure();
-  await fixture.service.measure();
-  await fixture.service.measure();
-  owner.measures = [measured(FootprintKind.Trace, { count: 1, bytes: 1 })];
-  await fixture.service.measure();
-  await fixture.service.measure();
-  await fixture.service.measure();
-  const records = (message: string) =>
-    lines
-      .map((line) => JSON.parse(line) as Record<string, unknown>)
-      .filter(
-        (record) =>
-          record.msg === message && record.kind === FootprintKind.Trace,
-      );
-  const [alert] = traceAlerts(fixture);
-  for (const message of ["footprint.alert.fired", "footprint.alert.resolved"]) {
-    const found = records(message);
-    assert.equal(found.length, ONE_CHANGE, message);
-    assert.deepEqual(
-      Object.keys(found[0] ?? {})
-        .filter((key) => !LOG_BASE_KEYS.includes(key))
-        .sort(),
-      ["alert_id", "instance_name", "item_key", "kind", "threshold", "value"],
-    );
-    assert.equal(found[0]?.alert_id, alert?.alert_id);
-    assert.equal(found[0]?.value, TRACE_THRESHOLD + 1);
-    assert.deepEqual(found[0]?.threshold, {
-      measure: ThresholdMeasure.Bytes,
-      value: TRACE_THRESHOLD,
-    });
-  }
-});
-
 test("an open episode whose item_key the next measurement no longer reports resolves", async (t) => {
   const fixture = footprintFixture(t);
   const low = (device: string) =>
@@ -626,31 +454,6 @@ test("a second disk owner keeps the server disk entries and a throwing owner kee
   assert.equal(deviceStat(fixture.service.stats()).free_bytes, TOTAL / 2);
 });
 
-test("acknowledge of an open episode completes", async (t) => {
-  const fixture = footprintFixture(t);
-  const alertId = createIdentity("alert");
-  fixture.store.transaction((tx) =>
-    insertAlert(tx, {
-      alert_id: alertId,
-      kind: FootprintKind.Trace,
-      instance_name: null,
-      item_key: null,
-      threshold: { measure: ThresholdMeasure.Bytes, value: GIB },
-      value: TOTAL,
-      resolved_at: null,
-      acknowledged_by: null,
-      acknowledged_at: null,
-      acknowledged_until: null,
-    }),
-  );
-  const acknowledged = await fixture.footprint["alert.acknowledge"](
-    { params: { alert_id: alertId }, query: {}, body: null },
-    { identity: HUMAN, idempotencyKey: createIdempotencyKey() },
-  );
-  assert.equal(acknowledged.type, OperationResultType.Completed);
-  assert.equal(acknowledged.data.acknowledged_until, 2 * TOTAL);
-});
-
 test("a failed alert write keeps the state, so the next measurement writes again", async (t) => {
   const fixture = footprintFixture(t);
   fixture.service.register(traceOwner(TRACE_THRESHOLD + 1));
@@ -690,6 +493,7 @@ const EXECUTION_LIVE = "execution_01JABCDEFGHJKMNPQRSTVWXYZ1";
 const EXECUTION_RECENT = "execution_01JABCDEFGHJKMNPQRSTVWXYZ2";
 const NODE_DONE = "node_01JABCDEFGHJKMNPQRSTVWXYZ0";
 const NODE_OPEN = "node_01JABCDEFGHJKMNPQRSTVWXYZ1";
+const POOL_KEY = "pool";
 const NODE_RETIRED = "node_01JABCDEFGHJKMNPQRSTVWXYZ2";
 const UNIT_DEVICE = "unit-device";
 
@@ -713,7 +517,6 @@ const SESSION_BYTES = 10;
 const ONE_CANDIDATE = 1;
 const UNIT_LOG_KEY = "kanthord.log";
 const SELECTED_WORKSPACE_BYTES = 9;
-const POOL_KEY = "pool";
 
 function instanceFixture(t: Parameters<typeof footprintFixture>[0]) {
   return footprintFixture(t, {

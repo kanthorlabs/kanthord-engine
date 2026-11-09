@@ -150,6 +150,26 @@ function commit(
   return answer;
 }
 
+interface PullProgress {
+  result: ClaimResult;
+  remaining: number;
+}
+
+function pullFinished(
+  dependencies: PullDependencies,
+  pull: WorkPull,
+  { result, remaining }: PullProgress,
+): boolean {
+  return (
+    (result.outcome !== ClaimOutcome.None &&
+      result.outcome !== ClaimOutcome.Queued) ||
+    result.settled ||
+    remaining <= WINDOW_ENDED ||
+    dependencies.waiting.pulling(pull.runtime_identity) ||
+    !dependencies.accepting()
+  );
+}
+
 export async function workPull(
   dependencies: PullDependencies,
   pull: WorkPull,
@@ -175,14 +195,7 @@ export async function workPull(
     const now = Date.now();
     const result = probe(dependencies, identity, pull, now);
     const remaining = deadline - performance.now();
-    if (
-      (result.outcome !== ClaimOutcome.None &&
-        result.outcome !== ClaimOutcome.Queued) ||
-      result.settled ||
-      remaining <= WINDOW_ENDED ||
-      dependencies.waiting.pulling(pull.runtime_identity) ||
-      !dependencies.accepting()
-    )
+    if (pullFinished(dependencies, pull, { result, remaining }))
       return commit(dependencies, identity, pull, caller, now);
     const held = heldJobWait(dependencies, identity.projectId, now);
     await dependencies.waiting.park(
