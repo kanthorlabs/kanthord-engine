@@ -863,7 +863,14 @@ test("a review preparation removes residue at the top of the review directory", 
   const key = h.reviewKey(nodeId);
   const leftover = join(key, CHECKOUTS_DIRECTORY, h.repository.name);
   mkdirSync(join(key, CHECKOUTS_DIRECTORY), { recursive: true });
-  await simpleGit().raw(["clone", "--", h.origin, leftover]);
+  await simpleGit().raw([
+    "clone",
+    "--branch",
+    h.repository.strategy.base_branch,
+    "--",
+    h.origin,
+    leftover,
+  ]);
   const tree = statSync(join(leftover, ".git")).ino;
   const residue = [
     join(key, "stray", "file"),
@@ -878,6 +885,10 @@ test("a review preparation removes residue at the top of the review directory", 
   const prepared = await h.review(nodeId, h.base);
   assert.equal(prepared.directory, leftover);
   assert.equal(statSync(join(leftover, ".git")).ino, tree);
+  assert.deepEqual(
+    h.logs.map(({ msg, fields }) => [msg, fields.purpose, fields.source]),
+    [["tree prepared", "review", "pool"]],
+  );
   for (const path of residue) assert.equal(existsSync(path), false);
   assert.deepEqual(readdirSync(key).sort(), [CHECKOUTS_DIRECTORY]);
   h.workspace.release(prepared.key, prepared.kind);
