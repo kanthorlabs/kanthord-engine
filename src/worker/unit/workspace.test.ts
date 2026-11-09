@@ -1141,6 +1141,7 @@ async function coderFixture(t: test.TestContext) {
 
 const SCRATCH_PROBE = "probe.mjs";
 const ROOT_USER = 0;
+const BROKEN_RECORD = "{";
 const PENDING_REBUILD = { code: "repository.node_checkout.pending_rebuild" };
 const SCRATCH_TEXT = "x";
 const TREE_PREPARED = "tree prepared";
@@ -1352,7 +1353,7 @@ test("a file in place of the scratch store does not stop the node release, and t
   h.release(nodeId);
 });
 
-test("a broken or linked push record counts as no record, and the prepare writes the remote head", async (t) => {
+test("a broken or linked push record refuses the preparation and is not followed", async (t) => {
   const h = await coderFixture(t);
   const nodeId = createIdentity("node");
   const first = await h.prepare(nodeId);
@@ -1390,10 +1391,10 @@ test("a broken or linked push record counts as no record, and the prepare writes
   ]) {
     broken();
     assert.equal(readPushRecord(key), null);
-    assert.equal((await h.prepare(nodeId)).head, pushed);
-    h.release(nodeId);
-    assert.deepEqual(readPushRecord(key), { confirmed: pushed, pending: null });
+    await assert.rejects(h.prepare(nodeId), PENDING_REBUILD);
+    assert.equal(readPushRecord(key), null);
   }
+  assert.equal(h.freeTrees(PoolClass.Agent).length, ONE_TREE);
   assert.equal(readFileSync(outside, "utf8"), OUTSIDE_TEXT);
 });
 
@@ -1660,26 +1661,36 @@ test("a node-key tree with a pending push whose binding changed its address stay
   );
 });
 
-test("an unreadable push record keeps the tree under the node key and counts as no record at the next preparation", async (t) => {
+test("an unreadable push record keeps the tree under the node key and refuses the next preparation", async (t) => {
   const h = await coderFixture(t);
   const nodeId = createIdentity("node");
   const first = await h.prepare(nodeId);
   await h.commit(first.directory, "work", "pushed");
-  const pushed = await h.pushNode(nodeId, first);
+  await h.pushNode(nodeId, first);
+  const local = await h.commit(first.directory, "work", "local");
   const key = h.recordKey(nodeId, first.nodeBranch);
-  writeFileSync(
-    join(key.nodeKey, "pushed", branchKeyOf(first.nodeBranch), key.bindingId),
-    "{",
+  const record = join(
+    key.nodeKey,
+    "pushed",
+    branchKeyOf(first.nodeBranch),
+    key.bindingId,
   );
+  writeFileSync(record, BROKEN_RECORD);
   h.release(nodeId);
   assert.ok(existsSync(join(first.directory, ".git")));
   assert.deepEqual(h.freeTrees(PoolClass.Agent), []);
-  const again = await h.prepare(nodeId);
-  assert.equal(again.head, pushed);
-  assert.deepEqual(h.sources(), [
-    ["coder", "clone"],
-    ["coder", "node"],
-  ]);
-  assert.deepEqual(readPushRecord(key), { confirmed: pushed, pending: null });
-  h.release(nodeId);
+  await assert.rejects(h.prepare(nodeId), PENDING_REBUILD);
+  assert.equal(
+    (
+      await simpleGit(first.directory).revparse([
+        `refs/heads/${first.nodeBranch}`,
+      ])
+    ).trim(),
+    local,
+  );
+  assert.equal(
+    (await simpleGit(first.directory).revparse(["HEAD"])).trim(),
+    local,
+  );
+  assert.equal(readFileSync(record, "utf8"), BROKEN_RECORD);
 });

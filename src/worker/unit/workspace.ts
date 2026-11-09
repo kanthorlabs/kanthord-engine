@@ -334,6 +334,12 @@ export class WorkspaceRoot {
     tree: CoderTree,
     created: string[],
   ): Promise<WorkspaceCheckout> {
+    if (pushRecordUnreadable(this.recordKeyOf(input, tree.repository)))
+      throw new Diagnostic(
+        RepositoryErrorCode.NodeCheckoutPendingRebuild,
+        "The push record of the node checkout cannot be read.",
+        { fields: [["path", tree.directory]] },
+      );
     const reused = await this.reuseNodeTree(input, tree);
     if (!reused) created.push(tree.directory);
     const source = reused
