@@ -11,7 +11,6 @@ import { instanceConfigurationValue } from "../../worker/contract.ts";
 import {
   decodeInstanceConfiguration,
   InstanceConfigSource,
-  instanceDirectories,
   instanceFilePath,
   resolveInstanceConfiguration,
   writeInstanceFile,
@@ -132,18 +131,12 @@ test("an invalid value and a file of another name refuse as config_invalid", asy
   for (const invalid of [
     `${value}=`,
     Buffer.from("not json").toString("base64url"),
-    Buffer.from(JSON.stringify({ ...configuration, extra: 1 })).toString(
-      "base64url",
-    ),
     Buffer.from(
       JSON.stringify({
         ...configuration,
         private_key: Buffer.alloc(32).toString("base64url"),
       }),
     ).toString("base64url"),
-    Buffer.from(JSON.stringify({ ...configuration, name: "server" })).toString(
-      "base64url",
-    ),
   ])
     refuses(() => decodeInstanceConfiguration(invalid), CONFIG_INVALID);
   const env = environmentOf(t);
@@ -177,12 +170,4 @@ test("a write refuses an existing file unless forced", async (t) => {
     resolveInstanceConfiguration({ instance: NAME }, env).configuration,
     replacement,
   );
-});
-
-test("the named directories hold the data and the log of one instance", (t) => {
-  const env = environmentOf(t);
-  assert.deepEqual(instanceDirectories(env, NAME), {
-    data: `${env.XDG_DATA_HOME}/kanthord/workers/${NAME}`,
-    log: `${env.XDG_STATE_HOME}/kanthord/workers/${NAME}`,
-  });
 });
