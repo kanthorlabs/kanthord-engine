@@ -469,10 +469,10 @@ test("regression: K110 a success rework judges no commit and a criterion-not-met
     run.clients.mission = {
       "execution.review_round.get": async () =>
         reviewRound([{ id: "finding_report", label: "S1" }]),
-      "execution.rework_assessment.get": async () => ({
-        ...reworkRead(api),
-        data: { ...reworkRead(api).data, result },
-      }),
+      "execution.rework_assessment.get": async () => {
+        const read = reworkRead(api);
+        return { ...read, data: { ...read.data, result } };
+      },
     } as unknown as MethodClients["mission"];
     run.clients.worker = NO_FAILED_CHECKS as unknown as MethodClients["worker"];
     assert.deepEqual(
