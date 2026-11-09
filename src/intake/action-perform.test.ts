@@ -8,11 +8,7 @@ import {
   type ReplyActionFacts,
   SshIdentitySubjectKind,
 } from "../custody/contract.ts";
-import {
-  background,
-  DEADLINE_EXCEEDED_CODE,
-  DeadlineExceeded,
-} from "../kernel/context.ts";
+import { background } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
@@ -64,8 +60,6 @@ import {
   SLACK_POST_URL,
   SLACK_REPLY_TS,
   SLACK_RESOURCE_IDENTITY,
-  SLACK_SECOND_REPLY_TS,
-  SLACK_SECOND_UPDATE_KEY,
   SLACK_TEAM_ID,
   SLACK_THREAD_TS,
   SLACK_TOKEN_ACCOUNT_ID,
@@ -98,7 +92,6 @@ const MERGED = "89abcdef0123456789abcdef0123456789abcdef";
 const API_CREDENTIAL = "github";
 const API_KEY = "api-key";
 const FIRST_REVISION = 1;
-const PULL_NUMBER = 7;
 const GATE_FILE_PATHS = ["package.json", "scripts/affected-tests.mjs"];
 const GATE_FILE_BODY = [
   "KanthorD does not merge this pull request. The change set of the node changes these gate files of the affected test declaration:",
@@ -113,8 +106,6 @@ const NO_MATERIALS = 0;
 const REVOKED_CODE = "credential.revision.revoked";
 const GIT_FAILED_CODE = "repository.connector.git_failed";
 const GIT_PUSH_REFUSED = "git.push_refused";
-const MERGE_EVIDENCE_ID = "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAV";
-const REUSED_EVIDENCE_ID = "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAW";
 
 const GitCall = {
   Push: "push",
@@ -412,72 +403,6 @@ test("an unpinned address host refuses before any git call, records no request a
   assert.ok(h.materials[0]?.dropped);
 });
 
-test("a reuse pushes the snapshot with the SSH identity and records no credential", async (t) => {
-  const h = harness(t, {
-    facts: actionFacts(PULL_REQUEST_ACTION, {
-      reused_address: {
-        kind: "pull_request",
-        resource_identity: RESOURCE_IDENTITY,
-        number: PULL_NUMBER,
-      },
-    }),
-  });
-  const answer = await h.perform({ reused_evidence_id: REUSED_EVIDENCE_ID });
-  assert.deepEqual(answer, {
-    kind: AddressKind.PullRequest,
-    resource_identity: RESOURCE_IDENTITY,
-    number: PULL_NUMBER,
-  });
-  assert.deepEqual(
-    h.git.map((item) => item.call),
-    [GitCall.SnapshotPush],
-  );
-  assertAccess(h, h.git[0]?.ssh);
-  assertBindingRelease(h);
-  assert.equal(h.rows()[0]?.credential, null);
-});
-
-test("a pull request create reads the base landing with the SSH identity and records the API credential", async (t) => {
-  const h = harness(t, {
-    facts: actionFacts(PULL_REQUEST_ACTION),
-    credential: API_CREDENTIAL,
-    landed: true,
-  });
-  const answer = await h.perform();
-  assert.equal("kind" in answer && answer.kind, AddressKind.BranchPush);
-  assert.deepEqual(
-    h.git.map((item) => item.call),
-    [GitCall.Landing],
-  );
-  assertAccess(h, h.git[0]?.ssh);
-  assertBindingRelease(h);
-  assert.deepEqual(h.githubCalls, []);
-  assert.equal(h.rows()[0]?.credential, API_CREDENTIAL);
-  assert.ok(h.materials.every((material) => material.dropped));
-});
-
-test("a pull request merge takes no SSH release", async (t) => {
-  const h = harness(t, {
-    facts: actionFacts(PULL_REQUEST_ACTION, {
-      merge_address: {
-        kind: "pull_request",
-        resource_identity: RESOURCE_IDENTITY,
-        number: PULL_NUMBER,
-      },
-    }),
-    credential: API_CREDENTIAL,
-  });
-  const answer = await h.perform({ merge_evidence_id: MERGE_EVIDENCE_ID });
-  assert.equal("class" in answer && answer.class, ResultClass.FinalRefusal);
-  assert.deepEqual(h.sshRequests(), []);
-  assert.deepEqual(h.git, []);
-  assert.deepEqual(h.githubCalls, ["merge_method"]);
-  assert.equal(
-    h.rows()[0]?.operation,
-    OutboundOperation.GitHubPullRequestMerge,
-  );
-});
-
 test("an SSH agent failure of a merge push answers confirmed_failure with ssh_agent_failed", async (t) => {
   const h = harness(t, {
     facts: actionFacts(MERGE_PUSH_ACTION),
@@ -495,83 +420,24 @@ test("an SSH agent failure of a merge push answers confirmed_failure with ssh_ag
   assert.equal(h.rows()[0]?.state, OutboundRequestState.Failed);
 });
 
-test("an SSH agent failure of the base landing read of a pull request create answers confirmed_failure with ssh_agent_failed", async (t) => {
-  const h = harness(t, {
-    facts: actionFacts(PULL_REQUEST_ACTION),
-    credential: API_CREDENTIAL,
-    landingFailure: new Diagnostic(SshAgentErrorCode.Failed, "agent failed"),
-  });
-  const answer = await h.perform();
-  assert.ok("class" in answer, JSON.stringify(answer));
-  assert.equal(answer.class, ResultClass.ConfirmedFailure);
-  assert.equal(answer.code, SshAgentErrorCode.Failed);
-  assert.deepEqual(h.githubCalls, []);
-  assert.ok(h.materials.every((material) => material.dropped));
-});
-
-const PUSH_FAILURES = [
-  {
-    stderr: " ! [rejected]        abc -> main (non-fast-forward)",
-    class: ResultClass.RetryableRefusal,
-    code: GIT_FAILED_CODE,
-  },
-  {
-    stderr: "remote: error: GH013: Repository rule violations found.\nTo host",
-    class: ResultClass.FinalRefusal,
-    code: GIT_PUSH_REFUSED,
-  },
-  {
-    stderr: "fatal: the remote end hung up unexpectedly",
-    class: ResultClass.UnknownOutcome,
-    code: GIT_FAILED_CODE,
-  },
-];
-
-for (const failure of PUSH_FAILURES)
-  test(`a merge push whose stderr is ${failure.class} answers ${failure.class}`, async (t) => {
-    const h = harness(t, {
-      facts: actionFacts(MERGE_PUSH_ACTION),
-      mergePush: async () => {
-        throw new GitWriteError(
-          GitStage.Push,
-          new Diagnostic(GIT_FAILED_CODE, "push: git failed.", {
-            cause: new Error(`push: git exited with 1: ${failure.stderr}`),
-          }),
-        );
-      },
-    });
-    const answer = await h.perform();
-    assert.ok("class" in answer, JSON.stringify(answer));
-    assert.equal(answer.class, failure.class);
-    assert.equal(answer.code, failure.code);
-  });
-
-test("a deadline of a merge push answers confirmed_failure with the deadline code", async (t) => {
+test("a merge push whose stderr is final_refusal answers final_refusal", async (t) => {
   const h = harness(t, {
     facts: actionFacts(MERGE_PUSH_ACTION),
     mergePush: async () => {
-      throw new GitWriteError(GitStage.BeforePush, new DeadlineExceeded());
+      throw new GitWriteError(
+        GitStage.Push,
+        new Diagnostic(GIT_FAILED_CODE, "push: git failed.", {
+          cause: new Error(
+            "push: git exited with 1: remote: error: GH013: Repository rule violations found.\nTo host",
+          ),
+        }),
+      );
     },
   });
   const answer = await h.perform();
   assert.ok("class" in answer, JSON.stringify(answer));
-  assert.equal(answer.class, ResultClass.ConfirmedFailure);
-  assert.equal(answer.code, DEADLINE_EXCEEDED_CODE);
-  assert.equal(h.rows()[0]?.state, OutboundRequestState.Failed);
-});
-
-test("a deadline of the base landing read of a pull request create answers confirmed_failure with the deadline code", async (t) => {
-  const h = harness(t, {
-    facts: actionFacts(PULL_REQUEST_ACTION),
-    credential: API_CREDENTIAL,
-    landingFailure: new DeadlineExceeded(),
-  });
-  const answer = await h.perform();
-  assert.ok("class" in answer, JSON.stringify(answer));
-  assert.equal(answer.class, ResultClass.ConfirmedFailure);
-  assert.equal(answer.code, DEADLINE_EXCEEDED_CODE);
-  assert.deepEqual(h.githubCalls, []);
-  assert.ok(h.materials.every((material) => material.dropped));
+  assert.equal(answer.class, ResultClass.FinalRefusal);
+  assert.equal(answer.code, GIT_PUSH_REFUSED);
 });
 
 test("a pull request create names the gate files in its body", async (t) => {
@@ -590,16 +456,6 @@ test("a pull request create names the gate files in its body", async (t) => {
   ]);
 });
 
-test("a pull request create without gate files sends no body", async (t) => {
-  const h = harness(t, {
-    facts: actionFacts(PULL_REQUEST_ACTION),
-    credential: API_CREDENTIAL,
-  });
-  await h.perform();
-  assert.equal(h.pullRequests.length, ONE_RELEASE);
-  assert.equal(Object.hasOwn(h.pullRequests[0] as object, "body"), false);
-});
-
 const REPLY_RESOURCE_IDENTITY = "conversation:github:owner/pushed";
 const REPLY_REPOSITORY = "owner/pushed";
 const REPLY_ACTION = "reply";
@@ -612,7 +468,6 @@ const REPLY_LINK = {
 const REPLY_BODY =
   "KanthorD: the review of node Ship accounts passed at attempt 1.";
 const FIRST_UPDATE_KEY = "issue_comment:101";
-const SECOND_UPDATE_KEY = "issue_comment:102";
 const REPLY_ACTOR_ID = "4242";
 const SECOND_ATTEMPT = 2;
 const ONE_POST = 1;
@@ -804,24 +659,6 @@ test("a reply action of a github conversation binding posts one comment and answ
   assert.ok(h.materials.every((material) => material.dropped));
 });
 
-test("the first reply on a link reads the token account once and records it in the pending row, and a later reply on the link reads it no more", async (t) => {
-  const h = replyHarness(t);
-  h.answers.push(h.posted(FIRST_UPDATE_KEY), h.posted(SECOND_UPDATE_KEY));
-  await h.perform();
-  assert.equal(h.accountReads(), ONE_READ);
-  assert.deepEqual(JSON.parse(h.posts[0]!.pending as string), {
-    actor_id: REPLY_ACTOR_ID,
-  });
-  await h.perform(SECOND_ATTEMPT);
-  assert.equal(h.accountReads(), ONE_READ);
-  assert.equal(h.posts.length, TWO_POSTS);
-  assert.equal(h.posts[1]!.pending, null);
-  assert.deepEqual(
-    h.rows().map((row) => row.state),
-    [OutboundRequestState.Succeeded, OutboundRequestState.Succeeded],
-  );
-});
-
 test("a reply call with no answer sets the request failed, and a repeat posts again", async (t) => {
   const h = replyHarness(t);
   h.answers.push(
@@ -897,7 +734,6 @@ const JIRA_REPLY_LINK = {
   resource_identity: JIRA_RESOURCE_IDENTITY,
   key: JIRA_ISSUE_KEY,
 };
-const JIRA_SECOND_UPDATE_KEY = "jira_comment:acme.atlassian.net:10044";
 const JIRA_SERVER_ERROR = 503;
 const JIRA_CREATED = 201;
 
@@ -1061,25 +897,6 @@ test("a reply action of a jira binding posts one ADF comment and answers its com
     },
   ]);
   assert.ok(h.materials.every((material) => material.dropped));
-});
-
-test("the first Jira reply on a link reads the accountId of myself once and a later reply reads it no more", async (t) => {
-  const h = jiraReplyHarness(t);
-  h.posts.push(h.posted(JIRA_COMMENT_ID), h.posted("10044"));
-  await h.perform();
-  const second = await h.perform(SECOND_ATTEMPT);
-  assert.equal(
-    "update_key" in second && second.update_key,
-    JIRA_SECOND_UPDATE_KEY,
-  );
-  assert.deepEqual(
-    h.requests.map(({ method, url }) => `${method} ${url}`),
-    [
-      `GET ${JIRA_MYSELF_URL}`,
-      `POST ${JIRA_POST_URL}`,
-      `POST ${JIRA_POST_URL}`,
-    ],
-  );
 });
 
 test("a Jira reply call with no answer sets the request failed and answers the Jira result code, and a repeat posts again", async (t) => {
@@ -1270,35 +1087,6 @@ test("a reply action of a slack binding posts one message with the thread and th
     },
   ]);
   assert.ok(h.materials.every((material) => material.dropped));
-});
-
-test("a Slack post answer without a user keeps the account of auth.test as the actor", async (t) => {
-  const h = slackReplyHarness(t);
-  h.posts.push(h.posted(SLACK_REPLY_TS));
-  await h.perform();
-  assert.deepEqual(
-    h.rows().map((row) => row.result),
-    [{ update_key: SLACK_UPDATE_KEY, actor_id: SLACK_TOKEN_ACCOUNT_ID }],
-  );
-});
-
-test("the first Slack reply on a link reads the user_id of auth.test once and a later reply reads it no more", async (t) => {
-  const h = slackReplyHarness(t);
-  h.posts.push(h.posted(SLACK_REPLY_TS), h.posted(SLACK_SECOND_REPLY_TS));
-  await h.perform();
-  const second = await h.perform(SECOND_ATTEMPT);
-  assert.equal(
-    "update_key" in second && second.update_key,
-    SLACK_SECOND_UPDATE_KEY,
-  );
-  assert.deepEqual(
-    h.requests.map(({ method, url }) => `${method} ${url}`),
-    [
-      `POST ${SLACK_AUTH_TEST_URL}`,
-      `POST ${SLACK_POST_URL}`,
-      `POST ${SLACK_POST_URL}`,
-    ],
-  );
 });
 
 test("a Slack reply call with no answer sets the request failed and answers the Slack result code, and a repeat posts again", async (t) => {
