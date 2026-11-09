@@ -3,13 +3,16 @@ import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { suite, test } from "node:test";
 import {
   appendFileSync,
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
   readFileSync,
   realpathSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { setTimeout as delay } from "node:timers/promises";
 import { dirname, join } from "node:path";
 import type { TestContext } from "node:test";
 import { simpleGit } from "simple-git";
@@ -85,6 +88,10 @@ const TREE_PREPARED = "tree prepared";
 const RELEASE_FROM_POOL = { purpose: "release", source: TreeSource.Pool };
 const ONE_TREE = 1;
 const GONE = "gone";
+const LEAK = "leak";
+const OPEN_MODE = "755";
+const POLL_MS = 20;
+const ABORTED = "release aborted";
 
 function storedEnvironment(
   document: Record<string, unknown>,
@@ -867,6 +874,129 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     };
     assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
     assert.equal(h.input.workspaces.pool.trees().length, ONE_TREE);
+    assert.equal(existsSync(releaseKey(h)), false);
+  });
+
+  test("a release tree whose .git mode a verification changes is deleted at the give, and the gate and the next prepare pass", async (t) => {
+    const h = await fixture(t, [], []);
+    h.revision = {
+      ...h.revision,
+      content: {
+        ...h.revision.content,
+        verifications: [`chmod ${OPEN_MODE} .git`],
+      },
+    };
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    assert.deepEqual(h.input.workspaces.pool.trees(), []);
+    assert.equal(existsSync(releaseKey(h)), false);
+    const key = h.input.workspaces.nodeKey(h.input.claim.node_id);
+    h.input.workspaces.release(key, WorkspaceKind.Node);
+    await prepareStepsWorkspace(h.input, h.run);
+  });
+
+  test("the next prepare deletes a crash leftover whose .git mode is open, and the prepare passes", async (t) => {
+    const h = await fixture(t, [], []);
+    const key = h.input.workspaces.nodeKey(h.input.claim.node_id);
+    const tree = join(releaseKey(h), h.checkouts[0]!.name);
+    await simpleGit().clone(h.root, tree);
+    await simpleGit(tree).remote([
+      "set-url",
+      "origin",
+      h.input.setup.repositories[0]!.address,
+    ]);
+    chmodSync(join(tree, ".git"), Number.parseInt(OPEN_MODE, 8));
+    h.input.workspaces.release(key, WorkspaceKind.Node);
+    await prepareStepsWorkspace(h.input, h.run);
+    assert.equal(existsSync(releaseKey(h)), false);
+    assert.deepEqual(h.input.workspaces.pool.trees(), []);
+  });
+
+  test("a release tree that is a symbolic link is removed as a link, and its target stays out of the pool", async (t) => {
+    const h = await fixture(t, [], []);
+    const key = h.input.workspaces.nodeKey(h.input.claim.node_id);
+    const outside = join(temporary(t), "outside");
+    await simpleGit().clone(h.root, outside);
+    await simpleGit(outside).remote([
+      "set-url",
+      "origin",
+      h.input.setup.repositories[0]!.address,
+    ]);
+    mkdirSync(releaseKey(h), { recursive: true });
+    symlinkSync(outside, join(releaseKey(h), h.checkouts[0]!.name));
+    h.input.workspaces.release(key, WorkspaceKind.Node);
+    await prepareStepsWorkspace(h.input, h.run);
+    assert.equal(existsSync(releaseKey(h)), false);
+    assert.deepEqual(h.input.workspaces.pool.trees(), []);
+    assert.equal(existsSync(join(outside, ".git")), true);
+    assert.equal(
+      existsSync(join(outside, ".git", "kanthord-pool.json")),
+      false,
+    );
+  });
+
+  test("the pool gives back a release tree that is a symbolic link as a removed link", async (t) => {
+    const h = await fixture(t, [], []);
+    const outside = join(temporary(t), "outside");
+    await simpleGit().clone(h.root, outside);
+    const link = join(temporary(t), "link");
+    symlinkSync(outside, link);
+    h.input.workspaces.pool.giveBack(
+      {
+        address: h.input.setup.repositories[0]!.address,
+        poolClass: PoolClass.Command,
+      },
+      link,
+      h.input.claim.node_id,
+    );
+    assert.equal(existsSync(link), false);
+    assert.deepEqual(h.input.workspaces.pool.trees(), []);
+    assert.equal(
+      existsSync(join(outside, ".git", "kanthord-pool.json")),
+      false,
+    );
+  });
+
+  test("a release round with an existing tree of a current checkout passes", async (t) => {
+    const h = await fixture(t, [], []);
+    await simpleGit().clone(h.root, join(releaseKey(h), h.checkouts[0]!.name));
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    assert.equal(existsSync(releaseKey(h)), false);
+  });
+
+  test("a tag that a release verification creates is absent in the next release round", async (t) => {
+    const h = await fixture(t, [], []);
+    h.revision = {
+      ...h.revision,
+      content: {
+        ...h.revision.content,
+        verifications: [
+          `! git rev-parse -q --verify refs/tags/${LEAK} && git tag ${LEAK}`,
+        ],
+      },
+    };
+    for (const content of ["changed", REVISED_CONTENT]) {
+      await changeNode(h, content);
+      assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    }
+  });
+
+  test("an abort during a release verification ends the gate with the abort reason, gives the tree back and leaves no release directory", async (t) => {
+    const marker = join(temporary(t), MARKER);
+    const h = await fixture(t, [], []);
+    h.revision = {
+      ...h.revision,
+      content: {
+        ...h.revision.content,
+        verifications: [`touch ${marker}; sleep 30`],
+      },
+    };
+    const reason = new Error(ABORTED);
+    const gate = releaseGate(h);
+    while (!existsSync(marker)) await delay(POLL_MS);
+    h.run.operationContext.cancel(reason);
+    assert.equal((await gate).kind, ReleaseGateKind.Routed);
+    assert.equal(h.run.operationContext.signal.reason, reason);
+    assert.equal(freeCommandTrees(h).length, ONE_TREE);
     assert.equal(existsSync(releaseKey(h)), false);
   });
 

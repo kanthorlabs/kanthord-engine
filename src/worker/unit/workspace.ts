@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import {
   appendFileSync,
   existsSync,
-  lstatSync,
   readFileSync,
   rmSync,
   utimesSync,
@@ -20,13 +19,12 @@ import type { SshAccess, SshSigner } from "../../repository/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import { cleanExcludes, originAddress } from "./local-git.ts";
 import { readSetupRecord } from "./setup-record.ts";
-import { POOL_DIRECTORY, PoolClass, TreePool } from "./tree-pool.ts";
+import { isTree, POOL_DIRECTORY, PoolClass, TreePool } from "./tree-pool.ts";
 import type { HandoverSshIdentity } from "../../custody/contract.ts";
 
 export const WORKSPACES_DIRECTORY = "workspaces";
 export const SCRATCH_DIRECTORY = ".kanthord-scratch/";
-const GIT_DIRECTORY = ".git";
-const GIT_EXCLUDE = [GIT_DIRECTORY, "info", "exclude"];
+const GIT_EXCLUDE = [".git", "info", "exclude"];
 export const CHECKOUTS_DIRECTORY = "checkouts";
 export const RELEASE_DIRECTORY = "release";
 export const EVIDENCE_DIRECTORY = "evidence";
@@ -238,12 +236,7 @@ export class WorkspaceRoot {
     const release = join(key, RELEASE_DIRECTORY);
     for (const repository of input.repositories) {
       const tree = join(release, bindingNameSchema.parse(repository.name));
-      if (
-        !lstatSync(join(tree, GIT_DIRECTORY), {
-          throwIfNoEntry: false,
-        })?.isDirectory()
-      )
-        continue;
+      if (!isTree(tree)) continue;
       const address = await originAddress({
         env: input.env,
         directory: tree,

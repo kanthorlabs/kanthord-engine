@@ -304,8 +304,11 @@ async function verifyInReleaseClones(
       };
     return { ...listed, affected };
   } finally {
-    giveReleaseTrees(state, key, base);
-    cleanup.cancel();
+    try {
+      giveReleaseTrees(state, key, base);
+    } finally {
+      cleanup.cancel();
+    }
   }
 }
 
@@ -380,6 +383,7 @@ async function buildReleaseClones(
     const directory = join(base, layoutOf(checkouts, checkout.directory));
     const address = repositoryOf(state, checkout).address;
     const env = state.input.env;
+    rmSync(directory, { recursive: true, force: true });
     const { source } = await prepareTree({
       pool: state.input.workspaces.pool,
       address,

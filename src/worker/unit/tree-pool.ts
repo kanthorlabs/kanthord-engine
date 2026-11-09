@@ -101,6 +101,13 @@ function freeTreesOf(directory: string): FreeTree[] {
     .map((path) => ({ path, ...metadataOf(path) }));
 }
 
+export function isTree(path: string): boolean {
+  return [path, join(path, GIT_DIRECTORY)].every(
+    (entry) =>
+      lstatSync(entry, { throwIfNoEntry: false })?.isDirectory() ?? false,
+  );
+}
+
 function removeTree(path: string): void {
   rmSync(path, { recursive: true, force: true });
 }
@@ -169,13 +176,15 @@ export class TreePool {
   }
 
   giveBack(slot: PoolSlot, tree: string, nodeId: string | null): void {
-    if (
-      lstatSync(join(tree, GIT_DIRECTORY), {
-        throwIfNoEntry: false,
-      })?.isDirectory()
-    )
+    if (!isTree(tree)) {
+      this.remove(tree);
+      return;
+    }
+    try {
       this.give(slot, tree, nodeId);
-    else this.remove(tree);
+    } catch {
+      this.remove(tree);
+    }
   }
 
   private evict(directory: string, limit: number): void {

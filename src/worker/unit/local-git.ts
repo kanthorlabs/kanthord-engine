@@ -1459,6 +1459,7 @@ export async function fetchLocal(call: GitCall, source: string): Promise<void> {
       source,
       "+refs/heads/*:refs/kanthord/heads/*",
       "+refs/remotes/origin/*:refs/kanthord/remotes/*",
+      "+refs/tags/*:refs/tags/*",
     ],
     call.context,
     call.deadlineMs,
