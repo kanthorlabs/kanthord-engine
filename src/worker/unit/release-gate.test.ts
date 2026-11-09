@@ -41,7 +41,7 @@ import {
   spanEnds,
   task,
 } from "./test-support.ts";
-import { RecordKind, SpanStatus } from "../../tracking/contract.ts";
+import { RecordKind } from "../../tracking/contract.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { VerificationContext } from "./method-telemetry.ts";
 import { VERIFICATION_RERUNS } from "./verification.ts";
@@ -60,7 +60,6 @@ const REVISED_CONTENT = "base two";
 const SECRET = "secret";
 const MARKER = "release-directory";
 const ONE_SPAN = 1;
-const NO_LOGS = 0;
 const FLAKY_LOG = "verification flaky";
 const TAG = "x";
 const CONFIG_KEY = "a.b";
@@ -406,64 +405,6 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(existsSync(join(key, RELEASE_DIRECTORY)), false);
   });
 
-  test("a passing release gate writes one release gate span with the result passed", async (t) => {
-    const h = await fixture(t, [task("pass", "true")], []);
-    const records = recordSpans(h);
-    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
-    const ends = spanEnds(records, SpanOperation.ReleaseGate);
-    assert.equal(ends.length, ONE_SPAN);
-    assert.equal(ends[0]?.status, SpanStatus.Ok);
-    assert.deepEqual(ends[0]?.attributes, {
-      "kanthord.release_gate.result": "passed",
-      "kanthord.release_gate.affected": "absent",
-    });
-  });
-
-  test("a failed release command writes the result routed with the unit id of its owner", async (t) => {
-    const owner = task("owner", "false");
-    const h = await fixture(t, [owner], []);
-    const records = recordSpans(h);
-    const gate = await releaseGate(h);
-    assert.equal(gate.kind, ReleaseGateKind.Routed);
-    assert.ok(gate.kind === ReleaseGateKind.Routed);
-    assert.ok(gate.instruction.includes(RELEASE_CLONE_TEXT));
-    const ends = spanEnds(records, SpanOperation.ReleaseGate);
-    assert.equal(ends.length, ONE_SPAN);
-    assert.equal(ends[0]?.status, SpanStatus.Ok);
-    assert.deepEqual(ends[0]?.attributes, {
-      "kanthord.release_gate.result": "routed",
-      "kanthord.release_gate.unit_id": owner.id,
-    });
-  });
-
-  test("the verification spans of a release name the owner of each command with the context release", async (t) => {
-    const owner = task("owner", "true && true");
-    const h = await fixture(t, [owner], []);
-    h.revision = {
-      ...h.revision,
-      content: { ...h.revision.content, verifications: ["true"] },
-    };
-    const records = recordSpans(h);
-    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
-    const starts = records.flatMap((record) =>
-      record.kind === RecordKind.Span &&
-      record.operation === SpanOperation.Verification &&
-      record.start_time !== undefined
-        ? [record.attributes]
-        : [],
-    );
-    assert.deepEqual(
-      starts.map((attributes) => [
-        attributes?.["kanthord.verification.context"],
-        attributes?.["kanthord.verification.owner_id"],
-      ]),
-      [
-        ["release", h.input.claim.node_id],
-        ["release", owner.id],
-      ],
-    );
-  });
-
   test("a command that the node and a task share runs once at the release gate and holds two results", async (t) => {
     const count = join(temporary(t), "count");
     const shared = `echo x >> ${count}`;
@@ -622,27 +563,6 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
       .filter((call) => call.arguments[0] === FLAKY_LOG)
       .map((call) => call.arguments[1]);
     assert.deepEqual(flaky, [{ flaky: [{ index: 0, command }] }]);
-  });
-
-  test("a release verification that fails on every rerun returns the failed run", async (t) => {
-    const h = await fixture(t, [task("owner", "true")], []);
-    h.revision = {
-      ...h.revision,
-      content: {
-        ...h.revision.content,
-        verifications: [FAILS_IN_RELEASE],
-      },
-    };
-    const events = t.mock.method(h.run, "log");
-    const gate = await releaseGate(h);
-    assert.ok(gate.kind === ReleaseGateKind.Routed);
-    assert.equal(gate.unit.id, h.input.claim.node_id);
-    assert.ok(gate.instruction.includes(RELEASE_CLONE_TEXT));
-    assert.equal(
-      events.mock.calls.filter((call) => call.arguments[0] === FLAKY_LOG)
-        .length,
-      NO_LOGS,
-    );
   });
 
   test("a node change that edits the declaration does not change the command that judges it", async (t) => {

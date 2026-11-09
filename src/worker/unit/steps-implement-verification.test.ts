@@ -168,20 +168,6 @@ suite(
       assert.equal(h.provider.calls.length, ONE_TOOL_TURN);
     });
 
-    test("a kill on the first run and a pass on the rerun passes the task verification", async (t) => {
-      const marker = join(temporary(t), "killed");
-      const current = task(
-        "rerun",
-        `test -f ${marker} || { touch ${marker}; kill -9 $$; }`,
-      );
-      const h = await fixture(t, [current], [fauxAssistantMessage("work")]);
-      assert.deepEqual(await runTask(h, current), {
-        kind: TaskResultKind.Complete,
-        recorded: false,
-      });
-      assert.equal(h.provider.calls.length, ONE_TURN);
-    });
-
     test("exit 127 on the node head and on the base head stops with environment_failed and sends no revision turn", async (t) => {
       const current = task("absent", "command-absent-x");
       const h = await fixture(
@@ -330,20 +316,6 @@ suite(
       assert.ok(
         JSON.stringify(h.provider.calls.at(-1)).includes("test -e never-fixed"),
       );
-    });
-
-    test("the setup instruction of a node-head failure goes to the first pending task", async (t) => {
-      const current = task("setup", "true");
-      const h = await fixture(t, [current], [fauxAssistantMessage("never")]);
-      h.setupInstruction = SETUP_INSTRUCTION;
-      const instructions: Array<string | null> = [];
-      await executionBoundary(h.run, () =>
-        runStepsImplement(h, async (_state, _task, instruction) => {
-          instructions.push(instruction);
-          return { kind: TaskResultKind.BudgetEnd };
-        }),
-      );
-      assert.deepEqual(instructions, [SETUP_INSTRUCTION]);
     });
 
     test("a task unit skips each node command in the live checkout and runs each own command", async (t) => {

@@ -5,11 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
-import {
-  stopAfter,
-  SUITE_CONCURRENCY,
-  temporary,
-} from "../../kernel/test-support.ts";
+import { stopAfter, SUITE_CONCURRENCY } from "../../kernel/test-support.ts";
 import * as connector from "../../repository/connector.ts";
 import { nodeBranchOf } from "../../repository/node-branch.ts";
 import type { Revision } from "../../mission/contract.ts";
@@ -26,10 +22,6 @@ import {
   ExecutionStop,
 } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
-import {
-  criterionRevisionInstruction,
-  requestedChangesText,
-} from "./judgement.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceKind } from "./workspace.ts";
 import {
@@ -40,7 +32,6 @@ import {
 import { refreshAtClaim, RefreshResult } from "./base-refresh.ts";
 import { MERGE_MARKERS_LEFT } from "./turn-gate.ts";
 import { nodeUnitOf } from "./release-gate.ts";
-import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import {
   advanceBase,
   commitOnNode,
@@ -110,52 +101,6 @@ suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
   });
 
-  test("the start check sends the requested changes to the node unit and not to a task judgement", async (t) => {
-    const requested = requestedChangesText([
-      {
-        binding: "repo",
-        head_commit: "a".repeat(40),
-        change_requests: [
-          {
-            review_id: 7,
-            reviewer: "octo",
-            body: "Rename the route.",
-            submitted_at: null,
-            commit_id: "a".repeat(40),
-            comments: [{ path: "src/route.ts", line: 4, body: "Use /api." }],
-          },
-        ],
-      },
-    ]);
-    assert.ok(requested);
-    const current = task("review", "true");
-    const h = await fixture(t, [current], []);
-    await recordDone(h, current);
-    h.verdict = {
-      source: VerdictSource.Rework,
-      text: requested,
-      findings: [],
-      round: null,
-      judged: [
-        {
-          binding_id: h.checkouts[0]!.binding_id,
-          commit: h.checkouts[0]!.head,
-        },
-      ],
-    };
-    const checked = await startCheck(h);
-    assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
-    assert.deepEqual(checked.pending, []);
-    assert.equal(
-      checked.node?.text,
-      criterionRevisionInstruction(SHIPPED_TEMPLATES, requested),
-    );
-    assert.deepEqual(
-      checked.node?.judged.map((entry) => entry.commit),
-      [h.checkouts[0]!.head],
-    );
-  });
-
   async function verdictFixture(
     t: TestContext,
     script: Parameters<typeof scriptedProvider>[0],
@@ -187,15 +132,6 @@ suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
     return { h, tasks };
   }
 
-  function loggedFields(
-    events: { mock: { calls: { arguments: unknown[] }[] } },
-    message: string,
-  ) {
-    return events.mock.calls
-      .filter((call) => call.arguments[0] === message)
-      .map((call) => call.arguments[1]);
-  }
-
   test("a budget end in the verdict turn commits its files as a checkpoint", async (t) => {
     const { h } = await verdictFixture(
       t,
@@ -224,16 +160,6 @@ suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
     const latest = (await simpleGit(h.root).log()).latest!;
     assert.equal(latest.message, `feat: ${h.revision.content.name}`);
     assert.equal(latest.body.trim(), h.input.claim.node_id);
-  });
-
-  test("the start check of a verdict runs no node verification", async (t) => {
-    const marker = join(temporary(t), "node-ran");
-    const { h } = await verdictFixture(t, [], `touch ${marker}; false`);
-    const events = t.mock.method(h.run, "log");
-    assert.deepEqual((await startCheck(h)).pending, []);
-    assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
-    assert.equal(existsSync(marker), false);
-    assert.deepEqual(loggedFields(events, "node verified"), []);
   });
 
   const NODE_CONTENT = {

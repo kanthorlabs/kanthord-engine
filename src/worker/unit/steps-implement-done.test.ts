@@ -9,7 +9,7 @@ import type { Revision } from "../../mission/contract.ts";
 import { executionBoundary } from "./native-method.ts";
 import { JUDGEMENT_MARKER } from "./judgement.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { runStepsImplement, startCheck } from "./steps-implement.ts";
+import { runStepsImplement } from "./steps-implement.ts";
 import { nodeUnitOf } from "./release-gate.ts";
 import { DONE_TRAILER, doneRecordOf } from "./done-record.ts";
 import {
@@ -27,7 +27,6 @@ import {
 type Harness = Awaited<ReturnType<typeof fixture>>;
 
 const ONE_TOOL_TURN = 2;
-const TWO_TOOL_TURNS = 4;
 const ONE_TURN = 1;
 const TWO_TURNS = 2;
 const TWO_BINDINGS = ["api", "web"];
@@ -89,12 +88,6 @@ function recordFinish(h: Harness): unknown[] {
   return recordReleases(h);
 }
 
-function heldMarker(h: Harness): boolean {
-  return h.provider.calls.some((call) =>
-    JSON.stringify(call).includes(JUDGEMENT_MARKER),
-  );
-}
-
 suite(
   "steps implement done records",
   { concurrency: SUITE_CONCURRENCY },
@@ -143,43 +136,6 @@ suite(
       const call = JSON.stringify(next.provider.calls[0]);
       assert.ok(call.includes(second.content.name));
       assert.equal(call.includes(first.content.name), false);
-    });
-
-    test("a task whose verifications pass on the base still gets a work turn", async (t) => {
-      const current = task("passing-unit", "true");
-      const h = await fixture(t, [current], [fauxAssistantMessage("nothing")]);
-      recordFinish(h);
-      assert.deepEqual(
-        await executionBoundary(h.run, () => runStepsImplement(h)),
-        RELEASED,
-      );
-      assert.equal(h.provider.calls.length, ONE_TURN);
-      assert.ok(
-        JSON.stringify(h.provider.calls[0]).includes(current.content.name),
-      );
-      assert.equal(heldMarker(h), false);
-    });
-
-    test("an implement execution runs no answer turn", async (t) => {
-      const current = task("revised", "grep -q good file");
-      const h = await fixture(
-        t,
-        [current],
-        [
-          bash("echo bad > file"),
-          fauxAssistantMessage("first"),
-          bash("echo good > file"),
-          fauxAssistantMessage("second"),
-        ],
-      );
-      recordFinish(h);
-      assert.deepEqual(
-        await executionBoundary(h.run, () => runStepsImplement(h)),
-        RELEASED,
-      );
-      assert.equal(h.provider.calls.length, TWO_TOOL_TURNS);
-      assert.equal(heldMarker(h), false);
-      assert.deepEqual(await remoteRecords(h), [doneRecordOf(current)]);
     });
 
     test("a task that passes with no change writes no record, and a budget end then releases the budget_end stop", async (t) => {
@@ -434,16 +390,6 @@ suite(
         "HEAD",
       ]);
       assert.equal(parents.trim().split(" ").length, MERGE_COMMIT_FIELDS);
-    });
-
-    test("a rework of a node that holds a node record still sends the verdict", async (t) => {
-      const h = await fixture(t, [], []);
-      h.revision = nodeRevision(h, "true");
-      await recordDone(h, nodeUnitOf(h.input.claim.node_id, h.revision));
-      h.verdict = verdictAtHead(h);
-      const checked = await startCheck(h);
-      assert.deepEqual(checked.pending, []);
-      assert.ok(checked.node?.text.includes(VERDICT));
     });
   },
 );

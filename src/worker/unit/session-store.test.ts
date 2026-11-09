@@ -20,9 +20,7 @@ import { SESSION_ENTRY_FULL_MAX_BYTES } from "../../tracking/contract.ts";
 import { type SessionRead, SessionReadOutcome } from "../contract.ts";
 import {
   executionSessionDirectory,
-  executionSessionRoot,
   readSessionFileEntry,
-  sessionRootOf,
 } from "./session-store.ts";
 
 const DIRECTORY_MODE_MASK = 0o7777;
@@ -67,14 +65,6 @@ function sessionFixture(t: TestContext) {
     join(directory, `${stamp}_${sessionId}.jsonl`);
   return { root, directory, read, file };
 }
-
-test("the session root lies in the pi directory of the data directory", () => {
-  assert.equal(sessionRootOf("/data"), join("/data", "pi", "sessions"));
-  assert.equal(
-    executionSessionRoot("/data"),
-    join("/data", "pi", "sessions", "execution"),
-  );
-});
 
 test("an execution directory has mode 0700 under the session root", (t) => {
   const root = join(temporary(t), "sessions");

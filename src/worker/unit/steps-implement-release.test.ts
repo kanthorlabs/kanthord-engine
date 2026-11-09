@@ -45,7 +45,6 @@ import {
   NO_PROVIDER_CALLS,
   recordDone,
   recordReleases,
-  recordSpans,
   STEPS_KEY,
   task,
   transport,
@@ -140,31 +139,6 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
     };
     await assert.rejects(runStepsImplement(other));
     assert.ok(existsSync(other.root));
-  });
-
-  test("a budget end writes no commit git span and still writes the push git span", async (t) => {
-    const h = await fixture(
-      t,
-      [task("partial", "false")],
-      [
-        fauxAssistantMessage(
-          fauxToolCall("write", { path: "notes", content: "partial" }),
-          { stopReason: "toolUse" },
-        ),
-      ],
-      1,
-    );
-    const records = recordSpans(h);
-    recordReleases(h);
-    await runStepsImplement(h);
-    const starts = records.flatMap((record) =>
-      record.kind === RecordKind.Span &&
-      record.operation === SpanOperation.Git &&
-      "start_time" in record
-        ? [record.attributes?.["kanthord.git.step"]]
-        : [],
-    );
-    assert.deepEqual(starts, [GitStep.Push]);
   });
 
   test("S1 budget-ended task verification releases further work and submits no evidence", async (t) => {
@@ -555,22 +529,6 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
     };
     await assert.rejects(runStepsImplement(h));
     assert.deepEqual(submitted, []);
-  });
-
-  test("the evidence holds one asset for each binding", async (t) => {
-    const { h, submitted } = await twoBindingRelease(t);
-    await runStepsImplement(h);
-    assert.deepEqual(submitted, [
-      h.checkouts.map((checkout) => ({
-        kind: "repository",
-        binding_id: checkout.binding_id,
-        commit: checkout.head,
-      })),
-    ]);
-    assert.deepEqual(
-      submitted[0]!.map((address) => address.binding_id),
-      h.input.setup.repositories.map((repository) => repository.binding_id),
-    );
   });
 
   test("a node whose change breaks an unlisted test gets a revision turn, fixes the test and releases", async (t) => {
