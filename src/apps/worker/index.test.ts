@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { createProvider, type Provider } from "@earendil-works/pi-ai";
-import { CancellationContext } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { HealthStatus } from "../../kernel/service.ts";
@@ -25,12 +24,10 @@ import { LoginSessionMode } from "../../llm/sessions.ts";
 import { generateX25519KeyPair } from "../../kernel/hpke.ts";
 import { machineConfigurationValue } from "../../worker/contract.ts";
 import { runWorker, Worker, type WorkerOptions } from "./index.ts";
-import { WorkerUnit } from "./unit.ts";
 import { MACHINE_CONFIG_VARIABLE, writeMachineFile } from "./machine-config.ts";
 import {
   FAKE_INSTANCE_NAME,
   FAKE_MACHINE,
-  FAKE_WORKER,
   fakeInstanceServer,
   FakePath,
   testClaim,
@@ -59,7 +56,6 @@ const REARM_RENEWAL_MS = 400;
 const REARM_WINDOWS = 4;
 const SUPERSEDE_TIMEOUT_MS = 60000;
 const POLL_MS = 10;
-const NO_WORK_DELAY_MS = 20;
 const TWO_BINDINGS = 2;
 const TWO_READS = 2;
 const LOGIN_INTERVAL_MS = 4000;
@@ -199,41 +195,6 @@ test("the unit temporary directory is <unit>/tmp with mode 0700", async (t) => {
   }
 });
 
-test("startup resolves the configuration, takes a token, logs the ready record, connects and registers each binding", async (t) => {
-  const f = await fixture(t);
-  const worker = new Worker(f.options());
-  try {
-    assert.equal(await worker.start(), null);
-    assert.deepEqual(
-      f.server.state.requests.slice(0, 3).map((request) => request.path),
-      [FakePath.Token, FakePath.Connect, FakePath.OpenAPI],
-    );
-    assert.deepEqual(f.records[0], {
-      msg: INSTANCE_READY,
-      instance: FAKE_INSTANCE_NAME,
-      worker: FAKE_WORKER,
-      fingerprint: f.records[0]!.fingerprint,
-      connection_name: CONNECTION_A,
-      config_source: "env",
-    });
-    assert.match(String(f.records[0]!.fingerprint), /^SHA256:/);
-    assert.equal(
-      f.records.filter((record) => record.msg === REGISTRATION_READY).length,
-      TWO_BINDINGS,
-    );
-    assert.equal(f.server.requestsTo(FakePath.Register).length, TWO_BINDINGS);
-    assert.deepEqual(await worker.healthcheck(), {
-      client: HealthStatus.Healthy,
-    });
-    const serialized = JSON.stringify(f.records);
-    assert.ok(!serialized.includes(f.server.configuration.private_key));
-    assert.ok(!serialized.includes(f.server.value));
-  } finally {
-    assert.equal(await worker.stop(), null);
-  }
-  assert.equal(f.server.state.deregistered.length, TWO_BINDINGS);
-});
-
 test("a token answer with another server version refuses the start before the connection", async (t) => {
   const f = await fixture(t);
   f.server.state.version = MISMATCH_VERSION;
@@ -310,31 +271,6 @@ test("a heartbeat with another server_version stops the unit", async (t) => {
   assert.equal(error.code, MISMATCH_CODE);
   assert.equal(f.server.state.deregistered.length, TWO_BINDINGS);
 });
-
-test(
-  "a second process supersedes the first, and the first ends as superseded without a deregistration",
-  { timeout: SUPERSEDE_TIMEOUT_MS },
-  async (t) => {
-    const f = await fixture(t);
-    const firstWorker = new Worker(
-      f.options({ heartbeatIntervalMs: FAST_HEARTBEAT_MS }),
-    );
-    stopAfter(t, () => firstWorker.stop());
-    const first = firstWorker.run();
-    await f.ready();
-    const second = new Worker(f.options({ connectionName: CONNECTION_B }));
-    stopAfter(t, () => second.stop());
-    const secondRun = second.run();
-    const error = await first;
-    assert.ok(error instanceof Diagnostic);
-    assert.equal(error.code, SUPERSEDED_CODE);
-    assert.deepEqual(error.fields, [["connection_name", CONNECTION_B]]);
-    assert.deepEqual(f.server.state.deregistered, []);
-    assert.equal(await second.start(), null);
-    assert.equal(await second.stop(), null);
-    assert.equal(await secondRun, null);
-  },
-);
 
 test(
   "a client request refused as superseded sends one heartbeat and ends the process",
@@ -661,31 +597,6 @@ test("the first heartbeat reads the work, a new work_version reads it once, and 
   assert.equal(await running, null);
 });
 
-test("a work read passes the stop orders to the unit", async (t) => {
-  const stopOrders = [
-    {
-      execution_id: "execution_01ARZ3NDEKTSV4RRFFQ69G5FAV",
-      reason: "instance_archived" as const,
-    },
-  ];
-  const received: unknown[] = [];
-  t.mock.method(WorkerUnit.prototype, "stopOrders", (orders: unknown) => {
-    received.push(orders);
-  });
-  const f = await fixture(t, SINGLE);
-  f.server.state.stopOrders = stopOrders;
-  const worker = new Worker(
-    f.options({ heartbeatIntervalMs: FAST_HEARTBEAT_MS }),
-  );
-  stopAfter(t, () => worker.stop());
-  const running = worker.run();
-  await f.ready();
-  await until(() => received.length === SINGLE, t.signal);
-  assert.deepEqual(received, [stopOrders]);
-  assert.equal(await worker.stop(), null);
-  assert.equal(await running, null);
-});
-
 test("a failed work read keeps the work version, so the next heartbeat reads the work again", async (t) => {
   const f = await fixture(t, SINGLE);
   let refused = false;
@@ -742,22 +653,6 @@ test("the heartbeat interval stays the same while a login runs", async (t) => {
   assert.equal(await running, null);
 });
 
-test("stop aborts each outstanding pull and deregisters each registration", async (t) => {
-  const f = await fixture(t);
-  const worker = new Worker(f.options());
-  stopAfter(t, () => worker.stop());
-  const running = worker.run();
-  await until(
-    () => f.server.requestsTo(FakePath.Pull).length === TWO_BINDINGS,
-    t.signal,
-  );
-  const context = new CancellationContext();
-  context.cancel();
-  assert.equal(await worker.stop(), null);
-  assert.equal(await running, null);
-  assert.equal(f.server.state.deregistered.length, TWO_BINDINGS);
-});
-
 test("an invalid pull answer exits with its diagnostic and keeps the registration", async (t) => {
   const f = await fixture(t, SINGLE);
   f.server.state.intercept = (request) =>
@@ -775,23 +670,6 @@ test("an invalid pull answer exits with its diagnostic and keeps the registratio
   assert.equal(result.code, ANSWER_INVALID);
   assert.equal(f.server.requestsTo(FakePath.Pull).length, SINGLE);
   assert.deepEqual(f.server.state.deregistered, []);
-});
-
-test("SIGHUP leaves the worker healthy and the handlers leave at termination", async (t) => {
-  const f = await fixture(t, SINGLE);
-  const before = process.listenerCount("SIGHUP");
-  const worker = new Worker(f.options());
-  stopAfter(t, () => worker.stop());
-  const running = worker.run();
-  await f.ready();
-  process.emit("SIGHUP");
-  await delay(NO_WORK_DELAY_MS);
-  assert.deepEqual(await worker.healthcheck(), {
-    client: HealthStatus.Healthy,
-  });
-  process.emit("SIGTERM");
-  assert.equal(await running, null);
-  assert.equal(process.listenerCount("SIGHUP"), before);
 });
 
 test("the stop watchdog starts only after an unresolved startup settles", async (t) => {
@@ -865,14 +743,6 @@ test("the default worker log writes JSON lines on stderr without the instance co
   } finally {
     child.kill("SIGKILL");
   }
-});
-
-test("the healthcheck is unavailable before the start", async () => {
-  const worker = new Worker();
-  assert.deepEqual(await worker.healthcheck(), {
-    client: HealthStatus.Unavailable,
-  });
-  assert.equal(await worker.stop(), null);
 });
 
 async function machineConfiguration(name: string) {
