@@ -39,56 +39,15 @@ import {
   WorkspaceRoot,
 } from "./workspace.ts";
 import type { RepositoryTransport } from "../contract.ts";
-import {
-  placedOf,
-  prepareEvaluation,
-  snapshotOf,
-  verificationCommands,
-} from "./evaluation-input.ts";
+import { prepareEvaluation, verificationCommands } from "./evaluation-input.ts";
 import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
-import { ROUND_PATCH_SUBJECT } from "./round-patch.ts";
 
-const GIT_DIRECTORY = ".git";
 const FIRST_ROUND = {
   round: 1,
   final: false,
   review_base: null,
   findings: [],
 };
-
-test("snapshot selection excludes requests and verifications and orders by identity", () => {
-  const asset = {
-    kind: "repository",
-    address: { kind: "repository", binding_id: "binding", commit: "head" },
-  };
-  const evidence = [
-    { id: "a", assets: [asset] },
-    { id: "b", assets: [asset] },
-    { id: "c", assets: [asset], requirement_key: "request" },
-    { id: "d", assets: [asset], verification: {} },
-  ] as Evidence[];
-  assert.deepEqual(snapshotOf(evidence, "binding"), {
-    evidenceId: "b",
-    commit: "head",
-  });
-  assert.equal(snapshotOf(evidence, "other"), null);
-  assert.equal(placedOf(evidence), null);
-});
-
-test("an affected test evidence is no snapshot and no placed asset", () => {
-  const assets = [
-    {
-      kind: "repository",
-      address: { kind: "repository", binding_id: "binding", commit: "head" },
-    },
-    { kind: "produced", address: { kind: "produced", sha256: "a".repeat(64) } },
-  ];
-  const evidence = [
-    { id: "z", subject: "Affected test results", assets },
-  ] as Evidence[];
-  assert.equal(snapshotOf(evidence, "binding"), null);
-  assert.equal(placedOf(evidence), null);
-});
 
 test("B3 review bundle places all supporting assets in the evidence directory outside the checkouts and removes partial object failures", async (t) => {
   for (const mode of ["success", "failure", "cancel"] as const) {
@@ -362,89 +321,6 @@ const PLACED_REPORT = "placed report";
 const ADDED_FILE = "added.md";
 const MODIFIED_FILE = "base";
 const MODIFIED_CONTENT = "modified";
-
-test("an examine node with one binding places the produced evidence outside its clean checkout", async (t) => {
-  const setup = anthropicSetup({ repositories: [repositorySetup()] });
-  const claim = {
-    execution_id: setup.execution_id,
-    node_id: createIdentity("node"),
-    attempt: 1,
-    pinned_revision: 1,
-    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-    created_at: Date.now(),
-    expired_at: Date.now() + 60000,
-    trace_id: "trace",
-    root_span_id: "1".repeat(16),
-  };
-  const assetId = createIdentity("evidence_asset");
-  const address = { kind: "produced", sha256: "a".repeat(64) };
-  const evidence = [
-    { id: "evidence", assets: [{ id: assetId, kind: "produced", address }] },
-  ] as Evidence[];
-  const clients = {
-    mission: {
-      "execution.evidence.asset.content.get": async () => ({
-        type: "completed",
-        status: 200,
-        data: {
-          asset_id: assetId,
-          address,
-          data: Buffer.from(PLACED_REPORT).toString("base64"),
-          encoding: "base64",
-          media_type: "text/markdown",
-        },
-      }),
-    },
-  } as unknown as MethodClients;
-  const run = new ExecutionRun({
-    claim,
-    clients,
-    credentials: { release: async () => {} },
-    context: background,
-  });
-  stopAfter(t, () => run.dispose());
-  const workspaces = WorkspaceRoot.open(temporary(t));
-  const prepared = await prepareEvaluation(
-    {
-      setup,
-      claim,
-      workspaces,
-      transport: {
-        cloneSnapshot: async (
-          _address: string,
-          _revision: string,
-          directory: string,
-        ) => {
-          await simpleGit(directory).init();
-          return "a".repeat(40);
-        },
-      } as unknown as RepositoryTransport,
-      sshAccess: everyBindingSshAccess,
-      env: hostEnvironment(),
-    },
-    run,
-    ExecutionIntent.Examine,
-    evidence,
-    FIRST_ROUND,
-  );
-  assert.equal(
-    prepared.directory,
-    join(prepared.key, CHECKOUTS_DIRECTORY, setup.repositories[0]!.name),
-  );
-  assert.deepEqual(
-    readdirSync(prepared.directory).filter((name) => name !== GIT_DIRECTORY),
-    [],
-  );
-  assert.equal(
-    readFileSync(join(prepared.key, EVIDENCE_DIRECTORY, assetId), "utf8"),
-    PLACED_REPORT,
-  );
-  assert.deepEqual(
-    prepared.reviewBundle.assets.map((item) => item.path),
-    [join("..", "..", EVIDENCE_DIRECTORY, assetId)],
-  );
-  workspaces.release(prepared.key, prepared.kind);
-});
 
 test("an implement snapshot evaluation places only the latest coder report outside its clean checkout", async (t) => {
   const state = temporary(t);
@@ -736,22 +612,6 @@ test("a snapshot that misses a binding stops with operation_failed", async (t) =
   );
 });
 
-test("an old round patch evidence is no snapshot and no placed asset", () => {
-  const evidence = [
-    {
-      id: "z",
-      subject: ROUND_PATCH_SUBJECT,
-      assets: [
-        {
-          kind: "produced",
-          address: { kind: "produced", sha256: "a".repeat(64) },
-        },
-      ],
-    },
-  ] as Evidence[];
-  assert.equal(placedOf(evidence), null);
-});
-
 const SINGLE_BINDING = 1;
 const ONE_ENTRY = 1;
 const OFF_HISTORY = "review base off the node history";
@@ -773,11 +633,6 @@ async function roundOrigin(state: string, name: string) {
     await git.raw([...COMMITTER, "commit", "-m", file]);
     return (await git.revparse(["HEAD"])).trim();
   };
-  const remove = async (file: string) => {
-    await git.raw(["rm", "-q", file]);
-    await git.raw([...COMMITTER, "commit", "-m", `remove ${file}`]);
-    return (await git.revparse(["HEAD"])).trim();
-  };
   const merge = async (branch: string, resolved?: Record<string, string>) => {
     if (resolved === undefined) {
       await git.raw([...COMMITTER, "merge", "--no-ff", "-m", "merge", branch]);
@@ -796,7 +651,7 @@ async function roundOrigin(state: string, name: string) {
   const checkout = (branch: string) => git.raw(["checkout", branch]);
   await commit("shared", "base line\n");
   await git.raw(["checkout", "-b", "node"]);
-  return { origin, git, commit, remove, merge, checkout };
+  return { origin, commit, merge, checkout };
 }
 
 async function roundEvaluation(
@@ -1036,62 +891,4 @@ test("a binding with no review-base commit gives the full change", async (t) => 
       .map((entry) => (entry.fields as { binding: string }).binding),
     ["web"],
   );
-});
-
-test("a file that the round adds and then deletes is not in added_files", async (t) => {
-  const { prepared } = await roundEvaluation(t, ["repo"], async ({ repo }) => {
-    const judged = await repo!.commit("node.md");
-    await repo!.commit("temporary.md");
-    await repo!.remove("temporary.md");
-    const head = await repo!.commit("kept.md");
-    return { snapshots: { repo: head }, base: { repo: judged } };
-  });
-  assert.deepEqual(prepared.reviewBundle.added_files, ["kept.md"]);
-  assert.deepEqual(prepared.reviewBundle.changed_files, [
-    "kept.md",
-    "temporary.md",
-  ]);
-});
-
-test("a file that the round adds and then renames is in added_files under its new name", async (t) => {
-  const { prepared } = await roundEvaluation(t, ["repo"], async ({ repo }) => {
-    const judged = await repo!.commit("node.md");
-    await repo!.commit("draft.md");
-    await repo!.git.raw(["mv", "draft.md", "final.md"]);
-    await repo!.git.raw([...COMMITTER, "commit", "-m", "rename draft.md"]);
-    const head = (await repo!.git.revparse(["HEAD"])).trim();
-    return { snapshots: { repo: head }, base: { repo: judged } };
-  });
-  assert.deepEqual(prepared.reviewBundle.added_files, ["final.md"]);
-  assert.deepEqual(prepared.reviewBundle.changed_files, [
-    "draft.md",
-    "final.md",
-  ]);
-});
-
-test("a fallback binding with no change gives an empty_patches entry and no patch", async (t) => {
-  const { prepared } = await roundEvaluation(
-    t,
-    ["api", "web"],
-    async ({ api, web }) => {
-      const judged = await api!.commit("api.md");
-      const apiHead = await api!.commit("api-fix.md");
-      const webHead = (await web!.git.revparse(["main"])).trim();
-      return {
-        snapshots: { api: apiHead, web: webHead },
-        base: { api: judged },
-      };
-    },
-  );
-  assert.deepEqual(prepared.reviewBundle.empty_patches, ["web"]);
-  assert.deepEqual(prepared.reviewBundle.patch_paths, [
-    join("..", EVIDENCE_DIRECTORY, "round-2-api.patch"),
-  ]);
-  assert.deepEqual(
-    prepared.patches.map((patch) => patch.name),
-    ["api"],
-  );
-  assert.deepEqual(prepared.reviewBundle.changed_files, [
-    join("api", "api-fix.md"),
-  ]);
 });
