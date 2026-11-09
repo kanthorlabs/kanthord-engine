@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { readdirSync, rmSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import type { Context } from "../../kernel/context.ts";
 import { ensureDirectory } from "../../kernel/files.ts";
@@ -18,7 +18,13 @@ import {
   affectedRevisionInstruction,
   releaseRevisionInstruction,
 } from "./judgement.ts";
-import { checkoutDetached, cloneLocal, matchRemote } from "./local-git.ts";
+import {
+  checkoutDetached,
+  cloneLocal,
+  fetchLocal,
+  matchRemote,
+  scrubTree,
+} from "./local-git.ts";
 import {
   environmentDigestsOf,
   testedCommitOf,
@@ -41,6 +47,8 @@ import { verificationFactsOf } from "./progress-rule.ts";
 import { CHECKOUTS_DIRECTORY, RELEASE_DIRECTORY } from "./workspace.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { SetupEnd, type SetupEntry, setUpHeads } from "./environment-setup.ts";
+import { readSetupRecord } from "./setup-record.ts";
+import { PoolClass, prepareTree } from "./tree-pool.ts";
 
 const EXIT_SUCCESS = 0;
 const NOT_FOUND = -1;
@@ -49,6 +57,10 @@ const PARENT = "..";
 const RELEASE_GATE_RESULT = "kanthord.release_gate.result";
 const RELEASE_GATE_UNIT_ID = "kanthord.release_gate.unit_id";
 const RELEASE_GATE_AFFECTED = "kanthord.release_gate.affected";
+const TREE_PREPARED = "tree prepared";
+const TREE_DELETED = "tree deleted";
+const RELEASE_PURPOSE = "release";
+const NO_REFS: readonly string[] = [];
 
 export const ReleaseGateKind = {
   Passed: "passed",
@@ -256,7 +268,6 @@ async function verifyInReleaseClones(
   const base = join(key, RELEASE_DIRECTORY);
   const cleanup = state.agent.budget.cleanupContext(state.run.operationContext);
   try {
-    rmSync(base, { recursive: true, force: true });
     const directory = await buildReleaseClones(state, key, base, cleanup);
     const setup = await setUpReleaseClones(state, key, base);
     if (setup !== null) return setup;
@@ -294,8 +305,11 @@ async function verifyInReleaseClones(
       };
     return { ...listed, affected };
   } finally {
-    rmSync(base, { recursive: true, force: true });
-    cleanup.cancel();
+    try {
+      giveReleaseTrees(state, key, base);
+    } finally {
+      cleanup.cancel();
+    }
   }
 }
 
@@ -337,6 +351,23 @@ async function runAffectedChecks(
   };
 }
 
+function giveReleaseTrees(state: StepsState, key: string, base: string): void {
+  const checkouts = join(key, CHECKOUTS_DIRECTORY);
+  for (const checkout of state.checkouts) {
+    const tree = join(base, layoutOf(checkouts, checkout.directory));
+    const code = state.input.workspaces.pool.giveBack(
+      {
+        address: repositoryOf(state, checkout).address,
+        poolClass: PoolClass.Command,
+      },
+      tree,
+      state.input.claim.node_id,
+    );
+    if (code !== null) state.run.log(TREE_DELETED, { path: tree, code });
+  }
+  rmSync(base, { recursive: true, force: true });
+}
+
 async function buildReleaseClones(
   state: StepsState,
   key: string,
@@ -346,30 +377,72 @@ async function buildReleaseClones(
   const checkouts = join(key, CHECKOUTS_DIRECTORY);
   const remaining = () => state.input.claim.expired_at - Date.now();
   ensureDirectory(base);
+  const current = new Set(
+    state.checkouts.map((checkout) => layoutOf(checkouts, checkout.directory)),
+  );
+  for (const name of readdirSync(base))
+    if (!current.has(name))
+      rmSync(join(base, name), { recursive: true, force: true });
   for (const checkout of state.checkouts) {
     const directory = join(base, layoutOf(checkouts, checkout.directory));
-    await cloneLocal(
-      state.input.env,
-      checkout.directory,
-      directory,
+    const address = repositoryOf(state, checkout).address;
+    const env = state.input.env;
+    rmSync(directory, { recursive: true, force: true });
+    const { source } = await prepareTree({
+      pool: state.input.workspaces.pool,
+      address,
+      poolClass: PoolClass.Command,
+      target: directory,
+      nodeId: state.input.claim.node_id,
+      keepRefs: NO_REFS,
+      env,
       context,
-      remaining(),
-    );
-    await matchRemote(
-      state.input.env,
-      directory,
-      checkout.directory,
-      repositoryOf(state, checkout).address,
-      context,
-      remaining(),
-    );
-    await checkoutDetached(
-      state.input.env,
-      directory,
-      checkout.head,
-      context,
-      remaining(),
-    );
+      deadlineMs: remaining(),
+      fresh: async () => {
+        await cloneLocal(
+          env,
+          checkout.directory,
+          directory,
+          context,
+          remaining(),
+        );
+        await matchRemote(
+          env,
+          directory,
+          checkout.directory,
+          address,
+          context,
+          remaining(),
+        );
+        await checkoutDetached(
+          env,
+          directory,
+          checkout.head,
+          context,
+          remaining(),
+        );
+      },
+      reuse: async () => {
+        await matchRemote(
+          env,
+          directory,
+          checkout.directory,
+          address,
+          context,
+          remaining(),
+        );
+        const call = () => ({
+          env,
+          directory,
+          context,
+          deadlineMs: remaining(),
+        });
+        await fetchLocal(call(), checkout.directory);
+        const record = await readSetupRecord(call());
+        await scrubTree(call(), checkout.head, record?.roots ?? []);
+      },
+    });
+    state.run.log(TREE_PREPARED, { purpose: RELEASE_PURPOSE, source });
   }
   return join(base, layoutOf(checkouts, state.root));
 }

@@ -17,9 +17,9 @@ import type { Context } from "../../kernel/context.ts";
 import type { ExecutionSetup, RepositoryTransport } from "../contract.ts";
 import type { SshAccess, SshSigner } from "../../repository/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
-import { cleanExcludes } from "./local-git.ts";
+import { cleanExcludes, originAddress } from "./local-git.ts";
 import { readSetupRecord } from "./setup-record.ts";
-import { POOL_DIRECTORY, TreePool } from "./tree-pool.ts";
+import { isTree, POOL_DIRECTORY, PoolClass, TreePool } from "./tree-pool.ts";
 import type { HandoverSshIdentity } from "../../custody/contract.ts";
 
 export const WORKSPACES_DIRECTORY = "workspaces";
@@ -28,6 +28,7 @@ const GIT_EXCLUDE = [".git", "info", "exclude"];
 export const CHECKOUTS_DIRECTORY = "checkouts";
 export const RELEASE_DIRECTORY = "release";
 export const EVIDENCE_DIRECTORY = "evidence";
+const TREE_DELETED = "tree deleted";
 const NO_CHECKOUTS = 0;
 const SINGLE_CHECKOUT = 1;
 const FIRST_CHECKOUT = 0;
@@ -155,6 +156,7 @@ export class WorkspaceRoot {
       nodeBranch: string;
       pushed: ReadonlySet<string>;
       repositories: readonly WorkspaceRepository[];
+      log?: (msg: string, fields: Record<string, unknown>) => void;
     },
   ): Promise<{ root: string; checkouts: WorkspaceCheckout[] }> {
     assert.ok(input.repositories.length > NO_CHECKOUTS);
@@ -165,7 +167,8 @@ export class WorkspaceRoot {
     try {
       ensureDirectory(key);
       this.touch(key);
-      rmSync(join(key, RELEASE_DIRECTORY), { recursive: true, force: true });
+      if (existsSync(join(key, RELEASE_DIRECTORY)))
+        await this.giveReleaseTrees(key, input, end);
       const checkouts: WorkspaceCheckout[] = [];
       for (const repository of input.repositories) {
         const directory = this.nodeDirectory(input.nodeId, repository.name);
@@ -222,6 +225,39 @@ export class WorkspaceRoot {
         rmSync(directory, { recursive: true, force: true });
       throw error;
     }
+  }
+  private async giveReleaseTrees(
+    key: string,
+    input: Preparation & {
+      env: NodeJS.ProcessEnv;
+      nodeId: string;
+      repositories: readonly WorkspaceRepository[];
+      log?: (msg: string, fields: Record<string, unknown>) => void;
+    },
+    end: number,
+  ): Promise<void> {
+    const release = join(key, RELEASE_DIRECTORY);
+    for (const repository of input.repositories) {
+      const tree = join(release, bindingNameSchema.parse(repository.name));
+      if (!isTree(tree)) continue;
+      const address = await originAddress({
+        env: input.env,
+        directory: tree,
+        context: input.context,
+        deadlineMs: end - performance.now(),
+      }).catch((error: unknown) => {
+        if (input.context.signal.aborted) throw error;
+        return null;
+      });
+      if (address !== repository.address) continue;
+      const code = this.pool.giveBack(
+        { address: repository.address, poolClass: PoolClass.Command },
+        tree,
+        input.nodeId,
+      );
+      if (code !== null) input.log?.(TREE_DELETED, { path: tree, code });
+    }
+    rmSync(release, { recursive: true, force: true });
   }
   async prepareSnapshots(
     input: Preparation & {
