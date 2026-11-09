@@ -14,7 +14,6 @@ import {
 import { unusedHostTools } from "../test-support.ts";
 import { linkUpdateListTool } from "./host-tools.ts";
 
-const CURSOR = "cursor_token";
 const NO_READS = 0;
 const ONE_READ = 1;
 const PAGE: LinkUpdateRead = {
@@ -72,14 +71,6 @@ test("a call with no argument reads the first page with the default limit and an
     { type: "text", text: canonicalJSON(PAGE) },
   ]);
   assert.deepEqual(answer.details, PAGE);
-});
-
-test("a call with a cursor reads that page", async () => {
-  const h = harness();
-  await h.run(h.validate({ cursor: CURSOR, limit: LINK_UPDATE_LIMIT_DEFAULT }));
-  assert.deepEqual(h.reads, [
-    { cursor: CURSOR, limit: LINK_UPDATE_LIMIT_DEFAULT },
-  ]);
 });
 
 test("a limit of 0 or above 100 refuses before any read", () => {

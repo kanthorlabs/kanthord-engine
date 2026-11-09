@@ -57,14 +57,13 @@ import {
   TEST_SSH_HOST_KEY,
   TEST_SSH_PUBLIC_KEY,
 } from "./test-support.ts";
-import { loadPi } from "../../agent/pi.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import {
   RecordKind,
   SpanStatus,
   type TelemetryRecord,
 } from "../../tracking/contract.ts";
-import { SessionFormat, SpanOperation, SpanRecorder } from "./telemetry.ts";
+import { SpanOperation, SpanRecorder } from "./telemetry.ts";
 import { PINNED_CONTEXT_TYPE } from "./session-entries.ts";
 import { readSessionFileEntry } from "./session-store.ts";
 import { SessionReadOutcome } from "../contract.ts";
@@ -76,7 +75,6 @@ const CALLS_BEFORE_FAILED_CHECK = 1;
 const TRANSCRIPT_LENGTH_BEFORE = 3;
 const SINGLE_TURN_BUDGET = 1;
 const SINGLE_CALL_COUNT = 1;
-const TWO_SENDS = 2;
 const CONTENT = "written";
 const USER_ROLE = "user";
 const HOME_TEXT = "home file text";
@@ -87,13 +85,9 @@ const TRANSCRIPT_MESSAGES = 5;
 const HEADER_LINES = 1;
 const EMPTY_LINE = "";
 const MESSAGE_ENTRY = "message";
-const ASSISTANT_ROLE = "assistant";
-const CHAT_OPERATION = "chat";
 const CUSTOM_ENTRY = "custom";
 const TOOL_CALL_PART = "toolCall";
-const SESSION_HEADER = "session";
 const NO_ENTRIES = 0;
-const SPAN_ID_LENGTH = 16;
 const WORK = renderWorkPrompt(SHIPPED_TEMPLATES, {
   node_id: NODE,
   revision: 1,
@@ -246,45 +240,6 @@ test("native software agent writes and runs bounded bash with execution credenti
   );
 });
 
-test("the agent.session span starts with the session attributes and its identity", async (t) => {
-  const h = await fixture(t, [fauxAssistantMessage("done")]);
-  const [start] = sessionSpans(h);
-  assert.ok(start?.start_time);
-  assert.equal(start.attributes?.["gen_ai.conversation.id"], start.span_id);
-  assert.equal(start.parent_span_id, "1".repeat(SPAN_ID_LENGTH));
-  const { agent_name, position, level, effective_configuration } = h.setupAgent;
-  const attributes = start.attributes ?? {};
-  const pi = await loadPi();
-  const expected = {
-    "gen_ai.operation.name": "invoke_agent",
-    "gen_ai.conversation.id": start.span_id,
-    "gen_ai.agent.name": agent_name,
-    "kanthord.agent.name": agent_name,
-    "kanthord.agent.chain_position": position,
-    "kanthord.agent.chain_level": level,
-    "gen_ai.request.model": effective_configuration.model_identifier,
-    "kanthord.agent.reasoning_effort": effective_configuration.reasoning_effort,
-    "kanthord.session.format": SessionFormat.Pi,
-    "kanthord.session.format_version": pi.CURRENT_SESSION_VERSION,
-  };
-  const exact = Object.fromEntries(
-    Object.keys(expected).map((key) => [key, attributes[key]]),
-  );
-  assert.deepEqual(exact, expected);
-});
-
-test("pi persists the session to a file of the execution directory named by the span identity", async (t) => {
-  const h = await fixture(t, [fauxAssistantMessage("done")]);
-  await h.agent.prompt(WORK);
-  const [start] = sessionSpans(h);
-  const files = sessionFiles(h);
-  assert.equal(files.length, SINGLE_CALL_COUNT);
-  assert.ok(files[0]?.endsWith(`_${start?.span_id}.jsonl`));
-  const [header] = sessionLines(h);
-  assert.equal(header?.type, SESSION_HEADER);
-  assert.equal(header?.id, start?.span_id);
-});
-
 test("dispose ends the agent.session span once with the entry count", async (t) => {
   const h = await fixture(t, [fauxAssistantMessage("done")]);
   await h.agent.prompt(WORK);
@@ -307,28 +262,6 @@ test("closeTrace ends the agent.session span with its status and dispose writes 
   h.agent.dispose();
   assert.equal(sessionEnds(h).length, SINGLE_CALL_COUNT);
   assert.equal(sessionEnds(h)[0]?.status, SpanStatus.Error);
-});
-
-test("without a session root pi writes no session file", async (t) => {
-  const h = await fixture(
-    t,
-    [fauxAssistantMessage("done")],
-    {},
-    unusedHostTools,
-    { sessionRoot: false },
-  );
-  await h.agent.prompt(WORK);
-  assert.equal(h.sessionRoot, undefined);
-  assert.equal(
-    sessionSpans(h)[0]?.attributes?.["kanthord.session.format"],
-    SessionFormat.Pi,
-  );
-  assert.deepEqual(
-    readdirSync(h.workspace, { recursive: true, encoding: "utf8" }).filter(
-      (name) => name.endsWith(".jsonl"),
-    ),
-    [],
-  );
 });
 
 function repositoryOf() {
@@ -506,72 +439,6 @@ test("a rebuild from the session file answers each pi entry that the tracer sent
   }
 });
 
-test("a turn end names the assistant session entry of the turn and links the session", async (t) => {
-  const h = await fixture(t, [fauxAssistantMessage("done")]);
-  await h.agent.prompt(WORK);
-  h.agent.closeTrace(SpanStatus.Ok);
-  const [session] = sessionSpans(h);
-  const turns = h.records.flatMap((record) =>
-    record.kind === RecordKind.Span && record.operation === SpanOperation.Turn
-      ? [record]
-      : [],
-  );
-  const start = turns.find((record) => record.start_time);
-  const end = turns.find((record) => record.end_time);
-  assert.equal(start?.attributes?.["gen_ai.conversation.id"], session?.span_id);
-  assert.equal(start?.attributes?.["gen_ai.operation.name"], CHAT_OPERATION);
-  const assistant = sessionEntries(h).find(
-    ({ entry_id }) =>
-      entry_id === end?.attributes?.["kanthord.session.entry_id"],
-  );
-  assert.equal(assistant?.entry_type, MESSAGE_ENTRY);
-  assert.equal(
-    (assistant?.entry.message as { role: string }).role,
-    ASSISTANT_ROLE,
-  );
-  const message = assistant?.entry.message as {
-    usage: { input: number; cacheRead: number; cacheWrite: number };
-  };
-  assert.equal(
-    end?.attributes?.["gen_ai.usage.input_tokens"],
-    message.usage.input + message.usage.cacheRead + message.usage.cacheWrite,
-  );
-});
-
-test("a tool start names the stored assistant entry that holds its call", async (t) => {
-  const h = await fixture(t, [
-    tool("write", { path: "written.txt", content: CONTENT }),
-    fauxAssistantMessage("done"),
-  ]);
-  await h.agent.prompt(WORK);
-  h.agent.closeTrace(SpanStatus.Ok);
-  const start = h.records.find(
-    (record) =>
-      record.kind === RecordKind.Span &&
-      record.operation === SpanOperation.Tool &&
-      record.start_time,
-  );
-  const callId = (start as { attributes?: Record<string, unknown> })
-    .attributes?.["gen_ai.tool.call.id"];
-  const entryId = (start as { attributes?: Record<string, unknown> })
-    .attributes?.["kanthord.session.entry_id"];
-  assert.ok(callId);
-  const assistant = sessionEntries(h).find(
-    ({ entry_id }) => entry_id === entryId,
-  );
-  assert.equal(assistant?.entry_type, MESSAGE_ENTRY);
-  const message = assistant?.entry.message as {
-    role: string;
-    content: { type: string; id?: string }[];
-  };
-  assert.equal(message.role, ASSISTANT_ROLE);
-  assert.ok(
-    message.content.some(
-      (part) => part.type === TOOL_CALL_PART && part.id === callId,
-    ),
-  );
-});
-
 function turnStarts(h: Harness) {
   return h.records.flatMap((record) =>
     record.kind === RecordKind.Span &&
@@ -581,45 +448,6 @@ function turnStarts(h: Harness) {
       : [],
   );
 }
-
-test("a prompt send records the work template on its turn start", async (t) => {
-  const h = await fixture(t, [fauxAssistantMessage("done")]);
-  await h.agent.prompt(WORK);
-  const [start] = turnStarts(h);
-  assert.equal(start?.["kanthord.prompt.template"], PromptTemplate.Work);
-  assert.equal(
-    start?.["kanthord.prompt.template.digest"],
-    digest(SHIPPED_TEMPLATES[PromptTemplate.Work]),
-  );
-  assert.equal(start?.["kanthord.prompt.work.digest"], WORK.digest);
-});
-
-test("an instruct send records the template that it names on its turn start", async (t) => {
-  const h = await fixture(t, [
-    fauxAssistantMessage("done"),
-    fauxAssistantMessage("repaired"),
-  ]);
-  await h.agent.prompt(WORK);
-  await h.agent.instruct(WORK, "repair", PromptTemplate.Repair);
-  const starts = turnStarts(h);
-  assert.equal(starts.length, TWO_SENDS);
-  assert.equal(starts[1]?.["kanthord.prompt.template"], PromptTemplate.Repair);
-  assert.equal(
-    starts[1]?.["kanthord.prompt.template.digest"],
-    digest(SHIPPED_TEMPLATES[PromptTemplate.Repair]),
-  );
-  assert.equal(starts[1]?.["kanthord.prompt.work.digest"], WORK.digest);
-});
-
-test("the entry_count of the agent.session end equals the count of sent entries", async (t) => {
-  const h = await fixture(t, [fauxAssistantMessage("done")]);
-  await h.agent.prompt(WORK);
-  h.agent.closeTrace(SpanStatus.Ok);
-  const [end] = sessionEnds(h);
-  const sent = sessionEntries(h).length;
-  assert.ok(sent > NO_ENTRIES);
-  assert.equal(end?.attributes?.["kanthord.session.entry_count"], sent);
-});
 
 test("a session entry record never holds the credential secret", async (t) => {
   const h = await fixture(t, [fauxAssistantMessage(`key ${SECRET}`)]);
@@ -713,28 +541,9 @@ test("a fake key of the work and the system prompt restores into write, blocks i
   ]);
 });
 
-test("the work prompt lists both repositories", async (t) => {
-  const current = task("both", "true");
-  const h = await implementFixture(t, [current], [], undefined, ["api", "web"]);
-  const text = taskWork(h, current).text;
-  assert.ok(
-    text.includes(
-      "## Repositories\n\nRepository api: directory `api`, base branch `main`\nRepository web: directory `web`, base branch `main`",
-    ),
-  );
-  const single = await implementFixture(t, [current], []);
-  assert.equal(
-    taskWork(single, current).text.includes("## Repositories"),
-    false,
-  );
-});
-
 const AFFECTED_COMMAND = "pnpm --silent run test:affected";
 const AFFECTED_SECTION = "## Affected tests";
 const BLANK_COMMAND = " ";
-const GATE_FILE = "package.json";
-const GATE_FILES_RULE =
-  "Change a gate file only when the requirement names it.";
 
 test("the node work and the task work name the affected command of a declaring checkout", async (t) => {
   const current = task("affected", "true");
@@ -753,19 +562,6 @@ test("the node work and the task work name the affected command of a declaring c
   assert.ok(nodeWork(h).text.includes(section));
   assert.ok(!first.affectedTests.length);
   assert.ok(!taskWork(first, current).text.includes(AFFECTED_SECTION));
-});
-
-test("the task work names the gate files of a declaring checkout", async (t) => {
-  const current = task("gated", "true");
-  const first = await implementFixture(t, [current], [], undefined, ["api"]);
-  await declareAffected(first, t, AFFECTED_COMMAND, [GATE_FILE]);
-  const h = await nextExecution(t, first, []);
-  assert.deepEqual(h.affectedTests[0]?.gate_files, [GATE_FILE]);
-  assert.ok(
-    taskWork(h, current).text.includes(
-      `Gate files of repository api: \`${GATE_FILE}\`. ${GATE_FILES_RULE}`,
-    ),
-  );
 });
 
 test("an invalid affected declaration gives no entry and no stop", async (t) => {

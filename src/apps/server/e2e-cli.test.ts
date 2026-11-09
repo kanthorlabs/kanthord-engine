@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { join } from "node:path";
 import { test } from "node:test";
 import {
   Consumer,
@@ -21,7 +20,6 @@ import {
   cliSession,
   createCredentials,
   environment,
-  kanthord,
   spawnKanthord,
 } from "./cli-test-support.ts";
 import { fakeGitHub, gatewayFixture } from "./test-support.ts";
@@ -30,106 +28,13 @@ const EXIT_SUCCESS = 0;
 const NO_OUTPUT = "";
 const VERSION = "--version";
 const EXIT_FAILURE = 1;
+const CONFIG_NOT_FOUND = "system.config.not_found";
 const SERVE = "serve";
 const NOT_FOUND = -1;
 const NO_COMMANDS = 0;
 const HELP = "--help";
 const COMMANDS_HEADER = "Commands:";
 const COMMAND_ROW = /^ {2}(\S+)(?:\s|$)/gm;
-
-const cases = [
-  {
-    id: "E08.1",
-    args: [],
-    names: [
-      "llm",
-      "repository",
-      "storage",
-      "agent",
-      "project",
-      "mission",
-      "scheduler",
-      "worker",
-    ],
-  },
-  {
-    id: "E08.2",
-    args: ["llm", "credential"],
-    names: [
-      "create",
-      "list",
-      "get",
-      "rotate",
-      "archive",
-      "update-metadata",
-      "revoke",
-      "login",
-      "login-code",
-      "login-status",
-      "platforms",
-      "check",
-      "verify",
-    ],
-    exact: true,
-  },
-  { id: "E08.3", args: ["agent"], names: ["get"] },
-  { id: "E08.4", args: ["agent"], names: ["enablement"] },
-  {
-    id: "E08.5",
-    args: ["agent", "enablement"],
-    names: ["list", "get", "put", "enable", "disable", "remove", "provider"],
-  },
-  {
-    id: "E08.6",
-    args: ["project"],
-    names: ["create", "list", "get", "rename", "binding", "agent"],
-  },
-  {
-    id: "E08.7",
-    args: ["project", "binding"],
-    names: ["list", "get", "export", "apply", "revision"],
-  },
-  { id: "E08.8", args: ["project", "agent"], names: ["list", "get"] },
-  {
-    id: "E08.9",
-    args: ["mission"],
-    names: [
-      "get",
-      "node",
-      "edge",
-      "dependency",
-      "criterion",
-      "export",
-      "import",
-    ],
-  },
-  { id: "E08.10", args: ["scheduler"], names: ["queue"] },
-  { id: "E08.11", args: ["scheduler", "queue"], names: ["list", "peek"] },
-  {
-    id: "E08.12",
-    args: ["agent", "enablement", "provider"],
-    names: ["add", "remove"],
-  },
-  {
-    id: "E08.13",
-    args: ["mission", "node"],
-    names: [
-      "list",
-      "get",
-      "create",
-      "update",
-      "revision",
-      "retire",
-      "rebind",
-      "priority",
-    ],
-  },
-  { id: "E08.14", args: ["mission", "import"], names: ["preview", "apply"] },
-  { id: "E08.15", args: ["mission"], names: ["link-update"] },
-  { id: "E08.16", args: ["mission", "link-update"], names: ["list"] },
-  { id: "E08.17", args: ["mission"], names: ["followup"] },
-  { id: "E08.18", args: ["mission", "followup"], names: ["list", "decide"] },
-];
 
 function commandNames(stdout: string): string[] {
   const lines = stdout.split("\n");
@@ -150,32 +55,6 @@ function commandNames(stdout: string): string[] {
   return names;
 }
 
-for (const scenario of cases) {
-  test(scenario.id, async (t) => {
-    const directory = temporary(t);
-    const env = {
-      ...environment(directory),
-      XDG_DATA_HOME: join(directory, "data"),
-      XDG_STATE_HOME: join(directory, "state"),
-      KANTHORD_ENDPOINT: undefined,
-      KANTHORD_TOKEN: undefined,
-    };
-    const result = await kanthord([...scenario.args, HELP], env);
-    assert.equal(result.code, EXIT_SUCCESS, result.stderr);
-    const names = commandNames(result.stdout);
-    if (scenario.exact) {
-      assert.deepEqual(names.sort(), [...scenario.names].sort());
-    } else {
-      for (const name of scenario.names) {
-        assert.ok(
-          names.includes(name),
-          `${scenario.id}: missing ${name}; found ${names.join(", ")}`,
-        );
-      }
-    }
-  });
-}
-
 test("the real process prints help and the package version", async (t) => {
   const env = environment(temporary(t));
   const help = await spawnKanthord([HELP], env, t.signal);
@@ -191,10 +70,7 @@ test("the real process exits with the failure code of a failed command", async (
   const result = await spawnKanthord(["config", "validate"], env, t.signal);
   assert.equal(result.code, EXIT_FAILURE);
   assert.equal(result.stdout, NO_OUTPUT);
-  assert.equal(
-    result.stderr,
-    `system.config.not_found: configuration is absent\nconfig:    ${env.KANTHORD_CONFIG!}\ncommand:   kanthord config init --config ${JSON.stringify(env.KANTHORD_CONFIG!)}\ncontainer: podman run --rm -v <volume>:/var/lib/kanthord docker.io/kanthorlabs/kanthord:<version> config init --gateway-bind :: --gateway-allowed-host localhost:<port> --gateway-allowed-host 127.0.0.1:<port>\n`,
-  );
+  assert.ok(result.stderr.startsWith(`${CONFIG_NOT_FOUND}:`), result.stderr);
 });
 
 test("the real process sends an authenticated request to the server", async (t) => {

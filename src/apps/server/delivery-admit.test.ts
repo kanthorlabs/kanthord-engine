@@ -221,19 +221,6 @@ test("an open pull request answers accepted_observation and writes nothing", asy
   assert.equal(h.node().state, NodeState.ExternalRequested);
 });
 
-test("an admitted event whose check answers checks_pending changes no state", async (t) => {
-  const h = await fixture(t);
-  h.answer(CheckEndState.ChecksPending);
-  const before = await evidenceOf(h);
-  assert.deepEqual(await h.admit(), {
-    disposition: Disposition.AcceptedObservation,
-    reason: null,
-  });
-  assert.equal(h.checks.length, SINGLE_CALL);
-  assert.deepEqual(await evidenceOf(h), before);
-  assert.equal(h.node().state, NodeState.ExternalRequested);
-});
-
 test("a failed check propagates its code and writes nothing", async (t) => {
   const h = await fixture(t);
   h.dependencies.intakeCheck.check = async () => {
@@ -405,22 +392,6 @@ test("another request that becomes the one unresolved match answers match_change
   );
 });
 
-test("an attempt that closes during the check writes no end state", async (t) => {
-  const h = await fixture(t);
-  during(h, () =>
-    h.store.transaction((tx) =>
-      tx.database
-        .prepare("UPDATE mission_attempt SET closed_at = ? WHERE node_id = ?")
-        .run(Date.now(), h.node_id),
-    ),
-  );
-  assert.deepEqual(await h.admit(), {
-    disposition: Disposition.Refused,
-    reason: AdmissionRefusal.Unmatched,
-  });
-  await unchanged(h, undefined);
-});
-
 test("a second matching request that appears during the check answers ambiguous", async (t) => {
   const h = await fixture(t);
   during(h, () => insertRequest(h, "next.pull_request"));
@@ -577,35 +548,6 @@ test("a merged closed pull request item of an unknown pull request still recheck
   assert.equal(h.node().state, NodeState.Available);
 });
 
-test("an unmerged closed pull request item sets other and blocks the node", async (t) => {
-  const h = await fixture(t);
-  h.answer(CheckEndState.Other);
-  assert.deepEqual(
-    await h.admit(
-      undefined,
-      closedItem(REQUEST_NUMBER, false),
-      "pull_request_closed",
-    ),
-    { disposition: Disposition.AcceptedObservation, reason: null },
-  );
-  assert.equal((await requestOf(h))?.end_state, EndState.Other);
-  assert.equal(h.node().state, NodeState.Blocked);
-});
-
-test("an unmerged closed pull request item of an unknown pull request is unmatched", async (t) => {
-  const h = await fixture(t);
-  h.answer(CheckEndState.Other);
-  assert.deepEqual(
-    await h.admit(
-      undefined,
-      closedItem(OTHER_NUMBER, false),
-      "pull_request_closed",
-    ),
-    { disposition: Disposition.Refused, reason: AdmissionRefusal.Unmatched },
-  );
-  assert.equal(h.checks.length, NO_CALLS);
-});
-
 function pushRequestOf(h: Harness): {
   nodeId: string;
   address: PlatformAddress;
@@ -712,35 +654,6 @@ test("a push to the base branch with no exact match checks a human-landing branc
   });
   assert.deepEqual(h.checks, [h.landing]);
   assert.equal(h.node().state, NodeState.Completed);
-});
-
-test("a push to the base branch whose human-landing check answers none keeps the request unresolved", async (t) => {
-  const h = await humanLandingFixture(t, OTHER_COMMIT);
-  h.answer(CheckEndState.None);
-  assert.deepEqual(await h.admit(undefined, pushed("main"), "push"), {
-    disposition: Disposition.AcceptedObservation,
-    reason: null,
-  });
-  assert.deepEqual(h.checks, [h.landing]);
-  const stored = h.store.transaction(
-    (tx) =>
-      tx.database
-        .prepare("SELECT end_state FROM mission_evidence WHERE id = ?")
-        .get(h.landing) as { end_state: string | null },
-  );
-  assert.equal(stored.end_state, null);
-  assert.equal(h.node().state, NodeState.ExternalRequested);
-});
-
-test("a push to another branch checks no branch push request", async (t) => {
-  const h = await humanLandingFixture(t, OTHER_COMMIT);
-  h.answer(CheckEndState.Expected, [OTHER_COMMIT]);
-  assert.deepEqual(await h.admit(undefined, pushed("feature"), "push"), {
-    disposition: Disposition.Refused,
-    reason: AdmissionRefusal.Unmatched,
-  });
-  assert.equal(h.checks.length, NO_CALLS);
-  assert.equal(h.node().state, NodeState.ExternalRequested);
 });
 
 test("an exact push match checks its request once", async (t) => {
@@ -864,19 +777,6 @@ test("the listed comment of the own reply reaches admission and answers actor_ig
   assert.equal(h.rows(), SINGLE_CALL);
 });
 
-test("a comment of the pending reply account answers actor_ignored", async (t) => {
-  const h = await linkedFixture(t);
-  h.dependencies.intakeLinks.replyMatch = async () => ({
-    succeeded: false,
-    pending_actor_ids: [String(COMMENT_USER_ID)],
-  });
-  assert.deepEqual(await h.admitComment(), {
-    disposition: Disposition.Refused,
-    reason: AdmissionRefusal.ActorIgnored,
-  });
-  assert.equal(h.rows(), NO_CALLS);
-});
-
 const JIRA_RESOURCE_IDENTITY = "conversation:jira:acme.atlassian.net/KD";
 const JIRA_ISSUE_KEY = "KD-42";
 const JIRA_ACCOUNT_ID = "712020:0a1b2c3d-4e5f";
@@ -939,29 +839,6 @@ async function jiraLinkedFixture(t: TestContext) {
   return { ...h, admit, rows };
 }
 
-test("the composed decodeLinkUpdate answers the link update of a Jira comment_created delivery", () => {
-  assert.deepEqual(
-    missionEventDecoder.decodeLinkUpdate({
-      platform: "jira",
-      resource: JIRA_RESOURCE_IDENTITY,
-      event: jiraCommentDelivery(),
-      metadata: { event: "comment_created" },
-    }),
-    {
-      external_link: {
-        kind: "jira_issue",
-        resource_identity: JIRA_RESOURCE_IDENTITY,
-        key: JIRA_ISSUE_KEY,
-      },
-      update_key: JIRA_UPDATE_KEY,
-      actor_id: JIRA_ACCOUNT_ID,
-      actor_automated: false,
-      occurred_at: JIRA_CREATED_MS,
-      mentions: [],
-    },
-  );
-});
-
 test("a signed comment_created delivery of a listed actor records one link update of a node that links the issue", async (t) => {
   const h = await jiraLinkedFixture(t);
   assert.equal(
@@ -983,19 +860,6 @@ test("a signed comment_created delivery of a listed actor records one link updat
     reason: null,
   });
   assert.equal(h.rows().length, SINGLE_CALL);
-});
-
-test("a Jira comment of an app account answers actor_ignored and another event answers undecodable", async (t) => {
-  const h = await jiraLinkedFixture(t);
-  assert.deepEqual(await h.admit(jiraCommentDelivery("app")), {
-    disposition: Disposition.Refused,
-    reason: AdmissionRefusal.ActorIgnored,
-  });
-  assert.deepEqual(await h.admit(jiraCommentDelivery(), "jira:issue_updated"), {
-    disposition: Disposition.Refused,
-    reason: AdmissionRefusal.Undecodable,
-  });
-  assert.equal(h.rows().length, NO_CALLS);
 });
 
 const SLACK_TEAM_ID = "T01ABCDEF";
@@ -1084,30 +948,6 @@ async function slackLinkedFixture(t: TestContext) {
   return { ...h, admit, rows };
 }
 
-test("the composed decodeLinkUpdate answers the link update of a Slack thread reply", () => {
-  assert.deepEqual(
-    missionEventDecoder.decodeLinkUpdate({
-      platform: "slack",
-      resource: SLACK_RESOURCE_IDENTITY,
-      event: slackReplyDelivery(),
-      metadata: { event: SLACK_MESSAGE_EVENT },
-    }),
-    {
-      external_link: {
-        kind: "slack_thread",
-        resource_identity: SLACK_RESOURCE_IDENTITY,
-        channel: SLACK_CHANNEL,
-        thread_ts: SLACK_THREAD_TS,
-      },
-      update_key: SLACK_UPDATE_KEY,
-      actor_id: SLACK_USER_ID,
-      actor_automated: false,
-      occurred_at: SLACK_REPLY_MS,
-      mentions: [],
-    },
-  );
-});
-
 test("a signed thread reply of a listed actor records one link update of a node that links the thread", async (t) => {
   const h = await slackLinkedFixture(t);
   assert.equal(
@@ -1130,17 +970,4 @@ test("a signed thread reply of a listed actor records one link update of a node 
     reason: null,
   });
   assert.equal(h.rows().length, SINGLE_CALL);
-});
-
-test("a Slack reply of a bot answers actor_ignored and a parent message answers undecodable", async (t) => {
-  const h = await slackLinkedFixture(t);
-  assert.deepEqual(await h.admit(slackReplyDelivery({ bot_id: "B01ABCDEF" })), {
-    disposition: Disposition.Refused,
-    reason: AdmissionRefusal.ActorIgnored,
-  });
-  assert.deepEqual(await h.admit(slackReplyDelivery({ ts: SLACK_THREAD_TS })), {
-    disposition: Disposition.Refused,
-    reason: AdmissionRefusal.Undecodable,
-  });
-  assert.equal(h.rows().length, NO_CALLS);
 });

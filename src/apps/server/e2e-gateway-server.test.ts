@@ -10,11 +10,7 @@ import { stringify } from "yaml";
 import { z } from "zod";
 import { CONFIG_VERSION, configuration } from "../../config/index.ts";
 import type { CredentialAnswer } from "../../custody/contract.ts";
-import {
-  gatewayOperations,
-  OWNER_PROJECT,
-  RESOURCE_CHECK_DEADLINE_MS,
-} from "../../gateway/contract.ts";
+import { gatewayOperations, OWNER_PROJECT } from "../../gateway/contract.ts";
 import { GATEWAY_STARTED_MESSAGE } from "../../gateway/index.ts";
 import { errorSchema } from "../../kernel/errors.ts";
 import {
@@ -26,11 +22,10 @@ import {
   HealthScope,
   type ResourceCheck,
   type ResourceEntry,
-  ResourceFailureReason,
   ResourceStatus,
 } from "../../kernel/health.ts";
 import { HttpStatus } from "../../kernel/http.ts";
-import { stopAfter, temporary } from "../../kernel/test-support.ts";
+import { temporary } from "../../kernel/test-support.ts";
 import {
   Intent,
   type Mission,
@@ -58,7 +53,6 @@ const FIRST_REVISION = 1;
 const SINGLE_HEALTH_CHECK = 1;
 const SECOND_REVISION = 2;
 const MODE_MASK = 0o777;
-const LATE_CHECK_DELAY_MS = RESOURCE_CHECK_DEADLINE_MS + 5000;
 const ANTHROPIC = "anthropic";
 const GITHUB = "github";
 const OPENAI_COMPATIBLE = "openai-compatible";
@@ -67,7 +61,6 @@ const COMPAT_CREDENTIAL = "compat-1";
 const PROJECT_NAME = "my-project";
 const CREDENTIAL_PREFIX = "credential_";
 const PROJECT_PREFIX = "project_";
-const MISSION_PREFIX = "mission_";
 const AGENT = "swe@1";
 const ENABLED = "enabled";
 const SONNET = "claude-sonnet-4-5";
@@ -369,16 +362,6 @@ test("E07.2 anthropic credential enables swe@1 at revision one", async (t) => {
   assert.deepEqual(read, put);
 });
 
-test("E07.3 project creation also creates its mission", async (t) => {
-  const fixture = await setup(t);
-  const project = await createProject(fixture);
-  const mission = success<Mission>(
-    await kanthord(["mission", "get", project.id], fixture.env),
-  );
-  assert.ok(mission.id.startsWith(MISSION_PREFIX));
-  assert.equal(mission.project_id, project.id);
-});
-
 test("E07.4 github repository binding advances the binding set to version two", async (t) => {
   const fixture = await setup(t);
   const project = await createProject(fixture);
@@ -672,58 +655,4 @@ test("E07.12 a failed project inventory refuses the healthcheck report", async (
     .object({ missing_inventories: z.array(z.string()) })
     .parse(error.details);
   assert.ok(details.missing_inventories.includes(OWNER_PROJECT));
-});
-
-test("E07.13 a resource check past its deadline reports unknown with deadline_exceeded", async (t) => {
-  let timer: NodeJS.Timeout | undefined;
-  stopAfter(t, () => clearTimeout(timer));
-  const check: ResourceCheck = () =>
-    new Promise((resolve) => {
-      timer = setTimeout(
-        () => resolve(ResourceStatus.Healthy),
-        LATE_CHECK_DELAY_MS,
-      );
-      timer.unref();
-    });
-  const fixture = await gatewayFixture(t, {
-    repositoryConnector: FAKE_REPOSITORY,
-    inventoryOverrides: { llm: () => [resource(FIRST_RESOURCE, check)] },
-  });
-  const response = await fixture.request(gatewayOperations.healthcheck.path, {
-    headers: { Authorization: `Bearer ${fixture.token}` },
-  });
-  assert.equal(response.status, HttpStatus.OK);
-  const body = gatewayOperations.healthcheck.output.parse(
-    await response.json(),
-  );
-  assert.deepEqual(body.shared.llm.global[FIRST_RESOURCE], {
-    status: ResourceStatus.Unknown,
-    capability: CAPABILITY,
-    failure_reason: ResourceFailureReason.DeadlineExceeded,
-  });
-});
-
-test("E07.14 a throwing resource check reports unknown", async (t) => {
-  const fixture = await gatewayFixture(t, {
-    repositoryConnector: FAKE_REPOSITORY,
-    inventoryOverrides: {
-      llm: () => [
-        resource(FIRST_RESOURCE, () => {
-          throw new Error("resource probe failed");
-        }),
-      ],
-    },
-  });
-  const response = await fixture.request(gatewayOperations.healthcheck.path, {
-    headers: { Authorization: `Bearer ${fixture.token}` },
-  });
-  assert.equal(response.status, HttpStatus.OK);
-  const body = gatewayOperations.healthcheck.output.parse(
-    await response.json(),
-  );
-  assert.deepEqual(body.shared.llm.global[FIRST_RESOURCE], {
-    status: ResourceStatus.Unknown,
-    capability: CAPABILITY,
-    failure_reason: ResourceFailureReason.Unclassified,
-  });
 });

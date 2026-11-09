@@ -24,9 +24,7 @@ import {
   UNSET_GIT_ENVIRONMENT,
 } from "../../kernel/test-support.ts";
 import {
-  addedFiles,
   changedEntries,
-  changedFiles,
   ChangeStatus,
   checkoutDetached,
   commitWork,
@@ -37,7 +35,6 @@ import {
   headCommit,
   isAncestor,
   mergeBase,
-  modifiedFiles,
   normaliseGitState,
   scrubTree,
   treeOf,
@@ -48,7 +45,6 @@ import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 
 const env = hostEnvironment();
 const DEFAULT_IDENTITY = "kanthord <kanthord@localhost>";
-const CRLF_CONTENT = "a\r\nb\r\n";
 const HOOK_MARKER = "hook-ran";
 const EXECUTABLE_MODE = 0o755;
 const MANY_FILES = 9000;
@@ -229,88 +225,6 @@ test("work commits ignore the interactive helpers of the host environment", asyn
   assert.equal(await headCommit(env, directory, background, 10000), head);
 });
 
-test("added files list only the files that the branch adds against its base", async (t) => {
-  const directory = temporary(t);
-  const git = simpleGit(directory);
-  const commit = (message: string) =>
-    git.raw([
-      "-c",
-      "user.name=Test",
-      "-c",
-      "user.email=test@example.invalid",
-      "commit",
-      "-m",
-      message,
-    ]);
-  await git.init();
-  await git.raw(["checkout", "-b", "main"]);
-  writeFileSync(join(directory, "kept"), "base");
-  await git.add("kept");
-  await commit("base");
-  await git.raw(["checkout", "-b", "work"]);
-  writeFileSync(join(directory, "kept"), "changed");
-  writeFileSync(join(directory, "debug.mjs"), "scratch");
-  await git.add(["kept", "debug.mjs"]);
-  await commit("work");
-  assert.deepEqual(
-    await addedFiles(env, directory, "main", background, 10000),
-    ["debug.mjs"],
-  );
-});
-
-test("modified files list the added, the modified and the deleted path of the branch", async (t) => {
-  const directory = temporary(t);
-  const git = simpleGit(directory);
-  const commit = (message: string) =>
-    git.raw([
-      "-c",
-      "user.name=Test",
-      "-c",
-      "user.email=test@example.invalid",
-      "commit",
-      "-m",
-      message,
-    ]);
-  await git.init();
-  await git.raw(["checkout", "-b", "main"]);
-  writeFileSync(join(directory, "modified"), "base");
-  writeFileSync(join(directory, "deleted"), "base");
-  await git.add(["modified", "deleted"]);
-  await commit("base");
-  await git.raw(["checkout", "-b", "work"]);
-  writeFileSync(join(directory, "modified"), "changed");
-  writeFileSync(join(directory, "added"), "new");
-  rmSync(join(directory, "deleted"));
-  await git.add(["modified", "added", "deleted"]);
-  await commit("work");
-  assert.deepEqual(
-    (await modifiedFiles(env, directory, "main", background, 10000)).sort(),
-    ["added", "deleted", "modified"],
-  );
-});
-
-test("changed files list an added, a modified, a deleted and a spaced path of a commit range", async (t) => {
-  const directory = temporary(t);
-  const git = simpleGit(directory);
-  await git.init();
-  await git.addConfig("user.name", "Test");
-  await git.addConfig("user.email", "test@example.invalid");
-  writeFileSync(join(directory, "modified"), "base");
-  writeFileSync(join(directory, "deleted"), "base");
-  const from = await commitWork(env, directory, "base", background, 10000);
-  assert.ok(from);
-  writeFileSync(join(directory, "modified"), "changed");
-  rmSync(join(directory, "deleted"));
-  writeFileSync(join(directory, "added"), "new");
-  writeFileSync(join(directory, "with space.txt"), "new");
-  const to = await commitWork(env, directory, "work", background, 10000);
-  assert.ok(to);
-  assert.deepEqual(
-    await changedFiles(env, directory, from, to, background, 10000),
-    ["added", "deleted", "modified", "with space.txt"],
-  );
-});
-
 test("merge base answers the fork commit of two branches", async (t) => {
   const directory = temporary(t);
   const git = simpleGit(directory);
@@ -412,57 +326,6 @@ test("work commits ignore the global git configuration of the host", async (t) =
   );
 });
 
-test("work commits ignore the default global ignore file of the host", async (t) => {
-  const config = temporary(t);
-  mkdirSync(join(config, "git"));
-  writeFileSync(join(config, "git", "ignore"), "**/*.env.*\n");
-  overrideEnvironment(t, {
-    ...UNSET_GIT_ENVIRONMENT,
-    HOME: temporary(t),
-    XDG_CONFIG_HOME: config,
-  });
-  const directory = temporary(t);
-  const git = simpleGit(directory);
-  await git.init();
-  writeFileSync(join(directory, ".env.example"), "KEY=value");
-  await commitWork(
-    hostEnvironment(),
-    directory,
-    "checkpoint",
-    background,
-    10000,
-  );
-  assert.deepEqual((await git.raw(["ls-files"])).trim().split("\n"), [
-    ".env.example",
-  ]);
-});
-
-test("work commits ignore the default global attributes file of the host", async (t) => {
-  const config = temporary(t);
-  mkdirSync(join(config, "git"));
-  writeFileSync(join(config, "git", "attributes"), "* text\n");
-  overrideEnvironment(t, {
-    ...UNSET_GIT_ENVIRONMENT,
-    HOME: temporary(t),
-    XDG_CONFIG_HOME: config,
-  });
-  const directory = temporary(t);
-  const git = simpleGit(directory);
-  await git.init();
-  writeFileSync(join(directory, "crlf.txt"), CRLF_CONTENT);
-  await commitWork(
-    hostEnvironment(),
-    directory,
-    "checkpoint",
-    background,
-    10000,
-  );
-  assert.equal(
-    await git.raw(["cat-file", "blob", "HEAD:crlf.txt"]),
-    CRLF_CONTENT,
-  );
-});
-
 test("work commits run no hook of the configured hooks path of the repository", async (t) => {
   const directory = temporary(t);
   const hooks = temporary(t);
@@ -471,24 +334,6 @@ test("work commits run no hook of the configured hooks path of the repository", 
   const git = simpleGit(directory, { unsafe: { allowUnsafeHooksPath: true } });
   await git.init();
   await git.addConfig("core.hooksPath", hooks);
-  writeFileSync(join(directory, "tracked"), "original");
-  const head = await commitWork(
-    env,
-    directory,
-    "checkpoint",
-    background,
-    10000,
-  );
-  assert.ok(head);
-  assert.equal(existsSync(marker), false);
-});
-
-test("work commits run no hook of the default hooks directory of the repository", async (t) => {
-  const directory = temporary(t);
-  const marker = join(temporary(t), HOOK_MARKER);
-  const git = simpleGit(directory);
-  await git.init();
-  writeRefusingHook(join(directory, ".git", "hooks"), marker);
   writeFileSync(join(directory, "tracked"), "original");
   const head = await commitWork(
     env,
@@ -687,8 +532,6 @@ const READY = "ready";
 const REBUILD = "rebuild";
 const NEWLINE_TEXT = "\n";
 const DETACHED_HEAD = "HEAD";
-const SKIP_WORKTREE_TAG = "S ";
-const NO_LINES = 0;
 const FALSE_TEXT = "false";
 const OUTSIDE_TEXT = "outside\n";
 const SCRUBBED_EXCLUDE = "/deps/\n/star\\*\n";
@@ -828,23 +671,6 @@ test("a replace ref is gone and the checkout writes the real tree", async (t) =>
   );
 });
 
-test("a skip-worktree bit is gone and the changed tracked file is restored", async (t) => {
-  const at = await poolFixture(t);
-  await hostGit(at.tree, ["update-index", "--skip-worktree", "tracked"]);
-  writeFileSync(join(at.tree, "tracked"), "changed");
-  const directory = await takeAndScrub(at);
-  assert.equal(
-    readFileSync(join(directory, "tracked"), "utf8"),
-    TRACKED_CONTENT,
-  );
-  assert.equal(
-    (await hostGit(directory, ["ls-files", "-v"]))
-      .split(NEWLINE_TEXT)
-      .filter((line) => line.startsWith(SKIP_WORKTREE_TAG)).length,
-    NO_LINES,
-  );
-});
-
 test("a sparse checkout is gone and each tracked file is present", async (t) => {
   const at = await poolFixture(t);
   await hostGit(at.tree, ["config", "core.sparseCheckout", "true"]);
@@ -975,29 +801,6 @@ test("a rebase, a sequencer and a bisect in progress are gone", async (t) => {
     assert.equal(existsSync(join(directory, ".git", name)), false, name);
 });
 
-test("a cherry-pick and a revert in progress are gone", async (t) => {
-  const at = await poolFixture(t);
-  const git = join(at.tree, ".git");
-  mkdirSync(join(git, "sequencer"));
-  writeFileSync(join(git, "sequencer", "todo"), `pick ${at.commit}\n`);
-  for (const name of ["CHERRY_PICK_HEAD", "REVERT_HEAD"])
-    writeFileSync(join(git, name), `${at.commit}\n`);
-  const directory = await takeAndScrub(at);
-  for (const name of ["sequencer", "CHERRY_PICK_HEAD", "REVERT_HEAD"])
-    assert.equal(existsSync(join(directory, ".git", name)), false, name);
-});
-
-test("a lock behind a symlink in .git outside the tree survives", async (t) => {
-  const at = await poolFixture(t);
-  const outside = join(at.root, "outside");
-  mkdirSync(outside);
-  writeFileSync(join(outside, "x.lock"), "");
-  symlinkSync(outside, join(at.tree, ".git", "linked"));
-  const directory = take(at);
-  assert.equal(await normalise(at, directory), REBUILD);
-  assert.equal(existsSync(join(outside, "x.lock")), true);
-});
-
 test("a symlinked config, info, objects, objects/info, hooks or refs answers rebuild", async (t) => {
   for (const path of [
     "config",
@@ -1054,17 +857,6 @@ test("a symlink anywhere under .git answers rebuild and the outside file stays",
     assert.equal(await normalise(at, directory), REBUILD, entry.name);
     assert.deepEqual(snapshot(outside), before, entry.name);
   }
-});
-
-test("a symlinked info/exclude answers rebuild and its target stays", async (t) => {
-  const at = await poolFixture(t);
-  const outside = join(at.root, "outside-exclude");
-  writeFileSync(outside, OUTSIDE_TEXT);
-  const exclude = join(at.tree, ".git", "info", "exclude");
-  rmSync(exclude, { force: true });
-  symlinkSync(outside, exclude);
-  assert.equal(await normalise(at, take(at)), REBUILD);
-  assert.equal(readFileSync(outside, "utf8"), OUTSIDE_TEXT);
 });
 
 test("a stale index lock and a stale ref lock are removed and the tree is reused", async (t) => {

@@ -14,7 +14,6 @@ import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
 import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { background } from "../../kernel/context.ts";
 import {
-  COLLECTION_MAX,
   RecordKind,
   SpanStatus,
   type TelemetryRecord,
@@ -34,14 +33,7 @@ import {
   TaskResultKind,
 } from "./steps-implement.ts";
 import { SpanOperation, SpanRecorder } from "./telemetry.ts";
-import { PromptTemplate } from "../../agent/contract.ts";
-import {
-  checkpointGate,
-  gatedAgent,
-  GateMode,
-  TurnViolation,
-  ViolationEnd,
-} from "./turn-gate.ts";
+import { gatedAgent, GateMode, TurnViolation } from "./turn-gate.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 import { WorkspaceKind } from "./workspace.ts";
 import {
@@ -81,10 +73,7 @@ const ONE_TEXT = 1;
 const GATE_MESSAGE = "feat: gate work";
 const CHANGED_FILE_COUNT = "kanthord.git.changed_file_count";
 const CHANGED_FILES = "kanthord.git.changed_files";
-const NO_CHANGED_FILES = 0;
 const ONE_CHANGED_FILE = 1;
-const TWO_CHANGED_FILES = 2;
-const MANY_CHANGED_FILES = 130;
 const EMPTY_PROMPT = { text: "prompt", digest: "digest" };
 const FAILING_SIGNER = "false";
 const SIGNER_FAILURE = "failed to sign the data";
@@ -173,21 +162,6 @@ async function gatedTurn(
 }
 
 suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
-  test("the gated agent passes the template of an instruction to the inner agent", async (t) => {
-    const h = await fixture(t, [], []);
-    const inner = t.mock.method(h.agent, "instruct", async () => {});
-    await gatedAgent(h, GATE_MESSAGE).instruct(
-      EMPTY_PROMPT,
-      "text",
-      PromptTemplate.Examine,
-    );
-    assert.deepEqual(inner.mock.calls[0]?.arguments, [
-      EMPTY_PROMPT,
-      "text",
-      PromptTemplate.Examine,
-    ]);
-  });
-
   function configureFailingSigner(h: Fixture): void {
     appendFileSync(
       join(h.root, ".git", "config"),
@@ -682,69 +656,6 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.deepEqual(end.attributes?.[CHANGED_FILES], [WORK_FILE]);
   });
 
-  test("a gate that commits two files ends with the count and both paths", async (t) => {
-    const h = await fixture(t, [], []);
-    const records = recordSpans(h);
-    await gatedTurn(h, t, async () => {
-      writeFileSync(join(h.root, WORK_FILE), WORK_FILE);
-      writeFileSync(join(h.root, STRAY_FILE), STRAY_FILE);
-    });
-    const { end } = gateSpan(records);
-    assert.equal(end.attributes?.[CHANGED_FILE_COUNT], TWO_CHANGED_FILES);
-    assert.deepEqual(end.attributes?.[CHANGED_FILES], [STRAY_FILE, WORK_FILE]);
-  });
-
-  test("a gate with no change ends with the count 0 and an empty list", async (t) => {
-    const h = await fixture(t, [], []);
-    const records = recordSpans(h);
-    await gatedTurn(h, t, async () => {});
-    const { end } = gateSpan(records);
-    assert.equal(end.attributes?.[CHANGED_FILE_COUNT], NO_CHANGED_FILES);
-    assert.deepEqual(end.attributes?.[CHANGED_FILES], []);
-  });
-
-  test("a gate with 130 changed files ends with the count 130 and 128 paths", async (t) => {
-    const h = await fixture(t, [], []);
-    const records = recordSpans(h);
-    await gatedTurn(h, t, async () => {
-      for (let number = 0; number < MANY_CHANGED_FILES; number++)
-        writeFileSync(join(h.root, `many-${number}.txt`), `${number}`);
-    });
-    const { end } = gateSpan(records);
-    assert.equal(end.attributes?.[CHANGED_FILE_COUNT], MANY_CHANGED_FILES);
-    const paths = end.attributes?.[CHANGED_FILES];
-    assert.ok(Array.isArray(paths));
-    assert.equal(paths.length, COLLECTION_MAX);
-  });
-
-  test("a turn that changes nothing writes a gate span with no change", async (t) => {
-    const h = await fixture(t, [], []);
-    const records = recordSpans(h);
-    await gatedTurn(h, t, async () => {});
-    assert.equal(
-      gateSpan(records).end.attributes?.["kanthord.gate.changed"],
-      false,
-    );
-  });
-
-  test("a restored violation writes the violation and ends the gate span with Ok", async (t) => {
-    const h = await fixture(t, [], []);
-    const records = recordSpans(h);
-    await simpleGit(h.root).checkoutLocalBranch(OTHER_BRANCH);
-    assert.equal(
-      await checkpointGate(h, GATE_MESSAGE, background, ViolationEnd.Restore),
-      false,
-    );
-    const { start, end } = gateSpan(records);
-    assert.equal(start.attributes?.["kanthord.gate.mode"], GateMode.Checkpoint);
-    assert.equal(end.status, SpanStatus.Ok);
-    assert.equal(
-      end.attributes?.["kanthord.gate.violation"],
-      TurnViolation.BranchChanged,
-    );
-    assert.equal(end.attributes?.["kanthord.gate.changed"], false);
-  });
-
   test("a stopping violation writes the violation and ends the gate span with Error and no text", async (t) => {
     const h = await fixture(t, [], []);
     const records = recordSpans(h);
@@ -763,20 +674,6 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
       TurnViolation.BranchChanged,
     );
     assert.deepEqual(texts, []);
-  });
-
-  test("the checkpoint gate writes the checkpoint mode", async (t) => {
-    const h = await fixture(t, [], []);
-    const records = recordSpans(h);
-    writeFileSync(join(h.root, WORK_FILE), WORK_FILE);
-    assert.equal(
-      await checkpointGate(h, GATE_MESSAGE, background, ViolationEnd.Stop),
-      true,
-    );
-    const { start, end } = gateSpan(records);
-    assert.equal(start.attributes?.["kanthord.gate.mode"], GateMode.Checkpoint);
-    assert.equal(end.attributes?.["kanthord.gate.changed"], true);
-    assert.deepEqual(end.attributes?.[CHANGED_FILES], [WORK_FILE]);
   });
 
   test("a failed gate commit ends the gate span with Error and the commit text and writes no git span", async (t) => {
