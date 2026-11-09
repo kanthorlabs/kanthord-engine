@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import {
   appendFileSync,
   existsSync,
-  readdirSync,
+  lstatSync,
   readFileSync,
+  realpathSync,
   rmSync,
   utimesSync,
 } from "node:fs";
 import { lstat } from "node:fs/promises";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { WORKSPACE_KEY_PATTERN } from "../../kernel/cleanup.ts";
 import { ensureDirectory, FILE_NOT_FOUND } from "../../kernel/files.ts";
 import { walkFootprint } from "../../kernel/footprint-walk.ts";
@@ -40,6 +41,9 @@ export const REVIEW_DIRECTORY = "review";
 export const EVIDENCE_DIRECTORY = "evidence";
 const TREE_DELETED = "tree deleted";
 const TREE_PREPARED = "tree prepared";
+const UNKNOWN_ERROR = "unknown";
+const PARENT_SEGMENT = "..";
+const FIRST_PART = 1;
 const REVIEW_PURPOSE = "review";
 const NO_REFS: readonly string[] = [];
 const NO_CHECKOUTS = 0;
@@ -279,7 +283,7 @@ export class WorkspaceRoot {
   ): Promise<void> {
     for (const repository of input.repositories) {
       const tree = join(directory, bindingNameSchema.parse(repository.name));
-      if (!isTree(tree)) continue;
+      if (this.unrealEntry(tree) !== null || !isTree(tree)) continue;
       const address = await originAddress({
         env: input.env,
         directory: tree,
@@ -296,11 +300,46 @@ export class WorkspaceRoot {
         input,
       );
     }
-    rmSync(directory, { recursive: true, force: true });
+    this.removeSafely(directory);
   }
-  private giveTree(slot: PoolSlot, tree: string, owner: TreeOwner): void {
-    const code = this.pool.giveBack(slot, tree, owner.nodeId);
-    if (code !== null) owner.log?.(TREE_DELETED, { path: tree, code });
+  giveTree(slot: PoolSlot, tree: string, owner: TreeOwner): void {
+    try {
+      const unreal = this.unrealEntry(tree);
+      if (unreal !== null) {
+        rmSync(unreal, { recursive: true, force: true });
+        return;
+      }
+      if (!lstatSync(tree, { throwIfNoEntry: false })) return;
+      if (
+        realpathSync(tree) !==
+        join(realpathSync(this.root), relative(this.root, tree))
+      )
+        return;
+      const code = this.pool.giveBack(slot, tree, owner.nodeId);
+      if (code !== null) owner.log?.(TREE_DELETED, { path: tree, code });
+    } catch (error) {
+      owner.log?.(TREE_DELETED, { path: tree, code: codeOf(error) });
+    }
+  }
+  removeSafely(path: string): void {
+    rmSync(this.unrealEntry(path) ?? path, { recursive: true, force: true });
+  }
+  removeUnreal(path: string): void {
+    const unreal = this.unrealEntry(path);
+    if (unreal !== null) rmSync(unreal, { recursive: true, force: true });
+  }
+  private unrealEntry(path: string): string | null {
+    const parts = relative(this.root, path).split(sep);
+    assert.ok(
+      !isAbsolute(relative(this.root, path)) && !parts.includes(PARENT_SEGMENT),
+    );
+    for (let index = FIRST_PART; index <= parts.length; index++) {
+      const entry = join(this.root, ...parts.slice(0, index));
+      const stats = lstatSync(entry, { throwIfNoEntry: false });
+      if (!stats) return null;
+      if (!stats.isDirectory()) return entry;
+    }
+    return null;
   }
   async prepareSnapshots(
     input: ReviewPreparation & {
@@ -380,18 +419,13 @@ export class WorkspaceRoot {
     try {
       ensureDirectory(node);
       this.touch(node);
+      await this.giveLeftoverTrees(
+        join(key, CHECKOUTS_DIRECTORY),
+        { ...input, repositories, poolClass: PoolClass.Agent },
+        end,
+      );
+      this.removeSafely(key);
       ensureDirectory(key);
-      for (const [directory, poolClass] of [
-        [CHECKOUTS_DIRECTORY, PoolClass.Agent],
-        [BASE_DIRECTORY, PoolClass.Command],
-      ] as const)
-        await this.giveLeftoverTrees(
-          join(key, directory),
-          { ...input, repositories, poolClass },
-          end,
-        );
-      for (const name of readdirSync(key))
-        rmSync(join(key, name), { recursive: true, force: true });
       for (const { repository, ref } of entries) {
         const name = bindingNameSchema.parse(repository.name);
         const target = join(key, CHECKOUTS_DIRECTORY, name);
@@ -541,24 +575,23 @@ export class WorkspaceRoot {
     assert.ok(review);
     const node = dirname(key);
     try {
-      for (const repository of review.repositories) {
-        const name = bindingNameSchema.parse(repository.name);
+      for (const repository of review.repositories)
         this.giveTree(
           { address: repository.address, poolClass: PoolClass.Agent },
-          join(key, CHECKOUTS_DIRECTORY, name),
+          join(key, CHECKOUTS_DIRECTORY, repository.name),
           review,
         );
-        this.giveTree(
-          { address: repository.address, poolClass: PoolClass.Command },
-          join(key, BASE_DIRECTORY, name),
-          review,
-        );
-      }
-      rmSync(key, { recursive: true, force: true });
-      if (existsSync(node)) this.touch(node);
     } finally {
-      this.reviews.delete(key);
-      this.held.delete(node);
+      try {
+        this.removeSafely(key);
+        if (lstatSync(node, { throwIfNoEntry: false })?.isDirectory())
+          this.touch(node);
+      } catch (error) {
+        review.log?.(TREE_DELETED, { path: key, code: codeOf(error) });
+      } finally {
+        this.reviews.delete(key);
+        this.held.delete(node);
+      }
     }
   }
 }
@@ -571,6 +604,10 @@ export function workRepositoriesOf(
     ...checkout,
     directory: relative(root, checkout.directory) || ".",
   }));
+}
+
+function codeOf(error: unknown): string {
+  return (error as NodeJS.ErrnoException | undefined)?.code ?? UNKNOWN_ERROR;
 }
 
 function excludeScratch(directory: string): void {

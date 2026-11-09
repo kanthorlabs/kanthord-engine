@@ -5,7 +5,9 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   statSync,
+  symlinkSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -880,7 +882,7 @@ test("a second review of the same repository reuses the tree and keeps each file
   h.workspace.release(second.key, second.kind);
 });
 
-test("a review release gives the trees back, removes the evidence and keeps the node key", async (t) => {
+test("a review release gives the checkout back, deletes the base head and the evidence and keeps the node key", async (t) => {
   const h = await reviewFixture(t);
   const nodeId = createIdentity("node");
   const prepared = await h.review(nodeId, h.base);
@@ -892,7 +894,7 @@ test("a review release gives the trees back, removes the evidence and keeps the 
   await simpleGit().raw(["clone", "--", prepared.directory, base]);
   h.workspace.release(prepared.key, prepared.kind);
   assert.equal(h.freeTrees(PoolClass.Agent).length, ONE_TREE);
-  assert.equal(h.freeTrees(PoolClass.Command).length, ONE_TREE);
+  assert.deepEqual(h.freeTrees(PoolClass.Command), []);
   assert.equal(existsSync(evidence), false);
   assert.equal(existsSync(prepared.directory), false);
   assert.equal(existsSync(base), false);
@@ -978,4 +980,65 @@ test("a reused review tree holds the local default branch and the current origin
     DETACHED_HEAD,
   );
   h.workspace.release(second.key, second.kind);
+});
+
+async function outsideTree(t: test.TestContext, origin: string, name: string) {
+  const outside = temporary(t);
+  await simpleGit().raw(["clone", "--", origin, join(outside, name)]);
+  chmodSync(join(outside, name, ".git"), 0o755);
+  return outside;
+}
+
+test("a review release does not follow a symbolic link that replaces review/checkouts", async (t) => {
+  const h = await reviewFixture(t);
+  const prepared = await h.review(createIdentity("node"), h.base);
+  const outside = await outsideTree(t, h.origin, h.repository.name);
+  const checkouts = join(prepared.key, CHECKOUTS_DIRECTORY);
+  rmSync(checkouts, { recursive: true, force: true });
+  symlinkSync(outside, checkouts);
+  h.workspace.release(prepared.key, prepared.kind);
+  assert.equal(existsSync(join(outside, h.repository.name, ".git")), true);
+  assert.equal(existsSync(prepared.key), false);
+  assert.deepEqual(h.workspace.pool.trees(), []);
+});
+
+test("a node preparation does not follow a symbolic link that replaces the release directory", async (t) => {
+  const h = await reviewFixture(t);
+  const nodeId = createIdentity("node");
+  const outside = await outsideTree(t, h.origin, h.repository.name);
+  writeFileSync(join(outside, "stray"), "x");
+  mkdirSync(h.workspace.nodeKey(nodeId), { mode: 0o700 });
+  symlinkSync(outside, join(h.workspace.nodeKey(nodeId), "release"));
+  await prepareOne(h.workspace, {
+    env,
+    transport,
+    sshAccess: everyBindingSshAccess,
+    context: background,
+    deadlineMs: GIT_DEADLINE_MS,
+    nodeId,
+    nodeBranch: nodeBranchOf(nodeId, FIRST_ATTEMPT),
+    pushed: false,
+    repository: h.repository,
+  });
+  h.workspace.release(h.workspace.nodeKey(nodeId), WorkspaceKind.Node);
+  assert.equal(existsSync(join(outside, h.repository.name, ".git")), true);
+  assert.equal(existsSync(join(outside, "stray")), true);
+  assert.equal(existsSync(join(h.workspace.nodeKey(nodeId), "release")), false);
+  assert.deepEqual(h.workspace.pool.trees(), []);
+});
+
+test("a file in place of review/checkouts does not stop the review release, and the next preparation succeeds", async (t) => {
+  const h = await reviewFixture(t);
+  const nodeId = createIdentity("node");
+  const prepared = await h.review(nodeId, h.base);
+  const checkouts = join(prepared.key, CHECKOUTS_DIRECTORY);
+  rmSync(checkouts, { recursive: true, force: true });
+  writeFileSync(checkouts, "x");
+  h.workspace.release(prepared.key, prepared.kind);
+  assert.equal(existsSync(prepared.key), false);
+  mkdirSync(prepared.key, { mode: 0o700 });
+  writeFileSync(checkouts, "x");
+  const next = await h.review(nodeId, h.base);
+  assert.ok(existsSync(join(next.directory, ".git")));
+  h.workspace.release(next.key, next.kind);
 });
