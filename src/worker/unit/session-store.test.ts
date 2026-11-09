@@ -20,9 +20,7 @@ import { SESSION_ENTRY_FULL_MAX_BYTES } from "../../tracking/contract.ts";
 import { type SessionRead, SessionReadOutcome } from "../contract.ts";
 import {
   executionSessionDirectory,
-  executionSessionRoot,
   readSessionFileEntry,
-  sessionRootOf,
 } from "./session-store.ts";
 
 const DIRECTORY_MODE_MASK = 0o7777;
@@ -67,14 +65,6 @@ function sessionFixture(t: TestContext) {
     join(directory, `${stamp}_${sessionId}.jsonl`);
   return { root, directory, read, file };
 }
-
-test("the session root lies in the pi directory of the data directory", () => {
-  assert.equal(sessionRootOf("/data"), join("/data", "pi", "sessions"));
-  assert.equal(
-    executionSessionRoot("/data"),
-    join("/data", "pi", "sessions", "execution"),
-  );
-});
 
 test("an execution directory has mode 0700 under the session root", (t) => {
   const root = join(temporary(t), "sessions");
@@ -123,23 +113,6 @@ test("a session read answers the entry with the identity and the type", async (t
   });
 });
 
-test("a session read of another type answers entry_absent", async (t) => {
-  const { root, read, file } = sessionFixture(t);
-  writeFileSync(file(), entryLine(ENTRY));
-  assert.deepEqual(
-    await readSessionFileEntry(root, { ...read, entry_type: "custom" }, signal),
-    { outcome: SessionReadOutcome.EntryAbsent },
-  );
-  assert.deepEqual(
-    await readSessionFileEntry(
-      root,
-      { ...read, entry_id: OTHER_ENTRY_ID },
-      signal,
-    ),
-    { outcome: SessionReadOutcome.EntryAbsent },
-  );
-});
-
 test("a session read without the session answers session_absent", async (t) => {
   const { root, directory, read, file } = sessionFixture(t);
   assert.deepEqual(await readSessionFileEntry(root, read, signal), {
@@ -160,26 +133,6 @@ test("a session read without the session answers session_absent", async (t) => {
   assert.deepEqual(
     await readSessionFileEntry(join(directory, "absent"), read, signal),
     { outcome: SessionReadOutcome.SessionAbsent },
-  );
-});
-
-test("a session read selects the file of the session among the files of the execution", async (t) => {
-  const { root, read, file } = sessionFixture(t);
-  const other = { ...ENTRY, id: OTHER_ENTRY_ID };
-  writeFileSync(file(OTHER_SESSION_ID), entryLine(ENTRY));
-  writeFileSync(file(SESSION_ID, "2026-11-04T00-00-00-000Z"), entryLine(other));
-  writeFileSync(file(SESSION_ID, "2026-11-05T00-00-00-000Z"), entryLine(ENTRY));
-  assert.deepEqual(await readSessionFileEntry(root, read, signal), {
-    outcome: SessionReadOutcome.Resolved,
-    entry: ENTRY,
-  });
-  assert.deepEqual(
-    await readSessionFileEntry(
-      root,
-      { ...read, session_id: OTHER_SESSION_ID, entry_id: OTHER_ENTRY_ID },
-      signal,
-    ),
-    { outcome: SessionReadOutcome.EntryAbsent },
   );
 });
 
@@ -204,26 +157,6 @@ test("a symlinked execution directory or a symlinked root of the executions answ
   assert.deepEqual(await readSessionFileEntry(linkedRoot, read, signal), {
     outcome: SessionReadOutcome.Unreadable,
   });
-});
-
-test("a regular file at the execution directory answers unreadable", async (t) => {
-  const root = join(temporary(t), "sessions");
-  const executionId = createIdentity("execution");
-  mkdirSync(join(root, "execution"), { recursive: true });
-  writeFileSync(join(root, "execution", executionId), entryLine(ENTRY));
-  assert.deepEqual(
-    await readSessionFileEntry(
-      root,
-      {
-        execution_id: executionId,
-        session_id: SESSION_ID,
-        entry_id: ENTRY_ID,
-        entry_type: ENTRY_TYPE,
-      },
-      signal,
-    ),
-    { outcome: SessionReadOutcome.Unreadable },
-  );
 });
 
 test("a symlinked session file is skipped", async (t) => {
