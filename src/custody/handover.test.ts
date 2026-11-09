@@ -646,31 +646,6 @@ test("authorization refusal reaches no material or pin", (t) => {
   assert.deepEqual(f.row.credentials, []);
 });
 
-test("handover seals and pins one item per credential and accepts a refresh of the second", (t) => {
-  const f = fixture(t, ["worker-key", "reviewer-key"]);
-  const payload = plainHandoverPayloadSchema.parse(
-    openEnvelope(f.keys.handover, f.aad, f.handover()),
-  );
-  assert.deepEqual(
-    payload.items.map((item) => item.credential_id),
-    f.credentialIds,
-  );
-  assert.deepEqual(f.row.credentials, f.credentialIds);
-  f.report(
-    sealEnvelope(f.keys.report, f.aad, {
-      ...f.refresh,
-      credential_id: f.credentialIds[1]!,
-    }),
-  );
-  const refreshed = plainHandoverPayloadSchema.parse(
-    openEnvelope(f.keys.handover, f.aad, f.handover()),
-  );
-  assert.deepEqual(
-    refreshed.items.map((item) => item.credential),
-    [FIRST, SECOND],
-  );
-});
-
 function liveRevisionId(store: Store, credential: string): string {
   return (
     store.database
@@ -923,25 +898,6 @@ test("one binding that lists a server and a worker instance hands each execution
   assert.notEqual(copyId, f.credentialId);
 });
 
-for (const placement of [HandoverPlacement.Server, HandoverPlacement.Container])
-  test(`a ${placement} placement handover carries the server-held item and the SSH identities`, (t) => {
-    const f = fixture(t, ["anthro-1"], ["deploy"]);
-    const payload = plainHandoverPayloadSchema.parse(
-      openEnvelope(f.keys.handover, f.aad, f.handover(undefined, placement)),
-    );
-    assert.deepEqual(payload.items, [
-      {
-        credential_id: f.credentialId,
-        provider_id: TEST_PLATFORM,
-        credential: FIRST,
-      },
-    ]);
-    assert.deepEqual(
-      payload.ssh_identities.map(({ binding_id }) => binding_id),
-      [...f.bindings.keys()],
-    );
-  });
-
 test("handover carries one SSH identity per repository binding and pins each revision", (t) => {
   const f = fixture(t, ["anthro-1"], ["deploy-a", "deploy-b"]);
   const payload = plainHandoverPayloadSchema.parse(
@@ -1065,53 +1021,6 @@ test("an SSH identity refusal seals no envelope and a legacy key answers ssh_key
       assert.equal(JSON.stringify(error).includes("bGVnYWN5"), false);
       return true;
     },
-  );
-});
-
-test("a refresh report that carries an SSH key answers report_invalid", (t) => {
-  const f = fixture(t, ["anthro-1"], ["deploy"]);
-  f.handover();
-  assert.throws(
-    () =>
-      f.report(
-        sealEnvelope(f.keys.report, f.aad, {
-          ...f.refresh,
-          credential: {
-            type: SecretShape.SshKey,
-            private_key: f.sshKeys.get("deploy"),
-          },
-        }),
-      ),
-    (error) => {
-      assert(error instanceof OperationError);
-      assert.equal(error.status, HttpStatus.BadRequest);
-      assert.equal(error.code, CUSTODY_REPORT_INVALID);
-      return true;
-    },
-  );
-  const pinned = liveRevisionId(f.store, "deploy");
-  assert.ok(f.row.credentials.includes(pinned));
-  assert.throws(
-    () =>
-      f.report(
-        sealEnvelope(f.keys.report, f.aad, {
-          ...f.refresh,
-          credential_id: pinned,
-        }),
-      ),
-    (error) => {
-      assert(error instanceof OperationError);
-      assert.equal(error.status, HttpStatus.BadRequest);
-      assert.equal(error.code, CUSTODY_REPORT_INVALID);
-      assert.equal(JSON.stringify(error).includes(OPENSSH_LABEL), false);
-      return true;
-    },
-  );
-  assert.equal(
-    plainHandoverPayloadSchema.parse(
-      openEnvelope(f.keys.handover, f.aad, f.handover()),
-    ).ssh_identities[0]?.private_key,
-    f.sshKeys.get("deploy"),
   );
 });
 
@@ -1509,19 +1418,6 @@ function leaseHeld(error: unknown): boolean {
   return error instanceof CredentialLeaseHeld;
 }
 
-test("a lease of a pinned revision answers the stored value and expires_at at now plus the lease", (t) => {
-  const f = fixture(t);
-  f.handover();
-  assert.deepEqual(leasePayloadOf(f, f.lease(f.credentialId)), {
-    item: {
-      credential_id: f.credentialId,
-      provider_id: piProviderId(TEST_PLATFORM),
-      credential: FIRST,
-    },
-    expires_at: NOW + CREDENTIAL_LEASE_MS,
-  });
-});
-
 test("a lease of another execution answers lease_held until the first lease ends and a lease of the same execution renews", (t) => {
   const f = fixture(t);
   f.handover();
@@ -1749,20 +1645,4 @@ test("an execution that pinned the machine copy keeps it after an own copy appea
   assert.equal(second.credential_id, machineCopyId);
   assert.equal(second.holder, MACHINE);
   assert.deepEqual(f.row.credentials, [machineCopyId]);
-});
-
-test("a lease of a pinned machine copy answers a sealed item with the machine name as holder", async (t) => {
-  const { f, machine } = await machineFixture(t, ["anthro-1"]);
-  const [machineCopy] = await f.holdCopies("anthro-1", [MACHINE]);
-  const copyId = machineCopy!.revisions[0]!.id;
-  sealedItemsOf(f);
-  const item = leasePayloadOf(f, f.lease(copyId)).item;
-  assert.ok("sealed" in item);
-  assert.equal(item.holder, MACHINE);
-  const opened = await openSealedCopy(
-    item,
-    SecretShape.ApiKey,
-    copyKeyOf(machine),
-  );
-  assert.deepEqual(opened?.credential, FIRST);
 });

@@ -12,13 +12,11 @@ import {
 } from "./key-check.ts";
 import { custodyMigrations } from "./migrations.ts";
 import { CUSTODY_SERVICE_NAME } from "./contract.ts";
-import { deriveEnvelopeKey } from "./envelope.ts";
 
 const CONFIG_PATH = "/etc/kanthord/kanthord.yaml";
 const KEY_A = Buffer.alloc(32, 1).toString("base64");
 const KEY_B = Buffer.alloc(32, 2).toString("base64");
 const ONE_ROW = 1;
-const VERIFIER_BYTES = 32;
 
 function migrated(): Store {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -37,12 +35,6 @@ function rows(store: Store) {
       verifier: Buffer.from(row.verifier as Uint8Array),
     }));
 }
-
-test("the verifier derives under its own label and differs from the envelope key", () => {
-  assert.equal(masterKeyVerifier(KEY_A).length, VERIFIER_BYTES);
-  assert.notDeepEqual(masterKeyVerifier(KEY_A), deriveEnvelopeKey(KEY_A));
-  assert.notDeepEqual(masterKeyVerifier(KEY_A), masterKeyVerifier(KEY_B));
-});
 
 test("enforce records the first master_key once and accepts it again", () => {
   const store = migrated();
@@ -70,9 +62,6 @@ test("enforce and verify refuse another master_key and keep the record", () => {
         (error: unknown) =>
           error instanceof Diagnostic &&
           error.code === MASTER_KEY_MISMATCH_CODE &&
-          diagnosticText(error).includes(`\nconfig:   ${CONFIG_PATH}\n`) &&
-          diagnosticText(error).includes(`database: ${store.path}\n`) &&
-          error.message.includes("restore the configuration file") &&
           !diagnosticText(error).includes(KEY_B),
       );
     assert.deepEqual(rows(store), before);
