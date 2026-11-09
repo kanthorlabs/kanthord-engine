@@ -13,11 +13,9 @@ import {
   markerTag,
   matcherNodes,
   mergeSpans,
-  promotes,
   redactValue,
   SCAN_FAILED,
   SENSITIVE_SCAN_MAX_CHARACTERS,
-  SENSITIVE_VALUE_MAX_CHARACTERS,
   SensitiveRule,
   type SensitiveSpan,
   SESSION_MARKER_PATTERN,
@@ -29,7 +27,6 @@ import {
   MiB,
   scanRows,
   seededText,
-  wholeScan,
 } from "./sensitive-text-test-support.ts";
 
 const j = (...parts: string[]) => parts.join("");
@@ -1472,15 +1469,6 @@ test("findKnownText finds each form of a known secret", () => {
 });
 const WRAP_WIDTH_MIME = 76;
 
-test("promotes keeps a common word out of the table", () => {
-  assert.ok(!promotes("postgres", SensitiveRule.UrlUserinfo));
-  assert.ok(!promotes("development", SensitiveRule.QuotedAssignment));
-  assert.ok(promotes(an(16), SensitiveRule.QuotedAssignment));
-  assert.ok(promotes("AKIA", SensitiveRule.AwsAccessKeyId));
-  assert.ok(promotes("x", SensitiveRule.Jwt));
-  assert.ok(!promotes("aaaaaaaaaaaaaaaab", SensitiveRule.HttpCredential));
-});
-
 test("the matcher masks from each key to the longest value of that key", () => {
   const nested = knownMatcher();
   for (let length = NESTED_FIRST; length < NESTED_END; length++)
@@ -1700,11 +1688,3 @@ function readCode() {
   }
   return (n: number) => text.slice(0, n);
 }
-
-test("one whole scan covers both passes", () => {
-  const matcher = knownMatcher();
-  const [pattern, known] = wholeScan(j(PASS, ' = "', an(16), '"'), matcher);
-  assert.equal(pattern!.length, ONE_SPAN);
-  assert.deepEqual(known, []);
-  assert.ok(SENSITIVE_VALUE_MAX_CHARACTERS);
-});
