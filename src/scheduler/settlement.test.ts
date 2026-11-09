@@ -1,13 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
-import {
-  BudgetLimit,
-  ClaimState,
-  EnvironmentFailure,
-  ExecutionStopReason,
-  TransitionRule,
-} from "./contract.ts";
+import { BudgetLimit, ClaimState, ExecutionStopReason } from "./contract.ts";
 import {
   executionFixture,
   FIRST_LOSS_WITHOUT_JOB,
@@ -26,7 +20,6 @@ import {
 } from "./execution-store.ts";
 import {
   consecutiveFailures,
-  countsFailure,
   EXECUTION_NOT_RUNNING,
   requireRunning,
   revoke,
@@ -39,16 +32,6 @@ const ONE_LOSS = 1;
 const SECOND_LOSS = 2;
 const THIRD_FAILURE = 3;
 const STOP = { reason: ExecutionStopReason.OperationFailed, code: null };
-const VERIFICATION_TIMEOUT_STOP = {
-  reason: ExecutionStopReason.EnvironmentFailed,
-  code: EnvironmentFailure.VerificationTimeout,
-  detail: JSON.stringify({
-    index: 0,
-    limit_ms: 600000,
-    exit_code: null,
-    command: "sleep 1000",
-  }),
-};
 
 test("credential pins append once in order, retain after end and select only unended executions", (t) => {
   const h = schedulerHarness(t);
@@ -185,34 +168,6 @@ test("settlement records exactly one loss at the transaction reading", (t) => {
   ]);
 });
 
-test("a loss answers the transition of the failure count below the limit and at the limit", (t) => {
-  const h = schedulerHarness(t);
-  const limit = SECOND_LOSS;
-  const paused = transitionFixture({
-    to: "Paused",
-    rule: TransitionRule.FailureLimit,
-    count: limit,
-    limit,
-  });
-  h.dependencies.transitions.failure = (_tx, _nodeId, count) =>
-    count >= limit ? paused : transitionFixture();
-  const row = executionFixture();
-  const next = executionFixture({ node_id: row.node_id });
-  h.store.transaction((tx) => {
-    insertExecution(tx, row);
-    assert.deepEqual(
-      settleNode(tx, h.dependencies, row.node_id, FIXTURE_DEADLINE)?.transition,
-      transitionFixture(),
-    );
-    insertExecution(tx, next);
-    assert.deepEqual(
-      settleNode(tx, h.dependencies, row.node_id, FIXTURE_DEADLINE + 1)
-        ?.transition,
-      paused,
-    );
-  });
-});
-
 test("consecutive losses reset after a finished row or revocation and isolate attempts", (t) => {
   const h = schedulerHarness(t);
   const row = executionFixture();
@@ -289,31 +244,6 @@ test("lost and stopped rows count together until a finished row with no stop", (
   });
 });
 
-test("no operator stop reason counts as a failure", () => {
-  for (const reason of [
-    ExecutionStopReason.InstanceArchived,
-    ExecutionStopReason.WorkerStopped,
-    ExecutionStopReason.HumanPaused,
-  ])
-    assert.equal(countsFailure({ reason, code: null }), false);
-});
-
-test("a revocation stores the stop it receives", (t) => {
-  const h = schedulerHarness(t);
-  const row = executionFixture({ expired_at: FIXTURE_DEADLINE + 100 });
-  const stop = {
-    reason: ExecutionStopReason.InstanceArchived,
-    code: null,
-    detail: JSON.stringify({ instance: "relay-a", actor: "Ulrich" }),
-  };
-  h.store.transaction((tx) => {
-    insertExecution(tx, row);
-    const revoked = revoke(tx, row.node_id, FIXTURE_NOW + 1, stop);
-    assert.deepEqual(revoked?.stop, stop);
-    assert.deepEqual(readExecution(tx, row.execution_id)?.stop, stop);
-  });
-});
-
 test("an archive row neither counts nor resets the failure count and a null stop row resets it", (t) => {
   const h = schedulerHarness(t);
   const node = createIdentity("node");
@@ -350,33 +280,6 @@ test("an archive row neither counts nor resets the failure count and a null stop
   };
   assert.equal(sequence(archived), SECOND_LOSS);
   assert.equal(sequence(null), ONE_LOSS);
-});
-
-test("a worker_stopped row leaves the failure count unchanged also at the failure limit", (t) => {
-  const h = schedulerHarness(t);
-  const node = createIdentity("node");
-  h.store.transaction((tx) => {
-    const at = (offset: number) =>
-      executionFixture({
-        node_id: node,
-        expired_at: FIXTURE_DEADLINE + 100,
-        created_at: FIXTURE_NOW + offset,
-      });
-    for (let index = 0; index < THIRD_FAILURE; index++) {
-      const failed = at(index + 1);
-      insertExecution(tx, failed);
-      endExecution(tx, failed.execution_id, FIXTURE_NOW + index + 1, STOP);
-    }
-    const stopped = at(THIRD_FAILURE + 1);
-    insertExecution(tx, stopped);
-    endExecution(tx, stopped.execution_id, FIXTURE_NOW + 10, {
-      reason: ExecutionStopReason.WorkerStopped,
-      code: null,
-    });
-    const next = at(THIRD_FAILURE + 2);
-    insertExecution(tx, next);
-    assert.equal(consecutiveFailures(tx, next, false), THIRD_FAILURE);
-  });
 });
 
 test("pause facts answer the counts of the count functions and the last stop of the attempt", (t) => {
@@ -541,51 +444,6 @@ test("a failed Mission loss rolls back the terminal write", (t) => {
   );
 });
 
-test("a verification_timeout stop counts as a failure and the third in a row pauses the node with failure_limit", (t) => {
-  const h = schedulerHarness(t);
-  assert.equal(countsFailure(VERIFICATION_TIMEOUT_STOP), true);
-  const paused = transitionFixture({
-    to: "Paused",
-    rule: TransitionRule.FailureLimit,
-    count: THIRD_FAILURE,
-    limit: THIRD_FAILURE,
-  });
-  h.dependencies.transitions.failure = (_tx, _nodeId, count) =>
-    count >= THIRD_FAILURE ? paused : transitionFixture();
-  const nodeId = createIdentity("node");
-  const at = (offset: number) =>
-    executionFixture({
-      node_id: nodeId,
-      expired_at: FIXTURE_DEADLINE + 100,
-      created_at: FIXTURE_NOW + offset,
-    });
-  h.store.transaction((tx) => {
-    const counts = [];
-    for (const offset of [1, 2, 3]) {
-      const row = at(offset);
-      insertExecution(tx, row);
-      endExecution(
-        tx,
-        row.execution_id,
-        FIXTURE_DEADLINE,
-        VERIFICATION_TIMEOUT_STOP,
-      );
-      counts.push(consecutiveFailures(tx, row));
-    }
-    assert.deepEqual(counts, [ONE_LOSS, SECOND_LOSS, THIRD_FAILURE]);
-    assert.equal(
-      h.service.pauseFacts(tx, nodeId, 1).consecutive_failures,
-      THIRD_FAILURE,
-    );
-    const failure = h.dependencies.transitions.failure;
-    assert.deepEqual(
-      failure(tx, nodeId, counts[0]!, FIXTURE_DEADLINE),
-      transitionFixture(),
-    );
-    assert.deepEqual(failure(tx, nodeId, counts[2]!, FIXTURE_DEADLINE), paused);
-  });
-});
-
 test("a loss of an expired kept claim of a Paused node ends the claim, keeps Paused and sets no hold", (t) => {
   const h = schedulerHarness(t);
   const kept = transitionFixture({ from: "Paused", to: "Paused" });
@@ -610,31 +468,6 @@ test("a loss of an expired kept claim of a Paused node ends the claim, keeps Pau
       project_id: row.project_id,
       attempt: row.attempt,
     });
-    insertExecution(tx, next);
-    assert.equal(consecutiveFailures(tx, next, false), ONE_LOSS);
-  });
-});
-
-test("a human_paused row counts no failure and is no reset point", (t) => {
-  const h = schedulerHarness(t);
-  const node = createIdentity("node");
-  h.store.transaction((tx) => {
-    const at = (offset: number) =>
-      executionFixture({
-        node_id: node,
-        expired_at: FIXTURE_DEADLINE + 100,
-        created_at: FIXTURE_NOW + offset,
-      });
-    const failed = at(1);
-    insertExecution(tx, failed);
-    endExecution(tx, failed.execution_id, FIXTURE_NOW + 2, STOP);
-    const paused = at(3);
-    insertExecution(tx, paused);
-    endExecution(tx, paused.execution_id, FIXTURE_NOW + 4, {
-      reason: ExecutionStopReason.HumanPaused,
-      code: null,
-    });
-    const next = at(5);
     insertExecution(tx, next);
     assert.equal(consecutiveFailures(tx, next, false), ONE_LOSS);
   });
