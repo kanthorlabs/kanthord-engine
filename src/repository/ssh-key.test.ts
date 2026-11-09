@@ -30,11 +30,8 @@ interface ToolResult {
   stderr: string;
 }
 
-function toolEnvironment(socket?: string): NodeJS.ProcessEnv {
-  return {
-    PATH: process.env.PATH,
-    ...(socket === undefined ? {} : { SSH_AUTH_SOCK: socket }),
-  };
+function toolEnvironment(): NodeJS.ProcessEnv {
+  return { PATH: process.env.PATH };
 }
 
 function runWithInput(
