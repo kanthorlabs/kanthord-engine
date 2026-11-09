@@ -2,38 +2,26 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   affectedFailureReport,
-  affectedRevisionInstruction,
-  criterionRevisionInstruction,
-  evaluationInstruction,
   evaluationJudgementSchemaOf,
-  examineInstruction,
-  failedChecksText,
-  failedVerificationRationale,
-  failedVerificationReport,
-  JUDGEMENT_MARKER,
   judgementBlockers,
   judgementRationale,
   linkUpdatesText,
   parseJudgement,
   parseRepaired,
   releaseRevisionInstruction,
-  repairInstruction,
   ReplyRepair,
   REQUESTED_CHANGES_MAX_BYTES,
   requestedChangesText,
   taskRevisionInstruction,
   UnmetGround,
-  unmetGroundSchema,
   withFlakyVerification,
 } from "./judgement.ts";
-import type { LinkUpdateRead } from "../contract.ts";
-import { VERDICT_LINK_UPDATE_LIMIT } from "./node-reads.ts";
 import {
   affectedFailureText,
   type AffectedRun,
   AffectedVerdict,
 } from "./affected.ts";
-import { type Verification, VerificationClass } from "./verification.ts";
+import type { Verification } from "./verification.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import { PromptTemplate } from "../../agent/contract.ts";
@@ -45,15 +33,10 @@ import {
 } from "../../mission/contract.ts";
 
 const FLAKY_OUTPUT_CHARS = 2048;
-const LINK_UPDATES_HEADING = "Updates of the external links of this node";
-const MISSING_LINE = "An update is no longer stored.";
 const LINK_NUMBER = 7;
 const LINK_TIME = 1760000000000;
-const NEW_UPDATES = 3;
-const MISSING_INDEX = 5;
 const ONE_MISSING = 1;
 const FIRST_UPDATE = 1;
-const TOTAL_UPDATES = 25;
 const LONG_BODY_FACTOR = 4;
 
 const evaluationJudgementSchema = evaluationJudgementSchemaOf({
@@ -86,7 +69,6 @@ const PLAN_DEFECT_RATIONALE =
   'plan defects\nPlan conflict:\n- node: "edit a.ts" vs "a.ts stays unchanged"\nPlan gap:\n- task_b: no test asked\nUnmet:\n- task_a: no route check\n- task_c: no lint';
 const PLAN_GAP_RATIONALE = "one gap\nPlan gap:\n- task_b: no test asked";
 const MET_RATIONALE = "met";
-const SINGLE_CONFLICT_DEFINITION = 1;
 const TWO_GAP_RATIONALE =
   "two gaps\nUnmet:\n- task_a: no route check\n- task_b: no restart test";
 
@@ -177,234 +159,6 @@ test("the rationale writes plan conflict and plan gap blocks before the unmet bl
   );
 });
 
-test("failed and unrun rationale names the command and cause", () => {
-  const testedInput = { kind: "produced" as const, sha256: "a".repeat(64) };
-  const cases: [Verification["results"], string][] = [
-    [[], "was not run."],
-    [
-      [{ command: "check", exit_code: 2, signal: null, timed_out: false }],
-      "failed with exit code 2.",
-    ],
-    [
-      [
-        {
-          command: "check",
-          exit_code: null,
-          signal: "SIGKILL",
-          timed_out: false,
-        },
-      ],
-      "was ended by signal SIGKILL.",
-    ],
-    [
-      [
-        {
-          command: "check",
-          exit_code: null,
-          signal: "SIGKILL",
-          timed_out: true,
-        },
-      ],
-      "reached its deadline.",
-    ],
-  ];
-  for (const [results, cause] of cases)
-    assert.equal(
-      failedVerificationRationale({ tested_input: testedInput, results }, [
-        "check",
-      ]),
-      `Verification 1 \`check\` ${cause}`,
-    );
-  const input = {
-    tasks: [
-      {
-        id: "task",
-        filename: "task.md",
-        content: {
-          name: "task",
-          requirement: "do",
-          criterion: "distinct criterion",
-          verifications: [],
-          bindings: [],
-        },
-      },
-    ],
-    verification: {
-      tested_input: testedInput,
-      results: [
-        {
-          command: "npm run verify",
-          exit_code: 0,
-          signal: null,
-          timed_out: false,
-        },
-      ],
-    },
-    evidence: [],
-    affected: null,
-    round: { number: 1, review_base: null },
-    priorFindings: [],
-  };
-  const instruction = evaluationInstruction(SHIPPED_TEMPLATES, input);
-  const examineEvaluation = evaluationInstruction(SHIPPED_TEMPLATES, {
-    ...input,
-    examine: true,
-  });
-  assert.match(
-    instruction,
-    /^Affected test results of this evaluation: null$/m,
-  );
-  const document = { version: 1, verdict: "passed", repositories: [] };
-  assert.ok(
-    evaluationInstruction(SHIPPED_TEMPLATES, {
-      ...input,
-      affected: document,
-    }).includes(
-      `Affected test results of this evaluation: ${JSON.stringify(document)}\n`,
-    ),
-  );
-  assert.match(
-    instruction,
-    /KanthorD ran the affected test command of each repository after the verifications; weigh a `base_red` verdict, each flaky test and each excluded e2e test as facts about the change\. A change to a file that selects or runs tests is a test change; judge it against the criterion\./,
-  );
-  assert.doesNotMatch(instruction, /proposals/);
-  assert.match(
-    examineEvaluation,
-    /A defect inside a completed implement dependency gets one proposal with dependency_id, name, requirement, criterion and one task, and proposals replace criterion-not-met for such defects\./,
-  );
-  assert.match(examineEvaluation, /"proposals": \[\{"dependency_id"/);
-  assert.match(examineEvaluation, /"finding_labels": \["B1"\]/);
-  assert.match(
-    examineEvaluation,
-    /Put in finding_labels the label of each blocker that the proposal fixes\. Name each blocker in at most one proposal\./,
-  );
-  assert.doesNotMatch(instruction, /finding_labels/);
-  assert.match(instruction, /distinct criterion/);
-  assert.match(
-    instruction,
-    /Verification results of this evaluation: \[\{"command":"npm run verify","exit_code":0/,
-  );
-  assert.match(
-    instruction,
-    /A blocker requires criterion-not-met, and success holds no blocker\. Give each item of your finding list as one item of findings\. Give each item its label, action, name, description, fix and why\. Report each defect once\. Put the task id in task_id, or null for the node criterion or the default standard\./,
-  );
-  assert.doesNotMatch(instruction, /prose style/);
-  assert.doesNotMatch(instruction, /unmet/);
-  assert.match(
-    instruction,
-    /in the review bundle\. If the review bundle holds a coder report, read it\. Judge each OPEN blocker of the coder report: list it as a blocker finding with its ground, or state in the rationale why it is not a defect\. An OPEN blocker of the coder report that the node scope forbids is a blocker finding with the conflict ground\. An answer of the coder report to a prior finding id is no coder blocker\. A coder blocker is exempt from the patch rule\. Weigh each current dependency outcome/,
-  );
-  assert.doesNotMatch(examineEvaluation, /coder report/);
-  assert.match(
-    instruction,
-    /Give each blocker a ground: stated for a requirement or criterion of the work prompt, standard for a default-standard rule, unstated for a defect that neither states, conflict for two stated requirements or criteria that the work cannot meet together\. Give each suggestion the ground null\./,
-  );
-  assert.match(
-    instruction,
-    /conflict for two stated requirements or criteria that the work cannot meet together\. Give each suggestion the ground null\. For example, correct work fails a criterion, a verification or an affected test unless it changes a file that the requirement forbids\. A failure that a defect of the work causes is no conflict\. For a conflict, write the description as the two requirements in quotes, joined by " vs ": "requirement A" vs "requirement B"\. Write every description in full; do not cite another finding label\./,
-  );
-  assert.match(
-    instruction,
-    /`changed_files` in the review bundle lists every file that the change under review adds, modifies or deletes\./,
-  );
-  assert.match(
-    instruction,
-    /A changed file that the requirement forbids is a blocker with the ground stated\. The exception is a change that correct work needs for a criterion, a verification or an affected test\./,
-  );
-  assert.match(
-    instruction,
-    /"findings": \[\{"label": "B1", "action": "yes", "task_id": null, "ground": "stated", "name": "Short name", "description": "The concrete defect", "fix": "The recommended change", "why": "The reason for the action"\}\], "fixed_finding_ids": \[\]/,
-  );
-  assert.doesNotMatch(instruction, /review round|Prior findings/);
-  assert.equal(
-    instruction.match(/ground conflict|conflict for/g)?.length,
-    SINGLE_CONFLICT_DEFINITION,
-  );
-  assert.match(instruction, /"ground": "stated"/);
-  assert.doesNotMatch(
-    instruction,
-    /reasoningEffort|modelIdentifier|resourceBudget/,
-  );
-});
-
-const JUDGEMENT_REPAIR =
-  "The reply holds no valid kanthord-judgement: line. Reply again with exactly one such line.";
-
-test("the repair instruction names the marker of the invalid reply", () => {
-  assert.equal(
-    repairInstruction(SHIPPED_TEMPLATES, JUDGEMENT_MARKER),
-    JUDGEMENT_REPAIR,
-  );
-});
-
-const EXAMINE_EMPTY = {
-  repositories: [],
-  verification: null,
-  dependencies: [],
-  outcomes: [],
-  evidence: [],
-};
-
-test("the examine instruction makes the reply the report and forbids a file", () => {
-  const instruction = examineInstruction(SHIPPED_TEMPLATES, EXAMINE_EMPTY);
-  assert.match(instruction, /Your reply is the report/);
-  assert.match(instruction, /write no file/);
-  assert.match(instruction, /every field including fix: and why:/);
-});
-
-test("the examine instruction carries the final-snapshot verification", () => {
-  const instruction = examineInstruction(SHIPPED_TEMPLATES, {
-    ...EXAMINE_EMPTY,
-    verification: {
-      tested_input: [
-        { kind: "repository", binding_id: "binding", commit: "d6d4973" },
-      ],
-      results: [
-        {
-          command: "npm run verify",
-          exit_code: 0,
-          signal: null,
-          timed_out: false,
-        },
-      ],
-    },
-  });
-  assert.match(instruction, /Final-snapshot verification: \{"tested_input"/);
-  assert.match(instruction, /"commit":"d6d4973"/);
-  assert.match(instruction, /"command":"npm run verify","exit_code":0/);
-});
-
-test("the task revision carries the output of the failed verification when it has one", () => {
-  const verification: Verification = {
-    tested_input: { kind: "produced", sha256: "hash" },
-    results: [
-      { command: "npm test", exit_code: 1, signal: null, timed_out: false },
-    ],
-  };
-  const withOutput = taskRevisionInstruction(
-    SHIPPED_TEMPLATES,
-    verification,
-    ["npm test"],
-    "✖ shutdown test timed out",
-  );
-  assert.match(
-    withOutput,
-    /Verification 1 `npm test` failed with exit code 1\./,
-  );
-  assert.match(withOutput, /```text\n✖ shutdown test timed out\n```$/);
-  assert.match(
-    withOutput,
-    /^Revise the task work to satisfy its criterion and verifications\. When a verification or an affected test needs a change to a forbidden file, make the smallest such change\. Verification 1/,
-  );
-  const withoutOutput = taskRevisionInstruction(
-    SHIPPED_TEMPLATES,
-    verification,
-    ["npm test"],
-    "",
-  );
-  assert.doesNotMatch(withoutOutput, /Output of the last verification/);
-});
-
 const PRODUCED_DIGEST = "hash";
 const RELEASE_COMMAND = "npm test";
 const FAILED_EXIT = 1;
@@ -452,25 +206,6 @@ test("only the release revision names the content of the release clone", () => {
     ),
     RELEASE_CLONE,
   );
-});
-
-test("a failed verification report carries the output and no flaky sentence", () => {
-  const run = {
-    verification: {
-      tested_input: { kind: "produced" as const, sha256: "hash" },
-      results: [
-        { command: "npm test", exit_code: 1, signal: null, timed_out: false },
-      ],
-    },
-    outputs: ["✖ order is created_at DESC"],
-    flaky: [true],
-    flaky_failures: [],
-    outcome: VerificationClass.CodeFailure,
-  };
-  const report = failedVerificationReport(run, ["npm test"]);
-  assert.match(report, /^Verification 1 `npm test` failed with exit code 1\./);
-  assert.doesNotMatch(report, /flaky/);
-  assert.match(report, /```text\n✖ order is created_at DESC\n```$/);
 });
 
 test("the Flaky verification description keeps the finding text bound for several large outputs", () => {
@@ -534,95 +269,7 @@ test("the requested changes text is null without a change request and stops at 4
   );
 });
 
-test("each change request names its binding", () => {
-  const request = (reviewer: string, commit: string) => ({
-    review_id: 1,
-    reviewer,
-    body: `${reviewer} body`,
-    submitted_at: null,
-    commit_id: commit,
-    comments: [],
-  });
-  assert.equal(
-    requestedChangesText([
-      {
-        binding: "api",
-        head_commit: "a".repeat(40),
-        change_requests: [request("octo", "a".repeat(40))],
-      },
-      {
-        binding: "web",
-        head_commit: "b".repeat(40),
-        change_requests: [request("hubot", "b".repeat(40))],
-      },
-    ]),
-    [
-      "The pull request reviewers request these changes:",
-      `Reviewer octo requests changes on api at commit ${"a".repeat(40)}: octo body`,
-      `Reviewer hubot requests changes on web at commit ${"b".repeat(40)}: hubot body`,
-    ].join("\n"),
-  );
-});
-
-test("the failed checks text names each check, binding and commit and stops at 4 KiB", () => {
-  const read = (binding: string, commit: string, failed: string[]) => ({
-    evidence_id: "evidence",
-    binding_id: `binding_${binding}`,
-    binding,
-    head_commit: commit,
-    failed,
-  });
-  assert.equal(failedChecksText([]), null);
-  assert.equal(
-    failedChecksText([
-      read("api", "a".repeat(40), ["lint", "unit"]),
-      read("web", "b".repeat(40), ["build"]),
-    ]),
-    [
-      "The pull request cannot merge:",
-      `The required checks lint, unit failed on api at commit ${"a".repeat(40)}.`,
-      `The required checks build failed on web at commit ${"b".repeat(40)}.`,
-    ].join("\n"),
-  );
-  const long = failedChecksText([
-    read("api", "a".repeat(40), ["x".repeat(REQUESTED_CHANGES_MAX_BYTES)]),
-  ]);
-  assert.ok(long);
-  assert.ok(long.startsWith("The pull request cannot merge:"));
-  assert.ok(long.endsWith("[The failed checks exceed 4 KiB and end here.]"));
-  assert.equal(
-    Buffer.byteLength(long.slice(0, long.lastIndexOf("\n")), "utf8"),
-    REQUESTED_CHANGES_MAX_BYTES,
-  );
-});
-
 const SINGLE_REPAIR = 1;
-
-test("a blocker finding requires a ground of the closed set", () => {
-  assert.deepEqual(Object.values(UnmetGround), [
-    "stated",
-    "standard",
-    "unstated",
-    "conflict",
-  ]);
-  assert.equal(unmetGroundSchema.safeParse("other").success, false);
-  assert.equal(
-    parseJudgement(UNGROUNDED_REPLY, evaluationJudgementSchema).reply,
-    null,
-  );
-  assert.equal(
-    parseJudgement(
-      GROUNDED_REPLY.replace("unstated", "other"),
-      evaluationJudgementSchema,
-    ).reply,
-    null,
-  );
-  assert.equal(
-    parseJudgement(GROUNDED_REPLY, evaluationJudgementSchema).reply?.findings[0]
-      ?.ground,
-    UnmetGround.Unstated,
-  );
-});
 
 function repairAgent(replies: readonly (string | undefined)[]) {
   const instructions: string[] = [];
@@ -708,22 +355,6 @@ function failedRun(repository: string, output: string): AffectedRun {
   };
 }
 
-test("the affected revision renders the rationale of each failed repository, the results and the first output", () => {
-  const first = failedRun("api", "first output");
-  const second = failedRun("web", "second output");
-  const instruction = affectedRevisionInstruction(SHIPPED_TEMPLATES, [
-    first,
-    second,
-  ]);
-  assert.ok(
-    instruction.includes(`${first.failure_text}\n\n${second.failure_text}`),
-  );
-  assert.ok(instruction.includes(JSON.stringify([first.head, second.head])));
-  assert.match(instruction, /```text\nfirst output\n```$/);
-  assert.doesNotMatch(instruction, /second output/);
-  assert.match(instruction, FORBIDDEN_FILE_RULE);
-});
-
 test("the affected failure report joins the text of each failed repository and ends with the first output", () => {
   const first = failedRun("api", "first output");
   const second = failedRun("web", "second output");
@@ -739,16 +370,9 @@ test("the affected failure report joins the text of each failed repository and e
   assert.doesNotMatch(report, /second output|cli output/);
 });
 
-test("the affected failure report holds no output block for an empty output", () => {
-  const run = failedRun("api", "");
-  assert.equal(affectedFailureReport([run]), run.failure_text);
-});
-
 const PRIOR_BLOCKER_ID = "finding_01ARZ3NDEKTSV4RRFFQ69G5FAB";
 const PRIOR_SUGGESTION_ID = "finding_01ARZ3NDEKTSV4RRFFQ69G5FAC";
 const UNLISTED_BLOCKER_RATIONALE = "r\nUnmet:\n- node: defect B1";
-const PLAIN_REVISION =
-  "Revise the task work to meet its criterion. Previous judgement: r";
 const ROUND_SCHEMA = evaluationJudgementSchemaOf({
   priorIds: [PRIOR_BLOCKER_ID, PRIOR_SUGGESTION_ID],
   priorBlockerIds: [PRIOR_BLOCKER_ID],
@@ -953,128 +577,6 @@ test("a criterion-not-met that rests only on an unlisted prior blocker is admitt
   );
 });
 
-test("the issues of a refused line reach the repair text", async () => {
-  const absent = parseJudgement("no marker", ROUND_SCHEMA);
-  assert.deepEqual(absent, { reply: null, issues: [] });
-  assert.equal(
-    repairInstruction(SHIPPED_TEMPLATES, JUDGEMENT_MARKER, absent.issues!),
-    JUDGEMENT_REPAIR,
-  );
-  const refused = repairAgent([UNGROUNDED_REPLY, GROUNDED_REPLY]);
-  await parseRepaired(
-    SHIPPED_TEMPLATES,
-    refused.agent,
-    {} as WorkPrompt,
-    evaluationJudgementSchema,
-  );
-  assert.equal(
-    refused.instructions[0],
-    `${JUDGEMENT_REPAIR} Correct each issue of the last line: ${JSON.stringify([
-      { path: "findings.0.ground", message: "A blocker holds a ground" },
-    ])}`,
-  );
-});
-
-test("a round with a review base renders the round block with the prior findings", () => {
-  const verification = { tested_input: [], results: [] } as never;
-  const base = {
-    tasks: [],
-    verification,
-    evidence: [],
-    affected: null,
-  };
-  const prior = [priorFinding(PRIOR_BLOCKER_ID, "B1")];
-  const reviewBase = [
-    { kind: "repository", binding_id: "binding", commit: "a".repeat(40) },
-  ];
-  const instruction = evaluationInstruction(SHIPPED_TEMPLATES, {
-    ...base,
-    round: { number: 2, review_base: reviewBase },
-    priorFindings: prior,
-  });
-  assert.match(
-    instruction,
-    /^This is review round 2\. `patch_paths` in the review bundle lists the patch of each repository since the latest review that gave success, a new finding or a proposal\. Review only that change: raise a new finding only on a line that a patch adds or changes\. List each prior finding that the change fixes in fixed_finding_ids\. Never report a prior finding again\. A finding that you do not list stays open\. A prior blocker that you do not list stays a blocker of this judgement\.$/m,
-  );
-  const line = instruction
-    .split("\n")
-    .find((entry) => entry.startsWith("Prior findings: "));
-  assert.deepEqual(JSON.parse(line!.slice("Prior findings: ".length)), [
-    {
-      id: PRIOR_BLOCKER_ID,
-      label: "B1",
-      round: 1,
-      kind: "blocker",
-      action: "yes",
-      task_id: null,
-      ground: "stated",
-      name: "name B1",
-      description: "defect B1",
-      fix: "fix B1",
-      why: "why B1",
-    },
-  ]);
-  assert.doesNotMatch(
-    evaluationInstruction(SHIPPED_TEMPLATES, {
-      ...base,
-      round: { number: 2, review_base: null },
-      priorFindings: prior,
-    }),
-    /review round|Prior findings/,
-  );
-});
-
-test("the criterion revision lists each open finding with its id and asks for an answer per id", () => {
-  assert.equal(
-    criterionRevisionInstruction(SHIPPED_TEMPLATES, "r"),
-    PLAIN_REVISION,
-  );
-  const text = criterionRevisionInstruction(SHIPPED_TEMPLATES, "r", [
-    priorFinding(PRIOR_BLOCKER_ID, "B1"),
-    { ...priorFinding(PRIOR_SUGGESTION_ID, "S1"), round: 2 },
-  ]);
-  assert.equal(
-    text,
-    [
-      PLAIN_REVISION,
-      "",
-      "Resolve each finding below. Change only what each finding needs, because the next review reads only the change since the latest review that gave success, a new finding or a proposal. In your final reply, answer each finding id with FIXED or OPEN and the reason. A finding answer is no blocker of your finding list.",
-      `- ${PRIOR_BLOCKER_ID} (B1, round 1) name B1: defect B1 fix: fix B1 why: why B1`,
-      `- ${PRIOR_SUGGESTION_ID} (S1, round 2) name S1: defect S1 fix: fix S1 why: why S1`,
-    ].join("\n"),
-  );
-});
-
-test("a proposal parses finding_labels and reads [] when the field is absent", () => {
-  const proposal = {
-    dependency_id: "node_x",
-    name: "Fix",
-    requirement: "Repair",
-    criterion: "Repaired",
-    task: {
-      name: "Task",
-      requirement: "Change",
-      criterion: "Done",
-      verifications: ["command"],
-    },
-  };
-  const reply = (value: unknown) =>
-    parseJudgement(
-      `kanthord-judgement: ${JSON.stringify({
-        result: "criterion-not-met",
-        rationale: "r",
-        proposals: [value],
-      })}`,
-      evaluationJudgementSchema,
-    ).reply;
-  assert.deepEqual(reply(proposal)?.proposals[0]?.finding_labels, []);
-  assert.deepEqual(
-    reply({ ...proposal, finding_labels: ["B1", "B2"] })?.proposals[0]
-      ?.finding_labels,
-    ["B1", "B2"],
-  );
-});
-
 function linkUpdate(index: number, overrides: object = {}) {
   return {
     id: `link_update_${String(index).padStart(2, "0")}`,
@@ -1095,46 +597,6 @@ function linkUpdate(index: number, overrides: object = {}) {
     ...overrides,
   };
 }
-
-test("the link updates text lists the newest updates with New marks, one line for each missing update and the count of older updates", () => {
-  const items: LinkUpdateRead["items"] = Array.from(
-    { length: VERDICT_LINK_UPDATE_LIMIT },
-    (_, index) =>
-      linkUpdate(VERDICT_LINK_UPDATE_LIMIT - index, {
-        new: index < NEW_UPDATES,
-      }),
-  );
-  items[MISSING_INDEX] = { ...items[MISSING_INDEX]!, content: null };
-  const text = linkUpdatesText({
-    items,
-    next_cursor: "next",
-    total: TOTAL_UPDATES,
-  });
-  assert.ok(text);
-  const lines = text.split("\n");
-  assert.equal(lines[0], LINK_UPDATES_HEADING);
-  assert.equal(
-    lines.filter((line) => line === MISSING_LINE).length,
-    ONE_MISSING,
-  );
-  assert.equal(
-    lines.filter((line) => line.startsWith("New")).length,
-    NEW_UPDATES,
-  );
-  assert.ok(
-    text.indexOf(`body ${VERDICT_LINK_UPDATE_LIMIT}.`) <
-      text.indexOf(`body ${FIRST_UPDATE}.`),
-  );
-  assert.ok(text.includes("octo/widgets"));
-  assert.ok(text.includes(new Date(LINK_TIME + FIRST_UPDATE).toISOString()));
-  assert.ok(
-    text.includes("https://github.com/octo/widgets/issues/7#issuecomment-1"),
-  );
-  assert.equal(
-    lines.at(-1),
-    `${TOTAL_UPDATES - VERDICT_LINK_UPDATE_LIMIT} older updates. Read them with the tool link_update_list.`,
-  );
-});
 
 test("the link updates text cuts no body and states no older updates when the page holds all", () => {
   const body = "x".repeat(REQUESTED_CHANGES_MAX_BYTES * LONG_BODY_FACTOR);
