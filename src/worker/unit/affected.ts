@@ -360,7 +360,7 @@ function failedIdsText(failed: readonly AffectedTestId[]): string {
 export function affectedFailureText(input: AffectedFailureInput): string {
   const head = `The affected test run of repository ${input.repository} failed. KanthorD ran \`${input.command}\` for ${input.changed} changed files`;
   if ("reason" in input)
-    return `${head}, and the command ${reasonText(input.reason)}. A second run on the head gave the same result, and the same command gives a valid result on the base head, so the change of the node causes it. Change the code so that the command writes a valid report in time.`;
+    return `${head}, and the command ${reasonText(input.reason)}. A second run on the head also gave no valid report, and the same command gives a valid result on the base head, so the change of the node causes it. Change the code so that the command writes a valid report in time.`;
   const noun = input.failed.length === ONE_ENTRY ? "test" : "tests";
   return `${head}. The run selected ${input.tests} test files, and ${input.failed.length} ${noun} failed: ${failedIdsText(input.failed)}. Each selected test imports a changed file directly or through other files. Change the code or the test so that every selected test passes.`;
 }

@@ -384,7 +384,7 @@ test("the failure text states why the head run gave no valid report", () => {
   for (const [reason, phrase] of reasons)
     assert.equal(
       affectedFailureText({ ...base, reason }),
-      `The affected test run of repository engine failed. KanthorD ran \`pnpm test:affected\` for 2 changed files, and the command ${phrase}. A second run on the head gave the same result, and the same command gives a valid result on the base head, so the change of the node causes it. Change the code so that the command writes a valid report in time.`,
+      `The affected test run of repository engine failed. KanthorD ran \`pnpm test:affected\` for 2 changed files, and the command ${phrase}. A second run on the head also gave no valid report, and the same command gives a valid result on the base head, so the change of the node causes it. Change the code so that the command writes a valid report in time.`,
     );
 });
 
@@ -431,13 +431,14 @@ permission() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
   tr -d '\\n' < "$KANTHORD_CHANGES"; echo
 } >> "$probe"
 case "$mode" in
+  invalid_then_*)
+    [ -e "$probe.rerun" ] || { touch "$probe.rerun"; echo 'not json' > "$KANTHORD_AFFECTED_REPORT"; exit 0; }
+    mode=\${mode#invalid_then_};;
+esac
+case "$mode" in
   slow) echo hung-output; sleep 30; exit 0;;
   absent) exit 127;;
   invalid) echo 'not json' > "$KANTHORD_AFFECTED_REPORT"; exit 0;;
-  invalid_then_pass|invalid_then_fail)
-    [ -e "$probe.rerun" ] || { touch "$probe.rerun"; echo 'not json' > "$KANTHORD_AFFECTED_REPORT"; exit 0; }
-    cp "reports/\${mode#invalid_then_}.json" "$KANTHORD_AFFECTED_REPORT"
-    [ "$mode" = invalid_then_pass ];;
   fail) cp "reports/$mode.json" "$KANTHORD_AFFECTED_REPORT"; exit 1;;
   *) cp "reports/$mode.json" "$KANTHORD_AFFECTED_REPORT"; exit 0;;
 esac
@@ -752,7 +753,7 @@ test("an invalid head report at two head runs with a valid base report answers f
   assert.equal(result.report, null);
   assert.match(
     result.failure_text ?? "",
-    /wrote no valid report: invalid JSON.*A second run on the head gave the same result/s,
+    /wrote no valid report: invalid JSON.*A second run on the head also gave no valid report/s,
   );
   assert.equal(result.base_run?.exit_code, EXIT_OK);
   assert.equal(
@@ -809,6 +810,18 @@ test("a time-limit end at the head answers failed with the time limit, the commi
     readFileSync(f.probe, "utf8").split("\n").length - 1,
     PROBE_LINES,
   );
+});
+
+test("a time-limit end at the second head run answers failed with the time limit and keeps the base run", async (t) => {
+  const f = await fixture(t, { base: "pass", head: "invalid_then_slow" });
+  const result = await ran(f, { commandLimitMs: SHORT_LIMIT_MS });
+  assert.equal(result.verdict, AffectedVerdict.Failed);
+  assert.equal(result.head.timed_out, true);
+  assert.equal(
+    result.failure_text,
+    `The affected tests reached their time limit of ${SHORT_LIMIT_S} s at ${f.head}.\n\nhung-output\n`,
+  );
+  assert.equal(result.base_run?.exit_code, EXIT_OK);
 });
 
 test("a time-limit end at the head answers failed also when the base times out", async (t) => {
