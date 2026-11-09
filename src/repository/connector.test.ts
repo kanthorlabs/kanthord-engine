@@ -42,6 +42,7 @@ import {
   pushSnapshotFresh,
   readFilesAtCommit,
   readObjectIds,
+  refreshSnapshot,
   resolveBranchCommit,
   squashPushFresh,
 } from "./connector.ts";
@@ -1724,6 +1725,7 @@ const MISSING_OBJECT_MARK = "?";
 const MAINTENANCE_OFF = "false";
 const GC_OFF = "0";
 const EMPTY_REFS = "";
+const DASH_BRANCH_REF = "refs/heads/-x";
 const NON_CANONICAL_GATE_PATHS = ["scripts/", "./p.json"];
 const GATE_DECLARATION_ENTRY = "entry.txt";
 const SLOW_UPLOAD_SECONDS = 8;
@@ -2081,4 +2083,197 @@ suite("connector gate refusals", { concurrency: SUITE_CONCURRENCY }, () => {
     );
     assert.equal(existsSync(origin.directory), true);
   });
+});
+
+suite("connector snapshot refresh", { concurrency: SUITE_CONCURRENCY }, () => {
+  const refresh = (address: string, revision: string, directory: string) =>
+    refreshSnapshot({
+      address,
+      revision,
+      directory,
+      context: background,
+      deadlineMs: DEADLINE_MS,
+      ssh: LOCAL_GIT_SSH_ACCESS,
+    });
+  const snapshotOf = async (
+    address: string,
+    revision: string,
+    directory: string,
+  ) =>
+    cloneSnapshot(
+      address,
+      revision,
+      directory,
+      background,
+      DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
+    );
+  const refused = {
+    code: GIT_FAILED,
+    message: /The remote does not serve the commit\./,
+  };
+
+  test("refreshSnapshot refuses a commit that no remote branch or tag holds", async (t) => {
+    const { origin, seed, snapshot, commit } = await remoteRepository(t);
+    const directory = temporary(t);
+    await simpleGit(seed).raw(["checkout", "-b", "gone"]);
+    const gone = await commit("gone", "gone");
+    await simpleGit(seed).raw(["push", "origin", "gone"]);
+    await snapshotOf(origin, snapshot, directory);
+    await simpleGit(seed).raw(["push", "origin", "--delete", "gone"]);
+    await simpleGit(directory).raw([
+      ...IDENTITY,
+      "commit",
+      "--allow-empty",
+      "-m",
+      "local",
+    ]);
+    const local = (await simpleGit(directory).revparse(["HEAD"])).trim();
+    await assert.rejects(refresh(origin, local, directory), refused);
+    await assert.rejects(refresh(origin, gone, directory), refused);
+  });
+
+  test("refreshSnapshot proves the commit against the binding address, not the stored URL", async (t) => {
+    const { origin, seed, snapshot, commit } = await remoteRepository(t);
+    const fork = join(temporary(t), "fork");
+    await simpleGit().raw(["clone", "--bare", "--", origin, fork]);
+    const extra = await commit("extra", "extra");
+    await simpleGit(seed).raw(["push", fork, "HEAD:refs/heads/extra"]);
+    const directory = temporary(t);
+    await snapshotOf(fork, extra, directory);
+    await assert.rejects(refresh(origin, extra, directory), refused);
+    assert.equal(await refresh(origin, snapshot, directory), snapshot);
+    assert.equal(
+      (
+        await simpleGit(directory).raw(["config", "--get", "remote.origin.url"])
+      ).trim(),
+      origin,
+    );
+  });
+
+  test("refreshSnapshot answers the commit that the remote serves after a new push", async (t) => {
+    const { origin, seed, base, commit } = await remoteRepository(t);
+    const directory = temporary(t);
+    await snapshotOf(origin, base, directory);
+    const pushed = await commit("next", "next");
+    await simpleGit(seed).raw(["push", "origin", BASE_BRANCH]);
+    assert.equal(await refresh(origin, pushed, directory), pushed);
+    assert.equal(
+      await refresh(origin, `origin/${BASE_BRANCH}`, directory),
+      pushed,
+    );
+  });
+
+  const refsUnder = async (directory: string, prefix: string) =>
+    (
+      await simpleGit(directory).raw([
+        "for-each-ref",
+        "--format=%(refname)",
+        prefix,
+      ])
+    ).trim();
+  const withoutLocalBranches = async (directory: string) => {
+    const git = simpleGit(directory);
+    await git.raw(["checkout", "--detach"]);
+    for (const ref of (await refsUnder(directory, "refs/heads"))
+      .split("\n")
+      .filter(Boolean))
+      await git.raw(["update-ref", "-d", ref]);
+  };
+
+  test("refreshSnapshot drops origin/HEAD and makes no local branch when the remote HEAD names a missing branch", async (t) => {
+    const { origin, snapshot } = await remoteRepository(t);
+    const directory = temporary(t);
+    await simpleGit(origin).raw(["symbolic-ref", "HEAD", "refs/heads/main"]);
+    await snapshotOf(origin, snapshot, directory);
+    await withoutLocalBranches(directory);
+    await simpleGit(origin).raw(["symbolic-ref", "HEAD", "refs/heads/gone"]);
+    assert.equal(await refresh(origin, snapshot, directory), snapshot);
+    assert.equal(
+      await refsUnder(directory, "refs/remotes/origin/HEAD"),
+      EMPTY_REFS,
+    );
+    assert.equal(await refsUnder(directory, "refs/heads"), EMPTY_REFS);
+  });
+
+  test("refreshSnapshot makes no local branch when the remote HEAD names a branch that is not a valid branch name", async (t) => {
+    const { origin, snapshot } = await remoteRepository(t);
+    const directory = temporary(t);
+    await simpleGit(origin).raw(["symbolic-ref", "HEAD", "refs/heads/main"]);
+    await snapshotOf(origin, snapshot, directory);
+    await withoutLocalBranches(directory);
+    await simpleGit(origin).raw(["update-ref", DASH_BRANCH_REF, snapshot]);
+    await simpleGit(origin).raw(["symbolic-ref", "HEAD", DASH_BRANCH_REF]);
+    assert.equal(await refresh(origin, snapshot, directory), snapshot);
+    assert.equal(await refsUnder(directory, "refs/heads"), EMPTY_REFS);
+    assert.equal(
+      await refsUnder(directory, "refs/remotes/origin/HEAD"),
+      EMPTY_REFS,
+    );
+  });
+
+  test("refreshSnapshot follows the remote tags and proves a commit that only a tag holds", async (t) => {
+    const { origin, seed, base } = await remoteRepository(t);
+    const git = simpleGit(seed);
+    await git.raw(["tag", "v1", base]);
+    await git.raw(["push", "origin", "v1"]);
+    const directory = temporary(t);
+    await snapshotOf(origin, base, directory);
+    await git.raw(["push", "origin", "--delete", "refs/tags/v1"]);
+    await git.raw(["checkout", "--detach", base]);
+    await git.raw([...IDENTITY, "commit", "--allow-empty", "-m", "tagged"]);
+    const tagged = (await git.revparse(["HEAD"])).trim();
+    await git.raw(["tag", "v2", tagged]);
+    await git.raw(["push", "origin", "v2"]);
+    assert.equal(await refresh(origin, tagged, directory), tagged);
+    assert.deepEqual(
+      (await simpleGit(directory).raw(["tag", "--list"])).trim().split("\n"),
+      ["v2"],
+    );
+  });
+});
+
+test("refreshSnapshot proves the commit with the commit-graph file off", async (t) => {
+  const { origin, snapshot } = await remoteRepository(t);
+  const directory = temporary(t);
+  await cloneSnapshot(
+    origin,
+    snapshot,
+    directory,
+    background,
+    DEADLINE_MS,
+    LOCAL_GIT_SSH_ACCESS,
+  );
+  const execPath = (await simpleGit().raw(["--exec-path"])).trim();
+  const bin = temporary(t);
+  const log = join(bin, "git.log");
+  writeFileSync(
+    join(bin, "git"),
+    `#!/bin/sh\necho "$*" >> '${log}'\nexec '${join(execPath, "git")}' "$@"\n`,
+    { mode: 0o700 },
+  );
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  stopAfter(t, () => {
+    process.env.PATH = path;
+  });
+  assert.equal(
+    await refreshSnapshot({
+      address: origin,
+      revision: snapshot,
+      directory,
+      context: background,
+      deadlineMs: DEADLINE_MS,
+      ssh: LOCAL_GIT_SSH_ACCESS,
+    }),
+    snapshot,
+  );
+  const calls = readFileSync(log, "utf8").split("\n");
+  for (const command of ["rev-parse", "for-each-ref --contains="])
+    assert.ok(
+      calls.some((line) =>
+        line.startsWith(`-c core.commitGraph=false ${command}`),
+      ),
+      command,
+    );
 });

@@ -330,6 +330,11 @@ async function methodsFixture(t: TestContext) {
     },
     cloneSnapshot: (address, ...args) =>
       connector.cloneSnapshot(barePaths.get(address)!, ...args),
+    refreshSnapshot: (input) =>
+      connector.refreshSnapshot({
+        ...input,
+        address: barePaths.get(input.address)!,
+      }),
     fetchAndCheckout: (...args) => connector.fetchAndCheckout(...args),
     fetchBase: (...args) => connector.fetchBase(...args),
     pushNodeBranch: (...args) => connector.pushNodeBranch(...args),

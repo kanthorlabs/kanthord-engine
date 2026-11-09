@@ -25,7 +25,11 @@ import {
   GIT_UNSAFE_OPTIONS,
   isolatedGitEnvironment,
 } from "../kernel/git-environment.ts";
-import { type RepositoryFile, RepositoryFileState } from "./contract.ts";
+import {
+  type RepositoryFile,
+  RepositoryFileState,
+  type SnapshotRefresh,
+} from "./contract.ts";
 import { GIT_DEADLINE_EXCEEDED } from "./git-failure.ts";
 import { CheckEndState, type CheckFold, ExpectedEndState } from "./github.ts";
 import { NODE_BRANCH_PATTERN } from "./node-branch.ts";
@@ -46,6 +50,10 @@ const EXCLUDE_PAIR = 2;
 const NO_REMAINDER = 0;
 const ROOT_PREFIX = "/";
 const EXPIRED = 0;
+const REMOTE_HEAD_PATTERN = /^ref: refs\/heads\/(\S+)\tHEAD$/m;
+const ORIGIN_REFS = "refs/remotes/origin/";
+const ORIGIN_HEAD = "refs/remotes/origin/HEAD";
+const NO_COMMIT_GRAPH = ["-c", "core.commitGraph=false"];
 const TIMEOUT_PLUGIN = "timeout";
 const EMPTY_BYTES = 0;
 const REPOSITORY_FILES_DIRECTORY_PREFIX = "kanthord-repository-files-";
@@ -90,6 +98,7 @@ const COMMIT_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const EXIT_SUCCESS = 0;
 const EXIT_NOT_ANCESTOR = 1;
 const EXIT_DETACHED_HEAD = 1;
+const EXIT_FATAL = 128;
 const NO_EXIT = -1;
 const GATE_DECLARATION_FILE = ".kanthord/affected-tests.json";
 const BARE_HEAD_FILE = "HEAD";
@@ -568,6 +577,90 @@ export async function cloneSnapshot(
       )
     ).trim();
   });
+}
+
+export async function refreshSnapshot(input: SnapshotRefresh): Promise<string> {
+  const { address, revision, directory, context, deadlineMs, ssh } = input;
+  assert.ok(address);
+  assert.ok(revision);
+  assert.ok(!revision.startsWith("-"));
+  return withAccess(ssh, context, deadlineMs, async (agent, remaining) => {
+    const end = performance.now() + remaining;
+    const run = (args: string[]) =>
+      runGit(
+        directory,
+        args,
+        context,
+        end - performance.now(),
+        "refresh snapshot",
+        { agent },
+      );
+    await run(["remote", "set-url", "origin", "--", address]);
+    await run([
+      "config",
+      "--replace-all",
+      "remote.origin.fetch",
+      "+refs/heads/*:refs/remotes/origin/*",
+    ]);
+    await run(["fetch", "--prune", "--prune-tags", "--tags", "origin"]);
+    const valid = async (branch: string) =>
+      (
+        await runGitExit(
+          directory,
+          ["check-ref-format", "--branch", branch],
+          context,
+          end - performance.now(),
+          "refresh snapshot",
+          [EXIT_SUCCESS, EXIT_FATAL],
+          { agent },
+        )
+      ).exitCode === EXIT_SUCCESS;
+    await refreshDefaultBranch(run, valid);
+    const commit = (
+      await run([
+        ...NO_COMMIT_GRAPH,
+        "rev-parse",
+        "--verify",
+        `${revision}^{commit}`,
+      ])
+    ).trim();
+    const holder = await run([
+      ...NO_COMMIT_GRAPH,
+      "for-each-ref",
+      `--contains=${commit}`,
+      "--count=1",
+      "--format=%(refname)",
+      "refs/remotes/origin",
+      "refs/tags",
+    ]);
+    if (holder.trim() === EMPTY_STRING)
+      throw new Diagnostic(
+        GIT_FAILED,
+        "refresh snapshot: The remote does not serve the commit.",
+      );
+    return commit;
+  });
+}
+
+async function refreshDefaultBranch(
+  run: (args: string[]) => Promise<string>,
+  valid: (branch: string) => Promise<boolean>,
+): Promise<void> {
+  const branch = REMOTE_HEAD_PATTERN.exec(
+    await run(["ls-remote", "--symref", "origin", "HEAD"]),
+  )?.[1];
+  const tracking = `${ORIGIN_REFS}${branch}`;
+  const fetched = async () =>
+    (await run(["for-each-ref", "--format=%(refname)", tracking]))
+      .trim()
+      .split("\n")
+      .includes(tracking);
+  if (branch === undefined || !(await fetched()) || !(await valid(branch))) {
+    await run(["update-ref", "-d", ORIGIN_HEAD]);
+    return;
+  }
+  await run(["symbolic-ref", ORIGIN_HEAD, tracking]);
+  await run(["branch", "--force", "--track", "--", branch, tracking]);
 }
 
 async function runGitExit(

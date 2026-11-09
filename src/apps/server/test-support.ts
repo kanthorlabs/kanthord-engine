@@ -1927,6 +1927,12 @@ export function mappedTransport(
         deadlineMs,
         LOCAL_GIT_SSH_ACCESS,
       ),
+    refreshSnapshot: (input) =>
+      connector.refreshSnapshot({
+        ...input,
+        address: mapped(input.address),
+        ssh: LOCAL_GIT_SSH_ACCESS,
+      }),
     fetchAndCheckout: (
       directory,
       branch,

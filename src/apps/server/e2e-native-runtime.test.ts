@@ -296,6 +296,8 @@ test(
       clone: (_address, ...args) => connector.clone(bare, ...args),
       cloneSnapshot: (_address, ...args) =>
         connector.cloneSnapshot(bare, ...args),
+      refreshSnapshot: (input) =>
+        connector.refreshSnapshot({ ...input, address: bare }),
       fetchAndCheckout: (...args) => connector.fetchAndCheckout(...args),
       fetchBase: (...args) => connector.fetchBase(...args),
       pushNodeBranch: (...args) => connector.pushNodeBranch(...args),

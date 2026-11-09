@@ -9,11 +9,7 @@ import {
 import { readDependencies } from "./node-reads.ts";
 import { examineInstruction } from "./judgement.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
-import {
-  type ExamineCheckout,
-  workRepositoriesOf,
-  WorkspaceKind,
-} from "./workspace.ts";
+import { type ExamineCheckout, workRepositoriesOf } from "./workspace.ts";
 import {
   namedCheckouts,
   runSetup,
@@ -71,7 +67,10 @@ export async function runStepsExamine(
     input.claim.expired_at,
   );
   const workspace = await input.workspaces.prepareExamine({
+    env: input.env,
     executionId: input.claim.execution_id,
+    nodeId: input.claim.node_id,
+    log: (msg, fields) => run.log(msg, fields),
     transport: input.transport,
     sshAccess: input.sshAccess,
     context: run.operationContext,
@@ -155,6 +154,6 @@ export async function runStepsExamine(
       return await run.release(true);
     throw error;
   } finally {
-    input.workspaces.release(workspace.key, WorkspaceKind.Execution);
+    input.workspaces.release(workspace.key, workspace.kind);
   }
 }

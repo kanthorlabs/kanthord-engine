@@ -78,6 +78,14 @@ export interface SshRelayAccess {
 }
 
 export type SshAccess = SshKeyAccess | SshRelayAccess;
+export interface SnapshotRefresh {
+  address: string;
+  revision: string;
+  directory: string;
+  context: Context;
+  deadlineMs: number;
+  ssh: SshAccess;
+}
 
 export const RepositoryFileState = {
   Present: "present",

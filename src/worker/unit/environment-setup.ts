@@ -44,7 +44,6 @@ import {
 } from "./verification.ts";
 
 export const SETUP_COMMAND_LIMIT_MS = COMMAND_LIMIT_MS;
-export const BASE_DIRECTORY = "base";
 const SINGLE_CHECKOUT = 1;
 const NO_EXIT = -1;
 const MISSING_INDEX = -1;

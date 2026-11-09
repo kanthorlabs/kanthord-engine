@@ -182,6 +182,12 @@ async function fixture(t: TestContext) {
         deadline,
         routed(ssh),
       ),
+    refreshSnapshot: (input) =>
+      connector.refreshSnapshot({
+        ...input,
+        address: origin,
+        ssh: routed(input.ssh),
+      }),
     fetchAndCheckout: (
       directory,
       branch,
@@ -1022,6 +1028,12 @@ async function raceRemote(t: TestContext, gate: ReturnType<typeof landGate>) {
         deadline,
         routed(ssh),
       ),
+    refreshSnapshot: (input) =>
+      component.refreshSnapshot({
+        ...input,
+        address: origin,
+        ssh: routed(input.ssh),
+      }),
     fetchAndCheckout: (
       directory,
       branch,

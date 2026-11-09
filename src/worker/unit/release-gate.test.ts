@@ -77,6 +77,7 @@ const TAG = "x";
 const CONFIG_KEY = "a.b";
 const BASE_CHANGE = "base change";
 const LEFTOVER = "leftover";
+const STRAY_FILE = "stray";
 const FAILS_IN_RELEASE = 'case "$PWD" in */release/*) test -e fixed;; esac';
 const STRAY = "stray";
 const BUILD = "build";
@@ -979,6 +980,19 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     const h = await fixture(t, [], []);
     await simpleGit().clone(h.root, join(releaseKey(h), h.checkouts[0]!.name));
     assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    assert.equal(existsSync(releaseKey(h)), false);
+  });
+
+  test("a release round does not follow a symbolic link that replaces the release directory", async (t) => {
+    const h = await fixture(t, [], []);
+    const outside = temporary(t);
+    const name = h.checkouts[0]!.name;
+    await simpleGit().clone(h.root, join(outside, name));
+    writeFileSync(join(outside, STRAY_FILE), STRAY_FILE);
+    symlinkSync(outside, releaseKey(h));
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    assert.equal(existsSync(join(outside, name, ".git")), true);
+    assert.equal(existsSync(join(outside, STRAY_FILE)), true);
     assert.equal(existsSync(releaseKey(h)), false);
   });
 
