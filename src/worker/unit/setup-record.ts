@@ -34,7 +34,7 @@ function validRoot(directory: string, root: string): boolean {
   const segments = root.split(SEGMENT_SEPARATOR);
   if (
     segments.includes(PARENT_SEGMENT) ||
-    segments.includes(GIT_DIRECTORY) ||
+    segments.some((segment) => segment.toLowerCase() === GIT_DIRECTORY) ||
     linkedParent(directory, segments)
   )
     return false;

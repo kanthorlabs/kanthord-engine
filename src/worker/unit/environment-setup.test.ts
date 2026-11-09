@@ -27,6 +27,7 @@ import {
   setUpHeads,
 } from "./environment-setup.ts";
 import { commitOf, headCommit } from "./local-git.ts";
+import { validRoots } from "./setup-record.ts";
 import {
   RecordKind,
   SpanStatus,
@@ -242,6 +243,17 @@ test("a changed environment keeps a recorded root under a symlink to a directory
     digest: digest(PLAIN_SETUP),
     roots: [],
   });
+});
+
+test("a recorded root under a .git segment in any letter case is not valid", async (t) => {
+  const { checkout } = await repository(t, { file: "base" });
+  assert.deepEqual(
+    await validRoots(
+      { env, directory: checkout, context: background, deadlineMs: 10000 },
+      [".GIT/objects", ".Git/", "deps/"],
+    ),
+    ["deps/"],
+  );
 });
 
 test("a failed setup keeps the earlier record", async (t) => {
