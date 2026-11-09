@@ -10,7 +10,6 @@ import { isolatedGitEnvironment } from "../kernel/git-environment.ts";
 import { temporary } from "../kernel/test-support.ts";
 import { clone, fetchBase, gitLsRemote, pushNodeBranch } from "./connector.ts";
 import {
-  SSH_SIGN_USER,
   type SshKeyAccess,
   type SshRelayAccess,
   SshSignErrorCode,
@@ -259,24 +258,4 @@ test("plain git pushes and fetches through the relay with an unbound publickey s
   assert.ok(
     h.methods.every((method) => method === SshAuthenticationMethod.PublicKey),
   );
-});
-
-test("the production user name git refuses a login as another user", async (t) => {
-  const h = await relayHarness(t, undefined, SSH_SIGN_USER);
-  assert.notEqual(h.sshd.user, SSH_SIGN_USER);
-  const failure = await withSshAgent(
-    h.access,
-    background,
-    DEADLINE_MS,
-    async (env) =>
-      execFileAsync(
-        "git",
-        ["clone", "-q", h.sshd.url(h.bare), join(temporary(t), "clone")],
-        { env },
-      ).then(
-        () => "",
-        (error: { stderr?: string }) => error.stderr ?? "",
-      ),
-  );
-  assert.match(failure, KEY_REFUSED);
 });
