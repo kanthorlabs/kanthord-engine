@@ -13,6 +13,7 @@ import {
   markerTag,
   matcherNodes,
   mergeSpans,
+  promotes,
   redactValue,
   SCAN_FAILED,
   SENSITIVE_SCAN_MAX_CHARACTERS,
@@ -1468,6 +1469,15 @@ test("findKnownText finds each form of a known secret", () => {
   assert.ok(!found(j("x", publicPart, "... [truncated]")));
 });
 const WRAP_WIDTH_MIME = 76;
+
+test("promotes keeps a common word out of the table", () => {
+  assert.ok(!promotes("postgres", SensitiveRule.UrlUserinfo));
+  assert.ok(!promotes("development", SensitiveRule.QuotedAssignment));
+  assert.ok(promotes(an(16), SensitiveRule.QuotedAssignment));
+  assert.ok(promotes("AKIA", SensitiveRule.AwsAccessKeyId));
+  assert.ok(promotes("x", SensitiveRule.Jwt));
+  assert.ok(!promotes("aaaaaaaaaaaaaaaab", SensitiveRule.HttpCredential));
+});
 
 test("the matcher masks from each key to the longest value of that key", () => {
   const nested = knownMatcher();
