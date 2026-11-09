@@ -1429,6 +1429,23 @@ export async function scrubTree(
   await git(["clean", "-ffdx", ...cleanExcludes(roots)]);
 }
 
+export async function originAddress(call: GitCall): Promise<string | null> {
+  const { matched, output } = await runMatch(
+    call.env,
+    call.directory,
+    [
+      "config",
+      "--file",
+      join(call.directory, GIT_DIRECTORY, "config"),
+      "--get",
+      "remote.origin.url",
+    ],
+    call.context,
+    call.deadlineMs,
+  );
+  return matched ? output.trim() : null;
+}
+
 export async function fetchLocal(call: GitCall, source: string): Promise<void> {
   assert.ok(source && !source.startsWith("-"));
   await run(
@@ -1442,6 +1459,7 @@ export async function fetchLocal(call: GitCall, source: string): Promise<void> {
       source,
       "+refs/heads/*:refs/kanthord/heads/*",
       "+refs/remotes/origin/*:refs/kanthord/remotes/*",
+      "+refs/tags/*:refs/tags/*",
     ],
     call.context,
     call.deadlineMs,
