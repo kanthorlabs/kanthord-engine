@@ -157,6 +157,7 @@ export async function runNativeExecution(
       try {
         working = await open(workspace.root);
       } catch (error) {
+        await workspace.base.giveBack();
         input.workspaces.release(
           input.workspaces.nodeKey(input.claim.node_id),
           WorkspaceKind.Node,

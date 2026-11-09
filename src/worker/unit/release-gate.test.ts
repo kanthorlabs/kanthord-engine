@@ -7,6 +7,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   symlinkSync,
@@ -48,6 +49,7 @@ import {
   nextExecution,
   recordReleases,
   recordSpans,
+  releasedRoot,
   spanEnds,
   task,
 } from "./test-support.ts";
@@ -76,6 +78,8 @@ const TAG = "x";
 const CONFIG_KEY = "a.b";
 const BASE_CHANGE = "base change";
 const LEFTOVER = "leftover";
+const STRAY_FILE = "stray";
+const NO_CONFIG = "";
 const FAILS_IN_RELEASE = 'case "$PWD" in */release/*) test -e fixed;; esac';
 const STRAY = "stray";
 const BUILD = "build";
@@ -131,6 +135,20 @@ function treesDeleted(t: TestContext, h: Fixture): () => unknown[] {
     log.mock.calls
       .filter((call) => call.arguments[0] === TREE_DELETED)
       .map((call) => call.arguments[1]);
+}
+
+function objectInodes(directory: string): Set<number> {
+  const inodes = new Set<number>();
+  const walk = (path: string) => {
+    for (const name of readdirSync(path)) {
+      const entry = join(path, name);
+      const stats = lstatSync(entry);
+      if (stats.isDirectory()) walk(entry);
+      else inodes.add(stats.ino);
+    }
+  };
+  walk(join(directory, ".git", "objects"));
+  return inodes;
 }
 
 function releaseKey(h: Fixture): string {
@@ -435,7 +453,7 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
       furtherWork: false,
     });
     const directory = readFileSync(marker, "utf8").trim();
-    assert.notEqual(directory, h.root);
+    assert.notEqual(directory, releasedRoot(h));
     assert.equal(
       directory,
       join(
@@ -444,9 +462,12 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
         h.checkouts[0]!.name,
       ),
     );
-    assert.equal((await simpleGit(h.root).tags()).all.includes(TAG), false);
     assert.equal(
-      (await simpleGit(h.root).getConfig(CONFIG_KEY, "local")).value,
+      (await simpleGit(releasedRoot(h)).tags()).all.includes(TAG),
+      false,
+    );
+    assert.equal(
+      (await simpleGit(releasedRoot(h)).getConfig(CONFIG_KEY, "local")).value,
       null,
     );
   });
@@ -726,6 +747,96 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(existsSync(join(again, BUILD)), false);
   });
 
+  test("a fresh release tree shares no object file with the checkout", async (t) => {
+    const h = await fixture(t, [], []);
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    const [tree] = freeCommandTrees(h);
+    assert.ok(tree);
+    const checkout = objectInodes(h.root);
+    assert.deepEqual(
+      [...objectInodes(tree)].filter((ino) => checkout.has(ino)),
+      [],
+    );
+  });
+
+  test("a fresh and a reused release tree hold the same refs and no branch config", async (t) => {
+    const h = await fixture(t, [], []);
+    const refsOf = (tree: string) =>
+      simpleGit(tree).raw([
+        "for-each-ref",
+        "--format=%(refname) %(objectname) %(symref)",
+      ]);
+    const originHead = (tree: string) =>
+      simpleGit(tree)
+        .raw(["symbolic-ref", "-q", "refs/remotes/origin/HEAD"])
+        .catch(() => NO_CONFIG);
+    const branchConfig = (tree: string) =>
+      simpleGit(tree)
+        .raw(["config", "--get-regexp", "^branch\\."])
+        .catch(() => NO_CONFIG);
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    const [fresh] = freeCommandTrees(h);
+    assert.ok(fresh);
+    const freshRefs = await refsOf(fresh);
+    const freshConfig = readFileSync(join(fresh, ".git", "config"), "utf8");
+    assert.equal(await branchConfig(fresh), NO_CONFIG);
+    assert.equal(await originHead(fresh), await originHead(h.root));
+    assert.notEqual(await originHead(h.root), NO_CONFIG);
+    const prepared = treesPrepared(t, h);
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    assert.deepEqual(prepared(), [RELEASE_FROM_POOL]);
+    const [reused] = freeCommandTrees(h);
+    assert.ok(reused);
+    assert.equal(await refsOf(reused), freshRefs);
+    assert.equal(await branchConfig(reused), NO_CONFIG);
+    assert.equal(
+      readFileSync(join(reused, ".git", "config"), "utf8"),
+      freshConfig,
+    );
+    assert.equal(await originHead(reused), await originHead(h.root));
+  });
+
+  test("a reused release tree whose origin/HEAD names another branch keeps each remote-tracking ref of the checkout", async (t) => {
+    const h = await fixture(t, [], []);
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    const [tree] = freeCommandTrees(h);
+    assert.ok(tree);
+    const branch = h.input.claim.node_branch;
+    await simpleGit(h.root).raw([
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "node",
+    ]);
+    await simpleGit(h.root).raw([
+      "push",
+      "origin",
+      `HEAD:refs/heads/${branch}`,
+    ]);
+    await simpleGit(h.root).fetch("origin");
+    await simpleGit(tree).raw([
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      `refs/remotes/origin/${branch}`,
+    ]);
+    const prepared = treesPrepared(t, h);
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    assert.deepEqual(prepared(), [RELEASE_FROM_POOL]);
+    const [reused] = freeCommandTrees(h);
+    assert.ok(reused);
+    const tracking = (directory: string) =>
+      simpleGit(directory).raw([
+        "for-each-ref",
+        "--format=%(refname) %(objectname) %(symref)",
+        "refs/remotes/origin/",
+      ]);
+    assert.equal(await tracking(reused), await tracking(h.root));
+  });
+
   test("a second node of the same repository reuses the release tree", async (t) => {
     const first = await fixture(t, [], []);
     assert.deepEqual(await releaseGate(first), {
@@ -899,6 +1010,19 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     const h = await fixture(t, [], []);
     await simpleGit().clone(h.root, join(releaseKey(h), h.checkouts[0]!.name));
     assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    assert.equal(existsSync(releaseKey(h)), false);
+  });
+
+  test("a release round does not follow a symbolic link that replaces the release directory", async (t) => {
+    const h = await fixture(t, [], []);
+    const outside = temporary(t);
+    const name = h.checkouts[0]!.name;
+    await simpleGit().clone(h.root, join(outside, name));
+    writeFileSync(join(outside, STRAY_FILE), STRAY_FILE);
+    symlinkSync(outside, releaseKey(h));
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    assert.equal(existsSync(join(outside, name, ".git")), true);
+    assert.equal(existsSync(join(outside, STRAY_FILE)), true);
     assert.equal(existsSync(releaseKey(h)), false);
   });
 

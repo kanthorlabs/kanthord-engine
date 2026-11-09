@@ -26,6 +26,7 @@ import {
   pushSnapshotFresh,
   readFilesAtCommit,
   readObjectIds,
+  refreshSnapshot,
   resolveBranchCommit,
   squashPushFresh,
 } from "./connector.ts";
@@ -149,6 +150,7 @@ function legacyKey(credential: string): OperationError {
 export class RepositoryComponent implements GitWriter {
   clone = clone;
   cloneSnapshot = cloneSnapshot;
+  refreshSnapshot = refreshSnapshot;
   fetchAndCheckout = fetchAndCheckout;
   fetchBase = fetchBase;
   pushNodeBranch = pushNodeBranch;

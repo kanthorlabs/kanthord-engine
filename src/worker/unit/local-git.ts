@@ -76,6 +76,9 @@ const REMOVED_STATE = [
 ];
 const REMOVED_STATE_PREFIXES = ["BISECT_", "MERGE_"];
 const KEPT_REF_PREFIXES = ["refs/remotes/origin/", "refs/tags/"];
+const BRANCH_PREFIX = "refs/heads/";
+const ORIGIN_PREFIX = "refs/remotes/origin/";
+const ORIGIN_HEAD = "refs/remotes/origin/HEAD";
 export const GitState = { Ready: "ready", Rebuild: "rebuild" } as const;
 export type GitState = (typeof GitState)[keyof typeof GitState];
 export const MERGE_HEAD = "MERGE_HEAD";
@@ -1009,6 +1012,21 @@ export async function cloneLocal(
   );
 }
 
+export async function clonePacked(
+  call: GitCall,
+  source: string,
+): Promise<void> {
+  assert.ok(source && !source.startsWith("-"));
+  assert.ok(call.directory && !call.directory.startsWith("-"));
+  await run(
+    call.env,
+    dirname(call.directory),
+    ["clone", "--no-local", "--no-checkout", "--", source, call.directory],
+    call.context,
+    call.deadlineMs,
+  );
+}
+
 export async function matchRemote(
   env: NodeJS.ProcessEnv,
   directory: string,
@@ -1363,6 +1381,30 @@ async function removeForeignRefs(
       await git(["update-ref", "--no-deref", "-d", ref]);
 }
 
+export async function writeConfigTemplate(
+  call: GitCall,
+  address: string,
+): Promise<GitState> {
+  assert.ok(address && !address.startsWith("-"));
+  const end = performance.now() + call.deadlineMs;
+  const remaining = () => Math.max(1, end - performance.now());
+  const config = join(call.directory, GIT_DIRECTORY, "config");
+  const entries = await configEntries(
+    { ...call, deadlineMs: remaining() },
+    config,
+  );
+  if (needsRebuild(entries)) return GitState.Rebuild;
+  writeFileSync(config, configTemplate(entries));
+  await run(
+    call.env,
+    call.directory,
+    ["config", "--file", config, "remote.origin.url", address],
+    call.context,
+    remaining(),
+  );
+  return GitState.Ready;
+}
+
 export async function normaliseGitState(
   call: GitCall,
   address: string,
@@ -1374,16 +1416,15 @@ export async function normaliseGitState(
   const git = (args: string[]) =>
     run(call.env, call.directory, args, call.context, remaining());
   const gitDirectory = join(call.directory, GIT_DIRECTORY);
-  const config = join(gitDirectory, "config");
   if (rebuildBeforeConfig(gitDirectory)) return GitState.Rebuild;
   removeLocks(gitDirectory);
-  const entries = await configEntries(
-    { ...call, deadlineMs: remaining() },
-    config,
-  );
-  if (needsRebuild(entries)) return GitState.Rebuild;
-  writeFileSync(config, configTemplate(entries));
-  await git(["config", "--file", config, "remote.origin.url", address]);
+  if (
+    (await writeConfigTemplate(
+      { ...call, deadlineMs: remaining() },
+      address,
+    )) === GitState.Rebuild
+  )
+    return GitState.Rebuild;
   removeAgentState(gitDirectory);
   const { matched, output } = await runMatch(
     call.env,
@@ -1464,4 +1505,157 @@ export async function fetchLocal(call: GitCall, source: string): Promise<void> {
     call.context,
     call.deadlineMs,
   );
+}
+
+export async function matchCheckoutRefs(
+  call: GitCall,
+  source: string,
+  address: string,
+): Promise<void> {
+  assert.ok(source && !source.startsWith("-"));
+  assert.ok(address && !address.startsWith("-"));
+  const end = performance.now() + call.deadlineMs;
+  const remaining = () => Math.max(1, end - performance.now());
+  const git = (args: string[]) =>
+    run(call.env, call.directory, args, call.context, remaining());
+  await git([
+    "fetch",
+    "--prune",
+    "--no-tags",
+    "--",
+    source,
+    `+${BRANCH_PREFIX}*:${ORIGIN_PREFIX}*`,
+  ]);
+  const branch = await symbolicRefOf(
+    { ...call, directory: source, deadlineMs: remaining() },
+    "HEAD",
+  );
+  await setOriginHead(
+    { ...call, deadlineMs: remaining() },
+    branch.startsWith(BRANCH_PREFIX)
+      ? `${ORIGIN_PREFIX}${branch.slice(BRANCH_PREFIX.length)}`
+      : null,
+  );
+  await removeBranches({ ...call, deadlineMs: remaining() });
+  await git(["remote", "set-url", "origin", "--", address]);
+}
+
+export async function matchOriginHead(
+  call: GitCall,
+  source: string,
+): Promise<void> {
+  assert.ok(source && !source.startsWith("-"));
+  const end = performance.now() + call.deadlineMs;
+  const remaining = () => Math.max(1, end - performance.now());
+  const target = await symbolicRefOf(
+    { ...call, directory: source, deadlineMs: remaining() },
+    ORIGIN_HEAD,
+  );
+  await setOriginHead(
+    { ...call, deadlineMs: remaining() },
+    target.startsWith(ORIGIN_PREFIX) ? target : null,
+  );
+}
+
+async function symbolicRefOf(call: GitCall, ref: string): Promise<string> {
+  const { matched, output } = await runMatch(
+    call.env,
+    call.directory,
+    ["symbolic-ref", "--quiet", ref],
+    call.context,
+    call.deadlineMs,
+  );
+  return matched ? output.trim() : NO_VALUE;
+}
+
+async function setOriginHead(
+  call: GitCall,
+  target: string | null,
+): Promise<void> {
+  const end = performance.now() + call.deadlineMs;
+  const remaining = () => Math.max(1, end - performance.now());
+  const exists =
+    target !== null &&
+    (await refCommit({ ...call, deadlineMs: remaining() }, target)) !== null;
+  await run(
+    call.env,
+    call.directory,
+    exists
+      ? ["symbolic-ref", ORIGIN_HEAD, target]
+      : ["update-ref", "--no-deref", "-d", ORIGIN_HEAD],
+    call.context,
+    remaining(),
+  );
+}
+
+export async function removeBranches(call: GitCall): Promise<void> {
+  const end = performance.now() + call.deadlineMs;
+  const git = (args: string[]) =>
+    run(
+      call.env,
+      call.directory,
+      args,
+      call.context,
+      Math.max(1, end - performance.now()),
+    );
+  const branches = (
+    await git(["for-each-ref", "--format=%(refname:lstrip=2)", BRANCH_PREFIX])
+  )
+    .split(NEWLINE)
+    .filter(Boolean);
+  if (branches.length) await git(["branch", "-D", "--", ...branches]);
+}
+
+export async function removeRef(call: GitCall, ref: string): Promise<void> {
+  assert.ok(ref.startsWith("refs/"));
+  await run(
+    call.env,
+    call.directory,
+    ["update-ref", "--no-deref", "-d", ref],
+    call.context,
+    call.deadlineMs,
+  );
+}
+
+export async function attachBranchAtHead(
+  call: GitCall,
+  branch: string,
+): Promise<void> {
+  const end = performance.now() + call.deadlineMs;
+  const remaining = () => Math.max(1, end - performance.now());
+  const ref = `refs/heads/${branch}`;
+  const commitOf = async (name: string) => {
+    const { matched, output } = await runMatch(
+      call.env,
+      call.directory,
+      ["rev-parse", "--quiet", "--verify", `${name}^{commit}`],
+      call.context,
+      remaining(),
+    );
+    return matched ? output.trim() : null;
+  };
+  const tip = await commitOf(ref);
+  if (tip === null || tip !== (await commitOf("HEAD"))) return;
+  await run(
+    call.env,
+    call.directory,
+    ["symbolic-ref", "HEAD", ref],
+    call.context,
+    remaining(),
+  );
+}
+
+export async function refCommit(
+  call: GitCall,
+  ref: string,
+): Promise<string | null> {
+  assert.ok(ref.startsWith("refs/"));
+  const { matched, output } = await runMatch(
+    call.env,
+    call.directory,
+    ["rev-parse", "--quiet", "--verify", `${ref}^{commit}`],
+    call.context,
+    call.deadlineMs,
+  );
+  return matched ? output.trim() : null;
 }

@@ -35,7 +35,7 @@ import { ExecutionIntent } from "../contract.ts";
 import {
   CHECKOUTS_DIRECTORY,
   EVIDENCE_DIRECTORY,
-  WorkspaceKind,
+  REVIEW_DIRECTORY,
   WorkspaceRoot,
 } from "./workspace.ts";
 import type { RepositoryTransport } from "../contract.ts";
@@ -48,6 +48,7 @@ import {
 import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 import { ROUND_PATCH_SUBJECT } from "./round-patch.ts";
 
+const GIT_DIRECTORY = ".git";
 const FIRST_ROUND = {
   round: 1,
   final: false,
@@ -189,7 +190,14 @@ test("B3 review bundle places all supporting assets in the evidence directory ou
     });
     const workspaces = WorkspaceRoot.open(temporary(t));
     const transport = {
-      cloneSnapshot: async () => "a".repeat(40),
+      cloneSnapshot: async (
+        _address: string,
+        _revision: string,
+        directory: string,
+      ) => {
+        await simpleGit(directory).init();
+        return "a".repeat(40);
+      },
     } as unknown as RepositoryTransport;
     try {
       const pending = prepareEvaluation(
@@ -209,7 +217,7 @@ test("B3 review bundle places all supporting assets in the evidence directory ou
       if (mode !== SUCCESS) {
         await assert.rejects(pending);
         assert.equal(
-          existsSync(workspaces.executionKey(claim.execution_id)),
+          existsSync(join(workspaces.nodeKey(claim.node_id), REVIEW_DIRECTORY)),
           false,
         );
         continue;
@@ -230,7 +238,11 @@ test("B3 review bundle places all supporting assets in the evidence directory ou
       );
       assert.equal(
         result.directory,
-        join(workspaces.executionKey(claim.execution_id), CHECKOUTS_DIRECTORY),
+        join(
+          workspaces.nodeKey(claim.node_id),
+          REVIEW_DIRECTORY,
+          CHECKOUTS_DIRECTORY,
+        ),
       );
       const evidenceDirectory = join(result.key, EVIDENCE_DIRECTORY);
       assert.deepEqual(
@@ -243,7 +255,7 @@ test("B3 review bundle places all supporting assets in the evidence directory ou
         OBJECT_REPORT,
       );
       assert.equal(existsSync(join(result.directory, second)), false);
-      workspaces.release(result.key, WorkspaceKind.Execution);
+      workspaces.release(result.key, result.kind);
     } finally {
       run.dispose();
       server.closeAllConnections();
@@ -318,7 +330,7 @@ test("an examine node with no binding places the produced evidence privately and
     PRIVATE,
   );
   assert.equal(prepared.directory, prepared.key);
-  workspaces.release(prepared.key, WorkspaceKind.Execution);
+  workspaces.release(prepared.key, prepared.kind);
   const content = {
     name: "name",
     requirement: "requirement",
@@ -398,7 +410,14 @@ test("an examine node with one binding places the produced evidence outside its 
       claim,
       workspaces,
       transport: {
-        cloneSnapshot: async () => "a".repeat(40),
+        cloneSnapshot: async (
+          _address: string,
+          _revision: string,
+          directory: string,
+        ) => {
+          await simpleGit(directory).init();
+          return "a".repeat(40);
+        },
       } as unknown as RepositoryTransport,
       sshAccess: everyBindingSshAccess,
       env: hostEnvironment(),
@@ -412,7 +431,10 @@ test("an examine node with one binding places the produced evidence outside its 
     prepared.directory,
     join(prepared.key, CHECKOUTS_DIRECTORY, setup.repositories[0]!.name),
   );
-  assert.deepEqual(readdirSync(prepared.directory), []);
+  assert.deepEqual(
+    readdirSync(prepared.directory).filter((name) => name !== GIT_DIRECTORY),
+    [],
+  );
   assert.equal(
     readFileSync(join(prepared.key, EVIDENCE_DIRECTORY, assetId), "utf8"),
     PLACED_REPORT,
@@ -421,7 +443,7 @@ test("an examine node with one binding places the produced evidence outside its 
     prepared.reviewBundle.assets.map((item) => item.path),
     [join("..", "..", EVIDENCE_DIRECTORY, assetId)],
   );
-  workspaces.release(prepared.key, WorkspaceKind.Execution);
+  workspaces.release(prepared.key, prepared.kind);
 });
 
 test("an implement snapshot evaluation places only the latest coder report outside its clean checkout", async (t) => {
@@ -575,7 +597,7 @@ test("an implement snapshot evaluation places only the latest coder report outsi
     "changed_files",
   ]);
   assert.deepEqual(prepared.patches, []);
-  workspaces.release(prepared.key, WorkspaceKind.Execution);
+  workspaces.release(prepared.key, prepared.kind);
   assert.equal(existsSync(prepared.key), false);
 });
 
@@ -697,7 +719,7 @@ test("two bindings check out two snapshots and record one tested commit for each
     join("api", "api.md"),
     join("web", "web.md"),
   ]);
-  h.workspaces.release(prepared.key, WorkspaceKind.Execution);
+  h.workspaces.release(prepared.key, prepared.kind);
 });
 
 test("a snapshot that misses a binding stops with operation_failed", async (t) => {
@@ -709,7 +731,7 @@ test("a snapshot that misses a binding stops with operation_failed", async (t) =
       error.reason === EndReason.OperationFailed,
   );
   assert.equal(
-    existsSync(h.workspaces.executionKey(h.claim.execution_id)),
+    existsSync(join(h.workspaces.nodeKey(h.claim.node_id), REVIEW_DIRECTORY)),
     false,
   );
 });
@@ -863,7 +885,7 @@ async function roundEvaluation(
     evidence,
     round,
   );
-  stopAfter(t, () => workspaces.release(prepared.key, WorkspaceKind.Execution));
+  stopAfter(t, () => workspaces.release(prepared.key, prepared.kind));
   return { prepared, logs, round };
 }
 

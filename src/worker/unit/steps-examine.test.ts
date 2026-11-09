@@ -7,7 +7,7 @@ import {
   realpathSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { simpleGit } from "simple-git";
 import {
   hostEnvironment,
@@ -25,7 +25,12 @@ import {
   repositorySetup,
   transport,
 } from "./test-support.ts";
-import { CHECKOUTS_DIRECTORY, WorkspaceRoot } from "./workspace.ts";
+import {
+  CHECKOUTS_DIRECTORY,
+  REVIEW_DIRECTORY,
+  WorkspaceRoot,
+} from "./workspace.ts";
+import { PoolClass } from "./tree-pool.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { RepositoryTransport } from "../contract.ts";
 import type { NativeAgent } from "./native-agent.ts";
@@ -42,7 +47,23 @@ const EVIDENCE_UPLOAD_COUNT = 1;
 const EXPECTED_RELEASES = 1;
 const NO_EVIDENCE_UPLOADS = 0;
 const WALL_TIME_MS = 1500;
-test("examine reports its dependencies once and removes its workspace", async (t) => {
+test("examine reports its dependencies once and gives its tree back to the pool", async (t) => {
+  const origin = join(temporary(t), "origin");
+  mkdirSync(origin);
+  const git = simpleGit(origin);
+  await git.init();
+  await git.raw(["checkout", "-b", "main"]);
+  writeFileSync(join(origin, "file"), "base");
+  await git.add("file");
+  await git.raw([
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.invalid",
+    "commit",
+    "-m",
+    "base",
+  ]);
   const scenarios = [
     {
       states: ["Completed"],
@@ -60,7 +81,9 @@ test("examine reports its dependencies once and removes its workspace", async (t
     },
   ];
   for (const scenario of scenarios) {
-    const setup = anthropicSetup();
+    const setup = anthropicSetup({
+      repositories: [{ ...repositorySetup(), address: origin }],
+    });
     const claim = {
       execution_id: setup.execution_id,
       node_id: createIdentity("node"),
@@ -134,7 +157,7 @@ test("examine reports its dependencies once and removes its workspace", async (t
         setup,
         claim,
         workspaces,
-        transport: {} as RepositoryTransport,
+        transport,
         sshAccess: everyBindingSshAccess,
         env: hostEnvironment(),
       },
@@ -165,8 +188,12 @@ test("examine reports its dependencies once and removes its workspace", async (t
     );
     assert.equal(opens, scenario.opens);
     assert.equal(
-      existsSync(workspaces.executionKey(claim.execution_id)),
+      existsSync(join(workspaces.nodeKey(claim.node_id), REVIEW_DIRECTORY)),
       false,
+    );
+    assert.deepEqual(
+      workspaces.pool.trees().map((tree) => basename(dirname(tree.path))),
+      [PoolClass.Agent],
     );
   }
 });
@@ -369,10 +396,17 @@ test("an examine node with two repository bindings runs from checkouts/ and list
   });
   stopAfter(t, () => run.dispose());
   const workspaces = WorkspaceRoot.open(realpathSync(temporary(t)));
-  const key = workspaces.executionKey(claim.execution_id);
+  const key = join(workspaces.nodeKey(claim.node_id), REVIEW_DIRECTORY);
   const root = join(key, CHECKOUTS_DIRECTORY);
   const transport = {
-    cloneSnapshot: async () => "a".repeat(40),
+    cloneSnapshot: async (
+      _address: string,
+      _revision: string,
+      directory: string,
+    ) => {
+      await simpleGit(directory).init();
+      return "a".repeat(40);
+    },
   } as unknown as RepositoryTransport;
   const opened: string[] = [];
   const texts: string[] = [];
@@ -475,7 +509,14 @@ test("an examine verification that the wall deadline cuts gives a later assessme
     ({ budget, instruct: async () => {} }) as unknown as NativeAgent;
   const workspaces = WorkspaceRoot.open(realpathSync(temporary(t)));
   const transport = {
-    cloneSnapshot: async () => "a".repeat(40),
+    cloneSnapshot: async (
+      _address: string,
+      _revision: string,
+      directory: string,
+    ) => {
+      await simpleGit(directory).init();
+      return "a".repeat(40);
+    },
   } as unknown as RepositoryTransport;
   assert.deepEqual(
     await runStepsExamine(
@@ -545,11 +586,13 @@ test("an examine checkout resolves origin/<upstream_branch>", async (t) => {
     strategy: { base_branch: "main", upstream_branch: "feat" },
   };
   const examine = await WorkspaceRoot.open(state).prepareExamine({
+    env: hostEnvironment(),
     transport,
     sshAccess: everyBindingSshAccess,
     context: background,
     deadlineMs: 60_000,
     executionId: createIdentity("execution"),
+    nodeId: createIdentity("node"),
     repositories: [repository],
   });
   assert.equal(

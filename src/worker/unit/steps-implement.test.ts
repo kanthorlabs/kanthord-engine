@@ -5,8 +5,14 @@ import {
   SESSION_MARKER_PATTERN,
 } from "../../agent/sensitive-text.ts";
 import { suite, test } from "node:test";
-import { existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
 import { simpleGit } from "simple-git";
 import { contentText } from "@earendil-works/pi-ai";
 import { REASON_MAX_LENGTH } from "../../kernel/probe.ts";
@@ -16,6 +22,7 @@ import {
   fauxToolCall,
   listedVerificationSpans,
   recordSpans,
+  releasedRoot,
   spanEnds,
 } from "./test-support.ts";
 import { SpanOperation } from "./telemetry.ts";
@@ -26,6 +33,7 @@ import { EndReason, ExecutionStop } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { CHECKOUTS_DIRECTORY, WorkspaceKind } from "./workspace.ts";
 import { DONE_TRAILER, doneRecordOf } from "./done-record.ts";
+import { readPushRecord } from "./push-record.ts";
 import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 import {
   HEAD_COMMIT_SUBJECT,
@@ -44,6 +52,7 @@ import { NoProgressRule } from "./progress-rule.ts";
 import {
   advanceBase,
   implementFixture as fixture,
+  nextExecution,
   NO_PROVIDER_CALLS,
   recordDone,
   recordReleases,
@@ -62,6 +71,7 @@ const REVISION_COUNT_ATTRIBUTE = "kanthord.task.revision_count";
 const WALL_DEADLINE_MS = 300;
 const FETCH_DEADLINE_MS = 20000;
 const MAIN_CHANGE = "main change";
+const UNPUSHED_TEXT = "unpushed";
 const MERGE_PARENT_FIELDS = 3;
 const VERDICT_PLANNED = "verdict planned";
 const LINK_UPDATE_COUNT = 3;
@@ -615,9 +625,38 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
       furtherWork: false,
     });
     assert.deepEqual(order, ["evidence", "evidence", "release:false"]);
-    const log = await simpleGit(h.root).log();
+    const log = await simpleGit(releasedRoot(h)).log();
     assert.equal(log.latest!.body.split("\n")[0], nodeId);
-    assert.ok(existsSync(join(h.root, "node-file")));
+    assert.ok(existsSync(join(releasedRoot(h), "node-file")));
+  });
+
+  test("a failed push writes pending, and the next execution starts from the unpushed head", async (t) => {
+    const h = await fixture(
+      t,
+      [],
+      [writeFile(UNPUSHED_TEXT), fauxAssistantMessage("done")],
+    );
+    const hook = join(h.bare, "hooks", "pre-receive");
+    writeFileSync(hook, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    acceptEvidence(h);
+    recordReleases(h);
+    await assert.rejects(runStepsImplement(h));
+    const head = (await simpleGit(h.root).revparse(["HEAD"])).trim();
+    const key = {
+      nodeKey: h.input.workspaces.nodeKey(h.input.claim.node_id),
+      nodeBranch: h.nodeBranch,
+      bindingId: h.checkouts[0]!.binding_id,
+    };
+    assert.deepEqual(readPushRecord(key), { confirmed: null, pending: head });
+    rmSync(hook);
+    const next = await nextExecution(
+      t,
+      h,
+      [],
+      dirname(h.input.workspaces.root),
+    );
+    assert.equal(next.checkouts[0]!.head, head);
+    assert.equal(readFileSync(join(next.root, "file"), "utf8"), UNPUSHED_TEXT);
   });
 
   test("a task skips each node command in the live checkout and runs each own command", async (t) => {
@@ -906,7 +945,10 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
         await simpleGit(h.bare).revparse([`refs/heads/${h.nodeBranch}`])
       ).trim();
       assert.equal(pushed, h.checkouts[0]!.head);
-      assert.equal((await simpleGit(h.root).revparse(["HEAD"])).trim(), pushed);
+      assert.equal(
+        (await simpleGit(releasedRoot(h)).revparse(["HEAD"])).trim(),
+        pushed,
+      );
     });
 
   test("a conflict rework merges the new base at the claim, runs no agent turn and releases the merged head", async (t) => {
@@ -925,10 +967,13 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
       await simpleGit(h.bare).revparse([`refs/heads/${h.nodeBranch}`])
     ).trim();
     assert.equal(pushed, h.checkouts[0]!.head);
-    assert.equal((await simpleGit(h.root).revparse(["HEAD"])).trim(), pushed);
+    assert.equal(
+      (await simpleGit(releasedRoot(h)).revparse(["HEAD"])).trim(),
+      pushed,
+    );
     assert.equal(
       (
-        await simpleGit(h.root).raw([
+        await simpleGit(releasedRoot(h)).raw([
           "rev-list",
           "--parents",
           "-n",

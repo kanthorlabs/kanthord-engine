@@ -21,6 +21,7 @@ import {
 } from "../../mission/contract.ts";
 import { EndReason, type ExecutionRun } from "./execution-run.ts";
 import {
+  BASE_DIRECTORY,
   EVIDENCE_DIRECTORY,
   type ExamineCheckout,
   WorkspaceKind,
@@ -28,7 +29,6 @@ import {
 import type { StepsInput } from "./steps-implement.ts";
 import type { TestedInput } from "./verification.ts";
 import {
-  BASE_DIRECTORY,
   BaseHead,
   namedCheckouts,
   SetupEnd,
@@ -173,7 +173,10 @@ async function prepareWorkspace(
     input.claim.expired_at,
   );
   const common = {
+    env: input.env,
     executionId: input.claim.execution_id,
+    nodeId: input.claim.node_id,
+    log: (msg: string, fields: Record<string, unknown>) => run.log(msg, fields),
     transport: input.transport,
     sshAccess: input.sshAccess,
     context: run.operationContext,
@@ -208,7 +211,7 @@ async function prepareWorkspace(
           ),
         };
       } catch (error) {
-        input.workspaces.release(workspace.key, WorkspaceKind.Execution);
+        input.workspaces.release(workspace.key, workspace.kind);
         throw error;
       }
     }
@@ -228,6 +231,7 @@ async function prepareWorkspace(
     directory,
     checkouts: [] as ExamineCheckout[],
     tested_input: null,
+    kind: WorkspaceKind.Execution,
     evidenceIds: [] as string[],
     scope: NO_SCOPE,
   };
@@ -399,7 +403,7 @@ async function setUpReview(
   );
   const base = new BaseHead(
     setupInput,
-    join(workspace.key, BASE_DIRECTORY),
+    { directory: join(workspace.key, BASE_DIRECTORY) },
     setup,
   );
   const result = await setUpHeads(
@@ -477,6 +481,7 @@ export async function prepareEvaluation(
     }
     return {
       key: workspace.key,
+      kind: workspace.kind,
       directory: workspace.directory,
       checkouts: workspace.checkouts,
       tested_input: testedInput,
@@ -499,7 +504,7 @@ export async function prepareEvaluation(
       },
     };
   } catch (error) {
-    input.workspaces.release(workspace.key, WorkspaceKind.Execution);
+    input.workspaces.release(workspace.key, workspace.kind);
     throw error;
   }
 }
