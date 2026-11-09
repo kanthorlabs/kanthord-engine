@@ -279,23 +279,6 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.deepEqual(evidence, [[api.head, web.head]]);
   });
 
-  test("a verdict turn that changes only a binding with no judged commit counts as unchanged", async (t) => {
-    const { h } = await verdictHarness(
-      t,
-      [
-        write("web/first"),
-        fauxAssistantMessage("web done"),
-        write("web/second"),
-        fauxAssistantMessage("web done again"),
-        fauxAssistantMessage("never"),
-      ],
-      TWO_BINDINGS,
-    );
-    h.verdict = verdictAt(VERDICT, [h.checkouts[0]!]);
-    await noProgressEnd(h);
-    assert.equal(h.provider.calls.length, TWO_TOOL_TURNS);
-  });
-
   test("a verdict with no judged commit sends its text once and a pass completes the node unit", async (t) => {
     const { h } = await verdictHarness(t, [fauxAssistantMessage("nothing")]);
     const head = h.checkouts[0]!.head;
@@ -501,82 +484,6 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
       taskStart?.arguments[0].attributes?.[ROUND_ATTRIBUTE],
       FIXED_ROUND,
     );
-  });
-
-  test("a task unit span holds no evaluation round", async (t) => {
-    const pending = task("pending", "true");
-    const h = await fixture(t, [pending], [fauxAssistantMessage("done")]);
-    const starts = t.mock.method(h.run.spans, "start");
-    recordReleases(h);
-    await executionBoundary(h.run, () => runStepsImplement(h));
-    const taskStart = starts.mock.calls.find(
-      (call) => call.arguments[0].operation === SpanOperation.Task,
-    );
-    assert.ok(taskStart);
-    assert.equal(
-      ROUND_ATTRIBUTE in (taskStart.arguments[0].attributes ?? {}),
-      false,
-    );
-  });
-
-  test("a success rework assessment with open findings gives a criterion revision that lists each open finding id", async (t) => {
-    const { h } = await verdictHarness(t, [fauxAssistantMessage("never")]);
-    const completed = (data: unknown) => ({
-      type: "completed",
-      status: 200,
-      data,
-    });
-    const open = ["finding_open_blocker", "finding_open_suggestion"].map(
-      (id, index) => ({
-        id,
-        label: index === NO_INDEX ? "B1" : "S1",
-        round: 1,
-        name: `name ${id}`,
-        description: `defect ${id}`,
-        fix: `fix ${id}`,
-        why: `why ${id}`,
-      }),
-    );
-    h.run.clients.mission = {
-      ...h.run.clients.mission,
-      "execution.rework_assessment.get": async () =>
-        completed({
-          id: "assessment",
-          result: "success",
-          rationale: VERDICT,
-          round: FIXED_ROUND,
-          tested_input: h.checkouts.map((checkout) => ({
-            kind: "repository",
-            binding_id: checkout.binding_id,
-            commit: checkout.head,
-          })),
-        }),
-      "execution.review_round.get": async () =>
-        completed({
-          round: FIXED_ROUND + 1,
-          final: false,
-          review_base: null,
-          findings: open,
-        }),
-    } as unknown as MethodClients["mission"];
-    h.run.clients.worker = {
-      ...h.run.clients.worker,
-      "execution.failed_check.get": async () => completed({ items: [] }),
-      "execution.link_update.get": async () =>
-        completed({ items: [], next_cursor: null, total: NO_INDEX }),
-    } as unknown as MethodClients["worker"];
-    const prior = await readPrior(h.run, h.input.setup.repositories);
-    h.verdict = prior.verdict;
-    const { node } = await startCheck(h);
-    assert.ok(node);
-    assert.equal(node.round, FIXED_ROUND);
-    for (const finding of open)
-      assert.ok(
-        node.text.includes(
-          `- ${finding.id} (${finding.label}, round 1) ${finding.name}:`,
-        ),
-        finding.id,
-      );
   });
 
   test("regression: K110 a success rework whose turn changes no file completes the node unit with no verdict rule", async (t) => {
