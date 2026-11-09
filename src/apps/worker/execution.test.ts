@@ -850,6 +850,17 @@ test("a refused setup releases one stop with the cause of its code and the pull 
   }
 });
 
+test("a setup answer that ends the execution releases no stop and the pull loop takes the next work", async (t) => {
+  const host = refusedSetupHost(t, {
+    status: 409,
+    code: "scheduler.execution.not_running",
+    details: null,
+  });
+  assert.equal(await host.running, null);
+  assert.equal(host.pulls(), TWO_PULLS);
+  assert.deepEqual(host.releases, []);
+});
+
 test("a refused setup whose release fails ends the pull loop with the setup code", async (t) => {
   const code = "worker.execution.prompt_not_pinned";
   const host = refusedSetupHost(
@@ -925,6 +936,22 @@ test("a handover that the handover key does not open releases a stop with worker
     further_work: true,
     reason: EndReason.OperationFailed,
     code: "worker.handover.decryption_failed",
+  });
+  assert.deepEqual(host.events, ["release"]);
+});
+
+test("a service refusal of the handover releases a stop with its code and the pull loop takes the next work", async (t) => {
+  const code = "credential.revision.revoked";
+  const host = refusedSetupHost(t, GATEWAY_ANSWERS[0]!, undefined, {
+    handover: failureAnswer({ status: 409, code, details: null }),
+  });
+  assert.equal(await host.running, null);
+  assert.equal(host.pulls(), TWO_PULLS);
+  assert.equal(host.releases.length, ONE_ENTRY);
+  assert.deepEqual(releasedStop(host.releases[0]), {
+    further_work: true,
+    reason: EndReason.OperationFailed,
+    code,
   });
   assert.deepEqual(host.events, ["release"]);
 });
