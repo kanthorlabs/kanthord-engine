@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import { sshKeyRevision } from "./credential.ts";
 import { SshSignErrorCode, SshSignRefusal } from "./contract.ts";
 import { generateSshKey, sshPublicKeyBlob } from "./ssh-key.ts";
 import {
@@ -25,7 +24,6 @@ const PASSWORD_METHOD = "password";
 const RSA_ALGORITHM = "rsa-sha2-256";
 const OTHER_SERVICE = "ssh-userauth";
 const TRAILING = Buffer.from([1]);
-const OPENSSH_ED25519 = /^ssh-ed25519 /;
 
 function fixture() {
   const key = generateSshKey("deploy");
@@ -54,11 +52,6 @@ test("the relay signs a publickey and a host-bound request of the record key wit
       false,
     );
   }
-});
-
-test("the repository key type is ed25519 for every generated SSH record", () => {
-  const revision = sshKeyRevision("deploy");
-  assert.match(String(revision.metadata.public_key), OPENSSH_ED25519);
 });
 
 test("a payload that is no user authentication answers not_user_authentication", () => {

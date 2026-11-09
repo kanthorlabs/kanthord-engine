@@ -135,6 +135,11 @@ function superseded(connectionName: unknown): Diagnostic {
   );
 }
 
+function connectionNameOf(error: Diagnostic): unknown {
+  if (!(error instanceof ExchangeFailure)) return null;
+  return (error.details as Record<string, unknown> | null)?.connection_name;
+}
+
 export class Worker implements Service {
   private readonly options: WorkerOptions;
   private readonly shutdown = new CancellationContext();
@@ -303,26 +308,8 @@ export class Worker implements Service {
       if (context.signal.aborted)
         return (await this.stop()) ?? reasonOf(context.signal);
       const error = await this.start();
-      if (error) {
-        const stopRequested =
-          error instanceof ContextCancelled && this.shutdown.signal.aborted;
-        return (
-          (await this.stop()) ??
-          reasonOf(context.signal) ??
-          (stopRequested ? null : error)
-        );
-      }
-      this.startExchangeLoops();
-      for (const hosted of [...this.hosted.values()])
-        if (hosted.entry.state === BindingEntryState.Draining)
-          this.removeHosted(hosted);
-      const running = this.unit!.run(context);
-      const outcome = await Promise.race([
-        running.then((result) => ({ result, ended: null })),
-        this.ended.promise.then((ended) => ({ result: null, ended })),
-      ]);
-      if (outcome.ended) return await this.end(outcome.ended, running);
-      return (await this.exchangeVerdict(outcome.result)) ?? outcome.result;
+      if (error) return await this.stopAfterFailedStart(error, context);
+      return await this.runStarted(context);
     } finally {
       clearTimeout(this.heartbeatTimer);
       clearTimeout(this.renewalTimer);
@@ -331,6 +318,33 @@ export class Worker implements Service {
       process.off("SIGTERM", stop);
       process.off("SIGHUP", ignoreHangup);
     }
+  }
+
+  private async stopAfterFailedStart(
+    error: Error,
+    context: Context,
+  ): Promise<Error | null> {
+    const stopRequested =
+      error instanceof ContextCancelled && this.shutdown.signal.aborted;
+    return (
+      (await this.stop()) ??
+      reasonOf(context.signal) ??
+      (stopRequested ? null : error)
+    );
+  }
+
+  private async runStarted(context: Context): Promise<Error | null> {
+    this.startExchangeLoops();
+    for (const hosted of [...this.hosted.values()])
+      if (hosted.entry.state === BindingEntryState.Draining)
+        this.removeHosted(hosted);
+    const running = this.unit!.run(context);
+    const outcome = await Promise.race([
+      running.then((result) => ({ result, ended: null })),
+      this.ended.promise.then((ended) => ({ result: null, ended })),
+    ]);
+    if (outcome.ended) return await this.end(outcome.ended, running);
+    return (await this.exchangeVerdict(outcome.result)) ?? outcome.result;
   }
 
   async healthcheck(): Promise<Healthcheck> {
@@ -529,29 +543,13 @@ export class Worker implements Service {
     if (this.shutdown.signal.aborted) return;
     if (!(error instanceof Diagnostic)) throw error;
     if (error.code === WorkerErrorCode.InstanceConnectionSuperseded)
-      return this.finish(
-        superseded(
-          error instanceof ExchangeFailure
-            ? (error.details as Record<string, unknown> | null)?.connection_name
-            : null,
-        ),
-      );
+      return this.finish(superseded(connectionNameOf(error)));
     if (error.code === VERSION_MISMATCH_CODE) return this.finish(error);
     if (
       error instanceof ExchangeFailure &&
       error.status === HttpStatus.Unauthorized
-    ) {
-      try {
-        await this.takeToken();
-        await this.reconnect();
-        return;
-      } catch (retry) {
-        if (retry instanceof Diagnostic && retry.code !== error.code)
-          return this.refused(retry);
-        if (retry instanceof Diagnostic) return this.finish(retry);
-        throw retry;
-      }
-    }
+    )
+      return this.reauthorize(error);
     if (
       error instanceof ExchangeFailure &&
       error.status === HttpStatus.NotFound
@@ -561,6 +559,18 @@ export class Worker implements Service {
       msg: "Worker instance exchange failed",
       code: error.code,
     });
+  }
+
+  private async reauthorize(error: ExchangeFailure): Promise<void> {
+    try {
+      await this.takeToken();
+      await this.reconnect();
+    } catch (retry) {
+      if (retry instanceof Diagnostic && retry.code !== error.code)
+        return this.refused(retry);
+      if (retry instanceof Diagnostic) return this.finish(retry);
+      throw retry;
+    }
   }
 
   private async reconnect(): Promise<void> {
