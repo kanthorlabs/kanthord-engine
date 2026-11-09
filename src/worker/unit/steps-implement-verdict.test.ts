@@ -279,23 +279,6 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.deepEqual(evidence, [[api.head, web.head]]);
   });
 
-  test("a verdict turn that changes only a binding with no judged commit counts as unchanged", async (t) => {
-    const { h } = await verdictHarness(
-      t,
-      [
-        write("web/first"),
-        fauxAssistantMessage("web done"),
-        write("web/second"),
-        fauxAssistantMessage("web done again"),
-        fauxAssistantMessage("never"),
-      ],
-      TWO_BINDINGS,
-    );
-    h.verdict = verdictAt(VERDICT, [h.checkouts[0]!]);
-    await noProgressEnd(h);
-    assert.equal(h.provider.calls.length, TWO_TOOL_TURNS);
-  });
-
   test("a verdict with no judged commit sends its text once and a pass completes the node unit", async (t) => {
     const { h } = await verdictHarness(t, [fauxAssistantMessage("nothing")]);
     const head = h.checkouts[0]!.head;

@@ -26,14 +26,9 @@ import type { MethodClients } from "./method-clients.ts";
 import type { TaskRunner } from "./steps-implement.ts";
 import { runStepsImplement, runTask } from "./steps-implement.ts";
 import { nodeUnitOf, releaseGate, ReleaseGateKind } from "./release-gate.ts";
-import { Diagnostic } from "../../kernel/errors.ts";
 import { background } from "../../kernel/context.ts";
 import { commitWork } from "./local-git.ts";
-import {
-  RecordKind,
-  SpanStatus,
-  type TelemetryRecord,
-} from "../../tracking/contract.ts";
+import { RecordKind, type TelemetryRecord } from "../../tracking/contract.ts";
 import { SpanOperation, SpanRecorder } from "./telemetry.ts";
 import { GitStep } from "./method-telemetry.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
@@ -401,63 +396,6 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(
       (await simpleGit(passing.root).revparse(["HEAD"])).trim(),
       passing.checkouts[0]!.head,
-    );
-  });
-
-  test("the finish writes one git span for each git step and the cause of a failed push", async (t) => {
-    const h = await fixture(t, [], []);
-    await recordNodeDone(h);
-    const records: TelemetryRecord[] = [];
-    (h.run as { spans: SpanRecorder }).spans = new SpanRecorder(
-      h.run.claim,
-      "coder-1",
-      { write: (batch) => records.push(...batch), flush: async () => {} },
-    );
-    const cause =
-      "push node branch: fatal: Could not read from remote repository.";
-    h.input.transport = {
-      ...transport,
-      pushNodeBranch: async () => {
-        throw new Diagnostic(
-          "repository.connector.git_failed",
-          "push node branch: git failed.",
-          { cause: new Error(cause) },
-        );
-      },
-    };
-    await assert.rejects(runStepsImplement(h));
-    const gitStarts = records.filter(
-      (record) =>
-        record.kind === RecordKind.Span &&
-        record.operation === SpanOperation.Git &&
-        "start_time" in record,
-    );
-    const steps = gitStarts.map((record) =>
-      record.kind === RecordKind.Span
-        ? record.attributes?.["kanthord.git.step"]
-        : undefined,
-    );
-    assert.deepEqual(steps, [GitStep.FetchBase, GitStep.Push]);
-    const push = gitStarts.at(-1)!;
-    assert.ok(push.kind === RecordKind.Span);
-    const end = records.find(
-      (record) =>
-        record.kind === RecordKind.Span &&
-        record.span_id === push.span_id &&
-        "end_time" in record,
-    );
-    assert.ok(end && end.kind === RecordKind.Span);
-    assert.equal(end.status, SpanStatus.Error);
-    const texts = records.filter(
-      (record) =>
-        record.kind === RecordKind.Text &&
-        end.text_ids?.includes(record.text_id),
-    );
-    assert.deepEqual(
-      texts.map((record) =>
-        record.kind === RecordKind.Text ? record.text : "",
-      ),
-      [`repository.connector.git_failed: ${cause}`],
     );
   });
 

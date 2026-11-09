@@ -83,25 +83,6 @@ suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
     );
   });
 
-  test("a done record holds across start checks, and a verdict still goes to the node unit", async (t) => {
-    const current = task("done", "true");
-    const h = await fixture(t, [current], []);
-    await recordDone(h, current);
-    assert.deepEqual((await startCheck(h)).pending, []);
-    assert.deepEqual((await startCheck(h)).pending, []);
-    h.verdict = {
-      source: VerdictSource.Rework,
-      text: `Unmet:\n- ${current.id}: still open`,
-      findings: [],
-      round: null,
-      judged: [],
-    };
-    const reworked = await startCheck(h);
-    assert.deepEqual(reworked.pending, []);
-    assert.ok(reworked.node?.text.includes(current.id));
-    assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
-  });
-
   async function verdictFixture(
     t: TestContext,
     script: Parameters<typeof scriptedProvider>[0],

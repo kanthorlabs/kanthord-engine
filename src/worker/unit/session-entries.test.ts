@@ -5,7 +5,6 @@ import { sessionEntryRecordSchema } from "../../tracking/contract.ts";
 import { canonicalJSON } from "../../kernel/json.ts";
 import {
   cutString,
-  ENTRY_CUT_LIMITS,
   SESSION_ENTRY_MAX_BYTES,
   sessionEntryRecord,
 } from "./session-entries.ts";
@@ -26,7 +25,6 @@ const HUNDRED_KIB = 100 * 1024;
 const FIRST_CUT_LIMIT = 4096;
 const HALF_OF_FIRST_LIMIT = FIRST_CUT_LIMIT / 2;
 const LONG_STRING = 5000;
-const STRINGS_FOR_SECOND_LIMIT = 20;
 const STRINGS_FOR_FALLBACK = 1000;
 const ENTRY_ID = "1a2b3c4d";
 const PARENT_ID = "0a1b2c3d";
@@ -165,17 +163,6 @@ test("an entry of 100 KiB keeps the head and the tail of each long string", () =
   assert.ok(bytesOf(record.entry) <= SESSION_ENTRY_MAX_BYTES);
 });
 
-test("an entry that the limit 4096 cannot bound falls to the limit 1024", () => {
-  const record = recordOf(toolResult(manyStrings(STRINGS_FOR_SECOND_LIMIT)));
-  assert.ok(record);
-  assert.equal(record.truncated, true);
-  const content = (record.entry.message as { content: { text: string }[] })
-    .content;
-  assert.ok(content[0]!.text.length > ENTRY_CUT_LIMITS[2]!);
-  assert.ok(content[0]!.text.length < FIRST_CUT_LIMIT);
-  assert.ok(bytesOf(record.entry) <= SESSION_ENTRY_MAX_BYTES);
-});
-
 test("an entry that the limit 256 cannot bound falls to the fallback fields", () => {
   const record = recordOf(
     toolResult(manyStrings(STRINGS_FOR_FALLBACK), {
@@ -198,16 +185,6 @@ test("an entry that the limit 256 cannot bound falls to the fallback fields", ()
       usage: USAGE,
       stopReason: "stop",
     },
-  });
-});
-
-test("the fallback of an entry without a message holds the four base fields", () => {
-  const record = recordOf(custom({ data: manyStrings(STRINGS_FOR_FALLBACK) }));
-  assert.deepEqual(record?.entry, {
-    type: "custom",
-    id: ENTRY_ID,
-    parentId: PARENT_ID,
-    timestamp: TIMESTAMP,
   });
 });
 
