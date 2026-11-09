@@ -52,14 +52,6 @@ const FORMAT_VERSION_KEY = "core.repositoryformatversion";
 const PARTIAL_CLONE_KEY = "extensions.partialclone";
 const PROMISOR_KEY = /^remote\..*\.promisor$/;
 const REBUILD_PATHS = ["shallow", "commondir"];
-const LINK_GUARDED_PATHS = [
-  "config",
-  "info",
-  "objects",
-  "objects/info",
-  "hooks",
-  "refs",
-];
 const KEPT_CORE_KEYS = [
   "core.filemode",
   "core.logallrefupdates",
@@ -1329,15 +1321,19 @@ function removeLocks(directory: string): void {
   }
 }
 
-function isSymbolicLink(path: string): boolean {
-  return lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink() ?? false;
+function holdsSymbolicLink(directory: string): boolean {
+  return readdirSync(directory, { withFileTypes: true }).some(
+    (entry) =>
+      entry.isSymbolicLink() ||
+      (entry.isDirectory() && holdsSymbolicLink(join(directory, entry.name))),
+  );
 }
 
 function rebuildBeforeConfig(git: string): boolean {
   return (
     !isDirectory(git) ||
     !existsSync(join(git, "config")) ||
-    LINK_GUARDED_PATHS.some((path) => isSymbolicLink(join(git, path))) ||
+    holdsSymbolicLink(git) ||
     REBUILD_PATHS.some((path) => existsSync(join(git, path))) ||
     entriesOf(join(git, "worktrees")).length > NO_ENTRIES
   );

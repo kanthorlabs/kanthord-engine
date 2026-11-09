@@ -994,7 +994,7 @@ test("a lock behind a symlink in .git outside the tree survives", async (t) => {
   writeFileSync(join(outside, "x.lock"), "");
   symlinkSync(outside, join(at.tree, ".git", "linked"));
   const directory = take(at);
-  assert.equal(await normalise(at, directory), READY);
+  assert.equal(await normalise(at, directory), REBUILD);
   assert.equal(existsSync(join(outside, "x.lock")), true);
 });
 
@@ -1020,14 +1020,50 @@ test("a symlinked config, info, objects, objects/info, hooks or refs answers reb
   }
 });
 
-test("a symlinked info/exclude is replaced and its target stays", async (t) => {
+test("a symlink anywhere under .git answers rebuild and the outside file stays", async (t) => {
+  const cases: {
+    name: string;
+    plant: (git: string, outside: string) => void;
+  }[] = [
+    {
+      name: "logs",
+      plant: (git, outside) => {
+        mkdirSync(join(outside, "refs", "kanthord"), { recursive: true });
+        writeFileSync(join(outside, "refs", "kanthord", "x"), OUTSIDE_TEXT);
+        rmSync(join(git, "logs"), { recursive: true, force: true });
+        symlinkSync(outside, join(git, "logs"));
+      },
+    },
+    {
+      name: "nested ref",
+      plant: (git, outside) => {
+        mkdirSync(outside);
+        writeFileSync(join(outside, "x"), OUTSIDE_TEXT);
+        mkdirSync(join(git, "refs", "heads"), { recursive: true });
+        symlinkSync(join(outside, "x"), join(git, "refs", "heads", "x"));
+      },
+    },
+  ];
+  for (const entry of cases) {
+    const at = await poolFixture(t);
+    const outside = join(at.root, "outside");
+    entry.plant(join(at.tree, ".git"), outside);
+    await hostGit(at.tree, ["update-ref", "refs/kanthord/x", at.commit]);
+    const before = snapshot(outside);
+    const directory = take(at);
+    assert.equal(await normalise(at, directory), REBUILD, entry.name);
+    assert.deepEqual(snapshot(outside), before, entry.name);
+  }
+});
+
+test("a symlinked info/exclude answers rebuild and its target stays", async (t) => {
   const at = await poolFixture(t);
   const outside = join(at.root, "outside-exclude");
   writeFileSync(outside, OUTSIDE_TEXT);
   const exclude = join(at.tree, ".git", "info", "exclude");
   rmSync(exclude, { force: true });
   symlinkSync(outside, exclude);
-  await takeAndScrub(at);
+  assert.equal(await normalise(at, take(at)), REBUILD);
   assert.equal(readFileSync(outside, "utf8"), OUTSIDE_TEXT);
 });
 
