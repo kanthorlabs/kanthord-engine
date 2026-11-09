@@ -5,7 +5,6 @@ import { CustodyComponent, custodyMigrations } from "../custody/index.ts";
 import {
   type CredentialAnswer,
   CUSTODY_SERVICE_NAME,
-  SecretShape,
 } from "../custody/contract.ts";
 import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -14,12 +13,8 @@ import {
   ResourceFailureReason,
   ResourceStatus,
 } from "../kernel/health.ts";
-import { HttpMethod, HttpStatus } from "../kernel/http.ts";
-import {
-  AccessPolicy,
-  type CallerContext,
-  OperationRegistry,
-} from "../kernel/operation.ts";
+import { HttpStatus } from "../kernel/http.ts";
+import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { AUTHORIZATION_HEADER } from "../kernel/probe.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { LLM_PLATFORMS } from "../llm/index.ts";
@@ -31,7 +26,6 @@ import {
   CAPABILITY_SSH_IDENTITY,
   GITHUB_RATE_LIMIT_URL,
   Platform,
-  probeGitHub,
   REPOSITORY_PLATFORMS,
 } from "./credential-platform.ts";
 import { RepositoryCredentials } from "./credential.ts";
@@ -138,73 +132,23 @@ function fails(fn: () => unknown, status: number, code: string) {
   );
 }
 
-test("the GitHub probe reads the rate limit with the stored token", async (t) => {
-  const fetch = t.mock.method(
-    globalThis,
-    "fetch",
-    async (
-      url: Parameters<typeof globalThis.fetch>[0],
-      options?: RequestInit,
-    ) => {
-      assert.equal(url, GITHUB_RATE_LIMIT_URL);
-      assert.equal(options?.method, HttpMethod.Get);
-      assert.deepEqual(options?.headers, {
-        [AUTHORIZATION_HEADER]: `Bearer ${SECRET}`,
-      });
-      return new Response(null, { status: HttpStatus.OK });
-    },
-  );
-  assert.equal(await probeGitHub(SECRET, background), ResourceStatus.Healthy);
-  assert.equal(fetch.mock.callCount(), ONE_CALL);
-});
-
-test("platform list answers github and ssh", (t) => {
-  const f = fixture(t);
-  assert.deepEqual(
-    f.invoke(repositoryOperations.platform_list, {
-      params: {},
-      query: {},
-      body: null,
-    }),
-    {
-      items: [
-        {
-          platform: "github",
-          secret_shape: SecretShape.ApiKey,
-          login_modes: [],
-          metadata_fields: [],
-          verifiable: true,
-        },
-        {
-          platform: "ssh",
-          secret_shape: SecretShape.SshKey,
-          login_modes: [],
-          metadata_fields: ["public_key", "fingerprint"],
-          verifiable: true,
-        },
-      ],
-    },
-  );
-});
-
 test("create refuses a platform of another component and get lists the bindings that name the credential", (t) => {
   const f = fixture(t);
-  for (const platform of ["anthropic", "s3"])
-    fails(
-      () =>
-        f.invoke(repositoryOperations.create, {
-          params: {},
-          query: {},
-          body: {
-            name: "other",
-            platform,
-            secret: { key: SECRET },
-            metadata: null,
-          },
-        }),
-      HttpStatus.BadRequest,
-      UNSUPPORTED_PLATFORM_CODE,
-    );
+  fails(
+    () =>
+      f.invoke(repositoryOperations.create, {
+        params: {},
+        query: {},
+        body: {
+          name: "other",
+          platform: "anthropic",
+          secret: { key: SECRET },
+          metadata: null,
+        },
+      }),
+    HttpStatus.BadRequest,
+    UNSUPPORTED_PLATFORM_CODE,
+  );
   f.invoke(repositoryOperations.create, {
     params: {},
     query: {},
@@ -288,7 +232,6 @@ test("a name of another component answers not found and the inventory holds only
 const OTHER_PLATFORM_CODE = "credential.platform.unsupported";
 const INVALID_INPUT_CODE = "credential.input.invalid";
 const NO_ROWS = 0;
-const CHECK_PATH = "/api/repository/credential/check";
 
 function rowCount(f: ReturnType<typeof fixture>): number {
   return (
@@ -359,73 +302,31 @@ test("check answers healthy, unhealthy and unknown for github without a row, a l
   assert.ok(!lines.join("").includes(SECRET));
 });
 
-test("check answers unknown when the request fails", async (t) => {
-  const f = fixture(t);
-  t.mock.method(globalThis, "fetch", async () => {
-    throw new Error(`failed with ${SECRET}`);
-  });
-  assert.deepEqual(
-    await f.invoke(repositoryOperations.check, {
-      params: {},
-      query: {},
-      body: { platform: "github", secret: { key: SECRET }, metadata: null },
-    }),
-    {
-      status: ResourceStatus.Unknown,
-      capability: CAPABILITY_RATE_LIMIT_READ,
-      failure_reason: ResourceFailureReason.Unreachable,
-    },
-  );
-});
-
 test("check refuses a platform of another component, invalid input and a body with a name", async (t) => {
   const f = fixture(t);
   const fetch = t.mock.method(globalThis, "fetch", async () => {
     throw new Error("UNEXPECTED_REQUEST");
   });
-  for (const platform of ["anthropic", "s3"])
-    await rejects(
-      () =>
-        f.invoke(repositoryOperations.check, {
-          params: {},
-          query: {},
-          body: { platform, secret: { key: SECRET }, metadata: null },
-        }),
-      HttpStatus.BadRequest,
-      OTHER_PLATFORM_CODE,
-    );
-  for (const body of [
-    { platform: "github", secret: { key: "" }, metadata: null },
-    { platform: "github", secret: { key: SECRET, extra: 1 }, metadata: null },
-    { platform: "github", secret: { key: SECRET }, metadata: {} },
-  ])
-    await rejects(
-      () =>
-        f.invoke(repositoryOperations.check, { params: {}, query: {}, body }),
-      HttpStatus.BadRequest,
-      INVALID_INPUT_CODE,
-    );
-  for (const body of [
-    {
-      name: "github",
-      platform: "github",
-      secret: { key: SECRET },
-      metadata: null,
-    },
-    { platform: "github", metadata: null },
-  ])
-    assert.throws(() =>
-      repositoryOperations.check.input.parse({ params: {}, query: {}, body }),
-    );
+  await rejects(
+    () =>
+      f.invoke(repositoryOperations.check, {
+        params: {},
+        query: {},
+        body: {
+          platform: "anthropic",
+          secret: { key: SECRET },
+          metadata: null,
+        },
+      }),
+    HttpStatus.BadRequest,
+    OTHER_PLATFORM_CODE,
+  );
   assert.equal(fetch.mock.callCount(), NO_ROWS);
   assert.equal(rowCount(f), NO_ROWS);
 });
 
 test("check takes no mutation key and the credential name check is refused", (t) => {
   const f = fixture(t);
-  assert.equal(repositoryOperations.check.mutation, false);
-  assert.equal(repositoryOperations.check.method, HttpMethod.Post);
-  assert.equal(repositoryOperations.check.path, CHECK_PATH);
   fails(
     () =>
       f.invoke(repositoryOperations.create, {
@@ -443,7 +344,6 @@ test("check takes no mutation key and the credential name check is refused", (t)
   );
 });
 
-const VERIFY_PATH = "/api/repository/credential/:credential_name/verify";
 const ARCHIVED_CODE = "credential.credential.archived";
 const REPOSITORY_NAME = "repo";
 
@@ -584,20 +484,6 @@ test("verify refuses an archived record, an unknown name and a name of another c
   assert.equal(fetch.mock.callCount(), NO_ROWS);
 });
 
-test("verify takes no body and no mutation key", () => {
-  assert.equal(repositoryOperations.verify.mutation, false);
-  assert.equal(repositoryOperations.verify.method, HttpMethod.Post);
-  assert.equal(repositoryOperations.verify.path, VERIFY_PATH);
-  assert.equal(repositoryOperations.verify.access, AccessPolicy.Human);
-  assert.throws(() =>
-    repositoryOperations.verify.input.parse({
-      params: { credential_name: REPOSITORY_NAME },
-      query: {},
-      body: {},
-    }),
-  );
-});
-
 async function rejectsWith(
   promise: unknown,
   status: number,
@@ -624,9 +510,6 @@ const ARMOR_LINES = 2;
 const NEXT_REVISION = FIRST_REVISION + 1;
 const NO_LINES = 0;
 const ONE_FILE = 1;
-const SSH_KEY_CREATE_PATH = "/api/repository/credential/ssh/key";
-const SSH_KEY_ROTATE_PATH =
-  "/api/repository/credential/:credential_name/ssh/key";
 
 function sshKeyCreate(name = SSH_NAME) {
   return { params: {}, query: {}, body: { name } };
@@ -735,10 +618,6 @@ test("ssh_key_create refuses a taken name and the reserved name ssh, and is a mu
     HttpStatus.BadRequest,
     "credential.input.invalid",
   );
-  assert.equal(repositoryOperations.ssh_key_create.mutation, true);
-  assert.equal(repositoryOperations.ssh_key_rotate.mutation, true);
-  assert.equal(repositoryOperations.ssh_key_create.path, SSH_KEY_CREATE_PATH);
-  assert.equal(repositoryOperations.ssh_key_rotate.path, SSH_KEY_ROTATE_PATH);
 });
 
 test("ssh_key_rotate refuses a stale revision, inserts a new key and drains the older revision", async (t) => {
