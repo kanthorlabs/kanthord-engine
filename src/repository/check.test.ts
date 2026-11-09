@@ -3,12 +3,14 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import test from "node:test";
+import { CancellationContext } from "../kernel/context.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 import { temporary } from "../kernel/test-support.ts";
 import {
   CheckErrorCode,
   parseGitVersion,
   parseSshVersion,
+  probeRepositoryTools,
   requireTool,
 } from "./check.ts";
 
@@ -79,4 +81,10 @@ test("requireTool refuses a missing tool", () => {
     () => requireTool("kanthord-missing-ssh-agent"),
     CheckErrorCode.ToolMissing,
   );
+});
+
+test("probeRepositoryTools resolves false for a cancelled context", async () => {
+  const context = new CancellationContext();
+  context.cancel();
+  assert.equal(await probeRepositoryTools(context), false);
 });

@@ -5,6 +5,7 @@ import { CustodyComponent, custodyMigrations } from "../custody/index.ts";
 import {
   type CredentialAnswer,
   CUSTODY_SERVICE_NAME,
+  SecretShape,
 } from "../custody/contract.ts";
 import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -131,6 +132,35 @@ function fails(fn: () => unknown, status: number, code: string) {
       error.code === code,
   );
 }
+
+test("platform list answers github and ssh", (t) => {
+  const f = fixture(t);
+  assert.deepEqual(
+    f.invoke(repositoryOperations.platform_list, {
+      params: {},
+      query: {},
+      body: null,
+    }),
+    {
+      items: [
+        {
+          platform: "github",
+          secret_shape: SecretShape.ApiKey,
+          login_modes: [],
+          metadata_fields: [],
+          verifiable: true,
+        },
+        {
+          platform: "ssh",
+          secret_shape: SecretShape.SshKey,
+          login_modes: [],
+          metadata_fields: ["public_key", "fingerprint"],
+          verifiable: true,
+        },
+      ],
+    },
+  );
+});
 
 test("create refuses a platform of another component and get lists the bindings that name the credential", (t) => {
   const f = fixture(t);
