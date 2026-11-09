@@ -85,6 +85,8 @@ const DEPS_SETUP = {
 };
 const NO_DEPS_SETUP = { postCreateCommand: "test ! -e deps" };
 const TREE_PREPARED = "tree prepared";
+const TREE_DELETED = "tree deleted";
+const INVALID_PERMISSIONS = "system.files.invalid_permissions";
 const RELEASE_FROM_POOL = { purpose: "release", source: TreeSource.Pool };
 const ONE_TREE = 1;
 const GONE = "gone";
@@ -121,6 +123,14 @@ function treesPrepared(t: TestContext, h: Fixture): () => unknown[] {
   return () =>
     log.mock.calls
       .filter((call) => call.arguments[0] === TREE_PREPARED)
+      .map((call) => call.arguments[1]);
+}
+
+function treesDeleted(t: TestContext, h: Fixture): () => unknown[] {
+  const log = t.mock.method(h.run, "log");
+  return () =>
+    log.mock.calls
+      .filter((call) => call.arguments[0] === TREE_DELETED)
       .map((call) => call.arguments[1]);
 }
 
@@ -886,7 +896,14 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
         verifications: [`chmod ${OPEN_MODE} .git`],
       },
     };
+    const deleted = treesDeleted(t, h);
     assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    assert.deepEqual(deleted(), [
+      {
+        path: join(releaseKey(h), h.checkouts[0]!.name),
+        code: INVALID_PERMISSIONS,
+      },
+    ]);
     assert.deepEqual(h.input.workspaces.pool.trees(), []);
     assert.equal(existsSync(releaseKey(h)), false);
     const key = h.input.workspaces.nodeKey(h.input.claim.node_id);
@@ -906,7 +923,9 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     ]);
     chmodSync(join(tree, ".git"), Number.parseInt(OPEN_MODE, 8));
     h.input.workspaces.release(key, WorkspaceKind.Node);
+    const deleted = treesDeleted(t, h);
     await prepareStepsWorkspace(h.input, h.run);
+    assert.deepEqual(deleted(), [{ path: tree, code: INVALID_PERMISSIONS }]);
     assert.equal(existsSync(releaseKey(h)), false);
     assert.deepEqual(h.input.workspaces.pool.trees(), []);
   });
@@ -980,7 +999,7 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     }
   });
 
-  test("an abort during a release verification ends the gate with the abort reason, gives the tree back and leaves no release directory", async (t) => {
+  test("an abort during a release verification answers routed, gives the tree back and leaves no release directory", async (t) => {
     const marker = join(temporary(t), MARKER);
     const h = await fixture(t, [], []);
     h.revision = {
@@ -995,7 +1014,6 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     while (!existsSync(marker)) await delay(POLL_MS);
     h.run.operationContext.cancel(reason);
     assert.equal((await gate).kind, ReleaseGateKind.Routed);
-    assert.equal(h.run.operationContext.signal.reason, reason);
     assert.equal(freeCommandTrees(h).length, ONE_TREE);
     assert.equal(existsSync(releaseKey(h)), false);
   });

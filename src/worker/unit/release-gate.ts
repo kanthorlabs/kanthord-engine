@@ -58,6 +58,7 @@ const RELEASE_GATE_RESULT = "kanthord.release_gate.result";
 const RELEASE_GATE_UNIT_ID = "kanthord.release_gate.unit_id";
 const RELEASE_GATE_AFFECTED = "kanthord.release_gate.affected";
 const TREE_PREPARED = "tree prepared";
+const TREE_DELETED = "tree deleted";
 const RELEASE_PURPOSE = "release";
 const NO_REFS: readonly string[] = [];
 
@@ -352,15 +353,18 @@ async function runAffectedChecks(
 
 function giveReleaseTrees(state: StepsState, key: string, base: string): void {
   const checkouts = join(key, CHECKOUTS_DIRECTORY);
-  for (const checkout of state.checkouts)
-    state.input.workspaces.pool.giveBack(
+  for (const checkout of state.checkouts) {
+    const tree = join(base, layoutOf(checkouts, checkout.directory));
+    const code = state.input.workspaces.pool.giveBack(
       {
         address: repositoryOf(state, checkout).address,
         poolClass: PoolClass.Command,
       },
-      join(base, layoutOf(checkouts, checkout.directory)),
+      tree,
       state.input.claim.node_id,
     );
+    if (code !== null) state.run.log(TREE_DELETED, { path: tree, code });
+  }
   rmSync(base, { recursive: true, force: true });
 }
 

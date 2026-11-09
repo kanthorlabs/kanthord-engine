@@ -28,6 +28,7 @@ const GIT_EXCLUDE = [".git", "info", "exclude"];
 export const CHECKOUTS_DIRECTORY = "checkouts";
 export const RELEASE_DIRECTORY = "release";
 export const EVIDENCE_DIRECTORY = "evidence";
+const TREE_DELETED = "tree deleted";
 const NO_CHECKOUTS = 0;
 const SINGLE_CHECKOUT = 1;
 const FIRST_CHECKOUT = 0;
@@ -155,6 +156,7 @@ export class WorkspaceRoot {
       nodeBranch: string;
       pushed: ReadonlySet<string>;
       repositories: readonly WorkspaceRepository[];
+      log?: (msg: string, fields: Record<string, unknown>) => void;
     },
   ): Promise<{ root: string; checkouts: WorkspaceCheckout[] }> {
     assert.ok(input.repositories.length > NO_CHECKOUTS);
@@ -230,6 +232,7 @@ export class WorkspaceRoot {
       env: NodeJS.ProcessEnv;
       nodeId: string;
       repositories: readonly WorkspaceRepository[];
+      log?: (msg: string, fields: Record<string, unknown>) => void;
     },
     end: number,
   ): Promise<void> {
@@ -246,12 +249,13 @@ export class WorkspaceRoot {
         if (input.context.signal.aborted) throw error;
         return null;
       });
-      if (address === repository.address)
-        this.pool.giveBack(
-          { address: repository.address, poolClass: PoolClass.Command },
-          tree,
-          input.nodeId,
-        );
+      if (address !== repository.address) continue;
+      const code = this.pool.giveBack(
+        { address: repository.address, poolClass: PoolClass.Command },
+        tree,
+        input.nodeId,
+      );
+      if (code !== null) input.log?.(TREE_DELETED, { path: tree, code });
     }
     rmSync(release, { recursive: true, force: true });
   }
