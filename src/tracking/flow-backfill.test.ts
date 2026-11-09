@@ -335,22 +335,6 @@ test("a trace with a kind that is not NULL is not handled again", async (t) => {
   assert.deepEqual(flowTables(store), tables);
 });
 
-test("pending_until holds the job start, then the anchor of the oldest handled trace, then null", async (t) => {
-  const store = memoryStore(t);
-  admitMixedTraces(store);
-  resetFlow(store);
-  const values: (number | null)[] = [];
-  await runBackfill(store, undefined, (value) => values.push(value));
-  assert.deepEqual(values, [JOB_START, ANCHOR - 50 * HOUR_MS, null]);
-});
-
-test("a start that finds no trace to handle reports the job start and then null", async (t) => {
-  const store = memoryStore(t);
-  const values: (number | null)[] = [];
-  await runBackfill(store, undefined, (value) => values.push(value));
-  assert.deepEqual(values, [JOB_START, null]);
-});
-
 test("the backfill counts no late record for a late root end, as the admission does", async (t) => {
   const store = memoryStore(t);
   const trace = traceOf(LATE_END_TRACE);

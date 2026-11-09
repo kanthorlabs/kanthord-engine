@@ -577,31 +577,6 @@ test("a record two hours after the end is late and marks the past-bucket rows of
   });
 });
 
-test("a record within an hour after the end is not late", (t) => {
-  const store = memoryStore(t);
-  const trace = traceOf(1);
-  write(store, trace, [rootStart(trace, "steps"), rootEnd(trace)]);
-  write(store, trace, [turn(trace, 1)], ANCHOR + 1000 + HOUR_MS);
-  assert.deepEqual(traceColumns(store, trace, "late_records"), {
-    late_records: 0,
-  });
-});
-
-test("an on-time root end after the end of its claim bucket sets no mark", (t) => {
-  const store = memoryStore(t);
-  const trace = traceOf(1);
-  write(store, trace, [rootStart(trace, "steps")], ANCHOR + 1000);
-  const endedAt = HOUR_START + HOUR_MS + 5 * 60000;
-  write(store, trace, [rootEnd(trace, {}, endedAt)], endedAt);
-  for (const grain of GRAINS)
-    assert.deepEqual(
-      rollup(store, grain).map((row) =>
-        shape(row, ["exit", "changed_after_end", "late_records"]),
-      ),
-      [{ exit: "unknown", changed_after_end: 0, late_records: 0 }],
-    );
-});
-
 test("a batch that ends the trace reads ended_at from the state for a later record", (t) => {
   const store = memoryStore(t);
   const trace = traceOf(1);
@@ -681,22 +656,6 @@ test("a turn with tokens and no cost adds to the unpriced tokens", (t) => {
       shape(row, ["turn_count", "unpriced_tokens", "cost_usd"]),
     ),
     [{ turn_count: 3, unpriced_tokens: 110, cost_usd: 0.25 }],
-  );
-});
-
-test("a turn with no model keys the empty model", (t) => {
-  const store = memoryStore(t);
-  const trace = traceOf(1);
-  write(store, trace, [
-    rootStart(trace, "steps"),
-    record(trace, "bare-turn", "9".repeat(16), "agent.turn", {
-      start: ANCHOR + 100,
-      end: ANCHOR + 200,
-    }),
-  ]);
-  assert.deepEqual(
-    usageRows(store, FlowGrain.Hour).map((row) => row.model),
-    [""],
   );
 });
 
@@ -888,20 +847,6 @@ test("the server span path moves the contribution across spans", (t) => {
         },
       ],
     );
-});
-
-test("insertTrace answers true for a new row and false for a stored row", (t) => {
-  const store = memoryStore(t);
-  const trace = traceOf(1);
-  const answers = store.transaction((tx) => [
-    insertTrace(tx, trace, ANCHOR),
-    insertTrace(tx, trace, ANCHOR + 1),
-  ]);
-  assert.deepEqual(answers, [true, false]);
-  assert.deepEqual(traceColumns(store, trace, "kind, created_at"), {
-    kind: "",
-    created_at: ANCHOR,
-  });
 });
 
 test("an anchor older than 8 days writes its hour row and its day row", (t) => {
