@@ -271,7 +271,21 @@ export class WorkspaceRoot {
           { ...input, poolClass: PoolClass.Command },
           end,
         );
-      this.keepOnly(join(key, PUSHED_DIRECTORY), branchKeyOf(input.nodeBranch));
+      this.keepOnly(
+        join(key, PUSHED_DIRECTORY),
+        [branchKeyOf(input.nodeBranch)],
+        input,
+      );
+      this.keepOnly(
+        join(key, CHECKOUTS_DIRECTORY),
+        [
+          SCRATCH_ENTRY,
+          ...input.repositories.map(({ name }) =>
+            bindingNameSchema.parse(name),
+          ),
+        ],
+        input,
+      );
       const checkouts: WorkspaceCheckout[] = [];
       for (const repository of input.repositories) {
         const directory = this.nodeDirectory(input.nodeId, repository.name);
@@ -487,11 +501,19 @@ export class WorkspaceRoot {
       hold.log?.(SCRATCH_NOT_STORED, { path: store, code: codeOf(error) });
     }
   }
-  private keepOnly(directory: string, name: string): void {
-    this.removeUnreal(directory);
-    if (!lstatSync(directory, { throwIfNoEntry: false })) return;
-    for (const entry of readdirSync(directory))
-      if (entry !== name) this.removeSafely(join(directory, entry));
+  private keepOnly(
+    directory: string,
+    names: readonly string[],
+    owner: TreeOwner,
+  ): void {
+    try {
+      this.removeUnreal(directory);
+      if (!lstatSync(directory, { throwIfNoEntry: false })) return;
+      for (const entry of readdirSync(directory))
+        if (!names.includes(entry)) this.removeSafely(join(directory, entry));
+    } catch (error) {
+      owner.log?.(TREE_DELETED, { path: directory, code: codeOf(error) });
+    }
   }
   private async giveLeftoverTrees(
     directory: string,

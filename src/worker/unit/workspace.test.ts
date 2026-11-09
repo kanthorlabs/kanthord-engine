@@ -1365,3 +1365,49 @@ test("a broken or linked push record counts as no record, and the prepare writes
   }
   assert.equal(readFileSync(outside, "utf8"), OUTSIDE_TEXT);
 });
+
+test("a node preparation removes each checkout of a removed binding and does not follow a symbolic link", async (t) => {
+  const h = await coderFixture(t);
+  const nodeId = createIdentity("node");
+  const checkouts = join(h.workspace.nodeKey(nodeId), CHECKOUTS_DIRECTORY);
+  const removed = join(checkouts, "removed-repo");
+  mkdirSync(checkouts, { recursive: true, mode: 0o700 });
+  await simpleGit().raw(["clone", "--", h.origin, removed]);
+  const outside = temporary(t);
+  writeFileSync(join(outside, SCRATCH_PROBE), OUTSIDE_TEXT);
+  symlinkSync(outside, join(checkouts, "linked"));
+  const scratch = writeScratch(checkouts);
+  const prepared = await h.prepare(nodeId);
+  assert.deepEqual(readdirSync(checkouts).sort(), [
+    ".kanthord-scratch",
+    h.repository.name,
+  ]);
+  assert.equal(readFileSync(scratch, "utf8"), SCRATCH_TEXT);
+  assert.equal(
+    readFileSync(join(outside, SCRATCH_PROBE), "utf8"),
+    OUTSIDE_TEXT,
+  );
+  assert.ok(existsSync(join(prepared.directory, ".git")));
+  h.release(nodeId);
+});
+
+test("a checkout of a removed binding that the prepare cannot remove does not stop the preparation", async (t) => {
+  const h = await coderFixture(t);
+  const nodeId = createIdentity("node");
+  const checkouts = join(h.workspace.nodeKey(nodeId), CHECKOUTS_DIRECTORY);
+  const locked = join(checkouts, "removed-repo", "locked");
+  mkdirSync(locked, { recursive: true, mode: 0o700 });
+  writeFileSync(join(locked, "file"), "x");
+  chmodSync(locked, 0o500);
+  try {
+    const prepared = await h.prepare(nodeId);
+    assert.ok(existsSync(join(prepared.directory, ".git")));
+    assert.deepEqual(
+      h.logs.filter(({ msg }) => msg !== TREE_PREPARED).map(({ msg }) => msg),
+      ["tree deleted"],
+    );
+    h.release(nodeId);
+  } finally {
+    chmodSync(locked, 0o700);
+  }
+});
