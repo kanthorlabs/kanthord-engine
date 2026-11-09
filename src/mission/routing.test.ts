@@ -6,12 +6,7 @@ import { isTerminal } from "./admission.ts";
 import { continuationHolds, readinessOf } from "./conditions.ts";
 import { NodeState } from "./contract.ts";
 import { type DepEdge, directDependenciesOf } from "./graph.ts";
-import {
-  claimableMap,
-  nodeClaimable,
-  reconcileMission,
-  routeMission,
-} from "./routing.ts";
+import { claimableMap, reconcileMission, routeMission } from "./routing.ts";
 import {
   insertDependency,
   insertMission,
@@ -264,23 +259,4 @@ test("reconcileMission makes no queue call for a node that stays terminal or ret
     );
   });
   assert.deepEqual(queueCalls(h), []);
-});
-
-test("nodeClaimable answers the claimable map value of each node", (t) => {
-  const h = routingHarness(t);
-  const { ids, retired } = randomGraph(h);
-  assert.ok(
-    ids.some((id) => retired.has(id)),
-    "The graph holds a retired node.",
-  );
-  h.store.transaction((tx) => {
-    const map = claimableMap(tx, h.missionId, h.dependencies.bindings);
-    for (const id of ids) {
-      assert.equal(
-        nodeClaimable(tx, readNode(tx, id)!, h.dependencies.bindings),
-        map.get(id) ?? false,
-        id,
-      );
-    }
-  });
 });

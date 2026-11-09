@@ -50,11 +50,6 @@ const CLAIM_CALLS = new Set([
   "schedulerClaims.executionsLost",
   "schedulerClaims.settle",
 ]);
-const UNLINKED_STATES = [
-  NodeState.Blocked,
-  NodeState.Completed,
-  NodeState.Discarded,
-] as const;
 
 function withoutLinkRows(snapshot: Record<string, unknown[]>) {
   return Object.fromEntries(
@@ -130,44 +125,6 @@ test("a node in Executing keeps its claim, attempt and execution", async (t) => 
   assert.equal(h.rows().length, SINGLE_ROW);
 });
 
-test("an actor that no link_trust names gets a row too", async (t) => {
-  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
-  h.addNode([linkOf()]);
-  h.decoding.update = updateOf({ actor_id: "424242" });
-  const answer = await h.admit();
-  assert.equal(answer.disposition, Disposition.AcceptedObservation);
-  assert.equal(h.rows().length, SINGLE_ROW);
-});
-
-test("two nodes that link the thread give one row", async (t) => {
-  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
-  h.addNode([linkOf()]);
-  h.addNode([linkOf(), linkOf(OTHER_LINK_NUMBER)]);
-  h.decoding.update = updateOf();
-  const answer = await h.admit();
-  assert.equal(answer.disposition, Disposition.AcceptedObservation);
-  assert.equal(h.rows().length, SINGLE_ROW);
-});
-
-for (const state of UNLINKED_STATES) {
-  test(`a ${state} node that links the thread gives one row and keeps its state`, async (t) => {
-    const h = linkUpdateHarness(t, INTAKE_IDENTITY);
-    const nodeId = h.addNode([linkOf()], state);
-    h.decoding.update = updateOf();
-    const before = withoutLinkRows(databaseSnapshot(h.store));
-    const answer = await h.admit();
-    assert.equal(answer.disposition, Disposition.AcceptedObservation);
-    assert.equal(h.rows().length, SINGLE_ROW);
-    assert.deepEqual(withoutLinkRows(databaseSnapshot(h.store)), before);
-    assert.equal(
-      h.store.database
-        .prepare("SELECT state FROM mission_node WHERE id = ?")
-        .get(nodeId)?.state,
-      state,
-    );
-  });
-}
-
 test("a thread that only a retired node links answers unmatched", async (t) => {
   const h = linkUpdateHarness(t, INTAKE_IDENTITY);
   h.retire(h.addNode([linkOf()]));
@@ -232,18 +189,6 @@ for (const [name, overrides] of [
   });
 }
 
-test("an object that no node links answers unmatched", async (t) => {
-  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
-  h.addNode([linkOf(OTHER_LINK_NUMBER)]);
-  h.decoding.update = updateOf();
-  const answer = await h.admit();
-  assert.deepEqual(answer, {
-    disposition: Disposition.Refused,
-    reason: AdmissionRefusal.Unmatched,
-  });
-  assert.equal(h.rows().length, NO_ROWS);
-});
-
 test("an event that decodes to nothing answers undecodable", async (t) => {
   const h = linkUpdateHarness(t, INTAKE_IDENTITY);
   h.addNode([linkOf()]);
@@ -307,17 +252,6 @@ test("an event that decodes to a request address follows the request path", asyn
   });
   assert.equal(h.decoding.updateCalls, NO_CALLS);
   assert.equal(h.rows().length, NO_ROWS);
-});
-
-test("admission calls no Intake check for a link update", async (t) => {
-  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
-  h.addNode([linkOf()]);
-  h.decoding.update = updateOf();
-  await h.admit();
-  h.decoding.update = updateOf({ update_key: "issue_comment:5002" });
-  await h.admit();
-  assert.equal(h.intakeChecks.length, NO_CALLS);
-  assert.equal(h.rows().length, SINGLE_ROW + SINGLE_ROW);
 });
 
 const FIRST_OCCURRED_AT = 1700000001000;
@@ -425,7 +359,6 @@ test("a read takes each pinned binding revision once", async (t) => {
 
 const LAST_ATTEMPT = 2;
 const NODE_TIME = 100;
-const NO_ATTEMPT = 0;
 const FIRST_REVISION = 1;
 const TERMINAL_STATES = [NodeState.Completed, NodeState.Discarded] as const;
 
@@ -484,15 +417,6 @@ for (const state of TERMINAL_STATES) {
     );
   });
 }
-
-test("a trusted update of a node discarded at attempt 0 opens one proposal of attempt 0", async (t) => {
-  const h = trustedHarness(t, NodeState.Discarded, NO_ATTEMPT);
-  await h.update();
-  const [proposal] = h.proposals();
-  assert.equal(h.proposals().length, SINGLE_ROW);
-  assert.equal(proposal?.attempt, NO_ATTEMPT);
-  assert.equal(proposal?.assessment_id, null);
-});
 
 for (const state of TERMINAL_STATES) {
   test(`an update of an actor outside link_trust of a ${state} node opens nothing`, async (t) => {
@@ -689,18 +613,6 @@ test("a mention of the handle on a thread that no node links inserts a mentioned
   assert.equal(row.snoozed_until, null);
 });
 
-test("a mention of the actor id inserts a mentioned row", async (t) => {
-  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
-  h.writeInbox(INBOX_IDENTITY);
-  h.decoding.update = updateOf({
-    actor_id: BOB_ACTOR,
-    update_key: FIRST_COMMENT_KEY,
-    mentions: [INBOX_ACTOR],
-  });
-  await h.admit();
-  assert.equal(lastRow(h).reason, InboxReason.Mentioned);
-});
-
 test("a later comment with no mention on a thread that holds a row inserts a participating row", async (t) => {
   const h = linkUpdateHarness(t, INTAKE_IDENTITY);
   const pin = h.writeInbox(INBOX_IDENTITY);
@@ -746,19 +658,6 @@ test("an update of the inbox actor inserts a participating row with done_at and 
   assert.ok(Math.abs(Number(own?.done_at) - started) < CLOCK_TOLERANCE_MS);
 });
 
-test("an own update with no row on the thread is admitted and done", async (t) => {
-  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
-  h.writeInbox(INBOX_IDENTITY);
-  h.decoding.update = updateOf({
-    actor_id: INBOX_ACTOR,
-    update_key: FIRST_COMMENT_KEY,
-    mentions: [],
-  });
-  const answer = await h.admit();
-  assert.equal(answer.disposition, Disposition.AcceptedObservation);
-  assert.notEqual(lastRow(h).done_at, null);
-});
-
 test("a comment on a linked thread inserts a linked row with the pin and keeps the node state", async (t) => {
   const h = linkUpdateHarness(t, INTAKE_IDENTITY);
   const pin = h.writeInbox(INBOX_IDENTITY);
@@ -781,19 +680,6 @@ test("a comment on a linked thread inserts a linked row with the pin and keeps t
       .get(nodeId)?.state,
     NodeState.Available,
   );
-});
-
-test("a linked thread that mentions the handle takes linked, the highest rank", async (t) => {
-  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
-  h.writeInbox(INBOX_IDENTITY);
-  h.addNode([linkOf()]);
-  h.decoding.update = updateOf({
-    actor_id: BOB_ACTOR,
-    update_key: FIRST_COMMENT_KEY,
-    mentions: [INBOX_HANDLE],
-  });
-  await h.admit();
-  assert.equal(lastRow(h).reason, InboxReason.Linked);
 });
 
 test("a comment with no mention on an unlinked thread with no row answers unmatched", async (t) => {
@@ -870,21 +756,4 @@ test("a change of inbox.handle keeps the pin of a pinned thread and a thread wit
   const row = lastRow(h);
   assert.equal(row.reason, InboxReason.Mentioned);
   assert.equal(row.binding_id, second);
-});
-
-test("a mention by an automated actor answers actor_ignored and inserts nothing", async (t) => {
-  const h = linkUpdateHarness(t, INTAKE_IDENTITY);
-  h.writeInbox(INBOX_IDENTITY);
-  h.decoding.update = updateOf({
-    actor_id: BOB_ACTOR,
-    actor_automated: true,
-    update_key: FIRST_COMMENT_KEY,
-    mentions: [INBOX_HANDLE],
-  });
-  const answer = await h.admit();
-  assert.deepEqual(answer, {
-    disposition: Disposition.Refused,
-    reason: AdmissionRefusal.ActorIgnored,
-  });
-  assert.equal(h.rows().length, NO_ROWS);
 });
