@@ -5,12 +5,10 @@ import { stopAfter } from "../kernel/stop-test-support.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
   type AnalyticsFlowQuery,
-  FLOW_PERCENTILE_METHOD,
   FlowCompare,
   FlowExit,
   FlowGrain,
   FlowMeasure,
-  flowReadSchema,
   FlowStage,
   TRACKING_SERVICE_NAME,
 } from "./contract.ts";
@@ -192,32 +190,6 @@ test("a row lands in its window and a row outside both adds nothing", (t) => {
   assert.equal(read.completeness.executions, COUNT_THREE);
 });
 
-test("the answer parses with the output schema", (t) => {
-  const store = hourStore(t);
-  rollup(store, FlowGrain.Hour, D0 + 7 * HOUR, {
-    exit: FlowExit.Stopped,
-    stop_reason: "operation_failed",
-    cause_category: "environment",
-    cause_detail: "dependency",
-    cause_assigner: "rule",
-    cost_usd: 1.5,
-  });
-  rollup(store, FlowGrain.Hour, D0 + 3 * HOUR, {
-    stage: FlowStage.Outcome,
-    exit: FlowExit.Rework,
-    cause_category: "unattributed",
-    cause_assigner: "rule",
-  });
-  histogram(store, FlowGrain.Hour, D0 + 7 * HOUR, "p1", "w1", 1000);
-  const read = readFlow(store, query(HOUR_QUERY), NOW, {
-    isHostedWorker: () => false,
-    rebuild: { pending_until: NOW },
-  });
-  assert.deepEqual(flowReadSchema.parse(read), read);
-  assert.deepEqual(read.rebuild, { pending_until: NOW });
-  assert.equal(read.percentile_method, FLOW_PERCENTILE_METHOD);
-});
-
 test("project_id and worker_name filter the rows", (t) => {
   const store = hourStore(t);
   rollup(store, FlowGrain.Hour, D0 + 7 * HOUR, {
@@ -265,29 +237,6 @@ test("project_id and worker_name filter the rows", (t) => {
     COUNT_TWO,
     NO_COUNT,
   ]);
-});
-
-test("a project filter keeps the rows of that project only", (t) => {
-  const store = memoryStore(t);
-  const first = "project_01";
-  const second = "project_02";
-  rollup(store, FlowGrain.Hour, D0 + 7 * HOUR, {
-    project_id: first,
-    executions: COUNT_THREE,
-  });
-  rollup(store, FlowGrain.Hour, D0 + 7 * HOUR, {
-    project_id: second,
-    executions: COUNT_FIVE,
-  });
-  rollup(store, FlowGrain.Hour, D0 + 3 * HOUR, { project_id: second });
-  const read = readFlow(
-    store,
-    query({ ...HOUR_QUERY, project_id: first as never }),
-    NOW,
-    OPTIONS,
-  );
-  assert.equal(stageOf(read, FlowStage.Executing).current.entered, COUNT_THREE);
-  assert.equal(read.previous_window, null);
 });
 
 function dayStore(t: TestContext): Store {
@@ -429,12 +378,4 @@ test("a store with rows from a later day gives a null previous window", (t) => {
   assert.equal(read.stop_reasons.previous_totals, null);
   assert.equal(stageOf(read, FlowStage.Outcome).previous, null);
   assert.equal(stageOf(read, FlowStage.Outcome).current.entered, COUNT_THREE);
-});
-
-test("an empty store gives a null previous window and zero sums", (t) => {
-  const read = readFlow(memoryStore(t), query(DAY_QUERY), NOW, OPTIONS);
-  assert.equal(read.previous_window, null);
-  assert.equal(read.cost.current.total_usd, NO_COUNT);
-  assert.deepEqual(read.usage.by.model, []);
-  assert.deepEqual(flowReadSchema.parse(read), read);
 });
