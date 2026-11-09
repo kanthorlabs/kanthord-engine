@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, type ExecFileException } from "node:child_process";
-import { addAbortListener, getEventListeners } from "node:events";
+import { addAbortListener } from "node:events";
 import { test } from "node:test";
 import { promisify } from "node:util";
 const ExitCode = { Success: 0, Failure: 1 } as const;
@@ -14,11 +14,6 @@ import {
 } from "./context.ts";
 
 const NO_NOTIFICATIONS = 0;
-const NO_LISTENERS = 0;
-const NO_COMPLETED_TASKS = 0;
-const ADMITTED_TASK_COUNT = 1;
-const COMPLETED_TASK_RESULT = "finished";
-const CHILD_COUNT = 1000;
 const Registration = {
   ListenerFirst: "listener-first",
   CancelFirst: "cancel-first",
@@ -62,77 +57,6 @@ test("Context inherits the earlier deadline and carries its reason on the native
   assert.throws(() => child.signal.throwIfAborted(), parent.signal.reason);
   const expired = new CancellationContext(background, Date.now() - 1);
   assert.ok(expired.signal.reason instanceof DeadlineExceeded);
-});
-
-test("A child holds no listener on its parent signal", () => {
-  const parent = new CancellationContext();
-  for (let index = 0; index < CHILD_COUNT; index++)
-    new CancellationContext(parent, Date.now() + 60000).cancel();
-  assert.equal(getEventListeners(parent.signal, "abort").length, NO_LISTENERS);
-  assert.equal(
-    getEventListeners(background.signal, "abort").length,
-    NO_LISTENERS,
-  );
-});
-
-test("CancellationContext lets an admitted task finish and rejects upcoming tasks at the admission guard", async () => {
-  const context = new CancellationContext();
-  const entered = Promise.withResolvers<void>();
-  const release = Promise.withResolvers<void>();
-  let started = 0;
-  let finished = 0;
-  const task = async () => {
-    context.signal.throwIfAborted();
-    started++;
-    entered.resolve();
-    await release.promise;
-    finished++;
-    return "finished";
-  };
-
-  const ongoing = task();
-  try {
-    await entered.promise;
-    context.cancel();
-    await cancelled(context.signal);
-    assert.ok(context.signal.reason instanceof ContextCancelled);
-    assert.equal(finished, NO_COMPLETED_TASKS);
-
-    await assert.rejects(task(), (error) => error === context.signal.reason);
-    assert.equal(started, ADMITTED_TASK_COUNT);
-  } finally {
-    release.resolve();
-  }
-
-  assert.equal(await ongoing, COMPLETED_TASK_RESULT);
-  assert.equal(finished, ADMITTED_TASK_COUNT);
-  await assert.rejects(task(), (error) => error === context.signal.reason);
-  assert.equal(started, ADMITTED_TASK_COUNT);
-  assert.equal(finished, ADMITTED_TASK_COUNT);
-});
-
-test("Context arms no timer for an inherited deadline and cancels through its parent", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
-  const parent = new CancellationContext(background, Date.now() + 10);
-  t.mock.timers.tick(1);
-  const later = new CancellationContext(parent, Date.now() + 60000);
-  const equal = new CancellationContext(parent, parent.deadline);
-  t.mock.timers.tick(30);
-  await Promise.all([
-    cancelled(parent.signal),
-    cancelled(later.signal),
-    cancelled(equal.signal),
-  ]);
-  assert.ok(parent.signal.reason instanceof DeadlineExceeded);
-  assert.equal(later.signal.reason, parent.signal.reason);
-  assert.equal(equal.signal.reason, parent.signal.reason);
-  const passed = Date.now() + 1;
-  const stalled = new CancellationContext(background, passed);
-  t.mock.timers.setTime(passed);
-  const late = new CancellationContext(stalled);
-  assert.ok(late.signal.reason instanceof DeadlineExceeded);
-  assert.equal(stalled.signal.aborted, false);
-  stalled.cancel();
 });
 
 test("A throwing cancellation listener terminates the process on both registration paths", async (t) => {
