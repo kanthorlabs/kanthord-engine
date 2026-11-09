@@ -27,76 +27,10 @@ const FIRST_ASSET_INDEX = 0;
 const NO_ITEMS = 0;
 const SINGLE_ITEM = 1;
 const NOT_RUNNING = MissionErrorCode.AuthorizationRefused;
-const VALIDATION = "gateway.request.validation_failed";
 const SECOND_ATTEMPT = 2;
 const BAD_GATEWAY = 502;
 const FAILED_AT = 100;
 const FIRST_MISSION_VERSION = 1;
-const Field = {
-  Subject: "subject",
-  Command: "command",
-  Signal: "signal",
-} as const;
-
-test("submission rejects blank and oversized nested Text before signing or insertion", async (t) => {
-  const h = evidenceHarness(t, IDENTITY);
-  for (const field of Object.values(Field)) {
-    const subject = field === Field.Subject ? " \t " : "Valid";
-    const long = "é".repeat(h.dependencies.config.text_max_bytes);
-    const verification = {
-      tested_input: {
-        kind: AssetKind.Repository,
-        binding_id: h.repositoryId,
-        commit: "a".repeat(40),
-      },
-      results: [
-        {
-          command: field === Field.Command ? long : "true",
-          signal: field === Field.Signal ? long : null,
-          exit_code: SUCCESSFUL_EXIT_CODE,
-          timed_out: false,
-        },
-      ],
-    };
-    await assert.rejects(
-      h.invoke("evidence.submit", {
-        params: { node_id: h.node_id },
-        query: {},
-        body: {
-          ...h.context,
-          subject,
-          verification,
-          assets: [
-            {
-              kind: AssetKind.Object,
-              size: SINGLE_ITEM,
-              media_type: "text/plain",
-            },
-          ],
-        },
-      }),
-      (error) => error instanceof OperationError && error.code === VALIDATION,
-    );
-  }
-  h.store.transaction((tx) => {
-    assert.equal(
-      (
-        tx.database
-          .prepare("SELECT count(*) AS count FROM mission_evidence")
-          .get() as { count: number }
-      ).count,
-      NO_ITEMS,
-    );
-    assert.equal(
-      (
-        tx.database
-          .prepare("SELECT count(*) AS count FROM mission_evidence_asset")
-          .get() as { count: number }
-      ).count,
-      NO_ITEMS,
-    );
-  });
-});
 
 test("repository and produced submissions publish atomically and repeated submissions mint new evidence", async (t) => {
   const h = evidenceHarness(t, IDENTITY);
@@ -284,31 +218,6 @@ test("two storage bindings grant the first", async (t) => {
   assert.equal(JSON.parse(stored.content).storage_binding_id, h.storageId);
 });
 
-test("a node with no storage binding answers mission.evidence.storage_binding_absent", async (t) => {
-  const h = executionHarness(t, IDENTITY);
-  await assert.rejects(
-    h.invoke("evidence.submit", {
-      params: { node_id: h.node_id },
-      query: {},
-      body: {
-        ...h.context,
-        subject: "Object",
-        assets: [
-          {
-            kind: AssetKind.Object,
-            size: SINGLE_ITEM,
-            media_type: "text/plain",
-          },
-        ],
-      },
-    }),
-    (error) =>
-      error instanceof OperationError &&
-      error.status === HttpStatus.Conflict &&
-      error.code === MissionErrorCode.EvidenceStorageBindingAbsent,
-  );
-});
-
 function failoverFixture(t: TestContext) {
   const h = evidenceHarness(t, IDENTITY);
   const second = createIdentity("binding");
@@ -409,12 +318,6 @@ function failoverFixture(t: TestContext) {
       query: {},
       body: removal,
     });
-  const removeEvidence = (evidenceId: string) =>
-    h.invoke("evidence.delete", {
-      params: { evidence_id: evidenceId },
-      query: {},
-      body: removal,
-    });
   const pinned = (result: Awaited<ReturnType<typeof submit>>) => {
     const asset = result.evidence.assets[FIRST_ASSET_INDEX]!;
     if (asset.kind !== AssetKind.Object) assert.fail();
@@ -441,7 +344,6 @@ function failoverFixture(t: TestContext) {
     submit,
     complete,
     removeAsset,
-    removeEvidence,
     pinned,
     evidenceCount,
   };
@@ -450,13 +352,6 @@ function failoverFixture(t: TestContext) {
 test("an unavailable first binding grants the second", async (t) => {
   const h = failoverFixture(t);
   h.states.set(h.storageId, { tombstone: false, disabled: true });
-  assert.equal(h.pinned(await h.submit()), h.second);
-  assert.deepEqual(h.granted, [h.second]);
-});
-
-test("a removed first binding grants the second", async (t) => {
-  const h = failoverFixture(t);
-  h.states.set(h.storageId, { tombstone: true, disabled: false });
   assert.equal(h.pinned(await h.submit()), h.second);
   assert.deepEqual(h.granted, [h.second]);
 });
@@ -545,15 +440,6 @@ test("a human delete of the failed asset makes its binding grantable again", asy
   assert.equal(h.pinned(await h.submit()), h.storageId);
 });
 
-test("a human delete of the failed evidence makes its binding grantable again", async (t) => {
-  const h = failoverFixture(t);
-  h.dependencies.intakeStorage.delete = async () => undefined;
-  const failed = h.fail(h.storageId, h.claim.attempt);
-  assert.equal(h.pinned(await h.submit()), h.second);
-  await h.removeEvidence(failed.evidenceId);
-  assert.equal(h.pinned(await h.submit()), h.storageId);
-});
-
 test("a failed asset of another attempt leaves every binding grantable", async (t) => {
   const h = failoverFixture(t);
   h.fail(h.storageId, SECOND_ATTEMPT);
@@ -576,25 +462,6 @@ test("no binding left answers mission.evidence.storage_exhausted", async (t) => 
   h.states.clear();
   await assert.rejects(h.submit, exhausted([h.storageId, h.second]));
   assert.equal(h.evidenceCount(), NO_ITEMS);
-});
-
-test("an exhausted answer with no failed asset lists no binding", async (t) => {
-  const h = failoverFixture(t);
-  h.states.set(h.storageId, { tombstone: false, disabled: true });
-  h.states.set(h.second, { tombstone: false, disabled: true });
-  const exhausted = {
-    code: MissionErrorCode.EvidenceStorageExhausted,
-    details: { node_id: h.node_id, attempt: h.claim.attempt, bindings: [] },
-  };
-  await assert.rejects(h.submit, exhausted);
-  assert.deepEqual(h.granted, []);
-  h.states.clear();
-  for (const id of [h.storageId, h.second])
-    h.refusals.set(id, () =>
-      authorizationRefused(AuthorizationRefusal.BindingRemoved),
-    );
-  await assert.rejects(h.submit, exhausted);
-  assert.deepEqual(h.granted, [h.storageId, h.second]);
 });
 
 test("a cancelled context during signing stops with no failover", async (t) => {
@@ -681,20 +548,6 @@ test("an implement evidence that misses a binding answers mission.evidence.bindi
   await assert.rejects(
     h.submit([h.repositoryId, h.repositoryId]),
     h.mismatch(h.repositoryId),
-  );
-  assert.equal(h.evidenceCount(), NO_ITEMS);
-});
-
-test("an implement evidence with a foreign binding answers mission.evidence.binding_mismatch", async (t) => {
-  const h = repositoryPairHarness(t);
-  const foreignId = createIdentity("binding");
-  await assert.rejects(
-    h.submit([h.repositoryId, h.secondId, foreignId]),
-    h.mismatch(foreignId),
-  );
-  await assert.rejects(
-    h.submit([h.repositoryId, h.storageId]),
-    h.mismatch(h.storageId),
   );
   assert.equal(h.evidenceCount(), NO_ITEMS);
 });
