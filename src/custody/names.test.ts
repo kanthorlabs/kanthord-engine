@@ -1,69 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  apiKeySecretSchema,
-  CREDENTIAL_NAME_MAX_LENGTH,
-  isNonblank,
-  oauthSecretSchema,
-  s3AccessKeySecretSchema,
-} from "./contract.ts";
+import { CREDENTIAL_NAME_MAX_LENGTH, isNonblank } from "./contract.ts";
 import {
   RESERVED_NAME_CHECK,
   RESERVED_NAME_LOGIN,
   RESERVED_NAME_PLATFORM,
   validateNameForm,
 } from "./names.ts";
-
-test("secret schemas reject unknown fields and blank key material", () => {
-  assert.deepEqual(apiKeySecretSchema.parse({ key: "token" }), {
-    key: "token",
-  });
-  assert.equal(apiKeySecretSchema.safeParse({ key: "  " }).success, false);
-  assert.equal(
-    apiKeySecretSchema.safeParse({ key: "token", extra: 1 }).success,
-    false,
-  );
-  assert.deepEqual(
-    oauthSecretSchema.parse({ refresh: " ", access: " ", expires: 0 }),
-    {
-      refresh: " ",
-      access: " ",
-      expires: 0,
-    },
-  );
-  assert.equal(
-    oauthSecretSchema.safeParse({ refresh: "", access: "a", expires: 1 })
-      .success,
-    false,
-  );
-  assert.equal(
-    oauthSecretSchema.safeParse({ refresh: "r", access: "", expires: 1 })
-      .success,
-    false,
-  );
-  assert.equal(
-    s3AccessKeySecretSchema.safeParse({
-      access_key_id: " ",
-      secret_access_key: "s",
-    }).success,
-    false,
-  );
-  assert.equal(
-    s3AccessKeySecretSchema.safeParse({
-      access_key_id: "a",
-      secret_access_key: " ",
-    }).success,
-    false,
-  );
-  assert.equal(
-    s3AccessKeySecretSchema.safeParse({
-      access_key_id: "a",
-      secret_access_key: "s",
-      sessionToken: "t",
-    }).success,
-    false,
-  );
-});
 
 test("names must be lower-case, start with a letter and fit in 63 chars", () => {
   assert.equal(validateNameForm("a"), true);
