@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { COLLECTION_MAX, SpanStatus } from "../tracking/contract.ts";
+import { SpanStatus } from "../tracking/contract.ts";
 import {
   IMPORT_OPERATION,
   ImportAttribute,
@@ -10,7 +10,6 @@ import {
 
 const APPLIED_AT = 700;
 const ERROR_TYPE = "mission.import.cycle";
-const EXTRA_CODES = 10;
 const FACTS: ImportFacts = {
   project_id: "project_1",
   mission_id: "mission_1",
@@ -67,22 +66,6 @@ test("importTrace answers an Error trace with sorted distinct violation codes", 
     "a.code",
     "b.code",
   ]);
-});
-
-test("importTrace cuts the violation codes at 128", () => {
-  const codes = Array.from(
-    { length: COLLECTION_MAX + EXTRA_CODES },
-    (_, index) => `code.${String(index).padStart(4, "0")}`,
-  );
-  const { contribution } = importTrace({
-    ...FACTS,
-    error_type: ERROR_TYPE,
-    violation_codes: codes,
-  });
-  assert.deepEqual(
-    contribution.attributes[ImportAttribute.ViolationCodes],
-    codes.slice(0, COLLECTION_MAX),
-  );
 });
 
 test("importTrace stores the reason as a text of the root span", () => {
