@@ -854,7 +854,7 @@ function newestStatesOf(
 }
 
 function outcomeOfCheck(
-  run: { status: string; conclusion?: string | null } | undefined,
+  run: z.infer<typeof checkRunsBodySchema>["check_runs"][number] | undefined,
   state: z.infer<typeof commitStatusStateSchema> | undefined,
 ): RequiredCheckOutcome {
   if (run !== undefined) return outcomeOfRun(run);
