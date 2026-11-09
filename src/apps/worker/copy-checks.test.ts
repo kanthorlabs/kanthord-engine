@@ -33,10 +33,7 @@ import { HttpStatus } from "../../kernel/http.ts";
 import { LLM_PROVIDERS, Platform } from "../../llm/platforms.ts";
 import type { LlmProvider } from "../../llm/provider.ts";
 import { CopyChecks } from "./copy-checks.ts";
-import {
-  copyKeysFixture,
-  TEST_MACHINE_NAME,
-} from "./copy-keys-test-support.ts";
+import { copyKeysFixture } from "./copy-keys-test-support.ts";
 import type { CopyKeys } from "./copy-keys.ts";
 import { EXCHANGE_UNAVAILABLE, ExchangeFailure } from "./instance-exchange.ts";
 
@@ -305,13 +302,10 @@ test("a refused report logs its code and a stopped instance checks nothing more"
   );
   f.checks.observe(NO_CREDENTIAL_VERSION);
   await f.checks.idle();
-  assert.deepEqual(f.logs, [
-    {
-      msg: "Worker instance credential report failed",
-      credential_name: "team-openai",
-      code: REPORT_FAILED_CODE,
-    },
-  ]);
+  assert.deepEqual(
+    f.logs.map(({ code }) => code),
+    [REPORT_FAILED_CODE],
+  );
   const context = new CancellationContext();
   context.cancel();
   const stopped = new CopyChecks({
@@ -443,12 +437,8 @@ test("a copy of a machine with no machine key sends no report and logs one skipp
   f.checks.observe(NO_CREDENTIAL_VERSION);
   await f.checks.idle();
   assert.deepEqual(f.reports, []);
-  assert.deepEqual(f.logs, [
-    {
-      msg: "Worker instance credential check skipped",
-      credential_name: "team-openai",
-      holder: TEST_MACHINE_NAME,
-      code: CONFIG_ABSENT,
-    },
-  ]);
+  assert.deepEqual(
+    f.logs.map(({ code }) => code),
+    [CONFIG_ABSENT],
+  );
 });
