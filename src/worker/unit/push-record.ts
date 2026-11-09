@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { rmSync } from "node:fs";
+import { lstatSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
   audit,
@@ -45,20 +45,39 @@ function auditOrRemove(path: string, kind: FileKind): void {
   }
 }
 
-export function readPushRecord(key: PushRecordKey): PushRecord | null {
+function parsedPushRecord(key: PushRecordKey): PushRecord | undefined {
   try {
     for (const directory of [
       join(key.nodeKey, PUSHED_DIRECTORY),
       directoryOf(key),
     ])
-      if (!audit(directory, FileKind.Directory, true)) return null;
-    const record = pushRecordSchema.parse(
-      JSON.parse(readPrivate(recordPath(key))),
-    );
-    return record.confirmed === null && record.pending === null ? null : record;
+      if (!audit(directory, FileKind.Directory, true)) return undefined;
+    return pushRecordSchema.parse(JSON.parse(readPrivate(recordPath(key))));
   } catch {
-    return null;
+    return undefined;
   }
+}
+
+export function readPushRecord(key: PushRecordKey): PushRecord | null {
+  const record = parsedPushRecord(key);
+  return record === undefined ||
+    (record.confirmed === null && record.pending === null)
+    ? null
+    : record;
+}
+
+export function pushRecordUnreadable(key: PushRecordKey): boolean {
+  try {
+    for (const entry of [
+      join(key.nodeKey, PUSHED_DIRECTORY),
+      directoryOf(key),
+      recordPath(key),
+    ])
+      if (!lstatSync(entry, { throwIfNoEntry: false })) return false;
+  } catch {
+    return true;
+  }
+  return parsedPushRecord(key) === undefined;
 }
 
 export function writePushRecord(

@@ -37,6 +37,7 @@ export type HostKeySource = (typeof HostKeySource)[keyof typeof HostKeySource];
 export const RepositoryErrorCode = {
   SshKeyLegacy: "repository.credential.ssh_key_legacy",
   NodeBranchMissing: "repository.node_branch.missing",
+  NodeCheckoutPendingRebuild: "repository.node_checkout.pending_rebuild",
 } as const;
 
 export const SSH_SIGN_USER = "git";

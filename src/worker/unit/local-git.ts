@@ -1504,3 +1504,18 @@ export async function attachBranchAtHead(
     remaining(),
   );
 }
+
+export async function refCommit(
+  call: GitCall,
+  ref: string,
+): Promise<string | null> {
+  assert.ok(ref.startsWith("refs/"));
+  const { matched, output } = await runMatch(
+    call.env,
+    call.directory,
+    ["rev-parse", "--quiet", "--verify", `${ref}^{commit}`],
+    call.context,
+    call.deadlineMs,
+  );
+  return matched ? output.trim() : null;
+}

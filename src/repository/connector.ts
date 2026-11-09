@@ -542,6 +542,16 @@ async function fetchAndCheckoutWith(
     { agent },
   );
   await run(["checkout", "--force", "-B", branch, start.revision, "--"]);
+  await refreshDefaultBranch(
+    run,
+    async (name) =>
+      (
+        await exit(
+          ["check-ref-format", "--branch", name],
+          [EXIT_SUCCESS, EXIT_FATAL],
+        )
+      ).exitCode === EXIT_SUCCESS,
+  );
   await run(
     current.output.trim() === branch
       ? ["clean", "-ffd"]
