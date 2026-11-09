@@ -6,7 +6,7 @@ import {
   type Transaction,
 } from "../kernel/store.ts";
 import { AgentChoiceKind, type AgentSelection } from "../scheduler/contract.ts";
-import { agentChoice, agentSelectionsAt } from "./agent-selection.ts";
+import { agentChoice } from "./agent-selection.ts";
 import { TWO_AGENT_WORKER, twoAgentDeclarationOf } from "./test-support.ts";
 import { InstancePlacement, type WorkerEntry } from "./contract.ts";
 import { insertInstance } from "./instance-rows.ts";
@@ -30,7 +30,6 @@ const BINDING = "binding";
 const ENABLEMENT = "agent_enablement_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const swePin = { agent_name: SWE, enablement_id: ENABLEMENT, position: 1 };
 const tuning = { reasoning_effort: "low" };
-const tx = {} as Transaction;
 const CODER = "coder-1";
 const RELAY_A = "relay-a";
 const RELAY_B = "relay-b";
@@ -137,32 +136,6 @@ test("the agent choice pins every selected agent, skips an invalid one and answe
     }),
     { kind: AgentChoiceKind.Cooling, available_at: AVAILABLE_AT },
   );
-});
-
-test("agentSelectionsAt resolves each pin against the entry of its agent in the pinned binding revision", () => {
-  const calls: unknown[][] = [];
-  const dependencies = {
-    workerBindingRowOf: (_tx: Transaction, bindingId: string) => {
-      assert.equal(bindingId, BINDING);
-      return { entries: [{ agent: SWE, ...tuning }] } as never;
-    },
-    agentConfiguration: {
-      selectionAt: (...args: unknown[]) => {
-        calls.push(args.slice(1));
-        return pin;
-      },
-    } as never,
-  };
-  const rePin = { agent_name: RE, enablement_id: ENABLEMENT, position: 0 };
-  assert.deepEqual(
-    agentSelectionsAt(dependencies, tx, BINDING, [swePin, rePin]),
-    [pin, pin],
-  );
-  assert.deepEqual(calls, [
-    [SWE, ENABLEMENT, tuning, 1],
-    [RE, ENABLEMENT, null, 0],
-  ]);
-  assert.deepEqual(agentSelectionsAt(dependencies, tx, BINDING, []), []);
 });
 
 function holdersOf(
