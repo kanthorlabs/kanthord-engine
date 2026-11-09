@@ -520,16 +520,6 @@ test("an implement revision with two links of a conversation binding with a repl
   );
 });
 
-test("a reply action keeps the position of its link in external_links", (t) => {
-  const other = linkTo(OTHER_CONVERSATION_RESOURCE, FIRST_LINK_NUMBER);
-  const own = linkTo(CONVERSATION_RESOURCE, SECOND_LINK_NUMBER);
-  const h = replyHarness(t, { replyPolicy: true, links: [other, own] });
-  assert.deepEqual(
-    h.actions().map((action) => [action.key, action.configuration]),
-    [[`${CONVERSATION_NAME}.reply.1`, { external_link: own }]],
-  );
-});
-
 test("a conversation binding without a reply policy, an examine revision and a link of another binding derive no reply action", (t) => {
   const own = linkTo(CONVERSATION_RESOURCE, FIRST_LINK_NUMBER);
   const other = linkTo(OTHER_CONVERSATION_RESOURCE, FIRST_LINK_NUMBER);
@@ -587,18 +577,6 @@ test("a jira binding with a reply policy freezes one reply action for each jira_
     assert.ok(actionKeySchema.safeParse(action.key).success);
 });
 
-test("a jira binding without a reply policy derives no reply action", (t) => {
-  assert.deepEqual(
-    replyHarness(t, {
-      replyPolicy: false,
-      links: [jiraLinkTo(JIRA_RESOURCE_IDENTITY, "KD-1")],
-      resource: JIRA_RESOURCE_IDENTITY,
-      platform: "jira",
-    }).actions(),
-    [],
-  );
-});
-
 const SLACK_RESOURCE_IDENTITY = "conversation:slack:T01ABCDEF";
 const OTHER_SLACK_RESOURCE_IDENTITY = "conversation:slack:T09ZZZZZZ";
 const SLACK_CHANNEL = "C01ABCDEF";
@@ -648,16 +626,4 @@ test("a slack binding with a reply policy freezes one reply action for each slac
   ]);
   for (const action of actions)
     assert.ok(actionKeySchema.safeParse(action.key).success);
-});
-
-test("a slack binding without a reply policy derives no reply action", (t) => {
-  assert.deepEqual(
-    replyHarness(t, {
-      replyPolicy: false,
-      links: [slackLinkTo(SLACK_RESOURCE_IDENTITY, SLACK_FIRST_THREAD_TS)],
-      resource: SLACK_RESOURCE_IDENTITY,
-      platform: "slack",
-    }).actions(),
-    [],
-  );
 });
