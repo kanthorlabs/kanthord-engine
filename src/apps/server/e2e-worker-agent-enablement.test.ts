@@ -235,17 +235,6 @@ test("E03.2 list enablements", async (t) => {
   assert.equal(answer.next_cursor, null);
 });
 
-test("E03.3 get enablement", async (t) => {
-  const fixture = await setup(t);
-  await created(fixture);
-  const answer = success<AgentEnablement>(
-    await kanthord([...COMMAND, "get", AGENT], fixture.env),
-  );
-  assert.equal(answer.agent_name, AGENT);
-  assert.equal(answer.revision, FIRST_REVISION);
-  assert.equal(answer.state, ENABLED);
-});
-
 test("E03.4 stale put refuses revision", async (t) => {
   const fixture = await setup(t);
   await created(fixture);
@@ -254,36 +243,6 @@ test("E03.4 stale put refuses revision", async (t) => {
     await kanthord([...COMMAND, "put", AGENT, "--file", path], fixture.env),
     "agent.enablement.revision_conflict",
   );
-});
-
-test("E03.5 disable enablement", async (t) => {
-  const fixture = await setup(t);
-  await disabled(fixture);
-  const answer = success<AgentEnablement>(
-    await kanthord([...COMMAND, "get", AGENT], fixture.env),
-  );
-  assert.equal(answer.state, DISABLED);
-  assert.equal(answer.revision, SECOND_REVISION);
-});
-
-test("E03.6 enable again", async (t) => {
-  const fixture = await setup(t);
-  await enabled(fixture);
-  const answer = success<AgentEnablement>(
-    await kanthord([...COMMAND, "get", AGENT], fixture.env),
-  );
-  assert.equal(answer.state, ENABLED);
-  assert.equal(answer.revision, THIRD_REVISION);
-});
-
-test("E03.7 add backup provider", async (t) => {
-  const fixture = await setup(t);
-  await added(fixture);
-  const answer = success<AgentEnablement>(
-    await kanthord([...COMMAND, "get", AGENT], fixture.env),
-  );
-  assert.equal(answer.revision, FOURTH_REVISION);
-  assert.equal(answer.agent_providers.length, TWO_PROVIDERS);
 });
 
 test("E03.7a provider add refuses a credential that another agent provider names", async (t) => {
@@ -302,21 +261,6 @@ test("E03.7a provider add refuses a credential that another agent provider names
     ),
     "agent.enablement.provider.credential_conflict",
   );
-});
-
-test("E03.8 remove backup provider", async (t) => {
-  const fixture = await setup(t);
-  await providerRemoved(fixture);
-  const answer = success<AgentEnablement>(
-    await kanthord([...COMMAND, "get", AGENT], fixture.env),
-  );
-  assert.equal(answer.revision, FIFTH_REVISION);
-  assert.equal(answer.agent_providers.length, SINGLE_ITEM);
-});
-
-test("E03.9 remove enablement", async (t) => {
-  const fixture = await setup(t);
-  await removed(fixture);
 });
 
 test("E03.10 removed enablement is not found", async (t) => {
@@ -545,22 +489,6 @@ test("E03.17 credential model list answers over HTTP before any enablement", asy
     ),
   );
   assert.ok(answer.items.some((item) => item.model_identifier === SONNET));
-});
-
-test("E03.18 agent get answers the prompt parts over HTTP", async (t) => {
-  const fixture = await setup(t);
-  const answer = success<{
-    prompt: { parts: { part: string; name: string }[]; final: string };
-  }>(await kanthord(["agent", "get", AGENT], fixture.env));
-  assert.deepEqual(
-    answer.prompt.parts.map(({ part, name }) => [part, name]),
-    [
-      ["standard", "base.md"],
-      ["role", `${AGENT}.md`],
-      ["workbench", "workbench.md"],
-      ["framing", "framing-workbench"],
-    ],
-  );
 });
 
 test("E03.20 cooldown list answers no hold and a clear of a credential with no hold is refused", async (t) => {

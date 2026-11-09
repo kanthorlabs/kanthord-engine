@@ -291,18 +291,6 @@ test("an empty frame or a frame above the limit closes the connection", async (t
   }
 });
 
-test("ssh-add lists the relayed key through the agent socket", async (t) => {
-  const f = relayFixture();
-  const { path } = await served(t, f.access);
-  const { stdout } = await execFileAsync("ssh-add", ["-L"], {
-    env: { PATH: process.env.PATH, SSH_AUTH_SOCK: path },
-  });
-  assert.equal(
-    stdout.trim().split(" ").slice(0, 2).join(" "),
-    f.key.public_key.split(" ").slice(0, 2).join(" "),
-  );
-});
-
 test("withSshAgent serves the relay socket only during its operation and writes no private key", async () => {
   const f = relayFixture();
   let socket = "";

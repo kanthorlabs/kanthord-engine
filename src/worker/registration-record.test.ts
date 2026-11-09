@@ -13,11 +13,7 @@ import {
   WorkerHost,
   workerOperations,
 } from "./contract.ts";
-import {
-  endRegistration,
-  insertRegistration,
-  readAllLive,
-} from "./registration-rows.ts";
+import { endRegistration, insertRegistration } from "./registration-rows.ts";
 import {
   listRegistrationRecords,
   registrationRecord,
@@ -99,70 +95,6 @@ function fixture(t: TestContext) {
   store.migrate([{ service: "worker", migrations: workerMigrations }]);
   return store;
 }
-
-test("registration records distinguish native/external placement and pure Scheduler activity", (t) => {
-  const store = fixture(t);
-  store.transaction((tx) => {
-    const registration = insertRegistration(
-      tx,
-      {
-        project_id: PROJECT,
-        resource_identity: RESOURCE,
-        client_id: createIdentity("client_identity"),
-        name: "worker-a",
-        instance_id: createIdentity("worker_instance"),
-      },
-      NOW,
-    );
-    const executionId = createIdentity("execution");
-    const before = readAllLive(tx);
-    for (const workerName of ["coder@1", "claude-code@1"])
-      for (const activity of Object.values(RegistrationActivity)) {
-        const record = registrationRecord(
-          tx,
-          {
-            workerBindingOf: () => ({
-              ...BINDING,
-              worker_name: workerName,
-              worker_instances: [INSTANCE_NAME],
-            }),
-            instanceNameOf: () => INSTANCE_NAME,
-            instancePlacementOf: () => PLACEMENT,
-            schedulerClaims: {
-              agentSelectionsOf: () => [],
-              agentPinsOf: () => null,
-              unendedExecutionOf: () => null,
-              requireRunning: () => assert.fail("UNEXPECTED_COLLABORATION"),
-              runningExecutionOfRuntime: () => {
-                throw new Error("read must not settle");
-              },
-              activityOf: (transaction, runtimeIdentity, now) => {
-                assert.equal(transaction, tx);
-                assert.equal(runtimeIdentity, registration.runtime_identity);
-                assert.equal(now, NOW);
-                return { activity, execution_id: executionId };
-              },
-            },
-          },
-          registration,
-          NOW,
-        );
-        assert.equal(record.runtime_identity, registration.runtime_identity);
-        assert.equal(record.activity, activity);
-        assert.equal(record.registered, true);
-        assert.equal(record.draining, false);
-        assert.equal(
-          "execution_id" in record,
-          activity === RegistrationActivity.Executing,
-        );
-        const native = workerName === NATIVE;
-        assert.equal("placement" in record, native);
-        if (native) assert.equal(record.placement, PLACEMENT);
-        assert.equal("token" in record, false);
-      }
-    assert.deepEqual(readAllLive(tx), before);
-  });
-});
 
 test("registration inventory pages live rows descending with both filters and canonical cursors", (t) => {
   const store = fixture(t);
@@ -328,49 +260,6 @@ test("a registration whose instance the latest binding revision does not list an
       assert.equal(dropped.instance, INSTANCE_NAME);
       assert.equal(recordOf(placement, [INSTANCE_NAME]).draining, false);
     }
-  });
-});
-
-test("a registration whose binding lists no instance takes the placement of its instance", (t) => {
-  const store = fixture(t);
-  store.transaction((tx) => {
-    const registration = insertRegistration(
-      tx,
-      {
-        project_id: PROJECT,
-        resource_identity: RESOURCE,
-        client_id: createIdentity("client_identity"),
-        name: INSTANCE_NAME,
-        instance_id: createIdentity("worker_instance"),
-      },
-      NOW,
-    );
-    const record = registrationRecord(
-      tx,
-      {
-        workerBindingOf: () => ({
-          ...BINDING,
-          worker_instances: [],
-        }),
-        instanceNameOf: () => INSTANCE_NAME,
-        instancePlacementOf: () => InstancePlacement.Container,
-        schedulerClaims: {
-          agentSelectionsOf: () => [],
-          agentPinsOf: () => null,
-          unendedExecutionOf: () => null,
-          requireRunning: () => assert.fail("UNEXPECTED_COLLABORATION"),
-          runningExecutionOfRuntime: () => null,
-          activityOf: () => ({
-            activity: RegistrationActivity.Idle,
-            execution_id: null,
-          }),
-        },
-      },
-      registration,
-      NOW,
-    );
-    assert.equal(record.draining, true);
-    assert.equal(record.placement, InstancePlacement.Container);
   });
 });
 

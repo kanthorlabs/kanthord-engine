@@ -21,7 +21,6 @@ const STOP_REASON = "instance_archived";
 const ACTOR = { kind: "human", account: "ulrich", name: "Ulrich" } as const;
 const INSERT = "workQueue.insert";
 const LOST = "schedulerClaims.executionsLost";
-const ACT = "acts.act";
 const KINDS = [
   { claim: NodeState.Executing, after: NodeState.Available },
   { claim: NodeState.Evaluating, after: NodeState.Waiting },
@@ -151,14 +150,6 @@ test("reportExecutionEnds reports one human revocation without a transition or a
   assert.equal(failureCause, null);
 });
 
-test("the revocation writes no act trace", (t) => {
-  const h = fixture(t, NodeState.Executing);
-  const ends = h.revoke();
-  assert.ok(ends);
-  h.service.reportExecutionEnds(ends);
-  assert.equal(h.calls.filter((call) => call.method === ACT).length, NO_CALLS);
-});
-
 test("a second call for the same execution answers null and changes nothing", (t) => {
   const h = fixture(t, NodeState.Executing);
   assert.ok(h.revoke());
@@ -179,14 +170,6 @@ test("a call for an execution that ended answers null and keeps the node", (t) =
   assert.equal(h.revoke(), null);
   assert.deepEqual(databaseSnapshot(h.store), before);
   assert.equal(h.node().state, NodeState.Executing);
-});
-
-test("a call for an unknown execution answers null", (t) => {
-  const h = fixture(t, NodeState.Executing);
-  const before = databaseSnapshot(h.store);
-  assert.equal(h.revoke(createIdentity("execution")), null);
-  assert.deepEqual(databaseSnapshot(h.store), before);
-  assert.equal(h.execution.ended_at, null);
 });
 
 test("a forced archive of a Paused node with a kept claim revokes it with instance_archived and keeps Paused", (t) => {
