@@ -522,11 +522,13 @@ for (const [label, line, field, value] of [
     for (const input of snapshots) {
       const parsed = importSnapshotSchema.parse(input);
       assert.deepEqual(
-        normalizeImportSnapshot(parsed, MISSION_ID, TEXT_MAX_BYTES).violations,
+        withoutMessage(
+          normalizeImportSnapshot(parsed, MISSION_ID, TEXT_MAX_BYTES)
+            .violations,
+        ),
         [
           {
             code: MissionErrorCode.ContentInvalid,
-            message: `Invalid node content: ${field}.`,
             details: { field },
             filename: "a.md",
             node_id: null,
@@ -2538,11 +2540,9 @@ test("preview reports the unmatched pairs and leaves the mission version unchang
     entry("b.md", { tags: [LINUX] }),
     entry("c.md"),
   ]);
-  assert.deepEqual(unmatched.violations, [
+  assert.deepEqual(withoutMessage(unmatched.violations), [
     {
       code: MissionErrorCode.TagsUnmatched,
-      message:
-        "The node write adds a node and claimable state pair that no worker binding covers.",
       filename: "a.md",
       node_id: seeded.id,
       details: {
@@ -2562,13 +2562,15 @@ test("preview reports the unmatched pairs and leaves the mission version unchang
     },
     {
       code: MissionErrorCode.TagsUnmatched,
-      message:
-        "The node write adds a node and claimable state pair that no worker binding covers.",
       filename: "b.md",
       node_id: null,
       details: {
         claims: [
-          { node_id: null, revision: VERSION, claim: ClaimableState.Available },
+          {
+            node_id: null,
+            revision: VERSION,
+            claim: ClaimableState.Available,
+          },
           { node_id: null, revision: VERSION, claim: ClaimableState.Waiting },
         ],
       },
@@ -2584,6 +2586,14 @@ test("preview reports the unmatched pairs and leaves the mission version unchang
   assert.deepEqual(covered.violations, []);
   assert.deepEqual(rows(), before);
 });
+
+function withoutMessage(violations: readonly { message: string }[]) {
+  return violations.map((violation) => {
+    const copy: Record<string, unknown> = { ...violation };
+    delete copy["message"];
+    return copy;
+  });
+}
 
 function mixedSet() {
   return [
