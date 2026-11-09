@@ -717,6 +717,8 @@ test(
       },
       cloneSnapshot: (_address, ...args) =>
         connector.cloneSnapshot(engineBare.bare, ...args),
+      refreshSnapshot: (input) =>
+        connector.refreshSnapshot({ ...input, address: engineBare.bare }),
       fetchAndCheckout: (...args) => connector.fetchAndCheckout(...args),
       fetchBase: (...args) => connector.fetchBase(...args),
       pushNodeBranch: (...args) => connector.pushNodeBranch(...args),

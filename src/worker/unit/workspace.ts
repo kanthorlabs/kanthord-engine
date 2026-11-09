@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   appendFileSync,
   existsSync,
+  readdirSync,
   readFileSync,
   rmSync,
   utimesSync,
@@ -17,9 +18,16 @@ import type { Context } from "../../kernel/context.ts";
 import type { ExecutionSetup, RepositoryTransport } from "../contract.ts";
 import type { SshAccess, SshSigner } from "../../repository/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
-import { cleanExcludes, originAddress } from "./local-git.ts";
+import { cleanExcludes, originAddress, scrubTree } from "./local-git.ts";
 import { readSetupRecord } from "./setup-record.ts";
-import { isTree, POOL_DIRECTORY, PoolClass, TreePool } from "./tree-pool.ts";
+import {
+  isTree,
+  POOL_DIRECTORY,
+  PoolClass,
+  type PoolSlot,
+  prepareTree,
+  TreePool,
+} from "./tree-pool.ts";
 import type { HandoverSshIdentity } from "../../custody/contract.ts";
 
 export const WORKSPACES_DIRECTORY = "workspaces";
@@ -27,14 +35,20 @@ export const SCRATCH_DIRECTORY = ".kanthord-scratch/";
 const GIT_EXCLUDE = [".git", "info", "exclude"];
 export const CHECKOUTS_DIRECTORY = "checkouts";
 export const RELEASE_DIRECTORY = "release";
+export const BASE_DIRECTORY = "base";
+export const REVIEW_DIRECTORY = "review";
 export const EVIDENCE_DIRECTORY = "evidence";
 const TREE_DELETED = "tree deleted";
+const TREE_PREPARED = "tree prepared";
+const REVIEW_PURPOSE = "review";
+const NO_REFS: readonly string[] = [];
 const NO_CHECKOUTS = 0;
 const SINGLE_CHECKOUT = 1;
 const FIRST_CHECKOUT = 0;
 export const WorkspaceKind = {
   Node: "node",
   Execution: "execution",
+  Review: "review",
 } as const;
 export type WorkspaceKind = (typeof WorkspaceKind)[keyof typeof WorkspaceKind];
 export const WorkspaceRemoval = {
@@ -51,6 +65,33 @@ interface Preparation {
   sshAccess: ReadonlyMap<string, SshAccess>;
   context: Context;
   deadlineMs: number;
+}
+type WorkspaceLog = (msg: string, fields: Record<string, unknown>) => void;
+interface ReviewPreparation extends Preparation {
+  env: NodeJS.ProcessEnv;
+  executionId: string;
+  nodeId: string;
+  log?: WorkspaceLog;
+}
+interface TreeOwner {
+  nodeId: string;
+  log?: WorkspaceLog;
+}
+interface ReviewHold extends TreeOwner {
+  repositories: readonly WorkspaceRepository[];
+}
+interface ReviewTree {
+  repository: WorkspaceRepository;
+  ref: string;
+  target: string;
+  end: number;
+}
+interface LeftoverTrees extends Preparation {
+  env: NodeJS.ProcessEnv;
+  nodeId: string;
+  repositories: readonly WorkspaceRepository[];
+  poolClass: PoolClass;
+  log?: WorkspaceLog;
 }
 interface RepositoryAddress {
   kind: "repository";
@@ -125,6 +166,7 @@ export class WorkspaceRoot {
   readonly root: string;
   readonly pool: TreePool;
   private readonly held = new Set<string>();
+  private readonly reviews = new Map<string, ReviewHold>();
   private constructor(root: string, pool: TreePool) {
     this.root = root;
     this.pool = pool;
@@ -156,7 +198,7 @@ export class WorkspaceRoot {
       nodeBranch: string;
       pushed: ReadonlySet<string>;
       repositories: readonly WorkspaceRepository[];
-      log?: (msg: string, fields: Record<string, unknown>) => void;
+      log?: WorkspaceLog;
     },
   ): Promise<{ root: string; checkouts: WorkspaceCheckout[] }> {
     assert.ok(input.repositories.length > NO_CHECKOUTS);
@@ -168,7 +210,11 @@ export class WorkspaceRoot {
       ensureDirectory(key);
       this.touch(key);
       if (existsSync(join(key, RELEASE_DIRECTORY)))
-        await this.giveReleaseTrees(key, input, end);
+        await this.giveLeftoverTrees(
+          join(key, RELEASE_DIRECTORY),
+          { ...input, poolClass: PoolClass.Command },
+          end,
+        );
       const checkouts: WorkspaceCheckout[] = [];
       for (const repository of input.repositories) {
         const directory = this.nodeDirectory(input.nodeId, repository.name);
@@ -226,19 +272,13 @@ export class WorkspaceRoot {
       throw error;
     }
   }
-  private async giveReleaseTrees(
-    key: string,
-    input: Preparation & {
-      env: NodeJS.ProcessEnv;
-      nodeId: string;
-      repositories: readonly WorkspaceRepository[];
-      log?: (msg: string, fields: Record<string, unknown>) => void;
-    },
+  private async giveLeftoverTrees(
+    directory: string,
+    input: LeftoverTrees,
     end: number,
   ): Promise<void> {
-    const release = join(key, RELEASE_DIRECTORY);
     for (const repository of input.repositories) {
-      const tree = join(release, bindingNameSchema.parse(repository.name));
+      const tree = join(directory, bindingNameSchema.parse(repository.name));
       if (!isTree(tree)) continue;
       const address = await originAddress({
         env: input.env,
@@ -250,18 +290,20 @@ export class WorkspaceRoot {
         return null;
       });
       if (address !== repository.address) continue;
-      const code = this.pool.giveBack(
-        { address: repository.address, poolClass: PoolClass.Command },
+      this.giveTree(
+        { address: repository.address, poolClass: input.poolClass },
         tree,
-        input.nodeId,
+        input,
       );
-      if (code !== null) input.log?.(TREE_DELETED, { path: tree, code });
     }
-    rmSync(release, { recursive: true, force: true });
+    rmSync(directory, { recursive: true, force: true });
+  }
+  private giveTree(slot: PoolSlot, tree: string, owner: TreeOwner): void {
+    const code = this.pool.giveBack(slot, tree, owner.nodeId);
+    if (code !== null) owner.log?.(TREE_DELETED, { path: tree, code });
   }
   async prepareSnapshots(
-    input: Preparation & {
-      executionId: string;
+    input: ReviewPreparation & {
       snapshots: readonly {
         repository: WorkspaceRepository;
         commit: string;
@@ -272,6 +314,7 @@ export class WorkspaceRoot {
     directory: string;
     checkouts: ExamineCheckout[];
     tested_input: RepositoryAddress | RepositoryAddress[];
+    kind: WorkspaceKind;
   }> {
     assert.ok(input.snapshots.length > NO_CHECKOUTS);
     const prepared = await this.prepareCheckouts(
@@ -284,8 +327,7 @@ export class WorkspaceRoot {
     return { ...prepared, tested_input: prepared.tested_input! };
   }
   async prepareExamine(
-    input: Preparation & {
-      executionId: string;
+    input: ReviewPreparation & {
       repositories: WorkspaceRepository[];
     },
   ): Promise<{
@@ -293,6 +335,7 @@ export class WorkspaceRoot {
     directory: string;
     checkouts: ExamineCheckout[];
     tested_input: RepositoryAddress | RepositoryAddress[] | null;
+    kind: WorkspaceKind;
   }> {
     return this.prepareCheckouts(
       input,
@@ -303,32 +346,62 @@ export class WorkspaceRoot {
     );
   }
   private async prepareCheckouts(
-    input: Preparation & { executionId: string },
+    input: ReviewPreparation,
     entries: readonly { repository: WorkspaceRepository; ref: string }[],
   ): Promise<{
     key: string;
     directory: string;
     checkouts: ExamineCheckout[];
     tested_input: RepositoryAddress | RepositoryAddress[] | null;
+    kind: WorkspaceKind;
   }> {
-    const { directory: key } = this.prepareExecution(input);
+    if (entries.length === NO_CHECKOUTS) {
+      const { directory } = this.prepareExecution(input);
+      return {
+        key: directory,
+        directory,
+        checkouts: [],
+        tested_input: null,
+        kind: WorkspaceKind.Execution,
+      };
+    }
+    const node = this.nodeKey(input.nodeId);
+    this.hold(node);
+    const key = join(node, REVIEW_DIRECTORY);
+    const repositories = entries.map(({ repository }) => repository);
+    this.reviews.set(key, {
+      nodeId: input.nodeId,
+      repositories,
+      ...(input.log ? { log: input.log } : {}),
+    });
     const end = performance.now() + input.deadlineMs;
     const checkouts: ExamineCheckout[] = [];
     const testedInput: RepositoryAddress[] = [];
     try {
+      ensureDirectory(node);
+      this.touch(node);
+      ensureDirectory(key);
+      for (const [directory, poolClass] of [
+        [CHECKOUTS_DIRECTORY, PoolClass.Agent],
+        [BASE_DIRECTORY, PoolClass.Command],
+      ] as const)
+        await this.giveLeftoverTrees(
+          join(key, directory),
+          { ...input, repositories, poolClass },
+          end,
+        );
+      for (const name of readdirSync(key))
+        rmSync(join(key, name), { recursive: true, force: true });
       for (const { repository, ref } of entries) {
         const name = bindingNameSchema.parse(repository.name);
         const target = join(key, CHECKOUTS_DIRECTORY, name);
         assert.ok(!existsSync(target), "Duplicate repository binding");
-        ensureDirectory(target);
-        const commit = await input.transport.cloneSnapshot(
-          repository.address,
+        const commit = await this.prepareReviewTree(input, {
+          repository,
           ref,
           target,
-          input.context,
-          end - performance.now(),
-          sshAccessOf(input.sshAccess, repository.binding_id),
-        );
+          end,
+        });
         checkouts.push({
           name,
           directory: target,
@@ -345,16 +418,66 @@ export class WorkspaceRoot {
         key,
         directory: listed
           ? join(key, CHECKOUTS_DIRECTORY)
-          : (checkouts[FIRST_CHECKOUT]?.directory ?? key),
+          : checkouts[FIRST_CHECKOUT]!.directory,
         checkouts,
-        tested_input: listed
-          ? testedInput
-          : (testedInput[FIRST_CHECKOUT] ?? null),
+        tested_input: listed ? testedInput : testedInput[FIRST_CHECKOUT]!,
+        kind: WorkspaceKind.Review,
       };
     } catch (error) {
-      this.release(key, WorkspaceKind.Execution);
+      this.release(key, WorkspaceKind.Review);
       throw error;
     }
+  }
+  private async prepareReviewTree(
+    input: ReviewPreparation,
+    tree: ReviewTree,
+  ): Promise<string> {
+    const { repository, ref, target, end } = tree;
+    const ssh = sshAccessOf(input.sshAccess, repository.binding_id);
+    const remaining = () => end - performance.now();
+    const call = () => ({
+      env: input.env,
+      directory: target,
+      context: input.context,
+      deadlineMs: remaining(),
+    });
+    let commit = "";
+    const { source } = await prepareTree({
+      pool: this.pool,
+      address: repository.address,
+      poolClass: PoolClass.Agent,
+      target,
+      nodeId: input.nodeId,
+      keepRefs: NO_REFS,
+      env: input.env,
+      context: input.context,
+      deadlineMs: remaining(),
+      fresh: async () => {
+        ensureDirectory(target);
+        commit = await input.transport.cloneSnapshot(
+          repository.address,
+          ref,
+          target,
+          input.context,
+          remaining(),
+          ssh,
+        );
+      },
+      reuse: async () => {
+        commit = await input.transport.refreshSnapshot({
+          address: repository.address,
+          revision: ref,
+          directory: target,
+          context: input.context,
+          deadlineMs: remaining(),
+          ssh,
+        });
+        const record = await readSetupRecord(call());
+        await scrubTree(call(), commit, record?.roots ?? []);
+      },
+    });
+    input.log?.(TREE_PREPARED, { purpose: REVIEW_PURPOSE, source });
+    return commit;
   }
   prepareExecution(input: { executionId: string }): { directory: string } {
     const directory = this.executionKey(input.executionId);
@@ -403,11 +526,40 @@ export class WorkspaceRoot {
     return { removal: WorkspaceRemoval.Removed, bytes: total.bytes };
   }
   release(key: string, kind: WorkspaceKind): void {
+    if (kind === WorkspaceKind.Review) {
+      this.releaseReview(key);
+      return;
+    }
     assert.equal(dirname(key), this.root);
     assert.ok(this.held.has(key));
     if (kind === WorkspaceKind.Node) this.touch(key);
     else rmSync(key, { recursive: true, force: true });
     this.held.delete(key);
+  }
+  private releaseReview(key: string): void {
+    const review = this.reviews.get(key);
+    assert.ok(review);
+    const node = dirname(key);
+    try {
+      for (const repository of review.repositories) {
+        const name = bindingNameSchema.parse(repository.name);
+        this.giveTree(
+          { address: repository.address, poolClass: PoolClass.Agent },
+          join(key, CHECKOUTS_DIRECTORY, name),
+          review,
+        );
+        this.giveTree(
+          { address: repository.address, poolClass: PoolClass.Command },
+          join(key, BASE_DIRECTORY, name),
+          review,
+        );
+      }
+      rmSync(key, { recursive: true, force: true });
+      if (existsSync(node)) this.touch(node);
+    } finally {
+      this.reviews.delete(key);
+      this.held.delete(node);
+    }
   }
 }
 

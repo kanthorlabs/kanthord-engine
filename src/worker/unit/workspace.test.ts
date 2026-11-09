@@ -3,13 +3,14 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   statSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
 import { test } from "node:test";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
 import * as connector from "../../repository/connector.ts";
@@ -29,6 +30,7 @@ import {
   WorkspaceKind,
   WorkspaceRoot,
 } from "./workspace.ts";
+import { PoolClass } from "./tree-pool.ts";
 import {
   everyBindingSshAccess,
   LOCAL_GIT_SSH_ACCESS,
@@ -107,7 +109,7 @@ test("the workspace root keeps an idle node workspace and removes only a release
   assert.equal(existsSync(held), true);
 });
 
-test("workspace preparation refreshes implement branches and creates disposable snapshots and examine workspaces", async (t) => {
+test("workspace preparation refreshes implement branches and takes review trees for snapshots and examine", async (t) => {
   const state = temporary(t);
   const origin = join(state, "origin");
   mkdirSync(origin);
@@ -175,6 +177,7 @@ test("workspace preparation refreshes implement branches and creates disposable 
   const snapshot = await workspace.prepareSnapshots({
     ...common,
     executionId: createIdentity("execution"),
+    nodeId,
     snapshots: [{ repository, commit: pushed }],
   });
   assert.deepEqual(snapshot.tested_input, {
@@ -186,7 +189,7 @@ test("workspace preparation refreshes implement branches and creates disposable 
     snapshot.directory,
     join(snapshot.key, CHECKOUTS_DIRECTORY, repository.name),
   );
-  workspace.release(snapshot.key, WorkspaceKind.Execution);
+  workspace.release(snapshot.key, snapshot.kind);
   const another = {
     ...repository,
     binding_id: createIdentity("binding"),
@@ -198,6 +201,7 @@ test("workspace preparation refreshes implement branches and creates disposable 
       const examine = await workspace.prepareExamine({
         ...common,
         executionId: createIdentity("execution"),
+        nodeId,
         repositories: [repository, another],
       });
       assert.deepEqual(
@@ -219,7 +223,7 @@ test("workspace preparation refreshes implement branches and creates disposable 
       );
       for (const name of [repository.name, another.name])
         assert.ok(existsSync(join(examine.directory, name, ".git")));
-      workspace.release(examine.key, WorkspaceKind.Execution);
+      workspace.release(examine.key, examine.kind);
       assert.equal(existsSync(examine.key), false);
     },
   );
@@ -229,6 +233,7 @@ test("workspace preparation refreshes implement branches and creates disposable 
       const examine = await workspace.prepareExamine({
         ...common,
         executionId: createIdentity("execution"),
+        nodeId,
         repositories: [repository],
       });
       assert.deepEqual(examine.tested_input, {
@@ -241,17 +246,19 @@ test("workspace preparation refreshes implement branches and creates disposable 
         join(examine.key, CHECKOUTS_DIRECTORY, repository.name),
       );
       assert.ok(existsSync(join(examine.directory, ".git")));
-      workspace.release(examine.key, WorkspaceKind.Execution);
+      workspace.release(examine.key, examine.kind);
     },
   );
   const empty = await workspace.prepareExamine({
     ...common,
     executionId: createIdentity("execution"),
+    nodeId,
     repositories: [],
   });
   assert.equal(empty.tested_input, null);
   assert.equal(empty.directory, empty.key);
-  workspace.release(empty.key, WorkspaceKind.Execution);
+  assert.equal(empty.kind, WorkspaceKind.Execution);
+  workspace.release(empty.key, empty.kind);
   const failedId = createIdentity("node");
   await assert.rejects(
     prepareOne(workspace, {
@@ -286,6 +293,7 @@ test("every workspace git operation takes the SSH identity of its binding, and a
       used.push({ operation: "clone_snapshot", ssh });
       throw stop;
     },
+    refreshSnapshot: async () => assert.fail("The refresh must not run."),
     fetchAndCheckout: async () => assert.fail("The fetch must not run."),
     fetchBase: async () => assert.fail("The fetch must not run."),
     pushNodeBranch: async () => assert.fail("The push must not run."),
@@ -316,12 +324,16 @@ test("every workspace git operation takes the SSH identity of its binding, and a
       }),
       workspace.prepareSnapshots({
         ...common,
+        env,
         executionId: createIdentity("execution"),
+        nodeId: createIdentity("node"),
         snapshots: [{ repository, commit: "head" }],
       }),
       workspace.prepareExamine({
         ...common,
+        env,
         executionId: createIdentity("execution"),
+        nodeId: createIdentity("node"),
         repositories: [repository],
       }),
     ];
@@ -779,4 +791,136 @@ test("a repository binding without a handed SSH identity takes the relay with th
   assert.equal(relayAccess.port, DEFAULT_SSH_PORT);
   assert.deepEqual(bindings, [relayed.binding_id]);
   assert.throws(() => handedSshAccess([], [relayed]));
+});
+
+const ONE_TREE = 1;
+const NEXT_FILE = "next";
+
+async function reviewFixture(t: test.TestContext) {
+  const h = await restartFixture(t);
+  const workspace = WorkspaceRoot.open(dirname(h.origin));
+  const repository = {
+    binding_id: createIdentity("binding"),
+    name: "todoapp-repo",
+    address: h.origin,
+    strategy: { base_branch: "main" },
+  };
+  const logs: { msg: string; fields: Record<string, unknown> }[] = [];
+  const review = (nodeId: string, commit: string) =>
+    workspace.prepareSnapshots({
+      env,
+      transport,
+      sshAccess: everyBindingSshAccess,
+      context: background,
+      deadlineMs: GIT_DEADLINE_MS,
+      executionId: createIdentity("execution"),
+      nodeId,
+      log: (msg, fields) => logs.push({ msg, fields }),
+      snapshots: [{ repository, commit }],
+    });
+  const push = async (file: string, value: string) => {
+    const pushed = await commit(h.seed, file, value);
+    await h.git.push("origin", "main");
+    return pushed;
+  };
+  const reviewKey = (nodeId: string) =>
+    join(workspace.nodeKey(nodeId), "review");
+  const freeTrees = (poolClass: PoolClass) =>
+    workspace.pool
+      .trees()
+      .filter((tree) => basename(dirname(tree.path)) === poolClass);
+  return {
+    ...h,
+    workspace,
+    repository,
+    logs,
+    review,
+    push,
+    reviewKey,
+    freeTrees,
+  };
+}
+
+test("a second review of the same repository reuses the tree and keeps each file of a setup root", async (t) => {
+  const h = await reviewFixture(t);
+  const first = await h.review(createIdentity("node"), h.base);
+  assert.equal(first.kind, WorkspaceKind.Review);
+  mkdirSync(join(first.directory, "deps"));
+  writeFileSync(join(first.directory, "deps", "marker"), "x");
+  writeFileSync(join(first.directory, "stray"), "x");
+  writeSetupRecordOf(first.directory, ["deps/"]);
+  const before = statSync(join(first.directory, "deps", "marker"));
+  const tree = statSync(join(first.directory, ".git")).ino;
+  h.workspace.release(first.key, first.kind);
+  const next = await h.push(NEXT_FILE, NEXT_FILE);
+  const second = await h.review(createIdentity("node"), next);
+  assert.deepEqual(second.tested_input, {
+    kind: "repository",
+    binding_id: h.repository.binding_id,
+    commit: next,
+  });
+  assert.equal(statSync(join(second.directory, ".git")).ino, tree);
+  const after = statSync(join(second.directory, "deps", "marker"));
+  assert.equal(after.ino, before.ino);
+  assert.equal(after.mtimeMs, before.mtimeMs);
+  assert.equal(existsSync(join(second.directory, "stray")), false);
+  assert.equal(
+    readFileSync(join(second.directory, NEXT_FILE), "utf8"),
+    NEXT_FILE,
+  );
+  assert.deepEqual(
+    h.logs.map(({ msg, fields }) => [msg, fields.purpose, fields.source]),
+    [
+      ["tree prepared", "review", "clone"],
+      ["tree prepared", "review", "pool"],
+    ],
+  );
+  h.workspace.release(second.key, second.kind);
+});
+
+test("a review release gives the trees back, removes the evidence and keeps the node key", async (t) => {
+  const h = await reviewFixture(t);
+  const nodeId = createIdentity("node");
+  const prepared = await h.review(nodeId, h.base);
+  assert.equal(prepared.key, h.reviewKey(nodeId));
+  const evidence = join(prepared.key, "evidence");
+  mkdirSync(evidence);
+  writeFileSync(join(evidence, "report.md"), "x");
+  const base = join(prepared.key, "base", h.repository.name);
+  await simpleGit().raw(["clone", "--", prepared.directory, base]);
+  h.workspace.release(prepared.key, prepared.kind);
+  assert.equal(h.freeTrees(PoolClass.Agent).length, ONE_TREE);
+  assert.equal(h.freeTrees(PoolClass.Command).length, ONE_TREE);
+  assert.equal(existsSync(evidence), false);
+  assert.equal(existsSync(prepared.directory), false);
+  assert.equal(existsSync(base), false);
+  assert.equal(existsSync(h.workspace.nodeKey(nodeId)), true);
+  h.workspace.hold(h.workspace.nodeKey(nodeId));
+  h.workspace.release(h.workspace.nodeKey(nodeId), WorkspaceKind.Node);
+});
+
+test("a review preparation removes residue at the top of the review directory", async (t) => {
+  const h = await reviewFixture(t);
+  const nodeId = createIdentity("node");
+  const key = h.reviewKey(nodeId);
+  const leftover = join(key, CHECKOUTS_DIRECTORY, h.repository.name);
+  mkdirSync(join(key, CHECKOUTS_DIRECTORY), { recursive: true });
+  await simpleGit().raw(["clone", "--", h.origin, leftover]);
+  const tree = statSync(join(leftover, ".git")).ino;
+  const residue = [
+    join(key, "stray", "file"),
+    join(key, "evidence", "old.md"),
+    join(key, CHECKOUTS_DIRECTORY, "unbound", "file"),
+    join(key, "base", h.repository.name, "file"),
+  ];
+  for (const path of residue) {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, "x");
+  }
+  const prepared = await h.review(nodeId, h.base);
+  assert.equal(prepared.directory, leftover);
+  assert.equal(statSync(join(leftover, ".git")).ino, tree);
+  for (const path of residue) assert.equal(existsSync(path), false);
+  assert.deepEqual(readdirSync(key).sort(), [CHECKOUTS_DIRECTORY]);
+  h.workspace.release(prepared.key, prepared.kind);
 });

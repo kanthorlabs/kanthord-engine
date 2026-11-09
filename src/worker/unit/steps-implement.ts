@@ -9,6 +9,7 @@ import type { ExecutionSetup, RepositoryTransport } from "../contract.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 import { join } from "node:path";
 import {
+  BASE_DIRECTORY,
   sshAccessOf,
   workRepositoriesOf,
   type WorkspaceCheckout,
@@ -50,7 +51,6 @@ import {
   type VerificationRun,
 } from "./verification.ts";
 import {
-  BASE_DIRECTORY,
   BaseHead,
   runSetup,
   SetupEnd,

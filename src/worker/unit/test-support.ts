@@ -147,6 +147,8 @@ export const transport: RepositoryTransport = {
       deadlineMs,
       LOCAL_GIT_SSH_ACCESS,
     ),
+  refreshSnapshot: (input) =>
+    connector.refreshSnapshot({ ...input, ssh: LOCAL_GIT_SSH_ACCESS }),
 };
 
 export const TEST_SSH_ACCESS: SshAccess = {

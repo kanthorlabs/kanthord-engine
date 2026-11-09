@@ -25,7 +25,11 @@ import {
   GIT_UNSAFE_OPTIONS,
   isolatedGitEnvironment,
 } from "../kernel/git-environment.ts";
-import { type RepositoryFile, RepositoryFileState } from "./contract.ts";
+import {
+  type RepositoryFile,
+  RepositoryFileState,
+  type SnapshotRefresh,
+} from "./contract.ts";
 import { GIT_DEADLINE_EXCEEDED } from "./git-failure.ts";
 import { CheckEndState, type CheckFold, ExpectedEndState } from "./github.ts";
 import { NODE_BRANCH_PATTERN } from "./node-branch.ts";
@@ -567,6 +571,50 @@ export async function cloneSnapshot(
         "clone snapshot",
       )
     ).trim();
+  });
+}
+
+export async function refreshSnapshot(input: SnapshotRefresh): Promise<string> {
+  const { address, revision, directory, context, deadlineMs, ssh } = input;
+  assert.ok(address);
+  assert.ok(revision);
+  assert.ok(!revision.startsWith("-"));
+  return withAccess(ssh, context, deadlineMs, async (agent, remaining) => {
+    const end = performance.now() + remaining;
+    const run = (args: string[]) =>
+      runGit(
+        directory,
+        args,
+        context,
+        end - performance.now(),
+        "refresh snapshot",
+        { agent },
+      );
+    await run(["remote", "set-url", "origin", "--", address]);
+    await run([
+      "config",
+      "--replace-all",
+      "remote.origin.fetch",
+      "+refs/heads/*:refs/remotes/origin/*",
+    ]);
+    await run(["fetch", "--prune", "--prune-tags", "--tags", "origin"]);
+    const commit = (
+      await run(["rev-parse", "--verify", `${revision}^{commit}`])
+    ).trim();
+    const holder = await run([
+      "for-each-ref",
+      `--contains=${commit}`,
+      "--count=1",
+      "--format=%(refname)",
+      "refs/remotes/origin",
+      "refs/tags",
+    ]);
+    if (holder.trim() === EMPTY_STRING)
+      throw new Diagnostic(
+        GIT_FAILED,
+        "refresh snapshot: The remote does not serve the commit.",
+      );
+    return commit;
   });
 }
 
