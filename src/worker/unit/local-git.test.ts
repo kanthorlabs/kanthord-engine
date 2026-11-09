@@ -964,6 +964,18 @@ test("a rebase, a sequencer and a bisect in progress are gone", async (t) => {
     assert.equal(existsSync(join(directory, ".git", name)), false, name);
 });
 
+test("a cherry-pick and a revert in progress are gone", async (t) => {
+  const at = await poolFixture(t);
+  const git = join(at.tree, ".git");
+  mkdirSync(join(git, "sequencer"));
+  writeFileSync(join(git, "sequencer", "todo"), `pick ${at.commit}\n`);
+  for (const name of ["CHERRY_PICK_HEAD", "REVERT_HEAD"])
+    writeFileSync(join(git, name), `${at.commit}\n`);
+  const directory = await takeAndScrub(at);
+  for (const name of ["sequencer", "CHERRY_PICK_HEAD", "REVERT_HEAD"])
+    assert.equal(existsSync(join(directory, ".git", name)), false, name);
+});
+
 test("a stale index lock and a stale ref lock are removed and the tree is reused", async (t) => {
   const at = await poolFixture(t);
   const git = join(at.tree, ".git");

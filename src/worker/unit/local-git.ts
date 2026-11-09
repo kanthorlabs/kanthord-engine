@@ -72,6 +72,8 @@ const REMOVED_STATE = [
   "rebase-apply",
   "sequencer",
   "AUTO_MERGE",
+  "CHERRY_PICK_HEAD",
+  "REVERT_HEAD",
 ];
 const REMOVED_STATE_PREFIXES = ["BISECT_", "MERGE_"];
 const KEPT_REF_PREFIXES = ["refs/remotes/origin/", "refs/tags/"];
