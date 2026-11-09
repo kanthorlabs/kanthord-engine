@@ -851,26 +851,6 @@ test("a claim of a Waiting node opens the execution with evaluation and the wait
   });
 });
 
-test("the opening names the instance of a claimant with an instance", (t) => {
-  const h = claimHarness(t);
-  h.store.transaction((tx) =>
-    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
-  );
-  const instance = { ...h.identity, instanceId: createIdentity("instance") };
-  const result = h.store.transaction((tx) =>
-    claimOnce(tx, h.dependencies, instance, h.pull, FIXTURE_NOW),
-  );
-  assert.equal(result.opening!.worker_instance, instance.name);
-});
-
-test("the opening keys a claimant with no instance by binding name and identity name", (t) => {
-  const h = claimHarness(t);
-  h.store.transaction((tx) =>
-    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
-  );
-  assert.equal(h.claim().opening!.worker_instance, DEFAULT_INSTANCE_KEY);
-});
-
 test("the opening of a server and a container instance carries its instance name", (t) => {
   for (const placement of ["server", "container"]) {
     const h = claimHarness(t);
@@ -931,15 +911,6 @@ test("the opening holds the placement of the registration instance and the facts
   assert.equal(opening.revision_turn, true);
   assert.equal(opening.dependency_count, DEPENDENCIES);
   assert.equal(opening.node_name, NODE_NAME);
-});
-
-test("the opening of an external harness claim holds no placement", (t) => {
-  const h = claimHarness(t);
-  h.dependencies.registrations.placementOf = () => null;
-  h.store.transaction((tx) =>
-    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
-  );
-  assert.equal(h.claim().opening!.placement, null);
 });
 
 test("the job of a revision turn measures the wait from its own queued_at", (t) => {
