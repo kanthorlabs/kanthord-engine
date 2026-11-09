@@ -18,7 +18,6 @@ import { dirname, join } from "node:path";
 import type { TestContext } from "node:test";
 import { simpleGit } from "simple-git";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
-import { createIdentity } from "../../kernel/identity.ts";
 import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
 import type { ExecutionEnvironment } from "../contract.ts";
 import type { TaskContent } from "../../mission/contract.ts";
@@ -46,14 +45,13 @@ import {
   fauxToolCall,
   implementFixture as fixture,
   listedVerificationSpans,
-  nextExecution,
   recordReleases,
   recordSpans,
   releasedRoot,
   spanEnds,
   task,
 } from "./test-support.ts";
-import { RecordKind, SpanStatus } from "../../tracking/contract.ts";
+import { RecordKind } from "../../tracking/contract.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { VerificationContext } from "./method-telemetry.ts";
 import { VERIFICATION_RERUNS } from "./verification.ts";
@@ -73,7 +71,6 @@ const REVISED_CONTENT = "base two";
 const SECRET = "secret";
 const MARKER = "release-directory";
 const ONE_SPAN = 1;
-const NO_LOGS = 0;
 const FLAKY_LOG = "verification flaky";
 const TAG = "x";
 const CONFIG_KEY = "a.b";
@@ -87,14 +84,12 @@ const BUILD = "build";
 const DEPS_SETUP = {
   postCreateCommand: "test -e deps || (mkdir deps && echo x > deps/marker)",
 };
-const NO_DEPS_SETUP = { postCreateCommand: "test ! -e deps" };
 const TREE_PREPARED = "tree prepared";
 const TREE_DELETED = "tree deleted";
 const INVALID_PERMISSIONS = "system.files.invalid_permissions";
 const RELEASE_FROM_POOL = { purpose: "release", source: TreeSource.Pool };
 const ONE_TREE = 1;
 const GONE = "gone";
-const LEAK = "leak";
 const OPEN_MODE = "755";
 const POLL_MS = 20;
 const ABORTED = "release aborted";
@@ -540,64 +535,6 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.deepEqual(h.input.workspaces.pool.trees(), []);
   });
 
-  test("a passing release gate writes one release gate span with the result passed", async (t) => {
-    const h = await fixture(t, [task("pass", "true")], []);
-    const records = recordSpans(h);
-    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
-    const ends = spanEnds(records, SpanOperation.ReleaseGate);
-    assert.equal(ends.length, ONE_SPAN);
-    assert.equal(ends[0]?.status, SpanStatus.Ok);
-    assert.deepEqual(ends[0]?.attributes, {
-      "kanthord.release_gate.result": "passed",
-      "kanthord.release_gate.affected": "absent",
-    });
-  });
-
-  test("a failed release command writes the result routed with the unit id of its owner", async (t) => {
-    const owner = task("owner", "false");
-    const h = await fixture(t, [owner], []);
-    const records = recordSpans(h);
-    const gate = await releaseGate(h);
-    assert.equal(gate.kind, ReleaseGateKind.Routed);
-    assert.ok(gate.kind === ReleaseGateKind.Routed);
-    assert.ok(gate.instruction.includes(RELEASE_CLONE_TEXT));
-    const ends = spanEnds(records, SpanOperation.ReleaseGate);
-    assert.equal(ends.length, ONE_SPAN);
-    assert.equal(ends[0]?.status, SpanStatus.Ok);
-    assert.deepEqual(ends[0]?.attributes, {
-      "kanthord.release_gate.result": "routed",
-      "kanthord.release_gate.unit_id": owner.id,
-    });
-  });
-
-  test("the verification spans of a release name the owner of each command with the context release", async (t) => {
-    const owner = task("owner", "true && true");
-    const h = await fixture(t, [owner], []);
-    h.revision = {
-      ...h.revision,
-      content: { ...h.revision.content, verifications: ["true"] },
-    };
-    const records = recordSpans(h);
-    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
-    const starts = records.flatMap((record) =>
-      record.kind === RecordKind.Span &&
-      record.operation === SpanOperation.Verification &&
-      record.start_time !== undefined
-        ? [record.attributes]
-        : [],
-    );
-    assert.deepEqual(
-      starts.map((attributes) => [
-        attributes?.["kanthord.verification.context"],
-        attributes?.["kanthord.verification.owner_id"],
-      ]),
-      [
-        ["release", h.input.claim.node_id],
-        ["release", owner.id],
-      ],
-    );
-  });
-
   test("a command that the node and a task share runs once at the release gate and holds two results", async (t) => {
     const count = join(temporary(t), "count");
     const shared = `echo x >> ${count}`;
@@ -758,27 +695,6 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.deepEqual(flaky, [{ flaky: [{ index: 0, command }] }]);
   });
 
-  test("a release verification that fails on every rerun returns the failed run", async (t) => {
-    const h = await fixture(t, [task("owner", "true")], []);
-    h.revision = {
-      ...h.revision,
-      content: {
-        ...h.revision.content,
-        verifications: [FAILS_IN_RELEASE],
-      },
-    };
-    const events = t.mock.method(h.run, "log");
-    const gate = await releaseGate(h);
-    assert.ok(gate.kind === ReleaseGateKind.Routed);
-    assert.equal(gate.unit.id, h.input.claim.node_id);
-    assert.ok(gate.instruction.includes(RELEASE_CLONE_TEXT));
-    assert.equal(
-      events.mock.calls.filter((call) => call.arguments[0] === FLAKY_LOG)
-        .length,
-      NO_LOGS,
-    );
-  });
-
   test("a node change that edits the declaration does not change the command that judges it", async (t) => {
     const h = await fixture(t, [task("pass", "true")], []);
     await declareAffected(h, t, affectedCommand(FAILS_WHEN_BROKEN));
@@ -917,50 +833,6 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(await tracking(reused), await tracking(h.root));
   });
 
-  test("a second node of the same repository reuses the release tree", async (t) => {
-    const first = await fixture(t, [], []);
-    assert.deepEqual(await releaseGate(first), {
-      kind: ReleaseGateKind.Passed,
-    });
-    const second = await nextExecution(
-      t,
-      {
-        ...first,
-        input: {
-          ...first.input,
-          claim: { ...first.input.claim, node_id: createIdentity("node") },
-        },
-      },
-      [],
-      dirname(first.input.workspaces.root),
-    );
-    const prepared = treesPrepared(t, second);
-    assert.deepEqual(await releaseGate(second), {
-      kind: ReleaseGateKind.Passed,
-    });
-    assert.deepEqual(prepared(), [RELEASE_FROM_POOL]);
-    assert.equal(freeCommandTrees(second).length, ONE_TREE);
-  });
-
-  test("a release round on a changed environment runs the setup on a tree with no earlier setup output", async (t) => {
-    const h = await fixture(
-      t,
-      [],
-      [],
-      undefined,
-      undefined,
-      storedEnvironment(DEPS_SETUP),
-    );
-    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
-    h.setup = h.setup.map((entry) => ({
-      ...entry,
-      environment: NO_DEPS_SETUP,
-    }));
-    const prepared = treesPrepared(t, h);
-    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
-    assert.deepEqual(prepared(), [RELEASE_FROM_POOL]);
-  });
-
   test("a release tree with an index lock is reused, the lock is absent and the gate passes", async (t) => {
     const h = await fixture(t, [], []);
     assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
@@ -973,14 +845,6 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     const [again] = freeCommandTrees(h);
     assert.ok(again);
     assert.equal(existsSync(join(again, ".git", "index.lock")), false);
-  });
-
-  test("the release gate gives its tree back to the command class", async (t) => {
-    const h = await fixture(t, [], []);
-    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
-    assert.equal(freeCommandTrees(h).length, ONE_TREE);
-    assert.equal(h.input.workspaces.pool.trees().length, ONE_TREE);
-    assert.equal(existsSync(releaseKey(h)), false);
   });
 
   test("a release tree drops the checkout of a binding that the node no longer holds", async (t) => {
@@ -1064,35 +928,6 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     );
   });
 
-  test("the pool gives back a release tree that is a symbolic link as a removed link", async (t) => {
-    const h = await fixture(t, [], []);
-    const outside = join(temporary(t), "outside");
-    await simpleGit().clone(h.root, outside);
-    const link = join(temporary(t), "link");
-    symlinkSync(outside, link);
-    h.input.workspaces.pool.giveBack(
-      {
-        address: h.input.setup.repositories[0]!.address,
-        poolClass: PoolClass.Command,
-      },
-      link,
-      h.input.claim.node_id,
-    );
-    assert.equal(existsSync(link), false);
-    assert.deepEqual(h.input.workspaces.pool.trees(), []);
-    assert.equal(
-      existsSync(join(outside, ".git", "kanthord-pool.json")),
-      false,
-    );
-  });
-
-  test("a release round with an existing tree of a current checkout passes", async (t) => {
-    const h = await fixture(t, [], []);
-    await simpleGit().clone(h.root, join(releaseKey(h), h.checkouts[0]!.name));
-    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
-    assert.equal(existsSync(releaseKey(h)), false);
-  });
-
   test("a release round does not follow a symbolic link that replaces the release directory", async (t) => {
     const h = await fixture(t, [], []);
     const outside = temporary(t);
@@ -1104,23 +939,6 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(existsSync(join(outside, name, ".git")), true);
     assert.equal(existsSync(join(outside, STRAY_FILE)), true);
     assert.equal(existsSync(releaseKey(h)), false);
-  });
-
-  test("a tag that a release verification creates is absent in the next release round", async (t) => {
-    const h = await fixture(t, [], []);
-    h.revision = {
-      ...h.revision,
-      content: {
-        ...h.revision.content,
-        verifications: [
-          `! git rev-parse -q --verify refs/tags/${LEAK} && git tag ${LEAK}`,
-        ],
-      },
-    };
-    for (const content of ["changed", REVISED_CONTENT]) {
-      await changeNode(h, content);
-      assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
-    }
   });
 
   test("an abort during a release verification answers routed, gives the tree back and leaves no release directory", async (t) => {

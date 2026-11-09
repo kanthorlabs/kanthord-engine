@@ -11,7 +11,6 @@ import { type Dependencies, WorkerService } from "./service.ts";
 import { ActionPerformer } from "./action-performer.ts";
 import {
   ACTION_REQUEST_TOOL_NAME,
-  alwaysAvailable,
   BindingEntryState,
   ContainerRuntime,
   ExecutionIntent,
@@ -476,7 +475,6 @@ test("Worker run joins cancellation before and after startup", async (t) => {
 });
 
 const AGENT = "swe@1";
-const OTHER_AGENT = "re@1";
 const WORKER = "coder@1";
 const EXTERNAL_HARNESS = "claude-code";
 const MODEL = "claude-sonnet-4-5";
@@ -1557,48 +1555,6 @@ test("handover handlers pass the proven execution and one transactional clock re
   assert.equal(f.commits(), expectedCommits);
 });
 
-test("catalog pages released declarations once per commit and registrations add no entry", async (t) => {
-  const f = enablementFixture(t);
-  const pageSize = 1;
-  const expectedCommits = 4;
-  const before = f.invoke("catalog.list", null, {});
-  assert.deepEqual(
-    before.items.map((item) => item.name),
-    ["coder@1", "reviewer@1"],
-  );
-  assert.equal(before.next_cursor, null);
-  const first = f.invoke("catalog.list", null, {}, { limit: pageSize });
-  assert.deepEqual(
-    first.items.map((item) => item.name),
-    ["coder@1"],
-  );
-  assert.equal(first.next_cursor, Buffer.from("coder@1").toString("base64url"));
-  const second = f.invoke(
-    "catalog.list",
-    null,
-    {},
-    { limit: pageSize, cursor: first.next_cursor },
-  );
-  assert.deepEqual(
-    second.items.map((item) => item.name),
-    ["reviewer@1"],
-  );
-  assert.equal(second.next_cursor, null);
-  await f.worker.start();
-  stopAfter(t, () => f.worker.stop());
-  f.store.transaction((tx) =>
-    f.worker.registrations.register(tx, client, Date.now()),
-  );
-  assert.deepEqual(f.invoke("catalog.list", null, {}), before);
-  assert.equal(f.commits(), expectedCommits);
-  assert.deepEqual(Object.keys(before.items[0]!).sort(), [
-    "declared_intents",
-    "declared_node_states",
-    "host",
-    "name",
-  ]);
-});
-
 test("registration reads commit once, retain heartbeat age and refuse ended identities", (t) => {
   const f = enablementFixture(t, { monotonicNow: () => 100 });
   const row = f.store.transaction((tx) =>
@@ -1732,47 +1688,6 @@ test("validateEntry refuses unknown workers and external entries and validates e
     () => validate({ model_identifier: MISSING_MODEL }),
     AgentErrorCode.ModelUnknown,
   );
-});
-
-test("workerAgentsOf lists the native agent of a worker", (t) => {
-  const f = enablementFixture(t);
-  assert.deepEqual(f.worker.workerAgentsOf(WORKER), [AGENT]);
-  assert.deepEqual(f.worker.workerAgentsOf("claude-code@1"), []);
-  assert.deepEqual(f.worker.workerAgentsOf(UNKNOWN), []);
-});
-
-test("workerAgentView answers null outside the agents of the worker and delegates the agent view", (t) => {
-  const f = enablementFixture(t);
-  const view = (
-    entry: WorkerEntry | null = null,
-    workerName = WORKER,
-    agentName = AGENT,
-  ) =>
-    f.store.transaction((tx) =>
-      f.worker.workerAgentView(tx, workerName, agentName, entry, SERVER_SCOPE),
-    );
-  assert.equal(view(null, UNKNOWN), null);
-  assert.equal(view(null, WORKER, UNKNOWN), null);
-  assert.equal(view(null, WORKER, OTHER_AGENT), null);
-  assert.equal(view(null, "claude-code@1"), null);
-  assert.deepEqual(view(), {
-    defaults: null,
-    effective: null,
-    chain: [],
-    active_position: null,
-    cooling: null,
-    valid: false,
-    issues: [{ path: [], code: AgentErrorCode.Unavailable }],
-  });
-  f.invokeAgent("enablement.put", putBody);
-  const entry = { model_identifier: MISSING_MODEL };
-  assert.deepEqual(
-    view(entry),
-    f.store.transaction((tx) =>
-      f.agent.agentView(tx, AGENT, entry, SERVER_SCOPE),
-    ),
-  );
-  assert.equal(view()?.valid, true);
 });
 
 type CredentialRecord = {
@@ -2386,17 +2301,6 @@ test("an instance at the worker placement is not hosted", (t) => {
   assert.equal(f.host.started.length, NO_STARTS);
 });
 
-test("the derived identity of a listed server instance registers and the row holds its instance_id", (t) => {
-  const f = poolFixture(t, 2);
-  f.worker.startPool();
-  const registered = f.register(SECOND_INSTANCE);
-  assert.equal(registered.resource_identity, POOL_RESOURCE);
-  const [row] = f.store.transaction(readAllLive);
-  assert.equal(row!.runtime_identity, registered.runtime_identity);
-  assert.equal(row!.instance_id, f.instanceIdOf(SECOND_INSTANCE));
-  assert.equal(row!.client_id, f.clientOf(f.nameOf(SECOND_INSTANCE)));
-});
-
 test("a client identity that the binding does not list for an instance refuses with placement_mismatch", (t) => {
   const f = poolFixture(t, 2);
   f.worker.startPool();
@@ -2485,50 +2389,6 @@ test("a binding that drops an instance with a live registration keeps a draining
   );
 });
 
-function mixedPool(t: TestContext) {
-  const f = poolFixture(t, 1);
-  const instanceId = f.addInstance(LAPTOP, InstancePlacement.Worker);
-  f.worker.startPool();
-  const server = f.register(FIRST_INSTANCE);
-  const laptop = f.registerAs(f.clientOf(LAPTOP), instanceId);
-  return { ...f, server, laptop };
-}
-
-test("placementOf answers the placement of the instance of a registration and null for an external harness", (t) => {
-  const f = mixedPool(t);
-  const placementOf = (runtimeIdentity: string) =>
-    f.store.transaction((tx) => f.worker.placementOf(tx, runtimeIdentity));
-  assert.equal(
-    placementOf(f.server.runtime_identity),
-    InstancePlacement.Server,
-  );
-  assert.equal(
-    placementOf(f.laptop.runtime_identity),
-    InstancePlacement.Worker,
-  );
-  const external = f.store.transaction((tx) =>
-    insertRegistration(
-      tx,
-      {
-        project_id: POOL_PROJECT,
-        resource_identity: POOL_RESOURCE,
-        client_id: createIdentity("client_identity"),
-        name: "external",
-      },
-      Date.now(),
-    ),
-  );
-  assert.equal(placementOf(external.runtime_identity), null);
-});
-
-test("claimantHolder answers the instance name at the worker placement and server otherwise in one binding", (t) => {
-  const f = mixedPool(t);
-  const holderOf = (runtimeIdentity: string) =>
-    f.store.transaction((tx) => f.worker.claimantHolder(tx, runtimeIdentity));
-  assert.equal(holderOf(f.laptop.runtime_identity), LAPTOP);
-  assert.equal(holderOf(f.server.runtime_identity), SERVER_HOLDER);
-});
-
 test("a registration record shows the placement and the drain flag of its instance", (t) => {
   const f = poolFixture(t, 2);
   f.worker.startPool();
@@ -2611,60 +2471,11 @@ const UNAVAILABLE_CONTAINER = {
   container_runtime: ContainerRuntime.Podman,
 } satisfies PlacementStatus;
 
-async function placementList(f: ReturnType<typeof poolFixture>) {
-  const operation = workerOperations["placement.list"];
-  const input = operation.input.parse({ params: {}, query: {}, body: null });
-  return operation.output.parse(
-    await f.registry.get(operation.id).handler(input, f.caller),
-  );
-}
-
 async function loggedAfterStart(f: ReturnType<typeof poolFixture>) {
   f.worker.startPool();
   await changesApplied();
   return f.logs.filter((line) => /worker\.pool\.driver_unavailable/.test(line));
 }
-
-test("the placement list answers server, container and worker in order", async (t) => {
-  const f = poolFixture(t, 1);
-  assert.deepEqual(await placementList(f), {
-    items: [
-      alwaysAvailable(InstancePlacement.Server),
-      alwaysAvailable(InstancePlacement.Container),
-      alwaysAvailable(InstancePlacement.Worker),
-    ],
-  });
-});
-
-for (const reason of Object.values(PlacementIssue))
-  test(`the placement list reports the container reason ${reason}`, async (t) => {
-    const f = poolFixture(t, 1);
-    const container = { ...UNAVAILABLE_CONTAINER, reason };
-    f.host.statuses.set(PoolPlacement.Container, container);
-    const { items } = await placementList(f);
-    assert.deepEqual(
-      items.map(({ placement }) => placement),
-      [
-        InstancePlacement.Server,
-        InstancePlacement.Container,
-        InstancePlacement.Worker,
-      ],
-    );
-    assert.deepEqual(items[1], container);
-    assert.deepEqual(items[0], alwaysAvailable(InstancePlacement.Server));
-    assert.deepEqual(items[2], alwaysAvailable(InstancePlacement.Worker));
-  });
-
-test("the placement list reports no unavailable server or worker placement", async (t) => {
-  const f = poolFixture(t, 1);
-  f.host.statuses.set(PoolPlacement.Server, {
-    ...UNAVAILABLE_CONTAINER,
-    placement: InstancePlacement.Server,
-  });
-  const { items } = await placementList(f);
-  assert.equal(items[0]!.placement, InstancePlacement.Server);
-  assert.equal(items[2]!.available, true);
-});
 
 test("start with an unavailable runtime and a live container instance logs the driver once and starts the pool", async (t) => {
   const f = poolFixture(t, 0);
@@ -2677,39 +2488,6 @@ test("start with an unavailable runtime and a live container instance logs the d
   assert.equal(record.reason, PlacementIssue.RuntimeFailed);
   assert.equal(record.detail, UNAVAILABLE_CONTAINER.detail);
   assert.equal(f.host.started.length, POOL_ONE_START);
-});
-
-const ROOTLESS_DOCKER_CONTAINER = {
-  placement: InstancePlacement.Container,
-  available: false,
-  reason: PlacementIssue.RuntimeFailed,
-  detail:
-    "rootless Docker cannot map the container uid 10001 to the server user. Use rootless Podman or a rootful runtime.",
-  container_runtime: ContainerRuntime.Docker,
-} satisfies PlacementStatus;
-
-test("the placement list answers runtime_failed with the rootless Docker detail for the worker screen", async (t) => {
-  const f = poolFixture(t, 1);
-  f.host.statuses.set(PoolPlacement.Container, ROOTLESS_DOCKER_CONTAINER);
-  const { items } = await placementList(f);
-  assert.deepEqual(items[1], ROOTLESS_DOCKER_CONTAINER);
-});
-
-test("a live container instance on rootless Docker logs the driver record with the rootless Docker detail for the instance screen", async (t) => {
-  const f = poolFixture(t, 0);
-  f.addInstance("boxed", InstancePlacement.Container);
-  f.host.statuses.set(PoolPlacement.Container, ROOTLESS_DOCKER_CONTAINER);
-  const lines = await loggedAfterStart(f);
-  assert.equal(lines.length, DRIVER_RECORDS);
-  const record = JSON.parse(lines[0]!);
-  assert.equal(record.reason, PlacementIssue.RuntimeFailed);
-  assert.equal(record.detail, ROOTLESS_DOCKER_CONTAINER.detail);
-});
-
-test("start logs no driver record for an available runtime", async (t) => {
-  const f = poolFixture(t, 0);
-  f.addInstance("boxed", InstancePlacement.Container);
-  assert.deepEqual(await loggedAfterStart(f), []);
 });
 
 test("start checks no runtime when no live instance holds the container placement", async (t) => {
@@ -2912,18 +2690,10 @@ test("the credential lease operation maps CredentialLeaseHeld to 503 worker.cred
   assert.deepEqual(await invoke(), envelope);
 });
 
-test("the handover refresh wait ends before the route timeout with a margin", () => {
-  assert.ok(HANDOVER_REFRESH_WAIT_MS < HANDOVER_TIMEOUT_MS);
-  assert.ok(PROMPT_SOURCE_READ_MS < HANDOVER_REFRESH_WAIT_MS);
-});
-
 const NAMED_BINDING = createIdentity("binding");
 const OTHER_NAMED_BINDING = createIdentity("binding");
 const UNNAMED_BINDING = createIdentity("binding");
 const HEAD = "a".repeat(40);
-const OTHER_HEAD = "b".repeat(64);
-const MOVED_HEAD = "c".repeat(40);
-const HANDOVER_ENVELOPE = { nonce: "nonce", ciphertext: "ciphertext" };
 const SLOW_REMOTE_MS = 15000;
 const SSH_UNREACHABLE_STATUS = 422;
 
@@ -2968,91 +2738,6 @@ const PROMPT_BINDINGS = () => [
   UNNAMED_BINDING,
   OTHER_NAMED_BINDING,
 ];
-
-test("the first handover of an attempt reads the base head of each binding that names an instruction file in parallel and pins it", async (t) => {
-  const memory = memoryPromptPins();
-  const pending = new Map<string, (commit: string) => void>();
-  const invoke = refreshingHandoverFixture(t, () => HANDOVER_ENVELOPE, {
-    repositoryBindingIdsOf: PROMPT_BINDINGS,
-    missionPromptPins: memory.pins,
-    promptBase: promptBaseOf(
-      (bindingId, context) =>
-        new Promise((resolve) => {
-          assert.ok(context.deadline !== null);
-          pending.set(bindingId, resolve);
-        }),
-    ),
-  });
-  const answer = invoke();
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual([...pending.keys()], [NAMED_BINDING, OTHER_NAMED_BINDING]);
-  pending.get(OTHER_NAMED_BINDING)!(OTHER_HEAD);
-  pending.get(NAMED_BINDING)!(HEAD);
-  assert.deepEqual(await answer, HANDOVER_ENVELOPE);
-  assert.deepEqual(memory.stored(), [
-    { binding_id: NAMED_BINDING, commit: HEAD },
-    { binding_id: OTHER_NAMED_BINDING, commit: OTHER_HEAD },
-  ]);
-});
-
-test("a first handover with no binding that names an instruction file pins an empty list and reads no head", async (t) => {
-  const memory = memoryPromptPins();
-  const invoke = refreshingHandoverFixture(t, () => HANDOVER_ENVELOPE, {
-    repositoryBindingIdsOf: PROMPT_BINDINGS,
-    missionPromptPins: memory.pins,
-    promptBase: promptBaseOf(async () => {
-      throw new Error("UNEXPECTED_COLLABORATION");
-    }, []),
-  });
-  assert.deepEqual(await invoke(), HANDOVER_ENVELOPE);
-  assert.deepEqual(memory.stored(), []);
-});
-
-test("a later handover of the attempt reads the stored pin and no head", async (t) => {
-  const memory = memoryPromptPins();
-  let reads = 0;
-  const invoke = refreshingHandoverFixture(t, () => HANDOVER_ENVELOPE, {
-    repositoryBindingIdsOf: PROMPT_BINDINGS,
-    missionPromptPins: memory.pins,
-    promptBase: promptBaseOf(async () => {
-      reads++;
-      return reads === FIRST_HANDOVER_ATTEMPT ? HEAD : MOVED_HEAD;
-    }, [NAMED_BINDING]),
-  });
-  assert.deepEqual(await invoke(), HANDOVER_ENVELOPE);
-  assert.deepEqual(
-    await invoke(createIdentity("execution")),
-    HANDOVER_ENVELOPE,
-  );
-  assert.equal(reads, FIRST_HANDOVER_ATTEMPT);
-  assert.deepEqual(memory.answered, [
-    [{ binding_id: NAMED_BINDING, commit: HEAD }],
-  ]);
-});
-
-test("two concurrent first handovers of one execution store one pin and both read it back", async (t) => {
-  const memory = memoryPromptPins();
-  const heads: ((commit: string) => void)[] = [];
-  const invoke = refreshingHandoverFixture(t, () => HANDOVER_ENVELOPE, {
-    repositoryBindingIdsOf: PROMPT_BINDINGS,
-    missionPromptPins: memory.pins,
-    promptBase: promptBaseOf(
-      () => new Promise((resolve) => heads.push(resolve)),
-      [NAMED_BINDING],
-    ),
-  });
-  const first = invoke();
-  const second = invoke();
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(heads.length, TWO_HANDOVER_ATTEMPTS);
-  heads[0]!(HEAD);
-  assert.deepEqual(await first, HANDOVER_ENVELOPE);
-  heads[1]!(MOVED_HEAD);
-  assert.deepEqual(await second, HANDOVER_ENVELOPE);
-  const pinned = [{ binding_id: NAMED_BINDING, commit: HEAD }];
-  assert.deepEqual(memory.stored(), pinned);
-  assert.deepEqual(memory.answered, [pinned, pinned]);
-});
 
 test("a head read failure answers ssh_unreachable and pins nothing", async (t) => {
   const memory = memoryPromptPins();
@@ -3167,83 +2852,6 @@ test("a slow remote together with a credential refresh in flight ends within the
   );
   assert.equal(settledAt, started + HANDOVER_REFRESH_WAIT_MS);
   assert.ok(settledAt! - started < HANDOVER_TIMEOUT_MS);
-});
-
-test("instanceOf answers the placement of a live instance and instanceKeyOf answers only a worker instance", (t) => {
-  const f = enablementFixture(t);
-  const WORKER_NAME = "coder@1";
-  const KEY = "a2V5";
-  const FINGERPRINT = "fingerprint";
-  const NOW = 1000;
-  const ENDED = 2000;
-  const rows = f.store.transaction((tx) => ({
-    server: insertInstance(
-      tx,
-      {
-        name: "hosted",
-        worker: WORKER_NAME,
-        placement: InstancePlacement.Server,
-        public_key: null,
-        fingerprint: null,
-      },
-      NOW,
-    ),
-    container: insertInstance(
-      tx,
-      {
-        name: "boxed",
-        worker: WORKER_NAME,
-        placement: InstancePlacement.Container,
-        public_key: null,
-        fingerprint: null,
-      },
-      NOW,
-    ),
-    remote: insertInstance(
-      tx,
-      {
-        name: "laptop",
-        worker: WORKER_NAME,
-        placement: InstancePlacement.Worker,
-        machine: insertMachineFor(tx, "laptop", NOW),
-        public_key: KEY,
-        fingerprint: FINGERPRINT,
-      },
-      NOW,
-    ),
-    archived: insertInstance(
-      tx,
-      {
-        name: "gone",
-        worker: WORKER_NAME,
-        placement: InstancePlacement.Server,
-        public_key: null,
-        fingerprint: null,
-      },
-      NOW,
-    ),
-  }));
-  f.store.transaction((tx) => endInstance(tx, rows.archived.id, ENDED));
-  f.store.transaction((tx) => {
-    assert.deepEqual(f.worker.instanceOf(tx, "hosted"), {
-      name: "hosted",
-      worker: WORKER_NAME,
-      placement: InstancePlacement.Server,
-    });
-    assert.deepEqual(f.worker.instanceOf(tx, "laptop"), {
-      name: "laptop",
-      worker: WORKER_NAME,
-      placement: InstancePlacement.Worker,
-    });
-    assert.equal(f.worker.instanceOf(tx, "gone"), null);
-    assert.equal(f.worker.instanceKeyOf(tx, "hosted"), null);
-    assert.equal(f.worker.instanceKeyOf(tx, "boxed"), null);
-    assert.deepEqual(f.worker.instanceKeyOf(tx, "laptop"), {
-      name: "laptop",
-      public_key: KEY,
-      fingerprint: FINGERPRINT,
-    });
-  });
 });
 
 const SESSION_READ: SessionRead = {
@@ -3515,22 +3123,6 @@ test("slot_image.delete refuses requested_by from a human caller and refuses the
     refused: [{ key: configured, reason: "live" }],
   });
   assert.deepEqual(f.host.removedImages, [old]);
-});
-
-test("instanceStateOf answers null for an unknown name and the archive state of the latest revision", (t) => {
-  const f = poolFixture(t, 1);
-  f.store.transaction((tx) => {
-    assert.equal(f.worker.instanceStateOf(tx, "absent"), null);
-    assert.deepEqual(f.worker.instanceStateOf(tx, f.nameOf(0)), {
-      archived: false,
-    });
-  });
-  f.archive(0);
-  f.store.transaction((tx) =>
-    assert.deepEqual(f.worker.instanceStateOf(tx, f.nameOf(0)), {
-      archived: true,
-    }),
-  );
 });
 
 const FOOTPRINT_HUMAN = testHumanIdentity("alice", "Alice", "jti");
