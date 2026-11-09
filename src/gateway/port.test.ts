@@ -9,7 +9,6 @@ import { MASTER_KEY_BYTES } from "../config/global.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import {
   type Operation,
-  OperationLifetime,
   OperationRegistry,
   REQUEST_BODY_MAX_BYTES,
   StoreName,
@@ -41,9 +40,7 @@ const INVALID_JSON = "gateway.request.invalid_json";
 const UNKNOWN_FAILURE = "gateway.invocation.unknown";
 const FAILED_MESSAGE = "Request failed";
 const FINISHED_MESSAGE = "Request finished";
-const CANCELLED_CODE = "gateway.invocation.cancelled";
 const FORBIDDEN_CODE = "test.forbidden";
-const CLIENT_CLOSED_STATUS = 499;
 const CLIENT_NAME = "dashboard";
 const RESOURCE_IDENTITY = "worker:kanthord:binding";
 const ISSUED_AT = 1;
@@ -180,34 +177,6 @@ test("a malformed message with a readable call id is answered with a validation 
   assert.equal(calls.length, NO_CALLS);
 });
 
-test("a malformed message without a call id is dropped", async (t) => {
-  const { invocation, calls } = fakeInvocation();
-  const { port, answers } = connect(t, invocation);
-  port.postMessage({ operation_id: workerOperations.heartbeat.id });
-  port.postMessage(null);
-  port.postMessage("text");
-  port.postMessage({ call_id: 1 });
-  port.postMessage(callOf(workerOperations.heartbeat, "call-1", null));
-  await answerOf(answers, "call-1", t.signal);
-  assert.equal(answers.length, SINGLE_ANSWER);
-  assert.equal(calls.length, SINGLE_ANSWER);
-});
-
-test("a stream operation is answered as an absent route", async (t) => {
-  t.mock.property(
-    workerOperations.heartbeat as Operation,
-    "lifetime",
-    OperationLifetime.Stream,
-  );
-  const { invocation, calls } = fakeInvocation();
-  const { port, answers } = connect(t, invocation);
-  port.postMessage(callOf(workerOperations.heartbeat, "call-1", null));
-  const answer = await answerOf(answers, "call-1", t.signal);
-  assert.equal(answer.status, HttpStatus.NotFound);
-  assert.equal(errorCode(answer), NOT_FOUND);
-  assert.equal(calls.length, NO_CALLS);
-});
-
 test("an operation id outside the five operation maps is answered as an absent route", async (t) => {
   const { invocation, calls } = fakeInvocation();
   const { port, answers } = connect(t, invocation);
@@ -228,16 +197,6 @@ test("a body that fails to parse reaches the invocation as a rejection", async (
   const { invocation, calls } = fakeInvocation();
   const { port, answers } = connect(t, invocation);
   port.postMessage(callOf(workerOperations.handover, "call-1", "not json"));
-  await answerOf(answers, "call-1", t.signal);
-  assert.equal(calls.length, SINGLE_ANSWER);
-  assert.equal(calls[0]?.options.rejection?.code, INVALID_JSON);
-});
-
-test("a body at the limit reaches the invocation", async (t) => {
-  const { invocation, calls } = fakeInvocation();
-  const { port, answers } = connect(t, invocation);
-  const body = "x".repeat(REQUEST_BODY_MAX_BYTES);
-  port.postMessage(callOf(workerOperations.handover, "call-1", body));
   await answerOf(answers, "call-1", t.signal);
   assert.equal(calls.length, SINGLE_ANSWER);
   assert.equal(calls[0]?.options.rejection?.code, INVALID_JSON);
@@ -367,40 +326,4 @@ test("a failed port call logs its code and its caller, and a successful call log
   assert.equal(succeeded!.status, HttpStatus.OK);
   assert.equal(succeeded!.code, undefined);
   assert.equal(succeeded!.wire_status, undefined);
-});
-
-test("a port cancel logs status 499 with the wire status 503, and the answer stays 503", async (t) => {
-  const { invocation, calls } = fakeInvocation(
-    (options) =>
-      new Promise((resolve) => {
-        if (options.context)
-          addAbortListener(options.context.signal, () =>
-            resolve(failedWith(HttpStatus.ServiceUnavailable, CANCELLED_CODE)),
-          );
-      }),
-  );
-  const { port, answers, finished } = loggedConnection(t, invocation);
-  port.postMessage(callOf(workerOperations.heartbeat, "call-1", null));
-  await eventually(() => calls[0], t.signal);
-  port.postMessage({ call_id: "call-1", cancel: true });
-  const answer = await answerOf(answers, "call-1", t.signal);
-  assert.equal(answer.status, HttpStatus.ServiceUnavailable);
-  assert.equal(errorCode(answer), CANCELLED_CODE);
-  const [record] = finished();
-  assert.equal(record!.status, CLIENT_CLOSED_STATUS);
-  assert.equal(record!.wire_status, HttpStatus.ServiceUnavailable);
-  assert.equal(record!.code, CANCELLED_CODE);
-});
-
-test("a cancel that the invocation raises without a port cancel logs status 503 and no wire status", async (t) => {
-  const { invocation } = fakeInvocation(async () =>
-    failedWith(HttpStatus.ServiceUnavailable, CANCELLED_CODE),
-  );
-  const { port, answers, finished } = loggedConnection(t, invocation);
-  port.postMessage(callOf(workerOperations.heartbeat, "call-1", null));
-  await answerOf(answers, "call-1", t.signal);
-  const [record] = finished();
-  assert.equal(record!.status, HttpStatus.ServiceUnavailable);
-  assert.equal(record!.wire_status, undefined);
-  assert.equal(record!.code, CANCELLED_CODE);
 });

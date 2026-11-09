@@ -28,6 +28,7 @@ import {
   PlatformAddressKind,
   RepositoryAction,
   type RepositoryActionEntry,
+  type RequiredCheckRead,
   requiredCheckReadSchema,
   Uncertainty,
   WorkerErrorCode,
@@ -73,6 +74,20 @@ type UncertainItem = Extract<
   ActionResultItem,
   { kind: typeof ActionResultKind.Uncertain }
 >;
+interface DispatchState {
+  settlement: UncertainItem | null;
+}
+interface DispatchScope {
+  caller: PerformerCaller;
+  claim: ExecutionClaim;
+  pending: Pending;
+  call: IntakeActionCall;
+  state: DispatchState;
+}
+interface CheckBlock {
+  message: string;
+  fields: Partial<Pick<RequiredCheckRead, "pending" | "failed">>;
+}
 const IN_FLIGHT_CODE = "intake.outbound.request.in_flight";
 const MERGE_SKIPPED_MESSAGE = "merge skipped: gate files changed";
 const NO_GATE_FILES = 0;
@@ -94,6 +109,22 @@ function landsByKanthorD(entry: Pending["entry"]): boolean {
     entry.action.configuration.landing === Landing.KanthorD &&
     entry.gate_files.length === NO_GATE_FILES
   );
+}
+
+function checkBlockOf(
+  data: RequiredCheckRead,
+  commit: string,
+): CheckBlock | null {
+  if (data.head_commit !== commit)
+    return { message: HEAD_COMMIT_CHANGED_MESSAGE, fields: {} };
+  if (data.pending.length > NO_CHECKS)
+    return {
+      message: CHECKS_PENDING_MESSAGE,
+      fields: { pending: data.pending },
+    };
+  if (data.failed.length > NO_CHECKS)
+    return { message: CHECKS_FAILED_MESSAGE, fields: { failed: data.failed } };
+  return null;
 }
 
 function recordsOnly(entry: Pending["entry"]): boolean {
@@ -312,113 +343,147 @@ export class ActionPerformer {
       ),
     );
     assert.deepEqual(authorized, pending.entry.action);
-    const call = { ...caller, executionId: claim.executionId };
-    let settlement: UncertainItem | null = null;
+    const scope: DispatchScope = {
+      caller,
+      claim,
+      pending,
+      call: { ...caller, executionId: claim.executionId },
+      state: { settlement: null },
+    };
     try {
-      const refusal = await this.reuse(call, claim, pending);
-      if (refusal) return refusal;
-      this.dependencies.store.transaction((tx) =>
-        this.dependencies.missionActions.authorizeAction(
-          tx,
-          claim,
-          pending.entry.action.key,
-        ),
-      );
-      if (recordsOnly(pending.entry)) {
-        const address: PlatformAddress = {
-          kind: PlatformAddressKind.BranchPush,
-          resource_identity: pending.entry.resource_identity,
-          branch: pending.operands.baseBranch,
-          commit: pending.operands.commit,
-        };
-        settlement = {
-          kind: ActionResultKind.Uncertain,
-          action: pending.key.action,
-          uncertainty: Uncertainty.Recording,
-          address,
-        };
-        const landing = await this.record(
-          caller,
-          claim,
-          { key: pending.entry.action.key, ref: pending.key.action },
-          address,
-        );
-        settlement =
-          landing.kind === ActionResultKind.Uncertain ? landing : null;
-        if (
-          landing.kind === ActionResultKind.Submitted &&
-          pending.entry.gate_files.length > NO_GATE_FILES
-        )
-          this.warnMergeSkipped(
-            landing.evidence.id as string,
-            pending.entry.gate_files,
-          );
-        return landing;
-      }
-      settlement = {
-        kind: ActionResultKind.Uncertain,
-        action: pending.key.action,
-        uncertainty: Uncertainty.Effect,
-      };
-      const answer = await this.performIntake(call, pending, () => {
-        settlement = null;
-      });
-      const item = performedItem(pending.key.action, answer);
-      if (item) {
-        settlement = item.kind === ActionResultKind.Uncertain ? item : null;
-        return item;
-      }
-      assert.ok(!isResultClass(answer));
-      settlement = {
-        kind: ActionResultKind.Uncertain,
-        action: pending.key.action,
-        uncertainty: Uncertainty.Recording,
-        address: answer,
-      };
-      const recorded = await this.record(
-        caller,
-        claim,
-        { key: pending.entry.action.key, ref: pending.key.action },
-        answer,
-      );
-      settlement =
-        recorded.kind === ActionResultKind.Uncertain ? recorded : null;
-      if (
-        recorded.kind === ActionResultKind.Submitted &&
-        answer.kind === PlatformAddressKind.PullRequest &&
-        pending.entry.action.action === RepositoryAction.PullRequest &&
-        pending.entry.action.configuration.landing === Landing.KanthorD
-      ) {
-        const evidenceId = recorded.evidence.id as string;
-        if (!landsByKanthorD(pending.entry)) {
-          this.warnMergeSkipped(evidenceId, pending.entry.gate_files);
-          return recorded;
-        }
-        await this.requestMerge(
-          call,
-          claim.nodeId,
-          claim.attempt,
-          pending.entry.action.key,
-          pending.operands.commit,
-          evidenceId,
-        ).catch((error: unknown) => {
-          this.dependencies.logger?.warn(
-            {
-              evidence_id: evidenceId,
-              code: error instanceof OperationError ? error.code : undefined,
-            },
-            "merge request failed",
-          );
-        });
-      }
-      return recorded;
+      return await this.performDispatch(scope);
     } finally {
       this.reservations.settle(
         pending.key,
         pending.reservation.owner,
-        settlement,
+        scope.state.settlement,
       );
     }
+  }
+
+  private async performDispatch(
+    scope: DispatchScope,
+  ): Promise<ActionResultItem> {
+    const { claim, pending, call } = scope;
+    const refusal = await this.reuse(call, claim, pending);
+    if (refusal) return refusal;
+    this.dependencies.store.transaction((tx) =>
+      this.dependencies.missionActions.authorizeAction(
+        tx,
+        claim,
+        pending.entry.action.key,
+      ),
+    );
+    if (recordsOnly(pending.entry)) return this.dispatchRecordsOnly(scope);
+    return this.dispatchPerformed(scope);
+  }
+
+  private async dispatchRecordsOnly(
+    scope: DispatchScope,
+  ): Promise<ActionResultItem> {
+    const { caller, claim, pending, state } = scope;
+    const address: PlatformAddress = {
+      kind: PlatformAddressKind.BranchPush,
+      resource_identity: pending.entry.resource_identity,
+      branch: pending.operands.baseBranch,
+      commit: pending.operands.commit,
+    };
+    state.settlement = {
+      kind: ActionResultKind.Uncertain,
+      action: pending.key.action,
+      uncertainty: Uncertainty.Recording,
+      address,
+    };
+    const landing = await this.record(
+      caller,
+      claim,
+      { key: pending.entry.action.key, ref: pending.key.action },
+      address,
+    );
+    state.settlement =
+      landing.kind === ActionResultKind.Uncertain ? landing : null;
+    if (
+      landing.kind === ActionResultKind.Submitted &&
+      pending.entry.gate_files.length > NO_GATE_FILES
+    )
+      this.warnMergeSkipped(
+        landing.evidence.id as string,
+        pending.entry.gate_files,
+      );
+    return landing;
+  }
+
+  private async dispatchPerformed(
+    scope: DispatchScope,
+  ): Promise<ActionResultItem> {
+    const { caller, claim, pending, call, state } = scope;
+    state.settlement = {
+      kind: ActionResultKind.Uncertain,
+      action: pending.key.action,
+      uncertainty: Uncertainty.Effect,
+    };
+    const answer = await this.performIntake(call, pending, () => {
+      state.settlement = null;
+    });
+    const item = performedItem(pending.key.action, answer);
+    if (item) {
+      state.settlement = item.kind === ActionResultKind.Uncertain ? item : null;
+      return item;
+    }
+    assert.ok(!isResultClass(answer));
+    state.settlement = {
+      kind: ActionResultKind.Uncertain,
+      action: pending.key.action,
+      uncertainty: Uncertainty.Recording,
+      address: answer,
+    };
+    const recorded = await this.record(
+      caller,
+      claim,
+      { key: pending.entry.action.key, ref: pending.key.action },
+      answer,
+    );
+    state.settlement =
+      recorded.kind === ActionResultKind.Uncertain ? recorded : null;
+    if (
+      recorded.kind === ActionResultKind.Submitted &&
+      answer.kind === PlatformAddressKind.PullRequest
+    )
+      await this.landRecordedPullRequest(scope, recorded.evidence.id as string);
+    return recorded;
+  }
+
+  private async landRecordedPullRequest(
+    scope: DispatchScope,
+    evidenceId: string,
+  ): Promise<void> {
+    const { claim, pending, call } = scope;
+    const { entry } = pending;
+    if (
+      entry.action.action !== RepositoryAction.PullRequest ||
+      entry.action.configuration.landing !== Landing.KanthorD
+    )
+      return;
+    if (!landsByKanthorD(entry)) {
+      this.warnMergeSkipped(evidenceId, entry.gate_files);
+      return;
+    }
+    await this.requestMerge(
+      call,
+      claim.nodeId,
+      claim.attempt,
+      entry.action.key,
+      pending.operands.commit,
+      evidenceId,
+    ).catch((error: unknown) => {
+      this.dependencies.logger?.warn(
+        {
+          evidence_id: evidenceId,
+          code: error instanceof OperationError ? error.code : undefined,
+        },
+        "merge request failed",
+      );
+    });
   }
 
   private async performIntake(
@@ -608,28 +673,12 @@ export class ActionPerformer {
       );
       return true;
     }
-    const { head_commit, pending, failed } = parsed.data;
-    if (head_commit !== commit) {
-      this.dependencies.logger?.warn(
-        { evidence_id: evidenceId },
-        HEAD_COMMIT_CHANGED_MESSAGE,
-      );
-      return true;
-    }
-    if (pending.length > NO_CHECKS) {
-      this.dependencies.logger?.warn(
-        { evidence_id: evidenceId, pending },
-        CHECKS_PENDING_MESSAGE,
-      );
-      return true;
-    }
-    if (failed.length > NO_CHECKS) {
-      this.dependencies.logger?.warn(
-        { evidence_id: evidenceId, failed },
-        CHECKS_FAILED_MESSAGE,
-      );
-      return true;
-    }
-    return false;
+    const block = checkBlockOf(parsed.data, commit);
+    if (!block) return false;
+    this.dependencies.logger?.warn(
+      { evidence_id: evidenceId, ...block.fields },
+      block.message,
+    );
+    return true;
   }
 }

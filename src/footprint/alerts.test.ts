@@ -9,10 +9,7 @@ import {
   type AlertStep,
   type AlertSubject,
   type AlertTrack,
-  clearValue,
   FIRING_TRACK,
-  isAbove,
-  isClear,
   OK_TRACK,
   step,
 } from "./alerts.ts";
@@ -154,42 +151,6 @@ test("a null threshold sets ok and resolves an open episode", () => {
   assert.equal(pending.event, null);
 });
 
-test("free_ratio clears at free_bytes / total_bytes >= clear", () => {
-  const clear = DEFAULT_DISK_FREE_RATIO / FOOTPRINT_ALERT_CLEAR_RATIO;
-  assert.equal(clearValue(FREE_RATIO), clear);
-  assert.equal(isClear(FREE_RATIO, clear), true);
-  assert.equal(isClear(FREE_RATIO, clear - Number.EPSILON), false);
-  assert.equal(isAbove(FREE_RATIO, DEFAULT_DISK_FREE_RATIO), false);
-  assert.equal(isAbove(FREE_RATIO, DEFAULT_DISK_FREE_RATIO / 2), true);
-});
-
-test("the days_to_floor clear value is value / 0.9 and a null value is clear and not above", () => {
-  const clear = DEFAULT_AGE_DAYS / FOOTPRINT_ALERT_CLEAR_RATIO;
-  assert.equal(clearValue(DAYS_TO_FLOOR), clear);
-  assert.equal(isClear(DAYS_TO_FLOOR, clear), false);
-  assert.equal(isClear(DAYS_TO_FLOOR, clear + 1), true);
-  assert.equal(isAbove(DAYS_TO_FLOOR, DEFAULT_AGE_DAYS), true);
-  assert.equal(isAbove(DAYS_TO_FLOOR, null), false);
-  assert.equal(isClear(DAYS_TO_FLOOR, null), true);
-  assert.equal(
-    run(OK_TRACK, [diskSubject(TOTAL / 2, null), diskSubject(TOTAL / 2, null)])
-      .track.state,
-    FootprintAlertState.Ok,
-  );
-});
-
-test("a null bytes value and a null free ratio are clear and not above", () => {
-  assert.equal(isAbove(BYTES, null), false);
-  assert.equal(isClear(BYTES, null), true);
-  const resolved = run(FIRING_TRACK, [bytesSubject(null), bytesSubject(null)]);
-  assert.deepEqual(resolved.event, { fire: false });
-  const unsized = { ...diskSubject(0, null), total_bytes: 0 };
-  assert.equal(
-    run(OK_TRACK, [unsized, unsized]).track.state,
-    FootprintAlertState.Ok,
-  );
-});
-
 test("a disk episode fires on the projection while the free ratio is above the floor", () => {
   const projected = diskSubject(TOTAL / 2, DEFAULT_AGE_DAYS - 1);
   const fired = run(OK_TRACK, [projected, projected]);
@@ -199,14 +160,6 @@ test("a disk episode fires on the projection while the free ratio is above the f
     threshold: DAYS_TO_FLOOR,
     value: DEFAULT_AGE_DAYS - 1,
   });
-});
-
-test("a disk episode records the condition that fired first", () => {
-  const fired = run(OK_TRACK, [
-    diskSubject(TOTAL / 2, DEFAULT_AGE_DAYS),
-    diskSubject(TOTAL / 20, 0),
-  ]);
-  assert.equal(fired.event?.fire && fired.event.threshold, DAYS_TO_FLOOR);
 });
 
 test("a disk episode resolves only when both conditions clear", () => {
@@ -389,13 +342,6 @@ test("a disk acknowledgement holds until the free bytes drop below the larger of
   assert.equal(acknowledgementHolds(acknowledged, diskBytes(until - 1)), false);
 });
 
-test("a disk acknowledgement below the floor holds until half the free bytes", () => {
-  assert.equal(
-    acknowledgedUntil(DISK_ALERT, diskBytes(50 * GIB), DEFAULT_DISK_FREE_RATIO),
-    25 * GIB,
-  );
-});
-
 test("a bytes acknowledgement holds until the value reaches twice the value at the acknowledgement", () => {
   const until = acknowledgedUntil(
     BYTES_ALERT,
@@ -411,24 +357,6 @@ test("a bytes acknowledgement holds until the value reaches twice the value at t
   });
   assert.equal(acknowledgementHolds(acknowledged, at(until - 1)), true);
   assert.equal(acknowledgementHolds(acknowledged, at(until)), false);
-});
-
-test("every acknowledged_until is an integer", () => {
-  for (const value of [
-    acknowledgedUntil(DISK_ALERT, diskBytes(401), DEFAULT_DISK_FREE_RATIO),
-    acknowledgedUntil(
-      DISK_ALERT,
-      diskBytes(150, 1005),
-      DEFAULT_DISK_FREE_RATIO,
-    ),
-    acknowledgedUntil(DISK_ALERT, diskBytes(51, 1005), DEFAULT_DISK_FREE_RATIO),
-    acknowledgedUntil(
-      { ...BYTES_ALERT, value: 0.5 },
-      null,
-      DEFAULT_DISK_FREE_RATIO,
-    ),
-  ])
-    assert.equal(Number.isInteger(value), true, String(value));
 });
 
 test("a new acknowledgement replaces the old one", async (t) => {

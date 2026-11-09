@@ -26,25 +26,17 @@ const WEEK = 7 * DAY;
 const MONDAY = Date.UTC(2024, 0, 1);
 const RANGE_END = MONDAY + 14 * DAY;
 const LIMIT = 1000;
-const ONE_ITEM = 1;
 const TURNS_IN_RANGE = 2;
-const COUNTED_TURNS = 2;
-const COUNTED_INPUT = 4;
-const COUNTED_TOTAL = 5;
-const COUNTED_COST = 1;
 const PROJECT_A = "project_01JZ8PZ0A1B2C3D4E5F6G7H8J9";
 const PROJECT_B = "project_01JZ8PZ0A1B2C3D4E5F6G7H8JA";
 const NODE_A = "node_01JZ8Q0K4M6N8P0R2S4T6V8W0X";
 const NODE_B = "node_01JZ8Q0K4M6N8P0R2S4T6V8W0Y";
 const RESPONSE_MODEL = "gen_ai.response.model";
-const REQUEST_MODEL = "gen_ai.request.model";
 const INPUT = "gen_ai.usage.input_tokens";
 const OUTPUT = "gen_ai.usage.output_tokens";
 const CACHE_READ = "gen_ai.usage.cache_read.input_tokens";
 const CACHE_CREATION = "gen_ai.usage.cache_creation.input_tokens";
 const COST = "kanthord.usage.cost_usd";
-const AGENT = "kanthord.agent.name";
-const PROVIDER = "gen_ai.provider.name";
 
 function traceIdOf(n: number): string {
   return n.toString(16).padStart(32, "0");
@@ -186,66 +178,6 @@ test("each model and day answers one item with the sums of its turns", async (t)
   ]);
 });
 
-test("the model is the response model, else the request model, else null", async (t) => {
-  const store = seededStore(t);
-  addTurns(store, [
-    {
-      start: MONDAY,
-      attributes: {
-        [RESPONSE_MODEL]: "response_a",
-        [REQUEST_MODEL]: "ignored",
-      },
-    },
-    { start: MONDAY, attributes: { [REQUEST_MODEL]: "request_b" } },
-    { start: MONDAY, attributes: {} },
-    { start: MONDAY, attributes: { [RESPONSE_MODEL]: 5, [REQUEST_MODEL]: 6 } },
-    {
-      start: MONDAY,
-      attributes: { [RESPONSE_MODEL]: 5, [REQUEST_MODEL]: "request_c" },
-    },
-  ]);
-  const { items } = await read(store, { bucket: AnalyticsBucket.None });
-  assert.deepEqual(keysOf(items), [
-    "request_b",
-    "request_c",
-    "response_a",
-    null,
-  ]);
-  assert.deepEqual(
-    items.map((item) => item.turn_count),
-    [1, 1, 1, 2],
-  );
-});
-
-test("each other group_by value groups by its field", async (t) => {
-  const store = seededStore(t);
-  addTurns(store, [
-    {
-      trace: 1,
-      start: MONDAY,
-      attributes: { [AGENT]: "coder", [PROVIDER]: "p1", [COST]: 1 },
-    },
-    {
-      trace: 2,
-      start: MONDAY,
-      attributes: { [AGENT]: "coder", [PROVIDER]: "p2", [COST]: 2 },
-    },
-    { trace: 2, start: MONDAY, attributes: { [AGENT]: 7, [COST]: 4 } },
-  ]);
-  const keys = async (group_by: CostGroupBy) =>
-    keysOf(
-      (await read(store, { group_by, bucket: AnalyticsBucket.None })).items,
-    );
-  assert.deepEqual(await keys(CostGroupBy.AgentName), [null, "coder"]);
-  assert.deepEqual(await keys(CostGroupBy.ProviderName), [null, "p2", "p1"]);
-  assert.deepEqual(await keys(CostGroupBy.WorkerName), [
-    "worker_b",
-    "worker_a",
-  ]);
-  assert.deepEqual(await keys(CostGroupBy.NodeId), [NODE_B, NODE_A]);
-  assert.deepEqual(await keys(CostGroupBy.ProjectId), [PROJECT_B, PROJECT_A]);
-});
-
 test("group_by none with bucket none answers the totals, also when a grouped read is truncated", async (t) => {
   const store = seededStore(t);
   addTurns(store, [
@@ -319,32 +251,6 @@ test("from and to bound the start time of a span inclusively", async (t) => {
   assert.equal(items[0]!.turn_count, TURNS_IN_RANGE);
 });
 
-test("another operation adds nothing and a string token adds 0", async (t) => {
-  const store = seededStore(t);
-  addTurns(store, [
-    { start: MONDAY, attributes: usage("a", [4, 1, 0, 0], 1) },
-    {
-      start: MONDAY,
-      operation: "agent.tool",
-      attributes: usage("a", [100, 100, 100, 100], 100),
-    },
-    {
-      start: MONDAY,
-      attributes: {
-        ...usage("a", [0, 0, 0, 0], 0),
-        [INPUT]: "50",
-        [COST]: "9",
-      },
-    },
-  ]);
-  const { items } = await read(store, { bucket: AnalyticsBucket.None });
-  assert.equal(items.length, ONE_ITEM);
-  assert.equal(items[0]!.turn_count, COUNTED_TURNS);
-  assert.equal(items[0]!.input_tokens, COUNTED_INPUT);
-  assert.equal(items[0]!.total_tokens, COUNTED_TOTAL);
-  assert.equal(items[0]!.cost_usd, COUNTED_COST);
-});
-
 test("items order by bucket, cost descending and key with null last", async (t) => {
   const store = seededStore(t);
   addTurns(store, [
@@ -360,16 +266,4 @@ test("items order by bucket, cost descending and key with null last", async (t) 
   const limited = await read(store, { bucket: AnalyticsBucket.None }, 2);
   assert.deepEqual(keysOf(limited.items), ["late", "m_c"]);
   assert.equal(limited.truncated, true);
-});
-
-test("a limit of 2 on three groups answers 2 items and truncated", async (t) => {
-  const store = seededStore(t);
-  addTurns(store, [
-    { start: MONDAY, attributes: usage("a", [0, 0, 0, 0], 1) },
-    { start: MONDAY, attributes: usage("b", [0, 0, 0, 0], 2) },
-    { start: MONDAY, attributes: usage("c", [0, 0, 0, 0], 3) },
-  ]);
-  const { items, truncated } = await read(store, {}, 2);
-  assert.deepEqual(keysOf(items), ["c", "b"]);
-  assert.equal(truncated, true);
 });

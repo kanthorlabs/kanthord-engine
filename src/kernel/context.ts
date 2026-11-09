@@ -42,14 +42,21 @@ export class CancellationContext implements Context {
     this.deadline = earlier(inherited, deadline);
     this.signal = AbortSignal.any([parent.signal, this.controller.signal]);
     if (this.signal.aborted) return;
-    if (deadline !== null && (inherited === null || deadline < inherited))
-      this.armDeadline();
-    else if (this.deadline !== null && this.deadline <= Date.now())
-      this.cancel(new DeadlineExceeded());
+    this.applyDeadline(inherited, deadline);
   }
 
   cancel(reason: Error = new ContextCancelled()): void {
     this.controller.abort(reason);
+  }
+
+  private applyDeadline(
+    inherited: number | null,
+    deadline: number | null,
+  ): void {
+    if (deadline !== null && (inherited === null || deadline < inherited))
+      this.armDeadline();
+    else if (this.deadline !== null && this.deadline <= Date.now())
+      this.cancel(new DeadlineExceeded());
   }
 
   private armDeadline(): void {

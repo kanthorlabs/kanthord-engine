@@ -1407,6 +1407,20 @@ function answered(path: string, state: RepositoryFileState): LinkStep {
   return { kind: LinkStepKind.Answered, file: repositoryFile(path, state) };
 }
 
+function resolvedPathBlockedState(
+  target: string,
+  resolved: string,
+): RepositoryFileState | undefined {
+  if (
+    posix.isAbsolute(target) ||
+    resolved === PARENT_DIRECTORY ||
+    resolved.startsWith(`${PARENT_DIRECTORY}/`)
+  )
+    return RepositoryFileState.OutsideRoot;
+  if (resolved === REPOSITORY_ROOT) return RepositoryFileState.NotRegularFile;
+  return undefined;
+}
+
 function followLinks(tree: RepositoryTree, path: string): LinkStep {
   assert.ok(path !== EMPTY_STRING);
   let current = path;
@@ -1428,14 +1442,8 @@ function followLinks(tree: RepositoryTree, path: string): LinkStep {
     const resolved = posix.normalize(
       posix.join(posix.dirname(current), target),
     );
-    if (
-      posix.isAbsolute(target) ||
-      resolved === PARENT_DIRECTORY ||
-      resolved.startsWith(`${PARENT_DIRECTORY}/`)
-    )
-      return answered(path, RepositoryFileState.OutsideRoot);
-    if (resolved === REPOSITORY_ROOT)
-      return answered(path, RepositoryFileState.NotRegularFile);
+    const blocked = resolvedPathBlockedState(target, resolved);
+    if (blocked !== undefined) return answered(path, blocked);
     current = resolved;
   }
   return answered(path, RepositoryFileState.Unreadable);

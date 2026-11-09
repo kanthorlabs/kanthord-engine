@@ -8,23 +8,26 @@ export const MAX_CONFIG_BYTES = 1048576;
 export const MAX_CONFIG_NODES = 4096;
 export const MAX_CONFIG_DEPTH = 32;
 
-export function inspectTree(
-  value: unknown,
-  budget: { remaining: number },
+interface NodeBudget {
+  remaining: number;
+}
+
+function tooManyValues(): Diagnostic {
+  return new Diagnostic(
+    "system.config.too_many_values",
+    "configuration: too many values.",
+  );
+}
+
+function spendNode(budget: NodeBudget): void {
+  if (budget.remaining === EXHAUSTED_NODE_BUDGET) throw tooManyValues();
+  budget.remaining--;
+}
+
+function refuseCycleOrDepth(
+  value: object,
   ancestors: ReadonlySet<object>,
 ): void {
-  assert.ok(
-    budget.remaining >= EXHAUSTED_NODE_BUDGET &&
-      budget.remaining <= MAX_CONFIG_NODES,
-  );
-  assert.ok(ancestors.size <= MAX_CONFIG_DEPTH);
-  if (budget.remaining === EXHAUSTED_NODE_BUDGET)
-    throw new Diagnostic(
-      "system.config.too_many_values",
-      "configuration: too many values.",
-    );
-  budget.remaining--;
-  if (!isObject(value)) return;
   if (ancestors.has(value))
     throw new Diagnostic(
       "system.config.cyclic_alias",
@@ -35,6 +38,9 @@ export function inspectTree(
       "system.config.too_deep",
       "configuration: nesting is too deep.",
     );
+}
+
+function refuseNonPlain(value: object): void {
   const prototype: unknown = Object.getPrototypeOf(value);
   if (
     !Array.isArray(value) &&
@@ -45,12 +51,24 @@ export function inspectTree(
       "system.config.invalid_mapping",
       "configuration: expected a plain mapping or array.",
     );
+}
+
+export function inspectTree(
+  value: unknown,
+  budget: { remaining: number },
+  ancestors: ReadonlySet<object>,
+): void {
+  assert.ok(
+    budget.remaining >= EXHAUSTED_NODE_BUDGET &&
+      budget.remaining <= MAX_CONFIG_NODES,
+  );
+  assert.ok(ancestors.size <= MAX_CONFIG_DEPTH);
+  spendNode(budget);
+  if (!isObject(value)) return;
+  refuseCycleOrDepth(value, ancestors);
+  refuseNonPlain(value);
   const children: unknown[] = Object.values(value);
-  if (children.length > budget.remaining)
-    throw new Diagnostic(
-      "system.config.too_many_values",
-      "configuration: too many values.",
-    );
+  if (children.length > budget.remaining) throw tooManyValues();
   const parents = new Set(ancestors).add(value);
   for (const child of children) inspectTree(child, budget, parents);
 }

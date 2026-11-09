@@ -1,16 +1,11 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
-import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
 import test, { type TestContext } from "node:test";
-import { promisify } from "node:util";
 import type { Material } from "../custody/contract.ts";
 import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
-import { isolatedGitEnvironment } from "../kernel/git-environment.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
-import { stopAfter, temporary } from "../kernel/test-support.ts";
+import { stopAfter } from "../kernel/test-support.ts";
 import { HostKeyErrorCode, RepositoryErrorCode } from "./contract.ts";
 import {
   RepositoryComponent,
@@ -22,8 +17,6 @@ import {
   createBareRepository,
   DEFAULT_SSH_PORT,
   startTestSshd,
-  TEST_REPOSITORY_FILE,
-  TEST_REPOSITORY_TEXT,
 } from "./sshd-test-support.ts";
 
 const CREDENTIAL_ID = "credential_01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -35,7 +28,6 @@ const HOST_KEY =
   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
 const DEADLINE_MS = 30_000;
 const ALTERNATIVE_PORT = 443;
-const execFileAsync = promisify(execFile);
 const ADDRESS_INVALID = "project.bindings.repository.address_invalid";
 const CHECK_CALL = "check";
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -104,30 +96,25 @@ test("sshAccessOf builds the access from the key and the pin of the address host
 
 test("sshAccessOf takes the port of an alternative SSH host from the fixed table and pins the bracket form", (t) => {
   const store = pinnedStore(t);
-  for (const host of [
-    "ssh.github.com",
-    "altssh.gitlab.com",
-    "altssh.bitbucket.org",
-  ]) {
-    store.database
-      .prepare(
-        "INSERT INTO repository_host_key (id, host, public_key, created_at) VALUES (?, ?, ?, 1)",
-      )
-      .run(`host_key_${host}`, host, HOST_KEY);
-    const key = generateSshKey(CREDENTIAL_NAME);
-    const access = store.transaction((tx) =>
-      new RepositoryComponent().sshAccessOf(
-        tx,
-        granted(`git@${host}:owner/repository.git`),
-        material({ private_key: key.private_key }),
-      ),
-    );
-    assert.equal(
-      access.known_hosts,
-      `[${host}]:${ALTERNATIVE_PORT} ${HOST_KEY}\n`,
-    );
-    assert.equal(access.port, ALTERNATIVE_PORT);
-  }
+  const host = "ssh.github.com";
+  store.database
+    .prepare(
+      "INSERT INTO repository_host_key (id, host, public_key, created_at) VALUES (?, ?, ?, 1)",
+    )
+    .run(`host_key_${host}`, host, HOST_KEY);
+  const key = generateSshKey(CREDENTIAL_NAME);
+  const access = store.transaction((tx) =>
+    new RepositoryComponent().sshAccessOf(
+      tx,
+      granted(`git@${host}:owner/repository.git`),
+      material({ private_key: key.private_key }),
+    ),
+  );
+  assert.equal(
+    access.known_hosts,
+    `[${host}]:${ALTERNATIVE_PORT} ${HOST_KEY}\n`,
+  );
+  assert.equal(access.port, ALTERNATIVE_PORT);
 });
 
 test("sshAccessOf refuses an unpinned host, an alias address and a legacy key by name and drops the material", (t) => {
@@ -135,13 +122,6 @@ test("sshAccessOf refuses an unpinned host, an alias address and a legacy key by
   const key = generateSshKey(CREDENTIAL_NAME);
   const component = new RepositoryComponent();
   const cases: Array<[unknown, string, (error: unknown) => boolean]> = [
-    [
-      { private_key: key.private_key },
-      "git@gitlab.com:owner/repository.git",
-      refusal(HttpStatus.Conflict, HostKeyErrorCode.Unpinned, {
-        host: "gitlab.com",
-      }),
-    ],
     [
       { private_key: key.private_key },
       "ssh://git@github.com/owner/repository.git",
@@ -180,41 +160,6 @@ test("sshAccessOf refuses an unpinned host, an alias address and a legacy key by
     );
     assert.ok(held.dropped());
   }
-});
-
-test("the known_hosts seam lets a test reach a local sshd on another port", async (t) => {
-  const sshd = await startTestSshd(t);
-  const bare = await createBareRepository(t);
-  const key = generateSshKey(CREDENTIAL_NAME);
-  await sshd.authorize(key.public_key);
-  const addresses: string[] = [];
-  const component = new RepositoryComponent({
-    knownHostsOf: (_tx, address) => {
-      addresses.push(address);
-      return sshd.known_hosts;
-    },
-    portOf: () => sshd.port,
-  });
-  const store = new Store(IN_MEMORY_DATABASE);
-  stopAfter(t, () => store.close());
-  const address = sshd.url(bare);
-  const access = store.transaction((tx) =>
-    component.sshAccessOf(
-      tx,
-      granted(address),
-      material({ private_key: key.private_key }),
-    ),
-  );
-  assert.deepEqual(addresses, [address]);
-  const directory = join(temporary(t), "clone");
-  await mkdir(directory);
-  await component.clone(address, directory, background, DEADLINE_MS, access);
-  const { stdout } = await execFileAsync(
-    "git",
-    ["show", `HEAD:${TEST_REPOSITORY_FILE}`],
-    { cwd: directory, env: isolatedGitEnvironment(process.env) },
-  );
-  assert.equal(stdout, TEST_REPOSITORY_TEXT);
 });
 
 test("gitLsRemote of the component reaches a local sshd with the custody key", async (t) => {

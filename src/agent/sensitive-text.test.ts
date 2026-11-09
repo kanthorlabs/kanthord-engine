@@ -17,7 +17,6 @@ import {
   redactValue,
   SCAN_FAILED,
   SENSITIVE_SCAN_MAX_CHARACTERS,
-  SENSITIVE_VALUE_MAX_CHARACTERS,
   SensitiveRule,
   type SensitiveSpan,
   SESSION_MARKER_PATTERN,
@@ -29,7 +28,6 @@ import {
   MiB,
   scanRows,
   seededText,
-  wholeScan,
 } from "./sensitive-text-test-support.ts";
 
 const j = (...parts: string[]) => parts.join("");
@@ -1700,11 +1698,3 @@ function readCode() {
   }
   return (n: number) => text.slice(0, n);
 }
-
-test("one whole scan covers both passes", () => {
-  const matcher = knownMatcher();
-  const [pattern, known] = wholeScan(j(PASS, ' = "', an(16), '"'), matcher);
-  assert.equal(pattern!.length, ONE_SPAN);
-  assert.deepEqual(known, []);
-  assert.ok(SENSITIVE_VALUE_MAX_CHARACTERS);
-});

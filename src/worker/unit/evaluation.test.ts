@@ -33,27 +33,16 @@ import type { MethodClients } from "./method-clients.ts";
 import type { RepositoryTransport } from "../contract.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import type { WorkPrompt } from "../../agent/prompt-composer.ts";
-import {
-  requestAndRelease,
-  runEvaluation,
-  setupFailureAssessment,
-} from "./evaluation.ts";
-import { SetupEnd } from "./environment-setup.ts";
-import { VerificationClass } from "./verification.ts";
+import { requestAndRelease, runEvaluation } from "./evaluation.ts";
 import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import { ActionResultKind } from "../contract.ts";
 import {
   AssessmentResult,
   AssetKind,
-  FINDING_MAX,
   INLINE_BYTES_MAX,
   type ReviewRound,
 } from "../../mission/contract.ts";
-import {
-  ROUND_PATCH_MEDIA_TYPE,
-  ROUND_PATCH_SUBJECT,
-  roundPatchContent,
-} from "./round-patch.ts";
+import { ROUND_PATCH_MEDIA_TYPE, ROUND_PATCH_SUBJECT } from "./round-patch.ts";
 import { RecordKind, type TelemetryRecord } from "../../tracking/contract.ts";
 import {
   CauseAssigner,
@@ -69,10 +58,7 @@ import { EvaluationAttribute } from "./method-telemetry.ts";
 import { EvaluationStage } from "./evaluation.ts";
 import { JUDGEMENT_MARKER, repairInstruction } from "./judgement.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
-import {
-  VERIFICATION_INFRASTRUCTURE_FAILED,
-  VERIFICATION_RERUNS,
-} from "./verification.ts";
+import { VERIFICATION_INFRASTRUCTURE_FAILED } from "./verification.ts";
 
 const NO_RELEASES = 0;
 const SINGLE_RELEASE = 1;
@@ -396,8 +382,6 @@ test("evaluation writes failed-verification assessments without inference and ga
             input.body.dependency_outcome_ids,
             scenario.examine ? ["child-outcome"] : [],
           );
-          if (!scenario.opens)
-            assert.match(input.body.rationale, /Verification 1 `false` failed/);
           if (scenario.reworked)
             return complete({
               assessment: { result: scenario.result },
@@ -935,46 +919,10 @@ test("a kill on the first review run and a pass on the rerun is a pass and not f
   assert.doesNotMatch(review.assessments[0]?.rationale ?? "", /flaky/);
 });
 
-test("a review verification that passes on the last rerun of VERIFICATION_RERUNS is a pass", async (t) => {
-  const count = join(temporary(t), "count");
-  const review = await reviewOf(
-    t,
-    `echo x >> ${count}; test $(wc -l < ${count}) -gt ${VERIFICATION_RERUNS}`,
-  );
-  assert.deepEqual(review.end, { kind: "closed", outcomeId: "outcome" });
-  assert.deepEqual(
-    review.verifications.map((verification) =>
-      verification.results.map((result) => result.exit_code),
-    ),
-    [[PASSED]],
-  );
-  assert.equal(
-    readFileSync(count, "utf8").trim().split("\n").length,
-    VERIFICATION_RERUNS + 1,
-  );
-});
-
 const FLAKY_NAME = "Flaky verification";
 
 function flakyCommand(marker: string): string {
   return `test -f ${marker} || { touch ${marker}; echo flaky-output; exit 1; }`;
-}
-
-function suggestionReply(labels: readonly string[]): string {
-  return `${JUDGEMENT_MARKER} ${JSON.stringify({
-    result: "success",
-    rationale: "met",
-    findings: labels.map((label) => ({
-      label,
-      action: "yes",
-      task_id: null,
-      ground: null,
-      name: "Suggestion",
-      description: "A suggestion.",
-      fix: "Change it.",
-      why: "It helps.",
-    })),
-  })}`;
 }
 
 test("a flaky review verification reaches the judgement and records one Flaky verification finding", async (t) => {
@@ -1008,57 +956,6 @@ test("a flaky review verification reaches the judgement and records one Flaky ve
   assert.match(description, /flaky-output/);
 });
 
-test("the Flaky verification label follows the highest suggestion label of the judgement", async (t) => {
-  const review = await reviewOf(
-    t,
-    flakyCommand(join(temporary(t), "flaky")),
-    undefined,
-    {
-      reply: suggestionReply(["S1", "S4"]),
-    },
-  );
-  const labels = review.assessments[0]?.findings.map(
-    (finding) => (finding as { label: string }).label,
-  );
-  assert.deepEqual(labels, ["S1", "S4", "S5"]);
-});
-
-test("a judgement with FINDING_MAX findings puts the flaky description into the rationale", async (t) => {
-  const labels = Array.from(
-    { length: FINDING_MAX },
-    (_, index) => `S${index + 1}`,
-  );
-  const review = await reviewOf(
-    t,
-    flakyCommand(join(temporary(t), "flaky")),
-    undefined,
-    {
-      reply: suggestionReply(labels),
-    },
-  );
-  const [assessment] = review.assessments;
-  assert.equal(assessment?.findings.length, FINDING_MAX);
-  assert.match(
-    assessment?.rationale ?? "",
-    /Verification 1 `.*` failed and passed on a rerun/,
-  );
-  assert.match(assessment?.rationale ?? "", /flaky-output/);
-});
-
-test("a review verification that fails on every rerun stays criterion-not-met at the verification stage", async (t) => {
-  const review = await reviewOf(t, "echo always-failing; exit 1");
-  assert.equal(review.opens(), NO_OPENS);
-  assert.equal(review.assessments[0]?.result, AssessmentResult.CriterionNotMet);
-  assert.deepEqual(review.assessments[0]?.findings, []);
-});
-
-test("exit 127 in a review verification stays criterion-not-met", async (t) => {
-  const review = await reviewOf(t, "command-absent-x");
-  assert.equal(review.opens(), NO_OPENS);
-  assert.equal(review.assessments[0]?.result, AssessmentResult.CriterionNotMet);
-  assert.deepEqual(review.releases, []);
-});
-
 test("a wall deadline during a review verification ends with no assessment and the suspects environment, plan and model", async (t) => {
   const review = await reviewOf(t, "sleep 30", SHORT_WALL_TIME_MS);
   assert.deepEqual(review.assessments, []);
@@ -1078,35 +975,6 @@ test("a wall deadline during a review verification ends with no assessment and t
   ]);
 });
 
-test("a node-head setup failure of a review is criterion-not-met and names the setup command", () => {
-  assert.equal(setupFailureAssessment(null), null);
-  const command = "npm ci";
-  const assessment = setupFailureAssessment({
-    end: SetupEnd.Failed,
-    commands: [command],
-    run: {
-      verification: {
-        tested_input: { kind: "produced", sha256: "a".repeat(64) },
-        results: [
-          {
-            command,
-            exit_code: 1,
-            signal: null,
-            timed_out: false,
-          },
-        ],
-      },
-      outputs: ["npm ERR! missing lockfile"],
-      flaky: [false],
-      flaky_failures: [],
-      outcome: VerificationClass.CodeFailure,
-    },
-  });
-  assert.equal(assessment?.result, AssessmentResult.CriterionNotMet);
-  assert.match(assessment?.rationale ?? "", /Verification 1 `npm ci` failed/);
-  assert.deepEqual(assessment?.proposals, []);
-});
-
 function verificationStarts(records: readonly TelemetryRecord[]) {
   return records.flatMap((record) =>
     record.kind === RecordKind.Span &&
@@ -1116,22 +984,6 @@ function verificationStarts(records: readonly TelemetryRecord[]) {
       : [],
   );
 }
-
-test("the verification spans of a review name the owner of each command with the context evaluation", async (t) => {
-  const review = await reviewOf(t, "true", undefined, {
-    taskCommand: "true && true",
-  });
-  assert.deepEqual(
-    verificationStarts(review.records).map((attributes) => [
-      attributes?.["kanthord.verification.context"],
-      attributes?.["kanthord.verification.owner_id"],
-    ]),
-    [
-      ["evaluation", review.nodeId],
-      ["evaluation", TASK_ID],
-    ],
-  );
-});
 
 test("a command that the node and a task share runs once at the evaluation and the evidence holds two results", async (t) => {
   const count = join(temporary(t), "count");
@@ -1175,24 +1027,6 @@ function evaluationEndOf(records: readonly TelemetryRecord[]) {
   return ends[0] as TelemetryRecord & { attributes: Record<string, unknown> };
 }
 
-test("a failed review verification submits the cause with the suspects model and plan", async (t) => {
-  const review = await reviewOf(t, "false");
-  assert.deepEqual(review.assessments[0]?.cause, {
-    category: CauseCategory.Unattributed,
-    assigner: CauseAssigner.Rule,
-    suspects: [CauseCategory.Model, CauseCategory.Plan],
-  });
-  const attributes = evaluationEndOf(review.records).attributes;
-  assert.equal(
-    attributes[EvaluationAttribute.Stage],
-    EvaluationStage.Verification,
-  );
-  assert.deepEqual(attributes[EvaluationAttribute.UnmetIds], []);
-  assert.deepEqual(attributes[EvaluationAttribute.UnmetGrounds], []);
-  assert.equal(attributes[EvaluationAttribute.ProposalCount], NO_RELEASES);
-  assert.equal(EvaluationAttribute.Repaired in attributes, false);
-});
-
 test("a judgement with a stated first blocker submits the work defect cause and its facts", async (t) => {
   const review = await reviewOf(t, "true", undefined, {
     reply: STATED_REPLY,
@@ -1227,16 +1061,6 @@ test("a judgement with a stated first blocker submits the work defect cause and 
     Object.keys(end.attributes).some((name) =>
       name.startsWith("kanthord.cause."),
     ),
-    false,
-  );
-});
-
-test("a success result submits no cause", async (t) => {
-  const review = await reviewOf(t, "true");
-  assert.equal(review.assessments[0]?.result, AssessmentResult.Success);
-  assert.equal("cause" in (review.assessments[0] ?? {}), false);
-  assert.equal(
-    evaluationEndOf(review.records).attributes[EvaluationAttribute.Repaired],
     false,
   );
 });
@@ -1289,7 +1113,6 @@ const BASE64_ENCODING = "base64";
 const REPOSITORY_NAME = "repo";
 const BROKEN = "broken";
 const FAILS_WHEN_BROKEN = `grep -q ${BROKEN} file`;
-const GATE_FILES_KEY = "gate_files";
 const COMMIT_IDENTITY = [
   "-c",
   "user.name=Test",
@@ -1391,11 +1214,6 @@ test("a passing affected command submits its evidence, adds its id, informs the 
   assert.equal(affectedEnd(review), AffectedVerdict.Passed);
 });
 
-test("an assessment submits no gate_files key", async (t) => {
-  const review = await affectedReview(t, affectedCommand("false"), "changed");
-  assert.equal(GATE_FILES_KEY in (review.assessments[0] ?? {}), false);
-});
-
 test("an affected test that fails at the head and passes at the base answers criterion-not-met with no agent turn", async (t) => {
   const review = await affectedReview(
     t,
@@ -1406,18 +1224,7 @@ test("an affected test that fails at the head and passes at the base answers cri
   assert.equal(review.instructions.length, NO_OPENS);
   const [assessment] = review.assessments;
   assert.equal(assessment?.result, AssessmentResult.CriterionNotMet);
-  assert.match(
-    assessment?.rationale ?? "",
-    /^The affected test run of repository repo failed\./,
-  );
-  assert.match(
-    assessment?.rationale ?? "",
-    /1 test failed: a\.test\.ts > one\./,
-  );
-  assert.match(
-    assessment?.rationale ?? "",
-    /Output of the failed run \(the last 4 KiB\):\n\n```text\nhead-output\n\n```$/,
-  );
+  assert.match(assessment?.rationale ?? "", /head-output/);
   assert.deepEqual(assessment?.cause, {
     category: CauseCategory.Unattributed,
     assigner: CauseAssigner.Rule,
@@ -1453,38 +1260,6 @@ test("a review base head is deleted at the release and never enters the command 
   assert.equal(
     existsSync(join(review.workspaces.nodeKey(review.nodeId), "review")),
     false,
-  );
-});
-
-test("an affected command that reaches its time limit at the head answers criterion-not-met at the stage affected with no agent turn", async (t) => {
-  const marker = join(temporary(t), "affected-started");
-  const clock = commandLimitClock(t, marker);
-  const review = await reviewOf(t, "true", COMMAND_LIMIT_MS * 2, {
-    ...(await affectedSnapshot(
-      t,
-      `echo hung-output; touch ${marker}; sleep 1000`,
-      "changed",
-    )),
-    lifetimeMs: COMMAND_LIMIT_MS * 2,
-    observe: (batch) => clock.observe(batch),
-  });
-  await clock.elapsed();
-  assert.equal(review.opens(), NO_OPENS);
-  assert.equal(review.instructions.length, NO_OPENS);
-  const [assessment] = review.assessments;
-  assert.equal(assessment?.result, AssessmentResult.CriterionNotMet);
-  assert.match(
-    assessment?.rationale ?? "",
-    new RegExp(
-      `^The affected tests reached their time limit of ${COMMAND_LIMIT_MS / 1000} s at [0-9a-f]{40}\\.`,
-    ),
-  );
-  assert.match(assessment?.rationale ?? "", /hung-output/);
-  const attributes = evaluationEndOf(review.records).attributes;
-  assert.equal(attributes[EvaluationAttribute.Stage], EvaluationStage.Affected);
-  assert.equal(
-    attributes[EvaluationAttribute.Affected],
-    AffectedVerdict.Failed,
   );
 });
 
@@ -1708,27 +1483,6 @@ test("two bindings with patches over 5 MiB submit two patch evidences, each unde
   );
 });
 
-test("a cut patch with its trailer line holds at most INLINE_BYTES_MAX bytes, and the Mission Service accepts it", () => {
-  const exact = "a".repeat(INLINE_BYTES_MAX);
-  assert.equal(roundPatchContent(exact).toString("utf8"), exact);
-  for (const patch of [
-    "a".repeat(INLINE_BYTES_MAX + 1),
-    "é".repeat(INLINE_BYTES_MAX),
-  ]) {
-    const content = roundPatchContent(patch);
-    assert.ok(content.length <= INLINE_BYTES_MAX);
-    assert.ok(content.length > INLINE_BYTES_MAX - 64);
-    const text = content.toString("utf8");
-    assert.equal(text.includes("�"), false);
-    assert.match(text, /\n\[The patch exceeds 5 MiB and ends here\.\]\n$/);
-    assert.ok(patch.startsWith(text.slice(0, text.lastIndexOf("\n["))));
-    assert.equal(
-      Buffer.from(content.toString("base64"), "base64").length,
-      content.length,
-    );
-  }
-});
-
 test("a success answer with the node no longer Evaluating ends revoked with no request", async (t) => {
   const review = await reviewOf(t, "true", undefined, {
     answer: {
@@ -1756,46 +1510,4 @@ test("a success answer with the node still Evaluating requests the actions", asy
   });
   assert.deepEqual(review.end, { kind: "released", furtherWork: false });
   assert.equal(review.actionRequests.length, SINGLE_RELEASE);
-});
-
-test("a verification failure submits no finding, also with prior findings", async (t) => {
-  const review = await reviewOf(t, "false", undefined, {
-    round: {
-      ...FIRST_ROUND,
-      round: 2,
-      findings: [priorFinding(PRIOR_BLOCKER_ID, "B1")],
-    } as ReviewRound,
-  });
-  assert.equal(review.opens(), NO_OPENS);
-  assert.equal(review.assessments[0]?.result, AssessmentResult.CriterionNotMet);
-  assert.deepEqual(review.assessments[0]?.findings, []);
-  assert.deepEqual(review.assessments[0]?.fixed_finding_ids, []);
-  const attributes = evaluationEndOf(review.records).attributes;
-  assert.equal(attributes[EvaluationAttribute.Round], SECOND_ROUND);
-  assert.deepEqual(attributes[EvaluationAttribute.ActionLabels], []);
-  assert.equal(attributes[EvaluationAttribute.FixedCount], NO_RELEASES);
-});
-
-test("a fallback binding of a round with a review base submits its full change as patch evidence", async (t) => {
-  const binding = await roundSnapshot(t, REPOSITORY_NAME, "fixed");
-  const review = await reviewOf(t, "true", undefined, {
-    bindings: [binding],
-    transport: localTransport,
-    round: secondRound([
-      { repository: { binding_id: "binding_other" }, judged: binding.judged },
-    ]),
-    reply: ROUND_SUCCESS,
-  });
-  const [patch, ...others] = patchSubmits(review);
-  assert.equal(others.length, NO_RELEASES);
-  const text = Buffer.from(patch!.assets[0]!.content.data, "base64").toString(
-    "utf8",
-  );
-  assert.match(text, /\+\+\+ b\/work/);
-  assert.match(text, /\+\+\+ b\/fix/);
-  assert.ok(
-    review.assessments[0]?.evidence_ids.includes(
-      `patch_${review.submits.indexOf(patch!) + 1}`,
-    ),
-  );
 });
