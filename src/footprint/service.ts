@@ -210,6 +210,138 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+interface MeasureRun {
+  readonly reported: Set<string>;
+  readonly skipped: Set<FootprintKind>;
+  readonly hosts: Set<string | null>;
+  readonly hostKinds: Map<string, Set<FootprintKind>>;
+}
+
+type VanishedCheck = (
+  kind: FootprintKind,
+  host: string | null,
+  key: string,
+) => boolean;
+
+type CleanupRemoval = NonNullable<StoredCleanup["outcome"]>;
+
+interface RemovalWindow {
+  readonly measure: FootprintMeasure;
+  readonly since: number;
+}
+
+interface StatContext {
+  readonly now: number;
+  readonly open: readonly StoredAlert[];
+  readonly entries: readonly Entry[];
+  readonly growths: ReadonlyMap<Entry, FootprintStat["growth_per_day"]>;
+}
+
+function noteHosts(
+  measures: readonly FootprintMeasure[],
+  run: MeasureRun,
+): void {
+  for (const measure of measures) {
+    run.hosts.add(measure.instance_name);
+    if (measure.instance_name === null) continue;
+    const kinds = run.hostKinds.get(measure.instance_name) ?? new Set();
+    kinds.add(measure.kind);
+    run.hostKinds.set(measure.instance_name, kinds);
+  }
+}
+
+function failedEntry(measure: FootprintMeasure, previous?: Entry): Entry {
+  return {
+    measure: previous?.measure ?? measure,
+    measured_at: previous?.measured_at ?? null,
+    error: measure.measure_error,
+    candidates: previous?.candidates ?? null,
+  };
+}
+
+function vanishedCheck(
+  instanceName: string | null,
+  reported: ReadonlySet<string>,
+  skipped: ReadonlySet<FootprintKind>,
+): VanishedCheck {
+  return (kind, host, key) =>
+    host === instanceName && !skipped.has(kind) && !reported.has(key);
+}
+
+function growthWindow(measure: FootprintMeasure, measuredAt: number): number {
+  if (measure.oldest_at === null) return DEFAULT_AGE_DAYS;
+  return Math.max(
+    WINDOW_MIN_DAYS,
+    Math.min(DEFAULT_AGE_DAYS, (measuredAt - measure.oldest_at) / DAY_MS),
+  );
+}
+
+function bytesPerItem(count: number, bytes: number): number {
+  return count === NO_ITEMS ? NO_ITEMS : bytes / count;
+}
+
+function removalOf(
+  cleanup: StoredCleanup,
+  window: RemovalWindow,
+): CleanupRemoval | null {
+  if (
+    cleanup.kind !== window.measure.kind ||
+    cleanup.instance_name !== window.measure.instance_name ||
+    cleanup.finished_at === null ||
+    cleanup.finished_at < window.since ||
+    (cleanup.rule?.name === CleanupRule.OlderThan &&
+      cleanup.rule.older_than_days >= DEFAULT_AGE_DAYS)
+  )
+    return null;
+  return cleanup.outcome;
+}
+
+function isStale(entry: Entry, now: number): boolean {
+  return (
+    entry.measured_at === null ||
+    now - entry.measured_at >
+      FOOTPRINT_STALE_INTERVALS * FOOTPRINT_MEASURE_INTERVAL_MS
+  );
+}
+
+function openAlertOf(
+  open: readonly StoredAlert[],
+  measure: FootprintMeasure,
+): StoredAlert | undefined {
+  return open.find(
+    (candidate) =>
+      candidate.kind === measure.kind &&
+      candidate.instance_name === measure.instance_name &&
+      candidate.item_key === measure.item_key,
+  );
+}
+
+function isOnDevice(candidate: Entry, disk: FootprintMeasure): boolean {
+  const device = candidate.measure.device;
+  return (
+    device !== null &&
+    (device === disk.item_key ||
+      (disk.runtime_store && device === RUNTIME_STORE_DEVICE)) &&
+    (disk.instance_name === null ||
+      candidate.measure.instance_name === disk.instance_name)
+  );
+}
+
+function totalGrowth(
+  disk: FootprintMeasure,
+  entries: readonly Entry[],
+  growths: ReadonlyMap<Entry, FootprintStat["growth_per_day"]>,
+): number | null {
+  let total: number | null = null;
+  for (const entry of entries) {
+    const growth = growths.get(entry);
+    if (!isOnDevice(entry, disk) || growth === null || growth === undefined)
+      continue;
+    total = (total ?? 0) + growth.bytes;
+  }
+  return total;
+}
+
 export class FootprintService implements Service {
   private readonly dependencies: Dependencies;
   private readonly now: () => number;
@@ -272,41 +404,44 @@ export class FootprintService implements Service {
     this.stateDeviceKey =
       (await this.dependencies.stateDevice?.().catch(() => null)) ??
       this.stateDeviceKey;
-    const reported = new Set<string>();
-    const skipped = new Set<FootprintKind>();
-    const hosts = new Set<string | null>([null]);
-    const hostKinds = new Map<string, Set<FootprintKind>>();
+    const run: MeasureRun = {
+      reported: new Set(),
+      skipped: new Set(),
+      hosts: new Set<string | null>([null]),
+      hostKinds: new Map(),
+    };
     for (const owner of this.owners) {
-      let measures: readonly FootprintMeasure[];
-      try {
-        measures = await owner.measure(this.shutdown.signal);
-      } catch (error) {
-        this.dependencies.logger.error(
-          { kinds: owner.kinds, reason: diagnostic(error) },
-          MEASURE_FAILED,
-        );
-        measures = owner.kinds.map((kind) =>
-          failedMeasure(kind, MEASURE_FAILED, messageOf(error)),
-        );
-        owner.kinds.forEach((kind) => skipped.add(kind));
-      }
-      for (const measure of measures) {
-        hosts.add(measure.instance_name);
-        if (measure.instance_name === null) continue;
-        const kinds = hostKinds.get(measure.instance_name) ?? new Set();
-        kinds.add(measure.kind);
-        hostKinds.set(measure.instance_name, kinds);
-      }
-      for (const key of await this.record(owner, measures)) reported.add(key);
+      const measures = await this.measureOwner(owner, run);
+      noteHosts(measures, run);
+      for (const key of await this.record(owner, measures))
+        run.reported.add(key);
     }
-    for (const host of hosts)
+    for (const host of run.hosts)
       this.settle(
         host,
-        reported,
+        run.reported,
         host === null
-          ? skipped
-          : this.unmeasuredKinds(hostKinds.get(host), skipped),
+          ? run.skipped
+          : this.unmeasuredKinds(run.hostKinds.get(host), run.skipped),
       );
+  }
+
+  private async measureOwner(
+    owner: FootprintOwner,
+    run: MeasureRun,
+  ): Promise<readonly FootprintMeasure[]> {
+    try {
+      return await owner.measure(this.shutdown.signal);
+    } catch (error) {
+      this.dependencies.logger.error(
+        { kinds: owner.kinds, reason: diagnostic(error) },
+        MEASURE_FAILED,
+      );
+      owner.kinds.forEach((kind) => run.skipped.add(kind));
+      return owner.kinds.map((kind) =>
+        failedMeasure(kind, MEASURE_FAILED, messageOf(error)),
+      );
+    }
   }
 
   private unmeasuredKinds(
@@ -317,6 +452,22 @@ export class FootprintService implements Service {
       Object.values(FootprintKind).filter(
         (kind) => skipped.has(kind) || !measured?.has(kind),
       ),
+    );
+  }
+
+  private warnErrorChanged(measure: FootprintMeasure, previous?: Entry): void {
+    if (
+      (previous?.error?.code ?? null) === (measure.measure_error?.code ?? null)
+    )
+      return;
+    this.dependencies.logger.warn(
+      {
+        kind: measure.kind,
+        instance_name: measure.instance_name,
+        item_key: measure.item_key,
+        code: measure.measure_error?.code ?? null,
+      },
+      MEASURE_ERROR_CHANGED,
     );
   }
 
@@ -334,26 +485,9 @@ export class FootprintService implements Service {
       );
       reported.add(key);
       const previous = this.entries.get(key);
-      if (
-        (previous?.error?.code ?? null) !==
-        (measure.measure_error?.code ?? null)
-      )
-        this.dependencies.logger.warn(
-          {
-            kind: measure.kind,
-            instance_name: measure.instance_name,
-            item_key: measure.item_key,
-            code: measure.measure_error?.code ?? null,
-          },
-          MEASURE_ERROR_CHANGED,
-        );
+      this.warnErrorChanged(measure, previous);
       if (measure.measure_error !== null) {
-        this.entries.set(key, {
-          measure: previous?.measure ?? measure,
-          measured_at: previous?.measured_at ?? null,
-          error: measure.measure_error,
-          candidates: previous?.candidates ?? null,
-        });
+        this.entries.set(key, failedEntry(measure, previous));
         continue;
       }
       this.entries.set(key, {
@@ -371,46 +505,60 @@ export class FootprintService implements Service {
     reported: ReadonlySet<string>,
     skipped: ReadonlySet<FootprintKind>,
   ): void {
-    const vanished = (kind: FootprintKind, host: string | null, key: string) =>
-      host === instanceName && !skipped.has(kind) && !reported.has(key);
+    const vanished = vanishedCheck(instanceName, reported, skipped);
     for (const [key, entry] of this.entries)
       if (vanished(entry.measure.kind, entry.measure.instance_name, key)) {
         this.entries.delete(key);
         this.tracks.delete(key);
       }
     try {
-      const open = new Map(
-        this.dependencies.store
-          .transaction((tx) => openAlerts(tx))
-          .map((alert) => [
-            entryKey(alert.kind, alert.instance_name, alert.item_key),
-            alert,
-          ]),
-      );
-      for (const [key, alert] of open)
-        if (vanished(alert.kind, alert.instance_name, key))
-          this.resolve(key, alert);
-      for (const stat of this.stats()) {
-        const key = entryKey(stat.kind, stat.instance_name, stat.item_key);
-        if (stat.instance_name !== instanceName || !reported.has(key)) continue;
-        const alert = open.get(key);
-        const next = step(
-          this.tracks.get(key) ?? (alert ? FIRING_TRACK : OK_TRACK),
-          stat,
-        );
-        if (next.event?.fire) this.fire(stat, next.event);
-        else if (next.event && alert) {
-          this.resolve(key, alert);
-          continue;
-        }
-        this.tracks.set(key, next.track);
-      }
+      this.evaluateAlerts(instanceName, reported, vanished);
     } catch (error) {
       this.dependencies.logger.error(
         { reason: diagnostic(error) },
         ALERT_EVALUATION_FAILED,
       );
     }
+  }
+
+  private evaluateAlerts(
+    instanceName: string | null,
+    reported: ReadonlySet<string>,
+    vanished: VanishedCheck,
+  ): void {
+    const open = new Map(
+      this.dependencies.store
+        .transaction((tx) => openAlerts(tx))
+        .map((alert) => [
+          entryKey(alert.kind, alert.instance_name, alert.item_key),
+          alert,
+        ]),
+    );
+    for (const [key, alert] of open)
+      if (vanished(alert.kind, alert.instance_name, key))
+        this.resolve(key, alert);
+    for (const stat of this.stats()) {
+      const key = entryKey(stat.kind, stat.instance_name, stat.item_key);
+      if (stat.instance_name !== instanceName || !reported.has(key)) continue;
+      this.advanceTrack(stat, key, open.get(key));
+    }
+  }
+
+  private advanceTrack(
+    stat: FootprintStat,
+    key: string,
+    alert: StoredAlert | undefined,
+  ): void {
+    const next = step(
+      this.tracks.get(key) ?? (alert ? FIRING_TRACK : OK_TRACK),
+      stat,
+    );
+    if (next.event?.fire) this.fire(stat, next.event);
+    else if (next.event && alert) {
+      this.resolve(key, alert);
+      return;
+    }
+    this.tracks.set(key, next.track);
   }
 
   private fire(
@@ -758,34 +906,16 @@ export class FootprintService implements Service {
     )
       return null;
     const measuredAt = entry.measured_at;
-    const window =
-      measure.oldest_at === null
-        ? DEFAULT_AGE_DAYS
-        : Math.max(
-            WINDOW_MIN_DAYS,
-            Math.min(
-              DEFAULT_AGE_DAYS,
-              (measuredAt - measure.oldest_at) / DAY_MS,
-            ),
-          );
-    const perItem =
-      measure.count === NO_ITEMS ? NO_ITEMS : measure.bytes / measure.count;
+    const window = growthWindow(measure, measuredAt);
+    const perItem = bytesPerItem(measure.count, measure.bytes);
+    const since = measuredAt - window * DAY_MS;
     let removed = 0;
     let removedBytes = 0;
     for (const cleanup of cleanups) {
-      if (
-        cleanup.kind !== measure.kind ||
-        cleanup.instance_name !== measure.instance_name ||
-        cleanup.outcome === null ||
-        cleanup.finished_at === null ||
-        cleanup.finished_at < measuredAt - window * DAY_MS ||
-        (cleanup.rule?.name === CleanupRule.OlderThan &&
-          cleanup.rule.older_than_days >= DEFAULT_AGE_DAYS)
-      )
-        continue;
-      removed += cleanup.outcome.removed;
-      removedBytes +=
-        cleanup.outcome.removed_bytes ?? cleanup.outcome.removed * perItem;
+      const outcome = removalOf(cleanup, { measure, since });
+      if (outcome === null) continue;
+      removed += outcome.removed;
+      removedBytes += outcome.removed_bytes ?? outcome.removed * perItem;
     }
     return {
       count: (measure.recent_count + removed) / window,
@@ -807,66 +937,75 @@ export class FootprintService implements Service {
     const growths = new Map(
       entries.map((entry) => [entry, this.growth(entry, cleanups)]),
     );
-    return entries.map((entry) => {
-      const { measure } = entry;
-      const growth = growths.get(entry) ?? null;
-      const alert = open.find(
-        (candidate) =>
-          candidate.kind === measure.kind &&
-          candidate.instance_name === measure.instance_name &&
-          candidate.item_key === measure.item_key,
-      );
-      const cleanable = isCleanable(measure.kind) ? measure.kind : null;
-      const rule = cleanable === null ? null : defaultRule(cleanable);
-      return {
-        kind: measure.kind,
-        instance_name: measure.instance_name,
-        item_key: measure.item_key,
-        instance_names: [...measure.instance_names],
-        measured_at: entry.measured_at,
-        stale:
-          entry.measured_at === null ||
-          now - entry.measured_at >
-            FOOTPRINT_STALE_INTERVALS * FOOTPRINT_MEASURE_INTERVAL_MS,
-        measure_error: entry.error,
-        count: measure.count,
-        bytes: measure.bytes,
-        wal_bytes: measure.wal_bytes,
-        free_bytes: measure.free_bytes,
-        total_bytes: measure.total_bytes,
-        oldest_at: measure.oldest_at,
-        newest_at: measure.newest_at,
-        growth_per_day: growth,
-        days_to_floor:
-          measure.kind === FootprintKind.Disk
-            ? this.daysToFloor(entry, entries, growths)
-            : null,
-        thresholds: this.thresholds(measure.kind),
-        alert: {
-          state:
-            this.tracks.get(
-              entryKey(measure.kind, measure.instance_name, measure.item_key),
-            )?.state ??
-            (alert ? FootprintAlertState.Firing : FootprintAlertState.Ok),
-          alert_id: alert?.alert_id ?? null,
-        },
-        delete_operation:
-          cleanable === null ? null : DELETE_OPERATIONS[cleanable],
-        rules: cleanable === null ? [] : [...KIND_RULES[cleanable]],
-        candidates:
-          rule === null || entry.candidates === null
-            ? null
-            : {
-                rule,
-                count: entry.candidates.count,
-                bytes:
-                  measure.kind === FootprintKind.Trace
-                    ? this.estimate(measure, entry.candidates.count)
-                    : entry.candidates.bytes,
-                bytes_estimated: measure.kind === FootprintKind.Trace,
-              },
-      };
-    });
+    return entries.map((entry) =>
+      this.entryStat(entry, { now, open, entries, growths }),
+    );
+  }
+
+  private entryStat(entry: Entry, context: StatContext): FootprintStat {
+    const { measure } = entry;
+    const alert = openAlertOf(context.open, measure);
+    const cleanable = isCleanable(measure.kind) ? measure.kind : null;
+    return {
+      kind: measure.kind,
+      instance_name: measure.instance_name,
+      item_key: measure.item_key,
+      instance_names: [...measure.instance_names],
+      measured_at: entry.measured_at,
+      stale: isStale(entry, context.now),
+      measure_error: entry.error,
+      count: measure.count,
+      bytes: measure.bytes,
+      wal_bytes: measure.wal_bytes,
+      free_bytes: measure.free_bytes,
+      total_bytes: measure.total_bytes,
+      oldest_at: measure.oldest_at,
+      newest_at: measure.newest_at,
+      growth_per_day: context.growths.get(entry) ?? null,
+      days_to_floor:
+        measure.kind === FootprintKind.Disk
+          ? this.daysToFloor(entry, context.entries, context.growths)
+          : null,
+      thresholds: this.thresholds(measure.kind),
+      alert: this.alertStat(measure, alert),
+      delete_operation:
+        cleanable === null ? null : DELETE_OPERATIONS[cleanable],
+      rules: cleanable === null ? [] : [...KIND_RULES[cleanable]],
+      candidates: this.candidatesStat(
+        entry,
+        cleanable === null ? null : defaultRule(cleanable),
+      ),
+    };
+  }
+
+  private alertStat(
+    measure: FootprintMeasure,
+    alert: StoredAlert | undefined,
+  ): FootprintStat["alert"] {
+    return {
+      state:
+        this.tracks.get(
+          entryKey(measure.kind, measure.instance_name, measure.item_key),
+        )?.state ??
+        (alert ? FootprintAlertState.Firing : FootprintAlertState.Ok),
+      alert_id: alert?.alert_id ?? null,
+    };
+  }
+
+  private candidatesStat(
+    entry: Entry,
+    rule: CleanupRuleValue | null,
+  ): FootprintStat["candidates"] {
+    if (rule === null || entry.candidates === null) return null;
+    const estimated = entry.measure.kind === FootprintKind.Trace;
+    return {
+      rule,
+      count: entry.candidates.count,
+      bytes: estimated
+        ? this.estimate(entry.measure, entry.candidates.count)
+        : entry.candidates.bytes,
+      bytes_estimated: estimated,
+    };
   }
 
   private estimate(measure: FootprintMeasure, count: number): number | null {
@@ -884,19 +1023,7 @@ export class FootprintService implements Service {
     const { measure } = disk;
     if (measure.free_bytes === null || measure.total_bytes === null)
       return null;
-    let total: number | null = null;
-    for (const entry of entries) {
-      const device = entry.measure.device;
-      const onDevice =
-        device !== null &&
-        (device === measure.item_key ||
-          (measure.runtime_store && device === RUNTIME_STORE_DEVICE)) &&
-        (measure.instance_name === null ||
-          entry.measure.instance_name === measure.instance_name);
-      const growth = growths.get(entry);
-      if (!onDevice || growth === null || growth === undefined) continue;
-      total = (total ?? 0) + growth.bytes;
-    }
+    const total = totalGrowth(measure, entries, growths);
     if (total === null || total === NO_GROWTH) return null;
     const floor =
       this.dependencies.config.disk_free_ratio * measure.total_bytes;
