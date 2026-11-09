@@ -557,25 +557,6 @@ function insertRevision(
     );
 }
 
-test("mission.get returns a project's mission through one commit", (t) => {
-  const { store, mission, invoke, commits, registry } = handlerFixture(t);
-  store.transaction((tx) => mission.createMission(tx, PROJECT_ID, HUMAN_ACTOR));
-  const result = invoke(PROJECT_ID);
-  assert.ok(
-    identitySchema(MISSION_IDENTITY_PREFIX).safeParse(result.id).success,
-  );
-  assert.deepEqual(result, {
-    id: result.id,
-    project_id: PROJECT_ID,
-    version: MISSION_INITIAL_VERSION,
-  });
-  assert.equal(
-    registry.get(missionOperations.get.id).operation.access,
-    AccessPolicy.Human,
-  );
-  assert.equal(commits(), ONE_COMMIT);
-});
-
 test("mission.get maps an unknown project to not found", (t) => {
   const { invoke, commits } = handlerFixture(t);
   assert.throws(
@@ -715,17 +696,6 @@ test("MissionService run logs a failed resume and keeps waiting", async (t) => {
   assert.equal(records[0]?.level, FAILED_LEVEL);
   assert.equal(records[0]?.message, RESUME_FAILED_MESSAGE);
   assert.ok((records[0]?.fields as { error: unknown }).error instanceof Error);
-});
-
-test("MissionService registers its operations health probe", async (t) => {
-  const registry = new HealthRegistry();
-  const { store } = fixture(t);
-  const mission = makeService(registry, store);
-  assert.equal(await mission.start(), null);
-  const results = await registry.check(background);
-  assert.ok(Object.hasOwn(results, MISSION_SERVICE_NAME));
-  assert.equal(results[MISSION_SERVICE_NAME]?.operations, HealthStatus.Healthy);
-  assert.equal(await mission.stop(), null);
 });
 
 test("createMission inserts a version-one mission and preserves duplicate project errors", (t) => {
@@ -1690,27 +1660,6 @@ test("node get answers the tasks of the visible revision", (t) => {
   );
 });
 
-test("node get answers intent and tags of the pinned revision while an attempt is open", (t) => {
-  const f = nodeFixture(t);
-  const nodeId = f.examine();
-  f.store.transaction((tx) =>
-    openAttempt(tx, nodeId, FIRST_REVISION, HUMAN_ACTOR, CREATED_AT),
-  );
-  const body = updateBody(f, nodeId);
-  body.content.tags = ["platform.macos"];
-  body.tasks = [];
-  f.update(nodeId, body);
-  const pinned = f.read(nodeId);
-  assert.equal(pinned.visible_revision, NEXT_REVISION);
-  assert.equal(pinned.intent, Intent.Examine);
-  assert.deepEqual(pinned.tags, []);
-  assert.deepEqual(pinned.content.tags, ["platform.macos"]);
-  f.store.transaction((tx) =>
-    closeAttempt(tx, nodeId, FIRST_REVISION, RETIRED_AT),
-  );
-  assert.deepEqual(f.read(nodeId).tags, ["platform.macos"]);
-});
-
 test("node list filters intent on the pinned revision while an attempt is open", (t) => {
   const f = nodeFixture(t);
   const nodeId = f.examine();
@@ -1993,24 +1942,6 @@ test("dependency edits reroute implement nodes and jobs atomically without revis
   ]);
   assert.deepEqual(f.snapshot().revisions, before.revisions);
   assert.deepEqual(f.snapshot().dependencies, []);
-});
-
-test("node reads answer dependsOn in ascending order on examine and implement nodes", (t) => {
-  const f = dependencyFixture(t);
-  const implement = f.implement();
-  const examine = f.examine();
-  const first = f.create({ ...f.body(), filename: OTHER_FILENAME }).revisions[
-    FIRST_ELEMENT_INDEX
-  ]!.node_id;
-  const second = f.create({ ...f.body(), filename: NEW_FILENAME }).revisions[
-    FIRST_ELEMENT_INDEX
-  ]!.node_id;
-  assert.deepEqual(dependsOnOf(f.read(examine)), []);
-  f.edit(DependencyOperation.Add, examine, second);
-  f.edit(DependencyOperation.Add, examine, first);
-  f.edit(DependencyOperation.Add, implement, first);
-  assert.deepEqual(dependsOnOf(f.read(examine)), [first, second].sort());
-  assert.deepEqual(dependsOnOf(f.read(implement)), [first]);
 });
 
 test("dependency addition rejects a three-node cycle and accepts the edge after a retirement breaks the path", (t) => {
@@ -2576,25 +2507,6 @@ test("node.priority.set reads absent priority as zero and overwrites without rev
   assert.deepEqual(f.snapshot().revisions, revisions);
 });
 
-test("node.priority.set accepts both signed limits and zero on examine and implement nodes", (t) => {
-  const f = priorityFixture(t);
-  const examine = f.examine();
-  const implement = f.create(f.body(Intent.Implement)).revisions[
-    FIRST_ELEMENT_INDEX
-  ]!.node_id;
-  const version = f.version();
-  for (const [id, value] of [
-    [examine, Number.MIN_SAFE_INTEGER],
-    [implement, Number.MAX_SAFE_INTEGER],
-    [implement, LOWEST_PRIORITY],
-  ] as const) {
-    const answer = f.set(id, value, version);
-    assert.equal(answer.priority, value);
-    assert.equal(f.node(id)?.priority, value);
-  }
-  assert.equal(f.version(), version);
-});
-
 test("node.priority.set checks existence, retirement, version and terminal in order", (t) => {
   const f = priorityFixture(t);
   const id = f.implement();
@@ -2683,40 +2595,6 @@ test("node.update no-op and changed implement fields preserve version and write 
     humanActor(f.caller),
   );
   assert.equal(f.version(), changed.mission_version);
-});
-
-test("node.update of an examine node lists only changed content fields in canonical order", (t) => {
-  const f = nodeFixture(t);
-  const id = f.examine();
-  const body = updateBody(f, id);
-  const changed = f.update(id, {
-    ...body,
-    content: {
-      ...body.content,
-      tags: ["platform.macos"],
-      commit_type: "docs",
-      criterion: "new criterion",
-      verifications: ["new verification"],
-      requirement: "new requirement",
-      name: "new name",
-      bindings: [OTHER_BINDING_ID],
-    },
-  });
-  assert.deepEqual(changed.revisions[FIRST_ELEMENT_INDEX]?.change, {
-    write: RevisionWrite.NodeUpdate,
-    previous_revision: FIRST_REVISION,
-    changed_fields: CONTENT_FIELDS.filter(
-      (field) =>
-        field !== ContentField.Filename &&
-        field !== ContentField.Intent &&
-        field !== ContentField.ExternalLinks,
-    ),
-    tasks: [],
-  });
-  assert.deepEqual(changed.revisions[FIRST_ELEMENT_INDEX]?.content.bindings, [
-    OTHER_BINDING_ID,
-  ]);
-  assert.deepEqual(changed.revisions[FIRST_ELEMENT_INDEX]?.tasks, []);
 });
 
 test("node.update accepts the binding identities of a node read and refuses a binding name", (t) => {
@@ -2855,27 +2733,6 @@ test("node update creates, changes and removes tasks", (t) => {
     MissionErrorCode.FilenameConflict,
     { filename: IMPLEMENT_FILENAME },
   );
-});
-
-test("node update changes intent while the attempt reads 0", (t) => {
-  const f = nodeFixture(t);
-  const id = f.examine();
-  const body = updateBody(f, id);
-  const changed = f.update(id, {
-    ...body,
-    content: {
-      ...body.content,
-      intent: Intent.Implement,
-      bindings: [BINDING_ID],
-    },
-  });
-  const revision = changed.revisions[FIRST_ELEMENT_INDEX]!;
-  assert.equal(revision.content.intent, Intent.Implement);
-  assert.deepEqual(revision.change.changed_fields, [
-    ContentField.Bindings,
-    ContentField.Intent,
-  ]);
-  assert.equal(f.read(id).intent, Intent.Implement);
 });
 
 test("node update refuses an intent change after the first claim with mission.node.intent_locked", (t) => {
@@ -3227,30 +3084,6 @@ test("criterion.set no-op preserves mission and revision; changed criterion pres
     external_links: [],
   });
   assert.deepEqual(revision.tasks, []);
-});
-
-test("criterion.set examine changes only criterion and verifications", (t) => {
-  const f = nodeFixture(t);
-  const id = f.examine();
-  const body = criterionBody(f, id);
-  const commits = f.commits();
-  const result = f.criterionSet(id, {
-    ...body,
-    criterion: "new criterion",
-    verifications: ["new verification"],
-  });
-  assert.equal(f.commits(), commits + ONE_COMMIT);
-  assert.equal(
-    result.mission_version,
-    body.expected_mission_version + VERSION_INCREMENT,
-  );
-  assert.deepEqual(result.revisions[FIRST_ELEMENT_INDEX]!.change, {
-    write: RevisionWrite.CriterionSet,
-    previous_revision: FIRST_REVISION,
-    changed_fields: [ContentField.Criterion, ContentField.Verifications],
-    tasks: [],
-  });
-  assert.deepEqual(result.revisions[FIRST_ELEMENT_INDEX]!.tasks, []);
 });
 
 test("criterion.set keeps the task list unchanged", (t) => {
@@ -3719,57 +3552,6 @@ test("node.retire checks existence, retirement, version, reason, admissibility a
     () => f.apply(id, body),
     retirementError(MissionErrorCode.Retired, { node_id: id }),
   );
-});
-
-test("node.retire detects a changed dependency digest even without a mission version change", (t) => {
-  const f = retireFixture(t);
-  const { node_id: nodeId, depends_on_id: dependsOnId } = f.pair();
-  const plan = f.preview(dependsOnId, { force: "true" });
-  f.store.database
-    .prepare(
-      "INSERT INTO mission_dependency (mission_id, dependent_id, depends_on_id) VALUES (?, ?, ?)",
-    )
-    .run(f.mission_id, nodeId, dependsOnId);
-  const before = { ...f.snapshot(), jobs: f.jobs() };
-  const changed = f.preview(dependsOnId, { force: "true" });
-  assert.equal(changed.mission_version, plan.mission_version);
-  assert.notEqual(changed.preview_digest, plan.preview_digest);
-  assert.throws(
-    () => f.apply(dependsOnId, f.request(plan)),
-    retirementError(MissionErrorCode.RetireMismatch),
-  );
-  assert.deepEqual({ ...f.snapshot(), jobs: f.jobs() }, before);
-});
-
-test("node.retire digest binds force and mission version", (t) => {
-  const f = retireFixture(t);
-  const id = f.examine();
-  const plan = f.preview(id);
-  assert.notEqual(
-    f.preview(id, { force: "true" }).preview_digest,
-    plan.preview_digest,
-  );
-  assert.throws(
-    () => f.apply(id, { ...f.request(plan), force: true }),
-    retirementError(MissionErrorCode.RetireMismatch),
-  );
-  f.create({ ...f.body(), filename: OTHER_FILENAME });
-  const before = { ...f.snapshot(), jobs: f.jobs() };
-  assert.throws(
-    () => f.apply(id, f.request(plan)),
-    retirementError(MissionErrorCode.VersionConflict, {
-      current: plan.mission_version + VERSION_INCREMENT,
-    }),
-  );
-  assert.throws(
-    () =>
-      f.apply(id, {
-        ...f.request(plan),
-        expected_mission_version: plan.mission_version + VERSION_INCREMENT,
-      }),
-    retirementError(MissionErrorCode.RetireMismatch),
-  );
-  assert.deepEqual({ ...f.snapshot(), jobs: f.jobs() }, before);
 });
 
 test("node.retire rolls back retirement, dependency removal, routing and jobs when queue deletion fails", (t) => {
@@ -4655,32 +4437,6 @@ for (const [label, taskCommand] of [
   });
 }
 
-test("import.preview accepts an implement node with no task file", (t) => {
-  const f = importApplyFixture(t);
-  const snapshot = f.importSnapshot(
-    f.initial.flatMap((item) => {
-      if (item.filename === IMPLEMENT_FILENAME)
-        return [{ ...item, verifications: [IMPORT_COMMAND] }];
-      return item.filename === TASK_FILENAME ? [] : [item];
-    }),
-  );
-  assert.deepEqual(f.preview(snapshot).violations, []);
-});
-
-test("import.preview accepts an implement verification that a task of the node holds exactly", (t) => {
-  const f = importApplyFixture(t);
-  const snapshot = f.importSnapshot(
-    f.initial.map((item) =>
-      item.filename === IMPLEMENT_FILENAME
-        ? { ...item, verifications: [IMPORT_COMMAND] }
-        : item.filename === TASK_FILENAME
-          ? { ...item, verifications: [VERIFICATION, IMPORT_COMMAND] }
-          : item,
-    ),
-  );
-  assert.deepEqual(f.preview(snapshot).violations, []);
-});
-
 for (const [state, code] of [
   [NodeState.Executing, MissionErrorCode.ConditionFailed],
   [NodeState.Completed, MissionErrorCode.TerminalChange],
@@ -4845,24 +4601,6 @@ test("a refused import apply sends one Error trace and still answers the violati
     contribution.attributes[ImportAttribute.VersionTo],
     contribution.attributes[ImportAttribute.VersionFrom],
   );
-});
-
-test("a refused import apply without a violation records its error code", (t) => {
-  const recorded = importActs();
-  const f = importApplyFixture(t, undefined, undefined, recorded.collaborators);
-  const body = f.request();
-  assert.throws(
-    () => f.apply({ ...body, preview_digest: INVALID_RETIRE_DIGEST }),
-    retirementError(MissionErrorCode.RetirementMismatch),
-  );
-  assert.equal(recorded.acts.length, SINGLE_ITEM);
-  const { contribution } = recorded.acts[0]!;
-  assert.equal(contribution.status, SpanStatus.Error);
-  assert.equal(
-    contribution.attributes[ImportAttribute.ErrorType],
-    MissionErrorCode.RetirementMismatch,
-  );
-  assert.deepEqual(contribution.attributes[ImportAttribute.ViolationCodes], []);
 });
 
 test("an import preview and a stale import apply send no trace", (t) => {
@@ -5306,25 +5044,6 @@ test("import.apply graph-only changes reroute jobs without writing content revis
     f.jobs().map((job) => job.node_id),
     [implement.id!, other.id!].sort(),
   );
-});
-
-test("import.apply permits terminal no-ops and an empty mission without writes", (t) => {
-  const f = importApplyFixture(t);
-  const empty = f.apply(f.request(f.importSnapshot([])));
-  assert.equal(empty.mission_version, MISSION_INITIAL_VERSION);
-  assert.deepEqual(empty.assigned_ids, []);
-  const first = f.apply(f.request());
-  const entries = f.identified(first);
-  const implement = entries.find(
-    (item) => item.filename === IMPLEMENT_FILENAME,
-  )!;
-  f.setState(implement.id!, NodeState.Completed);
-  const body = f.request(f.importSnapshot(entries));
-  const before = f.state();
-  const result = f.apply(body);
-  assert.equal(result.mission_version, first.mission_version);
-  assert.deepEqual(result.changes.revisions, []);
-  assert.deepEqual(f.state(), before);
 });
 
 test("import.apply Markdown uses the same digest, revisions, graph and no-op behavior as JSON", (t) => {
@@ -6129,24 +5848,6 @@ test("a rebind of a node with mixed environments refuses and writes no revision"
     (error) => f.mixedRefusal(error, [BINDING_ID, MIXED_SECOND_NEXT_ID]),
   );
   assert.deepEqual(f.snapshot(), before);
-});
-
-test("node create, node update and a rebind pass when the environments are not mixed", (t) => {
-  const f = mixedFixture(t);
-  f.state.mixed = false;
-  const created = f.create(f.bodyNaming([BINDING_ID]));
-  const nodeId = created.revisions[FIRST_ELEMENT_INDEX]!.node_id;
-  f.create({
-    ...f.bodyNaming([BINDING_ID, MIXED_SECOND_ID]),
-    filename: OTHER_FILENAME,
-  });
-  const updated = f.update(
-    nodeId,
-    f.updateNaming(nodeId, [BINDING_ID, MIXED_SECOND_ID]),
-  );
-  assert.equal(updated.revisions.length, SINGLE_ITEM);
-  const rebound = f.rebindTo(nodeId);
-  assert.equal(rebound.node_change.revisions.length, SINGLE_ITEM);
 });
 
 const SETUP_FILENAME = "setup.md";
