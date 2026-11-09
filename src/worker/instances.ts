@@ -156,6 +156,12 @@ export interface SessionReadTarget {
 export type SessionReadWait =
   { result: SessionReadResult } | { unreachable: UnreachableReason };
 
+interface SessionReadWaitScope {
+  instanceId: string;
+  queued: PendingSessionRead;
+  signal: AbortSignal;
+}
+
 interface PendingSessionRead {
   read_id: string;
   read: SessionRead;
@@ -1148,31 +1154,46 @@ export class WorkerInstances implements WorkerInstanceLookups {
     signal.throwIfAborted();
     if (this.connectionOf(instance.id) === null)
       return { unreachable: UnreachableReason.Offline };
+    const queued = this.pendingSessionRead(instance, read);
+    if (!queued) return { unreachable: UnreachableReason.Busy };
+    return this.awaitSessionRead({ instanceId: instance.id, queued, signal });
+  }
+
+  private pendingSessionRead(
+    instance: SessionReadTarget,
+    read: SessionRead,
+  ): PendingSessionRead | null {
     let pending = this.sessionReads.get(instance.id);
-    let queued = [...(pending?.values() ?? [])].find((candidate) =>
+    const existing = [...(pending?.values() ?? [])].find((candidate) =>
       sameRead(candidate.read, read),
     );
-    if (!queued) {
-      if ((pending?.size ?? NO_PENDING_READS) >= SESSION_READS_PENDING_MAX)
-        return { unreachable: UnreachableReason.Busy };
-      if (!pending) {
-        pending = new Map();
-        this.sessionReads.set(instance.id, pending);
-      }
-      queued = {
-        read_id: createIdentity(SESSION_READ_PREFIX),
-        read: {
-          execution_id: read.execution_id,
-          session_id: read.session_id,
-          entry_id: read.entry_id,
-          entry_type: read.entry_type,
-        },
-        answered: Promise.withResolvers(),
-        waiters: NO_WAITERS,
-      };
-      pending.set(queued.read_id, queued);
-      this.raiseWorkVersion(instance.name);
+    if (existing) return existing;
+    if ((pending?.size ?? NO_PENDING_READS) >= SESSION_READS_PENDING_MAX)
+      return null;
+    if (!pending) {
+      pending = new Map();
+      this.sessionReads.set(instance.id, pending);
     }
+    const queued: PendingSessionRead = {
+      read_id: createIdentity(SESSION_READ_PREFIX),
+      read: {
+        execution_id: read.execution_id,
+        session_id: read.session_id,
+        entry_id: read.entry_id,
+        entry_type: read.entry_type,
+      },
+      answered: Promise.withResolvers(),
+      waiters: NO_WAITERS,
+    };
+    pending.set(queued.read_id, queued);
+    this.raiseWorkVersion(instance.name);
+    return queued;
+  }
+
+  private async awaitSessionRead(
+    wait: SessionReadWaitScope,
+  ): Promise<SessionReadWait> {
+    const { instanceId, queued, signal } = wait;
     queued.waiters++;
     const cancel = new AbortController();
     const expired = delay(this.dependencies.sessionReadWaitMs, null, {
@@ -1187,7 +1208,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
       cancel.abort();
       queued.waiters--;
       if (queued.waiters === NO_WAITERS)
-        this.dropSessionRead(instance.id, queued);
+        this.dropSessionRead(instanceId, queued);
     }
   }
 

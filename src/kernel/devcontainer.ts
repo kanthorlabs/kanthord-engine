@@ -136,38 +136,55 @@ function stringEnd(text: string, start: number): number {
   return text.length;
 }
 
+interface JsoncScan {
+  output: string;
+  comma: number;
+  index: number;
+}
+
+function copyString(text: string, scan: JsoncScan): void {
+  const end = stringEnd(text, scan.index);
+  scan.output += text.slice(scan.index, end);
+  scan.comma = NO_COMMA;
+  scan.index = end;
+}
+
+function skipLineComment(text: string, scan: JsoncScan): void {
+  const end = text.indexOf(NEWLINE, scan.index);
+  scan.index = end === NOT_FOUND ? text.length : end;
+}
+
+function blankBlockComment(text: string, scan: JsoncScan): boolean {
+  const end = text.indexOf(BLOCK_END, scan.index + COMMENT_START_LENGTH);
+  if (end === NOT_FOUND) return false;
+  scan.output += SEPARATOR;
+  scan.index = end + BLOCK_END.length;
+  return true;
+}
+
+function copyToken(char: string, scan: JsoncScan): void {
+  if (CLOSERS.has(char) && scan.comma !== NO_COMMA)
+    scan.output = `${scan.output.slice(0, scan.comma)}${SEPARATOR}${scan.output.slice(scan.comma + 1)}`;
+  scan.comma = char === COMMA ? scan.output.length : NO_COMMA;
+  scan.output += char;
+  scan.index += 1;
+}
+
 export function jsoncText(text: string): string | null {
-  let output = "";
-  let comma = NO_COMMA;
-  let index = 0;
-  while (index < text.length) {
-    const char = text[index]!;
-    const next = text[index + 1];
-    if (char === QUOTE) {
-      const end = stringEnd(text, index);
-      output += text.slice(index, end);
-      comma = NO_COMMA;
-      index = end;
-    } else if (char === SLASH && next === SLASH) {
-      const end = text.indexOf(NEWLINE, index);
-      index = end === NOT_FOUND ? text.length : end;
-    } else if (char === SLASH && next === STAR) {
-      const end = text.indexOf(BLOCK_END, index + COMMENT_START_LENGTH);
-      if (end === NOT_FOUND) return null;
-      output += SEPARATOR;
-      index = end + BLOCK_END.length;
+  const scan: JsoncScan = { output: "", comma: NO_COMMA, index: 0 };
+  while (scan.index < text.length) {
+    const char = text[scan.index]!;
+    const next = text[scan.index + 1];
+    if (char === QUOTE) copyString(text, scan);
+    else if (char === SLASH && next === SLASH) skipLineComment(text, scan);
+    else if (char === SLASH && next === STAR) {
+      if (!blankBlockComment(text, scan)) return null;
     } else if (WHITESPACE.test(char)) {
-      output += char;
-      index += 1;
-    } else {
-      if (CLOSERS.has(char) && comma !== NO_COMMA)
-        output = `${output.slice(0, comma)}${SEPARATOR}${output.slice(comma + 1)}`;
-      comma = char === COMMA ? output.length : NO_COMMA;
-      output += char;
-      index += 1;
-    }
+      scan.output += char;
+      scan.index += 1;
+    } else copyToken(char, scan);
   }
-  return output;
+  return scan.output;
 }
 
 function withoutOtherTools(customizations: unknown): unknown {
@@ -284,33 +301,39 @@ export function variableRefusal(
   return null;
 }
 
+function disallowedKey(
+  value: unknown,
+  allowed: ReadonlySet<string>,
+): string | undefined {
+  if (!isObject(value)) return undefined;
+  return Object.keys(value).find((key) => !allowed.has(key));
+}
+
 function keyRefusal(document: EnvironmentObject): EnvironmentRefusal | null {
-  for (const key of Object.keys(document))
-    if (
+  const topKey = Object.keys(document).find(
+    (key) =>
       !ALLOWED_KEYS.has(key) &&
       !DROPPED_KEYS.has(key) &&
-      key !== CUSTOMIZATIONS_KEY
-    )
-      return refusal(key, EnvironmentRefusalReason.KeyNotAllowed);
-  const build = document[BUILD_KEY];
-  if (isObject(build))
-    for (const key of Object.keys(build))
-      if (!BUILD_ALLOWED_KEYS.has(key))
-        return refusal(
-          `${BUILD_KEY}${KEY_SEPARATOR}${key}`,
-          EnvironmentRefusalReason.KeyNotAllowed,
-        );
+      key !== CUSTOMIZATIONS_KEY,
+  );
+  if (topKey !== undefined)
+    return refusal(topKey, EnvironmentRefusalReason.KeyNotAllowed);
+  const buildKey = disallowedKey(document[BUILD_KEY], BUILD_ALLOWED_KEYS);
+  if (buildKey !== undefined)
+    return refusal(
+      `${BUILD_KEY}${KEY_SEPARATOR}${buildKey}`,
+      EnvironmentRefusalReason.KeyNotAllowed,
+    );
   const customizations = document[CUSTOMIZATIONS_KEY];
   const kanthord = isObject(customizations)
     ? (customizations as EnvironmentObject)[KANTHORD_KEY]
     : undefined;
-  if (isObject(kanthord))
-    for (const key of Object.keys(kanthord))
-      if (!KANTHORD_ALLOWED_KEYS.has(key))
-        return refusal(
-          [CUSTOMIZATIONS_KEY, KANTHORD_KEY, key].join(KEY_SEPARATOR),
-          EnvironmentRefusalReason.KeyNotAllowed,
-        );
+  const kanthordKey = disallowedKey(kanthord, KANTHORD_ALLOWED_KEYS);
+  if (kanthordKey !== undefined)
+    return refusal(
+      [CUSTOMIZATIONS_KEY, KANTHORD_KEY, kanthordKey].join(KEY_SEPARATOR),
+      EnvironmentRefusalReason.KeyNotAllowed,
+    );
   return null;
 }
 
