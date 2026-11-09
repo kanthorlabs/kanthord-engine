@@ -52,7 +52,7 @@ function scanString(text: string, start: number): number {
   throw new Diagnostic(NOT_JSON, "invalid JSON string");
 }
 
-export function detectDuplicateKeys(text: string): void {
+function assertJsonParses(text: string): void {
   try {
     JSON.parse(text);
   } catch (error) {
@@ -60,29 +60,41 @@ export function detectDuplicateKeys(text: string): void {
       throw new Diagnostic(NOT_JSON, "invalid JSON document");
     throw error;
   }
+}
+
+function recordKey(frame: NonNullable<Frame>, key: string): void {
+  if (frame.keys.has(key))
+    throw new Diagnostic(DUPLICATE_KEY, "duplicate JSON key", {
+      fields: [["key", key]],
+    });
+  frame.keys.add(key);
+  frame.expectKey = false;
+}
+
+function scanQuoted(stack: Frame[], text: string, start: number): number {
+  const end = scanString(text, start);
+  const frame = stack.at(-SCAN_STEP);
+  if (frame?.expectKey) recordKey(frame, JSON.parse(text.slice(start, end)));
+  return end;
+}
+
+function trackStructure(stack: Frame[], char: string | undefined): void {
+  if (char === OBJECT_START) stack.push({ keys: new Set(), expectKey: true });
+  else if (char === ARRAY_START) stack.push(null);
+  else if (char === OBJECT_END || char === ARRAY_END) stack.pop();
+  else if (char === COMMA) {
+    const frame = stack.at(-SCAN_STEP);
+    if (frame) frame.expectKey = true;
+  }
+}
+
+export function detectDuplicateKeys(text: string): void {
+  assertJsonParses(text);
   const stack: Frame[] = [];
   for (let index = STRING_START_INDEX; index < text.length; index++) {
     const char = text[index];
-    if (char === OBJECT_START) stack.push({ keys: new Set(), expectKey: true });
-    else if (char === ARRAY_START) stack.push(null);
-    else if (char === OBJECT_END || char === ARRAY_END) stack.pop();
-    else if (char === COMMA) {
-      const frame = stack.at(-SCAN_STEP);
-      if (frame) frame.expectKey = true;
-    } else if (char === QUOTE) {
-      const end = scanString(text, index);
-      const frame = stack.at(-SCAN_STEP);
-      if (frame?.expectKey) {
-        const key: string = JSON.parse(text.slice(index, end));
-        if (frame.keys.has(key))
-          throw new Diagnostic(DUPLICATE_KEY, "duplicate JSON key", {
-            fields: [["key", key]],
-          });
-        frame.keys.add(key);
-        frame.expectKey = false;
-      }
-      index = end - SCAN_STEP;
-    }
+    if (char === QUOTE) index = scanQuoted(stack, text, index) - SCAN_STEP;
+    else trackStructure(stack, char);
   }
 }
 
