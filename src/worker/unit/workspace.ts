@@ -361,11 +361,10 @@ export class WorkspaceRoot {
       context: input.context,
       deadlineMs: end - performance.now(),
     });
-    const real = this.unrealEntry(directory) === null && isTree(directory);
-    if (real && (await this.foreignOrigin(input, tree))) {
-      this.removeSafely(directory);
-      return false;
-    }
+    const real =
+      this.unrealEntry(directory) === null &&
+      isTree(directory) &&
+      !(await this.foreignOrigin(input, tree));
     const state = real
       ? await normaliseGitState(call(), repository.address, [
           `${BRANCH_REF_PREFIX}${input.nodeBranch}`,
@@ -381,7 +380,7 @@ export class WorkspaceRoot {
     if (readPushRecord(this.recordKeyOf(input, repository))?.pending)
       throw new Diagnostic(
         RepositoryErrorCode.NodeCheckoutPendingRebuild,
-        "The node checkout holds an unconfirmed push and fails the take guards.",
+        "The node checkout holds an unconfirmed push and cannot serve the binding.",
         { fields: [["path", directory]] },
       );
     this.removeSafely(directory);

@@ -183,8 +183,8 @@ The next execution takes a checkout from the pool or clones the repository. The 
 The preparation also removes each entry of `checkouts/` that is not a checkout of a current repository binding or `.kanthord-scratch/`. It removes a symbolic link and does not follow it.
 When the push record of a checkout cannot be read, the checkout stays in the node workspace at the end of the execution. The next preparation reads that record as no record.
 A checkout from the pool keeps the local node branch only when it equals the confirmed push. The preparation sets the local default branch and `origin/HEAD` to the remote default branch, as a clone does.
-A node workspace checkout whose `origin` differs from the binding address is replaced by a checkout of the binding address.
-When a checkout with an unconfirmed push fails the take guards, for example after `git worktree add`, the preparation refuses with `repository.node_checkout.pending_rebuild`. The checkout stays unchanged in the node workspace, so that a human recovers the commits.
+When the `origin` of a node workspace checkout differs from the binding address, the preparation replaces it with a checkout of the binding address.
+When a checkout with an unconfirmed push fails the take guards, for example after `git worktree add`, or its `origin` differs from the binding address, the preparation refuses with `repository.node_checkout.pending_rebuild`. The checkout stays unchanged in the node workspace, so that a human recovers the commits.
 The scratch directory `.kanthord-scratch/` stays between the executions of one node branch. A new node branch starts with no scratch directory.
 Each commit of the execution has the header `<commit_type>: <subject>` with no scope, and `commit_type` comes from the node content, `feat` when absent.
 The subject of a task commit is the task `name`. The subject of a node unit commit and of a verdict commit is the node `name`.

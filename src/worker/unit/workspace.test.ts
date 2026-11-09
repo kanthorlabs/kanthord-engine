@@ -1581,14 +1581,10 @@ test("a node-key tree of a binding that changed its address is replaced by a tre
   const first = await h.prepare(nodeId);
   const marker = join(first.directory, "ignored.txt");
   writeFileSync(marker, "x");
-  writePushRecord(h.recordKey(nodeId, first.nodeBranch), {
-    confirmed: null,
-    pending: first.head,
-  });
-  h.release(nodeId);
+  const restarted = WorkspaceRoot.open(dirname(h.workspace.root));
   const other = await restartTemplate(t);
   const moved = { ...h.repository, address: join(other.root, ORIGIN_NAME) };
-  const prepared = await prepareOne(h.workspace, {
+  const prepared = await prepareOne(restarted, {
     env,
     transport,
     sshAccess: everyBindingSshAccess,
@@ -1615,7 +1611,53 @@ test("a node-key tree of a binding that changed its address is replaced by a tre
     ["coder", "clone"],
     ["coder", "clone"],
   ]);
+  restarted.release(restarted.nodeKey(nodeId), WorkspaceKind.Node);
+});
+
+test("a node-key tree with a pending push whose binding changed its address stays and the preparation refuses", async (t) => {
+  const h = await coderFixture(t);
+  const nodeId = createIdentity("node");
+  const first = await h.prepare(nodeId);
+  const pending = await h.commit(first.directory, "work", "unpushed");
+  writePushRecord(h.recordKey(nodeId, first.nodeBranch), {
+    confirmed: null,
+    pending,
+  });
   h.release(nodeId);
+  const other = await restartTemplate(t);
+  const moved = { ...h.repository, address: join(other.root, ORIGIN_NAME) };
+  await assert.rejects(
+    prepareOne(h.workspace, {
+      env,
+      transport,
+      sshAccess: everyBindingSshAccess,
+      context: background,
+      deadlineMs: GIT_DEADLINE_MS,
+      nodeId,
+      nodeBranch: first.nodeBranch,
+      pushed: false,
+      repository: moved,
+    }),
+    PENDING_REBUILD,
+  );
+  assert.equal(
+    (
+      await simpleGit(first.directory).raw([
+        "config",
+        "--get",
+        "remote.origin.url",
+      ])
+    ).trim(),
+    h.origin,
+  );
+  assert.equal(
+    (
+      await simpleGit(first.directory).revparse([
+        `refs/heads/${first.nodeBranch}`,
+      ])
+    ).trim(),
+    pending,
+  );
 });
 
 test("an unreadable push record keeps the tree under the node key and counts as no record at the next preparation", async (t) => {
