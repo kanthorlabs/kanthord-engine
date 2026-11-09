@@ -2212,34 +2212,6 @@ suite("connector snapshot refresh", { concurrency: SUITE_CONCURRENCY }, () => {
     );
   });
 
-  test("refreshSnapshot proves the commit with the commit-graph file off", async (t) => {
-    const { origin, snapshot } = await remoteRepository(t);
-    const directory = temporary(t);
-    await snapshotOf(origin, snapshot, directory);
-    const execPath = (await simpleGit().raw(["--exec-path"])).trim();
-    const bin = temporary(t);
-    const log = join(bin, "git.log");
-    writeFileSync(
-      join(bin, "git"),
-      `#!/bin/sh\necho "$*" >> '${log}'\nexec '${join(execPath, "git")}' "$@"\n`,
-      { mode: 0o700 },
-    );
-    const path = process.env.PATH;
-    process.env.PATH = `${bin}:${path}`;
-    stopAfter(t, () => {
-      process.env.PATH = path;
-    });
-    assert.equal(await refresh(origin, snapshot, directory), snapshot);
-    const calls = readFileSync(log, "utf8").split("\n");
-    for (const command of ["rev-parse", "for-each-ref --contains="])
-      assert.ok(
-        calls.some((line) =>
-          line.startsWith(`-c core.commitGraph=false ${command}`),
-        ),
-        command,
-      );
-  });
-
   test("refreshSnapshot follows the remote tags and proves a commit that only a tag holds", async (t) => {
     const { origin, seed, base } = await remoteRepository(t);
     const git = simpleGit(seed);
@@ -2259,4 +2231,49 @@ suite("connector snapshot refresh", { concurrency: SUITE_CONCURRENCY }, () => {
       ["v2"],
     );
   });
+});
+
+test("refreshSnapshot proves the commit with the commit-graph file off", async (t) => {
+  const { origin, snapshot } = await remoteRepository(t);
+  const directory = temporary(t);
+  await cloneSnapshot(
+    origin,
+    snapshot,
+    directory,
+    background,
+    DEADLINE_MS,
+    LOCAL_GIT_SSH_ACCESS,
+  );
+  const execPath = (await simpleGit().raw(["--exec-path"])).trim();
+  const bin = temporary(t);
+  const log = join(bin, "git.log");
+  writeFileSync(
+    join(bin, "git"),
+    `#!/bin/sh\necho "$*" >> '${log}'\nexec '${join(execPath, "git")}' "$@"\n`,
+    { mode: 0o700 },
+  );
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  stopAfter(t, () => {
+    process.env.PATH = path;
+  });
+  assert.equal(
+    await refreshSnapshot({
+      address: origin,
+      revision: snapshot,
+      directory,
+      context: background,
+      deadlineMs: DEADLINE_MS,
+      ssh: LOCAL_GIT_SSH_ACCESS,
+    }),
+    snapshot,
+  );
+  const calls = readFileSync(log, "utf8").split("\n");
+  for (const command of ["rev-parse", "for-each-ref --contains="])
+    assert.ok(
+      calls.some((line) =>
+        line.startsWith(`-c core.commitGraph=false ${command}`),
+      ),
+      command,
+    );
 });
