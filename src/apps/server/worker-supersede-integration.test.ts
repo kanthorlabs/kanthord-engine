@@ -29,6 +29,7 @@ import {
   fauxAssistantMessage,
   fauxToolCall,
   transport as localTransport,
+  remapOrigin,
   scriptedModelRuntime,
   scriptedProvider,
 } from "../../worker/unit/test-support.ts";
@@ -131,6 +132,10 @@ function localRepository(bare: string): RepositoryTransport {
     ...localTransport,
     clone: (_address, directory, context, deadlineMs, ssh) =>
       localTransport.clone(bare, directory, context, deadlineMs, ssh),
+    fetchAndCheckout: async (...input) => {
+      await remapOrigin(input[0], () => bare);
+      return localTransport.fetchAndCheckout(...input);
+    },
     cloneSnapshot: (_address, revision, directory, context, deadlineMs, ssh) =>
       localTransport.cloneSnapshot(
         bare,

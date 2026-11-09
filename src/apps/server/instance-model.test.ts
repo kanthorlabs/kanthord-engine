@@ -43,6 +43,7 @@ import {
   fauxAssistantMessage,
   fauxToolCall,
   transport as localTransport,
+  remapOrigin,
   scriptedModelRuntime,
   scriptedProvider,
 } from "../../worker/unit/test-support.ts";
@@ -350,9 +351,12 @@ function repositoryOf(bare: string): RepositoryTransport {
   };
   return {
     ...localTransport,
-    clone: async (_address, directory, context, deadlineMs, ssh) => {
-      await localTransport.clone(bare, directory, context, deadlineMs, ssh);
-      await configure(directory);
+    clone: (_address, directory, context, deadlineMs, ssh) =>
+      localTransport.clone(bare, directory, context, deadlineMs, ssh),
+    fetchAndCheckout: async (...input) => {
+      await remapOrigin(input[0], () => bare);
+      await configure(input[0]);
+      return localTransport.fetchAndCheckout(...input);
     },
     cloneSnapshot: (_address, revision, directory, context, deadlineMs, ssh) =>
       localTransport.cloneSnapshot(
