@@ -13,6 +13,7 @@ import { trackingOperations } from "../tracking/contract.ts";
 import { builtinTools, toolOperations } from "./tools.ts";
 
 const TIMEOUT_SECONDS = 20;
+const ONE_CHILD = 1;
 
 test("a workbench bash call that times out leaves no process of its tree", async (t) => {
   const [bash] = builtinTools(
@@ -41,6 +42,25 @@ test("a workbench bash call that times out leaves no process of its tree", async
   assert.match(failure.message, /Command timed out after 20 seconds/);
   assert.equal(spawned.length, PROCESS_TREE_PIDS);
   assert.deepEqual(await survivingProcesses(spawned), []);
+});
+
+test("a background child of a Workbench bash call lives after the call", async (t) => {
+  const [bash] = builtinTools(
+    await loadPi(),
+    "swe@1",
+    temporary(t),
+  ).customTools;
+  assert.ok(bash);
+  const result = await bash.execute(
+    "call_bash",
+    { command: "sleep 30 >/dev/null 2>&1 & echo $!" },
+    undefined,
+    undefined,
+    undefined as never,
+  );
+  const spawned = spawnedPids(t, result.content);
+  assert.equal(spawned.length, ONE_CHILD);
+  assert.deepEqual(await survivingProcesses(spawned), spawned);
 });
 
 test("the human_or_service operations are workbench tools", () => {

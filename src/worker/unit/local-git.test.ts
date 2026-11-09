@@ -25,6 +25,7 @@ import {
   changedEntries,
   changedFiles,
   ChangeStatus,
+  checkoutDetached,
   commitWork,
   discardChanges,
   excludeUntracked,
@@ -49,6 +50,7 @@ const CRLF_LINE = "a\r\n";
 const EMPTY_OBJECT = "{}";
 const FAILING_SIGNER = "false";
 const SIGNER_FAILURE = "failed to sign the data";
+const REAL_CONTENT = "real";
 
 function writeRefusingHook(hooks: string, marker: string): void {
   mkdirSync(hooks, { recursive: true });
@@ -640,4 +642,27 @@ test("an untracked exclusion keeps the setup output out of a commit and out of t
     await excludeUntracked(env, directory, background, 10000),
     [],
   );
+});
+
+test("a KanthorD checkout writes the real tree of a commit with a replace ref", async (t) => {
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  const identity = [
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.invalid",
+  ];
+  await git.init();
+  writeFileSync(join(directory, "tracked"), REAL_CONTENT);
+  await git.add(["tracked"]);
+  await git.raw([...identity, "commit", "-m", "real"]);
+  const real = await headCommit(env, directory, background, 10000);
+  writeFileSync(join(directory, "tracked"), "replacement");
+  await git.add(["tracked"]);
+  await git.raw([...identity, "commit", "-m", "replacement"]);
+  const replacement = await headCommit(env, directory, background, 10000);
+  await git.raw(["replace", real, replacement]);
+  await checkoutDetached(env, directory, real, background, 10000);
+  assert.equal(readFileSync(join(directory, "tracked"), "utf8"), REAL_CONTENT);
 });

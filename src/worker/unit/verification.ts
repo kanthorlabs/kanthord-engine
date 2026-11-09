@@ -2,7 +2,13 @@ import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import type { Context } from "../../kernel/context.ts";
-import { killChildTree } from "../../kernel/process-group.ts";
+import {
+  killChildTree,
+  killProcessTree,
+  liveGroups,
+  type ProcessSystem,
+  SYSTEM_PROCESSES,
+} from "../../kernel/process-group.ts";
 import { redactReason } from "../../kernel/probe.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { EnvironmentFailure } from "../../scheduler/contract.ts";
@@ -69,6 +75,7 @@ const SIGNAL_EXIT_FIRST = 129;
 const SIGNAL_EXIT_LAST = 192;
 const OUTPUT_TAIL_BYTES = 4096;
 const OUTPUT_GRACE_MS = 1000;
+const NO_GROUPS = 0;
 export const CommandEnd = {
   Exit: "exit",
   CommandLimit: "command_limit",
@@ -110,6 +117,11 @@ export interface VerificationInput {
   exhausted?: () => boolean;
   baseline?: (command: string) => Promise<number | null>;
   memo?: MemoScope;
+  processes?: ProcessSystem;
+}
+
+interface RunInput extends VerificationInput {
+  groups: Set<number>;
 }
 
 function outputTail(chunks: Buffer[]): string {
@@ -121,18 +133,40 @@ function outputTail(chunks: Buffer[]): string {
 
 function observedCommand(
   attempt: CommandAttempt,
-  input: VerificationInput,
+  input: RunInput,
 ): Promise<CommandRun> {
   assert.ok(attempt.run >= FIRST_RUN);
   assert.ok(attempt.index < input.commands.length);
-  const execute = () => runCommand(attempt.command, input);
+  const execute = async () => {
+    try {
+      return await runCommand(attempt.command, input);
+    } finally {
+      keepLiveGroups(input);
+    }
+  };
   return input.observe ? input.observe(attempt, execute) : execute();
 }
 
-function runCommand(
-  command: string,
-  input: VerificationInput,
-): Promise<CommandRun> {
+function keepLiveGroups(input: RunInput): void {
+  if (input.groups.size === NO_GROUPS) return;
+  const live = liveGroups(
+    [...input.groups],
+    input.processes ?? SYSTEM_PROCESSES,
+  );
+  for (const group of input.groups)
+    if (!live.has(group)) input.groups.delete(group);
+}
+
+function endRunGroups(input: RunInput): void {
+  if (input.groups.size === NO_GROUPS) return;
+  const system = input.processes ?? SYSTEM_PROCESSES;
+  const live = liveGroups([...input.groups], system);
+  const leaders = new Set(system.readTable().map((row) => row.pid));
+  for (const group of live)
+    if (!leaders.has(group)) killProcessTree(group, system);
+}
+
+function runCommand(command: string, input: RunInput): Promise<CommandRun> {
   assert.ok(command);
   assert.ok(Number.isSafeInteger(input.deadline));
   const deadline = Math.min(
@@ -150,6 +184,7 @@ function runCommand(
       stdio: ["ignore", "pipe", "pipe"],
       detached: true,
     });
+    if (child.pid) input.groups.add(child.pid);
     const chunks: Buffer[] = [];
     let kept = 0;
     const keep = (chunk: Buffer) => {
@@ -274,7 +309,7 @@ async function absentOutcome(
 async function classifiedCommand(
   command: string,
   index: number,
-  input: VerificationInput,
+  input: RunInput,
 ): Promise<{ ran: CommandRun; outcome: VerificationClass; runs: number }> {
   const exhausted = input.exhausted ?? (() => false);
   const ran = await observedCommand(
@@ -315,6 +350,15 @@ export async function runVerificationsWithOutput(
   const replayed = input.memo?.replay(input.commands) ?? null;
   if (replayed !== null && unstartedClass(input) === null)
     return replayedRun(input, replayed);
+  const run: RunInput = { ...input, groups: new Set() };
+  try {
+    return await runCommands(run);
+  } finally {
+    endRunGroups(run);
+  }
+}
+
+async function runCommands(input: RunInput): Promise<VerificationRun> {
   const results: Verification["results"] = [];
   const outputs: string[] = [];
   const flaky: boolean[] = [];
@@ -388,7 +432,7 @@ function replayedRun(
 async function passesOnRerun(
   command: string,
   index: number,
-  input: VerificationInput,
+  input: RunInput,
   runs: number,
 ): Promise<CommandRun | null> {
   for (let rerun = 0; rerun < (input.reruns ?? 0); rerun++) {

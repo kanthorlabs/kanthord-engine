@@ -27,6 +27,7 @@ import {
 import { SpanOperation, SpanRecorder } from "./telemetry.ts";
 import { VerificationClass } from "./verification.ts";
 import { spanEnds } from "./test-support.ts";
+import { spawnedPids, survivingProcesses } from "../../agent/test-support.ts";
 
 const env = hostEnvironment();
 const IDENTITY = [
@@ -44,6 +45,7 @@ const TWO_RUNS = "run\nrun\n";
 const MAGIC_PATH = ":lock";
 const MAGIC_TEXT = "{}";
 const ONE_SPAN = 1;
+const ONE_CHILD = 1;
 const DIGEST = "d".repeat(64);
 const CLAIM = {
   execution_id: "execution_01JZ8R2B3C4D5E6F7G8H9J0K1M",
@@ -480,4 +482,23 @@ test("a setup run with no recorder writes no span", async (t) => {
   ]);
   assert.deepEqual(await runSetup(input(), entries), { end: SetupEnd.Pass });
   assert.deepEqual(records, []);
+});
+
+test("a background child of a setup command is dead before the first verification", async (t) => {
+  const { root, checkout } = await repository(t, { file: "base" });
+  const childFile = join(root, "setup-child");
+  const entries = await setupEntries(input(), [
+    setupCheckout(
+      checkout,
+      stored({
+        postCreateCommand: `sleep 30 >/dev/null 2>&1 & echo $! > ${childFile}`,
+      }),
+    ),
+  ]);
+  assert.deepEqual(await runSetup(input(), entries), { end: SetupEnd.Pass });
+  const spawned = spawnedPids(t, [
+    { type: "text", text: readFileSync(childFile, "utf8") },
+  ]);
+  assert.equal(spawned.length, ONE_CHILD);
+  assert.deepEqual(await survivingProcesses(spawned), []);
 });

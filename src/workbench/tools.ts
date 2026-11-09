@@ -129,7 +129,9 @@ export function builtinTools(
   const allowlist: string[] = [...agent.tools];
   if (!agent.tools.includes(BuiltinTool.Bash))
     return { allowlist, customTools: [] };
-  const local = processBashOperations(pi.getShellConfig(), () => {});
+  const local = processBashOperations(pi.getShellConfig(), () => {}, {
+    killGroupAtEnd: false,
+  });
   const bash = pi.createBashToolDefinition(cwd, {
     exposeSessionEnvironment: false,
     spawnHook: (context) => ({
