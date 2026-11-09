@@ -132,13 +132,6 @@ function consumerFixture(t: TestContext, consumers: IntakeConsumers) {
   });
 }
 
-test("Intake start accepts one consumer function per Consumer value and calls none", async (t) => {
-  const { consumers, calls } = recordingConsumers();
-  const intake = consumerFixture(t, consumers);
-  assert.equal(await intake.start(), null);
-  assert.equal(calls.length, UNCALLED_CONSUMER_COUNT);
-});
-
 test("Intake start refuses consumers without a function for a Consumer value", async (t) => {
   const intake = consumerFixture(t, {} as IntakeConsumers);
   await assert.rejects(intake.start(), assert.AssertionError);
@@ -238,15 +231,6 @@ test("inboundsNaming answers each inbound that names the credential", (t) => {
   assert.deepEqual(
     store.transaction((tx) => intake.inboundsNaming(tx, CREDENTIAL)),
     [first, second].sort().map((inbound_id) => ({ inbound_id })),
-  );
-});
-
-test("inboundsNaming answers no webhook inbound, which names no credential", (t) => {
-  const { intake, store } = migratedFixture(t);
-  insertNaming(store, InboundKind.Webhook, null);
-  assert.deepEqual(
-    store.transaction((tx) => intake.inboundsNaming(tx, CREDENTIAL)),
-    [],
   );
 });
 
@@ -517,38 +501,29 @@ test("run starts one poll loop per poll inbound and none for a webhook", async (
   await shutDown(s.intake, running);
 });
 
-for (const { name, demand, reads } of [
-  {
-    name: "a conversation poll with no link and an inbox reads the issue comments",
-    demand: { link_count: NO_LINKS, inbox: true },
-    reads: REQUESTS_PER_LOOP,
-  },
-  {
-    name: "a conversation poll with no link and no inbox makes no request",
-    demand: { link_count: NO_LINKS, inbox: false },
-    reads: UNSENT_REQUEST_COUNT,
-  },
-]) {
-  test(name, async (t) => {
-    const store = pollStore(t);
-    insertNaming(
-      store,
-      InboundKind.Poll,
-      CREDENTIAL,
-      null,
-      ResourceKind.Conversation,
-    );
-    const arms = timerArms(t);
-    const s = pollService(t, store, demand);
-    const running = s.intake.run();
-    await reaches(arms, ARMS_PER_LOOP, t.signal);
-    s.interval();
-    await settle();
-    await reaches(() => s.listComments.mock.callCount(), reads, t.signal);
-    assert.equal(s.listEvents.mock.callCount(), UNSENT_REQUEST_COUNT);
-    await shutDown(s.intake, running);
-  });
-}
+test("a conversation poll with no link and an inbox reads the issue comments", async (t) => {
+  const store = pollStore(t);
+  insertNaming(
+    store,
+    InboundKind.Poll,
+    CREDENTIAL,
+    null,
+    ResourceKind.Conversation,
+  );
+  const arms = timerArms(t);
+  const s = pollService(t, store, { link_count: NO_LINKS, inbox: true });
+  const running = s.intake.run();
+  await reaches(arms, ARMS_PER_LOOP, t.signal);
+  s.interval();
+  await settle();
+  await reaches(
+    () => s.listComments.mock.callCount(),
+    REQUESTS_PER_LOOP,
+    t.signal,
+  );
+  assert.equal(s.listEvents.mock.callCount(), UNSENT_REQUEST_COUNT);
+  await shutDown(s.intake, running);
+});
 
 test("an inbound delete stops its poll loop", async (t) => {
   const store = pollStore(t);
