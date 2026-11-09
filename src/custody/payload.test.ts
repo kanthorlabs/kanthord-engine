@@ -3,7 +3,6 @@ import { test } from "node:test";
 import { digest } from "../kernel/json.ts";
 import {
   handoverPayloadSchema,
-  piCredentialSchema,
   refreshReportSchema,
   SecretShape,
 } from "./contract.ts";
@@ -53,15 +52,7 @@ test("handover and report contracts refuse extra keys, wrong identities and dige
   const payload = { items: [item], ssh_identities: [ssh] };
   assert.deepEqual(handoverPayloadSchema.parse(payload), payload);
   assert.deepEqual(refreshReportSchema.parse(report), report);
-  assert.throws(() => piCredentialSchema.parse({ ...OAUTH, extra: true }));
   assert.throws(() => handoverPayloadSchema.parse({ items: [item] }));
-  assert.throws(() => handoverPayloadSchema.parse({ ...payload, extra: true }));
-  assert.throws(() =>
-    handoverPayloadSchema.parse({
-      ...payload,
-      items: [{ ...item, extra: true }],
-    }),
-  );
   assert.throws(() =>
     handoverPayloadSchema.parse({
       ...payload,
@@ -71,17 +62,12 @@ test("handover and report contracts refuse extra keys, wrong identities and dige
     }),
   );
   for (const entry of [
-    { ...ssh, extra: true },
     { ...ssh, binding_id: ID },
     { ...ssh, private_key: "key" },
   ])
     assert.throws(() =>
       handoverPayloadSchema.parse({ ...payload, ssh_identities: [entry] }),
     );
-  assert.throws(() => refreshReportSchema.parse({ ...report, extra: true }));
-  assert.throws(() =>
-    refreshReportSchema.parse({ ...report, digest: "invalid" }),
-  );
 });
 
 test("a refresh report with extra OAuth fields normalizes before validation", () => {

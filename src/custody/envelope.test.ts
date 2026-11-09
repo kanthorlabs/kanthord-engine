@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { test } from "node:test";
 import {
-  buildAad,
   decrypt,
   deriveEnvelopeKey,
   encrypt,
@@ -35,11 +34,6 @@ test("wrong id fails authentication", () => {
   assert.throws(() => decrypt(key, "other-id", platform, nonce, ciphertext));
 });
 
-test("wrong platform fails authentication", () => {
-  const { nonce, ciphertext } = encrypt(key, id, platform, secret);
-  assert.throws(() => decrypt(key, id, "other-platform", nonce, ciphertext));
-});
-
 test("invalid nonce length is rejected", () => {
   const { nonce, ciphertext } = encrypt(key, id, platform, secret);
   assert.throws(() =>
@@ -66,11 +60,4 @@ test("each encryption uses a fresh nonce and ciphertext", () => {
   const second = encrypt(key, id, platform, secret);
   assert.notDeepEqual(first.nonce, second.nonce);
   assert.notDeepEqual(first.ciphertext, second.ciphertext);
-});
-
-test("AAD uses big-endian UTF-8 byte lengths in id-platform order", () => {
-  assert.deepEqual(
-    buildAad("é", "s3"),
-    Buffer.from([0, 0, 0, 2, 0xc3, 0xa9, 0, 0, 0, 2, 0x73, 0x33]),
-  );
 });

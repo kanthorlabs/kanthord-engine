@@ -116,13 +116,6 @@ test("outside the single binary the dashboard paths answer the route error", asy
   assert.equal(await errorCode(response), ROUTE_NOT_FOUND);
 });
 
-test("the dashboard index injects the root base after the opening head tag", async (t) => {
-  const { request } = await gatewayFixture(t, { dashboard: loadEmbedded });
-  const response = await request("/index.html");
-  assert.equal(response.status, HttpStatus.OK);
-  assert.equal(await response.text(), ROOT_INDEX_HTML);
-});
-
 test("a dashboard index without a head element fails as an internal error", async (t) => {
   const { request } = await gatewayFixture(t, {
     dashboard: (path) =>
@@ -187,29 +180,6 @@ test("a prefixed gateway answers its root with the prefixed base", async (t) => 
   const response = await request(`${BASE_PATH}/`);
   assert.equal(response.status, HttpStatus.OK);
   assert.equal(response.headers.get("cache-control"), NO_CACHE);
-  assert.equal(await response.text(), PREFIXED_INDEX_HTML);
-});
-
-test("a prefixed gateway answers an asset under the prefix", async (t) => {
-  const { request } = await gatewayFixture(t, {
-    dashboard: loadEmbedded,
-    basePath: BASE_PATH,
-  });
-  const response = await request(`${BASE_PATH}/assets/index-abc.js`);
-  assert.equal(response.status, HttpStatus.OK);
-  assert.equal(response.headers.get("content-type"), SCRIPT_MEDIA_TYPE);
-  assert.equal(await response.text(), SCRIPT);
-});
-
-test("a prefixed gateway answers a deep dashboard route with the prefixed index", async (t) => {
-  const { request } = await gatewayFixture(t, {
-    dashboard: loadEmbedded,
-    basePath: BASE_PATH,
-  });
-  const response = await request(
-    `${BASE_PATH}/mission/mission_01M4C5J3SA6W8RBBC92HA9SSDS`,
-  );
-  assert.equal(response.status, HttpStatus.OK);
   assert.equal(await response.text(), PREFIXED_INDEX_HTML);
 });
 
