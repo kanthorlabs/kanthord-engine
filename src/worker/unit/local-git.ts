@@ -76,6 +76,9 @@ const REMOVED_STATE = [
 ];
 const REMOVED_STATE_PREFIXES = ["BISECT_", "MERGE_"];
 const KEPT_REF_PREFIXES = ["refs/remotes/origin/", "refs/tags/"];
+const BRANCH_PREFIX = "refs/heads/";
+const ORIGIN_PREFIX = "refs/remotes/origin/";
+const ORIGIN_HEAD = "refs/remotes/origin/HEAD";
 export const GitState = { Ready: "ready", Rebuild: "rebuild" } as const;
 export type GitState = (typeof GitState)[keyof typeof GitState];
 export const MERGE_HEAD = "MERGE_HEAD";
@@ -1479,6 +1482,51 @@ export async function fetchLocal(call: GitCall, source: string): Promise<void> {
     call.context,
     call.deadlineMs,
   );
+}
+
+export async function matchCheckoutRefs(
+  call: GitCall,
+  source: string,
+  address: string,
+): Promise<void> {
+  assert.ok(source && !source.startsWith("-"));
+  assert.ok(address && !address.startsWith("-"));
+  const end = performance.now() + call.deadlineMs;
+  const remaining = () => Math.max(1, end - performance.now());
+  const git = (args: string[]) =>
+    run(call.env, call.directory, args, call.context, remaining());
+  await git([
+    "fetch",
+    "--prune",
+    "--no-tags",
+    "--",
+    source,
+    `+${BRANCH_PREFIX}*:${ORIGIN_PREFIX}*`,
+  ]);
+  const current = await runMatch(
+    call.env,
+    source,
+    ["symbolic-ref", "--quiet", "HEAD"],
+    call.context,
+    remaining(),
+  );
+  const branch = current.matched ? current.output.trim() : NO_VALUE;
+  const tracking = branch.startsWith(BRANCH_PREFIX)
+    ? `${ORIGIN_PREFIX}${branch.slice(BRANCH_PREFIX.length)}`
+    : null;
+  if (
+    tracking !== null &&
+    (await refCommit({ ...call, deadlineMs: remaining() }, tracking)) !== null
+  )
+    await git(["symbolic-ref", ORIGIN_HEAD, tracking]);
+  else await git(["update-ref", "--no-deref", "-d", ORIGIN_HEAD]);
+  const branches = (
+    await git(["for-each-ref", "--format=%(refname:lstrip=2)", BRANCH_PREFIX])
+  )
+    .split(NEWLINE)
+    .filter(Boolean);
+  if (branches.length) await git(["branch", "-D", "--", ...branches]);
+  await git(["remote", "set-url", "origin", "--", address]);
 }
 
 export async function removeRef(call: GitCall, ref: string): Promise<void> {

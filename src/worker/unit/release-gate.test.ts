@@ -7,6 +7,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   symlinkSync,
@@ -134,6 +135,20 @@ function treesDeleted(t: TestContext, h: Fixture): () => unknown[] {
     log.mock.calls
       .filter((call) => call.arguments[0] === TREE_DELETED)
       .map((call) => call.arguments[1]);
+}
+
+function objectInodes(directory: string): Set<number> {
+  const inodes = new Set<number>();
+  const walk = (path: string) => {
+    for (const name of readdirSync(path)) {
+      const entry = join(path, name);
+      const stats = lstatSync(entry);
+      if (stats.isDirectory()) walk(entry);
+      else inodes.add(stats.ino);
+    }
+  };
+  walk(join(directory, ".git", "objects"));
+  return inodes;
 }
 
 function releaseKey(h: Fixture): string {
@@ -809,6 +824,18 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(after.mtimeMs, before.mtimeMs);
     assert.equal(existsSync(join(again, STRAY)), false);
     assert.equal(existsSync(join(again, BUILD)), false);
+  });
+
+  test("a fresh release tree shares no object file with the checkout", async (t) => {
+    const h = await fixture(t, [], []);
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    const [tree] = freeCommandTrees(h);
+    assert.ok(tree);
+    const checkout = objectInodes(h.root);
+    assert.deepEqual(
+      [...objectInodes(tree)].filter((ino) => checkout.has(ino)),
+      [],
+    );
   });
 
   test("a second node of the same repository reuses the release tree", async (t) => {

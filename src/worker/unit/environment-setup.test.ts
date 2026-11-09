@@ -684,6 +684,8 @@ test("a background child of a setup command is dead before the first verificatio
 const TREE_DELETED = "tree deleted";
 const INVALID_PERMISSIONS = "system.files.invalid_permissions";
 const OPEN_MODE = 0o755;
+const NODE_TRACKING_REF = "refs/remotes/origin/kanthord/node";
+const NO_REF = "";
 const ROOT_USER = 0;
 const ONE_TREE = 1;
 const READ_ONLY_MODE = 0o500;
@@ -950,4 +952,85 @@ test("a base head whose preparation fails gives back without a throw", async (t)
   await assert.rejects(base.setup());
   await base.giveBack();
   assert.deepEqual(h.commandTrees(), []);
+});
+
+async function refState(directory: string) {
+  const git = simpleGit(directory);
+  return {
+    refs: await git.raw([
+      "for-each-ref",
+      "--format=%(refname) %(objectname) %(symref)",
+    ]),
+    originHead: (
+      await git
+        .raw(["symbolic-ref", "-q", "refs/remotes/origin/HEAD"])
+        .catch(() => "")
+    ).trim(),
+    url: (await git.raw(["config", "--get", "remote.origin.url"])).trim(),
+    head: (await git.raw(["rev-parse", "HEAD"])).trim(),
+    attached: (
+      await git.raw(["symbolic-ref", "-q", "HEAD"]).catch(() => "")
+    ).trim(),
+  };
+}
+
+test("a fresh and a reused base tree of one checkout hold the same refs, origin/HEAD and origin URL", async (t) => {
+  const h = await poolFixture(t);
+  const first = createIdentity("node");
+  const fresh = await h.baseHead(first);
+  assert.deepEqual(await fresh.setup(), { end: SetupEnd.Pass });
+  const freshState = await refState(h.tree(first));
+  await fresh.giveBack();
+  const second = createIdentity("node");
+  const reused = await h.baseHead(second);
+  assert.deepEqual(await reused.setup(), { end: SetupEnd.Pass });
+  assert.deepEqual(await refState(h.tree(second)), freshState);
+  assert.deepEqual(h.prepared(), [
+    ["tree prepared", "clone"],
+    ["tree prepared", "pool"],
+  ]);
+  assert.equal(freshState.url, h.origin);
+  assert.equal(freshState.originHead, NODE_TRACKING_REF);
+  assert.equal(freshState.attached, NO_REF);
+  assert.equal(
+    freshState.head,
+    await commitOf(env, h.checkout, "origin/main", background, 10000),
+  );
+  assert.equal(/^refs\/heads\//m.test(freshState.refs), false);
+  await reused.giveBack();
+});
+
+test("a reused base tree follows the branches of a new checkout and drops origin/HEAD for a detached checkout", async (t) => {
+  const h = await poolFixture(t);
+  const first = createIdentity("node");
+  const fresh = await h.baseHead(first);
+  assert.deepEqual(await fresh.setup(), { end: SetupEnd.Pass });
+  await fresh.giveBack();
+  await simpleGit(h.checkout).raw(["checkout", "-b", "kanthord/other"]);
+  await simpleGit(h.checkout).raw(["branch", "-D", "kanthord/node"]);
+  await simpleGit(h.checkout).raw(["checkout", "--detach"]);
+  const second = createIdentity("node");
+  const reused = await h.baseHead(second);
+  assert.deepEqual(await reused.setup(), { end: SetupEnd.Pass });
+  const state = await refState(h.tree(second));
+  assert.equal(state.originHead, NO_REF);
+  assert.match(state.refs, /^refs\/remotes\/origin\/kanthord\/other /m);
+  assert.doesNotMatch(state.refs, /refs\/remotes\/origin\/kanthord\/node /);
+  await reused.giveBack();
+});
+
+test("the next preparation gives a crash leftover of a fresh base tree back and takes it", async (t) => {
+  const h = await poolFixture(t);
+  const nodeId = createIdentity("node");
+  const crashed = await h.baseHead(nodeId);
+  assert.deepEqual(await crashed.setup(), { end: SetupEnd.Pass });
+  const leftover = statSync(join(h.tree(nodeId), ".git")).ino;
+  const next = await h.baseHead(nodeId);
+  assert.deepEqual(await next.setup(), { end: SetupEnd.Pass });
+  assert.equal(statSync(join(h.tree(nodeId), ".git")).ino, leftover);
+  assert.deepEqual(h.prepared(), [
+    ["tree prepared", "clone"],
+    ["tree prepared", "pool"],
+  ]);
+  await next.giveBack();
 });

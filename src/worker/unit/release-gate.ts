@@ -20,7 +20,7 @@ import {
 } from "./judgement.ts";
 import {
   checkoutDetached,
-  cloneLocal,
+  clonePacked,
   fetchLocal,
   matchRemote,
   scrubTree,
@@ -401,13 +401,14 @@ async function buildReleaseClones(
       context,
       deadlineMs: remaining(),
       fresh: async () => {
-        await cloneLocal(
+        const call = () => ({
           env,
-          checkout.directory,
           directory,
           context,
-          remaining(),
-        );
+          deadlineMs: remaining(),
+        });
+        await clonePacked(call(), checkout.directory);
+        await fetchLocal(call(), checkout.directory);
         await matchRemote(
           env,
           directory,

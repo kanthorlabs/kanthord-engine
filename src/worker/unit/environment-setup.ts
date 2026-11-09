@@ -28,6 +28,7 @@ import {
   type GitCall,
   headCommit,
   ignoredPaths,
+  matchCheckoutRefs,
   restoreTracked,
   scrubTree,
   trackedChanges,
@@ -577,6 +578,7 @@ export class BaseHead {
     for (const [index, checkout] of this.checkouts.entries()) {
       const directory = join(this.directory, checkout.repository.name);
       const commit = commits[index]!;
+      const address = this.addressOf(checkout);
       const call = () => ({
         env,
         directory,
@@ -585,7 +587,7 @@ export class BaseHead {
       });
       const { source } = await prepareTree({
         pool: trees.workspaces.pool,
-        address: this.addressOf(checkout),
+        address,
         poolClass: PoolClass.Command,
         target: directory,
         nodeId: trees.nodeId,
@@ -603,11 +605,13 @@ export class BaseHead {
             context,
             remaining(this.input),
           );
+          await matchCheckoutRefs(call(), checkout.directory, address);
         },
         reuse: async () => {
           await fetchLocal(call(), checkout.directory);
           const record = await readSetupRecord(call());
           await scrubTree(call(), commit, record?.roots ?? []);
+          await matchCheckoutRefs(call(), checkout.directory, address);
         },
       });
       trees.log(TREE_PREPARED, { purpose: BASE_PURPOSE, source });
