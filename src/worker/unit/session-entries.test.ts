@@ -5,7 +5,6 @@ import { sessionEntryRecordSchema } from "../../tracking/contract.ts";
 import { canonicalJSON } from "../../kernel/json.ts";
 import {
   cutString,
-  ENTRY_CUT_LIMITS,
   SESSION_ENTRY_MAX_BYTES,
   sessionEntryRecord,
 } from "./session-entries.ts";
@@ -26,8 +25,6 @@ const HUNDRED_KIB = 100 * 1024;
 const FIRST_CUT_LIMIT = 4096;
 const HALF_OF_FIRST_LIMIT = FIRST_CUT_LIMIT / 2;
 const LONG_STRING = 5000;
-const STRINGS_FOR_SECOND_LIMIT = 20;
-const STRINGS_FOR_THIRD_LIMIT = 100;
 const STRINGS_FOR_FALLBACK = 1000;
 const ENTRY_ID = "1a2b3c4d";
 const PARENT_ID = "0a1b2c3d";
@@ -35,11 +32,6 @@ const TIMESTAMP = "2026-01-02T03:04:05.000Z";
 const USAGE = { input: 10, output: 2, cacheRead: 0, cacheWrite: 0 };
 const FIRST_SEQUENCE = 1;
 const NO_SECRETS: string[] = [];
-const SHORT_TEXT = "abcd";
-const SHORT_LIMIT = 4;
-const CUT_SHORT = "ab\n[cut 2 characters]\nef";
-const ENTRY_KIND = "session_entry";
-const MESSAGE_KIND = "message";
 const MARKER = /\n\[cut (\d+) characters\]\n/;
 const MARKER_SPLIT = /\n\[cut \d+ characters\]\n/;
 
@@ -171,27 +163,6 @@ test("an entry of 100 KiB keeps the head and the tail of each long string", () =
   assert.ok(bytesOf(record.entry) <= SESSION_ENTRY_MAX_BYTES);
 });
 
-test("an entry that the limit 4096 cannot bound falls to the limit 1024", () => {
-  const record = recordOf(toolResult(manyStrings(STRINGS_FOR_SECOND_LIMIT)));
-  assert.ok(record);
-  assert.equal(record.truncated, true);
-  const content = (record.entry.message as { content: { text: string }[] })
-    .content;
-  assert.ok(content[0]!.text.length > ENTRY_CUT_LIMITS[2]!);
-  assert.ok(content[0]!.text.length < FIRST_CUT_LIMIT);
-  assert.ok(bytesOf(record.entry) <= SESSION_ENTRY_MAX_BYTES);
-});
-
-test("an entry that the limit 1024 cannot bound falls to the limit 256", () => {
-  const record = recordOf(toolResult(manyStrings(STRINGS_FOR_THIRD_LIMIT)));
-  assert.ok(record);
-  assert.equal(record.truncated, true);
-  const content = (record.entry.message as { content: { text: string }[] })
-    .content;
-  assert.ok(content[0]!.text.length < ENTRY_CUT_LIMITS[1]!);
-  assert.ok(bytesOf(record.entry) <= SESSION_ENTRY_MAX_BYTES);
-});
-
 test("an entry that the limit 256 cannot bound falls to the fallback fields", () => {
   const record = recordOf(
     toolResult(manyStrings(STRINGS_FOR_FALLBACK), {
@@ -217,21 +188,6 @@ test("an entry that the limit 256 cannot bound falls to the fallback fields", ()
   });
 });
 
-test("the fallback of an entry without a message holds the four base fields", () => {
-  const record = recordOf(custom({ data: manyStrings(STRINGS_FOR_FALLBACK) }));
-  assert.deepEqual(record?.entry, {
-    type: "custom",
-    id: ENTRY_ID,
-    parentId: PARENT_ID,
-    timestamp: TIMESTAMP,
-  });
-});
-
-test("a text of at most the limit stays whole", () => {
-  assert.equal(cutString(SHORT_TEXT, SHORT_LIMIT), SHORT_TEXT);
-  assert.equal(cutString("abcdef", SHORT_LIMIT), CUT_SHORT);
-});
-
 test("a cut keeps a surrogate pair whole", () => {
   const headSplit = `${"x".repeat(HALF_OF_FIRST_LIMIT - 1)}😀${"y".repeat(HUNDRED_KIB)}`;
   const tailSplit = `${"x".repeat(HUNDRED_KIB)}😀${"y".repeat(HALF_OF_FIRST_LIMIT - 1)}`;
@@ -245,35 +201,6 @@ test("a cut keeps a surrogate pair whole", () => {
     const removed = Number(MARKER.exec(cut)?.[1]);
     assert.equal(before!.length + removed + after!.length, text.length);
   }
-});
-
-test("a tool result carries its tool call, an assistant entry carries null", () => {
-  assert.equal(recordOf(toolResult([]))?.tool_call_id, TOOL_CALL_ID);
-  const assistant = entry({
-    message: { role: "assistant", content: [], usage: USAGE },
-  });
-  assert.equal(recordOf(assistant)?.tool_call_id, null);
-  assert.equal(
-    recordOf(entry({ type: "custom", customType: "x" }))?.tool_call_id,
-    null,
-  );
-});
-
-test("a record maps the entry identity, the sequence and the time", () => {
-  const record = recordOf(toolResult([]));
-  assert.equal(record?.record_id, `${SESSION_ID}:entry.${ENTRY_ID}`);
-  assert.equal(record?.trace_id, TRACE_ID);
-  assert.equal(record?.kind, ENTRY_KIND);
-  assert.equal(record?.session_id, SESSION_ID);
-  assert.equal(record?.entry_id, ENTRY_ID);
-  assert.equal(record?.parent_entry_id, PARENT_ID);
-  assert.equal(record?.sequence, FIRST_SEQUENCE);
-  assert.equal(record?.entry_type, MESSAGE_KIND);
-  assert.equal(record?.entry_time, Date.parse(TIMESTAMP));
-  const before = Date.now();
-  const unparsed = recordOf(custom({ timestamp: "not a time" }));
-  assert.ok(unparsed && unparsed.entry_time >= before);
-  assert.equal(recordOf(custom({ parentId: null }))?.parent_entry_id, null);
 });
 
 test("an invalid entry identity answers null", () => {

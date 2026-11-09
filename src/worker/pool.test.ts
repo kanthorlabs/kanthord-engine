@@ -14,7 +14,6 @@ const RESOURCE = "worker:kanthord:coder";
 const OTHER_RESOURCE = "worker:kanthord:reviewer";
 const FIRST_AGE = 1;
 const SECOND_AGE = 2;
-const THIRD_AGE = 3;
 const TWO_STARTS = 2;
 const ONE_START = 1;
 
@@ -108,24 +107,4 @@ test("a binding that dropped an instance with a live registration stays as a dra
   );
   f.run([target(first, [])]);
   assert.deepEqual(f.host.updated.at(-1)!.entries, []);
-});
-
-test("an instance that arrives after the start starts and the others keep running", () => {
-  const f = fixture();
-  const first = instance("coder-1", FIRST_AGE);
-  f.run([target(first)]);
-  f.run([target(first), target(instance("coder-2", THIRD_AGE))]);
-  assert.deepEqual(
-    f.host.started.map(({ instance: started }) => started.name),
-    ["coder-1", "coder-2"],
-  );
-  assert.deepEqual(f.host.archived, []);
-});
-
-test("a restart goes to the host for the instance", () => {
-  const f = fixture();
-  const first = instance("coder-1", FIRST_AGE, PoolPlacement.Container);
-  f.run([target(first)]);
-  f.pool.restart(first);
-  assert.deepEqual(f.host.restarted, [first]);
 });

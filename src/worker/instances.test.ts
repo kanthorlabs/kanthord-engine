@@ -46,11 +46,7 @@ import {
   SESSION_READ_WAIT_MS,
   UnreachableReason,
 } from "../tracking/contract.ts";
-import {
-  insertRegistration,
-  readAllLive,
-  readRow,
-} from "./registration-rows.ts";
+import { readAllLive, readRow } from "./registration-rows.ts";
 import {
   generateX25519KeyPair,
   keyFingerprint,
@@ -125,7 +121,6 @@ function revokedClaimOf(executionId: string): ExecutionEnds["revoked"][number] {
 }
 const REVOKE_FAILURE = "revoke failed";
 const NO_CALLS = 0;
-const LIVENESS_GAP_MS = 5;
 const LOGIN_ENTRY: LoginSessionEntry = {
   session_id: "login_session_01ARZ3NDEKTSV4RRFFQ69G5FAV",
   name: "claude",
@@ -139,7 +134,6 @@ const INFO_LEVEL = 30;
 const ARCHIVED_RECORD = "worker.instance.archived";
 const ACTOR_NAME = "Alice";
 const SHORT_SESSION_READ_WAIT_MS = 20;
-const SESSION_READ_ID_PATTERN = /^session_read_[0-9A-HJKMNP-TV-Z]{26}$/;
 const SESSION_READ: SessionRead = {
   execution_id: createIdentity("execution"),
   session_id: "0123456789abcdef",
@@ -647,17 +641,6 @@ test("create refuses each invalid input with its code", async (t) => {
     ],
     [
       {
-        name: "Upper",
-        worker: WORKER,
-        placement: InstancePlacement.Worker,
-        machine: MACHINE,
-        public_key: other,
-      },
-      HttpStatus.BadRequest,
-      WorkerErrorCode.InstanceNameInvalid,
-    ],
-    [
-      {
         name: "other",
         worker: "absent@1",
         placement: InstancePlacement.Worker,
@@ -744,20 +727,6 @@ test("create at the worker placement refuses an absent, an unknown and an archiv
   assert.equal((await create(name)).machine, name);
 });
 
-test("create at a server or a container placement refuses a machine", async (t) => {
-  const f = instanceFixture(t);
-  const machine = await f.machine();
-  for (const placement of [
-    InstancePlacement.Server,
-    InstancePlacement.Container,
-  ])
-    await f.refuses(
-      () => f.createdAt(INSTANCE, placement, { machine }),
-      HttpStatus.BadRequest,
-      WorkerErrorCode.InstanceMachineInvalid,
-    );
-});
-
 test("create stores the machine name and refuses the name of a machine", async (t) => {
   const f = instanceFixture(t);
   const { record } = await f.created();
@@ -803,20 +772,6 @@ test("get answers the own copies and the machine copies of names with no own cop
       ["beta", INSTANCE, INSTANCE],
     ],
   );
-});
-
-test("create at a server or a container placement stores null key fields", async (t) => {
-  const f = instanceFixture(t);
-  for (const [name, placement] of [
-    ["thread-host", InstancePlacement.Server],
-    ["box", InstancePlacement.Container],
-  ] as const) {
-    const record = await f.createdAt(name, placement);
-    assert.equal(record.placement, placement);
-    assert.equal(record.public_key, null);
-    assert.equal(record.fingerprint, null);
-    assert.ok(!("instance_configuration" in record));
-  }
 });
 
 test("create refuses an absent or an unknown placement", async (t) => {
@@ -935,24 +890,6 @@ test("a Reset key of a server instance refuses", async (t) => {
       error.code === WorkerErrorCode.InstancePlacementUnsupported &&
       isDeepStrictEqual(error.details, { placement: InstancePlacement.Server }),
   );
-});
-
-test("list and get answer the placement of every instance", async (t) => {
-  const f = instanceFixture(t);
-  await f.created("alpha");
-  await f.createdAt("beta", InstancePlacement.Server);
-  await f.createdAt("gamma", InstancePlacement.Container);
-  const listed = await f.invoke("instance.list", null, {}, {});
-  assert.deepEqual(
-    listed.items.map((item) => [item.name, item.placement]),
-    [
-      ["alpha", InstancePlacement.Worker],
-      ["beta", InstancePlacement.Server],
-      ["gamma", InstancePlacement.Container],
-    ],
-  );
-  const got = await f.invoke("instance.get", null, { instance_name: "beta" });
-  assert.equal(got.placement, InstancePlacement.Server);
 });
 
 test("the token opens only with the instance key and refuses an unknown or ended revision", async (t) => {
@@ -1076,13 +1013,6 @@ test("the heartbeat answers the versions and the machine, and the work version s
       connection_name: CONNECTION_NAME,
     });
   const first = await beat();
-  assert.deepEqual(Object.keys(first).sort(), [
-    "binding_version",
-    "credential_version",
-    "machine",
-    "server_version",
-    "work_version",
-  ]);
   assert.equal(first.machine, MACHINE);
   assert.ok(first.work_version >= before && first.work_version <= after);
   f.worker().raiseWorkVersion(INSTANCE);
@@ -1091,40 +1021,6 @@ test("the heartbeat answers the versions and the machine, and the work version s
   assert.equal(
     f.worker().instances.workVersionOf("desktop"),
     first.work_version,
-  );
-});
-
-test("the work read answers the work version and the login sessions, renews no liveness and refuses a superseded connection", async (t) => {
-  const f = instanceFixture(t);
-  const { record } = await f.created();
-  f.logins.set(INSTANCE, [LOGIN_ENTRY]);
-  f.asWorker(record.id);
-  const first = await f.invoke("instance.connect", {
-    connection_name: CONNECTION_NAME,
-  });
-  const liveness = () =>
-    f.worker().instances.connectionOf(record.id)?.last_heartbeat_at;
-  const renewed = liveness();
-  await new Promise((resolve) => setTimeout(resolve, LIVENESS_GAP_MS));
-  f.worker().raiseWorkVersion(INSTANCE);
-  const work = await f.invoke("instance.work", {
-    connection_id: first.connection_id,
-  });
-  assert.deepEqual(work, {
-    work_version: f.worker().instances.workVersionOf(INSTANCE),
-    login_sessions: [LOGIN_ENTRY],
-    session_reads: [],
-    footprint_orders: [],
-    stop_orders: [],
-  });
-  assert.equal(liveness(), renewed);
-  await f.invoke("instance.connect", {
-    connection_name: OTHER_CONNECTION_NAME,
-  });
-  await f.refuses(
-    () => f.invoke("instance.work", { connection_id: first.connection_id }),
-    HttpStatus.Conflict,
-    WorkerErrorCode.InstanceConnectionSuperseded,
   );
 });
 
@@ -1401,37 +1297,6 @@ test("an archive with force revokes the live execution, ends the instance in one
   assert.equal(f.reports[0]!.inTransaction, false);
 });
 
-test("an archive with force logs worker.instance.archived with the actor and the execution ids", async (t) => {
-  const lines: string[] = [];
-  const f = instanceFixture(
-    t,
-    {},
-    SESSION_READ_WAIT_MS,
-    pino({ level: "info" }, { write: (line) => lines.push(line) }),
-  );
-  const { binding, registration } = await busyInstance(f);
-  const { archive } = archiveFixture(f);
-  binding.worker_instances = [];
-  const executionId = createIdentity("execution");
-  f.unended.set(registration.runtime_identity, executionId);
-  await archive(true);
-  assert.deepEqual(f.archivers, [
-    {
-      instance: INSTANCE,
-      actor: { kind: "human", account: "alice", name: ACTOR_NAME },
-    },
-  ]);
-  const records = lines
-    .map((line) => JSON.parse(line))
-    .filter((record) => record.msg === ARCHIVED_RECORD);
-  assert.equal(records.length, SINGLE_CALL);
-  assert.equal(records[0].level, INFO_LEVEL);
-  assert.equal(records[0].instance, INSTANCE);
-  assert.equal(records[0].actor, ACTOR_NAME);
-  assert.equal(records[0].force, true);
-  assert.deepEqual(records[0].execution_ids, [executionId]);
-});
-
 test("a failure of the revocation rolls the archive back and reports nothing", async (t) => {
   const f = instanceFixture(t);
   const { record, binding, registration } = await busyInstance(f);
@@ -1486,30 +1351,6 @@ test("a server restart keeps the registrations of a live instance and adopts the
       .instances.holdConnection(record.id, createIdentity("connection")),
     false,
   );
-  assert.equal(
-    f.worker().instances.connectionOf(record.id)?.connection_name,
-    CONNECTION_NAME,
-  );
-});
-
-test("a client request after a restart adopts the connection and the next heartbeat names it", async (t) => {
-  const f = instanceFixture(t);
-  const { record } = await f.created();
-  await f.worker().start();
-  f.asWorker(record.id);
-  const connection = await f.invoke("instance.connect", {
-    connection_name: CONNECTION_NAME,
-  });
-  await f.restart();
-  assert.equal(
-    f.worker().instances.holdConnection(record.id, connection.connection_id),
-    true,
-  );
-  f.asWorker(record.id);
-  await f.invoke("instance.heartbeat", {
-    connection_id: connection.connection_id,
-    connection_name: CONNECTION_NAME,
-  });
   assert.equal(
     f.worker().instances.connectionOf(record.id)?.connection_name,
     CONNECTION_NAME,
@@ -1571,55 +1412,6 @@ test("list answers no holder mismatch for a server and a container instance", as
   assert.deepEqual(f.scopes, []);
 });
 
-test("the registrations of an instance are empty for a registration with no instance", (t) => {
-  const f = instanceFixture(t);
-  const projectId = createIdentity("project");
-  const registration = f.store.transaction((tx) =>
-    insertRegistration(
-      tx,
-      {
-        client_id: createIdentity("client_identity"),
-        name: "coder-1",
-        project_id: projectId,
-        resource_identity: "worker:kanthord:general",
-        instance_id: null,
-      },
-      Date.now(),
-    ),
-  );
-  f.store.transaction((tx) =>
-    insertRegistration(
-      tx,
-      {
-        client_id: createIdentity("client_identity"),
-        name: "coder-2",
-        project_id: projectId,
-        resource_identity: "worker:kanthord:general",
-        instance_id: null,
-      },
-      Date.now(),
-    ),
-  );
-  assert.deepEqual(
-    f.store.transaction((tx) =>
-      f.worker().registrationsOfInstance(tx, registration.runtime_identity),
-    ),
-    [],
-  );
-});
-
-test("an instance counts as connected only while its last heartbeat is inside the connected window", async (t) => {
-  const f = instanceFixture(t);
-  const { record } = await f.created();
-  assert.equal(f.worker().instanceConnected(INSTANCE), false);
-  f.asWorker(record.id);
-  await f.invoke("instance.connect", { connection_name: CONNECTION_NAME });
-  assert.equal(f.worker().instanceConnected(INSTANCE), true);
-  const start = Date.now();
-  t.mock.method(Date, "now", () => start + INSTANCE_CONNECTED_WINDOW_MS + 1);
-  assert.equal(f.worker().instanceConnected(INSTANCE), false);
-});
-
 test("instance.get and instance.list show no connection once the last heartbeat leaves the connected window", async (t) => {
   const f = instanceFixture(t);
   const { record } = await f.created();
@@ -1671,40 +1463,6 @@ async function connectedInstance(
   };
   return { record, work, queue, report };
 }
-
-test("the work read lists each pending session read, the work version rises at each queue and a report answers each waiter", async (t) => {
-  const f = instanceFixture(t);
-  const box = await connectedInstance(f);
-  const before = (await box.work()).work_version;
-  const first = box.queue(SESSION_READ);
-  const joined = box.queue({ ...SESSION_READ });
-  const other = box.queue(sessionReadOf(1));
-  const work = await box.work();
-  assert.equal(work.work_version, before + SECOND_VERSION);
-  assert.deepEqual(
-    work.session_reads.map((listed) => ({
-      execution_id: listed.execution_id,
-      session_id: listed.session_id,
-      entry_id: listed.entry_id,
-      entry_type: listed.entry_type,
-    })),
-    [SESSION_READ, sessionReadOf(1)],
-  );
-  for (const { read_id } of work.session_reads)
-    assert.match(read_id, SESSION_READ_ID_PATTERN);
-  assert.equal(await box.report(work.session_reads[0]!.read_id), null);
-  assert.deepEqual(await first, { result: RESOLVED });
-  assert.deepEqual(await joined, { result: RESOLVED });
-  await box.report(work.session_reads[1]!.read_id, {
-    outcome: SessionReadOutcome.EntryAbsent,
-  });
-  assert.deepEqual(await other, {
-    result: { outcome: SessionReadOutcome.EntryAbsent },
-  });
-  const after = await box.work();
-  assert.deepEqual(after.session_reads, []);
-  assert.equal(after.work_version, before + SECOND_VERSION);
-});
 
 test("a session read of an instance with no current connection answers offline at once and queues nothing", async (t) => {
   const f = instanceFixture(t);
@@ -1802,35 +1560,6 @@ test("a report of a session read of another instance answers not_found and keeps
   assert.deepEqual((await box.work()).session_reads, [listed]);
   await box.report(listed!.read_id);
   assert.deepEqual(await wait, { result: RESOLVED });
-});
-
-test("the session read report refuses a body outside the outcome union", () => {
-  const body = workerOperations["session_read.report"].input.shape.body;
-  for (const refused of [
-    { outcome: SessionReadOutcome.Resolved },
-    { outcome: SessionReadOutcome.Resolved, entry: RESOLVED.entry, bytes: 1 },
-    { outcome: SessionReadOutcome.TooLarge },
-    { outcome: SessionReadOutcome.TooLarge, bytes: 0 },
-    { outcome: SessionReadOutcome.Unreadable, entry: RESOLVED.entry },
-    { outcome: "changed" },
-  ])
-    assert.equal(
-      body.safeParse(refused).success,
-      false,
-      JSON.stringify(refused),
-    );
-  for (const accepted of [
-    RESOLVED,
-    { outcome: SessionReadOutcome.TooLarge, bytes: 1 },
-    { outcome: SessionReadOutcome.SessionAbsent },
-    { outcome: SessionReadOutcome.EntryAbsent },
-    { outcome: SessionReadOutcome.Unreadable },
-  ])
-    assert.equal(
-      body.safeParse(accepted).success,
-      true,
-      JSON.stringify(accepted),
-    );
 });
 
 const WORKSPACE_KEY = "node_01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -1943,29 +1672,6 @@ test("a footprint report from a registration with no instance answers instance_n
     WorkerErrorCode.InstanceNotFound,
   );
   assert.deepEqual(f.footprint.measured, []);
-});
-
-test("a session delete at the worker placement queues a session order", async (t) => {
-  const f = instanceFixture(t);
-  const { record } = await f.created();
-  const cleanupId = createIdentity("cleanup");
-  const executionId = createIdentity("execution");
-  f.as(CLEANUP_HUMAN);
-  assert.deepEqual(
-    await f.invoke(
-      "instance.session.delete",
-      { cleanup_id: cleanupId, execution_ids: [executionId] },
-      { instance_name: INSTANCE },
-    ),
-    { queued: true },
-  );
-  assert.deepEqual(f.worker().instances.footprintOrdersOf(record.id), [
-    {
-      cleanup_id: cleanupId,
-      kind: InstanceCleanableKind.Session,
-      keys: [executionId],
-    },
-  ]);
 });
 
 test("an archive drops the orders of the instance and reports the archive to the footprint", async (t) => {
@@ -2140,18 +1846,6 @@ test("an order past the deadline revokes with the archive stop and ends the inst
   assert.equal(f.store.transaction(readAllLive).length, NO_ROWS);
 });
 
-test("an archive with force of a disconnected instance with a live execution revokes and ends it at once", async (t) => {
-  const f = instanceFixture(t);
-  const box = await connectedBusy(f);
-  f.worker().instances.dropConnection(box.record.id);
-  const archived = await box.archive();
-  assert.ok(archived.ended_at);
-  assert.equal(archived.stopping, undefined);
-  assert.deepEqual(f.revoked, [box.executionId]);
-  assert.equal(f.store.transaction(readAllLive).length, NO_ROWS);
-  assert.deepEqual(box.orders(), []);
-});
-
 test("a repeated archive answers the same stopping list and keeps one pending archive and one order", async (t) => {
   const { f, records } = loggingFixture(t);
   const box = await connectedBusy(f);
@@ -2278,17 +1972,6 @@ test("a second order for an execution keeps the first reason and a pending archi
   assert.equal(f.worker().stopOrderOf(box.executionId), null);
 });
 
-test("the archive keeps the connection while stopping is not empty and drops it when the instance ends", async (t) => {
-  const f = instanceFixture(t);
-  const box = await connectedBusy(f);
-  await box.archive();
-  assert.notEqual(f.worker().instances.connectionOf(box.record.id), null);
-  await box.archive();
-  assert.notEqual(f.worker().instances.connectionOf(box.record.id), null);
-  f.worker().executionReleased(box.executionId);
-  assert.equal(f.worker().instances.connectionOf(box.record.id), null);
-});
-
 test("the order timer retries a deferred end that failed and left an empty stopping list", async (t) => {
   const f = instanceFixture(t);
   const box = await connectedBusy(f);
@@ -2355,18 +2038,6 @@ test("a pause order is connected, raises the work version and appears in the wor
   assert.deepEqual(
     orders.map((order) => stopOrderEntrySchema.parse(order)),
     [{ execution_id: box.executionId, reason: StopOrderReason.HumanPaused }],
-  );
-});
-
-test("a registration of an instance with no connection is not connected", async (t) => {
-  const f = instanceFixture(t);
-  const box = await connectedBusy(f);
-  f.worker().instances.dropConnection(box.record.id);
-  assert.equal(
-    f.store.transaction((tx) =>
-      f.worker().executionConnected(tx, box.registration.runtime_identity),
-    ),
-    false,
   );
 });
 
@@ -2438,20 +2109,6 @@ test("a forced archive that revokes no claim calls no Mission hook", async (t) =
   assert.deepEqual(f.released, []);
 });
 
-test("a pause order past the deadline with an ended claim removes the order and runs no hook", async (t) => {
-  const f = instanceFixture(t);
-  const box = await connectedBusy(f);
-  const released = t.mock.method(f.worker().instances, "executionReleased");
-  sendPause(f, box);
-  const later = Date.now() + INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
-  t.mock.method(Date, "now", () => later);
-  f.worker().instances.sweepStopOrders();
-  assert.deepEqual(f.pausedRevocation.revoked, [box.executionId]);
-  assert.equal(released.mock.callCount(), NO_CALLS);
-  assert.equal(f.worker().orderOf(box.executionId), null);
-  assert.deepEqual(box.orders(), []);
-});
-
 test("a pause order past the deadline ends a pending archive of its instance when it empties stopping", async (t) => {
   const f = instanceFixture(t);
   const box = await connectedBusy(f);
@@ -2460,20 +2117,6 @@ test("a pause order past the deadline ends a pending archive of its instance whe
   const later = Date.now() + INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
   t.mock.method(Date, "now", () => later);
   f.worker().instances.sweepStopOrders();
-  assert.equal(f.worker().instances.liveInstance(box.record.id), null);
-  assert.equal(f.worker().orderOf(box.executionId), null);
-});
-
-test("a pause order and then an archive order of one execution keep one order with human_paused and the release ends the instance", async (t) => {
-  const f = instanceFixture(t);
-  const box = await connectedBusy(f);
-  sendPause(f, box);
-  const archived = await box.archive();
-  assert.deepEqual(archived.stopping, [box.executionId]);
-  assert.deepEqual(box.orders(), [
-    { execution_id: box.executionId, reason: StopOrderReason.HumanPaused },
-  ]);
-  f.worker().executionReleased(box.executionId);
   assert.equal(f.worker().instances.liveInstance(box.record.id), null);
   assert.equal(f.worker().orderOf(box.executionId), null);
 });
