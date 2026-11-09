@@ -62,9 +62,14 @@ function boundRowOf(
   return row;
 }
 
+interface PinnedClaim {
+  executionId: string;
+  runtimeIdentity: string;
+}
+
 function pinnedModelsOf(
   dependencies: ModelInferenceDependencies,
-  claim: { executionId: string; runtimeIdentity: string },
+  claim: PinnedClaim,
 ): ApprovedModelsFn {
   return (transaction, name) => {
     const record =
