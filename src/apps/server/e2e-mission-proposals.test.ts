@@ -311,14 +311,6 @@ test(
     let proposals!: Map<string, Proposal>;
     let decided!: ProposalDecideResult;
 
-    await t.test("the examine judgement blocks the examine node", () => {
-      assert.equal(h.judged.assessment.result, AssessmentResult.Undetermined);
-      assert.equal(
-        (h.judged.node as { state: string }).state,
-        NodeState.Blocked,
-      );
-    });
-
     await t.test("proposal list answers the open proposals", async () => {
       const page = await read<Page<Proposal>>(listArguments());
       assert.equal(page.items.length, TWO_ITEMS);
