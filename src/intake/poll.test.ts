@@ -25,7 +25,6 @@ import type {
   GitHubEvent,
   GitHubEventsAnswer,
   GitHubEventsQuery,
-  GitHubTarget,
 } from "../repository/github.ts";
 import {
   Consumer,
@@ -288,13 +287,11 @@ function modified(etag: string | null, events: GitHubEvent[]): EventsAnswer {
 
 function counted(
   count: number,
-  linkCount = NO_REQUESTS,
-  inbox = false,
 ): OperationResult<{ count: number; link_count: number; inbox: boolean }> {
   return {
     type: OperationResultType.Completed,
     status: HttpStatus.OK,
-    data: { count, link_count: linkCount, inbox },
+    data: { count, link_count: NO_REQUESTS, inbox: false },
   };
 }
 
@@ -341,16 +338,8 @@ function cycleHarness(t: TestContext, options: HarnessOptions = {}) {
   const { custody, grants, drops } = fakeCustody();
   const calls: { call: GitHubCall; query: GitHubEventsQuery }[] = [];
   const pullCalls: { call: GitHubCall; query: GitHubEventsQuery }[] = [];
-  const commentCalls: {
-    call: GitHubCall;
-    target: GitHubTarget;
-    query: { etag: string | null };
-  }[] = [];
   const answers: { next: () => Promise<EventsAnswer> } = {
     next: async () => modified(ETAG_FIRST, []),
-  };
-  const commentAnswers: { next: () => Promise<EventsAnswer> } = {
-    next: async () => modified(COMMENTS_ETAG_FIRST, []),
   };
   const pullAnswers: { next: () => Promise<EventsAnswer> } = {
     next: async () => ({ ok: true, value: { notModified: true } }),
@@ -383,10 +372,7 @@ function cycleHarness(t: TestContext, options: HarnessOptions = {}) {
         pullCalls.push({ call, query });
         return pullAnswers.next();
       },
-      listIssueComments: async (call, target, query) => {
-        commentCalls.push({ call, target, query });
-        return commentAnswers.next();
-      },
+      listIssueComments: async () => modified(COMMENTS_ETAG_FIRST, []),
     },
     unresolvedRequests: async (input, options) => {
       demands.inputs.push(input);
@@ -406,10 +392,8 @@ function cycleHarness(t: TestContext, options: HarnessOptions = {}) {
     drops,
     calls,
     pullCalls,
-    commentCalls,
     answers,
     pullAnswers,
-    commentAnswers,
     demands,
     warn,
     wakes,
@@ -572,14 +556,6 @@ function loopHarness(t: TestContext, options: HarnessOptions = {}) {
     h.answers.next = async () =>
       answers.shift() ?? { ok: true, value: { notModified: true } };
   };
-  const scriptPulls = (answers: EventsAnswer[]) => {
-    h.pullAnswers.next = async () =>
-      answers.shift() ?? { ok: true, value: { notModified: true } };
-  };
-  const scriptComments = (answers: EventsAnswer[]) => {
-    h.commentAnswers.next = async () =>
-      answers.shift() ?? { ok: true, value: { notModified: true } };
-  };
   return {
     ...h,
     loops,
@@ -587,8 +563,6 @@ function loopHarness(t: TestContext, options: HarnessOptions = {}) {
     elapse,
     rearmed,
     script,
-    scriptPulls,
-    scriptComments,
   };
 }
 
@@ -603,16 +577,8 @@ function limited(waitMs: number | null): EventsAnswer {
   };
 }
 
-function unchanged(pollIntervalMs?: number): EventsAnswer {
-  return {
-    ok: true,
-    value: {
-      notModified: true,
-      ...(pollIntervalMs === undefined
-        ? {}
-        : { poll_interval_ms: pollIntervalMs }),
-    },
-  };
+function unchanged(): EventsAnswer {
+  return { ok: true, value: { notModified: true } };
 }
 
 test("a slow request starts no second request of that inbound before it ends", async (t) => {

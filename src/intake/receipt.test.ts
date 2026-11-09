@@ -207,7 +207,7 @@ function harness(t: TestContext) {
     );
     return { id, secret: webhookSecret(dependencies.masterKey, id) };
   };
-  const addSlackInbound = (resource: string = SLACK_TEAM_ID) => {
+  const addSlackInbound = () => {
     const id = allocateInboundId();
     store.transaction((tx) =>
       insertInbound(tx, id, {
@@ -216,7 +216,10 @@ function harness(t: TestContext) {
         platform: InboundPlatform.Slack,
         consumer: Consumer.MissionDeliveryAdmit,
         credential: SIGNING_CREDENTIAL,
-        configuration: { resource_kind: ResourceKind.Conversation, resource },
+        configuration: {
+          resource_kind: ResourceKind.Conversation,
+          resource: SLACK_TEAM_ID,
+        },
         checkpoint: null,
         created_at: CREATED_AT,
       }),
@@ -290,10 +293,11 @@ function harness(t: TestContext) {
     if (signature !== undefined) headers.set("x-hub-signature-256", signature);
     return headers;
   };
-  const jira = (identifier: string | null, signature?: string) => {
-    const headers = new Headers({ "content-type": "application/json" });
-    if (identifier !== null)
-      headers.set("x-atlassian-webhook-identifier", identifier);
+  const jira = (identifier: string, signature?: string) => {
+    const headers = new Headers({
+      "content-type": "application/json",
+      "x-atlassian-webhook-identifier": identifier,
+    });
     if (signature !== undefined) headers.set("x-hub-signature", signature);
     return headers;
   };
@@ -330,7 +334,6 @@ function harness(t: TestContext) {
     jira,
     slack,
     signing,
-    deliver,
     receive,
     remove,
     github,
