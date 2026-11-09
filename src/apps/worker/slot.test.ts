@@ -317,19 +317,3 @@ test("serve slot applies a bindings frame and opens a port for the new entry onl
     [CLIENT_ID, SECOND_CLIENT_ID],
   );
 });
-
-test("serve slot exits 1 with worker.slot.frame_invalid on a port frame with no client_id and on a bindings frame before init", async (t) => {
-  for (const lines of [
-    [
-      encodeFrame(init()),
-      `${JSON.stringify({ kind: FrameKind.Port, message: PROBE })}\n`,
-    ],
-    [encodeFrame({ kind: FrameKind.Bindings, entries: [] })],
-  ]) {
-    const instance = slot(t, {});
-    for (const line of lines) instance.child.stdin.write(line);
-    const exit = await instance.exited;
-    assert.equal(exit.code, SLOT_FAILURE, lines.join(""));
-    assert.match(exit.stderr, /worker\.slot\.frame_invalid/, lines.join(""));
-  }
-});

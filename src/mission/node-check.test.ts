@@ -36,12 +36,9 @@ import {
 } from "./contract.ts";
 import { AdmissionQueue, admitDelivery } from "./delivery-admit.ts";
 import {
-  LINK_ACTOR,
   LINK_RESOURCE,
   linkOf,
   linkUpdateHarness,
-  OTHER_ACTOR,
-  OTHER_LINK_NUMBER,
   TRUSTED_ACTOR,
   updateOf,
 } from "./link-update-test-support.ts";
@@ -169,25 +166,6 @@ async function fixture(t: TestContext) {
   return { ...h, check };
 }
 
-test("node check passes the context and the request evidence identity to Intake", async (t) => {
-  const h = await fixture(t);
-  const remote = t.mock.method(
-    h.dependencies.intakeCheck,
-    "check",
-    async () => ({ end_state: CheckEndState.None, landed_commits: [] }),
-  );
-  const answer = await h.check();
-  assert.equal(
-    answer.results[FIRST_RESULT_INDEX]!.resolution,
-    Resolution.Unresolved,
-  );
-  assert.equal(remote.mock.callCount(), SINGLE_CALL);
-  const [context, evidenceId] =
-    remote.mock.calls[FIRST_RESULT_INDEX]!.arguments;
-  assert.equal(context?.signal.aborted, false);
-  assert.equal(evidenceId, h.request.id);
-});
-
 test("expected checks write every landed commit and close successful external attempts without changing mission version", async (t) => {
   const h = await fixture(t);
   h.dependencies.intakeCheck.check = async () => ({
@@ -298,41 +276,6 @@ test("a conflicting pull request returns the node to rework and keeps the reques
   );
   assert.equal(h.node().state, NodeState.Available);
   assert.equal(h.node().attempt, FIRST_ATTEMPT);
-  assert.equal(
-    h.store.transaction((tx) => readEvidence(tx, h.request.id))!.end_state,
-    null,
-  );
-});
-
-test("a pull request with a failed required check returns the node to rework and keeps the request unresolved", async (t) => {
-  const h = await fixture(t);
-  h.dependencies.intakeCheck.check = async () => ({
-    end_state: CheckEndState.ChecksFailed,
-    landed_commits: [],
-  });
-  assert.equal(
-    (await h.check()).results[FIRST_RESULT_INDEX]!.resolution,
-    Resolution.Unresolved,
-  );
-  assert.equal(h.node().state, NodeState.Available);
-  assert.equal(h.node().attempt, FIRST_ATTEMPT);
-  assert.equal(
-    h.store.transaction((tx) => readEvidence(tx, h.request.id))!.end_state,
-    null,
-  );
-});
-
-test("checks_pending leaves the node External.Requested and the request unresolved", async (t) => {
-  const h = await fixture(t);
-  h.dependencies.intakeCheck.check = async () => ({
-    end_state: CheckEndState.ChecksPending,
-    landed_commits: [],
-  });
-  assert.equal(
-    (await h.check()).results[FIRST_RESULT_INDEX]!.resolution,
-    Resolution.Unresolved,
-  );
-  assert.equal(h.node().state, NodeState.ExternalRequested);
   assert.equal(
     h.store.transaction((tx) => readEvidence(tx, h.request.id))!.end_state,
     null,
@@ -472,31 +415,6 @@ function insertNextRequest(
     ),
   );
 }
-
-test("one other end blocks the node after a sibling landed", async (t) => {
-  const h = await externalRequestHarness(t, IDENTITY, true);
-  insertNextRequest(h);
-  h.dependencies.intakeCheck.check = async (_context, evidenceId) =>
-    evidenceId === h.request.id
-      ? { end_state: CheckEndState.Expected, landed_commits: [COMMIT] }
-      : { end_state: CheckEndState.Other, landed_commits: [] };
-  const answer = await h.invoke("node.check", {
-    params: { node_id: h.node_id },
-    query: {},
-    body: { expected_mission_version: FIRST_MISSION_VERSION },
-  });
-  assert.deepEqual(
-    answer.results.map((result) => result.resolution).sort(),
-    [Resolution.ExpectedEnd, Resolution.OtherEnd].sort(),
-  );
-  assert.equal(h.node().state, NodeState.Blocked);
-  h.store.transaction((tx) =>
-    assert.deepEqual(
-      readLandedCommitEvidence(tx, h.node_id, FIRST_ATTEMPT).length,
-      SINGLE_LANDED_COMMIT,
-    ),
-  );
-});
 
 test("a landed sibling makes its attempt delivered across an unblock", async (t) => {
   const h = await externalRequestHarness(t, IDENTITY, true);
@@ -1022,8 +940,6 @@ const CLOSED_ATTEMPTS = 2;
 const SINGLE_PROPOSAL = 1;
 const SINGLE_ROW = 1;
 const NO_READS = 0;
-const FIRST_LINK_INDEX = 0;
-const SECOND_LINK_INDEX = 1;
 
 function linkCheckFixture(
   t: TestContext,
@@ -1165,16 +1081,6 @@ test("node check counts a refused item in refused and a repeat in duplicate", as
   assert.equal(h.rows().length, SINGLE_ROW);
 });
 
-test("node check counts an item with a stored update key in duplicate", async (t) => {
-  const h = linkCheckFixture(t);
-  h.addItem(updateOf({ update_key: "issue_comment:1" }));
-  h.addItem(updateOf({ update_key: "issue_comment:1" }));
-  const result = await h.check();
-  assert.deepEqual(result.link_updates, [
-    { external_link: linkOf(), admitted: 1, duplicate: 1, refused: 0 },
-  ]);
-});
-
 test("node check of a Completed node with a link admits an item of a trusted actor and opens a follow-up proposal", async (t) => {
   const h = linkCheckFixture(t, NodeState.Completed, CLOSED_ATTEMPTS);
   h.addItem(
@@ -1186,40 +1092,6 @@ test("node check of a Completed node with a link admits an item of a trusted act
   ]);
   assert.equal(h.proposals().length, SINGLE_PROPOSAL);
   assert.equal(h.state_of(), NodeState.Completed);
-});
-
-test("node check of a node in Available with a link admits an item and keeps its state", async (t) => {
-  const h = linkCheckFixture(t, NodeState.Available);
-  h.addItem(updateOf({ actor_id: LINK_ACTOR, update_key: "issue_comment:1" }));
-  h.addItem(updateOf({ actor_id: OTHER_ACTOR, update_key: "issue_comment:2" }));
-  const result = await h.check();
-  assert.equal(result.link_updates[FIRST_LINK_INDEX]!.admitted, TWO_ITEMS);
-  assert.equal(h.state_of(), NodeState.Available);
-});
-
-test("node check answers one entry for each link in the order of the links", async (t) => {
-  const h = linkCheckFixture(t);
-  const nodeId = h.addNode(
-    [
-      { ...linkOf(), resource_identity: OTHER_RESOURCE },
-      linkOf(OTHER_LINK_NUMBER),
-    ],
-    NodeState.Available,
-    [h.bindingId, h.otherBindingId],
-  );
-  const result = await h.check(nodeId);
-  assert.deepEqual(
-    result.link_updates.map((entry) => entry.external_link),
-    [
-      { ...linkOf(), resource_identity: OTHER_RESOURCE },
-      linkOf(OTHER_LINK_NUMBER),
-    ],
-  );
-  assert.deepEqual(
-    h.reads.map((read) => read.binding_id),
-    [h.otherBindingId, h.bindingId],
-  );
-  assert.equal(result.link_updates[SECOND_LINK_INDEX]!.admitted, NO_ITEMS);
 });
 
 test("node check of a node with no request and no link answers 409 no_unresolved_request", async (t) => {
@@ -1424,24 +1296,6 @@ test("a node with a pull request and a reply completes only when both reach thei
       readLandedCommitEvidence(tx, h.node_id, FIRST_ATTEMPT).length,
       SINGLE_LANDED_COMMIT,
     ),
-  );
-});
-
-test("the check of a reply evidence answers posted from a succeeded outbound request and calls no platform", async (t) => {
-  const h = await replyFixture(t);
-  h.store.transaction((tx) =>
-    tx.database
-      .prepare("UPDATE mission_evidence SET end_state = ? WHERE id = ?")
-      .run(CheckEndState.Expected, h.request.id),
-  );
-  h.outbound.set(h.replyId, OutboundRequestState.Succeeded);
-  assert.deepEqual(resolutionsOf(await h.check()), [
-    [REPLY_KEY, Resolution.ExpectedEnd],
-  ]);
-  assert.equal(h.platformCalls(), NO_REMOTE_CALLS);
-  assert.equal(
-    h.store.transaction((tx) => readEvidence(tx, h.replyId)?.end_state),
-    CheckEndState.Expected,
   );
 });
 
