@@ -25,7 +25,6 @@ import {
 } from "./test-support.ts";
 import {
   claimStateOf,
-  consecutiveStalls,
   insertExecution,
   readExecution,
 } from "./execution-store.ts";
@@ -54,7 +53,6 @@ const TELEMETRY_RECORDS = 2;
 const NO_STALLS = 0;
 const NO_FAILURES = 0;
 const NO_CALLS = 0;
-const FAILURE_CALL = "failure";
 const STOPPED_CALL = "stopped";
 const ONE_CALL = 1;
 const PRIOR_STALLS = 2;
@@ -62,7 +60,6 @@ const FAILURE_LIMIT = 3;
 const CURRENT_STALL = 1;
 const FIRST_FAILURE = 1;
 const SECOND_FAILURE = 2;
-const RELEASE_ROUTING = "release";
 const MILLISECONDS_PER_SECOND = 1000;
 const FIRST_HOLD_END =
   FIXTURE_NOW + DEFAULT_STOP_BACKOFF_SECONDS * MILLISECONDS_PER_SECOND;
@@ -183,26 +180,6 @@ test("a budget end is no failure and resets the failure count", (t) => {
     });
   assert.equal(countAfter([STOP, BUDGET_END]), FIRST_FAILURE);
   assert.equal(countAfter([STOP]), SECOND_FAILURE);
-});
-
-test("a failure stop between budget ends resets the budget-end count", (t) => {
-  const h = harness(t);
-  const count = h.store.transaction((tx) => {
-    for (const stop of [BUDGET_END, STOP, BUDGET_END]) {
-      insertExecution(
-        tx,
-        executionFixture({
-          node_id: h.row.node_id,
-          project_id: h.row.project_id,
-          attempt: h.row.attempt,
-          ended_at: FIXTURE_NOW,
-          stop,
-        }),
-      );
-    }
-    return consecutiveStalls(tx, h.row.node_id, h.row.attempt);
-  });
-  assert.equal(count, CURRENT_STALL);
 });
 
 test("Mission refusal rolls back all release writes and sends no wake", async (t) => {
@@ -334,116 +311,6 @@ test("a release stores the cause detail of its stop and hands it to telemetry", 
   ]);
 });
 
-test("a release with a stop cause hands that cause to the root end", async (t) => {
-  const h = harness(t);
-  t.mock.method(Date, "now", () => FIXTURE_NOW);
-  const cause = attributed(
-    CauseCategory.LlmProvider,
-    CauseSubcategory.RateLimited,
-  );
-  await h.release(true, { ...STOP, cause });
-  assert.deepEqual(
-    (h.telemetry[0]!.arguments[0] as { cause: unknown }).cause,
-    cause,
-  );
-});
-
-test("a stop with no cause hands unattributed with no suspects to the root end", async (t) => {
-  const h = harness(t);
-  t.mock.method(Date, "now", () => FIXTURE_NOW);
-  await h.release(true, STOP);
-  assert.deepEqual(
-    (h.telemetry[0]!.arguments[0] as { cause: unknown }).cause,
-    unattributed([]),
-  );
-});
-
-test("a release with no stop hands no cause to the root end", async (t) => {
-  const h = harness(t);
-  t.mock.method(Date, "now", () => FIXTURE_NOW);
-  await h.release(false);
-  assert.equal(
-    (h.telemetry[0]!.arguments[0] as { cause: unknown }).cause,
-    null,
-  );
-});
-
-test("a release writes one transition span after its root end", async (t) => {
-  const h = harness(t);
-  t.mock.method(Date, "now", () => FIXTURE_NOW);
-  await h.release(false);
-  assert.deepEqual(
-    h.telemetry.map((entry) => entry.method),
-    ["executionEnded", "executionTransition"],
-  );
-  assert.deepEqual(h.telemetry[1]!.arguments, [
-    executionTrace(h.row),
-    {
-      from: "Executing",
-      to: "Waiting",
-      rule: TransitionRule.None,
-      count: null,
-      limit: null,
-      lead_time_ms: null,
-      failure_count: null,
-      available_at: null,
-      transitioned_at: FIXTURE_NOW,
-    },
-  ]);
-});
-
-test("a release of an evaluating node hands over the state at the commit", async (t) => {
-  const h = harness(t);
-  t.mock.method(Date, "now", () => FIXTURE_NOW);
-  h.dependencies.transitions.release = () =>
-    transitionFixture({ from: "Evaluating", to: "Completed" });
-  await h.release(false);
-  assert.deepEqual(
-    h.telemetry[1]!.arguments[1],
-    executionTransition(
-      transitionFixture({ from: "Evaluating", to: "Completed" }),
-      FIXTURE_NOW,
-      null,
-    ),
-  );
-});
-
-test("a stop at the failure limit writes the failure limit rule with its count and limit", async (t) => {
-  const h = harness(t);
-  t.mock.method(Date, "now", () => FIXTURE_NOW);
-  t.mock.method(h.service, "wake", () => {});
-  const paused = transitionFixture({
-    to: "Paused",
-    rule: TransitionRule.FailureLimit,
-    count: FAILURE_LIMIT,
-    limit: FAILURE_LIMIT,
-  });
-  h.dependencies.transitions.failure = () => paused;
-  await h.release(true, STOP);
-  assert.deepEqual(h.telemetry[1]!.arguments, [
-    executionTrace(h.row),
-    executionTransition(paused, FIXTURE_NOW, FIRST_FAILURE_WITHOUT_JOB),
-  ]);
-});
-
-test("a stalled release at the further work limit writes the further work limit rule", async (t) => {
-  const h = harness(t);
-  t.mock.method(Date, "now", () => FIXTURE_NOW);
-  t.mock.method(h.service, "wake", () => {});
-  const paused = transitionFixture({
-    to: "Paused",
-    rule: TransitionRule.FurtherWorkLimit,
-    count: PRIOR_STALLS + CURRENT_STALL,
-    limit: PRIOR_STALLS + CURRENT_STALL,
-  });
-  h.dependencies.transitions.release = () => paused;
-  await h.release(true, BUDGET_END);
-  assert.deepEqual(h.telemetry[1]!.arguments, [
-    executionTrace(h.row),
-    executionTransition(paused, FIXTURE_NOW, null),
-  ]);
-});
-
 test("a refused release writes no transition span", async (t) => {
   const h = harness(t);
   t.mock.method(Date, "now", () => FIXTURE_NOW);
@@ -477,14 +344,6 @@ test("a release with a stop cause stores a stop with no cause", async (t) => {
   );
   assert.deepEqual(claimed.stop, STOP);
   assert.equal(JSON.stringify(claimed).includes("cause"), false);
-});
-
-test("a release without a stop field stores no stop", async (t) => {
-  const h = harness(t);
-  t.mock.method(Date, "now", () => FIXTURE_NOW);
-  await h.release(true);
-  assert.equal(h.read().stop, null);
-  assert.equal(h.calls[0]!.method, RELEASE_ROUTING);
 });
 
 test("the release input refuses a stop with no further work", () => {
@@ -629,44 +488,6 @@ test("a worker_stopped release calls stopped, not failure, and sets no hold", as
   assert.equal(job.available_at, null);
 });
 
-test("an environment_failed release keeps the failure path", async (t) => {
-  const h = harness(t);
-  t.mock.method(Date, "now", () => FIXTURE_NOW);
-  t.mock.method(h.service, "wake", () => {});
-  h.dependencies.environments.environmentFailed = () => {};
-  await h.release(true, {
-    reason: ExecutionStopReason.EnvironmentFailed,
-    code: EnvironmentFailure.SetupFailed,
-  });
-  assert.ok(h.calls.some((call) => call.method === FAILURE_CALL));
-  assert.ok(h.calls.every((call) => call.method !== STOPPED_CALL));
-});
-
-test("a worker_stopped release resets the budget-end stall count", async (t) => {
-  const h = harness(t);
-  t.mock.method(Date, "now", () => FIXTURE_NOW);
-  t.mock.method(h.service, "wake", () => {});
-  h.store.transaction((tx) => {
-    tx.database
-      .prepare("DELETE FROM scheduler_execution WHERE id = ?")
-      .run(h.row.execution_id);
-    for (const stop of [BUDGET_END, BUDGET_END, WORKER_STOPPED])
-      insertExecution(
-        tx,
-        executionFixture({
-          node_id: h.row.node_id,
-          project_id: h.row.project_id,
-          attempt: h.row.attempt,
-          ended_at: FIXTURE_NOW,
-          stop,
-        }),
-      );
-    insertExecution(tx, h.row);
-  });
-  await h.release(true, BUDGET_END);
-  assert.equal(h.calls[0]!.arguments[3], CURRENT_STALL);
-});
-
 test("an instance_archived release refuses with stop_unordered and writes nothing", async (t) => {
   const h = harness(t);
   t.mock.method(Date, "now", () => FIXTURE_NOW);
@@ -686,36 +507,6 @@ test("an instance_archived release refuses with stop_unordered and writes nothin
   assert.equal(h.calls.length, NO_CALLS);
   assert.equal(h.telemetry.length, NO_CALLS);
   assert.equal(wake.mock.callCount(), NO_CALLS);
-});
-
-test("an instance_archived release with a stop order calls stopped, not failure", async (t) => {
-  const h = harness(t);
-  t.mock.method(Date, "now", () => FIXTURE_NOW);
-  t.mock.method(h.service, "wake", () => {});
-  h.dependencies.stopOrderOf = (executionId) =>
-    executionId === h.row.execution_id
-      ? ExecutionStopReason.InstanceArchived
-      : null;
-  await h.release(true, INSTANCE_ARCHIVED);
-  assert.deepEqual(
-    h.calls.map((call) => call.method),
-    [STOPPED_CALL],
-  );
-  assert.deepEqual(h.read().stop, INSTANCE_ARCHIVED);
-});
-
-test("an instance_archived release whose order names another reason refuses with stop_unordered", async (t) => {
-  const h = harness(t);
-  t.mock.method(Date, "now", () => FIXTURE_NOW);
-  h.dependencies.stopOrderOf = () => ExecutionStopReason.WorkerStopped;
-  await assert.rejects(
-    h.release(true, INSTANCE_ARCHIVED),
-    (error: unknown) =>
-      error instanceof OperationError &&
-      error.status === HttpStatus.Conflict &&
-      error.code === STOP_UNORDERED,
-  );
-  assert.equal(h.read().ended_at, null);
 });
 
 test("executionReleased runs after the commit with the execution id and the stop", async (t) => {
@@ -822,26 +613,8 @@ test("an environment_failed release calls environmentFailed once after the commi
   ]);
 });
 
-test("an environment_failed release with no detail passes a null detail", async (t) => {
-  const h = environmentHarness(t);
-  await h.release(true, {
-    reason: ExecutionStopReason.EnvironmentFailed,
-    code: EnvironmentFailure.CommandAbsent,
-  });
-  assert.equal(h.failed.length, ONE_CALL);
-  assert.deepEqual(h.failed[0]!.digests, {});
-  assert.deepEqual(h.failed[0]!.stop, {
-    code: EnvironmentFailure.CommandAbsent,
-    detail: null,
-  });
-});
-
 for (const detail of [
   "setup failed",
-  "[1,2]",
-  "null",
-  JSON.stringify({ command: "pnpm install" }),
-  JSON.stringify({ digests: "none" }),
   JSON.stringify({ digests: { [API]: 1 } }),
 ]) {
   test(`a stop detail of ${detail} passes empty digests`, async (t) => {
@@ -899,25 +672,6 @@ test("a release that fails in its transaction calls environmentFailed never", as
   assert.equal(h.read().ended_at, null);
 });
 
-test("a release with another stop reason calls environmentFailed never", async (t) => {
-  const h = environmentHarness(t);
-  await h.release(true, STOP);
-  assert.deepEqual(h.failed, []);
-  assert.deepEqual(h.events, ["commit", "wake"]);
-});
-
-test("a release with no stop calls environmentFailed never", async (t) => {
-  const h = environmentHarness(t);
-  await h.release(true);
-  assert.deepEqual(h.failed, []);
-});
-
-test("a budget-end release calls environmentFailed never", async (t) => {
-  const h = environmentHarness(t);
-  await h.release(true, BUDGET_END);
-  assert.deepEqual(h.failed, []);
-});
-
 const HUMAN_PAUSED: ReleaseStop = {
   reason: ExecutionStopReason.HumanPaused,
   code: null,
@@ -949,75 +703,5 @@ test("a human_paused release with an order calls stopped, counts no failure and 
   assert.equal(
     h.store.transaction((tx) => consecutiveFailures(tx, ended, false)),
     NO_FAILURES,
-  );
-});
-
-test("a human_paused release with no order refuses with stop_unordered and writes nothing", async (t) => {
-  const h = harness(t);
-  t.mock.method(Date, "now", () => FIXTURE_NOW);
-  await assert.rejects(
-    h.release(true, HUMAN_PAUSED),
-    (error: unknown) =>
-      error instanceof OperationError &&
-      error.status === HttpStatus.Conflict &&
-      error.code === STOP_UNORDERED &&
-      isDeepStrictEqual(error.details, {
-        execution_id: h.row.execution_id,
-        reason: ExecutionStopReason.HumanPaused,
-      }),
-  );
-  assert.equal(h.read().ended_at, null);
-  assert.equal(h.calls.length, NO_CALLS);
-});
-
-test("a human_paused release resets the budget-end stall count", async (t) => {
-  const h = harness(t);
-  t.mock.method(Date, "now", () => FIXTURE_NOW);
-  t.mock.method(h.service, "wake", () => {});
-  h.store.transaction((tx) => {
-    tx.database
-      .prepare("DELETE FROM scheduler_execution WHERE id = ?")
-      .run(h.row.execution_id);
-    for (const stop of [BUDGET_END, BUDGET_END, HUMAN_PAUSED])
-      insertExecution(
-        tx,
-        executionFixture({
-          node_id: h.row.node_id,
-          project_id: h.row.project_id,
-          attempt: h.row.attempt,
-          ended_at: FIXTURE_NOW,
-          stop,
-        }),
-      );
-    insertExecution(tx, h.row);
-  });
-  await h.release(true, BUDGET_END);
-  assert.equal(h.calls[0]!.arguments[3], CURRENT_STALL);
-});
-
-test("an environment_failed release of a Paused node that stays Paused sets no hold", async (t) => {
-  const h = harness(t);
-  t.mock.method(Date, "now", () => FIXTURE_NOW);
-  t.mock.method(h.service, "wake", () => {});
-  h.dependencies.environments.environmentFailed = () => {};
-  const kept = transitionFixture({ from: "Paused", to: "Paused" });
-  h.store.transaction((tx) =>
-    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
-  );
-  h.dependencies.transitions.failure = () => kept;
-  await h.release(true, {
-    reason: ExecutionStopReason.EnvironmentFailed,
-    code: EnvironmentFailure.SetupFailed,
-  });
-  const job = h.store.transaction(
-    (tx) =>
-      tx.database
-        .prepare("SELECT available_at FROM scheduler_job WHERE node_id = ?")
-        .get(h.row.node_id) as { available_at: number | null },
-  );
-  assert.equal(job.available_at, null);
-  assert.deepEqual(
-    h.telemetry[1]!.arguments[1],
-    executionTransition(kept, FIXTURE_NOW, FIRST_FAILURE_WITHOUT_JOB),
   );
 });

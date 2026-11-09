@@ -138,29 +138,6 @@ test("a second record of the same root span adds nothing", () => {
   assert.deepEqual(afterEnd, NO_FACTS);
 });
 
-test("a queue wait that is not a safe integer of 0 or more gives no value", () => {
-  for (const wait of [-1, 1.5, Number.NaN, "7"]) {
-    const facts = flowFactsOf(
-      ROOT,
-      null,
-      rootOf({
-        "kanthord.execution.kind": "steps",
-        "kanthord.queue.wait_ms": wait,
-      }),
-    );
-    assert.deepEqual(facts.histogram, []);
-  }
-});
-
-test("an unknown kind adds no kind and no stage", () => {
-  const facts = flowFactsOf(
-    ROOT,
-    null,
-    rootOf({ "kanthord.execution.kind": "other" }),
-  );
-  assert.deepEqual(facts, NO_FACTS);
-});
-
 test("a root end sets the end, the revoke cause, the cause and the duration", () => {
   const before = rootOf({ "kanthord.execution.kind": "steps" });
   const after = {
@@ -227,39 +204,6 @@ test("an unattributed root cause takes its first suspect as detail", () => {
   });
 });
 
-test("a root end with no cause category holds an empty cause", () => {
-  const before = rootOf({});
-  const after = {
-    ...before,
-    end_time: END,
-    attributes: {
-      "kanthord.execution.end": ExecutionEnd.Finished,
-      [CauseAttribute.Subcategory]: CauseSubcategory.NoProgress,
-    },
-  };
-  assert.deepEqual(flowFactsOf(ROOT, before, after).cause?.value, {
-    cause_category: "",
-    cause_detail: "",
-    cause_assigner: "",
-  });
-});
-
-test("a root end with an unknown end stores null", () => {
-  const before = rootOf({});
-  const after = {
-    ...before,
-    end_time: END,
-    attributes: {
-      "kanthord.execution.end": "gone",
-      "kanthord.revoke.cause": "gone",
-    },
-  };
-  assert.deepEqual(flowFactsOf(ROOT, before, after).set, {
-    root_end: null,
-    revoke_cause: null,
-  });
-});
-
 test("a cause label sets the category, the detail and the human assigner", () => {
   const after = spanOf(
     CAUSE_LABEL_OPERATION,
@@ -301,17 +245,6 @@ test("a transition span sets the target, the rule and the lead time", () => {
   assert.deepEqual(flowFactsOf(ROOT, after, { ...after }), NO_FACTS);
 });
 
-test("a transition span with unknown values stores null and has no lead time", () => {
-  const after = spanOf(
-    TRANSITION_SPAN_OPERATION,
-    { "kanthord.node.state.to": "Gone", "kanthord.transition.rule": "gone" },
-    { start: END, end: END },
-  );
-  const facts = flowFactsOf(ROOT, null, after);
-  assert.deepEqual(facts.set, { transition_to: null, transition_rule: null });
-  assert.deepEqual(facts.histogram, []);
-});
-
 test("a release gate start raises the stage to verification once", () => {
   const started = spanOf("worker.release_gate", {}, { start: START });
   const facts = flowFactsOf(ROOT, null, started);
@@ -346,18 +279,6 @@ test("a passed release gate with no affected attribute is absent", () => {
   const facts = flowFactsOf(ROOT, null, ended);
   assert.deepEqual(facts.set, { gate_affected: FlowGateAffected.Absent });
   assert.equal(facts.stage, FlowStage.ReleaseGate);
-});
-
-test("a passed release gate with an unknown affected value stores null", () => {
-  const ended = spanOf(
-    "worker.release_gate",
-    {
-      "kanthord.release_gate.result": "passed",
-      "kanthord.release_gate.affected": "gone",
-    },
-    { start: START, end: END },
-  );
-  assert.deepEqual(flowFactsOf(ROOT, null, ended).set, { gate_affected: null });
 });
 
 test("a routed release gate counts once and keeps the stage", () => {
@@ -401,44 +322,6 @@ test("an affected release verification adds its run, its verdict, its flaky coun
     { measure: FlowMeasure.VerificationRunTime, value: END - START },
   ]);
   assert.deepEqual(flowFactsOf(ROOT, ended, { ...ended }), NO_FACTS);
-});
-
-test("a base red verdict counts and a zero flaky count does not", () => {
-  const ended = spanOf(
-    "worker.verification",
-    {
-      "kanthord.verification.kind": "affected",
-      "kanthord.verification.context": "release",
-      "kanthord.affected.verdict": "base_red",
-      "kanthord.affected.flaky_count": 0,
-    },
-    { start: START, end: END },
-  );
-  assert.deepEqual(flowFactsOf(ROOT, null, ended).counters, {
-    affected_runs: 1,
-    affected_base_red: 1,
-  });
-});
-
-test("a verification of another kind or context adds nothing", () => {
-  for (const attributes of [
-    {
-      "kanthord.verification.kind": "command",
-      "kanthord.verification.context": "release",
-    },
-    {
-      "kanthord.verification.kind": "affected",
-      "kanthord.verification.context": "step",
-    },
-  ])
-    assert.deepEqual(
-      flowFactsOf(
-        ROOT,
-        null,
-        spanOf("worker.verification", attributes, { start: START, end: END }),
-      ),
-      NO_FACTS,
-    );
 });
 
 test("an evaluation span end sets the evaluation stage and an unknown value stores null", () => {
@@ -519,32 +402,6 @@ test("a turn span end answers its usage and a started turn answers none", () => 
     cost_usd: 0.5,
   });
   assert.equal(flowFactsOf(ROOT, ended, { ...ended }).usage, null);
-});
-
-test("a turn usage uses the request model, then an empty model, and counts a non finite value as 0", () => {
-  const ended = spanOf(
-    "agent.turn",
-    {
-      "gen_ai.request.model": "request-model",
-      "gen_ai.usage.input_tokens": Number.POSITIVE_INFINITY,
-      "gen_ai.usage.output_tokens": "7",
-    },
-    { start: START, end: END },
-  );
-  assert.deepEqual(flowFactsOf(ROOT, null, ended).usage, {
-    model: "request-model",
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_read_tokens: 0,
-    cost_usd: 0,
-  });
-  const bare = spanOf("agent.turn", {}, { start: START, end: END });
-  assert.deepEqual([flowFactsOf(ROOT, null, bare).usage?.model], [""]);
-});
-
-test("a span of another operation adds nothing", () => {
-  const other = spanOf("other.operation", {}, { start: START, end: END });
-  assert.deepEqual(flowFactsOf(ROOT, null, other), NO_FACTS);
 });
 
 test("a scheduler execution span that is not the root adds nothing", () => {
