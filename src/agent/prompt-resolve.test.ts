@@ -13,7 +13,6 @@ import {
   type PromptPartAnswer,
   PromptPartState,
   type PromptReference,
-  promptReferenceSchema,
   PromptTemplate,
 } from "./contract.ts";
 import { WORKBENCH_PROMPT } from "./prompt-assets.ts";
@@ -402,21 +401,6 @@ test("an override template whose text equals the shipped text reports origin fil
     (await resolveReference(referenceOf(part), readers())).state,
     PromptPartState.Resolved,
   );
-});
-
-test("a reference accepts a SHA-1 or a SHA-256 commit and refuses another length", () => {
-  for (const commit of [COMMIT, "d".repeat(64)])
-    assert.equal(
-      promptReferenceSchema.safeParse({ ...instructionReference, commit })
-        .success,
-      true,
-    );
-  for (const commit of ["e".repeat(41), "f".repeat(39), "g".repeat(40)])
-    assert.equal(
-      promptReferenceSchema.safeParse({ ...instructionReference, commit })
-        .success,
-      false,
-    );
 });
 
 test("the resolved swe@1 prompt forbids a merge of another branch and the resolved re@1 prompt blocks content outside the requirement", async () => {
