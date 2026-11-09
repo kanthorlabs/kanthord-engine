@@ -434,7 +434,7 @@ const restartTemplate = fixtureTemplate(async (root) => {
   const seed = join(root, SEED_NAME);
   mkdirSync(origin);
   mkdirSync(seed);
-  await simpleGit(origin).init(true);
+  await simpleGit(origin).init(true, ["--initial-branch=main"]);
   const git = simpleGit(seed);
   await git.raw(["init", "-b", "main"]);
   const base = await commit(seed, ".gitignore", "ignored.txt\n");
