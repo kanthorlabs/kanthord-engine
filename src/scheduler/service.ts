@@ -103,6 +103,31 @@ type JobRow = {
   queued_at: number;
 };
 
+const DECLARED_OPERATION_ACCESS: readonly (readonly [
+  { service: string; access: AccessPolicy },
+  AccessPolicy,
+])[] = [
+  [schedulerOperations.queueList, AccessPolicy.Human],
+  [schedulerOperations.queuePeek, AccessPolicy.Human],
+  [schedulerOperations.workPull, AccessPolicy.Client],
+  [schedulerOperations.executionRelease, AccessPolicy.Client],
+  [schedulerOperations.claimGet, AccessPolicy.Client],
+  [schedulerOperations.executionList, AccessPolicy.Human],
+  [schedulerOperations.executionGet, AccessPolicy.Human],
+];
+
+function requireDeclaredOperations(): void {
+  const owned = DECLARED_OPERATION_ACCESS.every(
+    ([operation, access]) =>
+      operation.service === SCHEDULER_SERVICE_NAME &&
+      operation.access === access,
+  );
+  if (!owned)
+    throw new Error(
+      "Scheduler operations require scheduler ownership and their declared access.",
+    );
+}
+
 function toJob(row: JobRow): Job {
   return {
     job_id: row.id,
@@ -378,25 +403,7 @@ export class SchedulerService implements Service, WorkQueue {
   }
 
   declare(registry: OperationRegistry): void {
-    if (
-      schedulerOperations.queueList.service !== SCHEDULER_SERVICE_NAME ||
-      schedulerOperations.queueList.access !== AccessPolicy.Human ||
-      schedulerOperations.queuePeek.service !== SCHEDULER_SERVICE_NAME ||
-      schedulerOperations.queuePeek.access !== AccessPolicy.Human ||
-      schedulerOperations.workPull.service !== SCHEDULER_SERVICE_NAME ||
-      schedulerOperations.workPull.access !== AccessPolicy.Client ||
-      schedulerOperations.executionRelease.service !== SCHEDULER_SERVICE_NAME ||
-      schedulerOperations.executionRelease.access !== AccessPolicy.Client ||
-      schedulerOperations.claimGet.service !== SCHEDULER_SERVICE_NAME ||
-      schedulerOperations.claimGet.access !== AccessPolicy.Client ||
-      schedulerOperations.executionList.service !== SCHEDULER_SERVICE_NAME ||
-      schedulerOperations.executionList.access !== AccessPolicy.Human ||
-      schedulerOperations.executionGet.service !== SCHEDULER_SERVICE_NAME ||
-      schedulerOperations.executionGet.access !== AccessPolicy.Human
-    )
-      throw new Error(
-        "Scheduler operations require scheduler ownership and their declared access.",
-      );
+    requireDeclaredOperations();
     registry.register(schedulerOperations.queueList, (input, caller) =>
       this.queueList(input, caller),
     );
