@@ -339,7 +339,7 @@ export async function runStepsImplement(
       await checkpointOnStop(state, stopped);
     throw stopped;
   } finally {
-    state.base.dispose();
+    await state.base.giveBack();
     state.input.workspaces.release(
       state.input.workspaces.nodeKey(state.input.claim.node_id),
       WorkspaceKind.Node,
@@ -720,7 +720,24 @@ export async function prepareStepsWorkspace(
       prepared.checkouts,
       deadline,
     );
-    base = new BaseHead(setupInput, join(key, BASE_DIRECTORY), setup);
+    base = new BaseHead(
+      setupInput,
+      {
+        directory: join(key, BASE_DIRECTORY),
+        trees: {
+          workspaces: input.workspaces,
+          nodeId: input.claim.node_id,
+          addresses: new Map(
+            input.setup.repositories.map(({ name, address }) => [
+              name,
+              address,
+            ]),
+          ),
+          log: (msg, fields) => run.log(msg, fields),
+        },
+      },
+      setup,
+    );
     const result = await setUpHeads(
       setupInput,
       setup,
@@ -757,7 +774,7 @@ export async function prepareStepsWorkspace(
         : null,
     };
   } catch (error) {
-    base?.dispose();
+    await base?.giveBack();
     input.workspaces.release(key, WorkspaceKind.Node);
     throw error;
   }

@@ -20,9 +20,11 @@ import {
 } from "./judgement.ts";
 import {
   checkoutDetached,
-  cloneLocal,
+  clonePacked,
   fetchLocal,
+  matchOriginHead,
   matchRemote,
+  removeBranches,
   scrubTree,
 } from "./local-git.ts";
 import {
@@ -401,13 +403,14 @@ async function buildReleaseClones(
       context,
       deadlineMs: remaining(),
       fresh: async () => {
-        await cloneLocal(
+        const call = () => ({
           env,
-          checkout.directory,
           directory,
           context,
-          remaining(),
-        );
+          deadlineMs: remaining(),
+        });
+        await clonePacked(call(), checkout.directory);
+        await fetchLocal(call(), checkout.directory);
         await matchRemote(
           env,
           directory,
@@ -416,6 +419,7 @@ async function buildReleaseClones(
           context,
           remaining(),
         );
+        await matchOriginHead(call(), checkout.directory);
         await checkoutDetached(
           env,
           directory,
@@ -423,8 +427,15 @@ async function buildReleaseClones(
           context,
           remaining(),
         );
+        await removeBranches(call());
       },
       reuse: async () => {
+        const call = () => ({
+          env,
+          directory,
+          context,
+          deadlineMs: remaining(),
+        });
         await matchRemote(
           env,
           directory,
@@ -433,12 +444,7 @@ async function buildReleaseClones(
           context,
           remaining(),
         );
-        const call = () => ({
-          env,
-          directory,
-          context,
-          deadlineMs: remaining(),
-        });
+        await matchOriginHead(call(), checkout.directory);
         await fetchLocal(call(), checkout.directory);
         const record = await readSetupRecord(call());
         await scrubTree(call(), checkout.head, record?.roots ?? []);

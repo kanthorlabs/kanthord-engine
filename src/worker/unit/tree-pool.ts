@@ -16,7 +16,11 @@ import {
   FILE_NOT_FOUND,
   writePrivate,
 } from "../../kernel/files.ts";
-import { GitState, normaliseGitState } from "./local-git.ts";
+import {
+  GitState,
+  normaliseGitState,
+  writeConfigTemplate,
+} from "./local-git.ts";
 
 export const PoolClass = { Agent: "agent", Command: "command" } as const;
 export type PoolClass = (typeof PoolClass)[keyof typeof PoolClass];
@@ -243,8 +247,21 @@ export async function prepareTree(
   input: TreePreparation,
 ): Promise<{ source: TreeSource }> {
   const { pool, target, context } = input;
+  const end = performance.now() + input.deadlineMs;
   const clone = async () => {
     await input.fresh();
+    assert.equal(
+      await writeConfigTemplate(
+        {
+          env: input.env,
+          directory: target,
+          context,
+          deadlineMs: Math.max(1, end - performance.now()),
+        },
+        input.address,
+      ),
+      GitState.Ready,
+    );
     return { source: TreeSource.Clone };
   };
   if (!pool.take(input, target, input.nodeId)) return await clone();
