@@ -49,24 +49,8 @@ function isAssistant(message: AgentMessage): message is AssistantMessage {
   );
 }
 
-function turnAttributes(
-  message: AssistantMessage,
-  entryId: string | null,
-  modelDurationMs: number | null,
-): Attributes {
-  assert.ok(message.usage);
-  assert.equal(message.role, ASSISTANT_ROLE);
-  const { usage } = message;
-  const failure =
-    message.stopReason === ERROR_STOP
-      ? providerFailureOf(message.errorMessage ?? "")
-      : null;
-  const duration = Number.isFinite(message.durationMs)
-    ? message.durationMs
-    : modelDurationMs;
+function usageAttributes(usage: AssistantMessage["usage"]): Attributes {
   return {
-    "gen_ai.response.model": message.responseModel ?? message.model,
-    "gen_ai.provider.name": message.provider,
     "gen_ai.usage.input_tokens":
       usage.input + usage.cacheRead + usage.cacheWrite,
     "gen_ai.usage.output_tokens": usage.output,
@@ -75,12 +59,43 @@ function turnAttributes(
     ...(Number.isFinite(usage.cost?.total)
       ? { "kanthord.usage.cost_usd": usage.cost.total }
       : {}),
-    "gen_ai.response.finish_reasons": [message.stopReason],
+  };
+}
+
+function turnOptionalAttributes(
+  message: AssistantMessage,
+  entryId: string | null,
+  modelDurationMs: number | null,
+): Attributes {
+  const failure =
+    message.stopReason === ERROR_STOP
+      ? providerFailureOf(message.errorMessage ?? "")
+      : null;
+  const duration = Number.isFinite(message.durationMs)
+    ? message.durationMs
+    : modelDurationMs;
+  return {
     ...(failure === null ? {} : { "error.type": failure }),
     ...(entryId === null ? {} : { [SESSION_ENTRY_ATTRIBUTE]: entryId }),
     ...(duration === null || duration === undefined
       ? {}
       : { "kanthord.turn.model_duration_ms": duration }),
+  };
+}
+
+function turnAttributes(
+  message: AssistantMessage,
+  entryId: string | null,
+  modelDurationMs: number | null,
+): Attributes {
+  assert.ok(message.usage);
+  assert.equal(message.role, ASSISTANT_ROLE);
+  return {
+    "gen_ai.response.model": message.responseModel ?? message.model,
+    "gen_ai.provider.name": message.provider,
+    ...usageAttributes(message.usage),
+    "gen_ai.response.finish_reasons": [message.stopReason],
+    ...turnOptionalAttributes(message, entryId, modelDurationMs),
   };
 }
 

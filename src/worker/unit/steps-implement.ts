@@ -462,6 +462,33 @@ async function runPending(
   };
 }
 
+function recordTaskVerification(
+  state: StepsState,
+  unit: TaskContent,
+  checked: CheckedRun,
+): boolean {
+  const { verification } = checked;
+  const passed = verificationPassed(verification, checked.commands);
+  state.lastVerification = verificationFactsOf(passed, verification);
+  state.run.noteVerification(state.lastVerification?.timed_out ?? false);
+  state.run.log("task verified", {
+    task_id: unit.id,
+    commit: headSetOf(state.checkouts),
+    passed,
+    exit_codes: verification.results.map((result) => result.exit_code),
+  });
+  return passed;
+}
+
+function revisionInstructionOf(state: StepsState, checked: CheckedRun): string {
+  return taskRevisionInstruction(
+    state.input.setup.templates,
+    checked.verification,
+    checked.commands,
+    checked.outputs.at(-1) ?? "",
+  );
+}
+
 async function runNodeInstruction(
   state: StepsState,
   unit: TaskContent,
@@ -497,23 +524,9 @@ async function runNodeInstruction(
     } else if (revised && !agent.changed())
       countUnchangedTurn(state, NoProgressRule.UnchangedRevision);
     const checked = await verifyCommands(state, unit, commands);
-    const { verification, outputs } = checked;
-    const passed = verificationPassed(verification, checked.commands);
-    state.lastVerification = verificationFactsOf(passed, verification);
-    state.run.noteVerification(state.lastVerification?.timed_out ?? false);
-    state.run.log("task verified", {
-      task_id: unit.id,
-      commit: headSetOf(state.checkouts),
-      passed,
-      exit_codes: verification.results.map((result) => result.exit_code),
-    });
-    if (passed) return await completeUnit(state, unit, agent);
-    instruction = taskRevisionInstruction(
-      state.input.setup.templates,
-      verification,
-      checked.commands,
-      outputs.at(-1) ?? "",
-    );
+    if (recordTaskVerification(state, unit, checked))
+      return await completeUnit(state, unit, agent);
+    instruction = revisionInstructionOf(state, checked);
     template = PromptTemplate.TaskRevision;
     revised = true;
     state.revisionCount++;
@@ -567,23 +580,9 @@ export async function runTask(
       commit: headSetOf(state.checkouts),
     });
     const checked = await verifyTaskRun(state, task);
-    const { verification, outputs } = checked;
-    const passed = verificationPassed(verification, checked.commands);
-    state.lastVerification = verificationFactsOf(passed, verification);
-    state.run.noteVerification(state.lastVerification?.timed_out ?? false);
-    state.run.log("task verified", {
-      task_id: task.id,
-      commit: headSetOf(state.checkouts),
-      passed,
-      exit_codes: verification.results.map((result) => result.exit_code),
-    });
-    if (passed) return await completeUnit(state, task, agent);
-    instruction = taskRevisionInstruction(
-      state.input.setup.templates,
-      verification,
-      checked.commands,
-      outputs.at(-1) ?? "",
-    );
+    if (recordTaskVerification(state, task, checked))
+      return await completeUnit(state, task, agent);
+    instruction = revisionInstructionOf(state, checked);
     state.revisionCount++;
   }
   return ended;

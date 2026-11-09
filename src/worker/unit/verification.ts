@@ -358,6 +358,31 @@ export async function runVerificationsWithOutput(
   }
 }
 
+interface SettledCommand {
+  ran: CommandRun;
+  outcome: VerificationClass;
+  flakyFailure: FlakyFailure | null;
+}
+
+async function settledCommand(
+  command: string,
+  index: number,
+  input: RunInput,
+): Promise<SettledCommand> {
+  const classified = await classifiedCommand(command, index, input);
+  const { ran, outcome } = classified;
+  const passing =
+    outcome === VerificationClass.CodeFailure && !ran.result.timed_out
+      ? await passesOnRerun(command, index, input, classified.runs)
+      : null;
+  if (passing === null) return { ran, outcome, flakyFailure: null };
+  return {
+    ran: passing,
+    outcome: VerificationClass.Pass,
+    flakyFailure: { index, command, result: ran.result, output: ran.output },
+  };
+}
+
 async function runCommands(input: RunInput): Promise<VerificationRun> {
   const results: Verification["results"] = [];
   const outputs: string[] = [];
@@ -378,27 +403,14 @@ async function runCommands(input: RunInput): Promise<VerificationRun> {
       flaky.push(false);
       continue;
     }
-    const classified = await classifiedCommand(command, index, input);
-    let ran = classified.ran;
-    outcome = classified.outcome;
-    const passing =
-      outcome === VerificationClass.CodeFailure && !ran.result.timed_out
-        ? await passesOnRerun(command, index, input, classified.runs)
-        : null;
-    if (passing !== null) {
-      flakyFailures.push({
-        index,
-        command,
-        result: ran.result,
-        output: ran.output,
-      });
-      ran = passing;
-      outcome = VerificationClass.Pass;
-    }
+    const settled = await settledCommand(command, index, input);
+    const { ran } = settled;
+    outcome = settled.outcome;
+    if (settled.flakyFailure !== null) flakyFailures.push(settled.flakyFailure);
     input.memo?.ran(command, ran, outcome);
     results.push(ran.result);
     outputs.push(ran.output);
-    flaky.push(passing !== null);
+    flaky.push(settled.flakyFailure !== null);
     if (outcome !== VerificationClass.Pass) break;
     if (!firstPass.has(command)) firstPass.set(command, index);
   }
