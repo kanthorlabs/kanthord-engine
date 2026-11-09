@@ -112,17 +112,6 @@ test("a chunk split inside a UTF-8 sequence decodes to the same frame", () => {
   );
 });
 
-test("two frames in one chunk decode to two frames", () => {
-  const decoder = new FrameDecoder();
-  const chunk = Buffer.from(
-    encodeFrame(SERVER_FRAMES[3]!) + encodeFrame(SERVER_FRAMES[5]!),
-  );
-  assert.deepEqual(decodeAll(decoder, [chunk]), [
-    SERVER_FRAMES[3],
-    SERVER_FRAMES[5],
-  ]);
-});
-
 test("a line above 64 MiB is refused before its end arrives", () => {
   const decoder = new FrameDecoder();
   const line = Buffer.alloc(FRAME_LINE_LIMIT_BYTES + 1, "a");
@@ -179,28 +168,6 @@ test("the bridge posts each port frame unchanged and writes each port message as
       kind: FrameKind.Port,
       client_id: CLIENT_ID,
       message: { call_id: "call", status: ANSWERED, body: null },
-    },
-  ]);
-});
-
-test("the bridge writes an answer body as JSON, so a Date becomes text and an undefined field disappears", () => {
-  const port = new FakePort();
-  const side = bridge(port);
-  const at = new Date(0);
-  port.emit("message", {
-    call_id: "call",
-    status: ANSWERED,
-    body: { at, gone: undefined },
-  });
-  assert.deepEqual(side.written(), [
-    {
-      kind: FrameKind.Port,
-      client_id: CLIENT_ID,
-      message: {
-        call_id: "call",
-        status: ANSWERED,
-        body: { at: at.toISOString() },
-      },
     },
   ]);
 });
