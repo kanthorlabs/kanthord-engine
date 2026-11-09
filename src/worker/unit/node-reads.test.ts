@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { background } from "../../kernel/context.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
-import { ClosingEvent } from "../../mission/contract.ts";
+import { AssessmentResult, ClosingEvent } from "../../mission/contract.ts";
 import { linkUpdatesText } from "./judgement.ts";
 import { ExecutionRun, ExecutionStop } from "./execution-run.ts";
 import {
@@ -442,6 +442,33 @@ test("the judged commits of a rework are the repository commits of its tested in
       findings: [],
       round: null,
     });
+  }
+});
+
+test("regression: K110 a success rework judges no commit and a criterion-not-met rework keeps its tested commit", async (t) => {
+  const api = { kind: "repository", binding_id: "binding_api", commit: "a" };
+  for (const [result, judged] of [
+    [AssessmentResult.Success, []],
+    [
+      AssessmentResult.CriterionNotMet,
+      [{ binding_id: "binding_api", commit: "a" }],
+    ],
+  ] as const) {
+    const run = fixture(SECOND_ATTEMPT);
+    stopAfter(t, () => run.dispose());
+    run.clients.mission = {
+      "execution.review_round.get": async () =>
+        reviewRound([{ id: "finding_report", label: "S1" }]),
+      "execution.rework_assessment.get": async () => ({
+        ...reworkRead(api),
+        data: { ...reworkRead(api).data, result },
+      }),
+    } as unknown as MethodClients["mission"];
+    run.clients.worker = NO_FAILED_CHECKS as unknown as MethodClients["worker"];
+    assert.deepEqual(
+      (await readPrior(run, REPOSITORIES)).verdict?.judged,
+      judged,
+    );
   }
 });
 
