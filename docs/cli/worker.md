@@ -178,6 +178,9 @@ Each repository binding of the pinned revision has one checkout in `workspaces/<
 With one repository binding, the agent works from that checkout.
 With two or more, the agent works from `checkouts/`, and each binding is one directory under it.
 The execution commits each checkout that holds a change and pushes the node branch of every checkout.
+A checkout is a cache of the repository on the instance. At the end of each execution, the worker gives each checkout back to the tree pool of the instance. A checkout with a push that the remote did not confirm stays in the node workspace.
+The next execution takes a checkout from the pool or clones the repository. The push record `workspaces/<node identity>/pushed/` keeps the commits of a failed push on the node branch.
+The scratch directory `.kanthord-scratch/` stays between the executions of one node branch. A new node branch starts with no scratch directory.
 Each commit of the execution has the header `<commit_type>: <subject>` with no scope, and `commit_type` comes from the node content, `feat` when absent.
 The subject of a task commit is the task `name`. The subject of a node unit commit and of a verdict commit is the node `name`.
 The subject of a merge commit is `merge <base branch>`. The subject of a checkpoint commit is the `name` of the current unit.
