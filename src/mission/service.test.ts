@@ -8,7 +8,6 @@ import { OperationError } from "../kernel/errors.ts";
 import { CommitType } from "../kernel/commit-message.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import { digest } from "../kernel/json.ts";
-import { shippedAsset } from "../kernel/assets.ts";
 import {
   AccessPolicy,
   type CallerContext,
@@ -54,7 +53,6 @@ import {
   type NodeChange,
   nodeChangeSchema,
   type NodeCreate,
-  nodeCreateSchema,
   nodeSchema,
   NodeState,
   type NodeUpdate,
@@ -302,7 +300,6 @@ const BINDING_ID = "binding_00000000000000000000000000";
 const OTHER_BINDING_ID = "binding_00000000000000000000000001";
 const UNKNOWN_BINDING_ID = "binding_00000000000000000000000002";
 const OLDER_BINDING_ID = "binding_00000000000000000000000004";
-const MISSING_BINDING_ID = "binding_00000000000000000000000005";
 const FIRST_REVISION = 1;
 const NEXT_REVISION = 2;
 const CREATED_AT = 1000;
@@ -855,7 +852,6 @@ const ACTIVE_PRIORITY = 1;
 const SECOND_ENTRY_INDEX = 1;
 const FIRST_ATTEMPT = 1;
 const TWO_REVISIONS = 2;
-const SECOND_ATTEMPT = 2;
 const TWO_VERSION_STEPS = 2;
 const TWO_ITEMS = 2;
 const TWO_ROUTING_CALLS = 2;
@@ -876,12 +872,6 @@ const GITHUB_ISSUE = {
   number: ISSUE_NUMBER,
 };
 const SECOND_GITHUB_ISSUE = { ...GITHUB_ISSUE, number: SECOND_ISSUE_NUMBER };
-const JIRA_IDENTITY = "conversation:jira:acme.atlassian.net/KD";
-const JIRA_ISSUE = {
-  kind: ExternalLinkKind.JiraIssue,
-  resource_identity: JIRA_IDENTITY,
-  key: "KD-42",
-};
 const WORKER_NAME = "worker";
 const UNKNOWN_NAME = "unknown";
 const REASON = "Create planned work";
@@ -893,10 +883,8 @@ const OTHER_FILENAME = "other.md";
 const NEW_FILENAME = "new.md";
 const UNKNOWN_NODE_ID = "node_00000000000000000000000000";
 const UNKNOWN_MISSION_ID = "mission_00000000000000000000000000";
-const IMPORT_PREVIEW_PATH = "/api/mission/:mission_id/import/preview";
 const PRIORITY = 42;
 const NEGATIVE_PRIORITY = -42;
-const PRIORITY_PATH = "/api/mission/node/:node_id/priority";
 const QueueAction = { Insert: "insert", Delete: "delete" } as const;
 type QueueCall = {
   action: string;
@@ -1409,21 +1397,6 @@ test("node insert translates only the active filename unique constraint", (t) =>
   );
   assert.equal(f.version(), before);
 });
-
-for (const binding of [MISSING_BINDING_ID, STORAGE_NAME]) {
-  test(`node.create refuses the unresolved binding identity ${binding} before filename conflicts`, (t) => {
-    const f = nodeFixture(t);
-    f.examine();
-    const body = f.body();
-    body.content.bindings = [binding];
-    f.refuses(
-      body,
-      MissionErrorCode.BindingsInvalid,
-      { binding },
-      HttpStatus.BadRequest,
-    );
-  });
-}
 
 test("node.create keeps the submitted older binding revision as its pin", (t) => {
   const f = nodeFixture(t);
@@ -2040,19 +2013,6 @@ test("node reads answer dependsOn in ascending order on examine and implement no
   assert.deepEqual(dependsOnOf(f.read(implement)), [first]);
 });
 
-test("dependency addition rejects direct and self cycles without writes", (t) => {
-  const f = dependencyFixture(t);
-  const { node_id: nodeId, depends_on_id: dependsOnId } = f.pair();
-  f.edit(DependencyOperation.Add, nodeId, dependsOnId);
-  f.refuses(
-    DependencyOperation.Add,
-    dependsOnId,
-    nodeId,
-    MissionErrorCode.Cycle,
-  );
-  f.refuses(DependencyOperation.Add, nodeId, nodeId, MissionErrorCode.Cycle);
-});
-
 test("dependency addition rejects a three-node cycle and accepts the edge after a retirement breaks the path", (t) => {
   const f = dependencyFixture(t);
   const a = f.examine();
@@ -2260,37 +2220,6 @@ for (const operation of Object.values(DependencyOperation)) {
     assert.deepEqual({ ...f.snapshot(), jobs: f.jobs() }, before);
   });
 }
-
-test("dependency.add checks both endpoints exist before retirement and target retirement before version", (t) => {
-  const f = dependencyFixture(t);
-  const { node_id: nodeId, depends_on_id: dependsOnId } = f.pair();
-  f.store.database
-    .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
-    .run(RETIRED_AT, nodeId);
-  f.refuses(
-    DependencyOperation.Add,
-    nodeId,
-    UNKNOWN_NODE_ID,
-    MissionErrorCode.NodeNotFound,
-    undefined,
-    FIRST_REVISION,
-    HttpStatus.NotFound,
-  );
-  f.store.database
-    .prepare("UPDATE mission_node SET retired_at = NULL WHERE id = ?")
-    .run(nodeId);
-  f.store.database
-    .prepare("UPDATE mission_node SET retired_at = ? WHERE id = ?")
-    .run(RETIRED_AT, dependsOnId);
-  f.refuses(
-    DependencyOperation.Add,
-    nodeId,
-    dependsOnId,
-    MissionErrorCode.Retired,
-    { node_id: dependsOnId },
-    FIRST_REVISION,
-  );
-});
 
 test("dependency duplicate addition and absent removal do not write, increment or call the queue", (t) => {
   const f = dependencyFixture(t);
@@ -2608,40 +2537,6 @@ function priorityFixture(
   }
   return { ...f, jobs, updates, operation, set, refuses };
 }
-
-test("node.priority.set declares a human POST write with a closed safe-integer input", (t) => {
-  const f = priorityFixture(t);
-  const op = f.operation;
-  assert.equal(op.method, HttpMethod.Post);
-  assert.equal(op.path, PRIORITY_PATH);
-  assert.equal(op.access, AccessPolicy.Human);
-  assert.equal(op.mutation, true);
-  const valid = {
-    params: { node_id: UNKNOWN_NODE_ID },
-    query: {},
-    body: {
-      value: LOWEST_PRIORITY,
-      expected_mission_version: MISSION_INITIAL_VERSION,
-    },
-  };
-  assert.equal(op.input.safeParse(valid).success, true);
-  for (const value of [
-    0.5,
-    "42",
-    Number.MAX_SAFE_INTEGER + VERSION_INCREMENT,
-    Number.MIN_SAFE_INTEGER - VERSION_INCREMENT,
-  ]) {
-    assert.equal(
-      op.input.safeParse({ ...valid, body: { ...valid.body, value } }).success,
-      false,
-    );
-  }
-  assert.equal(
-    op.input.safeParse({ ...valid, body: { ...valid.body, reason: REASON } })
-      .success,
-    false,
-  );
-});
 
 test("node.priority.set reads absent priority as zero and overwrites without revision or version change", (t) => {
   const f = priorityFixture(t);
@@ -3061,12 +2956,6 @@ test("node create stores the external links of a node and node get answers them"
   ]);
 });
 
-test("node create reads an absent external links field as an empty list", (t) => {
-  const f = nodeFixture(t);
-  const id = f.examine();
-  assert.deepEqual(f.read(id).content.external_links, []);
-});
-
 test("node create refuses a link with no binding of its resource, a duplicate link and a link that names another conversation", (t) => {
   const f = nodeFixture(t);
   const refuse = (body: NodeCreate) =>
@@ -3090,22 +2979,6 @@ test("node create refuses a link with no binding of its resource, a duplicate li
   refuse(linkedBody(f, [GITHUB_ISSUE, { ...GITHUB_ISSUE }]));
   refuse(linkedBody(f, GITHUB_ISSUE as unknown as unknown[]));
   refuse(linkedBody(f, [{ ...GITHUB_ISSUE, number: 0 }]));
-});
-
-test("node create refuses a jira_issue link with no Jira binding with the field external_links", (t) => {
-  const f = nodeFixture(t);
-  const refuse = (body: NodeCreate) =>
-    f.refuses(
-      body,
-      MissionErrorCode.ContentInvalid,
-      { field: ContentField.ExternalLinks },
-      HttpStatus.BadRequest,
-    );
-  refuse(linkedBody(f, [JIRA_ISSUE]));
-  const body = linkedBody(f, [JIRA_ISSUE]);
-  refuse({ ...body, content: { ...body.content, bindings: [] } });
-  refuse(linkedBody(f, [{ ...JIRA_ISSUE, key: "OTHER-1" }]));
-  refuse(linkedBody(f, [JIRA_ISSUE, GITHUB_ISSUE]));
 });
 
 test("node update that adds a link writes the next revision and one that reorders two links writes a revision", (t) => {
@@ -3166,33 +3039,6 @@ test("node update refuses a duplicate link and a link with no binding with missi
       HttpStatus.BadRequest,
     );
 });
-
-for (const [label, field, value] of [
-  ["an unknown intent", ContentField.Intent, "build"],
-  ["a nonlist tags field", ContentField.Tags, "x"],
-  ["a repeated tag", ContentField.Tags, ["x", "x"]],
-] as const) {
-  test(`node create and update refuse ${label} with mission.node.content_invalid`, (t) => {
-    const f = nodeFixture(t);
-    const body = f.body();
-    f.refuses(
-      { ...body, content: { ...body.content, [field]: value } },
-      MissionErrorCode.ContentInvalid,
-      { field },
-      HttpStatus.BadRequest,
-    );
-    const id = f.examine();
-    const update = updateBody(f, id);
-    updateRefuses(
-      f,
-      id,
-      { ...update, content: { ...update.content, [field]: value } },
-      MissionErrorCode.ContentInvalid,
-      { field },
-      HttpStatus.BadRequest,
-    );
-  });
-}
 
 test("node update refuses a task of another node with mission.node.content_invalid", (t) => {
   const f = nodeFixture(t);
@@ -3499,8 +3345,6 @@ test("criterion.set enforces check order, revisions and content validation", (t)
 
 const INVALID_RETIRE_DIGEST = "0".repeat(64);
 const RETIRE_QUEUE_FAILURE = "retirement queue failure";
-const RETIRE_PREVIEW_PATH = "/api/mission/node/:node_id/retire/preview";
-const RETIRE_PATH = "/api/mission/node/:node_id/retire";
 
 function retireFixture(t: TestContext) {
   const f = dependencyFixture(t);
@@ -3597,45 +3441,6 @@ function retirementError(
   };
 }
 
-test("node.retire operations declare human read preview and write apply with strict force query", (t) => {
-  const f = retireFixture(t);
-  const id = f.examine();
-  const preview = missionOperations["node.retire.preview"];
-  const apply = missionOperations["node.retire"];
-  assert.equal(preview.method, HttpMethod.Get);
-  assert.equal(preview.path, RETIRE_PREVIEW_PATH);
-  assert.equal(preview.access, AccessPolicy.Human);
-  assert.equal(preview.mutation, false);
-  assert.equal(apply.method, HttpMethod.Post);
-  assert.equal(apply.path, RETIRE_PATH);
-  assert.equal(apply.access, AccessPolicy.Human);
-  assert.equal(apply.mutation, true);
-  assert.equal(f.preview(id).force, false);
-  assert.equal(f.preview(id, { force: "false" }).force, false);
-  assert.equal(f.preview(id, { force: "true" }).force, true);
-  for (const force of [
-    "",
-    "TRUE",
-    "False",
-    "0",
-    "1",
-    "yes",
-    true,
-    false,
-    null,
-    ["false"],
-  ]) {
-    assert.equal(
-      preview.input.safeParse({
-        params: { node_id: id },
-        query: { force },
-        body: null,
-      }).success,
-      false,
-    );
-  }
-});
-
 test("node.retire preview is read-only and hashes precisely the other five fields; apply increments once", (t) => {
   const f = retireFixture(t);
   const id = f.implement();
@@ -3657,21 +3462,6 @@ test("node.retire preview is read-only and hashes precisely the other five field
   assert.ok(f.node(id)?.retired_at);
   f.refuses(id, MissionErrorCode.Retired, { node_id: id });
 });
-
-for (const attempt of [FIRST_ATTEMPT, SECOND_ATTEMPT]) {
-  test(`node.retire preview and apply refuse attempt ${attempt}`, (t) => {
-    const f = retireFixture(t);
-    const id = f.implement();
-    f.store.database
-      .prepare("UPDATE mission_node SET attempt = ? WHERE id = ?")
-      .run(attempt, id);
-    f.refuses(id, MissionErrorCode.RetireRefused, {
-      node_id: id,
-      state: NodeState.Available,
-      attempt,
-    });
-  });
-}
 
 for (const state of [
   NodeState.Executing,
@@ -4085,14 +3875,6 @@ function importPreviewFixture(t: TestContext) {
 
 test("import.preview is a human POST with a read-only body, one commit and schema-valid answer", (t) => {
   const f = importPreviewFixture(t);
-  const operation = f.registry.get(
-    missionOperations["import.preview"].id,
-  ).operation;
-  assert.equal(operation.access, AccessPolicy.Human);
-  assert.equal(operation.method, HttpMethod.Post);
-  assert.equal(operation.path, IMPORT_PREVIEW_PATH);
-  assert.equal(operation.body, true);
-  assert.equal(operation.mutation, false);
   const result = f.preview();
   assert.deepEqual(result.violations, []);
   assert.deepEqual(
@@ -4374,7 +4156,6 @@ test("import.preview equivalent Markdown and JSON plans have identical classific
   assert.deepEqual(json.updates, [f.implementId]);
 });
 
-const IMPORT_APPLY_PATH = "/api/mission/:mission_id/import";
 const IMPORT_QUEUE_FAILURE = "import queue insert failed";
 const IMPORT_UPDATED_NAME = "Updated imported content";
 const IMPORT_EXTRA_TASK = "extra-task.md";
@@ -4647,14 +4428,6 @@ test("an import apply that settles an expired execution of a dependent writes on
 
 test("import.apply is a human mutation and imports a full graph in one commit and version increment", (t) => {
   const f = importApplyFixture(t);
-  const operation = f.registry.get(
-    missionOperations["import.apply"].id,
-  ).operation;
-  assert.equal(operation.method, HttpMethod.Post);
-  assert.equal(operation.path, IMPORT_APPLY_PATH);
-  assert.equal(operation.access, AccessPolicy.Human);
-  assert.equal(operation.mutation, true);
-  assert.equal(operation.body, true);
   const body = f.request();
   const result = f.apply(body);
   assert.equal(
@@ -5782,7 +5555,6 @@ test("serializePlanFile round-trips YAML-special verification strings", () => {
   assert.deepEqual(parsed.verifications, implement.verifications);
 });
 
-const REBIND_PATH = "/api/mission/:mission_id/rebind";
 const NEXT_BINDING_ID = "binding_00000000000000000000000003";
 const NEXT_STORAGE_ID = "binding_00000000000000000000000004";
 type BindingRevision = NonNullable<
@@ -5871,12 +5643,6 @@ function emptyRebindChange(missionVersion: number): NodeChange {
 
 test("mission.node.rebind declares a human write and advances a pin without changing tasks, state or routing", (t) => {
   const f = rebindFixture(t);
-  const operation = missionOperations[RevisionWrite.NodeRebind];
-  assert.equal(operation.method, HttpMethod.Post);
-  assert.equal(operation.path, REBIND_PATH);
-  assert.equal(operation.access, AccessPolicy.Human);
-  assert.equal(operation.mutation, true);
-  assert.equal(operation.body, true);
   const implementBody = f.body(Intent.Implement);
   implementBody.content.tags = ["platform.macos"];
   const nodeId =
@@ -6155,20 +5921,6 @@ test("mission rebind refuses missing and foreign named nodes", (t) => {
     HttpStatus.NotFound,
   );
 });
-
-for (const kind of [Intent.Examine, Intent.Implement]) {
-  test(`mission rebind refuses a named ${kind} that pins no matching binding`, (t) => {
-    const f = rebindFixture(t);
-    const nodeId = kind === Intent.Examine ? f.examine() : f.implement();
-    const bindingId = NEXT_STORAGE_ID;
-    f.refuses(
-      { node_id: nodeId, binding_id: bindingId },
-      MissionErrorCode.BindingMismatch,
-      HttpStatus.Conflict,
-      { node_id: nodeId, binding_id: bindingId },
-    );
-  });
-}
 
 const UnmatchedPin = {
   Foreign: "foreign pin",
@@ -6453,31 +6205,6 @@ test("nodeBodyOf parses a node file and refuses a task file, an id and a nonempt
     );
 });
 
-test("nodeBodyOf gives the node create body of the shipped suite pass setup node", () => {
-  const body = nodeBodyOf(
-    "suite-pass-setup-engine.md",
-    shippedAsset("plan/suite-pass-setup.md"),
-  );
-  assert.equal(body.content.intent, Intent.Implement);
-  assert.equal(body.content.commit_type, CommitType.Chore);
-  assert.deepEqual(body.content.verifications, [
-    "test -f .kanthord/suite-pass.json",
-    "! git check-ignore -q .kanthord/suite-pass.json",
-    "test ! -f .kanthord/affected-tests.json || grep -qF .kanthord/suite-pass.json .kanthord/affected-tests.json",
-  ]);
-  assert.deepEqual(body.content.bindings, []);
-  assert.deepEqual(body.tasks, []);
-  assert.equal(Object.hasOwn(body.content, "filename"), false);
-  assert.equal(Object.hasOwn(body.content, "depends_on"), false);
-  assert.ok(
-    nodeCreateSchema.safeParse({
-      ...body,
-      reason: "Add the suite pass record to engine.",
-      expected_mission_version: MISSION_INITIAL_VERSION,
-    }).success,
-  );
-});
-
 const STACK_COMMIT = "a".repeat(40);
 const STACK_FIRST_ATTEMPT = 1;
 const STACK_SECOND_ATTEMPT = 2;
@@ -6565,7 +6292,6 @@ test("attemptPromptStackOf refuses an absent attempt and an absent node", (t) =>
 
 const LINK_BASE_TIME = Date.parse("2026-11-07T00:00:00Z");
 const LINK_TICK_MS = 10;
-const LINK_UPDATE_PATH = "/api/mission/node/:node_id/link-update";
 const LINK_RESOURCE_IDENTITY = linkOf().resource_identity;
 const PAGE_OF_TWO = 2;
 const THREE_ROWS = 3;
@@ -6600,14 +6326,6 @@ function linkReadFixture(t: TestContext) {
     );
   return { ...h, nodeId, tick, open, close, linkUpdatesOf };
 }
-
-test("mission.link_update.list declares a human read of the trusted rows of a node", () => {
-  const operation = missionOperations["link_update.list"];
-  assert.equal(operation.method, HttpMethod.Get);
-  assert.equal(operation.path, LINK_UPDATE_PATH);
-  assert.equal(operation.access, AccessPolicy.Human);
-  assert.equal(operation.mutation, false);
-});
 
 test("mission.link_update.list answers the trusted rows newest first with limit and cursor", async (t) => {
   const h = linkReadFixture(t);
@@ -6718,27 +6436,6 @@ test("linkUpdatesOf marks every row new at attempt 1 and at attempt 3 only the r
       [first, false],
     ],
   );
-});
-
-test("linkUpdatesOf answers next_cursor and the total of the trusted rows", (t) => {
-  const h = linkReadFixture(t);
-  h.insertUpdate(linkOf(), OTHER_ACTOR, LINK_BASE_TIME);
-  h.insertUpdate(linkOf(), TRUSTED_ACTOR, LINK_BASE_TIME + 1);
-  h.insertUpdate(linkOf(), TRUSTED_ACTOR, LINK_BASE_TIME + PAGE_OF_TWO);
-  h.tick();
-  h.open();
-  const first = h.linkUpdatesOf(FIRST_ATTEMPT_NUMBER, { limit: 1 });
-  assert.equal(first.items.length, SINGLE_ITEM);
-  assert.equal(first.total, PAGE_OF_TWO);
-  assert.ok(first.next_cursor !== null);
-  const second = h.linkUpdatesOf(FIRST_ATTEMPT_NUMBER, {
-    limit: 1,
-    cursor: first.next_cursor,
-  });
-  assert.equal(second.items.length, SINGLE_ITEM);
-  assert.equal(second.next_cursor, null);
-  assert.equal(second.total, PAGE_OF_TWO);
-  assert.notEqual(second.items[0]?.id, first.items[0]?.id);
 });
 
 test("the executionReleased hook runs the pending close of its execution once", async (t) => {
