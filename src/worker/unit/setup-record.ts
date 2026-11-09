@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, rmSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { z } from "zod";
 import { writePrivate } from "../../kernel/files.ts";
@@ -19,10 +19,24 @@ function recordPath(directory: string): string {
   return join(directory, GIT_DIRECTORY, SETUP_RECORD_FILE);
 }
 
+function linkedParent(directory: string, segments: readonly string[]): boolean {
+  const parents = segments.slice(0, -1).filter(Boolean);
+  return parents.some(
+    (_, index) =>
+      lstatSync(join(directory, ...parents.slice(0, index + 1)), {
+        throwIfNoEntry: false,
+      })?.isSymbolicLink() ?? false,
+  );
+}
+
 function validRoot(directory: string, root: string): boolean {
   if (!root || root.startsWith(SEGMENT_SEPARATOR)) return false;
   const segments = root.split(SEGMENT_SEPARATOR);
-  if (segments.includes(PARENT_SEGMENT) || segments.includes(GIT_DIRECTORY))
+  if (
+    segments.includes(PARENT_SEGMENT) ||
+    segments.includes(GIT_DIRECTORY) ||
+    linkedParent(directory, segments)
+  )
     return false;
   const inside = relative(directory, resolve(directory, root));
   return (

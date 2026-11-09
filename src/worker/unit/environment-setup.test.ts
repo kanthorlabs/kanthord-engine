@@ -5,6 +5,7 @@ import {
   mkdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -223,6 +224,24 @@ test("a changed environment keeps a recorded root that holds a tracked path", as
     readFileSync(join(checkout, "deps", "tracked"), "utf8"),
     TRACKED_TEXT,
   );
+});
+
+test("a changed environment keeps a recorded root under a symlink to a directory outside the checkout", async (t) => {
+  const { root, checkout } = await repository(t, { ".gitignore": "link\n" });
+  const outside = join(root, "outside");
+  mkdirSync(join(outside, "sub"), { recursive: true });
+  writeFileSync(join(outside, "sub", "a"), TRACKED_TEXT);
+  symlinkSync(outside, join(checkout, "link"));
+  writeFileSync(
+    setupRecordPath(checkout),
+    JSON.stringify({ digest: "earlier", roots: ["link/sub", "link/"] }),
+  );
+  assert.deepEqual(await setUp(checkout, PLAIN_SETUP), { end: SetupEnd.Pass });
+  assert.equal(readFileSync(join(outside, "sub", "a"), "utf8"), TRACKED_TEXT);
+  assert.deepEqual(setupRecord(checkout), {
+    digest: digest(PLAIN_SETUP),
+    roots: [],
+  });
 });
 
 test("a failed setup keeps the earlier record", async (t) => {
