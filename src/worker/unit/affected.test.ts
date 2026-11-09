@@ -384,7 +384,7 @@ test("the failure text states why the head run gave no valid report", () => {
   for (const [reason, phrase] of reasons)
     assert.equal(
       affectedFailureText({ ...base, reason }),
-      `The affected test run of repository engine failed. KanthorD ran \`pnpm test:affected\` for 2 changed files, and the command ${phrase}. The same command gives a valid result on the base head, so the change of the node causes it. Change the code so that the command writes a valid report in time.`,
+      `The affected test run of repository engine failed. KanthorD ran \`pnpm test:affected\` for 2 changed files, and the command ${phrase}. A second run on the head gave the same result, and the same command gives a valid result on the base head, so the change of the node causes it. Change the code so that the command writes a valid report in time.`,
     );
 });
 
@@ -404,6 +404,7 @@ const IDENTITY = [
   "user.email=test@example.invalid",
 ];
 const PROBE_LINES = 7;
+const THREE_RUNS = 3;
 const NO_SPANS = 0;
 const CHANGED_COUNT = 2;
 const EXIT_ABSENT = 127;
@@ -433,6 +434,10 @@ case "$mode" in
   slow) echo hung-output; sleep 30; exit 0;;
   absent) exit 127;;
   invalid) echo 'not json' > "$KANTHORD_AFFECTED_REPORT"; exit 0;;
+  invalid_then_pass|invalid_then_fail)
+    [ -e "$probe.rerun" ] || { touch "$probe.rerun"; echo 'not json' > "$KANTHORD_AFFECTED_REPORT"; exit 0; }
+    cp "reports/\${mode#invalid_then_}.json" "$KANTHORD_AFFECTED_REPORT"
+    [ "$mode" = invalid_then_pass ];;
   fail) cp "reports/$mode.json" "$KANTHORD_AFFECTED_REPORT"; exit 1;;
   *) cp "reports/$mode.json" "$KANTHORD_AFFECTED_REPORT"; exit 0;;
 esac
@@ -740,16 +745,39 @@ test("an affected span of a version 1 report holds no floor attribute", async (t
     );
 });
 
-test("an invalid head report with a valid base report answers failed", async (t) => {
+test("an invalid head report at two head runs with a valid base report answers failed", async (t) => {
   const f = await fixture(t, { base: "pass", head: "invalid" });
   const result = await ran(f);
   assert.equal(result.verdict, AffectedVerdict.Failed);
   assert.equal(result.report, null);
   assert.match(
     result.failure_text ?? "",
-    /wrote no valid report: invalid JSON/,
+    /wrote no valid report: invalid JSON.*A second run on the head gave the same result/s,
   );
   assert.equal(result.base_run?.exit_code, EXIT_OK);
+  assert.equal(
+    readFileSync(f.probe, "utf8").split("\n").length - 1,
+    PROBE_LINES * THREE_RUNS,
+  );
+});
+
+test("regression: an invalid head report that a second head run makes valid answers passed", async (t) => {
+  const f = await fixture(t, { base: "pass", head: "invalid_then_pass" });
+  const result = await ran(f);
+  assert.equal(result.verdict, AffectedVerdict.Passed);
+  assert.equal(result.failure_text, null);
+  assert.deepEqual(result.failed, []);
+  assert.equal(result.head.exit_code, EXIT_OK);
+  assert.equal(result.base_run?.exit_code, EXIT_OK);
+});
+
+test("a second head run that fails a test that the base passes answers failed", async (t) => {
+  const f = await fixture(t, { base: "pass", head: "invalid_then_fail" });
+  const result = await ran(f);
+  assert.equal(result.verdict, AffectedVerdict.Failed);
+  assert.deepEqual(result.failed, [{ file: A_TEST, name: "one" }]);
+  assert.equal(result.head.exit_code, EXIT_FAILED);
+  assert.deepEqual(result.base_run?.failed, []);
 });
 
 test("an invalid report at both heads stops with affected_invalid", async (t) => {
