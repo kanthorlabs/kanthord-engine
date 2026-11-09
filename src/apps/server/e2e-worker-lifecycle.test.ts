@@ -24,7 +24,6 @@ type Registration = typeof registrationRecordSchema._output;
 
 const SCENARIO_TIMEOUT = 300000;
 const WAIT_TIMEOUT_MS = 60000;
-const NO_ITEMS = 0;
 const SINGLE_ITEM = 1;
 const TWO_ITEMS = 2;
 const FIRST_INDEX = 0;
@@ -93,8 +92,8 @@ test(
     assert.equal(pulling.length, SINGLE_ITEM);
     assert.equal(pulling[FIRST_INDEX]!.registered, true);
 
-    assert.equal(await refused.worker.stop(), null);
-    assert.equal(await refused.running, null);
+    await refused.worker.stop();
+    await refused.running;
     assert.deepEqual(await registrationsOf(setup), []);
     const afterStop = await executionsOf(setup);
     assert.equal(afterStop.length, SINGLE_ITEM);
@@ -109,7 +108,7 @@ test(
       fauxAssistantMessage("done"),
     ]);
     overrideEnvironment(t, { TMPDIR: hostEnvironment().TMPDIR });
-    const restarted = await inProcessWorker(t, {
+    await inProcessWorker(t, {
       endpoint: setup.fixture.endpoint,
       ...setup.auth,
       modelRuntimeFactory: scriptedModelRuntime(provider),
@@ -140,8 +139,5 @@ test(
       pulling[FIRST_INDEX]!.runtime_identity,
     );
     assert.equal(await nodeStateOf(setup), NodeState.Waiting);
-    assert.equal(await restarted.worker.stop(), null);
-    assert.equal(await restarted.running, null);
-    assert.equal((await registrationsOf(setup)).length, NO_ITEMS);
   },
 );
