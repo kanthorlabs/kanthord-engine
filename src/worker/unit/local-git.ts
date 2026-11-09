@@ -1381,6 +1381,30 @@ async function removeForeignRefs(
       await git(["update-ref", "--no-deref", "-d", ref]);
 }
 
+export async function writeConfigTemplate(
+  call: GitCall,
+  address: string,
+): Promise<GitState> {
+  assert.ok(address && !address.startsWith("-"));
+  const end = performance.now() + call.deadlineMs;
+  const remaining = () => Math.max(1, end - performance.now());
+  const config = join(call.directory, GIT_DIRECTORY, "config");
+  const entries = await configEntries(
+    { ...call, deadlineMs: remaining() },
+    config,
+  );
+  if (needsRebuild(entries)) return GitState.Rebuild;
+  writeFileSync(config, configTemplate(entries));
+  await run(
+    call.env,
+    call.directory,
+    ["config", "--file", config, "remote.origin.url", address],
+    call.context,
+    remaining(),
+  );
+  return GitState.Ready;
+}
+
 export async function normaliseGitState(
   call: GitCall,
   address: string,
@@ -1392,16 +1416,15 @@ export async function normaliseGitState(
   const git = (args: string[]) =>
     run(call.env, call.directory, args, call.context, remaining());
   const gitDirectory = join(call.directory, GIT_DIRECTORY);
-  const config = join(gitDirectory, "config");
   if (rebuildBeforeConfig(gitDirectory)) return GitState.Rebuild;
   removeLocks(gitDirectory);
-  const entries = await configEntries(
-    { ...call, deadlineMs: remaining() },
-    config,
-  );
-  if (needsRebuild(entries)) return GitState.Rebuild;
-  writeFileSync(config, configTemplate(entries));
-  await git(["config", "--file", config, "remote.origin.url", address]);
+  if (
+    (await writeConfigTemplate(
+      { ...call, deadlineMs: remaining() },
+      address,
+    )) === GitState.Rebuild
+  )
+    return GitState.Rebuild;
   removeAgentState(gitDirectory);
   const { matched, output } = await runMatch(
     call.env,
@@ -1503,25 +1526,66 @@ export async function matchCheckoutRefs(
     source,
     `+${BRANCH_PREFIX}*:${ORIGIN_PREFIX}*`,
   ]);
-  const current = await runMatch(
+  const branch = await symbolicRefOf(
+    { ...call, directory: source, deadlineMs: remaining() },
+    "HEAD",
+  );
+  await setOriginHead(
+    { ...call, deadlineMs: remaining() },
+    branch.startsWith(BRANCH_PREFIX)
+      ? `${ORIGIN_PREFIX}${branch.slice(BRANCH_PREFIX.length)}`
+      : null,
+  );
+  await removeBranches({ ...call, deadlineMs: remaining() });
+  await git(["remote", "set-url", "origin", "--", address]);
+}
+
+export async function matchOriginHead(
+  call: GitCall,
+  source: string,
+): Promise<void> {
+  assert.ok(source && !source.startsWith("-"));
+  const end = performance.now() + call.deadlineMs;
+  const remaining = () => Math.max(1, end - performance.now());
+  const target = await symbolicRefOf(
+    { ...call, directory: source, deadlineMs: remaining() },
+    ORIGIN_HEAD,
+  );
+  await setOriginHead(
+    { ...call, deadlineMs: remaining() },
+    target.startsWith(ORIGIN_PREFIX) ? target : null,
+  );
+}
+
+async function symbolicRefOf(call: GitCall, ref: string): Promise<string> {
+  const { matched, output } = await runMatch(
     call.env,
-    source,
-    ["symbolic-ref", "--quiet", "HEAD"],
+    call.directory,
+    ["symbolic-ref", "--quiet", ref],
+    call.context,
+    call.deadlineMs,
+  );
+  return matched ? output.trim() : NO_VALUE;
+}
+
+async function setOriginHead(
+  call: GitCall,
+  target: string | null,
+): Promise<void> {
+  const end = performance.now() + call.deadlineMs;
+  const remaining = () => Math.max(1, end - performance.now());
+  const exists =
+    target !== null &&
+    (await refCommit({ ...call, deadlineMs: remaining() }, target)) !== null;
+  await run(
+    call.env,
+    call.directory,
+    exists
+      ? ["symbolic-ref", ORIGIN_HEAD, target]
+      : ["update-ref", "--no-deref", "-d", ORIGIN_HEAD],
     call.context,
     remaining(),
   );
-  const branch = current.matched ? current.output.trim() : NO_VALUE;
-  const tracking = branch.startsWith(BRANCH_PREFIX)
-    ? `${ORIGIN_PREFIX}${branch.slice(BRANCH_PREFIX.length)}`
-    : null;
-  if (
-    tracking !== null &&
-    (await refCommit({ ...call, deadlineMs: remaining() }, tracking)) !== null
-  )
-    await git(["symbolic-ref", ORIGIN_HEAD, tracking]);
-  else await git(["update-ref", "--no-deref", "-d", ORIGIN_HEAD]);
-  await removeBranches({ ...call, deadlineMs: remaining() });
-  await git(["remote", "set-url", "origin", "--", address]);
 }
 
 export async function removeBranches(call: GitCall): Promise<void> {

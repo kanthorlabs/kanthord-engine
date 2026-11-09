@@ -337,6 +337,7 @@ function preparation(
     fresh: async () => {
       calls.push(existsSync(directory) ? "fresh-over-tree" : "fresh");
       mkdirSync(directory, { recursive: true });
+      await simpleGit(directory).init();
     },
     reuse: async () => {
       calls.push("reuse");

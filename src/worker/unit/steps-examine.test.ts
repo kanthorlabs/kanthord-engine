@@ -399,7 +399,14 @@ test("an examine node with two repository bindings runs from checkouts/ and list
   const key = join(workspaces.nodeKey(claim.node_id), REVIEW_DIRECTORY);
   const root = join(key, CHECKOUTS_DIRECTORY);
   const transport = {
-    cloneSnapshot: async () => "a".repeat(40),
+    cloneSnapshot: async (
+      _address: string,
+      _revision: string,
+      directory: string,
+    ) => {
+      await simpleGit(directory).init();
+      return "a".repeat(40);
+    },
   } as unknown as RepositoryTransport;
   const opened: string[] = [];
   const texts: string[] = [];
@@ -502,7 +509,14 @@ test("an examine verification that the wall deadline cuts gives a later assessme
     ({ budget, instruct: async () => {} }) as unknown as NativeAgent;
   const workspaces = WorkspaceRoot.open(realpathSync(temporary(t)));
   const transport = {
-    cloneSnapshot: async () => "a".repeat(40),
+    cloneSnapshot: async (
+      _address: string,
+      _revision: string,
+      directory: string,
+    ) => {
+      await simpleGit(directory).init();
+      return "a".repeat(40);
+    },
   } as unknown as RepositoryTransport;
   assert.deepEqual(
     await runStepsExamine(

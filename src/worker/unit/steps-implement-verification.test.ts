@@ -1,5 +1,6 @@
 import { VerdictSource } from "./node-reads.ts";
 import assert from "node:assert/strict";
+import { simpleGit } from "simple-git";
 import {
   attributed,
   CauseCategory,
@@ -32,6 +33,7 @@ import {
   fauxAssistantMessage,
   fauxToolCall,
   implementFixture as fixture,
+  nextExecution,
   recordDone,
   recordReleases,
   recordSpans,
@@ -264,6 +266,11 @@ suite(
     });
 
     test("a setup failure on the base head stops the prepare with environment_failed", async (t) => {
+      const failing = {
+        source: EnvironmentSource.Stored,
+        document: { postCreateCommand: "exit 5" },
+        digest: "d".repeat(64),
+      } as const;
       await assert.rejects(
         fixture(
           t,
@@ -271,16 +278,69 @@ suite(
           [fauxAssistantMessage("never")],
           undefined,
           undefined,
-          {
-            source: EnvironmentSource.Stored,
-            document: { postCreateCommand: "exit 5" },
-            digest: "d".repeat(64),
-          },
+          failing,
         ),
         {
           reason: EndReason.EnvironmentFailed,
           code: EnvironmentFailure.SetupFailed,
         },
+      );
+      const h = await fixture(t, [task("setup", "true")], []);
+      await simpleGit(h.root).raw([
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "node",
+      ]);
+      await simpleGit(h.root).raw([
+        "push",
+        "origin",
+        `HEAD:refs/heads/${h.input.claim.node_branch}`,
+      ]);
+      const state = dirname(h.input.workspaces.root);
+      await assert.rejects(
+        nextExecution(
+          t,
+          {
+            ...h,
+            input: {
+              ...h.input,
+              setup: {
+                ...h.input.setup,
+                repositories: h.input.setup.repositories.map((repository) => ({
+                  ...repository,
+                  environment: failing,
+                })),
+              },
+            },
+          },
+          [],
+          state,
+        ),
+        {
+          reason: EndReason.EnvironmentFailed,
+          code: EnvironmentFailure.SetupFailed,
+        },
+      );
+      assert.equal(
+        existsSync(
+          join(
+            h.input.workspaces.nodeKey(h.input.claim.node_id),
+            BASE_DIRECTORY,
+          ),
+        ),
+        false,
+      );
+      assert.equal(
+        h.input.workspaces.pool
+          .trees()
+          .filter(({ path }) => basename(dirname(path)) === PoolClass.Command)
+          .length,
+        ONE_TREE,
       );
     });
 

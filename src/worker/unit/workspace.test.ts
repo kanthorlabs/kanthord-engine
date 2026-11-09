@@ -1141,6 +1141,7 @@ async function coderFixture(t: test.TestContext) {
 
 const SCRATCH_PROBE = "probe.mjs";
 const ROOT_USER = 0;
+const DETACH_OFF = ["false", "false"];
 const BROKEN_RECORD = "{";
 const PENDING_REBUILD = { code: "repository.node_checkout.pending_rebuild" };
 const SCRATCH_TEXT = "x";
@@ -1693,4 +1694,31 @@ test("an unreadable push record keeps the tree under the node key and refuses th
     local,
   );
   assert.equal(readFileSync(record, "utf8"), BROKEN_RECORD);
+});
+
+async function detachedGcKeys(directory: string): Promise<string[]> {
+  const git = simpleGit(directory);
+  return [
+    await git.raw(["config", "--get", "gc.autoDetach"]).catch(() => ""),
+    await git
+      .raw(["config", "--get", "maintenance.autoDetach"])
+      .catch(() => ""),
+  ].map((value) => value.trim());
+}
+
+test("a fresh coder tree and a fresh review tree turn off the detached gc and maintenance", async (t) => {
+  const coder = await coderFixture(t);
+  const nodeId = createIdentity("node");
+  const prepared = await coder.prepare(nodeId);
+  assert.deepEqual(coder.sources(), [["coder", "clone"]]);
+  assert.deepEqual(await detachedGcKeys(prepared.directory), DETACH_OFF);
+  coder.release(nodeId);
+  const review = await reviewFixture(t);
+  const reviewed = await review.review(createIdentity("node"), review.base);
+  assert.deepEqual(
+    review.logs.map(({ fields }) => fields.source),
+    ["clone"],
+  );
+  assert.deepEqual(await detachedGcKeys(reviewed.directory), DETACH_OFF);
+  review.workspace.release(reviewed.key, reviewed.kind);
 });

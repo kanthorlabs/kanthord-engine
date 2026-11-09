@@ -846,6 +846,10 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
         "for-each-ref",
         "--format=%(refname) %(objectname) %(symref)",
       ]);
+    const originHead = (tree: string) =>
+      simpleGit(tree)
+        .raw(["symbolic-ref", "-q", "refs/remotes/origin/HEAD"])
+        .catch(() => NO_CONFIG);
     const branchConfig = (tree: string) =>
       simpleGit(tree)
         .raw(["config", "--get-regexp", "^branch\\."])
@@ -854,7 +858,10 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     const [fresh] = freeCommandTrees(h);
     assert.ok(fresh);
     const freshRefs = await refsOf(fresh);
+    const freshConfig = readFileSync(join(fresh, ".git", "config"), "utf8");
     assert.equal(await branchConfig(fresh), NO_CONFIG);
+    assert.equal(await originHead(fresh), await originHead(h.root));
+    assert.notEqual(await originHead(h.root), NO_CONFIG);
     const prepared = treesPrepared(t, h);
     assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
     assert.deepEqual(prepared(), [RELEASE_FROM_POOL]);
@@ -862,6 +869,52 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.ok(reused);
     assert.equal(await refsOf(reused), freshRefs);
     assert.equal(await branchConfig(reused), NO_CONFIG);
+    assert.equal(
+      readFileSync(join(reused, ".git", "config"), "utf8"),
+      freshConfig,
+    );
+    assert.equal(await originHead(reused), await originHead(h.root));
+  });
+
+  test("a reused release tree whose origin/HEAD names another branch keeps each remote-tracking ref of the checkout", async (t) => {
+    const h = await fixture(t, [], []);
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    const [tree] = freeCommandTrees(h);
+    assert.ok(tree);
+    const branch = h.input.claim.node_branch;
+    await simpleGit(h.root).raw([
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "node",
+    ]);
+    await simpleGit(h.root).raw([
+      "push",
+      "origin",
+      `HEAD:refs/heads/${branch}`,
+    ]);
+    await simpleGit(h.root).fetch("origin");
+    await simpleGit(tree).raw([
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      `refs/remotes/origin/${branch}`,
+    ]);
+    const prepared = treesPrepared(t, h);
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    assert.deepEqual(prepared(), [RELEASE_FROM_POOL]);
+    const [reused] = freeCommandTrees(h);
+    assert.ok(reused);
+    const tracking = (directory: string) =>
+      simpleGit(directory).raw([
+        "for-each-ref",
+        "--format=%(refname) %(objectname) %(symref)",
+        "refs/remotes/origin/",
+      ]);
+    assert.equal(await tracking(reused), await tracking(h.root));
   });
 
   test("a second node of the same repository reuses the release tree", async (t) => {

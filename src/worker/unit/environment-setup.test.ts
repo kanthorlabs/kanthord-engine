@@ -13,6 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
 import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
@@ -686,6 +687,8 @@ const INVALID_PERMISSIONS = "system.files.invalid_permissions";
 const OPEN_MODE = 0o755;
 const NODE_TRACKING_REF = "refs/remotes/origin/kanthord/node";
 const NO_REF = "";
+const POLL_MS = 20;
+const WAIT_MS = 300;
 const ROOT_USER = 0;
 const ONE_TREE = 1;
 const READ_ONLY_MODE = 0o500;
@@ -968,6 +971,7 @@ async function refState(directory: string) {
     ).trim(),
     url: (await git.raw(["config", "--get", "remote.origin.url"])).trim(),
     head: (await git.raw(["rev-parse", "HEAD"])).trim(),
+    config: readFileSync(join(directory, ".git", "config"), "utf8"),
     attached: (
       await git.raw(["symbolic-ref", "-q", "HEAD"]).catch(() => "")
     ).trim(),
@@ -1033,4 +1037,37 @@ test("the next preparation gives a crash leftover of a fresh base tree back and 
     ["tree prepared", "pool"],
   ]);
   await next.giveBack();
+});
+
+test("a base head give-back waits for a running preparation and then gives the tree to the command class", async (t) => {
+  const h = await poolFixture(t);
+  const started = join(h.root, "started");
+  const proceed = join(h.root, "proceed");
+  const nodeId = createIdentity("node");
+  const base = await h.baseHead(
+    nodeId,
+    setupCheckout(
+      h.checkout,
+      stored({
+        postCreateCommand: `touch ${started}; while test ! -e ${proceed}; do sleep 0.05; done`,
+      }),
+    ),
+  );
+  const setup = base.setup();
+  while (!existsSync(started)) await delay(POLL_MS);
+  let given = false;
+  const giving = base.giveBack().then(() => {
+    given = true;
+  });
+  await delay(WAIT_MS);
+  assert.equal(given, false);
+  writeFileSync(proceed, "x");
+  assert.deepEqual(await setup, { end: SetupEnd.Pass });
+  await giving;
+  assert.equal(h.commandTrees().length, ONE_TREE);
+  assert.equal(existsSync(dirname(h.tree(nodeId))), false);
+  assert.equal(
+    existsSync(join(h.commandTrees()[0]!, ".git", "kanthord-setup.json")),
+    true,
+  );
 });

@@ -48,6 +48,7 @@ import {
 import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 import { ROUND_PATCH_SUBJECT } from "./round-patch.ts";
 
+const GIT_DIRECTORY = ".git";
 const FIRST_ROUND = {
   round: 1,
   final: false,
@@ -189,7 +190,14 @@ test("B3 review bundle places all supporting assets in the evidence directory ou
     });
     const workspaces = WorkspaceRoot.open(temporary(t));
     const transport = {
-      cloneSnapshot: async () => "a".repeat(40),
+      cloneSnapshot: async (
+        _address: string,
+        _revision: string,
+        directory: string,
+      ) => {
+        await simpleGit(directory).init();
+        return "a".repeat(40);
+      },
     } as unknown as RepositoryTransport;
     try {
       const pending = prepareEvaluation(
@@ -402,7 +410,14 @@ test("an examine node with one binding places the produced evidence outside its 
       claim,
       workspaces,
       transport: {
-        cloneSnapshot: async () => "a".repeat(40),
+        cloneSnapshot: async (
+          _address: string,
+          _revision: string,
+          directory: string,
+        ) => {
+          await simpleGit(directory).init();
+          return "a".repeat(40);
+        },
       } as unknown as RepositoryTransport,
       sshAccess: everyBindingSshAccess,
       env: hostEnvironment(),
@@ -416,7 +431,10 @@ test("an examine node with one binding places the produced evidence outside its 
     prepared.directory,
     join(prepared.key, CHECKOUTS_DIRECTORY, setup.repositories[0]!.name),
   );
-  assert.deepEqual(readdirSync(prepared.directory), []);
+  assert.deepEqual(
+    readdirSync(prepared.directory).filter((name) => name !== GIT_DIRECTORY),
+    [],
+  );
   assert.equal(
     readFileSync(join(prepared.key, EVIDENCE_DIRECTORY, assetId), "utf8"),
     PLACED_REPORT,

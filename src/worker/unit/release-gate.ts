@@ -22,6 +22,7 @@ import {
   checkoutDetached,
   clonePacked,
   fetchLocal,
+  matchOriginHead,
   matchRemote,
   removeBranches,
   scrubTree,
@@ -418,6 +419,7 @@ async function buildReleaseClones(
           context,
           remaining(),
         );
+        await matchOriginHead(call(), checkout.directory);
         await checkoutDetached(
           env,
           directory,
@@ -428,6 +430,12 @@ async function buildReleaseClones(
         await removeBranches(call());
       },
       reuse: async () => {
+        const call = () => ({
+          env,
+          directory,
+          context,
+          deadlineMs: remaining(),
+        });
         await matchRemote(
           env,
           directory,
@@ -436,12 +444,7 @@ async function buildReleaseClones(
           context,
           remaining(),
         );
-        const call = () => ({
-          env,
-          directory,
-          context,
-          deadlineMs: remaining(),
-        });
+        await matchOriginHead(call(), checkout.directory);
         await fetchLocal(call(), checkout.directory);
         const record = await readSetupRecord(call());
         await scrubTree(call(), checkout.head, record?.roots ?? []);
