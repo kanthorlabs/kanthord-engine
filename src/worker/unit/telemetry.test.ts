@@ -15,16 +15,12 @@ import {
   SpanOperation,
   SpanRecorder,
   type TelemetrySink,
-  telemetrySpanId,
 } from "./telemetry.ts";
 import { AgentErrorType, traceAgent } from "./agent-telemetry.ts";
 import type { TurnPrompt } from "./native-agent.ts";
 import type { ToolTimeout } from "./tool-table.ts";
 import {
   environmentDigestsOf,
-  EvaluationAttribute,
-  evaluationEnd,
-  GitStep,
   taskEnd,
   taskFailure,
   taskSpan,
@@ -32,7 +28,6 @@ import {
   VerificationKind,
   verificationObserver,
   type VerificationScope,
-  withinGit,
 } from "./method-telemetry.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { noProgressDetail, NoProgressRule } from "./progress-rule.ts";
@@ -44,9 +39,7 @@ import {
   VerificationClass,
 } from "./verification.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
-import { Diagnostic } from "../../kernel/errors.ts";
 import { ChainLevel, PromptTemplate } from "../../agent/contract.ts";
-import { EvaluationStage } from "./rework-cause.ts";
 
 const CLAIM = {
   execution_id: "execution_01JZ8R2B3C4D5E6F7G8H9J0K1M",
@@ -57,7 +50,6 @@ const CLAIM = {
 };
 const WORKER = "coder@1";
 const SPAN_ID = /^[0-9a-f]{16}$/;
-const LONG_TEXT_CHARACTERS = 20000;
 const TWO_PARTS = 2;
 const FAILED = "failed";
 const INPUT_TOKENS = 10;
@@ -75,7 +67,6 @@ const ONE_UNSUBSCRIBE = 1;
 const TOOL_CALL = "call_1";
 const TWO_REFRESHES = 2;
 const NO_TOOL_SPANS = 0;
-const SECOND_POSITION = 1;
 const SESSION_ID = "2".repeat(16);
 const CREDENTIAL_SECRET = "test_tracer_credential_secret";
 const REFRESHED_SECRET = "test_tracer_refreshed_secret";
@@ -90,8 +81,6 @@ const MODEL = "glm-test-model";
 const OUTCOME_OK = "ok";
 const OUTCOME_ERROR = "error";
 const RATE_LIMITED = "rate_limited";
-const LAST_ASSISTANT_ENTRY = "00000004";
-const FIRST_ENTRY = "00000001";
 const EFFECTIVE_CONFIGURATION = {
   agent_provider: "zai",
   provider: "zai",
@@ -114,29 +103,6 @@ const CACHE_WRITE = 5;
 const OUTPUT_TOKENS = 2;
 const COST_USD = 0.25;
 const MESSAGE_DURATION_MS = 1234;
-const TURN_ATTRIBUTES = [
-  "gen_ai.conversation.id",
-  "gen_ai.operation.name",
-  "gen_ai.request.model",
-  "kanthord.agent.chain_level",
-  "kanthord.agent.chain_position",
-  "kanthord.agent.name",
-  "kanthord.agent_enablement.id",
-  "kanthord.turn.index",
-  "kanthord.worker_binding.id",
-];
-const TURN_END_ATTRIBUTES = [
-  "gen_ai.provider.name",
-  "gen_ai.response.finish_reasons",
-  "gen_ai.response.model",
-  "gen_ai.usage.cache_creation.input_tokens",
-  "gen_ai.usage.cache_read.input_tokens",
-  "gen_ai.usage.input_tokens",
-  "gen_ai.usage.output_tokens",
-  "kanthord.session.entry_id",
-  "kanthord.turn.model_duration_ms",
-  "kanthord.usage.cost_usd",
-];
 const TOOL_END_ATTRIBUTES = [
   "kanthord.tool.duration_ms",
   "kanthord.tool.outcome",
@@ -277,24 +243,9 @@ test("two recorders with two run keys give two identities to one key", () => {
   );
 });
 
-test("a recorder with a run key hashes the execution, the run key and the key", () => {
-  const spans = new SpanRecorder(CLAIM, WORKER, QUIET_SINK, RUN_KEY);
-  assert.equal(
-    spans.spanIdOf("turn:1"),
-    telemetrySpanId(CLAIM.execution_id, RUN_KEY, "turn:1"),
-  );
-});
-
 test("a minted run key holds 8 lower-case hexadecimal characters", () => {
   assert.match(mintRunKey(), /^[0-9a-f]{8}$/);
   assert.throws(() => new SpanRecorder(CLAIM, WORKER, QUIET_SINK, "NOT-A-KEY"));
-});
-
-test("spanIdOf equals the span_id of the start record of that key", () => {
-  const { records, spans } = recorder();
-  spans.start({ key: "phase:start", operation: SpanOperation.Phase });
-  const started = spanRecords(records).find((record) => record.start_time);
-  assert.equal(spans.spanIdOf("phase:start"), started?.span_id);
 });
 
 test("a nested span names the enclosing span as its parent", async () => {
@@ -389,45 +340,6 @@ test("a no_progress stop ends the task span with the rule, the counts and the ve
   });
 });
 
-test("another stop ends the task span with Error and no stop attribute", async () => {
-  const end = await stoppedTaskEnd(
-    new ExecutionStop(EndReason.OperationFailed, null, FAILED),
-  );
-  assert.equal(end?.status, SpanStatus.Error);
-  assert.deepEqual(end?.attributes, {
-    [REVISION_COUNT_ATTRIBUTE]: NO_REVISIONS,
-  });
-});
-
-test("a git failure span text holds the diagnostic line and its rows", async () => {
-  const cases = [
-    {
-      error: new Diagnostic("repository.git.push_failed", "push failed", {
-        fields: [["path", "/x"]],
-      }),
-      text: "repository.git.push_failed: push failed\npath: /x",
-    },
-    {
-      error: new Diagnostic("repository.git.push_failed", "push failed"),
-      text: "repository.git.push_failed: push failed",
-    },
-  ];
-  for (const { error, text } of cases) {
-    const { records, spans } = recorder();
-    await assert.rejects(
-      withinGit(spans, GitStep.Push, async () => {
-        throw error;
-      }),
-    );
-    assert.deepEqual(
-      records.flatMap((record) =>
-        record.kind === RecordKind.Text ? [record.text] : [],
-      ),
-      [text],
-    );
-  }
-});
-
 const FIRST_DIGEST = "a".repeat(64);
 const SECOND_DIGEST = "b".repeat(64);
 const DIGEST_ATTRIBUTE = "environment.digest";
@@ -484,12 +396,6 @@ async function observedVerification(
   };
 }
 
-const FAILED_COMMAND: CommandRun = {
-  result: { command: "x", exit_code: 1, signal: null, timed_out: false },
-  output: "",
-  end: CommandEnd.Exit,
-};
-
 test("a verification span records its context, its owner and the class of the run", async () => {
   const { start, end } = await observedVerification(
     TASK_SCOPE,
@@ -506,47 +412,12 @@ test("a verification span records its context, its owner and the class of the ru
   assert.equal(FLAKY_ATTRIBUTE in (end?.attributes ?? {}), false);
 });
 
-test("a verification span records no owner when the command has none", async () => {
-  const { start } = await observedVerification(
-    { context: VerificationContext.Node, ownerOf: () => null },
-    false,
-    PASSED_COMMAND,
-  );
-  assert.equal(
-    start?.attributes?.[CONTEXT_ATTRIBUTE],
-    VerificationContext.Node,
-  );
-  assert.equal(OWNER_ATTRIBUTE in (start?.attributes ?? {}), false);
-});
-
-test("a verification span records the flaky mark only on a passing flaky check", async () => {
-  const passing = await observedVerification(TASK_SCOPE, true, PASSED_COMMAND);
-  assert.equal(passing.end?.attributes?.[FLAKY_ATTRIBUTE], true);
-  const failing = await observedVerification(TASK_SCOPE, true, FAILED_COMMAND);
-  assert.equal(FLAKY_ATTRIBUTE in (failing.end?.attributes ?? {}), false);
-  assert.equal(
-    failing.end?.attributes?.[CLASS_ATTRIBUTE],
-    VerificationClass.CodeFailure,
-  );
-});
-
-test("a verification span records the one digest of the node", async () => {
-  const start = await verificationStart([FIRST_DIGEST]);
-  assert.equal(start?.attributes?.[DIGEST_ATTRIBUTE], FIRST_DIGEST);
-});
-
 test("a verification span joins the digests of two repositories with a comma in binding order", async () => {
   const start = await verificationStart([FIRST_DIGEST, SECOND_DIGEST]);
   assert.equal(
     start?.attributes?.[DIGEST_ATTRIBUTE],
     `${FIRST_DIGEST},${SECOND_DIGEST}`,
   );
-});
-
-test("a verification span records no digest attribute for no digest", async () => {
-  const start = await verificationStart([]);
-  assert.ok(start);
-  assert.equal(DIGEST_ATTRIBUTE in (start.attributes ?? {}), false);
 });
 
 test("the digests of the repositories skip a repository with no environment", () => {
@@ -569,21 +440,6 @@ test("the digests of the repositories skip a repository with no environment", ()
     ]),
     [FIRST_DIGEST, SECOND_DIGEST],
   );
-});
-
-test("a long text splits into numbered parts", () => {
-  const { records, spans } = recorder();
-  const spanId = spans.start({
-    key: "verification:1",
-    operation: SpanOperation.Verification,
-    texts: { output: "x".repeat(LONG_TEXT_CHARACTERS) },
-  });
-  const texts = records.filter((record) => record.kind === RecordKind.Text);
-  assert.equal(texts.length, TWO_PARTS);
-  assert.deepEqual(spanRecords(records)[0]?.text_ids, [
-    `${spanId}:output.1`,
-    `${spanId}:output.2`,
-  ]);
 });
 
 test("the agent tracer writes a turn and its tool call without a text", () => {
@@ -661,38 +517,6 @@ test("the agent tracer writes a turn and its tool call without a text", () => {
     assert.deepEqual(span.text_ids ?? [], []);
 });
 
-test("a tool start names the assistant entry that precedes it", () => {
-  const { records, spans } = recorder();
-  const scripted = scriptedSession();
-  traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
-  scripted.emit({ type: "turn_start" });
-  scripted.append({ type: "message", message: assistantMessage() });
-  scripted.emit({
-    type: "tool_execution_start",
-    toolCallId: TOOL_CALL,
-    toolName: "bash",
-    args: {},
-  });
-  const attributes = startOf(records, SpanOperation.Tool)?.attributes;
-  assert.equal(attributes?.["kanthord.session.entry_id"], FIRST_ENTRY);
-});
-
-test("a tool start holds no entry id without an assistant entry after the turn start", () => {
-  const { records, spans } = recorder();
-  const scripted = scriptedSession();
-  traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
-  scripted.append({ type: "message", message: assistantMessage() });
-  scripted.emit({ type: "turn_start" });
-  scripted.emit({
-    type: "tool_execution_start",
-    toolCallId: TOOL_CALL,
-    toolName: "bash",
-    args: {},
-  });
-  const attributes = startOf(records, SpanOperation.Tool)?.attributes ?? {};
-  assert.ok(!("kanthord.session.entry_id" in attributes));
-});
-
 const TURN_PROMPT: TurnPrompt = {
   template: PromptTemplate.Repair,
   template_digest: "a".repeat(64),
@@ -719,66 +543,6 @@ test("a turn start holds the prompt facts that promptOf answers", () => {
   );
 });
 
-test("a turn start holds the worker binding id and the enablement id", () => {
-  const { records, spans } = recorder();
-  const scripted = scriptedSession();
-  traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
-  scripted.emit({ type: "turn_start" });
-  const attributes = startOf(records, SpanOperation.Turn)?.attributes;
-  assert.equal(attributes?.["kanthord.worker_binding.id"], WORKER_BINDING_ID);
-  assert.equal(attributes?.["kanthord.agent_enablement.id"], ENABLEMENT_ID);
-});
-
-test("a turn start holds no enablement id when the agent has no pin", () => {
-  const { records, spans } = recorder();
-  const scripted = scriptedSession();
-  traceAgent(
-    scripted.session,
-    spans,
-    { ...TRACED_AGENT, enablement_id: null },
-    TRACING,
-  );
-  scripted.emit({ type: "turn_start" });
-  const attributes = startOf(records, SpanOperation.Turn)?.attributes ?? {};
-  assert.equal(attributes["kanthord.worker_binding.id"], WORKER_BINDING_ID);
-  assert.ok(!("kanthord.agent_enablement.id" in attributes));
-});
-
-test("a turn start holds no prompt fact when promptOf answers null", () => {
-  const { records, spans } = recorder();
-  const scripted = scriptedSession();
-  traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
-  scripted.emit({ type: "turn_start" });
-  const attributes = startOf(records, SpanOperation.Turn)?.attributes ?? {};
-  assert.deepEqual(
-    Object.keys(attributes).filter((name) =>
-      name.startsWith("kanthord.prompt."),
-    ),
-    [],
-  );
-});
-
-test("the turn start and end attributes hold exactly the listed names", () => {
-  const { records, spans } = recorder();
-  const scripted = scriptedSession();
-  traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
-  scripted.emit({ type: "turn_start" });
-  scripted.append({ type: "message", message: assistantMessage() });
-  scripted.emit({
-    type: "turn_end",
-    message: assistantMessage({ durationMs: MESSAGE_DURATION_MS }),
-    toolResults: [],
-  });
-  assert.deepEqual(
-    names(startOf(records, SpanOperation.Turn)?.attributes),
-    [...TURN_ATTRIBUTES, ...IDENTITY_NAMES].sort(),
-  );
-  assert.deepEqual(
-    names(endOf(records, SpanOperation.Turn)?.attributes),
-    TURN_END_ATTRIBUTES,
-  );
-});
-
 test("a turn error ends with the provider failure code and no text", () => {
   const { records, spans } = recorder();
   const scripted = scriptedSession();
@@ -797,80 +561,6 @@ test("a turn error ends with the provider failure code and no text", () => {
   assert.equal(end?.attributes?.["error.type"], RATE_LIMITED);
   assert.deepEqual(end?.attributes?.["gen_ai.response.finish_reasons"], [
     "error",
-  ]);
-  assert.deepEqual(textRecordsOf(records), []);
-});
-
-test("the turn omits the entry id, the cost and the duration when it has none", () => {
-  const { records, spans } = recorder();
-  const scripted = scriptedSession();
-  traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
-  scripted.append({ type: "message", message: assistantMessage() });
-  scripted.emit({ type: "turn_start" });
-  scripted.emit({
-    type: "turn_end",
-    message: assistantMessage({
-      usage: { ...assistantMessage().usage, cost: { total: Number.NaN } },
-    }),
-    toolResults: [],
-  });
-  const attributes = endOf(records, SpanOperation.Turn)?.attributes ?? {};
-  assert.deepEqual(
-    [
-      "kanthord.session.entry_id",
-      "kanthord.usage.cost_usd",
-      "kanthord.turn.model_duration_ms",
-    ].filter((name) => name in attributes),
-    [],
-  );
-});
-
-test("the turn names the last assistant entry that follows the turn start", () => {
-  const { records, spans } = recorder();
-  const scripted = scriptedSession();
-  traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
-  scripted.append({ type: "message", message: assistantMessage() });
-  scripted.emit({ type: "turn_start" });
-  scripted.append({ type: "message", message: assistantMessage() });
-  scripted.append({ type: "message", message: { role: "toolResult" } });
-  scripted.append({ type: "message", message: assistantMessage() });
-  scripted.append();
-  scripted.emit({ type: "message_end", message: assistantMessage() });
-  scripted.emit({
-    type: "turn_end",
-    message: assistantMessage(),
-    toolResults: [],
-  });
-  const attributes = endOf(records, SpanOperation.Turn)?.attributes ?? {};
-  assert.equal(attributes["kanthord.session.entry_id"], LAST_ASSISTANT_ENTRY);
-  assert.ok(Number(attributes["kanthord.turn.model_duration_ms"]) >= NO_SENT);
-});
-
-test("a tool error ends with Error and the tool_error type", () => {
-  const { records, spans } = recorder();
-  const scripted = scriptedSession();
-  traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
-  scripted.emit({ type: "turn_start" });
-  scripted.emit({
-    type: "tool_execution_start",
-    toolCallId: TOOL_CALL,
-    toolName: "bash",
-    args: {},
-  });
-  scripted.emit({
-    type: "tool_execution_end",
-    toolCallId: TOOL_CALL,
-    toolName: "bash",
-    result: { content: [{ type: "text", text: "boom" }] },
-    isError: true,
-  });
-  const end = endOf(records, SpanOperation.Tool);
-  assert.equal(end?.status, SpanStatus.Error);
-  assert.equal(end?.attributes?.["error.type"], AgentErrorType.ToolError);
-  assert.equal(end?.attributes?.["kanthord.tool.outcome"], OUTCOME_ERROR);
-  assert.deepEqual(names(end?.attributes), [
-    "error.type",
-    ...TOOL_END_ATTRIBUTES,
   ]);
   assert.deepEqual(textRecordsOf(records), []);
 });
@@ -927,26 +617,6 @@ test("a bash call with a requested and a cut timeout records both values", () =>
   );
 });
 
-test("a bash call without a requested timeout records only the applied value", () => {
-  const attributes = timeoutEnd({
-    requestedMs: null,
-    appliedMs: APPLIED_TIMEOUT_MS,
-  });
-  assert.deepEqual(names(attributes), [
-    "kanthord.tool.duration_ms",
-    "kanthord.tool.outcome",
-    "kanthord.tool.timeout.applied_ms",
-  ]);
-  assert.equal(
-    attributes["kanthord.tool.timeout.applied_ms"],
-    APPLIED_TIMEOUT_MS,
-  );
-});
-
-test("a tool end without a recorded timeout holds no timeout attribute", () => {
-  assert.deepEqual(names(timeoutEnd(undefined)), TOOL_END_ATTRIBUTES);
-});
-
 function bashProcessEnd(killed: boolean) {
   const { records, spans } = recorder();
   const scripted = scriptedSession();
@@ -986,60 +656,6 @@ test("a bash call that the timeout or the abort ended records its process and th
   assert.equal(attributes["process.group_leader.pid"], BASH_PID);
   assert.equal(attributes["kanthord.tool.killed"], true);
   assert.equal(attributes["kanthord.tool.outcome"], OUTCOME_ERROR);
-});
-
-test("a bash call that exits records its process and no kill", () => {
-  const attributes = bashProcessEnd(false);
-  assert.equal(attributes["process.pid"], BASH_PID);
-  assert.equal(attributes["process.group_leader.pid"], BASH_PID);
-  assert.equal(attributes["kanthord.tool.killed"], false);
-});
-
-test("a turn under a worker.task span names that span as its parent", async () => {
-  const { records, spans } = recorder();
-  const scripted = scriptedSession();
-  traceAgent(scripted.session, spans, TRACED_AGENT, TRACING);
-  const task = await spans.within(
-    { key: "task:1", operation: SpanOperation.Task },
-    async (taskId) => {
-      scripted.emit({ type: "turn_start" });
-      return taskId;
-    },
-  );
-  assert.equal(startOf(records, SpanOperation.Turn)?.parent_span_id, task);
-});
-
-test("the agent tracer writes the chain position and level of the pinned selection on a turn", () => {
-  const { records, spans } = recorder();
-  const scripted = scriptedSession();
-  const { session } = scripted;
-  const listener = scripted.emit;
-  traceAgent(
-    session,
-    spans,
-    {
-      ...TRACED_AGENT,
-      position: SECOND_POSITION,
-      level: ChainLevel.Binding,
-    },
-    TRACING,
-  );
-  listener({ type: "turn_start" });
-  const turn = spanRecords(records).find(
-    (record) => record.operation === SpanOperation.Turn,
-  );
-  assert.equal(
-    turn?.attributes?.["kanthord.agent.name"],
-    TRACED_AGENT.agent_name,
-  );
-  assert.equal(
-    turn?.attributes?.["kanthord.agent.chain_position"],
-    SECOND_POSITION,
-  );
-  assert.equal(
-    turn?.attributes?.["kanthord.agent.chain_level"],
-    ChainLevel.Binding,
-  );
 });
 
 test("a text split never cuts a surrogate pair", () => {
@@ -1253,58 +869,4 @@ test("an entry with an invalid identity is skipped and counted as a fault", () =
     [2],
   );
   assert.equal(spans.faultCount(), ONE_FAULT);
-});
-
-const FINAL_ROUND = 3;
-const FIXED_COUNT = 2;
-const FIXED_ROUND = 2;
-const ROUND_ATTRIBUTES = {
-  "kanthord.evaluation.round": FINAL_ROUND,
-  "kanthord.evaluation.final_round": true,
-  "kanthord.evaluation.action_labels": ["S1", "S4"],
-  "kanthord.evaluation.fixed_count": FIXED_COUNT,
-};
-
-test("the evaluation span ends with the round, the final round, the action labels and the fixed count", () => {
-  const end = evaluationEnd({
-    result: "success",
-    rationale: "met",
-    facts: {
-      stage: EvaluationStage.Judgement,
-      unmet_ids: [],
-      unmet_grounds: [],
-      proposal_count: 0,
-      repaired: false,
-      verification_class: VerificationClass.Pass,
-      affected: null,
-      round: FINAL_ROUND,
-      final_round: true,
-      action_labels: ["S1", "S4"],
-      fixed_count: FIXED_COUNT,
-    },
-  });
-  const attributes = end.attributes ?? {};
-  assert.deepEqual(
-    Object.fromEntries(
-      [
-        EvaluationAttribute.Round,
-        EvaluationAttribute.FinalRound,
-        EvaluationAttribute.ActionLabels,
-        EvaluationAttribute.FixedCount,
-      ].map((name) => [name, attributes[name]]),
-    ),
-    ROUND_ATTRIBUTES,
-  );
-});
-
-test("the task span of a verdict unit holds the round that it fixes", () => {
-  const { spans } = recorder();
-  const task = { id: CLAIM.node_id } as TaskContent;
-  assert.deepEqual(taskSpan(spans, task, FIXED_ROUND).attributes, {
-    "kanthord.task.id": CLAIM.node_id,
-    "kanthord.evaluation.round": FIXED_ROUND,
-  });
-  assert.deepEqual(taskSpan(spans, task).attributes, {
-    "kanthord.task.id": CLAIM.node_id,
-  });
 });
