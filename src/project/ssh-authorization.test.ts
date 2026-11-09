@@ -182,6 +182,16 @@ function refused(reason: string) {
   };
 }
 
+test("a human passes for a repository binding and receives its credential and address", (t) => {
+  const f = setup(t);
+  assert.deepEqual(f.authorize(human(), f.binding), {
+    credential: SSH_CREDENTIAL,
+    platform: SSH_CREDENTIAL_PLATFORM,
+    project_id: f.saved.project_id,
+    facts: { binding_id: f.saved.binding_id, address: ADDRESS },
+  });
+});
+
 test("a human passes for a draft configuration after the custody suitability of its credential", (t) => {
   const f = setup(t);
   const draft = {
