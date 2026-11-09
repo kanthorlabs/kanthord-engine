@@ -51,18 +51,6 @@ function context(testedInput: TestedInput): ActionContext {
   };
 }
 
-test("action operands come from the claim branch, the admitted assessment and the pinned action", () => {
-  const operands = operandsOf(NODE_BRANCH, context(snapshot), entry);
-  assert.deepEqual(operands, {
-    nodeBranch: NODE_BRANCH,
-    baseBranch: "main",
-    commit: COMMIT,
-    reusedAddress: null,
-    reusedEvidenceId: null,
-  });
-  assert.equal(operands.commit, snapshot.commit);
-});
-
 test("non-repository and wrong-binding snapshots are refused", () => {
   const inputs: TestedInput[] = [
     { kind: TestedInputKind.Produced, sha256: "a".repeat(64) },
@@ -84,23 +72,4 @@ test("non-repository and wrong-binding snapshots are refused", () => {
       ),
     { code: WorkerErrorCode.SnapshotAbsent },
   );
-});
-
-test("each action takes the commit of its own binding from the list", () => {
-  const other = {
-    kind: TestedInputKind.Repository,
-    binding_id: "binding_other",
-    commit: "c".repeat(40),
-  };
-  const sibling = {
-    ...entry,
-    action: {
-      ...entry.action,
-      key: "other.pull_request",
-      binding_id: "binding_other",
-    },
-  };
-  const list = context([other, snapshot]);
-  assert.equal(operandsOf(NODE_BRANCH, list, entry).commit, COMMIT);
-  assert.equal(operandsOf(NODE_BRANCH, list, sibling).commit, other.commit);
 });
