@@ -1292,6 +1292,42 @@ test("a broken or linked push record refuses the preparation and is not followed
   assert.equal(readFileSync(outside, "utf8"), OUTSIDE_TEXT);
 });
 
+const BROKEN_RECORD = "{";
+
+test("an unreadable push record keeps the tree under the node key and refuses the next preparation", async (t) => {
+  const h = await coderFixture(t);
+  const nodeId = createIdentity("node");
+  const first = await h.prepare(nodeId);
+  await h.commit(first.directory, "work", "pushed");
+  await h.pushNode(nodeId, first);
+  const local = await h.commit(first.directory, "work", "local");
+  const key = h.recordKey(nodeId, first.nodeBranch);
+  const record = join(
+    key.nodeKey,
+    "pushed",
+    branchKeyOf(first.nodeBranch),
+    key.bindingId,
+  );
+  writeFileSync(record, BROKEN_RECORD);
+  h.release(nodeId);
+  assert.ok(existsSync(join(first.directory, ".git")));
+  assert.deepEqual(h.freeTrees(PoolClass.Agent), []);
+  await assert.rejects(h.prepare(nodeId), PENDING_REBUILD);
+  assert.equal(
+    (
+      await simpleGit(first.directory).revparse([
+        `refs/heads/${first.nodeBranch}`,
+      ])
+    ).trim(),
+    local,
+  );
+  assert.equal(
+    (await simpleGit(first.directory).revparse(["HEAD"])).trim(),
+    local,
+  );
+  assert.equal(readFileSync(record, "utf8"), BROKEN_RECORD);
+});
+
 test("a node preparation removes each checkout of a removed binding and does not follow a symbolic link", async (t) => {
   const h = await coderFixture(t);
   const nodeId = createIdentity("node");
