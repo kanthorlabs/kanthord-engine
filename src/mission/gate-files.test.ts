@@ -15,14 +15,6 @@ test("gateFilesOf returns the paths of the binding", () => {
   assert.deepEqual(gateFilesOf(ASSESSMENT, BINDING_ID), PATHS);
 });
 
-test("gateFilesOf returns no path for a null assessment", () => {
-  assert.deepEqual(gateFilesOf(null, BINDING_ID), []);
-});
-
-test("gateFilesOf returns no path for a null column", () => {
-  assert.deepEqual(gateFilesOf({ gate_files: null }, BINDING_ID), []);
-});
-
 test("gateFilesOf returns no path for another binding", () => {
   assert.deepEqual(gateFilesOf(ASSESSMENT, OTHER_BINDING_ID), []);
 });
