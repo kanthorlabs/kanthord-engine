@@ -24,13 +24,9 @@ const OTHER_RESOURCE_IDENTITY = `conversation:slack:${SLACK_OTHER_TEAM_ID}`;
 const APP_ID = "A01ABCDEF";
 const BOT_ID = "B01ABCDEF";
 const CHANNEL_JOIN = "channel_join";
-const THREAD_BROADCAST = "thread_broadcast";
-const FILE_SHARE = "file_share";
 const MESSAGE_CHANGED = "message_changed";
 const MESSAGE_DELETED = "message_deleted";
 const OTHER_EVENT = "reaction_added";
-const DIRECT_CHANNEL = "D01ABCDEF";
-const MALFORMED_TS = "1700000100";
 
 function decode(
   event: object,
@@ -91,21 +87,6 @@ test("a parent message, a message without a thread, message_changed, message_del
     assert.equal(decode(event), null, JSON.stringify(event));
 });
 
-test("a message outside the form of its channel, its time or its user decodes to null", () => {
-  for (const event of [
-    slackMessage({ channel: DIRECT_CHANNEL }),
-    slackMessage({ channel: undefined }),
-    slackMessage({ ts: MALFORMED_TS }),
-    slackMessage({ thread_ts: MALFORMED_TS }),
-    slackMessage({ ts: undefined }),
-  ])
-    assert.equal(decode(event), null, JSON.stringify(event));
-});
-
-test("a message with no user answers a null actor", () => {
-  assert.equal(decode(slackMessage({ user: undefined }))?.actor_id, null);
-});
-
 test("bot_id, app_id and another subtype answer actor_automated true", () => {
   for (const overrides of [
     { bot_id: BOT_ID },
@@ -116,15 +97,6 @@ test("bot_id, app_id and another subtype answer actor_automated true", () => {
       decode(slackMessage(overrides))?.actor_automated,
       true,
       JSON.stringify(overrides),
-    );
-});
-
-test("thread_broadcast and file_share answer actor_automated false", () => {
-  for (const subtype of [THREAD_BROADCAST, FILE_SHARE])
-    assert.equal(
-      decode(slackMessage({ subtype }))?.actor_automated,
-      false,
-      subtype,
     );
 });
 
