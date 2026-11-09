@@ -665,6 +665,7 @@ export async function prepareStepsWorkspace(
     nodeBranch: input.claim.node_branch,
     pushed,
     repositories: input.setup.repositories,
+    log: (msg, fields) => run.log(msg, fields),
     transport: input.transport,
     sshAccess: input.sshAccess,
     context: run.operationContext,
