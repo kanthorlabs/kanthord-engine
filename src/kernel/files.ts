@@ -143,6 +143,7 @@ export function writePrivate(
     failure = publishFailure(error, path);
   }
   if (fd !== undefined) closeSync(fd);
-  failure ??= removeTemporary(temporary);
+  const cleanupFailure = removeTemporary(temporary);
+  failure ??= cleanupFailure;
   if (failure !== undefined) throw failure;
 }
