@@ -51,6 +51,7 @@ import {
   SpanOrigin,
   SpanStatus,
   type TelemetryRecord,
+  TIMELINE_LIMIT_DEFAULT,
   TimelineDepth,
   TraceSort,
   TraceState,
@@ -744,6 +745,27 @@ test("a malformed timeline cursor is refused", (t) => {
       () => service.timelineList(timelineListQuery({ cursor }), caller(store)),
       cursorInvalid,
     );
+});
+
+test("a timeline query holds exactly one scope", () => {
+  const { query } = trackingOperations.timelineList.input.shape;
+  assert.ok(!query.safeParse({}).success);
+  assert.ok(
+    !query.safeParse({ node_id: TRACE.node_id, project_id: TRACE.project_id })
+      .success,
+  );
+  assert.ok(query.safeParse({ node_id: TRACE.node_id }).success);
+  assert.ok(query.safeParse({ execution_id: TRACE.execution_id }).success);
+  assert.ok(query.safeParse({ project_id: TRACE.project_id }).success);
+  assert.ok(!query.safeParse({ node_id: TRACE.node_id, depth: "3" }).success);
+  assert.equal(
+    query.parse({ node_id: TRACE.node_id }).depth,
+    TimelineDepth.Child,
+  );
+  assert.equal(
+    query.parse({ node_id: TRACE.node_id }).limit,
+    TIMELINE_LIMIT_DEFAULT,
+  );
 });
 
 test("the facet read answers the five arrays", (t) => {
