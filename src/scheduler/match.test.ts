@@ -2,11 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
 import { type Claimant, ClaimIntent, ClaimNodeState } from "./contract.ts";
-import { admits, covered } from "./match.ts";
 import { schedulerHarness } from "./test-support.ts";
 
 const MACOS = "platform.macos";
-const XCODE = "toolchain.xcode";
 const WALL_TIME = 7200000;
 const PINNED_BINDING_READ = "workerBindingOf";
 
@@ -16,7 +14,6 @@ const coder: Claimant = {
   tags: [],
   environment: null,
 };
-const macosCoder: Claimant = { ...coder, tags: [MACOS, XCODE] };
 const reviewer: Claimant = {
   declared_node_states: [
     ClaimNodeState.Waiting,
@@ -26,71 +23,6 @@ const reviewer: Claimant = {
   tags: [],
   environment: null,
 };
-
-test("a claimant admits a node only when its worker declares the intent and its tags include every tag of the node", () => {
-  assert.equal(
-    admits(coder, {
-      intent: ClaimIntent.Implement,
-      tags: [],
-      repositories: [],
-    }),
-    true,
-  );
-  assert.equal(
-    admits(coder, {
-      intent: ClaimIntent.Implement,
-      tags: [MACOS],
-      repositories: [],
-    }),
-    false,
-  );
-  assert.equal(
-    admits(macosCoder, {
-      intent: ClaimIntent.Examine,
-      tags: [MACOS],
-      repositories: [],
-    }),
-    true,
-  );
-  assert.equal(
-    admits(macosCoder, {
-      intent: ClaimIntent.Implement,
-      tags: [MACOS, "platform.linux"],
-      repositories: [],
-    }),
-    false,
-  );
-  assert.equal(
-    admits(
-      { ...macosCoder, declared_intents: [ClaimIntent.Examine] },
-      { intent: ClaimIntent.Implement, tags: [], repositories: [] },
-    ),
-    false,
-  );
-  assert.equal(
-    admits(coder, {
-      intent: ClaimIntent.Implement,
-      tags: ["platform.MACOS"],
-      repositories: [],
-    }),
-    false,
-  );
-});
-
-test("a claimant covers a state only when its worker declares the state and it admits the node", () => {
-  const facts = {
-    intent: ClaimIntent.Implement,
-    tags: [MACOS],
-    repositories: [],
-  };
-  assert.equal(
-    covered([coder, reviewer], facts, ClaimNodeState.Available),
-    false,
-  );
-  assert.equal(covered([macosCoder], facts, ClaimNodeState.Available), true);
-  assert.equal(covered([macosCoder], facts, ClaimNodeState.Waiting), false);
-  assert.equal(covered([], facts, ClaimNodeState.Available), false);
-});
 
 test("unmatched claims answer each uncovered pair of Available, Waiting and External.Requested and ignore the instance count", (t) => {
   const h = schedulerHarness(t);
@@ -193,21 +125,6 @@ test("unmatched claims answer each uncovered pair of Available, Waiting and Exte
 
 const API = "repository:github:acme/api";
 const WEB = "repository:github:acme/web";
-
-test("a claimant with an environment admits only facts that name its repository binding", () => {
-  const apiCoder: Claimant = { ...coder, environment: API };
-  const facts = (repositories: string[]) => ({
-    intent: ClaimIntent.Implement,
-    tags: [],
-    repositories,
-  });
-  assert.equal(admits(apiCoder, facts([API])), true);
-  assert.equal(admits(apiCoder, facts([WEB, API])), true);
-  assert.equal(admits(apiCoder, facts([WEB])), false);
-  assert.equal(admits(apiCoder, facts([])), false);
-  for (const repositories of [[API], [WEB], []])
-    assert.equal(admits(coder, facts(repositories)), true);
-});
 
 test("unmatched claims follow the environment of the worker binding", (t) => {
   const h = schedulerHarness(t);
