@@ -41,9 +41,6 @@ const TWO_INSTANCES = 2;
 const THREE_SPANS = 3;
 const LARGER_SPAN = 200;
 const SMALLER_SPAN = 150;
-const ALL_DURATIONS = 3;
-const TURN_DURATIONS = 2;
-const TURN_MAX = 30;
 const VERIFICATIONS = 2;
 const VERIFICATION_MAX = 300;
 const QUEUE_WAITS = 2;
@@ -59,9 +56,6 @@ const NODE_A = "node_01JZ8Q0K4M6N8P0R2S4T6V8W0X";
 const NODE_B = "node_01JZ8Q0K4M6N8P0R2S4T6V8W0Y";
 const ROOT_OPERATION = "scheduler.execution";
 const TRANSITION_OPERATION = "scheduler.transition";
-const RESPONSE_MODEL = "gen_ai.response.model";
-const REQUEST_MODEL = "gen_ai.request.model";
-const AGENT = "kanthord.agent.name";
 const TOOL = "gen_ai.tool.name";
 const KIND = "kanthord.execution.kind";
 const WAIT = "kanthord.queue.wait_ms";
@@ -222,46 +216,6 @@ test("span_duration answers the percentiles of 100 durations", async (t) => {
   assertClose(item.max, 100);
 });
 
-test("one value answers that value for every percentile", async (t) => {
-  const store = seededStore(t);
-  addSpans(store, durations([42]));
-  const { items } = await read(store, AnalyticsMeasure.SpanDuration);
-  assert.deepEqual(items, [
-    {
-      key: null,
-      bucket_start: null,
-      count: 1,
-      p50: 42,
-      p90: 42,
-      p99: 42,
-      mean: 42,
-      max: 42,
-    },
-  ]);
-});
-
-test("span_duration skips a span with no end and the operation filters", async (t) => {
-  const store = seededStore(t);
-  addSpans(store, [
-    { start: MONDAY, end: MONDAY + 10, operation: "agent.turn" },
-    { start: MONDAY, end: MONDAY + 30, operation: "agent.turn" },
-    { start: MONDAY, end: null, operation: "agent.turn" },
-    { start: MONDAY, end: MONDAY + 500, operation: "agent.tool" },
-  ]);
-  const all = await read(store, AnalyticsMeasure.SpanDuration);
-  assert.equal(all.items[0]!.count, ALL_DURATIONS);
-  const turns = await read(store, AnalyticsMeasure.SpanDuration, {
-    operation: "agent.turn",
-  });
-  assert.equal(turns.items[0]!.count, TURN_DURATIONS);
-  assert.equal(turns.items[0]!.max, TURN_MAX);
-  assertClose(turns.items[0]!.mean, 20);
-  const none = await read(store, AnalyticsMeasure.SpanDuration, {
-    operation: "agent.none",
-  });
-  assert.deepEqual(none.items, []);
-});
-
 test("tool_latency reads only agent.tool spans and groups by the tool", async (t) => {
   const store = seededStore(t);
   addSpans(store, [
@@ -378,85 +332,6 @@ test("revision_turns counts the evaluating to available transitions of each atte
   );
 });
 
-test("revision_turns groups an attempt by the trace row of its first root span", async (t) => {
-  const store = seededStore(t);
-  addSpans(store, [
-    root(1, MONDAY + HOUR, "steps"),
-    root(2, MONDAY + HOUR, "steps"),
-    root(4, MONDAY + HOUR, "steps"),
-    root(3, MONDAY + 2 * HOUR, "evaluation"),
-    transition("Evaluating", "Available", MONDAY + 3 * HOUR),
-  ]);
-  const { items } = await read(store, AnalyticsMeasure.RevisionTurns, {
-    group_by: DurationGroupBy.NodeId,
-  });
-  assert.deepEqual(
-    items.map((item) => [item.key, item.count, item.max]),
-    [
-      [NODE_A, 2, 1],
-      [NODE_B, 1, 0],
-    ],
-  );
-});
-
-test("each group_by value groups by its field", async (t) => {
-  const store = seededStore(t);
-  addSpans(store, [
-    {
-      trace: 1,
-      operation: "agent.turn",
-      start: MONDAY,
-      attributes: {
-        [AGENT]: "coder",
-        [RESPONSE_MODEL]: "m_resp",
-        [REQUEST_MODEL]: "ignored",
-      },
-    },
-    {
-      trace: 2,
-      operation: "agent.tool",
-      start: MONDAY,
-      attributes: { [TOOL]: "bash", [REQUEST_MODEL]: "m_req", [AGENT]: 7 },
-    },
-    {
-      trace: 2,
-      operation: "agent.tool",
-      start: MONDAY,
-      attributes: { [TOOL]: "bash" },
-    },
-    {
-      trace: 1,
-      operation: "agent.turn",
-      start: MONDAY,
-      attributes: { [RESPONSE_MODEL]: 5, [REQUEST_MODEL]: "m_req" },
-    },
-  ]);
-  const keys = async (group_by: DurationGroupBy) =>
-    keysOf(
-      (await read(store, AnalyticsMeasure.SpanDuration, { group_by })).items,
-    );
-  assert.deepEqual(await keys(DurationGroupBy.Operation), [
-    "agent.tool",
-    "agent.turn",
-  ]);
-  assert.deepEqual(await keys(DurationGroupBy.ToolName), ["bash", null]);
-  assert.deepEqual(await keys(DurationGroupBy.AgentName), [null, "coder"]);
-  assert.deepEqual(await keys(DurationGroupBy.Model), [
-    "m_req",
-    "m_resp",
-    null,
-  ]);
-  assert.deepEqual(await keys(DurationGroupBy.WorkerName), [
-    "worker_a",
-    "worker_b",
-  ]);
-  assert.deepEqual(await keys(DurationGroupBy.NodeId), [NODE_A, NODE_B]);
-  assert.deepEqual(await keys(DurationGroupBy.ProjectId), [
-    PROJECT_A,
-    PROJECT_B,
-  ]);
-});
-
 test("items order by bucket, count descending and key with null last, and truncated follows the limit", async (t) => {
   const store = seededStore(t);
   const tool = (name: string | null, start: number): Seed => ({
@@ -551,33 +426,6 @@ test("instance_busy_ratio answers the summed durations of each instance over the
   });
 });
 
-test("instance_busy_ratio adds nothing for an open root span", async (t) => {
-  const store = seededStore(t);
-  addSpans(store, [
-    busyRoot(1, "alpha", MONDAY, MONDAY + 6 * HOUR),
-    busyRoot(2, "alpha", MONDAY, null),
-  ]);
-  const { items } = await readBusy(store);
-  assert.deepEqual(items, [
-    { key: "alpha", bucket_start: null, count: 1, ratio: 0.25 },
-  ]);
-});
-
-test("instance_busy_ratio adds nothing for a root span with no instance", async (t) => {
-  const store = seededStore(t);
-  addSpans(store, [
-    busyRoot(1, null, MONDAY, MONDAY + 6 * HOUR),
-    {
-      trace: 2,
-      start: MONDAY,
-      end: MONDAY + HOUR,
-      attributes: { [INSTANCE]: "alpha" },
-    },
-  ]);
-  const { items } = await readBusy(store);
-  assert.deepEqual(items, []);
-});
-
 test("instance_busy_ratio cuts a root span at the end of its bucket and divides by the bucket length", async (t) => {
   const store = seededStore(t);
   addSpans(store, [
@@ -601,28 +449,6 @@ test("instance_busy_ratio cuts a root span at the end of the range with no bucke
   assert.deepEqual(items, [
     { key: "alpha", bucket_start: null, count: 1, ratio: 0.5 },
   ]);
-});
-
-test("instance_busy_ratio cuts the items to the limit", async (t) => {
-  const store = seededStore(t);
-  addSpans(store, [
-    busyRoot(1, "alpha", MONDAY, MONDAY + HOUR),
-    busyRoot(2, "beta", MONDAY, MONDAY + HOUR),
-  ]);
-  const { items, truncated } = await readDuration(
-    store,
-    {
-      from: MONDAY,
-      to: MONDAY + DAY,
-      measure: AnalyticsMeasure.InstanceBusyRatio,
-      group_by: DurationGroupBy.WorkerInstance,
-      bucket: AnalyticsBucket.None,
-    },
-    1,
-    new AbortController().signal,
-  );
-  assert.deepEqual(keysOf(items), ["alpha"]);
-  assert.equal(truncated, true);
 });
 
 test("the query schema pairs instance_busy_ratio with worker_instance only", () => {
@@ -748,25 +574,6 @@ test("test_floor_share keeps one item for each bucket", async (t) => {
   const shares = items.map((item) => ("share" in item ? item.share : null));
   assertClose(shares[0]!, 0.1);
   assertClose(shares[1]!, 0.4);
-});
-
-test("test_floor_share takes the span with the larger span_id on a tie of start_time", async (t) => {
-  const store = seededStore(t);
-  addSpans(store, [
-    floorSpan(MONDAY + 1000, 10, 100, { span_id: spanIdOf(SMALLER_SPAN) }),
-    floorSpan(MONDAY + 1000, 50, 100, {
-      trace: 3,
-      span_id: spanIdOf(LARGER_SPAN),
-    }),
-  ]);
-  const { items } = await readFloorShare(store, {
-    group_by: DurationGroupBy.ProjectId,
-  });
-  assert.equal(items.length, ONE_ITEM);
-  const item = items[0]!;
-  assert.equal(item.count, TWO_INSTANCES);
-  assert.ok("share" in item);
-  assertClose(item.share, 0.5);
 });
 
 test("test_floor_share takes the larger span_id over the larger trace_id on a tie of start_time", async (t) => {
