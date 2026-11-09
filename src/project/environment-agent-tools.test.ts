@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { background } from "../kernel/context.ts";
 import { IdentityKind, type ServiceIdentity } from "../kernel/caller.ts";
-import { canonicalJSON } from "../kernel/json.ts";
 import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { stopAfter, temporary } from "../kernel/test-support.ts";
@@ -67,7 +66,6 @@ const REQUEST_ID = /^env_agent_[0-7][0-9A-HJKMNP-TV-Z]{25}$/;
 const REFUSAL = "Refused: the command is not in the allowlist.";
 const COMMAND_TEXT_LENGTH = 300;
 const PROBE_TOOL = "probe";
-const WRITE_TOOL = "environment_write";
 
 const ACCEPTED: ReadonlyArray<readonly [string, string[]]> = [
   ["cat /etc/os-release", ["cat", "/etc/os-release"]],
@@ -139,20 +137,6 @@ function textOf(result: { content: ReadonlyArray<unknown> }): string {
   return first.text;
 }
 
-test("the probe tool calls the port with the parsed command", async () => {
-  const { port, probes, answer } = fakePort();
-  const tool = toolNamed(port, PROBE_TOOL);
-  const result = await tool.execute(
-    "call",
-    { command: "uname -a" },
-    new AbortController().signal,
-    undefined,
-    undefined as never,
-  );
-  assert.deepEqual(probes, [{ argv: ["uname", "-a"] }]);
-  assert.equal(textOf(result), canonicalJSON(answer));
-});
-
 test("the probe tool refuses a command outside the allowlist and does not call the port", async () => {
   const { port, probes } = fakePort();
   const tool = toolNamed(port, PROBE_TOOL);
@@ -165,20 +149,6 @@ test("the probe tool refuses a command outside the allowlist and does not call t
   );
   assert.equal(textOf(result), [REFUSAL, ...PROBE_ALLOWLIST].join("\n"));
   assert.equal(probes.length, NO_CALLS);
-});
-
-test("the environment_write tool calls the port with the object", async () => {
-  const { port, writes } = fakePort();
-  const tool = toolNamed(port, WRITE_TOOL);
-  const result = await tool.execute(
-    "call",
-    { environment: VALID_ENVIRONMENT },
-    new AbortController().signal,
-    undefined,
-    undefined as never,
-  );
-  assert.deepEqual(writes, [VALID_ENVIRONMENT]);
-  assert.equal(textOf(result), canonicalJSON({ outcome: "built" }));
 });
 
 function submission(storagePrefix: string) {

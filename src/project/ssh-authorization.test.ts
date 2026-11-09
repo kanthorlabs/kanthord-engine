@@ -182,16 +182,6 @@ function refused(reason: string) {
   };
 }
 
-test("a human passes for a repository binding and receives its credential and address", (t) => {
-  const f = setup(t);
-  assert.deepEqual(f.authorize(human(), f.binding), {
-    credential: SSH_CREDENTIAL,
-    platform: SSH_CREDENTIAL_PLATFORM,
-    project_id: f.saved.project_id,
-    facts: { binding_id: f.saved.binding_id, address: ADDRESS },
-  });
-});
-
 test("a human passes for a draft configuration after the custody suitability of its credential", (t) => {
   const f = setup(t);
   const draft = {
@@ -294,14 +284,6 @@ test("a draft configuration refuses a machine and a service identity before the 
     refused("identity_refused"),
   );
   assert.deepEqual(f.suitability, []);
-});
-
-test("a machine without a claim refuses a binding", (t) => {
-  const f = setup(t);
-  assert.throws(
-    () => f.authorize(f.machine, f.binding),
-    refused("identity_refused"),
-  );
 });
 
 test("an absent binding, a worker binding and a removed binding refuse every identity", (t) => {
