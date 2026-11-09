@@ -360,7 +360,7 @@ function failedIdsText(failed: readonly AffectedTestId[]): string {
 export function affectedFailureText(input: AffectedFailureInput): string {
   const head = `The affected test run of repository ${input.repository} failed. KanthorD ran \`${input.command}\` for ${input.changed} changed files`;
   if ("reason" in input)
-    return `${head}, and the command ${reasonText(input.reason)}. The same command gives a valid result on the base head, so the change of the node causes it. Change the code so that the command writes a valid report in time.`;
+    return `${head}, and the command ${reasonText(input.reason)}. A second run on the head also gave no valid report, and the same command gives a valid result on the base head, so the change of the node causes it. Change the code so that the command writes a valid report in time.`;
   const noun = input.failed.length === ONE_ENTRY ? "test" : "tests";
   return `${head}. The run selected ${input.tests} test files, and ${input.failed.length} ${noun} failed: ${failedIdsText(input.failed)}. Each selected test imports a changed file directly or through other files. Change the code or the test so that every selected test passes.`;
 }
@@ -682,24 +682,36 @@ function failureTextOf(
   );
 }
 
-async function decide(
+interface HeadCheck {
+  executed: Executed;
+  outcome: Outcome;
+  durationMs: number;
+}
+
+async function checkHead(
   input: AffectedInput,
   prepared: Prepared,
-): Promise<AffectedRun | AffectedBudgetEnd> {
-  const { checkout } = input;
-  const { declaration, files } = prepared;
+): Promise<HeadCheck | null> {
   const started = Date.now();
   const executed = await runHead(input, prepared);
   const durationMs = Date.now() - started;
-  const head = outcomeOf(
+  const outcome = outcomeOf(
     executed,
     join(prepared.directory, REPORT_FILE),
     prepared,
   );
-  if (head === null) return { budgetEnd: true };
-  const report = "report" in head ? head.report : null;
-  const failedIds = report ? headFailed(report, files) : [];
-  const result: AffectedRun = {
+  return outcome === null ? null : { executed, outcome, durationMs };
+}
+
+function headResultOf(
+  input: AffectedInput,
+  prepared: Prepared,
+  head: HeadCheck,
+): AffectedRun {
+  const { checkout } = input;
+  const { declaration, files } = prepared;
+  const report = "report" in head.outcome ? head.outcome.report : null;
+  return {
     verdict: AffectedVerdict.Passed,
     binding_id: checkout.binding_id,
     repository: checkout.name,
@@ -708,39 +720,89 @@ async function decide(
     declaration,
     changed: files.length,
     report,
-    failed: failedIds,
+    failed: report ? headFailed(report, files) : [],
     promoted_flaky: report ? promotedFlaky(report, files) : [],
-    head: resultOf(executed.run, declaration.command),
-    output: executed.run.outputs.at(-1) ?? "",
-    duration_ms: durationMs,
+    head: resultOf(head.executed.run, declaration.command),
+    output: head.executed.run.outputs.at(-1) ?? "",
+    duration_ms: head.durationMs,
     base_run: null,
     failure_text: null,
   };
-  if (report && failedIds.length === EMPTY_LENGTH) return result;
-  if ("failure" in head && head.failure.kind === HeadFailureKind.TimedOut)
-    return {
-      ...result,
-      verdict: AffectedVerdict.Failed,
-      failure_text: affectedTimeoutText(
-        head.failure.time_limit_s,
-        checkout.head,
-        result.output,
-      ),
-    };
-  const base = await runBase(input, prepared);
-  if (base === null) return { budgetEnd: true };
-  if (!report && !("report" in base.outcome))
-    throw baseStop(input, prepared, base);
-  const verdict = verdictOf(report, failedIds, base);
+}
+
+function timeLimitOf(head: HeadCheck): number | null {
+  return "failure" in head.outcome &&
+    head.outcome.failure.kind === HeadFailureKind.TimedOut
+    ? head.outcome.failure.time_limit_s
+    : null;
+}
+
+function earlyResultOf(
+  input: AffectedInput,
+  result: AffectedRun,
+  head: HeadCheck,
+): AffectedRun | null {
+  if (result.report && result.failed.length === EMPTY_LENGTH) return result;
+  const timeLimitS = timeLimitOf(head);
+  if (timeLimitS === null) return null;
+  return {
+    ...result,
+    verdict: AffectedVerdict.Failed,
+    failure_text: affectedTimeoutText(
+      timeLimitS,
+      input.checkout.head,
+      result.output,
+    ),
+  };
+}
+
+interface Checks {
+  head: HeadCheck;
+  base: BaseCheck;
+}
+
+function settledResultOf(
+  input: AffectedInput,
+  prepared: Prepared,
+  { head, base }: Checks,
+): AffectedRun {
+  const result = {
+    ...headResultOf(input, prepared, head),
+    base_run: baseRunOf(base, prepared),
+  };
+  const early = earlyResultOf(input, result, head);
+  if (early) return early;
+  const verdict = verdictOf(result.report, result.failed, base);
   return {
     ...result,
     verdict,
-    base_run: baseRunOf(base, prepared),
     failure_text:
       verdict === AffectedVerdict.Failed
-        ? failureTextOf(input, prepared, head, failedIds)
+        ? failureTextOf(input, prepared, head.outcome, result.failed)
         : null,
   };
+}
+
+async function decide(
+  input: AffectedInput,
+  prepared: Prepared,
+): Promise<AffectedRun | AffectedBudgetEnd> {
+  const first = await checkHead(input, prepared);
+  if (first === null) return { budgetEnd: true };
+  const early = earlyResultOf(
+    input,
+    headResultOf(input, prepared, first),
+    first,
+  );
+  if (early) return early;
+  const base = await runBase(input, prepared);
+  if (base === null) return { budgetEnd: true };
+  const valid = "report" in first.outcome;
+  if (!valid && !("report" in base.outcome))
+    throw baseStop(input, prepared, base);
+  const head = valid ? first : await checkHead(input, prepared);
+  if (head === null) return { budgetEnd: true };
+  return settledResultOf(input, prepared, { head, base });
 }
 
 async function declarationOf(

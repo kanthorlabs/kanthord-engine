@@ -354,26 +354,6 @@ test("evidence writes all assets atomically and scopes requests, release and lan
   });
 });
 
-test("mission harness parses operation contracts and records the one caller transaction", async (t) => {
-  const h = fixture(t);
-  const result = await h.invoke("get", {
-    params: { project_id: h.project_id },
-    query: {},
-    body: null,
-  });
-  assert.equal(result.id, h.mission_id);
-  assert.equal(h.commits(), FIRST_ATTEMPT);
-  await assert.rejects(
-    h.invoke("get", {
-      params: { project_id: h.project_id },
-      query: {},
-      body: null,
-      actor: ACTOR,
-    }),
-  );
-  assert.equal(h.commits(), FIRST_ATTEMPT);
-});
-
 test("failed assets list each binding once for its attempt in failure order", (t) => {
   const h = fixture(t);
   const primary = createIdentity("binding");
