@@ -14,6 +14,7 @@ import {
   handedSshAccess,
   isExecutionEnd,
   type ModelRuntimeFactory,
+  type NativeExecutionInput,
   releaseSetupRefusal,
   type RepositoryTransport,
   runNativeExecution,
@@ -102,37 +103,48 @@ function endOf(
   );
 }
 
-export async function hostExecution(
-  input: HostExecutionInput,
-  execute = runNativeExecution,
-): Promise<Diagnostic | null | typeof SETUP_UNAVAILABLE> {
-  assert.ok(input.claim.execution_id);
-  assert.ok(input.clientSecret);
-  let handover: Awaited<ReturnType<typeof takeHandover>> | undefined;
-  let sshAccess: Map<string, SshAccess> | undefined;
-  let revoked = false;
-  const context = new CancellationContext(
-    input.context,
-    input.claim.expired_at,
-  );
-  const hostToolCall = async <T>(
+type HandedOver = Awaited<ReturnType<typeof takeHandover>>;
+type HostStep = Diagnostic | null | typeof SETUP_UNAVAILABLE;
+
+interface HostExecutionState {
+  handover?: HandedOver;
+  sshAccess?: Map<string, SshAccess>;
+  revoked: boolean;
+}
+
+interface HostRun {
+  input: HostExecutionInput;
+  context: CancellationContext;
+  telemetry: HttpTelemetrySink;
+  state: HostExecutionState;
+  execute: typeof runNativeExecution;
+}
+
+interface SetupExecution {
+  handover: HandedOver;
+  setup: NativeExecutionInput["setup"];
+}
+
+function endsExecution(error: unknown): boolean {
+  if (!(error instanceof HandoverRefused) || !error.result) return false;
+  return isExecutionEnd(error.result);
+}
+
+function hostToolCaller(run: HostRun) {
+  return async <T>(
     signal: AbortSignal | undefined,
     work: (callContext: CancellationContext) => Promise<T>,
   ): Promise<T> => {
-    const callContext = new CancellationContext(context);
+    const callContext = new CancellationContext(run.context);
     const abort = () => callContext.cancel();
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();
     try {
       return await work(callContext);
     } catch (error) {
-      if (
-        error instanceof HandoverRefused &&
-        error.result &&
-        isExecutionEnd(error.result)
-      ) {
-        revoked = true;
-        context.cancel();
+      if (endsExecution(error)) {
+        run.state.revoked = true;
+        run.context.cancel();
       }
       throw error;
     } finally {
@@ -140,139 +152,176 @@ export async function hostExecution(
       callContext.cancel();
     }
   };
-  const telemetry = new HttpTelemetrySink({
-    executionId: input.claim.execution_id,
-    send: (request, options) =>
-      input.api.tracking.telemetryWrite(request, options),
-    log: input.log,
+}
+
+function hostToolsOf(run: HostRun): NativeExecutionInput["hostTools"] {
+  const callTool = hostToolCaller(run);
+  const { input } = run;
+  return (workspace) => ({
+    evidenceUpload: (path, signal) =>
+      callTool(signal, (callContext) =>
+        uploadEvidence({
+          workspace,
+          path,
+          claim: input.claim,
+          api: input.api,
+          context: callContext,
+        }),
+      ),
+    linkUpdateList: (page, signal) =>
+      callTool(signal, async (callContext) =>
+        completed(
+          await input.api.worker["execution.link_update.get"](
+            {
+              params: { execution_id: input.claim.execution_id },
+              query: page,
+              body: null,
+            },
+            { context: callContext },
+          ),
+        ),
+      ),
   });
+}
+
+function releaseRefusal(
+  run: HostRun,
+  refusal: Diagnostic,
+): Promise<ExecutionEnd> {
+  return releaseSetupRefusal(
+    {
+      ...run.input,
+      clients: run.input.api,
+      credentials: run.state.handover?.credentials ?? NO_CREDENTIALS,
+      context: run.context,
+      telemetry: run.telemetry,
+    },
+    refusal,
+  );
+}
+
+async function takeHandoverOrRefusal(
+  run: HostRun,
+): Promise<HandedOver | Diagnostic> {
+  try {
+    return await takeHandover({ ...run.input, context: run.context });
+  } catch (error) {
+    const refusal = handoverRefusalOf(error);
+    if (!refusal) throw error;
+    return refusal;
+  }
+}
+
+function executeSetup(
+  run: HostRun,
+  { handover, setup }: SetupExecution,
+): Promise<ExecutionEnd> {
+  const { input } = run;
+  run.state.sshAccess = handedSshAccess(
+    handover.sshIdentities,
+    setup.repositories,
+    (bindingId) => relaySigner({ ...input, bindingId }),
+  );
+  return run.execute({
+    ...input,
+    setup,
+    clients: input.api,
+    credentials: handover.credentials,
+    sshAccess: run.state.sshAccess,
+    context: run.context,
+    telemetry: run.telemetry,
+    hostTools: hostToolsOf(run),
+  });
+}
+
+async function executeHandedOver(
+  run: HostRun,
+  handover: HandedOver,
+): Promise<ExecutionEnd> {
+  const { input, context } = run;
+  input.log({
+    msg: "credential handover received",
+    execution_id: input.claim.execution_id,
+    credential_ids: handover.credentials.items.map(
+      (item) => item.credential_id,
+    ),
+  });
+  const answer = await retryIndeterminate(
+    () =>
+      input.api.worker["execution.setup.get"](
+        {
+          params: { execution_id: input.claim.execution_id },
+          query: {},
+          body: null,
+        },
+        { context },
+      ),
+    input.claim.expired_at,
+    context,
+  );
+  const refusal = setupRefusalOf(answer);
+  if (refusal) return releaseRefusal(run, refusal);
+  return executeSetup(run, { handover, setup: completed(answer) });
+}
+
+function failureOf(run: HostRun, error: unknown): HostStep {
+  const { input } = run;
+  if (run.state.revoked || endsExecution(error)) return null;
+  if (
+    error instanceof HandoverRefused &&
+    error.code.startsWith(GATEWAY_CODE_PREFIX)
+  ) {
+    input.log({
+      msg: SETUP_UNAVAILABLE_RECORD,
+      execution_id: input.claim.execution_id,
+      code: error.code,
+    });
+    return SETUP_UNAVAILABLE;
+  }
+  if (error instanceof Diagnostic) return error;
+  return new Diagnostic(
+    error instanceof CodedError ? error.code : "system.operation.unknown",
+    "worker: execution cannot progress.",
+  );
+}
+
+export async function hostExecution(
+  input: HostExecutionInput,
+  execute = runNativeExecution,
+): Promise<HostStep> {
+  assert.ok(input.claim.execution_id);
+  assert.ok(input.clientSecret);
+  const context = new CancellationContext(
+    input.context,
+    input.claim.expired_at,
+  );
+  const run: HostRun = {
+    input,
+    context,
+    execute,
+    state: { revoked: false },
+    telemetry: new HttpTelemetrySink({
+      executionId: input.claim.execution_id,
+      send: (request, options) =>
+        input.api.tracking.telemetryWrite(request, options),
+      log: input.log,
+    }),
+  };
   try {
     context.signal.throwIfAborted();
-    try {
-      handover = await takeHandover({ ...input, context });
-    } catch (error) {
-      const refusal = handoverRefusalOf(error);
-      if (!refusal) throw error;
-      return endOf(
-        input,
-        context,
-        await releaseSetupRefusal(
-          {
-            ...input,
-            clients: input.api,
-            credentials: NO_CREDENTIALS,
-            context,
-            telemetry,
-          },
-          refusal,
-        ),
-      );
-    }
-    input.log({
-      msg: "credential handover received",
-      execution_id: input.claim.execution_id,
-      credential_ids: handover.credentials.items.map(
-        (item) => item.credential_id,
-      ),
-    });
-    const answer = await retryIndeterminate(
-      () =>
-        input.api.worker["execution.setup.get"](
-          {
-            params: { execution_id: input.claim.execution_id },
-            query: {},
-            body: null,
-          },
-          { context },
-        ),
-      input.claim.expired_at,
-      context,
-    );
-    const refusal = setupRefusalOf(answer);
-    let result: ExecutionEnd;
-    if (refusal)
-      result = await releaseSetupRefusal(
-        {
-          ...input,
-          clients: input.api,
-          credentials: handover.credentials,
-          context,
-          telemetry,
-        },
-        refusal,
-      );
-    else {
-      const setup = completed(answer);
-      sshAccess = handedSshAccess(
-        handover.sshIdentities,
-        setup.repositories,
-        (bindingId) => relaySigner({ ...input, bindingId }),
-      );
-      result = await execute({
-        ...input,
-        setup,
-        clients: input.api,
-        credentials: handover.credentials,
-        sshAccess,
-        context,
-        telemetry,
-        hostTools: (workspace) => ({
-          evidenceUpload: (path, signal) =>
-            hostToolCall(signal, (callContext) =>
-              uploadEvidence({
-                workspace,
-                path,
-                claim: input.claim,
-                api: input.api,
-                context: callContext,
-              }),
-            ),
-          linkUpdateList: (page, signal) =>
-            hostToolCall(signal, async (callContext) =>
-              completed(
-                await input.api.worker["execution.link_update.get"](
-                  {
-                    params: { execution_id: input.claim.execution_id },
-                    query: page,
-                    body: null,
-                  },
-                  { context: callContext },
-                ),
-              ),
-            ),
-        }),
-      });
-    }
-    if (revoked) return null;
+    const taken = await takeHandoverOrRefusal(run);
+    if (taken instanceof Diagnostic)
+      return endOf(input, context, await releaseRefusal(run, taken));
+    run.state.handover = taken;
+    const result = await executeHandedOver(run, taken);
+    if (run.state.revoked) return null;
     return endOf(input, context, result);
   } catch (error) {
-    if (revoked) return null;
-    if (
-      error instanceof HandoverRefused &&
-      error.result &&
-      isExecutionEnd(error.result)
-    )
-      return null;
-    if (
-      error instanceof HandoverRefused &&
-      error.code.startsWith(GATEWAY_CODE_PREFIX)
-    ) {
-      input.log({
-        msg: SETUP_UNAVAILABLE_RECORD,
-        execution_id: input.claim.execution_id,
-        code: error.code,
-      });
-      return SETUP_UNAVAILABLE;
-    }
-    if (error instanceof Diagnostic) return error;
-    return new Diagnostic(
-      error instanceof CodedError ? error.code : "system.operation.unknown",
-      "worker: execution cannot progress.",
-    );
+    return failureOf(run, error);
   } finally {
-    sshAccess?.clear();
-    handover?.credentials.discard();
-    telemetry.close();
+    run.state.sshAccess?.clear();
+    run.state.handover?.credentials.discard();
+    run.telemetry.close();
     context.cancel();
   }
 }

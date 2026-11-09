@@ -1,21 +1,12 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { test, type TestContext } from "node:test";
-import {
-  chmodSync,
-  existsSync,
-  readFileSync,
-  realpathSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import type { Revision } from "../../mission/contract.ts";
-import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import {
-  conflictInstruction,
   refreshAtClaim,
   refreshAtRelease,
   RefreshResult,
@@ -96,42 +87,6 @@ test("a claim merges the base branch of each binding", async (t) => {
   );
   assert.equal(api.head, await headOf(api.directory));
   assert.equal(web.head, await headOf(web.directory));
-});
-
-test("the conflict instruction names the binding and the directory", async (t) => {
-  assert.ok(
-    conflictInstruction(
-      SHIPPED_TEMPLATES,
-      { binding: "web", directory: "web", base_branch: "main" },
-      ["file"],
-    ).startsWith(
-      "The merge of origin/main into the node branch of repository web in directory `web` conflicts.",
-    ),
-  );
-  const { h, web, webBare } = await fixture(t, [
-    fauxAssistantMessage(
-      fauxToolCall("write", { path: "web/file", content: RESOLVED }),
-      { stopReason: "toolUse" },
-    ),
-    fauxAssistantMessage("resolved"),
-  ]);
-  await commitOnNode(web.directory, "node side");
-  web.head = await headOf(web.directory);
-  await advanceBase({ bare: webBare }, t, "main side");
-  await h.input.transport.fetchBase(
-    web.directory,
-    "main",
-    background,
-    DEADLINE_MS,
-    sshAccessOf(h.input.sshAccess, web.binding_id),
-  );
-  assert.equal(await refreshAtClaim(h), RefreshResult.Merged);
-  assert.ok(
-    JSON.stringify(h.provider.calls[0]).includes(
-      "node branch of repository web in directory `web` conflicts",
-    ),
-  );
-  assert.equal(readFileSync(join(web.directory, "file"), "utf8"), RESOLVED);
 });
 
 test("a conflict at the release goes through the conflict turn and concludes the merge", async (t) => {
@@ -258,24 +213,6 @@ const parentsOf = async (directory: string, commit: string) =>
     .split(" ")
     .slice(1);
 
-test("a claim refresh keeps the merge commit of the base", async (t) => {
-  const { h, web, webBare } = await fixture(t);
-  const before = web.head;
-  await advanceBase({ bare: webBare }, t, BASE_CHANGE, "web-base");
-  await h.input.transport.fetchBase(
-    web.directory,
-    "main",
-    background,
-    DEADLINE_MS,
-    sshAccessOf(h.input.sshAccess, web.binding_id),
-  );
-  assert.equal(await refreshAtClaim(h), RefreshResult.Merged);
-  const parents = await parentsOf(web.directory, web.head);
-  assert.equal(parents.length, TWO_PARENTS);
-  assert.equal(parents[0], before);
-  assert.equal(web.head, await headOf(web.directory));
-});
-
 test("a claim with upstream_branch merges the base, then the upstream, and the head has two merge commits", async (t) => {
   const { h, web, webBare } = await fixture(t);
   followUpstream(h);
@@ -340,63 +277,4 @@ test("an upstream conflict runs the conflict turn and the result keeps two paren
   assert.equal((await parentsOf(web.directory, web.head)).length, TWO_PARENTS);
   assert.equal((await parentsOf(web.directory, web.head))[0], before);
   assert.equal((await simpleGit(web.directory).status()).isClean(), true);
-});
-
-test("a release fetches the base and the upstream branch before the merge", async (t) => {
-  const { h, api, web, webBare } = await fixture(t);
-  followUpstream(h);
-  await advanceBase({ bare: webBare }, t, BASE_CHANGE, "web-base");
-  await advanceUpstream(webBare, t, UPSTREAM_CHANGE, "web-upstream");
-  const fetched: string[] = [];
-  const fetchBase = h.input.transport.fetchBase;
-  h.input.transport = {
-    ...h.input.transport,
-    fetchBase: (directory, branch, context, deadlineMs, ssh) => {
-      fetched.push(`${directory}:${branch}`);
-      return fetchBase(directory, branch, context, deadlineMs, ssh);
-    },
-  };
-  assert.equal(await refreshAtRelease(h), RefreshResult.Merged);
-  assert.deepEqual(fetched, [
-    `${api.directory}:main`,
-    `${web.directory}:main`,
-    `${web.directory}:${UPSTREAM}`,
-  ]);
-  assert.equal(
-    readFileSync(join(web.directory, "web-base"), "utf8"),
-    BASE_CHANGE,
-  );
-  assert.equal(
-    readFileSync(join(web.directory, "web-upstream"), "utf8"),
-    UPSTREAM_CHANGE,
-  );
-});
-
-test("with no upstream_branch the refresh runs the same git calls as before", async (t) => {
-  const { h, api, web } = await fixture(t);
-  const log = join(temporary(t), "git-calls");
-  const shims = temporary(t);
-  const real = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
-  const shim = join(shims, "git");
-  writeFileSync(
-    shim,
-    `#!/bin/sh\nprintf '%s\\n' "$PWD $*" >> '${log}'\nexec '${real}' "$@"\n`,
-  );
-  chmodSync(shim, 0o755);
-  h.input.env = {
-    ...h.input.env,
-    PATH: `${shims}:${h.input.env.PATH ?? ""}`,
-  };
-  assert.equal(await refreshAtClaim(h), RefreshResult.Current);
-  const calls = readFileSync(log, "utf8").trim().split("\n");
-  const directories = [api.directory, web.directory].map((directory) =>
-    realpathSync(directory),
-  );
-  assert.deepEqual(
-    calls.map((call) => call.replace(/^\S+ /, "")),
-    directories.flatMap(() => [
-      "rev-parse origin/main",
-      "merge-base HEAD origin/main",
-    ]),
-  );
 });

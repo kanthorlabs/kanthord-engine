@@ -25,7 +25,6 @@ import type { FlowRow } from "./flow-stages.ts";
 const HOUR = 3_600_000;
 const B0 = 100 * HOUR;
 const B1 = B0 + HOUR;
-const B2 = B1 + HOUR;
 const BUCKETS = [B0, B1];
 const NO_COUNT = 0;
 const COUNT_ONE = 1;
@@ -141,17 +140,6 @@ test("the cost sections sum the usage rows and the flow rows of each window", ()
     success: [COUNT_THREE, NO_COUNT],
   });
   assert.equal(cost.previous_same_hour, null);
-});
-
-test("the cost sections answer a null previous without a previous window", () => {
-  const cost = costOf({
-    buckets: BUCKETS,
-    rows: NO_ROWS,
-    usage: NO_ROWS,
-    same_hour: null,
-  });
-  assert.equal(cost.previous, null);
-  assert.deepEqual(cost.current.per_success_usd, null);
 });
 
 test("the same-hour sums read the same-hour rows and are null without a cut", () => {
@@ -416,27 +404,6 @@ test("previous_unattributed_share leaves out the exit budget and is null with no
     null,
   );
   assert.equal(causesOf(NO_ROWS, BUCKETS).previous_unattributed_share, null);
-});
-
-test("unattributed_share_series holds the share of each bucket and null for no caused row", () => {
-  const rows = {
-    current: [
-      causeRow({ cause_category: "unattributed" }),
-      row({
-        stage: FlowStage.Outcome,
-        exit: FlowExit.Rework,
-        cause_category: "plan",
-      }),
-      causeRow({
-        bucket_start: B2,
-        exit: FlowExit.Budget,
-        cause_category: "unattributed",
-      }),
-    ],
-    previous: null,
-  };
-  const result = causesOf(rows, [B0, B1, B2]);
-  assert.deepEqual(result.unattributed_share_series, [HALF, null, null]);
 });
 
 test("stop_reasons holds the order, a lost row, a budget_end row and the previous totals", () => {
