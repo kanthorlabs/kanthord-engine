@@ -122,6 +122,15 @@ test("configuration is strict, file-only, masks secrets, and reports every inval
   );
 });
 
+test("configuration rejects malformed secrets and accepts its initial document", () => {
+  assert.throws(
+    () =>
+      configuration({ version: CONFIG_VERSION, master_key: "secret-marker" }),
+    (error) => /master_key/.test(diagnosticText(error)),
+  );
+  assert.doesNotThrow(() => configuration(parseMapping(initialConfig())));
+});
+
 test("collection keys fail without YAML warnings or configuration excerpts", async (t) => {
   const path = join(temporary(t), "kanthord.yaml");
   const masterKey = randomBytes(32).toString("base64");
