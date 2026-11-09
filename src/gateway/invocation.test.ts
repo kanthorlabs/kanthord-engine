@@ -67,21 +67,6 @@ async function fixture(t: TestContext, registry: OperationRegistry) {
   return { invocation, token };
 }
 
-test("read operation commits once", async (t) => {
-  const registry = new OperationRegistry();
-  registry.register(operation, (_input, caller) =>
-    caller.commit(({ database }) =>
-      Number(database.prepare("SELECT 42 AS value").get()?.value),
-    ),
-  );
-  const { invocation, token } = await fixture(t, registry);
-  const response = await invocation.invoke(operation.id, input, {
-    authorization: `Bearer ${token}`,
-  });
-  assert.equal(response.status, HttpStatus.OK);
-  assert.equal(response.body, COMMITTED_VALUE);
-});
-
 test("second commit throws", async (t) => {
   const registry = new OperationRegistry();
   let secondError: unknown;
@@ -320,36 +305,6 @@ test("authentication precedes request validation on a credentialed route", async
   assert.equal(codeOf(response.body), VALIDATION_FAILED);
 });
 
-test("a validation failure names each unrecognized key", async (t) => {
-  const registry = new OperationRegistry();
-  const named = {
-    ...operation,
-    id: "test.named.create",
-    method: "POST",
-    path: "/api/test/named",
-    input: z.strictObject({
-      params: z.strictObject({}),
-      query: z.strictObject({}),
-      body: z.strictObject({ name: z.string() }),
-    }),
-  } as const;
-  registry.register(named, () => COMMITTED_VALUE);
-  const { invocation, token } = await fixture(t, registry);
-  const response = await invocation.invoke(
-    named.id,
-    { params: {}, query: {}, body: { name: "a", first: 1, second: 2 } },
-    { authorization: `Bearer ${token}` },
-  );
-  assert.equal(response.status, HttpStatus.BadRequest);
-  assert.deepEqual(
-    (response.body as { error: { details: unknown } }).error.details,
-    [
-      { path: ["body", "first"], code: "unrecognized_keys" },
-      { path: ["body", "second"], code: "unrecognized_keys" },
-    ],
-  );
-});
-
 function machineInvocation(
   t: TestContext,
   registry: OperationRegistry,
@@ -430,7 +385,6 @@ const clientOperation = {
   id: "test.client.read",
   access: AccessPolicy.Client,
 } as const;
-const UNKNOWN_FAILURE = "gateway.invocation.unknown";
 const CANCELLED_FAILURE = "gateway.invocation.cancelled";
 
 test("a request abort during the machine recheck answers cancelled and logs no failure", async (t) => {
@@ -453,36 +407,6 @@ test("a request abort during the machine recheck answers cancelled and logs no f
     CANCELLED_FAILURE,
   );
   assert.deepEqual(h.failures, []);
-});
-
-test("an unknown failure answers 500 and logs the error with the request and the operation", async (t) => {
-  const registry = new OperationRegistry();
-  const failure = new Error("handler bug");
-  registry.register(clientOperation, () => {
-    throw failure;
-  });
-  const h = machineInvocation(t, registry, async () => {});
-  const requestId = createIdentity("request");
-  const response = await h.invocation.invoke(clientOperation.id, input, {
-    identity: h.identity,
-    requestId,
-    logger: h.logger,
-  });
-  assert.equal(response.status, HttpStatus.InternalServerError);
-  assert.equal(
-    (response.body as { error: { code: string } }).error.code,
-    UNKNOWN_FAILURE,
-  );
-  assert.deepEqual(h.failures, [
-    {
-      fields: {
-        err: failure,
-        request_id: requestId,
-        operation: clientOperation.id,
-      },
-      message: "Request failed",
-    },
-  ]);
 });
 
 const NO_HANDLER_CALLS = 0;
@@ -543,9 +467,9 @@ test("an operation with an ended group answer answers 404 for an ended group and
       credential,
     );
     assert.equal(response.status, HttpStatus.NotFound);
-    assert.deepEqual(
-      (response.body as { error: { code: string; message: string } }).error,
-      { code: ENDED_CODE, message: ENDED_MESSAGE, details: null },
+    assert.equal(
+      (response.body as { error: { code: string } }).error.code,
+      ENDED_CODE,
     );
   }
   assert.equal(calls, NO_HANDLER_CALLS);

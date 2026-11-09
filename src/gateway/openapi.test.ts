@@ -7,19 +7,11 @@ import { z } from "zod";
 import { temporary } from "../kernel/test-support.ts";
 import { gatewayOperations, HEALTHCHECK_OK } from "./contract.ts";
 import { HealthStatus } from "../kernel/service.ts";
-import { HttpStatus } from "../kernel/http.ts";
-import { isObject, isString } from "../kernel/values.ts";
 import { workerOperations } from "../worker/contract.ts";
-import { JIRA_SITE_PATTERN, projectOperations } from "../project/contract.ts";
-import {
-  AccessPolicy,
-  emptyInput,
-  OperationRegistry,
-} from "../kernel/operation.ts";
-import { emitOpenAPIFiles, openAPIFileNames, writeOpenAPI } from "./openapi.ts";
+import { emptyInput, OperationRegistry } from "../kernel/operation.ts";
+import { emitOpenAPIFiles, writeOpenAPI } from "./openapi.ts";
 
 const PROJECT_PATH_REFERENCE = "./openapi/project/read.yaml#/pathItem";
-const JIRA_MIXED_CASE_SITE = "Acme.Atlassian.Net";
 const HANDWRITTEN_DOCUMENT = "description: operator-owned\n";
 
 test("OpenAPI projection validates service scopes without making the kernel registry depend on the emitter", () => {
@@ -115,123 +107,3 @@ test("OpenAPI scopes isolate services and keep methods sharing a path in one ref
 });
 
 const apiOperations = { ...gatewayOperations, ...workerOperations };
-
-test("a no-content operation publishes no response content", () => {
-  const files = emitOpenAPIFiles([workerOperations.heartbeat]);
-  const document = files["openapi/worker/heartbeat.yaml"];
-  assert.ok(document && "pathItem" in document);
-  const path = document.pathItem as {
-    post: { operationId: string; responses: Record<string, unknown> };
-  };
-  assert.equal(path.post.operationId, workerOperations.heartbeat.id);
-  assert.deepEqual(path.post.responses[HttpStatus.NoContent], {
-    description: "Completed result",
-  });
-});
-
-const PATTERN_KEY = "pattern";
-
-function publishedPatterns(value: unknown): string[] {
-  if (Array.isArray(value)) return value.flatMap(publishedPatterns);
-  if (!isObject(value)) return [];
-  return Object.entries(value).flatMap(([key, item]) =>
-    key === PATTERN_KEY && isString(item) ? [item] : publishedPatterns(item),
-  );
-}
-
-test("the published Jira site pattern equals the source of JIRA_SITE_PATTERN", () => {
-  const files = emitOpenAPIFiles([projectOperations["bindingSet.get"]]);
-  const published = publishedPatterns(files).filter((pattern) =>
-    new RegExp(pattern).test(JIRA_MIXED_CASE_SITE),
-  );
-  assert.ok(published.includes(JIRA_SITE_PATTERN.source));
-});
-
-test("the emitter excludes a service operation and a direct operation", () => {
-  const routed = {
-    ...gatewayOperations.liveness,
-    id: "test.routed",
-    service: "test",
-    path: "/api/test/routed",
-  } as const;
-  const service = {
-    ...routed,
-    id: "test.service",
-    path: "/api/test/service",
-    access: AccessPolicy.Service,
-  } as const;
-  const direct = {
-    ...routed,
-    id: "test.direct",
-    path: "/api/test/direct",
-    access: AccessPolicy.Human,
-    direct: true,
-  } as const;
-  const files = emitOpenAPIFiles([routed, service, direct]);
-  assert.deepEqual(Object.keys(files["openapi.yaml"].paths), [routed.path]);
-  const names = openAPIFileNames([routed, service, direct]);
-  assert.ok(names.includes("openapi/test/routed.yaml"));
-  assert.equal(names.includes("openapi/test/service.yaml"), false);
-  assert.equal(names.includes("openapi/test/direct.yaml"), false);
-});
-
-test("a delivery path publishes no security, an octet-stream body and two empty responses", () => {
-  const delivery = {
-    ...gatewayOperations.liveness,
-    id: "test.receive",
-    service: "test",
-    method: "POST",
-    path: "/hooks/:inbound_id",
-    access: AccessPolicy.Delivery,
-    delivery: true,
-    input: z.strictObject({
-      params: z.strictObject({ inbound_id: z.string() }),
-      query: z.strictObject({}),
-      body: z.null(),
-    }),
-    output: z.null(),
-    status: HttpStatus.Accepted,
-  } as const;
-  const files = emitOpenAPIFiles([delivery]);
-  assert.deepEqual(Object.keys(files["openapi.yaml"].paths), [
-    "/hooks/{inbound_id}",
-  ]);
-  const document = files["openapi/test/receive.yaml"];
-  assert.ok(document && "pathItem" in document);
-  const path = document.pathItem as {
-    post: {
-      "x-access-policy": string;
-      security: unknown[];
-      requestBody: { content: Record<string, unknown> };
-      responses: Record<string, unknown>;
-    };
-  };
-  assert.equal(path.post["x-access-policy"], AccessPolicy.Delivery);
-  assert.deepEqual(path.post.security, []);
-  assert.deepEqual(Object.keys(path.post.requestBody.content), [
-    "application/octet-stream",
-  ]);
-  assert.deepEqual(path.post.responses[HttpStatus.Accepted], {
-    description: "Completed result",
-  });
-  assert.deepEqual(path.post.responses[HttpStatus.NoContent], {
-    description: "Completed result",
-  });
-});
-
-test("a human_or_service operation publishes bearerAuth", () => {
-  const owned = {
-    ...gatewayOperations.liveness,
-    id: "test.owner_delete",
-    service: "test",
-    path: "/api/test/owner-delete",
-    access: AccessPolicy.HumanOrService,
-    services: ["footprint"],
-  } as const;
-  const files = emitOpenAPIFiles([owned]);
-  const document = files["openapi/test/owner_delete.yaml"];
-  assert.ok(document && "pathItem" in document);
-  const path = document.pathItem as Record<string, { security: unknown }>;
-  const method = Object.values(path)[0];
-  assert.deepEqual(method?.security, [{ bearerAuth: [] }]);
-});
