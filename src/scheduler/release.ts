@@ -79,10 +79,14 @@ interface StopEffects {
   environmentRepositories: string[] | null;
 }
 
+interface StopOrderInput {
+  executionId: string;
+  stop: ReleaseStopBody | null;
+}
+
 function requireStopOrder(
   dependencies: Dependencies,
-  executionId: string,
-  stop: ReleaseStopBody | null,
+  { executionId, stop }: StopOrderInput,
 ): void {
   if (
     stop &&
@@ -170,7 +174,7 @@ export function release(
   const proof = caller.execution;
   assert.ok(proof, "release requires an execution proof");
   assert.equal(proof.executionId, executionId);
-  requireStopOrder(dependencies, executionId, body.stop);
+  requireStopOrder(dependencies, { executionId, stop: body.stop });
   let released: ExecutionRow | undefined;
   let transition: NodeTransition | undefined;
   let hold: FailureHold | null = null;
