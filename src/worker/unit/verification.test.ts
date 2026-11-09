@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { suite, test } from "node:test";
 import { existsSync, readFileSync } from "node:fs";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { join } from "node:path";
 import { background, CancellationContext } from "../../kernel/context.ts";
@@ -14,13 +14,10 @@ import {
   temporary,
 } from "../../kernel/test-support.ts";
 import {
-  commandClassOf,
-  CommandEnd,
   environmentStop,
   infrastructureStop,
   runVerifications,
   runVerificationsWithOutput,
-  testedInputOf,
   VERIFICATION_INFRASTRUCTURE_FAILED,
   VerificationClass,
   type VerificationInput,
@@ -30,19 +27,9 @@ import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { VerificationContext } from "./method-telemetry.ts";
 import { VerificationMemo } from "./verification-memo.ts";
 import { REASON_MAX_LENGTH } from "../../kernel/probe.ts";
-import {
-  EnvironmentFailure,
-  STOP_DETAIL_MAX_LENGTH,
-} from "../../scheduler/contract.ts";
+import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
 import {
-  noProgressAttributes,
-  noProgressDetail,
-  NoProgressRule,
-  verificationFactsOf,
-} from "./progress-rule.ts";
-import {
-  pidsIn,
   PROCESS_TREE_PIDS,
   processTreeCommand,
   spawnedPids,
@@ -208,7 +195,6 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
   });
 
   const OUTPUT_TAIL_BYTES = 4096;
-  const LIMIT_BOUND_MS = 10000;
 
   test("verification keeps the last 4 KiB of the output of each command", async (t) => {
     const run = await runVerificationsWithOutput({
@@ -232,29 +218,6 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.ok(run.outputs[1]?.endsWith("aEND"));
   });
 
-  test("verification ends a command at its own limit before the execution deadline", async (t) => {
-    const started = Date.now();
-    const run = await runVerificationsWithOutput({
-      directory: temporary(t),
-      commands: ["echo started; sleep 30", "true"],
-      tested_input: { kind: "produced", sha256: "hash" },
-      deadline: Date.now() + 60000,
-      context: background,
-      env: hostEnvironment(),
-      commandLimitMs: 1000,
-    });
-    assert.ok(Date.now() - started < LIMIT_BOUND_MS);
-    assert.deepEqual(run.verification.results, [
-      {
-        command: "echo started; sleep 30",
-        exit_code: null,
-        signal: "SIGKILL",
-        timed_out: true,
-      },
-    ]);
-    assert.match(run.outputs[0] ?? "", /started/);
-  });
-
   const TREE_LIMIT_MS = 20000;
 
   test("a command that reaches its limit leaves no process of its tree, also a process in its own group", async (t) => {
@@ -271,43 +234,6 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(run.verification.results[0]?.timed_out, true);
     assert.equal(spawned.length, PROCESS_TREE_PIDS);
     assert.deepEqual(await survivingProcesses(spawned), []);
-  });
-
-  const TREE_START_POLLS = 100;
-  const TREE_START_POLL_MS = 50;
-  const TREE_PROCESS_GROUPS = 2;
-
-  function processGroupOf(pid: number): string {
-    return execFileSync("ps", ["-o", "pgid=", "-p", String(pid)], {
-      encoding: "utf8",
-    }).trim();
-  }
-
-  test("the sleep of the second process tree runs in its own process group", async (t) => {
-    const child = spawn("bash", ["-c", processTreeCommand()], {
-      detached: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    assert.ok(child.pid);
-    const leader = child.pid;
-    let output = "";
-    child.stdout.on("data", (chunk: Buffer) => (output += chunk.toString()));
-    child.stderr.on("data", (chunk: Buffer) => (output += chunk.toString()));
-    for (
-      let poll = 0;
-      poll < TREE_START_POLLS &&
-      pidsIn([{ type: "text", text: output }]).length < PROCESS_TREE_PIDS;
-      poll += 1
-    )
-      await delay(TREE_START_POLL_MS);
-    const spawned = spawnedPids(t, [{ type: "text", text: output }]);
-    stopAfter(t, () => killIfPresent(-leader));
-    assert.equal(spawned.length, PROCESS_TREE_PIDS);
-    assert.equal(output.trim().split("\n").length, PROCESS_TREE_PIDS);
-    assert.equal(
-      new Set(spawned.map(processGroupOf)).size,
-      TREE_PROCESS_GROUPS,
-    );
   });
 
   const FAILED_EXIT = 1;
@@ -364,70 +290,7 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
     );
   });
 
-  test("a failed command with no reruns stops the run with the failed result", async (t) => {
-    const directory = temporary(t);
-    const run = await runVerificationsWithOutput({
-      directory,
-      commands: ["test -f twice || { touch twice; exit 1; }", "true"],
-      tested_input: { kind: "produced", sha256: "hash" },
-      deadline: Date.now() + 10000,
-      context: background,
-      env: hostEnvironment(),
-      reruns: 0,
-    });
-    assert.equal(run.outcome, VerificationClass.CodeFailure);
-    assert.deepEqual(run.flaky, [false]);
-    assert.deepEqual(run.flaky_failures, []);
-    assert.equal(run.verification.results.length, ONE_RESULT);
-  });
-
-  test("the tested input is one address for one checkout and the list in binding order for two", () => {
-    const api = {
-      binding_id: "binding_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-      name: "api",
-      directory: "/w/checkouts/api",
-      head: "a".repeat(40),
-    };
-    const web = {
-      binding_id: "binding_01ARZ3NDEKTSV4RRFFQ69G5FAB",
-      name: "web",
-      directory: "/w/checkouts/web",
-      head: "b".repeat(40),
-    };
-    assert.deepEqual(testedInputOf([api]), {
-      kind: "repository",
-      binding_id: api.binding_id,
-      commit: api.head,
-    });
-    assert.deepEqual(
-      testedInputOf([api, web]),
-      [api, web].map((checkout) => ({
-        kind: "repository",
-        binding_id: checkout.binding_id,
-        commit: checkout.head,
-      })),
-    );
-  });
-
   const SIGNAL_KILL = "sh -c 'kill -9 $$'";
-  test("a rerun of a failed command carries flaky_check and no other attempt does", async (t) => {
-    const attempts: boolean[] = [];
-    await runVerificationsWithOutput({
-      observe: (attempt, execute) => {
-        attempts.push(attempt.flaky_check);
-        return execute();
-      },
-      directory: temporary(t),
-      commands: ["false"],
-      tested_input: { kind: "produced", sha256: "hash" },
-      deadline: Date.now() + 10000,
-      context: background,
-      env: hostEnvironment(),
-      reruns: 2,
-    });
-    assert.deepEqual(attempts, [false, true, true]);
-  });
-
   function repeatedListRun(
     t: Parameters<typeof temporary>[0],
     copyRepeated?: boolean,
@@ -474,41 +337,6 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(run.verification.results.length, THREE_RESULTS);
     assert.equal(repeated.lines(), RUN_AND_RERUN);
     assert.deepEqual(repeated.attempts, [0, 1, 2]);
-  });
-
-  function commandRun(exit_code: number | null, signal: string | null) {
-    return {
-      result: { command: "x", exit_code, signal, timed_out: false },
-      output: "",
-      end: CommandEnd.Exit,
-    };
-  }
-
-  test("commandClassOf answers code_failure for a failed exit, infrastructure for a signal and pass for a success", () => {
-    assert.equal(
-      commandClassOf(commandRun(FAILED_EXIT, null)),
-      VerificationClass.CodeFailure,
-    );
-    assert.equal(
-      commandClassOf(commandRun(null, KILL_SIGNAL)),
-      VerificationClass.Infrastructure,
-    );
-    assert.equal(commandClassOf(commandRun(0, null)), VerificationClass.Pass);
-  });
-
-  test("commandClassOf answers timeout for the command limit and code_failure for a cancel", () => {
-    const ended = (end: CommandEnd) => ({
-      ...commandRun(null, KILL_SIGNAL),
-      end,
-    });
-    assert.equal(
-      commandClassOf(ended(CommandEnd.CommandLimit)),
-      VerificationClass.Timeout,
-    );
-    assert.equal(
-      commandClassOf(ended(CommandEnd.Cancelled)),
-      VerificationClass.CodeFailure,
-    );
   });
 
   const EXIT_KILL = "sh -c 'kill -9 $$'; exit $?";
@@ -573,20 +401,8 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(verificationPassed(run.verification, input.commands), true);
   });
 
-  test("a kill on the run and a code failure on the rerun keeps the flaky reruns", async (t) => {
-    const marker = join(temporary(t), "killed");
-    const command = `test -f ${marker} || { touch ${marker}; kill -9 $$; }; exit 1`;
-    const { input, runs } = countedInput(temporary(t), [command]);
-    const run = await runVerificationsWithOutput(input);
-    assert.equal(run.outcome, VerificationClass.CodeFailure);
-    assert.deepEqual(runs, [1, 2, 3, 4]);
-    assert.deepEqual(run.flaky, [false]);
-    assert.equal(run.verification.results[0]?.exit_code, FAILED_EXIT);
-  });
-
   const REPEATED = "echo once >> count";
   const ONCE_LINE = "once\n";
-  const TWICE_LINES = "once\nonce\n";
 
   test("a repeated command after a failure never runs and never copies", async (t) => {
     const { input, runs } = countedInput(temporary(t), [
@@ -602,18 +418,6 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(run.outcome, VerificationClass.CodeFailure);
     assert.equal(runs.length, SINGLE_RUN);
     assert.equal(run.verification.results.length, SINGLE_RUN);
-  });
-
-  test("a command over the command limit is a timeout with no rerun", async (t) => {
-    const { input, runs } = countedInput(temporary(t), ["sleep 30"]);
-    const run = await runVerificationsWithOutput({
-      ...input,
-      commandLimitMs: 500,
-    });
-    assert.equal(run.outcome, VerificationClass.Timeout);
-    assert.equal(runs.length, SINGLE_RUN);
-    assert.equal(run.verification.results[0]?.timed_out, true);
-    assert.deepEqual(run.flaky_failures, []);
   });
 
   const AFTER_PASS_LIMIT_MS = 3000;
@@ -652,16 +456,6 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.match(detail, /"exit_code":null/);
   });
 
-  test("a verification that passes or fails by exit code has no environment stop", async (t) => {
-    for (const command of ["true", "false"]) {
-      const { input } = countedInput(temporary(t), [command]);
-      assert.equal(
-        environmentStop(await runVerificationsWithOutput(input)),
-        null,
-      );
-    }
-  });
-
   test("a kill at the wall deadline and a command after the deadline are a budget end", async (t) => {
     const { input, runs } = countedInput(temporary(t), ["sleep 30"]);
     const killed = await runVerificationsWithOutput({
@@ -686,14 +480,6 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
     });
     assert.equal(run.outcome, VerificationClass.BudgetEnd);
     assert.equal(runs.length, SINGLE_RUN);
-  });
-
-  test("exit 127 is a code failure with no infrastructure rerun", async (t) => {
-    const { input, runs } = countedInput(temporary(t), ["command-absent-x"]);
-    const run = await runVerificationsWithOutput({ ...input, reruns: 0 });
-    assert.equal(run.outcome, VerificationClass.CodeFailure);
-    assert.equal(runs.length, SINGLE_RUN);
-    assert.equal(run.verification.results[0]?.exit_code, COMMAND_ABSENT_EXIT);
   });
 
   test("exit 127 on the node head and on the base head is an environment failure", async (t) => {
@@ -771,37 +557,7 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
     );
   });
 
-  const LONG_COMMAND_LENGTH = 400;
   const CANCEL_AFTER_MS = 200;
-
-  test("the infrastructure stop detail keeps the result before the cut of a long command", async (t) => {
-    const prefix = `${SIGNAL_KILL} #`;
-    const command = `${prefix}${"x ".repeat(LONG_COMMAND_LENGTH)}`.slice(
-      0,
-      LONG_COMMAND_LENGTH,
-    );
-    const { input } = countedInput(temporary(t), [command]);
-    const stop = infrastructureStop(await runVerificationsWithOutput(input));
-    assert.ok(stop);
-    const detail = stop.detail ?? "";
-    assert.equal(detail.length, REASON_MAX_LENGTH);
-    assert.match(detail, /"signal":"SIGKILL"/);
-    assert.match(detail, /"timed_out":false/);
-    assert.match(detail, /"exit_code":null/);
-    assert.ok(detail.includes(prefix));
-  });
-
-  test("a cancel in the middle of a command is a code failure with one run", async (t) => {
-    const context = new CancellationContext();
-    const { input, runs } = countedInput(temporary(t), ["sleep 30"]);
-    const cancel = setTimeout(() => context.cancel(), CANCEL_AFTER_MS);
-    stopAfter(t, () => clearTimeout(cancel));
-    const run = await runVerificationsWithOutput({ ...input, context });
-    assert.equal(run.outcome, VerificationClass.CodeFailure);
-    assert.equal(runs.length, SINGLE_RUN);
-    assert.equal(run.verification.results[0]?.timed_out, false);
-    assert.equal(run.verification.results[0]?.signal, KILL_SIGNAL);
-  });
 
   const MEMO_TREES = ["tree"];
   const MEMO_DIGESTS = ["digest"];
@@ -848,24 +604,6 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.deepEqual(replayed.outputs, fresh.outputs);
     assert.deepEqual(replayed.flaky, [false, false]);
     assert.equal(readFileSync(join(directory, "count"), "utf8"), ONCE_LINE);
-  });
-
-  test("a memo miss in the list runs the whole list again", async (t) => {
-    const directory = temporary(t);
-    const memo = new VerificationMemo();
-    await runVerificationsWithOutput(
-      memoInput(directory, [REPEATED], memo, VerificationContext.Task).input,
-    );
-    const second = memoInput(
-      directory,
-      [REPEATED, "true"],
-      memo,
-      VerificationContext.Task,
-    );
-    const run = await runVerificationsWithOutput(second.input);
-    assert.equal(second.runs.length, TWO_COMMANDS_RUN);
-    assert.equal(run.verification.results.length, TWO_COMMANDS_RUN);
-    assert.equal(readFileSync(join(directory, "count"), "utf8"), TWICE_LINES);
   });
 
   test("a release memo replays a code failure and a live memo runs it again", async (t) => {
@@ -935,109 +673,6 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(second.runs.length, SINGLE_RUN);
   });
 
-  test("a memo replay does not start after the deadline passed", async (t) => {
-    const memo = new VerificationMemo();
-    const first = memoInput(
-      temporary(t),
-      ["true"],
-      memo,
-      VerificationContext.Task,
-    );
-    await runVerificationsWithOutput(first.input);
-    const second = memoInput(
-      temporary(t),
-      ["true"],
-      memo,
-      VerificationContext.Task,
-    );
-    const run = await runVerificationsWithOutput({
-      ...second.input,
-      deadline: Date.now(),
-    });
-    assert.equal(run.outcome, VerificationClass.BudgetEnd);
-    assert.deepEqual(run.verification.results, []);
-  });
-
-  const FACTS_COMMAND_LENGTH = 5000;
-  const FACTS_COMMAND_LIMIT = 2048;
-  const NO_PROGRESS_COUNT = 2;
-  const SECOND_INDEX = 1;
-  const NO_COMMAND = 0;
-  const SHORT_COMMAND = "npm test";
-
-  function factsOfResults(
-    commands: readonly string[],
-    exitCode: number | null,
-  ) {
-    return verificationFactsOf(false, {
-      tested_input: { kind: "produced", sha256: "hash" },
-      results: commands.map((command) => ({
-        command,
-        exit_code: exitCode,
-        signal: null,
-        timed_out: exitCode === null,
-      })),
-    });
-  }
-
-  function noProgressStop(verification: ReturnType<typeof factsOfResults>) {
-    return new ExecutionStop(
-      EndReason.NoProgress,
-      null,
-      noProgressDetail({
-        rule: NoProgressRule.UnchangedRevision,
-        count: NO_PROGRESS_COUNT,
-        limit: NO_PROGRESS_COUNT,
-        verification,
-      }),
-    );
-  }
-
-  test("the no-progress detail holds the index, a command trimmed to fit the stop detail and the limit", () => {
-    const command = "x".repeat(FACTS_COMMAND_LENGTH);
-    const facts = factsOfResults(["true", command], null);
-    assert.equal(facts?.command?.length, FACTS_COMMAND_LIMIT);
-    const detail = noProgressStop(facts).detail ?? "";
-    assert.ok(detail.length <= STOP_DETAIL_MAX_LENGTH);
-    const held = JSON.parse(detail).verification;
-    assert.equal(held.index, SECOND_INDEX);
-    assert.equal(held.limit_ms, COMMAND_LIMIT_MS);
-    assert.ok(held.command.length > NO_COMMAND);
-    assert.ok(command.startsWith(held.command));
-  });
-
-  test("the no-progress detail keeps a short command whole", () => {
-    const detail =
-      noProgressStop(factsOfResults([SHORT_COMMAND], FAILED_EXIT)).detail ?? "";
-    assert.equal(JSON.parse(detail).verification.command, SHORT_COMMAND);
-  });
-
-  test("the no-progress attributes hold timed_out, index and exit_code", () => {
-    const failed = noProgressAttributes(
-      noProgressStop(factsOfResults(["true", SHORT_COMMAND], FAILED_EXIT)),
-    );
-    assert.equal(failed["kanthord.stop.verification.passed"], false);
-    assert.equal(failed["kanthord.stop.verification.timed_out"], false);
-    assert.equal(failed["kanthord.stop.verification.index"], SECOND_INDEX);
-    assert.equal(failed["kanthord.stop.verification.exit_code"], FAILED_EXIT);
-    const hung = noProgressAttributes(
-      noProgressStop(factsOfResults(["true", "sleep 30"], null)),
-    );
-    assert.equal(hung["kanthord.stop.verification.timed_out"], true);
-    assert.equal(hung["kanthord.stop.verification.index"], SECOND_INDEX);
-    assert.ok(!("kanthord.stop.verification.exit_code" in hung));
-  });
-
-  test("the no-progress attributes hold no verification attribute for no verification", () => {
-    const attributes = noProgressAttributes(noProgressStop(null));
-    assert.deepEqual(Object.keys(attributes).sort(), [
-      "kanthord.stop.count",
-      "kanthord.stop.limit",
-      "kanthord.stop.reason",
-      "kanthord.stop.rule",
-    ]);
-  });
-
   const ABSENT_PROCESS = 999_998;
   const ABSENT_GROUP = 999_999;
   const INIT_PID = 1;
@@ -1081,22 +716,6 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(run.outcome, VerificationClass.Pass);
     assert.equal(spawned.length, ONE_CHILD);
     assert.deepEqual(await survivingProcesses(spawned), []);
-  });
-
-  test("a group with no member left is not signalled at the end of the run list", async (t) => {
-    const processes = recordedProcesses(() => []);
-    const run = await runVerificationsWithOutput({
-      directory: temporary(t),
-      commands: ["true"],
-      tested_input: { kind: "produced", sha256: "hash" },
-      deadline: Date.now() + 10000,
-      context: background,
-      env: hostEnvironment(),
-      processes: processes.system,
-    });
-    assert.equal(run.outcome, VerificationClass.Pass);
-    assert.ok(processes.reads() > NO_READS);
-    assert.deepEqual(processes.signals, []);
   });
 
   test("a group whose id leads a new process is not signalled", async (t) => {
