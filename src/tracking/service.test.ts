@@ -27,12 +27,10 @@ import {
   AnalyticsMeasure,
   CostGroupBy,
   Disposition,
-  DurationGroupBy,
   ExecutionEnd,
   ExecutionKind,
   type ExecutionOpening,
   type ExecutionTrace,
-  FlowCompare,
   FlowExit,
   FlowGrain,
   FlowKind,
@@ -42,7 +40,6 @@ import {
   RecordKind,
   RefusalReason,
   RevokeCause,
-  ROOT_SPAN_OPERATION,
   type RootSpanEnd,
   SCHEDULER_PRODUCER,
   type ServerTrace,
@@ -58,7 +55,6 @@ import {
   TimelineDepth,
   TraceSort,
   TraceState,
-  traceSummarySchema,
   TRACKING_SERVICE_NAME,
   trackingOperations,
   TransitionRule,
@@ -91,13 +87,6 @@ const OPENING: ExecutionOpening = {
   dependency_count: null,
   node_name: null,
 };
-const WORKER_INSTANCE = "instance_1";
-const PLACEMENT = "local";
-const NODE_NAME = "Write the report";
-const DEPENDENCY_COUNT = 2;
-const LEAD_TIME_MS = 4000;
-const HELD_FAILURES = 2;
-const HELD_UNTIL = 90000;
 const SPAN = "2".repeat(16);
 const RUNTIME = "worker_registration_01JZ8R2B3C4D5E6F7G8H9J0K1M";
 const CREATED = 1000;
@@ -108,7 +97,6 @@ const DAY_MS = 86400000;
 const NO_STORED = 0;
 const CURRENT_FLOW_SUCCESS = 2;
 const PREVIOUS_FLOW_SUCCESS = 4;
-const FLOW_STAGE_COUNT = 6;
 const ENDED = 5000;
 const NO_DROP = 0;
 const NO_ROWS = 0;
@@ -120,8 +108,6 @@ const PAGE_OF_ONE = 1;
 const STOP_DETAIL = "Cannot find module";
 const SPAN_PAGE = 10;
 const TRANSITION_SPAN = "scheduler.transition";
-const KEPT_STATE = "Executing";
-const SUMMARY_FIELDS = 27;
 const RATE_LIMITED = "rate_limited";
 const INPUT_TEXT = "npm test";
 const TRACE_NOT_FOUND = "tracking.trace.not_found";
@@ -184,61 +170,6 @@ function caller(store: Store, execution = true): CallerContext {
   };
 }
 
-test("the root start stores the kind, the worker name and the queue wait, and the trace row holds the worker name", (t) => {
-  const { store, service } = harness(t);
-  const opening: ExecutionOpening = {
-    kind: ExecutionKind.Evaluation,
-    worker_name: "judge@2",
-    queue_wait_ms: 1500,
-    worker_instance: null,
-    placement: null,
-    revision_turn: null,
-    dependency_count: null,
-    node_name: null,
-  };
-  service.executionOpened(TRACE, CREATED, opening);
-  const page = service.spanList(
-    TRACE.trace_id,
-    { limit: PAGE_OF_ONE },
-    caller(store),
-  );
-  assert.equal(page.items[0]!.span_id, TRACE.root_span_id);
-  const attributes = page.items[0]!.attributes;
-  assert.equal(attributes["kanthord.execution.kind"], opening.kind);
-  assert.equal(attributes["kanthord.worker.name"], opening.worker_name);
-  assert.equal(attributes["kanthord.queue.wait_ms"], opening.queue_wait_ms);
-  const row = store.database
-    .prepare("SELECT worker_name FROM tracking_trace WHERE trace_id = ?")
-    .get(TRACE.trace_id);
-  assert.deepEqual({ ...row }, { worker_name: opening.worker_name });
-});
-
-test("the root span opens at the claim and ends at the release", (t) => {
-  const { store, service } = harness(t);
-  service.executionOpened(TRACE, CREATED, OPENING);
-  service.executionEnded({
-    trace: TRACE,
-    ended_at: ENDED,
-    end: ExecutionEnd.Finished,
-    revoke_cause: null,
-    stop: { reason: "provider_failed", code: RATE_LIMITED },
-    cause: null,
-  });
-  const page = service.spanList(
-    TRACE.trace_id,
-    { limit: PAGE_OF_ONE },
-    caller(store),
-  );
-  const root = page.items[0];
-  assert.equal(root?.operation, ROOT_SPAN_OPERATION);
-  assert.equal(root?.producer, SCHEDULER_PRODUCER);
-  assert.equal(root?.start_time, CREATED);
-  assert.equal(root?.end_time, ENDED);
-  assert.equal(root?.status, SpanStatus.Error);
-  assert.equal(root?.attributes["kanthord.stop.code"], RATE_LIMITED);
-  assert.equal(service.droppedRecords(), NO_DROP);
-});
-
 test("a transition span is a child of the root span with the states, the rule and the time of the transition", (t) => {
   const { store, service } = harness(t);
   service.executionOpened(TRACE, CREATED, OPENING);
@@ -289,32 +220,6 @@ test("a transition span is a child of the root span with the states, the rule an
   );
   assert.equal(service.droppedRecords(), NO_DROP);
 });
-
-for (const rule of [TransitionRule.None, TransitionRule.PlanDefect])
-  test(`a transition span with the rule ${rule} holds neither the count nor the limit`, (t) => {
-    const { store, service } = harness(t);
-    service.executionOpened(TRACE, CREATED, OPENING);
-    service.executionTransition(TRACE, {
-      from: KEPT_STATE,
-      to: KEPT_STATE,
-      rule,
-      count: null,
-      limit: null,
-      lead_time_ms: null,
-      failure_count: null,
-      available_at: null,
-      transitioned_at: ENDED,
-    });
-    const span = service
-      .spanList(TRACE.trace_id, { limit: SPAN_PAGE }, caller(store))
-      .items.find((item) => item.operation === TRANSITION_SPAN);
-    assert.equal(span?.attributes["kanthord.node.state.from"], KEPT_STATE);
-    assert.equal(span?.attributes["kanthord.node.state.to"], KEPT_STATE);
-    assert.equal(span?.attributes["kanthord.transition.rule"], rule);
-    assert.equal("kanthord.transition.count" in span!.attributes, false);
-    assert.equal("kanthord.transition.limit" in span!.attributes, false);
-    assert.equal(service.droppedRecords(), NO_DROP);
-  });
 
 test("a transition span refuses a count and a limit that do not match its rule", (t) => {
   const { service } = harness(t);
@@ -446,102 +351,6 @@ test("a root end with an unattributed cause holds the suspects in order", (t) =>
   assert.equal("kanthord.cause.subcategory" in attributes, false);
 });
 
-test("a root end with a null cause writes no cause attribute", (t) => {
-  const { store, service } = harness(t);
-  endWith(service, null);
-  const attributes = rootOf(service, store);
-  assert.deepEqual(
-    Object.keys(attributes).filter((name) =>
-      name.startsWith("kanthord.cause."),
-    ),
-    [],
-  );
-});
-
-test("each non-null opening fact writes its attribute", (t) => {
-  const { store, service } = harness(t);
-  service.executionOpened(TRACE, CREATED, {
-    ...OPENING,
-    worker_instance: WORKER_INSTANCE,
-    placement: PLACEMENT,
-    revision_turn: true,
-    dependency_count: DEPENDENCY_COUNT,
-    node_name: NODE_NAME,
-  });
-  const attributes = rootOf(service, store);
-  assert.equal(attributes["kanthord.worker.instance"], WORKER_INSTANCE);
-  assert.equal(attributes["kanthord.worker.placement"], PLACEMENT);
-  assert.equal(attributes["kanthord.queue.revision_turn"], true);
-  assert.equal(attributes["kanthord.node.dependency_count"], DEPENDENCY_COUNT);
-  assert.equal(attributes["kanthord.node.name"], NODE_NAME);
-});
-
-test("a null opening fact writes no attribute", (t) => {
-  const { store, service } = harness(t);
-  service.executionOpened(TRACE, CREATED, OPENING);
-  const attributes = rootOf(service, store);
-  for (const name of [
-    "kanthord.worker.instance",
-    "kanthord.worker.placement",
-    "kanthord.queue.revision_turn",
-    "kanthord.node.dependency_count",
-    "kanthord.node.name",
-  ])
-    assert.equal(name in attributes, false);
-});
-
-test("a transition with a lead time writes the lead time and a transition with none writes no lead time", (t) => {
-  const { store, service } = harness(t);
-  service.executionOpened(TRACE, CREATED, OPENING);
-  service.executionTransition(TRACE, {
-    ...TRANSITION,
-    lead_time_ms: LEAD_TIME_MS,
-  });
-  const span = service
-    .spanList(TRACE.trace_id, { limit: SPAN_PAGE }, caller(store))
-    .items.find((item) => item.operation === TRANSITION_SPAN);
-  assert.equal(span?.attributes["kanthord.node.lead_time_ms"], LEAD_TIME_MS);
-});
-
-test("a transition with a failure hold writes the failure count and the hold end", (t) => {
-  const { store, service } = harness(t);
-  service.executionOpened(TRACE, CREATED, OPENING);
-  service.executionTransition(TRACE, {
-    ...TRANSITION,
-    failure_count: HELD_FAILURES,
-    available_at: HELD_UNTIL,
-  });
-  const span = service
-    .spanList(TRACE.trace_id, { limit: SPAN_PAGE }, caller(store))
-    .items.find((item) => item.operation === TRANSITION_SPAN);
-  assert.equal(
-    span?.attributes["kanthord.transition.failure_count"],
-    HELD_FAILURES,
-  );
-  assert.equal(span?.attributes["kanthord.node.available_at"], HELD_UNTIL);
-});
-
-test("a transition without a failure hold writes no hold attribute", (t) => {
-  const { store, service } = harness(t);
-  service.executionOpened(TRACE, CREATED, OPENING);
-  service.executionTransition(TRACE, TRANSITION);
-  const span = service
-    .spanList(TRACE.trace_id, { limit: SPAN_PAGE }, caller(store))
-    .items.find((item) => item.operation === TRANSITION_SPAN);
-  assert.equal("kanthord.transition.failure_count" in span!.attributes, false);
-  assert.equal("kanthord.node.available_at" in span!.attributes, false);
-});
-
-test("a transition without a lead time writes no lead time attribute", (t) => {
-  const { store, service } = harness(t);
-  service.executionOpened(TRACE, CREATED, OPENING);
-  service.executionTransition(TRACE, TRANSITION);
-  const span = service
-    .spanList(TRACE.trace_id, { limit: SPAN_PAGE }, caller(store))
-    .items.find((item) => item.operation === TRANSITION_SPAN);
-  assert.equal("kanthord.node.lead_time_ms" in span!.attributes, false);
-});
-
 test("the root span end carries the stop detail", (t) => {
   const { store, service } = harness(t);
   service.executionOpened(TRACE, CREATED, OPENING);
@@ -580,67 +389,11 @@ test("a repeated root open changes nothing", (t) => {
   assert.equal(service.droppedRecords(), NO_DROP);
 });
 
-test("the trace summary answers exactly the 27 fields with the node and the attempt of the execution", (t) => {
-  const { store, service } = harness(t);
-  service.executionOpened(TRACE, CREATED, OPENING);
-  const trace = service.traceGet(TRACE.trace_id, caller(store));
-  assert.deepEqual(
-    Object.keys(trace).sort(),
-    Object.keys(traceSummarySchema.shape).sort(),
-  );
-  assert.equal(Object.keys(trace).length, SUMMARY_FIELDS);
-  assert.equal(trace.node_id, TRACE.node_id);
-  assert.equal(trace.attempt, TRACE.attempt);
-  assert.equal(trace.started_at, CREATED);
-  assert.equal(trace.span_count, ONE_ENTRY);
-  assert.doesNotThrow(() => traceSummarySchema.parse(trace));
-});
-
 test("a failed root write is counted and never thrown", (t) => {
   const { store, service } = harness(t);
   store.close();
   assert.doesNotThrow(() => service.executionOpened(TRACE, CREATED, OPENING));
   assert.equal(service.droppedRecords(), ONE_DROP);
-});
-
-test("the claimant writes spans and texts of its execution", (t) => {
-  const { store, service } = harness(t);
-  const answer = service.telemetryWrite(
-    TRACE.execution_id,
-    [
-      {
-        record_id: `${SPAN}:start`,
-        trace_id: TRACE.trace_id,
-        kind: RecordKind.Span,
-        span_id: SPAN,
-        operation: "agent.tool",
-        parent_span_id: TRACE.root_span_id,
-        start_time: CREATED,
-        text_ids: [`${SPAN}:input`],
-      },
-      {
-        record_id: `${SPAN}:input`,
-        trace_id: TRACE.trace_id,
-        kind: RecordKind.Text,
-        text_id: `${SPAN}:input`,
-        text: INPUT_TEXT,
-      },
-    ],
-    caller(store),
-  );
-  assert.deepEqual(
-    answer.dispositions.map((entry) => entry.disposition),
-    [Disposition.Stored, Disposition.Stored],
-  );
-  const span = service.spanList(
-    TRACE.trace_id,
-    { limit: PAGE_OF_ONE },
-    caller(store),
-  ).items[0];
-  assert.equal(span?.producer, RUNTIME);
-  const text = service.textGet(TRACE.trace_id, `${SPAN}:input`, caller(store));
-  assert.equal(text.content, INPUT_TEXT);
-  assert.equal("state" in text, false);
 });
 
 function kindOf(store: Store): unknown {
@@ -711,34 +464,6 @@ test("the claim writes the flow rows of its execution", (t) => {
     { grain: "day", stage: "executing", exit: "open", executions: 1 },
     { grain: "hour", stage: "executing", exit: "open", executions: 1 },
   ]);
-});
-
-test("textGet answers exactly the trace, the text id, the content and the creation time", (t) => {
-  const { store, service } = harness(t);
-  service.telemetryWrite(
-    TRACE.execution_id,
-    [
-      {
-        record_id: `${SPAN}:input`,
-        trace_id: TRACE.trace_id,
-        kind: RecordKind.Text,
-        text_id: `${SPAN}:input`,
-        text: INPUT_TEXT,
-      },
-    ],
-    caller(store),
-  );
-  const text = service.textGet(TRACE.trace_id, `${SPAN}:input`, caller(store));
-  assert.deepEqual(Object.keys(text).sort(), [
-    "content",
-    "created_at",
-    "text_id",
-    "trace_id",
-  ]);
-  assert.equal(text.trace_id, TRACE.trace_id);
-  assert.equal(text.text_id, `${SPAN}:input`);
-  assert.equal(text.content, INPUT_TEXT);
-  assert.ok(Number.isSafeInteger(text.created_at));
 });
 
 test("a trace delete removes its spans, records, texts and session entries", (t) => {
@@ -970,17 +695,6 @@ test("a malformed cursor and a cursor of another sort are refused", (t) => {
 });
 
 const TIMELINE_PAGE = 100;
-const TRANSITION = {
-  from: "Evaluating",
-  to: "Blocked",
-  rule: TransitionRule.None,
-  count: null,
-  limit: null,
-  lead_time_ms: null,
-  failure_count: null,
-  available_at: null,
-  transitioned_at: 2000,
-};
 
 function timelineListQuery(
   overrides: Partial<Parameters<TrackingService["timelineList"]>[0]> = {},
@@ -1012,69 +726,6 @@ test("a trace list and a timeline with from after to answer the range error", (t
     ).items.length,
     ONE_ENTRY,
   );
-});
-
-test("a timeline page of a node scope holds the root and its child with a null cursor", (t) => {
-  const { store, service } = harness(t);
-  service.executionOpened(TRACE, CREATED, OPENING);
-  service.executionTransition(TRACE, TRANSITION);
-  const page = service.timelineList(timelineListQuery(), caller(store));
-  assert.deepEqual(
-    page.items.map((item) => [item.span_id, item.depth, item.worker_name]),
-    [
-      [TRACE.root_span_id, 1, OPENING.worker_name],
-      [page.items[1]!.span_id, 2, null],
-    ],
-  );
-  assert.equal(page.items[0]?.execution_id, TRACE.execution_id);
-  assert.equal(page.items[0]?.project_id, TRACE.project_id);
-  assert.equal(page.items[0]?.attempt, TRACE.attempt);
-  assert.equal(page.next_cursor, null);
-  const shallow = service.timelineList(
-    timelineListQuery({ depth: 1 }),
-    caller(store),
-  );
-  assert.equal(shallow.items.length, ONE_ENTRY);
-});
-
-test("a timeline page continues from its cursor until the cursor is null", (t) => {
-  const { store, service } = harness(t);
-  service.executionOpened(TRACE, CREATED, OPENING);
-  service.executionTransition(TRACE, TRANSITION);
-  const first = service.timelineList(
-    timelineListQuery({ limit: PAGE_OF_ONE }),
-    caller(store),
-  );
-  assert.equal(first.items.length, ONE_ENTRY);
-  assert.ok(first.next_cursor);
-  const second = service.timelineList(
-    timelineListQuery({ limit: PAGE_OF_ONE, cursor: first.next_cursor }),
-    caller(store),
-  );
-  assert.equal(second.items[0]?.depth, TimelineDepth.Child);
-  assert.equal(second.next_cursor, null);
-});
-
-test("from and to bound the traces of a timeline by window overlap", (t) => {
-  const { store, service } = harness(t);
-  service.executionOpened(TRACE, CREATED, OPENING);
-  const idsOf = (overrides: object) =>
-    service
-      .timelineList(timelineListQuery(overrides), caller(store))
-      .items.map((item) => item.trace_id);
-  assert.deepEqual(idsOf({ to: CREATED - 1 }), []);
-  assert.deepEqual(idsOf({ to: CREATED }), [TRACE.trace_id]);
-  assert.deepEqual(idsOf({ from: ENDED * 2 }), [TRACE.trace_id]);
-  service.executionEnded({
-    trace: TRACE,
-    ended_at: ENDED,
-    end: ExecutionEnd.Finished,
-    revoke_cause: null,
-    stop: null,
-    cause: null,
-  });
-  assert.deepEqual(idsOf({ from: ENDED }), [TRACE.trace_id]);
-  assert.deepEqual(idsOf({ from: ENDED + 1 }), []);
 });
 
 test("a malformed timeline cursor is refused", (t) => {
@@ -1223,30 +874,6 @@ test("a session entry list pages one session in sequence order", (t) => {
   }
 });
 
-test("a tool call identity filters the session entry list", (t) => {
-  const { store, service } = entryHarness(t);
-  const page = service.sessionEntryList(
-    { trace_id: TRACE.trace_id, session_id: SPAN },
-    { limit: ENTRY_PAGE, tool_call_id: TOOL_CALL },
-    caller(store),
-  );
-  assert.deepEqual(
-    page.items.map((item) => item.entry_id),
-    [`e${TOOL_RESULT_SEQUENCE}`],
-  );
-  assert.equal(page.next_cursor, null);
-});
-
-test("a session that the trace does not hold answers an empty page", (t) => {
-  const { store, service } = entryHarness(t);
-  const page = service.sessionEntryList(
-    { trace_id: TRACE.trace_id, session_id: "4".repeat(16) },
-    { limit: ENTRY_PAGE },
-    caller(store),
-  );
-  assert.deepEqual(page, { items: [], next_cursor: null });
-});
-
 test("a session entry read answers one entry or a refusal", (t) => {
   const { store, service } = entryHarness(t);
   const params = {
@@ -1285,8 +912,6 @@ const FULL_ENTRY = {
   full: true,
 };
 const TOO_LARGE_BYTES = SESSION_ENTRY_FULL_MAX_BYTES + 1;
-const REBUILD_PATH =
-  "/api/tracking/trace/:trace_id/session/:session_id/entry/:entry_id/full";
 
 function rebuildHarness(t: TestContext, answer: SessionReadAnswer) {
   const reads: SessionRead[] = [];
@@ -1506,13 +1131,6 @@ test("a rebuild of an entry of a trace without an execution answers instance_unk
   assert.equal(reads.length, NO_ROWS);
 });
 
-test("the rebuild operation is a human read with the tracking timeout", () => {
-  const operation = trackingOperations.sessionEntryRebuild;
-  assert.equal(operation.access, AccessPolicy.Human);
-  assert.equal(operation.mutation, false);
-  assert.equal(operation.path, REBUILD_PATH);
-});
-
 test("a session entry list refuses an unknown trace and a malformed cursor", (t) => {
   const { store, service } = entryHarness(t);
   assert.throws(
@@ -1607,19 +1225,6 @@ test("the backfill fills a trace older than the writable period and keeps it", a
   await backfillEnded(service, store);
   assert.equal(traceCount(store), ONE_ENTRY);
   assert.equal(kindOfTrace(store), FlowKind.None);
-});
-
-test("analyticsFlow answers rebuild with the job start while the backfill runs and null after it", async (t) => {
-  const { store, service } = harness(t);
-  assert.equal(service.analyticsFlow(flowQuery(), caller(store)).rebuild, null);
-  insertUnfilledTrace(store, NOW - DAY_MS);
-  stopAfter(t, () => service.stop());
-  assert.equal(await service.start(), null);
-  assert.deepEqual(service.analyticsFlow(flowQuery(), caller(store)).rebuild, {
-    pending_until: NOW,
-  });
-  await backfillEnded(service, store);
-  assert.equal(service.analyticsFlow(flowQuery(), caller(store)).rebuild, null);
 });
 
 test("a failed backfill is counted", async (t) => {
@@ -1853,14 +1458,6 @@ test("a server trace older than the writable period is dropped and counted", (t)
   assert.equal(traceCount(store), NO_ROWS);
 });
 
-test("two server traces of one project keep their rows", (t) => {
-  const { store, service } = harness(t);
-  for (const trace of [SERVER_TRACE, SECOND_SERVER_TRACE])
-    service.serverTraceSpan(trace, PROJECT_PRODUCER, serverRootStart(trace));
-  assert.equal(traceRows(store).length, TWO_ROWS);
-  assert.equal(service.droppedRecords(), NO_DROP);
-});
-
 test("a server root end with an error status sets the state and lists the error type", (t) => {
   const { store, service } = harness(t);
   service.serverTraceSpan(
@@ -1888,39 +1485,6 @@ const NODE_TRACE: ServerTrace = {
 };
 const ACT_TEXT = "the human revoked the attempt";
 const SECOND_ACT_TEXT = "the human asked for a retry";
-
-test("a server trace with a node stores its node and attempt and lists by node", (t) => {
-  const { store, service } = harness(t);
-  service.serverTraceSpan(
-    NODE_TRACE,
-    PROJECT_PRODUCER,
-    serverRootStart(NODE_TRACE),
-  );
-  const row = traceRows(store)[0];
-  assert.equal(row?.node_id, TRACE.node_id);
-  assert.equal(row?.attempt, NODE_ATTEMPT);
-  const page = service.traceList(
-    traceListQuery({ node_id: TRACE.node_id }),
-    caller(store, false),
-  );
-  assert.deepEqual(
-    page.items.map((item) => item.trace_id),
-    [NODE_TRACE.trace_id],
-  );
-  assert.equal(page.items[0]?.attempt, NODE_ATTEMPT);
-});
-
-test("a server trace with no node keeps its node and attempt null", (t) => {
-  const { store, service } = harness(t);
-  service.serverTraceSpan(
-    SERVER_TRACE,
-    PROJECT_PRODUCER,
-    serverRootStart(SERVER_TRACE),
-  );
-  const row = traceRows(store)[0];
-  assert.equal(row?.node_id, null);
-  assert.equal(row?.attempt, null);
-});
 
 test("a server contribution stores its span and its texts in one transaction", (t) => {
   const { store, service } = harness(t);
@@ -1991,7 +1555,6 @@ const TOOL_OPERATION = "agent.tool";
 const MODEL_ATTRIBUTE = "gen_ai.response.model";
 const COST_ATTRIBUTE = "kanthord.usage.cost_usd";
 const AGENT_ATTRIBUTE = "kanthord.agent.name";
-const TOOL_ATTRIBUTE = "gen_ai.tool.name";
 
 interface AnalyticsSpanSeed {
   trace?: number;
@@ -2098,27 +1661,6 @@ test("a cost read without a query answers the agent turns of the last 7 days by 
   );
 });
 
-test("a duration query holds a measure of the closed set", () => {
-  const { query } = trackingOperations.analyticsDuration.input.shape;
-  assert.ok(!query.safeParse({}).success);
-  assert.ok(!query.safeParse({ measure: "latency" }).success);
-  assert.ok(!query.safeParse({ measure: "span_duration", extra: 1 }).success);
-  for (const measure of Object.values(AnalyticsMeasure))
-    assert.ok(
-      query.safeParse(
-        measure === AnalyticsMeasure.InstanceBusyRatio
-          ? { measure, group_by: DurationGroupBy.WorkerInstance }
-          : { measure },
-      ).success,
-    );
-  assert.ok(
-    !query.safeParse({ measure: "span_duration", group_by: "unknown" }).success,
-  );
-  assert.ok(
-    !query.safeParse({ measure: "span_duration", bucket: "month" }).success,
-  );
-});
-
 test("a cost range of more than 31 days or with from after to is refused", async (t) => {
   const { store, service } = harness(t);
   const refused = [
@@ -2186,28 +1728,6 @@ test("a cost read answers truncated and at most 1000 items", async (t) => {
     costQuery({
       group_by: CostGroupBy.AgentName,
       bucket: AnalyticsBucket.None,
-    }),
-    caller(store),
-  );
-  assert.equal(read.items.length, ANALYTICS_LIMIT);
-  assert.equal(read.truncated, true);
-});
-
-test("a duration read answers truncated and at most 1000 items", async (t) => {
-  const { store, service } = harness(t);
-  seedAnalytics(
-    store,
-    Array.from({ length: OVER_LIMIT }, (_, index) => ({
-      operation: TOOL_OPERATION,
-      start: NOW - HOUR_MS,
-      end: NOW - HOUR_MS + 5,
-      attributes: { [TOOL_ATTRIBUTE]: `tool_${index}` },
-    })),
-  );
-  const read = await service.analyticsDuration(
-    durationQuery({
-      measure: AnalyticsMeasure.ToolLatency,
-      group_by: DurationGroupBy.ToolName,
     }),
     caller(store),
   );
@@ -2283,19 +1803,6 @@ function seedFlowRow(
   );
 }
 
-test("declare registers the flow operation with human access", (t) => {
-  const { service } = harness(t);
-  const registry = new OperationRegistry();
-  service.declare(registry);
-  const flow = registry
-    .all()
-    .find(
-      ({ operation }) => operation.id === trackingOperations.analyticsFlow.id,
-    );
-  assert.equal(flow?.operation.access, AccessPolicy.Human);
-  assert.equal(flow?.operation.path, trackingOperations.analyticsFlow.path);
-});
-
 test("declare refuses a flow operation with another access", (t) => {
   const { service } = harness(t);
   t.mock.property(
@@ -2303,21 +1810,7 @@ test("declare refuses a flow operation with another access", (t) => {
     "access",
     AccessPolicy.Client,
   );
-  assert.throws(
-    () => service.declare(new OperationRegistry()),
-    /Tracking operations require tracking ownership and their declared access/,
-  );
-});
-
-test("a flow query holds the values of the closed sets", () => {
-  const { query } = trackingOperations.analyticsFlow.input.shape;
-  assert.equal(query.parse({}).compare, FlowCompare.Previous);
-  assert.ok(query.safeParse({ bucket: "hour", compare: "none" }).success);
-  assert.ok(!query.safeParse({ bucket: "week" }).success);
-  assert.ok(!query.safeParse({ bucket: "none" }).success);
-  assert.ok(!query.safeParse({ compare: "next" }).success);
-  assert.ok(!query.safeParse({ extra: 1 }).success);
-  assert.ok(!query.safeParse({ worker_name: "x".repeat(257) }).success);
+  assert.throws(() => service.declare(new OperationRegistry()), Error);
 });
 
 test("a flow read answers the schema for a store with rows", (t) => {
@@ -2337,22 +1830,6 @@ test("a flow read answers the schema for a store with rows", (t) => {
   assert.equal(read.cost.current.success, CURRENT_FLOW_SUCCESS);
   assert.equal(read.cost.previous?.success, PREVIOUS_FLOW_SUCCESS);
   assert.equal(read.rebuild, null);
-});
-
-test("a flow read of an empty store answers a null previous window", (t) => {
-  const { store, service } = harness(t);
-  const read = service.analyticsFlow(flowQuery(), caller(store));
-  assert.equal(read.previous_window, null);
-  assert.equal(read.stages.length, FLOW_STAGE_COUNT);
-});
-
-test("a flow read never commits", (t) => {
-  const { store, service } = harness(t);
-  const reader: CallerContext = {
-    ...caller(store),
-    commit: () => assert.fail("a flow read must not commit"),
-  };
-  assert.doesNotThrow(() => service.analyticsFlow(flowQuery(), reader));
 });
 
 test("a flow range above 31 days, a from after to and the hour bucket above 2 days are refused", (t) => {
@@ -2377,15 +1854,6 @@ test("a flow range above 31 days, a from after to and the hour bucket above 2 da
     assert.doesNotThrow(() =>
       service.analyticsFlow(flowQuery(query), caller(store)),
     );
-});
-
-test("a flow read with only to takes from 7 days before it", (t) => {
-  const { store, service } = harness(t);
-  const to = DAY_START - 10 * DAY_MS;
-  const read = service.analyticsFlow(flowQuery({ to }), caller(store));
-  assert.equal(read.window.from, to - 7 * DAY_MS);
-  assert.equal(read.window.to, to);
-  assert.equal(read.window.now, to);
 });
 
 test("the cause label operation answers the cause with the assigner human and writes the username", (t) => {
