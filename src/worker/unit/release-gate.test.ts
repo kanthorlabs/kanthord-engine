@@ -464,12 +464,30 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
   test("the next prepare gives a release tree that a crash left back to the pool", async (t) => {
     const h = await fixture(t, [], []);
     const key = h.input.workspaces.nodeKey(h.input.claim.node_id);
-    await simpleGit().clone(h.root, join(releaseKey(h), h.checkouts[0]!.name));
+    const tree = join(releaseKey(h), h.checkouts[0]!.name);
+    await simpleGit().clone(h.root, tree);
+    await simpleGit(tree).remote([
+      "set-url",
+      "origin",
+      h.input.setup.repositories[0]!.address,
+    ]);
     mkdirSync(join(releaseKey(h), LEFTOVER), { recursive: true });
     h.input.workspaces.release(key, WorkspaceKind.Node);
     await prepareStepsWorkspace(h.input, h.run);
     assert.equal(existsSync(releaseKey(h)), false);
     assert.equal(freeCommandTrees(h).length, ONE_TREE);
+  });
+
+  test("the next prepare deletes a release tree that a crash left when its binding holds another address", async (t) => {
+    const h = await fixture(t, [], []);
+    const key = h.input.workspaces.nodeKey(h.input.claim.node_id);
+    const tree = join(releaseKey(h), h.checkouts[0]!.name);
+    await simpleGit().clone(h.root, tree);
+    await simpleGit(tree).remote(["set-url", "origin", temporary(t)]);
+    h.input.workspaces.release(key, WorkspaceKind.Node);
+    await prepareStepsWorkspace(h.input, h.run);
+    assert.equal(existsSync(releaseKey(h)), false);
+    assert.deepEqual(h.input.workspaces.pool.trees(), []);
   });
 
   test("the next prepare deletes a release tree whose .git is not a directory", async (t) => {

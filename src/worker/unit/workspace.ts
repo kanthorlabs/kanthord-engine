@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   appendFileSync,
   existsSync,
+  lstatSync,
   readFileSync,
   rmSync,
   utimesSync,
@@ -17,14 +18,15 @@ import type { Context } from "../../kernel/context.ts";
 import type { ExecutionSetup, RepositoryTransport } from "../contract.ts";
 import type { SshAccess, SshSigner } from "../../repository/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
-import { cleanExcludes } from "./local-git.ts";
+import { cleanExcludes, originAddress } from "./local-git.ts";
 import { readSetupRecord } from "./setup-record.ts";
 import { POOL_DIRECTORY, PoolClass, TreePool } from "./tree-pool.ts";
 import type { HandoverSshIdentity } from "../../custody/contract.ts";
 
 export const WORKSPACES_DIRECTORY = "workspaces";
 export const SCRATCH_DIRECTORY = ".kanthord-scratch/";
-const GIT_EXCLUDE = [".git", "info", "exclude"];
+const GIT_DIRECTORY = ".git";
+const GIT_EXCLUDE = [GIT_DIRECTORY, "info", "exclude"];
 export const CHECKOUTS_DIRECTORY = "checkouts";
 export const RELEASE_DIRECTORY = "release";
 export const EVIDENCE_DIRECTORY = "evidence";
@@ -165,7 +167,8 @@ export class WorkspaceRoot {
     try {
       ensureDirectory(key);
       this.touch(key);
-      this.giveReleaseTrees(key, input.nodeId, input.repositories);
+      if (existsSync(join(key, RELEASE_DIRECTORY)))
+        await this.giveReleaseTrees(key, input, end);
       const checkouts: WorkspaceCheckout[] = [];
       for (const repository of input.repositories) {
         const directory = this.nodeDirectory(input.nodeId, repository.name);
@@ -223,18 +226,40 @@ export class WorkspaceRoot {
       throw error;
     }
   }
-  private giveReleaseTrees(
+  private async giveReleaseTrees(
     key: string,
-    nodeId: string,
-    repositories: readonly WorkspaceRepository[],
-  ): void {
+    input: Preparation & {
+      env: NodeJS.ProcessEnv;
+      nodeId: string;
+      repositories: readonly WorkspaceRepository[];
+    },
+    end: number,
+  ): Promise<void> {
     const release = join(key, RELEASE_DIRECTORY);
-    for (const repository of repositories)
-      this.pool.giveBack(
-        { address: repository.address, poolClass: PoolClass.Command },
-        join(release, bindingNameSchema.parse(repository.name)),
-        nodeId,
-      );
+    for (const repository of input.repositories) {
+      const tree = join(release, bindingNameSchema.parse(repository.name));
+      if (
+        !lstatSync(join(tree, GIT_DIRECTORY), {
+          throwIfNoEntry: false,
+        })?.isDirectory()
+      )
+        continue;
+      const address = await originAddress({
+        env: input.env,
+        directory: tree,
+        context: input.context,
+        deadlineMs: end - performance.now(),
+      }).catch((error: unknown) => {
+        if (input.context.signal.aborted) throw error;
+        return null;
+      });
+      if (address === repository.address)
+        this.pool.giveBack(
+          { address: repository.address, poolClass: PoolClass.Command },
+          tree,
+          input.nodeId,
+        );
+    }
     rmSync(release, { recursive: true, force: true });
   }
   async prepareSnapshots(
