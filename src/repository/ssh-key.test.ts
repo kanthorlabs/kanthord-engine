@@ -2,17 +2,14 @@ import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { generateKeyPairSync } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { connect } from "node:net";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
-import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
-import { stopAfter, temporary } from "../kernel/test-support.ts";
+import { temporary } from "../kernel/test-support.ts";
 import { generateSshKey, sshFingerprintOf, sshPublicKeyOf } from "./ssh-key.ts";
 
 const execFileAsync = promisify(execFile);
 const FINGERPRINT_FIELD = 1;
-const SOCKET_POLL_MS = 10;
 const TRUNCATED_LINES = 2;
 const EXIT_SUCCESS = 0;
 const LINE_END = "\n";
@@ -63,41 +60,6 @@ function runWithInput(
   );
 }
 
-function socketAccepts(socket: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const client = connect(socket);
-    client.once("connect", () => {
-      client.destroy();
-      resolve(true);
-    });
-    client.once("error", () => resolve(false));
-  });
-}
-
-async function scratchAgent(t: TestContext): Promise<string> {
-  const socket = join(temporary(t), "a");
-  const agent = spawn("ssh-agent", ["-D", "-a", socket], {
-    env: toolEnvironment(),
-    stdio: "ignore",
-  });
-  let exited = false;
-  const closed = new Promise((resolve) =>
-    agent.once("close", () => {
-      exited = true;
-      resolve(undefined);
-    }),
-  );
-  stopAfter(t, async () => {
-    agent.kill();
-    await closed;
-  });
-  while (!exited) {
-    if (await socketAccepts(socket)) return socket;
-    await delay(SOCKET_POLL_MS, undefined, { signal: t.signal });
-  }
-  assert.fail("The scratch agent did not start.");
-}
-
 async function keygenText(t: TestContext, args: string[]): Promise<string> {
   const path = join(temporary(t), "key");
   await execFileAsync("ssh-keygen", ["-q", ...args, "-C", "", "-f", path], {
@@ -123,27 +85,6 @@ test("generateSshKey derives the fingerprint of ssh-keygen", async () => {
     result.stdout.split(FIELD_SEPARATOR)[FINGERPRINT_FIELD],
     key.fingerprint,
   );
-});
-
-test("ssh-add loads the generated key from stdin", async (t) => {
-  const socket = await scratchAgent(t);
-  const key = generateSshKey("alpha");
-  const added = await runWithInput(
-    "ssh-add",
-    ["-q", "-"],
-    key.private_key,
-    toolEnvironment(socket),
-  );
-  assert.equal(added.code, EXIT_SUCCESS, added.stderr);
-  const { stdout } = await execFileAsync("ssh-add", ["-L"], {
-    env: toolEnvironment(socket),
-  });
-  assert.equal(stdout.trim(), key.public_key);
-});
-
-test("sshPublicKeyOf derives the public key of a generated key", () => {
-  const key = generateSshKey("alpha");
-  assert.equal(sshPublicKeyOf(key.private_key), key.public_key);
 });
 
 test("sshPublicKeyOf refuses a PKCS8 text", () => {

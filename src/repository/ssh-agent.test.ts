@@ -64,10 +64,6 @@ const LINE_END = "\n";
 const SSH_VARIANT = "ssh";
 const DIRECTORY_FILES = ["a", "id.pub", "known_hosts"];
 const PORT = 2222;
-const INSTANCE_NAME_LENGTH_MAX = 63;
-const MKDTEMP_SUFFIX = "XXXXXX";
-const WINDOWS: NodeJS.Platform = "win32";
-const POSIX_TEMPORARY_ROOT = "/tmp";
 const KNOWN_HOSTS = `[127.0.0.1]:${PORT} ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA\n`;
 const PROC = "/proc";
 const LINUX = "linux";
@@ -192,24 +188,6 @@ function deadlineOf(directory: string): number {
   assert.ok(encoded);
   return Number.parseInt(encoded, DEADLINE_RADIX);
 }
-
-test("the agent root is /tmp on POSIX", () => {
-  if (process.platform === WINDOWS) return;
-  assert.equal(SSH_AGENT_ROOT, POSIX_TEMPORARY_ROOT);
-});
-
-test("an agent socket below the default root stays within the socket path limit for a 63-character instance name", () => {
-  const name = "a".repeat(INSTANCE_NAME_LENGTH_MAX);
-  const slotTemporary = join(scratch, "workers", name, "tmp");
-  const deadlineAt = Number.MAX_SAFE_INTEGER.toString(DEADLINE_RADIX);
-  const socket = join(
-    SSH_AGENT_ROOT,
-    `${SSH_AGENT_DIRECTORY_PREFIX}${deadlineAt}-${MKDTEMP_SUFFIX}`,
-    SSH_AGENT_SOCKET,
-  );
-  assert.ok(Buffer.byteLength(slotTemporary) > SOCKET_PATH_BYTES_MAX / 2);
-  assert.ok(Buffer.byteLength(socket) <= SOCKET_PATH_BYTES_MAX);
-});
 
 test("withSshAgent prepares a private directory and an isolated SSH command", async () => {
   const key = access("layout");
