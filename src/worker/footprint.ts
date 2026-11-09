@@ -64,6 +64,16 @@ interface SlotImageItem {
   readonly live: boolean;
 }
 
+interface StoreFields {
+  readonly instance_names: string[];
+  readonly runtime_store: boolean;
+}
+
+interface StoreMeasureScope {
+  readonly info: RuntimeStoreInfo;
+  readonly fields: StoreFields;
+}
+
 const systemDevice: StoreDevice = {
   stat: (path) => fileStat(path),
   statfs: (path) => fileStatfs(path),
@@ -78,6 +88,18 @@ export function repositoryOf(reference: string): string {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function unmeasuredStore(
+  fields: StoreFields,
+  message: string,
+): FootprintMeasure {
+  return failedMeasure(
+    FootprintKind.Disk,
+    WorkerFootprintErrorCode.RuntimeStoreUnmeasured,
+    message,
+    { ...fields, item_key: RUNTIME_STORE_DEVICE },
+  );
 }
 
 export class WorkerFootprint implements FootprintOwner {
@@ -202,61 +224,64 @@ export class WorkerFootprint implements FootprintOwner {
     const instances = [...this.dependencies.containerInstances()].sort();
     if (!instances.length) return [];
     const fields = { instance_names: instances, runtime_store: true };
-    const unmeasured = (message: string) =>
-      failedMeasure(
-        FootprintKind.Disk,
-        WorkerFootprintErrorCode.RuntimeStoreUnmeasured,
-        message,
-        { ...fields, item_key: RUNTIME_STORE_DEVICE },
-      );
     let info: RuntimeStoreInfo | null | undefined;
     try {
       info = await this.dependencies.host()?.runtimeStore(signal);
     } catch (error) {
-      return [unmeasured(messageOf(error))];
+      return [unmeasuredStore(fields, messageOf(error))];
     }
     if (info === null || info === undefined)
-      return [unmeasured("No container runtime answers.")];
-    if (info.runtime === ContainerRuntime.Podman) {
-      const { graph_root, graph_root_allocated, graph_root_used } = info;
-      if (
-        graph_root === null ||
-        graph_root_allocated === null ||
-        graph_root_used === null
-      )
-        return [unmeasured("podman info answers no graph root size.")];
-      return [
-        emptyMeasure(FootprintKind.Disk, {
-          ...fields,
-          item_key:
-            (await this.deviceKeyOf(graph_root)) ?? RUNTIME_STORE_DEVICE,
-          total_bytes: graph_root_allocated,
-          free_bytes: Math.max(0, graph_root_allocated - graph_root_used),
-        }),
-      ];
-    }
+      return [unmeasuredStore(fields, "No container runtime answers.")];
+    const scope: StoreMeasureScope = { info, fields };
+    if (info.runtime === ContainerRuntime.Podman)
+      return [await this.measurePodmanStore(scope)];
+    return [await this.measureDockerStore(scope)];
+  }
+
+  private async measurePodmanStore(
+    scope: StoreMeasureScope,
+  ): Promise<FootprintMeasure> {
+    const { info, fields } = scope;
+    const { graph_root, graph_root_allocated, graph_root_used } = info;
+    if (
+      graph_root === null ||
+      graph_root_allocated === null ||
+      graph_root_used === null
+    )
+      return unmeasuredStore(fields, "podman info answers no graph root size.");
+    return emptyMeasure(FootprintKind.Disk, {
+      ...fields,
+      item_key: (await this.deviceKeyOf(graph_root)) ?? RUNTIME_STORE_DEVICE,
+      total_bytes: graph_root_allocated,
+      free_bytes: Math.max(0, graph_root_allocated - graph_root_used),
+    });
+  }
+
+  private async measureDockerStore(
+    scope: StoreMeasureScope,
+  ): Promise<FootprintMeasure> {
+    const { info, fields } = scope;
     if (
       this.dependencies.platform !== LINUX ||
       info.operating_system === DOCKER_DESKTOP ||
       info.docker_root_dir === null
     )
-      return [
-        unmeasured("The Docker root directory is not on the server host."),
-      ];
+      return unmeasuredStore(
+        fields,
+        "The Docker root directory is not on the server host.",
+      );
     try {
       const space = await this.device.statfs(info.docker_root_dir);
-      return [
-        emptyMeasure(FootprintKind.Disk, {
-          ...fields,
-          item_key:
-            (await this.deviceKeyOf(info.docker_root_dir)) ??
-            RUNTIME_STORE_DEVICE,
-          total_bytes: space.blocks * space.bsize,
-          free_bytes: space.bavail * space.bsize,
-        }),
-      ];
+      return emptyMeasure(FootprintKind.Disk, {
+        ...fields,
+        item_key:
+          (await this.deviceKeyOf(info.docker_root_dir)) ??
+          RUNTIME_STORE_DEVICE,
+        total_bytes: space.blocks * space.bsize,
+        free_bytes: space.bavail * space.bsize,
+      });
     } catch (error) {
-      return [unmeasured(messageOf(error))];
+      return unmeasuredStore(fields, messageOf(error));
     }
   }
 

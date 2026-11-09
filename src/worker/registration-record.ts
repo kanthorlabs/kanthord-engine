@@ -27,9 +27,34 @@ interface Dependencies {
   ) => InstancePlacement | null;
 }
 
+interface RecordScope {
+  tx: Transaction;
+  dependencies: Dependencies;
+}
+
 function hostedPlacement(placement: InstancePlacement | null) {
   assert.ok(placement);
   return placement;
+}
+
+function recordedPlacement(
+  scope: RecordScope,
+  instanceId: Registration["instance_id"],
+) {
+  return hostedPlacement(
+    instanceId
+      ? (scope.dependencies.instancePlacementOf?.(scope.tx, instanceId) ?? null)
+      : null,
+  );
+}
+
+function recordedInstanceName(
+  scope: RecordScope,
+  instanceId: Registration["instance_id"],
+): string | null {
+  return instanceId
+    ? (scope.dependencies.instanceNameOf?.(scope.tx, instanceId) ?? null)
+    : null;
 }
 
 export function instanceDropped(
@@ -58,6 +83,7 @@ export function registrationRecord(
   assert.ok(binding && !binding.tombstone);
   const declaration = getWorkerDeclaration(binding.worker_name);
   assert.ok(declaration);
+  const scope: RecordScope = { tx, dependencies };
   const activity = dependencies.schedulerClaims.activityOf(
     tx,
     registration.runtime_identity,
@@ -73,29 +99,18 @@ export function registrationRecord(
     host: declaration.host,
     ...(declaration.host === WorkerHost.Kanthord
       ? {
-          placement: hostedPlacement(
-            registration.instance_id
-              ? (dependencies.instancePlacementOf?.(
-                  tx,
-                  registration.instance_id,
-                ) ?? null)
-              : null,
-          ),
+          placement: recordedPlacement(scope, registration.instance_id),
         }
       : {}),
     client_id: registration.client_id,
     name: registration.name,
-    instance: registration.instance_id
-      ? (dependencies.instanceNameOf?.(tx, registration.instance_id) ?? null)
-      : null,
+    instance: recordedInstanceName(scope, registration.instance_id),
     activity: activity.activity,
     ...(activity.activity === RegistrationActivity.Executing
       ? { execution_id: activity.execution_id }
       : {}),
-    draining: instanceDropped(
-      binding,
-      registration,
-      (instanceId) => dependencies.instanceNameOf?.(tx, instanceId) ?? null,
+    draining: instanceDropped(binding, registration, (instanceId) =>
+      recordedInstanceName(scope, instanceId),
     ),
     registered: true,
   });
