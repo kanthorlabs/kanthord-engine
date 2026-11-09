@@ -434,7 +434,7 @@ const restartTemplate = fixtureTemplate(async (root) => {
   const seed = join(root, SEED_NAME);
   mkdirSync(origin);
   mkdirSync(seed);
-  await simpleGit(origin).init(true);
+  await simpleGit(origin).init(true, ["--initial-branch=main"]);
   const git = simpleGit(seed);
   await git.raw(["init", "-b", "main"]);
   const base = await commit(seed, ".gitignore", "ignored.txt\n");
@@ -863,7 +863,14 @@ test("a review preparation removes residue at the top of the review directory", 
   const key = h.reviewKey(nodeId);
   const leftover = join(key, CHECKOUTS_DIRECTORY, h.repository.name);
   mkdirSync(join(key, CHECKOUTS_DIRECTORY), { recursive: true });
-  await simpleGit().raw(["clone", "--", h.origin, leftover]);
+  await simpleGit().raw([
+    "clone",
+    "--branch",
+    h.repository.strategy.base_branch,
+    "--",
+    h.origin,
+    leftover,
+  ]);
   const tree = statSync(join(leftover, ".git")).ino;
   const residue = [
     join(key, "stray", "file"),
@@ -878,6 +885,10 @@ test("a review preparation removes residue at the top of the review directory", 
   const prepared = await h.review(nodeId, h.base);
   assert.equal(prepared.directory, leftover);
   assert.equal(statSync(join(leftover, ".git")).ino, tree);
+  assert.deepEqual(
+    h.logs.map(({ msg, fields }) => [msg, fields.purpose, fields.source]),
+    [["tree prepared", "review", "pool"]],
+  );
   for (const path of residue) assert.equal(existsSync(path), false);
   assert.deepEqual(readdirSync(key).sort(), [CHECKOUTS_DIRECTORY]);
   h.workspace.release(prepared.key, prepared.kind);
@@ -885,7 +896,6 @@ test("a review preparation removes residue at the top of the review directory", 
 
 test("a reused review tree holds the local default branch and the current origin/HEAD, as a fresh clone does", async (t) => {
   const h = await reviewFixture(t);
-  await simpleGit(h.origin).raw(["symbolic-ref", "HEAD", "refs/heads/main"]);
   const first = await h.review(createIdentity("node"), h.base);
   h.workspace.release(first.key, first.kind);
   await h.git.raw(["checkout", "-b", TRUNK_BRANCH]);
@@ -1372,7 +1382,6 @@ async function refsOf(directory: string, exclude: string) {
 
 test("a pool tree with a commit after the confirmed push starts at the same head and default branch as a fresh clone", async (t) => {
   const h = await coderFixture(t);
-  await simpleGit(h.origin).raw(["symbolic-ref", "HEAD", "refs/heads/main"]);
   const nodeId = createIdentity("node");
   const first = await h.prepare(nodeId);
   await h.commit(first.directory, "work", "pushed");

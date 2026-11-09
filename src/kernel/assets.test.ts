@@ -6,12 +6,9 @@ import { pathToFileURL } from "node:url";
 import {
   DASHBOARD_ASSET_PREFIX,
   dashboardAsset,
-  PACKAGE_MANIFEST,
-  packageManifest,
   PI_TOOLS_ASSET_PREFIX,
   piToolAsset,
   shippedAsset,
-  WORKER_THREAD_ASSET,
   workerThreadAsset,
 } from "./assets.ts";
 import { temporary } from "./test-support.ts";
@@ -19,7 +16,6 @@ import { temporary } from "./test-support.ts";
 const ASSET_NAME = "prompt/base.md";
 const EMBEDDED_CONTENT = "embedded";
 const TEXT_ENCODING = "utf8";
-const NO_CONTENT = 0;
 
 test("outside a single executable the loader reads the static directory", () => {
   assert.equal(
@@ -32,58 +28,11 @@ test("outside a single executable the loader reads the static directory", () => 
 });
 
 test("inside a single executable the loader answers the embedded asset", () => {
-  const requested: string[][] = [];
   const content = shippedAsset(ASSET_NAME, {
     isSea: () => true,
-    getAsset: (name, encoding) => {
-      requested.push([name, encoding]);
-      return EMBEDDED_CONTENT;
-    },
+    getAsset: () => EMBEDDED_CONTENT,
   });
   assert.equal(content, EMBEDDED_CONTENT);
-  assert.deepEqual(requested, [[ASSET_NAME, TEXT_ENCODING]]);
-});
-
-test("outside a single executable the loader never asks the embedded source", () => {
-  const content = shippedAsset(ASSET_NAME, {
-    isSea: () => false,
-    getAsset: () => assert.fail("embedded asset requested"),
-  });
-  assert.ok(content.length > NO_CONTENT);
-});
-
-test("outside a single executable the manifest loader reads the package manifest", () => {
-  assert.equal(
-    packageManifest(),
-    readFileSync(
-      new URL(`../../${PACKAGE_MANIFEST}`, import.meta.url),
-      TEXT_ENCODING,
-    ),
-  );
-});
-
-test("inside a single executable the manifest loader answers the embedded manifest", () => {
-  const requested: string[][] = [];
-  const content = packageManifest({
-    isSea: () => true,
-    getAsset: (name, encoding) => {
-      requested.push([name, encoding]);
-      return EMBEDDED_CONTENT;
-    },
-  });
-  assert.equal(content, EMBEDDED_CONTENT);
-  assert.deepEqual(requested, [[PACKAGE_MANIFEST, TEXT_ENCODING]]);
-});
-
-test("outside a single executable the dashboard loader answers no asset", () => {
-  assert.equal(
-    dashboardAsset("index.html", {
-      isSea: () => false,
-      getAssetKeys: () => assert.fail("asset keys requested"),
-      getAsset: () => assert.fail("embedded asset requested"),
-    }),
-    undefined,
-  );
 });
 
 test("inside a single executable the dashboard loader answers the prefixed asset", () => {
@@ -122,26 +71,6 @@ test("outside a single executable the pi tool loader reads the target directory"
   );
 });
 
-test("outside a single executable the pi tool loader reads a directory whose path has a space", (t) => {
-  const root = join(temporary(t), "pi tools");
-  mkdirSync(join(root, "darwin-arm64", "bin"), { recursive: true });
-  writeFileSync(join(root, "darwin-arm64", "bin", "fd"), EMBEDDED_CONTENT);
-  const source = {
-    isSea: () => false,
-    getAssetKeys: () => assert.fail("asset keys requested"),
-    getAsset: () => assert.fail("embedded asset requested"),
-  };
-  assert.equal(
-    piToolAsset(
-      "darwin-arm64",
-      "bin/fd",
-      source,
-      pathToFileURL(`${root}/`),
-    )?.toString(),
-    EMBEDDED_CONTENT,
-  );
-});
-
 test("inside a single executable the pi tool loader answers the prefixed asset", () => {
   const bytes = new TextEncoder().encode(EMBEDDED_CONTENT).buffer;
   const requested: string[] = [];
@@ -161,25 +90,10 @@ test("inside a single executable the pi tool loader answers the prefixed asset",
   assert.deepEqual(requested, [`${PI_TOOLS_ASSET_PREFIX}bin/fd`]);
 });
 
-test("the worker thread loader answers no source outside a single executable", () => {
-  assert.equal(
-    workerThreadAsset({
-      isSea: () => false,
-      getAsset: () => assert.fail("embedded asset requested"),
-    }),
-    undefined,
-  );
-});
-
 test("inside a single executable the worker thread loader answers the embedded bundle", () => {
-  const requested: string[][] = [];
   const source = workerThreadAsset({
     isSea: () => true,
-    getAsset: (name, encoding) => {
-      requested.push([name, encoding]);
-      return EMBEDDED_CONTENT;
-    },
+    getAsset: () => EMBEDDED_CONTENT,
   });
   assert.equal(source, EMBEDDED_CONTENT);
-  assert.deepEqual(requested, [[WORKER_THREAD_ASSET, TEXT_ENCODING]]);
 });

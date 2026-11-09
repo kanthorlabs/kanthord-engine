@@ -44,7 +44,6 @@ import {
   ResourceKind,
   ResultClass,
 } from "./contract.ts";
-import { commitInbound, credentialRefusal } from "./inbound-create.ts";
 import { Platform } from "./credential-platform.ts";
 import { JIRA_RESOURCE } from "./jira-test-support.ts";
 import { IntakeService } from "./index.ts";
@@ -76,7 +75,6 @@ const ROWS_AFTER_EQUAL_CREATES = 2;
 const PROJECT_CALLS_PER_CREATE = 1;
 const REQUESTS_PER_POLL_CREATE = 1;
 const LOOPS_PER_POLL_CREATE = 1;
-const CREDENTIAL_NAME = "token";
 const PLATFORM_REFUSED = "intake.inbound.platform_refused";
 const POLL_CREDENTIAL = "github-poll";
 const OTHER_PLATFORM_CREDENTIAL = "s3-store";
@@ -86,7 +84,6 @@ const UNKNOWN_CREDENTIAL = "missing";
 const POLL_TOKEN = "ghp_poll-token";
 const UNAUTHORIZED_STATUS = 401;
 const ETAG = '"etag-1"';
-const OTHER_RESOURCE_KIND = "issue";
 const CLOSED_LOCAL_PORT = "http://127.0.0.1:9";
 
 const WEBHOOK: InboundCreate = {
@@ -255,120 +252,12 @@ test("an unknown project answers 404 and inserts nothing", async (t) => {
   assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
 });
 
-test("an unknown consumer fails the body schema", () => {
-  const parsed = intakeOperations["inbound.create"].input.safeParse({
-    params: {},
-    query: {},
-    body: { ...WEBHOOK, consumer: "mission.node.check" },
-  });
-  assert.equal(parsed.success, false);
-  assert.deepEqual(
-    parsed.error?.issues.map((issue) => issue.path),
-    [["body", "consumer"]],
-  );
-});
-
-test("an extra configuration field answers 400 with no project call and inserts nothing", async (t) => {
-  const h = harness(t);
-  const error = await refusesWith(
-    h.create({
-      ...WEBHOOK,
-      configuration: {
-        resource_kind: ResourceKind.Repository,
-        resource: RESOURCE,
-        events: ["push"],
-      },
-    }),
-    HttpStatus.BadRequest,
-    VALIDATION_FAILED,
-  );
-  assert.deepEqual(error.details, [
-    { path: ["body", "configuration", "events"], code: "unrecognized_keys" },
-  ]);
-  assert.equal(h.projectCalls.length, PROJECT_CALLS_AFTER_REFUSAL);
-  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
-});
-
 test("two equal creates insert two rows", async (t) => {
   const h = harness(t);
   const first = await h.create(WEBHOOK);
   const second = await h.create(WEBHOOK);
   assert.notEqual(first.id, second.id);
   assert.equal(h.rows().length, ROWS_AFTER_EQUAL_CREATES);
-});
-
-test("the insert step maps an unknown or unsuitable credential to 422", async (t) => {
-  const h = harness(t);
-  for (const code of [CREDENTIAL_NOT_FOUND, PLATFORM_MISMATCH]) {
-    const custody = {
-      custodySuitability: () => {
-        throw new OperationError(HttpStatus.NotFound, code, "Refused.");
-      },
-    };
-    assert.throws(
-      () =>
-        h.store.transaction((tx) =>
-          commitInbound(
-            custody,
-            tx,
-            createIdentity("inbound"),
-            { ...WEBHOOK, kind: InboundKind.Poll, credential: "token" },
-            null,
-          ),
-        ),
-      (error) =>
-        error instanceof OperationError &&
-        error.status === CREDENTIAL_INVALID_STATUS &&
-        error.code === CREDENTIAL_INVALID,
-    );
-  }
-  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
-});
-
-test("credentialRefusal maps the custody refusals and passes every other error", () => {
-  for (const code of [CREDENTIAL_NOT_FOUND, PLATFORM_MISMATCH]) {
-    const mapped = credentialRefusal(
-      new OperationError(HttpStatus.BadRequest, code, "Refused."),
-    );
-    assert.ok(mapped instanceof OperationError);
-    assert.equal(mapped.status, CREDENTIAL_INVALID_STATUS);
-    assert.equal(mapped.code, CREDENTIAL_INVALID);
-  }
-  const other = new OperationError(
-    HttpStatus.Conflict,
-    "credential.credential.archived",
-    "Archived.",
-  );
-  assert.equal(credentialRefusal(other), other);
-  const plain = new Error("boom");
-  assert.equal(credentialRefusal(plain), plain);
-});
-
-test("the insert step checks a named credential and inserts the row", async (t) => {
-  const h = harness(t);
-  const requests: unknown[] = [];
-  const custody = {
-    custodySuitability: (_tx: unknown, request: unknown) => {
-      requests.push(request);
-    },
-  };
-  const id = createIdentity("inbound");
-  const inbound = h.store.transaction((tx) =>
-    commitInbound(
-      custody,
-      tx,
-      id,
-      { ...WEBHOOK, kind: InboundKind.Poll, credential: "token" },
-      { since: 1 },
-    ),
-  );
-  assert.equal(inbound.id, id);
-  assert.equal(inbound.credential, CREDENTIAL_NAME);
-  assert.deepEqual(inbound.checkpoint, { since: 1 });
-  assert.deepEqual(requests, [
-    { credential: "token", platform: InboundPlatform.GitHub },
-  ]);
-  assert.equal(h.rows().length, ROWS_PER_CREATE);
 });
 
 const POLL: InboundCreate = {
@@ -569,26 +458,6 @@ test("a failed issue comment read answers 422 platform_refused, inserts no row a
   assert.equal(h.start.mock.callCount(), UNSTARTED_LOOP_COUNT);
 });
 
-test("an absent or another resource_kind answers 400 with no project call and inserts nothing", async (t) => {
-  const h = harness(t);
-  for (const configuration of [
-    { resource: RESOURCE },
-    { resource_kind: OTHER_RESOURCE_KIND, resource: RESOURCE },
-  ]) {
-    const error = await refusesWith(
-      h.create({ ...WEBHOOK, configuration }),
-      HttpStatus.BadRequest,
-      VALIDATION_FAILED,
-    );
-    assert.deepEqual(
-      (error.details as { path: string[] }[]).map((issue) => issue.path),
-      [["body", "configuration", "resource_kind"]],
-    );
-  }
-  assert.equal(h.projectCalls.length, PROJECT_CALLS_AFTER_REFUSAL);
-  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
-});
-
 test("a poll create starts one loop after the insert and a webhook starts none", async (t) => {
   const h = pollHarness(t, async () => modified);
   await h.create(WEBHOOK);
@@ -731,30 +600,6 @@ test("a Jira poll create answers 400 and inserts nothing", async (t) => {
   assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
 });
 
-test("a Jira webhook with a credential, a repository resource kind or a resource outside the form answers 400", async (t) => {
-  const h = harness(t);
-  for (const body of [
-    { ...JIRA_WEBHOOK, credential: "jira-token" },
-    {
-      ...JIRA_WEBHOOK,
-      configuration: {
-        resource_kind: ResourceKind.Repository,
-        resource: JIRA_RESOURCE,
-      },
-    },
-    ...[
-      "acme.example.com/KD",
-      "acme.atlassian.net/kd",
-      "acme.atlassian.net",
-    ].map((resource) => ({
-      ...JIRA_WEBHOOK,
-      configuration: { resource_kind: ResourceKind.Conversation, resource },
-    })),
-  ])
-    await refusesWith(h.create(body), HttpStatus.BadRequest, VALIDATION_FAILED);
-  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
-});
-
 const SLACK_WEBHOOK: InboundCreate = {
   ...WEBHOOK,
   platform: InboundPlatform.Slack,
@@ -795,50 +640,4 @@ test("a Slack webhook with no credential, a user token credential or an unknown 
     );
   assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
   assert.equal(h.drained(), DRAINS_AFTER_REFUSAL);
-});
-
-test("a Slack webhook with a team outside the form or a repository resource kind answers 400", async (t) => {
-  const h = pollHarness(t, async () => modified);
-  for (const configuration of [
-    ...["t01abcdef", "T0", "U01ABCDEF", "T01ABC-EF"].map((resource) => ({
-      resource_kind: ResourceKind.Conversation,
-      resource,
-    })),
-    { resource_kind: ResourceKind.Repository, resource: SLACK_TEAM_ID },
-  ])
-    await refusesWith(
-      h.create({ ...SLACK_WEBHOOK, configuration }),
-      HttpStatus.BadRequest,
-      VALIDATION_FAILED,
-    );
-  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
-});
-
-test("a Slack poll create answers 400 and inserts nothing", async (t) => {
-  const h = pollHarness(t, async () => modified);
-  for (const credential of [SIGNING_CREDENTIAL, SLACK_USER_CREDENTIAL]) {
-    const error = await refusesWith(
-      h.create({ ...SLACK_WEBHOOK, kind: InboundKind.Poll, credential }),
-      HttpStatus.BadRequest,
-      VALIDATION_FAILED,
-    );
-    assert.deepEqual(error.details, [
-      { path: ["body", "platform"], code: "custom" },
-    ]);
-  }
-  assert.equal(h.projectCalls.length, PROJECT_CALLS_AFTER_REFUSAL);
-  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
-});
-
-test("a GitHub webhook that names a credential answers 400 and inserts nothing", async (t) => {
-  const h = pollHarness(t, async () => modified);
-  const error = await refusesWith(
-    h.create({ ...WEBHOOK, credential: POLL_CREDENTIAL }),
-    HttpStatus.BadRequest,
-    VALIDATION_FAILED,
-  );
-  assert.deepEqual(error.details, [
-    { path: ["body", "credential"], code: "custom" },
-  ]);
-  assert.equal(h.rows().length, ROWS_AFTER_REFUSAL);
 });

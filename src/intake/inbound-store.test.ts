@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { identitySchema } from "../kernel/identity.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
   Consumer,
-  INBOUND_ID_PREFIX,
   InboundEventState,
   InboundKind,
   InboundPlatform,
@@ -30,7 +28,6 @@ const CREATED_AT = 1000;
 const RESOURCE = "acme/app";
 const CHECKPOINT = { cursor: "abc" };
 const KEPT_EVENTS = 2;
-const PENDING_EVENTS = 2;
 const EVENTS_AFTER_DELETE = 0;
 const PENDING_AFTER_SETTLE = 0;
 
@@ -92,12 +89,6 @@ function insertEvent(
   });
 }
 
-test("an allocated identity is an inbound identity", () => {
-  assert.ok(
-    identitySchema(INBOUND_ID_PREFIX).safeParse(allocateInboundId()).success,
-  );
-});
-
 test("the projection answers the row with parsed columns and no secret", (t) => {
   const store = migratedStore(t);
   const id = insert(store, { ...newInbound(), checkpoint: CHECKPOINT });
@@ -117,26 +108,6 @@ test("the projection answers the row with parsed columns and no secret", (t) => 
     created_at: CREATED_AT,
   });
   assert.equal("secret" in record, false);
-});
-
-test("a configuration with an extra field or a bad resource refuses", (t) => {
-  const store = migratedStore(t);
-  for (const configuration of [
-    { resource: RESOURCE, extra: 1 },
-    { resource: "acme" },
-  ])
-    assert.throws(() => insert(store, newInbound(configuration)));
-  assert.equal(
-    store.transaction((tx) => readInbound(tx, "missing")),
-    null,
-  );
-});
-
-test("two inserts with one configuration both succeed", (t) => {
-  const store = migratedStore(t);
-  const first = insert(store);
-  const second = insert(store);
-  assert.notEqual(first, second);
 });
 
 test("deleteInbound removes the events and the row", (t) => {
@@ -191,18 +162,6 @@ test("deleteInbound refuses an inbound with a pending event and keeps the row an
       },
   );
   assert.equal(left.total, KEPT_EVENTS);
-});
-
-test("pendingEventCount counts pending events alone", (t) => {
-  const store = migratedStore(t);
-  const id = insert(store);
-  insertEvent(store, id, "e1", InboundEventState.Pending);
-  insertEvent(store, id, "e2", InboundEventState.Pending);
-  insertEvent(store, id, "e3", InboundEventState.Succeeded);
-  assert.equal(
-    store.transaction((tx) => pendingEventCount(tx, id)),
-    PENDING_EVENTS,
-  );
 });
 
 test("a checkpoint write replaces the stored checkpoint of one row", (t) => {

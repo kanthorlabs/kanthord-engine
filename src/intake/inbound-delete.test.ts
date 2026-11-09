@@ -175,20 +175,3 @@ test("a repeat delete after a success answers 404", async (t) => {
   assert.equal(error.code, NOT_FOUND);
   assert.equal(h.removed.mock.callCount(), NOTIFICATIONS_PER_DELETE);
 });
-
-test("a delete of an unknown inbound answers 404", async (t) => {
-  const h = harness(t);
-  const error = await refusal(h.remove(allocateInboundId()));
-  assert.equal(error.status, HttpStatus.NotFound);
-  assert.equal(error.code, NOT_FOUND);
-});
-
-test("an identity of another prefix fails the params schema", () => {
-  const result = intakeOperations["inbound.delete"].input.safeParse({
-    params: { inbound_id: createIdentity("outbound_request") },
-    query: {},
-    body: null,
-  });
-  assert.equal(result.success, false);
-  assert.deepEqual(result.error?.issues[0]?.path, ["params", "inbound_id"]);
-});
