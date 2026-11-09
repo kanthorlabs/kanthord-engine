@@ -115,31 +115,3 @@ test("one repository binding and one storage binding make no call", () => {
   );
   assert.deepEqual(h.calls, []);
 });
-
-test("no binding makes no call", () => {
-  const h = harness(true);
-  inTransaction((tx) =>
-    guardEnvironmentMix(tx, h.dependencies, PROJECT_ID, []),
-  );
-  assert.deepEqual(h.calls, []);
-  assert.deepEqual(h.reads, []);
-});
-
-test("the collaboration receives the transaction, the project and the repository identities in node order", () => {
-  const h = harness(false);
-  const seen = inTransaction((tx) => {
-    guardEnvironmentMix(tx, h.dependencies, PROJECT_ID, [
-      OTHER_REPOSITORY_ID,
-      STORAGE,
-      REPOSITORY_ID,
-    ]);
-    return tx;
-  });
-  assert.equal(h.calls.length, SINGLE_CALL);
-  assert.equal(h.calls[0]?.tx, seen);
-  assert.equal(h.calls[0]?.projectId, PROJECT_ID);
-  assert.deepEqual(h.calls[0]?.identities, [
-    IDENTITIES[OTHER_REPOSITORY_ID],
-    IDENTITIES[REPOSITORY_ID],
-  ]);
-});

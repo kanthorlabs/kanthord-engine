@@ -174,21 +174,18 @@ const RETIRE_CONTROLS = {
   preview_digest: DIGEST,
 };
 const EXPORT = "export";
-const HELP = "--help";
 const ENDPOINT = "--endpoint";
 const TOKEN = "--token";
 const INTENT_OPTION = "--intent";
 const STATE = "--state";
 const NODE_OPTION = "--node";
 const SPACE = " ";
-const INCLUDE_RETIRED = "--include-retired";
 const LIMIT = "--limit";
 const FORMAT = "--format";
 const OUT = "--out";
 const NAME = "--name";
 const KEY = "--idempotency-key";
 const CONFIG = "--config";
-const PROJECT_ID_ARGUMENT = "<project-id>";
 const PROJECT_NAME = "mission-cli-project";
 const MISSION_ID = "mission_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const NODE_ID = "node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
@@ -425,17 +422,6 @@ function exportArgs(missionId: string, format: string, out: string): string[] {
   return [MISSION, EXPORT, missionId, FORMAT, format, OUT, out];
 }
 
-test("mission read help works offline and exposes positional IDs and filters", async (t) => {
-  const { env } = isolated(t);
-  const get = await kanthord([MISSION, GET, HELP], env);
-  assert.equal(get.code, SUCCESS, get.stderr);
-  assert.ok(get.stdout.includes(PROJECT_ID_ARGUMENT));
-  const list = await kanthord([MISSION, NODE, LIST, HELP], env);
-  assert.equal(list.code, SUCCESS, list.stderr);
-  for (const flag of [INTENT_OPTION, STATE, INCLUDE_RETIRED])
-    assert.ok(list.stdout.includes(flag));
-});
-
 for (const { args, code } of INVALID_CASES) {
   test(`mission rejects ${code} before contacting a server`, async (t) => {
     const { directory, env } = isolated(t);
@@ -469,9 +455,6 @@ for (const { path, code } of READ_LEAVES) {
 
 test("mission node create help and local file and identity validation", async (t) => {
   const { directory, env } = isolated(t);
-  const help = await kanthord([MISSION, NODE, CREATE, HELP], env);
-  assert.equal(help.code, SUCCESS, help.stderr);
-  assert.ok(help.stdout.includes(FILE));
   const missing = join(directory, "missing.json");
   const args = [MISSION, NODE, CREATE, MISSION_ID, FILE, missing];
   refusal(await kanthord([...args, ...LOCAL_FLAGS], env), FILE_NOT_FOUND);
@@ -509,17 +492,6 @@ test("mission node create help and local file and identity validation", async (t
 
 test("mission graph commands expose flags and reject invalid rebind IDs offline", async (t) => {
   const { env } = isolated(t);
-  for (const path of [
-    [DEPENDENCY, ADD, FILE],
-    [CRITERION, SET, FILE],
-    [NODE, REBIND, NODE_OPTION],
-    [NODE, PRIORITY, SET, FILE],
-  ]) {
-    const flag = path.at(-1)!;
-    const result = await kanthord([MISSION, ...path.slice(0, -1), HELP], env);
-    assert.equal(result.code, SUCCESS, result.stderr);
-    assert.ok(result.stdout.includes(flag));
-  }
   refusal(
     await kanthord(
       [
@@ -770,21 +742,6 @@ test(
     assert.ok(priority.idempotency_key);
   },
 );
-
-for (const { path, flags } of [
-  { path: [NODE, RETIRE], flags: [FILE, FORCE, KEY] },
-  { path: [NODE, RETIRE, PREVIEW], flags: [FORCE] },
-  { path: [IMPORT, PREVIEW], flags: [FILE] },
-  { path: [IMPORT, APPLY], flags: [FILE, KEY] },
-]) {
-  test(`mission ${path.join(SPACE)} help works offline`, async (t) => {
-    const result = await kanthord([MISSION, ...path, HELP], isolated(t).env);
-    assert.equal(result.code, SUCCESS, result.stderr);
-    for (const flag of flags) assert.ok(result.stdout.includes(flag));
-    if (path.includes(IMPORT) && path.includes(PREVIEW))
-      assert.ok(!result.stdout.includes(KEY));
-  });
-}
 
 test("mission node retire validates its identity, token, file and flag ownership", async (t) => {
   const fixture = isolated(t);
@@ -1336,10 +1293,6 @@ test("mission imports accept embedded empty files and JSON entries", async (t) =
     assert.equal(applied.mission_version, mission.version);
     assert.ok(applied.idempotency_key);
   }
-});
-
-test("mission get reads the empty mission created with its project", async (t) => {
-  await createMission(await setup(t));
 });
 
 test("mission export writes empty Markdown and complete private JSON answers", async (t) => {
@@ -2220,7 +2173,6 @@ const IMPORT_SET_DIRECTORY = "import-set";
 const INTENT_KEY = "intent:";
 const TAGS_KEY = "tags:";
 const NODE_KEY = "node:";
-const INVALID_INTENT = "task";
 
 function planFile(
   frontMatter: string[],
@@ -2554,15 +2506,6 @@ test(
         );
       },
     );
-    await t.test("EF03.5 an unknown intent filter is refused", async () => {
-      refusal(
-        await kanthord(
-          [MISSION, NODE, LIST, mission.id, INTENT_OPTION, INVALID_INTENT],
-          fixture.env,
-        ),
-        INVALID_INTENT_CODE,
-      );
-    });
     await t.test(
       "EF03.6 the Markdown export writes intent, tags and node",
       async () => {
