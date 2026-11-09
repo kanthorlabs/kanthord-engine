@@ -8,7 +8,7 @@ import {
   realpathSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
 import { temporary } from "../../kernel/test-support.ts";
@@ -29,6 +29,7 @@ import {
   implementFixture,
 } from "./test-support.ts";
 import { RELEASE_DIRECTORY, sshAccessOf } from "./workspace.ts";
+import { PoolClass, repoKeyOf } from "./tree-pool.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 
 const BINDINGS = ["api", "web"];
@@ -41,6 +42,7 @@ const UPSTREAM_CHANGE = "upstream change";
 const TWO_MERGES = "2";
 const TWO_PARENTS = 2;
 const NO_OUTPUT = "";
+const ONE_TREE = 1;
 const TEST_IDENTITY = [
   "-c",
   "user.name=Test",
@@ -182,6 +184,18 @@ test("a failed release verification keeps the merged heads and routes a revision
     ),
     false,
   );
+  const pool = h.input.workspaces.pool;
+  for (const repository of h.input.setup.repositories)
+    assert.equal(
+      pool
+        .trees()
+        .filter(
+          (tree) =>
+            dirname(tree.path) ===
+            join(pool.root, repoKeyOf(repository.address), PoolClass.Command),
+        ).length,
+      ONE_TREE,
+    );
 });
 
 test("the refresh fetches the base of each checkout with the SSH identity of its binding", async (t) => {

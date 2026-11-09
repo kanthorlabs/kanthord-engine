@@ -110,7 +110,7 @@ test("a task commit and a merge commit take the commit rule, the unit id body an
     taskMessage,
     `feat: add the login form\n\n${current.id}\n\n${record}`,
   );
-  assert.equal(parseTrailers(h.root, taskMessage), record);
+  assert.equal(parseTrailers(h.bare, taskMessage), record);
   assert.equal(
     byHeader.get("feat: merge main"),
     `feat: merge main\n\n${h.input.claim.node_id}`,

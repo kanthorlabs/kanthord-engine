@@ -20,13 +20,17 @@ import { EndReason, ExecutionStop } from "./execution-run.ts";
 import {
   checkoutDetached,
   cloneLocal,
+  clonePacked,
   commitOf,
   excludeUntracked,
+  fetchLocal,
   fileAtRevision,
   type GitCall,
   headCommit,
   ignoredPaths,
+  matchCheckoutRefs,
   restoreTracked,
+  scrubTree,
   trackedChanges,
 } from "./local-git.ts";
 import {
@@ -36,15 +40,16 @@ import {
   writeSetupRecord,
 } from "./setup-record.ts";
 import { SpanOperation, type SpanRecorder } from "./telemetry.ts";
+import { PoolClass, prepareTree } from "./tree-pool.ts";
 import {
   type CommandObserver,
   runVerificationsWithOutput,
   VerificationClass,
   type VerificationRun,
 } from "./verification.ts";
+import type { WorkspaceRoot } from "./workspace.ts";
 
 export const SETUP_COMMAND_LIMIT_MS = COMMAND_LIMIT_MS;
-export const BASE_DIRECTORY = "base";
 const SINGLE_CHECKOUT = 1;
 const NO_EXIT = -1;
 const MISSING_INDEX = -1;
@@ -53,6 +58,11 @@ const TRACKED_CHECK = "git status --porcelain --untracked-files=no";
 const TRACKED_CHANGE_EXIT = 1;
 const SETUP_ENTRY_COUNT = "kanthord.setup.entry_count";
 const SETUP_RESULT = "kanthord.setup.result";
+const TREE_PREPARED = "tree prepared";
+const TREE_DELETED = "tree deleted";
+const BASE_PURPOSE = "base";
+const UNKNOWN_ERROR = "unknown";
+const NO_REFS: readonly string[] = [];
 
 export interface SetupRepository {
   binding_id: string;
@@ -71,6 +81,18 @@ export interface BaseRunInput {
   variables: Readonly<Record<string, string>>;
   commandLimitMs: number;
   observe?: CommandObserver;
+}
+
+export interface BaseTrees {
+  workspaces: WorkspaceRoot;
+  nodeId: string;
+  addresses: ReadonlyMap<string, string>;
+  log: (msg: string, fields: Record<string, unknown>) => void;
+}
+
+export interface BasePlace {
+  directory: string;
+  trees?: BaseTrees;
 }
 
 export interface SetupInput {
@@ -352,16 +374,18 @@ export class BaseHead {
   private commitsRead: Promise<string[]> | null = null;
   private prepared: Promise<SetupResult> | null = null;
   private readonly results = new Map<string, number>();
+  private readonly trees: BaseTrees | null;
 
   constructor(
     input: SetupInput,
-    directory: string,
+    place: BasePlace,
     checkouts: readonly SetupEntry[],
   ) {
     assert.ok(checkouts.length);
     this.input = input;
-    this.directory = directory;
+    this.directory = place.directory;
     this.checkouts = checkouts;
+    this.trees = place.trees ?? null;
   }
 
   commits(): Promise<string[]> {
@@ -458,8 +482,38 @@ export class BaseHead {
     return exit;
   }
 
-  dispose(): void {
-    rmSync(this.directory, { recursive: true, force: true });
+  async giveBack(): Promise<void> {
+    if (this.prepared === null) return;
+    await this.prepared.catch(() => null);
+    if (this.trees === null) {
+      rmSync(this.directory, { recursive: true, force: true });
+      return;
+    }
+    const { workspaces, nodeId, log } = this.trees;
+    for (const checkout of this.checkouts)
+      workspaces.giveTree(
+        {
+          address: this.addressOf(checkout),
+          poolClass: PoolClass.Command,
+        },
+        join(this.directory, checkout.repository.name),
+        { nodeId, log },
+      );
+    try {
+      workspaces.removeSafely(this.directory);
+    } catch (error) {
+      log(TREE_DELETED, {
+        path: this.directory,
+        code:
+          (error as NodeJS.ErrnoException | undefined)?.code ?? UNKNOWN_ERROR,
+      });
+    }
+  }
+
+  private addressOf(checkout: SetupEntry): string {
+    const address = this.trees?.addresses.get(checkout.repository.name);
+    assert.ok(address, "A checkout of the base head holds an address.");
+    return address;
   }
 
   private root(): string {
@@ -474,6 +528,7 @@ export class BaseHead {
 
   private async prepare(): Promise<SetupResult> {
     const commits = await this.commits();
+    if (this.trees !== null) return this.prepareTrees(this.trees, commits);
     rmSync(this.directory, { recursive: true, force: true });
     ensureDirectory(this.directory);
     const clones: SetupEntry[] = [];
@@ -493,6 +548,73 @@ export class BaseHead {
         this.input.context,
         remaining(this.input),
       );
+      clones.push({ ...checkout, directory });
+    }
+    return runSetup(this.input, clones);
+  }
+
+  private async prepareTrees(
+    trees: BaseTrees,
+    commits: readonly string[],
+  ): Promise<SetupResult> {
+    const { env, context } = this.input;
+    await trees.workspaces.giveLeftoverTrees(
+      this.directory,
+      {
+        env,
+        context,
+        nodeId: trees.nodeId,
+        repositories: this.checkouts.map((checkout) => ({
+          name: checkout.repository.name,
+          address: this.addressOf(checkout),
+        })),
+        poolClass: PoolClass.Command,
+        log: trees.log,
+      },
+      performance.now() + remaining(this.input),
+    );
+    ensureDirectory(this.directory);
+    const clones: SetupEntry[] = [];
+    for (const [index, checkout] of this.checkouts.entries()) {
+      const directory = join(this.directory, checkout.repository.name);
+      const commit = commits[index]!;
+      const address = this.addressOf(checkout);
+      const call = () => ({
+        env,
+        directory,
+        context,
+        deadlineMs: remaining(this.input),
+      });
+      const { source } = await prepareTree({
+        pool: trees.workspaces.pool,
+        address,
+        poolClass: PoolClass.Command,
+        target: directory,
+        nodeId: trees.nodeId,
+        keepRefs: NO_REFS,
+        env,
+        context,
+        deadlineMs: remaining(this.input),
+        fresh: async () => {
+          await clonePacked(call(), checkout.directory);
+          await fetchLocal(call(), checkout.directory);
+          await checkoutDetached(
+            env,
+            directory,
+            commit,
+            context,
+            remaining(this.input),
+          );
+          await matchCheckoutRefs(call(), checkout.directory, address);
+        },
+        reuse: async () => {
+          await fetchLocal(call(), checkout.directory);
+          const record = await readSetupRecord(call());
+          await scrubTree(call(), commit, record?.roots ?? []);
+          await matchCheckoutRefs(call(), checkout.directory, address);
+        },
+      });
+      trees.log(TREE_PREPARED, { purpose: BASE_PURPOSE, source });
       clones.push({ ...checkout, directory });
     }
     return runSetup(this.input, clones);

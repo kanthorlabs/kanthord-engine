@@ -2,8 +2,9 @@ import { ExecutionBudget } from "./budget.ts";
 import { credentialSecrets } from "../../agent/hooks/sensitive-text-redaction.ts";
 import assert from "node:assert/strict";
 import { unusedHostTools } from "./test-support.ts";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
+import { simpleGit } from "simple-git";
 import { setTimeout } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
 import { background } from "../../kernel/context.ts";
@@ -43,7 +44,8 @@ import {
   testSshAccess,
   transport,
 } from "./test-support.ts";
-import { WorkspaceRoot } from "./workspace.ts";
+import { BASE_DIRECTORY, WorkspaceRoot } from "./workspace.ts";
+import { PoolClass } from "./tree-pool.ts";
 import {
   RecordKind,
   SpanStatus,
@@ -417,7 +419,109 @@ test("the end of the prepare phase span holds the shape of the pinned revision",
   assert.equal(end?.attributes?.["kanthord.node.binding_count"], BINDING_COUNT);
 });
 
+test("an agent open that throws after the prepare gives the base head tree back to the command class", async (t) => {
+  const h = await implementFixture(t, [task("first", "true")], []);
+  const { claim } = h.input;
+  writeFileSync(join(h.root, "node-file"), "node");
+  await simpleGit(h.root).add("node-file");
+  await simpleGit(h.root).raw([
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.invalid",
+    "commit",
+    "-m",
+    "node",
+  ]);
+  await simpleGit(h.root).raw([
+    "push",
+    "origin",
+    `HEAD:refs/heads/${claim.node_branch}`,
+  ]);
+  const setup = {
+    ...h.input.setup,
+    repositories: h.input.setup.repositories.map((repository) => ({
+      ...repository,
+      environment: {
+        source: EnvironmentSource.Stored,
+        document: { postCreateCommand: NODE_ONLY_SETUP_FAILURE },
+        digest: "d".repeat(64),
+      },
+    })),
+  };
+  const complete = (data: unknown) => ({
+    type: "completed",
+    status: 200,
+    data,
+  });
+  const clients = {
+    mission: {
+      "execution.pinnedRevision.get": async () =>
+        complete({
+          content: {
+            ...h.revision.content,
+            bindings: [setup.repositories[0]!.binding_id],
+          },
+          tasks: h.revision.tasks,
+        }),
+      "execution.rework_assessment.get": async () => complete(null),
+      "execution.evidence.list": async () =>
+        complete({ items: [], next_cursor: null }),
+    },
+    scheduler: { executionRelease: async () => complete({}) },
+    worker: {
+      "execution.failed_check.get": async () => complete({ items: [] }),
+      "execution.link_update.get": async () =>
+        complete({ items: [], next_cursor: null, total: 0 }),
+    },
+  } as unknown as MethodClients;
+  const store = new InMemoryCredentialStore();
+  await store.modify("anthropic", async () => ({
+    type: "api_key",
+    key: "test_open_failure",
+  }));
+  const workspaces = WorkspaceRoot.open(temporary(t));
+  await runNativeExecution({
+    claim,
+    setup,
+    clients,
+    credentials: {
+      items: [
+        {
+          credential_id: setup.agents[0]!.credential_id,
+          provider_id: "anthropic",
+          store,
+        },
+      ],
+      release: async () => {},
+    },
+    transport,
+    sshAccess: testSshAccess(setup.repositories),
+    workspaces,
+    hostHome: temporary(t),
+    env: hostEnvironment(),
+    modelRuntimeFactory: async () => {
+      throw new Error("open failed");
+    },
+    hostTools: () => unusedHostTools,
+    context: background,
+  });
+  assert.equal(
+    existsSync(join(workspaces.nodeKey(claim.node_id), BASE_DIRECTORY)),
+    false,
+  );
+  assert.equal(
+    workspaces.pool
+      .trees()
+      .filter(({ path }) => basename(dirname(path)) === PoolClass.Command)
+      .length,
+    ONE_COMMAND_TREE,
+  );
+});
+
 const OK_RELEASE = { kind: "released", furtherWork: false };
+const NODE_ONLY_SETUP_FAILURE = 'case "$PWD" in */checkouts/*) exit 1;; esac';
+const ONE_COMMAND_TREE = 1;
 
 async function examineRun(
   t: TestContext,

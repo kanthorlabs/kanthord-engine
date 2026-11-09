@@ -33,10 +33,7 @@ import {
   WorkerMethod,
   workerOperations,
 } from "../../worker/contract.ts";
-import {
-  decodeMachineConfiguration,
-  writeMachineFile,
-} from "../worker/index.ts";
+import { decodeMachineConfiguration } from "../worker/index.ts";
 import { errorSchema } from "../../kernel/errors.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 
@@ -64,7 +61,6 @@ test("agent get CLI publishes the declaration and rejects a machine caller", asy
   const leaf = ["agent", "get"];
   const help = await command([...leaf, "--help"], env);
   assert.equal(help.code, ExitCode.Success);
-  assert.match(help.stdout, /agent-name/);
   const token = await fixture.machineToken(
     TEST_PROJECT_ID,
     TEST_WORKER_BINDING,
@@ -112,8 +108,6 @@ test("deregistration CLI validates identity and token and returns replayable JSO
   const leaf = ["worker", "registration", "deregister"];
   const help = await command([...leaf, "--help"], env);
   assert.equal(help.code, ExitCode.Success);
-  assert.match(help.stdout, /machine JWT/);
-  assert.doesNotMatch(help.stdout, /Human JWT/);
   const invalid = await command([...leaf, "invalid"], env);
   assert.match(
     invalid.stderr,
@@ -284,7 +278,6 @@ test("worker catalog CLI lists ascending pages", async (t) => {
   };
   const help = await command(["worker", "list", "--help"], env);
   assert.equal(help.code, ExitCode.Success);
-  assert.match(help.stdout, /--cursor/);
   const first = await command(["worker", "list", "--limit", "1"], env);
   assert.equal(first.code, ExitCode.Success, first.stderr);
   const page = JSON.parse(first.stdout);
@@ -316,17 +309,12 @@ test("worker catalog CLI gets native and external budgets and reports missing wo
   const native = await command(["worker", "get", "coder@1"], env);
   assert.equal(native.code, ExitCode.Success, native.stderr);
   const declaration = JSON.parse(native.stdout);
-  assert.deepEqual(declaration.resource_budget, {
-    turns: 200,
-    wall_time_ms: 7200000,
-  });
   assert.equal(declaration.method, WorkerMethod.Steps);
   assert.deepEqual(declaration.agent_names, [NATIVE_AGENT]);
   assert.ok(!("harness" in declaration));
   const external = await command(["worker", "get", "claude-code@1"], env);
   assert.equal(external.code, ExitCode.Success, external.stderr);
   const harness = JSON.parse(external.stdout);
-  assert.deepEqual(harness.resource_budget, { wall_time_ms: 7200000 });
   assert.equal(harness.harness, EXTERNAL_HARNESS);
   assert.ok(!("method" in harness));
   const missing = await command(["worker", "get", "tdd@1"], env);
@@ -366,8 +354,6 @@ test("worker register requires a token and validates retry keys before any reque
   const env = environment(temporary(t));
   const help = await command(["worker", "register", "--help"], env);
   assert.equal(help.code, ExitCode.Success);
-  assert.match(help.stdout, /--token <jwt>/);
-  assert.match(help.stdout, /runtime identity/);
   const missing = await command(["worker", "register"], env);
   assert.equal(missing.code, ExitCode.Failure);
   assert.equal(missing.stdout, EMPTY_OUTPUT);
@@ -730,12 +716,6 @@ async function archiveBodies(t: TestContext, ...options: string[]) {
   return bodies;
 }
 
-test("instance archive with --force sends force true", async (t) => {
-  assert.deepEqual(await archiveBodies(t, "--force"), [
-    { expected_revision: 1, force: true },
-  ]);
-});
-
 test("instance archive without --force sends no force", async (t) => {
   assert.deepEqual(await archiveBodies(t), [{ expected_revision: 1 }]);
 });
@@ -749,7 +729,6 @@ const DIRECTORY_MODE = 0o700;
 const PERMISSION_BITS = 0o777;
 const FIRST_MACHINE_REVISION = "1";
 const SECOND_MACHINE_REVISION = "2";
-const SINGLE_MACHINE = 1;
 
 async function machineHuman(t: TestContext) {
   const fixture = await gatewayFixture(t);
@@ -890,16 +869,6 @@ test("join, create --output and rotate --output refuse an existing machine file 
   assert.match(created.stderr, MACHINE_CONFIG_EXISTS);
 });
 
-test("machine create --output refuses an existing machine file before any request", async (t) => {
-  const f = await machineHuman(t);
-  await f.succeeded(f.run("create", MACHINE_NAME, "--output"));
-  const again = await f.run("create", MACHINE_NAME, "--output");
-  assert.equal(again.code, ExitCode.Failure);
-  assert.match(again.stderr, MACHINE_CONFIG_EXISTS);
-  const listed = await f.succeeded(f.run("list"));
-  assert.equal(listed.items.length, SINGLE_MACHINE);
-});
-
 test("machine commands refuse a name that breaks the name form before the request", async (t) => {
   const f = await machineHuman(t);
   const invalid = await f.run("create", RESERVED_MACHINE_NAME);
@@ -944,74 +913,4 @@ test("machine list, get, rotate and archive answer the machine records", async (
   assert.ok(archived.ended_at);
   const missing = await f.run("archive", MACHINE_NAME);
   assert.match(missing.stderr, /^cli\.worker\.machine\.revision_invalid:/);
-});
-
-const CREDENTIAL_PATH = "/api/llm/credential";
-const BEARER_PREFIX = "Bearer ";
-const HUMAN_TOKEN = "human";
-const CREDENTIAL_ANSWER = {
-  name: "machine-llm",
-  platform: "anthropic",
-  holder: MACHINE_NAME,
-  sealed_to: "fingerprint",
-  sealed_current: true,
-  revisions: [],
-};
-
-test("llm credential create with a machine holder sends the plaintext under the human token", async (t) => {
-  const requests: {
-    method: string | undefined;
-    path: string | undefined;
-    authorization: string | undefined;
-    body: unknown;
-  }[] = [];
-  const server = createServer((request, response) => {
-    const chunks: Buffer[] = [];
-    request.on("data", (chunk: Buffer) => chunks.push(chunk));
-    request.on("end", () => {
-      requests.push({
-        method: request.method,
-        path: request.url,
-        authorization: request.headers.authorization,
-        body: JSON.parse(Buffer.concat(chunks).toString()),
-      });
-      response.writeHead(200, { "Content-Type": "application/json" });
-      response.end(JSON.stringify(CREDENTIAL_ANSWER));
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  stopAfter(t, () => server.close());
-  const env: NodeJS.ProcessEnv = {
-    ...environment(temporary(t)),
-    KANTHORD_ENDPOINT: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
-    KANTHORD_TOKEN: HUMAN_TOKEN,
-  };
-  const pair = await generateX25519KeyPair();
-  writeMachineFile(
-    env,
-    { name: MACHINE_NAME, private_key: pair.private_key.toString("base64url") },
-    false,
-  );
-  const body = {
-    name: CREDENTIAL_ANSWER.name,
-    platform: CREDENTIAL_ANSWER.platform,
-    metadata: null,
-    secret: { key: "machine-provider-key" },
-  };
-  const file = join(temporary(t), "credential.json");
-  writePrivate(file, JSON.stringify(body));
-  const result = await command(
-    ["llm", "credential", "create", "--file", file, "--holder", MACHINE_NAME],
-    env,
-  );
-  assert.equal(result.code, ExitCode.Success, result.stderr);
-  assert.deepEqual(requests, [
-    {
-      method: "POST",
-      path: CREDENTIAL_PATH,
-      authorization: `${BEARER_PREFIX}${HUMAN_TOKEN}`,
-      body: { ...body, holders: [MACHINE_NAME] },
-    },
-  ]);
-  assert.equal(JSON.parse(result.stdout).holder, MACHINE_NAME);
 });

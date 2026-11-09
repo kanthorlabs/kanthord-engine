@@ -24,7 +24,7 @@ import {
   type Context,
   DeadlineExceeded,
 } from "../kernel/context.ts";
-import { RepositoryFileState } from "./contract.ts";
+import { type PushRecord, RepositoryFileState } from "./contract.ts";
 import {
   BaseMovedError,
   changedGateFiles,
@@ -42,6 +42,7 @@ import {
   pushSnapshotFresh,
   readFilesAtCommit,
   readObjectIds,
+  refreshSnapshot,
   resolveBranchCommit,
   squashPushFresh,
 } from "./connector.ts";
@@ -157,16 +158,19 @@ suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
     const branch = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
     await clone(origin, first, background, DEADLINE_MS, LOCAL_GIT_SSH_ACCESS);
     assert.equal(
-      await fetchAndCheckout(
-        first,
-        branch,
-        "main",
-        false,
-        [],
-        background,
-        DEADLINE_MS,
-        LOCAL_GIT_SSH_ACCESS,
-      ),
+      (
+        await fetchAndCheckout(
+          first,
+          branch,
+          "main",
+          false,
+          [],
+          null,
+          background,
+          DEADLINE_MS,
+          LOCAL_GIT_SSH_ACCESS,
+        )
+      ).head,
       base,
     );
     const pushed = await commit(first, "pushed");
@@ -179,16 +183,19 @@ suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
     );
     await clone(origin, second, background, DEADLINE_MS, LOCAL_GIT_SSH_ACCESS);
     assert.equal(
-      await fetchAndCheckout(
-        second,
-        branch,
-        "main",
-        false,
-        [],
-        background,
-        DEADLINE_MS,
-        LOCAL_GIT_SSH_ACCESS,
-      ),
+      (
+        await fetchAndCheckout(
+          second,
+          branch,
+          "main",
+          false,
+          [],
+          null,
+          background,
+          DEADLINE_MS,
+          LOCAL_GIT_SSH_ACCESS,
+        )
+      ).head,
       pushed,
     );
     await simpleGit(second).reset(["--hard", base]);
@@ -269,31 +276,37 @@ suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
       LOCAL_GIT_SSH_ACCESS,
     );
     assert.equal(
-      await fetchAndCheckout(
-        workspace,
-        branch,
-        "main",
-        false,
-        [],
-        background,
-        DEADLINE_MS,
-        LOCAL_GIT_SSH_ACCESS,
-      ),
+      (
+        await fetchAndCheckout(
+          workspace,
+          branch,
+          "main",
+          false,
+          [],
+          null,
+          background,
+          DEADLINE_MS,
+          LOCAL_GIT_SSH_ACCESS,
+        )
+      ).head,
       base,
     );
     await commit(workspace, "unpushed");
     writeFileSync(join(workspace, "untracked"), "scratch");
     assert.equal(
-      await fetchAndCheckout(
-        workspace,
-        branch,
-        "main",
-        false,
-        [],
-        background,
-        DEADLINE_MS,
-        LOCAL_GIT_SSH_ACCESS,
-      ),
+      (
+        await fetchAndCheckout(
+          workspace,
+          branch,
+          "main",
+          false,
+          [],
+          null,
+          background,
+          DEADLINE_MS,
+          LOCAL_GIT_SSH_ACCESS,
+        )
+      ).head,
       base,
     );
     assert.equal(readFileSync(join(workspace, "file"), "utf8"), baseContent);
@@ -336,6 +349,7 @@ suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
         "main",
         false,
         keep,
+        null,
         background,
         DEADLINE_MS,
         LOCAL_GIT_SSH_ACCESS,
@@ -484,6 +498,7 @@ test("every git caller rejects a nonzero exit with an empty stderr", async (t) =
       BASE_BRANCH,
       false,
       [],
+      null,
       background,
       DEADLINE_MS,
       LOCAL_GIT_SSH_ACCESS,
@@ -1724,6 +1739,7 @@ const MISSING_OBJECT_MARK = "?";
 const MAINTENANCE_OFF = "false";
 const GC_OFF = "0";
 const EMPTY_REFS = "";
+const DASH_BRANCH_REF = "refs/heads/-x";
 const NON_CANONICAL_GATE_PATHS = ["scripts/", "./p.json"];
 const GATE_DECLARATION_ENTRY = "entry.txt";
 const SLOW_UPLOAD_SECONDS = 8;
@@ -2080,5 +2096,410 @@ suite("connector gate refusals", { concurrency: SUITE_CONCURRENCY }, () => {
         /Git deadline exceeded$/m.test(error.cause?.message ?? ""),
     );
     assert.equal(existsSync(origin.directory), true);
+  });
+});
+
+suite("connector snapshot refresh", { concurrency: SUITE_CONCURRENCY }, () => {
+  const refresh = (address: string, revision: string, directory: string) =>
+    refreshSnapshot({
+      address,
+      revision,
+      directory,
+      context: background,
+      deadlineMs: DEADLINE_MS,
+      ssh: LOCAL_GIT_SSH_ACCESS,
+    });
+  const snapshotOf = async (
+    address: string,
+    revision: string,
+    directory: string,
+  ) =>
+    cloneSnapshot(
+      address,
+      revision,
+      directory,
+      background,
+      DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
+    );
+  const refused = {
+    code: GIT_FAILED,
+    message: /The remote does not serve the commit\./,
+  };
+
+  test("refreshSnapshot refuses a commit that no remote branch or tag holds", async (t) => {
+    const { origin, seed, snapshot, commit } = await remoteRepository(t);
+    const directory = temporary(t);
+    await simpleGit(seed).raw(["checkout", "-b", "gone"]);
+    const gone = await commit("gone", "gone");
+    await simpleGit(seed).raw(["push", "origin", "gone"]);
+    await snapshotOf(origin, snapshot, directory);
+    await simpleGit(seed).raw(["push", "origin", "--delete", "gone"]);
+    await simpleGit(directory).raw([
+      ...IDENTITY,
+      "commit",
+      "--allow-empty",
+      "-m",
+      "local",
+    ]);
+    const local = (await simpleGit(directory).revparse(["HEAD"])).trim();
+    await assert.rejects(refresh(origin, local, directory), refused);
+    await assert.rejects(refresh(origin, gone, directory), refused);
+  });
+
+  test("refreshSnapshot proves the commit against the binding address, not the stored URL", async (t) => {
+    const { origin, seed, snapshot, commit } = await remoteRepository(t);
+    const fork = join(temporary(t), "fork");
+    await simpleGit().raw(["clone", "--bare", "--", origin, fork]);
+    const extra = await commit("extra", "extra");
+    await simpleGit(seed).raw(["push", fork, "HEAD:refs/heads/extra"]);
+    const directory = temporary(t);
+    await snapshotOf(fork, extra, directory);
+    await assert.rejects(refresh(origin, extra, directory), refused);
+    assert.equal(await refresh(origin, snapshot, directory), snapshot);
+    assert.equal(
+      (
+        await simpleGit(directory).raw(["config", "--get", "remote.origin.url"])
+      ).trim(),
+      origin,
+    );
+  });
+
+  test("refreshSnapshot answers the commit that the remote serves after a new push", async (t) => {
+    const { origin, seed, base, commit } = await remoteRepository(t);
+    const directory = temporary(t);
+    await snapshotOf(origin, base, directory);
+    const pushed = await commit("next", "next");
+    await simpleGit(seed).raw(["push", "origin", BASE_BRANCH]);
+    assert.equal(await refresh(origin, pushed, directory), pushed);
+    assert.equal(
+      await refresh(origin, `origin/${BASE_BRANCH}`, directory),
+      pushed,
+    );
+  });
+
+  const refsUnder = async (directory: string, prefix: string) =>
+    (
+      await simpleGit(directory).raw([
+        "for-each-ref",
+        "--format=%(refname)",
+        prefix,
+      ])
+    ).trim();
+  const withoutLocalBranches = async (directory: string) => {
+    const git = simpleGit(directory);
+    await git.raw(["checkout", "--detach"]);
+    for (const ref of (await refsUnder(directory, "refs/heads"))
+      .split("\n")
+      .filter(Boolean))
+      await git.raw(["update-ref", "-d", ref]);
+  };
+
+  test("refreshSnapshot drops origin/HEAD and makes no local branch when the remote HEAD names a missing branch", async (t) => {
+    const { origin, snapshot } = await remoteRepository(t);
+    const directory = temporary(t);
+    await simpleGit(origin).raw(["symbolic-ref", "HEAD", "refs/heads/main"]);
+    await snapshotOf(origin, snapshot, directory);
+    await withoutLocalBranches(directory);
+    await simpleGit(origin).raw(["symbolic-ref", "HEAD", "refs/heads/gone"]);
+    assert.equal(await refresh(origin, snapshot, directory), snapshot);
+    assert.equal(
+      await refsUnder(directory, "refs/remotes/origin/HEAD"),
+      EMPTY_REFS,
+    );
+    assert.equal(await refsUnder(directory, "refs/heads"), EMPTY_REFS);
+  });
+
+  test("refreshSnapshot makes no local branch when the remote HEAD names a branch that is not a valid branch name", async (t) => {
+    const { origin, snapshot } = await remoteRepository(t);
+    const directory = temporary(t);
+    await simpleGit(origin).raw(["symbolic-ref", "HEAD", "refs/heads/main"]);
+    await snapshotOf(origin, snapshot, directory);
+    await withoutLocalBranches(directory);
+    await simpleGit(origin).raw(["update-ref", DASH_BRANCH_REF, snapshot]);
+    await simpleGit(origin).raw(["symbolic-ref", "HEAD", DASH_BRANCH_REF]);
+    assert.equal(await refresh(origin, snapshot, directory), snapshot);
+    assert.equal(await refsUnder(directory, "refs/heads"), EMPTY_REFS);
+    assert.equal(
+      await refsUnder(directory, "refs/remotes/origin/HEAD"),
+      EMPTY_REFS,
+    );
+  });
+
+  test("refreshSnapshot follows the remote tags and proves a commit that only a tag holds", async (t) => {
+    const { origin, seed, base } = await remoteRepository(t);
+    const git = simpleGit(seed);
+    await git.raw(["tag", "v1", base]);
+    await git.raw(["push", "origin", "v1"]);
+    const directory = temporary(t);
+    await snapshotOf(origin, base, directory);
+    await git.raw(["push", "origin", "--delete", "refs/tags/v1"]);
+    await git.raw(["checkout", "--detach", base]);
+    await git.raw([...IDENTITY, "commit", "--allow-empty", "-m", "tagged"]);
+    const tagged = (await git.revparse(["HEAD"])).trim();
+    await git.raw(["tag", "v2", tagged]);
+    await git.raw(["push", "origin", "v2"]);
+    assert.equal(await refresh(origin, tagged, directory), tagged);
+    assert.deepEqual(
+      (await simpleGit(directory).raw(["tag", "--list"])).trim().split("\n"),
+      ["v2"],
+    );
+  });
+});
+
+test("refreshSnapshot proves the commit with the commit-graph file off", async (t) => {
+  const { origin, snapshot } = await remoteRepository(t);
+  const directory = temporary(t);
+  await cloneSnapshot(
+    origin,
+    snapshot,
+    directory,
+    background,
+    DEADLINE_MS,
+    LOCAL_GIT_SSH_ACCESS,
+  );
+  const execPath = (await simpleGit().raw(["--exec-path"])).trim();
+  const bin = temporary(t);
+  const log = join(bin, "git.log");
+  writeFileSync(
+    join(bin, "git"),
+    `#!/bin/sh\necho "$*" >> '${log}'\nexec '${join(execPath, "git")}' "$@"\n`,
+    { mode: 0o700 },
+  );
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}:${path}`;
+  stopAfter(t, () => {
+    process.env.PATH = path;
+  });
+  assert.equal(
+    await refreshSnapshot({
+      address: origin,
+      revision: snapshot,
+      directory,
+      context: background,
+      deadlineMs: DEADLINE_MS,
+      ssh: LOCAL_GIT_SSH_ACCESS,
+    }),
+    snapshot,
+  );
+  const calls = readFileSync(log, "utf8").split("\n");
+  for (const command of ["rev-parse", "for-each-ref --contains="])
+    assert.ok(
+      calls.some((line) =>
+        line.startsWith(`-c core.commitGraph=false ${command}`),
+      ),
+      command,
+    );
+});
+
+async function pushRuleFixture(t: TestContext) {
+  const root = temporary(t);
+  const origin = join(root, ORIGIN_NAME);
+  const seed = join(root, SEED_NAME);
+  const workspace = join(root, "workspace");
+  for (const directory of [origin, seed, workspace]) mkdirSync(directory);
+  await simpleGit(origin).init(true);
+  await simpleGit(seed).init();
+  await simpleGit(seed).raw(["checkout", "-b", "main"]);
+  const commit = async (directory: string, value: string) => {
+    writeFileSync(join(directory, "file"), value);
+    await simpleGit(directory).add("file");
+    await simpleGit(directory).raw([
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "-m",
+      value,
+    ]);
+    return (await simpleGit(directory).revparse(["HEAD"])).trim();
+  };
+  const base = await commit(seed, "base");
+  await simpleGit(seed).addRemote(ORIGIN_NAME, origin);
+  await simpleGit(seed).push(ORIGIN_NAME, "main");
+  const branch = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
+  await clone(origin, workspace, background, DEADLINE_MS, LOCAL_GIT_SSH_ACCESS);
+  const checkout = (record: PushRecord | null, pushed = false) =>
+    fetchAndCheckout(
+      workspace,
+      branch,
+      "main",
+      pushed,
+      [],
+      record,
+      background,
+      DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
+    );
+  const push = () =>
+    pushNodeBranch(
+      workspace,
+      branch,
+      background,
+      DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
+    );
+  const remote = async () =>
+    (await simpleGit(origin).raw(["branch", "--list", branch])).trim()
+      ? (await simpleGit(origin).revparse([`refs/heads/${branch}`])).trim()
+      : null;
+  const removeRemote = () =>
+    simpleGit(origin)
+      .raw(["branch", "-D", branch])
+      .then(() => undefined);
+  const rewrite = async (value: string) => {
+    await simpleGit(workspace).raw(["checkout", "--force", "-B", branch, base]);
+    return commit(workspace, value);
+  };
+  assert.equal((await checkout(null)).head, base);
+  return {
+    origin,
+    seed,
+    workspace,
+    base,
+    branch,
+    commit,
+    checkout,
+    push,
+    remote,
+    removeRemote,
+    rewrite,
+  };
+}
+
+const NO_RECORD = { confirmed: null, pending: null };
+const UNPUSHED_TEXT = "unpushed";
+const MISSING_BRANCH = { code: "repository.node_branch.missing" };
+
+suite("connector push record rules", { concurrency: SUITE_CONCURRENCY }, () => {
+  test("rule 1 writes the remote head as confirmed", async (t) => {
+    const f = await pushRuleFixture(t);
+    const pushed = await f.commit(f.workspace, "pushed");
+    await f.push();
+    assert.deepEqual(await f.checkout(null), {
+      head: pushed,
+      record: { confirmed: pushed, pending: null },
+    });
+    assert.deepEqual(await f.checkout(NO_RECORD), {
+      head: pushed,
+      record: { confirmed: pushed, pending: null },
+    });
+  });
+
+  test("rule 2 keeps unpushed commits after a failed push", async (t) => {
+    const f = await pushRuleFixture(t);
+    const confirmed = await f.commit(f.workspace, "pushed");
+    await f.push();
+    const pending = await f.commit(f.workspace, UNPUSHED_TEXT);
+    const record = { confirmed, pending };
+    assert.deepEqual(await f.checkout(record), { head: pending, record });
+    assert.equal(
+      readFileSync(join(f.workspace, "file"), "utf8"),
+      UNPUSHED_TEXT,
+    );
+  });
+
+  test("rule 2 follows the remote when the local branch does not descend", async (t) => {
+    const f = await pushRuleFixture(t);
+    const confirmed = await f.commit(f.workspace, "pushed");
+    await f.push();
+    await f.rewrite("diverged");
+    const record = { confirmed, pending: null };
+    assert.deepEqual(await f.checkout(record), { head: confirmed, record });
+  });
+
+  test("rule 3 keeps and confirms a push that the record did not confirm", async (t) => {
+    const f = await pushRuleFixture(t);
+    const pending = await f.commit(f.workspace, "pushed");
+    await f.push();
+    const later = await f.commit(f.workspace, "later");
+    assert.deepEqual(await f.checkout({ confirmed: null, pending }), {
+      head: later,
+      record: { confirmed: pending, pending: null },
+    });
+  });
+
+  test("rule 3 follows the remote when the local branch does not descend", async (t) => {
+    const f = await pushRuleFixture(t);
+    const pending = await f.commit(f.workspace, "pushed");
+    await f.push();
+    await f.rewrite("diverged");
+    assert.deepEqual(await f.checkout({ confirmed: f.base, pending }), {
+      head: pending,
+      record: { confirmed: pending, pending: null },
+    });
+  });
+
+  test("rule 4 refuses when the evidence holds the binding", async (t) => {
+    const f = await pushRuleFixture(t);
+    const pending = await f.commit(f.workspace, "unpushed");
+    await assert.rejects(
+      f.checkout({ confirmed: null, pending }, true),
+      MISSING_BRANCH,
+    );
+    assert.equal(
+      (await simpleGit(f.workspace).revparse(["HEAD"])).trim(),
+      pending,
+    );
+  });
+
+  test("rule 4 keeps the commits of a failed first push", async (t) => {
+    const f = await pushRuleFixture(t);
+    const pending = await f.commit(f.workspace, "unpushed");
+    const record = { confirmed: null, pending };
+    assert.deepEqual(await f.checkout(record), { head: pending, record });
+    assert.equal(await f.remote(), null);
+  });
+
+  test("rule 4 applies today's rule when the local branch does not descend", async (t) => {
+    const f = await pushRuleFixture(t);
+    const pending = await f.commit(f.workspace, "unpushed");
+    await f.rewrite("diverged");
+    const record = { confirmed: null, pending };
+    assert.deepEqual(await f.checkout(record), { head: f.base, record });
+  });
+
+  test("rule 5 refuses a lost pushed branch", async (t) => {
+    const f = await pushRuleFixture(t);
+    const confirmed = await f.commit(f.workspace, "pushed");
+    await f.push();
+    const local = await f.commit(f.workspace, "unpushed");
+    await f.removeRemote();
+    await simpleGit(f.workspace).raw([
+      "update-ref",
+      "-d",
+      `refs/remotes/origin/${f.branch}`,
+    ]);
+    await assert.rejects(
+      f.checkout({ confirmed, pending: null }),
+      MISSING_BRANCH,
+    );
+    assert.equal(
+      (await simpleGit(f.workspace).revparse(["HEAD"])).trim(),
+      local,
+    );
+  });
+
+  test("rule 6 follows a rewound remote and confirms its head", async (t) => {
+    const f = await pushRuleFixture(t);
+    const confirmed = await f.commit(f.workspace, "pushed");
+    await f.push();
+    const pending = await f.commit(f.workspace, "unpushed");
+    const other = join(dirname(f.workspace), "other");
+    mkdirSync(other);
+    await clone(f.origin, other, background, DEADLINE_MS, LOCAL_GIT_SSH_ACCESS);
+    await simpleGit(other).raw(["checkout", "-b", f.branch, f.base]);
+    const rewound = await f.commit(other, "rewound");
+    await simpleGit(other).raw([
+      "push",
+      "--force",
+      ORIGIN_NAME,
+      `${f.branch}:${f.branch}`,
+    ]);
+    assert.deepEqual(await f.checkout({ confirmed, pending }), {
+      head: rewound,
+      record: { confirmed: rewound, pending: null },
+    });
   });
 });

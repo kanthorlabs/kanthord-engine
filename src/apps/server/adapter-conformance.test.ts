@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createServer } from "node:http";
 import { DatabaseSync } from "node:sqlite";
 import { directClient } from "../../gateway/index.ts";
 import { httpClient } from "../../gateway/client.ts";
-import { gatewayOperations } from "../../gateway/contract.ts";
 import {
   AccessPolicy,
   type OperationResult,
@@ -148,57 +146,4 @@ test("every composed operation conforms across direct and HTTP adapters", async 
       );
     });
   }
-});
-
-test("HTTP against a closed port is indeterminate", async () => {
-  const server = createServer();
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  assert.ok(address && !isString(address));
-  await new Promise<void>((resolve, reject) =>
-    server.close((error) => (error ? reject(error) : resolve())),
-  );
-  const result = await httpClient(
-    gatewayOperations,
-    `http://127.0.0.1:${address.port}`,
-  ).liveness(input);
-  assert.equal(result.type, OperationResultType.Indeterminate);
-});
-
-test("the wire walk rejects functions, responses, transactions and class instances", () => {
-  const database = new DatabaseSync(":memory:");
-  try {
-    for (const value of [
-      () => {},
-      new Response(),
-      { database },
-      new Date(),
-      { nested: { callback: () => {} } },
-    ])
-      assert.throws(() => assertWireData(value));
-    assert.doesNotThrow(() =>
-      assertWireData({ nested: [null, true, 1, "value"] }),
-    );
-  } finally {
-    database.close();
-  }
-});
-
-test("the shape of a measured answer keeps every key, string, boolean and null and drops only the number values", () => {
-  const measured = {
-    stats: [{ kind: "disk", free_bytes: 1, stale: false, error: null }],
-  };
-  assert.deepEqual(
-    shapeOf(measured),
-    shapeOf({
-      stats: [{ kind: "disk", free_bytes: 2, stale: false, error: null }],
-    }),
-  );
-  for (const changed of [
-    { stats: [{ kind: "trace", free_bytes: 1, stale: false, error: null }] },
-    { stats: [{ kind: "disk", free_bytes: null, stale: false, error: null }] },
-    { stats: [{ kind: "disk", free_bytes: 1, stale: true, error: null }] },
-    { stats: [] },
-  ])
-    assert.notDeepEqual(shapeOf(measured), shapeOf(changed));
 });

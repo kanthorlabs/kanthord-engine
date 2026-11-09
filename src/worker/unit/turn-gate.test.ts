@@ -51,6 +51,7 @@ import {
   fauxToolCall,
   implementFixture as fixture,
   recordReleases,
+  releasedRoot,
   task,
   TEST_SSH_ACCESS,
 } from "./test-support.ts";
@@ -103,7 +104,8 @@ const write = (path: string, content: string) =>
 const headOf = async (directory: string, ref = "HEAD") =>
   (await simpleGit(directory).revparse([ref])).trim();
 
-const gitPath = (h: Fixture, name: string) => join(h.root, ".git", name);
+const gitPath = (h: Fixture, name: string) =>
+  join(releasedRoot(h), ".git", name);
 
 async function remoteHead(h: Fixture): Promise<string> {
   return headOf(h.bare, `refs/heads/${h.nodeBranch}`);
@@ -111,12 +113,12 @@ async function remoteHead(h: Fixture): Promise<string> {
 
 async function assertAtBefore(h: Fixture, before: string): Promise<void> {
   assert.equal(
-    (await simpleGit(h.root).raw(["symbolic-ref", "HEAD"])).trim(),
+    (await simpleGit(releasedRoot(h)).raw(["symbolic-ref", "HEAD"])).trim(),
     `refs/heads/${h.nodeBranch}`,
   );
-  assert.equal(await headOf(h.root), before);
+  assert.equal(await headOf(releasedRoot(h)), before);
   assert.equal(h.checkouts[0]!.head, before);
-  assert.equal((await simpleGit(h.root).status()).isClean(), true);
+  assert.equal((await simpleGit(releasedRoot(h)).status()).isClean(), true);
   assert.equal(await remoteHead(h), before);
 }
 
@@ -280,7 +282,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
       ),
     );
     await assertAtBefore(h, before);
-    assert.equal(existsSync(join(h.root, STRAY_FILE)), false);
+    assert.equal(existsSync(join(releasedRoot(h), STRAY_FILE)), false);
   });
 
   test("a write turn that commits ordinary commits settles as one commit", async (t) => {
@@ -353,7 +355,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     const detail = violationEnd(end, bodies, TurnViolation.BranchChanged);
     assert.ok(detail.includes(OTHER_BRANCH));
     await assertAtBefore(h, before);
-    assert.equal(existsSync(join(h.root, STRAY_FILE)), false);
+    assert.equal(existsSync(join(releasedRoot(h), STRAY_FILE)), false);
   });
 
   test("an agent that leaves a rebase in progress stops with git_in_progress", async (t) => {
@@ -609,11 +611,16 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     const end = await executionBoundary(h.run, () => runStepsImplement(h));
     assert.ok("stop" in end);
     assert.equal(end.stop?.reason, EndReason.ProviderFailed);
-    const local = await headOf(h.root, `refs/heads/${h.nodeBranch}`);
+    const local = await headOf(releasedRoot(h), `refs/heads/${h.nodeBranch}`);
     assert.equal(await remoteHead(h), local);
     assert.ok(
       (
-        await simpleGit(h.root).raw(["log", "-1", "--format=%b", local])
+        await simpleGit(releasedRoot(h)).raw([
+          "log",
+          "-1",
+          "--format=%b",
+          local,
+        ])
       ).includes(first.id),
     );
     await assertAtBefore(h, local);

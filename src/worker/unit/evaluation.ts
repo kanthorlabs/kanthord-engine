@@ -70,11 +70,7 @@ import {
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import type { StepsInput } from "./steps-implement.ts";
 import { commandOwners } from "./release-gate.ts";
-import {
-  type ExamineCheckout,
-  workRepositoriesOf,
-  WorkspaceKind,
-} from "./workspace.ts";
+import { type ExamineCheckout, workRepositoriesOf } from "./workspace.ts";
 import { ActionResultKind, ExecutionIntent } from "../contract.ts";
 import {
   environmentDigestsOf,
@@ -566,6 +562,6 @@ export async function runEvaluation(
       return await requestAndRelease(run);
     return run.stop(EndReason.OperationFailed);
   } finally {
-    input.workspaces.release(prepared.key, WorkspaceKind.Execution);
+    input.workspaces.release(prepared.key, prepared.kind);
   }
 }

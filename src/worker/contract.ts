@@ -33,7 +33,12 @@ import {
   type OperationResult,
   StoreName,
 } from "../kernel/operation.ts";
-import type { SshAccess } from "../repository/contract.ts";
+import type {
+  CheckoutResult,
+  PushRecord,
+  SnapshotRefresh,
+  SshAccess,
+} from "../repository/contract.ts";
 import { type Environment, environmentSchema } from "../kernel/devcontainer.ts";
 import { EnvironmentSource } from "../kernel/devcontainer.ts";
 import { copyHealthSchema, loginSessionEntrySchema } from "../llm/contract.ts";
@@ -1232,10 +1237,11 @@ export interface RepositoryTransport {
     baseBranch: string,
     pushed: boolean,
     keep: readonly string[],
+    record: PushRecord | null,
     context: Context,
     deadlineMs: number,
     ssh: SshAccess,
-  ): Promise<string>;
+  ): Promise<CheckoutResult>;
   fetchBase(
     directory: string,
     baseBranch: string,
@@ -1258,6 +1264,7 @@ export interface RepositoryTransport {
     deadlineMs: number,
     ssh: SshAccess,
   ): Promise<string>;
+  refreshSnapshot(input: SnapshotRefresh): Promise<string>;
 }
 export type ExecutionSetup = z.infer<typeof executionSetupSchema>;
 export const catalogItemSchema = z.strictObject({

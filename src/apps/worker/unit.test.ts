@@ -36,6 +36,7 @@ import {
   fauxToolCall,
   implementFixture,
   transport as localTransport,
+  remapOrigin,
   scriptedModelRuntime,
   scriptedProvider,
   STEPS_KEY,
@@ -769,6 +770,10 @@ async function liveStopUnit(
       clone: (_address, ...input) => localTransport.clone(h.bare, ...input),
       cloneSnapshot: (_address, ...input) =>
         localTransport.cloneSnapshot(h.bare, ...input),
+      fetchAndCheckout: async (...input) => {
+        await remapOrigin(input[0], () => h.bare);
+        return localTransport.fetchAndCheckout(...input);
+      },
       pushNodeBranch: async (...input) => {
         events.push("push");
         return localTransport.pushNodeBranch(...input);
