@@ -46,10 +46,14 @@ export class ToolProcesses {
 
   operations(toolCallId: string): BashOperations {
     assert.ok(toolCallId);
-    return processBashOperations(this.shell, (bashProcess) => {
-      if (this.ended.size >= PROCESSES_MAX) this.ended.clear();
-      this.ended.set(toolCallId, bashProcess);
-    });
+    return processBashOperations(
+      this.shell,
+      (bashProcess) => {
+        if (this.ended.size >= PROCESSES_MAX) this.ended.clear();
+        this.ended.set(toolCallId, bashProcess);
+      },
+      { killGroupAtEnd: true },
+    );
   }
 
   take(toolCallId: string): BashProcess | undefined {

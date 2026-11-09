@@ -76,6 +76,19 @@ export function killProcessTree(
   throwFailures(failures);
 }
 
+export function liveGroups(
+  groups: readonly number[],
+  system: ProcessSystem = SYSTEM_PROCESSES,
+): Set<number> {
+  const listed = new Set(groups);
+  return new Set(
+    system
+      .readTable()
+      .map((row) => row.group)
+      .filter((group) => listed.has(group)),
+  );
+}
+
 function assertLeader(leader: number): void {
   assert.ok(Number.isSafeInteger(leader) && leader > FIRST_USER_PID);
   assert.ok(leader !== process.pid && leader !== process.ppid);
