@@ -17,7 +17,6 @@ import {
 } from "../../kernel/git-environment.ts";
 import { CodedError } from "../../kernel/errors.ts";
 import { ensureDirectory } from "../../kernel/files.ts";
-import { readSetupRecord } from "./setup-record.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 import { childEnvironment } from "./tool-table.ts";
 const EXPIRED = 0;
@@ -53,6 +52,14 @@ const FORMAT_VERSION_KEY = "core.repositoryformatversion";
 const PARTIAL_CLONE_KEY = "extensions.partialclone";
 const PROMISOR_KEY = /^remote\..*\.promisor$/;
 const REBUILD_PATHS = ["shallow", "commondir"];
+const LINK_GUARDED_PATHS = [
+  "config",
+  "info",
+  "objects",
+  "objects/info",
+  "hooks",
+  "refs",
+];
 const KEPT_CORE_KEYS = [
   "core.filemode",
   "core.logallrefupdates",
@@ -1314,19 +1321,23 @@ function configTemplate(entries: readonly [string, string][]): string {
   ].join("");
 }
 
-function removeLocks(git: string): void {
-  for (const entry of readdirSync(git, {
-    recursive: true,
-    withFileTypes: true,
-  }))
-    if (!entry.isDirectory() && entry.name.endsWith(LOCK_SUFFIX))
-      rmSync(join(entry.parentPath, entry.name), { force: true });
+function removeLocks(directory: string): void {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) removeLocks(path);
+    else if (entry.name.endsWith(LOCK_SUFFIX)) rmSync(path, { force: true });
+  }
+}
+
+function isSymbolicLink(path: string): boolean {
+  return lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink() ?? false;
 }
 
 function rebuildBeforeConfig(git: string): boolean {
   return (
     !isDirectory(git) ||
     !existsSync(join(git, "config")) ||
+    LINK_GUARDED_PATHS.some((path) => isSymbolicLink(join(git, path))) ||
     REBUILD_PATHS.some((path) => existsSync(join(git, path))) ||
     entriesOf(join(git, "worktrees")).length > NO_ENTRIES
   );
@@ -1395,7 +1406,11 @@ export async function normaliseGitState(
   return GitState.Ready;
 }
 
-export async function scrubTree(call: GitCall, commit: string): Promise<void> {
+export async function scrubTree(
+  call: GitCall,
+  commit: string,
+  roots: readonly string[],
+): Promise<void> {
   assert.match(commit, COMMIT_PATTERN);
   const end = performance.now() + call.deadlineMs;
   const git = (args: string[]) =>
@@ -1406,9 +1421,9 @@ export async function scrubTree(call: GitCall, commit: string): Promise<void> {
       call.context,
       Math.max(1, end - performance.now()),
     );
-  const roots = (await readSetupRecord(call))?.roots ?? [];
   const exclude = join(call.directory, GIT_DIRECTORY, "info", "exclude");
   ensureDirectory(dirname(exclude));
+  rmSync(exclude, { force: true });
   writeFileSync(
     exclude,
     roots.map((root) => `${excludePattern(root)}${NEWLINE}`).join(""),

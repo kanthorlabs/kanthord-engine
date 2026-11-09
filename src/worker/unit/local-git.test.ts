@@ -4,6 +4,7 @@ import {
   appendFileSync,
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -41,7 +42,7 @@ import {
   scrubTree,
   treeOf,
 } from "./local-git.ts";
-import { writeSetupRecord } from "./setup-record.ts";
+import { readSetupRecord, writeSetupRecord } from "./setup-record.ts";
 import { PoolClass, TreePool } from "./tree-pool.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 
@@ -689,6 +690,7 @@ const DETACHED_HEAD = "HEAD";
 const SKIP_WORKTREE_TAG = "S ";
 const NO_LINES = 0;
 const FALSE_TEXT = "false";
+const OUTSIDE_TEXT = "outside\n";
 const SCRUBBED_EXCLUDE = "/deps/\n/star\\*\n";
 
 async function commitFile(directory: string, path: string, content: string) {
@@ -757,15 +759,24 @@ async function takeAndScrub(
 ): Promise<string> {
   const directory = take(at);
   assert.equal(await normalise(at, directory, keepRefs), READY);
-  await scrubTree(
-    { env, directory, context: background, deadlineMs: GIT_DEADLINE_MS },
-    at.commit,
-  );
+  const call = {
+    env,
+    directory,
+    context: background,
+    deadlineMs: GIT_DEADLINE_MS,
+  };
+  await scrubTree(call, at.commit, (await readSetupRecord(call))?.roots ?? []);
   return directory;
 }
 
 async function hostGit(directory: string, args: string[]): Promise<string> {
   return (await simpleGit(directory).raw(args)).trim();
+}
+
+function snapshot(path: string): string | string[] {
+  return lstatSync(path).isDirectory()
+    ? readdirSync(path, { recursive: true }).map(String).sort()
+    : readFileSync(path, "utf8");
 }
 
 function lockFiles(directory: string): string[] {
@@ -974,6 +985,50 @@ test("a cherry-pick and a revert in progress are gone", async (t) => {
   const directory = await takeAndScrub(at);
   for (const name of ["sequencer", "CHERRY_PICK_HEAD", "REVERT_HEAD"])
     assert.equal(existsSync(join(directory, ".git", name)), false, name);
+});
+
+test("a lock behind a symlink in .git outside the tree survives", async (t) => {
+  const at = await poolFixture(t);
+  const outside = join(at.root, "outside");
+  mkdirSync(outside);
+  writeFileSync(join(outside, "x.lock"), "");
+  symlinkSync(outside, join(at.tree, ".git", "linked"));
+  const directory = take(at);
+  assert.equal(await normalise(at, directory), READY);
+  assert.equal(existsSync(join(outside, "x.lock")), true);
+});
+
+test("a symlinked config, info, objects, objects/info, hooks or refs answers rebuild", async (t) => {
+  for (const path of [
+    "config",
+    "info",
+    "objects",
+    "objects/info",
+    "hooks",
+    "refs",
+  ]) {
+    const at = await poolFixture(t);
+    const inside = join(at.tree, ".git", path);
+    const outside = join(at.root, "outside");
+    mkdirSync(join(inside, ".."), { recursive: true });
+    if (existsSync(inside)) renameSync(inside, outside);
+    else mkdirSync(outside);
+    symlinkSync(outside, inside);
+    const before = snapshot(outside);
+    assert.equal(await normalise(at, take(at)), REBUILD, path);
+    assert.deepEqual(snapshot(outside), before, path);
+  }
+});
+
+test("a symlinked info/exclude is replaced and its target stays", async (t) => {
+  const at = await poolFixture(t);
+  const outside = join(at.root, "outside-exclude");
+  writeFileSync(outside, OUTSIDE_TEXT);
+  const exclude = join(at.tree, ".git", "info", "exclude");
+  rmSync(exclude, { force: true });
+  symlinkSync(outside, exclude);
+  await takeAndScrub(at);
+  assert.equal(readFileSync(outside, "utf8"), OUTSIDE_TEXT);
 });
 
 test("a stale index lock and a stale ref lock are removed and the tree is reused", async (t) => {

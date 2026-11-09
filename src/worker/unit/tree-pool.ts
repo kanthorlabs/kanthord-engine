@@ -108,7 +108,7 @@ function removeTree(path: string): void {
 export class TreePool {
   readonly root: string;
   private readonly rename: (from: string, to: string) => void;
-  private readonly remove: (path: string) => void;
+  readonly remove: (path: string) => void;
   private constructor(root: string, options: TreePoolOptions) {
     this.root = root;
     this.rename = options.rename ?? renameSync;
@@ -222,26 +222,26 @@ export async function prepareTree(
     return { source: TreeSource.Clone };
   };
   if (!pool.take(input, target, input.nodeId)) return await clone();
-  const state = await normaliseGitState(
-    {
-      env: input.env,
-      directory: target,
-      context,
-      deadlineMs: input.deadlineMs,
-    },
-    input.address,
-    input.keepRefs,
-  );
-  if (state === GitState.Rebuild) {
-    removeTree(target);
-    return await clone();
-  }
+  let reused = false;
   try {
-    await input.reuse();
+    const state = await normaliseGitState(
+      {
+        env: input.env,
+        directory: target,
+        context,
+        deadlineMs: input.deadlineMs,
+      },
+      input.address,
+      input.keepRefs,
+    );
+    if (state === GitState.Ready) {
+      await input.reuse();
+      reused = true;
+    }
   } catch (error) {
     if (context.signal.aborted) throw error;
-    removeTree(target);
-    return await clone();
   }
-  return { source: TreeSource.Pool };
+  if (reused) return { source: TreeSource.Pool };
+  pool.remove(target);
+  return await clone();
 }

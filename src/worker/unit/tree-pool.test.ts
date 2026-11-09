@@ -6,6 +6,7 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -288,7 +289,7 @@ test("the pool deletes an eviction leftover when it opens", (t) => {
   assert.equal(existsSync(kept), true);
 });
 
-async function gitTree(t: TestContext) {
+async function gitTree(t: TestContext, removed: string[] = []) {
   const root = temporary(t);
   const origin = join(root, "origin");
   mkdirSync(origin);
@@ -304,7 +305,12 @@ async function gitTree(t: TestContext) {
     "-m",
     "initial",
   ]);
-  const pool = TreePool.open(join(root, "pool"));
+  const pool = TreePool.open(join(root, "pool"), {
+    remove: (path) => {
+      removed.push(path);
+      rmSync(path, { recursive: true, force: true });
+    },
+  });
   const given = join(root, "given");
   await simpleGit(root).clone(origin, given);
   pool.give({ address: origin, poolClass: PoolClass.Agent }, given, NODE_A);
@@ -405,4 +411,37 @@ test("a failed reuse in an aborted context throws and clones nothing", async (t)
     ),
   );
   assert.deepEqual(calls, ["reuse"]);
+});
+
+async function retakenWith(
+  at: Awaited<ReturnType<typeof gitTree>>,
+  change: (taken: string) => void,
+) {
+  const slot = { address: at.origin, poolClass: PoolClass.Agent };
+  const taken = join(at.root, "taken");
+  assert.equal(at.pool.take(slot, taken, NODE_A), true);
+  change(taken);
+  at.pool.give(slot, taken, NODE_A);
+}
+
+test("a malformed .git/config makes the take rebuild", async (t) => {
+  const at = await gitTree(t);
+  await retakenWith(at, (taken) =>
+    writeFileSync(join(taken, ".git", "config"), "[core\n"),
+  );
+  const calls: string[] = [];
+  assert.deepEqual(await preparation(at, calls, async () => {}), {
+    source: TreeSource.Clone,
+  });
+  assert.deepEqual(calls, ["fresh"]);
+});
+
+test("a rebuilt or failed tree is deleted with the pool remover", async (t) => {
+  const removed: string[] = [];
+  const at = await gitTree(t, removed);
+  await retakenWith(at, (taken) =>
+    writeFileSync(join(taken, ".git", "shallow"), ""),
+  );
+  await preparation(at, [], async () => {});
+  assert.deepEqual(removed, [target(at.root)]);
 });
