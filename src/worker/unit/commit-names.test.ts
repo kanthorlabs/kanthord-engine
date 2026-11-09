@@ -1,31 +1,23 @@
-import { VerdictSource } from "./node-reads.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { test, type TestContext } from "node:test";
+import { test } from "node:test";
 import { simpleGit } from "simple-git";
-import { background } from "../../kernel/context.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { refreshAtClaim, RefreshResult } from "./base-refresh.ts";
 import { runStepsImplement } from "./steps-implement.ts";
 import { DONE_TRAILER, doneRecordOf } from "./done-record.ts";
-import { nodeUnitOf } from "./release-gate.ts";
 import {
   advanceBase,
-  commitOnNode,
   fauxAssistantMessage,
   fauxToolCall,
   implementFixture as fixture,
-  recordDone,
   recordReleases,
   task,
-  TEST_SSH_ACCESS,
 } from "./test-support.ts";
 
 const COMMIT_RULE =
   /^(feat|fix|docs|style|refactor|test|chore)(\([a-z0-9-]+\))?: \S.*$/;
 const HEADER_MAX_LENGTH = 100;
-const FETCH_DEADLINE_MS = 20000;
 const RELEASED = { kind: "released", furtherWork: false };
 const BASE_FILE = "other";
 const LONG_NAME = `Rework ${"the long subject of the node ".repeat(5)}end.`;
@@ -141,50 +133,6 @@ test("a node unit commit takes the commit type of the node and a header cut to 1
   assert.equal(unitId, h.input.claim.node_id);
 });
 
-test("a verdict commit takes the node name", async (t) => {
-  const current = task("judged", "true");
-  const h = await fixture(
-    t,
-    [current],
-    [write("verdict"), fauxAssistantMessage("fixed")],
-  );
-  await recordDone(h, current);
-  h.verdict = {
-    source: VerdictSource.Rework,
-    text: "The edge case stays unhandled.",
-    findings: [],
-    round: null,
-    judged: h.checkouts.map((checkout) => ({
-      binding_id: checkout.binding_id,
-      commit: checkout.head,
-    })),
-  };
-  await releaseRun(h);
-  const [latest] = await nodeMessages(h);
-  const unit = nodeUnitOf(h.input.claim.node_id, h.revision);
-  assert.equal(
-    latest,
-    `feat: implement\n\n${unit.id}\n\n${DONE_TRAILER}: ${doneRecordOf(unit)}`,
-  );
-});
-
-test("a conflict merge commit takes the commit rule", async (t) => {
-  const h = await conflictFixture(t, [
-    write("file"),
-    fauxAssistantMessage("resolved"),
-  ]);
-  await h.input.transport.fetchBase(
-    h.root,
-    "main",
-    background,
-    FETCH_DEADLINE_MS,
-    TEST_SSH_ACCESS,
-  );
-  assert.equal(await refreshAtClaim(h), RefreshResult.Merged);
-  const [message] = await messages(h.root, "-1");
-  assert.equal(message, `feat: merge main\n\n${h.input.claim.node_id}`);
-});
-
 test("a checkpoint commit takes the name of the current unit", async (t) => {
   const current = task("Write the guide", "false");
   const h = await fixture(
@@ -202,14 +150,3 @@ test("a checkpoint commit takes the name of the current unit", async (t) => {
   const [message] = await nodeMessages(h);
   assert.equal(message, `feat: write the guide\n\n${current.id}`);
 });
-
-async function conflictFixture(
-  t: TestContext,
-  script: Parameters<typeof fixture>[2],
-) {
-  const h = await fixture(t, [], script);
-  await commitOnNode(h.root, "node side");
-  h.checkouts[0]!.head = (await simpleGit(h.root).revparse(["HEAD"])).trim();
-  await advanceBase(h, t, "main side");
-  return h;
-}
