@@ -23,6 +23,7 @@ import {
   clonePacked,
   fetchLocal,
   matchRemote,
+  removeBranches,
   scrubTree,
 } from "./local-git.ts";
 import {
@@ -424,6 +425,7 @@ async function buildReleaseClones(
           context,
           remaining(),
         );
+        await removeBranches(call());
       },
       reuse: async () => {
         await matchRemote(

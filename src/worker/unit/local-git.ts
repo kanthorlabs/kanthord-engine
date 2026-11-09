@@ -1520,13 +1520,26 @@ export async function matchCheckoutRefs(
   )
     await git(["symbolic-ref", ORIGIN_HEAD, tracking]);
   else await git(["update-ref", "--no-deref", "-d", ORIGIN_HEAD]);
+  await removeBranches({ ...call, deadlineMs: remaining() });
+  await git(["remote", "set-url", "origin", "--", address]);
+}
+
+export async function removeBranches(call: GitCall): Promise<void> {
+  const end = performance.now() + call.deadlineMs;
+  const git = (args: string[]) =>
+    run(
+      call.env,
+      call.directory,
+      args,
+      call.context,
+      Math.max(1, end - performance.now()),
+    );
   const branches = (
     await git(["for-each-ref", "--format=%(refname:lstrip=2)", BRANCH_PREFIX])
   )
     .split(NEWLINE)
     .filter(Boolean);
   if (branches.length) await git(["branch", "-D", "--", ...branches]);
-  await git(["remote", "set-url", "origin", "--", address]);
 }
 
 export async function removeRef(call: GitCall, ref: string): Promise<void> {

@@ -80,6 +80,7 @@ const CONFIG_KEY = "a.b";
 const BASE_CHANGE = "base change";
 const LEFTOVER = "leftover";
 const STRAY_FILE = "stray";
+const NO_CONFIG = "";
 const FAILS_IN_RELEASE = 'case "$PWD" in */release/*) test -e fixed;; esac';
 const STRAY = "stray";
 const BUILD = "build";
@@ -836,6 +837,31 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
       [...objectInodes(tree)].filter((ino) => checkout.has(ino)),
       [],
     );
+  });
+
+  test("a fresh and a reused release tree hold the same refs and no branch config", async (t) => {
+    const h = await fixture(t, [], []);
+    const refsOf = (tree: string) =>
+      simpleGit(tree).raw([
+        "for-each-ref",
+        "--format=%(refname) %(objectname) %(symref)",
+      ]);
+    const branchConfig = (tree: string) =>
+      simpleGit(tree)
+        .raw(["config", "--get-regexp", "^branch\\."])
+        .catch(() => NO_CONFIG);
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    const [fresh] = freeCommandTrees(h);
+    assert.ok(fresh);
+    const freshRefs = await refsOf(fresh);
+    assert.equal(await branchConfig(fresh), NO_CONFIG);
+    const prepared = treesPrepared(t, h);
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    assert.deepEqual(prepared(), [RELEASE_FROM_POOL]);
+    const [reused] = freeCommandTrees(h);
+    assert.ok(reused);
+    assert.equal(await refsOf(reused), freshRefs);
+    assert.equal(await branchConfig(reused), NO_CONFIG);
   });
 
   test("a second node of the same repository reuses the release tree", async (t) => {
