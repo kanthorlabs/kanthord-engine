@@ -106,6 +106,7 @@ const NO_TASKS = 0;
 const NO_CHECKOUTS = 0;
 const NO_LINK_UPDATES = 0;
 const NO_PROGRESS_LIMIT = 2;
+const ONE_TURN = 1;
 const SINGLE_CHECKOUT = 1;
 const BASE_MERGED = "base_merged";
 
@@ -475,6 +476,7 @@ async function runNodeInstruction(
   let instruction = node.text;
   let template: PromptTemplate = PromptTemplate.CriterionRevision;
   let revised = false;
+  let waived = false;
   state.run.log("node instruction started", { task_id: unit.id, ruled });
   while (!budget.exhausted()) {
     await state.run.checkClaim();
@@ -488,12 +490,8 @@ async function runNodeInstruction(
         commit: headSetOf(state.checkouts),
         holds: !ruled,
       });
-      if (ruled) {
-        state.unchangedTurns = unchangedTurns;
-        countUnchangedTurn(state, NoProgressRule.VerdictRuleUnmet);
-        state.revisionCount++;
-        continue;
-      }
+      waived = ruled;
+      if (ruled && retryVerdictTurn(state, unit, unchangedTurns)) continue;
     } else if (revised && !agent.changed())
       countUnchangedTurn(state, NoProgressRule.UnchangedRevision);
     const checked = await verifyCommands(state, unit, commands);
@@ -508,6 +506,7 @@ async function runNodeInstruction(
       exit_codes: verification.results.map((result) => result.exit_code),
     });
     if (passed) return await completeUnit(state, unit, agent);
+    if (waived) countUnchangedTurn(state, NoProgressRule.VerdictRuleUnmet);
     instruction = taskRevisionInstruction(
       state.input.setup.templates,
       verification,
@@ -519,6 +518,24 @@ async function runNodeInstruction(
     state.revisionCount++;
   }
   return ended;
+}
+
+function retryVerdictTurn(
+  state: StepsState,
+  unit: TaskContent,
+  unchangedTurns: number,
+): boolean {
+  state.unchangedTurns = unchangedTurns;
+  if (state.unchangedTurns + ONE_TURN >= NO_PROGRESS_LIMIT) {
+    state.run.log("verdict rule waived for review", {
+      task_id: unit.id,
+      commit: headSetOf(state.checkouts),
+    });
+    return false;
+  }
+  countUnchangedTurn(state, NoProgressRule.VerdictRuleUnmet);
+  state.revisionCount++;
+  return true;
 }
 
 export const TaskResultKind = {
