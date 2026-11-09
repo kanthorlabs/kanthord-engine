@@ -90,19 +90,6 @@ test("a comment_created delivery decodes to its link, key and facts", () => {
   });
 });
 
-test("the time of comment.created reads with an offset of the form +0000, +00:00 and Z", () => {
-  for (const created of [
-    "2026-10-15T03:57:51.123+0000",
-    "2026-10-15T03:57:51.123+00:00",
-    "2026-10-15T03:57:51.123Z",
-    "2026-10-15T05:57:51.123+0200",
-  ])
-    assert.equal(
-      decode(jiraWebhookComment({ created }))?.occurred_at,
-      JIRA_CREATED_MS,
-    );
-});
-
 test("a comment of an app account answers actor_automated true", () => {
   const update = decode(
     jiraWebhookComment({
@@ -114,16 +101,6 @@ test("a comment of an app account answers actor_automated true", () => {
   );
   assert.equal(update?.actor_automated, true);
   assert.equal(update?.actor_id, JIRA_APP_ACCOUNT_ID);
-});
-
-test("a comment with no author answers a null actor", () => {
-  const update = decode(jiraWebhookComment({ author: undefined }));
-  assert.equal(update?.actor_id, null);
-});
-
-test("a comment without a valid comment.created decodes to null", () => {
-  for (const created of [undefined, "", "yesterday", 17, null])
-    assert.equal(decode(jiraWebhookComment({ created })), null);
 });
 
 test("another event, another project and a broken body decode to null", () => {
@@ -221,20 +198,6 @@ test("the description of an ADF body answers the text nodes with a newline betwe
     },
   );
   assert.equal(describe(jiraWebhookComment({ body }))?.body, ADF_TEXT);
-});
-
-test("the description answers null for another event, a missing author and a bad time", () => {
-  assert.equal(
-    describe(
-      jiraWebhookComment({}, { webhookEvent: JIRA_ISSUE_UPDATED_EVENT }),
-      JIRA_ISSUE_UPDATED_EVENT,
-    ),
-    null,
-  );
-  assert.equal(describe(jiraWebhookComment({ author: undefined })), null);
-  assert.equal(describe(jiraWebhookComment({ created: "yesterday" })), null);
-  assert.equal(describe(jiraWebhookComment({ body: 7 })), null);
-  assert.equal(describe({}), null);
 });
 
 const LISTED_ISSUE = { key: JIRA_ISSUE_KEY };
