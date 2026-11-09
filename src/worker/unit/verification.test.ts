@@ -5,6 +5,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { join } from "node:path";
 import { background, CancellationContext } from "../../kernel/context.ts";
+import type { ProcessRow, ProcessSystem } from "../../kernel/process-group.ts";
 import {
   hostEnvironment,
   killIfPresent,
@@ -1035,5 +1036,91 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
       "kanthord.stop.reason",
       "kanthord.stop.rule",
     ]);
+  });
+
+  const ABSENT_PROCESS = 999_998;
+  const ABSENT_GROUP = 999_999;
+  const INIT_PID = 1;
+  const ONE_CHILD = 1;
+  const NO_READS = 0;
+
+  function recordedProcesses(table: () => ProcessRow[]): {
+    system: ProcessSystem;
+    reads: () => number;
+    signals: [number, NodeJS.Signals][];
+  } {
+    let reads = 0;
+    const signals: [number, NodeJS.Signals][] = [];
+    return {
+      system: {
+        readTable: () => {
+          reads += 1;
+          return table();
+        },
+        signalGroup: (group, signal) => signals.push([group, signal]),
+      },
+      reads: () => reads,
+      signals,
+    };
+  }
+
+  test("a background child of a verification command lives until the end of its run list and is dead after it", async (t) => {
+    const directory = temporary(t);
+    const run = await runVerificationsWithOutput({
+      directory,
+      commands: [
+        "sleep 30 >/dev/null 2>&1 & echo $! > child; echo $!",
+        'kill -0 "$(cat child)"',
+      ],
+      tested_input: { kind: "produced", sha256: "hash" },
+      deadline: Date.now() + 10000,
+      context: background,
+      env: hostEnvironment(),
+    });
+    const spawned = spawnedPids(t, [{ type: "text", text: run.outputs[0] }]);
+    assert.equal(run.outcome, VerificationClass.Pass);
+    assert.equal(spawned.length, ONE_CHILD);
+    assert.deepEqual(await survivingProcesses(spawned), []);
+  });
+
+  test("a group with no member left is not signalled at the end of the run list", async (t) => {
+    const processes = recordedProcesses(() => []);
+    const run = await runVerificationsWithOutput({
+      directory: temporary(t),
+      commands: ["true"],
+      tested_input: { kind: "produced", sha256: "hash" },
+      deadline: Date.now() + 10000,
+      context: background,
+      env: hostEnvironment(),
+      processes: processes.system,
+    });
+    assert.equal(run.outcome, VerificationClass.Pass);
+    assert.ok(processes.reads() > NO_READS);
+    assert.deepEqual(processes.signals, []);
+  });
+
+  test("a group whose id leads a new process is not signalled", async (t) => {
+    const directory = temporary(t);
+    const leaderFile = join(directory, "leader");
+    const processes = recordedProcesses(() => {
+      if (!existsSync(leaderFile)) return [];
+      const leader = Number(readFileSync(leaderFile, "utf8"));
+      return [
+        { pid: leader, ppid: INIT_PID, group: ABSENT_GROUP },
+        { pid: ABSENT_PROCESS, ppid: INIT_PID, group: leader },
+      ];
+    });
+    const run = await runVerificationsWithOutput({
+      directory,
+      commands: ["echo $$ > leader"],
+      tested_input: { kind: "produced", sha256: "hash" },
+      deadline: Date.now() + 10000,
+      context: background,
+      env: hostEnvironment(),
+      processes: processes.system,
+    });
+    assert.equal(run.outcome, VerificationClass.Pass);
+    assert.ok(processes.reads() > NO_READS);
+    assert.deepEqual(processes.signals, []);
   });
 });

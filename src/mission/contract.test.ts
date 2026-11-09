@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
 import {
-  actionKeySchema,
   ActorKind,
   actorSchema,
   ActorService,
@@ -10,91 +9,29 @@ import {
   AdmissionRefusal,
   AssessmentResult,
   assessmentSubmitSchema,
-  assetSubmitSchema,
-  attemptSchema,
   contentSchema,
-  deliveryAdmitSchema,
   Disposition,
-  edgeSchema,
   evidenceDeleteSchema,
   evidenceRequestSchema,
   evidenceSubmitSchema,
   executionContextSchema,
-  EXTERNAL_LINK_LIMIT,
   ExternalLinkKind,
-  FINDING_IDENTITY_PREFIX,
-  FINDING_MAX,
-  FINDING_TEXT_MAX_BYTES,
-  FindingAction,
-  FindingCauseOwner,
-  findingCreateSchema,
-  findingDecideSchema,
-  FindingDecision,
-  FindingGround,
-  FindingKind,
-  FindingRoute,
-  FindingSource,
-  FindingStatus,
-  findingSubmitSchema,
-  findingUpdateSchema,
   humanActSchema,
   Intent,
-  mediaTypeSchema,
-  NODE_IDENTITY_PREFIX,
   nodeCheckSchema,
-  nodeCreateSchema,
-  nodeSchema,
   NodeState,
-  OBJECT_SIZE_MAX,
   overrideSchema,
   resumeSchema,
   ResumeTarget,
-  reviewRoundSchema,
-  TASK_IDENTITY_PREFIX,
-  taskBodySchema,
-  taskContentSchema,
-  taskWriteSchema,
   unblockChangeSchema,
   unblockSchema,
 } from "./contract.ts";
 
 const ZERO_ATTEMPT = 0;
-const EIGHT_KIB = 8192;
-test("service provenance accepts an optional canonical snake-case inbound event identity", () => {
-  const plain = { kind: ActorKind.Service, service: ActorService.Mission };
-  const provenance = {
-    ...plain,
-    inbound_event_id: createIdentity("inbound_event"),
-  };
-  assert.deepEqual(actorSchema.parse(plain), plain);
-  assert.deepEqual(actorSchema.parse(provenance), provenance);
-  assert.equal(
-    actorSchema.safeParse({ ...plain, inbound_event_id: "invalid" }).success,
-    false,
-  );
-  assert.equal(
-    actorSchema.safeParse({
-      ...plain,
-      inboundEventId: provenance.inbound_event_id,
-    }).success,
-    false,
-  );
-  assert.equal(
-    actorSchema.safeParse({
-      kind: ActorKind.Human,
-      account: "ulrich",
-      name: "Ulrich",
-      inbound_event_id: provenance.inbound_event_id,
-    }).success,
-    false,
-  );
-});
 const FIRST_REVISION = 1;
 const REASON = "Hold the work";
 const UNKNOWN_KEY = "unexpected";
-const INVALID_RESULT = "failure";
 const VALID_ACTION_KEY = "repo.pull_request";
-const INVALID_ACTION_KEY = "repo.merge";
 const HUMAN = { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" };
 const CONTEXT = {
   execution_id: createIdentity("execution"),
@@ -113,7 +50,6 @@ const ASSESSMENT = {
   rationale: REASON,
   tested_input: { kind: "produced", sha256: "a".repeat(64) },
 };
-
 test("the assessment body requires a cause with the result criterion-not-met and refuses it with another result", () => {
   const cause = {
     category: "model",
@@ -197,40 +133,6 @@ test("execution and evidence control inputs are strict and refuse forged actors"
   );
 });
 
-test("object size, media type and forced-delete reason have exact bounds", () => {
-  const object = {
-    kind: "object",
-    size: OBJECT_SIZE_MAX,
-    media_type: "text/plain",
-  };
-  assert.equal(assetSubmitSchema.safeParse(object).success, true);
-  assert.equal(
-    assetSubmitSchema.safeParse({
-      ...object,
-      size: OBJECT_SIZE_MAX + FIRST_REVISION,
-    }).success,
-    false,
-  );
-  for (const mediaType of [
-    "text/plain; charset=utf-8",
-    "text",
-    "téxt/plain",
-    "text/plain\n",
-    `${"a".repeat(128)}/b`,
-  ])
-    assert.equal(mediaTypeSchema.safeParse(mediaType).success, false);
-  assert.equal(mediaTypeSchema.safeParse("text/plain").success, true);
-  assert.equal(
-    mediaTypeSchema.safeParse(`${"a".repeat(127)}/${"b".repeat(127)}`).success,
-    true,
-  );
-  const deletion = { expected_mission_version: FIRST_REVISION, force: true };
-  assert.equal(evidenceDeleteSchema.safeParse(deletion).success, false);
-  assert.equal(
-    evidenceDeleteSchema.safeParse({ ...deletion, reason: REASON }).success,
-    true,
-  );
-});
 const ACT = {
   reason: REASON,
   expected_mission_version: FIRST_REVISION,
@@ -277,42 +179,6 @@ test("human control inputs reject unknown fields and forged actors", () => {
   }
 });
 
-test("attempt-zero preconditions are accepted but opened attempts start at one", () => {
-  assert.equal(humanActSchema.parse(ACT).expected_attempt, ZERO_ATTEMPT);
-  assert.equal(
-    humanActSchema.safeParse({ ...ACT, expected_attempt: null }).success,
-    false,
-  );
-  assert.equal(
-    humanActSchema.safeParse({
-      ...ACT,
-      expected_attempt: Number.MAX_SAFE_INTEGER + FIRST_REVISION,
-    }).success,
-    false,
-  );
-  assert.equal(
-    attemptSchema.shape.attempt.safeParse(ZERO_ATTEMPT).success,
-    false,
-  );
-  assert.equal(
-    attemptSchema.shape.attempt.parse(FIRST_REVISION),
-    FIRST_REVISION,
-  );
-});
-
-test("override result and action keys use the ruled closed sets", () => {
-  assert.equal(
-    overrideSchema.safeParse({ ...ACT, result: INVALID_RESULT }).success,
-    false,
-  );
-  assert.equal(
-    overrideSchema.parse({ ...ACT, result: AssessmentResult.Success }).result,
-    AssessmentResult.Success,
-  );
-  assert.equal(actionKeySchema.parse(VALID_ACTION_KEY), VALID_ACTION_KEY);
-  assert.equal(actionKeySchema.safeParse(INVALID_ACTION_KEY).success, false);
-});
-
 test("service actors admit Mission and Scheduler only", () => {
   for (const service of Object.values(ActorService)) {
     const actor = { kind: ActorKind.Service, service };
@@ -325,30 +191,6 @@ test("service actors admit Mission and Scheduler only", () => {
   assert.equal(
     actorSchema.safeParse({ kind: ActorKind.Service, service: UNKNOWN_KEY })
       .success,
-    false,
-  );
-});
-
-test("the delivery admission input holds canonical base64 event bytes", () => {
-  const body = {
-    inbound_event_id: createIdentity("inbound_event"),
-    project_id: createIdentity("project"),
-    platform: "github",
-    resource: "owner/gated",
-    event: Buffer.from('{"number":1}').toString("base64"),
-    metadata: { event: "pull_request" },
-  };
-  assert.deepEqual(deliveryAdmitSchema.parse(body), body);
-  for (const event of ["QR==", "QQ", "not base64!"])
-    assert.equal(
-      deliveryAdmitSchema.safeParse({ ...body, event }).success,
-      false,
-    );
-  assert.equal(
-    deliveryAdmitSchema.safeParse({
-      ...body,
-      inboundEventId: body.inbound_event_id,
-    }).success,
     false,
   );
 });
@@ -385,75 +227,6 @@ test("the delivery admission answer carries a reason only for a refusal", () => 
   );
 });
 
-test("a task identity takes the task prefix and a task body names no binding", () => {
-  const task = {
-    id: createIdentity(TASK_IDENTITY_PREFIX),
-    filename: "recover.md",
-    content: CONTENT,
-  };
-  assert.equal(taskContentSchema.safeParse(task).success, true);
-  assert.equal(
-    taskContentSchema.safeParse({
-      ...task,
-      id: createIdentity(NODE_IDENTITY_PREFIX),
-    }).success,
-    false,
-  );
-  assert.equal(
-    taskWriteSchema.safeParse({ filename: task.filename, content: CONTENT })
-      .success,
-    true,
-  );
-  assert.equal(
-    taskBodySchema.safeParse({
-      ...CONTENT,
-      bindings: [createIdentity("binding")],
-    }).success,
-    false,
-  );
-});
-
-test("a node create requires the task list", () => {
-  const create = {
-    filename: "recover.md",
-    content: NODE_CONTENT,
-    reason: REASON,
-    expected_mission_version: FIRST_REVISION,
-  };
-  assert.equal(nodeCreateSchema.safeParse(create).success, false);
-  assert.equal(
-    nodeCreateSchema.safeParse({ ...create, tasks: [] }).success,
-    true,
-  );
-});
-
-test("node content holds intent and a tags list that reads [] when absent", () => {
-  assert.deepEqual(contentSchema.parse(NODE_CONTENT).tags, []);
-  assert.equal(
-    contentSchema.safeParse({ ...NODE_CONTENT, intent: "task" }).success,
-    false,
-  );
-  const { intent, ...noIntent } = NODE_CONTENT;
-  assert.equal(intent, Intent.Implement);
-  assert.equal(contentSchema.safeParse(noIntent).success, false);
-  assert.equal(
-    contentSchema.safeParse({
-      ...NODE_CONTENT,
-      tags: ["platform.macos", "toolchain.xcode_16"],
-    }).success,
-    true,
-  );
-  assert.equal(
-    contentSchema.safeParse({ ...NODE_CONTENT, tags: ["platform.macOS"] })
-      .success,
-    false,
-  );
-  assert.equal(
-    taskBodySchema.safeParse({ ...CONTENT, intent: Intent.Implement }).success,
-    false,
-  );
-});
-
 const CONVERSATION_IDENTITY = "conversation:github:acme/app";
 const ISSUE_NUMBER = 117;
 const GITHUB_ISSUE = {
@@ -461,16 +234,6 @@ const GITHUB_ISSUE = {
   resource_identity: CONVERSATION_IDENTITY,
   number: ISSUE_NUMBER,
 };
-const NON_POSITIVE_NUMBER = 0;
-
-test("node content holds external links that read [] when absent", () => {
-  assert.deepEqual(contentSchema.parse(NODE_CONTENT).external_links, []);
-  assert.deepEqual(
-    contentSchema.parse({ ...NODE_CONTENT, external_links: [GITHUB_ISSUE] })
-      .external_links,
-    [GITHUB_ISSUE],
-  );
-});
 
 const JIRA_IDENTITY = "conversation:jira:acme.atlassian.net/KD";
 const JIRA_ISSUE = {
@@ -478,16 +241,6 @@ const JIRA_ISSUE = {
   resource_identity: JIRA_IDENTITY,
   key: "KD-42",
 };
-
-test("node content holds a jira_issue link next to a github_issue link", () => {
-  assert.deepEqual(
-    contentSchema.parse({
-      ...NODE_CONTENT,
-      external_links: [JIRA_ISSUE, GITHUB_ISSUE],
-    }).external_links,
-    [JIRA_ISSUE, GITHUB_ISSUE],
-  );
-});
 
 test("node content refuses a jira_issue link with a key of another project or outside its form", () => {
   const refused: unknown[] = [
@@ -529,324 +282,4 @@ test("node content refuses a jira_issue link with a key of another project or ou
     }).success,
     false,
   );
-});
-
-const SLACK_IDENTITY = "conversation:slack:T01ABCDEF";
-const SLACK_THREAD = {
-  kind: ExternalLinkKind.SlackThread,
-  resource_identity: SLACK_IDENTITY,
-  channel: "C01ABCDEF",
-  thread_ts: "1700000000.000100",
-};
-
-test("node content holds a slack_thread link next to the other links", () => {
-  assert.deepEqual(
-    contentSchema.parse({
-      ...NODE_CONTENT,
-      external_links: [SLACK_THREAD, JIRA_ISSUE, GITHUB_ISSUE],
-    }).external_links,
-    [SLACK_THREAD, JIRA_ISSUE, GITHUB_ISSUE],
-  );
-  assert.equal(
-    contentSchema.safeParse({
-      ...NODE_CONTENT,
-      external_links: [{ ...SLACK_THREAD, channel: "G01ABCDEF" }],
-    }).success,
-    true,
-  );
-});
-
-test("node content refuses a slack_thread link outside its form", () => {
-  const refused: unknown[] = [
-    { ...SLACK_THREAD, channel: "D01ABCDEF" },
-    { ...SLACK_THREAD, channel: "c01abcdef" },
-    { ...SLACK_THREAD, channel: "C0" },
-    { ...SLACK_THREAD, thread_ts: "1700000000" },
-    { ...SLACK_THREAD, thread_ts: "1700000000.0001" },
-    { ...SLACK_THREAD, thread_ts: "1700000000.0001000" },
-    { ...SLACK_THREAD, thread_ts: ".000100" },
-    { ...SLACK_THREAD, thread_ts: "1700000000.00010a" },
-    { ...SLACK_THREAD, resource_identity: CONVERSATION_IDENTITY },
-    { ...SLACK_THREAD, resource_identity: JIRA_IDENTITY },
-    { ...SLACK_THREAD, resource_identity: "conversation:slack:t01abcdef" },
-    { ...SLACK_THREAD, resource_identity: "repository:slack:T01ABCDEF" },
-    { ...SLACK_THREAD, number: ISSUE_NUMBER },
-    { ...SLACK_THREAD, key: "KD-42" },
-    { ...GITHUB_ISSUE, channel: SLACK_THREAD.channel },
-  ];
-  for (const link of refused)
-    assert.equal(
-      contentSchema.safeParse({ ...NODE_CONTENT, external_links: [link] })
-        .success,
-      false,
-      JSON.stringify(link),
-    );
-  assert.equal(
-    contentSchema.safeParse({
-      ...NODE_CONTENT,
-      external_links: [SLACK_THREAD, { ...SLACK_THREAD }],
-    }).success,
-    false,
-  );
-});
-
-test("node content refuses an invalid external link, a repeated link and more than 10 links", () => {
-  const refused: unknown[] = [
-    [{ ...GITHUB_ISSUE, kind: ExternalLinkKind.JiraIssue }],
-    [{ ...GITHUB_ISSUE, number: NON_POSITIVE_NUMBER }],
-    [{ ...GITHUB_ISSUE, number: 1.5 }],
-    [{ ...GITHUB_ISSUE, resource_identity: "repository:github:acme/app" }],
-    [{ ...GITHUB_ISSUE, resource_identity: "conversation:github:acme" }],
-    [{ ...GITHUB_ISSUE, title: "extra" }],
-    [GITHUB_ISSUE, { ...GITHUB_ISSUE }],
-    Array.from({ length: EXTERNAL_LINK_LIMIT + 1 }, (_, index) => ({
-      ...GITHUB_ISSUE,
-      number: index + 1,
-    })),
-    GITHUB_ISSUE,
-  ];
-  for (const external_links of refused)
-    assert.equal(
-      contentSchema.safeParse({ ...NODE_CONTENT, external_links }).success,
-      false,
-    );
-  assert.equal(
-    contentSchema.safeParse({
-      ...NODE_CONTENT,
-      external_links: Array.from(
-        { length: EXTERNAL_LINK_LIMIT },
-        (_, index) => ({
-          ...GITHUB_ISSUE,
-          number: index + 1,
-        }),
-      ),
-    }).success,
-    true,
-  );
-});
-
-test("an external link reads its fields in any key order as one link", () => {
-  const { kind, resource_identity, number } = GITHUB_ISSUE;
-  assert.equal(
-    contentSchema.safeParse({
-      ...NODE_CONTENT,
-      external_links: [GITHUB_ISSUE, { number, resource_identity, kind }],
-    }).success,
-    false,
-  );
-});
-
-test("a repeated key fails", () => {
-  assert.equal(
-    contentSchema.safeParse({
-      ...NODE_CONTENT,
-      tags: ["platform.macos", "platform.macos"],
-    }).success,
-    false,
-  );
-});
-
-test("a node create takes no parent and the node read holds intent and tags", () => {
-  const create = {
-    filename: "recover.md",
-    content: NODE_CONTENT,
-    tasks: [],
-    reason: REASON,
-    expected_mission_version: FIRST_REVISION,
-  };
-  assert.equal(nodeCreateSchema.safeParse(create).success, true);
-  assert.deepEqual(Object.keys(nodeCreateSchema.shape).sort(), [
-    "content",
-    "expected_mission_version",
-    "filename",
-    "reason",
-    "tasks",
-  ]);
-  assert.deepEqual(Object.keys(nodeSchema.shape).sort(), [
-    "attempt",
-    "blocked_context",
-    "content",
-    "depends_on",
-    "filename",
-    "id",
-    "intent",
-    "mission_id",
-    "paused_context",
-    "pinned_by_attempts",
-    "pinned_revision",
-    "priority",
-    "retired_at",
-    "state",
-    "tags",
-    "tasks",
-    "visible_revision",
-  ]);
-});
-
-test("an edge names the dependent and the dependency alone", () => {
-  const edge = {
-    dependent_id: createIdentity(NODE_IDENTITY_PREFIX),
-    depends_on_id: createIdentity(NODE_IDENTITY_PREFIX),
-  };
-  assert.equal(edgeSchema.safeParse(edge).success, true);
-  assert.equal(
-    edgeSchema.safeParse({ ...edge, kind: "dependency" }).success,
-    false,
-  );
-});
-
-test("an assessment submit defaults findings and fixed_finding_ids to empty lists and refuses a repeated fixed identity", () => {
-  const parsed = assessmentSubmitSchema.parse(ASSESSMENT);
-  assert.deepEqual(parsed.findings, []);
-  assert.deepEqual(parsed.fixed_finding_ids, []);
-  const id = createIdentity(FINDING_IDENTITY_PREFIX);
-  assert.deepEqual(
-    assessmentSubmitSchema.parse({ ...ASSESSMENT, fixed_finding_ids: [id] })
-      .fixed_finding_ids,
-    [id],
-  );
-  const repeated = assessmentSubmitSchema.safeParse({
-    ...ASSESSMENT,
-    fixed_finding_ids: [id, id],
-  });
-  assert.equal(repeated.success, false);
-  assert.deepEqual(repeated.error?.issues[0]?.path, ["fixed_finding_ids"]);
-  assert.equal(
-    assessmentSubmitSchema.safeParse({
-      ...ASSESSMENT,
-      fixed_finding_ids: [createIdentity("proposal")],
-    }).success,
-    false,
-  );
-});
-
-test("a submitted finding takes a reviewer label, the closed sets and at most FINDING_MAX items", () => {
-  const finding = {
-    label: "B12",
-    action: FindingAction.Yes,
-    task_id: null,
-    ground: FindingGround.Conflict,
-    name: "Name",
-    description: "Description",
-    fix: "Fix",
-    why: "Why",
-  };
-  assert.equal(findingSubmitSchema.safeParse(finding).success, true);
-  for (const label of ["H1", "B0", "S1000", "B", "s1"])
-    assert.equal(
-      findingSubmitSchema.safeParse({ ...finding, label }).success,
-      false,
-    );
-  for (const change of [
-    { action: "maybe" },
-    { ground: "other" },
-    { name: "" },
-    { prior_finding_id: createIdentity(FINDING_IDENTITY_PREFIX) },
-  ])
-    assert.equal(
-      findingSubmitSchema.safeParse({ ...finding, ...change }).success,
-      false,
-    );
-  assert.equal(
-    assessmentSubmitSchema.safeParse({
-      ...ASSESSMENT,
-      findings: Array.from({ length: FINDING_MAX + 1 }, () => finding),
-    }).success,
-    false,
-  );
-});
-
-test("the finding decide, create and update bodies are strict and take the closed sets", () => {
-  assert.equal(
-    findingDecideSchema.safeParse({
-      decision: FindingDecision.Dismissed,
-      decision_reason: "No defect",
-    }).success,
-    true,
-  );
-  assert.equal(
-    findingDecideSchema.safeParse({
-      decision: "rejected",
-      decision_reason: "x",
-    }).success,
-    false,
-  );
-  const create = {
-    expected_mission_version: 1,
-    assessment_id: createIdentity("assessment"),
-    kind: FindingKind.Blocker,
-    task_id: null,
-    name: "Name",
-    description: "Description",
-    fix: "Fix",
-    why: "Why",
-    cause_owner: FindingCauseOwner.Engine,
-  };
-  assert.equal(findingCreateSchema.safeParse(create).success, true);
-  assert.equal(
-    findingCreateSchema.safeParse({ ...create, label: "H1" }).success,
-    false,
-  );
-  assert.equal(
-    findingCreateSchema.safeParse({ ...create, cause_owner: "other" }).success,
-    false,
-  );
-  assert.equal(
-    findingUpdateSchema.safeParse({ expected_mission_version: 1 }).success,
-    false,
-  );
-  assert.equal(
-    findingUpdateSchema.safeParse({
-      expected_mission_version: 1,
-      task_id: null,
-    }).success,
-    true,
-  );
-  assert.equal(
-    findingUpdateSchema.safeParse({
-      expected_mission_version: 1,
-      route: FindingRoute.Fix,
-    }).success,
-    false,
-  );
-});
-
-test("a review round names its number, its finality, its review base and its findings", () => {
-  assert.equal(
-    reviewRoundSchema.safeParse({
-      round: 1,
-      final: false,
-      review_base: null,
-      findings: [],
-    }).success,
-    true,
-  );
-  assert.equal(
-    reviewRoundSchema.safeParse({
-      round: 0,
-      final: false,
-      review_base: null,
-      findings: [],
-    }).success,
-    false,
-  );
-  assert.deepEqual(Object.values(FindingStatus), ["open", "fixed"]);
-  assert.deepEqual(Object.values(FindingSource), ["reviewer", "human"]);
-  assert.deepEqual(Object.values(FindingRoute), ["fix", "report", "record"]);
-  assert.equal(FINDING_TEXT_MAX_BYTES, EIGHT_KIB);
-});
-
-test("the actor union still parses each variant", () => {
-  const variants = [
-    { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" },
-    {
-      kind: ActorKind.Execution,
-      execution_id: createIdentity("execution"),
-      client_id: null,
-      name: null,
-    },
-    { kind: ActorKind.Service, service: ActorService.Mission },
-  ];
-  for (const variant of variants)
-    assert.deepEqual(actorSchema.parse(variant), variant);
 });

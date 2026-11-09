@@ -338,6 +338,7 @@ suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
       WorkspaceKind.Node,
     );
     const prepared = await h.input.workspaces.prepareImplement({
+      env: h.input.env,
       nodeId,
       nodeBranch: restartBranch,
       pushed: new Set(),

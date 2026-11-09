@@ -18,14 +18,21 @@ const KEPT_GIT_VARIABLES: readonly string[] = [
 const ISOLATION = {
   GIT_CONFIG_GLOBAL: EMPTY_CONFIG_PATH,
   GIT_CONFIG_NOSYSTEM: "1",
-  GIT_CONFIG_COUNT: "3",
+  GIT_CONFIG_COUNT: "6",
   GIT_CONFIG_KEY_0: "core.excludesFile",
   GIT_CONFIG_VALUE_0: EMPTY_CONFIG_PATH,
   GIT_CONFIG_KEY_1: "core.attributesFile",
   GIT_CONFIG_VALUE_1: EMPTY_CONFIG_PATH,
   GIT_CONFIG_KEY_2: "core.hooksPath",
   GIT_CONFIG_VALUE_2: EMPTY_CONFIG_PATH,
+  GIT_CONFIG_KEY_3: "core.fsmonitor",
+  GIT_CONFIG_VALUE_3: "false",
+  GIT_CONFIG_KEY_4: "gc.autoDetach",
+  GIT_CONFIG_VALUE_4: "false",
+  GIT_CONFIG_KEY_5: "fetch.unpackLimit",
+  GIT_CONFIG_VALUE_5: "1",
   GIT_ATTR_NOSYSTEM: "1",
+  GIT_NO_REPLACE_OBJECTS: "1",
 } as const;
 
 export const GIT_UNSAFE_OPTIONS: NonNullable<SimpleGitOptions["unsafe"]> = {
@@ -33,6 +40,7 @@ export const GIT_UNSAFE_OPTIONS: NonNullable<SimpleGitOptions["unsafe"]> = {
   allowUnsafeConfigEnvCount: true,
   allowUnsafeSshCommand: true,
   allowUnsafeHooksPath: true,
+  allowUnsafeFsMonitor: true,
 };
 
 export function isolatedGitEnvironment(

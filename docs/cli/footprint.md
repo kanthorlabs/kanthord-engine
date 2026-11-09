@@ -23,6 +23,8 @@ confirms.
   measures `session` and its `disk`. At the `server` and `container`
   placements, the server measures `session`. See
   [worker.md](worker.md#instance-footprint-outside-the-cli-inventory).
+- The `workspace` kind lists the pool of the instance as one item `pool` when
+  it holds a tree. No cleanup selects it.
 - The candidates of an instance kind cover the oldest 10000 items of the last
   report. A `count` above 10000 marks a kind with more items.
 - The service evaluates the alert state of each kind, host and item after

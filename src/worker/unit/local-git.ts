@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import {
+  appendFileSync,
+  existsSync,
+  lstatSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { simpleGit, type SimpleGitOptions } from "simple-git";
 import type { Context } from "../../kernel/context.ts";
 import {
@@ -36,6 +44,40 @@ const RENAMED_PATH_OFFSET = 2;
 const PLAIN_RECORD_WIDTH = 2;
 const RENAME_RECORD_WIDTH = 3;
 const RAW_RECORD_WIDTH = 2;
+const GIT_DIRECTORY = ".git";
+const LOCK_SUFFIX = ".lock";
+const NO_ENTRIES = 0;
+const FORMAT_VERSION = "0";
+const FORMAT_VERSION_KEY = "core.repositoryformatversion";
+const PARTIAL_CLONE_KEY = "extensions.partialclone";
+const PROMISOR_KEY = /^remote\..*\.promisor$/;
+const REBUILD_PATHS = ["shallow", "commondir"];
+const KEPT_CORE_KEYS = [
+  "core.filemode",
+  "core.logallrefupdates",
+  "core.ignorecase",
+  "core.precomposeunicode",
+  "core.symlinks",
+];
+const BOOLEAN_VALUES = new Set(["true", "false"]);
+const CONFIG_KEY_SEPARATOR = ".";
+const CONFIG_ENTRY_SEPARATOR = "\n";
+const REMOVED_STATE = [
+  "info/attributes",
+  "info/grafts",
+  "info/sparse-checkout",
+  "objects/info/alternates",
+  "rebase-merge",
+  "rebase-apply",
+  "sequencer",
+  "AUTO_MERGE",
+  "CHERRY_PICK_HEAD",
+  "REVERT_HEAD",
+];
+const REMOVED_STATE_PREFIXES = ["BISECT_", "MERGE_"];
+const KEPT_REF_PREFIXES = ["refs/remotes/origin/", "refs/tags/"];
+export const GitState = { Ready: "ready", Rebuild: "rebuild" } as const;
+export type GitState = (typeof GitState)[keyof typeof GitState];
 export const MERGE_HEAD = "MERGE_HEAD";
 export const ChangeStatus = {
   Added: "added",
@@ -1112,6 +1154,62 @@ export async function excludeUntracked(
   return paths;
 }
 
+export interface GitCall {
+  env: NodeJS.ProcessEnv;
+  directory: string;
+  context: Context;
+  deadlineMs: number;
+}
+
+export async function ignoredPaths(call: GitCall): Promise<string[]> {
+  return (
+    await run(
+      call.env,
+      call.directory,
+      [
+        "ls-files",
+        "-z",
+        "--others",
+        "--ignored",
+        "--exclude-standard",
+        "--directory",
+      ],
+      call.context,
+      call.deadlineMs,
+    )
+  )
+    .split(NUL)
+    .filter(Boolean);
+}
+
+export async function trackedRoots(
+  call: GitCall,
+  roots: readonly string[],
+): Promise<string[]> {
+  const end = performance.now() + call.deadlineMs;
+  const tracked: string[] = [];
+  for (const root of roots)
+    if (
+      await run(
+        call.env,
+        call.directory,
+        ["--literal-pathspecs", "ls-files", "-z", "--", root],
+        call.context,
+        Math.max(1, end - performance.now()),
+      )
+    )
+      tracked.push(root);
+  return tracked;
+}
+
+function excludePattern(root: string): string {
+  return `/${root.replace(EXCLUDE_SPECIAL, "\\$&")}`;
+}
+
+export function cleanExcludes(roots: readonly string[]): string[] {
+  return roots.flatMap((root) => ["-e", excludePattern(root)]);
+}
+
 export async function restoreTracked(
   env: NodeJS.ProcessEnv,
   directory: string,
@@ -1147,4 +1245,205 @@ export async function trackedChanges(
     .split(NUL)
     .filter((entry) => entry.length > STATUS_PREFIX_LENGTH)
     .map((entry) => entry.slice(STATUS_PREFIX_LENGTH));
+}
+
+function remover(path: string): void {
+  rmSync(path, { recursive: true, force: true });
+}
+
+function isDirectory(path: string): boolean {
+  return lstatSync(path, { throwIfNoEntry: false })?.isDirectory() ?? false;
+}
+
+function entriesOf(directory: string): string[] {
+  return isDirectory(directory) ? readdirSync(directory) : [];
+}
+
+async function configEntries(
+  call: GitCall,
+  config: string,
+): Promise<[string, string][]> {
+  return (
+    await run(
+      call.env,
+      call.directory,
+      ["config", "--file", config, "--null", "--list"],
+      call.context,
+      call.deadlineMs,
+    )
+  )
+    .split(NUL)
+    .filter(Boolean)
+    .map((entry) => {
+      const separator = entry.indexOf(CONFIG_ENTRY_SEPARATOR);
+      return separator < NO_ENTRIES
+        ? [entry, NO_VALUE]
+        : [entry.slice(0, separator), entry.slice(separator + 1)];
+    });
+}
+
+function needsRebuild(entries: readonly [string, string][]): boolean {
+  const version =
+    entries.findLast(([key]) => key === FORMAT_VERSION_KEY)?.[1] ??
+    FORMAT_VERSION;
+  return (
+    version !== FORMAT_VERSION ||
+    entries.some(([key]) => key === PARTIAL_CLONE_KEY || PROMISOR_KEY.test(key))
+  );
+}
+
+function configTemplate(entries: readonly [string, string][]): string {
+  const core = KEPT_CORE_KEYS.flatMap((key) => {
+    const value = entries.findLast(([name]) => name === key)?.[1];
+    return value !== undefined && BOOLEAN_VALUES.has(value)
+      ? [`\t${key.split(CONFIG_KEY_SEPARATOR)[1]} = ${value}\n`]
+      : [];
+  });
+  return [
+    "[core]\n",
+    `\trepositoryformatversion = ${FORMAT_VERSION}\n`,
+    "\tbare = false\n",
+    ...core,
+    '[remote "origin"]\n',
+    "\tfetch = +refs/heads/*:refs/remotes/origin/*\n",
+    "[gc]\n",
+    "\tautoDetach = false\n",
+    "[maintenance]\n",
+    "\tautoDetach = false\n",
+  ].join("");
+}
+
+function removeLocks(directory: string): void {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) removeLocks(path);
+    else if (entry.name.endsWith(LOCK_SUFFIX)) rmSync(path, { force: true });
+  }
+}
+
+function holdsSymbolicLink(directory: string): boolean {
+  return readdirSync(directory, { withFileTypes: true }).some(
+    (entry) =>
+      entry.isSymbolicLink() ||
+      (entry.isDirectory() && holdsSymbolicLink(join(directory, entry.name))),
+  );
+}
+
+function rebuildBeforeConfig(git: string): boolean {
+  return (
+    !isDirectory(git) ||
+    !existsSync(join(git, "config")) ||
+    holdsSymbolicLink(git) ||
+    REBUILD_PATHS.some((path) => existsSync(join(git, path))) ||
+    entriesOf(join(git, "worktrees")).length > NO_ENTRIES
+  );
+}
+
+function removeAgentState(git: string): void {
+  for (const name of entriesOf(join(git, "hooks")))
+    remover(join(git, "hooks", name));
+  for (const path of REMOVED_STATE) remover(join(git, path));
+  for (const name of readdirSync(git))
+    if (REMOVED_STATE_PREFIXES.some((prefix) => name.startsWith(prefix)))
+      remover(join(git, name));
+}
+
+async function removeForeignRefs(
+  git: (args: string[]) => Promise<string>,
+  keepRefs: readonly string[],
+): Promise<void> {
+  const refs = (await git(["for-each-ref", "--format=%(refname)"]))
+    .split(NEWLINE)
+    .filter(Boolean);
+  for (const ref of refs)
+    if (
+      !keepRefs.includes(ref) &&
+      !KEPT_REF_PREFIXES.some((prefix) => ref.startsWith(prefix))
+    )
+      await git(["update-ref", "--no-deref", "-d", ref]);
+}
+
+export async function normaliseGitState(
+  call: GitCall,
+  address: string,
+  keepRefs: readonly string[],
+): Promise<GitState> {
+  assert.ok(address && !address.startsWith("-"));
+  const end = performance.now() + call.deadlineMs;
+  const remaining = () => Math.max(1, end - performance.now());
+  const git = (args: string[]) =>
+    run(call.env, call.directory, args, call.context, remaining());
+  const gitDirectory = join(call.directory, GIT_DIRECTORY);
+  const config = join(gitDirectory, "config");
+  if (rebuildBeforeConfig(gitDirectory)) return GitState.Rebuild;
+  removeLocks(gitDirectory);
+  const entries = await configEntries(
+    { ...call, deadlineMs: remaining() },
+    config,
+  );
+  if (needsRebuild(entries)) return GitState.Rebuild;
+  writeFileSync(config, configTemplate(entries));
+  await git(["config", "--file", config, "remote.origin.url", address]);
+  removeAgentState(gitDirectory);
+  const { matched, output } = await runMatch(
+    call.env,
+    call.directory,
+    ["rev-parse", "--quiet", "--verify", "HEAD^{commit}"],
+    call.context,
+    remaining(),
+  );
+  if (!matched) return GitState.Rebuild;
+  const head = output.trim();
+  assert.match(head, COMMIT_PATTERN);
+  await git(["update-ref", "--no-deref", "HEAD", head]);
+  await removeForeignRefs(git, keepRefs);
+  rmSync(join(gitDirectory, "index"), { force: true });
+  await git(["reset", "--mixed", "-q", "HEAD"]);
+  return GitState.Ready;
+}
+
+export async function scrubTree(
+  call: GitCall,
+  commit: string,
+  roots: readonly string[],
+): Promise<void> {
+  assert.match(commit, COMMIT_PATTERN);
+  const end = performance.now() + call.deadlineMs;
+  const git = (args: string[]) =>
+    run(
+      call.env,
+      call.directory,
+      args,
+      call.context,
+      Math.max(1, end - performance.now()),
+    );
+  const exclude = join(call.directory, GIT_DIRECTORY, "info", "exclude");
+  ensureDirectory(dirname(exclude));
+  rmSync(exclude, { force: true });
+  writeFileSync(
+    exclude,
+    roots.map((root) => `${excludePattern(root)}${NEWLINE}`).join(""),
+  );
+  await git(["checkout", "--force", "--detach", commit, "--"]);
+  await git(["reset", "--hard", commit]);
+  await git(["clean", "-ffdx", ...cleanExcludes(roots)]);
+}
+
+export async function fetchLocal(call: GitCall, source: string): Promise<void> {
+  assert.ok(source && !source.startsWith("-"));
+  await run(
+    call.env,
+    call.directory,
+    [
+      "fetch",
+      "--prune",
+      "--no-tags",
+      "--",
+      source,
+      "+refs/heads/*:refs/kanthord/heads/*",
+      "+refs/remotes/origin/*:refs/kanthord/remotes/*",
+    ],
+    call.context,
+    call.deadlineMs,
+  );
 }

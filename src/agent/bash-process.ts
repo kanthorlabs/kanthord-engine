@@ -27,15 +27,20 @@ export interface BashProcess {
 
 type ExecOptions = Parameters<BashOperations["exec"]>[2];
 
+export interface BashGroupOptions {
+  killGroupAtEnd: boolean;
+}
+
 export function processBashOperations(
   shell: ShellConfig,
   settled: (process: BashProcess) => void,
+  group: BashGroupOptions,
 ): BashOperations {
   assert.ok(shell.shell);
   assert.equal(shell.commandTransport ?? ARGV_TRANSPORT, ARGV_TRANSPORT);
   return {
     exec: (command, cwd, options) =>
-      runBash(shell, command, cwd, options, settled),
+      runBash(shell, command, cwd, options, settled, group),
   };
 }
 
@@ -45,6 +50,7 @@ async function runBash(
   cwd: string,
   options: ExecOptions,
   settled: (process: BashProcess) => void,
+  group: BashGroupOptions,
 ): Promise<{ exitCode: number | null }> {
   const { onData, signal, timeout, env } = options;
   const timeoutMs = timeoutMsOf(timeout);
@@ -89,6 +95,12 @@ async function runBash(
     clearTimeout(timer);
     signal?.removeEventListener("abort", kill);
     if (child.pid !== undefined) settled({ pid: child.pid, killed });
+    if (group.killGroupAtEnd && !killed && child.pid !== undefined)
+      killChildTree({
+        pid: child.pid,
+        exitCode: child.exitCode,
+        signalCode: child.signalCode,
+      });
   }
 }
 

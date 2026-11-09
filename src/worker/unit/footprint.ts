@@ -26,6 +26,7 @@ import {
   removeExecutionSession,
   sessionRootOf,
 } from "./session-store.ts";
+import { POOL_DIRECTORY } from "./tree-pool.ts";
 import {
   WorkspaceRemoval,
   type WorkspaceRoot,
@@ -150,6 +151,18 @@ export class UnitFootprint {
         modified_at: Math.floor(stats.mtimeMs),
       });
     }
+    const trees = this.options.workspaces.pool.trees();
+    if (trees.length > NO_ITEMS)
+      items.push({
+        key: POOL_DIRECTORY,
+        bytes: (
+          await walkFootprint(this.options.workspaces.pool.root, {
+            seen,
+            signal,
+          })
+        ).bytes,
+        modified_at: Math.max(...trees.map((tree) => tree.returned_at)),
+      });
     return items;
   }
 

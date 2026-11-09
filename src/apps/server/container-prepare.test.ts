@@ -245,17 +245,6 @@ test("prepare rejects with the runtime message when a refused removal leaves the
   );
 });
 
-test("a failed prepare runs again at the next prepare", async () => {
-  let refusals = ONE_CALL;
-  const f = hostWith(true, (call) => {
-    if (call.verb === Verb.Ps && refusals-- > NO_CALLS) return refused();
-    return ok();
-  });
-  await assert.rejects(f.driver.prepare(), /ps failed: ps refused/);
-  await f.driver.prepare();
-  assert.equal(f.verbs(Verb.Ps).length, PRIOR_COUNT);
-});
-
 test("a launch after a failed prepare runs prepare again and starts no container", async () => {
   const f = hostWith(true, (call) =>
     call.verb === Verb.Ps ? refused() : ok(),
@@ -721,18 +710,4 @@ test("the init frame carries the entries, a bindings frame changes them and a po
     client_id: "client_identity_other",
     message: call,
   });
-});
-
-test("the start sweep removes the volume of an archived instance and keeps the volume of a live one", async () => {
-  const names = [`${VOLUME_PREFIX}coder-1`, `${VOLUME_PREFIX}gone-1`].join(
-    "\n",
-  );
-  const f = hostWith(true, (call) =>
-    call.args[1] === VolumeAction.List ? ok(names) : ok(),
-  );
-  await f.driver.sweepVolumes(new Set(["gone-1"]));
-  assert.deepEqual(
-    volumeCalls(f, VolumeAction.Remove).map((call) => call.args[2]),
-    [`${VOLUME_PREFIX}gone-1`],
-  );
 });

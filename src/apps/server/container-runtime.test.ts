@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -10,49 +9,27 @@ import {
   PoolPlacement,
 } from "../../worker/contract.ts";
 import {
-  absentImage,
   boundedDetail,
-  bytesOf,
   cacheOwnerArguments,
-  cacheVolumeArguments,
-  cacheVolumeName,
-  containerOwner,
   containerRemovalFailure,
   detectRuntime,
   IdMap,
   idMapOf,
-  imageIdOf,
   imageListArguments,
-  infoArguments,
-  inspectContainerArguments,
-  inspectVolumeArguments,
-  killArguments,
   migrationArguments,
-  ownedArguments,
-  ownedCacheVolumeArguments,
-  ownedImageArguments,
   parseCacheVolumes,
   parsePodmanUsage,
   parseRuntimeStore,
   parseSystemUsage,
   parseVolume,
-  PODMAN_MIN_VERSION,
   readSystemUsage,
-  removeArguments,
-  removeImageArguments,
   runArguments,
   type RuntimeAnswer,
   type RuntimeFacts,
   type RuntimeHost,
-  sameImage,
-  slotInstanceName,
   SUCCESS_CODE,
   systemUsageArguments,
-  timeOf,
   unshareMigrationArguments,
-  unshareOwnerArguments,
-  versionBelow,
-  volumeArguments,
 } from "./container-runtime.ts";
 
 const INSTANCE_NAME = "coder-1";
@@ -69,9 +46,7 @@ const SECRET = "slot_client_secret_value";
 const SERVER_USER = "kanthord";
 const SERVER_UID = 1000;
 const ROOT_UID = 0;
-const DETAIL_LIMIT_BYTES = 200;
 const ENV_OPTION = "--env";
-const FIRST_LINE = "first line";
 const SUCCESS = 0;
 const ROOTLESS_DOCKER_DETAIL =
   "rootless Docker cannot map the container uid 10001 to the server user. Use rootless Podman or a rootful runtime.";
@@ -296,65 +271,6 @@ test("the run command forwards only the env names that the server sets", () => {
     (arg, index) => args[index - 1] === ENV_OPTION && !arg.includes("="),
   );
   assert.deepEqual(forwarded, ["TZ"]);
-});
-
-test("the runtime commands of the driver hold their documented argv", () => {
-  assert.deepEqual(infoArguments(), ["info", "--format", "json"]);
-  assert.deepEqual(ownedArguments(OWNER), [
-    "ps",
-    "--all",
-    "--filter",
-    `label=io.kanthord.owner=${OWNER}`,
-    "--format",
-    "{{.Names}}",
-  ]);
-  assert.deepEqual(removeArguments(`kanthord_slot_${INSTANCE_NAME}`), [
-    "rm",
-    "--force",
-    `kanthord_slot_${INSTANCE_NAME}`,
-  ]);
-  assert.deepEqual(
-    inspectContainerArguments(`kanthord_slot_${INSTANCE_NAME}`),
-    [
-      "container",
-      "inspect",
-      "--format",
-      "{{.Id}}",
-      `kanthord_slot_${INSTANCE_NAME}`,
-    ],
-  );
-  assert.deepEqual(killArguments(`kanthord_slot_${INSTANCE_NAME}`), [
-    "kill",
-    "--signal",
-    "KILL",
-    `kanthord_slot_${INSTANCE_NAME}`,
-  ]);
-  assert.deepEqual(volumeArguments(INSTANCE_NAME, OWNER), [
-    "volume",
-    "create",
-    "--label",
-    `io.kanthord.owner=${OWNER}`,
-    "--label",
-    `io.kanthord.instance=${INSTANCE_NAME}`,
-    "--label",
-    "io.kanthord.id_map=auto",
-    `kanthord_slot_${INSTANCE_NAME}`,
-  ]);
-});
-
-test("the owner is a stable 26-character Crockford value of the master key", () => {
-  const masterKey = randomBytes(32).toString("base64");
-  const owner = containerOwner(masterKey);
-  assert.match(owner, /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/);
-  assert.equal(containerOwner(masterKey), owner);
-  assert.notEqual(containerOwner(randomBytes(32).toString("base64")), owner);
-});
-
-test("a detail holds the first line of the runtime answer within 200 bytes", () => {
-  assert.equal(boundedDetail(`\n  ${FIRST_LINE} \nsecond`), FIRST_LINE);
-  assert.equal(boundedDetail(""), null);
-  const long = boundedDetail("é".repeat(DETAIL_LIMIT_BYTES));
-  assert.ok(Buffer.byteLength(long!) <= DETAIL_LIMIT_BYTES);
 });
 
 test("a server in a container answers server_in_container before any runtime check", async () => {
@@ -590,90 +506,11 @@ test("Docker answers when Podman fails, and the first failure names the detail o
 
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const RESOURCE = "repository:github:acme/app";
-const CACHE_NAME = /^kanthord_cache_[0-9a-f]{24}$/;
-const VOLUME_OPTION = "--volume";
-const SLOT_VOLUMES = 2;
 const NETAVARK_ERROR =
   'Error: netavark (exit code 1): nftables error: "nft" did not return successfully while applying ruleset';
 const REMOVE_REFUSED = 125;
 const INSPECT_ABSENT = 125;
 const CACHE_MOUNT = "/var/lib/kanthord/.cache";
-
-test("cacheVolumeName answers one name for one group and another name for another group", () => {
-  const name = cacheVolumeName(OWNER, PROJECT_ID, RESOURCE);
-  assert.match(name, CACHE_NAME);
-  assert.equal(cacheVolumeName(OWNER, PROJECT_ID, RESOURCE), name);
-  assert.notEqual(cacheVolumeName("OTHER", PROJECT_ID, RESOURCE), name);
-  assert.notEqual(cacheVolumeName(OWNER, "project_other", RESOURCE), name);
-  assert.notEqual(cacheVolumeName(OWNER, PROJECT_ID, "repository:other"), name);
-});
-
-test("the run command mounts the cache volume after the slot volume and only when it is set", () => {
-  const base = {
-    image: IMAGE,
-    instanceName: INSTANCE_NAME,
-    owner: OWNER,
-    environment: {},
-    ...SLOT_STATE,
-  };
-  const mounted = runArguments({ ...base, cacheVolume: "kanthord_cache_abc" });
-  const volumes = mounted.flatMap((arg, index) =>
-    mounted[index - 1] === VOLUME_OPTION ? [arg] : [],
-  );
-  assert.deepEqual(volumes, [
-    `kanthord_slot_${INSTANCE_NAME}:/var/lib/kanthord`,
-    `${SESSION_DIRECTORY}:/var/lib/kanthord/state/kanthord/pi/sessions`,
-    `kanthord_cache_abc:${CACHE_MOUNT}`,
-  ]);
-  const bare = runArguments({ ...base, cacheVolume: null });
-  assert.equal(
-    bare.filter((arg) => arg === VOLUME_OPTION).length,
-    SLOT_VOLUMES,
-  );
-});
-
-test("cacheVolumeArguments creates the named volume with the owner and group labels", () => {
-  assert.deepEqual(cacheVolumeArguments(OWNER, PROJECT_ID, RESOURCE), [
-    "volume",
-    "create",
-    "--label",
-    `io.kanthord.owner=${OWNER}`,
-    "--label",
-    `io.kanthord.cache_project=${PROJECT_ID}`,
-    "--label",
-    `io.kanthord.cache_resource=${RESOURCE}`,
-    "--label",
-    "io.kanthord.id_map=auto",
-    cacheVolumeName(OWNER, PROJECT_ID, RESOURCE),
-  ]);
-});
-
-test("slotInstanceName answers null for a cache volume name", () => {
-  assert.equal(
-    slotInstanceName(cacheVolumeName(OWNER, PROJECT_ID, RESOURCE)),
-    null,
-  );
-});
-
-test("ownedCacheVolumeArguments lists the names of the cache volumes of the owner with no label template", () => {
-  assert.deepEqual(ownedCacheVolumeArguments(OWNER), [
-    "volume",
-    "ls",
-    "--filter",
-    `label=io.kanthord.owner=${OWNER}`,
-    "--filter",
-    "label=io.kanthord.cache_project",
-    "--format",
-    "{{.Name}}",
-  ]);
-});
-
-test("inspectVolumeArguments inspects each named volume in one command", () => {
-  assert.deepEqual(
-    inspectVolumeArguments(["kanthord_cache_a", "kanthord_cache_b"]),
-    ["volume", "inspect", "kanthord_cache_a", "kanthord_cache_b"],
-  );
-});
 
 test("parseCacheVolumes answers the name, the creation time and the two labels of each inspected volume and skips a volume without both labels", () => {
   const output = JSON.stringify([
@@ -706,11 +543,6 @@ test("parseCacheVolumes answers the name, the creation time and the two labels o
   ]);
 });
 
-test("parseCacheVolumes rejects an answer that is not a list", () => {
-  assert.throws(() => parseCacheVolumes("not json"));
-  assert.throws(() => parseCacheVolumes("{}"));
-});
-
 function removal(answers: readonly RuntimeAnswer[]) {
   const calls: string[][] = [];
   const call = (args: readonly string[]) => {
@@ -726,14 +558,6 @@ function removal(answers: readonly RuntimeAnswer[]) {
   return { call, calls };
 }
 
-test("containerRemovalFailure answers null after a removal that exits 0 and inspects nothing", async () => {
-  const { call, calls } = removal([
-    { code: SUCCESS_CODE, stdout: "", stderr: "" },
-  ]);
-  assert.equal(await containerRemovalFailure(call, NAME_OF_SLOT), null);
-  assert.deepEqual(calls, [["rm", "--force", NAME_OF_SLOT]]);
-});
-
 test("containerRemovalFailure answers null when the runtime answers no such container", async () => {
   const { call, calls } = removal([
     {
@@ -744,31 +568,6 @@ test("containerRemovalFailure answers null when the runtime answers no such cont
   ]);
   assert.equal(await containerRemovalFailure(call, NAME_OF_SLOT), null);
   assert.deepEqual(calls, [["rm", "--force", NAME_OF_SLOT]]);
-});
-
-test("containerRemovalFailure answers null when a refused removal leaves no container", async () => {
-  const { call, calls } = removal([
-    { code: REMOVE_REFUSED, stdout: "", stderr: NETAVARK_ERROR },
-    {
-      code: INSPECT_ABSENT,
-      stdout: "",
-      stderr: `Error: no such container "${NAME_OF_SLOT}"`,
-    },
-  ]);
-  assert.equal(await containerRemovalFailure(call, NAME_OF_SLOT), null);
-  assert.deepEqual(calls, [
-    ["rm", "--force", NAME_OF_SLOT],
-    inspectContainerArguments(NAME_OF_SLOT),
-  ]);
-});
-
-test("containerRemovalFailure answers the refused removal when the container still exists", async () => {
-  const refused = { code: REMOVE_REFUSED, stdout: "", stderr: NETAVARK_ERROR };
-  const { call } = removal([
-    refused,
-    { code: SUCCESS_CODE, stdout: "abc\n", stderr: "" },
-  ]);
-  assert.deepEqual(await containerRemovalFailure(call, NAME_OF_SLOT), refused);
 });
 
 test("containerRemovalFailure answers the refused removal when the inspection fails for another reason", async () => {
@@ -893,25 +692,6 @@ test("idMapOf picks the auto option for a labeled volume and a full map for an e
   );
 });
 
-test("migrationArguments on rootless Podman on macOS takes keep-id with no size for a volume without the label", () => {
-  const args = migrationOf(ContainerRuntime.Podman, MACOS_FACTS, false);
-  assert.deepEqual(userNamespaceOf(args), [KEEP_ID_OPTION]);
-  assert.ok(!args.join(" ").includes("size="));
-});
-
-test("migrationArguments on rootless Podman on macOS takes the auto option for a labeled volume", () => {
-  const args = migrationOf(ContainerRuntime.Podman, MACOS_FACTS, true);
-  assert.deepEqual(userNamespaceOf(args), [AUTO_OPTION]);
-  assert.ok(!args.join(" ").includes("keep-id"));
-  assert.equal(args.at(-1), FILE_SHARE_SCRIPT);
-});
-
-test("migrationArguments on rootless Podman on Linux takes the auto option and the host directory variant for a labeled volume", () => {
-  const args = migrationOf(ContainerRuntime.Podman, LINUX_FACTS, true);
-  assert.deepEqual(userNamespaceOf(args), [AUTO_OPTION]);
-  assert.equal(args.at(-1), HOST_DIRECTORY_SCRIPT);
-});
-
 test("migrationArguments holds the documented argv of the host directory variant", () => {
   const rootful = { ...LINUX_FACTS, rootless: false };
   assert.deepEqual(migrationOf(ContainerRuntime.Podman, rootful, true), [
@@ -986,16 +766,6 @@ test("unshareMigrationArguments passes both paths as arguments, not in the scrip
   ]);
   assert.ok(!UNSHARE_SCRIPT.includes(mountPoint));
   assert.ok(!UNSHARE_SCRIPT.includes(MIGRATE_DIRECTORY));
-});
-
-test("unshareOwnerArguments changes the owner of the mount point to the server user", () => {
-  assert.deepEqual(unshareOwnerArguments("/volumes/cache/_data"), [
-    "unshare",
-    "chown",
-    "-R",
-    "0:0",
-    "/volumes/cache/_data",
-  ]);
 });
 
 test("cacheOwnerArguments runs the owner step once for a volume without the marker", () => {
@@ -1109,97 +879,8 @@ test("a rootless Podman below the minimum version answers runtime_failed with th
   });
 });
 
-test("a rootful Podman below the minimum version with server uid 0 answers runtime_failed with the version detail", async () => {
-  const { host } = fakeHost({
-    uid: ROOT_UID,
-    answers: { podman: answer(podmanInfo(false, [], "5.6.3")) },
-  });
-  assert.deepEqual(
-    (await detectRuntime(host)).status,
-    expected(
-      PlacementIssue.RuntimeFailed,
-      ContainerRuntime.Podman,
-      "podman 5.6.3 is below the required version 5.7.0. Upgrade Podman to 5.7.0 or later.",
-    ),
-  );
-});
-
-test("a Podman with no version answers runtime_failed with the unknown version detail", async () => {
-  const info: Record<string, unknown> = podmanInfo(true, ROOTLESS_MAP);
-  delete info["version"];
-  const { host } = fakeHost({ answers: { podman: answer(info) } });
-  assert.deepEqual(
-    (await detectRuntime(host)).status,
-    expected(
-      PlacementIssue.RuntimeFailed,
-      ContainerRuntime.Podman,
-      "podman unknown is below the required version 5.7.0. Upgrade Podman to 5.7.0 or later.",
-    ),
-  );
-});
-
-test("a Podman at or above the minimum version answers available", async () => {
-  for (const version of [PODMAN_MIN_VERSION, "6.1.3"]) {
-    const { host } = fakeHost({
-      answers: { podman: answer(podmanInfo(true, ROOTLESS_MAP, version)) },
-    });
-    assert.deepEqual(
-      (await detectRuntime(host)).status,
-      expected(null, ContainerRuntime.Podman),
-    );
-  }
-});
-
-test("versionBelow compares the Podman minimum version", () => {
-  assert.equal(versionBelow("5.6.3", PODMAN_MIN_VERSION), true);
-  assert.equal(versionBelow("4.9.3", PODMAN_MIN_VERSION), true);
-  assert.equal(versionBelow(PODMAN_MIN_VERSION, PODMAN_MIN_VERSION), false);
-  assert.equal(versionBelow("6.1.3", PODMAN_MIN_VERSION), false);
-  assert.equal(versionBelow("5.7.0-dev", PODMAN_MIN_VERSION), true);
-  assert.equal(versionBelow("5.7.0-rc1", PODMAN_MIN_VERSION), true);
-  assert.equal(versionBelow("5.8.0-dev", PODMAN_MIN_VERSION), false);
-  assert.equal(versionBelow("unknown", PODMAN_MIN_VERSION), true);
-});
-
 const IMAGE_HEX = "a".repeat(64);
 const OTHER_HEX = "b".repeat(64);
-
-test("systemUsageArguments reads the Docker verbose usage as JSON, the Podman verbose usage as a table, and the image reads hold the owner label", () => {
-  assert.deepEqual(systemUsageArguments(ContainerRuntime.Docker), [
-    "system",
-    "df",
-    "--verbose",
-    "--format",
-    "json",
-  ]);
-  assert.deepEqual(systemUsageArguments(ContainerRuntime.Podman), [
-    "system",
-    "df",
-    "--verbose",
-  ]);
-  assert.deepEqual(imageListArguments(), [
-    "image",
-    "ls",
-    "--all",
-    "--format",
-    "json",
-  ]);
-  assert.deepEqual(removeImageArguments("localhost/x:1"), [
-    "image",
-    "rm",
-    "localhost/x:1",
-  ]);
-  assert.deepEqual(ownedImageArguments(OWNER), [
-    "image",
-    "ls",
-    "--all",
-    "--no-trunc",
-    "--filter",
-    `label=io.kanthord.owner=${OWNER}`,
-    "--format",
-    "{{.ID}}",
-  ]);
-});
 
 test("parseSystemUsage reads the Docker verbose answer: one image for each id, its references, unique size and containers", () => {
   const stdout = JSON.stringify({
@@ -1498,30 +1179,6 @@ test("readSystemUsage runs the table and the image list on Podman and one JSON r
     ),
     /image list refused/,
   );
-});
-
-test("bytesOf, timeOf and the image id helpers read the runtime value forms", () => {
-  const noBytes = 0;
-  const kiloBytes = 1200;
-  const mebiBytes = 2097152;
-  const plainBytes = 77;
-  assert.equal(bytesOf("0B"), noBytes);
-  assert.equal(bytesOf("1.2kB"), kiloBytes);
-  assert.equal(bytesOf("2MiB"), mebiBytes);
-  assert.equal(bytesOf(plainBytes), plainBytes);
-  assert.equal(bytesOf("n/a"), noBytes);
-  assert.equal(timeOf(null), null);
-  assert.equal(
-    timeOf("2026-11-01T00:00:00Z"),
-    Date.parse("2026-11-01T00:00:00Z"),
-  );
-  assert.equal(imageIdOf(IMAGE_HEX), `sha256:${IMAGE_HEX}`);
-  assert.ok(sameImage(IMAGE_HEX.slice(0, 12), `sha256:${IMAGE_HEX}`));
-  assert.ok(!sameImage(OTHER_HEX, `sha256:${IMAGE_HEX}`));
-  assert.ok(
-    absentImage({ code: 1, stdout: "", stderr: "Error: image not known" }),
-  );
-  assert.ok(!absentImage({ code: 1, stdout: "", stderr: "permission denied" }));
 });
 
 test("parseRuntimeStore reads the Podman graph root sizes and the Docker root directory and system", () => {

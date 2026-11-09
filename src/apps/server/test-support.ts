@@ -1927,12 +1927,21 @@ export function mappedTransport(
         deadlineMs,
         LOCAL_GIT_SSH_ACCESS,
       ),
-    fetchAndCheckout: (directory, branch, base, pushed, context, deadlineMs) =>
+    fetchAndCheckout: (
+      directory,
+      branch,
+      base,
+      pushed,
+      keep,
+      context,
+      deadlineMs,
+    ) =>
       connector.fetchAndCheckout(
         directory,
         branch,
         base,
         pushed,
+        keep,
         context,
         deadlineMs,
         LOCAL_GIT_SSH_ACCESS,

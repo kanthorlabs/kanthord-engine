@@ -578,6 +578,7 @@ test("a push land answers final_refusal for a real pre-receive hook that prints 
     REAL_NODE_BRANCH,
     "main",
     false,
+    [],
     background,
     REAL_GIT_DEADLINE_MS,
     ssh,

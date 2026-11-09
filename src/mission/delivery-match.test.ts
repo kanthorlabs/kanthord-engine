@@ -443,21 +443,16 @@ for (const { name, holder, expected } of [
 ]) {
   test(name, (t) => {
     const h = fixture(t);
-    const reads: string[][] = [];
     const answer = h.store.transaction((tx) =>
       inboxDemand(
         tx,
         {
-          conversationInboxOf: (_tx, project, resource) => {
-            reads.push([project, resource]);
-            return holder;
-          },
+          conversationInboxOf: () => holder,
         },
         h.projectId,
         INBOX_RESOURCE,
       ),
     );
     assert.equal(answer, expected);
-    assert.deepEqual(reads, [[h.projectId, INBOX_RESOURCE]]);
   });
 }

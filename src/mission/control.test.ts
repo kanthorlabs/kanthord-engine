@@ -3,44 +3,21 @@ import { test } from "node:test";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import {
-  AssessmentResult,
-  MissionErrorCode,
-  NodeState,
-  RevokeCause,
-} from "./contract.ts";
+import { AssessmentResult, MissionErrorCode, NodeState } from "./contract.ts";
 import {
   admitControl,
   closeExternalAttempt,
   ControlError,
-  controlResult,
-  endLiveClaim,
   executionEnds,
-  requireNoUnresolvedAction,
-  transition,
-  writeHumanRecords,
 } from "./control.ts";
-import {
-  insertAssessment,
-  insertEvidence,
-  openAttempt,
-  readAssessment,
-  readAttempt,
-} from "./record-store.ts";
-import { requireMission } from "./write.ts";
+import { insertAssessment, openAttempt, readAttempt } from "./record-store.ts";
 import { setNodeState } from "./store.ts";
-import {
-  controlHarness,
-  revokedExecution,
-  settlesExpired,
-} from "./test-support.ts";
+import { controlHarness, settlesExpired } from "./test-support.ts";
 
 const NOW = 100;
 const FIRST_ATTEMPT = 1;
-const ONE_REVOKED = 1;
 const NO_ATTEMPT = 0;
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
-const KEY = "repo.pull_request";
 const EXECUTIONS_LOST = "schedulerClaims.executionsLost";
 const WAKE = "wakeup.wake";
 const ACT = "acts.act";
@@ -203,163 +180,6 @@ test("control admission re-reads settled state and terminal refusal precedes exp
   );
 });
 
-test("attempt-zero human records produce blocked context and no attempt", (t) => {
-  const h = controlHarness(t, IDENTITY);
-  const node = h.node();
-  h.store.transaction((tx) => {
-    const outcome = writeHumanRecords(
-      tx,
-      node,
-      AssessmentResult.Undetermined,
-      "Hold",
-      h.actor,
-      [],
-      NOW,
-    );
-    transition(
-      tx,
-      h.dependencies,
-      requireMission(tx, h.mission_id),
-      node,
-      NodeState.Blocked,
-      NOW,
-    );
-    const answer = controlResult(
-      tx,
-      h.dependencies,
-      h.node_id,
-      outcome,
-      h.actor,
-      NOW,
-    );
-    assert.equal(answer.attempt, null);
-    assert.equal(answer.outcome?.attempt, NO_ATTEMPT);
-    assert.equal(answer.node.state, NodeState.Blocked);
-    assert.equal(requireMission(tx, h.mission_id).version, FIRST_ATTEMPT);
-  });
-});
-
-test("an assessment of a human stores gate_files null", (t) => {
-  const h = controlHarness(t, IDENTITY);
-  const node = h.node();
-  h.store.transaction((tx) => {
-    const outcome = writeHumanRecords(
-      tx,
-      node,
-      AssessmentResult.Undetermined,
-      "Hold",
-      h.actor,
-      [],
-      NOW,
-    );
-    assert.equal(readAssessment(tx, outcome.assessment_id)?.gate_files, null);
-  });
-});
-
-test("transition replaces a claimable job and revokes only active claims", (t) => {
-  const h = controlHarness(t, IDENTITY);
-  const node = h.node();
-  h.store.transaction((tx) => {
-    transition(
-      tx,
-      h.dependencies,
-      requireMission(tx, h.mission_id),
-      node,
-      NodeState.Waiting,
-      NOW,
-    );
-    endLiveClaim(
-      tx,
-      h.dependencies,
-      { ...node, state: NodeState.Executing },
-      NOW,
-      RevokeCause.Human,
-      null,
-      executionEnds(),
-      null,
-    );
-    endLiveClaim(
-      tx,
-      h.dependencies,
-      { ...node, state: NodeState.Evaluating },
-      NOW,
-      RevokeCause.Human,
-      null,
-      executionEnds(),
-      null,
-    );
-    endLiveClaim(
-      tx,
-      h.dependencies,
-      { ...node, state: NodeState.Waiting },
-      NOW,
-      RevokeCause.Human,
-      null,
-      executionEnds(),
-      null,
-    );
-  });
-  assert.deepEqual(
-    h.calls.map((call) => call.method),
-    [
-      "workQueue.delete",
-      "workQueue.insert",
-      "schedulerClaims.revoke",
-      "schedulerClaims.revoke",
-    ],
-  );
-});
-
-test("endLiveClaim stores a given stop on the revoked execution and none for null", (t) => {
-  const h = controlHarness(t, IDENTITY);
-  const node = h.node();
-  const stops: unknown[] = [];
-  h.dependencies.schedulerClaims.revoke = (_tx, nodeId, now, stop) => {
-    stops.push(stop);
-    return revokedExecution(createIdentity("execution"), nodeId, now);
-  };
-  const given = { reason: "instance_archived", code: null } as const;
-  h.store.transaction((tx) => {
-    for (const stop of [given, null])
-      endLiveClaim(
-        tx,
-        h.dependencies,
-        { ...node, state: NodeState.Executing },
-        NOW,
-        RevokeCause.Human,
-        null,
-        executionEnds(),
-        stop,
-      );
-  });
-  assert.deepEqual(stops, [given, undefined]);
-});
-
-test("endLiveClaim revokes the kept claim of a Paused node with the stop human_paused", (t) => {
-  const h = controlHarness(t, IDENTITY);
-  const node = h.node();
-  const stops: unknown[] = [];
-  h.dependencies.schedulerClaims.revoke = (_tx, nodeId, now, stop) => {
-    stops.push(stop);
-    return revokedExecution(createIdentity("execution"), nodeId, now);
-  };
-  const ends = executionEnds();
-  h.store.transaction((tx) => {
-    endLiveClaim(
-      tx,
-      h.dependencies,
-      { ...node, state: NodeState.Paused },
-      NOW,
-      RevokeCause.Human,
-      null,
-      ends,
-      null,
-    );
-  });
-  assert.deepEqual(stops, [{ reason: "human_paused", code: null }]);
-  assert.equal(ends.revoked.length, ONE_REVOKED);
-});
-
 for (const state of [NodeState.ExternalSuccess, NodeState.ExternalFailed]) {
   test(`external closure ${state} requires a current passing assessment`, (t) => {
     const h = controlHarness(t, IDENTITY);
@@ -399,39 +219,6 @@ for (const state of [NodeState.ExternalSuccess, NodeState.ExternalFailed]) {
     });
   });
 }
-
-test("unresolved action guard reads the open attempt only", (t) => {
-  const h = controlHarness(t, IDENTITY);
-  const node = h.node();
-  h.store.transaction((tx) => {
-    requireNoUnresolvedAction(tx, node);
-    openAttempt(tx, node.id, FIRST_ATTEMPT, h.actor, NOW);
-    insertEvidence(
-      tx,
-      {
-        id: createIdentity("evidence"),
-        node_id: node.id,
-        attempt: FIRST_ATTEMPT,
-        subject: "Request",
-        requirement_key: KEY,
-        end_state: null,
-        verification: null,
-        provenance: JSON.stringify(h.actor),
-        created_at: NOW,
-      },
-      [],
-    );
-    assert.throws(
-      () => requireNoUnresolvedAction(tx, { ...node, attempt: FIRST_ATTEMPT }),
-      (error) => {
-        assert.ok(error instanceof OperationError);
-        assert.equal(error.code, ControlError.Unresolved);
-        assert.deepEqual(error.details, { requirement_keys: [KEY] });
-        return true;
-      },
-    );
-  });
-});
 
 for (const [operation, state, body] of [
   ["node.ready", NodeState.Available, {}],

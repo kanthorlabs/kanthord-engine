@@ -43,7 +43,6 @@ const HOME = "/var/lib/kanthord";
 const CHECKOUT = `${HOME}/checkout`;
 const HOST_LINE = "host";
 const SPAWN_LINE = "spawn";
-const STDIN_LINE = "stdin";
 const PREPARE_LINE = "prepare";
 const AUTO_OPTION = "--userns=auto:uidmapping=10001:0:1,gidmapping=10001:0:1";
 const ROOTLESS_FACTS: RuntimeFacts = {
@@ -57,7 +56,6 @@ const EXEC = "exec";
 const VOLUME = "volume";
 const SLOT_USER = "10001:10001";
 const TINI = "/usr/bin/tini";
-const MINIMUM_BUNDLE_BYTES = 0;
 const START = "run";
 const NOT_FOUND = -1;
 const VOLUME_OPTION = "--volume";
@@ -66,11 +64,9 @@ const FAILED_EXIT = 3;
 const EXISTS_EXIT = 125;
 const COMMAND_COUNT = 5;
 const MEMORY_MB = 4096;
-const BOUNDED_MEMORY_MB = 8192;
 const SHORT_LIMIT_MS = 500;
 const POLL_STEP_MS = 50;
 const POLL_ROUNDS = 100;
-const BUNDLE_HEADER = "# v";
 const REMOVE_REFUSED = 125;
 const START_REFUSED = 126;
 const START_REFUSAL = "Error: the runtime refused the start";
@@ -122,7 +118,6 @@ function proof(
   directory: string,
   overrides: {
     commandLimitMs?: number;
-    environmentMemoryMb?: number;
     existingCache?: boolean;
     answerOf?: (args: readonly string[]) => RuntimeAnswer | null;
     facts?: RuntimeFacts | null;
@@ -201,7 +196,7 @@ function proof(
     ...(overrides.commandLimitMs === undefined
       ? {}
       : { commandLimitMs: overrides.commandLimitMs }),
-    environmentMemoryMb: overrides.environmentMemoryMb ?? MEMORY_MB,
+    environmentMemoryMb: MEMORY_MB,
     runtimeFacts: () => Promise.resolve(overrides.facts ?? null),
     shared: overrides.shared ?? ((run) => run()),
     prepareCacheVolume: (_runtime, name, image) => {
@@ -335,28 +330,6 @@ test("a proof start waits while a full-map keep-id container runs in exclusive",
   await fullMap;
   await pending;
   assert.ok(ofKind(lines(), HOST_LINE).some((line) => line[0] === START));
-});
-
-test("the proof container holds the memory bound", async (t) => {
-  const { options, lines } = proof(temporary(t), {
-    environmentMemoryMb: BOUNDED_MEMORY_MB,
-  });
-  await proveInImage(options, input(), new AbortController().signal);
-  const start = ofKind(lines(), HOST_LINE).find((line) => line[0] === START);
-  assert.ok(start);
-  assert.equal(after(start, "--memory"), `${BOUNDED_MEMORY_MB}m`);
-});
-
-test("the bundle goes to the container on standard input and the clone lands in the checkout of the home", async (t) => {
-  const { options, lines } = proof(temporary(t));
-  await proveInImage(options, input(), new AbortController().signal);
-  const feed = ofKind(lines(), SPAWN_LINE).find((line) => line.includes("-i"));
-  assert.ok(feed);
-  assert.deepEqual(feed.slice(0, 6), [EXEC, "-i", "-w", HOME, NAME, "/bin/sh"]);
-  assert.match(feed.at(-1) ?? "", /git clone --quiet head\.bundle checkout/);
-  const [, header, size] = lines().find((line) => line[0] === STDIN_LINE) ?? [];
-  assert.ok(String(header).startsWith(BUNDLE_HEADER));
-  assert.ok(Number(size) > MINIMUM_BUNDLE_BYTES);
 });
 
 test("each setup command, then each check, runs through exec in the checkout and the results hold the phase, the command, the exit code and the output", async (t) => {

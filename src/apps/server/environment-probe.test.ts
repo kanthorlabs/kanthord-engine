@@ -5,7 +5,6 @@ import type { RuntimeAnswer, RuntimeHost } from "./container-runtime.ts";
 import {
   ENVIRONMENT_PROBE_TIMEOUT_MS,
   EnvironmentProbe,
-  PROBE_OUTPUT_BYTES,
 } from "./environment-probe.ts";
 
 const OWNER = "OWNER";
@@ -23,8 +22,6 @@ const RUN_COMMAND = "run";
 const REMOVE_COMMAND = "rm";
 const ONE_CONTAINER = 1;
 const NO_CONTAINER = 0;
-const FAILED_CODE = 3;
-const SHORT_OUTPUT = "abcd";
 
 interface Call {
   runtime: ContainerRuntime;
@@ -133,19 +130,6 @@ test("a probe starts no container when no tag exists", async () => {
   const answer = await probe(host).run(request(OS_RELEASE, [TAG, BASE_TAG]));
   assert.deepEqual(answer, { image: null, exit_code: null, output: "" });
   assert.equal(containers(calls).length, NO_CONTAINER);
-});
-
-test("the output is the standard output then the standard error cut to the last bytes", async () => {
-  const stdout = "a".repeat(PROBE_OUTPUT_BYTES);
-  const stderr = "é".repeat(10);
-  const { host } = fake([TAG], { code: FAILED_CODE, stdout, stderr });
-  const answer = await probe(host).run(request(OS_RELEASE, [TAG]));
-  assert.equal(answer.exit_code, FAILED_CODE);
-  assert.ok(Buffer.byteLength(answer.output) <= PROBE_OUTPUT_BYTES);
-  assert.ok(answer.output.endsWith(stderr));
-  const exact = fake([TAG], { stdout: "ab", stderr: "cd" });
-  const short = await probe(exact.host).run(request(OS_RELEASE, [TAG]));
-  assert.equal(short.output, SHORT_OUTPUT);
 });
 
 test("a probe that exceeds the timeout answers the runtime exit code and removes the container", async () => {

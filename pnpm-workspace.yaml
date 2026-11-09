@@ -9,3 +9,4 @@ allowBuilds:
   protobufjs: false
 # Refuse package versions published less than three days ago (in minutes).
 minimumReleaseAge: 4320
+enableGlobalVirtualStore: true

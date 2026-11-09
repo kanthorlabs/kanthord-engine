@@ -1231,6 +1231,7 @@ export interface RepositoryTransport {
     branch: string,
     baseBranch: string,
     pushed: boolean,
+    keep: readonly string[],
     context: Context,
     deadlineMs: number,
     ssh: SshAccess,

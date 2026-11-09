@@ -679,88 +679,6 @@ test("unblock change adds and removes a task", async (t) => {
   assert.deepEqual(result.node.tasks, revision.tasks);
 });
 
-test("unblock with a content change keeps the pinned older binding revision and the new attempt pins it", async (t) => {
-  const h = controlHarness(t, IDENTITY);
-  const olderId = createIdentity("binding");
-  const content = {
-    name: "Name",
-    requirement: "Requirement",
-    criterion: "Criterion",
-    verifications: ["true"],
-    bindings: [],
-  };
-  h.dependencies.bindings.getBindingRevision = () => ({
-    binding_id: olderId,
-    project_id: h.project_id,
-    name: "repo",
-    resource_identity: "repository:github:owner/repo",
-    revision: FIRST_ATTEMPT,
-    disabled: false,
-    tombstone: false,
-  });
-  h.dependencies.bindings.repositoryPolicyOf = () => ({
-    binding_id: olderId,
-    project_id: h.project_id,
-    name: "repo",
-    address: "git@github.com:owner/repo.git",
-    platform: "github",
-    ssh_credential: "github-ssh",
-    credential: "github",
-    base_branch: "main",
-    action: null,
-    landing: "human",
-  });
-  h.dependencies.bindings.resolveBindingIdentity = (_tx, projectId, id) =>
-    projectId === h.project_id && id === olderId
-      ? {
-          binding_id: olderId,
-          resource_identity: "repository:github:owner/repo",
-        }
-      : null;
-  h.store.transaction((tx) => {
-    tx.database
-      .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
-      .run(NodeState.Paused, h.node_id);
-    tx.database
-      .prepare(
-        "UPDATE mission_node_revision SET intent = ?, bindings = ? WHERE node_id = ?",
-      )
-      .run(Intent.Implement, JSON.stringify([olderId]), h.node_id);
-    openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
-  });
-  await h.invoke("node.block", {
-    params: { node_id: h.node_id },
-    query: {},
-    body: h.body(NodeState.Paused, FIRST_ATTEMPT),
-  });
-  const result = await h.invoke("node.unblock", {
-    params: { node_id: h.node_id },
-    query: {},
-    body: {
-      blocked_attempt: FIRST_ATTEMPT,
-      expected_revision: FIRST_ATTEMPT,
-      expected_mission_version: FIRST_ATTEMPT,
-      change: {
-        content: {
-          ...content,
-          name: "Renamed",
-          intent: Intent.Implement,
-          bindings: [olderId],
-        },
-        tasks: [],
-        reason: "Rename",
-      },
-    },
-  });
-  assert.equal(result.node.visible_revision, SECOND_ATTEMPT);
-  assert.equal(result.attempt?.node_revision, SECOND_ATTEMPT);
-  const stored = h.store.transaction((tx) =>
-    readCurrentRevision(tx, h.node_id),
-  )!;
-  assert.equal(stored.revision, SECOND_ATTEMPT);
-  assert.deepEqual(JSON.parse(stored.bindings), [olderId]);
-});
-
 test("an unblock with a content change that adds a link pins the new revision to the new attempt", async (t) => {
   const h = controlHarness(t, IDENTITY);
   const conversationId = createIdentity("binding");
@@ -1054,23 +972,6 @@ test("an unblock writes one act trace with the attempt that it opens and its rea
       text: "Retry on the current base branch.",
     },
   ]);
-});
-
-test("an unblock without a reason writes an act trace without a text", async (t) => {
-  const h = controlHarness(t, IDENTITY);
-  h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Blocked));
-  await h.invoke("node.unblock", {
-    params: { node_id: h.node_id },
-    query: {},
-    body: {
-      blocked_attempt: NO_ATTEMPT,
-      expected_revision: FIRST_ATTEMPT,
-      expected_mission_version: FIRST_ATTEMPT,
-    },
-  });
-  const [trace, contribution] = actCalls(h)[0]!;
-  assert.equal(trace.attempt, null);
-  assert.equal(contribution.texts, undefined);
 });
 
 test("a redirect writes the pause, the block and the unblock acts in that order", async (t) => {

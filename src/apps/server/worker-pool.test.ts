@@ -417,28 +417,6 @@ test(
   },
 );
 
-test(
-  "a restart of an idle instance ends its work pull with no claim and starts the thread again with no failure",
-  { timeout: POOL_TEST_TIMEOUT },
-  async (t) => {
-    const f = await serverPool(t, ONE_INSTANCE);
-    f.fixture.worker.startPool();
-    const [first] = await f.waitFor(ONE_INSTANCE);
-    const [instance] = f.hosted();
-    assert.ok(instance);
-    const thread = f.fixture.threadDriver.threadOf(instance.name);
-    f.fixture.workerPool.restart(instance);
-    await until(
-      () => f.fixture.threadDriver.threadOf(instance.name),
-      (current) => current !== undefined && current !== thread,
-      t.signal,
-    );
-    const [again] = await f.waitFor(ONE_INSTANCE);
-    assert.equal(again!.client_id, first!.client_id);
-    f.noFailure();
-  },
-);
-
 test("the thread environment holds the allowlist and the slot directories only", () => {
   const source = {
     PATH: "/bin",

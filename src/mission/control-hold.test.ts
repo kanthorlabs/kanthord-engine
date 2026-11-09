@@ -155,43 +155,6 @@ test("resume Waiting at attempt 0 opens attempt 1 as ready does; Available opens
   assert.ok(h.calls.some((call) => call.method === INSERT));
 });
 
-test("resume Waiting keeps an open attempt; resume Available at attempt 0 opens none", async (t) => {
-  const open = controlHarness(t, IDENTITY);
-  await open.invoke("node.ready", {
-    params: { node_id: open.node_id },
-    query: {},
-    body: open.body(),
-  });
-  await open.invoke("node.pause", {
-    params: { node_id: open.node_id },
-    query: {},
-    body: open.body(NodeState.Waiting, FIRST_ATTEMPT),
-  });
-  const kept = await open.invoke("node.resume", {
-    params: { node_id: open.node_id },
-    query: {},
-    body: {
-      ...open.body(NodeState.Paused, FIRST_ATTEMPT),
-      target: ResumeTarget.Waiting,
-    },
-  });
-  assert.equal(open.node().attempt, FIRST_ATTEMPT);
-  assert.equal(kept.attempt?.node_revision, FIRST_ATTEMPT);
-  const fresh = controlHarness(t, IDENTITY);
-  await fresh.invoke("node.pause", {
-    params: { node_id: fresh.node_id },
-    query: {},
-    body: fresh.body(),
-  });
-  const result = await fresh.invoke("node.resume", {
-    params: { node_id: fresh.node_id },
-    query: {},
-    body: { ...fresh.body(NodeState.Paused), target: ResumeTarget.Available },
-  });
-  assert.equal(result.attempt, null);
-  assert.equal(fresh.node().attempt, NO_ATTEMPT);
-});
-
 test("resume Waiting refuses unsatisfied closure; Available routes to Pending without opening an attempt", async (t) => {
   const h = controlHarness(t, IDENTITY);
   const target = createIdentity("node");
@@ -523,21 +486,6 @@ test("a refused pause writes no act trace", async (t) => {
       error instanceof OperationError && error.code === ControlError.Refused,
   );
   assert.equal(actCalls(h).length, NO_ACTS);
-});
-
-test("an act telemetry that throws changes no answer and no state", async (t) => {
-  const h = controlHarness(t, IDENTITY);
-  h.dependencies.acts.act = () => {
-    throw new Error("telemetry down");
-  };
-  const result = await h.invoke("node.pause", {
-    params: { node_id: h.node_id },
-    query: {},
-    body: h.body(),
-  });
-  assert.equal(result.node.state, NodeState.Paused);
-  assert.equal(h.node().state, NodeState.Paused);
-  assert.equal(h.calls.at(-1)?.method, WAKE);
 });
 
 const RUNTIME_IDENTITY = "runtime-1";

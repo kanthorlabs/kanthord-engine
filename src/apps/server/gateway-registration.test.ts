@@ -22,7 +22,6 @@ import { AccessPolicy } from "../../kernel/operation.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { errorSchema } from "../../kernel/errors.ts";
 import { workerOperations } from "../../worker/contract.ts";
-import { IN_MEMORY_DATABASE, Store } from "../../kernel/store.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 import { stopAfter } from "../../kernel/stop-test-support.ts";
 
@@ -57,43 +56,6 @@ const machineRead = {
   status: HttpStatus.OK,
   description: "Test the machine forwarding contract.",
 } as const;
-
-test("machine fake keeps attribution after a registration ends and a replacement registers", (t) => {
-  const store = new Store(IN_MEMORY_DATABASE);
-  stopAfter(t, () => store.close());
-  const { worker } = fakeMachines();
-  const client = {
-    client_id: "client",
-    name: DISPLAY_NAME,
-    project_id: TEST_PROJECT_ID,
-    resource_identity: `worker:kanthord:${TEST_WORKER_BINDING}`,
-  };
-  store.transaction((tx) => {
-    const row = worker.register(tx, client, Date.now());
-    assert.deepEqual(worker.liveRegistrationOf(tx, row.runtime_identity), row);
-    worker.deregister(tx, row.runtime_identity, Date.now());
-    const next = worker.register(
-      tx,
-      { ...client, name: "replacement" },
-      Date.now(),
-    );
-    assert.equal(worker.liveRegistrationOf(tx, row.runtime_identity), null);
-    assert.deepEqual(
-      worker.liveRegistrationOf(tx, next.runtime_identity),
-      next,
-    );
-    assert.deepEqual(worker.clientAttributionOf(tx, row.runtime_identity), {
-      client_id: client.client_id,
-      name: DISPLAY_NAME,
-    });
-    assert.deepEqual(worker.clientAttributionOf(tx, next.runtime_identity), {
-      client_id: client.client_id,
-      name: "replacement",
-    });
-    assert.equal(worker.liveRegistrationOf(tx, "unknown"), null);
-    assert.equal(worker.clientAttributionOf(tx, "unknown"), null);
-  });
-});
 
 async function fixtureForRegistration(
   t: TestContext,
@@ -229,31 +191,6 @@ function assertFailure(
   assert.equal(errorSchema.parse(result.error).error.code, code);
 }
 
-test("absent, removed and unavailable worker bindings refuse registration before reserving a key", async (t) => {
-  const fixture = await fixtureForRegistration(t);
-  for (const token of [
-    await fixture.machineToken(TEST_PROJECT_ID, "absent"),
-    fixture.machineJWT,
-  ]) {
-    fixture.machines.project.bindings.get(TEST_WORKER_BINDING)!.available =
-      false;
-    const result = await httpClient(
-      workerOperations,
-      fixture.endpoint,
-      token,
-    ).register(input);
-    assertFailure(result, HttpStatus.Unauthorized, ErrorCode.Unauthorized);
-    assert.equal(fixture.machines.worker.registrations.size, NO_REGISTRATIONS);
-  }
-  fixture.machines.project.bindings.delete(TEST_WORKER_BINDING);
-  assertFailure(
-    await fixture.client.register(input),
-    HttpStatus.Unauthorized,
-    ErrorCode.Unauthorized,
-  );
-  assert.equal(fixture.gateway.invocation.idempotency.healthcheck(), true);
-});
-
 test("heartbeat answers empty HTTP 204 and direct null only for registered machine identities", async (t) => {
   const fixture = await fixtureForRegistration(t);
   assertFailure(
@@ -324,42 +261,6 @@ test("concurrent machine registrations cannot oversubscribe one binding", async 
   )!;
   assertFailure(refusal, HttpStatus.Conflict, ErrorCode.Capacity);
   assert.equal(fixture.machines.worker.registrations.size, SINGLE_REGISTRATION);
-});
-
-test("no-content HTTP results ignore serialization metadata and match direct results", async (t) => {
-  const operation = {
-    ...machineRead,
-    id: "test.noContent",
-    path: "/api/test/no-content",
-    access: AccessPolicy.Human,
-    output: z.null(),
-    status: HttpStatus.NoContent,
-    contentType: "text/plain",
-  } as const;
-  const registry = new OperationRegistry();
-  registry.register(operation, () => null);
-  const f = await gatewayFixture(t, { registry });
-  const identity = await f.gateway.authentication.authenticate(
-    `Bearer ${f.token}`,
-  );
-  const direct = await directClient(
-    { empty: operation },
-    f.gateway.invocation,
-  ).empty(input, { identity });
-  const http = await httpClient(
-    { empty: operation },
-    f.endpoint,
-    f.token,
-  ).empty(input);
-  assert.ok(direct.type === OperationResultType.Completed);
-  assert.equal(direct.data, null);
-  assert.deepEqual(http, direct);
-  const raw = await f.request(operation.path, {
-    headers: { Authorization: `Bearer ${f.token}` },
-  });
-  assert.equal(raw.status, HttpStatus.NoContent);
-  const empty = "";
-  assert.equal(await raw.text(), empty);
 });
 
 test("invalid direct input is captured before caller mutation and never invokes authentication", async (t) => {

@@ -660,6 +660,7 @@ export async function prepareStepsWorkspace(
     input.claim.expired_at,
   );
   const prepared = await input.workspaces.prepareImplement({
+    env: input.env,
     nodeId: input.claim.node_id,
     nodeBranch: input.claim.node_branch,
     pushed,

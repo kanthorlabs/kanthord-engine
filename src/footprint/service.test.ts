@@ -713,6 +713,7 @@ const SESSION_BYTES = 10;
 const ONE_CANDIDATE = 1;
 const UNIT_LOG_KEY = "kanthord.log";
 const SELECTED_WORKSPACE_BYTES = 9;
+const POOL_KEY = "pool";
 
 function instanceFixture(t: Parameters<typeof footprintFixture>[0]) {
   return footprintFixture(t, {
@@ -842,6 +843,48 @@ test("the workspace candidates join nodeStates: a closed or retired node and an 
     [NODE_DONE, NODE_RETIRED, EXECUTION_RECENT],
   );
   assert.equal(page.data.total_bytes, SELECTED_WORKSPACE_BYTES);
+});
+
+test("the pool item of the workspace kind is not selectable", async (t) => {
+  const fixture = instanceFixture(t);
+  fixture.store.transaction((tx) =>
+    fixture.service.recordMeasurement(tx, INSTANCE, "server", {
+      measured_at: NOW,
+      disk: null,
+      kinds: [
+        reportedKind("workspace", [
+          { key: NODE_DONE, bytes: 1, modified_at: NOW - 3 * DAY_MS },
+          { key: POOL_KEY, bytes: 2, modified_at: NOW - 2 * DAY_MS },
+        ]),
+      ],
+    }),
+  );
+  const page = await fixture.footprint["candidate.list"](
+    {
+      params: { kind: "workspace" },
+      query: { instance_name: INSTANCE, limit: 10 },
+      body: null,
+    },
+    { identity: HUMAN },
+  );
+  assert.equal(page.type, OperationResultType.Completed);
+  assert.deepEqual(
+    page.data.items.map((item) => item.key),
+    [NODE_DONE],
+  );
+  const items = await fixture.footprint["item.list"](
+    {
+      params: { kind: "workspace" },
+      query: { instance_name: INSTANCE, limit: 10 },
+      body: null,
+    },
+    { identity: HUMAN },
+  );
+  assert.equal(items.type, OperationResultType.Completed);
+  assert.equal(
+    items.data.items.find((item) => item.key === POOL_KEY)?.refusal,
+    CleanupRefusal.Live,
+  );
 });
 
 test("recordResults completes an open instance record, keeps removed_bytes and answers an unknown cleanup", async (t) => {

@@ -463,6 +463,7 @@ test(
     });
     const [prepared] = (
       await root.prepareImplement({
+        env: hostEnvironment(),
         nodeId: x.execution.node_id,
         nodeBranch: x.execution.node_branch,
         pushed: new Set(),
@@ -658,6 +659,7 @@ test(
       });
       const [lab] = (
         await root.prepareImplement({
+          env: hostEnvironment(),
           nodeId: y.execution.node_id,
           nodeBranch: y.execution.node_branch,
           pushed: new Set(),
