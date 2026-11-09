@@ -265,16 +265,7 @@ function publicKeyOfSeed(seed: Buffer): Buffer {
   }
 }
 
-function readPrivateSection(
-  section: Buffer,
-  publicKey: Buffer,
-  seedOut?: Buffer,
-): string {
-  if (section.length % BLOCK_BYTES !== ALIGNED)
-    throw new Error("The SSH private section is malformed.");
-  const reader = new SshReader(section);
-  if (reader.uint32() !== reader.uint32())
-    throw new Error("The SSH check integers differ.");
+function readSeed(reader: SshReader, publicKey: Buffer): Buffer {
   if (reader.text() !== SSH_KEY_TYPE)
     throw new Error("The SSH key is not ed25519.");
   const sectionPublicKey = reader.bytes();
@@ -285,16 +276,32 @@ function readPrivateSection(
     !secret.subarray(SEED_BYTES).equals(publicKey)
   )
     throw new Error("The SSH key pair is inconsistent.");
-  if (
-    !publicKeyOfSeed(secret.subarray(SEED_OFFSET, SEED_BYTES)).equals(publicKey)
-  )
+  const seed = secret.subarray(SEED_OFFSET, SEED_BYTES);
+  if (!publicKeyOfSeed(seed).equals(publicKey))
     throw new Error("The SSH public key does not derive from the seed.");
-  seedOut?.set(secret.subarray(SEED_OFFSET, SEED_BYTES));
-  const comment = reader.text();
-  const padding = reader.rest();
+  return seed;
+}
+
+function assertPadding(padding: Buffer): void {
   for (let index = 0; index < padding.length; index += 1)
     if (padding[index] !== FIRST_PADDING_BYTE + index)
       throw new Error("The SSH private section is malformed.");
+}
+
+function readPrivateSection(
+  section: Buffer,
+  publicKey: Buffer,
+  seedOut?: Buffer,
+): string {
+  if (section.length % BLOCK_BYTES !== ALIGNED)
+    throw new Error("The SSH private section is malformed.");
+  const reader = new SshReader(section);
+  if (reader.uint32() !== reader.uint32())
+    throw new Error("The SSH check integers differ.");
+  const seed = readSeed(reader, publicKey);
+  seedOut?.set(seed);
+  const comment = reader.text();
+  assertPadding(reader.rest());
   return comment;
 }
 

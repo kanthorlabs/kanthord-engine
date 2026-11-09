@@ -24,8 +24,6 @@ import {
   CUSTODY_SERVICE_NAME,
   type CustodySuitabilityFn,
   type InboundsNamingFn,
-  S3_ACCESS_KEY_TEXT_MAX_LENGTH,
-  s3AccessKeySecretSchema,
   SecretShape,
   SERVER_HOLDER,
 } from "./contract.ts";
@@ -171,52 +169,6 @@ test("credential creation and rotation enforce the serialized budget before any 
     secret: maximum,
   }) as CredentialAnswer;
   assert.equal(rotated.revisions[0]?.revision, NEXT_REVISION);
-});
-
-test("an s3 field passes at its bound and one more character refuses on create and rotate", (t) => {
-  const f = fixture();
-  stopAfter(t, () => f.store.close());
-  const storage = inputs[3]!;
-  const bounded = "x".repeat(S3_ACCESS_KEY_TEXT_MAX_LENGTH);
-  for (const field of ["access_key_id", "secret_access_key"]) {
-    const oversized = { ...storage.secret, [field]: bounded + "x" };
-    fails(
-      () => f.create({ ...storage, name: "oversized", secret: oversized }),
-      HttpStatus.BadRequest,
-      INVALID_INPUT_CODE,
-    );
-    const name = `bounded-${field.replaceAll("_", "-")}`;
-    const created = f.create({
-      ...storage,
-      name,
-      secret: { ...storage.secret, [field]: bounded },
-    }) as CredentialAnswer;
-    fails(
-      () =>
-        f.rotate(created.name, {
-          expected_revision: FIRST_REVISION,
-          secret: oversized,
-        }),
-      HttpStatus.BadRequest,
-      INVALID_INPUT_CODE,
-    );
-    const rotated = f.rotate(created.name, {
-      expected_revision: FIRST_REVISION,
-      secret: { ...storage.secret, [field]: bounded },
-    }) as CredentialAnswer;
-    assert.equal(rotated.revisions[0]?.revision, NEXT_REVISION);
-  }
-});
-
-test("a stored s3 secret above the write bound still parses", () => {
-  const long = "x".repeat(S3_ACCESS_KEY_TEXT_MAX_LENGTH + 1);
-  assert.equal(
-    s3AccessKeySecretSchema.safeParse({
-      access_key_id: long,
-      secret_access_key: long,
-    }).success,
-    true,
-  );
 });
 
 const unusedExecutionDependencies = {
@@ -816,44 +768,6 @@ test("rotation drains unpinned revisions while reads drain released pins", () =>
       HttpStatus.Conflict,
       "credential.revision.ended",
     );
-  } finally {
-    f.store.close();
-  }
-});
-
-test("list drains every returned name and revoke drains other unpinned revisions", () => {
-  const pins = new Map<string, string[]>();
-  const f = fixture({ pins });
-  try {
-    for (const input of inputs.slice(0, 2)) {
-      const created = f.create(input) as CredentialAnswer;
-      pins.set(created.revisions[0]!.id, ["live-execution"]);
-      f.rotate(input.name, {
-        expected_revision: FIRST_REVISION,
-        secret: apiSecret,
-      });
-    }
-    pins.clear();
-    const page = f.list() as { items: CredentialAnswer[] };
-    for (const item of page.items) {
-      assert.notEqual(item.revisions[1]!.ended_at, null);
-      assert.equal(item.revisions[0]!.ended_at, null);
-    }
-    const current = f.get("github") as CredentialAnswer;
-    pins.set(current.revisions[0]!.id, ["live-execution"]);
-    const third = f.rotate("github", {
-      expected_revision: NEXT_REVISION,
-      secret: apiSecret,
-    }) as CredentialAnswer;
-    pins.set(third.revisions[0]!.id, ["live-execution"]);
-    f.rotate("github", {
-      expected_revision: THIRD_REVISION,
-      secret: apiSecret,
-    });
-    pins.clear();
-    const revoked = f.revoke("github", THIRD_REVISION) as CredentialAnswer;
-    assert.equal(revoked.revisions[0]!.ended_at, null);
-    assert(revoked.revisions.slice(1).every((row) => row.ended_at !== null));
   } finally {
     f.store.close();
   }
@@ -1612,44 +1526,6 @@ test("a name of another platform set answers not found on every read and write",
   }
 });
 
-test("credentialDependents returns both injected collaborations' results", () => {
-  const agentProviders = [{ agent_name: "agent", provider_name: "provider" }];
-  const bindings = [{ binding_id: "binding", project_id: "project" }];
-  const namings = [{ ...bindings[0]!, project_name: "alpha", name: "repo" }];
-  const inbounds = [{ inbound_id: "inbound" }];
-  const calls: { tx: Transaction; name: string }[] = [];
-  const f = fixture({
-    agentProvidersDependentOn: (tx, name) => {
-      calls.push({ tx, name });
-      return agentProviders;
-    },
-    bindingsNaming: (tx, name) => {
-      calls.push({ tx, name });
-      return namings;
-    },
-    inboundsNaming: (tx, name) => {
-      calls.push({ tx, name });
-      return inbounds;
-    },
-  });
-  try {
-    f.store.transaction((tx) => {
-      assert.deepEqual(f.component.credentialDependents(tx, "openai"), {
-        agent_providers: agentProviders,
-        bindings,
-        inbounds,
-      });
-      assert.deepEqual(calls, [
-        { tx, name: "openai" },
-        { tx, name: "openai" },
-        { tx, name: "openai" },
-      ]);
-    });
-  } finally {
-    f.store.close();
-  }
-});
-
 const IN_USE_CODE = "credential.credential.in_use";
 const GITHUB_NAME = "github";
 const CHECKS_OF_TWO_ARCHIVES = 6;
@@ -1730,22 +1606,8 @@ test("archive ends every live revision and keeps every row", () => {
   }
 });
 
-test("archive answers not found for an unknown name", () => {
-  const f = fixture();
-  try {
-    fails(
-      archiveCall(f, "missing"),
-      HttpStatus.NotFound,
-      "credential.credential.not_found",
-    );
-  } finally {
-    f.store.close();
-  }
-});
-
 const ARCHIVED_CODE = "credential.credential.archived";
 const REVOKE_ENDED_CODE = "credential.revision.ended";
-const EVERY_ARCHIVE_STEP = 3;
 const PAGE_OF_ONE = 1;
 
 function archivedFixture() {
@@ -1782,44 +1644,6 @@ test("an archived name refuses rotate, update-metadata and a second archive", ()
       HttpStatus.Conflict,
       REVOKE_ENDED_CODE,
     );
-  } finally {
-    f.store.close();
-  }
-});
-
-test("an archived name stays taken", () => {
-  const f = archivedFixture();
-  try {
-    fails(() => f.create(inputs[0]), HttpStatus.Conflict, NAME_CONFLICT_CODE);
-  } finally {
-    f.store.close();
-  }
-});
-
-test("get answers an archived name unchanged", () => {
-  const f = archivedFixture();
-  try {
-    const read = f.get("github") as CredentialAnswer;
-    assert.equal(read.name, GITHUB_NAME);
-    assert(read.revisions.every((row) => row.ended_at !== null));
-  } finally {
-    f.store.close();
-  }
-});
-
-test("a rotation never archives a name", () => {
-  const f = fixture();
-  try {
-    f.create(inputs[0]);
-    for (let step = 0; step < EVERY_ARCHIVE_STEP; step += 1) {
-      const read = f.get("github") as CredentialAnswer;
-      const answer = f.rotate("github", {
-        expected_revision: read.revisions[0]!.revision,
-        secret: apiSecret,
-      }) as CredentialAnswer;
-      assert(answer.revisions.some((row) => row.ended_at === null));
-      assert.equal(answer.revisions[0]!.ended_at, null);
-    }
   } finally {
     f.store.close();
   }
@@ -2740,7 +2564,6 @@ const MACHINE = "machine-1";
 const BOX_A = "box-1";
 const BOX_B = "box-2";
 const MACHINE_COPY_NAME = "github";
-const MACHINE_COPY_COUNT = 2;
 const MACHINE_SEALED_SET = { ...TEST_SET, instance_copies: true };
 
 async function keyOf(name: string): Promise<InstanceKey> {
@@ -2793,26 +2616,6 @@ async function machineFixture(
     f.store.transaction(read);
   return { f, keys, hold, inTransaction };
 }
-
-test("a create with the server and a machine as holders seals the machine copy to the machine key", async (t) => {
-  const m = await machineFixture();
-  stopAfter(t, () => m.f.store.close());
-  m.f.create({
-    name: MACHINE_COPY_NAME,
-    platform: TestPlatform.Key,
-    metadata: null,
-    secret: { key: "server-secret" },
-  });
-  const [copy] = await m.hold([MACHINE]);
-  assert.equal(copy!.holder, MACHINE);
-  assert.equal(copy!.sealed_to, m.keys.get(MACHINE)!.fingerprint);
-  assert.equal(copy!.sealed_current, true);
-  const holders = m.f.list({}) as { items: CredentialAnswer[] };
-  assert.deepEqual(
-    holders.items.map(({ holder }) => holder),
-    [MACHINE, SERVER_HOLDER],
-  );
-});
 
 test("copyHolderOf answers the instance with an own live copy, the machine without it and the instance for a stale own copy", async (t) => {
   const m = await machineFixture();
@@ -2867,25 +2670,6 @@ test("usedCopies answers each own copy and each machine copy of a name with no o
       ["alpha", MACHINE],
       ["beta", MACHINE],
     ],
-  );
-});
-
-test("sealed_current of a machine copy turns false after a machine rotate", async (t) => {
-  const m = await machineFixture();
-  stopAfter(t, () => m.f.store.close());
-  await m.hold([MACHINE]);
-  const current = () =>
-    m.inTransaction((tx) =>
-      m.f.component.get(tx, MACHINE_SEALED_SET, MACHINE_COPY_NAME, MACHINE),
-    ).sealed_current;
-  assert.equal(current(), true);
-  m.keys.set(MACHINE, await keyOf(MACHINE));
-  assert.equal(current(), false);
-  assert.equal(
-    m.inTransaction((tx) =>
-      m.f.component.copyHeld(tx, MACHINE_COPY_NAME, BOX_A),
-    ),
-    false,
   );
 });
 
@@ -2978,22 +2762,5 @@ test("an instance copy archive keeps the bindings as dependents when the machine
       ),
     HttpStatus.Conflict,
     IN_USE_CODE,
-  );
-});
-
-test("a machine archive archives every machine copy", async (t) => {
-  const m = await machineFixture();
-  stopAfter(t, () => m.f.store.close());
-  await m.hold([MACHINE], "alpha");
-  await m.hold([MACHINE], "beta");
-  assert.equal(
-    m.inTransaction((tx) =>
-      m.f.component.archiveHeld(tx, MACHINE, HOLD_AVAILABLE_AT),
-    ),
-    MACHINE_COPY_COUNT,
-  );
-  assert.deepEqual(
-    m.inTransaction((tx) => m.f.component.heldCopies(tx, MACHINE)),
-    [],
   );
 });

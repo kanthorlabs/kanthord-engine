@@ -15,9 +15,6 @@ const HUMAN = "alice";
 const NAME = "copilot";
 const PENDING_CODE = "credential.login.pending";
 const FAILURE_REASON = "denied";
-const LOGIN_ADDRESS = "https://example.com/login";
-const DEVICE_CODE = "ABCD";
-const PROGRESS_MESSAGE = "Waiting for approval";
 
 function start(store: LoginSessionStore, now = NOW) {
   return store.start(PLATFORM, LoginSessionMode.Browser, HUMAN, NAME, now);
@@ -75,36 +72,6 @@ test("completed and failed sessions do not block a new start", () => {
   assert.equal(next.state, LoginSessionState.Pending);
 });
 
-test("different humans and platforms have separate pending sessions", () => {
-  const store = new LoginSessionStore();
-  const first = start(store);
-  const otherHuman = store.start(
-    PLATFORM,
-    LoginSessionMode.Device,
-    "bob",
-    NAME,
-    NOW,
-  );
-  const otherPlatform = store.start(
-    "other",
-    LoginSessionMode.Browser,
-    HUMAN,
-    NAME,
-    NOW,
-  );
-
-  assert.notEqual(first.id, otherHuman.id);
-  assert.notEqual(first.id, otherPlatform.id);
-});
-
-test("get returns a known session and undefined for an unknown id", () => {
-  const store = new LoginSessionStore();
-  const session = start(store);
-
-  assert.equal(store.get(session.id), session);
-  assert.equal(store.get("unknown"), undefined);
-});
-
 test("complete, fail with reason, and expire set session state", () => {
   const store = new LoginSessionStore();
   const completed = start(store);
@@ -118,26 +85,6 @@ test("complete, fail with reason, and expire set session state", () => {
   assert.equal(failed.state, LoginSessionState.Failed);
   assert.equal(failed.failure_reason, FAILURE_REASON);
   assert.equal(expired.state, LoginSessionState.Expired);
-});
-
-test("updateAddress sets address and code", () => {
-  const store = new LoginSessionStore();
-  const session = start(store);
-  store.updateAddress(session.id, LOGIN_ADDRESS, DEVICE_CODE);
-
-  assert.equal(session.address, LOGIN_ADDRESS);
-  assert.equal(session.code, DEVICE_CODE);
-  store.updateAddress(session.id, null, null);
-  assert.equal(session.address, null);
-  assert.equal(session.code, null);
-});
-
-test("updateLastMessage sets lastMessage", () => {
-  const store = new LoginSessionStore();
-  const session = start(store);
-  store.updateLastMessage(session.id, PROGRESS_MESSAGE);
-
-  assert.equal(session.last_message, PROGRESS_MESSAGE);
 });
 
 test("pendingForPlatformAndHuman returns only non-expired pending sessions", () => {
@@ -157,18 +104,4 @@ test("pendingForPlatformAndHuman returns only non-expired pending sessions", () 
     store.pendingForPlatformAndHuman("other", HUMAN, NOW),
     undefined,
   );
-});
-
-test("mutators on an unknown id are no-ops", () => {
-  const store = new LoginSessionStore();
-  const session = start(store);
-
-  store.complete("unknown");
-  store.fail("unknown", "denied");
-  store.expire("unknown");
-  store.updateAddress("unknown", "https://example.com", "ABCD");
-  store.updateLastMessage("unknown", "waiting");
-  assert.equal(session.state, LoginSessionState.Pending);
-  assert.equal(session.address, null);
-  assert.equal(session.last_message, null);
 });

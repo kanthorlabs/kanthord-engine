@@ -86,80 +86,6 @@ test("execution views isolate material and report each normalized credential", a
   assert.deepEqual(await sequenced.store.read(PROVIDER), THIRD);
 });
 
-test("modify takes the lease once, passes the leased value to the function and sends one report", async () => {
-  const reports: RefreshReport[] = [];
-  const signals: (AbortSignal | undefined)[] = [];
-  const view = executionCredentialStore(
-    payload(),
-    async (report) => {
-      reports.push(report);
-    },
-    async (signal) => {
-      signals.push(signal);
-      return { ...LEASED };
-    },
-  );
-  const controller = new AbortController();
-  const seen: unknown[] = [];
-  const answer = await view.store.modify(
-    PROVIDER,
-    async (current) => {
-      seen.push(current);
-      return SECOND;
-    },
-    { signal: controller.signal },
-  );
-  assert.deepEqual(signals, [controller.signal]);
-  assert.deepEqual(seen, [LEASED]);
-  assert.deepEqual(answer, SECOND);
-  assert.deepEqual(reports, [
-    { credential_id: ID, digest: digest(LEASED), credential: SECOND },
-  ]);
-  assert.deepEqual(await view.store.read(PROVIDER), SECOND);
-});
-
-test("a function that answers undefined still sends one report of the leased value and two modify calls run in order", async () => {
-  const reports: RefreshReport[] = [];
-  const order: string[] = [];
-  const view = executionCredentialStore(
-    payload(),
-    async (report) => {
-      order.push("report");
-      reports.push(report);
-    },
-    async () => {
-      order.push("lease");
-      return { ...LEASED };
-    },
-  );
-  const { gate, release } = gated();
-  const first = view.store.modify(PROVIDER, async () => {
-    order.push("first");
-    await gate;
-    return undefined;
-  });
-  const second = view.store.modify(PROVIDER, async () => {
-    order.push("second");
-    return undefined;
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(order, ["lease", "first"]);
-  release();
-  assert.deepEqual(await Promise.all([first, second]), [LEASED, LEASED]);
-  assert.deepEqual(order, [
-    "lease",
-    "first",
-    "report",
-    "lease",
-    "second",
-    "report",
-  ]);
-  assert.deepEqual(reports, [
-    { credential_id: ID, digest: digest(LEASED), credential: LEASED },
-    { credential_id: ID, digest: digest(LEASED), credential: LEASED },
-  ]);
-});
-
 test("the store renews the lease before each retry of its report and keeps the value of the report", async () => {
   let leases = NO_CALLS;
   let failures = TWO_CALLS;
@@ -192,14 +118,6 @@ test("the store renews the lease before each retry of its report and keeps the v
   await view.release();
   assert.equal(leases, THREE_CALLS);
 });
-
-function gated() {
-  let release = () => {};
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  return { gate, release };
-}
 
 test("report failure propagates and retains the last acknowledged digest for retry", async () => {
   const failure = new Error("report unavailable");

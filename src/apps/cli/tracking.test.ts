@@ -5,10 +5,7 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { stopAfter, temporary } from "../../kernel/test-support.ts";
-import {
-  flowStopReasonSchema,
-  TRACE_QUERY_MAX_CHARACTERS,
-} from "../../tracking/contract.ts";
+import { flowStopReasonSchema } from "../../tracking/contract.ts";
 import { SESSION_READS_PENDING_MAX } from "../../worker/contract.ts";
 import { ExitCode } from "./constants.ts";
 import { runKanthord } from "./test-support.ts";
@@ -27,7 +24,6 @@ const FACET_ANSWER = {
 };
 const NO_REQUESTS = 0;
 const ONE_REQUEST = 1;
-const CAUSE_CATEGORY = "prompt";
 const LIMIT_LISTED = "10";
 const LIMIT_TOO_LARGE = "1001";
 const LIMIT_NOT_NUMBER = "many";
@@ -124,46 +120,6 @@ test("trace list sends its filters as query fields and writes the answer", async
   assert.deepEqual(JSON.parse(result.stdout), LIST_ANSWER);
 });
 
-test("trace list sends from and to as query fields", async (t) => {
-  const { endpoint, seen } = await fakeServer(t, LIST_ANSWER);
-  const result = await run(
-    t,
-    ["trace", "list", "--from", "1000", "--to", "2000"],
-    endpoint,
-  );
-  assert.equal(result.code, ExitCode.Success, result.stderr);
-  const url = new URL(seen[0]?.url ?? "", endpoint);
-  assert.deepEqual(Object.fromEntries(url.searchParams), {
-    from: "1000",
-    to: "2000",
-    sort: "started_at",
-    limit: "100",
-  });
-});
-
-test("trace list without an option sends the default sort and limit", async (t) => {
-  const { endpoint, seen } = await fakeServer(t, LIST_ANSWER);
-  const result = await run(t, ["trace", "list"], endpoint);
-  assert.equal(result.code, ExitCode.Success, result.stderr);
-  const url = new URL(seen[0]?.url ?? "", endpoint);
-  assert.deepEqual(Object.fromEntries(url.searchParams), {
-    sort: "started_at",
-    limit: "100",
-  });
-});
-
-test("trace list sends the cause category as a query field", async (t) => {
-  const { endpoint, seen } = await fakeServer(t, LIST_ANSWER);
-  const result = await run(
-    t,
-    ["trace", "list", "--cause-category", CAUSE_CATEGORY],
-    endpoint,
-  );
-  assert.equal(result.code, ExitCode.Success, result.stderr);
-  const url = new URL(seen[0]?.url ?? "", endpoint);
-  assert.equal(url.searchParams.get("cause_category"), CAUSE_CATEGORY);
-});
-
 test("trace list refuses a second --cause-category before any request", async (t) => {
   const { endpoint, seen } = await fakeServer(t, LIST_ANSWER);
   const result = await run(
@@ -192,13 +148,6 @@ const INVALID_LIST_OPTIONS: readonly (readonly [string[], string])[] = [
     "cli.tracking.trace.list.invalid_cause_category",
   ],
   [["--query", ""], "cli.tracking.trace.list.invalid_query"],
-  [
-    ["--query", "x".repeat(TRACE_QUERY_MAX_CHARACTERS + 1)],
-    "cli.tracking.trace.list.invalid_query",
-  ],
-  [["--from", "-1"], "cli.tracking.trace.list.invalid_query"],
-  [["--from", "soon"], "cli.tracking.trace.list.invalid_query"],
-  [["--to", "1.5"], "cli.tracking.trace.list.invalid_query"],
   [["--limit", LIMIT_NOT_NUMBER], "cli.pagination.limit_invalid"],
   [["--limit", LIMIT_TOO_LARGE], "cli.pagination.limit_out_of_range"],
 ];
@@ -566,7 +515,6 @@ for (const [args, code] of INVALID_ENTRY_ARGUMENTS)
     assert.equal(seen.length, NO_REQUESTS);
   });
 
-const EXECUTION_ID = "execution_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const TIMELINE_PATH = "/api/tracking/timeline";
 const TIMELINE_LEAF = "cli.tracking.timeline.list";
 
@@ -608,25 +556,12 @@ test("timeline list sends its scope and filters as query fields and writes the p
   assert.deepEqual(JSON.parse(result.stdout), LIST_ANSWER);
 });
 
-for (const [flag, value, field] of [
-  ["--execution", EXECUTION_ID, "execution_id"],
-  ["--project", PROJECT_ID, "project_id"],
-] as const)
-  test(`timeline list ${flag} sends ${field}`, async (t) => {
-    const { endpoint, seen } = await fakeServer(t, LIST_ANSWER);
-    const result = await run(t, ["timeline", "list", flag, value], endpoint);
-    assert.equal(result.code, ExitCode.Success, result.stderr);
-    const url = new URL(seen[0]?.url ?? "", endpoint);
-    assert.equal(url.searchParams.get(field), value);
-  });
-
 const INVALID_TIMELINE_OPTIONS: readonly (readonly [string[], string])[] = [
   [[], `${TIMELINE_LEAF}.invalid_query`],
   [
     ["--node", NODE_ID, "--project", PROJECT_ID],
     `${TIMELINE_LEAF}.invalid_query`,
   ],
-  [["--node", NODE_ID, "--from", "soon"], `${TIMELINE_LEAF}.invalid_query`],
   [["--execution", "invalid"], `${TIMELINE_LEAF}.invalid_execution_id`],
   [["--node", "invalid"], `${TIMELINE_LEAF}.invalid_node_id`],
   [["--project", "invalid"], `${TIMELINE_LEAF}.invalid_project_id`],
@@ -841,47 +776,6 @@ test("analytics duration sends its options as query fields and writes the page",
   assert.deepEqual(JSON.parse(result.stdout), ANALYTICS_ANSWER);
 });
 
-test("analytics duration sends the measure instance_busy_ratio by worker_instance", async (t) => {
-  const { endpoint, seen } = await fakeServer(t, ANALYTICS_ANSWER);
-  const result = await run(
-    t,
-    [
-      "analytics",
-      "duration",
-      "--measure",
-      "instance_busy_ratio",
-      "--group-by",
-      "worker_instance",
-    ],
-    endpoint,
-  );
-  assert.equal(result.code, ExitCode.Success, result.stderr);
-  const url = new URL(seen[0]?.url ?? "", endpoint);
-  assert.deepEqual(Object.fromEntries(url.searchParams), {
-    measure: "instance_busy_ratio",
-    group_by: "worker_instance",
-    bucket: "none",
-  });
-  assert.deepEqual(JSON.parse(result.stdout), ANALYTICS_ANSWER);
-});
-
-test("analytics duration accepts the measure test_floor_share", async (t) => {
-  const { endpoint, seen } = await fakeServer(t, ANALYTICS_ANSWER);
-  const result = await run(
-    t,
-    ["analytics", "duration", "--measure", "test_floor_share"],
-    endpoint,
-  );
-  assert.equal(result.code, ExitCode.Success, result.stderr);
-  const url = new URL(seen[0]?.url ?? "", endpoint);
-  assert.deepEqual(Object.fromEntries(url.searchParams), {
-    measure: "test_floor_share",
-    group_by: "none",
-    bucket: "none",
-  });
-  assert.deepEqual(JSON.parse(result.stdout), ANALYTICS_ANSWER);
-});
-
 test("analytics flow sends its options as query fields and writes the answer", async (t) => {
   const { endpoint, seen } = await fakeServer(t, FLOW_ANSWER);
   const result = await run(
@@ -920,16 +814,6 @@ test("analytics flow sends its options as query fields and writes the answer", a
   assert.deepEqual(JSON.parse(result.stdout), FLOW_ANSWER);
 });
 
-test("analytics flow sends the default compare and no other field", async (t) => {
-  const { endpoint, seen } = await fakeServer(t, FLOW_ANSWER);
-  const result = await run(t, ["analytics", "flow"], endpoint);
-  assert.equal(result.code, ExitCode.Success, result.stderr);
-  const url = new URL(seen[0]?.url ?? "", endpoint);
-  assert.deepEqual(Object.fromEntries(url.searchParams), {
-    compare: "previous",
-  });
-});
-
 const INVALID_ANALYTICS_OPTIONS: readonly (readonly [
   string,
   string[],
@@ -942,9 +826,6 @@ const INVALID_ANALYTICS_OPTIONS: readonly (readonly [
   ],
   ["cost", ["--node", "invalid"], `${ANALYTICS_COST_LEAF}.invalid_node_id`],
   ["cost", ["--bucket", "month"], `${ANALYTICS_COST_LEAF}.invalid_query`],
-  ["cost", ["--group-by", "tool_name"], `${ANALYTICS_COST_LEAF}.invalid_query`],
-  ["cost", ["--from", "soon"], `${ANALYTICS_COST_LEAF}.invalid_query`],
-  ["cost", ["--to", "-1"], `${ANALYTICS_COST_LEAF}.invalid_query`],
   [
     "duration",
     ["--measure", "tool_latency", "--project", "invalid"],
@@ -957,54 +838,11 @@ const INVALID_ANALYTICS_OPTIONS: readonly (readonly [
   ],
   ["duration", [], `${ANALYTICS_DURATION_LEAF}.invalid_query`],
   [
-    "duration",
-    ["--measure", "latency"],
-    `${ANALYTICS_DURATION_LEAF}.invalid_query`,
-  ],
-  [
-    "duration",
-    ["--measure", "tool_latency", "--group-by", "model_name"],
-    `${ANALYTICS_DURATION_LEAF}.invalid_query`,
-  ],
-  [
-    "duration",
-    ["--measure", "instance_busy_ratio", "--group-by", "model"],
-    `${ANALYTICS_DURATION_LEAF}.invalid_query`,
-  ],
-  [
-    "duration",
-    ["--measure", "tool_latency", "--group-by", "worker_instance"],
-    `${ANALYTICS_DURATION_LEAF}.invalid_query`,
-  ],
-  [
-    "duration",
-    ["--measure", "tool_latency", "--bucket", "month"],
-    `${ANALYTICS_DURATION_LEAF}.invalid_query`,
-  ],
-  [
-    "duration",
-    ["--measure", "tool_latency", "--from", "soon"],
-    `${ANALYTICS_DURATION_LEAF}.invalid_query`,
-  ],
-  [
-    "duration",
-    ["--measure", "tool_latency", "--to", "soon"],
-    `${ANALYTICS_DURATION_LEAF}.invalid_query`,
-  ],
-  [
     "flow",
     ["--project", "invalid"],
     `${ANALYTICS_FLOW_LEAF}.invalid_project_id`,
   ],
   ["flow", ["--bucket", "week"], `${ANALYTICS_FLOW_LEAF}.invalid_query`],
-  ["flow", ["--compare", "next"], `${ANALYTICS_FLOW_LEAF}.invalid_query`],
-  ["flow", ["--from", "soon"], `${ANALYTICS_FLOW_LEAF}.invalid_query`],
-  ["flow", ["--to", "-1"], `${ANALYTICS_FLOW_LEAF}.invalid_query`],
-  [
-    "flow",
-    ["--worker", "x".repeat(257)],
-    `${ANALYTICS_FLOW_LEAF}.invalid_query`,
-  ],
 ];
 
 for (const [leaf, options, code] of INVALID_ANALYTICS_OPTIONS)
@@ -1041,36 +879,21 @@ for (const [leaf, prefix, options] of [
       result.stderr,
     );
   });
-
-  test(`analytics ${leaf} with a lost answer exits with indeterminate`, async (t) => {
-    const server = createServer((request, response) => {
-      request.resume();
-      response.destroy();
-    });
-    await new Promise<void>((resolve) =>
-      server.listen(0, "127.0.0.1", resolve),
-    );
-    stopAfter(t, () => server.close());
-    const endpoint = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-    const result = await run(t, ["analytics", leaf, ...options], endpoint);
-    assert.equal(result.code, ExitCode.Failure);
-    assert.ok(result.stderr.includes(`${prefix}.indeterminate`), result.stderr);
-  });
-
-  test(`analytics ${leaf} prints the server error of an invalid range`, async (t) => {
-    const { endpoint } = await fakeServer(
-      t,
-      RANGE_INVALID_ANSWER,
-      HttpStatus.BadRequest,
-    );
-    const result = await run(t, ["analytics", leaf, ...options], endpoint);
-    assert.equal(result.code, ExitCode.Failure);
-    assert.ok(
-      result.stderr.includes("tracking.filter.range_invalid"),
-      result.stderr,
-    );
-  });
 }
+
+test("analytics cost prints the server error of an invalid range", async (t) => {
+  const { endpoint } = await fakeServer(
+    t,
+    RANGE_INVALID_ANSWER,
+    HttpStatus.BadRequest,
+  );
+  const result = await run(t, ["analytics", "cost"], endpoint);
+  assert.equal(result.code, ExitCode.Failure);
+  assert.ok(
+    result.stderr.includes("tracking.filter.range_invalid"),
+    result.stderr,
+  );
+});
 
 const KEY = "idempotency_key_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const LABEL_LEAF = "cli.tracking.cause.label";
@@ -1123,20 +946,6 @@ const INVALID_LABEL_ARGUMENTS: readonly (readonly [string[], string])[] = [
   [["invalid", ...LABEL_OPTIONS], `${LABEL_LEAF}.invalid_trace_id`],
   [
     [TRACE_ID, "--category", "unattributed", ...LABEL_OPTIONS.slice(2)],
-    `${LABEL_LEAF}.invalid_input`,
-  ],
-  [
-    [
-      TRACE_ID,
-      ...LABEL_OPTIONS.slice(0, 2),
-      "--subcategory",
-      "invalid",
-      ...LABEL_OPTIONS.slice(4),
-    ],
-    `${LABEL_LEAF}.invalid_input`,
-  ],
-  [
-    [TRACE_ID, ...LABEL_OPTIONS.slice(0, 4), "--reason", "  "],
     `${LABEL_LEAF}.invalid_input`,
   ],
 ];

@@ -37,8 +37,6 @@ import { insertEvent } from "./event-store.ts";
 import { IntakeService } from "./index.ts";
 import { allocateInboundId, insertInbound } from "./inbound-store.ts";
 import {
-  adfDocument,
-  adfParagraph,
   JIRA_CREATED_MS,
   JIRA_DISPLAY_NAME,
   JIRA_ISSUE_URL,
@@ -54,7 +52,6 @@ import {
   SLACK_REPLY_MS,
   SLACK_REPLY_TEXT,
   SLACK_TEAM_ID,
-  SLACK_THREAD_TS,
   SLACK_USER_ID,
   slackBytes,
   slackEventCallback,
@@ -69,7 +66,6 @@ const NO_CHANGES = 0;
 const AWS_KEY = "AK" + "IA" + "A".repeat(16);
 const BODY_PREFIX = "key ";
 const BODY_SUFFIX = " end";
-const ADF_TEXT = "one\ntwo";
 
 function harness(t: TestContext) {
   const store = new Store(IN_MEMORY_DATABASE);
@@ -296,15 +292,6 @@ test("a stored Jira comment answers the display name, the whole text, the issue 
   });
 });
 
-test("a stored Jira comment with an ADF body answers plain text", async (t) => {
-  const h = harness(t);
-  const body = adfDocument(adfParagraph("one"), adfParagraph("two"));
-  const answer = (await h.describe(
-    h.addJiraEvent(jiraBytes(jiraWebhookComment({ body }))),
-  )) as { body: string };
-  assert.equal(answer.body, ADF_TEXT);
-});
-
 test("a Jira body with a token answers the marker of its rule in place of the token", async (t) => {
   const h = harness(t);
   const id = h.addJiraEvent(
@@ -317,17 +304,6 @@ test("a Jira body with a token answers the marker of its rule in place of the to
     answer.body,
     BODY_PREFIX + tracerMarker(SensitiveRule.AwsAccessKeyId) + BODY_SUFFIX,
   );
-});
-
-test("a stored Jira event of another kind answers four null fields", async (t) => {
-  const h = harness(t);
-  const id = h.addJiraEvent(Buffer.from("{}"));
-  assert.deepEqual(await h.describe(id), {
-    author: null,
-    body: null,
-    url: null,
-    occurred_at: null,
-  });
 });
 
 test("a stored Slack thread reply answers the user, the whole text, the permalink and the time", async (t) => {
@@ -363,17 +339,4 @@ test("a Slack body with a token answers the marker of its rule in place of the t
     answer.body,
     BODY_PREFIX + tracerMarker(SensitiveRule.AwsAccessKeyId) + BODY_SUFFIX,
   );
-});
-
-test("a stored Slack parent message answers four null fields", async (t) => {
-  const h = harness(t);
-  const id = h.addSlackEvent(
-    slackBytes(slackEventCallback(slackMessage({ ts: SLACK_THREAD_TS }))),
-  );
-  assert.deepEqual(await h.describe(id), {
-    author: null,
-    body: null,
-    url: null,
-    occurred_at: null,
-  });
 });

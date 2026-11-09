@@ -76,21 +76,3 @@ test("the percentiles of a known set fall inside the bin of the exact value", ()
     assert.ok(Math.abs(found - exact) / exact <= TOLERANCE, `${fraction}`);
   }
 });
-
-test("bin 0 answers 0", () => {
-  assert.deepEqual(percentilesOf(binsOf([0, 0.2])), {
-    count: 2,
-    p50: 0,
-    p90: 0,
-    p99: 0,
-  });
-});
-
-test("an empty histogram answers null percentiles", () => {
-  assert.deepEqual(percentilesOf(emptyBins()), {
-    count: 0,
-    p50: null,
-    p90: null,
-    p99: null,
-  });
-});

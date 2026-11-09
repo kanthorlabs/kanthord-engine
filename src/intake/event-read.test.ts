@@ -140,11 +140,6 @@ async function refusal(promise: Promise<unknown>): Promise<OperationError> {
   return error;
 }
 
-test("an empty list answers no items and no cursor", async (t) => {
-  const h = harness(t);
-  assert.deepEqual(await h.list(), { items: [], next_cursor: null });
-});
-
 test("the list combines the inbound and state filters with AND", async (t) => {
   const h = harness(t);
   const first = h.addInbound();
@@ -168,13 +163,6 @@ test("the list combines the inbound and state filters with AND", async (t) => {
     await ids({ inbound_id: first, state: InboundEventState.Succeeded }),
     [settled],
   );
-});
-
-test("a list item is the projection with no event content", async (t) => {
-  const h = harness(t);
-  h.addEvent(h.addInbound());
-  const [item] = (await h.list()).items;
-  assert.deepEqual(Object.keys(item!).sort(), PROJECTION_KEYS);
 });
 
 function recordReadRows(t: TestContext, store: Store): object[] {

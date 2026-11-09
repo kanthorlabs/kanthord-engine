@@ -77,6 +77,88 @@ type Declaration = NonNullable<
   ReturnType<Dependencies["declarations"]["declarationOf"]>
 >;
 
+type JobRow = {
+  node_id: string;
+  queued_at: number;
+};
+interface SelectionContext {
+  tx: Transaction;
+  dependencies: Dependencies;
+  identity: MachineIdentity;
+  claimant: Claimant;
+  workerName: string;
+  executionId: string;
+  now: number;
+}
+type JobClaim = NonNullable<ReturnType<Dependencies["transitions"]["claim"]>>;
+interface OpenJobInput {
+  job: JobRow;
+  claim: JobClaim;
+  openingFacts: ReturnType<Dependencies["facts"]["openingFacts"]>;
+}
+interface ClaimedJob {
+  node_id: string;
+  claim: JobClaim;
+  opening: ExecutionOpening;
+}
+
+function isClaimable(context: SelectionContext, nodeId: string): boolean {
+  const { tx, dependencies, identity, claimant } = context;
+  const facts = dependencies.facts.claimFacts(tx, nodeId);
+  if (facts === null || !admits(claimant, facts)) return false;
+  return dependencies.environments.environmentsClaimable(
+    identity.projectId,
+    facts.repositories,
+  );
+}
+
+function openJob(
+  context: SelectionContext,
+  { job, claim, openingFacts }: OpenJobInput,
+): ExecutionOpening {
+  const { tx, dependencies, identity, workerName, now } = context;
+  assert.ok(identity.runtimeIdentity);
+  return executionOpening(
+    executionKindSchema.parse(claim.kind),
+    workerName,
+    job.queued_at,
+    now,
+    {
+      worker_instance: instanceKeyOf(identity),
+      placement: dependencies.registrations.placementOf(
+        tx,
+        identity.runtimeIdentity,
+      ),
+      revision_turn: openingFacts?.revision_turn ?? null,
+      dependency_count: openingFacts?.dependency_count ?? null,
+      node_name: openingFacts?.node_name ?? null,
+    },
+  );
+}
+
+function claimJob(context: SelectionContext, job: JobRow): ClaimedJob | null {
+  const { tx, dependencies, identity, claimant, executionId, now } = context;
+  const openingFacts = dependencies.facts.openingFacts(tx, job.node_id);
+  const claim = dependencies.transitions.claim(
+    tx,
+    job.node_id,
+    claimant.declared_node_states,
+    {
+      kind: "execution",
+      execution_id: executionId,
+      client_id: identity.clientId,
+      name: identity.name,
+    },
+    now,
+  );
+  if (!claim) return null;
+  return {
+    node_id: job.node_id,
+    claim,
+    opening: openJob(context, { job, claim, openingFacts }),
+  };
+}
+
 function selectJob(
   tx: Transaction,
   dependencies: Dependencies,
@@ -87,63 +169,30 @@ function selectJob(
   now: number,
 ) {
   assert.ok(identity.runtimeIdentity);
+  const context: SelectionContext = {
+    tx,
+    dependencies,
+    identity,
+    claimant,
+    workerName,
+    executionId,
+    now,
+  };
   const jobs = tx.database
     .prepare(
       "SELECT node_id, queued_at FROM scheduler_job WHERE project_id = ? AND (available_at IS NULL OR available_at <= ?) ORDER BY priority DESC, id ASC",
     )
-    .all(identity.projectId, now) as { node_id: string; queued_at: number }[];
+    .all(identity.projectId, now) as JobRow[];
   const lost: EndedExecution[] = [];
-  for (let index = 0; index < jobs.length; index++) {
-    const { node_id: nodeId, queued_at: queuedAt } = jobs[index]!;
-    const ended = settleNode(tx, dependencies, nodeId, now);
+  for (const job of jobs) {
+    const ended = settleNode(tx, dependencies, job.node_id, now);
     if (ended !== null) {
       lost.push(ended);
       continue;
     }
-    const facts = dependencies.facts.claimFacts(tx, nodeId);
-    if (facts === null || !admits(claimant, facts)) continue;
-    if (
-      !dependencies.environments.environmentsClaimable(
-        identity.projectId,
-        facts.repositories,
-      )
-    )
-      continue;
-    const openingFacts = dependencies.facts.openingFacts(tx, nodeId);
-    const claim = dependencies.transitions.claim(
-      tx,
-      nodeId,
-      claimant.declared_node_states,
-      {
-        kind: "execution",
-        execution_id: executionId,
-        client_id: identity.clientId,
-        name: identity.name,
-      },
-      now,
-    );
-    if (claim)
-      return {
-        node_id: nodeId,
-        claim,
-        opening: executionOpening(
-          executionKindSchema.parse(claim.kind),
-          workerName,
-          queuedAt,
-          now,
-          {
-            worker_instance: instanceKeyOf(identity),
-            placement: dependencies.registrations.placementOf(
-              tx,
-              identity.runtimeIdentity,
-            ),
-            revision_turn: openingFacts?.revision_turn ?? null,
-            dependency_count: openingFacts?.dependency_count ?? null,
-            node_name: openingFacts?.node_name ?? null,
-          },
-        ),
-        lost,
-      };
+    if (!isClaimable(context, job.node_id)) continue;
+    const claimed = claimJob(context, job);
+    if (claimed) return { ...claimed, lost };
   }
   return { node_id: null, claim: null, opening: null, lost };
 }
@@ -212,6 +261,74 @@ function acquire(
   );
 }
 
+interface AdmitContext {
+  tx: Transaction;
+  dependencies: ClaimDependencies;
+  identity: MachineIdentity;
+  pull: WorkPull;
+  now: number;
+}
+interface Admitted {
+  binding: Binding;
+  declaration: Declaration;
+}
+
+function readyOutcome(context: AdmitContext): ClaimOutcome | null {
+  const { tx, dependencies, identity, pull } = context;
+  if (dependencies.projects.projectPaused(tx, identity.projectId))
+    return ClaimOutcome.None;
+  if (
+    !dependencies.registrations.registrationHealthcheck(
+      tx,
+      pull.runtime_identity,
+    )
+  )
+    return ClaimOutcome.Refused;
+  return null;
+}
+
+function readAdmitted(context: AdmitContext): Admitted | null {
+  const { tx, dependencies, identity } = context;
+  const binding = dependencies.bindings.workerBindingOf(
+    tx,
+    identity.projectId,
+    identity.resourceIdentity,
+  );
+  if (!binding || binding.tombstone || binding.instance_count <= NO_INSTANCES)
+    return null;
+  const declaration = dependencies.declarations.declarationOf(
+    binding.worker_name,
+  );
+  if (!declaration) return null;
+  return { binding, declaration };
+}
+
+function capacityOutcome(
+  context: AdmitContext,
+  binding: Binding,
+): ClaimOutcome | null {
+  const { tx, dependencies, identity, pull, now } = context;
+  if (
+    countRunningOfGroup(
+      tx,
+      identity.projectId,
+      identity.resourceIdentity,
+      now,
+    ) >= binding.instance_count
+  )
+    return ClaimOutcome.None;
+  const siblings = dependencies.registrations.registrationsOfInstance(
+    tx,
+    pull.runtime_identity,
+  );
+  if (
+    countRunningOfRuntimes(tx, siblings, now) > NO_INSTANCES ||
+    !dependencies.instances.turn(pull.runtime_identity, siblings)
+  )
+    return ClaimOutcome.Queued;
+  return null;
+}
+
 function admit(
   tx: Transaction,
   dependencies: ClaimDependencies,
@@ -221,48 +338,18 @@ function admit(
 ): ClaimResult {
   assert.equal(pull.runtime_identity, identity.runtimeIdentity);
   assert.equal(pull.resource_identity, identity.resourceIdentity);
+  const context: AdmitContext = { tx, dependencies, identity, pull, now };
   const ended = settleRuntime(tx, dependencies, pull.runtime_identity, now);
   const lost = ended === null ? [] : [ended];
   const row = readUnendedOfRuntime(tx, pull.runtime_identity);
   if (row) return claimResult(ClaimOutcome.Running, row, lost);
-  if (dependencies.projects.projectPaused(tx, identity.projectId))
-    return claimResult(ClaimOutcome.None, null, lost);
-  if (
-    !dependencies.registrations.registrationHealthcheck(
-      tx,
-      pull.runtime_identity,
-    )
-  )
-    return claimResult(ClaimOutcome.Refused, null, lost);
-  const binding = dependencies.bindings.workerBindingOf(
-    tx,
-    identity.projectId,
-    identity.resourceIdentity,
-  );
-  if (!binding || binding.tombstone || binding.instance_count <= NO_INSTANCES)
-    return claimResult(ClaimOutcome.None, null, lost);
-  const declaration = dependencies.declarations.declarationOf(
-    binding.worker_name,
-  );
-  if (!declaration) return claimResult(ClaimOutcome.None, null, lost);
-  if (
-    countRunningOfGroup(
-      tx,
-      identity.projectId,
-      identity.resourceIdentity,
-      now,
-    ) >= binding.instance_count
-  )
-    return claimResult(ClaimOutcome.None, null, lost);
-  const siblings = dependencies.registrations.registrationsOfInstance(
-    tx,
-    pull.runtime_identity,
-  );
-  if (
-    countRunningOfRuntimes(tx, siblings, now) > NO_INSTANCES ||
-    !dependencies.instances.turn(pull.runtime_identity, siblings)
-  )
-    return claimResult(ClaimOutcome.Queued, null, lost);
+  const readiness = readyOutcome(context);
+  if (readiness) return claimResult(readiness, null, lost);
+  const admitted = readAdmitted(context);
+  if (!admitted) return claimResult(ClaimOutcome.None, null, lost);
+  const { binding, declaration } = admitted;
+  const capacity = capacityOutcome(context, binding);
+  if (capacity) return claimResult(capacity, null, lost);
   const choice = dependencies.agentChains.select(
     tx,
     binding.binding_id,

@@ -170,41 +170,63 @@ function recovering(track: AlertTrack): AlertStep {
       };
 }
 
-export function step(track: AlertTrack, subject: AlertSubject): AlertStep {
-  if (subject.stale || subject.measure_error !== null)
-    return { track, event: null };
+function withoutThresholds(track: AlertTrack): AlertStep {
   const open =
     track.state === FootprintAlertState.Firing ||
     track.state === FootprintAlertState.Recovering;
-  if (!subject.thresholds.length)
-    return { track: OK_TRACK, event: open ? RESOLVE : null };
+  return { track: OK_TRACK, event: open ? RESOLVE : null };
+}
+
+function stepFromOk(above: readonly Condition[]): AlertStep {
+  return above.length
+    ? pending(OK_TRACK, above)
+    : { track: OK_TRACK, event: null };
+}
+
+function stepFromPending(
+  track: AlertTrack,
+  above: readonly Condition[],
+): AlertStep {
+  return above.length
+    ? pending(track, above)
+    : { track: OK_TRACK, event: null };
+}
+
+function stepFromFiring(track: AlertTrack, clear: boolean): AlertStep {
+  return clear
+    ? recovering({ ...track, streak: NO_STREAK })
+    : { track, event: null };
+}
+
+function stepFromRecovering(track: AlertTrack, clear: boolean): AlertStep {
+  return clear
+    ? recovering(track)
+    : {
+        track: {
+          ...track,
+          state: FootprintAlertState.Firing,
+          streak: NO_STREAK,
+        },
+        event: null,
+      };
+}
+
+export function step(track: AlertTrack, subject: AlertSubject): AlertStep {
+  if (subject.stale || subject.measure_error !== null)
+    return { track, event: null };
+  if (!subject.thresholds.length) return withoutThresholds(track);
   const conditions = conditionsOf(subject);
   const above = conditions.filter((condition) => condition.above);
   const clear = conditions.every((condition) => condition.clear);
   switch (track.state) {
     case FootprintAlertState.Ok:
-      return above.length
-        ? pending(OK_TRACK, above)
-        : { track: OK_TRACK, event: null };
+      return stepFromOk(above);
     case FootprintAlertState.Pending:
-      return above.length
-        ? pending(track, above)
-        : { track: OK_TRACK, event: null };
+      return stepFromPending(track, above);
     case FootprintAlertState.Firing:
-      return clear
-        ? recovering({ ...track, streak: NO_STREAK })
-        : { track, event: null };
+      return stepFromFiring(track, clear);
     case FootprintAlertState.Recovering:
-      return clear
-        ? recovering(track)
-        : {
-            track: {
-              ...track,
-              state: FootprintAlertState.Firing,
-              streak: NO_STREAK,
-            },
-            event: null,
-          };
+      return stepFromRecovering(track, clear);
   }
 }
 

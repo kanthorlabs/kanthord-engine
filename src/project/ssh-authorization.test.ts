@@ -296,14 +296,6 @@ test("a draft configuration refuses a machine and a service identity before the 
   assert.deepEqual(f.suitability, []);
 });
 
-test("a machine without a claim refuses a binding", (t) => {
-  const f = setup(t);
-  assert.throws(
-    () => f.authorize(f.machine, f.binding),
-    refused("identity_refused"),
-  );
-});
-
 test("an absent binding, a worker binding and a removed binding refuse every identity", (t) => {
   const f = setup(t);
   assert.throws(

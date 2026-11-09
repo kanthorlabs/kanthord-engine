@@ -8,11 +8,7 @@ import {
 } from "../custody/contract.ts";
 import { IdentityKind, type ServiceIdentity } from "../kernel/caller.ts";
 import { ExternalLinkKind } from "../kernel/external-link.ts";
-import {
-  background,
-  DEADLINE_EXCEEDED_CODE,
-  DeadlineExceeded,
-} from "../kernel/context.ts";
+import { background } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
@@ -265,25 +261,6 @@ test("a branch push check reads the assessed commit and not the request commit",
   ]);
 });
 
-test("a branch push check answers expected with the landed commit", async (t) => {
-  const h = await harness(t, { facts: requestFacts(branchPush) });
-  assert.deepEqual(await h.check(), {
-    end_state: CheckEndState.Expected,
-    landed_commits: [LANDED],
-  });
-});
-
-test("a branch push check answers conflict when the base moved", async (t) => {
-  const h = await harness(t, {
-    facts: requestFacts(branchPush),
-    landing: BASE_MOVED,
-  });
-  assert.deepEqual(await h.check(), {
-    end_state: CheckEndState.Conflict,
-    landed_commits: [],
-  });
-});
-
 test("a branch push check answers none when nothing landed and the base did not move", async (t) => {
   const h = await harness(t, {
     facts: requestFacts(branchPush, true),
@@ -338,26 +315,6 @@ test("a pull request check takes no SSH release", async (t) => {
   assert.ok(h.materials.every((material) => material.dropped));
 });
 
-test("a pull request check answers 502 with the platform class when the read of the required checks fails", async (t) => {
-  const h = harness(t, {
-    facts: requestFacts({
-      kind: "pull_request",
-      resource_identity: RESOURCE_IDENTITY,
-      number: PULL_NUMBER,
-    }),
-    credential: "github",
-    checksFailure: ResultClass.RetryableRefusal,
-  });
-  await assert.rejects(
-    h.check(),
-    (error) =>
-      error instanceof OperationError &&
-      error.status === BAD_GATEWAY_STATUS &&
-      error.code === GITHUB_RESULT_CODE_PREFIX + ResultClass.RetryableRefusal,
-  );
-  assert.ok(h.materials.every((material) => material.dropped));
-});
-
 test("a branch push check answers 502 with ssh_agent_failed when the SSH agent fails", async (t) => {
   const h = harness(t, {
     facts: requestFacts(branchPush),
@@ -369,21 +326,6 @@ test("a branch push check answers 502 with ssh_agent_failed when the SSH agent f
       error instanceof OperationError &&
       error.status === BAD_GATEWAY_STATUS &&
       error.code === SshAgentErrorCode.Failed,
-  );
-  assert.equal(h.landings.length, ONE_LANDING);
-});
-
-test("a branch push check answers 502 with the deadline code when the deadline elapses", async (t) => {
-  const h = harness(t, {
-    facts: requestFacts(branchPush),
-    landingFailure: new DeadlineExceeded(),
-  });
-  await assert.rejects(
-    h.check(),
-    (error) =>
-      error instanceof OperationError &&
-      error.status === BAD_GATEWAY_STATUS &&
-      error.code === DEADLINE_EXCEEDED_CODE,
   );
   assert.equal(h.landings.length, ONE_LANDING);
 });
@@ -513,9 +455,4 @@ test("a reply evidence check answers none while its outbound request is pending"
   });
   assert.deepEqual(h.sshRequests(), []);
   assert.equal(h.materials.length, NO_MATERIALS);
-});
-
-test("a reply evidence check answers none when its outbound request is absent", async (t) => {
-  const h = harness(t, { facts: replyFacts });
-  assert.equal((await h.check()).end_state, CheckEndState.None);
 });

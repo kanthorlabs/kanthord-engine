@@ -18,6 +18,7 @@ import {
 import { ExecutionEnd } from "../tracking/contract.ts";
 import { executionTrace, executionTransition } from "./telemetry.ts";
 import type { Dependencies } from "./service.ts";
+import type { Transaction } from "../kernel/store.ts";
 import { consecutiveStalls, endExecution } from "./execution-store.ts";
 import {
   consecutiveFailures,
@@ -63,6 +64,106 @@ function notifyReleased(
   }
 }
 
+type ReleaseStopBody = NonNullable<ExecutionRelease["stop"]>;
+interface ReleaseContext {
+  tx: Transaction;
+  dependencies: Dependencies;
+  executionId: string;
+  body: ExecutionRelease;
+  row: ExecutionRow;
+  now: number;
+}
+interface StopEffects {
+  transition: NodeTransition;
+  hold: FailureHold | null;
+  environmentRepositories: string[] | null;
+}
+
+interface StopOrderInput {
+  executionId: string;
+  stop: ReleaseStopBody | null;
+}
+
+function requireStopOrder(
+  dependencies: Dependencies,
+  { executionId, stop }: StopOrderInput,
+): void {
+  if (
+    stop &&
+    ORDERED_STOP_REASONS.includes(stop.reason) &&
+    dependencies.stopOrderOf(executionId) !== stop.reason
+  )
+    throw new OperationError(
+      HttpStatus.Conflict,
+      STOP_UNORDERED,
+      "A worker release with this stop needs a stop order of the execution.",
+      { execution_id: executionId, reason: stop.reason },
+    );
+}
+
+function cooldownsOf(context: ReleaseContext): CooldownChange[] {
+  const { tx, dependencies, executionId, body, row, now } = context;
+  const selections = dependencies.agentChains.resolve(
+    tx,
+    row.worker_binding_id,
+    row.agent_pins,
+  );
+  const code = body.stop?.code ?? null;
+  if (body.stop?.reason !== ExecutionStopReason.ProviderFailed)
+    return dependencies.agentChains.success(tx, row, selections, executionId);
+  if (!isAdvancingProviderFailure(code)) return [];
+  return dependencies.agentChains.providerFailure(
+    tx,
+    row,
+    selections,
+    code,
+    executionId,
+    now,
+  );
+}
+
+function recordStop(
+  context: ReleaseContext,
+  stop: ReleaseStopBody,
+): StopEffects {
+  const { tx, dependencies, executionId, row, now } = context;
+  endExecution(tx, executionId, now, stop);
+  if (NO_FAILURE_STOPS.includes(stop.reason))
+    return {
+      transition: dependencies.transitions.stopped(tx, row.node_id, now),
+      hold: null,
+      environmentRepositories: null,
+    };
+  const environmentRepositories =
+    stop.reason === ExecutionStopReason.EnvironmentFailed
+      ? [
+          ...(dependencies.facts.claimFacts(tx, row.node_id)?.repositories ??
+            []),
+        ]
+      : null;
+  const { transition, hold } = recordFailure(
+    tx,
+    dependencies,
+    row.node_id,
+    consecutiveFailures(tx, row, countsFailure(stop)),
+    now,
+  );
+  return { transition, hold, environmentRepositories };
+}
+
+function releaseWork(context: ReleaseContext): NodeTransition {
+  const { tx, dependencies, executionId, body, row, now } = context;
+  endExecution(tx, executionId, now, body.stop);
+  const stalled = body.stop !== null;
+  return dependencies.transitions.release(
+    tx,
+    { execution_id: executionId, node_id: row.node_id, attempt: row.attempt },
+    body.further_work,
+    stalled ? consecutiveStalls(tx, row.node_id, row.attempt) : NO_STALLS,
+    now,
+  );
+}
+
 export function release(
   dependencies: Dependencies,
   executionId: string,
@@ -73,17 +174,7 @@ export function release(
   const proof = caller.execution;
   assert.ok(proof, "release requires an execution proof");
   assert.equal(proof.executionId, executionId);
-  if (
-    body.stop &&
-    ORDERED_STOP_REASONS.includes(body.stop.reason) &&
-    dependencies.stopOrderOf(executionId) !== body.stop.reason
-  )
-    throw new OperationError(
-      HttpStatus.Conflict,
-      STOP_UNORDERED,
-      "A worker release with this stop needs a stop order of the execution.",
-      { execution_id: executionId, reason: body.stop.reason },
-    );
+  requireStopOrder(dependencies, { executionId, stop: body.stop });
   let released: ExecutionRow | undefined;
   let transition: NodeTransition | undefined;
   let hold: FailureHold | null = null;
@@ -98,64 +189,27 @@ export function release(
       tx,
       row.runtime_identity,
     );
-    const selections = dependencies.agentChains.resolve(
+    const context: ReleaseContext = {
       tx,
-      row.worker_binding_id,
-      row.agent_pins,
-    );
-    const code = body.stop?.code ?? null;
-    if (
-      body.stop?.reason === ExecutionStopReason.ProviderFailed &&
-      isAdvancingProviderFailure(code)
-    )
-      cooldowns = dependencies.agentChains.providerFailure(
-        tx,
-        row,
-        selections,
-        code,
-        executionId,
-        now,
-      );
-    else if (body.stop?.reason !== ExecutionStopReason.ProviderFailed)
-      cooldowns = dependencies.agentChains.success(
-        tx,
-        row,
-        selections,
-        executionId,
-      );
+      dependencies,
+      executionId,
+      body,
+      row,
+      now,
+    };
+    cooldowns = cooldownsOf(context);
     if (
       body.stop !== null &&
       body.stop.reason !== ExecutionStopReason.BudgetEnd
     ) {
       assert.ok(body.further_work);
-      endExecution(tx, executionId, now, body.stop);
-      if (NO_FAILURE_STOPS.includes(body.stop.reason)) {
-        transition = dependencies.transitions.stopped(tx, row.node_id, now);
-        return { execution_id: executionId, ended_at: now };
-      }
-      if (body.stop.reason === ExecutionStopReason.EnvironmentFailed)
-        environmentRepositories = [
-          ...(dependencies.facts.claimFacts(tx, row.node_id)?.repositories ??
-            []),
-        ];
-      ({ transition, hold } = recordFailure(
-        tx,
-        dependencies,
-        row.node_id,
-        consecutiveFailures(tx, row, countsFailure(body.stop)),
-        now,
+      ({ transition, hold, environmentRepositories } = recordStop(
+        context,
+        body.stop,
       ));
       return { execution_id: executionId, ended_at: now };
     }
-    endExecution(tx, executionId, now, body.stop);
-    const stalled = body.stop !== null;
-    transition = dependencies.transitions.release(
-      tx,
-      { execution_id: executionId, node_id: row.node_id, attempt: row.attempt },
-      body.further_work,
-      stalled ? consecutiveStalls(tx, row.node_id, row.attempt) : NO_STALLS,
-      now,
-    );
+    transition = releaseWork(context);
     return { execution_id: executionId, ended_at: now };
   });
   assert.ok(released, "a committed release read its execution");

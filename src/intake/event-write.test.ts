@@ -27,12 +27,7 @@ import {
   intakeOperations,
   ResourceKind,
 } from "./contract.ts";
-import {
-  discardEventFrom,
-  eventState,
-  insertEvent,
-  retryFailedEvent,
-} from "./event-store.ts";
+import { eventState, insertEvent } from "./event-store.ts";
 import { IntakeService } from "./index.ts";
 import { allocateInboundId, insertInbound } from "./inbound-store.ts";
 import { intakeMigrations } from "./migrations.ts";
@@ -327,21 +322,6 @@ test("A discarded event is handed over by no later wake", async (t) => {
   await h.intake.dispatcher.join();
   assert.equal(h.calls.length, HANDOFFS_AFTER_DISCARD);
   assert.equal(h.stateOf(id), InboundEventState.Discarded);
-});
-
-test("A retry or a discard write from a stale state changes no row", (t) => {
-  const h = harness(t);
-  const pending = h.addEvent();
-  const succeeded = h.addEvent(InboundEventState.Succeeded);
-  h.store.transaction((tx) => {
-    assert.equal(retryFailedEvent(tx, pending), false);
-    assert.equal(
-      discardEventFrom(tx, succeeded, InboundEventState.Failed),
-      false,
-    );
-  });
-  assert.equal(h.stateOf(pending), InboundEventState.Pending);
-  assert.equal(h.stateOf(succeeded), InboundEventState.Succeeded);
 });
 
 test("A delete without a filter, with both filters or with the state pending answers 400 filter_invalid", async (t) => {

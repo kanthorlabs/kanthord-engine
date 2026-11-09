@@ -222,6 +222,33 @@ type LiveRow = CredentialRow & { nonce: Buffer; ciphertext: Buffer };
 
 type HandoverItem = HandoverPayload["items"][number];
 
+interface SealedLookup {
+  credential: string;
+  holder: string;
+  execution: Grant["execution"];
+}
+
+interface SealedFind {
+  pinned: CredentialRow | undefined;
+  row: CredentialRow | undefined;
+}
+
+type ListQuery = CredentialListQuery & { holder?: string; machine?: string };
+
+type ListGroup = { name: string; holder: string };
+
+interface ListGroupsOptions {
+  query: ListQuery;
+  after: ListGroup;
+  limit: number;
+}
+
+interface SealedRowOptions {
+  credential: string;
+}
+
+const NOTHING_FOUND: SealedFind = { pinned: undefined, row: undefined };
+
 function capturedResourceCheck(
   row: LiveRow,
   key: Buffer,
@@ -892,39 +919,16 @@ export class CustodyComponent implements Service, CredentialRecords {
     if (grant.credential === null) throw new FacilityError();
     consumeGrant(grant);
     const credential = grant.credential;
-    const pinned =
+    const found =
       holder === null
-        ? undefined
-        : pinnedRowOf(tx, credential, grant.execution?.credentials ?? []);
-    if (pinned && pinned.ended_at !== null)
-      throw new OperationError(
-        HttpStatus.Conflict,
-        CustodyErrorCode.RevisionRevoked,
-        "The pinned credential revision is revoked.",
-      );
-    const row =
-      pinned ??
-      (holder === null
-        ? undefined
-        : newestLive(
-            tx,
+        ? NOTHING_FOUND
+        : this.lookupSealed(tx, {
             credential,
-            this.copyHolderOf(tx, credential, holder),
-          ));
-    const key = row ? this.instanceKeys.keyOf(tx, row.holder) : null;
-    if (!row || row.sealed_to !== key?.fingerprint)
-      throw new OperationError(
-        HttpStatus.Forbidden,
-        CUSTODY_HOLDER_REFUSED,
-        "The worker placement receives only a copy sealed to the current key of its instance.",
-        {
-          reason:
-            row === undefined &&
-            newestLive(tx, credential, SERVER_HOLDER) !== undefined
-              ? HolderRefusal.ServerHeld
-              : HolderRefusal.HeldElsewhere,
-        },
-      );
+            holder,
+            execution: grant.execution,
+          });
+    const { pinned } = found;
+    const row = this.sealedRowOf(tx, found.row, { credential });
     if (row.platform !== grant.platform)
       throw new OperationError(
         HttpStatus.BadRequest,
@@ -935,6 +939,47 @@ export class CustodyComponent implements Service, CredentialRecords {
       this.executions.pinCredential(tx, grant.execution.execution_id, row.id);
     this.drainRevisions(tx, row.name, row.holder, now);
     return this.itemOfRow(tx, row);
+  }
+
+  private lookupSealed(tx: Transaction, lookup: SealedLookup): SealedFind {
+    const { credential, holder, execution } = lookup;
+    const pinned = pinnedRowOf(tx, credential, execution?.credentials ?? []);
+    if (pinned && pinned.ended_at !== null)
+      throw new OperationError(
+        HttpStatus.Conflict,
+        CustodyErrorCode.RevisionRevoked,
+        "The pinned credential revision is revoked.",
+      );
+    const row =
+      pinned ??
+      newestLive(tx, credential, this.copyHolderOf(tx, credential, holder));
+    return { pinned, row };
+  }
+
+  private sealedRowOf(
+    tx: Transaction,
+    row: CredentialRow | undefined,
+    options: SealedRowOptions,
+  ): CredentialRow {
+    const key = row ? this.instanceKeys.keyOf(tx, row.holder) : null;
+    if (row && row.sealed_to === key?.fingerprint) return row;
+    throw new OperationError(
+      HttpStatus.Forbidden,
+      CUSTODY_HOLDER_REFUSED,
+      "The worker placement receives only a copy sealed to the current key of its instance.",
+      { reason: this.refusalReasonOf(tx, row, options) },
+    );
+  }
+
+  private refusalReasonOf(
+    tx: Transaction,
+    row: CredentialRow | undefined,
+    options: SealedRowOptions,
+  ): HolderRefusal {
+    const serverHeld =
+      row === undefined &&
+      newestLive(tx, options.credential, SERVER_HOLDER) !== undefined;
+    return serverHeld ? HolderRefusal.ServerHeld : HolderRefusal.HeldElsewhere;
   }
 
   private revisionById(tx: Transaction, id: string): CredentialRow {
@@ -2188,23 +2233,19 @@ export class CustodyComponent implements Service, CredentialRecords {
     return answer;
   }
 
-  list(
+  private listGroups(
     tx: Transaction,
     set: CredentialPlatformSet,
-    query: CredentialListQuery & { holder?: string; machine?: string },
-  ): CredentialListAnswer {
+    options: ListGroupsOptions,
+  ): ListGroup[] {
     const {
       platform,
       holder,
       machine,
       include_archived: includeArchived,
-      limit: requestedLimit,
-      cursor,
-    } = query;
-    const after =
-      cursor === undefined ? { name: "", holder: "" } : decodeCursor(cursor);
-    const limit = requestedLimit ?? LIST_LIMIT_DEFAULT;
-    const groups = tx.database
+    } = options.query;
+    const { after, limit } = options;
+    return tx.database
       .prepare(
         "SELECT name, holder FROM credential WHERE (name > ? OR (name = ? AND holder > ?)) AND (? IS NULL OR platform = ?) AND (? IS NULL OR holder = ? OR (holder = ? AND NOT EXISTS (SELECT 1 FROM credential AS own WHERE own.name = credential.name AND own.holder = ? AND own.ended_at IS NULL))) AND platform IN (SELECT value FROM json_each(?)) GROUP BY name, holder HAVING (? = 1 OR MAX(ended_at IS NULL) = 1) ORDER BY name ASC, holder ASC LIMIT ?",
       )
@@ -2221,7 +2262,19 @@ export class CustodyComponent implements Service, CredentialRecords {
         JSON.stringify(Object.keys(set.platforms)),
         includeArchived === QUERY_TRUE ? INCLUDE : EXCLUDE,
         limit + EXTRA_ROW,
-      ) as { name: string; holder: string }[];
+      ) as ListGroup[];
+  }
+
+  list(
+    tx: Transaction,
+    set: CredentialPlatformSet,
+    query: CredentialListQuery & { holder?: string; machine?: string },
+  ): CredentialListAnswer {
+    const { limit: requestedLimit, cursor } = query;
+    const after =
+      cursor === undefined ? { name: "", holder: "" } : decodeCursor(cursor);
+    const limit = requestedLimit ?? LIST_LIMIT_DEFAULT;
+    const groups = this.listGroups(tx, set, { query, after, limit });
     const page = groups.slice(NO_ROWS, limit);
     const now = Date.now();
     for (const group of page)
