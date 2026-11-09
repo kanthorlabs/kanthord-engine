@@ -1311,6 +1311,23 @@ test("release and consume match the credential of the grant and refuse a consume
   }
 });
 
+test("a refusal of the mission authorization reaches no pin and no material", () => {
+  const m = missionGrantFixture();
+  try {
+    m.f.create(inputs[0]);
+    m.state.refused = true;
+    for (const authorize of [m.frozenAction, m.serviceMerge, m.requestEvidence])
+      assert.throws(
+        () => m.f.store.transaction((tx) => authorize(tx)),
+        /mission authorization refused/,
+      );
+    assert.deepEqual(m.row.credentials, []);
+    noSecret(m.f.logs);
+  } finally {
+    m.f.store.close();
+  }
+});
+
 test("revoke ends only an older live revision", () => {
   const pins = new Map<string, string[]>();
   const f = fixture({ pins });
@@ -1440,6 +1457,25 @@ test("credential metadata returns only nonsecret fields from the newest live rev
       f.store.transaction((tx) => metadata(tx, "openai"))?.id,
       rotated.revisions[0]!.id,
     );
+  } finally {
+    f.store.close();
+  }
+});
+
+test("create refuses a platform outside the platform set of the caller", () => {
+  const f = fixture();
+  try {
+    fails(
+      () => f.create({ ...inputs[0], platform: FOREIGN_PLATFORM }),
+      HttpStatus.BadRequest,
+      "credential.platform.unsupported",
+    );
+    fails(
+      () => f.create({ ...inputs[0], platform: TestPlatform.Key }, FOREIGN_SET),
+      HttpStatus.BadRequest,
+      "credential.platform.unsupported",
+    );
+    assert.equal(credentialCount(f), NO_CREDENTIALS);
   } finally {
     f.store.close();
   }
