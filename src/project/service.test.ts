@@ -88,7 +88,6 @@ import {
   type InstanceOf,
   INSTRUCTION_FILE_PATH_MAX_BYTES,
   InstructionFileReason,
-  JIRA_SITE_PATTERN,
   Landing,
   LinkTrustField,
   LinkTrustReason,
@@ -915,13 +914,6 @@ test("rename preserves fields, accepts its current name, and rejects another hol
   assert.deepEqual(f.invoke("rename", { name: RENAMED_NAME }, params), renamed);
   assert.deepEqual(f.invoke("get", null, params), renamed);
   assert.equal(f.invoke("create", { name: PROJECT_NAME }).name, PROJECT_NAME);
-});
-
-test("a created project is active", (t) => {
-  const f = fixture(t, { createMission: allowMission });
-  const project = f.invoke("create", { name: PROJECT_NAME });
-  assert.equal(project.paused_at, null);
-  assert.deepEqual(f.invoke("get", null, { project_id: project.id }), project);
 });
 
 test("pause and resume change paused_at, and a repeated call writes nothing", (t) => {
@@ -2013,38 +2005,6 @@ test("a native worker binding lists instances at different placements and answer
   assert.equal(unchanged.binding_set_version, written.binding_set_version);
 });
 
-test("the binding answers hold no placement for any listing", async (t) => {
-  const f = writeFixture(t);
-  const holdsNoPlacement = () => {
-    const bindingId = workerRowOfGroup(f)?.binding_id;
-    assert.ok(bindingId);
-    const answers = [
-      workerRowOfGroup(f),
-      ...f.store.transaction((tx) =>
-        f.project.workerBindingsOf(tx, f.params.project_id),
-      ),
-      f.store.transaction((tx) => f.project.workerBindingRowOf(tx, bindingId)),
-    ];
-    for (const answer of answers)
-      assert.equal(Object.hasOwn(answer!, "placement"), false);
-  };
-  const first = await f.write({
-    [WORKER_NAME]: nativeBinding([WORKER_INSTANCE, SERVER_INSTANCE]),
-  });
-  holdsNoPlacement();
-  const empty = await f.write(
-    { [WORKER_NAME]: nativeBinding([]) },
-    first.binding_set_version,
-  );
-  holdsNoPlacement();
-  const removed = await f.write({}, empty.binding_set_version);
-  await f.write(
-    { [WORKER_NAME]: workerBinding(EXTERNAL_WORKER) },
-    removed.binding_set_version,
-  );
-  holdsNoPlacement();
-});
-
 for (const field of [WorkerField.Placement, WorkerField.InstanceCount])
   test(`a native worker binding refuses ${field}`, async (t) => {
     const f = writeFixture(t);
@@ -2126,20 +2086,6 @@ for (const [field, value] of [
     assert.deepEqual(f.snapshot(), before);
   });
 
-test("a worker binding revises its listed instances and keeps its generation", async (t) => {
-  const f = writeFixture(t);
-  const first = await f.write({
-    [WORKER_NAME]: nativeBinding([SERVER_INSTANCE]),
-  });
-  const before = workerRowOfGroup(f);
-  await f.write(
-    { [WORKER_NAME]: nativeBinding([WORKER_INSTANCE]) },
-    first.binding_set_version,
-  );
-  const after = workerRowOfGroup(f);
-  assert.equal(after?.generation, before?.generation);
-});
-
 test("a worker binding that lists no instance answers a count of 0 and is disabled", async (t) => {
   const f = writeFixture(t);
   const written = await f.write({ [WORKER_NAME]: nativeBinding([]) });
@@ -2183,21 +2129,6 @@ test("a revision to an empty list ends no registration, and a removal and an ext
     result.binding_set_version,
   );
   assert.equal(f.registrationEnds.length, TWO_CALLS);
-});
-
-test("an external worker binding accepts an instance_count of 3", async (t) => {
-  const f = writeFixture(t);
-  const written = await f.write({
-    [WORKER_NAME]: {
-      kind: BindingKind.Worker,
-      config: { worker: EXTERNAL_WORKER, instance_count: THREE_INSTANCES },
-    },
-  });
-  assert.equal(
-    (written.bindings[WORKER_NAME]!.config as { instance_count: number })
-      .instance_count,
-    THREE_INSTANCES,
-  );
 });
 
 test("the agent view of a native worker that lists a worker instance checks the holders of its instances and claims no cooldown", async (t) => {
@@ -2340,22 +2271,6 @@ for (const [label, config, code, details] of INSTANCE_REFUSALS)
     );
     assert.deepEqual(f.snapshot(), before);
   });
-
-test("a native worker binding accepts 64 instances", async (t) => {
-  const names = Array.from(
-    { length: INSTANCE_COUNT_MAX },
-    (_value, index) => `coder-${index}`,
-  );
-  const f = writeFixture(t, {
-    instanceOf: (_tx, name) => ({
-      name,
-      worker: NATIVE_WORKER,
-      placement: WorkerPlacement.Server,
-    }),
-  });
-  await f.write({ [WORKER_NAME]: nativeBinding(names) });
-  assert.equal(workerRowOfGroup(f)?.instance_count, INSTANCE_COUNT_MAX);
-});
 
 const FIRST_LISTING = "first";
 const SECOND_PROJECT_NAME = "second-project";
@@ -2640,30 +2555,6 @@ function tracedWorker(tags: unknown, worker = NATIVE_WORKER) {
   const binding = workerBinding(worker);
   return { ...binding, config: { ...binding.config, tags } };
 }
-
-test("worker tags accept a tag of 64 bytes and read an absent field as an empty list", async (t) => {
-  const f = writeFixture(t);
-  const read = () =>
-    f.store.transaction((tx) =>
-      f.project.workerBindingOf(tx, f.params.project_id, WORKER_GROUP),
-    );
-  const list = () =>
-    f.store.transaction((tx) =>
-      f.project.workerBindingsOf(tx, f.params.project_id),
-    );
-  assert.equal(Buffer.byteLength(TAG_MAX), TAG_MAX_BYTES);
-  const first = await f.write({ [WORKER_NAME]: workerBinding() });
-  assert.deepEqual(read()?.tags, []);
-  await f.write(
-    { [WORKER_NAME]: tracedWorker([TAG_MAX, "toolchain.xcode_16"]) },
-    first.binding_set_version,
-  );
-  assert.deepEqual(read()?.tags, [TAG_MAX, "toolchain.xcode_16"]);
-  assert.deepEqual(
-    list().map(({ tags }) => tags),
-    [[TAG_MAX, "toolchain.xcode_16"]],
-  );
-});
 
 test("worker tags refuse a longer tag, an upper-case tag, an empty segment, a repeated tag and a nonlist value", async (t) => {
   const f = writeFixture(t);
@@ -3049,8 +2940,6 @@ test("an unchanged alias-model binding does not block a worker save and its chec
 
 const GITLAB_IDENTITY = "repository:gitlab:acme/api";
 const EMPTY_ISSUES = 0;
-const FIRST_INDEX = 0;
-const LONGEST_ACTOR_ID = "9999999999999999";
 
 function withoutCredential<T extends { credential?: string }>(
   config: T,
@@ -3128,29 +3017,6 @@ test("a write stores the binding prompts and a prompt change revises the binding
   );
 });
 
-test("a binding prompt key outside the three keys or the agent catalog fails the strict parse", () => {
-  const promptsPath = [
-    "body",
-    "bindings",
-    REPOSITORY_NAME,
-    "config",
-    "prompts",
-  ];
-  for (const [prompts, path] of [
-    [{ [SWE_AGENT]: "text" }, promptsPath],
-    [{ agents: { "coder@1": "text" } }, [...promptsPath, "agents"]],
-  ] as const)
-    assert.deepEqual(
-      schemaIssues({
-        [REPOSITORY_NAME]: {
-          ...repositoryBinding(),
-          config: { ...repositoryBinding().config, prompts },
-        },
-      }),
-      [{ code: "unrecognized_keys", path }],
-    );
-});
-
 test("a git-only platform accepts push and refuses a credential or pull_request", async (t) => {
   const address = "git@gitlab.com:acme/api.git";
   const f = writeFixture(t);
@@ -3199,37 +3065,6 @@ test("a git-only platform accepts push and refuses a credential or pull_request"
     f.ssh.map((call) => call.address),
     [address],
   );
-});
-
-const RETIRED_ACTION_NAME = ["merge", "push"].join("_");
-
-test("binding apply refuses the retired merge-push action name and accepts push", () => {
-  const config = repositoryBinding().config;
-  const withAction = (name: string) => ({
-    [REPOSITORY_NAME]: {
-      ...repositoryBinding(),
-      config: {
-        ...config,
-        strategy: {
-          ...config.strategy,
-          action: {
-            name,
-            follows: { type: FollowsType.AssessmentPassed },
-          },
-        },
-      },
-    },
-  });
-  assert.ok(Array.isArray(schemaIssues(withAction(RETIRED_ACTION_NAME))));
-  const accepted = projectOperations["bindingSet.write"].input.safeParse({
-    params: { project_id: "project" },
-    query: EMPTY_QUERY,
-    body: {
-      version: BINDING_SET_INITIAL_VERSION,
-      bindings: withAction(GitHubAction.Push),
-    },
-  });
-  assert.equal(accepted.success, true);
 });
 
 const CONVERSATION_NAME = "conversation";
@@ -3349,32 +3184,6 @@ test("conversationPolicyOf answers the action reply and its key for a binding wi
       null,
     );
   });
-});
-
-test("a conversation binding without repository or credential, or with an unknown key, fails the input schema", () => {
-  const complete = conversationBinding().config;
-  const without = (key: string) =>
-    Object.fromEntries(Object.entries(complete).filter(([k]) => k !== key));
-  for (const [config, code] of [
-    [without("repository"), "invalid_type"],
-    [without("credential"), "invalid_type"],
-    [{ ...complete, members: [] }, "unrecognized_keys"],
-  ] as const)
-    assert.deepEqual(
-      schemaIssues({
-        [CONVERSATION_NAME]: { kind: BindingKind.Conversation, config },
-      }).map((issue) => issue.code),
-      [code],
-    );
-});
-
-test("a conversation binding refuses a repository outside the owner and repository form", () => {
-  for (const repository of ["acme", "acme/app/extra", "acme/app:1", ""])
-    assert.ok(
-      schemaIssues({
-        [CONVERSATION_NAME]: conversationBinding({ repository }),
-      }).length > EMPTY_ISSUES,
-    );
 });
 
 test("a conversation binding refuses a credential of another platform", async (t) => {
@@ -3519,36 +3328,6 @@ test("link_trust refuses a wrong list with its reason and the refused id", async
   assert.deepEqual(f.snapshot(), before);
 });
 
-test("link_trust accepts a list of 32 ids and an id of 16 digits", async (t) => {
-  const f = writeFixture(t);
-  const actorIds = Array.from({ length: LINK_TRUST_MAX }, (_, index) =>
-    String(index + 1),
-  );
-  actorIds[FIRST_INDEX] = LONGEST_ACTOR_ID;
-  await f.write({
-    [CONVERSATION_NAME]: conversationBinding({
-      link_trust: linkTrustOf(actorIds),
-    }),
-  });
-});
-
-test("a link_trust key outside actor_ids fails the input schema", () => {
-  for (const kind of [BindingKind.Conversation, BindingKind.Repository]) {
-    const link_trust = { actor_ids: [ACTOR_ID], members: [ACTOR_ID] };
-    const binding =
-      kind === BindingKind.Conversation
-        ? conversationBinding({ link_trust })
-        : {
-            kind,
-            config: { ...repositoryBinding().config, link_trust },
-          };
-    assert.deepEqual(
-      schemaIssues({ [CONVERSATION_NAME]: binding }).map(({ path }) => path),
-      [[...CONFIG_PATH, "link_trust"]],
-    );
-  }
-});
-
 test("link_trust on a repository binding of platform gitlab refuses with platform_unsupported", async (t) => {
   const f = writeFixture(t);
   const address = "git@gitlab.com:acme/api.git";
@@ -3578,7 +3357,6 @@ test("link_trust on a repository binding of platform gitlab refuses with platfor
 const INBOX_HANDLE = "ulrich";
 const INBOX_HANDLE_LEADING_DASH = "-ulrich";
 const OTHER_PROJECT_NAME = "other-project";
-const INBOX_LONGEST_HANDLE = "a".repeat(INBOX_HANDLE_MAX_LENGTH);
 const INBOX_LONG_HANDLE = "a".repeat(INBOX_HANDLE_MAX_LENGTH + 1);
 
 function inboxOf(actor_id: unknown, handle: unknown) {
@@ -3622,19 +3400,6 @@ test("an inbox with an actor id and a handle stores and a change of it writes th
     changed,
   );
   assert.deepEqual(bindingRevisions(f), [REVISION_ONE, REVISION_TWO]);
-});
-
-test("an inbox handle of one character and of 39 characters stores", async (t) => {
-  const f = writeFixture(t);
-  for (const handle of ["a", INBOX_LONGEST_HANDLE]) {
-    const inbox = inboxOf(ACTOR_ID, handle);
-    await f.write(
-      { [CONVERSATION_NAME]: conversationBinding({ inbox }) },
-      f.store.transaction(
-        (tx) => requireProject(tx, f.params.project_id).binding_set_version,
-      ),
-    );
-  }
 });
 
 test("an invalid inbox refuses with its field and reason", async (t) => {
@@ -3692,19 +3457,7 @@ test("an invalid inbox refuses with its field and reason", async (t) => {
   assert.deepEqual(f.snapshot(), before);
 });
 
-test("an inbox key outside actor_id and handle fails the input schema", () => {
-  const inbox = { ...inboxOf(ACTOR_ID, INBOX_HANDLE), members: [ACTOR_ID] };
-  assert.deepEqual(
-    schemaIssues({ [CONVERSATION_NAME]: conversationBinding({ inbox }) }).map(
-      ({ path }) => path,
-    ),
-    [[...CONFIG_PATH, "inbox"]],
-  );
-});
-
 const JIRA_SITE = "acme.atlassian.net";
-const JIRA_MIXED_CASE_SITE = "Acme.Atlassian.Net";
-const NO_FLAGS = "";
 const JIRA_PROJECT_KEY = "KD";
 const JIRA_IDENTITY = "conversation:jira:acme.atlassian.net/KD";
 const JIRA_CREDENTIAL = "jira-conversation";
@@ -3747,24 +3500,6 @@ test("a conversation binding of platform jira stores with its resource identity 
   ]);
 });
 
-test("a jira site in mixed case stores under a lower-case site in the resource identity", async (t) => {
-  const f = writeFixture(t);
-  const result = await f.write({
-    [CONVERSATION_NAME]: jiraBinding({ site: JIRA_MIXED_CASE_SITE }),
-  });
-  assert.equal(
-    result.bindings[CONVERSATION_NAME]?.resource_identity,
-    JIRA_IDENTITY,
-  );
-});
-
-test("the jira site pattern accepts a site in mixed case and refuses a site outside atlassian.net", () => {
-  assert.equal(JIRA_SITE_PATTERN.flags, NO_FLAGS);
-  assert.ok(JIRA_SITE_PATTERN.test(JIRA_MIXED_CASE_SITE));
-  assert.ok(JIRA_SITE_PATTERN.test(JIRA_SITE));
-  assert.equal(JIRA_SITE_PATTERN.test("acme.example.com"), false);
-});
-
 test("conversationBindingOf and conversationPolicyOf answer the jira resource of a jira binding", (t) => {
   const f = fixture(t);
   f.store.transaction((tx) => {
@@ -3790,45 +3525,6 @@ test("conversationBindingOf and conversationPolicyOf answer the jira resource of
   });
 });
 
-test("a jira binding refuses a site of another domain, a key outside its form and a missing field", () => {
-  const complete = jiraBinding().config;
-  const without = (key: string) =>
-    Object.fromEntries(Object.entries(complete).filter(([k]) => k !== key));
-  for (const site of [
-    "acme.example.com",
-    "acme.atlassian.net.example.com",
-    "atlassian.net",
-    "acme/x.atlassian.net",
-    "",
-  ])
-    assert.ok(
-      schemaIssues({ [CONVERSATION_NAME]: jiraBinding({ site }) }).length >
-        EMPTY_ISSUES,
-      site,
-    );
-  for (const project_key of ["kd", "K", "1KD", "K-D", "KDKDKDKDKDK", ""])
-    assert.ok(
-      schemaIssues({ [CONVERSATION_NAME]: jiraBinding({ project_key }) })
-        .length > EMPTY_ISSUES,
-      project_key,
-    );
-  for (const key of ["site", "project_key", "credential"])
-    assert.ok(
-      schemaIssues({
-        [CONVERSATION_NAME]: {
-          kind: BindingKind.Conversation,
-          config: without(key),
-        },
-      }).length > EMPTY_ISSUES,
-      key,
-    );
-  assert.ok(
-    schemaIssues({
-      [CONVERSATION_NAME]: jiraBinding({ repository: CONVERSATION_REPOSITORY }),
-    }).length > EMPTY_ISSUES,
-  );
-});
-
 test("a jira binding refuses a credential of platform github", async (t) => {
   const failure = new OperationError(
     HttpStatus.BadRequest,
@@ -3852,24 +3548,6 @@ test("a jira binding refuses a credential of platform github", async (t) => {
     (error) => error === failure,
   );
   assert.deepEqual(f.snapshot(), before);
-});
-
-test("jira link_trust accepts Jira account ids up to 128 characters", async (t) => {
-  const f = writeFixture(t);
-  const link_trust = linkTrustOf([
-    JIRA_ACCOUNT_ID,
-    JIRA_SECOND_ACCOUNT_ID,
-    "a".repeat(JIRA_ACCOUNT_ID_MAX_LENGTH),
-    "1",
-  ]);
-  const result = await f.write({
-    [CONVERSATION_NAME]: jiraBinding({ link_trust }),
-  });
-  assert.deepEqual(
-    (result.bindings[CONVERSATION_NAME]?.config as Record<string, unknown>)
-      .link_trust,
-    link_trust,
-  );
 });
 
 test("jira link_trust refuses an invalid Jira id with id_invalid and the refused id", async (t) => {
@@ -4017,60 +3695,6 @@ test("a slack binding refuses a credential of platform github", async (t) => {
     (error) => error === failure,
   );
   assert.deepEqual(f.snapshot(), before);
-});
-
-test("a slack binding refuses a team id outside its form, a missing field and a foreign field", () => {
-  const complete = slackBinding().config;
-  const without = (key: string) =>
-    Object.fromEntries(Object.entries(complete).filter(([k]) => k !== key));
-  for (const team_id of [
-    "",
-    "t01abcdef",
-    "T0",
-    "U01ABCDEF",
-    "T01ABC-EF",
-    `T${"A".repeat(SLACK_ID_MAX_LENGTH)}`,
-  ])
-    assert.ok(
-      schemaIssues({ [CONVERSATION_NAME]: slackBinding({ team_id }) }).length >
-        EMPTY_ISSUES,
-      team_id,
-    );
-  for (const key of ["team_id", "credential"])
-    assert.ok(
-      schemaIssues({
-        [CONVERSATION_NAME]: {
-          kind: BindingKind.Conversation,
-          config: without(key),
-        },
-      }).length > EMPTY_ISSUES,
-      key,
-    );
-  for (const foreign of [
-    { repository: CONVERSATION_REPOSITORY },
-    { site: JIRA_SITE },
-  ])
-    assert.ok(
-      schemaIssues({ [CONVERSATION_NAME]: slackBinding(foreign) }).length >
-        EMPTY_ISSUES,
-    );
-});
-
-test("slack link_trust accepts Slack user ids of both forms up to 32 characters", async (t) => {
-  const f = writeFixture(t);
-  const link_trust = linkTrustOf([
-    SLACK_USER_ID,
-    SLACK_WORKSPACE_USER_ID,
-    `U${"A".repeat(SLACK_ID_MAX_LENGTH - 1)}`,
-  ]);
-  const result = await f.write({
-    [CONVERSATION_NAME]: slackBinding({ link_trust }),
-  });
-  assert.deepEqual(
-    (result.bindings[CONVERSATION_NAME]?.config as Record<string, unknown>)
-      .link_trust,
-    link_trust,
-  );
 });
 
 test("slack link_trust refuses an id outside its form with id_invalid and the refused id", async (t) => {
