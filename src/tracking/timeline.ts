@@ -169,22 +169,31 @@ function cursorOf(row: Record<string, unknown>): TimelineCursor {
   };
 }
 
-export function listTimeline(
-  tx: Transaction,
-  query: TimelineQuery,
-  after: TimelineCursor | null,
-): TimelinePage {
+interface TimelineScan {
+  after: TimelineCursor | null;
+  limit: number;
+}
+
+function limitOf(query: TimelineQuery): number {
   const limit = query.limit ?? TIMELINE_LIMIT_DEFAULT;
   assert.ok(
     Number.isSafeInteger(limit) &&
       limit >= TIMELINE_LIMIT_MIN &&
       limit <= TIMELINE_LIMIT_MAX,
   );
+  return limit;
+}
+
+function timelineRows(
+  tx: Transaction,
+  query: TimelineQuery,
+  scan: TimelineScan,
+): Record<string, unknown>[] {
   const depth = query.depth ?? TimelineDepth.Child;
   assert.ok(depth === TimelineDepth.Root || depth === TimelineDepth.Child);
   const [column, scope] = scopeOf(query);
-  const cursor = after ?? NO_CURSOR;
-  const rows = tx.database.prepare(statementOf(column)).all({
+  const cursor = scan.after ?? NO_CURSOR;
+  return tx.database.prepare(statementOf(column)).all({
     scope,
     from: query.from ?? Number.MIN_SAFE_INTEGER,
     to: query.to ?? Number.MAX_SAFE_INTEGER,
@@ -193,9 +202,15 @@ export function listTimeline(
     after_time: cursor.item_time,
     after_span_id: cursor.span_id,
     max_depth: depth,
-    trace_limit: limit + 1,
-    row_limit: ROWS_PER_ITEM_AND_END * limit + END_ROWS_EXTRA,
+    trace_limit: scan.limit + 1,
+    row_limit: ROWS_PER_ITEM_AND_END * scan.limit + END_ROWS_EXTRA,
   });
+}
+
+function pageOf(
+  rows: readonly Record<string, unknown>[],
+  limit: number,
+): TimelinePage {
   const items: Record<string, unknown>[] = [];
   const ends: Record<string, unknown>[] = [];
   for (const row of rows) {
@@ -216,4 +231,13 @@ export function listTimeline(
     next_cursor:
       ends.length > limit && lastEnd !== undefined ? cursorOf(lastEnd) : null,
   };
+}
+
+export function listTimeline(
+  tx: Transaction,
+  query: TimelineQuery,
+  after: TimelineCursor | null,
+): TimelinePage {
+  const limit = limitOf(query);
+  return pageOf(timelineRows(tx, query, { after, limit }), limit);
 }
