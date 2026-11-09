@@ -145,6 +145,8 @@ const KEPT_SETUP = {
 };
 const NO_DEPS_SETUP = { postCreateCommand: "test ! -e deps" };
 const NO_COMMAND_SETUP = {};
+const PLAIN_SETUP = { postCreateCommand: "true" };
+const TRACKED_TEXT = "tracked";
 
 test("a passing setup records the paths that it creates as setup roots", async (t) => {
   const { checkout } = await repository(t, { ".gitignore": "*.log\n" });
@@ -206,12 +208,21 @@ test("a record with a root outside the checkout removes nothing outside the chec
     end: SetupEnd.Pass,
   });
   assert.equal(existsSync(outside), true);
-  assert.equal(existsSync(join(checkout, "deps", "a")), true);
-  assert.deepEqual(await setUp(checkout, KEPT_SETUP), { end: SetupEnd.Pass });
-  assert.deepEqual(setupRecord(checkout), {
-    digest: digest(KEPT_SETUP),
-    roots: [],
-  });
+  assert.equal(existsSync(join(checkout, "deps")), false);
+  assert.equal(setupRecord(checkout), null);
+});
+
+test("a changed environment keeps a recorded root that holds a tracked path", async (t) => {
+  const { checkout } = await repository(t, { "deps/tracked": TRACKED_TEXT });
+  writeFileSync(
+    setupRecordPath(checkout),
+    JSON.stringify({ digest: "earlier", roots: ["deps/"] }),
+  );
+  assert.deepEqual(await setUp(checkout, PLAIN_SETUP), { end: SetupEnd.Pass });
+  assert.equal(
+    readFileSync(join(checkout, "deps", "tracked"), "utf8"),
+    TRACKED_TEXT,
+  );
 });
 
 test("a failed setup keeps the earlier record", async (t) => {

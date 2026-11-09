@@ -2,6 +2,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { z } from "zod";
 import { writePrivate } from "../../kernel/files.ts";
+import { type GitCall, trackedRoots } from "./local-git.ts";
 
 export const SETUP_RECORD_FILE = "kanthord-setup.json";
 const GIT_DIRECTORY = ".git";
@@ -31,15 +32,19 @@ function validRoot(directory: string, root: string): boolean {
   );
 }
 
-export function validRoots(
-  directory: string,
+export async function validRoots(
+  call: GitCall,
   roots: readonly string[],
-): boolean {
-  return roots.every((root) => validRoot(directory, root));
+): Promise<string[]> {
+  const inside = roots.filter((root) => validRoot(call.directory, root));
+  const tracked = await trackedRoots(call, inside);
+  return inside.filter((root) => !tracked.includes(root));
 }
 
-export function readSetupRecord(directory: string): SetupRecord | null {
-  const path = recordPath(directory);
+export async function readSetupRecord(
+  call: GitCall,
+): Promise<SetupRecord | null> {
+  const path = recordPath(call.directory);
   if (!existsSync(path)) return null;
   let value: unknown;
   try {
@@ -48,8 +53,11 @@ export function readSetupRecord(directory: string): SetupRecord | null {
     return null;
   }
   const parsed = setupRecordSchema.safeParse(value);
-  if (!parsed.success || !validRoots(directory, parsed.data.roots)) return null;
-  return parsed.data;
+  if (!parsed.success) return null;
+  return {
+    digest: parsed.data.digest,
+    roots: await validRoots(call, parsed.data.roots),
+  };
 }
 
 export function writeSetupRecord(directory: string, record: SetupRecord): void {

@@ -253,13 +253,16 @@ export function runSetup(
   );
 }
 
-function keptRoots(directory: string, environmentDigest: string): string[] {
-  const record = readSetupRecord(directory);
+async function keptRoots(
+  call: GitCall,
+  environmentDigest: string,
+): Promise<string[]> {
+  const record = await readSetupRecord(call);
   if (record === null) return [];
   if (record.digest === environmentDigest) return record.roots;
   for (const root of record.roots)
-    rmSync(join(directory, root), { recursive: true, force: true });
-  removeSetupRecord(directory);
+    rmSync(join(call.directory, root), { recursive: true, force: true });
+  removeSetupRecord(call.directory);
   return [];
 }
 
@@ -278,7 +281,7 @@ async function setUpEntries(
 ): Promise<SetupResult> {
   for (const entry of entries) {
     const environmentDigest = environmentDigestOf(entry);
-    const kept = keptRoots(entry.directory, environmentDigest);
+    const kept = await keptRoots(gitCall(input, entry), environmentDigest);
     const commands =
       entry.environment === null ? [] : setupScriptsOf(entry.environment);
     if (!commands.length) continue;
