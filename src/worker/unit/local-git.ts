@@ -1009,6 +1009,21 @@ export async function cloneLocal(
   );
 }
 
+export async function clonePacked(
+  call: GitCall,
+  source: string,
+): Promise<void> {
+  assert.ok(source && !source.startsWith("-"));
+  assert.ok(call.directory && !call.directory.startsWith("-"));
+  await run(
+    call.env,
+    dirname(call.directory),
+    ["clone", "--no-local", "--no-checkout", "--", source, call.directory],
+    call.context,
+    call.deadlineMs,
+  );
+}
+
 export async function matchRemote(
   env: NodeJS.ProcessEnv,
   directory: string,

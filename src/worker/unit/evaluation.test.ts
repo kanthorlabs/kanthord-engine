@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { PromptTemplate } from "../../agent/contract.ts";
 import { test, type TestContext } from "node:test";
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   hostEnvironment,
   stopAfter,
@@ -27,6 +27,7 @@ import {
   repositorySetup,
 } from "./test-support.ts";
 import { WorkspaceRoot } from "./workspace.ts";
+import { PoolClass } from "./tree-pool.ts";
 import { AFFECTED_DECLARATION_FILE, AffectedVerdict } from "./affected.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { RepositoryTransport } from "../contract.ts";
@@ -833,12 +834,13 @@ async function reviewOf(
         'kanthord-judgement: {"result":"success","rationale":"met"}',
     } as unknown as NativeAgent;
   };
+  const workspaces = WorkspaceRoot.open(temporary(t));
   const end = await executionBoundary(run, () =>
     runEvaluation(
       {
         setup,
         claim,
-        workspaces: WorkspaceRoot.open(temporary(t)),
+        workspaces,
         transport: options.transport ?? ({} as RepositoryTransport),
         sshAccess: everyBindingSshAccess,
         env: hostEnvironment(),
@@ -858,6 +860,7 @@ async function reviewOf(
     releases,
     records,
     actionRequests,
+    workspaces,
     opens: () => opens,
   };
 }
@@ -1431,6 +1434,25 @@ test("an affected test that fails at the head and passes at the base answers cri
   assert.equal(
     attributes[EvaluationAttribute.Affected],
     AffectedVerdict.Failed,
+  );
+});
+
+test("a review base head is deleted at the release and never enters the command class", async (t) => {
+  const review = await affectedReview(
+    t,
+    affectedCommand(`echo head-output; ${FAILS_WHEN_BROKEN}`),
+    BROKEN,
+  );
+  assert.equal(affectedEnd(review), AffectedVerdict.Failed);
+  assert.deepEqual(
+    review.workspaces.pool
+      .trees()
+      .filter(({ path }) => basename(dirname(path)) === PoolClass.Command),
+    [],
+  );
+  assert.equal(
+    existsSync(join(review.workspaces.nodeKey(review.nodeId), "review")),
+    false,
   );
 });
 

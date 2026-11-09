@@ -546,7 +546,7 @@ async function fixture(
   return {
     checkout,
     head: await headCommit(env, checkout, background, DEADLINE_MS),
-    base: new BaseHead(setup, join(root, "base"), entries),
+    base: new BaseHead(setup, { directory: join(root, "base") }, entries),
     key: join(root, "workspace"),
     probe,
     records,

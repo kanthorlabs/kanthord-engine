@@ -1,14 +1,18 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import {
+  chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
 import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
@@ -37,6 +41,8 @@ import { SpanOperation, SpanRecorder } from "./telemetry.ts";
 import { VerificationClass } from "./verification.ts";
 import { spanEnds } from "./test-support.ts";
 import { spawnedPids, survivingProcesses } from "../../agent/test-support.ts";
+import { BASE_DIRECTORY, WorkspaceRoot } from "./workspace.ts";
+import { PoolClass, repoKeyOf } from "./tree-pool.ts";
 
 const env = hostEnvironment();
 const IDENTITY = [
@@ -115,7 +121,11 @@ function input() {
 
 async function prepared(checkout: SetupCheckout, root: string) {
   const entries = await setupEntries(input(), [checkout]);
-  const base = new BaseHead(input(), join(root, "base"), entries);
+  const base = new BaseHead(
+    input(),
+    { directory: join(root, "base") },
+    entries,
+  );
   const head = await headCommit(env, checkout.directory, background, 10000);
   return { entries, base, head };
 }
@@ -401,7 +411,7 @@ test("a setup failure on the node head that passes on the base head is a code fa
   assert.equal(result.end, SetupEnd.Failed);
   assert.ok(result.end === SetupEnd.Failed);
   assert.equal(result.run.verification.results[0]?.exit_code, FAILED_EXIT);
-  base.dispose();
+  await base.giveBack();
   assert.equal(existsSync(join(root, "base")), false);
 });
 
@@ -510,7 +520,11 @@ test("the base rerun answers no exit when the budget ends in the base setup", as
   const entry = setupCheckout(checkout, stored({ postCreateCommand: "true" }));
   const exhausted = { ...input(), exhausted: () => true };
   const entries = await setupEntries(exhausted, [entry]);
-  const base = new BaseHead(exhausted, join(root, "base"), entries);
+  const base = new BaseHead(
+    exhausted,
+    { directory: join(root, "base") },
+    entries,
+  );
   assert.equal(await base.exitOf("command-absent-x"), null);
 });
 
@@ -665,4 +679,275 @@ test("a background child of a setup command is dead before the first verificatio
   ]);
   assert.equal(spawned.length, ONE_CHILD);
   assert.deepEqual(await survivingProcesses(spawned), []);
+});
+
+const TREE_DELETED = "tree deleted";
+const INVALID_PERMISSIONS = "system.files.invalid_permissions";
+const OPEN_MODE = 0o755;
+const ROOT_USER = 0;
+const ONE_TREE = 1;
+const READ_ONLY_MODE = 0o500;
+const STRAY_FILE = "stray.txt";
+const BASE_PURPOSE = "base";
+
+interface LogRecord {
+  msg: string;
+  fields: Record<string, unknown>;
+}
+
+async function poolFixture(t: TestContext) {
+  const { root, origin, checkout } = await repository(t, { file: "base" });
+  const workspaces = WorkspaceRoot.open(temporary(t));
+  const logs: LogRecord[] = [];
+  const entry = setupCheckout(checkout, stored(KEPT_SETUP));
+  const baseHead = async (nodeId: string, environment = entry) =>
+    new BaseHead(
+      input(),
+      {
+        directory: join(workspaces.nodeKey(nodeId), BASE_DIRECTORY),
+        trees: {
+          workspaces,
+          nodeId,
+          addresses: new Map([[environment.repository.name, origin]]),
+          log: (msg, fields) => logs.push({ msg, fields }),
+        },
+      },
+      await setupEntries(input(), [environment]),
+    );
+  const tree = (nodeId: string) =>
+    join(workspaces.nodeKey(nodeId), BASE_DIRECTORY, entry.repository.name);
+  const commandTrees = () =>
+    workspaces.pool
+      .trees()
+      .map(({ path }) => path)
+      .filter(
+        (path) =>
+          basename(dirname(path)) === PoolClass.Command &&
+          basename(dirname(dirname(path))) === repoKeyOf(origin),
+      );
+  const prepared = () =>
+    logs
+      .filter(({ fields }) => fields.purpose === BASE_PURPOSE)
+      .map(({ msg, fields }) => [msg, fields.source]);
+  return {
+    root,
+    origin,
+    checkout,
+    workspaces,
+    logs,
+    entry,
+    baseHead,
+    tree,
+    commandTrees,
+    prepared,
+  };
+}
+
+function objectInodes(directory: string): Set<number> {
+  const inodes = new Set<number>();
+  const walk = (path: string) => {
+    for (const name of readdirSync(path)) {
+      const entry = join(path, name);
+      const stats = lstatSync(entry);
+      if (stats.isDirectory()) walk(entry);
+      else inodes.add(stats.ino);
+    }
+  };
+  walk(join(directory, ".git", "objects"));
+  return inodes;
+}
+
+test("a second base head of the same repository reuses the tree and keeps each file of a setup root", async (t) => {
+  const h = await poolFixture(t);
+  const first = createIdentity("node");
+  const base = await h.baseHead(first);
+  assert.deepEqual(await base.setup(), { end: SetupEnd.Pass });
+  const marker = statSync(join(h.tree(first), "deps", "a"));
+  writeFileSync(join(h.tree(first), STRAY_FILE), "x");
+  await base.giveBack();
+  const second = createIdentity("node");
+  const next = await h.baseHead(second);
+  assert.deepEqual(await next.setup(), { end: SetupEnd.Pass });
+  const kept = statSync(join(h.tree(second), "deps", "a"));
+  assert.equal(kept.ino, marker.ino);
+  assert.equal(kept.mtimeMs, marker.mtimeMs);
+  assert.equal(existsSync(join(h.tree(second), STRAY_FILE)), false);
+  assert.equal(
+    (await headCommit(env, h.tree(second), background, 10000)).trim(),
+    await commitOf(env, h.checkout, "origin/main", background, 10000),
+  );
+  assert.deepEqual(h.prepared(), [
+    ["tree prepared", "clone"],
+    ["tree prepared", "pool"],
+  ]);
+  await next.giveBack();
+});
+
+test("a base head gives its tree back to the command class", async (t) => {
+  const h = await poolFixture(t);
+  const nodeId = createIdentity("node");
+  const base = await h.baseHead(nodeId);
+  assert.deepEqual(await base.setup(), { end: SetupEnd.Pass });
+  await base.giveBack();
+  assert.equal(h.commandTrees().length, ONE_TREE);
+  assert.equal(
+    existsSync(join(h.workspaces.nodeKey(nodeId), BASE_DIRECTORY)),
+    false,
+  );
+});
+
+test("a fresh base head tree shares no object file with the agent checkout", async (t) => {
+  const h = await poolFixture(t);
+  const nodeId = createIdentity("node");
+  const base = await h.baseHead(nodeId);
+  assert.deepEqual(await base.setup(), { end: SetupEnd.Pass });
+  const checkout = objectInodes(h.checkout);
+  assert.deepEqual(
+    [...objectInodes(h.tree(nodeId))].filter((ino) => checkout.has(ino)),
+    [],
+  );
+  await base.giveBack();
+});
+
+test("a fresh base head checks out a moved base commit that no local branch of the checkout holds", async (t) => {
+  const h = await poolFixture(t);
+  await commit(h.origin, "moved", "moved");
+  await simpleGit(h.checkout).fetch("origin");
+  const moved = await commitOf(
+    env,
+    h.checkout,
+    "origin/main",
+    background,
+    10000,
+  );
+  const nodeId = createIdentity("node");
+  const base = await h.baseHead(nodeId);
+  assert.deepEqual(await base.setup(), { end: SetupEnd.Pass });
+  assert.equal(await headCommit(env, h.tree(nodeId), background, 10000), moved);
+  await base.giveBack();
+});
+
+test("a base head gives back nothing when its setup never ran", async (t) => {
+  const h = await poolFixture(t);
+  const nodeId = createIdentity("node");
+  mkdirSync(dirname(h.tree(nodeId)), { recursive: true });
+  await simpleGit().raw([
+    "clone",
+    "--no-local",
+    "--",
+    h.origin,
+    h.tree(nodeId),
+  ]);
+  const base = await h.baseHead(nodeId);
+  await base.giveBack();
+  assert.deepEqual(h.commandTrees(), []);
+  assert.equal(existsSync(join(h.tree(nodeId), ".git")), true);
+});
+
+test("a base head preparation gives a crash leftover back and takes it", async (t) => {
+  const h = await poolFixture(t);
+  const nodeId = createIdentity("node");
+  mkdirSync(dirname(h.tree(nodeId)), { recursive: true });
+  await simpleGit().raw([
+    "clone",
+    "--no-local",
+    "--",
+    h.origin,
+    h.tree(nodeId),
+  ]);
+  const leftover = statSync(join(h.tree(nodeId), ".git")).ino;
+  const base = await h.baseHead(nodeId);
+  assert.deepEqual(await base.setup(), { end: SetupEnd.Pass });
+  assert.equal(statSync(join(h.tree(nodeId), ".git")).ino, leftover);
+  assert.deepEqual(h.prepared(), [["tree prepared", "pool"]]);
+  await base.giveBack();
+});
+
+test("a base head preparation removes a leftover entry with a current name that is not a tree", async (t) => {
+  const h = await poolFixture(t);
+  const nodeId = createIdentity("node");
+  mkdirSync(dirname(h.tree(nodeId)), { recursive: true });
+  writeFileSync(h.tree(nodeId), "x");
+  const base = await h.baseHead(nodeId);
+  assert.deepEqual(await base.setup(), { end: SetupEnd.Pass });
+  assert.equal(existsSync(join(h.tree(nodeId), ".git")), true);
+  assert.deepEqual(h.prepared(), [["tree prepared", "clone"]]);
+  await base.giveBack();
+});
+
+test("a base head does not follow a symbolic link that replaces the base directory", async (t) => {
+  const h = await poolFixture(t);
+  const nodeId = createIdentity("node");
+  const outside = join(h.root, "outside");
+  const outsideTree = join(outside, h.entry.repository.name);
+  mkdirSync(outside);
+  await simpleGit().raw(["clone", "--no-local", "--", h.origin, outsideTree]);
+  const directory = dirname(h.tree(nodeId));
+  mkdirSync(dirname(directory), { recursive: true });
+  symlinkSync(outside, directory);
+  const base = await h.baseHead(nodeId);
+  assert.deepEqual(await base.setup(), { end: SetupEnd.Pass });
+  assert.equal(lstatSync(directory).isDirectory(), true);
+  assert.equal(existsSync(join(outsideTree, ".git")), true);
+  rmSync(directory, { recursive: true, force: true });
+  symlinkSync(outside, directory);
+  await base.giveBack();
+  assert.equal(existsSync(join(outsideTree, ".git")), true);
+  assert.equal(existsSync(directory), false);
+  assert.deepEqual(h.commandTrees(), []);
+});
+
+test("a base head tree that the give cannot keep is deleted and logs tree deleted", async (t) => {
+  if (process.getuid?.() === ROOT_USER)
+    return t.skip("root bypasses the mode check");
+  const h = await poolFixture(t);
+  const nodeId = createIdentity("node");
+  const base = await h.baseHead(nodeId);
+  assert.deepEqual(await base.setup(), { end: SetupEnd.Pass });
+  chmodSync(join(h.tree(nodeId), ".git"), OPEN_MODE);
+  await base.giveBack();
+  assert.deepEqual(h.commandTrees(), []);
+  assert.equal(existsSync(h.tree(nodeId)), false);
+  assert.deepEqual(
+    h.logs
+      .filter(({ msg }) => msg === TREE_DELETED)
+      .map(({ fields }) => [fields.path, fields.code]),
+    [[h.tree(nodeId), INVALID_PERMISSIONS]],
+  );
+});
+
+test("a base head give-back that cannot remove the base directory logs tree deleted and does not throw", async (t) => {
+  if (process.getuid?.() === ROOT_USER)
+    return t.skip("root bypasses the mode check");
+  const h = await poolFixture(t);
+  const nodeId = createIdentity("node");
+  const base = await h.baseHead(nodeId);
+  assert.deepEqual(await base.setup(), { end: SetupEnd.Pass });
+  const directory = dirname(h.tree(nodeId));
+  const locked = join(directory, "locked");
+  mkdirSync(locked);
+  writeFileSync(join(locked, "file"), "x");
+  chmodSync(locked, READ_ONLY_MODE);
+  try {
+    await base.giveBack();
+  } finally {
+    chmodSync(locked, OPEN_MODE);
+  }
+  assert.equal(h.commandTrees().length, ONE_TREE);
+  assert.deepEqual(
+    h.logs
+      .filter(({ msg }) => msg === TREE_DELETED)
+      .map(({ fields }) => fields.path),
+    [directory],
+  );
+});
+
+test("a base head whose preparation fails gives back without a throw", async (t) => {
+  const h = await poolFixture(t);
+  const nodeId = createIdentity("node");
+  const base = await h.baseHead(nodeId);
+  rmSync(h.checkout, { recursive: true, force: true });
+  await assert.rejects(base.setup());
+  await base.giveBack();
+  assert.deepEqual(h.commandTrees(), []);
 });

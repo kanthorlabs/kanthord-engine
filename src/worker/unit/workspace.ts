@@ -151,10 +151,11 @@ interface ReviewTree {
   target: string;
   end: number;
 }
-interface LeftoverTrees extends Preparation {
+interface LeftoverTrees {
   env: NodeJS.ProcessEnv;
+  context: Context;
   nodeId: string;
-  repositories: readonly WorkspaceRepository[];
+  repositories: readonly Pick<WorkspaceRepository, "name" | "address">[];
   poolClass: PoolClass;
   log?: WorkspaceLog;
 }
@@ -575,7 +576,7 @@ export class WorkspaceRoot {
         });
       }
   }
-  private async giveLeftoverTrees(
+  async giveLeftoverTrees(
     directory: string,
     input: LeftoverTrees,
     end: number,

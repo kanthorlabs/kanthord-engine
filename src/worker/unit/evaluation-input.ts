@@ -403,7 +403,7 @@ async function setUpReview(
   );
   const base = new BaseHead(
     setupInput,
-    join(workspace.key, BASE_DIRECTORY),
+    { directory: join(workspace.key, BASE_DIRECTORY) },
     setup,
   );
   const result = await setUpHeads(

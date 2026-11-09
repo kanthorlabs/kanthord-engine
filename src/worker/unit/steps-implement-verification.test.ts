@@ -6,7 +6,7 @@ import {
   CauseSubcategory,
 } from "../../kernel/cause.ts";
 import { suite, test } from "node:test";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
@@ -17,7 +17,9 @@ import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { VERIFICATION_INFRASTRUCTURE_FAILED } from "./verification.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
-import { RELEASE_DIRECTORY } from "./workspace.ts";
+import { BASE_DIRECTORY, RELEASE_DIRECTORY } from "./workspace.ts";
+import { PoolClass } from "./tree-pool.ts";
+import { SetupEnd } from "./environment-setup.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { VerificationContext } from "./method-telemetry.ts";
 import {
@@ -39,6 +41,7 @@ import {
 const SIGNAL_KILL = "sh -c 'kill -9 $$'";
 const EXIT_KILL = "sh -c 'kill -9 $$'; exit $?";
 const ONE_TURN = 1;
+const ONE_TREE = 1;
 const ONE_TOOL_TURN = 2;
 const FOUR_TURNS = 4;
 const SETUP_MARKER = "setup-ran";
@@ -344,6 +347,26 @@ suite(
         }),
       );
       assert.deepEqual(instructions, [SETUP_INSTRUCTION]);
+    });
+
+    test("an implement execution gives its base head tree to the command class", async (t) => {
+      const current = task("setup", "true");
+      const h = await fixture(t, [current], [fauxAssistantMessage("never")]);
+      assert.equal((await h.base.setup()).end, SetupEnd.Pass);
+      await executionBoundary(h.run, () =>
+        runStepsImplement(h, async () => ({
+          kind: TaskResultKind.BudgetEnd,
+        })),
+      );
+      const key = h.input.workspaces.nodeKey(h.input.claim.node_id);
+      assert.equal(existsSync(join(key, BASE_DIRECTORY)), false);
+      assert.equal(
+        h.input.workspaces.pool
+          .trees()
+          .filter(({ path }) => basename(dirname(path)) === PoolClass.Command)
+          .length,
+        ONE_TREE,
+      );
     });
 
     test("a task unit skips each node command in the live checkout and runs each own command", async (t) => {
