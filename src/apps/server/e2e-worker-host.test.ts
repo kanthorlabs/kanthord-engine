@@ -36,6 +36,7 @@ import {
 import {
   fauxAssistantMessage,
   fauxToolCall,
+  remapOrigin,
   scriptedModelRuntime,
   scriptedProvider,
 } from "../../worker/unit/test-support.ts";
@@ -188,26 +189,30 @@ async function fixture(t: TestContext) {
         address: origin,
         ssh: routed(input.ssh),
       }),
-    fetchAndCheckout: (
+    fetchAndCheckout: async (
       directory,
       branch,
       base,
       pushed,
       keep,
+      record,
       context,
       deadline,
       ssh,
-    ) =>
-      connector.fetchAndCheckout(
+    ) => {
+      await remapOrigin(directory, () => origin);
+      return connector.fetchAndCheckout(
         directory,
         branch,
         base,
         pushed,
         keep,
+        record,
         context,
         deadline,
         routed(ssh),
-      ),
+      );
+    },
     fetchBase: (directory, base, context, deadline, ssh) =>
       connector.fetchBase(directory, base, context, deadline, routed(ssh)),
     pushNodeBranch: (directory, branch, context, deadline, ssh) =>
@@ -1034,26 +1039,30 @@ async function raceRemote(t: TestContext, gate: ReturnType<typeof landGate>) {
         address: origin,
         ssh: routed(input.ssh),
       }),
-    fetchAndCheckout: (
+    fetchAndCheckout: async (
       directory,
       branch,
       base,
       pushed,
       keep,
+      record,
       context,
       deadline,
       ssh,
-    ) =>
-      component.fetchAndCheckout(
+    ) => {
+      await remapOrigin(directory, () => origin);
+      return component.fetchAndCheckout(
         directory,
         branch,
         base,
         pushed,
         keep,
+        record,
         context,
         deadline,
         routed(ssh),
-      ),
+      );
+    },
     fetchBase: (directory, base, context, deadline, ssh) =>
       component.fetchBase(directory, base, context, deadline, routed(ssh)),
     pushNodeBranch: (directory, branch, context, deadline, ssh) =>

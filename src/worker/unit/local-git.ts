@@ -1465,3 +1465,57 @@ export async function fetchLocal(call: GitCall, source: string): Promise<void> {
     call.deadlineMs,
   );
 }
+
+export async function removeRef(call: GitCall, ref: string): Promise<void> {
+  assert.ok(ref.startsWith("refs/"));
+  await run(
+    call.env,
+    call.directory,
+    ["update-ref", "--no-deref", "-d", ref],
+    call.context,
+    call.deadlineMs,
+  );
+}
+
+export async function attachBranchAtHead(
+  call: GitCall,
+  branch: string,
+): Promise<void> {
+  const end = performance.now() + call.deadlineMs;
+  const remaining = () => Math.max(1, end - performance.now());
+  const ref = `refs/heads/${branch}`;
+  const commitOf = async (name: string) => {
+    const { matched, output } = await runMatch(
+      call.env,
+      call.directory,
+      ["rev-parse", "--quiet", "--verify", `${name}^{commit}`],
+      call.context,
+      remaining(),
+    );
+    return matched ? output.trim() : null;
+  };
+  const tip = await commitOf(ref);
+  if (tip === null || tip !== (await commitOf("HEAD"))) return;
+  await run(
+    call.env,
+    call.directory,
+    ["symbolic-ref", "HEAD", ref],
+    call.context,
+    remaining(),
+  );
+}
+
+export async function refCommit(
+  call: GitCall,
+  ref: string,
+): Promise<string | null> {
+  assert.ok(ref.startsWith("refs/"));
+  const { matched, output } = await runMatch(
+    call.env,
+    call.directory,
+    ["rev-parse", "--quiet", "--verify", `${ref}^{commit}`],
+    call.context,
+    call.deadlineMs,
+  );
+  return matched ? output.trim() : null;
+}

@@ -26,6 +26,9 @@ import {
   isolatedGitEnvironment,
 } from "../kernel/git-environment.ts";
 import {
+  type CheckoutResult,
+  type PushRecord,
+  RepositoryErrorCode,
   type RepositoryFile,
   RepositoryFileState,
   type SnapshotRefresh,
@@ -42,7 +45,7 @@ import { sshLoginOf } from "./ssh-login.ts";
 
 const GIT_FAILED = "repository.connector.git_failed";
 export const GIT_BASE_MOVED = "git.base_moved";
-export const NODE_BRANCH_MISSING = "repository.node_branch.missing";
+export const NODE_BRANCH_MISSING = RepositoryErrorCode.NodeBranchMissing;
 export const GATE_DECLARATION_INVALID = "repository.gate_declaration.invalid";
 const EMPTY_STRING = "";
 const EXCLUDE_OPTION = "-e";
@@ -99,6 +102,7 @@ const EXIT_SUCCESS = 0;
 const EXIT_NOT_ANCESTOR = 1;
 const EXIT_DETACHED_HEAD = 1;
 const EXIT_FATAL = 128;
+const EXIT_NOT_FOUND = 1;
 const NO_EXIT = -1;
 const GATE_DECLARATION_FILE = ".kanthord/affected-tests.json";
 const BARE_HEAD_FILE = "HEAD";
@@ -418,10 +422,11 @@ export async function fetchAndCheckout(
   baseBranch: string,
   pushed: boolean,
   keep: readonly string[],
+  record: PushRecord | null,
   context: Context,
   deadlineMs: number,
   ssh: SshAccess,
-): Promise<string> {
+): Promise<CheckoutResult> {
   return withAccess(ssh, context, deadlineMs, (agent, remaining) =>
     fetchAndCheckoutWith(
       directory,
@@ -429,6 +434,7 @@ export async function fetchAndCheckout(
       baseBranch,
       pushed,
       keep,
+      record,
       context,
       remaining,
       agent,
@@ -442,10 +448,11 @@ async function fetchAndCheckoutWith(
   baseBranch: string,
   pushed: boolean,
   keep: readonly string[],
+  record: PushRecord | null,
   context: Context,
   deadlineMs: number,
   agent: AgentVariables,
-): Promise<string> {
+): Promise<CheckoutResult> {
   assert.ok(branch);
   assert.ok(baseBranch);
   assert.equal(keep.length % EXCLUDE_PAIR, NO_REMAINDER);
@@ -478,16 +485,53 @@ async function fetchAndCheckoutWith(
       .includes(name);
   const tracked = () => listed(ref);
   const trackedBefore = await tracked();
+  const stored = storedRecord(record);
   if (
+    stored === null &&
     trackedBefore &&
     (await run(["ls-remote", "origin", `refs/heads/${branch}`])).trim() ===
       EMPTY_STRING
   )
     throw missing();
   await run(["fetch", "--prune", "origin"]);
-  const found = await tracked();
-  if (!found && (pushed || trackedBefore)) throw missing();
-  const target = found ? branch : baseBranch;
+  const exit = (args: string[], accepted: readonly number[]) =>
+    runGitExit(
+      directory,
+      args,
+      context,
+      end - performance.now(),
+      "fetch and checkout",
+      accepted,
+      { agent },
+    );
+  const commitOf = async (name: string) => {
+    const result = await exit(
+      ["rev-parse", "--verify", "--quiet", `${name}^{commit}`],
+      [EXIT_SUCCESS, EXIT_NOT_FOUND],
+    );
+    return result.exitCode === EXIT_SUCCESS ? result.output.trim() : null;
+  };
+  const start = await pushRuleStart(
+    {
+      record: stored,
+      remote: (await tracked()) ? await commitOf(ref) : null,
+      local: await commitOf(`refs/heads/${branch}`),
+      pushed,
+      trackedBefore,
+      branch,
+      baseBranch,
+    },
+    {
+      descends: async (ancestor, local) =>
+        (
+          await exit(
+            ["merge-base", "--is-ancestor", ancestor, local],
+            [EXIT_SUCCESS, EXIT_NOT_ANCESTOR, EXIT_FATAL],
+          )
+        ).exitCode === EXIT_SUCCESS,
+      missing,
+    },
+  );
   const current = await runGitExit(
     directory,
     ["symbolic-ref", "--quiet", "--short", "HEAD"],
@@ -497,13 +541,93 @@ async function fetchAndCheckoutWith(
     [EXIT_SUCCESS, EXIT_DETACHED_HEAD],
     { agent },
   );
-  await run(["checkout", "--force", "-B", branch, `origin/${target}`, "--"]);
+  await run(["checkout", "--force", "-B", branch, start.revision, "--"]);
+  await refreshDefaultBranch(
+    run,
+    async (name) =>
+      (
+        await exit(
+          ["check-ref-format", "--branch", name],
+          [EXIT_SUCCESS, EXIT_FATAL],
+        )
+      ).exitCode === EXIT_SUCCESS,
+  );
   await run(
     current.output.trim() === branch
       ? ["clean", "-ffd"]
       : ["clean", "-ffdx", ...keep],
   );
-  return (await run(["rev-parse", "HEAD"])).trim();
+  return {
+    head: (await run(["rev-parse", "HEAD"])).trim(),
+    record: start.record,
+  };
+}
+
+interface PushRuleFacts {
+  record: PushRecord | null;
+  remote: string | null;
+  local: string | null;
+  pushed: boolean;
+  trackedBefore: boolean;
+  branch: string;
+  baseBranch: string;
+}
+
+interface PushRuleChecks {
+  descends: (ancestor: string, local: string) => Promise<boolean>;
+  missing: () => Error;
+}
+
+interface PushRuleStart {
+  revision: string;
+  record: PushRecord | null;
+}
+
+function storedRecord(record: PushRecord | null): PushRecord | null {
+  return record === null ||
+    (record.confirmed === null && record.pending === null)
+    ? null
+    : record;
+}
+
+function confirmedRecord(commit: string | null): PushRecord | null {
+  return commit === null ? null : { confirmed: commit, pending: null };
+}
+
+function todayStart(
+  facts: PushRuleFacts,
+  checks: PushRuleChecks,
+  record: PushRecord | null,
+): PushRuleStart {
+  if (facts.remote !== null)
+    return { revision: `${ORIGIN_REFS}${facts.branch}`, record };
+  if (facts.pushed || facts.trackedBefore) throw checks.missing();
+  return { revision: `${ORIGIN_REFS}${facts.baseBranch}`, record };
+}
+
+async function pushRuleStart(
+  facts: PushRuleFacts,
+  checks: PushRuleChecks,
+): Promise<PushRuleStart> {
+  const { record, remote, local } = facts;
+  const keeps = async (commit: string | null) =>
+    local !== null && commit !== null && (await checks.descends(commit, local));
+  const follow = (kept: boolean) =>
+    kept && local !== null ? local : `${ORIGIN_REFS}${facts.branch}`;
+  if (record === null)
+    return todayStart(facts, checks, confirmedRecord(remote));
+  if (remote !== null) {
+    if (remote === record.confirmed)
+      return { revision: follow(await keeps(remote)), record };
+    return {
+      revision: follow(remote === record.pending && (await keeps(remote))),
+      record: confirmedRecord(remote),
+    };
+  }
+  if (record.confirmed !== null || facts.pushed) throw checks.missing();
+  if (local !== null && (await keeps(record.pending)))
+    return { revision: local, record };
+  return todayStart(facts, checks, record);
 }
 
 export async function fetchBase(

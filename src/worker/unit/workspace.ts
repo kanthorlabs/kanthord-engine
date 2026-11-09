@@ -3,23 +3,60 @@ import {
   appendFileSync,
   existsSync,
   lstatSync,
+  readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   utimesSync,
 } from "node:fs";
 import { lstat } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { WORKSPACE_KEY_PATTERN } from "../../kernel/cleanup.ts";
-import { ensureDirectory, FILE_NOT_FOUND } from "../../kernel/files.ts";
+import {
+  ensureDirectory,
+  FILE_NOT_FOUND,
+  readPrivate,
+  writePrivate,
+} from "../../kernel/files.ts";
 import { walkFootprint } from "../../kernel/footprint-walk.ts";
+import { Diagnostic } from "../../kernel/errors.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import { bindingNameSchema } from "../../project/contract.ts";
 import type { Context } from "../../kernel/context.ts";
 import type { ExecutionSetup, RepositoryTransport } from "../contract.ts";
-import type { SshAccess, SshSigner } from "../../repository/contract.ts";
+import {
+  RepositoryErrorCode,
+  type SshAccess,
+  type SshSigner,
+} from "../../repository/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
-import { cleanExcludes, originAddress, scrubTree } from "./local-git.ts";
+import {
+  attachBranchAtHead,
+  cleanExcludes,
+  GitState,
+  normaliseGitState,
+  originAddress,
+  refCommit,
+  removeRef,
+  scrubTree,
+} from "./local-git.ts";
+import {
+  branchKeyOf,
+  PUSHED_DIRECTORY,
+  type PushRecordKey,
+  pushRecordUnreadable,
+  readPushRecord,
+  writePushRecord,
+} from "./push-record.ts";
 import { readSetupRecord } from "./setup-record.ts";
 import {
   isTree,
@@ -28,6 +65,7 @@ import {
   type PoolSlot,
   prepareTree,
   TreePool,
+  TreeSource,
 } from "./tree-pool.ts";
 import type { HandoverSshIdentity } from "../../custody/contract.ts";
 
@@ -39,6 +77,13 @@ export const RELEASE_DIRECTORY = "release";
 export const BASE_DIRECTORY = "base";
 export const REVIEW_DIRECTORY = "review";
 export const EVIDENCE_DIRECTORY = "evidence";
+export const SCRATCH_STORE_DIRECTORY = "scratch";
+const SCRATCH_ENTRY = basename(SCRATCH_DIRECTORY);
+const SCRATCH_BRANCH_FILE = "branch";
+const SCRATCH_NOT_STORED = "scratch not stored";
+const CODER_PURPOSE = "coder";
+const BRANCH_REF_PREFIX = "refs/heads/";
+const ORIGIN_REF_PREFIX = "refs/remotes/origin/";
 const TREE_DELETED = "tree deleted";
 const TREE_PREPARED = "tree prepared";
 const UNKNOWN_ERROR = "unknown";
@@ -83,6 +128,22 @@ interface TreeOwner {
 }
 interface ReviewHold extends TreeOwner {
   repositories: readonly WorkspaceRepository[];
+}
+interface ImplementHold extends ReviewHold {
+  nodeBranch: string;
+}
+interface ImplementPreparation extends Preparation {
+  env: NodeJS.ProcessEnv;
+  nodeId: string;
+  nodeBranch: string;
+  pushed: ReadonlySet<string>;
+  repositories: readonly WorkspaceRepository[];
+  log?: WorkspaceLog;
+}
+interface CoderTree {
+  repository: WorkspaceRepository;
+  directory: string;
+  end: number;
 }
 interface ReviewTree {
   repository: WorkspaceRepository;
@@ -171,6 +232,7 @@ export class WorkspaceRoot {
   readonly pool: TreePool;
   private readonly held = new Set<string>();
   private readonly reviews = new Map<string, ReviewHold>();
+  private readonly implementations = new Map<string, ImplementHold>();
   private constructor(root: string, pool: TreePool) {
     this.root = root;
     this.pool = pool;
@@ -196,14 +258,7 @@ export class WorkspaceRoot {
     return join(this.root, identitySchema("execution").parse(executionId));
   }
   async prepareImplement(
-    input: Preparation & {
-      env: NodeJS.ProcessEnv;
-      nodeId: string;
-      nodeBranch: string;
-      pushed: ReadonlySet<string>;
-      repositories: readonly WorkspaceRepository[];
-      log?: WorkspaceLog;
-    },
+    input: ImplementPreparation,
   ): Promise<{ root: string; checkouts: WorkspaceCheckout[] }> {
     assert.ok(input.repositories.length > NO_CHECKOUTS);
     const key = this.nodeKey(input.nodeId);
@@ -219,6 +274,21 @@ export class WorkspaceRoot {
           { ...input, poolClass: PoolClass.Command },
           end,
         );
+      this.keepOnly(
+        join(key, PUSHED_DIRECTORY),
+        [branchKeyOf(input.nodeBranch)],
+        input,
+      );
+      this.keepOnly(
+        join(key, CHECKOUTS_DIRECTORY),
+        [
+          SCRATCH_ENTRY,
+          ...input.repositories.map(({ name }) =>
+            bindingNameSchema.parse(name),
+          ),
+        ],
+        input,
+      );
       const checkouts: WorkspaceCheckout[] = [];
       for (const repository of input.repositories) {
         const directory = this.nodeDirectory(input.nodeId, repository.name);
@@ -226,42 +296,21 @@ export class WorkspaceRoot {
           !checkouts.some((checkout) => checkout.directory === directory),
           "Duplicate repository binding",
         );
-        const ssh = sshAccessOf(input.sshAccess, repository.binding_id);
-        if (!existsSync(directory)) {
-          created.push(directory);
-          ensureDirectory(directory);
-          await input.transport.clone(
-            repository.address,
-            directory,
-            input.context,
-            end - performance.now(),
-            ssh,
-          );
-        }
-        const record = await readSetupRecord({
-          env: input.env,
-          directory,
-          context: input.context,
-          deadlineMs: end - performance.now(),
-        });
-        const head = await input.transport.fetchAndCheckout(
-          directory,
-          input.nodeBranch,
-          repository.strategy.base_branch,
-          input.pushed.has(repository.binding_id),
-          cleanExcludes(record?.roots ?? []),
-          input.context,
-          end - performance.now(),
-          ssh,
+        checkouts.push(
+          await this.prepareCoderCheckout(
+            input,
+            { repository, directory, end },
+            created,
+          ),
         );
-        excludeScratch(directory);
-        checkouts.push({
-          binding_id: repository.binding_id,
-          name: repository.name,
-          directory,
-          head,
-        });
       }
+      this.restoreScratch(key, input.nodeBranch, checkouts);
+      this.implementations.set(key, {
+        nodeId: input.nodeId,
+        nodeBranch: input.nodeBranch,
+        repositories: input.repositories,
+        ...(input.log ? { log: input.log } : {}),
+      });
       return {
         root:
           checkouts.length > SINGLE_CHECKOUT
@@ -271,10 +320,260 @@ export class WorkspaceRoot {
       };
     } catch (error) {
       this.held.delete(key);
-      for (const directory of created)
-        rmSync(directory, { recursive: true, force: true });
+      if (
+        (error as { code?: unknown }).code !==
+        RepositoryErrorCode.NodeBranchMissing
+      )
+        for (const directory of created)
+          rmSync(directory, { recursive: true, force: true });
       throw error;
     }
+  }
+  private async prepareCoderCheckout(
+    input: ImplementPreparation,
+    tree: CoderTree,
+    created: string[],
+  ): Promise<WorkspaceCheckout> {
+    if (pushRecordUnreadable(this.recordKeyOf(input, tree.repository)))
+      throw new Diagnostic(
+        RepositoryErrorCode.NodeCheckoutPendingRebuild,
+        "The push record of the node checkout cannot be read.",
+        { fields: [["path", tree.directory]] },
+      );
+    const reused = await this.reuseNodeTree(input, tree);
+    if (!reused) created.push(tree.directory);
+    const source = reused
+      ? TreeSource.Node
+      : await this.takeCoderTree(input, tree);
+    input.log?.(TREE_PREPARED, { purpose: CODER_PURPOSE, source });
+    const head = await this.checkoutCoderTree(input, tree);
+    excludeScratch(tree.directory);
+    return {
+      binding_id: tree.repository.binding_id,
+      name: tree.repository.name,
+      directory: tree.directory,
+      head,
+    };
+  }
+  private async reuseNodeTree(
+    input: ImplementPreparation,
+    tree: CoderTree,
+  ): Promise<boolean> {
+    const { directory, repository, end } = tree;
+    if (!lstatSync(directory, { throwIfNoEntry: false })) return false;
+    const call = () => ({
+      env: input.env,
+      directory,
+      context: input.context,
+      deadlineMs: end - performance.now(),
+    });
+    const real =
+      this.unrealEntry(directory) === null &&
+      isTree(directory) &&
+      !(await this.foreignOrigin(input, tree));
+    const state = real
+      ? await normaliseGitState(call(), repository.address, [
+          `${BRANCH_REF_PREFIX}${input.nodeBranch}`,
+        ]).catch((error: unknown) => {
+          if (input.context.signal.aborted) throw error;
+          return GitState.Rebuild;
+        })
+      : GitState.Rebuild;
+    if (state === GitState.Ready) {
+      await attachBranchAtHead(call(), input.nodeBranch);
+      return true;
+    }
+    if (readPushRecord(this.recordKeyOf(input, repository))?.pending)
+      throw new Diagnostic(
+        RepositoryErrorCode.NodeCheckoutPendingRebuild,
+        "The node checkout holds an unconfirmed push and cannot serve the binding.",
+        { fields: [["path", directory]] },
+      );
+    this.removeSafely(directory);
+    return false;
+  }
+  private async foreignOrigin(
+    input: ImplementPreparation,
+    tree: CoderTree,
+  ): Promise<boolean> {
+    const address = await originAddress({
+      env: input.env,
+      directory: tree.directory,
+      context: input.context,
+      deadlineMs: tree.end - performance.now(),
+    }).catch((error: unknown) => {
+      if (input.context.signal.aborted) throw error;
+      return null;
+    });
+    return address !== null && address !== tree.repository.address;
+  }
+  private recordKeyOf(
+    input: ImplementPreparation,
+    repository: WorkspaceRepository,
+  ): PushRecordKey {
+    return {
+      nodeKey: this.nodeKey(input.nodeId),
+      nodeBranch: input.nodeBranch,
+      bindingId: repository.binding_id,
+    };
+  }
+  private async takeCoderTree(
+    input: ImplementPreparation,
+    tree: CoderTree,
+  ): Promise<TreeSource> {
+    const { directory, repository, end } = tree;
+    const remaining = () => end - performance.now();
+    const call = () => ({
+      env: input.env,
+      directory,
+      context: input.context,
+      deadlineMs: remaining(),
+    });
+    const { source } = await prepareTree({
+      pool: this.pool,
+      address: repository.address,
+      poolClass: PoolClass.Agent,
+      target: directory,
+      nodeId: input.nodeId,
+      keepRefs: [`${BRANCH_REF_PREFIX}${input.nodeBranch}`],
+      env: input.env,
+      context: input.context,
+      deadlineMs: remaining(),
+      fresh: async () => {
+        ensureDirectory(directory);
+        await input.transport.clone(
+          repository.address,
+          directory,
+          input.context,
+          remaining(),
+          sshAccessOf(input.sshAccess, repository.binding_id),
+        );
+      },
+      reuse: async () => {
+        const branch = `${BRANCH_REF_PREFIX}${input.nodeBranch}`;
+        await removeRef(call(), `${ORIGIN_REF_PREFIX}${input.nodeBranch}`);
+        if (
+          (await refCommit(call(), branch)) !==
+          readPushRecord(this.recordKeyOf(input, repository))?.confirmed
+        )
+          await removeRef(call(), branch);
+        await attachBranchAtHead(call(), input.nodeBranch);
+      },
+    });
+    return source;
+  }
+  private async checkoutCoderTree(
+    input: ImplementPreparation,
+    tree: CoderTree,
+  ): Promise<string> {
+    const { directory, repository, end } = tree;
+    const recordKey = this.recordKeyOf(input, repository);
+    const setup = await readSetupRecord({
+      env: input.env,
+      directory,
+      context: input.context,
+      deadlineMs: end - performance.now(),
+    });
+    const { head, record } = await input.transport.fetchAndCheckout(
+      directory,
+      input.nodeBranch,
+      repository.strategy.base_branch,
+      input.pushed.has(repository.binding_id),
+      cleanExcludes(setup?.roots ?? []),
+      readPushRecord(recordKey),
+      input.context,
+      end - performance.now(),
+      sshAccessOf(input.sshAccess, repository.binding_id),
+    );
+    writePushRecord(recordKey, record);
+    return head;
+  }
+  private restoreScratch(
+    key: string,
+    nodeBranch: string,
+    checkouts: readonly WorkspaceCheckout[],
+  ): void {
+    const store = join(key, SCRATCH_STORE_DIRECTORY);
+    if (checkouts.length === SINGLE_CHECKOUT) {
+      const saved = join(store, branchKeyOf(nodeBranch));
+      if (
+        this.unrealEntry(saved) === null &&
+        lstatSync(saved, { throwIfNoEntry: false })?.isDirectory()
+      ) {
+        const scratch = join(
+          checkouts[FIRST_CHECKOUT]!.directory,
+          SCRATCH_ENTRY,
+        );
+        this.removeSafely(scratch);
+        renameSync(saved, scratch);
+      }
+      this.removeSafely(store);
+      return;
+    }
+    if (this.scratchBranch(store) !== nodeBranch)
+      this.removeSafely(join(key, CHECKOUTS_DIRECTORY, SCRATCH_ENTRY));
+    this.removeSafely(store);
+    ensureDirectory(store);
+    writePrivate(join(store, SCRATCH_BRANCH_FILE), nodeBranch, true);
+  }
+  private scratchBranch(store: string): string | null {
+    try {
+      if (this.unrealEntry(store) !== null) return null;
+      return readPrivate(join(store, SCRATCH_BRANCH_FILE));
+    } catch {
+      return null;
+    }
+  }
+  private storeScratch(key: string, hold: ImplementHold): void {
+    const store = join(key, SCRATCH_STORE_DIRECTORY);
+    try {
+      this.removeUnreal(store);
+      if (hold.repositories.length > SINGLE_CHECKOUT) {
+        ensureDirectory(store);
+        writePrivate(join(store, SCRATCH_BRANCH_FILE), hold.nodeBranch, true);
+        return;
+      }
+      const scratch = join(
+        key,
+        CHECKOUTS_DIRECTORY,
+        bindingNameSchema.parse(hold.repositories[FIRST_CHECKOUT]!.name),
+        SCRATCH_ENTRY,
+      );
+      if (this.unrealEntry(scratch) !== null) {
+        this.removeUnreal(scratch);
+        return;
+      }
+      if (!lstatSync(scratch, { throwIfNoEntry: false })) return;
+      ensureDirectory(store);
+      const saved = join(store, branchKeyOf(hold.nodeBranch));
+      this.removeSafely(saved);
+      renameSync(scratch, saved);
+    } catch (error) {
+      hold.log?.(SCRATCH_NOT_STORED, { path: store, code: codeOf(error) });
+    }
+  }
+  private keepOnly(
+    directory: string,
+    names: readonly string[],
+    owner: TreeOwner,
+  ): void {
+    let entries: string[] = [];
+    try {
+      this.removeUnreal(directory);
+      if (lstatSync(directory, { throwIfNoEntry: false }))
+        entries = readdirSync(directory);
+    } catch (error) {
+      owner.log?.(TREE_DELETED, { path: directory, code: codeOf(error) });
+    }
+    for (const entry of entries.filter((name) => !names.includes(name)))
+      try {
+        this.removeSafely(join(directory, entry));
+      } catch (error) {
+        owner.log?.(TREE_DELETED, {
+          path: join(directory, entry),
+          code: codeOf(error),
+        });
+      }
   }
   private async giveLeftoverTrees(
     directory: string,
@@ -566,9 +865,49 @@ export class WorkspaceRoot {
     }
     assert.equal(dirname(key), this.root);
     assert.ok(this.held.has(key));
-    if (kind === WorkspaceKind.Node) this.touch(key);
-    else rmSync(key, { recursive: true, force: true });
+    if (kind === WorkspaceKind.Node) {
+      this.releaseNode(key);
+      return;
+    }
+    rmSync(key, { recursive: true, force: true });
     this.held.delete(key);
+  }
+  private releaseNode(key: string): void {
+    const hold = this.implementations.get(key);
+    try {
+      if (hold) this.giveCoderTrees(key, hold);
+    } finally {
+      try {
+        if (lstatSync(key, { throwIfNoEntry: false })?.isDirectory())
+          this.touch(key);
+      } catch (error) {
+        hold?.log?.(TREE_DELETED, { path: key, code: codeOf(error) });
+      } finally {
+        this.implementations.delete(key);
+        this.held.delete(key);
+      }
+    }
+  }
+  private giveCoderTrees(key: string, hold: ImplementHold): void {
+    this.storeScratch(key, hold);
+    for (const repository of hold.repositories) {
+      const recordKey = {
+        nodeKey: key,
+        nodeBranch: hold.nodeBranch,
+        bindingId: repository.binding_id,
+      };
+      if (readPushRecord(recordKey)?.pending || pushRecordUnreadable(recordKey))
+        continue;
+      this.giveTree(
+        { address: repository.address, poolClass: PoolClass.Agent },
+        join(
+          key,
+          CHECKOUTS_DIRECTORY,
+          bindingNameSchema.parse(repository.name),
+        ),
+        hold,
+      );
+    }
   }
   private releaseReview(key: string): void {
     const review = this.reviews.get(key);

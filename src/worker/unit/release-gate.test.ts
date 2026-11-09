@@ -48,6 +48,7 @@ import {
   nextExecution,
   recordReleases,
   recordSpans,
+  releasedRoot,
   spanEnds,
   task,
 } from "./test-support.ts";
@@ -437,7 +438,7 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
       furtherWork: false,
     });
     const directory = readFileSync(marker, "utf8").trim();
-    assert.notEqual(directory, h.root);
+    assert.notEqual(directory, releasedRoot(h));
     assert.equal(
       directory,
       join(
@@ -446,9 +447,12 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
         h.checkouts[0]!.name,
       ),
     );
-    assert.equal((await simpleGit(h.root).tags()).all.includes(TAG), false);
     assert.equal(
-      (await simpleGit(h.root).getConfig(CONFIG_KEY, "local")).value,
+      (await simpleGit(releasedRoot(h)).tags()).all.includes(TAG),
+      false,
+    );
+    assert.equal(
+      (await simpleGit(releasedRoot(h)).getConfig(CONFIG_KEY, "local")).value,
       null,
     );
   });

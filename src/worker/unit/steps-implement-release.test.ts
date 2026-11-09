@@ -40,12 +40,15 @@ import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 import {
   advanceBase,
   affectedCommand,
+  agentTrees,
   declareAffected,
   implementFixture as fixture,
   NO_PROVIDER_CALLS,
+  ONE_FREE_TREE,
   recordDone,
   recordReleases,
   recordSpans,
+  releasedRoot,
   STEPS_KEY,
   task,
   transport,
@@ -63,7 +66,7 @@ async function recordNodeDone(h: Awaited<ReturnType<typeof fixture>>) {
 }
 
 suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
-  test("implement pushes the evidenced head before release and retains its workspace", async (t) => {
+  test("implement pushes the evidenced head before release and gives its tree back to the pool", async (t) => {
     const h = await fixture(t, [], []);
     await recordNodeDone(h);
     const order: string[] = [];
@@ -91,7 +94,9 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
     });
     assert.deepEqual(order, ["evidence", "release"]);
     assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
-    assert.ok(existsSync(h.root));
+    assert.equal(existsSync(h.root), false);
+    assert.ok(existsSync(h.input.workspaces.nodeKey(h.input.claim.node_id)));
+    assert.equal(agentTrees(h.input.workspaces).length, ONE_FREE_TREE);
   });
 
   test("implement checkpoints budget-ended work and refuses release after a failed push", async (t) => {
@@ -384,7 +389,9 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.deepEqual(bodies, []);
     assert.equal(pushes, NO_PUSHES);
     assert.equal(
-      (await simpleGit(h.root).status()).not_added.includes(PARTIAL_WORK),
+      (await simpleGit(releasedRoot(h)).status()).not_added.includes(
+        PARTIAL_WORK,
+      ),
       true,
     );
   });

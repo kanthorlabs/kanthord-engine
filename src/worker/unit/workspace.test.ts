@@ -33,6 +33,7 @@ import {
   WorkspaceRoot,
 } from "./workspace.ts";
 import { PoolClass } from "./tree-pool.ts";
+import { branchKeyOf, readPushRecord, writePushRecord } from "./push-record.ts";
 import {
   everyBindingSshAccess,
   LOCAL_GIT_SSH_ACCESS,
@@ -455,7 +456,11 @@ async function restartFixture(t: test.TestContext) {
     address: origin,
     strategy: { base_branch: "main" },
   };
+  const key = workspace.nodeKey(nodeId);
+  let held = false;
   const prepare = async (startAttempt: number, pushed = false) => {
+    if (held) workspace.release(key, WorkspaceKind.Node);
+    held = false;
     const prepared = await prepareOne(workspace, {
       env,
       transport,
@@ -467,14 +472,46 @@ async function restartFixture(t: test.TestContext) {
       pushed,
       repository,
     });
-    workspace.release(workspace.nodeKey(nodeId), WorkspaceKind.Node);
+    held = true;
     return prepared;
+  };
+  const push = async (prepared: { directory: string; nodeBranch: string }) => {
+    const record = {
+      nodeKey: key,
+      nodeBranch: prepared.nodeBranch,
+      bindingId: repository.binding_id,
+    };
+    const head = (
+      await simpleGit(prepared.directory).revparse(["HEAD"])
+    ).trim();
+    writePushRecord(record, {
+      confirmed: readPushRecord(record)?.confirmed ?? null,
+      pending: head,
+    });
+    await connector.pushNodeBranch(
+      prepared.directory,
+      prepared.nodeBranch,
+      background,
+      GIT_DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
+    );
+    writePushRecord(record, { confirmed: head, pending: null });
   };
   const remoteHead = async (branch: string) =>
     (await simpleGit(origin).revparse([`refs/heads/${branch}`])).trim();
   const deleteRemote = (branch: string) =>
     simpleGit(origin).raw(["branch", "-D", branch]);
-  return { origin, seed, base, commit, prepare, remoteHead, deleteRemote, git };
+  return {
+    origin,
+    seed,
+    base,
+    commit,
+    prepare,
+    push,
+    remoteHead,
+    deleteRemote,
+    git,
+  };
 }
 
 const missing = { code: connector.NODE_BRANCH_MISSING };
@@ -483,13 +520,7 @@ test("a continued attempt whose pushed node branch is gone stops and keeps its c
   const h = await restartFixture(t);
   const first = await h.prepare(FIRST_ATTEMPT);
   const pushed = await h.commit(first.directory, "work", "pushed");
-  await connector.pushNodeBranch(
-    first.directory,
-    first.nodeBranch,
-    background,
-    10000,
-    LOCAL_GIT_SSH_ACCESS,
-  );
+  await h.push(first);
   await h.deleteRemote(first.nodeBranch);
   await assert.rejects(h.prepare(FIRST_ATTEMPT), missing);
   await assert.rejects(h.prepare(FIRST_ATTEMPT), missing);
@@ -497,13 +528,7 @@ test("a continued attempt whose pushed node branch is gone stops and keeps its c
     (await simpleGit(first.directory).revparse(["HEAD"])).trim(),
     pushed,
   );
-  await connector.pushNodeBranch(
-    first.directory,
-    first.nodeBranch,
-    background,
-    10000,
-    LOCAL_GIT_SSH_ACCESS,
-  );
+  await h.push(first);
   assert.equal((await h.prepare(FIRST_ATTEMPT)).head, pushed);
 });
 
@@ -517,17 +542,15 @@ test("a restart from the base branch starts from the base after the earlier node
   const h = await restartFixture(t);
   const first = await h.prepare(FIRST_ATTEMPT);
   await h.commit(first.directory, "work", "rejected");
-  await connector.pushNodeBranch(
-    first.directory,
-    first.nodeBranch,
-    background,
-    10000,
-    LOCAL_GIT_SSH_ACCESS,
-  );
+  await h.push(first);
   await h.deleteRemote(first.nodeBranch);
   const restart = await h.prepare(RESTART_ATTEMPT);
   assert.equal(restart.nodeBranch, `${first.nodeBranch}-a2`);
   assert.equal(restart.head, h.base);
+  assert.deepEqual(
+    readdirSync(join(dirname(dirname(restart.directory)), "pushed")),
+    [],
+  );
 });
 
 test("a restart from the base branch checks out the base, pushes a new node branch and leaves the earlier branch", async (t) => {
@@ -535,25 +558,13 @@ test("a restart from the base branch checks out the base, pushes a new node bran
   const first = await h.prepare(FIRST_ATTEMPT);
   assert.equal(first.head, h.base);
   const earlier = await h.commit(first.directory, "work", "rejected");
-  await connector.pushNodeBranch(
-    first.directory,
-    first.nodeBranch,
-    background,
-    10000,
-    LOCAL_GIT_SSH_ACCESS,
-  );
+  await h.push(first);
   const restart = await h.prepare(RESTART_ATTEMPT);
   assert.equal(restart.directory, first.directory);
   assert.equal(restart.nodeBranch, `${first.nodeBranch}-a2`);
   assert.equal(restart.head, h.base);
   const fresh = await h.commit(restart.directory, "work", "fresh");
-  await connector.pushNodeBranch(
-    restart.directory,
-    restart.nodeBranch,
-    background,
-    10000,
-    LOCAL_GIT_SSH_ACCESS,
-  );
+  await h.push(restart);
   assert.equal(await h.remoteHead(restart.nodeBranch), fresh);
   assert.equal(await h.remoteHead(first.nodeBranch), earlier);
   assert.equal(
@@ -570,6 +581,7 @@ test("a restart from the base branch checks out the base, pushes a new node bran
 test("a branch switch removes the scratch directory and ignored files and a checkout of the same branch keeps them", async (t) => {
   const h = await restartFixture(t);
   const first = await h.prepare(FIRST_ATTEMPT);
+  await h.push(first);
   const scratch = join(first.directory, SCRATCH_DIRECTORY);
   const ignored = join(first.directory, "ignored.txt");
   const untracked = join(first.directory, "untracked.txt");
@@ -644,7 +656,10 @@ async function bindingsFixture(t: test.TestContext, names = BINDING_NAMES) {
     });
   }
   const nodeBranch = nodeBranchOf(nodeId, FIRST_ATTEMPT);
-  const prepare = (pushed: ReadonlySet<string> = new Set()) =>
+  const prepare = (
+    pushed: ReadonlySet<string> = new Set(),
+    branch = nodeBranch,
+  ) =>
     workspace.prepareImplement({
       env,
       transport,
@@ -652,7 +667,7 @@ async function bindingsFixture(t: test.TestContext, names = BINDING_NAMES) {
       context: background,
       deadlineMs: GIT_DEADLINE_MS,
       nodeId,
-      nodeBranch,
+      nodeBranch: branch,
       pushed,
       repositories,
     });
@@ -711,7 +726,7 @@ test("a missing remote node branch in one checkout stops with repository.node_br
   const h = await bindingsFixture(t);
   const key = h.workspace.nodeKey(h.nodeId);
   const prepared = await h.prepare();
-  for (const checkout of prepared.checkouts)
+  for (const checkout of prepared.checkouts) {
     await connector.pushNodeBranch(
       checkout.directory,
       h.nodeBranch,
@@ -719,6 +734,15 @@ test("a missing remote node branch in one checkout stops with repository.node_br
       10000,
       LOCAL_GIT_SSH_ACCESS,
     );
+    writePushRecord(
+      {
+        nodeKey: key,
+        nodeBranch: h.nodeBranch,
+        bindingId: checkout.binding_id,
+      },
+      { confirmed: checkout.head, pending: null },
+    );
+  }
   h.workspace.release(key, WorkspaceKind.Node);
   await simpleGit(h.repositories[1]!.address).raw([
     "branch",
@@ -1024,7 +1048,7 @@ test("a node preparation does not follow a symbolic link that replaces the relea
   assert.equal(existsSync(join(outside, h.repository.name, ".git")), true);
   assert.equal(existsSync(join(outside, "stray")), true);
   assert.equal(existsSync(join(h.workspace.nodeKey(nodeId), "release")), false);
-  assert.deepEqual(h.workspace.pool.trees(), []);
+  assert.deepEqual(h.freeTrees(PoolClass.Command), []);
 });
 
 test("a file in place of review/checkouts does not stop the review release, and the next preparation succeeds", async (t) => {
@@ -1041,4 +1065,632 @@ test("a file in place of review/checkouts does not stop the review release, and 
   const next = await h.review(nodeId, h.base);
   assert.ok(existsSync(join(next.directory, ".git")));
   h.workspace.release(next.key, next.kind);
+});
+
+async function coderFixture(t: test.TestContext) {
+  const h = await restartFixture(t);
+  const workspace = WorkspaceRoot.open(dirname(h.origin));
+  const repository = {
+    binding_id: createIdentity("binding"),
+    name: "todoapp-repo",
+    address: h.origin,
+    strategy: { base_branch: "main" },
+  };
+  const logs: { msg: string; fields: Record<string, unknown> }[] = [];
+  const prepare = (nodeId: string, attempt = FIRST_ATTEMPT) =>
+    prepareOne(workspace, {
+      env,
+      transport,
+      sshAccess: everyBindingSshAccess,
+      context: background,
+      deadlineMs: GIT_DEADLINE_MS,
+      nodeId,
+      nodeBranch: nodeBranchOf(nodeId, attempt),
+      pushed: false,
+      repository,
+      log: (msg, fields) => logs.push({ msg, fields }),
+    });
+  const release = (nodeId: string) =>
+    workspace.release(workspace.nodeKey(nodeId), WorkspaceKind.Node);
+  const freeTrees = (poolClass: PoolClass) =>
+    workspace.pool
+      .trees()
+      .filter((tree) => basename(dirname(tree.path)) === poolClass);
+  const recordKey = (nodeId: string, nodeBranch: string) => ({
+    nodeKey: workspace.nodeKey(nodeId),
+    nodeBranch,
+    bindingId: repository.binding_id,
+  });
+  const pushNode = async (
+    nodeId: string,
+    prepared: { directory: string; nodeBranch: string },
+  ) => {
+    await connector.pushNodeBranch(
+      prepared.directory,
+      prepared.nodeBranch,
+      background,
+      GIT_DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
+    );
+    const head = (
+      await simpleGit(prepared.directory).revparse(["HEAD"])
+    ).trim();
+    writePushRecord(recordKey(nodeId, prepared.nodeBranch), {
+      confirmed: head,
+      pending: null,
+    });
+    return head;
+  };
+  const sources = () =>
+    logs
+      .filter(({ msg }) => msg === TREE_PREPARED)
+      .map(({ fields }) => [fields.purpose, fields.source]);
+  return {
+    ...h,
+    workspace,
+    repository,
+    logs,
+    prepare,
+    release,
+    freeTrees,
+    sources,
+    recordKey,
+    pushNode,
+  };
+}
+
+const SCRATCH_PROBE = "probe.mjs";
+const ROOT_USER = 0;
+const BROKEN_RECORD = "{";
+const PENDING_REBUILD = { code: "repository.node_checkout.pending_rebuild" };
+const SCRATCH_TEXT = "x";
+const TREE_PREPARED = "tree prepared";
+const OUTSIDE_TEXT = "outside";
+
+function writeScratch(root: string): string {
+  const probe = join(root, SCRATCH_DIRECTORY, SCRATCH_PROBE);
+  mkdirSync(dirname(probe), { recursive: true });
+  writeFileSync(probe, SCRATCH_TEXT);
+  return probe;
+}
+
+test("a second node of the same repository takes the coder tree and keeps each file of a setup root", async (t) => {
+  const h = await coderFixture(t);
+  const firstNode = createIdentity("node");
+  const first = await h.prepare(firstNode);
+  mkdirSync(join(first.directory, "deps"));
+  writeFileSync(join(first.directory, "deps", "marker"), "x");
+  writeFileSync(join(first.directory, "stray"), "x");
+  writeFileSync(join(first.directory, "ignored.txt"), "x");
+  writeSetupRecordOf(first.directory, ["deps/"]);
+  const marker = statSync(join(first.directory, "deps", "marker"));
+  const tree = statSync(join(first.directory, ".git")).ino;
+  h.release(firstNode);
+  assert.equal(existsSync(first.directory), false);
+  assert.equal(existsSync(h.workspace.nodeKey(firstNode)), true);
+  assert.equal(h.freeTrees(PoolClass.Agent).length, ONE_TREE);
+  const secondNode = createIdentity("node");
+  const second = await h.prepare(secondNode);
+  assert.equal(statSync(join(second.directory, ".git")).ino, tree);
+  const after = statSync(join(second.directory, "deps", "marker"));
+  assert.equal(after.ino, marker.ino);
+  assert.equal(after.mtimeMs, marker.mtimeMs);
+  for (const residue of ["stray", "ignored.txt"])
+    assert.equal(existsSync(join(second.directory, residue)), false);
+  assert.equal(second.head, h.base);
+  assert.equal(
+    (await simpleGit(second.directory).branch()).current,
+    second.nodeBranch,
+  );
+  assert.equal(
+    (
+      await simpleGit(second.directory).raw([
+        "config",
+        "--get",
+        "remote.origin.url",
+      ])
+    ).trim(),
+    h.origin,
+  );
+  assert.deepEqual(h.sources(), [
+    ["coder", "clone"],
+    ["coder", "pool"],
+  ]);
+  h.release(secondNode);
+});
+
+test("a pool tree with a stale remote-tracking ref of the node branch starts from the base as a fresh clone does", async (t) => {
+  const h = await coderFixture(t);
+  const nodeId = createIdentity("node");
+  const first = await h.prepare(nodeId);
+  await h.commit(first.directory, "work", "pushed");
+  await connector.pushNodeBranch(
+    first.directory,
+    first.nodeBranch,
+    background,
+    GIT_DEADLINE_MS,
+    LOCAL_GIT_SSH_ACCESS,
+  );
+  h.release(nodeId);
+  await h.deleteRemote(first.nodeBranch);
+  const again = await h.prepare(nodeId);
+  assert.equal(again.head, h.base);
+  assert.deepEqual(h.sources(), [
+    ["coder", "clone"],
+    ["coder", "pool"],
+  ]);
+  h.release(nodeId);
+});
+
+test("a node keeps its scratch across executions of one attempt", async (t) => {
+  const h = await coderFixture(t);
+  const nodeId = createIdentity("node");
+  const first = await h.prepare(nodeId);
+  await h.pushNode(nodeId, first);
+  writeScratch(first.directory);
+  writeFileSync(join(first.directory, "ignored.txt"), "x");
+  h.release(nodeId);
+  assert.equal(existsSync(first.directory), false);
+  const second = await h.prepare(nodeId);
+  assert.equal(
+    readFileSync(
+      join(second.directory, SCRATCH_DIRECTORY, SCRATCH_PROBE),
+      "utf8",
+    ),
+    SCRATCH_TEXT,
+  );
+  assert.equal(existsSync(join(second.directory, "ignored.txt")), true);
+  assert.equal(existsSync(join(h.workspace.nodeKey(nodeId), "scratch")), false);
+  h.release(nodeId);
+  await t.test("two bindings keep checkouts/.kanthord-scratch", async () => {
+    const b = await bindingsFixture(t);
+    const key = b.workspace.nodeKey(b.nodeId);
+    const prepared = await b.prepare();
+    const probe = writeScratch(prepared.root);
+    b.workspace.release(key, WorkspaceKind.Node);
+    await b.prepare();
+    assert.equal(readFileSync(probe, "utf8"), SCRATCH_TEXT);
+    b.workspace.release(key, WorkspaceKind.Node);
+  });
+});
+
+test("a restart attempt gets no scratch of the earlier attempt", async (t) => {
+  const h = await coderFixture(t);
+  const nodeId = createIdentity("node");
+  const first = await h.prepare(nodeId);
+  writeScratch(first.directory);
+  h.release(nodeId);
+  const restart = await h.prepare(nodeId, RESTART_ATTEMPT);
+  assert.equal(existsSync(join(restart.directory, SCRATCH_DIRECTORY)), false);
+  assert.equal(existsSync(join(h.workspace.nodeKey(nodeId), "scratch")), false);
+  h.release(nodeId);
+  await t.test("two bindings", async () => {
+    const b = await bindingsFixture(t);
+    const key = b.workspace.nodeKey(b.nodeId);
+    const prepared = await b.prepare();
+    const probe = writeScratch(prepared.root);
+    b.workspace.release(key, WorkspaceKind.Node);
+    await b.prepare(new Set(), nodeBranchOf(b.nodeId, RESTART_ATTEMPT));
+    assert.equal(existsSync(probe), false);
+    b.workspace.release(key, WorkspaceKind.Node);
+  });
+});
+
+test("a coder tree with a pending push stays in the node key", async (t) => {
+  const h = await coderFixture(t);
+  const nodeId = createIdentity("node");
+  const first = await h.prepare(nodeId);
+  const pending = await h.commit(first.directory, "work", "unpushed");
+  writePushRecord(
+    {
+      nodeKey: h.workspace.nodeKey(nodeId),
+      nodeBranch: first.nodeBranch,
+      bindingId: h.repository.binding_id,
+    },
+    { confirmed: null, pending },
+  );
+  writeFileSync(join(first.directory, "ignored.txt"), "x");
+  h.release(nodeId);
+  assert.ok(existsSync(join(first.directory, ".git")));
+  assert.deepEqual(h.freeTrees(PoolClass.Agent), []);
+  const again = await h.prepare(nodeId);
+  assert.equal(again.directory, first.directory);
+  assert.equal(again.head, pending);
+  assert.equal(existsSync(join(again.directory, "ignored.txt")), true);
+  assert.deepEqual(h.sources(), [
+    ["coder", "clone"],
+    ["coder", "node"],
+  ]);
+  h.release(nodeId);
+});
+
+test("a node release does not follow a symbolic link that replaces the scratch directory or the checkouts directory", async (t) => {
+  const h = await coderFixture(t);
+  const nodeId = createIdentity("node");
+  const outside = temporary(t);
+  writeFileSync(join(outside, SCRATCH_PROBE), OUTSIDE_TEXT);
+  const first = await h.prepare(nodeId);
+  symlinkSync(outside, join(first.directory, ".kanthord-scratch"));
+  h.release(nodeId);
+  assert.equal(
+    readFileSync(join(outside, SCRATCH_PROBE), "utf8"),
+    OUTSIDE_TEXT,
+  );
+  assert.equal(h.freeTrees(PoolClass.Agent).length, ONE_TREE);
+  const second = await h.prepare(nodeId);
+  assert.equal(existsSync(join(second.directory, ".kanthord-scratch")), false);
+  const tree = await outsideTree(t, h.origin, h.repository.name);
+  const outsideScratch = writeScratch(join(tree, h.repository.name));
+  const checkouts = join(h.workspace.nodeKey(nodeId), CHECKOUTS_DIRECTORY);
+  rmSync(checkouts, { recursive: true, force: true });
+  symlinkSync(tree, checkouts);
+  h.release(nodeId);
+  assert.ok(existsSync(join(tree, h.repository.name, ".git")));
+  assert.equal(readFileSync(outsideScratch, "utf8"), SCRATCH_TEXT);
+  assert.equal(existsSync(checkouts), false);
+  assert.equal(
+    readFileSync(join(outside, SCRATCH_PROBE), "utf8"),
+    OUTSIDE_TEXT,
+  );
+});
+
+test("a file in place of the scratch store does not stop the node release, and the next preparation succeeds", async (t) => {
+  const h = await coderFixture(t);
+  const nodeId = createIdentity("node");
+  const first = await h.prepare(nodeId);
+  writeScratch(first.directory);
+  writeFileSync(join(h.workspace.nodeKey(nodeId), "scratch"), "x");
+  h.release(nodeId);
+  assert.equal(h.freeTrees(PoolClass.Agent).length, ONE_TREE);
+  assert.deepEqual(
+    h.logs.filter(({ msg }) => msg !== TREE_PREPARED),
+    [],
+  );
+  h.workspace.hold(h.workspace.nodeKey(nodeId));
+  h.workspace.release(h.workspace.nodeKey(nodeId), WorkspaceKind.Node);
+  const second = await h.prepare(nodeId);
+  assert.equal(second.head, h.base);
+  h.release(nodeId);
+});
+
+test("a broken or linked push record refuses the preparation and is not followed", async (t) => {
+  const h = await coderFixture(t);
+  const nodeId = createIdentity("node");
+  const first = await h.prepare(nodeId);
+  const pushed = await h.commit(first.directory, "work", "pushed");
+  await connector.pushNodeBranch(
+    first.directory,
+    first.nodeBranch,
+    background,
+    GIT_DEADLINE_MS,
+    LOCAL_GIT_SSH_ACCESS,
+  );
+  const key = {
+    nodeKey: h.workspace.nodeKey(nodeId),
+    nodeBranch: first.nodeBranch,
+    bindingId: h.repository.binding_id,
+  };
+  writePushRecord(key, { confirmed: pushed, pending: null });
+  h.release(nodeId);
+  const record = join(
+    key.nodeKey,
+    "pushed",
+    branchKeyOf(first.nodeBranch),
+    h.repository.binding_id,
+  );
+  const outside = join(temporary(t), "record");
+  writeFileSync(outside, OUTSIDE_TEXT);
+  for (const broken of [
+    () => writeFileSync(record, "{"),
+    () =>
+      writeFileSync(record, JSON.stringify({ confirmed: "x", pending: null })),
+    () => {
+      rmSync(record);
+      symlinkSync(outside, record);
+    },
+  ]) {
+    broken();
+    assert.equal(readPushRecord(key), null);
+    await assert.rejects(h.prepare(nodeId), PENDING_REBUILD);
+    assert.equal(readPushRecord(key), null);
+  }
+  assert.equal(h.freeTrees(PoolClass.Agent).length, ONE_TREE);
+  assert.equal(readFileSync(outside, "utf8"), OUTSIDE_TEXT);
+});
+
+test("a node preparation removes each checkout of a removed binding and does not follow a symbolic link", async (t) => {
+  const h = await coderFixture(t);
+  const nodeId = createIdentity("node");
+  const checkouts = join(h.workspace.nodeKey(nodeId), CHECKOUTS_DIRECTORY);
+  const removed = join(checkouts, "removed-repo");
+  mkdirSync(checkouts, { recursive: true, mode: 0o700 });
+  await simpleGit().raw(["clone", "--", h.origin, removed]);
+  const outside = temporary(t);
+  writeFileSync(join(outside, SCRATCH_PROBE), OUTSIDE_TEXT);
+  symlinkSync(outside, join(checkouts, "linked"));
+  const scratch = writeScratch(checkouts);
+  const prepared = await h.prepare(nodeId);
+  assert.deepEqual(readdirSync(checkouts).sort(), [
+    ".kanthord-scratch",
+    h.repository.name,
+  ]);
+  assert.equal(readFileSync(scratch, "utf8"), SCRATCH_TEXT);
+  assert.equal(
+    readFileSync(join(outside, SCRATCH_PROBE), "utf8"),
+    OUTSIDE_TEXT,
+  );
+  assert.ok(existsSync(join(prepared.directory, ".git")));
+  h.release(nodeId);
+});
+
+test(
+  "a checkout of a removed binding that the prepare cannot remove does not stop the preparation",
+  { skip: process.getuid?.() === ROOT_USER },
+  async (t) => {
+    const h = await coderFixture(t);
+    const nodeId = createIdentity("node");
+    const checkouts = join(h.workspace.nodeKey(nodeId), CHECKOUTS_DIRECTORY);
+    const locked = join(checkouts, "removed-repo", "locked");
+    mkdirSync(locked, { recursive: true, mode: 0o700 });
+    writeFileSync(join(locked, "file"), "x");
+    chmodSync(locked, 0o500);
+    try {
+      const prepared = await h.prepare(nodeId);
+      assert.ok(existsSync(join(prepared.directory, ".git")));
+      assert.deepEqual(
+        h.logs.filter(({ msg }) => msg !== TREE_PREPARED).map(({ msg }) => msg),
+        ["tree deleted"],
+      );
+      h.release(nodeId);
+    } finally {
+      chmodSync(locked, 0o700);
+    }
+  },
+);
+
+async function refsOf(directory: string, exclude: string) {
+  const heads = (
+    await simpleGit(directory).raw([
+      "for-each-ref",
+      "--format=%(refname) %(objectname) %(upstream)",
+      "refs/heads",
+    ])
+  )
+    .trim()
+    .split("\n")
+    .filter((line) => !line.startsWith(`refs/heads/${exclude} `));
+  const origin = (
+    await simpleGit(directory).raw(["symbolic-ref", "refs/remotes/origin/HEAD"])
+  ).trim();
+  return { heads, origin };
+}
+
+test("a pool tree with a commit after the confirmed push starts at the same head and default branch as a fresh clone", async (t) => {
+  const h = await coderFixture(t);
+  await simpleGit(h.origin).raw(["symbolic-ref", "HEAD", "refs/heads/main"]);
+  const nodeId = createIdentity("node");
+  const first = await h.prepare(nodeId);
+  await h.commit(first.directory, "work", "pushed");
+  const confirmed = await h.pushNode(nodeId, first);
+  await h.commit(first.directory, "work", "after");
+  h.release(nodeId);
+  await h.git.raw(["checkout", "-b", TRUNK_BRANCH]);
+  await commit(h.seed, TRUNK_BRANCH, TRUNK_BRANCH);
+  await h.git.push("origin", TRUNK_BRANCH);
+  await simpleGit(h.origin).raw([
+    "symbolic-ref",
+    "HEAD",
+    `refs/heads/${TRUNK_BRANCH}`,
+  ]);
+  const again = await h.prepare(nodeId);
+  assert.deepEqual(h.sources(), [
+    ["coder", "clone"],
+    ["coder", "pool"],
+  ]);
+  assert.equal(again.head, confirmed);
+  const fresh = join(temporary(t), "fresh");
+  await simpleGit().raw(["clone", "--no-checkout", "--", h.origin, fresh]);
+  assert.deepEqual(
+    await refsOf(again.directory, again.nodeBranch),
+    await refsOf(fresh, again.nodeBranch),
+  );
+  h.release(nodeId);
+});
+
+test("a node-key tree with a pending push that answers rebuild stays and the preparation refuses", async (t) => {
+  const h = await coderFixture(t);
+  const nodeId = createIdentity("node");
+  const first = await h.prepare(nodeId);
+  const pending = await h.commit(first.directory, "work", "unpushed");
+  writePushRecord(h.recordKey(nodeId, first.nodeBranch), {
+    confirmed: null,
+    pending,
+  });
+  const linked = join(temporary(t), "linked");
+  await simpleGit(first.directory).raw(["worktree", "add", "--detach", linked]);
+  h.release(nodeId);
+  await assert.rejects(h.prepare(nodeId), PENDING_REBUILD);
+  assert.equal(
+    (
+      await simpleGit(first.directory).revparse([
+        `refs/heads/${first.nodeBranch}`,
+      ])
+    ).trim(),
+    pending,
+  );
+  assert.ok(existsSync(join(first.directory, ".git", "worktrees")));
+  await assert.rejects(h.prepare(nodeId), PENDING_REBUILD);
+});
+
+test("a crash between two preparations of one attempt keeps the scratch of two bindings", async (t) => {
+  const b = await bindingsFixture(t);
+  const prepared = await b.prepare();
+  const probe = writeScratch(prepared.root);
+  const restarted = WorkspaceRoot.open(dirname(b.workspace.root));
+  await restarted.prepareImplement({
+    env,
+    transport,
+    sshAccess: everyBindingSshAccess,
+    context: background,
+    deadlineMs: GIT_DEADLINE_MS,
+    nodeId: b.nodeId,
+    nodeBranch: b.nodeBranch,
+    pushed: new Set(),
+    repositories: b.repositories,
+  });
+  assert.equal(readFileSync(probe, "utf8"), SCRATCH_TEXT);
+  restarted.release(restarted.nodeKey(b.nodeId), WorkspaceKind.Node);
+});
+
+test(
+  "a checkout entry that the prepare cannot remove does not keep the other entries",
+  { skip: process.getuid?.() === ROOT_USER },
+  async (t) => {
+    const h = await coderFixture(t);
+    const nodeId = createIdentity("node");
+    const checkouts = join(h.workspace.nodeKey(nodeId), CHECKOUTS_DIRECTORY);
+    const locked = join(checkouts, "a-locked", "inner");
+    mkdirSync(locked, { recursive: true, mode: 0o700 });
+    writeFileSync(join(locked, "file"), "x");
+    for (const name of ["b-removed", "c-removed"]) {
+      mkdirSync(join(checkouts, name));
+      writeFileSync(join(checkouts, name, "file"), "x");
+    }
+    chmodSync(locked, 0o500);
+    try {
+      await h.prepare(nodeId);
+      assert.deepEqual(readdirSync(checkouts).sort(), [
+        "a-locked",
+        h.repository.name,
+      ]);
+      assert.deepEqual(
+        h.logs
+          .filter(({ msg }) => msg !== TREE_PREPARED)
+          .map(({ fields }) => fields.path),
+        [join(checkouts, "a-locked")],
+      );
+      h.release(nodeId);
+    } finally {
+      chmodSync(locked, 0o700);
+    }
+  },
+);
+
+test("a node-key tree of a binding that changed its address is replaced by a tree of the new address", async (t) => {
+  const h = await coderFixture(t);
+  const nodeId = createIdentity("node");
+  const first = await h.prepare(nodeId);
+  const marker = join(first.directory, "ignored.txt");
+  writeFileSync(marker, "x");
+  const restarted = WorkspaceRoot.open(dirname(h.workspace.root));
+  const other = await restartTemplate(t);
+  const moved = { ...h.repository, address: join(other.root, ORIGIN_NAME) };
+  const prepared = await prepareOne(restarted, {
+    env,
+    transport,
+    sshAccess: everyBindingSshAccess,
+    context: background,
+    deadlineMs: GIT_DEADLINE_MS,
+    nodeId,
+    nodeBranch: first.nodeBranch,
+    pushed: false,
+    repository: moved,
+    log: (msg, fields) => h.logs.push({ msg, fields }),
+  });
+  assert.equal(existsSync(marker), false);
+  assert.equal(
+    (
+      await simpleGit(prepared.directory).raw([
+        "config",
+        "--get",
+        "remote.origin.url",
+      ])
+    ).trim(),
+    moved.address,
+  );
+  assert.deepEqual(h.sources(), [
+    ["coder", "clone"],
+    ["coder", "clone"],
+  ]);
+  restarted.release(restarted.nodeKey(nodeId), WorkspaceKind.Node);
+});
+
+test("a node-key tree with a pending push whose binding changed its address stays and the preparation refuses", async (t) => {
+  const h = await coderFixture(t);
+  const nodeId = createIdentity("node");
+  const first = await h.prepare(nodeId);
+  const pending = await h.commit(first.directory, "work", "unpushed");
+  writePushRecord(h.recordKey(nodeId, first.nodeBranch), {
+    confirmed: null,
+    pending,
+  });
+  h.release(nodeId);
+  const other = await restartTemplate(t);
+  const moved = { ...h.repository, address: join(other.root, ORIGIN_NAME) };
+  await assert.rejects(
+    prepareOne(h.workspace, {
+      env,
+      transport,
+      sshAccess: everyBindingSshAccess,
+      context: background,
+      deadlineMs: GIT_DEADLINE_MS,
+      nodeId,
+      nodeBranch: first.nodeBranch,
+      pushed: false,
+      repository: moved,
+    }),
+    PENDING_REBUILD,
+  );
+  assert.equal(
+    (
+      await simpleGit(first.directory).raw([
+        "config",
+        "--get",
+        "remote.origin.url",
+      ])
+    ).trim(),
+    h.origin,
+  );
+  assert.equal(
+    (
+      await simpleGit(first.directory).revparse([
+        `refs/heads/${first.nodeBranch}`,
+      ])
+    ).trim(),
+    pending,
+  );
+});
+
+test("an unreadable push record keeps the tree under the node key and refuses the next preparation", async (t) => {
+  const h = await coderFixture(t);
+  const nodeId = createIdentity("node");
+  const first = await h.prepare(nodeId);
+  await h.commit(first.directory, "work", "pushed");
+  await h.pushNode(nodeId, first);
+  const local = await h.commit(first.directory, "work", "local");
+  const key = h.recordKey(nodeId, first.nodeBranch);
+  const record = join(
+    key.nodeKey,
+    "pushed",
+    branchKeyOf(first.nodeBranch),
+    key.bindingId,
+  );
+  writeFileSync(record, BROKEN_RECORD);
+  h.release(nodeId);
+  assert.ok(existsSync(join(first.directory, ".git")));
+  assert.deepEqual(h.freeTrees(PoolClass.Agent), []);
+  await assert.rejects(h.prepare(nodeId), PENDING_REBUILD);
+  assert.equal(
+    (
+      await simpleGit(first.directory).revparse([
+        `refs/heads/${first.nodeBranch}`,
+      ])
+    ).trim(),
+    local,
+  );
+  assert.equal(
+    (await simpleGit(first.directory).revparse(["HEAD"])).trim(),
+    local,
+  );
+  assert.equal(readFileSync(record, "utf8"), BROKEN_RECORD);
 });

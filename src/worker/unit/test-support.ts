@@ -8,7 +8,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { simpleGit } from "simple-git";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { createModelRuntime, resolveModel } from "../../llm/model-connector.ts";
@@ -56,6 +56,7 @@ import { openNativeAgent } from "./native-agent.ts";
 import { ExecutionRun, type MethodClaim } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceRoot } from "./workspace.ts";
+import { PoolClass } from "./tree-pool.ts";
 import { prepareStepsWorkspace } from "./steps-implement.ts";
 import type { RefreshResult } from "./base-refresh.ts";
 import type { Verdict } from "./node-reads.ts";
@@ -94,6 +95,34 @@ export function scriptedModelRuntime(
   };
 }
 
+export const ONE_FREE_TREE = 1;
+
+export function releasedRoot(h: {
+  root: string;
+  input: { workspaces: WorkspaceRoot };
+}): string {
+  if (existsSync(h.root)) return h.root;
+  const trees = agentTrees(h.input.workspaces);
+  assert.equal(trees.length, ONE_FREE_TREE);
+  return trees[0]!;
+}
+
+export function agentTrees(workspaces: WorkspaceRoot): string[] {
+  return workspaces.pool
+    .trees()
+    .map((tree) => tree.path)
+    .filter((path) => basename(dirname(path)) === PoolClass.Agent);
+}
+
+export async function remapOrigin(
+  directory: string,
+  map: (url: string) => string,
+): Promise<void> {
+  const git = simpleGit(directory);
+  const url = (await git.raw(["config", "--get", "remote.origin.url"])).trim();
+  await git.raw(["remote", "set-url", "origin", map(url)]);
+}
+
 export const transport: RepositoryTransport = {
   clone: (address, directory, context, deadlineMs) =>
     connector.clone(
@@ -109,6 +138,7 @@ export const transport: RepositoryTransport = {
     base,
     pushed,
     keep,
+    record,
     context,
     deadlineMs,
   ) =>
@@ -118,6 +148,7 @@ export const transport: RepositoryTransport = {
       base,
       pushed,
       keep,
+      record,
       context,
       deadlineMs,
       LOCAL_GIT_SSH_ACCESS,

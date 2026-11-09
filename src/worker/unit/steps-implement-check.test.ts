@@ -17,6 +17,7 @@ import type { scriptedProvider } from "./test-support.ts";
 import {
   fauxAssistantMessage,
   fauxToolCall,
+  releasedRoot,
   TEST_SSH_ACCESS,
 } from "./test-support.ts";
 import {
@@ -218,10 +219,10 @@ suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.ok(end.kind === ExecutionEndKind.Released && end.furtherWork);
     assert.equal(bodies.length, ONE_RELEASE);
     assert.equal(
-      (await simpleGit(h.root).raw(["ls-files", STRAY_FILE])).trim(),
+      (await simpleGit(releasedRoot(h)).raw(["ls-files", STRAY_FILE])).trim(),
       STRAY_FILE,
     );
-    const latest = (await simpleGit(h.root).log()).latest!;
+    const latest = (await simpleGit(releasedRoot(h)).log()).latest!;
     assert.equal(latest.message, `feat: ${h.revision.content.name}`);
     assert.equal(latest.body.trim(), h.input.claim.node_id);
   });

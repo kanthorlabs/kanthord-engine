@@ -41,6 +41,7 @@ import {
 } from "../../agent/prompt-composer.ts";
 import { readDeclaration } from "./affected.ts";
 import { headCommit } from "./local-git.ts";
+import { readPushRecord, writePushRecord } from "./push-record.ts";
 import {
   environmentStop,
   infrastructureStop,
@@ -243,7 +244,22 @@ async function pushNodeBranches(
   context: Context,
   remaining: () => number,
 ): Promise<void> {
-  for (const checkout of state.checkouts)
+  for (const checkout of state.checkouts) {
+    const key = {
+      nodeKey: state.input.workspaces.nodeKey(state.input.claim.node_id),
+      nodeBranch: state.nodeBranch,
+      bindingId: checkout.binding_id,
+    };
+    const head = await headCommit(
+      state.input.env,
+      checkout.directory,
+      context,
+      remaining(),
+    );
+    writePushRecord(key, {
+      confirmed: readPushRecord(key)?.confirmed ?? null,
+      pending: head,
+    });
     await state.input.transport.pushNodeBranch(
       checkout.directory,
       state.nodeBranch,
@@ -251,6 +267,8 @@ async function pushNodeBranches(
       remaining(),
       sshAccessOf(state.input.sshAccess, checkout.binding_id),
     );
+    writePushRecord(key, { confirmed: head, pending: null });
+  }
 }
 
 export function repositoryOf(

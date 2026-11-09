@@ -52,6 +52,7 @@ import {
 import {
   fauxAssistantMessage,
   fauxToolCall,
+  remapOrigin,
   scriptedModelRuntime,
   scriptedProvider,
 } from "../../worker/unit/test-support.ts";
@@ -282,7 +283,10 @@ async function roundsFixture(t: TestContext, reworkLimit?: number) {
       connector.cloneSnapshot(bare, ...args),
     refreshSnapshot: (input) =>
       connector.refreshSnapshot({ ...input, address: bare }),
-    fetchAndCheckout: (...args) => connector.fetchAndCheckout(...args),
+    fetchAndCheckout: async (...args) => {
+      await remapOrigin(args[0], () => bare);
+      return connector.fetchAndCheckout(...args);
+    },
     fetchBase: (...args) => connector.fetchBase(...args),
     pushNodeBranch: (...args) => connector.pushNodeBranch(...args),
   };

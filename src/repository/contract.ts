@@ -36,6 +36,8 @@ export type HostKeySource = (typeof HostKeySource)[keyof typeof HostKeySource];
 
 export const RepositoryErrorCode = {
   SshKeyLegacy: "repository.credential.ssh_key_legacy",
+  NodeBranchMissing: "repository.node_branch.missing",
+  NodeCheckoutPendingRebuild: "repository.node_checkout.pending_rebuild",
 } as const;
 
 export const SSH_SIGN_USER = "git";
@@ -78,6 +80,16 @@ export interface SshRelayAccess {
 }
 
 export type SshAccess = SshKeyAccess | SshRelayAccess;
+const pushCommitSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
+export const pushRecordSchema = z.strictObject({
+  confirmed: pushCommitSchema.nullable(),
+  pending: pushCommitSchema.nullable(),
+});
+export type PushRecord = z.infer<typeof pushRecordSchema>;
+export interface CheckoutResult {
+  head: string;
+  record: PushRecord | null;
+}
 export interface SnapshotRefresh {
   address: string;
   revision: string;
