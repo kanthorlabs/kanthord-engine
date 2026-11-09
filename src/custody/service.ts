@@ -243,6 +243,10 @@ interface ListGroupsOptions {
   limit: number;
 }
 
+interface SealedRowOptions {
+  credential: string;
+}
+
 const NOTHING_FOUND: SealedFind = { pinned: undefined, row: undefined };
 
 function capturedResourceCheck(
@@ -924,7 +928,7 @@ export class CustodyComponent implements Service, CredentialRecords {
             execution: grant.execution,
           });
     const { pinned } = found;
-    const row = this.sealedRowOf(tx, credential, found.row);
+    const row = this.sealedRowOf(tx, found.row, { credential });
     if (row.platform !== grant.platform)
       throw new OperationError(
         HttpStatus.BadRequest,
@@ -954,8 +958,8 @@ export class CustodyComponent implements Service, CredentialRecords {
 
   private sealedRowOf(
     tx: Transaction,
-    credential: string,
     row: CredentialRow | undefined,
+    options: SealedRowOptions,
   ): CredentialRow {
     const key = row ? this.instanceKeys.keyOf(tx, row.holder) : null;
     if (row && row.sealed_to === key?.fingerprint) return row;
@@ -963,18 +967,18 @@ export class CustodyComponent implements Service, CredentialRecords {
       HttpStatus.Forbidden,
       CUSTODY_HOLDER_REFUSED,
       "The worker placement receives only a copy sealed to the current key of its instance.",
-      { reason: this.refusalReasonOf(tx, credential, row) },
+      { reason: this.refusalReasonOf(tx, row, options) },
     );
   }
 
   private refusalReasonOf(
     tx: Transaction,
-    credential: string,
     row: CredentialRow | undefined,
+    options: SealedRowOptions,
   ): HolderRefusal {
     const serverHeld =
       row === undefined &&
-      newestLive(tx, credential, SERVER_HOLDER) !== undefined;
+      newestLive(tx, options.credential, SERVER_HOLDER) !== undefined;
     return serverHeld ? HolderRefusal.ServerHeld : HolderRefusal.HeldElsewhere;
   }
 
