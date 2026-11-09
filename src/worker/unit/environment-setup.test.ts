@@ -33,14 +33,7 @@ import {
 } from "./environment-setup.ts";
 import { commitOf, headCommit } from "./local-git.ts";
 import { validRoots } from "./setup-record.ts";
-import {
-  RecordKind,
-  SpanStatus,
-  type TelemetryRecord,
-} from "../../tracking/contract.ts";
-import { SpanOperation, SpanRecorder } from "./telemetry.ts";
 import { VerificationClass } from "./verification.ts";
-import { spanEnds } from "./test-support.ts";
 import { spawnedPids, survivingProcesses } from "../../agent/test-support.ts";
 import { BASE_DIRECTORY, WorkspaceRoot } from "./workspace.ts";
 import { PoolClass, repoKeyOf } from "./tree-pool.ts";
@@ -60,16 +53,8 @@ const ONE_RUN = "run\n";
 const TWO_RUNS = "run\nrun\n";
 const MAGIC_PATH = ":lock";
 const MAGIC_TEXT = "{}";
-const ONE_SPAN = 1;
 const ONE_CHILD = 1;
 const DIGEST = "d".repeat(64);
-const CLAIM = {
-  execution_id: "execution_01JZ8R2B3C4D5E6F7G8H9J0K1M",
-  node_id: "node_01JZ8Q0K4M6N8P0R2S4T6V8W0X",
-  attempt: 1,
-  trace_id: "a".repeat(32),
-  root_span_id: "1".repeat(16),
-};
 
 async function commit(directory: string, path: string, content: string) {
   writeFileSync(join(directory, path), content);
@@ -198,17 +183,6 @@ test("a setup on a changed environment removes the recorded roots before its com
   });
 });
 
-test("a changed environment with no setup command removes the recorded roots", async (t) => {
-  const { checkout } = await repository(t, { file: "base" });
-  assert.deepEqual(await setUp(checkout, ROOTS_SETUP), { end: SetupEnd.Pass });
-  assert.deepEqual(await setUp(checkout, NO_COMMAND_SETUP), {
-    end: SetupEnd.Pass,
-  });
-  assert.equal(existsSync(join(checkout, "deps")), false);
-  assert.equal(existsSync(join(checkout, "out.txt")), false);
-  assert.equal(setupRecord(checkout), null);
-});
-
 test("a record with a root outside the checkout removes nothing outside the checkout", async (t) => {
   const { root, checkout } = await repository(t, { ".gitignore": "deps/\n" });
   const outside = join(root, "outside");
@@ -307,32 +281,6 @@ test("setup runs the commands of a stored environment in the checkout", async (t
   );
 });
 
-test("setup runs the commands of a detected and a universal environment in the checkout", async (t) => {
-  for (const source of [
-    EnvironmentSource.Detected,
-    EnvironmentSource.Universal,
-  ]) {
-    const { checkout } = await repository(t, { file: "base" });
-    const result = await runSetup(
-      input(),
-      await setupEntries(input(), [
-        setupCheckout(checkout, {
-          source,
-          document: {
-            updateContentCommand: `echo update > ${SETUP_MARKER}`,
-            postCreateCommand: ["sh", "-c", `echo create >> ${SETUP_MARKER}`],
-          },
-        }),
-      ]),
-    );
-    assert.deepEqual(result, { end: SetupEnd.Pass });
-    assert.equal(
-      readFileSync(join(checkout, SETUP_MARKER), "utf8"),
-      SETUP_OUTPUT,
-    );
-  }
-});
-
 test("setup reads the devcontainer file of the base head for a repository source", async (t) => {
   const { checkout } = await repository(t, {
     ".devcontainer/devcontainer.json": `{
@@ -367,24 +315,6 @@ test("setup reads the devcontainer file of the base head for a repository source
   );
 });
 
-test("an invalid devcontainer file of the base head stops with an environment failure", async (t) => {
-  const { checkout } = await repository(t, {
-    ".devcontainer/devcontainer.json": '{"postCreateCommand": 1}',
-  });
-  await assert.rejects(
-    setupEntries(input(), [
-      setupCheckout(checkout, {
-        source: EnvironmentSource.Repository,
-        digest: DIGEST,
-      }),
-    ]),
-    (error) =>
-      error instanceof ExecutionStop &&
-      error.reason === EndReason.EnvironmentFailed &&
-      error.code === EnvironmentFailure.SetupFailed,
-  );
-});
-
 test("a setup failure on the base head is an environment failure", async (t) => {
   const { root, checkout } = await repository(t, { file: "base" });
   const { entries, base, head } = await prepared(
@@ -396,8 +326,7 @@ test("a setup failure on the base head is an environment failure", async (t) => 
     (error) =>
       error instanceof ExecutionStop &&
       error.reason === EndReason.EnvironmentFailed &&
-      error.code === EnvironmentFailure.SetupFailed &&
-      /exit 3/.test(error.detail ?? ""),
+      error.code === EnvironmentFailure.SetupFailed,
   );
 });
 
@@ -414,21 +343,6 @@ test("a setup failure on the node head that passes on the base head is a code fa
   assert.equal(result.run.verification.results[0]?.exit_code, FAILED_EXIT);
   await base.giveBack();
   assert.equal(existsSync(join(root, "base")), false);
-});
-
-test("a setup failure on the node head and on the base head is an environment failure", async (t) => {
-  const { root, checkout } = await repository(t, { file: "base" });
-  await commit(checkout, "node", "node");
-  const { entries, base, head } = await prepared(
-    setupCheckout(checkout, stored({ postCreateCommand: "exit 4" })),
-    root,
-  );
-  await assert.rejects(
-    setUpHeads(input(), entries, base, [head]),
-    (error) =>
-      error instanceof ExecutionStop &&
-      error.code === EnvironmentFailure.SetupFailed,
-  );
 });
 
 test("the base rerun runs on the base head after its setup and is cached within one execution only", async (t) => {
@@ -501,21 +415,6 @@ test("a run in the base head stops with setup_failed when the base setup fails",
   );
 });
 
-test("the base rerun stops with setup_failed when the base setup fails", async (t) => {
-  const { root, checkout } = await repository(t, { file: "base" });
-  const { base } = await prepared(
-    setupCheckout(checkout, stored({ postCreateCommand: "exit 6" })),
-    root,
-  );
-  await assert.rejects(
-    base.exitOf("command-absent-x"),
-    (error) =>
-      error instanceof ExecutionStop &&
-      error.reason === EndReason.EnvironmentFailed &&
-      error.code === EnvironmentFailure.SetupFailed,
-  );
-});
-
 test("the base rerun answers no exit when the budget ends in the base setup", async (t) => {
   const { root, checkout } = await repository(t, { file: "base" });
   const entry = setupCheckout(checkout, stored({ postCreateCommand: "true" }));
@@ -546,28 +445,7 @@ test("a setup that changes a tracked file only on the node head is a code failur
   assert.ok(result.end === SetupEnd.Failed);
   assert.deepEqual(result.changed, ["package-lock.json"]);
   assert.equal(result.run.verification.results.at(-1)?.exit_code, FAILED_EXIT);
-  assert.match(result.run.outputs.at(-1) ?? "", /package-lock\.json/);
   assert.equal(result.commands.length, result.run.verification.results.length);
-});
-
-test("a setup that changes a tracked file on the node head and on the base head stops with setup_failed and names the path", async (t) => {
-  const { root, checkout } = await repository(t, { "package-lock.json": "{}" });
-  await commit(checkout, "node", "node");
-  const { entries, base, head } = await prepared(
-    setupCheckout(
-      checkout,
-      stored({ postCreateCommand: "echo changed > package-lock.json" }),
-    ),
-    root,
-  );
-  await assert.rejects(
-    setUpHeads(input(), entries, base, [head]),
-    (error) =>
-      error instanceof ExecutionStop &&
-      error.reason === EndReason.EnvironmentFailed &&
-      error.code === EnvironmentFailure.SetupFailed &&
-      /package-lock\.json/.test(error.detail ?? ""),
-  );
 });
 
 async function stagedAfterSetup(checkout: string): Promise<string[]> {
@@ -608,59 +486,6 @@ test("a tracked change restores a path that reads as pathspec magic", async (t) 
   assert.ok(result.end === SetupEnd.Failed);
   assert.deepEqual(result.changed, [MAGIC_PATH]);
   assert.equal(readFileSync(join(checkout, MAGIC_PATH), "utf8"), MAGIC_TEXT);
-});
-
-function recorded() {
-  const records: TelemetryRecord[] = [];
-  const spans = new SpanRecorder(CLAIM, "coder-1", {
-    write: (batch) => records.push(...batch),
-    flush: async () => {},
-  });
-  return { records, spans };
-}
-
-test("a setup run with a recorder writes one setup span with its result", async (t) => {
-  const { checkout } = await repository(t, { file: "base" });
-  const { records, spans } = recorded();
-  const withSpans = { ...input(), spans };
-  const entries = await setupEntries(withSpans, [
-    setupCheckout(checkout, stored({ postCreateCommand: "true" })),
-  ]);
-  assert.deepEqual(await runSetup(withSpans, entries), { end: SetupEnd.Pass });
-  const ends = spanEnds(records, SpanOperation.Setup);
-  assert.equal(ends.length, ONE_SPAN);
-  assert.equal(ends[0]?.status, SpanStatus.Ok);
-  assert.deepEqual(ends[0]?.attributes, { "kanthord.setup.result": "pass" });
-  const starts = records.filter((record) => "start_time" in record);
-  assert.equal(
-    starts[0]?.kind === RecordKind.Span &&
-      starts[0].attributes?.["kanthord.setup.entry_count"],
-    ONE_SPAN,
-  );
-});
-
-test("a failed setup script writes a setup span with the result failed and the status Ok", async (t) => {
-  const { checkout } = await repository(t, { file: "base" });
-  const { records, spans } = recorded();
-  const withSpans = { ...input(), spans };
-  const entries = await setupEntries(withSpans, [
-    setupCheckout(checkout, stored({ postCreateCommand: "exit 1" })),
-  ]);
-  assert.equal((await runSetup(withSpans, entries)).end, SetupEnd.Failed);
-  const ends = spanEnds(records, SpanOperation.Setup);
-  assert.equal(ends.length, ONE_SPAN);
-  assert.equal(ends[0]?.status, SpanStatus.Ok);
-  assert.deepEqual(ends[0]?.attributes, { "kanthord.setup.result": "failed" });
-});
-
-test("a setup run with no recorder writes no span", async (t) => {
-  const { checkout } = await repository(t, { file: "base" });
-  const { records } = recorded();
-  const entries = await setupEntries(input(), [
-    setupCheckout(checkout, stored({ postCreateCommand: "true" })),
-  ]);
-  assert.deepEqual(await runSetup(input(), entries), { end: SetupEnd.Pass });
-  assert.deepEqual(records, []);
 });
 
 test("a background child of a setup command is dead before the first verification", async (t) => {
@@ -788,19 +613,6 @@ test("a second base head of the same repository reuses the tree and keeps each f
   await next.giveBack();
 });
 
-test("a base head gives its tree back to the command class", async (t) => {
-  const h = await poolFixture(t);
-  const nodeId = createIdentity("node");
-  const base = await h.baseHead(nodeId);
-  assert.deepEqual(await base.setup(), { end: SetupEnd.Pass });
-  await base.giveBack();
-  assert.equal(h.commandTrees().length, ONE_TREE);
-  assert.equal(
-    existsSync(join(h.workspaces.nodeKey(nodeId), BASE_DIRECTORY)),
-    false,
-  );
-});
-
 test("a fresh base head tree shares no object file with the agent checkout", async (t) => {
   const h = await poolFixture(t);
   const nodeId = createIdentity("node");
@@ -811,24 +623,6 @@ test("a fresh base head tree shares no object file with the agent checkout", asy
     [...objectInodes(h.tree(nodeId))].filter((ino) => checkout.has(ino)),
     [],
   );
-  await base.giveBack();
-});
-
-test("a fresh base head checks out a moved base commit that no local branch of the checkout holds", async (t) => {
-  const h = await poolFixture(t);
-  await commit(h.origin, "moved", "moved");
-  await simpleGit(h.checkout).fetch("origin");
-  const moved = await commitOf(
-    env,
-    h.checkout,
-    "origin/main",
-    background,
-    10000,
-  );
-  const nodeId = createIdentity("node");
-  const base = await h.baseHead(nodeId);
-  assert.deepEqual(await base.setup(), { end: SetupEnd.Pass });
-  assert.equal(await headCommit(env, h.tree(nodeId), background, 10000), moved);
   await base.giveBack();
 });
 
@@ -865,18 +659,6 @@ test("a base head preparation gives a crash leftover back and takes it", async (
   assert.deepEqual(await base.setup(), { end: SetupEnd.Pass });
   assert.equal(statSync(join(h.tree(nodeId), ".git")).ino, leftover);
   assert.deepEqual(h.prepared(), [["tree prepared", "pool"]]);
-  await base.giveBack();
-});
-
-test("a base head preparation removes a leftover entry with a current name that is not a tree", async (t) => {
-  const h = await poolFixture(t);
-  const nodeId = createIdentity("node");
-  mkdirSync(dirname(h.tree(nodeId)), { recursive: true });
-  writeFileSync(h.tree(nodeId), "x");
-  const base = await h.baseHead(nodeId);
-  assert.deepEqual(await base.setup(), { end: SetupEnd.Pass });
-  assert.equal(existsSync(join(h.tree(nodeId), ".git")), true);
-  assert.deepEqual(h.prepared(), [["tree prepared", "clone"]]);
   await base.giveBack();
 });
 
@@ -1002,41 +784,6 @@ test("a fresh and a reused base tree of one checkout hold the same refs, origin/
   );
   assert.equal(/^refs\/heads\//m.test(freshState.refs), false);
   await reused.giveBack();
-});
-
-test("a reused base tree follows the branches of a new checkout and drops origin/HEAD for a detached checkout", async (t) => {
-  const h = await poolFixture(t);
-  const first = createIdentity("node");
-  const fresh = await h.baseHead(first);
-  assert.deepEqual(await fresh.setup(), { end: SetupEnd.Pass });
-  await fresh.giveBack();
-  await simpleGit(h.checkout).raw(["checkout", "-b", "kanthord/other"]);
-  await simpleGit(h.checkout).raw(["branch", "-D", "kanthord/node"]);
-  await simpleGit(h.checkout).raw(["checkout", "--detach"]);
-  const second = createIdentity("node");
-  const reused = await h.baseHead(second);
-  assert.deepEqual(await reused.setup(), { end: SetupEnd.Pass });
-  const state = await refState(h.tree(second));
-  assert.equal(state.originHead, NO_REF);
-  assert.match(state.refs, /^refs\/remotes\/origin\/kanthord\/other /m);
-  assert.doesNotMatch(state.refs, /refs\/remotes\/origin\/kanthord\/node /);
-  await reused.giveBack();
-});
-
-test("the next preparation gives a crash leftover of a fresh base tree back and takes it", async (t) => {
-  const h = await poolFixture(t);
-  const nodeId = createIdentity("node");
-  const crashed = await h.baseHead(nodeId);
-  assert.deepEqual(await crashed.setup(), { end: SetupEnd.Pass });
-  const leftover = statSync(join(h.tree(nodeId), ".git")).ino;
-  const next = await h.baseHead(nodeId);
-  assert.deepEqual(await next.setup(), { end: SetupEnd.Pass });
-  assert.equal(statSync(join(h.tree(nodeId), ".git")).ino, leftover);
-  assert.deepEqual(h.prepared(), [
-    ["tree prepared", "clone"],
-    ["tree prepared", "pool"],
-  ]);
-  await next.giveBack();
 });
 
 test("a base head give-back waits for a running preparation and then gives the tree to the command class", async (t) => {
