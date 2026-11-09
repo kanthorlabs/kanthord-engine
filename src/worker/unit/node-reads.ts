@@ -375,7 +375,10 @@ async function readUnblockPrior(
       verdict: {
         source: VerdictSource.Rework,
         text: rework.rationale,
-        judged: testedCommits(rework.tested_input),
+        judged:
+          rework.result === AssessmentResult.Success
+            ? []
+            : testedCommits(rework.tested_input),
         findings,
         round,
       },
