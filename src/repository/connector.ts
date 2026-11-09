@@ -41,6 +41,10 @@ export const GIT_BASE_MOVED = "git.base_moved";
 export const NODE_BRANCH_MISSING = "repository.node_branch.missing";
 export const GATE_DECLARATION_INVALID = "repository.gate_declaration.invalid";
 const EMPTY_STRING = "";
+const EXCLUDE_OPTION = "-e";
+const EXCLUDE_PAIR = 2;
+const NO_REMAINDER = 0;
+const ROOT_PREFIX = "/";
 const EXPIRED = 0;
 const TIMEOUT_PLUGIN = "timeout";
 const EMPTY_BYTES = 0;
@@ -404,6 +408,7 @@ export async function fetchAndCheckout(
   branch: string,
   baseBranch: string,
   pushed: boolean,
+  keep: readonly string[],
   context: Context,
   deadlineMs: number,
   ssh: SshAccess,
@@ -414,6 +419,7 @@ export async function fetchAndCheckout(
       branch,
       baseBranch,
       pushed,
+      keep,
       context,
       remaining,
       agent,
@@ -426,12 +432,18 @@ async function fetchAndCheckoutWith(
   branch: string,
   baseBranch: string,
   pushed: boolean,
+  keep: readonly string[],
   context: Context,
   deadlineMs: number,
   agent: AgentVariables,
 ): Promise<string> {
   assert.ok(branch);
   assert.ok(baseBranch);
+  assert.equal(keep.length % EXCLUDE_PAIR, NO_REMAINDER);
+  for (let index = 0; index < keep.length; index += EXCLUDE_PAIR) {
+    assert.equal(keep[index], EXCLUDE_OPTION);
+    assert.ok(keep[index + 1]!.startsWith(ROOT_PREFIX));
+  }
   const end = performance.now() + deadlineMs;
   const run = (args: string[]) =>
     runGit(
@@ -477,7 +489,11 @@ async function fetchAndCheckoutWith(
     { agent },
   );
   await run(["checkout", "--force", "-B", branch, `origin/${target}`, "--"]);
-  await run(["clean", current.output.trim() === branch ? "-ffd" : "-ffdx"]);
+  await run(
+    current.output.trim() === branch
+      ? ["clean", "-ffd"]
+      : ["clean", "-ffdx", ...keep],
+  );
   return (await run(["rev-parse", "HEAD"])).trim();
 }
 

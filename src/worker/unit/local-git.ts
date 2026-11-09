@@ -1112,6 +1112,61 @@ export async function excludeUntracked(
   return paths;
 }
 
+export interface GitCall {
+  env: NodeJS.ProcessEnv;
+  directory: string;
+  context: Context;
+  deadlineMs: number;
+}
+
+export async function ignoredPaths(call: GitCall): Promise<string[]> {
+  return (
+    await run(
+      call.env,
+      call.directory,
+      [
+        "ls-files",
+        "-z",
+        "--others",
+        "--ignored",
+        "--exclude-standard",
+        "--directory",
+      ],
+      call.context,
+      call.deadlineMs,
+    )
+  )
+    .split(NUL)
+    .filter(Boolean);
+}
+
+export async function trackedRoots(
+  call: GitCall,
+  roots: readonly string[],
+): Promise<string[]> {
+  const end = performance.now() + call.deadlineMs;
+  const tracked: string[] = [];
+  for (const root of roots)
+    if (
+      await run(
+        call.env,
+        call.directory,
+        ["--literal-pathspecs", "ls-files", "-z", "--", root],
+        call.context,
+        Math.max(1, end - performance.now()),
+      )
+    )
+      tracked.push(root);
+  return tracked;
+}
+
+export function cleanExcludes(roots: readonly string[]): string[] {
+  return roots.flatMap((root) => [
+    "-e",
+    `/${root.replace(EXCLUDE_SPECIAL, "\\$&")}`,
+  ]);
+}
+
 export async function restoreTracked(
   env: NodeJS.ProcessEnv,
   directory: string,

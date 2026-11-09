@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
 import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
+import { digest } from "../../kernel/json.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import type { ExecutionEnvironment } from "../contract.ts";
@@ -19,6 +27,7 @@ import {
   setUpHeads,
 } from "./environment-setup.ts";
 import { commitOf, headCommit } from "./local-git.ts";
+import { validRoots } from "./setup-record.ts";
 import {
   RecordKind,
   SpanStatus,
@@ -110,6 +119,161 @@ async function prepared(checkout: SetupCheckout, root: string) {
   const head = await headCommit(env, checkout.directory, background, 10000);
   return { entries, base, head };
 }
+
+function setupRecordPath(checkout: string): string {
+  return join(checkout, ".git", "kanthord-setup.json");
+}
+
+function setupRecordText(checkout: string): string | null {
+  const path = setupRecordPath(checkout);
+  return existsSync(path) ? readFileSync(path, "utf8") : null;
+}
+
+function setupRecord(checkout: string): unknown {
+  const text = setupRecordText(checkout);
+  return text === null ? null : JSON.parse(text);
+}
+
+async function setUp(checkout: string, document: Record<string, unknown>) {
+  return await runSetup(
+    input(),
+    await setupEntries(input(), [setupCheckout(checkout, stored(document))]),
+  );
+}
+
+const ROOTS_SETUP = {
+  postCreateCommand: "mkdir -p deps && echo x > deps/a && echo y > out.txt",
+};
+const KEPT_SETUP = {
+  postCreateCommand: "test -e deps || (mkdir deps && echo x > deps/a)",
+};
+const NO_DEPS_SETUP = { postCreateCommand: "test ! -e deps" };
+const NO_COMMAND_SETUP = {};
+const PLAIN_SETUP = { postCreateCommand: "true" };
+const TRACKED_TEXT = "tracked";
+
+test("a passing setup records the paths that it creates as setup roots", async (t) => {
+  const { checkout } = await repository(t, { ".gitignore": "*.log\n" });
+  writeFileSync(join(checkout, "earlier.log"), "x");
+  assert.deepEqual(await setUp(checkout, ROOTS_SETUP), {
+    end: SetupEnd.Pass,
+  });
+  assert.deepEqual(setupRecord(checkout), {
+    digest: digest(ROOTS_SETUP),
+    roots: ["deps/", "out.txt"],
+  });
+});
+
+test("a second setup keeps a recorded root that it does not create again", async (t) => {
+  const { checkout } = await repository(t, { file: "base" });
+  assert.deepEqual(await setUp(checkout, KEPT_SETUP), { end: SetupEnd.Pass });
+  assert.deepEqual(await setUp(checkout, KEPT_SETUP), { end: SetupEnd.Pass });
+  assert.deepEqual(setupRecord(checkout), {
+    digest: digest(KEPT_SETUP),
+    roots: ["deps/"],
+  });
+});
+
+test("a setup on a changed environment removes the recorded roots before its commands", async (t) => {
+  const { checkout } = await repository(t, { file: "base" });
+  assert.deepEqual(await setUp(checkout, ROOTS_SETUP), { end: SetupEnd.Pass });
+  assert.deepEqual(await setUp(checkout, NO_DEPS_SETUP), {
+    end: SetupEnd.Pass,
+  });
+  assert.equal(existsSync(join(checkout, "out.txt")), false);
+  assert.deepEqual(setupRecord(checkout), {
+    digest: digest(NO_DEPS_SETUP),
+    roots: [],
+  });
+});
+
+test("a changed environment with no setup command removes the recorded roots", async (t) => {
+  const { checkout } = await repository(t, { file: "base" });
+  assert.deepEqual(await setUp(checkout, ROOTS_SETUP), { end: SetupEnd.Pass });
+  assert.deepEqual(await setUp(checkout, NO_COMMAND_SETUP), {
+    end: SetupEnd.Pass,
+  });
+  assert.equal(existsSync(join(checkout, "deps")), false);
+  assert.equal(existsSync(join(checkout, "out.txt")), false);
+  assert.equal(setupRecord(checkout), null);
+});
+
+test("a record with a root outside the checkout removes nothing outside the checkout", async (t) => {
+  const { root, checkout } = await repository(t, { ".gitignore": "deps/\n" });
+  const outside = join(root, "outside");
+  writeFileSync(outside, "x");
+  mkdirSync(join(checkout, "deps"));
+  writeFileSync(join(checkout, "deps", "a"), "x");
+  writeFileSync(
+    setupRecordPath(checkout),
+    JSON.stringify({ digest: "earlier", roots: ["../outside", "deps/"] }),
+  );
+  assert.deepEqual(await setUp(checkout, NO_COMMAND_SETUP), {
+    end: SetupEnd.Pass,
+  });
+  assert.equal(existsSync(outside), true);
+  assert.equal(existsSync(join(checkout, "deps")), false);
+  assert.equal(setupRecord(checkout), null);
+});
+
+test("a changed environment keeps a recorded root that holds a tracked path", async (t) => {
+  const { checkout } = await repository(t, { "deps/tracked": TRACKED_TEXT });
+  writeFileSync(
+    setupRecordPath(checkout),
+    JSON.stringify({ digest: "earlier", roots: ["deps/"] }),
+  );
+  assert.deepEqual(await setUp(checkout, PLAIN_SETUP), { end: SetupEnd.Pass });
+  assert.equal(
+    readFileSync(join(checkout, "deps", "tracked"), "utf8"),
+    TRACKED_TEXT,
+  );
+});
+
+test("a changed environment keeps a recorded root under a symlink to a directory outside the checkout", async (t) => {
+  const { root, checkout } = await repository(t, { ".gitignore": "link\n" });
+  const outside = join(root, "outside");
+  mkdirSync(join(outside, "sub"), { recursive: true });
+  writeFileSync(join(outside, "sub", "a"), TRACKED_TEXT);
+  symlinkSync(outside, join(checkout, "link"));
+  writeFileSync(
+    setupRecordPath(checkout),
+    JSON.stringify({ digest: "earlier", roots: ["link/sub", "link/"] }),
+  );
+  assert.deepEqual(await setUp(checkout, PLAIN_SETUP), { end: SetupEnd.Pass });
+  assert.equal(readFileSync(join(outside, "sub", "a"), "utf8"), TRACKED_TEXT);
+  assert.deepEqual(setupRecord(checkout), {
+    digest: digest(PLAIN_SETUP),
+    roots: [],
+  });
+});
+
+test("a recorded root under a .git segment in any letter case is not valid", async (t) => {
+  const { checkout } = await repository(t, { file: "base" });
+  assert.deepEqual(
+    await validRoots(
+      { env, directory: checkout, context: background, deadlineMs: 10000 },
+      [".GIT/objects", ".Git/", "deps/"],
+    ),
+    ["deps/"],
+  );
+});
+
+test("a failed setup keeps the earlier record", async (t) => {
+  const { checkout } = await repository(t, { file: "base" });
+  const guarded = {
+    postCreateCommand:
+      "mkdir -p deps && test ! -e stop && if test -e touch; then echo changed > file; fi",
+  };
+  assert.deepEqual(await setUp(checkout, guarded), { end: SetupEnd.Pass });
+  const earlier = setupRecordText(checkout);
+  writeFileSync(join(checkout, "stop"), "x");
+  assert.equal((await setUp(checkout, guarded)).end, SetupEnd.Failed);
+  assert.equal(setupRecordText(checkout), earlier);
+  rmSync(join(checkout, "stop"));
+  writeFileSync(join(checkout, "touch"), "x");
+  assert.equal((await setUp(checkout, guarded)).end, SetupEnd.Failed);
+  assert.equal(setupRecordText(checkout), earlier);
+});
 
 test("setup runs the commands of a stored environment in the checkout", async (t) => {
   const { checkout } = await repository(t, { file: "base" });
