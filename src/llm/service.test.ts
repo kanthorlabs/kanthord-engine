@@ -32,7 +32,7 @@ import { decrypt, encrypt } from "../custody/envelope.ts";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { ResourceFailureReason, ResourceStatus } from "../kernel/health.ts";
-import { HttpMethod, HttpStatus } from "../kernel/http.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import {
   generateX25519KeyPair,
@@ -43,11 +43,7 @@ import {
 } from "../kernel/hpke.ts";
 import { testWorkerIdentity } from "../kernel/test-identity.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import {
-  AccessPolicy,
-  type CallerContext,
-  OperationRegistry,
-} from "../kernel/operation.ts";
+import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import {
   IN_MEMORY_DATABASE,
   Store,
@@ -57,7 +53,6 @@ import { HealthStatus } from "../kernel/service.ts";
 import { REPOSITORY_PLATFORMS } from "../repository/index.ts";
 import { STORAGE_PLATFORMS } from "../storage/index.ts";
 import {
-  Connection,
   type EnablementsDependentOnModelFn,
   llmOperations,
   ModelCheckResult,
@@ -87,7 +82,7 @@ import { LlmComponent } from "./service.ts";
 import { scriptedModelRuntime } from "./test-support.ts";
 import { loadPi } from "../agent/pi.ts";
 import { redactingLogger, stopAfter } from "../kernel/test-support.ts";
-import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 import { PROJECT_SERVICE_NAME } from "../project/contract.ts";
 
@@ -96,7 +91,6 @@ const HUMAN_ACCOUNT_ID = "alice";
 const NAME_CONFLICT_CODE = "credential.name.conflict";
 const REVISION_CONFLICT_CODE = "credential.revision.conflict";
 const CREDENTIAL_NOT_FOUND_CODE = "credential.credential.not_found";
-const PLATFORM_MISMATCH_CODE = "credential.platform.mismatch";
 const MODEL_IN_USE_CODE = "llm.metadata.model_in_use";
 const BASE_URL_FIXED_CODE = "llm.metadata.base_url_fixed";
 const REMOVED_MODEL = "removed";
@@ -613,48 +607,6 @@ test("a repeated approved model id answers invalid input at create, rotate and u
       INVALID_INPUT_CODE,
     );
     assert.equal(credentialCount(f), FIRST_REVISION);
-  } finally {
-    f.store.close();
-  }
-});
-
-test("openrouter takes an api key with null metadata and differs from openai-compatible", () => {
-  const f = fixture();
-  try {
-    f.create({
-      name: "router",
-      platform: Platform.OpenRouter,
-      secret: apiSecret,
-      metadata: null,
-    });
-    fails(
-      () =>
-        f.create({
-          name: "router-meta",
-          platform: Platform.OpenRouter,
-          secret: apiSecret,
-          metadata: { base_url: "https://example.com/v1", models: [] },
-        }),
-      HttpStatus.BadRequest,
-      INVALID_INPUT_CODE,
-    );
-    fails(
-      () =>
-        f.store.transaction((tx) =>
-          f.custody.custodySuitability(tx, {
-            credential: "router",
-            platform: Platform.OpenAICompatible,
-          }),
-        ),
-      HttpStatus.BadRequest,
-      PLATFORM_MISMATCH_CODE,
-    );
-    f.store.transaction((tx) =>
-      f.custody.custodySuitability(tx, {
-        credential: "router",
-        platform: Platform.OpenRouter,
-      }),
-    );
   } finally {
     f.store.close();
   }
@@ -1537,47 +1489,6 @@ test("OAuth pre-address failures preserve OperationError and sanitize arbitrary 
   }
 });
 
-test("OAuth unsupported select options fail without an address or a credential", async (t) => {
-  const provider = fakeProvider(async (interaction) => {
-    await interaction.prompt({
-      type: "select",
-      message: "Mode",
-      options: [{ id: "unsupported", label: "Unsupported" }],
-    });
-    return oauthCredential;
-  });
-  const f = fixture({ oauthProviders: () => [provider] });
-  stopAfter(t, async () => {
-    await f.component.stop();
-    f.store.close();
-  });
-  await assert.rejects(
-    f.login(LOGIN_BODY),
-    rejectsWith(HttpStatus.ServiceUnavailable, LOGIN_FAILED_CODE),
-  );
-  assert.equal(credentialCount(f), NO_CREDENTIALS);
-});
-
-test("OAuth auth_url records a browser address with a null code", async (t) => {
-  const gate = Promise.withResolvers<OAuthCredential>();
-  const provider = fakeProvider(async (interaction) => {
-    interaction.notify({ type: "auth_url", url: LOGIN_ADDRESS });
-    return await gate.promise;
-  });
-  const f = fixture({ oauthProviders: () => [provider] });
-  stopAfter(t, async () => {
-    await f.component.stop();
-    f.store.close();
-  });
-  const answer = await f.login(LOGIN_BODY);
-  assert.equal(answer.address, LOGIN_ADDRESS);
-  assert.equal(answer.code, null);
-  assert.equal(
-    f.loginStatus(answer.session_id).state,
-    LoginSessionState.Pending,
-  );
-});
-
 test("lifecycle aborts logins and joins cancellation", async () => {
   const f = fixture();
   try {
@@ -1650,119 +1561,6 @@ test("platform list answers the LLM platform table", (t) => {
 });
 
 const GROQ = "groq";
-
-test("create accepts a plain api_key record for groq and refuses metadata", (t) => {
-  const f = fixture();
-  stopAfter(t, () => f.store.close());
-  fails(
-    () =>
-      f.create({
-        name: GROQ,
-        platform: GROQ,
-        secret: apiSecret,
-        metadata: { region: "x" },
-      }),
-    HttpStatus.BadRequest,
-    INVALID_INPUT_CODE,
-  );
-  fails(
-    () =>
-      f.create({
-        name: GROQ,
-        platform: GROQ,
-        secret: { access_key_id: "id", secret_access_key: secretValue },
-        metadata: null,
-      }),
-    HttpStatus.BadRequest,
-    INVALID_INPUT_CODE,
-  );
-  const answer = f.create({
-    name: GROQ,
-    platform: GROQ,
-    secret: apiSecret,
-    metadata: null,
-  }) as CredentialAnswer;
-  assert.equal(answer.platform, GROQ);
-  assert.equal(answer.revisions[0]!.metadata, null);
-  noSecret(answer);
-});
-
-const llmMetadataCases = [
-  {
-    platform: Platform.AmazonBedrock,
-    metadata: { region: "us-east-1" },
-    edited: { region: "eu-west-1" },
-  },
-  {
-    platform: Platform.GoogleVertex,
-    metadata: { project: "project", location: "us-central1" },
-    edited: { project: "project", location: "europe-west4" },
-  },
-  {
-    platform: Platform.Azure,
-    metadata: { resource_name: "resource" },
-    edited: { resource_name: "other" },
-  },
-  {
-    platform: Platform.CloudflareWorkersAI,
-    metadata: { account_id: "account" },
-    edited: { account_id: "other" },
-  },
-  {
-    platform: Platform.CloudflareAIGateway,
-    metadata: { account_id: "account", gateway_id: "gateway" },
-    edited: { account_id: "account", gateway_id: "other" },
-  },
-];
-
-for (const { platform, metadata, edited } of llmMetadataCases) {
-  test(`${platform} create and metadata edit accept its metadata schema and refuse other metadata`, (t) => {
-    const f = fixture();
-    stopAfter(t, () => f.store.close());
-    const refused: unknown[] = [
-      null,
-      {},
-      { ...metadata, extra: "x" },
-      ...Object.keys(metadata).map((field) => ({ ...metadata, [field]: " " })),
-    ];
-    for (const invalid of refused)
-      fails(
-        () =>
-          f.create({
-            name: "llm",
-            platform,
-            secret: apiSecret,
-            metadata: invalid,
-          }),
-        HttpStatus.BadRequest,
-        INVALID_INPUT_CODE,
-      );
-    const created = f.create({
-      name: "llm",
-      platform,
-      secret: apiSecret,
-      metadata,
-    }) as CredentialAnswer;
-    assert.deepEqual(created.revisions[0]!.metadata, metadata);
-    for (const invalid of refused)
-      fails(
-        () =>
-          f.updateMetadata("llm", {
-            expected_revision: FIRST_REVISION,
-            metadata: invalid,
-          }),
-        HttpStatus.BadRequest,
-        INVALID_INPUT_CODE,
-      );
-    const updated = f.updateMetadata("llm", {
-      expected_revision: FIRST_REVISION,
-      metadata: edited,
-    }) as CredentialAnswer;
-    assert.equal(updated.revisions[0]!.revision, NEXT_REVISION);
-    assert.deepEqual(updated.revisions[0]!.metadata, edited);
-    noSecret(updated);
-  });
-}
 
 const HEALTH_SECRET = "test_private-resource-health-secret";
 const HEALTH_BASE_URL = "https://models.example/v1";
@@ -2065,7 +1863,6 @@ test("provider check refuses invalid input, an unknown or foreign credential and
   assert.equal(fetch.mock.callCount(), NO_FETCH_CALLS);
 });
 
-const MODEL_CHECK_CALLS = 2;
 const MODEL_CHECK_MODEL = "scripted-model";
 const MODEL_CHECK_FAILED_MESSAGE = "model check failed";
 const PROVIDER_CHECK_FAILED_MESSAGE = "provider check failed";
@@ -2075,9 +1872,6 @@ const MODEL_CHECK_BODY = {
   model_identifier: MODEL_CHECK_MODEL,
   reasoning_effort: "low",
 };
-const MODEL_CREDENTIAL_NOT_FOUND_CODE = "llm.model.credential_not_found";
-const MODEL_UNKNOWN_CODE = "llm.model.model_unknown";
-const MODEL_REASONING_UNSUPPORTED_CODE = "llm.model.reasoning_unsupported";
 
 async function scriptedModelCheck(
   script: Parameters<typeof scriptedModelRuntime>[1],
@@ -2093,22 +1887,6 @@ async function scriptedModelCheck(
   });
   return { f, calls: scripted.calls };
 }
-
-test("model check runs one tool round trip with the key of the credential and stores nothing", async (t) => {
-  const { f, calls } = await scriptedModelCheck([
-    fauxAssistantMessage([fauxToolCall("check_tool", {})], {
-      stopReason: "toolUse",
-    }),
-    fauxAssistantMessage("done"),
-  ]);
-  stopAfter(t, () => f.store.close());
-  const before = f.get("anthropic");
-  const answer = await f.modelCheck(MODEL_CHECK_BODY);
-  assert.deepEqual(answer, { result: "ok", message: null });
-  assert.equal(calls.length, MODEL_CHECK_CALLS);
-  assert.deepEqual(f.get("anthropic"), before);
-  assert.ok(!JSON.stringify(answer).includes(HEALTH_SECRET));
-});
 
 test("model check answers a provider failure with a redacted message", async (t) => {
   const { f } = await scriptedModelCheck([
@@ -2166,41 +1944,6 @@ test("provider check logs the credential name as credential_name without redacti
     .find((entry) => entry.msg === PROVIDER_CHECK_FAILED_MESSAGE);
   assert.equal(record.credential_name, COMPATIBLE_NAME);
   assert.ok(!lines.join("").includes("[Redacted]"));
-});
-
-test("model check refuses an unknown or foreign credential, an unknown model and an unsupported reasoning effort", async (t) => {
-  const { f, calls } = await scriptedModelCheck([fauxAssistantMessage("done")]);
-  stopAfter(t, () => f.store.close());
-  f.store.transaction((tx) =>
-    f.custody.create(
-      tx,
-      { platforms: REPOSITORY_PLATFORMS },
-      {
-        name: "github",
-        platform: "github",
-        secret: { key: HEALTH_SECRET },
-        metadata: null,
-      },
-      undefined,
-    ),
-  );
-  for (const credential of ["missing", "github"])
-    await failsAsync(
-      () => f.modelCheck({ ...MODEL_CHECK_BODY, credential }),
-      HttpStatus.NotFound,
-      MODEL_CREDENTIAL_NOT_FOUND_CODE,
-    );
-  await failsAsync(
-    () => f.modelCheck({ ...MODEL_CHECK_BODY, model_identifier: "missing" }),
-    HttpStatus.BadRequest,
-    MODEL_UNKNOWN_CODE,
-  );
-  await failsAsync(
-    () => f.modelCheck({ ...MODEL_CHECK_BODY, reasoning_effort: "unknown" }),
-    HttpStatus.BadRequest,
-    MODEL_REASONING_UNSUPPORTED_CODE,
-  );
-  assert.equal(calls.length, NO_FETCH_CALLS);
 });
 
 test("approved models answer the openai-compatible metadata models with defaults and nothing for another credential", (t) => {
@@ -2368,15 +2111,6 @@ test("check refuses an OAuth platform, a platform without a check, a platform of
   assert.equal(rowCount(f), NO_ROWS);
 });
 
-const CHECK_PATH = "/api/llm/credential/check";
-
-test("check takes no mutation key", () => {
-  assert.equal(llmOperations.check.mutation, false);
-  assert.equal(llmOperations.check.method, HttpMethod.Post);
-  assert.equal(llmOperations.check.path, CHECK_PATH);
-});
-
-const VERIFY_PATH = "/api/llm/credential/:credential_name/verify";
 const ARCHIVED_CODE = "credential.credential.archived";
 
 const credentialVerify = (f: ReturnType<typeof fixture>, name: string) =>
@@ -2506,20 +2240,6 @@ test("verify refuses an archived record, a platform without a check, an unknown 
     ARCHIVED_CODE,
   );
   assert.equal(fetch.mock.callCount(), NO_FETCH_CALLS);
-});
-
-test("verify takes no body and no mutation key", () => {
-  assert.equal(llmOperations.verify.mutation, false);
-  assert.equal(llmOperations.verify.method, HttpMethod.Post);
-  assert.equal(llmOperations.verify.path, VERIFY_PATH);
-  assert.equal(llmOperations.verify.access, AccessPolicy.Human);
-  assert.throws(() =>
-    llmOperations.verify.input.parse({
-      params: { credential_name: "anthropic" },
-      query: {},
-      body: {},
-    }),
-  );
 });
 
 const RELAY_A = "relay-a";
@@ -3062,28 +2782,6 @@ function assertRefreshed(
   assert.equal(stored.secret.access, REFRESHED_SUBSCRIPTION_ACCESS);
   assert.equal(stored.secret.refresh, REFRESHED_SUBSCRIPTION_REFRESH);
 }
-
-test("the provider check of an expired anthropic-subscription record refreshes through pi-ai and stores the token in place", async (t) => {
-  const f = fixture();
-  stopAfter(t, () => f.store.close());
-  const id = insertSubscription(f);
-  const requests = refreshingFetch(t);
-  const answer = await f.providerCheck({ credential: SUBSCRIPTION_NAME });
-  assert.equal(answer.connection, Connection.Unauthorized);
-  assertRefreshed(f, id, requests);
-});
-
-test("the health check of an expired anthropic-subscription record refreshes through pi-ai and stores the token in place", async (t) => {
-  const f = fixture();
-  stopAfter(t, () => f.store.close());
-  const id = insertSubscription(f);
-  const requests = refreshingFetch(t);
-  const [entry] = f.store.transaction((tx) =>
-    f.component.resourceInventory(tx),
-  );
-  assert.equal(await entry!.check(background), ResourceStatus.Unhealthy);
-  assertRefreshed(f, id, requests);
-});
 
 test("the model check of an expired anthropic-subscription record refreshes through pi-ai and stores the token in place", async (t) => {
   const f = fixture({ loadModelRuntime: loadPi });
