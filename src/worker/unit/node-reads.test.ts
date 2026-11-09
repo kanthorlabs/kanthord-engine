@@ -146,7 +146,12 @@ test("the prior is the rework verdict, else the cleared rationale, else null", a
   const answered = (rationale: string) => ({
     type: OperationResultType.Completed,
     status: 200,
-    data: { id: "assessment", rationale, tested_input: null },
+    data: {
+      id: "assessment",
+      rationale,
+      tested_input: null,
+      result: AssessmentResult.CriterionNotMet,
+    },
   });
   for (const [rework, cleared, expected] of [
     [answered("rework"), answered("cleared"), "rework"],
@@ -411,7 +416,12 @@ function reworkRead(testedInput: unknown) {
   return {
     type: OperationResultType.Completed,
     status: 200,
-    data: { id: "assessment", rationale: "rework", tested_input: testedInput },
+    data: {
+      id: "assessment",
+      rationale: "rework",
+      tested_input: testedInput,
+      result: AssessmentResult.CriterionNotMet,
+    },
   };
 }
 
