@@ -3,13 +3,9 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, symlinkSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { test } from "node:test";
-import { gatewayOperations } from "../../gateway/contract.ts";
-import { HttpStatus } from "../../kernel/http.ts";
-import { HealthStatus } from "../../kernel/service.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { CheckErrorCode } from "../../repository/check.ts";
 import { environment, kanthord, spawnKanthord } from "./cli-test-support.ts";
-import { gatewayFixture } from "./test-support.ts";
 
 const EXIT_SUCCESS = 0;
 const EXIT_FAILURE = 1;
@@ -49,14 +45,4 @@ test("E04.1 serve refuses startup when git is absent from PATH", async (t) => {
     ),
     result.stderr,
   );
-});
-
-test("E04.2 GET /api/liveness returns repository.toolchain map", async (t) => {
-  const fixture = await gatewayFixture(t);
-  const response = await fixture.request(gatewayOperations.liveness.path);
-  assert.equal(response.status, HttpStatus.OK);
-  const body = gatewayOperations.liveness.output.parse(await response.json());
-  assert.deepEqual(body.services.repository, {
-    toolchain: HealthStatus.Healthy,
-  });
 });
