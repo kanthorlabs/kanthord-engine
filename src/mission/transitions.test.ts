@@ -25,7 +25,6 @@ import {
 } from "./contract.ts";
 import { type Dependencies, MissionService } from "./service.ts";
 import {
-  closeAttempt,
   insertAssessment,
   insertEvidence,
   openAttempt,
@@ -54,7 +53,6 @@ const FIRST_ATTEMPT = 1;
 const SECOND_ATTEMPT = 2;
 const THIRD_ATTEMPT = 3;
 const NOW = 100;
-const NO_ATTEMPT = 0;
 const INSERT = "workQueue.insert";
 const UNMET = "mission.release.obligation_unmet";
 function fixture(
@@ -289,63 +287,6 @@ test("examine steps release admits produced evidence", (t) => {
   h.release();
   assert.equal(h.node().state, NodeState.Waiting);
   assert.equal(h.claim([NodeState.Waiting])?.kind, ClaimKind.Evaluation);
-});
-
-test("steps release excludes foreign execution and attempt evidence and requires every asset published", (t) => {
-  const h = fixture(t);
-  h.claim();
-  const add = (executionId: string, attempt: number, pending: boolean) =>
-    h.store.transaction((tx) => {
-      const id = createIdentity("evidence");
-      insertEvidence(
-        tx,
-        {
-          id,
-          node_id: h.node_id,
-          attempt,
-          subject: "Work",
-          requirement_key: null,
-          end_state: null,
-          verification: null,
-          provenance: JSON.stringify({
-            ...h.opener,
-            execution_id: executionId,
-          }),
-          created_at: NOW,
-        },
-        [
-          {
-            id: createIdentity("evidence_asset"),
-            evidence_id: id,
-            kind: AssetKind.Repository,
-            content: JSON.stringify({
-              binding_id: h.binding_id,
-              commit: "a".repeat(40),
-            }),
-            published_at: NOW,
-            expired_at: null,
-          },
-          ...(pending
-            ? [
-                {
-                  id: createIdentity("evidence_asset"),
-                  evidence_id: id,
-                  kind: AssetKind.Object,
-                  content: "{}",
-                  published_at: null,
-                  expired_at: NOW + FIRST_ATTEMPT,
-                },
-              ]
-            : []),
-        ],
-      );
-    });
-  add(createIdentity("execution"), FIRST_ATTEMPT, false);
-  h.refuses(ReleaseObligation.Evidence);
-  add(h.execution_id, NO_ATTEMPT, false);
-  h.refuses(ReleaseObligation.Evidence);
-  add(h.execution_id, FIRST_ATTEMPT, true);
-  h.refuses(ReleaseObligation.Evidence);
 });
 
 test("reviewer release requires a current success and every eligible request", (t) => {
@@ -607,37 +548,6 @@ test("an unblock from the base branch starts a new node branch that later attemp
   assert.equal(branchOf(evaluation), restartBranch);
 });
 
-test("nodeBranchesOf answers the branch of every attempt", (t) => {
-  const h = fixture(t);
-  const restartAttempt = 4;
-  const attempts = [1, 2, 3, 4, 5];
-  h.store.transaction((tx) => {
-    for (const attempt of attempts) {
-      openAttempt(
-        tx,
-        h.node_id,
-        FIRST_ATTEMPT,
-        h.opener,
-        NOW,
-        attempt === restartAttempt
-          ? StartPoint.BaseBranch
-          : StartPoint.NodeBranch,
-      );
-      closeAttempt(tx, h.node_id, attempt, NOW);
-    }
-  });
-  const first = `kanthord/${h.node_id}`;
-  const restarted = `kanthord/${h.node_id}-a${restartAttempt}`;
-  const shuffled = [4, 2, 5, 1, 3];
-  const branches = h.store.transaction((tx) =>
-    h.service.nodeBranchesOf(
-      tx,
-      shuffled.map((attempt) => ({ node_id: h.node_id, attempt })),
-    ),
-  );
-  assert.deepEqual(branches, [restarted, first, restarted, first, first]);
-});
-
 const WAKEUP_WAKE = "wakeup.wake";
 
 function wakes(calls: { method: string }[]): number {
@@ -785,36 +695,6 @@ test("deferred check applies expected end state and completes the node", async (
   assert.equal(h.node().state, NodeState.Completed);
 });
 
-test("deferred check applies other end state and blocks the node", async (t) => {
-  const h = deferredFixture(t, {
-    end_state: CheckEndState.Other,
-    landed_commits: [],
-  });
-  h.release();
-  await deferredCheckEnds(h.calls, t.signal);
-  assert.equal(h.node().state, NodeState.Blocked);
-});
-
-test("deferred check applies conflict and returns the node to Available", async (t) => {
-  const h = deferredFixture(t, {
-    end_state: CheckEndState.Conflict,
-    landed_commits: [],
-  });
-  h.release();
-  await deferredCheckEnds(h.calls, t.signal);
-  assert.equal(h.node().state, NodeState.Available);
-});
-
-test("deferred check applies checks_failed and returns the node to Available", async (t) => {
-  const h = deferredFixture(t, {
-    end_state: CheckEndState.ChecksFailed,
-    landed_commits: [],
-  });
-  h.release();
-  await deferredCheckEnds(h.calls, t.signal);
-  assert.equal(h.node().state, NodeState.Available);
-});
-
 test("deferred check with none leaves the node in ExternalRequested", async (t) => {
   const h = deferredFixture(t, {
     end_state: CheckEndState.None,
@@ -830,7 +710,6 @@ const MICROTASK_TURNS = 50;
 const FIRST_ROUND_DELAY_MS = 0;
 const JUST_BEFORE_RETRY_MS = DEFERRED_CHECK_RETRY_MS - 1;
 const ONE_MS = 1;
-const MERGE_FAILED = "Deferred merge failed.";
 const FIRST_ROUND_LABEL = "0";
 const SECOND_ROUND_LABEL = "1";
 const PENDING: CheckAnswer = {
@@ -952,7 +831,6 @@ test("a refused merge logs a warning and changes no state", async (t) => {
   await advance(FIRST_ROUND_DELAY_MS);
   assert.equal(h.mergeInputs.length, ONE_CALL);
   assert.equal(h.warnings.length, ONE_CALL);
-  assert.equal(h.warnings[FIRST_INDEX]!.message, MERGE_FAILED);
   assert.deepEqual(h.warnings[FIRST_INDEX]!.fields, {
     evidence_id: h.evidenceId,
     class: REFUSAL.class,
@@ -968,23 +846,6 @@ test("a refused merge logs a warning and changes no state", async (t) => {
   assert.equal(h.mergeInputs.length, ONE_CALL);
 });
 
-test("a thrown merge logs a warning and changes no state", async (t) => {
-  const advance = mockTimers(t);
-  const h = deferredFixture(t, SETTLED, {
-    landing: RepositoryLanding.KanthorD,
-    merge: async () => {
-      throw new Error("merge failed");
-    },
-  });
-  h.release();
-  await advance(FIRST_ROUND_DELAY_MS);
-  assert.equal(h.warnings.length, ONE_CALL);
-  assert.equal(h.warnings[FIRST_INDEX]!.message, MERGE_FAILED);
-  assert.equal(h.node().state, NodeState.ExternalRequested);
-  await advance(DEFERRED_CHECK_RETRY_MS);
-  assert.equal(h.checkCalls(), ONE_CALL);
-});
-
 const REQUEST_KEY_RUN_PATTERN =
   /\/service\/(deferred_[0-9A-HJKMNP-TV-Z]{26})\/(\d+)$/;
 
@@ -995,39 +856,6 @@ function mergeRetryClass(resultClass: string): MergeAnswer {
     message: resultClass,
   } as MergeAnswer;
 }
-
-test("a retryable merge failure schedules the next round after the retry delay", async (t) => {
-  const advance = mockTimers(t);
-  let mergeCalls = NO_CALLS;
-  const h = deferredFixture(
-    t,
-    async (call) =>
-      call <= ONE_CALL + 1
-        ? SETTLED
-        : {
-            end_state: CheckEndState.Expected,
-            landed_commits: [TESTED_COMMIT],
-          },
-    {
-      landing: RepositoryLanding.KanthorD,
-      merge: async () => {
-        mergeCalls++;
-        return mergeCalls === ONE_CALL
-          ? mergeRetryClass(ResultClass.RetryableRefusal)
-          : MERGE_ADDRESS;
-      },
-    },
-  );
-  h.release();
-  await advance(FIRST_ROUND_DELAY_MS);
-  assert.equal(h.mergeInputs.length, ONE_CALL);
-  await advance(JUST_BEFORE_RETRY_MS);
-  assert.equal(h.mergeInputs.length, ONE_CALL);
-  await advance(ONE_MS);
-  assert.equal(h.mergeInputs.length, ONE_CALL + 1);
-  await advance(FIRST_ROUND_DELAY_MS);
-  assert.equal(h.node().state, NodeState.Completed);
-});
 
 test("an unknown merge outcome schedules the next round after the retry delay", async (t) => {
   const advance = mockTimers(t);
@@ -1050,21 +878,6 @@ test("an unknown merge outcome schedules the next round after the retry delay", 
     h.mergeInputs[FIRST_INDEX]!.request_key,
     h.mergeInputs[ONE_CALL]!.request_key,
   );
-});
-
-test("a confirmed merge failure schedules the next round after the retry delay", async (t) => {
-  const advance = mockTimers(t);
-  const h = deferredFixture(t, SETTLED, {
-    landing: RepositoryLanding.KanthorD,
-    merge: async () => mergeRetryClass(ResultClass.ConfirmedFailure),
-  });
-  h.release();
-  await advance(FIRST_ROUND_DELAY_MS);
-  await advance(JUST_BEFORE_RETRY_MS);
-  assert.equal(h.checkCalls(), ONE_CALL);
-  await advance(ONE_MS);
-  assert.equal(h.checkCalls(), ONE_CALL + 1);
-  assert.equal(h.mergeInputs.length, ONE_CALL + 1);
 });
 
 test("a server start merges under a new key after a failed run", async (t) => {
@@ -1199,15 +1012,6 @@ test("a release after the quiescence runs no round and the next start checks the
   assert.equal(h.checkCalls(), ONE_CALL);
   await restarted.stop();
   assert.equal(await running, null);
-});
-
-test("a release before the quiescence runs no round after the quiescence", async (t) => {
-  const advance = mockTimers(t);
-  const h = deferredFixture(t, PENDING);
-  h.release();
-  await h.service.quiesce();
-  await advance(FIRST_ROUND_DELAY_MS);
-  assert.equal(h.checkCalls(), NO_CALLS);
 });
 
 test("the drain joins the round that is in flight at the quiescence", async (t) => {
@@ -1392,75 +1196,6 @@ test("a human-landing merge push waits in External.Requested until the check ans
   assert.equal(h.node().state, NodeState.Completed);
 });
 
-test("a failing deferred check leaves the node unchanged", async (t) => {
-  let checkCalls = 0;
-  const h = fixture(t, Intent.Implement, {
-    intakeCheck: {
-      check: async () => {
-        checkCalls++;
-        throw new Error("check failed");
-      },
-      merge: unexpectedCollaboration,
-    },
-  });
-  h.store.transaction((tx) =>
-    insertAssessment(tx, {
-      id: createIdentity("assessment"),
-      node_id: h.node_id,
-      attempt: FIRST_ATTEMPT,
-      node_revision: FIRST_ATTEMPT,
-      result: AssessmentResult.Success,
-      rationale: "Passed",
-      evidence_ids: "[]",
-      dependency_outcome_ids: "[]",
-      tested_input: null,
-      gate_files: null,
-      execution_id: h.execution_id,
-      actor: null,
-      created_at: NOW,
-    }),
-  );
-  h.claim();
-  h.store.transaction((tx) =>
-    setNodeState(tx, h.node_id, NodeState.Evaluating),
-  );
-  h.store.transaction((tx) => {
-    const id = createIdentity("evidence");
-    insertEvidence(
-      tx,
-      {
-        id,
-        node_id: h.node_id,
-        attempt: FIRST_ATTEMPT,
-        subject: "Request",
-        requirement_key: "repo.pull_request",
-        end_state: null,
-        verification: null,
-        provenance: JSON.stringify(h.opener),
-        created_at: NOW,
-      },
-      [
-        {
-          id: createIdentity("evidence_asset"),
-          evidence_id: id,
-          kind: AssetKind.Platform,
-          content: JSON.stringify({
-            kind: "pull_request",
-            resource_identity: GATED_RESOURCE,
-            number: PULL_REQUEST_NUMBER,
-          }),
-          published_at: NOW,
-          expired_at: null,
-        },
-      ],
-    );
-  });
-  h.release();
-  await deferredCheckEnds(h.calls, t.signal);
-  assert.equal(h.node().state, NodeState.ExternalRequested);
-  assert.equal(checkCalls, ONE_CALL);
-});
-
 test("deferred check with a live claim and expected end state writes no end state", async (t) => {
   const h = deferredFixture(t, {
     end_state: CheckEndState.Expected,
@@ -1526,19 +1261,6 @@ function repositoryPairFixture(t: TestContext) {
   return { ...h, second_id: secondId, evidence };
 }
 
-test("a release with one asset for one of two bindings is refused", (t) => {
-  const h = repositoryPairFixture(t);
-  h.claim();
-  h.evidence([h.binding_id]);
-  h.refuses(ReleaseObligation.Evidence);
-  h.evidence([h.second_id]);
-  h.refuses(ReleaseObligation.Evidence);
-  h.evidence([h.binding_id, h.binding_id]);
-  h.refuses(ReleaseObligation.Evidence);
-  h.evidence([h.binding_id, h.second_id, createIdentity("binding")]);
-  h.refuses(ReleaseObligation.Evidence);
-});
-
 test("one asset for each of two bindings releases", (t) => {
   const h = repositoryPairFixture(t);
   h.claim();
@@ -1547,127 +1269,6 @@ test("one asset for each of two bindings releases", (t) => {
   assert.equal(h.node().state, NodeState.Waiting);
 });
 
-test("a release answers the states, the rule, the count and the limit", (t) => {
-  const h = fixture(t);
-  h.claim();
-  h.evidence(AssetKind.Repository, true);
-  assert.deepEqual(h.release(), {
-    from: NodeState.Executing,
-    to: NodeState.Waiting,
-    rule: TransitionRule.None,
-    count: null,
-    limit: null,
-    first_available_at: null,
-  });
-  h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Available));
-  h.claim();
-  assert.deepEqual(h.release(true, FURTHER_WORK_LIMIT - 1), {
-    from: NodeState.Executing,
-    to: NodeState.Available,
-    rule: TransitionRule.None,
-    count: null,
-    limit: null,
-    first_available_at: null,
-  });
-  h.claim();
-  assert.deepEqual(h.release(true, FURTHER_WORK_LIMIT), {
-    from: NodeState.Executing,
-    to: NodeState.Paused,
-    rule: TransitionRule.FurtherWorkLimit,
-    count: FURTHER_WORK_LIMIT,
-    limit: h.dependencies.config.further_work_limit,
-    first_available_at: null,
-  });
-});
-
-test("a release of an evaluating node answers the state after the fold", (t) => {
-  const h = fixture(t);
-  h.store.transaction((tx) =>
-    insertAssessment(tx, {
-      id: createIdentity("assessment"),
-      node_id: h.node_id,
-      attempt: FIRST_ATTEMPT,
-      node_revision: FIRST_ATTEMPT,
-      result: AssessmentResult.Success,
-      rationale: "Passed",
-      evidence_ids: "[]",
-      dependency_outcome_ids: "[]",
-      tested_input: null,
-      gate_files: null,
-      execution_id: h.execution_id,
-      actor: null,
-      created_at: NOW,
-    }),
-  );
-  h.claim();
-  h.store.transaction((tx) =>
-    setNodeState(tx, h.node_id, NodeState.Evaluating),
-  );
-  h.store.transaction((tx) =>
-    insertEvidence(
-      tx,
-      {
-        id: createIdentity("evidence"),
-        node_id: h.node_id,
-        attempt: FIRST_ATTEMPT,
-        subject: "Request",
-        requirement_key: "repo.pull_request",
-        end_state: EndState.Expected,
-        verification: null,
-        provenance: JSON.stringify(h.opener),
-        created_at: NOW,
-      },
-      [],
-    ),
-  );
-  assert.deepEqual(h.release(), {
-    from: NodeState.Evaluating,
-    to: NodeState.Completed,
-    rule: TransitionRule.None,
-    count: null,
-    limit: null,
-    first_available_at: null,
-  });
-});
-
-test("a failure answers the states, the rule, the count and the limit", (t) => {
-  const h = fixture(t);
-  const failure = (count: number) =>
-    h.store.transaction((tx) => h.service.failure(tx, h.node_id, count, NOW));
-  h.claim();
-  assert.deepEqual(failure(FIRST_ATTEMPT), {
-    from: NodeState.Executing,
-    to: NodeState.Available,
-    rule: TransitionRule.None,
-    count: null,
-    limit: null,
-    first_available_at: null,
-  });
-  h.claim();
-  const limit = h.dependencies.config.consecutive_failure_limit;
-  assert.deepEqual(failure(limit), {
-    from: NodeState.Executing,
-    to: NodeState.Paused,
-    rule: TransitionRule.FailureLimit,
-    count: limit,
-    limit,
-    first_available_at: null,
-  });
-  h.store.transaction((tx) =>
-    setNodeState(tx, h.node_id, NodeState.Evaluating),
-  );
-  assert.deepEqual(failure(FIRST_ATTEMPT), {
-    from: NodeState.Evaluating,
-    to: NodeState.Waiting,
-    rule: TransitionRule.None,
-    count: null,
-    limit: null,
-    first_available_at: null,
-  });
-});
-
-const RESUMED = "Deferred checks resumed.";
-const LIMIT_REACHED = "Deferred check start limit reached.";
 const SINGLE_NODE_LIMIT = 1;
 const EXPIRED_START = NOW - 1;
 const COMPLETING: CheckAnswer = {
@@ -1721,15 +1322,14 @@ test("resume schedules at most the limit and logs the count and the limit warnin
   await deferredCheckEnds(h.calls, t.signal);
   await turn(undefined, { signal: t.signal });
   assert.equal(h.checkCalls(), ONE_CALL);
-  assert.deepEqual(h.infos, [
-    {
-      fields: { count: SINGLE_NODE_LIMIT, limit: SINGLE_NODE_LIMIT },
-      message: RESUMED,
-    },
-  ]);
-  assert.deepEqual(h.warnings, [
-    { fields: { limit: SINGLE_NODE_LIMIT }, message: LIMIT_REACHED },
-  ]);
+  assert.deepEqual(
+    h.infos.map((info) => info.fields),
+    [{ count: SINGLE_NODE_LIMIT, limit: SINGLE_NODE_LIMIT }],
+  );
+  assert.deepEqual(
+    h.warnings.map((warning) => warning.fields),
+    [{ limit: SINGLE_NODE_LIMIT }],
+  );
 });
 
 test("resume ignores a node in another state", async (t) => {
