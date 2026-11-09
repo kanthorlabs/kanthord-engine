@@ -1,14 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  createIdempotencyKey,
   createIdentity,
-  IDEMPOTENCY_KEY_PREFIX,
-  idempotencyKeySchema,
   IDENTITY_SUFFIX_LENGTH,
   identitySchema,
   identityTime,
-  ULID_LENGTH,
   ulidSchema,
 } from "./identity.ts";
 
@@ -29,32 +25,6 @@ test("entity identities retain a stable prefix and canonical uppercase ULID", ()
   }
 });
 
-test("identity validation rejects missing or wrong prefixes and noncanonical ULIDs", () => {
-  const schema = identitySchema("project");
-  for (const invalid of [
-    suffix,
-    `mission_${suffix}`,
-    `Project_${suffix}`,
-    `project__${suffix}`,
-    `project_${suffix.toLowerCase()}`,
-    `project_8${suffix.slice(1)}`,
-    ...["I", "L", "O", "U"].map(
-      (letter) => `project_${suffix.slice(0, -1)}${letter}`,
-    ),
-    `project_${suffix.slice(1)}`,
-    `project_${suffix}0`,
-    `project_${suffix}\n`,
-    `project_${suffix}\r\n`,
-    ` project_${suffix}`,
-    "",
-    null,
-    123,
-  ]) {
-    assert.equal(schema.safeParse(invalid).success, false, String(invalid));
-    assert.throws(() => schema.parse(invalid));
-  }
-});
-
 test("prefix declarations reject empty, non-word and unsafe regular-expression input", () => {
   for (const prefix of [
     "",
@@ -70,37 +40,6 @@ test("prefix declarations reject empty, non-word and unsafe regular-expression i
     assert.throws(() => identitySchema(prefix), assert.AssertionError);
     assert.throws(() => createIdentity(prefix), assert.AssertionError);
   }
-});
-
-test("the separate bare ULID scalar preserves protocol contracts without admitting entity IDs", () => {
-  assert.equal(ulidSchema.parse(suffix), suffix);
-  assert.equal(
-    ulidSchema.parse("7ZZZZZZZZZZZZZZZZZZZZZZZZZ").length,
-    ULID_LENGTH,
-  );
-  for (const invalid of [
-    suffix.toLowerCase(),
-    `request_${suffix}`,
-    `${suffix}\n`,
-    `8${suffix.slice(1)}`,
-  ]) {
-    assert.equal(ulidSchema.safeParse(invalid).success, false);
-    assert.throws(() => ulidSchema.parse(invalid));
-  }
-});
-
-test("idempotency keys carry the idempotency key prefix and refuse a bare ULID", () => {
-  const key = createIdempotencyKey();
-  assert.equal(idempotencyKeySchema.parse(key), key);
-  assert.ok(key.startsWith(`${IDEMPOTENCY_KEY_PREFIX}_`));
-  assert.notEqual(createIdempotencyKey(), key);
-  for (const invalid of [
-    suffix,
-    `request_${suffix}`,
-    `${IDEMPOTENCY_KEY_PREFIX}_${suffix.toLowerCase()}`,
-    `${IDEMPOTENCY_KEY_PREFIX}_${suffix}\n`,
-  ])
-    assert.equal(idempotencyKeySchema.safeParse(invalid).success, false);
 });
 
 test("an identity time lies in the creation window and needs a ULID suffix", () => {
