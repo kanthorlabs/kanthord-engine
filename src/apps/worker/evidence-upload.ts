@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { constants } from "node:fs";
+import { constants, type Stats } from "node:fs";
 import { type FileHandle, lstat, open, realpath } from "node:fs/promises";
 import { platform } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
@@ -131,46 +131,82 @@ function inside(root: string, path: string): boolean {
   );
 }
 
-export async function openEvidence(
-  workspace: string,
-  path: string,
-  io = evidenceFiles,
-) {
-  assert.ok(workspace);
+type EvidenceFiles = typeof evidenceFiles;
+
+interface OpenedEvidence {
+  file: FileHandle;
+  target: string;
+  parent: string;
+}
+
+interface OpenedEvidenceCheck {
+  before: Stats;
+  io: EvidenceFiles;
+}
+
+function refuseOutsideWorkspace(workspace: string, path: string): void {
   if (
     !path ||
     isAbsolute(path) ||
     !inside(resolve(workspace), resolve(workspace, path))
   )
     refuse(PathRefusal.OutsideWorkspace);
+}
+
+async function lstatRegularFile(target: string, io: EvidenceFiles) {
+  const before = await io.lstat(target);
+  if (before.isSymbolicLink()) refuse(PathRefusal.SymbolicLink);
+  if (!before.isFile()) refuse(PathRefusal.NotRegular);
+  return before;
+}
+
+function openWithoutFollowing(
+  root: string,
+  path: string,
+  io: EvidenceFiles,
+): Promise<FileHandle> {
+  return openContained(root, path, io).catch((error: NodeJS.ErrnoException) => {
+    const symlink = "ELOOP";
+    if (error.code === symlink) refuse(PathRefusal.SymbolicLink);
+    throw error;
+  });
+}
+
+function differentFile(left: Stats, right: Stats): boolean {
+  return left.dev !== right.dev || left.ino !== right.ino;
+}
+
+async function checkOpenedEvidence(
+  opened: OpenedEvidence,
+  check: OpenedEvidenceCheck,
+): Promise<void> {
+  const { file, target, parent } = opened;
+  const { before, io } = check;
+  const stat = await file.stat();
+  if (!stat.isFile()) refuse(PathRefusal.NotRegular);
+  const after = await io.lstat(target);
+  if (differentFile(after, stat) || differentFile(before, stat))
+    refuse(PathRefusal.Replaced);
+  if ((await io.realpath(dirname(target))) !== parent)
+    refuse(PathRefusal.Replaced);
+  assert.ok(stat.isFile());
+}
+
+export async function openEvidence(
+  workspace: string,
+  path: string,
+  io = evidenceFiles,
+) {
+  assert.ok(workspace);
+  refuseOutsideWorkspace(workspace, path);
   const root = await io.realpath(workspace);
   const target = resolve(workspace, path);
   const parent = await io.realpath(dirname(target));
   if (!inside(root, parent)) refuse(PathRefusal.OutsideWorkspace);
-  const before = await io.lstat(target);
-  if (before.isSymbolicLink()) refuse(PathRefusal.SymbolicLink);
-  if (!before.isFile()) refuse(PathRefusal.NotRegular);
-  const file = await openContained(root, path, io).catch(
-    (error: NodeJS.ErrnoException) => {
-      const symlink = "ELOOP";
-      if (error.code === symlink) refuse(PathRefusal.SymbolicLink);
-      throw error;
-    },
-  );
+  const before = await lstatRegularFile(target, io);
+  const file = await openWithoutFollowing(root, path, io);
   try {
-    const stat = await file.stat();
-    if (!stat.isFile()) refuse(PathRefusal.NotRegular);
-    const after = await io.lstat(target);
-    if (
-      after.dev !== stat.dev ||
-      after.ino !== stat.ino ||
-      before.ino !== stat.ino ||
-      before.dev !== stat.dev
-    )
-      refuse(PathRefusal.Replaced);
-    if ((await io.realpath(dirname(target))) !== parent)
-      refuse(PathRefusal.Replaced);
-    assert.ok(stat.isFile());
+    await checkOpenedEvidence({ file, target, parent }, { before, io });
     return file;
   } catch (error) {
     await file.close();
