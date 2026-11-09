@@ -103,6 +103,10 @@ export function mergeSpan(
   if (replacesScalar(existing, added)) return null;
   if (replacesAttribute(existing.attributes, added.attributes ?? {}))
     return null;
+  return mergedSpan(existing, added);
+}
+
+function mergedSpan(existing: Span, added: SpanContribution): Span {
   return {
     ...existing,
     start_time: existing.start_time ?? added.start_time ?? null,

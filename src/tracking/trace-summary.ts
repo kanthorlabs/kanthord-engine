@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { SQLInputValue } from "node:sqlite";
 import type { Transaction } from "../kernel/store.ts";
 import { isNumber, isString } from "../kernel/values.ts";
 import {
@@ -66,6 +67,68 @@ function rootState(span: Span): TraceStateValue {
   return span.status === SpanStatus.Error ? TraceState.Error : TraceState.Ok;
 }
 
+type StoredCollections = Readonly<Record<string, unknown>>;
+
+function oneIf(condition: boolean): number {
+  return condition ? 1 : 0;
+}
+
+function countParams(
+  before: Span | null,
+  after: Span,
+  isRoot: boolean,
+): SQLInputValue[] {
+  const isNew = before === null;
+  const newError =
+    after.status === SpanStatus.Error && before?.status !== SpanStatus.Error;
+  return [
+    oneIf(isNew),
+    oneIf(isNew && after.operation === TURN_OPERATION),
+    oneIf(isNew && after.operation === TOOL_OPERATION),
+    oneIf(newError),
+    countsAsFirstError(after, isRoot) ? after.span_id : null,
+  ];
+}
+
+function tokenParams(before: Span | null, after: Span): SQLInputValue[] {
+  return [
+    INPUT_TOKENS_ATTRIBUTE,
+    OUTPUT_TOKENS_ATTRIBUTE,
+    CACHE_READ_TOKENS_ATTRIBUTE,
+    CACHE_CREATION_TOKENS_ATTRIBUTE,
+    COST_ATTRIBUTE,
+  ].map((name) => numberAdded(before, after, name));
+}
+
+function collectionParams(
+  row: StoredCollections,
+  after: Span,
+): SQLInputValue[] {
+  return [
+    extended(row.agent_names, stringsOf(after, [AGENT_NAME_ATTRIBUTE])),
+    extended(
+      row.models,
+      stringsOf(after, [REQUEST_MODEL_ATTRIBUTE, RESPONSE_MODEL_ATTRIBUTE]),
+    ),
+    extended(row.error_types, stringsOf(after, [ERROR_TYPE_ATTRIBUTE])),
+    stringOf(after, WORKER_NAME_ATTRIBUTE),
+  ];
+}
+
+function rootParams(after: Span, isRoot: boolean): SQLInputValue[] {
+  const flag = oneIf(isRoot);
+  return [
+    flag,
+    after.start_time,
+    flag,
+    after.end_time,
+    flag,
+    rootState(after),
+    flag,
+    stringOf(after, STOP_REASON_ATTRIBUTE),
+  ];
+}
+
 export function updateTraceSummary(
   tx: Transaction,
   rootSpanId: string,
@@ -80,10 +143,7 @@ export function updateTraceSummary(
     )
     .get(after.trace_id);
   assert.ok(row, "updateTraceSummary: trace is absent");
-  const isNew = before === null;
   const isRoot = after.span_id === rootSpanId;
-  const isError = after.status === SpanStatus.Error;
-  const newError = isError && before?.status !== SpanStatus.Error;
   const result = tx.database
     .prepare(
       `UPDATE tracking_trace SET
@@ -108,31 +168,10 @@ export function updateTraceSummary(
       WHERE trace_id = ?`,
     )
     .run(
-      isNew ? 1 : 0,
-      isNew && after.operation === TURN_OPERATION ? 1 : 0,
-      isNew && after.operation === TOOL_OPERATION ? 1 : 0,
-      newError ? 1 : 0,
-      countsAsFirstError(after, isRoot) ? after.span_id : null,
-      numberAdded(before, after, INPUT_TOKENS_ATTRIBUTE),
-      numberAdded(before, after, OUTPUT_TOKENS_ATTRIBUTE),
-      numberAdded(before, after, CACHE_READ_TOKENS_ATTRIBUTE),
-      numberAdded(before, after, CACHE_CREATION_TOKENS_ATTRIBUTE),
-      numberAdded(before, after, COST_ATTRIBUTE),
-      extended(row.agent_names, stringsOf(after, [AGENT_NAME_ATTRIBUTE])),
-      extended(
-        row.models,
-        stringsOf(after, [REQUEST_MODEL_ATTRIBUTE, RESPONSE_MODEL_ATTRIBUTE]),
-      ),
-      extended(row.error_types, stringsOf(after, [ERROR_TYPE_ATTRIBUTE])),
-      stringOf(after, WORKER_NAME_ATTRIBUTE),
-      isRoot ? 1 : 0,
-      after.start_time,
-      isRoot ? 1 : 0,
-      after.end_time,
-      isRoot ? 1 : 0,
-      rootState(after),
-      isRoot ? 1 : 0,
-      stringOf(after, STOP_REASON_ATTRIBUTE),
+      ...countParams(before, after, isRoot),
+      ...tokenParams(before, after),
+      ...collectionParams(row, after),
+      ...rootParams(after, isRoot),
       after.trace_id,
     );
   assert.equal(Number(result.changes), ONE_ROW);
