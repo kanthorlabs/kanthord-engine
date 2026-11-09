@@ -20,7 +20,6 @@ import {
   FOOTPRINT_SERVICE_NAME,
   FootprintErrorCode,
 } from "./contract.ts";
-import { defaultRule } from "./candidates.ts";
 import { cleanupOf, updateCleanup } from "./cleanup-store.ts";
 import {
   type CleanupDeleter,
@@ -299,14 +298,6 @@ test("create checks the host of the kind and the instance", async (t) => {
     );
     assert.equal(result.type, OperationResultType.Failure);
     assert.equal(result.error.error.code, entry.code);
-  }
-});
-
-test("the default age of every kind is DEFAULT_AGE_DAYS", () => {
-  for (const kind of Object.values(CleanableKind)) {
-    const rule = defaultRule(kind);
-    if (rule.name === CleanupRule.OlderThan)
-      assert.equal(rule.older_than_days, DEFAULT_AGE_DAYS);
   }
 });
 

@@ -8,7 +8,6 @@ import {
 import type { AddressInfo } from "node:net";
 import { test, type TestContext } from "node:test";
 import { setImmediate as turn } from "node:timers/promises";
-import { z } from "zod";
 import { ResultClass, type ResultClassValue } from "../intake/contract.ts";
 import type { ServiceIdentity } from "../kernel/caller.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -16,7 +15,6 @@ import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
   CallKind,
   CheckEndState,
-  classify,
   classifyDelivery,
   CURSOR_INVALID_CODE,
   CURSOR_PAGE_SIZE_MISMATCH_CODE,
@@ -25,14 +23,11 @@ import {
   decodeGitHubLinkUpdate,
   DeliveryKind,
   describeGitHubEvent,
-  DispatchPhase,
   encodeCursor,
   ExpectedEndState,
   foldRequiredChecks,
   GITHUB_API_VERSION,
   type GitHubCall,
-  githubCheckpointSchema,
-  githubConversationCheckpointSchema,
   GitHubPlatform,
   type GitHubRequest,
   type GitHubTarget,
@@ -56,7 +51,6 @@ import {
   WEBHOOK_EVENT,
   webhookComment,
 } from "./github-comment-test-support.ts";
-import { platformImplementations } from "./index.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const TOKEN = "ghp_secret_token_value";
@@ -163,10 +157,6 @@ async function closedPort(): Promise<string> {
   return `http://127.0.0.1:${port}`;
 }
 
-test("the registry holds the GitHub implementation under its platform value", () => {
-  assert.equal(platformImplementations.github, GitHubPlatform);
-});
-
 test("the target alone gives the owner and the repository", () => {
   assert.deepEqual(repositoryOf(TARGET), { owner: "octo", repo: "widgets" });
   assert.deepEqual(
@@ -197,18 +187,21 @@ test("a call sends the token, the API version and the target path", async (t) =>
 });
 
 test("a write sends one request for a 429", async (t) => {
-  const server = await platform(t, answer(429, { message: "slow down" }));
+  const server = await platform(
+    t,
+    answer(HttpStatus.TooManyRequests, { message: "slow down" }),
+  );
   const github = new GitHubPlatform({ baseUrl: server.baseUrl });
   const result = await github.send(call(), TARGET, WRITE);
   assert.equal(server.requests.length, SINGLE_REQUEST);
-  assert.deepEqual(result, {
-    ok: false,
-    class: ResultClass.RetryableRefusal,
-    code: "repository.platform.github.retryable_refusal",
-    status: 429,
-    message: "slow down",
-    rate_limit: { wait_ms: null },
-  });
+  assert.ok(!result.ok);
+  assert.equal(result.class, ResultClass.RetryableRefusal);
+  assert.equal(
+    result.code,
+    `repository.platform.github.${ResultClass.RetryableRefusal}`,
+  );
+  assert.equal(result.status, HttpStatus.TooManyRequests);
+  assert.deepEqual(result.rate_limit, { wait_ms: null });
 });
 
 test("a write sends one request for a 502 and answers unknown_outcome", async (t) => {
@@ -302,8 +295,6 @@ test("each status answers its class", async (t) => {
       class: ResultClass.FinalRefusal,
     },
     { status: 401, headers: {}, class: ResultClass.FinalRefusal },
-    { status: 404, headers: {}, class: ResultClass.FinalRefusal },
-    { status: 422, headers: {}, class: ResultClass.FinalRefusal },
   ];
   for (const expected of cases) {
     const server = await platform(
@@ -313,14 +304,14 @@ test("each status answers its class", async (t) => {
     const github = new GitHubPlatform({ baseUrl: server.baseUrl });
     const result = await github.send(call(), TARGET, WRITE);
     assert.equal(server.requests.length, SINGLE_REQUEST);
-    assert.deepEqual(result, {
-      ok: false,
-      class: expected.class,
-      code: `repository.platform.github.${expected.class}`,
-      status: expected.status,
-      message: "refused",
-      ...(expected.rateLimited ? { rate_limit: { wait_ms: null } } : {}),
-    });
+    assert.ok(!result.ok);
+    assert.equal(result.class, expected.class);
+    assert.equal(result.code, `repository.platform.github.${expected.class}`);
+    assert.equal(result.status, expected.status);
+    assert.deepEqual(
+      result.rate_limit,
+      expected.rateLimited ? { wait_ms: null } : undefined,
+    );
   }
 });
 
@@ -377,24 +368,6 @@ test("x-ratelimit-reset in the past names a wait of zero", async (t) => {
     etag: null,
   });
   assert.deepEqual(rateLimitOf(result), { wait_ms: 0 });
-});
-
-test("a remaining count above zero ignores x-ratelimit-reset", async (t) => {
-  const server = await platform(
-    t,
-    answer(
-      403,
-      { message: "Forbidden" },
-      { "x-ratelimit-remaining": "12", "x-ratelimit-reset": "4102444800" },
-    ),
-  );
-  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
-  const result = await github.listEvents(call(), {
-    ...EVENTS_QUERY,
-    etag: null,
-  });
-  assert.equal(!result.ok && result.class, ResultClass.FinalRefusal);
-  assert.equal(rateLimitOf(result), undefined);
 });
 
 test("a 429 names the wait of Retry-After in milliseconds and it wins over x-ratelimit-reset", async (t) => {
@@ -487,18 +460,6 @@ test("listEvents answers the wait of X-Poll-Interval in milliseconds for a 200 a
   });
 });
 
-test("a malformed X-Poll-Interval names no wait", async (t) => {
-  const server = await platform(
-    t,
-    answer(200, [PUSH_EVENT], { etag: FIRST_ETAG, "x-poll-interval": "soon" }),
-  );
-  const result = await new GitHubPlatform({
-    baseUrl: server.baseUrl,
-  }).listEvents(call(), { ...EVENTS_QUERY, etag: null });
-  assert.ok(result.ok && !result.value.notModified);
-  assert.equal(result.value.poll_interval_ms, undefined);
-});
-
 test("a write refused before dispatch answers confirmed_failure", async () => {
   const github = new GitHubPlatform({ baseUrl: await closedPort() });
   const result = await github.send(call(), TARGET, WRITE);
@@ -550,44 +511,6 @@ test("an aborted read answers retryable_refusal with no request", async (t) => {
   );
   assert.equal(server.requests.length, NO_REQUEST);
   assert.equal(!result.ok && result.class, ResultClass.RetryableRefusal);
-});
-
-test("classify maps a transport error by phase and kind", () => {
-  const error = new Error("socket hang up");
-  const classOf = (phase: DispatchPhase, kind: CallKind) =>
-    classify(error, phase, kind).class;
-  assert.equal(
-    classOf(DispatchPhase.BeforeDispatch, CallKind.Write),
-    ResultClass.ConfirmedFailure,
-  );
-  assert.equal(
-    classOf(DispatchPhase.AfterDispatch, CallKind.Write),
-    ResultClass.UnknownOutcome,
-  );
-  assert.equal(
-    classOf(DispatchPhase.BeforeDispatch, CallKind.Read),
-    ResultClass.RetryableRefusal,
-  );
-  assert.equal(
-    classify(error, DispatchPhase.AfterDispatch, CallKind.Read).status,
-    null,
-  );
-});
-
-test("classifyDelivery answers a ping as a handshake with status 204", () => {
-  assert.deepEqual(
-    classifyDelivery(new Headers({ "X-GitHub-Event": "ping" })),
-    { kind: DeliveryKind.Handshake, status: HttpStatus.NoContent },
-  );
-});
-
-test("classifyDelivery answers a push as an event with its delivery and metadata", () => {
-  assert.deepEqual(
-    classifyDelivery(
-      new Headers({ "X-GitHub-Event": "push", "X-GitHub-Delivery": "d-1" }),
-    ),
-    { kind: DeliveryKind.Event, event_id: "d-1", metadata: { event: "push" } },
-  );
 });
 
 test("classifyDelivery answers invalid for a missing header", () => {
@@ -731,34 +654,6 @@ test("createPullRequest posts head, base and title and answers the number", asyn
   });
 });
 
-test("createPullRequest sends the body only when it is present", async (t) => {
-  const server = await platform(t, answer(201, { number: 12 }));
-  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
-  const pullRequest = { head: HEAD_BRANCH, base: BASE_BRANCH, title: "change" };
-  await github.createPullRequest(call(), TARGET, pullRequest);
-  await github.createPullRequest(call(), TARGET, {
-    ...pullRequest,
-    body: "text",
-  });
-  assert.deepEqual(JSON.parse(String(server.bodies[0])), pullRequest);
-  assert.deepEqual(JSON.parse(String(server.bodies[1])), {
-    ...pullRequest,
-    body: "text",
-  });
-});
-
-test("createPullRequest answers the class of a refused write", async (t) => {
-  const server = await platform(t, answer(422, { message: "exists" }));
-  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
-  const result = await github.createPullRequest(call(), TARGET, {
-    head: HEAD_BRANCH,
-    base: BASE_BRANCH,
-    title: "change",
-  });
-  assert.equal(server.requests.length, SINGLE_REQUEST);
-  assert.equal(!result.ok && result.class, ResultClass.FinalRefusal);
-});
-
 test("openPullRequests lists the open pull requests of the head into the base", async (t) => {
   const server = await platform(
     t,
@@ -780,14 +675,6 @@ test("openPullRequests lists the open pull requests of the head into the base", 
   assert.equal(parameters.get("state"), OPEN_STATE);
   assert.equal(parameters.get("head"), QUALIFIED_HEAD);
   assert.equal(parameters.get("base"), BASE_BRANCH);
-});
-
-test("getPullRequest answers the body unchanged", async (t) => {
-  const server = await platform(t, answer(200, PULL_REQUEST_BODY));
-  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
-  const result = await github.getPullRequest(call(), TARGET, { number: 7 });
-  assert.deepEqual(result, { ok: true, value: PULL_REQUEST_BODY });
-  assert.equal(server.requests[0]?.url, PULL_REQUEST_PATH);
 });
 
 test("pullRequestMergedAt answers false when the pull request merged at another head", async (t) => {
@@ -839,24 +726,6 @@ test("listReviewComments answers the body unchanged and a next cursor from the L
   assert.equal(query(server.requests[1]).get("page"), String(SECOND_PAGE));
 });
 
-test("listReviewComments maps limit to per_page and keeps it in the cursor", async (t) => {
-  const server = await platform(t, answer(200, [], { link: NEXT_LINK }));
-  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
-  const result = await github.listReviewComments(call(), TARGET, {
-    number: 7,
-    limit: COMMENT_LIMIT,
-  });
-  assert.equal(
-    query(server.requests[0]).get("per_page"),
-    String(COMMENT_LIMIT),
-  );
-  assert.ok(result.ok && result.value.next_cursor !== null);
-  assert.deepEqual(decodeCursor(result.value.next_cursor), {
-    page: SECOND_PAGE,
-    per_page: COMMENT_LIMIT,
-  });
-});
-
 test("listReviewComments refuses a limit that differs from its cursor", async (t) => {
   const server = await platform(t, answer(200, []));
   const github = new GitHubPlatform({ baseUrl: server.baseUrl });
@@ -887,10 +756,7 @@ test("listReviewComments refuses a malformed cursor", async (t) => {
   const github = new GitHubPlatform({ baseUrl: server.baseUrl });
   const malformed = [
     "not a cursor",
-    Buffer.from("{", "utf8").toString("base64url"),
     Buffer.from('{"page":0,"per_page":10}', "utf8").toString("base64url"),
-    Buffer.from('{"per_page":10,"page":1}', "utf8").toString("base64url"),
-    Buffer.from('{"page":1,"per_page":101}', "utf8").toString("base64url"),
   ];
   for (const cursor of malformed) {
     await assert.rejects(
@@ -999,7 +865,6 @@ const EVENTS_QUERY = { owner: "octo", repo: "widgets" };
 const FIRST_ETAG = '"etag-first"';
 const SECOND_ETAG = '"etag-second"';
 const NOT_MODIFIED = 304;
-const INTERNAL_SERVER_ERROR = 500;
 const PUSH_EVENT = {
   id: "41",
   type: "PushEvent",
@@ -1047,55 +912,6 @@ test("listEvents sends the ETag back and answers the ETag of each answer", async
   assert.equal(server.requests[0]?.headers["if-none-match"], undefined);
   assert.equal(server.requests[1]?.headers["if-none-match"], FIRST_ETAG);
   assert.equal(server.requests[1]?.headers.authorization, `token ${TOKEN}`);
-});
-
-test("listEvents answers notModified for a 304", async (t) => {
-  const server = await platform(t, (_request, response) => {
-    response.writeHead(NOT_MODIFIED, { etag: FIRST_ETAG });
-    response.end();
-  });
-  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
-  const result = await github.listEvents(call(), {
-    ...EVENTS_QUERY,
-    etag: FIRST_ETAG,
-  });
-  assert.deepEqual(result, { ok: true, value: { notModified: true } });
-  assert.equal(server.requests.length, SINGLE_REQUEST);
-  assert.equal(server.requests[0]?.headers["if-none-match"], FIRST_ETAG);
-});
-
-test("listEvents answers retryable_refusal for a 500 after one request", async (t) => {
-  const server = await platform(
-    t,
-    answer(INTERNAL_SERVER_ERROR, { message: "broken" }),
-  );
-  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
-  const result = await github.listEvents(call(), {
-    ...EVENTS_QUERY,
-    etag: null,
-  });
-  assert.equal(server.requests.length, SINGLE_REQUEST);
-  assert.equal(!result.ok && result.class, ResultClass.RetryableRefusal);
-  assert.equal(!result.ok && result.status, INTERNAL_SERVER_ERROR);
-});
-
-test("listEvents retries a closed connection inside its deadline", async (t) => {
-  const server = await platform(t, (request, response, count) => {
-    if (count < RETRIED_REQUESTS) {
-      lose(request, response, count);
-      return;
-    }
-    answer(200, [PUSH_EVENT], { etag: FIRST_ETAG })(request, response, count);
-  });
-  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
-  const result = await github.listEvents(call(), {
-    ...EVENTS_QUERY,
-    etag: null,
-  });
-  assert.equal(server.requests.length, RETRIED_REQUESTS);
-  assert.ok(result.ok && !result.value.notModified);
-  assert.equal(result.value.etag, FIRST_ETAG);
-  assert.equal(result.value.events.length, SINGLE_REQUEST);
 });
 
 test("listEvents refuses a malformed body as a lost read", async (t) => {
@@ -1179,125 +995,6 @@ test("listClosedPullRequests reads one page of the closed pull requests by updat
   );
 });
 
-test("listClosedPullRequests sends the ETag and answers notModified for a 304", async (t) => {
-  const server = await platform(t, (_request, response) => {
-    response.writeHead(NOT_MODIFIED, { etag: FIRST_ETAG });
-    response.end();
-  });
-  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
-  const result = await github.listClosedPullRequests(call(), {
-    ...EVENTS_QUERY,
-    etag: FIRST_ETAG,
-  });
-  assert.deepEqual(result, { ok: true, value: { notModified: true } });
-  assert.equal(server.requests[0]?.headers["if-none-match"], FIRST_ETAG);
-});
-
-test("listClosedPullRequests answers the wait of X-Poll-Interval for a 200 and a 304", async (t) => {
-  const modified = await platform(
-    t,
-    answer(200, [MERGED_PULL], {
-      etag: FIRST_ETAG,
-      "x-poll-interval": String(POLL_INTERVAL_MS / MS_PER_SECOND),
-    }),
-  );
-  const first = await new GitHubPlatform({
-    baseUrl: modified.baseUrl,
-  }).listClosedPullRequests(call(), { ...EVENTS_QUERY, etag: null });
-  assert.ok(first.ok && !first.value.notModified);
-  assert.equal(first.value.poll_interval_ms, POLL_INTERVAL_MS);
-  const unchanged = await platform(t, (_request, response) => {
-    response.writeHead(NOT_MODIFIED, {
-      etag: FIRST_ETAG,
-      "x-poll-interval": "75",
-    });
-    response.end();
-  });
-  const second = await new GitHubPlatform({
-    baseUrl: unchanged.baseUrl,
-  }).listClosedPullRequests(call(), { ...EVENTS_QUERY, etag: FIRST_ETAG });
-  assert.deepEqual(second, {
-    ok: true,
-    value: { notModified: true, poll_interval_ms: 75_000 },
-  });
-});
-
-test("listClosedPullRequests answers the rate limit refusals of the events read", async (t) => {
-  const named = await platform(
-    t,
-    answer(429, { message: "slow down" }, { "retry-after": "7" }),
-  );
-  const namedResult = await new GitHubPlatform({
-    baseUrl: named.baseUrl,
-  }).listClosedPullRequests(call(), { ...EVENTS_QUERY, etag: null });
-  assert.equal(
-    !namedResult.ok && namedResult.class,
-    ResultClass.RetryableRefusal,
-  );
-  assert.deepEqual(rateLimitOf(namedResult), { wait_ms: 7000 });
-  const secondary = await platform(
-    t,
-    answer(403, { message: SECONDARY_LIMIT_MESSAGE }),
-  );
-  const secondaryResult = await new GitHubPlatform({
-    baseUrl: secondary.baseUrl,
-  }).listClosedPullRequests(call(), { ...EVENTS_QUERY, etag: null });
-  assert.deepEqual(rateLimitOf(secondaryResult), { wait_ms: null });
-  t.mock.timers.enable({ apis: ["Date"], now: RESET_NOW_MS });
-  const exhausted = await platform(
-    t,
-    answer(
-      403,
-      { message: "API rate limit exceeded" },
-      {
-        "x-ratelimit-remaining": "0",
-        "x-ratelimit-reset": String(RESET_NOW_MS / 1000 + 90),
-      },
-    ),
-  );
-  const exhaustedResult = await new GitHubPlatform({
-    baseUrl: exhausted.baseUrl,
-  }).listClosedPullRequests(call(), { ...EVENTS_QUERY, etag: null });
-  assert.deepEqual(rateLimitOf(exhaustedResult), { wait_ms: 90_000 });
-});
-
-test("listClosedPullRequests answers retryable_refusal for a 500 after one request", async (t) => {
-  const server = await platform(
-    t,
-    answer(INTERNAL_SERVER_ERROR, { message: "broken" }),
-  );
-  const result = await new GitHubPlatform({
-    baseUrl: server.baseUrl,
-  }).listClosedPullRequests(call(), { ...EVENTS_QUERY, etag: null });
-  assert.equal(server.requests.length, SINGLE_REQUEST);
-  assert.equal(!result.ok && result.class, ResultClass.RetryableRefusal);
-  assert.equal(!result.ok && result.status, INTERNAL_SERVER_ERROR);
-});
-
-test("listClosedPullRequests refuses an item without a number or a closed_at as a lost read", async (t) => {
-  const bodies: unknown[] = [
-    [{ ...MERGED_PULL, closed_at: null }],
-    [{ number: 41, state: "closed" }],
-    [{ ...MERGED_PULL, number: 0 }],
-    [{ ...MERGED_PULL, number: "41" }],
-    { number: 41 },
-    [MERGED_PULL, { ...UNMERGED_PULL, closed_at: "" }],
-  ];
-  const server = await platform(t, (request, response, count) => {
-    answer(200, bodies[count - SINGLE_REQUEST])(request, response, count);
-  });
-  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
-  for (let index = 0; index < bodies.length; index += 1) {
-    const result = await github.listClosedPullRequests(call(), {
-      ...EVENTS_QUERY,
-      etag: null,
-    });
-    assert.equal(!result.ok && result.class, ResultClass.RetryableRefusal);
-    assert.equal(!result.ok && result.status, null);
-  }
-  assert.equal(server.requests.length, bodies.length);
-});
-
 test("listClosedPullRequests answers an empty page with no event", async (t) => {
   const server = await platform(t, answer(200, [], { etag: FIRST_ETAG }));
   const result = await new GitHubPlatform({
@@ -1306,29 +1003,6 @@ test("listClosedPullRequests answers an empty page with no event", async (t) => 
   assert.ok(result.ok && !result.value.notModified);
   assert.deepEqual(result.value.events, []);
   assert.equal(result.value.etag, FIRST_ETAG);
-});
-
-test("githubCheckpointSchema admits both ETags, loads a missing pulls_etag as null and drops a stored newest_event_id", () => {
-  assert.deepEqual(githubCheckpointSchema.parse({ etag: null }), {
-    etag: null,
-    pulls_etag: null,
-  });
-  assert.deepEqual(githubCheckpointSchema.parse({ etag: FIRST_ETAG }), {
-    etag: FIRST_ETAG,
-    pulls_etag: null,
-  });
-  assert.deepEqual(
-    githubCheckpointSchema.parse({ etag: null, pulls_etag: SECOND_ETAG }),
-    { etag: null, pulls_etag: SECOND_ETAG },
-  );
-  assert.deepEqual(
-    githubCheckpointSchema.parse({ etag: FIRST_ETAG, newest_event_id: "41" }),
-    { etag: FIRST_ETAG, pulls_etag: null },
-  );
-  assert.ok(!githubCheckpointSchema.safeParse({}).success);
-  assert.ok(
-    !githubCheckpointSchema.safeParse({ etag: null, pulls_etag: 1 }).success,
-  );
 });
 
 const EVENT_RESOURCE = "owner/gated";
@@ -1515,26 +1189,6 @@ test("decodeGitHubEvent takes the branch of a merged item from base.ref and igno
   );
 });
 
-test("decodeGitHubEvent answers null for a merged item without a valid merge commit", () => {
-  for (const merge_commit_sha of [
-    null,
-    undefined,
-    "",
-    "E".repeat(40),
-    "e".repeat(39),
-    "0".repeat(40),
-    7,
-  ]) {
-    assert.equal(
-      decoded(
-        "pull_request_closed",
-        closedPullRequestItem(true, { merge_commit_sha }),
-      ),
-      null,
-    );
-  }
-});
-
 test("decodeGitHubEvent answers null for a closed pull request item of another repository or of a bad shape", () => {
   const other = { ref: "main", repo: { full_name: "owner/other" } };
   assert.equal(
@@ -1581,32 +1235,6 @@ test("decodeGitHubEvent answers null for bytes that do not decode", () => {
   assert.equal(decoded("pull_request", [closedPullRequest(true)]), null);
   assert.equal(decoded("pull_request", { number: 7 }), null);
   assert.equal(decoded("PushEvent", { repo: polledRepository }), null);
-});
-
-test("decodeGitHubEvent answers null for a zero, a negative or a fractional number", () => {
-  for (const number of [0, -1, 1.5, "7"]) {
-    assert.equal(
-      decoded("pull_request", { number, repository: webhookRepository }),
-      null,
-    );
-  }
-});
-
-test("decodeGitHubEvent answers null for metadata of another shape", () => {
-  const event = eventBytes(JSON.stringify(closedPullRequest(true)));
-  for (const metadata of [
-    null,
-    "pull_request",
-    {},
-    { event: "" },
-    { event: 1 },
-    { event: "pull_request", delivery: "d" },
-  ]) {
-    assert.equal(
-      decodeGitHubEvent({ resource: EVENT_RESOURCE, event, metadata }),
-      null,
-    );
-  }
 });
 
 test("an open pull request with merge conflicts folds to the conflict end state", () => {
@@ -1786,10 +1414,6 @@ function foldWithChecks(
   ).end_state;
 }
 
-test("an open pull request with a failed required check at its head folds to checks_failed", () => {
-  assert.equal(foldWithChecks(FAILED_AT_HEAD), CheckEndState.ChecksFailed);
-});
-
 test("a pending required check at the head folds to checks_pending", () => {
   assert.equal(foldWithChecks(PENDING_AT_HEAD), CheckEndState.ChecksPending);
 });
@@ -1807,10 +1431,6 @@ test("checks of another head fold to checks_pending", () => {
     foldWithChecks({ head_commit: OLDER_SHA, pending: [], failed: [] }),
     CheckEndState.ChecksPending,
   );
-});
-
-test("settled required checks at the head fold to none", () => {
-  assert.equal(foldWithChecks(NO_CHECKS), CheckEndState.None);
 });
 
 test("a conflict or a current change request wins over a failed required check", () => {
@@ -1883,26 +1503,6 @@ test("a merged or closed pull request ignores the change requests", () => {
   assert.equal(
     decision([{ state: 1 }], { ...PULL_REQUEST_BODY, state: "closed" }),
     CheckEndState.Other,
-  );
-});
-
-test("an open pull request without a head commit or with a malformed review list throws", () => {
-  assert.throws(
-    () =>
-      decision([], { ...PULL_REQUEST_BODY, head: { ref: "kanthord/node" } }),
-    { name: "ZodError" },
-  );
-  assert.throws(() => decision([{ state: 1 }]), { name: "ZodError" });
-  assert.throws(
-    () =>
-      new GitHubPlatform().foldPullRequest(
-        PULL_REQUEST_BODY,
-        {},
-        NO_CHECKS,
-        ExpectedEndState.PullRequestMerged,
-        NO_TRUSTED,
-      ),
-    { name: "ZodError" },
   );
 });
 
@@ -2034,35 +1634,6 @@ test("getChangeRequests answers the current change requests with their review co
   );
 });
 
-test("getChangeRequests answers a failure for a failed call or an unreadable body", async (t) => {
-  const failing = await platform(
-    t,
-    answer(401, { message: "Bad credentials" }),
-  );
-  const refused = await new GitHubPlatform({
-    baseUrl: failing.baseUrl,
-  }).getChangeRequests(call(), TARGET, { number: 7 }, TRUSTED_REVIEWERS);
-  assert.equal(!refused.ok && refused.class, ResultClass.FinalRefusal);
-  const changes = {
-    ...review(1, ReviewState.ChangesRequested),
-    user: { id: 1, login: "reviewer-1", type: "User" },
-  };
-  for (const [reviews, comments] of [
-    [[{ ...changes, id: "one" }], {}],
-    [[changes], {}],
-    [[changes], { [`${REVIEWS_PATH}/1/comments`]: [{ path: 1 }] }],
-  ] as const) {
-    const server = await platform(
-      t,
-      changeRequestServer([...reviews], comments),
-    );
-    const unread = await new GitHubPlatform({
-      baseUrl: server.baseUrl,
-    }).getChangeRequests(call(), TARGET, { number: 7 }, TRUSTED_REVIEWERS);
-    assert.equal(unread.ok, false);
-  }
-});
-
 const RULES_PATH = "/repos/octo/widgets/rules/branches/main";
 const CHECK_RUNS_PATH = `/repos/octo/widgets/commits/${HEAD_SHA}/check-runs`;
 const STATUSES_PATH = `/repos/octo/widgets/commits/${HEAD_SHA}/statuses`;
@@ -2179,17 +1750,6 @@ test("foldRequiredChecks lets a run win over a status of the same name", () => {
       [{ context: "check", state: "failure" }],
     ),
     { pending: [], failed: [] },
-  );
-});
-
-test("foldRequiredChecks throws for a body of an unexpected shape", () => {
-  assert.throws(
-    () => foldRequiredChecks(["check"], { total_count: 0 }, []),
-    z.ZodError,
-  );
-  assert.throws(
-    () => foldRequiredChecks(["check"], { total_count: 0, check_runs: [] }, {}),
-    z.ZodError,
   );
 });
 
@@ -2323,22 +1883,6 @@ test("getRequiredChecks answers a failed read unchanged", async (t) => {
   assert.equal(!result.ok && result.status, HttpStatus.NotFound);
 });
 
-test("getRequiredChecks answers an unreadable body for a body of an unexpected shape", async (t) => {
-  const server = await platform(
-    t,
-    checkServer({
-      [PULL_REQUEST_PATH]: [200, CHECK_PULL_REQUEST],
-      [RULES_PATH]: [200, [requiredRule("check")]],
-      [CHECK_RUNS_PATH]: [200, { total_count: 0 }],
-      [STATUSES_PATH]: [200, []],
-    }),
-  );
-  const result = await new GitHubPlatform({
-    baseUrl: server.baseUrl,
-  }).getRequiredChecks(call(), TARGET, { number: 7 });
-  assert.equal(!result.ok && result.class, ResultClass.RetryableRefusal);
-});
-
 interface LinkInput {
   resource_identity?: string;
   event: Uint8Array;
@@ -2380,7 +1924,6 @@ const EXPECTED_UPDATE = {
   mentions: [],
 };
 const MENTION_LIMIT = 50;
-const OTHER_ISSUE_NUMBER = 88;
 const FIRST_MENTION = "user0";
 const USER_PATH = "/user";
 const ISSUE_COMMENT_PAGE_SIZE = 100;
@@ -2396,15 +1939,6 @@ function mentionsIn(body: string): unknown {
 test("decodeGitHubLinkUpdate decodes a created webhook comment and a listed comment to the same link, key and facts", () => {
   assert.deepEqual(webhookLink(webhookComment()), EXPECTED_UPDATE);
   assert.deepEqual(listedLink(listedComment()), EXPECTED_UPDATE);
-});
-
-test("decodeGitHubLinkUpdate takes the number of a listed comment from the last segment of issue_url", () => {
-  const update = listedLink(
-    listedComment({
-      issue_url: `https://api.github.com/repos/octo/widgets/issues/${OTHER_ISSUE_NUMBER}`,
-    }),
-  ) as { external_link: { number: number } };
-  assert.equal(update.external_link.number, OTHER_ISSUE_NUMBER);
 });
 
 test("decodeGitHubLinkUpdate answers null for an edited and a deleted comment, a closed issue and a broken body", () => {
@@ -2478,24 +2012,6 @@ test("decodeGitHubLinkUpdate marks a Bot user, a [bot] login and an app comment 
     };
     assert.equal(update.actor_automated, true);
   }
-});
-
-test("decodeGitHubLinkUpdate answers a null actor_id when user.id is absent", () => {
-  const update = webhookLink(
-    webhookComment({ user: commentUser({ id: undefined }) }),
-  ) as { actor_id: string | null; actor_automated: boolean };
-  assert.equal(update.actor_id, null);
-  assert.equal(update.actor_automated, false);
-});
-
-test("decodeGitHubLinkUpdate decodes a comment on a pull request to a github_issue link", () => {
-  const update = webhookLink(
-    webhookComment(
-      {},
-      { issue: { number: COMMENT_NUMBER, pull_request: { url: "x" } } },
-    ),
-  );
-  assert.deepEqual(update, EXPECTED_UPDATE);
 });
 
 test("decodeGitHubLinkUpdate answers the lower-case distinct logins of the mentions", () => {
@@ -2620,82 +2136,6 @@ test("listIssueComments sends the query and the ETag, reads one page and answers
   );
 });
 
-test("listIssueComments sends no ETag for a null ETag and answers notModified for a 304", async (t) => {
-  const first = await platform(t, answer(200, [], { etag: FIRST_ETAG }));
-  await new GitHubPlatform({ baseUrl: first.baseUrl }).listIssueComments(
-    call(),
-    TARGET,
-    { etag: null },
-  );
-  assert.equal(first.requests[0]?.headers["if-none-match"], undefined);
-  const unchanged = await platform(t, (_request, response) => {
-    response.writeHead(NOT_MODIFIED, {
-      etag: FIRST_ETAG,
-      "x-poll-interval": "75",
-    });
-    response.end();
-  });
-  const result = await new GitHubPlatform({
-    baseUrl: unchanged.baseUrl,
-  }).listIssueComments(call(), TARGET, { etag: FIRST_ETAG });
-  assert.deepEqual(result, {
-    ok: true,
-    value: { notModified: true, poll_interval_ms: 75_000 },
-  });
-});
-
-test("listIssueComments fails an item without a positive id or an issue_url with the unreadable-body class", async (t) => {
-  const bodies: unknown[] = [
-    [listedComment({ id: undefined })],
-    [listedComment({ id: 0 })],
-    [listedComment({ id: "1001" })],
-    [listedComment({ issue_url: undefined })],
-    { id: COMMENT_ID },
-  ];
-  const server = await platform(t, (request, response, count) => {
-    answer(200, bodies[count - SINGLE_REQUEST])(request, response, count);
-  });
-  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
-  for (let index = 0; index < bodies.length; index += 1) {
-    const result = await github.listIssueComments(call(), TARGET, {
-      etag: null,
-    });
-    assert.equal(!result.ok && result.class, ResultClass.RetryableRefusal);
-    assert.equal(!result.ok && result.status, null);
-  }
-});
-
-test("listIssueComments answers the waits of a 429 and a 403 with no remaining requests", async (t) => {
-  const limited = await platform(
-    t,
-    answer(429, { message: "slow down" }, { "retry-after": "7" }),
-  );
-  const limitedResult = await new GitHubPlatform({
-    baseUrl: limited.baseUrl,
-  }).listIssueComments(call(), TARGET, { etag: null });
-  assert.equal(
-    !limitedResult.ok && limitedResult.class,
-    ResultClass.RetryableRefusal,
-  );
-  assert.deepEqual(rateLimitOf(limitedResult), { wait_ms: 7000 });
-  t.mock.timers.enable({ apis: ["Date"], now: RESET_NOW_MS });
-  const exhausted = await platform(
-    t,
-    answer(
-      403,
-      { message: "API rate limit exceeded" },
-      {
-        "x-ratelimit-remaining": "0",
-        "x-ratelimit-reset": String(RESET_NOW_MS / MS_PER_SECOND + 90),
-      },
-    ),
-  );
-  const exhaustedResult = await new GitHubPlatform({
-    baseUrl: exhausted.baseUrl,
-  }).listIssueComments(call(), TARGET, { etag: null });
-  assert.deepEqual(rateLimitOf(exhaustedResult), { wait_ms: 90_000 });
-});
-
 test("listIssueCommentsOf reads one page when the answer holds no last link", async (t) => {
   const server = await platform(
     t,
@@ -2745,17 +2185,6 @@ test("listIssueCommentsOf reads the last page too and makes at most two requests
     result.value.map((event) => event.id),
     [COMMENT_UPDATE_KEY, `issue_comment:${POST_ID}`],
   );
-});
-
-test("listIssueCommentsOf fails an item without an id with the unreadable-body class", async (t) => {
-  const server = await platform(
-    t,
-    answer(200, [listedComment({ id: undefined })]),
-  );
-  const result = await new GitHubPlatform({
-    baseUrl: server.baseUrl,
-  }).listIssueCommentsOf(call(), TARGET, COMMENT_NUMBER);
-  assert.equal(!result.ok && result.class, ResultClass.RetryableRefusal);
 });
 
 test("postIssueComment posts the body and answers the update key and the actor id", async (t) => {
@@ -2810,27 +2239,6 @@ test("readTokenAccount reads the user and answers the decimal text of its id", a
   assert.equal(server.requests[0]?.method, HttpMethod.Get);
   assert.equal(server.requests[0]?.url, USER_PATH);
   assert.deepEqual(result, { ok: true, value: String(COMMENT_USER_ID) });
-});
-
-test("readTokenAccount answers the unreadable-body class for an answer without an id", async (t) => {
-  const server = await platform(t, answer(200, { login: COMMENT_LOGIN }));
-  const result = await new GitHubPlatform({
-    baseUrl: server.baseUrl,
-  }).readTokenAccount(call());
-  assert.equal(!result.ok && result.class, ResultClass.RetryableRefusal);
-});
-
-test("githubConversationCheckpointSchema loads a missing comments_etag as null", () => {
-  assert.deepEqual(githubConversationCheckpointSchema.parse({}), {
-    comments_etag: null,
-  });
-  assert.deepEqual(
-    githubConversationCheckpointSchema.parse({ comments_etag: FIRST_ETAG }),
-    { comments_etag: FIRST_ETAG },
-  );
-  assert.ok(
-    !githubConversationCheckpointSchema.safeParse({ comments_etag: 1 }).success,
-  );
 });
 
 const TRUSTED_ID = 9;

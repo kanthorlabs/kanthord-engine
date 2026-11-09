@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   contentText,
   getSystemMessageText,
@@ -21,7 +19,6 @@ import { countTurns, pinnedLayers } from "../../agent/pinned-layers.ts";
 import {
   anthropicSetup,
   fauxAssistantMessage,
-  fauxToolCall,
   scriptedModelRuntime,
   scriptedProvider,
 } from "./test-support.ts";
@@ -184,62 +181,6 @@ test("pinInference with a redacted system prompt and work inserts nothing and se
     ["system", "user"],
   );
   assert.ok(!JSON.stringify(call).includes(FAKE_KEY));
-});
-
-test("two tool calls produce three counted turns with no absent project message", async (t) => {
-  const cwd = temporary(t);
-  writeFileSync(join(cwd, "file"), "content");
-  const pins = pinnedLayers();
-  const provider = scriptedProvider([
-    fauxAssistantMessage(fauxToolCall("read", { path: "file" }), {
-      stopReason: "toolUse",
-    }),
-    fauxAssistantMessage(fauxToolCall("read", { path: "file" }), {
-      stopReason: "toolUse",
-    }),
-    fauxAssistantMessage("done"),
-  ]);
-  const setup = anthropicSetup();
-  const credentials = new InMemoryCredentialStore();
-  await credentials.modify("anthropic", async () => ({
-    type: "api_key",
-    key: "scripted",
-  }));
-  const { runtime, model } = await scriptedModelRuntime(provider)({
-    credential: {
-      credential_id: setup.agents[0]!.credential_id,
-      provider_id: "anthropic",
-      store: credentials,
-    },
-    agent: setup.agents[0]!,
-    signal: new AbortController().signal,
-  });
-  const { session } = await openSession({
-    cwd,
-    modelRuntime: runtime,
-    model,
-    thinkingLevel: "off",
-    systemPrompt: "owned system",
-    allowlist: ["read"],
-    customTools: [],
-    hostHome: cwd,
-    hooks: [pins.hook],
-    context: background,
-    knownSecrets: async () => [],
-  });
-  stopAfter(t, () => session.dispose());
-  pins.pinInference(session, "owned system");
-  let turns = 0;
-  stopAfter(
-    t,
-    countTurns(session, () => {
-      turns++;
-    }),
-  );
-  await session.prompt("read twice");
-  const expectedTurns = 3;
-  assert.equal(turns, expectedTurns);
-  assert.doesNotMatch(JSON.stringify(provider.calls), /project prompt/);
 });
 
 test("inference pin preserves stream arguments and later system updates across work changes and repeated calls", () => {

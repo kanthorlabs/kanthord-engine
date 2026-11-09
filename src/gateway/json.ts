@@ -40,6 +40,43 @@ export function parseJSON(source: string): unknown {
     }
     return invalid();
   }
+  function literal(): void {
+    const match =
+      /^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/.exec(
+        source.slice(index),
+      );
+    if (!match) invalid();
+    index += match![0].length;
+  }
+  function member(keys: Set<string>): void {
+    if (source[index] !== JsonToken.Quote) invalid();
+    const key = string();
+    if (keys.has(key)) invalid();
+    keys.add(key);
+    whitespace();
+    if (source[index++] !== JsonToken.MemberSeparator) invalid();
+  }
+  function container(depth: number): void {
+    const object = source[index++] === JsonToken.ObjectStart;
+    const end = object ? JsonToken.ObjectEnd : JsonToken.ArrayEnd;
+    const keys = new Set<string>();
+    whitespace();
+    if (source[index] === end) {
+      index++;
+      return;
+    }
+    for (;;) {
+      whitespace();
+      if (object) member(keys);
+      value(depth + 1);
+      whitespace();
+      if (source[index] === end) {
+        index++;
+        return;
+      }
+      if (source[index++] !== JsonToken.ValueSeparator) invalid();
+    }
+  }
   function value(depth: number): void {
     if (depth > MAX_JSON_DEPTH) invalid();
     whitespace();
@@ -51,39 +88,10 @@ export function parseJSON(source: string): unknown {
       source[index] === JsonToken.ObjectStart ||
       source[index] === JsonToken.ArrayStart
     ) {
-      const object = source[index++] === JsonToken.ObjectStart;
-      const end = object ? JsonToken.ObjectEnd : JsonToken.ArrayEnd;
-      const keys = new Set<string>();
-      whitespace();
-      if (source[index] === end) {
-        index++;
-        return;
-      }
-      for (;;) {
-        whitespace();
-        if (object) {
-          if (source[index] !== JsonToken.Quote) invalid();
-          const key = string();
-          if (keys.has(key)) invalid();
-          keys.add(key);
-          whitespace();
-          if (source[index++] !== JsonToken.MemberSeparator) invalid();
-        }
-        value(depth + 1);
-        whitespace();
-        if (source[index] === end) {
-          index++;
-          return;
-        }
-        if (source[index++] !== JsonToken.ValueSeparator) invalid();
-      }
+      container(depth);
+      return;
     }
-    const match =
-      /^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/.exec(
-        source.slice(index),
-      );
-    if (!match) invalid();
-    index += match![0].length;
+    literal();
   }
   try {
     value(0);

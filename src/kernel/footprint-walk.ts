@@ -1,3 +1,4 @@
+import type { BigIntStats } from "node:fs";
 import { lstat, readdir } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { setImmediate as yieldTurn } from "node:timers/promises";
@@ -31,51 +32,98 @@ function skipped(root: string, path: string, skip: readonly string[]): boolean {
   return skip.includes(name);
 }
 
+interface FootprintTally {
+  files: number;
+  bytes: number;
+  oldest: number | null;
+  newest: number | null;
+}
+
+interface WalkState {
+  readonly pending: string[];
+  readonly seen: Set<string>;
+  visited: number;
+}
+
+async function lstatPresent(path: string): Promise<BigIntStats | null> {
+  try {
+    return await lstat(path, { bigint: true });
+  } catch (error) {
+    if (absent(error)) return null;
+    throw error;
+  }
+}
+
+async function queueChildren(path: string, pending: string[]): Promise<void> {
+  let names: string[];
+  try {
+    names = await readdir(path);
+  } catch (error) {
+    if (absent(error)) return;
+    throw error;
+  }
+  for (const name of names) pending.push(join(path, name));
+}
+
+function seenBefore(stats: BigIntStats, seen: Set<string>): boolean {
+  if (stats.nlink <= SINGLE_LINK) return false;
+  const identity = `${stats.dev}:${stats.ino}`;
+  if (seen.has(identity)) return true;
+  seen.add(identity);
+  return false;
+}
+
+async function countableFile(
+  path: string,
+  state: WalkState,
+): Promise<BigIntStats | null> {
+  const stats = await lstatPresent(path);
+  if (stats === null) return null;
+  if (++state.visited % ENTRIES_PER_TURN === TURN_BOUNDARY) await yieldTurn();
+  if (stats.isDirectory()) {
+    await queueChildren(path, state.pending);
+    return null;
+  }
+  return seenBefore(stats, state.seen) ? null : stats;
+}
+
+function tallyFile(tally: FootprintTally, stats: BigIntStats): void {
+  const modified = Number(stats.mtimeMs);
+  tally.files += 1;
+  tally.bytes += Number(stats.size);
+  tally.oldest =
+    tally.oldest === null ? modified : Math.min(tally.oldest, modified);
+  tally.newest =
+    tally.newest === null ? modified : Math.max(tally.newest, modified);
+}
+
 export async function walkFootprint(
   root: string,
   options: WalkOptions = {},
 ): Promise<WalkTotal> {
   const skip = options.skip ?? [];
-  const seen = options.seen ?? new Set<string>();
-  let files = 0;
-  let bytes = 0;
-  let oldest: number | null = null;
-  let newest: number | null = null;
-  let visited = 0;
-  const pending = [root];
-  while (pending.length) {
+  const state: WalkState = {
+    pending: [root],
+    seen: options.seen ?? new Set<string>(),
+    visited: 0,
+  };
+  const tally: FootprintTally = {
+    files: 0,
+    bytes: 0,
+    oldest: null,
+    newest: null,
+  };
+  while (state.pending.length) {
     options.signal?.throwIfAborted();
-    const path = pending.pop()!;
+    const path = state.pending.pop()!;
     if (path !== root && skipped(root, path, skip)) continue;
-    let stats;
-    try {
-      stats = await lstat(path, { bigint: true });
-    } catch (error) {
-      if (absent(error)) continue;
-      throw error;
-    }
-    if (++visited % ENTRIES_PER_TURN === TURN_BOUNDARY) await yieldTurn();
-    if (stats.isDirectory()) {
-      let names: string[];
-      try {
-        names = await readdir(path);
-      } catch (error) {
-        if (absent(error)) continue;
-        throw error;
-      }
-      for (const name of names) pending.push(join(path, name));
-      continue;
-    }
-    if (stats.nlink > SINGLE_LINK) {
-      const identity = `${stats.dev}:${stats.ino}`;
-      if (seen.has(identity)) continue;
-      seen.add(identity);
-    }
-    const modified = Number(stats.mtimeMs);
-    files += 1;
-    bytes += Number(stats.size);
-    oldest = oldest === null ? modified : Math.min(oldest, modified);
-    newest = newest === null ? modified : Math.max(newest, modified);
+    const stats = await countableFile(path, state);
+    if (stats !== null) tallyFile(tally, stats);
   }
-  return { files, bytes, oldest_at: oldest, newest_at: newest };
+  return {
+    files: tally.files,
+    bytes: tally.bytes,
+    oldest_at: tally.oldest,
+    newest_at: tally.newest,
+  };
 }

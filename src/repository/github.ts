@@ -825,11 +825,9 @@ function outcomeOfStatus(
     : RequiredCheckOutcome.Failed;
 }
 
-export function foldRequiredChecks(
-  required: readonly string[],
+function newestRunsOf(
   checkRuns: unknown,
-  statuses: unknown,
-): { pending: string[]; failed: string[] } {
+): Map<string, z.infer<typeof checkRunsBodySchema>["check_runs"][number]> {
   const newestRuns = new Map<
     string,
     z.infer<typeof checkRunsBodySchema>["check_runs"][number]
@@ -838,6 +836,12 @@ export function foldRequiredChecks(
     const known = newestRuns.get(run.name);
     if (known === undefined || run.id > known.id) newestRuns.set(run.name, run);
   }
+  return newestRuns;
+}
+
+function newestStatesOf(
+  statuses: unknown,
+): Map<string, z.infer<typeof commitStatusStateSchema>> {
   const newestStates = new Map<
     string,
     z.infer<typeof commitStatusStateSchema>
@@ -846,17 +850,31 @@ export function foldRequiredChecks(
     if (!newestStates.has(status.context))
       newestStates.set(status.context, status.state);
   }
+  return newestStates;
+}
+
+function outcomeOfCheck(
+  run: z.infer<typeof checkRunsBodySchema>["check_runs"][number] | undefined,
+  state: z.infer<typeof commitStatusStateSchema> | undefined,
+): RequiredCheckOutcome {
+  if (run !== undefined) return outcomeOfRun(run);
+  if (state !== undefined) return outcomeOfStatus(state);
+  return RequiredCheckOutcome.Pending;
+}
+
+export function foldRequiredChecks(
+  required: readonly string[],
+  checkRuns: unknown,
+  statuses: unknown,
+): { pending: string[]; failed: string[] } {
+  const newestRuns = newestRunsOf(checkRuns);
+  const newestStates = newestStatesOf(statuses);
   const pending: string[] = [];
   const failed: string[] = [];
   for (const name of new Set(required)) {
     const run = newestRuns.get(name);
     const state = newestStates.get(name);
-    const outcome =
-      run !== undefined
-        ? outcomeOfRun(run)
-        : state !== undefined
-          ? outcomeOfStatus(state)
-          : RequiredCheckOutcome.Pending;
+    const outcome = outcomeOfCheck(run, state);
     if (outcome === RequiredCheckOutcome.Pending) pending.push(name);
     if (outcome === RequiredCheckOutcome.Failed) failed.push(name);
   }
@@ -909,6 +927,23 @@ function openEndState(
   )
     return CheckEndState.ChecksPending;
   return CheckEndState.None;
+}
+
+function attemptOfError(error: unknown, signal: AbortSignal): Attempt {
+  if (
+    error instanceof RequestError &&
+    error.status === NOT_MODIFIED_STATUS &&
+    error.response !== undefined
+  ) {
+    return { ok: true, value: exchangeOf(error.response, true) };
+  }
+  if (!(error instanceof RequestError) && !signal.aborted) {
+    throw error;
+  }
+  const phase = signal.aborted
+    ? DispatchPhase.AfterDispatch
+    : dispatchPhaseOf(error);
+  return { ok: false, error, phase };
 }
 
 export class GitHubPlatform {
@@ -1501,20 +1536,7 @@ export class GitHubPlatform {
       });
       return { ok: true, value: exchangeOf(response, false) };
     } catch (error) {
-      if (
-        error instanceof RequestError &&
-        error.status === NOT_MODIFIED_STATUS &&
-        error.response !== undefined
-      ) {
-        return { ok: true, value: exchangeOf(error.response, true) };
-      }
-      if (!(error instanceof RequestError) && !signal.aborted) {
-        throw error;
-      }
-      const phase = signal.aborted
-        ? DispatchPhase.AfterDispatch
-        : dispatchPhaseOf(error);
-      return { ok: false, error, phase };
+      return attemptOfError(error, signal);
     }
   }
 }

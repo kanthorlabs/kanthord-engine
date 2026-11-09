@@ -74,6 +74,43 @@ function queryOf(wire: PortCall["query"]): Record<string, string | string[]> {
   return query;
 }
 
+interface CallBody {
+  body: unknown;
+  rejection?: GatewayError;
+}
+
+function callBody(operation: Operation, call: PortCall): CallBody {
+  if (operation.body) {
+    try {
+      return { body: parseJSON(call.body ?? "") };
+    } catch (error) {
+      if (!(error instanceof GatewayError)) throw error;
+      return { body: null, rejection: error };
+    }
+  }
+  if (call.body)
+    return {
+      body: null,
+      rejection: new GatewayError(
+        HttpStatus.BadRequest,
+        "gateway.request.unexpected_body",
+        "This operation accepts no request body.",
+      ),
+    };
+  return { body: null };
+}
+
+function portAnswer(
+  operation: Operation,
+  result: RecordedResponse,
+): RecordedResponse {
+  if (result.status === HttpStatus.NoContent)
+    return { status: result.status, body: null };
+  if (operation.contentType && result.status === operation.status)
+    return { status: result.status, body: String(result.body) };
+  return result;
+}
+
 async function invokeCall(
   invocation: Invocation,
   credential: () => string | Promise<string>,
@@ -96,21 +133,7 @@ async function invokeCall(
       ),
       requestId,
     );
-  let body: unknown = null;
-  let rejection: GatewayError | undefined;
-  if (operation.body) {
-    try {
-      body = parseJSON(call.body ?? "");
-    } catch (error) {
-      if (!(error instanceof GatewayError)) throw error;
-      rejection = error;
-    }
-  } else if (call.body)
-    rejection = new GatewayError(
-      HttpStatus.BadRequest,
-      "gateway.request.unexpected_body",
-      "This operation accepts no request body.",
-    );
+  const { body, rejection } = callBody(operation, call);
   const result = await invocation.invoke(
     operation.id,
     { params: call.params, query: queryOf(call.query), body },
@@ -128,11 +151,7 @@ async function invokeCall(
       logger,
     },
   );
-  if (result.status === HttpStatus.NoContent)
-    return { status: result.status, body: null };
-  if (operation.contentType && result.status === operation.status)
-    return { status: result.status, body: String(result.body) };
-  return result;
+  return portAnswer(operation, result);
 }
 
 export function servePort(

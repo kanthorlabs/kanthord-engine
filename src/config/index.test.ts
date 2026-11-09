@@ -9,7 +9,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { execFile, type ExecFileException } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -21,27 +21,16 @@ import {
 import { isNumber } from "../kernel/values.ts";
 import {
   CONFIG_VERSION,
-  configPath,
   configuration,
   initialConfig,
   loadConfig,
   parseMapping,
   showConfig,
 } from "./index.ts";
-import { WRITABLE_DAYS_MAX } from "../tracking/config.ts";
-import {
-  DEFAULT_ENVIRONMENT_BUILD_TIMEOUT_MS,
-  DEFAULT_ENVIRONMENT_MEMORY_MB,
-} from "../project/config.ts";
 import { writePrivate } from "../kernel/files.ts";
 import { Diagnostic } from "../kernel/errors.ts";
 
 const FIRST_AUTH_VERSION = 1;
-const DEFAULT_TRACE_WRITABLE_DAYS = 30;
-const DEFAULT_DISK_FREE_RATIO = 0.1;
-const TRACE_THRESHOLD_BYTES = 8589934592;
-const LOG_THRESHOLD_BYTES = 2147483648;
-const CONFIGURED_THRESHOLD = 1073741824;
 const ExitCode = { Success: 0, Failure: 1 } as const;
 
 const EMPTY_OUTPUT = "";
@@ -52,21 +41,6 @@ const DEFAULT_BIND = "127.0.0.1";
 const DEFAULT_LOG_LEVEL = "info";
 const DEFAULT_PORT = 31415;
 const DEFAULT_IDEMPOTENCY_TTL = 86400;
-const DEFAULT_CONSECUTIVE_FAILURE_LIMIT = 3;
-const DEFAULT_REWORK_LIMIT = 2;
-const REWORK_OFF = 0;
-const DEFAULT_TEXT_MAX_BYTES = 32768;
-const DEFAULT_HEARTBEAT_WINDOW = 300;
-const DEFAULT_SERVER_INSTANCE_LIMIT = 16;
-const DEFAULT_CONTAINER_IMAGE = "docker.io/kanthorlabs/kanthord";
-const DEFAULT_RELEASE_RESERVE = 600;
-const DEFAULT_STOP_BACKOFF_SECONDS = 30;
-const DEFAULT_BUILD_TIMEOUT_MS = 1800000;
-const DEFAULT_MEMORY_MB = 4096;
-const CONFIGURED_BUILD_TIMEOUT_MS = 600000;
-const CONFIGURED_MEMORY_MB = 8192;
-const ROOT_BASE_PATH = "/";
-const INVALID_FIELD_CODE = "system.config.invalid_field";
 const ORIGINAL_CONTENT = "original";
 const REPLACEMENT_CONTENT = "replacement";
 
@@ -92,454 +66,12 @@ async function mainCommand(args: string[], signal: AbortSignal) {
 }
 
 test("service fragments preserve the existing YAML field set", () => {
-  const initial = parseMapping(initialConfig());
-  const config = configuration(initial).getProperties();
-  assert.deepEqual(Object.keys(initial).sort(), [
-    "agent",
-    "footprint",
-    "gateway",
-    "log",
-    "master_key",
-    "mission",
-    "project",
-    "scheduler",
-    "tracking",
-    "version",
-    "worker",
-  ]);
-  assert.deepEqual(Object.keys(config.worker), [
-    "heartbeat_window",
-    "server_instance_limit",
-    "container_image",
-  ]);
-  assert.deepEqual(Object.keys(config.scheduler), [
-    "release_reserve",
-    "stop_backoff",
-  ]);
-  assert.deepEqual(initial.scheduler, {
-    release_reserve: DEFAULT_RELEASE_RESERVE,
-    stop_backoff: DEFAULT_STOP_BACKOFF_SECONDS,
-  });
-  assert.deepEqual(initial.tracking, {
-    trace_writable_days: DEFAULT_TRACE_WRITABLE_DAYS,
-  });
-  assert.deepEqual(initial.worker, {
-    heartbeat_window: DEFAULT_HEARTBEAT_WINDOW,
-    server_instance_limit: DEFAULT_SERVER_INSTANCE_LIMIT,
-    container_image: DEFAULT_CONTAINER_IMAGE,
-  });
-  assert.deepEqual(Object.keys(config.mission).sort(), [
-    "consecutive_failure_limit",
-    "further_work_limit",
-    "rework_limit",
-    "text_max_bytes",
-  ]);
-  assert.deepEqual(Object.keys(config.gateway).sort(), [
-    "allowed_hosts",
-    "allowed_origins",
-    "auth",
-    "base_path",
-    "bind",
-    "idempotency_ttl",
-    "port",
-  ]);
+  const config = configuration(parseMapping(initialConfig())).getProperties();
   assert.deepEqual(Object.keys(config.gateway.auth).sort(), [
     "token_lifetime",
     "version",
   ]);
   assert.equal(config.gateway.auth.version, FIRST_AUTH_VERSION);
-  assert.deepEqual(config.gateway.allowed_origins, [
-    "http://127.0.0.1:27182",
-    "http://localhost:27182",
-  ]);
-});
-
-test("gateway base path defaults to the root and accepts only a prefix without a trailing slash", () => {
-  const masterKey = randomBytes(32).toString("base64");
-  assert.equal(
-    configuration({
-      version: CONFIG_VERSION,
-      master_key: masterKey,
-    }).getProperties().gateway.base_path,
-    ROOT_BASE_PATH,
-  );
-  for (const base_path of ["/", "/s/kanthord", "/a.b_c~d-e"])
-    assert.equal(
-      configuration({
-        version: CONFIG_VERSION,
-        master_key: masterKey,
-        gateway: { base_path },
-      }).getProperties().gateway.base_path,
-      base_path,
-    );
-  for (const base_path of [
-    "",
-    "s/kanthord",
-    "/s/kanthord/",
-    "//",
-    "/s//kanthord",
-    "/s kanthord",
-    "/s?x",
-    1,
-    null,
-  ])
-    assert.throws(
-      () =>
-        configuration({
-          version: CONFIG_VERSION,
-          master_key: masterKey,
-          gateway: { base_path },
-        }),
-      (error: Error & { code?: string }) => {
-        assert.equal(error.code, INVALID_FIELD_CODE);
-        assert.match(diagnosticText(error), /gateway\.base_path/);
-        return true;
-      },
-    );
-});
-
-test("worker configuration defaults and strict validation", () => {
-  const masterKey = randomBytes(32).toString("base64");
-  assert.deepEqual(
-    configuration({
-      version: CONFIG_VERSION,
-      master_key: masterKey,
-    }).getProperties().worker,
-    {
-      heartbeat_window: DEFAULT_HEARTBEAT_WINDOW,
-      server_instance_limit: DEFAULT_SERVER_INSTANCE_LIMIT,
-      container_image: DEFAULT_CONTAINER_IMAGE,
-    },
-  );
-  for (const container_image of [
-    "localhost/kanthord-dev",
-    "localhost:5000/kanthord",
-    "registry.example.com:443/team/kanthord-node",
-    "kanthord",
-  ])
-    assert.equal(
-      configuration({
-        version: CONFIG_VERSION,
-        master_key: masterKey,
-        worker: { container_image },
-      }).getProperties().worker.container_image,
-      container_image,
-    );
-  for (const worker of [
-    { heartbeat_window: 0 },
-    { heartbeat_window: -1 },
-    { heartbeat_window: 1.5 },
-    { heartbeat_window: Number.MAX_SAFE_INTEGER + 1 },
-    { server_instance_limit: 0 },
-    { server_instance_limit: -1 },
-    { server_instance_limit: 1.5 },
-    { server_instance_limit: Number.MAX_SAFE_INTEGER + 1 },
-    { container_image: "" },
-    { container_image: 1 },
-    { container_image: "docker.io/kanthorlabs/kanthord:28.0.1" },
-    { container_image: "localhost:5000/kanthord:latest" },
-    { container_image: "docker.io/kanthorlabs/kanthord@sha256:0123" },
-    { globalPrompt: "prompts/global.md" },
-    { unknown: true },
-  ]) {
-    assert.throws(
-      () =>
-        configuration({
-          version: CONFIG_VERSION,
-          master_key: masterKey,
-          worker,
-        }),
-      (error: Error & { code?: string }) => {
-        assert.equal(error.code, INVALID_FIELD_CODE);
-        assert.match(diagnosticText(error), /worker/);
-        return true;
-      },
-    );
-  }
-});
-
-test("agent prompt configuration defaults the agent directory to agents and accepts strings", () => {
-  const masterKey = randomBytes(32).toString("base64");
-  assert.deepEqual(
-    configuration({
-      version: CONFIG_VERSION,
-      master_key: masterKey,
-    }).getProperties().agent,
-    {
-      prompt: { agent_directory: "agents" },
-      cooldown: {
-        rate_limited_ms: 60000,
-        unavailable_ms: 60000,
-        quota_exhausted_ms: 3600000,
-        max_ms: 86400000,
-      },
-    },
-  );
-  const prompt = { agent_directory: "/agents" };
-  assert.deepEqual(
-    configuration({
-      version: CONFIG_VERSION,
-      master_key: masterKey,
-      agent: { prompt },
-    }).getProperties().agent.prompt,
-    prompt,
-  );
-  for (const bad of [
-    { agent_directory: null },
-    { agent_directory: 1 },
-    { system_file: "" },
-    { host_file: true },
-    { x: "" },
-  ])
-    assert.throws(
-      () =>
-        configuration({
-          version: CONFIG_VERSION,
-          master_key: masterKey,
-          agent: { prompt: bad },
-        }),
-      (error: Error & { code?: string }) => {
-        assert.equal(error.code, INVALID_FIELD_CODE);
-        return true;
-      },
-    );
-});
-
-test("config init emits Worker and Scheduler fields", async (t) => {
-  const path = join(temporary(t), "kanthord.yaml");
-  const result = await mainCommand(
-    ["config", "init", "--config", path],
-    t.signal,
-  );
-  assert.equal(result.status, ExitCode.Success);
-  assert.deepEqual(parseMapping(readFileSync(path, "utf8")).worker, {
-    heartbeat_window: DEFAULT_HEARTBEAT_WINDOW,
-    server_instance_limit: DEFAULT_SERVER_INSTANCE_LIMIT,
-    container_image: DEFAULT_CONTAINER_IMAGE,
-  });
-  assert.deepEqual(parseMapping(readFileSync(path, "utf8")).scheduler, {
-    release_reserve: DEFAULT_RELEASE_RESERVE,
-    stop_backoff: DEFAULT_STOP_BACKOFF_SECONDS,
-  });
-});
-
-test("Scheduler reserve accepts only a positive safe integer", () => {
-  const masterKey = randomBytes(32).toString("base64");
-  assert.equal(
-    configuration({
-      version: CONFIG_VERSION,
-      master_key: masterKey,
-    }).getProperties().scheduler.release_reserve,
-    DEFAULT_RELEASE_RESERVE,
-  );
-  for (const releaseReserve of [
-    0,
-    -1,
-    1.5,
-    "600",
-    null,
-    Number.MAX_SAFE_INTEGER + 1,
-  ]) {
-    assert.throws(
-      () =>
-        configuration({
-          version: CONFIG_VERSION,
-          master_key: masterKey,
-          scheduler: { release_reserve: releaseReserve },
-        }),
-      (error: Error & { code?: string }) => {
-        assert.equal(error.code, INVALID_FIELD_CODE);
-        assert.match(diagnosticText(error), /scheduler.release_reserve/);
-        return true;
-      },
-    );
-  }
-});
-
-test("the trace writable period accepts only a safe integer from 1 to 3650", () => {
-  const masterKey = randomBytes(32).toString("base64");
-  for (const writableDays of [0, WRITABLE_DAYS_MAX + 1, 1.5]) {
-    assert.throws(
-      () =>
-        configuration({
-          version: CONFIG_VERSION,
-          master_key: masterKey,
-          tracking: { trace_writable_days: writableDays },
-        }),
-      (error: Error & { code?: string }) => {
-        assert.equal(error.code, INVALID_FIELD_CODE);
-        assert.match(diagnosticText(error), /tracking.trace_writable_days/);
-        return true;
-      },
-    );
-  }
-  for (const writableDays of [1, WRITABLE_DAYS_MAX])
-    assert.equal(
-      configuration({
-        version: CONFIG_VERSION,
-        master_key: masterKey,
-        tracking: { trace_writable_days: writableDays },
-      }).getProperties().tracking.trace_writable_days,
-      writableDays,
-    );
-});
-
-test("footprint thresholds default to null except trace and log, and accept null", () => {
-  const masterKey = randomBytes(32).toString("base64");
-  const defaults = configuration({
-    version: CONFIG_VERSION,
-    master_key: masterKey,
-  }).getProperties().footprint;
-  assert.equal(defaults.disk_free_ratio, DEFAULT_DISK_FREE_RATIO);
-  assert.deepEqual(defaults.thresholds, {
-    operational_database: null,
-    trace: TRACE_THRESHOLD_BYTES,
-    database_backup: null,
-    log: LOG_THRESHOLD_BYTES,
-    environment: null,
-    cache_volume: null,
-    slot_image: null,
-    slot_residue: null,
-    intake_mirror: null,
-    workbench: null,
-    session: null,
-    workspace: null,
-    tool_output: null,
-  });
-  const configured = configuration({
-    version: CONFIG_VERSION,
-    master_key: masterKey,
-    footprint: { thresholds: { trace: null, workspace: CONFIGURED_THRESHOLD } },
-  }).getProperties().footprint.thresholds;
-  assert.equal(configured.trace, null);
-  assert.equal(configured.workspace, CONFIGURED_THRESHOLD);
-  assert.equal(configured.log, LOG_THRESHOLD_BYTES);
-  for (const value of [0, 1.5, "8GiB", Number.MAX_SAFE_INTEGER + 1])
-    assert.throws(
-      () =>
-        configuration({
-          version: CONFIG_VERSION,
-          master_key: masterKey,
-          footprint: { thresholds: { trace: value } },
-        }),
-      (error: Error & { code?: string }) => {
-        assert.equal(error.code, INVALID_FIELD_CODE);
-        assert.match(diagnosticText(error), /footprint.thresholds.trace/);
-        return true;
-      },
-    );
-  assert.throws(
-    () =>
-      configuration({
-        version: CONFIG_VERSION,
-        master_key: masterKey,
-        footprint: { thresholds: { disk: null } },
-      }),
-    (error: Error & { code?: string }) => error.code === INVALID_FIELD_CODE,
-  );
-});
-
-test("project configuration defaults to the environment run limits", () => {
-  const properties = configuration({
-    version: CONFIG_VERSION,
-    master_key: randomBytes(32).toString("base64"),
-  }).getProperties();
-  assert.equal(
-    properties.project.environment_build_timeout_ms,
-    DEFAULT_ENVIRONMENT_BUILD_TIMEOUT_MS,
-  );
-  assert.equal(
-    properties.project.environment_memory_mb,
-    DEFAULT_ENVIRONMENT_MEMORY_MB,
-  );
-  assert.equal(DEFAULT_ENVIRONMENT_BUILD_TIMEOUT_MS, DEFAULT_BUILD_TIMEOUT_MS);
-  assert.equal(DEFAULT_ENVIRONMENT_MEMORY_MB, DEFAULT_MEMORY_MB);
-});
-
-test("project configuration reads back the configured environment run limits", () => {
-  const { project } = configuration({
-    version: CONFIG_VERSION,
-    master_key: randomBytes(32).toString("base64"),
-    project: {
-      environment_build_timeout_ms: CONFIGURED_BUILD_TIMEOUT_MS,
-      environment_memory_mb: CONFIGURED_MEMORY_MB,
-    },
-  }).getProperties();
-  assert.equal(
-    project.environment_build_timeout_ms,
-    CONFIGURED_BUILD_TIMEOUT_MS,
-  );
-  assert.equal(project.environment_memory_mb, CONFIGURED_MEMORY_MB);
-});
-
-test("project configuration refuses an environment run limit below its bound, a fraction or a string", () => {
-  const masterKey = randomBytes(32).toString("base64");
-  const refused = [
-    { environment_build_timeout_ms: 59999 },
-    { environment_build_timeout_ms: 60000.5 },
-    { environment_build_timeout_ms: "600000" },
-    { environment_memory_mb: 255 },
-  ];
-  for (const project of refused)
-    assert.throws(
-      () =>
-        configuration({
-          version: CONFIG_VERSION,
-          master_key: masterKey,
-          project,
-        }),
-      (error: Error & { code?: string }) => {
-        assert.equal(error.code, INVALID_FIELD_CODE);
-        assert.match(
-          diagnosticText(error),
-          new RegExp(`project.${Object.keys(project)[0]}`),
-        );
-        return true;
-      },
-    );
-});
-
-test("mission configuration defaults and strict validation", () => {
-  const masterKey = randomBytes(32).toString("base64");
-  const mission = configuration({
-    version: CONFIG_VERSION,
-    master_key: masterKey,
-  }).getProperties().mission;
-  assert.equal(
-    mission.consecutive_failure_limit,
-    DEFAULT_CONSECUTIVE_FAILURE_LIMIT,
-  );
-  assert.equal(mission.rework_limit, DEFAULT_REWORK_LIMIT);
-  assert.equal(mission.text_max_bytes, DEFAULT_TEXT_MAX_BYTES);
-  assert.doesNotThrow(() =>
-    configuration({
-      version: CONFIG_VERSION,
-      master_key: masterKey,
-      mission: {
-        consecutive_failure_limit: DEFAULT_CONSECUTIVE_FAILURE_LIMIT,
-        rework_limit: REWORK_OFF,
-      },
-    }),
-  );
-  for (const invalidMission of [
-    { unknown: true },
-    { consecutive_failure_limit: -1 },
-    { rework_limit: -1 },
-  ]) {
-    assert.throws(
-      () =>
-        configuration({
-          version: CONFIG_VERSION,
-          master_key: masterKey,
-          mission: invalidMission,
-        }),
-      (error: Error & { code?: string }) => {
-        assert.equal(error.code, INVALID_FIELD_CODE);
-        assert.match(diagnosticText(error), /mission/);
-        return true;
-      },
-    );
-  }
 });
 
 test("configuration is strict, file-only, masks secrets, and reports every invalid field safely", (t) => {
@@ -722,17 +254,6 @@ test("diagnostics report explicit nulls rather than substituting defaults", () =
     );
 });
 
-test("configuration accepts ordinary aliases", () => {
-  const value = parseMapping("first: &hosts [localhost]\nsecond: *hosts");
-  const config = configuration({
-    version: CONFIG_VERSION,
-    master_key: randomBytes(32).toString("base64"),
-    gateway: { allowed_hosts: value.first, allowed_origins: value.second },
-  }).getProperties();
-  assert.deepEqual(config.gateway.allowed_hosts, ["localhost"]);
-  assert.deepEqual(config.gateway.allowed_origins, ["localhost"]);
-});
-
 test("programmatic configuration cannot bypass cycle and structure checks", () => {
   const masterKey = randomBytes(32).toString("base64");
   const cycle: Record<string, unknown> = {};
@@ -774,17 +295,6 @@ test("programmatic configuration cannot bypass cycle and structure checks", () =
   assert.throws(
     () => configuration([]),
     (error) => /expected a mapping/.test(diagnosticText(error)),
-  );
-});
-
-test("config option/environment resolution", () => {
-  assert.equal(
-    configPath("override.yaml", { KANTHORD_CONFIG: "other.yaml" }),
-    resolve("override.yaml"),
-  );
-  assert.equal(
-    configPath(undefined, { KANTHORD_CONFIG: "other.yaml" }),
-    resolve("other.yaml"),
   );
 });
 

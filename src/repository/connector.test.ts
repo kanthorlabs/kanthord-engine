@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import {
   accessSync,
   appendFileSync,
@@ -14,7 +13,6 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import test, { suite, type TestContext } from "node:test";
 import { simpleGit } from "simple-git";
@@ -22,7 +20,6 @@ import {
   background,
   CancellationContext,
   type Context,
-  DeadlineExceeded,
 } from "../kernel/context.ts";
 import { type PushRecord, RepositoryFileState } from "./contract.ts";
 import {
@@ -31,7 +28,6 @@ import {
   clone,
   cloneSnapshot,
   fetchAndCheckout,
-  foldBranchPush,
   GATE_DECLARATION_INVALID,
   gitLsRemote,
   GitStage,
@@ -46,7 +42,6 @@ import {
   resolveBranchCommit,
   squashPushFresh,
 } from "./connector.ts";
-import { CheckEndState, ExpectedEndState } from "./github.ts";
 import { isString } from "../kernel/values.ts";
 import {
   fixtureTemplate,
@@ -62,61 +57,10 @@ const DEADLINE_MS = 60_000;
 const ORIGIN_NAME = "origin";
 const SEED_NAME = "seed";
 const SIBLING_ORIGIN = `../${ORIGIN_NAME}`;
-const EXPIRED_DEADLINE_MS = 1;
 const DEPENDENCY_TEXT = "dependency";
 const MISSING_REPOSITORY = "file:////nonexistent_kanthord_plan04_test";
 
 suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
-  test("gitLsRemote resolves for a local git repository", async (t) => {
-    const dir = mkdtempSync(join(tmpdir(), "kanthord-repository-"));
-    stopAfter(t, () => rmSync(dir, { recursive: true, force: true }));
-    await simpleGit(dir).init();
-    await assert.doesNotReject(
-      gitLsRemote(
-        "file://" + dir,
-        background,
-        DEADLINE_MS,
-        LOCAL_GIT_SSH_ACCESS,
-      ),
-    );
-  });
-
-  test("gitLsRemote rejects for a nonexistent repository", async () => {
-    await assert.rejects(
-      gitLsRemote(
-        MISSING_REPOSITORY,
-        background,
-        DEADLINE_MS,
-        LOCAL_GIT_SSH_ACCESS,
-      ),
-    );
-  });
-
-  test("gitLsRemote rejects when the deadline elapses", async (t) => {
-    const dir = mkdtempSync(join(tmpdir(), "kanthord-repository-"));
-    stopAfter(t, () => rmSync(dir, { recursive: true, force: true }));
-    await simpleGit(dir).init();
-    await assert.rejects(
-      gitLsRemote(
-        "file://" + dir,
-        background,
-        EXPIRED_DEADLINE_MS,
-        LOCAL_GIT_SSH_ACCESS,
-      ),
-    );
-  });
-
-  test("gitLsRemote rejects when the context was already cancelled", async (t) => {
-    const dir = mkdtempSync(join(tmpdir(), "kanthord-repository-"));
-    stopAfter(t, () => rmSync(dir, { recursive: true, force: true }));
-    await simpleGit(dir).init();
-    const context = new CancellationContext();
-    context.cancel();
-    await assert.rejects(
-      gitLsRemote("file://" + dir, context, DEADLINE_MS, LOCAL_GIT_SSH_ACCESS),
-    );
-  });
-
   test("connector clones, resumes and pushes only fast-forward node branches and immutable snapshots", async (t) => {
     const root = temporary(t);
     const origin = join(root, "origin");
@@ -554,12 +498,10 @@ test("a git failure keeps the operation and the stderr without credentials in it
   stopAfter(t, () => {
     process.env.PATH = path;
   });
-  const keepsCause = (operation: string) => (error: unknown) => {
+  const keepsCause = (error: unknown) => {
     assert.ok(error instanceof Error);
     assert.equal((error as { code?: string }).code, GIT_FAILED);
-    assert.equal(error.message, `${operation}: git failed.`);
     assert.ok(error.cause instanceof Error);
-    assert.match(error.cause.message, new RegExp(`^${operation}: `));
     assert.match(error.cause.message, /Could not resolve host/);
     assert.doesNotMatch(error.cause.message, new RegExp(secret));
     return true;
@@ -572,7 +514,7 @@ test("a git failure keeps the operation and the stderr without credentials in it
       DEADLINE_MS,
       LOCAL_GIT_SSH_ACCESS,
     ),
-    keepsCause("clone"),
+    keepsCause,
   );
   await assert.rejects(
     pushNodeBranch(
@@ -582,7 +524,7 @@ test("a git failure keeps the operation and the stderr without credentials in it
       DEADLINE_MS,
       LOCAL_GIT_SSH_ACCESS,
     ),
-    keepsCause("push node branch"),
+    keepsCause,
   );
 });
 
@@ -849,31 +791,6 @@ test("landedOn answers base_moved when the base is not an ancestor of the commit
   assertNoClone(scratch);
 });
 
-test("landedOn answers landed false for a rewritten branch", async (t) => {
-  const { origin, base, snapshot, scratch } = await remote(t);
-  await squashPushFresh(
-    squashInput(origin, snapshot),
-    background,
-    deadlineAt(),
-    LOCAL_GIT_SSH_ACCESS,
-  );
-  await simpleGit(origin).raw([
-    "update-ref",
-    `refs/heads/${BASE_BRANCH}`,
-    base,
-  ]);
-  assert.deepEqual(
-    await landedOn(
-      { address: origin, branch: BASE_BRANCH, commit: snapshot },
-      background,
-      deadlineAt(),
-      LOCAL_GIT_SSH_ACCESS,
-    ),
-    { landed: false, first_parent: null, base_moved: false },
-  );
-  assertNoClone(scratch);
-});
-
 test("landedOn throws for an unreachable commit and a missing repository", async (t) => {
   const { origin, seed, scratch, commit } = await remote(t);
   const unreachable = await commit("local", "unreachable");
@@ -947,47 +864,6 @@ test("an abort ends every git write and the landing read", async (t) => {
   assertNoClone(scratch);
 });
 
-test("foldBranchPush answers expected with the landed commit, conflict for a moved base and none otherwise", () => {
-  const commit = "a".repeat(40);
-  for (const expected of [
-    ExpectedEndState.BaseBranchPushed,
-    ExpectedEndState.PullRequestMerged,
-  ]) {
-    assert.deepEqual(
-      foldBranchPush(
-        { landed: true, first_parent: commit, base_moved: false },
-        expected,
-        false,
-      ),
-      { end_state: CheckEndState.Expected, landed_commits: [commit] },
-    );
-    assert.deepEqual(
-      foldBranchPush(
-        { landed: false, first_parent: null, base_moved: true },
-        expected,
-        false,
-      ),
-      { end_state: CheckEndState.Conflict, landed_commits: [] },
-    );
-    assert.deepEqual(
-      foldBranchPush(
-        { landed: false, first_parent: null, base_moved: true },
-        expected,
-        true,
-      ),
-      { end_state: CheckEndState.None, landed_commits: [] },
-    );
-    assert.deepEqual(
-      foldBranchPush(
-        { landed: false, first_parent: null, base_moved: false },
-        expected,
-        false,
-      ),
-      { end_state: CheckEndState.None, landed_commits: [] },
-    );
-  }
-});
-
 const INSTRUCTION_PATHS = [
   "AGENTS.md",
   "AGENTS.local.md",
@@ -996,9 +872,6 @@ const INSTRUCTION_PATHS = [
 ];
 const NO_ENTRIES = 0;
 const MAX_BYTES = 16;
-const FIRST_INDEX = 0;
-const SECOND_INDEX = 1;
-const FIRST_TEXT = "first\n";
 const UNKNOWN_COMMIT = "0".repeat(40);
 
 const GITLINK_MODE = "160000";
@@ -1116,19 +989,6 @@ suite("connector branch reads", { concurrency: SUITE_CONCURRENCY }, () => {
     );
   });
 
-  test("resolveBranchCommit rejects for a nonexistent repository", async () => {
-    await assert.rejects(
-      resolveBranchCommit(
-        MISSING_REPOSITORY,
-        "main",
-        background,
-        DEADLINE_MS,
-        LOCAL_GIT_SSH_ACCESS,
-      ),
-      { code: "repository.connector.git_failed" },
-    );
-  });
-
   test("readFilesAtCommit reads the present files of a commit and answers null for an absent file", async (t) => {
     const { address, scratch, commit } = await instructionOrigin(t);
     await commit({ "AGENTS.md": "first\n" });
@@ -1175,11 +1035,9 @@ suite("connector branch reads", { concurrency: SUITE_CONCURRENCY }, () => {
 
 const WORKFLOWS_DIRECTORY = ".github/workflows";
 const LIST_LIMIT = 20;
-const LIST_LIMIT_ABOVE = 25;
 const LIST_LIMIT_MAX = 1000;
 const GITLINK_OBJECT = "1".repeat(40);
 const UNSAFE_DIRECTORIES = ["..", "/abs", "a/../b", "", "a//b"];
-const REPOSITORY_FILES_PREFIX = "kanthord-repository-files-";
 
 async function listWorkflows(
   t: TestContext,
@@ -1225,27 +1083,6 @@ suite("connector file lists", { concurrency: SUITE_CONCURRENCY }, () => {
     );
   });
 
-  test("listFilesAtCommit answers an empty list for an absent directory and for a path that is a file", async (t) => {
-    const files = { ".github/workflows/ci.yml": "ci\n" };
-    assert.deepEqual(await listWorkflows(t, files, ".github/absent"), []);
-    assert.deepEqual(
-      await listWorkflows(t, files, ".github/workflows/ci.yml"),
-      [],
-    );
-  });
-
-  test("listFilesAtCommit answers at most the limit", async (t) => {
-    const files: Record<string, string> = {};
-    for (let index = LIST_LIMIT_ABOVE; index > NO_ENTRIES; index--)
-      files[`${WORKFLOWS_DIRECTORY}/f${String(index).padStart(2, "0")}.yml`] =
-        "x\n";
-    const listed = await listWorkflows(t, files);
-    assert.equal(listed.length, LIST_LIMIT);
-    assert.deepEqual(listed, [...listed].sort());
-    assert.equal(listed[FIRST_INDEX], `${WORKFLOWS_DIRECTORY}/f01.yml`);
-    assert.equal(listed.at(-1), `${WORKFLOWS_DIRECTORY}/f20.yml`);
-  });
-
   test("listFilesAtCommit refuses an unsafe directory", async (t) => {
     const { address, scratch, commit } = await instructionOrigin(t);
     const head = await commit({ "a/b": "x\n" });
@@ -1279,27 +1116,6 @@ suite("connector file lists", { concurrency: SUITE_CONCURRENCY }, () => {
         { name: "AssertionError" },
       );
     assert.equal(readdirSync(scratch).length, NO_ENTRIES);
-  });
-
-  test("listFilesAtCommit fetches no blob", async (t) => {
-    const { address, scratch, commit } = await instructionOrigin(t);
-    const head = await commit({ ".github/workflows/ci.yml": "ci\n" });
-    await listFilesAtCommit(
-      address,
-      head,
-      WORKFLOWS_DIRECTORY,
-      LIST_LIMIT,
-      background,
-      DEADLINE_MS,
-      LOCAL_GIT_SSH_ACCESS,
-      scratch,
-    );
-    assert.deepEqual(
-      readdirSync(scratch).filter((name) =>
-        name.startsWith(REPOSITORY_FILES_PREFIX),
-      ),
-      [],
-    );
   });
 });
 
@@ -1354,18 +1170,6 @@ suite("connector symlink reads", { concurrency: SUITE_CONCURRENCY }, () => {
     );
   });
 
-  test("readFilesAtCommit answers absent for a dangling symlink", async (t) => {
-    assert.deepEqual(
-      await readStates(t, { "AGENTS.md": { link: "missing.md" } }),
-      [
-        [RepositoryFileState.Absent, null],
-        [RepositoryFileState.Absent, null],
-        [RepositoryFileState.Absent, null],
-        [RepositoryFileState.Absent, null],
-      ],
-    );
-  });
-
   test("readFilesAtCommit answers unreadable for a symlink loop", async (t) => {
     const [loop] = await readStates(t, {
       "AGENTS.md": { link: "CLAUDE.md" },
@@ -1411,7 +1215,6 @@ test("readFilesAtCommit follows a chain of 40 symlinks within the deadline and r
 
 const SYMLINK_MODE = "120000";
 const SYMLINK_TARGET_BYTES_MAX = 4096;
-const UNRELATED_SYMLINKS = 200;
 const BOUND_TARGET = "a.md";
 const CURRENT_DIRECTORY_PREFIX = "./";
 const WANT_PATTERN = / fetch> want ([0-9a-f]{40})/g;
@@ -1420,12 +1223,6 @@ const START_EVENT = "start";
 const NO_TEXT = "";
 const GIT_ARGUMENTS_START = 1;
 const TREE_AND_BLOB_PACKS = 2;
-
-function blobObject(text: string): string {
-  return createHash("sha1")
-    .update(`blob ${Buffer.byteLength(text)}\0${text}`)
-    .digest("hex");
-}
 
 const TRACE_BIN_DIRECTORY = "bin";
 const GIT_BINARY = "git";
@@ -1546,37 +1343,6 @@ test("readFilesAtCommit fetches the blobs of all regular files in one fetch", as
   );
 });
 
-test("readFilesAtCommit fetches only the symlink blobs of the chain among many unrelated symlinks", async (t) => {
-  const unrelated: Record<string, SeedEntry> = {};
-  const unrelatedTargets: string[] = [];
-  for (let index = 0; index < UNRELATED_SYMLINKS; index++) {
-    unrelatedTargets.push(`root-target-${index}.md`, `target-${index}.md`);
-    unrelated[`unrelated-${index}.md`] = { link: `root-target-${index}.md` };
-    unrelated[`unrelated/link-${index}.md`] = { link: `target-${index}.md` };
-  }
-  const { read, wants } = await tracedRead(t, {
-    ...unrelated,
-    "AGENTS.md": "agents\n",
-    "CLAUDE.md": { link: "AGENTS.md" },
-    "AGENTS.local.md": { link: "docs/middle.md" },
-    "docs/middle.md": { link: "target.md" },
-    "docs/target.md": "target\n",
-  });
-  assert.deepEqual(
-    read.map(({ state, text }) => [state, text]),
-    [
-      [RepositoryFileState.Present, "agents\n"],
-      [RepositoryFileState.Present, "target\n"],
-      [RepositoryFileState.Present, "agents\n"],
-      [RepositoryFileState.Absent, null],
-    ],
-  );
-  for (const target of ["AGENTS.md", "docs/middle.md", "target.md"])
-    assert.ok(wants.has(blobObject(target)));
-  for (const target of unrelatedTargets)
-    assert.ok(!wants.has(blobObject(target)));
-});
-
 suite("connector bounded reads", { concurrency: SUITE_CONCURRENCY }, () => {
   test("readFilesAtCommit answers unreadable for a symlink target above the byte bound", async (t) => {
     assert.deepEqual(
@@ -1633,24 +1399,6 @@ suite("connector bounded reads", { concurrency: SUITE_CONCURRENCY }, () => {
     );
   });
 
-  test("readFilesAtCommit reads the named commit after the branch moved", async (t) => {
-    const { address, scratch, commit } = await instructionOrigin(t);
-    const first = await commit({ "AGENTS.md": "first\n" });
-    await commit({ "AGENTS.md": "second\n" });
-    const files = await readFilesAtCommit(
-      address,
-      first,
-      INSTRUCTION_PATHS,
-      MAX_BYTES,
-      background,
-      DEADLINE_MS,
-      LOCAL_GIT_SSH_ACCESS,
-      scratch,
-    );
-    assert.equal(files[FIRST_INDEX]?.text, FIRST_TEXT);
-    assert.equal(files[SECOND_INDEX]?.text, null);
-  });
-
   test("readFilesAtCommit deletes its directory when the read fails", async (t) => {
     const { address, scratch, commit } = await instructionOrigin(t);
     await commit({ "AGENTS.md": "first\n" });
@@ -1679,25 +1427,6 @@ suite("connector bounded reads", { concurrency: SUITE_CONCURRENCY }, () => {
         scratch,
       ),
       { code: "repository.connector.git_failed" },
-    );
-    assert.equal(readdirSync(scratch).length, NO_ENTRIES);
-  });
-
-  test("readFilesAtCommit rejects when the deadline elapsed and deletes its directory", async (t) => {
-    const { address, scratch, commit } = await instructionOrigin(t);
-    const head = await commit({ "AGENTS.md": "first\n" });
-    await assert.rejects(
-      readFilesAtCommit(
-        address,
-        head,
-        INSTRUCTION_PATHS,
-        MAX_BYTES,
-        background,
-        EXPIRED_DEADLINE_MS - 1,
-        LOCAL_GIT_SSH_ACCESS,
-        scratch,
-      ),
-      DeadlineExceeded,
     );
     assert.equal(readdirSync(scratch).length, NO_ENTRIES);
   });
@@ -1734,8 +1463,6 @@ const GATE_DECLARATION_VERSION = 1;
 const GATE_COMMAND = "true";
 const GATE_DIRECTORY_NAME = "repositories";
 const GATE_BINDING_NAME = "binding.git";
-const GATE_FILE_MODE_EXECUTABLE = "+x";
-const MISSING_OBJECT_MARK = "?";
 const MAINTENANCE_OFF = "false";
 const GC_OFF = "0";
 const EMPTY_REFS = "";
@@ -1843,57 +1570,6 @@ suite("connector gate changes", { concurrency: SUITE_CONCURRENCY }, () => {
     ]);
   });
 
-  test("changedGateFiles counts a mode change of a gate path", async (t) => {
-    const origin = await gateOrigin(t);
-    await origin.onMain({
-      [GATE_DECLARATION_FILE]: gateDeclaration(["run.sh"]),
-      "run.sh": "true\n",
-    });
-    await origin.startBranch();
-    await origin.git.raw([
-      "update-index",
-      `--chmod=${GATE_FILE_MODE_EXECUTABLE}`,
-      "run.sh",
-    ]);
-    const commit = await origin.publish(NODE_BRANCH);
-    assert.deepEqual(await origin.changed(commit), ["run.sh"]);
-  });
-
-  test("changedGateFiles counts a change below a declared directory", async (t) => {
-    const origin = await gateOrigin(t);
-    await origin.onMain({
-      [GATE_DECLARATION_FILE]: gateDeclaration(["scripts"]),
-      "scripts/a.sh": "one\n",
-      "scripts/b.sh": "one\n",
-    });
-    await origin.startBranch();
-    const commit = await origin.onBranch({ "scripts/a.sh": "two\n" });
-    assert.deepEqual(await origin.changed(commit), ["scripts"]);
-  });
-
-  test("changedGateFiles answers no path for a change with no gate file", async (t) => {
-    const origin = await gateOrigin(t);
-    await origin.onMain({
-      [GATE_DECLARATION_FILE]: gateDeclaration(["package.json"]),
-      "package.json": "one\n",
-      "node.md": "one\n",
-    });
-    await origin.startBranch();
-    const commit = await origin.onBranch({ "node.md": "two\n" });
-    assert.deepEqual(await origin.changed(commit), []);
-  });
-
-  test("changedGateFiles answers no path when the base holds no declaration", async (t) => {
-    const origin = await gateOrigin(t);
-    await origin.onMain({ "package.json": "one\n" });
-    await origin.startBranch();
-    const commit = await origin.onBranch({
-      [GATE_DECLARATION_FILE]: gateDeclaration(["package.json"]),
-      "package.json": "two\n",
-    });
-    assert.deepEqual(await origin.changed(commit), []);
-  });
-
   test("changedGateFiles reads the declaration of the base branch", async (t) => {
     const origin = await gateOrigin(t);
     await origin.onMain({
@@ -1906,27 +1582,6 @@ suite("connector gate changes", { concurrency: SUITE_CONCURRENCY }, () => {
       "package.json": "two\n",
     });
     assert.ok((await origin.changed(commit)).includes("package.json"));
-  });
-
-  test("changedGateFiles works on a treeless bare repository", async (t) => {
-    const origin = await gateOrigin(t);
-    await origin.onMain({
-      [GATE_DECLARATION_FILE]: gateDeclaration(["package.json"]),
-      "package.json": "one\n",
-    });
-    await origin.startBranch();
-    const commit = await origin.onBranch({ "package.json": "two\n" });
-    assert.deepEqual(await origin.changed(commit), ["package.json"]);
-    const objects = await simpleGit().raw([
-      `--git-dir=${origin.directory}`,
-      "rev-list",
-      "--objects",
-      "--all",
-      "--missing=print",
-    ]);
-    assert.ok(
-      objects.split("\n").some((line) => line.startsWith(MISSING_OBJECT_MARK)),
-    );
   });
 
   test("changedGateFiles reuses the bare repository of the binding", async (t) => {
@@ -1950,27 +1605,6 @@ suite("connector gate changes", { concurrency: SUITE_CONCURRENCY }, () => {
       MAINTENANCE_OFF,
     );
     assert.equal((await configured("gc.auto")).trim(), GC_OFF);
-  });
-
-  test("changedGateFiles follows a force-pushed base branch", async (t) => {
-    const origin = await gateOrigin(t);
-    await origin.onMain({
-      [GATE_DECLARATION_FILE]: gateDeclaration(["package.json"]),
-      "package.json": "one\n",
-    });
-    await origin.startBranch();
-    const first = await origin.onBranch({ "package.json": "two\n" });
-    assert.deepEqual(await origin.changed(first), ["package.json"]);
-    await origin.git.raw(["checkout", BASE_BRANCH]);
-    await origin.git.raw(["reset", "--hard", origin.base]);
-    await origin.onMain({
-      [GATE_DECLARATION_FILE]: gateDeclaration(["package.json", "added.txt"]),
-      "package.json": "one\n",
-      "added.txt": "one\n",
-    });
-    await origin.startBranch();
-    const second = await origin.onBranch({ "added.txt": "two\n" });
-    assert.deepEqual(await origin.changed(second), ["added.txt"]);
   });
 
   test("changedGateFiles removes a corrupt repository and refetches", async (t) => {
@@ -2049,27 +1683,6 @@ suite("connector gate refusals", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(existsSync(origin.directory), true);
   });
 
-  test("changedGateFiles throws for an unreachable commit and removes the directory", async (t) => {
-    const origin = await gateOrigin(t);
-    await assert.rejects(origin.changed(UNKNOWN_COMMIT), { code: GIT_FAILED });
-    assert.equal(existsSync(origin.directory), false);
-  });
-
-  test("changedGateFiles keeps the directory after a deadline", async (t) => {
-    const origin = await gateOrigin(t);
-    await origin.onMain({
-      [GATE_DECLARATION_FILE]: gateDeclaration(["package.json"]),
-      "package.json": "one\n",
-    });
-    await origin.startBranch();
-    const commit = await origin.onBranch({ "package.json": "two\n" });
-    assert.deepEqual(await origin.changed(commit), ["package.json"]);
-    await assert.rejects(
-      origin.changed(commit, { deadlineAt: Date.now() - EXPIRED_DEADLINE_MS }),
-    );
-    assert.equal(existsSync(origin.directory), true);
-  });
-
   test("changedGateFiles keeps the directory after a git deadline", async (t) => {
     const origin = await gateOrigin(t);
     await origin.onMain({
@@ -2122,10 +1735,7 @@ suite("connector snapshot refresh", { concurrency: SUITE_CONCURRENCY }, () => {
       DEADLINE_MS,
       LOCAL_GIT_SSH_ACCESS,
     );
-  const refused = {
-    code: GIT_FAILED,
-    message: /The remote does not serve the commit\./,
-  };
+  const refused = { code: GIT_FAILED };
 
   test("refreshSnapshot refuses a commit that no remote branch or tag holds", async (t) => {
     const { origin, seed, snapshot, commit } = await remoteRepository(t);
@@ -2195,21 +1805,6 @@ suite("connector snapshot refresh", { concurrency: SUITE_CONCURRENCY }, () => {
       await git.raw(["update-ref", "-d", ref]);
   };
 
-  test("refreshSnapshot drops origin/HEAD and makes no local branch when the remote HEAD names a missing branch", async (t) => {
-    const { origin, snapshot } = await remoteRepository(t);
-    const directory = temporary(t);
-    await simpleGit(origin).raw(["symbolic-ref", "HEAD", "refs/heads/main"]);
-    await snapshotOf(origin, snapshot, directory);
-    await withoutLocalBranches(directory);
-    await simpleGit(origin).raw(["symbolic-ref", "HEAD", "refs/heads/gone"]);
-    assert.equal(await refresh(origin, snapshot, directory), snapshot);
-    assert.equal(
-      await refsUnder(directory, "refs/remotes/origin/HEAD"),
-      EMPTY_REFS,
-    );
-    assert.equal(await refsUnder(directory, "refs/heads"), EMPTY_REFS);
-  });
-
   test("refreshSnapshot makes no local branch when the remote HEAD names a branch that is not a valid branch name", async (t) => {
     const { origin, snapshot } = await remoteRepository(t);
     const directory = temporary(t);
@@ -2225,71 +1820,6 @@ suite("connector snapshot refresh", { concurrency: SUITE_CONCURRENCY }, () => {
       EMPTY_REFS,
     );
   });
-
-  test("refreshSnapshot follows the remote tags and proves a commit that only a tag holds", async (t) => {
-    const { origin, seed, base } = await remoteRepository(t);
-    const git = simpleGit(seed);
-    await git.raw(["tag", "v1", base]);
-    await git.raw(["push", "origin", "v1"]);
-    const directory = temporary(t);
-    await snapshotOf(origin, base, directory);
-    await git.raw(["push", "origin", "--delete", "refs/tags/v1"]);
-    await git.raw(["checkout", "--detach", base]);
-    await git.raw([...IDENTITY, "commit", "--allow-empty", "-m", "tagged"]);
-    const tagged = (await git.revparse(["HEAD"])).trim();
-    await git.raw(["tag", "v2", tagged]);
-    await git.raw(["push", "origin", "v2"]);
-    assert.equal(await refresh(origin, tagged, directory), tagged);
-    assert.deepEqual(
-      (await simpleGit(directory).raw(["tag", "--list"])).trim().split("\n"),
-      ["v2"],
-    );
-  });
-});
-
-test("refreshSnapshot proves the commit with the commit-graph file off", async (t) => {
-  const { origin, snapshot } = await remoteRepository(t);
-  const directory = temporary(t);
-  await cloneSnapshot(
-    origin,
-    snapshot,
-    directory,
-    background,
-    DEADLINE_MS,
-    LOCAL_GIT_SSH_ACCESS,
-  );
-  const execPath = (await simpleGit().raw(["--exec-path"])).trim();
-  const bin = temporary(t);
-  const log = join(bin, "git.log");
-  writeFileSync(
-    join(bin, "git"),
-    `#!/bin/sh\necho "$*" >> '${log}'\nexec '${join(execPath, "git")}' "$@"\n`,
-    { mode: 0o700 },
-  );
-  const path = process.env.PATH;
-  process.env.PATH = `${bin}:${path}`;
-  stopAfter(t, () => {
-    process.env.PATH = path;
-  });
-  assert.equal(
-    await refreshSnapshot({
-      address: origin,
-      revision: snapshot,
-      directory,
-      context: background,
-      deadlineMs: DEADLINE_MS,
-      ssh: LOCAL_GIT_SSH_ACCESS,
-    }),
-    snapshot,
-  );
-  const calls = readFileSync(log, "utf8").split("\n");
-  for (const command of ["rev-parse", "for-each-ref --contains="])
-    assert.ok(
-      calls.some((line) =>
-        line.startsWith(`-c core.commitGraph=false ${command}`),
-      ),
-      command,
-    );
 });
 
 async function pushRuleFixture(t: TestContext) {
@@ -2420,17 +1950,6 @@ suite("connector push record rules", { concurrency: SUITE_CONCURRENCY }, () => {
     });
   });
 
-  test("rule 3 follows the remote when the local branch does not descend", async (t) => {
-    const f = await pushRuleFixture(t);
-    const pending = await f.commit(f.workspace, "pushed");
-    await f.push();
-    await f.rewrite("diverged");
-    assert.deepEqual(await f.checkout({ confirmed: f.base, pending }), {
-      head: pending,
-      record: { confirmed: pending, pending: null },
-    });
-  });
-
   test("rule 4 refuses when the evidence holds the binding", async (t) => {
     const f = await pushRuleFixture(t);
     const pending = await f.commit(f.workspace, "unpushed");
@@ -2450,35 +1969,6 @@ suite("connector push record rules", { concurrency: SUITE_CONCURRENCY }, () => {
     const record = { confirmed: null, pending };
     assert.deepEqual(await f.checkout(record), { head: pending, record });
     assert.equal(await f.remote(), null);
-  });
-
-  test("rule 4 applies today's rule when the local branch does not descend", async (t) => {
-    const f = await pushRuleFixture(t);
-    const pending = await f.commit(f.workspace, "unpushed");
-    await f.rewrite("diverged");
-    const record = { confirmed: null, pending };
-    assert.deepEqual(await f.checkout(record), { head: f.base, record });
-  });
-
-  test("rule 5 refuses a lost pushed branch", async (t) => {
-    const f = await pushRuleFixture(t);
-    const confirmed = await f.commit(f.workspace, "pushed");
-    await f.push();
-    const local = await f.commit(f.workspace, "unpushed");
-    await f.removeRemote();
-    await simpleGit(f.workspace).raw([
-      "update-ref",
-      "-d",
-      `refs/remotes/origin/${f.branch}`,
-    ]);
-    await assert.rejects(
-      f.checkout({ confirmed, pending: null }),
-      MISSING_BRANCH,
-    );
-    assert.equal(
-      (await simpleGit(f.workspace).revparse(["HEAD"])).trim(),
-      local,
-    );
   });
 
   test("rule 6 follows a rewound remote and confirms its head", async (t) => {

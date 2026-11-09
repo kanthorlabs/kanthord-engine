@@ -23,29 +23,37 @@ type BucketClient = {
 };
 type CreateBucketClient = (config: S3ClientConfig) => BucketClient;
 
+interface StatusCodeResponse {
+  readonly $metadata: { readonly httpStatusCode: unknown };
+}
+
+function hasStatusCode(value: unknown): value is StatusCodeResponse {
+  return (
+    isObject(value) &&
+    "$metadata" in value &&
+    isObject(value.$metadata) &&
+    "httpStatusCode" in value.$metadata
+  );
+}
+
 function bucketStatus(
   value: unknown,
   secrets: readonly string[],
   observe?: ResourceObserver,
 ): ResourceStatusValue {
-  if (!isObject(value) || !("$metadata" in value)) {
+  if (!hasStatusCode(value)) {
     observe?.(thrownReason(value, secrets), ResourceFailureReason.Unreachable);
     return ResourceStatus.Unknown;
   }
-  const metadata = value.$metadata;
-  if (!isObject(metadata) || !("httpStatusCode" in metadata)) {
-    observe?.(thrownReason(value, secrets), ResourceFailureReason.Unreachable);
-    return ResourceStatus.Unknown;
-  }
-  if (metadata.httpStatusCode === HttpStatus.OK) return ResourceStatus.Healthy;
+  const status = value.$metadata.httpStatusCode;
+  if (status === HttpStatus.OK) return ResourceStatus.Healthy;
   observe?.(
-    `status=${String(metadata.httpStatusCode)}`,
-    isNumber(metadata.httpStatusCode)
-      ? failureReasonOfStatus(metadata.httpStatusCode)
+    `status=${String(status)}`,
+    isNumber(status)
+      ? failureReasonOfStatus(status)
       : ResourceFailureReason.Unreachable,
   );
-  if (metadata.httpStatusCode === HttpStatus.NotFound)
-    return ResourceStatus.Unhealthy;
+  if (status === HttpStatus.NotFound) return ResourceStatus.Unhealthy;
   return ResourceStatus.Unknown;
 }
 

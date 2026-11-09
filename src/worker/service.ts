@@ -57,6 +57,7 @@ import {
   type PlacementStatus,
   type PoolHost,
   type PromptBase,
+  type Registration,
   REGISTRATION_CAPABILITY,
   REGISTRATION_TARGET_KIND,
   type RepositoryBindingIdsOf,
@@ -642,22 +643,24 @@ export class WorkerService implements Service {
       return (await this.stop()) ?? reasonOf(context.signal);
     const error = await this.start();
     if (error) return error;
-    if (!this.quiesced)
-      this.heartbeatTimer ??= setInterval(() => {
-        try {
-          this.sweepRegistrations();
-        } catch (failure) {
-          this.runError = asError(failure);
-          void this.stop();
-        }
-      }, HEARTBEAT_SWEEP_INTERVAL_MS).unref();
-    if (!this.quiesced)
-      this.stopOrderTimer ??= setInterval(
-        () => this.instances.sweepStopOrders(),
-        INSTANCE_HEARTBEAT_INTERVAL_MS,
-      ).unref();
+    this.startSweepTimers();
     await cancelled(this.shutdown.signal);
     return (await this.stop()) ?? this.runError ?? reasonOf(context.signal);
+  }
+  private startSweepTimers(): void {
+    if (this.quiesced) return;
+    this.heartbeatTimer ??= setInterval(() => {
+      try {
+        this.sweepRegistrations();
+      } catch (failure) {
+        this.runError = asError(failure);
+        void this.stop();
+      }
+    }, HEARTBEAT_SWEEP_INTERVAL_MS).unref();
+    this.stopOrderTimer ??= setInterval(
+      () => this.instances.sweepStopOrders(),
+      INSTANCE_HEARTBEAT_INTERVAL_MS,
+    ).unref();
   }
   async healthcheck(): Promise<Healthcheck> {
     return {
@@ -831,6 +834,23 @@ export class WorkerService implements Service {
     endGroup(tx, projectId, resourceIdentity, now);
   }
 
+  private undroppedBindingOf(
+    tx: Transaction,
+    registration: Registration,
+  ): NonNullable<ReturnType<WorkerBindingOf>> | null {
+    const binding = this.dependencies.workerBindingOf(
+      tx,
+      registration.project_id,
+      registration.resource_identity,
+    );
+    if (!binding || binding.tombstone || binding.instance_count === NO_ITEMS)
+      return null;
+    const dropped = instanceDropped(binding, registration, (instanceId) =>
+      this.instanceNameOf(tx, instanceId),
+    );
+    return dropped ? null : binding;
+  }
+
   registrationHealthcheck(tx: Transaction, runtimeIdentity: string): boolean {
     assert.ok(tx.database.isTransaction);
     assert.equal(tx.database, this.dependencies.store.database);
@@ -839,19 +859,8 @@ export class WorkerService implements Service {
       runtimeIdentity,
     );
     if (!registration) return false;
-    const binding = this.dependencies.workerBindingOf(
-      tx,
-      registration.project_id,
-      registration.resource_identity,
-    );
-    if (!binding || binding.tombstone || binding.instance_count === NO_ITEMS)
-      return false;
-    if (
-      instanceDropped(binding, registration, (instanceId) =>
-        this.instanceNameOf(tx, instanceId),
-      )
-    )
-      return false;
+    const binding = this.undroppedBindingOf(tx, registration);
+    if (!binding) return false;
     const declaration = getWorkerDeclaration(binding.worker_name);
     assert.ok(declaration);
     if (declaration.host === WorkerHost.ExternalHarness) return true;

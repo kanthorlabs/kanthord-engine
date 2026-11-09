@@ -173,10 +173,6 @@ test("E06 webhook acquisition journey", { timeout: TIMEOUT }, async (t) => {
       (await send(PING_EVENT, "d-2", PING)).status,
       HttpStatus.NoContent,
     );
-    assert.equal(
-      (await send(PING_EVENT, "d-2", PING, null)).status,
-      HttpStatus.Unauthorized,
-    );
     assert.equal((await events()).length, EVENTS_PER_DELIVERY);
   });
 

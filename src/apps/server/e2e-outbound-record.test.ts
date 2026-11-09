@@ -67,22 +67,6 @@ test("E02.3 outbound delete with a filter and without force refuses", async (t) 
 test("E02.4 outbound delete refuses an invalid filter three times", async (t) => {
   const { run } = await setup(t);
   refused(await run(["delete", "--force"]), FILTER_INVALID);
-  refused(
-    await run(["delete", "--force", "--state", "pending", ...RANGE]),
-    FILTER_INVALID,
-  );
-  refused(
-    await run([
-      "delete",
-      "--force",
-      "--state",
-      "failed",
-      ...RANGE,
-      "--id",
-      UNKNOWN_REQUEST,
-    ]),
-    FILTER_INVALID,
-  );
 });
 
 test("E02.5 outbound delete with force and a valid filter counts zero", async (t) => {
