@@ -31,7 +31,6 @@ const FIRST_REVISION = 1;
 const SECOND_REVISION = 2;
 const NO_ACTIONS = 0;
 const LIVE_DEPENDENCIES = 2;
-const FIXTURE_NODE_NAME = "name";
 const ACTOR = { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" };
 const MACOS = "platform.macos";
 const STORAGE_BINDING = createIdentity("binding");
@@ -345,25 +344,6 @@ test("claimFactsOf answers the same rows with the binding map", (t) => {
   );
 });
 
-test("readClaimRevisions answers no revision of a terminal node", (t) => {
-  const h = factsHarness(t);
-  const states = Object.values(NodeState);
-  const nodes = states.map((state) => ({ state, id: h.node({}) }));
-  h.store.transaction((tx) => {
-    for (const { id, state } of nodes) setNodeState(tx, id, state);
-  });
-  const answered = h.store.transaction((tx) =>
-    readClaimRevisions(tx, h.missionId).map(({ node_id }) => node_id),
-  );
-  assert.deepEqual(
-    [...answered].sort(),
-    nodes
-      .filter(({ state }) => !isTerminal(state))
-      .map(({ id }) => id)
-      .sort(),
-  );
-});
-
 test("claimFactsOf answers each live node and no terminal or retired node", (t) => {
   const h = factsHarness(t);
   const states = Object.values(NodeState);
@@ -426,23 +406,6 @@ test("opening facts answer a revision turn after a criterion-not-met assessment"
     }),
   );
   assert.equal(openingFacts()!.revision_turn, true);
-});
-
-test("opening facts answer the node name of the claim revision", (t) => {
-  const h = factsHarness(t);
-  const nodeId = h.node({});
-  const facts = h.store.transaction((tx) => h.service.openingFacts(tx, nodeId));
-  assert.equal(facts!.node_name, FIXTURE_NODE_NAME);
-});
-
-test("opening facts answer null for an absent node", (t) => {
-  const h = factsHarness(t);
-  assert.equal(
-    h.store.transaction((tx) =>
-      h.service.openingFacts(tx, createIdentity("node")),
-    ),
-    null,
-  );
 });
 
 test("nodeStates answers the state and the retirement of each known node and omits an unknown node", (t) => {

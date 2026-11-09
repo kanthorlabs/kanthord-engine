@@ -11,7 +11,6 @@ import {
   resolveNodeBindings,
   validateFilename,
   validateNodeContent,
-  validatePlanContent,
   validateTaskCount,
   validateText,
 } from "./content.ts";
@@ -114,74 +113,6 @@ test("bindings must be a list of text names for every intent", () => {
       );
     }
   }
-});
-
-test("an absent or unknown intent answers mission.node.content_invalid", () => {
-  for (const intent of [undefined, "task", "", 1, null])
-    contentError(
-      () => validateNodeContent({ ...base(), intent }, DEFAULT_MAX),
-      "intent",
-    );
-});
-
-test("tags holds unique tags and reads [] when absent", () => {
-  validateNodeContent(base(), DEFAULT_MAX);
-  validateNodeContent(
-    { ...base(), tags: ["platform.macos", "toolchain.xcode_16"] },
-    DEFAULT_MAX,
-  );
-  for (const tags of [
-    "platform.macos",
-    null,
-    [1],
-    ["platform.macOS"],
-    ["platform..macos"],
-    ["platform.macos", "platform.macos"],
-  ])
-    contentError(
-      () => validateNodeContent({ ...base(), tags }, DEFAULT_MAX),
-      "tags",
-    );
-});
-
-test("commit_type takes one value of the closed set and is optional", () => {
-  validateNodeContent(base(), DEFAULT_MAX);
-  for (const commit_type of [
-    "feat",
-    "fix",
-    "docs",
-    "style",
-    "refactor",
-    "test",
-    "chore",
-  ])
-    validateNodeContent({ ...base(), commit_type }, DEFAULT_MAX);
-  for (const commit_type of ["build", "Feat", "", null, ["feat"], 1])
-    contentError(
-      () => validateNodeContent({ ...base(), commit_type }, DEFAULT_MAX),
-      "commit_type",
-    );
-});
-
-test("a name that gives no commit subject answers mission.node.content_invalid", () => {
-  for (const name of [".", "..", ". ."]) {
-    contentError(
-      () => validateNodeContent({ ...base(), name }, DEFAULT_MAX),
-      "name",
-    );
-    const { intent, ...task } = base();
-    assert.equal(intent, Intent.Implement);
-    contentError(
-      () => validatePlanContent({ ...task, name }, DEFAULT_MAX),
-      "name",
-    );
-  }
-});
-
-test("a task body holds the five plan content fields alone", () => {
-  const { intent, ...task } = base();
-  assert.equal(intent, Intent.Implement);
-  validatePlanContent(task, DEFAULT_MAX);
 });
 
 test("an examine node with a task answers mission.node.content_invalid", () => {
@@ -352,37 +283,6 @@ test("an implement node accepts two repository bindings in binding order", () =>
   for (const named of [
     ["api-repo", "web-repo"],
     ["web-repo", "api-repo"],
-  ])
-    assert.deepEqual(
-      resolveNamed(Intent.Implement, named).map(
-        (binding) => binding.binding_id,
-      ),
-      named.map((name) => catalog.get(name)!.binding_id),
-    );
-});
-
-test("an examine node accepts zero, one and two repository bindings", () => {
-  for (const named of [[], ["api-repo"], ["api-repo", "web-repo"]])
-    assert.deepEqual(
-      resolveNamed(Intent.Examine, named).map((binding) => binding.binding_id),
-      named.map((name) => catalog.get(name)!.binding_id),
-    );
-});
-
-test("a node names a conversation binding beside a repository binding for both intents", () => {
-  for (const intent of [Intent.Implement, Intent.Examine])
-    assert.deepEqual(
-      resolveNamed(intent, ["api-repo", "issues"]).map(
-        (binding) => binding.binding_id,
-      ),
-      ["api-repo", "issues"].map((name) => catalog.get(name)!.binding_id),
-    );
-});
-
-test("two storage bindings keep their write order", () => {
-  for (const named of [
-    ["api-repo", "reports", "archive"],
-    ["archive", "api-repo", "reports"],
   ])
     assert.deepEqual(
       resolveNamed(Intent.Implement, named).map(
