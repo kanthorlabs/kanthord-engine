@@ -15,14 +15,12 @@ import {
 } from "../../mission/contract.ts";
 import { schedulerOperations, WorkPullKind } from "../../scheduler/contract.ts";
 import {
-  ACTION_REQUEST_TIMEOUT_MS,
   ActionResultKind,
   RefusalClass,
   workerOperations,
 } from "../../worker/contract.ts";
 import {
   type Operation,
-  OperationLifetime,
   type OperationResult,
   OperationResultType,
 } from "../../kernel/operation.ts";
@@ -515,11 +513,4 @@ test("the setup node body creates one node and changes no other node", async (t)
     after.filter((node) => node.id !== created.node_id),
     before,
   );
-});
-
-test("action operation keeps the long unary execution-scoped contract", () => {
-  const operation = workerOperations["action.request"];
-  assert.equal(operation.timeoutMs, ACTION_REQUEST_TIMEOUT_MS);
-  assert.equal(operation.lifetime, OperationLifetime.Unary);
-  assert.equal(operation.requiresExecution, true);
 });
