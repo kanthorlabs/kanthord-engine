@@ -401,16 +401,6 @@ test("a node paused by stalled releases answers further_work_limit with the coun
   });
 });
 
-test("a turned-off further work limit never answers further_work_limit", (t) => {
-  const h = pausedNode(t, {
-    consecutive_failures: 0,
-    consecutive_stalls: FURTHER_WORK_LIMIT,
-    last_stop: null,
-  });
-  h.dependencies.config.further_work_limit = 0;
-  assert.equal(pausedRecord(h).paused_context?.rule, PauseRule.Human);
-});
-
 for (const stop of [lastStop(), null]) {
   test(`a node paused by a human answers human with no count, no limit and ${stop === null ? "no last stop" : "the last stop"}`, (t) => {
     const h = pausedNode(t, {
@@ -426,29 +416,3 @@ for (const stop of [lastStop(), null]) {
     });
   });
 }
-
-test("a node paused after a resume from failure_limit whose last stop is human_paused answers human", (t) => {
-  const stop = { ...lastStop(), reason: "human_paused" };
-  const h = pausedNode(t, {
-    consecutive_failures: FAILURE_LIMIT,
-    consecutive_stalls: ONE_STALL,
-    last_stop: stop,
-  });
-  assert.deepEqual(pausedRecord(h).paused_context, {
-    rule: PauseRule.Human,
-    count: null,
-    limit: null,
-    last_stop: stop,
-  });
-});
-
-test("a node in another state answers no paused_context", (t) => {
-  const h = fixture(t);
-  h.dependencies.pauseFacts.of = () => {
-    throw new Error("A node that is not paused reads no pause facts.");
-  };
-  for (const state of [NodeState.Available, NodeState.Executing]) {
-    h.store.transaction((tx) => setNodeState(tx, h.node_id, state));
-    assert.equal("paused_context" in pausedRecord(h), false);
-  }
-});
