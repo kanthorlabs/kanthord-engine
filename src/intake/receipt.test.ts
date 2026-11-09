@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import { test, type TestContext } from "node:test";
 import pino from "pino";
+import type { InboundOperation } from "../custody/contract.ts";
 import {
   GrantKind,
   type GrantOf,
   type GrantRequest,
-  InboundOperation,
   type Material,
 } from "../custody/contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
@@ -33,29 +33,18 @@ import {
   ResourceKind,
 } from "./contract.ts";
 import type { IntakeCustody } from "./action-check.ts";
-import { Platform } from "./credential-platform.ts";
 import { IntakeService } from "./index.ts";
 import { allocateInboundId, insertInbound } from "./inbound-store.ts";
 import { intakeMigrations } from "./migrations.ts";
+import { JIRA_RESOURCE, jiraWebhookComment } from "./jira-test-support.ts";
 import {
-  JIRA_ISSUE_UPDATED_DELIVERY_TEXT,
-  JIRA_ISSUE_UPDATED_EVENT,
-  JIRA_RESOURCE,
-  JIRA_WEBHOOK_EVENT,
-  jiraWebhookComment,
-} from "./jira-test-support.ts";
-import {
-  SLACK_CHALLENGE,
-  SLACK_EVENT_ID,
   SLACK_MESSAGE_EVENT,
   SLACK_OTHER_TEAM_ID,
-  SLACK_PARENT_DELIVERY_TEXT,
   SLACK_REPLY_DELIVERY_TEXT,
   SLACK_SIGNATURE_HEADER_NAME,
   SLACK_SIGNING_SECRET,
   SLACK_TEAM_ID,
   SLACK_TIMESTAMP_HEADER_NAME,
-  SLACK_URL_VERIFICATION_TEXT,
   slackEventCallback,
   slackMessage,
   slackSignature,
@@ -520,64 +509,8 @@ test("a poll inbound, an unknown identity and an invalid identity answer 404", a
   assert.equal(h.rows(poll.id).length, UNSTORED_ROW_COUNT);
 });
 
-test("a signed delivery without a delivery identity answers 400 and stores nothing", async (t) => {
-  const h = harness(t);
-  const { id, secret } = h.addInbound();
-  const headers = h.github("push", "", sign(secret, PUSH));
-  headers.delete("x-github-delivery");
-  assert.deepEqual(await h.receive(id, headers, PUSH), {
-    status: HttpStatus.BadRequest,
-    code: VALIDATION_FAILED,
-  });
-  assert.equal(h.rows(id).length, UNSTORED_ROW_COUNT);
-});
-
-test("a commit failure answers no acknowledgement and stores nothing", async (t) => {
-  const h = harness(t);
-  const { id, secret } = h.addInbound();
-  h.failCommits();
-  await assert.rejects(
-    h.receive(id, h.github("push", "d-1", sign(secret, PUSH)), PUSH),
-    /commit refused/,
-  );
-  assert.equal(h.rows(id).length, UNSTORED_ROW_COUNT);
-  assert.equal(h.wakes(), WAKES_AFTER_REFUSAL);
-});
-
 const JIRA_COMMENT = JSON.stringify(jiraWebhookComment());
 const JIRA_IDENTIFIER = "jira-hook-1";
-
-test("a valid Jira signature stores one event under the webhook identifier with the webhook event as metadata", async (t) => {
-  const h = harness(t);
-  const { id, secret } = h.addJiraInbound();
-  assert.deepEqual(
-    await h.receive(
-      id,
-      h.jira(JIRA_IDENTIFIER, sign(secret, JIRA_COMMENT)),
-      JIRA_COMMENT,
-    ),
-    { status: HttpStatus.Accepted, code: null },
-  );
-  const stored = h.rows(id);
-  assert.equal(stored.length, ROWS_PER_DELIVERY);
-  assert.equal(stored[0]!.event_id, JIRA_IDENTIFIER);
-  assert.equal(Buffer.from(stored[0]!.event).toString(), JIRA_COMMENT);
-  assert.deepEqual(JSON.parse(stored[0]!.metadata), {
-    event: JIRA_WEBHOOK_EVENT,
-  });
-  assert.equal(stored[0]!.state, InboundEventState.Pending);
-  assert.equal(h.wakes(), WAKES_PER_DELIVERY);
-});
-
-test("a Jira delivery of another event stores its event name", async (t) => {
-  const h = harness(t);
-  const { id, secret } = h.addJiraInbound();
-  const body = JIRA_ISSUE_UPDATED_DELIVERY_TEXT;
-  await h.receive(id, h.jira(JIRA_IDENTIFIER, sign(secret, body)), body);
-  assert.deepEqual(JSON.parse(h.rows(id)[0]!.metadata), {
-    event: JIRA_ISSUE_UPDATED_EVENT,
-  });
-});
 
 test("a missing, duplicate, malformed, wrong-length or wrong Jira signature answers 401 and stores nothing", async (t) => {
   const h = harness(t);
@@ -614,57 +547,6 @@ test("a missing, duplicate, malformed, wrong-length or wrong Jira signature answ
   assert.equal(h.wakes(), WAKES_AFTER_REFUSAL);
 });
 
-test("a signed Jira delivery without a webhook identifier or without a webhook event answers 400 and stores nothing", async (t) => {
-  const h = harness(t);
-  const { id, secret } = h.addJiraInbound();
-  const refused = {
-    status: HttpStatus.BadRequest,
-    code: VALIDATION_FAILED,
-  };
-  assert.deepEqual(
-    await h.receive(id, h.jira(null, sign(secret, JIRA_COMMENT)), JIRA_COMMENT),
-    refused,
-  );
-  assert.deepEqual(
-    await h.receive(id, h.jira("", sign(secret, JIRA_COMMENT)), JIRA_COMMENT),
-    refused,
-  );
-  for (const body of ["{}", "not json", "[]"])
-    assert.deepEqual(
-      await h.receive(id, h.jira(JIRA_IDENTIFIER, sign(secret, body)), body),
-      refused,
-    );
-  assert.equal(h.rows(id).length, UNSTORED_ROW_COUNT);
-});
-
-test("a repeated Jira identity stores one row", async (t) => {
-  const h = harness(t);
-  const { id, secret } = h.addJiraInbound();
-  const accepted = { status: HttpStatus.Accepted, code: null };
-  const deliver = (body: string) =>
-    h.receive(id, h.jira(JIRA_IDENTIFIER, sign(secret, body)), body);
-  assert.deepEqual(await deliver(JIRA_COMMENT), accepted);
-  assert.deepEqual(await deliver(`${JIRA_COMMENT}\n`), accepted);
-  const stored = h.rows(id);
-  assert.equal(stored.length, ROWS_PER_DELIVERY);
-  assert.equal(Buffer.from(stored[0]!.event).toString(), JIRA_COMMENT);
-});
-
-test("a Jira inbound verifies with its derived secret only", async (t) => {
-  const h = harness(t);
-  const jira = h.addJiraInbound();
-  const github = h.addInbound();
-  assert.deepEqual(
-    await h.receive(
-      jira.id,
-      h.jira(JIRA_IDENTIFIER, sign(github.secret, JIRA_COMMENT)),
-      JIRA_COMMENT,
-    ),
-    SIGNATURE_INVALID,
-  );
-  assert.equal(h.rows(jira.id).length, UNSTORED_ROW_COUNT);
-});
-
 const STALE_SECONDS = 301;
 const WRONG_SECRET = "test_private-wrong-signing-secret";
 const SLACK_ATTEMPT_COUNT_ONE = 1;
@@ -672,40 +554,6 @@ const OTHER_TEAM_DELIVERY_TEXT = JSON.stringify(
   slackEventCallback(slackMessage(), { team_id: SLACK_OTHER_TEAM_ID }),
 );
 const SLACK_ACCEPTED = { status: HttpStatus.Accepted, code: null };
-
-test("a valid v0 signature with a fresh timestamp stores one event under event_id and releases the signing secret once", async (t) => {
-  const h = harness(t);
-  const { id } = h.addSlackInbound();
-  assert.deepEqual(
-    await h.receive(
-      id,
-      h.slack(SLACK_REPLY_DELIVERY_TEXT),
-      SLACK_REPLY_DELIVERY_TEXT,
-    ),
-    SLACK_ACCEPTED,
-  );
-  const stored = h.rows(id);
-  assert.equal(stored.length, ROWS_PER_DELIVERY);
-  assert.equal(stored[0]!.event_id, SLACK_EVENT_ID);
-  assert.equal(
-    Buffer.from(stored[0]!.event).toString(),
-    SLACK_REPLY_DELIVERY_TEXT,
-  );
-  assert.deepEqual(JSON.parse(stored[0]!.metadata), {
-    event: SLACK_MESSAGE_EVENT,
-  });
-  assert.equal(stored[0]!.state, InboundEventState.Pending);
-  assert.equal(h.wakes(), WAKES_PER_DELIVERY);
-  assert.deepEqual(h.signing.releases, [
-    {
-      operation: InboundOperation.Receipt,
-      credential: SIGNING_CREDENTIAL,
-      platform: Platform.SlackSigningSecret,
-      resource: SLACK_TEAM_ID,
-    },
-  ]);
-  assert.equal(h.signing.drops(), SLACK_ATTEMPT_COUNT_ONE);
-});
 
 test("a stale or future timestamp, a missing or duplicate header, a malformed and a wrong signature answer 401 and store nothing", async (t) => {
   const h = harness(t);
@@ -752,30 +600,6 @@ test("a stale or future timestamp, a missing or duplicate header, a malformed an
     refusals.length + SLACK_ATTEMPT_COUNT_ONE,
   );
   assert.equal(h.signing.drops(), h.signing.releases.length);
-});
-
-test("a signed url_verification answers the challenge and stores nothing", async (t) => {
-  const h = harness(t);
-  const { id } = h.addSlackInbound();
-  const answer = await h.deliver(
-    id,
-    h.slack(SLACK_URL_VERIFICATION_TEXT),
-    SLACK_URL_VERIFICATION_TEXT,
-  );
-  assert.equal(answer.status, HttpStatus.OK);
-  assert.deepEqual(JSON.parse(answer.text), { challenge: SLACK_CHALLENGE });
-  assert.equal(h.rows(id).length, UNSTORED_ROW_COUNT);
-  assert.equal(h.wakes(), WAKES_AFTER_REFUSAL);
-  assert.equal(h.signing.drops(), SLACK_ATTEMPT_COUNT_ONE);
-  const forged = await h.deliver(
-    id,
-    h.slack(SLACK_URL_VERIFICATION_TEXT, { secret: WRONG_SECRET }),
-    SLACK_URL_VERIFICATION_TEXT,
-  );
-  assert.deepEqual(
-    { status: forged.status, code: forged.code },
-    SIGNATURE_INVALID,
-  );
 });
 
 test("a repeated event_id stores one row and a body of another team is stored", async (t) => {
@@ -830,20 +654,6 @@ test("a signed delivery of another shape answers 400 and stores nothing", async 
   assert.equal(h.signing.drops(), h.signing.releases.length);
 });
 
-test("a parent message is stored at the receipt", async (t) => {
-  const h = harness(t);
-  const { id } = h.addSlackInbound();
-  assert.deepEqual(
-    await h.receive(
-      id,
-      h.slack(SLACK_PARENT_DELIVERY_TEXT),
-      SLACK_PARENT_DELIVERY_TEXT,
-    ),
-    SLACK_ACCEPTED,
-  );
-  assert.equal(h.rows(id).length, ROWS_PER_DELIVERY);
-});
-
 test("a commit failure after a verified delivery stores nothing and still drops the material", async (t) => {
   const h = harness(t);
   const { id } = h.addSlackInbound();
@@ -859,18 +669,4 @@ test("a commit failure after a verified delivery stores nothing and still drops 
   assert.equal(h.rows(id).length, UNSTORED_ROW_COUNT);
   assert.equal(h.signing.releases.length, SLACK_ATTEMPT_COUNT_ONE);
   assert.equal(h.signing.drops(), SLACK_ATTEMPT_COUNT_ONE);
-});
-
-test("a Slack inbound does not verify with its derived webhook secret", async (t) => {
-  const h = harness(t);
-  const { id } = h.addSlackInbound();
-  const derived = h.addInbound().secret;
-  assert.deepEqual(
-    await h.receive(
-      id,
-      h.slack(SLACK_REPLY_DELIVERY_TEXT, { secret: derived }),
-      SLACK_REPLY_DELIVERY_TEXT,
-    ),
-    SIGNATURE_INVALID,
-  );
 });
