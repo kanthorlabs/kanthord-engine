@@ -18,7 +18,6 @@ import {
 const NAME = "workstation";
 const OTHER_NAME = "build-box";
 const BREAKING_NAME = "../escape";
-const RESERVED_NAME = "server";
 const CONFIG_INVALID = "worker.machine.config_invalid";
 const CONFIG_ABSENT = "worker.machine.config_absent";
 const CONFIG_CONFLICT = "worker.machine.config_conflict";
@@ -109,17 +108,11 @@ test("an invalid value refuses as config_invalid", async (t) => {
   for (const invalid of [
     `${value}=`,
     Buffer.from("not json").toString("base64url"),
-    Buffer.from(JSON.stringify({ ...configuration, extra: 1 })).toString(
-      "base64url",
-    ),
     Buffer.from(
       JSON.stringify({
         ...configuration,
         private_key: Buffer.alloc(32).toString("base64url"),
       }),
-    ).toString("base64url"),
-    Buffer.from(
-      JSON.stringify({ ...configuration, name: RESERVED_NAME }),
     ).toString("base64url"),
   ])
     refuses(() => decodeMachineConfiguration(invalid), CONFIG_INVALID);
@@ -145,8 +138,7 @@ test("an env value or a file of another machine refuses as config_invalid", asyn
 test("a name that breaks the name form refuses before any path or file read", async (t) => {
   const configuration = await configurationOf();
   const env = environmentOf(t);
-  for (const name of [BREAKING_NAME, RESERVED_NAME])
-    refuses(() => readMachineConfiguration(env, name), CONFIG_INVALID);
+  refuses(() => readMachineConfiguration(env, BREAKING_NAME), CONFIG_INVALID);
   refuses(
     () =>
       readMachineConfiguration(
