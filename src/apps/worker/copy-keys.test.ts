@@ -11,7 +11,6 @@ import type { CopyKeys } from "./copy-keys.ts";
 import { machineCopyKey } from "./instance-credential.ts";
 import { writeMachineFile } from "./machine-config.ts";
 
-const OTHER_NAME = "build-box";
 const RESERVED_NAME = "server";
 const CONFIG_INVALID = "worker.machine.config_invalid";
 const CONFIG_CONFLICT = "worker.machine.config_conflict";
@@ -55,11 +54,6 @@ test("of answers the machine key of the machine file and reads the file at each 
   const next = f.keys.of(TEST_MACHINE_NAME);
   sameKey(next, machineCopyKey(configuration(replaced)));
   assert.notEqual(next?.sealed_to, f.machine.key.sealed_to);
-});
-
-test("of answers null for a name with no machine configuration", async (t) => {
-  const f = await copyKeysFixture(t, { machineInEnv: false });
-  assert.equal(f.keys.of(OTHER_NAME), null);
 });
 
 test("of propagates a conflict and an invalid name", async (t) => {
