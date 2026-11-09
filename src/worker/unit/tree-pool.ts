@@ -16,11 +16,19 @@ import {
   FILE_NOT_FOUND,
   writePrivate,
 } from "../../kernel/files.ts";
-import { GitState, normaliseGitState } from "./local-git.ts";
+import {
+  GitState,
+  normaliseGitState,
+  writeConfigTemplate,
+} from "./local-git.ts";
 
 export const PoolClass = { Agent: "agent", Command: "command" } as const;
 export type PoolClass = (typeof PoolClass)[keyof typeof PoolClass];
-export const TreeSource = { Pool: "pool", Clone: "clone" } as const;
+export const TreeSource = {
+  Pool: "pool",
+  Clone: "clone",
+  Node: "node",
+} as const;
 export type TreeSource = (typeof TreeSource)[keyof typeof TreeSource];
 export const AGENT_FREE_TREES_MAX = 1;
 export const COMMAND_FREE_TREES_MAX = 2;
@@ -34,6 +42,7 @@ const REPO_KEY_LENGTH = 32;
 const NO_RETURN_TIME = 0;
 const EVICT_PREFIX = ".evict-";
 const CROSS_DEVICE = "EXDEV";
+const UNKNOWN_ERROR = "unknown";
 const GIT_DIRECTORY = ".git";
 const TREE_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -69,7 +78,7 @@ export function repoKeyOf(address: string): string {
 }
 
 function errorCode(error: unknown): string | undefined {
-  return (error as NodeJS.ErrnoException).code;
+  return (error as NodeJS.ErrnoException | undefined)?.code;
 }
 
 function namesOf(directory: string): string[] {
@@ -99,6 +108,13 @@ function freeTreesOf(directory: string): FreeTree[] {
     .map((name) => join(directory, name))
     .filter((path) => lstatSync(path, { throwIfNoEntry: false })?.isDirectory())
     .map((path) => ({ path, ...metadataOf(path) }));
+}
+
+export function isTree(path: string): boolean {
+  return [path, join(path, GIT_DIRECTORY)].every(
+    (entry) =>
+      lstatSync(entry, { throwIfNoEntry: false })?.isDirectory() ?? false,
+  );
 }
 
 function removeTree(path: string): void {
@@ -168,6 +184,20 @@ export class TreePool {
     this.evict(directory, FREE_TREES_MAX[slot.poolClass]);
   }
 
+  giveBack(slot: PoolSlot, tree: string, nodeId: string | null): string | null {
+    if (!isTree(tree)) {
+      this.remove(tree);
+      return null;
+    }
+    try {
+      this.give(slot, tree, nodeId);
+      return null;
+    } catch (error) {
+      this.remove(tree);
+      return errorCode(error) ?? UNKNOWN_ERROR;
+    }
+  }
+
   private evict(directory: string, limit: number): void {
     for (;;) {
       const trees = freeTreesOf(directory);
@@ -217,8 +247,21 @@ export async function prepareTree(
   input: TreePreparation,
 ): Promise<{ source: TreeSource }> {
   const { pool, target, context } = input;
+  const end = performance.now() + input.deadlineMs;
   const clone = async () => {
     await input.fresh();
+    assert.equal(
+      await writeConfigTemplate(
+        {
+          env: input.env,
+          directory: target,
+          context,
+          deadlineMs: Math.max(1, end - performance.now()),
+        },
+        input.address,
+      ),
+      GitState.Ready,
+    );
     return { source: TreeSource.Clone };
   };
   if (!pool.take(input, target, input.nodeId)) return await clone();

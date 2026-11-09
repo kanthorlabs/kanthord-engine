@@ -21,6 +21,7 @@ import {
   NO_PROVIDER_CALLS,
   recordDone,
   recordReleases,
+  releasedRoot,
   task,
 } from "./test-support.ts";
 
@@ -426,7 +427,7 @@ suite(
         RELEASED,
       );
       assert.equal(next.provider.calls.length, NO_PROVIDER_CALLS);
-      const parents = await simpleGit(next.root).raw([
+      const parents = await simpleGit(releasedRoot(next)).raw([
         "rev-list",
         "--parents",
         "-n",

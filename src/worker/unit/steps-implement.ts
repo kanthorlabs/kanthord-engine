@@ -9,6 +9,7 @@ import type { ExecutionSetup, RepositoryTransport } from "../contract.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 import { join } from "node:path";
 import {
+  BASE_DIRECTORY,
   sshAccessOf,
   workRepositoriesOf,
   type WorkspaceCheckout,
@@ -40,6 +41,7 @@ import {
 } from "../../agent/prompt-composer.ts";
 import { readDeclaration } from "./affected.ts";
 import { headCommit } from "./local-git.ts";
+import { readPushRecord, writePushRecord } from "./push-record.ts";
 import {
   environmentStop,
   infrastructureStop,
@@ -50,7 +52,6 @@ import {
   type VerificationRun,
 } from "./verification.ts";
 import {
-  BASE_DIRECTORY,
   BaseHead,
   runSetup,
   SetupEnd,
@@ -243,7 +244,22 @@ async function pushNodeBranches(
   context: Context,
   remaining: () => number,
 ): Promise<void> {
-  for (const checkout of state.checkouts)
+  for (const checkout of state.checkouts) {
+    const key = {
+      nodeKey: state.input.workspaces.nodeKey(state.input.claim.node_id),
+      nodeBranch: state.nodeBranch,
+      bindingId: checkout.binding_id,
+    };
+    const head = await headCommit(
+      state.input.env,
+      checkout.directory,
+      context,
+      remaining(),
+    );
+    writePushRecord(key, {
+      confirmed: readPushRecord(key)?.confirmed ?? null,
+      pending: head,
+    });
     await state.input.transport.pushNodeBranch(
       checkout.directory,
       state.nodeBranch,
@@ -251,6 +267,8 @@ async function pushNodeBranches(
       remaining(),
       sshAccessOf(state.input.sshAccess, checkout.binding_id),
     );
+    writePushRecord(key, { confirmed: head, pending: null });
+  }
 }
 
 export function repositoryOf(
@@ -321,7 +339,7 @@ export async function runStepsImplement(
       await checkpointOnStop(state, stopped);
     throw stopped;
   } finally {
-    state.base.dispose();
+    await state.base.giveBack();
     state.input.workspaces.release(
       state.input.workspaces.nodeKey(state.input.claim.node_id),
       WorkspaceKind.Node,
@@ -665,6 +683,7 @@ export async function prepareStepsWorkspace(
     nodeBranch: input.claim.node_branch,
     pushed,
     repositories: input.setup.repositories,
+    log: (msg, fields) => run.log(msg, fields),
     transport: input.transport,
     sshAccess: input.sshAccess,
     context: run.operationContext,
@@ -701,7 +720,24 @@ export async function prepareStepsWorkspace(
       prepared.checkouts,
       deadline,
     );
-    base = new BaseHead(setupInput, join(key, BASE_DIRECTORY), setup);
+    base = new BaseHead(
+      setupInput,
+      {
+        directory: join(key, BASE_DIRECTORY),
+        trees: {
+          workspaces: input.workspaces,
+          nodeId: input.claim.node_id,
+          addresses: new Map(
+            input.setup.repositories.map(({ name, address }) => [
+              name,
+              address,
+            ]),
+          ),
+          log: (msg, fields) => run.log(msg, fields),
+        },
+      },
+      setup,
+    );
     const result = await setUpHeads(
       setupInput,
       setup,
@@ -738,7 +774,7 @@ export async function prepareStepsWorkspace(
         : null,
     };
   } catch (error) {
-    base?.dispose();
+    await base?.giveBack();
     input.workspaces.release(key, WorkspaceKind.Node);
     throw error;
   }

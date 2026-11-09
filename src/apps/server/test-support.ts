@@ -1900,6 +1900,15 @@ async function seededBareRepository(root: string, name: string) {
   return { bare, head };
 }
 
+async function remapOrigin(
+  directory: string,
+  map: (url: string) => string,
+): Promise<void> {
+  const git = simpleGit(directory);
+  const url = (await git.raw(["config", "--get", "remote.origin.url"])).trim();
+  await git.raw(["remote", "set-url", "origin", map(url)]);
+}
+
 export function mappedTransport(
   addresses: Record<string, string>,
 ): RepositoryTransport & GitWriter {
@@ -1927,25 +1936,37 @@ export function mappedTransport(
         deadlineMs,
         LOCAL_GIT_SSH_ACCESS,
       ),
-    fetchAndCheckout: (
+    refreshSnapshot: (input) =>
+      connector.refreshSnapshot({
+        ...input,
+        address: mapped(input.address),
+        ssh: LOCAL_GIT_SSH_ACCESS,
+      }),
+    fetchAndCheckout: async (
       directory,
       branch,
       base,
       pushed,
       keep,
+      record,
       context,
       deadlineMs,
-    ) =>
-      connector.fetchAndCheckout(
+    ) => {
+      await remapOrigin(directory, (url) =>
+        Object.hasOwn(addresses, url) ? addresses[url]! : url,
+      );
+      return connector.fetchAndCheckout(
         directory,
         branch,
         base,
         pushed,
         keep,
+        record,
         context,
         deadlineMs,
         LOCAL_GIT_SSH_ACCESS,
-      ),
+      );
+    },
     fetchBase: (directory, base, context, deadlineMs) =>
       connector.fetchBase(
         directory,

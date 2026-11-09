@@ -80,6 +80,7 @@ import {
 import {
   fauxAssistantMessage,
   fauxToolCall,
+  remapOrigin,
   scriptedModelRuntime,
   scriptedProvider,
 } from "../../worker/unit/test-support.ts";
@@ -717,7 +718,12 @@ test(
       },
       cloneSnapshot: (_address, ...args) =>
         connector.cloneSnapshot(engineBare.bare, ...args),
-      fetchAndCheckout: (...args) => connector.fetchAndCheckout(...args),
+      refreshSnapshot: (input) =>
+        connector.refreshSnapshot({ ...input, address: engineBare.bare }),
+      fetchAndCheckout: async (...args) => {
+        await remapOrigin(args[0], () => engineBare.bare);
+        return connector.fetchAndCheckout(...args);
+      },
       fetchBase: (...args) => connector.fetchBase(...args),
       pushNodeBranch: (...args) => connector.pushNodeBranch(...args),
     };

@@ -31,6 +31,7 @@ import {
   NO_PROVIDER_CALLS,
   recordDone,
   recordReleases,
+  releasedRoot,
   task,
   TEST_SSH_ACCESS,
 } from "./test-support.ts";
@@ -218,7 +219,7 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
     await noProgressEnd(h);
     assert.equal(h.provider.calls.length, TWO_TURNS);
     assert.notEqual(h.checkouts[0]!.head, judged);
-    const parents = await simpleGit(h.root).raw([
+    const parents = await simpleGit(releasedRoot(h)).raw([
       "rev-list",
       "--parents",
       "-n",
@@ -437,7 +438,7 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
     const end = await executionBoundary(h.run, () => runStepsImplement(h));
     assert.ok("furtherWork" in end && end.furtherWork);
     assert.equal((bodies[0] as { further_work: boolean }).further_work, true);
-    const log = await simpleGit(h.root).raw([
+    const log = await simpleGit(releasedRoot(h)).raw([
       "log",
       "--format=%B",
       h.nodeBranch,

@@ -51,6 +51,7 @@ import {
 import {
   fauxAssistantMessage,
   fauxToolCall,
+  remapOrigin,
   scriptedModelRuntime,
   scriptedProvider,
 } from "../../worker/unit/test-support.ts";
@@ -330,7 +331,15 @@ async function methodsFixture(t: TestContext) {
     },
     cloneSnapshot: (address, ...args) =>
       connector.cloneSnapshot(barePaths.get(address)!, ...args),
-    fetchAndCheckout: (...args) => connector.fetchAndCheckout(...args),
+    refreshSnapshot: (input) =>
+      connector.refreshSnapshot({
+        ...input,
+        address: barePaths.get(input.address)!,
+      }),
+    fetchAndCheckout: async (...args) => {
+      await remapOrigin(args[0], (url) => barePaths.get(url) ?? url);
+      return connector.fetchAndCheckout(...args);
+    },
     fetchBase: (...args) => connector.fetchBase(...args),
     pushNodeBranch: (...args) => connector.pushNodeBranch(...args),
   };
