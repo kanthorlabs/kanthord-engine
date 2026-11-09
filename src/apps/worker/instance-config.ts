@@ -101,27 +101,35 @@ function fileExists(path: string): boolean {
   return audit(path, FileKind.File, true);
 }
 
-export function resolveInstanceConfiguration(
-  options: { instance?: string },
+interface InstanceOptions {
+  instance?: string;
+}
+
+interface EnvironmentResolution extends InstanceOptions {
+  env: NodeJS.ProcessEnv;
+}
+
+function resolveFromEnvironment(
+  configuration: InstanceConfiguration,
+  resolution: EnvironmentResolution,
+): ResolvedInstance {
+  const { instance, env } = resolution;
+  if (instance !== undefined && instance !== configuration.name)
+    throw invalid("--instance differs from the name of the configuration.");
+  const path = instanceFilePath(env, configuration.name);
+  if (fileExists(path))
+    throw new Diagnostic(
+      "worker.start.instance_config_conflict",
+      `worker instance: ${INSTANCE_CONFIG_VARIABLE} is set while the instance file exists.`,
+      { fields: [["path", path]] },
+    );
+  return { configuration, source: InstanceConfigSource.Env };
+}
+
+function resolveFromFile(
+  options: InstanceOptions,
   env: NodeJS.ProcessEnv,
 ): ResolvedInstance {
-  const value = env[INSTANCE_CONFIG_VARIABLE];
-  if (value?.trim()) {
-    const configuration = decodeInstanceConfiguration(value);
-    if (
-      options.instance !== undefined &&
-      options.instance !== configuration.name
-    )
-      throw invalid("--instance differs from the name of the configuration.");
-    const path = instanceFilePath(env, configuration.name);
-    if (fileExists(path))
-      throw new Diagnostic(
-        "worker.start.instance_config_conflict",
-        `worker instance: ${INSTANCE_CONFIG_VARIABLE} is set while the instance file exists.`,
-        { fields: [["path", path]] },
-      );
-    return { configuration, source: InstanceConfigSource.Env };
-  }
   const path =
     options.instance !== undefined &&
     instanceNameSchema.safeParse(options.instance).success
@@ -143,6 +151,19 @@ export function resolveInstanceConfiguration(
     configuration: readInstanceFile(path, options.instance!),
     source: InstanceConfigSource.File,
   };
+}
+
+export function resolveInstanceConfiguration(
+  options: { instance?: string },
+  env: NodeJS.ProcessEnv,
+): ResolvedInstance {
+  const value = env[INSTANCE_CONFIG_VARIABLE];
+  if (value?.trim())
+    return resolveFromEnvironment(decodeInstanceConfiguration(value), {
+      instance: options.instance,
+      env,
+    });
+  return resolveFromFile(options, env);
 }
 
 export function readNamedInstance(
