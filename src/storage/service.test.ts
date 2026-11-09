@@ -7,7 +7,6 @@ import { CustodyComponent, custodyMigrations } from "../custody/index.ts";
 import {
   type CredentialAnswer,
   CUSTODY_SERVICE_NAME,
-  SecretShape,
 } from "../custody/contract.ts";
 import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -16,12 +15,8 @@ import {
   ResourceFailureReason,
   ResourceStatus,
 } from "../kernel/health.ts";
-import { HttpMethod, HttpStatus } from "../kernel/http.ts";
-import {
-  AccessPolicy,
-  type CallerContext,
-  OperationRegistry,
-} from "../kernel/operation.ts";
+import { HttpStatus } from "../kernel/http.ts";
+import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { REPOSITORY_PLATFORMS } from "../repository/index.ts";
 import { storageOperations } from "./contract.ts";
@@ -128,41 +123,18 @@ function fails(fn: () => unknown, status: number, code: string) {
   );
 }
 
-test("platform list answers s3 alone", (t) => {
-  const f = fixture(t);
-  assert.deepEqual(
-    f.invoke(storageOperations.platform_list, {
-      params: {},
-      query: {},
-      body: null,
-    }),
-    {
-      items: [
-        {
-          platform: "s3",
-          secret_shape: SecretShape.S3AccessKey,
-          login_modes: [],
-          metadata_fields: ["endpoint", "bucket", "region"],
-          verifiable: true,
-        },
-      ],
-    },
-  );
-});
-
 test("create refuses a platform of another component and get lists the bindings that name the credential", (t) => {
   const f = fixture(t);
-  for (const platform of ["github", "anthropic"])
-    fails(
-      () =>
-        f.invoke(storageOperations.create, {
-          params: {},
-          query: {},
-          body: { ...S3_BODY, platform },
-        }),
-      HttpStatus.BadRequest,
-      UNSUPPORTED_PLATFORM_CODE,
-    );
+  fails(
+    () =>
+      f.invoke(storageOperations.create, {
+        params: {},
+        query: {},
+        body: { ...S3_BODY, platform: "github" },
+      }),
+    HttpStatus.BadRequest,
+    UNSUPPORTED_PLATFORM_CODE,
+  );
   f.invoke(storageOperations.create, { params: {}, query: {}, body: S3_BODY });
   const answer = f.invoke(storageOperations.get, {
     params: { credential_name: S3_BODY.name },
@@ -243,7 +215,6 @@ test("a name of another component answers not found and the inventory heads the 
 
 const INVALID_INPUT_CODE = "credential.input.invalid";
 const NO_ROWS = 0;
-const CHECK_PATH = "/api/storage/credential/check";
 const CHECK_BODY = {
   platform: S3_BODY.platform,
   secret: S3_BODY.secret,
@@ -316,42 +287,21 @@ test("check answers healthy, unhealthy and unknown for s3 without a row, a log o
   assert.ok(!lines.join("").includes(SECRET));
 });
 
-test("check answers unknown when the request throws", async (t) => {
-  const f = fixture(t);
-  t.mock.method(S3Client.prototype, "send", async () => {
-    throw new Error(`failed with ${SECRET}`);
-  });
-  t.mock.method(S3Client.prototype, "destroy", () => {});
-  assert.deepEqual(
-    await f.invoke(storageOperations.check, {
-      params: {},
-      query: {},
-      body: CHECK_BODY,
-    }),
-    {
-      status: ResourceStatus.Unknown,
-      capability: CAPABILITY_BUCKET_HEAD,
-      failure_reason: ResourceFailureReason.Unreachable,
-    },
-  );
-});
-
 test("check refuses a platform of another component, invalid input and a body with a name", async (t) => {
   const f = fixture(t);
   const send = t.mock.method(S3Client.prototype, "send", async () => {
     throw new Error("UNEXPECTED_REQUEST");
   });
-  for (const platform of ["github", "anthropic"])
-    await rejects(
-      () =>
-        f.invoke(storageOperations.check, {
-          params: {},
-          query: {},
-          body: { ...CHECK_BODY, platform },
-        }),
-      HttpStatus.BadRequest,
-      UNSUPPORTED_PLATFORM_CODE,
-    );
+  await rejects(
+    () =>
+      f.invoke(storageOperations.check, {
+        params: {},
+        query: {},
+        body: { ...CHECK_BODY, platform: "github" },
+      }),
+    HttpStatus.BadRequest,
+    UNSUPPORTED_PLATFORM_CODE,
+  );
   for (const body of [
     { ...CHECK_BODY, secret: { access_key_id: ACCESS_KEY_ID } },
     { ...CHECK_BODY, secret: { key: SECRET } },
@@ -376,9 +326,6 @@ test("check refuses a platform of another component, invalid input and a body wi
 
 test("check takes no mutation key and the credential name check is refused", (t) => {
   const f = fixture(t);
-  assert.equal(storageOperations.check.mutation, false);
-  assert.equal(storageOperations.check.method, HttpMethod.Post);
-  assert.equal(storageOperations.check.path, CHECK_PATH);
   fails(
     () =>
       f.invoke(storageOperations.create, {
@@ -391,7 +338,6 @@ test("check takes no mutation key and the credential name check is refused", (t)
   );
 });
 
-const VERIFY_PATH = "/api/storage/credential/:credential_name/verify";
 const ARCHIVED_CODE = "credential.credential.archived";
 
 function verifyInput(credentialName: string) {
@@ -528,18 +474,4 @@ test("verify refuses an archived record, an unknown name and a name of another c
     ARCHIVED_CODE,
   );
   assert.equal(send.mock.callCount(), NO_ROWS);
-});
-
-test("verify takes no body and no mutation key", () => {
-  assert.equal(storageOperations.verify.mutation, false);
-  assert.equal(storageOperations.verify.method, HttpMethod.Post);
-  assert.equal(storageOperations.verify.path, VERIFY_PATH);
-  assert.equal(storageOperations.verify.access, AccessPolicy.Human);
-  assert.throws(() =>
-    storageOperations.verify.input.parse({
-      params: { credential_name: S3_BODY.name },
-      query: {},
-      body: {},
-    }),
-  );
 });

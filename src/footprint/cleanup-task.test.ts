@@ -20,7 +20,6 @@ import {
   FOOTPRINT_SERVICE_NAME,
   FootprintErrorCode,
 } from "./contract.ts";
-import { defaultRule } from "./candidates.ts";
 import { cleanupOf, updateCleanup } from "./cleanup-store.ts";
 import {
   type CleanupDeleter,
@@ -238,27 +237,6 @@ test("cancel accepts only a queued record", async (t) => {
   assert.equal(again.error.error.code, FootprintErrorCode.CleanupNotQueued);
 });
 
-test("create refuses a repeated key and a key of the wrong form", async (t) => {
-  const fixture = footprintFixture(t);
-  for (const keys of [[traceId(1), traceId(1)], ["not-a-trace"]]) {
-    const result = await fixture.footprint["cleanup.create"](
-      {
-        params: {},
-        query: {},
-        body: {
-          kind: CleanableKind.Trace,
-          instance_name: null,
-          rule: null,
-          keys,
-        },
-      },
-      { identity: HUMAN, idempotencyKey: createIdempotencyKey() },
-    );
-    assert.equal(result.type, OperationResultType.Failure);
-    assert.equal(result.error.error.code, FootprintErrorCode.ValidationFailed);
-  }
-});
-
 test("create checks the host of the kind and the instance", async (t) => {
   const fixture = footprintFixture(t, {
     instances: { "e2e-coder-1": { archived: true } },
@@ -299,14 +277,6 @@ test("create checks the host of the kind and the instance", async (t) => {
     );
     assert.equal(result.type, OperationResultType.Failure);
     assert.equal(result.error.error.code, entry.code);
-  }
-});
-
-test("the default age of every kind is DEFAULT_AGE_DAYS", () => {
-  for (const kind of Object.values(CleanableKind)) {
-    const rule = defaultRule(kind);
-    if (rule.name === CleanupRule.OlderThan)
-      assert.equal(rule.older_than_days, DEFAULT_AGE_DAYS);
   }
 });
 

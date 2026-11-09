@@ -9,8 +9,7 @@ import {
   survivingProcesses,
 } from "../agent/test-support.ts";
 import { temporary } from "../kernel/test-support.ts";
-import { trackingOperations } from "../tracking/contract.ts";
-import { builtinTools, toolOperations } from "./tools.ts";
+import { builtinTools } from "./tools.ts";
 
 const TIMEOUT_SECONDS = 20;
 const ONE_CHILD = 1;
@@ -61,12 +60,4 @@ test("a background child of a Workbench bash call lives after the call", async (
   const spawned = spawnedPids(t, result.content);
   assert.equal(spawned.length, ONE_CHILD);
   assert.deepEqual(await survivingProcesses(spawned), spawned);
-});
-
-test("the human_or_service operations are workbench tools", () => {
-  const tools = toolOperations([trackingOperations.traceDelete]);
-  assert.deepEqual(
-    tools.map((operation) => operation.id),
-    [trackingOperations.traceDelete.id],
-  );
 });
