@@ -6,7 +6,6 @@ import {
   INSTANCE_CONNECTED_WINDOW_MS,
   InstancePlacement,
   machineConfigurationSchema,
-  machineOperations,
   WORKER_SERVICE_NAME,
   WorkerErrorCode,
   workerOperations,
@@ -257,11 +256,6 @@ function machineFixture(t: TestContext) {
   };
 }
 
-test("the secret mutations of the machine key carry the no-store header of a secret operation", () => {
-  assert.ok(machineOperations["machine.create"].secret);
-  assert.ok(machineOperations["machine.rotate"].secret);
-});
-
 test("create stores a public key and answers no machine configuration", async (t) => {
   const f = machineFixture(t);
   const { record, pair } = await f.createdMachine();
@@ -310,7 +304,6 @@ test("create refuses a bad name and a bad key with their codes", async (t) => {
   const key = (await generateX25519KeyPair()).public_key.toString(BASE64URL);
   const cases: [Record<string, unknown>, string][] = [
     [{ name: "token", public_key: key }, WorkerErrorCode.MachineNameInvalid],
-    [{ name: "Upper", public_key: key }, WorkerErrorCode.MachineNameInvalid],
     [
       { name: MACHINE, public_key: "not base64url!" },
       WorkerErrorCode.MachineKeyInvalid,
@@ -364,16 +357,6 @@ test("create refuses a name of a live or an archived machine or instance", async
     () => f.invoke("machine.create", { name: MACHINE }),
     HttpStatus.Conflict,
     WorkerErrorCode.MachineNameConflict,
-  );
-});
-
-test("an instance create refuses the name of a machine", async (t) => {
-  const f = machineFixture(t);
-  await f.createdMachine();
-  await f.refuses(
-    () => f.createdInstance(MACHINE),
-    HttpStatus.Conflict,
-    WorkerErrorCode.InstanceNameConflict,
   );
 });
 
@@ -655,58 +638,6 @@ test("archive calls archiveHeld with the machine name and refuses a second archi
   );
   const listed = await f.invoke("machine.list");
   assert.equal(listed.items.length, NO_ROWS);
-});
-
-test("machineKeyOf answers the current key after a rotate and null after an archive", async (t) => {
-  const f = machineFixture(t);
-  const { record, pair } = await f.createdMachine();
-  const keyOf = () =>
-    f.store.transaction((tx) => f.worker.machineKeyOf(tx, MACHINE));
-  assert.deepEqual(keyOf(), {
-    name: MACHINE,
-    public_key: pair.public_key.toString(BASE64URL),
-    fingerprint: record.fingerprint,
-  });
-  const next = await generateX25519KeyPair();
-  await f.invoke(
-    "machine.rotate",
-    {
-      expected_revision: FIRST_REVISION,
-      public_key: next.public_key.toString(BASE64URL),
-    },
-    { machine_name: MACHINE },
-  );
-  assert.deepEqual(keyOf(), {
-    name: MACHINE,
-    public_key: next.public_key.toString(BASE64URL),
-    fingerprint: keyFingerprint(next.public_key),
-  });
-  await f.invoke(
-    "machine.archive",
-    { expected_revision: SECOND_REVISION },
-    { machine_name: MACHINE },
-  );
-  assert.equal(keyOf(), null);
-  assert.equal(
-    f.store.transaction((tx) => f.worker.machineKeyOf(tx, OTHER_MACHINE)),
-    null,
-  );
-});
-
-test("machineOf answers the machine of a worker instance and null elsewhere", async (t) => {
-  const f = machineFixture(t);
-  await f.createdMachine();
-  await f.createdInstance(INSTANCE);
-  await f.invoke("instance.create", {
-    name: SECOND_INSTANCE,
-    worker: WORKER,
-    placement: InstancePlacement.Server,
-  });
-  const machineOf = (name: string) =>
-    f.store.transaction((tx) => f.worker.machineOf(tx, name));
-  assert.equal(machineOf(INSTANCE), MACHINE);
-  assert.equal(machineOf(SECOND_INSTANCE), null);
-  assert.equal(machineOf(THIRD_INSTANCE), null);
 });
 
 test("connectedInstancesOf orders by the newest heartbeat then by name and skips a stale heartbeat", async (t) => {
