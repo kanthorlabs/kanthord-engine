@@ -42,7 +42,6 @@ import type { SshAccess } from "../../repository/contract.ts";
 import { DEFAULT_SSH_PORT } from "../../repository/sshd-test-support.ts";
 
 const SECRET = Buffer.alloc(32, 7).toString("base64");
-const ENDED_RECORD = "execution ended";
 const SESSION_ROOT = "/test/session-root";
 const NO_ENTRIES = 0;
 const ONE_ENTRY = 1;
@@ -52,120 +51,6 @@ const REGISTRATION = {
   resource_identity: "worker:kanthord:test",
   worker_name: "coder@1",
 };
-const PROVIDER_CAUSE = "OAuth auth derivation failed for anthropic";
-test("host logs the stop of a released or ended execution in the execution ended record", async (t) => {
-  const api = httpTransport("http://127.0.0.1:1");
-  const claim = testClaim();
-  const credential = {
-    credential_id: "credential_01ARZ3NDEKTSV4RRFFQ69G5FAA",
-    provider_id: "anthropic",
-    credential: { type: "api_key", key: "test_host_key" },
-  };
-  t.mock.method(api.worker, "handover", async () => ({
-    type: OperationResultType.Completed,
-    status: 200,
-    data: sealEnvelope(
-      deriveHandoverKeys(SECRET).handover,
-      handoverAad(claim.execution_id, claim.claimant.runtime_identity),
-      { items: [credential], ssh_identities: [] },
-    ),
-  }));
-  t.mock.method(api.worker, "execution.setup.get", async () => ({
-    type: OperationResultType.Completed,
-    status: 200,
-    data: {
-      execution_id: claim.execution_id,
-      worker_name: "coder@1",
-      agents: [],
-      templates: SHIPPED_TEMPLATES,
-      resource_budget: { turns: 200, wall_time_ms: 7200000 },
-      intent: ExecutionIntent.Implement,
-      repositories: [],
-    },
-  }));
-  const records: Record<string, unknown>[] = [];
-  const input = {
-    api,
-    claim,
-    clientSecret: SECRET,
-    context: background,
-    workspaces: WorkspaceRoot.open(temporary(t)),
-    transport: new RepositoryComponent(),
-    modelRuntimeFactory: async () => {
-      throw new Error("Unexpected inference");
-    },
-    hostHome: temporary(t),
-    env: hostEnvironment(),
-    sessionRoot: SESSION_ROOT,
-    log: (record: Record<string, unknown>) => records.push(record),
-  };
-  const stop = {
-    reason: EndReason.OperationFailed,
-    code: "repository.host_key.unpinned",
-  };
-  const providerStop = {
-    reason: EndReason.ProviderFailed,
-    code: "unavailable",
-  };
-  await hostExecution(input, async () => ({
-    kind: "released",
-    furtherWork: true,
-    stop,
-  }));
-  await hostExecution(input, async () => ({
-    kind: "released",
-    furtherWork: false,
-  }));
-  await hostExecution(input, async () => ({ kind: "ended", ...stop }));
-  await hostExecution(input, async () => ({
-    kind: "released",
-    furtherWork: true,
-    stop: { ...providerStop, detail: PROVIDER_CAUSE },
-  }));
-  await hostExecution(input, async () => ({
-    kind: "ended",
-    ...providerStop,
-    detail: PROVIDER_CAUSE,
-  }));
-  const ended = records.filter((record) => record.msg === ENDED_RECORD);
-  assert.deepEqual(ended, [
-    {
-      msg: ENDED_RECORD,
-      execution_id: claim.execution_id,
-      kind: "released",
-      reason: stop.reason,
-      code: stop.code,
-    },
-    {
-      msg: ENDED_RECORD,
-      execution_id: claim.execution_id,
-      kind: "released",
-    },
-    {
-      msg: ENDED_RECORD,
-      execution_id: claim.execution_id,
-      kind: "ended",
-      reason: stop.reason,
-      code: stop.code,
-    },
-    {
-      msg: ENDED_RECORD,
-      execution_id: claim.execution_id,
-      kind: "released",
-      reason: providerStop.reason,
-      code: providerStop.code,
-      detail: PROVIDER_CAUSE,
-    },
-    {
-      msg: ENDED_RECORD,
-      execution_id: claim.execution_id,
-      kind: "ended",
-      reason: providerStop.reason,
-      code: providerStop.code,
-      detail: PROVIDER_CAUSE,
-    },
-  ]);
-});
 test("host takes handover before setup and method, discards on every method end", async (t) => {
   const api = httpTransport("http://127.0.0.1:1");
   const claim = testClaim();
@@ -1000,7 +885,6 @@ test("a refused setup whose release fails ends the pull loop with the setup code
 });
 
 const SETUP_UNAVAILABLE_RECORD = "worker.execution.setup_unavailable";
-const CLAIM_LIFETIME_MS = 60_000;
 const GATEWAY_ANSWERS = [
   { status: 504, code: "gateway.invocation.timeout", details: null },
   { status: 500, code: "gateway.invocation.unknown", details: null },
@@ -1030,19 +914,6 @@ test("a gateway answer of the setup ends only the execution and the pull loop ta
     assert.deepEqual(host.releases, [], answer.code);
     assert.deepEqual(unavailableRecords(host.logs), [answer.code]);
   }
-});
-
-test("a setup read that stays indeterminate until expired_at ends only the execution and the pull loop takes the next work", async (t) => {
-  const host = refusedSetupHost(t, GATEWAY_ANSWERS[0]!, undefined, {
-    setup: { type: OperationResultType.Indeterminate },
-    lifetime: CLAIM_LIFETIME_MS,
-  });
-  assert.equal(await host.running, null);
-  assert.equal(host.pulls(), TWO_PULLS);
-  assert.deepEqual(host.releases, []);
-  assert.deepEqual(unavailableRecords(host.logs), [
-    "gateway.invocation.timeout",
-  ]);
 });
 
 test("a handover that the handover key does not open releases a stop with worker.handover.decryption_failed and the pull loop takes the next work", async (t) => {

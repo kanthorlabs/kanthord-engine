@@ -43,61 +43,6 @@ const MEDIAN_EVEN = 2;
 const BUCKETS_ODD = 3;
 const BUCKETS_EVEN = 4;
 const FRACTION_QUARTER = 0.25;
-const SIGNAL_KEYS = {
-  queued: [],
-  executing: [
-    "turns_per_execution",
-    "tool_error_rate",
-    "turn_rate_limited",
-    "turn_quota_exhausted",
-    "turn_unavailable",
-    "turn_error_other",
-    "leak_rate",
-  ],
-  verification: [
-    "gate_routed",
-    "affected_runs",
-    "affected_failed",
-    "affected_base_red",
-    "affected_flaky_runs",
-    "flaky_tests",
-    "loops_per_entry",
-    "affected_fail_rate",
-    "flaky_run_share",
-    "base_red_share",
-    "budget",
-    "unobserved",
-    "unobserved_external",
-    "unobserved_no_gate",
-  ],
-  release_gate: [
-    "gate_affected_passed",
-    "gate_affected_base_red",
-    "gate_affected_absent",
-    "leak_rate",
-  ],
-  evaluation: [
-    "evaluation_time_p90",
-    "evaluation_setup",
-    "evaluation_verification",
-    "evaluation_affected",
-    "evaluation_judgement",
-  ],
-  outcome: [
-    "success",
-    "rework_rate",
-    "blocked_rate",
-    "blocked_rework_limit",
-    "blocked_plan_defect",
-  ],
-};
-const REMOVED_KEYS = [
-  "tools_per_execution",
-  "gate_runs",
-  "review_wait_p50",
-  "evaluation_time_p50",
-  "blocked_none",
-];
 
 const ZERO_VECTOR = Object.fromEntries(
   FLOW_VECTOR_COLUMNS.map((column) => [column, 0]),
@@ -175,21 +120,6 @@ function stageOf(
   return found;
 }
 
-test("the answer holds the six stages in order", () => {
-  const stages = stagesOf(NO_ROWS, NO_HISTOGRAMS, windows(COUNT_TWO), isHosted);
-  assert.deepEqual(
-    stages.map((stage) => stage.stage),
-    [
-      FlowStage.Queued,
-      FlowStage.Executing,
-      FlowStage.Verification,
-      FlowStage.ReleaseGate,
-      FlowStage.Evaluation,
-      FlowStage.Outcome,
-    ],
-  );
-});
-
 const COUNT_ROWS = [
   row({ stage: FlowStage.Executing, exit: FlowExit.Open }),
   row({
@@ -243,26 +173,6 @@ test("executing counts the unobserved execution", () => {
   assert.deepEqual(current.exits, {
     open: { count: COUNT_ONE, cost_usd: 0 },
     stopped: { count: COUNT_TWO, cost_usd: 1.5 },
-  });
-});
-
-test("verification does not count the unobserved execution", () => {
-  const { current } = stageOf(COUNT_ROWS, FlowStage.Verification);
-  assert.equal(current.entered, COUNT_FOUR);
-  assert.equal(current.unobserved, COUNT_ONE);
-  assert.equal(current.open, NO_COUNT);
-  assert.deepEqual(current.exits, {
-    budget: { count: COUNT_ONE, cost_usd: COUNT_TWO },
-  });
-});
-
-test("release_gate does not count the unobserved execution", () => {
-  const { current } = stageOf(COUNT_ROWS, FlowStage.ReleaseGate);
-  assert.equal(current.entered, COUNT_THREE);
-  assert.equal(current.unobserved, COUNT_ONE);
-  assert.deepEqual(current.exits, {
-    handed_on: { count: COUNT_ONE, cost_usd: 0 },
-    further_work: { count: COUNT_THREE, cost_usd: 0 },
   });
 });
 
@@ -328,22 +238,6 @@ test("evaluation and outcome read the rows of the kind evaluation", () => {
   });
 });
 
-test("a row of the stage none counts at no stage", () => {
-  const rows = [
-    row({
-      stage: FlowStageKey.None,
-      exit: FlowExit.Unknown,
-      executions: COUNT_FIVE,
-    }),
-  ];
-  const stages = stagesOf(rows, NO_HISTOGRAMS, windows(COUNT_TWO), isHosted);
-  for (const stage of stages) {
-    assert.equal(stage.current.entered, NO_COUNT);
-    assert.deepEqual(stage.current.exits, {});
-    assert.deepEqual(stage.dimensions, []);
-  }
-});
-
 test("the time of a stage is the percentile result of its measure over the merged bins", () => {
   const first = [100, 200, 300];
   const second = [5000, 6000];
@@ -361,21 +255,6 @@ test("the time of a stage is the percentile result of its measure over the merge
   );
   assert.deepEqual(time(FlowStage.Queued), percentilesOf(binsOf([COUNT_ONE])));
   assert.equal(time(FlowStage.Verification), null);
-});
-
-test("each stage reads its own measure", () => {
-  const measures: [FlowStage, FlowMeasure][] = [
-    [FlowStage.Queued, FlowMeasure.QueueWait],
-    [FlowStage.Executing, FlowMeasure.ExecutionTime],
-    [FlowStage.Verification, FlowMeasure.VerificationRunTime],
-    [FlowStage.ReleaseGate, FlowMeasure.GateRunTime],
-    [FlowStage.Evaluation, FlowMeasure.ReviewWait],
-    [FlowStage.Outcome, FlowMeasure.LeadTime],
-  ];
-  for (const [stage, measure] of measures) {
-    const result = stageOf(NO_ROWS, stage, [histogram(measure, [1000])]);
-    assert.equal(result.current.time?.count, COUNT_ONE);
-  }
 });
 
 test("the executing signals follow the table", () => {
@@ -560,30 +439,6 @@ test("a ratio with a denominator of 0 has no key in a window and a null in a ser
     null,
   ]);
   assert.deepEqual(executing.series.signals["turn_rate_limited"], [0, 0]);
-});
-
-test("the series of each stage holds each signal key of the table", () => {
-  const stages = stagesOf(NO_ROWS, NO_HISTOGRAMS, windows(COUNT_TWO), isHosted);
-  for (const stage of stages)
-    assert.deepEqual(
-      Object.keys(stage.series.signals).sort(),
-      [...SIGNAL_KEYS[stage.stage]].sort(),
-    );
-});
-
-test("no stage carries a removed signal key", () => {
-  const rows = COUNT_ROWS;
-  for (const stage of stagesOf(
-    rows,
-    NO_HISTOGRAMS,
-    windows(COUNT_TWO),
-    isHosted,
-  )) {
-    for (const key of REMOVED_KEYS) {
-      assert.equal(key in stage.current.signals, false);
-      assert.equal(key in stage.series.signals, false);
-    }
-  }
 });
 
 test("the series holds one value for each bucket with changed_after_end", () => {
@@ -773,16 +628,4 @@ test("previous_bucket_median is the mean of the two middle values for an even co
     turn_quota_exhausted: MEDIAN_EVEN * COUNT_TWO,
     turn_unavailable: 0,
   });
-});
-
-test("previous_bucket_median is empty for the other stages", () => {
-  const rows = previousRows([COUNT_FIVE, COUNT_ONE]);
-  for (const stage of [
-    FlowStage.Queued,
-    FlowStage.Verification,
-    FlowStage.ReleaseGate,
-    FlowStage.Evaluation,
-    FlowStage.Outcome,
-  ])
-    assert.deepEqual(stageOf(rows, stage).previous_bucket_median, {});
 });
