@@ -46,9 +46,10 @@ document.
   identity.
 - A server instance logs under `workers/<instance name>/` of the server
   state directory. The server log holds no record of a worker unit.
-- A `require` or `createRequire(...).resolve` specifier names a declared
-  dependency. With the pnpm global virtual store, `NODE_PATH` resolves an
-  undeclared one in KanthorD and not in a consumer install.
+- Each bare specifier of a `require`, a `createRequire(...).resolve`, a static
+  `import` and a dynamic `import()` names a declared dependency. With the pnpm
+  global virtual store, each pnpm script resolves an undeclared package through
+  `NODE_PATH` and `NODE_OPTIONS`. A consumer install does not resolve it.
 
 ## Tests
 
