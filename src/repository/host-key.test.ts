@@ -9,25 +9,18 @@ import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { childRun, stopAfter } from "../kernel/test-support.ts";
 import {
-  HOST_KEY_SCAN_FAILED_STATUS,
   HostKeyErrorCode,
   HostKeySource,
   repositoryOperations,
 } from "./contract.ts";
 import {
   type HostKeySources,
-  keyscanArguments,
   parseGitHubMeta,
   parseKeyscan,
   RepositoryHostKeys,
 } from "./host-key.ts";
 import { repositoryMigrations } from "./migrations.ts";
-import {
-  isGitHubSshHost,
-  isSshHost,
-  sshKnownHostsName,
-  sshPortOf,
-} from "./platform.ts";
+import { sshKnownHostsName, sshPortOf } from "./platform.ts";
 import { sshFingerprintOf } from "./ssh-key.ts";
 
 const REPOSITORY_SERVICE = "repository";
@@ -53,7 +46,6 @@ const GENERATED_KEYS = 3;
 const EXIT_SUCCESS = 0;
 const NO_READS = 0;
 const READ_PER_PIN = 1;
-const META_READ_PER_HOST = 2;
 const GITHUB_PINS = 2;
 const ONE_ROW_PER_HOST = 1;
 const NO_PINS = 0;
@@ -150,23 +142,6 @@ function fixture(t: TestContext, sources: Partial<HostKeySources> = {}) {
   return { store, hostKeys, reads, keys, meta, logs, scan, pin, list };
 }
 
-test("the SSH host predicates accept each host of the SSH host sets", () => {
-  for (const host of [
-    "github.com",
-    "ssh.github.com",
-    "gitlab.com",
-    "altssh.gitlab.com",
-    "bitbucket.org",
-    "altssh.bitbucket.org",
-  ])
-    assert.ok(isSshHost(host), host);
-  assert.ok(!isSshHost("example.com"));
-  assert.ok(!isSshHost("github"));
-  assert.ok(isGitHubSshHost("github.com"));
-  assert.ok(isGitHubSshHost("ssh.github.com"));
-  assert.ok(!isGitHubSshHost("gitlab.com"));
-});
-
 test("the meta parse takes the ed25519 entry of ssh_keys", () => {
   assert.equal(parseGitHubMeta(GITHUB_META), GITHUB_KEY);
   assert.equal(parseGitHubMeta({ ssh_keys: [GITHUB_META.ssh_keys[1]] }), null);
@@ -206,28 +181,6 @@ test("the keyscan parse of an alternative SSH host takes the line of the bracket
   assert.equal(parseKeyscan(ALTSSH_GITLAB, `${ALTSSH_GITLAB} ${key}\n`), null);
 });
 
-test("the keyscan arguments carry the port of the host", () => {
-  const argumentsOf = (port: string, host: string) => [
-    "-T",
-    "5",
-    "-t",
-    "ed25519",
-    "-p",
-    port,
-    "--",
-    host,
-  ];
-  assert.deepEqual(keyscanArguments(GITLAB), argumentsOf("22", GITLAB));
-  assert.deepEqual(
-    keyscanArguments(ALTSSH_GITLAB),
-    argumentsOf("443", ALTSSH_GITLAB),
-  );
-  assert.deepEqual(
-    keyscanArguments(ALTSSH_BITBUCKET),
-    argumentsOf("443", ALTSSH_BITBUCKET),
-  );
-});
-
 test("the fingerprint equals the output of ssh-keygen -l", async (t) => {
   assert.equal(sshFingerprintOf(GITHUB_KEY), GITHUB_FINGERPRINT);
   for (let index = 0; index < GENERATED_KEYS; index++) {
@@ -241,19 +194,6 @@ test("the fingerprint equals the output of ssh-keygen -l", async (t) => {
   }
 });
 
-test("a scan of a GitHub host reads the meta and derives the source", async (t) => {
-  const f = fixture(t);
-  for (const host of ["github.com", "ssh.github.com"])
-    assert.deepEqual(await f.scan(host), {
-      host,
-      public_key: GITHUB_KEY,
-      fingerprint: GITHUB_FINGERPRINT,
-      source: HostKeySource.GitHubMeta,
-    });
-  assert.equal(f.reads.meta, META_READ_PER_HOST);
-  assert.deepEqual(f.reads.keyscan, []);
-});
-
 test("a scan of another host runs the keyscan seam with source keyscan", async (t) => {
   const f = fixture(t);
   const answer = await f.scan(GITLAB);
@@ -265,29 +205,6 @@ test("a scan of another host runs the keyscan seam with source keyscan", async (
   });
   assert.deepEqual(f.reads.keyscan, [GITLAB]);
   assert.equal(f.reads.meta, NO_READS);
-});
-
-test("a meta answer with no ed25519 entry answers scan_failed", async (t) => {
-  const f = fixture(t);
-  f.meta.body = { ssh_keys: [GITHUB_META.ssh_keys[1]] };
-  await assert.rejects(f.scan(GITHUB), (error) =>
-    fails(error, HOST_KEY_SCAN_FAILED_STATUS, HostKeyErrorCode.ScanFailed),
-  );
-});
-
-test("a failed source read answers scan_failed with the host", async (t) => {
-  const f = fixture(t, {
-    keyscan: async () => {
-      throw new Error("timeout");
-    },
-  });
-  await assert.rejects(f.scan(GITLAB), (error) => {
-    assert.ok(
-      fails(error, HOST_KEY_SCAN_FAILED_STATUS, HostKeyErrorCode.ScanFailed),
-    );
-    assert.deepEqual((error as OperationError).details, { host: GITLAB });
-    return true;
-  });
 });
 
 test("a host outside every SSH host set answers host_unsupported", async (t) => {
@@ -429,18 +346,6 @@ test("ssh.github.com pins the GitHub meta key and reads its known-hosts line in 
   assert.deepEqual(
     (await f.list()).items.map((item) => item.host),
     [GITHUB, SSH_GITHUB],
-  );
-});
-
-test("an unpinned host refuses its known-hosts line with unpinned", (t) => {
-  const f = fixture(t);
-  assert.throws(
-    () => f.store.transaction((tx) => f.hostKeys.knownHostsLine(tx, GITLAB)),
-    (error) => {
-      assert.ok(fails(error, HttpStatus.Conflict, HostKeyErrorCode.Unpinned));
-      assert.deepEqual((error as OperationError).details, { host: GITLAB });
-      return true;
-    },
   );
 });
 

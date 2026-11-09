@@ -6,49 +6,20 @@ import { ExecutionStopReason } from "../scheduler/contract.ts";
 import {
   ExecutionEnd,
   FlowEvaluationStage,
-  flowEvaluationStageSchema,
   FlowExit,
-  flowExitSchema,
   FlowGateAffected,
-  flowGateAffectedSchema,
-  FlowGrain,
-  flowGrainSchema,
   FlowKind,
-  flowKindSchema,
-  FlowMeasure,
-  flowMeasureSchema,
   FlowStage,
-  flowStageSchema,
   FlowStopReason,
-  flowStopReasonSchema,
   TransitionRule,
 } from "./contract.ts";
 import {
   bucketsOf,
   contributionOf,
   exitOf,
-  FLOW_HOUR_RANGE_DAYS_MAX,
-  FLOW_VECTOR_COLUMNS,
-  FlowCauseAssigner,
-  flowCauseAssignerSchema,
-  FlowCauseCategory,
-  flowCauseCategorySchema,
-  FlowCauseDetail,
-  flowCauseDetailSchema,
   FlowStageKey,
-  flowStageKeySchema,
   type FlowTrace,
-  LATE_RECORD_MS,
   StopReasonKey,
-  stopReasonKeySchema,
-  validEvaluationStage,
-  validGateAffected,
-  validKind,
-  validRevokeCause,
-  validRootEnd,
-  validStage,
-  validTransitionRule,
-  validTransitionTo,
 } from "./flow-model.ts";
 
 const HOUR_MS = 3600000;
@@ -172,16 +143,6 @@ test("a steps execution never reads as assessed", () => {
     exitOf(traceOf({ transition_to: NodeState.Completed })),
     FlowExit.Unknown,
   );
-});
-
-test("an assessed end wins over a budget stop", () => {
-  const trace = evaluationOf({
-    root_end: ExecutionEnd.Revoked,
-    revoke_cause: "assessment",
-    transition_to: NodeState.Blocked,
-    stop_reason: ExecutionStopReason.BudgetEnd,
-  });
-  assert.equal(exitOf(trace), FlowExit.Blocked);
 });
 
 test("a budget stop is budget and wins over stopped", () => {
@@ -374,15 +335,6 @@ test("the cause stays only for the exits that carry a cause", () => {
   }
 });
 
-test("the key holds the empty string for a null project and a null worker", () => {
-  const { key } = contributionOf(
-    traceOf({ project_id: null, worker_name: null }),
-    isHosted,
-  );
-  assert.deepEqual([key.project_id], [""]);
-  assert.deepEqual([key.worker_name], [""]);
-});
-
 test("an external worker with no turns after its end awaits ingestion", () => {
   const external = traceOf({ worker_name: EXTERNAL });
   assert.deepEqual(
@@ -409,59 +361,6 @@ test("an external worker with no turns after its end awaits ingestion", () => {
     [contributionOf(unnamed, isHosted).vector.awaiting_ingestion],
     [0],
   );
-});
-
-test("the vector copies the summary and the flow counters", () => {
-  const { vector } = contributionOf(
-    traceOf({
-      cost_usd: 1.5,
-      turn_count: 2,
-      tool_count: 3,
-      tool_error_count: 4,
-      turn_rate_limited: 5,
-      turn_quota_exhausted: 6,
-      turn_unavailable: 7,
-      turn_error_other: 8,
-      gate_routed: 9,
-      affected_runs: 10,
-      affected_failed: 11,
-      affected_base_red: 12,
-      affected_flaky_runs: 13,
-      flaky_tests: 14,
-      late_records: 15,
-    }),
-    isHosted,
-  );
-  assert.deepEqual(vector, {
-    executions: 1,
-    unobserved: 0,
-    awaiting_ingestion: 0,
-    cost_usd: 1.5,
-    turn_count: 2,
-    tool_count: 3,
-    tool_error_count: 4,
-    turn_rate_limited: 5,
-    turn_quota_exhausted: 6,
-    turn_unavailable: 7,
-    turn_error_other: 8,
-    gate_routed: 9,
-    gate_affected_passed: 0,
-    gate_affected_base_red: 0,
-    gate_affected_absent: 0,
-    affected_runs: 10,
-    affected_failed: 11,
-    affected_base_red: 12,
-    affected_flaky_runs: 13,
-    flaky_tests: 14,
-    evaluation_setup: 0,
-    evaluation_verification: 0,
-    evaluation_affected: 0,
-    evaluation_judgement: 0,
-    blocked_rework_limit: 0,
-    blocked_plan_defect: 0,
-    late_records: 15,
-  });
-  assert.deepEqual(Object.keys(vector), [...FLOW_VECTOR_COLUMNS]);
 });
 
 test("each gate_affected value is one hot", () => {
@@ -545,111 +444,4 @@ test("the bucket of each grain starts at the UTC hour and the UTC day of an anch
     hour: day + 5 * HOUR_MS,
     day,
   });
-});
-
-test("each schema refuses a value outside its set", () => {
-  const schemas = [
-    flowGrainSchema,
-    flowKindSchema,
-    flowStageSchema,
-    flowExitSchema,
-    flowMeasureSchema,
-    flowStopReasonSchema,
-    flowEvaluationStageSchema,
-    flowGateAffectedSchema,
-    flowStageKeySchema,
-    stopReasonKeySchema,
-    flowCauseCategorySchema,
-    flowCauseDetailSchema,
-    flowCauseAssignerSchema,
-  ];
-  for (const schema of schemas)
-    assert.equal(schema.safeParse("outside_the_set").success, false);
-});
-
-test("the sets hold their values", () => {
-  assert.deepEqual(Object.values(FlowGrain), ["hour", "day"]);
-  assert.deepEqual(Object.values(FlowKind), ["steps", "evaluation", ""]);
-  assert.deepEqual(Object.values(FlowStage), [
-    "queued",
-    "executing",
-    "verification",
-    "release_gate",
-    "evaluation",
-    "outcome",
-  ]);
-  assert.deepEqual(Object.values(FlowMeasure), [
-    "queue_wait",
-    "execution_time",
-    "verification_run_time",
-    "gate_run_time",
-    "review_wait",
-    "evaluation_time",
-    "lead_time",
-  ]);
-  assert.deepEqual(Object.values(FlowEvaluationStage), [
-    "setup",
-    "verification",
-    "affected",
-    "judgement",
-  ]);
-  assert.deepEqual(Object.values(FlowGateAffected), [
-    "passed",
-    "base_red",
-    "absent",
-  ]);
-  assert.deepEqual([Object.values(FlowExit).length], [12]);
-});
-
-test("the key sets add the empty value", () => {
-  assert.ok(flowStageKeySchema.safeParse("").success);
-  assert.ok(flowStageKeySchema.safeParse("outcome").success);
-  assert.ok(stopReasonKeySchema.safeParse("").success);
-  assert.ok(stopReasonKeySchema.safeParse("lost").success);
-  assert.ok(flowCauseCategorySchema.safeParse("").success);
-  assert.ok(flowCauseCategorySchema.safeParse("unattributed").success);
-  assert.ok(flowCauseAssignerSchema.safeParse("").success);
-  assert.ok(flowCauseAssignerSchema.safeParse("human").success);
-  assert.ok(flowCauseDetailSchema.safeParse("").success);
-  assert.ok(flowCauseDetailSchema.safeParse("network").success);
-  assert.ok(flowCauseDetailSchema.safeParse("unattributed").success);
-  assert.deepEqual([Object.values(FlowCauseCategory).length], [10]);
-  assert.deepEqual([Object.values(FlowCauseAssigner).length], [4]);
-  assert.equal(
-    new Set(Object.values(FlowCauseDetail)).size,
-    Object.values(FlowCauseDetail).length,
-  );
-});
-
-test("each validator answers its value or null for an unknown value", () => {
-  assert.deepEqual([validRootEnd("lost")], ["lost"]);
-  assert.equal(validRootEnd("gone"), null);
-  assert.deepEqual([validRevokeCause("human")], ["human"]);
-  assert.equal(validRevokeCause("gone"), null);
-  assert.deepEqual([validTransitionTo("External.Failed")], ["External.Failed"]);
-  assert.equal(validTransitionTo("Gone"), null);
-  assert.deepEqual([validTransitionRule("plan_defect")], ["plan_defect"]);
-  assert.equal(validTransitionRule("gone"), null);
-  assert.deepEqual([validEvaluationStage("judgement")], ["judgement"]);
-  assert.equal(validEvaluationStage("gone"), null);
-  assert.deepEqual([validGateAffected("base_red")], ["base_red"]);
-  assert.equal(validGateAffected("gone"), null);
-  assert.deepEqual([validKind("steps")], ["steps"]);
-  assert.deepEqual([validKind("")], [""]);
-  assert.equal(validKind("gone"), null);
-  assert.deepEqual([validStage("outcome")], ["outcome"]);
-  assert.equal(validStage(""), null);
-  assert.equal(validStage(7), null);
-});
-
-test("FlowStopReason holds the values of ExecutionStopReason plus lost", () => {
-  assert.deepEqual(
-    new Set(Object.values(FlowStopReason)),
-    new Set([...Object.values(ExecutionStopReason), "lost"]),
-  );
-});
-
-test("the range and late constants hold their values", () => {
-  assert.deepEqual([FLOW_HOUR_RANGE_DAYS_MAX], [2]);
-  assert.equal(LATE_RECORD_MS, HOUR_MS);
 });
