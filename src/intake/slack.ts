@@ -125,11 +125,14 @@ const messageBodySchema = z.looseObject({
 
 type MessageEvent = z.infer<typeof messageBodySchema>["event"];
 
-interface ThreadReply {
-  event: MessageEvent;
-  link: DecodedSlackLink;
+interface MessageTime {
   seconds: string;
   micros: string;
+}
+
+interface ThreadReply extends MessageTime {
+  event: MessageEvent;
+  link: DecodedSlackLink;
 }
 
 function bodyOf(bytes: Uint8Array): unknown {
@@ -192,26 +195,43 @@ export function classifySlackDelivery(bytes: Uint8Array): SlackDelivery | null {
   };
 }
 
-function threadReplyOf(bytes: Uint8Array, teamId: string): ThreadReply | null {
-  const parsed = messageBodySchema.safeParse(bodyOf(bytes));
-  if (!parsed.success || parsed.data.team_id !== teamId) return null;
-  const { event } = parsed.data;
-  if (event.subtype !== undefined && IGNORED_SUBTYPES.has(event.subtype))
-    return null;
-  if (event.thread_ts === event.ts) return null;
+function threadLinkOf(
+  teamId: string,
+  event: MessageEvent,
+): DecodedSlackLink | null {
   const link = externalLinkSchema.safeParse({
     kind: ExternalLinkKind.SlackThread,
     resource_identity: `${CONVERSATION_IDENTITY_PREFIX}${teamId}`,
     channel: event.channel,
     thread_ts: event.thread_ts,
   });
-  const match = MESSAGE_TS_PATTERN.exec(event.ts);
-  const seconds = match?.[1];
-  const micros = match?.[2];
   if (!link.success || link.data.kind !== ExternalLinkKind.SlackThread)
     return null;
+  return link.data;
+}
+
+function messageTimeOf(ts: string): MessageTime | null {
+  const match = MESSAGE_TS_PATTERN.exec(ts);
+  const seconds = match?.[1];
+  const micros = match?.[2];
   if (seconds === undefined || micros === undefined) return null;
-  return { event, link: link.data, seconds, micros };
+  return { seconds, micros };
+}
+
+function isIgnoredSubtype(event: MessageEvent): boolean {
+  return event.subtype !== undefined && IGNORED_SUBTYPES.has(event.subtype);
+}
+
+function threadReplyOf(bytes: Uint8Array, teamId: string): ThreadReply | null {
+  const parsed = messageBodySchema.safeParse(bodyOf(bytes));
+  if (!parsed.success || parsed.data.team_id !== teamId) return null;
+  const { event } = parsed.data;
+  if (isIgnoredSubtype(event)) return null;
+  if (event.thread_ts === event.ts) return null;
+  const link = threadLinkOf(teamId, event);
+  const time = messageTimeOf(event.ts);
+  if (link === null || time === null) return null;
+  return { event, link, ...time };
 }
 
 function occurredAtOf(reply: ThreadReply): number {
@@ -266,6 +286,20 @@ export function describeSlackEvent(input: {
   };
 }
 
+async function refusedStatusResult(
+  response: Response,
+  observe?: ResourceObserver,
+): Promise<ResourceStatusValue> {
+  await response.body?.cancel();
+  observe?.(
+    `status=${response.status}`,
+    failureReasonOfStatus(response.status),
+  );
+  return response.status === HttpStatus.Forbidden
+    ? ResourceStatus.Unknown
+    : ResourceStatus.Unhealthy;
+}
+
 export async function probeSlackToken(
   token: string,
   context: Context,
@@ -281,16 +315,8 @@ export async function probeSlackToken(
       signal,
       redirect: "manual",
     });
-    if (response.status !== HttpStatus.OK) {
-      await response.body?.cancel();
-      observe?.(
-        `status=${response.status}`,
-        failureReasonOfStatus(response.status),
-      );
-      return response.status === HttpStatus.Forbidden
-        ? ResourceStatus.Unknown
-        : ResourceStatus.Unhealthy;
-    }
+    if (response.status !== HttpStatus.OK)
+      return await refusedStatusResult(response, observe);
     const answer = authTestAnswerSchema.parse(await response.json());
     if (signal.aborted) return ResourceStatus.Unknown;
     if (answer.ok) return ResourceStatus.Healthy;
@@ -402,46 +428,115 @@ function unreadable(kind: SlackCallKind): SlackFailure {
   );
 }
 
+interface SlackRequest {
+  kind: SlackCallKind;
+  method: string;
+  url: string;
+  body?: unknown;
+}
+
+interface SlackReply {
+  status: number;
+  accepted: boolean;
+  text: string;
+}
+
+function expiredFailure(kind: SlackCallKind): SlackFailure {
+  return failure(
+    kind === SlackCallKind.Read
+      ? ResultClass.RetryableRefusal
+      : ResultClass.ConfirmedFailure,
+    null,
+    "the deadline of the Slack call passed before dispatch",
+  );
+}
+
+function requestInit(
+  call: SlackCall,
+  request: SlackRequest,
+  signal: AbortSignal,
+): RequestInit {
+  return {
+    method: request.method,
+    headers: {
+      [AUTHORIZATION_HEADER]: `Bearer ${call.token}`,
+      ...(request.body === undefined
+        ? {}
+        : { "Content-Type": CONTENT_TYPE_JSON }),
+    },
+    ...(request.body === undefined
+      ? {}
+      : { body: JSON.stringify(request.body) }),
+    signal,
+    redirect: "manual",
+  };
+}
+
+async function fetchReply(url: string, init: RequestInit): Promise<SlackReply> {
+  const response = await globalThis.fetch(url, init);
+  return {
+    status: response.status,
+    accepted: response.ok,
+    text: await response.text(),
+  };
+}
+
+function refusalOf(
+  error: string | undefined,
+  kind: SlackCallKind,
+): SlackFailure {
+  const code =
+    error !== undefined && ERROR_CODE_PATTERN.test(error) ? error : null;
+  return failure(
+    code === null ? ResultClass.FinalRefusal : errorClass(code, kind),
+    null,
+    code === null
+      ? "the Slack answer refuses the call"
+      : `the Slack answer refuses the call: ${code}`,
+  );
+}
+
+function answeredBody(
+  body: unknown,
+  kind: SlackCallKind,
+): SlackAnswer<unknown> {
+  const answer = answerSchema.safeParse(body);
+  if (!answer.success) return unreadable(kind);
+  if (answer.data.ok) return { ok: true, value: body };
+  return refusalOf(answer.data.error, kind);
+}
+
+function answerOf(
+  reply: SlackReply,
+  kind: SlackCallKind,
+): SlackAnswer<unknown> {
+  if (!reply.accepted)
+    return failure(
+      statusClass(reply.status, kind),
+      reply.status,
+      "the Slack answer refuses the call",
+    );
+  let body: unknown;
+  try {
+    body = JSON.parse(reply.text);
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    return unreadable(kind);
+  }
+  return answeredBody(body, kind);
+}
+
 async function exchange(
   call: SlackCall,
-  request: {
-    kind: SlackCallKind;
-    method: string;
-    url: string;
-    body?: unknown;
-  },
+  request: SlackRequest,
 ): Promise<SlackAnswer<unknown>> {
   const remaining = call.deadlineAt - Date.now();
   if (call.signal.aborted || remaining <= NO_TIME_LEFT_MS)
-    return failure(
-      request.kind === SlackCallKind.Read
-        ? ResultClass.RetryableRefusal
-        : ResultClass.ConfirmedFailure,
-      null,
-      "the deadline of the Slack call passed before dispatch",
-    );
+    return expiredFailure(request.kind);
   const signal = AbortSignal.any([call.signal, AbortSignal.timeout(remaining)]);
-  let status: number;
-  let accepted: boolean;
-  let text: string;
+  let reply: SlackReply;
   try {
-    const response = await globalThis.fetch(request.url, {
-      method: request.method,
-      headers: {
-        [AUTHORIZATION_HEADER]: `Bearer ${call.token}`,
-        ...(request.body === undefined
-          ? {}
-          : { "Content-Type": CONTENT_TYPE_JSON }),
-      },
-      ...(request.body === undefined
-        ? {}
-        : { body: JSON.stringify(request.body) }),
-      signal,
-      redirect: "manual",
-    });
-    status = response.status;
-    accepted = response.ok;
-    text = await response.text();
+    reply = await fetchReply(request.url, requestInit(call, request, signal));
   } catch (error) {
     if (!(error instanceof Error)) throw error;
     return failure(
@@ -450,32 +545,7 @@ async function exchange(
       "the Slack call ended before an answer",
     );
   }
-  if (!accepted)
-    return failure(
-      statusClass(status, request.kind),
-      status,
-      "the Slack answer refuses the call",
-    );
-  let body: unknown;
-  try {
-    body = JSON.parse(text);
-  } catch (error) {
-    if (!(error instanceof SyntaxError)) throw error;
-    return unreadable(request.kind);
-  }
-  const answer = answerSchema.safeParse(body);
-  if (!answer.success) return unreadable(request.kind);
-  if (answer.data.ok) return { ok: true, value: body };
-  const { error } = answer.data;
-  const code =
-    error !== undefined && ERROR_CODE_PATTERN.test(error) ? error : null;
-  return failure(
-    code === null ? ResultClass.FinalRefusal : errorClass(code, request.kind),
-    null,
-    code === null
-      ? "the Slack answer refuses the call"
-      : `the Slack answer refuses the call: ${code}`,
-  );
+  return answerOf(reply, request.kind);
 }
 
 function updateKeyOf(teamId: string, channel: string, ts: string): string {
