@@ -633,7 +633,15 @@ test("a rootful runtime on macOS creates sessions.partial with mode 0700 and no 
 
 test("check answers the status only and facts answers null when the status is not available", async (t) => {
   const f = rig(t);
-  assert.equal((await f.driver.check()).available, true);
+  const status = await f.driver.check();
+  assert.equal(status.available, true);
+  assert.deepEqual(Object.keys(status).sort(), [
+    "available",
+    "container_runtime",
+    "detail",
+    "placement",
+    "reason",
+  ]);
   assert.deepEqual(await f.driver.facts(), {
     rootless: true,
     selinux: false,
