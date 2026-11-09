@@ -4,8 +4,11 @@ import {
   appendFileSync,
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -29,13 +32,18 @@ import {
   commitWork,
   discardChanges,
   excludeUntracked,
+  fetchLocal,
   fileAtRevision,
   headCommit,
   isAncestor,
   mergeBase,
   modifiedFiles,
+  normaliseGitState,
+  scrubTree,
   treeOf,
 } from "./local-git.ts";
+import { readSetupRecord, writeSetupRecord } from "./setup-record.ts";
+import { PoolClass, TreePool } from "./tree-pool.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 
 const env = hostEnvironment();
@@ -665,4 +673,520 @@ test("a KanthorD checkout writes the real tree of a commit with a replace ref", 
   await git.raw(["replace", real, replacement]);
   await checkoutDetached(env, directory, real, background, 10000);
   assert.equal(readFileSync(join(directory, "tracked"), "utf8"), REAL_CONTENT);
+});
+
+const TEST_IDENTITY = [
+  "-c",
+  "user.name=Test",
+  "-c",
+  "user.email=test@example.invalid",
+];
+const TRACKED_CONTENT = "tracked";
+const GIT_DEADLINE_MS = 30000;
+const READY = "ready";
+const REBUILD = "rebuild";
+const NEWLINE_TEXT = "\n";
+const DETACHED_HEAD = "HEAD";
+const SKIP_WORKTREE_TAG = "S ";
+const NO_LINES = 0;
+const FALSE_TEXT = "false";
+const OUTSIDE_TEXT = "outside\n";
+const SCRUBBED_EXCLUDE = "/deps/\n/star\\*\n";
+
+async function commitFile(directory: string, path: string, content: string) {
+  mkdirSync(join(directory, path, ".."), { recursive: true });
+  writeFileSync(join(directory, path), content);
+  await simpleGit(directory).add(path);
+  await simpleGit(directory).raw([...TEST_IDENTITY, "commit", "-m", path]);
+}
+
+async function poolFixture(
+  t: Parameters<typeof temporary>[0],
+  cloneArgs: readonly string[] = [],
+) {
+  const root = temporary(t);
+  const origin = join(root, "origin");
+  mkdirSync(origin);
+  await simpleGit(origin).raw(["init", "-b", "main"]);
+  await simpleGit(origin).raw(["config", "uploadpack.allowFilter", "true"]);
+  await commitFile(origin, ".gitignore", "deps/\nbuild/\n");
+  await commitFile(origin, "tracked", TRACKED_CONTENT);
+  await commitFile(origin, "dir/a", "a");
+  await commitFile(origin, "other/b", "b");
+  const tree = join(root, "tree");
+  await simpleGit(root).raw([
+    "clone",
+    ...cloneArgs,
+    cloneArgs.length ? `file://${origin}` : origin,
+    tree,
+  ]);
+  const commit = await headCommit(env, tree, background, GIT_DEADLINE_MS);
+  return { root, origin, tree, commit };
+}
+
+type PoolFixture = Awaited<ReturnType<typeof poolFixture>>;
+
+function take(at: PoolFixture): string {
+  const pool = TreePool.open(join(at.root, "pool"));
+  pool.give({ address: at.origin, poolClass: PoolClass.Agent }, at.tree, null);
+  const directory = join(at.root, "taken", "checkout");
+  assert.equal(
+    pool.take(
+      { address: at.origin, poolClass: PoolClass.Agent },
+      directory,
+      null,
+    ),
+    true,
+  );
+  return directory;
+}
+
+async function normalise(
+  at: PoolFixture,
+  directory: string,
+  keepRefs: readonly string[] = [],
+) {
+  return await normaliseGitState(
+    { env, directory, context: background, deadlineMs: GIT_DEADLINE_MS },
+    at.origin,
+    keepRefs,
+  );
+}
+
+async function takeAndScrub(
+  at: PoolFixture,
+  keepRefs: readonly string[] = [],
+): Promise<string> {
+  const directory = take(at);
+  assert.equal(await normalise(at, directory, keepRefs), READY);
+  const call = {
+    env,
+    directory,
+    context: background,
+    deadlineMs: GIT_DEADLINE_MS,
+  };
+  await scrubTree(call, at.commit, (await readSetupRecord(call))?.roots ?? []);
+  return directory;
+}
+
+async function hostGit(directory: string, args: string[]): Promise<string> {
+  return (await simpleGit(directory).raw(args)).trim();
+}
+
+function snapshot(path: string): string | string[] {
+  return lstatSync(path).isDirectory()
+    ? readdirSync(path, { recursive: true }).map(String).sort()
+    : readFileSync(path, "utf8");
+}
+
+function lockFiles(directory: string): string[] {
+  return readdirSync(join(directory, ".git"), { recursive: true })
+    .map(String)
+    .filter((name) => name.endsWith(".lock"));
+}
+
+test("a replace ref is gone and the checkout writes the real tree", async (t) => {
+  const at = await poolFixture(t);
+  await commitFile(at.tree, "tracked", "replacement");
+  const replacement = await headCommit(
+    env,
+    at.tree,
+    background,
+    GIT_DEADLINE_MS,
+  );
+  await hostGit(at.tree, ["replace", at.commit, replacement]);
+  await hostGit(at.tree, ["branch", "feature"]);
+  await hostGit(at.tree, ["branch", "keep"]);
+  await hostGit(at.tree, ["tag", "v1"]);
+  await hostGit(at.tree, ["update-ref", "refs/kanthord/heads/x", at.commit]);
+  writeFileSync(join(at.tree, "tracked"), "stashed");
+  await hostGit(at.tree, [...TEST_IDENTITY, "stash"]);
+  const directory = await takeAndScrub(at, ["refs/heads/keep"]);
+  assert.deepEqual(
+    (await hostGit(directory, ["for-each-ref", "--format=%(refname)"]))
+      .split(NEWLINE_TEXT)
+      .sort(),
+    [
+      "refs/heads/keep",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/main",
+      "refs/tags/v1",
+    ],
+  );
+  assert.equal(await hostGit(directory, ["rev-parse", "HEAD"]), at.commit);
+  assert.equal(
+    await hostGit(directory, ["rev-parse", "--abbrev-ref", "HEAD"]),
+    DETACHED_HEAD,
+  );
+  assert.equal(
+    await hostGit(directory, ["show", `${at.commit}:tracked`]),
+    TRACKED_CONTENT,
+  );
+  assert.equal(
+    readFileSync(join(directory, "tracked"), "utf8"),
+    TRACKED_CONTENT,
+  );
+});
+
+test("a skip-worktree bit is gone and the changed tracked file is restored", async (t) => {
+  const at = await poolFixture(t);
+  await hostGit(at.tree, ["update-index", "--skip-worktree", "tracked"]);
+  writeFileSync(join(at.tree, "tracked"), "changed");
+  const directory = await takeAndScrub(at);
+  assert.equal(
+    readFileSync(join(directory, "tracked"), "utf8"),
+    TRACKED_CONTENT,
+  );
+  assert.equal(
+    (await hostGit(directory, ["ls-files", "-v"]))
+      .split(NEWLINE_TEXT)
+      .filter((line) => line.startsWith(SKIP_WORKTREE_TAG)).length,
+    NO_LINES,
+  );
+});
+
+test("a sparse checkout is gone and each tracked file is present", async (t) => {
+  const at = await poolFixture(t);
+  await hostGit(at.tree, ["config", "core.sparseCheckout", "true"]);
+  writeFileSync(join(at.tree, ".git", "info", "sparse-checkout"), "/dir/\n");
+  await hostGit(at.tree, ["read-tree", "-mu", "HEAD"]);
+  assert.equal(existsSync(join(at.tree, "other", "b")), false);
+  const directory = await takeAndScrub(at);
+  for (const path of ["tracked", "dir/a", "other/b", ".gitignore"])
+    assert.equal(existsSync(join(directory, path)), true, path);
+  assert.equal(
+    existsSync(join(directory, ".git", "info", "sparse-checkout")),
+    false,
+  );
+});
+
+test("a fsmonitor hook and a filter driver do not run", async (t) => {
+  const at = await poolFixture(t);
+  const marker = join(at.root, "ran");
+  const filter = join(at.root, "filter.sh");
+  writeFileSync(filter, `#!/bin/sh\necho filter >> "${marker}"\ncat\n`);
+  chmodSync(filter, EXECUTABLE_MODE);
+  const monitor = join(at.root, "monitor.sh");
+  writeFileSync(monitor, `#!/bin/sh\necho monitor >> "${marker}"\n`);
+  chmodSync(monitor, EXECUTABLE_MODE);
+  appendFileSync(
+    join(at.tree, ".git", "config"),
+    `[core]\n\tfsmonitor = ${monitor}\n[filter "x"]\n\tsmudge = ${filter}\n\tclean = ${filter}\n`,
+  );
+  writeFileSync(join(at.tree, ".git", "info", "attributes"), "* filter=x\n");
+  const directory = await takeAndScrub(at);
+  await hostGit(directory, ["status"]);
+  await hostGit(directory, ["checkout", "--force", "--detach", at.commit]);
+  assert.equal(existsSync(marker), false);
+  assert.equal(
+    existsSync(join(directory, ".git", "info", "attributes")),
+    false,
+  );
+});
+
+test("a pushurl and an insteadOf rule are gone", async (t) => {
+  const at = await poolFixture(t);
+  const elsewhere = join(at.root, "elsewhere");
+  await hostGit(at.tree, ["config", "remote.origin.pushurl", elsewhere]);
+  await hostGit(at.tree, ["config", `url.${elsewhere}.insteadOf`, at.origin]);
+  appendFileSync(
+    join(at.tree, ".git", "config"),
+    "[user]\n\tname = Agent\n[core]\n\teditor = vi\n\tfilemode = maybe\n",
+  );
+  const directory = await takeAndScrub(at);
+  assert.equal(
+    await hostGit(directory, ["remote", "get-url", "--push", "origin"]),
+    at.origin,
+  );
+  const entries = (
+    await hostGit(directory, ["config", "--file", ".git/config", "--list"])
+  ).split(NEWLINE_TEXT);
+  const allowed = [
+    "core.repositoryformatversion=0",
+    "core.bare=false",
+    `remote.origin.url=${at.origin}`,
+    "remote.origin.fetch=+refs/heads/*:refs/remotes/origin/*",
+    "gc.autodetach=false",
+    "maintenance.autodetach=false",
+  ];
+  for (const entry of allowed) assert.ok(entries.includes(entry), entry);
+  const optional =
+    /^core\.(logallrefupdates|ignorecase|precomposeunicode|symlinks)=(true|false)$/;
+  assert.deepEqual(
+    entries.filter(
+      (entry) => !allowed.includes(entry) && !optional.test(entry),
+    ),
+    [],
+  );
+});
+
+test("the hooks directory is empty, and gc.autoDetach and maintenance.autoDetach read false", async (t) => {
+  const at = await poolFixture(t);
+  writeRefusingHook(join(at.tree, ".git", "hooks"), join(at.root, "hook"));
+  const directory = await takeAndScrub(at);
+  assert.deepEqual(readdirSync(join(directory, ".git", "hooks")), []);
+  assert.equal(
+    await hostGit(directory, ["config", "--get", "gc.autoDetach"]),
+    FALSE_TEXT,
+  );
+  assert.equal(
+    await hostGit(directory, ["config", "--get", "maintenance.autoDetach"]),
+    FALSE_TEXT,
+  );
+});
+
+test("an alternates file is gone", async (t) => {
+  const at = await poolFixture(t);
+  const alternates = join(at.tree, ".git", "objects", "info", "alternates");
+  mkdirSync(join(alternates, ".."), { recursive: true });
+  writeFileSync(alternates, `${join(at.origin, ".git", "objects")}\n`);
+  writeFileSync(join(at.tree, ".git", "info", "grafts"), `${at.commit}\n`);
+  const directory = await takeAndScrub(at);
+  for (const path of ["objects/info/alternates", "info/grafts"])
+    assert.equal(existsSync(join(directory, ".git", path)), false, path);
+});
+
+test("a rebase, a sequencer and a bisect in progress are gone", async (t) => {
+  const at = await poolFixture(t);
+  const git = join(at.tree, ".git");
+  for (const name of ["rebase-merge", "rebase-apply", "sequencer"]) {
+    mkdirSync(join(git, name));
+    writeFileSync(join(git, name, "head-name"), "refs/heads/main\n");
+  }
+  for (const name of [
+    "BISECT_START",
+    "BISECT_LOG",
+    "AUTO_MERGE",
+    "MERGE_HEAD",
+    "MERGE_MSG",
+  ])
+    writeFileSync(join(git, name), `${at.commit}\n`);
+  const directory = await takeAndScrub(at);
+  for (const name of [
+    "rebase-merge",
+    "rebase-apply",
+    "sequencer",
+    "BISECT_START",
+    "BISECT_LOG",
+    "AUTO_MERGE",
+    "MERGE_HEAD",
+    "MERGE_MSG",
+  ])
+    assert.equal(existsSync(join(directory, ".git", name)), false, name);
+});
+
+test("a cherry-pick and a revert in progress are gone", async (t) => {
+  const at = await poolFixture(t);
+  const git = join(at.tree, ".git");
+  mkdirSync(join(git, "sequencer"));
+  writeFileSync(join(git, "sequencer", "todo"), `pick ${at.commit}\n`);
+  for (const name of ["CHERRY_PICK_HEAD", "REVERT_HEAD"])
+    writeFileSync(join(git, name), `${at.commit}\n`);
+  const directory = await takeAndScrub(at);
+  for (const name of ["sequencer", "CHERRY_PICK_HEAD", "REVERT_HEAD"])
+    assert.equal(existsSync(join(directory, ".git", name)), false, name);
+});
+
+test("a lock behind a symlink in .git outside the tree survives", async (t) => {
+  const at = await poolFixture(t);
+  const outside = join(at.root, "outside");
+  mkdirSync(outside);
+  writeFileSync(join(outside, "x.lock"), "");
+  symlinkSync(outside, join(at.tree, ".git", "linked"));
+  const directory = take(at);
+  assert.equal(await normalise(at, directory), REBUILD);
+  assert.equal(existsSync(join(outside, "x.lock")), true);
+});
+
+test("a symlinked config, info, objects, objects/info, hooks or refs answers rebuild", async (t) => {
+  for (const path of [
+    "config",
+    "info",
+    "objects",
+    "objects/info",
+    "hooks",
+    "refs",
+  ]) {
+    const at = await poolFixture(t);
+    const inside = join(at.tree, ".git", path);
+    const outside = join(at.root, "outside");
+    mkdirSync(join(inside, ".."), { recursive: true });
+    if (existsSync(inside)) renameSync(inside, outside);
+    else mkdirSync(outside);
+    symlinkSync(outside, inside);
+    const before = snapshot(outside);
+    assert.equal(await normalise(at, take(at)), REBUILD, path);
+    assert.deepEqual(snapshot(outside), before, path);
+  }
+});
+
+test("a symlink anywhere under .git answers rebuild and the outside file stays", async (t) => {
+  const cases: {
+    name: string;
+    plant: (git: string, outside: string) => void;
+  }[] = [
+    {
+      name: "logs",
+      plant: (git, outside) => {
+        mkdirSync(join(outside, "refs", "kanthord"), { recursive: true });
+        writeFileSync(join(outside, "refs", "kanthord", "x"), OUTSIDE_TEXT);
+        rmSync(join(git, "logs"), { recursive: true, force: true });
+        symlinkSync(outside, join(git, "logs"));
+      },
+    },
+    {
+      name: "nested ref",
+      plant: (git, outside) => {
+        mkdirSync(outside);
+        writeFileSync(join(outside, "x"), OUTSIDE_TEXT);
+        mkdirSync(join(git, "refs", "heads"), { recursive: true });
+        symlinkSync(join(outside, "x"), join(git, "refs", "heads", "x"));
+      },
+    },
+  ];
+  for (const entry of cases) {
+    const at = await poolFixture(t);
+    const outside = join(at.root, "outside");
+    entry.plant(join(at.tree, ".git"), outside);
+    await hostGit(at.tree, ["update-ref", "refs/kanthord/x", at.commit]);
+    const before = snapshot(outside);
+    const directory = take(at);
+    assert.equal(await normalise(at, directory), REBUILD, entry.name);
+    assert.deepEqual(snapshot(outside), before, entry.name);
+  }
+});
+
+test("a symlinked info/exclude answers rebuild and its target stays", async (t) => {
+  const at = await poolFixture(t);
+  const outside = join(at.root, "outside-exclude");
+  writeFileSync(outside, OUTSIDE_TEXT);
+  const exclude = join(at.tree, ".git", "info", "exclude");
+  rmSync(exclude, { force: true });
+  symlinkSync(outside, exclude);
+  assert.equal(await normalise(at, take(at)), REBUILD);
+  assert.equal(readFileSync(outside, "utf8"), OUTSIDE_TEXT);
+});
+
+test("a stale index lock and a stale ref lock are removed and the tree is reused", async (t) => {
+  const at = await poolFixture(t);
+  const git = join(at.tree, ".git");
+  mkdirSync(join(git, "refs", "remotes", "origin"), { recursive: true });
+  for (const path of [
+    "index.lock",
+    "HEAD.lock",
+    "packed-refs.lock",
+    "refs/heads/main.lock",
+    "refs/remotes/origin/main.lock",
+  ])
+    writeFileSync(join(git, path), "");
+  const directory = await takeAndScrub(at);
+  assert.deepEqual(lockFiles(directory), []);
+  assert.equal(await hostGit(directory, ["rev-parse", "HEAD"]), at.commit);
+});
+
+test("a shallow tree, a partial clone and a tree with linked worktrees answer rebuild", async (t) => {
+  const cases: {
+    name: string;
+    cloneArgs?: string[];
+    change?: (at: PoolFixture) => Promise<void>;
+  }[] = [
+    { name: "shallow", cloneArgs: ["--depth", "1"] },
+    { name: "partial", cloneArgs: ["--filter=blob:none"] },
+    {
+      name: "partial at format 0",
+      cloneArgs: ["--filter=blob:none"],
+      change: async (at) => {
+        await hostGit(at.tree, ["config", "core.repositoryformatversion", "0"]);
+      },
+    },
+    {
+      name: "promisor remote",
+      change: async (at) => {
+        await hostGit(at.tree, ["config", "remote.origin.promisor", "true"]);
+      },
+    },
+    {
+      name: "linked worktree",
+      change: async (at) => {
+        await hostGit(at.tree, [
+          "worktree",
+          "add",
+          "--detach",
+          join(at.root, "linked"),
+        ]);
+      },
+    },
+    {
+      name: "commondir",
+      change: async (at) => {
+        writeFileSync(join(at.tree, ".git", "commondir"), "../other\n");
+      },
+    },
+    {
+      name: "format 1",
+      change: async (at) => {
+        await hostGit(at.tree, ["config", "core.repositoryformatversion", "1"]);
+      },
+    },
+  ];
+  for (const entry of cases) {
+    const at = await poolFixture(t, entry.cloneArgs);
+    await entry.change?.(at);
+    assert.equal(await normalise(at, take(at)), REBUILD, entry.name);
+  }
+});
+
+test("a tree whose .git is a relative gitdir file answers rebuild", async (t) => {
+  const at = await poolFixture(t);
+  renameSync(join(at.tree, ".git"), join(at.root, "store.git"));
+  writeFileSync(join(at.tree, ".git"), "gitdir: ../store.git\n");
+  assert.equal(await hostGit(at.tree, ["rev-parse", "HEAD"]), at.commit);
+  assert.equal(await normalise(at, at.tree), REBUILD);
+});
+
+test("scrubTree keeps the recorded roots, removes every other untracked and ignored path and rewrites info/exclude", async (t) => {
+  const at = await poolFixture(t);
+  mkdirSync(join(at.tree, "deps"));
+  writeFileSync(join(at.tree, "deps", "x"), "setup");
+  mkdirSync(join(at.tree, "build"));
+  writeFileSync(join(at.tree, "build", "y"), "agent");
+  writeFileSync(join(at.tree, "star*"), "setup");
+  writeFileSync(join(at.tree, "starX"), "agent");
+  writeFileSync(join(at.tree, "untracked"), "agent");
+  writeFileSync(join(at.tree, ".git", "info", "exclude"), "/stale\n");
+  writeSetupRecord(at.tree, { digest: "none", roots: ["deps/", "star*"] });
+  const directory = await takeAndScrub(at);
+  assert.equal(existsSync(join(directory, "deps", "x")), true);
+  assert.equal(existsSync(join(directory, "star*")), true);
+  for (const path of ["build", "starX", "untracked"])
+    assert.equal(existsSync(join(directory, path)), false, path);
+  assert.equal(
+    readFileSync(join(directory, ".git", "info", "exclude"), "utf8"),
+    SCRUBBED_EXCLUDE,
+  );
+});
+
+test("fetchLocal brings an unpushed commit of the source into the tree", async (t) => {
+  const at = await poolFixture(t);
+  const source = join(at.root, "source");
+  await simpleGit(at.root).clone(at.origin, source);
+  await hostGit(source, ["checkout", "-b", "kanthord/node"]);
+  await commitFile(source, "unpushed", "local");
+  const unpushed = await headCommit(env, source, background, GIT_DEADLINE_MS);
+  const directory = await takeAndScrub(at);
+  await fetchLocal(
+    { env, directory, context: background, deadlineMs: GIT_DEADLINE_MS },
+    source,
+  );
+  assert.equal(
+    await hostGit(directory, [
+      "rev-parse",
+      "refs/kanthord/heads/kanthord/node",
+    ]),
+    unpushed,
+  );
+  assert.equal(
+    await hostGit(directory, ["rev-parse", "refs/kanthord/remotes/main"]),
+    at.commit,
+  );
 });

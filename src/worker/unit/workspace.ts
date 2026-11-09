@@ -19,6 +19,7 @@ import type { SshAccess, SshSigner } from "../../repository/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import { cleanExcludes } from "./local-git.ts";
 import { readSetupRecord } from "./setup-record.ts";
+import { POOL_DIRECTORY, TreePool } from "./tree-pool.ts";
 import type { HandoverSshIdentity } from "../../custody/contract.ts";
 
 export const WORKSPACES_DIRECTORY = "workspaces";
@@ -121,16 +122,18 @@ export function sshAccessOf(
 
 export class WorkspaceRoot {
   readonly root: string;
+  readonly pool: TreePool;
   private readonly held = new Set<string>();
-  private constructor(root: string) {
+  private constructor(root: string, pool: TreePool) {
     this.root = root;
+    this.pool = pool;
   }
   static open(stateDirectory: string): WorkspaceRoot {
     assert.ok(stateDirectory);
     const root = resolve(stateDirectory, WORKSPACES_DIRECTORY);
     ensureDirectory(root);
     assert.equal(dirname(root), resolve(stateDirectory));
-    return new WorkspaceRoot(root);
+    return new WorkspaceRoot(root, TreePool.open(join(root, POOL_DIRECTORY)));
   }
   nodeKey(nodeId: string): string {
     return join(this.root, identitySchema("node").parse(nodeId));

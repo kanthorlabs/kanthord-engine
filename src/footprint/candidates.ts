@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
+import { WORKSPACE_KEY_PATTERN } from "../kernel/cleanup.ts";
 import { NodeState, type NodeStateFact } from "../mission/contract.ts";
 import type { FootprintItem } from "../worker/contract.ts";
 import {
@@ -122,6 +123,37 @@ interface Judged {
   readonly selectable: boolean;
 }
 
+function workspaceJudged(
+  item: FootprintItem,
+  base: FootprintCandidate,
+  facts: InstanceFacts,
+): Judged {
+  if (!WORKSPACE_KEY_PATTERN.test(item.key))
+    return {
+      candidate: { ...base, refusal: CleanupRefusal.Live },
+      selectable: false,
+    };
+  if (item.key.startsWith(NODE_PREFIX)) {
+    const node = facts.nodeStates.get(item.key);
+    return {
+      candidate: { ...base, node_id: item.key },
+      selectable:
+        node === undefined ||
+        node.retired ||
+        CLOSED_STATES.includes(node.state),
+    };
+  }
+  const live = facts.endTimes.get(item.key) === null;
+  return {
+    candidate: {
+      ...base,
+      execution_id: item.key,
+      refusal: live ? CleanupRefusal.Live : null,
+    },
+    selectable: !live,
+  };
+}
+
 function judged(
   kind: CleanableKind,
   item: FootprintItem,
@@ -150,27 +182,8 @@ function judged(
       selectable: !live,
     };
   }
-  if (kind === CleanableKind.Workspace && item.key.startsWith(NODE_PREFIX)) {
-    const node = facts.nodeStates.get(item.key);
-    return {
-      candidate: { ...base, node_id: item.key },
-      selectable:
-        node === undefined ||
-        node.retired ||
-        CLOSED_STATES.includes(node.state),
-    };
-  }
-  if (kind === CleanableKind.Workspace) {
-    const live = facts.endTimes.get(item.key) === null;
-    return {
-      candidate: {
-        ...base,
-        execution_id: item.key,
-        refusal: live ? CleanupRefusal.Live : null,
-      },
-      selectable: !live,
-    };
-  }
+  if (kind === CleanableKind.Workspace)
+    return workspaceJudged(item, base, facts);
   return { candidate: base, selectable: true };
 }
 

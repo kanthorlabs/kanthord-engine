@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -38,6 +39,9 @@ const NEW_WORKSPACE_BYTES = 20;
 const OTHER_BYTES = 5;
 const HOME_BYTES = 4;
 const ONE_RECENT = 1;
+const POOL_TREE_BYTES = 6;
+const POOL_KEY = "pool";
+const TWO_ITEMS = 2;
 
 interface Layout {
   slot: string;
@@ -155,6 +159,45 @@ test("a slot measure reports workspace, tool_output, log and slot_residue oldest
   const residue = kindOf(measurement, InstanceFootprintKind.SlotResidue);
   assert.equal(residue.bytes, OTHER_BYTES);
   assert.deepEqual(residue.items, []);
+});
+
+test("a slot measure counts a pool with a tree inside the workspace kind as one item with the newest return time, and an empty pool as no item", async (t) => {
+  const at = layout(t);
+  workspace(at, NODE_OLD, OLD_WORKSPACE_BYTES, NOW - 40 * DAY_MS);
+  const pool = join(at.workspaces.root, POOL_KEY);
+  mkdirSync(join(pool, "0".repeat(32), "agent"), { recursive: true });
+  const empty = kindOf(
+    await footprintOf(at).measure(background.signal),
+    InstanceFootprintKind.Workspace,
+  );
+  assert.deepEqual(
+    empty.items.map((item) => item.key),
+    [NODE_OLD],
+  );
+  let metadataBytes = 0;
+  for (const [poolClass, returnedAt] of [
+    ["agent", NOW - 3 * DAY_MS],
+    ["command", NOW - DAY_MS],
+  ] as const) {
+    const tree = join(pool, "0".repeat(32), poolClass, randomUUID());
+    mkdirSync(join(tree, ".git"), { recursive: true });
+    file(join(tree, "file"), POOL_TREE_BYTES, NOW - 50 * DAY_MS);
+    const metadata = JSON.stringify({ node_id: null, returned_at: returnedAt });
+    writeFileSync(join(tree, ".git", "kanthord-pool.json"), metadata);
+    metadataBytes += metadata.length;
+  }
+  const measured = kindOf(
+    await footprintOf(at).measure(background.signal),
+    InstanceFootprintKind.Workspace,
+  );
+  assert.deepEqual(
+    measured.items.map((item) => [item.key, item.bytes, item.modified_at]),
+    [
+      [NODE_OLD, OLD_WORKSPACE_BYTES, NOW - 40 * DAY_MS],
+      [POOL_KEY, 2 * POOL_TREE_BYTES + metadataBytes, NOW - DAY_MS],
+    ],
+  );
+  assert.equal(measured.count, TWO_ITEMS);
 });
 
 test("a container slot_residue skips the cache volume mount", async (t) => {
