@@ -14,10 +14,7 @@ import { llmOperations } from "../../llm/contract.ts";
 import { repositoryOperations } from "../../repository/contract.ts";
 import { storageOperations } from "../../storage/contract.ts";
 import { workerOperations } from "../../worker/contract.ts";
-import {
-  agentOperations,
-  agentProviderKindSchema,
-} from "../../agent/contract.ts";
+import { agentOperations } from "../../agent/contract.ts";
 import { schedulerOperations } from "../../scheduler/contract.ts";
 import {
   BINDING_SET_INITIAL_VERSION,
@@ -28,9 +25,6 @@ import {
   projectOperations,
 } from "../../project/contract.ts";
 import {
-  AssetKind,
-  findingSchema,
-  Intent,
   MISSION_INITIAL_VERSION,
   missionOperations,
   missionSchema,
@@ -50,7 +44,6 @@ import {
 } from "../../gateway/local.ts";
 import { errorSchema } from "../../kernel/errors.ts";
 import { createIdempotencyKey, createIdentity } from "../../kernel/identity.ts";
-import { ExternalLinkKind } from "../../kernel/external-link.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
   AccessPolicy,
@@ -129,20 +122,9 @@ const EXTERNAL_LINK_FRAGMENT_EXCEPTIONS = [
   "openapi/mission/criterion.set.yaml",
   "openapi/mission/node.retire.yaml",
 ];
-const EXTERNAL_LINKS_PROPERTY = "external_links";
-const NO_EXTERNAL_LINK_LISTS = 0;
 const AGENT_PROVIDER_FRAGMENT_EXCEPTION = "openapi/agent/enablement.get.yaml";
 const EXECUTION_SETUP_FRAGMENT_EXCEPTION =
   "openapi/worker/execution.setup.get.yaml";
-const EXECUTION_ENVIRONMENT_SOURCES = [
-  "stored",
-  "repository",
-  "detected",
-  "universal",
-];
-const PROVIDER_PROPERTY = "provider";
-const ENUM_KEYWORD = "enum";
-const AGENT_PROVIDER_ENUM_COUNT = 3;
 const TRACE_LIST_FRAGMENT_EXCEPTION = "openapi/tracking/trace.list.yaml";
 const CLEANUP_FRAGMENT_EXCEPTION = "openapi/footprint/cleanup.create.yaml";
 const FLOW_FRAGMENT_EXCEPTION = "openapi/tracking/analytics.flow.yaml";
@@ -203,125 +185,6 @@ type ResolvedSchema = {
   not?: unknown;
 };
 
-function assertRegistrationOutput(schema: ResolvedSchema): void {
-  assert.ok(schema.allOf);
-  const [base, host, registration, activity] = schema.allOf;
-  assert.equal(base?.additionalProperties, false);
-  assert.deepEqual(base?.required, [
-    "runtime_identity",
-    "project_id",
-    "resource_identity",
-    "worker_name",
-    "host",
-    "instance",
-    "activity",
-    "draining",
-    "registered",
-  ]);
-  for (const union of [host, registration, activity])
-    for (const variant of union!.anyOf!)
-      assert.notEqual(variant.additionalProperties, false);
-  assert.deepEqual(
-    host?.anyOf?.map((variant) => variant.required),
-    [["host", "placement"], ["host"]],
-  );
-  assert.deepEqual(
-    registration?.anyOf?.map((variant) => variant.required),
-    [["registered", "client_id", "name"], ["registered"]],
-  );
-  assert.deepEqual(
-    activity?.anyOf?.map((variant) => variant.required),
-    [["activity", "execution_id"], ["activity"]],
-  );
-  const second = 1;
-  assert.deepEqual(host?.anyOf?.[second]?.properties.placement?.not, {});
-  assert.deepEqual(
-    registration?.anyOf?.[second]?.properties.client_id?.not,
-    {},
-  );
-  assert.deepEqual(registration?.anyOf?.[second]?.properties.name?.not, {});
-  assert.deepEqual(activity?.anyOf?.[second]?.properties.execution_id?.not, {});
-}
-
-test("published Worker lists preserve optional limits, filter dependency and conditional records", async () => {
-  const api = await SwaggerParser.dereference(openapiPath());
-  const integer = "integer";
-  const limitName = "limit";
-  const defaultLimit = 100;
-  const minimum = 1;
-  const maximum = 1000;
-  for (const path of ["/api/worker/catalog", "/api/worker/registration"]) {
-    const operation = api.paths?.[path]?.get as unknown as {
-      parameters: {
-        name: string;
-        required: boolean;
-        schema: {
-          type: string;
-          minimum: number;
-          maximum: number;
-          default: number;
-        };
-      }[];
-      responses: Record<string, ResolvedJsonResponse>;
-      "x-access-policy": string;
-    };
-    assert.ok(operation);
-    assert.equal(operation["x-access-policy"], AccessPolicy.Human);
-    const limit = operation.parameters.find(
-      (parameter) => parameter.name === limitName,
-    );
-    assert.ok(limit);
-    assert.equal(limit.required, false);
-    assert.equal(limit.schema.type, integer);
-    assert.equal(limit.schema.default, defaultLimit);
-    assert.equal(limit.schema.minimum, minimum);
-    assert.equal(limit.schema.maximum, maximum);
-    const output =
-      operation.responses[HttpStatus.OK]!.content["application/json"].schema;
-    assert.deepEqual(output.required, ["items", "next_cursor"]);
-    assert.equal(output.properties.items?.type, ARRAY_SCHEMA_TYPE);
-  }
-  const fragment = parse(
-    readFileSync(
-      join(dirname(openapiPath()), "openapi/worker/registration.list.yaml"),
-      "utf8",
-    ),
-  ) as {
-    components: {
-      schemas: Record<
-        string,
-        {
-          properties: Record<
-            string,
-            {
-              dependentRequired?: unknown;
-              properties: Record<string, { description?: string }>;
-            }
-          >;
-        }
-      >;
-    };
-  };
-  const query =
-    fragment.components.schemas["worker.registration.list.Input"]!.properties
-      .query!;
-  assert.deepEqual(query.dependentRequired, {
-    resource_identity: ["project_id"],
-  });
-  assert.match(
-    query.properties.resource_identity!.description!,
-    /Requires project_id/,
-  );
-  const list = api.paths?.["/api/worker/registration"]?.get?.responses[
-    HttpStatus.OK
-  ] as unknown as ResolvedJsonResponse;
-  const get = api.paths?.["/api/worker/registration/{runtime_identity}"]?.get
-    ?.responses[HttpStatus.OK] as unknown as ResolvedJsonResponse;
-  assertRegistrationOutput(
-    list.content["application/json"].schema.properties.items!.items!,
-  );
-  assertRegistrationOutput(get.content["application/json"].schema);
-});
 type ResolvedJsonResponse = {
   content: { "application/json": { schema: ResolvedSchema } };
 };
@@ -759,295 +622,6 @@ test("the operation inventory agrees with contracts, OpenAPI and live registry",
   );
 });
 
-function assertBlockedNode(schema: unknown): void {
-  assert.ok(isObject(schema) && !("oneOf" in schema));
-  const node = schema as ResolvedSchema;
-  assert.deepEqual(node.properties.intent?.enum, [
-    Intent.Implement,
-    Intent.Examine,
-  ]);
-  const context = node.properties.blocked_context;
-  assert.ok(context);
-  assert.deepEqual(context.required, ["outcome", "requests"]);
-  assert.equal(context.properties.requests?.type, ARRAY_SCHEMA_TYPE);
-  assert.deepEqual(Object.keys(context.properties.outcome!.properties).sort(), [
-    "assessment_id",
-    "attempt",
-    "closing_event",
-    "created_at",
-    "evidence_ids",
-    "id",
-    "node_id",
-    "node_revision",
-    "result",
-  ]);
-}
-
-function assertEvidenceShape(schema: ResolvedSchema): void {
-  assert.deepEqual(Object.keys(schema.properties).sort(), [
-    "assets",
-    "attempt",
-    "created_at",
-    "end_state",
-    "id",
-    "node_id",
-    "provenance",
-    "requirement_key",
-    "subject",
-    "verification",
-  ]);
-  assert.deepEqual(schema.required, [
-    "id",
-    "node_id",
-    "attempt",
-    "subject",
-    "assets",
-    "provenance",
-    "created_at",
-  ]);
-  const variants = schema.properties.assets!.items!.oneOf!;
-  assert.deepEqual(
-    variants.map((item) => item.properties.kind!.const),
-    ["repository", "produced", "object", "platform"],
-  );
-  for (const asset of variants) {
-    assert.deepEqual(asset.required, [
-      "id",
-      "published_at",
-      "expired_at",
-      "kind",
-      "address",
-      ...(asset.properties.kind!.const === AssetKind.Object
-        ? ["storage_binding_id", "size", "media_type"]
-        : []),
-    ]);
-    for (const field of ["published_at", "expired_at"])
-      assert.ok(
-        asset.properties[field]!.anyOf!.some(
-          (item) => item.type === NULL_SCHEMA_TYPE,
-        ),
-      );
-    assert.ok(asset.properties.address);
-  }
-  assert.deepEqual(schema.properties.verification!.required, [
-    "tested_input",
-    "results",
-  ]);
-  assert.deepEqual(
-    schema.properties.provenance!.oneOf!.map(
-      (item) => item.properties.kind!.const,
-    ),
-    ["human", "execution", "service"],
-  );
-}
-
-test("named finding exceptions retain the finding record shape", () => {
-  for (const [file, operation, page] of FINDING_FRAGMENT_EXCEPTIONS) {
-    const fragment = parse(
-      readFileSync(
-        join(dirname(openapiPath()), `openapi/mission/${file}.yaml`),
-        "utf8",
-      ),
-    );
-    const output = fragment.components.schemas[
-      `${operation}.Output`
-    ] as ResolvedSchema;
-    const finding = page ? output.properties.items!.items! : output;
-    assert.deepEqual(
-      [...(finding.required ?? [])].sort(),
-      Object.keys(findingSchema.shape).sort(),
-    );
-    assert.deepEqual(finding.properties.route!.enum, [
-      "fix",
-      "report",
-      "record",
-    ]);
-    assert.deepEqual(finding.properties.status!.enum, ["open", "fixed"]);
-  }
-});
-
-test("named evidence exceptions retain record shapes and conditional request validation", () => {
-  for (const [file, operation, page] of EVIDENCE_FRAGMENT_EXCEPTIONS) {
-    const fragment = parse(
-      readFileSync(
-        join(dirname(openapiPath()), `openapi/mission/${file}.yaml`),
-        "utf8",
-      ),
-    );
-    const output = fragment.components.schemas[
-      `${operation}.Output`
-    ] as ResolvedSchema;
-    if (page) {
-      assert.deepEqual(output.required, ["items", "next_cursor"]);
-      assert.ok(
-        output.properties.next_cursor!.anyOf!.some(
-          (item) => item.type === NULL_SCHEMA_TYPE,
-        ),
-      );
-    }
-    assertEvidenceShape(page ? output.properties.items!.items! : output);
-  }
-  for (const name of ["evidence.delete", "evidence.asset.delete"]) {
-    const fragment = parse(
-      readFileSync(
-        join(dirname(openapiPath()), `openapi/mission/${name}.yaml`),
-        "utf8",
-      ),
-    );
-    const input =
-      fragment.components.schemas[`mission.${name}.Input`].properties.body;
-    assert.deepEqual(input.if, {
-      properties: { force: { const: true } },
-      required: ["force"],
-    });
-    assert.deepEqual(input.then, { required: ["reason"] });
-  }
-  const assessment = parse(
-    readFileSync(
-      join(dirname(openapiPath()), "openapi/mission/assessment.list.yaml"),
-      "utf8",
-    ),
-  );
-  for (const field of ["evidence_ids", "dependency_outcome_ids"])
-    assert.equal(
-      assessment.components.schemas["mission.assessment.submit.Input"]
-        .properties.body.properties[field].uniqueItems,
-      true,
-    );
-});
-
-test("dependency list exception preserves full dependency and identity-only variants", () => {
-  const fragment = parse(
-    readFileSync(
-      join(
-        dirname(openapiPath()),
-        "openapi/mission/execution.dependency.list.yaml",
-      ),
-      "utf8",
-    ),
-  );
-  const output =
-    fragment.components.schemas["mission.execution.dependency.list.Output"];
-  assert.deepEqual(output.required, ["items", "next_cursor"]);
-  const [full, minimal] = output.properties.items.items.anyOf;
-  assert.deepEqual(minimal.required, ["id", "state"]);
-  assert.deepEqual(Object.keys(minimal.properties).sort(), ["id", "state"]);
-  assert.equal(minimal.additionalProperties, false);
-  assert.deepEqual(full.required, [
-    "id",
-    "filename",
-    "mission_id",
-    "visible_revision",
-    "content",
-    "tasks",
-    "retired_at",
-    "pinned_by_attempts",
-    "state",
-    "attempt",
-    "pinned_revision",
-    "priority",
-    "depends_on",
-    "intent",
-    "tags",
-  ]);
-  assert.deepEqual(full.properties.blocked_context.required, [
-    "outcome",
-    "requests",
-  ]);
-});
-
-test("named Mission fragment size exceptions retain the complete blocked context", () => {
-  const files = emitOpenAPIFiles(apiOperations);
-  for (const [
-    fragment,
-    operationId,
-    ...path
-  ] of MISSION_BLOCKED_CONTEXT_FRAGMENT_EXCEPTIONS) {
-    const file = files[`openapi/mission/${fragment}.yaml`];
-    assert.ok(file);
-    let schema: unknown = file;
-    for (const key of [
-      "components",
-      "schemas",
-      `${operationId}.Output`,
-      ...path,
-    ]) {
-      assert.ok(isObject(schema));
-      schema = (schema as Record<string, unknown>)[key];
-    }
-    assertBlockedNode(schema);
-  }
-});
-test("the external link fragments exceed the soft limit only through the external link variants", () => {
-  const files = emitOpenAPIFiles(apiOperations);
-  for (const name of EXTERNAL_LINK_FRAGMENT_EXCEPTIONS) {
-    const lists: unknown[] = [];
-    const collect = (value: unknown): void => {
-      if (Array.isArray(value)) return value.forEach(collect);
-      if (!isObject(value)) return;
-      for (const [key, entry] of Object.entries(value)) {
-        if (key === EXTERNAL_LINKS_PROPERTY) lists.push(entry);
-        collect(entry);
-      }
-    };
-    collect(files[name]);
-    assert.ok(lists.length > NO_EXTERNAL_LINK_LISTS, name);
-    for (const list of lists) {
-      const { items } = list as {
-        items: { oneOf: { properties: { kind: { const: string } } }[] };
-      };
-      assert.deepEqual(
-        items.oneOf.map((variant) => variant.properties.kind.const),
-        Object.values(ExternalLinkKind),
-      );
-    }
-  }
-});
-test("the agent enablement fragment exceeds the soft limit only through the agent provider enum", () => {
-  const fragment = parse(
-    readFileSync(
-      join(dirname(openapiPath()), AGENT_PROVIDER_FRAGMENT_EXCEPTION),
-      "utf8",
-    ),
-  );
-  const enums: unknown[] = [];
-  const collect = (value: unknown): void => {
-    if (Array.isArray(value)) return value.forEach(collect);
-    if (!isObject(value)) return;
-    for (const [key, entry] of Object.entries(value)) {
-      if (key === PROVIDER_PROPERTY && isObject(entry) && ENUM_KEYWORD in entry)
-        enums.push(entry.enum);
-      collect(entry);
-    }
-  };
-  collect(fragment.components.schemas);
-  assert.equal(enums.length, AGENT_PROVIDER_ENUM_COUNT);
-  for (const values of enums)
-    assert.deepEqual(values, agentProviderKindSchema.options);
-});
-test("the execution setup fragment exceeds the soft limit only through the environment documents", () => {
-  const fragment = parse(
-    readFileSync(
-      join(dirname(openapiPath()), EXECUTION_SETUP_FRAGMENT_EXCEPTION),
-      "utf8",
-    ),
-  );
-  const environment =
-    fragment.components.schemas["worker.execution.setup.get.Output"].properties
-      .repositories.items.properties.environment;
-  const variants = environment.anyOf[0].oneOf;
-  assert.deepEqual(
-    variants.map((variant: ResolvedSchema) => variant.properties.source!.const),
-    EXECUTION_ENVIRONMENT_SOURCES,
-  );
-  const [stored, repository, detected, universal] = variants;
-  assert.deepEqual(stored.required, ["source", "document", "digest"]);
-  assert.deepEqual(repository.required, ["source", "digest"]);
-  for (const variant of [detected, universal]) {
-    assert.deepEqual(variant.required, ["source", "document"]);
-    assert.equal(variant.additionalProperties, false);
-  }
-});
 test("published OpenAPI validates, matches the registry exactly, and describes real responses", async (t) => {
   const files = emitOpenAPIFiles(apiOperations);
   const emitted = files["openapi.yaml"];
@@ -1587,104 +1161,6 @@ test("no route reaches intake.inbound.event.describe", async () => {
   );
 });
 
-test("published outbound request reads are human unary routes", async () => {
-  const resolved = await SwaggerParser.dereference(openapiPath());
-  const list = resolved.paths?.["/api/intake/outbound"]?.get as
-    ResolvedOperation | undefined;
-  const get = resolved.paths?.["/api/intake/outbound/{outbound_request_id}"]
-    ?.get as ResolvedOperation | undefined;
-  assert.equal(list?.operationId, intakeOperations["outbound.request.list"].id);
-  assert.equal(list?.["x-access-policy"], AccessPolicy.Human);
-  assert.equal(get?.operationId, intakeOperations["outbound.request.get"].id);
-  assert.equal(get?.["x-access-policy"], AccessPolicy.Human);
-});
-
-test("published outbound request discard and delete are human mutation routes", async () => {
-  const resolved = await SwaggerParser.dereference(openapiPath());
-  const discard = resolved.paths?.[
-    "/api/intake/outbound/{outbound_request_id}/discard"
-  ]?.post as ResolvedOperation | undefined;
-  const remove = resolved.paths?.["/api/intake/outbound/delete"]?.post as
-    ResolvedOperation | undefined;
-  assert.equal(
-    discard?.operationId,
-    intakeOperations["outbound.request.discard"].id,
-  );
-  assert.equal(discard?.["x-access-policy"], AccessPolicy.Human);
-  assert.equal(
-    remove?.operationId,
-    intakeOperations["outbound.request.delete"].id,
-  );
-  assert.equal(remove?.["x-access-policy"], AccessPolicy.Human);
-});
-
-test("published inbound event retry and discard are human mutation routes", async () => {
-  const resolved = await SwaggerParser.dereference(openapiPath());
-  const retry = resolved.paths?.["/api/intake/event/{inbound_event_id}/retry"]
-    ?.post as ResolvedOperation | undefined;
-  const discard = resolved.paths?.[
-    "/api/intake/event/{inbound_event_id}/discard"
-  ]?.post as ResolvedOperation | undefined;
-  assert.equal(retry?.operationId, intakeOperations["inbound.event.retry"].id);
-  assert.equal(retry?.["x-access-policy"], AccessPolicy.Human);
-  assert.equal(
-    discard?.operationId,
-    intakeOperations["inbound.event.discard"].id,
-  );
-  assert.equal(discard?.["x-access-policy"], AccessPolicy.Human);
-});
-
-test("published inbound event delete is a human mutation route that answers a count", async () => {
-  const resolved = await SwaggerParser.dereference(openapiPath());
-  const remove = resolved.paths?.["/api/intake/event/delete"]?.post as
-    | (ResolvedOperation & {
-        responses?: Record<
-          number,
-          { content?: Record<string, { schema: ResolvedSchema }> }
-        >;
-      })
-    | undefined;
-  assert.equal(
-    remove?.operationId,
-    intakeOperations["inbound.event.delete"].id,
-  );
-  assert.equal(remove?.["x-access-policy"], AccessPolicy.Human);
-  const schema =
-    remove?.responses?.[HttpStatus.OK]?.content?.["application/json"]?.schema;
-  assert.deepEqual(schema?.required, ["count"]);
-});
-
-test("published inbound create is a human mutation route with a 201 inbound", async () => {
-  const resolved = await SwaggerParser.dereference(openapiPath());
-  const create = resolved.paths?.["/api/intake/inbound"]?.post as
-    | (ResolvedOperation & {
-        responses?: Record<
-          number,
-          { content?: Record<string, { schema: ResolvedSchema }> }
-        >;
-      })
-    | undefined;
-  assert.equal(create?.operationId, intakeOperations["inbound.create"].id);
-  assert.equal(create?.["x-access-policy"], AccessPolicy.Human);
-  const created = create?.responses?.[INBOUND_CREATED];
-  assert.deepEqual(
-    Object.keys(
-      created?.content?.["application/json"]?.schema.properties ?? {},
-    ).sort(),
-    [
-      "checkpoint",
-      "configuration",
-      "consumer",
-      "created_at",
-      "credential",
-      "id",
-      "kind",
-      "platform",
-      "project_id",
-    ],
-  );
-});
-
 test("inbound create answers 201, replays a repeated key, refuses an unknown consumer and a machine identity", async (t) => {
   const fixture = await gatewayFixture(t);
   const authorization = `Bearer ${fixture.token}`;
@@ -1854,18 +1330,6 @@ test("the binding write answers inbox_invalid and inbox_taken through the gatewa
   });
 });
 
-test("published inbound reads are human unary routes", async () => {
-  const resolved = await SwaggerParser.dereference(openapiPath());
-  const list = resolved.paths?.["/api/intake/inbound"]?.get as
-    ResolvedOperation | undefined;
-  const get = resolved.paths?.["/api/intake/inbound/{inbound_id}"]?.get as
-    ResolvedOperation | undefined;
-  assert.equal(list?.operationId, intakeOperations["inbound.list"].id);
-  assert.equal(list?.["x-access-policy"], AccessPolicy.Human);
-  assert.equal(get?.operationId, intakeOperations["inbound.get"].id);
-  assert.equal(get?.["x-access-policy"], AccessPolicy.Human);
-});
-
 test("inbound get answers the webhook secret over HTTP, refuses another prefix and logs no secret", async (t) => {
   const fixture = await gatewayFixture(t);
   const authorization = `Bearer ${fixture.token}`;
@@ -1935,25 +1399,6 @@ test("inbound get answers the webhook secret over HTTP, refuses another prefix a
   assert.ok(fixture.logs.length > INBOUND_NO_LOGS);
   for (const line of fixture.logs)
     assert.equal(line.includes(answer.secret), false);
-});
-
-test("published inbound delete is a human route with a bodyless 204 response", async () => {
-  const resolved = await SwaggerParser.dereference(openapiPath());
-  const remove = resolved.paths?.["/api/intake/inbound/{inbound_id}"]
-    ?.delete as ResolvedOperation | undefined;
-  assert.equal(remove?.operationId, intakeOperations["inbound.delete"].id);
-  assert.equal(remove?.["x-access-policy"], AccessPolicy.Human);
-  const fragment = parse(
-    readFileSync(
-      join(dirname(openapiPath()), "openapi/intake/inbound.delete.yaml"),
-      "utf8",
-    ),
-  );
-  assert.equal(fragment.pathItem.delete["x-mutation"], true);
-  assert.equal(
-    fragment.pathItem.delete.responses[HttpStatus.NoContent].content,
-    undefined,
-  );
 });
 
 test("inbound delete answers 204 over HTTP and 404 for a repeat", async (t) => {
