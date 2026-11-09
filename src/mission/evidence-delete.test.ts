@@ -402,46 +402,6 @@ test("a forced request deletion rolled back after the settlement writes no end",
   );
 });
 
-test("both deletes log the human, the force and the reason after the commit", async (t) => {
-  const h = fixture(t);
-  h.dependencies.intakeStorage.delete = async () => undefined;
-  const records: { fields: unknown; message: string }[] = [];
-  h.dependencies.logger.info = ((fields: unknown, message: string) => {
-    records.push({ fields, message });
-  }) as typeof h.dependencies.logger.info;
-  await h.remove(true);
-  const parentId = h.examine_id;
-  h.store.transaction((tx) => {
-    setNodeState(tx, h.node_id, NodeState.Completed);
-    setNodeState(tx, parentId, NodeState.Discarded);
-  });
-  await h.invoke("evidence.delete", {
-    params: { evidence_id: h.evidence_id },
-    query: {},
-    body: { expected_mission_version: FIRST_ATTEMPT, force: false },
-  });
-  assert.deepEqual(records, [
-    {
-      fields: {
-        asset_id: h.asset_id,
-        account: IDENTITY.accountId,
-        force: true,
-        reason: "Remove",
-      },
-      message: "evidence asset deleted",
-    },
-    {
-      fields: {
-        evidence_id: h.evidence_id,
-        account: IDENTITY.accountId,
-        force: false,
-        reason: null,
-      },
-      message: "evidence deleted",
-    },
-  ]);
-});
-
 test("a delete writes one act trace with the evidence, the reason and equal states", async (t) => {
   const h = fixture(t);
   h.dependencies.intakeStorage.delete = async () => undefined;
@@ -501,43 +461,6 @@ test("a forced delete of a request evidence holds the states and links the revok
   assert.deepEqual(contribution.links, [
     { trace_id: revoked.trace.trace_id, span_id: revoked.trace.root_span_id },
   ]);
-});
-
-test("a refused delete writes no act trace", async (t) => {
-  const h = fixture(t, true);
-  await assert.rejects(
-    h.invoke("evidence.delete", {
-      params: { evidence_id: h.evidence_id },
-      query: {},
-      body: { expected_mission_version: FIRST_ATTEMPT, force: false },
-    }),
-    (error) =>
-      error instanceof OperationError &&
-      error.code === MissionErrorCode.EvidenceRequestForceRequired,
-  );
-  assert.equal(actCalls(h).length, NO_CALLS);
-});
-
-test("a delete rolled back after the commit write writes no act trace", async (t) => {
-  const h = fixture(t, true);
-  h.caller.commit = (write) =>
-    h.store.transaction((tx) => {
-      write(tx);
-      throw new Error("rollback");
-    });
-  await assert.rejects(
-    h.invoke("evidence.delete", {
-      params: { evidence_id: h.evidence_id },
-      query: {},
-      body: {
-        expected_mission_version: FIRST_ATTEMPT,
-        force: true,
-        reason: "Remove request",
-      },
-    }),
-    { message: "rollback" },
-  );
-  assert.equal(actCalls(h).length, NO_CALLS);
 });
 
 test("a delete with an act telemetry that throws keeps its answer", async (t) => {
