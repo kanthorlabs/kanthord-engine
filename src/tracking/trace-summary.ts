@@ -73,10 +73,14 @@ function oneIf(condition: boolean): number {
   return condition ? 1 : 0;
 }
 
+interface CountOptions {
+  isRoot: boolean;
+}
+
 function countParams(
   before: Span | null,
   after: Span,
-  isRoot: boolean,
+  options: CountOptions,
 ): SQLInputValue[] {
   const isNew = before === null;
   const newError =
@@ -86,7 +90,7 @@ function countParams(
     oneIf(isNew && after.operation === TURN_OPERATION),
     oneIf(isNew && after.operation === TOOL_OPERATION),
     oneIf(newError),
-    countsAsFirstError(after, isRoot) ? after.span_id : null,
+    countsAsFirstError(after, options.isRoot) ? after.span_id : null,
   ];
 }
 
@@ -168,7 +172,7 @@ export function updateTraceSummary(
       WHERE trace_id = ?`,
     )
     .run(
-      ...countParams(before, after, isRoot),
+      ...countParams(before, after, { isRoot }),
       ...tokenParams(before, after),
       ...collectionParams(row, after),
       ...rootParams(after, isRoot),
