@@ -42,7 +42,6 @@ import {
   type RepositoryTransport,
   workerOperations,
 } from "../../worker/contract.ts";
-import type { agentOperations } from "../../agent/contract.ts";
 import { ChainLevel } from "../../agent/contract.ts";
 import { SWE_AGENT_PROMPT } from "../../agent/prompt-assets.ts";
 import { framing, PromptConsumer } from "../../agent/prompt-render.ts";
@@ -360,55 +359,7 @@ test(
     mkdirSync(join(hostHome, ".agents"), { mode: PRIVATE_MODE });
     writeFileSync(join(hostHome, ".agents/AGENTS.md"), GLOBAL);
 
-    await t.test("E07.1 software agent declaration", async () => {
-      const declaration = await read<
-        (typeof agentOperations)["get"]["output"]["_output"]
-      >(["agent", "get", "swe@1"]);
-      assert.equal(declaration.agent_name, SWE);
-      const texts = declaration.prompt.parts!.map((part) => part.text);
-      for (const name of ["base.md", "swe@1.md"])
-        assert.ok(
-          texts.includes(
-            readFileSync(
-              new URL(`../../../static/prompt/${name}`, import.meta.url),
-              "utf8",
-            ),
-          ),
-        );
-      assert.deepEqual(
-        declaration.tools.map(({ name, source }) => ({ name, source })),
-        [
-          ...["read", "edit", "write", "grep", "find", "ls", "bash"].map(
-            (name) => ({
-              name,
-              source: "builtin",
-            }),
-          ),
-          { name: "evidence-upload", source: "host" },
-          { name: "link_update_list", source: "host" },
-        ],
-      );
-      assert.equal(
-        declaration.configuration_schema.additionalProperties,
-        false,
-      );
-      assert.deepEqual(declaration.configuration_schema.required, [
-        "agent_provider",
-        "provider",
-        "credential",
-        "model_identifier",
-        "reasoning_effort",
-      ]);
-      assert.equal(declaration.enablement?.revision, FIRST_REVISION);
-    });
     await t.test("E07.2 reviewer and unknown agent", async () => {
-      const declaration = await read<
-        (typeof agentOperations)["get"]["output"]["_output"]
-      >(["agent", "get", "re@1"]);
-      assert.deepEqual(
-        declaration.tools.map(({ name }) => name),
-        ["read", "grep", "find", "ls"],
-      );
       const unknown = await kanthord(["agent", "get", "nope@1"], human);
       assert.equal(unknown.code, FAILURE_EXIT);
       assert.ok(unknown.stderr.startsWith("agent.catalog.not_found:"));

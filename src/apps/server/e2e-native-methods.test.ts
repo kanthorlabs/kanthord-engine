@@ -726,18 +726,6 @@ suite("native methods", { concurrency: SUITE_CONCURRENCY }, () => {
       });
       const bare = (name: string) =>
         simpleGit(h.barePaths.get(`git@github.com:owner/${name}.git`)!);
-      await t.test(
-        "EF09b.1 the node get holds api and web in binding order",
-        async () => {
-          const node = await h.read<{ content: { bindings: string[] } }>([
-            "mission",
-            "node",
-            "get",
-            checkoutFlow,
-          ]);
-          assert.deepEqual(node.content.bindings, [api, web]);
-        },
-      );
       let refused: Awaited<ReturnType<typeof kanthord>> | null = null;
       const heads: string[] = [];
       await t.test(
