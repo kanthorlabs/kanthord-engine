@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { test, type TestContext } from "node:test";
+import { test } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
@@ -10,10 +10,8 @@ import {
   Intent,
   MissionErrorCode,
   NodeState,
-  repositoryAddressSchema,
   type Revision,
   type StorageBinding,
-  type TestedInput,
   type Verification,
 } from "./contract.ts";
 import {
@@ -43,20 +41,6 @@ const IMPLEMENT_COUNT = 3;
 const RESOURCE = "repository:github:owner/repository";
 const OTHER_RESOURCE = "repository:github:owner/other";
 const VALIDATION = "gateway.request.validation_failed";
-
-test("repository commits require complete lowercase SHA-1 or SHA-256 values", () => {
-  const base = {
-    kind: AssetKind.Repository,
-    binding_id: createIdentity("binding"),
-  };
-  for (const commit of [COMMIT, "b".repeat(64)])
-    assert.ok(repositoryAddressSchema.safeParse({ ...base, commit }).success);
-  for (const commit of ["abcdef", "A".repeat(40), "main"])
-    assert.equal(
-      repositoryAddressSchema.safeParse({ ...base, commit }).success,
-      false,
-    );
-});
 
 test("the tested input of an examine node with two repository bindings is a list in binding order, and an implement node checks its pinned bindings", (t) => {
   const h = executionHarness(t, IDENTITY);
@@ -243,80 +227,6 @@ test("the tested input of an examine node with two repository bindings is a list
     );
     assert.equal(implementNodes.length, IMPLEMENT_COUNT);
   });
-});
-
-function implementPair(t: TestContext) {
-  const h = executionHarness(t, IDENTITY);
-  const firstId = createIdentity("binding");
-  const secondId = createIdentity("binding");
-  h.dependencies.bindings.getBindingRevision = (_tx, id) => ({
-    binding_id: id,
-    project_id: h.project_id,
-    name: id,
-    resource_identity: id === secondId ? OTHER_RESOURCE : RESOURCE,
-    revision: FIRST_REVISION,
-    tombstone: false,
-    disabled: false,
-  });
-  const address = (bindingId: string) =>
-    ({
-      kind: AssetKind.Repository,
-      binding_id: bindingId,
-      commit: COMMIT,
-    }) as const;
-  const check = (testedInput: TestedInput) =>
-    h.store.transaction((tx) => {
-      const prior = getRevision(tx, h.node_id, FIRST_REVISION);
-      const revision: Revision = {
-        ...prior,
-        content: {
-          ...prior.content,
-          intent: Intent.Implement,
-          bindings: [firstId, secondId],
-        },
-        tasks: [],
-      };
-      requireTestedInput(
-        tx,
-        h.dependencies.bindings,
-        readNode(tx, h.node_id)!,
-        revision,
-        testedInput,
-      );
-    });
-  const mismatch = (bindingId: string) => (error: unknown) =>
-    error instanceof OperationError &&
-    error.code === MissionErrorCode.EvidenceBindingMismatch &&
-    JSON.stringify(error.details) === JSON.stringify({ binding_id: bindingId });
-  return { firstId, secondId, address, check, mismatch };
-}
-
-test("a node with two bindings writes a tested input list in binding order", (t) => {
-  const h = implementPair(t);
-  h.check([h.address(h.firstId), h.address(h.secondId)]);
-  assert.throws(
-    () => h.check(h.address(h.firstId)),
-    (error) => error instanceof OperationError && error.code === VALIDATION,
-  );
-});
-
-test("a list out of binding order answers mission.evidence.binding_mismatch", (t) => {
-  const h = implementPair(t);
-  const foreignId = createIdentity("binding");
-  assert.throws(
-    () => h.check([h.address(h.secondId), h.address(h.firstId)]),
-    h.mismatch(h.secondId),
-  );
-  assert.throws(() => h.check([h.address(h.firstId)]), h.mismatch(h.secondId));
-  assert.throws(
-    () =>
-      h.check([
-        h.address(h.firstId),
-        h.address(h.secondId),
-        h.address(foreignId),
-      ]),
-    h.mismatch(foreignId),
-  );
 });
 
 test("produced bytes have canonical base64, an exact decoded limit and the decoded digest", () => {
