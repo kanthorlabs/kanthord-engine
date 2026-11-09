@@ -4,13 +4,19 @@ import { suite, test } from "node:test";
 import {
   appendFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import type { TestContext } from "node:test";
 import { simpleGit } from "simple-git";
+import { EnvironmentSource } from "../../kernel/devcontainer.ts";
+import { createIdentity } from "../../kernel/identity.ts";
 import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
+import type { ExecutionEnvironment } from "../contract.ts";
 import type { TaskContent } from "../../mission/contract.ts";
 import { EndReason } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
@@ -36,6 +42,7 @@ import {
   fauxToolCall,
   implementFixture as fixture,
   listedVerificationSpans,
+  nextExecution,
   recordReleases,
   recordSpans,
   spanEnds,
@@ -45,6 +52,7 @@ import { RecordKind, SpanStatus } from "../../tracking/contract.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { VerificationContext } from "./method-telemetry.ts";
 import { VERIFICATION_RERUNS } from "./verification.ts";
+import { PoolClass, repoKeyOf, TreeSource } from "./tree-pool.ts";
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
@@ -67,6 +75,54 @@ const CONFIG_KEY = "a.b";
 const BASE_CHANGE = "base change";
 const LEFTOVER = "leftover";
 const FAILS_IN_RELEASE = 'case "$PWD" in */release/*) test -e fixed;; esac';
+const STRAY = "stray";
+const BUILD = "build";
+const DEPS_SETUP = {
+  postCreateCommand: "test -e deps || (mkdir deps && echo x > deps/marker)",
+};
+const NO_DEPS_SETUP = { postCreateCommand: "test ! -e deps" };
+const TREE_PREPARED = "tree prepared";
+const RELEASE_FROM_POOL = { purpose: "release", source: TreeSource.Pool };
+const ONE_TREE = 1;
+const GONE = "gone";
+
+function storedEnvironment(
+  document: Record<string, unknown>,
+): ExecutionEnvironment {
+  return {
+    source: EnvironmentSource.Stored,
+    document,
+    digest: "d".repeat(64),
+  };
+}
+
+function freeCommandTrees(h: Fixture): string[] {
+  const pool = h.input.workspaces.pool;
+  const directory = join(
+    pool.root,
+    repoKeyOf(h.input.setup.repositories[0]!.address),
+    PoolClass.Command,
+  );
+  return pool
+    .trees()
+    .map((tree) => tree.path)
+    .filter((path) => dirname(path) === directory);
+}
+
+function treesPrepared(t: TestContext, h: Fixture): () => unknown[] {
+  const log = t.mock.method(h.run, "log");
+  return () =>
+    log.mock.calls
+      .filter((call) => call.arguments[0] === TREE_PREPARED)
+      .map((call) => call.arguments[1]);
+}
+
+function releaseKey(h: Fixture): string {
+  return join(
+    h.input.workspaces.nodeKey(h.input.claim.node_id),
+    RELEASE_DIRECTORY,
+  );
+}
 
 function write(path: string, content: string) {
   return fauxAssistantMessage(fauxToolCall("write", { path, content }), {
@@ -364,7 +420,14 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     });
     const directory = readFileSync(marker, "utf8").trim();
     assert.notEqual(directory, h.root);
-    assert.equal(existsSync(directory), false);
+    assert.equal(
+      directory,
+      join(
+        realpathSync(h.input.workspaces.nodeKey(h.input.claim.node_id)),
+        RELEASE_DIRECTORY,
+        h.checkouts[0]!.name,
+      ),
+    );
     assert.equal((await simpleGit(h.root).tags()).all.includes(TAG), false);
     assert.equal(
       (await simpleGit(h.root).getConfig(CONFIG_KEY, "local")).value,
@@ -386,24 +449,39 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
         ],
       },
     };
-    await advanceBase(h, t, BASE_CHANGE, "other");
-    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
-    const fetched = (await simpleGit(h.bare).revparse(["main"])).trim();
-    assert.equal(readFileSync(base, "utf8").trim(), fetched);
-    assert.equal(
-      readFileSync(url, "utf8").trim(),
-      h.input.setup.repositories[0]!.address,
-    );
+    for (const change of [BASE_CHANGE, REVISED_CONTENT]) {
+      await advanceBase(h, t, change, "other");
+      assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+      const fetched = (await simpleGit(h.bare).revparse(["main"])).trim();
+      assert.equal(readFileSync(base, "utf8").trim(), fetched);
+      assert.equal(
+        readFileSync(url, "utf8").trim(),
+        h.input.setup.repositories[0]!.address,
+      );
+    }
   });
 
-  test("the next prepare removes release clones that a crash left", async (t) => {
+  test("the next prepare gives a release tree that a crash left back to the pool", async (t) => {
     const h = await fixture(t, [], []);
     const key = h.input.workspaces.nodeKey(h.input.claim.node_id);
-    const leftover = join(key, RELEASE_DIRECTORY, LEFTOVER);
-    mkdirSync(leftover, { recursive: true });
+    await simpleGit().clone(h.root, join(releaseKey(h), h.checkouts[0]!.name));
+    mkdirSync(join(releaseKey(h), LEFTOVER), { recursive: true });
     h.input.workspaces.release(key, WorkspaceKind.Node);
     await prepareStepsWorkspace(h.input, h.run);
-    assert.equal(existsSync(join(key, RELEASE_DIRECTORY)), false);
+    assert.equal(existsSync(releaseKey(h)), false);
+    assert.equal(freeCommandTrees(h).length, ONE_TREE);
+  });
+
+  test("the next prepare deletes a release tree whose .git is not a directory", async (t) => {
+    const h = await fixture(t, [], []);
+    const key = h.input.workspaces.nodeKey(h.input.claim.node_id);
+    const tree = join(releaseKey(h), h.checkouts[0]!.name);
+    mkdirSync(tree, { recursive: true });
+    writeFileSync(join(tree, ".git"), `gitdir: ${join(h.root, ".git")}\n`);
+    h.input.workspaces.release(key, WorkspaceKind.Node);
+    await prepareStepsWorkspace(h.input, h.run);
+    assert.equal(existsSync(releaseKey(h)), false);
+    assert.deepEqual(h.input.workspaces.pool.trees(), []);
   });
 
   test("a passing release gate writes one release gate span with the result passed", async (t) => {
@@ -657,6 +735,140 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     await changeNode(h, BROKEN);
     const gate = await releaseGate(h);
     assert.equal(gate.kind, ReleaseGateKind.Routed);
+  });
+
+  test("a second release round keeps each file of a setup root and removes residue outside the setup roots", async (t) => {
+    const h = await fixture(
+      t,
+      [],
+      [],
+      undefined,
+      undefined,
+      storedEnvironment(DEPS_SETUP),
+    );
+    h.revision = {
+      ...h.revision,
+      content: {
+        ...h.revision.content,
+        verifications: [`test ! -e ${STRAY} && test ! -e ${BUILD}`],
+      },
+    };
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    const [tree] = freeCommandTrees(h);
+    assert.ok(tree);
+    const before = lstatSync(join(tree, "deps", "marker"));
+    writeFileSync(join(tree, STRAY), STRAY);
+    mkdirSync(join(tree, BUILD));
+    writeFileSync(join(tree, BUILD, STRAY), STRAY);
+    await changeNode(h, "changed");
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    const [again] = freeCommandTrees(h);
+    assert.ok(again);
+    const after = lstatSync(join(again, "deps", "marker"));
+    assert.equal(after.ino, before.ino);
+    assert.equal(after.mtimeMs, before.mtimeMs);
+    assert.equal(existsSync(join(again, STRAY)), false);
+    assert.equal(existsSync(join(again, BUILD)), false);
+  });
+
+  test("a second node of the same repository reuses the release tree", async (t) => {
+    const first = await fixture(t, [], []);
+    assert.deepEqual(await releaseGate(first), {
+      kind: ReleaseGateKind.Passed,
+    });
+    const second = await nextExecution(
+      t,
+      {
+        ...first,
+        input: {
+          ...first.input,
+          claim: { ...first.input.claim, node_id: createIdentity("node") },
+        },
+      },
+      [],
+      dirname(first.input.workspaces.root),
+    );
+    const prepared = treesPrepared(t, second);
+    assert.deepEqual(await releaseGate(second), {
+      kind: ReleaseGateKind.Passed,
+    });
+    assert.deepEqual(prepared(), [RELEASE_FROM_POOL]);
+    assert.equal(freeCommandTrees(second).length, ONE_TREE);
+  });
+
+  test("a release round on a changed environment runs the setup on a tree with no earlier setup output", async (t) => {
+    const h = await fixture(
+      t,
+      [],
+      [],
+      undefined,
+      undefined,
+      storedEnvironment(DEPS_SETUP),
+    );
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    h.setup = h.setup.map((entry) => ({
+      ...entry,
+      environment: NO_DEPS_SETUP,
+    }));
+    const prepared = treesPrepared(t, h);
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    assert.deepEqual(prepared(), [RELEASE_FROM_POOL]);
+  });
+
+  test("a release tree with an index lock is reused, the lock is absent and the gate passes", async (t) => {
+    const h = await fixture(t, [], []);
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    const [tree] = freeCommandTrees(h);
+    assert.ok(tree);
+    writeFileSync(join(tree, ".git", "index.lock"), "");
+    const prepared = treesPrepared(t, h);
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    assert.deepEqual(prepared(), [RELEASE_FROM_POOL]);
+    const [again] = freeCommandTrees(h);
+    assert.ok(again);
+    assert.equal(existsSync(join(again, ".git", "index.lock")), false);
+  });
+
+  test("the release gate gives its tree back to the command class", async (t) => {
+    const h = await fixture(t, [], []);
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    assert.equal(freeCommandTrees(h).length, ONE_TREE);
+    assert.equal(h.input.workspaces.pool.trees().length, ONE_TREE);
+    assert.equal(existsSync(releaseKey(h)), false);
+  });
+
+  test("a release tree drops the checkout of a binding that the node no longer holds", async (t) => {
+    const h = await fixture(t, [], []);
+    mkdirSync(join(releaseKey(h), GONE, ".git"), { recursive: true });
+    h.revision = {
+      ...h.revision,
+      content: {
+        ...h.revision.content,
+        verifications: [`test ! -e ../${GONE}`],
+      },
+    };
+    assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    assert.equal(h.input.workspaces.pool.trees().length, ONE_TREE);
+    assert.equal(existsSync(releaseKey(h)), false);
+  });
+
+  test("a release round after a new commit of the node tests the new head", async (t) => {
+    const marker = join(temporary(t), MARKER);
+    const h = await fixture(t, [], []);
+    h.revision = {
+      ...h.revision,
+      content: {
+        ...h.revision.content,
+        verifications: [`git rev-parse HEAD >> ${marker}`],
+      },
+    };
+    const heads: string[] = [];
+    for (const content of ["changed", REVISED_CONTENT]) {
+      await changeNode(h, content);
+      heads.push(h.checkouts[0]!.head);
+      assert.deepEqual(await releaseGate(h), { kind: ReleaseGateKind.Passed });
+    }
+    assert.deepEqual(readFileSync(marker, "utf8").trim().split("\n"), heads);
   });
 });
 

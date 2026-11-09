@@ -168,6 +168,16 @@ export class TreePool {
     this.evict(directory, FREE_TREES_MAX[slot.poolClass]);
   }
 
+  giveBack(slot: PoolSlot, tree: string, nodeId: string | null): void {
+    if (
+      lstatSync(join(tree, GIT_DIRECTORY), {
+        throwIfNoEntry: false,
+      })?.isDirectory()
+    )
+      this.give(slot, tree, nodeId);
+    else this.remove(tree);
+  }
+
   private evict(directory: string, limit: number): void {
     for (;;) {
       const trees = freeTreesOf(directory);

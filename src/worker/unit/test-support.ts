@@ -271,6 +271,7 @@ export async function nextExecution(
     bares: string[];
   },
   script: Parameters<typeof scriptedProvider>[0],
+  state?: string,
 ) {
   const opened = await openExecution(
     t,
@@ -283,6 +284,7 @@ export async function nextExecution(
       },
       tasks: previous.revision.tasks,
       bares: previous.bares,
+      state,
     },
     script,
   );
@@ -296,11 +298,12 @@ async function openExecution(
     claim: MethodClaim;
     tasks: TaskContent[];
     bares: string[];
+    state?: string;
   },
   script: Parameters<typeof scriptedProvider>[0],
 ) {
   const { setup, claim, tasks, bares } = base;
-  const state = temporary(t);
+  const state = base.state ?? temporary(t);
   const input = {
     claim,
     setup,

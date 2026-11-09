@@ -19,7 +19,7 @@ import type { SshAccess, SshSigner } from "../../repository/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import { cleanExcludes } from "./local-git.ts";
 import { readSetupRecord } from "./setup-record.ts";
-import { POOL_DIRECTORY, TreePool } from "./tree-pool.ts";
+import { POOL_DIRECTORY, PoolClass, TreePool } from "./tree-pool.ts";
 import type { HandoverSshIdentity } from "../../custody/contract.ts";
 
 export const WORKSPACES_DIRECTORY = "workspaces";
@@ -165,7 +165,7 @@ export class WorkspaceRoot {
     try {
       ensureDirectory(key);
       this.touch(key);
-      rmSync(join(key, RELEASE_DIRECTORY), { recursive: true, force: true });
+      this.giveReleaseTrees(key, input.nodeId, input.repositories);
       const checkouts: WorkspaceCheckout[] = [];
       for (const repository of input.repositories) {
         const directory = this.nodeDirectory(input.nodeId, repository.name);
@@ -222,6 +222,20 @@ export class WorkspaceRoot {
         rmSync(directory, { recursive: true, force: true });
       throw error;
     }
+  }
+  private giveReleaseTrees(
+    key: string,
+    nodeId: string,
+    repositories: readonly WorkspaceRepository[],
+  ): void {
+    const release = join(key, RELEASE_DIRECTORY);
+    for (const repository of repositories)
+      this.pool.giveBack(
+        { address: repository.address, poolClass: PoolClass.Command },
+        join(release, bindingNameSchema.parse(repository.name)),
+        nodeId,
+      );
+    rmSync(release, { recursive: true, force: true });
   }
   async prepareSnapshots(
     input: Preparation & {
