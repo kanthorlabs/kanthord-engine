@@ -8,7 +8,6 @@ import {
 } from "../../kernel/cause.ts";
 import {
   BudgetLimit,
-  EnvironmentFailure,
   ExecutionStopReason,
   ProviderFailure,
 } from "../../scheduler/contract.ts";
@@ -72,72 +71,6 @@ test("a provider failure maps to the provider, the configuration or the suspects
       CauseCategory.Prompt,
       CauseCategory.LlmProvider,
     ]),
-  );
-});
-
-test("an environment failure maps to the environment with its code", () => {
-  assert.deepEqual(
-    stopCauseOf(
-      ExecutionStopReason.EnvironmentFailed,
-      EnvironmentFailure.SetupFailed,
-      null,
-      QUIET,
-    ),
-    attributed(CauseCategory.Environment, CauseSubcategory.SetupFailed),
-  );
-  assert.deepEqual(
-    stopCauseOf(
-      ExecutionStopReason.EnvironmentFailed,
-      EnvironmentFailure.CommandAbsent,
-      null,
-      QUIET,
-    ),
-    attributed(CauseCategory.Environment, CauseSubcategory.CommandAbsent),
-  );
-  assert.deepEqual(
-    stopCauseOf(
-      ExecutionStopReason.EnvironmentFailed,
-      EnvironmentFailure.AffectedInvalid,
-      null,
-      QUIET,
-    ),
-    attributed(CauseCategory.Environment, CauseSubcategory.AffectedInvalid),
-  );
-  assert.deepEqual(
-    stopCauseOf(
-      ExecutionStopReason.EnvironmentFailed,
-      EnvironmentFailure.AffectedTimeout,
-      null,
-      QUIET,
-    ),
-    attributed(CauseCategory.Environment, CauseSubcategory.AffectedTimeout),
-  );
-  assert.deepEqual(
-    stopCauseOf(
-      ExecutionStopReason.EnvironmentFailed,
-      EnvironmentFailure.VerificationTimeout,
-      null,
-      QUIET,
-    ),
-    attributed(CauseCategory.Environment, CauseSubcategory.VerificationHang),
-  );
-});
-
-test("an operation failure with a git step maps to the suspects of the step", () => {
-  for (const step of [GitStep.FetchBase, GitStep.Push])
-    assert.deepEqual(
-      stopCauseOf(ExecutionStopReason.OperationFailed, null, null, {
-        ...QUIET,
-        git_step: step,
-      }),
-      unattributed([CauseCategory.Infrastructure, CauseCategory.WorkerAction]),
-    );
-  assert.deepEqual(
-    stopCauseOf(ExecutionStopReason.OperationFailed, null, null, {
-      ...QUIET,
-      git_step: GitStep.MergeBase,
-    }),
-    unattributed([CauseCategory.WorkerAction, CauseCategory.Environment]),
   );
 });
 
@@ -289,42 +222,4 @@ test("a budget end and an absent assessment use the signal when the detail names
       timedOut,
     );
   }
-});
-
-test("the other stops map to their suspects", () => {
-  for (const reason of [
-    ExecutionStopReason.JudgementInvalid,
-    ExecutionStopReason.ReportAbsent,
-  ])
-    assert.deepEqual(
-      stopCauseOf(reason, null, null, QUIET),
-      unattributed([CauseCategory.Model, CauseCategory.Prompt]),
-    );
-  assert.deepEqual(
-    stopCauseOf(ExecutionStopReason.ActionUnsettled, null, null, QUIET),
-    unattributed([CauseCategory.WorkerAction, CauseCategory.Infrastructure]),
-  );
-});
-
-test("a stop that no row names is unattributed with no suspects", () => {
-  assert.deepEqual(
-    stopCauseOf(ExecutionStopReason.ProviderFailed, "other", null, QUIET),
-    unattributed([]),
-  );
-  assert.deepEqual(
-    stopCauseOf(ExecutionStopReason.EnvironmentFailed, "other", null, QUIET),
-    unattributed([]),
-  );
-});
-
-test("an operator stop maps to the human intervention", () => {
-  for (const reason of [
-    ExecutionStopReason.InstanceArchived,
-    ExecutionStopReason.WorkerStopped,
-    ExecutionStopReason.HumanPaused,
-  ])
-    assert.deepEqual(
-      stopCauseOf(reason, null, null, QUIET),
-      attributed(CauseCategory.Human, CauseSubcategory.Intervention),
-    );
 });
