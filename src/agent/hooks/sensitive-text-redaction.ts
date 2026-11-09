@@ -178,6 +178,34 @@ function keptThinking(message: Message, block: unknown): boolean {
   return record.redacted === true || (isString(signature) && !!signature);
 }
 
+interface RestoreMarker {
+  rule: string;
+  markerTag: string;
+  entry: TableEntry | undefined;
+}
+
+interface MarkerRefusalContext {
+  shell: boolean;
+  writes: boolean;
+  tag: string;
+}
+
+function markerRefusal(
+  marker: RestoreMarker,
+  context: MarkerRefusalContext,
+): RestoreReason | undefined {
+  if (
+    marker.entry?.rule === SensitiveRule.LlmCredential ||
+    marker.rule === SensitiveRule.LlmCredential
+  )
+    return RestoreReason.Credential;
+  if (context.shell) return RestoreReason.Shell;
+  if (!context.writes) return undefined;
+  if (marker.markerTag !== context.tag) return RestoreReason.Resume;
+  if (!marker.entry) return RestoreReason.Unkept;
+  return undefined;
+}
+
 function stringsOf(value: unknown): string[] {
   const strings: string[] = [];
   mapSensitiveStrings(value, (text) => {
@@ -398,6 +426,10 @@ export function sensitiveTextRedaction(
     const block = (next: RestoreReason) => {
       if (reason !== RestoreReason.Credential) reason = next;
     };
+    const noteRefusal = (next: RestoreReason) => {
+      if (next === RestoreReason.Credential) block(next);
+      else reason ??= next;
+    };
     const restored: string[] = [];
     const restoreText = (text: string) =>
       text.replace(
@@ -406,26 +438,15 @@ export function sensitiveTextRedaction(
           if (!markerTag.startsWith(sessionPart)) return whole;
           const entry =
             markerTag === tag ? byIndex.get(markerIndex(index)) : undefined;
-          if (
-            entry?.rule === SensitiveRule.LlmCredential ||
-            rule === SensitiveRule.LlmCredential
-          ) {
-            block(RestoreReason.Credential);
+          const refusal = markerRefusal(
+            { rule, markerTag, entry },
+            { shell, writes, tag },
+          );
+          if (refusal) {
+            noteRefusal(refusal);
             return whole;
           }
-          if (shell) {
-            reason ??= RestoreReason.Shell;
-            return whole;
-          }
-          if (!writes) return whole;
-          if (markerTag !== tag) {
-            reason ??= RestoreReason.Resume;
-            return whole;
-          }
-          if (!entry) {
-            reason ??= RestoreReason.Unkept;
-            return whole;
-          }
+          if (!writes || !entry) return whole;
           restored.push(entry.value);
           return entry.value;
         },
