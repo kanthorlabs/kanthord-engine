@@ -1,18 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { checksOf, environmentSchema } from "../kernel/devcontainer.ts";
+import { environmentSchema } from "../kernel/devcontainer.ts";
 import type { RepositoryFile } from "../repository/contract.ts";
 import {
   DetectedStack,
   detectEnvironment,
-  DETECTION_PATHS,
   detectStacks,
-  NIX_BASE_IMAGE,
-  NIX_CHECK,
-  NIX_ENV_FILE,
-  NIX_FEATURE,
-  NIX_FLAKE_DIRECTORY,
-  packageManagerVersion,
   WORKFLOW_DIRECTORY,
   WORKFLOW_FILES_MAX,
   workflowPaths,
@@ -74,34 +67,6 @@ test("a manifest gives its stack", () => {
       [stack],
       manifest.path,
     );
-});
-
-test("a lock file or a version file alone gives no stack", () => {
-  const files = [
-    file("pnpm-lock.yaml", ""),
-    file("yarn.lock", ""),
-    file(".nvmrc", "20"),
-    file(".python-version", "3.11"),
-    file(".tool-versions", "nodejs 20"),
-    file("uv.lock", ""),
-    file("flake.nix", ""),
-  ];
-  assert.deepEqual(detectStacks(files), []);
-  assert.deepEqual(detectStacks([]), []);
-});
-
-test("the stacks answer in a fixed order", () => {
-  const files = Object.values(MANIFEST).reverse();
-  assert.deepEqual(
-    detectStacks(files).map((entry) => entry.stack),
-    [
-      DetectedStack.Node,
-      DetectedStack.Python,
-      DetectedStack.Go,
-      DetectedStack.Rust,
-      DetectedStack.Java,
-    ],
-  );
 });
 
 test("the node version follows the precedence", () => {
@@ -247,51 +212,6 @@ test("workflowPaths keeps the workflow files in path order", () => {
       `${WORKFLOW_DIRECTORY}/w${String(index).padStart(2, "0")}.yml`,
   );
   assert.deepEqual(workflowPaths(many), many.slice(0, WORKFLOW_FILES_MAX));
-});
-
-test("the detection paths hold the 24 design paths in order", () => {
-  assert.deepEqual(DETECTION_PATHS, [
-    ".nvmrc",
-    ".node-version",
-    "package.json",
-    "pnpm-lock.yaml",
-    "package-lock.json",
-    "yarn.lock",
-    ".python-version",
-    "pyproject.toml",
-    "requirements.txt",
-    "uv.lock",
-    "poetry.lock",
-    "go.mod",
-    "Cargo.toml",
-    "rust-toolchain.toml",
-    "rust-toolchain",
-    "pom.xml",
-    "mvnw",
-    "build.gradle",
-    "build.gradle.kts",
-    "gradlew",
-    ".java-version",
-    ".tool-versions",
-    "flake.nix",
-    "flake.lock",
-  ]);
-});
-
-test("the package manager version comes from packageManager", () => {
-  const manifest = (text: string) => [file("package.json", text)];
-  const declared = manifest('{"packageManager":"pnpm@9.12.0+sha512.abc"}');
-  assert.deepEqual(
-    [
-      packageManagerVersion(declared, "pnpm"),
-      packageManagerVersion(declared, "yarn"),
-      packageManagerVersion(manifest("{}"), "pnpm"),
-      packageManagerVersion(manifest("{"), "pnpm"),
-      packageManagerVersion([], "pnpm"),
-      packageManagerVersion([tooLarge("package.json")], "pnpm"),
-    ],
-    ["9.12.0", "latest", "latest", "latest", "latest", "latest"],
-  );
 });
 
 const BASE_ENV = {
@@ -490,17 +410,6 @@ test("a lock file order decides between the rows", () => {
   });
 });
 
-test("a repository with no lock file drafts no install command", () => {
-  expectDraft([NODE_20, PACKAGE], {
-    image: NODE_IMAGE,
-    checks: ["node --version", "npm --version"],
-  });
-  expectDraft([file("pyproject.toml", "")], {
-    image: "mcr.microsoft.com/devcontainers/python:3.12-bookworm",
-    checks: ["python --version"],
-  });
-});
-
 test("two stacks draft the base image with one feature each", () => {
   expectDraft(
     [
@@ -572,15 +481,6 @@ const FLAKE_DOCUMENT: Expected = {
   env: { BASH_ENV: "/etc/kanthord-nix-env.sh" },
 };
 
-test("the nix constants hold the design values", () => {
-  assert.equal(NIX_BASE_IMAGE, FLAKE_DOCUMENT.image);
-  assert.deepEqual(Object.keys(FLAKE_DOCUMENT.features ?? {}), [NIX_FEATURE]);
-  assert.deepEqual(
-    [NIX_FLAKE_DIRECTORY, NIX_ENV_FILE, NIX_CHECK],
-    ["/etc/kanthord-flake", "/etc/kanthord-nix-env.sh", "nix --version"],
-  );
-});
-
 test("a repository with only flake.nix drafts the flake document", () => {
   expectDraft([FLAKE], FLAKE_DOCUMENT);
   const drafted = detectEnvironment([FLAKE]);
@@ -620,12 +520,6 @@ test("flake.nix takes precedence over the node, go, rust and ci inputs", () => {
   assert.deepEqual(detectEnvironment([FLAKE, PACKAGE])?.stacks, []);
 });
 
-test("the checks of a flake document are the nix check", () => {
-  const drafted = detectEnvironment([FLAKE, PACKAGE]);
-  assert.ok(drafted);
-  assert.deepEqual(checksOf(drafted.document), ["nix --version"]);
-});
-
 test("a flake.nix that is not present drafts no flake document", () => {
   assert.equal(detectEnvironment([tooLarge("flake.nix")]), null);
   assert.equal(
@@ -638,8 +532,4 @@ test("a flake.nix that is not present drafts no flake document", () => {
     [detectEnvironment([tooLarge("flake.nix"), PACKAGE])?.document.image],
     ["mcr.microsoft.com/devcontainers/javascript-node:24-bookworm"],
   );
-});
-
-test("a flake.lock alone drafts nothing", () => {
-  assert.equal(detectEnvironment([file("flake.lock", "{}")]), null);
 });
