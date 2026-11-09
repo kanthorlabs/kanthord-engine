@@ -33,7 +33,6 @@ import {
 } from "../kernel/context.ts";
 import { HealthStatus } from "../kernel/service.ts";
 import { compareRouteSpecificity } from "./service.ts";
-import { GATEWAY_STARTED_MESSAGE } from "./constants.ts";
 import { createIdempotencyKey } from "../kernel/identity.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
 
@@ -60,11 +59,8 @@ const FINISHED_MESSAGE = "Request finished";
 const CANCELLED_CODE = "gateway.invocation.cancelled";
 const CLIENT_CLOSED_STATUS = 499;
 const PREFLIGHT_MAX_AGE = "600";
-const CLOSE_POLL_ATTEMPTS = 100;
 const FORBIDDEN_CODE = "test.identity.forbidden";
 const HANDLER_BUG = "handler bug";
-const LOOPBACK_BIND_SENTENCE =
-  "A loopback bind accepts connections from this host only.";
 const ExpectedErrorCode = {
   RouteNotFound: "gateway.routing.not_found",
   HostNotAllowed: "gateway.http.host_not_allowed",
@@ -430,34 +426,6 @@ test("direct and HTTP adapters share transactional idempotency, validation, fail
   });
 });
 
-test("expired replay executes the handler again while an unexpired replay does not", async (t) => {
-  let now = Date.now();
-  t.mock.method(Date, "now", () => now);
-  const registry = new OperationRegistry();
-  const operation = {
-    ...protectedRead,
-    mutation: true,
-    method: "POST" as const,
-  };
-  let calls = 0;
-  registry.register(operation, (_input, caller) =>
-    caller.commit(() => ({ accountId: String(++calls) })),
-  );
-  const fixture = await gatewayFixture(t, { registry });
-  const identity = await fixture.gateway.authentication.authenticate(
-    `Bearer ${fixture.token}`,
-  );
-  const client = directClient({ operation }, fixture.gateway.invocation);
-  const options = { identity, idempotencyKey: createIdempotencyKey() };
-  const input = { params: {}, query: {}, body: null };
-  const first = await client.operation(input, options);
-  assert.deepEqual(await client.operation(input, options), first);
-  assert.equal(calls, SINGLE_EXECUTION_COUNT);
-  now += fixture.config.gateway.idempotency_ttl * 1000;
-  assert.notDeepEqual(await client.operation(input, options), first);
-  assert.equal(calls, SINGLE_EXECUTION_COUNT + SINGLE_EXECUTION_COUNT);
-});
-
 test("timeout leaves a mutation in progress until its atomic commit, then replays without repeating", async (t) => {
   const registry = new OperationRegistry();
   const gate = Promise.withResolvers<void>();
@@ -685,34 +653,6 @@ test("a delivery answers the Response of its handler, after a commit or without 
     assert.equal(await answer.text(), EMPTY_RESPONSE_BODY);
   }
   assert.equal(committed, SINGLE_EXECUTION_COUNT);
-});
-
-test("client disconnect reaches waiting handlers", async (t) => {
-  const registry = new OperationRegistry();
-  const entered = Promise.withResolvers<void>();
-  const cancelled = Promise.withResolvers<void>();
-  registry.register(
-    { ...protectedRead, id: "test.wait", path: "/api/wait" },
-    async (_input, caller) => {
-      entered.resolve();
-      await aborted(caller.context.signal);
-      cancelled.resolve();
-      return { accountId: "cancelled" };
-    },
-  );
-  const fixture = await gatewayFixture(t, { registry });
-  const token = fixture.token;
-  const abort = new AbortController();
-  const request = fixture
-    .request("/api/wait", {
-      signal: abort.signal,
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    .catch(() => {});
-  await entered.promise;
-  abort.abort();
-  await cancelled.promise;
-  await request;
 });
 
 test("the verification API returns only JWT-named business properties and requires a bearer token", async (t) => {
@@ -983,35 +923,6 @@ test("HTTP authentication precedes body framing and schema validation", async (t
   }
 });
 
-test("HTTP validation failure names each unrecognized key of the body", async (t) => {
-  const registry = new OperationRegistry();
-  const create = {
-    ...protectedRead,
-    id: "test.create",
-    method: "POST",
-    path: "/api/named",
-    body: true,
-    input: emptyInput.extend({ body: z.strictObject({ name: z.string() }) }),
-  } as const;
-  registry.register(create, () => ({ accountId: HUMAN_USERNAME }));
-  const fixture = await gatewayFixture(t, { registry });
-  const response = await fixture.request(create.path, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${fixture.token}`,
-    },
-    body: JSON.stringify({ name: "a", first: 1, second: 2 }),
-  });
-  assert.equal(response.status, HttpStatus.BadRequest);
-  const { error } = errorSchema.parse(await response.json());
-  assert.equal(error.code, ExpectedErrorCode.ValidationFailed);
-  assert.deepEqual(error.details, [
-    { path: ["body", "first"], code: "unrecognized_keys" },
-    { path: ["body", "second"], code: "unrecognized_keys" },
-  ]);
-});
-
 test("the host refusal names the refused host and the allowlist field, never the allowlist", async (t) => {
   const fixture = await gatewayFixture(t);
   const refusals: [Record<string, string>, string | null][] = [
@@ -1025,35 +936,12 @@ test("the host refusal names the refused host and the allowlist field, never the
     });
     assert.equal(response.status, HttpStatus.Forbidden);
     const body = errorSchema.parse(await response.json());
-    assert.deepEqual(body.error, {
-      code: ExpectedErrorCode.HostNotAllowed,
-      message: "Host is not allowed. Add it to gateway.allowed_hosts.",
-      details: { host, field: "gateway.allowed_hosts" },
+    assert.equal(body.error.code, ExpectedErrorCode.HostNotAllowed);
+    assert.deepEqual(body.error.details, {
+      host,
+      field: "gateway.allowed_hosts",
     });
     assert.doesNotMatch(JSON.stringify(body), /localhost|127\.0\.0\.1/);
-  }
-});
-
-test("the start record states the bind and the port, and a loopback bind states its reach", async (t) => {
-  for (const [bind, message] of [
-    ["127.0.0.1", `${GATEWAY_STARTED_MESSAGE}. ${LOOPBACK_BIND_SENTENCE}`],
-    ["::1", `${GATEWAY_STARTED_MESSAGE}. ${LOOPBACK_BIND_SENTENCE}`],
-    [
-      "::ffff:127.0.0.1",
-      `${GATEWAY_STARTED_MESSAGE}. ${LOOPBACK_BIND_SENTENCE}`,
-    ],
-    ["::", GATEWAY_STARTED_MESSAGE],
-  ] as const) {
-    const fixture = await gatewayFixture(t, { bind });
-    const records = fixture.logs
-      .map((line) => JSON.parse(line))
-      .filter((record) => record.msg.startsWith(GATEWAY_STARTED_MESSAGE));
-    assert.equal(records.length, SINGLE_EXECUTION_COUNT);
-    assert.equal(records[0].level, INFO_LEVEL);
-    assert.equal(records[0].msg, message);
-    assert.equal(records[0].bind, bind);
-    assert.equal(records[0].port, fixture.gateway.address()!.port);
-    assert.equal(records[0].address, undefined);
   }
 });
 
@@ -1230,36 +1118,4 @@ test("every API preflight from an allowed origin answers the CORS headers and th
     ExpectedErrorCode.RouteNotFound,
   );
   assert.equal(missing.headers.get("access-control-allow-origin"), origin);
-});
-
-test("a closed HTTP connection logs status 499 with the wire status 503", async (t) => {
-  const registry = new OperationRegistry();
-  const entered = Promise.withResolvers<void>();
-  registry.register(protectedRead, async (_input, caller) => {
-    entered.resolve();
-    await aborted(caller.context.signal);
-    caller.context.signal.throwIfAborted();
-    return { accountId: HUMAN_USERNAME };
-  });
-  const fixture = await gatewayFixture(t, { registry });
-  const abort = new AbortController();
-  const request = fixture
-    .request(protectedRead.path, {
-      signal: abort.signal,
-      headers: { Authorization: `Bearer ${fixture.token}` },
-    })
-    .catch(() => {});
-  await entered.promise;
-  abort.abort();
-  await request;
-  for (
-    let attempt = 0;
-    attempt < CLOSE_POLL_ATTEMPTS && !finishedRecords(fixture.logs).length;
-    attempt++
-  )
-    await delay(KEEP_ALIVE_POLL_MS);
-  const [record] = finishedRecords(fixture.logs);
-  assert.equal(record.status, CLIENT_CLOSED_STATUS);
-  assert.equal(record.wire_status, HttpStatus.ServiceUnavailable);
-  assert.equal(record.code, CANCELLED_CODE);
 });

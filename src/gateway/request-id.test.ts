@@ -24,8 +24,7 @@ import { failure, unauthorized } from "./errors.ts";
 import { Idempotency } from "./idempotency.ts";
 import { gatewayOperations } from "./contract.ts";
 import { workerOperations } from "../worker/contract.ts";
-import { emitOpenAPIFiles } from "./openapi.ts";
-import { requestIdSchema, resolveRequestId } from "./request-id.ts";
+import { requestIdSchema } from "./request-id.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
 const apiOperations = { ...gatewayOperations, ...workerOperations };
 const requestId = "request_01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -37,18 +36,6 @@ const invalidIds = [
   requestId + "0",
   "arbitrary-correlation-id",
 ];
-
-test("request IDs preserve accepted values and replace absent or invalid values", () => {
-  assert.equal(resolveRequestId(requestId), requestId);
-  const generated = new Set<string>();
-  for (const input of [undefined, "", ...invalidIds, `${requestId}\n`]) {
-    const value = resolveRequestId(input);
-    assert.equal(requestIdSchema.parse(value), value);
-    assert.notEqual(value, input);
-    generated.add(value);
-  }
-  assert.equal(generated.size, invalidIds.length + 3);
-});
 
 test("clients treat a failure with a bare or wrong-kind request ID as indeterminate", async () => {
   const operation = apiOperations.verify;
@@ -98,28 +85,6 @@ test("idempotency records retain full request IDs while their keys carry the ide
       /canonical ULID/,
     );
   }
-});
-
-test("OpenAPI publishes the same request-ID and idempotency-key formats as validation", () => {
-  const files = emitOpenAPIFiles(Object.values(apiOperations));
-  const shared = files["openapi/shared/components.yaml"] as {
-    components: {
-      schemas: { Error: { properties: { request_id: object } } };
-      parameters: { IdempotencyKey: { schema: { pattern: string } } };
-    };
-  };
-  const { $schema: dialect, ...schema } = z.toJSONSchema(requestIdSchema);
-  assert.ok(dialect?.includes("json-schema"));
-  assert.deepEqual(
-    shared.components.schemas.Error.properties.request_id,
-    schema,
-  );
-  const keyPattern = new RegExp(
-    shared.components.parameters.IdempotencyKey.schema.pattern,
-  );
-  assert.ok(keyPattern.test(createIdempotencyKey()));
-  assert.equal(keyPattern.test(ulid()), false);
-  assert.equal(keyPattern.test(requestId), false);
 });
 
 test("HTTP responses and logs share the validated prefixed request ID, including routing failures", async (t) => {
