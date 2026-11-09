@@ -33,6 +33,18 @@ const HELLO_FILE = "hello.txt";
 const within = (t: TestContext) =>
   AbortSignal.any([t.signal, AbortSignal.timeout(WAIT_TIMEOUT_MS)]);
 
+const bounded = <T>(work: Promise<T>, signal: AbortSignal) => {
+  signal.throwIfAborted();
+  return Promise.race([
+    work,
+    new Promise<never>((_, reject) =>
+      signal.addEventListener("abort", () => reject(signal.reason), {
+        once: true,
+      }),
+    ),
+  ]);
+};
+
 const executionsOf = async (setup: Setup) =>
   (
     await setup.read<{ items: ExecutionRecord[] }>([
@@ -92,8 +104,8 @@ test(
     assert.equal(pulling.length, SINGLE_ITEM);
     assert.equal(pulling[FIRST_INDEX]!.registered, true);
 
-    await refused.worker.stop();
-    await refused.running;
+    await bounded(refused.worker.stop(), within(t));
+    await bounded(refused.running, within(t));
     assert.deepEqual(await registrationsOf(setup), []);
     const afterStop = await executionsOf(setup);
     assert.equal(afterStop.length, SINGLE_ITEM);
