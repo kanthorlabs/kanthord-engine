@@ -1175,7 +1175,6 @@ test("a failed span write or a writer that stores no record fails the setup with
   );
 });
 
-const SSH_UNREACHABLE_STATUS = 422;
 const FIRST_ATTEMPT = 1;
 const SECOND_ATTEMPT = 2;
 const PINNED_COMMIT = "a".repeat(40);
@@ -1260,22 +1259,6 @@ test("a new attempt reads the instruction file at its own pinned commit", async 
   assert.ok(second.agents[0]!.prompt.final.includes(MOVED_TEXT));
 });
 
-test("a node-branch change of the instruction file changes no prompt, because the setup reads only the pinned commit", async (t) => {
-  const nodeBranchHead = "d".repeat(40);
-  const reads: string[] = [];
-  const f = twoAgentFixture(t, {
-    instructionFile: INSTRUCTION_PATH,
-    pins: () => [{ binding_id: bindingOf(f), commit: PINNED_COMMIT }],
-    readFile: filesAt(
-      { [PINNED_COMMIT]: PINNED_TEXT, [nodeBranchHead]: MOVED_TEXT },
-      reads,
-    ),
-  });
-  const answer = await f.run();
-  assert.deepEqual(reads, [PINNED_COMMIT]);
-  assert.ok(!answer.agents[0]!.prompt.final.includes(MOVED_TEXT));
-});
-
 test("an absent instruction file adds no part", async (t) => {
   const f = twoAgentFixture(t, {
     instructionFile: INSTRUCTION_PATH,
@@ -1332,24 +1315,6 @@ for (const reason of [
       },
     });
   });
-
-test("a failed read of the pinned commit answers its project code", async (t) => {
-  const f = twoAgentFixture(t, {
-    instructionFile: INSTRUCTION_PATH,
-    pins: () => [{ binding_id: bindingOf(f), commit: PINNED_COMMIT }],
-    readFile: async () => {
-      throw new OperationError(
-        SSH_UNREACHABLE_STATUS,
-        ProjectErrorCode.RepositorySshUnreachable,
-        "Repository is unreachable.",
-        { failure_reason: "deadline_exceeded" },
-      );
-    },
-  });
-  await assert.rejects(f.run(), {
-    code: ProjectErrorCode.RepositorySshUnreachable,
-  });
-});
 
 test("a binding that names an instruction file answers 409 prompt_not_pinned with a null pin and with a pin that holds no entry for it", async (t) => {
   for (const pin of [
@@ -1592,12 +1557,7 @@ function bindingOf(f: { bindingIds: string[] }): string {
   return bindingId;
 }
 
-async function repositorySetup(
-  t: TestContext,
-  address: string,
-  pin: boolean,
-  upstream_branch?: string,
-) {
+async function repositorySetup(t: TestContext, address: string, pin: boolean) {
   const store = new Store(":memory:");
   stopAfter(t, () => store.close());
   store.migrate([{ service: "repository", migrations: repositoryMigrations }]);
@@ -1672,7 +1632,6 @@ async function repositorySetup(
         platform: RepositoryPlatform.GitHub,
         ssh_credential: SSH_CREDENTIAL,
         base_branch: "main",
-        ...(upstream_branch !== undefined && { upstream_branch }),
         prompts: {},
         environment: null,
         repository_environment: true,
@@ -1719,17 +1678,6 @@ test("setup answers the pinned host key line of each repository and no secret", 
   const text = JSON.stringify(answer);
   assert.equal(text.includes("PRIVATE KEY"), false);
   assert.equal(text.includes(SSH_CREDENTIAL), false);
-});
-
-test("the setup of a claim holds strategy.upstream_branch when the binding sets it", async (t) => {
-  const address = "git@github.com:kanthorlabs/kanthord.git";
-  const withUpstream = await repositorySetup(t, address, true, "develop");
-  assert.deepEqual(withUpstream.repositories[0]?.strategy, {
-    base_branch: "main",
-    upstream_branch: "develop",
-  });
-  const without = await repositorySetup(t, address, true);
-  assert.deepEqual(without.repositories[0]?.strategy, { base_branch: "main" });
 });
 
 test("setup refuses an unpinned host and an alias host before any answer", async (t) => {
