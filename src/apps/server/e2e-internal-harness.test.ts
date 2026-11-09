@@ -821,6 +821,7 @@ test("local mapped repository clones main and publishes only the node branch", a
     TEST_BRANCH,
     "main",
     false,
+    [],
     context,
     GIT_TIMEOUT_MS,
     TEST_SSH_ACCESS,

@@ -23,10 +23,18 @@ import {
   commitOf,
   excludeUntracked,
   fileAtRevision,
+  type GitCall,
   headCommit,
+  ignoredPaths,
   restoreTracked,
   trackedChanges,
 } from "./local-git.ts";
+import {
+  nextRoots,
+  readSetupRecord,
+  removeSetupRecord,
+  writeSetupRecord,
+} from "./setup-record.ts";
 import { SpanOperation, type SpanRecorder } from "./telemetry.ts";
 import {
   type CommandObserver,
@@ -182,6 +190,10 @@ export async function setupEntries(
   return entries;
 }
 
+export function environmentDigestOf(entry: SetupEntry): string {
+  return entry.environment === null ? NO_DOCUMENT : digest(entry.environment);
+}
+
 function trackedFailure(
   run: VerificationRun,
   commands: readonly string[],
@@ -241,14 +253,36 @@ export function runSetup(
   );
 }
 
+function keptRoots(directory: string, environmentDigest: string): string[] {
+  const record = readSetupRecord(directory);
+  if (record === null) return [];
+  if (record.digest === environmentDigest) return record.roots;
+  for (const root of record.roots)
+    rmSync(join(directory, root), { recursive: true, force: true });
+  removeSetupRecord(directory);
+  return [];
+}
+
+function gitCall(input: SetupInput, entry: SetupEntry): GitCall {
+  return {
+    env: input.env,
+    directory: entry.directory,
+    context: input.context,
+    deadlineMs: remaining(input),
+  };
+}
+
 async function setUpEntries(
   input: SetupInput,
   entries: readonly SetupEntry[],
 ): Promise<SetupResult> {
   for (const entry of entries) {
+    const environmentDigest = environmentDigestOf(entry);
+    const kept = keptRoots(entry.directory, environmentDigest);
     const commands =
       entry.environment === null ? [] : setupScriptsOf(entry.environment);
     if (!commands.length) continue;
+    const before = await ignoredPaths(gitCall(input, entry));
     const run = await runVerificationsWithOutput({
       directory: entry.directory,
       commands,
@@ -300,6 +334,10 @@ async function setUpEntries(
       remaining(input),
     );
     if (changed.length) return trackedFailure(run, commands, changed);
+    writeSetupRecord(entry.directory, {
+      digest: environmentDigest,
+      roots: nextRoots(kept, before, await ignoredPaths(gitCall(input, entry))),
+    });
   }
   return { end: SetupEnd.Pass };
 }
@@ -428,11 +466,7 @@ export class BaseHead {
   }
 
   private digests(): string[] {
-    return this.checkouts.map((checkout) =>
-      checkout.environment === null
-        ? NO_DOCUMENT
-        : digest(checkout.environment),
-    );
+    return this.checkouts.map(environmentDigestOf);
   }
 
   private async prepare(): Promise<SetupResult> {

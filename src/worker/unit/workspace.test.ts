@@ -13,7 +13,11 @@ import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
 import * as connector from "../../repository/connector.ts";
-import { fixtureTemplate, temporary } from "../../kernel/test-support.ts";
+import {
+  fixtureTemplate,
+  hostEnvironment,
+  temporary,
+} from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { nodeBranchOf } from "../../repository/node-branch.ts";
 import { generateSshKey } from "../../repository/ssh-key.ts";
@@ -59,6 +63,7 @@ const PREPARATION_KINDS = 3;
 const ORIGIN_NAME = "origin";
 const SEED_NAME = "seed";
 const GIT_DEADLINE_MS = 60_000;
+const env = hostEnvironment();
 
 test("workspace root audits private mode and keys refuse foreign identities", (t) => {
   const expectedBranch = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
@@ -133,6 +138,7 @@ test("workspace preparation refreshes implement branches and creates disposable 
     strategy: { base_branch: "main" },
   };
   const common = {
+    env,
     transport,
     sshAccess: everyBindingSshAccess,
     context: background,
@@ -302,6 +308,7 @@ test("every workspace git operation takes the SSH identity of its binding, and a
     return [
       prepareOne(workspace, {
         ...common,
+        env,
         nodeId: createIdentity("node"),
         nodeBranch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
         pushed: false,
@@ -355,6 +362,7 @@ test("an implement workspace excludes the scratch directory from git once", asyn
   const workspace = WorkspaceRoot.open(state);
   const nodeId = createIdentity("node");
   const input = {
+    env,
     transport,
     sshAccess: everyBindingSshAccess,
     context: background,
@@ -435,6 +443,7 @@ async function restartFixture(t: test.TestContext) {
   };
   const prepare = async (startAttempt: number, pushed = false) => {
     const prepared = await prepareOne(workspace, {
+      env,
       transport,
       sshAccess: everyBindingSshAccess,
       context: background,
@@ -569,6 +578,40 @@ test("a branch switch removes the scratch directory and ignored files and a chec
   assert.equal(existsSync(untracked), false);
 });
 
+function writeSetupRecordOf(directory: string, roots: readonly string[]) {
+  writeFileSync(
+    join(directory, ".git", "kanthord-setup.json"),
+    JSON.stringify({ digest: "earlier", roots }),
+  );
+}
+
+test("a branch switch keeps the recorded setup roots of the checkout", async (t) => {
+  const h = await restartFixture(t);
+  const first = await h.prepare(FIRST_ATTEMPT);
+  const deps = join(first.directory, "deps");
+  mkdirSync(deps);
+  writeFileSync(join(deps, "a"), "x");
+  const other = join(first.directory, "other");
+  writeFileSync(other, "x");
+  writeSetupRecordOf(first.directory, ["deps/"]);
+  const inode = statSync(join(deps, "a")).ino;
+  await h.prepare(RESTART_ATTEMPT);
+  assert.equal(statSync(join(deps, "a")).ino, inode);
+  assert.equal(existsSync(other), false);
+});
+
+test("a branch switch removes a recorded root that holds a tracked path", async (t) => {
+  const h = await restartFixture(t);
+  const first = await h.prepare(FIRST_ATTEMPT);
+  const deps = join(first.directory, "deps");
+  mkdirSync(deps);
+  await commit(first.directory, "deps/tracked", "tracked");
+  writeFileSync(join(deps, "untracked"), "x");
+  writeSetupRecordOf(first.directory, ["deps/"]);
+  await h.prepare(RESTART_ATTEMPT);
+  assert.equal(existsSync(deps), false);
+});
+
 const BINDING_NAMES = ["api", "web"];
 
 async function bindingsFixture(t: test.TestContext, names = BINDING_NAMES) {
@@ -589,6 +632,7 @@ async function bindingsFixture(t: test.TestContext, names = BINDING_NAMES) {
   const nodeBranch = nodeBranchOf(nodeId, FIRST_ATTEMPT);
   const prepare = (pushed: ReadonlySet<string> = new Set()) =>
     workspace.prepareImplement({
+      env,
       transport,
       sshAccess: everyBindingSshAccess,
       context: background,

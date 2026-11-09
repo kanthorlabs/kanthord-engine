@@ -62,6 +62,7 @@ const ORIGIN_NAME = "origin";
 const SEED_NAME = "seed";
 const SIBLING_ORIGIN = `../${ORIGIN_NAME}`;
 const EXPIRED_DEADLINE_MS = 1;
+const DEPENDENCY_TEXT = "dependency";
 const MISSING_REPOSITORY = "file:////nonexistent_kanthord_plan04_test";
 
 suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
@@ -161,6 +162,7 @@ suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
         branch,
         "main",
         false,
+        [],
         background,
         DEADLINE_MS,
         LOCAL_GIT_SSH_ACCESS,
@@ -182,6 +184,7 @@ suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
         branch,
         "main",
         false,
+        [],
         background,
         DEADLINE_MS,
         LOCAL_GIT_SSH_ACCESS,
@@ -271,6 +274,7 @@ suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
         branch,
         "main",
         false,
+        [],
         background,
         DEADLINE_MS,
         LOCAL_GIT_SSH_ACCESS,
@@ -285,6 +289,7 @@ suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
         branch,
         "main",
         false,
+        [],
         background,
         DEADLINE_MS,
         LOCAL_GIT_SSH_ACCESS,
@@ -293,6 +298,71 @@ suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
     );
     assert.equal(readFileSync(join(workspace, "file"), "utf8"), baseContent);
     assert.deepEqual(readdirSync(workspace).sort(), [".git", "file"]);
+  });
+
+  test("fetchAndCheckout keeps each excluded root on a branch switch and removes the other ignored files", async (t) => {
+    const root = temporary(t);
+    const origin = join(root, "origin");
+    const seed = join(root, "seed");
+    const workspace = join(root, "workspace");
+    for (const directory of [origin, seed, workspace]) mkdirSync(directory);
+    await simpleGit(origin).init(true);
+    await simpleGit(seed).init();
+    await simpleGit(seed).raw(["checkout", "-b", "main"]);
+    writeFileSync(join(seed, ".gitignore"), "*.log\n");
+    await simpleGit(seed).add(".gitignore");
+    await simpleGit(seed).raw([
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "-m",
+      "base",
+    ]);
+    await simpleGit(seed).addRemote("origin", origin);
+    await simpleGit(seed).push("origin", "main");
+    await clone(
+      origin,
+      workspace,
+      background,
+      DEADLINE_MS,
+      LOCAL_GIT_SSH_ACCESS,
+    );
+    const checkout = (branch: string, keep: readonly string[]) =>
+      fetchAndCheckout(
+        workspace,
+        branch,
+        "main",
+        false,
+        keep,
+        background,
+        DEADLINE_MS,
+        LOCAL_GIT_SSH_ACCESS,
+      );
+    await checkout("kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA", []);
+    mkdirSync(join(workspace, "deps"));
+    writeFileSync(join(workspace, "deps", "a"), DEPENDENCY_TEXT);
+    writeFileSync(join(workspace, "out[1].txt"), "x");
+    writeFileSync(join(workspace, "other.log"), "x");
+    mkdirSync(join(workspace, "cache"));
+    writeFileSync(join(workspace, "cache", "b"), "x");
+    await checkout("kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAB", [
+      "-e",
+      "/deps/",
+      "-e",
+      "/out\\[1].txt",
+    ]);
+    assert.deepEqual(readdirSync(workspace).sort(), [
+      ".git",
+      ".gitignore",
+      "deps",
+      "out[1].txt",
+    ]);
+    assert.equal(
+      readFileSync(join(workspace, "deps", "a"), "utf8"),
+      DEPENDENCY_TEXT,
+    );
   });
 });
 
@@ -413,6 +483,7 @@ test("every git caller rejects a nonzero exit with an empty stderr", async (t) =
       NODE_BRANCH,
       BASE_BRANCH,
       false,
+      [],
       background,
       DEADLINE_MS,
       LOCAL_GIT_SSH_ACCESS,

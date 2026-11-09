@@ -17,6 +17,8 @@ import type { Context } from "../../kernel/context.ts";
 import type { ExecutionSetup, RepositoryTransport } from "../contract.ts";
 import type { SshAccess, SshSigner } from "../../repository/contract.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
+import { cleanExcludes, trackedRoots } from "./local-git.ts";
+import { readSetupRecord } from "./setup-record.ts";
 import type { HandoverSshIdentity } from "../../custody/contract.ts";
 
 export const WORKSPACES_DIRECTORY = "workspaces";
@@ -145,6 +147,7 @@ export class WorkspaceRoot {
   }
   async prepareImplement(
     input: Preparation & {
+      env: NodeJS.ProcessEnv;
       nodeId: string;
       nodeBranch: string;
       pushed: ReadonlySet<string>;
@@ -179,11 +182,22 @@ export class WorkspaceRoot {
             ssh,
           );
         }
+        const roots = readSetupRecord(directory)?.roots ?? [];
+        const tracked = await trackedRoots(
+          {
+            env: input.env,
+            directory,
+            context: input.context,
+            deadlineMs: end - performance.now(),
+          },
+          roots,
+        );
         const head = await input.transport.fetchAndCheckout(
           directory,
           input.nodeBranch,
           repository.strategy.base_branch,
           input.pushed.has(repository.binding_id),
+          cleanExcludes(roots.filter((root) => !tracked.includes(root))),
           input.context,
           end - performance.now(),
           ssh,
