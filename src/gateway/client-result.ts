@@ -11,6 +11,7 @@ import {
   type ClientOptions,
   type Operation,
   OperationLifetime,
+  type OperationResult,
   OperationResultType,
   type ServiceClient,
 } from "../kernel/operation.ts";
@@ -56,6 +57,72 @@ function answerValidationFailure(error: z.ZodError): ErrorBody {
     request_id: resolveRequestId(),
   };
 }
+interface ClientCall {
+  operation: Operation;
+  idempotencyKey: string | undefined;
+}
+
+function interruptedResult(
+  error: unknown,
+  idempotencyKey: string | undefined,
+): OperationResult<unknown> {
+  return error instanceof PortClosedError
+    ? {
+        type: OperationResultType.Indeterminate,
+        idempotencyKey,
+        closed: true,
+      }
+    : { type: OperationResultType.Indeterminate, idempotencyKey };
+}
+
+function completedResult(
+  call: ClientCall,
+  result: RecordedResponse,
+): OperationResult<unknown> {
+  const { operation, idempotencyKey } = call;
+  if (
+    operation.lifetime === OperationLifetime.Stream &&
+    result.body instanceof Response
+  )
+    return {
+      type: OperationResultType.Completed,
+      status: result.status,
+      data: result.body,
+      idempotencyKey,
+    };
+  const output = operation.output.safeParse(
+    JSON.parse(JSON.stringify(result.body)),
+  );
+  if (output.success)
+    return {
+      type: OperationResultType.Completed,
+      status: result.status,
+      data: output.data,
+      idempotencyKey,
+    };
+  return {
+    type: OperationResultType.Failure,
+    status: result.status,
+    error: answerValidationFailure(output.error),
+    idempotencyKey,
+  };
+}
+
+function failedResult(
+  result: RecordedResponse,
+  idempotencyKey: string | undefined,
+): OperationResult<unknown> {
+  const failure = errorSchema.safeParse(result.body);
+  if (!failure.success)
+    return { type: OperationResultType.Indeterminate, idempotencyKey };
+  return {
+    type: OperationResultType.Failure,
+    status: result.status,
+    error: failure.data,
+    idempotencyKey,
+  };
+}
+
 export function createClient<T extends Record<string, Operation>>(
   operations: T,
   call: (
@@ -78,51 +145,11 @@ export function createClient<T extends Record<string, Operation>>(
             idempotencyKey,
           });
         } catch (error) {
-          return error instanceof PortClosedError
-            ? {
-                type: OperationResultType.Indeterminate,
-                idempotencyKey,
-                closed: true,
-              }
-            : { type: OperationResultType.Indeterminate, idempotencyKey };
+          return interruptedResult(error, idempotencyKey);
         }
-        if (result.status === operation.status) {
-          if (
-            operation.lifetime === OperationLifetime.Stream &&
-            result.body instanceof Response
-          )
-            return {
-              type: OperationResultType.Completed,
-              status: result.status,
-              data: result.body,
-              idempotencyKey,
-            };
-          const output = operation.output.safeParse(
-            JSON.parse(JSON.stringify(result.body)),
-          );
-          if (output.success)
-            return {
-              type: OperationResultType.Completed,
-              status: result.status,
-              data: output.data,
-              idempotencyKey,
-            };
-          return {
-            type: OperationResultType.Failure,
-            status: result.status,
-            error: answerValidationFailure(output.error),
-            idempotencyKey,
-          };
-        }
-        const failure = errorSchema.safeParse(result.body);
-        if (!failure.success)
-          return { type: OperationResultType.Indeterminate, idempotencyKey };
-        return {
-          type: OperationResultType.Failure,
-          status: result.status,
-          error: failure.data,
-          idempotencyKey,
-        };
+        return result.status === operation.status
+          ? completedResult({ operation, idempotencyKey }, result)
+          : failedResult(result, idempotencyKey);
       },
     ]),
   ) as ServiceClient<T>;
