@@ -1447,9 +1447,6 @@
   "src/worker/unit/steps-implement.ts": {
     "@typescript-eslint/max-params": {
       "count": 2
-    },
-    "complexity": {
-      "count": 1
     }
   },
   "src/worker/unit/stop-cause.ts": {

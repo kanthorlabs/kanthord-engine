@@ -491,6 +491,24 @@ function revisionInstructionOf(state: StepsState, checked: CheckedRun): string {
   );
 }
 
+function endUnchangedStreak(
+  state: StepsState,
+  passed: boolean,
+  ruled: boolean,
+): void {
+  if (passed && ruled) state.unchangedTurns = NO_UNCHANGED_TURNS;
+}
+
+function reviseNodeInstruction(
+  state: StepsState,
+  checked: CheckedRun,
+  ruled: boolean,
+): string {
+  if (ruled) countUnchangedTurn(state, NoProgressRule.VerdictRuleUnmet);
+  state.revisionCount++;
+  return revisionInstructionOf(state, checked);
+}
+
 async function runNodeInstruction(
   state: StepsState,
   unit: TaskContent,
@@ -522,14 +540,12 @@ async function runNodeInstruction(
       countUnchangedTurn(state, NoProgressRule.UnchangedRevision);
     const checked = await verifyCommands(state, unit, commands);
     const passed = recordTaskVerification(state, unit, checked);
-    if (passed && ruled) state.unchangedTurns = NO_UNCHANGED_TURNS;
+    endUnchangedStreak(state, passed, ruled);
     if (passed) return await completeUnit(state, unit, agent);
     if (budget.exhausted()) return ended;
-    if (ruled) countUnchangedTurn(state, NoProgressRule.VerdictRuleUnmet);
-    instruction = revisionInstructionOf(state, checked);
+    instruction = reviseNodeInstruction(state, checked, ruled);
     template = PromptTemplate.TaskRevision;
     revised = true;
-    state.revisionCount++;
   }
   return ended;
 }
