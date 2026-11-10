@@ -42,6 +42,7 @@ import {
   type SshAccess,
   type SshKeyAccess,
 } from "../repository/index.ts";
+import { RepositoryErrorCode } from "../repository/contract.ts";
 import { SshAgentErrorCode } from "../repository/ssh-agent.ts";
 import {
   OutboundRequestState,
@@ -54,7 +55,7 @@ import type { CallAnswer } from "./outbound.ts";
 import { findByKey } from "./outbound-store.ts";
 
 const BAD_GATEWAY_STATUS = 502;
-export const GIT_FAILED_CODE = "repository.connector.git_failed";
+export const GIT_FAILED_CODE = RepositoryErrorCode.GitFailed;
 export const GIT_PUSH_REFUSED = "git.push_refused";
 const UNEXPECTED_BODY_MESSAGE = "the GitHub answer holds an unexpected body";
 const PULL_REQUEST_STATE_OPEN = "open";

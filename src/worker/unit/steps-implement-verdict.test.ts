@@ -45,6 +45,7 @@ const ONE_TURN = 1;
 const ONE_COMMAND = 1;
 const TWO_TOOL_TURNS = 4;
 const FOUR_TURNS = 4;
+const FIVE_TURNS = 5;
 const TWO_BINDINGS = ["api", "web"];
 const BASE_FILE = "other";
 const FETCH_DEADLINE_MS = 20000;
@@ -60,6 +61,7 @@ const LINK_BODY = "Please also handle the empty list.";
 const ROUND_ATTRIBUTE = "kanthord.evaluation.round";
 const FAILING_SETUP = "false";
 const FAILED_EXIT_CODE = 1;
+const SECOND_RUN_PASSES = "test -f .git/seen || { touch .git/seen; false; }";
 
 type Harness = Awaited<ReturnType<typeof fixture>>;
 
@@ -556,6 +558,75 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
       content: { ...h.revision.content, verifications: [FAILING_SETUP] },
     };
     h.verdict = verdictAt(VERDICT, h.checkouts);
+    const { end } = await noProgressEnd(h);
+    assert.ok("stop" in end && end.stop);
+    assert.equal(
+      JSON.parse(end.stop.detail!).rule,
+      NoProgressRule.UnchangedRevision,
+    );
+    assert.equal(h.provider.calls.length, FOUR_TURNS);
+  });
+
+  test("regression: N10 a task that passes after an unchanged revision leaves the next verdict unit two turns", async (t) => {
+    const earlier = task("earlier", SECOND_RUN_PASSES);
+    const judged = task("judged", "true");
+    const h = await fixture(
+      t,
+      [earlier, judged],
+      [
+        fauxAssistantMessage("nothing"),
+        fauxAssistantMessage("nothing again"),
+        fauxAssistantMessage("verdict nothing"),
+        fauxAssistantMessage("verdict nothing again"),
+        fauxAssistantMessage("never"),
+      ],
+    );
+    await recordDone(h, judged);
+    h.verdict = verdictAt(VERDICT, h.checkouts);
+    await releasedEnd(h);
+    assert.equal(h.provider.calls.length, FOUR_TURNS);
+  });
+
+  test("regression: N10 a task after a task that passed with an unchanged revision gets two unchanged revisions", async (t) => {
+    const earlier = task("earlier", SECOND_RUN_PASSES);
+    const stuck = task("stuck", FAILING_SETUP);
+    const h = await fixture(
+      t,
+      [earlier, stuck],
+      [
+        fauxAssistantMessage("nothing"),
+        fauxAssistantMessage("nothing again"),
+        fauxAssistantMessage("stuck work"),
+        fauxAssistantMessage("stuck nothing"),
+        fauxAssistantMessage("stuck nothing again"),
+        fauxAssistantMessage("never"),
+      ],
+    );
+    const { end } = await noProgressEnd(h);
+    assert.ok("stop" in end && end.stop);
+    assert.equal(
+      JSON.parse(end.stop.detail!).rule,
+      NoProgressRule.UnchangedRevision,
+    );
+    assert.equal(h.provider.calls.length, FIVE_TURNS);
+  });
+
+  test("regression: N10 the first routed revision after a task that passed with an unchanged revision gets two unchanged turns", async (t) => {
+    const h = await fixture(
+      t,
+      [task("earlier", SECOND_RUN_PASSES)],
+      [
+        fauxAssistantMessage("nothing"),
+        fauxAssistantMessage("nothing again"),
+        fauxAssistantMessage("routed nothing"),
+        fauxAssistantMessage("routed nothing again"),
+        fauxAssistantMessage("never"),
+      ],
+    );
+    h.revision = {
+      ...h.revision,
+      content: { ...h.revision.content, verifications: [FAILING_SETUP] },
+    };
     const { end } = await noProgressEnd(h);
     assert.ok("stop" in end && end.stop);
     assert.equal(

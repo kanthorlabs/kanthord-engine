@@ -130,8 +130,11 @@ const LOGIN_ENTRY: LoginSessionEntry = {
   holder: "relay-a",
 };
 const SINGLE_CALL = 1;
+const TWO_CALLS = 2;
 const INFO_LEVEL = 30;
 const ARCHIVED_RECORD = "worker.instance.archived";
+const CONNECTED_RECORD = "worker.instance.connected";
+const DISCONNECTED_RECORD = "worker.instance.disconnected";
 const ACTOR_NAME = "Alice";
 const SHORT_SESSION_READ_WAIT_MS = 20;
 const SESSION_READ: SessionRead = {
@@ -1770,6 +1773,116 @@ function loggingFixture(t: TestContext) {
       .filter((record) => record.msg === message);
   return { f, records };
 }
+
+test("a connection past the window logs one disconnect record and a later heartbeat logs a connect record", async (t) => {
+  const { f, records } = loggingFixture(t);
+  const { record } = await f.created();
+  f.asWorker(record.id, INSTANCE);
+  const { connection_id } = await f.invoke("instance.connect", {
+    connection_name: CONNECTION_NAME,
+  });
+  assert.equal(records(CONNECTED_RECORD).length, SINGLE_CALL);
+  const instances = f.worker().instances;
+  instances.sweepConnections();
+  assert.equal(records(DISCONNECTED_RECORD).length, NO_CALLS);
+  const later = Date.now() + INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  t.mock.method(Date, "now", () => later);
+  instances.sweepConnections();
+  instances.sweepConnections();
+  const disconnected = records(DISCONNECTED_RECORD);
+  assert.equal(disconnected.length, SINGLE_CALL);
+  assert.equal(disconnected[0].level, INFO_LEVEL);
+  assert.equal(disconnected[0].instance, INSTANCE);
+  assert.equal(disconnected[0].connection_name, CONNECTION_NAME);
+  await f.invoke("instance.heartbeat", {
+    connection_id,
+    connection_name: CONNECTION_NAME,
+  });
+  const connected = records(CONNECTED_RECORD);
+  assert.equal(connected.length, TWO_CALLS);
+  assert.equal(connected[1].instance, INSTANCE);
+  assert.equal(connected[1].last_heartbeat_at, new Date(later).toISOString());
+});
+
+test("a connect with its connection id after a lapse logs a connect record with the connection name", async (t) => {
+  const { f, records } = loggingFixture(t);
+  const { record } = await f.created();
+  f.asWorker(record.id, INSTANCE);
+  const { connection_id } = await f.invoke("instance.connect", {
+    connection_name: CONNECTION_NAME,
+  });
+  const later = Date.now() + INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  t.mock.method(Date, "now", () => later);
+  f.worker().instances.sweepConnections();
+  await f.invoke("instance.connect", {
+    connection_id,
+    connection_name: CONNECTION_NAME,
+  });
+  const connected = records(CONNECTED_RECORD);
+  assert.equal(connected.length, TWO_CALLS);
+  assert.equal(connected[1].connection_name, CONNECTION_NAME);
+});
+
+test("a held connection with no entry after a restart logs one connect record", async (t) => {
+  const { f, records } = loggingFixture(t);
+  const { record } = await f.created();
+  assert.ok(
+    f
+      .worker()
+      .instances.holdConnection(record.id, createIdentity("connection")),
+  );
+  const connected = records(CONNECTED_RECORD);
+  assert.equal(connected.length, SINGLE_CALL);
+  assert.equal(connected[0].instance, INSTANCE);
+  assert.equal(connected[0].connection_name, null);
+});
+
+test("a store failure in the connection sweep logs the failure and throws nothing", async (t) => {
+  const { f, records } = loggingFixture(t);
+  const { record } = await f.created();
+  f.asWorker(record.id, INSTANCE);
+  await f.invoke("instance.connect", { connection_name: CONNECTION_NAME });
+  const later = Date.now() + INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  t.mock.method(Date, "now", () => later);
+  t.mock.method(f.store, "transaction", () => {
+    throw new Error("the store is closed");
+  });
+  f.worker().instances.sweepConnections();
+  assert.equal(records(DISCONNECTED_RECORD).length, NO_CALLS);
+  assert.equal(
+    records("worker.instance.connection_log_failed").length,
+    SINGLE_CALL,
+  );
+});
+
+test("a connect with no connection id replaces the current connection and logs no disconnect record for it", async (t) => {
+  const { f, records } = loggingFixture(t);
+  const { record } = await f.created();
+  f.asWorker(record.id, INSTANCE);
+  await f.invoke("instance.connect", { connection_name: CONNECTION_NAME });
+  await f.invoke("instance.connect", {
+    connection_name: OTHER_CONNECTION_NAME,
+  });
+  const later = Date.now() + INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  t.mock.method(Date, "now", () => later);
+  f.worker().instances.sweepConnections();
+  assert.equal(records(CONNECTED_RECORD).length, TWO_CALLS);
+  const disconnected = records(DISCONNECTED_RECORD);
+  assert.equal(disconnected.length, SINGLE_CALL);
+  assert.equal(disconnected[0].connection_name, OTHER_CONNECTION_NAME);
+});
+
+test("an archive that drops the connection logs no disconnect record", async (t) => {
+  const { f, records } = loggingFixture(t);
+  const box = await connectedBusy(f);
+  await box.archive();
+  f.worker().executionReleased(box.executionId);
+  assert.equal(f.worker().instances.connectionOf(box.record.id), null);
+  const later = Date.now() + INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  t.mock.method(Date, "now", () => later);
+  f.worker().instances.sweepConnections();
+  assert.equal(records(DISCONNECTED_RECORD).length, NO_CALLS);
+});
 
 test("a forced archive of a connected instance with a live execution orders the stop and ends no instance", async (t) => {
   const f = instanceFixture(t);

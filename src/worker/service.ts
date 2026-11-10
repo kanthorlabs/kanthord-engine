@@ -657,10 +657,10 @@ export class WorkerService implements Service {
         void this.stop();
       }
     }, HEARTBEAT_SWEEP_INTERVAL_MS).unref();
-    this.stopOrderTimer ??= setInterval(
-      () => this.instances.sweepStopOrders(),
-      INSTANCE_HEARTBEAT_INTERVAL_MS,
-    ).unref();
+    this.stopOrderTimer ??= setInterval(() => {
+      this.instances.sweepStopOrders();
+      this.instances.sweepConnections();
+    }, INSTANCE_HEARTBEAT_INTERVAL_MS).unref();
   }
   async healthcheck(): Promise<Healthcheck> {
     return {

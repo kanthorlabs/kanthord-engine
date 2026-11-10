@@ -77,7 +77,10 @@ import {
 } from "./registration-rows.ts";
 
 export const INSTANCE_ARCHIVED_LOG = "worker.instance.archived";
+export const INSTANCE_CONNECTED_LOG = "worker.instance.connected";
+export const INSTANCE_DISCONNECTED_LOG = "worker.instance.disconnected";
 const STOP_ORDER_FAILED = "worker.instance.stop_order_failed";
+const CONNECTION_LOG_FAILED = "worker.instance.connection_log_failed";
 const BASE64URL = "base64url";
 const UTF8 = "utf8";
 const ZERO_BYTE = 0;
@@ -174,6 +177,7 @@ interface CurrentConnection {
   connection_name: string | null;
   connected_at: number;
   last_heartbeat_at: number;
+  lapsed: boolean;
 }
 
 interface PreparedKey {
@@ -458,13 +462,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
       current.connection_name ??= connectionName;
       return true;
     }
-    const now = Date.now();
-    this.connections.set(instanceId, {
-      connection_id: connectionId,
-      connection_name: connectionName,
-      connected_at: now,
-      last_heartbeat_at: now,
-    });
+    this.openConnection(instanceId, connectionId, connectionName);
     return true;
   }
 
@@ -514,6 +512,67 @@ export class WorkerInstances implements WorkerInstanceLookups {
 
   dropConnection(instanceId: string): void {
     this.connections.delete(instanceId);
+  }
+
+  sweepConnections(): void {
+    const now = Date.now();
+    for (const [instanceId, current] of this.connections) {
+      if (current.lapsed) continue;
+      if (now - current.last_heartbeat_at <= INSTANCE_CONNECTED_WINDOW_MS)
+        continue;
+      current.lapsed = true;
+      try {
+        this.logConnection(INSTANCE_DISCONNECTED_LOG, instanceId, current);
+      } catch (error) {
+        this.dependencies.logger.error(
+          { err: asError(error), instance_id: instanceId },
+          CONNECTION_LOG_FAILED,
+        );
+      }
+    }
+  }
+
+  private openConnection(
+    instanceId: string,
+    connectionId: string,
+    connectionName: string | null,
+  ): void {
+    const now = Date.now();
+    const opened: CurrentConnection = {
+      connection_id: connectionId,
+      connection_name: connectionName,
+      connected_at: now,
+      last_heartbeat_at: now,
+      lapsed: false,
+    };
+    this.connections.set(instanceId, opened);
+    this.logConnection(INSTANCE_CONNECTED_LOG, instanceId, opened);
+  }
+
+  private renewConnection(instanceId: string, current: CurrentConnection) {
+    current.last_heartbeat_at = Date.now();
+    if (!current.lapsed) return;
+    current.lapsed = false;
+    this.logConnection(INSTANCE_CONNECTED_LOG, instanceId, current);
+  }
+
+  private logConnection(
+    operation: string,
+    instanceId: string,
+    current: CurrentConnection,
+  ): void {
+    const instance = this.dependencies.store.transaction((tx) =>
+      readInstanceById(tx, instanceId),
+    );
+    this.dependencies.logger.info(
+      {
+        operation,
+        instance: instance?.name ?? null,
+        connection_name: current.connection_name,
+        last_heartbeat_at: new Date(current.last_heartbeat_at).toISOString(),
+      },
+      operation,
+    );
   }
 
   bindingsListing(tx: Transaction, name: string): ListedBinding[] {
@@ -1107,7 +1166,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
   } {
     if (!this.holdConnection(instanceId, connectionId, connectionName))
       throw superseded(this.connections.get(instanceId));
-    this.connections.get(instanceId)!.last_heartbeat_at = Date.now();
+    this.renewConnection(instanceId, this.connections.get(instanceId)!);
     return {
       server_version: packageVersion(),
       binding_version: this.bindingVersionOf(name),
@@ -1238,22 +1297,16 @@ export class WorkerInstances implements WorkerInstanceLookups {
     connectionId: string | undefined,
     connectionName: string,
   ): string {
-    const now = Date.now();
     if (connectionId === undefined) {
       const created = createIdentity(CONNECTION_ID_PREFIX);
-      this.connections.set(instanceId, {
-        connection_id: created,
-        connection_name: connectionName,
-        connected_at: now,
-        last_heartbeat_at: now,
-      });
+      this.openConnection(instanceId, created, connectionName);
       return created;
     }
-    if (!this.holdConnection(instanceId, connectionId))
+    if (!this.holdConnection(instanceId, connectionId, connectionName))
       throw superseded(this.connections.get(instanceId));
     const current = this.connections.get(instanceId)!;
     current.connection_name = connectionName;
-    current.last_heartbeat_at = now;
+    this.renewConnection(instanceId, current);
     return connectionId;
   }
 

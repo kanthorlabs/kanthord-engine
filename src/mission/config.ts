@@ -24,7 +24,7 @@ export const missionConfigSchema: Schema<MissionConfig> = {
     default: DEFAULT_FURTHER_WORK_LIMIT,
   },
   rework_limit: {
-    doc: "Reworks of an attempt that the Mission Service permits. A criterion-not-met assessment and, on an implement node, a success assessment with an action:yes finding or an open finding cause a rework below the limit. An assessment of a later round causes no rework, and its findings are report-only. The value 0 turns rework off.",
+    doc: "Reworks of an attempt that the Mission Service permits. A criterion-not-met assessment and, on an implement node, a success assessment with an action:yes finding or an open finding cause a rework below the limit. The round that equals the limit plus 1 is final: its assessment causes no rework, and its findings are report-only. The value 0 turns rework off.",
     format: "nat",
     default: DEFAULT_REWORK_LIMIT,
   },
