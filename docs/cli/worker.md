@@ -669,6 +669,8 @@ Each item holds the instance record, `connection`, `binding_count` and `holder_m
 `binding_count` counts the bindings that list the instance.
 `holder_mismatch` is true when a binding that lists the instance names a credential with no live copy of the instance sealed to its current key. It is `false` for a `server` or a `container` instance, which uses the copy of the holder `server`.
 
+The server writes one info log record `worker.instance.connected` when an instance opens a connection. It writes the same record when a lapsed connection sends a heartbeat or a connect again. It writes one info log record `worker.instance.disconnected` when the last heartbeat of a connection becomes older than 60 seconds. The server checks every 15 seconds, so the record comes at most 15 seconds after the window ends. Each record holds `instance`, `connection_name` and `last_heartbeat_at`. After a server restart, a connected record of a Gateway request holds `connection_name: null`. An archive that ends the connection writes no `worker.instance.disconnected` record. A new connection replaces the current connection and writes no disconnected record for it. When the server cannot write a disconnected record, it logs `worker.instance.connection_log_failed` and continues.
+
 ### `instance get`
 
 ```text

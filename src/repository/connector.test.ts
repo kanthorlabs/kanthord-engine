@@ -78,7 +78,7 @@ suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
       baseSnapshot,
     ])
       mkdirSync(directory);
-    await simpleGit(origin).init(true);
+    await simpleGit(origin).init(true, ["--initial-branch=main"]);
     const git = simpleGit(seed);
     await git.init();
     await git.raw(["checkout", "-b", "main"]);
@@ -190,7 +190,7 @@ suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
     const seed = join(root, "seed");
     const workspace = join(root, "workspace");
     for (const directory of [origin, seed, workspace]) mkdirSync(directory);
-    await simpleGit(origin).init(true);
+    await simpleGit(origin).init(true, ["--initial-branch=main"]);
     await simpleGit(seed).init();
     await simpleGit(seed).raw(["checkout", "-b", "main"]);
     const commit = async (directory: string, value: string) => {
@@ -263,7 +263,7 @@ suite("connector clone and fetch", { concurrency: SUITE_CONCURRENCY }, () => {
     const seed = join(root, "seed");
     const workspace = join(root, "workspace");
     for (const directory of [origin, seed, workspace]) mkdirSync(directory);
-    await simpleGit(origin).init(true);
+    await simpleGit(origin).init(true, ["--initial-branch=main"]);
     await simpleGit(seed).init();
     await simpleGit(seed).raw(["checkout", "-b", "main"]);
     writeFileSync(join(seed, ".gitignore"), "*.log\n");
@@ -373,7 +373,7 @@ const remoteTemplate = fixtureTemplate(async (root) => {
   const seed = join(root, SEED_NAME);
   mkdirSync(origin);
   mkdirSync(seed);
-  await simpleGit(origin).init(true);
+  await simpleGit(origin).init(true, ["--initial-branch=main"]);
   const git = simpleGit(seed);
   await git.raw(["init", "-b", BASE_BRANCH]);
   const commit = seedCommit(seed);
@@ -888,7 +888,7 @@ const instructionTemplate = fixtureTemplate(async (root) => {
   const seed = join(root, SEED_NAME);
   mkdirSync(origin);
   mkdirSync(seed);
-  await simpleGit(origin).init(true);
+  await simpleGit(origin).init(true, ["--initial-branch=main"]);
   await simpleGit(origin).raw(["config", "uploadpack.allowFilter", "true"]);
   await simpleGit(origin).raw([
     "config",
@@ -1828,7 +1828,7 @@ async function pushRuleFixture(t: TestContext) {
   const seed = join(root, SEED_NAME);
   const workspace = join(root, "workspace");
   for (const directory of [origin, seed, workspace]) mkdirSync(directory);
-  await simpleGit(origin).init(true);
+  await simpleGit(origin).init(true, ["--initial-branch=main"]);
   await simpleGit(seed).init();
   await simpleGit(seed).raw(["checkout", "-b", "main"]);
   const commit = async (directory: string, value: string) => {

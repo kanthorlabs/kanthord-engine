@@ -373,13 +373,17 @@ async function runUnits(
     state.setupInstruction,
   );
   let nodeInstruction = checked.node;
+  let planned = true;
   while (!state.agent.budget.exhausted()) {
     const ran = await runPending(state, units, nodeInstruction, taskRunner, {
       done: checked.done,
       completed,
       reports,
+      planned,
     });
     if (ran.budgetEnd) return ran;
+    if (planned) state.unchangedTurns = NO_UNCHANGED_TURNS;
+    planned = false;
     nodeInstruction = null;
     const gate = await releaseGate(state);
     if (gate.kind === ReleaseGateKind.Passed)
@@ -411,10 +415,11 @@ function withSetupInstruction(
   return [{ ...first, instruction }, ...rest];
 }
 
-interface Completion {
+interface PendingScope {
   done: ReadonlySet<string>;
   completed: Set<string>;
   reports: Map<string, string>;
+  planned: boolean;
 }
 
 async function runPending(
@@ -422,7 +427,7 @@ async function runPending(
   pending: readonly PendingTask[],
   node: NodeInstruction | null,
   taskRunner: TaskRunner,
-  { done, completed, reports }: Completion,
+  { done, completed, reports, planned }: PendingScope,
 ): Promise<UnitsEnd> {
   assert.ok(pending.length <= unitsOf(state).length);
   const units = pending.map(({ task, instruction }) => ({
@@ -443,6 +448,7 @@ async function runPending(
   for (const { task, verdict, round, run } of units) {
     state.task = task;
     state.revisionCount = 0;
+    if (planned) state.unchangedTurns = NO_UNCHANGED_TURNS;
     const result = await state.run.spans.within(
       taskSpan(state.run.spans, task, round),
       run,
@@ -490,14 +496,6 @@ function revisionInstructionOf(state: StepsState, checked: CheckedRun): string {
   );
 }
 
-function endUnchangedStreakOnRuledPass(
-  state: StepsState,
-  passed: boolean,
-  ruled: boolean,
-): void {
-  if (passed && ruled) state.unchangedTurns = NO_UNCHANGED_TURNS;
-}
-
 function reviseNodeInstruction(
   state: StepsState,
   checked: CheckedRun,
@@ -540,7 +538,6 @@ async function runNodeInstruction(
       countUnchangedTurn(state, NoProgressRule.UnchangedRevision);
     const checked = await verifyCommands(state, unit, commands);
     const passed = recordTaskVerification(state, unit, checked);
-    endUnchangedStreakOnRuledPass(state, passed, ruled);
     if (passed) return await completeUnit(state, unit, agent);
     if (budget.exhausted()) return ended;
     instruction = reviseNodeInstruction(state, checked, ruled);

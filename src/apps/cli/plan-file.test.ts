@@ -232,6 +232,18 @@ function write(directory: string, name: string, text: string): string {
   return path;
 }
 
+function isolatedEnvironment(directory: string): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    KANTHORD_CONFIG: join(directory, "kanthord.yaml"),
+    XDG_CONFIG_HOME: directory,
+    XDG_DATA_HOME: join(directory, "data"),
+    XDG_STATE_HOME: join(directory, "state"),
+    KANTHORD_ENDPOINT: undefined,
+    KANTHORD_TOKEN: undefined,
+  };
+}
+
 async function run(
   t: TestContext,
   command: "update" | "unblock",
@@ -264,15 +276,7 @@ async function run(
       "--token",
       "t",
     ],
-    {
-      ...process.env,
-      KANTHORD_CONFIG: join(directory, "kanthord.yaml"),
-      XDG_CONFIG_HOME: directory,
-      XDG_DATA_HOME: join(directory, "data"),
-      XDG_STATE_HOME: join(directory, "state"),
-      KANTHORD_ENDPOINT: undefined,
-      KANTHORD_TOKEN: undefined,
-    },
+    isolatedEnvironment(directory),
     t.signal,
   );
   return { result, requests };
@@ -408,7 +412,7 @@ test("--file with --plan-file refuses and sends nothing", async (t) => {
       "--token",
       "t",
     ],
-    process.env,
+    isolatedEnvironment(directory),
     t.signal,
   );
   assert.equal(result.code, ExitCode.Failure);
@@ -493,7 +497,7 @@ test("--project, --reason and --start-point with --file refuse and send nothing"
       "--token",
       "t",
     ],
-    process.env,
+    isolatedEnvironment(directory),
     t.signal,
   );
   assert.equal(result.code, ExitCode.Failure);
