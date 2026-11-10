@@ -292,9 +292,9 @@ function boundedList(entries: readonly string[]): string[] {
   return kept;
 }
 
-export function affectedEnd(result: AffectedRun): SpanEnd {
+function affectedCountAttributes(result: AffectedRun): Attributes {
   const { report } = result;
-  const attributes: Attributes = {
+  return {
     [AffectedAttribute.Verdict]: result.verdict,
     [AffectedAttribute.Selection]: report?.selection ?? INVALID_SELECTION,
     [AffectedAttribute.ChangedCount]: result.changed,
@@ -309,6 +309,10 @@ export function affectedEnd(result: AffectedRun): SpanEnd {
     [AffectedAttribute.Failed]: boundedList(result.failed.map(testIdText)),
     [VerificationAttribute.TimedOut]: result.head.timed_out,
   };
+}
+
+function affectedReportAttributes(report: AffectedRun["report"]): Attributes {
+  const attributes: Attributes = {};
   if (report?.selection === AffectedSelection.All && report.reason !== null)
     attributes[AffectedAttribute.Reason] = report.reason;
   if (report?.floor) {
@@ -317,6 +321,14 @@ export function affectedEnd(result: AffectedRun): SpanEnd {
     if (report.floor.total_seconds !== null)
       attributes[AffectedAttribute.TotalSeconds] = report.floor.total_seconds;
   }
+  return attributes;
+}
+
+export function affectedEnd(result: AffectedRun): SpanEnd {
+  const attributes: Attributes = {
+    ...affectedCountAttributes(result),
+    ...affectedReportAttributes(result.report),
+  };
   if (result.head.exit_code !== null)
     attributes[VerificationAttribute.ExitCode] = result.head.exit_code;
   return {
