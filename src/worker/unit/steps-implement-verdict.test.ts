@@ -59,7 +59,6 @@ const LINK_BODY = "Please also handle the empty list.";
 const ROUND_ATTRIBUTE = "kanthord.evaluation.round";
 const FAILING_SETUP = "false";
 const FAILED_EXIT_CODE = 1;
-const WAIVED_EVENT = "verdict rule waived for review";
 
 type Harness = Awaited<ReturnType<typeof fixture>>;
 
@@ -89,10 +88,6 @@ function recordEvidence(h: Harness): string[][] {
     },
   } as unknown as MethodClients["mission"];
   return commits;
-}
-
-function occurrences(call: unknown, text: string): number {
-  return JSON.stringify(call).split(text).length - ONE_TURN;
 }
 
 function write(path: string) {
@@ -173,39 +168,6 @@ async function verdictHarness(
 }
 
 suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
-  test("a verdict that names no task sends a verdict turn twice and an unchanged tree with passing verifications completes the node unit", async (t) => {
-    const { h, current } = await verdictHarness(t, [
-      fauxAssistantMessage("nothing"),
-      fauxAssistantMessage("nothing again"),
-      fauxAssistantMessage("never"),
-    ]);
-    const judged = h.checkouts[0]!.head;
-    h.verdict = verdictAt(VERDICT, h.checkouts);
-    const starts = t.mock.method(h.run.spans, "start");
-    const ends = t.mock.method(h.run.spans, "end");
-    assert.deepEqual(await releasedEnd(h), [[judged]]);
-    const taskStart = starts.mock.calls.find(
-      (call) => call.arguments[0].operation === SpanOperation.Task,
-    );
-    const taskEnd = ends.mock.calls.find(
-      (call) => call.arguments[0] === taskStart?.result,
-    );
-    assert.deepEqual(taskEnd?.arguments[1], {
-      status: SpanStatus.Ok,
-      attributes: {
-        "kanthord.task.result": TaskResultKind.Complete,
-        "kanthord.task.revision_count": ONE_REVISION,
-      },
-    });
-    assert.equal(h.provider.calls.length, TWO_TURNS);
-    const first = JSON.stringify(h.provider.calls[0]);
-    assert.ok(first.includes(VERDICT));
-    assert.ok(first.includes(current.id));
-    assert.ok(first.includes("## Tasks"));
-    assert.equal(occurrences(h.provider.calls[1], VERDICT), TWO_TURNS);
-    assert.equal(h.checkouts[0]!.head, judged);
-  });
-
   test("a verdict with no commit and failing verifications stops with verdict_rule_unmet after the last verdict turn and the detail holds the failed verification", async (t) => {
     const { h } = await verdictHarness(t, [
       fauxAssistantMessage("nothing"),
@@ -537,12 +499,69 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
     const head = h.checkouts[0]!.head;
     reworkAssessment(h, "criterion-not-met");
     h.verdict = (await readPrior(h.run, h.input.setup.repositories)).verdict;
-    const events = t.mock.method(h.run, "log");
+    const starts = t.mock.method(h.run.spans, "start");
+    const ends = t.mock.method(h.run.spans, "end");
     assert.deepEqual(await releasedEnd(h), [[head]]);
     assert.equal(h.provider.calls.length, TWO_TURNS);
-    assert.ok(
-      events.mock.calls.some((call) => call.arguments[0] === WAIVED_EVENT),
+    assert.equal(h.checkouts[0]!.head, head);
+    const taskStart = starts.mock.calls.find(
+      (call) => call.arguments[0].operation === SpanOperation.Task,
     );
+    const taskEnd = ends.mock.calls.find(
+      (call) => call.arguments[0] === taskStart?.result,
+    );
+    assert.deepEqual(taskEnd?.arguments[1], {
+      status: SpanStatus.Ok,
+      attributes: {
+        "kanthord.task.result": TaskResultKind.Complete,
+        "kanthord.task.revision_count": ONE_REVISION,
+      },
+    });
+  });
+
+  test("a setup that reaches the deadline after the verdict waiver ends with budget_end, not no_progress", async (t) => {
+    const { h } = await verdictHarness(t, [
+      fauxAssistantMessage("nothing"),
+      fauxAssistantMessage("nothing again"),
+      fauxAssistantMessage("never"),
+    ]);
+    h.verdict = verdictAt(VERDICT, h.checkouts);
+    h.setup = h.setup.map((entry) => ({
+      ...entry,
+      environment: { postCreateCommand: "sleep 30" },
+    }));
+    h.setupPending = true;
+    h.agent.budget.wallDeadline = () => Date.now() + WALL_DEADLINE_MS;
+    const bodies = recordReleases(h);
+    recordEvidence(h);
+    const end = await executionBoundary(h.run, () => runStepsImplement(h));
+    assert.ok("furtherWork" in end && end.furtherWork);
+    assert.ok("stop" in end && end.stop);
+    assert.equal(end.stop.reason, EndReason.BudgetEnd);
+    assert.equal((bodies[0] as { further_work: boolean }).further_work, true);
+    assert.equal(h.provider.calls.length, TWO_TURNS);
+  });
+
+  test("a routed revision after a verdict waiver and a release failure gets two unchanged turns before no_progress", async (t) => {
+    const { h } = await verdictHarness(t, [
+      fauxAssistantMessage("nothing"),
+      fauxAssistantMessage("nothing again"),
+      fauxAssistantMessage("routed nothing"),
+      fauxAssistantMessage("routed nothing again"),
+      fauxAssistantMessage("never"),
+    ]);
+    h.revision = {
+      ...h.revision,
+      content: { ...h.revision.content, verifications: [FAILING_SETUP] },
+    };
+    h.verdict = verdictAt(VERDICT, h.checkouts);
+    const { end } = await noProgressEnd(h);
+    assert.ok("stop" in end && end.stop);
+    assert.equal(
+      JSON.parse(end.stop.detail!).rule,
+      NoProgressRule.UnchangedRevision,
+    );
+    assert.equal(h.provider.calls.length, TWO_TOOL_TURNS);
   });
 
   test("an attempt with only a link update plans the node unit with the link updates text and no verdict rule", async (t) => {

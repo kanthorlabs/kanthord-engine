@@ -23,6 +23,7 @@ import {
   gatedAgent,
   type GatedAgent,
   isTurnViolation,
+  NO_UNCHANGED_TURNS,
   removeRootEntries,
   restoreCheckout,
   unitCommitMessage,
@@ -476,7 +477,6 @@ async function runNodeInstruction(
   let instruction = node.text;
   let template: PromptTemplate = PromptTemplate.CriterionRevision;
   let revised = false;
-  let waived = false;
   state.run.log("node instruction started", { task_id: unit.id, ruled });
   while (!budget.exhausted()) {
     await state.run.checkClaim();
@@ -490,8 +490,7 @@ async function runNodeInstruction(
         commit: headSetOf(state.checkouts),
         holds: !ruled,
       });
-      waived = ruled;
-      if (ruled && retryVerdictTurn(state, unit, unchangedTurns)) continue;
+      if (ruled && verdictTurnRetried(state, unit, unchangedTurns)) continue;
     } else if (revised && !agent.changed())
       countUnchangedTurn(state, NoProgressRule.UnchangedRevision);
     const checked = await verifyCommands(state, unit, commands);
@@ -505,8 +504,10 @@ async function runNodeInstruction(
       passed,
       exit_codes: verification.results.map((result) => result.exit_code),
     });
+    if (passed && ruled) state.unchangedTurns = NO_UNCHANGED_TURNS;
     if (passed) return await completeUnit(state, unit, agent);
-    if (waived) countUnchangedTurn(state, NoProgressRule.VerdictRuleUnmet);
+    if (budget.exhausted()) return ended;
+    if (ruled) countUnchangedTurn(state, NoProgressRule.VerdictRuleUnmet);
     instruction = taskRevisionInstruction(
       state.input.setup.templates,
       verification,
@@ -520,7 +521,7 @@ async function runNodeInstruction(
   return ended;
 }
 
-function retryVerdictTurn(
+function verdictTurnRetried(
   state: StepsState,
   unit: TaskContent,
   unchangedTurns: number,
