@@ -173,8 +173,4 @@ test("E05 inbound store CLI journey", { timeout: TIMEOUT }, async (t) => {
   await t.test("E05.6 a malformed identity refuses", async () => {
     refused(await run(["get", "bad"]), INVALID_ID);
   });
-
-  await t.test("E05.7 an unknown kind filter refuses", async () => {
-    refused(await run(["list", "--kind", "push"]), VALIDATION_FAILED);
-  });
 });

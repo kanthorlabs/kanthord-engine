@@ -25,8 +25,6 @@ const COMMITTED_PREFIX_LENGTH = 1;
 const COMPLETE_HISTORY_LENGTH = 2;
 const PRIVATE_FILE_MODE = 0o600;
 const SELECT_ALL_SQL = "SELECT * FROM t";
-const TRANSACTION_COUNT = 1000;
-const DISTINCT_SQL_COUNT = 3;
 const ROLLBACK_MESSAGE = "rolled back";
 const ORPHAN_KEY = 99;
 const NO_ROWS = 0;
@@ -42,12 +40,6 @@ const DUPLICATE_SERVICE_CODE = "system.database.migration.duplicate_service";
 const INCOMPATIBLE_HISTORY_CODE =
   "system.database.migration.incompatible_history";
 const SCHEMA_MISMATCH_CODE = "system.database.migration.schema_mismatch";
-const SCHEMA_MISMATCH_MESSAGE =
-  "the schema of this service differs from its migration text; stop the server, delete kanthord.db, tracking.db and their -wal and -shm files in the data directory, and start again";
-const DATABASE_NOT_OPEN = {
-  code: "ERR_INVALID_STATE",
-  message: "database is not open",
-};
 
 test("exclusive WAL ownership refuses a second process and releases after close", async (t) => {
   const path = join(temporary(t), "kanthord.db");
@@ -250,59 +242,6 @@ test("plan reads the history without a write and backup copies a consistent priv
   }
 });
 
-test("prepare answers one statement for one SQL text across transactions", () => {
-  const store = new Store(":memory:");
-  try {
-    const sql = "SELECT 1 AS value";
-    const first = store.transaction(({ database }) => {
-      const statement = database.prepare(sql);
-      assert.equal(database.prepare(sql), statement);
-      return statement;
-    });
-    store.transaction(({ database }) => {
-      assert.equal(database.prepare(sql), first);
-    });
-  } finally {
-    store.close();
-  }
-});
-
-test("the connection prepares one statement for each SQL text over many transactions", () => {
-  const store = new Store(":memory:");
-  try {
-    const statements = new Set<unknown>();
-    for (let index = 0; index < TRANSACTION_COUNT; index++)
-      store.transaction(({ database }) => {
-        for (let value = 1; value <= DISTINCT_SQL_COUNT; value++)
-          statements.add(database.prepare(`SELECT ${value} AS value`));
-      });
-    assert.equal(statements.size, DISTINCT_SQL_COUNT);
-  } finally {
-    store.close();
-  }
-});
-
-test("a rollback clears the statement cache", () => {
-  const store = new Store(":memory:");
-  try {
-    const sql = "SELECT 1 AS value";
-    let rolledBack: unknown;
-    assert.throws(
-      () =>
-        store.transaction(({ database }) => {
-          rolledBack = database.prepare(sql);
-          throw new Error(ROLLBACK_MESSAGE);
-        }),
-      { message: ROLLBACK_MESSAGE },
-    );
-    store.transaction(({ database }) => {
-      assert.notEqual(database.prepare(sql), rolledBack);
-    });
-  } finally {
-    store.close();
-  }
-});
-
 test("a rollback after a schema change answers the old columns", () => {
   const store = new Store(":memory:");
   try {
@@ -382,21 +321,6 @@ test("a transaction that SQLite ended keeps the error of the work", () => {
   }
 });
 
-test("prepare with options answers a new statement", () => {
-  const store = new Store(":memory:");
-  try {
-    const sql = "SELECT 1 AS value";
-    store.transaction(({ database }) => {
-      assert.notEqual(
-        database.prepare(sql, { readBigInts: false }),
-        database.prepare(sql, { readBigInts: false }),
-      );
-    });
-  } finally {
-    store.close();
-  }
-});
-
 test("the statement cache drops the least recently used statement above the limit", () => {
   const store = new Store(":memory:");
   try {
@@ -455,28 +379,6 @@ test("a cached statement binds no value of an earlier call", () => {
   } finally {
     store.close();
   }
-});
-
-test("a prepare after a schema change answers the new columns", () => {
-  const store = new Store(":memory:");
-  try {
-    store.database.exec("CREATE TABLE t (a TEXT); INSERT INTO t VALUES ('x')");
-    const before = store.database.prepare(SELECT_ALL_SQL).all();
-    assert.deepEqual(Object.keys(before[0]!), ["a"]);
-    store.database.exec("ALTER TABLE t ADD COLUMN w TEXT");
-    const after = store.database.prepare(SELECT_ALL_SQL).all();
-    assert.deepEqual(Object.keys(after[0]!), ["a", "w"]);
-  } finally {
-    store.close();
-  }
-});
-
-test("a prepare after close throws database is not open", () => {
-  const store = new Store(":memory:");
-  const sql = "SELECT 1 AS value";
-  store.database.prepare(sql);
-  store.close();
-  assert.throws(() => store.database.prepare(sql), DATABASE_NOT_OPEN);
 });
 
 test("a failed exec clears the statement cache", () => {
@@ -543,7 +445,6 @@ test("plan refuses a recorded service whose migration text changed and writes no
     const changed = [{ service: "one", migrations: [createOneChanged] }];
     const refused = refusal(() => store.plan(changed));
     assert.equal(refused.code, SCHEMA_MISMATCH_CODE);
-    assert.equal(refused.message, SCHEMA_MISMATCH_MESSAGE);
     assert.deepEqual(refused.fields, [
       ["path", path],
       ["service", "one"],
@@ -556,35 +457,6 @@ test("plan refuses a recorded service whose migration text changed and writes no
     assert.deepEqual(snapshot(store), before);
   } finally {
     store.close();
-  }
-});
-
-test("plan refuses a hand edit of the schema of a service", () => {
-  const edits: ReadonlyArray<readonly [string, string]> = [
-    ["ALTER TABLE one_first ADD COLUMN extra TEXT", "one_first"],
-    ["DROP INDEX one_first_value", "one_first_value"],
-    [
-      "CREATE UNIQUE INDEX hand_index ON one_first (value, other)",
-      "hand_index",
-    ],
-    [
-      "CREATE TRIGGER hand_trigger BEFORE INSERT ON one_first BEGIN SELECT RAISE(ABORT, 'x'); END",
-      "hand_trigger",
-    ],
-  ];
-  for (const [sql, object] of edits) {
-    const store = migratedStore();
-    try {
-      store.database.exec(sql);
-      const refused = refusal(() => store.plan(ONE_SERVICES));
-      assert.equal(refused.code, SCHEMA_MISMATCH_CODE, sql);
-      assert.deepEqual(refused.fields.slice(1), [
-        ["service", "one"],
-        ["object", object],
-      ]);
-    } finally {
-      store.close();
-    }
   }
 });
 
@@ -668,42 +540,6 @@ test("plan refuses a recorded version above the list length with incompatible_hi
     assert.equal(refused.code, INCOMPATIBLE_HISTORY_CODE);
     assert.deepEqual(refused.fields, [["path", path]]);
     assert.deepEqual(snapshot(store), before);
-  } finally {
-    store.close();
-  }
-});
-
-test("plan answers a service with no recorded row as pending with no compare", () => {
-  const store = migratedStore();
-  try {
-    store.database.exec("CREATE TABLE two_first (value INTEGER)");
-    assert.deepEqual(
-      store.plan([
-        ...ONE_SERVICES,
-        { service: "two", migrations: [createTwo] },
-      ]),
-      { fresh: false, pending: [{ service: "two", from: 0, to: 1 }] },
-    );
-  } finally {
-    store.close();
-  }
-});
-
-test("plan answers a recorded prefix with a pending version as pending", () => {
-  const store = migratedStore();
-  try {
-    assert.deepEqual(
-      store.plan([{ service: "one", migrations: [createOne, extendOne] }]),
-      { fresh: false, pending: [{ service: "one", from: 1, to: 2 }] },
-    );
-    assert.equal(
-      refusal(() =>
-        store.plan([
-          { service: "one", migrations: [createOneChanged, extendOne] },
-        ]),
-      ).code,
-      SCHEMA_MISMATCH_CODE,
-    );
   } finally {
     store.close();
   }

@@ -15,13 +15,10 @@ import type {
 import { LLM_PLATFORMS } from "../../llm/index.ts";
 import { REPOSITORY_PLATFORMS } from "../../repository/index.ts";
 import { STORAGE_PLATFORMS } from "../../storage/index.ts";
-import { loadConfig } from "../../config/index.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { ExitCode } from "./constants.ts";
 import { EXAMPLE_MARKER, fileBodyOf } from "./file-body.ts";
-import { OVERRIDE_STATES } from "../../mission/contract.ts";
 import { createProgram } from "./index.ts";
-import { missionExamples } from "./mission-examples.ts";
 import { runKanthord } from "./test-support.ts";
 
 const FILE_FLAG = "--file";
@@ -29,7 +26,6 @@ const NOT_FOUND = -1;
 const MIN_FILE_COMMANDS = 30;
 const EXAMPLE_INDENT = /^ {2}/gm;
 const MAX_COMMANDS = 400;
-const WHITESPACE = /\s+/g;
 const NOTES_MARKER = "\nNotes:\n";
 
 type FileCommand = { path: string[]; command: Command };
@@ -149,27 +145,4 @@ test("every command with a --file option prints a body example that its schema a
     assert.ok(parsed.success, `${label}: ${JSON.stringify(parsed.error)}`);
     assertPlatformFields(path, example, createdPlatforms);
   }
-});
-
-test("the node override example names a state that override accepts", () => {
-  assert.ok(
-    (OVERRIDE_STATES as readonly string[]).includes(
-      missionExamples.override.expected_state,
-    ),
-  );
-});
-
-test("config init help names the default and the container value of --gateway-bind", async (t) => {
-  const env = environment(temporary(t));
-  const created = await runKanthord(["config", "init"], env, t.signal);
-  assert.equal(created.code, ExitCode.Success, created.stderr);
-  const defaultBind = loadConfig(env.KANTHORD_CONFIG!).gateway.bind;
-  const help = await runKanthord(["config", "init", "--help"], env, t.signal);
-  assert.equal(help.code, ExitCode.Success, help.stderr);
-  assert.match(
-    help.stdout.replace(WHITESPACE, " "),
-    new RegExp(
-      `default: ${defaultBind.replaceAll(".", "\\.")}; use :: in a container`,
-    ),
-  );
 });

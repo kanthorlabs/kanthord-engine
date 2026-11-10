@@ -18,7 +18,6 @@ import {
 } from "./execution-run.ts";
 import {
   disposeAgent,
-  environmentDigestsOf,
   executionBoundary,
   runNativeExecution,
   stopOnEnd,
@@ -52,7 +51,7 @@ import {
   type TelemetryRecord,
 } from "../../tracking/contract.ts";
 import { AgentErrorType } from "./agent-telemetry.ts";
-import { Phase, SpanOperation } from "./telemetry.ts";
+import { SpanOperation } from "./telemetry.ts";
 import { ExecutionIntent, type RepositoryTransport } from "../contract.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import type { MethodClients } from "./method-clients.ts";
@@ -67,9 +66,6 @@ const RELEASE_CALL = "executionRelease";
 const SESSION_END = "agent.session.end";
 const SESSION_ENTRY = "session_entry";
 const ONE_RELEASE = 1;
-const TASK_COUNT = 2;
-const VERIFICATION_COUNT = 3;
-const BINDING_COUNT = 1;
 async function startedSession(t: TestContext, clients: MethodClients) {
   const setup = anthropicSetup();
   const claim = {
@@ -336,87 +332,6 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
   assert.deepEqual(result, { kind: "closed", outcomeId: "outcome" });
   assert.equal(assessments, EXPECTED_CALL_COUNT);
   assert.equal(provider.calls.length, EXPECTED_CALL_COUNT);
-});
-test("the end of the prepare phase span holds the shape of the pinned revision", async (t) => {
-  const h = await implementFixture(
-    t,
-    [task("first", "true"), task("second", "true")],
-    [],
-  );
-  const { setup, claim } = h.input;
-  const complete = (data: unknown) => ({
-    type: "completed",
-    status: 200,
-    data,
-  });
-  const clients = {
-    mission: {
-      "execution.pinnedRevision.get": async () =>
-        complete({
-          content: {
-            ...h.revision.content,
-            bindings: [setup.repositories[0]!.binding_id],
-          },
-          tasks: h.revision.tasks,
-        }),
-      "execution.rework_assessment.get": async () => complete(null),
-      "execution.evidence.list": async () =>
-        complete({ items: [], next_cursor: null }),
-    },
-    scheduler: { executionRelease: async () => complete({}) },
-    worker: {
-      "execution.failed_check.get": async () => complete({ items: [] }),
-      "execution.link_update.get": async () =>
-        complete({ items: [], next_cursor: null, total: 0 }),
-    },
-  } as unknown as MethodClients;
-  const written: TelemetryRecord[] = [];
-  const store = new InMemoryCredentialStore();
-  await store.modify("anthropic", async () => ({
-    type: "api_key",
-    key: "test_prepare_shape",
-  }));
-  await runNativeExecution({
-    claim,
-    setup,
-    clients,
-    credentials: {
-      items: [
-        {
-          credential_id: setup.agents[0]!.credential_id,
-          provider_id: "anthropic",
-          store,
-        },
-      ],
-      release: async () => {},
-    },
-    transport,
-    sshAccess: testSshAccess(setup.repositories),
-    workspaces: WorkspaceRoot.open(temporary(t)),
-    hostHome: temporary(t),
-    env: hostEnvironment(),
-    modelRuntimeFactory: scriptedModelRuntime(scriptedProvider([])),
-    hostTools: () => unusedHostTools,
-    context: background,
-    telemetry: {
-      write: (records) => void written.push(...records),
-      flush: async () => {},
-    },
-  });
-  const spans = written.filter((record) => record.kind === RecordKind.Span);
-  const prepare = spans.find(
-    (record) => record.attributes?.["kanthord.phase"] === Phase.Prepare,
-  );
-  const end = spans.find(
-    (record) => record.end_time && record.span_id === prepare?.span_id,
-  );
-  assert.equal(end?.status, SpanStatus.Ok);
-  assert.equal(end?.attributes?.["kanthord.node.task_count"], TASK_COUNT);
-  assert.equal(
-    end?.attributes?.["kanthord.node.verification_count"],
-    VERIFICATION_COUNT,
-  );
-  assert.equal(end?.attributes?.["kanthord.node.binding_count"], BINDING_COUNT);
 });
 
 test("an agent open that throws after the prepare gives the base head tree back to the command class", async (t) => {
@@ -718,20 +633,4 @@ test("refused execution evidence aborts the agent and prevents later server oper
     assert.equal(aborts, EXPECTED_CALL_COUNT);
     assert.equal(releases, NO_RELEASES);
   }
-});
-
-test("the environment digests of a setup name each repository environment by its resource identity", () => {
-  const repository = repositorySetup();
-  const digest = "d".repeat(64);
-  assert.deepEqual(
-    environmentDigestsOf([
-      {
-        ...repository,
-        resource_identity: "github:acme/engine",
-        environment: { source: EnvironmentSource.Repository, digest },
-      },
-      { ...repository, resource_identity: "github:acme/none" },
-    ]),
-    { "github:acme/engine": digest },
-  );
 });

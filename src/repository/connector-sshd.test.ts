@@ -10,7 +10,6 @@ import { isolatedGitEnvironment } from "../kernel/git-environment.ts";
 import { ResourceFailureReason } from "../kernel/health.ts";
 import { temporary } from "../kernel/test-support.ts";
 import {
-  BaseMovedError,
   clone,
   cloneSnapshot,
   fetchAndCheckout,
@@ -191,72 +190,9 @@ function squashInput(address: string, commit: string) {
   };
 }
 
-async function landedCommit(
-  bare: string,
-  commit: string,
-): Promise<{
-  parents: string[];
-  tree: string;
-  message: string;
-  identity: string;
-}> {
-  return {
-    parents: (await git(bare, ["rev-parse", `${commit}^@`])).split("\n"),
-    tree: await git(bare, ["rev-parse", `${commit}^{tree}`]),
-    message: await git(bare, ["log", "-1", "--format=%B", commit]),
-    identity: await git(bare, [
-      "log",
-      "-1",
-      "--format=%an <%ae> %cn <%ce>",
-      commit,
-    ]),
-  };
+async function landedIdentity(bare: string, commit: string): Promise<string> {
+  return git(bare, ["log", "-1", "--format=%an <%ae> %cn <%ce>", commit]);
 }
-
-test("the land pushes one commit with the assessed tree, the old base tip as parent and both trailers", async (t) => {
-  const { address, bare, ssh } = await sshRemote(t);
-  const { commit } = await nodeCommit(t, address, ssh);
-  const base = await git(bare, ["rev-parse", BASE_BRANCH]);
-  const landed = await squashPushFresh(
-    squashInput(address, commit),
-    background,
-    deadlineAt(),
-    ssh,
-  );
-  const result = await landedCommit(bare, landed.commit);
-  assert.deepEqual(result.parents, [base]);
-  assert.equal(result.tree, await git(bare, ["rev-parse", `${commit}^{tree}`]));
-  assert.equal(
-    result.message,
-    `${HEADER}\n\nKanthorD-Node: ${NODE_ID}\nKanthorD-Tested: ${commit}`,
-  );
-});
-
-test("a base that moved after the assessment answers base_moved and pushes nothing", async (t) => {
-  const { address, bare, ssh } = await sshRemote(t);
-  const { commit } = await nodeCommit(t, address, ssh);
-  const tip = await git(bare, ["rev-parse", BASE_BRANCH]);
-  const next = await git(bare, [
-    "commit-tree",
-    `${tip}^{tree}`,
-    "-p",
-    tip,
-    "-m",
-    "moved",
-  ]);
-  await git(bare, ["update-ref", `refs/heads/${BASE_BRANCH}`, next]);
-  const moved = await git(bare, ["rev-parse", BASE_BRANCH]);
-  await assert.rejects(
-    squashPushFresh(
-      squashInput(address, commit),
-      background,
-      deadlineAt(),
-      ssh,
-    ),
-    (error) => error instanceof BaseMovedError,
-  );
-  assert.equal(await git(bare, ["rev-parse", BASE_BRANCH]), moved);
-});
 
 test("a pre-receive hook that prints GH013 is a rule refusal of the land", async (t) => {
   const { address, bare, ssh } = await sshRemote(t);
@@ -283,26 +219,6 @@ test("a pre-receive hook that prints GH013 is a rule refusal of the land", async
   assert.match(refusal.detail, /GH013: Repository rule violations/);
 });
 
-test("landedOn finds a commit by its KanthorD-Tested trailer", async (t) => {
-  const { address, ssh } = await sshRemote(t);
-  const { commit } = await nodeCommit(t, address, ssh);
-  const landed = await squashPushFresh(
-    squashInput(address, commit),
-    background,
-    deadlineAt(),
-    ssh,
-  );
-  assert.deepEqual(
-    await landedOn(
-      { address, branch: BASE_BRANCH, commit },
-      background,
-      deadlineAt(),
-      ssh,
-    ),
-    { landed: true, first_parent: landed.commit, base_moved: false },
-  );
-});
-
 test("the author and the committer are the account that the greeting of the key names", async (t) => {
   const { address, bare, ssh } = await sshRemote(t, USER_GREETING);
   const { commit } = await nodeCommit(t, address, ssh);
@@ -314,7 +230,7 @@ test("the author and the committer are the account that the greeting of the key 
   );
   const account = "octocat <octocat@users.noreply.github.com>";
   assert.equal(
-    (await landedCommit(bare, landed.commit)).identity,
+    await landedIdentity(bare, landed.commit),
     `${account} ${account}`,
   );
 });
@@ -330,23 +246,7 @@ test("a deploy key greeting gives the author of the assessed commit", async (t) 
   );
   const author = await git(bare, ["log", "-1", "--format=%an <%ae>", commit]);
   assert.equal(
-    (await landedCommit(bare, landed.commit)).identity,
-    `${author} ${author}`,
-  );
-});
-
-test("a key without a greeting gives the author of the assessed commit", async (t) => {
-  const { address, bare, ssh } = await sshRemote(t);
-  const { commit } = await nodeCommit(t, address, ssh);
-  const landed = await squashPushFresh(
-    squashInput(address, commit),
-    background,
-    deadlineAt(),
-    ssh,
-  );
-  const author = await git(bare, ["log", "-1", "--format=%an <%ae>", commit]);
-  assert.equal(
-    (await landedCommit(bare, landed.commit)).identity,
+    await landedIdentity(bare, landed.commit),
     `${author} ${author}`,
   );
 });

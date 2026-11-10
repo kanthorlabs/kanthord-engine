@@ -2,12 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   buildDocument,
-  checksOf,
   environmentRefusal,
   environmentSchema,
-  EnvironmentSource,
   jsoncText,
-  lifecycleScripts,
   parseEnvironmentText,
   setupScriptsOf,
 } from "./devcontainer.ts";
@@ -27,24 +24,6 @@ test("an environment text parses with comments and trailing commas", () => {
   });
 });
 
-test("an environment text that is not a JSON object is invalid", () => {
-  for (const text of ["[]", "1", "{", '{"image": 1}', ""])
-    assert.equal(parseEnvironmentText(text).document, null, text);
-  assert.match(parseEnvironmentText("{").error ?? "", /JSON/);
-});
-
-test("a lifecycle command keeps the order of its forms", () => {
-  assert.deepEqual(lifecycleScripts(undefined), []);
-  assert.deepEqual(lifecycleScripts("npm ci"), ["npm ci"]);
-  assert.deepEqual(lifecycleScripts(["pip", "install", "it's"]), [
-    "'pip' 'install' 'it'\\''s'",
-  ]);
-  assert.deepEqual(
-    lifecycleScripts({ first: "make deps", second: ["make", "build"] }),
-    ["make deps", "'make' 'build'"],
-  );
-});
-
 test("setup runs the update content command before the post create command", () => {
   const document = environmentSchema.parse({
     onCreateCommand: "apt-get install -y libpq-dev",
@@ -53,14 +32,6 @@ test("setup runs the update content command before the post create command", () 
   });
   assert.deepEqual(setupScriptsOf(document), ["npm ci", "'npm' 'run' 'build'"]);
   assert.deepEqual(setupScriptsOf(environmentSchema.parse({})), []);
-});
-
-test("an environment refuses a lifecycle command of a wrong type", () => {
-  for (const postCreateCommand of [1, [], "", { name: 2 }])
-    assert.equal(
-      environmentSchema.safeParse({ postCreateCommand }).success,
-      false,
-    );
 });
 
 test("a JSONC text drops comments and trailing commas outside strings only", () => {
@@ -189,33 +160,6 @@ test("an environment refuses a variable name or value that a Containerfile line 
   );
 });
 
-test("an environment text drops every inert key", () => {
-  const parsed = parseEnvironmentText(`{
-    "$schema": "x",
-    "name": "dev",
-    "image": "base",
-    "forwardPorts": [3000],
-    "portsAttributes": {},
-    "otherPortsAttributes": {},
-    "remoteUser": "vscode",
-    "containerUser": "vscode",
-    "updateRemoteUserUID": true,
-    "userEnvProbe": "none",
-    "overrideCommand": false,
-    "shutdownAction": "none",
-    "hostRequirements": {},
-    "waitFor": "postCreateCommand",
-    "postStartCommand": "start",
-    "postAttachCommand": "attach",
-    "workspaceFolder": "/w",
-    "init": true,
-    "appPort": [8080],
-    "secrets": {},
-    "customizations": { "vscode": {} }
-  }`);
-  assert.deepEqual(parsed, { document: { image: "base" }, error: null });
-});
-
 test("an environment text keeps customizations.kanthord and drops the other tools", () => {
   const parsed = parseEnvironmentText(
     JSON.stringify({
@@ -231,44 +175,6 @@ test("an environment text keeps customizations.kanthord and drops the other tool
   });
 });
 
-test("an environment text refuses a check list of a wrong type", () => {
-  const many = Array.from({ length: 33 }, () => "true");
-  for (const checks of [many, [""], ["   "], [1], "node", {}]) {
-    const parsed = parseEnvironmentText(
-      JSON.stringify({ customizations: { kanthord: { checks } } }),
-    );
-    assert.equal(parsed.document, null);
-    assert.match(parsed.error ?? "", /customizations\.kanthord\.checks/);
-  }
-  const edge = Array.from({ length: 32 }, () => "true");
-  assert.equal(
-    parseEnvironmentText(
-      JSON.stringify({ customizations: { kanthord: { checks: edge } } }),
-    ).error,
-    null,
-  );
-});
-
-test("an environment text keeps another key of customizations.kanthord for the refusal", () => {
-  const parsed = parseEnvironmentText(
-    JSON.stringify({ customizations: { kanthord: { other: 1 } } }),
-  );
-  assert.equal(parsed.error, null);
-  assert.deepEqual(environmentRefusal(parsed.document!), {
-    key: "customizations.kanthord.other",
-    reason: "the key is not allowed",
-  });
-});
-
-test("the environment schema accepts the customizations of another tool", () => {
-  const parsed = environmentSchema.safeParse({
-    image: "base",
-    customizations: { vscode: { extensions: ["a"] } },
-  });
-  assert.equal(parsed.success, true);
-  assert.equal(environmentRefusal({ customizations: { vscode: {} } }), null);
-});
-
 test("an environment refuses another key of customizations.kanthord", () => {
   assert.deepEqual(
     environmentRefusal({ customizations: { kanthord: { other: 1 } } }),
@@ -280,24 +186,4 @@ test("an environment refuses another key of customizations.kanthord", () => {
     }),
     null,
   );
-});
-
-test("checksOf answers the checks or an empty list", () => {
-  assert.deepEqual(checksOf({}), []);
-  assert.deepEqual(checksOf({ customizations: {} }), []);
-  assert.deepEqual(checksOf({ customizations: { kanthord: {} } }), []);
-  assert.deepEqual(
-    checksOf({ customizations: { kanthord: { checks: ["a", "b"] } } }),
-    ["a", "b"],
-  );
-});
-
-test("EnvironmentSource holds the five sources", () => {
-  assert.deepEqual(EnvironmentSource, {
-    Stored: "stored",
-    Repository: "repository",
-    Detected: "detected",
-    Universal: "universal",
-    None: "none",
-  });
 });

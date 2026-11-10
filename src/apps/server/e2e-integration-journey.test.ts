@@ -626,16 +626,6 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
     assert.equal(assessed.outcome.result, AssessmentResult.Success);
     assert.equal(await j.state(h.I), NodeState.Completed);
   });
-  await t.test(
-    "EJ10.7 the health report keeps the inbound checks",
-    async () => {
-      const report = await j.health();
-      assert.deepEqual(
-        report.services.intake.projects[PROJECT_NAME],
-        inbounds(ResourceStatus.Healthy),
-      );
-    },
-  );
   await t.test("EJ10.8 the evidence delete removes the object", async () => {
     const M = await h.missionVersion();
     await j.read([

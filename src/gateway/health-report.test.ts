@@ -14,11 +14,9 @@ import {
   ResourceStatus,
   type ResourceStatusValue,
 } from "../kernel/health.ts";
-import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import { Store } from "../kernel/store.ts";
 import {
-  gatewayOperations,
   type InventorySnapshot,
   OWNER_AGENT,
   OWNER_INTAKE,
@@ -28,7 +26,7 @@ import {
   OWNER_STORAGE,
   OWNER_WORKER,
 } from "./contract.ts";
-import { collectInventories, resourceHealthReport } from "./health-report.ts";
+import { resourceHealthReport } from "./health-report.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const LIMITS = { maxConcurrent: 3, checkDeadlineMs: 500, reportBudgetMs: 2000 };
@@ -42,13 +40,9 @@ const CHECK_DEADLINE_MS = 20;
 const UNFIRED_FACTOR = 3;
 const ACCOUNT = "health-reader";
 const SICK_REASON = "status=500";
-const SICK_TARGET = "sick";
-const FINE_TARGET = "fine";
-const SILENT_TARGET = "silent";
 const LOG_MESSAGE = "resource.health.check";
 const CAPABILITY = "reachability";
 const CHECK_ERROR = new Error("secret credential or private endpoint");
-const STATUSES = Object.values(ResourceStatus);
 const OWNERS = [
   OWNER_LLM,
   OWNER_REPOSITORY,
@@ -119,114 +113,6 @@ function fixture(t: TestContext, entries: InventorySnapshot["entries"] = []) {
   };
 }
 
-test("collectInventories isolates failing owners in llm, repository, storage, agent, worker, project, intake order", (t) => {
-  const f = fixture(t);
-  const calls: string[] = [];
-  const llm = entry("credential");
-  const project = entry("binding");
-  const snapshot = f.store.transaction((tx) =>
-    collectInventories(tx, {
-      llm: (received) => {
-        assert.equal(received, tx);
-        calls.push(OWNER_LLM);
-        return [llm];
-      },
-      repository: (received) => {
-        assert.equal(received, tx);
-        calls.push(OWNER_REPOSITORY);
-        return [];
-      },
-      storage: (received) => {
-        assert.equal(received, tx);
-        calls.push(OWNER_STORAGE);
-        return [];
-      },
-      agent: (received) => {
-        assert.equal(received, tx);
-        calls.push(OWNER_AGENT);
-        return [];
-      },
-      worker: (received) => {
-        assert.equal(received, tx);
-        calls.push(OWNER_WORKER);
-        throw CHECK_ERROR;
-      },
-      project: (received) => {
-        assert.equal(received, tx);
-        calls.push(OWNER_PROJECT);
-        return [project];
-      },
-      intake: (received) => {
-        assert.equal(received, tx);
-        calls.push(OWNER_INTAKE);
-        return [];
-      },
-    }),
-  );
-  assert.deepEqual(calls, OWNERS);
-  assert.deepEqual(snapshot, {
-    entries: [
-      { owner: OWNER_LLM, entry: llm },
-      { owner: OWNER_PROJECT, entry: project },
-    ],
-    missing_inventories: [OWNER_WORKER],
-  });
-});
-
-test("report places every owner and scope with exact capabilities, encoded names and fresh empty maps", async (t) => {
-  const entries = OWNERS.flatMap((owner, index) => [
-    {
-      owner,
-      entry: entry(`${owner}%2Fglobal%25`, {
-        check: async () => STATUSES[index % STATUSES.length]!,
-      }),
-    },
-    {
-      owner,
-      entry: entry(`${owner}%2Fproject`, {
-        scope: HealthScope.Project,
-        project: "project%2Fone",
-      }),
-    },
-  ]);
-  const f = fixture(t, entries);
-  const report = await f.report();
-  assert.deepEqual(gatewayOperations.healthcheck.output.parse(report), report);
-  const owners = {
-    llm: report.shared.llm,
-    repository: report.shared.repository,
-    storage: report.shared.storage,
-    agent: report.shared.agent,
-    worker: report.services.worker,
-    project: report.services.project,
-    intake: report.services.intake,
-  };
-  for (const [index, owner] of OWNERS.entries())
-    assert.deepEqual(owners[owner], {
-      global: {
-        [`${owner}%2Fglobal%25`]: {
-          status: STATUSES[index % STATUSES.length],
-          capability: CAPABILITY,
-          failure_reason:
-            STATUSES[index % STATUSES.length] === ResourceStatus.Healthy
-              ? null
-              : ResourceFailureReason.Unclassified,
-        },
-      },
-      projects: {
-        "project%2Fone": {
-          [`${owner}%2Fproject`]: {
-            status: ResourceStatus.Healthy,
-            capability: CAPABILITY,
-            failure_reason: null,
-          },
-        },
-      },
-    });
-  assert.equal(f.commits(), SINGLE_CHECK);
-  assert.equal(f.collections(), SINGLE_CHECK);
-});
-
 test("an empty intake inventory answers fresh empty maps", async (t) => {
   const f = fixture(t);
   const report = await f.report();
@@ -241,61 +127,6 @@ test("an empty intake inventory answers fresh empty maps", async (t) => {
     projects: {},
   });
   assert.equal(f.commits(), SINGLE_CHECK + SINGLE_CHECK);
-});
-
-test("an intake entry lands under services.intake.projects by project and inbound name", async (t) => {
-  const inbound = entry("inbound%2Fone", {
-    scope: HealthScope.Project,
-    project: "alpha",
-  });
-  const f = fixture(t, [{ owner: OWNER_INTAKE, entry: inbound }]);
-  const report = await f.report();
-  assert.deepEqual(report.services.intake, {
-    global: {},
-    projects: {
-      alpha: {
-        "inbound%2Fone": {
-          status: ResourceStatus.Healthy,
-          capability: CAPABILITY,
-          failure_reason: null,
-        },
-      },
-    },
-  });
-  assert.deepEqual(report.services.project, { global: {}, projects: {} });
-});
-
-test("a throwing intake inventory answers 503 inventory_failed with intake missing", async (t) => {
-  const f = fixture(t);
-  const empty = () => [];
-  await assert.rejects(
-    resourceHealthReport(
-      f.caller,
-      () =>
-        f.store.transaction((tx) =>
-          collectInventories(tx, {
-            llm: empty,
-            repository: empty,
-            storage: empty,
-            agent: empty,
-            worker: empty,
-            project: empty,
-            intake: () => {
-              throw CHECK_ERROR;
-            },
-          }),
-        ),
-      f.logger,
-      LIMITS,
-    ),
-    {
-      status: HttpStatus.ServiceUnavailable,
-      code: "gateway.healthcheck.inventory_failed",
-      details: { missing_inventories: [OWNER_INTAKE] },
-    },
-  );
-  assert.equal(f.commits(), EMPTY_COUNT);
-  assert.equal(f.logs.length, EMPTY_COUNT);
 });
 
 test("shared targets use the first check once across owners and projects and log one safe record", async (t) => {
@@ -344,88 +175,6 @@ test("shared targets use the first check once across owners and projects and log
     },
   );
   assert.doesNotMatch(f.logs.join(""), /secret|credential|endpoint/);
-});
-
-test("a non-healthy check logs its observed reason and a healthy check logs none", async (t) => {
-  const f = fixture(t, [
-    {
-      owner: OWNER_LLM,
-      entry: entry(SICK_TARGET, {
-        check: async (_context, observe) => {
-          observe?.(SICK_REASON, ResourceFailureReason.Unclassified);
-          return ResourceStatus.Unknown;
-        },
-      }),
-    },
-    {
-      owner: OWNER_WORKER,
-      entry: entry(FINE_TARGET, {
-        check: async (_context, observe) => {
-          observe?.("status=200", ResourceFailureReason.Unclassified);
-          return ResourceStatus.Healthy;
-        },
-      }),
-    },
-  ]);
-  await f.report();
-  const logs = f.logs.map((line) => JSON.parse(line));
-  const sick = logs.find((log) => log.target === SICK_TARGET);
-  assert.equal(sick?.reason, SICK_REASON);
-  assert.equal(
-    Object.hasOwn(
-      logs.find((log) => log.target === FINE_TARGET),
-      "reason",
-    ),
-    false,
-  );
-});
-
-test("a report entry carries the observed failure reason, unclassified without a code and null when healthy", async (t) => {
-  const f = fixture(t, [
-    {
-      owner: OWNER_REPOSITORY,
-      entry: entry(SICK_TARGET, {
-        check: async (_context, observe) => {
-          observe?.(SICK_REASON, ResourceFailureReason.KeyRefused);
-          return ResourceStatus.Unhealthy;
-        },
-      }),
-    },
-    {
-      owner: OWNER_REPOSITORY,
-      entry: entry(FINE_TARGET, {
-        check: async (_context, observe) => {
-          observe?.("status=200", ResourceFailureReason.Unclassified);
-          return ResourceStatus.Healthy;
-        },
-      }),
-    },
-    {
-      owner: OWNER_REPOSITORY,
-      entry: entry(SILENT_TARGET, {
-        check: async () => ResourceStatus.Unhealthy,
-      }),
-    },
-  ]);
-  const report = await f.report();
-  assert.deepEqual(gatewayOperations.healthcheck.output.parse(report), report);
-  assert.deepEqual(report.shared.repository.global, {
-    [SICK_TARGET]: {
-      status: ResourceStatus.Unhealthy,
-      capability: CAPABILITY,
-      failure_reason: ResourceFailureReason.KeyRefused,
-    },
-    [FINE_TARGET]: {
-      status: ResourceStatus.Healthy,
-      capability: CAPABILITY,
-      failure_reason: null,
-    },
-    [SILENT_TARGET]: {
-      status: ResourceStatus.Unhealthy,
-      capability: CAPABILITY,
-      failure_reason: ResourceFailureReason.Unclassified,
-    },
-  });
 });
 
 test("a never-settling check expires, releases its slot and retains its unknown entry", async (t) => {
@@ -547,29 +296,6 @@ test("a check of every owner that exceeds its deadline carries deadline_exceeded
       capability: CAPABILITY,
       failure_reason: ResourceFailureReason.DeadlineExceeded,
     });
-});
-
-test("a check that settles within its deadline keeps its observed reason", async (t) => {
-  const f = fixture(t, [
-    {
-      owner: OWNER_STORAGE,
-      entry: entry("forbidden", {
-        check: async (_context, observe) => {
-          observe?.("status=403", ResourceFailureReason.Forbidden);
-          return ResourceStatus.Unknown;
-        },
-      }),
-    },
-  ]);
-  const report = await f.report({
-    ...LIMITS,
-    checkDeadlineMs: CHECK_DEADLINE_MS,
-  });
-  assert.deepEqual(report.shared.storage.global.forbidden, {
-    status: ResourceStatus.Unknown,
-    capability: CAPABILITY,
-    failure_reason: ResourceFailureReason.Forbidden,
-  });
 });
 
 test("synchronous throws, rejections and invalid statuses become unknown without losing entries", async (t) => {

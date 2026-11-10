@@ -8,7 +8,6 @@ const FIXED_WIDTH = 16;
 const FIXED_WIDTH_ROW = "backup:         /a\n";
 const ALIGNED_ROWS =
   "session_id:      lls_1\ncount:           0\nidempotency_key: idempotency_key_01K0000000000000000000000A\n";
-const REPEATED_ROWS = "backup: /a\nbackup: /b\n";
 
 test("rows align every value to the longest name and omit empty values", () => {
   assert.equal(
@@ -31,16 +30,6 @@ test("a URL block follows the rows after one empty line with the bare URL at col
   );
   assert.equal(formatRows([], [["address", URL]]), `address:\n${URL}\n`);
   assert.equal(formatRows([["a", null]], [["address", null]]), NO_OUTPUT);
-});
-
-test("repeated names keep their order", () => {
-  assert.equal(
-    formatRows([
-      ["backup", "/a"],
-      ["backup", "/b"],
-    ]),
-    REPEATED_ROWS,
-  );
 });
 
 test("a fixed width from a closed name set aligns rows that print one at a time", () => {

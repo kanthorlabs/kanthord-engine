@@ -39,6 +39,7 @@ import {
   frozenStore,
   insideRefreshWindow,
   refreshWatch,
+  type RefreshWatch,
 } from "./refresh-watch.ts";
 
 export const GITHUB_COPILOT_TOKEN_URL =
@@ -126,6 +127,14 @@ export function statusOfErrorMessage(
   return match ? Number(match[1]) : null;
 }
 
+interface HttpProbe {
+  url: string;
+  headers: Record<string, string>;
+  readModels: boolean;
+  signal: AbortSignal;
+  observe?: ResourceObserver;
+}
+
 async function httpCheck(
   url: string,
   headers: Record<string, string>,
@@ -136,40 +145,7 @@ async function httpCheck(
   try {
     const { signal } = context;
     if (signal.aborted) return UNREACHABLE;
-    const response = await globalThis.fetch(url, {
-      method: HttpMethod.Get,
-      headers,
-      signal,
-      redirect: "manual",
-    });
-    if (!response.ok || !readModels) {
-      await response.body?.cancel();
-      if (signal.aborted) return UNREACHABLE;
-      if (response.ok) return OK_WITHOUT_MODELS;
-      observe?.(
-        `status=${response.status}`,
-        failureReasonOfStatus(response.status),
-      );
-      return {
-        connection: connectionOfStatus(response.status),
-        models: null,
-      };
-    }
-    const body: unknown = await response.json().catch(() => MALFORMED_BODY);
-    if (signal.aborted) return UNREACHABLE;
-    const list = openAIModelListSchema.safeParse(body);
-    if (!list.success) {
-      observe?.("model list malformed", ResourceFailureReason.InvalidResponse);
-      return INVALID_RESPONSE;
-    }
-    return {
-      connection: Connection.Ok,
-      models: list.data.data.map((model) => ({
-        id: model.id,
-        owned_by: model.owned_by ?? null,
-        created: model.created ?? null,
-      })),
-    };
+    return await probeHttp({ url, headers, readModels, signal, observe });
   } catch (error) {
     observe?.(
       thrownReason(error, headerSecrets(headers)),
@@ -177,6 +153,58 @@ async function httpCheck(
     );
     return UNREACHABLE;
   }
+}
+
+async function probeHttp(probe: HttpProbe): Promise<ProviderCheckAnswer> {
+  const { url, headers, readModels, signal } = probe;
+  const response = await globalThis.fetch(url, {
+    method: HttpMethod.Get,
+    headers,
+    signal,
+    redirect: "manual",
+  });
+  if (!response.ok || !readModels) return answerWithoutModels(response, probe);
+  return answerWithModels(response, probe);
+}
+
+async function answerWithoutModels(
+  response: Response,
+  probe: HttpProbe,
+): Promise<ProviderCheckAnswer> {
+  const { signal, observe } = probe;
+  await response.body?.cancel();
+  if (signal.aborted) return UNREACHABLE;
+  if (response.ok) return OK_WITHOUT_MODELS;
+  observe?.(
+    `status=${response.status}`,
+    failureReasonOfStatus(response.status),
+  );
+  return {
+    connection: connectionOfStatus(response.status),
+    models: null,
+  };
+}
+
+async function answerWithModels(
+  response: Response,
+  probe: HttpProbe,
+): Promise<ProviderCheckAnswer> {
+  const { signal, observe } = probe;
+  const body: unknown = await response.json().catch(() => MALFORMED_BODY);
+  if (signal.aborted) return UNREACHABLE;
+  const list = openAIModelListSchema.safeParse(body);
+  if (!list.success) {
+    observe?.("model list malformed", ResourceFailureReason.InvalidResponse);
+    return INVALID_RESPONSE;
+  }
+  return {
+    connection: Connection.Ok,
+    models: list.data.data.map((model) => ({
+      id: model.id,
+      owned_by: model.owned_by ?? null,
+      created: model.created ?? null,
+    })),
+  };
 }
 
 export async function checkGitHubCopilot(
@@ -293,66 +321,22 @@ type ModelCallCheck = {
   refreshStore?: CredentialStore;
 };
 
+interface ModelCallRun {
+  signal: AbortSignal;
+  watch: RefreshWatch;
+  observe?: ResourceObserver;
+}
+
 async function modelCallCheck(
   check: ModelCallCheck,
   context: Context,
   observe?: ResourceObserver,
 ): Promise<ProviderCheckAnswer> {
-  const { providerId, modelId, credential, options, call, refreshStore } =
-    check;
   const watch = refreshWatch();
   try {
     const { signal } = context;
     if (signal.aborted) return UNREACHABLE;
-    const model = getBuiltinModels(providerId).find(({ id }) => id === modelId);
-    if (!model) {
-      observe?.("check model not found", ResourceFailureReason.Unclassified);
-      return INVALID_RESPONSE;
-    }
-    const credentials = watch.wrap(
-      refreshStore ?? frozenStore(providerId, credential),
-    );
-    let responseStatus: number | null = null;
-    const reply = await call(
-      model,
-      {
-        messages: [
-          {
-            role: "user",
-            content: MODEL_CALL_CHECK_PROMPT,
-            timestamp: Date.now(),
-          },
-        ],
-      },
-      {
-        ...options,
-        signal,
-        onResponse: ({ status }) => {
-          responseStatus = status;
-        },
-      },
-      credentials,
-    );
-    if (signal.aborted) return UNREACHABLE;
-    if (watch.refreshFailed()) {
-      observe?.(
-        ACCESS_TOKEN_REFRESH_FAILED_REASON,
-        ResourceFailureReason.Unauthorized,
-      );
-      return UNAUTHORIZED;
-    }
-    const secrets = [...check.secrets, ...watch.secrets()];
-    if (!MODEL_CALL_FAILURES.includes(reply.stopReason))
-      return OK_WITHOUT_MODELS;
-    const status = refusedStatus(responseStatus, reply.errorMessage);
-    observe?.(
-      failureReason(reply, secrets),
-      status === null
-        ? ResourceFailureReason.Unreachable
-        : failureReasonOfStatus(status),
-    );
-    if (status === null) return UNREACHABLE;
-    return { connection: connectionOfStatus(status), models: null };
+    return await runModelCall(check, { signal, watch, observe });
   } catch (error) {
     observe?.(
       thrownReason(error, [...check.secrets, ...watch.secrets()]),
@@ -360,6 +344,97 @@ async function modelCallCheck(
     );
     return UNREACHABLE;
   }
+}
+
+async function runModelCall(
+  check: ModelCallCheck,
+  run: ModelCallRun,
+): Promise<ProviderCheckAnswer> {
+  const { providerId, modelId, credential, refreshStore } = check;
+  const { signal, watch, observe } = run;
+  const model = getBuiltinModels(providerId).find(({ id }) => id === modelId);
+  if (!model) {
+    observe?.("check model not found", ResourceFailureReason.Unclassified);
+    return INVALID_RESPONSE;
+  }
+  const credentials = watch.wrap(
+    refreshStore ?? frozenStore(providerId, credential),
+  );
+  const outcome = await requestModelReply(check, model, {
+    signal,
+    credentials,
+  });
+  if (signal.aborted) return UNREACHABLE;
+  if (watch.refreshFailed()) {
+    observe?.(
+      ACCESS_TOKEN_REFRESH_FAILED_REASON,
+      ResourceFailureReason.Unauthorized,
+    );
+    return UNAUTHORIZED;
+  }
+  const secrets = [...check.secrets, ...watch.secrets()];
+  return answerOfModelReply(outcome, { secrets, observe });
+}
+
+interface ModelRequest {
+  signal: AbortSignal;
+  credentials: CredentialStore;
+}
+
+interface ModelReplyOutcome {
+  reply: AssistantMessage;
+  responseStatus: number | null;
+}
+
+async function requestModelReply(
+  check: ModelCallCheck,
+  model: Model<Api>,
+  request: ModelRequest,
+): Promise<ModelReplyOutcome> {
+  let responseStatus: number | null = null;
+  const reply = await check.call(
+    model,
+    {
+      messages: [
+        {
+          role: "user",
+          content: MODEL_CALL_CHECK_PROMPT,
+          timestamp: Date.now(),
+        },
+      ],
+    },
+    {
+      ...check.options,
+      signal: request.signal,
+      onResponse: ({ status }) => {
+        responseStatus = status;
+      },
+    },
+    request.credentials,
+  );
+  return { reply, responseStatus };
+}
+
+interface ModelReplyAnswer {
+  secrets: readonly string[];
+  observe?: ResourceObserver;
+}
+
+function answerOfModelReply(
+  outcome: ModelReplyOutcome,
+  answer: ModelReplyAnswer,
+): ProviderCheckAnswer {
+  const { reply, responseStatus } = outcome;
+  if (!MODEL_CALL_FAILURES.includes(reply.stopReason)) return OK_WITHOUT_MODELS;
+  const status = refusedStatus(responseStatus, reply.errorMessage);
+  answer.observe?.(
+    failureReason(reply, answer.secrets),
+    status === null
+      ? ResourceFailureReason.Unreachable
+      : failureReasonOfStatus(status),
+  );
+  if (status === null) return UNREACHABLE;
+  return { connection: connectionOfStatus(status), models: null };
 }
 
 export interface CodexCredential {

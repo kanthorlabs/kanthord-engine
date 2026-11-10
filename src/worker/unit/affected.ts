@@ -137,50 +137,64 @@ const floorSchema = z.strictObject({
   total_seconds: z.number().finite().nonnegative().nullable(),
 });
 
-export const affectedReportSchema = z
-  .strictObject({
-    version: z.union([
-      z.literal(REPORT_VERSION_ONE),
-      z.literal(REPORT_VERSION_TWO),
-    ]),
-    selection: z.enum(AffectedSelection),
-    reason: boundedString(REASON_MAX_BYTES)
-      .regex(NON_BLANK, NON_BLANK_MESSAGE)
-      .nullable(),
-    tests: z.array(boundedString(STRING_MAX_BYTES)).max(LIST_MAX_ENTRIES),
-    failed: z.array(testIdSchema).max(LIST_MAX_ENTRIES),
-    flaky: z.array(testIdSchema).max(LIST_MAX_ENTRIES),
-    excluded_e2e: z
-      .array(boundedString(STRING_MAX_BYTES))
-      .max(LIST_MAX_ENTRIES),
-    floor: floorSchema.optional(),
-  })
-  .superRefine((report, context) => {
-    const issue = (path: string, message: string) =>
+const affectedReportBase = z.strictObject({
+  version: z.union([
+    z.literal(REPORT_VERSION_ONE),
+    z.literal(REPORT_VERSION_TWO),
+  ]),
+  selection: z.enum(AffectedSelection),
+  reason: boundedString(REASON_MAX_BYTES)
+    .regex(NON_BLANK, NON_BLANK_MESSAGE)
+    .nullable(),
+  tests: z.array(boundedString(STRING_MAX_BYTES)).max(LIST_MAX_ENTRIES),
+  failed: z.array(testIdSchema).max(LIST_MAX_ENTRIES),
+  flaky: z.array(testIdSchema).max(LIST_MAX_ENTRIES),
+  excluded_e2e: z.array(boundedString(STRING_MAX_BYTES)).max(LIST_MAX_ENTRIES),
+  floor: floorSchema.optional(),
+});
+type ReportFields = z.infer<typeof affectedReportBase>;
+type IssueRaiser = (path: string, message: string) => void;
+
+function checkFloor(report: ReportFields, issue: IssueRaiser): void {
+  if (report.floor !== undefined && report.version === REPORT_VERSION_ONE)
+    issue("floor", "is absent in a version 1 report");
+  if (
+    report.floor?.total_seconds != null &&
+    report.selection !== AffectedSelection.All
+  )
+    issue("floor", "holds total_seconds only for the selection all");
+}
+
+function checkSelection(report: ReportFields, issue: IssueRaiser): void {
+  const needsReason = report.selection === AffectedSelection.All;
+  if (needsReason !== (report.reason !== null))
+    issue("reason", "is nonblank exactly for the selection all");
+  if (
+    report.selection === AffectedSelection.None &&
+    report.tests.length > EMPTY_LENGTH
+  )
+    issue("tests", "is empty for the selection none");
+}
+
+function checkResultLists(report: ReportFields, issue: IssueRaiser): void {
+  const selected = new Set(report.tests);
+  for (const field of ["failed", "flaky"] as const)
+    if (report[field].some((id) => !selected.has(id.file)))
+      issue(field, "holds a file that is not in tests");
+  const failedIds = new Set(report.failed.map(testIdText));
+  if (report.flaky.some((id) => failedIds.has(testIdText(id))))
+    issue("flaky", "holds an id of failed");
+}
+
+export const affectedReportSchema = affectedReportBase.superRefine(
+  (report, context) => {
+    const issue: IssueRaiser = (path, message) =>
       context.addIssue({ code: "custom", path: [path], message });
-    if (report.floor !== undefined && report.version === REPORT_VERSION_ONE)
-      issue("floor", "is absent in a version 1 report");
-    if (
-      report.floor?.total_seconds != null &&
-      report.selection !== AffectedSelection.All
-    )
-      issue("floor", "holds total_seconds only for the selection all");
-    const needsReason = report.selection === AffectedSelection.All;
-    if (needsReason !== (report.reason !== null))
-      issue("reason", "is nonblank exactly for the selection all");
-    if (
-      report.selection === AffectedSelection.None &&
-      report.tests.length > EMPTY_LENGTH
-    )
-      issue("tests", "is empty for the selection none");
-    const selected = new Set(report.tests);
-    for (const field of ["failed", "flaky"] as const)
-      if (report[field].some((id) => !selected.has(id.file)))
-        issue(field, "holds a file that is not in tests");
-    const failedIds = new Set(report.failed.map(testIdText));
-    if (report.flaky.some((id) => failedIds.has(testIdText(id))))
-      issue("flaky", "holds an id of failed");
-  });
+    checkFloor(report, issue);
+    checkSelection(report, issue);
+    checkResultLists(report, issue);
+  },
+);
 export type AffectedReport = z.infer<typeof affectedReportSchema>;
 
 export interface ChangesDocument {

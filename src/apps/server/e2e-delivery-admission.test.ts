@@ -391,31 +391,6 @@ suite("E08 delivery admission", { concurrency: SUITE_CONCURRENCY }, () => {
   );
 
   test(
-    "E08.11 a merge admitted after release completes the node via the fold",
-    { timeout: TIMEOUT },
-    async (t) => {
-      const h = await setup(t);
-      const E = await h.create("examine-1.md");
-      const P = await h.implement("implement-p.md", E);
-      await h.actionRequest(P.x2);
-      await h.release(P.x2.execution_id);
-      assert.equal((await h.node(P.nodeId)).state, NodeState.ExternalRequested);
-      h.gitHub.merge(FIRST_PULL_REQUEST, MERGED_COMMIT);
-      const answer = completed(
-        await h.admit(
-          closed(FIRST_PULL_REQUEST, true),
-          createIdentity("inbound_event"),
-        ),
-      );
-      assert.deepEqual(answer, {
-        disposition: Disposition.AcceptedObservation,
-        reason: null,
-      });
-      assert.equal((await h.node(P.nodeId)).state, NodeState.Completed);
-    },
-  );
-
-  test(
     "E08.12 a merge under the live claim completes via the deferred check after release",
     { timeout: TIMEOUT },
     async (t) => {

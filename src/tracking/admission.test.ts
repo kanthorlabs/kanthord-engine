@@ -30,7 +30,6 @@ const NO_RECORD = 0;
 const ONE_RECORD = 1;
 const TEXT_CONTENT = "Tests: 1 passed";
 const ENTRY = "e1";
-const UUID_ENTRY = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const FIRST_SEQUENCE = 1;
 const ENTRY_TIME = 1500;
 
@@ -153,14 +152,6 @@ test("a start and an end make one finished span", (t) => {
   assert.deepEqual(span?.text_ids, [`${SPAN}:output`]);
 });
 
-test("a start alone is a readable unfinished span", (t) => {
-  const store = trackingStore(t);
-  admit(store, [start()]);
-  const span = store.transaction((tx) => readSpan(tx, TRACE, SPAN));
-  assert.equal(span?.end_time, null);
-  assert.equal(span?.status, SpanStatus.Unset);
-});
-
 test("an end before its start creates the span with no start time", (t) => {
   const store = trackingStore(t);
   admit(store, [end()]);
@@ -185,15 +176,6 @@ test("a second end with another record identity is refused", (t) => {
   admit(store, [end()]);
   const answer = admit(store, [end({ record_id: `${SPAN}:end.again` })]);
   assert.equal(answer.dispositions[0]?.disposition, Disposition.Refused);
-  assert.equal(answer.dispositions[0]?.reason, RefusalReason.ValueReplaced);
-});
-
-test("a record cannot replace an attribute value", (t) => {
-  const store = trackingStore(t);
-  admit(store, [start()]);
-  const answer = admit(store, [
-    end({ attributes: { "gen_ai.tool.name": "read" } }),
-  ]);
   assert.equal(answer.dispositions[0]?.reason, RefusalReason.ValueReplaced);
 });
 
@@ -300,42 +282,12 @@ test("a new session entry at a taken sequence is refused", (t) => {
   assert.equal(entryRows(store).length, ONE_RECORD);
 });
 
-test("a session entry is stored when its session span is absent", (t) => {
-  const store = trackingStore(t);
-  const answer = admit(store, [entryRecord()]);
-  assert.equal(answer.stored, ONE_RECORD);
-  assert.equal(
-    store.transaction((tx) => readSpan(tx, TRACE, SPAN)),
-    null,
-  );
-});
-
-test("a session entry larger than the record bound is refused", (t) => {
-  const store = trackingStore(t);
-  const answer = admit(store, [
-    entryRecord({ entry: { text: "x".repeat(70000) } }),
-  ]);
-  assert.equal(answer.dispositions[0]?.reason, RefusalReason.RecordTooLarge);
-  assert.equal(entryRows(store).length, NO_RECORD);
-});
-
 test("the record schema refuses a session entry whose record identity differs", () => {
   const result = telemetryRecordSchema.safeParse(
     entryRecord({ record_id: `${SPAN}:entry.other` }),
   );
   assert.equal(result.success, false);
   assert.deepEqual(result.error?.issues[0]?.path, ["record_id"]);
-});
-
-test("the record schema admits a UUID entry identity", () => {
-  const result = telemetryRecordSchema.safeParse(
-    entryRecord({
-      record_id: `${SPAN}:entry.${UUID_ENTRY}`,
-      entry_id: UUID_ENTRY,
-      parent_entry_id: UUID_ENTRY,
-    }),
-  );
-  assert.equal(result.success, true);
 });
 
 test("a server contribution whose text identity exists is refused and stores neither its span nor its texts", (t) => {

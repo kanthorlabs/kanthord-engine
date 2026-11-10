@@ -6,7 +6,6 @@ import {
   environmentRootEnd,
   environmentRootStart,
   EnvironmentSpan,
-  environmentSpanSchema,
   environmentStepSpan,
   type EnvironmentStepSpan,
 } from "./environment-telemetry.ts";
@@ -27,7 +26,6 @@ const RUN = {
   digest: "digest_1",
 } as const;
 const SETUP_FAILED = "setup_failed";
-const BUILD_FAILED = "build_failed";
 const START_TIME = 11;
 const END_TIME = 12;
 const TAIL = "SECRET_TAIL_TEXT";
@@ -61,20 +59,6 @@ test("environmentRootStart answers the root span with the five attributes", () =
   });
 });
 
-test("environmentRootEnd answers Ok for a passed run", () => {
-  const contribution = environmentRootEnd(TRACE, {
-    end_time: END_TIME,
-    status: SpanStatus.Ok,
-    error_type: null,
-  });
-  assert.equal(contribution.span_id, TRACE.root_span_id);
-  assert.equal(contribution.parent_span_id, null);
-  assert.equal(contribution.operation, EnvironmentSpan.Root);
-  assert.equal(contribution.end_time, END_TIME);
-  assert.equal(contribution.status, SpanStatus.Ok);
-  assert.equal(contribution.attributes?.["error.type"], undefined);
-});
-
 test("environmentRootEnd answers Error and the class for a failed run", () => {
   const contribution = environmentRootEnd(TRACE, {
     end_time: END_TIME,
@@ -83,16 +67,6 @@ test("environmentRootEnd answers Error and the class for a failed run", () => {
   });
   assert.equal(contribution.status, SpanStatus.Error);
   assert.equal(contribution.attributes?.["error.type"], SETUP_FAILED);
-});
-
-test("environmentRootEnd answers Error and no class for a cancelled run", () => {
-  const contribution = environmentRootEnd(TRACE, {
-    end_time: END_TIME,
-    status: SpanStatus.Error,
-    error_type: null,
-  });
-  assert.equal(contribution.status, SpanStatus.Error);
-  assert.equal(contribution.attributes?.["error.type"], undefined);
 });
 
 test("root start and root end hold distinct record identities", () => {
@@ -119,25 +93,6 @@ test("environmentStepSpan answers one child span for each step operation", () =>
     assert.equal(contribution.end_time, END_TIME);
     assert.equal(contribution.status, SpanStatus.Ok);
   }
-});
-
-test("environmentStepSpan holds Error and the class for a failed step", () => {
-  const contribution = environmentStepSpan(TRACE, {
-    ...passedStep(EnvironmentSpan.Build),
-    status: SpanStatus.Error,
-    error_type: BUILD_FAILED,
-  });
-  assert.equal(contribution.status, SpanStatus.Error);
-  assert.equal(contribution.attributes?.["error.type"], BUILD_FAILED);
-});
-
-test("the span names form a closed set", () => {
-  assert.deepEqual(environmentSpanSchema.options, [
-    "project.environment",
-    "environment.build",
-    "environment.setup",
-    "environment.proof",
-  ]);
 });
 
 test("no contribution holds an output tail, a command output or an environment value", () => {

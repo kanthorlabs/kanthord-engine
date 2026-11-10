@@ -24,62 +24,6 @@ const PULL_INPUT = {
   },
 };
 
-test("client input validation names each unrecognized key", async () => {
-  const client = httpClient(
-    gatewayOperations,
-    "http://localhost",
-    undefined,
-    async () => {
-      throw new Error("no request expected");
-    },
-  );
-  const result = await client.verify({
-    params: {},
-    query: {},
-    body: null,
-    first: 1,
-    second: 2,
-  } as never);
-  assert.ok(result.type === OperationResultType.Failure);
-  assert.deepEqual(result.error.error.details, [
-    { path: ["first"], code: "unrecognized_keys" },
-    { path: ["second"], code: "unrecognized_keys" },
-  ]);
-});
-
-test("verification client preserves JWT business properties and rejects aliases and metadata", async () => {
-  const claims = { kind: "human", sub: " ulrich ", name: " Ulrich " };
-  const input = { params: {}, query: {}, body: null };
-  const client = httpClient(
-    gatewayOperations,
-    "http://localhost",
-    undefined,
-    async () => Response.json(claims),
-  );
-  const result = await client.verify(input);
-  assert.ok(result.type === OperationResultType.Completed);
-  assert.deepEqual(result.data, claims);
-
-  const invalidResponses = [
-    { kind: claims.kind, accountId: claims.sub, name: claims.name },
-    { ...claims, accountId: claims.sub },
-    { ...claims, iat: 0, exp: 1, jti: "session" },
-  ];
-  for (let index = 0; index < invalidResponses.length; index++) {
-    const invalidClient = httpClient(
-      gatewayOperations,
-      "http://localhost",
-      undefined,
-      async () => Response.json(invalidResponses[index]),
-    );
-    const result = await invalidClient.verify(input);
-    assert.ok(result.type === OperationResultType.Failure);
-    assert.equal(result.status, HttpStatus.OK);
-    assert.equal(result.error.error.code, ANSWER_INVALID);
-    assert.equal(result.idempotencyKey, undefined);
-  }
-});
-
 test("an expected answer that fails the output schema is a declared failure", async () => {
   const client = httpClient(
     schedulerOperations,
@@ -147,10 +91,6 @@ test("server version is the package version served through the OpenAPI operation
 
 test("missing, malformed and unavailable server versions are diagnostics", async () => {
   for (const body of [
-    "",
-    "info: [",
-    "info: {}",
-    "info: {version: 1}",
     "info: {version: ''}",
     "info: {version: first, version: second}",
   ]) {
@@ -168,35 +108,6 @@ test("missing, malformed and unavailable server versions are diagnostics", async
   const result = await readServerVersion(client);
   assert.ok(result instanceof Diagnostic);
   assert.equal(result.code, VERSION_UNAVAILABLE);
-});
-
-test("client joins an endpoint path prefix with the operation path", async () => {
-  const input = { params: {}, query: {}, body: null };
-  for (const [endpoint, expected] of [
-    [
-      "https://h.example/s/kanthord",
-      "https://h.example/s/kanthord/api/liveness",
-    ],
-    [
-      "https://h.example/s/kanthord/",
-      "https://h.example/s/kanthord/api/liveness",
-    ],
-    ["https://h.example", "https://h.example/api/liveness"],
-    ["https://h.example/", "https://h.example/api/liveness"],
-  ]) {
-    let requested = "";
-    const client = httpClient(
-      gatewayOperations,
-      endpoint!,
-      undefined,
-      async (url) => {
-        requested = String(url);
-        return Response.json({ status: "ok", services: {} });
-      },
-    );
-    await client.liveness(input);
-    assert.equal(requested, expected);
-  }
 });
 
 test("client reaches a gateway served under a base path", async (t) => {

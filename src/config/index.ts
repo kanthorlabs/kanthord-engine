@@ -124,6 +124,42 @@ function inspectField(
   }
 }
 
+interface InspectScope {
+  readonly prefix: string;
+  readonly issues: string[];
+}
+
+function reportUndeclared(
+  definition: Schema,
+  object: Record<string, unknown>,
+  scope: InspectScope,
+): void {
+  const undeclared = Object.keys(object).filter(
+    (key) => !Object.hasOwn(definition, key),
+  );
+  if (undeclared.length)
+    scope.issues.push(`${scope.prefix || "configuration"}: undeclared field.`);
+}
+
+function inspectEntry(
+  [key, field]: [string, Schema[string]],
+  object: Record<string, unknown>,
+  scope: InspectScope,
+): void {
+  const path = scope.prefix ? `${scope.prefix}.${key}` : key;
+  const supplied = Object.hasOwn(object, key);
+  if (!Object.hasOwn(field, "format")) {
+    inspect(field as Schema, supplied ? object[key] : {}, path, scope.issues);
+    return;
+  }
+  inspectField(
+    field as Field,
+    supplied ? object[key] : (field as Field).default,
+    path,
+    scope.issues,
+  );
+}
+
 function inspect(
   definition: Schema,
   input: unknown,
@@ -144,23 +180,9 @@ function inspect(
     return;
   }
   const object = input as Record<string, unknown>;
-  const undeclared = Object.keys(object).filter(
-    (key) => !Object.hasOwn(definition, key),
-  );
-  if (undeclared.length)
-    issues.push(`${prefix || "configuration"}: undeclared field.`);
-  for (const [key, field] of entries) {
-    const path = prefix ? `${prefix}.${key}` : key;
-    const supplied = Object.hasOwn(object, key);
-    if (Object.hasOwn(field, "format"))
-      inspectField(
-        field as Field,
-        supplied ? object[key] : (field as Field).default,
-        path,
-        issues,
-      );
-    else inspect(field as Schema, supplied ? object[key] : {}, path, issues);
-  }
+  const scope: InspectScope = { prefix, issues };
+  reportUndeclared(definition, object, scope);
+  for (const entry of entries) inspectEntry(entry, object, scope);
 }
 
 export function configVersion(value: unknown): number {

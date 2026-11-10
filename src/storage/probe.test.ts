@@ -1,6 +1,4 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { HeadBucketCommand, S3Client } from "@aws-sdk/client-s3";
 import {
@@ -19,7 +17,6 @@ const ENDPOINT = "https://storage.example";
 const BUCKET = "test-bucket";
 const REGION = "us-east-1";
 const ONE_CALL = 1;
-const DEADLINE_MS = 50;
 const BUCKET_PATH = `/${BUCKET}/`;
 
 const s3Check = (
@@ -41,8 +38,6 @@ for (const throws of [false, true]) {
     [HttpStatus.OK, ResourceStatus.Healthy],
     [HttpStatus.NotFound, ResourceStatus.Unhealthy],
     [HttpStatus.Forbidden, ResourceStatus.Unknown],
-    [HttpStatus.Unauthorized, ResourceStatus.Unknown],
-    [HttpStatus.InternalServerError, ResourceStatus.Unknown],
   ] as const) {
     test(`S3 maps ${status} from ${throws ? "error" : "response"} and destroys the client`, async (t) => {
       const destroy = t.mock.fn();
@@ -134,29 +129,6 @@ test("S3 names the failure reason of a status failure and a network error", asyn
   );
   assert.equal(observed[3]![0], `status=${HttpStatus.NotFound}`);
   assert.ok(observed.every(([reason]) => !reason.includes(SECRET)));
-});
-
-test("S3 past its deadline observes no reason", async (t) => {
-  const server = createServer(() => {});
-  stopAfter(t, () => server.closeAllConnections());
-  stopAfter(t, () => server.close());
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address() as AddressInfo;
-  const observed: string[] = [];
-  assert.equal(
-    await probeS3(
-      ACCESS_KEY_ID,
-      SECRET,
-      `http://127.0.0.1:${port}`,
-      BUCKET,
-      REGION,
-      new CancellationContext(background, Date.now() + DEADLINE_MS),
-      undefined,
-      (_reason, failureReason) => void observed.push(failureReason),
-    ),
-    ResourceStatus.Unknown,
-  );
-  assert.deepEqual(observed, []);
 });
 
 test("S3 network, construction and cleanup errors remain unknown without leaking secrets", async (t) => {

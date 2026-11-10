@@ -55,6 +55,111 @@ async function setUpExamine(
   return result.end;
 }
 
+type ExamineWorkspace = Awaited<
+  ReturnType<StepsInput["workspaces"]["prepareExamine"]>
+>;
+
+interface ExamineContext {
+  input: StepsInput;
+  run: ExecutionRun;
+  revision: Revision;
+  budget: ExecutionBudget;
+  deadline: number;
+}
+
+async function examineVerification(
+  context: ExamineContext,
+  workspace: ExamineWorkspace,
+) {
+  const { input, run, revision, budget } = context;
+  const verification =
+    workspace.tested_input === null
+      ? null
+      : await runVerifications({
+          observe: verificationObserver(
+            run.spans,
+            testedCommitOf(workspace.tested_input),
+            environmentDigestsOf(input.setup.repositories),
+            {
+              context: VerificationContext.Node,
+              ownerOf: () => input.claim.node_id,
+            },
+          ),
+          directory: workspace.directory,
+          commands: revision.content.verifications,
+          tested_input: workspace.tested_input,
+          deadline: budget.wallDeadline(),
+          context: run.operationContext,
+          env: input.env,
+        });
+  run.noteVerification(verification?.results.at(-1)?.timed_out ?? false);
+  return verification;
+}
+
+async function examineWorkspace(
+  context: ExamineContext,
+  workspace: ExamineWorkspace,
+  openAgent: (directory: string) => Promise<NativeAgent>,
+): Promise<ExecutionEnd> {
+  const { input, run, revision, budget, deadline } = context;
+  const { directory, checkouts } = workspace;
+  if (
+    (await setUpExamine(input, run, workspace, deadline)) === SetupEnd.BudgetEnd
+  )
+    return await run.release(true);
+  const current = await readDependencies(run);
+  if (budget.exhausted()) return await run.release(true);
+  const agent = await openAgent(directory);
+  if (agent.budget.exhausted()) return await run.release(true);
+  const work = renderWorkPrompt(input.setup.templates, {
+    node_id: input.claim.node_id,
+    revision: input.claim.pinned_revision,
+    content: revision.content,
+    repositories: workRepositoriesOf(directory, checkouts),
+  });
+  const verification = await examineVerification(context, workspace);
+  await agent.instruct(
+    work,
+    examineInstruction(input.setup.templates, {
+      repositories: workRepositoriesOf(directory, checkouts),
+      verification,
+      dependencies: current.dependencies,
+      outcomes: current.outcomes,
+      evidence: current.evidence,
+    }),
+    PromptTemplate.Examine,
+  );
+  if (agent.budget.exhausted()) return await run.release(true);
+  const assessment = agent.lastText();
+  if (!assessment?.trim()) run.stop(EndReason.ReportAbsent);
+  const report = `${reportFacts(current.dependencies, current.outcomes, verification)}\n\n## Assessment\n\n${assessment}`;
+  await run.submitEvidence(input.claim.node_id, {
+    subject: REPORT_SUBJECT,
+    assets: [
+      {
+        kind: "produced",
+        content: {
+          media_type: REPORT_MEDIA_TYPE,
+          encoding: "base64",
+          data: Buffer.from(report, "utf8").toString("base64"),
+        },
+      },
+    ],
+  });
+  return await run.release(false);
+}
+
+function endedByBudgetExhaustion(
+  context: ExamineContext,
+  error: unknown,
+): boolean {
+  return (
+    (error instanceof ContextCancelled || error instanceof DeadlineExceeded) &&
+    context.budget.exhausted() &&
+    !context.run.operationContext.signal.aborted
+  );
+}
+
 export async function runStepsExamine(
   input: StepsInput,
   run: ExecutionRun,
@@ -77,81 +182,11 @@ export async function runStepsExamine(
     deadlineMs: deadline - Date.now(),
     repositories: input.setup.repositories,
   });
-  const { directory, checkouts } = workspace;
+  const context: ExamineContext = { input, run, revision, budget, deadline };
   try {
-    if (
-      (await setUpExamine(input, run, workspace, deadline)) ===
-      SetupEnd.BudgetEnd
-    )
-      return await run.release(true);
-    const current = await readDependencies(run);
-    if (budget.exhausted()) return await run.release(true);
-    const agent = await openAgent(directory);
-    if (agent.budget.exhausted()) return await run.release(true);
-    const work = renderWorkPrompt(input.setup.templates, {
-      node_id: input.claim.node_id,
-      revision: input.claim.pinned_revision,
-      content: revision.content,
-      repositories: workRepositoriesOf(directory, checkouts),
-    });
-    const verification =
-      workspace.tested_input === null
-        ? null
-        : await runVerifications({
-            observe: verificationObserver(
-              run.spans,
-              testedCommitOf(workspace.tested_input),
-              environmentDigestsOf(input.setup.repositories),
-              {
-                context: VerificationContext.Node,
-                ownerOf: () => input.claim.node_id,
-              },
-            ),
-            directory,
-            commands: revision.content.verifications,
-            tested_input: workspace.tested_input,
-            deadline: budget.wallDeadline(),
-            context: run.operationContext,
-            env: input.env,
-          });
-    run.noteVerification(verification?.results.at(-1)?.timed_out ?? false);
-    await agent.instruct(
-      work,
-      examineInstruction(input.setup.templates, {
-        repositories: workRepositoriesOf(directory, checkouts),
-        verification,
-        dependencies: current.dependencies,
-        outcomes: current.outcomes,
-        evidence: current.evidence,
-      }),
-      PromptTemplate.Examine,
-    );
-    if (agent.budget.exhausted()) return await run.release(true);
-    const assessment = agent.lastText();
-    if (!assessment?.trim()) run.stop(EndReason.ReportAbsent);
-    const report = `${reportFacts(current.dependencies, current.outcomes, verification)}\n\n## Assessment\n\n${assessment}`;
-    await run.submitEvidence(input.claim.node_id, {
-      subject: REPORT_SUBJECT,
-      assets: [
-        {
-          kind: "produced",
-          content: {
-            media_type: REPORT_MEDIA_TYPE,
-            encoding: "base64",
-            data: Buffer.from(report, "utf8").toString("base64"),
-          },
-        },
-      ],
-    });
-    return await run.release(false);
+    return await examineWorkspace(context, workspace, openAgent);
   } catch (error) {
-    if (
-      (error instanceof ContextCancelled ||
-        error instanceof DeadlineExceeded) &&
-      budget.exhausted() &&
-      !run.operationContext.signal.aborted
-    )
-      return await run.release(true);
+    if (endedByBudgetExhaustion(context, error)) return await run.release(true);
     throw error;
   } finally {
     input.workspaces.release(workspace.key, workspace.kind);

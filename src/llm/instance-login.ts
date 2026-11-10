@@ -115,43 +115,55 @@ export class InstanceLogin {
 
   report(body: LoginReportBody, write: (copy: SealedCopy) => void): () => void {
     this.requirePending();
-    const sealed = body.sealed !== undefined || body.sealed_to !== undefined;
-    if (body.state === InstanceLoginState.Completed) {
-      if (
-        body.sealed === undefined ||
-        body.sealed_to === undefined ||
-        this.session.address === null
-      )
-        throw invalidReport();
-      try {
-        write({
-          holder: this.session.holder,
-          sealed: body.sealed,
-          sealed_to: body.sealed_to,
-        });
-      } catch (error) {
-        this.fail(error instanceof OperationError ? error.code : LOGIN_FAILED);
-        throw error;
-      }
-      return () => this.complete();
-    }
-    if (sealed) throw invalidReport();
+    if (body.state === InstanceLoginState.Completed)
+      return this.reportCompleted(body, write);
+    if (body.sealed !== undefined || body.sealed_to !== undefined)
+      throw invalidReport();
     if (body.state === InstanceLoginState.Failed)
       return () => this.fail(body.failure_reason ?? LOGIN_FAILED);
+    return this.reportProgress(body);
+  }
+
+  private reportCompleted(
+    body: LoginReportBody,
+    write: (copy: SealedCopy) => void,
+  ): () => void {
+    if (
+      body.sealed === undefined ||
+      body.sealed_to === undefined ||
+      this.session.address === null
+    )
+      throw invalidReport();
+    try {
+      write({
+        holder: this.session.holder,
+        sealed: body.sealed,
+        sealed_to: body.sealed_to,
+      });
+    } catch (error) {
+      this.fail(error instanceof OperationError ? error.code : LOGIN_FAILED);
+      throw error;
+    }
+    return () => this.complete();
+  }
+
+  private reportProgress(body: LoginReportBody): () => void {
     if (
       body.address !== null &&
       this.session.address !== null &&
       body.address !== this.session.address
     )
       throw invalidReport();
-    return () => {
-      if (!this.pending()) return;
-      if (body.address !== null && this.session.address === null)
-        this.sessions.updateAddress(this.session.id, body.address, body.code);
-      if (body.message !== null)
-        this.sessions.updateLastMessage(this.session.id, body.message);
-      if (this.session.address !== null) this.ready.resolve();
-    };
+    return () => this.applyProgress(body);
+  }
+
+  private applyProgress(body: LoginReportBody): void {
+    if (!this.pending()) return;
+    if (body.address !== null && this.session.address === null)
+      this.sessions.updateAddress(this.session.id, body.address, body.code);
+    if (body.message !== null)
+      this.sessions.updateLastMessage(this.session.id, body.message);
+    if (this.session.address !== null) this.ready.resolve();
   }
 
   complete(): void {

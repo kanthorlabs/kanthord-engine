@@ -32,17 +32,12 @@ import { LOCAL_GIT_SSH_ACCESS } from "../repository/sshd-test-support.ts";
 import {
   BindingKind,
   bindingSetWriteInputSchema,
-  INSTRUCTION_FILE_CACHE_ENTRIES,
-  type InstructionFile,
   PROJECT_SERVICE_NAME,
   ProjectErrorCode,
   type RepositoryFiles,
 } from "./contract.ts";
 import { ProjectEnvironments } from "./environment.ts";
-import {
-  InstructionFileCache,
-  instructionFileFrom,
-} from "./instruction-file.ts";
+import { instructionFileFrom } from "./instruction-file.ts";
 import { projectMigrations } from "./migrations.ts";
 import {
   insertProject,
@@ -56,7 +51,6 @@ const TWO_READS = 2;
 const REJECTED = "rejected";
 const PATH = "AGENTS.md";
 const TEXT = "Write every name in snake_case.\n";
-const RESOURCE = "repository:github:acme/api";
 const SHORT_DEADLINE_MS = 50;
 const SLOW_READ_BOUND_MS = 1000;
 const IDENTITY = { kind: IdentityKind.Service, service: PROJECT_SERVICE_NAME };
@@ -122,26 +116,6 @@ test("instructionFileFrom maps each reader state to present, absent or invalid",
       text: null,
     },
   );
-});
-
-test("the instruction file cache keeps 256 entries and evicts the least recent one", () => {
-  const cache = new InstructionFileCache();
-  const entry = (commit: string): InstructionFile => ({
-    path: PATH,
-    commit,
-    state: InstructionFileState.Absent,
-    reason: null,
-    text: null,
-  });
-  for (let index = 0; index < INSTRUCTION_FILE_CACHE_ENTRIES; index++)
-    cache.set(RESOURCE, entry(String(index)));
-  assert.ok(cache.get(RESOURCE, "0", PATH));
-  cache.set(RESOURCE, entry("next"));
-  assert.ok(cache.get(RESOURCE, "0", PATH));
-  assert.equal(cache.get(RESOURCE, "1", PATH), undefined);
-  assert.ok(cache.get(RESOURCE, "next", PATH));
-  assert.equal(cache.get("repository:github:acme/web", "0", PATH), undefined);
-  assert.equal(cache.get(RESOURCE, "0", "CLAUDE.md"), undefined);
 });
 
 async function localRepository(

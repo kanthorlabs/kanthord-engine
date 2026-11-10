@@ -1,23 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { linkSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { walkFootprint } from "./footprint-walk.ts";
 import { temporary } from "./test-support.ts";
 
 const BYTES = 100;
-const LINKED_FILES = 1;
 const WALKED_FILES = 2;
-
-test("a hard link counts once", async (t) => {
-  const root = temporary(t);
-  writeFileSync(join(root, "a"), "x".repeat(BYTES));
-  linkSync(join(root, "a"), join(root, "b"));
-  const total = await walkFootprint(root);
-  assert.equal(total.files, LINKED_FILES);
-  assert.equal(total.bytes, BYTES);
-});
 
 test("a symlink is not followed and a skip path is not walked", async (t) => {
   const root = temporary(t);

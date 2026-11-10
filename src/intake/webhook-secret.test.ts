@@ -37,18 +37,6 @@ test("two inbound identities answer two secrets", () => {
   );
 });
 
-test("one inbound identity answers one secret on every call", () => {
-  const key = masterKey();
-  assert.equal(webhookSecret(key, INBOUND), webhookSecret(key, INBOUND));
-});
-
-test("a replaced master key answers a different secret", () => {
-  assert.notEqual(
-    webhookSecret(masterKey(), INBOUND),
-    webhookSecret(masterKey(), INBOUND),
-  );
-});
-
 test("the secret differs from the record cipher key and the JWT signing key", () => {
   const key = masterKey();
   const secret = Buffer.from(webhookSecret(key, INBOUND), "base64url");

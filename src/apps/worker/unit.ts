@@ -591,14 +591,23 @@ export class WorkerUnit {
       return (await this.stop()) ?? reasonOf(context.signal);
     const error = await (this.startTask ?? this.start());
     if (error) return (await this.stop()) ?? reasonOf(context.signal) ?? error;
-    const loopError = await lifecycle(async () => {
-      this.running = true;
-      for (const entry of [...this.entries])
-        if (entry.registration && !entry.loop) this.runEntry(entry);
-      if (this.draining && !this.entries.length) this.pulls.cancel();
-      await this.waitLoops();
-      if (this.failure) throw this.failure;
-    });
+    const loopError = await lifecycle(() => this.runEntries());
+    return this.settleLoop(loopError, context);
+  }
+
+  private async runEntries(): Promise<void> {
+    this.running = true;
+    for (const entry of [...this.entries])
+      if (entry.registration && !entry.loop) this.runEntry(entry);
+    if (this.draining && !this.entries.length) this.pulls.cancel();
+    await this.waitLoops();
+    if (this.failure) throw this.failure;
+  }
+
+  private async settleLoop(
+    loopError: Error | null,
+    context: Context,
+  ): Promise<Error | null> {
     const wasStopping = this.shutdown.signal.aborted;
     const stopError = await this.stop();
     return (
