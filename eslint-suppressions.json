@@ -2,9 +2,6 @@
   "src/agent/bash-process.ts": {
     "@typescript-eslint/max-params": {
       "count": 1
-    },
-    "complexity": {
-      "count": 1
     }
   },
   "src/agent/configuration.ts": {
@@ -19,9 +16,6 @@
   },
   "src/agent/hooks/sensitive-text-redaction.ts": {
     "@typescript-eslint/max-params": {
-      "count": 1
-    },
-    "complexity": {
       "count": 1
     }
   },
@@ -41,9 +35,6 @@
   "src/agent/pi-tools.ts": {
     "@typescript-eslint/max-params": {
       "count": 1
-    },
-    "complexity": {
-      "count": 1
     }
   },
   "src/agent/prompt-composer.ts": {
@@ -53,9 +44,6 @@
   },
   "src/agent/prompt-files.ts": {
     "@typescript-eslint/max-params": {
-      "count": 1
-    },
-    "complexity": {
       "count": 1
     }
   },
@@ -77,17 +65,11 @@
   "src/agent/sensitive-text.ts": {
     "@typescript-eslint/max-params": {
       "count": 2
-    },
-    "complexity": {
-      "count": 6
     }
   },
   "src/agent/service.ts": {
     "@typescript-eslint/max-params": {
       "count": 11
-    },
-    "complexity": {
-      "count": 2
     },
     "kanthord/no-inline-param-type": {
       "count": 2
@@ -170,9 +152,6 @@
     }
   },
   "src/apps/cli/shared.ts": {
-    "complexity": {
-      "count": 1
-    },
     "kanthord/no-inline-param-type": {
       "count": 1
     }
@@ -180,11 +159,6 @@
   "src/apps/cli/tracking.ts": {
     "@typescript-eslint/max-params": {
       "count": 5
-    }
-  },
-  "src/apps/cli/upgrade.ts": {
-    "complexity": {
-      "count": 1
     }
   },
   "src/apps/cli/worker-instance.ts": {
@@ -200,9 +174,6 @@
   "src/apps/server/container-runtime.ts": {
     "@typescript-eslint/max-params": {
       "count": 1
-    },
-    "complexity": {
-      "count": 3
     }
   },
   "src/apps/server/environment-host-proof.ts": {
@@ -213,9 +184,6 @@
   "src/apps/server/environment-image.ts": {
     "@typescript-eslint/max-params": {
       "count": 4
-    },
-    "complexity": {
-      "count": 1
     },
     "kanthord/no-inline-param-type": {
       "count": 3
@@ -237,12 +205,6 @@
   "src/apps/server/index.ts": {
     "@typescript-eslint/max-params": {
       "count": 22
-    },
-    "complexity": {
-      "count": 2
-    },
-    "kanthord/no-inline-param-type": {
-      "count": 1
     }
   },
   "src/apps/server/instance-issuer.ts": {
@@ -254,15 +216,7 @@
     "@typescript-eslint/max-params": {
       "count": 2
     },
-    "complexity": {
-      "count": 1
-    },
     "kanthord/no-inline-param-type": {
-      "count": 1
-    }
-  },
-  "src/apps/worker/execution.ts": {
-    "complexity": {
       "count": 1
     }
   },
@@ -274,15 +228,7 @@
       "count": 1
     }
   },
-  "src/apps/worker/index.ts": {
-    "complexity": {
-      "count": 2
-    }
-  },
   "src/apps/worker/instance-config.ts": {
-    "complexity": {
-      "count": 1
-    },
     "kanthord/no-inline-param-type": {
       "count": 1
     }
@@ -290,11 +236,6 @@
   "src/apps/worker/instance-exchange.ts": {
     "@typescript-eslint/max-params": {
       "count": 3
-    }
-  },
-  "src/apps/worker/pull-loop.ts": {
-    "complexity": {
-      "count": 1
     }
   },
   "src/apps/worker/slot.ts": {
@@ -310,9 +251,6 @@
   "src/apps/worker/unit.ts": {
     "@typescript-eslint/max-params": {
       "count": 1
-    },
-    "complexity": {
-      "count": 1
     }
   },
   "src/config/convict.d.ts": {
@@ -323,9 +261,6 @@
   "src/config/index.ts": {
     "@typescript-eslint/max-params": {
       "count": 2
-    },
-    "complexity": {
-      "count": 1
     }
   },
   "src/custody/contract.ts": {
@@ -363,9 +298,6 @@
     "@typescript-eslint/max-params": {
       "count": 33
     },
-    "complexity": {
-      "count": 2
-    },
     "kanthord/no-inline-param-type": {
       "count": 7
     }
@@ -373,11 +305,6 @@
   "src/footprint/alert-store.ts": {
     "@typescript-eslint/max-params": {
       "count": 2
-    }
-  },
-  "src/footprint/alerts.ts": {
-    "complexity": {
-      "count": 1
     }
   },
   "src/footprint/candidates.ts": {
@@ -403,17 +330,11 @@
   "src/footprint/service.ts": {
     "@typescript-eslint/max-params": {
       "count": 5
-    },
-    "complexity": {
-      "count": 6
     }
   },
   "src/gateway/auth/authentication.ts": {
     "@typescript-eslint/max-params": {
       "count": 1
-    },
-    "complexity": {
-      "count": 3
     }
   },
   "src/gateway/auth/jwt.ts": {
@@ -424,16 +345,8 @@
       "count": 5
     }
   },
-  "src/gateway/client-result.ts": {
-    "complexity": {
-      "count": 1
-    }
-  },
   "src/gateway/client.ts": {
     "@typescript-eslint/max-params": {
-      "count": 1
-    },
-    "complexity": {
       "count": 1
     }
   },
@@ -466,39 +379,18 @@
     "@typescript-eslint/max-params": {
       "count": 1
     },
-    "complexity": {
-      "count": 3
-    },
     "kanthord/no-inline-param-type": {
-      "count": 1
-    }
-  },
-  "src/gateway/json.ts": {
-    "complexity": {
-      "count": 1
-    }
-  },
-  "src/gateway/openapi.ts": {
-    "complexity": {
       "count": 1
     }
   },
   "src/gateway/port.ts": {
     "@typescript-eslint/max-params": {
       "count": 2
-    },
-    "complexity": {
-      "count": 1
     }
   },
   "src/gateway/request-log.ts": {
     "@typescript-eslint/max-params": {
       "count": 1
-    }
-  },
-  "src/gateway/service.ts": {
-    "complexity": {
-      "count": 2
     }
   },
   "src/intake/action-check.ts": {
@@ -575,11 +467,8 @@
     }
   },
   "src/intake/jira.ts": {
-    "complexity": {
-      "count": 2
-    },
     "kanthord/no-inline-param-type": {
-      "count": 4
+      "count": 3
     }
   },
   "src/intake/link-read.ts": {
@@ -627,11 +516,8 @@
     }
   },
   "src/intake/slack.ts": {
-    "complexity": {
-      "count": 3
-    },
     "kanthord/no-inline-param-type": {
-      "count": 4
+      "count": 3
     }
   },
   "src/intake/storage-delete.ts": {
@@ -652,44 +538,14 @@
       "count": 1
     }
   },
-  "src/kernel/context.ts": {
-    "complexity": {
-      "count": 1
-    }
-  },
-  "src/kernel/devcontainer.ts": {
-    "complexity": {
-      "count": 2
-    }
-  },
   "src/kernel/errors.ts": {
     "@typescript-eslint/max-params": {
-      "count": 1
-    }
-  },
-  "src/kernel/files.ts": {
-    "complexity": {
-      "count": 1
-    }
-  },
-  "src/kernel/footprint-walk.ts": {
-    "complexity": {
       "count": 1
     }
   },
   "src/kernel/hpke.ts": {
     "@typescript-eslint/max-params": {
       "count": 4
-    }
-  },
-  "src/kernel/json.ts": {
-    "complexity": {
-      "count": 1
-    }
-  },
-  "src/kernel/operation.ts": {
-    "complexity": {
-      "count": 1
     }
   },
   "src/kernel/probe.ts": {
@@ -703,9 +559,6 @@
     }
   },
   "src/kernel/yaml.ts": {
-    "complexity": {
-      "count": 1
-    },
     "kanthord/no-inline-param-type": {
       "count": 1
     }
@@ -717,9 +570,6 @@
   },
   "src/llm/instance-login.ts": {
     "@typescript-eslint/max-params": {
-      "count": 1
-    },
-    "complexity": {
       "count": 1
     }
   },
@@ -736,17 +586,11 @@
   "src/llm/probes.ts": {
     "@typescript-eslint/max-params": {
       "count": 8
-    },
-    "complexity": {
-      "count": 2
     }
   },
   "src/llm/service.ts": {
     "@typescript-eslint/max-params": {
       "count": 4
-    },
-    "complexity": {
-      "count": 2
     },
     "kanthord/no-inline-param-type": {
       "count": 2
@@ -783,17 +627,11 @@
   "src/mission/assessment-submit.ts": {
     "@typescript-eslint/max-params": {
       "count": 2
-    },
-    "complexity": {
-      "count": 1
     }
   },
   "src/mission/authorization.ts": {
     "@typescript-eslint/max-params": {
       "count": 18
-    },
-    "complexity": {
-      "count": 1
     },
     "kanthord/no-inline-param-type": {
       "count": 5
@@ -812,9 +650,6 @@
   "src/mission/content.ts": {
     "@typescript-eslint/max-params": {
       "count": 1
-    },
-    "complexity": {
-      "count": 1
     }
   },
   "src/mission/contract.ts": {
@@ -825,9 +660,6 @@
   "src/mission/control-close.ts": {
     "@typescript-eslint/max-params": {
       "count": 7
-    },
-    "complexity": {
-      "count": 1
     },
     "kanthord/no-inline-param-type": {
       "count": 1
@@ -914,9 +746,6 @@
   "src/mission/evidence-request.ts": {
     "@typescript-eslint/max-params": {
       "count": 1
-    },
-    "complexity": {
-      "count": 1
     }
   },
   "src/mission/evidence-submit.ts": {
@@ -998,9 +827,6 @@
   "src/mission/import-revisions.ts": {
     "@typescript-eslint/max-params": {
       "count": 2
-    },
-    "complexity": {
-      "count": 1
     }
   },
   "src/mission/import-telemetry.ts": {
@@ -1011,9 +837,6 @@
   "src/mission/import.ts": {
     "@typescript-eslint/max-params": {
       "count": 7
-    },
-    "complexity": {
-      "count": 4
     }
   },
   "src/mission/inbox-item.ts": {
@@ -1032,17 +855,11 @@
   "src/mission/link-update-read.ts": {
     "@typescript-eslint/max-params": {
       "count": 3
-    },
-    "complexity": {
-      "count": 1
     }
   },
   "src/mission/node-check.ts": {
     "@typescript-eslint/max-params": {
       "count": 8
-    },
-    "complexity": {
-      "count": 2
     },
     "kanthord/no-inline-param-type": {
       "count": 1
@@ -1079,11 +896,6 @@
       "count": 1
     }
   },
-  "src/mission/parser.ts": {
-    "complexity": {
-      "count": 3
-    }
-  },
   "src/mission/proposal-decide.ts": {
     "@typescript-eslint/max-params": {
       "count": 1
@@ -1110,9 +922,6 @@
   "src/mission/record-read.ts": {
     "@typescript-eslint/max-params": {
       "count": 2
-    },
-    "complexity": {
-      "count": 1
     },
     "kanthord/no-inline-param-type": {
       "count": 1
@@ -1144,29 +953,17 @@
   "src/mission/transitions.ts": {
     "@typescript-eslint/max-params": {
       "count": 5
-    },
-    "complexity": {
-      "count": 1
-    },
-    "kanthord/no-inline-param-type": {
-      "count": 1
     }
   },
   "src/project/contract.ts": {
     "@typescript-eslint/max-params": {
       "count": 3
     },
-    "complexity": {
-      "count": 1
-    },
     "kanthord/no-inline-param-type": {
       "count": 1
     }
   },
   "src/project/environment-agent-tools.ts": {
-    "complexity": {
-      "count": 1
-    },
     "kanthord/no-inline-param-type": {
       "count": 1
     }
@@ -1192,25 +989,16 @@
   "src/project/footprint.ts": {
     "@typescript-eslint/max-params": {
       "count": 1
-    },
-    "complexity": {
-      "count": 1
     }
   },
   "src/project/onboarding.ts": {
     "@typescript-eslint/max-params": {
       "count": 8
-    },
-    "complexity": {
-      "count": 6
     }
   },
   "src/project/service.ts": {
     "@typescript-eslint/max-params": {
       "count": 8
-    },
-    "complexity": {
-      "count": 1
     },
     "kanthord/no-inline-param-type": {
       "count": 10
@@ -1225,9 +1013,6 @@
     "@typescript-eslint/max-params": {
       "count": 4
     },
-    "complexity": {
-      "count": 1
-    },
     "kanthord/no-inline-param-type": {
       "count": 2
     }
@@ -1235,9 +1020,6 @@
   "src/repository/connector.ts": {
     "@typescript-eslint/max-params": {
       "count": 33
-    },
-    "complexity": {
-      "count": 1
     },
     "kanthord/no-inline-param-type": {
       "count": 2
@@ -1252,9 +1034,6 @@
     "@typescript-eslint/max-params": {
       "count": 6
     },
-    "complexity": {
-      "count": 2
-    },
     "kanthord/no-inline-param-type": {
       "count": 14
     }
@@ -1267,14 +1046,6 @@
   "src/repository/ssh-agent.ts": {
     "@typescript-eslint/max-params": {
       "count": 2
-    },
-    "complexity": {
-      "count": 1
-    }
-  },
-  "src/repository/ssh-key.ts": {
-    "complexity": {
-      "count": 1
     }
   },
   "src/repository/ssh-login.ts": {
@@ -1290,9 +1061,6 @@
   "src/scheduler/claim.ts": {
     "@typescript-eslint/max-params": {
       "count": 5
-    },
-    "complexity": {
-      "count": 2
     }
   },
   "src/scheduler/contract.ts": {
@@ -1316,17 +1084,11 @@
   "src/scheduler/release.ts": {
     "@typescript-eslint/max-params": {
       "count": 2
-    },
-    "complexity": {
-      "count": 1
     }
   },
   "src/scheduler/service.ts": {
     "@typescript-eslint/max-params": {
       "count": 4
-    },
-    "complexity": {
-      "count": 1
     }
   },
   "src/scheduler/settlement.ts": {
@@ -1353,9 +1115,6 @@
   "src/scheduler/work-pull.ts": {
     "@typescript-eslint/max-params": {
       "count": 3
-    },
-    "complexity": {
-      "count": 1
     }
   },
   "src/storage/platforms.ts": {
@@ -1366,9 +1125,6 @@
   "src/storage/probe.ts": {
     "@typescript-eslint/max-params": {
       "count": 2
-    },
-    "complexity": {
-      "count": 1
     },
     "kanthord/no-inline-param-type": {
       "count": 1
@@ -1381,9 +1137,6 @@
   },
   "src/tracking/admission.ts": {
     "@typescript-eslint/max-params": {
-      "count": 1
-    },
-    "complexity": {
       "count": 1
     }
   },
@@ -1410,9 +1163,6 @@
   "src/tracking/flow-admission.ts": {
     "@typescript-eslint/max-params": {
       "count": 2
-    },
-    "complexity": {
-      "count": 1
     }
   },
   "src/tracking/flow-backfill.ts": {
@@ -1422,11 +1172,6 @@
   },
   "src/tracking/flow-facts.ts": {
     "@typescript-eslint/max-params": {
-      "count": 1
-    }
-  },
-  "src/tracking/flow-model.ts": {
-    "complexity": {
       "count": 1
     }
   },
@@ -1467,21 +1212,8 @@
     "@typescript-eslint/max-params": {
       "count": 1
     },
-    "complexity": {
-      "count": 2
-    },
     "kanthord/no-inline-param-type": {
       "count": 10
-    }
-  },
-  "src/tracking/timeline.ts": {
-    "complexity": {
-      "count": 1
-    }
-  },
-  "src/tracking/trace-list.ts": {
-    "complexity": {
-      "count": 1
     }
   },
   "src/tracking/trace-store.ts": {
@@ -1495,9 +1227,6 @@
   "src/tracking/trace-summary.ts": {
     "@typescript-eslint/max-params": {
       "count": 1
-    },
-    "complexity": {
-      "count": 1
     }
   },
   "src/workbench/service.ts": {
@@ -1508,9 +1237,6 @@
   "src/worker/action-performer.ts": {
     "@typescript-eslint/max-params": {
       "count": 3
-    },
-    "complexity": {
-      "count": 2
     },
     "kanthord/no-inline-param-type": {
       "count": 1
@@ -1523,12 +1249,6 @@
   },
   "src/worker/authorization.ts": {
     "@typescript-eslint/max-params": {
-      "count": 1
-    },
-    "complexity": {
-      "count": 1
-    },
-    "kanthord/no-inline-param-type": {
       "count": 1
     }
   },
@@ -1545,11 +1265,6 @@
       "count": 3
     }
   },
-  "src/worker/footprint.ts": {
-    "complexity": {
-      "count": 1
-    }
-  },
   "src/worker/instance-rows.ts": {
     "kanthord/no-inline-param-type": {
       "count": 2
@@ -1558,9 +1273,6 @@
   "src/worker/instances.ts": {
     "@typescript-eslint/max-params": {
       "count": 5
-    },
-    "complexity": {
-      "count": 1
     },
     "kanthord/no-inline-param-type": {
       "count": 6
@@ -1593,9 +1305,6 @@
     "@typescript-eslint/max-params": {
       "count": 2
     },
-    "complexity": {
-      "count": 1
-    },
     "kanthord/no-inline-param-type": {
       "count": 1
     }
@@ -1617,9 +1326,6 @@
     "@typescript-eslint/max-params": {
       "count": 8
     },
-    "complexity": {
-      "count": 2
-    },
     "kanthord/no-inline-param-type": {
       "count": 4
     }
@@ -1633,9 +1339,6 @@
     "@typescript-eslint/max-params": {
       "count": 2
     },
-    "complexity": {
-      "count": 1
-    },
     "kanthord/no-inline-param-type": {
       "count": 1
     }
@@ -1643,9 +1346,6 @@
   "src/worker/unit/agent-telemetry.ts": {
     "@typescript-eslint/max-params": {
       "count": 2
-    },
-    "complexity": {
-      "count": 1
     }
   },
   "src/worker/unit/base-refresh.ts": {
@@ -1670,9 +1370,6 @@
     "@typescript-eslint/max-params": {
       "count": 5
     },
-    "complexity": {
-      "count": 1
-    },
     "kanthord/no-inline-param-type": {
       "count": 2
     }
@@ -1680,17 +1377,11 @@
   "src/worker/unit/evaluation.ts": {
     "@typescript-eslint/max-params": {
       "count": 5
-    },
-    "complexity": {
-      "count": 2
     }
   },
   "src/worker/unit/execution-run.ts": {
     "@typescript-eslint/max-params": {
       "count": 3
-    },
-    "complexity": {
-      "count": 1
     },
     "kanthord/no-inline-param-type": {
       "count": 1
@@ -1718,9 +1409,6 @@
     "@typescript-eslint/max-params": {
       "count": 1
     },
-    "complexity": {
-      "count": 1
-    },
     "kanthord/no-inline-param-type": {
       "count": 3
     }
@@ -1728,21 +1416,10 @@
   "src/worker/unit/native-agent.ts": {
     "@typescript-eslint/max-params": {
       "count": 1
-    },
-    "complexity": {
-      "count": 1
-    }
-  },
-  "src/worker/unit/node-reads.ts": {
-    "complexity": {
-      "count": 1
     }
   },
   "src/worker/unit/release-gate.ts": {
     "@typescript-eslint/max-params": {
-      "count": 1
-    },
-    "complexity": {
       "count": 1
     }
   },
@@ -1755,9 +1432,6 @@
     "@typescript-eslint/max-params": {
       "count": 4
     },
-    "complexity": {
-      "count": 2
-    },
     "kanthord/no-inline-param-type": {
       "count": 1
     }
@@ -1765,9 +1439,6 @@
   "src/worker/unit/steps-examine.ts": {
     "@typescript-eslint/max-params": {
       "count": 2
-    },
-    "complexity": {
-      "count": 1
     },
     "kanthord/no-inline-param-type": {
       "count": 1
@@ -1781,9 +1452,6 @@
   "src/worker/unit/stop-cause.ts": {
     "@typescript-eslint/max-params": {
       "count": 1
-    },
-    "complexity": {
-      "count": 2
     }
   },
   "src/worker/unit/telemetry.ts": {
@@ -1808,9 +1476,6 @@
   },
   "src/worker/unit/verification.ts": {
     "@typescript-eslint/max-params": {
-      "count": 1
-    },
-    "complexity": {
       "count": 1
     }
   },
