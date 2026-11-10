@@ -6,6 +6,7 @@ const NO_ROUNDS = 0;
 export class DeferredRounds {
   readonly #rounds = new Set<Promise<void>>();
   readonly #timers = new Set<() => void>();
+  readonly #owners = new Map<string, string>();
   #quiescent = false;
 
   get quiescent(): boolean {
@@ -15,6 +16,19 @@ export class DeferredRounds {
   admit(round: Promise<void>): void {
     const tracked = round.finally(() => this.#rounds.delete(tracked));
     this.#rounds.add(tracked);
+  }
+
+  own(key: string, run: string): void {
+    if (this.#quiescent) return;
+    this.#owners.set(key, run);
+  }
+
+  owns(key: string, run: string): boolean {
+    return this.#owners.get(key) === run;
+  }
+
+  release(key: string, run: string): void {
+    if (this.owns(key, run)) this.#owners.delete(key);
   }
 
   arm(delayMs: number, run: () => void): void {
@@ -39,6 +53,7 @@ export class DeferredRounds {
     this.#quiescent = true;
     for (const cancel of this.#timers) cancel();
     this.#timers.clear();
+    this.#owners.clear();
   }
 
   async drain(): Promise<void> {

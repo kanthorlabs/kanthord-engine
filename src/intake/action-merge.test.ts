@@ -87,6 +87,7 @@ const PULL_ROUTE = `GET /repos/owner/pushed/pulls/${PULL_NUMBER}`;
 const MERGE_ROUTE = `PUT /repos/owner/pushed/pulls/${PULL_NUMBER}/merge`;
 const HTTP_OK = 200;
 const HTTP_CONFLICT = 409;
+const HTTP_METHOD_NOT_ALLOWED = 405;
 const ONE_REQUEST = 1;
 const REAL_GIT_DEADLINE_MS = 30_000;
 const REAL_NODE_BRANCH = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -97,6 +98,7 @@ const REQUEST_KEY = "request-key";
 const Platform = {
   Merges: "merges",
   LosesMergeAnswer: "loses_merge_answer",
+  NotMergeable: "not_mergeable",
 } as const;
 type Platform = (typeof Platform)[keyof typeof Platform];
 
@@ -184,6 +186,10 @@ async function gitHubServer(
       const sha = (JSON.parse(requests.at(-1)!.body) as { sha: string }).sha;
       if (sha !== options.head)
         return answer(HTTP_CONFLICT, { message: "Head branch was modified" });
+      if (options.platform === Platform.NotMergeable)
+        return answer(HTTP_METHOD_NOT_ALLOWED, {
+          message: "Pull Request is not mergeable",
+        });
       state.merged = true;
       if (options.platform === Platform.LosesMergeAnswer)
         return request.socket.destroy();
@@ -382,6 +388,19 @@ test("a pull request whose head differs from the tested commit answers final_ref
   assert.equal(
     answer.code,
     GITHUB_RESULT_CODE_PREFIX + ResultClass.FinalRefusal,
+  );
+  assert.equal(h.gitHub.merges(), ONE_REQUEST);
+  assert.equal(h.gitHub.state.merged, false);
+});
+
+test("regression: K118 a 405 merge answer answers retryable_refusal and merges nothing", async (t) => {
+  const h = await harness(t, { platform: Platform.NotMergeable });
+  const answer = await h.merge();
+  assert.ok("class" in answer);
+  assert.equal(answer.class, ResultClass.RetryableRefusal);
+  assert.equal(
+    answer.code,
+    GITHUB_RESULT_CODE_PREFIX + ResultClass.RetryableRefusal,
   );
   assert.equal(h.gitHub.merges(), ONE_REQUEST);
   assert.equal(h.gitHub.state.merged, false);

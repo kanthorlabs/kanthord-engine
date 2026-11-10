@@ -9,12 +9,14 @@ import {
 } from "../custody/contract.ts";
 import { type CallerIdentity, isServiceIdentity } from "../kernel/caller.ts";
 import { commitHeader } from "../kernel/commit-message.ts";
+import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import type { SshAccess } from "../repository/index.ts";
 import {
   GITHUB_RESULT_CODE_PREFIX,
   type GitHubCall,
+  type GitHubFailure,
   type GitHubTarget,
   GitHubTargetKind,
 } from "../repository/github.ts";
@@ -48,6 +50,7 @@ import {
 } from "./outbound.ts";
 
 const EXPIRED_DEADLINE_MS = 0;
+const RETRIED_MERGE_STATUSES: readonly number[] = [HttpStatus.MethodNotAllowed];
 export const FOREIGN_MERGE_ANSWER_MESSAGE =
   "The request key holds the answer of another merge.";
 
@@ -302,14 +305,24 @@ export async function callMergePullRequest(
       merge_method: method.value,
     },
   );
-  if (!answer.ok)
-    return {
-      ok: false,
-      class: answer.class,
-      code: answer.code,
-      message: answer.message,
-    };
+  if (!answer.ok) return mergeRefusal(answer);
   return { ok: true, result: merge };
+}
+
+function mergeRefusal(answer: GitHubFailure): CallAnswer {
+  const resultClass =
+    answer.status !== null && RETRIED_MERGE_STATUSES.includes(answer.status)
+      ? ResultClass.RetryableRefusal
+      : answer.class;
+  return {
+    ok: false,
+    class: resultClass,
+    code: GITHUB_RESULT_CODE_PREFIX + resultClass,
+    message:
+      answer.status === null
+        ? answer.message
+        : `${answer.status} ${answer.message}`,
+  };
 }
 
 export async function readBackMergePullRequest(

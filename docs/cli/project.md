@@ -386,7 +386,7 @@ The key of the action is `<binding name>.<name>`, which the Mission Service free
   - No lock: nothing serializes the lands of two nodes. The remote accepts one push and refuses the other. The refused node follows the up-to-date rule.
   - Refusals: the land reads the stderr of a failed push.
     - A non-fast-forward rejection (`! [rejected]` with `fetch first` or `non-fast-forward`) answers `retryable_refusal`. The rounds of the Mission Service retry it.
-    - A refusal by a branch rule (`GH006`, `GH013` or `protected branch`) answers `final_refusal` with the code `git.push_refused` and the first stderr line in the detail. The rounds stop, and the node stays in `External.Requested`.
+    - A refusal by a branch rule (`GH006`, `GH013` or `protected branch`) answers `final_refusal` with the code `git.push_refused` and the first stderr line in the detail. The rounds stop, and the node stays in `External.Requested`. `kanthord mission node check <node-id>` starts the rounds again.
     - Any other push failure answers `unknown_outcome`. The read-back decides whether the push landed.
   - Ruleset: the ruleset of a `push` target blocks only deletion and force push. A `pull_request` rule or a required check refuses every push. For such a branch, use the action `pull_request` with `landing: kanthord`.
   - Human land: after `git.push_refused`, a human lands the change on the base branch. The human uses a fast-forward of the tested commit, or a commit with the trailer `KanthorD-Tested: <sha>`. Then the human runs `kanthord mission node check <node-id>`. The check finds the tested commit as an ancestor of the base branch, or the trailer, and answers `expected`.

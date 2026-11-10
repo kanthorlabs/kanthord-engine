@@ -75,6 +75,7 @@ export const AuthorizationRefusal = {
   BindingRemoved: "binding_removed",
   ServiceMismatch: "service_mismatch",
   GateFileChanged: "gate_file_changed",
+  ProjectPaused: "project_paused",
 } as const;
 type Refusal = (typeof AuthorizationRefusal)[keyof typeof AuthorizationRefusal];
 
@@ -570,7 +571,7 @@ export function authorizeServiceMerge(
     action,
   );
   if (dependencies.projectPaused(tx, policy.project_id))
-    authorizationRefused(AuthorizationRefusal.ClaimNotLive);
+    authorizationRefused(AuthorizationRefusal.ProjectPaused);
   const { content } = getRevision(tx, node.id, open.node_revision);
   return {
     credential:
