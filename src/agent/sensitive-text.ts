@@ -436,32 +436,41 @@ interface PatternPart {
 
 const FILE_LINE_GROUP = "file";
 
+interface PartMatch {
+  part: PatternPart;
+  match: RegExpExecArray;
+}
+
+function matchRange(match: RegExpExecArray): [number, number] {
+  return (
+    match.indices?.groups?.value ?? [match.index, match.index + match[0].length]
+  );
+}
+
+function matchRule({ part, match }: PartMatch): SensitiveRule {
+  if (part.alternate && match.groups?.[FILE_LINE_GROUP] !== undefined)
+    return part.alternate;
+  return part.rule;
+}
+
+function pushPartMatch(context: ScanContext, found: PartMatch, out: Span[]) {
+  const { part, match } = found;
+  const [start, end] = matchRange(match);
+  const value = context.text.slice(start, end);
+  if (part.excludes?.test(value)) return;
+  const rule = matchRule(found);
+  const secret = match.groups?.password ?? value;
+  if (
+    !accepted(context, { rule, start, end, secret, host: match.groups?.host })
+  )
+    return;
+  pushSpan(out, rule, context.text, start, end);
+}
+
 function findPart(context: ScanContext, part: PatternPart, out: Span[]) {
   if (!lowerIncludes(context, part.literals)) return;
-  for (const match of context.text.matchAll(part.pattern)) {
-    const range = match.indices?.groups?.value ?? [
-      match.index,
-      match.index + match[0].length,
-    ];
-    const value = context.text.slice(range[0], range[1]);
-    const secret = match.groups?.password ?? value;
-    const rule =
-      part.alternate && match.groups?.[FILE_LINE_GROUP] !== undefined
-        ? part.alternate
-        : part.rule;
-    if (part.excludes?.test(value)) continue;
-    if (
-      !accepted(context, {
-        rule,
-        start: range[0],
-        end: range[1],
-        secret,
-        host: match.groups?.host,
-      })
-    )
-      continue;
-    pushSpan(out, rule, context.text, range[0], range[1]);
-  }
+  for (const match of context.text.matchAll(part.pattern))
+    pushPartMatch(context, { part, match }, out);
 }
 
 const TOKEN_PATTERNS: readonly [SensitiveRule, string][] = [
@@ -660,6 +669,68 @@ const DSN_VALUE_CHARACTER = /[^/\s@"'$<]/;
 const DSN_USER_CHARACTER = /[^/\s:@"']/;
 const DSN_HOST_CHARACTER = /[^):\s]/;
 
+function dsnWindowStart(text: string, at: number): number {
+  let windowStart = at;
+  const limit = Math.max(0, at - V);
+  while (
+    windowStart > limit &&
+    DSN_VALUE_CHARACTER.test(text[windowStart - 1]!)
+  )
+    windowStart--;
+  return windowStart;
+}
+
+function dsnHostEnd(text: string, hostStart: number): number {
+  let hostEnd = hostStart;
+  while (
+    hostEnd < text.length &&
+    hostEnd - hostStart < DNS_HOST_MAX_CHARACTERS &&
+    DSN_HOST_CHARACTER.test(text[hostEnd]!)
+  )
+    hostEnd++;
+  return hostEnd;
+}
+
+function hasDsnUser(text: string, colon: number): boolean {
+  let user = colon;
+  while (
+    user > TEXT_START &&
+    colon - user < NM &&
+    DSN_USER_CHARACTER.test(text[user - 1]!)
+  )
+    user--;
+  return user !== colon;
+}
+
+interface DsnAnchor {
+  anchor: string;
+  at: number;
+}
+
+function pushDsnAt(context: ScanContext, found: DsnAnchor, out: Span[]) {
+  const { text } = context;
+  const { anchor, at } = found;
+  const windowStart = dsnWindowStart(text, at);
+  const hostStart = at + anchor.length;
+  const hostEnd = dsnHostEnd(text, hostStart);
+  if (hostEnd === hostStart) return;
+  for (let colon = windowStart; colon + 1 < at; colon++) {
+    if (text[colon] !== COLON) continue;
+    if (!hasDsnUser(text, colon)) continue;
+    if (
+      accepted(context, {
+        rule: SensitiveRule.GoMysqlDsn,
+        start: colon + 1,
+        end: at,
+        secret: text.slice(colon + 1, at),
+        host: text.slice(hostStart, hostEnd),
+      })
+    )
+      pushSpan(out, SensitiveRule.GoMysqlDsn, text, colon + 1, at);
+    break;
+  }
+}
+
 function findGoMysqlDsn(context: ScanContext, out: Span[]) {
   const { text } = context;
   for (const anchor of GO_DSN_ANCHORS) {
@@ -668,46 +739,8 @@ function findGoMysqlDsn(context: ScanContext, out: Span[]) {
       let at = text.indexOf(anchor);
       at !== NO_MATCH;
       at = text.indexOf(anchor, at + 1)
-    ) {
-      let windowStart = at;
-      const limit = Math.max(0, at - V);
-      while (
-        windowStart > limit &&
-        DSN_VALUE_CHARACTER.test(text[windowStart - 1]!)
-      )
-        windowStart--;
-      const hostStart = at + anchor.length;
-      let hostEnd = hostStart;
-      while (
-        hostEnd < text.length &&
-        hostEnd - hostStart < DNS_HOST_MAX_CHARACTERS &&
-        DSN_HOST_CHARACTER.test(text[hostEnd]!)
-      )
-        hostEnd++;
-      if (hostEnd === hostStart) continue;
-      for (let colon = windowStart; colon + 1 < at; colon++) {
-        if (text[colon] !== COLON) continue;
-        let user = colon;
-        while (
-          user > TEXT_START &&
-          colon - user < NM &&
-          DSN_USER_CHARACTER.test(text[user - 1]!)
-        )
-          user--;
-        if (user === colon) continue;
-        if (
-          accepted(context, {
-            rule: SensitiveRule.GoMysqlDsn,
-            start: colon + 1,
-            end: at,
-            secret: text.slice(colon + 1, at),
-            host: text.slice(hostStart, hostEnd),
-          })
-        )
-          pushSpan(out, SensitiveRule.GoMysqlDsn, text, colon + 1, at);
-        break;
-      }
-    }
+    )
+      pushDsnAt(context, { anchor, at }, out);
   }
 }
 
@@ -738,6 +771,56 @@ function lineEndAt(text: string, position: number): number {
   return end === NO_MATCH ? text.length : end;
 }
 
+interface KeyBodyRange {
+  start: number;
+  end: number;
+}
+
+interface KeyBodyRun {
+  runEnd: number;
+  inRun: boolean;
+  bodyStart: number;
+}
+
+interface KeyBodyLine {
+  text: string;
+  position: number;
+  end: number;
+}
+
+function keyBodyRange(start: number, end: number): KeyBodyRange | undefined {
+  if (start === NO_MATCH || end <= start) return undefined;
+  return { start, end };
+}
+
+function takeKeyBodyLine(run: KeyBodyRun, line: KeyBodyLine): boolean {
+  if (BASE64_LINE.test(line.text)) {
+    if (run.bodyStart === NO_MATCH) run.bodyStart = line.position;
+    if (run.inRun) run.runEnd = line.end;
+    return true;
+  }
+  if (BLANK_LINE.test(line.text) || PEM_FIELD_LINE.test(line.text)) {
+    if (run.bodyStart !== NO_MATCH) run.inRun = false;
+    return true;
+  }
+  return false;
+}
+
+function scanKeyBody(text: string, start: number): KeyBodyRange | undefined {
+  const run: KeyBodyRun = { runEnd: start, inRun: true, bodyStart: NO_MATCH };
+  let position = start;
+  while (position < text.length) {
+    const end = lineEndAt(text, position);
+    const line = text.slice(position, end);
+    if (PRIVATE_KEY_HEADER_IN_LINE.test(line)) break;
+    if (PRIVATE_KEY_END_LINE.test(line))
+      return keyBodyRange(run.bodyStart, position - 1);
+    if (!takeKeyBodyLine(run, { text: line, position, end })) break;
+    position = end + 1;
+  }
+  return keyBodyRange(run.bodyStart, run.runEnd);
+}
+
 function privateKeyBody(
   text: string,
   headerEnd: number,
@@ -750,29 +833,8 @@ function privateKeyBody(
   const start = walk.lineEnd + 1;
   if (walk.bodyStart === start) return;
   walk.bodyStart = start;
-  let position = start;
-  let runEnd = start;
-  let inRun = true;
-  let bodyStart = NO_MATCH;
-  while (position < text.length) {
-    const end = lineEndAt(text, position);
-    const line = text.slice(position, end);
-    if (PRIVATE_KEY_HEADER_IN_LINE.test(line)) break;
-    if (PRIVATE_KEY_END_LINE.test(line)) {
-      if (bodyStart !== NO_MATCH && position - 1 > bodyStart)
-        pushSpan(out, SensitiveRule.PrivateKey, text, bodyStart, position - 1);
-      return;
-    }
-    if (BASE64_LINE.test(line)) {
-      if (bodyStart === NO_MATCH) bodyStart = position;
-      if (inRun) runEnd = end;
-    } else if (BLANK_LINE.test(line) || PEM_FIELD_LINE.test(line)) {
-      if (bodyStart !== NO_MATCH) inRun = false;
-    } else break;
-    position = end + 1;
-  }
-  if (bodyStart !== NO_MATCH && runEnd > bodyStart)
-    pushSpan(out, SensitiveRule.PrivateKey, text, bodyStart, runEnd);
+  const body = scanKeyBody(text, start);
+  if (body) pushSpan(out, SensitiveRule.PrivateKey, text, body.start, body.end);
 }
 
 function findPrivateKeys(context: ScanContext, out: Span[]) {
@@ -826,6 +888,44 @@ function segmentEnd(text: string, start: number): number {
   return position;
 }
 
+interface JwtWalk {
+  valid: boolean;
+  position: number;
+  firstEnd: number;
+}
+
+function walkJwtSegments(text: string, start: number): JwtWalk {
+  let position = start;
+  let firstEnd = start;
+  let valid = true;
+  for (let segment = 0; segment < JWT_SEGMENTS && valid; segment++) {
+    const segmentStart = position;
+    if (segment === PAYLOAD_SEGMENT && !text.startsWith(JWT_START, position)) {
+      valid = false;
+      break;
+    }
+    position = segmentEnd(text, position);
+    if (segment === HEADER_SEGMENT) firstEnd = position;
+    if (position - segmentStart < JWT_SEGMENT_MIN_CHARACTERS[segment]!)
+      valid = false;
+    else if (segment < JWT_SEGMENTS - 1) {
+      if (text[position] === SEGMENT_DOT) position++;
+      else valid = false;
+    }
+  }
+  return { valid, position, firstEnd };
+}
+
+function jwtTailEnd(text: string, from: number): number {
+  let position = from;
+  while (
+    text[position] === SEGMENT_DOT &&
+    JWT_SEGMENT_CODES[text.charCodeAt(position + 1)]
+  )
+    position = segmentEnd(text, position + 1);
+  return position;
+}
+
 function findJwt(context: ScanContext, out: Span[]) {
   const { text } = context;
   if (!context.lower.includes(JWT_START.toLowerCase())) return;
@@ -835,38 +935,14 @@ function findJwt(context: ScanContext, out: Span[]) {
     if (start === NO_MATCH) return;
     from = start + 1;
     if (start > TEXT_START && WORD_CODES[text.charCodeAt(start - 1)]) continue;
-    let position = start;
-    let firstEnd = start;
-    let valid = true;
-    for (let segment = 0; segment < JWT_SEGMENTS && valid; segment++) {
-      const segmentStart = position;
-      if (
-        segment === PAYLOAD_SEGMENT &&
-        !text.startsWith(JWT_START, position)
-      ) {
-        valid = false;
-        break;
-      }
-      position = segmentEnd(text, position);
-      if (segment === HEADER_SEGMENT) firstEnd = position;
-      if (position - segmentStart < JWT_SEGMENT_MIN_CHARACTERS[segment]!)
-        valid = false;
-      else if (segment < JWT_SEGMENTS - 1) {
-        if (text[position] === SEGMENT_DOT) position++;
-        else valid = false;
-      }
-    }
-    if (!valid) {
-      from = Math.max(from, firstEnd);
+    const walk = walkJwtSegments(text, start);
+    if (!walk.valid) {
+      from = Math.max(from, walk.firstEnd);
       continue;
     }
-    while (
-      text[position] === SEGMENT_DOT &&
-      JWT_SEGMENT_CODES[text.charCodeAt(position + 1)]
-    )
-      position = segmentEnd(text, position + 1);
-    pushSpan(out, SensitiveRule.Jwt, text, start, position);
-    from = position;
+    const end = jwtTailEnd(text, walk.position);
+    pushSpan(out, SensitiveRule.Jwt, text, start, end);
+    from = end;
   }
 }
 
@@ -981,6 +1057,17 @@ interface IndexedValue {
   rank: number;
 }
 
+interface KeyHit {
+  key: number;
+  start: number;
+  end: number;
+}
+
+interface ScanRun {
+  out: Span[];
+  last: Span | undefined;
+}
+
 class Automaton {
   readonly next: Map<number, number>[] = [new Map()];
   readonly fail: number[] = [0];
@@ -1054,43 +1141,56 @@ class Automaton {
     return this.next.length;
   }
 
+  private advance(from: number, code: number): number {
+    let node = from;
+    let target = ROOT_NODE;
+    while (node !== ROOT_NODE) {
+      const child = this.next[node]!.get(code);
+      if (child !== undefined) {
+        target = child;
+        break;
+      }
+      node = this.fail[node]!;
+    }
+    return node === ROOT_NODE ? this.rootNext[code]! : target;
+  }
+
+  private mergeHit(last: Span, hit: KeyHit) {
+    last.start = Math.min(last.start, hit.start);
+    last.end = Math.max(last.end, hit.end);
+    if (this.rank[hit.key]! < last.rank) {
+      last.rank = this.rank[hit.key]!;
+      last.rule = this.rule[hit.key]!;
+    }
+  }
+
+  private record(run: ScanRun, hit: KeyHit) {
+    const { last } = run;
+    if (last && hit.start <= last.end) {
+      this.mergeHit(last, hit);
+      return;
+    }
+    run.last = {
+      rule: this.rule[hit.key]!,
+      start: hit.start,
+      end: hit.end,
+      value: "",
+      rank: this.rank[hit.key]!,
+    };
+    run.out.push(run.last);
+  }
+
   scan(text: string, out: Span[]) {
     let node = 0;
-    let last: Span | undefined;
+    const run: ScanRun = { out, last: undefined };
     for (let index = 0; index < text.length; index++) {
-      const code = text.charCodeAt(index);
-      let target = ROOT_NODE;
-      while (node !== ROOT_NODE) {
-        const child = this.next[node]!.get(code);
-        if (child !== undefined) {
-          target = child;
-          break;
-        }
-        node = this.fail[node]!;
-      }
-      node = node === ROOT_NODE ? this.rootNext[code]! : target;
+      node = this.advance(node, text.charCodeAt(index));
       if (node === ROOT_NODE) continue;
       const key = this.reach[node] ? node : this.link[node]!;
       if (key === ROOT_NODE) continue;
       const start = index + 1 - this.depth[key]!;
       const end = Math.min(text.length, start + this.reach[key]!);
-      if (last && start <= last.end) {
-        last.start = Math.min(last.start, start);
-        last.end = Math.max(last.end, end);
-        if (this.rank[key]! < last.rank) {
-          last.rank = this.rank[key]!;
-          last.rule = this.rule[key]!;
-        }
-      } else {
-        last = {
-          rule: this.rule[key]!,
-          start,
-          end,
-          value: "",
-          rank: this.rank[key]!,
-        };
-        out.push(last);
-      }
+      this.record(run, { key, start, end });
     }
     for (const span of out) span.value ||= text.slice(span.start, span.end);
   }
@@ -1191,9 +1291,12 @@ export function matcherNodes(matcher: KnownMatcher): number {
   return matcher.state().all.nodes();
 }
 
-function partSpans(text: string, prepared: Prepared, out: Span[]) {
-  const { windows } = prepared;
-  if (!windows.size) return;
+interface PartScan {
+  text: string;
+  windows: Prepared["windows"];
+}
+
+function linePartSpans({ text, windows }: PartScan, out: Span[]) {
   for (let position = 0; position <= text.length;) {
     const hits = windows.get(
       text.slice(position, position + KNOWN_PART_MIN_CHARACTERS),
@@ -1205,6 +1308,9 @@ function partSpans(text: string, prepared: Prepared, out: Span[]) {
     if (lineEnd === NO_MATCH) break;
     position = lineEnd + 1;
   }
+}
+
+function truncatedPartSpans({ text, windows }: PartScan, out: Span[]) {
   for (
     let cut = text.indexOf(TRUNCATION_TEXT);
     cut !== NO_MATCH;
@@ -1221,6 +1327,13 @@ function partSpans(text: string, prepared: Prepared, out: Span[]) {
         out.push(secretSpan(text, cut - length, cut));
     }
   }
+}
+
+function partSpans(text: string, prepared: Prepared, out: Span[]) {
+  const { windows } = prepared;
+  if (!windows.size) return;
+  linePartSpans({ text, windows }, out);
+  truncatedPartSpans({ text, windows }, out);
 }
 
 function secretSpan(text: string, start: number, end: number): Span {

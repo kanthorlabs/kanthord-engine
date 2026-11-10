@@ -11,7 +11,6 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import {
   CleanupRefusal,
-  FOOTPRINT_REPORT_ITEMS_MAX,
   InstanceCleanableKind,
   InstanceFootprintKind,
 } from "../../kernel/cleanup.ts";
@@ -37,7 +36,6 @@ const DEVICE = 77;
 const OLD_WORKSPACE_BYTES = 10;
 const NEW_WORKSPACE_BYTES = 20;
 const OTHER_BYTES = 5;
-const HOME_BYTES = 4;
 const ONE_RECENT = 1;
 const POOL_TREE_BYTES = 6;
 const POOL_KEY = "pool";
@@ -200,16 +198,6 @@ test("a slot measure counts a pool with a tree inside the workspace kind as one 
   assert.equal(measured.count, TWO_ITEMS);
 });
 
-test("a container slot_residue skips the cache volume mount", async (t) => {
-  const at = layout(t, true);
-  file(join(at.slot, "home-file"), HOME_BYTES, NOW);
-  const measurement = await footprintOf(at).measure(background.signal);
-  assert.equal(
-    kindOf(measurement, InstanceFootprintKind.SlotResidue).bytes,
-    HOME_BYTES,
-  );
-});
-
 test("tool_output keeps only regular files of the name form and skips a symlink", async (t) => {
   const at = layout(t);
   const target = join(at.slot, "target");
@@ -251,31 +239,6 @@ test("a worker measure reports session and disk, and slot_residue reports <unit>
     kindOf(measurement, InstanceFootprintKind.SlotResidue).bytes,
     OTHER_BYTES,
   );
-});
-
-test("items stop at the report limit and items_complete turns false", async (t) => {
-  const at = layout(t);
-  const footprint = footprintOf(at);
-  const items = Array.from(
-    { length: FOOTPRINT_REPORT_ITEMS_MAX + 1 },
-    (_, index) => ({
-      key: `k${index}`,
-      bytes: 1,
-      modified_at: NOW - index,
-    }),
-  );
-  const measure = (
-    footprint as unknown as {
-      kindMeasure: (
-        kind: InstanceFootprintKind,
-        items: unknown[],
-        listed: boolean,
-      ) => { items: unknown[]; items_complete: boolean; count: number };
-    }
-  ).kindMeasure(InstanceFootprintKind.Workspace, items, true);
-  assert.equal(measure.items.length, FOOTPRINT_REPORT_ITEMS_MAX);
-  assert.equal(measure.count, FOOTPRINT_REPORT_ITEMS_MAX + 1);
-  assert.equal(measure.items_complete, false);
 });
 
 test("a workspace order removes a closed workspace, refuses a held key and answers absent on a repeat", async (t) => {

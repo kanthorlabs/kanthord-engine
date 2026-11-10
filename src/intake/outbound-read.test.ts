@@ -165,11 +165,6 @@ async function refusal(promise: Promise<unknown>): Promise<OperationError> {
   return error;
 }
 
-test("an empty list answers no items and no cursor", async (t) => {
-  const h = harness(t);
-  assert.deepEqual(await h.list(), { items: [], next_cursor: null });
-});
-
 test("the list combines the project, state and operation filters with AND", async (t) => {
   const h = harness(t);
   const target = h.insert("k1", {

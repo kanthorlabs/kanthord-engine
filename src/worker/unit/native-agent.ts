@@ -249,6 +249,41 @@ function appendPinnedContext(session: AgentSession): void {
   });
 }
 
+type PiRuntime = Awaited<ReturnType<typeof loadPi>>;
+
+interface StartedSessionTrace {
+  sessionId: string | undefined;
+  trace: SessionTrace | undefined;
+}
+
+function startSessionTrace(
+  input: NativeAgentInput,
+  pi: PiRuntime,
+): StartedSessionTrace {
+  if (!input.spans) return { sessionId: undefined, trace: undefined };
+  const key = input.spans.key("session");
+  const sessionId = input.spans.spanIdOf(key);
+  input.spans.start({
+    key,
+    operation: SpanOperation.Session,
+    attributes: {
+      "gen_ai.operation.name": "invoke_agent",
+      "gen_ai.conversation.id": sessionId,
+      "gen_ai.agent.name": input.agent.agent_name,
+      "kanthord.agent.name": input.agent.agent_name,
+      "kanthord.agent.chain_position": input.agent.position,
+      "kanthord.agent.chain_level": input.agent.level,
+      "gen_ai.request.model":
+        input.agent.effective_configuration.model_identifier,
+      [REASONING_EFFORT_ATTRIBUTE]:
+        input.agent.effective_configuration.reasoning_effort,
+      "kanthord.session.format": SessionFormat.Pi,
+      "kanthord.session.format_version": pi.CURRENT_SESSION_VERSION,
+    },
+  });
+  return { sessionId, trace: sessionTrace(input.spans, sessionId) };
+}
+
 export async function openNativeAgent(
   input: NativeAgentInput,
 ): Promise<NativeAgent> {
@@ -272,30 +307,9 @@ export async function openNativeAgent(
     );
     const pins = pinnedLayers();
     const pi = await withDeadline(loadPi(), context);
-    let sessionId: string | undefined;
-    if (input.spans) {
-      const key = input.spans.key("session");
-      sessionId = input.spans.spanIdOf(key);
-      input.spans.start({
-        key,
-        operation: SpanOperation.Session,
-        attributes: {
-          "gen_ai.operation.name": "invoke_agent",
-          "gen_ai.conversation.id": sessionId,
-          "gen_ai.agent.name": input.agent.agent_name,
-          "kanthord.agent.name": input.agent.agent_name,
-          "kanthord.agent.chain_position": input.agent.position,
-          "kanthord.agent.chain_level": input.agent.level,
-          "gen_ai.request.model":
-            input.agent.effective_configuration.model_identifier,
-          [REASONING_EFFORT_ATTRIBUTE]:
-            input.agent.effective_configuration.reasoning_effort,
-          "kanthord.session.format": SessionFormat.Pi,
-          "kanthord.session.format_version": pi.CURRENT_SESSION_VERSION,
-        },
-      });
-      trace = sessionTrace(input.spans, sessionId);
-    }
+    const started = startSessionTrace(input, pi);
+    const { sessionId } = started;
+    trace = started.trace;
     const options = sessionId === undefined ? {} : { id: sessionId };
     const sessionManager = input.sessionRoot
       ? pi.SessionManager.create(

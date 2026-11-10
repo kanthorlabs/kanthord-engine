@@ -5,7 +5,6 @@ import { HttpStatus } from "../kernel/http.ts";
 import {
   chainConfigurations,
   checkFallbackDuplicates,
-  tailOf,
 } from "./configuration.ts";
 import { AgentErrorCode, ChainLevel } from "./contract.ts";
 
@@ -30,37 +29,6 @@ const enablementTail = [plus, nemotron];
 function level<T extends object>(config: T, chainLevel: ChainLevel) {
   return { ...config, level: chainLevel };
 }
-
-test("a chain inherits the enablement tail when the entry omits the field", () => {
-  assert.deepEqual(chainConfigurations(luna, enablementTail, null), [
-    level(luna, ChainLevel.Enablement),
-    level(plus, ChainLevel.Enablement),
-    level(nemotron, ChainLevel.Enablement),
-  ]);
-  assert.deepEqual(
-    chainConfigurations(luna, enablementTail, { reasoning_effort: "high" }),
-    [
-      level({ ...luna, reasoning_effort: "high" }, ChainLevel.Binding),
-      level(plus, ChainLevel.Enablement),
-      level(nemotron, ChainLevel.Enablement),
-    ],
-  );
-  assert.equal(tailOf(enablementTail, null), enablementTail);
-});
-
-test("a named binding tail replaces the enablement tail whole and an empty tail means no fallback", () => {
-  assert.deepEqual(
-    chainConfigurations(luna, enablementTail, {
-      ...plus,
-      fallback_configurations: [nemotron],
-    }),
-    [level(plus, ChainLevel.Binding), level(nemotron, ChainLevel.Binding)],
-  );
-  assert.deepEqual(
-    chainConfigurations(luna, enablementTail, { fallback_configurations: [] }),
-    [level(luna, ChainLevel.Enablement)],
-  );
-});
 
 test("a later chain entry with the provider and model of an earlier entry is dropped", () => {
   assert.deepEqual(

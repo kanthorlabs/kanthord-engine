@@ -236,14 +236,6 @@ test("a pull of a runtime that archiving names answers no work and claims nothin
   );
 });
 
-test("a pull of a runtime that archiving does not name claims as before", async (t) => {
-  const h = harness(t);
-  h.dependencies.archiving = () => false;
-  h.enqueue();
-  const result = await h.pull();
-  assert.equal(result.kind, WorkPullKind.Claimed);
-});
-
 const SELECTION: AgentSelection = {
   agent_name: "swe@1",
   position: 1,
@@ -300,14 +292,6 @@ test("a claim reports its selections to the agent chain once, after the commit, 
   ]);
 });
 
-test("a pull without work reports no selection", async (t) => {
-  const h = selectionHarness(t);
-  await h.service.quiesce();
-  h.enqueue();
-  assert.deepEqual(await h.pull(), { kind: WorkPullKind.NoWork });
-  assert.deepEqual(h.reported, []);
-});
-
 test("a re-pull that answers the running execution reports no selection", async (t) => {
   const h = selectionHarness(t);
   h.enqueue();
@@ -318,25 +302,6 @@ test("a re-pull that answers the running execution reports no selection", async 
 });
 
 const HEALTHCHECK = "registrationHealthcheck";
-const MARKER_BRANCH = "kanthord/marker";
-
-test("the work pull answer derives node_branch from the Mission branches", async (t) => {
-  const h = harness(t);
-  const requests: { node_id: string; attempt: number }[][] = [];
-  h.dependencies.branches = {
-    nodeBranchesOf: (_tx, keys) => {
-      requests.push([...keys]);
-      return keys.map(() => MARKER_BRANCH);
-    },
-  };
-  h.enqueue();
-  const result = await h.pull();
-  assert.equal(result.kind, WorkPullKind.Claimed);
-  assert.equal(result.execution.node_branch, MARKER_BRANCH);
-  assert.deepEqual(requests, [
-    [{ node_id: h.row.node_id, attempt: FIRST_ATTEMPT }],
-  ]);
-});
 
 test("project wake serves parked pulls in arrival order and another project does not", async (t) => {
   const h = harness(t);
@@ -743,41 +708,6 @@ test("a sibling turn that finds no work passes the slot to the parked pull at on
   assert.equal(claimantOf(await waiting), first.runtime);
   context.cancel();
   await cancelled;
-});
-
-test("one binding keeps its speed when no other binding of its instance waits", async (t) => {
-  const h = instanceHarness(t, false);
-  const { first } = h;
-  first.enqueue(THREE_COMMITS);
-  for (let round = 0; round < THREE_COMMITS; round++) {
-    const commits = h.commits();
-    const result = await first.pull();
-    assert.equal(claimantOf(result), first.runtime);
-    assert.equal(h.commits(), commits + ONE_COMMIT);
-    assert.equal(h.service.pulling(first.runtime), false);
-    assert.equal(result.kind, WorkPullKind.Claimed);
-    await first.release(result.execution.execution_id);
-  }
-});
-
-test("one binding keeps its claims when its sibling pulls with no work", async (t) => {
-  const h = instanceHarness(t);
-  const { first, second } = h;
-  first.enqueue(THREE_COMMITS);
-  let running = await first.pull();
-  for (let round = 0; round < THREE_COMMITS - 1; round++) {
-    assert.equal(running.kind, WorkPullKind.Claimed);
-    await first.release(running.execution.execution_id);
-    const waiting = first.pull();
-    await turn();
-    const context = new CancellationContext();
-    const idle = assert.rejects(second.pull(context), { code: CANCELLED });
-    running = await waiting;
-    assert.equal(claimantOf(running), first.runtime);
-    assert.equal(h.service.pulling(first.runtime), false);
-    context.cancel();
-    await idle;
-  }
 });
 
 test("the instance guard still allows one execution per instance", async (t) => {

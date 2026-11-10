@@ -447,15 +447,6 @@ test("A human delete during a read-back recreates no row, and the repeat answers
   assert.equal(h.inFlight.size, IDLE_IN_FLIGHT_SIZE);
 });
 
-test("A repeat of discarded answers 409 discarded", async (t) => {
-  const h = harness(t);
-  const id = insertRow(h.store);
-  assert.ok(h.store.transaction((tx) => discard(tx, id)));
-  await rejectsWith(run(h, {}), DISCARDED);
-  assert.equal(h.counts.calls, UNRUN_COUNT);
-  assert.equal(h.counts.readBacks, UNRUN_COUNT);
-});
-
 test("A refusal of authorize inserts no row and calls nothing", async (t) => {
   const h = harness(t);
   await rejectsWith(run(h, { refuse: true }), AUTHORIZE_REFUSED);

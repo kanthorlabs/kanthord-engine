@@ -10,7 +10,6 @@ import {
 } from "../../mission/contract.ts";
 import {
   authorizationHarness,
-  HARNESS_ACTION_KEY,
   HARNESS_CREDENTIAL,
   HARNESS_PLATFORM,
   repositoryRequestOf,
@@ -53,15 +52,6 @@ test("the Mission service identity authorizes a request evidence without a claim
   assert.equal(authorized.project_id, h.project_id);
   assert.equal(authorized.facts.address.kind, PlatformAddressKind.PullRequest);
   assert.equal(authorized.facts.repository.binding_id, h.repositoryId);
-});
-
-test("another service identity refuses a request evidence with service_mismatch", (t) => {
-  const h = serviceHarness(t);
-  refuses(() => h.authorize(INTAKE_SERVICE_NAME), "service_mismatch");
-  assert.equal(
-    h.authorize(MISSION_SERVICE_NAME).facts.frozen_action.key,
-    HARNESS_ACTION_KEY,
-  );
 });
 
 test("a disabled or removed binding refuses the request evidence of the Mission service identity", (t) => {

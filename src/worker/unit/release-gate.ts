@@ -125,12 +125,16 @@ interface AffectedNote {
   verdict: AffectedVerdict | null;
 }
 
-async function gateRelease(
+interface VerifiedRelease {
+  checked: ReleaseCheck;
+  commands: readonly string[];
+  owners: readonly TaskContent[];
+}
+
+async function verifyRelease(
   state: StepsState,
-  note: AffectedNote,
-): Promise<ReleaseGate> {
-  if ((await refreshAtRelease(state)) === RefreshResult.BudgetEnd)
-    return { kind: ReleaseGateKind.BudgetEnd };
+): Promise<VerifiedRelease | null> {
+  if ((await refreshAtRelease(state)) === RefreshResult.BudgetEnd) return null;
   const commands = verificationCommands(state.revision);
   const owners = commandOwners(state);
   assert.equal(owners.length, commands.length);
@@ -141,7 +145,7 @@ async function gateRelease(
   );
   if (run.outcome === VerificationClass.BudgetEnd) {
     state.agent.budget.wallDeadlineReached();
-    return { kind: ReleaseGateKind.BudgetEnd };
+    return null;
   }
   const stop = infrastructureStop(run) ?? environmentStop(run);
   if (stop) throw stop;
@@ -152,21 +156,24 @@ async function gateRelease(
         command: failure.command,
       })),
     });
-  const affected = checked.affected;
-  note.verdict = affected?.verdict ?? null;
-  const passed =
+  return { checked, commands, owners };
+}
+
+function releasePassed(verified: VerifiedRelease): boolean {
+  const { checked, commands } = verified;
+  return (
     !checked.setup &&
-    verificationPassed(run.verification, commands) &&
-    affected?.verdict !== AffectedVerdict.Failed;
-  state.lastVerification = verificationFactsOf(passed, run.verification);
-  state.run.log("release verified", {
-    commits: state.checkouts.map((checkout) => checkout.head),
-    passed,
-    setup: checked.setup,
-    exit_codes: run.verification.results.map((result) => result.exit_code),
-    ...(affected ? { affected: affected.verdict } : {}),
-  });
-  if (passed) return { kind: ReleaseGateKind.Passed };
+    verificationPassed(checked.run.verification, commands) &&
+    checked.affected?.verdict !== AffectedVerdict.Failed
+  );
+}
+
+function routedRelease(
+  state: StepsState,
+  verified: VerifiedRelease,
+): ReleaseGate {
+  const { checked, owners } = verified;
+  const { run, affected } = checked;
   if (affected?.verdict === AffectedVerdict.Failed)
     return {
       kind: ReleaseGateKind.Routed,
@@ -190,6 +197,36 @@ async function gateRelease(
       run.outputs.at(-1) ?? "",
     ),
   };
+}
+
+function releaseOutcome(
+  state: StepsState,
+  verified: VerifiedRelease,
+  note: AffectedNote,
+): ReleaseGate {
+  const { checked } = verified;
+  const { run, affected } = checked;
+  note.verdict = affected?.verdict ?? null;
+  const passed = releasePassed(verified);
+  state.lastVerification = verificationFactsOf(passed, run.verification);
+  state.run.log("release verified", {
+    commits: state.checkouts.map((checkout) => checkout.head),
+    passed,
+    setup: checked.setup,
+    exit_codes: run.verification.results.map((result) => result.exit_code),
+    ...(affected ? { affected: affected.verdict } : {}),
+  });
+  if (passed) return { kind: ReleaseGateKind.Passed };
+  return routedRelease(state, verified);
+}
+
+async function gateRelease(
+  state: StepsState,
+  note: AffectedNote,
+): Promise<ReleaseGate> {
+  const verified = await verifyRelease(state);
+  if (verified === null) return { kind: ReleaseGateKind.BudgetEnd };
+  return releaseOutcome(state, verified, note);
 }
 
 function firstFailedIndex(run: VerificationRun): number {

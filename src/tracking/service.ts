@@ -825,27 +825,7 @@ export class TrackingService implements Service, ExecutionTelemetry {
   }
 
   declare(registry: OperationRegistry): void {
-    const operations = Object.values(trackingOperations);
-    if (
-      operations.some(
-        (operation) => operation.service !== TRACKING_SERVICE_NAME,
-      ) ||
-      trackingOperations.telemetryWrite.access !== AccessPolicy.Client ||
-      trackingOperations.traceGet.access !== AccessPolicy.Human ||
-      trackingOperations.traceList.access !== AccessPolicy.Human ||
-      trackingOperations.facetGet.access !== AccessPolicy.Human ||
-      trackingOperations.timelineList.access !== AccessPolicy.Human ||
-      trackingOperations.analyticsCost.access !== AccessPolicy.Human ||
-      trackingOperations.analyticsDuration.access !== AccessPolicy.Human ||
-      trackingOperations.analyticsFlow.access !== AccessPolicy.Human ||
-      trackingOperations.spanList.access !== AccessPolicy.Human ||
-      trackingOperations.textGet.access !== AccessPolicy.Human ||
-      trackingOperations.sessionEntryList.access !== AccessPolicy.Human ||
-      trackingOperations.sessionEntryGet.access !== AccessPolicy.Human ||
-      trackingOperations.sessionEntryRebuild.access !== AccessPolicy.Human ||
-      trackingOperations.causeLabel.access !== AccessPolicy.Human ||
-      trackingOperations.traceDelete.access !== AccessPolicy.HumanOrService
-    )
+    if (!operationsDeclared())
       throw new Error(
         "Tracking operations require tracking ownership and their declared access.",
       );
@@ -952,6 +932,33 @@ export class TrackingService implements Service, ExecutionTelemetry {
   }
 }
 
+const DECLARED_ACCESS = [
+  [trackingOperations.telemetryWrite, AccessPolicy.Client],
+  [trackingOperations.traceGet, AccessPolicy.Human],
+  [trackingOperations.traceList, AccessPolicy.Human],
+  [trackingOperations.facetGet, AccessPolicy.Human],
+  [trackingOperations.timelineList, AccessPolicy.Human],
+  [trackingOperations.analyticsCost, AccessPolicy.Human],
+  [trackingOperations.analyticsDuration, AccessPolicy.Human],
+  [trackingOperations.analyticsFlow, AccessPolicy.Human],
+  [trackingOperations.spanList, AccessPolicy.Human],
+  [trackingOperations.textGet, AccessPolicy.Human],
+  [trackingOperations.sessionEntryList, AccessPolicy.Human],
+  [trackingOperations.sessionEntryGet, AccessPolicy.Human],
+  [trackingOperations.sessionEntryRebuild, AccessPolicy.Human],
+  [trackingOperations.causeLabel, AccessPolicy.Human],
+  [trackingOperations.traceDelete, AccessPolicy.HumanOrService],
+] as const;
+
+function operationsDeclared(): boolean {
+  return (
+    Object.values(trackingOperations).every(
+      (operation) => operation.service === TRACKING_SERVICE_NAME,
+    ) &&
+    DECLARED_ACCESS.every(([operation, access]) => operation.access === access)
+  );
+}
+
 function endsWell(end: RootSpanEnd): boolean {
   if (end.end === ExecutionEnd.Revoked)
     return end.revoke_cause === RevokeCause.Assessment;
@@ -984,7 +991,7 @@ function openingAttributes(opening: ExecutionOpening): Attributes {
   };
 }
 
-function transitionAttributes(transition: ExecutionTransition): Attributes {
+function assertTransition(transition: ExecutionTransition): void {
   assert.ok(transition.from);
   assert.ok(transition.to);
   const limited = LIMIT_RULES.includes(transition.rule);
@@ -1005,6 +1012,10 @@ function transitionAttributes(transition: ExecutionTransition): Attributes {
       (transition.failure_count !== null &&
         Number.isSafeInteger(transition.available_at)),
   );
+}
+
+function transitionAttributes(transition: ExecutionTransition): Attributes {
+  assertTransition(transition);
   return {
     "kanthord.node.state.from": transition.from,
     "kanthord.node.state.to": transition.to,

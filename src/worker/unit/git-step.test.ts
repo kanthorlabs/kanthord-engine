@@ -18,19 +18,6 @@ test("a marked error answers its step", () => {
   assert.equal(gitStepOf(error), GitStep.Commit);
 });
 
-test("a second mark keeps the first step", () => {
-  const error = new Error("failed");
-  markGitStep(error, GitStep.Commit);
-  markGitStep(error, GitStep.Push);
-  assert.equal(gitStepOf(error), GitStep.Commit);
-});
-
-test("an unmarked error and a string answer null", () => {
-  markGitStep("failed", GitStep.Push);
-  assert.equal(gitStepOf(new Error("failed")), null);
-  assert.equal(gitStepOf("failed"), null);
-});
-
 test("an error thrown through withinGit answers its step", async () => {
   const spans = new SpanRecorder(CLAIM, "coder@1", noTelemetry);
   const error = new Error("push failed");

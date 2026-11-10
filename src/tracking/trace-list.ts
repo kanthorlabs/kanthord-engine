@@ -78,8 +78,7 @@ interface Condition {
   params: Bound[];
 }
 
-function conditionOf(query: TraceListQuery): Condition {
-  const condition: Condition = { clauses: [], params: [] };
+function addExact(condition: Condition, query: TraceListQuery): void {
   for (const column of EXACT_FILTERS) {
     const value = query[column];
     if (value === undefined) continue;
@@ -98,6 +97,9 @@ function conditionOf(query: TraceListQuery): Condition {
     condition.clauses.push(`${EFFECTIVE_CAUSE_CATEGORY} = ?`);
     condition.params.push(query.cause_category);
   }
+}
+
+function addRange(condition: Condition, query: TraceListQuery): void {
   const text = query.q;
   if (text !== undefined) {
     condition.clauses.push(
@@ -119,6 +121,12 @@ function conditionOf(query: TraceListQuery): Condition {
     condition.clauses.push(`${value} ${operator} ?`);
     condition.params.push(bound);
   }
+}
+
+function conditionOf(query: TraceListQuery): Condition {
+  const condition: Condition = { clauses: [], params: [] };
+  addExact(condition, query);
+  addRange(condition, query);
   return condition;
 }
 

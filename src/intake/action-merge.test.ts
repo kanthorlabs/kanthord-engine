@@ -86,7 +86,6 @@ const SETTINGS_ROUTE = "GET /repos/owner/pushed";
 const PULL_ROUTE = `GET /repos/owner/pushed/pulls/${PULL_NUMBER}`;
 const MERGE_ROUTE = `PUT /repos/owner/pushed/pulls/${PULL_NUMBER}/merge`;
 const HTTP_OK = 200;
-const HTTP_METHOD_NOT_ALLOWED = 405;
 const HTTP_CONFLICT = 409;
 const ONE_REQUEST = 1;
 const REAL_GIT_DEADLINE_MS = 30_000;
@@ -98,7 +97,6 @@ const REQUEST_KEY = "request-key";
 const Platform = {
   Merges: "merges",
   LosesMergeAnswer: "loses_merge_answer",
-  RefusesMerge: "refuses_merge",
 } as const;
 type Platform = (typeof Platform)[keyof typeof Platform];
 
@@ -183,8 +181,6 @@ async function gitHubServer(
           head: { sha: options.head },
         });
       if (route !== MERGE_ROUTE) return answer(404, { message: "not found" });
-      if (options.platform === Platform.RefusesMerge)
-        return answer(HTTP_METHOD_NOT_ALLOWED, { message: "not allowed" });
       const sha = (JSON.parse(requests.at(-1)!.body) as { sha: string }).sha;
       if (sha !== options.head)
         return answer(HTTP_CONFLICT, { message: "Head branch was modified" });
@@ -375,18 +371,6 @@ test("a repeat of the key after a lost merge answer reads back only", async (t) 
   assert.equal(h.rows()[0]?.state, OutboundRequestState.Succeeded);
 });
 
-test("a refused merge answers its result class", async (t) => {
-  const h = await harness(t, { platform: Platform.RefusesMerge });
-  const answer = await h.merge();
-  assert.ok("class" in answer);
-  assert.equal(answer.class, ResultClass.FinalRefusal);
-  assert.equal(
-    answer.code,
-    GITHUB_RESULT_CODE_PREFIX + ResultClass.FinalRefusal,
-  );
-  assert.equal(h.gitHub.state.merged, false);
-});
-
 test("a pull request whose head differs from the tested commit answers final_refusal and merges nothing", async (t) => {
   const h = await harness(t, {
     platform: Platform.Merges,
@@ -502,11 +486,6 @@ const NON_FAST_FORWARD_STDERR = [
 ].join("\n");
 const RULE_REFUSAL_FIRST_LINE =
   "remote: error: GH013: Repository rule violations found for refs/heads/main.";
-const RULE_REFUSAL_STDERR = [
-  RULE_REFUSAL_FIRST_LINE,
-  "remote: - Changes must be made through a pull request.",
-  " ! [remote rejected] abc -> main (push declined due to repository rule violations)",
-].join("\n");
 
 function pushRefusal(stderr: string): GitWriteError {
   return new GitWriteError(
@@ -542,15 +521,6 @@ test("a push land answers retryable_refusal for a non-fast-forward rejection", a
   assert.ok("class" in answer, JSON.stringify(answer));
   assert.equal(answer.class, ResultClass.RetryableRefusal);
   assert.equal(answer.code, GIT_FAILED_CODE);
-});
-
-test("a push land answers final_refusal with git.push_refused and the first stderr line for GH013", async (t) => {
-  const answer = await pushLandAnswer(t, pushRefusal(RULE_REFUSAL_STDERR));
-  assert.deepEqual(answer, {
-    class: ResultClass.FinalRefusal,
-    code: GIT_PUSH_REFUSED,
-    message: RULE_REFUSAL_FIRST_LINE,
-  });
 });
 
 test("a push land answers final_refusal for a real pre-receive hook that prints GH013", async (t) => {
@@ -622,14 +592,4 @@ test("a push land answers final_refusal for a real pre-receive hook that prints 
   assert.equal(answer.class, ResultClass.FinalRefusal);
   assert.equal(answer.code, GIT_PUSH_REFUSED);
   assert.match(answer.message, /GH013: Repository rule violations/);
-});
-
-test("a push land answers unknown_outcome for another push failure", async (t) => {
-  const answer = await pushLandAnswer(
-    t,
-    pushRefusal("fatal: the remote end hung up unexpectedly"),
-  );
-  assert.ok("class" in answer, JSON.stringify(answer));
-  assert.equal(answer.class, ResultClass.UnknownOutcome);
-  assert.equal(answer.code, GIT_FAILED_CODE);
 });

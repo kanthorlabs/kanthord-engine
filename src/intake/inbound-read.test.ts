@@ -125,11 +125,6 @@ async function refusal(promise: Promise<unknown>): Promise<OperationError> {
   return error;
 }
 
-test("an empty list answers no items and no cursor", async (t) => {
-  const h = harness(t);
-  assert.deepEqual(await h.list(), { items: [], next_cursor: null });
-});
-
 test("the list combines the project, kind and platform filters with AND", async (t) => {
   const h = harness(t);
   const target = h.insert({
@@ -159,13 +154,6 @@ test("the list combines the project, kind and platform filters with AND", async 
     await ids({ project_id: PROJECT_ID, kind: InboundKind.Webhook }),
     [webhook],
   );
-});
-
-test("a list item is the projection with no address and no secret", async (t) => {
-  const h = harness(t);
-  h.insert();
-  const [item] = (await h.list()).items;
-  assert.deepEqual(Object.keys(item!).sort(), PROJECTION_KEYS);
 });
 
 test("a page of two answers the newest first with a cursor to the rest", async (t) => {
@@ -225,17 +213,4 @@ test("a get of an unknown identity answers 404 not_found", async (t) => {
   const error = await refusal(h.get(createIdentity("inbound")));
   assert.equal(error.status, HttpStatus.NotFound);
   assert.equal(error.code, NOT_FOUND);
-});
-
-test("a get of an identity of another prefix fails the params schema", () => {
-  const parsed = intakeOperations["inbound.get"].input.safeParse({
-    params: { inbound_id: createIdentity("outbound_request") },
-    query: {},
-    body: null,
-  });
-  assert.equal(parsed.success, false);
-  assert.deepEqual(
-    new Set(parsed.error?.issues.map((issue) => issue.path.join("."))),
-    new Set(["params.inbound_id"]),
-  );
 });

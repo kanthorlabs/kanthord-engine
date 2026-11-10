@@ -181,6 +181,68 @@ async function scanLines(
   return { resolved: entry, tooLarge };
 }
 
+interface SessionScanContext {
+  executions: string;
+  executionsStats: Stats;
+  directory: string;
+  directoryStats: Stats;
+  read: SessionRead;
+  signal: AbortSignal;
+}
+
+async function sessionFileNames(
+  directory: string,
+  suffix: string,
+): Promise<string[]> {
+  try {
+    return (await readdir(directory)).filter((name) => name.endsWith(suffix));
+  } catch (error) {
+    if (isMissing(error)) return [];
+    throw new Unreadable();
+  }
+}
+
+async function scanSessionFile(
+  context: SessionScanContext,
+  handle: FileHandle,
+): Promise<LineScan | null> {
+  const { executions, executionsStats, directory, read, signal } = context;
+  const stats = await handle.stat().catch(() => {
+    throw new Unreadable();
+  });
+  if (!stats.isFile()) return null;
+  await requireSameDirectory(executions, executionsStats);
+  await requireSameDirectory(directory, context.directoryStats);
+  return scanLines(handle, stats.size, read, signal).catch((error: unknown) => {
+    if (signal.aborted) throw error;
+    throw new Unreadable();
+  });
+}
+
+async function scanSessionFiles(
+  context: SessionScanContext,
+  names: readonly string[],
+): Promise<SessionReadResult> {
+  let tooLarge: number | null = null;
+  for (const name of names) {
+    context.signal.throwIfAborted();
+    const handle = await openSessionFile(join(context.directory, name));
+    if (!handle) continue;
+    try {
+      const scan = await scanSessionFile(context, handle);
+      if (scan === null) continue;
+      if (scan.resolved)
+        return { outcome: SessionReadOutcome.Resolved, entry: scan.resolved };
+      tooLarge ??= scan.tooLarge;
+    } finally {
+      await handle.close();
+    }
+  }
+  return tooLarge === null
+    ? { outcome: SessionReadOutcome.EntryAbsent }
+    : { outcome: SessionReadOutcome.TooLarge, bytes: tooLarge };
+}
+
 export async function readSessionFileEntry(
   root: string,
   read: SessionRead,
@@ -201,47 +263,21 @@ export async function readSessionFileEntry(
     if (!executionsStats || !directoryStatsKept)
       return { outcome: SessionReadOutcome.SessionAbsent };
     const suffix = `${SESSION_NAME_SEPARATOR}${read.session_id}${SESSION_FILE_SUFFIX}`;
-    let names: string[];
-    try {
-      names = (await readdir(directory)).filter((name) =>
-        name.endsWith(suffix),
-      );
-    } catch (error) {
-      if (isMissing(error))
-        return { outcome: SessionReadOutcome.SessionAbsent };
-      throw new Unreadable();
-    }
+    const names = await sessionFileNames(directory, suffix);
     if (names.length === START)
       return { outcome: SessionReadOutcome.SessionAbsent };
     options.beforeOpen?.();
-    let tooLarge: number | null = null;
-    for (const name of names) {
-      signal.throwIfAborted();
-      const handle = await openSessionFile(join(directory, name));
-      if (!handle) continue;
-      try {
-        const stats = await handle.stat().catch(() => {
-          throw new Unreadable();
-        });
-        if (!stats.isFile()) continue;
-        await requireSameDirectory(executions, executionsStats);
-        await requireSameDirectory(directory, directoryStatsKept);
-        const scan = await scanLines(handle, stats.size, read, signal).catch(
-          (error: unknown) => {
-            if (signal.aborted) throw error;
-            throw new Unreadable();
-          },
-        );
-        if (scan.resolved)
-          return { outcome: SessionReadOutcome.Resolved, entry: scan.resolved };
-        tooLarge ??= scan.tooLarge;
-      } finally {
-        await handle.close();
-      }
-    }
-    return tooLarge === null
-      ? { outcome: SessionReadOutcome.EntryAbsent }
-      : { outcome: SessionReadOutcome.TooLarge, bytes: tooLarge };
+    return await scanSessionFiles(
+      {
+        executions,
+        executionsStats,
+        directory,
+        directoryStats: directoryStatsKept,
+        read,
+        signal,
+      },
+      names,
+    );
   } catch (error) {
     if (error instanceof Unreadable)
       return { outcome: SessionReadOutcome.Unreadable };
@@ -266,6 +302,14 @@ async function trustedTotal(
   });
 }
 
+function isFirstLink(stats: Stats, seen: Set<string>): boolean {
+  if (stats.nlink <= SINGLE_LINK) return true;
+  const identity = `${stats.dev}:${stats.ino}`;
+  if (seen.has(identity)) return false;
+  seen.add(identity);
+  return true;
+}
+
 async function walkTrusted(
   directory: string,
   kept: Stats,
@@ -287,11 +331,7 @@ async function walkTrusted(
       }
       if (!stats.isFile()) continue;
       newest = Math.max(newest, stats.mtimeMs);
-      if (stats.nlink > SINGLE_LINK) {
-        const identity = `${stats.dev}:${stats.ino}`;
-        if (seen.has(identity)) continue;
-        seen.add(identity);
-      }
+      if (!isFirstLink(stats, seen)) continue;
       bytes += stats.size;
     }
   }

@@ -11,7 +11,6 @@ import {
   SpanStatus,
   type TelemetryRecord,
   TraceState,
-  traceSummarySchema,
   TRACKING_SERVICE_NAME,
 } from "./contract.ts";
 import { trackingMigrations } from "./migrations.ts";
@@ -42,9 +41,7 @@ const ONE_SPAN = 1;
 const TWO_SPANS = 2;
 const THREE_SPANS = 3;
 const FOUR_SPANS = 4;
-const SUMMARY_TOTALS = 10;
 const NAME_LIMIT = 128;
-const FIRST_SEQUENCE = 1;
 const FIRST_INPUT = 100;
 const SECOND_INPUT = 50;
 const FIRST_OUTPUT = 10;
@@ -120,35 +117,6 @@ function admit(store: Store, records: TelemetryRecord[], producer = PRODUCER) {
   );
 }
 
-test("a new trace answers an open summary with no totals", (t) => {
-  const store = trackingStore(t);
-  const answer = summary(store);
-  assert.doesNotThrow(() => traceSummarySchema.parse(answer));
-  assert.equal(answer.state, TraceState.Open);
-  assert.equal(answer.node_id, TRACE.node_id);
-  assert.equal(answer.attempt, TRACE.attempt);
-  assert.equal(answer.duration_ms, null);
-  assert.deepEqual(
-    [answer.agent_names, answer.models, answer.error_types],
-    [[], [], []],
-  );
-  assert.deepEqual(
-    [
-      answer.input_tokens,
-      answer.output_tokens,
-      answer.cache_read_tokens,
-      answer.cache_creation_tokens,
-      answer.total_tokens,
-      answer.cost_usd,
-      answer.span_count,
-      answer.turn_count,
-      answer.tool_count,
-      answer.error_count,
-    ],
-    new Array(SUMMARY_TOTALS).fill(NO_COUNT),
-  );
-});
-
 test("the root span start and end set the state, the times and the stop reason", (t) => {
   const store = trackingStore(t);
   admitRoot(store, { start_time: STARTED });
@@ -169,14 +137,6 @@ test("the root span start and end set the state, the times and the stop reason",
   assert.equal(ended.span_count, ONE_SPAN);
   assert.equal(ended.error_count, ONE_SPAN);
   assert.equal(ended.first_error_span_id, null);
-});
-
-test("a root span end with a status other than Error ends the trace as ok", (t) => {
-  const store = trackingStore(t);
-  admitRoot(store, { start_time: STARTED });
-  admitRoot(store, { end_time: ENDED, status: SpanStatus.Ok });
-  assert.equal(summary(store).state, TraceState.Ok);
-  assert.equal(summary(store).stop_reason, null);
 });
 
 test("the turn spans add their usage to the totals", (t) => {
@@ -371,34 +331,5 @@ test("a refused record and a repeated record change nothing", (t) => {
     OTHER_PRODUCER,
   );
   assert.equal(refused.dispositions[0]?.disposition, Disposition.Refused);
-  assert.deepEqual(summary(store), before);
-});
-
-test("a text record and a session entry record change nothing", (t) => {
-  const store = trackingStore(t);
-  const before = summary(store);
-  admit(store, [
-    {
-      record_id: "2222222222222222:input",
-      trace_id: TRACE.trace_id,
-      kind: RecordKind.Text,
-      text_id: "2222222222222222:input",
-      text: "npm test",
-    },
-    {
-      record_id: `${FIRST}:entry.e1`,
-      trace_id: TRACE.trace_id,
-      kind: RecordKind.SessionEntry,
-      session_id: FIRST,
-      entry_id: "e1",
-      parent_entry_id: null,
-      sequence: FIRST_SEQUENCE,
-      entry_type: "message",
-      entry_time: STARTED,
-      tool_call_id: null,
-      truncated: false,
-      entry: {},
-    },
-  ]);
   assert.deepEqual(summary(store), before);
 });

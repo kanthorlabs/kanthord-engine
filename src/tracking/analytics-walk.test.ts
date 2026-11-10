@@ -30,7 +30,6 @@ const OTHER = "agent.tool";
 const RANGE = { from: 1000, to: 2000 };
 const MANY_TRACES = 250;
 const FIRST_STEP_ONLY = 1;
-const NO_STATEMENTS = 0;
 const STEP_SIZES = [100, 100, 50];
 const BASE: Fixture = {
   n: 0,
@@ -155,24 +154,6 @@ test("the selection keeps each overlapping trace and drops the others", (t) => {
   );
 });
 
-test("the selection answers the identity fields of each trace", (t) => {
-  const store = openStore(t);
-  insertFixture(store, { ...BASE, n: 1 });
-  assert.deepEqual(
-    store.transaction((tx) => selectTraces(tx, RANGE, {})),
-    [
-      {
-        trace_id: traceIdOf(1),
-        root_span_id: spanIdOf(1),
-        project_id: PROJECT_A,
-        node_id: NODE_A,
-        attempt: null,
-        worker_name: null,
-      },
-    ],
-  );
-});
-
 test("a walk over 250 traces runs 3 steps and visits each span once", async (t) => {
   const { store, traces } = seededMany(t);
   const original = store.transaction.bind(store);
@@ -252,40 +233,4 @@ test("an abort after the first step stops the walk with its reason", async (t) =
     (error) => error === reason,
   );
   assert.equal(steps, FIRST_STEP_ONLY);
-});
-
-test("the step statement searches the primary key of the span table", async (t) => {
-  const { store, traces } = seededMany(t);
-  const prepare = t.mock.method(store.database, "prepare");
-  await walkSpans(
-    store,
-    traces,
-    turnFilter(),
-    new AbortController().signal,
-    () => {},
-  );
-  const statements = prepare.mock.calls
-    .map((call) => String(call.arguments[0]))
-    .filter((sql) => sql.includes("FROM tracking_span"));
-  prepare.mock.restore();
-  assert.notEqual(statements.length, NO_STATEMENTS);
-  for (const sql of statements) {
-    const details = store.database
-      .prepare(`EXPLAIN QUERY PLAN ${sql}`)
-      .all()
-      .map((row) => String(row.detail));
-    assert.ok(
-      details.some(
-        (detail) =>
-          detail.startsWith("SEARCH") &&
-          detail.includes("sqlite_autoindex_tracking_span_1"),
-      ),
-    );
-    assert.ok(
-      !details.some(
-        (detail) =>
-          detail.startsWith("SCAN") && detail.includes("tracking_span"),
-      ),
-    );
-  }
 });

@@ -125,69 +125,148 @@ function jsonSchema(
   return rebase(result) as Record<string, unknown>;
 }
 
-function emitOperation(operation: Operation, schemas: Record<string, unknown>) {
-  const inputName = `${operation.id}.Input`;
-  const outputName = `${operation.id}.Output`;
-  const input = jsonSchema(inputName, operation.input, true) as {
-    properties?: Record<
-      string,
-      { properties?: Record<string, unknown>; required?: string[] }
-    >;
-  };
-  schemas[inputName] = input;
-  schemas[outputName] = jsonSchema(outputName, operation.output);
-  const inputRef = `#/components/schemas/${pointer(inputName)}`;
-  const parameters: unknown[] = [];
-  for (const [location, part] of [
-    [ParameterLocation.Path, "params"],
-    [ParameterLocation.Query, "query"],
-  ] as const) {
-    const object = input.properties?.[part];
-    for (const name of Object.keys(object?.properties ?? {}))
-      parameters.push({
-        name,
-        in: location,
-        required:
-          location === ParameterLocation.Path ||
-          (object?.required?.includes(name) ?? false),
-        schema: {
-          $ref: `${inputRef}/properties/${part}/properties/${pointer(name)}`,
-        },
-      });
-  }
+interface ParameterPart {
+  properties?: Record<string, unknown>;
+  required?: string[];
+}
+
+interface InputSchema {
+  properties?: Record<string, ParameterPart>;
+}
+
+interface ParameterSource {
+  location: (typeof ParameterLocation)[keyof typeof ParameterLocation];
+  part: string;
+  inputRef: string;
+}
+
+const BEARER_POLICIES: readonly AccessPolicy[] = [
+  AccessPolicy.Human,
+  AccessPolicy.HumanOrService,
+  AccessPolicy.Client,
+];
+
+const ERROR_STATUSES: readonly number[] = [
+  HttpStatus.BadRequest,
+  HttpStatus.Unauthorized,
+  HttpStatus.Forbidden,
+  HttpStatus.NotFound,
+  HttpStatus.Conflict,
+  HttpStatus.PayloadTooLarge,
+  HttpStatus.UnsupportedMediaType,
+  HttpStatus.InternalServerError,
+  HttpStatus.ServiceUnavailable,
+  HttpStatus.GatewayTimeout,
+];
+
+function partParameters(
+  input: InputSchema,
+  source: ParameterSource,
+): unknown[] {
+  const object = input.properties?.[source.part];
+  return Object.keys(object?.properties ?? {}).map((name) => ({
+    name,
+    in: source.location,
+    required:
+      source.location === ParameterLocation.Path ||
+      (object?.required?.includes(name) ?? false),
+    schema: {
+      $ref: `${source.inputRef}/properties/${source.part}/properties/${pointer(name)}`,
+    },
+  }));
+}
+
+function operationParameters(
+  operation: Operation,
+  input: InputSchema,
+  inputRef: string,
+): unknown[] {
+  const parameters = [
+    ...partParameters(input, {
+      location: ParameterLocation.Path,
+      part: "params",
+      inputRef,
+    }),
+    ...partParameters(input, {
+      location: ParameterLocation.Query,
+      part: "query",
+      inputRef,
+    }),
+  ];
   if (operation.mutation)
     parameters.push({ $ref: `${sharedRef}/parameters/IdempotencyKey` });
+  return parameters;
+}
+
+function completedResponse(
+  operation: Operation,
+  outputName: string,
+): Record<string, unknown> {
+  return {
+    description: "Completed result",
+    ...(operation.status === HttpStatus.NoContent || operation.delivery
+      ? {}
+      : {
+          content: {
+            [operation.contentType ?? "application/json"]: {
+              schema: { $ref: `#/components/schemas/${pointer(outputName)}` },
+            },
+          },
+        }),
+  };
+}
+
+function operationResponses(
+  operation: Operation,
+  outputName: string,
+): Record<string, unknown> {
   const responses: Record<string, unknown> = {
     ...(operation.delivery
       ? { [HttpStatus.NoContent]: { description: "Completed result" } }
       : {}),
-    [operation.status]: {
-      description: "Completed result",
-      ...(operation.status === HttpStatus.NoContent || operation.delivery
-        ? {}
-        : {
-            content: {
-              [operation.contentType ?? "application/json"]: {
-                schema: { $ref: `#/components/schemas/${pointer(outputName)}` },
-              },
-            },
-          }),
-    },
+    [operation.status]: completedResponse(operation, outputName),
   };
   for (const status of new Set([
-    HttpStatus.BadRequest,
-    HttpStatus.Unauthorized,
-    HttpStatus.Forbidden,
-    HttpStatus.NotFound,
-    HttpStatus.Conflict,
-    HttpStatus.PayloadTooLarge,
-    HttpStatus.UnsupportedMediaType,
-    HttpStatus.InternalServerError,
-    HttpStatus.ServiceUnavailable,
-    HttpStatus.GatewayTimeout,
+    ...ERROR_STATUSES,
     ...(operation.errors ?? []),
   ]))
     responses[status] = { $ref: `${sharedRef}/responses/Error` };
+  return responses;
+}
+
+function jsonRequestBody(inputRef: string): Record<string, unknown> {
+  return {
+    requestBody: {
+      required: true,
+      content: {
+        "application/json": {
+          schema: { $ref: `${inputRef}/properties/body` },
+        },
+      },
+    },
+  };
+}
+
+function binaryRequestBody(): Record<string, unknown> {
+  return {
+    requestBody: {
+      required: true,
+      content: {
+        "application/octet-stream": {
+          schema: { type: "string", contentEncoding: "binary" },
+        },
+      },
+    },
+  };
+}
+
+function emitOperation(operation: Operation, schemas: Record<string, unknown>) {
+  const inputName = `${operation.id}.Input`;
+  const outputName = `${operation.id}.Output`;
+  const input = jsonSchema(inputName, operation.input, true) as InputSchema;
+  schemas[inputName] = input;
+  schemas[outputName] = jsonSchema(outputName, operation.output);
+  const inputRef = `#/components/schemas/${pointer(inputName)}`;
   return {
     operationId: operation.id,
     tags: [operation.service],
@@ -196,38 +275,13 @@ function emitOperation(operation: Operation, schemas: Record<string, unknown>) {
     "x-timeout-ms": operation.timeoutMs,
     "x-mutation": operation.mutation,
     "x-kanthord-lifetime": operation.lifetime,
-    security:
-      operation.access === AccessPolicy.Human ||
-      operation.access === AccessPolicy.HumanOrService ||
-      operation.access === AccessPolicy.Client
-        ? [{ bearerAuth: [] }]
-        : [],
-    parameters,
-    ...(operation.body
-      ? {
-          requestBody: {
-            required: true,
-            content: {
-              "application/json": {
-                schema: { $ref: `${inputRef}/properties/body` },
-              },
-            },
-          },
-        }
-      : {}),
-    ...(operation.delivery
-      ? {
-          requestBody: {
-            required: true,
-            content: {
-              "application/octet-stream": {
-                schema: { type: "string", contentEncoding: "binary" },
-              },
-            },
-          },
-        }
-      : {}),
-    responses,
+    security: BEARER_POLICIES.includes(operation.access)
+      ? [{ bearerAuth: [] }]
+      : [],
+    parameters: operationParameters(operation, input, inputRef),
+    ...(operation.body ? jsonRequestBody(inputRef) : {}),
+    ...(operation.delivery ? binaryRequestBody() : {}),
+    responses: operationResponses(operation, outputName),
   };
 }
 

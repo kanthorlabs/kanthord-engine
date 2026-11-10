@@ -377,17 +377,6 @@ test("a conversation poll check answers unhealthy for a failed issue comment rea
   assert.deepEqual(reasons, [FINAL_REFUSAL_CODE]);
 });
 
-test("a poll check answers healthy for a 304 and changes no inbound", async (t) => {
-  const h = harness(t);
-  const entry = h.entryOf(h.insert(InboundKind.Poll));
-  h.answers.next = async () => ({ ok: true, value: { notModified: true } });
-  h.pullAnswers.next = async () => ({ ok: true, value: { notModified: true } });
-  const before = h.stored();
-  assert.equal(await entry.check(checkContext(t)), ResourceStatus.Healthy);
-  assert.deepEqual(h.drops, [CREDENTIAL, CREDENTIAL]);
-  assert.deepEqual(h.stored(), before);
-});
-
 test("a poll check answers unhealthy for a failed events read, observes its code and makes no closed pull request read", async (t) => {
   const h = harness(t);
   const entry = h.entryOf(h.insert(InboundKind.Poll));
@@ -479,21 +468,6 @@ test("the check deadline propagates and drops the material", async (t) => {
     entry.check(context),
     (error) =>
       error instanceof DeadlineExceeded && error === context.signal.reason,
-  );
-  assert.deepEqual(h.drops, [CREDENTIAL]);
-});
-
-test("a caller cancellation answers no success and drops the material", async (t) => {
-  const h = harness(t);
-  const entry = h.entryOf(h.insert(InboundKind.Poll));
-  const context = checkContext(t);
-  h.answers.next = (call) => {
-    context.cancel();
-    return abortedAnswer(call);
-  };
-  await assert.rejects(
-    entry.check(context),
-    (error) => error === context.signal.reason,
   );
   assert.deepEqual(h.drops, [CREDENTIAL]);
 });

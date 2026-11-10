@@ -23,6 +23,7 @@ import {
   gatedAgent,
   type GatedAgent,
   isTurnViolation,
+  NO_UNCHANGED_TURNS,
   removeRootEntries,
   restoreCheckout,
   unitCommitMessage,
@@ -106,6 +107,7 @@ const NO_TASKS = 0;
 const NO_CHECKOUTS = 0;
 const NO_LINK_UPDATES = 0;
 const NO_PROGRESS_LIMIT = 2;
+const ONE_TURN = 1;
 const SINGLE_CHECKOUT = 1;
 const BASE_MERGED = "base_merged";
 
@@ -462,6 +464,33 @@ async function runPending(
   };
 }
 
+function recordTaskVerification(
+  state: StepsState,
+  unit: TaskContent,
+  checked: CheckedRun,
+): boolean {
+  const { verification } = checked;
+  const passed = verificationPassed(verification, checked.commands);
+  state.lastVerification = verificationFactsOf(passed, verification);
+  state.run.noteVerification(state.lastVerification?.timed_out ?? false);
+  state.run.log("task verified", {
+    task_id: unit.id,
+    commit: headSetOf(state.checkouts),
+    passed,
+    exit_codes: verification.results.map((result) => result.exit_code),
+  });
+  return passed;
+}
+
+function revisionInstructionOf(state: StepsState, checked: CheckedRun): string {
+  return taskRevisionInstruction(
+    state.input.setup.templates,
+    checked.verification,
+    checked.commands,
+    checked.outputs.at(-1) ?? "",
+  );
+}
+
 async function runNodeInstruction(
   state: StepsState,
   unit: TaskContent,
@@ -488,37 +517,39 @@ async function runNodeInstruction(
         commit: headSetOf(state.checkouts),
         holds: !ruled,
       });
-      if (ruled) {
-        state.unchangedTurns = unchangedTurns;
-        countUnchangedTurn(state, NoProgressRule.VerdictRuleUnmet);
-        state.revisionCount++;
-        continue;
-      }
+      if (ruled && verdictTurnRetried(state, unit, unchangedTurns)) continue;
     } else if (revised && !agent.changed())
       countUnchangedTurn(state, NoProgressRule.UnchangedRevision);
     const checked = await verifyCommands(state, unit, commands);
-    const { verification, outputs } = checked;
-    const passed = verificationPassed(verification, checked.commands);
-    state.lastVerification = verificationFactsOf(passed, verification);
-    state.run.noteVerification(state.lastVerification?.timed_out ?? false);
-    state.run.log("task verified", {
-      task_id: unit.id,
-      commit: headSetOf(state.checkouts),
-      passed,
-      exit_codes: verification.results.map((result) => result.exit_code),
-    });
+    const passed = recordTaskVerification(state, unit, checked);
+    if (passed && ruled) state.unchangedTurns = NO_UNCHANGED_TURNS;
     if (passed) return await completeUnit(state, unit, agent);
-    instruction = taskRevisionInstruction(
-      state.input.setup.templates,
-      verification,
-      checked.commands,
-      outputs.at(-1) ?? "",
-    );
+    if (budget.exhausted()) return ended;
+    if (ruled) countUnchangedTurn(state, NoProgressRule.VerdictRuleUnmet);
+    instruction = revisionInstructionOf(state, checked);
     template = PromptTemplate.TaskRevision;
     revised = true;
     state.revisionCount++;
   }
   return ended;
+}
+
+function verdictTurnRetried(
+  state: StepsState,
+  unit: TaskContent,
+  unchangedTurns: number,
+): boolean {
+  state.unchangedTurns = unchangedTurns;
+  if (state.unchangedTurns + ONE_TURN >= NO_PROGRESS_LIMIT) {
+    state.run.log("verdict rule waived for review", {
+      task_id: unit.id,
+      commit: headSetOf(state.checkouts),
+    });
+    return false;
+  }
+  countUnchangedTurn(state, NoProgressRule.VerdictRuleUnmet);
+  state.revisionCount++;
+  return true;
 }
 
 export const TaskResultKind = {
@@ -567,23 +598,9 @@ export async function runTask(
       commit: headSetOf(state.checkouts),
     });
     const checked = await verifyTaskRun(state, task);
-    const { verification, outputs } = checked;
-    const passed = verificationPassed(verification, checked.commands);
-    state.lastVerification = verificationFactsOf(passed, verification);
-    state.run.noteVerification(state.lastVerification?.timed_out ?? false);
-    state.run.log("task verified", {
-      task_id: task.id,
-      commit: headSetOf(state.checkouts),
-      passed,
-      exit_codes: verification.results.map((result) => result.exit_code),
-    });
-    if (passed) return await completeUnit(state, task, agent);
-    instruction = taskRevisionInstruction(
-      state.input.setup.templates,
-      verification,
-      checked.commands,
-      outputs.at(-1) ?? "",
-    );
+    if (recordTaskVerification(state, task, checked))
+      return await completeUnit(state, task, agent);
+    instruction = revisionInstructionOf(state, checked);
     state.revisionCount++;
   }
   return ended;
