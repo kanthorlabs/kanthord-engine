@@ -55,7 +55,7 @@ export const ViolationEnd = {
 } as const;
 export type ViolationEnd = (typeof ViolationEnd)[keyof typeof ViolationEnd];
 const NO_ENTRIES = 0;
-const NO_UNCHANGED_TURNS = 0;
+export const NO_UNCHANGED_TURNS = 0;
 const SINGLE_CHECKOUT = 1;
 const SCRATCH_ENTRY = basename(SCRATCH_DIRECTORY);
 const DETACHED = "a detached HEAD";

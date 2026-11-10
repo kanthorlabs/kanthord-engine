@@ -499,6 +499,79 @@ export class ExecutionRun {
       : { kind: ExecutionEndKind.Released, furtherWork, stop };
   }
 
+  private async settleCredentialsForStop(): Promise<ExecutionEnd | null> {
+    try {
+      this.settlement ??= this.credentials.release();
+      await this.settlement;
+      return null;
+    } catch (error) {
+      if (!endsExecution(error)) throw error;
+      return {
+        kind: ExecutionEndKind.Ended,
+        reason: EndReason.Revoked,
+        code: error.code,
+      };
+    }
+  }
+
+  private async indeterminateStopRelease(
+    stop: ReleaseStop,
+    context: CancellationContext,
+  ): Promise<ExecutionEnd | null> {
+    const claim = await this.clients.scheduler.claimGet(
+      {
+        params: { execution_id: this.claim.execution_id },
+        query: {},
+        body: null,
+      },
+      { context, idempotencyKey: createIdempotencyKey() },
+    );
+    if (
+      claim.type === OperationResultType.Completed &&
+      claim.data.claim_state === ClaimState.Finished &&
+      claim.data.stop !== null
+    )
+      return { kind: ExecutionEndKind.Released, furtherWork: true, stop };
+    if (claim.type === OperationResultType.Failure && isExecutionEnd(claim))
+      return {
+        kind: ExecutionEndKind.Ended,
+        reason: EndReason.Revoked,
+        code: claim.error.error.code,
+      };
+    return null;
+  }
+
+  private async stopReleaseEnd(
+    stop: ReleaseStop,
+    context: CancellationContext,
+  ): Promise<ExecutionEnd | null> {
+    this.closeTraces(SpanStatus.Error);
+    await this.spans.flush(TELEMETRY_FLUSH_MS);
+    const result = await this.clients.scheduler.executionRelease(
+      {
+        params: { execution_id: this.claim.execution_id },
+        query: {},
+        body: { further_work: true, stop },
+      },
+      { context, idempotencyKey: createIdempotencyKey() },
+    );
+    if (result.type === OperationResultType.Indeterminate) {
+      const resolved = await this.indeterminateStopRelease(stop, context);
+      if (resolved !== null) return resolved;
+    }
+    if (result.type === OperationResultType.Completed)
+      return { kind: ExecutionEndKind.Released, furtherWork: true, stop };
+    if (!isExecutionEnd(result)) return null;
+    return {
+      kind: ExecutionEndKind.Ended,
+      reason: EndReason.Revoked,
+      code:
+        result.type === OperationResultType.Failure
+          ? result.error.error.code
+          : null,
+    };
+  }
+
   async releaseStop(stopped: ExecutionStop): Promise<ExecutionEnd> {
     const reason = stopped.reason;
     assert.ok(reason !== EndReason.Revoked);
@@ -510,53 +583,10 @@ export class ExecutionRun {
     };
     const context = this.cleanupContext();
     try {
-      try {
-        this.settlement ??= this.credentials.release();
-        await this.settlement;
-      } catch (error) {
-        if (!endsExecution(error)) throw error;
-        return {
-          kind: ExecutionEndKind.Ended,
-          reason: EndReason.Revoked,
-          code: error.code,
-        };
-      }
-      this.closeTraces(SpanStatus.Error);
-      await this.spans.flush(TELEMETRY_FLUSH_MS);
-      const params = { execution_id: this.claim.execution_id };
-      const result = await this.clients.scheduler.executionRelease(
-        { params, query: {}, body: { further_work: true, stop } },
-        { context, idempotencyKey: createIdempotencyKey() },
-      );
-      if (result.type === OperationResultType.Indeterminate) {
-        const claim = await this.clients.scheduler.claimGet(
-          { params, query: {}, body: null },
-          { context, idempotencyKey: createIdempotencyKey() },
-        );
-        if (
-          claim.type === OperationResultType.Completed &&
-          claim.data.claim_state === ClaimState.Finished &&
-          claim.data.stop !== null
-        )
-          return { kind: ExecutionEndKind.Released, furtherWork: true, stop };
-        if (claim.type === OperationResultType.Failure && isExecutionEnd(claim))
-          return {
-            kind: ExecutionEndKind.Ended,
-            reason: EndReason.Revoked,
-            code: claim.error.error.code,
-          };
-      }
-      if (result.type === OperationResultType.Completed)
-        return { kind: ExecutionEndKind.Released, furtherWork: true, stop };
-      if (isExecutionEnd(result))
-        return {
-          kind: ExecutionEndKind.Ended,
-          reason: EndReason.Revoked,
-          code:
-            result.type === OperationResultType.Failure
-              ? result.error.error.code
-              : null,
-        };
+      const revoked = await this.settleCredentialsForStop();
+      if (revoked !== null) return revoked;
+      const ended = await this.stopReleaseEnd(stop, context);
+      if (ended !== null) return ended;
     } catch (error) {
       if (!(error instanceof Error)) throw error;
     } finally {

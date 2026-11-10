@@ -1,5 +1,5 @@
 import { addAbortListener } from "node:events";
-import { Hono } from "hono";
+import { Hono, type Context as HonoContext } from "hono";
 import { cors } from "hono/cors";
 import { bodyLimit } from "hono/body-limit";
 import { requestId } from "hono/request-id";
@@ -33,8 +33,8 @@ import type { GatewayConfig } from "./config.ts";
 import { asError, Diagnostic } from "../kernel/errors.ts";
 import type { Authentication } from "./auth/authentication.ts";
 import { GatewayError, respondError } from "./errors.ts";
-import type { Idempotency } from "./idempotency.ts";
-import type { Invocation } from "./invocation.ts";
+import type { Idempotency, RecordedResponse } from "./idempotency.ts";
+import type { Invocation, InvocationOptions } from "./invocation.ts";
 import { parseJSON } from "./json.ts";
 import { gatewayOperations, type InventoryCollector } from "./contract.ts";
 import { registerGatewayOperations } from "./declarations.ts";
@@ -137,6 +137,123 @@ const HOST_CHECK_FREE_POLICIES: readonly AccessPolicy[] = [
   AccessPolicy.Worker,
   AccessPolicy.Public,
 ];
+
+type ServiceContext = HonoContext<ServiceEnv>;
+
+interface RequestPayload {
+  body: unknown;
+  delivery?: InvocationOptions["delivery"];
+  rejection?: GatewayError;
+}
+
+const OPENAPI_OPERATION_IDS: readonly string[] = [
+  gatewayOperations.openapi.id,
+  gatewayOperations.openapiFile.id,
+];
+
+function healthStatus(healthy: boolean | undefined): number {
+  return healthy ? HealthStatus.Healthy : HealthStatus.Unavailable;
+}
+
+async function jsonPayload(context: ServiceContext): Promise<RequestPayload> {
+  const mediaType = context.req
+    .header("content-type")
+    ?.split(";")[0]
+    ?.trim()
+    .toLowerCase();
+  if (mediaType !== MediaType.JSON)
+    return {
+      body: null,
+      rejection: new GatewayError(
+        HttpStatus.UnsupportedMediaType,
+        "gateway.request.unsupported_media_type",
+        "Request body requires application/json.",
+      ),
+    };
+  try {
+    return { body: parseJSON(await context.req.text()) };
+  } catch (error) {
+    if (!(error instanceof GatewayError)) throw error;
+    return { body: null, rejection: error };
+  }
+}
+
+async function unexpectedBodyPayload(
+  context: ServiceContext,
+): Promise<RequestPayload> {
+  if (!(await context.req.text()).length) return { body: null };
+  return {
+    body: null,
+    rejection: new GatewayError(
+      HttpStatus.BadRequest,
+      "gateway.request.unexpected_body",
+      "This operation accepts no request body.",
+    ),
+  };
+}
+
+async function requestPayload(
+  operation: Operation,
+  context: ServiceContext,
+): Promise<RequestPayload> {
+  if (operation.delivery)
+    return {
+      body: null,
+      delivery: {
+        bytes: await context.req.arrayBuffer(),
+        headers: new Headers(context.req.raw.headers),
+      },
+    };
+  if (operation.body) return jsonPayload(context);
+  if (context.req.raw.body && operation.lifetime !== OperationLifetime.Stream)
+    return unexpectedBodyPayload(context);
+  return { body: null };
+}
+
+function requestQuery(
+  context: ServiceContext,
+): Record<string, string | string[]> {
+  const query: Record<string, string | string[]> = {};
+  for (const [key, values] of Object.entries(context.req.queries()))
+    Object.defineProperty(query, key, {
+      value: values.length === SINGLE_QUERY_VALUE_COUNT ? values[0]! : values,
+      enumerable: true,
+    });
+  return query;
+}
+
+async function staticYaml(
+  context: ServiceContext,
+  result: RecordedResponse,
+): Promise<Response> {
+  const response = await serveStatic({
+    path: "openapi.yaml",
+    mimes: { yaml: "application/yaml" },
+    getContent: async () => String(result.body),
+  })(context, async () => {});
+  return response ?? context.res;
+}
+
+async function answerOf(
+  operation: Operation,
+  result: RecordedResponse,
+  context: ServiceContext,
+): Promise<Response> {
+  if (result.body instanceof Response) return result.body;
+  if (result.status === HttpStatus.NoContent)
+    return new Response(null, { status: result.status });
+  if (operation.contentType && result.status === operation.status)
+    return OPENAPI_OPERATION_IDS.includes(operation.id)
+      ? staticYaml(context, result)
+      : new Response(String(result.body), {
+          status: result.status,
+          headers: { "Content-Type": operation.contentType },
+        });
+  return Response.json(result.body, {
+    status: result.status,
+    ...(operation.secret ? { headers: NO_STORE_HEADERS } : {}),
+  });
+}
 
 export class GatewayService implements Service {
   readonly app: Hono<ServiceEnv>;
@@ -348,26 +465,13 @@ export class GatewayService implements Service {
   async healthcheck(): Promise<Healthcheck> {
     const ready = this.ready && this.started && !this.shutdown.signal.aborted;
     return {
-      listener:
-        ready && this.listener?.listening
-          ? HealthStatus.Healthy
-          : HealthStatus.Unavailable,
-      authentication:
-        ready && (await this.authentication.healthcheck())
-          ? HealthStatus.Healthy
-          : HealthStatus.Unavailable,
-      idempotency:
-        ready && this.idempotency.healthcheck()
-          ? HealthStatus.Healthy
-          : HealthStatus.Unavailable,
-      registry:
-        ready && this.registry.healthcheck()
-          ? HealthStatus.Healthy
-          : HealthStatus.Unavailable,
-      invocation:
-        ready && this.invocation.healthcheck()
-          ? HealthStatus.Healthy
-          : HealthStatus.Unavailable,
+      listener: healthStatus(ready && this.listener?.listening),
+      authentication: healthStatus(
+        ready && (await this.authentication.healthcheck()),
+      ),
+      idempotency: healthStatus(ready && this.idempotency.healthcheck()),
+      registry: healthStatus(ready && this.registry.healthcheck()),
+      invocation: healthStatus(ready && this.invocation.healthcheck()),
     };
   }
 
@@ -592,57 +696,14 @@ export class GatewayService implements Service {
           };
           outgoing?.once("close", onClose);
           const work = (async () => {
-            let body: unknown = null;
-            let delivery;
-            let rejection: GatewayError | undefined;
-            if (operation.delivery)
-              delivery = {
-                bytes: await context.req.arrayBuffer(),
-                headers: new Headers(context.req.raw.headers),
-              };
-            else if (operation.body) {
-              if (
-                context.req
-                  .header("content-type")
-                  ?.split(";")[0]
-                  ?.trim()
-                  .toLowerCase() !== MediaType.JSON
-              )
-                rejection = new GatewayError(
-                  HttpStatus.UnsupportedMediaType,
-                  "gateway.request.unsupported_media_type",
-                  "Request body requires application/json.",
-                );
-              else
-                try {
-                  body = parseJSON(await context.req.text());
-                } catch (error) {
-                  if (!(error instanceof GatewayError)) throw error;
-                  rejection = error;
-                }
-            } else if (
-              context.req.raw.body &&
-              operation.lifetime !== OperationLifetime.Stream
-            ) {
-              if ((await context.req.text()).length)
-                rejection = new GatewayError(
-                  HttpStatus.BadRequest,
-                  "gateway.request.unexpected_body",
-                  "This operation accepts no request body.",
-                );
-            }
-            const query: Record<string, string | string[]> = {};
-            for (const [key, values] of Object.entries(context.req.queries()))
-              Object.defineProperty(query, key, {
-                value:
-                  values.length === SINGLE_QUERY_VALUE_COUNT
-                    ? values[0]!
-                    : values,
-                enumerable: true,
-              });
+            const payload = await requestPayload(operation, context);
             const result = await this.invocation.invoke(
               operation.id,
-              { params: context.req.param(), query, body },
+              {
+                params: context.req.param(),
+                query: requestQuery(context),
+                body: payload.body,
+              },
               {
                 authorization: context.req.header("authorization"),
                 idempotencyKey: context.req.header("idempotency-key"),
@@ -651,8 +712,8 @@ export class GatewayService implements Service {
                 onIdentity: (identity) => {
                   outcome.caller = callerName(identity);
                 },
-                delivery,
-                rejection,
+                delivery: payload.delivery,
+                rejection: payload.rejection,
                 request: context.req.raw,
                 host: context.req.header("host"),
                 traceparent: context.req.header("traceparent"),
@@ -660,30 +721,7 @@ export class GatewayService implements Service {
                 logger: this.options.logger,
               },
             );
-            if (result.body instanceof Response) return result.body;
-            if (result.status === HttpStatus.NoContent)
-              return new Response(null, { status: result.status });
-            if (operation.contentType && result.status === operation.status) {
-              if (
-                operation.id === gatewayOperations.openapi.id ||
-                operation.id === gatewayOperations.openapiFile.id
-              ) {
-                const response = await serveStatic({
-                  path: "openapi.yaml",
-                  mimes: { yaml: "application/yaml" },
-                  getContent: async () => String(result.body),
-                })(context, async () => {});
-                return response ?? context.res;
-              }
-              return new Response(String(result.body), {
-                status: result.status,
-                headers: { "Content-Type": operation.contentType },
-              });
-            }
-            return Response.json(result.body, {
-              status: result.status,
-              ...(operation.secret ? { headers: NO_STORE_HEADERS } : {}),
-            });
+            return answerOf(operation, result, context);
           })();
           this.httpPending.add(work);
           try {

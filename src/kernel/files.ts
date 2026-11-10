@@ -100,6 +100,24 @@ export function readPrivate(path: string): string {
   }
 }
 
+function publishFailure(error: unknown, path: string): unknown {
+  if (error instanceof Diagnostic) return error;
+  return new Diagnostic(
+    "system.files.publish_failed",
+    "cannot publish file; the destination must be absent",
+    { fields: [["path", path]] },
+  );
+}
+
+function removeTemporary(temporary: string): unknown {
+  try {
+    unlinkSync(temporary);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== FILE_NOT_FOUND) return error;
+  }
+  return undefined;
+}
+
 export function writePrivate(
   path: string,
   content: string,
@@ -122,21 +140,10 @@ export function writePrivate(
     if (replace) renameSync(temporary, path);
     else linkSync(temporary, path);
   } catch (error) {
-    failure =
-      error instanceof Diagnostic
-        ? error
-        : new Diagnostic(
-            "system.files.publish_failed",
-            "cannot publish file; the destination must be absent",
-            { fields: [["path", path]] },
-          );
+    failure = publishFailure(error, path);
   }
   if (fd !== undefined) closeSync(fd);
-  try {
-    unlinkSync(temporary);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== FILE_NOT_FOUND)
-      failure ??= error;
-  }
+  const cleanupFailure = removeTemporary(temporary);
+  failure ??= cleanupFailure;
   if (failure !== undefined) throw failure;
 }

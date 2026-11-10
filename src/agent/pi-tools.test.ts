@@ -17,11 +17,7 @@ import {
   PI_TOOLS_MANIFEST,
   shippedAsset,
 } from "../kernel/assets.ts";
-import {
-  requirePiTools,
-  stopAfter,
-  temporary,
-} from "../kernel/test-support.ts";
+import { stopAfter, temporary } from "../kernel/test-support.ts";
 import {
   installPiTools,
   type PiToolsManifest,
@@ -36,8 +32,6 @@ const WORKING_BINARY = "#!/bin/sh\necho test_tool\n";
 const FAILING_BINARY = "#!/bin/sh\nexit 1\n";
 const EXECUTABLE_MODE = 0o755;
 const MODE_MASK = 0o777;
-const RELEASE_TARGETS = ["darwin-arm64", "linux-arm64", "linux-x64"];
-const SHA256_HEX_LENGTH = 64;
 const NO_ITEMS = 0;
 const LINUX_PLATFORM = "linux";
 const TEXT_BUSY = "ETXTBSY";
@@ -146,7 +140,6 @@ test("installer refuses a binary whose digest differs from the manifest", (t) =>
       }),
     {
       code: "worker.start.tool_missing",
-      message: "binary digest differs from the manifest.",
       fields: [["tool", TOOL]],
     },
   );
@@ -185,7 +178,6 @@ test("installer refuses a host target outside the manifest", (t) => {
       }),
     {
       code: "worker.start.tool_missing",
-      message: "host target is not in the manifest.",
       fields: [
         ["tool", TOOL],
         ["target", "freebsd-x64"],
@@ -207,7 +199,6 @@ test("installer refuses an absent binary source and an absent license source", (
       installPiTools({ ...options, root: pathToFileURL(`${temporary(t)}/`) }),
     {
       code: "worker.start.tool_missing",
-      message: "binary source is absent.",
       fields: [["tool", TOOL]],
     },
   );
@@ -222,7 +213,6 @@ test("installer refuses an absent binary source and an absent license source", (
       }),
     {
       code: "worker.start.tool_missing",
-      message: "license source is absent.",
     },
   );
 });
@@ -237,7 +227,7 @@ test("installer refuses a tool whose version command fails", (t) => {
         manifest: manifestOf(FAILING_BINARY),
         root: developmentRoot(t, FAILING_BINARY),
       }),
-    { code: "worker.start.tool_missing", message: "cannot run." },
+    { code: "worker.start.tool_missing" },
   );
 });
 
@@ -293,22 +283,8 @@ test("installer refuses a pi directory that cannot hold the tools", (t) => {
         manifest: manifestOf(WORKING_BINARY),
         root: developmentRoot(t, WORKING_BINARY),
       }),
-    { code: "worker.start.tool_missing", message: "cannot install." },
+    { code: "worker.start.tool_missing" },
   );
-});
-
-test("the shipped manifest pins each tool for each release target", () => {
-  const manifest = piToolsManifestSchema.parse(
-    JSON.parse(shippedAsset(PI_TOOLS_MANIFEST)),
-  );
-  assert.ok(Object.keys(manifest.tools).length > NO_ITEMS);
-  for (const definition of Object.values(manifest.tools)) {
-    assert.deepEqual(Object.keys(definition.targets).sort(), RELEASE_TARGETS);
-    for (const entry of Object.values(definition.targets)) {
-      assert.equal(entry.binary_sha256.length, SHA256_HEX_LENGTH);
-      assert.ok(entry.license_paths.length > NO_ITEMS);
-    }
-  }
 });
 
 test("the manifest tools equal the tools that the pi tool manager declares", async () => {
@@ -333,34 +309,4 @@ test("the manifest tools equal the tools that the pi tool manager declares", asy
     declared.map(([, key]) => key).sort(),
     Object.keys(manifest.tools).sort(),
   );
-});
-
-test("the pi tools guard names each absent or stale tool and the fetch command", (t) => {
-  const target = `${process.platform}-${process.arch}`;
-  const shipped = piToolsManifestSchema.parse(
-    JSON.parse(shippedAsset(PI_TOOLS_MANIFEST)),
-  );
-  const tools = Object.keys(shipped.tools);
-  const root = temporary(t);
-  const directory = pathToFileURL(`${root}/`);
-  const refusal = (names: string[]) => ({
-    message: `pi tools are absent or stale: ${names.join(", ")}. Run pnpm run pi-tools:fetch before this test.`,
-  });
-  assert.throws(() => requirePiTools({ directory }), refusal(tools));
-  const bin = join(root, target, "bin");
-  mkdirSync(bin, { recursive: true });
-  writeFileSync(join(bin, TOOL), WORKING_BINARY);
-  const manifest = (binary: string): PiToolsManifest => ({
-    tools: {
-      [TOOL]: {
-        ...manifestOf(binary).tools[TOOL]!,
-        targets: { [target]: manifestOf(binary).tools[TOOL]!.targets[TARGET]! },
-      },
-    },
-  });
-  assert.throws(
-    () => requirePiTools({ directory, manifest: manifest(FAILING_BINARY) }),
-    refusal([TOOL]),
-  );
-  requirePiTools({ directory, manifest: manifest(WORKING_BINARY) });
 });

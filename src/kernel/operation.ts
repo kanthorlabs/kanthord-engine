@@ -127,6 +127,117 @@ export interface RegisteredOperation {
   handler: Handler<z.ZodType, z.ZodType>;
 }
 
+function assertAccessPolicy(operation: Operation): void {
+  if (!Object.values(AccessPolicy).includes(operation.access))
+    throw new Error("Every route must declare an access policy.");
+  if (
+    operation.access === AccessPolicy.Service &&
+    (operation.requiresExecution !== undefined ||
+      operation.requiresRegistration !== undefined ||
+      operation.delivery !== undefined ||
+      operation.secret !== undefined)
+  )
+    throw new Error(
+      "A service operation declares no execution, registration, delivery or secret.",
+    );
+}
+
+function assertExecutionRules(operation: Operation): void {
+  if (
+    operation.requiresExecution &&
+    (operation.access !== AccessPolicy.Client ||
+      operation.requiresRegistration === false)
+  )
+    throw new Error(
+      "An execution proof requires client access and a live registration.",
+    );
+  if (
+    operation.endedGroup &&
+    (operation.access !== AccessPolicy.Client ||
+      operation.requiresRegistration !== false)
+  )
+    throw new Error(
+      "An ended group answer requires client access and no live registration.",
+    );
+}
+
+function assertRouteKind(operation: Operation): void {
+  if (
+    operation.direct &&
+    operation.access !== AccessPolicy.Human &&
+    operation.access !== AccessPolicy.Client
+  )
+    throw new Error("Only a human or client operation is direct.");
+  if (
+    (operation.access === AccessPolicy.HumanOrService) !==
+    (operation.services !== undefined &&
+      operation.services.length > EMPTY_REGISTRY_SIZE)
+  )
+    throw new Error(
+      "A human_or_service operation lists its services, and no other operation lists services.",
+    );
+}
+
+function assertLifetime(operation: Operation): void {
+  if (!Object.values(OperationLifetime).includes(operation.lifetime))
+    throw new Error("Every route must declare a valid lifetime.");
+}
+
+function assertPathPrefix(operation: Operation): void {
+  if (operation.access === AccessPolicy.Delivery) {
+    if (!operation.path.startsWith(DELIVERY_PATH_PREFIX))
+      throw new Error("A delivery route requires the /hooks prefix.");
+  } else if (
+    !operation.path.startsWith(API_PATH_PREFIX) ||
+    /^\/api\/v\d+(\/|$)/.test(operation.path)
+  )
+    throw new Error("Routes require the unversioned /api prefix.");
+}
+
+function assertTimeout(operation: Operation): void {
+  if (
+    !Number.isFinite(operation.timeoutMs) ||
+    operation.timeoutMs <= NO_TIMEOUT_MS
+  )
+    throw new Error("Every route requires a positive timeout.");
+}
+
+function assertDeliveryRules(operation: Operation): void {
+  if (operation.delivery && operation.access !== AccessPolicy.Delivery)
+    throw new Error("The exact-byte adapter requires the delivery policy.");
+  if (operation.delivery && operation.mutation)
+    throw new Error("A delivery operation is no mutation.");
+  if (operation.access === AccessPolicy.Delivery && !operation.delivery)
+    throw new Error("A delivery requires the exact-byte adapter.");
+  if (operation.mutation && operation.access === AccessPolicy.Public)
+    throw new Error("A mutation requires a verified caller.");
+}
+
+function assertUniqueRoute(
+  entries: readonly RegisteredOperation[],
+  operation: Operation,
+): void {
+  if (
+    entries.some(
+      ({ operation: entry }) =>
+        entry.id === operation.id ||
+        (entry.path.replace(/:[^/]+/g, ":") ===
+          operation.path.replace(/:[^/]+/g, ":") &&
+          entry.method === operation.method),
+    )
+  )
+    throw new Error("Duplicate operation or route.");
+  if (
+    entries.some(
+      ({ operation: entry }) =>
+        entry.path === operation.path && entry.service !== operation.service,
+    )
+  )
+    throw new Error(
+      "All operations at one path must belong to the same service.",
+    );
+}
+
 export class OperationRegistry {
   private entries: RegisteredOperation[] = [];
   private sealed = false;
@@ -136,90 +247,14 @@ export class OperationRegistry {
     handler: Handler<I, O>,
   ): void {
     if (this.sealed) throw new Error("Route registration is closed.");
-    if (!Object.values(AccessPolicy).includes(operation.access))
-      throw new Error("Every route must declare an access policy.");
-    if (
-      operation.access === AccessPolicy.Service &&
-      (operation.requiresExecution !== undefined ||
-        operation.requiresRegistration !== undefined ||
-        operation.delivery !== undefined ||
-        operation.secret !== undefined)
-    )
-      throw new Error(
-        "A service operation declares no execution, registration, delivery or secret.",
-      );
-    if (
-      operation.requiresExecution &&
-      (operation.access !== AccessPolicy.Client ||
-        operation.requiresRegistration === false)
-    )
-      throw new Error(
-        "An execution proof requires client access and a live registration.",
-      );
-    if (
-      operation.endedGroup &&
-      (operation.access !== AccessPolicy.Client ||
-        operation.requiresRegistration !== false)
-    )
-      throw new Error(
-        "An ended group answer requires client access and no live registration.",
-      );
-    if (
-      operation.direct &&
-      operation.access !== AccessPolicy.Human &&
-      operation.access !== AccessPolicy.Client
-    )
-      throw new Error("Only a human or client operation is direct.");
-    if (
-      (operation.access === AccessPolicy.HumanOrService) !==
-      (operation.services !== undefined &&
-        operation.services.length > EMPTY_REGISTRY_SIZE)
-    )
-      throw new Error(
-        "A human_or_service operation lists its services, and no other operation lists services.",
-      );
-    if (!Object.values(OperationLifetime).includes(operation.lifetime))
-      throw new Error("Every route must declare a valid lifetime.");
-    if (operation.access === AccessPolicy.Delivery) {
-      if (!operation.path.startsWith(DELIVERY_PATH_PREFIX))
-        throw new Error("A delivery route requires the /hooks prefix.");
-    } else if (
-      !operation.path.startsWith(API_PATH_PREFIX) ||
-      /^\/api\/v\d+(\/|$)/.test(operation.path)
-    )
-      throw new Error("Routes require the unversioned /api prefix.");
-    if (
-      !Number.isFinite(operation.timeoutMs) ||
-      operation.timeoutMs <= NO_TIMEOUT_MS
-    )
-      throw new Error("Every route requires a positive timeout.");
-    if (operation.delivery && operation.access !== AccessPolicy.Delivery)
-      throw new Error("The exact-byte adapter requires the delivery policy.");
-    if (operation.delivery && operation.mutation)
-      throw new Error("A delivery operation is no mutation.");
-    if (operation.access === AccessPolicy.Delivery && !operation.delivery)
-      throw new Error("A delivery requires the exact-byte adapter.");
-    if (operation.mutation && operation.access === AccessPolicy.Public)
-      throw new Error("A mutation requires a verified caller.");
-    if (
-      this.entries.some(
-        ({ operation: entry }) =>
-          entry.id === operation.id ||
-          (entry.path.replace(/:[^/]+/g, ":") ===
-            operation.path.replace(/:[^/]+/g, ":") &&
-            entry.method === operation.method),
-      )
-    )
-      throw new Error("Duplicate operation or route.");
-    if (
-      this.entries.some(
-        ({ operation: entry }) =>
-          entry.path === operation.path && entry.service !== operation.service,
-      )
-    )
-      throw new Error(
-        "All operations at one path must belong to the same service.",
-      );
+    assertAccessPolicy(operation);
+    assertExecutionRules(operation);
+    assertRouteKind(operation);
+    assertLifetime(operation);
+    assertPathPrefix(operation);
+    assertTimeout(operation);
+    assertDeliveryRules(operation);
+    assertUniqueRoute(this.entries, operation);
     this.entries.push({
       operation,
       handler: handler as Handler<z.ZodType, z.ZodType>,

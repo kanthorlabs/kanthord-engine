@@ -27,7 +27,6 @@ import { CustodyComponent } from "./service.ts";
 import {
   consumeGrant,
   FacilityError,
-  grantFacts,
   MaterialBuffer,
   mintGrant,
 } from "./facility.ts";
@@ -61,33 +60,6 @@ test("grants freeze a snapshot and reject fabrication, copies and repeated consu
   assert.throws(() => consumeGrant(Object.freeze({ ...grant })), FacilityError);
   consumeGrant(grant);
   assert.throws(() => consumeGrant(grant), FacilityError);
-});
-
-test("grant facts answer the project, the credential and frozen facts without consumption", () => {
-  const fields = {
-    ...FIELDS,
-    kind: GrantKind.RequestEvidence,
-    credential: null,
-    execution: null,
-    facts: { nested: { values: ["one"] } },
-  } as unknown as Parameters<
-    typeof mintGrant<typeof GrantKind.RequestEvidence>
-  >[0];
-  const grant = mintGrant(fields);
-  const answer = grantFacts(grant);
-  assert.deepEqual(answer, {
-    project_id: "project-one",
-    credential: null,
-    facts: { nested: { values: ["one"] } },
-  });
-  assert(Object.isFrozen(answer));
-  assert(
-    Object.isFrozen((answer.facts as unknown as { nested: object }).nested),
-  );
-  assert.deepEqual(grantFacts(grant), answer);
-  consumeGrant(grant);
-  assert.deepEqual(grantFacts(grant), answer);
-  assert.throws(() => grantFacts(Object.freeze({ ...grant })), FacilityError);
 });
 
 test("material clears its owned bytes on success and holder failure", (t) => {

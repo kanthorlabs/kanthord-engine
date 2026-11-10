@@ -26,6 +26,8 @@ import {
 import type { ProjectBindings } from "../../project/contract.ts";
 import {
   InstancePlacement,
+  type LiveInstance,
+  type Registration,
   type WorkerInstanceLookups,
   type WorkerRegistrations,
   workerResourceIdentitySchema,
@@ -134,6 +136,75 @@ function refuseClientForms(claims: Claims): void {
     throw jwtRefused(JwtCause.InvalidType);
 }
 
+type MachineClient = Omit<MachineIdentity, "kind" | "jti" | "runtimeIdentity">;
+type ResolvedGroup = NonNullable<
+  Awaited<ReturnType<ProjectBindings["resolveWorkerGroup"]>>
+>;
+
+interface InstanceOwner {
+  clientId: string;
+  projectId: string;
+  resourceIdentity: string;
+}
+
+function refuseConnectionClaim(
+  connected: boolean,
+  connectionId: string | undefined,
+): void {
+  if (connected && connectionId === undefined)
+    throw jwtRefused(JwtCause.InstanceRequired);
+  if (!connected && connectionId !== undefined)
+    throw jwtRefused(JwtCause.ForbiddenClaim);
+}
+
+function refuseGroupMismatch(
+  resolved: ResolvedGroup,
+  client: MachineClient,
+): void {
+  if (
+    resolved.project_id !== client.projectId ||
+    resolved.resource_identity !== client.resourceIdentity
+  )
+    throw unauthorized();
+}
+
+function refuseRegistrationMismatch(
+  registration: Registration | undefined,
+  resolved: ResolvedGroup,
+  client: MachineClient,
+): void {
+  if (
+    registration &&
+    (registration.client_id !== client.clientId ||
+      registration.resource_identity !== resolved.resource_identity ||
+      registration.project_id !== resolved.project_id)
+  )
+    throw unauthorized();
+}
+
+function humanIdentity(claims: Claims): HumanIdentity {
+  refuseForbidden(claims, [...MACHINE_CLAIMS, ...INSTANCE_CLAIMS]);
+  if (!validText(claims.sub, MAX_HUMAN_USERNAME_LENGTH))
+    throw jwtRefused(JwtCause.InvalidType);
+  return mintHumanIdentity(claims.sub, claims.name, claims.jti);
+}
+
+function machineClient(claims: Claims): MachineClient {
+  return {
+    clientId: claims.sub,
+    name: claims.name,
+    projectId: claims.project_id!,
+    resourceIdentity: claims.resource_identity!,
+    issuedAt: claims.iat * MILLISECONDS_PER_SECOND,
+    ...(claims.instance_id === undefined
+      ? {}
+      : { instanceId: claims.instance_id }),
+    ...(claims.connection_id === undefined
+      ? {}
+      : { connectionId: claims.connection_id }),
+  };
+}
+
 export class Authentication {
   private readonly key: Promise<CryptoKey>;
   private readonly machines?: AuthenticationLookups;
@@ -156,6 +227,22 @@ export class Authentication {
     }
   }
 
+  private liveInstanceOf(instanceId: string | undefined): LiveInstance {
+    if (instanceId === undefined) throw jwtRefused(JwtCause.InstanceRequired);
+    const instance = this.machines?.instances?.liveInstance(instanceId);
+    if (!instance) throw jwtRefused(JwtCause.InstanceEnded);
+    return instance;
+  }
+
+  private refuseUnlistedInstance(owner: InstanceOwner): void {
+    const registration = this.machines!.worker.findByClient(owner.clientId);
+    if (
+      registration?.project_id !== owner.projectId ||
+      registration.resource_identity !== owner.resourceIdentity
+    )
+      throw jwtRefused(JwtCause.InstanceNotListed);
+  }
+
   private refuseInstance(
     clientId: string,
     projectId: string,
@@ -164,55 +251,43 @@ export class Authentication {
     instanceId: string | undefined,
     connectionId: string | undefined,
   ): void {
-    if (instanceId === undefined) throw jwtRefused(JwtCause.InstanceRequired);
-    const instance = this.machines?.instances?.liveInstance(instanceId);
-    if (!instance) throw jwtRefused(JwtCause.InstanceEnded);
+    const instance = this.liveInstanceOf(instanceId);
     const connected = instance.placement === InstancePlacement.Worker;
-    if (connected && connectionId === undefined)
-      throw jwtRefused(JwtCause.InstanceRequired);
-    if (!connected && connectionId !== undefined)
-      throw jwtRefused(JwtCause.ForbiddenClaim);
-    if (!listed.includes(instance.name)) {
-      const registration = this.machines!.worker.findByClient(clientId);
-      if (
-        registration?.project_id !== projectId ||
-        registration.resource_identity !== resourceIdentity
-      )
-        throw jwtRefused(JwtCause.InstanceNotListed);
-    }
+    refuseConnectionClaim(connected, connectionId);
+    if (!listed.includes(instance.name))
+      this.refuseUnlistedInstance({ clientId, projectId, resourceIdentity });
     if (
       connected &&
-      !this.machines!.instances!.holdConnection(instanceId, connectionId!)
+      !this.machines!.instances!.holdConnection(instanceId!, connectionId!)
     )
       throw jwtRefused(JwtCause.ConnectionSuperseded);
   }
 
-  private async resolveMachine(
-    client: Omit<MachineIdentity, "kind" | "jti" | "runtimeIdentity">,
-    jti: string,
+  private async resolveGroup(
+    client: MachineClient,
     context: Context,
-  ): Promise<MachineIdentity> {
+  ): Promise<ResolvedGroup> {
     const resolved = await this.machines?.project.resolveWorkerGroup(
       client.projectId,
       client.resourceIdentity,
       client.issuedAt,
       context,
     );
-    if (!resolved) {
-      const ended = await this.machines?.project.workerGroupEnded(
-        client.projectId,
-        client.resourceIdentity,
-        client.issuedAt,
-        context,
-      );
-      throw ended ? new WorkerGroupEnded() : unauthorized();
-    }
-    if (
-      resolved.project_id !== client.projectId ||
-      resolved.resource_identity !== client.resourceIdentity
-    )
-      throw unauthorized();
-    const registration = this.machines!.worker.findByClient(client.clientId);
+    if (resolved) return resolved;
+    const ended = await this.machines?.project.workerGroupEnded(
+      client.projectId,
+      client.resourceIdentity,
+      client.issuedAt,
+      context,
+    );
+    throw ended ? new WorkerGroupEnded() : unauthorized();
+  }
+
+  private refuseInstanceClaims(
+    resolved: ResolvedGroup,
+    client: MachineClient,
+    registration: Registration | undefined,
+  ): void {
     const listed = resolved.worker_instances ?? [];
     const drained = resolved.worker_instances?.length === NO_INSTANCES;
     if (drained && !registration) throw unauthorized();
@@ -228,13 +303,18 @@ export class Authentication {
         client.connectionId,
       );
     else if (claimsInstance) throw jwtRefused(JwtCause.ForbiddenClaim);
-    if (
-      registration &&
-      (registration.client_id !== client.clientId ||
-        registration.resource_identity !== resolved.resource_identity ||
-        registration.project_id !== resolved.project_id)
-    )
-      throw unauthorized();
+  }
+
+  private async resolveMachine(
+    client: MachineClient,
+    jti: string,
+    context: Context,
+  ): Promise<MachineIdentity> {
+    const resolved = await this.resolveGroup(client, context);
+    refuseGroupMismatch(resolved, client);
+    const registration = this.machines!.worker.findByClient(client.clientId);
+    this.refuseInstanceClaims(resolved, client, registration);
+    refuseRegistrationMismatch(registration, resolved, client);
     return mintMachineIdentity(
       {
         ...client,
@@ -294,10 +374,9 @@ export class Authentication {
     return current;
   }
 
-  async authenticate(
+  private async verifiedClaims(
     authorization: string | undefined,
-    context: Context = background,
-  ): Promise<HumanIdentity | MachineIdentity | WorkerIdentity> {
+  ): Promise<Claims> {
     if (!authorization || !/^Bearer [^\s,]+$/i.test(authorization))
       throw unauthorized();
     const key = await this.key;
@@ -315,40 +394,40 @@ export class Authentication {
     const claims = closedClaims(verified);
     refuseTime(claims);
     refuseCommonForms(claims);
-    if (claims.kind === IdentityKind.Human) {
-      refuseForbidden(claims, [...MACHINE_CLAIMS, ...INSTANCE_CLAIMS]);
-      if (!validText(claims.sub, MAX_HUMAN_USERNAME_LENGTH))
-        throw jwtRefused(JwtCause.InvalidType);
-      return mintHumanIdentity(claims.sub, claims.name, claims.jti);
-    }
-    if (claims.kind === IdentityKind.Worker) {
-      refuseForbidden(claims, [...MACHINE_CLAIMS, ...INSTANCE_CLAIMS]);
-      if (!instanceIdentitySchema.safeParse(claims.sub).success)
-        throw jwtRefused(JwtCause.InvalidType);
-      return this.resolveWorker(claims.sub, claims.name, claims.jti);
-    }
-    if (claims.kind !== IdentityKind.Client)
+    return claims;
+  }
+
+  private workerIdentity(claims: Claims): WorkerIdentity {
+    refuseForbidden(claims, [...MACHINE_CLAIMS, ...INSTANCE_CLAIMS]);
+    if (!instanceIdentitySchema.safeParse(claims.sub).success)
       throw jwtRefused(JwtCause.InvalidType);
+    return this.resolveWorker(claims.sub, claims.name, claims.jti);
+  }
+
+  private async clientIdentity(
+    claims: Claims,
+    context: Context,
+  ): Promise<MachineIdentity> {
     refuseClientForms(claims);
     const identity = await this.resolveMachine(
-      {
-        clientId: claims.sub,
-        name: claims.name,
-        projectId: claims.project_id!,
-        resourceIdentity: claims.resource_identity!,
-        issuedAt: claims.iat * MILLISECONDS_PER_SECOND,
-        ...(claims.instance_id === undefined
-          ? {}
-          : { instanceId: claims.instance_id }),
-        ...(claims.connection_id === undefined
-          ? {}
-          : { connectionId: claims.connection_id }),
-      },
+      machineClient(claims),
       claims.jti,
       context,
     );
     if (identity.runtimeIdentity)
       this.machines!.worker.heartbeat(identity.runtimeIdentity);
     return identity;
+  }
+
+  async authenticate(
+    authorization: string | undefined,
+    context: Context = background,
+  ): Promise<HumanIdentity | MachineIdentity | WorkerIdentity> {
+    const claims = await this.verifiedClaims(authorization);
+    if (claims.kind === IdentityKind.Human) return humanIdentity(claims);
+    if (claims.kind === IdentityKind.Worker) return this.workerIdentity(claims);
+    if (claims.kind !== IdentityKind.Client)
+      throw jwtRefused(JwtCause.InvalidType);
+    return this.clientIdentity(claims, context);
   }
 }

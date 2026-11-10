@@ -166,27 +166,42 @@ function isKeyOfProject(key: string, projectKey: string): boolean {
   );
 }
 
-function parsedComment(
-  input: { event: Uint8Array; metadata: unknown },
-  projectKey: string,
-): ParsedComment | null {
-  const metadata = metadataSchema.safeParse(input.metadata);
+function commentWebhookOf(
+  event: Uint8Array,
+  metadataInput: unknown,
+): CommentWebhook | null {
+  const metadata = metadataSchema.safeParse(metadataInput);
   if (!metadata.success || !COMMENT_EVENTS.has(metadata.data.event))
     return null;
-  const parsed = commentWebhookSchema.safeParse(bodyOf(input.event));
+  const parsed = commentWebhookSchema.safeParse(bodyOf(event));
   if (!parsed.success) return null;
   if (
     metadata.data.event === COMMENT_CREATED_EVENT &&
     parsed.data.webhookEvent !== COMMENT_CREATED_EVENT
   )
     return null;
-  const { issue, comment } = parsed.data;
-  const issueProject = issue.fields?.project?.key;
-  if (issueProject !== undefined && issueProject !== projectKey) return null;
-  if (!isKeyOfProject(issue.key, projectKey)) return null;
-  const occurredAt = commentTimeOf(comment.created);
+  return parsed.data;
+}
+
+function isWebhookOfProject(
+  webhook: CommentWebhook,
+  projectKey: string,
+): boolean {
+  const issueProject = webhook.issue.fields?.project?.key;
+  if (issueProject !== undefined && issueProject !== projectKey) return false;
+  return isKeyOfProject(webhook.issue.key, projectKey);
+}
+
+function parsedComment(
+  input: { event: Uint8Array; metadata: unknown },
+  projectKey: string,
+): ParsedComment | null {
+  const webhook = commentWebhookOf(input.event, input.metadata);
+  if (webhook === null) return null;
+  if (!isWebhookOfProject(webhook, projectKey)) return null;
+  const occurredAt = commentTimeOf(webhook.comment.created);
   if (occurredAt === null) return null;
-  return { webhook: parsed.data, occurred_at: occurredAt };
+  return { webhook, occurred_at: occurredAt };
 }
 
 export function decodeJiraLinkUpdate(input: {
@@ -366,58 +381,101 @@ function statusClass(status: number, kind: JiraCallKind): ResultClassValue {
   return ResultClass.FinalRefusal;
 }
 
-async function exchange(
-  call: JiraCall,
-  request: {
-    kind: JiraCallKind;
-    method: string;
-    path: string;
-    query?: Record<string, string>;
-    body?: unknown;
-  },
-): Promise<JiraAnswer<unknown>> {
-  const remaining = call.deadlineAt - Date.now();
-  if (call.signal.aborted || remaining <= NO_TIME_LEFT_MS)
-    return failure(
-      request.kind === JiraCallKind.Read
-        ? ResultClass.RetryableRefusal
-        : ResultClass.ConfirmedFailure,
-      null,
-      "the deadline of the Jira call passed before dispatch",
-    );
+interface JiraRequest {
+  kind: JiraCallKind;
+  method: string;
+  path: string;
+  query?: Record<string, string>;
+  body?: unknown;
+}
+
+interface JiraReply {
+  status: number;
+  accepted: boolean;
+  text: string;
+}
+
+function expiredFailure(kind: JiraCallKind): JiraFailure {
+  return failure(
+    kind === JiraCallKind.Read
+      ? ResultClass.RetryableRefusal
+      : ResultClass.ConfirmedFailure,
+    null,
+    "the deadline of the Jira call passed before dispatch",
+  );
+}
+
+function requestUrl(call: JiraCall, request: JiraRequest): string {
   const query =
     request.query === undefined
       ? ""
       : `?${new URLSearchParams(request.query).toString()}`;
-  const signal = AbortSignal.any([call.signal, AbortSignal.timeout(remaining)]);
-  let status: number;
-  let accepted: boolean;
-  let text: string;
-  try {
-    const response = await globalThis.fetch(
-      `${jiraApiUrl(call.credentials.cloud_id, request.path)}${query}`,
-      {
-        method: request.method,
-        headers: {
-          Authorization: jiraBasicAuthorization(
-            call.credentials.email,
-            call.credentials.token,
-          ),
-          Accept: CONTENT_TYPE_JSON,
-          ...(request.body === undefined
-            ? {}
-            : { "Content-Type": CONTENT_TYPE_JSON }),
-        },
-        ...(request.body === undefined
-          ? {}
-          : { body: JSON.stringify(request.body) }),
-        signal,
-        redirect: "manual",
-      },
+  return `${jiraApiUrl(call.credentials.cloud_id, request.path)}${query}`;
+}
+
+function requestInit(
+  call: JiraCall,
+  request: JiraRequest,
+  signal: AbortSignal,
+): RequestInit {
+  return {
+    method: request.method,
+    headers: {
+      Authorization: jiraBasicAuthorization(
+        call.credentials.email,
+        call.credentials.token,
+      ),
+      Accept: CONTENT_TYPE_JSON,
+      ...(request.body === undefined
+        ? {}
+        : { "Content-Type": CONTENT_TYPE_JSON }),
+    },
+    ...(request.body === undefined
+      ? {}
+      : { body: JSON.stringify(request.body) }),
+    signal,
+    redirect: "manual",
+  };
+}
+
+async function fetchReply(url: string, init: RequestInit): Promise<JiraReply> {
+  const response = await globalThis.fetch(url, init);
+  return {
+    status: response.status,
+    accepted: response.ok,
+    text: await response.text(),
+  };
+}
+
+function answerOf(reply: JiraReply, kind: JiraCallKind): JiraAnswer<unknown> {
+  if (!reply.accepted)
+    return failure(
+      statusClass(reply.status, kind),
+      reply.status,
+      "the Jira answer refuses the call",
     );
-    status = response.status;
-    accepted = response.ok;
-    text = await response.text();
+  try {
+    return { ok: true, value: JSON.parse(reply.text) };
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    return unreadable(kind);
+  }
+}
+
+async function exchange(
+  call: JiraCall,
+  request: JiraRequest,
+): Promise<JiraAnswer<unknown>> {
+  const remaining = call.deadlineAt - Date.now();
+  if (call.signal.aborted || remaining <= NO_TIME_LEFT_MS)
+    return expiredFailure(request.kind);
+  const signal = AbortSignal.any([call.signal, AbortSignal.timeout(remaining)]);
+  let reply: JiraReply;
+  try {
+    reply = await fetchReply(
+      requestUrl(call, request),
+      requestInit(call, request, signal),
+    );
   } catch (error) {
     if (!(error instanceof Error)) throw error;
     return failure(
@@ -426,18 +484,7 @@ async function exchange(
       "the Jira call ended before an answer",
     );
   }
-  if (!accepted)
-    return failure(
-      statusClass(status, request.kind),
-      status,
-      "the Jira answer refuses the call",
-    );
-  try {
-    return { ok: true, value: JSON.parse(text) };
-  } catch (error) {
-    if (!(error instanceof SyntaxError)) throw error;
-    return unreadable(request.kind);
-  }
+  return answerOf(reply, request.kind);
 }
 
 function unreadable(kind: JiraCallKind): JiraFailure {

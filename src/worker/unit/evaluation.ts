@@ -152,21 +152,25 @@ interface AffectedStep {
   document: AffectedEvidence | null;
 }
 
-async function judge(
-  input: StepsInput,
-  run: ExecutionRun,
-  revision: Revision,
-  evidence: unknown,
-  verificationRun: VerificationRun,
-  directory: string,
-  checkouts: readonly ExamineCheckout[],
-  openAgent: OpenAgent,
-  dependencies: Awaited<ReturnType<typeof readDependencies>> | null,
-  setupFailure: SetupFailure | null,
-  affected: AffectedStep | null,
-  round: ReviewRound,
-) {
-  const examine = input.setup.intent === ExecutionIntent.Examine;
+type Dependencies = Awaited<ReturnType<typeof readDependencies>> | null;
+
+interface JudgeContext {
+  input: StepsInput;
+  run: ExecutionRun;
+  revision: Revision;
+  evidence: unknown;
+  verificationRun: VerificationRun;
+  directory: string;
+  checkouts: readonly ExamineCheckout[];
+  dependencies: Dependencies;
+  setupFailure: SetupFailure | null;
+  affected: AffectedStep | null;
+  round: ReviewRound;
+}
+
+function shortcutAssessment(context: JudgeContext) {
+  const { run, revision, verificationRun, setupFailure, affected, round } =
+    context;
   const commands = verificationCommands(revision);
   const verification = verificationRun.verification;
   if (verificationRun.outcome === VerificationClass.BudgetEnd)
@@ -203,23 +207,26 @@ async function judge(
         affected.verdict,
       ),
     };
-  const agent = await openAgent(directory);
-  if (agent.budget.exhausted()) return run.stop(EndReason.AssessmentAbsent);
+  return null;
+}
+
+async function askJudgement(context: JudgeContext, agent: NativeAgent) {
+  const { input, run, revision, evidence, directory, round } = context;
   const work = renderWorkPrompt(input.setup.templates, {
     node_id: input.claim.node_id,
     revision: input.claim.pinned_revision,
     content: revision.content,
-    repositories: workRepositoriesOf(directory, checkouts),
+    repositories: workRepositoriesOf(directory, context.checkouts),
   });
   await agent.instruct(
     work,
     evaluationInstruction(input.setup.templates, {
-      examine,
+      examine: input.setup.intent === ExecutionIntent.Examine,
       tasks: revision.tasks,
-      verification,
+      verification: context.verificationRun.verification,
       evidence,
-      dependencies,
-      affected: affected?.document ?? null,
+      dependencies: context.dependencies,
+      affected: context.affected?.document ?? null,
       round: { number: round.round, review_base: round.review_base },
       priorFindings: round.findings,
     }),
@@ -242,6 +249,15 @@ async function judge(
     return run.stop(EndReason.AssessmentAbsent);
   if (judgement === ReplyRepair.Invalid)
     return run.stop(EndReason.JudgementInvalid);
+  return { judgement, repaired };
+}
+
+function judgedAssessment(
+  context: JudgeContext,
+  asked: Awaited<ReturnType<typeof askJudgement>>,
+) {
+  const { input, run, verificationRun, affected, round } = context;
+  const { judgement, repaired } = asked;
   const blockers = judgementBlockers(
     input.claim.node_id,
     judgement,
@@ -253,7 +269,8 @@ async function judge(
     findings: judgement.findings.map((finding) => finding.label),
     fixed: judgement.fixed_finding_ids,
   });
-  const proposals = examine ? judgement.proposals : [];
+  const proposals =
+    input.setup.intent === ExecutionIntent.Examine ? judgement.proposals : [];
   const recorded = withFlakyVerification(
     {
       rationale: judgementRationale({
@@ -287,6 +304,40 @@ async function judge(
       affected?.verdict ?? null,
     ),
   };
+}
+
+async function judge(
+  input: StepsInput,
+  run: ExecutionRun,
+  revision: Revision,
+  evidence: unknown,
+  verificationRun: VerificationRun,
+  directory: string,
+  checkouts: readonly ExamineCheckout[],
+  openAgent: OpenAgent,
+  dependencies: Dependencies,
+  setupFailure: SetupFailure | null,
+  affected: AffectedStep | null,
+  round: ReviewRound,
+) {
+  const context: JudgeContext = {
+    input,
+    run,
+    revision,
+    evidence,
+    verificationRun,
+    directory,
+    checkouts,
+    dependencies,
+    setupFailure,
+    affected,
+    round,
+  };
+  const shortcut = shortcutAssessment(context);
+  if (shortcut !== null) return shortcut;
+  const agent = await openAgent(directory);
+  if (agent.budget.exhausted()) return run.stop(EndReason.AssessmentAbsent);
+  return judgedAssessment(context, await askJudgement(context, agent));
 }
 
 export function setupFailureAssessment(setupFailure: SetupFailure | null) {
@@ -380,17 +431,17 @@ async function endedByBudget<T>(
   }
 }
 
-async function evaluate(
-  input: StepsInput,
-  run: ExecutionRun,
-  revision: Revision,
-  prepared: PreparedEvaluation,
-  budget: ExecutionBudget,
-  openAgent: OpenAgent,
-  round: ReviewRound,
-) {
+interface EvaluateContext {
+  input: StepsInput;
+  run: ExecutionRun;
+  revision: Revision;
+  prepared: PreparedEvaluation;
+  budget: ExecutionBudget;
+}
+
+async function verifyEvaluation(context: EvaluateContext) {
+  const { input, run, revision, prepared, budget } = context;
   assert.ok(prepared.directory);
-  assert.equal(input.claim.execution_id, input.setup.execution_id);
   const owners = commandOwners({ input, revision });
   const verificationRun = await runVerificationsWithOutput({
     observe: verificationObserver(
@@ -416,8 +467,15 @@ async function evaluate(
   run.noteVerification(
     verificationRun.verification.results.at(-1)?.timed_out ?? false,
   );
+  return verificationRun;
+}
+
+function submitVerificationEvidence(
+  context: EvaluateContext,
+  verificationRun: VerificationRun,
+) {
   const verification = verificationRun.verification;
-  const recorded = await run.submitEvidence(input.claim.node_id, {
+  return context.run.submitEvidence(context.input.claim.node_id, {
     subject: VERIFICATION_SUBJECT,
     assets: [
       {
@@ -433,33 +491,89 @@ async function evaluate(
     ],
     verification,
   });
-  const affected =
+}
+
+async function affectedStepOf(
+  context: EvaluateContext,
+  verificationRun: VerificationRun,
+): Promise<AffectedStep | null> {
+  const { input, run, revision, prepared, budget } = context;
+  const runnable =
     input.setup.intent === ExecutionIntent.Implement &&
     prepared.checkouts.length > NO_ITEMS &&
     prepared.setupFailure === null &&
-    verificationPassed(verification, verificationCommands(revision))
-      ? await endedByBudget(run, budget, () =>
-          runAffectedStep(input, run, prepared, budget),
-        )
-      : null;
-  const recordedAffected =
-    affected?.document == null
-      ? null
-      : await run.submitEvidence(input.claim.node_id, {
-          subject: AFFECTED_SUBJECT,
-          assets: [
-            {
-              kind: "produced",
-              content: {
-                media_type: "application/json",
-                encoding: "base64",
-                data: Buffer.from(canonicalJSON(affected.document)).toString(
-                  "base64",
-                ),
-              },
+    verificationPassed(
+      verificationRun.verification,
+      verificationCommands(revision),
+    );
+  if (!runnable) return null;
+  return endedByBudget(run, budget, () =>
+    runAffectedStep(input, run, prepared, budget),
+  );
+}
+
+async function submitAffectedEvidence(
+  context: EvaluateContext,
+  affected: AffectedStep | null,
+) {
+  if (affected?.document == null) return null;
+  return context.run.submitEvidence(context.input.claim.node_id, {
+    subject: AFFECTED_SUBJECT,
+    assets: [
+      {
+        kind: "produced",
+        content: {
+          media_type: "application/json",
+          encoding: "base64",
+          data: Buffer.from(canonicalJSON(affected.document)).toString(
+            "base64",
+          ),
+        },
+      },
+    ],
+  });
+}
+
+async function submitPatchEvidence(context: EvaluateContext) {
+  const patchIds: string[] = [];
+  for (const patch of context.prepared.patches) {
+    const submitted = await context.run.submitEvidence(
+      context.input.claim.node_id,
+      {
+        subject: ROUND_PATCH_SUBJECT,
+        assets: [
+          {
+            kind: "produced",
+            content: {
+              media_type: ROUND_PATCH_MEDIA_TYPE,
+              encoding: "base64",
+              data: roundPatchContent(patch.text).toString("base64"),
             },
-          ],
-        });
+          },
+        ],
+      },
+    );
+    patchIds.push(submitted.id);
+  }
+  return patchIds;
+}
+
+async function evaluate(
+  input: StepsInput,
+  run: ExecutionRun,
+  revision: Revision,
+  prepared: PreparedEvaluation,
+  budget: ExecutionBudget,
+  openAgent: OpenAgent,
+  round: ReviewRound,
+) {
+  assert.ok(prepared.directory);
+  assert.equal(input.claim.execution_id, input.setup.execution_id);
+  const context: EvaluateContext = { input, run, revision, prepared, budget };
+  const verificationRun = await verifyEvaluation(context);
+  const recorded = await submitVerificationEvidence(context, verificationRun);
+  const affected = await affectedStepOf(context, verificationRun);
+  const recordedAffected = await submitAffectedEvidence(context, affected);
   const dependencies =
     input.setup.intent === ExecutionIntent.Examine
       ? await readDependencies(run)
@@ -480,23 +594,7 @@ async function evaluate(
       round,
     ),
   );
-  const patchIds: string[] = [];
-  for (const patch of prepared.patches) {
-    const submitted = await run.submitEvidence(input.claim.node_id, {
-      subject: ROUND_PATCH_SUBJECT,
-      assets: [
-        {
-          kind: "produced",
-          content: {
-            media_type: ROUND_PATCH_MEDIA_TYPE,
-            encoding: "base64",
-            data: roundPatchContent(patch.text).toString("base64"),
-          },
-        },
-      ],
-    });
-    patchIds.push(submitted.id);
-  }
+  const patchIds = await submitPatchEvidence(context);
   return {
     evidence_ids: [
       recorded.id,

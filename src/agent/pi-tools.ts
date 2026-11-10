@@ -117,13 +117,16 @@ function runVersion(path: string, env: NodeJS.ProcessEnv) {
   return run;
 }
 
-function installTool(
-  tool: string,
-  entry: PiToolTarget,
-  target: string,
-  binDirectory: string,
-  options: PiToolsOptions,
-): void {
+interface ToolInstall {
+  tool: string;
+  entry: PiToolTarget;
+  target: string;
+  binDirectory: string;
+  options: PiToolsOptions;
+}
+
+function verifiedBinary(install: ToolInstall): Buffer {
+  const { tool, entry, target, options } = install;
   const binary = piToolAsset(
     target,
     `${BIN_DIRECTORY_NAME}/${tool}`,
@@ -133,40 +136,66 @@ function installTool(
   if (!binary) throw toolMissing(tool, "binary source is absent");
   if (!piToolCurrent(binary, entry.binary_sha256))
     throw toolMissing(tool, "binary digest differs from the manifest");
-  const path = join(binDirectory, tool);
+  return binary;
+}
+
+function publishLicense(license: string, install: ToolInstall): void {
+  const { tool, target, binDirectory, options } = install;
+  const file = basename(license);
+  const bytes = piToolAsset(
+    target,
+    `${LICENSES_DIRECTORY_NAME}/${tool}/${file}`,
+    options.assets,
+    options.root,
+  );
+  if (!bytes)
+    throw toolMissing(tool, "license source is absent", [["license", file]]);
+  publish(
+    join(binDirectory, LICENSES_DIRECTORY_NAME, tool, file),
+    bytes,
+    LICENSE_MODE,
+  );
+}
+
+function publishToolFiles(
+  path: string,
+  binary: Buffer,
+  install: ToolInstall,
+): void {
+  const { tool, entry } = install;
   try {
     if (!hasDigest(path, entry.binary_sha256))
       publish(path, binary, BINARY_MODE);
-    for (const license of entry.license_paths) {
-      const file = basename(license);
-      const bytes = piToolAsset(
-        target,
-        `${LICENSES_DIRECTORY_NAME}/${tool}/${file}`,
-        options.assets,
-        options.root,
-      );
-      if (!bytes)
-        throw toolMissing(tool, "license source is absent", [
-          ["license", file],
-        ]);
-      publish(
-        join(binDirectory, LICENSES_DIRECTORY_NAME, tool, file),
-        bytes,
-        LICENSE_MODE,
-      );
-    }
+    for (const license of entry.license_paths) publishLicense(license, install);
   } catch (error) {
     if (error instanceof Diagnostic) throw error;
     throw toolMissing(tool, "cannot install", [
       ["reason", (error as Error).message],
     ]);
   }
-  const run = runVersion(path, options.env ?? process.env);
+}
+
+function assertToolRuns(path: string, install: ToolInstall): void {
+  const run = runVersion(path, install.options.env ?? process.env);
   if (run.error || run.status !== SUCCESS)
-    throw toolMissing(tool, "cannot run", [
+    throw toolMissing(install.tool, "cannot run", [
       ["reason", run.error?.message],
       ["exit_status", run.status],
     ]);
+}
+
+function installTool(
+  tool: string,
+  entry: PiToolTarget,
+  target: string,
+  binDirectory: string,
+  options: PiToolsOptions,
+): void {
+  const install = { tool, entry, target, binDirectory, options };
+  const binary = verifiedBinary(install);
+  const path = join(binDirectory, tool);
+  publishToolFiles(path, binary, install);
+  assertToolRuns(path, install);
 }
 
 export function installPiTools(options: PiToolsOptions = {}): void {

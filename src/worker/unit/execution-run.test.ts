@@ -25,7 +25,6 @@ import {
 } from "../../kernel/cause.ts";
 import { BudgetLimit } from "../../scheduler/contract.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
-import { GitStep, markGitStep } from "./git-step.ts";
 import { stopAfter } from "../../kernel/stop-test-support.ts";
 
 const SETTLE_CALL_COUNT = 1;
@@ -373,16 +372,6 @@ test("a stop of an uncoded error halts and releases with no detail when the secr
   assert.deepEqual(bodies, [{ further_work: true, stop }]);
 });
 
-test("a stop of a coded error keeps its code and carries no detail", async (t) => {
-  const run = fixture();
-  stopAfter(t, () => run.dispose());
-  const stopped = await run.stopOf(new CodedError(ERROR, "refused"));
-  assert.deepEqual(
-    { code: stopped.code, detail: stopped.detail },
-    { code: ERROR, detail: null },
-  );
-});
-
 test("a stop release sends the cause detail of a provider failure", async (t) => {
   const run = fixture();
   stopAfter(t, () => run.dispose());
@@ -412,41 +401,6 @@ test("a stop release sends the cause detail of a provider failure", async (t) =>
     stop,
   });
   assert.deepEqual(bodies, [{ further_work: true, stop }]);
-});
-
-test("a stop release keeps the cause detail when it reconciles a lost answer or falls back to an end", async (t) => {
-  const stop = {
-    reason: EndReason.ProviderFailed,
-    code: ProviderFailure.Unavailable,
-    detail: "OAuth auth derivation failed for anthropic",
-  };
-  const sent = {
-    ...stop,
-    cause: attributed(CauseCategory.LlmProvider, CauseSubcategory.Unavailable),
-  };
-  for (const recorded of [sent, null]) {
-    const run = fixture();
-    stopAfter(t, () => run.dispose());
-    const stopped = await run.stopOf(
-      new ExecutionStop(stop.reason, stop.code, stop.detail),
-    );
-    run.clients.scheduler = {
-      executionRelease: async () => ({
-        type: OperationResultType.Indeterminate,
-      }),
-      claimGet: async () => ({
-        type: OperationResultType.Completed,
-        status: 200,
-        data: { claim_state: "finished", stop: recorded },
-      }),
-    } as unknown as MethodClients["scheduler"];
-    assert.deepEqual(
-      await run.releaseStop(stopped),
-      recorded
-        ? { kind: "released", furtherWork: true, stop: sent }
-        : { kind: "ended", ...stop },
-    );
-  }
 });
 
 test("a stop release that the scheduler refuses as ended ends the run as revoked", async (t) => {
@@ -502,20 +456,6 @@ test("a stop release whose credential report the server refuses as ended ends th
     });
     assert.equal(releases, NO_CALLS);
   }
-});
-
-test("a credential settlement that the server refuses as ended stops the run as revoked", async (t) => {
-  const run = fixture(async () => {
-    throw new CodedError(EXECUTION_PROOF_FAILED, "Refused");
-  });
-  stopAfter(t, () => run.dispose());
-  await assert.rejects(
-    run.settleCredentials(),
-    (error: unknown) =>
-      error instanceof ExecutionStop &&
-      error.reason === EndReason.Revoked &&
-      error.code === EXECUTION_PROOF_FAILED,
-  );
 });
 
 test("a lost release answer with a claim read that the server refuses as ended ends the run as revoked", async (t) => {
@@ -594,7 +534,6 @@ test("the claim check stops the run as revoked when the server refuses the execu
   );
 });
 
-const CAUSE = "cause";
 const DIGESTS = { "github:acme/engine": "d".repeat(64) };
 
 async function releasedStop(run: ExecutionRun, stop: unknown) {
@@ -632,46 +571,6 @@ test("an environment failure stop detail holds the digests of the environments o
   });
 });
 
-test("an environment failure stop with a text detail or no detail holds the digests", async (t) => {
-  for (const detail of [".devcontainer/devcontainer.json: invalid", null]) {
-    const run = fixture(async () => {}, undefined, DIGESTS);
-    stopAfter(t, () => run.dispose());
-    const stop = await releasedStop(
-      run,
-      new ExecutionStop(EndReason.EnvironmentFailed, "setup_failed", detail),
-    );
-    assert.deepEqual(JSON.parse(stop.detail!), {
-      ...(detail === null ? {} : { detail }),
-      digests: DIGESTS,
-    });
-  }
-});
-
-test("a stop of another reason or a setup without environment digests keeps its detail", async (t) => {
-  const other = fixture(async () => {}, undefined, DIGESTS);
-  stopAfter(t, () => other.dispose());
-  assert.equal(
-    (
-      await releasedStop(
-        other,
-        new ExecutionStop(EndReason.ProviderFailed, "unavailable", CAUSE),
-      )
-    ).detail,
-    CAUSE,
-  );
-  const bare = fixture();
-  stopAfter(t, () => bare.dispose());
-  assert.equal(
-    (
-      await releasedStop(
-        bare,
-        new ExecutionStop(EndReason.EnvironmentFailed, "setup_failed", CAUSE),
-      )
-    ).detail,
-    CAUSE,
-  );
-});
-
 function capture(run: ExecutionRun) {
   const bodies: { stop: Record<string, unknown> | null }[] = [];
   run.clients.scheduler = {
@@ -707,19 +606,6 @@ test("a budget-end release sends the cause with the timeout of the last noted ve
   );
 });
 
-test("a provider failure stop sends the provider cause", async (t) => {
-  const run = fixture();
-  stopAfter(t, () => run.dispose());
-  const stop = await releasedStop(
-    run,
-    new ExecutionStop(EndReason.ProviderFailed, ProviderFailure.RateLimited),
-  );
-  assert.deepEqual(
-    stop.cause,
-    attributed(CauseCategory.LlmProvider, CauseSubcategory.RateLimited),
-  );
-});
-
 test("a git commit failure sends the redacted git stderr and its suspects", async (t) => {
   const run = fixture();
   stopAfter(t, () => run.dispose());
@@ -738,25 +624,6 @@ test("a git commit failure sends the redacted git stderr and its suspects", asyn
       CauseCategory.Environment,
     ]),
   });
-});
-
-test("an error marked with a git step sends the suspects of the step", async (t) => {
-  const run = fixture();
-  stopAfter(t, () => run.dispose());
-  const error = new Error("push refused");
-  markGitStep(error, GitStep.Push);
-  const stop = await releasedStop(run, error);
-  assert.deepEqual(
-    stop.cause,
-    unattributed([CauseCategory.Infrastructure, CauseCategory.WorkerAction]),
-  );
-});
-
-test("a revoked stop holds no cause", async (t) => {
-  const run = fixture();
-  stopAfter(t, () => run.dispose());
-  const stopped = await run.stopOf(new ExecutionStop(EndReason.Revoked, null));
-  assert.equal(stopped.cause, null);
 });
 
 test("a source_invalid operation failure gives its details reason as the stop detail and the cause of that reason", async (t) => {

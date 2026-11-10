@@ -349,6 +349,22 @@ export async function readPrior(
   };
 }
 
+async function readRequestedOrClearedPrior(
+  run: ExecutionRun,
+  repositories: readonly RepositoryName[],
+): Promise<Prior> {
+  const requested = await readRequestedChanges(run, repositories);
+  if (requested !== null) return { verdict: requested, cleared: null };
+  const cleared = await readClearedAssessment(run);
+  return {
+    verdict: null,
+    cleared:
+      cleared === null || cleared.result === AssessmentResult.Success
+        ? null
+        : cleared.rationale,
+  };
+}
+
 async function readUnblockPrior(
   run: ExecutionRun,
   repositories: readonly RepositoryName[],
@@ -384,14 +400,5 @@ async function readUnblockPrior(
       },
       cleared: null,
     };
-  const requested = await readRequestedChanges(run, repositories);
-  if (requested !== null) return { verdict: requested, cleared: null };
-  const cleared = await readClearedAssessment(run);
-  return {
-    verdict: null,
-    cleared:
-      cleared === null || cleared.result === AssessmentResult.Success
-        ? null
-        : cleared.rationale,
-  };
+  return readRequestedOrClearedPrior(run, repositories);
 }

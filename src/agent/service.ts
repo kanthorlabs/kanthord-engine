@@ -126,6 +126,13 @@ interface StackTarget {
   commit: string | null;
 }
 
+interface PromptStackQuery {
+  node_id?: string | undefined;
+  attempt?: number | undefined;
+  binding_id?: string | undefined;
+  project_id?: string | undefined;
+}
+
 function wireRecord(row: EnablementRow) {
   return agentEnablementSchema.parse({
     agent_name: row.agent_name,
@@ -200,6 +207,65 @@ function conflict(
     "Agent enablement change refused.",
     { agent_name: agentName, ...details },
   );
+}
+
+interface ProviderChange {
+  agentName: string;
+  current: ReturnType<typeof getEnablement>;
+  agentProviders: EnablementRow["agent_providers"];
+}
+
+function assertProviderSet({
+  agentName,
+  agentProviders,
+}: ProviderChange): void {
+  if (agentProviders.length === NO_ITEMS)
+    throw configurationError(agentName, AgentErrorCode.ProviderRequired);
+  const names = new Set(agentProviders.map(({ name }) => name));
+  if (names.size !== agentProviders.length)
+    throw conflict(agentName, AgentErrorCode.ProviderNameConflict);
+  const credentials = new Set(
+    agentProviders.map(({ credential }) => credential),
+  );
+  if (credentials.size !== agentProviders.length)
+    throw conflict(agentName, AgentErrorCode.ProviderCredentialConflict);
+}
+
+function assertProvidersFixed({
+  agentName,
+  current,
+  agentProviders,
+}: ProviderChange): void {
+  if (
+    current?.agent_providers.some((old) =>
+      agentProviders.some(
+        (item) => item.name === old.name && item.provider !== old.provider,
+      ),
+    )
+  )
+    throw conflict(agentName, AgentErrorCode.ProviderFixed);
+}
+
+function assertProvidersUnused(
+  { agentName, current, agentProviders }: ProviderChange,
+  entries: ReturnType<EntriesOfAgent>,
+): void {
+  const names = new Set(agentProviders.map(({ name }) => name));
+  const omitted = new Set(
+    current?.agent_providers
+      .filter(({ name }) => !names.has(name))
+      .map(({ name }) => name),
+  );
+  const bindings = entries
+    .filter(
+      ({ entry }) =>
+        (entry?.agent_provider !== undefined &&
+          omitted.has(entry.agent_provider)) ||
+        namesProvider(entry?.fallback_configurations, omitted),
+    )
+    .map(bindingIdentity);
+  if (bindings.length > NO_ITEMS)
+    throw conflict(agentName, AgentErrorCode.ProviderInUse, { bindings });
 }
 
 function saveRevision(tx: Transaction, current: EnablementRow) {
@@ -383,16 +449,8 @@ export class AgentComponent {
       default_configuration: defaultConfiguration,
       fallback_configurations: fallbackConfigurations,
     } = body;
-    if (agentProviders.length === NO_ITEMS)
-      throw configurationError(agentName, AgentErrorCode.ProviderRequired);
-    const names = new Set(agentProviders.map(({ name }) => name));
-    if (names.size !== agentProviders.length)
-      throw conflict(agentName, AgentErrorCode.ProviderNameConflict);
-    const credentials = new Set(
-      agentProviders.map(({ credential }) => credential),
-    );
-    if (credentials.size !== agentProviders.length)
-      throw conflict(agentName, AgentErrorCode.ProviderCredentialConflict);
+    const change = { agentName, current, agentProviders };
+    assertProviderSet(change);
     for (const item of agentProviders)
       validateProvider(this.dependencies, tx, agentName, item);
     this.validateChain(
@@ -402,30 +460,9 @@ export class AgentComponent {
       defaultConfiguration,
       fallbackConfigurations,
     );
-    if (
-      current?.agent_providers.some((old) =>
-        agentProviders.some(
-          (item) => item.name === old.name && item.provider !== old.provider,
-        ),
-      )
-    )
-      throw conflict(agentName, AgentErrorCode.ProviderFixed);
+    assertProvidersFixed(change);
     const entries = this.dependencies.entriesOfAgent(tx, agentName);
-    const omitted = new Set(
-      current?.agent_providers
-        .filter(({ name }) => !names.has(name))
-        .map(({ name }) => name),
-    );
-    const bindings = entries
-      .filter(
-        ({ entry }) =>
-          (entry?.agent_provider !== undefined &&
-            omitted.has(entry.agent_provider)) ||
-          namesProvider(entry?.fallback_configurations, omitted),
-      )
-      .map(bindingIdentity);
-    if (bindings.length > NO_ITEMS)
-      throw conflict(agentName, AgentErrorCode.ProviderInUse, { bindings });
+    assertProvidersUnused(change, entries);
     this.validateBindings(
       tx,
       agentName,
@@ -1063,6 +1100,16 @@ export class AgentComponent {
     return [...matches.values()];
   }
 
+  private promptStackOf(query: PromptStackQuery) {
+    if (query.node_id !== undefined)
+      return this.nodePrompts(query.node_id, query.attempt ?? null);
+    if (query.binding_id === undefined || query.project_id === undefined)
+      return null;
+    return headPrompts(
+      this.repositoryPrompts(query.project_id, query.binding_id),
+    );
+  }
+
   private repositoryPrompts(
     projectId: string,
     bindingId: string,
@@ -1316,14 +1363,7 @@ export class AgentComponent {
           params.agent_name,
         );
         assert.equal(declaration.agent_name, params.agent_name);
-        const stack =
-          query.node_id !== undefined
-            ? this.nodePrompts(query.node_id, query.attempt ?? null)
-            : query.binding_id === undefined || query.project_id === undefined
-              ? null
-              : headPrompts(
-                  this.repositoryPrompts(query.project_id, query.binding_id),
-                );
+        const stack = this.promptStackOf(query);
         const consumer =
           stack === null && declaration.workbench
             ? PromptConsumer.Workbench

@@ -150,6 +150,25 @@ function socketAccepts(
   });
 }
 
+function sweepDeadlineExpired(name: string, now: number): boolean {
+  const match = SWEEP_PATTERN.exec(name);
+  if (!match?.[1]) return false;
+  const deadlineAt = Number.parseInt(match[1], DEADLINE_RADIX);
+  return Number.isSafeInteger(deadlineAt) && deadlineAt + SWEEP_GRACE_MS < now;
+}
+
+async function isAbandonedDirectory(
+  path: string,
+  uid: number | undefined,
+): Promise<boolean> {
+  const info = await lstat(path).catch(() => null);
+  if (!info?.isDirectory() || info.uid !== uid) return false;
+  return !(await socketAccepts(
+    join(path, SSH_AGENT_SOCKET),
+    SOCKET_PROBE_TIMEOUT_MS,
+  ));
+}
+
 export async function sweepSshAgentDirectories(
   now: number,
   root: string = SSH_AGENT_ROOT,
@@ -157,18 +176,9 @@ export async function sweepSshAgentDirectories(
   const uid = process.getuid?.();
   const names = await readdir(root).catch(() => [] as string[]);
   for (const name of names) {
-    const match = SWEEP_PATTERN.exec(name);
-    if (!match?.[1]) continue;
-    const deadlineAt = Number.parseInt(match[1], DEADLINE_RADIX);
-    if (!Number.isSafeInteger(deadlineAt) || deadlineAt + SWEEP_GRACE_MS >= now)
-      continue;
+    if (!sweepDeadlineExpired(name, now)) continue;
     const path = join(root, name);
-    const info = await lstat(path).catch(() => null);
-    if (!info?.isDirectory() || info.uid !== uid) continue;
-    if (
-      await socketAccepts(join(path, SSH_AGENT_SOCKET), SOCKET_PROBE_TIMEOUT_MS)
-    )
-      continue;
+    if (!(await isAbandonedDirectory(path, uid))) continue;
     await rm(path, { recursive: true, force: true }).catch(() => {});
   }
 }

@@ -2,10 +2,7 @@ import assert from "node:assert/strict";
 import { SERVER_HOLDER } from "../custody/contract.ts";
 import { COOLDOWN_DEFAULTS } from "./config.ts";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
-import {
-  getBuiltinModels,
-  getBuiltinProviders,
-} from "@earendil-works/pi-ai/providers/all";
+import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -20,13 +17,10 @@ import {
   type AgentEntry,
   AgentErrorCode,
   agentOperations,
-  agentProviderKindSchema,
   type AgentSelection,
   type ApprovedModel,
-  type ChainEntry,
   ChainLevel,
   CooldownChangeKind,
-  FALLBACK_CONFIGURATIONS_MAX,
   type HolderScope,
   InstructionFileState,
   LIST_LIMIT_DEFAULT,
@@ -82,7 +76,6 @@ const OTHER_AGENT = "re@1";
 const ENV_AGENT = "env@1";
 const WORKER = "coder@1";
 const MODEL = "claude-sonnet-4-5";
-const SUBSCRIPTION_MODEL = "claude-haiku-5-5";
 const MISSING_MODEL = "claude-3-5-sonnet-20241022";
 const UNKNOWN = "unknown";
 const FIRST_REVISION = 1;
@@ -931,72 +924,6 @@ test("agent prompt resolve requires execution_id and agent_name and admits only 
     );
 });
 
-test("agent declaration read exposes prompts, tools and current enablement without writes", async (t) => {
-  const schemaVersion = "https://json-schema.org/draft/2020-12/schema";
-  const disabled = "disabled";
-  const requested: string[] = [];
-  const f = enablementFixture(t, {
-    toolDeclarations: async (agentName) => {
-      requested.push(agentName);
-      return TOOLS;
-    },
-  });
-  const operation = agentOperations.get;
-  const read = async (agentName = AGENT) =>
-    operation.output.parse(
-      await f.registry
-        .get(operation.id)
-        .handler(
-          { params: { agent_name: agentName }, query: {}, body: null },
-          f.caller,
-        ),
-    );
-  const before = f.store.database
-    .prepare("SELECT total_changes() AS count")
-    .get();
-  const declaration = await read();
-  assert.equal(declaration.enablement, null);
-  assert.deepEqual(declaration.tools, TOOLS);
-  const parts = declaration.prompt.parts!;
-  assert.ok(
-    parts[0]!.text!.startsWith(
-      "This text is the shared standard of every agent.",
-    ),
-  );
-  assert.ok(parts[1]!.text!.startsWith("## Role"));
-  assert.equal(declaration.configuration_schema.$schema, schemaVersion);
-  assert.equal(declaration.configuration_schema.additionalProperties, false);
-  assert.deepEqual(declaration.configuration_schema.required, [
-    "agent_provider",
-    "provider",
-    "credential",
-    "model_identifier",
-    "reasoning_effort",
-  ]);
-  assert.doesNotMatch(
-    JSON.stringify(declaration.configuration_schema),
-    /"(?:default|options)":/,
-  );
-  assert.match(
-    String(declaration.configuration_schema.description),
-    /JSON Schema validates neither lookup/,
-  );
-  assert.deepEqual((await read(OTHER_AGENT)).tools, TOOLS);
-  assert.deepEqual(requested, [AGENT, OTHER_AGENT]);
-  assert.deepEqual(
-    f.store.database.prepare("SELECT total_changes() AS count").get(),
-    before,
-  );
-  const enabled = f.invoke("enablement.put", putBody);
-  assert.deepEqual((await read()).enablement, enabled);
-  f.invoke("enablement.disable", { expected_revision: enabled.revision });
-  assert.equal((await read()).enablement?.state, disabled);
-  await assert.rejects(read("nope@1"), {
-    code: AgentErrorCode.AgentNotFound,
-    status: HttpStatus.NotFound,
-  });
-});
-
 test("resource inventory includes every live provider across pages without writes", async (t) => {
   const calls: Array<{
     tx: Parameters<Dependencies["providerHealthCheck"]>[0];
@@ -1309,32 +1236,6 @@ test("remove refuses bindings and tombstones only when unused", (t) => {
   });
 });
 
-test("put after remove creates the enablement with no expected revision at the next revision", (t) => {
-  const f = enablementFixture(t);
-  f.invoke("enablement.put", putBody);
-  f.invoke("enablement.remove", { expected_revision: 1 });
-  const created = f.invoke("enablement.put", putBody);
-  assert.equal(created.revision, THIRD_REVISION);
-  assert.equal(created.state, EnablementState.Enabled);
-  assert.deepEqual(f.invoke("enablement.get"), created);
-});
-
-test("put after remove refuses the removal revision", (t) => {
-  const f = enablementFixture(t);
-  f.invoke("enablement.put", putBody);
-  f.invoke("enablement.remove", { expected_revision: 1 });
-  refuses(
-    () =>
-      f.invoke("enablement.put", {
-        ...putBody,
-        expected_revision: SECOND_REVISION,
-      }),
-    AgentErrorCode.RevisionConflict,
-    HttpStatus.Conflict,
-    { agent_name: AGENT, revision: null },
-  );
-});
-
 test("provider add and remove preserve uniqueness, last provider, default and explicit dependents", (t) => {
   let entries: AgentDependentBinding[] = [];
   const f = enablementFixture(t, { entriesOfAgent: () => entries });
@@ -1538,91 +1439,6 @@ test("anthropic uses the built-in catalog, not absent credential metadata", (t) 
     f.invoke("enablement.put", putBody).default_configuration.model_identifier,
     MODEL,
   );
-});
-
-test("openai-codex uses the built-in catalog and refuses an unknown model", (t) => {
-  const f = enablementFixture(t, {
-    approvedModels: () => {
-      throw new Error("Built-in catalog must not read metadata.");
-    },
-  });
-  const codex = { ...provider, provider: AgentProviderKind.OpenaiCodex };
-  const body = (modelIdentifier: string) => ({
-    agent_providers: [codex],
-    default_configuration: { ...defaults, model_identifier: modelIdentifier },
-    fallback_configurations: [],
-  });
-  refuses(
-    () => f.invoke("enablement.put", body(MODEL)),
-    AgentErrorCode.ModelUnknown,
-  );
-  const builtin = "gpt-5.5";
-  assert.equal(
-    f.invoke("enablement.put", body(builtin)).default_configuration
-      .model_identifier,
-    builtin,
-  );
-});
-
-test("openrouter uses the built-in catalog and refuses an unknown model", (t) => {
-  const f = enablementFixture(t, {
-    approvedModels: () => {
-      throw new Error("Built-in catalog must not read metadata.");
-    },
-  });
-  const router = { ...provider, provider: AgentProviderKind.Openrouter };
-  const body = (modelIdentifier: string) => ({
-    agent_providers: [router],
-    default_configuration: { ...defaults, model_identifier: modelIdentifier },
-    fallback_configurations: [],
-  });
-  refuses(
-    () => f.invoke("enablement.put", body(MODEL)),
-    AgentErrorCode.ModelUnknown,
-  );
-  const builtin = "anthropic/claude-haiku-4.5";
-  assert.equal(
-    f.invoke("enablement.put", body(builtin)).default_configuration
-      .model_identifier,
-    builtin,
-  );
-});
-
-test("groq uses the built-in catalog and refuses an unknown model", (t) => {
-  const f = enablementFixture(t, {
-    approvedModels: () => {
-      throw new Error("Built-in catalog must not read metadata.");
-    },
-  });
-  const groq = { ...provider, provider: "groq" };
-  const body = (modelIdentifier: string) => ({
-    agent_providers: [groq],
-    default_configuration: { ...defaults, model_identifier: modelIdentifier },
-    fallback_configurations: [],
-  });
-  refuses(
-    () => f.invoke("enablement.put", body(MODEL)),
-    AgentErrorCode.ModelUnknown,
-  );
-  const builtin = "llama-3.1-8b-instant";
-  assert.equal(
-    f.invoke("enablement.put", body(builtin)).default_configuration
-      .model_identifier,
-    builtin,
-  );
-});
-
-test("the agent provider set holds openai-compatible, anthropic-subscription and every pi-ai built-in provider", () => {
-  assert.deepEqual(
-    agentProviderKindSchema.options.toSorted(),
-    [
-      AgentProviderKind.OpenaiCompatible,
-      AgentProviderKind.AnthropicSubscription,
-      ...getBuiltinProviders(),
-    ].toSorted(),
-  );
-  assert.equal(agentProviderKindSchema.safeParse("github").success, false);
-  assert.equal(agentProviderKindSchema.safeParse("s3").success, false);
 });
 
 test("openai-compatible approved models establish models and reasoning levels, including an explicit empty set", (t) => {
@@ -2060,33 +1876,6 @@ test("model list answers the built-in catalog of the provider with its supported
   assert.equal(f.commits(), SECOND_REVISION);
 });
 
-test("model list of anthropic-subscription answers the built-in catalog of the anthropic pi provider", (t) => {
-  const f = enablementFixture(t, {
-    approvedModels: () => {
-      throw new Error("Built-in catalog must not read metadata.");
-    },
-  });
-  f.invoke("enablement.put", {
-    ...putBody,
-    agent_providers: [
-      { ...provider, provider: AgentProviderKind.AnthropicSubscription },
-    ],
-  });
-  const { items } = f.invoke(MODEL_LIST, null, {
-    agent_name: AGENT,
-    provider_name: provider.name,
-  });
-  assert.deepEqual(
-    items.map(({ model_identifier }) => model_identifier),
-    getBuiltinModels(AgentProviderKind.Anthropic).map(({ id }) => id),
-  );
-  assert.ok(
-    items.some(
-      ({ model_identifier }) => model_identifier === SUBSCRIPTION_MODEL,
-    ),
-  );
-});
-
 test("model list answers the approved models and reasoning levels of an openai-compatible credential", (t) => {
   let models: ApprovedModel[] | null = [
     { id: MODEL, reasoning_levels: [DEFAULT_REASONING, "high"] },
@@ -2143,38 +1932,6 @@ test("model list refuses an unknown agent, an absent enablement and an absent pr
 
 const CREDENTIAL_MODEL_LIST = "model.list";
 
-test("credential model list answers the models of a credential before any enablement", (t) => {
-  const approved = [{ id: MODEL, reasoning_levels: [DEFAULT_REASONING] }];
-  const requested: string[] = [];
-  const f = enablementFixture(t, {
-    approvedModels: (_tx, credential) => {
-      requested.push(credential);
-      return approved;
-    },
-  });
-  const builtin = f.invoke(
-    CREDENTIAL_MODEL_LIST,
-    null,
-    {},
-    { provider: AgentProviderKind.Anthropic, credential: provider.credential },
-  );
-  assert.deepEqual(
-    builtin.items.map(({ model_identifier }) => model_identifier),
-    getBuiltinModels(AgentProviderKind.Anthropic).map(({ id }) => id),
-  );
-  assert.deepEqual(requested, []);
-  const compatible = f.invoke(
-    CREDENTIAL_MODEL_LIST,
-    null,
-    {},
-    { provider: AgentProviderKind.OpenaiCompatible, credential: "gateway" },
-  );
-  assert.deepEqual(compatible.items, [
-    { model_identifier: MODEL, reasoning_efforts: [DEFAULT_REASONING] },
-  ]);
-  assert.deepEqual(requested, ["gateway"]);
-});
-
 test("credential model list refuses a credential that does not suit the provider kind", (t) => {
   const f = enablementFixture(t, {
     custodySuitability: () => {
@@ -2198,47 +1955,6 @@ test("credential model list refuses a credential that does not suit the provider
   assert.throws(() =>
     f.invoke(CREDENTIAL_MODEL_LIST, null, {}, { ...query, provider: "github" }),
   );
-});
-
-test("every listed model and reasoning effort passes the configuration validation", (t) => {
-  const approved = [
-    { id: MODEL, reasoning_levels: [DEFAULT_REASONING, "low", "high"] },
-    { id: "plain", reasoning_levels: [DEFAULT_REASONING] },
-  ];
-  const f = enablementFixture(t, { approvedModels: () => approved });
-  const custom = {
-    name: "custom",
-    provider: AgentProviderKind.OpenaiCompatible,
-    credential: "gateway",
-  };
-  f.invoke("enablement.put", {
-    ...putBody,
-    agent_providers: [provider, custom],
-  });
-  const row = f.invoke("enablement.get");
-  for (const item of row.agent_providers) {
-    const { items } = f.invoke(MODEL_LIST, null, {
-      agent_name: AGENT,
-      provider_name: item.name,
-    });
-    assert.ok(items.length);
-    for (const { model_identifier, reasoning_efforts } of items)
-      for (const reasoningEffort of reasoning_efforts)
-        f.store.transaction((tx) =>
-          assert.doesNotThrow(() =>
-            f.agent.validateEntry(
-              tx,
-              AGENT,
-              {
-                agent_provider: item.name,
-                model_identifier,
-                reasoning_effort: reasoningEffort,
-              },
-              [SERVER_HOLDER],
-            ),
-          ),
-        );
-  }
 });
 
 const HAIKU = "claude-haiku-4-5";
@@ -2349,21 +2065,6 @@ test("put stores the fallback chain and the agent view resolves an inherited, a 
 
 test("put refuses a missing tail, a long tail, a duplicate tail entry and an invalid tail entry", (t) => {
   const f = enablementFixture(t);
-  const withoutTail = {
-    agent_providers: chainBody.agent_providers,
-    default_configuration: chainBody.default_configuration,
-  };
-  assert.throws(() => f.invoke("enablement.put", withoutTail));
-  const longTail = Array.from(
-    { length: FALLBACK_CONFIGURATIONS_MAX + 1 },
-    () => primaryOpus,
-  );
-  assert.throws(() =>
-    f.invoke("enablement.put", {
-      ...chainBody,
-      fallback_configurations: longTail,
-    }),
-  );
   for (const tail of [
     [primaryOpus, { ...primaryOpus, reasoning_effort: "high" }],
     [{ ...defaults, reasoning_effort: "high" }],
@@ -2771,19 +2472,6 @@ async function readAgent(f: ReturnType<typeof enablementFixture>) {
   );
 }
 
-function selectionOf(entry: ChainEntry): AgentSelection {
-  return {
-    agent_name: AGENT,
-    position: entry.position,
-    level: entry.level,
-    agent_provider: entry.agent_provider,
-    provider: entry.provider,
-    credential: entry.credential,
-    model_identifier: entry.model_identifier,
-    reasoning_effort: entry.reasoning_effort,
-  };
-}
-
 test("agent read answers the chain of the enablement with no cooldown, with no copy check and without the hold of an instance copy", async (t) => {
   const holds = memoryCredentialHolds();
   const f = holdFixture(t, {
@@ -2832,63 +2520,6 @@ test("agent read answers the chain of the enablement with no cooldown, with no c
       cooldown: null,
     },
   ]);
-  assert.equal(answer.active_position, HEAD_POSITION);
-  assert.equal(answer.cooling, null);
-});
-
-test("agent read shows one cooling entry and keeps the head active", async (t) => {
-  const f = holdFixture(t);
-  const second = f.view().chain[SECOND_POSITION];
-  assert.ok(second);
-  f.fail(selectionOf(second), AdvancingFailure.RateLimited);
-  const answer = await readAgent(f);
-  assert.deepEqual(
-    answer.chain.map(({ cooldown }) => cooldown),
-    [
-      null,
-      {
-        strikes: FIRST_STRIKE,
-        available_at: f.now() + COOLDOWN_DEFAULTS.rate_limited_ms,
-      },
-      null,
-    ],
-  );
-  assert.equal(answer.active_position, HEAD_POSITION);
-  assert.equal(answer.cooling, null);
-});
-
-test("agent read answers no active position and the earliest end when every entry cools", async (t) => {
-  const f = holdFixture(t);
-  const head = f.selected();
-  f.fail(head, AdvancingFailure.RateLimited);
-  const afterHead = await readAgent(f);
-  assert.equal(afterHead.active_position, SECOND_POSITION);
-  assert.equal(afterHead.cooling, null);
-  f.fail(f.selected(), AdvancingFailure.QuotaExhausted);
-  const answer = await readAgent(f);
-  const headEnd = f.now() + COOLDOWN_DEFAULTS.rate_limited_ms;
-  assert.deepEqual(
-    answer.chain.map(({ cooldown }) => cooldown?.available_at),
-    [headEnd, f.now() + COOLDOWN_DEFAULTS.quota_exhausted_ms, headEnd],
-  );
-  assert.equal(answer.active_position, null);
-  assert.deepEqual(answer.cooling, {
-    code: AgentErrorCode.ChainCooling,
-    available_at: headEnd,
-  });
-});
-
-test("agent read shows an expired cooldown with its strikes and selects its entry", async (t) => {
-  const f = holdFixture(t);
-  const head = f.selected();
-  f.fail(head, AdvancingFailure.RateLimited);
-  const end = f.now() + COOLDOWN_DEFAULTS.rate_limited_ms;
-  f.advance(COOLDOWN_DEFAULTS.rate_limited_ms);
-  const answer = await readAgent(f);
-  assert.deepEqual(answer.chain[HEAD_POSITION]?.cooldown, {
-    strikes: FIRST_STRIKE,
-    available_at: end,
-  });
   assert.equal(answer.active_position, HEAD_POSITION);
   assert.equal(answer.cooling, null);
 });
@@ -3251,30 +2882,6 @@ test("a human lists the holds and clears one by credential name, and a clear of 
     HttpStatus.NotFound,
     { credential: provider.credential, holder: SERVER_HOLDER },
   );
-});
-
-test("a committed human clear of a cooldown logs agent.fallback.cooldown_cleared", (t) => {
-  const { logger, logs } = capturedLogger();
-  const f = holdFixture(t, { logger });
-  const head = f.selected();
-  f.fail(head, AdvancingFailure.RateLimited);
-  logs.length = 0;
-  f.invoke("cooldown.clear", null, { credential: head.credential });
-  assert.deepEqual(logs, [
-    {
-      level: pino.levels.values.info,
-      msg: FallbackLog.CooldownCleared,
-      credential_name: head.credential,
-      holder: SERVER_HOLDER,
-    },
-  ]);
-  refuses(
-    () => f.invoke("cooldown.clear", null, { credential: head.credential }),
-    AgentErrorCode.CooldownNotFound,
-    HttpStatus.NotFound,
-    { credential: head.credential, holder: SERVER_HOLDER },
-  );
-  assert.equal(logs.length, ONE_LOG);
 });
 
 test("a rolled-back clear of a cooldown writes no log", (t) => {

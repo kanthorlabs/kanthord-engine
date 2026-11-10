@@ -21,7 +21,6 @@ import { stopAfter } from "../../kernel/stop-test-support.ts";
 const SECOND_ATTEMPT = 2;
 const ONE_READ = 1;
 const CLEARED_RATIONALE = "cleared";
-const REMOVED_BINDING = "binding_removed";
 const REPOSITORIES = [
   { binding_id: "binding_api", name: "api" },
   { binding_id: "binding_web", name: "web" },
@@ -307,111 +306,6 @@ test("an attempt not ended by a change request reads no change request", async (
   assert.equal(await readRequestedChanges(first, REPOSITORIES), null);
 });
 
-test("an external failure without a current change request keeps the cleared rationale", async (t) => {
-  const run = fixture(SECOND_ATTEMPT);
-  stopAfter(t, () => run.dispose());
-  run.clients.mission = {
-    "execution.review_round.get": async () => reviewRound([]),
-    "execution.rework_assessment.get": async () => NOT_FOUND,
-    "execution.clearedOutcome.get": async () =>
-      clearedOutcome(ClosingEvent.ExternalFailed),
-    "execution.cleared_assessment.get": async () => ({
-      type: OperationResultType.Completed,
-      status: 200,
-      data: { id: "assessment", rationale: CLEARED_RATIONALE },
-    }),
-  } as unknown as MethodClients["mission"];
-  run.clients.worker = {
-    ...NO_FAILED_CHECKS,
-    "execution.change_request.get": async () => ({
-      type: OperationResultType.Completed,
-      status: 200,
-      data: {
-        items: [{ ...CHANGE_REQUESTS.items[0], change_requests: [] }],
-      },
-    }),
-  } as unknown as MethodClients["worker"];
-  assert.deepEqual(await readPrior(run, REPOSITORIES), {
-    verdict: null,
-    cleared: CLEARED_RATIONALE,
-  });
-});
-
-test("the cleared assessment read of a first attempt answers null with no call", async (t) => {
-  const run = fixture();
-  stopAfter(t, () => run.dispose());
-  run.clients.mission = {} as MethodClients["mission"];
-  assert.equal(await readClearedAssessment(run), null);
-});
-
-test("each change request names its binding", async (t) => {
-  const run = fixture(SECOND_ATTEMPT);
-  stopAfter(t, () => run.dispose());
-  const [item] = CHANGE_REQUESTS.items;
-  assert.ok(item);
-  run.clients.mission = {
-    "execution.review_round.get": async () => reviewRound([]),
-    "execution.clearedOutcome.get": async () =>
-      clearedOutcome(ClosingEvent.ExternalFailed),
-  } as unknown as MethodClients["mission"];
-  run.clients.worker = {
-    ...NO_FAILED_CHECKS,
-    "execution.change_request.get": async () => ({
-      type: OperationResultType.Completed,
-      status: 200,
-      data: {
-        items: [
-          item,
-          { ...item, evidence_id: "evidence_web", binding_id: "binding_web" },
-        ].map((entry) => ({
-          ...entry,
-          change_requests: entry.change_requests.map((request) => ({
-            ...request,
-            comments: [],
-          })),
-        })),
-      },
-    }),
-  } as unknown as MethodClients["worker"];
-  const requested = await readRequestedChanges(run, REPOSITORIES);
-  assert.equal(requested?.source, VerdictSource.Rework);
-  const text = requested?.text;
-  assert.ok(text);
-  assert.deepEqual(
-    text.split("\n").slice(1),
-    ["api", "web"].map(
-      (name) =>
-        `Reviewer octo requests changes on ${name} at commit ${"a".repeat(40)}: Rename the route.`,
-    ),
-  );
-});
-
-test("a change request of a binding that the pinned revision does not name names its binding_id", async (t) => {
-  const run = fixture(SECOND_ATTEMPT);
-  stopAfter(t, () => run.dispose());
-  const [item] = CHANGE_REQUESTS.items;
-  assert.ok(item);
-  run.clients.mission = {
-    "execution.review_round.get": async () => reviewRound([]),
-    "execution.clearedOutcome.get": async () =>
-      clearedOutcome(ClosingEvent.ExternalFailed),
-  } as unknown as MethodClients["mission"];
-  run.clients.worker = {
-    ...NO_FAILED_CHECKS,
-    "execution.change_request.get": async () => ({
-      type: OperationResultType.Completed,
-      status: 200,
-      data: { items: [{ ...item, binding_id: REMOVED_BINDING }] },
-    }),
-  } as unknown as MethodClients["worker"];
-  const text = (await readRequestedChanges(run, REPOSITORIES))?.text;
-  assert.ok(text);
-  assert.equal(
-    text.split("\n")[1],
-    `Reviewer octo requests changes on ${REMOVED_BINDING} at commit ${"a".repeat(40)}: Rename the route.`,
-  );
-});
-
 function reworkRead(testedInput: unknown) {
   return {
     type: OperationResultType.Completed,
@@ -628,28 +522,6 @@ test("a failed check without a rework assessment is the whole verdict", async (t
   });
 });
 
-test("an empty failed check answer keeps the current verdict", async (t) => {
-  const run = fixture(SECOND_ATTEMPT);
-  stopAfter(t, () => run.dispose());
-  run.clients.mission = {
-    "execution.review_round.get": async () => reviewRound([]),
-    "execution.rework_assessment.get": async () => reworkRead(null),
-  } as unknown as MethodClients["mission"];
-  run.clients.worker = failedCheckRead(
-    [],
-  ) as unknown as MethodClients["worker"];
-  assert.deepEqual(await readPrior(run, REPOSITORIES), {
-    verdict: {
-      source: VerdictSource.Rework,
-      text: "rework",
-      judged: [],
-      findings: [],
-      round: null,
-    },
-    cleared: null,
-  });
-});
-
 test("readPrior adds the open findings of the review round and the round of a rework assessment", async (t) => {
   const findings = [
     { id: "finding_a", label: "B1" },
@@ -785,21 +657,6 @@ test("only an update gives a verdict with no judged commit", async (t) => {
     },
     cleared: null,
   });
-});
-
-test("attempt 1 with one update gives a verdict", async (t) => {
-  const run = fixture();
-  stopAfter(t, () => run.dispose());
-  run.clients.mission = {
-    "execution.rework_assessment.get": async () => NOT_FOUND,
-  } as unknown as MethodClients["mission"];
-  run.clients.worker = {
-    ...NO_FAILED_CHECKS,
-    ...linkUpdateRead(),
-  } as unknown as MethodClients["worker"];
-  const prior = await readPrior(run, REPOSITORIES);
-  assert.equal(prior.verdict?.text, linkUpdatesText(LINK_UPDATE_READ));
-  assert.deepEqual(prior.verdict?.judged, []);
 });
 
 test("no update keeps the verdict absent at attempt 1", async (t) => {

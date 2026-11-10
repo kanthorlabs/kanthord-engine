@@ -91,6 +91,63 @@ function operationUrl(endpoint: string, path: string): URL {
   return new URL(path.slice(1), base);
 }
 
+interface OperationInput {
+  params: Record<string, unknown>;
+  query: Record<string, unknown>;
+  body: unknown;
+}
+
+type ClientToken = string | (() => string | undefined) | undefined;
+
+function appendQuery(url: URL, query: Record<string, unknown>): void {
+  for (const [key, value] of Object.entries(query))
+    for (const entry of Array.isArray(value) ? value : [value])
+      if (entry !== undefined) url.searchParams.append(key, String(entry));
+}
+
+function requestUrl(
+  endpoint: string,
+  operation: Operation,
+  input: OperationInput,
+): URL {
+  const path = operation.path.replace(/:([^/]+)/g, (_, key: string) =>
+    encodeURIComponent(String(input.params[key])),
+  );
+  const url = operationUrl(endpoint, path);
+  appendQuery(url, input.query);
+  return url;
+}
+
+function requestHeaders(
+  operation: Operation,
+  options: ClientOptions,
+  token: ClientToken,
+): Headers {
+  const headers = new Headers();
+  const bearer = isString(token) ? token : token?.();
+  if (bearer) headers.set("Authorization", `Bearer ${bearer}`);
+  if (options.idempotencyKey)
+    headers.set("Idempotency-Key", options.idempotencyKey);
+  if (options.traceparent) headers.set("traceparent", options.traceparent);
+  if (options.tracestate) headers.set("tracestate", options.tracestate);
+  if (operation.body) headers.set("Content-Type", "application/json");
+  return headers;
+}
+
+function isStreamed(operation: Operation, response: Response): boolean {
+  return operation.lifetime === OperationLifetime.Stream && response.ok;
+}
+
+async function responseBody(
+  operation: Operation,
+  response: Response,
+): Promise<unknown> {
+  if (response.status === HttpStatus.NoContent) return null;
+  return operation.contentType && response.ok
+    ? await response.text()
+    : await response.json();
+}
+
 export function httpClient<T extends Record<string, Operation>>(
   operations: T,
   endpoint: string,
@@ -100,26 +157,9 @@ export function httpClient<T extends Record<string, Operation>>(
   return createClient(operations, async (operation, raw, options) => {
     const parsed = operation.input.safeParse(raw);
     if (!parsed.success) return inputValidationFailure(parsed.error);
-    const input = parsed.data as {
-      params: Record<string, unknown>;
-      query: Record<string, unknown>;
-      body: unknown;
-    };
-    const path = operation.path.replace(/:([^/]+)/g, (_, key: string) =>
-      encodeURIComponent(String(input.params[key])),
-    );
-    const url = operationUrl(endpoint, path);
-    for (const [key, value] of Object.entries(input.query))
-      for (const entry of Array.isArray(value) ? value : [value])
-        if (entry !== undefined) url.searchParams.append(key, String(entry));
-    const headers = new Headers();
-    const bearer = isString(token) ? token : token?.();
-    if (bearer) headers.set("Authorization", `Bearer ${bearer}`);
-    if (options.idempotencyKey)
-      headers.set("Idempotency-Key", options.idempotencyKey);
-    if (options.traceparent) headers.set("traceparent", options.traceparent);
-    if (options.tracestate) headers.set("tracestate", options.tracestate);
-    if (operation.body) headers.set("Content-Type", "application/json");
+    const input = parsed.data as OperationInput;
+    const url = requestUrl(endpoint, operation, input);
+    const headers = requestHeaders(operation, options, token);
     const context = new CancellationContext(
       options.context ?? background,
       Date.now() + operation.timeoutMs + DEADLINE_GRACE_MS,
@@ -134,19 +174,14 @@ export function httpClient<T extends Record<string, Operation>>(
         signal: context.signal,
         redirect: "error",
       });
-      if (operation.lifetime === OperationLifetime.Stream && response.ok) {
+      if (isStreamed(operation, response)) {
         const body = retainResponse(response, dispose);
         streaming = true;
         return { status: response.status, body };
       }
       return {
         status: response.status,
-        body:
-          response.status === HttpStatus.NoContent
-            ? null
-            : operation.contentType && response.ok
-              ? await response.text()
-              : await response.json(),
+        body: await responseBody(operation, response),
       };
     } finally {
       if (!streaming) dispose();

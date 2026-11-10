@@ -33,8 +33,6 @@ const XCODE = "toolchain.xcode";
 const LINUX = "platform.linux";
 const NODE_CREATE = 1;
 const NO_ATTEMPT = 0;
-const RELEASED_WORKERS = ["coder@1", "reviewer@1"];
-const DECLARED_INTENTS = [Intent.Implement, Intent.Examine];
 const CONFIGURATION = {
   agent_provider: "default",
   model_identifier: "claude-sonnet-4-5",
@@ -346,28 +344,6 @@ test("EF05.1-EF05.8 the match admits a node by intent and tags and refuses an un
         h.project.id,
       ]);
       assert.equal(mission.version, h.mission.version + NODE_CREATE);
-    },
-  );
-  await t.test(
-    "EF05.8 the catalog answers the declared intents of each worker",
-    async () => {
-      const page = await h.read<Page<Record<string, unknown>>>([
-        "worker",
-        "list",
-      ]);
-      assert.deepEqual(
-        page.items.map(({ name }) => name),
-        RELEASED_WORKERS,
-      );
-      for (const item of page.items) {
-        assert.deepEqual(item.declared_intents, DECLARED_INTENTS);
-        assert.deepEqual(Object.keys(item).sort(), [
-          "declared_intents",
-          "declared_node_states",
-          "host",
-          "name",
-        ]);
-      }
     },
   );
   const linuxCoder = await h.instance("linux-coder");

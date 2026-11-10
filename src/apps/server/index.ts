@@ -263,7 +263,7 @@ export function projectScopedIntakeInventory(
   };
 }
 
-export function composeServices(options: {
+interface ComposeServicesOptions {
   config: ServerConfig;
   store: Store;
   trackingStore: Store;
@@ -296,19 +296,85 @@ export function composeServices(options: {
   repositoryFiles?: RepositoryFiles;
   handoverRefreshWaitMs?: number;
   promptBase?: PromptBase;
-}) {
-  const repoConnector =
+}
+
+function repositoryConnectorOf(
+  options: ComposeServicesOptions,
+): RepositoryConnector {
+  return (
     options.repositoryConnector ??
     new RepositoryComponent({
       health: options.health,
       checkTools: checkServerRepositoryTools,
-    });
+    })
+  );
+}
+
+function repositoryComponentOf(
+  connector: RepositoryConnector,
+): RepositoryComponent {
+  return connector instanceof RepositoryComponent
+    ? connector
+    : new RepositoryComponent();
+}
+
+function containerSlotDriverOf(
+  options: ComposeServicesOptions,
+  containerDriver: ContainerDriver,
+): SlotDriver {
+  return options.containerSlotDriver?.(containerDriver) ?? containerDriver;
+}
+
+function intakeLimitsOf(limits: ComposeServicesOptions["intake"]) {
+  return {
+    pendingEventLimit: limits?.pendingEventLimit,
+    pollIntervalMs: limits?.pollIntervalMs,
+  };
+}
+
+interface InventoryServices {
+  llm: InventorySource;
+  agent: InventorySource;
+  repositoryCredentials: InventorySource;
+  storage: InventorySource;
+  worker: InventorySource;
+  project: ProjectService;
+  intake: IntakeService;
+  intakeCredentials: InventorySource;
+}
+
+interface InventorySource {
+  resourceInventory(tx: Transaction): ResourceEntry[];
+}
+
+function inventorySources(
+  services: InventoryServices,
+  overrides: ComposeServicesOptions["inventoryOverrides"],
+): ResourceInventories {
+  const given = overrides ?? {};
+  return {
+    llm: given.llm ?? ((tx) => services.llm.resourceInventory(tx)),
+    agent: given.agent ?? ((tx) => services.agent.resourceInventory(tx)),
+    repository:
+      given.repository ??
+      ((tx) => services.repositoryCredentials.resourceInventory(tx)),
+    storage: given.storage ?? ((tx) => services.storage.resourceInventory(tx)),
+    worker: given.worker ?? ((tx) => services.worker.resourceInventory(tx)),
+    project: given.project ?? ((tx) => services.project.resourceInventory(tx)),
+    intake:
+      given.intake ??
+      ((tx) => [
+        ...projectScopedIntakeInventory(services.intake, services.project)(tx),
+        ...services.intakeCredentials.resourceInventory(tx),
+      ]),
+  };
+}
+
+export function composeServices(options: ComposeServicesOptions) {
+  const repoConnector = repositoryConnectorOf(options);
   const github = new platformImplementations.github(options.github);
   const s3 = new storageImplementations.s3();
-  const repositoryComponent =
-    repoConnector instanceof RepositoryComponent
-      ? repoConnector
-      : new RepositoryComponent();
+  const repositoryComponent = repositoryComponentOf(repoConnector);
   const gitWriter: GitWriter =
     options.repositoryTransport ?? repositoryComponent;
   const envelopeKey = deriveEnvelopeKey(options.config.master_key);
@@ -426,8 +492,7 @@ export function composeServices(options: {
     footprintUsage: (signal) => environmentImages.footprintUsage(signal),
     removeImage: (reference) => environmentImages.removeImage(reference),
   };
-  const containerSlotDriver =
-    options.containerSlotDriver?.(containerDriver) ?? containerDriver;
+  const containerSlotDriver = containerSlotDriverOf(options, containerDriver);
   const serverSlotDriver = options.serverSlotDriver ?? threadDriver;
   const workerPool = new WorkerPool({
     drivers: new Map<PoolPlacement, SlotDriver>([
@@ -1275,8 +1340,7 @@ export function composeServices(options: {
         { params: {}, query: {}, body: input },
         counterOptions,
       ),
-    pendingEventLimit: options.intake?.pendingEventLimit,
-    pollIntervalMs: options.intake?.pollIntervalMs,
+    ...intakeLimitsOf(options.intake),
   });
   const workbench = new WorkbenchService({
     store: options.store,
@@ -1431,32 +1495,22 @@ export function composeServices(options: {
     registry,
     () =>
       options.store.transaction((tx) =>
-        collectInventories(tx, {
-          llm:
-            options.inventoryOverrides?.llm ??
-            ((tx) => llm.resourceInventory(tx)),
-          agent:
-            options.inventoryOverrides?.agent ??
-            ((tx) => agent.resourceInventory(tx)),
-          repository:
-            options.inventoryOverrides?.repository ??
-            ((tx) => repositoryCredentials.resourceInventory(tx)),
-          storage:
-            options.inventoryOverrides?.storage ??
-            ((tx) => storage.resourceInventory(tx)),
-          worker:
-            options.inventoryOverrides?.worker ??
-            ((tx) => worker.resourceInventory(tx)),
-          project:
-            options.inventoryOverrides?.project ??
-            ((tx) => project.resourceInventory(tx)),
-          intake:
-            options.inventoryOverrides?.intake ??
-            ((tx) => [
-              ...projectScopedIntakeInventory(intake, project)(tx),
-              ...intakeCredentials.resourceInventory(tx),
-            ]),
-        }),
+        collectInventories(
+          tx,
+          inventorySources(
+            {
+              llm,
+              agent,
+              repositoryCredentials,
+              storage,
+              worker,
+              project,
+              intake,
+              intakeCredentials,
+            },
+            options.inventoryOverrides,
+          ),
+        ),
       ),
     options.logger,
   );

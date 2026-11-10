@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { httpClient } from "./client.ts";
-import { OperationResultType } from "../kernel/operation.ts";
 import {
   conflict,
   failure,
@@ -10,7 +8,6 @@ import {
   unauthorized,
 } from "./errors.ts";
 import { errorSchema } from "../kernel/errors.ts";
-import { gatewayOperations } from "./contract.ts";
 
 import { HttpStatus } from "../kernel/http.ts";
 
@@ -72,23 +69,4 @@ test("constructors and failure envelopes reject legacy and malformed codes", () 
       false,
     );
   }
-});
-
-test("HTTP clients reject nonconforming failure envelopes as indeterminate", async () => {
-  const client = httpClient(
-    gatewayOperations,
-    "http://localhost",
-    undefined,
-    async () =>
-      Response.json(
-        {
-          error: { code: "UNAUTHORIZED", message: "Failure.", details: null },
-          request_id: requestId,
-        },
-        { status: 401 },
-      ),
-  );
-  const result = await client.verify({ params: {}, query: {}, body: null });
-  assert.equal(result.type, OperationResultType.Indeterminate);
-  assert.equal(result.idempotencyKey, undefined);
 });

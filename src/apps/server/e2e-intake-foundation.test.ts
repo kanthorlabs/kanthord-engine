@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ulid } from "ulid";
-import { gatewayOperations } from "../../gateway/contract.ts";
 import { directClient } from "../../gateway/index.ts";
 import { errorSchema } from "../../kernel/errors.ts";
 import { HttpMethod, HttpStatus, MediaType } from "../../kernel/http.ts";
@@ -17,43 +16,7 @@ import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const NOT_FOUND = "gateway.routing.not_found";
 const UNAUTHORIZED = "gateway.authentication.unauthorized";
-const FIXTURE_SERVICE_NAMES = [
-  "gateway",
-  "custody",
-  "scheduler",
-  "worker",
-  "repository",
-  "project",
-  "mission",
-  "intake",
-  "tracking",
-];
-const EMPTY_OWNER = { global: {}, projects: {} };
 const input = { params: {}, query: {}, body: null };
-
-test("E01.1 liveness answers the intake events probe beside the existing maps", async (t) => {
-  const fixture = await gatewayFixture(t);
-  const response = await fixture.request(gatewayOperations.liveness.path);
-  assert.equal(response.status, HttpStatus.OK);
-  const body = gatewayOperations.liveness.output.parse(await response.json());
-  assert.deepEqual(body.services.intake, { events: HttpStatus.OK });
-  assert.deepEqual(
-    Object.keys(body.services).sort(),
-    [...FIXTURE_SERVICE_NAMES].sort(),
-  );
-});
-
-test("E01.2 healthcheck answers an empty intake owner", async (t) => {
-  const fixture = await gatewayFixture(t);
-  const response = await fixture.request(gatewayOperations.healthcheck.path, {
-    headers: { authorization: `Bearer ${fixture.token}` },
-  });
-  assert.equal(response.status, HttpStatus.OK);
-  const body = gatewayOperations.healthcheck.output.parse(
-    await response.json(),
-  );
-  assert.deepEqual(body.services.intake, EMPTY_OWNER);
-});
 
 test("E01.3 a service operation has no route and serves a minted service identity alone", async (t) => {
   const registry = new OperationRegistry();

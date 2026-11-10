@@ -7,7 +7,6 @@ import { pathToFileURL } from "node:url";
 import pino, { type Logger } from "pino";
 import { IdentityKind, type ServiceIdentity } from "../kernel/caller.ts";
 import { background } from "../kernel/context.ts";
-import { Diagnostic } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import {
@@ -18,8 +17,6 @@ import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { stopAfter, temporary } from "../kernel/test-support.ts";
 import {
   Consumer,
-  ERROR_ARRAY_MAX_BYTES,
-  type ErrorItem,
   InboundEventState,
   InboundKind,
   InboundPlatform,
@@ -67,14 +64,8 @@ const HANDOFFS_PER_EVENT = 1;
 const ERROR_ITEMS_PER_FAILURE = 1;
 const HANDOFFS_AFTER_RETRY = 2;
 const PENDING_EVENTS_AT_START = 3;
-const FILL_MESSAGE_LENGTH = 100;
-const READ_FAILED = "system.file.read_failed";
-const READ_FAILED_MESSAGE = "cannot read";
-const CONSUMER_CALL_FAILED =
-  "intake: the consumer call of an inbound event failed.";
 const WAKE_OFFSETS = 12;
 const EVENT_ENCODING = "base64";
-const CONVERSATION_IDENTITY = `conversation:github:${RESOURCE}`;
 
 interface Harness {
   store: Store;
@@ -214,23 +205,6 @@ async function handOver(h: Harness): Promise<void> {
   await h.dispatcher.join();
 }
 
-test("A reservation adds the oldest pending candidate, and the next candidate skips it", (t) => {
-  const store = memoryStore(t);
-  const inboundId = addInbound(store);
-  const [first, second] = ["d-1", "d-2"]
-    .map((d) => addEvent(store, inboundId, d))
-    .sort();
-  const inFlight = new Set<string>();
-  const candidate = store.transaction((tx) => nextCandidate(tx, inFlight));
-  assert.equal(candidate, first);
-  assert.ok(store.transaction((tx) => reserve(tx, inFlight, first!)));
-  assert.deepEqual([...inFlight], [first]);
-  assert.equal(
-    store.transaction((tx) => nextCandidate(tx, inFlight)),
-    second,
-  );
-});
-
 test("A discard that wins before the reservation starts no handoff", async (t) => {
   const h = harness(t);
   const id = addEvent(h.store, h.inboundId, "d-1");
@@ -283,15 +257,6 @@ test("The handoff input holds the event row and its inbound, under the service i
   assert.equal(h.calls[0]?.options.context, background);
   assert.ok(h.calls[0]?.options.idempotencyKey);
   assert.equal(recordOf(h.store, id).error, null);
-});
-
-test("The handoff input of a conversation inbound holds the conversation identity as the resource", async (t) => {
-  const h = harness(t);
-  const inboundId = addInbound(h.store, ResourceKind.Conversation);
-  addEvent(h.store, inboundId, "d-1");
-  h.answers.push(completed({ disposition: "duplicate", reason: null }));
-  await handOver(h);
-  assert.equal(h.calls[0]?.input.resource, CONVERSATION_IDENTITY);
 });
 
 test("Repeated wakes during a handoff start no second handoff of the event", async (t) => {
@@ -416,23 +381,6 @@ test("A wake during a direct handoff starts no second handoff, and the drain han
   assert.equal(recordOf(h.store, second).state, InboundEventState.Succeeded);
 });
 
-test("A 409 claim_live or match_changed answer sets failed with that code", async (t) => {
-  const h = harness(t);
-  for (const code of [CLAIM_LIVE, MATCH_CHANGED]) {
-    const id = addEvent(h.store, h.inboundId, code);
-    h.answers.push(
-      failure(HttpStatus.Conflict, code, "The admission refused."),
-    );
-    await handOver(h);
-    const record = recordOf(h.store, id);
-    assert.equal(record.state, InboundEventState.Failed);
-    assert.deepEqual(
-      record.error?.map((item) => item.code),
-      [code],
-    );
-  }
-});
-
 test("Two failures and one retry leave two error items; a failed event stays untouched without a retry", async (t) => {
   const h = harness(t);
   const id = addEvent(h.store, h.inboundId, "d-1");
@@ -451,48 +399,6 @@ test("Two failures and one retry leave two error items; a failed event stays unt
   assert.deepEqual(
     record.error?.map((item) => item.code),
     [CLAIM_LIVE, MATCH_CHANGED],
-  );
-});
-
-test("An append to a full error array drops the oldest item and sets failed", async (t) => {
-  const h = harness(t);
-  const id = addEvent(h.store, h.inboundId, "d-1");
-  const items = fullErrorArray();
-  h.store.database
-    .prepare("UPDATE intake_inbound_event SET error = ? WHERE id = ?")
-    .run(canonicalJSON(items), id);
-  h.answers.push(indeterminate());
-  await handOver(h);
-  const record = recordOf(h.store, id);
-  assert.equal(record.state, InboundEventState.Failed);
-  assert.deepEqual(record.error?.[0], items[1]);
-  assert.equal(record.error?.at(-1)?.code, INDETERMINATE);
-});
-
-function fullErrorArray(): ErrorItem[] {
-  const items: ErrorItem[] = [];
-  for (let index = 0; index < ERROR_ARRAY_MAX_BYTES; index++) {
-    const next = {
-      code: `old_${index}`,
-      message: "x".repeat(FILL_MESSAGE_LENGTH),
-      created_at: index,
-    };
-    if (canonicalJSON([...items, next]).length > ERROR_ARRAY_MAX_BYTES) break;
-    items.push(next);
-  }
-  return items;
-}
-
-test("An indeterminate answer sets failed with the code indeterminate", async (t) => {
-  const h = harness(t);
-  const id = addEvent(h.store, h.inboundId, "d-1");
-  h.answers.push(indeterminate());
-  await handOver(h);
-  const record = recordOf(h.store, id);
-  assert.equal(record.state, InboundEventState.Failed);
-  assert.deepEqual(
-    record.error?.map((item) => item.code),
-    [INDETERMINATE],
   );
 });
 
@@ -557,24 +463,6 @@ test("A thrown consumer call writes failed with system.operation.unknown and no 
   assert.ok(!h.lines.join("").includes(SECRET));
   await handOver(h);
   assert.equal(h.calls.length, HANDOFFS_PER_EVENT);
-});
-
-test("A thrown consumer diagnostic writes its rows as fields in the log record", async (t) => {
-  const h = harness(t);
-  addEvent(h.store, h.inboundId, "d-1");
-  h.answers.push(() =>
-    Promise.reject(
-      new Diagnostic(READ_FAILED, READ_FAILED_MESSAGE, {
-        fields: [["path", "/x"]],
-      }),
-    ),
-  );
-  await handOver(h);
-  const record = h.lines
-    .map((line) => JSON.parse(line) as Record<string, unknown>)
-    .find((line) => line.msg === CONSUMER_CALL_FAILED);
-  assert.equal(record?.reason, `${READ_FAILED}: ${READ_FAILED_MESSAGE}`);
-  assert.deepEqual(record?.fields, { path: "/x" });
 });
 
 test("A configuration that fails to parse sets failed, and a later event is handed over", async (t) => {

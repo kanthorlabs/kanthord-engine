@@ -135,6 +135,14 @@ export function framingPart(
   );
 }
 
+function shippedRole(name: string): string | null {
+  if (!name.endsWith(MARKDOWN_EXTENSION)) return null;
+  return (
+    getAgentDeclaration(name.slice(0, -MARKDOWN_EXTENSION.length))
+      ?.agent_prompt ?? null
+  );
+}
+
 export function shippedText(
   reference: Pick<PromptReference, "part" | "name">,
 ): string | null {
@@ -147,12 +155,8 @@ export function shippedText(
     return name === STANDARD_FILE ? BASE_PROMPT : null;
   if (part === PromptPart.Workbench)
     return name === WORKBENCH_FILE ? WORKBENCH_PROMPT : null;
-  if (part !== PromptPart.Role || !name.endsWith(MARKDOWN_EXTENSION))
-    return null;
-  return (
-    getAgentDeclaration(name.slice(0, -MARKDOWN_EXTENSION.length))
-      ?.agent_prompt ?? null
-  );
+  if (part !== PromptPart.Role) return null;
+  return shippedRole(name);
 }
 
 export async function resolveAgentPrompt(

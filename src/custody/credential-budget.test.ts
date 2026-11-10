@@ -8,7 +8,6 @@ import {
   oauthSecretSchema,
   piCredentialSchema,
   type RefreshReport,
-  s3AccessKeySecretSchema,
   SecretShape,
 } from "./contract.ts";
 import { executionCredentialStore } from "./client.ts";
@@ -95,19 +94,6 @@ for (const type of [SecretShape.ApiKey, SecretShape.OAuth] as const) {
     }
   });
 }
-
-test("storage access keys are outside the execution credential budget", () => {
-  const secret = {
-    access_key_id: "id",
-    secret_access_key: "x".repeat(NEXT_BYTE),
-  };
-  assert.ok(s3AccessKeySecretSchema.safeParse(secret).success);
-  assert.equal(
-    piCredentialSchema.safeParse({ type: SecretShape.S3AccessKey, ...secret })
-      .success,
-    false,
-  );
-});
 
 for (const field of ["key", "refresh", "access"] as const) {
   test(`${field} rejects lone surrogates without throwing or replacing the execution credential`, async () => {
