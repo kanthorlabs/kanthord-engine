@@ -44,6 +44,7 @@ const TWO_TURNS = 2;
 const ONE_TURN = 1;
 const ONE_COMMAND = 1;
 const TWO_TOOL_TURNS = 4;
+const FOUR_TURNS = 4;
 const TWO_BINDINGS = ["api", "web"];
 const BASE_FILE = "other";
 const FETCH_DEADLINE_MS = 20000;
@@ -561,7 +562,7 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
       JSON.parse(end.stop.detail!).rule,
       NoProgressRule.UnchangedRevision,
     );
-    assert.equal(h.provider.calls.length, TWO_TOOL_TURNS);
+    assert.equal(h.provider.calls.length, FOUR_TURNS);
   });
 
   test("an attempt with only a link update plans the node unit with the link updates text and no verdict rule", async (t) => {
