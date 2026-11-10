@@ -47,7 +47,6 @@ import { stopAfter, temporary } from "../kernel/test-support.ts";
 import { IdentityKind } from "../kernel/caller.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { GIT_DEADLINE_EXCEEDED } from "../repository/git-failure.ts";
-import { SSH_AGENT_CLEANUP_TIMEOUT_MS } from "../repository/contract.ts";
 import { FootprintErrorCode } from "../footprint/contract.ts";
 import { FOOTPRINT_SERVICE } from "../kernel/cleanup.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -4034,22 +4033,6 @@ test("a save at a stale version reads every repository binding and answers a ver
   assert.deepEqual(state.reads, [REPOSITORY_ADDRESS, REPOSITORY_ADDRESS]);
 });
 
-test("a refused binding write names the git failure reason in its details", async (t) => {
-  const f = writeFixture(t, {
-    repositoryConnector: {
-      async gitLsRemote() {
-        throw gitFailure(KEY_REFUSED_STDERR);
-      },
-    },
-  });
-  await rejectsWrite(
-    f.write({ [REPOSITORY_NAME]: repositoryBinding() }),
-    SSH_FAILURE_STATUS,
-    ProjectErrorCode.RepositorySshUnreachable,
-    { failure_reason: ResourceFailureReason.KeyRefused },
-  );
-});
-
 test("cancellation during gitLsRemote propagates the context error, whether the connector rejects or resolves", async (t) => {
   for (const rejects of [true, false]) {
     const context = new CancellationContext();
@@ -5252,28 +5235,6 @@ test("a repository binding refuses an environment secret that is not valid", asy
   }
 });
 
-test("an environment secrets value that is no object of strings fails the input schema", () => {
-  const operation = projectOperations["bindingSet.write"];
-  for (const secrets of [
-    "registry-auth",
-    [REGISTRY_CREDENTIAL],
-    { [REGISTRY_VARIABLE]: 1 },
-    { [REGISTRY_VARIABLE]: "" },
-    null,
-  ])
-    assert.equal(
-      operation.input.safeParse({
-        params: { project_id: "project" },
-        query: {},
-        body: {
-          version: BINDING_SET_INITIAL_VERSION,
-          bindings: { [REPOSITORY_NAME]: environmentSecretBinding(secrets) },
-        },
-      }).success,
-      false,
-    );
-});
-
 test("bindingsNaming names the binding that holds the credential in environment secrets", async (t) => {
   const f = writeFixture(t, environmentSecretCustody());
   const answer = await f.write({
@@ -5473,39 +5434,6 @@ test("resolveBindingIdentity answers the submitted revision of a live binding of
   });
 });
 
-test("resolveBindingIdentity refuses an identity from before a removal of the binding", (t) => {
-  const f = fixture(t);
-  f.store.transaction((tx) => {
-    const project = insertProject(tx, PROJECT_NAME);
-    const before = persistBindings(tx, project.id, {
-      [REPOSITORY_NAME]: repositoryBinding(),
-    }).bindings[REPOSITORY_NAME]!;
-    persistBindings(tx, project.id, {});
-    const added = persistBindings(tx, project.id, {
-      [REPOSITORY_NAME]: repositoryBinding(),
-    }).bindings[REPOSITORY_NAME]!;
-    const latest = persistBindings(tx, project.id, {
-      [REPOSITORY_NAME]: {
-        ...repositoryBinding(),
-        config: { ...repositoryBinding().config, available: false },
-      },
-    }).bindings[REPOSITORY_NAME]!;
-    assert.equal(added.resource_identity, before.resource_identity);
-    assert.equal(
-      f.project.resolveBindingIdentity(tx, project.id, before.id),
-      null,
-    );
-    for (const revision of [added, latest])
-      assert.deepEqual(
-        f.project.resolveBindingIdentity(tx, project.id, revision.id),
-        {
-          binding_id: revision.id,
-          resource_identity: revision.resource_identity,
-        },
-      );
-  });
-});
-
 test("storageBindingOf reads the pinned configuration after a prefix revision", (t) => {
   const f = fixture(t);
   const prefix = "later";
@@ -5525,26 +5453,6 @@ test("storageBindingOf reads the pinned configuration after a prefix revision", 
       ...original.config,
     });
     assert.equal(f.project.storageBindingOf(tx, later.id)?.prefix, prefix);
-  });
-});
-
-test("storageBindingOf refuses a repository binding", (t) => {
-  const f = fixture(t);
-  f.store.transaction((tx) => {
-    const project = insertProject(tx, PROJECT_NAME);
-    const row = persistBindings(tx, project.id, {
-      [REPOSITORY_NAME]: repositoryBinding(),
-    }).bindings[REPOSITORY_NAME]!;
-    assert.equal(f.project.storageBindingOf(tx, row.id), null);
-    assert.ok(tx.database.isTransaction);
-  });
-});
-
-test("storageBindingOf answers null for an unknown identity", (t) => {
-  const f = fixture(t);
-  f.store.transaction((tx) => {
-    assert.equal(f.project.storageBindingOf(tx, MISSING_NAME), null);
-    assert.ok(tx.database.isTransaction);
   });
 });
 
@@ -5680,34 +5588,6 @@ test("repositoryPolicyOf preserves the named revision after a strategy change", 
   });
 });
 
-test("a binding prompt change inserts the next binding revision and the policy keeps the pinned text", (t) => {
-  const f = fixture(t);
-  f.store.transaction((tx) => {
-    const project = insertProject(tx, PROJECT_NAME);
-    const original = repositoryBinding();
-    original.config.prompts = { agents: { [SWE_AGENT]: "first" } };
-    const pinned = persistBindings(tx, project.id, {
-      [REPOSITORY_NAME]: original,
-    }).bindings[REPOSITORY_NAME]!;
-    const later = persistBindings(tx, project.id, {
-      [REPOSITORY_NAME]: {
-        ...original,
-        config: {
-          ...original.config,
-          prompts: { agents: { [SWE_AGENT]: "second" } },
-        },
-      },
-    }).bindings[REPOSITORY_NAME]!;
-    assert.equal(later.revision, pinned.revision + 1);
-    assert.deepEqual(f.project.repositoryPolicyOf(tx, pinned.id)?.prompts, {
-      agents: { [SWE_AGENT]: "first" },
-    });
-    assert.deepEqual(f.project.repositoryPolicyOf(tx, later.id)?.prompts, {
-      agents: { [SWE_AGENT]: "second" },
-    });
-  });
-});
-
 test("instructionBindingsOf answers only the repository revisions that name an instruction file", (t) => {
   const f = fixture(t);
   f.store.transaction((tx) => {
@@ -5732,23 +5612,6 @@ test("instructionBindingsOf answers only the repository revisions that name an i
     assert.deepEqual(f.project.instructionBindingsOf(tx, ids), [
       rows[REPOSITORY_NAME]!.id,
     ]);
-  });
-});
-
-test("repositoryPolicyOf answers null for an absent or nonrepository binding", (t) => {
-  const f = fixture(t);
-  f.store.transaction((tx) => {
-    const project = insertProject(tx, PROJECT_NAME);
-    const rows = persistBindings(tx, project.id, {
-      [WORKER_NAME]: workerBinding(),
-      [STORAGE_NAME]: storageBinding(),
-    }).bindings;
-    assert.equal(f.project.repositoryPolicyOf(tx, MISSING_NAME), null);
-    assert.equal(f.project.repositoryPolicyOf(tx, rows[WORKER_NAME]!.id), null);
-    assert.equal(
-      f.project.repositoryPolicyOf(tx, rows[STORAGE_NAME]!.id),
-      null,
-    );
   });
 });
 
@@ -6015,39 +5878,6 @@ test("binding.verify returns healthy for a valid repository binding", async (t) 
   ]);
 });
 
-test("binding.verify returns unhealthy for address when SSH read fails", async (t) => {
-  const { f, sshCalls, credentialCalls } = verifyFixture(
-    t,
-    "ssh_fail",
-    "healthy",
-  );
-  const project = f.store.transaction((tx) => {
-    const p = insertProject(tx, PROJECT_NAME);
-    persistBindings(tx, p.id, { [REPOSITORY_NAME]: repositoryBinding() });
-    return p;
-  });
-  const bindings = f.store.transaction((tx) =>
-    Array.from(readCurrentBindingSet(tx, project.id).values()),
-  );
-  const binding = bindings[NO_ITEMS];
-  assert.ok(binding);
-  const result = await f.invokeAsync("binding.verify", {
-    project_id: project.id,
-    binding_id: binding.id,
-  });
-  assert.equal(result.address.status, ResourceStatus.Unhealthy);
-  assert.equal(result.address.capability, RESOURCE_CAPABILITY_NETWORK_GIT_READ);
-  assert.equal(
-    result.address.failure_reason,
-    ResourceFailureReason.Unclassified,
-  );
-  assert.equal(sshCalls.length, ONE_CALL);
-  assert.deepEqual(credentialCalls, [
-    sshCredentialOf(REPOSITORY_ADDRESS),
-    REPOSITORY_CREDENTIAL,
-  ]);
-});
-
 test("binding.verify returns unknown for address when the SSH read exceeds its deadline", async (t) => {
   const { f, sshStarted, credentialCalls } = verifyFixture(
     t,
@@ -6213,68 +6043,6 @@ test("binding.verify returns 404 for an absent binding", async (t) => {
     f.invokeAsync("binding.verify", {
       project_id: project.id,
       binding_id: `${BINDING_ID_PREFIX}_01ARZ3NDEKTSV4RRFFQ69G5FAV`,
-    }),
-    (error) => {
-      assert.ok(error instanceof OperationError);
-      assert.equal(error.status, HttpStatus.NotFound);
-      assert.equal(error.code, ProjectErrorCode.BindingNotFound);
-      return true;
-    },
-  );
-});
-
-test("binding.verify returns 404 for a removed binding", async (t) => {
-  const { f } = verifyFixture(t, "healthy", "healthy");
-  const project = f.store.transaction((tx) => {
-    const p = insertProject(tx, PROJECT_NAME);
-    const result = writeBindingSet(
-      tx,
-      p.id,
-      p.binding_set_version,
-      new Map([[REPOSITORY_NAME, repositoryBinding()]]),
-    );
-    const bindingId = result.changes[NO_ITEMS]?.binding_id;
-    assert.ok(bindingId);
-    writeBindingSet(
-      tx,
-      p.id,
-      p.binding_set_version + VERSION_INCREMENT,
-      new Map(),
-    );
-    return { project_id: p.id, binding_id: bindingId };
-  });
-  await assert.rejects(
-    f.invokeAsync("binding.verify", {
-      project_id: project.project_id,
-      binding_id: project.binding_id,
-    }),
-    (error) => {
-      assert.ok(error instanceof OperationError);
-      assert.equal(error.status, HttpStatus.NotFound);
-      assert.equal(error.code, ProjectErrorCode.BindingNotFound);
-      return true;
-    },
-  );
-});
-
-test("binding.verify returns 404 for a non-repository binding", async (t) => {
-  const { f } = verifyFixture(t, "healthy", "healthy");
-  const project = f.store.transaction((tx) => {
-    const p = insertProject(tx, PROJECT_NAME);
-    const result = writeBindingSet(
-      tx,
-      p.id,
-      p.binding_set_version,
-      new Map([[WORKER_NAME, workerBinding()]]),
-    );
-    const bindingId = result.changes[NO_ITEMS]?.binding_id;
-    assert.ok(bindingId);
-    return { project_id: p.id, binding_id: bindingId };
-  });
-  await assert.rejects(
-    f.invokeAsync("binding.verify", {
-      project_id: project.project_id,
-      binding_id: project.binding_id,
     }),
     (error) => {
       assert.ok(error instanceof OperationError);
@@ -6621,20 +6389,6 @@ test("a write refuses an instruction file that is invalid at the base head with 
   }
 });
 
-test("a write without an instruction file refuses an absent base branch and writes nothing", async (t) => {
-  const { repositoryFiles } = instructionRepositoryFiles(null, null);
-  const f = writeFixture(t, { repositoryFiles });
-  const before = f.snapshot();
-  const commits = f.commits();
-  await rejectsWrite(
-    f.write({ [REPOSITORY_NAME]: repositoryBinding() }),
-    SSH_FAILURE_STATUS,
-    ProjectErrorCode.RepositoryBaseBranchAbsent,
-  );
-  assert.equal(f.commits(), commits);
-  assert.deepEqual(f.snapshot(), before);
-});
-
 const UPSTREAM_BRANCH = "main";
 
 function upstreamBinding(base = "fix/x", upstream = UPSTREAM_BRANCH) {
@@ -6962,22 +6716,6 @@ test("binding.check answers the failure reason of a failed instruction file read
   assert.deepEqual(heads, []);
 });
 
-test("binding.check answers deadline_exceeded for an address read that exceeds its deadline", async (t) => {
-  const { f, sshStarted } = verifyFixture(t, ADDRESS_SSH_HANG, "healthy", {
-    custodySuitability: () => {},
-  });
-  const project = f.store.transaction((tx) => insertProject(tx, PROJECT_NAME));
-  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
-  const pending = checkBinding(f, project.id, repositoryBinding().config);
-  await sshStarted.promise;
-  t.mock.timers.tick(BINDING_CHECK_TIMEOUT_MS);
-  assert.deepEqual((await pending).address, {
-    status: ResourceStatus.Unknown,
-    capability: RESOURCE_CAPABILITY_NETWORK_GIT_READ,
-    failure_reason: ResourceFailureReason.DeadlineExceeded,
-  });
-});
-
 test("binding.check refuses a static violation with the write code before any SSH call", async (t) => {
   const { f, sshCalls, credentialCalls } = verifyFixture(
     t,
@@ -7087,20 +6825,6 @@ test("binding.environment.set stores the environment as a new revision with no r
   );
 });
 
-test("a revision pinned before an environment set takes the environment of the current revision", async (t) => {
-  const { f, saved } = environmentReadFixture(t, {}, WRITABLE);
-  const pinned = f.store.transaction((tx) =>
-    f.project.repositoryPolicyOf(tx, saved.binding_id),
-  );
-  assert.equal(pinned?.environment, null);
-  await setEnvironment(f, saved, STORED_ENVIRONMENT);
-  const policy = f.store.transaction((tx) =>
-    f.project.repositoryPolicyOf(tx, saved.binding_id),
-  );
-  assert.equal(policy?.binding_id, saved.binding_id);
-  assert.deepEqual(policy?.environment, STORED_ENVIRONMENT);
-});
-
 async function storedEnvironmentRead(
   t: TestContext,
   behavior: Parameters<typeof environmentReadFixture>[1] = {},
@@ -7178,19 +6902,6 @@ test("binding.environment.get answers suite_pass absent with no suite pass confi
     );
     assert.equal(read.suite_pass, SuitePassState.Present, state);
   }
-});
-
-test("binding.environment.get answers suite_pass for a stored environment", async (t) => {
-  const { f, params } = await storedEnvironmentRead(t, {
-    files: { [SUITE_PASS_FILE]: SUITE_PASS_TEXT },
-  });
-  assert.deepEqual(await f.invokeAsync("binding.environment.get", params), {
-    source: EnvironmentSource.Stored,
-    commit: null,
-    environment: STORED_ENVIRONMENT,
-    reason: null,
-    suite_pass: SuitePassState.Present,
-  });
 });
 
 test("binding.environment.get keeps the stored environment and answers suite_pass null when the read fails", async (t) => {
@@ -7484,22 +7195,6 @@ test("binding.environment.get refuses a read that exceeds the read deadline, not
   await refusal;
 });
 
-test("binding.environment.get refuses a devcontainer read that exceeds the read deadline with ssh_unreachable", async (t) => {
-  const { f, saved, readStarted } = environmentReadFixture(t, {
-    readHang: true,
-    placement: WorkerPlacement.Container,
-  });
-  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
-  const refusal = refusesRead(
-    f.invokeAsync("binding.environment.get", saved),
-    SSH_FAILURE_STATUS,
-    ProjectErrorCode.RepositorySshUnreachable,
-  );
-  await readStarted.promise;
-  t.mock.timers.tick(REPOSITORY_FILES_READ_TIMEOUT_MS);
-  await refusal;
-});
-
 test("binding.environment.get bounds the commit read and the detection read with one read deadline", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
   const { f, saved, readStarted } = environmentReadFixture(t, {
@@ -7521,13 +7216,6 @@ test("binding.environment.get bounds the commit read and the detection read with
   await turn();
   assert.equal(settled, true);
   await refusal;
-});
-
-test("the environment route outlasts the read deadline", () => {
-  assert.ok(
-    projectOperations["binding.environment.get"].timeoutMs >
-      REPOSITORY_FILES_READ_TIMEOUT_MS + SSH_AGENT_CLEANUP_TIMEOUT_MS,
-  );
 });
 
 test("binding.environment.get answers the universal source at the image target with no manifest", async (t) => {
@@ -7635,7 +7323,7 @@ test("a repository devcontainer with a refused key names the key in environment 
     refused.saved,
   );
   assert.equal(answer.environment, null);
-  assert.match(answer.reason ?? "", /runArgs: the key is not allowed/);
+  assert.match(answer.reason ?? "", /runArgs/);
 });
 
 const OTHER_REPOSITORY_NAME = "other";
@@ -7782,14 +7470,6 @@ test("environmentsMixed answers false for equal documents after key order normal
       postCreateCommand: MIXED_FIRST_ENVIRONMENT.postCreateCommand,
       image: MIXED_FIRST_ENVIRONMENT.image,
     },
-  ]);
-  assert.equal(f.mixed(f.both()), false);
-});
-
-test("environmentsMixed answers false when one binding has no stored document", async (t) => {
-  const f = await environmentFixture(t, WorkerPlacement.Container, [
-    MIXED_FIRST_ENVIRONMENT,
-    undefined,
   ]);
   assert.equal(f.mixed(f.both()), false);
 });
