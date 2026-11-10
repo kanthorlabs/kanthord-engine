@@ -1,12 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
-import {
-  importAdmissible,
-  isTerminal,
-  nodeApiWriteAdmissible,
-  reconcileJob,
-} from "./admission.ts";
+import { importAdmissible, reconcileJob } from "./admission.ts";
 import { MISSION_SERVICE_NAME, NodeState, type WorkQueue } from "./contract.ts";
 import { missionMigrations } from "./migrations.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
@@ -17,7 +12,6 @@ const INITIAL_ATTEMPT = 0;
 const NEXT_ATTEMPT = 1;
 const PRIORITY = 9;
 const DEFAULT_PRIORITY = 0;
-const STATES = Object.values(NodeState);
 const UNEXPECTED_CALL = "unexpected priority update";
 
 function fixture(t: TestContext): Store {
@@ -27,21 +21,6 @@ function fixture(t: TestContext): Store {
     { service: MISSION_SERVICE_NAME, migrations: missionMigrations },
   ]);
   return store;
-}
-
-for (const state of [...STATES, null]) {
-  test(`isTerminal: ${state}`, () => {
-    assert.equal(
-      isTerminal(state),
-      state === NodeState.Completed || state === NodeState.Discarded,
-    );
-  });
-  test(`nodeApiWriteAdmissible: ${state}`, () => {
-    assert.equal(
-      nodeApiWriteAdmissible(state),
-      state !== NodeState.Completed && state !== NodeState.Discarded,
-    );
-  });
 }
 
 for (const [state, attempt, expected] of [

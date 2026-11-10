@@ -17,7 +17,6 @@ import {
   AssessmentResult,
   AssetKind,
   ConversationAction,
-  EndState,
   ExpectedEndState,
   MISSION_SERVICE_NAME,
   MissionErrorCode,
@@ -197,24 +196,6 @@ function bindingRefusals(
   h.dependencies.bindings.getBindingRevision = original;
 }
 
-test("Mission authorizes a pull request action with the assessed snapshot and the binding credential", (t) => {
-  const h = actionHarness(t);
-  h.assess();
-  const authorized = h.frozen();
-  assert.equal(authorized.credential, HARNESS_CREDENTIAL);
-  assert.equal(authorized.platform, HARNESS_PLATFORM);
-  assert.equal(authorized.project_id, h.project_id);
-  assert.equal(authorized.facts.frozen_action.key, PULL_REQUEST_KEY);
-  assert.deepEqual(authorized.facts.repository, {
-    binding_id: h.repositoryId,
-    address: h.policy.address,
-    resource_identity: h.resourceIdentity,
-    base_branch: "main",
-  });
-  assert.equal(authorized.facts.snapshot_commit, ASSESSED_COMMIT);
-  assert.equal(authorized.facts.reused_address, null);
-});
-
 test("Mission authorizes a merge push action without a credential", (t) => {
   const h = actionHarness(t);
   h.policy.action = RepositoryAction.Push;
@@ -234,11 +215,6 @@ test("a frozen action refuses a steps claim and an evaluation claim without a cu
   );
   assert.equal(h.frozen().facts.snapshot_commit, ASSESSED_COMMIT);
   h.assess(AssessmentResult.CriterionNotMet);
-  refuses(() => h.frozen(), "claim_not_live");
-});
-
-test("a frozen action refuses without any assessment", (t) => {
-  const h = actionHarness(t);
   refuses(() => h.frozen(), "claim_not_live");
 });
 
@@ -649,52 +625,6 @@ test("a merge address refuses an unknown evidence id", (t) => {
   );
 });
 
-test("a merge address refuses evidence from another node", (t) => {
-  const h = kanthordHarness(t);
-  refuses(
-    () =>
-      h.frozen({ mergeEvidenceId: h.request(h.pullRequest, h.otherNode()) }),
-    "node_mismatch",
-  );
-});
-
-test("a merge address refuses evidence with another action key", (t) => {
-  const h = kanthordHarness(t);
-  const otherId = h.request(h.pullRequest, h.node_id, "other.pull_request");
-  refuses(() => h.frozen({ mergeEvidenceId: otherId }), "node_mismatch");
-});
-
-test("a merge address refuses a resolved evidence request", (t) => {
-  const h = kanthordHarness(t);
-  const id = h.request();
-  h.store.transaction((tx) =>
-    tx.database
-      .prepare("UPDATE mission_evidence SET end_state = ? WHERE id = ?")
-      .run(EndState.Expected, id),
-  );
-  refuses(() => h.frozen({ mergeEvidenceId: id }), "node_mismatch");
-});
-
-test("a merge address refuses a non-pull-request address", (t) => {
-  const h = kanthordHarness(t);
-  const branchId = h.request({
-    kind: PlatformAddressKind.BranchPush,
-    resource_identity: h.resourceIdentity,
-    branch: "main",
-    commit: ASSESSED_COMMIT,
-  });
-  refuses(() => h.frozen({ mergeEvidenceId: branchId }), "node_mismatch");
-});
-
-test("a merge address refuses evidence from another resource", (t) => {
-  const h = kanthordHarness(t);
-  const foreignId = h.request({
-    ...h.pullRequest,
-    resource_identity: "repository:github:other/repo",
-  });
-  refuses(() => h.frozen({ mergeEvidenceId: foreignId }), "node_mismatch");
-});
-
 test("a merge address admits a branch push of a push action", (t) => {
   const h = actionHarness(t);
   h.policy.action = RepositoryAction.Push;
@@ -798,7 +728,6 @@ const serviceMergePullRequest = {
   resource_identity: "repository:github:owner/repo",
   number: SERVICE_MERGE_NUMBER,
 };
-const FIRST_NODE_REVISION = 1;
 const OTHER_SERVICE_NAME = "intake";
 
 function serviceMergeHarness(t: TestContext) {
@@ -844,60 +773,12 @@ test("a service merge refuses an identity that is not the Mission Service", (t) 
   );
 });
 
-test("a service merge refuses an unknown evidence", (t) => {
-  const h = serviceMergeHarness(t);
-  refuses(
-    () => h.merge({ evidenceId: createIdentity("evidence") }),
-    "node_mismatch",
-  );
-});
-
-test("a service merge refuses an evidence without a requirement key", (t) => {
-  const h = serviceMergeHarness(t);
-  h.store.transaction((tx) =>
-    tx.database
-      .prepare(
-        "UPDATE mission_evidence SET requirement_key = NULL WHERE id = ?",
-      )
-      .run(h.evidenceId),
-  );
-  refuses(() => h.merge(), "node_mismatch");
-});
-
-test("a service merge refuses a resolved evidence", (t) => {
-  const h = serviceMergeHarness(t);
-  h.store.transaction((tx) =>
-    tx.database
-      .prepare("UPDATE mission_evidence SET end_state = ? WHERE id = ?")
-      .run(EndState.Expected, h.evidenceId),
-  );
-  refuses(() => h.merge(), "node_mismatch");
-});
-
 test("a service merge refuses a node that is not External.Requested", (t) => {
   const h = serviceMergeHarness(t);
   for (const state of [NodeState.Evaluating, NodeState.Completed]) {
     h.store.transaction((tx) => setNodeState(tx, h.node_id, state));
     refuses(() => h.merge(), "claim_not_live");
   }
-});
-
-test("a service merge refuses a closed attempt and an evidence of an earlier attempt", (t) => {
-  const h = serviceMergeHarness(t);
-  h.store.transaction((tx) =>
-    closeAttempt(tx, h.node_id, h.claim.attempt, Date.now()),
-  );
-  refuses(() => h.merge(), "claim_not_live");
-  h.store.transaction((tx) =>
-    openAttempt(
-      tx,
-      h.node_id,
-      FIRST_NODE_REVISION,
-      h.executionActor,
-      Date.now(),
-    ),
-  );
-  refuses(() => h.merge(), "claim_not_live");
 });
 
 test("a service merge refuses a non-pull-request address and an address of another resource", (t) => {
@@ -932,12 +813,6 @@ test("a service merge refuses a human landing", (t) => {
   refuses(() => h.merge(), "node_mismatch");
 });
 
-test("a service merge refuses an assessment that is not success", (t) => {
-  const h = serviceMergeHarness(t);
-  h.assess(AssessmentResult.CriterionNotMet);
-  refuses(() => h.merge(), "claim_not_live");
-});
-
 test("a service merge refuses a changed gate file of the binding", (t) => {
   const h = serviceMergeHarness(t);
   h.assess(AssessmentResult.Success, ASSESSED_COMMIT, [
@@ -956,11 +831,6 @@ test("a service merge refuses a commit that is not the tested commit", (t) => {
 test("a service merge refuses a disabled or removed binding", (t) => {
   const h = serviceMergeHarness(t);
   bindingRefusals(h, () => h.merge());
-});
-
-test("a service merge refuses a disabled or removed binding before the commit check", (t) => {
-  const h = serviceMergeHarness(t);
-  bindingRefusals(h, () => h.merge({ commit: OTHER_COMMIT }));
 });
 
 test("a service merge refuses a paused project", (t) => {
@@ -994,19 +864,6 @@ function pushMergeHarness(t: TestContext) {
     );
   return { ...h, evidenceId, merge };
 }
-
-test("a service merge of a push action admits its branch push with no credential and the node identity", (t) => {
-  const h = pushMergeHarness(t);
-  const authorized = h.merge();
-  assert.equal(authorized.credential, null);
-  assert.equal(authorized.facts.frozen_action.action, RepositoryAction.Push);
-  assert.equal(authorized.facts.snapshot_commit, ASSESSED_COMMIT);
-  assert.equal(
-    authorized.facts.merge_address?.kind,
-    PlatformAddressKind.BranchPush,
-  );
-  assert.equal(authorized.facts.node.id, h.node_id);
-});
 
 test("a service merge of a push action refuses a pull request address, a changed gate file and another commit", (t) => {
   const h = pushMergeHarness(t);

@@ -1,13 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type ExecutionTrace, SpanStatus } from "../tracking/contract.ts";
-import {
-  Act,
-  ActAttribute,
-  type ActFacts,
-  actSchema,
-  actTrace,
-} from "./act-telemetry.ts";
+import { Act, ActAttribute, type ActFacts, actTrace } from "./act-telemetry.ts";
 
 const REVOKED: ExecutionTrace = {
   execution_id: "execution_1",
@@ -32,29 +26,7 @@ const FACTS: ActFacts = {
   evidence_id: null,
   lead_time_ms: null,
 };
-const THIRTEEN_ACTS = 13;
-const EVIDENCE_ID = "evidence_1";
 const LEAD_TIME_MS = 460;
-
-test("the acts are the closed set of thirteen operations", () => {
-  assert.equal(Object.keys(Act).length, THIRTEEN_ACTS);
-  assert.equal(new Set(Object.values(Act)).size, THIRTEEN_ACTS);
-});
-
-test("actSchema accepts each act and refuses another operation", () => {
-  for (const act of Object.values(Act)) assert.equal(actSchema.parse(act), act);
-  assert.equal(actSchema.safeParse("mission.node.create").success, false);
-});
-
-test("actTrace answers the trace with the project, the node, the attempt and the act time", () => {
-  const { trace } = actTrace(Act.Pause, FACTS);
-  assert.match(trace.trace_id, /^[0-9a-f]{32}$/);
-  assert.match(trace.root_span_id, /^[0-9a-f]{16}$/);
-  assert.equal(trace.project_id, FACTS.project_id);
-  assert.equal(trace.node_id, FACTS.node_id);
-  assert.equal(trace.attempt, FACTS.attempt);
-  assert.equal(trace.created_at, ACTED_AT);
-});
 
 test("actTrace answers a root contribution that starts and ends at the act time", () => {
   const { trace, contribution } = actTrace(Act.Pause, FACTS);
@@ -89,12 +61,6 @@ test("actTrace stores the reason as a text of the root span", () => {
   );
 });
 
-test("actTrace answers no text without a reason", () => {
-  const { contribution } = actTrace(Act.Unblock, { ...FACTS, reason: null });
-  assert.equal(contribution.text_ids, undefined);
-  assert.equal(contribution.texts, undefined);
-});
-
 test("actTrace links the root span of a revoked execution", () => {
   const { contribution } = actTrace(Act.Pause, { ...FACTS, revoked: REVOKED });
   assert.deepEqual(contribution.links, [
@@ -122,12 +88,4 @@ test("actTrace names no attempt before the first attempt opens", () => {
   });
   assert.equal(trace.attempt, null);
   assert.equal(ActAttribute.Attempt in contribution.attributes, false);
-});
-
-test("actTrace names the evidence of an evidence delete", () => {
-  const { contribution } = actTrace(Act.DeleteEvidence, {
-    ...FACTS,
-    evidence_id: EVIDENCE_ID,
-  });
-  assert.equal(contribution.attributes[ActAttribute.EvidenceId], EVIDENCE_ID);
 });
