@@ -595,13 +595,16 @@ async function settleMerge(
   if (merge === MergeOutcome.Stop) stopped.add(item.request.id);
 }
 
-function skipsMerge(scope: RoundScope, item: RequestItem): boolean {
-  const { node_id: nodeId, attempt, id } = item.request;
+function roundLost(scope: RoundScope, item: RequestItem): boolean {
+  const { node_id: nodeId, attempt } = item.request;
   return (
-    scope.stopped.has(id) ||
     quiescent(scope.dependencies) ||
     !roundsOf(scope.dependencies).owns(runKeyOf(nodeId, attempt), scope.run)
   );
+}
+
+function skipsMerge(scope: RoundScope, item: RequestItem): boolean {
+  return scope.stopped.has(item.request.id) || roundLost(scope, item);
 }
 
 async function runDeferredCheck(
@@ -623,7 +626,7 @@ async function runDeferredCheck(
   if (outcome.held) return outcome;
   const scope: RoundScope = { dependencies, run, round, stopped, outcome };
   for (const item of prepared.requests) {
-    if (quiescent(dependencies)) break;
+    if (roundLost(scope, item)) break;
     const answer = await checkRequest(dependencies, item);
     if (answer === null) {
       outcome.failed = true;

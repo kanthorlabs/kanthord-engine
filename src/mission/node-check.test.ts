@@ -83,6 +83,7 @@ const MICROTASK_TURNS = 50;
 const FIRST_ROUND_DELAY_MS = 0;
 const CHECKS_PER_ROUND = 2;
 const ROUNDS_AFTER_FIRST = 2;
+const NEW_RUN_ROUNDS = 2;
 const ONE_ROUND = 1;
 const ONE_MERGE = 1;
 const NO_MERGES = 0;
@@ -986,7 +987,7 @@ test("a node check during a live run leaves one run", async (t) => {
   assert.equal(checks, ONE_ROUND + SINGLE_CALL);
   await advance(FIRST_ROUND_DELAY_MS);
   await advance(DEFERRED_CHECK_RETRY_MS);
-  assert.equal(checks, ONE_ROUND + SINGLE_CALL + ROUNDS_AFTER_FIRST);
+  assert.equal(checks, ONE_ROUND + SINGLE_CALL + NEW_RUN_ROUNDS);
 });
 
 const INTAKE_IDENTITY = testServiceIdentity(INTAKE_SERVICE_NAME);
