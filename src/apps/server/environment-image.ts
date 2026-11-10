@@ -406,32 +406,48 @@ function substituted(value: string, current: ReadonlyMap<string, string>) {
   );
 }
 
+function environmentOf(entries: readonly string[] | null | undefined) {
+  const environment = new Map<string, string>();
+  for (const entry of entries ?? []) {
+    const index = entry.indexOf(ENVIRONMENT_ASSIGNMENT);
+    if (index !== NOT_FOUND)
+      environment.set(entry.slice(0, index), entry.slice(index + 1));
+  }
+  return environment;
+}
+
+function metadataEntriesOf(label: string | undefined) {
+  const parsed: unknown = label === undefined ? [] : JSON.parse(label);
+  return z
+    .array(metadataEntrySchema)
+    .parse(Array.isArray(parsed) ? parsed : [parsed]);
+}
+
+function applyVariables(
+  entry: z.infer<typeof metadataEntrySchema>,
+  environment: Map<string, string>,
+  changed: Map<string, string>,
+): void {
+  for (const variables of [entry.containerEnv, entry.remoteEnv])
+    for (const [name, value] of Object.entries(variables ?? {})) {
+      if (value === null) continue;
+      const next = substituted(value, environment);
+      environment.set(name, next);
+      changed.set(name, next);
+    }
+}
+
 export function imageSettings(inspected: string): {
   environment: Map<string, string>;
   onCreate: string[];
 } {
   const [image] = imageInspectSchema.parse(JSON.parse(inspected));
-  const environment = new Map<string, string>();
-  for (const entry of image!.Config.Env ?? []) {
-    const index = entry.indexOf(ENVIRONMENT_ASSIGNMENT);
-    if (index !== NOT_FOUND)
-      environment.set(entry.slice(0, index), entry.slice(index + 1));
-  }
-  const label = image!.Config.Labels?.[METADATA_LABEL];
-  const parsed: unknown = label === undefined ? [] : JSON.parse(label);
-  const entries = z
-    .array(metadataEntrySchema)
-    .parse(Array.isArray(parsed) ? parsed : [parsed]);
+  const environment = environmentOf(image!.Config.Env);
+  const entries = metadataEntriesOf(image!.Config.Labels?.[METADATA_LABEL]);
   const changed = new Map<string, string>();
   const onCreate: string[] = [];
   for (const entry of entries) {
-    for (const variables of [entry.containerEnv, entry.remoteEnv])
-      for (const [name, value] of Object.entries(variables ?? {})) {
-        if (value === null) continue;
-        const next = substituted(value, environment);
-        environment.set(name, next);
-        changed.set(name, next);
-      }
+    applyVariables(entry, environment, changed);
     onCreate.push(...lifecycleScripts(entry.onCreateCommand));
   }
   return { environment: changed, onCreate };
