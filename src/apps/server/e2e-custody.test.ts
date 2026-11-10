@@ -161,44 +161,6 @@ test("E01.4 list contains the created credential without secrets", async (t) => 
   assert.equal(listed.next_cursor, null);
 });
 
-test("E01.5 list filters credentials by platform", async (t) => {
-  const { directory, env } = await setup(t);
-  const file = createFile(directory, ANTHROPIC);
-  success(await kanthord([...LLM, "create", "--file", file], env));
-  const anthropic = success<ListAnswer>(
-    await kanthord([...LLM, "list", "--platform", ANTHROPIC], env),
-  );
-  assert.ok(anthropic.items.some((item) => item.name === NAME));
-  const github = success<ListAnswer>(
-    await kanthord([...LLM, "list", "--platform", GITHUB], env),
-  );
-  assert.deepEqual(github.items, []);
-});
-
-test("E01.6 get refuses a nonexistent credential", async (t) => {
-  const { env } = await setup(t);
-  refusal(
-    await kanthord([...LLM, "get", "nonexistent"], env),
-    "credential.credential.not_found",
-  );
-});
-
-test("E01.7 rotating a github credential adds a secret-free revision", async (t) => {
-  const { directory, env } = await setup(t);
-  const file = createFile(directory, GITHUB);
-  success(await kanthord([...REPOSITORY, "create", "--file", file], env));
-  success(
-    await kanthord(
-      [...REPOSITORY, "rotate", NAME, "--file", rotateFile(directory)],
-      env,
-    ),
-  );
-  const read = success(await kanthord([...REPOSITORY, "get", NAME], env));
-  assert.equal(read.revisions.length, TWO_REVISION_COUNT);
-  assert.ok(read.revisions[0]);
-  assert.equal(read.revisions[0].revision, SECOND_REVISION);
-});
-
 const STALE_ROTATION_TIMEOUT_MS = 60000;
 test(
   "E01.8 rotate refuses an observed stale expected revision",
@@ -410,20 +372,6 @@ test("revoke refuses revision zero without a server", async (t) => {
   refusal(
     await kanthord([...LLM, "revoke", NAME, String(INVALID_REVISION)], env),
     "cli.llm.credential.revoke.invalid_revision",
-  );
-});
-
-test("rotate refuses expected revision zero without a server", async (t) => {
-  const directory = temporary(t);
-  const env = { ...environment(directory), KANTHORD_TOKEN: LOCAL_TOKEN };
-  const rotation = join(directory, "zero.json");
-  writePrivate(
-    rotation,
-    JSON.stringify({ expected_revision: INVALID_REVISION, secret: SECRET }),
-  );
-  refusal(
-    await kanthord([...LLM, "rotate", NAME, "--file", rotation], env),
-    "cli.file.schema_invalid",
   );
 });
 

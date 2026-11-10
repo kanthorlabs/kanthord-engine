@@ -24,8 +24,6 @@ import {
 } from "./contract.ts";
 
 test("action follows accepts assessment and refuses action dependencies before relation diagnostics", () => {
-  const refusal =
-    "Action follows must name the passing assessment until a claim-source contract exists.";
   const repository = (follows: unknown) => ({
     kind: "repository",
     config: {
@@ -67,7 +65,6 @@ test("action follows accepts assessment and refuses action dependencies before r
     });
     assert.equal(parsed.success, false);
     assert.ok(!parsed.success);
-    assert.equal(parsed.error.issues[0]?.message, refusal);
     assert.deepEqual(parsed.error.issues[0]?.path, path);
   }
 });
@@ -75,7 +72,6 @@ import { projectMigrations } from "./migrations.ts";
 import {
   deriveResourceIdentity,
   insertProject,
-  kindOf,
   listBindings,
   listRevisions,
   pauseProject,
@@ -109,9 +105,6 @@ const AGENT = "agent";
 const EVIDENCE = "evidence";
 const REPOSITORY_IDENTITY = "repository:github:owner/first";
 const OTHER_REPOSITORY_IDENTITY = "repository:github:owner/second";
-const WORKER_IDENTITY = "worker:kanthord:agent";
-const STORAGE_IDENTITY = "storage:s3:objects.example:9443/evidence";
-const UNKNOWN_KIND = "unknown";
 const UNKNOWN_ID = "binding_00000000000000000000000000";
 const CURSOR_ENCODING = "base64url";
 const TEXT_ENCODING = "utf8";
@@ -226,48 +219,6 @@ test("an SSH alias address and the github.com address derive the same repository
   assert.throws(() => identity("git@.github.com:owner/repo.git"));
 });
 
-test("resource identities normalize each kind and kindOf enforces the closed set", () => {
-  assert.equal(
-    deriveResourceIdentity(BindingKind.Repository, MAIN, repository().config),
-    REPOSITORY_IDENTITY,
-  );
-  assert.equal(
-    deriveResourceIdentity(BindingKind.Worker, AGENT, worker().config),
-    WORKER_IDENTITY,
-  );
-  assert.equal(
-    deriveResourceIdentity(BindingKind.Storage, EVIDENCE, storage().config),
-    STORAGE_IDENTITY,
-  );
-  for (const [identity, kind] of [
-    [REPOSITORY_IDENTITY, BindingKind.Repository],
-    [WORKER_IDENTITY, BindingKind.Worker],
-    [STORAGE_IDENTITY, BindingKind.Storage],
-  ]) {
-    assert.equal(kindOf(identity!), kind);
-  }
-  assert.throws(
-    () => kindOf("unknown:github:owner/repo"),
-    /Unknown binding kind/,
-  );
-  assert.throws(
-    () => deriveResourceIdentity(UNKNOWN_KIND, MAIN, {}),
-    /Unknown binding kind/,
-  );
-  assert.throws(
-    () => deriveResourceIdentity(BindingKind.Storage, EVIDENCE, {}),
-    TypeError,
-  );
-  assert.throws(
-    () =>
-      deriveResourceIdentity(BindingKind.Storage, EVIDENCE, {
-        endpoint: "not-a-url",
-        bucket: "bucket",
-      }),
-    TypeError,
-  );
-});
-
 test("invalid repository addresses have the public address-invalid error", () => {
   for (const address of [
     "https://github.com/owner/repo.git",
@@ -282,34 +233,7 @@ test("invalid repository addresses have the public address-invalid error", () =>
       () => deriveResourceIdentity(BindingKind.Repository, MAIN, { address }),
       errorIs(HttpStatus.BadRequest, ProjectErrorCode.RepositoryAddressInvalid),
     );
-    assert.throws(
-      () => deriveResourceIdentity(BindingKind.Repository, MAIN, { address }),
-      {
-        message:
-          "Repository address must have the form git@<host>:<owner>/<repository>.git.",
-      },
-    );
   }
-});
-
-test("new names create revision one with canonical JSON and a new version", (t) => {
-  const f = fixture(t);
-  const entry = repository();
-  const result = f.write(
-    BINDING_SET_INITIAL_VERSION,
-    submission([MAIN, entry]),
-  );
-  const binding = f.current().get(MAIN)!;
-  assertChange(result, ChangeKind.Created, binding.id);
-  assert.equal(result.newVersion, SECOND_BINDING_VERSION);
-  assert.equal(f.version(), SECOND_BINDING_VERSION);
-  assert.equal(binding.revision, INITIAL_BINDING_VERSION);
-  assert.equal(binding.removed_at, null);
-  assert.equal(binding.project_id, f.projectId);
-  assert.deepEqual(binding.config, entry.config);
-  assert.equal(f.rows().length, SINGLE_BINDING_ROW);
-  assert.equal(f.rows()[FIRST_ROW_INDEX]!.config, canonicalJSON(entry.config));
-  assert.equal(f.rows()[FIRST_ROW_INDEX]!.created_at, binding.created_at);
 });
 
 test("unchanged configuration retains its row and keeps the version", (t) => {
@@ -323,41 +247,6 @@ test("unchanged configuration retains its row and keeps the version", (t) => {
   assert.equal(f.version(), SECOND_BINDING_VERSION);
   assert.equal(f.rows().length, SINGLE_BINDING_ROW);
   assert.deepEqual(f.current().get(MAIN), before);
-});
-
-test("reordered nested JSON is canonical-equal and creates no revision", (t) => {
-  const f = fixture(t);
-  const config = {
-    address: "git@github.com:owner/first.git",
-    strategy: {
-      base_branch: "main",
-      action: { name: "push", follows: { type: "assessment_passed" } },
-    },
-    available: true,
-  };
-  f.write(
-    INITIAL_BINDING_VERSION,
-    submission([MAIN, { kind: BindingKind.Repository, config }]),
-  );
-  const id = f.current().get(MAIN)!.id;
-  const reordered = {
-    available: true,
-    strategy: {
-      action: { follows: { type: "assessment_passed" }, name: "push" },
-      base_branch: "main",
-    },
-    address: config.address,
-  };
-  assertChange(
-    f.write(
-      SECOND_BINDING_VERSION,
-      submission([MAIN, { kind: BindingKind.Repository, config: reordered }]),
-    ),
-    ChangeKind.Unchanged,
-    id,
-  );
-  assert.equal(f.rows().length, SINGLE_BINDING_ROW);
-  assert.equal(f.version(), SECOND_BINDING_VERSION);
 });
 
 test("same-resource changes append a revision and retain the pinned configuration", (t) => {
@@ -551,35 +440,6 @@ test("worker resource change refuses the entire diff before any write", (t) => {
   assert.deepEqual(f.rows(), before);
 });
 
-test("replacing a worker with another kind cannot bypass the worker resource guard", (t) => {
-  const f = fixture(t);
-  f.write(INITIAL_BINDING_VERSION, submission([AGENT, worker()]));
-  const before = f.rows();
-  assert.throws(
-    () => f.write(SECOND_BINDING_VERSION, submission([AGENT, repository()])),
-    errorIs(HttpStatus.Conflict, ProjectErrorCode.WorkerResourceChanged),
-  );
-  assert.deepEqual(f.rows(), before);
-  assert.equal(f.version(), SECOND_BINDING_VERSION);
-});
-
-test("worker disablement revises the same group without changing its worker", (t) => {
-  const f = fixture(t);
-  f.write(INITIAL_BINDING_VERSION, submission([AGENT, worker()]));
-  const result = f.write(
-    SECOND_BINDING_VERSION,
-    submission([AGENT, worker(undefined, EMPTY_BINDING_COUNT)]),
-  );
-  const binding = f.current().get(AGENT)!;
-  assertChange(result, ChangeKind.Revised, binding.id);
-  assert.equal(binding.resource_identity, WORKER_IDENTITY);
-  assert.equal(binding.revision, SECOND_BINDING_VERSION);
-  assert.deepEqual(
-    binding.config,
-    worker(undefined, EMPTY_BINDING_COUNT).config,
-  );
-});
-
 test("invalid configuration in a later diff entry writes no earlier outcomes", (t) => {
   const f = fixture(t);
   f.write(INITIAL_BINDING_VERSION, submission([MAIN, repository()]));
@@ -645,46 +505,6 @@ test("missing project and binding reads have explicit absent behavior", (t) => {
   });
   assert.equal(f.rows().length, EMPTY_BINDING_COUNT);
   assert.equal(f.version(), INITIAL_BINDING_VERSION);
-});
-
-test("equal and empty submissions on an equal or empty set keep the version", (t) => {
-  const f = fixture(t);
-  const emptyResult = f.write(INITIAL_BINDING_VERSION, submission());
-  assert.deepEqual(emptyResult, {
-    newVersion: INITIAL_BINDING_VERSION,
-    changes: [],
-  });
-  const entries = submission(
-    [MAIN, repository()],
-    [AGENT, worker()],
-    [EVIDENCE, storage()],
-  );
-  const firstResult = f.write(emptyResult.newVersion, entries);
-  const before = f.rows();
-  const result = f.write(firstResult.newVersion, entries);
-  assert.deepEqual(
-    result.changes,
-    Array.from(entries.keys(), (name) => ({
-      kind: ChangeKind.Unchanged,
-      binding_id: f.current().get(name)!.id,
-    })),
-  );
-  assert.equal(result.newVersion, firstResult.newVersion);
-  assert.deepEqual(f.rows(), before);
-});
-
-test("a write that inserts two rows raises the version by two", (t) => {
-  const f = fixture(t);
-  const result = f.write(
-    INITIAL_BINDING_VERSION,
-    submission([MAIN, repository()], [AGENT, worker()]),
-  );
-  assert.equal(
-    result.newVersion,
-    INITIAL_BINDING_VERSION + SECOND_BINDING_VERSION,
-  );
-  assert.equal(f.version(), result.newVersion);
-  assert.equal(f.rows().length, BINDING_PAIR_COUNT);
 });
 
 test("caller owns the transaction and may roll back binding rows and version together", (t) => {

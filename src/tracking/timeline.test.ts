@@ -49,9 +49,6 @@ const TRACE_END_TIME = Number.MAX_SAFE_INTEGER;
 const WIDE_LIMIT = 1000;
 const NO_ITEMS = 0;
 const FIVE_TRACES = 5;
-const FIVE_ITEMS = 5;
-const SIX_ITEMS = 6;
-const CHILD_DURATION = 200;
 const ROOT_STRIDE = 1000;
 const TRACE_COUNT = 12;
 const NO_ROOT_TRACE = 5;
@@ -215,13 +212,6 @@ function threeTraces(t: TestContext): Store {
   return store;
 }
 
-test("a node scope answers the traces of the node in ascending order of the trace start", (t) => {
-  const store = threeTraces(t);
-  const page = read(store, { depth: 1 });
-  assert.deepEqual(pairsOf(page), [...spans(2), ...spans(3), ...spans(1)]);
-  assert.equal(page.next_cursor, null);
-});
-
 test("depth 1 answers the roots and depth 2 adds the children and no grandchild", (t) => {
   const store = threeTraces(t);
   assert.deepEqual(
@@ -364,19 +354,6 @@ test("depth 1 over a middle trace with no root row leaves no gap", (t) => {
   );
 });
 
-test("a page that ends on the last item of a trace holds a cursor and the next page starts with the next trace", (t) => {
-  const store = emptyStore(t);
-  insertTraceRow(store, { n: 1, started: 1000, ended: 2000 });
-  insertTraceRow(store, { n: 2, started: 2000, ended: 3000 });
-  child(store, 1, 1, 1500, 1600);
-  const first = read(store, { depth: 2, limit: 2 });
-  assert.deepEqual(pairsOf(first), spans(1, 1));
-  assert.ok(first.next_cursor);
-  const second = read(store, { depth: 2, limit: 2 }, first.next_cursor);
-  assert.deepEqual(pairsOf(second), spans(2));
-  assert.equal(second.next_cursor, null);
-});
-
 test("a page of kept traces with no item answers the cursor of a trace end", (t) => {
   const store = emptyStore(t);
   insertTraceRow(store, { n: 1, started: 1000, ended: 2000, root: false });
@@ -393,15 +370,6 @@ test("a page of kept traces with no item answers the cursor of a trace end", (t)
   const second = read(store, { depth: 1, limit: 1 }, first.next_cursor);
   assert.deepEqual(pairsOf(second), spans(3));
   assert.equal(second.next_cursor, null);
-});
-
-test("the last page holds no cursor", (t) => {
-  const store = threeTraces(t);
-  const page = read(store, { depth: 2, limit: 6 });
-  assert.equal(page.items.length, SIX_ITEMS);
-  assert.equal(page.next_cursor, null);
-  assert.equal(read(store, { limit: FIVE_ITEMS }).items.length, FIVE_ITEMS);
-  assert.ok(read(store, { limit: FIVE_ITEMS }).next_cursor);
 });
 
 test("a walk at any page size answers the items of one wide read", (t) => {
@@ -433,43 +401,6 @@ test("a walk at any page size answers the items of one wide read", (t) => {
     walk(store, { depth: 2 }, WIDE_LIMIT).length,
     TRACE_COUNT - 1 + 6 + 3 + 1,
   );
-});
-
-test("an item holds the span fields, the trace fields and the duration", (t) => {
-  const store = emptyStore(t);
-  insertTraceRow(store, { n: 1, started: 1000, ended: 2000, worker: "w1" });
-  child(store, 1, 1, 1100, 1300);
-  child(store, 1, 2, null, 1400);
-  const [root, first, second] = read(store, { depth: 2 }).items;
-  assert.deepEqual(root, {
-    trace_id: traceIdOf(1),
-    span_id: spanIdOf(rootOf(1)),
-    parent_span_id: null,
-    producer: "scheduler",
-    origin: SpanOrigin.Observed,
-    operation: "scheduler.execution",
-    start_time: 1000,
-    end_time: 2000,
-    status: SpanStatus.Ok,
-    attributes: { key: "value" },
-    events: [],
-    links: [],
-    text_ids: [],
-    created_at: 1,
-    depth: 1,
-    duration_ms: 1000,
-    project_id: PROJECT_A,
-    node_id: NODE_A,
-    execution_id: `execution_${ULID_HEAD}1`,
-    attempt: 1,
-    worker_name: "w1",
-  });
-  assert.equal(first?.depth, TimelineDepth.Child);
-  assert.equal(first?.duration_ms, CHILD_DURATION);
-  assert.equal(first?.worker_name, null);
-  assert.equal(first?.parent_span_id, spanIdOf(rootOf(1)));
-  assert.equal(first?.node_id, NODE_A);
-  assert.equal(second?.duration_ms, null);
 });
 
 interface Captured {

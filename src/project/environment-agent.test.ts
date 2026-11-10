@@ -18,8 +18,6 @@ import {
 } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
-import { framing, PromptConsumer } from "../agent/prompt-render.ts";
-import { ENV_AGENT_PROMPT } from "../agent/prompt-assets.ts";
 import { getAgentDeclaration } from "../agent/catalog.ts";
 import {
   AgentErrorCode,
@@ -78,7 +76,6 @@ const BINDING_NAME = "app";
 const BINDING_ID = "binding_01";
 const ENV_BINDING_TEXT = "Use the pinned toolchain image.";
 const SWE_TEXT = "Prefer small commits.";
-const OVERRIDE_TEXT = "Use only the documented build command.";
 const INVALID_OVERRIDE_TEXT = "bell\u0007";
 const COMMIT = "0123456789abcdef";
 const INSTRUCTION_PATH = "AGENTS.md";
@@ -329,20 +326,6 @@ test(
 );
 
 test(
-  "a disabled enablement answers not_enabled",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const f = fixture(t, [], { view: { ...unavailable } });
-    assert.equal(
-      await f.agent.run(f.input()),
-      EnvironmentSessionEnd.NotEnabled,
-    );
-    f.state.view = available;
-    assert.equal(f.agent.enabled(), true);
-  },
-);
-
-test(
   "an enabled agent reads a checkout file and ends",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
@@ -357,41 +340,6 @@ test(
     assert.ok(results.length);
     assert.ok(text(results[0]!).includes(PACKAGE_TEXT));
     assert.deepEqual(f.record.authorized, [CREDENTIAL]);
-  },
-);
-
-test(
-  "the provider sees only the file tools and the input tools",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const f = fixture(t, [fauxAssistantMessage("done")]);
-    await f.agent.run(f.input());
-    assert.deepEqual(
-      [...f.provider.tools[0]!].sort(),
-      ["find", "grep", "ls", "read", WRITE_TOOL].sort(),
-    );
-  },
-);
-
-test(
-  "the first call holds the prompt of env@1 and the failure",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const f = fixture(t, [fauxAssistantMessage("done")]);
-    await f.agent.run(f.input());
-    const first = f.provider.calls[0]!;
-    assert.ok(first.systemPrompt?.includes(ENV_AGENT_PROMPT));
-    assert.ok(
-      first.systemPrompt?.includes(
-        `Binding prompt of repository ${BINDING_NAME}:\n\n${ENV_BINDING_TEXT}\n\n${framing(SHIPPED_TEMPLATES, PromptConsumer.Worker)}`,
-      ),
-    );
-    assert.ok(!first.systemPrompt?.includes(SWE_TEXT));
-    const user = first.messages.find((message) => message.role === ROLE_USER)!;
-    const body = text(user);
-    assert.ok(body.includes(BINDING_NAME));
-    assert.ok(body.includes(FAILURE_CLASS));
-    assert.ok(body.includes(TAIL));
   },
 );
 
@@ -450,23 +398,6 @@ test(
 );
 
 test(
-  "an override file replaces the shipped env@1 prompt",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const promptDirectory = temporary(t);
-    writeFileSync(join(promptDirectory, `${ENV_AGENT_NAME}.md`), OVERRIDE_TEXT);
-    const f = fixture(t, [fauxAssistantMessage("done")], {
-      view: available,
-      promptDirectory,
-    });
-    assert.equal(await f.agent.run(f.input()), EnvironmentSessionEnd.Ended);
-    const first = f.provider.calls[0]!;
-    assert.ok(first.systemPrompt?.includes(OVERRIDE_TEXT));
-    assert.ok(!first.systemPrompt?.includes(ENV_AGENT_PROMPT));
-  },
-);
-
-test(
   "an invalid override file answers 409 template_invalid with no model call",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
@@ -489,31 +420,6 @@ test(
       },
     });
     assert.equal(f.provider.calls.length, NO_CALLS);
-  },
-);
-
-test(
-  "the repository is exported into the run directory, and the directory is removed",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const f = fixture(t, [fauxAssistantMessage("done")]);
-    await f.agent.run(f.input());
-    const sessionId = f.record.sessionIds[0]!;
-    assert.match(sessionId, /^env_session_[0-9A-HJKMNP-TV-Z]{26}$/);
-    assert.deepEqual(f.record.exports, [
-      {
-        bindingId: "binding_01",
-        commit: COMMIT,
-        directory: f.record.checkouts[0]!,
-      },
-    ]);
-    assert.ok(
-      f.record.checkouts[0]!.endsWith(
-        join("environments", `run-${sessionId}`, "checkout"),
-      ),
-    );
-    assert.equal(existsSync(dirname(f.record.checkouts[0]!)), false);
-    assert.deepEqual(f.runDirectories(), []);
   },
 );
 

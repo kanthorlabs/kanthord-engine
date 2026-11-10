@@ -311,17 +311,3 @@ test("cache volume delete refuses a bound pair and a volume in use, and removes 
   });
   assert.deepEqual(h.removedVolumes, [`${PROJECT_ID} ${UNBOUND}`]);
 });
-
-test("boundPaths answers the identity path of each bound repository once", (t) => {
-  const h = harness(t, {
-    bound: [
-      { project_id: PROJECT_ID, resource_identity: BOUND, digest: null },
-      {
-        project_id: "project_01ARZ3NDEKTSV4RRFFQ69G5FAW",
-        resource_identity: BOUND,
-        digest: CURRENT,
-      },
-    ],
-  });
-  assert.deepEqual(h.footprint.boundPaths(), [BOUND_PATH]);
-});

@@ -540,12 +540,50 @@ function tableBytesOf(value: string | undefined, line: string): number {
   return Math.round(Number(match[1]) * unit);
 }
 
-function podmanTable(table: string): {
+interface PodmanTable {
   unique: Map<string, number>;
   volumes: RuntimeVolumeUsage[];
-} {
-  const unique = new Map<string, number>();
-  const volumes: RuntimeVolumeUsage[] = [];
+}
+
+function imageRow(line: string, unique: Map<string, number>): void {
+  const columns = line.split(TABLE_GAP);
+  const id = columns[IMAGE_ID_COLUMN] ?? "";
+  if (
+    columns.length < IMAGE_ROW_COLUMNS ||
+    !SHORT_IMAGE_ID.test(id) ||
+    !TABLE_COUNT.test(columns.at(CONTAINERS_COLUMN) ?? "")
+  )
+    throw unknownLine(line);
+  unique.set(imageIdOf(id), tableBytesOf(columns.at(UNIQUE_SIZE_COLUMN), line));
+}
+
+function volumeRow(line: string, volumes: RuntimeVolumeUsage[]): void {
+  const columns = line.split(TABLE_GAP);
+  const [name, links, size] = columns;
+  if (
+    columns.length !== VOLUME_ROW_COLUMNS ||
+    !filled(name) ||
+    !TABLE_COUNT.test(links ?? "")
+  )
+    throw unknownLine(line);
+  volumes.push({
+    name,
+    bytes: tableBytesOf(size, line),
+    links: Number(links),
+  });
+}
+
+function usageRow(
+  line: string,
+  section: UsageSection,
+  collected: PodmanTable,
+): void {
+  if (section === UsageSection.Images) imageRow(line, collected.unique);
+  else if (section === UsageSection.Volumes) volumeRow(line, collected.volumes);
+}
+
+function podmanTable(table: string): PodmanTable {
+  const collected: PodmanTable = { unique: new Map(), volumes: [] };
   const seen = new Set<UsageSection>();
   let section: UsageSection | null = null;
   let header = false;
@@ -563,37 +601,34 @@ function podmanTable(table: string): {
       header = false;
       continue;
     }
-    const columns = line.split(TABLE_GAP);
-    if (section === UsageSection.Images) {
-      const id = columns[IMAGE_ID_COLUMN] ?? "";
-      if (
-        columns.length < IMAGE_ROW_COLUMNS ||
-        !SHORT_IMAGE_ID.test(id) ||
-        !TABLE_COUNT.test(columns.at(CONTAINERS_COLUMN) ?? "")
-      )
-        throw unknownLine(line);
-      unique.set(
-        imageIdOf(id),
-        tableBytesOf(columns.at(UNIQUE_SIZE_COLUMN), line),
-      );
-    } else if (section === UsageSection.Volumes) {
-      const [name, links, size] = columns;
-      if (
-        columns.length !== VOLUME_ROW_COLUMNS ||
-        !filled(name) ||
-        !TABLE_COUNT.test(links ?? "")
-      )
-        throw unknownLine(line);
-      volumes.push({
-        name,
-        bytes: tableBytesOf(size, line),
-        links: Number(links),
-      });
-    }
+    usageRow(line, section, collected);
   }
   if (!seen.has(UsageSection.Images) || !seen.has(UsageSection.Volumes))
     throw new Error("The Podman usage table holds no image or volume section.");
-  return { unique, volumes };
+  return collected;
+}
+
+interface ListedImage {
+  id: string;
+  containers: number;
+  names: string[];
+}
+
+function listedImage(image: unknown): ListedImage {
+  const id = field(image, "Id");
+  const containers = field(image, "Containers");
+  const names = field(image, "Names") ?? [];
+  if (
+    !filled(id) ||
+    !IMAGE_ID_HEX.test(id) ||
+    !isNumber(containers) ||
+    !Number.isSafeInteger(containers) ||
+    containers < NO_COUNT ||
+    !Array.isArray(names) ||
+    !names.every(filled)
+  )
+    throw new Error("The Podman image list holds an unknown image.");
+  return { id, containers, names };
 }
 
 export function parsePodmanUsage(
@@ -606,19 +641,7 @@ export function parsePodmanUsage(
     throw new Error("The Podman image list answers no list.");
   const images = new Map<string, RuntimeImageUsage>();
   for (const image of listed) {
-    const id = field(image, "Id");
-    const containers = field(image, "Containers");
-    const names = field(image, "Names") ?? [];
-    if (
-      !filled(id) ||
-      !IMAGE_ID_HEX.test(id) ||
-      !isNumber(containers) ||
-      !Number.isSafeInteger(containers) ||
-      containers < NO_COUNT ||
-      !Array.isArray(names) ||
-      !names.every(filled)
-    )
-      throw new Error("The Podman image list holds an unknown image.");
+    const { id, containers, names } = listedImage(image);
     const key = imageIdOf(id);
     const bytes = unique.get(key.slice(0, SHORT_IMAGE_KEY_LENGTH));
     if (bytes === undefined) continue;
@@ -1051,31 +1074,42 @@ export function versionBelow(version: string, minimum: string): boolean {
   return false;
 }
 
+function subordinateRefusal(
+  host: RuntimeHost,
+  info: Record<string, unknown>,
+): string | null {
+  if (!rootlessPodman(info) || coversContainerUid(info)) return null;
+  return `the subordinate uid range of ${host.user} does not cover the container uid ${CONTAINER_UID}. Add a subordinate uid range of at least ${CONTAINER_UID} ids for ${host.user}.`;
+}
+
+function rootlessDockerRefusal(
+  host: RuntimeHost,
+  info: Record<string, unknown>,
+): string | null {
+  if (
+    host.platform !== LINUX ||
+    dockerDesktop(info) ||
+    !securityOption(info, ROOTLESS_OPTION)
+  )
+    return null;
+  return `rootless Docker cannot map the container uid ${CONTAINER_UID} to the server user. Use rootless Podman or a rootful runtime.`;
+}
+
+function podmanVersionRefusal(info: Record<string, unknown>): string | null {
+  const version = field(info, "version", "Version");
+  if (isString(version) && !versionBelow(version, PODMAN_MIN_VERSION))
+    return null;
+  return `podman ${isString(version) ? version : "unknown"} is below the required version ${PODMAN_MIN_VERSION}. Upgrade Podman to ${PODMAN_MIN_VERSION} or later.`;
+}
+
 function refusal(
   host: RuntimeHost,
   runtime: ContainerRuntime,
   info: Record<string, unknown>,
 ): string | null {
-  if (
-    runtime === ContainerRuntime.Podman &&
-    rootlessPodman(info) &&
-    !coversContainerUid(info)
-  )
-    return `the subordinate uid range of ${host.user} does not cover the container uid ${CONTAINER_UID}. Add a subordinate uid range of at least ${CONTAINER_UID} ids for ${host.user}.`;
-  if (
-    runtime === ContainerRuntime.Docker &&
-    host.platform === LINUX &&
-    !dockerDesktop(info) &&
-    securityOption(info, ROOTLESS_OPTION)
-  )
-    return `rootless Docker cannot map the container uid ${CONTAINER_UID} to the server user. Use rootless Podman or a rootful runtime.`;
-  const version = field(info, "version", "Version");
-  if (
-    runtime === ContainerRuntime.Podman &&
-    (!isString(version) || versionBelow(version, PODMAN_MIN_VERSION))
-  )
-    return `podman ${isString(version) ? version : "unknown"} is below the required version ${PODMAN_MIN_VERSION}. Upgrade Podman to ${PODMAN_MIN_VERSION} or later.`;
-  return null;
+  if (runtime === ContainerRuntime.Podman)
+    return subordinateRefusal(host, info) ?? podmanVersionRefusal(info);
+  return rootlessDockerRefusal(host, info);
 }
 
 function factsOf(

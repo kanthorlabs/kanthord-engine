@@ -107,11 +107,7 @@ function environmentCauseOf(code: string | null): FailureCause {
     : attributed(CauseCategory.Environment, subcategory);
 }
 
-function operationCauseOf(
-  code: string | null,
-  detail: string | null,
-  gitStep: GitStep | null,
-): FailureCause {
+function gitStepCauseOf(gitStep: GitStep | null): FailureCause | null {
   if (gitStep === GitStep.FetchBase || gitStep === GitStep.Push)
     return unattributed([
       CauseCategory.Infrastructure,
@@ -122,6 +118,13 @@ function operationCauseOf(
       CauseCategory.WorkerAction,
       CauseCategory.Environment,
     ]);
+  return null;
+}
+
+function promptOperationCauseOf(
+  code: string | null,
+  detail: string | null,
+): FailureCause | null {
   if (code === VERIFICATION_INFRASTRUCTURE_FAILED)
     return attributed(
       CauseCategory.Infrastructure,
@@ -136,12 +139,20 @@ function operationCauseOf(
       CauseCategory.Infrastructure,
       CauseSubcategory.PromptRecord,
     );
+  return null;
+}
+
+function configurationCauseOf(code: string | null): FailureCause | null {
   if (code === ProjectErrorCode.RepositorySshUnreachable)
     return attributed(CauseCategory.Infrastructure, CauseSubcategory.Network);
   if (code === ProjectErrorCode.RepositoryBaseBranchAbsent)
     return attributed(CauseCategory.Human, CauseSubcategory.Configuration);
   if (code?.startsWith(BINDING_CODE_PREFIX))
     return attributed(CauseCategory.Human, CauseSubcategory.Configuration);
+  return null;
+}
+
+function workerOperationCauseOf(code: string | null): FailureCause | null {
   if (code === GIT_COMMIT_FAILED)
     return unattributed([
       CauseCategory.WorkerAction,
@@ -159,7 +170,21 @@ function operationCauseOf(
       CauseCategory.Infrastructure,
       CauseCategory.WorkerAction,
     ]);
-  return unattributed([]);
+  return null;
+}
+
+function operationCauseOf(
+  code: string | null,
+  detail: string | null,
+  gitStep: GitStep | null,
+): FailureCause {
+  return (
+    gitStepCauseOf(gitStep) ??
+    promptOperationCauseOf(code, detail) ??
+    configurationCauseOf(code) ??
+    workerOperationCauseOf(code) ??
+    unattributed([])
+  );
 }
 
 function noProgressCauseOf(timedOut: boolean): FailureCause {
@@ -182,6 +207,33 @@ function budgetCauseOf(timedOut: boolean): FailureCause {
     : unattributed([CauseCategory.Plan, CauseCategory.Model]);
 }
 
+type FixedStopReason = Exclude<
+  ExecutionStopReason,
+  | typeof ExecutionStopReason.ProviderFailed
+  | typeof ExecutionStopReason.EnvironmentFailed
+  | typeof ExecutionStopReason.OperationFailed
+  | typeof ExecutionStopReason.NoProgress
+  | typeof ExecutionStopReason.BudgetEnd
+  | typeof ExecutionStopReason.AssessmentAbsent
+>;
+
+function fixedStopCauseOf(reason: FixedStopReason): FailureCause {
+  switch (reason) {
+    case ExecutionStopReason.InstanceArchived:
+    case ExecutionStopReason.WorkerStopped:
+    case ExecutionStopReason.HumanPaused:
+      return attributed(CauseCategory.Human, CauseSubcategory.Intervention);
+    case ExecutionStopReason.JudgementInvalid:
+    case ExecutionStopReason.ReportAbsent:
+      return unattributed([CauseCategory.Model, CauseCategory.Prompt]);
+    case ExecutionStopReason.ActionUnsettled:
+      return unattributed([
+        CauseCategory.WorkerAction,
+        CauseCategory.Infrastructure,
+      ]);
+  }
+}
+
 export function stopCauseOf(
   reason: ExecutionStopReason,
   code: string | null,
@@ -200,17 +252,7 @@ export function stopCauseOf(
     case ExecutionStopReason.BudgetEnd:
     case ExecutionStopReason.AssessmentAbsent:
       return budgetCauseOf(isTimedOut(detail, signals));
-    case ExecutionStopReason.InstanceArchived:
-    case ExecutionStopReason.WorkerStopped:
-    case ExecutionStopReason.HumanPaused:
-      return attributed(CauseCategory.Human, CauseSubcategory.Intervention);
-    case ExecutionStopReason.JudgementInvalid:
-    case ExecutionStopReason.ReportAbsent:
-      return unattributed([CauseCategory.Model, CauseCategory.Prompt]);
-    case ExecutionStopReason.ActionUnsettled:
-      return unattributed([
-        CauseCategory.WorkerAction,
-        CauseCategory.Infrastructure,
-      ]);
+    default:
+      return fixedStopCauseOf(reason);
   }
 }

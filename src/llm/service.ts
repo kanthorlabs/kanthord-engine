@@ -125,6 +125,22 @@ const CredentialErrorCode = {
 const NO_ROWS = 0;
 const LOGIN_FAILED_REASON = "login failed";
 
+function oauthLoginPlatform(platform: string): Platform {
+  if (!isLlmPlatform(platform))
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      CredentialErrorCode.UnsupportedPlatform,
+      "Unsupported platform.",
+    );
+  if (LLM_PLATFORMS[platform].secret_shape !== SecretShape.OAuth)
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      CredentialErrorCode.UnsupportedEntry,
+      "Unsupported credential entry.",
+    );
+  return platform;
+}
+
 function invalidInput(): OperationError {
   return new OperationError(
     HttpStatus.BadRequest,
@@ -516,32 +532,50 @@ export class LlmComponent implements Service {
   ):
     | typeof llmOperations.create.output._output
     | Promise<typeof llmOperations.create.output._output> {
-    const { name, platform, metadata } = body;
     const identity = caller.identity;
-    if (isWorkerIdentity(identity)) {
-      if (
-        body.secret !== undefined ||
-        body.holders !== undefined ||
-        body.holder === undefined
-      )
-        throw invalidInput();
-      const holder = body.holder;
-      const copy = { holder, ...sealedBody(body) };
-      return this.written(
-        [holder],
-        caller.commit((tx) => {
-          if (this.workerHolder(tx, identity) !== holder)
-            throw instanceForbidden();
-          const [answer] = this.records.createCopies(
-            tx,
-            this.platformSet,
-            { name, platform, metadata, copies: [copy] },
-            undefined,
-          );
-          return answer!;
-        }),
-      );
-    }
+    if (isWorkerIdentity(identity))
+      return this.createWorkerCopy(body, caller, identity);
+    return this.createServerCopies(body, caller);
+  }
+
+  private createWorkerCopy(
+    body: LlmCredentialCreate,
+    caller: CallerContext,
+    identity: WorkerIdentity,
+  ):
+    | typeof llmOperations.create.output._output
+    | Promise<typeof llmOperations.create.output._output> {
+    const { name, platform, metadata } = body;
+    if (
+      body.secret !== undefined ||
+      body.holders !== undefined ||
+      body.holder === undefined
+    )
+      throw invalidInput();
+    const holder = body.holder;
+    const copy = { holder, ...sealedBody(body) };
+    return this.written(
+      [holder],
+      caller.commit((tx) => {
+        if (this.workerHolder(tx, identity) !== holder)
+          throw instanceForbidden();
+        const [answer] = this.records.createCopies(
+          tx,
+          this.platformSet,
+          { name, platform, metadata, copies: [copy] },
+          undefined,
+        );
+        return answer!;
+      }),
+    );
+  }
+
+  private createServerCopies(
+    body: LlmCredentialCreate,
+    caller: CallerContext,
+  ):
+    | typeof llmOperations.create.output._output
+    | Promise<typeof llmOperations.create.output._output> {
     if (
       body.secret === undefined ||
       body.holder !== undefined ||
@@ -900,22 +934,19 @@ export class LlmComponent implements Service {
         LlmErrorCode.Stopped,
         "The LLM component is stopped.",
       );
-    const { platform, name, mode: requested } = input.body;
     const holder = input.body.holder ?? SERVER_HOLDER;
-    if (!isLlmPlatform(platform))
-      throw new OperationError(
-        HttpStatus.BadRequest,
-        CredentialErrorCode.UnsupportedPlatform,
-        "Unsupported platform.",
-      );
-    if (LLM_PLATFORMS[platform].secret_shape !== SecretShape.OAuth)
-      throw new OperationError(
-        HttpStatus.BadRequest,
-        CredentialErrorCode.UnsupportedEntry,
-        "Unsupported credential entry.",
-      );
+    const platform = oauthLoginPlatform(input.body.platform);
     if (holder !== SERVER_HOLDER)
       return this.loginInstance(input, caller, platform, holder);
+    return this.loginServer(input, caller, platform);
+  }
+
+  private async loginServer(
+    input: typeof llmOperations.login.input._output,
+    caller: CallerContext,
+    platform: Platform,
+  ): Promise<typeof llmOperations.login.output._output> {
+    const { name, mode: requested } = input.body;
     this.store.transaction((tx) => this.records.requireAvailableName(tx, name));
     const mode = loginMode(
       platform,

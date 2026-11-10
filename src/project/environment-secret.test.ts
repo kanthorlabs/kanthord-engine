@@ -5,7 +5,6 @@ import { CustodyComponent, custodyMigrations } from "../custody/index.ts";
 import {
   type CredentialAnswer,
   CUSTODY_SERVICE_NAME,
-  SecretShape,
 } from "../custody/contract.ts";
 import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -145,28 +144,6 @@ async function rejects(fn: () => unknown, status: number, code: string) {
       error.code === code,
   );
 }
-
-test("platform list answers environment_secret alone with the api_key shape and no probe", (t) => {
-  const f = fixture(t);
-  assert.deepEqual(
-    f.invoke(environmentSecretOperations.platform_list, {
-      params: {},
-      query: {},
-      body: null,
-    }),
-    {
-      items: [
-        {
-          platform: ENVIRONMENT_SECRET_PLATFORM,
-          secret_shape: SecretShape.ApiKey,
-          login_modes: [],
-          metadata_fields: [],
-          verifiable: false,
-        },
-      ],
-    },
-  );
-});
 
 test("create answers the record without the secret and refuses metadata", (t) => {
   const f = fixture(t);

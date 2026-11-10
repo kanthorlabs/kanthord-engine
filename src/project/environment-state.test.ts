@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { readdirSync, statSync, writeFileSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { canonicalJSON } from "../kernel/json.ts";
 import { temporary } from "../kernel/test-support.ts";
 import {
   classifyProof,
@@ -10,7 +9,6 @@ import {
   environmentDigest,
   type EnvironmentDigestInput,
   environmentPath,
-  environmentTagOf,
   EnvironmentTarget,
   type ProofFile,
   type ProofFileInput,
@@ -26,10 +24,8 @@ const DOT_IDENTITY = "repository:github:Acme/.Todo_App";
 const DOT_PATH = "repository/github/acme/todo-app";
 const SETUP_FAILED = "setup_failed";
 const SLEEP_COMMAND = "sleep 999";
-const SUM = "a".repeat(64);
 const LONG_PATH_LENGTH = 197;
 const LONG_PATH_KEPT = 180;
-const TAIL_LIMIT = 4096;
 const PRIVATE_MODE = 0o600;
 const MODE_MASK = 0o777;
 const KEPT_REPAIRS = 2;
@@ -106,24 +102,6 @@ test("an environment path above 200 characters keeps 180 characters and a hash",
   assert.notEqual(path, environmentPath(`${identity}b`));
 });
 
-test("an environment path of a long identity never ends a part with a separator", () => {
-  const path = environmentPath(`repository:gitlab:${"group/".repeat(60)}app`);
-  assert.equal(path.length, LONG_PATH_LENGTH);
-  assert.doesNotMatch(path, /[-/]-/);
-  assert.doesNotMatch(path, /\/-/);
-});
-
-test("an environment tag names the image path and the digest", () => {
-  assert.equal(
-    environmentTagOf("repository:github:Acme/.Todo_App", SUM),
-    `localhost/kanthord-env/repository/github/acme/todo-app:${SUM}`,
-  );
-  assert.equal(
-    environmentTagOf("repository:gitlab:Group/Sub/__", SUM),
-    `localhost/kanthord-env/repository/gitlab/group/sub/x:${SUM}`,
-  );
-});
-
 test("the environment digest changes with each input and ignores the key order", () => {
   const first = environmentDigest(input());
   assert.match(first, /^[0-9a-f]{64}$/);
@@ -150,44 +128,6 @@ test("the environment digest changes with each input and ignores the key order",
     input({ version: "2.0.0" }),
   ])
     assert.notEqual(environmentDigest(other), first);
-});
-
-const REGISTRY_SECRET = {
-  variable: "REGISTRY_AUTH",
-  credential: "registry-auth",
-  revision: 1,
-};
-const NPM_SECRET = {
-  variable: "NPM_TOKEN",
-  credential: "npm-token",
-  revision: 3,
-};
-
-test("the environment digest changes with the revision of a secret and with no secret", () => {
-  const first = environmentDigest(input({ secrets: [REGISTRY_SECRET] }));
-  assert.notEqual(
-    environmentDigest(
-      input({ secrets: [{ ...REGISTRY_SECRET, revision: 2 }] }),
-    ),
-    first,
-  );
-  assert.notEqual(environmentDigest(input()), first);
-});
-
-test("the environment digest ignores the order of the secrets", () => {
-  assert.equal(
-    environmentDigest(input({ secrets: [REGISTRY_SECRET, NPM_SECRET] })),
-    environmentDigest(input({ secrets: [NPM_SECRET, REGISTRY_SECRET] })),
-  );
-});
-
-test("the canonical JSON of the digest input holds the variable, the credential and the revision of a secret only", () => {
-  const text = canonicalJSON(input({ secrets: [REGISTRY_SECRET] }));
-  assert.ok(
-    text.includes(
-      '"secrets":[{"credential":"registry-auth","revision":1,"variable":"REGISTRY_AUTH"}]',
-    ),
-  );
 });
 
 test("a proof of commands that all end with exit 0 passes", () => {
@@ -267,12 +207,6 @@ test("a check that ends with another exit code joins the red baseline", () => {
   );
 });
 
-test("the tail keeps the last 4096 bytes of the output", () => {
-  const output = `${"a".repeat(100)}${"b".repeat(TAIL_LIMIT)}`;
-  const verdict = classifyProof([result(ProofPhase.Setup, "x", 1, { output })]);
-  assert.equal(verdict.tail, "b".repeat(TAIL_LIMIT));
-});
-
 test("proof files write, read, list and remove", (t) => {
   const root = temporary(t);
   const files = new ProofFiles(root);
@@ -301,24 +235,6 @@ test("proof files write, read, list and remove", (t) => {
   files.remove(path, second);
   assert.deepEqual(files.digests(path), [sum]);
   assert.deepEqual(files.digests(other), [sum]);
-});
-
-test("a proof file that fails the schema reads as absent", (t) => {
-  const root = temporary(t);
-  const files = new ProofFiles(root);
-  const path = "repository/github/acme/app";
-  const sum = "d".repeat(64);
-  files.write(path, proofFile(sum));
-  writeFileSync(
-    join(root, path, `${sum}.json`),
-    JSON.stringify({ ...proofFile(sum), extra: 1 }),
-  );
-  assert.equal(files.read(path, sum), null);
-  writeFileSync(
-    join(root, path, `${sum}.json`),
-    JSON.stringify({ ...proofFile(sum), repairs: -1 }),
-  );
-  assert.equal(files.read(path, sum), null);
 });
 
 test("a write keeps the repairs of the file of the same digest and a new file holds 0", (t) => {

@@ -55,53 +55,100 @@ async function runBash(
   const { onData, signal, timeout, env } = options;
   const timeoutMs = timeoutMsOf(timeout);
   if (signal?.aborted) throw new Error(ABORTED);
-  await access(cwd).catch(() => {
-    throw new Error(`Working directory does not exist: ${cwd}`);
-  });
+  await assertWorkingDirectory(cwd);
   const child = spawn(shell.shell, [...shell.args, command], {
     cwd,
     detached: true,
     env,
     stdio: ["ignore", "pipe", "pipe"],
   });
-  let killed = false;
-  let killFailure: unknown = null;
-  const kill = () => {
-    if (killed || child.pid === undefined) return;
-    killed = true;
-    try {
-      killChildTree({
-        pid: child.pid,
-        exitCode: child.exitCode,
-        signalCode: child.signalCode,
-      });
-    } catch (error) {
-      killFailure = error;
-    }
-  };
-  const timer =
-    timeoutMs === undefined ? undefined : setTimeout(kill, timeoutMs);
-  signal?.addEventListener("abort", kill, { once: true });
-  if (signal?.aborted) kill();
+  const killer = childKiller(child);
+  const timer = armKillTimer(killer.kill, timeoutMs);
+  signal?.addEventListener("abort", killer.kill, { once: true });
+  if (signal?.aborted) killer.kill();
   child.stdout?.on("data", onData);
   child.stderr?.on("data", onData);
   try {
     const exitCode = await childExit(child);
-    if (killFailure !== null) throw killFailure;
-    if (signal?.aborted) throw new Error(ABORTED);
-    if (killed) throw new Error(`timeout:${timeout}`);
+    assertBashOutcome(killer, { signal, timeout });
     return { exitCode: exitCode ?? signalExit(child) };
   } finally {
     clearTimeout(timer);
-    signal?.removeEventListener("abort", kill);
-    if (child.pid !== undefined) settled({ pid: child.pid, killed });
-    if (group.killGroupAtEnd && !killed && child.pid !== undefined)
-      killChildTree({
-        pid: child.pid,
-        exitCode: child.exitCode,
-        signalCode: child.signalCode,
-      });
+    signal?.removeEventListener("abort", killer.kill);
+    settleChild(child, killer.wasKilled(), { settled, group });
   }
+}
+
+async function assertWorkingDirectory(cwd: string): Promise<void> {
+  await access(cwd).catch(() => {
+    throw new Error(`Working directory does not exist: ${cwd}`);
+  });
+}
+
+function killTree(child: ChildProcess): void {
+  assert.ok(child.pid !== undefined);
+  killChildTree({
+    pid: child.pid,
+    exitCode: child.exitCode,
+    signalCode: child.signalCode,
+  });
+}
+
+interface ChildKiller {
+  kill: () => void;
+  wasKilled: () => boolean;
+  failure: () => unknown;
+}
+
+function childKiller(child: ChildProcess): ChildKiller {
+  let killed = false;
+  let killFailure: unknown = null;
+  return {
+    kill: () => {
+      if (killed || child.pid === undefined) return;
+      killed = true;
+      try {
+        killTree(child);
+      } catch (error) {
+        killFailure = error;
+      }
+    },
+    wasKilled: () => killed,
+    failure: () => killFailure,
+  };
+}
+
+function armKillTimer(
+  kill: () => void,
+  timeoutMs: number | undefined,
+): NodeJS.Timeout | undefined {
+  return timeoutMs === undefined ? undefined : setTimeout(kill, timeoutMs);
+}
+
+interface BashOutcomeInput {
+  signal: AbortSignal | undefined;
+  timeout: number | undefined;
+}
+
+function assertBashOutcome(killer: ChildKiller, input: BashOutcomeInput): void {
+  if (killer.failure() !== null) throw killer.failure();
+  if (input.signal?.aborted) throw new Error(ABORTED);
+  if (killer.wasKilled()) throw new Error(`timeout:${input.timeout}`);
+}
+
+interface SettleChildOptions {
+  settled: (process: BashProcess) => void;
+  group: BashGroupOptions;
+}
+
+function settleChild(
+  child: ChildProcess,
+  killed: boolean,
+  options: SettleChildOptions,
+): void {
+  if (child.pid === undefined) return;
+  options.settled({ pid: child.pid, killed });
+  if (options.group.killGroupAtEnd && !killed) killTree(child);
 }
 
 function timeoutMsOf(timeout: number | undefined): number | undefined {

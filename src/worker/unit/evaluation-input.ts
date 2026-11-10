@@ -256,14 +256,155 @@ function existsAt(directory: string, file: string): boolean {
   );
 }
 
+interface RepositorySnapshot {
+  repository: { binding_id: string; name: string };
+  commit: string;
+}
+
+interface ReviewScopeContext {
+  input: StepsInput;
+  run: ExecutionRun;
+  round: ReviewRound;
+  deadline: number;
+  workspaceDirectory: string;
+  snapshots: readonly RepositorySnapshot[];
+}
+
+interface CheckoutScopeEntry {
+  checkout: ExamineCheckout;
+  prefixed: (file: string) => string;
+  snapshot: RepositorySnapshot | undefined;
+  base: string | null;
+}
+
+function checkoutScopeEntry(
+  context: ReviewScopeContext,
+  checkout: ExamineCheckout,
+): CheckoutScopeEntry {
+  const prefix = relative(context.workspaceDirectory, checkout.directory);
+  const snapshot = context.snapshots.find(
+    (entry) => entry.repository.name === checkout.name,
+  );
+  return {
+    checkout,
+    prefixed: (file) => (prefix ? join(prefix, file) : file),
+    snapshot,
+    base:
+      snapshot === undefined
+        ? null
+        : reviewBaseCommit(
+            context.round.review_base,
+            snapshot.repository.binding_id,
+          ),
+  };
+}
+
+async function nodeHistoryScope(
+  context: ReviewScopeContext,
+  entry: CheckoutScopeEntry,
+  scope: ReviewScope,
+): Promise<boolean> {
+  const { input, run, deadline } = context;
+  const { checkout, prefixed, snapshot, base } = entry;
+  if (snapshot === undefined || base === null) return false;
+  if (
+    !(await onFirstParentChain(
+      input.env,
+      checkout.directory,
+      base,
+      run.operationContext,
+      deadline - Date.now(),
+    ))
+  )
+    return false;
+  const read = (added: boolean) =>
+    roundFiles(
+      input.env,
+      checkout.directory,
+      base,
+      added,
+      run.operationContext,
+      deadline - Date.now(),
+    );
+  scope.changedFiles.push(...(await read(false)).map(prefixed));
+  scope.addedFiles.push(
+    ...(await read(true))
+      .filter((file) => existsAt(checkout.directory, file))
+      .map(prefixed),
+  );
+  scope.patches.push({
+    binding_id: snapshot.repository.binding_id,
+    name: checkout.name,
+    text: await roundPatch(
+      input.env,
+      checkout.directory,
+      base,
+      run.operationContext,
+      deadline - Date.now(),
+    ),
+  });
+  return true;
+}
+
+async function originScope(
+  context: ReviewScopeContext,
+  entry: CheckoutScopeEntry,
+  scope: ReviewScope,
+): Promise<void> {
+  const { input, run, round, deadline } = context;
+  const { checkout, prefixed, snapshot, base } = entry;
+  if (round.review_base !== null)
+    run.log("review base off the node history", {
+      binding: checkout.name,
+      review_base: base,
+    });
+  const origin = `origin/${checkout.base_branch}`;
+  scope.addedFiles.push(
+    ...(
+      await addedFiles(
+        input.env,
+        checkout.directory,
+        origin,
+        run.operationContext,
+        deadline - Date.now(),
+      )
+    ).map(prefixed),
+  );
+  scope.changedFiles.push(
+    ...(
+      await modifiedFiles(
+        input.env,
+        checkout.directory,
+        origin,
+        run.operationContext,
+        deadline - Date.now(),
+      )
+    ).map(prefixed),
+  );
+  if (round.review_base === null || snapshot === undefined) return;
+  const text = await changePatch(
+    input.env,
+    checkout.directory,
+    origin,
+    run.operationContext,
+    deadline - Date.now(),
+  );
+  if (text.length === NO_PATCH_BYTES) {
+    scope.emptyPatches.push(checkout.name);
+    return;
+  }
+  scope.patches.push({
+    binding_id: snapshot.repository.binding_id,
+    name: checkout.name,
+    text,
+  });
+}
+
 async function reviewScopeOf(
   input: StepsInput,
   run: ExecutionRun,
   workspace: { directory: string; checkouts: readonly ExamineCheckout[] },
-  snapshots: readonly {
-    repository: { binding_id: string; name: string };
-    commit: string;
-  }[],
+  snapshots: readonly RepositorySnapshot[],
   round: ReviewRound,
   deadline: number,
 ): Promise<ReviewScope> {
@@ -273,104 +414,22 @@ async function reviewScopeOf(
     patches: [],
     emptyPatches: [],
   };
+  const context: ReviewScopeContext = {
+    input,
+    run,
+    round,
+    deadline,
+    workspaceDirectory: workspace.directory,
+    snapshots,
+  };
   for (const checkout of workspace.checkouts) {
-    const prefix = relative(workspace.directory, checkout.directory);
-    const prefixed = (file: string) => (prefix ? join(prefix, file) : file);
-    const snapshot = snapshots.find(
-      (entry) => entry.repository.name === checkout.name,
-    );
-    const base =
-      snapshot === undefined
-        ? null
-        : reviewBaseCommit(round.review_base, snapshot.repository.binding_id);
-    if (snapshot !== undefined && base === snapshot.commit) {
+    const entry = checkoutScopeEntry(context, checkout);
+    if (entry.snapshot !== undefined && entry.base === entry.snapshot.commit) {
       scope.emptyPatches.push(checkout.name);
       continue;
     }
-    if (
-      snapshot !== undefined &&
-      base !== null &&
-      (await onFirstParentChain(
-        input.env,
-        checkout.directory,
-        base,
-        run.operationContext,
-        deadline - Date.now(),
-      ))
-    ) {
-      const read = (added: boolean) =>
-        roundFiles(
-          input.env,
-          checkout.directory,
-          base,
-          added,
-          run.operationContext,
-          deadline - Date.now(),
-        );
-      scope.changedFiles.push(...(await read(false)).map(prefixed));
-      scope.addedFiles.push(
-        ...(await read(true))
-          .filter((file) => existsAt(checkout.directory, file))
-          .map(prefixed),
-      );
-      scope.patches.push({
-        binding_id: snapshot.repository.binding_id,
-        name: checkout.name,
-        text: await roundPatch(
-          input.env,
-          checkout.directory,
-          base,
-          run.operationContext,
-          deadline - Date.now(),
-        ),
-      });
-      continue;
-    }
-    if (round.review_base !== null)
-      run.log("review base off the node history", {
-        binding: checkout.name,
-        review_base: base,
-      });
-    const origin = `origin/${checkout.base_branch}`;
-    scope.addedFiles.push(
-      ...(
-        await addedFiles(
-          input.env,
-          checkout.directory,
-          origin,
-          run.operationContext,
-          deadline - Date.now(),
-        )
-      ).map(prefixed),
-    );
-    scope.changedFiles.push(
-      ...(
-        await modifiedFiles(
-          input.env,
-          checkout.directory,
-          origin,
-          run.operationContext,
-          deadline - Date.now(),
-        )
-      ).map(prefixed),
-    );
-    if (round.review_base === null || snapshot === undefined) continue;
-    const text = await changePatch(
-      input.env,
-      checkout.directory,
-      origin,
-      run.operationContext,
-      deadline - Date.now(),
-    );
-    if (text.length === NO_PATCH_BYTES) {
-      scope.emptyPatches.push(checkout.name);
-      continue;
-    }
-    scope.patches.push({
-      binding_id: snapshot.repository.binding_id,
-      name: checkout.name,
-      text,
-    });
+    if (await nodeHistoryScope(context, entry, scope)) continue;
+    await originScope(context, entry, scope);
   }
   scope.changedFiles.sort();
   return scope;
