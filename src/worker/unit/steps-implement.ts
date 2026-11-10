@@ -491,7 +491,7 @@ function revisionInstructionOf(state: StepsState, checked: CheckedRun): string {
   );
 }
 
-function endUnchangedStreak(
+function endUnchangedStreakOnRuledPass(
   state: StepsState,
   passed: boolean,
   ruled: boolean,
@@ -505,8 +505,9 @@ function reviseNodeInstruction(
   ruled: boolean,
 ): string {
   if (ruled) countUnchangedTurn(state, NoProgressRule.VerdictRuleUnmet);
+  const instruction = revisionInstructionOf(state, checked);
   state.revisionCount++;
-  return revisionInstructionOf(state, checked);
+  return instruction;
 }
 
 async function runNodeInstruction(
@@ -540,7 +541,7 @@ async function runNodeInstruction(
       countUnchangedTurn(state, NoProgressRule.UnchangedRevision);
     const checked = await verifyCommands(state, unit, commands);
     const passed = recordTaskVerification(state, unit, checked);
-    endUnchangedStreak(state, passed, ruled);
+    endUnchangedStreakOnRuledPass(state, passed, ruled);
     if (passed) return await completeUnit(state, unit, agent);
     if (budget.exhausted()) return ended;
     instruction = reviseNodeInstruction(state, checked, ruled);
