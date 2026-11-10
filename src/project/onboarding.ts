@@ -231,6 +231,59 @@ interface ReadFailure {
   failure_reason: string | null;
 }
 
+interface ReadRequest {
+  projectId: string;
+  group: RepositoryGroup;
+  target: EnvironmentTarget;
+  previous: GroupRecord | undefined;
+}
+
+interface ReadOutcome {
+  next: GroupRecord;
+  failure: ReadFailure | null;
+}
+
+function failedRead(request: ReadRequest, failure: ReadFailure): ReadOutcome {
+  const { projectId, group, target, previous } = request;
+  const base = previous ?? emptyRecord(projectId, group, target);
+  const next: GroupRecord = {
+    ...base,
+    ...(base.target === target
+      ? {}
+      : {
+          digest: null,
+          tag: null,
+          proof: null,
+          repairs: 0,
+          proved: false,
+        }),
+    target,
+    reason: failure.reason,
+  };
+  return { next, failure };
+}
+
+interface RunOutcome {
+  completed: boolean;
+  verdict: ProofVerdict | null;
+}
+
+function queuedToRun(record: GroupRecord | undefined): record is GroupRecord {
+  return (
+    record !== undefined &&
+    record.step !== null &&
+    record.run_started_at === null
+  );
+}
+
+type FailableRecord = GroupRecord & { digest: string; commit: string };
+
+function failable(record: GroupRecord | undefined): record is FailableRecord {
+  return (
+    record !== undefined && record.digest !== null && record.commit !== null
+  );
+}
+
 function groupNamed(
   environment: string | null,
   repositories: readonly RepositoryGroup[],
@@ -361,17 +414,20 @@ function staleFailure(
   return proof?.outcome === ProofOutcome.Failed && proof.commit !== commit;
 }
 
+function provedTarget(record: GroupRecord): boolean {
+  return (
+    (record.target === EnvironmentTarget.Image && record.proved) ||
+    (record.target === EnvironmentTarget.Host &&
+      record.proof?.outcome === ProofOutcome.Passed)
+  );
+}
+
 function decidedStatusOf(record: GroupRecord): EnvironmentStatus | null {
   if (!record.read_succeeded) return EnvironmentStatus.Pending;
   if (record.proof?.outcome === ProofOutcome.Failed)
     return EnvironmentStatus.Failed;
   if (record.target === EnvironmentTarget.Remote) return EnvironmentStatus.None;
-  if (
-    (record.target === EnvironmentTarget.Image && record.proved) ||
-    (record.target === EnvironmentTarget.Host &&
-      record.proof?.outcome === ProofOutcome.Passed)
-  )
-    return EnvironmentStatus.Ready;
+  if (provedTarget(record)) return EnvironmentStatus.Ready;
   if (record.source === EnvironmentSource.None) return EnvironmentStatus.None;
   return null;
 }
@@ -738,32 +794,42 @@ export class Onboarding {
   private async checkBaseCommit(key: string): Promise<void> {
     const record = this.records.get(key);
     if (record === undefined) return;
-    if (statusOf(record) !== EnvironmentStatus.Failed)
+    if (!this.failedAndIdle(key, record))
       return this.retryWhileWaiting(key, record);
-    if (this.busy(key, record) || this.targetMoved(record))
-      return this.retryWhileWaiting(key, record);
-    let commit: string;
-    try {
-      commit = await this.dependencies.baseCommitOf(
-        record.binding_id,
-        this.context,
-      );
-    } catch (error) {
-      if (this.context.signal.aborted) return;
-      this.logReadFailure(key, record, readFailureOf(error));
-      return this.retryWhileWaiting(key, record);
-    }
+    const commit = await this.readBaseCommit(key, record);
+    if (commit === null) return;
     if (this.context.signal.aborted || this.records.get(key) !== record) return;
-    if (
-      statusOf(record) !== EnvironmentStatus.Failed ||
-      this.busy(key, record) ||
-      this.targetMoved(record)
-    )
+    if (!this.failedAndIdle(key, record))
       return this.retryWhileWaiting(key, record);
     this.loggedReadFailures.delete(key);
     if (record.proof?.commit === commit)
       return this.retryWhileWaiting(key, record);
     this.trigger(record.project_id, record.resource_identity);
+  }
+
+  private failedAndIdle(key: string, record: GroupRecord): boolean {
+    return (
+      statusOf(record) === EnvironmentStatus.Failed &&
+      !this.busy(key, record) &&
+      !this.targetMoved(record)
+    );
+  }
+
+  private async readBaseCommit(
+    key: string,
+    record: GroupRecord,
+  ): Promise<string | null> {
+    try {
+      return await this.dependencies.baseCommitOf(
+        record.binding_id,
+        this.context,
+      );
+    } catch (error) {
+      if (this.context.signal.aborted) return null;
+      this.logReadFailure(key, record, readFailureOf(error));
+      this.retryWhileWaiting(key, record);
+      return null;
+    }
   }
 
   private busy(key: string, record: GroupRecord): boolean {
@@ -805,49 +871,17 @@ export class Onboarding {
     }
     const target = targetOf(group, facts);
     const previous = this.records.get(key);
-    if (previous !== undefined && previous.run_started_at !== null) {
-      this.marked.add(key);
-      return;
-    }
+    if (this.markIfRunning(key, previous)) return;
     const wasClaimable =
       previous !== undefined && claimable(statusOf(previous));
-    let next: GroupRecord;
-    let failure: ReadFailure | null = null;
-    try {
-      next = await this.read(projectId, group, target, previous);
-      if (!next.read_succeeded && next.reason !== null)
-        failure = { reason: next.reason, failure_reason: null };
-    } catch (error) {
-      failure = readFailureOf(error);
-      const base = previous ?? emptyRecord(projectId, group, target);
-      next = {
-        ...base,
-        ...(base.target === target
-          ? {}
-          : {
-              digest: null,
-              tag: null,
-              proof: null,
-              repairs: 0,
-              proved: false,
-            }),
-        target,
-        reason: failure.reason,
-      };
-    }
-    next.reason_started_at =
-      next.reason === null
-        ? null
-        : (previous?.reason_started_at ?? this.dependencies.now());
-    if (this.changedWhileReading.delete(key)) {
-      if (!this.context.signal.aborted) this.again.add(key);
-      return;
-    }
-    const current = this.records.get(key);
-    if (current !== undefined && current.run_started_at !== null) {
-      this.marked.add(key);
-      return;
-    }
+    const { next, failure } = await this.readRecord({
+      projectId,
+      group,
+      target,
+      previous,
+    });
+    if (this.supersededWhileReading(key)) return;
+    if (this.markIfRunning(key, this.records.get(key))) return;
     this.records.set(key, next);
     this.logReadFailure(key, next, failure);
     this.schedule(key, next);
@@ -857,14 +891,45 @@ export class Onboarding {
       this.dependencies.wake(projectId);
   }
 
+  private markIfRunning(key: string, record: GroupRecord | undefined): boolean {
+    if (record === undefined || record.run_started_at === null) return false;
+    this.marked.add(key);
+    return true;
+  }
+
+  private supersededWhileReading(key: string): boolean {
+    if (!this.changedWhileReading.delete(key)) return false;
+    if (!this.context.signal.aborted) this.again.add(key);
+    return true;
+  }
+
+  private async readRecord(request: ReadRequest): Promise<ReadOutcome> {
+    const { projectId, group, target, previous } = request;
+    let outcome: ReadOutcome;
+    try {
+      const next = await this.read(projectId, group, target, previous);
+      const failure: ReadFailure | null =
+        !next.read_succeeded && next.reason !== null
+          ? { reason: next.reason, failure_reason: null }
+          : null;
+      outcome = { next, failure };
+    } catch (error) {
+      outcome = failedRead(request, readFailureOf(error));
+    }
+    outcome.next.reason_started_at =
+      outcome.next.reason === null
+        ? null
+        : (previous?.reason_started_at ?? this.dependencies.now());
+    return outcome;
+  }
+
   private async read(
     projectId: string,
     group: RepositoryGroup,
     target: EnvironmentTarget,
     previous: GroupRecord | undefined,
   ): Promise<GroupRecord> {
-    const { runtime, proofs, version } = this.dependencies;
-    const { signal } = this.context;
+    const { proofs, version } = this.dependencies;
     const resolved = await this.dependencies.resolveGroup(
       group.binding_id,
       target,
@@ -887,12 +952,7 @@ export class Onboarding {
       source: resolved.source,
       document: resolved.document,
       files: resolved.files,
-      base_image: atImage
-        ? await this.baseImageOf(resolved.document?.image, signal)
-        : null,
-      slot_image: atImage
-        ? await runtime.imageId(this.dependencies.slotImage, signal)
-        : null,
+      ...(await this.imageFactsOf(target, resolved.document?.image)),
       secrets,
       version,
     });
@@ -913,10 +973,7 @@ export class Onboarding {
       tag,
       proof: stale ? null : stored,
       repairs: stored?.repairs ?? 0,
-      proved:
-        !stale &&
-        tag !== null &&
-        (await runtime.imageExists(`${tag}${PROVED_SUFFIX}`)),
+      proved: await this.provedImage(tag, stale),
       read_succeeded: true,
       reason: null,
     };
@@ -924,6 +981,30 @@ export class Onboarding {
     next.step_started_at = null;
     if (decidedStatusOf(next) === null) next.step = await this.stepOf(next);
     return next;
+  }
+
+  private async provedImage(
+    tag: string | null,
+    stale: boolean,
+  ): Promise<boolean> {
+    if (stale || tag === null) return false;
+    return this.dependencies.runtime.imageExists(`${tag}${PROVED_SUFFIX}`);
+  }
+
+  private async imageFactsOf(
+    target: EnvironmentTarget,
+    reference: string | undefined,
+  ): Promise<{ base_image: string | null; slot_image: string | null }> {
+    if (target !== EnvironmentTarget.Image)
+      return { base_image: null, slot_image: null };
+    const { signal } = this.context;
+    return {
+      base_image: await this.baseImageOf(reference, signal),
+      slot_image: await this.dependencies.runtime.imageId(
+        this.dependencies.slotImage,
+        signal,
+      ),
+    };
   }
 
   private async baseImageOf(
@@ -976,12 +1057,7 @@ export class Onboarding {
 
   private async runGroup(key: string): Promise<void> {
     const record = this.records.get(key);
-    if (
-      record === undefined ||
-      record.step === null ||
-      record.run_started_at !== null
-    )
-      return;
+    if (!queuedToRun(record)) return;
     assert.ok(record.digest !== null, "A queued group holds a digest.");
     const ranForSession = record.session !== null;
     const now = this.dependencies.now();
@@ -990,6 +1066,20 @@ export class Onboarding {
     this.notify();
     const trace = this.openTrace(record, now);
     this.logRun(RUN_STARTED, record);
+    const outcome = await this.executeRun(record, trace);
+    this.settleRun(key, record, outcome);
+    if (
+      outcome.completed &&
+      outcome.verdict?.outcome === ProofOutcome.Failed &&
+      !ranForSession
+    )
+      this.considerSession(record);
+  }
+
+  private async executeRun(
+    record: GroupRecord,
+    trace: ServerTrace,
+  ): Promise<RunOutcome> {
     let completed = false;
     let verdict: ProofVerdict | null = null;
     const runId = this.dependencies.runId();
@@ -1001,18 +1091,7 @@ export class Onboarding {
         completed = true;
       }
     } catch (error) {
-      if (!this.context.signal.aborted) {
-        record.reason = redact(messageOf(error), secretValues);
-        record.reason_started_at ??= this.dependencies.now();
-        this.dependencies.logger.error(
-          {
-            err: redactedError(error, secretValues),
-            binding: record.binding_name,
-            digest: record.digest,
-          },
-          RUN_FAILED,
-        );
-      }
+      this.recordRunFailure(record, error, secretValues);
     } finally {
       this.dependencies.secrets.remove(runId);
       secretValues.length = NO_ITEMS;
@@ -1023,13 +1102,37 @@ export class Onboarding {
       this.closeTrace(trace, completed ? verdict : null);
       this.logRun(RUN_ENDED, record);
     }
-    if (completed && claimable(statusOf(record)))
+    return { completed, verdict };
+  }
+
+  private recordRunFailure(
+    record: GroupRecord,
+    error: unknown,
+    secretValues: readonly string[],
+  ): void {
+    if (this.context.signal.aborted) return;
+    record.reason = redact(messageOf(error), secretValues);
+    record.reason_started_at ??= this.dependencies.now();
+    this.dependencies.logger.error(
+      {
+        err: redactedError(error, secretValues),
+        binding: record.binding_name,
+        digest: record.digest,
+      },
+      RUN_FAILED,
+    );
+  }
+
+  private settleRun(
+    key: string,
+    record: GroupRecord,
+    outcome: RunOutcome,
+  ): void {
+    if (outcome.completed && claimable(statusOf(record)))
       this.dependencies.wake(record.project_id);
     if (this.records.get(key) === record) this.retryWhileWaiting(key, record);
     if (this.marked.delete(key))
       this.trigger(record.project_id, record.resource_identity);
-    if (completed && verdict?.outcome === ProofOutcome.Failed && !ranForSession)
-      this.considerSession(record);
   }
 
   private targetMoved(record: GroupRecord): boolean {
@@ -1598,38 +1701,48 @@ export class Onboarding {
   }
 
   environmentFailed(input: EnvironmentFailedInput): void {
-    const { proofs } = this.dependencies;
-    for (const identity of input.resource_identities) {
-      const key = keyOf(input.project_id, identity);
-      const record = this.records.get(key);
-      if (
-        record === undefined ||
-        record.digest === null ||
-        record.commit === null
-      )
-        continue;
-      if (input.digests[identity] !== record.digest) continue;
-      const file: ProofFile = {
-        digest: record.digest,
-        outcome: ProofOutcome.Failed,
-        class: input.stop.code,
-        origin: FailureOrigin.Execution,
-        execution_id: input.execution_id,
-        ...detailFacts(input.stop.detail),
-        tail: input.stop.detail,
-        reproduce: this.reproduceOf(record.tag),
-        checks: record.proof?.checks ?? [],
-        repairs: record.proof?.repairs ?? 0,
-        ended_at: this.dependencies.now(),
-        commit: record.commit,
-      };
-      if (this.computing.has(key)) this.changedWhileReading.add(key);
-      record.proof = proofs.write(environmentPath(identity), file);
-      record.repairs = record.proof.repairs;
-      this.considerSession(record);
-      this.retryWhileWaiting(key, record);
-    }
+    for (const identity of input.resource_identities)
+      this.recordExecutionFailure(input, identity);
     this.notify();
+  }
+
+  private recordExecutionFailure(
+    input: EnvironmentFailedInput,
+    identity: string,
+  ): void {
+    const key = keyOf(input.project_id, identity);
+    const record = this.records.get(key);
+    if (!failable(record)) return;
+    if (input.digests[identity] !== record.digest) return;
+    const file = this.executionFailureFile(record, input);
+    if (this.computing.has(key)) this.changedWhileReading.add(key);
+    record.proof = this.dependencies.proofs.write(
+      environmentPath(identity),
+      file,
+    );
+    record.repairs = record.proof.repairs;
+    this.considerSession(record);
+    this.retryWhileWaiting(key, record);
+  }
+
+  private executionFailureFile(
+    record: FailableRecord,
+    input: EnvironmentFailedInput,
+  ): ProofFile {
+    return {
+      digest: record.digest,
+      outcome: ProofOutcome.Failed,
+      class: input.stop.code,
+      origin: FailureOrigin.Execution,
+      execution_id: input.execution_id,
+      ...detailFacts(input.stop.detail),
+      tail: input.stop.detail,
+      reproduce: this.reproduceOf(record.tag),
+      checks: record.proof?.checks ?? [],
+      repairs: record.proof?.repairs ?? 0,
+      ended_at: this.dependencies.now(),
+      commit: record.commit,
+    };
   }
 
   async rebuild(

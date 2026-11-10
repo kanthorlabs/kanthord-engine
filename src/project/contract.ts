@@ -592,6 +592,16 @@ function refineFollowsCycles(
   }
 }
 
+function isSubmittedActionRepository(
+  bindings: BindingEdits,
+  name: string,
+): boolean {
+  const target = Object.hasOwn(bindings, name) ? bindings[name] : undefined;
+  return (
+    target?.kind === BindingKind.Repository && !!target.config.strategy.action
+  );
+}
+
 function refineBindingRelations(
   bindings: BindingEdits,
   ctx: z.RefinementCtx,
@@ -609,13 +619,7 @@ function refineBindingRelations(
       message:
         "Action follows must name the passing assessment until a claim-source contract exists.",
     });
-    const target = Object.hasOwn(bindings, follows.binding)
-      ? bindings[follows.binding]
-      : undefined;
-    if (
-      target?.kind !== BindingKind.Repository ||
-      !target.config.strategy.action
-    ) {
+    if (!isSubmittedActionRepository(bindings, follows.binding)) {
       ctx.addIssue({
         code: CUSTOM_ISSUE,
         path: followsPath(name),

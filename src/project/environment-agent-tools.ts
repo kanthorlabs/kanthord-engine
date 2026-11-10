@@ -82,6 +82,10 @@ export function parseProbeCommand(text: string): ProbeCommand | null {
       form.every((word, index) => word === words[index]),
   );
   if (fixed !== undefined) return { argv: [...fixed] };
+  return parseWordedProbe(words);
+}
+
+function parseWordedProbe(words: readonly string[]): ProbeCommand | null {
   const [first, second, third] = words;
   if (
     words.length === COMMAND_V_LENGTH &&
@@ -90,10 +94,10 @@ export function parseProbeCommand(text: string): ProbeCommand | null {
     isWord(third)
   )
     return { argv: ["sh", "-c", COMMAND_V_SCRIPT, "sh", third] };
-  if (words.length === PAIR_LENGTH && isWord(first) && second === VERSION_FLAG)
+  if (words.length !== PAIR_LENGTH) return null;
+  if (isWord(first) && second === VERSION_FLAG)
     return { argv: [first, VERSION_FLAG] };
-  if (words.length === PAIR_LENGTH && first === LIST && isPath(second))
-    return { argv: [LIST, second] };
+  if (first === LIST && isPath(second)) return { argv: [LIST, second] };
   return null;
 }
 
