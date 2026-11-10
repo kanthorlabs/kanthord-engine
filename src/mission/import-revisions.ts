@@ -136,6 +136,12 @@ function taskList(
   return { tasks, changes };
 }
 
+function nextRevisionNumber(previous: Revision | undefined): number {
+  return previous === undefined
+    ? FIRST_REVISION
+    : previous.revision + REVISION_INCREMENT;
+}
+
 function ownerRevision(
   ownerId: string,
   previous: Revision | undefined,
@@ -156,10 +162,7 @@ function ownerRevision(
     node_id: ownerId,
     filename: next.filename,
     content: next.content,
-    revision:
-      previous === undefined
-        ? FIRST_REVISION
-        : previous.revision + REVISION_INCREMENT,
+    revision: nextRevisionNumber(previous),
     reason,
     actor,
     created_at: now,

@@ -57,13 +57,14 @@ import { getRevision } from "./node-read.ts";
 import { recordNotFound } from "./record-list.ts";
 import {
   type AssetRow,
+  type AttemptRow,
   type EvidenceRow,
   readAssets,
   readAttempt,
   readEvidence,
   readOpenAttempt,
 } from "./record-store.ts";
-import { readNode } from "./store.ts";
+import { type NodeRow, readNode } from "./store.ts";
 import type { Dependencies } from "./service.ts";
 
 export const AuthorizationRefusal = {
@@ -496,17 +497,14 @@ function mergeAddressOf(
   return landingAddressOf(tx, action, evidenceId, resourceIdentity);
 }
 
-export function authorizeServiceMerge(
-  tx: Transaction,
-  dependencies: AuthorizationDependencies & Pick<Dependencies, "projectPaused">,
-  identity: ServiceIdentity,
-  input: { evidenceId: string; commit: string },
-): Authorized<ActionFacts> {
-  assert.ok(tx.database.isTransaction);
-  assert.ok(input.evidenceId);
-  if (identity.service !== MISSION_SERVICE_NAME)
-    authorizationRefused(AuthorizationRefusal.ServiceMismatch);
-  const evidence = readEvidence(tx, input.evidenceId);
+interface MergeTarget {
+  node: NodeRow;
+  open: AttemptRow;
+  evidence: EvidenceRow;
+}
+
+function mergeTargetOf(tx: Transaction, evidenceId: string): MergeTarget {
+  const evidence = readEvidence(tx, evidenceId);
   if (!evidence || !evidence.requirement_key || evidence.end_state !== null)
     authorizationRefused(AuthorizationRefusal.NodeMismatch);
   const node = readNode(tx, evidence.node_id);
@@ -518,13 +516,38 @@ export function authorizeServiceMerge(
     open.attempt !== evidence.attempt
   )
     authorizationRefused(AuthorizationRefusal.ClaimNotLive);
+  return { node, open, evidence };
+}
+
+function mergeActionOf(
+  tx: Transaction,
+  bindings: MissionBindings,
+  target: MergeTarget,
+): FrozenAction {
+  const { node, open, evidence } = target;
   const action = requiredActionsOf(
     tx,
-    dependencies.bindings,
+    bindings,
     node.id,
     open.node_revision,
   ).find((item) => item.key === evidence.requirement_key);
   assert.ok(action);
+  return action;
+}
+
+export function authorizeServiceMerge(
+  tx: Transaction,
+  dependencies: AuthorizationDependencies & Pick<Dependencies, "projectPaused">,
+  identity: ServiceIdentity,
+  input: { evidenceId: string; commit: string },
+): Authorized<ActionFacts> {
+  assert.ok(tx.database.isTransaction);
+  assert.ok(input.evidenceId);
+  if (identity.service !== MISSION_SERVICE_NAME)
+    authorizationRefused(AuthorizationRefusal.ServiceMismatch);
+  const target = mergeTargetOf(tx, input.evidenceId);
+  const { node, open, evidence } = target;
+  const action = mergeActionOf(tx, dependencies.bindings, target);
   mergeLandingAdmitted(action);
   const revision = authorizeBinding(
     tx,

@@ -466,7 +466,9 @@ function storedContent(
   return { binding_ids: content.bindings, intent: content.intent };
 }
 
-function checkVerificationCoverage(result: ResolvedImport): void {
+function verificationsByOwner(
+  result: ResolvedImport,
+): Map<string, Set<string>> {
   const covered = new Map<string, Set<string>>();
   for (const item of result.resolved_entries) {
     if (!isTaskEntry(item.entry) || item.owner_id === null) continue;
@@ -474,14 +476,25 @@ function checkVerificationCoverage(result: ResolvedImport): void {
     for (const command of item.entry.verifications) commands.add(command);
     covered.set(item.owner_id, commands);
   }
+  return covered;
+}
+
+function needsVerificationCoverage(
+  item: ResolvedImportEntry,
+  covered: Map<string, Set<string>>,
+): boolean {
+  return (
+    !isTaskEntry(item.entry) &&
+    !item.terminal &&
+    item.entry.intent === Intent.Implement &&
+    covered.has(item.key)
+  );
+}
+
+function checkVerificationCoverage(result: ResolvedImport): void {
+  const covered = verificationsByOwner(result);
   for (const item of result.resolved_entries) {
-    if (
-      isTaskEntry(item.entry) ||
-      item.terminal ||
-      item.entry.intent !== Intent.Implement ||
-      !covered.has(item.key)
-    )
-      continue;
+    if (!needsVerificationCoverage(item, covered)) continue;
     for (const command of item.entry.verifications)
       if (!covered.get(item.key)?.has(command))
         result.violations.push(
@@ -656,19 +669,17 @@ function droppedEdges(result: ResolvedImport): Edge[] {
   return dependencies;
 }
 
-function classify(tx: Transaction, result: ResolvedImport): void {
-  assert.equal(
-    result.violations.length,
-    NO_VIOLATIONS,
-    "Classification requires a valid resolved graph.",
-  );
-  const kept = new Set<string>();
+function addMovedOwner(item: ResolvedImportEntry, owners: Set<string>): void {
+  if (item.owner_id !== null && item.task?.owner_id !== item.owner_id)
+    owners.add(item.owner_id);
+}
+
+function changedTaskOwners(result: ResolvedImport): Set<string> {
   const keptTasks = new Set<string>();
   const owners = new Set<string>();
   for (const item of result.resolved_entries) {
     if (!isTaskEntry(item.entry)) continue;
-    if (item.owner_id !== null && item.task?.owner_id !== item.owner_id)
-      owners.add(item.owner_id);
+    addMovedOwner(item, owners);
     if (item.task === null) continue;
     keptTasks.add(item.task.id);
     if (taskChanged(item)) {
@@ -678,36 +689,63 @@ function classify(tx: Transaction, result: ResolvedImport): void {
   }
   for (const task of result.current_tasks.values())
     if (!keptTasks.has(task.id)) owners.add(task.owner_id);
-  for (const item of result.resolved_entries) {
-    if (item.entry.id === undefined) {
-      result.creates.push(item.entry.filename);
-      continue;
-    }
-    if (isTaskEntry(item.entry)) continue;
-    assert.ok(
-      item.current,
-      "Supplied identities resolve before classification.",
-    );
-    kept.add(item.current.id);
-    const contentChanged =
-      entryChanged(tx, item) || owners.has(item.current.id);
-    if (contentChanged) result.content_updates.push(item.current.id);
-    const previous = result.current_dependencies
-      .filter((edge) => edge.dependent === item.key)
-      .map((edge) => edge.depends_on)
-      .sort();
-    const target =
-      contentChanged ||
-      canonicalJSON(previous) !== canonicalJSON([...item.depends_on].sort())
-        ? result.updates
-        : result.no_ops;
-    target.push(item.current.id);
+  return owners;
+}
+
+function dependsOnChanged(
+  result: ResolvedImport,
+  item: ResolvedImportEntry,
+): boolean {
+  const previous = result.current_dependencies
+    .filter((edge) => edge.dependent === item.key)
+    .map((edge) => edge.depends_on)
+    .sort();
+  return canonicalJSON(previous) !== canonicalJSON([...item.depends_on].sort());
+}
+
+interface ClassifyScope {
+  tx: Transaction;
+  result: ResolvedImport;
+  owners: Set<string>;
+  kept: Set<string>;
+}
+
+function classifyEntry(scope: ClassifyScope, item: ResolvedImportEntry): void {
+  const { tx, result, owners, kept } = scope;
+  if (item.entry.id === undefined) {
+    result.creates.push(item.entry.filename);
+    return;
   }
+  if (isTaskEntry(item.entry)) return;
+  assert.ok(item.current, "Supplied identities resolve before classification.");
+  kept.add(item.current.id);
+  const contentChanged = entryChanged(tx, item) || owners.has(item.current.id);
+  if (contentChanged) result.content_updates.push(item.current.id);
+  const target =
+    contentChanged || dependsOnChanged(result, item)
+      ? result.updates
+      : result.no_ops;
+  target.push(item.current.id);
+}
+
+function classify(tx: Transaction, result: ResolvedImport): void {
+  assert.equal(
+    result.violations.length,
+    NO_VIOLATIONS,
+    "Classification requires a valid resolved graph.",
+  );
+  const scope: ClassifyScope = {
+    tx,
+    result,
+    owners: changedTaskOwners(result),
+    kept: new Set<string>(),
+  };
+  for (const item of result.resolved_entries) classifyEntry(scope, item);
   result.drifts = result.resolved_entries
     .flatMap((item) => driftOf(tx, item) ?? [])
     .sort((a, b) => a.filename.localeCompare(b.filename));
   result.retirements = [...result.current_nodes.keys()]
-    .filter((id) => !kept.has(id))
+    .filter((id) => !scope.kept.has(id))
     .sort();
   result.creates.sort();
   result.updates.sort();
@@ -842,6 +880,86 @@ function visibleRevisionOf(
   return { visible_revision: row.revision, reason: row.reason };
 }
 
+interface ConditionScope {
+  tx: Transaction;
+  resolved: ResolvedImport;
+  modified: Set<string>;
+  retiring: Set<string>;
+}
+
+function locatorOf(node: NodeRow): Locator {
+  return { id: node.id, filename: node.filename };
+}
+
+function terminalChangeViolation(
+  scope: ConditionScope,
+  node: NodeRow,
+): Violation {
+  return violation(
+    MissionErrorCode.TerminalChange,
+    scope.retiring.has(node.id)
+      ? "Import cannot retire a terminal node. Keep its unchanged file in the plan."
+      : "Import cannot change a terminal node.",
+    { node_id: node.id },
+    locatorOf(node),
+  );
+}
+
+function heldAttemptViolation(scope: ConditionScope, node: NodeRow): Violation {
+  const retiring = scope.retiring.has(node.id);
+  return violation(
+    MissionErrorCode.ConditionFailed,
+    retiring
+      ? "Import cannot retire a node that holds an attempt. Discard the node, then keep its unchanged file in the plan."
+      : "Node holds an attempt and its server revision differs. Run mission export and copy this node file into the plan.",
+    retiring
+      ? { state: node.state, attempt: node.attempt }
+      : {
+          state: node.state,
+          attempt: node.attempt,
+          ...visibleRevisionOf(scope.tx, node.id),
+          remedy: EXPORT_REMEDY,
+        },
+    locatorOf(node),
+  );
+}
+
+function dependencyEditViolation(
+  scope: ConditionScope,
+  node: NodeRow,
+): Violation | null {
+  const { tx, resolved } = scope;
+  const previous = new Set(
+    resolved.current_dependencies
+      .filter((edge) => edge.dependent === node.id)
+      .map((edge) => edge.depends_on),
+  );
+  const next = resolved.dependencies.get(node.id) ?? new Set<string>();
+  const adding = [...next].some((target) => !previous.has(target));
+  const removing = [...previous].some((target) => !next.has(target));
+  if (!(adding || removing) || !dependencyEditGuarded(tx, node, adding))
+    return null;
+  return violation(
+    ControlError.StateConflict,
+    "Node state refuses a dependency edit.",
+    { state: node.state, attempt: node.attempt },
+    locatorOf(node),
+  );
+}
+
+function nodeConditionViolation(
+  scope: ConditionScope,
+  node: NodeRow,
+): Violation | null {
+  if (isTerminal(node.state)) return terminalChangeViolation(scope, node);
+  if (
+    scope.modified.has(node.id) &&
+    !importAdmissible(node.state, node.attempt)
+  )
+    return heldAttemptViolation(scope, node);
+  return dependencyEditViolation(scope, node);
+}
+
 export function checkImportCondition(
   tx: Transaction,
   resolved: ResolvedImport,
@@ -849,61 +967,17 @@ export function checkImportCondition(
   assert.equal(resolved.violations.length, NO_VIOLATIONS);
   const violations: Violation[] = [];
   const modified = modifiedNodes(resolved);
-  const retiring = new Set(resolved.retirements);
+  const scope: ConditionScope = {
+    tx,
+    resolved,
+    modified,
+    retiring: new Set(resolved.retirements),
+  };
   for (const id of [...new Set([...modified, ...resolved.updates])].sort()) {
     const node = readNode(tx, id);
     assert.ok(node, "Modified nodes exist in the transaction.");
-    const locator = { id, filename: node.filename };
-    if (isTerminal(node.state)) {
-      violations.push(
-        violation(
-          MissionErrorCode.TerminalChange,
-          retiring.has(id)
-            ? "Import cannot retire a terminal node. Keep its unchanged file in the plan."
-            : "Import cannot change a terminal node.",
-          { node_id: id },
-          locator,
-        ),
-      );
-      continue;
-    }
-    if (modified.has(id) && !importAdmissible(node.state, node.attempt)) {
-      violations.push(
-        violation(
-          MissionErrorCode.ConditionFailed,
-          retiring.has(id)
-            ? "Import cannot retire a node that holds an attempt. Discard the node, then keep its unchanged file in the plan."
-            : "Node holds an attempt and its server revision differs. Run mission export and copy this node file into the plan.",
-          retiring.has(id)
-            ? { state: node.state, attempt: node.attempt }
-            : {
-                state: node.state,
-                attempt: node.attempt,
-                ...visibleRevisionOf(tx, id),
-                remedy: EXPORT_REMEDY,
-              },
-          locator,
-        ),
-      );
-      continue;
-    }
-    const previous = new Set(
-      resolved.current_dependencies
-        .filter((edge) => edge.dependent === id)
-        .map((edge) => edge.depends_on),
-    );
-    const next = resolved.dependencies.get(id) ?? new Set<string>();
-    const adding = [...next].some((target) => !previous.has(target));
-    const removing = [...previous].some((target) => !next.has(target));
-    if ((adding || removing) && dependencyEditGuarded(tx, node, adding))
-      violations.push(
-        violation(
-          ControlError.StateConflict,
-          "Node state refuses a dependency edit.",
-          { state: node.state, attempt: node.attempt },
-          locator,
-        ),
-      );
+    const found = nodeConditionViolation(scope, node);
+    if (found !== null) violations.push(found);
   }
   return violations;
 }
@@ -911,6 +985,68 @@ export function checkImportCondition(
 export interface PreparedImport {
   preview: ImportPreview;
   resolved: ResolvedImport | null;
+}
+
+type PreviewClassification = Pick<
+  ImportPreview,
+  "creates" | "updates" | "retirements" | "removed_edges" | "no_ops" | "drifts"
+>;
+
+interface PreviewSource {
+  mission: Mission;
+  snapshot: ImportSnapshot;
+  normalized: NormalizedSnapshot;
+  resolved: ResolvedImport | null;
+}
+
+function classificationOf(
+  resolved: ResolvedImport | null,
+): PreviewClassification {
+  if (resolved === null)
+    return {
+      creates: [],
+      updates: [],
+      retirements: [],
+      removed_edges: [],
+      no_ops: [],
+      drifts: [],
+    };
+  return {
+    creates: resolved.creates,
+    updates: resolved.updates,
+    retirements: resolved.retirements,
+    removed_edges: resolved.removed_edges,
+    no_ops: resolved.no_ops,
+    drifts: resolved.drifts,
+  };
+}
+
+function previewViolations(
+  tx: Transaction,
+  source: PreviewSource,
+): Violation[] {
+  const { normalized, resolved } = source;
+  if (resolved === null) return normalized.violations;
+  if (resolved.violations.length > NO_VIOLATIONS) return resolved.violations;
+  return checkImportCondition(tx, resolved);
+}
+
+function previewOf(tx: Transaction, source: PreviewSource): ImportPreview {
+  const { mission, snapshot, normalized, resolved } = source;
+  const violations = previewViolations(tx, source);
+  const classification = classificationOf(resolved);
+  return {
+    mission_id: mission.id,
+    expected_mission_version: snapshot.mission_version,
+    preview_digest: importDigest(
+      mission.id,
+      snapshot.mission_version,
+      resolved === null ? normalized.entries : digestEntries(tx, resolved),
+      classification,
+    ),
+    ...classification,
+    violations,
+  };
 }
 
 export function prepareImport(
@@ -943,36 +1079,9 @@ export function prepareImport(
           environments,
         )
       : null;
-  const violations =
-    resolved === null
-      ? normalized.violations
-      : resolved.violations.length > NO_VIOLATIONS
-        ? resolved.violations
-        : checkImportCondition(tx, resolved);
-  const retirements = resolved?.retirements ?? [];
   return {
     resolved,
-    preview: {
-      mission_id: mission.id,
-      expected_mission_version: snapshot.mission_version,
-      preview_digest: importDigest(
-        mission.id,
-        snapshot.mission_version,
-        resolved === null ? normalized.entries : digestEntries(tx, resolved),
-        {
-          creates: resolved?.creates ?? [],
-          updates: resolved?.updates ?? [],
-          retirements,
-        },
-      ),
-      creates: resolved?.creates ?? [],
-      updates: resolved?.updates ?? [],
-      retirements,
-      removed_edges: resolved?.removed_edges ?? [],
-      no_ops: resolved?.no_ops ?? [],
-      drifts: resolved?.drifts ?? [],
-      violations,
-    },
+    preview: previewOf(tx, { mission, snapshot, normalized, resolved }),
   };
 }
 

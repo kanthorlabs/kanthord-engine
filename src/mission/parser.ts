@@ -1,4 +1,4 @@
-import { isMap, isScalar, parseDocument } from "yaml";
+import { type Document, isMap, isScalar, parseDocument } from "yaml";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { identitySchema } from "../kernel/identity.ts";
@@ -104,15 +104,7 @@ function refuse(filename: string, reason: string): never {
   );
 }
 
-function frontMatter(
-  filename: string,
-  source: string,
-): Record<string, unknown> {
-  const document = parseDocument(source, {
-    uniqueKeys: true,
-    stringKeys: true,
-    prettyErrors: false,
-  });
+function requireStringKeyedMap(filename: string, document: Document): void {
   if (
     document.errors.length > NO_PARSE_ISSUES ||
     document.warnings.length > NO_PARSE_ISSUES
@@ -123,6 +115,18 @@ function frontMatter(
     if (!isScalar(pair.key) || typeof pair.key.value !== STRING_TYPE)
       refuse(filename, REASON.FrontMatterInvalid);
   }
+}
+
+function frontMatter(
+  filename: string,
+  source: string,
+): Record<string, unknown> {
+  const document = parseDocument(source, {
+    uniqueKeys: true,
+    stringKeys: true,
+    prettyErrors: false,
+  });
+  requireStringKeyedMap(filename, document);
   let value: unknown;
   try {
     value = document.toJS({ maxAliasCount: ALIAS_LIMIT });
@@ -151,11 +155,16 @@ function stringList(
   return value as string[];
 }
 
-function fields(
+type SharedFields = Pick<
+  ParsedPlanContent,
+  "filename" | "id" | "bindings" | "verifications"
+>;
+
+function requireFileForm(
   filename: string,
   mapping: Record<string, unknown>,
-): ParsedFields {
-  const isNode = Object.hasOwn(mapping, FIELD.Intent);
+  isNode: boolean,
+): void {
   if (isNode === Object.hasOwn(mapping, FIELD.Node))
     refuse(filename, REASON.FormInvalid);
   if (!isNode && Object.hasOwn(mapping, FIELD.DependsOn))
@@ -166,24 +175,32 @@ function fields(
   for (const key of Object.keys(mapping)) {
     if (!permitted.includes(key)) refuse(filename, REASON.UnknownKey);
   }
-  const id = mapping[FIELD.Id];
+}
+
+function requireFileId(filename: string, id: unknown, isNode: boolean): void {
   if (id !== undefined && !planFileIdSchema.safeParse(id).success)
     refuse(filename, REASON.FieldInvalid);
   const prefix = isNode ? NODE_IDENTITY_PREFIX : TASK_IDENTITY_PREFIX;
   if (id !== undefined && !identitySchema(prefix).safeParse(id).success)
     refuse(filename, REASON.IdPrefixInvalid);
-  const shared = {
-    filename,
-    ...(id !== undefined ? { id: id as string } : {}),
-    bindings: stringList(filename, mapping[FIELD.Bindings], false),
-    verifications: stringList(filename, mapping[FIELD.Verifications], false),
-  };
-  if (!isNode) {
-    const node = mapping[FIELD.Node];
-    if (!planFileNameSchema.safeParse(node).success)
-      refuse(filename, REASON.FieldInvalid);
-    return { ...shared, node: node as string };
-  }
+}
+
+function taskFields(
+  filename: string,
+  mapping: Record<string, unknown>,
+  shared: SharedFields,
+): ParsedFields {
+  const node = mapping[FIELD.Node];
+  if (!planFileNameSchema.safeParse(node).success)
+    refuse(filename, REASON.FieldInvalid);
+  return { ...shared, node: node as string };
+}
+
+function nodeFields(
+  filename: string,
+  mapping: Record<string, unknown>,
+  shared: SharedFields,
+): ParsedFields {
   const tags = mapping[FIELD.Tags];
   const externalLinks = mapping[FIELD.ExternalLinks];
   const commitType = mapping[FIELD.CommitType];
@@ -197,38 +214,79 @@ function fields(
   };
 }
 
+function fields(
+  filename: string,
+  mapping: Record<string, unknown>,
+): ParsedFields {
+  const isNode = Object.hasOwn(mapping, FIELD.Intent);
+  requireFileForm(filename, mapping, isNode);
+  const id = mapping[FIELD.Id];
+  requireFileId(filename, id, isNode);
+  const shared = {
+    filename,
+    ...(id !== undefined ? { id: id as string } : {}),
+    bindings: stringList(filename, mapping[FIELD.Bindings], false),
+    verifications: stringList(filename, mapping[FIELD.Verifications], false),
+  };
+  return isNode
+    ? nodeFields(filename, mapping, shared)
+    : taskFields(filename, mapping, shared);
+}
+
+interface BodyState {
+  name: string | undefined;
+  section: string | undefined;
+  sections: Map<string, string[]>;
+  fenced: boolean;
+}
+
+function openHeading(filename: string, state: BodyState, line: string): void {
+  if (state.name !== undefined) refuse(filename, REASON.HeadingRepeated);
+  if (state.section !== undefined) refuse(filename, REASON.BodyInvalid);
+  const name = /^# (.+)$/.exec(line)?.[HEADING_CAPTURE_GROUP]?.trim();
+  if (!name) refuse(filename, REASON.HeadingMissing);
+  state.name = name;
+}
+
+function openSection(filename: string, state: BodyState, line: string): void {
+  const title = /^## (.+)$/.exec(line)?.[HEADING_CAPTURE_GROUP];
+  if (title !== SECTION.Requirement && title !== SECTION.Criterion)
+    refuse(filename, REASON.UnknownSection);
+  if (state.name === undefined) refuse(filename, REASON.HeadingMissing);
+  if (state.sections.has(title)) refuse(filename, REASON.SectionRepeated);
+  state.section = title;
+  state.sections.set(title, []);
+}
+
+function readBodyLine(filename: string, state: BodyState, line: string): void {
+  if (/^\s*```/.test(line)) state.fenced = !state.fenced;
+  if (!state.fenced && /^#(?:\s|$)/.test(line) && !/^##/.test(line)) {
+    openHeading(filename, state, line);
+    return;
+  }
+  if (!state.fenced && /^##(?:\s|$)/.test(line)) {
+    openSection(filename, state, line);
+    return;
+  }
+  if (state.section !== undefined)
+    state.sections.get(state.section)!.push(line);
+  else if (line.trim() !== BLANK_BODY_LINE)
+    refuse(filename, REASON.BodyInvalid);
+}
+
 function body(
   filename: string,
   lines: string[],
 ): Pick<ParsedPlanFile, "name" | "requirement" | "criterion"> {
-  let name: string | undefined;
-  let section: string | undefined;
-  const sections = new Map<string, string[]>();
-  let fenced = false;
-  for (let index = FIRST_LINE_INDEX; index < lines.length; index += LINE_STEP) {
-    const line = lines[index]!;
-    if (/^\s*```/.test(line)) fenced = !fenced;
-    if (!fenced && /^#(?:\s|$)/.test(line) && !/^##/.test(line)) {
-      if (name !== undefined) refuse(filename, REASON.HeadingRepeated);
-      if (section !== undefined) refuse(filename, REASON.BodyInvalid);
-      name = /^# (.+)$/.exec(line)?.[HEADING_CAPTURE_GROUP]?.trim();
-      if (!name) refuse(filename, REASON.HeadingMissing);
-      continue;
-    }
-    if (!fenced && /^##(?:\s|$)/.test(line)) {
-      const title = /^## (.+)$/.exec(line)?.[HEADING_CAPTURE_GROUP];
-      if (title !== SECTION.Requirement && title !== SECTION.Criterion)
-        refuse(filename, REASON.UnknownSection);
-      if (name === undefined) refuse(filename, REASON.HeadingMissing);
-      if (sections.has(title)) refuse(filename, REASON.SectionRepeated);
-      section = title;
-      sections.set(title, []);
-      continue;
-    }
-    if (section !== undefined) sections.get(section)!.push(line);
-    else if (line.trim() !== BLANK_BODY_LINE)
-      refuse(filename, REASON.BodyInvalid);
-  }
+  const state: BodyState = {
+    name: undefined,
+    section: undefined,
+    sections: new Map<string, string[]>(),
+    fenced: false,
+  };
+  for (let index = FIRST_LINE_INDEX; index < lines.length; index += LINE_STEP)
+    readBodyLine(filename, state, lines[index]!);
+  const { name, sections } = state;
   if (name === undefined) refuse(filename, REASON.HeadingMissing);
   if (!sections.has(SECTION.Requirement) || !sections.has(SECTION.Criterion))
     refuse(filename, REASON.SectionMissing);
