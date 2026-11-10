@@ -7313,6 +7313,19 @@ test("binding.environment.set refuses a key or a value that the build path does 
   );
 });
 
+test("a repository devcontainer with a refused key names the key in environment show", async (t) => {
+  const refused = environmentReadFixture(t, {
+    texts: [`{ "image": "base", "runArgs": ["--privileged"] }`],
+    placement: WorkerPlacement.Container,
+  });
+  const answer = await refused.f.invokeAsync(
+    "binding.environment.get",
+    refused.saved,
+  );
+  assert.equal(answer.environment, null);
+  assert.match(answer.reason ?? "", /runArgs/);
+});
+
 const OTHER_REPOSITORY_NAME = "other";
 const OTHER_ADDRESS = "git@github.com:owner/other.git";
 
