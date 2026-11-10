@@ -381,7 +381,7 @@ async function originScope(
       )
     ).map(prefixed),
   );
-  if (round.review_base === null || snapshot === undefined) return;
+  if (snapshot === undefined) return;
   const text = await changePatch(
     input.env,
     checkout.directory,
@@ -553,12 +553,12 @@ export async function prepareEvaluation(
         assets,
         added_files: workspace.scope.addedFiles,
         changed_files: workspace.scope.changedFiles,
+        patch_paths: patches.map((patch) => patch.path),
+        empty_patches: workspace.scope.emptyPatches,
         ...(round.review_base === null
           ? {}
           : {
               round: { number: round.round, review_base: round.review_base },
-              patch_paths: patches.map((patch) => patch.path),
-              empty_patches: workspace.scope.emptyPatches,
             }),
       },
     };

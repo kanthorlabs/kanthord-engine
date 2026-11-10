@@ -594,6 +594,7 @@ export function evaluationInstruction(
   templates: PromptTemplates,
   input: {
     examine?: boolean;
+    fullChange: boolean;
     tasks: readonly TaskContent[];
     verification: Verification;
     evidence: unknown;
@@ -605,6 +606,7 @@ export function evaluationInstruction(
 ): string {
   return renderTemplate(templates, PromptTemplate.Evaluation, {
     examine: input.examine === true,
+    full_change: input.fullChange,
     tasks: input.tasks.map((task) => ({
       id: task.id,
       criterion: task.content.criterion,

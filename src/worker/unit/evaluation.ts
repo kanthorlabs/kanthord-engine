@@ -99,6 +99,7 @@ export async function requestAndRelease(
 }
 
 const NO_ITEMS = 0;
+const NO_PATCHES = 0;
 export const VERIFICATION_SUBJECT = "Evaluation verification results";
 type OpenAgent = (directory: string) => Promise<NativeAgent>;
 
@@ -154,11 +155,15 @@ interface AffectedStep {
 
 type Dependencies = Awaited<ReturnType<typeof readDependencies>> | null;
 
+interface ReviewEvidence {
+  patch_paths: readonly string[];
+}
+
 interface JudgeContext {
   input: StepsInput;
   run: ExecutionRun;
   revision: Revision;
-  evidence: unknown;
+  evidence: ReviewEvidence;
   verificationRun: VerificationRun;
   directory: string;
   checkouts: readonly ExamineCheckout[];
@@ -218,10 +223,15 @@ async function askJudgement(context: JudgeContext, agent: NativeAgent) {
     content: revision.content,
     repositories: workRepositoriesOf(directory, context.checkouts),
   });
+  const examine = input.setup.intent === ExecutionIntent.Examine;
   await agent.instruct(
     work,
     evaluationInstruction(input.setup.templates, {
-      examine: input.setup.intent === ExecutionIntent.Examine,
+      examine,
+      fullChange:
+        !examine &&
+        round.review_base === null &&
+        evidence.patch_paths.length > NO_PATCHES,
       tasks: revision.tasks,
       verification: context.verificationRun.verification,
       evidence,
@@ -310,7 +320,7 @@ async function judge(
   input: StepsInput,
   run: ExecutionRun,
   revision: Revision,
-  evidence: unknown,
+  evidence: ReviewEvidence,
   verificationRun: VerificationRun,
   directory: string,
   checkouts: readonly ExamineCheckout[],

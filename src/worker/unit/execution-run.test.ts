@@ -14,7 +14,7 @@ import {
 } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { ProviderFailure } from "../../scheduler/contract.ts";
-import { CodedError, OperationError } from "../../kernel/errors.ts";
+import { CodedError, Diagnostic, OperationError } from "../../kernel/errors.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { AgentErrorCode, PromptSourceReason } from "../../agent/contract.ts";
 import {
@@ -25,6 +25,8 @@ import {
 } from "../../kernel/cause.ts";
 import { BudgetLimit } from "../../scheduler/contract.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
+import { RepositoryErrorCode } from "../../repository/contract.ts";
+import { GitStage, GitWriteError } from "../../repository/connector.ts";
 import { stopAfter } from "../../kernel/stop-test-support.ts";
 
 const SETTLE_CALL_COUNT = 1;
@@ -623,6 +625,26 @@ test("a git commit failure sends the redacted git stderr and its suspects", asyn
       CauseCategory.WorkerAction,
       CauseCategory.Environment,
     ]),
+  });
+});
+
+test("regression: K112 a git_failed stop carries the redacted git cause in its detail", async (t) => {
+  const run = fixture();
+  stopAfter(t, () => run.dispose());
+  const stop = await releasedStop(
+    run,
+    new GitWriteError(
+      GitStage.Push,
+      new Diagnostic(RepositoryErrorCode.GitFailed, "push: git failed.", {
+        cause: new Error(`push: rejected ${RUN_SECRET}`),
+      }),
+    ),
+  );
+  assert.deepEqual(stop, {
+    reason: EndReason.OperationFailed,
+    code: RepositoryErrorCode.GitFailed,
+    detail: "Error: push: rejected [redacted]",
+    cause: unattributed([]),
   });
 });
 

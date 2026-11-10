@@ -90,7 +90,7 @@ const UNLISTED_LABEL = "S8";
 const NO_OFFSET = 0;
 const OPEN_AFTER_ROUND_TWO = 3;
 const FIXED_AFTER_ROUND_THREE = 10;
-const PATCH_EVIDENCES = 2;
+const PATCH_EVIDENCES = 3;
 const LARGE_FIX_BYTES = 6 * 1024 * 1024;
 const ROUNDS = [1, 2, 3];
 const SINGLE_ROUND = [1];
@@ -456,7 +456,7 @@ suite("review rounds", { concurrency: SUITE_CONCURRENCY }, () => {
         }),
       );
       assert.deepEqual(roundOne.result, REVOKED);
-      assert.doesNotMatch(bundleOf(roundOne.provider), /patch_paths/);
+      assert.match(bundleOf(roundOne.provider), /round-1-repo\.patch/);
       assert.equal(await f.state(), NodeState.Available);
       const first = await f.findings();
       assert.equal(first.length, BLOCKER_COUNT + SUGGESTION_COUNT);

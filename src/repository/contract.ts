@@ -38,6 +38,7 @@ export const RepositoryErrorCode = {
   SshKeyLegacy: "repository.credential.ssh_key_legacy",
   NodeBranchMissing: "repository.node_branch.missing",
   NodeCheckoutPendingRebuild: "repository.node_checkout.pending_rebuild",
+  GitFailed: "repository.connector.git_failed",
 } as const;
 
 export const SSH_SIGN_USER = "git";

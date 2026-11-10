@@ -201,7 +201,7 @@ async function settleImplement(
         cleanup,
         ViolationEnd.Stop,
       );
-    }
+    } else await submitCoderReport(state, end.reports);
     await withinGit(state.run.spans, GitStep.Push, () =>
       pushNodeBranches(state, cleanup, remaining),
     );
@@ -224,7 +224,6 @@ async function settleImplement(
           },
         })),
       });
-      await submitCoderReport(state, end.reports);
     }
   } finally {
     cleanup.cancel();

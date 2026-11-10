@@ -1027,6 +1027,18 @@ function evaluationEndOf(records: readonly TelemetryRecord[]) {
   return ends[0] as TelemetryRecord & { attributes: Record<string, unknown> };
 }
 
+test("a review with no repository snapshot states no full change patch rule", async (t) => {
+  const review = await reviewOf(t, "true", undefined, {
+    reply: STATED_REPLY,
+    taskCommand: "true",
+  });
+  const [instruction] = review.instructions;
+  assert.ok(
+    instruction!.includes("Read only the checkouts in your working directory"),
+  );
+  assert.ok(!instruction!.includes("lists the full change of each repository"));
+});
+
 test("a judgement with a stated first blocker submits the work defect cause and its facts", async (t) => {
   const review = await reviewOf(t, "true", undefined, {
     reply: STATED_REPLY,
@@ -1143,7 +1155,7 @@ async function affectedSnapshot(
   await git.raw(["checkout", "-b", "node"]);
   writeFileSync(join(origin, "file"), nodeContent);
   await git.add("file");
-  await git.raw([...COMMIT_IDENTITY, "commit", "-m", "work"]);
+  await git.raw([...COMMIT_IDENTITY, "commit", "--allow-empty", "-m", "work"]);
   const snapshot = (await git.revparse(["HEAD"])).trim();
   await git.raw(["checkout", "main"]);
   return {
@@ -1206,6 +1218,7 @@ test("a passing affected command submits its evidence, adds its id, informs the 
   assert.deepEqual(review.assessments[0]?.evidence_ids, [
     "verification",
     "affected",
+    "patch_3",
     "snapshot",
     "placed",
   ]);
@@ -1233,6 +1246,7 @@ test("an affected test that fails at the head and passes at the base answers cri
   assert.deepEqual(assessment?.evidence_ids, [
     "verification",
     "affected",
+    "patch_3",
     "snapshot",
     "placed",
   ]);
@@ -1274,11 +1288,34 @@ test("an affected test that fails at both heads goes to the reviewer with base_r
   assert.equal(affectedEnd(review), AffectedVerdict.BaseRed);
 });
 
+test("regression: K113 a first review prompt states the full change patch and the working directory rule", async (t) => {
+  const review = await affectedReview(t, null, "changed");
+  const [instruction] = review.instructions;
+  assert.match(
+    instruction!,
+    /^`patch_paths` in the review bundle lists the full change of each repository against its base branch\./m,
+  );
+  assert.ok(
+    instruction!.includes(
+      "Read only the checkouts in your working directory and the paths that the review bundle lists.",
+    ),
+  );
+  assert.doesNotMatch(instruction!, /This is review round/);
+});
+
+test("a first review with an empty full change states no patch rule", async (t) => {
+  const review = await affectedReview(t, null, "base");
+  const [instruction] = review.instructions;
+  assert.ok(instruction!.includes('"empty_patches":["repo"]'));
+  assert.ok(!instruction!.includes("lists the full change of each repository"));
+});
+
 test("a node with no declaration submits no affected evidence and passes null to the reviewer", async (t) => {
   const review = await affectedReview(t, null, "changed");
   assert.equal(affectedEvidenceOf(review).length, NO_RELEASES);
   assert.deepEqual(review.assessments[0]?.evidence_ids, [
     "verification",
+    "patch_2",
     "snapshot",
     "placed",
   ]);

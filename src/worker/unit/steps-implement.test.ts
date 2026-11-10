@@ -59,6 +59,7 @@ import {
   STEPS_KEY,
   task,
   TEST_SSH_ACCESS,
+  transport,
 } from "./test-support.ts";
 import { background } from "../../kernel/context.ts";
 import { PromptTemplate } from "../../agent/contract.ts";
@@ -520,7 +521,7 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(stopped.detail?.length, REASON_MAX_LENGTH);
   });
 
-  test("an implement execution submits the coder report of the last turn of each unit after the head commit", async (t) => {
+  test("an implement execution submits the coder report of the last turn of each unit before the push and the head commit", async (t) => {
     const first = task("first", "grep -q good file");
     const silent = task("silent", "true");
     const last = task("last", "true");
@@ -541,10 +542,10 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
     await runStepsImplement(h);
     assert.deepEqual(
       bodies.map((body) => body.subject),
-      [HEAD_COMMIT_SUBJECT, CODER_REPORT_SUBJECT],
+      [CODER_REPORT_SUBJECT, HEAD_COMMIT_SUBJECT],
     );
     const report = `## ${first.id} first\n\nfirst final\n\n## ${last.id} last\n\nlast final`;
-    assert.deepEqual(bodies.at(-1)?.assets, [
+    assert.deepEqual(bodies.at(0)?.assets, [
       {
         kind: AssetKind.Produced,
         content: {
@@ -554,6 +555,27 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
         },
       },
     ]);
+  });
+
+  test("regression: K112 a push failure after the release gate keeps the coder report", async (t) => {
+    const h = await fixture(
+      t,
+      [task("work", "true")],
+      [fauxAssistantMessage("work final")],
+    );
+    h.input.transport = {
+      ...transport,
+      pushNodeBranch: async () => {
+        throw new Error("push failed");
+      },
+    };
+    const bodies = recordEvidence(h);
+    recordReleases(h);
+    await assert.rejects(runStepsImplement(h));
+    assert.deepEqual(
+      bodies.map((body) => body.subject),
+      [CODER_REPORT_SUBJECT],
+    );
   });
 
   test("a unit that the release gate routes again keeps its section at its position with the text of the rerun", async (t) => {
