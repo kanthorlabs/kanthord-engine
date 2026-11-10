@@ -23,6 +23,7 @@ import {
   gatedAgent,
   type GatedAgent,
   isTurnViolation,
+  NO_UNCHANGED_TURNS,
   removeRootEntries,
   restoreCheckout,
   unitCommitMessage,
@@ -106,6 +107,7 @@ const NO_TASKS = 0;
 const NO_CHECKOUTS = 0;
 const NO_LINK_UPDATES = 0;
 const NO_PROGRESS_LIMIT = 2;
+const ONE_TURN = 1;
 const SINGLE_CHECKOUT = 1;
 const BASE_MERGED = "base_merged";
 
@@ -515,23 +517,39 @@ async function runNodeInstruction(
         commit: headSetOf(state.checkouts),
         holds: !ruled,
       });
-      if (ruled) {
-        state.unchangedTurns = unchangedTurns;
-        countUnchangedTurn(state, NoProgressRule.VerdictRuleUnmet);
-        state.revisionCount++;
-        continue;
-      }
+      if (ruled && verdictTurnRetried(state, unit, unchangedTurns)) continue;
     } else if (revised && !agent.changed())
       countUnchangedTurn(state, NoProgressRule.UnchangedRevision);
     const checked = await verifyCommands(state, unit, commands);
-    if (recordTaskVerification(state, unit, checked))
-      return await completeUnit(state, unit, agent);
+    const passed = recordTaskVerification(state, unit, checked);
+    if (passed && ruled) state.unchangedTurns = NO_UNCHANGED_TURNS;
+    if (passed) return await completeUnit(state, unit, agent);
+    if (budget.exhausted()) return ended;
+    if (ruled) countUnchangedTurn(state, NoProgressRule.VerdictRuleUnmet);
     instruction = revisionInstructionOf(state, checked);
     template = PromptTemplate.TaskRevision;
     revised = true;
     state.revisionCount++;
   }
   return ended;
+}
+
+function verdictTurnRetried(
+  state: StepsState,
+  unit: TaskContent,
+  unchangedTurns: number,
+): boolean {
+  state.unchangedTurns = unchangedTurns;
+  if (state.unchangedTurns + ONE_TURN >= NO_PROGRESS_LIMIT) {
+    state.run.log("verdict rule waived for review", {
+      task_id: unit.id,
+      commit: headSetOf(state.checkouts),
+    });
+    return false;
+  }
+  countUnchangedTurn(state, NoProgressRule.VerdictRuleUnmet);
+  state.revisionCount++;
+  return true;
 }
 
 export const TaskResultKind = {

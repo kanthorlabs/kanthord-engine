@@ -1009,13 +1009,11 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
       fauxAssistantMessage("never"),
     ]);
     const instruct = t.mock.method(h.agent, "instruct");
+    acceptEvidence(h);
     recordReleases(h);
-    const end = await executionBoundary(h.run, () => runStepsImplement(h));
-    assert.ok("stop" in end && end.stop);
-    assert.equal(end.stop.reason, EndReason.NoProgress);
-    assert.equal(
-      JSON.parse(end.stop.detail!).rule,
-      NoProgressRule.VerdictRuleUnmet,
+    assert.deepEqual(
+      await executionBoundary(h.run, () => runStepsImplement(h)),
+      { kind: "released", furtherWork: false },
     );
     assert.deepEqual(
       instruct.mock.calls.map((call) => call.arguments[2]),
