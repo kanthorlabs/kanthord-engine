@@ -154,6 +154,94 @@ function page<T extends { at: number; bytes: number }>(
   };
 }
 
+type FootprintUsage = Awaited<
+  ReturnType<ProjectFootprintDependencies["runtime"]["footprintUsage"]>
+>;
+
+interface EnvironmentItemBook {
+  readonly items: Map<string, EnvironmentItem>;
+  itemOf(path: string, digest: string): EnvironmentItem;
+}
+
+function environmentItemBook(live: Set<string>): EnvironmentItemBook {
+  const items = new Map<string, EnvironmentItem>();
+  const itemOf = (path: string, digest: string): EnvironmentItem => {
+    const key = `${path}${KEY_SEPARATOR}${digest}`;
+    let item = items.get(key);
+    if (item === undefined) {
+      item = {
+        key,
+        path,
+        digest,
+        at: NO_TIME,
+        bytes: 0,
+        proof: false,
+        live: live.has(key),
+      };
+      items.set(key, item);
+    }
+    return item;
+  };
+  return { items, itemOf };
+}
+
+function ownedImages(
+  usage: FootprintUsage["usage"],
+  ownedImageIds: readonly string[],
+): RuntimeImageUsage[] {
+  return usage.images.flatMap((image): RuntimeImageUsage[] => {
+    const id = ownedImageIds.find((candidate) =>
+      sameImage(candidate, image.id),
+    );
+    return id === undefined ? [] : [{ ...image, id }];
+  });
+}
+
+function imageItems(
+  image: RuntimeImageUsage,
+  book: EnvironmentItemBook,
+): Set<EnvironmentItem> {
+  const keys = new Set<EnvironmentItem>();
+  for (const reference of image.references) {
+    const found = environmentKeyOf(reference);
+    if (found !== null) keys.add(book.itemOf(found.path, found.digest));
+  }
+  return keys;
+}
+
+function unreferencedImageItem(
+  image: RuntimeImageUsage,
+): EnvironmentItem | null {
+  if (image.references.length || !IMAGE_ID.test(image.id)) return null;
+  return {
+    key: image.id,
+    path: null,
+    digest: null,
+    at: image.created_at ?? NO_TIME,
+    bytes: image.unique_bytes,
+    proof: false,
+    live: image.containers > NO_CONTAINERS,
+  };
+}
+
+function addImageUsage(
+  image: RuntimeImageUsage,
+  book: EnvironmentItemBook,
+): void {
+  const keys = imageItems(image, book);
+  const first = [...keys].at(0);
+  if (first === undefined) {
+    const item = unreferencedImageItem(image);
+    if (item !== null) book.items.set(image.id, item);
+    return;
+  }
+  first.bytes += image.unique_bytes;
+  for (const item of keys) {
+    item.at = Math.max(item.at, image.created_at ?? NO_TIME);
+    if (image.containers > NO_CONTAINERS) item.live = true;
+  }
+}
+
 export class ProjectFootprint implements FootprintOwner {
   readonly kinds: readonly FootprintKind[] = [
     FootprintKind.Environment,
@@ -219,73 +307,42 @@ export class ProjectFootprint implements FootprintOwner {
   }> {
     const { usage, owned_image_ids, cache_volumes } =
       await this.dependencies.runtime.footprintUsage(signal);
-    const owned = usage.images.flatMap((image): RuntimeImageUsage[] => {
-      const id = owned_image_ids.find((candidate) =>
-        sameImage(candidate, image.id),
-      );
-      return id === undefined ? [] : [{ ...image, id }];
-    });
-    const live = this.liveKeys();
-    const items = new Map<string, EnvironmentItem>();
-    const itemOf = (path: string, digest: string) => {
-      const key = `${path}${KEY_SEPARATOR}${digest}`;
-      let item = items.get(key);
-      if (item === undefined) {
-        item = {
-          key,
-          path,
-          digest,
-          at: NO_TIME,
-          bytes: 0,
-          proof: false,
-          live: live.has(key),
-        };
-        items.set(key, item);
-      }
-      return item;
+    const book = environmentItemBook(this.liveKeys());
+    for (const image of ownedImages(usage, owned_image_ids))
+      addImageUsage(image, book);
+    await this.addProofUsage(book, signal);
+    return {
+      environments: [...book.items.values()],
+      caches: this.cacheItems(usage, cache_volumes),
     };
-    for (const image of owned) {
-      const keys = new Set<EnvironmentItem>();
-      for (const reference of image.references) {
-        const found = environmentKeyOf(reference);
-        if (found !== null) keys.add(itemOf(found.path, found.digest));
-      }
-      const first = [...keys].at(0);
-      if (first === undefined) {
-        if (image.references.length || !IMAGE_ID.test(image.id)) continue;
-        items.set(image.id, {
-          key: image.id,
-          path: null,
-          digest: null,
-          at: image.created_at ?? NO_TIME,
-          bytes: image.unique_bytes,
-          proof: false,
-          live: image.containers > NO_CONTAINERS,
-        });
-        continue;
-      }
-      first.bytes += image.unique_bytes;
-      for (const item of keys) {
-        item.at = Math.max(item.at, image.created_at ?? NO_TIME);
-        if (image.containers > NO_CONTAINERS) item.live = true;
-      }
-    }
+  }
+
+  private async addProofUsage(
+    book: EnvironmentItemBook,
+    signal: AbortSignal,
+  ): Promise<void> {
     for (const path of this.proofPaths())
       for (const digest of this.dependencies.proofs.digests(path)) {
         signal.throwIfAborted();
         const proof = await this.proofStat(path, digest);
         if (proof === null || !DIGEST.test(digest)) continue;
-        const item = itemOf(path, digest);
+        const item = book.itemOf(path, digest);
         item.bytes += proof.bytes;
         item.proof = true;
         if (item.at === NO_TIME) item.at = proof.at;
       }
+  }
+
+  private cacheItems(
+    usage: FootprintUsage["usage"],
+    cacheVolumes: FootprintUsage["cache_volumes"],
+  ): CacheItem[] {
     const boundPairs = new Set(
       this.dependencies
         .bound()
         .map((entry) => pairKey(entry.project_id, entry.resource_identity)),
     );
-    const caches = cache_volumes.map((volume): CacheItem => {
+    return cacheVolumes.map((volume): CacheItem => {
       const used = usage.volumes.find((entry) => entry.name === volume.name);
       const unbound = !boundPairs.has(
         pairKey(volume.project_id, volume.resource_identity),
@@ -299,7 +356,6 @@ export class ProjectFootprint implements FootprintOwner {
         volume,
       };
     });
-    return { environments: [...items.values()], caches };
   }
 
   async measure(signal: AbortSignal): Promise<FootprintMeasure[]> {

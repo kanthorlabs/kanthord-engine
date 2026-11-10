@@ -241,35 +241,30 @@ export function parseRepositoryAddress(
   return { host, owner, repository };
 }
 
-export function deriveResourceIdentity(
-  kind: string,
-  bindingName: string,
-  config: unknown,
-): string {
-  if (kind === BindingKind.Worker) return workerResourceIdentity(bindingName);
-  if (kind === BindingKind.Repository) {
-    const address =
-      isObject(config) && "address" in config ? config.address : null;
-    const parsed = parseRepositoryAddress(address);
-    if (!parsed)
-      throw new OperationError(
-        HttpStatus.BadRequest,
-        ProjectErrorCode.RepositoryAddressInvalid,
-        "Repository address must have the form git@<host>:<owner>/<repository>.git.",
-      );
-    const { owner, repository } = parsed;
-    const platform =
-      isObject(config) && "platform" in config && isString(config.platform)
-        ? config.platform
-        : REPOSITORY_PLATFORM;
-    return `${BindingKind.Repository}:${platform}:${owner}/${repository}`;
-  }
-  if (kind === BindingKind.Conversation) {
-    const parsed = conversationConfigSchema.parse(config);
-    return `${BindingKind.Conversation}:${parsed.platform}:${conversationResourceOf(parsed)}`;
-  }
-  if (kind !== BindingKind.Storage)
-    throw new Error(`Unknown binding kind: ${kind}`);
+function repositoryResourceIdentity(config: unknown): string {
+  const address =
+    isObject(config) && "address" in config ? config.address : null;
+  const parsed = parseRepositoryAddress(address);
+  if (!parsed)
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      ProjectErrorCode.RepositoryAddressInvalid,
+      "Repository address must have the form git@<host>:<owner>/<repository>.git.",
+    );
+  const { owner, repository } = parsed;
+  const platform =
+    isObject(config) && "platform" in config && isString(config.platform)
+      ? config.platform
+      : REPOSITORY_PLATFORM;
+  return `${BindingKind.Repository}:${platform}:${owner}/${repository}`;
+}
+
+function conversationResourceIdentity(config: unknown): string {
+  const parsed = conversationConfigSchema.parse(config);
+  return `${BindingKind.Conversation}:${parsed.platform}:${conversationResourceOf(parsed)}`;
+}
+
+function storageResourceIdentity(config: unknown): string {
   if (
     !isObject(config) ||
     !("endpoint" in config) ||
@@ -281,6 +276,21 @@ export function deriveResourceIdentity(
       "Storage configuration requires an endpoint and bucket.",
     );
   return `${BindingKind.Storage}:${STORAGE_PLATFORM}:${new URL(config.endpoint).host}/${config.bucket}`;
+}
+
+export function deriveResourceIdentity(
+  kind: string,
+  bindingName: string,
+  config: unknown,
+): string {
+  if (kind === BindingKind.Worker) return workerResourceIdentity(bindingName);
+  if (kind === BindingKind.Repository)
+    return repositoryResourceIdentity(config);
+  if (kind === BindingKind.Conversation)
+    return conversationResourceIdentity(config);
+  if (kind !== BindingKind.Storage)
+    throw new Error(`Unknown binding kind: ${kind}`);
+  return storageResourceIdentity(config);
 }
 
 function toBinding(row: BindingRow): StoredBinding {

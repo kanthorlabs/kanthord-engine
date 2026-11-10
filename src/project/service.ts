@@ -860,6 +860,12 @@ function noStoredEnvironment(tx: Transaction, projectId: string): boolean {
   );
 }
 
+interface NativeWorker {
+  name: string;
+  config: typeof workerConfigWriteSchema._output;
+  agents: readonly string[];
+}
+
 export class ProjectService implements Service, ProjectBindings {
   private readonly bindings?: ProjectBindings;
   private readonly operationalStore: Store;
@@ -1764,26 +1770,35 @@ export class ProjectService implements Service, ProjectBindings {
   ): void {
     refuseInvalidTags(name, config.tags);
     const agents = this.workerAgentsOf(config.worker);
-    if (agents.length === EMPTY_LENGTH) {
-      this.validateEntry(tx, config.worker, null, []);
-      for (const field of [
-        WorkerField.Entries,
-        WorkerField.ResourceBudget,
-        WorkerField.Placement,
-        WorkerField.WorkerInstances,
-        WorkerField.Environment,
-      ]) {
-        if (config[field] === undefined) continue;
-        throw new OperationError(
-          HttpStatus.BadRequest,
-          ProjectErrorCode.WorkerFieldForbidden,
-          "External workers do not accept native configuration fields.",
-          { binding: name, field },
-        );
-      }
-      refuseInstanceCount(config);
-      return;
+    if (agents.length === EMPTY_LENGTH)
+      return this.validateExternalWorker(tx, name, config);
+    this.validateNativeWorker(tx, { name, config, agents });
+  }
+  private validateExternalWorker(
+    tx: Transaction,
+    name: string,
+    config: typeof workerConfigWriteSchema._output,
+  ): void {
+    this.validateEntry(tx, config.worker, null, []);
+    for (const field of [
+      WorkerField.Entries,
+      WorkerField.ResourceBudget,
+      WorkerField.Placement,
+      WorkerField.WorkerInstances,
+      WorkerField.Environment,
+    ]) {
+      if (config[field] === undefined) continue;
+      throw new OperationError(
+        HttpStatus.BadRequest,
+        ProjectErrorCode.WorkerFieldForbidden,
+        "External workers do not accept native configuration fields.",
+        { binding: name, field },
+      );
     }
+    refuseInstanceCount(config);
+  }
+  private validateNativeWorker(tx: Transaction, native: NativeWorker): void {
+    const { name, config, agents } = native;
     for (const field of [WorkerField.Placement, WorkerField.InstanceCount]) {
       if (config[field] === undefined) continue;
       throw new OperationError(
