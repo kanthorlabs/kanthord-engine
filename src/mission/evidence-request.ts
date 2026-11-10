@@ -35,6 +35,70 @@ function addressKindOf(action: FrozenAction) {
     : PlatformAddressKind.BranchPush;
 }
 
+interface AddressCheck {
+  nodeId: string;
+  attempt: number;
+  action: FrozenAction;
+  body: EvidenceRequest;
+  resourceIdentity: string;
+}
+
+function baseBranchOf(action: FrozenAction): string | null {
+  return action.action === ConversationAction.Reply
+    ? null
+    : action.configuration.base_branch;
+}
+
+function isContainedLanding(
+  check: AddressCheck,
+  baseBranch: string | null,
+): boolean {
+  const { action, body } = check;
+  return (
+    action.action === RepositoryAction.PullRequest &&
+    body.address.kind === PlatformAddressKind.BranchPush &&
+    body.address.branch === baseBranch
+  );
+}
+
+function isHumanLandingMismatch(
+  tx: Transaction,
+  check: AddressCheck,
+  baseBranch: string | null,
+): boolean {
+  const { nodeId, attempt, action, body } = check;
+  const humanLanding = landsByHuman(
+    action,
+    gateFilesOf(currentAssessmentOf(tx, nodeId, attempt), action.binding_id),
+  );
+  return (
+    humanLanding &&
+    body.address.kind === PlatformAddressKind.BranchPush &&
+    (body.address.branch !== baseBranch ||
+      body.address.commit !==
+        assessedCommitOf(tx, nodeId, attempt, action.binding_id))
+  );
+}
+
+function requireRequestAddress(tx: Transaction, check: AddressCheck): void {
+  const { action, body } = check;
+  const kind = addressKindOf(action);
+  const baseBranch = baseBranchOf(action);
+  const containedLanding = isContainedLanding(check, baseBranch);
+  const humanLandingMismatch = isHumanLandingMismatch(tx, check, baseBranch);
+  if (
+    (body.address.kind !== kind && !containedLanding) ||
+    body.address.resource_identity !== check.resourceIdentity ||
+    humanLandingMismatch
+  )
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      MissionErrorCode.RequestAddressMismatch,
+      "Request address does not match the required action.",
+      { requirement_key: body.requirement_key },
+    );
+}
+
 export function requestEvidence(
   tx: Transaction,
   dependencies: Dependencies,
@@ -63,39 +127,13 @@ export function requestEvidence(
     action.binding_id,
   );
   assert.ok(binding);
-  const kind = addressKindOf(action);
-  const baseBranch =
-    action.action === ConversationAction.Reply
-      ? null
-      : action.configuration.base_branch;
-  const containedLanding =
-    action.action === RepositoryAction.PullRequest &&
-    body.address.kind === PlatformAddressKind.BranchPush &&
-    body.address.branch === baseBranch;
-  const humanLanding = landsByHuman(
+  requireRequestAddress(tx, {
+    nodeId,
+    attempt: claim.attempt,
     action,
-    gateFilesOf(
-      currentAssessmentOf(tx, nodeId, claim.attempt),
-      action.binding_id,
-    ),
-  );
-  const humanLandingMismatch =
-    humanLanding &&
-    body.address.kind === PlatformAddressKind.BranchPush &&
-    (body.address.branch !== baseBranch ||
-      body.address.commit !==
-        assessedCommitOf(tx, nodeId, claim.attempt, action.binding_id));
-  if (
-    (body.address.kind !== kind && !containedLanding) ||
-    body.address.resource_identity !== binding.resource_identity ||
-    humanLandingMismatch
-  )
-    throw new OperationError(
-      HttpStatus.BadRequest,
-      MissionErrorCode.RequestAddressMismatch,
-      "Request address does not match the required action.",
-      { requirement_key: body.requirement_key },
-    );
+    body,
+    resourceIdentity: binding.resource_identity,
+  });
   if (
     readRequests(tx, nodeId, claim.attempt).some(
       (request) => request.requirement_key === body.requirement_key,

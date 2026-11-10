@@ -96,6 +96,76 @@ function itemOf(row: LinkUpdateRow, newSince: number | null): LinkUpdate {
   });
 }
 
+interface TrustFilter {
+  where: string;
+  values: string[];
+}
+
+interface UpdatePageQuery {
+  missionId: string;
+  filter: TrustFilter;
+  page: LinkUpdatePage;
+}
+
+function trustFilterOf(trusted: TrustedLink[]): TrustFilter {
+  const trust = trusted
+    .map(
+      () =>
+        "(external_link = ? AND actor_id IN (SELECT value FROM json_each(?)))",
+    )
+    .join(" OR ");
+  return {
+    where: `mission_id = ? AND (${trust})`,
+    values: trusted.flatMap((link) => [
+      link.external_link,
+      JSON.stringify(link.actor_ids),
+    ]),
+  };
+}
+
+function pageLimitOf(page: LinkUpdatePage): number {
+  return page.limit ?? NODE_LIST_LIMIT_DEFAULT;
+}
+
+function countLinkUpdates(tx: Transaction, query: UpdatePageQuery): number {
+  const total = tx.database
+    .prepare(
+      `SELECT COUNT(*) AS total FROM mission_link_update WHERE ${query.filter.where}`,
+    )
+    .get(query.missionId, ...query.filter.values) as { total: number };
+  return total.total;
+}
+
+function readPageRows(
+  tx: Transaction,
+  query: UpdatePageQuery,
+): LinkUpdateRow[] {
+  const { page, filter } = query;
+  const after = page.cursor === undefined ? null : cursorOf(page.cursor);
+  return tx.database
+    .prepare(
+      `SELECT * FROM mission_link_update WHERE ${filter.where}
+       AND (? IS NULL OR occurred_at < ? OR (occurred_at = ? AND id < ?))
+       ORDER BY occurred_at DESC, id DESC LIMIT ?`,
+    )
+    .all(
+      query.missionId,
+      ...filter.values,
+      after?.occurred_at ?? null,
+      after?.occurred_at ?? null,
+      after?.occurred_at ?? null,
+      after?.id ?? null,
+      pageLimitOf(page) + PAGINATION_LOOKAHEAD,
+    ) as unknown as LinkUpdateRow[];
+}
+
+function nextCursorOf(rows: LinkUpdateRow[], limit: number): string | null {
+  const last = rows[limit - LAST_ITEM_OFFSET];
+  return rows.length > limit && last !== undefined
+    ? encode(`${last.occurred_at}${CURSOR_SEPARATOR}${last.id}`)
+    : null;
+}
+
 function readLinkUpdates(
   tx: Transaction,
   bindings: MissionBindings,
@@ -107,48 +177,18 @@ function readLinkUpdates(
   const trusted = trustedLinksOf(tx, bindings, revision);
   if (trusted.length === NO_TRUSTED_LINKS)
     return { items: [], next_cursor: null, total: NO_ROWS };
-  const trust = trusted
-    .map(
-      () =>
-        "(external_link = ? AND actor_id IN (SELECT value FROM json_each(?)))",
-    )
-    .join(" OR ");
-  const trustValues = trusted.flatMap((link) => [
-    link.external_link,
-    JSON.stringify(link.actor_ids),
-  ]);
-  const where = `mission_id = ? AND (${trust})`;
-  const total = tx.database
-    .prepare(`SELECT COUNT(*) AS total FROM mission_link_update WHERE ${where}`)
-    .get(missionId, ...trustValues) as { total: number };
-  const after = page.cursor === undefined ? null : cursorOf(page.cursor);
-  const limit = page.limit ?? NODE_LIST_LIMIT_DEFAULT;
-  const rows = tx.database
-    .prepare(
-      `SELECT * FROM mission_link_update WHERE ${where}
-       AND (? IS NULL OR occurred_at < ? OR (occurred_at = ? AND id < ?))
-       ORDER BY occurred_at DESC, id DESC LIMIT ?`,
-    )
-    .all(
-      missionId,
-      ...trustValues,
-      after?.occurred_at ?? null,
-      after?.occurred_at ?? null,
-      after?.occurred_at ?? null,
-      after?.id ?? null,
-      limit + PAGINATION_LOOKAHEAD,
-    ) as unknown as LinkUpdateRow[];
-  const items = rows
-    .slice(FIRST_INDEX, limit)
-    .map((row) => itemOf(row, newSince));
-  const last = rows[limit - LAST_ITEM_OFFSET];
+  const query: UpdatePageQuery = {
+    missionId,
+    filter: trustFilterOf(trusted),
+    page,
+  };
+  const total = countLinkUpdates(tx, query);
+  const rows = readPageRows(tx, query);
+  const limit = pageLimitOf(page);
   return {
-    items,
-    next_cursor:
-      rows.length > limit && last !== undefined
-        ? encode(`${last.occurred_at}${CURSOR_SEPARATOR}${last.id}`)
-        : null,
-    total: total.total,
+    items: rows.slice(FIRST_INDEX, limit).map((row) => itemOf(row, newSince)),
+    next_cursor: nextCursorOf(rows, limit),
+    total,
   };
 }
 

@@ -142,27 +142,34 @@ export function evidenceRecord(tx: Transaction, row: EvidenceRow): Evidence {
   });
 }
 
+function humanClosingEvent(
+  tx: Transaction,
+  row: OutcomeRow,
+  assessment: AssessmentRow,
+): ClosingEvent {
+  assert.ok(assessment.actor !== null);
+  assert.equal(
+    actorSchema.parse(JSON.parse(assessment.actor)).kind,
+    ActorKind.Human,
+  );
+  if (assessment.result === AssessmentResult.Success)
+    return ClosingEvent.SuccessOverride;
+  if (
+    assessment.result === AssessmentResult.Undetermined &&
+    readNode(tx, row.node_id)?.state === NodeState.Discarded &&
+    readCurrentOutcome(tx, row.node_id)?.id === row.id
+  )
+    return ClosingEvent.HumanDiscard;
+  return ClosingEvent.HumanBlock;
+}
+
 function closingEvent(
   tx: Transaction,
   bindings: MissionBindings,
   row: OutcomeRow,
   assessment: AssessmentRow,
 ): ClosingEvent {
-  if (assessment.actor !== null) {
-    assert.equal(
-      actorSchema.parse(JSON.parse(assessment.actor)).kind,
-      ActorKind.Human,
-    );
-    if (assessment.result === AssessmentResult.Success)
-      return ClosingEvent.SuccessOverride;
-    if (
-      assessment.result === AssessmentResult.Undetermined &&
-      readNode(tx, row.node_id)?.state === NodeState.Discarded &&
-      readCurrentOutcome(tx, row.node_id)?.id === row.id
-    )
-      return ClosingEvent.HumanDiscard;
-    return ClosingEvent.HumanBlock;
-  }
+  if (assessment.actor !== null) return humanClosingEvent(tx, row, assessment);
   assert.ok(assessment.execution_id);
   if (assessment.result !== AssessmentResult.Success)
     return ClosingEvent.AssessmentNotPassed;

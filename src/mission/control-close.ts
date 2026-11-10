@@ -164,6 +164,21 @@ function holdForStop(
   };
 }
 
+function settleOverriddenAttempt(
+  tx: Transaction,
+  node: NodeRow,
+  now: number,
+): void {
+  const attempt = node.attempt;
+  assert.ok(attempt !== null);
+  if (node.state === NodeState.Blocked)
+    markProposalsRejected(tx, node.id, attempt, now);
+  if (attempt > NO_ATTEMPT && node.state !== NodeState.Blocked) {
+    closeAttempt(tx, node.id, attempt, now);
+    routeOpenFixFindings(tx, node.id, attempt, FindingRoute.Report);
+  }
+}
+
 export function overrideNode(
   tx: Transaction,
   dependencies: Dependencies,
@@ -216,12 +231,7 @@ export function overrideNode(
         now,
       ),
     );
-  if (node.state === NodeState.Blocked)
-    markProposalsRejected(tx, nodeId, node.attempt, now);
-  if (node.attempt > NO_ATTEMPT && node.state !== NodeState.Blocked) {
-    closeAttempt(tx, nodeId, node.attempt, now);
-    routeOpenFixFindings(tx, nodeId, node.attempt, FindingRoute.Report);
-  }
+  settleOverriddenAttempt(tx, node, now);
   const outcome = writeHumanRecords(
     tx,
     node,

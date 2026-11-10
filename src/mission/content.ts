@@ -161,17 +161,10 @@ export function commitTypeField(
     : { commit_type: commitType as Content["commit_type"] };
 }
 
-export function validatePlanContent(
-  content: unknown,
+function validateVerifications(
+  verifications: unknown,
   textMaxBytes: number,
 ): void {
-  const input = recordOf(content);
-  for (const field of [Field.Name, Field.Requirement, Field.Criterion]) {
-    const value = nonblankText(field, input[field]);
-    validateText(field, value, textMaxBytes);
-  }
-  if (!isCommitSubject(input[Field.Name] as string)) invalidContent(Field.Name);
-  const verifications = input[Field.Verifications];
   if (
     verifications === undefined ||
     (Array.isArray(verifications) && verifications.length === EMPTY_LENGTH)
@@ -190,7 +183,9 @@ export function validatePlanContent(
     const value = nonblankText(Field.Verifications, verifications[index]);
     validateText(Field.Verifications, value, textMaxBytes);
   }
-  const bindings = input[Field.Bindings];
+}
+
+function validateBindingList(bindings: unknown): void {
   if (!Array.isArray(bindings)) invalidBindings();
   for (
     let index = LOOP_START, count = bindings.length;
@@ -199,6 +194,20 @@ export function validatePlanContent(
   ) {
     if (!isString(bindings[index])) invalidBindings();
   }
+}
+
+export function validatePlanContent(
+  content: unknown,
+  textMaxBytes: number,
+): void {
+  const input = recordOf(content);
+  for (const field of [Field.Name, Field.Requirement, Field.Criterion]) {
+    const value = nonblankText(field, input[field]);
+    validateText(field, value, textMaxBytes);
+  }
+  if (!isCommitSubject(input[Field.Name] as string)) invalidContent(Field.Name);
+  validateVerifications(input[Field.Verifications], textMaxBytes);
+  validateBindingList(input[Field.Bindings]);
 }
 
 export type ResolvedBinding = { binding_id: string; resource_identity: string };

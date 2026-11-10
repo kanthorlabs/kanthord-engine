@@ -155,10 +155,61 @@ function hasEvidence(
   );
 }
 
+interface ReleaseExecution {
+  execution_id: string;
+  node_id: string;
+  attempt: number;
+}
+
+interface ReleaseScope {
+  tx: Transaction;
+  dependencies: Dependencies;
+  node: NodeRow;
+  execution: ReleaseExecution;
+  furtherWork: boolean;
+}
+
+function requireEvaluationObligations(scope: ReleaseScope): void {
+  const { tx, dependencies, node, execution } = scope;
+  if (
+    currentAssessmentOf(tx, node.id, execution.attempt)?.result !==
+    AssessmentResult.Success
+  )
+    refuse(ReleaseObligation.Assessment);
+  if (
+    eligibleUnrequested(
+      actionStatesOf(tx, dependencies.bindings, node.id, execution.attempt),
+    ).length > NO_ELIGIBLE_ACTIONS
+  )
+    refuse(ReleaseObligation.Request);
+}
+
+function requireReleaseObligations(scope: ReleaseScope): void {
+  const { tx, dependencies, node, execution, furtherWork } = scope;
+  if (
+    node.state === NodeState.Executing &&
+    !furtherWork &&
+    !hasEvidence(tx, dependencies, node, execution.execution_id)
+  )
+    refuse(ReleaseObligation.Evidence);
+  if (node.state === NodeState.Evaluating) requireEvaluationObligations(scope);
+}
+
+function releasedStateOf(
+  from: NodeState,
+  furtherWork: boolean,
+  stalledOut: boolean,
+): NodeState {
+  if (from === NodeState.Paused) return NodeState.Paused;
+  if (from === NodeState.Evaluating) return NodeState.ExternalRequested;
+  if (stalledOut) return NodeState.Paused;
+  return furtherWork ? NodeState.Available : NodeState.Waiting;
+}
+
 export function release(
   tx: Transaction,
   dependencies: Dependencies,
-  execution: { execution_id: string; node_id: string; attempt: number },
+  execution: ReleaseExecution,
   furtherWork: boolean,
   stalledReleases: number,
   now: number,
@@ -171,38 +222,11 @@ export function release(
   );
   assert.equal(node.attempt, execution.attempt);
   assert.equal(readOpenAttempt(tx, node.id)?.attempt, execution.attempt);
-  if (
-    node.state === NodeState.Executing &&
-    !furtherWork &&
-    !hasEvidence(tx, dependencies, node, execution.execution_id)
-  )
-    refuse(ReleaseObligation.Evidence);
-  if (node.state === NodeState.Evaluating) {
-    if (
-      currentAssessmentOf(tx, node.id, execution.attempt)?.result !==
-      AssessmentResult.Success
-    )
-      refuse(ReleaseObligation.Assessment);
-    if (
-      eligibleUnrequested(
-        actionStatesOf(tx, dependencies.bindings, node.id, execution.attempt),
-      ).length > NO_ELIGIBLE_ACTIONS
-    )
-      refuse(ReleaseObligation.Request);
-  }
+  requireReleaseObligations({ tx, dependencies, node, execution, furtherWork });
   const limit = dependencies.config.further_work_limit;
   const stalledOut =
     furtherWork && limit > NO_FURTHER_WORK_LIMIT && stalledReleases >= limit;
-  const state =
-    node.state === NodeState.Paused
-      ? NodeState.Paused
-      : node.state === NodeState.Evaluating
-        ? NodeState.ExternalRequested
-        : stalledOut
-          ? NodeState.Paused
-          : furtherWork
-            ? NodeState.Available
-            : NodeState.Waiting;
+  const state = releasedStateOf(node.state, furtherWork, stalledOut);
   transition(
     tx,
     dependencies,

@@ -9,6 +9,7 @@ import { canonicalJSON } from "../kernel/json.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  type Actor,
   ActorKind,
   actorSchema,
   ActorService,
@@ -159,6 +160,57 @@ export function foldExternalState(
   closeExternalAttempt(tx, dependencies, requireNode(tx, node.id), now);
 }
 
+function externalAttemptOpen(
+  tx: Transaction,
+  node: NodeRow,
+  attempt: number,
+): boolean {
+  return (
+    node.state === NodeState.ExternalRequested &&
+    readOpenAttempt(tx, node.id)?.attempt === attempt
+  );
+}
+
+interface LandedCommits {
+  nodeId: string;
+  attempt: number;
+  bindingId: string;
+  commits: string[];
+  provenance: Actor;
+  now: number;
+}
+
+function insertLandedCommits(tx: Transaction, landed: LandedCommits): void {
+  const { nodeId, attempt, bindingId, provenance, now } = landed;
+  for (const commit of landed.commits) {
+    const id = createIdentity("evidence");
+    insertEvidence(
+      tx,
+      {
+        id,
+        node_id: nodeId,
+        attempt,
+        subject: LANDED_COMMIT_SUBJECT,
+        requirement_key: null,
+        end_state: null,
+        verification: null,
+        provenance: canonicalJSON(provenance),
+        created_at: now,
+      },
+      [
+        {
+          id: createIdentity("evidence_asset"),
+          evidence_id: id,
+          kind: AssetKind.Repository,
+          content: canonicalJSON({ binding_id: bindingId, commit }),
+          published_at: now,
+          expired_at: null,
+        },
+      ],
+    );
+  }
+}
+
 export function applyEndState(
   tx: Transaction,
   dependencies: Dependencies,
@@ -188,10 +240,7 @@ export function applyEndState(
     answer.end_state === CheckEndState.Conflict ||
     answer.end_state === CheckEndState.ChecksFailed
   ) {
-    if (
-      node.state === NodeState.ExternalRequested &&
-      readOpenAttempt(tx, node.id)?.attempt === request.attempt
-    )
+    if (externalAttemptOpen(tx, node, request.attempt))
       transition(tx, dependencies, mission, node, NodeState.Available, now);
     return;
   }
@@ -201,42 +250,16 @@ export function applyEndState(
     )
     .run(answer.end_state, evidenceId);
   assert.equal(write.changes, EXPECTED_ROW_CHANGE);
-  if (answer.end_state === CheckEndState.Expected) {
-    for (const commit of answer.landed_commits) {
-      const id = createIdentity("evidence");
-      insertEvidence(
-        tx,
-        {
-          id,
-          node_id: node.id,
-          attempt: request.attempt,
-          subject: LANDED_COMMIT_SUBJECT,
-          requirement_key: null,
-          end_state: null,
-          verification: null,
-          provenance: canonicalJSON(provenance),
-          created_at: now,
-        },
-        [
-          {
-            id: createIdentity("evidence_asset"),
-            evidence_id: id,
-            kind: AssetKind.Repository,
-            content: canonicalJSON({
-              binding_id: frozenAction.binding_id,
-              commit,
-            }),
-            published_at: now,
-            expired_at: null,
-          },
-        ],
-      );
-    }
-  }
-  if (
-    node.state === NodeState.ExternalRequested &&
-    readOpenAttempt(tx, node.id)?.attempt === request.attempt
-  )
+  if (answer.end_state === CheckEndState.Expected)
+    insertLandedCommits(tx, {
+      nodeId: node.id,
+      attempt: request.attempt,
+      bindingId: frozenAction.binding_id,
+      commits: answer.landed_commits,
+      provenance,
+      now,
+    });
+  if (externalAttemptOpen(tx, node, request.attempt))
     foldExternalState(tx, dependencies, node, request.attempt, now);
   else
     reconcileMission(
@@ -444,15 +467,25 @@ async function requestMerge(
   }
 }
 
-async function runDeferredCheck(
+interface PreparedRound {
+  mission: ReturnType<typeof requireMission>;
+  requests: RequestItem[];
+}
+
+interface RoundScope {
+  dependencies: Dependencies;
+  run: string;
+  round: number;
+  stopped: Set<string>;
+  outcome: RoundOutcome;
+}
+
+function prepareRound(
   dependencies: Dependencies,
   nodeId: string,
   attempt: number,
-  run: string,
-  stopped: Set<string>,
-  round: number,
-): Promise<RoundOutcome | null> {
-  const prepared = dependencies.store.transaction((tx) => {
+): PreparedRound | null {
+  return dependencies.store.transaction((tx) => {
     const node = readNode(tx, nodeId);
     if (!node || node.state !== NodeState.ExternalRequested) return null;
     const openAttempt = readOpenAttempt(tx, nodeId);
@@ -465,66 +498,98 @@ async function runDeferredCheck(
     const mission = requireMission(tx, node.mission_id);
     return { mission, requests };
   });
+}
+
+async function checkRequest(
+  dependencies: Dependencies,
+  item: RequestItem,
+): Promise<CheckAnswer | null> {
+  try {
+    dependencies.store.transaction((tx) =>
+      authorizeRequest(tx, dependencies, item.request.id),
+    );
+    return checkAnswerSchemaOf(item.frozen_action).parse(
+      await dependencies.intakeCheck.check(
+        roundContext(dependencies),
+        item.request.id,
+      ),
+    );
+  } catch (error) {
+    dependencies.logger.warn(
+      { error, evidence_id: item.request.id },
+      "Deferred check failed.",
+    );
+    return null;
+  }
+}
+
+function applyAnswer(
+  dependencies: Dependencies,
+  item: RequestItem,
+  answer: CheckAnswer,
+): string | null {
+  return dependencies.store.transaction((tx) => {
+    const now = Date.now();
+    if (answer.end_state === CheckEndState.None)
+      return mergeCommitOf(tx, dependencies, item, now);
+    const claim = changesNothing(answer.end_state)
+      ? null
+      : dependencies.schedulerClaims.liveExecutionOf(
+          tx,
+          item.request.node_id,
+          now,
+        );
+    if (claim === null)
+      applyEndState(tx, dependencies, item.request.id, answer, now);
+    return null;
+  });
+}
+
+async function settleMerge(
+  scope: RoundScope,
+  item: RequestItem,
+  commit: string,
+): Promise<void> {
+  const { dependencies, run, round, stopped, outcome } = scope;
+  const merge = await requestMerge(dependencies, item, commit, run, round);
+  if (merge === MergeOutcome.Merged) outcome.merged = true;
+  if (merge === MergeOutcome.Retry) outcome.failed = true;
+  if (merge === MergeOutcome.Stop) stopped.add(item.request.id);
+}
+
+async function runDeferredCheck(
+  dependencies: Dependencies,
+  nodeId: string,
+  attempt: number,
+  run: string,
+  stopped: Set<string>,
+  round: number,
+): Promise<RoundOutcome | null> {
+  const prepared = prepareRound(dependencies, nodeId, attempt);
   if (prepared === null) return null;
   const outcome: RoundOutcome = {
     merged: false,
     pending: false,
     failed: false,
   };
+  const scope: RoundScope = { dependencies, run, round, stopped, outcome };
   for (const item of prepared.requests) {
     if (quiescent(dependencies)) break;
-    let answer: CheckAnswer;
-    try {
-      dependencies.store.transaction((tx) =>
-        authorizeRequest(tx, dependencies, item.request.id),
-      );
-      answer = checkAnswerSchemaOf(item.frozen_action).parse(
-        await dependencies.intakeCheck.check(
-          roundContext(dependencies),
-          item.request.id,
-        ),
-      );
-    } catch (error) {
-      dependencies.logger.warn(
-        { error, evidence_id: item.request.id },
-        "Deferred check failed.",
-      );
+    const answer = await checkRequest(dependencies, item);
+    if (answer === null) {
       outcome.failed = true;
       continue;
     }
     if (answer.end_state === CheckEndState.ChecksPending)
       outcome.pending = true;
-    const mergeCommit = dependencies.store.transaction((tx) => {
-      const now = Date.now();
-      if (answer.end_state === CheckEndState.None)
-        return mergeCommitOf(tx, dependencies, item, now);
-      const claim = changesNothing(answer.end_state)
-        ? null
-        : dependencies.schedulerClaims.liveExecutionOf(
-            tx,
-            item.request.node_id,
-            now,
-          );
-      if (claim === null)
-        applyEndState(tx, dependencies, item.request.id, answer, now);
-      return null;
-    });
+    const mergeCommit = applyAnswer(dependencies, item, answer);
     if (
       mergeCommit === null ||
       stopped.has(item.request.id) ||
       quiescent(dependencies)
     )
       continue;
-    const merge = await requestMerge(
-      dependencies,
-      item,
-      mergeCommit,
-      run,
-      round,
-    );
-    if (merge === MergeOutcome.Merged) outcome.merged = true;
-    if (merge === MergeOutcome.Retry) outcome.failed = true;
-    if (merge === MergeOutcome.Stop) stopped.add(item.request.id);
+    await settleMerge(scope, item, mergeCommit);
   }
   dependencies.wakeup.wake(prepared.mission.project_id);
   return outcome;
