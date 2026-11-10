@@ -510,6 +510,9 @@ No query fields are accepted. The required file supplies the following fields.
 - A gate G commit that fails stops with `operation_failed` and the code
   `worker.git.commit_failed`. The stop detail holds the redacted git stderr,
   cut to 300 characters.
+- A git operation of the repository connector that fails in an execution
+  stops with `operation_failed` and the code `repository.connector.git_failed`.
+  The stop detail holds the redacted git cause, cut to 300 characters.
 - A worker runs the setup of the environment of each repository binding in
   each checkout and each clone: `updateContentCommand`, then
   `postCreateCommand`. A setup that changes a tracked file fails, and the

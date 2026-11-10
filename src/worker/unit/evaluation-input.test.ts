@@ -471,8 +471,13 @@ test("an implement snapshot evaluation places only the latest coder report outsi
     "assets",
     "added_files",
     "changed_files",
+    "patch_paths",
+    "empty_patches",
   ]);
-  assert.deepEqual(prepared.patches, []);
+  assert.deepEqual(
+    prepared.patches.map((patch) => patch.name),
+    ["repo"],
+  );
   workspaces.release(prepared.key, prepared.kind);
   assert.equal(existsSync(prepared.key), false);
 });
@@ -661,7 +666,7 @@ async function roundEvaluation(
     origins: Record<string, Awaited<ReturnType<typeof roundOrigin>>>,
   ) => Promise<{
     snapshots: Record<string, string>;
-    base: Record<string, string>;
+    base: Record<string, string> | null;
   }>,
 ) {
   const state = temporary(t);
@@ -716,16 +721,19 @@ async function roundEvaluation(
   });
   stopAfter(t, () => run.dispose());
   const workspaces = WorkspaceRoot.open(join(state, "workspaces"));
-  const reviewBase = Object.entries(base).map(([name, commit]) =>
+  const reviewBase = Object.entries(base ?? {}).map(([name, commit]) =>
     address(name, commit),
   );
-  const round = {
-    round: 2,
-    final: false,
-    review_base:
-      reviewBase.length === SINGLE_BINDING ? reviewBase[0]! : reviewBase,
-    findings: [],
-  };
+  const round =
+    base === null
+      ? { round: 1, final: false, review_base: null, findings: [] }
+      : {
+          round: 2,
+          final: false,
+          review_base:
+            reviewBase.length === SINGLE_BINDING ? reviewBase[0]! : reviewBase,
+          findings: [],
+        };
   const prepared = await prepareEvaluation(
     {
       setup,
@@ -835,6 +843,21 @@ test("a review base that is an ancestor only through a second parent gives the f
     logs.filter((entry) => entry.message === OFF_HISTORY).length,
     ONE_ENTRY,
   );
+});
+
+test("regression: K113 a first review holds the full change patch", async (t) => {
+  const { prepared } = await roundEvaluation(t, ["repo"], async ({ repo }) => {
+    await repo!.commit("first.md");
+    const head = await repo!.commit("second.md");
+    return { snapshots: { repo: head }, base: null };
+  });
+  assert.equal(prepared.reviewBundle.round, undefined);
+  assert.equal(prepared.reviewBundle.patch_paths.length, SINGLE_BINDING);
+  assert.match(prepared.reviewBundle.patch_paths[0]!, /round-1-repo\.patch$/);
+  assert.deepEqual(prepared.reviewBundle.empty_patches, []);
+  const [patch] = prepared.patches;
+  assert.match(patch!.text, /\+\+\+ b\/first\.md/);
+  assert.match(patch!.text, /\+\+\+ b\/second\.md/);
 });
 
 test("a review base equal to the head gives an empty patch and an empty_patches entry", async (t) => {

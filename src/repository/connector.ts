@@ -43,7 +43,7 @@ import {
 } from "./ssh-agent.ts";
 import { sshLoginOf } from "./ssh-login.ts";
 
-const GIT_FAILED = "repository.connector.git_failed";
+const GIT_FAILED = RepositoryErrorCode.GitFailed;
 export const GIT_BASE_MOVED = "git.base_moved";
 export const NODE_BRANCH_MISSING = RepositoryErrorCode.NodeBranchMissing;
 export const GATE_DECLARATION_INVALID = "repository.gate_declaration.invalid";

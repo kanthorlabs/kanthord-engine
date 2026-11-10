@@ -449,6 +449,7 @@ test("the examine evaluation prompt asks for finding_labels and the other evalua
     ),
   );
   assert.ok(examine.includes('"finding_labels": ["B1"]'));
+  assert.ok(!examine.includes("lists the full change of each repository"));
   assert.ok(
     !renderTemplate(SHIPPED_TEMPLATE_SET.templates, PromptTemplate.Evaluation, {
       ...values,

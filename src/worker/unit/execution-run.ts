@@ -27,6 +27,7 @@ import { SpanStatus } from "../../tracking/contract.ts";
 import { type FailureCause, unattributed } from "../../kernel/cause.ts";
 import { type GitStep, gitStepOf } from "./git-step.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
+import { RepositoryErrorCode } from "../../repository/contract.ts";
 import { codedStopDetail, stopCauseOf } from "./stop-cause.ts";
 
 type EvidenceBody = Omit<
@@ -37,6 +38,18 @@ type AssessmentBody = Omit<
   Parameters<MethodClients["mission"]["assessment.submit"]>[0]["body"],
   "execution_id" | "attempt" | "node_revision"
 >;
+
+const GIT_FAILURE_CODES: ReadonlySet<string> = new Set([
+  GIT_COMMIT_FAILED,
+  RepositoryErrorCode.GitFailed,
+]);
+
+function gitFailureCause(error: CodedError): unknown {
+  let cause: unknown = error.cause ?? error;
+  while (cause instanceof CodedError && cause.cause instanceof Error)
+    cause = cause.cause;
+  return cause;
+}
 
 export const EndReason = {
   ...ExecutionStopReason,
@@ -253,8 +266,8 @@ export class ExecutionRun {
       return this.halt(
         EndReason.OperationFailed,
         error.code,
-        error.code === GIT_COMMIT_FAILED
-          ? await this.reasonOf(error.cause ?? error)
+        GIT_FAILURE_CODES.has(error.code)
+          ? await this.reasonOf(gitFailureCause(error))
           : codedStopDetail(
               error.code,
               "details" in error ? error.details : null,
