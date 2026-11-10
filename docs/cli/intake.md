@@ -715,10 +715,11 @@ the node is `External.Requested` on the open attempt of the evidence, the
 action is a `pull_request` with the landing `kanthord`, the current assessment
 of the attempt is `success` with no changed gate file, and `commit` is the
 tested commit of the binding. A removed binding, a disabled binding and a
-paused project get no merge. The merge call and the read-back are the call and
+paused project get no merge. A paused project answers 403
+`mission.authorization.refused` with the reason `project_paused`. The merge call and the read-back are the call and
 the read-back of `github.pull_request_merge` that `intake.action.perform` uses.
 It answers the pull request address, or a result class answer with the code
-`repository.platform.github.<class>`. Intake stores the request under the key `service_merge/<request_key>`. `intake.action.perform` answers `400` `gateway.request.validation_failed` for a `request_key` that starts with `service_merge/`. A stored answer that names another pull request answers `final_refusal` and calls no merge.
+`repository.platform.github.<class>`. A merge call that GitHub answers with 405 answers `retryable_refusal`, because GitHub answers 405 while it cannot merge the pull request yet. A merge call that GitHub answers with 409 answers `final_refusal`, because the head of the pull request is not `commit`. When GitHub answers an HTTP status, the message of a refused merge call is that status, a space and the message of GitHub. Intake stores the request under the key `service_merge/<request_key>`. `intake.action.perform` answers `400` `gateway.request.validation_failed` for a `request_key` that starts with `service_merge/`. A stored answer that names another pull request answers `final_refusal` and calls no merge.
 
 Before the merge, the action performer reads the required checks with `github-pull-request-required-check-get`. While a required check of the head commit is pending or failed, it requests no merge. When the read fails or answers an unexpected body, it requests no merge. The deferred check of the Mission Service can then request the merge.
 

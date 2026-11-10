@@ -34,6 +34,7 @@ import {
 import { insertNode, readNode, setNodeState } from "./store.ts";
 import { insertRevision, readCurrentRevision } from "./store.ts";
 import { revisionFromRow } from "./revision.ts";
+import { AuthorizationRefusal, authorizationRefused } from "./authorization.ts";
 import {
   DEFERRED_CHECK_RETRY_MS,
   DEFERRED_CHECK_ROUND_LIMIT,
@@ -835,6 +836,7 @@ test("a refused merge logs a warning and changes no state", async (t) => {
     evidence_id: h.evidenceId,
     class: REFUSAL.class,
     code: REFUSAL.code,
+    message: REFUSAL.message,
   });
   assert.equal(h.node().state, NodeState.ExternalRequested);
   assert.equal(
@@ -904,6 +906,50 @@ test("a server start merges under a new key after a failed run", async (t) => {
   assert.equal(first![2], FIRST_ROUND_LABEL);
   assert.equal(second![2], FIRST_ROUND_LABEL);
   assert.notEqual(first![1], second![1]);
+});
+
+test("regression: K115 a paused project holds the deferred round and merges after the resume", async (t) => {
+  const advance = mockTimers(t);
+  const h = deferredFixture(t, SETTLED, {
+    landing: RepositoryLanding.KanthorD,
+  });
+  let paused = true;
+  h.dependencies.projectPaused = () => paused;
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  await advance(DEFERRED_CHECK_RETRY_MS);
+  assert.equal(h.checkCalls(), NO_CALLS);
+  assert.equal(h.mergeInputs.length, NO_CALLS);
+  paused = false;
+  await advance(DEFERRED_CHECK_RETRY_MS);
+  assert.equal(h.checkCalls(), ONE_CALL);
+  assert.equal(h.mergeInputs.length, ONE_CALL);
+  assert.equal(
+    REQUEST_KEY_RUN_PATTERN.exec(h.mergeInputs[FIRST_INDEX]!.request_key)![2],
+    FIRST_ROUND_LABEL,
+  );
+});
+
+test("regression: K115 a merge refused with mission.authorization.refused retries in the next round", async (t) => {
+  const advance = mockTimers(t);
+  let refusals = NO_CALLS;
+  const h = deferredFixture(t, SETTLED, {
+    landing: RepositoryLanding.KanthorD,
+    merge: async () => {
+      if (refusals++ === NO_CALLS)
+        authorizationRefused(AuthorizationRefusal.ProjectPaused);
+      return MERGE_ADDRESS;
+    },
+  });
+  h.release();
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(h.mergeInputs.length, ONE_CALL);
+  await advance(DEFERRED_CHECK_RETRY_MS);
+  assert.equal(h.mergeInputs.length, ONE_CALL + 1);
+  assert.equal(
+    REQUEST_KEY_RUN_PATTERN.exec(h.mergeInputs[ONE_CALL]!.request_key)![2],
+    SECOND_ROUND_LABEL,
+  );
 });
 
 test("an assessment that is no longer a success at merge time calls no merge and logs no crash", async (t) => {

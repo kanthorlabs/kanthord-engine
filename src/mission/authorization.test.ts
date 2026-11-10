@@ -839,7 +839,7 @@ test("a service merge refuses a paused project", (t) => {
     assert.equal(projectId, h.project_id);
     return true;
   };
-  refuses(() => h.merge(), "claim_not_live");
+  refuses(() => h.merge(), "project_paused");
 });
 
 function pushMergeHarness(t: TestContext) {

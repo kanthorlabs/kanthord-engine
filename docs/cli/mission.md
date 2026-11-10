@@ -901,12 +901,17 @@ The required-action and request sets of an `examine` node are empty.
   `repository.platform.github.<class>`. A node with no unresolved request and
   no external link answers 409 `mission.node.no_unresolved_request`.
   After a reviewer release, KanthorD checks a pending pull request again every
-  60 s, at most 60 times. It merges a `kanthord` landing pull request when its
+  60 s, at most 60 times. While the project is paused, a round makes no check and no merge.
+  The round waits 60 s and runs again with the same round number, so a pause uses no round.
+  A human landing during a pause resolves after the resume. KanthorD merges a `kanthord` landing pull request when its
   required checks pass. A merge that answers `confirmed_failure`,
-  `retryable_refusal` or `unknown_outcome` runs the next round after 60 s. Each
-  round sends a new request key. After a `final_refusal` merge answer or a thrown merge error, the check requests no further merge of that pull request until the next server start. The rounds continue while another request of the node is pending or failed.
+  `retryable_refusal` or `unknown_outcome` runs the next round after 60 s.
+  A merge that fails with 403 `mission.authorization.refused` also runs the next round after 60 s. Each
+  round sends a new request key. After a `final_refusal` merge answer or another merge error, the check requests no further merge of that pull request until the next server start or the next node check. The rounds continue while another request of the node is pending or failed.
+  The warning `Deferred merge failed.` holds the class, the code and the message of a refused merge.
   The last round ends the check. A human then merges the
-  pull request. At each server start, KanthorD checks again each
+  pull request, or runs node check. Node check starts the rounds again for the open attempt of the node.
+  Each open attempt has one live run of rounds. A new run replaces the old run, and the old run sends no further merge. At each server start, KanthorD checks again each
   `External.Requested` node that holds an unresolved request, at most 50 nodes
   for each start.
   The [request record](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-request-record) defines the check.
@@ -1172,10 +1177,10 @@ open attempt and pinned action or evidence, and resolves binding disablement
 and removal through Project. A human object access follows the asset's pinned
 storage binding. Force bypasses no binding authorization.
 
-| HTTP | Code                            | Condition                                                                                                                                                                                           | Operations                                                                                                                                            |
-| ---- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 403  | `mission.authorization.refused` | The protected facility chain breaks; details `{ reason }` is `claim_not_live`, `node_mismatch`, `attempt_closed`, `binding_disabled`, `binding_removed`, `service_mismatch` or `gate_file_changed`. | evidence submit, evidence asset content get, execution asset content get, evidence delete, evidence asset delete, node check, evidence asset complete |
-| 502  | `storage.platform.s3.<class>`   | The S3 call of the object check or the object delete answers a result class; `details.status` holds the S3 HTTP status when the failure carries one, otherwise null.                                | evidence asset complete, evidence delete, evidence asset delete                                                                                       |
+| HTTP | Code                            | Condition                                                                                                                                                                                                             | Operations                                                                                                                                            |
+| ---- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 403  | `mission.authorization.refused` | The protected facility chain breaks; details `{ reason }` is `claim_not_live`, `node_mismatch`, `attempt_closed`, `binding_disabled`, `binding_removed`, `service_mismatch`, `gate_file_changed` or `project_paused`. | evidence submit, evidence asset content get, execution asset content get, evidence delete, evidence asset delete, node check, evidence asset complete |
+| 502  | `storage.platform.s3.<class>`   | The S3 call of the object check or the object delete answers a result class; `details.status` holds the S3 HTTP status when the failure carries one, otherwise null.                                                  | evidence asset complete, evidence delete, evidence asset delete                                                                                       |
 
 An object delete uses the evidence asset identity as its Intake request key.
 A repeat after failure reads the object back without redispatching the delete;

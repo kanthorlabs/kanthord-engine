@@ -48,6 +48,8 @@ const WORKER_INSTANCE_COUNT = 1;
 const FIRST_ATTEMPT = 1;
 const PULL_REQUEST_CREATES = 1;
 const OUTBOUND_ROWS_PER_ACTION = 1;
+const BRANCH_RULES_ROUTE = "/repos/owner/gated/rules/branches/main";
+const OPEN_PULL_REQUEST_CHECKS = 3;
 const LANDED_EVIDENCE_COUNT = 1;
 const FIRST_PULL_REQUEST = 1;
 const TIMEOUT = 180000;
@@ -277,13 +279,21 @@ test("E03 repository actions CLI journey", { timeout: TIMEOUT }, async (t) => {
       assert.equal((await h.node(h.P)).state, NodeState.ExternalRequested);
     },
   );
-  await t.test("E03.5 an open pull request stays unresolved", async () => {
+  await t.test("E03.5 an open pull request stays unresolved", async (t) => {
     const answer = await h.check(h.P);
     assert.equal(
       answer.results[FIRST_INDEX]?.resolution,
       Resolution.Unresolved,
     );
     assert.deepEqual(answer.failures, []);
+    await until(
+      () =>
+        h.gitHub.calls.filter((call) =>
+          call.path.startsWith(BRANCH_RULES_ROUTE),
+        ).length,
+      (checks) => checks >= OPEN_PULL_REQUEST_CHECKS,
+      t.signal,
+    );
   });
   await t.test("E03.6 a merged pull request completes P", async () => {
     h.gitHub.merge(FIRST_PULL_REQUEST, MERGED_COMMIT);

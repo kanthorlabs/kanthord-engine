@@ -1386,7 +1386,7 @@ suite(
             h.gitHub.refuseMerge(null);
           }
           assert.ok("class" in answer, JSON.stringify(answer));
-          assert.equal(answer.class, ResultClass.FinalRefusal);
+          assert.equal(answer.class, ResultClass.RetryableRefusal);
           assert.equal(h.row("refused")?.state, OutboundRequestState.Failed);
           dropped(h.materials);
         });

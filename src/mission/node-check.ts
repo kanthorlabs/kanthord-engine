@@ -314,7 +314,7 @@ export async function checkNode(
         "The node has no unresolved request.",
       );
     requireInbounds(tx, dependencies, mission.project_id, links);
-    return { mission, requests, links };
+    return { mission, requests, links, attempt: attempt?.attempt ?? null };
   });
   const linkUpdates = await admitLinkUpdates(
     dependencies,
@@ -390,12 +390,38 @@ export async function checkNode(
     failures,
     link_updates: linkUpdates,
   }));
+  restartDeferredCheck(dependencies, nodeId, prepared.attempt);
   dependencies.wakeup.wake(prepared.mission.project_id);
   return result;
 }
 
+function restartDeferredCheck(
+  dependencies: Dependencies,
+  nodeId: string,
+  attempt: number | null,
+): void {
+  if (attempt === null) return;
+  scheduleDeferredCheck(dependencies, nodeId, attempt);
+}
+
 type RequestItem = ReturnType<typeof requestContext>;
-type RoundOutcome = { merged: boolean; pending: boolean; failed: boolean };
+type RoundOutcome = {
+  merged: boolean;
+  pending: boolean;
+  failed: boolean;
+  held: boolean;
+};
+
+function runKeyOf(nodeId: string, attempt: number): string {
+  return `${nodeId}/${attempt}`;
+}
+
+function refusedByAuthorization(error: unknown): boolean {
+  return (
+    error instanceof OperationError &&
+    error.code === MissionErrorCode.AuthorizationRefused
+  );
+}
 
 function roundsOf(dependencies: Dependencies): DeferredRounds {
   assert.ok(dependencies.rounds, "The Mission Service owns the rounds.");
@@ -455,7 +481,12 @@ async function requestMerge(
     );
     if ("kind" in answer) return MergeOutcome.Merged;
     dependencies.logger.warn(
-      { evidence_id: id, class: answer.class, code: answer.code },
+      {
+        evidence_id: id,
+        class: answer.class,
+        code: answer.code,
+        message: answer.message,
+      },
       DEFERRED_MERGE_FAILED,
     );
     return RETRIED_MERGE_CLASSES.includes(answer.class)
@@ -463,13 +494,16 @@ async function requestMerge(
       : MergeOutcome.Stop;
   } catch (error) {
     dependencies.logger.warn({ error, evidence_id: id }, DEFERRED_MERGE_FAILED);
-    return MergeOutcome.Stop;
+    return refusedByAuthorization(error)
+      ? MergeOutcome.Retry
+      : MergeOutcome.Stop;
   }
 }
 
 interface PreparedRound {
   mission: ReturnType<typeof requireMission>;
   requests: RequestItem[];
+  paused: boolean;
 }
 
 interface RoundScope {
@@ -496,7 +530,11 @@ function prepareRound(
       .map((row) => requestContext(tx, dependencies, row.id));
     if (requests.length === NO_UNRESOLVED_REQUESTS) return null;
     const mission = requireMission(tx, node.mission_id);
-    return { mission, requests };
+    return {
+      mission,
+      requests,
+      paused: dependencies.projectPaused(tx, mission.project_id),
+    };
   });
 }
 
@@ -557,6 +595,15 @@ async function settleMerge(
   if (merge === MergeOutcome.Stop) stopped.add(item.request.id);
 }
 
+function skipsMerge(scope: RoundScope, item: RequestItem): boolean {
+  const { node_id: nodeId, attempt, id } = item.request;
+  return (
+    scope.stopped.has(id) ||
+    quiescent(scope.dependencies) ||
+    !roundsOf(scope.dependencies).owns(runKeyOf(nodeId, attempt), scope.run)
+  );
+}
+
 async function runDeferredCheck(
   dependencies: Dependencies,
   nodeId: string,
@@ -571,7 +618,9 @@ async function runDeferredCheck(
     merged: false,
     pending: false,
     failed: false,
+    held: prepared.paused,
   };
+  if (outcome.held) return outcome;
   const scope: RoundScope = { dependencies, run, round, stopped, outcome };
   for (const item of prepared.requests) {
     if (quiescent(dependencies)) break;
@@ -583,12 +632,7 @@ async function runDeferredCheck(
     if (answer.end_state === CheckEndState.ChecksPending)
       outcome.pending = true;
     const mergeCommit = applyAnswer(dependencies, item, answer);
-    if (
-      mergeCommit === null ||
-      stopped.has(item.request.id) ||
-      quiescent(dependencies)
-    )
-      continue;
+    if (mergeCommit === null || skipsMerge(scope, item)) continue;
     await settleMerge(scope, item, mergeCommit);
   }
   dependencies.wakeup.wake(prepared.mission.project_id);
@@ -604,16 +648,19 @@ function nextRound(
   round: number,
   outcome: RoundOutcome,
 ): void {
+  const rounds = roundsOf(dependencies);
+  const again = (delayMs: number, at: number) =>
+    rounds.arm(delayMs, () =>
+      runRound(dependencies, nodeId, attempt, run, stopped, at),
+    );
   const next = round + NEXT_ROUND_STEP;
-  if (next >= DEFERRED_CHECK_ROUND_LIMIT) return;
-  if (outcome.merged)
-    return roundsOf(dependencies).arm(IMMEDIATE_DELAY_MS, () =>
-      runRound(dependencies, nodeId, attempt, run, stopped, next),
-    );
+  if (outcome.held) return again(DEFERRED_CHECK_RETRY_MS, round);
+  if (next >= DEFERRED_CHECK_ROUND_LIMIT)
+    return rounds.release(runKeyOf(nodeId, attempt), run);
+  if (outcome.merged) return again(IMMEDIATE_DELAY_MS, next);
   if (outcome.pending || outcome.failed)
-    roundsOf(dependencies).arm(DEFERRED_CHECK_RETRY_MS, () =>
-      runRound(dependencies, nodeId, attempt, run, stopped, next),
-    );
+    return again(DEFERRED_CHECK_RETRY_MS, next);
+  rounds.release(runKeyOf(nodeId, attempt), run);
 }
 
 function runRound(
@@ -624,14 +671,17 @@ function runRound(
   stopped: Set<string>,
   round: number,
 ): void {
-  if (quiescent(dependencies)) return;
-  roundsOf(dependencies).admit(
+  const rounds = roundsOf(dependencies);
+  const key = runKeyOf(nodeId, attempt);
+  if (quiescent(dependencies) || !rounds.owns(key, run)) return;
+  rounds.admit(
     runDeferredCheck(dependencies, nodeId, attempt, run, stopped, round)
       .then((outcome) => {
-        if (outcome === null) return;
+        if (outcome === null) return rounds.release(key, run);
         nextRound(dependencies, nodeId, attempt, run, stopped, round, outcome);
       })
       .catch((error) => {
+        rounds.release(key, run);
         dependencies.logger.warn(
           { error, node_id: nodeId },
           "Deferred check crashed.",
@@ -647,6 +697,7 @@ export function scheduleDeferredCheck(
 ): void {
   const run = createIdentity(DEFERRED_RUN_PREFIX);
   const stopped = new Set<string>();
+  roundsOf(dependencies).own(runKeyOf(nodeId, attempt), run);
   roundsOf(dependencies).arm(IMMEDIATE_DELAY_MS, () =>
     runRound(dependencies, nodeId, attempt, run, stopped, FIRST_ROUND),
   );

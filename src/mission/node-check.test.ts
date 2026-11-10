@@ -156,6 +156,7 @@ test("invalid Intake answers leave requests unresolved and stale mission version
 });
 
 async function fixture(t: TestContext) {
+  t.mock.timers.enable({ apis: ["setTimeout", "setImmediate"] });
   const h = await externalRequestHarness(t, IDENTITY);
   const check = () =>
     h.invoke("node.check", {
@@ -417,6 +418,7 @@ function insertNextRequest(
 }
 
 test("a landed sibling makes its attempt delivered across an unblock", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "setImmediate"] });
   const h = await externalRequestHarness(t, IDENTITY, true);
   insertNextRequest(h);
   let nextEnded = false;
@@ -929,6 +931,64 @@ test("a push refused by a branch rule stops the rounds and a human land with nod
   assert.equal(h.node().state, NodeState.Completed);
 });
 
+function nodeCheck(h: Awaited<ReturnType<typeof externalRequestHarness>>) {
+  return h.invoke("node.check", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: { expected_mission_version: FIRST_MISSION_VERSION },
+  });
+}
+
+test("regression: K117 node check starts the deferred rounds again after a stopped merge", async (t) => {
+  const { advance } = pushHarness(t);
+  const h = await externalRequestHarness(
+    t,
+    IDENTITY,
+    false,
+    RepositoryAction.Push,
+  );
+  let merges = NO_MERGES;
+  h.dependencies.intakeCheck.check = async () => ({
+    end_state: CheckEndState.None,
+    landed_commits: [],
+  });
+  h.dependencies.intakeCheck.merge = async () => {
+    merges++;
+    return PUSH_REFUSED;
+  };
+  scheduleDeferredCheck(h.dependencies, h.node_id, FIRST_ATTEMPT);
+  await advance(FIRST_ROUND_DELAY_MS);
+  await advance(DEFERRED_CHECK_RETRY_MS);
+  assert.equal(merges, ONE_MERGE);
+  await nodeCheck(h);
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(merges, ONE_MERGE + ONE_MERGE);
+  assert.equal(h.node().state, NodeState.ExternalRequested);
+});
+
+test("a node check during a live run leaves one run", async (t) => {
+  const { advance } = pushHarness(t);
+  const h = await externalRequestHarness(
+    t,
+    IDENTITY,
+    false,
+    RepositoryAction.Push,
+  );
+  let checks = NO_REMOTE_CALLS;
+  h.dependencies.intakeCheck.check = async () => {
+    checks++;
+    return { end_state: CheckEndState.ChecksPending, landed_commits: [] };
+  };
+  scheduleDeferredCheck(h.dependencies, h.node_id, FIRST_ATTEMPT);
+  await advance(FIRST_ROUND_DELAY_MS);
+  assert.equal(checks, ONE_ROUND);
+  await nodeCheck(h);
+  assert.equal(checks, ONE_ROUND + SINGLE_CALL);
+  await advance(FIRST_ROUND_DELAY_MS);
+  await advance(DEFERRED_CHECK_RETRY_MS);
+  assert.equal(checks, ONE_ROUND + SINGLE_CALL + ROUNDS_AFTER_FIRST);
+});
+
 const INTAKE_IDENTITY = testServiceIdentity(INTAKE_SERVICE_NAME);
 const OTHER_RESOURCE = "conversation:github:acme/other";
 const LISTED_EVENT = "issue_comment_listed";
@@ -1316,7 +1376,6 @@ test("an expected answer for a reply evidence with a landed commit leaves the re
 });
 
 test("the deferred check resolves an unresolved comment evidence", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout", "setImmediate"] });
   const h = await replyFixture(t);
   h.store.transaction((tx) =>
     tx.database
