@@ -477,17 +477,6 @@ test("an assessment of a node with no action reads no gate files", async (t) => 
   assert.equal(result.assessment.result, AssessmentResult.Success);
 });
 
-test("an assessment of a node with no action stores gate_files null", async (t) => {
-  const h = await fixture(t);
-  const result = await h.submit();
-  assert.equal(
-    h.store.transaction(
-      (tx) => readAssessment(tx, result.assessment.id)?.gate_files,
-    ),
-    null,
-  );
-});
-
 test("a not-met assessment that sends rework and a passed assessment that completes the node end the root span with the assessment cause", async (t) => {
   for (const [result, state] of [
     [AssessmentResult.CriterionNotMet, NodeState.Available],

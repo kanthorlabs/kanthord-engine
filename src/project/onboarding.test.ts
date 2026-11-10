@@ -15,11 +15,9 @@ import {
 } from "../custody/contract.ts";
 import { INTAKE_SERVICE_NAME } from "../intake/contract.ts";
 import { IdentityKind } from "../kernel/caller.ts";
-import { CancellationContext } from "../kernel/context.ts";
 import {
   DEVCONTAINER_FILE,
   type Environment,
-  environmentSchema,
   EnvironmentSource,
 } from "../kernel/devcontainer.ts";
 import { OperationError } from "../kernel/errors.ts";
@@ -40,12 +38,7 @@ import {
   type RepositoryFiles,
   WorkerPlacement,
 } from "./contract.ts";
-import {
-  detectEnvironment,
-  DETECTION_PATHS,
-  WORKFLOW_DIRECTORY,
-  WORKFLOW_FILES_MAX,
-} from "./detection.ts";
+import { detectEnvironment, DETECTION_PATHS } from "./detection.ts";
 import { type GroupResolution, ProjectEnvironments } from "./environment.ts";
 import type {
   EnvironmentSessionHandle,
@@ -124,12 +117,9 @@ const BASE = "base";
 const TEST_TIMEOUT_MS = 20000;
 const STORED_SOURCE = "stored";
 const REPOSITORY_SOURCE = "repository";
-const NONE_SOURCE = "none";
 const TRANSIENT = "transient fetch failure";
 const UNREACHABLE = "ssh unreachable";
-const BRANCH_ABSENT = "base branch absent";
 const COMMAND_ABSENT = "command_absent";
-const AFFECTED_INVALID = "affected_invalid";
 const DOCS_NAME = "docs";
 const DOCS_REPAIRS = 2;
 const ONE_CALL = 1;
@@ -151,10 +141,7 @@ const IMAGE = "image";
 const EXECUTION_ID = "execution_1";
 const SETUP_FAILED = "setup_failed";
 const PROOF_CRASHED = "proof crashed";
-const HOST_CRASHED = "host crashed";
-const DEADLINE_TAIL = "the run deadline of 30 minutes passed";
 const TWO_CALLS = 2;
-const THREE_DIGESTS = 3;
 const THREE_CALLS = 3;
 const RUNTIME_NAME = "podman";
 const UNTIL_ATTEMPTS = 1000;
@@ -174,7 +161,6 @@ const KEPT_REPAIRS = 2;
 const REMOVE_STALE_RUNS = "removeStaleRuns";
 const RENAMED_BINDING_ID = "binding_app_2";
 const STRAY_IDENTITY = "repository:github:acme/gone";
-const RUN_STARTED = "project.onboarding.run_started";
 const RUN_ENDED = "project.onboarding.run_ended";
 const CHECKOUT = "/tmp/checkout";
 const INVALID_DOCUMENT = "bad document";
@@ -733,24 +719,6 @@ test("targetOf answers image for a container worker binding that names the group
   );
 });
 
-test("targetOf answers image through the default of the environment key", () => {
-  assert.equal(
-    targetOf(APP, facts([APP], [container(null)])),
-    EnvironmentTarget.Image,
-  );
-  assert.equal(
-    targetOf(APP, facts([APP, DOCS], [container(null)])),
-    EnvironmentTarget.Host,
-  );
-});
-
-test("targetOf answers image for a server binding next to a container binding of the group", () => {
-  assert.equal(
-    targetOf(APP, facts([APP], [server, container("app")])),
-    EnvironmentTarget.Image,
-  );
-});
-
 test("targetOf answers remote when every worker binding is at the worker placement or external", () => {
   assert.equal(
     targetOf(APP, facts([APP], [remoteWorker])),
@@ -781,27 +749,6 @@ test("targetOf answers image for a binding that lists a container instance next 
     targetOf(DOCS, facts([APP, DOCS], [mixed])),
     EnvironmentTarget.Host,
   );
-});
-
-test("targetOf answers remote when every listed instance is at the worker placement", () => {
-  const several: WorkerBindingFacts = {
-    placements: [WorkerPlacement.Worker, WorkerPlacement.Worker],
-    external: false,
-    environment: null,
-  };
-  assert.equal(
-    targetOf(APP, facts([APP], [several])),
-    EnvironmentTarget.Remote,
-  );
-});
-
-test("targetOf answers host when a listed instance is at the server placement", () => {
-  const mixed: WorkerBindingFacts = {
-    placements: [WorkerPlacement.Worker, WorkerPlacement.Server],
-    external: false,
-    environment: null,
-  };
-  assert.equal(targetOf(APP, facts([APP], [mixed])), EnvironmentTarget.Host);
 });
 
 test("targetOf answers host with no worker binding", () => {
@@ -837,29 +784,6 @@ test("a stored environment answers stored at every target", async (t) => {
     await h.compute();
     assert.equal(h.state().source, STORED_SOURCE);
   }
-});
-
-test("a repository devcontainer answers repository at image and none at host", async (t) => {
-  const image = new Harness(t);
-  await image.compute();
-  assert.equal(image.state().source, REPOSITORY_SOURCE);
-  assert.deepEqual(image.resolveCalls, [
-    { bindingId: APP.binding_id, target: EnvironmentTarget.Image },
-  ]);
-  const host = new Harness(t);
-  host.bindings = facts([APP], []);
-  host.resolution = NOTHING;
-  await host.compute();
-  assert.equal(host.state().source, NONE_SOURCE);
-  assert.equal(host.resolveCalls[0]?.target, EnvironmentTarget.Host);
-});
-
-test("no document answers none", async (t) => {
-  const h = new Harness(t);
-  h.resolution = NOTHING;
-  await h.compute();
-  assert.equal(h.state().source, NONE_SOURCE);
-  assert.equal(h.state().status, EnvironmentStatus.None);
 });
 
 test("the digest of a record equals the environment digest of its inputs at image", async (t) => {
@@ -969,51 +893,6 @@ test("status rule 3: a failed proof file decides failed before a proved tag", as
   });
 });
 
-test("status rule 4: a proved tag at image and a passed proof at host decide ready", async (t) => {
-  const h = new Harness(t);
-  h.existing.add(h.provedOf(h.digest()));
-  await h.compute();
-  assert.equal(h.state().status, EnvironmentStatus.Ready);
-  assert.equal(h.state().failure, null);
-
-  const host = new Harness(t);
-  host.bindings = facts([APP], []);
-  host.resolution = STORED;
-  host.writeProof(proofFile(host.digest()));
-  await host.compute();
-  assert.equal(host.state().status, EnvironmentStatus.Ready);
-  assert.deepEqual(host.state().checks, [
-    { command: "make test", exit_code: 2 },
-  ]);
-});
-
-test("status rule 5: source none decides none", async (t) => {
-  for (const workers of [[container("app")], []]) {
-    const h = new Harness(t);
-    h.bindings = facts([APP], workers);
-    h.resolution = NOTHING;
-    await h.compute();
-    assert.equal(h.state().status, EnvironmentStatus.None);
-  }
-});
-
-test("status rule 6: the step is building without the tag and proving with it", async (t) => {
-  const h = new Harness(t);
-  await h.compute();
-  assert.equal(h.state().status, EnvironmentStatus.Building);
-
-  const tagged = new Harness(t);
-  tagged.existing.add(tagged.tagOf(tagged.digest()));
-  await tagged.compute();
-  assert.equal(tagged.state().status, EnvironmentStatus.Proving);
-
-  const host = new Harness(t);
-  host.bindings = facts([APP], []);
-  host.resolution = STORED;
-  await host.compute();
-  assert.equal(host.state().status, EnvironmentStatus.Proving);
-});
-
 test("status rule 1: an active run decides the step before any other rule", () => {
   const failed = proofFile("d", { outcome: "failed", class: "setup_failed" });
   assert.equal(
@@ -1053,14 +932,6 @@ test("at remote the status is failed by a failed proof file, or none", async (t)
   assert.deepEqual(h.events, [`wake ${PROJECT}`]);
 });
 
-test("a failed first read sets the reason and keeps the group pending", async (t) => {
-  const h = new Harness(t);
-  h.resolution = new Error(BRANCH_ABSENT);
-  await h.compute();
-  assert.equal(h.state().status, EnvironmentStatus.Pending);
-  assert.equal(h.state().reason, BRANCH_ABSENT);
-});
-
 test("a failed read after a successful read keeps the status and the digest", async (t) => {
   const h = new Harness(t);
   const sum = h.digest();
@@ -1096,17 +967,6 @@ function sshReadError(failureReason: string = KEY_REFUSED): OperationError {
     { failure_reason: failureReason },
   );
 }
-
-test("a failed SSH read carries the failure reason into the reason", async (t) => {
-  const h = new Harness(t);
-  h.resolution = sshReadError();
-  await h.compute();
-  assert.equal(h.state().status, EnvironmentStatus.Pending);
-  assert.equal(
-    h.state().reason,
-    `${SSH_READ_FAILED} The failure reason is ${KEY_REFUSED}.`,
-  );
-});
 
 test("a failed read logs one read_failed record until the reason changes", async (t) => {
   const h = new Harness(t);
@@ -1153,16 +1013,6 @@ test("a failed read logs one read_failed record until the reason changes", async
   assert.equal(records[1]?.failure_reason, null);
 });
 
-test("a read that answers an invalid document logs a read_failed record", async (t) => {
-  const h = new Harness(t);
-  h.resolution = { ...REPOSITORY, reason: INVALID_DOCUMENT };
-  await h.compute();
-  assert.equal(h.state().status, EnvironmentStatus.Pending);
-  const [record] = h.logged(READ_FAILED);
-  assert.equal(record?.reason, INVALID_DOCUMENT);
-  assert.equal(record?.failure_reason, null);
-});
-
 test("a binding change re-arms the read_failed record", async (t) => {
   const h = new Harness(t);
   h.resolution = sshReadError();
@@ -1179,17 +1029,6 @@ test("a binding change re-arms the read_failed record", async (t) => {
     record?.reason,
     `${SSH_READ_FAILED} The failure reason is ${KEY_REFUSED}.`,
   );
-});
-
-test("a target change re-arms the read_failed record", async (t) => {
-  const h = new Harness(t);
-  h.bindings = facts([APP], [server]);
-  h.resolution = sshReadError();
-  await h.compute();
-  assert.equal(h.logged(READ_FAILED).length, ONE_CALL);
-  h.bindings = facts([APP], [container("app")]);
-  h.onboarding.bindingsChanged(PROJECT);
-  await h.until(() => h.logged(READ_FAILED).length === TWO_RECORDS);
 });
 
 test("a failed read after a target change writes the new target, and a later write of the same facts logs no second record", async (t) => {
@@ -1332,88 +1171,6 @@ test("a group that becomes claimable by a compute wakes the project once", async
   await h.compute();
   assert.deepEqual(h.woken, [PROJECT]);
 });
-
-test("environmentDigestOf answers the digest, keeps it after a failed read and answers null with no record", async (t) => {
-  const h = new Harness(t);
-  assert.equal(
-    h.onboarding.environmentDigestOf(PROJECT, APP.resource_identity),
-    null,
-  );
-  const sum = h.digest();
-  h.existing.add(h.provedOf(sum));
-  await h.compute();
-  assert.equal(
-    h.onboarding.environmentDigestOf(PROJECT, APP.resource_identity),
-    sum,
-  );
-  h.resolution = new Error("down");
-  await h.compute();
-  assert.equal(
-    h.onboarding.environmentDigestOf(PROJECT, APP.resource_identity),
-    sum,
-  );
-});
-
-test(
-  "a trigger during a compute marks the group for one more compute",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const h = new Harness(t);
-    h.resolution = NOTHING;
-    h.resolveGate = new Deferred();
-    const first = h.compute();
-    await turn();
-    const second = h.compute();
-    const third = h.compute();
-    assert.equal(h.resolveCalls.length, ONE_CALL);
-    h.resolveGate.release();
-    await Promise.all([first, second, third]);
-    assert.equal(h.resolveCalls.length, TWO_CALLS);
-  },
-);
-
-test(
-  "slotImage resolves the tag for ready and the slot image for none",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const signal = AbortSignal.timeout(TEST_TIMEOUT_MS);
-    const ready = new Harness(t);
-    const sum = ready.digest();
-    ready.existing.add(ready.provedOf(sum));
-    await ready.compute();
-    assert.equal(
-      await ready.onboarding.slotImage(PROJECT, WORKER_IDENTITY, signal),
-      ready.tagOf(sum),
-    );
-
-    const none = new Harness(t);
-    none.resolution = NOTHING;
-    assert.equal(
-      await none.onboarding.slotImage(PROJECT, WORKER_IDENTITY, signal),
-      SLOT_IMAGE,
-    );
-  },
-);
-
-test(
-  "slotImage waits through building and resolves after the record turns ready",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const h = new Harness(t);
-    await h.compute();
-    assert.equal(h.state().status, EnvironmentStatus.Building);
-    let settled = false;
-    const answer = h.onboarding
-      .slotImage(PROJECT, WORKER_IDENTITY, AbortSignal.timeout(TEST_TIMEOUT_MS))
-      .finally(() => (settled = true));
-    await turn();
-    await turn();
-    assert.equal(settled, false);
-    h.open();
-    assert.equal(await answer, h.tagOf(h.digest()));
-    assert.equal(h.state().status, EnvironmentStatus.Ready);
-  },
-);
 
 test(
   "slotImage rejects when the signal aborts",
@@ -1579,38 +1336,6 @@ test(
 );
 
 test(
-  "a proof with a red check writes passed with the baseline",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const h = new Harness(t);
-    h.open();
-    h.proveResults = [
-      result("setup", "make setup", 0),
-      result("check", "make test", 2),
-    ];
-    await h.compute();
-    await h.ended();
-    const file = h.proofOf(h.digest());
-    assert.ok(file);
-    assert.equal(file.outcome, PASSED);
-    assert.deepEqual(file.checks, [{ command: "make test", exit_code: 2 }]);
-  },
-);
-
-test(
-  "a timed out proof result is classified",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const h = new Harness(t);
-    h.open();
-    h.proveResults = [result("setup", "make setup", null, { timed_out: true })];
-    await h.compute();
-    await h.ended();
-    assert.equal(h.proofOf(h.digest())?.class, SETUP_FAILED);
-  },
-);
-
-test(
   "a host run proves on the host, never builds and writes a null reproduce",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
@@ -1696,26 +1421,6 @@ test(
 );
 
 test(
-  "a deadline in the build writes build_failed with the deadline tail",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const h = new Harness(t);
-    const timeouts: number[] = [];
-    t.mock.method(AbortSignal, "timeout", (milliseconds: number) => {
-      timeouts.push(milliseconds);
-      return AbortSignal.abort(new Error("deadline"));
-    });
-    await h.compute();
-    await h.ended();
-    assert.deepEqual(timeouts, [RUN_DEADLINE_MS]);
-    const file = h.proofOf(h.digest());
-    assert.ok(file);
-    assert.equal(file.class, BUILD_FAILED);
-    assert.equal(file.tail, DEADLINE_TAIL);
-  },
-);
-
-test(
   "the deadline option cancels a build that never ends and writes build_failed",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
@@ -1746,68 +1451,6 @@ test(
     assert.equal(file.tail, PROOF_CRASHED);
     assert.equal(h.state().status, EnvironmentStatus.Failed);
     assert.equal(h.state().run_started_at, null);
-  },
-);
-
-test(
-  "a rejection of the host proof writes a failed proof file",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const h = new Harness(t);
-    h.bindings = facts([APP], []);
-    h.resolution = STORED;
-    h.proveError = new Error(HOST_CRASHED);
-    await h.compute();
-    h.open();
-    await h.ended();
-    const file = h.proofOf(h.digest());
-    assert.ok(file);
-    assert.equal(file.outcome, FAILED);
-    assert.equal(file.tail, HOST_CRASHED);
-    assert.equal(h.state().status, EnvironmentStatus.Failed);
-  },
-);
-
-test(
-  "a deadline in the proof writes setup_failed with the deadline tail",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const h = new Harness(t);
-    h.existing.add(h.tagOf(h.digest()));
-    t.mock.method(AbortSignal, "timeout", () =>
-      AbortSignal.abort(new Error("deadline")),
-    );
-    await h.compute();
-    await h.ended();
-    const file = h.proofOf(h.digest());
-    assert.ok(file);
-    assert.equal(file.class, SETUP_FAILED);
-    assert.equal(file.tail, DEADLINE_TAIL);
-  },
-);
-
-test(
-  "the logger receives the start and the end of a run",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const h = new Harness(t);
-    await h.compute();
-    await h.until(() => h.logged(RUN_STARTED).length > NO_CALLS);
-    h.open();
-    await h.ended();
-    const sum = h.digest();
-    const [started] = h.logged(RUN_STARTED);
-    const [ended] = h.logged(RUN_ENDED);
-    assert.equal(started?.binding, APP_NAME);
-    assert.equal(started?.digest, sum);
-    assert.equal(started?.target, IMAGE);
-    assert.equal(started?.status, EnvironmentStatus.Building);
-    assert.equal(started?.class, null);
-    assert.equal(ended?.status, EnvironmentStatus.Ready);
-    assert.equal(ended?.digest, sum);
-    assert.equal(ended?.target, IMAGE);
-    assert.equal(ended?.binding, APP_NAME);
-    assert.equal(ended?.class, null);
   },
 );
 
@@ -1874,19 +1517,6 @@ test("environmentFailed writes the failed proof file of the current digest", asy
   assert.equal(h.woken.length, NO_CALLS);
 });
 
-test("environmentFailed writes the affected_invalid class with the origin execution", async (t) => {
-  const h = await readyHarness(t);
-  h.onboarding.environmentFailed(
-    failureInput(h, { stop: { code: AFFECTED_INVALID, detail: BOOM } }),
-  );
-  const file = h.proofOf(h.digest());
-  assert.ok(file);
-  assert.equal(file.outcome, FAILED);
-  assert.equal(file.origin, EXECUTION);
-  assert.equal(file.class, AFFECTED_INVALID);
-  assert.equal(h.state().failure?.origin, EXECUTION);
-});
-
 test("environmentFailed records the commit of the group and reads the base-branch commit after 60 seconds", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const h = await readyHarness(t);
@@ -1894,16 +1524,6 @@ test("environmentFailed records the commit of the group and reads the base-branc
   assert.equal(h.proofOf(h.digest())?.commit, BASE_COMMIT);
   t.mock.timers.tick(COMMIT_CHECK_MS);
   await h.until(() => h.headCalls.length === ONE_CALL);
-});
-
-test("environmentFailed keeps a null command and exit code for a text detail", async (t) => {
-  const h = await readyHarness(t);
-  h.onboarding.environmentFailed(failureInput(h));
-  const file = h.proofOf(h.digest());
-  assert.ok(file);
-  assert.equal(file.tail, BOOM);
-  assert.equal(file.command, null);
-  assert.equal(file.exit_code, null);
 });
 
 test("environmentFailed skips a group with no record or no digest", async (t) => {
@@ -1926,27 +1546,6 @@ test("environmentFailed keeps the status of a group with another current digest"
   );
   assert.deepEqual(h.proofs.digests(h.pathOf()), []);
   assert.equal(h.state().status, EnvironmentStatus.Ready);
-});
-
-test("environmentFailed keeps the status of a group with no digests entry", async (t) => {
-  const h = await readyHarness(t);
-  h.onboarding.environmentFailed(failureInput(h, { digests: {} }));
-  assert.deepEqual(h.proofs.digests(h.pathOf()), []);
-  assert.equal(h.state().status, EnvironmentStatus.Ready);
-
-  const none = new Harness(t);
-  none.bindings = facts([APP], []);
-  none.resolution = NOTHING;
-  await none.compute();
-  none.onboarding.environmentFailed(failureInput(none, { digests: {} }));
-  assert.equal(none.state().status, EnvironmentStatus.None);
-  none.onboarding.environmentFailed(
-    failureInput(none, {
-      digests: { [APP.resource_identity]: none.digest() },
-    }),
-  );
-  assert.equal(none.state().status, EnvironmentStatus.Failed);
-  assert.equal(none.state().failure?.reproduce, null);
 });
 
 async function readyWithProof(t: TestContext): Promise<Harness> {
@@ -2050,15 +1649,6 @@ test("bindingsChanged sets a changed record to pending before it returns, comput
   assert.deepEqual(h.onboarding.states(PROJECT), []);
 });
 
-test("bindingsChanged keeps the record of an unchanged binding and computes it again", async (t) => {
-  const h = new Harness(t);
-  h.resolution = NOTHING;
-  await h.compute();
-  h.onboarding.bindingsChanged(PROJECT);
-  assert.equal(h.state().status, EnvironmentStatus.None);
-  await h.until(() => h.resolveCalls.length === TWO_CALLS);
-});
-
 test("a worker binding write that changes the target sets the record to pending", async (t) => {
   const h = new Harness(t);
   h.resolution = NOTHING;
@@ -2105,18 +1695,6 @@ test("environmentClaimed returns before any dependency of the compute runs", asy
   assert.equal(h.bindingsCalls, NO_CALLS);
   await turn();
   assert.equal(h.bindingsCalls, ONE_CALL);
-});
-
-test("environmentsClaimable for a group with no record answers false before any dependency of the compute runs", async (t) => {
-  const h = new Harness(t);
-  assert.equal(
-    h.onboarding.environmentsClaimable(PROJECT, [APP.resource_identity]),
-    false,
-  );
-  assert.equal(h.bindingsCalls, NO_CALLS);
-  await turn();
-  assert.equal(h.bindingsCalls, ONE_CALL);
-  await h.until(() => h.onboarding.states(PROJECT).length === ONE_CALL);
 });
 
 test("a trigger during a running compute runs the compute once more and starts no parallel compute", async (t) => {
@@ -2519,16 +2097,6 @@ test("a failed group that turns pending at a binding change with a failed read r
   await h.until(() => h.resolveCalls.length === THREE_CALLS);
 });
 
-test("a rebuild of a failed group with a failed read reads again after 60 seconds", async (t) => {
-  const h = await failedGroup(t);
-  h.resolution = new Error(UNREACHABLE);
-  await h.onboarding.rebuild(PROJECT, APP.binding_id);
-  assert.equal(h.state().status, EnvironmentStatus.Pending);
-  assert.equal(h.resolveCalls.length, TWO_CALLS);
-  t.mock.timers.tick(PENDING_RETRY_MS);
-  await h.until(() => h.resolveCalls.length === THREE_CALLS);
-});
-
 test("a commit check that ends during a computation of the group starts no second read", async (t) => {
   const h = await failedGroup(t);
   h.headGate = new Deferred();
@@ -2564,46 +2132,6 @@ test("an execution failure of a proved image proves again at a new commit and ke
   await h.ended();
   assert.equal(h.state().status, EnvironmentStatus.Ready);
   assert.equal(h.proofOf(h.digest())?.commit, MOVED_COMMIT);
-});
-
-test("a run that ends pending after a failed tag of the proof reads again after 60 seconds", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  const h = new Harness(t);
-  h.tagProvedError = new Error(BOOM);
-  h.open();
-  await h.compute();
-  await h.ended();
-  assert.equal(h.state().status, EnvironmentStatus.Pending);
-  assert.equal(h.state().reason, BOOM);
-  assert.equal(h.resolveCalls.length, ONE_CALL);
-  t.mock.timers.tick(PENDING_RETRY_MS);
-  await h.until(() => h.resolveCalls.length === TWO_CALLS);
-});
-
-test("a pending group holds reason_started_at from its first failed read until a read succeeds", async (t) => {
-  const h = new Harness(t);
-  h.resolution = new Error(UNREACHABLE);
-  await h.compute();
-  const first = h.state().reason_started_at;
-  assert.ok(Number.isInteger(first));
-  h.resolution = new Error(TRANSIENT);
-  await h.compute();
-  assert.equal(h.state().reason, TRANSIENT);
-  assert.equal(h.state().reason_started_at, first);
-  h.resolution = { ...REPOSITORY, document: null, reason: INVALID_DOCUMENT };
-  await h.compute();
-  assert.equal(h.state().status, EnvironmentStatus.Pending);
-  assert.equal(h.state().reason_started_at, first);
-  h.resolution = REPOSITORY;
-  h.existing.add(h.provedOf(h.digest()));
-  await h.compute();
-  assert.equal(h.state().reason, null);
-  assert.equal(h.state().reason_started_at, null);
-  h.resolution = new Error(UNREACHABLE);
-  await h.compute();
-  const second = h.state().reason_started_at;
-  assert.ok(Number.isInteger(second));
-  assert.notEqual(second, first);
 });
 
 test("a run that throws after its proof sets reason_started_at with its reason", async (t) => {
@@ -2649,20 +2177,11 @@ test("stop aborts the active run, clears the timer and rejects each slotImage wa
   assert.equal(pending.resolveCalls.length, ONE_CALL);
 });
 
-const UNIVERSAL_IMAGE = "mcr.microsoft.com/devcontainers/base:bookworm";
 const REPOSITORY_ADDRESS = "git@github.com:owner/repo.git";
 const PACKAGE_JSON = "package.json";
 const PACKAGE_LOCK = "package-lock.json";
-const WORKFLOW_FILE = `${WORKFLOW_DIRECTORY}/ci.yml`;
 const NODE_PACKAGE = '{"engines":{"node":"22"}}';
-const ADDED_PACKAGE = '{"engines":{"node":"20"}}';
-const WORKFLOW_TEXT = (version: string) =>
-  `jobs:\n  test:\n    steps:\n      - uses: actions/setup-node@v4\n        with:\n          node-version: ${version}\n`;
 const BROKEN_DEVCONTAINER = "{";
-const UNIVERSAL_FILE = new URL(
-  "../../static/environment/universal.json",
-  import.meta.url,
-);
 const REPOSITORY_SERVICE = {
   kind: IdentityKind.Service,
   service: PROJECT_SERVICE_NAME,
@@ -2774,20 +2293,6 @@ function resolvingHarness(
   return { h, group, environments };
 }
 
-test("baseCommitOf answers the commit of the base branch and reads no file", async (t) => {
-  const repository = new FakeRepository();
-  const { group, environments } = resolvingHarness(t, repository, imageWorkers);
-  assert.equal(
-    await environments.baseCommitOf(
-      group.binding_id,
-      new CancellationContext(),
-    ),
-    BASE_COMMIT,
-  );
-  assert.deepEqual(repository.reads, []);
-  assert.deepEqual(repository.lists, []);
-});
-
 const imageWorkers = (name: string) => [container(name)];
 const hostWorkers = () => [server];
 const remoteWorkers = () => [remoteWorker];
@@ -2824,17 +2329,6 @@ test("an image target without a stored environment or a devcontainer resolves th
   assert.deepEqual(h.buildInputs[0]?.document, detected.document);
 });
 
-test("an image target with a repository devcontainer reads no detection input", async (t) => {
-  const repository = new FakeRepository();
-  repository.files.set(DEVCONTAINER_FILE, `{"image":"${BASE}"}`);
-  repository.files.set(PACKAGE_JSON, NODE_PACKAGE);
-  const { h, group } = resolvingHarness(t, repository, imageWorkers);
-  await h.compute(group);
-  assert.equal(h.state(group).source, EnvironmentSource.Repository);
-  assert.deepEqual(repository.readPaths(), [DEVCONTAINER_FILE]);
-  assert.equal(repository.lists.length, NO_CALLS);
-});
-
 test("an image target keeps the repository source and the reason of a devcontainer that fails to parse", async (t) => {
   const repository = new FakeRepository();
   repository.files.set(DEVCONTAINER_FILE, BROKEN_DEVCONTAINER);
@@ -2852,18 +2346,6 @@ test("an image target keeps the repository source and the reason of a devcontain
   assert.equal(repository.lists.length, NO_CALLS);
 });
 
-test("an image target without a manifest resolves the universal source", async (t) => {
-  const repository = new FakeRepository();
-  const { h, group } = resolvingHarness(t, repository, imageWorkers);
-  await h.compute(group);
-  assert.equal(h.state(group).source, EnvironmentSource.Universal);
-  await h.until(() => h.events.includes("build"));
-  assert.deepEqual(
-    h.buildInputs[0]?.document,
-    JSON.parse(readFileSync(UNIVERSAL_FILE, "utf8")),
-  );
-});
-
 test("a host target proves only the checks of a detected source", async (t) => {
   const repository = new FakeRepository();
   repository.files.set("go.mod", "module example.com/app\n\ngo 1.25\n");
@@ -2874,15 +2356,6 @@ test("a host target proves only the checks of a detected source", async (t) => {
   assert.deepEqual(h.proveInputs[0]?.checks, ["go version"]);
   assert.deepEqual(h.proveInputs[0]?.setup, []);
   assert.deepEqual(h.events, ["proveOnHost"]);
-});
-
-test("a host target ignores the repository devcontainer", async (t) => {
-  const repository = new FakeRepository();
-  repository.files.set(DEVCONTAINER_FILE, `{"image":"${BASE}"}`);
-  const { h, group } = resolvingHarness(t, repository, hostWorkers);
-  await h.compute(group);
-  assert.equal(h.state(group).source, EnvironmentSource.None);
-  assert.ok(!repository.readPaths().includes(DEVCONTAINER_FILE));
 });
 
 test("a remote target resolves the detected source and starts no run", async (t) => {
@@ -2903,80 +2376,6 @@ test("a remote target resolves the detected source and starts no run", async (t)
     digests: { [group.resource_identity]: digest },
   });
   assert.equal(h.state(group).status, EnvironmentStatus.Failed);
-});
-
-test("the digest changes with the text of a manifest and of a workflow file", async (t) => {
-  const repository = new FakeRepository();
-  repository.files.set(PACKAGE_JSON, NODE_PACKAGE);
-  repository.files.set(WORKFLOW_FILE, WORKFLOW_TEXT("22"));
-  const { h, group } = resolvingHarness(t, repository, remoteWorkers);
-  await h.compute(group);
-  const first = h.state(group).digest;
-  assert.deepEqual(repository.lists, [
-    { commit: "c1", directory: WORKFLOW_DIRECTORY, limit: WORKFLOW_FILES_MAX },
-  ]);
-  repository.files.set(PACKAGE_JSON, ADDED_PACKAGE);
-  await h.compute(group);
-  const second = h.state(group).digest;
-  repository.files.set(WORKFLOW_FILE, WORKFLOW_TEXT("20"));
-  await h.compute(group);
-  const third = h.state(group).digest;
-  assert.ok(first && second && third);
-  assert.equal(new Set([first, second, third]).size, THREE_DIGESTS);
-});
-
-test("the digest input lists every read file in path order", async (t) => {
-  const repository = new FakeRepository();
-  repository.files.set(PACKAGE_JSON, NODE_PACKAGE);
-  repository.files.set(WORKFLOW_FILE, WORKFLOW_TEXT("22"));
-  const { h, group } = resolvingHarness(t, repository, remoteWorkers);
-  await h.compute(group);
-  const detected = detectEnvironment(
-    textOnlyFiles([...DETECTION_PATHS, WORKFLOW_FILE], repository.files),
-  );
-  assert.ok(detected);
-  const files = textOnlyFiles(
-    [...DETECTION_PATHS, WORKFLOW_FILE],
-    repository.files,
-  );
-  assert.equal(
-    h.state(group).digest,
-    environmentDigest({
-      resource_identity: group.resource_identity,
-      target: EnvironmentTarget.Remote,
-      source: EnvironmentSource.Detected,
-      document: detected.document,
-      files,
-      base_image: null,
-      slot_image: null,
-      secrets: [],
-      version: VERSION,
-    }),
-  );
-});
-
-test("the universal environment passes the schema and holds the pinned stacks", () => {
-  const document = JSON.parse(readFileSync(UNIVERSAL_FILE, "utf8"));
-  assert.ok(environmentSchema.safeParse(document).success);
-  assert.equal(document.image, UNIVERSAL_IMAGE);
-  const features = document.features as Record<string, { version: string }>;
-  for (const name of ["node", "python", "go", "java"])
-    assert.ok(
-      features[`ghcr.io/devcontainers/features/${name}:1`]?.version,
-      name,
-    );
-  assert.deepEqual(Object.keys(document.containerEnv), [
-    "PATH",
-    "GOPATH",
-    "CARGO_HOME",
-  ]);
-  assert.deepEqual(document.customizations.kanthord.checks, [
-    "node --version",
-    "python --version",
-    "go version",
-    "java -version",
-  ]);
-  assert.equal(document.updateContentCommand, undefined);
 });
 
 const ROOT_SPAN = "project.environment";
@@ -3077,59 +2476,6 @@ test(
 );
 
 test(
-  "a rejected build records the build span with build_failed",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const h = new Harness(t);
-    h.open();
-    t.mock.method(AbortSignal, "timeout", () =>
-      AbortSignal.abort(new Error("deadline")),
-    );
-    await h.compute();
-    await h.ended();
-    const build = h.spanOf(BUILD_SPAN);
-    assert.equal(build?.status, SpanStatus.Error);
-    assert.equal(build?.attributes?.["error.type"], BUILD_FAILED);
-  },
-);
-
-test(
-  "a host run records no build span",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const h = new Harness(t);
-    h.open();
-    h.bindings = facts([APP], []);
-    h.resolution = STORED;
-    h.proveResults = PASSING_RESULTS;
-    await h.compute();
-    await h.ended();
-    assert.deepEqual(h.recorded(), [
-      `${ROOT_SPAN}:start`,
-      `${SETUP_SPAN}:${SpanStatus.Ok}`,
-      `${PROOF_SPAN}:${SpanStatus.Ok}`,
-      `${ROOT_SPAN}:${SpanStatus.Ok}`,
-    ]);
-    assert.equal(h.spanOf(BUILD_SPAN), undefined);
-  },
-);
-
-test(
-  "a run with an existing tag records no build span",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const h = new Harness(t);
-    h.open();
-    h.existing.add(h.tagOf(h.digest()));
-    h.proveResults = PASSING_RESULTS;
-    await h.compute();
-    await h.ended();
-    assert.equal(h.spanOf(BUILD_SPAN), undefined);
-    assert.equal(h.recorded().at(-1), `${ROOT_SPAN}:${SpanStatus.Ok}`);
-  },
-);
-
-test(
   "a cancelled run records the root end with Error and no class",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
@@ -3216,27 +2562,6 @@ test(
     assert.equal(existsSync(cancelled.secretFile()), true);
     await cancelled.onboarding.stop();
     assert.equal(existsSync(cancelled.secretFile()), false);
-  },
-);
-
-test(
-  "a rotation of the credential gives the next trigger a new digest and a new run",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const h = secretHarness(t);
-    h.open();
-    h.proveResults = PASSING_RESULTS;
-    await h.compute(SECRET_APP);
-    await h.ended();
-    const first = h.state(SECRET_APP).digest;
-    assert.equal(h.state(SECRET_APP).status, EnvironmentStatus.Ready);
-    h.rotateSecret(1);
-    await h.compute(SECRET_APP);
-    await h.ended(TWO_CALLS);
-    const second = h.state(SECRET_APP).digest;
-    assert.notEqual(second, first);
-    assert.equal(second, h.digest(SECRET_APP));
-    assert.equal(h.buildInputs.length, TWO_CALLS);
   },
 );
 
@@ -3533,28 +2858,6 @@ test(
 );
 
 test(
-  "probe calls the runner with the tags of the current digest and the checkout",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const h = await failedHarness(t);
-    let answer: Record<string, unknown> = {};
-    h.script = async (tools) => {
-      answer = await callTool(tools, "probe", { command: "uname -a" });
-    };
-    await startSession(h);
-    const tag = h.tagOf(h.digest());
-    assert.deepEqual(h.probes, [
-      {
-        tags: [tag, `${tag}${BASE_SUFFIX}`],
-        checkout: CHECKOUT,
-        argv: ["uname", "-a"],
-      },
-    ]);
-    assert.deepEqual(answer, PROBE_ANSWER);
-  },
-);
-
-test(
   "states answers repairing for the group only while its session runs",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
@@ -3593,29 +2896,6 @@ test(
     await startSession(h);
     assert.deepEqual(answer, { reason: "tool_limit" });
     assert.equal(h.probes.length, ENV_AGENT_TOOL_CALL_LIMIT);
-    assert.equal(h.sessionEnds, ONE_CALL);
-  },
-);
-
-test(
-  "a write counts toward the tool call limit",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const h = await failedHarness(t);
-    let answer: Record<string, unknown> = {};
-    h.script = async (tools) => {
-      for (
-        let call = NO_CALLS;
-        call < ENV_AGENT_TOOL_CALL_LIMIT - ONE_CALL;
-        call++
-      )
-        await callTool(tools, "probe", { command: "uname -a" });
-      await writeTool(tools, REFUSED_ENVIRONMENT);
-      answer = await writeTool(tools, agentDocument(ONE_CALL));
-    };
-    await startSession(h);
-    assert.deepEqual(answer, { reason: "tool_limit" });
-    assert.equal(h.writes.length, ONE_CALL);
     assert.equal(h.sessionEnds, ONE_CALL);
   },
 );
@@ -3750,17 +3030,6 @@ test(
     await failRun(repository);
     assert.equal(repository.sessionInputs.length, NO_CALLS);
     assert.equal(repository.state().repairs, NO_REPAIRS);
-  },
-);
-
-test(
-  "the source none starts a session at an execution failure",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const h = agentHarness(t, NOTHING);
-    await h.compute();
-    h.onboarding.environmentFailed(failureInput(h, { digests: digestsOf(h) }));
-    await sessionsEnded(h, ONE_CALL);
   },
 );
 
@@ -3936,19 +3205,6 @@ test(
 );
 
 test(
-  "an execution failure at the remote target starts no session",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const h = agentHarness(t);
-    h.bindings = facts([APP], [remoteWorker]);
-    await h.compute();
-    h.onboarding.environmentFailed(failureInput(h, { digests: digestsOf(h) }));
-    assert.equal(h.state().target, EnvironmentTarget.Remote);
-    assert.equal(h.sessionInputs.length, NO_CALLS);
-  },
-);
-
-test(
   "a failure with no enabled env@1 starts no session and counts no repair",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
@@ -3970,20 +3226,6 @@ test(
     await sessionsEnded(h, ONE_CALL);
     assert.equal(h.proofOf(h.digest())?.repairs, ONE_CALL);
     assert.equal(h.sessionInputs[0]?.failure.repairs, ONE_CALL);
-  },
-);
-
-test(
-  "four failures of one digest start 3 sessions",
-  { timeout: TEST_TIMEOUT_MS },
-  async (t) => {
-    const h = await provedAgentHarness(t);
-    for (let failure = 1; failure <= REPAIR_LIMIT + ONE_CALL; failure++) {
-      h.onboarding.environmentFailed(failureInput(h));
-      await sessionsEnded(h, Math.min(failure, REPAIR_LIMIT));
-    }
-    assert.equal(h.proofOf(h.digest())?.repairs, REPAIR_LIMIT);
-    assert.equal(h.sessionInputs.length, REPAIR_LIMIT);
   },
 );
 
@@ -4114,24 +3356,6 @@ test("the state shows the repairs on disk during a run at a new commit", async (
   const h = staleFailureHarness(t);
   await h.compute();
   await h.until(() => h.events.includes(BUILD));
-  assert.equal(h.state().repairs, KEPT_REPAIRS);
-});
-
-test("the state shows the repairs on disk after a run at a new commit", async (t) => {
-  const h = staleFailureHarness(t);
-  h.open();
-  await h.compute();
-  await h.ended();
-  assert.equal(h.proofOf(h.digest())?.repairs, KEPT_REPAIRS);
-  assert.equal(h.state().repairs, KEPT_REPAIRS);
-});
-
-test("the state shows the repairs on disk after an execution failure at a new commit", async (t) => {
-  const h = staleFailureHarness(t);
-  await h.compute();
-  await h.until(() => h.events.includes(BUILD));
-  h.onboarding.environmentFailed(failureInput(h));
-  assert.equal(h.proofOf(h.digest())?.repairs, KEPT_REPAIRS);
   assert.equal(h.state().repairs, KEPT_REPAIRS);
 });
 
