@@ -52,7 +52,7 @@ Each is `unary`, has `mutation: false` and a default timeout of 30 s.
 
 ## Catalog and enablement commands
 
-The catalog holds `swe@1`, `re@1` and `pe@1`.
+The catalog holds `swe@1`, `re@1`, `pe@1` and `ops@1`.
 `pe@1` has no worker. Its enablement takes a credential with the holder `server`.
 The Onboarding component of the Project Service runs `pe@1`.
 

@@ -164,6 +164,8 @@ components:
                           type: string
                         pe@1:
                           type: string
+                        ops@1:
+                          type: string
                       additionalProperties: false
                   additionalProperties: false
                 environment:

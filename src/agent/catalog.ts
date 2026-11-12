@@ -6,6 +6,7 @@ import {
 } from "../worker/contract.ts";
 import type { AgentName } from "./contract.ts";
 import {
+  OPS_AGENT_PROMPT,
   PE_AGENT_PROMPT,
   RE_AGENT_PROMPT,
   SWE_AGENT_PROMPT,
@@ -66,6 +67,45 @@ const NODE_REVIEW_READS = [
   "mission.assessment.list",
   "mission.evidence.list",
   "mission.evidence.get",
+] as const;
+
+const OPS_OPERATIONS = [
+  "gateway.healthcheck",
+  "project.list",
+  "mission.get",
+  "mission.node.list",
+  "mission.node.get",
+  "mission.assessment.list",
+  "mission.proposal.list",
+  "mission.externalAction.list",
+  "mission.evidence.list",
+  "scheduler.execution.list",
+  "scheduler.queue.list",
+  "worker.instance.list",
+  "agent.cooldown.list",
+  "workbench.session.list",
+  "mission.export",
+  "mission.import.preview",
+  "worker.catalog.list",
+  "project.binding.list",
+  "project.agentConfiguration.list",
+  "llm.credential.list",
+  "mission.node.pause",
+  "mission.node.resume",
+  "mission.node.check",
+  "mission.node.priority.set",
+  "mission.dependency.add",
+  "mission.dependency.remove",
+  "project.pause",
+  "project.resume",
+  "agent.cooldown.clear",
+  "mission.node.unblock",
+  "mission.node.block",
+  "mission.node.create",
+  "mission.node.update",
+  "mission.proposal.decide",
+  "mission.criterion.set",
+  "mission.import.apply",
 ] as const;
 
 export const AGENT_DECLARATIONS: Readonly<Record<AgentName, AgentDeclaration>> =
@@ -130,6 +170,22 @@ export const AGENT_DECLARATIONS: Readonly<Record<AgentName, AgentDeclaration>> =
         operation: [],
       },
       overridable_fields: [],
+    },
+    "ops@1": {
+      agent_name: "ops@1",
+      display_name: "Yumi",
+      agent_prompt: OPS_AGENT_PROMPT,
+      tools: {
+        builtin: [],
+        host: [],
+        operation: OPS_OPERATIONS,
+      },
+      overridable_fields: [
+        "agent_provider",
+        "model_identifier",
+        "reasoning_effort",
+        "fallback_configurations",
+      ],
     },
   };
 

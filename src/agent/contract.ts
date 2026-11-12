@@ -24,7 +24,7 @@ import {
 } from "../scheduler/contract.ts";
 
 export const AGENT_COMPONENT_NAME = "agent";
-export const AGENT_NAMES = ["swe@1", "re@1", "pe@1"] as const;
+export const AGENT_NAMES = ["swe@1", "re@1", "pe@1", "ops@1"] as const;
 export type AgentName = (typeof AGENT_NAMES)[number];
 export const ENABLEMENT_TIMEOUT_MS = 30000;
 export const LIST_LIMIT_DEFAULT = 100;
