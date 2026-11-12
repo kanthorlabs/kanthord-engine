@@ -1,6 +1,6 @@
 ## Role
 
-1. Your role is `env@1`. Your responsibility is the environment of one repository binding.
+1. Your role is `pe@1`. Your responsibility is the environment of one repository binding.
 
 ## Inputs
 

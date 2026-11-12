@@ -73,7 +73,7 @@ const OVERRIDE_TEXT = "Write the smallest complete change.";
 const INVALID_OVERRIDE_TEXT = "bell\u0007";
 const AGENT = "swe@1";
 const OTHER_AGENT = "re@1";
-const ENV_AGENT = "env@1";
+const PE_AGENT = "pe@1";
 const WORKER = "coder@1";
 const MODEL = "claude-sonnet-4-5";
 const MISSING_MODEL = "claude-3-5-sonnet-20241022";
@@ -281,7 +281,7 @@ test("agent read answers the shipped parts, the workbench part of a workbench ag
   const final = await read(AGENT, { view: "final" });
   assert.equal(final.prompt.parts, undefined);
   assert.equal(final.prompt.final, answer.prompt.final);
-  const env = await read(ENV_AGENT);
+  const env = await read(PE_AGENT);
   assert.deepEqual(
     env.prompt.parts!.map(({ part }) => part),
     [PromptPart.Standard, PromptPart.Role, PromptPart.Framing],
@@ -3072,18 +3072,18 @@ test("a view without a claimant shows the hold with the latest available_at over
   assert.equal(cooldownOf(SERVER_SCOPE), null);
 });
 
-test("env@1 enablement takes a credential with the holder server", (t) => {
+test("pe@1 enablement takes a credential with the holder server", (t) => {
   const f = enablementFixture(t, {
     copyHeld: (_tx, _credential, holder) => holder === SERVER_HOLDER,
   });
-  const params = { agent_name: ENV_AGENT };
+  const params = { agent_name: PE_AGENT };
   const put = f.invoke("enablement.put", putBody, params);
-  assert.equal(put.agent_name, ENV_AGENT);
+  assert.equal(put.agent_name, PE_AGENT);
   const view = (agentName: string) =>
     f.store.transaction((tx) =>
       f.agent.agentView(tx, agentName, null, SERVER_SCOPE),
     );
-  assert.equal(view(ENV_AGENT)?.valid, true);
+  assert.equal(view(PE_AGENT)?.valid, true);
   assert.deepEqual(view(AGENT)?.issues, [
     { path: [], code: AgentErrorCode.Unavailable },
   ]);

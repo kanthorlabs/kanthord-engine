@@ -52,9 +52,9 @@ Each is `unary`, has `mutation: false` and a default timeout of 30 s.
 
 ## Catalog and enablement commands
 
-The catalog holds `swe@1`, `re@1` and `env@1`.
-`env@1` has no worker. Its enablement takes a credential with the holder `server`.
-The Onboarding component of the Project Service runs `env@1`.
+The catalog holds `swe@1`, `re@1` and `pe@1`.
+`pe@1` has no worker. Its enablement takes a credential with the holder `server`.
+The Onboarding component of the Project Service runs `pe@1`.
 
 ### `list`
 
@@ -87,12 +87,12 @@ Required token: human JWT. Absent body. HTTP `200` returns
 With `--project` and `--binding-id`, `final` is the worker system prompt with the parts of that binding before the framing. The read takes the instruction file at the current head of the base branch, as the next attempt takes it.
 With `--node`, `final` is the worker system prompt with the parts of each repository binding of the node revision that the attempt pins. The read takes the instruction file at the commit that the attempt pins, and at the current base head for an attempt with no pin.
 The read takes every instruction file in parallel under one 20 s deadline. A failed read is a part state, and the read answers `200`. `--attempt` without `--node`, and `--node` with `--project` or `--binding-id`, answer `400 gateway.request.validation_failed`.
-Without `--project`, `--binding-id` and `--node`, a workbench agent answers the Workbench system prompt, and `env@1` answers the worker system prompt.
+Without `--project`, `--binding-id` and `--node`, a workbench agent answers the Workbench system prompt, and `pe@1` answers the worker system prompt.
 
 | Result field           | Type and meaning                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `configuration_schema` | JSON Schema draft 2020-12 object describing the effective configuration: every allowed field, its type, requiredness and enumeration. Its `description` states the whole-configuration constraint that the Agent component checks; JSON Schema validates no cross-field lookup.                                                                                                                                               |
-| `overridable_fields`   | Array of field paths allowed in a Project override; no wildcard permission to add fields. For `swe@1` and `re@1` it is `["agent_provider", "model_identifier", "reasoning_effort"]`. For `env@1` it is `[]`.                                                                                                                                                                                                                  |
+| `overridable_fields`   | Array of field paths allowed in a Project override; no wildcard permission to add fields. For `swe@1` and `re@1` it is `["agent_provider", "model_identifier", "reasoning_effort"]`. For `pe@1` it is `[]`.                                                                                                                                                                                                                  |
 | `enablement`           | The [agent enablement record](#agent-enablement-record), or `null` when no record exists.                                                                                                                                                                                                                                                                                                                                     |
 | `prompt`               | Required object `{ parts, final }`. The [prompt answer](#the-prompt-answer) below defines both fields.                                                                                                                                                                                                                                                                                                                        |
 | `tools`                | Array of permitted tool declarations; each item has `name: string`, `source` (one of `builtin`, `kanthord-mcp`, `host`) and `input_schema: object`. Project-added tools are inspected through Project configuration instead.                                                                                                                                                                                                  |
@@ -171,8 +171,8 @@ With `--view final`, `parts` is absent.
 
 An override file that is not a regular UTF-8 file, exceeds 32768 bytes or holds a control character answers `409 agent.prompt.template_invalid`.
 The details are `{ file, path, reason }`. `file` names the file, for example `swe@1.md`.
-The same refusal applies to the execution setup, the Workbench session open and the `env@1` run. No reader falls back to the shipped text.
-For `env@1`, the refusal ends the session, and the server logs `project.onboarding.session_failed`. No client receives a 409 there.
+The same refusal applies to the execution setup, the Workbench session open and the `pe@1` run. No reader falls back to the shipped text.
+For `pe@1`, the refusal ends the session, and the server logs `project.onboarding.session_failed`. No client receives a 409 there.
 
 ### Prompt templates
 

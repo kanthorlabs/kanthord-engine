@@ -338,9 +338,9 @@ Common to every `config`:
 - `prompts`: **optional**, object with three optional keys; absent by default. A key outside the three keys refuses the write as a validation failure.
   - `instruction_file`: a repository path, for example `AGENTS.md`, `CLAUDE.md` or `docs/agent-rules.md`; absent by default. The path is relative, uses `/`, holds no `.` segment, no `..` segment, no empty segment, no backslash and no control character, and holds at most 255 bytes. It takes no `@<commit>` form. Help: "Name one file, for example AGENTS.md. Its text joins the default standard of every agent. KanthorD reads no nested file. Leave the field empty when the file holds advice or instructions for an interactive tool."
   - `repository`: the stored Repository prompt, one text for every agent of the binding.
-  - `agents`: object that maps an agent name of the catalog to one Binding prompt text. The keys are `swe@1`, `re@1` and `env@1`, and each key is optional. A key outside the catalog refuses the write as a validation failure.
+  - `agents`: object that maps an agent name of the catalog to one Binding prompt text. The keys are `swe@1`, `re@1` and `pe@1`, and each key is optional. A key outside the catalog refuses the write as a validation failure.
   - The server composes the parts of each repository binding into the system prompt of every native agent on that repository, in this order: the instruction file under the heading `Repository prompt of repository <name>, file <path>:`, the text of `repository` under `Repository prompt of repository <name>, set in KanthorD:`, and the text of `agents[<agent>]` under `Binding prompt of repository <name>:` for that agent only. An absent key, an empty string or a blank string adds no text. An absent instruction file adds no part.
-  - An execution reads the instruction file at the base commit that the first handover of its attempt pins, never from the node branch. Every later execution of the attempt reads the same commit, and a new attempt pins the base head again. The `env@1` run reads the file at the commit of the run. A file that is invalid at that commit stops the execution with `agent.prompt.source_invalid`.
+  - An execution reads the instruction file at the base commit that the first handover of its attempt pins, never from the node branch. Every later execution of the attempt reads the same commit, and a new attempt pins the base head again. The `pe@1` run reads the file at the commit of the run. A file that is invalid at that commit stops the execution with `agent.prompt.source_invalid`.
   - A save of a new or changed binding that names `instruction_file` reads the file at the head of the base branch, with a 20 s deadline. An absent file passes. A file that is too large, not UTF-8, unreadable or that holds a control character refuses the write. KanthorD reads no nested file, no `*.local.md` file and expands no `@` import.
   - A change of any `prompts` key is a binding revision, so a node keeps the texts of its pinned revision until `mission node rebind`. Environment onboarding treats the new binding id as a changed binding and clears `environment_from_agent`.
   - Help of `repository` and of each text of `agents`: "Each work-product sentence is a rule. The reviewer judges a violation as a blocker. A rule about the method, the tools, the repository operations or the release is guidance: the reviewer reports a violation as a suggestion."
@@ -850,17 +850,17 @@ A refused key, path or variable answers `400 project.environment.key_refused` wi
 For `environment set`, every code of `binding apply` applies.
 An absent project answers `404 project.project.not_found`.
 
-### The repair by env@1
+### The repair by pe@1
 
-The agent `env@1` repairs a failed environment. A human enables it with `kanthord agent enablement put env@1`. The enablement takes a credential with the holder `server`. Without an enabled `env@1`, a failure stays for the human.
+The agent `pe@1` repairs a failed environment. A human enables it with `kanthord agent enablement put pe@1`. The enablement takes a credential with the holder `server`. Without an enabled `pe@1`, a failure stays for the human.
 
 The Onboarding component starts one session after a failed proof. The start follows a run that writes a failed proof file, or an execution that reports an environment failure. A session starts only when each condition holds:
 
 - The target is `image`.
-- The source is `detected`, `universal` or `none`. The source `stored` qualifies only when the last write of the stored environment came from a session of `env@1`. A binding-set write from another caller clears that mark.
+- The source is `detected`, `universal` or `none`. The source `stored` qualifies only when the last write of the stored environment came from a session of `pe@1`. A binding-set write from another caller clears that mark.
 - No session of the group runs, and the failed run did not run for a session.
 - The current binding set still gives the group the target of the failed run or execution.
-- `env@1` is enabled.
+- `pe@1` is enabled.
 - `repairs` of the proof file of the current digest is below 3.
 
 The component increments `repairs` before it starts the session. One digest gets at most 3 sessions. A session has at most 5 attempts and at most 64 tool calls. The server stop aborts each session.

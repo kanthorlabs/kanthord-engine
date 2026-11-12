@@ -3205,7 +3205,7 @@ test(
 );
 
 test(
-  "a failure with no enabled env@1 starts no session and counts no repair",
+  "a failure with no enabled pe@1 starts no session and counts no repair",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const h = agentHarness(t);

@@ -406,13 +406,13 @@ test("the Agent component refuses an invalid workbench configuration", async (t)
   );
 });
 
-test("the workbench lists and opens no env@1 session", async (t) => {
+test("the workbench lists and opens no pe@1 session", async (t) => {
   const state = temporaryDirectory();
   const pi = await loadPi();
-  const envAgent = "env@1";
+  const peAgent = "pe@1";
   pi.SessionManager.create(
-    join(state, "workbench", envAgent),
-    join(state, "pi", "sessions", "workbench", envAgent),
+    join(state, "workbench", peAgent),
+    join(state, "pi", "sessions", "workbench", peAgent),
     { id: "workbench_session_01ARZ3NDEKTSV4RRFFQ69G5FAV" },
   ).appendMessage({
     role: "user",
@@ -428,12 +428,12 @@ test("the workbench lists and opens no env@1 session", async (t) => {
     ),
   );
   assert.deepEqual(
-    listed.items.filter((item) => item.agent_name === envAgent),
+    listed.items.filter((item) => item.agent_name === peAgent),
     [],
   );
   failed(
     await fixture.workbench["session.list"](
-      { params: {}, query: { agent_name: envAgent }, body: null },
+      { params: {}, query: { agent_name: peAgent }, body: null },
       fixture.options,
     ),
     HttpStatus.NotFound,
@@ -445,7 +445,7 @@ test("the workbench lists and opens no env@1 session", async (t) => {
         params: {},
         query: {},
         body: {
-          agent_name: envAgent,
+          agent_name: peAgent,
           agent_provider: DEFAULT,
           model_identifier: SONNET,
           reasoning_effort: OFF,

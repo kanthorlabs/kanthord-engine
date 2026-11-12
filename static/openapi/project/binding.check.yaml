@@ -162,7 +162,7 @@ components:
                           type: string
                         re@1:
                           type: string
-                        env@1:
+                        pe@1:
                           type: string
                       additionalProperties: false
                   additionalProperties: false

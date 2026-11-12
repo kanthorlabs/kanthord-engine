@@ -67,7 +67,7 @@ const SETTLE_WAIT_MS = 500;
 const CONTAINER_IMAGE = "kanthord-test";
 const BASE_IMAGE = "mcr.microsoft.com/devcontainers/base:bookworm";
 const UNIVERSAL_CHECK = "node --version";
-const ENV_AGENT = "env@1";
+const PE_AGENT = "pe@1";
 const WRITE_TOOL = "environment_write";
 const PROBE_TOOL = "probe";
 const TOOL_USE = "toolUse";
@@ -226,7 +226,7 @@ async function enableEnvironmentAgent(fixture: Fixture): Promise<number> {
   const enabled = await humanCaller(fixture)(
     agentOperations["enablement.put"],
     {
-      params: { agent_name: ENV_AGENT },
+      params: { agent_name: PE_AGENT },
       query: {},
       body: {
         agent_providers: [
@@ -246,7 +246,7 @@ async function enableEnvironmentAgent(fixture: Fixture): Promise<number> {
 
 async function disableEnvironmentAgent(fixture: Fixture, revision: number) {
   await humanCaller(fixture)(agentOperations["enablement.disable"], {
-    params: { agent_name: ENV_AGENT },
+    params: { agent_name: PE_AGENT },
     query: {},
     body: { expected_revision: revision },
   });
@@ -600,7 +600,7 @@ test(
 );
 
 test(
-  "a failure with no enabled env@1 starts no session",
+  "a failure with no enabled pe@1 starts no session",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const agent = await agentFixture(t, [fauxAssistantMessage(TEXT_ANSWER)]);

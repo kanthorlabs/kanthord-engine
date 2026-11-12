@@ -52,7 +52,7 @@ import type {
 import type { EnvironmentTarget, RepositoryPolicy } from "./contract.ts";
 import { ENVIRONMENT_DIRECTORY, type ProofFile } from "./environment-state.ts";
 
-export const ENV_AGENT_NAME = "env@1";
+export const PE_AGENT_NAME = "pe@1";
 
 export const EnvironmentSessionEnd = {
   NotEnabled: "not_enabled",
@@ -198,7 +198,7 @@ export class EnvironmentAgent {
 
   private view(): AgentView | null {
     return this.dependencies.store.transaction((tx) =>
-      this.dependencies.agentView(tx, ENV_AGENT_NAME),
+      this.dependencies.agentView(tx, PE_AGENT_NAME),
     );
   }
 
@@ -210,14 +210,14 @@ export class EnvironmentAgent {
     lifetime: CancellationContext,
   ): Promise<OpenedSession> {
     const { effective } = view;
-    const declaration = getAgentDeclaration(ENV_AGENT_NAME);
+    const declaration = getAgentDeclaration(PE_AGENT_NAME);
     assert.ok(declaration);
     const credentials = this.dependencies.serverAgentCredentials({
       session_id: sessionId,
       platform: effective.provider,
       requester: () => this.dependencies.identity,
       authorize: (tx) => {
-        const current = this.dependencies.agentView(tx, ENV_AGENT_NAME);
+        const current = this.dependencies.agentView(tx, PE_AGENT_NAME);
         if (!usable(current)) throw new FacilityError();
         return {
           credential: current.effective.credential,
@@ -251,7 +251,7 @@ export class EnvironmentAgent {
       input.context,
     );
     const parts = await this.dependencies.composePrompt(
-      ENV_AGENT_NAME,
+      PE_AGENT_NAME,
       input.context,
     );
     const templates = await this.dependencies.templates(input.context);
@@ -288,11 +288,7 @@ export class EnvironmentAgent {
       systemPrompt: systemPrompt(
         [
           ...parts,
-          ...bindingParts(
-            repository ? [repository] : [],
-            ENV_AGENT_NAME,
-            files,
-          ),
+          ...bindingParts(repository ? [repository] : [], PE_AGENT_NAME, files),
         ],
         PromptConsumer.Worker,
         templates,

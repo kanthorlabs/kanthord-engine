@@ -6,7 +6,7 @@ import {
 } from "../worker/contract.ts";
 import type { AgentName } from "./contract.ts";
 import {
-  ENV_AGENT_PROMPT,
+  PE_AGENT_PROMPT,
   RE_AGENT_PROMPT,
   SWE_AGENT_PROMPT,
 } from "./prompt-assets.ts";
@@ -95,9 +95,9 @@ export const AGENT_DECLARATIONS: Readonly<Record<AgentName, AgentDeclaration>> =
       ],
       workbench: true,
     },
-    "env@1": {
-      agent_name: "env@1",
-      agent_prompt: ENV_AGENT_PROMPT,
+    "pe@1": {
+      agent_name: "pe@1",
+      agent_prompt: PE_AGENT_PROMPT,
       host_tools: [],
       tools: [
         BuiltinTool.Read,
