@@ -310,6 +310,7 @@ test("the build writes the allowlisted document outside the checkout with absolu
       postCreateCommand: "npm ci",
     }),
     cli: REPORT_CLI,
+    variables: { PATH: process.env.PATH, HOME: process.env.HOME },
     checkout: (target) => {
       checkout = realpathSync(target);
       writeCheckout(target, {
@@ -367,6 +368,7 @@ test("a symlinked .devcontainer of the checkout gets no write and no build path 
   const stored = images(join(directory, "stored"), {
     environment: environment(),
     cli: REPORT_CLI,
+    variables: { PATH: process.env.PATH, HOME: process.env.HOME },
     checkout: link,
   });
   reportOf(await stored.build());
