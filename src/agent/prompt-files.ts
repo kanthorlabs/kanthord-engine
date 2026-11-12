@@ -15,6 +15,7 @@ import {
   type PromptPartAnswer,
   PromptPartState,
   type PromptReference,
+  PromptTemplate,
 } from "./contract.ts";
 import { BASE_PROMPT, WORKBENCH_PROMPT } from "./prompt-assets.ts";
 import { digest } from "./prompt-composer.ts";
@@ -45,6 +46,7 @@ interface PromptFile {
 
 export interface AgentPromptInput {
   agent: AgentDeclaration;
+  templates: TemplateSet;
   directory: string | null;
   workbench: boolean;
   context: Context;
@@ -139,6 +141,27 @@ export function framingPart(
   );
 }
 
+export function identityPart(
+  set: TemplateSet,
+  agent: AgentDeclaration,
+  directory: string | null,
+): PromptPartAnswer {
+  const templatesDirectory = templateDirectory(directory);
+  return filePart(
+    { part: PromptPart.Identity, name: PromptTemplate.Identity },
+    set.origins[PromptTemplate.Identity],
+    templatesDirectory === null
+      ? null
+      : join(
+          templatesDirectory,
+          `${PromptTemplate.Identity}${MARKDOWN_EXTENSION}`,
+        ),
+    renderTemplate(set.templates, PromptTemplate.Identity, {
+      display_name: agent.display_name,
+    }),
+  );
+}
+
 function shippedRole(name: string): string | null {
   if (!name.endsWith(MARKDOWN_EXTENSION)) return null;
   return (
@@ -147,10 +170,20 @@ function shippedRole(name: string): string | null {
   );
 }
 
+function shippedIdentity(name: string, agentName: string): string | null {
+  const agent = getAgentDeclaration(agentName);
+  if (name !== PromptTemplate.Identity || agent === undefined) return null;
+  return renderTemplate(SHIPPED_TEMPLATES, PromptTemplate.Identity, {
+    display_name: agent.display_name,
+  });
+}
+
 export function shippedText(
   reference: Pick<PromptReference, "part" | "name">,
+  agentName: string,
 ): string | null {
   const { part, name } = reference;
+  if (part === PromptPart.Identity) return shippedIdentity(name, agentName);
   if (part === PromptPart.Framing)
     return isFramingTemplate(name)
       ? renderTemplate(SHIPPED_TEMPLATES, name, {})
@@ -170,7 +203,11 @@ export async function resolveAgentPrompt(
     workbenchAgentNames().includes(input.agent.agent_name) || !input.workbench,
   );
   const parts: PromptPartAnswer[] = [];
-  for (const file of promptFiles(input.agent, input.workbench))
+  const identified = workbenchAgentNames().includes(input.agent.agent_name);
+  for (const file of promptFiles(input.agent, input.workbench)) {
+    if (identified && file.part === PromptPart.Role)
+      parts.push(identityPart(input.templates, input.agent, input.directory));
     parts.push(await resolveFile(file, input.directory, input.context));
+  }
   return parts;
 }

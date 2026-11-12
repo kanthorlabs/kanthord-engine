@@ -42,6 +42,7 @@ export type PromptOrigin = (typeof PromptOrigin)[keyof typeof PromptOrigin];
 
 export const PromptPart = {
   Standard: "standard",
+  Identity: "identity",
   Role: "role",
   Workbench: "workbench",
   InstructionFile: "instruction_file",
@@ -104,6 +105,7 @@ export const PromptView = { Final: "final" } as const;
 export type PromptView = (typeof PromptView)[keyof typeof PromptView];
 
 export const PromptTemplate = {
+  Identity: "identity",
   Work: "work",
   FramingWorker: "framing-worker",
   FramingWorkbench: "framing-workbench",

@@ -138,20 +138,21 @@ KanthorD reads only the one repository file that `prompts.instruction_file` of a
 `parts` holds the parts of the system prompt in reading order:
 
 1. `standard`: the file `base.md`, for every agent.
-2. `role`: the file `<agent-name>.md`, for example `swe@1.md`.
-3. `workbench`: the file `workbench.md`, only in the Workbench system prompt.
-4. For each repository binding, in binding order:
+2. `identity`: the rendered template `identity`, with the display name of the agent. Only an agent with Workbench operation tools has it. No human text is rendered as a template.
+3. `role`: the file `<agent-name>.md`, for example `swe@1.md`.
+4. `workbench`: the file `workbench.md`, only in the Workbench system prompt.
+5. For each repository binding, in binding order:
    1. `instruction_file`: the file that `prompts.instruction_file` names. An absent file adds no part.
    2. `repository`: the nonblank text of `prompts.repository`.
    3. `binding`: the nonblank text of `prompts.agents[<agent-name>]`.
-5. `framing`: the rendered framing template, `framing-worker` or `framing-workbench`. It closes the system prompt.
+6. `framing`: the rendered framing template, `framing-worker` or `framing-workbench`. It closes the system prompt.
 
 Each part holds the following fields:
 
 | Part field   | Type and meaning                                                                                                                                                                                                                                                                              |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `layer`      | The prompt layer: `1` for `standard`, `role` and `workbench`, `2` for `instruction_file` and `repository`, `3` for `binding`. `null` for `framing`.                                                                                                                                           |
-| `part`       | One of `standard`, `role`, `workbench`, `instruction_file`, `repository`, `binding` and `framing`.                                                                                                                                                                                            |
+| `layer`      | The prompt layer: `1` for `standard`, `identity`, `role` and `workbench`, `2` for `instruction_file` and `repository`, `3` for `binding`. `null` for `framing`.                                                                                                                                           |
+| `part`       | One of `standard`, `identity`, `role`, `workbench`, `instruction_file`, `repository`, `binding` and `framing`.                                                                                                                                                                                            |
 | `name`       | The file name of a layer 1 part, for example `base.md`. The template name of `framing`. The repository name of a layer 2 or layer 3 part.                                                                                                                                                     |
 | `origin`     | `binary` for a shipped text, `file` for an override file, `database` for `repository` and `binding`, and `repository` for `instruction_file`.                                                                                                                                                 |
 | `path`       | The override path that the server looked up, also for `binary`. The repository path for `instruction_file`. `null` for `repository` and `binding`, and when `agent_directory` is empty.                                                                                                       |
@@ -229,7 +230,7 @@ git -C engine show "$(git rev-parse "v<engine_version>:engine"):static/prompt/<n
 git -C engine show "$(git rev-parse "v<engine_version>:engine"):static/prompt/template/<name>.md"
 ```
 
-The first command reads a part with the name `<name>`, for example `base.md`. The second command reads a `framing` part, for example `framing-worker`.
+The first command reads a part with the name `<name>`, for example `base.md`. The second command reads an `identity` or `framing` part, for example `identity` or `framing-worker`.
 The release tag `v<engine_version>` of the root repository names the engine commit. A development build has no release tag, so its version names no unique engine commit.
 For a `changed` part of origin `file`, read the old file from the version control of the agent directory.
 

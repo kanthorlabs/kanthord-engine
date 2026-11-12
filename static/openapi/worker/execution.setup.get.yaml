@@ -222,6 +222,7 @@ components:
                           type: string
                           enum:
                             - standard
+                            - identity
                             - role
                             - workbench
                             - instruction_file
@@ -282,6 +283,8 @@ components:
         templates:
           type: object
           properties:
+            identity:
+              type: string
             work:
               type: string
             framing-worker:
@@ -301,6 +304,7 @@ components:
             conflict:
               type: string
           required:
+            - identity
             - work
             - framing-worker
             - framing-workbench

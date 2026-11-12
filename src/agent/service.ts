@@ -1263,7 +1263,7 @@ export class AgentComponent {
     return { ...resolved, engine_version: record.engine_version };
   }
 
-  composePrompt(
+  async composePrompt(
     agentName: string,
     consumer: PromptConsumer,
     context: Context,
@@ -1272,6 +1272,7 @@ export class AgentComponent {
     assert.ok(agent);
     return resolveAgentPrompt({
       agent,
+      templates: await this.templateSet(context),
       directory: this.agentDirectory(),
       workbench: consumer === PromptConsumer.Workbench,
       context,

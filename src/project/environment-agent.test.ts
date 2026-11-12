@@ -17,7 +17,10 @@ import {
   Type,
 } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
+import {
+  SHIPPED_TEMPLATE_SET,
+  SHIPPED_TEMPLATES,
+} from "../agent/prompt-templates.ts";
 import { getAgentDeclaration } from "../agent/catalog.ts";
 import {
   AgentErrorCode,
@@ -224,6 +227,7 @@ function fixture(
     composePrompt: (agentName, context) =>
       resolveAgentPrompt({
         agent: getAgentDeclaration(agentName)!,
+        templates: SHIPPED_TEMPLATE_SET,
         directory: state.promptDirectory ?? null,
         workbench: false,
         context,

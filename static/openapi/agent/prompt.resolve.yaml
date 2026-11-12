@@ -101,6 +101,7 @@ components:
                 type: string
                 enum:
                   - standard
+                  - identity
                   - role
                   - workbench
                   - instruction_file

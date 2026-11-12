@@ -31,6 +31,7 @@ import {
   PromptPartState,
   type PromptReference,
   promptReferenceSchema,
+  PromptTemplate,
   ToolSource,
 } from "./contract.ts";
 import { PROMPT_SOURCE_READ_MS } from "../kernel/prompt-source.ts";
@@ -252,6 +253,15 @@ test("agent read answers the shipped parts, the workbench part of a workbench ag
       ],
       [
         PromptLayer.KanthorD,
+        PromptPart.Identity,
+        PromptTemplate.Identity,
+        PromptOrigin.Binary,
+        null,
+        null,
+        PromptPartState.Resolved,
+      ],
+      [
+        PromptLayer.KanthorD,
         PromptPart.Role,
         `${AGENT}.md`,
         PromptOrigin.Binary,
@@ -279,10 +289,10 @@ test("agent read answers the shipped parts, the workbench part of a workbench ag
       ],
     ],
   );
-  assert.equal(parts[1]!.text, getAgentDeclaration(AGENT)!.agent_prompt);
+  assert.equal(parts[2]!.text, getAgentDeclaration(AGENT)!.agent_prompt);
   assert.match(parts[0]!.digest!, /^[a-f0-9]{64}$/);
   assert.equal(
-    parts[3]!.text,
+    parts[4]!.text,
     framing(SHIPPED_TEMPLATES, PromptConsumer.Workbench),
   );
   assert.equal(answer.prompt.final, parts.map(({ text }) => text).join("\n\n"));
@@ -320,9 +330,9 @@ test("an override file of the agent directory replaces the shipped text and an i
   assert.equal(parts[0]!.origin, PromptOrigin.Binary);
   assert.deepEqual(
     {
-      origin: parts[1]!.origin,
-      path: parts[1]!.path,
-      text: parts[1]!.text,
+      origin: parts[2]!.origin,
+      path: parts[2]!.path,
+      text: parts[2]!.text,
     },
     { origin: PromptOrigin.File, path: overridePath, text: OVERRIDE_TEXT },
   );
@@ -339,6 +349,24 @@ test("an override file of the agent directory replaces the shipped text and an i
       reason: "control_character",
     },
   });
+});
+
+test("(security) a role override file that holds a display_name placeholder stays literal in final", async (t) => {
+  const root = temporary(t);
+  const directory = join(root, "agents");
+  mkdirSync(directory);
+  const f = enablementFixture(t, {
+    config: {
+      prompt: { agent_directory: "agents" },
+      cooldown: COOLDOWN_DEFAULTS,
+    },
+    dataDirectory: root,
+  });
+  const literal = "Greet as {{display_name}}.";
+  writeFileSync(join(directory, `${AGENT}.md`), literal);
+  const final = (await promptReader(f)(AGENT)).prompt.final!;
+  assert.ok(final.includes(literal));
+  assert.ok(final.includes("Your name is SWE."));
 });
 
 test("agent read renders the framing from the template files of the agent directory", async (t) => {
@@ -436,6 +464,15 @@ test("agent read with a repository binding answers the binding prompt of the age
       [
         PromptLayer.KanthorD,
         PromptPart.Standard,
+        PromptOrigin.Binary,
+        null,
+        null,
+        null,
+        null,
+      ],
+      [
+        PromptLayer.KanthorD,
+        PromptPart.Identity,
         PromptOrigin.Binary,
         null,
         null,
@@ -603,6 +640,12 @@ test("agent get --node answers the stack that the agent of the node reads at the
         null,
         PromptPartState.Resolved,
       ],
+      [
+        PromptLayer.KanthorD,
+        PromptPart.Identity,
+        null,
+        PromptPartState.Resolved,
+      ],
       [PromptLayer.KanthorD, PromptPart.Role, null, PromptPartState.Resolved],
       [
         PromptLayer.Repository,
@@ -655,6 +698,7 @@ test("agent get --node with an absent instruction file answers no instruction fi
     answer.prompt.parts!.map(({ part }) => part),
     [
       PromptPart.Standard,
+      PromptPart.Identity,
       PromptPart.Role,
       PromptPart.Repository,
       PromptPart.Binding,
