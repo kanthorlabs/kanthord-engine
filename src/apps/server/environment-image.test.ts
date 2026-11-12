@@ -267,7 +267,7 @@ process.stderr.write(JSON.stringify({
   document: JSON.parse(readFileSync(config, "utf8")),
   feature: existsSync(config.replace("devcontainer.json", "local/install.sh")),
   variables: Object.keys(process.env),
-  values: Object.values(process.env),
+  secret: Object.values(process.env).includes("s3cr3t"),
 }));
 process.exit(3);`;
 
@@ -277,7 +277,7 @@ function reportOf(result: ImageBuildResult): {
   document: Record<string, unknown>;
   feature: boolean;
   variables: string[];
-  values: string[];
+  secret: boolean;
 } {
   assert.ok(result.outcome === ImageBuildOutcome.Failed);
   return JSON.parse(result.tail);
@@ -353,7 +353,7 @@ test("the build gives the devcontainer CLI no server variable", async (t) => {
       .sort(),
     ["CONTAINER_HOST", "HOME", "PATH", "XDG_CONFIG_HOME"],
   );
-  assert.equal(report.values.includes("s3cr3t"), false);
+  assert.equal(report.secret, false);
 });
 
 test("a symlinked .devcontainer of the checkout gets no write and no build path outside the checkout", async (t) => {
