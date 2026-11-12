@@ -83,7 +83,15 @@ const SECOND_REVISION = 2;
 const THIRD_REVISION = 3;
 const ADD_PROVIDER = "enablement.provider.add";
 const REMOVE_PROVIDER = "enablement.provider.remove";
-const TOOLS = [{ name: "read", source: ToolSource.Builtin, input_schema: {} }];
+const TOOLS = [
+  {
+    name: "read",
+    source: ToolSource.Builtin,
+    input_schema: {},
+    description: "",
+    guard_class: null,
+  },
+];
 const provider = {
   name: "primary",
   provider: AgentProviderKind.Anthropic,

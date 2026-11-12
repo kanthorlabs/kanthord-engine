@@ -234,16 +234,28 @@ components:
                 enum:
                   - host
                   - builtin
+                  - operation
                   - kanthord-mcp
               input_schema:
                 type: object
                 propertyNames:
                   type: string
                 additionalProperties: {}
+              description:
+                type: string
+              guard_class:
+                anyOf:
+                  - type: string
+                    enum:
+                      - read
+                      - card
+                  - type: "null"
             required:
               - name
               - source
               - input_schema
+              - description
+              - guard_class
             additionalProperties: false
         enablement:
           anyOf:

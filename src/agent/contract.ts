@@ -268,14 +268,20 @@ export type EntriesOfAgent = (
 export const ToolSource = {
   Host: "host",
   Builtin: "builtin",
+  Operation: "operation",
   KanthordMcp: "kanthord-mcp",
 } as const;
 export type ToolSource = (typeof ToolSource)[keyof typeof ToolSource];
+
+export const GuardClass = { Read: "read", Card: "card" } as const;
+export type GuardClass = (typeof GuardClass)[keyof typeof GuardClass];
 
 export const toolDeclarationSchema = z.strictObject({
   name: z.string().min(1),
   source: z.enum(ToolSource),
   input_schema: z.record(z.string(), z.unknown()),
+  description: z.string(),
+  guard_class: z.enum(GuardClass).nullable(),
 });
 export type ToolDeclaration = z.infer<typeof toolDeclarationSchema>;
 

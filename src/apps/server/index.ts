@@ -168,6 +168,7 @@ import { WorkerPool } from "./worker-pool.ts";
 import { instanceIssuer } from "./instance-issuer.ts";
 import { AgentComponent, agentMigrations } from "../../agent/index.ts";
 import {
+  operationToolDeclarations,
   WorkbenchFootprint,
   workbenchMigrations,
   type WorkbenchModelRuntimeFactory,
@@ -816,7 +817,13 @@ export function composeServices(options: ComposeServicesOptions) {
       },
       promptRecordOf,
     },
-    toolDeclarations: (name) => toolDeclarations(name),
+    toolDeclarations: async (name) => [
+      ...(await toolDeclarations(name)),
+      ...operationToolDeclarations(
+        registry.all().map(({ operation }) => operation),
+        name,
+      ),
+    ],
     logger: options.logger,
   });
   const repositoryCredentials = new RepositoryCredentials({

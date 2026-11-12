@@ -4,5 +4,5 @@ export {
   type WorkbenchModelRuntimeFactory,
 } from "./service.ts";
 export { workbenchMigrations } from "./migrations.ts";
-export { toolName } from "./tools.ts";
+export { operationToolDeclarations, toolName } from "./tools.ts";
 export { WorkbenchFootprint } from "./footprint.ts";

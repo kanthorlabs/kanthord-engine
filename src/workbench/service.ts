@@ -376,17 +376,18 @@ export class WorkbenchService implements Service {
         session.place.cwd,
       );
       const mutations = new Map<string, Operation>();
-      const operations = toolOperations(this.dependencies.operations()).map(
-        (operation) => {
-          if (operation.mutation)
-            mutations.set(toolName(operation.id), operation);
-          return operationTool(
-            operation,
-            this.dependencies.invoke,
-            () => session.requester,
-          );
-        },
-      );
+      const operations = toolOperations(
+        this.dependencies.operations(),
+        declaration.tools.operation,
+      ).map((operation) => {
+        if (operation.mutation)
+          mutations.set(toolName(operation.id), operation);
+        return operationTool(
+          operation,
+          this.dependencies.invoke,
+          () => session.requester,
+        );
+      });
       session.secrets = credentialSecrets(
         credentials,
         piProviderId(resolved.provider),

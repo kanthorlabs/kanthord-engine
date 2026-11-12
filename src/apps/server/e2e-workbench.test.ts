@@ -27,6 +27,7 @@ import {
   temporaryDirectory,
 } from "../../kernel/test-support.ts";
 import { isString } from "../../kernel/values.ts";
+import { AGENT_DECLARATIONS } from "../../agent/catalog.ts";
 import { AgentErrorCode, agentOperations } from "../../agent/contract.ts";
 import { loadPi } from "../../agent/pi.ts";
 import {
@@ -909,6 +910,15 @@ const TOOL_USE = "toolUse" as const;
 const SPARE = "spare";
 const TOOL_RESULT = "toolResult";
 const PROVIDER_ADD = "agent.enablement.provider.add";
+
+function listOperations(t: TestContext, ...ids: string[]) {
+  const listed = AGENT_DECLARATIONS[AGENT].tools.operation as string[];
+  const before = [...listed];
+  listed.push(...ids);
+  t.after(() => {
+    listed.splice(0, listed.length, ...before);
+  });
+}
 const FAST_POLL_MS = 2000;
 
 function toolCall(name: string, args: Parameters<typeof fauxToolCall>[1]) {
@@ -984,6 +994,7 @@ async function providerNames(fixture: Fixture): Promise<string[]> {
 }
 
 test("a poll answers at once when the snapshot changed after the version that the client holds", async (t) => {
+  listOperations(t, PROVIDER_ADD);
   const fixture = await workbenchFixture(t, [
     toolCall(toolName(PROVIDER_ADD), addSpare),
     fauxAssistantMessage(ANSWER),
@@ -1022,13 +1033,13 @@ test("a poll answers at once when the snapshot changed after the version that th
   assert.ok(answer.version > before.version);
 });
 
-test("the tool table holds the built-in tools of the agent and one tool per human operation without secret material", async (t) => {
+test("the tool table holds the built-in tools of the agent and the listed operation tools", async (t) => {
   const fixture = await workbenchFixture(t, [fauxAssistantMessage(ANSWER)]);
   const session = await createSession(fixture);
   completed(await message(fixture, session.id, QUESTION));
   await untilIdle(fixture, session.id, t.signal);
   const tools = fixture.provider.tools[0]!;
-  for (const name of [
+  const expected = [
     "read",
     "edit",
     "write",
@@ -1036,34 +1047,26 @@ test("the tool table holds the built-in tools of the agent and one tool per huma
     "find",
     "ls",
     "bash",
+    ...AGENT_DECLARATIONS[AGENT].tools.operation.map(toolName),
+  ];
+  assert.deepEqual([...tools].sort(), expected.sort());
+  for (const name of [
     "agent.get",
     "agent.enablement.put",
-    "mission.node.list",
     "project.create",
-    "llm.credential.list",
-    "llm.credential.update_metadata",
-    "repository.host_key.list",
-    "repository.host_key.scan",
-    "workbench.session.get",
-  ])
-    assert.ok(tools.includes(toolName(name)), name);
-  for (const name of [
     "llm.credential.create",
-    "llm.credential.rotate",
-    "llm.credential.check",
-    "llm.credential.login_code",
     "repository.credential.create",
-    "repository.credential.rotate",
-    "repository.credential.check",
-    "repository.host_key.pin",
-    "repository.credential.ssh_key_create",
-    "repository.credential.ssh_key_rotate",
     "storage.credential.create",
-    "storage.credential.rotate",
-    "storage.credential.check",
+    "intake.inbound.get",
+    "intake.storage.get",
+    "mission.evidence.asset.content.get",
+    "intake.credential.create",
+    "intake.credential.rotate",
+    "intake.credential.check",
+    "project.credential.create",
+    "project.credential.rotate",
+    "project.credential.check",
     "worker.handover",
-    "mission.evidence.submit",
-    "scheduler.work.pull",
     "evidence-upload",
   ])
     assert.ok(!tools.includes(toolName(name)), name);
@@ -1071,6 +1074,7 @@ test("the tool table holds the built-in tools of the agent and one tool per huma
 });
 
 test("a read tool and a built-in tool run at once and a refusal returns the owning service code", async (t) => {
+  listOperations(t, "agent.enablement.get", "agent.get");
   const fixture = await workbenchFixture(t, [
     toolCall(toolName("agent.enablement.get"), {
       params: { agent_name: AGENT },
@@ -1103,6 +1107,7 @@ test("a read tool and a built-in tool run at once and a refusal returns the owni
 });
 
 test("a mutation tool runs only after the human approves the call", async (t) => {
+  listOperations(t, PROVIDER_ADD);
   const fixture = await workbenchFixture(t, [
     toolCall(toolName(PROVIDER_ADD), addSpare),
     fauxAssistantMessage(ANSWER),
@@ -1162,6 +1167,7 @@ async function listedSession(fixture: Fixture, sessionId: string) {
 }
 
 test("the session list names the run and the pending approval of an open session without the input", async (t) => {
+  listOperations(t, PROVIDER_ADD);
   const fixture = await workbenchFixture(t, [
     toolCall(toolName(PROVIDER_ADD), addSpare),
     fauxAssistantMessage(ANSWER),
@@ -1193,6 +1199,7 @@ test("the session list names the run and the pending approval of an open session
 });
 
 test("a rejected call reaches the agent as a blocked call", async (t) => {
+  listOperations(t, PROVIDER_ADD);
   const fixture = await workbenchFixture(t, [
     toolCall(toolName(PROVIDER_ADD), addSpare),
     fauxAssistantMessage(ANSWER),
@@ -1223,6 +1230,7 @@ test("a rejected call reaches the agent as a blocked call", async (t) => {
 });
 
 test("an abort rejects every pending approval", async (t) => {
+  listOperations(t, PROVIDER_ADD);
   const fixture = await workbenchFixture(t, [
     toolCall(toolName(PROVIDER_ADD), addSpare),
     fauxAssistantMessage(ANSWER),
