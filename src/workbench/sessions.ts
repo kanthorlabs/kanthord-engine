@@ -7,7 +7,7 @@ import type {
 import { ensureDirectory } from "../kernel/files.ts";
 import { homeRelative } from "../kernel/xdg.ts";
 import { isString } from "../kernel/values.ts";
-import { WORKBENCH_AGENT_NAMES } from "../agent/catalog.ts";
+import { workbenchAgentNames } from "../agent/catalog.ts";
 import { loadPi, PI_DIRECTORY_NAME } from "../agent/pi.ts";
 import {
   type SessionEntry,
@@ -39,7 +39,7 @@ export function sessionPlace(
   agentName: string,
 ): SessionPlace {
   assert.ok(stateDirectory);
-  assert.ok(WORKBENCH_AGENT_NAMES.includes(agentName));
+  assert.ok(workbenchAgentNames().includes(agentName));
   const place = {
     cwd: workbenchDirectory(stateDirectory, agentName),
     sessionDir: join(
@@ -87,7 +87,7 @@ export async function findSession(
   id: string,
 ): Promise<{ agentName: string; manager: SessionManager } | null> {
   const pi = await loadPi();
-  for (const agentName of WORKBENCH_AGENT_NAMES) {
+  for (const agentName of workbenchAgentNames()) {
     const place = sessionPlace(stateDirectory, agentName);
     const path = pi.SessionManager.findById(place.cwd, id, place.sessionDir);
     if (path === undefined) continue;

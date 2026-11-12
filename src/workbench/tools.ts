@@ -126,8 +126,8 @@ export function builtinTools(
   const agent = getAgentDeclaration(agentName);
   assert.ok(agent);
   assert.ok(cwd);
-  const allowlist: string[] = [...agent.tools];
-  if (!agent.tools.includes(BuiltinTool.Bash))
+  const allowlist: string[] = [...agent.tools.builtin];
+  if (!agent.tools.builtin.includes(BuiltinTool.Bash))
     return { allowlist, customTools: [] };
   const local = processBashOperations(pi.getShellConfig(), () => {}, {
     killGroupAtEnd: false,

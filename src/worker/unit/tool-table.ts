@@ -87,11 +87,11 @@ export function sessionTools(
   const agent = getAgentDeclaration(agentName);
   assert.ok(agent);
   assert.ok(cwd);
-  const allowlist: string[] = [...agent.tools, ...agent.host_tools];
-  const customTools: ToolDefinition[] = agent.host_tools.map((name) =>
+  const allowlist: string[] = [...agent.tools.builtin, ...agent.tools.host];
+  const customTools: ToolDefinition[] = agent.tools.host.map((name) =>
     HOST_TOOLS[name](hostTools),
   );
-  if (!agent.tools.includes(BuiltinTool.Bash))
+  if (!agent.tools.builtin.includes(BuiltinTool.Bash))
     return { allowlist, customTools };
   const options = (
     toolCallId: string,

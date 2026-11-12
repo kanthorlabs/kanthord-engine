@@ -8,7 +8,7 @@ import { HealthScope, type ResourceEntry } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { OperationRegistry } from "../kernel/operation.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
-import { getAgentDeclaration } from "./catalog.ts";
+import { getAgentDeclaration, workbenchAgentNames } from "./catalog.ts";
 import type { AgentConfig } from "./config.ts";
 import {
   chainConfigurations,
@@ -1365,7 +1365,8 @@ export class AgentComponent {
         assert.equal(declaration.agent_name, params.agent_name);
         const stack = this.promptStackOf(query);
         const consumer =
-          stack === null && declaration.workbench
+          stack === null &&
+          workbenchAgentNames().includes(declaration.agent_name)
             ? PromptConsumer.Workbench
             : PromptConsumer.Worker;
         const files = await this.instructionFilesOf(

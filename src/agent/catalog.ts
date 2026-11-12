@@ -15,9 +15,14 @@ export interface AgentDeclaration {
   agent_name: string;
   overridable_fields: readonly string[];
   agent_prompt: string;
-  tools: readonly BuiltinTool[];
-  host_tools: readonly HostTool[];
-  workbench: boolean;
+  display_name: string;
+  tools: AgentTools;
+}
+
+export interface AgentTools {
+  builtin: readonly BuiltinTool[];
+  host: readonly HostTool[];
+  operation: readonly string[];
 }
 
 export const EVIDENCE_UPLOAD_PARAMETERS = Type.Object(
@@ -54,67 +59,87 @@ export const BuiltinTool = {
 } as const;
 export type BuiltinTool = (typeof BuiltinTool)[keyof typeof BuiltinTool];
 
+const NODE_REVIEW_READS = [
+  "mission.node.get",
+  "mission.attempt.list",
+  "mission.outcome.list",
+  "mission.assessment.list",
+  "mission.evidence.list",
+  "mission.evidence.get",
+] as const;
+
 export const AGENT_DECLARATIONS: Readonly<Record<AgentName, AgentDeclaration>> =
   {
     "swe@1": {
       agent_name: "swe@1",
+      display_name: "SWE",
       agent_prompt: SWE_AGENT_PROMPT,
-      host_tools: [HostTool.EvidenceUpload, HostTool.LinkUpdateList],
-      tools: [
-        BuiltinTool.Read,
-        BuiltinTool.Edit,
-        BuiltinTool.Write,
-        BuiltinTool.Grep,
-        BuiltinTool.Find,
-        BuiltinTool.Ls,
-        BuiltinTool.Bash,
-      ],
+      tools: {
+        builtin: [
+          BuiltinTool.Read,
+          BuiltinTool.Edit,
+          BuiltinTool.Write,
+          BuiltinTool.Grep,
+          BuiltinTool.Find,
+          BuiltinTool.Ls,
+          BuiltinTool.Bash,
+        ],
+        host: [HostTool.EvidenceUpload, HostTool.LinkUpdateList],
+        operation: NODE_REVIEW_READS,
+      },
       overridable_fields: [
         "agent_provider",
         "model_identifier",
         "reasoning_effort",
         "fallback_configurations",
       ],
-      workbench: true,
     },
     "re@1": {
       agent_name: "re@1",
+      display_name: "RE",
       agent_prompt: RE_AGENT_PROMPT,
-      host_tools: [],
-      tools: [
-        BuiltinTool.Read,
-        BuiltinTool.Grep,
-        BuiltinTool.Find,
-        BuiltinTool.Ls,
-      ],
+      tools: {
+        builtin: [
+          BuiltinTool.Read,
+          BuiltinTool.Grep,
+          BuiltinTool.Find,
+          BuiltinTool.Ls,
+        ],
+        host: [],
+        operation: NODE_REVIEW_READS,
+      },
       overridable_fields: [
         "agent_provider",
         "model_identifier",
         "reasoning_effort",
         "fallback_configurations",
       ],
-      workbench: true,
     },
     "pe@1": {
       agent_name: "pe@1",
+      display_name: "PE",
       agent_prompt: PE_AGENT_PROMPT,
-      host_tools: [],
-      tools: [
-        BuiltinTool.Read,
-        BuiltinTool.Grep,
-        BuiltinTool.Find,
-        BuiltinTool.Ls,
-      ],
+      tools: {
+        builtin: [
+          BuiltinTool.Read,
+          BuiltinTool.Grep,
+          BuiltinTool.Find,
+          BuiltinTool.Ls,
+        ],
+        host: [],
+        operation: [],
+      },
       overridable_fields: [],
-      workbench: false,
     },
   };
 
-export const WORKBENCH_AGENT_NAMES: readonly string[] = Object.values(
-  AGENT_DECLARATIONS,
-)
-  .filter((declaration) => declaration.workbench)
-  .map((declaration) => declaration.agent_name);
+const NO_OPERATIONS = 0;
+
+export function workbenchAgentNames(): string[] {
+  return Object.values(AGENT_DECLARATIONS)
+    .filter((declaration) => declaration.tools.operation.length > NO_OPERATIONS)
+    .map((declaration) => declaration.agent_name);
+}
 
 export function getAgentDeclaration(
   agentName: string,

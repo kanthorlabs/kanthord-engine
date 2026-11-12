@@ -32,10 +32,7 @@ import {
   type Service,
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
-import {
-  getAgentDeclaration,
-  WORKBENCH_AGENT_NAMES,
-} from "../agent/catalog.ts";
+import { getAgentDeclaration, workbenchAgentNames } from "../agent/catalog.ts";
 import { AgentErrorCode, type AgentView } from "../agent/contract.ts";
 import { openSession, withDeadline } from "../agent/agent-session.ts";
 import {
@@ -196,7 +193,7 @@ function refused(sessionId: string): OperationError {
 }
 
 function requireAgent(agentName: string): void {
-  if (!WORKBENCH_AGENT_NAMES.includes(agentName))
+  if (!workbenchAgentNames().includes(agentName))
     throw new OperationError(
       HttpStatus.NotFound,
       AgentErrorCode.AgentNotFound,
@@ -695,7 +692,7 @@ export class WorkbenchService implements Service {
   async list(agentName: string | undefined) {
     if (agentName !== undefined) requireAgent(agentName);
     const agentNames =
-      agentName === undefined ? WORKBENCH_AGENT_NAMES : [agentName];
+      agentName === undefined ? workbenchAgentNames() : [agentName];
     const items = [];
     for (const name of agentNames)
       for (const stored of await listSessions(

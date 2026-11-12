@@ -26,8 +26,10 @@ export async function toolDeclarations(agentName: string): Promise<
     [BuiltinTool.Ls]: pi.createLsToolDefinition,
     [BuiltinTool.Bash]: pi.createBashToolDefinition,
   };
-  assert.ok(agent.tools.every((name) => Object.hasOwn(factories, name)));
-  const builtin = agent.tools.map((name) => {
+  assert.ok(
+    agent.tools.builtin.every((name) => Object.hasOwn(factories, name)),
+  );
+  const builtin = agent.tools.builtin.map((name) => {
     const definition = factories[name](piAgentDirectory());
     return {
       name: definition.name,
@@ -40,7 +42,7 @@ export async function toolDeclarations(agentName: string): Promise<
   });
   return [
     ...builtin,
-    ...agent.host_tools.map((name) => ({
+    ...agent.tools.host.map((name) => ({
       name,
       source: ToolSource.Host,
       input_schema: JSON.parse(

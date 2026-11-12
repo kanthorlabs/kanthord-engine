@@ -49,12 +49,12 @@ import { isString } from "../kernel/values.ts";
 import { createModelRuntime, resolveModel } from "../llm/model-connector.ts";
 import { PROJECT_SERVICE_NAME } from "./contract.ts";
 import {
-  PE_AGENT_NAME,
   EnvironmentAgent,
   type EnvironmentModelRuntimeFactory,
   EnvironmentSessionEnd,
   type EnvironmentSessionHandle,
   type EnvironmentSessionInput,
+  PE_AGENT_NAME,
 } from "./environment-agent.ts";
 import { EnvironmentTarget, type ProofFile } from "./environment-state.ts";
 

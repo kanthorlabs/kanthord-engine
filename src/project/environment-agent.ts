@@ -294,7 +294,7 @@ export class EnvironmentAgent {
         templates,
       ),
       allowlist: [
-        ...declaration.tools,
+        ...declaration.tools.builtin,
         ...customTools.map((tool) => tool.name),
       ],
       customTools,
