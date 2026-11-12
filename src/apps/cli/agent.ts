@@ -85,6 +85,8 @@ const GET_INVALID_VIEW = "cli.agent.get.invalid_view";
 const GET_BINDING_PAIR = "cli.agent.get.project_binding_pair_required";
 const LIMIT_INVALID = "cli.pagination.limit_invalid";
 const LIMIT_OUT_OF_RANGE = "cli.pagination.limit_out_of_range";
+const AGENT_LIST_TOKEN_REQUIRED = "cli.agent.list.token_required";
+const AGENT_LIST_INDETERMINATE = "cli.agent.list.indeterminate";
 const LIST_TOKEN_REQUIRED = "cli.agent.enablement.list.token_required";
 const GET_TOKEN_REQUIRED = "cli.agent.enablement.get.token_required";
 const PUT_TOKEN_REQUIRED = "cli.agent.enablement.put.token_required";
@@ -120,10 +122,7 @@ const REMOVE_INVALID_REVISION = "cli.agent.enablement.remove.invalid_revision";
 const PROVIDER_REMOVE_INVALID_REVISION =
   "cli.agent.enablement.provider.remove.invalid_revision";
 
-async function list(command: Command): Promise<void> {
-  const options = command.optsWithGlobals();
-  const { endpoint, token } = resolveClient(options);
-  requireToken(token, LIST_TOKEN_REQUIRED);
+function listQuery(options: Record<string, string | undefined>) {
   const limit =
     options.limit === undefined
       ? LIST_LIMIT_DEFAULT
@@ -133,18 +132,37 @@ async function list(command: Command): Promise<void> {
       LIMIT_OUT_OF_RANGE,
       `limit must be at most ${LIST_LIMIT_MAX}`,
     );
+  return {
+    limit,
+    ...(options.cursor !== undefined ? { cursor: options.cursor } : {}),
+  };
+}
+
+async function list(command: Command): Promise<void> {
+  const options = command.optsWithGlobals();
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, LIST_TOKEN_REQUIRED);
   const result = await httpClient(agentOperations, endpoint, token)[
     "enablement.list"
-  ]({
+  ]({ params: {}, query: listQuery(options), body: null });
+  process.stdout.write(
+    `${JSON.stringify(handleReadResult(result, LIST_INDETERMINATE))}\n`,
+  );
+}
+
+async function agentList(command: Command): Promise<void> {
+  assert.equal(agentOperations.list.access, AccessPolicy.Human);
+  assert.equal(agentOperations.list.mutation, false);
+  const options = command.optsWithGlobals();
+  const { endpoint, token } = resolveClient(options);
+  requireToken(token, AGENT_LIST_TOKEN_REQUIRED);
+  const result = await httpClient(agentOperations, endpoint, token).list({
     params: {},
-    query: {
-      limit,
-      ...(options.cursor !== undefined ? { cursor: options.cursor } : {}),
-    },
+    query: listQuery(options),
     body: null,
   });
   process.stdout.write(
-    `${JSON.stringify(handleReadResult(result, LIST_INDETERMINATE))}\n`,
+    `${JSON.stringify(handleReadResult(result, AGENT_LIST_INDETERMINATE))}\n`,
   );
 }
 
@@ -438,6 +456,16 @@ export function addAgentCommand(program: Command): void {
       "Caller JWT (otherwise KANTHORD_TOKEN or cli.yaml)",
       singleUse("--token"),
     );
+  agent
+    .command(LIST)
+    .description("List every catalog agent as JSON (human JWT)")
+    .option("--limit <count>", "Maximum results per page", singleUse("--limit"))
+    .option(
+      "--cursor <cursor>",
+      "Continue from a cursor",
+      singleUse("--cursor"),
+    )
+    .action((_options, command: Command) => agentList(command));
   agent
     .command("get")
     .argument("<agent-name>", "Agent name")

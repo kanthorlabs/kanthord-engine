@@ -28,7 +28,12 @@ import {
 } from "../../kernel/test-support.ts";
 import { isString } from "../../kernel/values.ts";
 import { AGENT_DECLARATIONS } from "../../agent/catalog.ts";
-import { AgentErrorCode, agentOperations } from "../../agent/contract.ts";
+import {
+  AGENT_NAMES,
+  AgentErrorCode,
+  agentOperations,
+  ToolSource,
+} from "../../agent/contract.ts";
 import { loadPi } from "../../agent/pi.ts";
 import {
   REDACTION_LOG_MESSAGE,
@@ -457,6 +462,39 @@ test("the workbench lists and opens no pe@1 session", async (t) => {
     HttpStatus.NotFound,
     "agent.catalog.not_found",
   );
+});
+
+test("(happy path) agent.list answers every catalog agent in name order with its consumers and tool counts", async (t) => {
+  const fixture = await workbenchFixture(t);
+  const listed = completed(
+    await fixture.agent.list(
+      { params: {}, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  assert.deepEqual(
+    listed.items.map(({ agent_name }) => agent_name),
+    [...AGENT_NAMES].sort(),
+  );
+  const item = (name: string) =>
+    listed.items.find(({ agent_name }) => agent_name === name)!;
+  const ops = completed(
+    await fixture.agent.get(
+      { params: { agent_name: "ops@1" }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  assert.equal(item("ops@1").display_name, OPS_DISPLAY_NAME);
+  assert.deepEqual(item("ops@1").worker_names, []);
+  assert.deepEqual(item("ops@1").consumers, ["workbench"]);
+  assert.equal(
+    item("ops@1").tool_counts.operation,
+    ops.tools.filter(({ source }) => source === ToolSource.Operation).length,
+  );
+  assert.equal(item("ops@1").enablement, null);
+  assert.deepEqual(item("pe@1").consumers, ["worker"]);
+  assert.deepEqual(item("swe@1").consumers, ["workbench", "worker"]);
+  assert.deepEqual(item("re@1").consumers, ["workbench", "worker"]);
 });
 
 test("a stored session resumes from the last entry of each kind and lists through pi", async (t) => {
@@ -909,6 +947,7 @@ test("a session resumes after a restart with its configuration and its completed
 const TOOL_USE = "toolUse" as const;
 const SPARE = "spare";
 const TOOL_RESULT = "toolResult";
+const OPS_DISPLAY_NAME = "Yumi";
 const PROVIDER_ADD = "agent.enablement.provider.add";
 
 function listOperations(t: TestContext, ...ids: string[]) {

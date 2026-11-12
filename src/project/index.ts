@@ -9,6 +9,7 @@ export {
 export {
   EnvironmentAgent,
   type EnvironmentModelRuntimeFactory,
+  PE_AGENT_NAME,
 } from "./environment-agent.ts";
 export type {
   EnvironmentProbeRunner,

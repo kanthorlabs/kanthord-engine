@@ -321,6 +321,8 @@ const fakeAgentCollaborations: Omit<AgentDependencies, "store"> = {
   providerHealthCheck: () => async () => ResourceStatus.Unknown,
   providerCapability: () => PROVIDER_CAPABILITY,
   toolDeclarations: async () => [],
+  workerNamesOf: () => [],
+  workerAgentNames: [],
   logger: pino({ enabled: false }),
 };
 const WORKER_CONFIG = {

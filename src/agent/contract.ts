@@ -101,6 +101,13 @@ export const PromptSourceReason = {
 export type PromptSourceReason =
   (typeof PromptSourceReason)[keyof typeof PromptSourceReason];
 
+export const PromptConsumer = {
+  Workbench: "workbench",
+  Worker: "worker",
+} as const;
+export type PromptConsumer =
+  (typeof PromptConsumer)[keyof typeof PromptConsumer];
+
 export const PromptView = { Final: "final" } as const;
 export type PromptView = (typeof PromptView)[keyof typeof PromptView];
 
@@ -463,6 +470,7 @@ export const chainCoolingSchema = z.strictObject({
 
 export const agentDeclarationSchema = z.strictObject({
   agent_name: z.string().min(1),
+  display_name: z.string().min(1),
   configuration_schema: z.record(z.string(), z.unknown()),
   overridable_fields: z.array(z.string()),
   prompt: promptAnswerSchema,
@@ -472,6 +480,16 @@ export const agentDeclarationSchema = z.strictObject({
   active_position: z.number().int().nonnegative().nullable(),
   cooling: chainCoolingSchema.nullable(),
 });
+
+export const agentListItemSchema = z.strictObject({
+  agent_name: z.string().min(1),
+  display_name: z.string().min(1),
+  worker_names: z.array(z.string().min(1)),
+  consumers: z.array(z.enum([PromptConsumer.Workbench, PromptConsumer.Worker])),
+  tool_counts: z.record(z.enum(ToolSource), z.number().int().min(0)),
+  enablement: agentEnablementSchema.nullable(),
+});
+export type AgentListItem = z.infer<typeof agentListItemSchema>;
 
 const emptyFields = z.strictObject({});
 const agentParams = z.strictObject({ agent_name: z.string().min(1) });
@@ -499,6 +517,33 @@ const enablementMutation = {
 } as const;
 
 export const agentOperations = {
+  list: {
+    ...enablementOperation,
+    id: "agent.list",
+    method: HttpMethod.Get,
+    path: "/api/agent",
+    mutation: false,
+    body: false,
+    input: z.strictObject({
+      params: emptyFields,
+      query: z.strictObject({
+        limit: z.coerce
+          .number()
+          .int()
+          .min(1)
+          .max(LIST_LIMIT_MAX)
+          .default(LIST_LIMIT_DEFAULT),
+        cursor: z.string().min(1).optional(),
+      }),
+      body: z.null(),
+    }),
+    output: z.strictObject({
+      items: z.array(agentListItemSchema),
+      next_cursor: z.string().nullable(),
+    }),
+    description:
+      "List every catalog agent in ascending agent-name order, with its consumers and tool counts.",
+  },
   "enablement.list": {
     ...enablementOperation,
     id: "agent.enablement.list",

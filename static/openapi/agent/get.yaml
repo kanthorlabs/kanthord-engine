@@ -121,6 +121,9 @@ components:
         agent_name:
           type: string
           minLength: 1
+        display_name:
+          type: string
+          minLength: 1
         configuration_schema:
           type: object
           propertyNames:
@@ -476,6 +479,7 @@ components:
             - type: "null"
       required:
         - agent_name
+        - display_name
         - configuration_schema
         - overridable_fields
         - prompt

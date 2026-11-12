@@ -24,6 +24,7 @@ import {
 } from "./configuration.ts";
 import {
   type AdvancingFailure,
+  AGENT_NAMES,
   AGENT_PROVIDER_TARGET_KIND,
   agentCooldownSchema,
   type AgentDependentBinding,
@@ -31,6 +32,7 @@ import {
   agentEnablementSchema,
   type AgentEntry,
   AgentErrorCode,
+  type AgentListItem,
   agentModelSchema,
   agentOperations,
   type AgentProviderItem,
@@ -57,6 +59,7 @@ import {
   type ProviderCapabilityFn,
   type ProviderHealthCheckFn,
   type ToolDeclarationsFn,
+  ToolSource,
 } from "./contract.ts";
 import {
   agentProvidersDependentOn,
@@ -66,6 +69,7 @@ import {
   getEnablement,
   insertEnablementRevision,
   listEnablements,
+  pageAgentNames,
   readEnablementRevision,
 } from "./enablements.ts";
 import { cooldownDuration } from "./cooldowns.ts";
@@ -106,6 +110,8 @@ import {
 } from "./prompt-templates.ts";
 
 const NO_ITEMS = 0;
+const NO_TOOLS = 0;
+const ONE_TOOL = 1;
 const LAST_PROVIDER = 1;
 const HEALTH_PAGE_SIZE = 100;
 const FIRST_POSITION = 0;
@@ -344,6 +350,8 @@ export interface Dependencies {
   providerHealthCheck: ProviderHealthCheckFn;
   providerCapability: ProviderCapabilityFn;
   toolDeclarations: ToolDeclarationsFn;
+  workerNamesOf(agentName: string): string[];
+  workerAgentNames: readonly string[];
   logger: Logger;
   clock?: () => number;
 }
@@ -1308,7 +1316,57 @@ export class AgentComponent {
     );
   }
 
+  private consumersOf(agentName: string): AgentListItem["consumers"] {
+    return [
+      ...(workbenchAgentNames().includes(agentName)
+        ? [PromptConsumer.Workbench]
+        : []),
+      ...(this.dependencies.workerAgentNames.includes(agentName)
+        ? [PromptConsumer.Worker]
+        : []),
+    ];
+  }
+
+  private async toolCountsOf(
+    agentName: string,
+  ): Promise<AgentListItem["tool_counts"]> {
+    const counts = Object.fromEntries(
+      Object.values(ToolSource).map((source) => [source, NO_TOOLS]),
+    ) as AgentListItem["tool_counts"];
+    for (const { source } of await this.dependencies.toolDeclarations(
+      agentName,
+    ))
+      counts[source] += ONE_TOOL;
+    return counts;
+  }
+
   declare(registry: OperationRegistry): void {
+    registry.register(agentOperations.list, async ({ query }, caller) => {
+      const page = pageAgentNames(
+        [...AGENT_NAMES].sort(),
+        query.limit,
+        query.cursor ?? null,
+      );
+      const toolCounts = new Map<string, AgentListItem["tool_counts"]>();
+      for (const name of page.names)
+        toolCounts.set(name, await this.toolCountsOf(name));
+      return caller.commit((tx) => ({
+        items: page.names.map((name) => {
+          const declaration = getAgentDeclaration(name);
+          assert.ok(declaration);
+          const row = getEnablement(tx, name);
+          return {
+            agent_name: name,
+            display_name: declaration.display_name,
+            worker_names: this.dependencies.workerNamesOf(name),
+            consumers: this.consumersOf(name),
+            tool_counts: toolCounts.get(name)!,
+            enablement: row ? wireRecord(row) : null,
+          };
+        }),
+        next_cursor: page.next_cursor,
+      }));
+    });
     registry.register(agentOperations["enablement.list"], ({ query }, caller) =>
       caller.commit((tx) => {
         const page = listEnablements(tx, query.limit, query.cursor ?? null);
@@ -1395,6 +1453,7 @@ export class AgentComponent {
           assert.ok(view);
           return {
             agent_name: declaration.agent_name,
+            display_name: declaration.display_name,
             configuration_schema: z.toJSONSchema(effectiveConfigurationSchema),
             overridable_fields: [...declaration.overridable_fields],
             prompt:

@@ -29,7 +29,7 @@ The request, output, failure and replay rules of the [Worker shared contract](./
 
 | Status | Command after `kanthord agent`                                                                                           | Route                                                                 | Operation ID                           | Access  |
 | ------ | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- | -------------------------------------- | ------- |
-| P      | `list [L]`                                                                                                               | `GET /api/agent`                                                      | `agent.list`                           | `human` |
+| I      | `list [L]`                                                                                                               | `GET /api/agent`                                                      | `agent.list`                           | `human` |
 | I      | `get <agent-name> [--view final] [--project <project-id> --binding-id <binding-id> \| --node <node-id> [--attempt <k>]]` | `GET /api/agent/:agent_name`                                          | `agent.get`                            | `human` |
 | I      | `prompt resolve --execution <execution-id> --agent <agent-name>`                                                         | `GET /api/agent/prompt/resolve`                                       | `agent.prompt.resolve`                 | `human` |
 | I      | `enablement list [L] [R]`                                                                                                | `GET /api/agent/enablement`                                           | `agent.enablement.list`                | `human` |
@@ -58,12 +58,21 @@ The Onboarding component of the Project Service runs `pe@1`.
 
 ### `list`
 
-This command remains proposed. It uses `[L]`, no positional arguments and no filters.
+It uses `[L]`, no positional arguments and no filters.
 Required token: human JWT. Query holds `limit` and optional `cursor`. Returns
 `{ items, next_cursor }`, paged by `agent_name` in ascending alphabetical order.
 It lists every catalog agent, also an agent without an enablement. Each item holds
-`agent_name: AgentName`, `worker_names: WorkerName[]` and `enablement`, the
+`agent_name: AgentName`, `display_name`, `worker_names: WorkerName[]`, `consumers`,
+`tool_counts` and `enablement`, the
 [agent enablement record](#agent-enablement-record) or `null` when no record exists.
+
+`consumers` names the services that run the agent, in the order `workbench`, `worker`:
+
+- `workbench`: the agent lists at least one operation tool.
+- `worker`: a released `kanthord` worker names the agent, or the agent is the environment agent `pe@1` of the Project Service.
+
+An agent that no service runs answers `[]`.
+`tool_counts` counts the tool declarations of the agent by `source`, with one key for each of `builtin`, `host`, `kanthord-mcp` and `operation`. A source with no tool counts `0`. The counts equal the `tools` of `agent get`.
 
 ### `get <agent-name>`
 
@@ -74,7 +83,7 @@ kanthord agent get <agent-name> [--view final] [--project <project-id> --binding
 `agent-name` is required `AgentName`, with no default, and maps to
 `params.agent_name`. The key names one catalog declaration, not a worker binding.
 Required token: human JWT. Absent body. HTTP `200` returns
-`agent_name` and the following declaration/configuration fields:
+`agent_name`, `display_name` and the following declaration/configuration fields:
 
 | Option                      | Query        | Meaning                                                                                                                                                                                                                    |
 | --------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -95,7 +104,7 @@ Without `--project`, `--binding-id` and `--node`, a workbench agent answers the 
 | `overridable_fields`   | Array of field paths allowed in a Project override; no wildcard permission to add fields. For `swe@1` and `re@1` it is `["agent_provider", "model_identifier", "reasoning_effort"]`. For `pe@1` it is `[]`.                                                                                                                                                                                                                  |
 | `enablement`           | The [agent enablement record](#agent-enablement-record), or `null` when no record exists.                                                                                                                                                                                                                                                                                                                                     |
 | `prompt`               | Required object `{ parts, final }`. The [prompt answer](#the-prompt-answer) below defines both fields.                                                                                                                                                                                                                                                                                                                        |
-| `tools`                | Array of permitted tool declarations; each item has `name: string`, `source` (one of `builtin`, `kanthord-mcp`, `host`) and `input_schema: object`. Project-added tools are inspected through Project configuration instead.                                                                                                                                                                                                  |
+| `tools`                | Array of permitted tool declarations; each item has `name: string`, `source` (one of `builtin`, `kanthord-mcp`, `host`, `operation`), `input_schema: object`, `description: string` and `guard_class` (`read` or `card` for an `operation` item, `null` for a built-in or host item). A built-in or host item holds `description: ""`. Project-added tools are inspected through Project configuration instead.                                                                                                                                                                                                  |
 | `chain`                | Array of the fallback chain of the enablement: the default configuration, then each `fallback_configurations` entry. Each item holds `position`, `level`, `agent_provider`, `provider`, `credential`, `model_identifier`, `reasoning_effort` and `cooldown`. `cooldown` is `null` or `{ strikes, available_at }` of the hold of the `server` copy of the credential. `[]` when the enablement is absent, disabled or invalid. |
 | `active_position`      | The `position` of the first chain entry whose `cooldown` is `null` or ended. `null` when every chain entry has a live cooldown or `chain` is `[]`.                                                                                                                                                                                                                                                                            |
 | `cooling`              | `{ code: "agent.configuration.chain_cooling", available_at }` when every chain entry has a live cooldown, with the earliest `available_at` of the chain. Otherwise `null`.                                                                                                                                                                                                                                                    |

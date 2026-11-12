@@ -492,6 +492,8 @@ function pinHarness(
     providerHealthCheck: () => async () => ResourceStatus.Unknown,
     providerCapability: () => "model-list read",
     toolDeclarations: async () => [],
+    workerNamesOf: () => [],
+    workerAgentNames: [],
     logger,
     clock: () => FIXTURE_NOW,
   });

@@ -1,0 +1,279 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: agent.list
+    tags:
+      - agent
+    description: List every catalog agent in ascending agent-name order, with its
+      consumers and tool counts.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/agent.list.Input/properties/query/properties/limit"
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/agent.list.Input/properties/query/properties/cursor"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/agent.list.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    agent.list.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties:
+            limit:
+              default: 100
+              type: integer
+              minimum: 1
+              maximum: 1000
+            cursor:
+              type: string
+              minLength: 1
+          required: []
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    agent.list.Output:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              agent_name:
+                type: string
+                minLength: 1
+              display_name:
+                type: string
+                minLength: 1
+              worker_names:
+                type: array
+                items:
+                  type: string
+                  minLength: 1
+              consumers:
+                type: array
+                items:
+                  type: string
+                  enum:
+                    - workbench
+                    - worker
+              tool_counts:
+                type: object
+                propertyNames:
+                  type: string
+                  enum:
+                    - host
+                    - builtin
+                    - operation
+                    - kanthord-mcp
+                additionalProperties:
+                  type: integer
+                  minimum: 0
+                  maximum: 9007199254740991
+                required:
+                  - host
+                  - builtin
+                  - operation
+                  - kanthord-mcp
+              enablement:
+                anyOf:
+                  - type: object
+                    properties:
+                      agent_name:
+                        type: string
+                      state:
+                        type: string
+                        enum:
+                          - enabled
+                          - disabled
+                      agent_providers:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                              minLength: 1
+                            provider:
+                              type: string
+                              enum:
+                                - openai-compatible
+                                - amazon-bedrock
+                                - ant-ling
+                                - anthropic
+                                - anthropic-subscription
+                                - azure
+                                - baseten
+                                - cerebras
+                                - cloudflare-ai-gateway
+                                - cloudflare-workers-ai
+                                - deepseek
+                                - fireworks
+                                - github-copilot
+                                - google
+                                - google-vertex
+                                - groq
+                                - huggingface
+                                - kimi-coding
+                                - meta
+                                - minimax
+                                - minimax-cn
+                                - mistral
+                                - moonshotai
+                                - moonshotai-cn
+                                - nvidia
+                                - openai
+                                - openai-codex
+                                - opencode
+                                - opencode-go
+                                - openrouter
+                                - qwen-token-plan
+                                - qwen-token-plan-cn
+                                - qwen-token-plan-individual
+                                - radius
+                                - together
+                                - typesafe
+                                - vercel-ai-gateway
+                                - xai
+                                - xiaomi
+                                - xiaomi-token-plan-ams
+                                - xiaomi-token-plan-cn
+                                - xiaomi-token-plan-sgp
+                                - zai
+                                - zai-coding-cn
+                            credential:
+                              type: string
+                              minLength: 1
+                          required:
+                            - name
+                            - provider
+                            - credential
+                          additionalProperties: false
+                      default_configuration:
+                        type: object
+                        properties:
+                          agent_provider:
+                            type: string
+                            minLength: 1
+                          model_identifier:
+                            type: string
+                            minLength: 1
+                          reasoning_effort:
+                            type: string
+                            enum:
+                              - off
+                              - minimal
+                              - low
+                              - medium
+                              - high
+                              - xhigh
+                              - max
+                        required:
+                          - agent_provider
+                          - model_identifier
+                          - reasoning_effort
+                        additionalProperties: false
+                      fallback_configurations:
+                        maxItems: 7
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            agent_provider:
+                              type: string
+                              minLength: 1
+                            model_identifier:
+                              type: string
+                              minLength: 1
+                            reasoning_effort:
+                              type: string
+                              enum:
+                                - off
+                                - minimal
+                                - low
+                                - medium
+                                - high
+                                - xhigh
+                                - max
+                          required:
+                            - agent_provider
+                            - model_identifier
+                            - reasoning_effort
+                          additionalProperties: false
+                      revision:
+                        type: integer
+                        exclusiveMinimum: 0
+                        maximum: 9007199254740991
+                    required:
+                      - agent_name
+                      - state
+                      - agent_providers
+                      - default_configuration
+                      - fallback_configurations
+                      - revision
+                    additionalProperties: false
+                  - type: "null"
+            required:
+              - agent_name
+              - display_name
+              - worker_names
+              - consumers
+              - tool_counts
+              - enablement
+            additionalProperties: false
+        next_cursor:
+          anyOf:
+            - type: string
+            - type: "null"
+      required:
+        - items
+        - next_cursor
+      additionalProperties: false

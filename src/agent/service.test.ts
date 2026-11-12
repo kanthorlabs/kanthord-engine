@@ -149,6 +149,8 @@ const fakeCollaborations: Omit<Dependencies, "store" | "credentialHolds"> = {
   providerHealthCheck: () => async () => ResourceStatus.Unknown,
   providerCapability: () => PROVIDER_CAPABILITY,
   toolDeclarations: async () => TOOLS,
+  workerNamesOf: () => [],
+  workerAgentNames: [],
   logger: pino({ enabled: false }),
 };
 
