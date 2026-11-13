@@ -17,7 +17,10 @@ import {
   Type,
 } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
+import {
+  SHIPPED_TEMPLATE_SET,
+  SHIPPED_TEMPLATES,
+} from "../agent/prompt-templates.ts";
 import { getAgentDeclaration } from "../agent/catalog.ts";
 import {
   AgentErrorCode,
@@ -49,12 +52,12 @@ import { isString } from "../kernel/values.ts";
 import { createModelRuntime, resolveModel } from "../llm/model-connector.ts";
 import { PROJECT_SERVICE_NAME } from "./contract.ts";
 import {
-  ENV_AGENT_NAME,
   EnvironmentAgent,
   type EnvironmentModelRuntimeFactory,
   EnvironmentSessionEnd,
   type EnvironmentSessionHandle,
   type EnvironmentSessionInput,
+  PE_AGENT_NAME,
 } from "./environment-agent.ts";
 import { EnvironmentTarget, type ProofFile } from "./environment-state.ts";
 
@@ -207,7 +210,7 @@ function fixture(
     hostHome: temporary(t),
     identity,
     agentView: (_tx, name) => {
-      assert.equal(name, ENV_AGENT_NAME);
+      assert.equal(name, PE_AGENT_NAME);
       return state.view;
     },
     serverAgentCredentials: (input) => {
@@ -224,6 +227,7 @@ function fixture(
     composePrompt: (agentName, context) =>
       resolveAgentPrompt({
         agent: getAgentDeclaration(agentName)!,
+        templates: SHIPPED_TEMPLATE_SET,
         directory: state.promptDirectory ?? null,
         workbench: false,
         context,
@@ -240,7 +244,7 @@ function fixture(
                     instruction_file: INSTRUCTION_PATH,
                     repository: REPOSITORY_TEXT,
                   }),
-              agents: { [ENV_AGENT_NAME]: ENV_BINDING_TEXT, "swe@1": SWE_TEXT },
+              agents: { [PE_AGENT_NAME]: ENV_BINDING_TEXT, "swe@1": SWE_TEXT },
             },
           }
         : null,
@@ -344,7 +348,7 @@ test(
 );
 
 test(
-  "env@1 reads the instruction file at the commit of its run before the stored repository prompt",
+  "pe@1 reads the instruction file at the commit of its run before the stored repository prompt",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const f = fixture(t, [fauxAssistantMessage("done")], {
@@ -403,7 +407,7 @@ test(
   async (t) => {
     const promptDirectory = temporary(t);
     writeFileSync(
-      join(promptDirectory, `${ENV_AGENT_NAME}.md`),
+      join(promptDirectory, `${PE_AGENT_NAME}.md`),
       INVALID_OVERRIDE_TEXT,
     );
     const f = fixture(t, [fauxAssistantMessage("done")], {
@@ -414,8 +418,8 @@ test(
       status: HttpStatus.Conflict,
       code: AgentErrorCode.PromptTemplateInvalid,
       details: {
-        file: `${ENV_AGENT_NAME}.md`,
-        path: join(promptDirectory, `${ENV_AGENT_NAME}.md`),
+        file: `${PE_AGENT_NAME}.md`,
+        path: join(promptDirectory, `${PE_AGENT_NAME}.md`),
         reason: InvalidReason.ControlCharacter,
       },
     });
@@ -489,7 +493,7 @@ test(
 );
 
 test(
-  "the env@1 session redacts its JSON failure, keeps the confinement and logs the counts after drive",
+  "the pe@1 session redacts its JSON failure, keeps the confinement and logs the counts after drive",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const fakeKey = ["AKIA", "KANTHORDCANARY01"].join("");

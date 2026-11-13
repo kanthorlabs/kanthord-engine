@@ -15,9 +15,20 @@ import {
   OperationResultType,
 } from "../kernel/operation.ts";
 import { BuiltinTool, getAgentDeclaration } from "../agent/catalog.ts";
+import {
+  GuardClass,
+  type ToolDeclaration,
+  ToolSource,
+} from "../agent/contract.ts";
 import { childEnvironment } from "../agent/environment.ts";
 import { processBashOperations } from "../agent/bash-process.ts";
+import {
+  intakeCredentialOperations,
+  intakeOperations,
+} from "../intake/contract.ts";
 import { llmOperations } from "../llm/contract.ts";
+import { missionOperations } from "../mission/contract.ts";
+import { environmentSecretOperations } from "../project/contract.ts";
 import { repositoryOperations } from "../repository/contract.ts";
 import { storageOperations } from "../storage/contract.ts";
 import { createIdempotencyKey } from "../kernel/identity.ts";
@@ -36,6 +47,15 @@ export const SECRET_OPERATION_IDS: ReadonlySet<string> = new Set([
   storageOperations.create.id,
   storageOperations.rotate.id,
   storageOperations.check.id,
+  intakeOperations["inbound.get"].id,
+  intakeOperations["storage.get"].id,
+  missionOperations["evidence.asset.content.get"].id,
+  intakeCredentialOperations.create.id,
+  intakeCredentialOperations.rotate.id,
+  intakeCredentialOperations.check.id,
+  environmentSecretOperations.create.id,
+  environmentSecretOperations.rotate.id,
+  environmentSecretOperations.check.id,
 ]);
 
 const HUMAN_POLICIES: readonly AccessPolicy[] = [
@@ -50,13 +70,17 @@ export type InvokeOperation = (
   options: ClientOptions,
 ) => Promise<OperationResult<unknown>>;
 
-export function toolOperations(operations: readonly Operation[]): Operation[] {
+export function toolOperations(
+  operations: readonly Operation[],
+  listed: readonly string[],
+): Operation[] {
   return operations.filter(
     (operation) =>
       HUMAN_POLICIES.includes(operation.access) &&
       operation.lifetime !== OperationLifetime.Stream &&
       !operation.secret &&
-      !SECRET_OPERATION_IDS.has(operation.id),
+      !SECRET_OPERATION_IDS.has(operation.id) &&
+      listed.includes(operation.id),
   );
 }
 
@@ -71,6 +95,24 @@ function parameters(operation: Operation): TSchema {
 
 export function toolName(operationId: string): string {
   return operationId.replaceAll(".", "--");
+}
+
+export function operationToolDeclarations(
+  operations: readonly Operation[],
+  agentName: string,
+): ToolDeclaration[] {
+  const agent = getAgentDeclaration(agentName);
+  assert.ok(agent);
+  const listed = agent.tools.operation;
+  return toolOperations(operations, listed)
+    .sort((a, b) => listed.indexOf(a.id) - listed.indexOf(b.id))
+    .map((operation) => ({
+      name: toolName(operation.id),
+      source: ToolSource.Operation,
+      input_schema: parameters(operation) as unknown as Record<string, unknown>,
+      description: operation.description,
+      guard_class: operation.mutation ? GuardClass.Card : GuardClass.Read,
+    }));
 }
 
 export function operationTool(
@@ -126,8 +168,8 @@ export function builtinTools(
   const agent = getAgentDeclaration(agentName);
   assert.ok(agent);
   assert.ok(cwd);
-  const allowlist: string[] = [...agent.tools];
-  if (!agent.tools.includes(BuiltinTool.Bash))
+  const allowlist: string[] = [...agent.tools.builtin];
+  if (!agent.tools.builtin.includes(BuiltinTool.Bash))
     return { allowlist, customTools: [] };
   const local = processBashOperations(pi.getShellConfig(), () => {}, {
     killGroupAtEnd: false,

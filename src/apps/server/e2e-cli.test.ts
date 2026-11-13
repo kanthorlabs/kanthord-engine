@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { AGENT_NAMES } from "../../agent/contract.ts";
 import {
   Consumer,
   InboundKind,
@@ -527,4 +528,22 @@ test("kanthord mission node check prints the link counts", async (t) => {
       refused: NO_ITEMS,
     },
   ]);
+});
+
+test("(happy path) kanthord agent list prints every catalog agent", async (t) => {
+  const fixture = await gatewayFixture(t);
+  const env = {
+    ...environment(temporary(t)),
+    KANTHORD_ENDPOINT: fixture.endpoint,
+    KANTHORD_TOKEN: fixture.token,
+  };
+  const result = await spawnKanthord(["agent", "list"], env, t.signal);
+  assert.equal(result.code, EXIT_SUCCESS, result.stderr);
+  const answer = JSON.parse(result.stdout) as {
+    items: { agent_name: string }[];
+  };
+  assert.deepEqual(
+    answer.items.map(({ agent_name }) => agent_name),
+    [...AGENT_NAMES].sort(),
+  );
 });

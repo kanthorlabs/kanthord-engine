@@ -32,10 +32,7 @@ import {
   type Service,
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
-import {
-  getAgentDeclaration,
-  WORKBENCH_AGENT_NAMES,
-} from "../agent/catalog.ts";
+import { getAgentDeclaration, workbenchAgentNames } from "../agent/catalog.ts";
 import { AgentErrorCode, type AgentView } from "../agent/contract.ts";
 import { openSession, withDeadline } from "../agent/agent-session.ts";
 import {
@@ -196,7 +193,7 @@ function refused(sessionId: string): OperationError {
 }
 
 function requireAgent(agentName: string): void {
-  if (!WORKBENCH_AGENT_NAMES.includes(agentName))
+  if (!workbenchAgentNames().includes(agentName))
     throw new OperationError(
       HttpStatus.NotFound,
       AgentErrorCode.AgentNotFound,
@@ -379,17 +376,18 @@ export class WorkbenchService implements Service {
         session.place.cwd,
       );
       const mutations = new Map<string, Operation>();
-      const operations = toolOperations(this.dependencies.operations()).map(
-        (operation) => {
-          if (operation.mutation)
-            mutations.set(toolName(operation.id), operation);
-          return operationTool(
-            operation,
-            this.dependencies.invoke,
-            () => session.requester,
-          );
-        },
-      );
+      const operations = toolOperations(
+        this.dependencies.operations(),
+        declaration.tools.operation,
+      ).map((operation) => {
+        if (operation.mutation)
+          mutations.set(toolName(operation.id), operation);
+        return operationTool(
+          operation,
+          this.dependencies.invoke,
+          () => session.requester,
+        );
+      });
       session.secrets = credentialSecrets(
         credentials,
         piProviderId(resolved.provider),
@@ -695,7 +693,7 @@ export class WorkbenchService implements Service {
   async list(agentName: string | undefined) {
     if (agentName !== undefined) requireAgent(agentName);
     const agentNames =
-      agentName === undefined ? WORKBENCH_AGENT_NAMES : [agentName];
+      agentName === undefined ? workbenchAgentNames() : [agentName];
     const items = [];
     for (const name of agentNames)
       for (const stored of await listSessions(

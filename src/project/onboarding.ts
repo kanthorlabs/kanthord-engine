@@ -96,9 +96,9 @@ const SESSION_FAILED = "project.onboarding.session_failed";
 const NO_TOOL_CALLS = 0;
 const NO_ATTEMPTS = 0;
 
-export const ENV_AGENT_ATTEMPT_LIMIT = 5;
-export const ENV_AGENT_TOOL_CALL_LIMIT = 64;
-export const ENV_AGENT_REPAIR_LIMIT = 3;
+export const PE_AGENT_ATTEMPT_LIMIT = 5;
+export const PE_AGENT_TOOL_CALL_LIMIT = 64;
+export const PE_AGENT_REPAIR_LIMIT = 3;
 
 export const AttemptRefusal = {
   AttemptLimit: "attempt_limit",
@@ -1154,7 +1154,7 @@ export class Onboarding {
     const { proofs } = this.dependencies;
     const path = environmentPath(group.resource_identity);
     const proof = this.proofAtCommit(group);
-    if (proof === null || proof.repairs >= ENV_AGENT_REPAIR_LIMIT) return;
+    if (proof === null || proof.repairs >= PE_AGENT_REPAIR_LIMIT) return;
     const failure = {
       ...proof,
       repairs: proofs.incrementRepairs(path, group.digest),
@@ -1554,7 +1554,7 @@ export class Onboarding {
     let attempts = NO_ATTEMPTS;
     const overLimit = (): boolean => {
       toolCalls++;
-      if (toolCalls <= ENV_AGENT_TOOL_CALL_LIMIT) return false;
+      if (toolCalls <= PE_AGENT_TOOL_CALL_LIMIT) return false;
       handle.end();
       return true;
     };
@@ -1603,10 +1603,10 @@ export class Onboarding {
     signal: AbortSignal,
   ): Promise<AttemptAnswer> {
     const attemptsLeft = Math.max(
-      ENV_AGENT_ATTEMPT_LIMIT - attempt,
+      PE_AGENT_ATTEMPT_LIMIT - attempt,
       NO_ATTEMPTS,
     );
-    if (attempt > ENV_AGENT_ATTEMPT_LIMIT) {
+    if (attempt > PE_AGENT_ATTEMPT_LIMIT) {
       handle.end();
       return {
         outcome: null,
@@ -1615,7 +1615,7 @@ export class Onboarding {
         attempts_left: attemptsLeft,
       };
     }
-    const lastAttempt = attempt === ENV_AGENT_ATTEMPT_LIMIT;
+    const lastAttempt = attempt === PE_AGENT_ATTEMPT_LIMIT;
     const record = this.liveRecord(key);
     const written = await this.dependencies.writeEnvironment(
       record.project_id,

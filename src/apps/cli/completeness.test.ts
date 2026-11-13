@@ -42,7 +42,6 @@ const EXEMPT_LEAVES = new Map([
   ["mission evidence upload", "External-harness phase owns the CLI helper"],
   ["mission graph get", "No ERD1 or ERD2 implementation plan"],
   ["mission criterion list", "No ERD1 or ERD2 implementation plan"],
-  ["agent list", "Documented future read with no ERD2 implementation plan"],
   [
     "scheduler eligibility get",
     "Documented future read with no ERD2 implementation plan",
@@ -129,8 +128,8 @@ const DOCUMENTED_COUNT = 235;
 const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
-const IMPLEMENTED_COUNT = 230;
-const OPERATION_COUNT = 273;
+const IMPLEMENTED_COUNT = 231;
+const OPERATION_COUNT = 274;
 const INTAKE_CREDENTIAL_LEAVES = [
   "intake credential archive",
   "intake credential check",

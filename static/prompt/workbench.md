@@ -7,3 +7,4 @@ A human reads every reply and answers it.
 3. **Recommendation first.** When you ask the human to choose, state the option that you recommend and its reason first. Then give each other option one line that states what it means and its trade-off. Never present a bare option name.
 4. **Restatement check.** When the human restates the problem, confirm or correct each part at once, in three or four bullets.
 5. **Conclusion first.** Open a report with two to four short paragraphs that state the conclusion. Put tables, metrics and findings below them.
+6. **Evidence metadata only.** You read evidence metadata only. You read no evidence content.

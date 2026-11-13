@@ -4,16 +4,12 @@ import {
   getAgentDeclaration,
   HOST_TOOL_PARAMETERS,
 } from "../agent/catalog.ts";
-import { ToolSource } from "../agent/contract.ts";
+import { type ToolDeclaration, ToolSource } from "../agent/contract.ts";
 import { loadPi, piAgentDirectory } from "../agent/pi.ts";
 
-export async function toolDeclarations(agentName: string): Promise<
-  {
-    name: string;
-    source: ToolSource;
-    input_schema: Record<string, unknown>;
-  }[]
-> {
+export async function toolDeclarations(
+  agentName: string,
+): Promise<ToolDeclaration[]> {
   const agent = getAgentDeclaration(agentName);
   assert.ok(agent, "Tool declarations require a known agent");
   const pi = await loadPi();
@@ -26,12 +22,16 @@ export async function toolDeclarations(agentName: string): Promise<
     [BuiltinTool.Ls]: pi.createLsToolDefinition,
     [BuiltinTool.Bash]: pi.createBashToolDefinition,
   };
-  assert.ok(agent.tools.every((name) => Object.hasOwn(factories, name)));
-  const builtin = agent.tools.map((name) => {
+  assert.ok(
+    agent.tools.builtin.every((name) => Object.hasOwn(factories, name)),
+  );
+  const builtin = agent.tools.builtin.map((name) => {
     const definition = factories[name](piAgentDirectory());
     return {
       name: definition.name,
       source: ToolSource.Builtin,
+      description: "",
+      guard_class: null,
       input_schema: JSON.parse(JSON.stringify(definition.parameters)) as Record<
         string,
         unknown
@@ -40,9 +40,11 @@ export async function toolDeclarations(agentName: string): Promise<
   });
   return [
     ...builtin,
-    ...agent.host_tools.map((name) => ({
+    ...agent.tools.host.map((name) => ({
       name,
       source: ToolSource.Host,
+      description: "",
+      guard_class: null,
       input_schema: JSON.parse(
         JSON.stringify(HOST_TOOL_PARAMETERS[name]),
       ) as Record<string, unknown>,

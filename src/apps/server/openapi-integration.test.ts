@@ -262,6 +262,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["storage.credential.platform_list", AccessPolicy.Human],
   ["storage.credential.check", AccessPolicy.Human],
   ["storage.credential.verify", AccessPolicy.Human],
+  ["agent.list", AccessPolicy.Human],
   ["agent.enablement.list", AccessPolicy.Human],
   ["agent.enablement.get", AccessPolicy.Human],
   ["agent.enablement.put", AccessPolicy.Human],
@@ -496,8 +497,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["footprint.measure.run", AccessPolicy.Human],
   ["footprint.backup.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 281;
-const ROUTED_OPERATION_COUNT = 266;
+const OPERATION_COUNT = 282;
+const ROUTED_OPERATION_COUNT = 267;
 const INTAKE_OPERATION_COUNT = 37;
 const INTAKE_ROUTED_OPERATION_COUNT = 24;
 const SERVICE_OPERATION_IDS = [

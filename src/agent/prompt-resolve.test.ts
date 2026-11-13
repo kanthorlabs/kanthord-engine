@@ -118,6 +118,7 @@ test("the references of a composition resolve to the composed text", async (t) =
   const composed = [
     ...(await resolveAgentPrompt({
       agent: getAgentDeclaration(AGENT)!,
+      templates: SHIPPED_TEMPLATE_SET,
       directory,
       workbench: false,
       context: background,
@@ -138,6 +139,7 @@ test("the references of a composition resolve to the composed text", async (t) =
     composed.map(({ part, origin }) => [part, origin]),
     [
       [PromptPart.Standard, PromptOrigin.Binary],
+      [PromptPart.Identity, PromptOrigin.Binary],
       [PromptPart.Role, PromptOrigin.File],
       [PromptPart.Binding, PromptOrigin.Database],
       [PromptPart.Framing, PromptOrigin.File],
@@ -175,6 +177,7 @@ test("each origin resolves its text and its layer and heading", async () => {
         digest: (
           await resolveAgentPrompt({
             agent: getAgentDeclaration(AGENT)!,
+            templates: SHIPPED_TEMPLATE_SET,
             directory: null,
             workbench: false,
             context: background,
@@ -266,8 +269,9 @@ test("a text whose digest or source changed resolves as changed with no text and
   const directory = temporary(t);
   const path = join(directory, `${AGENT}.md`);
   writeFileSync(path, OVERRIDE_TEXT);
-  const [, role] = await resolveAgentPrompt({
+  const [, , role] = await resolveAgentPrompt({
     agent: getAgentDeclaration(AGENT)!,
+    templates: SHIPPED_TEMPLATE_SET,
     directory,
     workbench: false,
     context: background,
@@ -332,8 +336,9 @@ test("an invalid source resolves as invalid and an unreachable remote as unreach
   mkdirSync(join(directory, "prompts"));
   const framingPath = join(directory, "prompts", "framing-worker.md");
   writeFileSync(framingPath, "Custom framing.");
-  const [, role] = await resolveAgentPrompt({
+  const [, , role] = await resolveAgentPrompt({
     agent: getAgentDeclaration(AGENT)!,
+    templates: SHIPPED_TEMPLATE_SET,
     directory,
     workbench: false,
     context: background,
@@ -407,11 +412,12 @@ test("the resolved swe@1 prompt forbids a merge of another branch and the resolv
   const roleText = async (agentName: string) => {
     const parts = await resolveAgentPrompt({
       agent: getAgentDeclaration(agentName)!,
+      templates: SHIPPED_TEMPLATE_SET,
       directory: null,
       workbench: false,
       context: background,
     });
-    const role = await resolveReference(referenceOf(parts[1]!), readers());
+    const role = await resolveReference(referenceOf(parts[2]!), readers());
     return role.text;
   };
   assert.ok(
@@ -424,6 +430,20 @@ test("the resolved swe@1 prompt forbids a merge of another branch and the resolv
       "A change in the diff that the requirement and the tasks do not ask for is a blocker, also when a merge of another branch brings it in.",
     ),
   );
+});
+
+test("(invariant guard) a recorded identity part resolves to the same text", async () => {
+  const [, identity] = await resolveAgentPrompt({
+    agent: getAgentDeclaration(AGENT)!,
+    templates: SHIPPED_TEMPLATE_SET,
+    directory: null,
+    workbench: false,
+    context: background,
+  });
+  assert.equal(identity!.part, PromptPart.Identity);
+  assert.match(identity!.text!, /^Your name is SWE\./);
+  const answer = await resolveReference(referenceOf(identity!), readers());
+  assert.deepEqual(answer, identity);
 });
 
 test("the examine evaluation prompt asks for finding_labels and the other evaluation prompt does not", () => {

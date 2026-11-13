@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   type AgentName,
+  PromptConsumer,
   PromptLayer,
   PromptOrigin,
   PromptPart,
@@ -13,12 +14,7 @@ import {
 import { digest } from "./prompt-composer.ts";
 import { renderTemplate } from "./prompt-templates.ts";
 
-export const PromptConsumer = {
-  Workbench: "workbench",
-  Worker: "worker",
-} as const;
-export type PromptConsumer =
-  (typeof PromptConsumer)[keyof typeof PromptConsumer];
+export { PromptConsumer } from "./contract.ts";
 
 const FRAMING_TEMPLATES: Record<PromptConsumer, PromptTemplate> = {
   [PromptConsumer.Workbench]: PromptTemplate.FramingWorkbench,
@@ -46,6 +42,7 @@ const NO_CHARACTERS = 0;
 
 const PART_LAYERS: Record<PromptPart, PromptLayer | null> = {
   [PromptPart.Standard]: PromptLayer.KanthorD,
+  [PromptPart.Identity]: PromptLayer.KanthorD,
   [PromptPart.Role]: PromptLayer.KanthorD,
   [PromptPart.Workbench]: PromptLayer.KanthorD,
   [PromptPart.InstructionFile]: PromptLayer.Repository,

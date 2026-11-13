@@ -109,6 +109,7 @@ import {
   ENVIRONMENT_SECRET_PLATFORMS,
   EnvironmentAgent,
   type EnvironmentModelRuntimeFactory,
+  PE_AGENT_NAME,
   projectMigrations,
   ProjectService,
   projectSshIdentityAuthorization,
@@ -143,7 +144,9 @@ import { mintServiceIdentity } from "../../kernel/service-mint.ts";
 import {
   agentPromptContribution,
   agentPromptSpanId,
+  agentsOfWorker,
   isHostedWorker,
+  RELEASED_WORKER_NAMES,
   storedPromptFacts,
   toolDeclarations,
   workerMigrations,
@@ -168,6 +171,7 @@ import { WorkerPool } from "./worker-pool.ts";
 import { instanceIssuer } from "./instance-issuer.ts";
 import { AgentComponent, agentMigrations } from "../../agent/index.ts";
 import {
+  operationToolDeclarations,
   WorkbenchFootprint,
   workbenchMigrations,
   type WorkbenchModelRuntimeFactory,
@@ -816,7 +820,21 @@ export function composeServices(options: ComposeServicesOptions) {
       },
       promptRecordOf,
     },
-    toolDeclarations: (name) => toolDeclarations(name),
+    workerNamesOf: (name) =>
+      RELEASED_WORKER_NAMES.filter((worker) =>
+        agentsOfWorker(worker).includes(name),
+      ),
+    workerAgentNames: [
+      ...RELEASED_WORKER_NAMES.flatMap(agentsOfWorker),
+      PE_AGENT_NAME,
+    ],
+    toolDeclarations: async (name) => [
+      ...(await toolDeclarations(name)),
+      ...operationToolDeclarations(
+        registry.all().map(({ operation }) => operation),
+        name,
+      ),
+    ],
     logger: options.logger,
   });
   const repositoryCredentials = new RepositoryCredentials({

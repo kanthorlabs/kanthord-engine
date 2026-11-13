@@ -27,7 +27,15 @@ import {
   temporaryDirectory,
 } from "../../kernel/test-support.ts";
 import { isString } from "../../kernel/values.ts";
-import { AgentErrorCode, agentOperations } from "../../agent/contract.ts";
+import { getAgentDeclaration } from "../../agent/catalog.ts";
+import {
+  AGENT_NAMES,
+  AgentErrorCode,
+  agentOperations,
+  GuardClass,
+  PromptPart,
+  ToolSource,
+} from "../../agent/contract.ts";
 import { loadPi } from "../../agent/pi.ts";
 import {
   REDACTION_LOG_MESSAGE,
@@ -51,11 +59,15 @@ import {
   toolName,
   type WorkbenchModelRuntimeFactory,
 } from "../../workbench/index.ts";
-import { gatewayFixture } from "./test-support.ts";
+import { MissionErrorCode, missionOperations } from "../../mission/contract.ts";
+import { projectOperations } from "../../project/contract.ts";
+import { COVERING_WORKER_BINDINGS, gatewayFixture } from "./test-support.ts";
 import { framing, PromptConsumer } from "../../agent/prompt-render.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 
 const AGENT = "swe@1";
+const REVIEW_AGENT = "re@1";
+const OPS = "ops@1";
 const ANTHROPIC = "anthropic";
 const DEFAULT = "default";
 const BACKUP = "backup";
@@ -136,6 +148,7 @@ async function workbenchFixture(
   script: FauxResponseStep[] = [],
   stateDirectory?: string,
   agentDirectory = temporary(t),
+  enabledAgents: readonly string[] = [AGENT],
 ) {
   const scripted = scriptedFactory(script);
   const fixture = await gatewayFixture(t, {
@@ -161,40 +174,43 @@ async function workbenchFixture(
       ),
     );
   const agent = directClient(agentOperations, fixture.invocation);
-  completed(
-    await agent["enablement.put"](
-      {
-        params: { agent_name: AGENT },
-        query: {},
-        body: {
-          agent_providers: [
-            {
-              name: DEFAULT,
-              provider: ANTHROPIC,
-              credential: PRIMARY_CREDENTIAL,
+  for (const agentName of enabledAgents)
+    completed(
+      await agent["enablement.put"](
+        {
+          params: { agent_name: agentName },
+          query: {},
+          body: {
+            agent_providers: [
+              {
+                name: DEFAULT,
+                provider: ANTHROPIC,
+                credential: PRIMARY_CREDENTIAL,
+              },
+              {
+                name: BACKUP,
+                provider: ANTHROPIC,
+                credential: BACKUP_CREDENTIAL,
+              },
+            ],
+            default_configuration: {
+              agent_provider: DEFAULT,
+              model_identifier: SONNET,
+              reasoning_effort: OFF,
             },
-            {
-              name: BACKUP,
-              provider: ANTHROPIC,
-              credential: BACKUP_CREDENTIAL,
-            },
-          ],
-          default_configuration: {
-            agent_provider: DEFAULT,
-            model_identifier: SONNET,
-            reasoning_effort: OFF,
+            fallback_configurations: [],
           },
-          fallback_configurations: [],
         },
-      },
-      options,
-    ),
-  );
+        options,
+      ),
+    );
   return {
     ...fixture,
     provider: scripted.provider,
     options,
     agent,
+    projects: directClient(projectOperations, fixture.invocation),
+    missions: directClient(missionOperations, fixture.invocation),
     workbenchService: fixture.workbench,
     workbench: directClient(workbenchOperations, fixture.invocation),
   };
@@ -207,13 +223,14 @@ async function createSession(
     model_identifier: SONNET,
     reasoning_effort: OFF,
   },
+  agentName = AGENT,
 ) {
   return completed(
     await fixture.workbench["session.create"](
       {
         params: {},
         query: {},
-        body: { agent_name: AGENT, ...configuration },
+        body: { agent_name: agentName, ...configuration },
       },
       fixture.options,
     ),
@@ -406,13 +423,13 @@ test("the Agent component refuses an invalid workbench configuration", async (t)
   );
 });
 
-test("the workbench lists and opens no env@1 session", async (t) => {
+test("the workbench lists and opens no pe@1 session", async (t) => {
   const state = temporaryDirectory();
   const pi = await loadPi();
-  const envAgent = "env@1";
+  const peAgent = "pe@1";
   pi.SessionManager.create(
-    join(state, "workbench", envAgent),
-    join(state, "pi", "sessions", "workbench", envAgent),
+    join(state, "workbench", peAgent),
+    join(state, "pi", "sessions", "workbench", peAgent),
     { id: "workbench_session_01ARZ3NDEKTSV4RRFFQ69G5FAV" },
   ).appendMessage({
     role: "user",
@@ -428,12 +445,12 @@ test("the workbench lists and opens no env@1 session", async (t) => {
     ),
   );
   assert.deepEqual(
-    listed.items.filter((item) => item.agent_name === envAgent),
+    listed.items.filter((item) => item.agent_name === peAgent),
     [],
   );
   failed(
     await fixture.workbench["session.list"](
-      { params: {}, query: { agent_name: envAgent }, body: null },
+      { params: {}, query: { agent_name: peAgent }, body: null },
       fixture.options,
     ),
     HttpStatus.NotFound,
@@ -445,7 +462,7 @@ test("the workbench lists and opens no env@1 session", async (t) => {
         params: {},
         query: {},
         body: {
-          agent_name: envAgent,
+          agent_name: peAgent,
           agent_provider: DEFAULT,
           model_identifier: SONNET,
           reasoning_effort: OFF,
@@ -456,6 +473,39 @@ test("the workbench lists and opens no env@1 session", async (t) => {
     HttpStatus.NotFound,
     "agent.catalog.not_found",
   );
+});
+
+test("(happy path) agent.list answers every catalog agent in name order with its consumers and tool counts", async (t) => {
+  const fixture = await workbenchFixture(t);
+  const listed = completed(
+    await fixture.agent.list(
+      { params: {}, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  assert.deepEqual(
+    listed.items.map(({ agent_name }) => agent_name),
+    [...AGENT_NAMES].sort(),
+  );
+  const item = (name: string) =>
+    listed.items.find(({ agent_name }) => agent_name === name)!;
+  const ops = completed(
+    await fixture.agent.get(
+      { params: { agent_name: "ops@1" }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  assert.equal(item("ops@1").display_name, OPS_DISPLAY_NAME);
+  assert.deepEqual(item("ops@1").worker_names, []);
+  assert.deepEqual(item("ops@1").consumers, ["workbench"]);
+  assert.equal(
+    item("ops@1").tool_counts.operation,
+    ops.tools.filter(({ source }) => source === ToolSource.Operation).length,
+  );
+  assert.equal(item("ops@1").enablement, null);
+  assert.deepEqual(item("pe@1").consumers, ["worker"]);
+  assert.deepEqual(item("swe@1").consumers, ["workbench", "worker"]);
+  assert.deepEqual(item("re@1").consumers, ["workbench", "worker"]);
 });
 
 test("a stored session resumes from the last entry of each kind and lists through pi", async (t) => {
@@ -906,9 +956,17 @@ test("a session resumes after a restart with its configuration and its completed
 });
 
 const TOOL_USE = "toolUse" as const;
-const SPARE = "spare";
 const TOOL_RESULT = "toolResult";
-const PROVIDER_ADD = "agent.enablement.provider.add";
+const OPS_DISPLAY_NAME = "Yumi";
+const PROJECT_RESUME = "project.resume";
+const PROJECT_NAME = "operations";
+const UNKNOWN_NODE = "node_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const FIRST_BINDING_SET = 1;
+const NO_PAUSE = null;
+const NO_TOOLS = 0;
+const NO_DESCRIPTION = "";
+const OPS_OPERATION_COUNT = 36;
+const NODE_REVIEW_READ_COUNT = 6;
 const FAST_POLL_MS = 2000;
 
 function toolCall(name: string, args: Parameters<typeof fauxToolCall>[1]) {
@@ -937,16 +995,106 @@ function toolResults(entries: readonly Entry[]) {
     }));
 }
 
-const addSpare = {
-  params: { agent_name: AGENT },
-  query: {},
-  body: {
-    expected_revision: 1,
-    name: SPARE,
-    provider: ANTHROPIC,
-    credential: SPARE_CREDENTIAL,
-  },
-};
+function resumeInput(projectId: string) {
+  return { params: { project_id: projectId }, query: {}, body: null };
+}
+
+async function pausedProject(fixture: Fixture): Promise<string> {
+  const project = completed(
+    await fixture.projects.create(
+      { params: {}, query: {}, body: { name: PROJECT_NAME } },
+      fixture.options,
+    ),
+  );
+  completed(
+    await fixture.projects.pause(
+      resumeInput(project.id) as never,
+      fixture.options,
+    ),
+  );
+  return project.id;
+}
+
+async function pausedAt(
+  fixture: Fixture,
+  projectId: string,
+): Promise<number | null> {
+  return completed(
+    await fixture.projects.get(
+      resumeInput(projectId) as never,
+      fixture.options,
+    ),
+  ).paused_at;
+}
+
+async function createNode(fixture: Fixture): Promise<string> {
+  const project = completed(
+    await fixture.projects.create(
+      { params: {}, query: {}, body: { name: PROJECT_NAME } },
+      fixture.options,
+    ),
+  );
+  completed(
+    await fixture.projects["bindingSet.write"](
+      {
+        params: { project_id: project.id },
+        query: {},
+        body: {
+          version: FIRST_BINDING_SET,
+          bindings: COVERING_WORKER_BINDINGS,
+        },
+      } as never,
+      fixture.options,
+    ),
+  );
+  const mission = completed(
+    await fixture.missions.get(
+      { params: { project_id: project.id }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  const created = completed(
+    await fixture.missions["node.create"](
+      {
+        params: { mission_id: mission.id },
+        query: {},
+        body: {
+          filename: "review.md",
+          content: {
+            name: "Review the thread",
+            requirement: "Review the thread",
+            criterion: "The thread is reviewed",
+            verifications: ["true"],
+            bindings: [],
+            intent: "examine",
+          },
+          tasks: [],
+          reason: "plan",
+          expected_mission_version: mission.version,
+        },
+      } as never,
+      fixture.options,
+    ),
+  ) as { revisions: { node_id: string }[] };
+  return created.revisions[0]!.node_id;
+}
+
+async function resumeFixture(t: TestContext) {
+  const target = { projectId: "" };
+  const fixture = await workbenchFixture(
+    t,
+    [
+      () => toolCall(toolName(PROJECT_RESUME), resumeInput(target.projectId)),
+      fauxAssistantMessage(ANSWER),
+    ],
+    undefined,
+    undefined,
+    [OPS],
+  );
+  target.projectId = await pausedProject(fixture);
+  const session = await createSession(fixture, undefined, OPS);
+  return { fixture, session, projectId: target.projectId };
+}
 
 async function untilApproval(
   fixture: Fixture,
@@ -973,22 +1121,8 @@ async function untilApproval(
   }
 }
 
-async function providerNames(fixture: Fixture): Promise<string[]> {
-  const enablement = completed(
-    await fixture.agent["enablement.get"](
-      { params: { agent_name: AGENT }, query: {}, body: null },
-      fixture.options,
-    ),
-  );
-  return enablement.agent_providers.map(({ name }) => name);
-}
-
 test("a poll answers at once when the snapshot changed after the version that the client holds", async (t) => {
-  const fixture = await workbenchFixture(t, [
-    toolCall(toolName(PROVIDER_ADD), addSpare),
-    fauxAssistantMessage(ANSWER),
-  ]);
-  const session = await createSession(fixture);
+  const { fixture, session } = await resumeFixture(t);
   const sessionId = session.id;
   const before = completed(
     await fixture.workbench["session.events"](
@@ -1022,98 +1156,209 @@ test("a poll answers at once when the snapshot changed after the version that th
   assert.ok(answer.version > before.version);
 });
 
-test("the tool table holds the built-in tools of the agent and one tool per human operation without secret material", async (t) => {
-  const fixture = await workbenchFixture(t, [fauxAssistantMessage(ANSWER)]);
-  const session = await createSession(fixture);
-  completed(await message(fixture, session.id, QUESTION));
-  await untilIdle(fixture, session.id, t.signal);
-  const tools = fixture.provider.tools[0]!;
-  for (const name of [
-    "read",
-    "edit",
-    "write",
-    "grep",
-    "find",
-    "ls",
-    "bash",
-    "agent.get",
-    "agent.enablement.put",
-    "mission.node.list",
-    "project.create",
-    "llm.credential.list",
-    "llm.credential.update_metadata",
-    "repository.host_key.list",
-    "repository.host_key.scan",
-    "workbench.session.get",
-  ])
-    assert.ok(tools.includes(toolName(name)), name);
-  for (const name of [
-    "llm.credential.create",
-    "llm.credential.rotate",
-    "llm.credential.check",
-    "llm.credential.login_code",
-    "repository.credential.create",
-    "repository.credential.rotate",
-    "repository.credential.check",
-    "repository.host_key.pin",
-    "repository.credential.ssh_key_create",
-    "repository.credential.ssh_key_rotate",
-    "storage.credential.create",
-    "storage.credential.rotate",
-    "storage.credential.check",
-    "worker.handover",
-    "mission.evidence.submit",
-    "scheduler.work.pull",
-    "evidence-upload",
-  ])
-    assert.ok(!tools.includes(toolName(name)), name);
-  for (const name of tools) assert.match(name, /^[a-zA-Z0-9_-]{1,64}$/);
+test("(happy path) the tool table of each workbench agent holds its built-in tools and its listed operation tools", async (t) => {
+  const agents = [OPS, AGENT, REVIEW_AGENT];
+  const fixture = await workbenchFixture(
+    t,
+    agents.map(() => fauxAssistantMessage(ANSWER)),
+    undefined,
+    undefined,
+    agents,
+  );
+  for (const [index, agentName] of agents.entries()) {
+    const session = await createSession(fixture, undefined, agentName);
+    completed(await message(fixture, session.id, QUESTION));
+    await untilIdle(fixture, session.id, t.signal);
+    const tools = fixture.provider.tools[index]!;
+    const { builtin, operation } = getAgentDeclaration(agentName)!.tools;
+    assert.deepEqual(
+      [...tools].sort(),
+      [...builtin, ...operation.map(toolName)].sort(),
+      agentName,
+    );
+    for (const name of [
+      "agent.get",
+      "agent.enablement.put",
+      "project.create",
+      "llm.credential.create",
+      "repository.credential.create",
+      "storage.credential.create",
+      "intake.inbound.get",
+      "intake.storage.get",
+      "mission.evidence.asset.content.get",
+      "intake.credential.create",
+      "intake.credential.rotate",
+      "intake.credential.check",
+      "project.credential.create",
+      "project.credential.rotate",
+      "project.credential.check",
+      "worker.handover",
+      "evidence-upload",
+    ])
+      assert.ok(!tools.includes(toolName(name)), `${agentName} ${name}`);
+    for (const name of tools) assert.match(name, /^[a-zA-Z0-9_-]{1,64}$/);
+  }
 });
 
-test("a read tool and a built-in tool run at once and a refusal returns the owning service code", async (t) => {
-  const fixture = await workbenchFixture(t, [
-    toolCall(toolName("agent.enablement.get"), {
-      params: { agent_name: AGENT },
-      query: {},
-      body: null,
-    }),
-    toolCall(toolName("agent.get"), {
-      params: { agent_name: "unknown@1" },
-      query: {},
-      body: null,
-    }),
-    toolCall("ls", { path: "." }),
-    fauxAssistantMessage(ANSWER),
-  ]);
-  const session = await createSession(fixture);
+test("(happy path) agent.get answers the display name, the identity part and the operation tools of each workbench agent", async (t) => {
+  const fixture = await workbenchFixture(t);
+  const read = async (agentName: string) =>
+    completed(
+      await fixture.agent.get(
+        { params: { agent_name: agentName }, query: {}, body: null },
+        fixture.options,
+      ),
+    );
+  const ops = await read(OPS);
+  assert.equal(ops.display_name, OPS_DISPLAY_NAME);
+  assert.equal(
+    ops.tools.filter(({ source }) => source === ToolSource.Operation).length,
+    OPS_OPERATION_COUNT,
+  );
+  assert.deepEqual(
+    ops.prompt.parts!.map(({ part }) => part),
+    [
+      PromptPart.Standard,
+      PromptPart.Identity,
+      PromptPart.Role,
+      PromptPart.Workbench,
+      PromptPart.Framing,
+    ],
+  );
+  assert.ok(
+    ops.prompt
+      .parts!.find(({ part }) => part === PromptPart.Identity)!
+      .text!.startsWith(`Your name is ${OPS_DISPLAY_NAME}.`),
+  );
+  for (const agentName of [AGENT, REVIEW_AGENT]) {
+    const { tools } = await read(agentName);
+    const declared = getAgentDeclaration(agentName)!.tools;
+    const local = tools.slice(
+      NO_TOOLS,
+      declared.builtin.length + declared.host.length,
+    );
+    const operations = tools.slice(local.length);
+    assert.ok(
+      local.every(
+        ({ source, description, guard_class }) =>
+          source !== ToolSource.Operation &&
+          description === NO_DESCRIPTION &&
+          guard_class === null,
+      ),
+      agentName,
+    );
+    assert.equal(operations.length, NODE_REVIEW_READ_COUNT, agentName);
+    assert.deepEqual(
+      operations.map(({ name, source, guard_class }) => [
+        name,
+        source,
+        guard_class,
+      ]),
+      declared.operation.map((id) => [
+        toolName(id),
+        ToolSource.Operation,
+        GuardClass.Read,
+      ]),
+      agentName,
+    );
+  }
+});
+
+test("(happy path) a read tool of ops@1 succeeds and a refusal returns the owning service code", async (t) => {
+  const fixture = await workbenchFixture(
+    t,
+    [
+      toolCall(toolName("project.list"), {
+        params: {},
+        query: {},
+        body: null,
+      }),
+      toolCall(toolName("mission.node.get"), {
+        params: { node_id: UNKNOWN_NODE },
+        query: {},
+        body: null,
+      }),
+      fauxAssistantMessage(ANSWER),
+    ],
+    undefined,
+    undefined,
+    [OPS],
+  );
+  completed(
+    await fixture.projects.create(
+      { params: {}, query: {}, body: { name: PROJECT_NAME } },
+      fixture.options,
+    ),
+  );
+  const session = await createSession(fixture, undefined, OPS);
   completed(await message(fixture, session.id, QUESTION));
   const entries = await untilIdle(fixture, session.id, t.signal);
   const results = toolResults(entries);
   assert.deepEqual(
     results.map(({ toolName, isError }) => ({ toolName, isError })),
     [
-      { toolName: toolName("agent.enablement.get"), isError: false },
-      { toolName: toolName("agent.get"), isError: true },
-      { toolName: "ls", isError: false },
+      { toolName: toolName("project.list"), isError: false },
+      { toolName: toolName("mission.node.get"), isError: true },
     ],
   );
-  assert.ok(results[0]!.text.includes(PRIMARY_CREDENTIAL));
-  assert.ok(results[1]!.text.startsWith("agent.catalog.not_found:"));
+  assert.ok(results[0]!.text.includes(PROJECT_NAME));
+  assert.ok(results[1]!.text.startsWith(`${MissionErrorCode.NodeNotFound}:`));
+  assert.deepEqual(texts(entries, "assistant").at(-1), ANSWER);
+});
+
+test("(happy path) a read tool and a built-in tool of swe@1 run at once", async (t) => {
+  const target = { nodeId: "" };
+  const fixture = await workbenchFixture(
+    t,
+    [
+      () =>
+        fauxAssistantMessage(
+          [
+            fauxToolCall(toolName("mission.node.get"), {
+              params: { node_id: target.nodeId },
+              query: {},
+              body: null,
+            }),
+            fauxToolCall("ls", { path: "." }),
+          ],
+          { stopReason: TOOL_USE },
+        ),
+      fauxAssistantMessage(ANSWER),
+    ],
+    undefined,
+    undefined,
+    [AGENT, REVIEW_AGENT],
+  );
+  target.nodeId = await createNode(fixture);
+  const session = await createSession(fixture);
+  completed(await message(fixture, session.id, QUESTION));
+  const entries = await untilIdle(fixture, session.id, t.signal);
+  const results = toolResults(entries);
+  assert.deepEqual(
+    results
+      .map(({ toolName, isError }) => ({ toolName, isError }))
+      .sort((a, b) => a.toolName!.localeCompare(b.toolName!)),
+    [
+      { toolName: "ls", isError: false },
+      { toolName: toolName("mission.node.get"), isError: false },
+    ],
+  );
+  assert.ok(
+    results
+      .find((result) => result.toolName === toolName("mission.node.get"))!
+      .text.includes(target.nodeId),
+  );
   assert.deepEqual(texts(entries, "assistant").at(-1), ANSWER);
 });
 
 test("a mutation tool runs only after the human approves the call", async (t) => {
-  const fixture = await workbenchFixture(t, [
-    toolCall(toolName(PROVIDER_ADD), addSpare),
-    fauxAssistantMessage(ANSWER),
-  ]);
-  const session = await createSession(fixture);
+  const { fixture, session, projectId } = await resumeFixture(t);
   const sessionId = session.id;
   completed(await message(fixture, sessionId, QUESTION));
   const pending = await untilApproval(fixture, sessionId, t.signal);
-  assert.equal(pending.operation_id, PROVIDER_ADD);
-  assert.deepEqual(pending.input, addSpare);
-  assert.deepEqual(await providerNames(fixture), [DEFAULT, BACKUP]);
+  assert.equal(pending.operation_id, PROJECT_RESUME);
+  assert.deepEqual(pending.input, resumeInput(projectId));
+  assert.notEqual(await pausedAt(fixture, projectId), NO_PAUSE);
   failed(
     await fixture.workbench["session.approve"](
       {
@@ -1148,13 +1393,13 @@ test("a mutation tool runs only after the human approves the call", async (t) =>
     toolResults(entries).map(({ isError }) => isError),
     [false],
   );
-  assert.deepEqual(await providerNames(fixture), [DEFAULT, BACKUP, SPARE]);
+  assert.equal(await pausedAt(fixture, projectId), NO_PAUSE);
 });
 
 async function listedSession(fixture: Fixture, sessionId: string) {
   const listed = completed(
     await fixture.workbench["session.list"](
-      { params: {}, query: { agent_name: AGENT }, body: null },
+      { params: {}, query: { agent_name: OPS }, body: null },
       fixture.options,
     ),
   );
@@ -1162,11 +1407,7 @@ async function listedSession(fixture: Fixture, sessionId: string) {
 }
 
 test("the session list names the run and the pending approval of an open session without the input", async (t) => {
-  const fixture = await workbenchFixture(t, [
-    toolCall(toolName(PROVIDER_ADD), addSpare),
-    fauxAssistantMessage(ANSWER),
-  ]);
-  const session = await createSession(fixture);
+  const { fixture, session } = await resumeFixture(t);
   const sessionId = session.id;
   completed(await message(fixture, sessionId, QUESTION));
   const pending = await untilApproval(fixture, sessionId, t.signal);
@@ -1174,7 +1415,7 @@ test("the session list names the run and the pending approval of an open session
   assert.equal(waiting?.run_active, true);
   assert.deepEqual(waiting?.pending_approval, {
     tool_call_id: pending.tool_call_id,
-    operation_id: PROVIDER_ADD,
+    operation_id: PROJECT_RESUME,
   });
   completed(
     await fixture.workbench["session.approve"](
@@ -1193,11 +1434,7 @@ test("the session list names the run and the pending approval of an open session
 });
 
 test("a rejected call reaches the agent as a blocked call", async (t) => {
-  const fixture = await workbenchFixture(t, [
-    toolCall(toolName(PROVIDER_ADD), addSpare),
-    fauxAssistantMessage(ANSWER),
-  ]);
-  const session = await createSession(fixture);
+  const { fixture, session, projectId } = await resumeFixture(t);
   const sessionId = session.id;
   completed(await message(fixture, sessionId, QUESTION));
   const pending = await untilApproval(fixture, sessionId, t.signal);
@@ -1214,20 +1451,16 @@ test("a rejected call reaches the agent as a blocked call", async (t) => {
   const entries = await untilIdle(fixture, sessionId, t.signal);
   assert.deepEqual(toolResults(entries), [
     {
-      toolName: toolName(PROVIDER_ADD),
+      toolName: toolName(PROJECT_RESUME),
       isError: true,
       text: WORKBENCH_REJECTION_REASON,
     },
   ]);
-  assert.deepEqual(await providerNames(fixture), [DEFAULT, BACKUP]);
+  assert.notEqual(await pausedAt(fixture, projectId), NO_PAUSE);
 });
 
 test("an abort rejects every pending approval", async (t) => {
-  const fixture = await workbenchFixture(t, [
-    toolCall(toolName(PROVIDER_ADD), addSpare),
-    fauxAssistantMessage(ANSWER),
-  ]);
-  const session = await createSession(fixture);
+  const { fixture, session, projectId } = await resumeFixture(t);
   const sessionId = session.id;
   completed(await message(fixture, sessionId, QUESTION));
   const pending = await untilApproval(fixture, sessionId, t.signal);
@@ -1257,7 +1490,7 @@ test("an abort rejects every pending approval", async (t) => {
     HttpStatus.NotFound,
     WorkbenchErrorCode.ApprovalNotFound,
   );
-  assert.deepEqual(await providerNames(fixture), [DEFAULT, BACKUP]);
+  assert.notEqual(await pausedAt(fixture, projectId), NO_PAUSE);
 });
 
 const FAKE_KEY = ["AKIA", "KANTHORDCANARY01"].join("");

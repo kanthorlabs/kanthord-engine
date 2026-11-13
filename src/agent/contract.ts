@@ -24,7 +24,7 @@ import {
 } from "../scheduler/contract.ts";
 
 export const AGENT_COMPONENT_NAME = "agent";
-export const AGENT_NAMES = ["swe@1", "re@1", "env@1"] as const;
+export const AGENT_NAMES = ["swe@1", "re@1", "pe@1", "ops@1"] as const;
 export type AgentName = (typeof AGENT_NAMES)[number];
 export const ENABLEMENT_TIMEOUT_MS = 30000;
 export const LIST_LIMIT_DEFAULT = 100;
@@ -42,6 +42,7 @@ export type PromptOrigin = (typeof PromptOrigin)[keyof typeof PromptOrigin];
 
 export const PromptPart = {
   Standard: "standard",
+  Identity: "identity",
   Role: "role",
   Workbench: "workbench",
   InstructionFile: "instruction_file",
@@ -100,10 +101,18 @@ export const PromptSourceReason = {
 export type PromptSourceReason =
   (typeof PromptSourceReason)[keyof typeof PromptSourceReason];
 
+export const PromptConsumer = {
+  Workbench: "workbench",
+  Worker: "worker",
+} as const;
+export type PromptConsumer =
+  (typeof PromptConsumer)[keyof typeof PromptConsumer];
+
 export const PromptView = { Final: "final" } as const;
 export type PromptView = (typeof PromptView)[keyof typeof PromptView];
 
 export const PromptTemplate = {
+  Identity: "identity",
   Work: "work",
   FramingWorker: "framing-worker",
   FramingWorkbench: "framing-workbench",
@@ -268,14 +277,20 @@ export type EntriesOfAgent = (
 export const ToolSource = {
   Host: "host",
   Builtin: "builtin",
+  Operation: "operation",
   KanthordMcp: "kanthord-mcp",
 } as const;
 export type ToolSource = (typeof ToolSource)[keyof typeof ToolSource];
+
+export const GuardClass = { Read: "read", Card: "card" } as const;
+export type GuardClass = (typeof GuardClass)[keyof typeof GuardClass];
 
 export const toolDeclarationSchema = z.strictObject({
   name: z.string().min(1),
   source: z.enum(ToolSource),
   input_schema: z.record(z.string(), z.unknown()),
+  description: z.string(),
+  guard_class: z.enum(GuardClass).nullable(),
 });
 export type ToolDeclaration = z.infer<typeof toolDeclarationSchema>;
 
@@ -455,6 +470,7 @@ export const chainCoolingSchema = z.strictObject({
 
 export const agentDeclarationSchema = z.strictObject({
   agent_name: z.string().min(1),
+  display_name: z.string().min(1),
   configuration_schema: z.record(z.string(), z.unknown()),
   overridable_fields: z.array(z.string()),
   prompt: promptAnswerSchema,
@@ -464,6 +480,16 @@ export const agentDeclarationSchema = z.strictObject({
   active_position: z.number().int().nonnegative().nullable(),
   cooling: chainCoolingSchema.nullable(),
 });
+
+export const agentListItemSchema = z.strictObject({
+  agent_name: z.string().min(1),
+  display_name: z.string().min(1),
+  worker_names: z.array(z.string().min(1)),
+  consumers: z.array(z.enum([PromptConsumer.Workbench, PromptConsumer.Worker])),
+  tool_counts: z.record(z.enum(ToolSource), z.number().int().min(0)),
+  enablement: agentEnablementSchema.nullable(),
+});
+export type AgentListItem = z.infer<typeof agentListItemSchema>;
 
 const emptyFields = z.strictObject({});
 const agentParams = z.strictObject({ agent_name: z.string().min(1) });
@@ -491,6 +517,33 @@ const enablementMutation = {
 } as const;
 
 export const agentOperations = {
+  list: {
+    ...enablementOperation,
+    id: "agent.list",
+    method: HttpMethod.Get,
+    path: "/api/agent",
+    mutation: false,
+    body: false,
+    input: z.strictObject({
+      params: emptyFields,
+      query: z.strictObject({
+        limit: z.coerce
+          .number()
+          .int()
+          .min(1)
+          .max(LIST_LIMIT_MAX)
+          .default(LIST_LIMIT_DEFAULT),
+        cursor: z.string().min(1).optional(),
+      }),
+      body: z.null(),
+    }),
+    output: z.strictObject({
+      items: z.array(agentListItemSchema),
+      next_cursor: z.string().nullable(),
+    }),
+    description:
+      "List every catalog agent in ascending agent-name order, with its consumers and tool counts.",
+  },
   "enablement.list": {
     ...enablementOperation,
     id: "agent.enablement.list",

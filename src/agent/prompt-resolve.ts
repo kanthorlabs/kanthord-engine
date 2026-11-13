@@ -10,7 +10,9 @@ import {
   type PromptPartAnswer,
   PromptPartState,
   type PromptReference,
+  PromptTemplate,
 } from "./contract.ts";
+import { getAgentDeclaration } from "./catalog.ts";
 import { digest } from "./prompt-composer.ts";
 import { shippedText } from "./prompt-files.ts";
 import { finalPrompt, isFramingTemplate, promptPart } from "./prompt-render.ts";
@@ -83,17 +85,41 @@ function renderedFraming(name: string, text: string): Resolution {
   }
 }
 
+function renderedIdentity(
+  name: string,
+  text: string,
+  agentName: string,
+): Resolution {
+  const agent = getAgentDeclaration(agentName);
+  if (name !== PromptTemplate.Identity || agent === undefined) return CHANGED;
+  try {
+    return resolved(
+      renderTemplate(
+        { ...SHIPPED_TEMPLATES, [PromptTemplate.Identity]: text },
+        PromptTemplate.Identity,
+        { display_name: agent.display_name },
+      ),
+    );
+  } catch (error) {
+    if (error instanceof OperationError) return INVALID;
+    throw error;
+  }
+}
+
 async function fileText(
   reference: PromptReference,
-  context: Context,
+  readers: PromptReaders,
 ): Promise<Resolution> {
+  const { context, agentName } = readers;
   assert.ok(reference.path);
   const read = await readAgentFile(reference.path, { context });
   if (read.state === SourceState.Absent) return CHANGED;
   if (read.state === SourceState.Invalid) return INVALID;
-  return reference.part === PromptPart.Framing
-    ? renderedFraming(reference.name, read.text)
-    : resolved(read.text);
+  if (reference.part === PromptPart.Framing)
+    return renderedFraming(reference.name, read.text);
+  if (reference.part === PromptPart.Identity)
+    return renderedIdentity(reference.name, read.text, agentName);
+  return resolved(read.text);
 }
 
 async function instructionFileText(
@@ -120,9 +146,9 @@ function textOf(
   readers: PromptReaders,
 ): Promise<Resolution> | Resolution {
   if (reference.origin === PromptOrigin.Binary)
-    return resolved(shippedText(reference));
+    return resolved(shippedText(reference, readers.agentName));
   if (reference.origin === PromptOrigin.File)
-    return fileText(reference, readers.context);
+    return fileText(reference, readers);
   if (reference.origin === PromptOrigin.Repository)
     return instructionFileText(reference, readers);
   assert.equal(reference.origin, PromptOrigin.Database);

@@ -31,6 +31,7 @@ import {
   PromptPartState,
   type PromptReference,
   promptReferenceSchema,
+  PromptTemplate,
   ToolSource,
 } from "./contract.ts";
 import { PROMPT_SOURCE_READ_MS } from "../kernel/prompt-source.ts";
@@ -73,7 +74,7 @@ const OVERRIDE_TEXT = "Write the smallest complete change.";
 const INVALID_OVERRIDE_TEXT = "bell\u0007";
 const AGENT = "swe@1";
 const OTHER_AGENT = "re@1";
-const ENV_AGENT = "env@1";
+const PE_AGENT = "pe@1";
 const WORKER = "coder@1";
 const MODEL = "claude-sonnet-4-5";
 const MISSING_MODEL = "claude-3-5-sonnet-20241022";
@@ -83,7 +84,15 @@ const SECOND_REVISION = 2;
 const THIRD_REVISION = 3;
 const ADD_PROVIDER = "enablement.provider.add";
 const REMOVE_PROVIDER = "enablement.provider.remove";
-const TOOLS = [{ name: "read", source: ToolSource.Builtin, input_schema: {} }];
+const TOOLS = [
+  {
+    name: "read",
+    source: ToolSource.Builtin,
+    input_schema: {},
+    description: "",
+    guard_class: null,
+  },
+];
 const provider = {
   name: "primary",
   provider: AgentProviderKind.Anthropic,
@@ -140,6 +149,8 @@ const fakeCollaborations: Omit<Dependencies, "store" | "credentialHolds"> = {
   providerHealthCheck: () => async () => ResourceStatus.Unknown,
   providerCapability: () => PROVIDER_CAPABILITY,
   toolDeclarations: async () => TOOLS,
+  workerNamesOf: () => [],
+  workerAgentNames: [],
   logger: pino({ enabled: false }),
 };
 
@@ -244,6 +255,15 @@ test("agent read answers the shipped parts, the workbench part of a workbench ag
       ],
       [
         PromptLayer.KanthorD,
+        PromptPart.Identity,
+        PromptTemplate.Identity,
+        PromptOrigin.Binary,
+        null,
+        null,
+        PromptPartState.Resolved,
+      ],
+      [
+        PromptLayer.KanthorD,
         PromptPart.Role,
         `${AGENT}.md`,
         PromptOrigin.Binary,
@@ -271,17 +291,17 @@ test("agent read answers the shipped parts, the workbench part of a workbench ag
       ],
     ],
   );
-  assert.equal(parts[1]!.text, getAgentDeclaration(AGENT)!.agent_prompt);
+  assert.equal(parts[2]!.text, getAgentDeclaration(AGENT)!.agent_prompt);
   assert.match(parts[0]!.digest!, /^[a-f0-9]{64}$/);
   assert.equal(
-    parts[3]!.text,
+    parts[4]!.text,
     framing(SHIPPED_TEMPLATES, PromptConsumer.Workbench),
   );
   assert.equal(answer.prompt.final, parts.map(({ text }) => text).join("\n\n"));
   const final = await read(AGENT, { view: "final" });
   assert.equal(final.prompt.parts, undefined);
   assert.equal(final.prompt.final, answer.prompt.final);
-  const env = await read(ENV_AGENT);
+  const env = await read(PE_AGENT);
   assert.deepEqual(
     env.prompt.parts!.map(({ part }) => part),
     [PromptPart.Standard, PromptPart.Role, PromptPart.Framing],
@@ -312,9 +332,9 @@ test("an override file of the agent directory replaces the shipped text and an i
   assert.equal(parts[0]!.origin, PromptOrigin.Binary);
   assert.deepEqual(
     {
-      origin: parts[1]!.origin,
-      path: parts[1]!.path,
-      text: parts[1]!.text,
+      origin: parts[2]!.origin,
+      path: parts[2]!.path,
+      text: parts[2]!.text,
     },
     { origin: PromptOrigin.File, path: overridePath, text: OVERRIDE_TEXT },
   );
@@ -331,6 +351,24 @@ test("an override file of the agent directory replaces the shipped text and an i
       reason: "control_character",
     },
   });
+});
+
+test("(security) a role override file that holds a display_name placeholder stays literal in final", async (t) => {
+  const root = temporary(t);
+  const directory = join(root, "agents");
+  mkdirSync(directory);
+  const f = enablementFixture(t, {
+    config: {
+      prompt: { agent_directory: "agents" },
+      cooldown: COOLDOWN_DEFAULTS,
+    },
+    dataDirectory: root,
+  });
+  const literal = "Greet as {{display_name}}.";
+  writeFileSync(join(directory, `${AGENT}.md`), literal);
+  const final = (await promptReader(f)(AGENT)).prompt.final!;
+  assert.ok(final.includes(literal));
+  assert.ok(final.includes("Your name is SWE."));
 });
 
 test("agent read renders the framing from the template files of the agent directory", async (t) => {
@@ -428,6 +466,15 @@ test("agent read with a repository binding answers the binding prompt of the age
       [
         PromptLayer.KanthorD,
         PromptPart.Standard,
+        PromptOrigin.Binary,
+        null,
+        null,
+        null,
+        null,
+      ],
+      [
+        PromptLayer.KanthorD,
+        PromptPart.Identity,
         PromptOrigin.Binary,
         null,
         null,
@@ -595,6 +642,12 @@ test("agent get --node answers the stack that the agent of the node reads at the
         null,
         PromptPartState.Resolved,
       ],
+      [
+        PromptLayer.KanthorD,
+        PromptPart.Identity,
+        null,
+        PromptPartState.Resolved,
+      ],
       [PromptLayer.KanthorD, PromptPart.Role, null, PromptPartState.Resolved],
       [
         PromptLayer.Repository,
@@ -647,6 +700,7 @@ test("agent get --node with an absent instruction file answers no instruction fi
     answer.prompt.parts!.map(({ part }) => part),
     [
       PromptPart.Standard,
+      PromptPart.Identity,
       PromptPart.Role,
       PromptPart.Repository,
       PromptPart.Binding,
@@ -3072,18 +3126,18 @@ test("a view without a claimant shows the hold with the latest available_at over
   assert.equal(cooldownOf(SERVER_SCOPE), null);
 });
 
-test("env@1 enablement takes a credential with the holder server", (t) => {
+test("pe@1 enablement takes a credential with the holder server", (t) => {
   const f = enablementFixture(t, {
     copyHeld: (_tx, _credential, holder) => holder === SERVER_HOLDER,
   });
-  const params = { agent_name: ENV_AGENT };
+  const params = { agent_name: PE_AGENT };
   const put = f.invoke("enablement.put", putBody, params);
-  assert.equal(put.agent_name, ENV_AGENT);
+  assert.equal(put.agent_name, PE_AGENT);
   const view = (agentName: string) =>
     f.store.transaction((tx) =>
       f.agent.agentView(tx, agentName, null, SERVER_SCOPE),
     );
-  assert.equal(view(ENV_AGENT)?.valid, true);
+  assert.equal(view(PE_AGENT)?.valid, true);
   assert.deepEqual(view(AGENT)?.issues, [
     { path: [], code: AgentErrorCode.Unavailable },
   ]);

@@ -121,6 +121,9 @@ components:
         agent_name:
           type: string
           minLength: 1
+        display_name:
+          type: string
+          minLength: 1
         configuration_schema:
           type: object
           propertyNames:
@@ -150,6 +153,7 @@ components:
                     type: string
                     enum:
                       - standard
+                      - identity
                       - role
                       - workbench
                       - instruction_file
@@ -234,16 +238,28 @@ components:
                 enum:
                   - host
                   - builtin
+                  - operation
                   - kanthord-mcp
               input_schema:
                 type: object
                 propertyNames:
                   type: string
                 additionalProperties: {}
+              description:
+                type: string
+              guard_class:
+                anyOf:
+                  - type: string
+                    enum:
+                      - read
+                      - card
+                  - type: "null"
             required:
               - name
               - source
               - input_schema
+              - description
+              - guard_class
             additionalProperties: false
         enablement:
           anyOf:
@@ -463,6 +479,7 @@ components:
             - type: "null"
       required:
         - agent_name
+        - display_name
         - configuration_schema
         - overridable_fields
         - prompt

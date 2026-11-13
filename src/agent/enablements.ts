@@ -128,6 +128,21 @@ export function listEnablements(
   return { items, next_cursor: nextCursor };
 }
 
+export function pageAgentNames(
+  names: readonly string[],
+  limit: number,
+  cursor: string | null,
+): { names: string[]; next_cursor: string | null } {
+  const after = cursor === null ? null : decodeCursor(cursor);
+  const rest = names.filter((name) => after === null || name > after);
+  const page = rest.slice(FIRST_ROW, limit);
+  const nextCursor =
+    rest.length > limit
+      ? Buffer.from(page.at(-1)!, TEXT_ENCODING).toString(CURSOR_ENCODING)
+      : null;
+  return { names: page, next_cursor: nextCursor };
+}
+
 export function getEnablement(
   tx: Transaction,
   agentName: string,

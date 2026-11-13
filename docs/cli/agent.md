@@ -29,7 +29,7 @@ The request, output, failure and replay rules of the [Worker shared contract](./
 
 | Status | Command after `kanthord agent`                                                                                           | Route                                                                 | Operation ID                           | Access  |
 | ------ | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- | -------------------------------------- | ------- |
-| P      | `list [L]`                                                                                                               | `GET /api/agent`                                                      | `agent.list`                           | `human` |
+| I      | `list [L]`                                                                                                               | `GET /api/agent`                                                      | `agent.list`                           | `human` |
 | I      | `get <agent-name> [--view final] [--project <project-id> --binding-id <binding-id> \| --node <node-id> [--attempt <k>]]` | `GET /api/agent/:agent_name`                                          | `agent.get`                            | `human` |
 | I      | `prompt resolve --execution <execution-id> --agent <agent-name>`                                                         | `GET /api/agent/prompt/resolve`                                       | `agent.prompt.resolve`                 | `human` |
 | I      | `enablement list [L] [R]`                                                                                                | `GET /api/agent/enablement`                                           | `agent.enablement.list`                | `human` |
@@ -52,18 +52,27 @@ Each is `unary`, has `mutation: false` and a default timeout of 30 s.
 
 ## Catalog and enablement commands
 
-The catalog holds `swe@1`, `re@1` and `env@1`.
-`env@1` has no worker. Its enablement takes a credential with the holder `server`.
-The Onboarding component of the Project Service runs `env@1`.
+The catalog holds `swe@1`, `re@1`, `pe@1` and `ops@1`.
+`pe@1` has no worker. Its enablement takes a credential with the holder `server`.
+The Onboarding component of the Project Service runs `pe@1`.
 
 ### `list`
 
-This command remains proposed. It uses `[L]`, no positional arguments and no filters.
+It uses `[L]`, no positional arguments and no filters.
 Required token: human JWT. Query holds `limit` and optional `cursor`. Returns
 `{ items, next_cursor }`, paged by `agent_name` in ascending alphabetical order.
 It lists every catalog agent, also an agent without an enablement. Each item holds
-`agent_name: AgentName`, `worker_names: WorkerName[]` and `enablement`, the
+`agent_name: AgentName`, `display_name`, `worker_names: WorkerName[]`, `consumers`,
+`tool_counts` and `enablement`, the
 [agent enablement record](#agent-enablement-record) or `null` when no record exists.
+
+`consumers` names the services that run the agent, in the order `workbench`, `worker`:
+
+- `workbench`: the agent lists at least one operation tool.
+- `worker`: a released `kanthord` worker names the agent, or the agent is the environment agent `pe@1` of the Project Service.
+
+An agent that no service runs answers `[]`.
+`tool_counts` counts the tool declarations of the agent by `source`, with one key for each of `builtin`, `host`, `kanthord-mcp` and `operation`. A source with no tool counts `0`. The counts equal the `tools` of `agent get`.
 
 ### `get <agent-name>`
 
@@ -74,7 +83,7 @@ kanthord agent get <agent-name> [--view final] [--project <project-id> --binding
 `agent-name` is required `AgentName`, with no default, and maps to
 `params.agent_name`. The key names one catalog declaration, not a worker binding.
 Required token: human JWT. Absent body. HTTP `200` returns
-`agent_name` and the following declaration/configuration fields:
+`agent_name`, `display_name` and the following declaration/configuration fields:
 
 | Option                      | Query        | Meaning                                                                                                                                                                                                                    |
 | --------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -87,15 +96,15 @@ Required token: human JWT. Absent body. HTTP `200` returns
 With `--project` and `--binding-id`, `final` is the worker system prompt with the parts of that binding before the framing. The read takes the instruction file at the current head of the base branch, as the next attempt takes it.
 With `--node`, `final` is the worker system prompt with the parts of each repository binding of the node revision that the attempt pins. The read takes the instruction file at the commit that the attempt pins, and at the current base head for an attempt with no pin.
 The read takes every instruction file in parallel under one 20 s deadline. A failed read is a part state, and the read answers `200`. `--attempt` without `--node`, and `--node` with `--project` or `--binding-id`, answer `400 gateway.request.validation_failed`.
-Without `--project`, `--binding-id` and `--node`, a workbench agent answers the Workbench system prompt, and `env@1` answers the worker system prompt.
+Without `--project`, `--binding-id` and `--node`, a workbench agent answers the Workbench system prompt, and `pe@1` answers the worker system prompt.
 
 | Result field           | Type and meaning                                                                                                                                                                                                                                                                                                                                                                                                              |
 | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `configuration_schema` | JSON Schema draft 2020-12 object describing the effective configuration: every allowed field, its type, requiredness and enumeration. Its `description` states the whole-configuration constraint that the Agent component checks; JSON Schema validates no cross-field lookup.                                                                                                                                               |
-| `overridable_fields`   | Array of field paths allowed in a Project override; no wildcard permission to add fields. For `swe@1` and `re@1` it is `["agent_provider", "model_identifier", "reasoning_effort"]`. For `env@1` it is `[]`.                                                                                                                                                                                                                  |
+| `overridable_fields`   | Array of field paths allowed in a Project override; no wildcard permission to add fields. For `swe@1` and `re@1` it is `["agent_provider", "model_identifier", "reasoning_effort"]`. For `pe@1` it is `[]`.                                                                                                                                                                                                                   |
 | `enablement`           | The [agent enablement record](#agent-enablement-record), or `null` when no record exists.                                                                                                                                                                                                                                                                                                                                     |
 | `prompt`               | Required object `{ parts, final }`. The [prompt answer](#the-prompt-answer) below defines both fields.                                                                                                                                                                                                                                                                                                                        |
-| `tools`                | Array of permitted tool declarations; each item has `name: string`, `source` (one of `builtin`, `kanthord-mcp`, `host`) and `input_schema: object`. Project-added tools are inspected through Project configuration instead.                                                                                                                                                                                                  |
+| `tools`                | Array of permitted tool declarations; each item has `name: string`, `source` (one of `builtin`, `kanthord-mcp`, `host`, `operation`), `input_schema: object`, `description: string` and `guard_class` (`read` or `card` for an `operation` item, `null` for a built-in or host item). A built-in or host item holds `description: ""`. Project-added tools are inspected through Project configuration instead.               |
 | `chain`                | Array of the fallback chain of the enablement: the default configuration, then each `fallback_configurations` entry. Each item holds `position`, `level`, `agent_provider`, `provider`, `credential`, `model_identifier`, `reasoning_effort` and `cooldown`. `cooldown` is `null` or `{ strikes, available_at }` of the hold of the `server` copy of the credential. `[]` when the enablement is absent, disabled or invalid. |
 | `active_position`      | The `position` of the first chain entry whose `cooldown` is `null` or ended. `null` when every chain entry has a live cooldown or `chain` is `[]`.                                                                                                                                                                                                                                                                            |
 | `cooling`              | `{ code: "agent.configuration.chain_cooling", available_at }` when every chain entry has a live cooldown, with the earliest `available_at` of the chain. Otherwise `null`.                                                                                                                                                                                                                                                    |
@@ -138,20 +147,21 @@ KanthorD reads only the one repository file that `prompts.instruction_file` of a
 `parts` holds the parts of the system prompt in reading order:
 
 1. `standard`: the file `base.md`, for every agent.
-2. `role`: the file `<agent-name>.md`, for example `swe@1.md`.
-3. `workbench`: the file `workbench.md`, only in the Workbench system prompt.
-4. For each repository binding, in binding order:
+2. `identity`: the rendered template `identity`, with the display name of the agent. Only an agent with Workbench operation tools has it. No human text is rendered as a template.
+3. `role`: the file `<agent-name>.md`, for example `swe@1.md`.
+4. `workbench`: the file `workbench.md`, only in the Workbench system prompt.
+5. For each repository binding, in binding order:
    1. `instruction_file`: the file that `prompts.instruction_file` names. An absent file adds no part.
    2. `repository`: the nonblank text of `prompts.repository`.
    3. `binding`: the nonblank text of `prompts.agents[<agent-name>]`.
-5. `framing`: the rendered framing template, `framing-worker` or `framing-workbench`. It closes the system prompt.
+6. `framing`: the rendered framing template, `framing-worker` or `framing-workbench`. It closes the system prompt.
 
 Each part holds the following fields:
 
 | Part field   | Type and meaning                                                                                                                                                                                                                                                                              |
 | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `layer`      | The prompt layer: `1` for `standard`, `role` and `workbench`, `2` for `instruction_file` and `repository`, `3` for `binding`. `null` for `framing`.                                                                                                                                           |
-| `part`       | One of `standard`, `role`, `workbench`, `instruction_file`, `repository`, `binding` and `framing`.                                                                                                                                                                                            |
+| `layer`      | The prompt layer: `1` for `standard`, `identity`, `role` and `workbench`, `2` for `instruction_file` and `repository`, `3` for `binding`. `null` for `framing`.                                                                                                                               |
+| `part`       | One of `standard`, `identity`, `role`, `workbench`, `instruction_file`, `repository`, `binding` and `framing`.                                                                                                                                                                                |
 | `name`       | The file name of a layer 1 part, for example `base.md`. The template name of `framing`. The repository name of a layer 2 or layer 3 part.                                                                                                                                                     |
 | `origin`     | `binary` for a shipped text, `file` for an override file, `database` for `repository` and `binding`, and `repository` for `instruction_file`.                                                                                                                                                 |
 | `path`       | The override path that the server looked up, also for `binary`. The repository path for `instruction_file`. `null` for `repository` and `binding`, and when `agent_directory` is empty.                                                                                                       |
@@ -171,8 +181,8 @@ With `--view final`, `parts` is absent.
 
 An override file that is not a regular UTF-8 file, exceeds 32768 bytes or holds a control character answers `409 agent.prompt.template_invalid`.
 The details are `{ file, path, reason }`. `file` names the file, for example `swe@1.md`.
-The same refusal applies to the execution setup, the Workbench session open and the `env@1` run. No reader falls back to the shipped text.
-For `env@1`, the refusal ends the session, and the server logs `project.onboarding.session_failed`. No client receives a 409 there.
+The same refusal applies to the execution setup, the Workbench session open and the `pe@1` run. No reader falls back to the shipped text.
+For `pe@1`, the refusal ends the session, and the server logs `project.onboarding.session_failed`. No client receives a 409 there.
 
 ### Prompt templates
 
@@ -229,7 +239,7 @@ git -C engine show "$(git rev-parse "v<engine_version>:engine"):static/prompt/<n
 git -C engine show "$(git rev-parse "v<engine_version>:engine"):static/prompt/template/<name>.md"
 ```
 
-The first command reads a part with the name `<name>`, for example `base.md`. The second command reads a `framing` part, for example `framing-worker`.
+The first command reads a part with the name `<name>`, for example `base.md`. The second command reads an `identity` or `framing` part, for example `identity` or `framing-worker`.
 The release tag `v<engine_version>` of the root repository names the engine commit. A development build has no release tag, so its version names no unique engine commit.
 For a `changed` part of origin `file`, read the old file from the version control of the agent directory.
 

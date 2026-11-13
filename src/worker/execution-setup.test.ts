@@ -51,7 +51,10 @@ import { digest } from "../agent/prompt-composer.ts";
 import type { Dependencies } from "./service.ts";
 import { type AgentPromptFacts, promptReference } from "./prompt-telemetry.ts";
 import { PROMPT_SOURCE_READ_MS } from "../kernel/prompt-source.ts";
-import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
+import {
+  SHIPPED_TEMPLATE_SET,
+  SHIPPED_TEMPLATES,
+} from "../agent/prompt-templates.ts";
 import { ExecutionIntent, InstancePlacement } from "./contract.ts";
 import type { AgentSelection } from "../scheduler/contract.ts";
 import {
@@ -332,6 +335,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
       compose: (agentName: string) =>
         resolveAgentPrompt({
           agent: getAgentDeclaration(agentName)!,
+          templates: SHIPPED_TEMPLATE_SET,
           directory: promptDirectory,
           workbench: false,
           context: background,
