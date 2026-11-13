@@ -5,6 +5,7 @@ import type { PiCodingAgent } from "../agent/pi.ts";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { CancellationContext } from "../kernel/context.ts";
 import { canonicalJSON } from "../kernel/json.ts";
+import { isObject } from "../kernel/values.ts";
 import type { HumanIdentity } from "../kernel/caller.ts";
 import {
   AccessPolicy,
@@ -32,6 +33,8 @@ import { environmentSecretOperations } from "../project/contract.ts";
 import { repositoryOperations } from "../repository/contract.ts";
 import { storageOperations } from "../storage/contract.ts";
 import { createIdempotencyKey } from "../kernel/identity.ts";
+
+const NO_PROPERTIES = 0;
 
 export const SECRET_OPERATION_IDS: ReadonlySet<string> = new Set([
   llmOperations.create.id,
@@ -84,13 +87,53 @@ export function toolOperations(
   );
 }
 
-function parameters(operation: Operation): TSchema {
+const BODY_PART = "body";
+const ENVELOPE_PARTS = ["params", "query", BODY_PART] as const;
+const BODYLESS_SCHEMA = { type: "null" };
+
+interface ToolShape {
+  schema: TSchema;
+  omitted: Record<string, unknown>;
+}
+
+function omittedValue(part: string, schema: unknown): unknown {
+  if (!isObject(schema)) return undefined;
+  if (part === BODY_PART)
+    return canonicalJSON(schema) === canonicalJSON(BODYLESS_SCHEMA)
+      ? null
+      : undefined;
+  const { properties } = schema as { properties?: unknown };
+  return isObject(properties) &&
+    Object.keys(properties).length === NO_PROPERTIES
+    ? {}
+    : undefined;
+}
+
+function toolShape(operation: Operation): ToolShape {
   const schema = z.toJSONSchema(operation.input, {
     io: "input",
     unrepresentable: "any",
   }) as Record<string, unknown>;
   delete schema.$schema;
-  return schema as unknown as TSchema;
+  const omitted: Record<string, unknown> = {};
+  const properties = schema.properties as Record<string, unknown> | undefined;
+  if (!properties) return { schema: schema as unknown as TSchema, omitted };
+  for (const part of ENVELOPE_PARTS) {
+    const value = omittedValue(part, properties[part]);
+    if (value === undefined) continue;
+    omitted[part] = value;
+    delete properties[part];
+  }
+  if (Array.isArray(schema.required)) {
+    const required = schema.required.filter((part) => !(part in omitted));
+    if (required.length === NO_PROPERTIES) delete schema.required;
+    else schema.required = required;
+  }
+  return { schema: schema as unknown as TSchema, omitted };
+}
+
+function parameters(operation: Operation): TSchema {
+  return toolShape(operation).schema;
 }
 
 export function toolName(operationId: string): string {
@@ -121,11 +164,12 @@ export function operationTool(
   requester: () => HumanIdentity | undefined,
 ): ToolDefinition {
   assert.ok(HUMAN_POLICIES.includes(operation.access));
+  const { schema, omitted } = toolShape(operation);
   return {
     name: toolName(operation.id),
     label: operation.id,
     description: operation.description,
-    parameters: parameters(operation),
+    parameters: schema,
     async execute(_toolCallId, params, signal) {
       const identity = requester();
       assert.ok(identity);
@@ -133,13 +177,17 @@ export function operationTool(
       const cancel = () => context.cancel();
       signal?.addEventListener("abort", cancel, { once: true });
       try {
-        const result = await invoke(operation, params, {
-          identity,
-          context,
-          ...(operation.mutation
-            ? { idempotencyKey: createIdempotencyKey() }
-            : {}),
-        });
+        const result = await invoke(
+          operation,
+          { ...(params as object), ...omitted },
+          {
+            identity,
+            context,
+            ...(operation.mutation
+              ? { idempotencyKey: createIdempotencyKey() }
+              : {}),
+          },
+        );
         if (result.type === OperationResultType.Completed)
           return {
             content: [{ type: "text", text: canonicalJSON(result.data) }],
