@@ -414,6 +414,10 @@ The implemented fields are:
   credential after that provider failure. Each strike doubles it.
 - `agent.cooldown.max_ms`: optional Convict `nat` in milliseconds, default
   `86400000`. It caps a cooldown.
+- `workbench.approval_wait_ms`: optional safe integer in milliseconds, from
+  `60000` to `86400000` inclusive, default `3600000` (one hour). It holds the
+  maximum wait of a pending tool call approval. At the end the call returns
+  blocked and the run ends. A value outside the bounds fails startup.
 - `mission.consecutive_failure_limit`: optional Convict `nat`, default `3`. It
   holds the consecutive failure limit of the Mission Service.
 - `mission.further_work_limit`: optional Convict `nat`, default `3`. It holds
