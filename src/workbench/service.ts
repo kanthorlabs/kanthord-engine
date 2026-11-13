@@ -93,6 +93,7 @@ import {
   toolOperations,
 } from "./tools.ts";
 import {
+  actionSettled,
   appendRecord,
   createSession,
   findSession,
@@ -217,8 +218,6 @@ interface ActionReportResult {
   tool_call_id: string;
   outcome: ActionOutcome;
 }
-
-const CUSTOM_MESSAGE_ENTRY = "custom_message";
 
 const IDLE_SESSION = {
   disposeAgent: () => {},
@@ -607,17 +606,7 @@ export class WorkbenchService implements Service {
         { session_id: sessionId, tool_call_id: toolCallId },
       );
     const settled =
-      session.doneReports.has(toolCallId) ||
-      entries.some((entry) => {
-        const details = entry.details as
-          { tool_call_id?: unknown; outcome?: unknown } | undefined;
-        return (
-          entry.type === CUSTOM_MESSAGE_ENTRY &&
-          entry.customType === WORKBENCH_ACTION_RESULT_ENTRY &&
-          details?.tool_call_id === toolCallId &&
-          details.outcome === ActionOutcome.Done
-        );
-      });
+      session.doneReports.has(toolCallId) || actionSettled(entries, toolCallId);
     if (settled)
       throw new OperationError(
         HttpStatus.Conflict,

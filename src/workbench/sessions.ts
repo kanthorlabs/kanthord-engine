@@ -10,7 +10,9 @@ import { isString } from "../kernel/values.ts";
 import { workbenchAgentNames } from "../agent/catalog.ts";
 import { loadPi, PI_DIRECTORY_NAME } from "../agent/pi.ts";
 import {
+  ActionOutcome,
   type SessionEntry,
+  WORKBENCH_ACTION_RESULT_ENTRY,
   WORKBENCH_CONFIGURATION_ENTRY,
   WORKBENCH_DIRECTORY_NAME,
   WORKBENCH_RECORD_ENTRY,
@@ -22,6 +24,7 @@ import {
 const SESSIONS_DIRECTORY_NAME = "sessions";
 const EntryType = {
   Custom: "custom",
+  CustomMessage: "custom_message",
   ModelChange: "model_change",
   ThinkingLevelChange: "thinking_level_change",
 } as const;
@@ -143,6 +146,22 @@ export function recordOf(entry: SessionEntry): WorkbenchRecord | null {
     return null;
   const parsed = workbenchRecordSchema.safeParse(entry.data);
   return parsed.success ? parsed.data : null;
+}
+
+export function actionSettled(
+  entries: readonly SessionEntry[],
+  toolCallId: string,
+): boolean {
+  return entries.some((entry) => {
+    const details = entry.details as
+      { tool_call_id?: unknown; outcome?: unknown } | undefined;
+    return (
+      entry.type === EntryType.CustomMessage &&
+      entry.customType === WORKBENCH_ACTION_RESULT_ENTRY &&
+      details?.tool_call_id === toolCallId &&
+      details.outcome === ActionOutcome.Done
+    );
+  });
 }
 
 export function lastModel(
