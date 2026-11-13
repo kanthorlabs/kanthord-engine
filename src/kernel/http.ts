@@ -15,6 +15,7 @@ export const HttpStatus = {
   UnsupportedMediaType: 415,
   TooManyRequests: 429,
   InternalServerError: 500,
+  BadGateway: 502,
   ServiceUnavailable: 503,
   GatewayTimeout: 504,
 } as const;

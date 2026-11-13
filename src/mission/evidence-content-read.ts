@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
 import { OperationError } from "../kernel/errors.ts";
-import { HttpStatus } from "../kernel/http.ts";
+import { HttpStatus, MediaType } from "../kernel/http.ts";
 import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
@@ -160,13 +160,28 @@ function signGet(
   );
 }
 
-export async function readContent(
+export interface ContentRequest {
+  assetId: string;
+  bound: ContentBound;
+  execution: boolean;
+}
+
+export interface ContentRange {
+  offset?: number;
+  length?: number;
+}
+
+export interface DownloadRequest {
+  assetId: string;
+  range: ContentRange;
+}
+
+export async function prepareContent(
   dependencies: Dependencies,
   caller: CallerContext,
-  assetId: string,
-  bound: ContentBound,
-  execution: boolean,
+  request: ContentRequest,
 ) {
+  const { assetId, bound, execution } = request;
   assert.ok(caller.identity);
   assert.equal(typeof bound, FUNCTION_TYPE);
   const prepared = dependencies.store.transaction((tx) => {
@@ -179,10 +194,7 @@ export async function readContent(
       );
     return content;
   });
-  if (!prepared.object)
-    return caller.commit((tx) =>
-      storedContentSchema.parse(contentOf(tx, assetId, bound).result),
-    );
+  if (!prepared.object) return { result: prepared.result, signed: null };
   let object = prepared.object;
   for (let attempt = 0; attempt < MAX_SIGNINGS; attempt++) {
     const signed = await signGet(dependencies, caller, assetId, execution);
@@ -194,13 +206,104 @@ export async function readContent(
       object = current.object;
       continue;
     }
-    return caller.commit((tx) => {
-      const final = contentOf(tx, assetId, bound);
-      assert.equal(final.object?.object_version, object.object_version);
-      return storedContentSchema.parse({ ...final.result, ...signed });
-    });
+    return { result: current.result, signed };
   }
   assert.fail(
     "An asset version is written once, so signing converges within two attempts.",
   );
+}
+
+export async function readContent(
+  dependencies: Dependencies,
+  caller: CallerContext,
+  assetId: string,
+  bound: ContentBound,
+  execution: boolean,
+) {
+  const { result, signed } = await prepareContent(dependencies, caller, {
+    assetId,
+    bound,
+    execution,
+  });
+  if (!signed)
+    return caller.commit((tx) =>
+      storedContentSchema.parse(contentOf(tx, assetId, bound).result),
+    );
+  return caller.commit((tx) => {
+    const final = contentOf(tx, assetId, bound);
+    assert.deepEqual(final.result.address, result.address);
+    return storedContentSchema.parse({ ...final.result, ...signed });
+  });
+}
+
+const EVIDENCE_FILE_EXTENSIONS: Readonly<Record<string, string>> = {
+  "text/plain": ".txt",
+  "application/json": ".json",
+  "application/xml": ".xml",
+  "text/xml": ".xml",
+  "application/yaml": ".yaml",
+  "text/yaml": ".yaml",
+  "image/png": ".png",
+  "image/jpeg": ".jpg",
+  "image/gif": ".gif",
+  "image/webp": ".webp",
+};
+const DEFAULT_FILE_EXTENSION = ".bin";
+const EMPTY_SIZE = 0;
+const DEFAULT_OFFSET = 0;
+const MEDIA_TYPE_PARAMETER_SEPARATOR = ";";
+
+function fileExtension(mediaType: string) {
+  const essence = mediaType
+    .split(MEDIA_TYPE_PARAMETER_SEPARATOR)[0]
+    ?.trim()
+    .toLowerCase();
+  return (
+    (essence === undefined ? undefined : EVIDENCE_FILE_EXTENSIONS[essence]) ??
+    DEFAULT_FILE_EXTENSION
+  );
+}
+
+function sliceOf(content: Buffer, range: ContentRange) {
+  if (content.length === EMPTY_SIZE) return content;
+  const offset = range.offset ?? DEFAULT_OFFSET;
+  if (offset >= content.length)
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      MissionErrorCode.EvidenceContentRangeInvalid,
+      "The offset is at or after the end of the content.",
+    );
+  return content.subarray(offset, offset + (range.length ?? content.length));
+}
+
+export async function downloadContent(
+  dependencies: Dependencies,
+  caller: CallerContext,
+  request: DownloadRequest,
+) {
+  const { result, signed } = await prepareContent(dependencies, caller, {
+    assetId: request.assetId,
+    bound: () => true,
+    execution: false,
+  });
+  if (signed || !("data" in result))
+    throw new OperationError(
+      HttpStatus.BadGateway,
+      MissionErrorCode.EvidenceContentUnavailable,
+      "The storage read failed.",
+    );
+  const content = Buffer.from(result.data, CONTENT_ENCODING);
+  const body = sliceOf(content, request.range);
+  return new Response(body, {
+    status: HttpStatus.OK,
+    headers: {
+      "Content-Type": MediaType.Binary,
+      "Content-Length": String(body.length),
+      "Content-Disposition": `attachment; filename="${request.assetId}${fileExtension(result.media_type)}"`,
+      "X-Content-Type-Options": "nosniff",
+      "Cache-Control": "no-store",
+      "X-Evidence-Media-Type": result.media_type,
+      "X-Evidence-Size": String(content.length),
+    },
+  });
 }

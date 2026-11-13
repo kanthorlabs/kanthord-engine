@@ -393,6 +393,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["mission.evidence.list", AccessPolicy.Human],
   ["mission.evidence.get", AccessPolicy.Human],
   ["mission.evidence.asset.content.get", AccessPolicy.Human],
+  ["mission.evidence.asset.content.download", AccessPolicy.Human],
   ["mission.evidence.asset.delete", AccessPolicy.Human],
   ["mission.evidence.delete", AccessPolicy.Human],
   ["mission.assessment.list", AccessPolicy.Human],
@@ -499,8 +500,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["footprint.measure.run", AccessPolicy.Human],
   ["footprint.backup.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 284;
-const ROUTED_OPERATION_COUNT = 269;
+const OPERATION_COUNT = 285;
+const ROUTED_OPERATION_COUNT = 270;
 const INTAKE_OPERATION_COUNT = 37;
 const INTAKE_ROUTED_OPERATION_COUNT = 24;
 const SERVICE_OPERATION_IDS = [

@@ -1,0 +1,98 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: mission.evidence.asset.content.download
+    tags:
+      - mission
+    description: Download stored evidence content through the server.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: stream
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: asset_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/mission.evidence.asset.content.download.Input/prope\
+            rties/params/properties/asset_id"
+      - name: offset
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/mission.evidence.asset.content.download.Input/prope\
+            rties/query/properties/offset"
+      - name: length
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/mission.evidence.asset.content.download.Input/prope\
+            rties/query/properties/length"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/octet-stream:
+            schema:
+              $ref: "#/components/schemas/mission.evidence.asset.content.download.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    mission.evidence.asset.content.download.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            asset_id:
+              type: string
+              minLength: 41
+              maxLength: 41
+              pattern: ^evidence_asset_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: evidence_asset_ followed by a canonical 26-character uppercase
+                ULID.
+          required:
+            - asset_id
+          additionalProperties: false
+        query:
+          type: object
+          properties:
+            offset:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            length:
+              type: integer
+              exclusiveMinimum: 0
+              maximum: 5368709120
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    mission.evidence.asset.content.download.Output:
+      type: string

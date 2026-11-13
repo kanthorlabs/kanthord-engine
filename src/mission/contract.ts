@@ -3,7 +3,7 @@ import { humanActorSchema } from "../kernel/actor.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import { canonicalJSON, timestamp } from "../kernel/json.ts";
 import { isString } from "../kernel/values.ts";
-import { HttpMethod, HttpStatus } from "../kernel/http.ts";
+import { HttpMethod, HttpStatus, MediaType } from "../kernel/http.ts";
 import {
   AccessPolicy,
   type Operation,
@@ -531,6 +531,8 @@ export const MissionErrorCode = {
   EvidenceTooLarge: "mission.evidence.too_large",
   EvidenceUploadExpired: "mission.evidence.upload_expired",
   EvidenceContentRepository: "mission.evidence.content_repository",
+  EvidenceContentRangeInvalid: "mission.evidence.content_range_invalid",
+  EvidenceContentUnavailable: "mission.evidence.content_unavailable",
   EvidenceRemoveNodeLive: "mission.evidence.remove_node_live",
   EvidenceRequestForceRequired: "mission.evidence.request_force_required",
   EvidenceRequestAssetRefused: "mission.evidence.request_asset_refused",
@@ -2414,6 +2416,29 @@ export const missionOperations = {
     ),
     output: storedContentSchema,
     description: "Read stored evidence content.",
+  },
+  "evidence.asset.content.download": {
+    ...readOperation,
+    id: "mission.evidence.asset.content.download",
+    method: HttpMethod.Get,
+    path: "/api/mission/evidence/asset/:asset_id/content/download",
+    lifetime: OperationLifetime.Stream,
+    access: AccessPolicy.Human,
+    contentType: MediaType.Binary,
+    input: readInput(
+      z.strictObject({ asset_id: identitySchema("evidence_asset") }),
+      z.strictObject({
+        offset: z.coerce.number().int().nonnegative().optional(),
+        length: z.coerce
+          .number()
+          .int()
+          .positive()
+          .max(OBJECT_SIZE_MAX)
+          .optional(),
+      }),
+    ),
+    output: z.string(),
+    description: "Download stored evidence content through the server.",
   },
   "execution.evidence.asset.content.get": {
     ...readOperation,

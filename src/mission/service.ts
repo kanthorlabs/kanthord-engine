@@ -112,7 +112,11 @@ import { completeEvidence } from "./evidence-complete.ts";
 import { requestEvidence } from "./evidence-request.ts";
 import { submitEvidence } from "./evidence-submit.ts";
 import { evidencePage, getEvidence } from "./evidence-read.ts";
-import { executionContentBound, readContent } from "./evidence-content-read.ts";
+import {
+  downloadContent,
+  executionContentBound,
+  readContent,
+} from "./evidence-content-read.ts";
 import { submitAssessment } from "./assessment-submit.ts";
 import { serverGateFiles } from "./gate-files.ts";
 import { checkNode, resumeDeferredChecks } from "./node-check.ts";
@@ -561,6 +565,14 @@ export class MissionService
           () => true,
           false,
         ),
+    );
+    registry.register(
+      missionOperations["evidence.asset.content.download"],
+      ({ params, query }, caller) =>
+        downloadContent(this.dependencies, caller, {
+          assetId: params.asset_id,
+          range: query,
+        }),
     );
     registry.register(
       missionOperations["execution.evidence.asset.content.get"],

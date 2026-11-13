@@ -154,6 +154,8 @@ paths:
     $ref: ./openapi/mission/edge.list.yaml#/pathItem
   /api/mission/evidence/asset/{asset_id}/complete:
     $ref: ./openapi/mission/evidence.asset.complete.yaml#/pathItem
+  /api/mission/evidence/asset/{asset_id}/content/download:
+    $ref: ./openapi/mission/evidence.asset.content.download.yaml#/pathItem
   /api/mission/evidence/asset/{asset_id}/content:
     $ref: ./openapi/mission/evidence.asset.content.get.yaml#/pathItem
   /api/mission/evidence/asset/{asset_id}:
