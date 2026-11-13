@@ -59,10 +59,11 @@ export type WorkbenchRecordKind =
 
 const actionSeenSchema = z.union([
   z.strictObject({
+    name: z.string(),
     state: z.string(),
     attempt: z.number().int().nonnegative(),
   }),
-  z.strictObject({ paused: z.boolean() }),
+  z.strictObject({ name: z.string(), paused: z.boolean() }),
 ]);
 
 export const workbenchRecordSchema = z.discriminatedUnion("kind", [
