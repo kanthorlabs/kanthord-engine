@@ -1,25 +1,48 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { HttpStatus } from "../../kernel/http.ts";
+import { httpClient } from "../../gateway/client.ts";
+import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
+import {
+  type OperationResult,
+  OperationResultType,
+} from "../../kernel/operation.ts";
 import {
   AssetKind,
   type Evidence,
   Intent,
   type Mission,
   MissionErrorCode,
+  missionOperations,
   type NodeChange,
 } from "../../mission/contract.ts";
-import { gatewayFixture } from "./test-support.ts";
+import { fakeS3, gatewayFixture } from "./test-support.ts";
 import {
   cliMachine,
   cliSession,
   createCredentials,
+  executionContext,
   passingEvaluation,
 } from "./cli-test-support.ts";
 
 const REPOSITORY_KEY = "download-test-repository-key";
 const REPOSITORY = "repo";
+const STORE = "store";
 const HARNESS = "harness";
+const REGION = "eu-central-1";
+const STORAGE_PREFIX = "kanthord";
+const STORAGE_SECRET_KEY = "download-test-storage-key";
+const FIRST_ATTEMPT = 1;
+const FIRST_OBJECT_BODY = "0123456789";
+const SECOND_OBJECT_BODY = "abcdefghij";
+const OBJECT_SIZE = FIRST_OBJECT_BODY.length;
+const OBJECT_MEDIA_TYPE = "text/plain";
+const OBJECT_RANGE_QUERY = "?offset=2&length=3";
+const OBJECT_RANGE_TEXT = "234";
+const OBJECT_TAIL_QUERY = "?offset=8";
+const OBJECT_TAIL_TEXT = "89";
+const STORAGE_FAILURE_STATUS = 500;
+const SIGNED_QUERY_MARKER = "X-Amz-";
 const COMMIT = "a".repeat(40);
 const FIRST_VERSION = 1;
 const FIRST_INDEX = 0;
@@ -34,7 +57,18 @@ const RANGE_TEXT = "k";
 type Page<T> = { items: T[]; next_cursor: string | null };
 type Binding = { id: string; name: string; resource_identity: string };
 
+type Upload = { asset_id: string; put_url: string };
+
+function completed<T>(result: OperationResult<T>): T {
+  assert.ok(
+    result.type === OperationResultType.Completed,
+    JSON.stringify(result),
+  );
+  return result.data;
+}
+
 async function setup(t: TestContext) {
+  const s3 = await fakeS3(t);
   const fixture = await gatewayFixture(t, {
     repositoryConnector: { gitLsRemote: async () => {} },
   });
@@ -46,6 +80,15 @@ async function setup(t: TestContext) {
   );
   const { read, write } = session;
   await createCredentials(session, REPOSITORY_KEY);
+  await write(["storage", "credential", "create"], {
+    name: STORE,
+    platform: "s3",
+    metadata: { endpoint: s3.endpoint, bucket: s3.bucket, region: REGION },
+    secret: {
+      access_key_id: "AKIAEXAMPLE",
+      secret_access_key: STORAGE_SECRET_KEY,
+    },
+  });
   const project = await read<{ id: string }>([
     "project",
     "create",
@@ -65,6 +108,17 @@ async function setup(t: TestContext) {
           strategy: { base_branch: "main" },
           ssh_credential: "github-ssh",
           credential: "github",
+        },
+      },
+      [STORE]: {
+        kind: "storage",
+        config: {
+          available: true,
+          endpoint: s3.endpoint,
+          bucket: s3.bucket,
+          region: REGION,
+          prefix: STORAGE_PREFIX,
+          credential: STORE,
         },
       },
       [HARNESS]: {
@@ -91,7 +145,7 @@ async function setup(t: TestContext) {
         criterion: "Accounts recover",
         verifications: ["true"],
         intent: Intent.Implement,
-        bindings: [binding(REPOSITORY).id],
+        bindings: [binding(REPOSITORY).id, binding(STORE).id],
       },
       tasks: [],
       reason: "plan",
@@ -104,10 +158,51 @@ async function setup(t: TestContext) {
     projectId: project.id,
     resourceIdentity: binding(HARNESS).resource_identity,
   });
+  const api = httpClient(missionOperations, fixture.endpoint, machine.token);
+  let objectKey = "";
+  let objectId = "";
   await passingEvaluation(session, machine, {
     nodeId,
     bindingId: binding(REPOSITORY).id,
     commit: COMMIT,
+    executing: async (execution) => {
+      const context = executionContext(execution);
+      const submitted = completed(
+        await api["evidence.submit"](
+          {
+            params: { node_id: nodeId },
+            query: {},
+            body: {
+              ...context,
+              subject: "recording",
+              assets: [
+                {
+                  kind: AssetKind.Object,
+                  media_type: OBJECT_MEDIA_TYPE,
+                  size: OBJECT_SIZE,
+                },
+              ],
+            },
+          },
+          { idempotencyKey: createIdempotencyKey() },
+        ),
+      );
+      const upload = submitted.uploads[0] as Upload;
+      const put = await fetch(upload.put_url, {
+        method: HttpMethod.Put,
+        body: FIRST_OBJECT_BODY,
+      });
+      assert.equal(put.status, HttpStatus.OK);
+      await put.arrayBuffer();
+      completed(
+        await api["evidence.asset.complete"](
+          { params: { asset_id: upload.asset_id }, query: {}, body: context },
+          { idempotencyKey: createIdempotencyKey() },
+        ),
+      );
+      objectId = upload.asset_id;
+      objectKey = `${STORAGE_PREFIX}/${project.id}/${mission.id}/${nodeId}/${FIRST_ATTEMPT}/${upload.asset_id}`;
+    },
   });
   const evidence = await read<Page<Evidence>>([
     "mission",
@@ -127,9 +222,22 @@ async function setup(t: TestContext) {
       `${fixture.endpoint}/api/mission/evidence/asset/${assetId}/content/download${query}`,
       { headers: { Authorization: `Bearer ${fixture.token}` } },
     );
+  const overwriteObject = async () => {
+    const put = await fetch(`${s3.endpoint}/${s3.bucket}/${objectKey}`, {
+      method: HttpMethod.Put,
+      headers: { Authorization: "AWS4-HMAC-SHA256 e2e" },
+      body: SECOND_OBJECT_BODY,
+    });
+    assert.equal(put.status, HttpStatus.OK);
+    await put.arrayBuffer();
+  };
   return {
     producedId: assetOf(AssetKind.Produced),
     repositoryId: assetOf(AssetKind.Repository),
+    objectId,
+    s3,
+    logs: fixture.logs,
+    overwriteObject,
     download,
   };
 }
@@ -180,6 +288,39 @@ test(
           body.error.code,
           MissionErrorCode.EvidenceContentRepository,
         );
+      },
+    );
+    await t.test(
+      "happy path: an object answers the recorded version, whole and by range",
+      async () => {
+        await h.overwriteObject();
+        const whole = await h.download(h.objectId);
+        assert.equal(whole.status, HttpStatus.OK);
+        assert.equal(await whole.text(), FIRST_OBJECT_BODY);
+        assert.equal(whole.headers.get("content-type"), OCTET_STREAM);
+        assert.equal(whole.headers.get("x-evidence-size"), String(OBJECT_SIZE));
+        const ranged = await h.download(h.objectId, OBJECT_RANGE_QUERY);
+        assert.equal(ranged.status, HttpStatus.OK);
+        assert.equal(await ranged.text(), OBJECT_RANGE_TEXT);
+        const tail = await h.download(h.objectId, OBJECT_TAIL_QUERY);
+        assert.equal(await tail.text(), OBJECT_TAIL_TEXT);
+      },
+    );
+    await t.test(
+      "security, redaction: a storage 500 answers 502 with no signed URL",
+      async () => {
+        h.s3.failNext(STORAGE_FAILURE_STATUS);
+        const response = await h.download(h.objectId);
+        assert.equal(response.status, HttpStatus.BadGateway);
+        const text = await response.text();
+        const body = JSON.parse(text) as { error: { code: string } };
+        assert.equal(
+          body.error.code,
+          MissionErrorCode.EvidenceContentUnavailable,
+        );
+        assert.ok(!text.includes(SIGNED_QUERY_MARKER));
+        for (const line of h.logs)
+          assert.ok(!line.includes(SIGNED_QUERY_MARKER));
       },
     );
   },

@@ -206,7 +206,7 @@ export async function prepareContent(
       object = current.object;
       continue;
     }
-    return { result: current.result, signed };
+    return { result: current.result, signed: { ...signed, headers: {} } };
   }
   assert.fail(
     "An asset version is written once, so signing converges within two attempts.",
@@ -229,10 +229,11 @@ export async function readContent(
     return caller.commit((tx) =>
       storedContentSchema.parse(contentOf(tx, assetId, bound).result),
     );
+  const { get_url, expires_at } = signed;
   return caller.commit((tx) => {
     const final = contentOf(tx, assetId, bound);
     assert.deepEqual(final.result.address, result.address);
-    return storedContentSchema.parse({ ...final.result, ...signed });
+    return storedContentSchema.parse({ ...final.result, get_url, expires_at });
   });
 }
 
@@ -251,6 +252,7 @@ const EVIDENCE_FILE_EXTENSIONS: Readonly<Record<string, string>> = {
 const DEFAULT_FILE_EXTENSION = ".bin";
 const EMPTY_SIZE = 0;
 const DEFAULT_OFFSET = 0;
+const LAST_INDEX_OFFSET = 1;
 const MEDIA_TYPE_PARAMETER_SEPARATOR = ";";
 
 function fileExtension(mediaType: string) {
@@ -264,16 +266,103 @@ function fileExtension(mediaType: string) {
   );
 }
 
-function sliceOf(content: Buffer, range: ContentRange) {
-  if (content.length === EMPTY_SIZE) return content;
-  const offset = range.offset ?? DEFAULT_OFFSET;
-  if (offset >= content.length)
+interface ContentSlice {
+  start: number;
+  stop: number;
+}
+
+interface StoredBytes {
+  mediaType: string;
+  size: number;
+  length: number;
+}
+
+interface ProducedContent {
+  media_type: string;
+  data: string;
+}
+
+interface ObjectSource {
+  mediaType: string;
+  size: number;
+  signed: { get_url: string; headers: Record<string, string> };
+}
+
+function sliceBounds(size: number, range: ContentRange): ContentSlice {
+  if (size === EMPTY_SIZE) return { start: EMPTY_SIZE, stop: EMPTY_SIZE };
+  const start = range.offset ?? DEFAULT_OFFSET;
+  if (start >= size)
     throw new OperationError(
       HttpStatus.BadRequest,
       MissionErrorCode.EvidenceContentRangeInvalid,
       "The offset is at or after the end of the content.",
     );
-  return content.subarray(offset, offset + (range.length ?? content.length));
+  return { start, stop: Math.min(start + (range.length ?? size), size) };
+}
+
+function downloadHeaders(request: DownloadRequest, stored: StoredBytes) {
+  return {
+    "Content-Type": MediaType.Binary,
+    "Content-Length": String(stored.length),
+    "Content-Disposition": `attachment; filename="${request.assetId}${fileExtension(stored.mediaType)}"`,
+    "X-Content-Type-Options": "nosniff",
+    "Cache-Control": "no-store",
+    "X-Evidence-Media-Type": stored.mediaType,
+    "X-Evidence-Size": String(stored.size),
+  };
+}
+
+function storageUnavailable() {
+  return new OperationError(
+    HttpStatus.BadGateway,
+    MissionErrorCode.EvidenceContentUnavailable,
+    "The storage read failed.",
+  );
+}
+
+function producedAnswer(request: DownloadRequest, produced: ProducedContent) {
+  const content = Buffer.from(produced.data, CONTENT_ENCODING);
+  const { start, stop } = sliceBounds(content.length, request.range);
+  return new Response(content.subarray(start, stop), {
+    status: HttpStatus.OK,
+    headers: downloadHeaders(request, {
+      mediaType: produced.media_type,
+      size: content.length,
+      length: stop - start,
+    }),
+  });
+}
+
+async function objectAnswer(
+  caller: CallerContext,
+  request: DownloadRequest,
+  source: ObjectSource,
+) {
+  const { start, stop } = sliceBounds(source.size, request.range);
+  const headers = downloadHeaders(request, {
+    mediaType: source.mediaType,
+    size: source.size,
+    length: stop - start,
+  });
+  if (source.size === EMPTY_SIZE)
+    return new Response(new Uint8Array(), { status: HttpStatus.OK, headers });
+  const ranged = start > DEFAULT_OFFSET || stop < source.size;
+  const { get_url } = source.signed;
+  const storage = await fetch(get_url, {
+    headers: {
+      ...source.signed.headers,
+      ...(ranged
+        ? { Range: `bytes=${start}-${stop - LAST_INDEX_OFFSET}` }
+        : {}),
+    },
+    redirect: "error",
+    signal: caller.context.signal,
+  }).catch(() => null);
+  const accepted = ranged ? HttpStatus.PartialContent : HttpStatus.OK;
+  if (storage?.status === accepted && storage.body)
+    return new Response(storage.body, { status: HttpStatus.OK, headers });
+  await storage?.body?.cancel().catch(() => undefined);
+  throw storageUnavailable();
 }
 
 export async function downloadContent(
@@ -286,24 +375,11 @@ export async function downloadContent(
     bound: () => true,
     execution: false,
   });
-  if (signed || !("data" in result))
-    throw new OperationError(
-      HttpStatus.BadGateway,
-      MissionErrorCode.EvidenceContentUnavailable,
-      "The storage read failed.",
-    );
-  const content = Buffer.from(result.data, CONTENT_ENCODING);
-  const body = sliceOf(content, request.range);
-  return new Response(body, {
-    status: HttpStatus.OK,
-    headers: {
-      "Content-Type": MediaType.Binary,
-      "Content-Length": String(body.length),
-      "Content-Disposition": `attachment; filename="${request.assetId}${fileExtension(result.media_type)}"`,
-      "X-Content-Type-Options": "nosniff",
-      "Cache-Control": "no-store",
-      "X-Evidence-Media-Type": result.media_type,
-      "X-Evidence-Size": String(content.length),
-    },
+  if ("data" in result) return producedAnswer(request, result);
+  assert.ok(signed);
+  return objectAnswer(caller, request, {
+    mediaType: result.media_type,
+    size: result.size,
+    signed,
   });
 }

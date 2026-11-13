@@ -2034,6 +2034,12 @@ const S3_CHECKSUM_TYPE_HEADER = "x-amz-checksum-type";
 const S3_CHECKSUM_MODE_ENABLED = "ENABLED";
 const S3_CHECKSUM_TYPE_FULL = "FULL_OBJECT";
 const S3_HEAD = "HEAD";
+const S3_RANGE_HEADER = "range";
+const S3_CONTENT_RANGE_HEADER = "content-range";
+const S3_RANGE_PATTERN = /^bytes=(\d+)-(\d+)$/;
+const S3_INDEX_STEP = 1;
+const S3_RANGE_START_GROUP = 1;
+const S3_RANGE_END_GROUP = 2;
 const S3_BASE64 = "base64";
 const S3_SHA256 = "sha256";
 const S3_ERROR_CODES = {
@@ -2060,6 +2066,7 @@ export interface FakeS3Call {
 interface FakeS3State {
   versions: Map<string, FakeS3Object[]>;
   calls: FakeS3Call[];
+  closed: FakeS3Call[];
   nextFailure: number | null;
   losses: number;
 }
@@ -2166,9 +2173,32 @@ function readS3Object(
     headers[CHECKSUM_HEADER] = found.sha256;
     headers[S3_CHECKSUM_TYPE_HEADER] = S3_CHECKSUM_TYPE_FULL;
   }
+  if (request.method !== HttpMethod.Get)
+    return response.writeHead(HttpStatus.OK, headers).end();
+  response.on("close", () => {
+    if (!response.writableFinished)
+      state.closed.push({
+        method: HttpMethod.Get,
+        key: target.key,
+        version: target.version,
+      });
+  });
+  const range = S3_RANGE_PATTERN.exec(request.headers[S3_RANGE_HEADER] ?? "");
+  if (!range)
+    return response.writeHead(HttpStatus.OK, headers).end(found.bytes);
+  const start = Number(range[S3_RANGE_START_GROUP]);
+  const end = Math.min(
+    Number(range[S3_RANGE_END_GROUP]),
+    found.bytes.length - S3_INDEX_STEP,
+  );
+  const slice = found.bytes.subarray(start, end + S3_INDEX_STEP);
   response
-    .writeHead(HttpStatus.OK, headers)
-    .end(request.method === HttpMethod.Get ? found.bytes : undefined);
+    .writeHead(HttpStatus.PartialContent, {
+      ...headers,
+      [S3_CONTENT_LENGTH_HEADER]: slice.length,
+      [S3_CONTENT_RANGE_HEADER]: `bytes ${start}-${end}/${found.bytes.length}`,
+    })
+    .end(slice);
 }
 
 function deleteS3Object(
@@ -2226,6 +2256,7 @@ export async function fakeS3(t: TestContext) {
   const state: FakeS3State = {
     versions: new Map(),
     calls: [],
+    closed: [],
     nextFailure: null,
     losses: ZERO_LOSSES,
   };
@@ -2254,6 +2285,7 @@ export async function fakeS3(t: TestContext) {
     endpoint: `http://127.0.0.1:${address.port}`,
     bucket: S3_BUCKET,
     calls: state.calls as readonly FakeS3Call[],
+    closed: state.closed as readonly FakeS3Call[],
     objects(key: string): readonly FakeS3Object[] {
       return state.versions.get(key) ?? [];
     },
