@@ -21,16 +21,13 @@ const MAX_WIRE_NODES = 10000;
 const NO_SYMBOL_KEYS = 0;
 const input = { params: {}, query: {}, body: null };
 const MEASURED_OPERATIONS: readonly string[] = ["footprint.measure.run"];
-const HOST_DEPENDENT_KEY = "alert";
 
 function shapeOf(value: unknown): unknown {
   if (typeof value === ValueType.Number) return ValueType.Number;
   if (Array.isArray(value)) return value.map(shapeOf);
   if (isObject(value))
     return Object.fromEntries(
-      Object.entries(value)
-        .filter(([key]) => key !== HOST_DEPENDENT_KEY)
-        .map(([key, child]) => [key, shapeOf(child)]),
+      Object.entries(value).map(([key, child]) => [key, shapeOf(child)]),
     );
   return value;
 }
