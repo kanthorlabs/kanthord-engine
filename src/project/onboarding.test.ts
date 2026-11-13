@@ -69,13 +69,13 @@ import {
 } from "./environment-state.ts";
 import {
   type BindingFacts,
-  ENV_AGENT_ATTEMPT_LIMIT,
-  ENV_AGENT_TOOL_CALL_LIMIT,
   type EnvironmentFailedInput,
   environmentStateSchema,
   type GroupRecord,
   Onboarding,
   type OnboardingDependencies,
+  PE_AGENT_ATTEMPT_LIMIT,
+  PE_AGENT_TOOL_CALL_LIMIT,
   type RepositoryGroup,
   statusOf,
   targetOf,
@@ -2746,7 +2746,7 @@ test(
         class: SETUP_FAILED,
         tail: BOOM,
         checks: [],
-        attempts_left: ENV_AGENT_ATTEMPT_LIMIT - ONE_CALL,
+        attempts_left: PE_AGENT_ATTEMPT_LIMIT - ONE_CALL,
       },
     ]);
     const tag = h.tagOf(h.digest());
@@ -2779,7 +2779,7 @@ test(
         class: null,
         tail: "",
         checks: [],
-        attempts_left: ENV_AGENT_ATTEMPT_LIMIT - ONE_CALL,
+        attempts_left: PE_AGENT_ATTEMPT_LIMIT - ONE_CALL,
       },
     ]);
     assert.equal(h.state().status, EnvironmentStatus.Ready);
@@ -2796,7 +2796,7 @@ test(
     let endsAtFifth = NO_CALLS;
     let runsAtSixth = NO_CALLS;
     h.script = async (tools) => {
-      for (let attempt = 1; attempt <= ENV_AGENT_ATTEMPT_LIMIT; attempt++)
+      for (let attempt = 1; attempt <= PE_AGENT_ATTEMPT_LIMIT; attempt++)
         answers.push(await writeTool(tools, agentDocument(attempt)));
       endsAtFifth = h.sessionEnds;
       runsAtSixth = h.proveInputs.length;
@@ -2804,7 +2804,7 @@ test(
     };
     await startSession(h);
     assert.deepEqual(
-      answers.slice(NO_CALLS, ENV_AGENT_ATTEMPT_LIMIT).map((answer) => ({
+      answers.slice(NO_CALLS, PE_AGENT_ATTEMPT_LIMIT).map((answer) => ({
         outcome: answer.outcome,
         attempts_left: answer.attempts_left,
       })),
@@ -2813,7 +2813,7 @@ test(
         attempts_left: attemptsLeft,
       })),
     );
-    assert.deepEqual(answers[ENV_AGENT_ATTEMPT_LIMIT], {
+    assert.deepEqual(answers[PE_AGENT_ATTEMPT_LIMIT], {
       outcome: null,
       reason: "attempt_limit",
       detail: null,
@@ -2821,7 +2821,7 @@ test(
     });
     assert.equal(endsAtFifth, ONE_CALL);
     assert.equal(h.sessionEnds, TWO_CALLS);
-    assert.equal(h.writes.length, ENV_AGENT_ATTEMPT_LIMIT);
+    assert.equal(h.writes.length, PE_AGENT_ATTEMPT_LIMIT);
     assert.equal(h.proveInputs.length, runsAtSixth);
   },
 );
@@ -2834,7 +2834,7 @@ test(
     const answers: Array<Record<string, unknown>> = [];
     h.script = async (tools) => {
       answers.push(await writeTool(tools, REFUSED_ENVIRONMENT));
-      for (let attempt = 1; attempt < ENV_AGENT_ATTEMPT_LIMIT; attempt++)
+      for (let attempt = 1; attempt < PE_AGENT_ATTEMPT_LIMIT; attempt++)
         answers.push(await writeTool(tools, agentDocument(attempt)));
       answers.push(await writeTool(tools, agentDocument(NO_CALLS)));
     };
@@ -2843,7 +2843,7 @@ test(
       outcome: null,
       reason: "write_refused",
       detail: INVALID_DOCUMENT,
-      attempts_left: ENV_AGENT_ATTEMPT_LIMIT - ONE_CALL,
+      attempts_left: PE_AGENT_ATTEMPT_LIMIT - ONE_CALL,
     });
     assert.deepEqual(answers.at(-ONE_CALL), {
       outcome: null,
@@ -2851,8 +2851,8 @@ test(
       detail: null,
       attempts_left: NO_CALLS,
     });
-    assert.equal(answers.length, ENV_AGENT_ATTEMPT_LIMIT + ONE_CALL);
-    assert.equal(h.writes.length, ENV_AGENT_ATTEMPT_LIMIT);
+    assert.equal(answers.length, PE_AGENT_ATTEMPT_LIMIT + ONE_CALL);
+    assert.equal(h.writes.length, PE_AGENT_ATTEMPT_LIMIT);
     assert.equal(h.sessionEnds, TWO_CALLS);
   },
 );
@@ -2888,14 +2888,14 @@ test(
     const h = await failedHarness(t);
     let answer: Record<string, unknown> = {};
     h.script = async (tools) => {
-      for (let call = NO_CALLS; call < ENV_AGENT_TOOL_CALL_LIMIT; call++)
+      for (let call = NO_CALLS; call < PE_AGENT_TOOL_CALL_LIMIT; call++)
         await callTool(tools, "probe", { command: "uname -a" });
       assert.equal(h.sessionEnds, NO_CALLS);
       answer = await callTool(tools, "probe", { command: "uname -a" });
     };
     await startSession(h);
     assert.deepEqual(answer, { reason: "tool_limit" });
-    assert.equal(h.probes.length, ENV_AGENT_TOOL_CALL_LIMIT);
+    assert.equal(h.probes.length, PE_AGENT_TOOL_CALL_LIMIT);
     assert.equal(h.sessionEnds, ONE_CALL);
   },
 );
@@ -3251,12 +3251,12 @@ test(
   async (t) => {
     const h = agentHarness(t);
     h.script = async (tools) => {
-      for (let attempt = 1; attempt <= ENV_AGENT_ATTEMPT_LIMIT; attempt++)
+      for (let attempt = 1; attempt <= PE_AGENT_ATTEMPT_LIMIT; attempt++)
         await writeTool(tools, agentDocument(attempt));
     };
     await failRun(h);
     await sessionsEnded(h, ONE_CALL);
-    await h.ended(ENV_AGENT_ATTEMPT_LIMIT + ONE_CALL);
+    await h.ended(PE_AGENT_ATTEMPT_LIMIT + ONE_CALL);
     assert.equal(h.sessionInputs.length, ONE_CALL);
   },
 );
