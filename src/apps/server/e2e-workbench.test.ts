@@ -51,7 +51,9 @@ import { scriptedProvider } from "../../agent/test-support.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { createModelRuntime, resolveModel } from "../../llm/model-connector.ts";
 import {
+  ActionOutcome,
   MessageDelivery,
+  WORKBENCH_ACTION_RESULT_ENTRY,
   WORKBENCH_CONFIGURATION_ENTRY,
   WORKBENCH_EXPIRY_REASON,
   WORKBENCH_QUEUE_LIMIT,
@@ -64,7 +66,11 @@ import {
   toolName,
   type WorkbenchModelRuntimeFactory,
 } from "../../workbench/index.ts";
-import { MissionErrorCode, missionOperations } from "../../mission/contract.ts";
+import {
+  MissionErrorCode,
+  missionOperations,
+  NodeState,
+} from "../../mission/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { COVERING_WORKER_BINDINGS, gatewayFixture } from "./test-support.ts";
 import { framing, PromptConsumer } from "../../agent/prompt-render.ts";
@@ -963,6 +969,11 @@ const TOOL_USE = "toolUse" as const;
 const TOOL_RESULT = "toolResult";
 const OPS_DISPLAY_NAME = "Yumi";
 const PROJECT_RESUME = "project.resume";
+const TWO_RESULTS = 2;
+const NO_RECORDS = 0;
+const OFFER_ACTION = "offer_action";
+const NODE_DISCARD = "mission.node.discard";
+const RECORD_ENTRY = "kanthord.workbench.record";
 const PROJECT_NAME = "operations";
 const UNKNOWN_NODE = "node_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const FIRST_BINDING_SET = 1;
@@ -1182,7 +1193,7 @@ test("(happy path) the tool table of each workbench agent holds its built-in too
     const { builtin, operation } = getAgentDeclaration(agentName)!.tools;
     assert.deepEqual(
       [...tools].sort(),
-      [...builtin, ...operation.map(toolName)].sort(),
+      [...builtin, ...operation.map(toolName), OFFER_ACTION].sort(),
       agentName,
     );
     for (const name of [
@@ -2314,3 +2325,597 @@ test("a credential marker from before configure to another credential blocks aft
     ),
   );
 });
+
+async function blockedNode(fixture: Fixture): Promise<string> {
+  const nodeId = await createNode(fixture);
+  const [project] = completed(
+    await fixture.projects.list(
+      { params: {}, query: {}, body: null } as never,
+      fixture.options,
+    ),
+  ).items;
+  for (const operation of [
+    fixture.missions["node.pause"],
+    fixture.missions["node.block"],
+  ] as unknown as ((input: unknown, options: unknown) => Promise<never>)[]) {
+    const node = completed(
+      await fixture.missions["node.get"](
+        { params: { node_id: nodeId }, query: {}, body: null },
+        fixture.options,
+      ),
+    );
+    const mission = completed(
+      await fixture.missions["get"](
+        { params: { project_id: project!.id }, query: {}, body: null },
+        fixture.options,
+      ),
+    );
+    completed(
+      await operation(
+        {
+          params: { node_id: nodeId },
+          query: {},
+          body: {
+            reason: "hold",
+            expected_mission_version: mission.version,
+            expected_state: node.state,
+            expected_attempt: node.attempt,
+          },
+        },
+        fixture.options,
+      ),
+    );
+  }
+  return nodeId;
+}
+
+async function nodeOf(fixture: Fixture, nodeId: string) {
+  return completed(
+    await fixture.missions["node.get"](
+      { params: { node_id: nodeId }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+}
+
+function offerInput(operationId: string, targetId: string) {
+  return { operation_id: operationId, target_id: targetId };
+}
+
+function recordsOf(entries: readonly Entry[]): Entry[] {
+  return entries.filter(
+    (entry) => entry.type === CustomType && entry.customType === RECORD_ENTRY,
+  );
+}
+
+async function sessionEntries(fixture: Fixture, sessionId: string) {
+  return completed(
+    await fixture.workbench["session.get"](
+      { params: { session_id: sessionId }, query: {}, body: null },
+      fixture.options,
+    ),
+  ).entries as Entry[];
+}
+
+function toolCallIds(entries: readonly Entry[]): string[] {
+  return entries
+    .filter((entry) => entry.type === MESSAGE_ENTRY)
+    .map((entry) => entry.message as { role: string; toolCallId?: string })
+    .filter((message) => message.role === TOOL_RESULT)
+    .map((message) => message.toolCallId!);
+}
+
+async function offerFixture(t: TestContext, script: FauxResponseStep[]) {
+  const fixture = await workbenchFixture(t, script, undefined, undefined, [
+    OPS,
+    AGENT,
+    REVIEW_AGENT,
+  ]);
+  const session = await createSession(fixture, undefined, OPS);
+  return { fixture, session };
+}
+
+test("(happy path) offer_action records the server read of a Blocked node and of a paused project and runs no act", async (t) => {
+  const target = { nodeId: "", projectId: "" };
+  const { fixture, session } = await offerFixture(t, [
+    () => toolCall(OFFER_ACTION, offerInput(NODE_DISCARD, target.nodeId)),
+    fauxAssistantMessage(ANSWER),
+    () => toolCall(OFFER_ACTION, offerInput(PROJECT_RESUME, target.projectId)),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  target.nodeId = await blockedNode(fixture);
+  const [project] = completed(
+    await fixture.projects.list(
+      { params: {}, query: {}, body: null } as never,
+      fixture.options,
+    ),
+  ).items;
+  target.projectId = project!.id;
+  completed(
+    await fixture.projects.pause(
+      resumeInput(target.projectId) as never,
+      fixture.options,
+    ),
+  );
+  const before = await nodeOf(fixture, target.nodeId);
+  assert.equal(before.state, NodeState.Blocked);
+  completed(await message(fixture, session.id, QUESTION));
+  const first = await untilIdle(fixture, session.id, t.signal);
+  const [offered] = recordsOf(first);
+  assert.equal(recordsOf(first).length, SINGLE);
+  assert.deepEqual(offered!.data, {
+    kind: "action_offer",
+    tool_call_id: toolCallIds(first)[0],
+    operation_id: NODE_DISCARD,
+    target_id: target.nodeId,
+    seen: { state: NodeState.Blocked, attempt: before.attempt },
+  });
+  assert.equal((await nodeOf(fixture, target.nodeId)).state, NodeState.Blocked);
+  assert.equal(
+    completed(
+      await fixture.workbench["session.events"](
+        {
+          params: { session_id: session.id },
+          query: {},
+          body: null,
+        },
+        fixture.options,
+      ),
+    ).snapshot.pending_approval,
+    null,
+  );
+  completed(await message(fixture, session.id, QUESTION));
+  const second = await untilIdle(
+    fixture,
+    session.id,
+    t.signal,
+    first.at(-1)!.id as string,
+  );
+  assert.equal(recordsOf(second).length, SINGLE);
+  assert.deepEqual(recordsOf(second)[0]!.data, {
+    kind: "action_offer",
+    tool_call_id: toolCallIds(second)[0],
+    operation_id: PROJECT_RESUME,
+    target_id: target.projectId,
+    seen: { paused: true },
+  });
+  assert.notEqual(await pausedAt(fixture, target.projectId), NO_PAUSE);
+});
+
+test("(security) offer_action refuses an operation outside the action card list and records nothing", async (t) => {
+  const { fixture, session } = await offerFixture(t, [
+    toolCall(
+      OFFER_ACTION,
+      offerInput("workbench.session.approve", UNKNOWN_NODE),
+    ),
+    toolCall(OFFER_ACTION, offerInput("toString", UNKNOWN_NODE)),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  completed(await message(fixture, session.id, QUESTION));
+  const entries = await untilIdle(fixture, session.id, t.signal);
+  const results = toolResults(entries);
+  assert.equal(results.length, TWO_RESULTS);
+  for (const result of results) {
+    assert.equal(result.isError, true);
+    assert.ok(
+      result.text.startsWith("workbench.action.operation_refused:"),
+      result.text,
+    );
+  }
+  assert.equal(
+    recordsOf(await sessionEntries(fixture, session.id)).length,
+    NO_RECORDS,
+  );
+});
+
+test("(security) offer_action refuses a target of the wrong kind or an unknown node and records nothing", async (t) => {
+  const { fixture, session } = await offerFixture(t, [
+    toolCall(
+      OFFER_ACTION,
+      offerInput(NODE_DISCARD, "project_01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+    ),
+    toolCall(OFFER_ACTION, offerInput(NODE_DISCARD, UNKNOWN_NODE)),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  completed(await message(fixture, session.id, QUESTION));
+  const entries = await untilIdle(fixture, session.id, t.signal);
+  const results = toolResults(entries);
+  assert.equal(results.length, TWO_RESULTS);
+  assert.ok(
+    results[0]!.text.startsWith("workbench.action.target_invalid:"),
+    results[0]!.text,
+  );
+  assert.ok(
+    results[1]!.text.startsWith(`${MissionErrorCode.NodeNotFound}:`),
+    results[1]!.text,
+  );
+  assert.ok(results.every(({ isError }) => isError));
+  assert.equal(
+    recordsOf(await sessionEntries(fixture, session.id)).length,
+    NO_RECORDS,
+  );
+});
+
+test("(security) a second offer_action in one run gives offer_limit and the next run offers again", async (t) => {
+  const target = { nodeId: "" };
+  const { fixture, session } = await offerFixture(t, [
+    () => toolCall(OFFER_ACTION, offerInput(NODE_DISCARD, target.nodeId)),
+    () => toolCall(OFFER_ACTION, offerInput(NODE_DISCARD, target.nodeId)),
+    fauxAssistantMessage(ANSWER),
+    () => toolCall(OFFER_ACTION, offerInput(NODE_DISCARD, target.nodeId)),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  target.nodeId = await blockedNode(fixture);
+  completed(await message(fixture, session.id, QUESTION));
+  const first = await untilIdle(fixture, session.id, t.signal);
+  const results = toolResults(first);
+  assert.deepEqual(
+    results.map(({ isError }) => isError),
+    [false, true],
+  );
+  assert.ok(
+    results[1]!.text.startsWith("workbench.action.offer_limit:"),
+    results[1]!.text,
+  );
+  assert.equal(recordsOf(first).length, SINGLE);
+  completed(await message(fixture, session.id, QUESTION));
+  const second = await untilIdle(
+    fixture,
+    session.id,
+    t.signal,
+    first.at(-1)!.id as string,
+  );
+  assert.deepEqual(
+    toolResults(second).map(({ isError }) => isError),
+    [false],
+  );
+  assert.equal(
+    recordsOf(await sessionEntries(fixture, session.id)).length,
+    SINGLE + SINGLE,
+  );
+});
+
+test("(invariant guard) the action_offer record leaves buildSessionContext unchanged", async (t) => {
+  const target = { nodeId: "" };
+  const { fixture, session } = await offerFixture(t, [
+    () => toolCall(OFFER_ACTION, offerInput(NODE_DISCARD, target.nodeId)),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  target.nodeId = await blockedNode(fixture);
+  completed(await message(fixture, session.id, QUESTION));
+  await untilIdle(fixture, session.id, t.signal);
+  const entries = await sessionEntries(fixture, session.id);
+  const [record] = recordsOf(entries);
+  assert.ok(record);
+  const without = entries
+    .filter((entry) => entry !== record)
+    .map((entry) =>
+      entry.parentId === record.id
+        ? { ...entry, parentId: record.parentId }
+        : entry,
+    );
+  const { buildSessionContext } = await loadPi();
+  assert.deepEqual(
+    buildSessionContext(entries as never),
+    buildSessionContext(without as never),
+  );
+});
+
+const CUSTOM_MESSAGE = "custom_message";
+const NO_ERROR_CODE = null;
+const DISCARD_REASON = "owner decision";
+const TWO_PROVIDER_CALLS = 2;
+const RESULT_TEXT_DONE = (operation: string, target: string) =>
+  `The owner ran ${operation} on ${target}. Result: done.`;
+
+function reportAction(
+  fixture: Fixture,
+  sessionId: string,
+  toolCallId: string,
+  body: { outcome: string; error_code: string | null },
+) {
+  return fixture.workbench["session.action.report"](
+    {
+      params: { session_id: sessionId, tool_call_id: toolCallId },
+      query: {},
+      body,
+    } as never,
+    fixture.options,
+  );
+}
+
+function resultsOf(entries: readonly Entry[]): Entry[] {
+  return entries.filter(
+    (entry) =>
+      entry.type === CUSTOM_MESSAGE &&
+      entry.customType === WORKBENCH_ACTION_RESULT_ENTRY,
+  );
+}
+
+async function offeredProject(t: TestContext, stateDirectory?: string) {
+  const target = { projectId: "" };
+  const fixture = await workbenchFixture(
+    t,
+    [
+      () =>
+        toolCall(OFFER_ACTION, offerInput(PROJECT_RESUME, target.projectId)),
+      fauxAssistantMessage(ANSWER),
+    ],
+    stateDirectory,
+    undefined,
+    [OPS],
+  );
+  target.projectId = await pausedProject(fixture);
+  const session = await createSession(fixture, undefined, OPS);
+  completed(await message(fixture, session.id, QUESTION));
+  const entries = await untilIdle(fixture, session.id, t.signal);
+  return {
+    fixture,
+    session,
+    entries,
+    projectId: target.projectId,
+    toolCallId: toolCallIds(entries)[0]!,
+  };
+}
+
+test("(happy path) action.report done appends one hidden action_result message and the next run reads its text", async (t) => {
+  const { fixture, session, projectId, toolCallId } = await offeredProject(t);
+  assert.deepEqual(
+    completed(
+      await reportAction(fixture, session.id, toolCallId, {
+        outcome: ActionOutcome.Done,
+        error_code: NO_ERROR_CODE,
+      }),
+    ),
+    {
+      session_id: session.id,
+      tool_call_id: toolCallId,
+      outcome: ActionOutcome.Done,
+    },
+  );
+  const stored = resultsOf(await sessionEntries(fixture, session.id));
+  assert.equal(stored.length, SINGLE);
+  assert.equal(stored[0]!.display, false);
+  assert.deepEqual(stored[0]!.details, {
+    tool_call_id: toolCallId,
+    operation_id: PROJECT_RESUME,
+    target_id: projectId,
+    outcome: ActionOutcome.Done,
+    error_code: NO_ERROR_CODE,
+  });
+  const text = RESULT_TEXT_DONE(PROJECT_RESUME, projectId);
+  assert.equal(stored[0]!.content, text);
+  fixture.provider.calls.length = 0;
+  completed(await message(fixture, session.id, QUESTION));
+  await untilIdle(fixture, session.id, t.signal);
+  assert.ok(JSON.stringify(fixture.provider.calls[0]!.messages).includes(text));
+});
+
+test("(invariant guard) a done result settles the card, and a failed result does not", async (t) => {
+  const { fixture, session, projectId, toolCallId } = await offeredProject(t);
+  const failure = {
+    outcome: ActionOutcome.Failed,
+    error_code: "project.not_found",
+  };
+  const done = { outcome: ActionOutcome.Done, error_code: NO_ERROR_CODE };
+  completed(await reportAction(fixture, session.id, toolCallId, failure));
+  completed(
+    await reportAction(fixture, session.id, toolCallId, {
+      outcome: ActionOutcome.Failed,
+      error_code: NO_ERROR_CODE,
+    }),
+  );
+  completed(await reportAction(fixture, session.id, toolCallId, done));
+  for (const body of [done, failure])
+    failed(
+      await reportAction(fixture, session.id, toolCallId, body),
+      HttpStatus.Conflict,
+      WorkbenchErrorCode.ActionSettled,
+    );
+  const stored = resultsOf(await sessionEntries(fixture, session.id));
+  assert.deepEqual(
+    stored.map((entry) => entry.content),
+    [
+      `The owner ran ${PROJECT_RESUME} on ${projectId}. Result: failed, project.not_found.`,
+      `The owner ran ${PROJECT_RESUME} on ${projectId}. Result: failed.`,
+      RESULT_TEXT_DONE(PROJECT_RESUME, projectId),
+    ],
+  );
+});
+
+test("(security) action.report answers 404 for an unknown tool call and 400 for a done with an error code", async (t) => {
+  const { fixture, session, toolCallId } = await offeredProject(t);
+  failed(
+    await reportAction(fixture, session.id, "absent", {
+      outcome: ActionOutcome.Done,
+      error_code: NO_ERROR_CODE,
+    }),
+    HttpStatus.NotFound,
+    WorkbenchErrorCode.ActionNotFound,
+  );
+  failed(
+    await reportAction(fixture, session.id, toolCallId, {
+      outcome: ActionOutcome.Done,
+      error_code: "project.not_found",
+    }),
+    HttpStatus.BadRequest,
+    "gateway.request.validation_failed",
+  );
+  assert.equal(
+    resultsOf(await sessionEntries(fixture, session.id)).length,
+    NO_RECORDS,
+  );
+});
+
+test("(invariant guard) action.report during an active run lands after the turn and keeps each tool call next to its result", async (t) => {
+  const target = { projectId: "" };
+  const held = heldAnswer(ANSWER);
+  const fixture = await workbenchFixture(
+    t,
+    [
+      () =>
+        toolCall(OFFER_ACTION, offerInput(PROJECT_RESUME, target.projectId)),
+      held.step,
+    ],
+    undefined,
+    undefined,
+    [OPS],
+  );
+  target.projectId = await pausedProject(fixture);
+  const session = await createSession(fixture, undefined, OPS);
+  completed(await message(fixture, session.id, QUESTION));
+  while (fixture.provider.calls.length < TWO_PROVIDER_CALLS) {
+    t.signal.throwIfAborted();
+    await setImmediate();
+  }
+  const [offered] = recordsOf(await eventEntries(fixture, session.id));
+  const toolCallId = (offered!.data as { tool_call_id: string }).tool_call_id;
+  const done = { outcome: ActionOutcome.Done, error_code: NO_ERROR_CODE };
+  completed(await reportAction(fixture, session.id, toolCallId, done));
+  for (const body of [
+    done,
+    { outcome: ActionOutcome.Failed, error_code: NO_ERROR_CODE },
+  ])
+    failed(
+      await reportAction(fixture, session.id, toolCallId, body),
+      HttpStatus.Conflict,
+      WorkbenchErrorCode.ActionSettled,
+    );
+  held.gate.resolve();
+  await untilIdle(fixture, session.id, t.signal);
+  const entries = await sessionEntries(fixture, session.id);
+  const types = entries.map((entry) =>
+    entry.type === MESSAGE_ENTRY
+      ? (entry.message as { role: string }).role
+      : entry.type === CUSTOM_MESSAGE
+        ? CUSTOM_MESSAGE
+        : (entry.type as string),
+  );
+  assert.deepEqual(types.slice(-5), [
+    "assistant",
+    CustomType,
+    TOOL_RESULT,
+    "assistant",
+    CUSTOM_MESSAGE,
+  ]);
+  assert.equal(resultsOf(entries).length, SINGLE);
+  const { buildSessionContext } = await loadPi();
+  const roles = buildSessionContext(entries as never).messages.map(
+    (entry) => entry.role,
+  );
+  assert.deepEqual(roles.slice(-4), [
+    "assistant",
+    TOOL_RESULT,
+    "assistant",
+    "custom",
+  ]);
+});
+
+test("(happy path) action.report after a restart appends through the session manager and the next run reads it", async (t) => {
+  const state = temporaryDirectory();
+  const first = await offeredProject(t, state);
+  assert.equal(
+    (await first.fixture.workbenchService.stop()) ?? undefined,
+    undefined,
+  );
+  const second = await workbenchFixture(
+    t,
+    [fauxAssistantMessage(ANSWER)],
+    state,
+    undefined,
+    [OPS],
+  );
+  stopAfter(t, () => rmSync(state, { recursive: true, force: true }));
+  completed(
+    await reportAction(second, first.session.id, first.toolCallId, {
+      outcome: ActionOutcome.Done,
+      error_code: NO_ERROR_CODE,
+    }),
+  );
+  const text = RESULT_TEXT_DONE(PROJECT_RESUME, first.projectId);
+  assert.equal(
+    resultsOf(await sessionEntries(second, first.session.id)).length,
+    SINGLE,
+  );
+  completed(await message(second, first.session.id, QUESTION));
+  await untilIdle(second, first.session.id, t.signal);
+  assert.ok(JSON.stringify(second.provider.calls[0]!.messages).includes(text));
+});
+
+test("(security) a direct human discard after a card is attributed to the owner account, then action.report done succeeds", async (t) => {
+  const target = { nodeId: "" };
+  const { fixture, session } = await offerFixture(t, [
+    () => toolCall(OFFER_ACTION, offerInput(NODE_DISCARD, target.nodeId)),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  target.nodeId = await blockedNode(fixture);
+  completed(await message(fixture, session.id, QUESTION));
+  const entries = await untilIdle(fixture, session.id, t.signal);
+  const node = await nodeOf(fixture, target.nodeId);
+  const mission = completed(
+    await fixture.missions.get(
+      {
+        params: { project_id: await firstProjectId(fixture) },
+        query: {},
+        body: null,
+      },
+      fixture.options,
+    ),
+  );
+  const discarded = completed(
+    await fixture.missions["node.discard"](
+      {
+        params: { node_id: target.nodeId },
+        query: {},
+        body: {
+          reason: DISCARD_REASON,
+          expected_mission_version: mission.version,
+          expected_state: node.state,
+          expected_attempt: node.attempt,
+        },
+      },
+      fixture.options,
+    ),
+  );
+  assert.equal(discarded.node.state, NodeState.Discarded);
+  const stored = completed(
+    await fixture.missions["assessment.list"](
+      {
+        params: { node_id: target.nodeId },
+        query: {},
+        body: null,
+      } as never,
+      fixture.options,
+    ),
+  ).items.find((assessment) => assessment.rationale === DISCARD_REASON);
+  assert.deepEqual(stored?.actor, {
+    kind: "human",
+    account: identity.accountId,
+    name: identity.name,
+  });
+  completed(
+    await reportAction(fixture, session.id, toolCallIds(entries)[0]!, {
+      outcome: ActionOutcome.Done,
+      error_code: NO_ERROR_CODE,
+    }),
+  );
+});
+
+async function firstProjectId(fixture: Fixture): Promise<string> {
+  const [project] = completed(
+    await fixture.projects.list(
+      { params: {}, query: {}, body: null } as never,
+      fixture.options,
+    ),
+  ).items;
+  return project!.id;
+}
+
+async function eventEntries(fixture: Fixture, sessionId: string) {
+  return completed(
+    await fixture.workbench["session.events"](
+      { params: { session_id: sessionId }, query: {}, body: null },
+      fixture.options,
+    ),
+  ).entries as Entry[];
+}

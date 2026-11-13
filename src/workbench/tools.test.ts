@@ -38,6 +38,7 @@ import { schedulerOperations } from "../scheduler/contract.ts";
 import { storageOperations } from "../storage/contract.ts";
 import { trackingOperations } from "../tracking/contract.ts";
 import { workerOperations } from "../worker/contract.ts";
+import { ACTION_CARD_OPERATIONS, ActionTarget } from "./actions.ts";
 import { workbenchOperations } from "./contract.ts";
 import {
   builtinTools,
@@ -50,6 +51,7 @@ import {
 
 const TIMEOUT_SECONDS = 20;
 const ONE_CHILD = 1;
+const ONE_OPERATION = 1;
 
 test("a workbench bash call that times out leaves no process of its tree", async (t) => {
   const [bash] = builtinTools(
@@ -245,3 +247,40 @@ test("a tool call of a bodiless operation without body reaches the operation wit
 function envelopeProperties(schema: unknown): object {
   return (schema as { properties: object }).properties;
 }
+
+const ACTION_TARGET_KEYS = {
+  [ActionTarget.Node]: "node_id",
+  [ActionTarget.Project]: "project_id",
+};
+const ACTION_CARD_OPERATION_COUNT = 8;
+
+test("(security) each action card id is one human mutation without stream or secret, with the key of its target kind", () => {
+  const ids = Object.keys(ACTION_CARD_OPERATIONS);
+  assert.equal(ids.length, ACTION_CARD_OPERATION_COUNT);
+  for (const id of ids) {
+    const matches = OPERATION_UNION.filter((operation) => operation.id === id);
+    assert.equal(matches.length, ONE_OPERATION, id);
+    const [operation] = matches;
+    assert.ok(operation);
+    assert.equal(operation.access, AccessPolicy.Human, id);
+    assert.equal(operation.mutation, true, id);
+    assert.notEqual(operation.lifetime, OperationLifetime.Stream, id);
+    assert.ok(!operation.secret, id);
+    assert.ok(!SECRET_OPERATION_IDS.has(id), id);
+    const target = ACTION_CARD_OPERATIONS[id];
+    assert.ok(target);
+    const params = envelopeSchema(operation).params as {
+      properties: Record<string, unknown>;
+    };
+    assert.ok(ACTION_TARGET_KEYS[target] in params.properties, id);
+  }
+});
+
+test("(security) no tool list of the agent catalog holds workbench.session.action.report", () => {
+  const reportId = workbenchOperations["session.action.report"].id;
+  for (const declaration of Object.values(AGENT_DECLARATIONS))
+    assert.ok(
+      !declaration.tools.operation.includes(reportId),
+      declaration.agent_name,
+    );
+});

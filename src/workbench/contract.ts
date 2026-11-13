@@ -14,15 +14,21 @@ export const WORKBENCH_SERVICE_NAME = "workbench";
 export const WORKBENCH_SESSION_PREFIX = "workbench_session";
 export const WORKBENCH_DIRECTORY_NAME = "workbench";
 export const WORKBENCH_CONFIGURATION_ENTRY = "kanthord.workbench.configuration";
+export const WORKBENCH_RECORD_ENTRY = "kanthord.workbench.record";
+export const WORKBENCH_ACTION_RESULT_ENTRY = "kanthord.workbench.action_result";
 export const WORKBENCH_TIMEOUT_MS = 30000;
 export const WORKBENCH_EVENTS_WAIT_MS = 25000;
 export const WORKBENCH_MESSAGE_MAX_LENGTH = 1048576;
+export const WORKBENCH_ERROR_CODE_MAX_LENGTH = 128;
 export const WORKBENCH_QUEUE_LIMIT = 10;
 export const WORKBENCH_QUEUED_MESSAGE_PREFIX = "workbench_queued_message";
 
 export const MessageDelivery = { Queue: "queue", Replace: "replace" } as const;
 export type MessageDelivery =
   (typeof MessageDelivery)[keyof typeof MessageDelivery];
+
+export const ActionOutcome = { Done: "done", Failed: "failed" } as const;
+export type ActionOutcome = (typeof ActionOutcome)[keyof typeof ActionOutcome];
 
 export const WorkbenchErrorCode = {
   Stopped: "workbench.lifecycle.stopped",
@@ -34,6 +40,8 @@ export const WorkbenchErrorCode = {
   ApprovalNotFound: "workbench.session.approval_not_found",
   QueueFull: "workbench.session.queue_full",
   QueuedMessageNotFound: "workbench.session.queued_message_not_found",
+  ActionNotFound: "workbench.session.action_not_found",
+  ActionSettled: "workbench.session.action_settled",
 } as const;
 
 export const workbenchConfigurationSchema = z.strictObject({
@@ -44,6 +52,29 @@ export const workbenchConfigurationSchema = z.strictObject({
 export type WorkbenchConfiguration = z.infer<
   typeof workbenchConfigurationSchema
 >;
+
+export const WorkbenchRecordKind = { ActionOffer: "action_offer" } as const;
+export type WorkbenchRecordKind =
+  (typeof WorkbenchRecordKind)[keyof typeof WorkbenchRecordKind];
+
+const actionSeenSchema = z.union([
+  z.strictObject({
+    state: z.string(),
+    attempt: z.number().int().nonnegative(),
+  }),
+  z.strictObject({ paused: z.boolean() }),
+]);
+
+export const workbenchRecordSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal(WorkbenchRecordKind.ActionOffer),
+    tool_call_id: z.string(),
+    operation_id: z.string(),
+    target_id: z.string(),
+    seen: actionSeenSchema,
+  }),
+]);
+export type WorkbenchRecord = z.infer<typeof workbenchRecordSchema>;
 
 const timestampSchema = z
   .number()
@@ -276,6 +307,39 @@ export const workbenchOperations = {
     }),
     description:
       "Approve or reject the pending call of a mutation tool of the active run.",
+  },
+  "session.action.report": {
+    ...workbenchMutation,
+    id: "workbench.session.action.report",
+    method: HttpMethod.Post,
+    path: "/api/workbench/session/:session_id/action/:tool_call_id/report",
+    input: z.strictObject({
+      params: sessionParams.extend({ tool_call_id: z.string().min(1) }),
+      query: emptyFields,
+      body: z
+        .strictObject({
+          outcome: z.enum(ActionOutcome),
+          error_code: z
+            .string()
+            .regex(/^[a-z0-9_]+(\.[a-z0-9_]+)+$/)
+            .max(WORKBENCH_ERROR_CODE_MAX_LENGTH)
+            .nullable(),
+        })
+        .refine(
+          (body) =>
+            body.outcome !== ActionOutcome.Done || body.error_code === null,
+          {
+            message: "A done outcome carries no error_code.",
+            path: ["error_code"],
+          },
+        ),
+    }),
+    output: sessionParams.extend({
+      tool_call_id: z.string(),
+      outcome: z.enum(ActionOutcome),
+    }),
+    description:
+      "Record the outcome of an action card that the owner ran. It runs no act.",
   },
   "session.events": {
     ...workbenchOperation,

@@ -62,12 +62,14 @@ import type {
   WorkbenchCredentialsFn,
 } from "../custody/contract.ts";
 import {
+  ActionOutcome,
   MessageDelivery,
   type PendingApproval,
   type QueuedMessage,
   type RunSnapshot,
   type SessionEntry,
   type SessionEvents,
+  WORKBENCH_ACTION_RESULT_ENTRY,
   WORKBENCH_CONFIGURATION_ENTRY,
   WORKBENCH_EVENTS_WAIT_MS,
   WORKBENCH_EXPIRY_REASON,
@@ -81,6 +83,7 @@ import {
   workbenchOperations,
   type WorkbenchSession,
 } from "./contract.ts";
+import { offerActionTool } from "./actions.ts";
 import type { WorkbenchConfig } from "./config.ts";
 import {
   builtinTools,
@@ -90,11 +93,14 @@ import {
   toolOperations,
 } from "./tools.ts";
 import {
+  actionSettled,
+  appendRecord,
   createSession,
   findSession,
   lastModel,
   lastThinkingLevel,
   listSessions,
+  recordOf,
   resumeCommand,
   type SessionPlace,
   sessionPlace,
@@ -157,6 +163,7 @@ interface OpenSession {
   waiters: Set<() => void>;
   version: number;
   approvals: Map<string, Approval>;
+  doneReports: Set<string>;
   redaction: SensitiveTextRedaction | null;
   secrets: KnownSecrets;
 }
@@ -187,6 +194,7 @@ interface Run {
   firstEntry: number;
   ended: boolean;
   endingCall: string | null;
+  offerToolCallId: string | null;
   settled: Promise<void>;
 }
 
@@ -198,6 +206,17 @@ function requiresAbort(run: Run | null, event: AgentEvent): boolean {
   return (
     event.type === TOOL_EXECUTION_END && event.toolCallId === run.endingCall
   );
+}
+
+interface ActionReportBody {
+  outcome: ActionOutcome;
+  error_code: string | null;
+}
+
+interface ActionReportResult {
+  session_id: string;
+  tool_call_id: string;
+  outcome: ActionOutcome;
 }
 
 const IDLE_SESSION = {
@@ -363,6 +382,7 @@ export class WorkbenchService implements Service {
       waiters: new Set(),
       version: 0,
       approvals: new Map(),
+      doneReports: new Set(),
     };
     this.sessions.set(sessionId, session);
     return session;
@@ -443,6 +463,20 @@ export class WorkbenchService implements Service {
           () => session.requester,
         );
       });
+      const offer = offerActionTool({
+        operations: this.dependencies.operations(),
+        invoke: this.dependencies.invoke,
+        requester: () => session.requester,
+        offer: {
+          taken: () => session.run?.offerToolCallId != null,
+          append: (record) => {
+            appendRecord(session.manager, record);
+            assert.ok(session.run);
+            session.run.offerToolCallId = record.tool_call_id;
+            this.notify(session);
+          },
+        },
+      });
       session.secrets = credentialSecrets(
         credentials,
         piProviderId(resolved.provider),
@@ -456,8 +490,9 @@ export class WorkbenchService implements Service {
         allowlist: [
           ...builtin.allowlist,
           ...operations.map((tool) => tool.name),
+          offer.name,
         ],
-        customTools: [...builtin.customTools, ...operations],
+        customTools: [...builtin.customTools, ...operations, offer],
         hostHome,
         hooks: [
           toolApproval({
@@ -551,6 +586,76 @@ export class WorkbenchService implements Service {
       );
     pending.decide(approved ? ALLOWED : REJECTED);
     return { session_id: sessionId, tool_call_id: toolCallId, approved };
+  }
+
+  async actionReport(
+    sessionId: string,
+    toolCallId: string,
+    body: ActionReportBody,
+  ): Promise<ActionReportResult> {
+    const session = await this.session(sessionId);
+    const entries = this.entries(session.manager);
+    const offered = entries
+      .map(recordOf)
+      .find((record) => record?.tool_call_id === toolCallId);
+    if (!offered)
+      throw new OperationError(
+        HttpStatus.NotFound,
+        WorkbenchErrorCode.ActionNotFound,
+        "The workbench session holds no action card with this identity.",
+        { session_id: sessionId, tool_call_id: toolCallId },
+      );
+    const settled =
+      session.doneReports.has(toolCallId) || actionSettled(entries, toolCallId);
+    if (settled)
+      throw new OperationError(
+        HttpStatus.Conflict,
+        WorkbenchErrorCode.ActionSettled,
+        "The action card of this identity already has a done result.",
+        { session_id: sessionId, tool_call_id: toolCallId },
+      );
+    const failure =
+      body.outcome === ActionOutcome.Failed
+        ? `failed${body.error_code === null ? "" : `, ${body.error_code}`}`
+        : ActionOutcome.Done;
+    const text = `The owner ran ${offered.operation_id} on ${offered.target_id}. Result: ${failure}.`;
+    const details = {
+      tool_call_id: toolCallId,
+      operation_id: offered.operation_id,
+      target_id: offered.target_id,
+      outcome: body.outcome,
+      error_code: body.error_code,
+    };
+    if (body.outcome === ActionOutcome.Done)
+      session.doneReports.add(toolCallId);
+    if (session.agent) {
+      try {
+        await session.agent.sendCustomMessage(
+          {
+            customType: WORKBENCH_ACTION_RESULT_ENTRY,
+            content: text,
+            display: false,
+            details,
+          },
+          { triggerTurn: false },
+        );
+      } catch (error) {
+        session.doneReports.delete(toolCallId);
+        throw error;
+      }
+    } else
+      session.manager.appendCustomMessageEntry(
+        WORKBENCH_ACTION_RESULT_ENTRY,
+        text,
+        false,
+        details,
+      );
+    this.notify(session);
+    return {
+      session_id: sessionId,
+      tool_call_id: toolCallId,
+      outcome: body.outcome,
+    };
   }
 
   private closeAgent(session: OpenSession): void {
@@ -714,6 +819,7 @@ export class WorkbenchService implements Service {
       firstEntry: session.manager.getEntries().length,
       ended: false,
       endingCall: null,
+      offerToolCallId: null,
       stopped: false,
       settled: completion.promise,
     };
@@ -921,6 +1027,7 @@ export class WorkbenchService implements Service {
       waiters: new Set(),
       version: 0,
       approvals: new Map(),
+      doneReports: new Set(),
     };
     this.sessions.set(id, session);
     try {
@@ -990,6 +1097,11 @@ export class WorkbenchService implements Service {
       workbenchOperations["session.approve"],
       ({ params, body }) =>
         this.approve(params.session_id, body.tool_call_id, body.approved),
+    );
+    registry.register(
+      workbenchOperations["session.action.report"],
+      ({ params, body }) =>
+        this.actionReport(params.session_id, params.tool_call_id, body),
     );
     registry.register(workbenchOperations["session.abort"], ({ params }) =>
       this.abort(params.session_id),
