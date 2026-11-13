@@ -2067,10 +2067,18 @@ test("(happy path) a replace during a run clears the queue, aborts the provider 
     { id: secondId, text: SECOND_QUEUED },
   ]);
   assert.ok(replaced.queued_message_id);
+  assert.equal(
+    (await snapshotOf(fixture, sessionId)).snapshot.error_message,
+    null,
+  );
   const entries = await untilIdle(fixture, sessionId, t.signal);
   assert.equal(signals[0]?.aborted, true);
   assert.deepEqual(texts(entries, "user"), [QUESTION, THIRD_ANSWER]);
   assert.equal(fixture.provider.calls.length, SINGLE + SINGLE);
+  assert.equal(
+    (await snapshotOf(fixture, sessionId)).snapshot.error_message,
+    null,
+  );
   assert.deepEqual((await snapshotOf(fixture, sessionId)).snapshot.queue, []);
 });
 
@@ -2140,6 +2148,7 @@ test("(happy path) a stop clears the queue, answers the cleared items and starts
   const answer = await snapshotOf(fixture, sessionId);
   assert.equal(answer.snapshot.run_active, false);
   assert.deepEqual(answer.snapshot.queue, []);
+  assert.equal(answer.snapshot.error_message, null);
 });
 
 test("(invariant guard) a stop while the first launch opens the agent starts no provider call", async (t) => {

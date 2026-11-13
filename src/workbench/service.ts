@@ -152,6 +152,7 @@ interface OpenSession {
   queue: Promise<void>;
   run: Run | null;
   runError: string | null;
+  agentErrorStale: boolean;
   queuedMessages: PendingMessage[];
   waiters: Set<() => void>;
   version: number;
@@ -203,6 +204,7 @@ const IDLE_SESSION = {
   disposeAgent: () => {},
   run: null,
   runError: null,
+  agentErrorStale: false,
   redaction: null,
   secrets: async () => [],
 } as const;
@@ -485,6 +487,8 @@ export class WorkbenchService implements Service {
       pinnedLayers().pinInference(agent, opened.systemPrompt);
       const unsubscribeEvents = agent.subscribe((event) => {
         if (requiresAbort(session.run, event)) void session.agent?.abort();
+        if (event.type === AGENT_START && !session.run?.stopped)
+          session.agentErrorStale = false;
         if (event.type === AGENT_END && session.run) session.run.ended = true;
         this.notify(session);
       });
@@ -647,7 +651,10 @@ export class WorkbenchService implements Service {
       pending_approval: this.pendingApprovalOf(session),
       run_active: this.runActive(session),
       queue: session.queuedMessages.map(({ id, text }) => ({ id, text })),
-      error_message: session.runError ?? state?.errorMessage ?? null,
+      error_message:
+        session.runError ??
+        (session.agentErrorStale ? undefined : state?.errorMessage) ??
+        null,
     };
   }
 
@@ -695,7 +702,8 @@ export class WorkbenchService implements Service {
     const settle = () => {
       if (settled) return;
       settled = true;
-      session.runError ??= session.agent?.state.errorMessage ?? null;
+      if (!run.stopped)
+        session.runError ??= session.agent?.state.errorMessage ?? null;
       if (session.run === run) session.run = null;
       completion.resolve();
       this.notify(session);
@@ -756,6 +764,7 @@ export class WorkbenchService implements Service {
   private async stopRun(session: OpenSession, run: Run | null): Promise<void> {
     if (!run || session.run !== run) return;
     run.stopped = true;
+    session.agentErrorStale = true;
     this.rejectApprovals(session);
     await session.agent?.abort();
   }
