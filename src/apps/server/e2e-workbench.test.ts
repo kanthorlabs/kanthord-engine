@@ -27,6 +27,7 @@ import {
   temporary,
   temporaryDirectory,
 } from "../../kernel/test-support.ts";
+import { createIdempotencyKey } from "../../kernel/identity.ts";
 import { isString } from "../../kernel/values.ts";
 import { getAgentDeclaration } from "../../agent/catalog.ts";
 import {
@@ -52,6 +53,7 @@ import { createModelRuntime, resolveModel } from "../../llm/model-connector.ts";
 import {
   WORKBENCH_CONFIGURATION_ENTRY,
   WORKBENCH_EXPIRY_REASON,
+  WORKBENCH_QUEUE_LIMIT,
   WORKBENCH_REJECTION_REASON,
   type WorkbenchConfiguration,
   WorkbenchErrorCode,
@@ -87,6 +89,7 @@ const CustomType = "custom";
 const ModelChange = "model_change";
 const ThinkingChange = "thinking_level_change";
 const SINGLE = 1;
+const NO_QUEUED_MESSAGES = 0;
 const NO_UNKEPT = 0;
 const HOST_HOME = "/home/kanthord_host";
 const MESSAGE_ENTRY = "message";
@@ -728,7 +731,11 @@ async function untilIdle(
     entries.push(...answer.entries);
     cursor = (entries.at(-1)?.id as string | undefined) ?? cursor;
     version = answer.version;
-    if (!answer.snapshot.run_active) return entries;
+    if (
+      !answer.snapshot.run_active &&
+      answer.snapshot.queue.length === NO_QUEUED_MESSAGES
+    )
+      return entries;
   }
 }
 
@@ -760,12 +767,12 @@ test("a message runs the agent while a long poll follows the run to its end", as
   assert.equal(accepted.type, OperationResultType.Completed);
   assert.ok(accepted.type === OperationResultType.Completed);
   assert.equal(accepted.status, HttpStatus.Accepted);
-  assert.deepEqual(accepted.data, { session_id: sessionId, run_active: true });
-  failed(
-    await message(fixture, sessionId, QUESTION),
-    HttpStatus.Conflict,
-    WorkbenchErrorCode.RunActive,
-  );
+  assert.deepEqual(accepted.data, {
+    session_id: sessionId,
+    run_active: true,
+    queued_message_id: null,
+    cleared: [],
+  });
   failed(
     await fixture.workbench["session.configure"](
       {
@@ -887,7 +894,7 @@ test("an abort stops the active run", async (t) => {
         fixture.options,
       ),
     ),
-    { session_id: sessionId, run_active: false },
+    { session_id: sessionId, run_active: false, cleared: [] },
   );
   const read = completed(
     await fixture.workbench["session.get"](
@@ -1707,6 +1714,316 @@ test("(invariant guard) a pending card at the service stop leaves a tool call wi
     ),
   );
   assert.ok(roles.every(({ role }) => role !== TOOL_RESULT));
+});
+
+const SECOND_ANSWER = "Second answer.";
+const THIRD_ANSWER = "Third answer.";
+const FIRST_QUEUED = "First queued message.";
+const SECOND_QUEUED = "Second queued message.";
+const LAUNCH_FAILURE = "launch failed";
+const SECOND_HUMAN = testHumanIdentity("kanthord", "Grace", "workbench-test-2");
+
+function heldAnswer(text: string) {
+  const gate = Promise.withResolvers<void>();
+  return {
+    gate,
+    step: async () => {
+      await gate.promise;
+      return fauxAssistantMessage(text);
+    },
+  };
+}
+
+function untilAbort(text: string) {
+  return async (
+    _context: unknown,
+    options?: { signal?: AbortSignal | undefined },
+  ) => {
+    await new Promise<void>((resolve) =>
+      options?.signal?.addEventListener("abort", () => resolve(), {
+        once: true,
+      }),
+    );
+    return fauxAssistantMessage(text);
+  };
+}
+
+async function queueMessage(
+  fixture: Fixture,
+  sessionId: string,
+  text: string,
+  options = fixture.options,
+) {
+  const accepted = await fixture.workbench["session.message"](
+    { params: { session_id: sessionId }, query: {}, body: { text } },
+    options,
+  );
+  return completed(accepted);
+}
+
+async function queuedId(fixture: Fixture, sessionId: string, text: string) {
+  const accepted = await queueMessage(fixture, sessionId, text);
+  assert.ok(accepted.queued_message_id);
+  return accepted.queued_message_id;
+}
+
+function removeQueued(
+  fixture: Fixture,
+  sessionId: string,
+  queuedMessageId: string,
+) {
+  return fixture.workbench["session.queue.remove"](
+    {
+      params: { session_id: sessionId, queued_message_id: queuedMessageId },
+      query: {},
+      body: null,
+    },
+    fixture.options,
+  );
+}
+
+test("(happy path) a message during a run waits in the queue and runs after the run in order of acceptance", async (t) => {
+  const first = heldAnswer(ANSWER);
+  const fixture = await workbenchFixture(t, [
+    first.step,
+    fauxAssistantMessage(SECOND_ANSWER),
+    fauxAssistantMessage(THIRD_ANSWER),
+  ]);
+  const session = await createSession(fixture);
+  const sessionId = session.id;
+  completed(await message(fixture, sessionId, QUESTION));
+  const accepted = await message(fixture, sessionId, FIRST_QUEUED);
+  assert.ok(accepted.type === OperationResultType.Completed);
+  assert.equal(accepted.status, HttpStatus.Accepted);
+  const firstId = accepted.data.queued_message_id;
+  const secondId = await queuedId(fixture, sessionId, SECOND_QUEUED);
+  assert.ok(firstId);
+  assert.deepEqual((await snapshotOf(fixture, sessionId)).snapshot.queue, [
+    { id: firstId, text: FIRST_QUEUED },
+    { id: secondId, text: SECOND_QUEUED },
+  ]);
+  first.gate.resolve();
+  const entries = await untilIdle(fixture, sessionId, t.signal);
+  assert.deepEqual(texts(entries, "user"), [
+    QUESTION,
+    FIRST_QUEUED,
+    SECOND_QUEUED,
+  ]);
+  assert.deepEqual(texts(entries, "assistant"), [
+    ANSWER,
+    SECOND_ANSWER,
+    THIRD_ANSWER,
+  ]);
+  assert.deepEqual((await snapshotOf(fixture, sessionId)).snapshot.queue, []);
+});
+
+test("(invariant guard) a message between the end of the agent and the settle of the run queues and runs next", async (t) => {
+  const fixture = await workbenchFixture(t, [
+    fauxAssistantMessage(ANSWER),
+    fauxAssistantMessage(SECOND_ANSWER),
+  ]);
+  const session = await createSession(fixture);
+  const sessionId = session.id;
+  type Notified = { run: { ended: boolean } | null };
+  const service = fixture.workbenchService as unknown as {
+    notify(session: Notified): void;
+  };
+  const notify = service.notify.bind(service);
+  let sent: ReturnType<typeof queueMessage> | null = null;
+  t.mock.method(service, "notify", (notified: Notified) => {
+    notify(notified);
+    if (notified.run?.ended && !sent)
+      sent = queueMessage(fixture, sessionId, FIRST_QUEUED);
+  });
+  completed(await message(fixture, sessionId, QUESTION));
+  const entries = await untilIdle(fixture, sessionId, t.signal);
+  assert.ok(sent);
+  assert.ok(
+    (await (sent as ReturnType<typeof queueMessage>)).queued_message_id,
+  );
+  assert.deepEqual(texts(entries, "user"), [QUESTION, FIRST_QUEUED]);
+  assert.deepEqual(texts(entries, "assistant"), [ANSWER, SECOND_ANSWER]);
+});
+
+test("(happy path) a removed queued message answers 200, then 404, and never runs", async (t) => {
+  const first = heldAnswer(ANSWER);
+  const fixture = await workbenchFixture(t, [
+    first.step,
+    fauxAssistantMessage(SECOND_ANSWER),
+  ]);
+  const session = await createSession(fixture);
+  const sessionId = session.id;
+  completed(await message(fixture, sessionId, QUESTION));
+  const removedId = await queuedId(fixture, sessionId, FIRST_QUEUED);
+  const keptId = await queuedId(fixture, sessionId, SECOND_QUEUED);
+  assert.deepEqual(
+    completed(await removeQueued(fixture, sessionId, removedId)),
+    {
+      session_id: sessionId,
+      queued_message_id: removedId,
+    },
+  );
+  failed(
+    await removeQueued(fixture, sessionId, removedId),
+    HttpStatus.NotFound,
+    WorkbenchErrorCode.QueuedMessageNotFound,
+  );
+  assert.deepEqual(
+    (await snapshotOf(fixture, sessionId)).snapshot.queue.map(({ id }) => id),
+    [keptId],
+  );
+  first.gate.resolve();
+  const entries = await untilIdle(fixture, sessionId, t.signal);
+  assert.deepEqual(texts(entries, "user"), [QUESTION, SECOND_QUEUED]);
+});
+
+test("(security) the eleventh queued message answers 409 queue_full", async (t) => {
+  const fixture = await workbenchFixture(t, [untilAbort(ANSWER)]);
+  const session = await createSession(fixture);
+  const sessionId = session.id;
+  completed(await message(fixture, sessionId, QUESTION));
+  for (let count = 0; count < WORKBENCH_QUEUE_LIMIT; count++)
+    await queuedId(fixture, sessionId, `${FIRST_QUEUED} ${count}`);
+  failed(
+    await message(fixture, sessionId, SECOND_QUEUED),
+    HttpStatus.Conflict,
+    WorkbenchErrorCode.QueueFull,
+  );
+  assert.equal(
+    (await snapshotOf(fixture, sessionId)).snapshot.queue.length,
+    WORKBENCH_QUEUE_LIMIT,
+  );
+});
+
+test("(security) a configure during a run answers 409 run_active", async (t) => {
+  const fixture = await workbenchFixture(t, [untilAbort(ANSWER)]);
+  const session = await createSession(fixture);
+  completed(await message(fixture, session.id, QUESTION));
+  failed(
+    await fixture.workbench["session.configure"](
+      {
+        params: { session_id: session.id },
+        query: {},
+        body: session.configuration,
+      },
+      fixture.options,
+    ),
+    HttpStatus.Conflict,
+    WorkbenchErrorCode.RunActive,
+  );
+});
+
+test("(invariant guard) a failed launch of a drained item sets the error, the next item runs and the error stays until the next run starts", async (t) => {
+  const first = heldAnswer(ANSWER);
+  const fixture = await workbenchFixture(t, [
+    first.step,
+    fauxAssistantMessage(SECOND_ANSWER),
+    fauxAssistantMessage(THIRD_ANSWER),
+  ]);
+  const session = await createSession(fixture);
+  const sessionId = session.id;
+  completed(await message(fixture, sessionId, QUESTION));
+  await queuedId(fixture, sessionId, FIRST_QUEUED);
+  await queuedId(fixture, sessionId, SECOND_QUEUED);
+  const service = fixture.workbenchService as unknown as {
+    resolve(): unknown;
+  };
+  t.mock.method(
+    service,
+    "resolve",
+    () => {
+      throw new Error(LAUNCH_FAILURE);
+    },
+    { times: SINGLE },
+  );
+  first.gate.resolve();
+  const entries = await untilIdle(fixture, sessionId, t.signal);
+  assert.deepEqual(texts(entries, "user"), [QUESTION, SECOND_QUEUED]);
+  assert.equal(
+    (await snapshotOf(fixture, sessionId)).snapshot.error_message,
+    LAUNCH_FAILURE,
+  );
+  completed(await message(fixture, sessionId, FIRST_QUEUED));
+  assert.equal(
+    (await snapshotOf(fixture, sessionId)).snapshot.error_message,
+    null,
+  );
+  await untilIdle(fixture, sessionId, t.signal);
+});
+
+test("(security) each drained run uses the requester of its own item", async (t) => {
+  const first = heldAnswer(ANSWER);
+  const fixture = await workbenchFixture(t, [
+    first.step,
+    fauxAssistantMessage(SECOND_ANSWER),
+    fauxAssistantMessage(THIRD_ANSWER),
+  ]);
+  const session = await createSession(fixture);
+  const sessionId = session.id;
+  const authorize = t.mock.method(fixture.workbenchService, "authorize");
+  completed(await message(fixture, sessionId, QUESTION));
+  await queueMessage(fixture, sessionId, FIRST_QUEUED, {
+    identity: SECOND_HUMAN,
+  });
+  await queueMessage(fixture, sessionId, SECOND_QUEUED);
+  first.gate.resolve();
+  await untilIdle(fixture, sessionId, t.signal);
+  const requesters = authorize.mock.calls
+    .map(({ arguments: [, requester] }) => requester.jti)
+    .filter((jti, index, all) => jti !== all[index - SINGLE]);
+  assert.deepEqual(requesters, [identity.jti, SECOND_HUMAN.jti, identity.jti]);
+});
+
+test("(invariant guard) the same idempotency key twice through HTTP queues one message", async (t) => {
+  const fixture = await workbenchFixture(t, [untilAbort(ANSWER)]);
+  const session = await createSession(fixture);
+  const sessionId = session.id;
+  completed(await message(fixture, sessionId, QUESTION));
+  const key = createIdempotencyKey();
+  const send = async () => {
+    const response = await fixture.request(
+      `/api/workbench/session/${sessionId}/message`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${fixture.token}`,
+          "content-type": "application/json",
+          "Idempotency-Key": key,
+        },
+        body: JSON.stringify({ text: FIRST_QUEUED }),
+      },
+    );
+    assert.equal(response.status, HttpStatus.Accepted);
+    return (await response.json()) as { queued_message_id: string };
+  };
+  const first = await send();
+  const replay = await send();
+  assert.ok(first.queued_message_id);
+  assert.equal(replay.queued_message_id, first.queued_message_id);
+  assert.deepEqual(
+    (await snapshotOf(fixture, sessionId)).snapshot.queue.map(({ id }) => id),
+    [first.queued_message_id],
+  );
+});
+
+test("(invariant guard) a service stop with two queued items starts no further provider call", async (t) => {
+  const fixture = await workbenchFixture(t, [
+    untilAbort(ANSWER),
+    fauxAssistantMessage(SECOND_ANSWER),
+    fauxAssistantMessage(THIRD_ANSWER),
+  ]);
+  const session = await createSession(fixture);
+  const sessionId = session.id;
+  completed(await message(fixture, sessionId, QUESTION));
+  await queuedId(fixture, sessionId, FIRST_QUEUED);
+  await queuedId(fixture, sessionId, SECOND_QUEUED);
+  while (fixture.provider.calls.length < SINGLE) {
+    t.signal.throwIfAborted();
+    await setImmediate();
+  }
+  await fixture.workbenchService.stop();
+  for (let turn = 0; turn < SETTLE_TURNS; turn++) await setImmediate();
+  assert.equal(fixture.provider.calls.length, SINGLE);
 });
 
 const FAKE_KEY = ["AKIA", "KANTHORDCANARY01"].join("");

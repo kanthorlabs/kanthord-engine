@@ -154,6 +154,24 @@ components:
                 - type: "null"
             run_active:
               type: boolean
+            queue:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    minLength: 51
+                    maxLength: 51
+                    pattern: ^workbench_queued_message_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: workbench_queued_message_ followed by a canonical 26-character
+                      uppercase ULID.
+                  text:
+                    type: string
+                required:
+                  - id
+                  - text
+                additionalProperties: false
             error_message:
               anyOf:
                 - type: string
@@ -163,6 +181,7 @@ components:
             - pending_tool_calls
             - pending_approval
             - run_active
+            - queue
             - error_message
           additionalProperties: false
         version:

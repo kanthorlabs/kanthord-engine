@@ -17,6 +17,10 @@ export const WORKBENCH_CONFIGURATION_ENTRY = "kanthord.workbench.configuration";
 export const WORKBENCH_TIMEOUT_MS = 30000;
 export const WORKBENCH_EVENTS_WAIT_MS = 25000;
 export const WORKBENCH_MESSAGE_MAX_LENGTH = 1048576;
+export const WORKBENCH_QUEUE_LIMIT = 10;
+export const WORKBENCH_QUEUED_MESSAGE_PREFIX = "workbench_queued_message";
+
+export const MessageDelivery = { Queue: "queue", Replace: "replace" } as const;
 
 export const WorkbenchErrorCode = {
   Stopped: "workbench.lifecycle.stopped",
@@ -26,6 +30,8 @@ export const WorkbenchErrorCode = {
   SetupRefused: "workbench.session.setup_refused",
   AuthorizationRefused: "workbench.authorization.refused",
   ApprovalNotFound: "workbench.session.approval_not_found",
+  QueueFull: "workbench.session.queue_full",
+  QueuedMessageNotFound: "workbench.session.queued_message_not_found",
 } as const;
 
 export const workbenchConfigurationSchema = z.strictObject({
@@ -86,11 +92,18 @@ export const pendingApprovalSchema = pendingApprovalSummarySchema.extend({
 });
 export type PendingApproval = z.infer<typeof pendingApprovalSchema>;
 
+export const queuedMessageSchema = z.strictObject({
+  id: identitySchema(WORKBENCH_QUEUED_MESSAGE_PREFIX),
+  text: z.string(),
+});
+export type QueuedMessage = z.infer<typeof queuedMessageSchema>;
+
 export const runSnapshotSchema = z.strictObject({
   streaming_message: z.record(z.string(), z.unknown()).nullable(),
   pending_tool_calls: z.array(z.string()),
   pending_approval: pendingApprovalSchema.nullable(),
   run_active: z.boolean(),
+  queue: z.array(queuedMessageSchema),
   error_message: z.string().nullable(),
 });
 export type RunSnapshot = z.infer<typeof runSnapshotSchema>;
@@ -192,11 +205,20 @@ export const workbenchOperations = {
       query: emptyFields,
       body: z.strictObject({
         text: z.string().min(1).max(WORKBENCH_MESSAGE_MAX_LENGTH),
+        delivery: z
+          .enum([MessageDelivery.Queue, MessageDelivery.Replace])
+          .default(MessageDelivery.Queue),
       }),
     }),
-    output: sessionParams.extend({ run_active: z.literal(true) }),
+    output: sessionParams.extend({
+      run_active: z.literal(true),
+      queued_message_id: identitySchema(
+        WORKBENCH_QUEUED_MESSAGE_PREFIX,
+      ).nullable(),
+      cleared: z.array(queuedMessageSchema),
+    }),
     description:
-      "Start a run of the agent on one human message. A session holds one run at a time.",
+      "Start a run on one human message, or queue it behind the active run. `replace` clears the queue, stops the active run and queues the message.",
   },
   "session.abort": {
     ...workbenchOperation,
@@ -209,8 +231,29 @@ export const workbenchOperations = {
       query: emptyFields,
       body: z.null(),
     }),
-    output: sessionParams.extend({ run_active: z.literal(false) }),
-    description: "Stop the active run of a workbench session.",
+    output: sessionParams.extend({
+      run_active: z.literal(false),
+      cleared: z.array(queuedMessageSchema),
+    }),
+    description: "Stop the active run and clear the queue.",
+  },
+  "session.queue.remove": {
+    ...workbenchOperation,
+    id: "workbench.session.queue.remove",
+    method: HttpMethod.Delete,
+    path: "/api/workbench/session/:session_id/queue/:queued_message_id",
+    mutation: true,
+    input: z.strictObject({
+      params: sessionParams.extend({
+        queued_message_id: identitySchema(WORKBENCH_QUEUED_MESSAGE_PREFIX),
+      }),
+      query: emptyFields,
+      body: z.null(),
+    }),
+    output: sessionParams.extend({
+      queued_message_id: identitySchema(WORKBENCH_QUEUED_MESSAGE_PREFIX),
+    }),
+    description: "Remove one queued message of a workbench session.",
   },
   "session.approve": {
     ...workbenchMutation,

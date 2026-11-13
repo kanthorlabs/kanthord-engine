@@ -4,8 +4,9 @@ pathItem:
     operationId: workbench.session.message
     tags:
       - workbench
-    description: Start a run of the agent on one human message. A session holds one
-      run at a time.
+    description: Start a run on one human message, or queue it behind the active
+      run. `replace` clears the queue, stops the active run and queues the
+      message.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: true
@@ -82,6 +83,12 @@ components:
               type: string
               minLength: 1
               maxLength: 1048576
+            delivery:
+              default: queue
+              type: string
+              enum:
+                - queue
+                - replace
           required:
             - text
           additionalProperties: false
@@ -103,7 +110,36 @@ components:
         run_active:
           type: boolean
           const: true
+        queued_message_id:
+          anyOf:
+            - type: string
+              minLength: 51
+              maxLength: 51
+              pattern: ^workbench_queued_message_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: workbench_queued_message_ followed by a canonical 26-character
+                uppercase ULID.
+            - type: "null"
+        cleared:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                minLength: 51
+                maxLength: 51
+                pattern: ^workbench_queued_message_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: workbench_queued_message_ followed by a canonical 26-character
+                  uppercase ULID.
+              text:
+                type: string
+            required:
+              - id
+              - text
+            additionalProperties: false
       required:
         - session_id
         - run_active
+        - queued_message_id
+        - cleared
       additionalProperties: false

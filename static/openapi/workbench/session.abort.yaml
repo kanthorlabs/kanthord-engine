@@ -4,7 +4,7 @@ pathItem:
     operationId: workbench.session.abort
     tags:
       - workbench
-    description: Stop the active run of a workbench session.
+    description: Stop the active run and clear the queue.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: true
@@ -88,7 +88,26 @@ components:
         run_active:
           type: boolean
           const: false
+        cleared:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                minLength: 51
+                maxLength: 51
+                pattern: ^workbench_queued_message_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: workbench_queued_message_ followed by a canonical 26-character
+                  uppercase ULID.
+              text:
+                type: string
+            required:
+              - id
+              - text
+            additionalProperties: false
       required:
         - session_id
         - run_active
+        - cleared
       additionalProperties: false
