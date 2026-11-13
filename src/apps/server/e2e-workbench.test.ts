@@ -1000,6 +1000,7 @@ const TWO_RESULTS = 2;
 const NO_RECORDS = 0;
 const OFFER_ACTION = "offer_action";
 const NODE_DISCARD = "mission.node.discard";
+const NODE_RESUME = "mission.node.resume";
 const RECORD_ENTRY = "kanthord.workbench.record";
 const PROJECT_NAME = "operations";
 const UNKNOWN_NODE = "node_01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -2484,7 +2485,11 @@ test("(happy path) offer_action records the server read of a Blocked node and of
     tool_call_id: toolCallIds(first)[0],
     operation_id: NODE_DISCARD,
     target_id: target.nodeId,
-    seen: { state: NodeState.Blocked, attempt: before.attempt },
+    seen: {
+      name: before.content.name,
+      state: NodeState.Blocked,
+      attempt: before.attempt,
+    },
   });
   assert.equal((await nodeOf(fixture, target.nodeId)).state, NodeState.Blocked);
   assert.equal(
@@ -2513,9 +2518,66 @@ test("(happy path) offer_action records the server read of a Blocked node and of
     tool_call_id: toolCallIds(second)[0],
     operation_id: PROJECT_RESUME,
     target_id: target.projectId,
-    seen: { paused: true },
+    seen: { name: project!.name, paused: true },
   });
   assert.notEqual(await pausedAt(fixture, target.projectId), NO_PAUSE);
+});
+
+test("(happy path) offer_action with mission.node.resume on a paused node records the node name", async (t) => {
+  const target = { nodeId: "" };
+  const { fixture, session } = await offerFixture(t, [
+    () => toolCall(OFFER_ACTION, offerInput(NODE_RESUME, target.nodeId)),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  target.nodeId = await createNode(fixture);
+  const [project] = completed(
+    await fixture.projects.list(
+      { params: {}, query: {}, body: null } as never,
+      fixture.options,
+    ),
+  ).items;
+  const node = await nodeOf(fixture, target.nodeId);
+  const mission = completed(
+    await fixture.missions["get"](
+      { params: { project_id: project!.id }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  completed(
+    await (
+      fixture.missions["node.pause"] as unknown as (
+        input: unknown,
+        options: unknown,
+      ) => Promise<never>
+    )(
+      {
+        params: { node_id: target.nodeId },
+        query: {},
+        body: {
+          reason: "hold",
+          expected_mission_version: mission.version,
+          expected_state: node.state,
+          expected_attempt: node.attempt,
+        },
+      },
+      fixture.options,
+    ),
+  );
+  const paused = await nodeOf(fixture, target.nodeId);
+  assert.equal(paused.state, NodeState.Paused);
+  completed(await message(fixture, session.id, QUESTION));
+  const entries = await untilIdle(fixture, session.id, t.signal);
+  assert.deepEqual(recordsOf(entries)[0]!.data, {
+    kind: "action_offer",
+    tool_call_id: toolCallIds(entries)[0],
+    operation_id: NODE_RESUME,
+    target_id: target.nodeId,
+    seen: {
+      name: paused.content.name,
+      state: NodeState.Paused,
+      attempt: paused.attempt,
+    },
+  });
 });
 
 test("(security) offer_action refuses an operation outside the action card list and records nothing", async (t) => {
