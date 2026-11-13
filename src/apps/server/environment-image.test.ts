@@ -267,9 +267,11 @@ process.stderr.write(JSON.stringify({
   document: JSON.parse(readFileSync(config, "utf8")),
   feature: existsSync(config.replace("devcontainer.json", "local/install.sh")),
   variables: Object.keys(process.env),
-  values: Object.values(process.env),
+  secret: Object.values(process.env).includes("s3cr3t"),
 }));
 process.exit(3);`;
+
+const REPORT_VARIABLES = { PATH: process.env.PATH, HOME: process.env.HOME };
 
 function reportOf(result: ImageBuildResult): {
   config: string;
@@ -277,7 +279,7 @@ function reportOf(result: ImageBuildResult): {
   document: Record<string, unknown>;
   feature: boolean;
   variables: string[];
-  values: string[];
+  secret: boolean;
 } {
   assert.ok(result.outcome === ImageBuildOutcome.Failed);
   return JSON.parse(result.tail);
@@ -310,7 +312,7 @@ test("the build writes the allowlisted document outside the checkout with absolu
       postCreateCommand: "npm ci",
     }),
     cli: REPORT_CLI,
-    variables: { PATH: process.env.PATH, HOME: process.env.HOME },
+    variables: REPORT_VARIABLES,
     checkout: (target) => {
       checkout = realpathSync(target);
       writeCheckout(target, {
@@ -354,7 +356,7 @@ test("the build gives the devcontainer CLI no server variable", async (t) => {
       .sort(),
     ["CONTAINER_HOST", "HOME", "PATH", "XDG_CONFIG_HOME"],
   );
-  assert.equal(report.values.includes("s3cr3t"), false);
+  assert.equal(report.secret, false);
 });
 
 test("a symlinked .devcontainer of the checkout gets no write and no build path outside the checkout", async (t) => {
@@ -368,7 +370,7 @@ test("a symlinked .devcontainer of the checkout gets no write and no build path 
   const stored = images(join(directory, "stored"), {
     environment: environment(),
     cli: REPORT_CLI,
-    variables: { PATH: process.env.PATH, HOME: process.env.HOME },
+    variables: REPORT_VARIABLES,
     checkout: link,
   });
   reportOf(await stored.build());
