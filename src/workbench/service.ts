@@ -91,6 +91,7 @@ import {
 import { missionOperations } from "../mission/contract.ts";
 import { offerActionTool } from "./actions.ts";
 import {
+  EVIDENCE_ASSET_MISMATCH,
   EVIDENCE_READ_TOOL,
   evidenceFacts,
   evidenceReadTool,
@@ -584,12 +585,19 @@ export class WorkbenchService implements Service {
     call: ToolCallEvent,
     options: EvidenceGrantOptions,
   ): Promise<ToolDecision> {
-    const facts = await evidenceFacts(
-      this.dependencies.invoke,
-      () => session.requester,
-      { input: call.input, signal: options.signal },
-    ).catch(() => null);
-    if (!facts || session.evidenceGrants.has(facts.node_id)) return ALLOWED;
+    let facts: Awaited<ReturnType<typeof evidenceFacts>>;
+    try {
+      facts = await evidenceFacts(
+        this.dependencies.invoke,
+        () => session.requester,
+        { input: call.input, signal: options.signal },
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.startsWith(EVIDENCE_ASSET_MISMATCH)) return ALLOWED;
+      return { allowed: false, reason: message, terminate: false };
+    }
+    if (session.evidenceGrants.has(facts.node_id)) return ALLOWED;
     const { offset, length } = call.input as {
       offset?: number;
       length?: number;

@@ -1,51 +1,19 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { httpClient } from "../../gateway/client.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
-import { createIdempotencyKey } from "../../kernel/identity.ts";
-import {
-  type OperationResult,
-  OperationResultType,
-} from "../../kernel/operation.ts";
-import {
-  AssetKind,
-  type Evidence,
-  Intent,
-  type Mission,
-  MissionErrorCode,
-  missionOperations,
-  type NodeChange,
-} from "../../mission/contract.ts";
+import { MissionErrorCode } from "../../mission/contract.ts";
 import { fakeS3, gatewayFixture } from "./test-support.ts";
-import {
-  cliMachine,
-  cliSession,
-  createCredentials,
-  executionContext,
-  passingEvaluation,
-} from "./cli-test-support.ts";
+import { seedEvidence } from "./evidence-test-support.ts";
 
-const REPOSITORY_KEY = "download-test-repository-key";
-const REPOSITORY = "repo";
-const STORE = "store";
-const HARNESS = "harness";
-const REGION = "eu-central-1";
-const STORAGE_PREFIX = "kanthord";
-const STORAGE_SECRET_KEY = "download-test-storage-key";
-const FIRST_ATTEMPT = 1;
 const FIRST_OBJECT_BODY = "0123456789";
-const SECOND_OBJECT_BODY = "abcdefghij";
 const OBJECT_SIZE = FIRST_OBJECT_BODY.length;
-const OBJECT_MEDIA_TYPE = "text/plain";
+const SECOND_OBJECT_BODY = "abcdefghij";
 const OBJECT_RANGE_QUERY = "?offset=2&length=3";
 const OBJECT_RANGE_TEXT = "234";
 const OBJECT_TAIL_QUERY = "?offset=8";
 const OBJECT_TAIL_TEXT = "89";
 const STORAGE_FAILURE_STATUS = 500;
 const SIGNED_QUERY_MARKER = "X-Amz-";
-const COMMIT = "a".repeat(40);
-const FIRST_VERSION = 1;
-const FIRST_INDEX = 0;
 const PRODUCED_TEXT = "ok";
 const PRODUCED_SIZE = PRODUCED_TEXT.length;
 const TIMEOUT = 300000;
@@ -54,176 +22,26 @@ const NOSNIFF = "nosniff";
 const TEXT_MEDIA_TYPE = "text/plain";
 const RANGE_QUERY = "?offset=1&length=1";
 const RANGE_TEXT = "k";
-type Page<T> = { items: T[]; next_cursor: string | null };
-type Binding = { id: string; name: string; resource_identity: string };
-
-type Upload = { asset_id: string; put_url: string };
-
-function completed<T>(result: OperationResult<T>): T {
-  assert.ok(
-    result.type === OperationResultType.Completed,
-    JSON.stringify(result),
-  );
-  return result.data;
-}
 
 async function setup(t: TestContext) {
   const s3 = await fakeS3(t);
   const fixture = await gatewayFixture(t, {
     repositoryConnector: { gitLsRemote: async () => {} },
   });
-  const session = cliSession(
+  const [node] = await seedEvidence(
     t,
-    fixture.endpoint,
-    fixture.token,
-    REPOSITORY_KEY,
+    fixture,
+    [{ produced: [PRODUCED_TEXT], object: FIRST_OBJECT_BODY }],
+    { s3 },
   );
-  const { read, write } = session;
-  await createCredentials(session, REPOSITORY_KEY);
-  await write(["storage", "credential", "create"], {
-    name: STORE,
-    platform: "s3",
-    metadata: { endpoint: s3.endpoint, bucket: s3.bucket, region: REGION },
-    secret: {
-      access_key_id: "AKIAEXAMPLE",
-      secret_access_key: STORAGE_SECRET_KEY,
-    },
-  });
-  const project = await read<{ id: string }>([
-    "project",
-    "create",
-    "--name",
-    "evidence-download",
-  ]);
-  const mission = await read<Mission>(["mission", "get", project.id]);
-  await write(["project", "binding", "apply", project.id], {
-    version: FIRST_VERSION,
-    bindings: {
-      [REPOSITORY]: {
-        kind: "repository",
-        config: {
-          available: true,
-          platform: "github",
-          address: "git@github.com:owner/repo.git",
-          strategy: { base_branch: "main" },
-          ssh_credential: "github-ssh",
-          credential: "github",
-        },
-      },
-      [STORE]: {
-        kind: "storage",
-        config: {
-          available: true,
-          endpoint: s3.endpoint,
-          bucket: s3.bucket,
-          region: REGION,
-          prefix: STORAGE_PREFIX,
-          credential: STORE,
-        },
-      },
-      [HARNESS]: {
-        kind: "worker",
-        config: { worker: "claude-code@1", instance_count: 1 },
-      },
-    },
-  });
-  const bindings = await read<Page<Binding>>([
-    "project",
-    "binding",
-    "list",
-    project.id,
-  ]);
-  const binding = (name: string) =>
-    bindings.items.find((item) => item.name === name)!;
-  const change = await write<NodeChange>(
-    ["mission", "node", "create", mission.id],
-    {
-      filename: "implement.md",
-      content: {
-        name: "Recover accounts",
-        requirement: "Recover accounts",
-        criterion: "Accounts recover",
-        verifications: ["true"],
-        intent: Intent.Implement,
-        bindings: [binding(REPOSITORY).id, binding(STORE).id],
-      },
-      tasks: [],
-      reason: "plan",
-      expected_mission_version: mission.version,
-    },
-  );
-  const nodeId = change.revisions[FIRST_INDEX]!.node_id;
-  const machine = await cliMachine(session, {
-    masterKey: fixture.config.master_key,
-    projectId: project.id,
-    resourceIdentity: binding(HARNESS).resource_identity,
-  });
-  const api = httpClient(missionOperations, fixture.endpoint, machine.token);
-  let objectKey = "";
-  let objectId = "";
-  await passingEvaluation(session, machine, {
-    nodeId,
-    bindingId: binding(REPOSITORY).id,
-    commit: COMMIT,
-    executing: async (execution) => {
-      const context = executionContext(execution);
-      const submitted = completed(
-        await api["evidence.submit"](
-          {
-            params: { node_id: nodeId },
-            query: {},
-            body: {
-              ...context,
-              subject: "recording",
-              assets: [
-                {
-                  kind: AssetKind.Object,
-                  media_type: OBJECT_MEDIA_TYPE,
-                  size: OBJECT_SIZE,
-                },
-              ],
-            },
-          },
-          { idempotencyKey: createIdempotencyKey() },
-        ),
-      );
-      const upload = submitted.uploads[0] as Upload;
-      const put = await fetch(upload.put_url, {
-        method: HttpMethod.Put,
-        body: FIRST_OBJECT_BODY,
-      });
-      assert.equal(put.status, HttpStatus.OK);
-      await put.arrayBuffer();
-      completed(
-        await api["evidence.asset.complete"](
-          { params: { asset_id: upload.asset_id }, query: {}, body: context },
-          { idempotencyKey: createIdempotencyKey() },
-        ),
-      );
-      objectId = upload.asset_id;
-      objectKey = `${STORAGE_PREFIX}/${project.id}/${mission.id}/${nodeId}/${FIRST_ATTEMPT}/${upload.asset_id}`;
-    },
-  });
-  const evidence = await read<Page<Evidence>>([
-    "mission",
-    "evidence",
-    "list",
-    nodeId,
-  ]);
-  const assetOf = (kind: string) => {
-    const asset = evidence.items
-      .flatMap((item) => item.assets)
-      .find((item) => item.address.kind === kind);
-    assert.ok(asset);
-    return asset.id;
-  };
+  const { produced, object, repository, objectKey } = node!;
   const download = (assetId: string, query = "") =>
     fetch(
       `${fixture.endpoint}/api/mission/evidence/asset/${assetId}/content/download${query}`,
       { headers: { Authorization: `Bearer ${fixture.token}` } },
     );
   const overwriteObject = async () => {
-    const put = await fetch(`${s3.endpoint}/${s3.bucket}/${objectKey}`, {
+    const put = await fetch(`${s3.endpoint}/${s3.bucket}/${objectKey!}`, {
       method: HttpMethod.Put,
       headers: { Authorization: "AWS4-HMAC-SHA256 e2e" },
       body: SECOND_OBJECT_BODY,
@@ -232,9 +50,9 @@ async function setup(t: TestContext) {
     await put.arrayBuffer();
   };
   return {
-    producedId: assetOf(AssetKind.Produced),
-    repositoryId: assetOf(AssetKind.Repository),
-    objectId,
+    producedId: produced[0]!.assetId,
+    repositoryId: repository.assetId,
+    objectId: object!.assetId,
     s3,
     logs: fixture.logs,
     overwriteObject,

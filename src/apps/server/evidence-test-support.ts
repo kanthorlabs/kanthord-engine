@@ -33,6 +33,7 @@ const REGION = "eu-central-1";
 const STORAGE_PREFIX = "kanthord";
 const COMMIT = "a".repeat(40);
 const FIRST_VERSION = 1;
+const FIRST_ATTEMPT = 1;
 const FIRST_INDEX = 0;
 const TEXT_MEDIA_TYPE = "text/plain";
 
@@ -56,6 +57,8 @@ export interface SeededNode {
   nodeId: string;
   produced: SeedAsset[];
   object: SeedAsset | null;
+  repository: SeedAsset;
+  objectKey: string | null;
 }
 
 export interface SeedOptions {
@@ -276,7 +279,19 @@ export async function seedEvidence(
         ? null
         : assetOf(objectEvidenceId, AssetKind.Object);
     assert.equal(object?.assetId ?? objectAssetId, objectAssetId);
-    seeded.push({ nodeId, produced, object });
+    const repositoryEvidence = listed.items.find((item) =>
+      item.assets.some((asset) => asset.address.kind === AssetKind.Repository),
+    );
+    assert.ok(repositoryEvidence);
+    seeded.push({
+      nodeId,
+      produced,
+      object,
+      repository: assetOf(repositoryEvidence.id, AssetKind.Repository),
+      objectKey: object
+        ? `${STORAGE_PREFIX}/${project.id}/${mission.id}/${nodeId}/${FIRST_ATTEMPT}/${object.assetId}`
+        : null,
+    });
   }
   return seeded;
 }

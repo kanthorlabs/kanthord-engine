@@ -10,6 +10,7 @@ import { missionOperations } from "../mission/contract.ts";
 import type { InvokeOperation } from "./tools.ts";
 
 export const EVIDENCE_READ_TOOL = "evidence_read";
+export const EVIDENCE_ASSET_MISMATCH = "workbench.evidence.asset_mismatch";
 export const EVIDENCE_TEXT_MAX_BYTES = 65536;
 export const EVIDENCE_TEXT_MEDIA_TYPES: readonly string[] = [
   "text/*",
@@ -143,7 +144,7 @@ export async function evidenceFacts(
   const asset = evidence.assets.find((item) => item.id === input.asset_id);
   if (!asset)
     throw new Error(
-      `workbench.evidence.asset_mismatch: The evidence holds no asset ${input.asset_id}.`,
+      `${EVIDENCE_ASSET_MISMATCH}: The evidence holds no asset ${input.asset_id}.`,
     );
   return {
     evidence_id: evidence.id,
