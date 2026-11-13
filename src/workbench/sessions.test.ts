@@ -14,7 +14,7 @@ const VALID_RECORD: WorkbenchRecord = {
   tool_call_id: "call_1",
   operation_id: "project.pause",
   target_id: "project_X",
-  seen: { paused: false },
+  seen: { name: "Billing", paused: false },
 };
 
 function recordEntry(data: unknown) {

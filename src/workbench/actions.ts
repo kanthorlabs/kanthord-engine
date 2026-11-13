@@ -34,16 +34,27 @@ export const TARGET_READS: Readonly<
 };
 
 const nodeReadSchema = z.looseObject({
+  content: z.looseObject({ name: z.string() }),
   state: nodeStateSchema,
   attempt: z.number().int().nonnegative(),
 });
 const projectReadSchema = z.looseObject({
+  name: z.string(),
   paused_at: z.number().int().nullable(),
 });
 
+const ACTION_CARD_OPERATION_IDS = Object.keys(ACTION_CARD_OPERATIONS) as [
+  string,
+  ...string[],
+];
+
 const offerParametersSchema = z.strictObject({
-  operation_id: z.string(),
+  operation_id: z.enum(ACTION_CARD_OPERATION_IDS),
   target_id: z.string(),
+});
+
+const offerCallSchema = offerParametersSchema.extend({
+  operation_id: z.string(),
 });
 
 function offerParameters(): TSchema {
@@ -68,10 +79,18 @@ type ActionOffer = Extract<
 
 function seenOf(target: ActionTarget, data: unknown): ActionOffer["seen"] {
   if (target === ActionTarget.Node) {
-    const { state, attempt } = nodeReadSchema.parse(data);
-    return { state, attempt };
+    const { content, state, attempt } = nodeReadSchema.parse(data);
+    return { name: content.name, state, attempt };
   }
-  return { paused: projectReadSchema.parse(data).paused_at !== null };
+  const { name, paused_at } = projectReadSchema.parse(data);
+  return { name, paused: paused_at !== null };
+}
+
+function assertCardAct(operationId: string): void {
+  if (!Object.hasOwn(ACTION_CARD_OPERATIONS, operationId))
+    throw new Error(
+      `workbench.action.operation_refused: ${operationId} is no action card act.`,
+    );
 }
 
 export function offerActionTool(input: OfferActionToolInput): ToolDefinition {
@@ -111,15 +130,16 @@ export function offerActionTool(input: OfferActionToolInput): ToolDefinition {
   return {
     name: WORKBENCH_ACTION_TOOL_NAME,
     label: WORKBENCH_ACTION_TOOL_NAME,
-    description:
-      "Show an action card to the owner. The tool runs nothing. The owner decides whether the act runs.",
+    description: `Show an action card to the owner. The tool runs nothing. The owner decides whether the act runs. Card acts: ${ACTION_CARD_OPERATION_IDS.join(", ")}.`,
     parameters: offerParameters(),
+    prepareArguments(args) {
+      const parsed = offerCallSchema.safeParse(args);
+      if (parsed.success) assertCardAct(parsed.data.operation_id);
+      return args;
+    },
     async execute(toolCallId, params, signal) {
-      const { operation_id, target_id } = offerParametersSchema.parse(params);
-      if (!Object.hasOwn(ACTION_CARD_OPERATIONS, operation_id))
-        throw new Error(
-          `workbench.action.operation_refused: ${operation_id} is no action card act.`,
-        );
+      const { operation_id, target_id } = offerCallSchema.parse(params);
+      assertCardAct(operation_id);
       const target = ACTION_CARD_OPERATIONS[operation_id];
       assert.ok(target);
       if (!identitySchema(target).safeParse(target_id).success)
