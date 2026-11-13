@@ -64,7 +64,11 @@ import {
   toolName,
   type WorkbenchModelRuntimeFactory,
 } from "../../workbench/index.ts";
-import { MissionErrorCode, missionOperations } from "../../mission/contract.ts";
+import {
+  MissionErrorCode,
+  missionOperations,
+  NodeState,
+} from "../../mission/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { COVERING_WORKER_BINDINGS, gatewayFixture } from "./test-support.ts";
 import { framing, PromptConsumer } from "../../agent/prompt-render.ts";
@@ -963,6 +967,11 @@ const TOOL_USE = "toolUse" as const;
 const TOOL_RESULT = "toolResult";
 const OPS_DISPLAY_NAME = "Yumi";
 const PROJECT_RESUME = "project.resume";
+const TWO_RESULTS = 2;
+const NO_RECORDS = 0;
+const OFFER_ACTION = "offer_action";
+const NODE_DISCARD = "mission.node.discard";
+const RECORD_ENTRY = "kanthord.workbench.record";
 const PROJECT_NAME = "operations";
 const UNKNOWN_NODE = "node_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const FIRST_BINDING_SET = 1;
@@ -1182,7 +1191,7 @@ test("(happy path) the tool table of each workbench agent holds its built-in too
     const { builtin, operation } = getAgentDeclaration(agentName)!.tools;
     assert.deepEqual(
       [...tools].sort(),
-      [...builtin, ...operation.map(toolName)].sort(),
+      [...builtin, ...operation.map(toolName), OFFER_ACTION].sort(),
       agentName,
     );
     for (const name of [
@@ -2312,5 +2321,280 @@ test("a credential marker from before configure to another credential blocks aft
     fixture.provider.calls.every(
       (call) => !JSON.stringify(call.messages).includes(PRIMARY_KEY),
     ),
+  );
+});
+
+async function blockedNode(fixture: Fixture): Promise<string> {
+  const nodeId = await createNode(fixture);
+  const [project] = completed(
+    await fixture.projects.list(
+      { params: {}, query: {}, body: null } as never,
+      fixture.options,
+    ),
+  ).items;
+  for (const operation of [
+    fixture.missions["node.pause"],
+    fixture.missions["node.block"],
+  ] as unknown as ((input: unknown, options: unknown) => Promise<never>)[]) {
+    const node = completed(
+      await fixture.missions["node.get"](
+        { params: { node_id: nodeId }, query: {}, body: null },
+        fixture.options,
+      ),
+    );
+    const mission = completed(
+      await fixture.missions["get"](
+        { params: { project_id: project!.id }, query: {}, body: null },
+        fixture.options,
+      ),
+    );
+    completed(
+      await operation(
+        {
+          params: { node_id: nodeId },
+          query: {},
+          body: {
+            reason: "hold",
+            expected_mission_version: mission.version,
+            expected_state: node.state,
+            expected_attempt: node.attempt,
+          },
+        },
+        fixture.options,
+      ),
+    );
+  }
+  return nodeId;
+}
+
+async function nodeOf(fixture: Fixture, nodeId: string) {
+  return completed(
+    await fixture.missions["node.get"](
+      { params: { node_id: nodeId }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+}
+
+function offerInput(operationId: string, targetId: string) {
+  return { operation_id: operationId, target_id: targetId };
+}
+
+function recordsOf(entries: readonly Entry[]): Entry[] {
+  return entries.filter(
+    (entry) => entry.type === CustomType && entry.customType === RECORD_ENTRY,
+  );
+}
+
+async function sessionEntries(fixture: Fixture, sessionId: string) {
+  return completed(
+    await fixture.workbench["session.get"](
+      { params: { session_id: sessionId }, query: {}, body: null },
+      fixture.options,
+    ),
+  ).entries as Entry[];
+}
+
+function toolCallIds(entries: readonly Entry[]): string[] {
+  return entries
+    .filter((entry) => entry.type === MESSAGE_ENTRY)
+    .map((entry) => entry.message as { role: string; toolCallId?: string })
+    .filter((message) => message.role === TOOL_RESULT)
+    .map((message) => message.toolCallId!);
+}
+
+async function offerFixture(t: TestContext, script: FauxResponseStep[]) {
+  const fixture = await workbenchFixture(t, script, undefined, undefined, [
+    OPS,
+    AGENT,
+    REVIEW_AGENT,
+  ]);
+  const session = await createSession(fixture, undefined, OPS);
+  return { fixture, session };
+}
+
+test("(happy path) offer_action records the server read of a Blocked node and of a paused project and runs no act", async (t) => {
+  const target = { nodeId: "", projectId: "" };
+  const { fixture, session } = await offerFixture(t, [
+    () => toolCall(OFFER_ACTION, offerInput(NODE_DISCARD, target.nodeId)),
+    fauxAssistantMessage(ANSWER),
+    () => toolCall(OFFER_ACTION, offerInput(PROJECT_RESUME, target.projectId)),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  target.nodeId = await blockedNode(fixture);
+  const [project] = completed(
+    await fixture.projects.list(
+      { params: {}, query: {}, body: null } as never,
+      fixture.options,
+    ),
+  ).items;
+  target.projectId = project!.id;
+  completed(
+    await fixture.projects.pause(
+      resumeInput(target.projectId) as never,
+      fixture.options,
+    ),
+  );
+  const before = await nodeOf(fixture, target.nodeId);
+  assert.equal(before.state, NodeState.Blocked);
+  completed(await message(fixture, session.id, QUESTION));
+  const first = await untilIdle(fixture, session.id, t.signal);
+  const [offered] = recordsOf(first);
+  assert.equal(recordsOf(first).length, SINGLE);
+  assert.deepEqual(offered!.data, {
+    kind: "action_offer",
+    tool_call_id: toolCallIds(first)[0],
+    operation_id: NODE_DISCARD,
+    target_id: target.nodeId,
+    seen: { state: NodeState.Blocked, attempt: before.attempt },
+  });
+  assert.equal((await nodeOf(fixture, target.nodeId)).state, NodeState.Blocked);
+  assert.equal(
+    completed(
+      await fixture.workbench["session.events"](
+        {
+          params: { session_id: session.id },
+          query: {},
+          body: null,
+        },
+        fixture.options,
+      ),
+    ).snapshot.pending_approval,
+    null,
+  );
+  completed(await message(fixture, session.id, QUESTION));
+  const second = await untilIdle(
+    fixture,
+    session.id,
+    t.signal,
+    first.at(-1)!.id as string,
+  );
+  assert.equal(recordsOf(second).length, SINGLE);
+  assert.deepEqual(recordsOf(second)[0]!.data, {
+    kind: "action_offer",
+    tool_call_id: toolCallIds(second)[0],
+    operation_id: PROJECT_RESUME,
+    target_id: target.projectId,
+    seen: { paused: true },
+  });
+  assert.notEqual(await pausedAt(fixture, target.projectId), NO_PAUSE);
+});
+
+test("(security) offer_action refuses an operation outside the action card list and records nothing", async (t) => {
+  const { fixture, session } = await offerFixture(t, [
+    toolCall(
+      OFFER_ACTION,
+      offerInput("workbench.session.approve", UNKNOWN_NODE),
+    ),
+    toolCall(OFFER_ACTION, offerInput("toString", UNKNOWN_NODE)),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  completed(await message(fixture, session.id, QUESTION));
+  const entries = await untilIdle(fixture, session.id, t.signal);
+  const results = toolResults(entries);
+  assert.equal(results.length, TWO_RESULTS);
+  for (const result of results) {
+    assert.equal(result.isError, true);
+    assert.ok(
+      result.text.startsWith("workbench.action.operation_refused:"),
+      result.text,
+    );
+  }
+  assert.equal(
+    recordsOf(await sessionEntries(fixture, session.id)).length,
+    NO_RECORDS,
+  );
+});
+
+test("(security) offer_action refuses a target of the wrong kind or an unknown node and records nothing", async (t) => {
+  const { fixture, session } = await offerFixture(t, [
+    toolCall(
+      OFFER_ACTION,
+      offerInput(NODE_DISCARD, "project_01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+    ),
+    toolCall(OFFER_ACTION, offerInput(NODE_DISCARD, UNKNOWN_NODE)),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  completed(await message(fixture, session.id, QUESTION));
+  const entries = await untilIdle(fixture, session.id, t.signal);
+  const results = toolResults(entries);
+  assert.equal(results.length, TWO_RESULTS);
+  assert.ok(
+    results[0]!.text.startsWith("workbench.action.target_invalid:"),
+    results[0]!.text,
+  );
+  assert.ok(
+    results[1]!.text.startsWith(`${MissionErrorCode.NodeNotFound}:`),
+    results[1]!.text,
+  );
+  assert.ok(results.every(({ isError }) => isError));
+  assert.equal(
+    recordsOf(await sessionEntries(fixture, session.id)).length,
+    NO_RECORDS,
+  );
+});
+
+test("(security) a second offer_action in one run gives offer_limit and the next run offers again", async (t) => {
+  const target = { nodeId: "" };
+  const { fixture, session } = await offerFixture(t, [
+    () => toolCall(OFFER_ACTION, offerInput(NODE_DISCARD, target.nodeId)),
+    () => toolCall(OFFER_ACTION, offerInput(NODE_DISCARD, target.nodeId)),
+    fauxAssistantMessage(ANSWER),
+    () => toolCall(OFFER_ACTION, offerInput(NODE_DISCARD, target.nodeId)),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  target.nodeId = await blockedNode(fixture);
+  completed(await message(fixture, session.id, QUESTION));
+  const first = await untilIdle(fixture, session.id, t.signal);
+  const results = toolResults(first);
+  assert.deepEqual(
+    results.map(({ isError }) => isError),
+    [false, true],
+  );
+  assert.ok(
+    results[1]!.text.startsWith("workbench.action.offer_limit:"),
+    results[1]!.text,
+  );
+  assert.equal(recordsOf(first).length, SINGLE);
+  completed(await message(fixture, session.id, QUESTION));
+  const second = await untilIdle(
+    fixture,
+    session.id,
+    t.signal,
+    first.at(-1)!.id as string,
+  );
+  assert.deepEqual(
+    toolResults(second).map(({ isError }) => isError),
+    [false],
+  );
+  assert.equal(
+    recordsOf(await sessionEntries(fixture, session.id)).length,
+    SINGLE + SINGLE,
+  );
+});
+
+test("(invariant guard) the action_offer record leaves buildSessionContext unchanged", async (t) => {
+  const target = { nodeId: "" };
+  const { fixture, session } = await offerFixture(t, [
+    () => toolCall(OFFER_ACTION, offerInput(NODE_DISCARD, target.nodeId)),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  target.nodeId = await blockedNode(fixture);
+  completed(await message(fixture, session.id, QUESTION));
+  await untilIdle(fixture, session.id, t.signal);
+  const entries = await sessionEntries(fixture, session.id);
+  const [record] = recordsOf(entries);
+  assert.ok(record);
+  const without = entries
+    .filter((entry) => entry !== record)
+    .map((entry) =>
+      entry.parentId === record.id
+        ? { ...entry, parentId: record.parentId }
+        : entry,
+    );
+  const { buildSessionContext } = await loadPi();
+  assert.deepEqual(
+    buildSessionContext(entries as never),
+    buildSessionContext(without as never),
   );
 });

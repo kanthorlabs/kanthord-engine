@@ -81,6 +81,7 @@ import {
   workbenchOperations,
   type WorkbenchSession,
 } from "./contract.ts";
+import { offerActionTool } from "./actions.ts";
 import type { WorkbenchConfig } from "./config.ts";
 import {
   builtinTools,
@@ -90,6 +91,7 @@ import {
   toolOperations,
 } from "./tools.ts";
 import {
+  appendRecord,
   createSession,
   findSession,
   lastModel,
@@ -187,6 +189,7 @@ interface Run {
   firstEntry: number;
   ended: boolean;
   endingCall: string | null;
+  offerToolCallId: string | null;
   settled: Promise<void>;
 }
 
@@ -443,6 +446,20 @@ export class WorkbenchService implements Service {
           () => session.requester,
         );
       });
+      const offer = offerActionTool({
+        operations: this.dependencies.operations(),
+        invoke: this.dependencies.invoke,
+        requester: () => session.requester,
+        offer: {
+          taken: () => session.run?.offerToolCallId != null,
+          append: (record) => {
+            appendRecord(session.manager, record);
+            assert.ok(session.run);
+            session.run.offerToolCallId = record.tool_call_id;
+            this.notify(session);
+          },
+        },
+      });
       session.secrets = credentialSecrets(
         credentials,
         piProviderId(resolved.provider),
@@ -456,8 +473,9 @@ export class WorkbenchService implements Service {
         allowlist: [
           ...builtin.allowlist,
           ...operations.map((tool) => tool.name),
+          offer.name,
         ],
-        customTools: [...builtin.customTools, ...operations],
+        customTools: [...builtin.customTools, ...operations, offer],
         hostHome,
         hooks: [
           toolApproval({
@@ -714,6 +732,7 @@ export class WorkbenchService implements Service {
       firstEntry: session.manager.getEntries().length,
       ended: false,
       endingCall: null,
+      offerToolCallId: null,
       stopped: false,
       settled: completion.promise,
     };
