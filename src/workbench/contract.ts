@@ -9,11 +9,13 @@ import {
 } from "../kernel/operation.ts";
 import { reasoningEffortSchema } from "../agent/contract.ts";
 import { COPY_REPORT_TEXT_MAX_LENGTH } from "../llm/contract.ts";
+import { nodeStateSchema } from "../mission/contract.ts";
 
 export const WORKBENCH_SERVICE_NAME = "workbench";
 export const WORKBENCH_SESSION_PREFIX = "workbench_session";
 export const WORKBENCH_DIRECTORY_NAME = "workbench";
 export const WORKBENCH_CONFIGURATION_ENTRY = "kanthord.workbench.configuration";
+export const WORKBENCH_RECORD_ENTRY = "kanthord.workbench.record";
 export const WORKBENCH_TIMEOUT_MS = 30000;
 export const WORKBENCH_EVENTS_WAIT_MS = 25000;
 export const WORKBENCH_MESSAGE_MAX_LENGTH = 1048576;
@@ -44,6 +46,29 @@ export const workbenchConfigurationSchema = z.strictObject({
 export type WorkbenchConfiguration = z.infer<
   typeof workbenchConfigurationSchema
 >;
+
+export const WorkbenchRecordKind = { ActionOffer: "action_offer" } as const;
+export type WorkbenchRecordKind =
+  (typeof WorkbenchRecordKind)[keyof typeof WorkbenchRecordKind];
+
+const actionSeenSchema = z.union([
+  z.strictObject({
+    state: nodeStateSchema,
+    attempt: z.number().int().nonnegative(),
+  }),
+  z.strictObject({ paused: z.boolean() }),
+]);
+
+export const workbenchRecordSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal(WorkbenchRecordKind.ActionOffer),
+    tool_call_id: z.string(),
+    operation_id: z.string(),
+    target_id: z.string(),
+    seen: actionSeenSchema,
+  }),
+]);
+export type WorkbenchRecord = z.infer<typeof workbenchRecordSchema>;
 
 const timestampSchema = z
   .number()

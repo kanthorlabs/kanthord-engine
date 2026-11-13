@@ -13,7 +13,10 @@ import {
   type SessionEntry,
   WORKBENCH_CONFIGURATION_ENTRY,
   WORKBENCH_DIRECTORY_NAME,
+  WORKBENCH_RECORD_ENTRY,
   type WorkbenchConfiguration,
+  type WorkbenchRecord,
+  workbenchRecordSchema,
 } from "./contract.ts";
 
 const SESSIONS_DIRECTORY_NAME = "sessions";
@@ -122,6 +125,24 @@ export function storedConfiguration(
     model_identifier: model?.modelId,
     reasoning_effort: thinking?.thinkingLevel,
   };
+}
+
+export function appendRecord(
+  manager: SessionManager,
+  record: WorkbenchRecord,
+): string {
+  const parsed = workbenchRecordSchema.parse(record);
+  return manager.appendCustomEntry(WORKBENCH_RECORD_ENTRY, parsed);
+}
+
+export function recordOf(entry: SessionEntry): WorkbenchRecord | null {
+  if (
+    entry.type !== EntryType.Custom ||
+    entry.customType !== WORKBENCH_RECORD_ENTRY
+  )
+    return null;
+  const parsed = workbenchRecordSchema.safeParse(entry.data);
+  return parsed.success ? parsed.data : null;
 }
 
 export function lastModel(
