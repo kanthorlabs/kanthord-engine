@@ -999,6 +999,10 @@ function resumeInput(projectId: string) {
   return { params: { project_id: projectId }, query: {}, body: null };
 }
 
+function resumeToolInput(projectId: string) {
+  return { params: { project_id: projectId } };
+}
+
 async function pausedProject(fixture: Fixture): Promise<string> {
   const project = completed(
     await fixture.projects.create(
@@ -1084,7 +1088,8 @@ async function resumeFixture(t: TestContext) {
   const fixture = await workbenchFixture(
     t,
     [
-      () => toolCall(toolName(PROJECT_RESUME), resumeInput(target.projectId)),
+      () =>
+        toolCall(toolName(PROJECT_RESUME), resumeToolInput(target.projectId)),
       fauxAssistantMessage(ANSWER),
     ],
     undefined,
@@ -1269,14 +1274,10 @@ test("(happy path) a read tool of ops@1 succeeds and a refusal returns the ownin
     t,
     [
       toolCall(toolName("project.list"), {
-        params: {},
         query: {},
-        body: null,
       }),
       toolCall(toolName("mission.node.get"), {
         params: { node_id: UNKNOWN_NODE },
-        query: {},
-        body: null,
       }),
       fauxAssistantMessage(ANSWER),
     ],
@@ -1316,8 +1317,6 @@ test("(happy path) a read tool and a built-in tool of swe@1 run at once", async 
           [
             fauxToolCall(toolName("mission.node.get"), {
               params: { node_id: target.nodeId },
-              query: {},
-              body: null,
             }),
             fauxToolCall("ls", { path: "." }),
           ],
@@ -1357,7 +1356,7 @@ test("a mutation tool runs only after the human approves the call", async (t) =>
   completed(await message(fixture, sessionId, QUESTION));
   const pending = await untilApproval(fixture, sessionId, t.signal);
   assert.equal(pending.operation_id, PROJECT_RESUME);
-  assert.deepEqual(pending.input, resumeInput(projectId));
+  assert.deepEqual(pending.input, resumeToolInput(projectId));
   assert.notEqual(await pausedAt(fixture, projectId), NO_PAUSE);
   failed(
     await fixture.workbench["session.approve"](

@@ -11,12 +11,15 @@ import {
   spawnedPids,
   survivingProcesses,
 } from "../agent/test-support.ts";
+import { createIdentity } from "../kernel/identity.ts";
 import { temporary } from "../kernel/test-support.ts";
+import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { isObject } from "../kernel/values.ts";
 import {
   AccessPolicy,
   type Operation,
   OperationLifetime,
+  OperationResultType,
 } from "../kernel/operation.ts";
 import { footprintOperations } from "../footprint/contract.ts";
 import { gatewayOperations } from "../gateway/contract.ts";
@@ -36,7 +39,14 @@ import { storageOperations } from "../storage/contract.ts";
 import { trackingOperations } from "../tracking/contract.ts";
 import { workerOperations } from "../worker/contract.ts";
 import { workbenchOperations } from "./contract.ts";
-import { builtinTools, SECRET_OPERATION_IDS, toolOperations } from "./tools.ts";
+import {
+  builtinTools,
+  type InvokeOperation,
+  operationTool,
+  operationToolDeclarations,
+  SECRET_OPERATION_IDS,
+  toolOperations,
+} from "./tools.ts";
 
 const TIMEOUT_SECONDS = 20;
 const ONE_CHILD = 1;
@@ -158,3 +168,80 @@ test("(security) no operation that toolOperations keeps answers a presigned URL 
       assert.ok(!names.includes(url), `${operation.id} answers ${url}`);
   }
 });
+
+const EMPTY_PART_PROPERTIES = 0;
+const NULL_TYPE = "null";
+const DATA_PARTS = ["params", "query"];
+
+function envelopeSchema(
+  operation: Operation,
+): Record<string, Record<string, unknown>> {
+  const schema = z.toJSONSchema(operation.input, {
+    io: "input",
+    unrepresentable: "any",
+  }) as { properties: Record<string, Record<string, unknown>> };
+  return schema.properties;
+}
+
+test("no tool schema of ops@1 names a part that carries no data", () => {
+  const declarations = operationToolDeclarations(OPERATION_UNION, "ops@1");
+  assert.ok(declarations.length > NO_OPERATIONS);
+  for (const declaration of declarations) {
+    const operation = OPERATION_UNION.find(
+      ({ id }) => id.replaceAll(".", "--") === declaration.name,
+    );
+    assert.ok(operation, declaration.name);
+    const full = envelopeSchema(operation);
+    const properties = (declaration.input_schema.properties ?? {}) as Record<
+      string,
+      unknown
+    >;
+    const required = (declaration.input_schema.required ?? []) as string[];
+    const bodiless = full.body?.type === NULL_TYPE;
+    assert.equal("body" in properties, !bodiless, `${operation.id} body`);
+    for (const part of DATA_PARTS) {
+      const empty =
+        Object.keys((full[part]?.properties ?? {}) as object).length ===
+        EMPTY_PART_PROPERTIES;
+      assert.equal(part in properties, !empty, `${operation.id} ${part}`);
+    }
+    for (const name of required)
+      assert.ok(name in properties, `${operation.id} requires ${name}`);
+  }
+});
+
+test("a tool call of a bodiless operation without body reaches the operation with body null", async () => {
+  const operation = missionOperations.get;
+  const projectId = createIdentity("project");
+  const calls: unknown[] = [];
+  const invoke: InvokeOperation = (_target, input) => {
+    calls.push(input);
+    assert.deepEqual(operation.input.parse(input), input);
+    return Promise.resolve({
+      type: OperationResultType.Completed,
+      status: 200,
+      data: { ok: true },
+    });
+  };
+  const tool = operationTool(operation, invoke, () =>
+    testHumanIdentity("account", "Account", "token"),
+  );
+  assert.deepEqual(Object.keys(envelopeProperties(tool.parameters)), [
+    "params",
+  ]);
+  const result = await tool.execute(
+    "call_get",
+    { params: { project_id: projectId } },
+    undefined,
+    undefined,
+    undefined as never,
+  );
+  assert.deepEqual(calls, [
+    { params: { project_id: projectId }, query: {}, body: null },
+  ]);
+  assert.deepEqual(result.details, { ok: true });
+});
+
+function envelopeProperties(schema: unknown): object {
+  return (schema as { properties: object }).properties;
+}
