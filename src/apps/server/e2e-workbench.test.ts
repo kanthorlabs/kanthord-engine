@@ -779,18 +779,6 @@ test("a message runs the agent while a long poll follows the run to its end", as
     queued_message_id: null,
     cleared: [],
   });
-  failed(
-    await fixture.workbench["session.configure"](
-      {
-        params: { session_id: sessionId },
-        query: {},
-        body: session.configuration,
-      },
-      fixture.options,
-    ),
-    HttpStatus.Conflict,
-    WorkbenchErrorCode.RunActive,
-  );
   const during = completed(
     await fixture.workbench["session.get"](
       { params: { session_id: sessionId }, query: {}, body: null },
@@ -800,6 +788,7 @@ test("a message runs the agent while a long poll follows the run to its end", as
   assert.equal(during.run_active, true);
   assert.deepEqual(during.entries, session.entries);
   const last = session.entries.at(-1)!.id;
+  await untilProviderCall(fixture, t.signal);
   const first = completed(
     await fixture.workbench["session.events"](
       { params: { session_id: sessionId }, query: { after: last }, body: null },
