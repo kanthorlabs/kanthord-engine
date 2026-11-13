@@ -62,6 +62,7 @@ import type {
   WorkbenchCredentialsFn,
 } from "../custody/contract.ts";
 import {
+  MessageDelivery,
   type PendingApproval,
   type QueuedMessage,
   type RunSnapshot,
@@ -174,12 +175,28 @@ interface LaunchItem {
   context: Context;
 }
 
+interface MessageBody {
+  text: string;
+  delivery: MessageDelivery;
+}
+
 interface Run {
   settle: () => void;
+  stopped: boolean;
   firstEntry: number;
   ended: boolean;
   endingCall: string | null;
   settled: Promise<void>;
+}
+
+type AgentEvent = Parameters<Parameters<AgentSession["subscribe"]>[0]>[0];
+
+function requiresAbort(run: Run | null, event: AgentEvent): boolean {
+  if (!run) return false;
+  if (event.type === AGENT_START) return run.stopped;
+  return (
+    event.type === TOOL_EXECUTION_END && event.toolCallId === run.endingCall
+  );
 }
 
 const IDLE_SESSION = {
@@ -190,6 +207,7 @@ const IDLE_SESSION = {
   secrets: async () => [],
 } as const;
 const NOT_FOUND_INDEX = -1;
+const AGENT_START = "agent_start";
 const AGENT_END = "agent_end";
 const TOOL_EXECUTION_END = "tool_execution_end";
 const ALLOWED: ToolDecision = { allowed: true };
@@ -466,12 +484,8 @@ export class WorkbenchService implements Service {
       session.redaction = opened.redaction;
       pinnedLayers().pinInference(agent, opened.systemPrompt);
       const unsubscribeEvents = agent.subscribe((event) => {
+        if (requiresAbort(session.run, event)) void session.agent?.abort();
         if (event.type === AGENT_END && session.run) session.run.ended = true;
-        if (
-          event.type === TOOL_EXECUTION_END &&
-          event.toolCallId === session.run?.endingCall
-        )
-          void session.agent?.abort();
         this.notify(session);
       });
       const running = agent;
@@ -692,6 +706,7 @@ export class WorkbenchService implements Service {
       firstEntry: session.manager.getEntries().length,
       ended: false,
       endingCall: null,
+      stopped: false,
       settled: completion.promise,
     };
     session.run = run;
@@ -705,6 +720,7 @@ export class WorkbenchService implements Service {
     run: Run,
     item: LaunchItem,
   ): Promise<void> {
+    if (run.stopped) return run.settle();
     session.requester = item.requester;
     const resolved = this.dependencies.store.transaction((tx) =>
       this.resolve(tx, session.agentName, session.configuration),
@@ -737,6 +753,13 @@ export class WorkbenchService implements Service {
     });
   }
 
+  private async stopRun(session: OpenSession, run: Run | null): Promise<void> {
+    if (!run || session.run !== run) return;
+    run.stopped = true;
+    this.rejectApprovals(session);
+    await session.agent?.abort();
+  }
+
   private enqueue(
     session: OpenSession,
     text: string,
@@ -766,22 +789,30 @@ export class WorkbenchService implements Service {
   async message(
     caller: CallerContext,
     sessionId: string,
-    text: string,
+    body: MessageBody,
   ): Promise<{
     session_id: string;
     run_active: true;
     queued_message_id: string | null;
     cleared: QueuedMessage[];
   }> {
+    const { text, delivery } = body;
     const session = await this.session(sessionId);
     const requester = humanOf(caller);
-    if (session.run)
+    const active = session.run;
+    if (active) {
+      const cleared =
+        delivery === MessageDelivery.Replace ? this.clearQueue(session) : [];
+      const queued = this.enqueue(session, text, requester);
+      if (delivery === MessageDelivery.Replace)
+        void this.exclusive(session, () => this.stopRun(session, active));
       return {
         session_id: sessionId,
         run_active: true,
-        queued_message_id: this.enqueue(session, text, requester),
-        cleared: [],
+        queued_message_id: queued,
+        cleared,
       };
+    }
     const run = this.claim(session, true);
     try {
       await this.exclusive(session, () =>
@@ -829,15 +860,10 @@ export class WorkbenchService implements Service {
     cleared: QueuedMessage[];
   }> {
     const session = await this.session(sessionId);
-    const cleared = await this.exclusive(session, async () => {
-      const cleared = this.clearQueue(session);
-      const run = session.run;
-      this.rejectApprovals(session);
-      if (!run) return cleared;
-      await session.agent?.abort();
-      await run.settled;
-      return cleared;
-    });
+    const run = session.run;
+    const cleared = this.clearQueue(session);
+    await this.exclusive(session, () => this.stopRun(session, run));
+    if (run) await run.settled;
     return { session_id: sessionId, run_active: false, cleared };
   }
 
@@ -943,7 +969,7 @@ export class WorkbenchService implements Service {
     registry.register(
       workbenchOperations["session.message"],
       ({ params, body }, caller) =>
-        this.message(caller, params.session_id, body.text),
+        this.message(caller, params.session_id, body),
     );
     registry.register(
       workbenchOperations["session.approve"],

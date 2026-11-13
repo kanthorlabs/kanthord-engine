@@ -21,6 +21,8 @@ export const WORKBENCH_QUEUE_LIMIT = 10;
 export const WORKBENCH_QUEUED_MESSAGE_PREFIX = "workbench_queued_message";
 
 export const MessageDelivery = { Queue: "queue", Replace: "replace" } as const;
+export type MessageDelivery =
+  (typeof MessageDelivery)[keyof typeof MessageDelivery];
 
 export const WorkbenchErrorCode = {
   Stopped: "workbench.lifecycle.stopped",

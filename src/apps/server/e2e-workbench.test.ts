@@ -51,6 +51,7 @@ import { scriptedProvider } from "../../agent/test-support.ts";
 import { llmOperations } from "../../llm/contract.ts";
 import { createModelRuntime, resolveModel } from "../../llm/model-connector.ts";
 import {
+  MessageDelivery,
   WORKBENCH_CONFIGURATION_ENTRY,
   WORKBENCH_EXPIRY_REASON,
   WORKBENCH_QUEUE_LIMIT,
@@ -126,7 +127,10 @@ function failed<T>(
   assert.equal(result.error.error.code, code);
 }
 
-function scriptedFactory(script: FauxResponseStep[]): {
+function scriptedFactory(
+  script: FauxResponseStep[],
+  beforeOpen?: () => Promise<void>,
+): {
   factory: WorkbenchModelRuntimeFactory;
   provider: ReturnType<typeof scriptedProvider>;
 } {
@@ -141,6 +145,7 @@ function scriptedFactory(script: FauxResponseStep[]): {
   return {
     provider,
     factory: async (input) => {
+      await beforeOpen?.();
       const runtime = await createModelRuntime(await loadPi(), input);
       runtime.registerNativeProvider(provider.provider);
       return { runtime, model: resolveModel(runtime, input.configuration) };
@@ -154,8 +159,9 @@ async function workbenchFixture(
   stateDirectory?: string,
   agentDirectory = temporary(t),
   enabledAgents: readonly string[] = [AGENT],
+  beforeOpen?: () => Promise<void>,
 ) {
-  const scripted = scriptedFactory(script);
+  const scripted = scriptedFactory(script, beforeOpen);
   const fixture = await gatewayFixture(t, {
     stateDirectory,
     agentDirectory,
@@ -1739,13 +1745,39 @@ function untilAbort(text: string) {
     _context: unknown,
     options?: { signal?: AbortSignal | undefined },
   ) => {
-    await new Promise<void>((resolve) =>
+    await new Promise<void>((resolve) => {
+      if (options?.signal?.aborted) resolve();
       options?.signal?.addEventListener("abort", () => resolve(), {
         once: true,
-      }),
-    );
+      });
+    });
     return fauxAssistantMessage(text);
   };
+}
+
+function replaceMessage(fixture: Fixture, sessionId: string, text: string) {
+  return fixture.workbench["session.message"](
+    {
+      params: { session_id: sessionId },
+      query: {},
+      body: { text, delivery: MessageDelivery.Replace },
+    },
+    fixture.options,
+  );
+}
+
+function stopSession(fixture: Fixture, sessionId: string) {
+  return fixture.workbench["session.abort"](
+    { params: { session_id: sessionId }, query: {}, body: null },
+    fixture.options,
+  );
+}
+
+async function untilProviderCall(fixture: Fixture, signal: AbortSignal) {
+  while (fixture.provider.calls.length < SINGLE) {
+    signal.throwIfAborted();
+    await setImmediate();
+  }
 }
 
 async function queueMessage(
@@ -2017,13 +2049,183 @@ test("(invariant guard) a service stop with two queued items starts no further p
   completed(await message(fixture, sessionId, QUESTION));
   await queuedId(fixture, sessionId, FIRST_QUEUED);
   await queuedId(fixture, sessionId, SECOND_QUEUED);
-  while (fixture.provider.calls.length < SINGLE) {
-    t.signal.throwIfAborted();
-    await setImmediate();
-  }
+  await untilProviderCall(fixture, t.signal);
   await fixture.workbenchService.stop();
   for (let turn = 0; turn < SETTLE_TURNS; turn++) await setImmediate();
   assert.equal(fixture.provider.calls.length, SINGLE);
+});
+
+test("(happy path) a replace during a run clears the queue, aborts the provider and runs the replace text next", async (t) => {
+  const signals: (AbortSignal | undefined)[] = [];
+  const fixture = await workbenchFixture(t, [
+    (_context, options) => {
+      signals.push(options?.signal);
+      return untilAbort(ANSWER)(_context, options);
+    },
+    fauxAssistantMessage(SECOND_ANSWER),
+  ]);
+  const session = await createSession(fixture);
+  const sessionId = session.id;
+  completed(await message(fixture, sessionId, QUESTION));
+  await untilProviderCall(fixture, t.signal);
+  const firstId = await queuedId(fixture, sessionId, FIRST_QUEUED);
+  const secondId = await queuedId(fixture, sessionId, SECOND_QUEUED);
+  const replaced = completed(
+    await replaceMessage(fixture, sessionId, THIRD_ANSWER),
+  );
+  assert.deepEqual(replaced.cleared, [
+    { id: firstId, text: FIRST_QUEUED },
+    { id: secondId, text: SECOND_QUEUED },
+  ]);
+  assert.ok(replaced.queued_message_id);
+  const entries = await untilIdle(fixture, sessionId, t.signal);
+  assert.equal(signals[0]?.aborted, true);
+  assert.deepEqual(texts(entries, "user"), [QUESTION, THIRD_ANSWER]);
+  assert.equal(fixture.provider.calls.length, SINGLE + SINGLE);
+  assert.deepEqual((await snapshotOf(fixture, sessionId)).snapshot.queue, []);
+});
+
+test("(security) a replace during a pending approval blocks the call and never invokes the operation", async (t) => {
+  const { fixture, session, projectId } = await resumeFixture(t);
+  const sessionId = session.id;
+  completed(await message(fixture, sessionId, QUESTION));
+  await untilApproval(fixture, sessionId, t.signal);
+  completed(await replaceMessage(fixture, sessionId, FIRST_QUEUED));
+  const entries = await untilIdle(fixture, sessionId, t.signal);
+  assert.deepEqual(
+    toolResults(entries).map(({ toolName: name, isError }) => ({
+      name,
+      isError,
+    })),
+    [{ name: toolName(PROJECT_RESUME), isError: true }],
+  );
+  assert.deepEqual(texts(entries, "user"), [QUESTION, FIRST_QUEUED]);
+  assert.notEqual(await pausedAt(fixture, projectId), NO_PAUSE);
+});
+
+test("(invariant guard) two replaces in a row clear the first and only the second runs", async (t) => {
+  const fixture = await workbenchFixture(t, [
+    untilAbort(ANSWER),
+    fauxAssistantMessage(SECOND_ANSWER),
+    fauxAssistantMessage(THIRD_ANSWER),
+  ]);
+  const session = await createSession(fixture);
+  const sessionId = session.id;
+  completed(await message(fixture, sessionId, QUESTION));
+  await untilProviderCall(fixture, t.signal);
+  const [first, second] = await Promise.all([
+    replaceMessage(fixture, sessionId, FIRST_QUEUED),
+    replaceMessage(fixture, sessionId, SECOND_QUEUED),
+  ]);
+  const firstId = completed(first).queued_message_id;
+  assert.deepEqual(completed(first).cleared, []);
+  assert.deepEqual(completed(second).cleared, [
+    { id: firstId, text: FIRST_QUEUED },
+  ]);
+  const entries = await untilIdle(fixture, sessionId, t.signal);
+  assert.deepEqual(texts(entries, "user"), [QUESTION, SECOND_QUEUED]);
+});
+
+test("(happy path) a stop clears the queue, answers the cleared items and starts no further provider call", async (t) => {
+  const fixture = await workbenchFixture(t, [
+    untilAbort(ANSWER),
+    fauxAssistantMessage(SECOND_ANSWER),
+  ]);
+  const session = await createSession(fixture);
+  const sessionId = session.id;
+  completed(await message(fixture, sessionId, QUESTION));
+  const firstId = await queuedId(fixture, sessionId, FIRST_QUEUED);
+  const secondId = await queuedId(fixture, sessionId, SECOND_QUEUED);
+  await untilProviderCall(fixture, t.signal);
+  const stopped = completed(await stopSession(fixture, sessionId));
+  assert.deepEqual(stopped, {
+    session_id: sessionId,
+    run_active: false,
+    cleared: [
+      { id: firstId, text: FIRST_QUEUED },
+      { id: secondId, text: SECOND_QUEUED },
+    ],
+  });
+  for (let turn = 0; turn < SETTLE_TURNS; turn++) await setImmediate();
+  assert.equal(fixture.provider.calls.length, SINGLE);
+  const answer = await snapshotOf(fixture, sessionId);
+  assert.equal(answer.snapshot.run_active, false);
+  assert.deepEqual(answer.snapshot.queue, []);
+});
+
+test("(invariant guard) a stop while the first launch opens the agent starts no provider call", async (t) => {
+  const state = temporaryDirectory();
+  const first = await workbenchFixture(
+    t,
+    [fauxAssistantMessage(ANSWER)],
+    state,
+  );
+  const session = await createSession(first);
+  completed(await message(first, session.id, QUESTION));
+  await untilIdle(first, session.id, t.signal);
+  await first.workbenchService.stop();
+  const entered = Promise.withResolvers<void>();
+  const gate = Promise.withResolvers<void>();
+  const second = await workbenchFixture(
+    t,
+    [fauxAssistantMessage(SECOND_ANSWER)],
+    state,
+    undefined,
+    [AGENT],
+    async () => {
+      entered.resolve();
+      await gate.promise;
+    },
+  );
+  stopAfter(t, () => rmSync(state, { recursive: true, force: true }));
+  const sending = message(second, session.id, QUESTION);
+  await entered.promise;
+  const stopping = stopSession(second, session.id);
+  await setImmediate();
+  gate.resolve();
+  completed(await sending);
+  assert.deepEqual(completed(await stopping), {
+    session_id: session.id,
+    run_active: false,
+    cleared: [],
+  });
+  assert.equal(second.provider.calls.length, NO_QUEUED_MESSAGES);
+  assert.equal(
+    (await snapshotOf(second, session.id)).snapshot.run_active,
+    false,
+  );
+});
+
+test("(invariant guard) a replace right after a drained launch stops that run before its provider call and runs the replace text next", async (t) => {
+  const first = heldAnswer(ANSWER);
+  const fixture = await workbenchFixture(t, [
+    first.step,
+    fauxAssistantMessage(SECOND_ANSWER),
+  ]);
+  const session = await createSession(fixture);
+  const sessionId = session.id;
+  type Claimer = { claim(session: unknown, clearError: boolean): unknown };
+  const service = fixture.workbenchService as unknown as Claimer;
+  const claim = service.claim.bind(service);
+  let replacing: ReturnType<typeof replaceMessage> | null = null;
+  t.mock.method(service, "claim", (claimed: unknown, clearError: boolean) => {
+    const run = claim(claimed, clearError);
+    if (!clearError && !replacing)
+      replacing = replaceMessage(fixture, sessionId, SECOND_QUEUED);
+    return run;
+  });
+  completed(await message(fixture, sessionId, QUESTION));
+  await queuedId(fixture, sessionId, FIRST_QUEUED);
+  first.gate.resolve();
+  const entries = await untilIdle(fixture, sessionId, t.signal);
+  assert.ok(replacing);
+  assert.deepEqual(
+    completed(await (replacing as ReturnType<typeof replaceMessage>)).cleared,
+    [],
+  );
+  assert.equal(texts(entries, "user").at(-SINGLE), SECOND_QUEUED);
+  assert.equal(texts(entries, "assistant").at(-SINGLE), SECOND_ANSWER);
+  assert.equal(fixture.provider.calls.length, SINGLE + SINGLE);
 });
 
 const FAKE_KEY = ["AKIA", "KANTHORDCANARY01"].join("");
