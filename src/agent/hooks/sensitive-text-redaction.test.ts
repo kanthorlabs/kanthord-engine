@@ -730,9 +730,8 @@ test("a later approval holds the unchanged marker of an operation input", async 
       approve: async (call) => {
         if (call.toolName === OPERATION_TOOL)
           approvals.set(call.toolCallId, structuredClone(call.input));
-        return true;
+        return { allowed: true };
       },
-      reason: "refused",
     }) as (pi: ExtensionAPI) => void
   )(api);
   const fire = async (

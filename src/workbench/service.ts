@@ -44,7 +44,10 @@ import {
   type SensitiveTextRedaction,
 } from "../agent/hooks/sensitive-text-redaction.ts";
 import { pinnedLayers } from "../agent/pinned-layers.ts";
-import { toolApproval } from "../agent/hooks/tool-approval.ts";
+import {
+  toolApproval,
+  type ToolDecision,
+} from "../agent/hooks/tool-approval.ts";
 import { loadPi } from "../agent/pi.ts";
 import type { PromptPartAnswer, PromptTemplates } from "../agent/contract.ts";
 import { PromptConsumer, systemPrompt } from "../agent/prompt-render.ts";
@@ -59,12 +62,17 @@ import type {
   WorkbenchCredentialsFn,
 } from "../custody/contract.ts";
 import {
+  MessageDelivery,
   type PendingApproval,
+  type QueuedMessage,
   type RunSnapshot,
   type SessionEntry,
   type SessionEvents,
   WORKBENCH_CONFIGURATION_ENTRY,
   WORKBENCH_EVENTS_WAIT_MS,
+  WORKBENCH_EXPIRY_REASON,
+  WORKBENCH_QUEUE_LIMIT,
+  WORKBENCH_QUEUED_MESSAGE_PREFIX,
   WORKBENCH_REJECTION_REASON,
   WORKBENCH_SESSION_PREFIX,
   type WorkbenchConfiguration,
@@ -73,6 +81,7 @@ import {
   workbenchOperations,
   type WorkbenchSession,
 } from "./contract.ts";
+import type { WorkbenchConfig } from "./config.ts";
 import {
   builtinTools,
   type InvokeOperation,
@@ -98,6 +107,7 @@ export type WorkbenchModelRuntimeFactory = (
 
 export interface Dependencies {
   store: Store;
+  config: WorkbenchConfig;
   logger: Logger;
   stateDirectory: string;
   hostHome?: string;
@@ -142,6 +152,8 @@ interface OpenSession {
   queue: Promise<void>;
   run: Run | null;
   runError: string | null;
+  agentErrorStale: boolean;
+  queuedMessages: PendingMessage[];
   waiters: Set<() => void>;
   version: number;
   approvals: Map<string, Approval>;
@@ -151,24 +163,66 @@ interface OpenSession {
 
 interface Approval {
   approval: PendingApproval;
-  decide: (approved: boolean) => void;
+  decide: (decision: ToolDecision) => void;
+}
+
+interface PendingMessage extends QueuedMessage {
+  requester: HumanIdentity;
+}
+
+interface LaunchItem {
+  text: string;
+  requester: HumanIdentity;
+  context: Context;
+}
+
+interface MessageBody {
+  text: string;
+  delivery: MessageDelivery;
 }
 
 interface Run {
+  settle: () => void;
+  stopped: boolean;
   firstEntry: number;
   ended: boolean;
+  endingCall: string | null;
   settled: Promise<void>;
+}
+
+type AgentEvent = Parameters<Parameters<AgentSession["subscribe"]>[0]>[0];
+
+function requiresAbort(run: Run | null, event: AgentEvent): boolean {
+  if (!run) return false;
+  if (event.type === AGENT_START) return run.stopped;
+  return (
+    event.type === TOOL_EXECUTION_END && event.toolCallId === run.endingCall
+  );
 }
 
 const IDLE_SESSION = {
   disposeAgent: () => {},
   run: null,
   runError: null,
+  agentErrorStale: false,
   redaction: null,
   secrets: async () => [],
 } as const;
 const NOT_FOUND_INDEX = -1;
+const AGENT_START = "agent_start";
 const AGENT_END = "agent_end";
+const TOOL_EXECUTION_END = "tool_execution_end";
+const ALLOWED: ToolDecision = { allowed: true };
+const REJECTED: ToolDecision = {
+  allowed: false,
+  reason: WORKBENCH_REJECTION_REASON,
+  terminate: false,
+};
+const EXPIRED: ToolDecision = {
+  allowed: false,
+  reason: WORKBENCH_EXPIRY_REASON,
+  terminate: true,
+};
 
 const defaultModelRuntimeFactory: WorkbenchModelRuntimeFactory = async (
   input,
@@ -304,6 +358,7 @@ export class WorkbenchService implements Service {
       requester: undefined,
       agent: null,
       ...IDLE_SESSION,
+      queuedMessages: [],
       queue: Promise.resolve(),
       waiters: new Set(),
       version: 0,
@@ -408,7 +463,7 @@ export class WorkbenchService implements Service {
           toolApproval({
             approve: async (call, signal) => {
               const operation = mutations.get(call.toolName);
-              if (!operation) return true;
+              if (!operation) return ALLOWED;
               return this.approval(
                 session,
                 {
@@ -419,7 +474,6 @@ export class WorkbenchService implements Service {
                 signal,
               );
             },
-            reason: WORKBENCH_REJECTION_REASON,
           }),
         ],
         context,
@@ -432,6 +486,9 @@ export class WorkbenchService implements Service {
       session.redaction = opened.redaction;
       pinnedLayers().pinInference(agent, opened.systemPrompt);
       const unsubscribeEvents = agent.subscribe((event) => {
+        if (requiresAbort(session.run, event)) void session.agent?.abort();
+        if (event.type === AGENT_START && !session.run?.stopped)
+          session.agentErrorStale = false;
         if (event.type === AGENT_END && session.run) session.run.ended = true;
         this.notify(session);
       });
@@ -453,16 +510,22 @@ export class WorkbenchService implements Service {
     session: OpenSession,
     approval: PendingApproval,
     signal: AbortSignal | undefined,
-  ): Promise<boolean> {
-    const decision = Promise.withResolvers<boolean>();
-    const reject = () => decide(false);
-    const decide = (approved: boolean) => {
+  ): Promise<ToolDecision> {
+    if (signal?.aborted) return Promise.resolve(REJECTED);
+    const decision = Promise.withResolvers<ToolDecision>();
+    const reject = () => decide(REJECTED);
+    const expire = () => {
+      if (session.run) session.run.endingCall = approval.tool_call_id;
+      decide(EXPIRED);
+    };
+    const timer = setTimeout(expire, this.dependencies.config.approval_wait_ms);
+    const decide = (result: ToolDecision) => {
+      clearTimeout(timer);
       signal?.removeEventListener("abort", reject);
       session.approvals.delete(approval.tool_call_id);
-      decision.resolve(approved);
+      decision.resolve(result);
       this.notify(session);
     };
-    if (signal?.aborted) return Promise.resolve(false);
     signal?.addEventListener("abort", reject, { once: true });
     session.approvals.set(approval.tool_call_id, { approval, decide });
     this.notify(session);
@@ -470,7 +533,7 @@ export class WorkbenchService implements Service {
   }
 
   private rejectApprovals(session: OpenSession): void {
-    for (const { decide } of [...session.approvals.values()]) decide(false);
+    for (const { decide } of [...session.approvals.values()]) decide(REJECTED);
   }
 
   approve(
@@ -486,7 +549,7 @@ export class WorkbenchService implements Service {
         "The workbench session holds no pending call with this identity.",
         { session_id: sessionId, tool_call_id: toolCallId },
       );
-    pending.decide(approved);
+    pending.decide(approved ? ALLOWED : REJECTED);
     return { session_id: sessionId, tool_call_id: toolCallId, approved };
   }
 
@@ -587,7 +650,11 @@ export class WorkbenchService implements Service {
       pending_tool_calls: state ? [...state.pendingToolCalls] : [],
       pending_approval: this.pendingApprovalOf(session),
       run_active: this.runActive(session),
-      error_message: session.runError ?? state?.errorMessage ?? null,
+      queue: session.queuedMessages.map(({ id, text }) => ({ id, text })),
+      error_message:
+        session.runError ??
+        (session.agentErrorStale ? undefined : state?.errorMessage) ??
+        null,
     };
   }
 
@@ -629,65 +696,190 @@ export class WorkbenchService implements Service {
     }
   }
 
-  async message(
-    caller: CallerContext,
-    sessionId: string,
-    text: string,
-  ): Promise<{ session_id: string; run_active: true }> {
-    const session = await this.session(sessionId);
-    if (session.run?.ended) await session.run.settled;
-    this.requireIdle(session);
+  private claim(session: OpenSession, clearError: boolean): Run {
     const completion = Promise.withResolvers<void>();
-    const run: Run = {
-      firstEntry: session.manager.getEntries().length,
-      ended: false,
-      settled: completion.promise,
-    };
-    session.run = run;
-    session.runError = null;
-    this.notify(session);
+    let settled = false;
     const settle = () => {
+      if (settled) return;
+      settled = true;
+      if (!run.stopped)
+        session.runError ??= session.agent?.state.errorMessage ?? null;
       if (session.run === run) session.run = null;
       completion.resolve();
       this.notify(session);
+      this.startNext(session);
     };
-    try {
-      await this.exclusive(session, async () => {
-        session.requester = humanOf(caller);
-        const resolved = this.dependencies.store.transaction((tx) =>
-          this.resolve(tx, session.agentName, session.configuration),
-        );
-        if (!session.agent)
-          await this.openAgent(session, resolved, caller.context);
-        assert.ok(session.agent);
-        void session.agent
-          .prompt(text, { expandPromptTemplates: false })
-          .catch((error: unknown) => {
+    const run: Run = {
+      settle,
+      firstEntry: session.manager.getEntries().length,
+      ended: false,
+      endingCall: null,
+      stopped: false,
+      settled: completion.promise,
+    };
+    session.run = run;
+    if (clearError) session.runError = null;
+    this.notify(session);
+    return run;
+  }
+
+  private async launch(
+    session: OpenSession,
+    run: Run,
+    item: LaunchItem,
+  ): Promise<void> {
+    if (run.stopped) return run.settle();
+    session.requester = item.requester;
+    const resolved = this.dependencies.store.transaction((tx) =>
+      this.resolve(tx, session.agentName, session.configuration),
+    );
+    if (!session.agent) await this.openAgent(session, resolved, item.context);
+    assert.ok(session.agent);
+    void session.agent
+      .prompt(item.text, { expandPromptTemplates: false })
+      .catch((error: unknown) => {
+        session.runError =
+          error instanceof Error ? error.message : String(error);
+      })
+      .finally(run.settle);
+  }
+
+  private startNext(session: OpenSession): void {
+    if (this.shutdown.signal.aborted) {
+      session.queuedMessages.length = 0;
+      return;
+    }
+    if (session.run) return;
+    const item = session.queuedMessages.shift();
+    if (!item) return;
+    const run = this.claim(session, false);
+    this.exclusive(session, () =>
+      this.launch(session, run, { ...item, context: this.shutdown }),
+    ).catch((error: unknown) => {
+      session.runError = error instanceof Error ? error.message : String(error);
+      run.settle();
+    });
+  }
+
+  private async stopRun(session: OpenSession, run: Run | null): Promise<void> {
+    if (!run || session.run !== run) return;
+    run.stopped = true;
+    session.agentErrorStale = true;
+    this.rejectApprovals(session);
+    await session.agent?.abort();
+  }
+
+  private enqueue(
+    session: OpenSession,
+    text: string,
+    requester: HumanIdentity,
+  ): string {
+    if (session.queuedMessages.length >= WORKBENCH_QUEUE_LIMIT)
+      throw new OperationError(
+        HttpStatus.Conflict,
+        WorkbenchErrorCode.QueueFull,
+        "The workbench session holds the maximum number of queued messages.",
+        { session_id: session.id, limit: WORKBENCH_QUEUE_LIMIT },
+      );
+    const id = createIdentity(WORKBENCH_QUEUED_MESSAGE_PREFIX);
+    session.queuedMessages.push({ id, text, requester });
+    this.notify(session);
+    return id;
+  }
+
+  private clearQueue(session: OpenSession): QueuedMessage[] {
+    const cleared = session.queuedMessages
+      .splice(0)
+      .map(({ id, text }) => ({ id, text }));
+    if (cleared.length) this.notify(session);
+    return cleared;
+  }
+
+  async message(
+    caller: CallerContext,
+    sessionId: string,
+    body: MessageBody,
+  ): Promise<{
+    session_id: string;
+    run_active: true;
+    queued_message_id: string | null;
+    cleared: QueuedMessage[];
+  }> {
+    const { text, delivery } = body;
+    const session = await this.session(sessionId);
+    const requester = humanOf(caller);
+    const active = session.run;
+    if (active) {
+      const cleared =
+        delivery === MessageDelivery.Replace ? this.clearQueue(session) : [];
+      const queued = this.enqueue(session, text, requester);
+      if (delivery === MessageDelivery.Replace)
+        this.exclusive(session, () => this.stopRun(session, active)).catch(
+          (error: unknown) => {
             session.runError =
               error instanceof Error ? error.message : String(error);
-          })
-          .finally(settle);
-      });
+            this.notify(session);
+          },
+        );
+      return {
+        session_id: sessionId,
+        run_active: true,
+        queued_message_id: queued,
+        cleared,
+      };
+    }
+    const run = this.claim(session, true);
+    try {
+      await this.exclusive(session, () =>
+        this.launch(session, run, {
+          text,
+          requester,
+          context: caller.context,
+        }),
+      );
     } catch (error) {
-      settle();
+      run.settle();
       throw error;
     }
-    return { session_id: sessionId, run_active: true };
+    return {
+      session_id: sessionId,
+      run_active: true,
+      queued_message_id: null,
+      cleared: [],
+    };
+  }
+
+  async removeQueued(
+    sessionId: string,
+    queuedMessageId: string,
+  ): Promise<{ session_id: string; queued_message_id: string }> {
+    const session = await this.session(sessionId);
+    const index = session.queuedMessages.findIndex(
+      ({ id }) => id === queuedMessageId,
+    );
+    if (index === NOT_FOUND_INDEX)
+      throw new OperationError(
+        HttpStatus.NotFound,
+        WorkbenchErrorCode.QueuedMessageNotFound,
+        "The workbench session holds no queued message with this identity.",
+        { session_id: sessionId, queued_message_id: queuedMessageId },
+      );
+    session.queuedMessages.splice(index, 1);
+    this.notify(session);
+    return { session_id: sessionId, queued_message_id: queuedMessageId };
   }
 
   async abort(sessionId: string): Promise<{
     session_id: string;
     run_active: false;
+    cleared: QueuedMessage[];
   }> {
     const session = await this.session(sessionId);
-    await this.exclusive(session, async () => {
-      const run = session.run;
-      this.rejectApprovals(session);
-      if (!run) return;
-      await session.agent?.abort();
-      await run.settled;
-    });
-    return { session_id: sessionId, run_active: false };
+    const run = session.run;
+    const cleared = this.clearQueue(session);
+    await this.exclusive(session, () => this.stopRun(session, run));
+    if (run) await run.settled;
+    return { session_id: sessionId, run_active: false, cleared };
   }
 
   async list(agentName: string | undefined) {
@@ -724,6 +916,7 @@ export class WorkbenchService implements Service {
       requester: humanOf(caller),
       agent: null,
       ...IDLE_SESSION,
+      queuedMessages: [],
       queue: Promise.resolve(),
       waiters: new Set(),
       version: 0,
@@ -791,7 +984,7 @@ export class WorkbenchService implements Service {
     registry.register(
       workbenchOperations["session.message"],
       ({ params, body }, caller) =>
-        this.message(caller, params.session_id, body.text),
+        this.message(caller, params.session_id, body),
     );
     registry.register(
       workbenchOperations["session.approve"],
@@ -800,6 +993,11 @@ export class WorkbenchService implements Service {
     );
     registry.register(workbenchOperations["session.abort"], ({ params }) =>
       this.abort(params.session_id),
+    );
+    registry.register(
+      workbenchOperations["session.queue.remove"],
+      ({ params }) =>
+        this.removeQueued(params.session_id, params.queued_message_id),
     );
     registry.register(
       workbenchOperations["session.events"],
