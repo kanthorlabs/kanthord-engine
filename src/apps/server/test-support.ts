@@ -2068,6 +2068,7 @@ interface FakeS3State {
   versions: Map<string, FakeS3Object[]>;
   calls: FakeS3Call[];
   closed: FakeS3Call[];
+  ranges: string[];
   overrun: boolean;
   nextFailure: number | null;
   losses: number;
@@ -2195,7 +2196,9 @@ function readS3Object(
         version: target.version,
       });
   });
-  const range = S3_RANGE_PATTERN.exec(request.headers[S3_RANGE_HEADER] ?? "");
+  const rangeHeader = request.headers[S3_RANGE_HEADER];
+  if (rangeHeader !== undefined) state.ranges.push(rangeHeader);
+  const range = S3_RANGE_PATTERN.exec(rangeHeader ?? "");
   if (!range)
     return response.writeHead(HttpStatus.OK, headers).end(found.bytes);
   if (state.overrun) {
@@ -2273,6 +2276,7 @@ export async function fakeS3(t: TestContext) {
     versions: new Map(),
     calls: [],
     closed: [],
+    ranges: [],
     overrun: false,
     nextFailure: null,
     losses: ZERO_LOSSES,
@@ -2303,6 +2307,7 @@ export async function fakeS3(t: TestContext) {
     bucket: S3_BUCKET,
     calls: state.calls as readonly FakeS3Call[],
     closed: state.closed as readonly FakeS3Call[],
+    ranges: state.ranges as readonly string[],
     objects(key: string): readonly FakeS3Object[] {
       return state.versions.get(key) ?? [];
     },

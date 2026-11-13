@@ -13,6 +13,9 @@ const OBJECT_RANGE_TEXT = "234";
 const OBJECT_TAIL_QUERY = "?offset=8";
 const OBJECT_TAIL_TEXT = "89";
 const STORAGE_FAILURE_STATUS = 500;
+const STORAGE_FAILURE_MESSAGE = "The storage read failed.";
+const NO_STORE = "no-store";
+const OBJECT_RANGE_HEADER = "bytes=2-4";
 const SIGNED_QUERY_MARKER = "X-Amz-";
 const PRODUCED_TEXT = "ok";
 const PRODUCED_SIZE = PRODUCED_TEXT.length;
@@ -75,6 +78,7 @@ test(
         whole.headers.get("content-disposition"),
         `attachment; filename="${h.producedId}.txt"`,
       );
+      assert.equal(whole.headers.get("cache-control"), NO_STORE);
       assert.equal(whole.headers.get("x-evidence-media-type"), TEXT_MEDIA_TYPE);
       assert.equal(whole.headers.get("x-evidence-size"), String(PRODUCED_SIZE));
       const ranged = await h.download(h.producedId, RANGE_QUERY);
@@ -120,6 +124,7 @@ test(
         const ranged = await h.download(h.objectId, OBJECT_RANGE_QUERY);
         assert.equal(ranged.status, HttpStatus.OK);
         assert.equal(await ranged.text(), OBJECT_RANGE_TEXT);
+        assert.ok(h.s3.ranges.includes(OBJECT_RANGE_HEADER));
         const tail = await h.download(h.objectId, OBJECT_TAIL_QUERY);
         assert.equal(await tail.text(), OBJECT_TAIL_TEXT);
       },
@@ -131,11 +136,14 @@ test(
         const response = await h.download(h.objectId);
         assert.equal(response.status, HttpStatus.BadGateway);
         const text = await response.text();
-        const body = JSON.parse(text) as { error: { code: string } };
+        const body = JSON.parse(text) as {
+          error: { code: string; message: string };
+        };
         assert.equal(
           body.error.code,
           MissionErrorCode.EvidenceContentUnavailable,
         );
+        assert.equal(body.error.message, STORAGE_FAILURE_MESSAGE);
         assert.ok(!text.includes(SIGNED_QUERY_MARKER));
         for (const line of h.logs)
           assert.ok(!line.includes(SIGNED_QUERY_MARKER));
