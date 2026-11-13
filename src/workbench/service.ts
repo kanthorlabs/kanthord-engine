@@ -73,6 +73,7 @@ import {
   workbenchOperations,
   type WorkbenchSession,
 } from "./contract.ts";
+import type { WorkbenchConfig } from "./config.ts";
 import {
   builtinTools,
   type InvokeOperation,
@@ -98,6 +99,7 @@ export type WorkbenchModelRuntimeFactory = (
 
 export interface Dependencies {
   store: Store;
+  config: WorkbenchConfig;
   logger: Logger;
   stateDirectory: string;
   hostHome?: string;

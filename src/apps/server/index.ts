@@ -1362,6 +1362,7 @@ export function composeServices(options: ComposeServicesOptions) {
   });
   const workbench = new WorkbenchService({
     store: options.store,
+    config: options.config.workbench,
     logger: options.logger,
     stateDirectory: options.stateDirectory,
     agentPrompt: {
