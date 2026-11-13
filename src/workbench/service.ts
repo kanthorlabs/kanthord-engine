@@ -62,12 +62,14 @@ import type {
   WorkbenchCredentialsFn,
 } from "../custody/contract.ts";
 import {
+  ActionOutcome,
   MessageDelivery,
   type PendingApproval,
   type QueuedMessage,
   type RunSnapshot,
   type SessionEntry,
   type SessionEvents,
+  WORKBENCH_ACTION_RESULT_ENTRY,
   WORKBENCH_CONFIGURATION_ENTRY,
   WORKBENCH_EVENTS_WAIT_MS,
   WORKBENCH_EXPIRY_REASON,
@@ -97,6 +99,7 @@ import {
   lastModel,
   lastThinkingLevel,
   listSessions,
+  recordOf,
   resumeCommand,
   type SessionPlace,
   sessionPlace,
@@ -202,6 +205,19 @@ function requiresAbort(run: Run | null, event: AgentEvent): boolean {
     event.type === TOOL_EXECUTION_END && event.toolCallId === run.endingCall
   );
 }
+
+interface ActionReportBody {
+  outcome: ActionOutcome;
+  error_code: string | null;
+}
+
+interface ActionReportResult {
+  session_id: string;
+  tool_call_id: string;
+  outcome: ActionOutcome;
+}
+
+const CUSTOM_MESSAGE_ENTRY = "custom_message";
 
 const IDLE_SESSION = {
   disposeAgent: () => {},
@@ -569,6 +585,77 @@ export class WorkbenchService implements Service {
       );
     pending.decide(approved ? ALLOWED : REJECTED);
     return { session_id: sessionId, tool_call_id: toolCallId, approved };
+  }
+
+  async actionReport(
+    sessionId: string,
+    toolCallId: string,
+    body: ActionReportBody,
+  ): Promise<ActionReportResult> {
+    const session = await this.session(sessionId);
+    const entries = this.entries(session.manager);
+    const offered = entries
+      .map(recordOf)
+      .find((record) => record?.tool_call_id === toolCallId);
+    if (!offered)
+      throw new OperationError(
+        HttpStatus.NotFound,
+        WorkbenchErrorCode.ActionNotFound,
+        "The workbench session holds no action card with this identity.",
+        { session_id: sessionId, tool_call_id: toolCallId },
+      );
+    const settled = entries.some((entry) => {
+      const details = entry.details as
+        { tool_call_id?: unknown; outcome?: unknown } | undefined;
+      return (
+        entry.type === CUSTOM_MESSAGE_ENTRY &&
+        entry.customType === WORKBENCH_ACTION_RESULT_ENTRY &&
+        details?.tool_call_id === toolCallId &&
+        details.outcome === ActionOutcome.Done
+      );
+    });
+    if (settled)
+      throw new OperationError(
+        HttpStatus.Conflict,
+        WorkbenchErrorCode.ActionSettled,
+        "The action card of this identity already has a done result.",
+        { session_id: sessionId, tool_call_id: toolCallId },
+      );
+    const failure =
+      body.outcome === ActionOutcome.Failed
+        ? `failed${body.error_code === null ? "" : `, ${body.error_code}`}`
+        : ActionOutcome.Done;
+    const text = `The owner ran ${offered.operation_id} on ${offered.target_id}. Result: ${failure}.`;
+    const details = {
+      tool_call_id: toolCallId,
+      operation_id: offered.operation_id,
+      target_id: offered.target_id,
+      outcome: body.outcome,
+      error_code: body.error_code,
+    };
+    if (session.agent)
+      await session.agent.sendCustomMessage(
+        {
+          customType: WORKBENCH_ACTION_RESULT_ENTRY,
+          content: text,
+          display: false,
+          details,
+        },
+        { triggerTurn: false },
+      );
+    else
+      session.manager.appendCustomMessageEntry(
+        WORKBENCH_ACTION_RESULT_ENTRY,
+        text,
+        false,
+        details,
+      );
+    this.notify(session);
+    return {
+      session_id: sessionId,
+      tool_call_id: toolCallId,
+      outcome: body.outcome,
+    };
   }
 
   private closeAgent(session: OpenSession): void {
@@ -1009,6 +1096,11 @@ export class WorkbenchService implements Service {
       workbenchOperations["session.approve"],
       ({ params, body }) =>
         this.approve(params.session_id, body.tool_call_id, body.approved),
+    );
+    registry.register(
+      workbenchOperations["session.action.report"],
+      ({ params, body }) =>
+        this.actionReport(params.session_id, params.tool_call_id, body),
     );
     registry.register(workbenchOperations["session.abort"], ({ params }) =>
       this.abort(params.session_id),

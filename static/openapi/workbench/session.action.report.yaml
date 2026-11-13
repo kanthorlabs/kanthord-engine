@@ -1,0 +1,132 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: workbench.session.action.report
+    tags:
+      - workbench
+    description: Record the outcome of an action card that the owner ran. It runs no act.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/workbench.session.action.report.Input/properties/pa\
+            rams/properties/session_id"
+      - name: tool_call_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/workbench.session.action.report.Input/properties/pa\
+            rams/properties/tool_call_id"
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/workbench.session.action.report.Input/properties/bo\
+              dy"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/workbench.session.action.report.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    workbench.session.action.report.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            session_id:
+              type: string
+              minLength: 44
+              maxLength: 44
+              pattern: ^workbench_session_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: workbench_session_ followed by a canonical 26-character uppercase
+                ULID.
+            tool_call_id:
+              type: string
+              minLength: 1
+          required:
+            - session_id
+            - tool_call_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            outcome:
+              type: string
+              enum:
+                - done
+                - failed
+            error_code:
+              anyOf:
+                - type: string
+                  maxLength: 128
+                  pattern: ^[a-z0-9_]+(\.[a-z0-9_]+)+$
+                - type: "null"
+          required:
+            - outcome
+            - error_code
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    workbench.session.action.report.Output:
+      type: object
+      properties:
+        session_id:
+          type: string
+          minLength: 44
+          maxLength: 44
+          pattern: ^workbench_session_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: workbench_session_ followed by a canonical 26-character uppercase
+            ULID.
+        tool_call_id:
+          type: string
+        outcome:
+          type: string
+          enum:
+            - done
+            - failed
+      required:
+        - session_id
+        - tool_call_id
+        - outcome
+      additionalProperties: false

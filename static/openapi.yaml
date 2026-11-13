@@ -404,6 +404,8 @@ paths:
     $ref: ./openapi/tracking/trace.list.yaml#/pathItem
   /api/workbench/session/{session_id}/abort:
     $ref: ./openapi/workbench/session.abort.yaml#/pathItem
+  /api/workbench/session/{session_id}/action/{tool_call_id}/report:
+    $ref: ./openapi/workbench/session.action.report.yaml#/pathItem
   /api/workbench/session/{session_id}/approve:
     $ref: ./openapi/workbench/session.approve.yaml#/pathItem
   /api/workbench/session/{session_id}/configuration:
