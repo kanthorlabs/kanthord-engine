@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
+import { setImmediate } from "node:timers/promises";
 import {
   fauxAssistantMessage,
   type FauxResponseStep,
@@ -50,6 +51,7 @@ import { llmOperations } from "../../llm/contract.ts";
 import { createModelRuntime, resolveModel } from "../../llm/model-connector.ts";
 import {
   WORKBENCH_CONFIGURATION_ENTRY,
+  WORKBENCH_EXPIRY_REASON,
   WORKBENCH_REJECTION_REASON,
   type WorkbenchConfiguration,
   WorkbenchErrorCode,
@@ -1083,7 +1085,7 @@ async function createNode(fixture: Fixture): Promise<string> {
   return created.revisions[0]!.node_id;
 }
 
-async function resumeFixture(t: TestContext) {
+async function resumeFixture(t: TestContext, stateDirectory?: string) {
   const target = { projectId: "" };
   const fixture = await workbenchFixture(
     t,
@@ -1092,7 +1094,7 @@ async function resumeFixture(t: TestContext) {
         toolCall(toolName(PROJECT_RESUME), resumeToolInput(target.projectId)),
       fauxAssistantMessage(ANSWER),
     ],
-    undefined,
+    stateDirectory,
     undefined,
     [OPS],
   );
@@ -1490,6 +1492,221 @@ test("an abort rejects every pending approval", async (t) => {
     WorkbenchErrorCode.ApprovalNotFound,
   );
   assert.notEqual(await pausedAt(fixture, projectId), NO_PAUSE);
+});
+
+const SETTLE_TURNS = 20;
+const ASSISTANT_ROLE = "assistant";
+
+function enableTimers(t: TestContext): void {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+}
+
+async function snapshotOf(fixture: Fixture, sessionId: string) {
+  return completed(
+    await fixture.workbench["session.events"](
+      { params: { session_id: sessionId }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+}
+
+async function decide(
+  fixture: Fixture,
+  sessionId: string,
+  toolCallId: string,
+  approved: boolean,
+) {
+  return fixture.workbench["session.approve"](
+    {
+      params: { session_id: sessionId },
+      query: {},
+      body: { tool_call_id: toolCallId, approved },
+    },
+    fixture.options,
+  );
+}
+
+test("(happy path) a card with no decision expires, returns the expiry reason and ends the run", async (t) => {
+  enableTimers(t);
+  const { fixture, session, projectId } = await resumeFixture(t);
+  const sessionId = session.id;
+  completed(await message(fixture, sessionId, QUESTION));
+  const pending = await untilApproval(fixture, sessionId, t.signal);
+  t.mock.timers.tick(fixture.config.workbench.approval_wait_ms);
+  const entries = await untilIdle(fixture, sessionId, t.signal);
+  assert.deepEqual(toolResults(entries), [
+    {
+      toolName: toolName(PROJECT_RESUME),
+      isError: true,
+      text: WORKBENCH_EXPIRY_REASON,
+    },
+  ]);
+  assert.notEqual(await pausedAt(fixture, projectId), NO_PAUSE);
+  const answer = await snapshotOf(fixture, sessionId);
+  assert.equal(answer.snapshot.pending_approval, null);
+  assert.equal(
+    (await listedSession(fixture, sessionId))?.pending_approval,
+    null,
+  );
+  assert.equal(fixture.provider.calls.length, SINGLE);
+  failed(
+    await decide(fixture, sessionId, pending.tool_call_id, true),
+    HttpStatus.NotFound,
+    WorkbenchErrorCode.ApprovalNotFound,
+  );
+});
+
+test("(invariant guard) an approve one millisecond before the expiry runs the call and a later tick changes nothing", async (t) => {
+  enableTimers(t);
+  const { fixture, session, projectId } = await resumeFixture(t);
+  const sessionId = session.id;
+  const wait = fixture.config.workbench.approval_wait_ms;
+  completed(await message(fixture, sessionId, QUESTION));
+  const pending = await untilApproval(fixture, sessionId, t.signal);
+  t.mock.timers.tick(wait - SINGLE);
+  assert.equal(
+    (await snapshotOf(fixture, sessionId)).snapshot.pending_approval
+      ?.tool_call_id,
+    pending.tool_call_id,
+  );
+  completed(await decide(fixture, sessionId, pending.tool_call_id, true));
+  const entries = await untilIdle(fixture, sessionId, t.signal);
+  assert.deepEqual(
+    toolResults(entries).map(({ isError }) => isError),
+    [false],
+  );
+  assert.equal(await pausedAt(fixture, projectId), NO_PAUSE);
+  const before = await snapshotOf(fixture, sessionId);
+  t.mock.timers.tick(wait);
+  await setImmediate();
+  const after = await snapshotOf(fixture, sessionId);
+  assert.equal(after.version, before.version);
+  assert.equal(after.snapshot.run_active, false);
+});
+
+test("(invariant guard) an abort and then a full tick leave the version unchanged", async (t) => {
+  enableTimers(t);
+  const { fixture, session } = await resumeFixture(t);
+  const sessionId = session.id;
+  completed(await message(fixture, sessionId, QUESTION));
+  await untilApproval(fixture, sessionId, t.signal);
+  completed(
+    await fixture.workbench["session.abort"](
+      { params: { session_id: sessionId }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  const before = await snapshotOf(fixture, sessionId);
+  t.mock.timers.tick(fixture.config.workbench.approval_wait_ms);
+  await setImmediate();
+  assert.equal((await snapshotOf(fixture, sessionId)).version, before.version);
+});
+
+test("(security) the expiry of the first mutation of a batch ends the run before the second card and any provider call", async (t) => {
+  enableTimers(t);
+  const target = { projectId: "" };
+  const fixture = await workbenchFixture(
+    t,
+    [
+      () =>
+        fauxAssistantMessage(
+          [
+            fauxToolCall(
+              toolName(PROJECT_RESUME),
+              resumeToolInput(target.projectId),
+            ),
+            fauxToolCall(
+              toolName(PROJECT_RESUME),
+              resumeToolInput(target.projectId),
+            ),
+          ],
+          { stopReason: TOOL_USE },
+        ),
+      fauxAssistantMessage(ANSWER),
+    ],
+    undefined,
+    undefined,
+    [OPS],
+  );
+  target.projectId = await pausedProject(fixture);
+  const session = await createSession(fixture, undefined, OPS);
+  completed(await message(fixture, session.id, QUESTION));
+  await untilApproval(fixture, session.id, t.signal);
+  t.mock.timers.tick(fixture.config.workbench.approval_wait_ms);
+  const entries = await untilIdle(fixture, session.id, t.signal);
+  assert.deepEqual(
+    toolResults(entries).map(({ isError, text }) => ({ isError, text })),
+    [{ isError: true, text: WORKBENCH_EXPIRY_REASON }],
+  );
+  assert.equal(
+    (await snapshotOf(fixture, session.id)).snapshot.pending_approval,
+    null,
+  );
+  assert.notEqual(await pausedAt(fixture, target.projectId), NO_PAUSE);
+  assert.equal(fixture.provider.calls.length, SINGLE);
+});
+
+test("(invariant guard) a service stop with a pending card and then a full tick throws nothing and notifies nothing", async (t) => {
+  enableTimers(t);
+  const { fixture, session } = await resumeFixture(t);
+  const sessionId = session.id;
+  completed(await message(fixture, sessionId, QUESTION));
+  await untilApproval(fixture, sessionId, t.signal);
+  const notify = t.mock.method(
+    fixture.workbenchService as unknown as { notify(): void },
+    "notify",
+  );
+  await fixture.workbenchService.stop();
+  for (let turn = 0; turn < SETTLE_TURNS; turn++) await setImmediate();
+  const notified = notify.mock.callCount();
+  t.mock.timers.tick(fixture.config.workbench.approval_wait_ms);
+  await setImmediate();
+  assert.equal(notify.mock.callCount(), notified);
+});
+
+test("(invariant guard) a pending card at the service stop leaves a tool call with no tool result and the next run completes", async (t) => {
+  enableTimers(t);
+  const state = temporaryDirectory();
+  const first = await resumeFixture(t, state);
+  completed(await message(first.fixture, first.session.id, QUESTION));
+  await untilApproval(first.fixture, first.session.id, t.signal);
+  await first.fixture.workbenchService.stop();
+  const second = await workbenchFixture(
+    t,
+    [fauxAssistantMessage(ANSWER)],
+    state,
+    undefined,
+    [OPS],
+  );
+  stopAfter(t, () => rmSync(state, { recursive: true, force: true }));
+  const resumed = completed(
+    await second.workbench["session.get"](
+      { params: { session_id: first.session.id }, query: {}, body: null },
+      second.options,
+    ),
+  );
+  assert.deepEqual(toolResults(resumed.entries), []);
+  assert.ok(JSON.stringify(resumed.entries).includes(toolName(PROJECT_RESUME)));
+  completed(await message(second, first.session.id, FIRST_MESSAGE));
+  const entries = await untilIdle(
+    second,
+    first.session.id,
+    t.signal,
+    resumed.entries.at(-1)!.id,
+  );
+  assert.deepEqual(texts(entries, "assistant"), [ANSWER]);
+  const roles = second.provider.calls[0]!.messages as {
+    role: string;
+    content: unknown;
+  }[];
+  assert.ok(
+    roles.some(
+      ({ role, content }) =>
+        role === ASSISTANT_ROLE &&
+        JSON.stringify(content).includes('"type":"toolCall"'),
+    ),
+  );
+  assert.ok(roles.every(({ role }) => role !== TOOL_RESULT));
 });
 
 const FAKE_KEY = ["AKIA", "KANTHORDCANARY01"].join("");

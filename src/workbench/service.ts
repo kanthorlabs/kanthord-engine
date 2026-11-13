@@ -44,7 +44,10 @@ import {
   type SensitiveTextRedaction,
 } from "../agent/hooks/sensitive-text-redaction.ts";
 import { pinnedLayers } from "../agent/pinned-layers.ts";
-import { toolApproval } from "../agent/hooks/tool-approval.ts";
+import {
+  toolApproval,
+  type ToolDecision,
+} from "../agent/hooks/tool-approval.ts";
 import { loadPi } from "../agent/pi.ts";
 import type { PromptPartAnswer, PromptTemplates } from "../agent/contract.ts";
 import { PromptConsumer, systemPrompt } from "../agent/prompt-render.ts";
@@ -65,6 +68,7 @@ import {
   type SessionEvents,
   WORKBENCH_CONFIGURATION_ENTRY,
   WORKBENCH_EVENTS_WAIT_MS,
+  WORKBENCH_EXPIRY_REASON,
   WORKBENCH_REJECTION_REASON,
   WORKBENCH_SESSION_PREFIX,
   type WorkbenchConfiguration,
@@ -153,12 +157,13 @@ interface OpenSession {
 
 interface Approval {
   approval: PendingApproval;
-  decide: (approved: boolean) => void;
+  decide: (decision: ToolDecision) => void;
 }
 
 interface Run {
   firstEntry: number;
   ended: boolean;
+  endingCall: string | null;
   settled: Promise<void>;
 }
 
@@ -171,6 +176,18 @@ const IDLE_SESSION = {
 } as const;
 const NOT_FOUND_INDEX = -1;
 const AGENT_END = "agent_end";
+const TOOL_EXECUTION_END = "tool_execution_end";
+const ALLOWED: ToolDecision = { allowed: true };
+const REJECTED: ToolDecision = {
+  allowed: false,
+  reason: WORKBENCH_REJECTION_REASON,
+  terminate: false,
+};
+const EXPIRED: ToolDecision = {
+  allowed: false,
+  reason: WORKBENCH_EXPIRY_REASON,
+  terminate: true,
+};
 
 const defaultModelRuntimeFactory: WorkbenchModelRuntimeFactory = async (
   input,
@@ -410,7 +427,7 @@ export class WorkbenchService implements Service {
           toolApproval({
             approve: async (call, signal) => {
               const operation = mutations.get(call.toolName);
-              if (!operation) return true;
+              if (!operation) return ALLOWED;
               return this.approval(
                 session,
                 {
@@ -421,7 +438,6 @@ export class WorkbenchService implements Service {
                 signal,
               );
             },
-            reason: WORKBENCH_REJECTION_REASON,
           }),
         ],
         context,
@@ -435,6 +451,11 @@ export class WorkbenchService implements Service {
       pinnedLayers().pinInference(agent, opened.systemPrompt);
       const unsubscribeEvents = agent.subscribe((event) => {
         if (event.type === AGENT_END && session.run) session.run.ended = true;
+        if (
+          event.type === TOOL_EXECUTION_END &&
+          event.toolCallId === session.run?.endingCall
+        )
+          void session.agent?.abort();
         this.notify(session);
       });
       const running = agent;
@@ -455,16 +476,22 @@ export class WorkbenchService implements Service {
     session: OpenSession,
     approval: PendingApproval,
     signal: AbortSignal | undefined,
-  ): Promise<boolean> {
-    const decision = Promise.withResolvers<boolean>();
-    const reject = () => decide(false);
-    const decide = (approved: boolean) => {
+  ): Promise<ToolDecision> {
+    if (signal?.aborted) return Promise.resolve(REJECTED);
+    const decision = Promise.withResolvers<ToolDecision>();
+    const reject = () => decide(REJECTED);
+    const expire = () => {
+      if (session.run) session.run.endingCall = approval.tool_call_id;
+      decide(EXPIRED);
+    };
+    const timer = setTimeout(expire, this.dependencies.config.approval_wait_ms);
+    const decide = (result: ToolDecision) => {
+      clearTimeout(timer);
       signal?.removeEventListener("abort", reject);
       session.approvals.delete(approval.tool_call_id);
-      decision.resolve(approved);
+      decision.resolve(result);
       this.notify(session);
     };
-    if (signal?.aborted) return Promise.resolve(false);
     signal?.addEventListener("abort", reject, { once: true });
     session.approvals.set(approval.tool_call_id, { approval, decide });
     this.notify(session);
@@ -472,7 +499,7 @@ export class WorkbenchService implements Service {
   }
 
   private rejectApprovals(session: OpenSession): void {
-    for (const { decide } of [...session.approvals.values()]) decide(false);
+    for (const { decide } of [...session.approvals.values()]) decide(REJECTED);
   }
 
   approve(
@@ -488,7 +515,7 @@ export class WorkbenchService implements Service {
         "The workbench session holds no pending call with this identity.",
         { session_id: sessionId, tool_call_id: toolCallId },
       );
-    pending.decide(approved);
+    pending.decide(approved ? ALLOWED : REJECTED);
     return { session_id: sessionId, tool_call_id: toolCallId, approved };
   }
 
@@ -643,6 +670,7 @@ export class WorkbenchService implements Service {
     const run: Run = {
       firstEntry: session.manager.getEntries().length,
       ended: false,
+      endingCall: null,
       settled: completion.promise,
     };
     session.run = run;

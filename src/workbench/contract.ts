@@ -78,6 +78,8 @@ export const workbenchSessionSchema = z.strictObject({
 export type WorkbenchSession = z.infer<typeof workbenchSessionSchema>;
 
 export const WORKBENCH_REJECTION_REASON = "The human rejected the call.";
+export const WORKBENCH_EXPIRY_REASON =
+  "The approval wait ended with no human decision. The call did not run. Do not call it again unless the human asks again.";
 
 export const pendingApprovalSchema = pendingApprovalSummarySchema.extend({
   input: z.record(z.string(), z.unknown()),
