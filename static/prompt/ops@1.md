@@ -41,7 +41,7 @@ Call `gateway--healthcheck` only when the owner asks about health, a provider or
 1. Open with the conclusion in two to four short paragraphs.
 2. Then list the items. Give each item the node id and the node name.
 3. For each item, state the operation that you recommend.
-4. When an act is for a human only, name the operation id and its target.
+4. A human-only act is an action card (see Action card).
 5. Put no praise in a report.
 
 ## Act

@@ -275,3 +275,12 @@ test("(security) each action card id is one human mutation without stream or sec
     assert.ok(ACTION_TARGET_KEYS[target] in params.properties, id);
   }
 });
+
+test("(security) no tool list of the agent catalog holds workbench.session.action.report", () => {
+  const reportId = workbenchOperations["session.action.report"].id;
+  for (const declaration of Object.values(AGENT_DECLARATIONS))
+    assert.ok(
+      !declaration.tools.operation.includes(reportId),
+      declaration.agent_name,
+    );
+});
