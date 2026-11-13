@@ -24,7 +24,11 @@ export interface AgentTools {
   builtin: readonly BuiltinTool[];
   host: readonly HostTool[];
   operation: readonly string[];
+  workbench: readonly WorkbenchTool[];
 }
+
+export const WorkbenchTool = { EvidenceRead: "evidence_read" } as const;
+export type WorkbenchTool = (typeof WorkbenchTool)[keyof typeof WorkbenchTool];
 
 export const EVIDENCE_UPLOAD_PARAMETERS = Type.Object(
   { path: Type.String({ minLength: 1 }) },
@@ -126,6 +130,7 @@ export const AGENT_DECLARATIONS: Readonly<Record<AgentName, AgentDeclaration>> =
         ],
         host: [HostTool.EvidenceUpload, HostTool.LinkUpdateList],
         operation: NODE_REVIEW_READS,
+        workbench: [WorkbenchTool.EvidenceRead],
       },
       overridable_fields: [
         "agent_provider",
@@ -147,6 +152,7 @@ export const AGENT_DECLARATIONS: Readonly<Record<AgentName, AgentDeclaration>> =
         ],
         host: [],
         operation: NODE_REVIEW_READS,
+        workbench: [WorkbenchTool.EvidenceRead],
       },
       overridable_fields: [
         "agent_provider",
@@ -168,6 +174,7 @@ export const AGENT_DECLARATIONS: Readonly<Record<AgentName, AgentDeclaration>> =
         ],
         host: [],
         operation: [],
+        workbench: [],
       },
       overridable_fields: [],
     },
@@ -179,6 +186,7 @@ export const AGENT_DECLARATIONS: Readonly<Record<AgentName, AgentDeclaration>> =
         builtin: [],
         host: [],
         operation: OPS_OPERATIONS,
+        workbench: [],
       },
       overridable_fields: [
         "agent_provider",

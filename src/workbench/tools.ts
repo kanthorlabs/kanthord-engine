@@ -32,6 +32,11 @@ import { missionOperations } from "../mission/contract.ts";
 import { environmentSecretOperations } from "../project/contract.ts";
 import { repositoryOperations } from "../repository/contract.ts";
 import { storageOperations } from "../storage/contract.ts";
+import {
+  EVIDENCE_READ_DESCRIPTION,
+  EVIDENCE_READ_PARAMETERS,
+  EVIDENCE_READ_TOOL,
+} from "./evidence.ts";
 import { createIdempotencyKey } from "../kernel/identity.ts";
 
 const NO_PROPERTIES = 0;
@@ -156,6 +161,23 @@ export function operationToolDeclarations(
       description: operation.description,
       guard_class: operation.mutation ? GuardClass.Card : GuardClass.Read,
     }));
+}
+
+export function workbenchToolDeclarations(
+  agentName: string,
+): ToolDeclaration[] {
+  const agent = getAgentDeclaration(agentName);
+  assert.ok(agent);
+  return agent.tools.workbench.map(() => ({
+    name: EVIDENCE_READ_TOOL,
+    source: ToolSource.Workbench,
+    input_schema: EVIDENCE_READ_PARAMETERS as unknown as Record<
+      string,
+      unknown
+    >,
+    description: EVIDENCE_READ_DESCRIPTION,
+    guard_class: GuardClass.Card,
+  }));
 }
 
 export function operationTool(

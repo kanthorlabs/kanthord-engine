@@ -239,6 +239,7 @@ components:
                   - host
                   - builtin
                   - operation
+                  - workbench
                   - kanthord-mcp
               input_schema:
                 type: object

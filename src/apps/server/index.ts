@@ -176,6 +176,7 @@ import {
   workbenchMigrations,
   type WorkbenchModelRuntimeFactory,
   WorkbenchService,
+  workbenchToolDeclarations,
 } from "../../workbench/index.ts";
 import { WORKBENCH_SERVICE_NAME } from "../../workbench/contract.ts";
 import { AGENT_COMPONENT_NAME } from "../../agent/contract.ts";
@@ -834,6 +835,7 @@ export function composeServices(options: ComposeServicesOptions) {
         registry.all().map(({ operation }) => operation),
         name,
       ),
+      ...workbenchToolDeclarations(name),
     ],
     logger: options.logger,
   });

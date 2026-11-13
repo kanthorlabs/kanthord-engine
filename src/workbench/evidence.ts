@@ -51,7 +51,7 @@ const evidenceRecordSchema = z.object({
   ),
 });
 
-const evidenceReadParameters = (() => {
+export const EVIDENCE_READ_PARAMETERS = (() => {
   const schema = z.toJSONSchema(evidenceReadSchema, {
     io: "input",
     unrepresentable: "any",
@@ -263,7 +263,7 @@ export function evidenceReadTool(
     name: EVIDENCE_READ_TOOL,
     label: EVIDENCE_READ_TOOL,
     description: EVIDENCE_READ_DESCRIPTION,
-    parameters: evidenceReadParameters,
+    parameters: EVIDENCE_READ_PARAMETERS,
     async execute(_toolCallId, params, signal) {
       const facts = await evidenceFacts(invoke, requester, {
         input: params,

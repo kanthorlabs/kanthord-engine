@@ -113,6 +113,7 @@ components:
                     - host
                     - builtin
                     - operation
+                    - workbench
                     - kanthord-mcp
                 additionalProperties:
                   type: integer
@@ -122,6 +123,7 @@ components:
                   - host
                   - builtin
                   - operation
+                  - workbench
                   - kanthord-mcp
               enablement:
                 anyOf:

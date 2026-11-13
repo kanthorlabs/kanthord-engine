@@ -1257,7 +1257,10 @@ test("(happy path) agent.get answers the display name, the identity part and the
       NO_TOOLS,
       declared.builtin.length + declared.host.length,
     );
-    const operations = tools.slice(local.length);
+    const operations = tools.slice(
+      local.length,
+      local.length + declared.operation.length,
+    );
     assert.ok(
       local.every(
         ({ source, description, guard_class }) =>

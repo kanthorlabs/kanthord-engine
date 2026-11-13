@@ -278,6 +278,7 @@ export const ToolSource = {
   Host: "host",
   Builtin: "builtin",
   Operation: "operation",
+  Workbench: "workbench",
   KanthordMcp: "kanthord-mcp",
 } as const;
 export type ToolSource = (typeof ToolSource)[keyof typeof ToolSource];
