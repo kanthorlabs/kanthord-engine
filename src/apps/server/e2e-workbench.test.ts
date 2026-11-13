@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setImmediate } from "node:timers/promises";
@@ -72,7 +73,12 @@ import {
   NodeState,
 } from "../../mission/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
-import { COVERING_WORKER_BINDINGS, gatewayFixture } from "./test-support.ts";
+import {
+  COVERING_WORKER_BINDINGS,
+  fakeS3,
+  gatewayFixture,
+} from "./test-support.ts";
+import { type SeededNode, seedEvidence } from "./evidence-test-support.ts";
 import { framing, PromptConsumer } from "../../agent/prompt-render.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 
@@ -159,6 +165,12 @@ function scriptedFactory(
   };
 }
 
+interface Persistence {
+  path: string;
+  masterKey: string;
+  resumed: boolean;
+}
+
 async function workbenchFixture(
   t: TestContext,
   script: FauxResponseStep[] = [],
@@ -166,15 +178,22 @@ async function workbenchFixture(
   agentDirectory = temporary(t),
   enabledAgents: readonly string[] = [AGENT],
   beforeOpen?: () => Promise<void>,
+  persistence?: Persistence,
 ) {
   const scripted = scriptedFactory(script, beforeOpen);
   const fixture = await gatewayFixture(t, {
     stateDirectory,
     agentDirectory,
     workbenchModelRuntimeFactory: scripted.factory,
+    repositoryConnector: { gitLsRemote: async () => {} },
+    ...(persistence
+      ? { path: persistence.path, masterKey: persistence.masterKey }
+      : {}),
   });
   const options = { identity };
   const llm = directClient(llmOperations, fixture.invocation);
+  if (persistence?.resumed)
+    return workbenchClients(fixture, scripted.provider, options);
   for (const [name, key] of [
     [PRIMARY_CREDENTIAL, PRIMARY_KEY],
     [BACKUP_CREDENTIAL, BACKUP_KEY],
@@ -221,11 +240,19 @@ async function workbenchFixture(
         options,
       ),
     );
+  return workbenchClients(fixture, scripted.provider, options);
+}
+
+function workbenchClients(
+  fixture: Awaited<ReturnType<typeof gatewayFixture>>,
+  provider: ReturnType<typeof scriptedProvider>,
+  options: { identity: typeof identity },
+) {
   return {
     ...fixture,
-    provider: scripted.provider,
+    provider,
     options,
-    agent,
+    agent: directClient(agentOperations, fixture.invocation),
     projects: directClient(projectOperations, fixture.invocation),
     missions: directClient(missionOperations, fixture.invocation),
     workbenchService: fixture.workbench,
@@ -1190,10 +1217,16 @@ test("(happy path) the tool table of each workbench agent holds its built-in too
     completed(await message(fixture, session.id, QUESTION));
     await untilIdle(fixture, session.id, t.signal);
     const tools = fixture.provider.tools[index]!;
-    const { builtin, operation } = getAgentDeclaration(agentName)!.tools;
+    const { builtin, operation, workbench } =
+      getAgentDeclaration(agentName)!.tools;
     assert.deepEqual(
       [...tools].sort(),
-      [...builtin, ...operation.map(toolName), OFFER_ACTION].sort(),
+      [
+        ...builtin,
+        ...operation.map(toolName),
+        ...workbench,
+        OFFER_ACTION,
+      ].sort(),
       agentName,
     );
     for (const name of [
@@ -2922,3 +2955,355 @@ async function eventEntries(fixture: Fixture, sessionId: string) {
     ),
   ).entries as Entry[];
 }
+
+const EVIDENCE_READ = "evidence_read";
+const OBJECT_KIND = "object";
+const SESSION_FILE_SUFFIX = ".jsonl";
+const DOWNLOAD_OPERATION = "mission.evidence.asset.content.download";
+const ALPHA_TEXT = "alpha evidence text";
+const BETA_TEXT = "beta evidence text";
+const GAMMA_TEXT = "gamma evidence text";
+const OBJECT_TEXT = "object evidence text";
+const LARGE_OBJECT_BYTES = 1024 ** 2;
+const EVIDENCE_TEXT_CAP = 65536;
+const SIGNED_QUERY_MARKER = "X-Amz-";
+const FIRST_ATTEMPT_NUMBER = 1;
+const STORAGE_CLOSE_POLLS = 100;
+const STORAGE_CLOSE_POLL_MS = 20;
+const MASTER_KEY_BYTES = 32;
+
+interface EvidenceTarget {
+  nodes: SeededNode[];
+}
+
+interface EvidenceSetup {
+  nodes: Parameters<typeof seedEvidence>[2];
+  storage?: boolean;
+  stateDirectory?: string;
+  persistence?: Persistence;
+  agentName?: string;
+}
+
+function evidenceCall(target: EvidenceTarget, node: number, asset: number) {
+  return () => {
+    const found = target.nodes[node]!.produced[asset]!;
+    return toolCall(EVIDENCE_READ, {
+      evidence_id: found.evidenceId,
+      asset_id: found.assetId,
+    });
+  };
+}
+
+async function evidenceFixture(
+  t: TestContext,
+  script: FauxResponseStep[],
+  target: EvidenceTarget,
+  setup: EvidenceSetup,
+) {
+  const agentName = setup.agentName ?? REVIEW_AGENT;
+  const fixture = await workbenchFixture(
+    t,
+    script,
+    setup.stateDirectory,
+    undefined,
+    [agentName],
+    undefined,
+    setup.persistence,
+  );
+  const s3 = await fakeS3(t);
+  target.nodes = await seedEvidence(t, fixture, setup.nodes, {
+    ...(setup.storage ? { s3 } : {}),
+  });
+  const session = await createSession(fixture, undefined, agentName);
+  return { fixture, session, s3 };
+}
+
+test("(happy path) evidence_read shows one card for a node, runs the next asset of that node with none and shows a new card for another node", async (t) => {
+  const target: EvidenceTarget = { nodes: [] };
+  const { fixture, session } = await evidenceFixture(
+    t,
+    [
+      evidenceCall(target, 0, 0),
+      evidenceCall(target, 0, 1),
+      evidenceCall(target, 1, 0),
+      fauxAssistantMessage(ANSWER),
+    ],
+    target,
+    {
+      nodes: [
+        { produced: [ALPHA_TEXT, BETA_TEXT] },
+        { produced: [GAMMA_TEXT] },
+      ],
+    },
+  );
+  completed(await message(fixture, session.id, QUESTION));
+  const first = await untilApproval(fixture, session.id, t.signal);
+  const [nodeA, nodeB] = target.nodes as [SeededNode, SeededNode];
+  assert.equal(first.operation_id, DOWNLOAD_OPERATION);
+  assert.deepEqual(first.input, {
+    node_id: nodeA.nodeId,
+    attempt: FIRST_ATTEMPT_NUMBER,
+    evidence_id: nodeA.produced[0]!.evidenceId,
+    asset_id: nodeA.produced[0]!.assetId,
+    kind: "produced",
+  });
+  completed(await decide(fixture, session.id, first.tool_call_id, true));
+  const second = await untilApproval(fixture, session.id, t.signal);
+  assert.equal(second.input.node_id, nodeB.nodeId);
+  assert.equal(second.input.asset_id, nodeB.produced[0]!.assetId);
+  completed(await decide(fixture, session.id, second.tool_call_id, true));
+  const results = toolResults(await untilIdle(fixture, session.id, t.signal));
+  assert.deepEqual(
+    results.map(({ isError }) => isError),
+    [false, false, false],
+  );
+  for (const [index, text] of [ALPHA_TEXT, BETA_TEXT, GAMMA_TEXT].entries())
+    assert.ok(results[index]!.text.includes(text), text);
+});
+
+test("(security) a rejected evidence card grants nothing, an expired card grants nothing and the next call shows a card again", async (t) => {
+  const target: EvidenceTarget = { nodes: [] };
+  const { fixture, session } = await evidenceFixture(
+    t,
+    [
+      evidenceCall(target, 0, 0),
+      evidenceCall(target, 0, 1),
+      evidenceCall(target, 0, 0),
+      fauxAssistantMessage(ANSWER),
+    ],
+    target,
+    { nodes: [{ produced: [ALPHA_TEXT, BETA_TEXT] }] },
+  );
+  enableTimers(t);
+  completed(await message(fixture, session.id, QUESTION));
+  const rejected = await untilApproval(fixture, session.id, t.signal);
+  completed(await decide(fixture, session.id, rejected.tool_call_id, false));
+  const expiring = await untilApproval(fixture, session.id, t.signal);
+  assert.equal(expiring.input.node_id, target.nodes[0]!.nodeId);
+  t.mock.timers.tick(fixture.config.workbench.approval_wait_ms);
+  const entries = await untilIdle(fixture, session.id, t.signal);
+  assert.deepEqual(
+    toolResults(entries).map(({ isError, text }) => ({ isError, text })),
+    [
+      { isError: true, text: WORKBENCH_REJECTION_REASON },
+      { isError: true, text: WORKBENCH_EXPIRY_REASON },
+    ],
+  );
+  completed(await message(fixture, session.id, QUESTION));
+  const again = await untilApproval(fixture, session.id, t.signal);
+  assert.equal(again.input.node_id, target.nodes[0]!.nodeId);
+  completed(await decide(fixture, session.id, again.tool_call_id, true));
+  const last = await untilIdle(
+    fixture,
+    session.id,
+    t.signal,
+    entries.at(-1)!.id as string,
+  );
+  assert.deepEqual(
+    toolResults(last).map(({ isError }) => isError),
+    [false],
+  );
+});
+
+test("(security, the grant lives in memory) a restart of kanthord clears the grant and the next call shows a card", async (t) => {
+  const state = temporaryDirectory();
+  stopAfter(t, () => rmSync(state, { recursive: true, force: true }));
+  const persistence = {
+    path: join(temporary(t), "operational.db"),
+    masterKey: randomBytes(MASTER_KEY_BYTES).toString("base64"),
+    resumed: false,
+  };
+  const target: EvidenceTarget = { nodes: [] };
+  let sessionId = "";
+  await t.test("grant a node and stop", async (step) => {
+    const { fixture: first, session } = await evidenceFixture(
+      step,
+      [evidenceCall(target, 0, 0), fauxAssistantMessage(ANSWER)],
+      target,
+      {
+        nodes: [{ produced: [ALPHA_TEXT, BETA_TEXT] }],
+        stateDirectory: state,
+        persistence,
+      },
+    );
+    sessionId = session.id;
+    completed(await message(first, session.id, QUESTION));
+    const granted = await untilApproval(first, session.id, step.signal);
+    completed(await decide(first, session.id, granted.tool_call_id, true));
+    await untilIdle(first, session.id, step.signal);
+  });
+  const second = await workbenchFixture(
+    t,
+    [evidenceCall(target, 0, 1), fauxAssistantMessage(ANSWER)],
+    state,
+    undefined,
+    [REVIEW_AGENT],
+    undefined,
+    { ...persistence, resumed: true },
+  );
+  completed(await message(second, sessionId, QUESTION));
+  const pending = await untilApproval(second, sessionId, t.signal);
+  assert.equal(pending.operation_id, DOWNLOAD_OPERATION);
+  assert.equal(pending.input.node_id, target.nodes[0]!.nodeId);
+});
+
+test("(invariant guard, race of two calls in one batch) two evidence_read calls on one node in one batch show one card and both succeed", async (t) => {
+  const target: EvidenceTarget = { nodes: [] };
+  const { fixture, session } = await evidenceFixture(
+    t,
+    [
+      () =>
+        fauxAssistantMessage(
+          target.nodes[0]!.produced.map(({ evidenceId, assetId }) =>
+            fauxToolCall(EVIDENCE_READ, {
+              evidence_id: evidenceId,
+              asset_id: assetId,
+            }),
+          ),
+          { stopReason: TOOL_USE },
+        ),
+      fauxAssistantMessage(ANSWER),
+    ],
+    target,
+    { nodes: [{ produced: [ALPHA_TEXT, BETA_TEXT] }] },
+  );
+  completed(await message(fixture, session.id, QUESTION));
+  const pending = await untilApproval(fixture, session.id, t.signal);
+  completed(await decide(fixture, session.id, pending.tool_call_id, true));
+  const results = toolResults(await untilIdle(fixture, session.id, t.signal));
+  assert.deepEqual(
+    results.map(({ isError }) => isError),
+    [false, false],
+  );
+});
+
+test("(security) an asset outside the evidence gives asset_mismatch and no pending card", async (t) => {
+  const target: EvidenceTarget = { nodes: [] };
+  const { fixture, session } = await evidenceFixture(
+    t,
+    [
+      () =>
+        toolCall(EVIDENCE_READ, {
+          evidence_id: target.nodes[0]!.produced[0]!.evidenceId,
+          asset_id: target.nodes[1]!.produced[0]!.assetId,
+        }),
+      fauxAssistantMessage(ANSWER),
+    ],
+    target,
+    { nodes: [{ produced: [ALPHA_TEXT] }, { produced: [GAMMA_TEXT] }] },
+  );
+  completed(await message(fixture, session.id, QUESTION));
+  const results = toolResults(await untilIdle(fixture, session.id, t.signal));
+  assert.equal(results.length, SINGLE);
+  assert.equal(results[0]!.isError, true);
+  assert.ok(results[0]!.text.startsWith("workbench.evidence.asset_mismatch: "));
+  assert.equal(
+    (await snapshotOf(fixture, session.id)).snapshot.pending_approval,
+    null,
+  );
+});
+
+test("(security, redaction) an object read leaves no signed URL and no storage host in the result, the details or the session file", async (t) => {
+  const target: EvidenceTarget = { nodes: [] };
+  const { fixture, session, s3 } = await evidenceFixture(
+    t,
+    [
+      () =>
+        toolCall(EVIDENCE_READ, {
+          evidence_id: target.nodes[0]!.object!.evidenceId,
+          asset_id: target.nodes[0]!.object!.assetId,
+        }),
+      fauxAssistantMessage(ANSWER),
+    ],
+    target,
+    { nodes: [{ produced: [], object: OBJECT_TEXT }], storage: true },
+  );
+  completed(await message(fixture, session.id, QUESTION));
+  const pending = await untilApproval(fixture, session.id, t.signal);
+  assert.equal(pending.input.kind, OBJECT_KIND);
+  completed(await decide(fixture, session.id, pending.tool_call_id, true));
+  const entries = await untilIdle(fixture, session.id, t.signal);
+  const [result] = toolResults(entries);
+  assert.equal(result!.isError, false);
+  assert.ok(result!.text.includes(OBJECT_TEXT));
+  const raw = readdirSync(fixture.stateDirectory, {
+    recursive: true,
+    encoding: "utf8",
+  })
+    .filter((name) => name.endsWith(SESSION_FILE_SUFFIX))
+    .map((name) => readFileSync(join(fixture.stateDirectory, name), "utf8"))
+    .join("\n");
+  assert.ok(raw.length);
+  const host = new URL(s3.endpoint).host;
+  for (const text of [JSON.stringify(entries), raw]) {
+    assert.ok(!text.includes(SIGNED_QUERY_MARKER));
+    assert.ok(!text.includes(host));
+  }
+});
+
+test("(security, argument guard) evidence_read cancels the body at its cap on a large object and the storage sees the connection close", async (t) => {
+  const target: EvidenceTarget = { nodes: [] };
+  const { fixture, session, s3 } = await evidenceFixture(
+    t,
+    [
+      () =>
+        toolCall(EVIDENCE_READ, {
+          evidence_id: target.nodes[0]!.object!.evidenceId,
+          asset_id: target.nodes[0]!.object!.assetId,
+        }),
+      fauxAssistantMessage(ANSWER),
+    ],
+    target,
+    {
+      nodes: [{ produced: [], object: "x".repeat(LARGE_OBJECT_BYTES) }],
+      storage: true,
+    },
+  );
+  s3.overrunNext();
+  completed(await message(fixture, session.id, QUESTION));
+  const pending = await untilApproval(fixture, session.id, t.signal);
+  completed(await decide(fixture, session.id, pending.tool_call_id, true));
+  const [result] = toolResults(await untilIdle(fixture, session.id, t.signal));
+  assert.equal(result!.isError, false);
+  const block1 = JSON.parse(
+    result!.text.slice(NO_TOOLS, result!.text.indexOf("}") + SINGLE),
+  ) as {
+    length: number;
+    truncated: boolean;
+  };
+  assert.equal(block1.length, EVIDENCE_TEXT_CAP);
+  assert.equal(block1.truncated, true);
+  for (let poll = 0; poll < STORAGE_CLOSE_POLLS && !s3.closed.length; poll++)
+    await new Promise((resolve) => setTimeout(resolve, STORAGE_CLOSE_POLL_MS));
+  assert.equal(s3.closed.length, SINGLE);
+});
+
+test("(happy path) the provider receives evidence_read for swe@1 and re@1 and none for ops@1, and agent.get lists it as a card workbench tool", async (t) => {
+  const agents = [OPS, AGENT, REVIEW_AGENT];
+  const fixture = await workbenchFixture(
+    t,
+    agents.map(() => fauxAssistantMessage(ANSWER)),
+    undefined,
+    undefined,
+    agents,
+  );
+  for (const [index, agentName] of agents.entries()) {
+    const session = await createSession(fixture, undefined, agentName);
+    completed(await message(fixture, session.id, QUESTION));
+    await untilIdle(fixture, session.id, t.signal);
+    assert.equal(
+      fixture.provider.tools[index]!.includes(EVIDENCE_READ),
+      agentName !== OPS,
+      agentName,
+    );
+  }
+  const { tools } = completed(
+    await fixture.agent.get(
+      { params: { agent_name: REVIEW_AGENT }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  const listed = tools.find(({ name }) => name === EVIDENCE_READ);
+  assert.equal(listed?.source, ToolSource.Workbench);
+  assert.equal(listed?.guard_class, GuardClass.Card);
+});

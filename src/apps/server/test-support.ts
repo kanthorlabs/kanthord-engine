@@ -2038,6 +2038,7 @@ const S3_RANGE_HEADER = "range";
 const S3_CONTENT_RANGE_HEADER = "content-range";
 const S3_RANGE_PATTERN = /^bytes=(\d+)-(\d+)$/;
 const S3_INDEX_STEP = 1;
+const S3_OVERRUN_CHUNK_BYTES = 65536;
 const S3_RANGE_START_GROUP = 1;
 const S3_RANGE_END_GROUP = 2;
 const S3_BASE64 = "base64";
@@ -2067,6 +2068,7 @@ interface FakeS3State {
   versions: Map<string, FakeS3Object[]>;
   calls: FakeS3Call[];
   closed: FakeS3Call[];
+  overrun: boolean;
   nextFailure: number | null;
   losses: number;
 }
@@ -2150,6 +2152,16 @@ function putS3Object(
   response.writeHead(HttpStatus.OK, { [S3_VERSION_HEADER]: version }).end();
 }
 
+function streamUntilClosed(response: ServerResponse) {
+  const chunk = Buffer.alloc(S3_OVERRUN_CHUNK_BYTES);
+  const pump = () => {
+    while (!response.destroyed && response.write(chunk));
+  };
+  response.writeHead(HttpStatus.PartialContent);
+  response.on("drain", pump);
+  pump();
+}
+
 function readS3Object(
   state: FakeS3State,
   request: IncomingMessage,
@@ -2186,6 +2198,10 @@ function readS3Object(
   const range = S3_RANGE_PATTERN.exec(request.headers[S3_RANGE_HEADER] ?? "");
   if (!range)
     return response.writeHead(HttpStatus.OK, headers).end(found.bytes);
+  if (state.overrun) {
+    state.overrun = false;
+    return streamUntilClosed(response);
+  }
   const start = Number(range[S3_RANGE_START_GROUP]);
   const end = Math.min(
     Number(range[S3_RANGE_END_GROUP]),
@@ -2257,6 +2273,7 @@ export async function fakeS3(t: TestContext) {
     versions: new Map(),
     calls: [],
     closed: [],
+    overrun: false,
     nextFailure: null,
     losses: ZERO_LOSSES,
   };
@@ -2288,6 +2305,9 @@ export async function fakeS3(t: TestContext) {
     closed: state.closed as readonly FakeS3Call[],
     objects(key: string): readonly FakeS3Object[] {
       return state.versions.get(key) ?? [];
+    },
+    overrunNext(): void {
+      state.overrun = true;
     },
     failNext(status: number): void {
       assert.ok(Number.isInteger(status));
