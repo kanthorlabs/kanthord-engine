@@ -15,7 +15,11 @@ import {
   type OperationResult,
   OperationResultType,
 } from "../kernel/operation.ts";
-import { BuiltinTool, getAgentDeclaration } from "../agent/catalog.ts";
+import {
+  BuiltinTool,
+  getAgentDeclaration,
+  WorkbenchTool,
+} from "../agent/catalog.ts";
 import {
   GuardClass,
   type ToolDeclaration,
@@ -163,12 +167,8 @@ export function operationToolDeclarations(
     }));
 }
 
-export function workbenchToolDeclarations(
-  agentName: string,
-): ToolDeclaration[] {
-  const agent = getAgentDeclaration(agentName);
-  assert.ok(agent);
-  return agent.tools.workbench.map(() => ({
+const WORKBENCH_TOOL_DECLARATIONS: Record<WorkbenchTool, ToolDeclaration> = {
+  [WorkbenchTool.EvidenceRead]: {
     name: EVIDENCE_READ_TOOL,
     source: ToolSource.Workbench,
     input_schema: EVIDENCE_READ_PARAMETERS as unknown as Record<
@@ -177,7 +177,15 @@ export function workbenchToolDeclarations(
     >,
     description: EVIDENCE_READ_DESCRIPTION,
     guard_class: GuardClass.Card,
-  }));
+  },
+};
+
+export function workbenchToolDeclarations(
+  agentName: string,
+): ToolDeclaration[] {
+  const agent = getAgentDeclaration(agentName);
+  assert.ok(agent);
+  return agent.tools.workbench.map((tool) => WORKBENCH_TOOL_DECLARATIONS[tool]);
 }
 
 export function operationTool(
