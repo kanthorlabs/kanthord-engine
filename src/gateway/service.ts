@@ -602,7 +602,12 @@ export class GatewayService implements Service {
           "traceparent",
           "tracestate",
         ],
-        exposeHeaders: ["X-Request-Id"],
+        exposeHeaders: [
+          "X-Request-Id",
+          "Content-Disposition",
+          "X-Evidence-Media-Type",
+          "X-Evidence-Size",
+        ],
         maxAge: PREFLIGHT_MAX_AGE_SECONDS,
       })(context, next);
     });
