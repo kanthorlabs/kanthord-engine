@@ -814,7 +814,13 @@ export class WorkbenchService implements Service {
         delivery === MessageDelivery.Replace ? this.clearQueue(session) : [];
       const queued = this.enqueue(session, text, requester);
       if (delivery === MessageDelivery.Replace)
-        void this.exclusive(session, () => this.stopRun(session, active));
+        this.exclusive(session, () => this.stopRun(session, active)).catch(
+          (error: unknown) => {
+            session.runError =
+              error instanceof Error ? error.message : String(error);
+            this.notify(session);
+          },
+        );
       return {
         session_id: sessionId,
         run_active: true,
