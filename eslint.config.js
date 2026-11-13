@@ -720,20 +720,6 @@ export default tseslint.config(
             },
             {
               from: element("service", {
-                captured: { name: "workbench" },
-                fileInternalPath: "contract.ts",
-              }),
-              allow: [
-                {
-                  to: element("service", {
-                    captured: { name: "mission" },
-                    fileInternalPath: "contract.ts",
-                  }),
-                },
-              ],
-            },
-            {
-              from: element("service", {
                 captured: { name: "tracking" },
                 fileInternalPath: "contract.ts",
               }),

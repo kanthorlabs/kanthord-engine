@@ -162,6 +162,7 @@ interface OpenSession {
   waiters: Set<() => void>;
   version: number;
   approvals: Map<string, Approval>;
+  doneReports: Set<string>;
   redaction: SensitiveTextRedaction | null;
   secrets: KnownSecrets;
 }
@@ -382,6 +383,7 @@ export class WorkbenchService implements Service {
       waiters: new Set(),
       version: 0,
       approvals: new Map(),
+      doneReports: new Set(),
     };
     this.sessions.set(sessionId, session);
     return session;
@@ -604,16 +606,18 @@ export class WorkbenchService implements Service {
         "The workbench session holds no action card with this identity.",
         { session_id: sessionId, tool_call_id: toolCallId },
       );
-    const settled = entries.some((entry) => {
-      const details = entry.details as
-        { tool_call_id?: unknown; outcome?: unknown } | undefined;
-      return (
-        entry.type === CUSTOM_MESSAGE_ENTRY &&
-        entry.customType === WORKBENCH_ACTION_RESULT_ENTRY &&
-        details?.tool_call_id === toolCallId &&
-        details.outcome === ActionOutcome.Done
-      );
-    });
+    const settled =
+      session.doneReports.has(toolCallId) ||
+      entries.some((entry) => {
+        const details = entry.details as
+          { tool_call_id?: unknown; outcome?: unknown } | undefined;
+        return (
+          entry.type === CUSTOM_MESSAGE_ENTRY &&
+          entry.customType === WORKBENCH_ACTION_RESULT_ENTRY &&
+          details?.tool_call_id === toolCallId &&
+          details.outcome === ActionOutcome.Done
+        );
+      });
     if (settled)
       throw new OperationError(
         HttpStatus.Conflict,
@@ -633,17 +637,24 @@ export class WorkbenchService implements Service {
       outcome: body.outcome,
       error_code: body.error_code,
     };
-    if (session.agent)
-      await session.agent.sendCustomMessage(
-        {
-          customType: WORKBENCH_ACTION_RESULT_ENTRY,
-          content: text,
-          display: false,
-          details,
-        },
-        { triggerTurn: false },
-      );
-    else
+    if (body.outcome === ActionOutcome.Done)
+      session.doneReports.add(toolCallId);
+    if (session.agent) {
+      try {
+        await session.agent.sendCustomMessage(
+          {
+            customType: WORKBENCH_ACTION_RESULT_ENTRY,
+            content: text,
+            display: false,
+            details,
+          },
+          { triggerTurn: false },
+        );
+      } catch (error) {
+        session.doneReports.delete(toolCallId);
+        throw error;
+      }
+    } else
       session.manager.appendCustomMessageEntry(
         WORKBENCH_ACTION_RESULT_ENTRY,
         text,
@@ -1027,6 +1038,7 @@ export class WorkbenchService implements Service {
       waiters: new Set(),
       version: 0,
       approvals: new Map(),
+      doneReports: new Set(),
     };
     this.sessions.set(id, session);
     try {

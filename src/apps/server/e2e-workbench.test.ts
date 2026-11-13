@@ -2603,6 +2603,7 @@ test("(invariant guard) the action_offer record leaves buildSessionContext uncha
 
 const CUSTOM_MESSAGE = "custom_message";
 const NO_ERROR_CODE = null;
+const DISCARD_REASON = "owner decision";
 const TWO_PROVIDER_CALLS = 2;
 const RESULT_TEXT_DONE = (operation: string, target: string) =>
   `The owner ran ${operation} on ${target}. Result: done.`;
@@ -2769,12 +2770,17 @@ test("(invariant guard) action.report during an active run lands after the turn 
   }
   const [offered] = recordsOf(await eventEntries(fixture, session.id));
   const toolCallId = (offered!.data as { tool_call_id: string }).tool_call_id;
-  completed(
-    await reportAction(fixture, session.id, toolCallId, {
-      outcome: ActionOutcome.Done,
-      error_code: NO_ERROR_CODE,
-    }),
-  );
+  const done = { outcome: ActionOutcome.Done, error_code: NO_ERROR_CODE };
+  completed(await reportAction(fixture, session.id, toolCallId, done));
+  for (const body of [
+    done,
+    { outcome: ActionOutcome.Failed, error_code: NO_ERROR_CODE },
+  ])
+    failed(
+      await reportAction(fixture, session.id, toolCallId, body),
+      HttpStatus.Conflict,
+      WorkbenchErrorCode.ActionSettled,
+    );
   held.gate.resolve();
   await untilIdle(fixture, session.id, t.signal);
   const entries = await sessionEntries(fixture, session.id);
@@ -2792,6 +2798,7 @@ test("(invariant guard) action.report during an active run lands after the turn 
     "assistant",
     CUSTOM_MESSAGE,
   ]);
+  assert.equal(resultsOf(entries).length, SINGLE);
   const { buildSessionContext } = await loadPi();
   const roles = buildSessionContext(entries as never).messages.map(
     (entry) => entry.role,
@@ -2861,7 +2868,7 @@ test("(security) a direct human discard after a card is attributed to the owner 
         params: { node_id: target.nodeId },
         query: {},
         body: {
-          reason: "owner decision",
+          reason: DISCARD_REASON,
           expected_mission_version: mission.version,
           expected_state: node.state,
           expected_attempt: node.attempt,
@@ -2871,7 +2878,17 @@ test("(security) a direct human discard after a card is attributed to the owner 
     ),
   );
   assert.equal(discarded.node.state, NodeState.Discarded);
-  assert.deepEqual(discarded.actor, {
+  const stored = completed(
+    await fixture.missions["assessment.list"](
+      {
+        params: { node_id: target.nodeId },
+        query: {},
+        body: null,
+      } as never,
+      fixture.options,
+    ),
+  ).items.find((assessment) => assessment.rationale === DISCARD_REASON);
+  assert.deepEqual(stored?.actor, {
     kind: "human",
     account: identity.accountId,
     name: identity.name,

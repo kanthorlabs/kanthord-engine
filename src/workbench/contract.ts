@@ -9,7 +9,6 @@ import {
 } from "../kernel/operation.ts";
 import { reasoningEffortSchema } from "../agent/contract.ts";
 import { COPY_REPORT_TEXT_MAX_LENGTH } from "../llm/contract.ts";
-import { nodeStateSchema } from "../mission/contract.ts";
 
 export const WORKBENCH_SERVICE_NAME = "workbench";
 export const WORKBENCH_SESSION_PREFIX = "workbench_session";
@@ -60,7 +59,7 @@ export type WorkbenchRecordKind =
 
 const actionSeenSchema = z.union([
   z.strictObject({
-    state: nodeStateSchema,
+    state: z.string(),
     attempt: z.number().int().nonnegative(),
   }),
   z.strictObject({ paused: z.boolean() }),
