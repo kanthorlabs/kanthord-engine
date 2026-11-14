@@ -296,3 +296,17 @@ test("(security) no tool list of the agent catalog holds workbench.session.actio
       declaration.agent_name,
     );
 });
+
+test("(security) no tool list of the agent catalog holds llm.credential.rotate, project.bindingSet.write or agent.enablement.put", () => {
+  const setupIds = [
+    llmOperations.rotate.id,
+    projectOperations["bindingSet.write"].id,
+    agentOperations["enablement.put"].id,
+  ];
+  for (const declaration of Object.values(AGENT_DECLARATIONS))
+    for (const id of setupIds)
+      assert.ok(
+        !declaration.tools.operation.includes(id),
+        `${declaration.agent_name} ${id}`,
+      );
+});
