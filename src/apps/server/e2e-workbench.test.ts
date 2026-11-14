@@ -3527,6 +3527,32 @@ test("(security) offer_action on an absent credential gives credential.credentia
   );
 });
 
+test("(security) offer_action on an archived credential gives workbench.action.target_refused and records nothing", async (t) => {
+  const { fixture, session, target } = await setupFixture(t, CREDENTIAL_ROTATE);
+  target.id = await rotatedCredential(fixture);
+  completed(
+    await directClient(llmOperations, fixture.invocation).archive(
+      {
+        params: { credential_name: target.id },
+        query: {},
+        body: null,
+      } as never,
+      fixture.options,
+    ),
+  );
+  const entries = await offerOnce(t, fixture, session.id);
+  const [result] = toolResults(entries);
+  assert.equal(result!.isError, true);
+  assert.ok(
+    result!.text.startsWith("workbench.action.target_refused:"),
+    result!.text,
+  );
+  assert.equal(
+    recordsOf(await sessionEntries(fixture, session.id)).length,
+    NO_RECORDS,
+  );
+});
+
 test("(security) offer_action on an absent project gives project.project.not_found and records nothing", async (t) => {
   const { fixture, session, target } = await setupFixture(t, BINDING_SET_WRITE);
   target.id = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
