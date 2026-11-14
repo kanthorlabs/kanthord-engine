@@ -282,13 +282,17 @@ export function parseCase(
   };
 }
 
-export function loadSuite(agent: string, ids: readonly string[]): LoadedCase[] {
+export function loadSuite(
+  agent: string,
+  ids: readonly string[],
+  root = EVAL_DIRECTORY,
+): LoadedCase[] {
   if (!AGENT_NAME.test(agent))
     throw new CodedError(
       CaseErrorCode.Invalid,
       `The agent name has no valid form: ${agent}.`,
     );
-  const directory = join(EVAL_DIRECTORY, agent);
+  const directory = join(root, agent);
   const files = readdirSync(directory)
     .filter((name) => extname(name) === CASE_EXTENSION)
     .sort();

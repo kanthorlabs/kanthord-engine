@@ -68,10 +68,12 @@ export interface SandboxOptions {
   key: string;
   configuration: WorkbenchConfiguration;
   runtimeFactory?: WorkbenchModelRuntimeFactory;
+  evalDirectory?: string;
 }
 
 export interface Sandbox {
   subject: string;
+  evalDirectory: string;
   configuration: WorkbenchConfiguration;
   fixture: GatewayFixture;
   call: ReturnType<typeof humanCaller>;
@@ -102,6 +104,7 @@ export async function openSandbox(
   });
   return {
     subject: options.subject,
+    evalDirectory: options.evalDirectory ?? EVAL_DIRECTORY,
     configuration: options.configuration,
     fixture,
     call: humanCaller(fixture),
@@ -193,7 +196,7 @@ function assetBytes(
   ids: PlaceholderIds,
 ) {
   const bytes = readFileSync(
-    join(EVAL_DIRECTORY, sandbox.subject, FIXTURES_DIRECTORY, file),
+    join(sandbox.evalDirectory, sandbox.subject, FIXTURES_DIRECTORY, file),
   );
   if (!media.startsWith(TEXT_MEDIA_PREFIX)) return bytes;
   return Buffer.from(

@@ -7,7 +7,7 @@ const nonnegativeNumber = z.number().nonnegative();
 const rateSchema = z.number().min(0).max(1);
 
 const promptDigestSchema = z.strictObject({
-  layer: z.string(),
+  layer: z.number().int().nullable(),
   source: z.string(),
   digest: z.string(),
 });
