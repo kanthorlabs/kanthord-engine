@@ -1,0 +1,49 @@
+{
+  "entries": [
+    {
+      "filename": "node-x.md",
+      "intent": "implement",
+      "name": "Export report",
+      "requirement": "Export report as specified.",
+      "criterion": "Export report works.",
+      "verifications": [
+        "pnpm test"
+      ],
+      "bindings": [
+        "repo"
+      ],
+      "tags": [],
+      "depends_on": []
+    },
+    {
+      "filename": "node-y.md",
+      "intent": "implement",
+      "name": "Import report",
+      "requirement": "Import report as specified.",
+      "criterion": "Import report works.",
+      "verifications": [
+        "pnpm test"
+      ],
+      "bindings": [
+        "repo"
+      ],
+      "tags": [],
+      "depends_on": []
+    },
+    {
+      "filename": "node-z.md",
+      "intent": "implement",
+      "name": "Archive report",
+      "requirement": "Archive report as specified.",
+      "criterion": "Archive report works.",
+      "verifications": [
+        "pnpm test"
+      ],
+      "bindings": [
+        "repo"
+      ],
+      "tags": [],
+      "depends_on": []
+    }
+  ]
+}

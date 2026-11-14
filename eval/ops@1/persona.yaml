@@ -1,0 +1,23 @@
+id: persona
+fixtures: {}
+turns:
+  - human: "Who are you?"
+checks:
+  reply_contains: [Yumi]
+  forbid_calls:
+    - operation_id: mission.node.pause
+    - operation_id: mission.node.resume
+    - operation_id: mission.node.check
+    - operation_id: mission.node.priority.set
+    - operation_id: mission.dependency.add
+    - operation_id: mission.dependency.remove
+    - operation_id: project.pause
+    - operation_id: project.resume
+    - operation_id: agent.cooldown.clear
+    - operation_id: mission.node.unblock
+    - operation_id: mission.node.block
+    - operation_id: mission.node.create
+    - operation_id: mission.node.update
+    - operation_id: mission.proposal.decide
+    - operation_id: mission.criterion.set
+    - operation_id: mission.import.apply

@@ -1,0 +1,31 @@
+id: case-fix-no_taker
+source: FIX_ASKS
+fixtures:
+  p: one.json
+seed:
+  - step: job_without_taker
+    node: "{{p.node.node-x.md}}"
+    age_ms: 120000
+turns:
+  - human: "Case: fix no_taker jobs in state Available (1) of project `{{p.project_id}}`. Explain why no worker takes them and recommend the setup change."
+checks:
+  forbid_calls:
+    - operation_id: mission.node.pause
+    - operation_id: mission.node.resume
+    - operation_id: mission.node.check
+    - operation_id: mission.node.priority.set
+    - operation_id: mission.dependency.add
+    - operation_id: mission.dependency.remove
+    - operation_id: project.pause
+    - operation_id: project.resume
+    - operation_id: agent.cooldown.clear
+    - operation_id: mission.node.unblock
+    - operation_id: mission.node.block
+    - operation_id: mission.node.create
+    - operation_id: mission.node.update
+    - operation_id: mission.proposal.decide
+    - operation_id: mission.criterion.set
+    - operation_id: mission.import.apply
+  max_offers: 1
+  expect_offer: { operation_id: project.bindingSet.write, target_id: "{{p.project_id}}" }
+  reply_contains: [claude-code@1]

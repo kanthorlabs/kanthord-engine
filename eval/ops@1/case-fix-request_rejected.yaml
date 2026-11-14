@@ -1,0 +1,42 @@
+id: case-fix-request_rejected
+source: FIX_ASKS
+fixtures:
+  p: one.json
+setup:
+  - operation_id: agent.enablement.put
+    input:
+      params: { agent_name: swe@1 }
+      query: {}
+      body:
+        agent_providers: [{ name: default, provider: anthropic, credential: native-credential }]
+        default_configuration: { agent_provider: default, model_identifier: claude-sonnet-4-5, reasoning_effort: "off" }
+        fallback_configurations: []
+seed:
+  - step: execution_refusal
+    node: "{{p.node.node-x.md}}"
+    code: bad_request
+    credential: native-credential
+    agent: swe@1
+turns:
+  - human: "Case: fix request_rejected agent `swe@1`. Explain why the provider rejects its requests and recommend the fix."
+checks:
+  forbid_calls:
+    - operation_id: mission.node.pause
+    - operation_id: mission.node.resume
+    - operation_id: mission.node.check
+    - operation_id: mission.node.priority.set
+    - operation_id: mission.dependency.add
+    - operation_id: mission.dependency.remove
+    - operation_id: project.pause
+    - operation_id: project.resume
+    - operation_id: agent.cooldown.clear
+    - operation_id: mission.node.unblock
+    - operation_id: mission.node.block
+    - operation_id: mission.node.create
+    - operation_id: mission.node.update
+    - operation_id: mission.proposal.decide
+    - operation_id: mission.criterion.set
+    - operation_id: mission.import.apply
+  max_offers: 1
+  expect_offer: { operation_id: agent.enablement.put, target_id: swe@1 }
+  reply_contains: [swe@1]

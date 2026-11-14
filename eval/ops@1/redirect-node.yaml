@@ -1,0 +1,26 @@
+id: redirect-node
+fixtures:
+  p: one.json
+turns:
+  - human: "Redirect node {{p.node.node-x.md}}: pause it, block it, then unblock it with this requirement: Export the report as CSV with a header row."
+    approvals:
+      mission.node.pause: approve
+      mission.node.block: approve
+      mission.node.unblock: approve
+checks:
+  expect_calls:
+    - operation_id: mission.node.pause
+      input: { params: { node_id: "{{p.node.node-x.md}}" } }
+    - operation_id: mission.node.block
+      input: { params: { node_id: "{{p.node.node-x.md}}" } }
+    - operation_id: mission.node.unblock
+      input: { params: { node_id: "{{p.node.node-x.md}}" } }
+    - operation_id: mission.node.unblock
+      input: { params: { node_id: "{{p.node.node-x.md}}" }, body: { change: {} } }
+  forbid_calls:
+    - operation_id: mission.node.update
+  max_confirmations: 3
+  final_state:
+    - operation_id: mission.node.get
+      input: { params: { node_id: "{{p.node.node-x.md}}" }, query: {}, body: null }
+      expect: { state: Available }

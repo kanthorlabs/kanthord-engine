@@ -43,7 +43,7 @@ const REFERENCE =
   /^([\w-]+)\.(?:(project_id)|node\.(.+)|evidence\.(.+?)(?:\.asset\.(\d+))?)$/;
 const AGENT_NAME = /^[a-z][a-z0-9-]*@\d+$/;
 
-const caseIdSchema = z.string().regex(/^[a-z][a-z0-9-]*$/);
+const caseIdSchema = z.string().regex(/^[a-z][a-z0-9_-]*$/);
 const fixtureKeySchema = z.string().regex(/^[\w-]+$/);
 const fileNameSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
 const referenceSchema = z.string().min(1);

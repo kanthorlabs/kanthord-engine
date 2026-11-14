@@ -1,0 +1,19 @@
+{
+  "entries": [
+    {
+      "filename": "node-x.md",
+      "intent": "implement",
+      "name": "Export report",
+      "requirement": "Export report as specified.",
+      "criterion": "Export report works.",
+      "verifications": [
+        "pnpm test"
+      ],
+      "bindings": [
+        "repo"
+      ],
+      "tags": [],
+      "depends_on": []
+    }
+  ]
+}

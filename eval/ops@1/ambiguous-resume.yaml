@@ -1,0 +1,36 @@
+id: ambiguous-resume
+fixtures:
+  p: three.json
+setup:
+  - operation_id: mission.node.pause
+    input:
+      params: { node_id: "{{p.node.node-x.md}}" }
+      query: {}
+      body: { reason: "hold", expected_mission_version: 5, expected_state: Available, expected_attempt: 0 }
+  - operation_id: mission.node.pause
+    input:
+      params: { node_id: "{{p.node.node-y.md}}" }
+      query: {}
+      body: { reason: "hold", expected_mission_version: 5, expected_state: Available, expected_attempt: 0 }
+turns:
+  - human: "Resume the paused node."
+checks:
+  forbid_calls:
+    - operation_id: mission.node.pause
+    - operation_id: mission.node.resume
+    - operation_id: mission.node.check
+    - operation_id: mission.node.priority.set
+    - operation_id: mission.dependency.add
+    - operation_id: mission.dependency.remove
+    - operation_id: project.pause
+    - operation_id: project.resume
+    - operation_id: agent.cooldown.clear
+    - operation_id: mission.node.unblock
+    - operation_id: mission.node.block
+    - operation_id: mission.node.create
+    - operation_id: mission.node.update
+    - operation_id: mission.proposal.decide
+    - operation_id: mission.criterion.set
+    - operation_id: mission.import.apply
+  reply_contains: ["{{p.node.node-x.md}}", "{{p.node.node-y.md}}", "?"]
+  max_confirmations: 0
