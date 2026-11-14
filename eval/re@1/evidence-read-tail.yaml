@@ -13,4 +13,5 @@ turns:
       mission.evidence.asset.content.download: approve
 checks:
   reply_contains: [EVAL_ERROR_TAIL]
-  max_tool_calls: 4
+  expect_calls:
+    - { tool: evidence_read, count: 2 }

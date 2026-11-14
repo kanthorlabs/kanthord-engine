@@ -130,6 +130,10 @@ import type { Registration, VerifiedClient } from "../../worker/contract.ts";
 import type { Transaction } from "../../kernel/store.ts";
 import type { Context } from "../../kernel/context.ts";
 import { createIdentity } from "../../kernel/identity.ts";
+export {
+  endWorkerRegistrations,
+  seedWorkerRegistration,
+} from "../../worker/test-support.ts";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
 import { isString } from "../../kernel/values.ts";
 import { OperationError as GatewayError } from "../../kernel/errors.ts";
@@ -2816,6 +2820,27 @@ export async function provisionWorkerProject(
         body: null,
       }),
   };
+}
+
+export async function rewriteWorkerProject(
+  fixture: Parameters<typeof humanCaller>[0],
+  projectId: string,
+  workers: Readonly<Record<string, number>>,
+) {
+  const call = humanCaller(fixture);
+  const current = await call(projectOperations["bindingSet.get"], {
+    params: { project_id: projectId },
+    query: {},
+    body: null,
+  });
+  return call(projectOperations["bindingSet.write"], {
+    params: { project_id: projectId },
+    query: {},
+    body: {
+      version: current.version,
+      bindings: workerProjectBindings(workers) as never,
+    },
+  });
 }
 
 const NATIVE_DEFAULTS = {

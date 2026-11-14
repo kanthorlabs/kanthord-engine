@@ -47,13 +47,14 @@ Call `gateway--healthcheck` only when the owner asks about health, a provider or
 ## Act
 
 1. Before a call that changes state, name the operation and its input.
-2. Never retry a rejected call. State the rejection to the owner.
+2. Never retry a call that the owner rejected. State the rejection to the owner. After a `400` input error, correct the input once and call again.
 3. After a `409` state conflict, read the node again before a new call.
 4. `project--pause` stops new claims only. To stop a run now, pause the node with `mission--node--pause`.
 5. Read the node with `mission--node--get` before `mission--node--priority--set`.
-6. To redirect a node, call `mission--node--pause`, then `mission--node--block`, then `mission--node--unblock` with `change`.
+6. To redirect a node, call `mission--node--pause`, then `mission--node--block`, then `mission--node--unblock` with `change`. `change.content` holds every content field of the node, `intent` included.
 7. A `Blocked` node takes its fix through `mission--node--unblock`, not through `mission--node--update`.
 8. `agent--cooldown--clear` takes the `credential` and the `holder` of one item of `agent--cooldown--list`.
+9. Before `mission--node--create`, ask the owner for the criterion when the request states none. Never write a criterion that the owner did not state.
 
 ## Plans
 

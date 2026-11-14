@@ -3,12 +3,15 @@ import { join } from "node:path";
 import type { TestContext } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
+  endWorkerRegistrations,
   gatewayFixture,
   humanCaller,
   nativeOAuthProviders,
   provisionNativeAgent,
   provisionRepositoryCredentials,
   provisionWorkerProject,
+  rewriteWorkerProject,
+  seedWorkerRegistration,
 } from "../apps/server/test-support.ts";
 import { CodedError } from "../kernel/errors.ts";
 import { type Operation, OperationRegistry } from "../kernel/operation.ts";
@@ -60,6 +63,8 @@ export const CheckKind = {
 
 const FIXTURE_REASON = "eval fixture";
 const GENERAL_BINDING = "general";
+const GENERAL_INSTANCE_COUNT = 1;
+const NO_INSTANCES = 0;
 const SEED_ATTEMPT = 1;
 const POLL_INTERVAL_MS = 50;
 const TURN_DEADLINE_MS = 300000;
@@ -129,8 +134,14 @@ async function provisionFixture(
   entries: FixtureEntry[],
 ): Promise<FixtureIds> {
   const project = await provisionWorkerProject(sandbox.fixture, key, {
-    [GENERAL_BINDING]: 0,
+    [GENERAL_BINDING]: GENERAL_INSTANCE_COUNT,
   });
+  const general = await bindingNamed(sandbox, project.id, GENERAL_BINDING);
+  seedWorkerRegistration(
+    sandbox.fixture.store,
+    project.id,
+    general.resource_identity,
+  );
   const mission = await sandbox.call(missionOperations.get, {
     params: { project_id: project.id },
     query: {},
@@ -315,6 +326,28 @@ function seedEvidenceStep(
   };
 }
 
+async function seedJobWithoutTaker(
+  sandbox: Sandbox,
+  step: Extract<SeedStepValue, { step: typeof SeedStep.JobWithoutTaker }>,
+  ids: PlaceholderIds,
+): Promise<void> {
+  const { fixture } = locate(ids, step.node);
+  const binding = await bindingNamed(
+    sandbox,
+    fixture.project_id,
+    GENERAL_BINDING,
+  );
+  endWorkerRegistrations(
+    sandbox.fixture.store,
+    fixture.project_id,
+    binding.resource_identity,
+  );
+  await rewriteWorkerProject(sandbox.fixture, fixture.project_id, {
+    [GENERAL_BINDING]: NO_INSTANCES,
+  });
+  ageJob(sandbox.fixture.store, step.node, Date.now() - step.age_ms);
+}
+
 async function seedStep(
   sandbox: Sandbox,
   step: SeedStepValue,
@@ -329,7 +362,7 @@ async function seedStep(
   )
     await seedEnvironmentStep(sandbox, step);
   if (step.step === SeedStep.JobWithoutTaker)
-    ageJob(sandbox.fixture.store, step.node, Date.now() - step.age_ms);
+    await seedJobWithoutTaker(sandbox, step, ids);
 }
 
 interface Tally {
