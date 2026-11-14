@@ -20,8 +20,8 @@ import { EVAL_CONFIGURATION, runSuite } from "./run.ts";
 const SUBJECT = "ops@1";
 const PROVIDER = "anthropic";
 const KEY = "sk-eval-test-key";
-const ACCESS_TOKEN = "eval-oauth-access-value";
-const REFRESH_TOKEN = "eval-oauth-refresh-value";
+const ACCESS_TOKEN = "eval-run-access-value";
+const REFRESH_TOKEN = "eval-run-refresh-value";
 const FAR_EXPIRY_MS = 86400000;
 const KEY_SOURCE: CredentialSource = {
   kind: CredentialSourceKind.Key,
