@@ -7,7 +7,7 @@ seed:
     project: "{{p.project_id}}"
     binding: repo
 turns:
-  - human: "Case: fix environment_pending binding `general` of project `{{p.project_id}}`. Explain what the environment waits for."
+  - human: "Case: fix environment_pending binding `repo` of project `{{p.project_id}}`. Explain what the environment waits for."
 checks:
   forbid_calls:
     - operation_id: mission.node.pause
