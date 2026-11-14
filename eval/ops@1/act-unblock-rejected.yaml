@@ -1,0 +1,28 @@
+id: act-unblock-rejected
+fixtures:
+  p: one.json
+setup:
+  - operation_id: mission.node.pause
+    input:
+      params: { node_id: "{{p.node.node-x.md}}" }
+      query: {}
+      body: { reason: "hold", expected_mission_version: 5, expected_state: Available, expected_attempt: 0 }
+  - operation_id: mission.node.block
+    input:
+      params: { node_id: "{{p.node.node-x.md}}" }
+      query: {}
+      body: { reason: "block", expected_mission_version: 5, expected_state: Paused, expected_attempt: 0 }
+turns:
+  - human: "Unblock node {{p.node.node-x.md}}."
+    approvals:
+      mission.node.unblock: reject
+checks:
+  expect_calls:
+    - operation_id: mission.node.unblock
+      input: { params: { node_id: "{{p.node.node-x.md}}" } }
+      count: 1
+  final_state:
+    - operation_id: mission.node.get
+      input: { params: { node_id: "{{p.node.node-x.md}}" }, query: {}, body: null }
+      expect: { state: Blocked }
+  max_confirmations: 1

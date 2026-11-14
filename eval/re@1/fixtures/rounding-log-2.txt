@@ -1,0 +1,4 @@
+TAP version 13
+ok 1 - export writes header
+ok 2 - export writes rows
+1..2

@@ -12,6 +12,8 @@ const GLOBAL_RULE = "no-restricted-globals";
 const SYNTAX_RULE = "no-restricted-syntax";
 const REFUSED_PROBES = ["src/intake/probe.ts", "src/kernel/probe.ts"];
 const ADMITTED_PROBE = "src/apps/server/probe.ts";
+const EVAL_PROBE = "src/eval/probe.ts";
+const EVAL_PROBE_SOURCE = `import { gatewayFixture } from "../apps/server/test-support.ts";\nexport const probe = gatewayFixture;\n`;
 const STORAGE_PROBE = "src/storage/probe.ts";
 const SERVICE_IMPORT_SOURCE = `import { IntakeService } from "../intake/service.ts";\nexport const probe = IntakeService;\n`;
 const EXPECTED_REFUSALS = 1;
@@ -53,6 +55,13 @@ test("an import of service-mint.ts outside src/apps/server/ is a boundary error"
 
 test("an import of service-mint.ts from src/apps/server/ is admitted", async () => {
   assert.equal(await boundaryErrors(ADMITTED_PROBE), NO_REFUSALS);
+});
+
+test("an import of gatewayFixture from src/eval/ is admitted", async () => {
+  assert.equal(
+    await boundaryErrors(EVAL_PROBE, EVAL_PROBE_SOURCE),
+    NO_REFUSALS,
+  );
 });
 
 test("an import of a service file from src/storage/ is a boundary error", async () => {

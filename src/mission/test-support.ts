@@ -32,6 +32,7 @@ import {
   type AssessmentSubmit,
   AssetKind,
   type Authorized,
+  CONTENT_ENCODING,
   type FailureHold,
   FindingAction,
   FindingGround,
@@ -61,6 +62,7 @@ import {
   insertNode,
   insertRevision,
   intentOf,
+  readCurrentRevision,
   readNode,
   setNodeState,
 } from "./store.ts";
@@ -69,10 +71,12 @@ import type { ActContribution } from "./act-telemetry.ts";
 import { missionMigrations } from "./migrations.ts";
 import { type Dependencies, MissionService } from "./service.ts";
 import {
+  closeAttempt,
   insertAssessment,
   insertEvidence,
   openAttempt,
 } from "./record-store.ts";
+import { producedContent } from "./evidence-content.ts";
 import { getRevision } from "./node-read.ts";
 import { LANDED_COMMIT_SUBJECT } from "./node-check.ts";
 
@@ -1016,4 +1020,85 @@ export function repositoryRequestOf(
   const { facts } = authorized;
   assert.ok("repository" in facts);
   return { ...authorized, facts };
+}
+
+const SEED_ACTOR_NAME = "Eval";
+
+export interface SeedEvidenceInput {
+  node_id: string;
+  attempt: number;
+  assets: readonly { media_type: string; bytes: Buffer }[];
+}
+
+export interface SeededEvidence {
+  evidence_id: string;
+  asset_ids: string[];
+}
+
+function seedActor() {
+  return {
+    kind: ActorKind.Execution,
+    execution_id: createIdentity("execution"),
+    client_id: null,
+    name: SEED_ACTOR_NAME,
+  } as const;
+}
+
+export function ensureClosedAttempts(
+  store: Store,
+  nodeId: string,
+  attempt: number,
+  now = Date.now(),
+): void {
+  store.transaction((tx) => {
+    const node = readNode(tx, nodeId);
+    assert.ok(node);
+    const revision = readCurrentRevision(tx, nodeId);
+    assert.ok(revision);
+    for (let next = node.attempt + 1; next <= attempt; next += 1) {
+      openAttempt(tx, nodeId, revision.revision, seedActor(), now);
+      closeAttempt(tx, nodeId, next, now);
+    }
+  });
+}
+
+export function seedEvidence(
+  store: Store,
+  input: SeedEvidenceInput,
+  now = Date.now(),
+): SeededEvidence {
+  assert.ok(input.assets.length);
+  ensureClosedAttempts(store, input.node_id, input.attempt, now);
+  const evidenceId = createIdentity("evidence");
+  const assetIds = input.assets.map(() => createIdentity("evidence_asset"));
+  store.transaction((tx) =>
+    insertEvidence(
+      tx,
+      {
+        id: evidenceId,
+        node_id: input.node_id,
+        attempt: input.attempt,
+        subject: "Produced",
+        requirement_key: null,
+        end_state: null,
+        verification: null,
+        provenance: canonicalJSON(seedActor()),
+        created_at: now,
+      },
+      input.assets.map((asset, index) => ({
+        id: assetIds[index]!,
+        evidence_id: evidenceId,
+        kind: AssetKind.Produced,
+        content: canonicalJSON(
+          producedContent({
+            media_type: asset.media_type,
+            data: asset.bytes.toString(CONTENT_ENCODING),
+          }),
+        ),
+        published_at: now,
+        expired_at: null,
+      })),
+    ),
+  );
+  return { evidence_id: evidenceId, asset_ids: assetIds };
 }

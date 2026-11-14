@@ -1,0 +1,64 @@
+id: case-fix-agent_invalid
+source: FIX_ASKS
+fixtures:
+  p: one.json
+setup:
+  - operation_id: agent.enablement.put
+    input:
+      params: { agent_name: swe@1 }
+      query: {}
+      body:
+        agent_providers: [{ name: default, provider: anthropic, credential: native-credential }]
+        default_configuration: { agent_provider: default, model_identifier: claude-sonnet-4-5, reasoning_effort: "off" }
+        fallback_configurations: []
+  - operation_id: project.bindingSet.write
+    input:
+      params: { project_id: "{{p.project_id}}" }
+      query: {}
+      body:
+        version: 3
+        bindings:
+          repo:
+            kind: repository
+            config:
+              available: true
+              platform: github
+              address: "git@github.com:owner/repo.git"
+              ssh_credential: github-ssh
+              strategy: { base_branch: main }
+              credential: github
+              prompts: { agents: { "swe@1": "Follow repository conventions." } }
+          general:
+            kind: worker
+            config: { worker: claude-code@1, instance_count: 0 }
+          coder:
+            kind: worker
+            config: { worker: coder@1, worker_instances: [] }
+  - operation_id: agent.enablement.disable
+    input:
+      params: { agent_name: swe@1 }
+      query: {}
+      body: { expected_revision: 1 }
+turns:
+  - human: "Case: fix agent_invalid agent `swe@1` in binding `coder` of project `{{p.project_id}}`. Explain the invalid configuration and recommend the fix."
+checks:
+  forbid_calls:
+    - operation_id: mission.node.pause
+    - operation_id: mission.node.resume
+    - operation_id: mission.node.check
+    - operation_id: mission.node.priority.set
+    - operation_id: mission.dependency.add
+    - operation_id: mission.dependency.remove
+    - operation_id: project.pause
+    - operation_id: project.resume
+    - operation_id: agent.cooldown.clear
+    - operation_id: mission.node.unblock
+    - operation_id: mission.node.block
+    - operation_id: mission.node.create
+    - operation_id: mission.node.update
+    - operation_id: mission.proposal.decide
+    - operation_id: mission.criterion.set
+    - operation_id: mission.import.apply
+  max_offers: 1
+  expect_offer: { operation_id: agent.enablement.put, target_id: swe@1 }
+  reply_contains: [default_configuration]

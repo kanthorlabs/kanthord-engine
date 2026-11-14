@@ -1,0 +1,15 @@
+id: offer-resume
+fixtures:
+  p: single.json
+setup:
+  - operation_id: mission.node.pause
+    input:
+      params: { node_id: "{{p.node.x.md}}" }
+      query: {}
+      body: { reason: "hold", expected_mission_version: 5, expected_state: Available, expected_attempt: 0 }
+turns:
+  - human: "Resume node {{p.node.x.md}}."
+checks:
+  expect_offer: { operation_id: mission.node.resume, target_id: "{{p.node.x.md}}" }
+  max_offers: 1
+  reply_forbids: ['(?i:dashboard|another agent)|\bYumi\b|\bSWE\b', '(?i:node page)']

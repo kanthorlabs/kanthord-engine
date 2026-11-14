@@ -12,6 +12,9 @@ document.
   application around one unit.
 - `src/apps/server/index.ts` is the composition root. `src/main.ts` only
   dispatches the CLI.
+- `src/eval/` is the eval harness: case parser, checks, comparison, sandbox and
+  runner. It is test code only.
+- `eval/` holds the eval cases and fixtures per subject.
 
 ## Validate
 

@@ -1,0 +1,19 @@
+{
+  "entries": [
+    {
+      "filename": "x.md",
+      "intent": "implement",
+      "name": "Round totals",
+      "requirement": "Round totals as specified.",
+      "criterion": "Round totals works.",
+      "verifications": [
+        "pnpm test"
+      ],
+      "bindings": [
+        "repo"
+      ],
+      "tags": [],
+      "depends_on": []
+    }
+  ]
+}

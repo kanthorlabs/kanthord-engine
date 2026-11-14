@@ -1,0 +1,33 @@
+id: case-fix-project_paused
+source: FIX_ASKS
+fixtures:
+  p: one.json
+setup:
+  - operation_id: project.pause
+    input:
+      params: { project_id: "{{p.project_id}}" }
+      query: {}
+      body: null
+turns:
+  - human: "Case: fix project_paused project `{{p.project_id}}`. Explain why it is paused and recommend whether to resume it."
+checks:
+  forbid_calls:
+    - operation_id: mission.node.pause
+    - operation_id: mission.node.resume
+    - operation_id: mission.node.check
+    - operation_id: mission.node.priority.set
+    - operation_id: mission.dependency.add
+    - operation_id: mission.dependency.remove
+    - operation_id: project.pause
+    - operation_id: project.resume
+    - operation_id: agent.cooldown.clear
+    - operation_id: mission.node.unblock
+    - operation_id: mission.node.block
+    - operation_id: mission.node.create
+    - operation_id: mission.node.update
+    - operation_id: mission.proposal.decide
+    - operation_id: mission.criterion.set
+    - operation_id: mission.import.apply
+  max_offers: 1
+  expect_offer: { operation_id: project.resume, target_id: "{{p.project_id}}" }
+  reply_contains: [paused]
