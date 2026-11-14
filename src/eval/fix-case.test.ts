@@ -26,6 +26,8 @@ const REGISTRATION_LIMIT = 100;
 const SINGLE_REGISTRATION = 1;
 const SINGLE_JOB = 1;
 const NO_INSTANCES = 0;
+const NATIVE_PLATFORM = "anthropic";
+const NATIVE_CREDENTIAL = "native-credential";
 const NO_JOBS = 0;
 const TEST_TIMEOUT_MS = 60000;
 
@@ -208,7 +210,7 @@ test(
 );
 
 test(
-  "case-fix-request_rejected prepares with its own credential",
+  "case-fix-request_rejected prepares on the native credential",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const sandbox = await openSandbox(t, {
@@ -220,5 +222,15 @@ test(
     assert.ok(loaded);
     const { failed } = await prepareCase(sandbox, loaded);
     assert.equal(failed, null);
+    assert.equal(sandbox.native.platform, NATIVE_PLATFORM);
+    const enablement = await sandbox.call(agentOperations["enablement.get"], {
+      params: { agent_name: FIX_AGENT },
+      query: {},
+      body: null,
+    });
+    assert.deepEqual(
+      enablement.agent_providers.map((item) => item.credential),
+      [NATIVE_CREDENTIAL],
+    );
   },
 );

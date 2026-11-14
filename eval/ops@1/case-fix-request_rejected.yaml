@@ -3,24 +3,19 @@ source: FIX_ASKS
 fixtures:
   p: one.json
 setup:
-  - operation_id: llm.credential.create
-    input:
-      params: {}
-      query: {}
-      body: { name: anthropic-main, platform: anthropic, metadata: null, secret: { key: sk-eval-not-a-key } }
   - operation_id: agent.enablement.put
     input:
       params: { agent_name: swe@1 }
       query: {}
       body:
-        agent_providers: [{ name: default, provider: anthropic, credential: anthropic-main }]
+        agent_providers: [{ name: default, provider: "{{native.platform}}", credential: native-credential }]
         default_configuration: { agent_provider: default, model_identifier: claude-sonnet-4-5, reasoning_effort: "off" }
         fallback_configurations: []
 seed:
   - step: execution_refusal
     node: "{{p.node.node-x.md}}"
     code: bad_request
-    credential: anthropic-main
+    credential: native-credential
     agent: swe@1
 turns:
   - human: "Case: fix request_rejected agent `swe@1`. Explain why the provider rejects its requests and recommend the fix."

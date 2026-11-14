@@ -9,8 +9,10 @@ import {
   EVAL_DIRECTORY,
   loadSuite,
   parseCase,
+  resolvePlaceholders,
 } from "./case.ts";
 
+const PLATFORM_PLACEHOLDER = "{{native.platform}}";
 const PLACEHOLDER_UNKNOWN = "eval.case.placeholder_unknown";
 const FIXTURE_FILE = "alpha.json";
 const RETRIES = "retries";
@@ -88,6 +90,22 @@ test("security: argument guard - a placeholder with an unknown fixture key or fi
     { code: PLACEHOLDER_UNKNOWN },
   );
   assert.ok(parseCase(source(caseText())));
+});
+
+test("the native.platform placeholder resolves to the platform of each credential source", () => {
+  const parsed = parseCase(
+    source(caseText({ turn: `Use ${PLATFORM_PLACEHOLDER}.` })),
+  );
+  for (const platform of ["anthropic", "anthropic-subscription"])
+    assert.deepEqual(
+      resolvePlaceholders(parsed.turns[0]!.human, {}, { platform }),
+      `Use ${platform}.`,
+    );
+});
+
+test("security: argument guard - a fixture key native fails the parse", () => {
+  const text = caseText().replace("  alpha: ", "  native: ");
+  assert.throws(() => parseCase(source(text)), z.ZodError);
 });
 
 test("invariant guard: verdict - case_digest is stable under key order and changes with the fixture, the asset or the seed", () => {

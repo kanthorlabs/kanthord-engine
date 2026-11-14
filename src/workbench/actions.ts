@@ -231,7 +231,7 @@ export function offerActionTool(input: OfferActionToolInput): ToolDefinition {
         content: [
           {
             type: "text",
-            text: `Card shown: ${operation_id} on ${target_id}. The owner decides. Do not state that the act ran. If the answer is not written yet, write it now. Then end the answer.`,
+            text: `Card shown: ${operation_id} on ${target_id}. The owner decides. Do not state that the act ran. Now write the full answer: the report that the human asked for, then one sentence about the card.`,
           },
         ],
         details: record,

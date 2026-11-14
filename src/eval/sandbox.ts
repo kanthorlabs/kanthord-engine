@@ -36,6 +36,7 @@ import {
   type FixtureEntry,
   type FixtureIds,
   type LoadedCase,
+  type NativePlaceholders,
   type PlaceholderIds,
   resolvePlaceholders,
   SeedStep,
@@ -87,6 +88,7 @@ export interface Sandbox {
   evalDirectory: string;
   configuration: WorkbenchConfiguration;
   fixture: GatewayFixture;
+  native: NativePlaceholders;
   call: ReturnType<typeof humanCaller>;
   operation(id: string): Operation;
 }
@@ -123,6 +125,7 @@ export async function openSandbox(
     evalDirectory: options.evalDirectory ?? EVAL_DIRECTORY,
     configuration: options.configuration,
     fixture,
+    native: { platform: credential.platform },
     call: humanCaller(fixture),
     operation: (id) => registry.get(id).operation,
   };
@@ -230,7 +233,7 @@ function assetBytes(
   );
   if (!media.startsWith(TEXT_MEDIA_PREFIX)) return bytes;
   return Buffer.from(
-    resolvePlaceholders(bytes.toString(TEXT_ENCODING), ids),
+    resolvePlaceholders(bytes.toString(TEXT_ENCODING), ids, sandbox.native),
     TEXT_ENCODING,
   );
 }
@@ -513,11 +516,18 @@ export async function prepareCase(
       key,
       loaded.fixture_entries[key]!,
     );
-  const setup = await runSetup(sandbox, resolvePlaceholders(loaded.setup, ids));
+  const setup = await runSetup(
+    sandbox,
+    resolvePlaceholders(loaded.setup, ids, sandbox.native),
+  );
   if (setup) return { ids, failed: failedPlay(CheckKind.Setup, setup) };
   for (const step of loaded.seed)
     try {
-      await seedStep(sandbox, resolvePlaceholders(step, ids), ids);
+      await seedStep(
+        sandbox,
+        resolvePlaceholders(step, ids, sandbox.native),
+        ids,
+      );
     } catch (error) {
       return { ids, failed: failedPlay(CheckKind.Seed, failureDetail(error)) };
     }
@@ -532,6 +542,10 @@ export async function playCase(
   if (failed) return failed;
   return runTurns(
     sandbox,
-    resolvePlaceholders({ turns: loaded.turns, checks: loaded.checks }, ids),
+    resolvePlaceholders(
+      { turns: loaded.turns, checks: loaded.checks },
+      ids,
+      sandbox.native,
+    ),
   );
 }
