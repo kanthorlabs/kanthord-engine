@@ -1,0 +1,15 @@
+id: evidence-reject
+fixtures:
+  p: single.json
+seed:
+  - step: evidence
+    node: "{{p.node.x.md}}"
+    attempt: 1
+    assets:
+      - { media_type: text/plain, file: markers.txt }
+turns:
+  - human: "Read the test log of node {{p.node.x.md}}."
+    approvals:
+      mission.evidence.asset.content.download: reject
+checks:
+  reply_forbids: [EVAL_LINE_ALPHA, EVAL_LINE_BRAVO, EVAL_LINE_CHARLIE]

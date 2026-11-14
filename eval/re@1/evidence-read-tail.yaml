@@ -1,0 +1,16 @@
+id: evidence-read-tail
+fixtures:
+  p: single.json
+seed:
+  - step: evidence
+    node: "{{p.node.x.md}}"
+    attempt: 1
+    assets:
+      - { media_type: text/plain, file: migration-tail.txt }
+turns:
+  - human: "Why did node {{p.node.x.md}} fail?"
+    approvals:
+      mission.evidence.asset.content.download: approve
+checks:
+  reply_contains: [EVAL_ERROR_TAIL]
+  max_tool_calls: 4

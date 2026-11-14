@@ -1,0 +1,34 @@
+{
+  "entries": [
+    {
+      "filename": "x.md",
+      "intent": "implement",
+      "name": "Round totals",
+      "requirement": "Round totals as specified.",
+      "criterion": "Round totals works.",
+      "verifications": [
+        "pnpm test"
+      ],
+      "bindings": [
+        "repo"
+      ],
+      "tags": [],
+      "depends_on": []
+    },
+    {
+      "filename": "y.md",
+      "intent": "implement",
+      "name": "Archive totals",
+      "requirement": "Archive totals as specified.",
+      "criterion": "Archive totals works.",
+      "verifications": [
+        "pnpm test"
+      ],
+      "bindings": [
+        "repo"
+      ],
+      "tags": [],
+      "depends_on": []
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+id: evidence-refused-type
+fixtures:
+  p: single.json
+seed:
+  - step: evidence
+    node: "{{p.node.x.md}}"
+    attempt: 1
+    assets:
+      - { media_type: application/zip, file: bundle.zip }
+turns:
+  - human: "Read the evidence of node {{p.node.x.md}}."
+    approvals:
+      mission.evidence.asset.content.download: approve
+checks:
+  reply_contains: ["{{p.evidence.x.md.asset.0}}", Download]
+  reply_forbids: ['https?://']

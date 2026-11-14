@@ -1,0 +1,17 @@
+id: evidence-read-log
+fixtures:
+  p: single.json
+seed:
+  - step: evidence
+    node: "{{p.node.x.md}}"
+    attempt: 1
+    assets:
+      - { media_type: text/plain, file: rounding-log-1.txt }
+      - { media_type: text/plain, file: rounding-log-2.txt }
+turns:
+  - human: "Why did node {{p.node.x.md}} fail? Read both test logs."
+    approvals:
+      mission.evidence.asset.content.download: approve
+checks:
+  reply_contains: [EVAL_TEST_ROUNDING]
+  max_confirmations: 1

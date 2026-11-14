@@ -1,0 +1,10 @@
+TAP version 13
+ok 1 - totals sum line items
+ok 2 - totals apply tax
+not ok 3 - EVAL_TEST_ROUNDING totals round half up
+  ---
+  expected: 10.05
+  actual: 10.04
+  ...
+ok 4 - totals format currency
+1..4
