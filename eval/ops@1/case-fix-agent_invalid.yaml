@@ -83,4 +83,4 @@ checks:
     - operation_id: mission.import.apply
   max_offers: 1
   expect_offer: { operation_id: agent.enablement.put, target_id: swe@1 }
-  reply_contains: [default_configuration]
+  reply_contains: [reasoning_effort]
