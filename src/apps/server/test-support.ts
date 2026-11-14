@@ -2813,8 +2813,19 @@ const NATIVE_DEFAULTS = {
   reasoning_effort: "off",
 } as const;
 
+export interface NativeAgentOptions {
+  agentName?: string;
+  key?: string;
+  configuration?: EnablementBody["default_configuration"];
+}
+
 export async function provisionNativeAgent(
   fixture: Parameters<typeof humanCaller>[0],
+  {
+    agentName = "swe@1",
+    key = "native-provider-key",
+    configuration = NATIVE_DEFAULTS,
+  }: NativeAgentOptions = {},
 ) {
   const call = humanCaller(fixture);
   const empty = { params: {}, query: {} };
@@ -2824,11 +2835,11 @@ export async function provisionNativeAgent(
       name: "native-credential",
       platform: "anthropic",
       metadata: null,
-      [SECRET_FIELD]: { key: "native-provider-key" },
+      [SECRET_FIELD]: { key },
     },
   });
   await call(agentOperations["enablement.put"], {
-    params: { agent_name: "swe@1" },
+    params: { agent_name: agentName },
     query: {},
     body: {
       agent_providers: [
@@ -2838,7 +2849,7 @@ export async function provisionNativeAgent(
           credential: "native-credential",
         },
       ],
-      default_configuration: NATIVE_DEFAULTS,
+      default_configuration: configuration,
       fallback_configurations: [],
     },
   });

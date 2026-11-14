@@ -306,6 +306,7 @@ export default tseslint.config(
             "src/(custody|project|mission|scheduler|worker|workbench|tracking|gateway|intake|footprint)",
           capture: ["name"],
         },
+        { type: "eval", pattern: "src/eval" },
         { type: "apps-server", pattern: "src/apps/server" },
         { type: "apps-cli", pattern: "src/apps/cli" },
         { type: "apps-worker", pattern: "src/apps/worker" },
@@ -434,6 +435,25 @@ export default tseslint.config(
                   to: element("service", {
                     captured: { name: "intake" },
                     fileInternalPath: "jira-test-support.ts",
+                  }),
+                },
+              ],
+            },
+            {
+              from: element("eval"),
+              allow: [
+                ...allow("kernel", "component"),
+                { to: serviceEntry("{index,contract}.ts") },
+                { to: applicationEntry("apps-server") },
+                {
+                  to: element("apps-server", {
+                    fileInternalPath: "test-support.ts",
+                  }),
+                },
+                {
+                  to: element("service", {
+                    captured: { name: "{mission,scheduler}" },
+                    fileInternalPath: "test-support.ts",
                   }),
                 },
               ],
@@ -913,6 +933,7 @@ export default tseslint.config(
       "src/kernel/caller-mint.ts",
       "src/kernel/service-mint.ts",
       "src/apps/server/**/*.ts",
+      "src/eval/**",
     ],
     rules: {
       "no-restricted-imports": [
@@ -1023,7 +1044,11 @@ export default tseslint.config(
   },
   {
     files: ["src/**/*.ts"],
-    ignores: ["src/**/*.test.ts", "src/**/*test-support.ts"],
+    ignores: [
+      "src/**/*.test.ts",
+      "src/**/*test-support.ts",
+      "src/eval/**",
+    ],
     rules: {
       "@typescript-eslint/no-magic-numbers": [
         "error",
@@ -1042,7 +1067,12 @@ export default tseslint.config(
   },
   {
     files: ["src/**/*.ts"],
-    ignores: ["**/*.test.ts", "**/*test-support.ts", "**/__fixtures__/**"],
+    ignores: [
+      "**/*.test.ts",
+      "**/*test-support.ts",
+      "**/__fixtures__/**",
+      "src/eval/**",
+    ],
     rules: {
       complexity: ["error", 10],
       "@typescript-eslint/max-params": ["error", { max: 3 }],
