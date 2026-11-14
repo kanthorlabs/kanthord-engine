@@ -2034,6 +2034,13 @@ const S3_CHECKSUM_TYPE_HEADER = "x-amz-checksum-type";
 const S3_CHECKSUM_MODE_ENABLED = "ENABLED";
 const S3_CHECKSUM_TYPE_FULL = "FULL_OBJECT";
 const S3_HEAD = "HEAD";
+const S3_RANGE_HEADER = "range";
+const S3_CONTENT_RANGE_HEADER = "content-range";
+const S3_RANGE_PATTERN = /^bytes=(\d+)-(\d+)$/;
+const S3_INDEX_STEP = 1;
+const S3_OVERRUN_CHUNK_BYTES = 65536;
+const S3_RANGE_START_GROUP = 1;
+const S3_RANGE_END_GROUP = 2;
 const S3_BASE64 = "base64";
 const S3_SHA256 = "sha256";
 const S3_ERROR_CODES = {
@@ -2060,6 +2067,9 @@ export interface FakeS3Call {
 interface FakeS3State {
   versions: Map<string, FakeS3Object[]>;
   calls: FakeS3Call[];
+  closed: FakeS3Call[];
+  ranges: string[];
+  overrun: boolean;
   nextFailure: number | null;
   losses: number;
 }
@@ -2143,6 +2153,16 @@ function putS3Object(
   response.writeHead(HttpStatus.OK, { [S3_VERSION_HEADER]: version }).end();
 }
 
+function streamUntilClosed(response: ServerResponse) {
+  const chunk = Buffer.alloc(S3_OVERRUN_CHUNK_BYTES);
+  const pump = () => {
+    while (!response.destroyed && response.write(chunk));
+  };
+  response.writeHead(HttpStatus.PartialContent);
+  response.on("drain", pump);
+  pump();
+}
+
 function readS3Object(
   state: FakeS3State,
   request: IncomingMessage,
@@ -2166,9 +2186,38 @@ function readS3Object(
     headers[CHECKSUM_HEADER] = found.sha256;
     headers[S3_CHECKSUM_TYPE_HEADER] = S3_CHECKSUM_TYPE_FULL;
   }
+  if (request.method !== HttpMethod.Get)
+    return response.writeHead(HttpStatus.OK, headers).end();
+  response.on("close", () => {
+    if (!response.writableFinished)
+      state.closed.push({
+        method: HttpMethod.Get,
+        key: target.key,
+        version: target.version,
+      });
+  });
+  const rangeHeader = request.headers[S3_RANGE_HEADER];
+  if (rangeHeader !== undefined) state.ranges.push(rangeHeader);
+  const range = S3_RANGE_PATTERN.exec(rangeHeader ?? "");
+  if (!range)
+    return response.writeHead(HttpStatus.OK, headers).end(found.bytes);
+  if (state.overrun) {
+    state.overrun = false;
+    return streamUntilClosed(response);
+  }
+  const start = Number(range[S3_RANGE_START_GROUP]);
+  const end = Math.min(
+    Number(range[S3_RANGE_END_GROUP]),
+    found.bytes.length - S3_INDEX_STEP,
+  );
+  const slice = found.bytes.subarray(start, end + S3_INDEX_STEP);
   response
-    .writeHead(HttpStatus.OK, headers)
-    .end(request.method === HttpMethod.Get ? found.bytes : undefined);
+    .writeHead(HttpStatus.PartialContent, {
+      ...headers,
+      [S3_CONTENT_LENGTH_HEADER]: slice.length,
+      [S3_CONTENT_RANGE_HEADER]: `bytes ${start}-${end}/${found.bytes.length}`,
+    })
+    .end(slice);
 }
 
 function deleteS3Object(
@@ -2226,6 +2275,9 @@ export async function fakeS3(t: TestContext) {
   const state: FakeS3State = {
     versions: new Map(),
     calls: [],
+    closed: [],
+    ranges: [],
+    overrun: false,
     nextFailure: null,
     losses: ZERO_LOSSES,
   };
@@ -2254,8 +2306,13 @@ export async function fakeS3(t: TestContext) {
     endpoint: `http://127.0.0.1:${address.port}`,
     bucket: S3_BUCKET,
     calls: state.calls as readonly FakeS3Call[],
+    closed: state.closed as readonly FakeS3Call[],
+    ranges: state.ranges as readonly string[],
     objects(key: string): readonly FakeS3Object[] {
       return state.versions.get(key) ?? [];
+    },
+    overrunNext(): void {
+      state.overrun = true;
     },
     failNext(status: number): void {
       assert.ok(Number.isInteger(status));

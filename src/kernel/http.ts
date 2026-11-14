@@ -3,6 +3,7 @@ export const HttpStatus = {
   Created: 201,
   Accepted: 202,
   NoContent: 204,
+  PartialContent: 206,
   MovedPermanently: 301,
   BadRequest: 400,
   Unauthorized: 401,
@@ -15,6 +16,7 @@ export const HttpStatus = {
   UnsupportedMediaType: 415,
   TooManyRequests: 429,
   InternalServerError: 500,
+  BadGateway: 502,
   ServiceUnavailable: 503,
   GatewayTimeout: 504,
 } as const;

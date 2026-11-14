@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
 import { OperationError } from "../kernel/errors.ts";
-import { HttpStatus } from "../kernel/http.ts";
+import { HttpStatus, MediaType } from "../kernel/http.ts";
 import type { CallerContext, ExecutionClaim } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
@@ -160,13 +160,28 @@ function signGet(
   );
 }
 
-export async function readContent(
+export interface ContentRequest {
+  assetId: string;
+  bound: ContentBound;
+  execution: boolean;
+}
+
+export interface ContentRange {
+  offset?: number;
+  length?: number;
+}
+
+export interface DownloadRequest {
+  assetId: string;
+  range: ContentRange;
+}
+
+export async function prepareContent(
   dependencies: Dependencies,
   caller: CallerContext,
-  assetId: string,
-  bound: ContentBound,
-  execution: boolean,
+  request: ContentRequest,
 ) {
+  const { assetId, bound, execution } = request;
   assert.ok(caller.identity);
   assert.equal(typeof bound, FUNCTION_TYPE);
   const prepared = dependencies.store.transaction((tx) => {
@@ -179,10 +194,7 @@ export async function readContent(
       );
     return content;
   });
-  if (!prepared.object)
-    return caller.commit((tx) =>
-      storedContentSchema.parse(contentOf(tx, assetId, bound).result),
-    );
+  if (!prepared.object) return { result: prepared.result, signed: null };
   let object = prepared.object;
   for (let attempt = 0; attempt < MAX_SIGNINGS; attempt++) {
     const signed = await signGet(dependencies, caller, assetId, execution);
@@ -194,13 +206,180 @@ export async function readContent(
       object = current.object;
       continue;
     }
-    return caller.commit((tx) => {
-      const final = contentOf(tx, assetId, bound);
-      assert.equal(final.object?.object_version, object.object_version);
-      return storedContentSchema.parse({ ...final.result, ...signed });
-    });
+    return { result: current.result, signed: { ...signed, headers: {} } };
   }
   assert.fail(
     "An asset version is written once, so signing converges within two attempts.",
   );
+}
+
+export async function readContent(
+  dependencies: Dependencies,
+  caller: CallerContext,
+  assetId: string,
+  bound: ContentBound,
+  execution: boolean,
+) {
+  const { result, signed } = await prepareContent(dependencies, caller, {
+    assetId,
+    bound,
+    execution,
+  });
+  if (!signed)
+    return caller.commit((tx) =>
+      storedContentSchema.parse(contentOf(tx, assetId, bound).result),
+    );
+  const { get_url, expires_at } = signed;
+  return caller.commit((tx) => {
+    const final = contentOf(tx, assetId, bound);
+    assert.deepEqual(final.result.address, result.address);
+    return storedContentSchema.parse({ ...final.result, get_url, expires_at });
+  });
+}
+
+const EVIDENCE_FILE_EXTENSIONS: Readonly<Record<string, string>> = {
+  "text/plain": ".txt",
+  "application/json": ".json",
+  "application/xml": ".xml",
+  "text/xml": ".xml",
+  "application/yaml": ".yaml",
+  "text/yaml": ".yaml",
+  "image/png": ".png",
+  "image/jpeg": ".jpg",
+  "image/gif": ".gif",
+  "image/webp": ".webp",
+};
+const DEFAULT_FILE_EXTENSION = ".bin";
+const EMPTY_SIZE = 0;
+const DEFAULT_OFFSET = 0;
+const LAST_INDEX_OFFSET = 1;
+const MEDIA_TYPE_PARAMETER_SEPARATOR = ";";
+
+function fileExtension(mediaType: string) {
+  const essence = mediaType
+    .split(MEDIA_TYPE_PARAMETER_SEPARATOR)[0]
+    ?.trim()
+    .toLowerCase();
+  return (
+    (essence === undefined ? undefined : EVIDENCE_FILE_EXTENSIONS[essence]) ??
+    DEFAULT_FILE_EXTENSION
+  );
+}
+
+interface ContentSlice {
+  start: number;
+  stop: number;
+}
+
+interface StoredBytes {
+  mediaType: string;
+  size: number;
+  length: number;
+}
+
+interface ProducedContent {
+  media_type: string;
+  data: string;
+}
+
+interface ObjectSource {
+  mediaType: string;
+  size: number;
+  signed: { get_url: string; headers: Record<string, string> };
+}
+
+function sliceBounds(size: number, range: ContentRange): ContentSlice {
+  if (size === EMPTY_SIZE) return { start: EMPTY_SIZE, stop: EMPTY_SIZE };
+  const start = range.offset ?? DEFAULT_OFFSET;
+  if (start >= size)
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      MissionErrorCode.EvidenceContentRangeInvalid,
+      "The offset is at or after the end of the content.",
+    );
+  return { start, stop: Math.min(start + (range.length ?? size), size) };
+}
+
+function downloadHeaders(request: DownloadRequest, stored: StoredBytes) {
+  return {
+    "Content-Type": MediaType.Binary,
+    "Content-Length": String(stored.length),
+    "Content-Disposition": `attachment; filename="${request.assetId}${fileExtension(stored.mediaType)}"`,
+    "X-Content-Type-Options": "nosniff",
+    "Cache-Control": "no-store",
+    "X-Evidence-Media-Type": stored.mediaType,
+    "X-Evidence-Size": String(stored.size),
+  };
+}
+
+function storageUnavailable() {
+  return new OperationError(
+    HttpStatus.BadGateway,
+    MissionErrorCode.EvidenceContentUnavailable,
+    "The storage read failed.",
+  );
+}
+
+function producedAnswer(request: DownloadRequest, produced: ProducedContent) {
+  const content = Buffer.from(produced.data, CONTENT_ENCODING);
+  const { start, stop } = sliceBounds(content.length, request.range);
+  return new Response(content.subarray(start, stop), {
+    status: HttpStatus.OK,
+    headers: downloadHeaders(request, {
+      mediaType: produced.media_type,
+      size: content.length,
+      length: stop - start,
+    }),
+  });
+}
+
+async function objectAnswer(
+  caller: CallerContext,
+  request: DownloadRequest,
+  source: ObjectSource,
+) {
+  const { start, stop } = sliceBounds(source.size, request.range);
+  const headers = downloadHeaders(request, {
+    mediaType: source.mediaType,
+    size: source.size,
+    length: stop - start,
+  });
+  if (source.size === EMPTY_SIZE)
+    return new Response(new Uint8Array(), { status: HttpStatus.OK, headers });
+  const ranged = start > DEFAULT_OFFSET || stop < source.size;
+  const { get_url } = source.signed;
+  const storage = await fetch(get_url, {
+    headers: {
+      ...source.signed.headers,
+      ...(ranged
+        ? { Range: `bytes=${start}-${stop - LAST_INDEX_OFFSET}` }
+        : {}),
+    },
+    redirect: "error",
+    signal: caller.context.signal,
+  }).catch(() => null);
+  const accepted = ranged ? HttpStatus.PartialContent : HttpStatus.OK;
+  if (storage?.status === accepted && storage.body)
+    return new Response(storage.body, { status: HttpStatus.OK, headers });
+  await storage?.body?.cancel().catch(() => undefined);
+  throw storageUnavailable();
+}
+
+export async function downloadContent(
+  dependencies: Dependencies,
+  caller: CallerContext,
+  request: DownloadRequest,
+) {
+  const { result, signed } = await prepareContent(dependencies, caller, {
+    assetId: request.assetId,
+    bound: () => true,
+    execution: false,
+  });
+  if ("data" in result) return producedAnswer(request, result);
+  assert.ok(signed);
+  return objectAnswer(caller, request, {
+    mediaType: result.media_type,
+    size: result.size,
+    signed,
+  });
 }

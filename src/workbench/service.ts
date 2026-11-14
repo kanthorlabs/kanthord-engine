@@ -7,6 +7,7 @@ import type {
   AgentSession,
   ModelRuntime,
   SessionManager,
+  ToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
 import {
   background,
@@ -32,7 +33,11 @@ import {
   type Service,
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
-import { getAgentDeclaration, workbenchAgentNames } from "../agent/catalog.ts";
+import {
+  getAgentDeclaration,
+  workbenchAgentNames,
+  WorkbenchTool,
+} from "../agent/catalog.ts";
 import { AgentErrorCode, type AgentView } from "../agent/contract.ts";
 import { openSession, withDeadline } from "../agent/agent-session.ts";
 import {
@@ -83,7 +88,14 @@ import {
   workbenchOperations,
   type WorkbenchSession,
 } from "./contract.ts";
+import { missionOperations } from "../mission/contract.ts";
 import { offerActionTool } from "./actions.ts";
+import {
+  EVIDENCE_ASSET_MISMATCH,
+  EVIDENCE_READ_TOOL,
+  evidenceFacts,
+  evidenceReadTool,
+} from "./evidence.ts";
 import type { WorkbenchConfig } from "./config.ts";
 import {
   builtinTools,
@@ -164,8 +176,13 @@ interface OpenSession {
   version: number;
   approvals: Map<string, Approval>;
   doneReports: Set<string>;
+  evidenceGrants: Set<string>;
   redaction: SensitiveTextRedaction | null;
   secrets: KnownSecrets;
+}
+
+interface EvidenceGrantOptions {
+  signal: AbortSignal | undefined;
 }
 
 interface Approval {
@@ -383,6 +400,7 @@ export class WorkbenchService implements Service {
       version: 0,
       approvals: new Map(),
       doneReports: new Set(),
+      evidenceGrants: new Set(),
     };
     this.sessions.set(sessionId, session);
     return session;
@@ -477,6 +495,19 @@ export class WorkbenchService implements Service {
           },
         },
       });
+      const evidence = declaration.tools.workbench.includes(
+        WorkbenchTool.EvidenceRead,
+      )
+        ? [
+            evidenceReadTool(
+              this.dependencies.invoke,
+              () => session.requester,
+              {
+                grants: session.evidenceGrants,
+              },
+            ),
+          ]
+        : [];
       session.secrets = credentialSecrets(
         credentials,
         piProviderId(resolved.provider),
@@ -491,12 +522,20 @@ export class WorkbenchService implements Service {
           ...builtin.allowlist,
           ...operations.map((tool) => tool.name),
           offer.name,
+          ...evidence.map((tool) => tool.name),
         ],
-        customTools: [...builtin.customTools, ...operations, offer],
+        customTools: [
+          ...builtin.customTools,
+          ...operations,
+          offer,
+          ...evidence,
+        ],
         hostHome,
         hooks: [
           toolApproval({
             approve: async (call, signal) => {
+              if (call.toolName === EVIDENCE_READ_TOOL)
+                return this.evidenceGrant(session, call, { signal });
               const operation = mutations.get(call.toolName);
               if (!operation) return ALLOWED;
               return this.approval(
@@ -539,6 +578,49 @@ export class WorkbenchService implements Service {
       lifetime.cancel();
       throw error;
     }
+  }
+
+  private async evidenceGrant(
+    session: OpenSession,
+    call: ToolCallEvent,
+    options: EvidenceGrantOptions,
+  ): Promise<ToolDecision> {
+    let facts: Awaited<ReturnType<typeof evidenceFacts>>;
+    try {
+      facts = await evidenceFacts(
+        this.dependencies.invoke,
+        () => session.requester,
+        { input: call.input, signal: options.signal },
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.startsWith(EVIDENCE_ASSET_MISMATCH)) return ALLOWED;
+      return { allowed: false, reason: message, terminate: false };
+    }
+    if (session.evidenceGrants.has(facts.node_id)) return ALLOWED;
+    const { offset, length } = call.input as {
+      offset?: number;
+      length?: number;
+    };
+    const decision = await this.approval(
+      session,
+      {
+        tool_call_id: call.toolCallId,
+        operation_id: missionOperations["evidence.asset.content.download"].id,
+        input: {
+          node_id: facts.node_id,
+          attempt: facts.attempt,
+          evidence_id: facts.evidence_id,
+          asset_id: facts.asset_id,
+          kind: facts.kind,
+          ...(offset === undefined ? {} : { offset }),
+          ...(length === undefined ? {} : { length }),
+        },
+      },
+      options.signal,
+    );
+    if (decision.allowed) session.evidenceGrants.add(facts.node_id);
+    return decision;
   }
 
   private approval(
@@ -1028,6 +1110,7 @@ export class WorkbenchService implements Service {
       version: 0,
       approvals: new Map(),
       doneReports: new Set(),
+      evidenceGrants: new Set(),
     };
     this.sessions.set(id, session);
     try {
