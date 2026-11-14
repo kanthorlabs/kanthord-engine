@@ -23,6 +23,17 @@ import {
 } from "../../repository/contract.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { llmOperations } from "../../llm/contract.ts";
+import { LoginSessionState } from "../../llm/sessions.ts";
+import {
+  ANTHROPIC_PI_PROVIDER_ID,
+  ANTHROPIC_SUBSCRIPTION_PLATFORM,
+} from "../../kernel/pi-provider.ts";
+import {
+  createProvider,
+  type Provider,
+  type ProviderAuthInteraction,
+} from "@earendil-works/pi-ai";
+import { setTimeout as delay } from "node:timers/promises";
 import { agentOperations } from "../../agent/contract.ts";
 import {
   Intent,
@@ -2813,31 +2824,107 @@ const NATIVE_DEFAULTS = {
   reasoning_effort: "off",
 } as const;
 
+export type NativeCredential =
+  | { platform: "anthropic"; secret: { key: string } }
+  | {
+      platform: "anthropic-subscription";
+      secret: { refresh: string; access: string; expires: number };
+    };
+
+const NATIVE_CREDENTIAL: NativeCredential = {
+  platform: "anthropic",
+  secret: { key: "native-provider-key" },
+};
+
 export interface NativeAgentOptions {
   agentName?: string;
-  key?: string;
+  credential?: NativeCredential;
   configuration?: EnablementBody["default_configuration"];
+}
+
+const NATIVE_CREDENTIAL_NAME = "native-credential";
+const NATIVE_LOGIN_POLL_MS = 20;
+const NATIVE_LOGIN_ATTEMPTS = 100;
+const NATIVE_LOGIN_ADDRESS = "https://native-login.invalid/authorize";
+
+function unexpectedStream(): never {
+  throw new Error("The native login provider streams no model reply.");
+}
+
+export function nativeOAuthProviders(
+  credential: NativeCredential,
+): () => readonly Provider[] {
+  if (credential.platform !== ANTHROPIC_SUBSCRIPTION_PLATFORM) return () => [];
+  const provider = createProvider({
+    id: ANTHROPIC_PI_PROVIDER_ID,
+    models: [],
+    api: { stream: unexpectedStream, streamSimple: unexpectedStream },
+    auth: {
+      oauth: {
+        name: "Native login",
+        login: async (interaction: ProviderAuthInteraction) => {
+          interaction.notify({
+            type: "auth_url",
+            url: NATIVE_LOGIN_ADDRESS,
+          });
+          return { type: "oauth", ...credential.secret };
+        },
+        refresh: async () => {
+          throw new Error("The native login provider refreshes no token.");
+        },
+        toAuth: async () => {
+          throw new Error("The native login provider resolves no auth.");
+        },
+      },
+    },
+  });
+  return () => [provider];
+}
+
+async function loginNativeCredential(
+  call: ReturnType<typeof humanCaller>,
+  platform: NativeCredential["platform"],
+): Promise<void> {
+  const started = await call(llmOperations.login, {
+    params: {},
+    query: {},
+    body: { platform, name: NATIVE_CREDENTIAL_NAME },
+  });
+  for (let attempt = 0; attempt < NATIVE_LOGIN_ATTEMPTS; attempt++) {
+    const status = await call(llmOperations.login_status, {
+      params: { session_id: started.session_id },
+      query: {},
+      body: null,
+    });
+    if (status.state === LoginSessionState.Completed) return;
+    assert.equal(status.state, LoginSessionState.Pending);
+    await delay(NATIVE_LOGIN_POLL_MS);
+  }
+  assert.fail("The native login did not complete.");
 }
 
 export async function provisionNativeAgent(
   fixture: Parameters<typeof humanCaller>[0],
   {
     agentName = "swe@1",
-    key = "native-provider-key",
+    credential = NATIVE_CREDENTIAL,
     configuration = NATIVE_DEFAULTS,
   }: NativeAgentOptions = {},
 ) {
   const call = humanCaller(fixture);
   const empty = { params: {}, query: {} };
-  await call(llmOperations.create, {
-    ...empty,
-    body: {
-      name: "native-credential",
-      platform: "anthropic",
-      metadata: null,
-      [SECRET_FIELD]: { key },
-    },
-  });
+  if (credential.platform === ANTHROPIC_SUBSCRIPTION_PLATFORM)
+    await loginNativeCredential(call, credential.platform);
+  else
+    await call(llmOperations.create, {
+      ...empty,
+      body: {
+        name: NATIVE_CREDENTIAL_NAME,
+        platform: credential.platform,
+        metadata: null,
+        [SECRET_FIELD]: credential.secret,
+      },
+    });
   await call(agentOperations["enablement.put"], {
     params: { agent_name: agentName },
     query: {},
@@ -2845,8 +2932,8 @@ export async function provisionNativeAgent(
       agent_providers: [
         {
           name: "default",
-          provider: "anthropic",
-          credential: "native-credential",
+          provider: credential.platform,
+          credential: NATIVE_CREDENTIAL_NAME,
         },
       ],
       default_configuration: configuration,

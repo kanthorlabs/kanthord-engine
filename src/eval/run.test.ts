@@ -14,11 +14,19 @@ import { createModelRuntime, resolveModel } from "../llm/model-connector.ts";
 import { temporary } from "../kernel/test-support.ts";
 import type { WorkbenchModelRuntimeFactory } from "../workbench/index.ts";
 import { type EvalRun, evalRunSchema, historyEntrySchema } from "./compare.ts";
+import { type CredentialSource, CredentialSourceKind } from "./credential.ts";
 import { EVAL_CONFIGURATION, runSuite } from "./run.ts";
 
 const SUBJECT = "ops@1";
 const PROVIDER = "anthropic";
 const KEY = "sk-eval-test-key";
+const ACCESS_TOKEN = "eval-oauth-access-value";
+const REFRESH_TOKEN = "eval-oauth-refresh-value";
+const FAR_EXPIRY_MS = 86400000;
+const KEY_SOURCE: CredentialSource = {
+  kind: CredentialSourceKind.Key,
+  key: KEY,
+};
 const Role = { User: "user", ToolResult: "toolResult" } as const;
 const Tool = {
   List: "project--list",
@@ -231,7 +239,7 @@ function options(
       output,
       history: `${output}.history`,
       rerun: false,
-      key: KEY,
+      credential: KEY_SOURCE,
       runtimeFactory: scriptedFactory(),
       directory: suiteDirectory(t, cases),
       print: (line: string) => lines.push(line),
@@ -289,14 +297,15 @@ test("happy path: rerun mode keeps runs and pass_rate and writes the rerun of th
   assert.equal(unblock!.rerun_pass_rate, EVERY_RUN_PASSED);
 });
 
-test("security: redaction - no file, printed line or error text holds the key and the entry holds no check detail", async (t) => {
+async function redactionTexts(
+  t: TestContext,
+  credential: CredentialSource,
+): Promise<{ texts: string[]; entry: string }> {
   const {
     output,
     options: suite,
     lines,
-  } = options(t, {
-    unblock: UNBLOCK_CASE,
-  });
+  } = options(t, { unblock: UNBLOCK_CASE }, { credential });
   await runSuite(t, suite);
   const entryPath = output.replace(".json", ".entry.json");
   const files = [readFileSync(output, "utf8"), readFileSync(entryPath, "utf8")];
@@ -305,12 +314,35 @@ test("security: redaction - no file, printed line or error text holds the key an
     (failure: unknown) => String(failure),
   );
   assert.ok(error);
-  for (const text of [...files, ...lines, error])
-    assert.equal(text.includes(KEY), false);
-  const entry = files[1]!;
-  assert.equal(entry.includes('"detail"'), false);
-  assert.equal(entry.includes(UNBLOCK_REPLY), false);
-  assert.equal(NODE_PATTERN.test(entry), false);
+  return { texts: [...files, ...lines, error], entry: files[1]! };
+}
+
+function authFile(t: TestContext): CredentialSource {
+  const path = join(temporary(t), "auth.json");
+  writeFileSync(
+    path,
+    JSON.stringify({
+      anthropic: {
+        type: "oauth",
+        access: ACCESS_TOKEN,
+        refresh: REFRESH_TOKEN,
+        expires: Date.now() + FAR_EXPIRY_MS,
+      },
+    }),
+  );
+  return { kind: CredentialSourceKind.AuthFile, path };
+}
+
+test("security: redaction - no file, printed line or error text holds the key, the access token or the refresh token and the entry holds no check detail", async (t) => {
+  for (const credential of [KEY_SOURCE, authFile(t)]) {
+    const { texts, entry } = await redactionTexts(t, credential);
+    for (const text of texts)
+      for (const secret of [KEY, ACCESS_TOKEN, REFRESH_TOKEN])
+        assert.equal(text.includes(secret), false);
+    assert.equal(entry.includes('"detail"'), false);
+    assert.equal(entry.includes(UNBLOCK_REPLY), false);
+    assert.equal(NODE_PATTERN.test(entry), false);
+  }
 });
 
 test("invariant guard: verdict - an unnamed approval is rejected and fails the run with unexpected_approval", async (t) => {

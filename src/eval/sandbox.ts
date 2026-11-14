@@ -5,6 +5,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import {
   gatewayFixture,
   humanCaller,
+  nativeOAuthProviders,
   provisionNativeAgent,
   provisionRepositoryCredentials,
   provisionWorkerProject,
@@ -37,6 +38,7 @@ import {
   SeedStep,
   type SeedStepValue,
 } from "./case.ts";
+import { type CredentialSource, sandboxCredential } from "./credential.ts";
 import {
   type Confirmation,
   type Observation,
@@ -69,7 +71,7 @@ type GatewayFixture = Awaited<ReturnType<typeof gatewayFixture>>;
 
 export interface SandboxOptions {
   subject: string;
-  key: string;
+  credential: CredentialSource;
   configuration: WorkbenchConfiguration;
   runtimeFactory?: WorkbenchModelRuntimeFactory;
   evalDirectory?: string;
@@ -93,17 +95,22 @@ export async function openSandbox(
   t: TestContext,
   options: SandboxOptions,
 ): Promise<Sandbox> {
+  const credential = await sandboxCredential(
+    options.credential,
+    TURN_DEADLINE_MS,
+  );
   const registry = new OperationRegistry();
   const fixture = await gatewayFixture(t, {
     registry,
     repositoryConnector: { gitLsRemote: async () => {} },
     workbenchModelRuntimeFactory: options.runtimeFactory,
+    oauthProviders: nativeOAuthProviders(credential),
     agentDirectory: "",
   });
   await provisionRepositoryCredentials(fixture);
   await provisionNativeAgent(fixture, {
     agentName: options.subject,
-    key: options.key,
+    credential,
     configuration: options.configuration,
   });
   return {
