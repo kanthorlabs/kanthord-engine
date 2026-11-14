@@ -5,12 +5,21 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { HumanIdentity } from "../kernel/caller.ts";
 import { CancellationContext } from "../kernel/context.ts";
 import { identitySchema } from "../kernel/identity.ts";
+import { agentOperations } from "../agent/contract.ts";
+import { llmOperations } from "../llm/contract.ts";
 import { type Operation, OperationResultType } from "../kernel/operation.ts";
 import { nodeStateSchema } from "../mission/contract.ts";
+import { projectOperations } from "../project/contract.ts";
 import { type WorkbenchRecord, WorkbenchRecordKind } from "./contract.ts";
 import type { InvokeOperation } from "./tools.ts";
 
-export const ActionTarget = { Node: "node", Project: "project" } as const;
+export const ActionTarget = {
+  Node: "node",
+  Project: "project",
+  Credential: "credential",
+  BindingSet: "bindingSet",
+  Agent: "agent",
+} as const;
 export type ActionTarget = (typeof ActionTarget)[keyof typeof ActionTarget];
 
 export const WORKBENCH_ACTION_TOOL_NAME = "offer_action";
@@ -24,6 +33,9 @@ export const ACTION_CARD_OPERATIONS: Readonly<Record<string, ActionTarget>> = {
   "mission.node.pause": ActionTarget.Node,
   "project.pause": ActionTarget.Project,
   "project.resume": ActionTarget.Project,
+  [llmOperations.rotate.id]: ActionTarget.Credential,
+  [projectOperations["bindingSet.write"].id]: ActionTarget.BindingSet,
+  [agentOperations["enablement.put"].id]: ActionTarget.Agent,
 };
 
 export const TARGET_READS: Readonly<
@@ -31,6 +43,18 @@ export const TARGET_READS: Readonly<
 > = {
   [ActionTarget.Node]: { operation_id: "mission.node.get", param: "node_id" },
   [ActionTarget.Project]: { operation_id: "project.get", param: "project_id" },
+  [ActionTarget.Credential]: {
+    operation_id: "llm.credential.get",
+    param: "credential_name",
+  },
+  [ActionTarget.BindingSet]: {
+    operation_id: "project.bindingSet.get",
+    param: "project_id",
+  },
+  [ActionTarget.Agent]: {
+    operation_id: "agent.enablement.get",
+    param: "agent_name",
+  },
 };
 
 const nodeReadSchema = z.looseObject({

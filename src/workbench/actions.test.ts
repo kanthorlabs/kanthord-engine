@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { ACTION_CARD_OPERATIONS, offerActionTool } from "./actions.ts";
 
 const CARD_ACT_IDS = Object.keys(ACTION_CARD_OPERATIONS);
-const CARD_ACT_COUNT = 8;
+const CARD_ACT_COUNT = 11;
 const PROMPT_PATH = new URL(
   "../../static/prompt/workbench.md",
   import.meta.url,
@@ -41,15 +41,29 @@ test("(happy path) the workbench prompt lists every card act", () => {
   );
 });
 
-test("(security) an id outside the set fails with operation_refused", async () => {
-  await assert.rejects(
-    tool().execute(
-      "call_1",
-      { operation_id: "toString", target_id: "node_X" },
-      undefined,
-      undefined,
-      undefined as never,
-    ),
-    /^Error: workbench\.action\.operation_refused:/,
-  );
+test("(security) an id outside the set fails with operation_refused and records nothing", async () => {
+  const records: unknown[] = [];
+  const offerTool = offerActionTool({
+    operations: [],
+    invoke: () => Promise.reject(new Error("no read expected")),
+    requester: () => undefined,
+    offer: { taken: () => false, append: (record) => records.push(record) },
+  });
+  for (const operation_id of [
+    "mission.node.retire",
+    "workbench.session.approve",
+    "toString",
+  ])
+    await assert.rejects(
+      offerTool.execute(
+        "call_1",
+        { operation_id, target_id: "node_X" },
+        undefined,
+        undefined,
+        undefined as never,
+      ),
+      /^Error: workbench\.action\.operation_refused:/,
+      operation_id,
+    );
+  assert.deepEqual(records, []);
 });
