@@ -2,6 +2,10 @@ id: case-fix-environment_failed
 source: FIX_ASKS
 fixtures:
   p: one.json
+seed:
+  - step: environment_failed
+    project: "{{p.project_id}}"
+    binding: repo
 turns:
   - human: "Case: fix environment_failed binding `general` of project `{{p.project_id}}`. Explain why the environment failed and recommend the fix."
 checks:

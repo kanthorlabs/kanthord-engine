@@ -15,6 +15,7 @@ const PLACEHOLDER_UNKNOWN = "eval.case.placeholder_unknown";
 const FIXTURE_FILE = "alpha.json";
 const RETRIES = "retries";
 const DEFAULT_RETRIES = 2;
+const NO_ITEMS = 0;
 const ASSET_FILE = "report.txt";
 const FIXTURE = JSON.stringify({
   entries: [
@@ -133,9 +134,28 @@ test("invariant guard: verdict - case_digest is stable under key order and chang
   assert.notEqual(explicit.case_digest, plain.case_digest);
 });
 
+test("security: argument guard - an unknown key at the top level, in checks or in a seed step fails the parse", () => {
+  const unknownKeys = [
+    `${caseText()}\nunknown_key: 1`,
+    caseText().replace(
+      "  max_tool_calls: 3",
+      "  max_tool_calls: 3\n  unknown_key: 1",
+    ),
+    caseText({
+      seed: `${EVIDENCE_SEED}\n    unknown_key: 1`,
+    }),
+  ];
+  for (const text of unknownKeys)
+    assert.throws(() => parseCase(source(text)), z.ZodError);
+  assert.ok(parseCase(source(caseText({ seed: EVIDENCE_SEED }))));
+});
+
 test("security: argument guard - every case file under eval parses with its fixture and asset files", () => {
-  if (!existsSync(EVAL_DIRECTORY)) return;
-  for (const agent of readdirSync(EVAL_DIRECTORY))
-    if (statSync(join(EVAL_DIRECTORY, agent)).isDirectory())
-      loadSuite(agent, []);
+  assert.ok(existsSync(EVAL_DIRECTORY));
+  const agents = readdirSync(EVAL_DIRECTORY).filter((name) =>
+    statSync(join(EVAL_DIRECTORY, name)).isDirectory(),
+  );
+  assert.notEqual(agents.length, NO_ITEMS);
+  for (const agent of agents)
+    assert.notEqual(loadSuite(agent, []).length, NO_ITEMS);
 });

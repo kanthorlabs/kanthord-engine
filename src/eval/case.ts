@@ -8,6 +8,7 @@ import { CodedError } from "../kernel/errors.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { isObject, isString } from "../kernel/values.ts";
 import { importEntrySchema } from "../mission/contract.ts";
+import { ProviderFailure } from "../scheduler/contract.ts";
 import { checksSchema } from "./score.ts";
 
 export const EVAL_DIRECTORY = fileURLToPath(
@@ -34,6 +35,8 @@ export const SeedStep = {
   ExecutionRefusal: "execution_refusal",
   JobWithoutTaker: "job_without_taker",
   Evidence: "evidence",
+  EnvironmentFailed: "environment_failed",
+  EnvironmentPending: "environment_pending",
 } as const;
 
 export const ApprovalAnswer = { Approve: "approve", Reject: "reject" } as const;
@@ -62,7 +65,7 @@ const seedStepSchema = z.discriminatedUnion("step", [
   z.strictObject({
     step: z.literal(SeedStep.ExecutionRefusal),
     node: referenceSchema,
-    code: z.enum(["unauthorized", "bad_request"]),
+    code: z.enum([ProviderFailure.Unauthorized, ProviderFailure.BadRequest]),
     credential: z.string().min(1),
     agent: z.string().min(1),
   }),
@@ -70,6 +73,16 @@ const seedStepSchema = z.discriminatedUnion("step", [
     step: z.literal(SeedStep.JobWithoutTaker),
     node: referenceSchema,
     age_ms: z.int().nonnegative(),
+  }),
+  z.strictObject({
+    step: z.literal(SeedStep.EnvironmentFailed),
+    project: referenceSchema,
+    binding: z.string().min(1),
+  }),
+  z.strictObject({
+    step: z.literal(SeedStep.EnvironmentPending),
+    project: referenceSchema,
+    binding: z.string().min(1),
   }),
   z.strictObject({
     step: z.literal(SeedStep.Evidence),

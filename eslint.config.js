@@ -452,7 +452,7 @@ export default tseslint.config(
                 },
                 {
                   to: element("service", {
-                    captured: { name: "{mission,scheduler}" },
+                    captured: { name: "{mission,project,scheduler}" },
                     fileInternalPath: "test-support.ts",
                   }),
                 },
