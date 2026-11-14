@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { credentialSourceOf } from "./credential.ts";
 import { SuiteRun } from "./run.ts";
 
 const DEFAULT_REPEAT = 3;
@@ -34,7 +35,7 @@ const suite = new SuiteRun({
   output: required("EVAL_OUTPUT"),
   history: required("EVAL_HISTORY"),
   rerun: process.env.EVAL_RERUN === RERUN_ENABLED,
-  key: required("EVAL_ANTHROPIC_API_KEY"),
+  credential: credentialSourceOf(process.env),
 });
 
 for (const job of suite.jobs) test(job.title, (t) => suite.play(t, job));

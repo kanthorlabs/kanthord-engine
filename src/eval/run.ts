@@ -24,6 +24,7 @@ import {
   passRateOf,
   type RunResult,
 } from "./compare.ts";
+import type { CredentialSource } from "./credential.ts";
 import {
   openSandbox,
   playCase,
@@ -58,7 +59,7 @@ export interface SuiteOptions {
   output: string;
   history: string;
   rerun: boolean;
-  key: string;
+  credential: CredentialSource;
   runtimeFactory?: WorkbenchModelRuntimeFactory;
   directory?: string;
   print?: (line: string) => void;
@@ -169,7 +170,7 @@ export class SuiteRun {
   async play(t: TestContext, job: Job): Promise<void> {
     const sandbox = await openSandbox(t, {
       subject: this.options.agent,
-      key: this.options.key,
+      credential: this.options.credential,
       configuration: EVAL_CONFIGURATION,
       runtimeFactory: this.options.runtimeFactory,
       evalDirectory: this.options.directory,

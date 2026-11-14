@@ -4,6 +4,7 @@ import { AgentErrorCode, agentOperations } from "../agent/contract.ts";
 import { EnablementState } from "../agent/enablements.ts";
 import { EnvironmentStatus, projectOperations } from "../project/contract.ts";
 import { loadSuite } from "./case.ts";
+import { CredentialSourceKind } from "./credential.ts";
 import { EVAL_CONFIGURATION } from "./run.ts";
 import { openSandbox, prepareCase, type Sandbox } from "./sandbox.ts";
 
@@ -19,7 +20,7 @@ const TEST_TIMEOUT_MS = 60000;
 async function preparedSandbox(t: TestContext, id: string) {
   const sandbox = await openSandbox(t, {
     subject: SUBJECT,
-    key: KEY,
+    credential: { kind: CredentialSourceKind.Key, key: KEY },
     configuration: EVAL_CONFIGURATION,
   });
   const [loaded] = loadSuite(SUBJECT, [id]);
