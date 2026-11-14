@@ -2822,10 +2822,93 @@ export async function provisionWorkerProject(
   };
 }
 
-export async function rewriteWorkerProject(
+export interface EvalWorkerBinding {
+  worker: string;
+  worker_instances: readonly string[];
+}
+
+function evalProjectBindings(
+  workers: Readonly<Record<string, EvalWorkerBinding>>,
+): never {
+  return {
+    ...workerProjectBindings({}),
+    ...Object.fromEntries(
+      Object.entries(workers).map(([name, config]) => [
+        name,
+        { kind: "worker", config },
+      ]),
+    ),
+  } as never;
+}
+
+export async function provisionEvalProject(
+  fixture: Parameters<typeof humanCaller>[0],
+  name: string,
+  workers: Readonly<Record<string, EvalWorkerBinding>>,
+) {
+  const call = humanCaller(fixture);
+  const empty = { params: {}, query: {} };
+  const project = await call(projectOperations.create, {
+    ...empty,
+    body: { name },
+  });
+  const bindingSet = await call(projectOperations["bindingSet.write"], {
+    params: { project_id: project.id },
+    query: {},
+    body: {
+      version: FIRST_BINDING_SET_VERSION,
+      bindings: evalProjectBindings(workers),
+    },
+  });
+  const mission = await call(missionOperations.get, {
+    params: { project_id: project.id },
+    query: {},
+    body: null,
+  });
+  const examine = await call(missionOperations["node.create"], {
+    params: { mission_id: mission.id },
+    query: {},
+    body: {
+      filename: "examine-1.md",
+      content: { ...WORKER_PROJECT_NODE, intent: Intent.Examine, bindings: [] },
+      tasks: [],
+      reason: "plan",
+      expected_mission_version: FIRST_MISSION_VERSION,
+    },
+  });
+  const implement = await call(missionOperations["node.create"], {
+    params: { mission_id: mission.id },
+    query: {},
+    body: {
+      filename: "implement-1.md",
+      content: {
+        ...WORKER_PROJECT_NODE,
+        intent: Intent.Implement,
+        bindings: [bindingSet.bindings.repo!.id],
+      },
+      tasks: [],
+      reason: "plan",
+      expected_mission_version: SECOND_MISSION_VERSION,
+    },
+  });
+  await call(missionOperations["dependency.add"], {
+    params: {
+      node_id: examine.revisions[0]!.node_id,
+      depends_on_id: implement.revisions[0]!.node_id,
+    },
+    query: {},
+    body: {
+      reason: "plan",
+      expected_mission_version: implement.mission_version,
+    },
+  });
+  return { id: project.id };
+}
+
+export async function rewriteEvalWorkerBindings(
   fixture: Parameters<typeof humanCaller>[0],
   projectId: string,
-  workers: Readonly<Record<string, number>>,
+  workers: Readonly<Record<string, EvalWorkerBinding>>,
 ) {
   const call = humanCaller(fixture);
   const current = await call(projectOperations["bindingSet.get"], {
@@ -2836,10 +2919,7 @@ export async function rewriteWorkerProject(
   return call(projectOperations["bindingSet.write"], {
     params: { project_id: projectId },
     query: {},
-    body: {
-      version: current.version,
-      bindings: workerProjectBindings(workers) as never,
-    },
+    body: { version: current.version, bindings: evalProjectBindings(workers) },
   });
 }
 

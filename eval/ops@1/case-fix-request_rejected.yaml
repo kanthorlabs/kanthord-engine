@@ -8,6 +8,7 @@ setup:
       params: { agent_name: swe@1 }
       query: {}
       body:
+        expected_revision: 1
         agent_providers: [{ name: default, provider: "{{native.platform}}", credential: native-credential }]
         default_configuration: { agent_provider: default, model_identifier: claude-sonnet-4-5, reasoning_effort: "off" }
         fallback_configurations: []

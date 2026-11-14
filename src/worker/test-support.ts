@@ -240,6 +240,7 @@ export function seedWorkerRegistration(
   store: Store,
   projectId: string,
   resourceIdentity: string,
+  instance: { id: string; name: string } | null = null,
 ): void {
   store.transaction((tx) => {
     insertRegistration(
@@ -248,7 +249,8 @@ export function seedWorkerRegistration(
         project_id: projectId,
         resource_identity: resourceIdentity,
         client_id: createIdentity("client_identity"),
-        name: "eval-worker",
+        name: instance?.name ?? "eval-worker",
+        instance_id: instance?.id ?? null,
       },
       Date.now(),
     );
