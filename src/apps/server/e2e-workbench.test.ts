@@ -3369,3 +3369,276 @@ test("(happy path) the provider receives evidence_read for swe@1 and re@1 and no
   assert.equal(listed?.source, ToolSource.Workbench);
   assert.equal(listed?.guard_class, GuardClass.Card);
 });
+
+const CREDENTIAL_ROTATE = "llm.credential.rotate";
+const BINDING_SET_WRITE = "project.bindingSet.write";
+const ENABLEMENT_PUT = "agent.enablement.put";
+const SETUP_CREDENTIAL = "anthropic-main";
+const FIRST_REVISION = 1;
+const SECOND_REVISION = 2;
+const THREE_OFFERS = 3;
+const SETUP_SEEN_KEYS = [
+  "kind",
+  "operation_id",
+  "seen",
+  "target_id",
+  "tool_call_id",
+];
+
+async function setupFixture(t: TestContext, operationId: string) {
+  const target = { id: "" };
+  const { fixture, session } = await offerFixture(t, [
+    () => toolCall(OFFER_ACTION, offerInput(operationId, target.id)),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  return { fixture, session, target };
+}
+
+async function offerOnce(
+  t: TestContext,
+  fixture: Fixture,
+  sessionId: string,
+): Promise<Entry[]> {
+  completed(await message(fixture, sessionId, QUESTION));
+  return untilIdle(fixture, sessionId, t.signal);
+}
+
+async function rotatedCredential(fixture: Fixture): Promise<string> {
+  const llm = directClient(llmOperations, fixture.invocation);
+  completed(
+    await llm.create(
+      {
+        params: {},
+        query: {},
+        body: {
+          name: SETUP_CREDENTIAL,
+          platform: ANTHROPIC,
+          metadata: null,
+          secret: { key: "setup-first-key" },
+        },
+      },
+      fixture.options,
+    ),
+  );
+  completed(
+    await llm.rotate(
+      {
+        params: { credential_name: SETUP_CREDENTIAL },
+        query: {},
+        body: { expected_revision: FIRST_REVISION, secret: { key: "second" } },
+      } as never,
+      fixture.options,
+    ),
+  );
+  return SETUP_CREDENTIAL;
+}
+
+async function createdProject(fixture: Fixture): Promise<string> {
+  return completed(
+    await fixture.projects.create(
+      { params: {}, query: {}, body: { name: PROJECT_NAME } },
+      fixture.options,
+    ),
+  ).id;
+}
+
+async function bindingSetVersion(
+  fixture: Fixture,
+  projectId: string,
+): Promise<number> {
+  return completed(
+    await fixture.projects["bindingSet.get"](
+      { params: { project_id: projectId }, query: {}, body: null } as never,
+      fixture.options,
+    ),
+  ).version;
+}
+
+async function enablementRevision(
+  fixture: Fixture,
+  agentName: string,
+): Promise<number> {
+  return completed(
+    await fixture.agent["enablement.get"](
+      { params: { agent_name: agentName }, query: {}, body: null } as never,
+      fixture.options,
+    ),
+  ).revision;
+}
+
+function assertSetupRecord(
+  entries: readonly Entry[],
+  operationId: string,
+  targetId: string,
+  seen: object,
+): void {
+  const [record] = recordsOf(entries);
+  assert.equal(recordsOf(entries).length, SINGLE);
+  assert.deepEqual(record!.data, {
+    kind: "action_offer",
+    tool_call_id: toolCallIds(entries)[0],
+    operation_id: operationId,
+    target_id: targetId,
+    seen,
+  });
+  assert.deepEqual(Object.keys(record!.data as object).sort(), SETUP_SEEN_KEYS);
+}
+
+test("(happy path) offer_action on a rotated credential records its newest live revision", async (t) => {
+  const { fixture, session, target } = await setupFixture(t, CREDENTIAL_ROTATE);
+  target.id = await rotatedCredential(fixture);
+  const entries = await offerOnce(t, fixture, session.id);
+  assertSetupRecord(entries, CREDENTIAL_ROTATE, SETUP_CREDENTIAL, {
+    revision: SECOND_REVISION,
+  });
+});
+
+test("(happy path) offer_action on an enabled agent records the revision of its enablement", async (t) => {
+  const { fixture, session, target } = await setupFixture(t, ENABLEMENT_PUT);
+  target.id = OPS;
+  const entries = await offerOnce(t, fixture, session.id);
+  assertSetupRecord(entries, ENABLEMENT_PUT, OPS, {
+    revision: await enablementRevision(fixture, OPS),
+  });
+});
+
+test("(happy path) offer_action on a project records the version of its binding set", async (t) => {
+  const { fixture, session, target } = await setupFixture(t, BINDING_SET_WRITE);
+  target.id = await createdProject(fixture);
+  const entries = await offerOnce(t, fixture, session.id);
+  assertSetupRecord(entries, BINDING_SET_WRITE, target.id, {
+    version: await bindingSetVersion(fixture, target.id),
+  });
+});
+
+test("(security) offer_action on an absent credential gives credential.credential.not_found and records nothing", async (t) => {
+  const { fixture, session, target } = await setupFixture(t, CREDENTIAL_ROTATE);
+  target.id = "absent-credential";
+  const entries = await offerOnce(t, fixture, session.id);
+  const [result] = toolResults(entries);
+  assert.equal(result!.isError, true);
+  assert.ok(
+    result!.text.startsWith("credential.credential.not_found:"),
+    result!.text,
+  );
+  assert.equal(
+    recordsOf(await sessionEntries(fixture, session.id)).length,
+    NO_RECORDS,
+  );
+});
+
+test("(security) offer_action on an archived credential gives workbench.action.target_refused and records nothing", async (t) => {
+  const { fixture, session, target } = await setupFixture(t, CREDENTIAL_ROTATE);
+  target.id = await rotatedCredential(fixture);
+  completed(
+    await directClient(llmOperations, fixture.invocation).archive(
+      {
+        params: { credential_name: target.id },
+        query: {},
+        body: null,
+      } as never,
+      fixture.options,
+    ),
+  );
+  const entries = await offerOnce(t, fixture, session.id);
+  const [result] = toolResults(entries);
+  assert.equal(result!.isError, true);
+  assert.ok(
+    result!.text.startsWith("workbench.action.target_refused:"),
+    result!.text,
+  );
+  assert.equal(
+    recordsOf(await sessionEntries(fixture, session.id)).length,
+    NO_RECORDS,
+  );
+});
+
+test("(security) offer_action on an absent project gives project.project.not_found and records nothing", async (t) => {
+  const { fixture, session, target } = await setupFixture(t, BINDING_SET_WRITE);
+  target.id = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+  const entries = await offerOnce(t, fixture, session.id);
+  const [result] = toolResults(entries);
+  assert.equal(result!.isError, true);
+  assert.ok(
+    result!.text.startsWith("project.project.not_found:"),
+    result!.text,
+  );
+  assert.equal(
+    recordsOf(await sessionEntries(fixture, session.id)).length,
+    NO_RECORDS,
+  );
+});
+
+test("(security) offer_action on an absent agent enablement gives agent.enablement.not_found and records nothing", async (t) => {
+  const { fixture, session, target } = await setupFixture(t, ENABLEMENT_PUT);
+  target.id = "ghost@1";
+  const entries = await offerOnce(t, fixture, session.id);
+  const [result] = toolResults(entries);
+  assert.equal(result!.isError, true);
+  assert.ok(
+    result!.text.startsWith("agent.enablement.not_found:"),
+    result!.text,
+  );
+  assert.equal(
+    recordsOf(await sessionEntries(fixture, session.id)).length,
+    NO_RECORDS,
+  );
+});
+
+test("(security) a setup offer runs no mutation, appends one record and creates no pending approval", async (t) => {
+  const target = { operationId: "", id: "" };
+  const { fixture, session } = await offerFixture(t, [
+    () => toolCall(OFFER_ACTION, offerInput(target.operationId, target.id)),
+    fauxAssistantMessage(ANSWER),
+    () => toolCall(OFFER_ACTION, offerInput(target.operationId, target.id)),
+    fauxAssistantMessage(ANSWER),
+    () => toolCall(OFFER_ACTION, offerInput(target.operationId, target.id)),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  const credential = await rotatedCredential(fixture);
+  const projectId = await createdProject(fixture);
+  const before = {
+    version: await bindingSetVersion(fixture, projectId),
+    revision: await enablementRevision(fixture, OPS),
+  };
+  let after: string | undefined;
+  for (const [operationId, id] of [
+    [CREDENTIAL_ROTATE, credential],
+    [BINDING_SET_WRITE, projectId],
+    [ENABLEMENT_PUT, OPS],
+  ] as const) {
+    target.operationId = operationId;
+    target.id = id;
+    completed(await message(fixture, session.id, QUESTION));
+    const entries = await untilIdle(fixture, session.id, t.signal, after);
+    after = entries.at(-1)!.id as string;
+    assert.equal(recordsOf(entries).length, SINGLE, operationId);
+    assert.equal(
+      completed(
+        await fixture.workbench["session.events"](
+          { params: { session_id: session.id }, query: {}, body: null },
+          fixture.options,
+        ),
+      ).snapshot.pending_approval,
+      null,
+      operationId,
+    );
+  }
+  assert.equal(
+    recordsOf(await sessionEntries(fixture, session.id)).length,
+    THREE_OFFERS,
+  );
+  assert.equal(await bindingSetVersion(fixture, projectId), before.version);
+  assert.equal(await enablementRevision(fixture, OPS), before.revision);
+  const credentials = completed(
+    await directClient(llmOperations, fixture.invocation).get(
+      {
+        params: { credential_name: credential },
+        query: {},
+        body: null,
+      } as never,
+      fixture.options,
+    ),
+  );
+  assert.equal(credentials.revisions.length, SECOND_REVISION);
+});

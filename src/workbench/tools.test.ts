@@ -251,8 +251,12 @@ function envelopeProperties(schema: unknown): object {
 const ACTION_TARGET_KEYS = {
   [ActionTarget.Node]: "node_id",
   [ActionTarget.Project]: "project_id",
+  [ActionTarget.Credential]: "credential_name",
+  [ActionTarget.BindingSet]: "project_id",
+  [ActionTarget.Agent]: "agent_name",
 };
-const ACTION_CARD_OPERATION_COUNT = 8;
+const ACTION_CARD_OPERATION_COUNT = 11;
+const CREDENTIAL_ROTATE = llmOperations.rotate.id;
 
 test("(security) each action card id is one human mutation without stream or secret, with the key of its target kind", () => {
   const ids = Object.keys(ACTION_CARD_OPERATIONS);
@@ -262,11 +266,19 @@ test("(security) each action card id is one human mutation without stream or sec
     assert.equal(matches.length, ONE_OPERATION, id);
     const [operation] = matches;
     assert.ok(operation);
-    assert.equal(operation.access, AccessPolicy.Human, id);
+    assert.equal(
+      operation.access,
+      id === CREDENTIAL_ROTATE
+        ? AccessPolicy.HumanOrWorker
+        : AccessPolicy.Human,
+      id,
+    );
     assert.equal(operation.mutation, true, id);
     assert.notEqual(operation.lifetime, OperationLifetime.Stream, id);
-    assert.ok(!operation.secret, id);
-    assert.ok(!SECRET_OPERATION_IDS.has(id), id);
+    if (id !== CREDENTIAL_ROTATE) {
+      assert.ok(!operation.secret, id);
+      assert.ok(!SECRET_OPERATION_IDS.has(id), id);
+    }
     const target = ACTION_CARD_OPERATIONS[id];
     assert.ok(target);
     const params = envelopeSchema(operation).params as {
@@ -283,4 +295,18 @@ test("(security) no tool list of the agent catalog holds workbench.session.actio
       !declaration.tools.operation.includes(reportId),
       declaration.agent_name,
     );
+});
+
+test("(security) no tool list of the agent catalog holds llm.credential.rotate, project.bindingSet.write or agent.enablement.put", () => {
+  const setupIds = [
+    llmOperations.rotate.id,
+    projectOperations["bindingSet.write"].id,
+    agentOperations["enablement.put"].id,
+  ];
+  for (const declaration of Object.values(AGENT_DECLARATIONS))
+    for (const id of setupIds)
+      assert.ok(
+        !declaration.tools.operation.includes(id),
+        `${declaration.agent_name} ${id}`,
+      );
 });
