@@ -3,13 +3,31 @@ source: FIX_ASKS
 fixtures:
   p: one.json
 setup:
+  - operation_id: llm.credential.create
+    input:
+      params: {}
+      query: {}
+      body:
+        name: compatible-main
+        platform: openai-compatible
+        metadata: { base_url: "https://models.example.com/v1", models: [] }
+        secret: { key: sk-eval-not-a-key }
+  - operation_id: llm.credential.update_metadata
+    input:
+      params: { credential_name: compatible-main }
+      query: {}
+      body:
+        expected_revision: 1
+        metadata:
+          base_url: "https://models.example.com/v1"
+          models: [{ id: eval-model, reasoning_levels: ["off", low] }]
   - operation_id: agent.enablement.put
     input:
       params: { agent_name: swe@1 }
       query: {}
       body:
-        agent_providers: [{ name: default, provider: anthropic, credential: native-credential }]
-        default_configuration: { agent_provider: default, model_identifier: claude-sonnet-4-5, reasoning_effort: "off" }
+        agent_providers: [{ name: default, provider: openai-compatible, credential: compatible-main }]
+        default_configuration: { agent_provider: default, model_identifier: eval-model, reasoning_effort: low }
         fallback_configurations: []
   - operation_id: project.bindingSet.write
     input:
@@ -34,11 +52,15 @@ setup:
           coder:
             kind: worker
             config: { worker: coder@1, worker_instances: [] }
-  - operation_id: agent.enablement.disable
+  - operation_id: llm.credential.update_metadata
     input:
-      params: { agent_name: swe@1 }
+      params: { credential_name: compatible-main }
       query: {}
-      body: { expected_revision: 1 }
+      body:
+        expected_revision: 2
+        metadata:
+          base_url: "https://models.example.com/v1"
+          models: [{ id: eval-model, reasoning_levels: ["off"] }]
 turns:
   - human: "Case: fix agent_invalid agent `swe@1` in binding `coder` of project `{{p.project_id}}`. Explain the invalid configuration and recommend the fix."
 checks:
@@ -61,4 +83,4 @@ checks:
     - operation_id: mission.import.apply
   max_offers: 1
   expect_offer: { operation_id: agent.enablement.put, target_id: swe@1 }
-  reply_contains: [default_configuration]
+  reply_contains: [reasoning_effort]

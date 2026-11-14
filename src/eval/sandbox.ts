@@ -14,6 +14,10 @@ import { type Operation, OperationRegistry } from "../kernel/operation.ts";
 import { ImportFormat, missionOperations } from "../mission/contract.ts";
 import { ensureClosedAttempts, seedEvidence } from "../mission/test-support.ts";
 import { projectOperations } from "../project/contract.ts";
+import {
+  seedEnvironmentFailed,
+  seedEnvironmentPending,
+} from "../project/test-support.ts";
 import { schedulerOperations } from "../scheduler/contract.ts";
 import { ageJob, seedExecutionRefusal } from "../scheduler/test-support.ts";
 import {
@@ -213,19 +217,19 @@ function assetBytes(
   );
 }
 
-async function workerBinding(sandbox: Sandbox, projectId: string) {
+async function bindingNamed(sandbox: Sandbox, projectId: string, name: string) {
   const bindings = await sandbox.call(projectOperations["binding.list"], {
     params: { project_id: projectId },
     query: {},
     body: null,
   });
   const binding = bindings.items.find(
-    (item) => item.name === GENERAL_BINDING && item.removed_at === null,
+    (item) => item.name === name && item.removed_at === null,
   );
   if (!binding)
     throw new CodedError(
       SandboxErrorCode.SeedInvalid,
-      "The fixture project holds no general worker binding.",
+      `The fixture project holds no ${name} binding.`,
     );
   return binding;
 }
@@ -236,7 +240,11 @@ async function seedRefusal(
   ids: PlaceholderIds,
 ): Promise<void> {
   const { fixture } = locate(ids, step.node);
-  const binding = await workerBinding(sandbox, fixture.project_id);
+  const binding = await bindingNamed(
+    sandbox,
+    fixture.project_id,
+    GENERAL_BINDING,
+  );
   ensureClosedAttempts(sandbox.fixture.store, step.node, SEED_ATTEMPT);
   const executionId = seedExecutionRefusal(sandbox.fixture.store, {
     project_id: fixture.project_id,
@@ -260,6 +268,24 @@ async function seedRefusal(
       SandboxErrorCode.SeedInvalid,
       `The agent ${step.agent} resolves another credential than ${step.credential}.`,
     );
+}
+
+async function seedEnvironmentStep(
+  sandbox: Sandbox,
+  step: Extract<
+    SeedStepValue,
+    {
+      step:
+        typeof SeedStep.EnvironmentFailed | typeof SeedStep.EnvironmentPending;
+    }
+  >,
+): Promise<void> {
+  const binding = await bindingNamed(sandbox, step.project, step.binding);
+  const seed =
+    step.step === SeedStep.EnvironmentFailed
+      ? seedEnvironmentFailed
+      : seedEnvironmentPending;
+  await seed(sandbox.fixture.project, step.project, binding.id);
 }
 
 function seedEvidenceStep(
@@ -290,6 +316,11 @@ async function seedStep(
   if (step.step === SeedStep.ExecutionRefusal)
     await seedRefusal(sandbox, step, ids);
   if (step.step === SeedStep.Evidence) seedEvidenceStep(sandbox, step, ids);
+  if (
+    step.step === SeedStep.EnvironmentFailed ||
+    step.step === SeedStep.EnvironmentPending
+  )
+    await seedEnvironmentStep(sandbox, step);
   if (step.step === SeedStep.JobWithoutTaker)
     ageJob(sandbox.fixture.store, step.node, Date.now() - step.age_ms);
 }
@@ -426,10 +457,15 @@ function failedPlay(kind: string, detail: string): PlayedCase {
   };
 }
 
-export async function playCase(
+export interface PreparedCase {
+  ids: PlaceholderIds;
+  failed: PlayedCase | null;
+}
+
+export async function prepareCase(
   sandbox: Sandbox,
   loaded: LoadedCase,
-): Promise<PlayedCase> {
+): Promise<PreparedCase> {
   const ids: PlaceholderIds = {};
   for (const key of Object.keys(loaded.fixtures).sort())
     ids[key] = await provisionFixture(
@@ -438,13 +474,22 @@ export async function playCase(
       loaded.fixture_entries[key]!,
     );
   const setup = await runSetup(sandbox, resolvePlaceholders(loaded.setup, ids));
-  if (setup) return failedPlay(CheckKind.Setup, setup);
+  if (setup) return { ids, failed: failedPlay(CheckKind.Setup, setup) };
   for (const step of loaded.seed)
     try {
       await seedStep(sandbox, resolvePlaceholders(step, ids), ids);
     } catch (error) {
-      return failedPlay(CheckKind.Seed, failureDetail(error));
+      return { ids, failed: failedPlay(CheckKind.Seed, failureDetail(error)) };
     }
+  return { ids, failed: null };
+}
+
+export async function playCase(
+  sandbox: Sandbox,
+  loaded: LoadedCase,
+): Promise<PlayedCase> {
+  const { ids, failed } = await prepareCase(sandbox, loaded);
+  if (failed) return failed;
   return runTurns(
     sandbox,
     resolvePlaceholders({ turns: loaded.turns, checks: loaded.checks }, ids),

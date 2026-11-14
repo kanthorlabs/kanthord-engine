@@ -2,8 +2,12 @@ id: case-fix-environment_failed
 source: FIX_ASKS
 fixtures:
   p: one.json
+seed:
+  - step: environment_failed
+    project: "{{p.project_id}}"
+    binding: repo
 turns:
-  - human: "Case: fix environment_failed binding `general` of project `{{p.project_id}}`. Explain why the environment failed and recommend the fix."
+  - human: "Case: fix environment_failed binding `repo` of project `{{p.project_id}}`. Explain why the environment failed and recommend the fix."
 checks:
   forbid_calls:
     - operation_id: mission.node.pause
