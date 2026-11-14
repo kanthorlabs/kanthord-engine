@@ -22,6 +22,8 @@ export const ActionTarget = {
 } as const;
 export type ActionTarget = (typeof ActionTarget)[keyof typeof ActionTarget];
 
+const NO_REVISIONS = 0;
+
 export const WORKBENCH_ACTION_TOOL_NAME = "offer_action";
 
 export const ACTION_CARD_OPERATIONS: Readonly<Record<string, ActionTarget>> = {
@@ -67,6 +69,21 @@ const projectReadSchema = z.looseObject({
   paused_at: z.number().int().nullable(),
 });
 
+const credentialReadSchema = z.looseObject({
+  revisions: z.array(
+    z.looseObject({
+      revision: z.number().int().positive(),
+      ended_at: z.number().int().nullable(),
+    }),
+  ),
+});
+const bindingSetReadSchema = z.looseObject({
+  version: z.number().int().positive(),
+});
+const agentReadSchema = z.looseObject({
+  revision: z.number().int().positive(),
+});
+
 const ACTION_CARD_OPERATION_IDS = Object.keys(ACTION_CARD_OPERATIONS) as [
   string,
   ...string[],
@@ -101,13 +118,43 @@ type ActionOffer = Extract<
   { kind: typeof WorkbenchRecordKind.ActionOffer }
 >;
 
+function newestLiveRevision(data: unknown): number {
+  const { revisions } = credentialReadSchema.parse(data);
+  const live = revisions
+    .filter(({ ended_at }) => ended_at === null)
+    .map(({ revision }) => revision);
+  if (live.length === NO_REVISIONS)
+    throw new Error(
+      "workbench.action.target_refused: The credential has no live revision.",
+    );
+  return Math.max(...live);
+}
+
 function seenOf(target: ActionTarget, data: unknown): ActionOffer["seen"] {
-  if (target === ActionTarget.Node) {
-    const { content, state, attempt } = nodeReadSchema.parse(data);
-    return { name: content.name, state, attempt };
+  switch (target) {
+    case ActionTarget.Node: {
+      const { content, state, attempt } = nodeReadSchema.parse(data);
+      return { name: content.name, state, attempt };
+    }
+    case ActionTarget.Project: {
+      const { name, paused_at } = projectReadSchema.parse(data);
+      return { name, paused: paused_at !== null };
+    }
+    case ActionTarget.Credential:
+      return { revision: newestLiveRevision(data) };
+    case ActionTarget.BindingSet:
+      return { version: bindingSetReadSchema.parse(data).version };
+    case ActionTarget.Agent:
+      return { revision: agentReadSchema.parse(data).revision };
   }
-  const { name, paused_at } = projectReadSchema.parse(data);
-  return { name, paused: paused_at !== null };
+}
+
+function assertTargetIdentity(target: ActionTarget, targetId: string): void {
+  if (target !== ActionTarget.Node && target !== ActionTarget.Project) return;
+  if (!identitySchema(target).safeParse(targetId).success)
+    throw new Error(
+      `workbench.action.target_invalid: The target is no ${target} identity.`,
+    );
 }
 
 function assertCardAct(operationId: string): void {
@@ -166,10 +213,7 @@ export function offerActionTool(input: OfferActionToolInput): ToolDefinition {
       assertCardAct(operation_id);
       const target = ACTION_CARD_OPERATIONS[operation_id];
       assert.ok(target);
-      if (!identitySchema(target).safeParse(target_id).success)
-        throw new Error(
-          `workbench.action.target_invalid: The target is no ${target} identity.`,
-        );
+      assertTargetIdentity(target, target_id);
       if (offer.taken())
         throw new Error(
           "workbench.action.offer_limit: One action card per answer. The first card stays.",

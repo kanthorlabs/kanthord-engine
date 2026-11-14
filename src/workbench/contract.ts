@@ -64,6 +64,8 @@ const actionSeenSchema = z.union([
     attempt: z.number().int().nonnegative(),
   }),
   z.strictObject({ name: z.string(), paused: z.boolean() }),
+  z.strictObject({ revision: z.number().int().positive() }),
+  z.strictObject({ version: z.number().int().positive() }),
 ]);
 
 export const workbenchRecordSchema = z.discriminatedUnion("kind", [
