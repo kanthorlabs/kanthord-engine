@@ -10,6 +10,7 @@ import {
   provisionNativeAgent,
   provisionRepositoryCredentials,
   provisionWorkerProject,
+  rewriteWorkerProject,
   seedWorkerRegistration,
 } from "../apps/server/test-support.ts";
 import { CodedError } from "../kernel/errors.ts";
@@ -63,6 +64,7 @@ export const CheckKind = {
 const FIXTURE_REASON = "eval fixture";
 const GENERAL_BINDING = "general";
 const GENERAL_INSTANCE_COUNT = 1;
+const NO_INSTANCES = 0;
 const SEED_ATTEMPT = 1;
 const POLL_INTERVAL_MS = 50;
 const TURN_DEADLINE_MS = 300000;
@@ -340,6 +342,9 @@ async function seedJobWithoutTaker(
     fixture.project_id,
     binding.resource_identity,
   );
+  await rewriteWorkerProject(sandbox.fixture, fixture.project_id, {
+    [GENERAL_BINDING]: NO_INSTANCES,
+  });
   ageJob(sandbox.fixture.store, step.node, Date.now() - step.age_ms);
 }
 
