@@ -10,4 +10,5 @@ export {
   toolName,
   workbenchToolDeclarations,
 } from "./tools.ts";
+export { recordOf } from "./sessions.ts";
 export { WorkbenchFootprint } from "./footprint.ts";
