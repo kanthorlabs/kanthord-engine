@@ -4,6 +4,7 @@ import pino from "pino";
 import type { z } from "zod";
 import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
+import { getEnablement } from "../agent/enablements.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { stopAfter } from "../kernel/test-support.ts";
 import {
@@ -14,12 +15,15 @@ import {
   AgentChoiceKind,
   ClaimIntent,
   type ExecutionRow,
+  ExecutionStopReason,
   type FailureHold,
   type NodeTransition,
+  type ProviderFailure,
   SCHEDULER_SERVICE_NAME,
   schedulerOperations,
   TransitionRule,
 } from "./contract.ts";
+import { endExecution, insertExecution } from "./execution-store.ts";
 import { schedulerMigrations } from "./migrations.ts";
 import { type Dependencies, SchedulerService } from "./service.ts";
 
@@ -232,4 +236,62 @@ export function schedulerHarness(
     ) as z.output<(typeof schedulerOperations)[K]["output"]>;
   }
   return { store, service, registry, dependencies, calls, telemetry, invoke };
+}
+
+const REFUSAL_LIFETIME_MS = 60000;
+const SINGLE_ROW = 1;
+const FIRST_POSITION = 0;
+
+export interface RefusalSeed {
+  project_id: string;
+  node_id: string;
+  worker_binding_id: string;
+  resource_identity: string;
+  attempt: number;
+  agent: string;
+  code: Extract<ProviderFailure, "unauthorized" | "bad_request">;
+}
+
+export function seedExecutionRefusal(
+  store: Store,
+  seed: RefusalSeed,
+  now = Date.now(),
+): string {
+  const row = executionFixture({
+    project_id: seed.project_id,
+    node_id: seed.node_id,
+    worker_binding_id: seed.worker_binding_id,
+    resource_identity: seed.resource_identity,
+    attempt: seed.attempt,
+    created_at: now,
+    expired_at: now + REFUSAL_LIFETIME_MS,
+  });
+  store.transaction((tx) => {
+    const enablement = getEnablement(tx, seed.agent);
+    assert.ok(enablement, "The agent holds no live enablement.");
+    insertExecution(tx, {
+      ...row,
+      agent_pins: [
+        {
+          agent_name: seed.agent,
+          enablement_id: enablement.id,
+          position: FIRST_POSITION,
+        },
+      ],
+    });
+    endExecution(tx, row.execution_id, now, {
+      reason: ExecutionStopReason.ProviderFailed,
+      code: seed.code,
+    });
+  });
+  return row.execution_id;
+}
+
+export function ageJob(store: Store, nodeId: string, queuedAt: number): void {
+  store.transaction((tx) => {
+    const result = tx.database
+      .prepare("UPDATE scheduler_job SET queued_at = ? WHERE node_id = ?")
+      .run(queuedAt, nodeId);
+    assert.equal(result.changes, SINGLE_ROW, "The node holds no job row.");
+  });
 }
