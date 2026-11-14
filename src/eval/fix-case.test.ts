@@ -5,6 +5,8 @@ import { EnablementState } from "../agent/enablements.ts";
 import { EnvironmentStatus, projectOperations } from "../project/contract.ts";
 import { loadSuite } from "./case.ts";
 import { CredentialSourceKind } from "./credential.ts";
+import { schedulerOperations } from "../scheduler/contract.ts";
+import { RegistrationActivity, workerOperations } from "../worker/contract.ts";
 import { EVAL_CONFIGURATION } from "./run.ts";
 import { openSandbox, prepareCase, type Sandbox } from "./sandbox.ts";
 
@@ -15,6 +17,10 @@ const FIXTURE_KEY = "p";
 const CODER_BINDING = "coder";
 const REPOSITORY_BINDING = "repo";
 const PENDING_THRESHOLD_MS = 600000;
+const GENERAL_BINDING = "general";
+const REGISTRATION_LIMIT = 100;
+const SINGLE_REGISTRATION = 1;
+const SINGLE_JOB = 1;
 const TEST_TIMEOUT_MS = 60000;
 
 async function preparedSandbox(t: TestContext, id: string) {
@@ -119,5 +125,54 @@ test(
     assert.ok(state.reason);
     assert.ok(state.reason_started_at !== null);
     assert.ok(Date.now() - state.reason_started_at > PENDING_THRESHOLD_MS);
+  },
+);
+
+async function registrationsOf(sandbox: Sandbox, projectId: string) {
+  const listed = await sandbox.call(workerOperations["registration.list"], {
+    params: {},
+    query: { project_id: projectId, limit: REGISTRATION_LIMIT },
+    body: null,
+  });
+  return listed.items;
+}
+
+test(
+  "a plain fixture project holds an idle serving registration for its general binding",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { sandbox, projectId } = await preparedSandbox(t, "status-all-clear");
+    const general = await bindingId(sandbox, projectId, GENERAL_BINDING);
+    const bindings = await sandbox.call(projectOperations["binding.list"], {
+      params: { project_id: projectId },
+      query: {},
+      body: null,
+    });
+    const resource = bindings.items.find(
+      (item) => item.id === general,
+    )?.resource_identity;
+    const registrations = await registrationsOf(sandbox, projectId);
+    assert.equal(registrations.length, SINGLE_REGISTRATION);
+    assert.equal(registrations[0]?.resource_identity, resource);
+    assert.equal(registrations[0]?.activity, RegistrationActivity.Idle);
+    assert.equal(registrations[0]?.draining, false);
+  },
+);
+
+test(
+  "case-fix-no_taker leaves an aged job and no live registration",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { sandbox, projectId } = await preparedSandbox(
+      t,
+      "case-fix-no_taker",
+    );
+    assert.deepEqual(await registrationsOf(sandbox, projectId), []);
+    const queue = await sandbox.call(schedulerOperations.queueList, {
+      params: { project_id: projectId },
+      query: {},
+      body: null,
+    });
+    assert.equal(queue.items.length, SINGLE_JOB);
   },
 );

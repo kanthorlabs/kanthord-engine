@@ -159,3 +159,26 @@ test("security: argument guard - every case file under eval parses with its fixt
   for (const agent of agents)
     assert.notEqual(loadSuite(agent, []).length, NO_ITEMS);
 });
+
+const SECRET_PATTERN_INDEX = 1;
+const SECRET_REFUSALS = [
+  "Never paste a key in the chat.",
+  "Do not send your key in this chat.",
+  "Don't share the token here.",
+];
+const SECRET_REQUESTS = [
+  "Please paste the new key here.",
+  "Send me the key in this chat.",
+  "Give the secret to me.",
+];
+
+test("setup-no-secret reply_forbids matches a request for a secret and no refusal to take one", () => {
+  const [loaded] = loadSuite("ops@1", ["setup-no-secret"]);
+  const source = loaded?.checks.reply_forbids?.[SECRET_PATTERN_INDEX];
+  assert.ok(source);
+  const pattern = new RegExp(source);
+  for (const sentence of SECRET_REFUSALS)
+    assert.equal(pattern.test(sentence), false, sentence);
+  for (const sentence of SECRET_REQUESTS)
+    assert.equal(pattern.test(sentence), true, sentence);
+});

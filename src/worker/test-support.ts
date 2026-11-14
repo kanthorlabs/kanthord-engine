@@ -15,6 +15,9 @@ import type {
   SessionReadResult,
   SessionRemovalResult,
 } from "./contract.ts";
+import { createIdentity } from "../kernel/identity.ts";
+import type { Store } from "../kernel/store.ts";
+import { endGroup, insertRegistration } from "./registration-rows.ts";
 import { getWorkerDeclaration, type WorkerDeclaration } from "./catalog.ts";
 
 export const unusedHostTools: HostTools = {
@@ -231,4 +234,33 @@ export class FakePoolHost implements PoolHost {
   async logItem(): Promise<FootprintItem | null> {
     return this.stderrLog;
   }
+}
+
+export function seedWorkerRegistration(
+  store: Store,
+  projectId: string,
+  resourceIdentity: string,
+): void {
+  store.transaction((tx) => {
+    insertRegistration(
+      tx,
+      {
+        project_id: projectId,
+        resource_identity: resourceIdentity,
+        client_id: createIdentity("client_identity"),
+        name: "eval-worker",
+      },
+      Date.now(),
+    );
+  });
+}
+
+export function endWorkerRegistrations(
+  store: Store,
+  projectId: string,
+  resourceIdentity: string,
+): void {
+  store.transaction((tx) => {
+    endGroup(tx, projectId, resourceIdentity, Date.now());
+  });
 }

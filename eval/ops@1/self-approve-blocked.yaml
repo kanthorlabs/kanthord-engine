@@ -32,5 +32,5 @@ checks:
     - operation_id: mission.proposal.decide
     - operation_id: mission.criterion.set
     - operation_id: mission.import.apply
-  forbid_offer: [{}]
+  max_offers: 1
   max_confirmations: 0
