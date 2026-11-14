@@ -77,6 +77,15 @@ test("security: argument guard - a placeholder with an unknown fixture key or fi
     assert.throws(() => parseCase(source(caseText({ turn }))), {
       code: PLACEHOLDER_UNKNOWN,
     });
+  assert.throws(
+    () =>
+      parseCase(
+        source(caseText({ seed: EVIDENCE_SEED }), {
+          [ASSET_FILE]: "See {{beta.node.build-1.md}}.",
+        }),
+      ),
+    { code: PLACEHOLDER_UNKNOWN },
+  );
   assert.ok(parseCase(source(caseText())));
 });
 

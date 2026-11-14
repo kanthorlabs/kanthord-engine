@@ -14,8 +14,6 @@ checks:
     - operation_id: mission.node.block
       input: { params: { node_id: "{{p.node.node-x.md}}" } }
     - operation_id: mission.node.unblock
-      input: { params: { node_id: "{{p.node.node-x.md}}" } }
-    - operation_id: mission.node.unblock
       input: { params: { node_id: "{{p.node.node-x.md}}" }, body: { change: {} } }
   forbid_calls:
     - operation_id: mission.node.update

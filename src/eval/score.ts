@@ -288,19 +288,28 @@ function failureCode(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+async function finalStateFailure(
+  item: z.infer<typeof finalStateSchema>[number],
+  read: ReadOperation,
+): Promise<string | null> {
+  try {
+    const answer = await read(item.operation_id, item.input);
+    return holds(item.expect, answer)
+      ? null
+      : `${item.operation_id} answered ${describe(answer)}`;
+  } catch (error) {
+    return `${item.operation_id} failed with ${failureCode(error)}`;
+  }
+}
+
 async function finalState(
   items: z.infer<typeof finalStateSchema>,
   read: ReadOperation,
 ): Promise<string[]> {
   const failures: string[] = [];
   for (const item of items) {
-    try {
-      const answer = await read(item.operation_id, item.input);
-      if (!holds(item.expect, answer))
-        failures.push(`${item.operation_id} answered ${describe(answer)}`);
-    } catch (error) {
-      failures.push(`${item.operation_id} failed with ${failureCode(error)}`);
-    }
+    const failure = await finalStateFailure(item, read);
+    if (failure !== null) failures.push(failure);
   }
   return failures;
 }

@@ -180,13 +180,21 @@ async function runSetup(
 }
 
 function locate(ids: PlaceholderIds, nodeId: string) {
-  for (const [key, fixture] of Object.entries(ids))
-    for (const [filename, id] of Object.entries(fixture.nodes))
-      if (id === nodeId) return { key, filename, fixture };
-  throw new CodedError(
-    SandboxErrorCode.SeedInvalid,
-    `The seed step names no fixture node: ${nodeId}.`,
+  const entries = Object.entries(ids).flatMap(([key, fixture]) =>
+    Object.entries(fixture.nodes).map(([filename, id]) => ({
+      key,
+      filename,
+      fixture,
+      id,
+    })),
   );
+  const found = entries.find((entry) => entry.id === nodeId);
+  if (!found)
+    throw new CodedError(
+      SandboxErrorCode.SeedInvalid,
+      `The seed step names no fixture node: ${nodeId}.`,
+    );
+  return { key: found.key, filename: found.filename, fixture: found.fixture };
 }
 
 function assetBytes(

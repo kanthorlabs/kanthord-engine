@@ -41,6 +41,7 @@ export const ApprovalAnswer = { Approve: "approve", Reject: "reject" } as const;
 const PLACEHOLDER = /\{\{([^{}]*)\}\}/g;
 const REFERENCE =
   /^([\w-]+)\.(?:(project_id)|node\.(.+)|evidence\.(.+?)(?:\.asset\.(\d+))?)$/;
+const TEXT_MEDIA_PREFIX = "text/";
 const AGENT_NAME = /^[a-z][a-z0-9-]*@\d+$/;
 
 const caseIdSchema = z.string().regex(/^[a-z][a-z0-9_-]*$/);
@@ -242,6 +243,16 @@ function assetFiles(value: Case): string[] {
   );
 }
 
+function textAssetFiles(value: Case): string[] {
+  return value.seed.flatMap((step) =>
+    step.step === SeedStep.Evidence
+      ? step.assets
+          .filter((asset) => asset.media_type.startsWith(TEXT_MEDIA_PREFIX))
+          .map((asset) => asset.file)
+      : [],
+  );
+}
+
 function digestOf(raw: unknown, files: readonly Buffer[]): string {
   const hash = createHash("sha256").update(canonicalJSON(raw), "utf8");
   for (const bytes of files) hash.update(bytes);
@@ -268,13 +279,16 @@ export function parseCase(
         .entries,
     ]),
   );
-  for (const scope of placeholderScope(value))
+  const assetBytes = assetFiles(value).map((file) => source.readFile(file));
+  const assetTexts = textAssetFiles(value).map((file) =>
+    source.readFile(file).toString("utf8"),
+  );
+  for (const scope of [...placeholderScope(value), ...assetTexts])
     mapStrings(scope, (text) =>
       replacePlaceholders(text, (reference) =>
         checkReference(reference, fixture_entries),
       ),
     );
-  const assetBytes = assetFiles(value).map((file) => source.readFile(file));
   return {
     ...value,
     case_digest: digestOf(raw, [...fixtureBytes, ...assetBytes]),
