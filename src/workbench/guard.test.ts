@@ -167,3 +167,33 @@ test("(security: refused path) floorOf blocks every human-only id with the human
     );
   }
 });
+
+test("(security: refused path) floorOf applies the import rules in order", () => {
+  const apply = missionOperations["import.apply"];
+  const retirement = { confirmed_retirements: ["node_1"] };
+  const cases = [
+    { body: { format: "json", ...retirement }, text: RETIREMENT_TEXT },
+    { body: { format: "markdown", ...retirement }, text: RETIREMENT_TEXT },
+    { body: { format: "markdown" }, text: FORMAT_TEXT },
+  ];
+  for (const { body, text } of cases) {
+    const decision = floorOf(apply, { params: {}, query: {}, body });
+    assert.equal(decision.action, BLOCK_ACTION, JSON.stringify(body));
+    assert.ok(
+      decision.action === BLOCK_ACTION && decision.reason === text,
+      JSON.stringify(body),
+    );
+  }
+  assert.deepEqual(
+    floorOf(apply, {
+      params: {},
+      query: {},
+      body: { format: "json", confirmed_retirements: [] },
+    }),
+    { action: "confirm" },
+  );
+  assert.deepEqual(
+    floorOf(apply, { params: {}, query: {}, body: { format: "json" } }),
+    { action: "confirm" },
+  );
+});
