@@ -176,6 +176,8 @@ components:
               anyOf:
                 - type: string
                 - type: "null"
+            auto_mode:
+              type: boolean
           required:
             - streaming_message
             - pending_tool_calls
@@ -183,6 +185,7 @@ components:
             - run_active
             - queue
             - error_message
+            - auto_mode
           additionalProperties: false
         version:
           type: integer

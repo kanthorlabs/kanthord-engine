@@ -54,7 +54,10 @@ export type WorkbenchConfiguration = z.infer<
   typeof workbenchConfigurationSchema
 >;
 
-export const WorkbenchRecordKind = { ActionOffer: "action_offer" } as const;
+export const WorkbenchRecordKind = {
+  ActionOffer: "action_offer",
+  AutoMode: "auto_mode",
+} as const;
 export type WorkbenchRecordKind =
   (typeof WorkbenchRecordKind)[keyof typeof WorkbenchRecordKind];
 
@@ -76,6 +79,10 @@ export const workbenchRecordSchema = z.discriminatedUnion("kind", [
     operation_id: z.string(),
     target_id: z.string(),
     seen: actionSeenSchema,
+  }),
+  z.strictObject({
+    kind: z.literal(WorkbenchRecordKind.AutoMode),
+    enabled: z.boolean(),
   }),
 ]);
 export type WorkbenchRecord = z.infer<typeof workbenchRecordSchema>;
@@ -172,6 +179,7 @@ export const runSnapshotSchema = z.strictObject({
   run_active: z.boolean(),
   queue: z.array(queuedMessageSchema),
   error_message: z.string().nullable(),
+  auto_mode: z.boolean(),
 });
 export type RunSnapshot = z.infer<typeof runSnapshotSchema>;
 
@@ -341,6 +349,20 @@ export const workbenchOperations = {
     }),
     description:
       "Approve or reject the pending call of a mutation tool of the active run.",
+  },
+  "session.autoMode.set": {
+    ...workbenchMutation,
+    id: "workbench.session.autoMode.set",
+    method: HttpMethod.Post,
+    path: "/api/workbench/session/:session_id/auto-mode",
+    input: z.strictObject({
+      params: sessionParams,
+      query: emptyFields,
+      body: z.strictObject({ enabled: z.boolean() }),
+    }),
+    output: sessionParams.extend({ enabled: z.boolean() }),
+    description:
+      "Switch auto mode of a workbench session on or off. Only the owner changes it. A set to the current value changes nothing.",
   },
   "session.action.report": {
     ...workbenchMutation,

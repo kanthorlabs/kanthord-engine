@@ -2303,13 +2303,14 @@ test("(invariant guard) a replace right after a drained launch stops that run be
   ]);
   const session = await createSession(fixture);
   const sessionId = session.id;
-  type Claimer = { claim(session: unknown, clearError: boolean): unknown };
+  type ClaimOptions = { clearError: boolean };
+  type Claimer = { claim(session: unknown, options: ClaimOptions): unknown };
   const service = fixture.workbenchService as unknown as Claimer;
   const claim = service.claim.bind(service);
   let replacing: ReturnType<typeof replaceMessage> | null = null;
-  t.mock.method(service, "claim", (claimed: unknown, clearError: boolean) => {
-    const run = claim(claimed, clearError);
-    if (!clearError && !replacing)
+  t.mock.method(service, "claim", (claimed: unknown, options: ClaimOptions) => {
+    const run = claim(claimed, options);
+    if (!options.clearError && !replacing)
       replacing = replaceMessage(fixture, sessionId, SECOND_QUEUED);
     return run;
   });
@@ -3841,4 +3842,150 @@ test("(security: authorization) an import with no retirement waits on the card a
   const entries = await untilIdle(fixture, session.id, t.signal);
   assert.ok(toolResults(entries).every(({ isError }) => isError));
   assert.deepEqual(await importState(fixture, target), before);
+});
+
+const AUTO_MODE_KIND = "auto_mode";
+
+const THREE_RECORDS = 3;
+
+async function setAutoMode(
+  fixture: Fixture,
+  sessionId: string,
+  enabled: boolean,
+) {
+  return fixture.workbench["session.autoMode.set"](
+    {
+      params: { session_id: sessionId },
+      query: {},
+      body: { enabled },
+    },
+    fixture.options,
+  );
+}
+
+async function autoModeState(fixture: Fixture, sessionId: string) {
+  const answer = completed(
+    await fixture.workbench["session.events"](
+      { params: { session_id: sessionId }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  return {
+    enabled: answer.snapshot.auto_mode,
+    records: answer.entries.filter(
+      (entry) =>
+        (entry.data as { kind?: string } | undefined)?.kind === AUTO_MODE_KIND,
+    ).length,
+  };
+}
+
+test("(happy path) autoMode.set answers 200 with no active run, shows in the run snapshot, and a set to the current value appends no record", async (t) => {
+  const fixture = await workbenchFixture(t);
+  const session = await createSession(fixture);
+  assert.deepEqual(await autoModeState(fixture, session.id), {
+    enabled: true,
+    records: NO_RECORDS,
+  });
+  assert.deepEqual(completed(await setAutoMode(fixture, session.id, true)), {
+    session_id: session.id,
+    enabled: true,
+  });
+  assert.deepEqual(completed(await setAutoMode(fixture, session.id, false)), {
+    session_id: session.id,
+    enabled: false,
+  });
+  assert.deepEqual(completed(await setAutoMode(fixture, session.id, false)), {
+    session_id: session.id,
+    enabled: false,
+  });
+  assert.deepEqual(await autoModeState(fixture, session.id), {
+    enabled: false,
+    records: SINGLE,
+  });
+});
+
+test("(invariant guard, data loss) a new service over the same state directory opens the session with the last auto mode value", async (t) => {
+  const state = temporaryDirectory();
+  stopAfter(t, () => rmSync(state, { recursive: true, force: true }));
+  const persistence = {
+    path: join(temporary(t), "operational.db"),
+    masterKey: randomBytes(MASTER_KEY_BYTES).toString("base64"),
+    resumed: false,
+  };
+  let sessionId = "";
+  await t.test(
+    "switch auto mode off and on and off, then stop",
+    async (step) => {
+      const first = await workbenchFixture(
+        step,
+        [fauxAssistantMessage(ANSWER)],
+        state,
+        undefined,
+        [AGENT],
+        undefined,
+        persistence,
+      );
+      sessionId = (await createSession(first)).id;
+      completed(await message(first, sessionId, QUESTION));
+      await untilIdle(first, sessionId, step.signal);
+      for (const enabled of [false, true, false])
+        completed(await setAutoMode(first, sessionId, enabled));
+    },
+  );
+  const second = await workbenchFixture(
+    t,
+    [],
+    state,
+    undefined,
+    [AGENT],
+    undefined,
+    { ...persistence, resumed: true },
+  );
+  assert.deepEqual(await autoModeState(second, sessionId), {
+    enabled: false,
+    records: THREE_RECORDS,
+  });
+});
+
+test("(happy path) an owner run of re@1 reads a node that the message names with no approval, and a node that it does not name only after an approval", async (t) => {
+  const target: EvidenceTarget = { nodes: [] };
+  const { fixture, session } = await evidenceFixture(
+    t,
+    [
+      evidenceCall(target, 0, 0),
+      evidenceCall(target, 1, 0),
+      fauxAssistantMessage(ANSWER),
+    ],
+    target,
+    { nodes: [{ produced: [ALPHA_TEXT] }, { produced: [GAMMA_TEXT] }] },
+  );
+  const [nodeX, nodeY] = target.nodes as [SeededNode, SeededNode];
+  completed(await message(fixture, session.id, `Review ${nodeX.nodeId}`));
+  const pending = await untilApproval(fixture, session.id, t.signal);
+  assert.equal(pending.input.node_id, nodeY.nodeId);
+  completed(await decide(fixture, session.id, pending.tool_call_id, true));
+  const results = toolResults(await untilIdle(fixture, session.id, t.signal));
+  assert.deepEqual(
+    results.map(({ isError }) => isError),
+    [false, false],
+  );
+  assert.ok(results[0]!.text.includes(ALPHA_TEXT));
+  assert.ok(results[1]!.text.includes(GAMMA_TEXT));
+});
+
+test("(security: authorization) with auto mode off the read of a node that the message names shows an approval", async (t) => {
+  const target: EvidenceTarget = { nodes: [] };
+  const { fixture, session } = await evidenceFixture(
+    t,
+    [evidenceCall(target, 0, 0), fauxAssistantMessage(ANSWER)],
+    target,
+    { nodes: [{ produced: [ALPHA_TEXT] }] },
+  );
+  const [nodeX] = target.nodes as [SeededNode];
+  completed(await setAutoMode(fixture, session.id, false));
+  completed(await message(fixture, session.id, `Review ${nodeX.nodeId}`));
+  const pending = await untilApproval(fixture, session.id, t.signal);
+  assert.equal(pending.input.node_id, nodeX.nodeId);
+  completed(await decide(fixture, session.id, pending.tool_call_id, false));
+  await untilIdle(fixture, session.id, t.signal);
 });

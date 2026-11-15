@@ -110,7 +110,7 @@ export interface OfferActionToolInput {
   operations: readonly Operation[];
   invoke: InvokeOperation;
   requester: () => HumanIdentity | undefined;
-  offer: { taken(): boolean; append(record: WorkbenchRecord): void };
+  offer: { taken(): boolean; append(record: ActionOffer): void };
 }
 
 type ActionOffer = Extract<

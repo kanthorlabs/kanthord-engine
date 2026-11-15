@@ -35,7 +35,7 @@ import { SECRET_OPERATION_IDS } from "./tools.ts";
 const NO_OPERATIONS = 0;
 const ONE_OPERATION = 1;
 const BLOCK_ACTION = "block";
-const HUMAN_ONLY_COUNT = 88;
+const HUMAN_ONLY_COUNT = 89;
 const HUMAN_ONLY_CODE = "workbench.guard.human_only";
 const IMPORT_FORMAT_CODE = "workbench.guard.import_format";
 const HUMAN_ONLY_TEXT =
@@ -147,7 +147,7 @@ test("the guard block reasons and texts are exact", () => {
   assert.equal(WORKBENCH_IMPORT_FORMAT_TEXT, FORMAT_TEXT);
 });
 
-test("the human-only set holds 88 ids and keeps mission.proposal.decide out", () => {
+test("the human-only set holds 89 ids and keeps mission.proposal.decide out", () => {
   assert.equal(HUMAN_ONLY_OPERATIONS.size, HUMAN_ONLY_COUNT);
   assert.ok(
     !HUMAN_ONLY_OPERATIONS.has(missionOperations["proposal.decide"].id),

@@ -23,9 +23,12 @@ Every operation has `human` access.
 | `workbench.session.message`       | `POST /api/workbench/session/:session_id/message`                     | `unary`  |
 | `workbench.session.approve`       | `POST /api/workbench/session/:session_id/approve`                     | `unary`  |
 | `workbench.session.action.report` | `POST /api/workbench/session/:session_id/action/:tool_call_id/report` | `unary`  |
+| `workbench.session.autoMode.set`  | `POST /api/workbench/session/:session_id/auto-mode`                   | `unary`  |
 | `workbench.session.abort`         | `POST /api/workbench/session/:session_id/abort`                       | `unary`  |
 | `workbench.session.queue.remove`  | `DELETE /api/workbench/session/:session_id/queue/:queued_message_id`  | `unary`  |
 | `workbench.session.events`        | `GET /api/workbench/session/:session_id/events`                       | `wait`   |
+
+`workbench.session.autoMode.set` takes the body `{ enabled }` and answers `{ session_id, enabled }`. It is a human-only act of the owner. The run snapshot of `workbench.session.events` answers `auto_mode`.
 
 ## Error codes
 

@@ -86,6 +86,7 @@ import {
   workbenchConfigurationSchema,
   WorkbenchErrorCode,
   workbenchOperations,
+  WorkbenchRecordKind,
   type WorkbenchSession,
 } from "./contract.ts";
 import { missionOperations } from "../mission/contract.ts";
@@ -117,6 +118,7 @@ import {
   resumeCommand,
   type SessionPlace,
   sessionPlace,
+  storedAutoMode,
   storedConfiguration,
 } from "./sessions.ts";
 
@@ -178,6 +180,7 @@ interface OpenSession {
   approvals: Map<string, Approval>;
   doneReports: Set<string>;
   evidenceGrants: Set<string>;
+  autoMode: boolean;
   redaction: SensitiveTextRedaction | null;
   secrets: KnownSecrets;
 }
@@ -201,12 +204,18 @@ interface LaunchItem {
   context: Context;
 }
 
+interface ClaimOptions {
+  clearError: boolean;
+  request: string;
+}
+
 interface MessageBody {
   text: string;
   delivery: MessageDelivery;
 }
 
 interface Run {
+  request: string;
   settle: () => void;
   stopped: boolean;
   firstEntry: number;
@@ -413,6 +422,7 @@ export class WorkbenchService implements Service {
       approvals: new Map(),
       doneReports: new Set(),
       evidenceGrants: new Set(),
+      autoMode: storedAutoMode(this.entries(found.manager)),
     };
     this.sessions.set(sessionId, session);
     return session;
@@ -618,6 +628,10 @@ export class WorkbenchService implements Service {
       return { allowed: false, reason: message, terminate: false };
     }
     if (session.evidenceGrants.has(facts.node_id)) return ALLOWED;
+    if (this.messageGrants(session, facts.node_id)) {
+      session.evidenceGrants.add(facts.node_id);
+      return ALLOWED;
+    }
     const { offset, length } = call.input as {
       offset?: number;
       length?: number;
@@ -641,6 +655,10 @@ export class WorkbenchService implements Service {
     );
     if (decision.allowed) session.evidenceGrants.add(facts.node_id);
     return decision;
+  }
+
+  private messageGrants(session: OpenSession, nodeId: string): boolean {
+    return session.autoMode && !!session.run?.request.includes(nodeId);
   }
 
   private approval(
@@ -690,6 +708,22 @@ export class WorkbenchService implements Service {
     return { session_id: sessionId, tool_call_id: toolCallId, approved };
   }
 
+  async autoModeSet(
+    sessionId: string,
+    enabled: boolean,
+  ): Promise<{ session_id: string; enabled: boolean }> {
+    const session = await this.session(sessionId);
+    if (session.autoMode !== enabled) {
+      session.autoMode = enabled;
+      appendRecord(session.manager, {
+        kind: WorkbenchRecordKind.AutoMode,
+        enabled,
+      });
+      this.notify(session);
+    }
+    return { session_id: sessionId, enabled };
+  }
+
   async actionReport(
     sessionId: string,
     toolCallId: string,
@@ -697,9 +731,13 @@ export class WorkbenchService implements Service {
   ): Promise<ActionReportResult> {
     const session = await this.session(sessionId);
     const entries = this.entries(session.manager);
-    const offered = entries
-      .map(recordOf)
-      .find((record) => record?.tool_call_id === toolCallId);
+    const [offered] = entries.flatMap((entry) => {
+      const record = recordOf(entry);
+      return record?.kind === WorkbenchRecordKind.ActionOffer &&
+        record.tool_call_id === toolCallId
+        ? [record]
+        : [];
+    });
     if (!offered)
       throw new OperationError(
         HttpStatus.NotFound,
@@ -862,6 +900,7 @@ export class WorkbenchService implements Service {
         session.runError ??
         (session.agentErrorStale ? undefined : state?.errorMessage) ??
         null,
+      auto_mode: session.autoMode,
     };
   }
 
@@ -903,7 +942,7 @@ export class WorkbenchService implements Service {
     }
   }
 
-  private claim(session: OpenSession, clearError: boolean): Run {
+  private claim(session: OpenSession, options: ClaimOptions): Run {
     const completion = Promise.withResolvers<void>();
     let settled = false;
     const settle = () => {
@@ -917,6 +956,7 @@ export class WorkbenchService implements Service {
       this.startNext(session);
     };
     const run: Run = {
+      request: options.request,
       settle,
       firstEntry: session.manager.getEntries().length,
       ended: false,
@@ -926,7 +966,7 @@ export class WorkbenchService implements Service {
       settled: completion.promise,
     };
     session.run = run;
-    if (clearError) session.runError = null;
+    if (options.clearError) session.runError = null;
     this.notify(session);
     return run;
   }
@@ -960,7 +1000,10 @@ export class WorkbenchService implements Service {
     if (session.run) return;
     const item = session.queuedMessages.shift();
     if (!item) return;
-    const run = this.claim(session, false);
+    const run = this.claim(session, {
+      clearError: false,
+      request: item.text,
+    });
     this.exclusive(session, () =>
       this.launch(session, run, { ...item, context: this.shutdown }),
     ).catch((error: unknown) => {
@@ -1036,7 +1079,7 @@ export class WorkbenchService implements Service {
         cleared,
       };
     }
-    const run = this.claim(session, true);
+    const run = this.claim(session, { clearError: true, request: text });
     try {
       await this.exclusive(session, () =>
         this.launch(session, run, {
@@ -1132,6 +1175,7 @@ export class WorkbenchService implements Service {
       approvals: new Map(),
       doneReports: new Set(),
       evidenceGrants: new Set(),
+      autoMode: true,
     };
     this.sessions.set(id, session);
     try {
@@ -1206,6 +1250,10 @@ export class WorkbenchService implements Service {
       workbenchOperations["session.action.report"],
       ({ params, body }) =>
         this.actionReport(params.session_id, params.tool_call_id, body),
+    );
+    registry.register(
+      workbenchOperations["session.autoMode.set"],
+      ({ params, body }) => this.autoModeSet(params.session_id, body.enabled),
     );
     registry.register(workbenchOperations["session.abort"], ({ params }) =>
       this.abort(params.session_id),
