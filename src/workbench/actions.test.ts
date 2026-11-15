@@ -154,3 +154,12 @@ test("(happy path) the workbench prompt maps each fix case to its setup act", ()
     ),
   );
 });
+
+test("(security) the workbench prompt forbids repeating a secret that the human sent", () => {
+  const prompt = readFileSync(PROMPT_PATH, "utf8");
+  assert.ok(
+    prompt.includes(
+      "Never ask the human for a secret, and never accept one in the chat. Never repeat a secret that the human sent.",
+    ),
+  );
+});

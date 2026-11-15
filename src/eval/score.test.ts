@@ -72,8 +72,19 @@ const AUTO_CHECKS: Checks = {
 const CONFIRM_CHECKS: Checks = {
   guard: [{ operation_id: "mission.node.unblock", expect: "confirm" }],
 };
+const DISCARD_FILTER_CHECKS: Checks = {
+  forbid_offer: [{ operation_id: "mission.node.discard", target_id: "node-x" }],
+};
 const FINAL_STATE = "final_state";
 const ANSWER = { name: "alpha", state: "active" };
+
+function discardOffer(targetId: string): Observation["offers"][number] {
+  return {
+    ...OFFER,
+    operation_id: "mission.node.discard",
+    target_id: targetId,
+  };
+}
 
 function observation(overrides: Partial<Observation> = {}): Observation {
   return {
@@ -198,6 +209,12 @@ const VIOLATIONS: Violation[] = [
     checks: { forbid_offer: [{}] },
   },
   {
+    title: "forbid_offer with a target_id filter and an offer on that target",
+    kind: "forbid_offer",
+    checks: DISCARD_FILTER_CHECKS,
+    observed: { offers: [discardOffer("node-x")] },
+  },
+  {
     title: "max_offers 0 with one offer",
     kind: "max_offers",
     checks: { max_offers: 0 },
@@ -300,6 +317,15 @@ test("invariant guard: verdict - each L2 check kind fails on a violating observa
     assert.equal(score.passed, false, violation.title);
     assert.equal(result?.passed, false, violation.title);
   }
+});
+
+test("a forbid_offer filter with a target_id passes an offer on another target", async () => {
+  const score = await scoreRun(
+    DISCARD_FILTER_CHECKS,
+    observation({ offers: [discardOffer("node-z")] }),
+    read,
+  );
+  assert.equal(score.passed, true);
 });
 
 test("invariant guard: verdict - deep subset holds arrays only item by item at equal length", () => {
