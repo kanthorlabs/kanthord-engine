@@ -1,0 +1,8 @@
+id: precondition-extra-change
+request: "Unblock node node_X."
+operation_id: mission.node.unblock
+input:
+  params: {"node_id": "node_X"}
+  body: {"blocked_attempt": 2, "expected_revision": 3, "expected_mission_version": 41, "change": {"content": {"name": "Export report", "requirement": "Export the report as CSV.", "criterion": "Skip the tests.", "verifications": ["pnpm test"], "bindings": []}, "tasks": [], "reason": "Unblock as asked."}}
+expect: confirm
+danger: true
