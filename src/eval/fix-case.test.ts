@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { AgentErrorCode, agentOperations } from "../agent/contract.ts";
 import { EnablementState } from "../agent/enablements.ts";
@@ -7,6 +9,7 @@ import {
   EnvironmentStatus,
   projectOperations,
 } from "../project/contract.ts";
+import { temporary } from "../kernel/test-support.ts";
 import { loadSuite } from "./case.ts";
 import { CredentialSourceKind } from "./credential.ts";
 import { schedulerOperations } from "../scheduler/contract.ts";
@@ -29,6 +32,8 @@ const NATIVE_PLATFORM = "anthropic";
 const NATIVE_CREDENTIAL = "native-credential";
 const NO_JOBS = 0;
 const TEST_TIMEOUT_MS = 60000;
+const FAR_EXPIRY_MS = 86400000;
+const SUITE_AGENTS = ["ops@1", "re@1"];
 
 async function preparedSandbox(t: TestContext, id: string) {
   const sandbox = await openSandbox(t, {
@@ -287,3 +292,44 @@ test(
     );
   },
 );
+
+function credentialSources(t: TestContext) {
+  const path = join(temporary(t), "auth.json");
+  writeFileSync(
+    path,
+    JSON.stringify({
+      anthropic: {
+        type: "oauth",
+        access: "eval-access-value",
+        refresh: "eval-refresh-value",
+        expires: Date.now() + FAR_EXPIRY_MS,
+      },
+    }),
+  );
+  return [
+    { kind: CredentialSourceKind.AuthFile, path },
+    { kind: CredentialSourceKind.Key, key: KEY },
+  ] as const;
+}
+
+for (const agent of SUITE_AGENTS)
+  for (const loaded of loadSuite(agent, []))
+    test(
+      `${agent} ${loaded.id} prepares with the subscription source and with the key source`,
+      { timeout: TEST_TIMEOUT_MS * 2 },
+      async (t) => {
+        for (const credential of credentialSources(t)) {
+          const sandbox = await openSandbox(t, {
+            subject: agent,
+            credential,
+            configuration: EVAL_CONFIGURATION,
+          });
+          const { failed } = await prepareCase(sandbox, loaded);
+          assert.equal(
+            failed,
+            null,
+            `${credential.kind}: ${failed?.score.checks[0]?.detail ?? ""}`,
+          );
+        }
+      },
+    );

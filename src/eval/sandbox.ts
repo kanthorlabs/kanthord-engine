@@ -139,7 +139,12 @@ export async function openSandbox(
     credential,
     configuration: options.configuration,
   });
-  await enableWorkerAgents(fixture, credential.platform, options.configuration);
+  await enableWorkerAgents(
+    fixture,
+    options.subject,
+    credential.platform,
+    options.configuration,
+  );
   await connectEvalInstances(t, fixture);
   return {
     subject: options.subject,
@@ -154,11 +159,12 @@ export async function openSandbox(
 
 async function enableWorkerAgents(
   fixture: GatewayFixture,
+  subject: string,
   platform: NativeCredential["platform"],
   configuration: WorkbenchConfiguration,
 ): Promise<void> {
   const call = humanCaller(fixture);
-  for (const agent of WORKER_AGENTS)
+  for (const agent of WORKER_AGENTS.filter((name) => name !== subject))
     await call(agentOperations["enablement.put"], {
       params: { agent_name: agent },
       query: {},
