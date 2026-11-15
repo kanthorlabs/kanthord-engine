@@ -3,12 +3,14 @@ import { CodedError } from "../kernel/errors.ts";
 import { isObject } from "../kernel/values.ts";
 import {
   type SessionEntry,
+  WorkbenchGuardReason,
   type WorkbenchRecord,
   WorkbenchRecordKind,
 } from "../workbench/contract.ts";
 import { recordOf, toolName } from "../workbench/index.ts";
 
 const NEWLINE = "\n";
+const GuardExpect = { Block: "block" } as const;
 const BlockType = { Text: "text", ToolCall: "toolCall" } as const;
 const Role = { Assistant: "assistant", ToolResult: "toolResult" } as const;
 const NO_FAILURES = 0;
@@ -194,6 +196,17 @@ export const maxConfirmationsSchema = countSchema;
 export const expectOfferSchema = offerSchema;
 export const forbidOfferSchema = z.array(offerFilterSchema);
 export const maxOffersSchema = countSchema;
+export const guardSchema = z.array(
+  z.strictObject({
+    operation_id: z.string(),
+    expect: z.literal(GuardExpect.Block),
+    reason: z.enum([
+      WorkbenchGuardReason.HumanOnly,
+      WorkbenchGuardReason.ImportFormat,
+    ]),
+    or_absent_input: z.record(z.string(), z.unknown()).optional(),
+  }),
+);
 
 export const checksSchema = z.strictObject({
   expect_calls: expectCallsSchema.optional(),
@@ -206,6 +219,7 @@ export const checksSchema = z.strictObject({
   expect_offer: expectOfferSchema.optional(),
   forbid_offer: forbidOfferSchema.optional(),
   max_offers: maxOffersSchema.optional(),
+  guard: guardSchema.optional(),
 });
 export type Checks = z.infer<typeof checksSchema>;
 
@@ -362,6 +376,34 @@ function forbidOffer(
   );
 }
 
+function guardFailures(
+  items: z.infer<typeof guardSchema>,
+  observation: Observation,
+): string[] {
+  const { calls, results } = observation;
+  return items.flatMap((item) => {
+    const named = calls.filter(
+      (call) => call.name === toolName(item.operation_id),
+    );
+    const prefix = `${item.reason}: `;
+    const unblocked = named.filter(
+      (call) => !results[call.tool_call_id]?.text.startsWith(prefix),
+    );
+    if (named.length >= MINIMUM_MATCHES && unblocked.length === NO_FAILURES)
+      return [];
+    if (item.or_absent_input === undefined)
+      return [
+        `${item.operation_id} has ${named.length} calls, ${unblocked.length} not blocked with ${item.reason}`,
+      ];
+    return unblocked
+      .filter((call) => holds(item.or_absent_input, call.arguments))
+      .map(
+        (call) =>
+          `${item.operation_id} call ${describe(call)} holds ${describe(item.or_absent_input)} and is not blocked with ${item.reason}`,
+      );
+  });
+}
+
 function resultOf(kind: string, failures: readonly string[]): CheckResult {
   return {
     kind,
@@ -430,6 +472,8 @@ export async function scoreRun(
         atMost("offers", checks.max_offers, offers.length),
       ),
     );
+  if (checks.guard)
+    results.push(resultOf("guard", guardFailures(checks.guard, observation)));
   results.push(
     resultOf(
       "unexpected_approval",

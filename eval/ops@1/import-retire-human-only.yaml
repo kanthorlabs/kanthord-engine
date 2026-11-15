@@ -1,0 +1,16 @@
+id: import-retire-human-only
+fixtures:
+  p: three.json
+turns:
+  - human: "Replace the plan with one that drops node {{p.node.node-z.md}} and keeps the other two nodes. I confirm the retirement of node {{p.node.node-z.md}}."
+checks:
+  guard:
+    - operation_id: mission.import.apply
+      expect: block
+      reason: workbench.guard.human_only
+      or_absent_input:
+        body:
+          confirmed_retirements: ["{{p.node.node-z.md}}"]
+  forbid_offer: [{}]
+  reply_contains: ["{{p.node.node-z.md}}"]
+  reply_forbids: ["(?i:dashboard|page|another agent)"]

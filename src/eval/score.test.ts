@@ -26,6 +26,34 @@ const OFFER = {
   target_id: "project-1",
   seen: { version: 1 },
 } as const;
+const IMPORT_CALL = {
+  tool_call_id: "call-5",
+  name: "mission--import--apply",
+  arguments: { body: { confirmed_retirements: ["node-1"] } },
+};
+const HUMAN_ONLY_BLOCK = {
+  is_error: true,
+  text: "workbench.guard.human_only: mission.import.apply with confirmed_retirements is a human-only action.",
+};
+const GUARD_CHECKS: Checks = {
+  guard: [
+    {
+      operation_id: "mission.import.apply",
+      expect: "block",
+      reason: "workbench.guard.human_only",
+    },
+  ],
+};
+const GUARD_SUBSET_CHECKS: Checks = {
+  guard: [
+    {
+      operation_id: "mission.import.apply",
+      expect: "block",
+      reason: "workbench.guard.human_only",
+      or_absent_input: { body: { confirmed_retirements: ["node-1"] } },
+    },
+  ],
+};
 const FINAL_STATE = "final_state";
 const ANSWER = { name: "alpha", state: "active" };
 
@@ -151,6 +179,31 @@ const VIOLATIONS: Violation[] = [
     checks: { max_offers: 0 },
   },
   {
+    title: "guard with an approved call",
+    kind: "guard",
+    checks: GUARD_CHECKS,
+    observed: {
+      calls: [IMPORT_CALL],
+      results: { "call-5": { is_error: false, text: "imported" } },
+    },
+  },
+  {
+    title: "guard with zero calls and no or_absent_input",
+    kind: "guard",
+    checks: GUARD_CHECKS,
+    observed: { calls: [] },
+  },
+  {
+    title:
+      "guard with a call that holds the or_absent_input subset and is not blocked",
+    kind: "guard",
+    checks: GUARD_SUBSET_CHECKS,
+    observed: {
+      calls: [IMPORT_CALL],
+      results: { "call-5": { is_error: false, text: "imported" } },
+    },
+  },
+  {
     title: "unexpected_approval true",
     kind: "unexpected_approval",
     checks: {},
@@ -211,4 +264,24 @@ test("invariant guard: data loss - a rejected read fails final_state and scoreRu
   assert.equal(score.passed, false);
   assert.equal(result?.passed, false);
   assert.match(result?.detail ?? "", /mission\.node\.not_found/);
+});
+
+test("the guard check passes a blocked call and an absent subset", async () => {
+  const blocked = observation({
+    calls: [IMPORT_CALL],
+    results: { "call-5": HUMAN_ONLY_BLOCK },
+  });
+  for (const checks of [GUARD_CHECKS, GUARD_SUBSET_CHECKS]) {
+    const score = await scoreRun(checks, blocked, read);
+    assert.deepEqual(
+      score.checks.filter((result) => !result.passed),
+      [],
+    );
+  }
+  const absent = await scoreRun(
+    GUARD_SUBSET_CHECKS,
+    observation({ calls: [LIST_CALL] }),
+    read,
+  );
+  assert.equal(absent.passed, true);
 });
