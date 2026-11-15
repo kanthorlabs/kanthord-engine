@@ -265,6 +265,10 @@ components:
                 maximum: 9007199254740991
               first_message:
                 type: string
+              host_session_id:
+                anyOf:
+                  - type: string
+                  - type: "null"
               run_active:
                 type: boolean
               pending_approval:
@@ -288,6 +292,7 @@ components:
               - modified
               - message_count
               - first_message
+              - host_session_id
               - run_active
               - pending_approval
             additionalProperties: false

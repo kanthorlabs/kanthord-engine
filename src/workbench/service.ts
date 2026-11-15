@@ -1362,7 +1362,7 @@ export class WorkbenchService implements Service {
       id,
       agentName,
       place,
-      manager: await createSession(place, id),
+      manager: await createSession(place, id, {}),
       configuration,
       requester: humanOf(caller),
       agent: null,
