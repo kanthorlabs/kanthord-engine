@@ -172,7 +172,12 @@ interface Resolved {
 
 interface GuardResolved extends Resolved {
   credential: string;
+  agentProvider: string;
   model: string;
+}
+
+interface GuardAuthorization extends WorkbenchAuthorization {
+  agentProvider: string;
 }
 
 interface GuardRuntime {
@@ -386,7 +391,7 @@ export class WorkbenchService implements Service {
     tx: Transaction,
     requester: HumanIdentity,
     sessionId: string,
-  ): WorkbenchAuthorization {
+  ): GuardAuthorization {
     assert.ok(isHumanIdentity(requester));
     if (!this.sessions.has(sessionId)) throw refused(sessionId);
     const view = this.dependencies.agentConfiguration.agentView(
@@ -398,13 +403,14 @@ export class WorkbenchService implements Service {
     return {
       credential: view.effective.credential,
       platform: view.effective.provider,
+      agentProvider: view.effective.agent_provider,
     };
   }
 
   private resolveGuard(tx: Transaction, session: OpenSession): GuardResolved {
     const { requester } = session;
     if (!requester) throw refused(session.id);
-    const { credential, platform } = this.authorizeGuard(
+    const { credential, platform, agentProvider } = this.authorizeGuard(
       tx,
       requester,
       session.id,
@@ -419,6 +425,7 @@ export class WorkbenchService implements Service {
       credentialId: metadata.id,
       metadata: metadata.metadata,
       credential,
+      agentProvider,
       model,
     };
   }
@@ -445,7 +452,7 @@ export class WorkbenchService implements Service {
       },
       credentialId: resolved.credentialId,
       configuration: {
-        agent_provider: resolved.credential,
+        agent_provider: resolved.agentProvider,
         provider: resolved.provider,
         model_identifier: resolved.model,
         reasoning_effort: ReasoningLevel.Off,

@@ -155,7 +155,9 @@ function scriptedFactory(
 ): {
   factory: WorkbenchModelRuntimeFactory;
   provider: ReturnType<typeof scriptedProvider>;
+  configurations: WorkbenchConfiguration[];
 } {
+  const configurations: WorkbenchConfiguration[] = [];
   const provider = scriptedProvider(script, {
     providerId: ANTHROPIC,
     modelIdentifier: SONNET,
@@ -167,8 +169,10 @@ function scriptedFactory(
   });
   return {
     provider,
+    configurations,
     factory: async (input) => {
       await beforeOpen?.();
+      configurations.push(input.configuration);
       const runtime = await createModelRuntime(await loadPi(), input);
       runtime.registerNativeProvider(provider.provider);
       return { runtime, model: resolveModel(runtime, input.configuration) };
@@ -204,7 +208,12 @@ async function workbenchFixture(
   const options = { identity };
   const llm = directClient(llmOperations, fixture.invocation);
   if (persistence?.resumed)
-    return workbenchClients(fixture, scripted.provider, options);
+    return workbenchClients(
+      fixture,
+      scripted.provider,
+      scripted.configurations,
+      options,
+    );
   for (const [name, key] of [
     [PRIMARY_CREDENTIAL, PRIMARY_KEY],
     [BACKUP_CREDENTIAL, BACKUP_KEY],
@@ -261,17 +270,24 @@ async function workbenchFixture(
         options,
       ),
     );
-  return workbenchClients(fixture, scripted.provider, options);
+  return workbenchClients(
+    fixture,
+    scripted.provider,
+    scripted.configurations,
+    options,
+  );
 }
 
 function workbenchClients(
   fixture: Awaited<ReturnType<typeof gatewayFixture>>,
   provider: ReturnType<typeof scriptedProvider>,
+  configurations: readonly WorkbenchConfiguration[],
   options: { identity: typeof identity },
 ) {
   return {
     ...fixture,
     provider,
+    configurations,
     options,
     agent: directClient(agentOperations, fixture.invocation),
     projects: directClient(projectOperations, fixture.invocation),
@@ -4054,6 +4070,8 @@ test("(security: authorization) a message grant ends with its run, so after auto
       fauxAssistantMessage(ANSWER),
       evidenceCall(target, 0, 0),
       fauxAssistantMessage(ANSWER),
+      evidenceCall(target, 0, 0),
+      fauxAssistantMessage(ANSWER),
     ],
     target,
     { nodes: [{ produced: [ALPHA_TEXT] }] },
@@ -4065,6 +4083,11 @@ test("(security: authorization) a message grant ends with its run, so after auto
     toolResults(first).map(({ isError }) => isError),
     [false],
   );
+  completed(await message(fixture, session.id, QUESTION));
+  const unnamed = await untilApproval(fixture, session.id, t.signal);
+  assert.equal(unnamed.input.node_id, nodeX.nodeId);
+  completed(await decide(fixture, session.id, unnamed.tool_call_id, false));
+  await untilIdle(fixture, session.id, t.signal);
   completed(await setAutoMode(fixture, session.id, false));
   completed(await message(fixture, session.id, `Review ${nodeX.nodeId}`));
   const pending = await untilApproval(fixture, session.id, t.signal);
@@ -4190,6 +4213,25 @@ test("(happy path) a verdict auto at the threshold with a quote of the run messa
   ]);
   assert.equal(guardCalls(fixture).length, SINGLE);
   assert.equal(guardCalls(fixture)[0]!.apiKey, SPARE_KEY);
+});
+
+test("(invariant guard: provider identity) the guard runtime gets the agent provider of the guard enablement, never its credential name", async (t) => {
+  const { fixture, session, target } = await guardedFixture(t, {
+    guard: true,
+    script: (x) => [
+      criterionCall(x),
+      verdictStep(x),
+      fauxAssistantMessage(ANSWER),
+    ],
+  });
+  completed(await message(fixture, session.id, target.request));
+  await untilIdle(fixture, session.id, t.signal);
+  const guard = fixture.configurations.filter(
+    ({ model_identifier }) => model_identifier === GUARD_MODEL,
+  );
+  assert.equal(guard.length, SINGLE);
+  assert.equal(guard[0]!.agent_provider, DEFAULT);
+  assert.notEqual(guard[0]!.agent_provider, SPARE_CREDENTIAL);
 });
 
 test("(happy path) an R1 call runs with no card and no guard model call, and writes one guard record with reason reversible with no guard@1 enablement", async (t) => {

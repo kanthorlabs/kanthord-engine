@@ -3,7 +3,7 @@ import type { Context } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import type { BindingPrompts } from "../project/contract.ts";
 import {
-  type AgentName,
+  type BindingAgentName,
   InstructionFileState,
   PromptOrigin,
   PromptPart,
@@ -65,7 +65,7 @@ export function bindingText(
   const text =
     part === PromptPart.Repository
       ? prompts.repository
-      : prompts.agents?.[agentName as AgentName];
+      : prompts.agents?.[agentName as BindingAgentName];
   return text ?? null;
 }
 

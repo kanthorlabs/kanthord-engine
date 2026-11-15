@@ -32,6 +32,15 @@ export const AGENT_NAMES = [
   "guard@1",
 ] as const;
 export type AgentName = (typeof AGENT_NAMES)[number];
+export const INTERNAL_AGENT_NAMES = ["guard@1"] as const;
+export type BindingAgentName = Exclude<
+  AgentName,
+  (typeof INTERNAL_AGENT_NAMES)[number]
+>;
+export const BINDING_AGENT_NAMES = AGENT_NAMES.filter(
+  (name): name is BindingAgentName =>
+    !(INTERNAL_AGENT_NAMES as readonly string[]).includes(name),
+);
 export const ENABLEMENT_TIMEOUT_MS = 30000;
 export const LIST_LIMIT_DEFAULT = 100;
 export const LIST_LIMIT_MAX = 1000;
