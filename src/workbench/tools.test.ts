@@ -40,6 +40,7 @@ import { trackingOperations } from "../tracking/contract.ts";
 import { workerOperations } from "../worker/contract.ts";
 import { ACTION_CARD_OPERATIONS, ActionTarget } from "./actions.ts";
 import { workbenchOperations } from "./contract.ts";
+import { HUMAN_ONLY_OPERATIONS } from "./guard.ts";
 import {
   builtinTools,
   type InvokeOperation,
@@ -151,6 +152,19 @@ test("(security) every listed id passes the eligibility filter and no list names
       assert.ok(!operation.secret, id);
       assert.ok(!SECRET_OPERATION_IDS.has(id), id);
     }
+});
+
+test("(security: authorization) no tool list names a human-only id", () => {
+  for (const declaration of Object.values(AGENT_DECLARATIONS)) {
+    const humanOnly = declaration.tools.operation.filter((id) =>
+      HUMAN_ONLY_OPERATIONS.has(id),
+    );
+    assert.deepEqual(
+      humanOnly,
+      [],
+      `${declaration.agent_name} lists human-only ids: ${humanOnly.join(", ")}`,
+    );
+  }
 });
 
 test("(security) no operation that toolOperations keeps answers a presigned URL property", () => {

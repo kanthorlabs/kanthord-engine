@@ -90,6 +90,7 @@ import {
 } from "./contract.ts";
 import { missionOperations } from "../mission/contract.ts";
 import { offerActionTool } from "./actions.ts";
+import { floorOf, GuardAction } from "./guard.ts";
 import {
   EVIDENCE_ASSET_MISMATCH,
   EVIDENCE_READ_TOOL,
@@ -468,13 +469,12 @@ export class WorkbenchService implements Service {
         session.agentName,
         session.place.cwd,
       );
-      const mutations = new Map<string, Operation>();
+      const toolOperationsByName = new Map<string, Operation>();
       const operations = toolOperations(
         this.dependencies.operations(),
         declaration.tools.operation,
       ).map((operation) => {
-        if (operation.mutation)
-          mutations.set(toolName(operation.id), operation);
+        toolOperationsByName.set(toolName(operation.id), operation);
         return operationTool(
           operation,
           this.dependencies.invoke,
@@ -536,14 +536,23 @@ export class WorkbenchService implements Service {
             approve: async (call, signal) => {
               if (call.toolName === EVIDENCE_READ_TOOL)
                 return this.evidenceGrant(session, call, { signal });
-              const operation = mutations.get(call.toolName);
+              const operation = toolOperationsByName.get(call.toolName);
               if (!operation) return ALLOWED;
+              const input = JSON.parse(JSON.stringify(call.input ?? {}));
+              const decision = floorOf(operation, input);
+              if (decision.action === GuardAction.Run) return ALLOWED;
+              if (decision.action === GuardAction.Block)
+                return {
+                  allowed: false,
+                  reason: decision.reason,
+                  terminate: false,
+                };
               return this.approval(
                 session,
                 {
                   tool_call_id: call.toolCallId,
                   operation_id: operation.id,
-                  input: JSON.parse(JSON.stringify(call.input ?? {})),
+                  input,
                 },
                 signal,
               );

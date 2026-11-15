@@ -61,6 +61,7 @@ import {
   WORKBENCH_REJECTION_REASON,
   type WorkbenchConfiguration,
   WorkbenchErrorCode,
+  WorkbenchGuardReason,
   workbenchOperations,
 } from "../../workbench/contract.ts";
 import {
@@ -68,6 +69,7 @@ import {
   type WorkbenchModelRuntimeFactory,
 } from "../../workbench/index.ts";
 import {
+  ImportFormat,
   MissionErrorCode,
   missionOperations,
   NodeState,
@@ -3641,4 +3643,151 @@ test("(security) a setup offer runs no mutation, appends one record and creates 
     ),
   );
   assert.equal(credentials.revisions.length, SECOND_REVISION);
+});
+
+const IMPORT_APPLY = missionOperations["import.apply"].id;
+const PREVIEW_DIGEST = "a".repeat(64);
+const IMPORT_REASON = "import the plan";
+
+interface ImportTarget {
+  missionId: string;
+  version: number;
+  nodeId: string;
+}
+
+function importToolInput(target: ImportTarget, body: Record<string, unknown>) {
+  return {
+    params: { mission_id: target.missionId },
+    body: {
+      mission_id: target.missionId,
+      mission_version: target.version,
+      reason: IMPORT_REASON,
+      preview_digest: PREVIEW_DIGEST,
+      ...body,
+    },
+  };
+}
+
+async function importTarget(fixture: Fixture): Promise<ImportTarget> {
+  const nodeId = await createNode(fixture);
+  const mission = completed(
+    await fixture.missions.get(
+      {
+        params: { project_id: await firstProjectId(fixture) },
+        query: {},
+        body: null,
+      },
+      fixture.options,
+    ),
+  );
+  return { missionId: mission.id, version: mission.version, nodeId };
+}
+
+async function importState(fixture: Fixture, target: ImportTarget) {
+  const mission = completed(
+    await fixture.missions.get(
+      {
+        params: { project_id: await firstProjectId(fixture) },
+        query: {},
+        body: null,
+      },
+      fixture.options,
+    ),
+  );
+  const nodes = completed(
+    await fixture.missions["node.list"](
+      {
+        params: { mission_id: target.missionId },
+        query: {},
+        body: null,
+      } as never,
+      fixture.options,
+    ),
+  );
+  return {
+    version: mission.version,
+    nodeIds: nodes.items.map(({ id }) => id),
+  };
+}
+
+async function importFixture(
+  t: TestContext,
+  bodiesOf: (target: ImportTarget) => Record<string, unknown>[],
+) {
+  const holder = { target: undefined as ImportTarget | undefined };
+  const bodies: Record<string, unknown>[] = [];
+  const fixture = await workbenchFixture(
+    t,
+    [
+      ...[0, 1].map((index) => () => {
+        assert.ok(holder.target);
+        const body = bodies[index];
+        assert.ok(body);
+        return toolCall(
+          toolName(IMPORT_APPLY),
+          importToolInput(holder.target, body),
+        );
+      }),
+      fauxAssistantMessage(ANSWER),
+    ],
+    undefined,
+    undefined,
+    [OPS, AGENT, REVIEW_AGENT],
+  );
+  const target = await importTarget(fixture);
+  holder.target = target;
+  bodies.push(...bodiesOf(target));
+  const session = await createSession(fixture, undefined, OPS);
+  return { fixture, session, target };
+}
+
+test("(security: refused path) an import with retirements or with markdown creates no card, runs no import and returns the guard code", async (t) => {
+  const { fixture, session, target } = await importFixture(t, (node) => [
+    {
+      format: ImportFormat.Json,
+      entries: [],
+      confirmed_retirements: [node.nodeId],
+    },
+    {
+      format: ImportFormat.Markdown,
+      files: [],
+      confirmed_retirements: [],
+    },
+  ]);
+  const before = await importState(fixture, target);
+  completed(await message(fixture, session.id, QUESTION));
+  const entries = await untilIdle(fixture, session.id, t.signal);
+  const results = toolResults(entries);
+  assert.equal(results.length, TWO_RESULTS);
+  assert.ok(
+    results[0]?.text.startsWith(WorkbenchGuardReason.HumanOnly),
+    results[0]?.text ?? "",
+  );
+  assert.ok(
+    results[1]?.text.startsWith(WorkbenchGuardReason.ImportFormat),
+    results[1]?.text ?? "",
+  );
+  assert.ok(results.every(({ isError }) => isError));
+  assert.equal(
+    (await snapshotOf(fixture, session.id)).snapshot.pending_approval,
+    null,
+  );
+  assert.deepEqual(await importState(fixture, target), before);
+});
+
+test("(security: authorization) an import with no retirement waits on the card and a rejection runs nothing", async (t) => {
+  const { fixture, session, target } = await importFixture(t, () => [
+    { format: ImportFormat.Json, entries: [], confirmed_retirements: [] },
+    { format: ImportFormat.Json, entries: [], confirmed_retirements: [] },
+  ]);
+  const before = await importState(fixture, target);
+  completed(await message(fixture, session.id, QUESTION));
+  const pending = await untilApproval(fixture, session.id, t.signal);
+  assert.equal(pending.operation_id, IMPORT_APPLY);
+  completed(await decide(fixture, session.id, pending.tool_call_id, false));
+  const second = await untilApproval(fixture, session.id, t.signal);
+  completed(await decide(fixture, session.id, second.tool_call_id, false));
+  const entries = await untilIdle(fixture, session.id, t.signal);
+  assert.ok(toolResults(entries).every(({ isError }) => isError));
+  assert.deepEqual(await importState(fixture, target), before);
 });

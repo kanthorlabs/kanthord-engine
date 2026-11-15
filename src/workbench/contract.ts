@@ -120,6 +120,16 @@ export const workbenchSessionSchema = z.strictObject({
 export type WorkbenchSession = z.infer<typeof workbenchSessionSchema>;
 
 export const WORKBENCH_REJECTION_REASON = "The human rejected the call.";
+
+export const WorkbenchGuardReason = {
+  HumanOnly: "workbench.guard.human_only",
+  ImportFormat: "workbench.guard.import_format",
+} as const;
+export function workbenchHumanOnlyText(operationId: string): string {
+  return `${WorkbenchGuardReason.HumanOnly}: ${operationId} is a human-only action. Only the human runs it.`;
+}
+export const WORKBENCH_IMPORT_RETIREMENT_TEXT = `${WorkbenchGuardReason.HumanOnly}: mission.import.apply with confirmed_retirements is a human-only action. Import with no retirement, or ask the human to retire the nodes.`;
+export const WORKBENCH_IMPORT_FORMAT_TEXT = `${WorkbenchGuardReason.ImportFormat}: Agent imports use format json.`;
 export const WORKBENCH_EXPIRY_REASON =
   "The approval wait ended with no human decision. The call did not run. Do not call it again unless the human asks again.";
 
