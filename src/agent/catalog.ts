@@ -6,6 +6,7 @@ import {
 } from "../worker/contract.ts";
 import type { AgentName } from "./contract.ts";
 import {
+  GUARD_PROMPT,
   OPS_AGENT_PROMPT,
   PE_AGENT_PROMPT,
   RE_AGENT_PROMPT,
@@ -18,6 +19,8 @@ export interface AgentDeclaration {
   agent_prompt: string;
   display_name: string;
   tools: AgentTools;
+  pinned_model_identifier?: string;
+  internal?: true;
 }
 
 export interface AgentTools {
@@ -194,6 +197,15 @@ export const AGENT_DECLARATIONS: Readonly<Record<AgentName, AgentDeclaration>> =
         "reasoning_effort",
         "fallback_configurations",
       ],
+    },
+    "guard@1": {
+      agent_name: "guard@1",
+      display_name: "Guard",
+      agent_prompt: GUARD_PROMPT,
+      tools: { builtin: [], host: [], operation: [], workbench: [] },
+      pinned_model_identifier: "claude-sonnet-5",
+      internal: true,
+      overridable_fields: [],
     },
   };
 

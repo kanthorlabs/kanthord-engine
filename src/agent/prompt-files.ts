@@ -36,6 +36,7 @@ import {
 
 const STANDARD_FILE = "base.md";
 const WORKBENCH_FILE = "workbench.md";
+const GUARD_FILE = "guard.md";
 const MARKDOWN_EXTENSION = ".md";
 
 interface PromptFile {
@@ -69,6 +70,14 @@ function promptFiles(
   agent: AgentDeclaration,
   workbench: boolean,
 ): PromptFile[] {
+  if (agent.internal)
+    return [
+      {
+        part: PromptPart.Role,
+        name: GUARD_FILE,
+        shipped: agent.agent_prompt,
+      },
+    ];
   return [
     { part: PromptPart.Standard, name: STANDARD_FILE, shipped: BASE_PROMPT },
     {

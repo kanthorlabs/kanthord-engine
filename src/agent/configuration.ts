@@ -18,7 +18,10 @@ import {
   type DefaultConfiguration,
   reasoningEffortSchema,
 } from "./contract.ts";
+import { getAgentDeclaration } from "./catalog.ts";
 import { AgentProviderKind } from "./enablements.ts";
+
+const NO_FALLBACKS = 0;
 
 const issueFields: Readonly<Record<string, string>> = {
   [AgentErrorCode.ProviderNotFound]: "agent_provider",
@@ -48,6 +51,20 @@ export function configurationError(
     "Agent configuration is unavailable or invalid.",
     { agent_name: agentName },
   );
+}
+
+export function assertModelPinned(
+  agentName: string,
+  defaults: DefaultConfiguration,
+  fallbackConfigurations: readonly DefaultConfiguration[],
+): void {
+  const pin = getAgentDeclaration(agentName)?.pinned_model_identifier;
+  if (pin === undefined) return;
+  if (
+    defaults.model_identifier !== pin ||
+    fallbackConfigurations.length > NO_FALLBACKS
+  )
+    throw configurationError(agentName, AgentErrorCode.ModelPinned);
 }
 
 export function effectiveConfiguration(

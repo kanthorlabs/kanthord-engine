@@ -24,7 +24,13 @@ import {
 } from "../scheduler/contract.ts";
 
 export const AGENT_COMPONENT_NAME = "agent";
-export const AGENT_NAMES = ["swe@1", "re@1", "pe@1", "ops@1"] as const;
+export const AGENT_NAMES = [
+  "swe@1",
+  "re@1",
+  "pe@1",
+  "ops@1",
+  "guard@1",
+] as const;
 export type AgentName = (typeof AGENT_NAMES)[number];
 export const ENABLEMENT_TIMEOUT_MS = 30000;
 export const LIST_LIMIT_DEFAULT = 100;
@@ -152,6 +158,7 @@ export const AgentErrorCode = {
   ChainCooling: "agent.configuration.chain_cooling",
   CooldownNotFound: "agent.cooldown.not_found",
   ModelUnknown: "agent.configuration.model_unknown",
+  ModelPinned: "agent.configuration.model_pinned",
   ReasoningUnsupported: "agent.configuration.reasoning_effort_unsupported",
   CredentialUnsuitable: "agent.configuration.credential_unsuitable",
   CredentialHolderMismatch: "agent.configuration.credential_holder_mismatch",
@@ -474,6 +481,7 @@ export const agentDeclarationSchema = z.strictObject({
   display_name: z.string().min(1),
   configuration_schema: z.record(z.string(), z.unknown()),
   overridable_fields: z.array(z.string()),
+  pinned_model_identifier: z.string().min(1).nullable(),
   prompt: promptAnswerSchema,
   tools: z.array(toolDeclarationSchema),
   enablement: agentEnablementSchema.nullable(),

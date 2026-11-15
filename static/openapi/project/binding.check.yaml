@@ -166,6 +166,8 @@ components:
                           type: string
                         ops@1:
                           type: string
+                        guard@1:
+                          type: string
                       additionalProperties: false
                   additionalProperties: false
                 environment:

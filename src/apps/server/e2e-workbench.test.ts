@@ -13,6 +13,7 @@ import {
 } from "@earendil-works/pi-ai";
 import {
   BASE_PROMPT,
+  GUARD_PROMPT,
   SWE_AGENT_PROMPT,
   WORKBENCH_PROMPT,
 } from "../../agent/prompt-assets.ts";
@@ -36,6 +37,7 @@ import {
   AgentErrorCode,
   agentOperations,
   GuardClass,
+  PromptOrigin,
   PromptPart,
   ToolSource,
 } from "../../agent/contract.ts";
@@ -901,6 +903,25 @@ test("an override file replaces the shipped workbench text and an invalid one re
     path: overridePath,
     reason: "control_character",
   });
+});
+
+test("(security: refused path) agent.get of guard@1 answers the shipped text and reads no override file", async (t) => {
+  const agentDirectory = temporary(t);
+  writeFileSync(join(agentDirectory, "guard@1.md"), OVERRIDE_TEXT);
+  writeFileSync(join(agentDirectory, "guard.md"), OVERRIDE_TEXT);
+  writeFileSync(join(agentDirectory, "base.md"), OVERRIDE_TEXT);
+  const fixture = await workbenchFixture(t, [], undefined, agentDirectory);
+  const guard = completed(
+    await fixture.agent.get(
+      { params: { agent_name: "guard@1" }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  assert.equal(guard.prompt.final, GUARD_PROMPT);
+  assert.deepEqual(
+    guard.prompt.parts?.map(({ origin }) => origin),
+    [PromptOrigin.Binary],
+  );
 });
 
 test("an abort stops the active run", async (t) => {

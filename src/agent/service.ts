@@ -8,9 +8,14 @@ import { HealthScope, type ResourceEntry } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { OperationRegistry } from "../kernel/operation.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
-import { getAgentDeclaration, workbenchAgentNames } from "./catalog.ts";
+import {
+  type AgentDeclaration,
+  getAgentDeclaration,
+  workbenchAgentNames,
+} from "./catalog.ts";
 import type { AgentConfig } from "./config.ts";
 import {
+  assertModelPinned,
   chainConfigurations,
   chainIssues,
   checkFallbackDuplicates,
@@ -457,6 +462,7 @@ export class AgentComponent {
       default_configuration: defaultConfiguration,
       fallback_configurations: fallbackConfigurations,
     } = body;
+    assertModelPinned(agentName, defaultConfiguration, fallbackConfigurations);
     const change = { agentName, current, agentProviders };
     assertProviderSet(change);
     for (const item of agentProviders)
@@ -547,6 +553,11 @@ export class AgentComponent {
     body: (typeof agentOperations)["enablement.provider.add"]["input"]["_output"]["body"],
   ) {
     const current = currentRevision(tx, agentName, body.expected_revision);
+    assertModelPinned(
+      agentName,
+      current.default_configuration,
+      current.fallback_configurations,
+    );
     const { name, provider, credential } = body;
     if (current.agent_providers.some((item) => item.name === name))
       throw conflict(agentName, AgentErrorCode.ProviderNameConflict);
@@ -1278,13 +1289,44 @@ export class AgentComponent {
   ): Promise<PromptPartAnswer[]> {
     const agent = getAgentDeclaration(agentName);
     assert.ok(agent);
+    const directory = agent.internal ? null : this.agentDirectory();
     return resolveAgentPrompt({
       agent,
-      templates: await this.templateSet(context),
-      directory: this.agentDirectory(),
+      templates: await resolveTemplateSet(
+        templateDirectory(directory),
+        context,
+      ),
+      directory,
       workbench: consumer === PromptConsumer.Workbench,
       context,
     });
+  }
+
+  private async agentPromptOf(
+    declaration: AgentDeclaration,
+    query: (typeof agentOperations)["get"]["input"]["_output"]["query"],
+    context: Context,
+  ): Promise<{ parts: PromptPartAnswer[]; final: string | null }> {
+    if (declaration.internal) {
+      const parts = await this.composePrompt(
+        declaration.agent_name,
+        PromptConsumer.Worker,
+        context,
+      );
+      return { parts, final: parts[0]!.text };
+    }
+    const stack = this.promptStackOf(query);
+    const consumer =
+      stack === null && workbenchAgentNames().includes(declaration.agent_name)
+        ? PromptConsumer.Workbench
+        : PromptConsumer.Worker;
+    const files = await this.instructionFilesOf(stack?.targets ?? [], context);
+    const parts = [
+      ...(await this.composePrompt(declaration.agent_name, consumer, context)),
+      ...bindingParts(stack?.repositories ?? [], declaration.agent_name, files),
+      await this.promptFraming(consumer, context),
+    ];
+    return { parts, final: finalPrompt(parts) };
   }
 
   private agentDirectory(): string | null {
@@ -1422,26 +1464,11 @@ export class AgentComponent {
           params.agent_name,
         );
         assert.equal(declaration.agent_name, params.agent_name);
-        const stack = this.promptStackOf(query);
-        const consumer =
-          stack === null &&
-          workbenchAgentNames().includes(declaration.agent_name)
-            ? PromptConsumer.Workbench
-            : PromptConsumer.Worker;
-        const files = await this.instructionFilesOf(
-          stack?.targets ?? [],
+        const { parts, final } = await this.agentPromptOf(
+          declaration,
+          query,
           caller.context,
         );
-        const parts = [
-          ...(await this.composePrompt(
-            params.agent_name,
-            consumer,
-            caller.context,
-          )),
-          ...bindingParts(stack?.repositories ?? [], params.agent_name, files),
-          await this.promptFraming(consumer, caller.context),
-        ];
-        const final = finalPrompt(parts);
         return caller.commit((tx) => {
           const row = getEnablement(tx, params.agent_name);
           const view = this.agentView(
@@ -1456,6 +1483,8 @@ export class AgentComponent {
             display_name: declaration.display_name,
             configuration_schema: z.toJSONSchema(effectiveConfigurationSchema),
             overridable_fields: [...declaration.overridable_fields],
+            pinned_model_identifier:
+              declaration.pinned_model_identifier ?? null,
             prompt:
               query.view === PromptView.Final ? { final } : { parts, final },
             tools,
