@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { llmOperations } from "../llm/contract.ts";
 import { OperationResultType } from "../kernel/operation.ts";
+import { projectOperations } from "../project/contract.ts";
 import {
   ACTION_CARD_OPERATIONS,
   ActionTarget,
@@ -105,4 +106,42 @@ test("(security) a credential read with no live revision throws target_refused a
     /^Error: workbench\.action\.target_refused:/,
   );
   assert.deepEqual(records, []);
+});
+
+test("(happy path) the offer_action result tells the agent to write the full answer", async () => {
+  const operation_id = projectOperations["bindingSet.write"].id;
+  const target_id = "project_X";
+  const get = TARGET_READS[ActionTarget.BindingSet].operation_id;
+  const offerTool = offerActionTool({
+    operations: [{ id: get } as never],
+    invoke: () =>
+      Promise.resolve({
+        type: OperationResultType.Completed,
+        data: { version: 1 },
+      } as never),
+    requester: () => ({}) as never,
+    offer: { taken: () => false, append: () => undefined },
+  });
+  const result = await offerTool.execute(
+    "call_1",
+    { operation_id, target_id },
+    undefined,
+    undefined,
+    undefined as never,
+  );
+  assert.deepEqual(result.content, [
+    {
+      type: "text",
+      text: `Card shown: ${operation_id} on ${target_id}. The owner decides. Do not state that the act ran. Now write the full answer: the report that the human asked for, then one sentence about the card.`,
+    },
+  ]);
+});
+
+test("(happy path) the workbench prompt tells the agent to write the full answer after the card", () => {
+  const prompt = readFileSync(PROMPT_PATH, "utf8");
+  assert.ok(
+    prompt.includes(
+      "Call `offer_action` at most once per answer, as your last tool call. After the card, write the full answer: the report that the human asked for, then one sentence about the card.",
+    ),
+  );
 });
