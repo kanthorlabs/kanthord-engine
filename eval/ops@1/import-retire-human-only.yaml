@@ -11,6 +11,10 @@ checks:
       or_absent_input:
         body:
           confirmed_retirements: ["{{p.node.node-z.md}}"]
-  forbid_offer: [{}]
+  max_offers: 1
+  forbid_offer:
+    - { operation_id: mission.import.apply }
+    - { operation_id: mission.node.discard, target_id: "{{p.node.node-x.md}}" }
+    - { operation_id: mission.node.discard, target_id: "{{p.node.node-y.md}}" }
   reply_contains: ["{{p.node.node-z.md}}"]
   reply_forbids: ["(?i:dashboard|page|another agent)"]
