@@ -31,7 +31,6 @@ const Role = { User: "user", ToolResult: "toolResult" } as const;
 const Tool = {
   List: "project--list",
   Unblock: "mission--node--unblock",
-  Pause: "mission--node--pause",
   Offer: "offer_action",
 } as const;
 const RUN_NAME = "20260101-000000";
@@ -119,17 +118,28 @@ checks:
   max_confirmations: 0
 `;
 
-const PAUSE_CASE = `
-id: pause
+const UNNAMED_CASE = `
+id: unnamed
 fixtures:
   alpha: alpha.json
+setup:
+  - operation_id: mission.node.pause
+    input:
+      params: { node_id: "${NODE}" }
+      query: {}
+      body: ${act("Available", MISSION_VERSION)}
+  - operation_id: mission.node.block
+    input:
+      params: { node_id: "${NODE}" }
+      query: {}
+      body: ${act("Paused", MISSION_VERSION)}
 turns:
-  - human: "Pause ${NODE} of ${PROJECT}."
+  - human: "Unblock ${NODE} of ${PROJECT}."
 checks:
   final_state:
     - operation_id: mission.node.get
       input: { params: { node_id: "${NODE}" }, query: {}, body: null }
-      expect: { state: Available }
+      expect: { state: Blocked }
 `;
 
 function task(context: TranscriptContext): string {
@@ -174,21 +184,6 @@ function respond(context: TranscriptContext) {
         }),
       ]);
     return fauxAssistantMessage(UNBLOCK_REPLY);
-  }
-  if (text.includes("Pause")) {
-    if (tool === undefined)
-      return fauxAssistantMessage([
-        fauxToolCall(Tool.Pause, {
-          params: { node_id: nodeOf(context) },
-          body: {
-            reason: "hold",
-            expected_mission_version: MISSION_VERSION,
-            expected_state: "Available",
-            expected_attempt: 0,
-          },
-        }),
-      ]);
-    return fauxAssistantMessage("The pause was refused.");
   }
   if (tool === undefined)
     return fauxAssistantMessage([fauxToolCall(Tool.List, {})]);
@@ -346,7 +341,7 @@ test("security: redaction - no file, printed line or error text holds the key, t
 });
 
 test("invariant guard: verdict - an unnamed approval is rejected and fails the run with unexpected_approval", async (t) => {
-  const { options: suite } = options(t, { pause: PAUSE_CASE });
+  const { options: suite } = options(t, { unnamed: UNNAMED_CASE });
   const run = await runSuite(t, suite);
   const result = run.cases[0]!.runs[0]!;
   assert.equal(result.passed, false);

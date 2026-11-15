@@ -55,6 +55,9 @@ import { llmOperations } from "../../llm/contract.ts";
 import { createModelRuntime, resolveModel } from "../../llm/model-connector.ts";
 import {
   ActionOutcome,
+  GUARD_AUTO_CONFIDENCE,
+  GUARD_TOOL_NAME,
+  GuardCause,
   MessageDelivery,
   WORKBENCH_ACTION_RESULT_ENTRY,
   WORKBENCH_CONFIGURATION_ENTRY,
@@ -89,6 +92,8 @@ import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 const AGENT = "swe@1";
 const REVIEW_AGENT = "re@1";
 const OPS = "ops@1";
+const GUARD_AGENT = "guard@1";
+const GUARD_MODEL = "claude-sonnet-5";
 const ANTHROPIC = "anthropic";
 const DEFAULT = "default";
 const BACKUP = "backup";
@@ -111,6 +116,7 @@ const NO_UNKEPT = 0;
 const HOST_HOME = "/home/kanthord_host";
 const MESSAGE_ENTRY = "message";
 const SYSTEM_ROLE = "system";
+const USER_ROLE = "user";
 const INVALID_OVERRIDE_TEXT = "bell\u0007";
 const OVERRIDE_TEXT = "Answer in one sentence.";
 const QUESTION = "How many objectives are open?";
@@ -156,6 +162,7 @@ function scriptedFactory(
     models: [
       { id: SONNET, reasoning: false },
       { id: HAIKU, reasoning: true },
+      { id: GUARD_MODEL, reasoning: false },
     ],
   });
   return {
@@ -221,21 +228,31 @@ async function workbenchFixture(
           params: { agent_name: agentName },
           query: {},
           body: {
-            agent_providers: [
-              {
-                name: DEFAULT,
-                provider: ANTHROPIC,
-                credential: PRIMARY_CREDENTIAL,
-              },
-              {
-                name: BACKUP,
-                provider: ANTHROPIC,
-                credential: BACKUP_CREDENTIAL,
-              },
-            ],
+            agent_providers:
+              agentName === GUARD_AGENT
+                ? [
+                    {
+                      name: DEFAULT,
+                      provider: ANTHROPIC,
+                      credential: SPARE_CREDENTIAL,
+                    },
+                  ]
+                : [
+                    {
+                      name: DEFAULT,
+                      provider: ANTHROPIC,
+                      credential: PRIMARY_CREDENTIAL,
+                    },
+                    {
+                      name: BACKUP,
+                      provider: ANTHROPIC,
+                      credential: BACKUP_CREDENTIAL,
+                    },
+                  ],
             default_configuration: {
               agent_provider: DEFAULT,
-              model_identifier: SONNET,
+              model_identifier:
+                agentName === GUARD_AGENT ? GUARD_MODEL : SONNET,
               reasoning_effort: OFF,
             },
             fallback_configurations: [],
@@ -1059,6 +1076,14 @@ const PROJECT_NAME = "operations";
 const UNKNOWN_NODE = "node_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const FIRST_BINDING_SET = 1;
 const NO_PAUSE = null;
+const CRITERION_SET = "mission.criterion.set";
+const ORIGINAL_CRITERION = "The thread is reviewed";
+const NEW_CRITERION = "The thread is reviewed twice";
+const UNAVAILABLE_GUARD = {
+  cause: "unavailable",
+  reason: null,
+  confidence: null,
+};
 const NO_TOOLS = 0;
 const NO_DESCRIPTION = "";
 const OPS_OPERATION_COUNT = 36;
@@ -1091,12 +1116,12 @@ function toolResults(entries: readonly Entry[]) {
     }));
 }
 
-function resumeInput(projectId: string) {
-  return { params: { project_id: projectId }, query: {}, body: null };
-}
-
 function resumeToolInput(projectId: string) {
   return { params: { project_id: projectId } };
+}
+
+function resumeInput(projectId: string) {
+  return { params: { project_id: projectId }, query: {}, body: null };
 }
 
 async function pausedProject(fixture: Fixture): Promise<string> {
@@ -1127,7 +1152,16 @@ async function pausedAt(
   ).paused_at;
 }
 
+interface CreatedNode {
+  nodeId: string;
+  missionVersion: number;
+}
+
 async function createNode(fixture: Fixture): Promise<string> {
+  return (await createdNode(fixture)).nodeId;
+}
+
+async function createdNode(fixture: Fixture): Promise<CreatedNode> {
   const project = completed(
     await fixture.projects.create(
       { params: {}, query: {}, body: { name: PROJECT_NAME } },
@@ -1175,26 +1209,51 @@ async function createNode(fixture: Fixture): Promise<string> {
       } as never,
       fixture.options,
     ),
-  ) as { revisions: { node_id: string }[] };
-  return created.revisions[0]!.node_id;
+  ) as { revisions: { node_id: string }[]; mission_version: number };
+  return {
+    nodeId: created.revisions[0]!.node_id,
+    missionVersion: created.mission_version,
+  };
 }
 
-async function resumeFixture(t: TestContext, stateDirectory?: string) {
-  const target = { projectId: "" };
+function criterionToolInput(created: CreatedNode) {
+  return {
+    params: { node_id: created.nodeId },
+    body: {
+      criterion: NEW_CRITERION,
+      verifications: ["true"],
+      reason: "tighten",
+      expected_revision: FIRST_REVISION,
+      expected_mission_version: created.missionVersion,
+    },
+  };
+}
+
+async function criterionOf(fixture: Fixture, nodeId: string): Promise<string> {
+  return completed(
+    await fixture.missions["node.get"](
+      { params: { node_id: nodeId }, query: {}, body: null },
+      fixture.options,
+    ),
+  ).content.criterion;
+}
+
+async function cardFixture(t: TestContext, stateDirectory?: string) {
+  const target = { input: {} };
   const fixture = await workbenchFixture(
     t,
     [
-      () =>
-        toolCall(toolName(PROJECT_RESUME), resumeToolInput(target.projectId)),
+      () => toolCall(toolName(CRITERION_SET), target.input),
       fauxAssistantMessage(ANSWER),
     ],
     stateDirectory,
     undefined,
-    [OPS],
+    [OPS, AGENT, REVIEW_AGENT],
   );
-  target.projectId = await pausedProject(fixture);
+  const created = await createdNode(fixture);
+  target.input = criterionToolInput(created);
   const session = await createSession(fixture, undefined, OPS);
-  return { fixture, session, projectId: target.projectId };
+  return { fixture, session, nodeId: created.nodeId, input: target.input };
 }
 
 async function untilApproval(
@@ -1223,7 +1282,7 @@ async function untilApproval(
 }
 
 test("a poll answers at once when the snapshot changed after the version that the client holds", async (t) => {
-  const { fixture, session } = await resumeFixture(t);
+  const { fixture, session } = await cardFixture(t);
   const sessionId = session.id;
   const before = completed(
     await fixture.workbench["session.events"](
@@ -1456,13 +1515,14 @@ test("(happy path) a read tool and a built-in tool of swe@1 run at once", async 
 });
 
 test("a mutation tool runs only after the human approves the call", async (t) => {
-  const { fixture, session, projectId } = await resumeFixture(t);
+  const { fixture, session, nodeId, input } = await cardFixture(t);
   const sessionId = session.id;
   completed(await message(fixture, sessionId, QUESTION));
   const pending = await untilApproval(fixture, sessionId, t.signal);
-  assert.equal(pending.operation_id, PROJECT_RESUME);
-  assert.deepEqual(pending.input, resumeToolInput(projectId));
-  assert.notEqual(await pausedAt(fixture, projectId), NO_PAUSE);
+  assert.equal(pending.operation_id, CRITERION_SET);
+  assert.deepEqual(pending.input, input);
+  assert.deepEqual(pending.guard, UNAVAILABLE_GUARD);
+  assert.equal(await criterionOf(fixture, nodeId), ORIGINAL_CRITERION);
   failed(
     await fixture.workbench["session.approve"](
       {
@@ -1497,7 +1557,7 @@ test("a mutation tool runs only after the human approves the call", async (t) =>
     toolResults(entries).map(({ isError }) => isError),
     [false],
   );
-  assert.equal(await pausedAt(fixture, projectId), NO_PAUSE);
+  assert.equal(await criterionOf(fixture, nodeId), NEW_CRITERION);
 });
 
 async function listedSession(fixture: Fixture, sessionId: string) {
@@ -1511,7 +1571,7 @@ async function listedSession(fixture: Fixture, sessionId: string) {
 }
 
 test("the session list names the run and the pending approval of an open session without the input", async (t) => {
-  const { fixture, session } = await resumeFixture(t);
+  const { fixture, session } = await cardFixture(t);
   const sessionId = session.id;
   completed(await message(fixture, sessionId, QUESTION));
   const pending = await untilApproval(fixture, sessionId, t.signal);
@@ -1519,7 +1579,7 @@ test("the session list names the run and the pending approval of an open session
   assert.equal(waiting?.run_active, true);
   assert.deepEqual(waiting?.pending_approval, {
     tool_call_id: pending.tool_call_id,
-    operation_id: PROJECT_RESUME,
+    operation_id: CRITERION_SET,
   });
   completed(
     await fixture.workbench["session.approve"](
@@ -1538,7 +1598,7 @@ test("the session list names the run and the pending approval of an open session
 });
 
 test("a rejected call reaches the agent as a blocked call", async (t) => {
-  const { fixture, session, projectId } = await resumeFixture(t);
+  const { fixture, session, nodeId } = await cardFixture(t);
   const sessionId = session.id;
   completed(await message(fixture, sessionId, QUESTION));
   const pending = await untilApproval(fixture, sessionId, t.signal);
@@ -1555,16 +1615,16 @@ test("a rejected call reaches the agent as a blocked call", async (t) => {
   const entries = await untilIdle(fixture, sessionId, t.signal);
   assert.deepEqual(toolResults(entries), [
     {
-      toolName: toolName(PROJECT_RESUME),
+      toolName: toolName(CRITERION_SET),
       isError: true,
       text: WORKBENCH_REJECTION_REASON,
     },
   ]);
-  assert.notEqual(await pausedAt(fixture, projectId), NO_PAUSE);
+  assert.equal(await criterionOf(fixture, nodeId), ORIGINAL_CRITERION);
 });
 
 test("an abort rejects every pending approval", async (t) => {
-  const { fixture, session, projectId } = await resumeFixture(t);
+  const { fixture, session, nodeId } = await cardFixture(t);
   const sessionId = session.id;
   completed(await message(fixture, sessionId, QUESTION));
   const pending = await untilApproval(fixture, sessionId, t.signal);
@@ -1594,7 +1654,7 @@ test("an abort rejects every pending approval", async (t) => {
     HttpStatus.NotFound,
     WorkbenchErrorCode.ApprovalNotFound,
   );
-  assert.notEqual(await pausedAt(fixture, projectId), NO_PAUSE);
+  assert.equal(await criterionOf(fixture, nodeId), ORIGINAL_CRITERION);
 });
 
 const SETTLE_TURNS = 20;
@@ -1631,7 +1691,7 @@ async function decide(
 
 test("(happy path) a card with no decision expires, returns the expiry reason and ends the run", async (t) => {
   enableTimers(t);
-  const { fixture, session, projectId } = await resumeFixture(t);
+  const { fixture, session, nodeId } = await cardFixture(t);
   const sessionId = session.id;
   completed(await message(fixture, sessionId, QUESTION));
   const pending = await untilApproval(fixture, sessionId, t.signal);
@@ -1639,12 +1699,12 @@ test("(happy path) a card with no decision expires, returns the expiry reason an
   const entries = await untilIdle(fixture, sessionId, t.signal);
   assert.deepEqual(toolResults(entries), [
     {
-      toolName: toolName(PROJECT_RESUME),
+      toolName: toolName(CRITERION_SET),
       isError: true,
       text: WORKBENCH_EXPIRY_REASON,
     },
   ]);
-  assert.notEqual(await pausedAt(fixture, projectId), NO_PAUSE);
+  assert.equal(await criterionOf(fixture, nodeId), ORIGINAL_CRITERION);
   const answer = await snapshotOf(fixture, sessionId);
   assert.equal(answer.snapshot.pending_approval, null);
   assert.equal(
@@ -1661,7 +1721,7 @@ test("(happy path) a card with no decision expires, returns the expiry reason an
 
 test("(invariant guard) an approve one millisecond before the expiry runs the call and a later tick changes nothing", async (t) => {
   enableTimers(t);
-  const { fixture, session, projectId } = await resumeFixture(t);
+  const { fixture, session, nodeId } = await cardFixture(t);
   const sessionId = session.id;
   const wait = fixture.config.workbench.approval_wait_ms;
   completed(await message(fixture, sessionId, QUESTION));
@@ -1678,7 +1738,7 @@ test("(invariant guard) an approve one millisecond before the expiry runs the ca
     toolResults(entries).map(({ isError }) => isError),
     [false],
   );
-  assert.equal(await pausedAt(fixture, projectId), NO_PAUSE);
+  assert.equal(await criterionOf(fixture, nodeId), NEW_CRITERION);
   const before = await snapshotOf(fixture, sessionId);
   t.mock.timers.tick(wait);
   await setImmediate();
@@ -1689,7 +1749,7 @@ test("(invariant guard) an approve one millisecond before the expiry runs the ca
 
 test("(invariant guard) an abort and then a full tick leave the version unchanged", async (t) => {
   enableTimers(t);
-  const { fixture, session } = await resumeFixture(t);
+  const { fixture, session } = await cardFixture(t);
   const sessionId = session.id;
   completed(await message(fixture, sessionId, QUESTION));
   await untilApproval(fixture, sessionId, t.signal);
@@ -1707,21 +1767,15 @@ test("(invariant guard) an abort and then a full tick leave the version unchange
 
 test("(security) the expiry of the first mutation of a batch ends the run before the second card and any provider call", async (t) => {
   enableTimers(t);
-  const target = { projectId: "" };
+  const target = { input: {} };
   const fixture = await workbenchFixture(
     t,
     [
       () =>
         fauxAssistantMessage(
           [
-            fauxToolCall(
-              toolName(PROJECT_RESUME),
-              resumeToolInput(target.projectId),
-            ),
-            fauxToolCall(
-              toolName(PROJECT_RESUME),
-              resumeToolInput(target.projectId),
-            ),
+            fauxToolCall(toolName(CRITERION_SET), target.input),
+            fauxToolCall(toolName(CRITERION_SET), target.input),
           ],
           { stopReason: TOOL_USE },
         ),
@@ -1729,9 +1783,10 @@ test("(security) the expiry of the first mutation of a batch ends the run before
     ],
     undefined,
     undefined,
-    [OPS],
+    [OPS, AGENT, REVIEW_AGENT],
   );
-  target.projectId = await pausedProject(fixture);
+  const created = await createdNode(fixture);
+  target.input = criterionToolInput(created);
   const session = await createSession(fixture, undefined, OPS);
   completed(await message(fixture, session.id, QUESTION));
   await untilApproval(fixture, session.id, t.signal);
@@ -1745,13 +1800,13 @@ test("(security) the expiry of the first mutation of a batch ends the run before
     (await snapshotOf(fixture, session.id)).snapshot.pending_approval,
     null,
   );
-  assert.notEqual(await pausedAt(fixture, target.projectId), NO_PAUSE);
+  assert.equal(await criterionOf(fixture, created.nodeId), ORIGINAL_CRITERION);
   assert.equal(fixture.provider.calls.length, SINGLE);
 });
 
 test("(invariant guard) a service stop with a pending card and then a full tick throws nothing and notifies nothing", async (t) => {
   enableTimers(t);
-  const { fixture, session } = await resumeFixture(t);
+  const { fixture, session } = await cardFixture(t);
   const sessionId = session.id;
   completed(await message(fixture, sessionId, QUESTION));
   await untilApproval(fixture, sessionId, t.signal);
@@ -1770,7 +1825,7 @@ test("(invariant guard) a service stop with a pending card and then a full tick 
 test("(invariant guard) a pending card at the service stop leaves a tool call with no tool result and the next run completes", async (t) => {
   enableTimers(t);
   const state = temporaryDirectory();
-  const first = await resumeFixture(t, state);
+  const first = await cardFixture(t, state);
   completed(await message(first.fixture, first.session.id, QUESTION));
   await untilApproval(first.fixture, first.session.id, t.signal);
   await first.fixture.workbenchService.stop();
@@ -1789,7 +1844,7 @@ test("(invariant guard) a pending card at the service stop leaves a tool call wi
     ),
   );
   assert.deepEqual(toolResults(resumed.entries), []);
-  assert.ok(JSON.stringify(resumed.entries).includes(toolName(PROJECT_RESUME)));
+  assert.ok(JSON.stringify(resumed.entries).includes(toolName(CRITERION_SET)));
   completed(await message(second, first.session.id, FIRST_MESSAGE));
   const entries = await untilIdle(
     second,
@@ -2184,7 +2239,7 @@ test("(happy path) a replace during a run clears the queue, aborts the provider 
 });
 
 test("(security) a replace during a pending approval blocks the call and never invokes the operation", async (t) => {
-  const { fixture, session, projectId } = await resumeFixture(t);
+  const { fixture, session, nodeId } = await cardFixture(t);
   const sessionId = session.id;
   completed(await message(fixture, sessionId, QUESTION));
   await untilApproval(fixture, sessionId, t.signal);
@@ -2195,10 +2250,10 @@ test("(security) a replace during a pending approval blocks the call and never i
       name,
       isError,
     })),
-    [{ name: toolName(PROJECT_RESUME), isError: true }],
+    [{ name: toolName(CRITERION_SET), isError: true }],
   );
   assert.deepEqual(texts(entries, "user"), [QUESTION, FIRST_QUEUED]);
-  assert.notEqual(await pausedAt(fixture, projectId), NO_PAUSE);
+  assert.equal(await criterionOf(fixture, nodeId), ORIGINAL_CRITERION);
 });
 
 test("(invariant guard) two replaces in a row clear the first and only the second runs", async (t) => {
@@ -3988,4 +4043,420 @@ test("(security: authorization) with auto mode off the read of a node that the m
   assert.equal(pending.input.node_id, nodeX.nodeId);
   completed(await decide(fixture, session.id, pending.tool_call_id, false));
   await untilIdle(fixture, session.id, t.signal);
+});
+
+const PROJECT_PAUSE = "project.pause";
+const IMPORT_REQUEST = "Apply the import of the plan.";
+const GUARD_RECORD_KIND = "guard";
+const GUARD_REASON = "The run message directs this change.";
+const CLASSIFIER_REASON = "zq-classifier-reason";
+const CLASSIFIER_CONFIDENCE = 0.4242;
+const NO_GUARD_CALLS = 0;
+
+interface GuardTarget {
+  input: Parameters<typeof fauxToolCall>[1];
+  nodeId: string;
+  request: string;
+  quote: string;
+}
+
+interface VerdictOptions {
+  verdict?: Record<string, unknown>;
+  gate?: Promise<void>;
+  started?: PromiseWithResolvers<void>;
+}
+
+function verdictStep(target: GuardTarget, options: VerdictOptions = {}) {
+  return async () => {
+    options.started?.resolve();
+    await options.gate;
+    return toolCall(GUARD_TOOL_NAME, {
+      tier: "auto",
+      confidence: GUARD_AUTO_CONFIDENCE,
+      request_quote: target.quote,
+      reason: GUARD_REASON,
+      ...options.verdict,
+    });
+  };
+}
+
+function classifierConfirm(target: GuardTarget) {
+  return verdictStep(target, {
+    verdict: {
+      tier: "confirm",
+      confidence: CLASSIFIER_CONFIDENCE,
+      reason: CLASSIFIER_REASON,
+    },
+  });
+}
+
+function criterionCall(target: GuardTarget) {
+  return () => toolCall(toolName(CRITERION_SET), target.input);
+}
+
+async function guardedFixture(
+  t: TestContext,
+  options: {
+    guard: boolean;
+    script: (target: GuardTarget) => FauxResponseStep[];
+  },
+) {
+  const target: GuardTarget = { input: {}, nodeId: "", request: "", quote: "" };
+  const fixture = await workbenchFixture(
+    t,
+    options.script(target),
+    undefined,
+    undefined,
+    [OPS, AGENT, REVIEW_AGENT, ...(options.guard ? [GUARD_AGENT] : [])],
+  );
+  const created = await createdNode(fixture);
+  target.input = criterionToolInput(created);
+  target.nodeId = created.nodeId;
+  target.quote = `Set the criterion of ${created.nodeId}`;
+  target.request = `${target.quote} to ${NEW_CRITERION}.`;
+  const session = await createSession(fixture, undefined, OPS);
+  return { fixture, session, target };
+}
+
+function guardCalls(fixture: Fixture) {
+  return fixture.provider.calls.filter(
+    ({ systemPrompt }) => systemPrompt === GUARD_PROMPT,
+  );
+}
+
+function agentCalls(fixture: Fixture) {
+  return fixture.provider.calls.filter(
+    ({ systemPrompt }) => systemPrompt !== GUARD_PROMPT,
+  );
+}
+
+function guardRecords(entries: readonly Entry[]) {
+  return entries
+    .map((entry) => entry.data as { kind?: string } | undefined)
+    .filter((data) => data?.kind === GUARD_RECORD_KIND);
+}
+
+test("(happy path) a verdict auto at the threshold with a quote of the run message runs the call with no card and writes one guard record", async (t) => {
+  const { fixture, session, target } = await guardedFixture(t, {
+    guard: true,
+    script: (x) => [
+      criterionCall(x),
+      verdictStep(x),
+      fauxAssistantMessage(ANSWER),
+    ],
+  });
+  completed(await message(fixture, session.id, target.request));
+  const entries = await untilIdle(fixture, session.id, t.signal);
+  assert.deepEqual(
+    toolResults(entries).map(({ isError }) => isError),
+    [false],
+  );
+  assert.equal(await criterionOf(fixture, target.nodeId), NEW_CRITERION);
+  assert.deepEqual(guardRecords(entries), [
+    {
+      kind: GUARD_RECORD_KIND,
+      tool_call_id: toolCallIds(entries)[0],
+      operation_id: CRITERION_SET,
+      reason: GUARD_REASON,
+    },
+  ]);
+  assert.equal(guardCalls(fixture).length, SINGLE);
+  assert.equal(guardCalls(fixture)[0]!.apiKey, SPARE_KEY);
+});
+
+test("(happy path) an R1 call runs with no card and no guard model call, and writes one guard record with reason reversible with no guard@1 enablement", async (t) => {
+  const target = { input: {} };
+  const fixture = await workbenchFixture(
+    t,
+    [
+      () => toolCall(toolName(PROJECT_PAUSE), target.input),
+      fauxAssistantMessage(ANSWER),
+    ],
+    undefined,
+    undefined,
+    [OPS],
+  );
+  const project = completed(
+    await fixture.projects.create(
+      { params: {}, query: {}, body: { name: PROJECT_NAME } },
+      fixture.options,
+    ),
+  );
+  target.input = resumeToolInput(project.id);
+  const session = await createSession(fixture, undefined, OPS);
+  completed(await message(fixture, session.id, QUESTION));
+  const entries = await untilIdle(fixture, session.id, t.signal);
+  assert.deepEqual(
+    toolResults(entries).map(({ isError }) => isError),
+    [false],
+  );
+  assert.notEqual(await pausedAt(fixture, project.id), NO_PAUSE);
+  assert.deepEqual(guardRecords(entries), [
+    {
+      kind: GUARD_RECORD_KIND,
+      tool_call_id: toolCallIds(entries)[0],
+      operation_id: PROJECT_PAUSE,
+      reason: GuardCause.Reversible,
+    },
+  ]);
+  assert.equal(guardCalls(fixture).length, NO_GUARD_CALLS);
+});
+
+test("(security: authorization) an import with no retirement gives confirm with cause import and no model call, also when the classifier answers auto", async (t) => {
+  const holder = { input: {} };
+  const verdict = { quote: "" };
+  const fixture = await workbenchFixture(
+    t,
+    [
+      () => toolCall(toolName(IMPORT_APPLY), holder.input),
+      fauxAssistantMessage(ANSWER),
+      async () =>
+        toolCall(GUARD_TOOL_NAME, {
+          tier: "auto",
+          confidence: GUARD_AUTO_CONFIDENCE,
+          request_quote: verdict.quote,
+          reason: GUARD_REASON,
+        }),
+    ],
+    undefined,
+    undefined,
+    [OPS, AGENT, REVIEW_AGENT, GUARD_AGENT],
+  );
+  const target = await importTarget(fixture);
+  verdict.quote = IMPORT_REQUEST;
+  holder.input = importToolInput(target, {
+    format: ImportFormat.Json,
+    entries: [],
+    confirmed_retirements: [],
+  });
+  const session = await createSession(fixture, undefined, OPS);
+  completed(await message(fixture, session.id, IMPORT_REQUEST));
+  const pending = await untilApproval(fixture, session.id, t.signal);
+  assert.equal(pending.operation_id, IMPORT_APPLY);
+  assert.deepEqual(pending.guard, {
+    cause: GuardCause.Import,
+    reason: null,
+    confidence: null,
+  });
+  completed(await decide(fixture, session.id, pending.tool_call_id, false));
+  await untilIdle(fixture, session.id, t.signal);
+  assert.equal(guardCalls(fixture).length, NO_GUARD_CALLS);
+});
+
+test("(security: refused path) a call with guard@1 not enabled gives confirm with cause unavailable and no model call", async (t) => {
+  const { fixture, session, target } = await guardedFixture(t, {
+    guard: false,
+    script: (x) => [
+      criterionCall(x),
+      fauxAssistantMessage(ANSWER),
+      verdictStep(x),
+    ],
+  });
+  completed(await message(fixture, session.id, target.request));
+  const pending = await untilApproval(fixture, session.id, t.signal);
+  assert.deepEqual(pending.guard, UNAVAILABLE_GUARD);
+  completed(await decide(fixture, session.id, pending.tool_call_id, false));
+  await untilIdle(fixture, session.id, t.signal);
+  assert.equal(guardCalls(fixture).length, NO_GUARD_CALLS);
+  assert.equal(await criterionOf(fixture, target.nodeId), ORIGINAL_CRITERION);
+});
+
+test("(security: refused path) after autoMode.set off the next call gives confirm with cause auto_mode_off and no model call", async (t) => {
+  const { fixture, session, target } = await guardedFixture(t, {
+    guard: true,
+    script: (x) => [
+      criterionCall(x),
+      fauxAssistantMessage(ANSWER),
+      verdictStep(x),
+    ],
+  });
+  completed(await setAutoMode(fixture, session.id, false));
+  completed(await message(fixture, session.id, target.request));
+  const pending = await untilApproval(fixture, session.id, t.signal);
+  assert.deepEqual(pending.guard, {
+    cause: GuardCause.AutoModeOff,
+    reason: null,
+    confidence: null,
+  });
+  completed(await decide(fixture, session.id, pending.tool_call_id, false));
+  await untilIdle(fixture, session.id, t.signal);
+  assert.equal(guardCalls(fixture).length, NO_GUARD_CALLS);
+});
+
+test("(security: authorization) a queued owner item classifies against its own text", async (t) => {
+  const first = heldAnswer(ANSWER);
+  const { fixture, session, target } = await guardedFixture(t, {
+    guard: true,
+    script: (x) => [
+      first.step,
+      criterionCall(x),
+      verdictStep(x),
+      fauxAssistantMessage(SECOND_ANSWER),
+    ],
+  });
+  completed(await message(fixture, session.id, QUESTION));
+  await queuedId(fixture, session.id, target.request);
+  first.gate.resolve();
+  await untilIdle(fixture, session.id, t.signal);
+  const calls = guardCalls(fixture);
+  assert.equal(calls.length, SINGLE);
+  const sent = calls[0]!.messages.find(({ role }) => role === USER_ROLE) as {
+    content: string;
+  };
+  assert.equal(JSON.parse(sent.content).request, target.request);
+  assert.equal(await criterionOf(fixture, target.nodeId), NEW_CRITERION);
+});
+
+test("(security: redaction) the agent context holds no guard reason, confidence or record after an approved and a rejected classifier card", async (t) => {
+  const { fixture, session, target } = await guardedFixture(t, {
+    guard: true,
+    script: (x) => [
+      criterionCall(x),
+      classifierConfirm(x),
+      criterionCall(x),
+      classifierConfirm(x),
+      fauxAssistantMessage(ANSWER),
+    ],
+  });
+  completed(await message(fixture, session.id, target.request));
+  const approved = await untilApproval(fixture, session.id, t.signal);
+  assert.deepEqual(approved.guard, {
+    cause: GuardCause.Classifier,
+    reason: CLASSIFIER_REASON,
+    confidence: CLASSIFIER_CONFIDENCE,
+  });
+  completed(await decide(fixture, session.id, approved.tool_call_id, true));
+  const rejected = await untilApproval(fixture, session.id, t.signal);
+  assert.notEqual(rejected.tool_call_id, approved.tool_call_id);
+  completed(await decide(fixture, session.id, rejected.tool_call_id, false));
+  await untilIdle(fixture, session.id, t.signal);
+  const context = JSON.stringify(agentCalls(fixture).map((c) => c.messages));
+  assert.ok(!context.includes(CLASSIFIER_REASON));
+  assert.ok(!context.includes(String(CLASSIFIER_CONFIDENCE)));
+  assert.ok(!context.includes(`"kind":"${GUARD_RECORD_KIND}"`));
+});
+
+test("(invariant guard: rollback) an abort of the run during classification blocks the call and leaves no pending approval", async (t) => {
+  const started = Promise.withResolvers<void>();
+  const { fixture, session, target } = await guardedFixture(t, {
+    guard: true,
+    script: (x) => [
+      criterionCall(x),
+      async (_context, options) => {
+        started.resolve();
+        await new Promise<void>((resolve) =>
+          options?.signal?.addEventListener("abort", () => resolve(), {
+            once: true,
+          }),
+        );
+        return verdictStep(x)();
+      },
+    ],
+  });
+  completed(await message(fixture, session.id, target.request));
+  await started.promise;
+  completed(await stopSession(fixture, session.id));
+  const answer = await snapshotOf(fixture, session.id);
+  assert.equal(answer.snapshot.pending_approval, null);
+  assert.equal(answer.snapshot.run_active, false);
+  assert.equal(await criterionOf(fixture, target.nodeId), ORIGINAL_CRITERION);
+});
+
+test("(invariant guard: two-writer race) a set to off while the classifier runs gives confirm with cause auto_mode_off", async (t) => {
+  const gate = Promise.withResolvers<void>();
+  const started = Promise.withResolvers<void>();
+  const { fixture, session, target } = await guardedFixture(t, {
+    guard: true,
+    script: (x) => [
+      criterionCall(x),
+      verdictStep(x, { gate: gate.promise, started }),
+      fauxAssistantMessage(ANSWER),
+    ],
+  });
+  completed(await message(fixture, session.id, target.request));
+  await started.promise;
+  completed(await setAutoMode(fixture, session.id, false));
+  gate.resolve();
+  const pending = await untilApproval(fixture, session.id, t.signal);
+  assert.equal(pending.guard?.cause, GuardCause.AutoModeOff);
+  completed(await decide(fixture, session.id, pending.tool_call_id, false));
+  await untilIdle(fixture, session.id, t.signal);
+  assert.equal(await criterionOf(fixture, target.nodeId), ORIGINAL_CRITERION);
+});
+
+test("(invariant guard: data loss) a rejection leaves auto mode on and the next classified call goes to the classifier", async (t) => {
+  const { fixture, session, target } = await guardedFixture(t, {
+    guard: true,
+    script: (x) => [
+      criterionCall(x),
+      classifierConfirm(x),
+      fauxAssistantMessage(ANSWER),
+      criterionCall(x),
+      verdictStep(x),
+      fauxAssistantMessage(SECOND_ANSWER),
+    ],
+  });
+  completed(await message(fixture, session.id, target.request));
+  const pending = await untilApproval(fixture, session.id, t.signal);
+  completed(await decide(fixture, session.id, pending.tool_call_id, false));
+  const entries = await untilIdle(fixture, session.id, t.signal);
+  assert.equal(
+    (await snapshotOf(fixture, session.id)).snapshot.auto_mode,
+    true,
+  );
+  completed(await message(fixture, session.id, target.request));
+  const next = await untilIdle(
+    fixture,
+    session.id,
+    t.signal,
+    entries.at(-1)!.id as string,
+  );
+  assert.deepEqual(
+    toolResults(next).map(({ isError }) => isError),
+    [false],
+  );
+  assert.equal(guardCalls(fixture).length, TWO_RESULTS);
+  assert.equal(await criterionOf(fixture, target.nodeId), NEW_CRITERION);
+});
+
+test("(invariant guard: data loss) a Stop with auto mode off leaves it off", async (t) => {
+  const held = heldAnswer(ANSWER);
+  const { fixture, session } = await guardedFixture(t, {
+    guard: true,
+    script: () => [held.step],
+  });
+  completed(await setAutoMode(fixture, session.id, false));
+  completed(await message(fixture, session.id, QUESTION));
+  const stopping = stopSession(fixture, session.id);
+  held.gate.resolve();
+  completed(await stopping);
+  assert.equal(
+    (await snapshotOf(fixture, session.id)).snapshot.auto_mode,
+    false,
+  );
+});
+
+test("(invariant guard: data loss) a guard record between a tool call and its result keeps the session context valid", async (t) => {
+  const { fixture, session, target } = await guardedFixture(t, {
+    guard: true,
+    script: (x) => [
+      criterionCall(x),
+      verdictStep(x),
+      fauxAssistantMessage(ANSWER),
+    ],
+  });
+  completed(await message(fixture, session.id, target.request));
+  const entries = await untilIdle(fixture, session.id, t.signal);
+  const kinds = entries.map((entry) =>
+    guardRecords([entry]).length > NO_GUARD_CALLS
+      ? GUARD_RECORD_KIND
+      : (entry.message as { role?: string } | undefined)?.role,
+  );
+  const record = kinds.indexOf(GUARD_RECORD_KIND);
+  assert.equal(kinds[record - SINGLE], ASSISTANT_ROLE);
+  assert.equal(kinds[record + SINGLE], TOOL_RESULT);
+  const roles = (agentCalls(fixture)[SINGLE]!.messages as { role: string }[])
+    .map(({ role }) => role)
+    .filter((role) => role !== SYSTEM_ROLE);
+  assert.deepEqual(roles, [USER_ROLE, ASSISTANT_ROLE, TOOL_RESULT]);
 });

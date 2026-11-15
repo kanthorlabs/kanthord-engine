@@ -30,6 +30,8 @@ Every operation has `human` access.
 
 `workbench.session.autoMode.set` takes the body `{ enabled }` and answers `{ session_id, enabled }`. It is a human-only act of the owner. The run snapshot of `workbench.session.events` answers `auto_mode`.
 
+The pending approval of the run snapshot carries `guard`. `guard` is `null` for an evidence card. Every other card carries `{ cause, reason, confidence }`. `cause` is one of `import`, `auto_mode_off`, `unavailable`, `oversize`, `no_verdict` and `classifier`. `reason` and `confidence` are `null` for every cause other than `classifier`.
+
 ## Error codes
 
 Every operation can also answer the shared codes of [other.md](other.md#error-codes).

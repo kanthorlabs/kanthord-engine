@@ -259,6 +259,8 @@ components:
                     enum:
                       - read
                       - card
+                      - reversible
+                      - judged
                   - type: "null"
             required:
               - name

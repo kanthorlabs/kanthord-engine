@@ -23,8 +23,12 @@ import {
 } from "./contract.ts";
 
 const NO_CHARS = 0;
-const TIER_AUTO = "auto";
-const TIER_CONFIRM = "confirm";
+export const GuardTier = { Auto: "auto", Confirm: "confirm" } as const;
+export const ClassifyKind = {
+  Verdict: "verdict",
+  Failed: "failed",
+  Aborted: "aborted",
+} as const;
 const TOOL_CALL_BLOCK = "toolCall";
 const TOOL_USE_STOP = "toolUse";
 
@@ -34,9 +38,9 @@ export const GUARD_TOOL: Tool = {
     "Give the verdict on the tool call: auto when the run message directs it, confirm otherwise.",
   parameters: Type.Object(
     {
-      tier: Type.Unsafe<typeof TIER_AUTO | typeof TIER_CONFIRM>({
+      tier: Type.Unsafe<typeof GuardTier.Auto | typeof GuardTier.Confirm>({
         type: "string",
-        enum: [TIER_AUTO, TIER_CONFIRM],
+        enum: [GuardTier.Auto, GuardTier.Confirm],
       }),
       confidence: Type.Number(),
       request_quote: Type.String(),
@@ -48,7 +52,7 @@ export const GUARD_TOOL: Tool = {
 };
 
 export const guardVerdictSchema = z.strictObject({
-  tier: z.enum([TIER_AUTO, TIER_CONFIRM]),
+  tier: z.enum(GuardTier),
   confidence: z.number().min(0).max(1),
   request_quote: z.string(),
   reason: z.string().max(GUARD_REASON_MAX_CHARS),
@@ -64,16 +68,16 @@ export interface GuardCall {
 export type GuardRequest = UserMessage & { content: string };
 
 export type ClassifyResult =
-  | { kind: "verdict"; verdict: GuardVerdict }
+  | { kind: typeof ClassifyKind.Verdict; verdict: GuardVerdict }
   | {
-      kind: "failed";
+      kind: typeof ClassifyKind.Failed;
       cause: typeof GuardCause.NoVerdict | typeof GuardCause.Oversize;
     }
-  | { kind: "aborted" };
+  | { kind: typeof ClassifyKind.Aborted };
 
 export type CallDecision =
-  | { tier: typeof TIER_AUTO }
-  | { tier: typeof TIER_CONFIRM; cause: typeof GuardCause.Classifier };
+  | { tier: typeof GuardTier.Auto }
+  | { tier: typeof GuardTier.Confirm; cause: typeof GuardCause.Classifier };
 
 export interface ClassifyInput {
   runtime: Pick<ModelRuntime, "complete">;
@@ -119,7 +123,10 @@ export function guardRequest(
 }
 
 function verdictOf(reply: AssistantMessage): ClassifyResult {
-  const noVerdict = { kind: "failed", cause: GuardCause.NoVerdict } as const;
+  const noVerdict = {
+    kind: ClassifyKind.Failed,
+    cause: GuardCause.NoVerdict,
+  } as const;
   if (reply.stopReason !== TOOL_USE_STOP) return noVerdict;
   const call = reply.content.find(
     (block): block is ToolCall =>
@@ -127,7 +134,9 @@ function verdictOf(reply: AssistantMessage): ClassifyResult {
   );
   if (!call) return noVerdict;
   const parsed = guardVerdictSchema.safeParse(call.arguments);
-  return parsed.success ? { kind: "verdict", verdict: parsed.data } : noVerdict;
+  return parsed.success
+    ? { kind: ClassifyKind.Verdict, verdict: parsed.data }
+    : noVerdict;
 }
 
 export async function classifyCall(
@@ -135,7 +144,7 @@ export async function classifyCall(
 ): Promise<ClassifyResult> {
   const { runtime, model, request, signal } = input;
   if (Buffer.byteLength(request.content) > GUARD_REQUEST_MAX_BYTES)
-    return { kind: "failed", cause: GuardCause.Oversize };
+    return { kind: ClassifyKind.Failed, cause: GuardCause.Oversize };
   const timeout = new AbortController();
   const timer = setTimeout(() => timeout.abort(), GUARD_TIMEOUT_MS);
   try {
@@ -149,11 +158,11 @@ export async function classifyCall(
         thinkingEnabled: false,
       },
     );
-    return signal.aborted ? { kind: "aborted" } : verdictOf(reply);
+    return signal.aborted ? { kind: ClassifyKind.Aborted } : verdictOf(reply);
   } catch {
     return signal.aborted
-      ? { kind: "aborted" }
-      : { kind: "failed", cause: GuardCause.NoVerdict };
+      ? { kind: ClassifyKind.Aborted }
+      : { kind: ClassifyKind.Failed, cause: GuardCause.NoVerdict };
   } finally {
     clearTimeout(timer);
   }
@@ -161,11 +170,11 @@ export async function classifyCall(
 
 export function decide(verdict: GuardVerdict, request: string): CallDecision {
   const authorized =
-    verdict.tier === TIER_AUTO &&
+    verdict.tier === GuardTier.Auto &&
     verdict.confidence >= GUARD_AUTO_CONFIDENCE &&
     verdict.request_quote.length > NO_CHARS &&
     request.includes(verdict.request_quote);
   return authorized
-    ? { tier: TIER_AUTO }
-    : { tier: TIER_CONFIRM, cause: GuardCause.Classifier };
+    ? { tier: GuardTier.Auto }
+    : { tier: GuardTier.Confirm, cause: GuardCause.Classifier };
 }

@@ -290,7 +290,12 @@ export const ToolSource = {
 } as const;
 export type ToolSource = (typeof ToolSource)[keyof typeof ToolSource];
 
-export const GuardClass = { Read: "read", Card: "card" } as const;
+export const GuardClass = {
+  Read: "read",
+  Card: "card",
+  Reversible: "reversible",
+  Judged: "judged",
+} as const;
 export type GuardClass = (typeof GuardClass)[keyof typeof GuardClass];
 
 export const toolDeclarationSchema = z.strictObject({

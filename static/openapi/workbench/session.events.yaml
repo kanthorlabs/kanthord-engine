@@ -146,10 +146,39 @@ components:
                       propertyNames:
                         type: string
                       additionalProperties: {}
+                    guard:
+                      anyOf:
+                        - type: object
+                          properties:
+                            cause:
+                              type: string
+                              enum:
+                                - import
+                                - auto_mode_off
+                                - reversible
+                                - unavailable
+                                - oversize
+                                - no_verdict
+                                - classifier
+                            reason:
+                              anyOf:
+                                - type: string
+                                - type: "null"
+                            confidence:
+                              anyOf:
+                                - type: number
+                                - type: "null"
+                          required:
+                            - cause
+                            - reason
+                            - confidence
+                          additionalProperties: false
+                        - type: "null"
                   required:
                     - tool_call_id
                     - operation_id
                     - input
+                    - guard
                   additionalProperties: false
                 - type: "null"
             run_active:
