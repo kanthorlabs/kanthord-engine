@@ -26,15 +26,16 @@ setup:
       params: { agent_name: swe@1 }
       query: {}
       body:
-        agent_providers: [{ name: default, provider: openai-compatible, credential: compatible-main }]
-        default_configuration: { agent_provider: default, model_identifier: eval-model, reasoning_effort: low }
+        expected_revision: 1
+        agent_providers: [{ name: compatible, provider: openai-compatible, credential: compatible-main }]
+        default_configuration: { agent_provider: compatible, model_identifier: eval-model, reasoning_effort: low }
         fallback_configurations: []
   - operation_id: project.bindingSet.write
     input:
       params: { project_id: "{{p.project_id}}" }
       query: {}
       body:
-        version: 3
+        version: 4
         bindings:
           repo:
             kind: repository
@@ -46,12 +47,12 @@ setup:
               strategy: { base_branch: main }
               credential: github
               prompts: { agents: { "swe@1": "Follow repository conventions." } }
-          general:
-            kind: worker
-            config: { worker: claude-code@1, instance_count: 0 }
           coder:
             kind: worker
-            config: { worker: coder@1, worker_instances: [] }
+            config: { worker: coder@1, worker_instances: [eval-coder-1] }
+          reviewer:
+            kind: worker
+            config: { worker: reviewer@1, worker_instances: [eval-reviewer-1] }
   - operation_id: llm.credential.update_metadata
     input:
       params: { credential_name: compatible-main }

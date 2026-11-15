@@ -25,6 +25,7 @@ const CaseErrorCode = {
 } as const;
 
 export const ReferenceKind = {
+  NativePlatform: "native_platform",
   ProjectId: "project_id",
   Node: "node",
   Evidence: "evidence",
@@ -48,7 +49,14 @@ const TEXT_MEDIA_PREFIX = "text/";
 const AGENT_NAME = /^[a-z][a-z0-9-]*@\d+$/;
 
 const caseIdSchema = z.string().regex(/^[a-z][a-z0-9_-]*$/);
-const fixtureKeySchema = z.string().regex(/^[\w-]+$/);
+const NATIVE_KEY = "native";
+const NATIVE_REFERENCE = "native.platform";
+const fixtureKeySchema = z
+  .string()
+  .regex(/^[\w-]+$/)
+  .refine((key) => key !== NATIVE_KEY, {
+    message: `The fixture key ${NATIVE_KEY} is reserved.`,
+  });
 const fileNameSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
 const referenceSchema = z.string().min(1);
 
@@ -144,6 +152,10 @@ export interface FixtureIds {
 
 export type PlaceholderIds = Record<string, FixtureIds>;
 
+export interface NativePlaceholders {
+  platform: string;
+}
+
 interface Reference {
   key: string;
   kind: ReferenceKind;
@@ -152,6 +164,13 @@ interface Reference {
 }
 
 function parseReference(body: string): Reference {
+  if (body === NATIVE_REFERENCE)
+    return {
+      key: NATIVE_KEY,
+      kind: ReferenceKind.NativePlatform,
+      filename: "",
+      asset: undefined,
+    };
   const match = REFERENCE.exec(body);
   if (!match)
     throw new CodedError(
@@ -201,6 +220,7 @@ function checkReference(
   reference: Reference,
   entries: Record<string, FixtureEntry[]>,
 ): string {
+  if (reference.kind === ReferenceKind.NativePlatform) return "";
   const fixture = entries[reference.key];
   const known =
     fixture !== undefined &&
@@ -227,7 +247,12 @@ function resolved(value: string | undefined, reference: Reference): string {
   return value;
 }
 
-function lookup(ids: PlaceholderIds, reference: Reference): string {
+function lookup(
+  ids: PlaceholderIds,
+  native: NativePlaceholders,
+  reference: Reference,
+): string {
+  if (reference.kind === ReferenceKind.NativePlatform) return native.platform;
   const fixture = ids[reference.key];
   if (reference.kind === ReferenceKind.ProjectId)
     return resolved(fixture?.project_id, reference);
@@ -242,9 +267,13 @@ function lookup(ids: PlaceholderIds, reference: Reference): string {
   );
 }
 
-export function resolvePlaceholders<T>(value: T, ids: PlaceholderIds): T {
+export function resolvePlaceholders<T>(
+  value: T,
+  ids: PlaceholderIds,
+  native: NativePlaceholders,
+): T {
   return mapStrings(value, (text) =>
-    replacePlaceholders(text, (reference) => lookup(ids, reference)),
+    replacePlaceholders(text, (reference) => lookup(ids, native, reference)),
   ) as T;
 }
 

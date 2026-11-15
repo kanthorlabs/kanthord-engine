@@ -2742,10 +2742,10 @@ function workerProjectBindings(
   };
 }
 
-export async function provisionWorkerProject(
+async function createWorkerProject(
   fixture: Parameters<typeof humanCaller>[0],
   name: string,
-  workers: Readonly<Record<string, number>>,
+  bindings: Record<string, unknown>,
 ) {
   const call = humanCaller(fixture);
   const empty = { params: {}, query: {} };
@@ -2753,13 +2753,14 @@ export async function provisionWorkerProject(
     ...empty,
     body: { name },
   });
-  const written = (version: number, next: Readonly<Record<string, number>>) =>
-    call(projectOperations["bindingSet.write"], {
-      params: { project_id: project.id },
-      query: {},
-      body: { version, bindings: workerProjectBindings(next) as never },
-    });
-  const bindingSet = await written(FIRST_BINDING_SET_VERSION, workers);
+  const bindingSet = await call(projectOperations["bindingSet.write"], {
+    params: { project_id: project.id },
+    query: {},
+    body: {
+      version: FIRST_BINDING_SET_VERSION,
+      bindings: bindings as never,
+    },
+  });
   const mission = await call(missionOperations.get, {
     params: { project_id: project.id },
     query: {},
@@ -2802,6 +2803,26 @@ export async function provisionWorkerProject(
       expected_mission_version: implement.mission_version,
     },
   });
+  return { project, bindingSet };
+}
+
+export async function provisionWorkerProject(
+  fixture: Parameters<typeof humanCaller>[0],
+  name: string,
+  workers: Readonly<Record<string, number>>,
+) {
+  const call = humanCaller(fixture);
+  const { project, bindingSet } = await createWorkerProject(
+    fixture,
+    name,
+    workerProjectBindings(workers),
+  );
+  const written = (version: number, next: Readonly<Record<string, number>>) =>
+    call(projectOperations["bindingSet.write"], {
+      params: { project_id: project.id },
+      query: {},
+      body: { version, bindings: workerProjectBindings(next) as never },
+    });
   return {
     id: project.id,
     bindingSetVersion: bindingSet.binding_set_version,
@@ -2822,10 +2843,42 @@ export async function provisionWorkerProject(
   };
 }
 
-export async function rewriteWorkerProject(
+export interface EvalWorkerBinding {
+  worker: string;
+  worker_instances: readonly string[];
+}
+
+function evalProjectBindings(
+  workers: Readonly<Record<string, EvalWorkerBinding>>,
+): never {
+  return {
+    ...workerProjectBindings({}),
+    ...Object.fromEntries(
+      Object.entries(workers).map(([name, config]) => [
+        name,
+        { kind: "worker", config },
+      ]),
+    ),
+  } as never;
+}
+
+export async function provisionEvalProject(
+  fixture: Parameters<typeof humanCaller>[0],
+  name: string,
+  workers: Readonly<Record<string, EvalWorkerBinding>>,
+) {
+  const { project } = await createWorkerProject(
+    fixture,
+    name,
+    evalProjectBindings(workers),
+  );
+  return { id: project.id };
+}
+
+export async function rewriteEvalWorkerBindings(
   fixture: Parameters<typeof humanCaller>[0],
   projectId: string,
-  workers: Readonly<Record<string, number>>,
+  workers: Readonly<Record<string, EvalWorkerBinding>>,
 ) {
   const call = humanCaller(fixture);
   const current = await call(projectOperations["bindingSet.get"], {
@@ -2836,10 +2889,7 @@ export async function rewriteWorkerProject(
   return call(projectOperations["bindingSet.write"], {
     params: { project_id: projectId },
     query: {},
-    body: {
-      version: current.version,
-      bindings: workerProjectBindings(workers) as never,
-    },
+    body: { version: current.version, bindings: evalProjectBindings(workers) },
   });
 }
 

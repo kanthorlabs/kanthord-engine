@@ -2,18 +2,23 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
+import { agentOperations } from "../agent/contract.ts";
 import {
+  createInstances,
   endWorkerRegistrations,
+  type EvalWorkerBinding,
   gatewayFixture,
   humanCaller,
+  type NativeCredential,
   nativeOAuthProviders,
+  provisionEvalProject,
   provisionNativeAgent,
   provisionRepositoryCredentials,
-  provisionWorkerProject,
-  rewriteWorkerProject,
+  rewriteEvalWorkerBindings,
   seedWorkerRegistration,
 } from "../apps/server/test-support.ts";
 import { CodedError } from "../kernel/errors.ts";
+import { createIdentity } from "../kernel/identity.ts";
 import { type Operation, OperationRegistry } from "../kernel/operation.ts";
 import { ImportFormat, missionOperations } from "../mission/contract.ts";
 import { ensureClosedAttempts, seedEvidence } from "../mission/test-support.ts";
@@ -24,6 +29,10 @@ import {
 } from "../project/test-support.ts";
 import { schedulerOperations } from "../scheduler/contract.ts";
 import { ageJob, seedExecutionRefusal } from "../scheduler/test-support.ts";
+import {
+  INSTANCE_HEARTBEAT_INTERVAL_MS,
+  workerOperations,
+} from "../worker/contract.ts";
 import {
   type WorkbenchConfiguration,
   workbenchOperations,
@@ -36,6 +45,7 @@ import {
   type FixtureEntry,
   type FixtureIds,
   type LoadedCase,
+  type NativePlaceholders,
   type PlaceholderIds,
   resolvePlaceholders,
   SeedStep,
@@ -62,9 +72,19 @@ export const CheckKind = {
 } as const;
 
 const FIXTURE_REASON = "eval fixture";
-const GENERAL_BINDING = "general";
-const GENERAL_INSTANCE_COUNT = 1;
-const NO_INSTANCES = 0;
+const CODER_BINDING = "coder";
+const REVIEWER_BINDING = "reviewer";
+const WORKER_AGENTS = ["swe@1", "re@1"] as const;
+const NATIVE_CREDENTIAL = "native-credential";
+const INSTANCE_LIST_LIMIT = 100;
+const EVAL_WORKERS = [
+  { binding: CODER_BINDING, worker: "coder@1", instance: "eval-coder-1" },
+  {
+    binding: REVIEWER_BINDING,
+    worker: "reviewer@1",
+    instance: "eval-reviewer-1",
+  },
+] as const;
 const SEED_ATTEMPT = 1;
 const POLL_INTERVAL_MS = 50;
 const TURN_DEADLINE_MS = 300000;
@@ -87,6 +107,7 @@ export interface Sandbox {
   evalDirectory: string;
   configuration: WorkbenchConfiguration;
   fixture: GatewayFixture;
+  native: NativePlaceholders;
   call: ReturnType<typeof humanCaller>;
   operation(id: string): Operation;
 }
@@ -118,14 +139,107 @@ export async function openSandbox(
     credential,
     configuration: options.configuration,
   });
+  await enableWorkerAgents(
+    fixture,
+    options.subject,
+    credential.platform,
+    options.configuration,
+  );
+  await connectEvalInstances(t, fixture);
   return {
     subject: options.subject,
     evalDirectory: options.evalDirectory ?? EVAL_DIRECTORY,
     configuration: options.configuration,
     fixture,
+    native: { platform: credential.platform },
     call: humanCaller(fixture),
     operation: (id) => registry.get(id).operation,
   };
+}
+
+async function enableWorkerAgents(
+  fixture: GatewayFixture,
+  subject: string,
+  platform: NativeCredential["platform"],
+  configuration: WorkbenchConfiguration,
+): Promise<void> {
+  const call = humanCaller(fixture);
+  for (const agent of WORKER_AGENTS.filter((name) => name !== subject))
+    await call(agentOperations["enablement.put"], {
+      params: { agent_name: agent },
+      query: {},
+      body: {
+        agent_providers: [
+          {
+            name: configuration.agent_provider,
+            provider: platform,
+            credential: NATIVE_CREDENTIAL,
+          },
+        ],
+        default_configuration: configuration,
+        fallback_configurations: [],
+      },
+    });
+}
+
+async function connectEvalInstances(
+  t: TestContext,
+  fixture: GatewayFixture,
+): Promise<void> {
+  for (const { worker, instance } of EVAL_WORKERS)
+    await createInstances(fixture, [instance], undefined, worker);
+  const listed = await humanCaller(fixture)(workerOperations["instance.list"], {
+    params: {},
+    query: { limit: INSTANCE_LIST_LIMIT },
+    body: null,
+  });
+  const connections = listed.items.map((record) => ({
+    id: record.id,
+    name: record.name,
+    connection_id: createIdentity("connection"),
+  }));
+  const heartbeat = () => {
+    for (const connection of connections)
+      fixture.worker.instances.heartbeat(
+        connection.id,
+        connection.name,
+        connection.connection_id,
+        connection.name,
+      );
+  };
+  heartbeat();
+  const timer = setInterval(heartbeat, INSTANCE_HEARTBEAT_INTERVAL_MS).unref();
+  t.after(() => clearInterval(timer));
+}
+
+function evalWorkerBindings(
+  coderInstances: readonly string[],
+): Record<string, EvalWorkerBinding> {
+  return Object.fromEntries(
+    EVAL_WORKERS.map(({ binding, worker, instance }) => [
+      binding,
+      {
+        worker,
+        worker_instances:
+          binding === CODER_BINDING ? coderInstances : [instance],
+      },
+    ]),
+  );
+}
+
+async function instanceNamed(sandbox: Sandbox, name: string) {
+  const listed = await sandbox.call(workerOperations["instance.list"], {
+    params: {},
+    query: { limit: INSTANCE_LIST_LIMIT },
+    body: null,
+  });
+  const instance = listed.items.find((item) => item.name === name);
+  if (!instance)
+    throw new CodedError(
+      SandboxErrorCode.SeedInvalid,
+      `The sandbox holds no worker instance ${name}.`,
+    );
+  return instance;
 }
 
 async function provisionFixture(
@@ -133,15 +247,21 @@ async function provisionFixture(
   key: string,
   entries: FixtureEntry[],
 ): Promise<FixtureIds> {
-  const project = await provisionWorkerProject(sandbox.fixture, key, {
-    [GENERAL_BINDING]: GENERAL_INSTANCE_COUNT,
-  });
-  const general = await bindingNamed(sandbox, project.id, GENERAL_BINDING);
-  seedWorkerRegistration(
-    sandbox.fixture.store,
-    project.id,
-    general.resource_identity,
+  const project = await provisionEvalProject(
+    sandbox.fixture,
+    key,
+    evalWorkerBindings([EVAL_WORKERS[0].instance]),
   );
+  for (const { binding, instance } of EVAL_WORKERS) {
+    const bound = await bindingNamed(sandbox, project.id, binding);
+    const record = await instanceNamed(sandbox, instance);
+    seedWorkerRegistration(
+      sandbox.fixture.store,
+      project.id,
+      bound.resource_identity,
+      { id: record.id, name: record.name },
+    );
+  }
   const mission = await sandbox.call(missionOperations.get, {
     params: { project_id: project.id },
     query: {},
@@ -230,7 +350,7 @@ function assetBytes(
   );
   if (!media.startsWith(TEXT_MEDIA_PREFIX)) return bytes;
   return Buffer.from(
-    resolvePlaceholders(bytes.toString(TEXT_ENCODING), ids),
+    resolvePlaceholders(bytes.toString(TEXT_ENCODING), ids, sandbox.native),
     TEXT_ENCODING,
   );
 }
@@ -261,7 +381,7 @@ async function seedRefusal(
   const binding = await bindingNamed(
     sandbox,
     fixture.project_id,
-    GENERAL_BINDING,
+    CODER_BINDING,
   );
   ensureClosedAttempts(sandbox.fixture.store, step.node, SEED_ATTEMPT);
   const executionId = seedExecutionRefusal(sandbox.fixture.store, {
@@ -335,16 +455,18 @@ async function seedJobWithoutTaker(
   const binding = await bindingNamed(
     sandbox,
     fixture.project_id,
-    GENERAL_BINDING,
+    CODER_BINDING,
   );
   endWorkerRegistrations(
     sandbox.fixture.store,
     fixture.project_id,
     binding.resource_identity,
   );
-  await rewriteWorkerProject(sandbox.fixture, fixture.project_id, {
-    [GENERAL_BINDING]: NO_INSTANCES,
-  });
+  await rewriteEvalWorkerBindings(
+    sandbox.fixture,
+    fixture.project_id,
+    evalWorkerBindings([]),
+  );
   ageJob(sandbox.fixture.store, step.node, Date.now() - step.age_ms);
 }
 
@@ -513,11 +635,18 @@ export async function prepareCase(
       key,
       loaded.fixture_entries[key]!,
     );
-  const setup = await runSetup(sandbox, resolvePlaceholders(loaded.setup, ids));
+  const setup = await runSetup(
+    sandbox,
+    resolvePlaceholders(loaded.setup, ids, sandbox.native),
+  );
   if (setup) return { ids, failed: failedPlay(CheckKind.Setup, setup) };
   for (const step of loaded.seed)
     try {
-      await seedStep(sandbox, resolvePlaceholders(step, ids), ids);
+      await seedStep(
+        sandbox,
+        resolvePlaceholders(step, ids, sandbox.native),
+        ids,
+      );
     } catch (error) {
       return { ids, failed: failedPlay(CheckKind.Seed, failureDetail(error)) };
     }
@@ -532,6 +661,10 @@ export async function playCase(
   if (failed) return failed;
   return runTurns(
     sandbox,
-    resolvePlaceholders({ turns: loaded.turns, checks: loaded.checks }, ids),
+    resolvePlaceholders(
+      { turns: loaded.turns, checks: loaded.checks },
+      ids,
+      sandbox.native,
+    ),
   );
 }

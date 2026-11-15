@@ -46,6 +46,7 @@ test(
       (item) => item.name === NATIVE_CREDENTIAL,
     );
     assert.equal(created?.platform, ANTHROPIC_SUBSCRIPTION_PLATFORM);
+    assert.equal(sandbox.native.platform, ANTHROPIC_SUBSCRIPTION_PLATFORM);
     const enablement = await sandbox.call(agentOperations["enablement.get"], {
       params: { agent_name: SUBJECT },
       query: {},
