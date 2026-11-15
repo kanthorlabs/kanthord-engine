@@ -1116,12 +1116,12 @@ function toolResults(entries: readonly Entry[]) {
     }));
 }
 
-function resumeToolInput(projectId: string) {
-  return { params: { project_id: projectId } };
-}
-
 function resumeInput(projectId: string) {
   return { params: { project_id: projectId }, query: {}, body: null };
+}
+
+function resumeToolInput(projectId: string) {
+  return { params: { project_id: projectId } };
 }
 
 async function pausedProject(fixture: Fixture): Promise<string> {
@@ -4037,6 +4037,34 @@ test("(security: authorization) with auto mode off the read of a node that the m
     { nodes: [{ produced: [ALPHA_TEXT] }] },
   );
   const [nodeX] = target.nodes as [SeededNode];
+  completed(await setAutoMode(fixture, session.id, false));
+  completed(await message(fixture, session.id, `Review ${nodeX.nodeId}`));
+  const pending = await untilApproval(fixture, session.id, t.signal);
+  assert.equal(pending.input.node_id, nodeX.nodeId);
+  completed(await decide(fixture, session.id, pending.tool_call_id, false));
+  await untilIdle(fixture, session.id, t.signal);
+});
+
+test("(security: authorization) a message grant ends with its run, so after auto mode goes off the read of the same node shows an approval", async (t) => {
+  const target: EvidenceTarget = { nodes: [] };
+  const { fixture, session } = await evidenceFixture(
+    t,
+    [
+      evidenceCall(target, 0, 0),
+      fauxAssistantMessage(ANSWER),
+      evidenceCall(target, 0, 0),
+      fauxAssistantMessage(ANSWER),
+    ],
+    target,
+    { nodes: [{ produced: [ALPHA_TEXT] }] },
+  );
+  const [nodeX] = target.nodes as [SeededNode];
+  completed(await message(fixture, session.id, `Review ${nodeX.nodeId}`));
+  const first = await untilIdle(fixture, session.id, t.signal);
+  assert.deepEqual(
+    toolResults(first).map(({ isError }) => isError),
+    [false],
+  );
   completed(await setAutoMode(fixture, session.id, false));
   completed(await message(fixture, session.id, `Review ${nodeX.nodeId}`));
   const pending = await untilApproval(fixture, session.id, t.signal);

@@ -720,7 +720,11 @@ export class WorkbenchService implements Service {
               this.dependencies.invoke,
               () => session.requester,
               {
-                grants: session.evidenceGrants,
+                grants: {
+                  has: (nodeId) =>
+                    session.evidenceGrants.has(nodeId) ||
+                    this.messageGrants(session, nodeId),
+                },
               },
             ),
           ]
@@ -818,10 +822,7 @@ export class WorkbenchService implements Service {
       return { allowed: false, reason: message, terminate: false };
     }
     if (session.evidenceGrants.has(facts.node_id)) return ALLOWED;
-    if (this.messageGrants(session, facts.node_id)) {
-      session.evidenceGrants.add(facts.node_id);
-      return ALLOWED;
-    }
+    if (this.messageGrants(session, facts.node_id)) return ALLOWED;
     const { offset, length } = call.input as {
       offset?: number;
       length?: number;
