@@ -1,6 +1,7 @@
 {
   "version": 1,
   "always_run": [
+    "src/agent/guard-proof.test.ts",
     "src/apps/server/import-boundaries.test.ts",
     "src/apps/server/unwired-import.test.ts",
     "src/apps/server/worker-oauth-flows.test.ts",
