@@ -4,8 +4,10 @@ import {
   intakeCredentialOperations,
   intakeOperations,
 } from "../intake/contract.ts";
+import type { Operation } from "../kernel/operation.ts";
+import { isObject } from "../kernel/values.ts";
 import { llmOperations } from "../llm/contract.ts";
-import { missionOperations } from "../mission/contract.ts";
+import { ImportFormat, missionOperations } from "../mission/contract.ts";
 import {
   environmentSecretOperations,
   projectOperations,
@@ -14,7 +16,12 @@ import { repositoryOperations } from "../repository/contract.ts";
 import { storageOperations } from "../storage/contract.ts";
 import { trackingOperations } from "../tracking/contract.ts";
 import { workerOperations } from "../worker/contract.ts";
-import { workbenchOperations } from "./contract.ts";
+import {
+  WORKBENCH_IMPORT_FORMAT_TEXT,
+  WORKBENCH_IMPORT_RETIREMENT_TEXT,
+  workbenchHumanOnlyText,
+  workbenchOperations,
+} from "./contract.ts";
 
 export const HUMAN_ONLY_OPERATIONS: ReadonlySet<string> = new Set([
   missionOperations["node.discard"].id,
@@ -111,3 +118,38 @@ export type GuardDecision =
   | { action: "run" }
   | { action: "block"; reason: string }
   | { action: "confirm" };
+
+const NO_RETIREMENTS = 0;
+
+function importBody(input: unknown): Record<string, unknown> | undefined {
+  if (!isObject(input)) return undefined;
+  const { body } = input as { body?: unknown };
+  return isObject(body) ? (body as Record<string, unknown>) : undefined;
+}
+
+function block(reason: string): GuardDecision {
+  return { action: "block", reason };
+}
+
+function importBlock(input: unknown): GuardDecision | undefined {
+  const body = importBody(input);
+  if (!body) return undefined;
+  const retirements = body.confirmed_retirements;
+  if (
+    retirements !== undefined &&
+    !(Array.isArray(retirements) && retirements.length === NO_RETIREMENTS)
+  )
+    return block(WORKBENCH_IMPORT_RETIREMENT_TEXT);
+  if (body.format === ImportFormat.Markdown)
+    return block(WORKBENCH_IMPORT_FORMAT_TEXT);
+  return undefined;
+}
+
+export function floorOf(operation: Operation, input: unknown): GuardDecision {
+  if (operation.mutation !== true) return { action: "run" };
+  if (HUMAN_ONLY_OPERATIONS.has(operation.id))
+    return block(workbenchHumanOnlyText(operation.id));
+  if (operation.id === missionOperations["import.apply"].id)
+    return importBlock(input) ?? { action: "confirm" };
+  return { action: "confirm" };
+}

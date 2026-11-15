@@ -29,11 +29,12 @@ import {
   workbenchHumanOnlyText,
   workbenchOperations,
 } from "./contract.ts";
-import { HUMAN_ONLY_OPERATIONS } from "./guard.ts";
+import { floorOf, HUMAN_ONLY_OPERATIONS } from "./guard.ts";
 import { SECRET_OPERATION_IDS } from "./tools.ts";
 
 const NO_OPERATIONS = 0;
 const ONE_OPERATION = 1;
+const BLOCK_ACTION = "block";
 const HUMAN_ONLY_COUNT = 88;
 const HUMAN_ONLY_CODE = "workbench.guard.human_only";
 const IMPORT_FORMAT_CODE = "workbench.guard.import_format";
@@ -151,4 +152,18 @@ test("the human-only set holds 88 ids and keeps mission.proposal.decide out", ()
   assert.ok(
     !HUMAN_ONLY_OPERATIONS.has(missionOperations["proposal.decide"].id),
   );
+});
+
+test("(security: refused path) floorOf blocks every human-only id with the human-only code", () => {
+  for (const id of HUMAN_ONLY_OPERATIONS) {
+    const operation = OPERATION_UNION.find((candidate) => candidate.id === id);
+    assert.ok(operation, id);
+    const decision = floorOf(operation, { params: {}, query: {}, body: {} });
+    assert.equal(decision.action, BLOCK_ACTION, id);
+    assert.ok(
+      decision.action === BLOCK_ACTION &&
+        decision.reason.startsWith(WorkbenchGuardReason.HumanOnly),
+      id,
+    );
+  }
 });
