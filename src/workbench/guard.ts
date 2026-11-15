@@ -114,10 +114,16 @@ export const HUMAN_ONLY_OPERATIONS: ReadonlySet<string> = new Set([
   workerOperations["slot_image.delete"].id,
 ]);
 
+export const GuardAction = {
+  Run: "run",
+  Block: "block",
+  Confirm: "confirm",
+} as const;
+
 export type GuardDecision =
-  | { action: "run" }
-  | { action: "block"; reason: string }
-  | { action: "confirm" };
+  | { action: typeof GuardAction.Run }
+  | { action: typeof GuardAction.Block; reason: string }
+  | { action: typeof GuardAction.Confirm };
 
 const NO_RETIREMENTS = 0;
 
@@ -128,7 +134,7 @@ function importBody(input: unknown): Record<string, unknown> | undefined {
 }
 
 function block(reason: string): GuardDecision {
-  return { action: "block", reason };
+  return { action: GuardAction.Block, reason };
 }
 
 function importBlock(input: unknown): GuardDecision | undefined {
@@ -146,10 +152,10 @@ function importBlock(input: unknown): GuardDecision | undefined {
 }
 
 export function floorOf(operation: Operation, input: unknown): GuardDecision {
-  if (operation.mutation !== true) return { action: "run" };
+  if (operation.mutation !== true) return { action: GuardAction.Run };
   if (HUMAN_ONLY_OPERATIONS.has(operation.id))
     return block(workbenchHumanOnlyText(operation.id));
   if (operation.id === missionOperations["import.apply"].id)
-    return importBlock(input) ?? { action: "confirm" };
-  return { action: "confirm" };
+    return importBlock(input) ?? { action: GuardAction.Confirm };
+  return { action: GuardAction.Confirm };
 }
