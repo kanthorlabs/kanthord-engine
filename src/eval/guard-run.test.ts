@@ -28,6 +28,7 @@ import {
 } from "../workbench/contract.ts";
 import type { WorkbenchModelRuntimeFactory } from "../workbench/index.ts";
 import { historyEntrySchema } from "./compare.ts";
+import { CredentialSourceKind } from "./credential.ts";
 import {
   GUARD_EVAL_CONFIGURATION,
   guardRunSchema,
@@ -141,7 +142,7 @@ function options(t: TestContext, step: FauxResponseStep) {
       output,
       history: `${output}.history`,
       rerun: false,
-      apiKey: KEY,
+      credential: { kind: CredentialSourceKind.Key, key: KEY },
       proof,
       runtimeFactory: factoryOf(step),
       directory: suiteRoot(t),

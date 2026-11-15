@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import type { TestContext } from "node:test";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Credential, Model } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { parse } from "yaml";
 import { z } from "zod";
@@ -24,6 +24,7 @@ import { piProviderId } from "../kernel/pi-provider.ts";
 import { connectModel } from "../llm/model-connector.ts";
 import { ReasoningLevel } from "../llm/platforms.ts";
 import { frozenStore } from "../llm/refresh-watch.ts";
+import type { NativeCredential } from "../apps/server/test-support.ts";
 import { missionOperations } from "../mission/contract.ts";
 import {
   GuardCause,
@@ -38,6 +39,7 @@ import {
   type WorkbenchModelRuntimeFactory,
 } from "../workbench/index.ts";
 import { EVAL_DIRECTORY } from "./case.ts";
+import { type CredentialSource, sandboxCredential } from "./credential.ts";
 import {
   compare,
   type EvalRun,
@@ -73,7 +75,7 @@ const GuardErrorCode = {
 
 const CASE_EXTENSION = ".yaml";
 const CASE_AGENT = "ops@1";
-const PLATFORM = "anthropic" as const;
+const CREDENTIAL_LEAD_MS = 600000;
 const CREDENTIAL_ID = "guard-eval";
 const PROOF_PROMPT = "guard.md";
 const CONCURRENCY = 4;
@@ -156,7 +158,7 @@ export interface GuardSuiteOptions {
   output: string;
   history: string;
   rerun: boolean;
-  apiKey: string;
+  credential: CredentialSource;
   proof: string;
   runtimeFactory?: WorkbenchModelRuntimeFactory;
   directory?: string;
@@ -232,21 +234,28 @@ function descriptionOf(operationId: string): string {
   return operation.description;
 }
 
+function credentialOf(native: NativeCredential): Credential {
+  if ("key" in native.secret)
+    return { type: SecretShape.ApiKey, key: native.secret.key };
+  return { type: SecretShape.OAuth, ...native.secret };
+}
+
 async function connectedModel(
   options: GuardSuiteOptions,
   signal: AbortSignal,
 ): Promise<GuardModel> {
-  const providerId = piProviderId(PLATFORM);
+  const native = await sandboxCredential(
+    options.credential,
+    CREDENTIAL_LEAD_MS,
+  );
+  const providerId = piProviderId(native.platform);
   const input: Parameters<WorkbenchModelRuntimeFactory>[0] = {
-    credentials: frozenStore(providerId, {
-      type: SecretShape.ApiKey,
-      key: options.apiKey,
-    }),
+    credentials: frozenStore(providerId, credentialOf(native)),
     handoverItem: { credential_id: CREDENTIAL_ID, provider_id: providerId },
     credentialId: CREDENTIAL_ID,
     configuration: {
       agent_provider: GUARD_EVAL_CONFIGURATION.agent_provider,
-      provider: PLATFORM,
+      provider: native.platform,
       model_identifier: GUARD_EVAL_CONFIGURATION.model_identifier,
       reasoning_effort: ReasoningLevel.Off,
     },

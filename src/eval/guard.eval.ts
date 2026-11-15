@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { API_KEY_VARIABLE } from "./credential.ts";
+import { credentialSourceOf } from "./credential.ts";
 import { GUARD_SUBJECT, runGuardSuite } from "./guard-run.ts";
 
 const DEFAULT_REPEAT = 3;
@@ -47,7 +47,7 @@ const options = {
   output: required("EVAL_OUTPUT"),
   history: required("EVAL_HISTORY"),
   rerun: process.env.EVAL_RERUN === RERUN_ENABLED,
-  apiKey: required(API_KEY_VARIABLE),
+  credential: credentialSourceOf(process.env),
   proof: PROOF_PATH,
 };
 
