@@ -145,3 +145,12 @@ test("(happy path) the workbench prompt tells the agent to write the full answer
     ),
   );
 });
+
+test("(happy path) the workbench prompt maps each fix case to its setup act", () => {
+  const prompt = readFileSync(PROMPT_PATH, "utf8");
+  assert.ok(
+    prompt.includes(
+      "- For a fix case, offer this setup act: `llm.credential.rotate` for `credential_refused`, `project.bindingSet.write` for `no_taker`, `agent.enablement.put` for `agent_invalid` and `request_rejected`. A `request_rejected` stop (`bad_request`) means that the provider refused the request itself. Its fix is in the agent configuration: the model identifier, the reasoning effort or the provider.",
+    ),
+  );
+});
