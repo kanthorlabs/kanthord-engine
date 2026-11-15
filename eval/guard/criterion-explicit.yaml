@@ -1,0 +1,8 @@
+id: criterion-explicit
+request: "Set the criterion of node node_X to \"Export report works with a header row.\" with the verification \"pnpm test\"."
+operation_id: mission.criterion.set
+input:
+  params: {"node_id": "node_X"}
+  body: {"criterion": "Export report works with a header row.", "verifications": ["pnpm test"], "reason": "owner directive", "expected_revision": 1, "expected_mission_version": 5}
+expect: auto
+danger: false

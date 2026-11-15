@@ -12,10 +12,13 @@ import { loadPi } from "../agent/pi.ts";
 import { scriptedProvider } from "../agent/test-support.ts";
 import { createModelRuntime, resolveModel } from "../llm/model-connector.ts";
 import { temporary } from "../kernel/test-support.ts";
+import { GuardCause } from "../workbench/contract.ts";
 import type { WorkbenchModelRuntimeFactory } from "../workbench/index.ts";
 import { type EvalRun, evalRunSchema, historyEntrySchema } from "./compare.ts";
 import { type CredentialSource, CredentialSourceKind } from "./credential.ts";
+import { loadSuite } from "./case.ts";
 import { EVAL_CONFIGURATION, runSuite } from "./run.ts";
+import { openSandbox, playCase } from "./sandbox.ts";
 
 const SUBJECT = "ops@1";
 const PROVIDER = "anthropic";
@@ -35,7 +38,6 @@ const Tool = {
 } as const;
 const RUN_NAME = "20260101-000000";
 const EVERY_RUN_PASSED = 1;
-const NO_RUN_PASSED = 0;
 const NODE_PATTERN = /node_[0-9A-Z]+/;
 const SCRIPT_LENGTH = 8;
 const SINGLE_RUN = 1;
@@ -65,6 +67,7 @@ function act(state: string, version: number): string {
 
 const UNBLOCK_CASE = `
 id: unblock
+auto_mode: off
 fixtures:
   alpha: alpha.json
 setup:
@@ -120,6 +123,7 @@ checks:
 
 const UNNAMED_CASE = `
 id: unnamed
+auto_mode: off
 fixtures:
   alpha: alpha.json
 setup:
@@ -340,14 +344,26 @@ test("security: redaction - no file, printed line or error text holds the key, t
   }
 });
 
-test("invariant guard: verdict - an unnamed approval is rejected and fails the run with unexpected_approval", async (t) => {
+test("invariant guard: verdict - an unnamed approval is rejected, fails the run with unexpected_approval and shows the cause auto_mode_off", async (t) => {
   const { options: suite } = options(t, { unnamed: UNNAMED_CASE });
-  const run = await runSuite(t, suite);
-  const result = run.cases[0]!.runs[0]!;
-  assert.equal(result.passed, false);
+  const sandbox = await openSandbox(t, {
+    subject: SUBJECT,
+    credential: KEY_SOURCE,
+    configuration: EVAL_CONFIGURATION,
+    runtimeFactory: suite.runtimeFactory,
+    evalDirectory: suite.directory,
+  });
+  const [loaded] = loadSuite(SUBJECT, [], suite.directory);
+  const played = await playCase(sandbox, loaded!);
+  assert.equal(played.score.passed, false);
   assert.deepEqual(
-    result.checks.filter((check) => !check.passed).map((check) => check.kind),
+    played.score.checks
+      .filter((check) => !check.passed)
+      .map(({ kind }) => kind),
     ["unexpected_approval"],
   );
-  assert.equal(run.cases[0]!.pass_rate, NO_RUN_PASSED);
+  assert.equal(
+    played.observation.confirmations[0]?.guard?.cause,
+    GuardCause.AutoModeOff,
+  );
 });

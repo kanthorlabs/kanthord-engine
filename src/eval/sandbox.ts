@@ -34,12 +34,14 @@ import {
   workerOperations,
 } from "../worker/contract.ts";
 import {
+  GUARD_AGENT_NAME,
   type WorkbenchConfiguration,
   workbenchOperations,
 } from "../workbench/contract.ts";
 import type { WorkbenchModelRuntimeFactory } from "../workbench/index.ts";
 import {
   ApprovalAnswer,
+  AutoMode,
   type Case,
   EVAL_DIRECTORY,
   type FixtureEntry,
@@ -75,6 +77,11 @@ const FIXTURE_REASON = "eval fixture";
 const CODER_BINDING = "coder";
 const REVIEWER_BINDING = "reviewer";
 const WORKER_AGENTS = ["swe@1", "re@1"] as const;
+const GUARD_CONFIGURATION: WorkbenchConfiguration = {
+  agent_provider: "default",
+  model_identifier: "claude-sonnet-5",
+  reasoning_effort: "off",
+};
 const NATIVE_CREDENTIAL = "native-credential";
 const INSTANCE_LIST_LIMIT = 100;
 const EVAL_WORKERS = [
@@ -145,6 +152,7 @@ export async function openSandbox(
     credential.platform,
     options.configuration,
   );
+  await enableGuard(fixture, credential.platform);
   await connectEvalInstances(t, fixture);
   return {
     subject: options.subject,
@@ -180,6 +188,27 @@ async function enableWorkerAgents(
         fallback_configurations: [],
       },
     });
+}
+
+async function enableGuard(
+  fixture: GatewayFixture,
+  platform: NativeCredential["platform"],
+): Promise<void> {
+  await humanCaller(fixture)(agentOperations["enablement.put"], {
+    params: { agent_name: GUARD_AGENT_NAME },
+    query: {},
+    body: {
+      agent_providers: [
+        {
+          name: GUARD_CONFIGURATION.agent_provider,
+          provider: platform,
+          credential: NATIVE_CREDENTIAL,
+        },
+      ],
+      default_configuration: GUARD_CONFIGURATION,
+      fallback_configurations: [],
+    },
+  });
 }
 
 async function connectEvalInstances(
@@ -499,14 +528,11 @@ async function answerPending(
   approvals: Case["turns"][number]["approvals"],
   tally: Tally,
 ): Promise<void> {
-  const listed = await sandbox.call(workbenchOperations["session.list"], {
-    params: {},
-    query: { agent_name: sandbox.subject },
-    body: null,
-  });
-  const pending = listed.items.find(
-    (item) => item.id === sessionId,
-  )?.pending_approval;
+  const { snapshot } = await sandbox.call(
+    workbenchOperations["session.events"],
+    { params: { session_id: sessionId }, query: {}, body: null },
+  );
+  const pending = snapshot.pending_approval;
   if (!pending || tally.answered.has(pending.tool_call_id)) return;
   const named = approvals[pending.operation_id];
   const answer = named ?? ApprovalAnswer.Reject;
@@ -524,6 +550,7 @@ async function answerPending(
     operation_id: pending.operation_id,
     tool_call_id: pending.tool_call_id,
     answer,
+    guard: pending.guard,
   });
 }
 
@@ -549,7 +576,7 @@ async function settleTurn(
 
 export async function runTurns(
   sandbox: Sandbox,
-  run: Pick<Case, "turns" | "checks">,
+  run: Pick<Case, "turns" | "checks" | "auto_mode">,
 ): Promise<PlayedCase> {
   const created = await sandbox.call(workbenchOperations["session.create"], {
     params: {},
@@ -557,6 +584,12 @@ export async function runTurns(
     body: { agent_name: sandbox.subject, ...sandbox.configuration },
   });
   const params = { session_id: created.id };
+  if (run.auto_mode === AutoMode.Off)
+    await sandbox.call(workbenchOperations["session.autoMode.set"], {
+      params,
+      query: {},
+      body: { enabled: false },
+    });
   const tally: Tally = {
     confirmations: [],
     answered: new Set(),
@@ -662,7 +695,11 @@ export async function playCase(
   return runTurns(
     sandbox,
     resolvePlaceholders(
-      { turns: loaded.turns, checks: loaded.checks },
+      {
+        turns: loaded.turns,
+        checks: loaded.checks,
+        auto_mode: loaded.auto_mode,
+      },
       ids,
       sandbox.native,
     ),

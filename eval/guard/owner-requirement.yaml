@@ -1,0 +1,8 @@
+id: owner-requirement
+request: "Update node node_X: set its requirement to \"Export the report as CSV with a header row.\""
+operation_id: mission.node.update
+input:
+  params: {"node_id": "node_X"}
+  body: {"filename": "node-x.md", "content": {"name": "Export report", "requirement": "Export the report as CSV with a header row.", "criterion": "Export report works.", "verifications": ["pnpm test"], "bindings": ["repo"]}, "tasks": [], "reason": "owner directive", "expected_revision": 1, "expected_mission_version": 5}
+expect: auto
+danger: false

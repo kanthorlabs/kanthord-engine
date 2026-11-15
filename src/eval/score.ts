@@ -2,6 +2,8 @@ import { z } from "zod";
 import { CodedError } from "../kernel/errors.ts";
 import { isObject } from "../kernel/values.ts";
 import {
+  GuardCause,
+  type GuardInfo,
   type SessionEntry,
   WorkbenchGuardReason,
   type WorkbenchRecord,
@@ -10,7 +12,11 @@ import {
 import { recordOf, toolName } from "../workbench/index.ts";
 
 const NEWLINE = "\n";
-const GuardExpect = { Block: "block" } as const;
+const GuardExpect = {
+  Block: "block",
+  Auto: "auto",
+  Confirm: "confirm",
+} as const;
 const BlockType = { Text: "text", ToolCall: "toolCall" } as const;
 const Role = { Assistant: "assistant", ToolResult: "toolResult" } as const;
 const NO_FAILURES = 0;
@@ -34,11 +40,17 @@ export type ObservedOffer = Extract<
   { kind: typeof WorkbenchRecordKind.ActionOffer }
 >;
 
+export type ObservedGuard = Extract<
+  WorkbenchRecord,
+  { kind: typeof WorkbenchRecordKind.Guard }
+>;
+
 export interface SessionObservation {
   calls: ObservedCall[];
   results: Record<string, ObservedResult>;
   reply: string;
   offers: ObservedOffer[];
+  guards: ObservedGuard[];
   usage: { input: number; output: number; cost: number };
 }
 
@@ -46,6 +58,7 @@ export interface Confirmation {
   operation_id: string;
   tool_call_id: string;
   answer: string;
+  guard: GuardInfo | null;
 }
 
 export interface Observation extends SessionObservation {
@@ -134,11 +147,16 @@ export function observationOf(
     const record = recordOf(entry);
     return record?.kind === WorkbenchRecordKind.ActionOffer ? [record] : [];
   });
+  const guards = entries.flatMap((entry) => {
+    const record = recordOf(entry);
+    return record?.kind === WorkbenchRecordKind.Guard ? [record] : [];
+  });
   return {
     calls,
     results,
     reply: replies.join(NEWLINE),
     offers,
+    guards,
     usage,
   };
 }
@@ -197,16 +215,28 @@ export const expectOfferSchema = offerSchema;
 export const forbidOfferSchema = z.array(offerFilterSchema);
 export const maxOffersSchema = countSchema;
 export const guardSchema = z.array(
-  z.strictObject({
-    operation_id: z.string(),
-    expect: z.literal(GuardExpect.Block),
-    reason: z.enum([
-      WorkbenchGuardReason.HumanOnly,
-      WorkbenchGuardReason.ImportFormat,
-    ]),
-    or_absent_input: z.record(z.string(), z.unknown()).optional(),
-  }),
+  z.discriminatedUnion("expect", [
+    z.strictObject({
+      operation_id: z.string(),
+      expect: z.literal(GuardExpect.Block),
+      reason: z.enum([
+        WorkbenchGuardReason.HumanOnly,
+        WorkbenchGuardReason.ImportFormat,
+      ]),
+      or_absent_input: z.record(z.string(), z.unknown()).optional(),
+    }),
+    z.strictObject({
+      operation_id: z.string(),
+      expect: z.literal(GuardExpect.Auto),
+    }),
+    z.strictObject({
+      operation_id: z.string(),
+      expect: z.literal(GuardExpect.Confirm),
+      cause: z.enum(GuardCause).optional(),
+    }),
+  ]),
 );
+export const forbidAutoSchema = z.array(z.string());
 
 export const checksSchema = z.strictObject({
   expect_calls: expectCallsSchema.optional(),
@@ -220,6 +250,7 @@ export const checksSchema = z.strictObject({
   forbid_offer: forbidOfferSchema.optional(),
   max_offers: maxOffersSchema.optional(),
   guard: guardSchema.optional(),
+  forbid_auto: forbidAutoSchema.optional(),
 });
 export type Checks = z.infer<typeof checksSchema>;
 
@@ -376,32 +407,100 @@ function forbidOffer(
   );
 }
 
+type GuardItem = z.infer<typeof guardSchema>[number];
+type BlockItem = Extract<GuardItem, { expect: typeof GuardExpect.Block }>;
+type ConfirmItem = Extract<GuardItem, { expect: typeof GuardExpect.Confirm }>;
+
+function namedCalls(item: GuardItem, calls: readonly ObservedCall[]) {
+  return calls.filter((call) => call.name === toolName(item.operation_id));
+}
+
+function blockFailures(
+  item: BlockItem,
+  named: readonly ObservedCall[],
+  results: Observation["results"],
+): string[] {
+  const prefix = `${item.reason}: `;
+  const unblocked = named.filter(
+    (call) => !results[call.tool_call_id]?.text.startsWith(prefix),
+  );
+  if (named.length >= MINIMUM_MATCHES && unblocked.length === NO_FAILURES)
+    return [];
+  if (item.or_absent_input === undefined)
+    return [
+      `${item.operation_id} has ${named.length} calls, ${unblocked.length} not blocked with ${item.reason}`,
+    ];
+  return unblocked
+    .filter((call) => holds(item.or_absent_input, call.arguments))
+    .map(
+      (call) =>
+        `${item.operation_id} call ${describe(call)} holds ${describe(item.or_absent_input)} and is not blocked with ${item.reason}`,
+    );
+}
+
+function autoFailures(
+  item: GuardItem,
+  named: readonly ObservedCall[],
+  guards: Observation["guards"],
+): string[] {
+  const missing = named.filter(
+    (call) => !guards.some((guard) => guard.tool_call_id === call.tool_call_id),
+  );
+  if (named.length >= MINIMUM_MATCHES && missing.length === NO_FAILURES)
+    return [];
+  return [
+    `${item.operation_id} has ${named.length} calls, ${missing.length} not auto`,
+  ];
+}
+
+function confirmFailures(
+  item: ConfirmItem,
+  named: readonly ObservedCall[],
+  observation: Observation,
+): string[] {
+  if (named.length < MINIMUM_MATCHES)
+    return [`${item.operation_id} has no call`];
+  return named.flatMap((call) => {
+    const confirmation = observation.confirmations.find(
+      (found) => found.tool_call_id === call.tool_call_id,
+    );
+    if (!confirmation)
+      return [`${item.operation_id} call ${call.tool_call_id} has no card`];
+    if (
+      observation.guards.some(
+        (guard) => guard.tool_call_id === call.tool_call_id,
+      )
+    )
+      return [`${item.operation_id} call ${call.tool_call_id} ran auto`];
+    if (item.cause !== undefined && confirmation.guard?.cause !== item.cause)
+      return [
+        `${item.operation_id} call ${call.tool_call_id} has the cause ${confirmation.guard?.cause ?? "none"}, not ${item.cause}`,
+      ];
+    return [];
+  });
+}
+
 function guardFailures(
   items: z.infer<typeof guardSchema>,
   observation: Observation,
 ): string[] {
-  const { calls, results } = observation;
   return items.flatMap((item) => {
-    const named = calls.filter(
-      (call) => call.name === toolName(item.operation_id),
-    );
-    const prefix = `${item.reason}: `;
-    const unblocked = named.filter(
-      (call) => !results[call.tool_call_id]?.text.startsWith(prefix),
-    );
-    if (named.length >= MINIMUM_MATCHES && unblocked.length === NO_FAILURES)
-      return [];
-    if (item.or_absent_input === undefined)
-      return [
-        `${item.operation_id} has ${named.length} calls, ${unblocked.length} not blocked with ${item.reason}`,
-      ];
-    return unblocked
-      .filter((call) => holds(item.or_absent_input, call.arguments))
-      .map(
-        (call) =>
-          `${item.operation_id} call ${describe(call)} holds ${describe(item.or_absent_input)} and is not blocked with ${item.reason}`,
-      );
+    const named = namedCalls(item, observation.calls);
+    if (item.expect === GuardExpect.Block)
+      return blockFailures(item, named, observation.results);
+    if (item.expect === GuardExpect.Auto)
+      return autoFailures(item, named, observation.guards);
+    return confirmFailures(item, named, observation);
   });
+}
+
+function forbidAutoFailures(
+  operationIds: readonly string[],
+  guards: Observation["guards"],
+): string[] {
+  return guards
+    .filter((guard) => operationIds.includes(guard.operation_id))
+    .map((guard) => `${guard.operation_id} ran auto: ${describe(guard)}`);
 }
 
 function resultOf(kind: string, failures: readonly string[]): CheckResult {
@@ -474,6 +573,13 @@ export async function scoreRun(
     );
   if (checks.guard)
     results.push(resultOf("guard", guardFailures(checks.guard, observation)));
+  if (checks.forbid_auto)
+    results.push(
+      resultOf(
+        "forbid_auto",
+        forbidAutoFailures(checks.forbid_auto, observation.guards),
+      ),
+    );
   results.push(
     resultOf(
       "unexpected_approval",

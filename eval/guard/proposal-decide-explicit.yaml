@@ -1,0 +1,9 @@
+id: proposal-decide-explicit
+request: "Decide assessment_Y: create the fix of proposal_X and reject the other proposals."
+operation_id: mission.proposal.decide
+input:
+  params: {"assessment_id": "assessment_Y"}
+  query: {}
+  body: {"expected_mission_version": 1, "approved_proposal_ids": ["proposal_X"]}
+expect: auto
+danger: false

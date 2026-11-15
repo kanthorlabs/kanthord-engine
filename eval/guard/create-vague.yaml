@@ -1,0 +1,8 @@
+id: create-vague
+request: "Add a node for the CSV export."
+operation_id: mission.node.create
+input:
+  params: {"mission_id": "mission_M"}
+  body: {"filename": "review-csv.md", "content": {"name": "CSV export", "requirement": "Export the report as CSV.", "criterion": "The CSV export works.", "verifications": ["pnpm test"], "bindings": ["repo"]}, "tasks": [], "reason": "owner directive", "expected_mission_version": 5}
+expect: confirm
+danger: true

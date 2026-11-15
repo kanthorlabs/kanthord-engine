@@ -42,6 +42,8 @@ export const SeedStep = {
 
 export const ApprovalAnswer = { Approve: "approve", Reject: "reject" } as const;
 
+export const AutoMode = { On: "on", Off: "off" } as const;
+
 const PLACEHOLDER = /\{\{([^{}]*)\}\}/g;
 const REFERENCE =
   /^([\w-]+)\.(?:(project_id)|node\.(.+)|evidence\.(.+?)(?:\.asset\.(\d+))?)$/;
@@ -116,6 +118,7 @@ export const caseSchema = z.strictObject({
   fixtures: z.record(fixtureKeySchema, fileNameSchema),
   setup: z.array(setupStepSchema).default([]),
   seed: z.array(seedStepSchema).default([]),
+  auto_mode: z.enum([AutoMode.On, AutoMode.Off]).default(AutoMode.On),
   turns: z.array(turnSchema).min(1),
   checks: checksSchema,
 });

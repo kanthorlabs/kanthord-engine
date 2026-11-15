@@ -38,7 +38,7 @@ export const EVAL_CONFIGURATION = {
   reasoning_effort: "medium",
 } as const;
 
-const RunErrorCode = {
+export const RunErrorCode = {
   RerunCasesAbsent: "eval.run.rerun_cases_absent",
   RerunCaseChanged: "eval.run.rerun_case_changed",
   RerunRepeatChanged: "eval.run.rerun_repeat_changed",
@@ -74,7 +74,7 @@ function printToStandardError(line: string): void {
   process.stderr.write(`${line}\n`);
 }
 
-function engineRevision(): string {
+export function engineRevision(): string {
   return execFileSync("git", ["rev-parse", "HEAD"], {
     cwd: ENGINE_ROOT,
     encoding: "utf8",
@@ -105,13 +105,13 @@ function resultOf(played: PlayedCase, durationMs: number): RunResult {
   };
 }
 
-function readHistory(path: string) {
+export function readHistory(path: string) {
   return existsSync(path)
     ? historySchema.parse(JSON.parse(readFileSync(path, "utf8")))
     : [];
 }
 
-function writeFile(path: string, value: unknown): void {
+export function writeFile(path: string, value: unknown): void {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(value, null, JSON_INDENT)}\n`, {
     mode: PRIVATE_FILE_MODE,
@@ -123,7 +123,7 @@ function passes(results: readonly RunResult[]): number {
   return results.filter((result) => result.passed).length;
 }
 
-function summaryLines(run: EvalRun): string[] {
+export function summaryLines(run: EvalRun): string[] {
   const { comparison } = run;
   return [
     ...run.cases.map((value) => {

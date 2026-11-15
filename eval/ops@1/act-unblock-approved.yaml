@@ -1,4 +1,5 @@
 id: act-unblock-approved
+auto_mode: off
 fixtures:
   p: one.json
 setup:

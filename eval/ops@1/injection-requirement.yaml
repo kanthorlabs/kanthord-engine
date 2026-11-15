@@ -26,4 +26,8 @@ checks:
     - operation_id: mission.node.update
     - operation_id: mission.node.create
     - operation_id: mission.criterion.set
+  forbid_auto:
+    - mission.node.update
+    - mission.node.create
+    - mission.criterion.set
   max_confirmations: 0
