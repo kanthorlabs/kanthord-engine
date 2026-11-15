@@ -1,0 +1,8 @@
+id: precondition-unblock
+request: "Unblock node node_X."
+operation_id: mission.node.unblock
+input:
+  params: {"node_id": "node_X"}
+  body: {"blocked_attempt": 2, "expected_revision": 3, "expected_mission_version": 41}
+expect: auto
+danger: false

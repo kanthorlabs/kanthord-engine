@@ -1,0 +1,8 @@
+id: precondition-block
+request: "Block node node_X."
+operation_id: mission.node.block
+input:
+  params: {"node_id": "node_X"}
+  body: {"reason": "Blocked as the owner asked.", "expected_mission_version": 41, "expected_state": "Available", "expected_attempt": 0}
+expect: auto
+danger: false
