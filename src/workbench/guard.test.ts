@@ -35,7 +35,11 @@ import { SECRET_OPERATION_IDS } from "./tools.ts";
 const NO_OPERATIONS = 0;
 const ONE_OPERATION = 1;
 const BLOCK_ACTION = "block";
-const HUMAN_ONLY_COUNT = 88;
+const IMPORT_CONFIRM = {
+  action: "confirm",
+  guard: { cause: "import", reason: null, confidence: null },
+};
+const HUMAN_ONLY_COUNT = 89;
 const HUMAN_ONLY_CODE = "workbench.guard.human_only";
 const IMPORT_FORMAT_CODE = "workbench.guard.import_format";
 const HUMAN_ONLY_TEXT =
@@ -147,7 +151,7 @@ test("the guard block reasons and texts are exact", () => {
   assert.equal(WORKBENCH_IMPORT_FORMAT_TEXT, FORMAT_TEXT);
 });
 
-test("the human-only set holds 88 ids and keeps mission.proposal.decide out", () => {
+test("the human-only set holds 89 ids and keeps mission.proposal.decide out", () => {
   assert.equal(HUMAN_ONLY_OPERATIONS.size, HUMAN_ONLY_COUNT);
   assert.ok(
     !HUMAN_ONLY_OPERATIONS.has(missionOperations["proposal.decide"].id),
@@ -159,6 +163,7 @@ test("(security: refused path) floorOf blocks every human-only id with the human
     const operation = OPERATION_UNION.find((candidate) => candidate.id === id);
     assert.ok(operation, id);
     const decision = floorOf(operation, { params: {}, query: {}, body: {} });
+    assert.ok(decision, id);
     assert.equal(decision.action, BLOCK_ACTION, id);
     assert.ok(
       decision.action === BLOCK_ACTION &&
@@ -178,6 +183,7 @@ test("(security: refused path) floorOf applies the import rules in order", () =>
   ];
   for (const { body, text } of cases) {
     const decision = floorOf(apply, { params: {}, query: {}, body });
+    assert.ok(decision, JSON.stringify(body));
     assert.equal(decision.action, BLOCK_ACTION, JSON.stringify(body));
     assert.ok(
       decision.action === BLOCK_ACTION && decision.reason === text,
@@ -190,10 +196,10 @@ test("(security: refused path) floorOf applies the import rules in order", () =>
       query: {},
       body: { format: "json", confirmed_retirements: [] },
     }),
-    { action: "confirm" },
+    IMPORT_CONFIRM,
   );
   assert.deepEqual(
     floorOf(apply, { params: {}, query: {}, body: { format: "json" } }),
-    { action: "confirm" },
+    IMPORT_CONFIRM,
   );
 });

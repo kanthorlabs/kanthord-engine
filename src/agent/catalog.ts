@@ -4,8 +4,9 @@ import {
   LINK_UPDATE_LIMIT_MAX,
   LINK_UPDATE_LIMIT_MIN,
 } from "../worker/contract.ts";
-import type { AgentName } from "./contract.ts";
+import { type AgentName, INTERNAL_AGENT_NAMES } from "./contract.ts";
 import {
+  GUARD_PROMPT,
   OPS_AGENT_PROMPT,
   PE_AGENT_PROMPT,
   RE_AGENT_PROMPT,
@@ -18,6 +19,8 @@ export interface AgentDeclaration {
   agent_prompt: string;
   display_name: string;
   tools: AgentTools;
+  pinned_model_identifier?: string;
+  internal?: true;
 }
 
 export interface AgentTools {
@@ -112,90 +115,107 @@ const OPS_OPERATIONS = [
   "mission.import.apply",
 ] as const;
 
+const SHIPPED_DECLARATIONS: Readonly<Record<AgentName, AgentDeclaration>> = {
+  "swe@1": {
+    agent_name: "swe@1",
+    display_name: "SWE",
+    agent_prompt: SWE_AGENT_PROMPT,
+    tools: {
+      builtin: [
+        BuiltinTool.Read,
+        BuiltinTool.Edit,
+        BuiltinTool.Write,
+        BuiltinTool.Grep,
+        BuiltinTool.Find,
+        BuiltinTool.Ls,
+        BuiltinTool.Bash,
+      ],
+      host: [HostTool.EvidenceUpload, HostTool.LinkUpdateList],
+      operation: NODE_REVIEW_READS,
+      workbench: [WorkbenchTool.EvidenceRead],
+    },
+    overridable_fields: [
+      "agent_provider",
+      "model_identifier",
+      "reasoning_effort",
+      "fallback_configurations",
+    ],
+  },
+  "re@1": {
+    agent_name: "re@1",
+    display_name: "RE",
+    agent_prompt: RE_AGENT_PROMPT,
+    tools: {
+      builtin: [
+        BuiltinTool.Read,
+        BuiltinTool.Grep,
+        BuiltinTool.Find,
+        BuiltinTool.Ls,
+      ],
+      host: [],
+      operation: NODE_REVIEW_READS,
+      workbench: [WorkbenchTool.EvidenceRead],
+    },
+    overridable_fields: [
+      "agent_provider",
+      "model_identifier",
+      "reasoning_effort",
+      "fallback_configurations",
+    ],
+  },
+  "pe@1": {
+    agent_name: "pe@1",
+    display_name: "PE",
+    agent_prompt: PE_AGENT_PROMPT,
+    tools: {
+      builtin: [
+        BuiltinTool.Read,
+        BuiltinTool.Grep,
+        BuiltinTool.Find,
+        BuiltinTool.Ls,
+      ],
+      host: [],
+      operation: [],
+      workbench: [],
+    },
+    overridable_fields: [],
+  },
+  "ops@1": {
+    agent_name: "ops@1",
+    display_name: "Yumi",
+    agent_prompt: OPS_AGENT_PROMPT,
+    tools: {
+      builtin: [],
+      host: [],
+      operation: OPS_OPERATIONS,
+      workbench: [],
+    },
+    overridable_fields: [
+      "agent_provider",
+      "model_identifier",
+      "reasoning_effort",
+      "fallback_configurations",
+    ],
+  },
+  "guard@1": {
+    agent_name: "guard@1",
+    display_name: "Guard",
+    agent_prompt: GUARD_PROMPT,
+    tools: { builtin: [], host: [], operation: [], workbench: [] },
+    pinned_model_identifier: "claude-sonnet-5",
+    overridable_fields: [],
+  },
+};
+
 export const AGENT_DECLARATIONS: Readonly<Record<AgentName, AgentDeclaration>> =
-  {
-    "swe@1": {
-      agent_name: "swe@1",
-      display_name: "SWE",
-      agent_prompt: SWE_AGENT_PROMPT,
-      tools: {
-        builtin: [
-          BuiltinTool.Read,
-          BuiltinTool.Edit,
-          BuiltinTool.Write,
-          BuiltinTool.Grep,
-          BuiltinTool.Find,
-          BuiltinTool.Ls,
-          BuiltinTool.Bash,
-        ],
-        host: [HostTool.EvidenceUpload, HostTool.LinkUpdateList],
-        operation: NODE_REVIEW_READS,
-        workbench: [WorkbenchTool.EvidenceRead],
-      },
-      overridable_fields: [
-        "agent_provider",
-        "model_identifier",
-        "reasoning_effort",
-        "fallback_configurations",
-      ],
-    },
-    "re@1": {
-      agent_name: "re@1",
-      display_name: "RE",
-      agent_prompt: RE_AGENT_PROMPT,
-      tools: {
-        builtin: [
-          BuiltinTool.Read,
-          BuiltinTool.Grep,
-          BuiltinTool.Find,
-          BuiltinTool.Ls,
-        ],
-        host: [],
-        operation: NODE_REVIEW_READS,
-        workbench: [WorkbenchTool.EvidenceRead],
-      },
-      overridable_fields: [
-        "agent_provider",
-        "model_identifier",
-        "reasoning_effort",
-        "fallback_configurations",
-      ],
-    },
-    "pe@1": {
-      agent_name: "pe@1",
-      display_name: "PE",
-      agent_prompt: PE_AGENT_PROMPT,
-      tools: {
-        builtin: [
-          BuiltinTool.Read,
-          BuiltinTool.Grep,
-          BuiltinTool.Find,
-          BuiltinTool.Ls,
-        ],
-        host: [],
-        operation: [],
-        workbench: [],
-      },
-      overridable_fields: [],
-    },
-    "ops@1": {
-      agent_name: "ops@1",
-      display_name: "Yumi",
-      agent_prompt: OPS_AGENT_PROMPT,
-      tools: {
-        builtin: [],
-        host: [],
-        operation: OPS_OPERATIONS,
-        workbench: [],
-      },
-      overridable_fields: [
-        "agent_provider",
-        "model_identifier",
-        "reasoning_effort",
-        "fallback_configurations",
-      ],
-    },
-  };
+  Object.fromEntries(
+    Object.entries(SHIPPED_DECLARATIONS).map(([name, declaration]) => [
+      name,
+      (INTERNAL_AGENT_NAMES as readonly string[]).includes(name)
+        ? { ...declaration, internal: true }
+        : declaration,
+    ]),
+  ) as Record<AgentName, AgentDeclaration>;
 
 const NO_OPERATIONS = 0;
 

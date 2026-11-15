@@ -23,9 +23,14 @@ Every operation has `human` access.
 | `workbench.session.message`       | `POST /api/workbench/session/:session_id/message`                     | `unary`  |
 | `workbench.session.approve`       | `POST /api/workbench/session/:session_id/approve`                     | `unary`  |
 | `workbench.session.action.report` | `POST /api/workbench/session/:session_id/action/:tool_call_id/report` | `unary`  |
+| `workbench.session.autoMode.set`  | `POST /api/workbench/session/:session_id/auto-mode`                   | `unary`  |
 | `workbench.session.abort`         | `POST /api/workbench/session/:session_id/abort`                       | `unary`  |
 | `workbench.session.queue.remove`  | `DELETE /api/workbench/session/:session_id/queue/:queued_message_id`  | `unary`  |
 | `workbench.session.events`        | `GET /api/workbench/session/:session_id/events`                       | `wait`   |
+
+`workbench.session.autoMode.set` takes the body `{ enabled }` and answers `{ session_id, enabled }`. It is a human-only act of the owner. The run snapshot of `workbench.session.events` answers `auto_mode`.
+
+The pending approval of the run snapshot carries `guard`. `guard` is `null` for an evidence card. Every other card carries `{ cause, reason, confidence }`. `cause` is one of `import`, `auto_mode_off`, `unavailable`, `oversize`, `no_verdict` and `classifier`. `reason` and `confidence` are `null` for every cause other than `classifier`.
 
 ## Error codes
 
@@ -38,6 +43,7 @@ Every operation can also answer the shared codes of [other.md](other.md#error-co
 | 404   | `workbench.session.queued_message_not_found` | The queued message identity names no queued message of the session.                                                            |
 | 404   | `workbench.session.action_not_found`         | No `action_offer` record of the session holds the `tool_call_id`.                                                              |
 | 409   | `workbench.session.action_settled`           | A `done` result already exists for the `tool_call_id`.                                                                         |
+| 409   | `workbench.session.agent_refused`            | A create names a catalog agent with no operation tool, such as `pe@1` or `guard@1`; details `{ agent_name }`.                  |
 | 409   | `workbench.session.run_active`               | A configure arrives while a run is active.                                                                                     |
 | 409   | `workbench.session.queue_full`               | A message arrives while the queue holds 10 messages.                                                                           |
 | 409   | `workbench.session.configuration_invalid`    | The stored entries of the session hold no readable configuration.                                                              |

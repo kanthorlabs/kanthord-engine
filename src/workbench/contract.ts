@@ -42,6 +42,7 @@ export const WorkbenchErrorCode = {
   QueuedMessageNotFound: "workbench.session.queued_message_not_found",
   ActionNotFound: "workbench.session.action_not_found",
   ActionSettled: "workbench.session.action_settled",
+  AgentRefused: "workbench.session.agent_refused",
 } as const;
 
 export const workbenchConfigurationSchema = z.strictObject({
@@ -53,7 +54,31 @@ export type WorkbenchConfiguration = z.infer<
   typeof workbenchConfigurationSchema
 >;
 
-export const WorkbenchRecordKind = { ActionOffer: "action_offer" } as const;
+export const GUARD_AGENT_NAME = "guard@1";
+export const GUARD_MAX_TOKENS = 1024;
+export const GUARD_TIMEOUT_MS = 10000;
+export const GUARD_AUTO_CONFIDENCE = 0.9;
+export const GUARD_REQUEST_MAX_BYTES = 16384;
+export const GUARD_TEXT_KEEP_CHARS = 64;
+export const GUARD_REASON_MAX_CHARS = 300;
+export const GUARD_TOOL_NAME = "guard_verdict";
+
+export const GuardCause = {
+  Import: "import",
+  AutoModeOff: "auto_mode_off",
+  Reversible: "reversible",
+  Unavailable: "unavailable",
+  Oversize: "oversize",
+  NoVerdict: "no_verdict",
+  Classifier: "classifier",
+} as const;
+export type GuardCause = (typeof GuardCause)[keyof typeof GuardCause];
+
+export const WorkbenchRecordKind = {
+  ActionOffer: "action_offer",
+  AutoMode: "auto_mode",
+  Guard: "guard",
+} as const;
 export type WorkbenchRecordKind =
   (typeof WorkbenchRecordKind)[keyof typeof WorkbenchRecordKind];
 
@@ -75,6 +100,16 @@ export const workbenchRecordSchema = z.discriminatedUnion("kind", [
     operation_id: z.string(),
     target_id: z.string(),
     seen: actionSeenSchema,
+  }),
+  z.strictObject({
+    kind: z.literal(WorkbenchRecordKind.AutoMode),
+    enabled: z.boolean(),
+  }),
+  z.strictObject({
+    kind: z.literal(WorkbenchRecordKind.Guard),
+    tool_call_id: z.string(),
+    operation_id: z.string(),
+    reason: z.string().max(GUARD_REASON_MAX_CHARS),
   }),
 ]);
 export type WorkbenchRecord = z.infer<typeof workbenchRecordSchema>;
@@ -133,8 +168,16 @@ export const WORKBENCH_IMPORT_FORMAT_TEXT = `${WorkbenchGuardReason.ImportFormat
 export const WORKBENCH_EXPIRY_REASON =
   "The approval wait ended with no human decision. The call did not run. Do not call it again unless the human asks again.";
 
+export const guardInfoSchema = z.strictObject({
+  cause: z.enum(GuardCause),
+  reason: z.string().nullable(),
+  confidence: z.number().nullable(),
+});
+export type GuardInfo = z.infer<typeof guardInfoSchema>;
+
 export const pendingApprovalSchema = pendingApprovalSummarySchema.extend({
   input: z.record(z.string(), z.unknown()),
+  guard: guardInfoSchema.nullable(),
 });
 export type PendingApproval = z.infer<typeof pendingApprovalSchema>;
 
@@ -151,6 +194,7 @@ export const runSnapshotSchema = z.strictObject({
   run_active: z.boolean(),
   queue: z.array(queuedMessageSchema),
   error_message: z.string().nullable(),
+  auto_mode: z.boolean(),
 });
 export type RunSnapshot = z.infer<typeof runSnapshotSchema>;
 
@@ -320,6 +364,20 @@ export const workbenchOperations = {
     }),
     description:
       "Approve or reject the pending call of a mutation tool of the active run.",
+  },
+  "session.autoMode.set": {
+    ...workbenchMutation,
+    id: "workbench.session.autoMode.set",
+    method: HttpMethod.Post,
+    path: "/api/workbench/session/:session_id/auto-mode",
+    input: z.strictObject({
+      params: sessionParams,
+      query: emptyFields,
+      body: z.strictObject({ enabled: z.boolean() }),
+    }),
+    output: sessionParams.extend({ enabled: z.boolean() }),
+    description:
+      "Switch auto mode of a workbench session on or off. Only the owner changes it. A set to the current value changes nothing.",
   },
   "session.action.report": {
     ...workbenchMutation,

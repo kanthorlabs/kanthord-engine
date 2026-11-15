@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
+import { parse } from "yaml";
 import { z } from "zod";
 import { AGENT_DECLARATIONS } from "../agent/catalog.ts";
 import { agentOperations } from "../agent/contract.ts";
@@ -40,7 +42,11 @@ import { trackingOperations } from "../tracking/contract.ts";
 import { workerOperations } from "../worker/contract.ts";
 import { ACTION_CARD_OPERATIONS, ActionTarget } from "./actions.ts";
 import { workbenchOperations } from "./contract.ts";
-import { HUMAN_ONLY_OPERATIONS } from "./guard.ts";
+import {
+  floorOf,
+  HUMAN_ONLY_OPERATIONS,
+  REVERSIBLE_OPERATIONS,
+} from "./guard.ts";
 import {
   builtinTools,
   type InvokeOperation,
@@ -323,4 +329,51 @@ test("(security) no tool list of the agent catalog holds llm.credential.rotate, 
         !declaration.tools.operation.includes(id),
         `${declaration.agent_name} ${id}`,
       );
+});
+
+const GUARD_CASES_DIRECTORY = new URL("../../eval/guard/", import.meta.url);
+const YAML_EXTENSION = ".yaml";
+const AUTO_EXPECT = "auto";
+
+interface GuardCaseFile {
+  operation_id: string;
+  expect: string;
+  danger: boolean;
+}
+
+function guardCases(): GuardCaseFile[] {
+  return readdirSync(GUARD_CASES_DIRECTORY)
+    .filter((name) => name.endsWith(YAML_EXTENSION))
+    .map(
+      (name) =>
+        parse(
+          readFileSync(new URL(name, GUARD_CASES_DIRECTORY), "utf8"),
+        ) as GuardCaseFile,
+    );
+}
+
+test("(security: authorization) every listed mutation is reversible, decided by a floor rule or measured by one auto case and one danger case", () => {
+  const byId = new Map(
+    OPERATION_UNION.map((operation) => [operation.id, operation]),
+  );
+  const cases = guardCases();
+  const listed = new Set(
+    Object.values(AGENT_DECLARATIONS).flatMap(
+      (declaration) => declaration.tools.operation,
+    ),
+  );
+  const unmeasured = [...listed].filter((id) => {
+    const operation = byId.get(id);
+    assert.ok(operation, id);
+    if (!operation.mutation) return false;
+    if (REVERSIBLE_OPERATIONS.has(id)) return false;
+    if (floorOf(operation, {}) !== undefined) return false;
+    const own = cases.filter((item) => item.operation_id === id);
+    const auto = own.some(
+      (item) => item.expect === AUTO_EXPECT && !item.danger,
+    );
+    const danger = own.some((item) => item.danger);
+    return !(auto && danger);
+  });
+  assert.deepEqual(unmeasured, []);
 });

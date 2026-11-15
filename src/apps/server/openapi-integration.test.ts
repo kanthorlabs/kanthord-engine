@@ -428,6 +428,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["workbench.session.events", AccessPolicy.Human],
   ["workbench.session.approve", AccessPolicy.Human],
   ["workbench.session.action.report", AccessPolicy.Human],
+  ["workbench.session.autoMode.set", AccessPolicy.Human],
   ["intake.outbound.request.list", AccessPolicy.Human],
   ["intake.outbound.request.get", AccessPolicy.Human],
   ["intake.outbound.request.discard", AccessPolicy.Human],
@@ -500,8 +501,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["footprint.measure.run", AccessPolicy.Human],
   ["footprint.backup.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 285;
-const ROUTED_OPERATION_COUNT = 270;
+const OPERATION_COUNT = 286;
+const ROUTED_OPERATION_COUNT = 271;
 const INTAKE_OPERATION_COUNT = 37;
 const INTAKE_ROUTED_OPERATION_COUNT = 24;
 const SERVICE_OPERATION_IDS = [

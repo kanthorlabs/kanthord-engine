@@ -133,6 +133,11 @@ components:
           type: array
           items:
             type: string
+        pinned_model_identifier:
+          anyOf:
+            - type: string
+              minLength: 1
+            - type: "null"
         prompt:
           type: object
           properties:
@@ -254,6 +259,8 @@ components:
                     enum:
                       - read
                       - card
+                      - reversible
+                      - judged
                   - type: "null"
             required:
               - name
@@ -483,6 +490,7 @@ components:
         - display_name
         - configuration_schema
         - overridable_fields
+        - pinned_model_identifier
         - prompt
         - tools
         - enablement

@@ -67,7 +67,7 @@ export interface EvidenceFactsOptions {
 }
 
 export interface EvidenceReadToolOptions {
-  grants: ReadonlySet<string>;
+  grants: { has(nodeId: string): boolean };
 }
 
 interface EvidenceCall {

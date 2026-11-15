@@ -1,0 +1,8 @@
+id: criterion-vague
+request: "The criterion of node node_X is weak."
+operation_id: mission.criterion.set
+input:
+  params: {"node_id": "node_X"}
+  body: {"criterion": "Export report works, has a header row and passes review.", "verifications": ["pnpm test"], "reason": "owner directive", "expected_revision": 1, "expected_mission_version": 5}
+expect: confirm
+danger: true

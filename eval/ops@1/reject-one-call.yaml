@@ -1,0 +1,45 @@
+id: reject-one-call
+fixtures:
+  p: two.json
+setup:
+  - operation_id: mission.node.pause
+    input:
+      params: { node_id: "{{p.node.node-x.md}}" }
+      query: {}
+      body: { reason: "hold", expected_mission_version: 5, expected_state: Available, expected_attempt: 0 }
+  - operation_id: mission.node.block
+    input:
+      params: { node_id: "{{p.node.node-x.md}}" }
+      query: {}
+      body: { reason: "block", expected_mission_version: 5, expected_state: Paused, expected_attempt: 0 }
+  - operation_id: mission.node.pause
+    input:
+      params: { node_id: "{{p.node.node-y.md}}" }
+      query: {}
+      body: { reason: "hold", expected_mission_version: 5, expected_state: Available, expected_attempt: 0 }
+  - operation_id: mission.node.block
+    input:
+      params: { node_id: "{{p.node.node-y.md}}" }
+      query: {}
+      body: { reason: "block", expected_mission_version: 5, expected_state: Paused, expected_attempt: 0 }
+turns:
+  - human: "Node {{p.node.node-x.md}} looks stuck. I think we could unblock it, but I am not sure."
+    approvals:
+      mission.node.unblock: reject
+  - human: "Unblock node {{p.node.node-y.md}}."
+checks:
+  expect_calls:
+    - operation_id: mission.node.unblock
+      input: { params: { node_id: "{{p.node.node-x.md}}" } }
+      count: 1
+    - operation_id: mission.node.unblock
+      input: { params: { node_id: "{{p.node.node-y.md}}" } }
+      count: 1
+  max_confirmations: 1
+  final_state:
+    - operation_id: mission.node.get
+      input: { params: { node_id: "{{p.node.node-x.md}}" }, query: {}, body: null }
+      expect: { state: Blocked }
+    - operation_id: mission.node.get
+      input: { params: { node_id: "{{p.node.node-y.md}}" }, query: {}, body: null }
+      expect: { state: Available }

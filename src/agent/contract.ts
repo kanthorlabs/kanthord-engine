@@ -24,8 +24,23 @@ import {
 } from "../scheduler/contract.ts";
 
 export const AGENT_COMPONENT_NAME = "agent";
-export const AGENT_NAMES = ["swe@1", "re@1", "pe@1", "ops@1"] as const;
+export const AGENT_NAMES = [
+  "swe@1",
+  "re@1",
+  "pe@1",
+  "ops@1",
+  "guard@1",
+] as const;
 export type AgentName = (typeof AGENT_NAMES)[number];
+export const INTERNAL_AGENT_NAMES = ["guard@1"] as const;
+export type BindingAgentName = Exclude<
+  AgentName,
+  (typeof INTERNAL_AGENT_NAMES)[number]
+>;
+export const BINDING_AGENT_NAMES = AGENT_NAMES.filter(
+  (name): name is BindingAgentName =>
+    !(INTERNAL_AGENT_NAMES as readonly string[]).includes(name),
+);
 export const ENABLEMENT_TIMEOUT_MS = 30000;
 export const LIST_LIMIT_DEFAULT = 100;
 export const LIST_LIMIT_MAX = 1000;
@@ -152,6 +167,7 @@ export const AgentErrorCode = {
   ChainCooling: "agent.configuration.chain_cooling",
   CooldownNotFound: "agent.cooldown.not_found",
   ModelUnknown: "agent.configuration.model_unknown",
+  ModelPinned: "agent.configuration.model_pinned",
   ReasoningUnsupported: "agent.configuration.reasoning_effort_unsupported",
   CredentialUnsuitable: "agent.configuration.credential_unsuitable",
   CredentialHolderMismatch: "agent.configuration.credential_holder_mismatch",
@@ -283,7 +299,12 @@ export const ToolSource = {
 } as const;
 export type ToolSource = (typeof ToolSource)[keyof typeof ToolSource];
 
-export const GuardClass = { Read: "read", Card: "card" } as const;
+export const GuardClass = {
+  Read: "read",
+  Card: "card",
+  Reversible: "reversible",
+  Judged: "judged",
+} as const;
 export type GuardClass = (typeof GuardClass)[keyof typeof GuardClass];
 
 export const toolDeclarationSchema = z.strictObject({
@@ -474,6 +495,7 @@ export const agentDeclarationSchema = z.strictObject({
   display_name: z.string().min(1),
   configuration_schema: z.record(z.string(), z.unknown()),
   overridable_fields: z.array(z.string()),
+  pinned_model_identifier: z.string().min(1).nullable(),
   prompt: promptAnswerSchema,
   tools: z.array(toolDeclarationSchema),
   enablement: agentEnablementSchema.nullable(),

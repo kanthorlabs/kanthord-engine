@@ -25,8 +25,8 @@ import {
 import { tagSchema } from "../kernel/tag.ts";
 import { SERVER_HOLDER } from "../kernel/holder.ts";
 import {
-  AGENT_NAMES,
-  type AgentName,
+  BINDING_AGENT_NAMES,
+  type BindingAgentName,
   fallbackConfigurationsSchema,
   type HolderScope,
   InstructionFileState,
@@ -267,8 +267,8 @@ export type InstructionFileReason =
 
 export const bindingAgentPromptsSchema = z.strictObject(
   Object.fromEntries(
-    AGENT_NAMES.map((name) => [name, z.string().optional()]),
-  ) as Record<AgentName, z.ZodOptional<z.ZodString>>,
+    BINDING_AGENT_NAMES.map((name) => [name, z.string().optional()]),
+  ) as Record<BindingAgentName, z.ZodOptional<z.ZodString>>,
 );
 export const bindingPromptsSchema = z.strictObject({
   instruction_file: z.string().optional(),

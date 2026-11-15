@@ -11,6 +11,7 @@ import {
   parseCase,
   resolvePlaceholders,
 } from "./case.ts";
+import { GUARD_SUBJECT, loadGuardSuite } from "./guard-run.ts";
 
 const PLATFORM_PLACEHOLDER = "{{native.platform}}";
 const PLACEHOLDER_UNKNOWN = "eval.case.placeholder_unknown";
@@ -170,12 +171,15 @@ test("security: argument guard - an unknown key at the top level, in checks or i
 
 test("security: argument guard - every case file under eval parses with its fixture and asset files", () => {
   assert.ok(existsSync(EVAL_DIRECTORY));
-  const agents = readdirSync(EVAL_DIRECTORY).filter((name) =>
-    statSync(join(EVAL_DIRECTORY, name)).isDirectory(),
+  const agents = readdirSync(EVAL_DIRECTORY).filter(
+    (name) =>
+      name !== GUARD_SUBJECT &&
+      statSync(join(EVAL_DIRECTORY, name)).isDirectory(),
   );
   assert.notEqual(agents.length, NO_ITEMS);
   for (const agent of agents)
     assert.notEqual(loadSuite(agent, []).length, NO_ITEMS);
+  assert.notEqual(loadGuardSuite([]).length, NO_ITEMS);
 });
 
 const SECRET_PATTERN_INDEX = 1;

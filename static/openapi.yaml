@@ -410,6 +410,8 @@ paths:
     $ref: ./openapi/workbench/session.action.report.yaml#/pathItem
   /api/workbench/session/{session_id}/approve:
     $ref: ./openapi/workbench/session.approve.yaml#/pathItem
+  /api/workbench/session/{session_id}/auto-mode:
+    $ref: ./openapi/workbench/session.autoMode.set.yaml#/pathItem
   /api/workbench/session/{session_id}/configuration:
     $ref: ./openapi/workbench/session.configure.yaml#/pathItem
   /api/workbench/session:

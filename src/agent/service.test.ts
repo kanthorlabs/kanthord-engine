@@ -1357,6 +1357,63 @@ test("provider add and remove preserve uniqueness, last provider, default and ex
   assert.deepEqual(remove(spare.name, 2).agent_providers, [provider]);
 });
 
+const GUARD_AGENT = "guard@1";
+const GUARD_MODEL = "claude-sonnet-5";
+
+test("(security: argument guard) enablement put of a pinned agent refuses another model", (t) => {
+  const f = enablementFixture(t);
+  refuses(
+    () => f.invoke("enablement.put", putBody, { agent_name: GUARD_AGENT }),
+    AgentErrorCode.ModelPinned,
+  );
+  const pinned = {
+    ...putBody,
+    default_configuration: { ...defaults, model_identifier: GUARD_MODEL },
+  };
+  refuses(
+    () =>
+      f.invoke(
+        "enablement.put",
+        {
+          ...pinned,
+          fallback_configurations: [
+            { ...defaults, model_identifier: GUARD_MODEL },
+          ],
+        },
+        { agent_name: GUARD_AGENT },
+      ),
+    AgentErrorCode.ModelPinned,
+  );
+  assert.equal(
+    f.invoke("enablement.put", pinned, { agent_name: GUARD_AGENT })
+      .default_configuration.model_identifier,
+    GUARD_MODEL,
+  );
+});
+
+test("(security: argument guard) provider add of a pinned agent refuses a stored model that differs from the pin", (t) => {
+  const f = enablementFixture(t);
+  f.store.transaction((tx) =>
+    insertEnablementRevision(
+      tx,
+      GUARD_AGENT,
+      EnablementState.Enabled,
+      [provider],
+      defaults,
+      [],
+    ),
+  );
+  refuses(
+    () =>
+      f.invoke(
+        ADD_PROVIDER,
+        { ...spare, expected_revision: FIRST_REVISION },
+        { agent_name: GUARD_AGENT },
+      ),
+    AgentErrorCode.ModelPinned,
+  );
+});
+
 test("put rejects duplicate names, duplicate credentials, absent defaults, provider-kind changes, and omitted explicit providers", (t) => {
   let entries: AgentDependentBinding[] = [];
   const f = enablementFixture(t, { entriesOfAgent: () => entries });

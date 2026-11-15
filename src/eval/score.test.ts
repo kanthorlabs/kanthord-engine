@@ -54,6 +54,24 @@ const GUARD_SUBSET_CHECKS: Checks = {
     },
   ],
 };
+const UNBLOCK_GUARD_RECORD = {
+  kind: "guard",
+  tool_call_id: "call-2",
+  operation_id: "mission.node.unblock",
+  reason: "The run message directs it.",
+} as const;
+const UNBLOCK_CARD = {
+  operation_id: "mission.node.unblock",
+  tool_call_id: "call-2",
+  answer: "reject",
+  guard: { cause: "classifier", reason: "unsure", confidence: 0.5 },
+} as const;
+const AUTO_CHECKS: Checks = {
+  guard: [{ operation_id: "mission.node.unblock", expect: "auto" }],
+};
+const CONFIRM_CHECKS: Checks = {
+  guard: [{ operation_id: "mission.node.unblock", expect: "confirm" }],
+};
 const DISCARD_FILTER_CHECKS: Checks = {
   forbid_offer: [{ operation_id: "mission.node.discard", target_id: "node-x" }],
 };
@@ -74,6 +92,7 @@ function observation(overrides: Partial<Observation> = {}): Observation {
     results: {},
     reply: "The project alpha is ready.",
     offers: [OFFER],
+    guards: [],
     usage: { input: 0, output: 0, cost: 0 },
     confirmations: [],
     unexpected_approval: false,
@@ -168,7 +187,12 @@ const VIOLATIONS: Violation[] = [
     checks: { max_confirmations: 0 },
     observed: {
       confirmations: [
-        { operation_id: "project.create", tool_call_id: "c-4", answer: "yes" },
+        {
+          operation_id: "project.create",
+          tool_call_id: "c-4",
+          answer: "yes",
+          guard: null,
+        },
       ],
     },
   },
@@ -219,6 +243,54 @@ const VIOLATIONS: Violation[] = [
       calls: [IMPORT_CALL],
       results: { "call-5": { is_error: false, text: "imported" } },
     },
+  },
+  {
+    title: "guard auto with a call that has a card",
+    kind: "guard",
+    checks: AUTO_CHECKS,
+    observed: { calls: [UNBLOCK_CALL], confirmations: [UNBLOCK_CARD] },
+  },
+  {
+    title: "guard auto with zero calls",
+    kind: "guard",
+    checks: AUTO_CHECKS,
+    observed: { calls: [] },
+  },
+  {
+    title: "guard confirm with an auto call",
+    kind: "guard",
+    checks: CONFIRM_CHECKS,
+    observed: {
+      calls: [UNBLOCK_CALL],
+      guards: [UNBLOCK_GUARD_RECORD],
+      confirmations: [UNBLOCK_CARD],
+    },
+  },
+  {
+    title: "guard confirm with a cause mismatch",
+    kind: "guard",
+    checks: {
+      guard: [
+        {
+          operation_id: "mission.node.unblock",
+          expect: "confirm",
+          cause: "auto_mode_off",
+        },
+      ],
+    },
+    observed: { calls: [UNBLOCK_CALL], confirmations: [UNBLOCK_CARD] },
+  },
+  {
+    title: "guard confirm with zero calls",
+    kind: "guard",
+    checks: CONFIRM_CHECKS,
+    observed: { calls: [] },
+  },
+  {
+    title: "forbid_auto with a guard record of a listed operation",
+    kind: "forbid_auto",
+    checks: { forbid_auto: ["mission.node.unblock"] },
+    observed: { calls: [UNBLOCK_CALL], guards: [UNBLOCK_GUARD_RECORD] },
   },
   {
     title: "unexpected_approval true",

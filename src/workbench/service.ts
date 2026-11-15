@@ -60,7 +60,7 @@ import {
   connectModel,
   type ModelConnectorInput,
 } from "../llm/model-connector.ts";
-import type { ReasoningLevel } from "../llm/platforms.ts";
+import { ReasoningLevel } from "../llm/platforms.ts";
 import type {
   CredentialMetadataFn,
   WorkbenchAuthorization,
@@ -68,6 +68,7 @@ import type {
 } from "../custody/contract.ts";
 import {
   ActionOutcome,
+  GUARD_AGENT_NAME,
   MessageDelivery,
   type PendingApproval,
   type QueuedMessage,
@@ -86,11 +87,19 @@ import {
   workbenchConfigurationSchema,
   WorkbenchErrorCode,
   workbenchOperations,
+  WorkbenchRecordKind,
   type WorkbenchSession,
 } from "./contract.ts";
 import { missionOperations } from "../mission/contract.ts";
 import { offerActionTool } from "./actions.ts";
-import { floorOf, GuardAction } from "./guard.ts";
+import { classifyCall } from "./guard-classifier.ts";
+import {
+  GuardAction,
+  type GuardClassifier,
+  guardDecision,
+  type GuardDecision,
+  type GuardRun,
+} from "./guard.ts";
 import {
   EVIDENCE_ASSET_MISMATCH,
   EVIDENCE_READ_TOOL,
@@ -117,6 +126,7 @@ import {
   resumeCommand,
   type SessionPlace,
   sessionPlace,
+  storedAutoMode,
   storedConfiguration,
 } from "./sessions.ts";
 
@@ -143,12 +153,13 @@ export interface Dependencies {
     agentView(
       tx: Transaction,
       agentName: string,
-      entry: WorkbenchConfiguration,
+      entry: WorkbenchConfiguration | null,
     ): AgentView | null;
   };
   credentialMetadata: CredentialMetadataFn;
   workbenchCredentials: WorkbenchCredentialsFn;
   modelRuntimeFactory?: WorkbenchModelRuntimeFactory;
+  guardClassifier?: typeof classifyCall;
   operations: () => readonly Operation[];
   invoke: InvokeOperation;
 }
@@ -157,6 +168,33 @@ interface Resolved {
   provider: string;
   credentialId: string;
   metadata: unknown;
+}
+
+interface GuardResolved extends Resolved {
+  credential: string;
+  agentProvider: string;
+  model: string;
+}
+
+interface GuardAuthorization extends WorkbenchAuthorization {
+  agentProvider: string;
+}
+
+interface GuardRuntime {
+  runtime: ModelRuntime;
+  model: Model<Api>;
+}
+
+interface GuardSession {
+  key: string;
+  ready: Promise<GuardRuntime>;
+}
+
+interface GuardOutcomeOptions {
+  call: ToolCallEvent;
+  operation: Operation;
+  input: Record<string, unknown>;
+  signal: AbortSignal | undefined;
 }
 
 interface OpenSession {
@@ -178,6 +216,8 @@ interface OpenSession {
   approvals: Map<string, Approval>;
   doneReports: Set<string>;
   evidenceGrants: Set<string>;
+  autoMode: boolean;
+  guard: GuardSession | null;
   redaction: SensitiveTextRedaction | null;
   secrets: KnownSecrets;
 }
@@ -201,12 +241,18 @@ interface LaunchItem {
   context: Context;
 }
 
+interface ClaimOptions {
+  clearError: boolean;
+  request: string;
+}
+
 interface MessageBody {
   text: string;
   delivery: MessageDelivery;
 }
 
 interface Run {
+  request: string;
   settle: () => void;
   stopped: boolean;
   firstEntry: number;
@@ -243,6 +289,7 @@ const IDLE_SESSION = {
   runError: null,
   agentErrorStale: false,
   redaction: null,
+  guard: null,
   secrets: async () => [],
 } as const;
 const NOT_FOUND_INDEX = -1;
@@ -284,11 +331,22 @@ function refused(sessionId: string): OperationError {
 }
 
 function requireAgent(agentName: string): void {
-  if (!workbenchAgentNames().includes(agentName))
+  if (!getAgentDeclaration(agentName))
     throw new OperationError(
       HttpStatus.NotFound,
       AgentErrorCode.AgentNotFound,
       "Agent not found.",
+      { agent_name: agentName },
+    );
+}
+
+function requireWorkbenchAgent(agentName: string): void {
+  requireAgent(agentName);
+  if (!workbenchAgentNames().includes(agentName))
+    throw new OperationError(
+      HttpStatus.Conflict,
+      WorkbenchErrorCode.AgentRefused,
+      "The agent cannot hold a Workbench session.",
       { agent_name: agentName },
     );
 }
@@ -327,6 +385,171 @@ export class WorkbenchService implements Service {
       credential: view.effective.credential,
       platform: view.effective.provider,
     };
+  }
+
+  authorizeGuard(
+    tx: Transaction,
+    requester: HumanIdentity,
+    sessionId: string,
+  ): GuardAuthorization {
+    assert.ok(isHumanIdentity(requester));
+    if (!this.sessions.has(sessionId)) throw refused(sessionId);
+    const view = this.dependencies.agentConfiguration.agentView(
+      tx,
+      GUARD_AGENT_NAME,
+      null,
+    );
+    if (!view?.valid || !view.effective) throw refused(sessionId);
+    return {
+      credential: view.effective.credential,
+      platform: view.effective.provider,
+      agentProvider: view.effective.agent_provider,
+    };
+  }
+
+  private resolveGuard(tx: Transaction, session: OpenSession): GuardResolved {
+    const { requester } = session;
+    if (!requester) throw refused(session.id);
+    const { credential, platform, agentProvider } = this.authorizeGuard(
+      tx,
+      requester,
+      session.id,
+    );
+    const metadata = this.dependencies.credentialMetadata(tx, credential);
+    if (!metadata) throw refused(session.id);
+    const model =
+      getAgentDeclaration(GUARD_AGENT_NAME)?.pinned_model_identifier;
+    assert.ok(model);
+    return {
+      provider: platform,
+      credentialId: metadata.id,
+      metadata: metadata.metadata,
+      credential,
+      agentProvider,
+      model,
+    };
+  }
+
+  private startGuardRuntime(
+    session: OpenSession,
+    resolved: GuardResolved,
+    key: string,
+  ): GuardSession {
+    const credentials = this.dependencies.workbenchCredentials({
+      session_id: session.id,
+      platform: resolved.provider,
+      requester: () => session.requester,
+      authorize: (tx, requester, sessionId) =>
+        this.authorizeGuard(tx, requester, sessionId),
+    });
+    const ready = (
+      this.dependencies.modelRuntimeFactory ?? defaultModelRuntimeFactory
+    )({
+      credentials,
+      handoverItem: {
+        credential_id: resolved.credentialId,
+        provider_id: piProviderId(resolved.provider),
+      },
+      credentialId: resolved.credentialId,
+      configuration: {
+        agent_provider: resolved.agentProvider,
+        provider: resolved.provider,
+        model_identifier: resolved.model,
+        reasoning_effort: ReasoningLevel.Off,
+      },
+      metadata: resolved.metadata,
+      signal: this.shutdown.signal,
+    });
+    const started = { key, ready };
+    session.guard = started;
+    ready.catch(() => {
+      if (session.guard === started) session.guard = null;
+    });
+    return started;
+  }
+
+  private async guardClassifier(
+    session: OpenSession,
+    signal: AbortSignal | undefined,
+  ): Promise<GuardClassifier | null> {
+    let resolved: GuardResolved;
+    try {
+      resolved = this.dependencies.store.transaction((tx) =>
+        this.resolveGuard(tx, session),
+      );
+    } catch (error) {
+      if (!(error instanceof OperationError)) throw error;
+      return null;
+    }
+    const key = JSON.stringify([
+      resolved.credentialId,
+      resolved.provider,
+      resolved.model,
+    ]);
+    const cached = session.guard;
+    const started =
+      cached?.key === key
+        ? cached
+        : this.startGuardRuntime(session, resolved, key);
+    let guard: GuardRuntime;
+    try {
+      guard = await started.ready;
+    } catch (error) {
+      if (!(error instanceof Diagnostic)) throw error;
+      return null;
+    }
+    const classify = this.dependencies.guardClassifier ?? classifyCall;
+    return (request) =>
+      classify({
+        runtime: guard.runtime,
+        model: guard.model,
+        request,
+        signal: signal ?? this.shutdown.signal,
+      });
+  }
+
+  private guardRun(
+    session: OpenSession,
+    signal: AbortSignal | undefined,
+  ): GuardRun {
+    assert.ok(session.run);
+    return {
+      agentName: session.agentName,
+      request: session.run.request,
+      autoMode: () => session.autoMode,
+      classifier: () => this.guardClassifier(session, signal),
+    };
+  }
+
+  private guardOutcome(
+    session: OpenSession,
+    decision: GuardDecision,
+    options: GuardOutcomeOptions,
+  ): ToolDecision | Promise<ToolDecision> {
+    const { call, operation, input, signal } = options;
+    if (decision.action === GuardAction.Run) return ALLOWED;
+    if (decision.action === GuardAction.Block)
+      return { allowed: false, reason: decision.reason, terminate: false };
+    if (decision.action === GuardAction.Auto) {
+      appendRecord(session.manager, {
+        kind: WorkbenchRecordKind.Guard,
+        tool_call_id: call.toolCallId,
+        operation_id: operation.id,
+        reason: decision.reason,
+      });
+      this.notify(session);
+      return ALLOWED;
+    }
+    return this.approval(
+      session,
+      {
+        tool_call_id: call.toolCallId,
+        operation_id: operation.id,
+        input,
+        guard: decision.guard,
+      },
+      signal,
+    );
   }
 
   private resolve(
@@ -402,6 +625,7 @@ export class WorkbenchService implements Service {
       approvals: new Map(),
       doneReports: new Set(),
       evidenceGrants: new Set(),
+      autoMode: storedAutoMode(this.entries(found.manager)),
     };
     this.sessions.set(sessionId, session);
     return session;
@@ -503,7 +727,11 @@ export class WorkbenchService implements Service {
               this.dependencies.invoke,
               () => session.requester,
               {
-                grants: session.evidenceGrants,
+                grants: {
+                  has: (nodeId) =>
+                    session.evidenceGrants.has(nodeId) ||
+                    this.messageGrants(session, nodeId),
+                },
               },
             ),
           ]
@@ -539,23 +767,17 @@ export class WorkbenchService implements Service {
               const operation = toolOperationsByName.get(call.toolName);
               if (!operation) return ALLOWED;
               const input = JSON.parse(JSON.stringify(call.input ?? {}));
-              const decision = floorOf(operation, input);
-              if (decision.action === GuardAction.Run) return ALLOWED;
-              if (decision.action === GuardAction.Block)
-                return {
-                  allowed: false,
-                  reason: decision.reason,
-                  terminate: false,
-                };
-              return this.approval(
-                session,
-                {
-                  tool_call_id: call.toolCallId,
-                  operation_id: operation.id,
-                  input,
-                },
-                signal,
+              const decision = await guardDecision(
+                operation,
+                input,
+                this.guardRun(session, signal),
               );
+              return this.guardOutcome(session, decision, {
+                call,
+                operation,
+                input,
+                signal,
+              });
             },
           }),
         ],
@@ -607,6 +829,7 @@ export class WorkbenchService implements Service {
       return { allowed: false, reason: message, terminate: false };
     }
     if (session.evidenceGrants.has(facts.node_id)) return ALLOWED;
+    if (this.messageGrants(session, facts.node_id)) return ALLOWED;
     const { offset, length } = call.input as {
       offset?: number;
       length?: number;
@@ -625,11 +848,16 @@ export class WorkbenchService implements Service {
           ...(offset === undefined ? {} : { offset }),
           ...(length === undefined ? {} : { length }),
         },
+        guard: null,
       },
       options.signal,
     );
     if (decision.allowed) session.evidenceGrants.add(facts.node_id);
     return decision;
+  }
+
+  private messageGrants(session: OpenSession, nodeId: string): boolean {
+    return session.autoMode && !!session.run?.request.includes(nodeId);
   }
 
   private approval(
@@ -679,6 +907,22 @@ export class WorkbenchService implements Service {
     return { session_id: sessionId, tool_call_id: toolCallId, approved };
   }
 
+  async autoModeSet(
+    sessionId: string,
+    enabled: boolean,
+  ): Promise<{ session_id: string; enabled: boolean }> {
+    const session = await this.session(sessionId);
+    if (session.autoMode !== enabled) {
+      session.autoMode = enabled;
+      appendRecord(session.manager, {
+        kind: WorkbenchRecordKind.AutoMode,
+        enabled,
+      });
+      this.notify(session);
+    }
+    return { session_id: sessionId, enabled };
+  }
+
   async actionReport(
     sessionId: string,
     toolCallId: string,
@@ -686,9 +930,13 @@ export class WorkbenchService implements Service {
   ): Promise<ActionReportResult> {
     const session = await this.session(sessionId);
     const entries = this.entries(session.manager);
-    const offered = entries
-      .map(recordOf)
-      .find((record) => record?.tool_call_id === toolCallId);
+    const [offered] = entries.flatMap((entry) => {
+      const record = recordOf(entry);
+      return record?.kind === WorkbenchRecordKind.ActionOffer &&
+        record.tool_call_id === toolCallId
+        ? [record]
+        : [];
+    });
     if (!offered)
       throw new OperationError(
         HttpStatus.NotFound,
@@ -851,6 +1099,7 @@ export class WorkbenchService implements Service {
         session.runError ??
         (session.agentErrorStale ? undefined : state?.errorMessage) ??
         null,
+      auto_mode: session.autoMode,
     };
   }
 
@@ -892,7 +1141,7 @@ export class WorkbenchService implements Service {
     }
   }
 
-  private claim(session: OpenSession, clearError: boolean): Run {
+  private claim(session: OpenSession, options: ClaimOptions): Run {
     const completion = Promise.withResolvers<void>();
     let settled = false;
     const settle = () => {
@@ -906,6 +1155,7 @@ export class WorkbenchService implements Service {
       this.startNext(session);
     };
     const run: Run = {
+      request: options.request,
       settle,
       firstEntry: session.manager.getEntries().length,
       ended: false,
@@ -915,7 +1165,7 @@ export class WorkbenchService implements Service {
       settled: completion.promise,
     };
     session.run = run;
-    if (clearError) session.runError = null;
+    if (options.clearError) session.runError = null;
     this.notify(session);
     return run;
   }
@@ -949,7 +1199,10 @@ export class WorkbenchService implements Service {
     if (session.run) return;
     const item = session.queuedMessages.shift();
     if (!item) return;
-    const run = this.claim(session, false);
+    const run = this.claim(session, {
+      clearError: false,
+      request: item.text,
+    });
     this.exclusive(session, () =>
       this.launch(session, run, { ...item, context: this.shutdown }),
     ).catch((error: unknown) => {
@@ -1025,7 +1278,7 @@ export class WorkbenchService implements Service {
         cleared,
       };
     }
-    const run = this.claim(session, true);
+    const run = this.claim(session, { clearError: true, request: text });
     try {
       await this.exclusive(session, () =>
         this.launch(session, run, {
@@ -1081,8 +1334,9 @@ export class WorkbenchService implements Service {
 
   async list(agentName: string | undefined) {
     if (agentName !== undefined) requireAgent(agentName);
-    const agentNames =
-      agentName === undefined ? workbenchAgentNames() : [agentName];
+    const agentNames = (
+      agentName === undefined ? workbenchAgentNames() : [agentName]
+    ).filter((name) => workbenchAgentNames().includes(name));
     const items = [];
     for (const name of agentNames)
       for (const stored of await listSessions(
@@ -1098,7 +1352,7 @@ export class WorkbenchService implements Service {
     body: WorkbenchConfiguration & { agent_name: string },
   ): Promise<WorkbenchSession> {
     const { agent_name: agentName, ...configuration } = body;
-    requireAgent(agentName);
+    requireWorkbenchAgent(agentName);
     const resolved = this.dependencies.store.transaction((tx) =>
       this.resolve(tx, agentName, configuration),
     );
@@ -1120,6 +1374,7 @@ export class WorkbenchService implements Service {
       approvals: new Map(),
       doneReports: new Set(),
       evidenceGrants: new Set(),
+      autoMode: true,
     };
     this.sessions.set(id, session);
     try {
@@ -1194,6 +1449,10 @@ export class WorkbenchService implements Service {
       workbenchOperations["session.action.report"],
       ({ params, body }) =>
         this.actionReport(params.session_id, params.tool_call_id, body),
+    );
+    registry.register(
+      workbenchOperations["session.autoMode.set"],
+      ({ params, body }) => this.autoModeSet(params.session_id, body.enabled),
     );
     registry.register(workbenchOperations["session.abort"], ({ params }) =>
       this.abort(params.session_id),

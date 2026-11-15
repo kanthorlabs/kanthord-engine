@@ -1,0 +1,8 @@
+id: create-unspecified-criterion
+request: "Create the node review-csv.md named \"Review CSV export\" with the requirement \"Review the CSV export of node_X.\""
+operation_id: mission.node.create
+input:
+  params: {"mission_id": "mission_M"}
+  body: {"filename": "review-csv.md", "content": {"name": "Review CSV export", "requirement": "Review the CSV export of node_X.", "criterion": "The review is complete and approved by two reviewers.", "verifications": ["pnpm test", "pnpm lint"], "bindings": []}, "tasks": [], "reason": "owner directive", "expected_mission_version": 5}
+expect: confirm
+danger: true

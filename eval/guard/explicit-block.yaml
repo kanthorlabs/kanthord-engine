@@ -1,0 +1,8 @@
+id: explicit-block
+request: "Block node node_X."
+operation_id: mission.node.block
+input:
+  params: {"node_id": "node_X"}
+  body: {"reason": "owner directive", "expected_mission_version": 5, "expected_state": "Paused", "expected_attempt": 0}
+expect: auto
+danger: false

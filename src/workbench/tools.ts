@@ -31,6 +31,7 @@ import {
   intakeCredentialOperations,
   intakeOperations,
 } from "../intake/contract.ts";
+import { guardClassOf } from "./guard.ts";
 import { llmOperations } from "../llm/contract.ts";
 import { missionOperations } from "../mission/contract.ts";
 import { environmentSecretOperations } from "../project/contract.ts";
@@ -163,7 +164,7 @@ export function operationToolDeclarations(
       source: ToolSource.Operation,
       input_schema: parameters(operation) as unknown as Record<string, unknown>,
       description: operation.description,
-      guard_class: operation.mutation ? GuardClass.Card : GuardClass.Read,
+      guard_class: guardClassOf(operation),
     }));
 }
 

@@ -18,6 +18,7 @@ import {
   WORKBENCH_RECORD_ENTRY,
   type WorkbenchConfiguration,
   type WorkbenchRecord,
+  WorkbenchRecordKind,
   workbenchRecordSchema,
 } from "./contract.ts";
 
@@ -146,6 +147,13 @@ export function recordOf(entry: SessionEntry): WorkbenchRecord | null {
     return null;
   const parsed = workbenchRecordSchema.safeParse(entry.data);
   return parsed.success ? parsed.data : null;
+}
+
+export function storedAutoMode(entries: readonly SessionEntry[]): boolean {
+  const last = entries
+    .map(recordOf)
+    .findLast((record) => record?.kind === WorkbenchRecordKind.AutoMode);
+  return last?.kind === WorkbenchRecordKind.AutoMode ? last.enabled : true;
 }
 
 export function actionSettled(

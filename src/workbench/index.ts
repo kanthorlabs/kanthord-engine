@@ -12,3 +12,12 @@ export {
 } from "./tools.ts";
 export { recordOf } from "./sessions.ts";
 export { WorkbenchFootprint } from "./footprint.ts";
+export {
+  ClassifyKind,
+  type ClassifyResult,
+  classifyCall,
+  decide,
+  GUARD_TOOL,
+  guardRequest,
+  GuardTier,
+} from "./guard-classifier.ts";
