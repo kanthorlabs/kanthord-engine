@@ -38,6 +38,7 @@ Every operation can also answer the shared codes of [other.md](other.md#error-co
 | 404   | `workbench.session.queued_message_not_found` | The queued message identity names no queued message of the session.                                                            |
 | 404   | `workbench.session.action_not_found`         | No `action_offer` record of the session holds the `tool_call_id`.                                                              |
 | 409   | `workbench.session.action_settled`           | A `done` result already exists for the `tool_call_id`.                                                                         |
+| 409   | `workbench.session.agent_refused`            | A create names a catalog agent with no operation tool, such as `pe@1` or `guard@1`; details `{ agent_name }`.                  |
 | 409   | `workbench.session.run_active`               | A configure arrives while a run is active.                                                                                     |
 | 409   | `workbench.session.queue_full`               | A message arrives while the queue holds 10 messages.                                                                           |
 | 409   | `workbench.session.configuration_invalid`    | The stored entries of the session hold no readable configuration.                                                              |

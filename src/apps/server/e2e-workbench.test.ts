@@ -496,9 +496,18 @@ test("the workbench lists and opens no pe@1 session", async (t) => {
     listed.items.filter((item) => item.agent_name === peAgent),
     [],
   );
+  assert.deepEqual(
+    completed(
+      await fixture.workbench["session.list"](
+        { params: {}, query: { agent_name: peAgent }, body: null },
+        fixture.options,
+      ),
+    ),
+    { items: [] },
+  );
   failed(
     await fixture.workbench["session.list"](
-      { params: {}, query: { agent_name: peAgent }, body: null },
+      { params: {}, query: { agent_name: "unknown@1" }, body: null },
       fixture.options,
     ),
     HttpStatus.NotFound,
@@ -518,8 +527,29 @@ test("the workbench lists and opens no pe@1 session", async (t) => {
       },
       fixture.options,
     ),
-    HttpStatus.NotFound,
-    "agent.catalog.not_found",
+    HttpStatus.Conflict,
+    WorkbenchErrorCode.AgentRefused,
+  );
+});
+
+test("(security: refused path) workbench.session.create with guard@1 answers a conflict", async (t) => {
+  const fixture = await workbenchFixture(t);
+  failed(
+    await fixture.workbench["session.create"](
+      {
+        params: {},
+        query: {},
+        body: {
+          agent_name: "guard@1",
+          agent_provider: DEFAULT,
+          model_identifier: SONNET,
+          reasoning_effort: OFF,
+        },
+      },
+      fixture.options,
+    ),
+    HttpStatus.Conflict,
+    WorkbenchErrorCode.AgentRefused,
   );
 });
 

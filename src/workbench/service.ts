@@ -284,11 +284,22 @@ function refused(sessionId: string): OperationError {
 }
 
 function requireAgent(agentName: string): void {
-  if (!workbenchAgentNames().includes(agentName))
+  if (!getAgentDeclaration(agentName))
     throw new OperationError(
       HttpStatus.NotFound,
       AgentErrorCode.AgentNotFound,
       "Agent not found.",
+      { agent_name: agentName },
+    );
+}
+
+function requireWorkbenchAgent(agentName: string): void {
+  requireAgent(agentName);
+  if (!workbenchAgentNames().includes(agentName))
+    throw new OperationError(
+      HttpStatus.Conflict,
+      WorkbenchErrorCode.AgentRefused,
+      "The agent cannot hold a Workbench session.",
       { agent_name: agentName },
     );
 }
@@ -1081,8 +1092,9 @@ export class WorkbenchService implements Service {
 
   async list(agentName: string | undefined) {
     if (agentName !== undefined) requireAgent(agentName);
-    const agentNames =
-      agentName === undefined ? workbenchAgentNames() : [agentName];
+    const agentNames = (
+      agentName === undefined ? workbenchAgentNames() : [agentName]
+    ).filter((name) => workbenchAgentNames().includes(name));
     const items = [];
     for (const name of agentNames)
       for (const stored of await listSessions(
@@ -1098,7 +1110,7 @@ export class WorkbenchService implements Service {
     body: WorkbenchConfiguration & { agent_name: string },
   ): Promise<WorkbenchSession> {
     const { agent_name: agentName, ...configuration } = body;
-    requireAgent(agentName);
+    requireWorkbenchAgent(agentName);
     const resolved = this.dependencies.store.transaction((tx) =>
       this.resolve(tx, agentName, configuration),
     );

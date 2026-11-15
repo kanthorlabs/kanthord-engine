@@ -42,6 +42,7 @@ export const WorkbenchErrorCode = {
   QueuedMessageNotFound: "workbench.session.queued_message_not_found",
   ActionNotFound: "workbench.session.action_not_found",
   ActionSettled: "workbench.session.action_settled",
+  AgentRefused: "workbench.session.agent_refused",
 } as const;
 
 export const workbenchConfigurationSchema = z.strictObject({
