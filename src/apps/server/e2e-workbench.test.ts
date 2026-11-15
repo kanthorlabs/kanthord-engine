@@ -35,7 +35,6 @@ import { getAgentDeclaration } from "../../agent/catalog.ts";
 import {
   AGENT_NAMES,
   AgentErrorCode,
-  agentOperations,
   GuardClass,
   PromptOrigin,
   PromptPart,
@@ -50,9 +49,7 @@ import {
   SensitiveRule,
   SESSION_MARKER_PATTERN,
 } from "../../agent/sensitive-text.ts";
-import { scriptedProvider } from "../../agent/test-support.ts";
 import { llmOperations } from "../../llm/contract.ts";
-import { createModelRuntime, resolveModel } from "../../llm/model-connector.ts";
 import {
   ActionOutcome,
   GUARD_AUTO_CONFIDENCE,
@@ -62,57 +59,56 @@ import {
   WORKBENCH_ACTION_RESULT_ENTRY,
   WORKBENCH_CONFIGURATION_ENTRY,
   WORKBENCH_EXPIRY_REASON,
+  WORKBENCH_OPENING_TEXT,
   WORKBENCH_QUEUE_LIMIT,
   WORKBENCH_REJECTION_REASON,
   type WorkbenchConfiguration,
   WorkbenchErrorCode,
   WorkbenchGuardReason,
-  workbenchOperations,
 } from "../../workbench/contract.ts";
-import {
-  toolName,
-  type WorkbenchModelRuntimeFactory,
-} from "../../workbench/index.ts";
+import { toolName } from "../../workbench/index.ts";
 import {
   ImportFormat,
   MissionErrorCode,
   missionOperations,
   NodeState,
 } from "../../mission/contract.ts";
-import { projectOperations } from "../../project/contract.ts";
 import {
+  AGENT,
+  ANTHROPIC,
+  BACKUP,
+  BACKUP_KEY,
+  completed,
   COVERING_WORKER_BINDINGS,
+  DEFAULT,
   fakeS3,
-  gatewayFixture,
+  GUARD_AGENT,
+  GUARD_MODEL,
+  HAIKU,
+  OFF,
+  type Persistence,
+  PRIMARY_KEY,
+  SONNET,
+  SPARE_CREDENTIAL,
+  SPARE_KEY,
+  workbenchHarness,
 } from "./test-support.ts";
 import { type SeededNode, seedEvidence } from "./evidence-test-support.ts";
 import { framing, PromptConsumer } from "../../agent/prompt-render.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 
-const AGENT = "swe@1";
+const identity = testHumanIdentity("kanthord", "Ulrich", "workbench-test");
+const { workbenchFixture } = workbenchHarness(identity);
 const REVIEW_AGENT = "re@1";
 const OPS = "ops@1";
-const GUARD_AGENT = "guard@1";
-const GUARD_MODEL = "claude-sonnet-5";
-const ANTHROPIC = "anthropic";
-const DEFAULT = "default";
-const BACKUP = "backup";
-const SONNET = "claude-sonnet-4-5";
-const HAIKU = "claude-haiku-4-5";
-const OFF = "off" as const;
 const LOW = "low" as const;
-const PRIMARY_CREDENTIAL = "anthro-1";
-const BACKUP_CREDENTIAL = "anthro-2";
-const SPARE_CREDENTIAL = "anthro-3";
-const PRIMARY_KEY = "primary-scripted-key";
-const BACKUP_KEY = "backup-scripted-key";
-const SPARE_KEY = "spare-scripted-key";
 const CustomType = "custom";
 const ModelChange = "model_change";
 const ThinkingChange = "thinking_level_change";
 const SINGLE = 1;
 const NO_QUEUED_MESSAGES = 0;
 const NO_UNKEPT = 0;
+const GREETING_PREFIX = "Hi, I am ";
 const HOST_HOME = "/home/kanthord_host";
 const MESSAGE_ENTRY = "message";
 const SYSTEM_ROLE = "system";
@@ -122,17 +118,6 @@ const OVERRIDE_TEXT = "Answer in one sentence.";
 const QUESTION = "How many objectives are open?";
 const ANSWER = "Two objectives are open.";
 const FIRST_MESSAGE = "List the open objectives.";
-const identity = testHumanIdentity("kanthord", "Ulrich", "workbench-test");
-
-function completed<T>(result: OperationResult<T>): T {
-  assert.equal(
-    result.type,
-    OperationResultType.Completed,
-    JSON.stringify(result),
-  );
-  assert.ok(result.type === OperationResultType.Completed);
-  return result.data;
-}
 
 function failed<T>(
   result: OperationResult<T>,
@@ -147,154 +132,6 @@ function failed<T>(
   assert.ok(result.type === OperationResultType.Failure);
   assert.equal(result.status, status);
   assert.equal(result.error.error.code, code);
-}
-
-function scriptedFactory(
-  script: FauxResponseStep[],
-  beforeOpen?: () => Promise<void>,
-): {
-  factory: WorkbenchModelRuntimeFactory;
-  provider: ReturnType<typeof scriptedProvider>;
-  configurations: WorkbenchConfiguration[];
-} {
-  const configurations: WorkbenchConfiguration[] = [];
-  const provider = scriptedProvider(script, {
-    providerId: ANTHROPIC,
-    modelIdentifier: SONNET,
-    models: [
-      { id: SONNET, reasoning: false },
-      { id: HAIKU, reasoning: true },
-      { id: GUARD_MODEL, reasoning: false },
-    ],
-  });
-  return {
-    provider,
-    configurations,
-    factory: async (input) => {
-      await beforeOpen?.();
-      configurations.push(input.configuration);
-      const runtime = await createModelRuntime(await loadPi(), input);
-      runtime.registerNativeProvider(provider.provider);
-      return { runtime, model: resolveModel(runtime, input.configuration) };
-    },
-  };
-}
-
-interface Persistence {
-  path: string;
-  masterKey: string;
-  resumed: boolean;
-}
-
-async function workbenchFixture(
-  t: TestContext,
-  script: FauxResponseStep[] = [],
-  stateDirectory?: string,
-  agentDirectory = temporary(t),
-  enabledAgents: readonly string[] = [AGENT],
-  beforeOpen?: () => Promise<void>,
-  persistence?: Persistence,
-) {
-  const scripted = scriptedFactory(script, beforeOpen);
-  const fixture = await gatewayFixture(t, {
-    stateDirectory,
-    agentDirectory,
-    workbenchModelRuntimeFactory: scripted.factory,
-    repositoryConnector: { gitLsRemote: async () => {} },
-    ...(persistence
-      ? { path: persistence.path, masterKey: persistence.masterKey }
-      : {}),
-  });
-  const options = { identity };
-  const llm = directClient(llmOperations, fixture.invocation);
-  if (persistence?.resumed)
-    return workbenchClients(
-      fixture,
-      scripted.provider,
-      scripted.configurations,
-      options,
-    );
-  for (const [name, key] of [
-    [PRIMARY_CREDENTIAL, PRIMARY_KEY],
-    [BACKUP_CREDENTIAL, BACKUP_KEY],
-    [SPARE_CREDENTIAL, SPARE_KEY],
-  ] as const)
-    completed(
-      await llm.create(
-        {
-          params: {},
-          query: {},
-          body: { name, platform: ANTHROPIC, metadata: null, secret: { key } },
-        },
-        options,
-      ),
-    );
-  const agent = directClient(agentOperations, fixture.invocation);
-  for (const agentName of enabledAgents)
-    completed(
-      await agent["enablement.put"](
-        {
-          params: { agent_name: agentName },
-          query: {},
-          body: {
-            agent_providers:
-              agentName === GUARD_AGENT
-                ? [
-                    {
-                      name: DEFAULT,
-                      provider: ANTHROPIC,
-                      credential: SPARE_CREDENTIAL,
-                    },
-                  ]
-                : [
-                    {
-                      name: DEFAULT,
-                      provider: ANTHROPIC,
-                      credential: PRIMARY_CREDENTIAL,
-                    },
-                    {
-                      name: BACKUP,
-                      provider: ANTHROPIC,
-                      credential: BACKUP_CREDENTIAL,
-                    },
-                  ],
-            default_configuration: {
-              agent_provider: DEFAULT,
-              model_identifier:
-                agentName === GUARD_AGENT ? GUARD_MODEL : SONNET,
-              reasoning_effort: OFF,
-            },
-            fallback_configurations: [],
-          },
-        },
-        options,
-      ),
-    );
-  return workbenchClients(
-    fixture,
-    scripted.provider,
-    scripted.configurations,
-    options,
-  );
-}
-
-function workbenchClients(
-  fixture: Awaited<ReturnType<typeof gatewayFixture>>,
-  provider: ReturnType<typeof scriptedProvider>,
-  configurations: readonly WorkbenchConfiguration[],
-  options: { identity: typeof identity },
-) {
-  return {
-    ...fixture,
-    provider,
-    configurations,
-    options,
-    agent: directClient(agentOperations, fixture.invocation),
-    projects: directClient(projectOperations, fixture.invocation),
-    missions: directClient(missionOperations, fixture.invocation),
-    workbenchService: fixture.workbench,
-    workbench: directClient(workbenchOperations, fixture.invocation),
-  };
 }
 
 async function createSession(
@@ -856,6 +693,10 @@ function texts(entries: readonly Entry[], role: string): string[] {
         : (message.content as { type: string; text?: string }[])
             .map((block) => block.text ?? "")
             .join(""),
+    )
+    .filter(
+      (text) =>
+        text !== WORKBENCH_OPENING_TEXT && !text.startsWith(GREETING_PREFIX),
     );
 }
 
@@ -4528,5 +4369,11 @@ test("(invariant guard: data loss) a guard record between a tool call and its re
   const roles = (agentCalls(fixture)[SINGLE]!.messages as { role: string }[])
     .map(({ role }) => role)
     .filter((role) => role !== SYSTEM_ROLE);
-  assert.deepEqual(roles, [USER_ROLE, ASSISTANT_ROLE, TOOL_RESULT]);
+  assert.deepEqual(roles, [
+    USER_ROLE,
+    ASSISTANT_ROLE,
+    USER_ROLE,
+    ASSISTANT_ROLE,
+    TOOL_RESULT,
+  ]);
 });

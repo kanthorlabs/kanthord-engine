@@ -1,5 +1,6 @@
 import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
+import { rmSync } from "node:fs";
 import { homedir } from "node:os";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { Logger } from "pino";
@@ -38,7 +39,11 @@ import {
   workbenchAgentNames,
   WorkbenchTool,
 } from "../agent/catalog.ts";
-import { AgentErrorCode, type AgentView } from "../agent/contract.ts";
+import {
+  AgentErrorCode,
+  type AgentView,
+  PromptTemplate,
+} from "../agent/contract.ts";
 import { openSession, withDeadline } from "../agent/agent-session.ts";
 import {
   credentialSecrets,
@@ -56,6 +61,7 @@ import {
 import { loadPi } from "../agent/pi.ts";
 import type { PromptPartAnswer, PromptTemplates } from "../agent/contract.ts";
 import { PromptConsumer, systemPrompt } from "../agent/prompt-render.ts";
+import { renderTemplate } from "../agent/prompt-templates.ts";
 import {
   connectModel,
   type ModelConnectorInput,
@@ -116,12 +122,14 @@ import {
 } from "./tools.ts";
 import {
   actionSettled,
+  appendOpening,
   appendRecord,
   createSession,
   findSession,
   lastModel,
   lastThinkingLevel,
   listSessions,
+  openingIds,
   recordOf,
   resumeCommand,
   type SessionPlace,
@@ -178,6 +186,14 @@ interface GuardResolved extends Resolved {
 
 interface GuardAuthorization extends WorkbenchAuthorization {
   agentProvider: string;
+}
+
+interface BuiltRuntime {
+  provider: string;
+  runtime: ModelRuntime;
+  model: Model<Api>;
+  credentials: ReturnType<Dependencies["workbenchCredentials"]>;
+  lifetime: CancellationContext;
 }
 
 interface GuardRuntime {
@@ -631,20 +647,37 @@ export class WorkbenchService implements Service {
     return session;
   }
 
+  private async greeting(
+    session: OpenSession,
+    context: Context,
+  ): Promise<string> {
+    const declaration = getAgentDeclaration(session.agentName);
+    assert.ok(declaration);
+    return renderTemplate(
+      await this.dependencies.agentPrompt.templates(context),
+      PromptTemplate.Greeting,
+      {
+        display_name: declaration.display_name,
+        model: session.configuration.model_identifier,
+      },
+    );
+  }
+
+  private title(session: OpenSession, text: string): void {
+    if (session.manager.getSessionName() === undefined)
+      session.manager.appendSessionInfo(text);
+  }
+
   private entries(manager: SessionManager): SessionEntry[] {
     return JSON.parse(JSON.stringify(manager.getEntries())) as SessionEntry[];
   }
 
-  private async openAgent(
+  private async buildRuntime(
     session: OpenSession,
     resolved: Resolved,
     context: Context,
-  ): Promise<void> {
-    assert.equal(session.agent, null);
-    const declaration = getAgentDeclaration(session.agentName);
-    assert.ok(declaration);
+  ): Promise<BuiltRuntime> {
     const lifetime = new CancellationContext(this.shutdown);
-    let agent: AgentSession | undefined;
     try {
       const credentials = this.dependencies.workbenchCredentials({
         session_id: session.id,
@@ -681,6 +714,30 @@ export class WorkbenchService implements Service {
           { session_id: session.id },
         );
       });
+      return {
+        provider: resolved.provider,
+        runtime,
+        model,
+        credentials,
+        lifetime,
+      };
+    } catch (error) {
+      lifetime.cancel();
+      throw error;
+    }
+  }
+
+  private async openAgent(
+    session: OpenSession,
+    built: BuiltRuntime,
+    context: Context,
+  ): Promise<void> {
+    assert.equal(session.agent, null);
+    const declaration = getAgentDeclaration(session.agentName);
+    assert.ok(declaration);
+    const { provider, runtime, model, credentials, lifetime } = built;
+    let agent: AgentSession | undefined;
+    try {
       const hostHome = this.dependencies.hostHome ?? homedir();
       const parts = await this.dependencies.agentPrompt.compose(
         session.agentName,
@@ -736,10 +793,7 @@ export class WorkbenchService implements Service {
             ),
           ]
         : [];
-      session.secrets = credentialSecrets(
-        credentials,
-        piProviderId(resolved.provider),
-      );
+      session.secrets = credentialSecrets(credentials, piProviderId(provider));
       const opened = await openSession({
         cwd: session.place.cwd,
         modelRuntime: runtime,
@@ -1032,14 +1086,16 @@ export class WorkbenchService implements Service {
   }
 
   private view(session: OpenSession): WorkbenchSession {
-    const entries = this.entries(session.manager);
+    const all = this.entries(session.manager);
+    const [internal] = openingIds(all);
+    const entries = (
+      this.runActive(session) ? all.slice(0, session.run!.firstEntry) : all
+    ).filter((entry) => entry.id !== internal);
     return {
       id: session.id,
       agent_name: session.agentName,
       configuration: { ...session.configuration },
-      entries: this.runActive(session)
-        ? entries.slice(0, session.run!.firstEntry)
-        : entries,
+      entries,
       run_active: this.runActive(session),
       resume_command: resumeCommand(
         session.manager,
@@ -1180,7 +1236,10 @@ export class WorkbenchService implements Service {
     const resolved = this.dependencies.store.transaction((tx) =>
       this.resolve(tx, session.agentName, session.configuration),
     );
-    if (!session.agent) await this.openAgent(session, resolved, item.context);
+    if (!session.agent) {
+      const built = await this.buildRuntime(session, resolved, item.context);
+      await this.openAgent(session, built, item.context);
+    }
     assert.ok(session.agent);
     void session.agent
       .prompt(item.text, { expandPromptTemplates: false })
@@ -1260,6 +1319,7 @@ export class WorkbenchService implements Service {
     const requester = humanOf(caller);
     const active = session.run;
     if (active) {
+      this.title(session, text);
       const cleared =
         delivery === MessageDelivery.Replace ? this.clearQueue(session) : [];
       const queued = this.enqueue(session, text, requester);
@@ -1291,6 +1351,7 @@ export class WorkbenchService implements Service {
       run.settle();
       throw error;
     }
+    this.title(session, text);
     return {
       session_id: sessionId,
       run_active: true,
@@ -1377,12 +1438,21 @@ export class WorkbenchService implements Service {
       autoMode: true,
     };
     this.sessions.set(id, session);
+    let built: BuiltRuntime | undefined;
     try {
-      await this.openAgent(session, resolved, caller.context);
+      built = await this.buildRuntime(session, resolved, caller.context);
       this.syncEntries(session, piProviderId(resolved.provider));
+      appendOpening(session.manager, {
+        model: built.model,
+        greeting: await this.greeting(session, caller.context),
+      });
+      await this.openAgent(session, built, caller.context);
     } catch (error) {
+      built?.lifetime.cancel();
       this.closeAgent(session);
       this.sessions.delete(id);
+      const file = session.manager.getSessionFile();
+      if (file) rmSync(file, { force: true });
       throw error;
     }
     return this.view(session);
@@ -1409,7 +1479,12 @@ export class WorkbenchService implements Service {
       this.closeAgent(session);
       session.configuration = configuration;
       try {
-        await this.openAgent(session, resolved, caller.context);
+        const built = await this.buildRuntime(
+          session,
+          resolved,
+          caller.context,
+        );
+        await this.openAgent(session, built, caller.context);
       } catch (error) {
         session.configuration = previous;
         throw error;
