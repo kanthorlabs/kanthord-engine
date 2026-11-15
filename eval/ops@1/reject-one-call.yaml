@@ -30,11 +30,11 @@ turns:
 checks:
   expect_calls:
     - operation_id: mission.node.unblock
-      input: { params: { node_id: "{{p.node.node-x.md}}" } }
-      count: 1
-    - operation_id: mission.node.unblock
       input: { params: { node_id: "{{p.node.node-y.md}}" } }
       count: 1
+  guard:
+    - operation_id: mission.node.unblock
+      expect: auto
   max_confirmations: 1
   final_state:
     - operation_id: mission.node.get
