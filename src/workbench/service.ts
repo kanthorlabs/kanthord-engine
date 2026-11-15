@@ -148,7 +148,7 @@ export interface Dependencies {
     validateEntry(
       tx: Transaction,
       agentName: string,
-      entry: WorkbenchConfiguration,
+      entry: WorkbenchConfiguration | null,
     ): void;
     agentView(
       tx: Transaction,
