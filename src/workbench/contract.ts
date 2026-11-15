@@ -120,6 +120,26 @@ export const workbenchSessionSchema = z.strictObject({
 });
 export type WorkbenchSession = z.infer<typeof workbenchSessionSchema>;
 
+export const GUARD_AGENT_NAME = "guard@1";
+export const GUARD_MAX_TOKENS = 1024;
+export const GUARD_TIMEOUT_MS = 10000;
+export const GUARD_AUTO_CONFIDENCE = 0.9;
+export const GUARD_REQUEST_MAX_BYTES = 16384;
+export const GUARD_TEXT_KEEP_CHARS = 64;
+export const GUARD_REASON_MAX_CHARS = 300;
+export const GUARD_TOOL_NAME = "guard_verdict";
+
+export const GuardCause = {
+  Import: "import",
+  AutoModeOff: "auto_mode_off",
+  Reversible: "reversible",
+  Unavailable: "unavailable",
+  Oversize: "oversize",
+  NoVerdict: "no_verdict",
+  Classifier: "classifier",
+} as const;
+export type GuardCause = (typeof GuardCause)[keyof typeof GuardCause];
+
 export const WORKBENCH_REJECTION_REASON = "The human rejected the call.";
 
 export const WorkbenchGuardReason = {
