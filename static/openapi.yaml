@@ -418,6 +418,8 @@ paths:
     $ref: ./openapi/workbench/session.create.yaml#/pathItem
   /api/workbench/session/{session_id}/events:
     $ref: ./openapi/workbench/session.events.yaml#/pathItem
+  /api/workbench/session/{session_id}/fork:
+    $ref: ./openapi/workbench/session.fork.yaml#/pathItem
   /api/workbench/session/{session_id}:
     $ref: ./openapi/workbench/session.get.yaml#/pathItem
   /api/workbench/session/{session_id}/message:

@@ -39,7 +39,7 @@ const IMPORT_CONFIRM = {
   action: "confirm",
   guard: { cause: "import", reason: null, confidence: null },
 };
-const HUMAN_ONLY_COUNT = 89;
+const HUMAN_ONLY_COUNT = 90;
 const HUMAN_ONLY_CODE = "workbench.guard.human_only";
 const IMPORT_FORMAT_CODE = "workbench.guard.import_format";
 const HUMAN_ONLY_TEXT =
@@ -151,7 +151,7 @@ test("the guard block reasons and texts are exact", () => {
   assert.equal(WORKBENCH_IMPORT_FORMAT_TEXT, FORMAT_TEXT);
 });
 
-test("the human-only set holds 89 ids and keeps mission.proposal.decide out", () => {
+test("the human-only set holds 90 ids and keeps mission.proposal.decide out", () => {
   assert.equal(HUMAN_ONLY_OPERATIONS.size, HUMAN_ONLY_COUNT);
   assert.ok(
     !HUMAN_ONLY_OPERATIONS.has(missionOperations["proposal.decide"].id),

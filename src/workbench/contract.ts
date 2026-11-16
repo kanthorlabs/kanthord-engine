@@ -30,6 +30,7 @@ export const WORKBENCH_FORK_FRAME =
 export const WORKBENCH_FORK_ACK =
   "I read the summary of the earlier conversation.";
 export const FORK_SOURCE_TITLE_MAX_CHARS = 120;
+const NO_CHARACTERS = 0;
 export const FORK_TIMEOUT_MS = 90000;
 export const FORK_SUMMARY_TIMEOUT_MS = 60000;
 export const FORK_SOURCE_MAX_BYTES = 65536;
@@ -58,6 +59,8 @@ export const WorkbenchErrorCode = {
   ActionSettled: "workbench.session.action_settled",
   AgentRefused: "workbench.session.agent_refused",
   NotHost: "workbench.session.not_host",
+  SummaryFailed: "workbench.fork.summary_failed",
+  SummaryRefused: "workbench.fork.summary_refused",
 } as const;
 
 export const workbenchConfigurationSchema = z.strictObject({
@@ -96,6 +99,7 @@ export const GuardSummaryCause = {
   Timeout: "timeout",
   NoVerdict: "no_verdict",
   Oversize: "oversize",
+  Unavailable: "unavailable",
 } as const;
 export type GuardSummaryCause =
   (typeof GuardSummaryCause)[keyof typeof GuardSummaryCause];
@@ -331,6 +335,32 @@ export const workbenchOperations = {
     output: workbenchSessionSchema,
     description:
       "Get the configuration, the entries of the completed runs and the run state of a workbench session.",
+  },
+  "session.fork": {
+    ...workbenchMutation,
+    id: "workbench.session.fork",
+    method: HttpMethod.Post,
+    path: "/api/workbench/session/:session_id/fork",
+    status: HttpStatus.Accepted,
+    timeoutMs: FORK_TIMEOUT_MS,
+    input: z.strictObject({
+      params: sessionParams,
+      query: emptyFields,
+      body: z
+        .strictObject({ text: z.string().min(1) })
+        .refine(
+          ({ text }) =>
+            text.trim().length > NO_CHARACTERS &&
+            Buffer.byteLength(text) <= FORK_TEXT_MAX_BYTES,
+          {
+            path: ["text"],
+            message: `The text holds one nonblank character and at most ${FORK_TEXT_MAX_BYTES} bytes.`,
+          },
+        ),
+    }),
+    output: sessionParams.extend({ run_active: z.literal(true) }),
+    description:
+      "Fork a workbench conversation into a new conversation. The server summarizes the source, guard@1 checks the summary, and only after a pass does the server write the fork and start the first run on `text`. Error `workbench.fork.summary_refused` answers `cause` and `reason`. `reason` is null except for cause `refused`.",
   },
   "session.configure": {
     ...workbenchMutation,

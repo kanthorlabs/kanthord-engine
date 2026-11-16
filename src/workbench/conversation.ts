@@ -9,8 +9,19 @@ import {
   renderTemplate,
   SHIPPED_TEMPLATES,
 } from "../agent/prompt-templates.ts";
-import type { MemberEntry, SessionEntry } from "./contract.ts";
-import { openingIds, OpeningKind } from "./sessions.ts";
+import {
+  FORK_SOURCE_MAX_BYTES,
+  type MemberEntry,
+  type SessionEntry,
+  WORKBENCH_ACTION_RESULT_ENTRY,
+  WorkbenchRecordKind,
+} from "./contract.ts";
+import {
+  forkSummaryOf,
+  openingIds,
+  OpeningKind,
+  recordOf,
+} from "./sessions.ts";
 import type { Dependencies } from "./service.ts";
 
 const MENTION_PREFIX = "@";
@@ -238,6 +249,157 @@ export function relayText(
   )
     items.shift();
   return items.length > NO_CHARACTERS ? content() : null;
+}
+
+const CUSTOM_MESSAGE_ENTRY = "custom_message";
+const FORK_SUMMARY_LABEL = "Summary of an earlier conversation:\n";
+const REPLACEMENT_CHARACTERS = /\uFFFD+$/;
+const NO_TEXT = "";
+
+export interface ForkConversation {
+  members: readonly RelayMember[];
+  authorName: string;
+}
+
+const ForkItemKind = {
+  Summary: "summary",
+  Human: "human",
+  Other: "other",
+} as const;
+type ForkItemKind = (typeof ForkItemKind)[keyof typeof ForkItemKind];
+
+interface ForkItem extends RelayItem {
+  kind: ForkItemKind;
+}
+
+function isActionResult(entry: SessionEntry): boolean {
+  return (
+    entry.type === CUSTOM_MESSAGE_ENTRY &&
+    entry.customType === WORKBENCH_ACTION_RESULT_ENTRY
+  );
+}
+
+function settledCards(members: readonly RelayMember[]): Set<string> {
+  const settled = new Set<string>();
+  for (const { entries } of members)
+    for (const entry of entries) {
+      const details = entry.details as { tool_call_id?: unknown } | undefined;
+      if (isActionResult(entry) && isString(details?.tool_call_id))
+        settled.add(details.tool_call_id);
+    }
+  return settled;
+}
+
+function cardLineOf(
+  entry: SessionEntry,
+  settled: ReadonlySet<string>,
+): string | null {
+  const record = recordOf(entry);
+  if (
+    record?.kind !== WorkbenchRecordKind.ActionOffer ||
+    settled.has(record.tool_call_id)
+  )
+    return null;
+  return `Open action card: ${record.operation_id} on ${record.target_id}. The owner has not run it.`;
+}
+
+interface ForkContext {
+  authorName: string;
+  settled: ReadonlySet<string>;
+}
+
+interface ForkLine {
+  kind: ForkItemKind;
+  text: string;
+}
+
+function messageLineOf(
+  author: RelayMember,
+  entry: SessionEntry,
+  authorName: string,
+): ForkLine | null {
+  const message = entry.message as
+    { role?: unknown; content?: unknown } | undefined;
+  const human = entry.type === MESSAGE_ENTRY && message?.role === USER_ROLE;
+  const summary = human ? forkSummaryOf(textOf(message?.content)) : null;
+  if (summary !== null)
+    return {
+      kind: ForkItemKind.Summary,
+      text: `${FORK_SUMMARY_LABEL}${summary}`,
+    };
+  const text = relayItemOf(author, entry, authorName);
+  if (text === null) return null;
+  return { kind: human ? ForkItemKind.Human : ForkItemKind.Other, text };
+}
+
+function forkItemOf(
+  author: RelayMember,
+  entry: SessionEntry,
+  context: ForkContext,
+): ForkLine | null {
+  if (isActionResult(entry)) {
+    const text = textOf(entry.content);
+    return text.length === NO_CHARACTERS
+      ? null
+      : { kind: ForkItemKind.Other, text };
+  }
+  const card = cardLineOf(entry, context.settled);
+  if (card !== null) return { kind: ForkItemKind.Other, text: card };
+  return messageLineOf(author, entry, context.authorName);
+}
+
+function forkItems(conversation: ForkConversation): ForkItem[] {
+  const settled = settledCards(conversation.members);
+  const items: ForkItem[] = [];
+  for (const author of conversation.members) {
+    const { hidden } = openingIds(author.entries);
+    for (const entry of author.entries) {
+      if (hidden.has(entry.id)) continue;
+      const item = forkItemOf(author, entry, {
+        authorName: conversation.authorName,
+        settled,
+      });
+      if (item !== null)
+        items.push({ ...item, at: Date.parse(entry.timestamp) });
+    }
+  }
+  return items.sort((left, right) => left.at - right.at);
+}
+
+function clippedToBytes(text: string, maxBytes: number): string {
+  const bytes = Buffer.from(text, BYTES_ENCODING);
+  if (bytes.length <= maxBytes) return text;
+  return bytes
+    .subarray(NO_CHARACTERS, maxBytes)
+    .toString(BYTES_ENCODING)
+    .replace(REPLACEMENT_CHARACTERS, NO_TEXT);
+}
+
+export function forkMaterial(conversation: ForkConversation): string {
+  const items = forkItems(conversation);
+  const summary = items.find(({ kind }) => kind === ForkItemKind.Summary);
+  const first = items.find(({ kind }) => kind === ForkItemKind.Human);
+  const pinned = [summary, first].flatMap((item) => (item ? [item.text] : []));
+  const rest = items
+    .filter((item) => item !== summary && item !== first)
+    .map(({ text }) => text);
+  const kept = [...rest];
+  const content = () => {
+    const omitted = rest.length - kept.length;
+    return [
+      ...pinned,
+      ...(omitted > NO_CHARACTERS
+        ? [`${omitted} earlier messages are not shown.`]
+        : []),
+      ...kept,
+    ].join(ITEM_SEPARATOR);
+  };
+  while (
+    kept.length > NO_CHARACTERS &&
+    Buffer.byteLength(content(), BYTES_ENCODING) > FORK_SOURCE_MAX_BYTES
+  )
+    kept.shift();
+  return clippedToBytes(content(), FORK_SOURCE_MAX_BYTES);
 }
 
 export interface MergeMember {

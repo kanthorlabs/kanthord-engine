@@ -76,6 +76,7 @@ export const HUMAN_ONLY_OPERATIONS: ReadonlySet<string> = new Set([
   workbenchOperations["session.message"].id,
   workbenchOperations["session.create"].id,
   workbenchOperations["session.configure"].id,
+  workbenchOperations["session.fork"].id,
   workbenchOperations["session.abort"].id,
   workbenchOperations["session.queue.remove"].id,
   workbenchOperations["session.action.report"].id,

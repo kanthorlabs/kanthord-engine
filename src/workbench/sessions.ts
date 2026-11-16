@@ -13,6 +13,7 @@ import { workbenchAgentNames } from "../agent/catalog.ts";
 import { loadPi, PI_DIRECTORY_NAME } from "../agent/pi.ts";
 import {
   ActionOutcome,
+  FORK_SOURCE_TITLE_MAX_CHARS,
   type SessionEntry,
   WORKBENCH_ACTION_RESULT_ENTRY,
   WORKBENCH_CONFIGURATION_ENTRY,
@@ -67,6 +68,8 @@ export type OpeningKind = (typeof OpeningKind)[keyof typeof OpeningKind];
 const sessionIdSchema = identitySchema(WORKBENCH_SESSION_PREFIX);
 const FORK_ID_END = ".";
 const NO_TEXT = "";
+const NO_CHARACTERS = 0;
+const TITLE_MAX_CHARS = FORK_SOURCE_TITLE_MAX_CHARS;
 
 export function hostIdOf(path: string): string {
   const name = basename(path, SESSION_FILE_EXTENSION);
@@ -121,6 +124,13 @@ export function forkSourceId(text: string): string | null {
 
 export function isForkOpening(text: string): boolean {
   return forkSourceId(text) !== null;
+}
+
+export function forkSummaryOf(text: string): string | null {
+  const id = forkSourceId(text);
+  if (id === null) return null;
+  const head = `${WORKBENCH_FORK_PREFIX}${id}.${WORKBENCH_FORK_FRAME}`;
+  return text.startsWith(head) ? text.slice(head.length) : null;
 }
 
 export async function listSessions(place: SessionPlace, agentName: string) {
@@ -244,6 +254,19 @@ function firstUserText(messages: readonly SessionEntry[]): string | null {
     isString(content[0].text)
     ? content[0].text
     : null;
+}
+
+export function forkSourceTitle(
+  entries: readonly SessionEntry[],
+  name: string | undefined,
+): string {
+  if (name !== undefined) return name.slice(NO_CHARACTERS, TITLE_MAX_CHARS);
+  const messages = messagesOf(entries);
+  const text = firstUserText(messages);
+  const opened = openingKindOf(text) !== null;
+  return opened || text === null
+    ? NO_TEXT
+    : text.slice(NO_CHARACTERS, TITLE_MAX_CHARS);
 }
 
 export function forkedFrom(entries: readonly SessionEntry[]): string | null {
