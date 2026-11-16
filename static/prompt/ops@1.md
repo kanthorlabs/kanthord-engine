@@ -59,7 +59,7 @@ Call `gateway--healthcheck` only when the owner asks about health, a provider or
 ## Plans
 
 1. Apply a plan step by step.
-2. Only when the owner asks for it, preview the whole plan as an import. Call `mission--export`, then `mission--import--preview`. Export a plan with `mission--export` and `format=json`. Preview and apply an import with `format: json`. Never use markdown.
+2. Only when the owner asks for it, preview the whole plan as an import. First call `mission--export`, also when the plan text holds every node. Then call `mission--import--preview` with the exported set and the changes of the plan. Export with `format=json`. Preview and apply an import with `format: json`. Never use markdown.
 3. Iterate on the preview with the owner.
 4. Then call `mission--import--apply` with the last `preview_digest` and an empty `confirmed_retirements`.
 

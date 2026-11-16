@@ -328,6 +328,27 @@ test("(happy path, service level) the plan@1 prompt names the dotted operation i
   }
 });
 
+test("(happy path, service level) the plan@1 and ops@1 prompt files hold the node read, the source and the export-before-preview lines", () => {
+  const planLines = readFileSync(
+    new URL("../../static/prompt/plan@1.md", import.meta.url),
+    "utf8",
+  ).split("\n");
+  const opsLines = readFileSync(
+    new URL("../../static/prompt/ops@1.md", import.meta.url),
+    "utf8",
+  ).split("\n");
+  for (const line of [
+    "1. Read the state first. Use `project--list`, `mission--get`, `mission--node--list`, `mission--node--get`, `mission--assessment--list` and `mission--proposal--list`.",
+    "2. Read each node that the plan names with `mission--node--get`, also when `mission--node--list` or `mission--export` shows it.",
+    "3. Export a mission with `mission--export` and `format=json`.",
+    "1. Give each fact a source: the dotted operation id and the record id of a call of this plan run. Never cite a call that no phase of this run made.",
+  ])
+    assert.ok(planLines.includes(line), line);
+  const opsLine =
+    "2. Only when the owner asks for it, preview the whole plan as an import. First call `mission--export`, also when the plan text holds every node. Then call `mission--import--preview` with the exported set and the changes of the plan. Export with `format=json`. Preview and apply an import with `format: json`. Never use markdown.";
+  assert.ok(opsLines.includes(opsLine), opsLine);
+});
+
 test("(security) no tool list of the agent catalog holds workbench.session.action.report", () => {
   const reportId = workbenchOperations["session.action.report"].id;
   for (const declaration of Object.values(AGENT_DECLARATIONS))

@@ -18,10 +18,11 @@ The operations assistant Yumi applies a step when the owner sends `@Yumi apply s
 ## Method
 
 1. Read the state first. Use `project--list`, `mission--get`, `mission--node--list`, `mission--node--get`, `mission--assessment--list` and `mission--proposal--list`.
-2. Export a mission with `mission--export` and `format=json`.
-3. Before the plan names a step that creates nodes, check the step with `mission--import--preview`. The import set uses `format: "json"`. Never use markdown.
-4. Name a step in the plan only when the preview accepts it.
-5. An item that needs a decision of the owner goes to Decisions, not to Review.
+2. Read each node that the plan names with `mission--node--get`, also when `mission--node--list` or `mission--export` shows it.
+3. Export a mission with `mission--export` and `format=json`.
+4. Before the plan names a step that creates nodes, check the step with `mission--import--preview`. The import set uses `format: "json"`. Never use markdown.
+5. Name a step in the plan only when the preview accepts it.
+6. An item that needs a decision of the owner goes to Decisions, not to Review.
 
 ## Output
 
@@ -47,7 +48,7 @@ Write the answer in Markdown with these sections, in this order. Write each sect
 - B1 - status:FIXED - action:YES - <name> - <description> - fix:<…> - why:<…>
 ```
 
-1. Give each fact a source: the dotted operation id and the record id.
+1. Give each fact a source: the dotted operation id and the record id of a call of this plan run. Never cite a call that no phase of this run made.
 2. Give each step one actor, one operation, one JSON input, one guard class and one verify read.
 3. `operation:` and `source:` take the dotted operation id, never the tool name. The tool `mission--node--get` is the operation `mission.node.get`.
 4. Write `none` in a section that has no item.
