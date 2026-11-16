@@ -1907,6 +1907,36 @@ test("(security) the eleventh queued message answers 409 queue_full", async (t) 
   );
 });
 
+test("(security) a refused queued message leaves the session title unchanged", async (t) => {
+  const fixture = await workbenchFixture(t, [untilAbort(ANSWER)]);
+  const session = await createSession(fixture);
+  const sessionId = session.id;
+  completed(await message(fixture, sessionId, QUESTION));
+  for (let count = 0; count < WORKBENCH_QUEUE_LIMIT; count++)
+    await queuedId(fixture, sessionId, `${FIRST_QUEUED} ${count}`);
+  const { manager } = (
+    fixture.workbenchService as unknown as {
+      sessions: Map<
+        string,
+        {
+          manager: {
+            appendSessionInfo(name: string): void;
+            getSessionName(): string | undefined;
+          };
+        }
+      >;
+    }
+  ).sessions.get(sessionId)!;
+  manager.appendSessionInfo("");
+  assert.equal(manager.getSessionName(), undefined);
+  failed(
+    await message(fixture, sessionId, SECOND_QUEUED),
+    HttpStatus.Conflict,
+    WorkbenchErrorCode.QueueFull,
+  );
+  assert.equal(manager.getSessionName(), undefined);
+});
+
 test("(security) a configure during a run answers 409 run_active", async (t) => {
   const fixture = await workbenchFixture(t, [untilAbort(ANSWER)]);
   const session = await createSession(fixture);

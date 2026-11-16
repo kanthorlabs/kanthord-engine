@@ -109,3 +109,34 @@ test("invariant: a merge with equal timestamps keeps every entry in member order
     ],
   );
 });
+
+test("invariant: a clock that steps back keeps the file order of one member and repeats no entry across two cursor reads", () => {
+  const hostEntries = [stamped("h1", 5), stamped("h2", 3)];
+  const guestEntries = [stamped("g1", 4)];
+  const host = { sessionId: "host", agentName: "ops@1" };
+  const guest = { sessionId: "guest", agentName: "re@1" };
+  const ids = (entries: ReturnType<typeof mergeEntries>) =>
+    entries.map(({ id }) => id);
+  const first = mergeEntries([
+    { ...host, entries: hostEntries.slice(FIRST_ITEM, 1) },
+    { ...guest, entries: [] },
+  ]);
+  const second = mergeEntries(
+    [
+      { ...host, entries: hostEntries },
+      { ...guest, entries: guestEntries },
+    ],
+    new Map([["host", "h1"]]),
+  );
+  assert.deepEqual(ids(first), ["h1"]);
+  assert.deepEqual(ids(second), ["h2", "g1"]);
+  assert.deepEqual(
+    ids(
+      mergeEntries([
+        { ...host, entries: hostEntries },
+        { ...guest, entries: guestEntries },
+      ]),
+    ),
+    ["g1", "h1", "h2"],
+  );
+});

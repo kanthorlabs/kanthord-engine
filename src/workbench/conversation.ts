@@ -246,13 +246,6 @@ export interface MergeMember {
   entries: readonly SessionEntry[];
 }
 
-interface Placed {
-  entry: MemberEntry;
-  at: number;
-  member: number;
-  position: number;
-}
-
 export function parseCursor(
   after: string | undefined,
   hostId: string,
@@ -275,30 +268,40 @@ export function mergeEntries(
   members: readonly MergeMember[],
   after: ReadonlyMap<string, string> = new Map(),
 ): MemberEntry[] {
-  const placed: Placed[] = [];
-  members.forEach(({ sessionId, agentName, entries }, member) => {
+  const queues = members.map(({ sessionId, agentName, entries }) => {
     const [internal] = openingIds(entries);
     const cursor = after.get(sessionId);
     const start =
       cursor === undefined
         ? NO_CHARACTERS
         : entries.findIndex((entry) => entry.id === cursor) + FIRST_AFTER;
-    entries.forEach((entry, position) => {
-      if (position < start || entry.id === internal) return;
-      placed.push({
-        entry: { ...entry, session_id: sessionId, agent_name: agentName },
-        at: Date.parse(entry.timestamp),
-        member,
-        position,
-      });
-    });
+    return entries
+      .slice(start)
+      .filter((entry) => entry.id !== internal)
+      .map((entry): MemberEntry => ({
+        ...entry,
+        session_id: sessionId,
+        agent_name: agentName,
+      }));
   });
-  return placed
-    .sort(
-      (left, right) =>
-        left.at - right.at ||
-        left.member - right.member ||
-        left.position - right.position,
-    )
-    .map(({ entry }) => entry);
+  const heads = queues.map(() => NO_CHARACTERS);
+  const total = queues.reduce(
+    (sum, queue) => sum + queue.length,
+    NO_CHARACTERS,
+  );
+  const merged: MemberEntry[] = [];
+  while (merged.length < total) {
+    let next = NOT_FOUND;
+    let earliest = Number.POSITIVE_INFINITY;
+    for (const [member, queue] of queues.entries()) {
+      const head = queue[heads[member]!];
+      if (head === undefined) continue;
+      const at = Date.parse(head.timestamp);
+      if (next !== NOT_FOUND && at >= earliest) continue;
+      earliest = at;
+      next = member;
+    }
+    merged.push(queues[next]![heads[next]!++]!);
+  }
+  return merged;
 }

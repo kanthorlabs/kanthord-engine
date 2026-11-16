@@ -19,6 +19,7 @@ import {
 import { testHumanIdentity } from "../../kernel/test-identity.ts";
 import { isString } from "../../kernel/values.ts";
 import { WorkbenchErrorCode } from "../../workbench/contract.ts";
+import { toolName } from "../../workbench/index.ts";
 import { type SeededNode, seedEvidence } from "./evidence-test-support.ts";
 import {
   AGENT,
@@ -50,6 +51,7 @@ const MENTION_REQUEST = "@RE summarize the open objectives.";
 const FOLLOW_UP = "And what else?";
 const EVIDENCE_READ = "evidence_read";
 const EVIDENCE_TEXT = "alpha evidence text";
+const NODE_GET_OPERATION = "mission.node.get";
 const DOWNLOAD_OPERATION = "mission.evidence.asset.content.download";
 const MESSAGE_ENTRY = "message";
 const USER_ROLE = "user";
@@ -466,6 +468,45 @@ test(
       .map(({ arguments: [, requester] }) => requester.jti)
       .filter((jti, index, all) => jti !== all[index - SINGLE]);
     assert.deepEqual(requesters, [identity.jti, SECOND_HUMAN.jti]);
+  },
+);
+
+test(
+  "(security, authorization) a participant operation tool call runs with the requester of the run",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, host, nodeId } = await evidenceMembers(t, (target) => [
+      () =>
+        toolCall(toolName(NODE_GET_OPERATION), {
+          params: { node_id: target.nodes[0]!.nodeId },
+        }),
+      fauxAssistantMessage(ANSWER),
+    ]);
+    const service = fixture.workbenchService as unknown as {
+      dependencies: { invoke: unknown };
+    };
+    const invoke = t.mock.method(
+      service.dependencies,
+      "invoke" as never,
+    ) as unknown as {
+      mock: {
+        calls: {
+          arguments: [{ id: string }, unknown, { identity?: unknown }];
+        }[];
+      };
+    };
+    completed(
+      await sendMessage(fixture, host.id, `@RE Review ${nodeId}`, {
+        identity: SECOND_HUMAN,
+      }),
+    );
+    await untilIdle(fixture, host.id, t.signal);
+    const identities = invoke.mock.calls
+      .filter(
+        ({ arguments: [operation] }) => operation.id === NODE_GET_OPERATION,
+      )
+      .map(({ arguments: [, , options] }) => options.identity);
+    assert.deepEqual(identities, [SECOND_HUMAN]);
   },
 );
 

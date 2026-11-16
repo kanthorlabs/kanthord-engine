@@ -1614,10 +1614,10 @@ export class WorkbenchService implements Service {
       const mention = this.dependencies.store.transaction((tx) =>
         resolveMention(tx, text, this.dependencies),
       );
-      this.title(session, text);
       const cleared =
         delivery === MessageDelivery.Replace ? this.clearQueue(session) : [];
       const queued = this.enqueue(session, { text, requester }, mention);
+      this.title(session, text);
       if (delivery === MessageDelivery.Replace)
         this.exclusive(session, () => this.stopRun(session, active)).catch(
           (error: unknown) => {
