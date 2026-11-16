@@ -29,6 +29,7 @@ export const AGENT_NAMES = [
   "re@1",
   "pe@1",
   "ops@1",
+  "plan@1",
   "guard@1",
 ] as const;
 export type AgentName = (typeof AGENT_NAMES)[number];
@@ -142,6 +143,8 @@ export const PromptTemplate = {
   Conflict: "conflict",
   Greeting: "greeting",
   Relay: "relay",
+  PlanDraft: "plan-draft",
+  PlanReview: "plan-review",
 } as const;
 export type PromptTemplate =
   (typeof PromptTemplate)[keyof typeof PromptTemplate];

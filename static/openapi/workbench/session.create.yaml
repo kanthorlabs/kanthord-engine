@@ -214,6 +214,11 @@ components:
                 type: string
               agent_name:
                 type: string
+              phase:
+                type: string
+                enum:
+                  - planner
+                  - reviewer
             required:
               - type
               - id

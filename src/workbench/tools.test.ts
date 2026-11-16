@@ -308,6 +308,26 @@ test("(security) each action card id is one human mutation without stream or sec
   }
 });
 
+test("(security: authorization) plan@1 lists no mutation", () => {
+  const byId = new Map(
+    OPERATION_UNION.map((operation) => [operation.id, operation]),
+  );
+  const mutations = AGENT_DECLARATIONS["plan@1"].tools.operation.filter(
+    (id) => byId.get(id)?.mutation,
+  );
+  assert.deepEqual(mutations, []);
+});
+
+test("(happy path, service level) the plan@1 prompt names the dotted operation id with the tool name example in the Facts and Plan lines", () => {
+  const example =
+    "the tool `mission--node--get` is the operation `mission.node.get`";
+  const lines = AGENT_DECLARATIONS["plan@1"].agent_prompt.split("\n");
+  for (const marker of ["- F1 - ", "1. <step> - "]) {
+    const line = lines.find((entry) => entry.startsWith(marker));
+    assert.ok(line?.includes(example), marker);
+  }
+});
+
 test("(security) no tool list of the agent catalog holds workbench.session.action.report", () => {
   const reportId = workbenchOperations["session.action.report"].id;
   for (const declaration of Object.values(AGENT_DECLARATIONS))

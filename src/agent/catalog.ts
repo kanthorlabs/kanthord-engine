@@ -9,6 +9,7 @@ import {
   GUARD_PROMPT,
   OPS_AGENT_PROMPT,
   PE_AGENT_PROMPT,
+  PLAN_AGENT_PROMPT,
   RE_AGENT_PROMPT,
   SWE_AGENT_PROMPT,
 } from "./prompt-assets.ts";
@@ -115,6 +116,17 @@ const OPS_OPERATIONS = [
   "mission.import.apply",
 ] as const;
 
+const PLAN_OPERATIONS = [
+  "project.list",
+  "mission.get",
+  "mission.node.list",
+  "mission.node.get",
+  "mission.export",
+  "mission.import.preview",
+  "mission.assessment.list",
+  "mission.proposal.list",
+] as const;
+
 const SHIPPED_DECLARATIONS: Readonly<Record<AgentName, AgentDeclaration>> = {
   "swe@1": {
     agent_name: "swe@1",
@@ -188,6 +200,23 @@ const SHIPPED_DECLARATIONS: Readonly<Record<AgentName, AgentDeclaration>> = {
       builtin: [],
       host: [],
       operation: OPS_OPERATIONS,
+      workbench: [],
+    },
+    overridable_fields: [
+      "agent_provider",
+      "model_identifier",
+      "reasoning_effort",
+      "fallback_configurations",
+    ],
+  },
+  "plan@1": {
+    agent_name: "plan@1",
+    display_name: "Jeremy",
+    agent_prompt: PLAN_AGENT_PROMPT,
+    tools: {
+      builtin: [],
+      host: [],
+      operation: PLAN_OPERATIONS,
       workbench: [],
     },
     overridable_fields: [

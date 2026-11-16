@@ -1,0 +1,36 @@
+{
+  "entries": [
+    {
+      "filename": "node-x.md",
+      "intent": "implement",
+      "name": "Export report",
+      "requirement": "Export report as specified.",
+      "criterion": "It works.",
+      "verifications": [
+        "true"
+      ],
+      "bindings": [
+        "repo"
+      ],
+      "tags": [],
+      "depends_on": []
+    },
+    {
+      "filename": "node-y.md",
+      "intent": "implement",
+      "name": "Publish report",
+      "requirement": "Publish report as specified.",
+      "criterion": "Publish report works.",
+      "verifications": [
+        "pnpm test"
+      ],
+      "bindings": [
+        "repo"
+      ],
+      "tags": [],
+      "depends_on": [
+        "node-x.md"
+      ]
+    }
+  ]
+}

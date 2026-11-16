@@ -1,0 +1,25 @@
+id: import-batch-after-review
+agents: [plan@1]
+fixtures:
+  p: one.json
+turns:
+  - human: "@Jeremy plan one new implement node named \"Audit log\" with the filename node-n.md, the requirement \"Write the audit log.\", the criterion \"The audit log works.\", the verification pnpm test and the binding repo. It depends on node {{p.node.node-x.md}}."
+  - human: "@Yumi apply the whole plan as one import."
+    approvals:
+      mission.import.apply: approve
+checks:
+  expect_calls:
+    - operation_id: mission.export
+    - operation_id: mission.import.preview
+    - operation_id: mission.import.apply
+      input: { body: { confirmed_retirements: [] } }
+  forbid_auto:
+    - mission.import.apply
+  max_confirmations: 1
+  final_state:
+    - operation_id: mission.node.list
+      input: { params: { mission_id: "{{p.mission_id}}" }, query: {}, body: null }
+      expect:
+        items:
+          - { content: { name: Audit log } }
+          - { content: { name: Export report } }

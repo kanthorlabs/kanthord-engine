@@ -10,7 +10,8 @@ import {
   type WorkbenchRecord,
   WorkbenchRecordKind,
 } from "../workbench/contract.ts";
-import { recordOf, toolName } from "../workbench/index.ts";
+import { planOf, recordOf, toolName } from "../workbench/index.ts";
+import { type OperationLookup, planContractFailures } from "./plan-contract.ts";
 
 const NEWLINE = "\n";
 const GuardExpect = {
@@ -21,6 +22,7 @@ const GuardExpect = {
 const BlockType = { Text: "text", ToolCall: "toolCall" } as const;
 const Role = { Assistant: "assistant", ToolResult: "toolResult" } as const;
 const NO_FAILURES = 0;
+const LAST = -1;
 const MINIMUM_MATCHES = 1;
 const PASSED_DETAIL = "";
 const FAILURE_SEPARATOR = "; ";
@@ -133,7 +135,7 @@ export function observationOf(
     if (message.role === Role.Assistant) {
       const assistant = assistantMessageSchema.parse(message);
       calls.push(...callsOf(assistant.content));
-      replies.push(...textsOf(assistant.content));
+      if (!isString(entry.phase)) replies.push(...textsOf(assistant.content));
       usage.input += assistant.usage.input;
       usage.output += assistant.usage.output;
       usage.cost += assistant.usage.cost.total;
@@ -154,10 +156,11 @@ export function observationOf(
     const record = recordOf(entry);
     return record?.kind === WorkbenchRecordKind.Guard ? [record] : [];
   });
+  const plan = entries.flatMap((entry) => planOf(entry) ?? []).at(LAST);
   return {
     calls,
     results,
-    reply: replies.join(NEWLINE),
+    reply: plan ? plan.text : replies.join(NEWLINE),
     offers,
     guards,
     usage,
@@ -269,6 +272,7 @@ export const checksSchema = z.strictObject({
   forbid_auto: forbidAutoSchema.optional(),
   summary_contains: summaryContainsSchema.optional(),
   summary_forbids: summaryForbidsSchema.optional(),
+  plan_contract: z.literal(true).optional(),
 });
 export type Checks = z.infer<typeof checksSchema>;
 
@@ -593,10 +597,13 @@ function resultOf(kind: string, failures: readonly string[]): CheckResult {
   };
 }
 
+const NO_OPERATION: OperationLookup = () => undefined;
+
 export async function scoreRun(
   checks: Checks,
   observation: Observation,
   read: ReadOperation,
+  lookup: OperationLookup = NO_OPERATION,
 ): Promise<RunScore> {
   const results: CheckResult[] = [];
   const { calls, offers } = observation;
@@ -680,6 +687,13 @@ export async function scoreRun(
       resultOf(
         "summary_forbids",
         summaryForbids(checks.summary_forbids, observation.summary),
+      ),
+    );
+  if (checks.plan_contract)
+    results.push(
+      resultOf(
+        "plan_contract",
+        planContractFailures(observation.reply, observation.calls, lookup),
       ),
     );
   results.push(
