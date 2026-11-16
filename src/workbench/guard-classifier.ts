@@ -54,11 +54,15 @@ export const GUARD_TOOL: Tool = {
   constrainedSampling: { type: "json_schema", strict: "require" },
 };
 
+const cutReasonSchema = z
+  .string()
+  .transform((reason) => reason.slice(NO_CHARS, GUARD_REASON_MAX_CHARS));
+
 export const guardVerdictSchema = z.strictObject({
   tier: z.enum(GuardTier),
   confidence: z.number().min(0).max(1),
   request_quote: z.string(),
-  reason: z.string().max(GUARD_REASON_MAX_CHARS),
+  reason: cutReasonSchema,
 });
 export type GuardVerdict = z.infer<typeof guardVerdictSchema>;
 
@@ -86,7 +90,7 @@ export const GUARD_SUMMARY_TOOL: Tool = {
 
 export const guardSummaryVerdictSchema = z.strictObject({
   verdict: z.enum(SummaryVerdict),
-  reason: z.string().max(GUARD_REASON_MAX_CHARS),
+  reason: cutReasonSchema,
   confidence: z.number().min(0).max(1),
 });
 export type GuardSummaryVerdict = z.infer<typeof guardSummaryVerdictSchema>;

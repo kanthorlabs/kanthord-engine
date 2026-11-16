@@ -8,20 +8,26 @@ import {
   type Model,
 } from "@earendil-works/pi-ai";
 import {
+  checkSummary,
   classifyCall,
   decide,
   type GuardCall,
   guardRequest,
+  GuardTier,
   type GuardVerdict,
   redactForeignText,
+  SummaryVerdict,
 } from "./guard-classifier.ts";
 import {
   GUARD_AUTO_CONFIDENCE,
+  GUARD_REASON_MAX_CHARS,
   GUARD_REQUEST_MAX_BYTES,
+  GUARD_SUMMARY_TOOL_NAME,
   GUARD_TEXT_KEEP_CHARS,
   GUARD_TIMEOUT_MS,
   GUARD_TOOL_NAME,
   GuardCause,
+  GuardSummaryCause,
 } from "./contract.ts";
 
 const AGENT = "ops@1";
@@ -174,5 +180,44 @@ test("(security: redaction) a long string that the run message lacks becomes a p
     node_id: NODE_ID,
     short: "ok",
     count: 3,
+  });
+});
+
+const LONG_REASON_CHARS = 400;
+
+test("(invariant: data loss) a call verdict with a 400-character reason gives its verdict with a cut reason", async () => {
+  const { result } = classify(
+    answer(verdict({ reason: "r".repeat(LONG_REASON_CHARS) })),
+  );
+  const checked = await result;
+  assert.ok(checked.kind === VERDICT_KIND);
+  assert.equal(checked.verdict.tier, GuardTier.Auto);
+  assert.equal(checked.verdict.reason, "r".repeat(GUARD_REASON_MAX_CHARS));
+});
+
+test("(invariant: data loss) a summary verdict with a 400-character reason gives its verdict with a cut reason", async () => {
+  const run = scripted(async () =>
+    fauxAssistantMessage(
+      [
+        fauxToolCall(GUARD_SUMMARY_TOOL_NAME, {
+          verdict: SummaryVerdict.Refuse,
+          reason: "r".repeat(LONG_REASON_CHARS),
+          confidence: 1,
+        }),
+      ],
+      { stopReason: "toolUse" },
+    ),
+  );
+  const decision = await checkSummary({
+    runtime: run.runtime,
+    model,
+    instruction: "Continue.",
+    summary: "A summary.",
+    signal: new AbortController().signal,
+  });
+  assert.deepEqual(decision, {
+    decision: SummaryVerdict.Refuse,
+    cause: GuardSummaryCause.Refused,
+    reason: "r".repeat(GUARD_REASON_MAX_CHARS),
   });
 });

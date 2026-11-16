@@ -277,14 +277,16 @@ export function forkedFrom(entries: readonly SessionEntry[]): string | null {
 export function openingIds(entries: readonly SessionEntry[]): {
   kind: OpeningKind | null;
   hidden: Set<string>;
+  forkEntry: string | null;
 } {
   const messages = messagesOf(entries);
   const kind = openingKindOf(firstUserText(messages));
   const ids = messages
     .slice(0, OPENING_ENTRY_COUNT)
     .map((entry) => entry.id as string);
-  if (kind === OpeningKind.Fork) return { kind, hidden: new Set(ids.slice(1)) };
-  return { kind, hidden: new Set(kind === null ? [] : ids) };
+  if (kind === OpeningKind.Fork)
+    return { kind, hidden: new Set(ids.slice(1)), forkEntry: ids[0] ?? null };
+  return { kind, hidden: new Set(kind === null ? [] : ids), forkEntry: null };
 }
 
 function openingKindOf(text: string | null): OpeningKind | null {

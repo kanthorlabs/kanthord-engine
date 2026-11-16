@@ -33,6 +33,7 @@ const MESSAGE_ENTRY = "message";
 const ASSISTANT_ROLE = "assistant";
 const FINAL_STOP_REASON = "stop";
 const NO_CHARACTERS = 0;
+const HOST_INDEX = 0;
 const NOT_FOUND = -1;
 const FIRST_AFTER = 1;
 const PAIR_SEPARATOR = ",";
@@ -214,11 +215,19 @@ interface RelayItems {
   items: string[];
 }
 
-function summaryOfEntry(entry: SessionEntry): string | null {
+function forkEntryOf(members: readonly RelayMember[]): string | null {
+  const host = members[HOST_INDEX];
+  return host === undefined ? null : openingIds(host.entries).forkEntry;
+}
+
+function summaryOfEntry(
+  entry: SessionEntry,
+  forkEntry: string | null,
+): string | null {
   const message = entry.message as
     { role?: unknown; content?: unknown } | undefined;
-  return entry.type === MESSAGE_ENTRY && message?.role === USER_ROLE
-    ? forkSummaryOf(textOf(message.content))
+  return entry.id === forkEntry && entry.type === MESSAGE_ENTRY
+    ? forkSummaryOf(textOf(message?.content))
     : null;
 }
 
@@ -227,14 +236,19 @@ interface RelayLine {
   text: string;
 }
 
+interface LineContext {
+  authorName: string;
+  forkEntry: string | null;
+}
+
 function relayLineOf(
   author: RelayMember,
   entry: SessionEntry,
-  authorName: string,
+  context: LineContext,
 ): RelayLine | null {
-  const summary = summaryOfEntry(entry);
+  const summary = summaryOfEntry(entry, context.forkEntry);
   if (summary !== null) return { summary: true, text: summary };
-  const text = relayItemOf(author, entry, authorName);
+  const text = relayItemOf(author, entry, context.authorName);
   return text === null ? null : { summary: false, text };
 }
 
@@ -248,13 +262,17 @@ function relayItems(member: RelayMember, input: RelayInput): RelayItems {
   const since = relaySince(member, input);
   const items: RelayItem[] = [];
   const summaries: RelayItem[] = [];
+  const context = {
+    authorName: input.authorName,
+    forkEntry: forkEntryOf(input.members),
+  };
   for (const author of input.members) {
     if (author.id === member.id) continue;
     const opening = openingIds(author.entries);
     for (const entry of author.entries) {
       const at = Date.parse(entry.timestamp);
       if (opening.hidden.has(entry.id) || !(at > since)) continue;
-      const line = relayLineOf(author, entry, input.authorName);
+      const line = relayLineOf(author, entry, context);
       if (line === null) continue;
       (line.summary ? summaries : items).push({ at, text: line.text });
     }
@@ -344,8 +362,7 @@ function cardLineOf(
   return `Open action card: ${record.operation_id} on ${record.target_id}. The owner has not run it.`;
 }
 
-interface ForkContext {
-  authorName: string;
+interface ForkContext extends LineContext {
   settled: ReadonlySet<string>;
 }
 
@@ -357,18 +374,18 @@ interface ForkLine {
 function messageLineOf(
   author: RelayMember,
   entry: SessionEntry,
-  authorName: string,
+  context: LineContext,
 ): ForkLine | null {
   const message = entry.message as
     { role?: unknown; content?: unknown } | undefined;
   const human = entry.type === MESSAGE_ENTRY && message?.role === USER_ROLE;
-  const summary = human ? forkSummaryOf(textOf(message?.content)) : null;
+  const summary = summaryOfEntry(entry, context.forkEntry);
   if (summary !== null)
     return {
       kind: ForkItemKind.Summary,
       text: `${FORK_SUMMARY_LABEL}${summary}`,
     };
-  const text = relayItemOf(author, entry, authorName);
+  const text = relayItemOf(author, entry, context.authorName);
   if (text === null) return null;
   return { kind: human ? ForkItemKind.Human : ForkItemKind.Other, text };
 }
@@ -386,11 +403,12 @@ function forkItemOf(
   }
   const card = cardLineOf(entry, context.settled);
   if (card !== null) return { kind: ForkItemKind.Other, text: card };
-  return messageLineOf(author, entry, context.authorName);
+  return messageLineOf(author, entry, context);
 }
 
 function forkItems(conversation: ForkConversation): ForkItem[] {
   const settled = settledCards(conversation.members);
+  const forkEntry = forkEntryOf(conversation.members);
   const items: ForkItem[] = [];
   for (const author of conversation.members) {
     const { hidden } = openingIds(author.entries);
@@ -398,6 +416,7 @@ function forkItems(conversation: ForkConversation): ForkItem[] {
       if (hidden.has(entry.id)) continue;
       const item = forkItemOf(author, entry, {
         authorName: conversation.authorName,
+        forkEntry,
         settled,
       });
       if (item !== null)
