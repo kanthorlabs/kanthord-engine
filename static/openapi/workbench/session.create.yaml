@@ -179,6 +179,22 @@ components:
             - model_identifier
             - reasoning_effort
           additionalProperties: false
+        members:
+          type: array
+          items:
+            type: object
+            properties:
+              session_id:
+                type: string
+              agent_name:
+                type: string
+              display_name:
+                type: string
+            required:
+              - session_id
+              - agent_name
+              - display_name
+            additionalProperties: false
         entries:
           type: array
           items:
@@ -194,11 +210,17 @@ components:
                   - type: "null"
               timestamp:
                 type: string
+              session_id:
+                type: string
+              agent_name:
+                type: string
             required:
               - type
               - id
               - parentId
               - timestamp
+              - session_id
+              - agent_name
             additionalProperties: {}
         run_active:
           type: boolean
@@ -208,6 +230,7 @@ components:
         - id
         - agent_name
         - configuration
+        - members
         - entries
         - run_active
         - resume_command
@@ -244,6 +267,8 @@ components:
               id:
                 type: string
               agent_name:
+                type: string
+              display_name:
                 type: string
               name:
                 anyOf:
@@ -284,9 +309,77 @@ components:
                       - operation_id
                     additionalProperties: false
                   - type: "null"
+              participants:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    agent_name:
+                      type: string
+                    display_name:
+                      type: string
+                    name:
+                      anyOf:
+                        - type: string
+                        - type: "null"
+                    created:
+                      type: integer
+                      minimum: -9007199254740991
+                      maximum: 9007199254740991
+                      description: Unix epoch time in milliseconds.
+                    modified:
+                      type: integer
+                      minimum: -9007199254740991
+                      maximum: 9007199254740991
+                      description: Unix epoch time in milliseconds.
+                    message_count:
+                      type: integer
+                      minimum: 0
+                      maximum: 9007199254740991
+                    first_message:
+                      type: string
+                    host_session_id:
+                      anyOf:
+                        - type: string
+                        - type: "null"
+                    run_active:
+                      type: boolean
+                    pending_approval:
+                      anyOf:
+                        - type: object
+                          properties:
+                            tool_call_id:
+                              type: string
+                            operation_id:
+                              type: string
+                          required:
+                            - tool_call_id
+                            - operation_id
+                          additionalProperties: false
+                        - type: "null"
+                    participants:
+                      type: array
+                      prefixItems: []
+                  required:
+                    - id
+                    - agent_name
+                    - display_name
+                    - name
+                    - created
+                    - modified
+                    - message_count
+                    - first_message
+                    - host_session_id
+                    - run_active
+                    - pending_approval
+                    - participants
+                  additionalProperties: false
             required:
               - id
               - agent_name
+              - display_name
               - name
               - created
               - modified
@@ -295,6 +388,7 @@ components:
               - host_session_id
               - run_active
               - pending_approval
+              - participants
             additionalProperties: false
       required:
         - items

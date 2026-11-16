@@ -9,7 +9,7 @@ import {
   renderTemplate,
   SHIPPED_TEMPLATES,
 } from "../agent/prompt-templates.ts";
-import type { SessionEntry } from "./contract.ts";
+import type { MemberEntry, SessionEntry } from "./contract.ts";
 import { openingIds } from "./sessions.ts";
 import type { Dependencies } from "./service.ts";
 
@@ -22,6 +22,10 @@ const MESSAGE_ENTRY = "message";
 const ASSISTANT_ROLE = "assistant";
 const FINAL_STOP_REASON = "stop";
 const NO_CHARACTERS = 0;
+const NOT_FOUND = -1;
+const FIRST_AFTER = 1;
+const PAIR_SEPARATOR = ",";
+const PAIR_DELIMITER = ":";
 const USER_ROLE = "user";
 const TEXT_BLOCK = "text";
 const ITEM_SEPARATOR = "\n\n";
@@ -234,4 +238,67 @@ export function relayText(
   )
     items.shift();
   return items.length > NO_CHARACTERS ? content() : null;
+}
+
+export interface MergeMember {
+  sessionId: string;
+  agentName: string;
+  entries: readonly SessionEntry[];
+}
+
+interface Placed {
+  entry: MemberEntry;
+  at: number;
+  member: number;
+  position: number;
+}
+
+export function parseCursor(
+  after: string | undefined,
+  hostId: string,
+): Map<string, string> {
+  const cursor = new Map<string, string>();
+  if (after === undefined) return cursor;
+  for (const pair of after.split(PAIR_SEPARATOR)) {
+    const split = pair.indexOf(PAIR_DELIMITER);
+    if (split === NOT_FOUND) cursor.set(hostId, pair);
+    else
+      cursor.set(
+        pair.slice(NO_CHARACTERS, split),
+        pair.slice(split + PAIR_DELIMITER.length),
+      );
+  }
+  return cursor;
+}
+
+export function mergeEntries(
+  members: readonly MergeMember[],
+  after: ReadonlyMap<string, string> = new Map(),
+): MemberEntry[] {
+  const placed: Placed[] = [];
+  members.forEach(({ sessionId, agentName, entries }, member) => {
+    const [internal] = openingIds(entries);
+    const cursor = after.get(sessionId);
+    const start =
+      cursor === undefined
+        ? NO_CHARACTERS
+        : entries.findIndex((entry) => entry.id === cursor) + FIRST_AFTER;
+    entries.forEach((entry, position) => {
+      if (position < start || entry.id === internal) return;
+      placed.push({
+        entry: { ...entry, session_id: sessionId, agent_name: agentName },
+        at: Date.parse(entry.timestamp),
+        member,
+        position,
+      });
+    });
+  });
+  return placed
+    .sort(
+      (left, right) =>
+        left.at - right.at ||
+        left.member - right.member ||
+        left.position - right.position,
+    )
+    .map(({ entry }) => entry);
 }

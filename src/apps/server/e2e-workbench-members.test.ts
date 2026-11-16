@@ -17,7 +17,6 @@ import {
   OperationResultType,
 } from "../../kernel/operation.ts";
 import { testHumanIdentity } from "../../kernel/test-identity.ts";
-import { temporaryDirectory } from "../../kernel/test-support.ts";
 import { isString } from "../../kernel/values.ts";
 import { WorkbenchErrorCode } from "../../workbench/contract.ts";
 import { type SeededNode, seedEvidence } from "./evidence-test-support.ts";
@@ -42,7 +41,7 @@ const SECOND_HUMAN = testHumanIdentity(
   "Grace",
   "workbench-members-2",
 );
-const { workbenchFixture } = workbenchHarness(identity);
+const { conversationFixture } = workbenchHarness(identity);
 const OPS = "ops@1";
 const REVIEW_AGENT = "re@1";
 const ANSWER = "Two objectives are open.";
@@ -134,7 +133,7 @@ async function listed(fixture: Fixture) {
       { params: {}, query: {}, body: null },
       fixture.options,
     ),
-  ).items;
+  ).items.flatMap((item) => [item, ...item.participants]);
 }
 
 async function participantOf(fixture: Fixture, hostId: string) {
@@ -149,16 +148,6 @@ function agentCalls(fixture: Fixture, prompt: string) {
   return fixture.provider.calls.filter(({ systemPrompt }) =>
     systemPrompt?.includes(prompt),
   );
-}
-
-async function members(
-  t: TestContext,
-  script: FauxResponseStep[] = [fauxAssistantMessage(ANSWER)],
-  enabled: readonly string[] = [OPS, REVIEW_AGENT, AGENT],
-) {
-  const state = temporaryDirectory();
-  const fixture = await workbenchFixture(t, script, state, undefined, enabled);
-  return { state, fixture };
 }
 
 interface EvidenceTarget {
@@ -180,7 +169,7 @@ async function evidenceMembers(
   script: (target: EvidenceTarget) => FauxResponseStep[],
 ) {
   const target: EvidenceTarget = { nodes: [] };
-  const built = await members(t, script(target));
+  const built = await conversationFixture(t, script(target));
   target.nodes = await seedEvidence(t, built.fixture, [
     { produced: [EVIDENCE_TEXT] },
   ]);
@@ -192,7 +181,9 @@ test(
   "(happy path, mention) a first message with @RE in an ops@1 host creates an re@1 participant and runs it",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
-    const { state, fixture } = await members(t);
+    const { state, fixture } = await conversationFixture(t, [
+      fauxAssistantMessage(ANSWER),
+    ]);
     const host = await createHost(fixture, OPS);
     completed(await sendMessage(fixture, host.id, MENTION_REQUEST));
     await untilIdle(fixture, host.id, t.signal);
@@ -220,7 +211,7 @@ test(
   "(happy path, untagged) an untagged follow-up after the RE answer runs re@1, the member that answered last",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
-    const { fixture } = await members(t, [
+    const { fixture } = await conversationFixture(t, [
       fauxAssistantMessage(ANSWER),
       fauxAssistantMessage(SECOND_ANSWER),
     ]);
@@ -281,7 +272,9 @@ test(
   "(security, refused path) the host-only operations on a participant id answer 409 not_host",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
-    const { fixture } = await members(t);
+    const { fixture } = await conversationFixture(t, [
+      fauxAssistantMessage(ANSWER),
+    ]);
     const host = await createHost(fixture, OPS);
     completed(await sendMessage(fixture, host.id, MENTION_REQUEST));
     await untilIdle(fixture, host.id, t.signal);
@@ -366,7 +359,7 @@ test(
   "(security, argument guard) @Guard answers 404 and creates no session",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
-    const { state, fixture } = await members(t, []);
+    const { state, fixture } = await conversationFixture(t, []);
     const host = await createHost(fixture, OPS);
     const details = failed(
       await sendMessage(fixture, host.id, "@Guard hi"),
@@ -391,7 +384,7 @@ test(
   "(security, argument guard) a mention of a disabled agent answers 400 and creates no session",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
-    const { state, fixture } = await members(t, []);
+    const { state, fixture } = await conversationFixture(t, []);
     const enablement = completed(
       await fixture.agent["enablement.get"](
         { params: { agent_name: REVIEW_AGENT }, query: {}, body: null },
@@ -455,7 +448,7 @@ test(
   "(security, authorization) a participant run uses the requester of its own message",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
-    const { fixture } = await members(t, [
+    const { fixture } = await conversationFixture(t, [
       fauxAssistantMessage(ANSWER),
       fauxAssistantMessage(SECOND_ANSWER),
     ]);
@@ -481,7 +474,7 @@ test(
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const gate = Promise.withResolvers<void>();
-    const { fixture } = await members(t, [
+    const { fixture } = await conversationFixture(t, [
       async () => {
         await gate.promise;
         return fauxAssistantMessage(ANSWER);

@@ -74,6 +74,7 @@ import type {
 } from "../custody/contract.ts";
 import {
   ActionOutcome,
+  type ConversationMember,
   GUARD_AGENT_NAME,
   MessageDelivery,
   type PendingApproval,
@@ -101,6 +102,9 @@ import { missionOperations } from "../mission/contract.ts";
 import {
   lastAnswerer,
   lastTurnEntry,
+  mergeEntries,
+  type MergeMember,
+  parseCursor,
   type RelayMember,
   relayText,
   resolveMention,
@@ -138,7 +142,6 @@ import {
   lastModel,
   lastThinkingLevel,
   listSessions,
-  openingIds,
   recordOf,
   resumeCommand,
   type SessionPlace,
@@ -349,6 +352,12 @@ function sessionNotFound(sessionId: string): OperationError {
     "Workbench session not found.",
     { session_id: sessionId },
   );
+}
+
+function displayNameOf(agentName: string): string {
+  const declaration = getAgentDeclaration(agentName);
+  assert.ok(declaration);
+  return declaration.display_name;
 }
 
 function notHost(session: OpenSession): OperationError {
@@ -1204,17 +1213,37 @@ export class WorkbenchService implements Service {
       manager.appendThinkingLevelChange(configuration.reasoning_effort);
   }
 
+  private memberEntries(host: OpenSession, limited: boolean): MergeMember[] {
+    const running = limited && this.runActive(host);
+    const active = this.runningMember(host);
+    return host.members.map((member) => {
+      const entries = this.entries(member.manager);
+      return {
+        sessionId: member.id,
+        agentName: member.agentName,
+        entries:
+          running && member === active
+            ? entries.slice(0, host.run!.firstEntry)
+            : entries,
+      };
+    });
+  }
+
+  private conversationMembers(host: OpenSession): ConversationMember[] {
+    return host.members.map((member) => ({
+      session_id: member.id,
+      agent_name: member.agentName,
+      display_name: displayNameOf(member.agentName),
+    }));
+  }
+
   private view(session: OpenSession): WorkbenchSession {
-    const all = this.entries(session.manager);
-    const [internal] = openingIds(all);
-    const entries = (
-      this.runActive(session) ? all.slice(0, session.run!.firstEntry) : all
-    ).filter((entry) => entry.id !== internal);
     return {
       id: session.id,
       agent_name: session.agentName,
       configuration: { ...session.configuration },
-      entries,
+      members: this.conversationMembers(session),
+      entries: mergeEntries(this.memberEntries(session, true)),
       run_active: this.runActive(session),
       resume_command: resumeCommand(
         session.manager,
@@ -1227,7 +1256,10 @@ export class WorkbenchService implements Service {
     const session = this.sessions.get(sessionId);
     const pending = session ? this.pendingApprovalOf(session) : null;
     return {
-      run_active: session !== undefined && this.runActive(session),
+      run_active:
+        session !== undefined &&
+        this.runActive(session) &&
+        this.runsMember(session),
       pending_approval: pending
         ? {
             tool_call_id: pending.tool_call_id,
@@ -1235,6 +1267,13 @@ export class WorkbenchService implements Service {
           }
         : null,
     };
+  }
+
+  private runsMember(session: OpenSession): boolean {
+    return (
+      session.hostId === null ||
+      this.hostOf(session).run?.memberId === session.id
+    );
   }
 
   private pendingApprovalOf(session: OpenSession): PendingApproval | null {
@@ -1284,16 +1323,15 @@ export class WorkbenchService implements Service {
     };
   }
 
-  private changes(session: OpenSession, after: string | undefined) {
-    const entries = this.entries(session.manager);
-    const index =
-      after === undefined
-        ? NOT_FOUND_INDEX
-        : entries.findIndex((entry) => entry.id === after);
+  private changes(host: OpenSession, after: string | undefined) {
     return {
-      entries: entries.slice(index + 1),
-      snapshot: this.snapshot(session),
-      version: session.version,
+      members: this.conversationMembers(host),
+      entries: mergeEntries(
+        this.memberEntries(host, false),
+        parseCursor(after, host.id),
+      ),
+      snapshot: this.snapshot(host),
+      version: host.version,
     };
   }
 
@@ -1362,6 +1400,7 @@ export class WorkbenchService implements Service {
     if (run.stopped) return run.settle();
     const member = await this.member(host, item);
     run.memberId = member.id;
+    run.firstEntry = member.manager.getEntries().length;
     member.requester = item.requester;
     const resolved = this.dependencies.store.transaction((tx) =>
       this.resolve(tx, member.agentName, member.configuration),
@@ -1381,11 +1420,9 @@ export class WorkbenchService implements Service {
   }
 
   private relayMember(member: OpenSession): RelayMember {
-    const declaration = getAgentDeclaration(member.agentName);
-    assert.ok(declaration);
     return {
       id: member.id,
-      displayName: declaration.display_name,
+      displayName: displayNameOf(member.agentName),
       entries: this.entries(member.manager),
     };
   }
@@ -1632,16 +1669,38 @@ export class WorkbenchService implements Service {
 
   async list(agentName: string | undefined) {
     if (agentName !== undefined) requireAgent(agentName);
-    const agentNames = (
-      agentName === undefined ? workbenchAgentNames() : [agentName]
-    ).filter((name) => workbenchAgentNames().includes(name));
+    const stored = [];
+    for (const name of workbenchAgentNames())
+      stored.push(
+        ...(await listSessions(
+          sessionPlace(this.dependencies.stateDirectory, name),
+          name,
+        )),
+      );
     const items = [];
-    for (const name of agentNames)
-      for (const stored of await listSessions(
-        sessionPlace(this.dependencies.stateDirectory, name),
-        name,
-      ))
-        items.push({ ...stored, ...this.runState(stored.id) });
+    for (const host of stored) {
+      if (host.host_session_id !== null) continue;
+      if (agentName !== undefined && host.agent_name !== agentName) continue;
+      const participants = stored
+        .filter(({ host_session_id }) => host_session_id === host.id)
+        .sort((left, right) => left.created - right.created)
+        .map((participant) => ({
+          ...participant,
+          ...this.runState(participant.id),
+          display_name: displayNameOf(participant.agent_name),
+          participants: [] as [],
+        }));
+      items.push({
+        ...host,
+        ...this.runState(host.id),
+        display_name: displayNameOf(host.agent_name),
+        modified: Math.max(
+          host.modified,
+          ...participants.map(({ modified }) => modified),
+        ),
+        participants,
+      });
+    }
     return { items };
   }
 

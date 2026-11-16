@@ -8,6 +8,7 @@ import {
 import {
   leadingMention,
   MentionKind,
+  mergeEntries,
   RELAY_MAX_BYTES,
   relayText,
 } from "./conversation.ts";
@@ -73,4 +74,38 @@ test("security: a relay above RELAY_MAX_BYTES keeps the newest items and starts 
   );
   assert.ok(content.includes(`Ulrich to @RE: item-${LAST_ITEM} `));
   assert.ok(!content.includes(`item-${FIRST_ITEM} `));
+});
+
+function stamped(id: string, offset: number) {
+  return {
+    type: "custom",
+    id,
+    parentId: null,
+    timestamp: new Date(FIRST_TIMESTAMP + offset * STEP_MS).toISOString(),
+  };
+}
+
+test("invariant: a merge with equal timestamps keeps every entry in member order, then in file order", () => {
+  const merged = mergeEntries([
+    {
+      sessionId: "host",
+      agentName: "ops@1",
+      entries: [stamped("h1", 0), stamped("h2", 1), stamped("h3", 1)],
+    },
+    {
+      sessionId: "guest",
+      agentName: "re@1",
+      entries: [stamped("g1", 0), stamped("g2", 1)],
+    },
+  ]);
+  assert.deepEqual(
+    merged.map(({ id, session_id }) => [session_id, id]),
+    [
+      ["host", "h1"],
+      ["guest", "g1"],
+      ["host", "h2"],
+      ["host", "h3"],
+      ["guest", "g2"],
+    ],
+  );
 });

@@ -135,9 +135,23 @@ export const pendingApprovalSummarySchema = z.strictObject({
   operation_id: z.string(),
 });
 
-export const sessionListItemSchema = z.strictObject({
+export const memberEntrySchema = sessionEntrySchema.extend({
+  session_id: z.string(),
+  agent_name: z.string(),
+});
+export type MemberEntry = z.infer<typeof memberEntrySchema>;
+
+export const conversationMemberSchema = z.strictObject({
+  session_id: z.string(),
+  agent_name: z.string(),
+  display_name: z.string(),
+});
+export type ConversationMember = z.infer<typeof conversationMemberSchema>;
+
+const sessionListFields = z.strictObject({
   id: z.string(),
   agent_name: z.string(),
+  display_name: z.string(),
   name: z.string().nullable(),
   created: timestampSchema,
   modified: timestampSchema,
@@ -148,11 +162,20 @@ export const sessionListItemSchema = z.strictObject({
   pending_approval: pendingApprovalSummarySchema.nullable(),
 });
 
+export const participantListItemSchema = sessionListFields.extend({
+  participants: z.tuple([]),
+});
+
+export const sessionListItemSchema = sessionListFields.extend({
+  participants: z.array(participantListItemSchema),
+});
+
 export const workbenchSessionSchema = z.strictObject({
   id: identitySchema(WORKBENCH_SESSION_PREFIX),
   agent_name: z.string(),
   configuration: workbenchConfigurationSchema,
-  entries: z.array(sessionEntrySchema),
+  members: z.array(conversationMemberSchema),
+  entries: z.array(memberEntrySchema),
   run_active: z.boolean(),
   resume_command: z.string(),
 });
@@ -204,7 +227,8 @@ export const runSnapshotSchema = z.strictObject({
 export type RunSnapshot = z.infer<typeof runSnapshotSchema>;
 
 export const sessionEventsSchema = z.strictObject({
-  entries: z.array(sessionEntrySchema),
+  members: z.array(conversationMemberSchema),
+  entries: z.array(memberEntrySchema),
   snapshot: runSnapshotSchema,
   version: z.number().int().nonnegative(),
 });
@@ -435,6 +459,6 @@ export const workbenchOperations = {
     }),
     output: sessionEventsSchema,
     description:
-      "Answer the session entries after `after` and the snapshot of the active run at once when `version` differs, else wait up to 25 seconds for a change.",
+      "Answer the merged entries of the conversation after `after` and the snapshot of the active run at once when `version` differs, else wait up to 25 seconds for a change. `after` holds one `<session_id>:<entry_id>` pair per member, comma-separated. A plain entry id names the host pair.",
   },
 } as const satisfies Record<string, Operation>;

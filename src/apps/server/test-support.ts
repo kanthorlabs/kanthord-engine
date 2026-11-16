@@ -3128,6 +3128,8 @@ export interface Persistence {
   resumed: boolean;
 }
 
+const CONVERSATION_AGENTS = ["ops@1", "re@1", "swe@1"];
+
 export function workbenchHarness(identity: HumanIdentity) {
   async function workbenchFixture(
     t: TestContext,
@@ -3244,7 +3246,22 @@ export function workbenchHarness(identity: HumanIdentity) {
       workbench: directClient(workbenchOperations, fixture.invocation),
     };
   }
-  return { workbenchFixture, workbenchClients };
+  async function conversationFixture(
+    t: TestContext,
+    script: FauxResponseStep[],
+    enabled: readonly string[] = CONVERSATION_AGENTS,
+  ) {
+    const state = temporaryDirectory();
+    const fixture = await workbenchFixture(
+      t,
+      script,
+      state,
+      undefined,
+      enabled,
+    );
+    return { state, fixture };
+  }
+  return { workbenchFixture, workbenchClients, conversationFixture };
 }
 
 export type WorkbenchFixture = Awaited<
@@ -3252,7 +3269,6 @@ export type WorkbenchFixture = Awaited<
 >;
 
 const TOOL_USE = "toolUse" as const;
-const FIRST_RECORD = 1;
 const WORKBENCH_CONFIGURATION = {
   agent_provider: DEFAULT,
   model_identifier: SONNET,
@@ -3299,15 +3315,16 @@ export async function untilSettled(
   signal: AbortSignal,
 ) {
   let version: number | undefined;
-  let after: string | undefined;
+  const cursor = new Map<string, string>();
   for (;;) {
     signal.throwIfAborted();
+    const after = [...cursor].map(([member, entry]) => `${member}:${entry}`);
     const answer = completed(
       await fixture.workbench["session.events"](
         {
           params: { session_id: sessionId },
           query: {
-            ...(after === undefined ? {} : { after }),
+            ...(after.length ? { after: after.join(",") } : {}),
             ...(version === undefined ? {} : { version }),
           },
           body: null,
@@ -3315,8 +3332,7 @@ export async function untilSettled(
         fixture.options,
       ),
     );
-    after =
-      (answer.entries.at(-FIRST_RECORD)?.id as string | undefined) ?? after;
+    for (const entry of answer.entries) cursor.set(entry.session_id, entry.id);
     if (answer.snapshot.pending_approval)
       return answer.snapshot.pending_approval;
     if (!answer.snapshot.run_active && !answer.snapshot.queue.length)
