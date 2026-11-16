@@ -3348,3 +3348,29 @@ export async function untilIdle(
 ): Promise<void> {
   assert.equal(await untilSettled(fixture, sessionId, signal), null);
 }
+
+export function untilAbort(text: string) {
+  return async (
+    _context: unknown,
+    options?: { signal?: AbortSignal | undefined },
+  ) => {
+    await new Promise<void>((resolve) => {
+      if (options?.signal?.aborted) resolve();
+      options?.signal?.addEventListener("abort", () => resolve(), {
+        once: true,
+      });
+    });
+    return fauxAssistantMessage(text);
+  };
+}
+
+export function heldAnswer(text: string) {
+  const gate = Promise.withResolvers<void>();
+  return {
+    gate,
+    step: async () => {
+      await gate.promise;
+      return fauxAssistantMessage(text);
+    },
+  };
+}

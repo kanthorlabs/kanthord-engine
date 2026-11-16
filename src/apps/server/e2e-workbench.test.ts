@@ -85,12 +85,14 @@ import {
   GUARD_AGENT,
   GUARD_MODEL,
   HAIKU,
+  heldAnswer,
   OFF,
   type Persistence,
   PRIMARY_KEY,
   SONNET,
   SPARE_CREDENTIAL,
   SPARE_KEY,
+  untilAbort,
   workbenchHarness,
 } from "./test-support.ts";
 import { type SeededNode, seedEvidence } from "./evidence-test-support.ts";
@@ -108,6 +110,7 @@ const ThinkingChange = "thinking_level_change";
 const SINGLE = 1;
 const NO_QUEUED_MESSAGES = 0;
 const NO_UNKEPT = 0;
+const UNTAGGED = { agent_name: null, display_name: null };
 const GREETING_PREFIX = "Hi, I am ";
 const HOST_HOME = "/home/kanthord_host";
 const MESSAGE_ENTRY = "message";
@@ -716,6 +719,7 @@ test("a message runs the agent while a long poll follows the run to its end", as
   assert.equal(accepted.status, HttpStatus.Accepted);
   assert.deepEqual(accepted.data, {
     session_id: sessionId,
+    agent_name: AGENT,
     run_active: true,
     queued_message_id: null,
     cleared: [],
@@ -1731,32 +1735,6 @@ const SECOND_QUEUED = "Second queued message.";
 const LAUNCH_FAILURE = "launch failed";
 const SECOND_HUMAN = testHumanIdentity("kanthord", "Grace", "workbench-test-2");
 
-function heldAnswer(text: string) {
-  const gate = Promise.withResolvers<void>();
-  return {
-    gate,
-    step: async () => {
-      await gate.promise;
-      return fauxAssistantMessage(text);
-    },
-  };
-}
-
-function untilAbort(text: string) {
-  return async (
-    _context: unknown,
-    options?: { signal?: AbortSignal | undefined },
-  ) => {
-    await new Promise<void>((resolve) => {
-      if (options?.signal?.aborted) resolve();
-      options?.signal?.addEventListener("abort", () => resolve(), {
-        once: true,
-      });
-    });
-    return fauxAssistantMessage(text);
-  };
-}
-
 function replaceMessage(fixture: Fixture, sessionId: string, text: string) {
   return fixture.workbench["session.message"](
     {
@@ -1833,8 +1811,8 @@ test("(happy path) a message during a run waits in the queue and runs after the 
   const secondId = await queuedId(fixture, sessionId, SECOND_QUEUED);
   assert.ok(firstId);
   assert.deepEqual((await snapshotOf(fixture, sessionId)).snapshot.queue, [
-    { id: firstId, text: FIRST_QUEUED },
-    { id: secondId, text: SECOND_QUEUED },
+    { id: firstId, text: FIRST_QUEUED, ...UNTAGGED },
+    { id: secondId, text: SECOND_QUEUED, ...UNTAGGED },
   ]);
   first.gate.resolve();
   const entries = await untilIdle(fixture, sessionId, t.signal);
@@ -2076,8 +2054,8 @@ test("(happy path) a replace during a run clears the queue, aborts the provider 
     await replaceMessage(fixture, sessionId, THIRD_ANSWER),
   );
   assert.deepEqual(replaced.cleared, [
-    { id: firstId, text: FIRST_QUEUED },
-    { id: secondId, text: SECOND_QUEUED },
+    { id: firstId, text: FIRST_QUEUED, ...UNTAGGED },
+    { id: secondId, text: SECOND_QUEUED, ...UNTAGGED },
   ]);
   assert.ok(replaced.queued_message_id);
   assert.equal(
@@ -2130,7 +2108,7 @@ test("(invariant guard) two replaces in a row clear the first and only the secon
   const firstId = completed(first).queued_message_id;
   assert.deepEqual(completed(first).cleared, []);
   assert.deepEqual(completed(second).cleared, [
-    { id: firstId, text: FIRST_QUEUED },
+    { id: firstId, text: FIRST_QUEUED, ...UNTAGGED },
   ]);
   const entries = await untilIdle(fixture, sessionId, t.signal);
   assert.deepEqual(texts(entries, "user"), [QUESTION, SECOND_QUEUED]);
@@ -2152,8 +2130,8 @@ test("(happy path) a stop clears the queue, answers the cleared items and starts
     session_id: sessionId,
     run_active: false,
     cleared: [
-      { id: firstId, text: FIRST_QUEUED },
-      { id: secondId, text: SECOND_QUEUED },
+      { id: firstId, text: FIRST_QUEUED, ...UNTAGGED },
+      { id: secondId, text: SECOND_QUEUED, ...UNTAGGED },
     ],
   });
   for (let turn = 0; turn < SETTLE_TURNS; turn++) await setImmediate();

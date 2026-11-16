@@ -212,6 +212,8 @@ export type PendingApproval = z.infer<typeof pendingApprovalSchema>;
 export const queuedMessageSchema = z.strictObject({
   id: identitySchema(WORKBENCH_QUEUED_MESSAGE_PREFIX),
   text: z.string(),
+  agent_name: z.string().nullable(),
+  display_name: z.string().nullable(),
 });
 export type QueuedMessage = z.infer<typeof queuedMessageSchema>;
 
@@ -330,6 +332,7 @@ export const workbenchOperations = {
       }),
     }),
     output: sessionParams.extend({
+      agent_name: z.string().nullable(),
       run_active: z.literal(true),
       queued_message_id: identitySchema(
         WORKBENCH_QUEUED_MESSAGE_PREFIX,
@@ -337,7 +340,7 @@ export const workbenchOperations = {
       cleared: z.array(queuedMessageSchema),
     }),
     description:
-      "Start a run on one human message, or queue it behind the active run. `replace` clears the queue, stops the active run and queues the message.",
+      "Start a run on one human message, or queue it behind the active run. A leading `@<display name>` names the member that runs the message. `agent_name` answers the member that runs now, the mention of a queued message, or null for an untagged queued message. `replace` clears the queue, stops the active run and queues the message.",
   },
   "session.abort": {
     ...workbenchOperation,

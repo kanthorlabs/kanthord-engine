@@ -102,6 +102,7 @@ import { missionOperations } from "../mission/contract.ts";
 import {
   lastAnswerer,
   lastTurnEntry,
+  type MentionMatch,
   mergeEntries,
   type MergeMember,
   parseCursor,
@@ -265,6 +266,20 @@ interface Approval {
 
 interface PendingMessage extends QueuedMessage {
   requester: HumanIdentity;
+}
+
+interface EnqueueItem {
+  text: string;
+  requester: HumanIdentity;
+}
+
+function queuedView({
+  id,
+  text,
+  agent_name,
+  display_name,
+}: PendingMessage): QueuedMessage {
+  return { id, text, agent_name, display_name };
 }
 
 interface LaunchItem {
@@ -1314,7 +1329,7 @@ export class WorkbenchService implements Service {
       pending_tool_calls: state ? [...state.pendingToolCalls] : [],
       pending_approval: this.pendingApprovalOf(session),
       run_active: this.runActive(session),
-      queue: session.queuedMessages.map(({ id, text }) => ({ id, text })),
+      queue: session.queuedMessages.map(queuedView),
       error_message:
         session.runError ??
         (session.agentErrorStale ? undefined : state?.errorMessage) ??
@@ -1551,8 +1566,8 @@ export class WorkbenchService implements Service {
 
   private enqueue(
     session: OpenSession,
-    text: string,
-    requester: HumanIdentity,
+    item: EnqueueItem,
+    mention: MentionMatch | null,
   ): string {
     if (session.queuedMessages.length >= WORKBENCH_QUEUE_LIMIT)
       throw new OperationError(
@@ -1562,15 +1577,19 @@ export class WorkbenchService implements Service {
         { session_id: session.id, limit: WORKBENCH_QUEUE_LIMIT },
       );
     const id = createIdentity(WORKBENCH_QUEUED_MESSAGE_PREFIX);
-    session.queuedMessages.push({ id, text, requester });
+    session.queuedMessages.push({
+      id,
+      text: item.text,
+      requester: item.requester,
+      agent_name: mention?.agent_name ?? null,
+      display_name: mention?.display_name ?? null,
+    });
     this.notify(session);
     return id;
   }
 
   private clearQueue(session: OpenSession): QueuedMessage[] {
-    const cleared = session.queuedMessages
-      .splice(0)
-      .map(({ id, text }) => ({ id, text }));
+    const cleared = session.queuedMessages.splice(0).map(queuedView);
     if (cleared.length) this.notify(session);
     return cleared;
   }
@@ -1581,6 +1600,7 @@ export class WorkbenchService implements Service {
     body: MessageBody,
   ): Promise<{
     session_id: string;
+    agent_name: string | null;
     run_active: true;
     queued_message_id: string | null;
     cleared: QueuedMessage[];
@@ -1591,10 +1611,13 @@ export class WorkbenchService implements Service {
     const requester = humanOf(caller);
     const active = session.run;
     if (active) {
+      const mention = this.dependencies.store.transaction((tx) =>
+        resolveMention(tx, text, this.dependencies),
+      );
       this.title(session, text);
       const cleared =
         delivery === MessageDelivery.Replace ? this.clearQueue(session) : [];
-      const queued = this.enqueue(session, text, requester);
+      const queued = this.enqueue(session, { text, requester }, mention);
       if (delivery === MessageDelivery.Replace)
         this.exclusive(session, () => this.stopRun(session, active)).catch(
           (error: unknown) => {
@@ -1605,6 +1628,7 @@ export class WorkbenchService implements Service {
         );
       return {
         session_id: sessionId,
+        agent_name: mention?.agent_name ?? null,
         run_active: true,
         queued_message_id: queued,
         cleared,
@@ -1626,6 +1650,7 @@ export class WorkbenchService implements Service {
     this.title(session, text);
     return {
       session_id: sessionId,
+      agent_name: this.memberOfRun(session, run).agentName,
       run_active: true,
       queued_message_id: null,
       cleared: [],

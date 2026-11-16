@@ -102,9 +102,19 @@ components:
                   uppercase ULID.
               text:
                 type: string
+              agent_name:
+                anyOf:
+                  - type: string
+                  - type: "null"
+              display_name:
+                anyOf:
+                  - type: string
+                  - type: "null"
             required:
               - id
               - text
+              - agent_name
+              - display_name
             additionalProperties: false
       required:
         - session_id
