@@ -29,6 +29,7 @@ export const AGENT_NAMES = [
   "re@1",
   "pe@1",
   "ops@1",
+  "plan@1",
   "guard@1",
 ] as const;
 export type AgentName = (typeof AGENT_NAMES)[number];
