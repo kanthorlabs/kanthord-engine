@@ -1877,6 +1877,7 @@ export class WorkbenchService implements Service {
     const material = forkMaterial({
       members,
       authorName: humanOf(caller).name,
+      inProgress: this.runActive(source) ? source.run!.request : null,
     });
     const title = forkSourceTitle(
       this.entries(source.manager),

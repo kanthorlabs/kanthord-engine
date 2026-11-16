@@ -209,56 +209,97 @@ function relayItemOf(
   return isFinalAnswer(entry) ? `${author.displayName}: ${text}` : null;
 }
 
-function relayItems(member: RelayMember, input: RelayInput): string[] {
-  const since = input.startEntry
-    ? Date.parse(
-        member.entries.find((entry) => entry.id === input.startEntry)
-          ?.timestamp ?? "",
-      )
-    : BEFORE_ALL;
+interface RelayItems {
+  summary: string | null;
+  items: string[];
+}
+
+function summaryOfEntry(entry: SessionEntry): string | null {
+  const message = entry.message as
+    { role?: unknown; content?: unknown } | undefined;
+  return entry.type === MESSAGE_ENTRY && message?.role === USER_ROLE
+    ? forkSummaryOf(textOf(message.content))
+    : null;
+}
+
+interface RelayLine {
+  summary: boolean;
+  text: string;
+}
+
+function relayLineOf(
+  author: RelayMember,
+  entry: SessionEntry,
+  authorName: string,
+): RelayLine | null {
+  const summary = summaryOfEntry(entry);
+  if (summary !== null) return { summary: true, text: summary };
+  const text = relayItemOf(author, entry, authorName);
+  return text === null ? null : { summary: false, text };
+}
+
+function relaySince(member: RelayMember, input: RelayInput): number {
+  if (!input.startEntry) return BEFORE_ALL;
+  const started = member.entries.find((entry) => entry.id === input.startEntry);
+  return Date.parse(started?.timestamp ?? "");
+}
+
+function relayItems(member: RelayMember, input: RelayInput): RelayItems {
+  const since = relaySince(member, input);
   const items: RelayItem[] = [];
+  const summaries: RelayItem[] = [];
   for (const author of input.members) {
     if (author.id === member.id) continue;
     const opening = openingIds(author.entries);
     for (const entry of author.entries) {
       const at = Date.parse(entry.timestamp);
       if (opening.hidden.has(entry.id) || !(at > since)) continue;
-      const text = relayItemOf(author, entry, input.authorName);
-      if (text !== null) items.push({ at, text });
+      const line = relayLineOf(author, entry, input.authorName);
+      if (line === null) continue;
+      (line.summary ? summaries : items).push({ at, text: line.text });
     }
   }
-  return items
-    .sort((left, right) => left.at - right.at)
-    .map(({ text }) => text);
+  return {
+    summary: summaries[NO_CHARACTERS]?.text ?? null,
+    items: items
+      .sort((left, right) => left.at - right.at)
+      .map(({ text }) => text),
+  };
 }
 
 export function relayText(
   member: RelayMember,
   input: RelayInput,
 ): string | null {
-  const items = relayItems(member, input);
+  const { summary, items } = relayItems(member, input);
   const head = renderTemplate(
     input.templates ?? SHIPPED_TEMPLATES,
     PromptTemplate.Relay,
     {},
   );
-  const content = () => [head, ...items].join(ITEM_SEPARATOR);
+  const content = () =>
+    [head, ...(summary === null ? [] : [summary]), ...items].join(
+      ITEM_SEPARATOR,
+    );
   while (
     items.length > NO_CHARACTERS &&
     Buffer.byteLength(content(), BYTES_ENCODING) > RELAY_MAX_BYTES
   )
     items.shift();
-  return items.length > NO_CHARACTERS ? content() : null;
+  if (items.length === NO_CHARACTERS && summary === null) return null;
+  return clippedToBytes(content(), RELAY_MAX_BYTES);
 }
 
 const CUSTOM_MESSAGE_ENTRY = "custom_message";
 const FORK_SUMMARY_LABEL = "Summary of an earlier conversation:\n";
 const REPLACEMENT_CHARACTERS = /\uFFFD+$/;
 const NO_TEXT = "";
+const IN_PROGRESS_PREFIX = "In progress in the earlier conversation: ";
 
 export interface ForkConversation {
   members: readonly RelayMember[];
   authorName: string;
+  inProgress: string | null;
 }
 
 const ForkItemKind = {
@@ -384,6 +425,10 @@ export function forkMaterial(conversation: ForkConversation): string {
     .filter((item) => item !== summary && item !== first)
     .map(({ text }) => text);
   const kept = [...rest];
+  const tail =
+    conversation.inProgress === null
+      ? []
+      : [`${IN_PROGRESS_PREFIX}${conversation.inProgress}.`];
   const content = () => {
     const omitted = rest.length - kept.length;
     return [
@@ -392,6 +437,7 @@ export function forkMaterial(conversation: ForkConversation): string {
         ? [`${omitted} earlier messages are not shown.`]
         : []),
       ...kept,
+      ...tail,
     ].join(ITEM_SEPARATOR);
   };
   while (

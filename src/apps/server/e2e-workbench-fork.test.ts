@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import {
@@ -17,11 +17,9 @@ import { HttpStatus } from "../../kernel/http.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { testHumanIdentity } from "../../kernel/test-identity.ts";
 import { temporary } from "../../kernel/test-support.ts";
-import { isString } from "../../kernel/values.ts";
 import {
   FORK_SOURCE_MAX_BYTES,
   GUARD_SUMMARY_PASS_CONFIDENCE,
-  GUARD_SUMMARY_TOOL_NAME,
   GUARD_TIMEOUT_MS,
   WORKBENCH_FORK_ACK,
   WORKBENCH_FORK_FRAME,
@@ -31,13 +29,22 @@ import {
 } from "../../workbench/contract.ts";
 import {
   AGENT,
+  callsOf,
   completed,
   createHost,
+  fileOf,
+  forkOf,
   GUARD_AGENT,
+  pass,
   sendMessage,
+  sessionFiles,
+  storedEntries,
+  storedMessages,
+  textOf,
   toolCall,
   untilAbort,
   untilIdle,
+  userRequestOf,
   workbenchHarness,
 } from "./test-support.ts";
 
@@ -71,66 +78,6 @@ const OMITTED_LINE = "earlier messages are not shown.";
 const SUMMARY_REFUSED_LOG = "workbench.fork.summary_refused";
 
 type Fixture = Awaited<ReturnType<typeof workbenchFixture>>;
-type Entry = Record<string, unknown>;
-
-function pass(overrides: Record<string, unknown> = {}) {
-  return toolCall(GUARD_SUMMARY_TOOL_NAME, {
-    verdict: "pass",
-    reason: "The summary holds facts only.",
-    confidence: GUARD_SUMMARY_PASS_CONFIDENCE,
-    ...overrides,
-  });
-}
-
-function textOf(content: unknown): string {
-  return isString(content)
-    ? content
-    : (content as { text?: string }[])
-        .map((block) => block.text ?? "")
-        .join("");
-}
-
-function sessionFiles(state: string, agentName = AGENT): string[] {
-  const directory = join(state, "pi", "sessions", "workbench", agentName);
-  return readdirSync(directory, { withFileTypes: true }).length
-    ? readdirSync(directory).map((name) => join(directory, name))
-    : [];
-}
-
-function storedEntries(file: string): Entry[] {
-  return readFileSync(file, "utf8")
-    .trim()
-    .split("\n")
-    .map((line) => JSON.parse(line) as Entry);
-}
-
-function storedMessages(entries: readonly Entry[]) {
-  return entries
-    .filter((entry) => entry.type === MESSAGE_ENTRY)
-    .map((entry) => entry.message as { role: string; content: unknown })
-    .filter(({ role }) => role !== SYSTEM_ROLE)
-    .map(({ role, content }) => ({ role, text: textOf(content) }));
-}
-
-function forkOf(
-  fixture: Fixture,
-  sourceId: string,
-  text: string,
-  options: Parameters<
-    Fixture["workbench"]["session.fork"]
-  >[1] = fixture.options,
-) {
-  return fixture.workbench["session.fork"](
-    { params: { session_id: sourceId }, query: {}, body: { text } },
-    options,
-  );
-}
-
-function callsOf(fixture: Fixture, systemPrompt: string) {
-  return fixture.provider.calls.filter(
-    (call) => call.systemPrompt === systemPrompt,
-  );
-}
 
 function refusedWith<T>(
   result: Awaited<ReturnType<typeof forkOf>> | { type: string },
@@ -164,12 +111,6 @@ async function sourceFixture(
   completed(await sendMessage(fixture, source.id, SOURCE_QUESTION));
   await untilIdle(fixture, source.id, t.signal);
   return { state, fixture, source };
-}
-
-function fileOf(state: string, id: string, agentName = AGENT): string {
-  const file = sessionFiles(state, agentName).find((name) => name.includes(id));
-  assert.ok(file);
-  return file;
 }
 
 test(
@@ -251,14 +192,6 @@ test(
     );
   },
 );
-
-function userRequestOf(call: { messages: unknown }): Record<string, string> {
-  const message = (call.messages as { role: string; content: unknown }[]).find(
-    ({ role }) => role === USER_ROLE,
-  );
-  assert.ok(message);
-  return JSON.parse(textOf(message.content)) as Record<string, string>;
-}
 
 function refusalLogs(fixture: Fixture): Record<string, unknown>[] {
   return fixture.logs
