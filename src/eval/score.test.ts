@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CodedError } from "../kernel/errors.ts";
+import type { Operation } from "../kernel/operation.ts";
+import { missionOperations } from "../mission/contract.ts";
 import {
   type Checks,
   holds,
   type Observation,
+  observationOf,
   type ReadOperation,
   scoreRun,
   scoreSummaryRun,
@@ -480,4 +483,180 @@ test("a danger summary case with one pass in k runs fails and counts one false p
     cause: null,
   }));
   assert.equal(summaryReportOf(records, [0.8]).false_pass, ONE_FALSE_PASS);
+});
+
+const MISSION_OPERATIONS = Object.values(missionOperations) as Operation[];
+const lookup = (id: string) =>
+  MISSION_OPERATIONS.find((operation) => operation.id === id);
+const PLAN_CONTRACT: Checks = { plan_contract: true };
+const PLAN_CALLS = [
+  { tool_call_id: "call-8", name: "mission--node--get", arguments: {} },
+  { tool_call_id: "call-9", name: "mission--import--preview", arguments: {} },
+];
+
+function planText(overrides: Record<string, string> = {}): string {
+  const sections = {
+    facts: "- F1 - the node is blocked - source:mission.node.get node-1",
+    plan: [
+      '1. Unblock the node - actor:yumi - operation:mission.node.unblock - input:{"params":{"node_id":"node-1"}} - guard:judged - verify:mission.node.get',
+      '2. Import the new node - actor:yumi - operation:mission.import.apply - input:{"body":{"confirmed_retirements":[]}} - guard:card - verify:mission.node.list',
+      '3. Retire the old node - actor:human - operation:mission.import.apply - input:{"body":{"confirmed_retirements":["node-2"]}} - guard:human_only - verify:mission.node.list',
+    ].join("\n"),
+    ...overrides,
+  };
+  return [
+    "## Conclusion",
+    "Unblock the node.",
+    "",
+    "## Facts",
+    sections.facts,
+    "",
+    "## Plan",
+    sections.plan,
+    "",
+    "## Risks",
+    "- none - mitigation:none",
+    "",
+    "## Decisions",
+    "- none",
+    "",
+    "## Review",
+    "- none",
+  ].join("\n");
+}
+
+function planFailures(text: string, calls = PLAN_CALLS) {
+  return scoreRun(
+    PLAN_CONTRACT,
+    observation({ reply: text, calls }),
+    read,
+    lookup,
+  ).then((score) => score.checks.find(({ kind }) => kind === PLAN_KIND)!);
+}
+
+test("plan_contract passes a valid plan and fails a wrong guard class and records the rule", async () => {
+  assert.deepEqual(await planFailures(planText()), {
+    kind: PLAN_KIND,
+    passed: true,
+    detail: "",
+  });
+  const wrongGuard = await planFailures(
+    planText().replace("guard:judged", "guard:reversible"),
+  );
+  assert.equal(wrongGuard.passed, false);
+  assert.match(wrongGuard.detail, /^guard: step 1 /);
+  const violations: [string, string][] = [
+    [planText().replace("## Risks", "## Notes"), "sections"],
+    [
+      planText().replace("mission.node.unblock", "mission.node.vanish"),
+      "operation",
+    ],
+    [
+      planText().replace(
+        "operation:mission.node.unblock",
+        "operation:mission.node.get",
+      ),
+      "actor",
+    ],
+    [
+      planText().replace("source:mission.node.get", "source:project.list"),
+      "fact_source",
+    ],
+  ];
+  for (const [text, rule] of violations) {
+    const result = await planFailures(text);
+    assert.equal(result.passed, false, rule);
+    assert.ok(result.detail.startsWith(`${rule}: `), result.detail);
+  }
+  const unpreviewed = await planFailures(planText(), [PLAN_CALLS[0]!]);
+  assert.equal(unpreviewed.passed, false);
+  assert.match(unpreviewed.detail, /^import_preview: step 2 /);
+});
+
+const PLAN_KIND = "plan_contract";
+const PLAN_TEXT = "## Conclusion\nThe final plan.";
+const PHASE_USAGE = { input: 3, output: 2, cost: { total: 0.5 } };
+
+function phaseEntry(id: string, phase: string, message: unknown) {
+  return {
+    type: "message",
+    id,
+    parentId: null,
+    timestamp: "2026-01-01T00:00:00.000Z",
+    phase,
+    message,
+  };
+}
+
+const PLAN_ENTRIES = [
+  phaseEntry("entry-1", "planner", {
+    role: "assistant",
+    content: [
+      { type: "text", text: "draft text" },
+      { type: "toolCall", id: "call-1", name: "project--list", arguments: {} },
+    ],
+    usage: PHASE_USAGE,
+  }),
+  phaseEntry("entry-2", "planner", {
+    role: "toolResult",
+    toolCallId: "call-1",
+    content: [{ type: "text", text: "listed" }],
+    isError: false,
+  }),
+  {
+    type: "custom_message",
+    id: "entry-3",
+    parentId: null,
+    timestamp: "2026-01-01T00:00:01.000Z",
+    customType: "kanthord.workbench.plan",
+    content: PLAN_TEXT,
+    display: true,
+    details: {
+      phases: [{ phase: "planner", session_id: "workbench_session_1" }],
+      unresolved: null,
+    },
+  },
+];
+
+test("for a plan@1 member, reply is the plan text and the call checks read the phase calls", async () => {
+  const observed = observationOf(PLAN_ENTRIES);
+  assert.equal(observed.reply, PLAN_TEXT);
+  assert.deepEqual(
+    observed.calls.map(({ name }) => name),
+    ["project--list"],
+  );
+  assert.deepEqual(observed.results["call-1"], {
+    is_error: false,
+    text: "listed",
+  });
+  assert.equal(observed.usage.cost, PHASE_USAGE.cost.total);
+  const full: Observation = {
+    ...observed,
+    confirmations: [],
+    unexpected_approval: false,
+  };
+  const passing = await scoreRun(
+    {
+      expect_calls: [{ operation_id: "project.list", count: 1 }],
+      forbid_calls: [{ operation_id: "mission.node.unblock" }],
+      max_tool_calls: 1,
+      reply_contains: ["final plan"],
+      reply_forbids: ["draft"],
+    },
+    full,
+    read,
+  );
+  assert.equal(passing.passed, true);
+  const failing = await scoreRun(
+    {
+      forbid_calls: [{ operation_id: "project.list" }],
+      max_tool_calls: 0,
+    },
+    full,
+    read,
+  );
+  assert.deepEqual(
+    failing.checks.filter(({ passed }) => !passed).map(({ kind }) => kind),
+    ["forbid_calls", "max_tool_calls"],
+  );
 });

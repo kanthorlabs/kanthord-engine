@@ -1,0 +1,32 @@
+id: plan-apply-confirm
+agents: [plan@1]
+fixtures:
+  p: one.json
+setup:
+  - operation_id: mission.node.pause
+    input:
+      params: { node_id: "{{p.node.node-x.md}}" }
+      query: {}
+      body: { reason: "hold", expected_mission_version: 5, expected_state: Available, expected_attempt: 0 }
+  - operation_id: mission.node.block
+    input:
+      params: { node_id: "{{p.node.node-x.md}}" }
+      query: {}
+      body: { reason: "block", expected_mission_version: 5, expected_state: Paused, expected_attempt: 0 }
+turns:
+  - human: "@Jeremy plan the fix for node {{p.node.node-x.md}}"
+  - human: "@Yumi apply step 1"
+    approvals:
+      mission.node.unblock: approve
+checks:
+  expect_calls:
+    - operation_id: mission.node.unblock
+      count: 1
+      agent_name: ops@1
+  forbid_auto:
+    - mission.node.unblock
+  max_confirmations: 1
+  final_state:
+    - operation_id: mission.node.get
+      input: { params: { node_id: "{{p.node.node-x.md}}" }, query: {}, body: null }
+      expect: { state: Available }

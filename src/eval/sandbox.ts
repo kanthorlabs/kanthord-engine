@@ -139,6 +139,7 @@ export interface Sandbox {
   native: NativePlaceholders;
   call: ReturnType<typeof humanCaller>;
   operation(id: string): Operation;
+  find(id: string): Operation | undefined;
 }
 
 export interface PlayedCase {
@@ -200,6 +201,8 @@ export async function openSandbox(
     native: { platform: credential.platform },
     call: humanCaller(fixture),
     operation: (id) => registry.get(id).operation,
+    find: (id) =>
+      registry.all().find(({ operation }) => operation.id === id)?.operation,
   };
 }
 
@@ -389,7 +392,12 @@ async function provisionFixture(
       "node_id" in item ? [[item.filename, item.node_id]] : [],
     ),
   );
-  return { project_id: project.id, nodes, evidence: {} };
+  return {
+    project_id: project.id,
+    mission_id: mission.id,
+    nodes,
+    evidence: {},
+  };
 }
 
 function failureDetail(error: unknown): string {
@@ -649,7 +657,10 @@ function membersObservation(
       observationOf(
         session.entries.filter(
           (entry) =>
-            entry.session_id === member.session_id && entry.id !== greeting,
+            (entry.session_id === member.session_id ||
+              (entry.phase !== undefined &&
+                entry.agent_name === member.agent_name)) &&
+            entry.id !== greeting,
         ),
       ),
     ]),
@@ -769,8 +780,11 @@ export async function runTurns(
     unexpected_approval: tally.unexpected,
     summary: summaryOf(final),
   };
-  const score = await scoreRun(run.checks, observation, (id, input) =>
-    sandbox.call(sandbox.operation(id), input),
+  const score = await scoreRun(
+    run.checks,
+    observation,
+    (id, input) => sandbox.call(sandbox.operation(id), input),
+    sandbox.find,
   );
   const summarizer = sandbox.summarizer.durations.length
     ? sandbox.summarizer

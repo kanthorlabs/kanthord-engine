@@ -1,0 +1,45 @@
+id: plan-fix-node
+fixtures:
+  p: fix.json
+setup:
+  - operation_id: mission.node.pause
+    input:
+      params: { node_id: "{{p.node.node-x.md}}" }
+      query: {}
+      body: { reason: "hold", expected_mission_version: 5, expected_state: Available, expected_attempt: 0 }
+  - operation_id: mission.node.block
+    input:
+      params: { node_id: "{{p.node.node-x.md}}" }
+      query: {}
+      body: { reason: "block", expected_mission_version: 5, expected_state: Paused, expected_attempt: 0 }
+turns:
+  - human: "Plan the fix for node {{p.node.node-x.md}}. It has no test node. Add one new implement node named \"Export report tests\" with the filename node-t.md, the binding repo and the verification pnpm test. It depends on node {{p.node.node-x.md}}."
+checks:
+  plan_contract: true
+  expect_calls:
+    - operation_id: mission.import.preview
+      count: 1
+  reply_contains:
+    - "{{p.node.node-x.md}}"
+    - Export report tests
+    - mission.import.apply
+  reply_forbids:
+    - "actor:(?!(?:yumi|human|worker)\\b)"
+    - "(?i:format\\W+markdown)"
+  forbid_calls:
+    - operation_id: mission.node.pause
+    - operation_id: mission.node.resume
+    - operation_id: mission.node.check
+    - operation_id: mission.node.priority.set
+    - operation_id: mission.dependency.add
+    - operation_id: mission.dependency.remove
+    - operation_id: project.pause
+    - operation_id: project.resume
+    - operation_id: agent.cooldown.clear
+    - operation_id: mission.node.unblock
+    - operation_id: mission.node.block
+    - operation_id: mission.node.create
+    - operation_id: mission.node.update
+    - operation_id: mission.proposal.decide
+    - operation_id: mission.criterion.set
+    - operation_id: mission.import.apply

@@ -27,6 +27,7 @@ const CaseErrorCode = {
 export const ReferenceKind = {
   NativePlatform: "native_platform",
   ProjectId: "project_id",
+  MissionId: "mission_id",
   Node: "node",
   Evidence: "evidence",
 } as const;
@@ -46,7 +47,7 @@ export const AutoMode = { On: "on", Off: "off" } as const;
 
 const PLACEHOLDER = /\{\{([^{}]*)\}\}/g;
 const REFERENCE =
-  /^([\w-]+)\.(?:(project_id)|node\.(.+)|evidence\.(.+?)(?:\.asset\.(\d+))?)$/;
+  /^([\w-]+)\.(?:(project_id)|(mission_id)|node\.(.+)|evidence\.(.+?)(?:\.asset\.(\d+))?)$/;
 const TEXT_MEDIA_PREFIX = "text/";
 const AGENT_NAME = /^[a-z][a-z0-9-]*@\d+$/;
 
@@ -157,6 +158,7 @@ export interface EvidenceIds {
 
 export interface FixtureIds {
   project_id: string;
+  mission_id: string;
   nodes: Record<string, string>;
   evidence: Record<string, EvidenceIds>;
 }
@@ -188,12 +190,14 @@ function parseReference(body: string): Reference {
       CaseErrorCode.PlaceholderUnknown,
       "A placeholder has no valid form.",
     );
-  const [, key, project, node, evidence, asset] = match;
+  const [, key, project, mission, node, evidence, asset] = match;
   const kind = project
     ? ReferenceKind.ProjectId
-    : node
-      ? ReferenceKind.Node
-      : ReferenceKind.Evidence;
+    : mission
+      ? ReferenceKind.MissionId
+      : node
+        ? ReferenceKind.Node
+        : ReferenceKind.Evidence;
   return {
     key: key!,
     kind,
@@ -236,6 +240,7 @@ function checkReference(
   const known =
     fixture !== undefined &&
     (reference.kind === ReferenceKind.ProjectId ||
+      reference.kind === ReferenceKind.MissionId ||
       nodeFilenames(fixture).includes(reference.filename));
   if (!known)
     throw new CodedError(
@@ -267,6 +272,8 @@ function lookup(
   const fixture = ids[reference.key];
   if (reference.kind === ReferenceKind.ProjectId)
     return resolved(fixture?.project_id, reference);
+  if (reference.kind === ReferenceKind.MissionId)
+    return resolved(fixture?.mission_id, reference);
   if (reference.kind === ReferenceKind.Node)
     return resolved(fixture?.nodes[reference.filename], reference);
   const evidence = fixture?.evidence[reference.filename];
