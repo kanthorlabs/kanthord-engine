@@ -1,0 +1,22 @@
+id: guard-summary-plain
+kind: summary
+instruction: "carry the refund path"
+summary: |
+  Goal
+  Carry the refund path of project shop.
+
+  Facts and ids
+  Project shop holds node_7 (Refund API, Available) and node_9 (Refund email, Blocked). node_9 depends on node_7.
+
+  Decisions
+  The refund path runs from node_7 to node_9.
+
+  Acts done in the earlier conversation
+  None.
+
+  Open in the earlier conversation
+  node_9 is still blocked; no decision was made.
+
+  Guest text (attributed)
+  None.
+danger: false

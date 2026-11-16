@@ -105,12 +105,19 @@ const seedStepSchema = z.discriminatedUnion("step", [
 ]);
 export type SeedStepValue = z.infer<typeof seedStepSchema>;
 
-const turnSchema = z.strictObject({
+const humanTurnSchema = z.strictObject({
   human: z.string().min(1),
   approvals: z
     .record(z.string(), z.enum([ApprovalAnswer.Approve, ApprovalAnswer.Reject]))
     .default({}),
 });
+
+const forkTurnSchema = z.strictObject({
+  fork: z.strictObject({ text: z.string().min(1) }),
+});
+
+const turnSchema = z.union([humanTurnSchema, forkTurnSchema]);
+export type Turn = z.infer<typeof turnSchema>;
 
 export const caseSchema = z.strictObject({
   id: caseIdSchema,

@@ -8,18 +8,24 @@ import {
 } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import type { TestContext } from "node:test";
-import type { Api, Credential, Model } from "@earendil-works/pi-ai";
+import type {
+  Api,
+  AssistantMessage,
+  Credential,
+  Model,
+} from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { parse } from "yaml";
 import { z } from "zod";
 import { PromptPart } from "../agent/contract.ts";
 import { loadPi } from "../agent/pi.ts";
 import { digest } from "../agent/prompt-composer.ts";
-import { GUARD_PROMPT } from "../agent/prompt-assets.ts";
+import { GUARD_PROMPT, GUARD_SUMMARY_PROMPT } from "../agent/prompt-assets.ts";
 import { layerOf } from "../agent/prompt-render.ts";
 import { SecretShape } from "../custody/contract.ts";
 import { CodedError } from "../kernel/errors.ts";
 import { canonicalJSON } from "../kernel/json.ts";
+import { isObject } from "../kernel/values.ts";
 import { piProviderId } from "../kernel/pi-provider.ts";
 import { connectModel } from "../llm/model-connector.ts";
 import { ReasoningLevel } from "../llm/platforms.ts";
@@ -28,14 +34,19 @@ import type { NativeCredential } from "../apps/server/test-support.ts";
 import { missionOperations } from "../mission/contract.ts";
 import {
   GuardCause,
+  GuardSummaryCause,
   type WorkbenchConfiguration,
 } from "../workbench/contract.ts";
 import {
+  checkSummary,
   classifyCall,
   ClassifyKind,
   decide,
   guardRequest,
   GuardTier,
+  parsedSummaryVerdict,
+  SummaryVerdict,
+  visibleText,
   type WorkbenchModelRuntimeFactory,
 } from "../workbench/index.ts";
 import { EVAL_DIRECTORY } from "./case.ts";
@@ -50,7 +61,15 @@ import {
   type RunResult,
 } from "./compare.ts";
 import {
+  scoreSummaryRun,
+  SummaryDecided,
+  type SummaryRecord,
+  summaryReportOf,
+} from "./score.ts";
+import {
   engineRevision,
+  LATENCY_FRACTIONS,
+  percentile,
   readHistory,
   RunErrorCode,
   summaryLines,
@@ -78,11 +97,10 @@ const CASE_AGENT = "ops@1";
 const CREDENTIAL_LEAD_MS = 600000;
 const CREDENTIAL_ID = "guard-eval";
 const PROOF_PROMPT = "guard.md";
+const PROOF_SUMMARY_PROMPT = "guard-summary.md";
+const SUMMARY_KIND = "summary";
 const CONCURRENCY = 4;
-const P50 = 0.5;
-const P95 = 0.95;
 const NO_RUNS = 0;
-const MILLISECONDS_ZERO = 0;
 const JSON_INDENT = 2;
 const GUARD_DIRECTORY_NAME = "guard";
 
@@ -107,8 +125,28 @@ export const guardCaseSchema = z
   });
 export type GuardCase = z.infer<typeof guardCaseSchema>;
 
+export const summaryCaseSchema = z.strictObject({
+  id: caseIdSchema,
+  kind: z.literal(SUMMARY_KIND),
+  instruction: z.string().min(1),
+  summary: z.string().min(1),
+  danger: z.boolean(),
+  gate: z.literal(false).optional(),
+});
+export type SummaryCase = z.infer<typeof summaryCaseSchema>;
+
 export interface LoadedGuardCase extends GuardCase {
   case_digest: string;
+}
+
+export interface LoadedSummaryCase extends SummaryCase {
+  case_digest: string;
+}
+
+export type LoadedCase = LoadedGuardCase | LoadedSummaryCase;
+
+function isSummary(loaded: LoadedCase): loaded is LoadedSummaryCase {
+  return "kind" in loaded;
 }
 
 export interface GuardCaseSource {
@@ -132,6 +170,36 @@ const sweepSchema = z.strictObject({
   auto_rate: z.number().min(0).max(1),
 });
 
+const summaryRecordSchema = z.strictObject({
+  case_id: z.string(),
+  danger: z.boolean(),
+  gate: z.boolean(),
+  decided: z.enum(SummaryDecided),
+  verdict: z.enum(SummaryDecided).nullable(),
+  confidence: z.number().nullable(),
+  cause: z.enum(GuardSummaryCause).nullable(),
+});
+
+const summaryMetricsSchema = z.strictObject({
+  false_pass: z.int().nonnegative(),
+  summary_pass_rate: z.number().min(0).max(1),
+  causes: z.record(z.string(), z.int().nonnegative()),
+  ungated: z.array(summaryRecordSchema),
+  verdicts: z.array(summaryRecordSchema),
+  sweep: z.array(
+    z.strictObject({
+      threshold: z.number(),
+      false_pass: z.int().nonnegative(),
+      pass_rate: z.number().min(0).max(1),
+    }),
+  ),
+  latency_ms: z.strictObject({
+    p50: z.number().nonnegative(),
+    p95: z.number().nonnegative(),
+  }),
+  cost: z.number().nonnegative(),
+});
+
 const metricsShape = {
   false_auto: z.int().nonnegative(),
   auto_rate: z.number().min(0).max(1),
@@ -143,6 +211,7 @@ const metricsShape = {
   cost: z.number().nonnegative(),
   verdicts: z.array(verdictRecordSchema),
   sweep: z.array(sweepSchema),
+  summary: summaryMetricsSchema,
 };
 export const guardRunSchema = evalRunSchema.extend(metricsShape);
 export type GuardRun = z.infer<typeof guardRunSchema>;
@@ -166,12 +235,13 @@ export interface GuardSuiteOptions {
 }
 
 interface GuardJob {
-  loaded: LoadedGuardCase;
+  loaded: LoadedCase;
 }
 
 interface PlayedRun {
   result: RunResult;
-  record: VerdictRecord;
+  record: VerdictRecord | null;
+  summary: SummaryRecord | null;
 }
 
 interface GuardModel {
@@ -179,9 +249,11 @@ interface GuardModel {
   model: Model<Api>;
 }
 
-export function parseGuardCase(source: GuardCaseSource): LoadedGuardCase {
+export function parseGuardCase(source: GuardCaseSource): LoadedCase {
   const raw: unknown = parse(source.text);
-  const value = guardCaseSchema.parse(raw);
+  const value = (
+    isObject(raw) && "kind" in raw ? summaryCaseSchema : guardCaseSchema
+  ).parse(raw);
   if (value.id !== source.id)
     throw new CodedError(
       GuardErrorCode.CaseInvalid,
@@ -198,7 +270,7 @@ export function parseGuardCase(source: GuardCaseSource): LoadedGuardCase {
 export function loadGuardSuite(
   ids: readonly string[],
   root = EVAL_DIRECTORY,
-): LoadedGuardCase[] {
+): LoadedCase[] {
   const directory = join(root, GUARD_DIRECTORY_NAME);
   const files = readdirSync(directory)
     .filter((name) => extname(name) === CASE_EXTENSION)
@@ -271,14 +343,59 @@ async function connectedModel(
 function metered(
   runtime: Pick<ModelRuntime, "complete">,
   spend: { input: number; output: number; cost: number },
+  replies: AssistantMessage[] = [],
 ): Pick<ModelRuntime, "complete"> {
   return {
     complete: async (...args) => {
       const reply = await runtime.complete(...args);
+      replies.push(reply);
       spend.input += reply.usage.input;
       spend.output += reply.usage.output;
       spend.cost += reply.usage.cost.total;
       return reply;
+    },
+  };
+}
+
+async function playSummaryRun(
+  guard: GuardModel,
+  loaded: LoadedSummaryCase,
+  signal: AbortSignal,
+): Promise<PlayedRun> {
+  const started = Date.now();
+  const spend = { input: 0, output: 0, cost: 0 };
+  const replies: AssistantMessage[] = [];
+  const answer = await checkSummary({
+    runtime: metered(guard.runtime, spend, replies),
+    model: guard.model,
+    instruction: visibleText(loaded.instruction),
+    summary: visibleText(loaded.summary),
+    signal,
+  });
+  const reply = replies.at(-1);
+  const verdict = reply ? parsedSummaryVerdict(reply) : null;
+  const decided =
+    answer.decision === SummaryVerdict.Pass
+      ? SummaryDecided.Pass
+      : SummaryDecided.Refuse;
+  const score = scoreSummaryRun(loaded.danger, decided);
+  return {
+    record: null,
+    summary: {
+      case_id: loaded.id,
+      danger: loaded.danger,
+      gate: loaded.gate !== false,
+      decided,
+      verdict: verdict?.verdict ?? null,
+      confidence: verdict?.confidence ?? null,
+      cause: answer.decision === SummaryVerdict.Pass ? null : answer.cause,
+    },
+    result: {
+      ...score,
+      input_tokens: spend.input,
+      output_tokens: spend.output,
+      cost: spend.cost,
+      duration_ms: Date.now() - started,
     },
   };
 }
@@ -314,6 +431,7 @@ async function playRun(
   const passed = decided === loaded.expect;
   return {
     record,
+    summary: null,
     result: {
       passed,
       checks: [
@@ -381,18 +499,32 @@ function rate(count: number, total: number): number {
   return total === NO_RUNS ? 0 : count / total;
 }
 
-function percentile(values: readonly number[], fraction: number): number {
-  if (!values.length) return MILLISECONDS_ZERO;
-  const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.max(Math.ceil(sorted.length * fraction) - 1, 0)]!;
+function summaryMetricsOf(played: readonly PlayedRun[]): GuardRun["summary"] {
+  const runs = played.filter(({ summary }) => summary !== null);
+  const records = runs.map(({ summary }) => summary!);
+  const durations = runs.map(({ result }) => result.duration_ms);
+  return {
+    ...summaryReportOf(records, SWEEP_THRESHOLDS),
+    verdicts: records,
+    latency_ms: {
+      p50: percentile(durations, LATENCY_FRACTIONS.p50),
+      p95: percentile(durations, LATENCY_FRACTIONS.p95),
+    },
+    cost: runs.reduce((sum, { result }) => sum + result.cost, 0),
+  };
 }
 
 function metricsOf(
-  suite: readonly LoadedGuardCase[],
-  played: readonly PlayedRun[],
+  suite: readonly LoadedCase[],
+  allPlayed: readonly PlayedRun[],
 ): Pick<GuardRun, keyof typeof metricsShape> {
-  const byId = new Map(suite.map((loaded) => [loaded.id, loaded]));
-  const records = played.map(({ record }) => record);
+  const played = allPlayed.filter(({ record }) => record !== null);
+  const byId = new Map(
+    suite
+      .filter((loaded): loaded is LoadedGuardCase => !isSummary(loaded))
+      .map((loaded) => [loaded.id, loaded]),
+  );
+  const records = played.map(({ record }) => record!);
   const dangerous = records.filter(({ case_id }) => byId.get(case_id)!.danger);
   const expected = records.filter(
     ({ case_id }) => byId.get(case_id)!.expect === GuardExpect.Auto,
@@ -418,12 +550,13 @@ function metricsOf(
       records.length,
     ),
     latency_ms: {
-      p50: percentile(durations, P50),
-      p95: percentile(durations, P95),
+      p50: percentile(durations, LATENCY_FRACTIONS.p50),
+      p95: percentile(durations, LATENCY_FRACTIONS.p95),
     },
     cost: played.reduce((sum, { result }) => sum + result.cost, 0),
     verdicts: records,
     sweep: SWEEP_THRESHOLDS.map(sweepOf),
+    summary: summaryMetricsOf(allPlayed),
   };
 }
 
@@ -441,6 +574,11 @@ function promptDigests(): EvalRun["prompt_digests"] {
       layer: layerOf(PromptPart.Role),
       source: PROOF_PROMPT,
       digest: digest(GUARD_PROMPT),
+    },
+    {
+      layer: layerOf(PromptPart.Role),
+      source: PROOF_SUMMARY_PROMPT,
+      digest: digest(GUARD_SUMMARY_PROMPT),
     },
   ];
 }
@@ -465,7 +603,7 @@ function allPassed(results: readonly RunResult[]): boolean {
 }
 
 function passRateFor(
-  loaded: LoadedGuardCase,
+  loaded: LoadedCase,
   results: readonly RunResult[],
   repeat: number,
 ): number {
@@ -495,6 +633,19 @@ function finish(guardRun: GuardRun, options: GuardSuiteOptions): GuardRun {
       (item) =>
         `sweep ${item.threshold} false_auto ${item.false_auto} auto_rate ${item.auto_rate}`,
     ),
+    `summary_false_pass ${run.summary.false_pass}`,
+    `summary_pass_rate ${run.summary.summary_pass_rate}`,
+    `summary_causes ${JSON.stringify(run.summary.causes)}`,
+    `summary_latency_p50_ms ${run.summary.latency_ms.p50}`,
+    `summary_latency_p95_ms ${run.summary.latency_ms.p95}`,
+    `summary_cost ${run.summary.cost}`,
+    ...run.summary.sweep.map(
+      (item) =>
+        `summary_sweep ${item.threshold} false_pass ${item.false_pass} pass_rate ${item.pass_rate}`,
+    ),
+    ...run.summary.ungated.map(
+      (item) => `ungated ${item.case_id} ${item.decided}`,
+    ),
   ])
     print(line);
   return run;
@@ -512,20 +663,24 @@ async function playAll(
       ...(await Promise.all(
         jobs
           .slice(start, start + CONCURRENCY)
-          .map(({ loaded }) => playRun(guard, loaded, t.signal)),
+          .map(({ loaded }) =>
+            isSummary(loaded)
+              ? playSummaryRun(guard, loaded, t.signal)
+              : playRun(guard, loaded, t.signal),
+          ),
       )),
     );
   return played;
 }
 
-function jobsOf(suite: readonly LoadedGuardCase[], repeat: number): GuardJob[] {
+function jobsOf(suite: readonly LoadedCase[], repeat: number): GuardJob[] {
   return suite.flatMap((loaded) =>
     Array.from({ length: repeat }, () => ({ loaded })),
   );
 }
 
 function groupResults(
-  suite: readonly LoadedGuardCase[],
+  suite: readonly LoadedCase[],
   played: readonly PlayedRun[],
   repeat: number,
 ): Map<string, RunResult[]> {
@@ -542,7 +697,7 @@ function groupResults(
 }
 
 function runOf(
-  suite: readonly LoadedGuardCase[],
+  suite: readonly LoadedCase[],
   played: readonly PlayedRun[],
   options: GuardSuiteOptions,
 ): GuardRun {
@@ -573,7 +728,7 @@ function runOf(
 }
 
 function rerunOf(
-  suite: readonly LoadedGuardCase[],
+  suite: readonly LoadedCase[],
   played: readonly PlayedRun[],
   options: GuardSuiteOptions,
 ): GuardRun {
@@ -621,7 +776,9 @@ export async function runGuardSuite(
       : runOf(suite, played, options),
     options,
   );
-  if (!options.rerun && !options.cases.length && run.false_auto === NO_RUNS)
+  const gatesPassed =
+    run.false_auto === NO_RUNS && run.summary.false_pass === NO_RUNS;
+  if (!options.rerun && !options.cases.length && gatesPassed)
     writeProof(options.proof, run);
   return run;
 }

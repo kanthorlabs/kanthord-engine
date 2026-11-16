@@ -1,0 +1,111 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: workbench.session.fork
+    tags:
+      - workbench
+    description: Fork a workbench conversation into a new conversation. The server
+      summarizes the source, guard@1 checks the summary, and only after a pass
+      does the server write the fork and start the first run on `text`. Error
+      `workbench.fork.summary_refused` answers `cause` and `reason`. `reason` is
+      null except for cause `refused`.
+    x-access-policy: human
+    x-timeout-ms: 90000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/workbench.session.fork.Input/properties/params/prop\
+            erties/session_id"
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/workbench.session.fork.Input/properties/body"
+    responses:
+      "202":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/workbench.session.fork.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    workbench.session.fork.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            session_id:
+              type: string
+              minLength: 44
+              maxLength: 44
+              pattern: ^workbench_session_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: workbench_session_ followed by a canonical 26-character uppercase
+                ULID.
+          required:
+            - session_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            text:
+              type: string
+              minLength: 1
+          required:
+            - text
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    workbench.session.fork.Output:
+      type: object
+      properties:
+        session_id:
+          type: string
+          minLength: 44
+          maxLength: 44
+          pattern: ^workbench_session_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: workbench_session_ followed by a canonical 26-character uppercase
+            ULID.
+        run_active:
+          type: boolean
+          const: true
+      required:
+        - session_id
+        - run_active
+      additionalProperties: false

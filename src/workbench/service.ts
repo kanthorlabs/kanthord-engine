@@ -15,6 +15,7 @@ import {
   CancellationContext,
   cancelled,
   type Context,
+  joined,
   reasonOf,
 } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
@@ -76,6 +77,7 @@ import {
   ActionOutcome,
   type ConversationMember,
   GUARD_AGENT_NAME,
+  GuardSummaryCause,
   MessageDelivery,
   type PendingApproval,
   type QueuedMessage,
@@ -100,6 +102,7 @@ import {
 } from "./contract.ts";
 import { missionOperations } from "../mission/contract.ts";
 import {
+  forkMaterial,
   lastAnswerer,
   lastTurnEntry,
   type MentionMatch,
@@ -111,7 +114,13 @@ import {
   resolveMention,
 } from "./conversation.ts";
 import { offerActionTool } from "./actions.ts";
-import { classifyCall } from "./guard-classifier.ts";
+import {
+  checkSummary,
+  classifyCall,
+  type SummaryDecision,
+  SummaryVerdict,
+} from "./guard-classifier.ts";
+import { forkSummaryRequest, summarize, visibleText } from "./fork-summary.ts";
 import {
   GuardAction,
   type GuardClassifier,
@@ -135,10 +144,13 @@ import {
 } from "./tools.ts";
 import {
   actionSettled,
+  appendForkOpening,
   appendOpening,
   appendRecord,
   createSession,
   findSession,
+  forkedFrom,
+  forkSourceTitle,
   hostIdOf,
   lastModel,
   lastThinkingLevel,
@@ -207,6 +219,31 @@ interface BuiltRuntime {
   model: Model<Api>;
   credentials: ReturnType<Dependencies["workbenchCredentials"]>;
   lifetime: CancellationContext;
+}
+
+export interface ForkInput {
+  text: string;
+}
+
+interface RuntimeOwner {
+  id: string;
+  configuration: WorkbenchConfiguration;
+  requester: HumanIdentity | undefined;
+}
+
+interface SummaryInput {
+  resolved: Resolved;
+  request: ReturnType<typeof forkSummaryRequest>;
+}
+
+interface SummaryCheckInput {
+  instruction: string;
+  summary: string;
+}
+
+interface ForkSummary {
+  summary: string;
+  model: Model<Api>;
 }
 
 interface GuardRuntime {
@@ -341,6 +378,7 @@ const IDLE_SESSION = {
   secrets: async () => [],
 } as const;
 const NOT_FOUND_INDEX = -1;
+const SUMMARY_REFUSED_LOG = "workbench.fork.summary_refused";
 const AGENT_START = "agent_start";
 const AGENT_END = "agent_end";
 const TOOL_EXECUTION_END = "tool_execution_end";
@@ -366,6 +404,27 @@ function sessionNotFound(sessionId: string): OperationError {
     WorkbenchErrorCode.SessionNotFound,
     "Workbench session not found.",
     { session_id: sessionId },
+  );
+}
+
+function summaryFailed(sessionId: string): OperationError {
+  return new OperationError(
+    HttpStatus.BadGateway,
+    WorkbenchErrorCode.SummaryFailed,
+    "The summary of the workbench conversation failed.",
+    { session_id: sessionId },
+  );
+}
+
+function summaryRefused(
+  cause: GuardSummaryCause,
+  reason: string | null,
+): OperationError {
+  return new OperationError(
+    HttpStatus.Conflict,
+    WorkbenchErrorCode.SummaryRefused,
+    "The guard refused the summary of the workbench conversation.",
+    { cause, reason },
   );
 }
 
@@ -503,16 +562,19 @@ export class WorkbenchService implements Service {
     };
   }
 
-  private resolveGuard(tx: Transaction, session: OpenSession): GuardResolved {
-    const { requester } = session;
-    if (!requester) throw refused(session.id);
+  private resolveGuard(
+    tx: Transaction,
+    sessionId: string,
+    requester: HumanIdentity | undefined,
+  ): GuardResolved {
+    if (!requester) throw refused(sessionId);
     const { credential, platform, agentProvider } = this.authorizeGuard(
       tx,
       requester,
-      session.id,
+      sessionId,
     );
     const metadata = this.dependencies.credentialMetadata(tx, credential);
-    if (!metadata) throw refused(session.id);
+    if (!metadata) throw refused(sessionId);
     const model =
       getAgentDeclaration(GUARD_AGENT_NAME)?.pinned_model_identifier;
     assert.ok(model);
@@ -526,19 +588,19 @@ export class WorkbenchService implements Service {
     };
   }
 
-  private startGuardRuntime(
-    session: OpenSession,
+  private connectGuard(
+    owner: Pick<RuntimeOwner, "id" | "requester">,
     resolved: GuardResolved,
-    key: string,
-  ): GuardSession {
+    signal: AbortSignal,
+  ): Promise<GuardRuntime> {
     const credentials = this.dependencies.workbenchCredentials({
-      session_id: session.id,
+      session_id: owner.id,
       platform: resolved.provider,
-      requester: () => session.requester,
+      requester: () => owner.requester,
       authorize: (tx, requester, sessionId) =>
         this.authorizeGuard(tx, requester, sessionId),
     });
-    const ready = (
+    return (
       this.dependencies.modelRuntimeFactory ?? defaultModelRuntimeFactory
     )({
       credentials,
@@ -554,8 +616,16 @@ export class WorkbenchService implements Service {
         reasoning_effort: ReasoningLevel.Off,
       },
       metadata: resolved.metadata,
-      signal: this.shutdown.signal,
+      signal,
     });
+  }
+
+  private startGuardRuntime(
+    session: OpenSession,
+    resolved: GuardResolved,
+    key: string,
+  ): GuardSession {
+    const ready = this.connectGuard(session, resolved, this.shutdown.signal);
     const started = { key, ready };
     session.guard = started;
     ready.catch(() => {
@@ -571,7 +641,7 @@ export class WorkbenchService implements Service {
     let resolved: GuardResolved;
     try {
       resolved = this.dependencies.store.transaction((tx) =>
-        this.resolveGuard(tx, session),
+        this.resolveGuard(tx, session.id, session.requester),
       );
     } catch (error) {
       if (!(error instanceof OperationError)) throw error;
@@ -807,7 +877,7 @@ export class WorkbenchService implements Service {
   }
 
   private async buildRuntime(
-    session: OpenSession,
+    session: RuntimeOwner,
     resolved: Resolved,
     context: Context,
   ): Promise<BuiltRuntime> {
@@ -1258,6 +1328,7 @@ export class WorkbenchService implements Service {
       agent_name: session.agentName,
       configuration: { ...session.configuration },
       members: this.conversationMembers(session),
+      forked_from: forkedFrom(this.entries(session.manager)),
       entries: mergeEntries(this.memberEntries(session, true)),
       run_active: this.runActive(session),
       resume_command: resumeCommand(
@@ -1657,6 +1728,196 @@ export class WorkbenchService implements Service {
     };
   }
 
+  private requireLive(context: Context): void {
+    const reason = reasonOf(context.signal);
+    if (reason) throw reason;
+  }
+
+  private async summarizeSource(
+    caller: CallerContext,
+    source: OpenSession,
+    summary: SummaryInput,
+  ): Promise<ForkSummary> {
+    const built = await this.buildRuntime(
+      {
+        id: source.id,
+        configuration: source.configuration,
+        requester: humanOf(caller),
+      },
+      summary.resolved,
+      caller.context,
+    );
+    try {
+      const result = await summarize({
+        runtime: built.runtime,
+        model: built.model,
+        request: summary.request,
+        signal: caller.context.signal,
+      });
+      this.requireLive(caller.context);
+      if (!result.ok) throw summaryFailed(source.id);
+      return { summary: result.summary, model: built.model };
+    } finally {
+      built.lifetime.cancel();
+    }
+  }
+
+  private async checkSource(
+    caller: CallerContext,
+    source: OpenSession,
+    check: SummaryCheckInput,
+  ): Promise<SummaryDecision> {
+    const owner = { id: source.id, requester: humanOf(caller) };
+    let resolved: GuardResolved;
+    try {
+      resolved = this.dependencies.store.transaction((tx) =>
+        this.resolveGuard(tx, owner.id, owner.requester),
+      );
+    } catch (error) {
+      if (!(error instanceof OperationError)) throw error;
+      return this.unavailable();
+    }
+    const lifetime = new CancellationContext(
+      joined(caller.context, this.shutdown),
+    );
+    try {
+      const guard = await withDeadline(
+        this.connectGuard(owner, resolved, lifetime.signal),
+        caller.context,
+      ).catch((error: unknown) => {
+        if (!(error instanceof Diagnostic)) throw error;
+        return null;
+      });
+      if (guard === null) return this.unavailable();
+      return await checkSummary({
+        runtime: guard.runtime,
+        model: guard.model,
+        ...check,
+        signal: caller.context.signal,
+      });
+    } finally {
+      lifetime.cancel();
+    }
+  }
+
+  private unavailable(): SummaryDecision {
+    return {
+      decision: SummaryVerdict.Refuse,
+      cause: GuardSummaryCause.Unavailable,
+      reason: null,
+    };
+  }
+
+  private async writeFork(
+    caller: CallerContext,
+    source: OpenSession,
+    opening: ForkSummary & { provider: string; title: string },
+  ): Promise<OpenSession> {
+    const id = createIdentity(WORKBENCH_SESSION_PREFIX);
+    const place = sessionPlace(
+      this.dependencies.stateDirectory,
+      source.agentName,
+    );
+    const fork = newOpenSession({
+      id,
+      hostId: null,
+      agentName: source.agentName,
+      place,
+      manager: await createSession(place, id, {}),
+      configuration: { ...source.configuration },
+      requester: humanOf(caller),
+      autoMode: true,
+    });
+    fork.members.push(fork);
+    this.sessions.set(id, fork);
+    try {
+      this.syncEntries(fork, opening.provider);
+      appendRecord(fork.manager, {
+        kind: WorkbenchRecordKind.Fork,
+        source_title: opening.title,
+      });
+      appendForkOpening(fork.manager, {
+        model: opening.model,
+        sourceId: source.id,
+        summary: opening.summary,
+      });
+    } catch (error) {
+      this.discardFork(fork);
+      throw error;
+    }
+    return fork;
+  }
+
+  private discardFork(fork: OpenSession): void {
+    for (const member of fork.members) {
+      this.closeAgent(member);
+      this.sessions.delete(member.id);
+      const file = member.manager.getSessionFile();
+      if (file) rmSync(file, { force: true });
+    }
+  }
+
+  async fork(
+    caller: CallerContext,
+    sourceId: string,
+    input: ForkInput,
+  ): Promise<{ session_id: string; run_active: true }> {
+    const source = await this.session(sourceId);
+    this.requireHost(source);
+    const resolved = this.dependencies.store.transaction((tx) => {
+      resolveMention(tx, input.text, this.dependencies);
+      return this.resolve(tx, source.agentName, source.configuration);
+    });
+    const instruction = visibleText(input.text);
+    const members = this.memberEntries(source, true).map((member) => ({
+      id: member.sessionId,
+      displayName: displayNameOf(member.agentName),
+      entries: member.entries,
+    }));
+    const material = forkMaterial({
+      members,
+      authorName: humanOf(caller).name,
+      inProgress: this.runActive(source) ? source.run!.request : null,
+    });
+    const title = forkSourceTitle(
+      this.entries(source.manager),
+      source.manager.getSessionName(),
+    );
+    const { summary, model } = await this.summarizeSource(caller, source, {
+      resolved,
+      request: forkSummaryRequest(visibleText(material), instruction),
+    });
+    const visibleSummary = visibleText(summary);
+    const decision = await this.checkSource(caller, source, {
+      instruction,
+      summary: visibleSummary,
+    });
+    this.requireLive(caller.context);
+    if (decision.decision === SummaryVerdict.Refuse) {
+      this.dependencies.logger.info(
+        { session_id: sourceId, cause: decision.cause },
+        SUMMARY_REFUSED_LOG,
+      );
+      throw summaryRefused(decision.cause, decision.reason);
+    }
+    const fork = await this.writeFork(caller, source, {
+      summary: visibleSummary,
+      model,
+      provider: piProviderId(resolved.provider),
+      title,
+    });
+    try {
+      await this.message(caller, fork.id, {
+        text: input.text,
+        delivery: MessageDelivery.Queue,
+      });
+    } catch (error) {
+      this.discardFork(fork);
+      throw error;
+    }
+    return { session_id: fork.id, run_active: true };
+  }
+
   async removeQueued(
     sessionId: string,
     queuedMessageId: string,
@@ -1820,6 +2081,10 @@ export class WorkbenchService implements Service {
     );
     registry.register(workbenchOperations["session.get"], ({ params }) =>
       this.get(params.session_id),
+    );
+    registry.register(
+      workbenchOperations["session.fork"],
+      ({ params, body }, caller) => this.fork(caller, params.session_id, body),
     );
     registry.register(
       workbenchOperations["session.configure"],

@@ -14,6 +14,7 @@ import {
 import {
   BASE_PROMPT,
   GUARD_PROMPT,
+  GUARD_SUMMARY_PROMPT,
   SWE_AGENT_PROMPT,
   WORKBENCH_PROMPT,
 } from "../../agent/prompt-assets.ts";
@@ -36,6 +37,7 @@ import {
   AGENT_NAMES,
   AgentErrorCode,
   GuardClass,
+  GuardTask,
   PromptOrigin,
   PromptPart,
   ToolSource,
@@ -828,6 +830,81 @@ test("(security: refused path) agent.get of guard@1 answers the shipped text and
   assert.equal(guard.prompt.final, GUARD_PROMPT);
   assert.deepEqual(
     guard.prompt.parts?.map(({ origin }) => origin),
+    [PromptOrigin.Binary],
+  );
+});
+
+async function guardPrompt(
+  fixture: Awaited<ReturnType<typeof workbenchFixture>>,
+  query: { task?: GuardTask },
+) {
+  return completed(
+    await fixture.agent.get(
+      { params: { agent_name: "guard@1" }, query, body: null },
+      fixture.options,
+    ),
+  ).prompt;
+}
+
+test("(happy path) agent.get of guard@1 with task call or no task answers the guard.md part only", async (t) => {
+  const fixture = await workbenchFixture(t, []);
+  for (const query of [{ task: GuardTask.Call }, {}]) {
+    const prompt = await guardPrompt(fixture, query);
+    assert.equal(prompt.final, GUARD_PROMPT);
+    assert.deepEqual(
+      prompt.parts?.map(({ part, name }) => [part, name]),
+      [[PromptPart.Role, "guard.md"]],
+    );
+  }
+});
+
+test("(happy path) agent.get of guard@1 with task summary answers the guard-summary.md part only", async (t) => {
+  const fixture = await workbenchFixture(t, []);
+  const prompt = await guardPrompt(fixture, { task: GuardTask.Summary });
+  assert.equal(prompt.final, GUARD_SUMMARY_PROMPT);
+  assert.deepEqual(
+    prompt.parts?.map(({ part, name, origin, text }) => [
+      part,
+      name,
+      origin,
+      text,
+    ]),
+    [
+      [
+        PromptPart.Role,
+        "guard-summary.md",
+        PromptOrigin.Binary,
+        GUARD_SUMMARY_PROMPT,
+      ],
+    ],
+  );
+});
+
+test("(security: argument guard) agent.get of swe@1 with task summary answers a validation failure", async (t) => {
+  const fixture = await workbenchFixture(t, []);
+  failed(
+    await fixture.agent.get(
+      {
+        params: { agent_name: "swe@1" },
+        query: { task: GuardTask.Summary },
+        body: null,
+      },
+      fixture.options,
+    ),
+    HttpStatus.BadRequest,
+    "gateway.request.validation_failed",
+  );
+});
+
+test("(security: refused path) agent.get of guard@1 with task summary reads no override file", async (t) => {
+  const agentDirectory = temporary(t);
+  for (const name of ["guard@1.md", "base.md", "guard-summary.md"])
+    writeFileSync(join(agentDirectory, name), OVERRIDE_TEXT);
+  const fixture = await workbenchFixture(t, [], undefined, agentDirectory);
+  const prompt = await guardPrompt(fixture, { task: GuardTask.Summary });
+  assert.equal(prompt.final, GUARD_SUMMARY_PROMPT);
+  assert.deepEqual(
+    prompt.parts?.map(({ origin }) => origin),
     [PromptOrigin.Binary],
   );
 });

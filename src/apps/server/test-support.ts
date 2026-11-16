@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { simpleGit } from "simple-git";
 import { ulid } from "ulid";
@@ -93,6 +101,8 @@ import { workerMigrations } from "../../worker/index.ts";
 import { agentMigrations } from "../../agent/index.ts";
 import { workbenchMigrations } from "../../workbench/index.ts";
 import {
+  GUARD_SUMMARY_PASS_CONFIDENCE,
+  GUARD_SUMMARY_TOOL_NAME,
   WORKBENCH_SERVICE_NAME,
   type WorkbenchConfiguration,
   workbenchOperations,
@@ -3373,4 +3383,86 @@ export function heldAnswer(text: string) {
       return fauxAssistantMessage(text);
     },
   };
+}
+
+const FORK_USER_ROLE = "user";
+const FORK_SYSTEM_ROLE = "system";
+const FORK_MESSAGE_ENTRY = "message";
+const NO_FILES = 0;
+
+export type StoredEntry = Record<string, unknown>;
+
+export function pass(overrides: Record<string, unknown> = {}) {
+  return toolCall(GUARD_SUMMARY_TOOL_NAME, {
+    verdict: "pass",
+    reason: "The summary holds facts only.",
+    confidence: GUARD_SUMMARY_PASS_CONFIDENCE,
+    ...overrides,
+  });
+}
+
+export function textOf(content: unknown): string {
+  return isString(content)
+    ? content
+    : (content as { text?: string }[])
+        .map((block) => block.text ?? "")
+        .join("");
+}
+
+export function sessionFiles(state: string, agentName = AGENT): string[] {
+  const directory = join(state, "pi", "sessions", "workbench", agentName);
+  return readdirSync(directory).length > NO_FILES
+    ? readdirSync(directory).map((name) => join(directory, name))
+    : [];
+}
+
+export function fileOf(state: string, id: string, agentName = AGENT): string {
+  const file = sessionFiles(state, agentName).find((name) => name.includes(id));
+  assert.ok(file);
+  return file;
+}
+
+export function storedEntries(file: string): StoredEntry[] {
+  return readFileSync(file, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as StoredEntry);
+}
+
+export function storedMessages(entries: readonly StoredEntry[]) {
+  return entries
+    .filter((entry) => entry.type === FORK_MESSAGE_ENTRY)
+    .map((entry) => entry.message as { role: string; content: unknown })
+    .filter(({ role }) => role !== FORK_SYSTEM_ROLE)
+    .map(({ role, content }) => ({ role, text: textOf(content) }));
+}
+
+export function forkOf(
+  fixture: WorkbenchFixture,
+  sourceId: string,
+  text: string,
+  options: Parameters<
+    WorkbenchFixture["workbench"]["session.fork"]
+  >[1] = fixture.options,
+) {
+  return fixture.workbench["session.fork"](
+    { params: { session_id: sourceId }, query: {}, body: { text } },
+    options,
+  );
+}
+
+export function callsOf(fixture: WorkbenchFixture, systemPrompt: string) {
+  return fixture.provider.calls.filter(
+    (call) => call.systemPrompt === systemPrompt,
+  );
+}
+
+export function userRequestOf(call: {
+  messages: unknown;
+}): Record<string, string> {
+  const message = (call.messages as { role: string; content: unknown }[]).find(
+    ({ role }) => role === FORK_USER_ROLE,
+  );
+  assert.ok(message);
+  return JSON.parse(textOf(message.content)) as Record<string, string>;
 }

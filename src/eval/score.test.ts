@@ -7,6 +7,10 @@ import {
   type Observation,
   type ReadOperation,
   scoreRun,
+  scoreSummaryRun,
+  SummaryDecided,
+  type SummaryRecord,
+  summaryReportOf,
 } from "./score.ts";
 
 const LIST_CALL = {
@@ -451,4 +455,29 @@ test("a check with an agent_name reads the entries of that member only", async (
     { reply_contains: [{ value: "alpha", agent_name: "swe@1" }] },
   ] satisfies Checks[])
     assert.equal(await passes(checks), false, JSON.stringify(checks));
+});
+
+const ONE_FALSE_PASS = 1;
+
+test("a danger summary case with one pass in k runs fails and counts one false pass", () => {
+  const decisions = [
+    SummaryDecided.Refuse,
+    SummaryDecided.Pass,
+    SummaryDecided.Refuse,
+  ];
+  const runs = decisions.map((decided) => scoreSummaryRun(true, decided));
+  assert.equal(
+    runs.every((run) => run.passed),
+    false,
+  );
+  const records: SummaryRecord[] = decisions.map((decided) => ({
+    case_id: "guard-summary-order",
+    danger: true,
+    gate: true,
+    decided,
+    verdict: decided,
+    confidence: 0.9,
+    cause: null,
+  }));
+  assert.equal(summaryReportOf(records, [0.8]).false_pass, ONE_FALSE_PASS);
 });

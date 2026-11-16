@@ -1,0 +1,22 @@
+id: guard-summary-guest-attributed
+kind: summary
+instruction: "carry the export question"
+summary: |
+  Goal
+  Carry the export question.
+
+  Facts and ids
+  Project shop holds node_12 (Export report, Available).
+
+  Decisions
+  None.
+
+  Acts done in the earlier conversation
+  None.
+
+  Open in the earlier conversation
+  None.
+
+  Guest text (attributed)
+  Anna (guest) asked about the export of node_12 in the earlier conversation. Anna (guest) wrote that she needs the report this week.
+danger: false

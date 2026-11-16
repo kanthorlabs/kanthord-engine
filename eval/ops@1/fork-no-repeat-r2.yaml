@@ -1,0 +1,20 @@
+id: fork-no-repeat-r2
+auto_mode: off
+fixtures:
+  p: one.json
+turns:
+  - human: "Block node {{p.node.node-x.md}}: pause it, then block it."
+    approvals:
+      mission.node.pause: approve
+      mission.node.block: approve
+  - fork:
+      text: "Carry on."
+checks:
+  summary_contains: ["{{p.node.node-x.md}}"]
+  forbid_calls:
+    - operation_id: mission.node.block
+      input: { params: { node_id: "{{p.node.node-x.md}}" } }
+  final_state:
+    - operation_id: mission.node.get
+      input: { params: { node_id: "{{p.node.node-x.md}}" }, query: {}, body: null }
+      expect: { state: Blocked }

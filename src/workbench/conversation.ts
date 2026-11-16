@@ -9,8 +9,19 @@ import {
   renderTemplate,
   SHIPPED_TEMPLATES,
 } from "../agent/prompt-templates.ts";
-import type { MemberEntry, SessionEntry } from "./contract.ts";
-import { openingIds } from "./sessions.ts";
+import {
+  FORK_SOURCE_MAX_BYTES,
+  type MemberEntry,
+  type SessionEntry,
+  WORKBENCH_ACTION_RESULT_ENTRY,
+  WorkbenchRecordKind,
+} from "./contract.ts";
+import {
+  forkSummaryOf,
+  openingIds,
+  OpeningKind,
+  recordOf,
+} from "./sessions.ts";
 import type { Dependencies } from "./service.ts";
 
 const MENTION_PREFIX = "@";
@@ -22,6 +33,7 @@ const MESSAGE_ENTRY = "message";
 const ASSISTANT_ROLE = "assistant";
 const FINAL_STOP_REASON = "stop";
 const NO_CHARACTERS = 0;
+const HOST_INDEX = 0;
 const NOT_FOUND = -1;
 const FIRST_AFTER = 1;
 const PAIR_SEPARATOR = ",";
@@ -198,46 +210,261 @@ function relayItemOf(
   return isFinalAnswer(entry) ? `${author.displayName}: ${text}` : null;
 }
 
-function relayItems(member: RelayMember, input: RelayInput): string[] {
-  const since = input.startEntry
-    ? Date.parse(
-        member.entries.find((entry) => entry.id === input.startEntry)
-          ?.timestamp ?? "",
-      )
-    : BEFORE_ALL;
+interface RelayItems {
+  summary: string | null;
+  items: string[];
+}
+
+function forkEntryOf(members: readonly RelayMember[]): string | null {
+  const host = members[HOST_INDEX];
+  return host === undefined ? null : openingIds(host.entries).forkEntry;
+}
+
+function summaryOfEntry(
+  entry: SessionEntry,
+  forkEntry: string | null,
+): string | null {
+  const message = entry.message as
+    { role?: unknown; content?: unknown } | undefined;
+  return entry.id === forkEntry && entry.type === MESSAGE_ENTRY
+    ? forkSummaryOf(textOf(message?.content))
+    : null;
+}
+
+interface RelayLine {
+  summary: boolean;
+  text: string;
+}
+
+interface LineContext {
+  authorName: string;
+  forkEntry: string | null;
+}
+
+function relayLineOf(
+  author: RelayMember,
+  entry: SessionEntry,
+  context: LineContext,
+): RelayLine | null {
+  const summary = summaryOfEntry(entry, context.forkEntry);
+  if (summary !== null) return { summary: true, text: summary };
+  const text = relayItemOf(author, entry, context.authorName);
+  return text === null ? null : { summary: false, text };
+}
+
+function relaySince(member: RelayMember, input: RelayInput): number {
+  if (!input.startEntry) return BEFORE_ALL;
+  const started = member.entries.find((entry) => entry.id === input.startEntry);
+  return Date.parse(started?.timestamp ?? "");
+}
+
+function relayItems(member: RelayMember, input: RelayInput): RelayItems {
+  const since = relaySince(member, input);
   const items: RelayItem[] = [];
+  const summaries: RelayItem[] = [];
+  const context = {
+    authorName: input.authorName,
+    forkEntry: forkEntryOf(input.members),
+  };
   for (const author of input.members) {
     if (author.id === member.id) continue;
     const opening = openingIds(author.entries);
     for (const entry of author.entries) {
       const at = Date.parse(entry.timestamp);
-      if (opening.has(entry.id) || !(at > since)) continue;
-      const text = relayItemOf(author, entry, input.authorName);
-      if (text !== null) items.push({ at, text });
+      if (opening.hidden.has(entry.id) || !(at > since)) continue;
+      const line = relayLineOf(author, entry, context);
+      if (line === null) continue;
+      (line.summary ? summaries : items).push({ at, text: line.text });
     }
   }
-  return items
-    .sort((left, right) => left.at - right.at)
-    .map(({ text }) => text);
+  return {
+    summary: summaries[NO_CHARACTERS]?.text ?? null,
+    items: items
+      .sort((left, right) => left.at - right.at)
+      .map(({ text }) => text),
+  };
 }
 
 export function relayText(
   member: RelayMember,
   input: RelayInput,
 ): string | null {
-  const items = relayItems(member, input);
+  const { summary, items } = relayItems(member, input);
   const head = renderTemplate(
     input.templates ?? SHIPPED_TEMPLATES,
     PromptTemplate.Relay,
     {},
   );
-  const content = () => [head, ...items].join(ITEM_SEPARATOR);
+  const content = () =>
+    [head, ...(summary === null ? [] : [summary]), ...items].join(
+      ITEM_SEPARATOR,
+    );
   while (
     items.length > NO_CHARACTERS &&
     Buffer.byteLength(content(), BYTES_ENCODING) > RELAY_MAX_BYTES
   )
     items.shift();
-  return items.length > NO_CHARACTERS ? content() : null;
+  if (items.length === NO_CHARACTERS && summary === null) return null;
+  return clippedToBytes(content(), RELAY_MAX_BYTES);
+}
+
+const CUSTOM_MESSAGE_ENTRY = "custom_message";
+const FORK_SUMMARY_LABEL = "Summary of an earlier conversation:\n";
+const REPLACEMENT_CHARACTERS = /\uFFFD+$/;
+const NO_TEXT = "";
+const IN_PROGRESS_PREFIX = "In progress in the earlier conversation: ";
+
+export interface ForkConversation {
+  members: readonly RelayMember[];
+  authorName: string;
+  inProgress: string | null;
+}
+
+const ForkItemKind = {
+  Summary: "summary",
+  Human: "human",
+  Other: "other",
+} as const;
+type ForkItemKind = (typeof ForkItemKind)[keyof typeof ForkItemKind];
+
+interface ForkItem extends RelayItem {
+  kind: ForkItemKind;
+}
+
+function isActionResult(entry: SessionEntry): boolean {
+  return (
+    entry.type === CUSTOM_MESSAGE_ENTRY &&
+    entry.customType === WORKBENCH_ACTION_RESULT_ENTRY
+  );
+}
+
+function settledCards(members: readonly RelayMember[]): Set<string> {
+  const settled = new Set<string>();
+  for (const { entries } of members)
+    for (const entry of entries) {
+      const details = entry.details as { tool_call_id?: unknown } | undefined;
+      if (isActionResult(entry) && isString(details?.tool_call_id))
+        settled.add(details.tool_call_id);
+    }
+  return settled;
+}
+
+function cardLineOf(
+  entry: SessionEntry,
+  settled: ReadonlySet<string>,
+): string | null {
+  const record = recordOf(entry);
+  if (
+    record?.kind !== WorkbenchRecordKind.ActionOffer ||
+    settled.has(record.tool_call_id)
+  )
+    return null;
+  return `Open action card: ${record.operation_id} on ${record.target_id}. The owner has not run it.`;
+}
+
+interface ForkContext extends LineContext {
+  settled: ReadonlySet<string>;
+}
+
+interface ForkLine {
+  kind: ForkItemKind;
+  text: string;
+}
+
+function messageLineOf(
+  author: RelayMember,
+  entry: SessionEntry,
+  context: LineContext,
+): ForkLine | null {
+  const message = entry.message as
+    { role?: unknown; content?: unknown } | undefined;
+  const human = entry.type === MESSAGE_ENTRY && message?.role === USER_ROLE;
+  const summary = summaryOfEntry(entry, context.forkEntry);
+  if (summary !== null)
+    return {
+      kind: ForkItemKind.Summary,
+      text: `${FORK_SUMMARY_LABEL}${summary}`,
+    };
+  const text = relayItemOf(author, entry, context.authorName);
+  if (text === null) return null;
+  return { kind: human ? ForkItemKind.Human : ForkItemKind.Other, text };
+}
+
+function forkItemOf(
+  author: RelayMember,
+  entry: SessionEntry,
+  context: ForkContext,
+): ForkLine | null {
+  if (isActionResult(entry)) {
+    const text = textOf(entry.content);
+    return text.length === NO_CHARACTERS
+      ? null
+      : { kind: ForkItemKind.Other, text };
+  }
+  const card = cardLineOf(entry, context.settled);
+  if (card !== null) return { kind: ForkItemKind.Other, text: card };
+  return messageLineOf(author, entry, context);
+}
+
+function forkItems(conversation: ForkConversation): ForkItem[] {
+  const settled = settledCards(conversation.members);
+  const forkEntry = forkEntryOf(conversation.members);
+  const items: ForkItem[] = [];
+  for (const author of conversation.members) {
+    const { hidden } = openingIds(author.entries);
+    for (const entry of author.entries) {
+      if (hidden.has(entry.id)) continue;
+      const item = forkItemOf(author, entry, {
+        authorName: conversation.authorName,
+        forkEntry,
+        settled,
+      });
+      if (item !== null)
+        items.push({ ...item, at: Date.parse(entry.timestamp) });
+    }
+  }
+  return items.sort((left, right) => left.at - right.at);
+}
+
+function clippedToBytes(text: string, maxBytes: number): string {
+  const bytes = Buffer.from(text, BYTES_ENCODING);
+  if (bytes.length <= maxBytes) return text;
+  return bytes
+    .subarray(NO_CHARACTERS, maxBytes)
+    .toString(BYTES_ENCODING)
+    .replace(REPLACEMENT_CHARACTERS, NO_TEXT);
+}
+
+export function forkMaterial(conversation: ForkConversation): string {
+  const items = forkItems(conversation);
+  const summary = items.find(({ kind }) => kind === ForkItemKind.Summary);
+  const first = items.find(({ kind }) => kind === ForkItemKind.Human);
+  const pinned = [summary, first].flatMap((item) => (item ? [item.text] : []));
+  const rest = items
+    .filter((item) => item !== summary && item !== first)
+    .map(({ text }) => text);
+  const kept = [...rest];
+  const tail =
+    conversation.inProgress === null
+      ? []
+      : [`${IN_PROGRESS_PREFIX}${conversation.inProgress}.`];
+  const content = () => {
+    const omitted = rest.length - kept.length;
+    return [
+      ...pinned,
+      ...(omitted > NO_CHARACTERS
+        ? [`${omitted} earlier messages are not shown.`]
+        : []),
+      ...kept,
+      ...tail,
+    ].join(ITEM_SEPARATOR);
+  };
+  while (
+    kept.length > NO_CHARACTERS &&
+    Buffer.byteLength(content(), BYTES_ENCODING) > FORK_SOURCE_MAX_BYTES
+  )
+    kept.shift();
+  return clippedToBytes(content(), FORK_SOURCE_MAX_BYTES);
 }
 
 export interface MergeMember {
@@ -269,7 +496,11 @@ export function mergeEntries(
   after: ReadonlyMap<string, string> = new Map(),
 ): MemberEntry[] {
   const queues = members.map(({ sessionId, agentName, entries }) => {
-    const [internal] = openingIds(entries);
+    const { kind, hidden } = openingIds(entries);
+    const dropped =
+      kind === OpeningKind.Opening
+        ? [...hidden].slice(NO_CHARACTERS, FIRST_AFTER)
+        : [...hidden];
     const cursor = after.get(sessionId);
     const start =
       cursor === undefined
@@ -277,7 +508,7 @@ export function mergeEntries(
         : entries.findIndex((entry) => entry.id === cursor) + FIRST_AFTER;
     return entries
       .slice(start)
-      .filter((entry) => entry.id !== internal)
+      .filter((entry) => !dropped.includes(entry.id))
       .map((entry): MemberEntry => ({
         ...entry,
         session_id: sessionId,

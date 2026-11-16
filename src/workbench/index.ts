@@ -10,14 +10,19 @@ export {
   toolName,
   workbenchToolDeclarations,
 } from "./tools.ts";
-export { recordOf } from "./sessions.ts";
+export { forkSummaryOf, recordOf } from "./sessions.ts";
+export { visibleText } from "./fork-summary.ts";
 export { WorkbenchFootprint } from "./footprint.ts";
 export {
+  checkSummary,
   ClassifyKind,
   type ClassifyResult,
   classifyCall,
   decide,
+  decideSummary,
   GUARD_TOOL,
   guardRequest,
   GuardTier,
+  parsedSummaryVerdict,
+  SummaryVerdict,
 } from "./guard-classifier.ts";

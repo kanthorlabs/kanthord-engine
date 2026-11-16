@@ -30,6 +30,7 @@ import {
   playCase,
   type PlayedCase,
   type Sandbox,
+  type SummarizerMeter,
 } from "./sandbox.ts";
 
 export const EVAL_CONFIGURATION = {
@@ -49,6 +50,9 @@ const ENGINE_ROOT = join(EVAL_DIRECTORY, "..");
 const RUN_EXTENSION = ".json";
 const ENTRY_EXTENSION = ".entry.json";
 const JSON_INDENT = 2;
+const P50 = 0.5;
+const P95 = 0.95;
+const MILLISECONDS_ZERO = 0;
 
 type PromptDigest = EvalRun["prompt_digests"][number];
 
@@ -105,6 +109,27 @@ function resultOf(played: PlayedCase, durationMs: number): RunResult {
   };
 }
 
+export function percentile(
+  values: readonly number[],
+  fraction: number,
+): number {
+  if (!values.length) return MILLISECONDS_ZERO;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.max(Math.ceil(sorted.length * fraction) - 1, 0)]!;
+}
+
+export const LATENCY_FRACTIONS = { p50: P50, p95: P95 } as const;
+
+function forkLines(meters: readonly SummarizerMeter[]): string[] {
+  if (!meters.length) return [];
+  const durations = meters.flatMap((meter) => meter.durations);
+  return [
+    `fork_summary_p50_ms ${percentile(durations, P50)}`,
+    `fork_summary_p95_ms ${percentile(durations, P95)}`,
+    `fork_summary_cost ${meters.reduce((sum, meter) => sum + meter.cost, 0)}`,
+  ];
+}
+
 export function readHistory(path: string) {
   return existsSync(path)
     ? historySchema.parse(JSON.parse(readFileSync(path, "utf8")))
@@ -149,6 +174,7 @@ export class SuiteRun {
   private readonly options: SuiteOptions;
   private readonly suite: LoadedCase[];
   private readonly results = new Map<string, RunResult[]>();
+  private readonly summarizers: SummarizerMeter[] = [];
   private prompts: PromptDigest[] | null = null;
 
   constructor(options: SuiteOptions) {
@@ -183,6 +209,7 @@ export class SuiteRun {
     const results = this.results.get(job.loaded.id) ?? [];
     results.push(resultOf(played, Date.now() - started));
     this.results.set(job.loaded.id, results);
+    if (played.summarizer) this.summarizers.push({ ...played.summarizer });
   }
 
   finish(): EvalRun {
@@ -193,7 +220,8 @@ export class SuiteRun {
     writeFile(this.options.output, run);
     writeFile(this.entryPath(), historyEntryOf(run));
     const print = this.options.print ?? printToStandardError;
-    for (const line of summaryLines(run)) print(line);
+    for (const line of [...summaryLines(run), ...forkLines(this.summarizers)])
+      print(line);
     return run;
   }
 

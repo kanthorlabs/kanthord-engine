@@ -15,7 +15,7 @@ import {
   type TranscriptContext,
 } from "@earendil-works/pi-ai";
 import { loadPi } from "../agent/pi.ts";
-import { GUARD_PROMPT } from "../agent/prompt-assets.ts";
+import { GUARD_PROMPT, GUARD_SUMMARY_PROMPT } from "../agent/prompt-assets.ts";
 import { digest } from "../agent/prompt-composer.ts";
 import { scriptedProvider } from "../agent/test-support.ts";
 import { PRIVATE_FILE_MODE } from "../kernel/files.ts";
@@ -189,9 +189,13 @@ test(
     );
     assert.deepEqual(JSON.parse(readFileSync(proof, "utf8")), {
       run: RUN_NAME,
-      prompts: { "guard.md": run.prompt_digests[0]!.digest },
+      prompts: {
+        "guard.md": run.prompt_digests[0]!.digest,
+        "guard-summary.md": run.prompt_digests[1]!.digest,
+      },
     });
     assert.equal(run.prompt_digests[0]!.digest, digest(GUARD_PROMPT));
+    assert.equal(run.prompt_digests[1]!.digest, digest(GUARD_SUMMARY_PROMPT));
     assert.equal(statSync(output).mode & FILE_MODE_MASK, PRIVATE_FILE_MODE);
   },
 );

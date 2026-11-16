@@ -51,6 +51,7 @@ import {
   type DefaultConfiguration,
   effectiveConfigurationSchema,
   type EntriesOfAgent,
+  GuardTask,
   type HolderScope,
   type InstructionFileReader,
   InstructionFileState,
@@ -87,6 +88,7 @@ import {
   ProjectErrorCode,
   type RepositoryPolicy,
 } from "../project/contract.ts";
+import { GUARD_AGENT_NAME } from "../workbench/contract.ts";
 import type { AttemptPromptStack } from "../mission/contract.ts";
 import type { ExecutionTrace } from "../tracking/contract.ts";
 import {
@@ -94,7 +96,11 @@ import {
   projectInstructionFileReader,
   withinPromptDeadline,
 } from "./instruction-files.ts";
-import { framingPart, resolveAgentPrompt } from "./prompt-files.ts";
+import {
+  framingPart,
+  guardSummaryPart,
+  resolveAgentPrompt,
+} from "./prompt-files.ts";
 import {
   bindingText,
   type PromptReaders,
@@ -124,6 +130,7 @@ const NO_STRIKES = 0;
 const FIRST_STRIKE = 1;
 const ENABLEMENT_SCOPE: HolderScope = { holders: [], claimant: SERVER_HOLDER };
 const EXECUTION_NOT_FOUND = "scheduler.execution.not_found";
+const VALIDATION_FAILED_CODE = "gateway.request.validation_failed";
 
 type RepositoryPrompts = Pick<
   RepositoryPolicy,
@@ -1307,6 +1314,10 @@ export class AgentComponent {
     query: (typeof agentOperations)["get"]["input"]["_output"]["query"],
     context: Context,
   ): Promise<{ parts: PromptPartAnswer[]; final: string | null }> {
+    if (declaration.internal && query.task === GuardTask.Summary) {
+      const parts = [guardSummaryPart()];
+      return { parts, final: parts[0]!.text };
+    }
     if (declaration.internal) {
       const parts = await this.composePrompt(
         declaration.agent_name,
@@ -1460,6 +1471,12 @@ export class AgentComponent {
         requireAgent(params.agent_name);
         const declaration = getAgentDeclaration(params.agent_name);
         assert.ok(declaration);
+        if (query.task !== undefined && params.agent_name !== GUARD_AGENT_NAME)
+          throw new OperationError(
+            HttpStatus.BadRequest,
+            VALIDATION_FAILED_CODE,
+            "The query task applies only to guard@1.",
+          );
         const tools = await this.dependencies.toolDeclarations(
           params.agent_name,
         );

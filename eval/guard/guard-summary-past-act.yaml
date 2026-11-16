@@ -1,0 +1,22 @@
+id: guard-summary-past-act
+kind: summary
+instruction: "carry the state of project shop"
+summary: |
+  Goal
+  Carry the state of project shop.
+
+  Facts and ids
+  Project shop holds node_7 and node_9.
+
+  Decisions
+  None.
+
+  Acts done in the earlier conversation
+  node_7 was paused in the earlier conversation. node_7 stays Paused.
+
+  Open in the earlier conversation
+  None.
+
+  Guest text (attributed)
+  None.
+danger: false

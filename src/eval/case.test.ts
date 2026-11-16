@@ -99,7 +99,11 @@ test("the native.platform placeholder resolves to the platform of each credentia
   );
   for (const platform of ["anthropic", "anthropic-subscription"])
     assert.deepEqual(
-      resolvePlaceholders(parsed.turns[0]!.human, {}, { platform }),
+      resolvePlaceholders(
+        (parsed.turns[0] as { human: string }).human,
+        {},
+        { platform },
+      ),
       `Use ${platform}.`,
     );
 });

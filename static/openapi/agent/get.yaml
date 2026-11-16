@@ -24,6 +24,11 @@ pathItem:
         required: false
         schema:
           $ref: "#/components/schemas/agent.get.Input/properties/query/properties/view"
+      - name: task
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/agent.get.Input/properties/query/properties/task"
       - name: project_id
         in: query
         required: false
@@ -94,6 +99,11 @@ components:
               type: string
               enum:
                 - final
+            task:
+              type: string
+              enum:
+                - call
+                - summary
             project_id:
               type: string
               minLength: 1
