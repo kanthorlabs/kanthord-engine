@@ -21,7 +21,7 @@ The operations assistant Yumi applies a step when the owner sends `@Yumi apply s
 2. Export a mission with `mission--export` and `format=json`.
 3. Before the plan names a step that creates nodes, check the step with `mission--import--preview`. The import set uses `format: "json"`. Never use markdown.
 4. Name a step in the plan only when the preview accepts it.
-5. An item that needs a decision of Ulrich goes to Decisions, not to Review.
+5. An item that needs a decision of the owner goes to Decisions, not to Review.
 
 ## Output
 
@@ -41,7 +41,7 @@ Write the answer in Markdown with these sections, in this order. Write each sect
 - <risk> - mitigation:<…>
 
 ## Decisions
-- D1 - <question for Ulrich> - recommend:<option and reason> - alternatives:<option: trade-off; …>
+- D1 - <question for the owner> - recommend:<option and reason> - alternatives:<option: trade-off; …>
 
 ## Review
 - B1 - status:FIXED - action:YES - <name> - <description> - fix:<…> - why:<…>

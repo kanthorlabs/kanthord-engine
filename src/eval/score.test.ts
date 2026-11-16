@@ -562,6 +562,7 @@ test("plan_contract passes a valid plan and fails a wrong guard class and record
       planText().replace("source:mission.node.get", "source:project.list"),
       "fact_source",
     ],
+    [planText().replace('{"params"', "{params"), "input"],
   ];
   for (const [text, rule] of violations) {
     const result = await planFailures(text);

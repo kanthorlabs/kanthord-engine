@@ -18,6 +18,7 @@ export const PlanRule = {
   Guard: "guard",
   FactSource: "fact_source",
   ImportPreview: "import_preview",
+  Input: "input",
 } as const;
 
 const SECTIONS = [
@@ -57,6 +58,7 @@ interface Step {
   operation: string | undefined;
   guard: string | undefined;
   input: unknown;
+  inputValid: boolean;
 }
 
 function sectionLines(lines: readonly string[], heading: string): string[] {
@@ -79,13 +81,13 @@ function sectionFailures(lines: readonly string[]): string[] {
     : [`${PlanRule.Sections}: the text lacks ${SECTIONS.join(", ")} in order`];
 }
 
-function inputOf(line: string): unknown {
+function inputOf(line: string): { input: unknown; inputValid: boolean } {
   const text = INPUT_FIELD.exec(line)?.[FIRST_AFTER];
-  if (text === undefined) return undefined;
+  if (text === undefined) return { input: undefined, inputValid: true };
   try {
-    return JSON.parse(text);
+    return { input: JSON.parse(text), inputValid: true };
   } catch {
-    return undefined;
+    return { input: undefined, inputValid: false };
   }
 }
 
@@ -97,7 +99,7 @@ function stepsOf(lines: readonly string[]): Step[] {
       actor: ACTOR_FIELD.exec(line)?.[FIRST_AFTER],
       operation: OPERATION_FIELD.exec(line)?.[FIRST_AFTER],
       guard: GUARD_FIELD.exec(line)?.[FIRST_AFTER],
-      input: inputOf(line),
+      ...inputOf(line),
     }));
 }
 
@@ -130,6 +132,8 @@ function stepFailures(step: Step, lookup: OperationLookup): string[] {
       `${PlanRule.Operation}: ${label} names ${step.operation}, absent from the registry`,
     ];
   const failures: string[] = [];
+  if (!step.inputValid)
+    failures.push(`${PlanRule.Input}: ${label} holds no valid JSON input`);
   if (
     step.actor === YUMI_ACTOR &&
     !(
