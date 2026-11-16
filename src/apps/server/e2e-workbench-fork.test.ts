@@ -374,11 +374,11 @@ test(
     const [summarizer] = callsOf(fixture, FORK_SUMMARY_PROMPT);
     const { conversation } = userRequestOf(summarizer!);
     for (const line of [
-      "Ulrich to @RE: @RE look at the marker.",
+      "Ulrich (owner) to @RE: @RE look at the marker.",
       `RE: ${REVIEW_ANSWER}`,
-      "Ulrich to @Yumi: @Yumi what did RE say?",
+      "Ulrich (owner) to @Yumi: @Yumi what did RE say?",
       `Yumi: ${HOST_ANSWER}`,
-      "Ulrich to @Yumi: @Yumi anything else?",
+      "Ulrich (owner) to @Yumi: @Yumi anything else?",
       `The owner ran ${PROJECT_RESUME} on ${target.projectId}. Result: done.`,
       `Open action card: ${PROJECT_RESUME} on ${target.projectId}.`,
     ])

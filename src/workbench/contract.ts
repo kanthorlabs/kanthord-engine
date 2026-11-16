@@ -343,6 +343,7 @@ export const workbenchOperations = {
     path: "/api/workbench/session/:session_id/fork",
     status: HttpStatus.Accepted,
     timeoutMs: FORK_TIMEOUT_MS,
+    errors: [HttpStatus.BadGateway],
     input: z.strictObject({
       params: sessionParams,
       query: emptyFields,

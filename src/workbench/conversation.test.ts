@@ -6,6 +6,7 @@ import {
   SHIPPED_TEMPLATES,
 } from "../agent/prompt-templates.ts";
 import {
+  forkMaterial,
   leadingMention,
   MentionKind,
   mergeEntries,
@@ -139,4 +140,18 @@ test("invariant: a clock that steps back keeps the file order of one member and 
     ),
     ["g1", "h1", "h2"],
   );
+});
+
+test("the fork material of a conversation with one owner message holds the owner mark", () => {
+  const host = {
+    id: "host",
+    displayName: "Ops",
+    entries: [humanEntry(FIRST_ITEM)],
+  };
+  const material = forkMaterial({
+    members: [host],
+    authorName: "Ulrich",
+    inProgress: null,
+  });
+  assert.ok(material.includes("Ulrich (owner) to @Ops: "));
 });
