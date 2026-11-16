@@ -17,6 +17,7 @@ export const WORKBENCH_CONFIGURATION_ENTRY = "kanthord.workbench.configuration";
 export const WORKBENCH_RECORD_ENTRY = "kanthord.workbench.record";
 export const WORKBENCH_ACTION_RESULT_ENTRY = "kanthord.workbench.action_result";
 export const WORKBENCH_RELAY_ENTRY = "kanthord.workbench.relay";
+export const WORKBENCH_PLAN_ENTRY = "kanthord.workbench.plan";
 export const WORKBENCH_OPENING_TEXT = "The owner opened this conversation.";
 export const WORKBENCH_TIMEOUT_MS = 30000;
 export const WORKBENCH_EVENTS_WAIT_MS = 25000;
@@ -148,6 +149,25 @@ export const workbenchRecordSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 export type WorkbenchRecord = z.infer<typeof workbenchRecordSchema>;
+
+export const PlanPhase = { Planner: "planner", Reviewer: "reviewer" } as const;
+export type PlanPhase = (typeof PlanPhase)[keyof typeof PlanPhase];
+
+export const UNRESOLVED_MISSING = "missing";
+export const planDetailsSchema = z.strictObject({
+  phases: z.array(
+    z.strictObject({
+      phase: z.enum(PlanPhase),
+      session_id: z.string(),
+    }),
+  ),
+  unresolved: z.union([
+    z.number().int().positive(),
+    z.literal(UNRESOLVED_MISSING),
+    z.null(),
+  ]),
+});
+export type PlanDetails = z.infer<typeof planDetailsSchema>;
 
 const timestampSchema = z
   .number()
