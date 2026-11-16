@@ -113,6 +113,22 @@ components:
             - model_identifier
             - reasoning_effort
           additionalProperties: false
+        members:
+          type: array
+          items:
+            type: object
+            properties:
+              session_id:
+                type: string
+              agent_name:
+                type: string
+              display_name:
+                type: string
+            required:
+              - session_id
+              - agent_name
+              - display_name
+            additionalProperties: false
         entries:
           type: array
           items:
@@ -128,11 +144,17 @@ components:
                   - type: "null"
               timestamp:
                 type: string
+              session_id:
+                type: string
+              agent_name:
+                type: string
             required:
               - type
               - id
               - parentId
               - timestamp
+              - session_id
+              - agent_name
             additionalProperties: {}
         run_active:
           type: boolean
@@ -142,6 +164,7 @@ components:
         - id
         - agent_name
         - configuration
+        - members
         - entries
         - run_active
         - resume_command

@@ -172,6 +172,7 @@ export class SuiteRun {
       subject: this.options.agent,
       credential: this.options.credential,
       configuration: EVAL_CONFIGURATION,
+      agents: job.loaded.agents,
       runtimeFactory: this.options.runtimeFactory,
       evalDirectory: this.options.directory,
     });

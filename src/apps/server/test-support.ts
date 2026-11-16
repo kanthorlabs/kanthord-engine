@@ -3,7 +3,7 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { simpleGit } from "simple-git";
 import { ulid } from "ulid";
-import { IdentityKind } from "../../kernel/caller.ts";
+import { type HumanIdentity, IdentityKind } from "../../kernel/caller.ts";
 import { join } from "node:path";
 import { WorkerUnit } from "../worker/unit.ts";
 import { directories } from "../../kernel/xdg.ts";
@@ -30,11 +30,19 @@ import {
 } from "../../kernel/pi-provider.ts";
 import {
   createProvider,
+  fauxAssistantMessage,
+  type FauxResponseStep,
+  fauxToolCall,
   type Provider,
   type ProviderAuthInteraction,
 } from "@earendil-works/pi-ai";
 import { setTimeout as delay } from "node:timers/promises";
 import { agentOperations } from "../../agent/contract.ts";
+import { loadPi } from "../../agent/pi.ts";
+import { scriptedProvider } from "../../agent/test-support.ts";
+import { directClient } from "../../gateway/index.ts";
+import { createModelRuntime, resolveModel } from "../../llm/model-connector.ts";
+import type { WorkbenchModelRuntimeFactory } from "../../workbench/index.ts";
 import {
   Intent,
   missionOperations,
@@ -84,7 +92,11 @@ import { canonicalJSON } from "../../kernel/json.ts";
 import { workerMigrations } from "../../worker/index.ts";
 import { agentMigrations } from "../../agent/index.ts";
 import { workbenchMigrations } from "../../workbench/index.ts";
-import { WORKBENCH_SERVICE_NAME } from "../../workbench/contract.ts";
+import {
+  WORKBENCH_SERVICE_NAME,
+  type WorkbenchConfiguration,
+  workbenchOperations,
+} from "../../workbench/contract.ts";
 import { AGENT_COMPONENT_NAME } from "../../agent/contract.ts";
 import { fakeRepositoryFiles } from "./container-fakes-test-support.ts";
 import { environment, kanthord } from "./cli-test-support.ts";
@@ -3051,4 +3063,314 @@ export async function provisionNativeServerProject(
     },
   });
   return { id: project.id, instance: instances[0]! };
+}
+
+export const AGENT = "swe@1";
+export const GUARD_AGENT = "guard@1";
+export const GUARD_MODEL = "claude-sonnet-5";
+export const ANTHROPIC = "anthropic";
+export const DEFAULT = "default";
+export const BACKUP = "backup";
+export const SONNET = "claude-sonnet-4-5";
+export const HAIKU = "claude-haiku-4-5";
+export const OFF = "off" as const;
+export const PRIMARY_CREDENTIAL = "anthro-1";
+export const BACKUP_CREDENTIAL = "anthro-2";
+export const SPARE_CREDENTIAL = "anthro-3";
+export const PRIMARY_KEY = "primary-scripted-key";
+export const BACKUP_KEY = "backup-scripted-key";
+export const SPARE_KEY = "spare-scripted-key";
+
+export function completed<T>(result: OperationResult<T>): T {
+  assert.equal(
+    result.type,
+    OperationResultType.Completed,
+    JSON.stringify(result),
+  );
+  assert.ok(result.type === OperationResultType.Completed);
+  return result.data;
+}
+
+export function scriptedFactory(
+  script: FauxResponseStep[],
+  beforeOpen?: () => Promise<void>,
+): {
+  factory: WorkbenchModelRuntimeFactory;
+  provider: ReturnType<typeof scriptedProvider>;
+  configurations: WorkbenchConfiguration[];
+} {
+  const configurations: WorkbenchConfiguration[] = [];
+  const provider = scriptedProvider(script, {
+    providerId: ANTHROPIC,
+    modelIdentifier: SONNET,
+    models: [
+      { id: SONNET, reasoning: false },
+      { id: HAIKU, reasoning: true },
+      { id: GUARD_MODEL, reasoning: false },
+    ],
+  });
+  return {
+    provider,
+    configurations,
+    factory: async (input) => {
+      await beforeOpen?.();
+      configurations.push(input.configuration);
+      const runtime = await createModelRuntime(await loadPi(), input);
+      runtime.registerNativeProvider(provider.provider);
+      return { runtime, model: resolveModel(runtime, input.configuration) };
+    },
+  };
+}
+
+export interface Persistence {
+  path: string;
+  masterKey: string;
+  resumed: boolean;
+}
+
+const CONVERSATION_AGENTS = ["ops@1", "re@1", "swe@1"];
+
+export function workbenchHarness(identity: HumanIdentity) {
+  async function workbenchFixture(
+    t: TestContext,
+    script: FauxResponseStep[] = [],
+    stateDirectory?: string,
+    agentDirectory = temporary(t),
+    enabledAgents: readonly string[] = [AGENT],
+    beforeOpen?: () => Promise<void>,
+    persistence?: Persistence,
+  ) {
+    const scripted = scriptedFactory(script, beforeOpen);
+    const fixture = await gatewayFixture(t, {
+      stateDirectory,
+      agentDirectory,
+      workbenchModelRuntimeFactory: scripted.factory,
+      repositoryConnector: { gitLsRemote: async () => {} },
+      ...(persistence
+        ? { path: persistence.path, masterKey: persistence.masterKey }
+        : {}),
+    });
+    const options = { identity };
+    const llm = directClient(llmOperations, fixture.invocation);
+    if (persistence?.resumed)
+      return workbenchClients(
+        fixture,
+        scripted.provider,
+        scripted.configurations,
+        options,
+      );
+    for (const [name, key] of [
+      [PRIMARY_CREDENTIAL, PRIMARY_KEY],
+      [BACKUP_CREDENTIAL, BACKUP_KEY],
+      [SPARE_CREDENTIAL, SPARE_KEY],
+    ] as const)
+      completed(
+        await llm.create(
+          {
+            params: {},
+            query: {},
+            body: {
+              name,
+              platform: ANTHROPIC,
+              metadata: null,
+              secret: { key },
+            },
+          },
+          options,
+        ),
+      );
+    const agent = directClient(agentOperations, fixture.invocation);
+    for (const agentName of enabledAgents)
+      completed(
+        await agent["enablement.put"](
+          {
+            params: { agent_name: agentName },
+            query: {},
+            body: {
+              agent_providers:
+                agentName === GUARD_AGENT
+                  ? [
+                      {
+                        name: DEFAULT,
+                        provider: ANTHROPIC,
+                        credential: SPARE_CREDENTIAL,
+                      },
+                    ]
+                  : [
+                      {
+                        name: DEFAULT,
+                        provider: ANTHROPIC,
+                        credential: PRIMARY_CREDENTIAL,
+                      },
+                      {
+                        name: BACKUP,
+                        provider: ANTHROPIC,
+                        credential: BACKUP_CREDENTIAL,
+                      },
+                    ],
+              default_configuration: {
+                agent_provider: DEFAULT,
+                model_identifier:
+                  agentName === GUARD_AGENT ? GUARD_MODEL : SONNET,
+                reasoning_effort: OFF,
+              },
+              fallback_configurations: [],
+            },
+          },
+          options,
+        ),
+      );
+    return workbenchClients(
+      fixture,
+      scripted.provider,
+      scripted.configurations,
+      options,
+    );
+  }
+
+  function workbenchClients(
+    fixture: Awaited<ReturnType<typeof gatewayFixture>>,
+    provider: ReturnType<typeof scriptedProvider>,
+    configurations: readonly WorkbenchConfiguration[],
+    options: { identity: HumanIdentity },
+  ) {
+    return {
+      ...fixture,
+      provider,
+      configurations,
+      options,
+      agent: directClient(agentOperations, fixture.invocation),
+      projects: directClient(projectOperations, fixture.invocation),
+      missions: directClient(missionOperations, fixture.invocation),
+      workbenchService: fixture.workbench,
+      workbench: directClient(workbenchOperations, fixture.invocation),
+    };
+  }
+  async function conversationFixture(
+    t: TestContext,
+    script: FauxResponseStep[],
+    enabled: readonly string[] = CONVERSATION_AGENTS,
+  ) {
+    const state = temporaryDirectory();
+    const fixture = await workbenchFixture(
+      t,
+      script,
+      state,
+      undefined,
+      enabled,
+    );
+    return { state, fixture };
+  }
+  return { workbenchFixture, workbenchClients, conversationFixture };
+}
+
+export type WorkbenchFixture = Awaited<
+  ReturnType<ReturnType<typeof workbenchHarness>["workbenchFixture"]>
+>;
+
+const TOOL_USE = "toolUse" as const;
+const WORKBENCH_CONFIGURATION = {
+  agent_provider: DEFAULT,
+  model_identifier: SONNET,
+  reasoning_effort: OFF,
+};
+
+export function toolCall(
+  name: string,
+  args: Parameters<typeof fauxToolCall>[1],
+) {
+  return fauxAssistantMessage(fauxToolCall(name, args), {
+    stopReason: TOOL_USE,
+  });
+}
+
+export async function createHost(fixture: WorkbenchFixture, agentName: string) {
+  return completed(
+    await fixture.workbench["session.create"](
+      {
+        params: {},
+        query: {},
+        body: { agent_name: agentName, ...WORKBENCH_CONFIGURATION },
+      },
+      fixture.options,
+    ),
+  );
+}
+
+export function sendMessage(
+  fixture: WorkbenchFixture,
+  sessionId: string,
+  text: string,
+  options = fixture.options,
+) {
+  return fixture.workbench["session.message"](
+    { params: { session_id: sessionId }, query: {}, body: { text } },
+    options,
+  );
+}
+
+export async function untilSettled(
+  fixture: WorkbenchFixture,
+  sessionId: string,
+  signal: AbortSignal,
+) {
+  let version: number | undefined;
+  const cursor = new Map<string, string>();
+  for (;;) {
+    signal.throwIfAborted();
+    const after = [...cursor].map(([member, entry]) => `${member}:${entry}`);
+    const answer = completed(
+      await fixture.workbench["session.events"](
+        {
+          params: { session_id: sessionId },
+          query: {
+            ...(after.length ? { after: after.join(",") } : {}),
+            ...(version === undefined ? {} : { version }),
+          },
+          body: null,
+        },
+        fixture.options,
+      ),
+    );
+    for (const entry of answer.entries) cursor.set(entry.session_id, entry.id);
+    if (answer.snapshot.pending_approval)
+      return answer.snapshot.pending_approval;
+    if (!answer.snapshot.run_active && !answer.snapshot.queue.length)
+      return null;
+    version = answer.version;
+  }
+}
+
+export async function untilIdle(
+  fixture: WorkbenchFixture,
+  sessionId: string,
+  signal: AbortSignal,
+): Promise<void> {
+  assert.equal(await untilSettled(fixture, sessionId, signal), null);
+}
+
+export function untilAbort(text: string) {
+  return async (
+    _context: unknown,
+    options?: { signal?: AbortSignal | undefined },
+  ) => {
+    await new Promise<void>((resolve) => {
+      if (options?.signal?.aborted) resolve();
+      options?.signal?.addEventListener("abort", () => resolve(), {
+        once: true,
+      });
+    });
+    return fauxAssistantMessage(text);
+  };
+}
+
+export function heldAnswer(text: string) {
+  const gate = Promise.withResolvers<void>();
+  return {
+    gate,
+    step: async () => {
+      await gate.promise;
+      return fauxAssistantMessage(text);
+    },
+  };
 }

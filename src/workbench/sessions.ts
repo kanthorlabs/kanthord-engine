@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type {
   SessionInfo,
   SessionManager,
@@ -15,6 +16,7 @@ import {
   WORKBENCH_ACTION_RESULT_ENTRY,
   WORKBENCH_CONFIGURATION_ENTRY,
   WORKBENCH_DIRECTORY_NAME,
+  WORKBENCH_OPENING_TEXT,
   WORKBENCH_RECORD_ENTRY,
   type WorkbenchConfiguration,
   type WorkbenchRecord,
@@ -23,9 +25,20 @@ import {
 } from "./contract.ts";
 
 const SESSIONS_DIRECTORY_NAME = "sessions";
+const SESSION_FILE_EXTENSION = ".jsonl";
+const FILE_NAME_SEPARATOR = "_";
+const OPENING_ENTRY_COUNT = 2;
+const NOT_FOUND = -1;
+const ONE_BLOCK = 1;
+const USER_ROLE = "user";
+const ASSISTANT_ROLE = "assistant";
+const STOP_REASON = "stop";
+const TEXT_BLOCK = "text";
+const NO_COST = 0;
 const EntryType = {
   Custom: "custom",
   CustomMessage: "custom_message",
+  Message: "message",
   ModelChange: "model_change",
   ThinkingLevelChange: "thinking_level_change",
 } as const;
@@ -33,6 +46,16 @@ const EntryType = {
 export interface SessionPlace {
   cwd: string;
   sessionDir: string;
+}
+
+export type CreateSessionOptions = { parentSession?: string };
+export type OpeningInput = { model: Model<Api>; greeting: string };
+
+export function hostIdOf(path: string): string {
+  const name = basename(path, SESSION_FILE_EXTENSION);
+  const separator = name.indexOf(FILE_NAME_SEPARATOR);
+  assert.notEqual(separator, NOT_FOUND, "A pi session file name holds an id.");
+  return name.slice(separator + FILE_NAME_SEPARATOR.length);
 }
 
 function workbenchDirectory(stateDirectory: string, agentName: string): string {
@@ -68,25 +91,88 @@ export async function listSessions(place: SessionPlace, agentName: string) {
     place.cwd,
     place.sessionDir,
   );
-  return sessions.map((session) => ({
-    id: session.id,
-    agent_name: agentName,
-    name: session.name ?? null,
-    created: session.created.getTime(),
-    modified: session.modified.getTime(),
-    message_count: session.messageCount,
-    first_message: session.firstMessage,
-  }));
+  return sessions.map((session) => {
+    const opened = session.firstMessage === WORKBENCH_OPENING_TEXT;
+    return {
+      id: session.id,
+      agent_name: agentName,
+      name: session.name ?? null,
+      created: session.created.getTime(),
+      modified: session.modified.getTime(),
+      message_count: opened ? session.messageCount - 1 : session.messageCount,
+      first_message: opened ? (session.name ?? "") : session.firstMessage,
+      host_session_id:
+        session.parentSessionPath === undefined
+          ? null
+          : hostIdOf(session.parentSessionPath),
+    };
+  });
 }
 
 export async function createSession(
   place: SessionPlace,
   id: string,
+  options: CreateSessionOptions,
 ): Promise<SessionManager> {
   const pi = await loadPi();
-  const manager = pi.SessionManager.create(place.cwd, place.sessionDir, { id });
+  const manager = pi.SessionManager.create(place.cwd, place.sessionDir, {
+    id,
+    parentSession: options.parentSession,
+  });
   assert.equal(manager.getSessionId(), id);
   return manager;
+}
+
+export function appendOpening(
+  manager: SessionManager,
+  opening: OpeningInput,
+): void {
+  const timestamp = Date.now();
+  manager.appendMessage({
+    role: USER_ROLE,
+    content: [{ type: TEXT_BLOCK, text: WORKBENCH_OPENING_TEXT }],
+    timestamp,
+  });
+  manager.appendMessage({
+    role: ASSISTANT_ROLE,
+    content: [{ type: TEXT_BLOCK, text: opening.greeting }],
+    api: opening.model.api,
+    provider: opening.model.provider,
+    model: opening.model.id,
+    usage: {
+      input: NO_COST,
+      output: NO_COST,
+      cacheRead: NO_COST,
+      cacheWrite: NO_COST,
+      totalTokens: NO_COST,
+      cost: {
+        input: NO_COST,
+        output: NO_COST,
+        cacheRead: NO_COST,
+        cacheWrite: NO_COST,
+        total: NO_COST,
+      },
+    },
+    stopReason: STOP_REASON,
+    timestamp,
+  });
+}
+
+export function openingIds(entries: readonly SessionEntry[]): Set<string> {
+  const messages = entries.filter((entry) => entry.type === EntryType.Message);
+  const first = messages[0]?.message as
+    { role?: unknown; content?: unknown } | undefined;
+  const content = first?.content;
+  const opened =
+    first?.role === USER_ROLE &&
+    Array.isArray(content) &&
+    content.length === ONE_BLOCK &&
+    content[0]?.type === TEXT_BLOCK &&
+    content[0].text === WORKBENCH_OPENING_TEXT;
+  if (!opened) return new Set();
+  return new Set(
+    messages.slice(0, OPENING_ENTRY_COUNT).map((entry) => entry.id as string),
+  );
 }
 
 export async function findSession(

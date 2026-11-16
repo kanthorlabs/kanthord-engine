@@ -16,6 +16,8 @@ export const WORKBENCH_DIRECTORY_NAME = "workbench";
 export const WORKBENCH_CONFIGURATION_ENTRY = "kanthord.workbench.configuration";
 export const WORKBENCH_RECORD_ENTRY = "kanthord.workbench.record";
 export const WORKBENCH_ACTION_RESULT_ENTRY = "kanthord.workbench.action_result";
+export const WORKBENCH_RELAY_ENTRY = "kanthord.workbench.relay";
+export const WORKBENCH_OPENING_TEXT = "The owner opened this conversation.";
 export const WORKBENCH_TIMEOUT_MS = 30000;
 export const WORKBENCH_EVENTS_WAIT_MS = 25000;
 export const WORKBENCH_MESSAGE_MAX_LENGTH = 1048576;
@@ -43,6 +45,7 @@ export const WorkbenchErrorCode = {
   ActionNotFound: "workbench.session.action_not_found",
   ActionSettled: "workbench.session.action_settled",
   AgentRefused: "workbench.session.agent_refused",
+  NotHost: "workbench.session.not_host",
 } as const;
 
 export const workbenchConfigurationSchema = z.strictObject({
@@ -132,23 +135,47 @@ export const pendingApprovalSummarySchema = z.strictObject({
   operation_id: z.string(),
 });
 
-export const sessionListItemSchema = z.strictObject({
+export const memberEntrySchema = sessionEntrySchema.extend({
+  session_id: z.string(),
+  agent_name: z.string(),
+});
+export type MemberEntry = z.infer<typeof memberEntrySchema>;
+
+export const conversationMemberSchema = z.strictObject({
+  session_id: z.string(),
+  agent_name: z.string(),
+  display_name: z.string(),
+});
+export type ConversationMember = z.infer<typeof conversationMemberSchema>;
+
+const sessionListFields = z.strictObject({
   id: z.string(),
   agent_name: z.string(),
+  display_name: z.string(),
   name: z.string().nullable(),
   created: timestampSchema,
   modified: timestampSchema,
   message_count: z.number().int().nonnegative(),
   first_message: z.string(),
+  host_session_id: z.string().nullable(),
   run_active: z.boolean(),
   pending_approval: pendingApprovalSummarySchema.nullable(),
+});
+
+export const participantListItemSchema = sessionListFields.extend({
+  participants: z.tuple([]),
+});
+
+export const sessionListItemSchema = sessionListFields.extend({
+  participants: z.array(participantListItemSchema),
 });
 
 export const workbenchSessionSchema = z.strictObject({
   id: identitySchema(WORKBENCH_SESSION_PREFIX),
   agent_name: z.string(),
   configuration: workbenchConfigurationSchema,
-  entries: z.array(sessionEntrySchema),
+  members: z.array(conversationMemberSchema),
+  entries: z.array(memberEntrySchema),
   run_active: z.boolean(),
   resume_command: z.string(),
 });
@@ -176,6 +203,7 @@ export const guardInfoSchema = z.strictObject({
 export type GuardInfo = z.infer<typeof guardInfoSchema>;
 
 export const pendingApprovalSchema = pendingApprovalSummarySchema.extend({
+  session_id: z.string(),
   input: z.record(z.string(), z.unknown()),
   guard: guardInfoSchema.nullable(),
 });
@@ -184,6 +212,8 @@ export type PendingApproval = z.infer<typeof pendingApprovalSchema>;
 export const queuedMessageSchema = z.strictObject({
   id: identitySchema(WORKBENCH_QUEUED_MESSAGE_PREFIX),
   text: z.string(),
+  agent_name: z.string().nullable(),
+  display_name: z.string().nullable(),
 });
 export type QueuedMessage = z.infer<typeof queuedMessageSchema>;
 
@@ -199,7 +229,8 @@ export const runSnapshotSchema = z.strictObject({
 export type RunSnapshot = z.infer<typeof runSnapshotSchema>;
 
 export const sessionEventsSchema = z.strictObject({
-  entries: z.array(sessionEntrySchema),
+  members: z.array(conversationMemberSchema),
+  entries: z.array(memberEntrySchema),
   snapshot: runSnapshotSchema,
   version: z.number().int().nonnegative(),
 });
@@ -301,6 +332,7 @@ export const workbenchOperations = {
       }),
     }),
     output: sessionParams.extend({
+      agent_name: z.string().nullable(),
       run_active: z.literal(true),
       queued_message_id: identitySchema(
         WORKBENCH_QUEUED_MESSAGE_PREFIX,
@@ -308,7 +340,7 @@ export const workbenchOperations = {
       cleared: z.array(queuedMessageSchema),
     }),
     description:
-      "Start a run on one human message, or queue it behind the active run. `replace` clears the queue, stops the active run and queues the message.",
+      "Start a run on one human message, or queue it behind the active run. A leading `@<display name>` names the member that runs the message. `agent_name` answers the member that runs now, the mention of a queued message, or null for an untagged queued message. `replace` clears the queue, stops the active run and queues the message.",
   },
   "session.abort": {
     ...workbenchOperation,
@@ -430,6 +462,6 @@ export const workbenchOperations = {
     }),
     output: sessionEventsSchema,
     description:
-      "Answer the session entries after `after` and the snapshot of the active run at once when `version` differs, else wait up to 25 seconds for a change.",
+      "Answer the merged entries of the conversation after `after` and the snapshot of the active run at once when `version` differs, else wait up to 25 seconds for a change. `after` holds one `<session_id>:<entry_id>` pair per member, comma-separated. A plain entry id names the host pair.",
   },
 } as const satisfies Record<string, Operation>;

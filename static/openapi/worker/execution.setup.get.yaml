@@ -303,6 +303,10 @@ components:
               type: string
             conflict:
               type: string
+            greeting:
+              type: string
+            relay:
+              type: string
           required:
             - identity
             - work
@@ -314,6 +318,8 @@ components:
             - examine
             - repair
             - conflict
+            - greeting
+            - relay
           additionalProperties: false
         resource_budget:
           type: object

@@ -5,8 +5,10 @@ pathItem:
     tags:
       - workbench
     description: Start a run on one human message, or queue it behind the active
-      run. `replace` clears the queue, stops the active run and queues the
-      message.
+      run. A leading `@<display name>` names the member that runs the message.
+      `agent_name` answers the member that runs now, the mention of a queued
+      message, or null for an untagged queued message. `replace` clears the
+      queue, stops the active run and queues the message.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: true
@@ -107,6 +109,10 @@ components:
           pattern: ^workbench_session_[0-7][0-9A-HJKMNP-TV-Z]{25}$
           description: workbench_session_ followed by a canonical 26-character uppercase
             ULID.
+        agent_name:
+          anyOf:
+            - type: string
+            - type: "null"
         run_active:
           type: boolean
           const: true
@@ -133,12 +139,23 @@ components:
                   uppercase ULID.
               text:
                 type: string
+              agent_name:
+                anyOf:
+                  - type: string
+                  - type: "null"
+              display_name:
+                anyOf:
+                  - type: string
+                  - type: "null"
             required:
               - id
               - text
+              - agent_name
+              - display_name
             additionalProperties: false
       required:
         - session_id
+        - agent_name
         - run_active
         - queued_message_id
         - cleared

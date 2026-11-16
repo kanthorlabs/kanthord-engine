@@ -116,6 +116,7 @@ export const caseSchema = z.strictObject({
   id: caseIdSchema,
   source: z.string().min(1).optional(),
   fixtures: z.record(fixtureKeySchema, fileNameSchema),
+  agents: z.array(z.string().regex(AGENT_NAME)).default([]),
   setup: z.array(setupStepSchema).default([]),
   seed: z.array(seedStepSchema).default([]),
   auto_mode: z.enum([AutoMode.On, AutoMode.Off]).default(AutoMode.On),

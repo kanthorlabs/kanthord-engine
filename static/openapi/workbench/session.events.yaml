@@ -4,9 +4,10 @@ pathItem:
     operationId: workbench.session.events
     tags:
       - workbench
-    description: Answer the session entries after `after` and the snapshot of the
-      active run at once when `version` differs, else wait up to 25 seconds for
-      a change.
+    description: Answer the merged entries of the conversation after `after` and the
+      snapshot of the active run at once when `version` differs, else wait up to
+      25 seconds for a change. `after` holds one `<session_id>:<entry_id>` pair
+      per member, comma-separated. A plain entry id names the host pair.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: false
@@ -98,6 +99,22 @@ components:
     workbench.session.events.Output:
       type: object
       properties:
+        members:
+          type: array
+          items:
+            type: object
+            properties:
+              session_id:
+                type: string
+              agent_name:
+                type: string
+              display_name:
+                type: string
+            required:
+              - session_id
+              - agent_name
+              - display_name
+            additionalProperties: false
         entries:
           type: array
           items:
@@ -113,11 +130,17 @@ components:
                   - type: "null"
               timestamp:
                 type: string
+              session_id:
+                type: string
+              agent_name:
+                type: string
             required:
               - type
               - id
               - parentId
               - timestamp
+              - session_id
+              - agent_name
             additionalProperties: {}
         snapshot:
           type: object
@@ -140,6 +163,8 @@ components:
                     tool_call_id:
                       type: string
                     operation_id:
+                      type: string
+                    session_id:
                       type: string
                     input:
                       type: object
@@ -177,6 +202,7 @@ components:
                   required:
                     - tool_call_id
                     - operation_id
+                    - session_id
                     - input
                     - guard
                   additionalProperties: false
@@ -197,9 +223,19 @@ components:
                       uppercase ULID.
                   text:
                     type: string
+                  agent_name:
+                    anyOf:
+                      - type: string
+                      - type: "null"
+                  display_name:
+                    anyOf:
+                      - type: string
+                      - type: "null"
                 required:
                   - id
                   - text
+                  - agent_name
+                  - display_name
                 additionalProperties: false
             error_message:
               anyOf:
@@ -221,6 +257,7 @@ components:
           minimum: 0
           maximum: 9007199254740991
       required:
+        - members
         - entries
         - snapshot
         - version

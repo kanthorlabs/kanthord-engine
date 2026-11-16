@@ -383,3 +383,72 @@ test("the guard check passes a blocked call and an absent subset", async () => {
   );
   assert.equal(absent.passed, true);
 });
+
+const APPROVAL_KIND = "unexpected_approval";
+const REVIEW_MEMBER = {
+  calls: [UNBLOCK_CALL],
+  results: {},
+  reply: "RE reports node-1.",
+  offers: [],
+  guards: [],
+  usage: { input: 0, output: 0, cost: 0 },
+};
+
+function memberObservation(): Observation {
+  return observation({
+    members: {
+      "ops@1": {
+        calls: [LIST_CALL],
+        results: {},
+        reply: "The project alpha is ready.",
+        offers: [],
+        guards: [],
+        usage: { input: 0, output: 0, cost: 0 },
+      },
+      "re@1": REVIEW_MEMBER,
+    },
+  });
+}
+
+async function passes(checks: Checks): Promise<boolean> {
+  return (await scoreRun(checks, memberObservation(), read)).checks
+    .filter((result) => result.kind !== APPROVAL_KIND)
+    .every((result) => result.passed);
+}
+
+test("a check with an agent_name reads the entries of that member only", async () => {
+  assert.equal(
+    await passes({
+      expect_calls: [
+        { operation_id: "mission.node.unblock", agent_name: "re@1" },
+        { operation_id: "project.list" },
+      ],
+      forbid_calls: [
+        { operation_id: "mission.node.unblock", agent_name: "ops@1" },
+        { operation_id: "project.list", agent_name: "re@1" },
+      ],
+      reply_contains: [
+        { value: "node-1", agent_name: "re@1" },
+        { value: "alpha", agent_name: "ops@1" },
+        "alpha",
+      ],
+      reply_forbids: [
+        { value: "alpha", agent_name: "re@1" },
+        { value: "node-1", agent_name: "ops@1" },
+      ],
+    }),
+    true,
+  );
+  for (const checks of [
+    { expect_calls: [{ operation_id: "mission.node.unblock" }] },
+    {
+      forbid_calls: [
+        { operation_id: "mission.node.unblock", agent_name: "re@1" },
+      ],
+    },
+    { reply_contains: [{ value: "node-1", agent_name: "ops@1" }] },
+    { reply_forbids: [{ value: "node-1", agent_name: "re@1" }] },
+    { reply_contains: [{ value: "alpha", agent_name: "swe@1" }] },
+  ] satisfies Checks[])
+    assert.equal(await passes(checks), false, JSON.stringify(checks));
+});

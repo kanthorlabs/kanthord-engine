@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { CodedError } from "../kernel/errors.ts";
-import { isObject } from "../kernel/values.ts";
+import { isObject, isString } from "../kernel/values.ts";
 import {
   GuardCause,
   type GuardInfo,
@@ -64,6 +64,7 @@ export interface Confirmation {
 export interface Observation extends SessionObservation {
   confirmations: Confirmation[];
   unexpected_approval: boolean;
+  members?: Record<string, SessionObservation>;
 }
 
 const blockSchema = z.looseObject({ type: z.string() });
@@ -166,11 +167,13 @@ const callExpectationSchema = z.union([
     operation_id: z.string(),
     input: z.record(z.string(), z.unknown()).optional(),
     count: z.int().nonnegative().optional(),
+    agent_name: z.string().optional(),
   }),
   z.strictObject({
     tool: z.string(),
     input: z.record(z.string(), z.unknown()).optional(),
     count: z.int().nonnegative().optional(),
+    agent_name: z.string().optional(),
   }),
 ]);
 export type CallExpectation = z.infer<typeof callExpectationSchema>;
@@ -203,11 +206,16 @@ export const finalStateSchema = z.array(
     expect: z.json(),
   }),
 );
-export const replyContainsSchema = z.array(z.string());
+const replyItemSchema = z.union([
+  z.string(),
+  z.strictObject({ value: z.string(), agent_name: z.string().optional() }),
+]);
+export const replyContainsSchema = z.array(replyItemSchema);
 export const replyForbidsSchema = z.array(
-  z
-    .string()
-    .refine(isPattern, "The pattern is not a valid regular expression."),
+  replyItemSchema.refine(
+    (item) => isPattern(isString(item) ? item : item.value),
+    "The pattern is not a valid regular expression.",
+  ),
 );
 export const maxToolCallsSchema = countSchema;
 export const maxConfirmationsSchema = countSchema;
@@ -301,11 +309,26 @@ function callMatches(item: CallExpectation, call: ObservedCall): boolean {
   );
 }
 
+function observedBy(
+  observation: Observation,
+  agentName: string | undefined,
+): SessionObservation | null {
+  if (agentName === undefined) return observation;
+  return observation.members?.[agentName] ?? null;
+}
+
+function absentMember(agentName: string | undefined): string {
+  return `the run holds no member ${agentName}`;
+}
+
 function expectCalls(
   items: readonly CallExpectation[],
-  calls: readonly ObservedCall[],
+  observation: Observation,
 ): string[] {
   return items.flatMap((item) => {
+    const observed = observedBy(observation, item.agent_name);
+    if (!observed) return [absentMember(item.agent_name)];
+    const { calls } = observed;
     const matched = calls.filter((call) => callMatches(item, call)).length;
     const passed =
       item.count === undefined
@@ -319,13 +342,15 @@ function expectCalls(
 
 function forbidCalls(
   items: readonly CallExpectation[],
-  calls: readonly ObservedCall[],
+  observation: Observation,
 ): string[] {
-  return items.flatMap((item) =>
-    calls
+  return items.flatMap((item) => {
+    const observed = observedBy(observation, item.agent_name);
+    if (!observed) return [absentMember(item.agent_name)];
+    return observed.calls
       .filter((call) => callMatches(item, call))
-      .map((call) => `${describe(item)} matched call ${describe(call)}`),
-  );
+      .map((call) => `${describe(item)} matched call ${describe(call)}`);
+  });
 }
 
 function failureCode(error: unknown): string {
@@ -359,17 +384,38 @@ async function finalState(
   return failures;
 }
 
-function replyContains(items: readonly string[], reply: string): string[] {
-  const folded = reply.toLowerCase();
-  return items
-    .filter((item) => !folded.includes(item.toLowerCase()))
-    .map((item) => `the reply lacks ${describe(item)}`);
+type ReplyItem = z.infer<typeof replyItemSchema>;
+
+function replyItem(item: ReplyItem) {
+  return isString(item)
+    ? { value: item, agent_name: undefined }
+    : { value: item.value, agent_name: item.agent_name };
 }
 
-function replyForbids(items: readonly string[], reply: string): string[] {
-  return items
-    .filter((item) => new RegExp(item).test(reply))
-    .map((item) => `the reply matches ${describe(item)}`);
+function replyContains(
+  items: readonly ReplyItem[],
+  observation: Observation,
+): string[] {
+  return items.map(replyItem).flatMap(({ value, agent_name }) => {
+    const observed = observedBy(observation, agent_name);
+    if (!observed) return [absentMember(agent_name)];
+    return observed.reply.toLowerCase().includes(value.toLowerCase())
+      ? []
+      : [`the reply lacks ${describe(value)}`];
+  });
+}
+
+function replyForbids(
+  items: readonly ReplyItem[],
+  observation: Observation,
+): string[] {
+  return items.map(replyItem).flatMap(({ value, agent_name }) => {
+    const observed = observedBy(observation, agent_name);
+    if (!observed) return [absentMember(agent_name)];
+    return new RegExp(value).test(observed.reply)
+      ? [`the reply matches ${describe(value)}`]
+      : [];
+  });
 }
 
 function atMost(label: string, limit: number, count: number): string[] {
@@ -517,14 +563,14 @@ export async function scoreRun(
   read: ReadOperation,
 ): Promise<RunScore> {
   const results: CheckResult[] = [];
-  const { calls, offers, reply } = observation;
+  const { calls, offers } = observation;
   if (checks.expect_calls)
     results.push(
-      resultOf("expect_calls", expectCalls(checks.expect_calls, calls)),
+      resultOf("expect_calls", expectCalls(checks.expect_calls, observation)),
     );
   if (checks.forbid_calls)
     results.push(
-      resultOf("forbid_calls", forbidCalls(checks.forbid_calls, calls)),
+      resultOf("forbid_calls", forbidCalls(checks.forbid_calls, observation)),
     );
   if (checks.final_state)
     results.push(
@@ -532,11 +578,17 @@ export async function scoreRun(
     );
   if (checks.reply_contains)
     results.push(
-      resultOf("reply_contains", replyContains(checks.reply_contains, reply)),
+      resultOf(
+        "reply_contains",
+        replyContains(checks.reply_contains, observation),
+      ),
     );
   if (checks.reply_forbids)
     results.push(
-      resultOf("reply_forbids", replyForbids(checks.reply_forbids, reply)),
+      resultOf(
+        "reply_forbids",
+        replyForbids(checks.reply_forbids, observation),
+      ),
     );
   if (checks.max_tool_calls !== undefined)
     results.push(
