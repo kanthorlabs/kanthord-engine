@@ -1,0 +1,22 @@
+id: guard-summary-agent-offer
+kind: summary
+instruction: "carry the state of project shop"
+summary: |
+  Goal
+  Carry the state of project shop.
+
+  Facts and ids
+  Project shop holds node_9 (Refund email).
+
+  Decisions
+  Yumi recommended deciding the fix first.
+
+  Acts done in the earlier conversation
+  None.
+
+  Open in the earlier conversation
+  Yumi offered an action card for mission.node.unblock. No card was created.
+
+  Guest text (attributed)
+  None.
+danger: false
