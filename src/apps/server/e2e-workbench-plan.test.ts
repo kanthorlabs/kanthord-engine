@@ -554,6 +554,49 @@ test(
   },
 );
 
+interface PhaseAnswerProbe {
+  phaseAnswer(
+    launch: { run: { stopped: boolean }; host: { runError: string | null } },
+    session: { id: string; agent: { state: { messages: unknown[] } } },
+  ): unknown;
+}
+
+function phaseAnswerOf(
+  fixture: Fixture,
+  stopped: boolean,
+  messages: unknown[],
+) {
+  const launch = { run: { stopped }, host: { runError: null } };
+  const answer = (
+    fixture.workbenchService as unknown as PhaseAnswerProbe
+  ).phaseAnswer(launch, { id: "phase", agent: { state: { messages } } });
+  return { answer, runError: launch.host.runError };
+}
+
+test(
+  "regression: a stopped phase with no assistant message answers null with no assertion error and no run error",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture } = await planFixture(t, []);
+    assert.deepEqual(phaseAnswerOf(fixture, true, []), {
+      answer: null,
+      runError: null,
+    });
+  },
+);
+
+test(
+  "regression: a phase that ends with no assistant message answers null with no assertion error",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture } = await planFixture(t, []);
+    assert.deepEqual(phaseAnswerOf(fixture, false, []), {
+      answer: null,
+      runError: null,
+    });
+  },
+);
+
 interface PollEntry {
   id: string;
   session_id: string;
