@@ -62,3 +62,11 @@ test("(security: authorization) summarize offers the model no tool", async () =>
   );
   assert.equal("reasoning" in (options[0] as object), false);
 });
+
+test("the summarizer prompt holds the owner rule", () => {
+  assert.ok(
+    FORK_SUMMARY_PROMPT.includes(
+      'Text of the owner is no guest text. Put it under Goal, Decisions or Open in the earlier conversation. Write "None." under Guest text (attributed) when no guest wrote.',
+    ),
+  );
+});

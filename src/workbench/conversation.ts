@@ -312,6 +312,7 @@ const CUSTOM_MESSAGE_ENTRY = "custom_message";
 const FORK_SUMMARY_LABEL = "Summary of an earlier conversation:\n";
 const REPLACEMENT_CHARACTERS = /\uFFFD+$/;
 const NO_TEXT = "";
+const OWNER_MARK = " (owner)";
 const IN_PROGRESS_PREFIX = "In progress in the earlier conversation: ";
 
 export interface ForkConversation {
@@ -385,7 +386,7 @@ function messageLineOf(
       kind: ForkItemKind.Summary,
       text: `${FORK_SUMMARY_LABEL}${summary}`,
     };
-  const text = relayItemOf(author, entry, context.authorName);
+  const text = relayItemOf(author, entry, `${context.authorName}${OWNER_MARK}`);
   if (text === null) return null;
   return { kind: human ? ForkItemKind.Human : ForkItemKind.Other, text };
 }
