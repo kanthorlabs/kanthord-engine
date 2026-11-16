@@ -24,6 +24,12 @@ export const WORKBENCH_MESSAGE_MAX_LENGTH = 1048576;
 export const WORKBENCH_ERROR_CODE_MAX_LENGTH = 128;
 export const WORKBENCH_QUEUE_LIMIT = 10;
 export const WORKBENCH_QUEUED_MESSAGE_PREFIX = "workbench_queued_message";
+export const FORK_TIMEOUT_MS = 90000;
+export const FORK_SUMMARY_TIMEOUT_MS = 60000;
+export const FORK_SOURCE_MAX_BYTES = 65536;
+export const FORK_TEXT_MAX_BYTES = 4096;
+export const FORK_SUMMARY_MAX_TOKENS = 2048;
+export const FORK_SUMMARY_MAX_BYTES = 8192;
 
 export const MessageDelivery = { Queue: "queue", Replace: "replace" } as const;
 export type MessageDelivery =
