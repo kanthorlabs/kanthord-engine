@@ -17,7 +17,9 @@ import {
   completed,
   DEFAULT,
   OFF,
+  sendMessage,
   SONNET,
+  untilIdle,
   workbenchHarness,
 } from "./test-support.ts";
 
@@ -79,36 +81,6 @@ function create(fixture: Fixture) {
   );
 }
 
-function send(fixture: Fixture, sessionId: string, text: string) {
-  return fixture.workbench["session.message"](
-    { params: { session_id: sessionId }, query: {}, body: { text } },
-    fixture.options,
-  );
-}
-
-async function untilIdle(
-  fixture: Fixture,
-  sessionId: string,
-  signal: AbortSignal,
-): Promise<void> {
-  let version: number | undefined;
-  for (;;) {
-    signal.throwIfAborted();
-    const answer = completed(
-      await fixture.workbench["session.events"](
-        {
-          params: { session_id: sessionId },
-          query: version === undefined ? {} : { version },
-          body: null,
-        },
-        fixture.options,
-      ),
-    );
-    if (!answer.snapshot.run_active) return;
-    version = answer.version;
-  }
-}
-
 async function openedFixture(
   t: TestContext,
   script = [fauxAssistantMessage(ANSWER)],
@@ -154,7 +126,7 @@ test(
       ),
     );
     assert.deepEqual(messagesOf(viewed.entries), messagesOf(session.entries));
-    completed(await send(fixture, session.id, QUESTION));
+    completed(await sendMessage(fixture, session.id, QUESTION));
     await untilIdle(fixture, session.id, t.signal);
     const [call] = fixture.provider.calls;
     assert.ok(call);
@@ -187,7 +159,7 @@ test(
       if (notified.run) requests.push(notified.run.request);
       notify(notified);
     });
-    completed(await send(fixture, session.id, QUESTION));
+    completed(await sendMessage(fixture, session.id, QUESTION));
     await untilIdle(fixture, session.id, t.signal);
     assert.ok(requests.length >= SINGLE);
     assert.deepEqual([...new Set(requests)], [QUESTION]);

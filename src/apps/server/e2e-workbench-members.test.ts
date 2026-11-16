@@ -5,7 +5,6 @@ import { test, type TestContext } from "node:test";
 import {
   fauxAssistantMessage,
   type FauxResponseStep,
-  fauxToolCall,
 } from "@earendil-works/pi-ai";
 import {
   OPS_AGENT_PROMPT,
@@ -25,9 +24,15 @@ import { type SeededNode, seedEvidence } from "./evidence-test-support.ts";
 import {
   AGENT,
   completed,
+  createHost,
   DEFAULT,
   OFF,
+  sendMessage,
   SONNET,
+  toolCall,
+  untilIdle,
+  untilSettled,
+  type WorkbenchFixture,
   workbenchHarness,
 } from "./test-support.ts";
 
@@ -49,7 +54,6 @@ const EVIDENCE_TEXT = "alpha evidence text";
 const DOWNLOAD_OPERATION = "mission.evidence.asset.content.download";
 const MESSAGE_ENTRY = "message";
 const USER_ROLE = "user";
-const TOOL_USE = "toolUse" as const;
 const QUEUED_MESSAGE_ID = "workbench_queued_message_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const NO_ITEMS = 0;
 const SINGLE = 1;
@@ -61,7 +65,7 @@ const CONFIGURATION = {
   reasoning_effort: OFF,
 };
 
-type Fixture = Awaited<ReturnType<typeof workbenchFixture>>;
+type Fixture = WorkbenchFixture;
 type Entry = Record<string, unknown>;
 
 function failed(
@@ -78,12 +82,6 @@ function failed(
   assert.equal(result.status, status);
   assert.equal(result.error.error.code, code);
   return result.error.error.details as Record<string, unknown> | null;
-}
-
-function toolCall(name: string, args: Parameters<typeof fauxToolCall>[1]) {
-  return fauxAssistantMessage(fauxToolCall(name, args), {
-    stopReason: TOOL_USE,
-  });
 }
 
 function sessionFiles(state: string, agentName: string): string[] {
@@ -112,70 +110,6 @@ function userTexts(entries: readonly Entry[]): string[] {
             .map((block) => block.text ?? "")
             .join(""),
     );
-}
-
-async function createHost(fixture: Fixture, agentName = OPS) {
-  return completed(
-    await fixture.workbench["session.create"](
-      {
-        params: {},
-        query: {},
-        body: { agent_name: agentName, ...CONFIGURATION },
-      },
-      fixture.options,
-    ),
-  );
-}
-
-function send(
-  fixture: Fixture,
-  sessionId: string,
-  text: string,
-  options = fixture.options,
-) {
-  return fixture.workbench["session.message"](
-    { params: { session_id: sessionId }, query: {}, body: { text } },
-    options,
-  );
-}
-
-async function settled(
-  fixture: Fixture,
-  sessionId: string,
-  signal: AbortSignal,
-) {
-  let version: number | undefined;
-  let after: string | undefined;
-  for (;;) {
-    signal.throwIfAborted();
-    const answer = completed(
-      await fixture.workbench["session.events"](
-        {
-          params: { session_id: sessionId },
-          query: {
-            ...(after === undefined ? {} : { after }),
-            ...(version === undefined ? {} : { version }),
-          },
-          body: null,
-        },
-        fixture.options,
-      ),
-    );
-    after = (answer.entries.at(-SINGLE)?.id as string | undefined) ?? after;
-    if (answer.snapshot.pending_approval)
-      return answer.snapshot.pending_approval;
-    if (!answer.snapshot.run_active && !answer.snapshot.queue.length)
-      return null;
-    version = answer.version;
-  }
-}
-
-async function untilIdle(
-  fixture: Fixture,
-  sessionId: string,
-  signal: AbortSignal,
-): Promise<void> {
-  assert.equal(await settled(fixture, sessionId, signal), null);
 }
 
 function decide(
@@ -250,7 +184,7 @@ async function evidenceMembers(
   target.nodes = await seedEvidence(t, built.fixture, [
     { produced: [EVIDENCE_TEXT] },
   ]);
-  const host = await createHost(built.fixture);
+  const host = await createHost(built.fixture, OPS);
   return { ...built, target, host, nodeId: target.nodes[0]!.nodeId };
 }
 
@@ -259,8 +193,8 @@ test(
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const { state, fixture } = await members(t);
-    const host = await createHost(fixture);
-    completed(await send(fixture, host.id, MENTION_REQUEST));
+    const host = await createHost(fixture, OPS);
+    completed(await sendMessage(fixture, host.id, MENTION_REQUEST));
     await untilIdle(fixture, host.id, t.signal);
     const [hostFile] = sessionFiles(state, OPS);
     const [participantFile] = sessionFiles(state, REVIEW_AGENT);
@@ -290,10 +224,10 @@ test(
       fauxAssistantMessage(ANSWER),
       fauxAssistantMessage(SECOND_ANSWER),
     ]);
-    const host = await createHost(fixture);
-    completed(await send(fixture, host.id, MENTION_REQUEST));
+    const host = await createHost(fixture, OPS);
+    completed(await sendMessage(fixture, host.id, MENTION_REQUEST));
     await untilIdle(fixture, host.id, t.signal);
-    completed(await send(fixture, host.id, FOLLOW_UP));
+    completed(await sendMessage(fixture, host.id, FOLLOW_UP));
     await untilIdle(fixture, host.id, t.signal);
     assert.equal(fixture.provider.calls.length, TWO_RUNS);
     assert.equal(agentCalls(fixture, RE_AGENT_PROMPT).length, TWO_RUNS);
@@ -314,8 +248,8 @@ test(
       evidenceCall(target),
       fauxAssistantMessage(ANSWER),
     ]);
-    completed(await send(fixture, host.id, MENTION_REQUEST));
-    const pending = await settled(fixture, host.id, t.signal);
+    completed(await sendMessage(fixture, host.id, MENTION_REQUEST));
+    const pending = await untilSettled(fixture, host.id, t.signal);
     assert.ok(pending);
     const participant = await participantOf(fixture, host.id);
     assert.equal(pending.session_id, participant.id);
@@ -348,8 +282,8 @@ test(
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const { fixture } = await members(t);
-    const host = await createHost(fixture);
-    completed(await send(fixture, host.id, MENTION_REQUEST));
+    const host = await createHost(fixture, OPS);
+    completed(await sendMessage(fixture, host.id, MENTION_REQUEST));
     await untilIdle(fixture, host.id, t.signal);
     const participant = await participantOf(fixture, host.id);
     const params = { session_id: participant.id };
@@ -362,7 +296,7 @@ test(
         { params, query: {}, body: null },
         fixture.options,
       ),
-      await send(fixture, participant.id, FOLLOW_UP),
+      await sendMessage(fixture, participant.id, FOLLOW_UP),
       await fixture.workbench["session.abort"](
         { params, query: {}, body: null },
         fixture.options,
@@ -399,7 +333,7 @@ test(
       evidenceCall(target),
       fauxAssistantMessage(SECOND_ANSWER),
     ]);
-    completed(await send(fixture, host.id, `@RE Review ${nodeId}`));
+    completed(await sendMessage(fixture, host.id, `@RE Review ${nodeId}`));
     await untilIdle(fixture, host.id, t.signal);
     completed(
       await fixture.workbench["session.autoMode.set"](
@@ -411,8 +345,10 @@ test(
         fixture.options,
       ),
     );
-    completed(await send(fixture, host.id, `@RE Review ${nodeId} again`));
-    const pending = await settled(fixture, host.id, t.signal);
+    completed(
+      await sendMessage(fixture, host.id, `@RE Review ${nodeId} again`),
+    );
+    const pending = await untilSettled(fixture, host.id, t.signal);
     assert.ok(pending);
     assert.equal(pending.input.node_id, nodeId);
     assert.equal(
@@ -431,9 +367,9 @@ test(
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const { state, fixture } = await members(t, []);
-    const host = await createHost(fixture);
+    const host = await createHost(fixture, OPS);
     const details = failed(
-      await send(fixture, host.id, "@Guard hi"),
+      await sendMessage(fixture, host.id, "@Guard hi"),
       HttpStatus.NotFound,
       AgentErrorCode.AgentNotFound,
     );
@@ -472,9 +408,9 @@ test(
         fixture.options,
       ),
     );
-    const host = await createHost(fixture);
+    const host = await createHost(fixture, OPS);
     failed(
-      await send(fixture, host.id, MENTION_REQUEST),
+      await sendMessage(fixture, host.id, MENTION_REQUEST),
       HttpStatus.BadRequest,
       AgentErrorCode.Unavailable,
     );
@@ -494,14 +430,14 @@ test(
       evidenceCall(target),
       fauxAssistantMessage(SECOND_ANSWER),
     ]);
-    completed(await send(fixture, host.id, MENTION_REQUEST));
-    const pending = await settled(fixture, host.id, t.signal);
+    completed(await sendMessage(fixture, host.id, MENTION_REQUEST));
+    const pending = await untilSettled(fixture, host.id, t.signal);
     assert.ok(pending);
     completed(
       await decide(fixture, pending.session_id, pending.tool_call_id, true),
     );
     await untilIdle(fixture, host.id, t.signal);
-    completed(await send(fixture, host.id, "@SWE read the evidence."));
+    completed(await sendMessage(fixture, host.id, "@SWE read the evidence."));
     await untilIdle(fixture, host.id, t.signal);
     const swe = (await listed(fixture)).find(
       (item) => item.agent_name === AGENT,
@@ -523,12 +459,14 @@ test(
       fauxAssistantMessage(ANSWER),
       fauxAssistantMessage(SECOND_ANSWER),
     ]);
-    const host = await createHost(fixture);
+    const host = await createHost(fixture, OPS);
     const authorize = t.mock.method(fixture.workbenchService, "authorize");
-    completed(await send(fixture, host.id, MENTION_REQUEST));
+    completed(await sendMessage(fixture, host.id, MENTION_REQUEST));
     await untilIdle(fixture, host.id, t.signal);
     completed(
-      await send(fixture, host.id, FOLLOW_UP, { identity: SECOND_HUMAN }),
+      await sendMessage(fixture, host.id, FOLLOW_UP, {
+        identity: SECOND_HUMAN,
+      }),
     );
     await untilIdle(fixture, host.id, t.signal);
     const requesters = authorize.mock.calls
@@ -549,8 +487,8 @@ test(
         return fauxAssistantMessage(ANSWER);
       },
     ]);
-    const host = await createHost(fixture);
-    completed(await send(fixture, host.id, MENTION_REQUEST));
+    const host = await createHost(fixture, OPS);
+    completed(await sendMessage(fixture, host.id, MENTION_REQUEST));
     const participant = await participantOf(fixture, host.id);
     const service = fixture.workbenchService as unknown as {
       sessions: Map<string, { agent: unknown }>;

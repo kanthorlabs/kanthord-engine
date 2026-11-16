@@ -30,7 +30,9 @@ import {
 } from "../../kernel/pi-provider.ts";
 import {
   createProvider,
+  fauxAssistantMessage,
   type FauxResponseStep,
+  fauxToolCall,
   type Provider,
   type ProviderAuthInteraction,
 } from "@earendil-works/pi-ai";
@@ -3243,4 +3245,90 @@ export function workbenchHarness(identity: HumanIdentity) {
     };
   }
   return { workbenchFixture, workbenchClients };
+}
+
+export type WorkbenchFixture = Awaited<
+  ReturnType<ReturnType<typeof workbenchHarness>["workbenchFixture"]>
+>;
+
+const TOOL_USE = "toolUse" as const;
+const FIRST_RECORD = 1;
+const WORKBENCH_CONFIGURATION = {
+  agent_provider: DEFAULT,
+  model_identifier: SONNET,
+  reasoning_effort: OFF,
+};
+
+export function toolCall(
+  name: string,
+  args: Parameters<typeof fauxToolCall>[1],
+) {
+  return fauxAssistantMessage(fauxToolCall(name, args), {
+    stopReason: TOOL_USE,
+  });
+}
+
+export async function createHost(fixture: WorkbenchFixture, agentName: string) {
+  return completed(
+    await fixture.workbench["session.create"](
+      {
+        params: {},
+        query: {},
+        body: { agent_name: agentName, ...WORKBENCH_CONFIGURATION },
+      },
+      fixture.options,
+    ),
+  );
+}
+
+export function sendMessage(
+  fixture: WorkbenchFixture,
+  sessionId: string,
+  text: string,
+  options = fixture.options,
+) {
+  return fixture.workbench["session.message"](
+    { params: { session_id: sessionId }, query: {}, body: { text } },
+    options,
+  );
+}
+
+export async function untilSettled(
+  fixture: WorkbenchFixture,
+  sessionId: string,
+  signal: AbortSignal,
+) {
+  let version: number | undefined;
+  let after: string | undefined;
+  for (;;) {
+    signal.throwIfAborted();
+    const answer = completed(
+      await fixture.workbench["session.events"](
+        {
+          params: { session_id: sessionId },
+          query: {
+            ...(after === undefined ? {} : { after }),
+            ...(version === undefined ? {} : { version }),
+          },
+          body: null,
+        },
+        fixture.options,
+      ),
+    );
+    after =
+      (answer.entries.at(-FIRST_RECORD)?.id as string | undefined) ?? after;
+    if (answer.snapshot.pending_approval)
+      return answer.snapshot.pending_approval;
+    if (!answer.snapshot.run_active && !answer.snapshot.queue.length)
+      return null;
+    version = answer.version;
+  }
+}
+
+export async function untilIdle(
+  fixture: WorkbenchFixture,
+  sessionId: string,
+  signal: AbortSignal,
+): Promise<void> {
+  assert.equal(await untilSettled(fixture, sessionId, signal), null);
 }

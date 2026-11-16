@@ -88,6 +88,7 @@ import {
   WORKBENCH_QUEUE_LIMIT,
   WORKBENCH_QUEUED_MESSAGE_PREFIX,
   WORKBENCH_REJECTION_REASON,
+  WORKBENCH_RELAY_ENTRY,
   WORKBENCH_SESSION_PREFIX,
   type WorkbenchConfiguration,
   workbenchConfigurationSchema,
@@ -97,7 +98,13 @@ import {
   type WorkbenchSession,
 } from "./contract.ts";
 import { missionOperations } from "../mission/contract.ts";
-import { lastAnswerer, resolveMention } from "./conversation.ts";
+import {
+  lastAnswerer,
+  lastTurnEntry,
+  type RelayMember,
+  relayText,
+  resolveMention,
+} from "./conversation.ts";
 import { offerActionTool } from "./actions.ts";
 import { classifyCall } from "./guard-classifier.ts";
 import {
@@ -1364,12 +1371,44 @@ export class WorkbenchService implements Service {
       await this.openAgent(member, built, item.context);
     }
     assert.ok(member.agent);
+    await this.relay(host, member, item);
     void member.agent
       .prompt(item.text, { expandPromptTemplates: false })
       .catch((error: unknown) => {
         host.runError = error instanceof Error ? error.message : String(error);
       })
       .finally(run.settle);
+  }
+
+  private relayMember(member: OpenSession): RelayMember {
+    const declaration = getAgentDeclaration(member.agentName);
+    assert.ok(declaration);
+    return {
+      id: member.id,
+      displayName: declaration.display_name,
+      entries: this.entries(member.manager),
+    };
+  }
+
+  private async relay(
+    host: OpenSession,
+    member: OpenSession,
+    item: LaunchItem,
+  ): Promise<void> {
+    assert.ok(member.agent);
+    const self = this.relayMember(member);
+    const content = relayText(self, {
+      members: host.members.map((other) => this.relayMember(other)),
+      startEntry: lastTurnEntry(self.entries),
+      authorName: item.requester.name,
+      templates: await this.dependencies.agentPrompt.templates(item.context),
+    });
+    if (content === null) return;
+    await member.agent.sendCustomMessage({
+      customType: WORKBENCH_RELAY_ENTRY,
+      content,
+      display: false,
+    });
   }
 
   private async member(host: OpenSession, item: LaunchItem) {
