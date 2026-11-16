@@ -123,6 +123,9 @@ export const PromptConsumer = {
 export type PromptConsumer =
   (typeof PromptConsumer)[keyof typeof PromptConsumer];
 
+export const GuardTask = { Call: "call", Summary: "summary" } as const;
+export type GuardTask = (typeof GuardTask)[keyof typeof GuardTask];
+
 export const PromptView = { Final: "final" } as const;
 export type PromptView = (typeof PromptView)[keyof typeof PromptView];
 
@@ -607,6 +610,7 @@ export const agentOperations = {
       query: z
         .strictObject({
           view: z.enum(PromptView).optional(),
+          task: z.enum(GuardTask).optional(),
           project_id: z.string().min(1).optional(),
           binding_id: z.string().min(1).optional(),
           node_id: z.string().min(1).optional(),

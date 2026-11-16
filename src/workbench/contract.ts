@@ -71,6 +71,8 @@ export const GUARD_REQUEST_MAX_BYTES = 16384;
 export const GUARD_TEXT_KEEP_CHARS = 64;
 export const GUARD_REASON_MAX_CHARS = 300;
 export const GUARD_TOOL_NAME = "guard_verdict";
+export const GUARD_SUMMARY_TOOL_NAME = "guard_summary_verdict";
+export const GUARD_SUMMARY_PASS_CONFIDENCE = 0.9;
 
 export const GuardCause = {
   Import: "import",
@@ -82,6 +84,15 @@ export const GuardCause = {
   Classifier: "classifier",
 } as const;
 export type GuardCause = (typeof GuardCause)[keyof typeof GuardCause];
+
+export const GuardSummaryCause = {
+  Refused: "refused",
+  Timeout: "timeout",
+  NoVerdict: "no_verdict",
+  Oversize: "oversize",
+} as const;
+export type GuardSummaryCause =
+  (typeof GuardSummaryCause)[keyof typeof GuardSummaryCause];
 
 export const WorkbenchRecordKind = {
   ActionOffer: "action_offer",

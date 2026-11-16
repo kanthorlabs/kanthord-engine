@@ -17,7 +17,11 @@ import {
   type PromptReference,
   PromptTemplate,
 } from "./contract.ts";
-import { BASE_PROMPT, WORKBENCH_PROMPT } from "./prompt-assets.ts";
+import {
+  BASE_PROMPT,
+  GUARD_SUMMARY_PROMPT,
+  WORKBENCH_PROMPT,
+} from "./prompt-assets.ts";
 import { digest } from "./prompt-composer.ts";
 import {
   framing,
@@ -37,6 +41,7 @@ import {
 const STANDARD_FILE = "base.md";
 const WORKBENCH_FILE = "workbench.md";
 const GUARD_FILE = "guard.md";
+const GUARD_SUMMARY_FILE = "guard-summary.md";
 const MARKDOWN_EXTENSION = ".md";
 
 interface PromptFile {
@@ -131,6 +136,15 @@ async function resolveFile(
   if (read.state === SourceState.Invalid)
     throw promptFileInvalid(file.name, path, read.reason);
   return filePart(file, PromptOrigin.File, path, read.text);
+}
+
+export function guardSummaryPart(): PromptPartAnswer {
+  return filePart(
+    { part: PromptPart.Role, name: GUARD_SUMMARY_FILE },
+    PromptOrigin.Binary,
+    null,
+    GUARD_SUMMARY_PROMPT,
+  );
 }
 
 export function framingPart(

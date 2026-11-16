@@ -8,6 +8,7 @@ export const OPS_AGENT_PROMPT = shippedAsset("prompt/ops@1.md");
 export const WORKBENCH_PROMPT = shippedAsset("prompt/workbench.md");
 export const FORK_SUMMARY_PROMPT = shippedAsset("prompt/fork-summary.md");
 export const GUARD_PROMPT = shippedAsset("prompt/guard.md");
+export const GUARD_SUMMARY_PROMPT = shippedAsset("prompt/guard-summary.md");
 
 export function shippedTemplate(name: string): string {
   return shippedAsset(`prompt/template/${name}.md`);
