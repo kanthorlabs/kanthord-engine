@@ -31,6 +31,8 @@ const OPENING_ENTRY_COUNT = 2;
 const NOT_FOUND = -1;
 const ONE_BLOCK = 1;
 const USER_ROLE = "user";
+const ASSISTANT_ROLE = "assistant";
+const STOP_REASON = "stop";
 const TEXT_BLOCK = "text";
 const NO_COST = 0;
 const EntryType = {
@@ -132,8 +134,8 @@ export function appendOpening(
     timestamp,
   });
   manager.appendMessage({
-    role: "assistant",
-    content: [{ type: "text", text: opening.greeting }],
+    role: ASSISTANT_ROLE,
+    content: [{ type: TEXT_BLOCK, text: opening.greeting }],
     api: opening.model.api,
     provider: opening.model.provider,
     model: opening.model.id,
@@ -151,7 +153,7 @@ export function appendOpening(
         total: NO_COST,
       },
     },
-    stopReason: "stop",
+    stopReason: STOP_REASON,
     timestamp,
   });
 }
