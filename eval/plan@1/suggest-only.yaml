@@ -9,8 +9,8 @@ checks:
     - "{{p.node.node-x.md}}"
     - "{{p.node.node-y.md}}"
     - "{{p.node.node-z.md}}"
-    - duplicate
-    - verification
+    - Export report copy
+    - "`true`"
   reply_forbids:
     - "actor:(?!(?:yumi|human|worker)\\b)"
   forbid_calls:

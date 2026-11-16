@@ -7,6 +7,7 @@ import { test, type TestContext } from "node:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { AGENT_DECLARATIONS } from "../../agent/catalog.ts";
 import { PromptTemplate } from "../../agent/contract.ts";
+import { loadPi } from "../../agent/pi.ts";
 import {
   renderTemplate,
   SHIPPED_TEMPLATES,
@@ -62,6 +63,8 @@ const FORK_TEXT = "@Yumi continue with the plan.";
 const FORK_ANSWER = "Yumi continues.";
 const PROVIDER_FAILURE = "zq-planner-provider-failure";
 const PROJECT_LIST = "project--list";
+const OFFER_ACTION_TOOL = "offer_action";
+const HUMAN_INTERLOCUTOR_HEADING = "## Human interlocutor";
 const TEST_TIMEOUT_MS = 60000;
 const SETTLE_TURNS = 20;
 const SYSTEM_ROLE = "system";
@@ -471,6 +474,83 @@ test(
       fixture.provider.tools.map((tools) => [...tools].sort()),
       [listed, listed],
     );
+  },
+);
+
+test(
+  "(happy path) a phase system prompt holds no offer_action text and an ops@1 system prompt holds it",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, host } = await planFixture(t, [
+      fauxAssistantMessage(DRAFT),
+      fauxAssistantMessage(REVIEW_CLEAN),
+    ]);
+    completed(await sendMessage(fixture, host.id, REQUEST));
+    await untilIdle(fixture, host.id, t.signal);
+    assert.equal(fixture.provider.calls.length, PAIR);
+    for (const call of fixture.provider.calls) {
+      assert.ok(call.systemPrompt?.includes(HUMAN_INTERLOCUTOR_HEADING));
+      assert.ok(!call.systemPrompt?.includes(OFFER_ACTION_TOOL));
+    }
+    const ops = await workbenchFixture(
+      t,
+      [fauxAssistantMessage(YUMI_ANSWER)],
+      temporary(t),
+      undefined,
+      [OPS],
+    );
+    const opsHost = await createHost(ops, OPS);
+    completed(await sendMessage(ops, opsHost.id, YUMI_REQUEST));
+    await untilIdle(ops, opsHost.id, t.signal);
+    assert.ok(ops.provider.calls[0]!.systemPrompt?.includes(OFFER_ACTION_TOOL));
+  },
+);
+
+test(
+  "(invariant guard) a finished plan run reads each phase file once for every later get and poll",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, host } = await planFixture(t, [
+      fauxAssistantMessage(DRAFT),
+      fauxAssistantMessage(REVIEW_CLEAN),
+    ]);
+    const open = t.mock.method((await loadPi()).SessionManager, "open");
+    completed(await sendMessage(fixture, host.id, REQUEST));
+    await untilIdle(fixture, host.id, t.signal);
+    const first = await getOf(fixture, host.id);
+    const second = await getOf(fixture, host.id);
+    await pollOf(fixture, host.id, new Map());
+    assert.equal(open.mock.callCount(), PAIR);
+    assert.deepEqual(second.entries, first.entries);
+  },
+);
+
+test(
+  "(invariant, rollback) a service stop during a phase lets the phase settle with no error and no plan",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { state, fixture, host } = await planFixture(t, [
+      untilAbort(DRAFT),
+      fauxAssistantMessage(REVIEW_CLEAN),
+    ]);
+    const hostOf = t.mock.method(
+      fixture.workbenchService as unknown as { hostOf(): unknown },
+      "hostOf",
+    );
+    completed(await sendMessage(fixture, host.id, REQUEST));
+    await untilCalls(fixture, SINGLE, t.signal);
+    assert.equal(
+      (await fixture.workbenchService.stop()) ?? undefined,
+      undefined,
+    );
+    await settleTurns();
+    assert.ok(hostOf.mock.callCount() > NO_ENTRIES);
+    assert.deepEqual(
+      hostOf.mock.calls.filter(({ error }) => error !== undefined),
+      [],
+    );
+    assert.equal(fixture.provider.calls.length, SINGLE);
+    assert.deepEqual(plansOf(state), []);
   },
 );
 

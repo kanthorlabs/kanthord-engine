@@ -144,6 +144,7 @@ import {
   planMutations,
   planOf,
   runPlanPipeline,
+  withoutOfferAction,
 } from "./plan-pipeline.ts";
 import {
   builtinTools,
@@ -542,6 +543,7 @@ function humanOf(caller: CallerContext): HumanIdentity {
 export class WorkbenchService implements Service {
   private readonly dependencies: Dependencies;
   private readonly sessions = new Map<string, OpenSession>();
+  private readonly finishedPhaseEntries = new Map<string, SessionEntry[]>();
   private readonly loading = new Map<string, Promise<OpenSession>>();
   private readonly shutdown = new CancellationContext();
   private started = false;
@@ -972,10 +974,11 @@ export class WorkbenchService implements Service {
     let agent: AgentSession | undefined;
     try {
       const hostHome = this.dependencies.hostHome ?? homedir();
-      const parts = await this.dependencies.agentPrompt.compose(
+      const composed = await this.dependencies.agentPrompt.compose(
         session.agentName,
         context,
       );
+      const parts = isPhase ? withoutOfferAction(composed) : composed;
       const templates = await this.dependencies.agentPrompt.templates(context);
       const prompt = systemPrompt(parts, PromptConsumer.Workbench, templates);
       const builtin = builtinTools(
@@ -1354,23 +1357,28 @@ export class WorkbenchService implements Service {
     );
     const opened = await Promise.all(
       phases.map(async ({ phase, session_id: id }) => {
-        const manager = await openPhaseSession(
-          this.dependencies.stateDirectory,
-          id,
-        );
-        return manager === null
+        const entries = await this.phaseEntries(id);
+        return entries === null
           ? []
-          : [
-              {
-                sessionId: id,
-                agentName: member.agentName,
-                phase,
-                entries: this.entries(manager),
-              },
-            ];
+          : [{ sessionId: id, agentName: member.agentName, phase, entries }];
       }),
     );
     return opened.flat();
+  }
+
+  private async phaseEntries(
+    sessionId: string,
+  ): Promise<SessionEntry[] | null> {
+    const cached = this.finishedPhaseEntries.get(sessionId);
+    if (cached) return cached;
+    const manager = await openPhaseSession(
+      this.dependencies.stateDirectory,
+      sessionId,
+    );
+    if (manager === null) return null;
+    const entries = this.entries(manager);
+    this.finishedPhaseEntries.set(sessionId, entries);
+    return entries;
   }
 
   private async phaseMembers(host: OpenSession): Promise<MergeMember[]> {
@@ -1673,13 +1681,13 @@ export class WorkbenchService implements Service {
     launch: PlanLaunch,
     session: OpenSession,
   ): PhaseAnswer | null {
+    if (this.phaseEnded(launch.run)) return null;
     assert.ok(session.agent);
     const last = session.agent.state.messages.findLast(
       (entry): entry is AssistantMessage => entry.role === ASSISTANT_ROLE,
     );
-    assert.ok(last);
-    if (this.phaseEnded(launch.run) || last.stopReason === ABORTED_STOP_REASON)
-      return null;
+    if (!last) return null;
+    if (last.stopReason === ABORTED_STOP_REASON) return null;
     if (last.stopReason === ERROR_STOP_REASON) {
       launch.host.runError = last.errorMessage ?? PHASE_ERROR_MESSAGE;
       return null;
@@ -2347,7 +2355,11 @@ export class WorkbenchService implements Service {
     this.started = false;
     for (const session of this.sessions.values()) {
       void session.agent?.abort();
-      void session.run?.phaseSession?.agent?.abort();
+      const phaseSession = session.run?.phaseSession;
+      if (phaseSession) {
+        void phaseSession.agent?.abort();
+        this.closeAgent(phaseSession);
+      }
       this.closeAgent(session);
     }
     this.sessions.clear();

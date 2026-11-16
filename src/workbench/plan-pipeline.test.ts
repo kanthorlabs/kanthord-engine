@@ -1,8 +1,17 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
+import { temporary } from "../kernel/test-support.ts";
 import { type PlanDetails, WORKBENCH_PLAN_ENTRY } from "./contract.ts";
-import { planOf } from "./plan-pipeline.ts";
+import {
+  createPhaseSession,
+  openPhaseSession,
+  planOf,
+} from "./plan-pipeline.ts";
+import { sessionPlace } from "./sessions.ts";
 
+const PHASE_ID = "workbench_session_1";
 const VALID_DETAILS: PlanDetails = {
   phases: [{ phase: "planner", session_id: "workbench_session_1" }],
   unresolved: null,
@@ -21,7 +30,7 @@ function planEntry(details: unknown) {
   };
 }
 
-test("security: planOf answers null for a plan entry whose details fail the schema", () => {
+test("(security, argument guard) planOf answers null for a plan entry whose details fail the schema", () => {
   assert.deepEqual(planOf(planEntry(VALID_DETAILS)), {
     text: "The plan.",
     details: VALID_DETAILS,
@@ -38,4 +47,14 @@ test("security: planOf answers null for a plan entry whose details fail the sche
     null,
   );
   assert.equal(planOf(planEntry(undefined)), null);
+});
+
+test("(invariant guard) opening an absent phase session creates no phases directory and creating one does", async (t) => {
+  const state = temporary(t);
+  const directory = join(sessionPlace(state, "plan@1").sessionDir, "phases");
+  assert.equal(await openPhaseSession(state, PHASE_ID), null);
+  assert.equal(existsSync(directory), false);
+  const manager = await createPhaseSession(state, PHASE_ID);
+  assert.equal(existsSync(directory), true);
+  assert.equal(manager.getSessionId(), PHASE_ID);
 });

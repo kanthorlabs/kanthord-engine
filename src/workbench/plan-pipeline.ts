@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
 import { AGENT_DECLARATIONS } from "../agent/catalog.ts";
-import type { GuardClass, PromptTemplates } from "../agent/contract.ts";
+import {
+  type GuardClass,
+  PromptPart,
+  type PromptPartAnswer,
+  type PromptTemplates,
+} from "../agent/contract.ts";
 import { loadPi } from "../agent/pi.ts";
 import { ensureDirectory } from "../kernel/files.ts";
 import type { Operation } from "../kernel/operation.ts";
@@ -17,6 +22,7 @@ import {
   UNRESOLVED_MISSING,
   WORKBENCH_PLAN_ENTRY,
 } from "./contract.ts";
+import { WORKBENCH_ACTION_TOOL_NAME } from "./actions.ts";
 import { guardClassOf } from "./guard.ts";
 import { type SessionPlace, sessionPlace } from "./sessions.ts";
 
@@ -44,6 +50,7 @@ export const PLAN_AGENT = "plan@1";
 const PHASE_DIRECTORY_NAME = "phases";
 const REVIEW_HEADING = "## Review";
 const LINE_BREAK = /\r?\n/;
+const LINE_JOIN = "\n";
 const BULLET = /^\s*[-*]\s/;
 const OPEN_STATUS = "status:OPEN";
 const YES_ACTION = "action:YES";
@@ -54,9 +61,26 @@ const CUSTOM_MESSAGE_ENTRY = "custom_message";
 
 function phasePlace(stateDirectory: string): SessionPlace {
   const place = sessionPlace(stateDirectory, PLAN_AGENT);
-  const sessionDir = join(place.sessionDir, PHASE_DIRECTORY_NAME);
-  ensureDirectory(sessionDir);
-  return { cwd: place.cwd, sessionDir };
+  return {
+    cwd: place.cwd,
+    sessionDir: join(place.sessionDir, PHASE_DIRECTORY_NAME),
+  };
+}
+
+export function withoutOfferAction(
+  parts: readonly PromptPartAnswer[],
+): PromptPartAnswer[] {
+  return parts.map((part) =>
+    part.part === PromptPart.Workbench && part.text !== null
+      ? {
+          ...part,
+          text: part.text
+            .split(LINE_BREAK)
+            .filter((line) => !line.includes(WORKBENCH_ACTION_TOOL_NAME))
+            .join(LINE_JOIN),
+        }
+      : part,
+  );
 }
 
 export async function createPhaseSession(
@@ -65,6 +89,7 @@ export async function createPhaseSession(
 ): Promise<SessionManager> {
   const pi = await loadPi();
   const place = phasePlace(stateDirectory);
+  ensureDirectory(place.sessionDir);
   const manager = pi.SessionManager.create(place.cwd, place.sessionDir, {
     id: sessionId,
   });

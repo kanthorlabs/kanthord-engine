@@ -32,10 +32,10 @@ Write the answer in Markdown with these sections, in this order. Write each sect
 <2–4 sentences: the recommendation>
 
 ## Facts
-- F1 - <fact> - source:<operation_id> <record id>
+- F1 - <fact> - source:<dotted operation id; the tool `mission--node--get` is the operation `mission.node.get`> <record id>
 
 ## Plan
-1. <step> - actor:<yumi|human|worker> - operation:<operation_id> - input:<json> - guard:<read|reversible|judged|card|human_only> - verify:<read that proves the step>
+1. <step> - actor:<yumi|human|worker> - operation:<dotted operation id; the tool `mission--node--get` is the operation `mission.node.get`> - input:<json> - guard:<read|reversible|judged|card|human_only> - verify:<read that proves the step>
 
 ## Risks
 - <risk> - mitigation:<…>
@@ -47,9 +47,10 @@ Write the answer in Markdown with these sections, in this order. Write each sect
 - B1 - status:FIXED - action:YES - <name> - <description> - fix:<…> - why:<…>
 ```
 
-1. Give each fact a source: the operation id and the record id.
+1. Give each fact a source: the dotted operation id and the record id.
 2. Give each step one actor, one operation, one JSON input, one guard class and one verify read.
-3. Write `none` in a section that has no item.
+3. `operation:` and `source:` take the dotted operation id, never the tool name. The tool `mission--node--get` is the operation `mission.node.get`.
+4. Write `none` in a section that has no item.
 
 ## Untrusted text
 

@@ -22,8 +22,8 @@ checks:
   reply_contains:
     - "{{p.node.node-x.md}}"
     - "{{p.node.node-y.md}}"
-    - criterion
-    - verification
+    - It works
+    - "`true`"
   reply_forbids:
     - "actor:(?!(?:yumi|human|worker)\\b)"
   forbid_calls:

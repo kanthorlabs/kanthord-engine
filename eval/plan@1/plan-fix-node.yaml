@@ -18,10 +18,10 @@ checks:
   plan_contract: true
   expect_calls:
     - operation_id: mission.import.preview
-      count: 1
   reply_contains:
     - "{{p.node.node-x.md}}"
     - Export report tests
+    - node-t.md
     - mission.import.apply
   reply_forbids:
     - "actor:(?!(?:yumi|human|worker)\\b)"

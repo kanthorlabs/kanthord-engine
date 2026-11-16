@@ -534,7 +534,7 @@ function planFailures(text: string, calls = PLAN_CALLS) {
   ).then((score) => score.checks.find(({ kind }) => kind === PLAN_KIND)!);
 }
 
-test("plan_contract passes a valid plan and fails a wrong guard class and records the rule", async () => {
+test("(happy path, service level) plan_contract passes a valid plan and fails a wrong guard class and records the rule", async () => {
   assert.deepEqual(await planFailures(planText()), {
     kind: PLAN_KIND,
     passed: true,
@@ -619,7 +619,7 @@ const PLAN_ENTRIES = [
   },
 ];
 
-test("for a plan@1 member, reply is the plan text and the call checks read the phase calls", async () => {
+test("(happy path, service level) for a plan@1 member, reply is the plan text and the call checks read the phase calls", async () => {
   const observed = observationOf(PLAN_ENTRIES);
   assert.equal(observed.reply, PLAN_TEXT);
   assert.deepEqual(
