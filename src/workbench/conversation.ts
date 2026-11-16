@@ -12,6 +12,7 @@ import {
 import {
   FORK_SOURCE_MAX_BYTES,
   type MemberEntry,
+  type PlanPhase,
   type SessionEntry,
   WORKBENCH_ACTION_RESULT_ENTRY,
   WorkbenchRecordKind,
@@ -22,6 +23,7 @@ import {
   OpeningKind,
   recordOf,
 } from "./sessions.ts";
+import { planOf } from "./plan-pipeline.ts";
 import type { Dependencies } from "./service.ts";
 
 const MENTION_PREFIX = "@";
@@ -141,6 +143,7 @@ export interface Answerer {
 }
 
 function isFinalAnswer(entry: SessionEntry): boolean {
+  if (planOf(entry) !== null) return true;
   const message = entry.message as
     { role?: unknown; stopReason?: unknown } | undefined;
   return (
@@ -200,6 +203,11 @@ function relayItemOf(
   entry: SessionEntry,
   authorName: string,
 ): string | null {
+  const plan = planOf(entry);
+  if (plan !== null)
+    return plan.text.length === NO_CHARACTERS
+      ? null
+      : `${author.displayName}: ${plan.text}`;
   const message = entry.message as
     { role?: unknown; content?: unknown } | undefined;
   if (entry.type !== MESSAGE_ENTRY) return null;
@@ -471,6 +479,7 @@ export function forkMaterial(conversation: ForkConversation): string {
 export interface MergeMember {
   sessionId: string;
   agentName: string;
+  phase?: PlanPhase;
   entries: readonly SessionEntry[];
 }
 
@@ -496,7 +505,7 @@ export function mergeEntries(
   members: readonly MergeMember[],
   after: ReadonlyMap<string, string> = new Map(),
 ): MemberEntry[] {
-  const queues = members.map(({ sessionId, agentName, entries }) => {
+  const queues = members.map(({ sessionId, agentName, phase, entries }) => {
     const { kind, hidden } = openingIds(entries);
     const dropped =
       kind === OpeningKind.Opening
@@ -514,6 +523,7 @@ export function mergeEntries(
         ...entry,
         session_id: sessionId,
         agent_name: agentName,
+        ...(phase === undefined ? {} : { phase }),
       }));
   });
   const heads = queues.map(() => NO_CHARACTERS);

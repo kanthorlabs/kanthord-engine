@@ -190,6 +190,7 @@ export const pendingApprovalSummarySchema = z.strictObject({
 export const memberEntrySchema = sessionEntrySchema.extend({
   session_id: z.string(),
   agent_name: z.string(),
+  phase: z.enum(PlanPhase).optional(),
 });
 export type MemberEntry = z.infer<typeof memberEntrySchema>;
 

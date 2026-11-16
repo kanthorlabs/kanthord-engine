@@ -6,6 +6,11 @@ import { setImmediate } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { AGENT_DECLARATIONS } from "../../agent/catalog.ts";
+import { PromptTemplate } from "../../agent/contract.ts";
+import {
+  renderTemplate,
+  SHIPPED_TEMPLATES,
+} from "../../agent/prompt-templates.ts";
 import { isString } from "../../kernel/values.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { testHumanIdentity } from "../../kernel/test-identity.ts";
@@ -18,7 +23,9 @@ import { toolName } from "../../workbench/index.ts";
 import {
   completed,
   createHost,
+  forkOf,
   heldAnswer,
+  pass,
   sendMessage,
   toolCall,
   untilAbort,
@@ -30,6 +37,7 @@ const identity = testHumanIdentity("kanthord", "Ulrich", "workbench-plan");
 const SECOND_HUMAN = testHumanIdentity("kanthord", "Grace", "workbench-plan-2");
 const { workbenchFixture } = workbenchHarness(identity);
 const PLAN = "plan@1";
+const OPS = "ops@1";
 const GUARD = "guard@1";
 const REQUEST = "Plan the billing mission.";
 const REPLACEMENT = "Plan the shipping mission.";
@@ -44,6 +52,14 @@ const REVIEW_TWO_OPEN = [
   "- S1 - status:FIXED - action:YES - i - j - fix:k - why:l",
 ].join("\n");
 const REVIEW_CLEAN = "## Conclusion\nClean.\n\n## Review\n- none";
+const MENTION_REQUEST = `@Jeremy ${REQUEST}`;
+const FOLLOW_UP = "And the shipping side too.";
+const YUMI_REQUEST = "@Yumi what is next?";
+const YUMI_ANSWER = "Yumi answers.";
+const FINAL_PLAN = "## Conclusion\nZq final plan.\n\n## Review\n- none";
+const SUMMARY = "Goal: apply the plan.";
+const FORK_TEXT = "@Yumi continue with the plan.";
+const FORK_ANSWER = "Yumi continues.";
 const PROVIDER_FAILURE = "zq-planner-provider-failure";
 const PROJECT_LIST = "project--list";
 const TEST_TIMEOUT_MS = 60000;
@@ -52,10 +68,12 @@ const SYSTEM_ROLE = "system";
 const USER_ROLE = "user";
 const ASSISTANT_ROLE = "assistant";
 const READ_COUNT = 8;
+const NO_ENTRIES = 0;
 const SINGLE = 1;
 const PAIR = 2;
 const TRIPLE = 3;
 const MASTER_KEY_BYTES = 32;
+const RELAY_HEAD = renderTemplate(SHIPPED_TEMPLATES, PromptTemplate.Relay, {});
 const MESSAGE_ENTRY = "message";
 const CUSTOM_MESSAGE_ENTRY = "custom_message";
 const JSONL_EXTENSION = ".jsonl";
@@ -453,5 +471,320 @@ test(
       fixture.provider.tools.map((tools) => [...tools].sort()),
       [listed, listed],
     );
+  },
+);
+
+interface PollEntry {
+  id: string;
+  session_id: string;
+  agent_name: string;
+  phase?: string | undefined;
+}
+
+async function pollOf(
+  fixture: Fixture,
+  hostId: string,
+  cursor: Map<string, string>,
+  version?: number,
+) {
+  const after = [...cursor].map(([member, entry]) => `${member}:${entry}`);
+  const answer = completed(
+    await fixture.workbench["session.events"](
+      {
+        params: { session_id: hostId },
+        query: {
+          ...(after.length ? { after: after.join(",") } : {}),
+          ...(version === undefined ? {} : { version }),
+        },
+        body: null,
+      },
+      fixture.options,
+    ),
+  );
+  for (const entry of answer.entries) cursor.set(entry.session_id, entry.id);
+  return answer;
+}
+
+async function getOf(fixture: Fixture, hostId: string) {
+  return completed(
+    await fixture.workbench["session.get"](
+      { params: { session_id: hostId }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+}
+
+function phaseEntriesOf(entries: readonly PollEntry[]): PollEntry[] {
+  return entries.filter((entry) => entry.phase !== undefined);
+}
+
+function phaseIds(state: string): string[] {
+  return phaseFiles(state).map((file) => readLines(file)[0]!.id as string);
+}
+
+function occurrences(text: string, part: string): number {
+  return text.split(part).length - SINGLE;
+}
+
+function relaysOf(fixture: Fixture, call: number): string[] {
+  return requestMessages(fixture, call)
+    .map(({ content }) => textOf(content))
+    .filter((text) => text.startsWith(RELAY_HEAD));
+}
+
+async function mentionedPlan(
+  t: TestContext,
+  script: Parameters<typeof workbenchFixture>[1],
+  enabled: readonly string[] = [OPS, PLAN],
+) {
+  const state = temporary(t);
+  const fixture = await workbenchFixture(t, script, state, undefined, enabled);
+  const host = await createHost(fixture, OPS);
+  completed(await sendMessage(fixture, host.id, MENTION_REQUEST));
+  await untilIdle(fixture, host.id, t.signal);
+  return { state, fixture, host };
+}
+
+test(
+  "(happy path) the list shows no phase session and the merged poll and get hold the same phase entries",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { state, fixture, host } = await mentionedPlan(t, [
+      fauxAssistantMessage(DRAFT),
+      fauxAssistantMessage(FINAL_PLAN),
+    ]);
+    const listed = completed(
+      await fixture.workbench["session.list"](
+        { params: {}, query: {}, body: null },
+        fixture.options,
+      ),
+    ).items;
+    const listedIds = listed.flatMap((item) => [
+      item.id,
+      ...item.participants.map(({ id }) => id),
+    ]);
+    assert.equal(listed.length, SINGLE);
+    assert.equal(listed[0]!.participants.length, SINGLE);
+    assert.equal(listed[0]!.participants[0]!.agent_name, PLAN);
+    const phases = phaseIds(state);
+    assert.equal(phases.length, PAIR);
+    for (const id of phases) assert.ok(!listedIds.includes(id), id);
+    const entries = hostEntries(state);
+    const users = entries.filter(
+      (entry) =>
+        entry.type === MESSAGE_ENTRY &&
+        (entry.message as { role: string }).role === USER_ROLE,
+    );
+    assert.deepEqual(
+      users.map((entry) =>
+        textOf((entry.message as { content: unknown }).content),
+      ),
+      [MENTION_REQUEST],
+    );
+    const [plan] = plansOf(state);
+    assert.equal(plan!.display, true);
+    assert.equal(plan!.content, FINAL_PLAN);
+    const poll = await pollOf(fixture, host.id, new Map());
+    const read = await getOf(fixture, host.id);
+    const polled = phaseEntriesOf(poll.entries);
+    assert.deepEqual(phaseEntriesOf(read.entries), polled);
+    assert.deepEqual(
+      new Set(polled.map(({ phase }) => phase)),
+      new Set([PlanPhase.Planner, PlanPhase.Reviewer]),
+    );
+    for (const entry of polled) {
+      assert.ok(phases.includes(entry.session_id));
+      assert.equal(entry.agent_name, PLAN);
+    }
+    const memberIds = poll.members.map(({ session_id: id }) => id);
+    for (const entry of poll.entries.filter(({ phase }) => phase === undefined))
+      assert.ok(memberIds.includes(entry.session_id));
+    assert.deepEqual(read.entries, poll.entries);
+  },
+);
+
+test(
+  "(happy path, plan@1 host) the list, the membership, the poll members and the relay hold no phase session",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { state, fixture, host } = await planFixture(t, [
+      fauxAssistantMessage(DRAFT),
+      fauxAssistantMessage(FINAL_PLAN),
+      fauxAssistantMessage(DRAFT),
+      fauxAssistantMessage(FINAL_PLAN),
+    ]);
+    completed(await sendMessage(fixture, host.id, REQUEST));
+    await untilIdle(fixture, host.id, t.signal);
+    completed(await sendMessage(fixture, host.id, FOLLOW_UP));
+    await untilIdle(fixture, host.id, t.signal);
+    const phases = phaseIds(state);
+    assert.equal(phases.length, TRIPLE + SINGLE);
+    const listed = completed(
+      await fixture.workbench["session.list"](
+        { params: {}, query: {}, body: null },
+        fixture.options,
+      ),
+    ).items;
+    assert.deepEqual(
+      listed.map(({ id, participants }) => [id, participants.length]),
+      [[host.id, 0]],
+    );
+    const read = await getOf(fixture, host.id);
+    const poll = await pollOf(fixture, host.id, new Map());
+    for (const members of [read.members, poll.members])
+      assert.deepEqual(
+        members.map(({ session_id: id }) => id),
+        [host.id],
+      );
+    assert.ok(phaseEntriesOf(poll.entries).length > NO_ENTRIES);
+    for (const call of [0, PAIR]) assert.deepEqual(relaysOf(fixture, call), []);
+    const second = textOf(requestMessages(fixture, PAIR)[0]!.content);
+    assert.ok(second.includes(FOLLOW_UP));
+    assert.ok(!second.includes(DRAFT));
+  },
+);
+
+test(
+  "(happy path) after a plan a @Yumi run receives one relay with the plan text once and no phase entry",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, host } = await mentionedPlan(t, [
+      fauxAssistantMessage(DRAFT),
+      fauxAssistantMessage(FINAL_PLAN),
+      fauxAssistantMessage(YUMI_ANSWER),
+    ]);
+    completed(await sendMessage(fixture, host.id, YUMI_REQUEST));
+    await untilIdle(fixture, host.id, t.signal);
+    assert.equal(fixture.provider.calls.length, TRIPLE);
+    const relays = relaysOf(fixture, PAIR);
+    assert.equal(relays.length, SINGLE);
+    assert.equal(occurrences(relays[0]!, `Jeremy: ${FINAL_PLAN}`), SINGLE);
+    assert.equal(occurrences(relays[0]!, FINAL_PLAN), SINGLE);
+    assert.ok(!relays[0]!.includes(DRAFT));
+    for (const line of mutationLines())
+      assert.ok(!relays[0]!.includes(line), line);
+  },
+);
+
+test(
+  "(happy path) an untagged follow-up after a plan runs plan@1",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { state, fixture, host } = await mentionedPlan(t, [
+      fauxAssistantMessage(DRAFT),
+      fauxAssistantMessage(FINAL_PLAN),
+      fauxAssistantMessage(DRAFT),
+      fauxAssistantMessage(FINAL_PLAN),
+    ]);
+    const queued = completed(await sendMessage(fixture, host.id, FOLLOW_UP));
+    assert.equal(queued.agent_name, PLAN);
+    await untilIdle(fixture, host.id, t.signal);
+    assert.equal(fixture.provider.calls.length, TRIPLE + SINGLE);
+    assert.ok(
+      textOf(requestMessages(fixture, PAIR)[0]!.content).includes(FOLLOW_UP),
+    );
+    assert.equal(plansOf(state).length, PAIR);
+  },
+);
+
+test(
+  "(invariant, data loss) a poll resumed with the phase pairs repeats no entry and loses none",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const planner = heldAnswer(DRAFT);
+    const reviewer = heldAnswer(FINAL_PLAN);
+    const { state, fixture, host } = await planFixture(t, [
+      planner.step,
+      reviewer.step,
+    ]);
+    completed(await sendMessage(fixture, host.id, REQUEST));
+    await untilCalls(fixture, SINGLE, t.signal);
+    const cursor = new Map<string, string>();
+    const collected: PollEntry[] = [];
+    let answer = await pollOf(fixture, host.id, cursor);
+    collected.push(...answer.entries);
+    const early = phaseEntriesOf(answer.entries);
+    assert.ok(early.length > NO_ENTRIES);
+    for (const entry of early) assert.equal(entry.phase, PlanPhase.Planner);
+    planner.gate.resolve();
+    await untilCalls(fixture, PAIR, t.signal);
+    answer = await pollOf(fixture, host.id, cursor, answer.version);
+    collected.push(...answer.entries);
+    reviewer.gate.resolve();
+    while (answer.snapshot.run_active) {
+      answer = await pollOf(fixture, host.id, cursor, answer.version);
+      collected.push(...answer.entries);
+    }
+    assert.deepEqual((await pollOf(fixture, host.id, cursor)).entries, []);
+    const full = await pollOf(fixture, host.id, new Map());
+    const key = ({ session_id: sessionId, id }: PollEntry) =>
+      `${sessionId}:${id}`;
+    assert.equal(new Set(collected.map(key)).size, collected.length);
+    assert.deepEqual(
+      new Set(collected.map(key)),
+      new Set(full.entries.map(key)),
+    );
+    assert.deepEqual(
+      new Set(phaseEntriesOf(collected).map(({ session_id: id }) => id)),
+      new Set(phaseIds(state)),
+    );
+  },
+);
+
+test(
+  "(invariant, data loss) after a stop the poll answers no phase entry of the stopped run",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { state, fixture, host } = await planFixture(t, [
+      fauxAssistantMessage(DRAFT),
+      untilAbort(FINAL_PLAN),
+    ]);
+    completed(await sendMessage(fixture, host.id, REQUEST));
+    await untilCalls(fixture, PAIR, t.signal);
+    const during = await pollOf(fixture, host.id, new Map());
+    assert.ok(phaseEntriesOf(during.entries).length > NO_ENTRIES);
+    completed(
+      await fixture.workbench["session.abort"](
+        { params: { session_id: host.id }, query: {}, body: null },
+        fixture.options,
+      ),
+    );
+    await settleTurns();
+    assert.equal(phaseFiles(state).length, PAIR);
+    const after = await pollOf(fixture, host.id, new Map());
+    assert.deepEqual(phaseEntriesOf(after.entries), []);
+    assert.deepEqual(
+      phaseEntriesOf((await getOf(fixture, host.id)).entries),
+      [],
+    );
+  },
+);
+
+test(
+  "(invariant, data loss) the fork material of a source with a Jeremy plan holds one plan item with the author Jeremy",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, host } = await mentionedPlan(
+      t,
+      [
+        fauxAssistantMessage(DRAFT),
+        fauxAssistantMessage(FINAL_PLAN),
+        fauxAssistantMessage(SUMMARY),
+        pass(),
+        fauxAssistantMessage(FORK_ANSWER),
+      ],
+      [OPS, PLAN, GUARD],
+    );
+    const forked = completed(await forkOf(fixture, host.id, FORK_TEXT));
+    await untilIdle(fixture, forked.session_id, t.signal);
+    const [request] = requestMessages(fixture, PAIR);
+    const { conversation: material } = JSON.parse(textOf(request!.content)) as {
+      conversation: string;
+    };
+    assert.equal(occurrences(material, `Jeremy: ${FINAL_PLAN}`), SINGLE);
+    assert.equal(occurrences(material, FINAL_PLAN), SINGLE);
+    assert.ok(!material.includes(DRAFT));
+    for (const line of mutationLines())
+      assert.ok(!material.includes(line), line);
   },
 );

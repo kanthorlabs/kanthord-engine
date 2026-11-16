@@ -138,9 +138,11 @@ import {
 import type { WorkbenchConfig } from "./config.ts";
 import {
   createPhaseSession,
+  openPhaseSession,
   type PhaseAnswer,
   PLAN_AGENT,
   planMutations,
+  planOf,
   runPlanPipeline,
 } from "./plan-pipeline.ts";
 import {
@@ -355,6 +357,7 @@ interface Run {
   offerToolCallId: string | null;
   phase: PlanPhase | null;
   phaseSession: OpenSession | null;
+  phases: OpenSession[];
   settled: Promise<void>;
 }
 
@@ -1345,6 +1348,52 @@ export class WorkbenchService implements Service {
     });
   }
 
+  private async plannedPhases(member: OpenSession): Promise<MergeMember[]> {
+    const phases = this.entries(member.manager).flatMap(
+      (entry) => planOf(entry)?.details.phases ?? [],
+    );
+    const opened = await Promise.all(
+      phases.map(async ({ phase, session_id: id }) => {
+        const manager = await openPhaseSession(
+          this.dependencies.stateDirectory,
+          id,
+        );
+        return manager === null
+          ? []
+          : [
+              {
+                sessionId: id,
+                agentName: member.agentName,
+                phase,
+                entries: this.entries(manager),
+              },
+            ];
+      }),
+    );
+    return opened.flat();
+  }
+
+  private async phaseMembers(host: OpenSession): Promise<MergeMember[]> {
+    const found = new Map<string, MergeMember>();
+    for (const member of host.members.filter(
+      ({ agentName }) => agentName === PLAN_AGENT,
+    ))
+      for (const phased of await this.plannedPhases(member))
+        found.set(phased.sessionId, phased);
+    const { run } = host;
+    if (run !== null && !run.ended)
+      for (const session of run.phases) {
+        assert.ok(session.phase);
+        found.set(session.id, {
+          sessionId: session.id,
+          agentName: session.agentName,
+          phase: session.phase,
+          entries: this.entries(session.manager),
+        });
+      }
+    return [...found.values()];
+  }
+
   private conversationMembers(host: OpenSession): ConversationMember[] {
     return host.members.map((member) => ({
       session_id: member.id,
@@ -1353,14 +1402,17 @@ export class WorkbenchService implements Service {
     }));
   }
 
-  private view(session: OpenSession): WorkbenchSession {
+  private async view(session: OpenSession): Promise<WorkbenchSession> {
     return {
       id: session.id,
       agent_name: session.agentName,
       configuration: { ...session.configuration },
       members: this.conversationMembers(session),
       forked_from: forkedFrom(this.entries(session.manager)),
-      entries: mergeEntries(this.memberEntries(session, true)),
+      entries: mergeEntries([
+        ...this.memberEntries(session, true),
+        ...(await this.phaseMembers(session)),
+      ]),
       run_active: this.runActive(session),
       resume_command: resumeCommand(
         session.manager,
@@ -1446,11 +1498,14 @@ export class WorkbenchService implements Service {
     };
   }
 
-  private changes(host: OpenSession, after: string | undefined) {
+  private async changes(host: OpenSession, after: string | undefined) {
     return {
       members: this.conversationMembers(host),
       entries: mergeEntries(
-        this.memberEntries(host, false),
+        [
+          ...this.memberEntries(host, false),
+          ...(await this.phaseMembers(host)),
+        ],
         parseCursor(after, host.id),
       ),
       snapshot: this.snapshot(host),
@@ -1473,11 +1528,11 @@ export class WorkbenchService implements Service {
     const wake = () => window.cancel();
     session.waiters.add(wake);
     try {
-      const current = this.changes(session, after);
+      const current = await this.changes(session, after);
       if (current.entries.length || version !== current.version) return current;
       await cancelled(window.signal);
       await new Promise((resolve) => setImmediate(resolve));
-      return this.changes(session, after);
+      return await this.changes(session, after);
     } finally {
       session.waiters.delete(wake);
       window.cancel();
@@ -1508,6 +1563,7 @@ export class WorkbenchService implements Service {
       offerToolCallId: null,
       phase: null,
       phaseSession: null,
+      phases: [],
       stopped: false,
       settled: completion.promise,
     };
@@ -1598,6 +1654,7 @@ export class WorkbenchService implements Service {
     };
     run.phase = phase;
     run.phaseSession = session;
+    run.phases.push(session);
     this.notify(host);
     try {
       const built = await this.buildRuntime(member, resolved, this.shutdown);
