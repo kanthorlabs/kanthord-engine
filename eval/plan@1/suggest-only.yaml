@@ -10,9 +10,9 @@ checks:
     - "{{p.node.node-y.md}}"
     - "{{p.node.node-z.md}}"
     - Export report copy
-    - "`true`"
   reply_forbids:
     - "actor:(?!(?:yumi|human|worker)\\b)"
+    - "^(?![\\s\\S]*(?i:verif\\w*\\W+(?:\\w+\\W+){0,3}true\\b))"
   forbid_calls:
     - operation_id: mission.node.pause
     - operation_id: mission.node.resume

@@ -2363,6 +2363,7 @@ export class WorkbenchService implements Service {
       this.closeAgent(session);
     }
     this.sessions.clear();
+    this.finishedPhaseEntries.clear();
     return Promise.resolve(null);
   }
 

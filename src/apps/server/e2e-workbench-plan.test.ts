@@ -554,6 +554,29 @@ test(
   },
 );
 
+test(
+  "(invariant, rollback) a service stop clears the cache of the finished phase entries",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, host } = await planFixture(t, [
+      fauxAssistantMessage(DRAFT),
+      fauxAssistantMessage(REVIEW_CLEAN),
+    ]);
+    const { finishedPhaseEntries } = fixture.workbenchService as unknown as {
+      finishedPhaseEntries: Map<string, unknown>;
+    };
+    completed(await sendMessage(fixture, host.id, REQUEST));
+    await untilIdle(fixture, host.id, t.signal);
+    await getOf(fixture, host.id);
+    assert.equal(finishedPhaseEntries.size, PAIR);
+    assert.equal(
+      (await fixture.workbenchService.stop()) ?? undefined,
+      undefined,
+    );
+    assert.equal(finishedPhaseEntries.size, NO_ENTRIES);
+  },
+);
+
 interface PhaseAnswerProbe {
   phaseAnswer(
     launch: { run: { stopped: boolean }; host: { runError: string | null } },
