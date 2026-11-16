@@ -139,6 +139,7 @@ import {
   appendRecord,
   createSession,
   findSession,
+  forkedFrom,
   hostIdOf,
   lastModel,
   lastThinkingLevel,
@@ -1258,6 +1259,7 @@ export class WorkbenchService implements Service {
       agent_name: session.agentName,
       configuration: { ...session.configuration },
       members: this.conversationMembers(session),
+      forked_from: forkedFrom(this.entries(session.manager)),
       entries: mergeEntries(this.memberEntries(session, true)),
       run_active: this.runActive(session),
       resume_command: resumeCommand(

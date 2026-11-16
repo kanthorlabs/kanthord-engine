@@ -10,7 +10,7 @@ import {
   SHIPPED_TEMPLATES,
 } from "../agent/prompt-templates.ts";
 import type { MemberEntry, SessionEntry } from "./contract.ts";
-import { openingIds } from "./sessions.ts";
+import { openingIds, OpeningKind } from "./sessions.ts";
 import type { Dependencies } from "./service.ts";
 
 const MENTION_PREFIX = "@";
@@ -211,7 +211,7 @@ function relayItems(member: RelayMember, input: RelayInput): string[] {
     const opening = openingIds(author.entries);
     for (const entry of author.entries) {
       const at = Date.parse(entry.timestamp);
-      if (opening.has(entry.id) || !(at > since)) continue;
+      if (opening.hidden.has(entry.id) || !(at > since)) continue;
       const text = relayItemOf(author, entry, input.authorName);
       if (text !== null) items.push({ at, text });
     }
@@ -269,7 +269,11 @@ export function mergeEntries(
   after: ReadonlyMap<string, string> = new Map(),
 ): MemberEntry[] {
   const queues = members.map(({ sessionId, agentName, entries }) => {
-    const [internal] = openingIds(entries);
+    const { kind, hidden } = openingIds(entries);
+    const dropped =
+      kind === OpeningKind.Opening
+        ? [...hidden].slice(NO_CHARACTERS, FIRST_AFTER)
+        : [...hidden];
     const cursor = after.get(sessionId);
     const start =
       cursor === undefined
@@ -277,7 +281,7 @@ export function mergeEntries(
         : entries.findIndex((entry) => entry.id === cursor) + FIRST_AFTER;
     return entries
       .slice(start)
-      .filter((entry) => entry.id !== internal)
+      .filter((entry) => !dropped.includes(entry.id))
       .map((entry): MemberEntry => ({
         ...entry,
         session_id: sessionId,

@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { basename, join } from "node:path";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import type {
   SessionInfo,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { ensureDirectory } from "../kernel/files.ts";
+import { identitySchema } from "../kernel/identity.ts";
 import { homeRelative } from "../kernel/xdg.ts";
 import { isString } from "../kernel/values.ts";
 import { workbenchAgentNames } from "../agent/catalog.ts";
@@ -16,8 +17,12 @@ import {
   WORKBENCH_ACTION_RESULT_ENTRY,
   WORKBENCH_CONFIGURATION_ENTRY,
   WORKBENCH_DIRECTORY_NAME,
+  WORKBENCH_FORK_ACK,
+  WORKBENCH_FORK_FRAME,
+  WORKBENCH_FORK_PREFIX,
   WORKBENCH_OPENING_TEXT,
   WORKBENCH_RECORD_ENTRY,
+  WORKBENCH_SESSION_PREFIX,
   type WorkbenchConfiguration,
   type WorkbenchRecord,
   WorkbenchRecordKind,
@@ -50,6 +55,18 @@ export interface SessionPlace {
 
 export type CreateSessionOptions = { parentSession?: string };
 export type OpeningInput = { model: Model<Api>; greeting: string };
+export type ForkOpeningInput = {
+  model: Model<Api>;
+  sourceId: string;
+  summary: string;
+};
+
+export const OpeningKind = { Opening: "opening", Fork: "fork" } as const;
+export type OpeningKind = (typeof OpeningKind)[keyof typeof OpeningKind];
+
+const sessionIdSchema = identitySchema(WORKBENCH_SESSION_PREFIX);
+const FORK_ID_END = ".";
+const NO_TEXT = "";
 
 export function hostIdOf(path: string): string {
   const name = basename(path, SESSION_FILE_EXTENSION);
@@ -85,6 +102,27 @@ export function sessionPlace(
   return place;
 }
 
+function messageCountOf(
+  session: SessionInfo,
+  opened: boolean,
+  forked: boolean,
+): number {
+  if (forked) return session.messageCount - OPENING_ENTRY_COUNT;
+  return opened ? session.messageCount - 1 : session.messageCount;
+}
+
+export function forkSourceId(text: string): string | null {
+  if (!text.startsWith(WORKBENCH_FORK_PREFIX)) return null;
+  const rest = text.slice(WORKBENCH_FORK_PREFIX.length);
+  const end = rest.indexOf(FORK_ID_END);
+  const id = rest.slice(0, end);
+  return end !== NOT_FOUND && sessionIdSchema.safeParse(id).success ? id : null;
+}
+
+export function isForkOpening(text: string): boolean {
+  return forkSourceId(text) !== null;
+}
+
 export async function listSessions(place: SessionPlace, agentName: string) {
   const pi = await loadPi();
   const sessions: SessionInfo[] = await pi.SessionManager.list(
@@ -93,18 +131,21 @@ export async function listSessions(place: SessionPlace, agentName: string) {
   );
   return sessions.map((session) => {
     const opened = session.firstMessage === WORKBENCH_OPENING_TEXT;
+    const forked = isForkOpening(session.firstMessage);
     return {
       id: session.id,
       agent_name: agentName,
       name: session.name ?? null,
       created: session.created.getTime(),
       modified: session.modified.getTime(),
-      message_count: opened ? session.messageCount - 1 : session.messageCount,
-      first_message: opened ? (session.name ?? "") : session.firstMessage,
+      message_count: messageCountOf(session, opened, forked),
+      first_message:
+        opened || forked ? (session.name ?? NO_TEXT) : session.firstMessage,
       host_session_id:
         session.parentSessionPath === undefined
           ? null
           : hostIdOf(session.parentSessionPath),
+      forked_from: forkSourceId(session.firstMessage),
     };
   });
 }
@@ -123,22 +164,17 @@ export async function createSession(
   return manager;
 }
 
-export function appendOpening(
-  manager: SessionManager,
-  opening: OpeningInput,
-): void {
-  const timestamp = Date.now();
-  manager.appendMessage({
-    role: USER_ROLE,
-    content: [{ type: TEXT_BLOCK, text: WORKBENCH_OPENING_TEXT }],
-    timestamp,
-  });
-  manager.appendMessage({
+function assistantMessage(
+  model: Model<Api>,
+  text: string,
+  timestamp: number,
+): AssistantMessage {
+  return {
     role: ASSISTANT_ROLE,
-    content: [{ type: TEXT_BLOCK, text: opening.greeting }],
-    api: opening.model.api,
-    provider: opening.model.provider,
-    model: opening.model.id,
+    content: [{ type: TEXT_BLOCK, text }],
+    api: model.api,
+    provider: model.provider,
+    model: model.id,
     usage: {
       input: NO_COST,
       output: NO_COST,
@@ -155,24 +191,82 @@ export function appendOpening(
     },
     stopReason: STOP_REASON,
     timestamp,
-  });
+  };
 }
 
-export function openingIds(entries: readonly SessionEntry[]): Set<string> {
-  const messages = entries.filter((entry) => entry.type === EntryType.Message);
+export function appendOpening(
+  manager: SessionManager,
+  opening: OpeningInput,
+): void {
+  const timestamp = Date.now();
+  manager.appendMessage({
+    role: USER_ROLE,
+    content: [{ type: TEXT_BLOCK, text: WORKBENCH_OPENING_TEXT }],
+    timestamp,
+  });
+  manager.appendMessage(
+    assistantMessage(opening.model, opening.greeting, timestamp),
+  );
+}
+
+export function appendForkOpening(
+  manager: SessionManager,
+  opening: ForkOpeningInput,
+): void {
+  const timestamp = Date.now();
+  manager.appendMessage({
+    role: USER_ROLE,
+    content: [
+      {
+        type: TEXT_BLOCK,
+        text: `${WORKBENCH_FORK_PREFIX}${opening.sourceId}.${WORKBENCH_FORK_FRAME}${opening.summary}`,
+      },
+    ],
+    timestamp,
+  });
+  manager.appendMessage(
+    assistantMessage(opening.model, WORKBENCH_FORK_ACK, timestamp),
+  );
+}
+
+function messagesOf(entries: readonly SessionEntry[]): SessionEntry[] {
+  return entries.filter((entry) => entry.type === EntryType.Message);
+}
+
+function firstUserText(messages: readonly SessionEntry[]): string | null {
   const first = messages[0]?.message as
     { role?: unknown; content?: unknown } | undefined;
   const content = first?.content;
-  const opened =
-    first?.role === USER_ROLE &&
+  return first?.role === USER_ROLE &&
     Array.isArray(content) &&
     content.length === ONE_BLOCK &&
     content[0]?.type === TEXT_BLOCK &&
-    content[0].text === WORKBENCH_OPENING_TEXT;
-  if (!opened) return new Set();
-  return new Set(
-    messages.slice(0, OPENING_ENTRY_COUNT).map((entry) => entry.id as string),
-  );
+    isString(content[0].text)
+    ? content[0].text
+    : null;
+}
+
+export function forkedFrom(entries: readonly SessionEntry[]): string | null {
+  const text = firstUserText(messagesOf(entries));
+  return text === null ? null : forkSourceId(text);
+}
+
+export function openingIds(entries: readonly SessionEntry[]): {
+  kind: OpeningKind | null;
+  hidden: Set<string>;
+} {
+  const messages = messagesOf(entries);
+  const kind = openingKindOf(firstUserText(messages));
+  const ids = messages
+    .slice(0, OPENING_ENTRY_COUNT)
+    .map((entry) => entry.id as string);
+  if (kind === OpeningKind.Fork) return { kind, hidden: new Set(ids.slice(1)) };
+  return { kind, hidden: new Set(kind === null ? [] : ids) };
+}
+
+function openingKindOf(text: string | null): OpeningKind | null {
+  if (text === WORKBENCH_OPENING_TEXT) return OpeningKind.Opening;
+  return text !== null && isForkOpening(text) ? OpeningKind.Fork : null;
 }
 
 export async function findSession(

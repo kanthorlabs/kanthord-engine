@@ -222,6 +222,15 @@ components:
               - session_id
               - agent_name
             additionalProperties: {}
+        forked_from:
+          anyOf:
+            - type: string
+              minLength: 44
+              maxLength: 44
+              pattern: ^workbench_session_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: workbench_session_ followed by a canonical 26-character uppercase
+                ULID.
+            - type: "null"
         run_active:
           type: boolean
         resume_command:
@@ -232,6 +241,7 @@ components:
         - configuration
         - members
         - entries
+        - forked_from
         - run_active
         - resume_command
       additionalProperties: false
@@ -294,6 +304,15 @@ components:
                 anyOf:
                   - type: string
                   - type: "null"
+              forked_from:
+                anyOf:
+                  - type: string
+                    minLength: 44
+                    maxLength: 44
+                    pattern: ^workbench_session_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: workbench_session_ followed by a canonical 26-character uppercase
+                      ULID.
+                  - type: "null"
               run_active:
                 type: boolean
               pending_approval:
@@ -344,6 +363,15 @@ components:
                       anyOf:
                         - type: string
                         - type: "null"
+                    forked_from:
+                      anyOf:
+                        - type: string
+                          minLength: 44
+                          maxLength: 44
+                          pattern: ^workbench_session_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                          description: workbench_session_ followed by a canonical 26-character uppercase
+                            ULID.
+                        - type: "null"
                     run_active:
                       type: boolean
                     pending_approval:
@@ -372,6 +400,7 @@ components:
                     - message_count
                     - first_message
                     - host_session_id
+                    - forked_from
                     - run_active
                     - pending_approval
                     - participants
@@ -386,6 +415,7 @@ components:
               - message_count
               - first_message
               - host_session_id
+              - forked_from
               - run_active
               - pending_approval
               - participants
