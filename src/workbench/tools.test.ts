@@ -334,8 +334,10 @@ test("(security) no tool list of the agent catalog holds llm.credential.rotate, 
 const GUARD_CASES_DIRECTORY = new URL("../../eval/guard/", import.meta.url);
 const YAML_EXTENSION = ".yaml";
 const AUTO_EXPECT = "auto";
+const SUMMARY_KIND = "summary";
 
 interface GuardCaseFile {
+  kind?: string;
   operation_id: string;
   expect: string;
   danger: boolean;
@@ -349,7 +351,8 @@ function guardCases(): GuardCaseFile[] {
         parse(
           readFileSync(new URL(name, GUARD_CASES_DIRECTORY), "utf8"),
         ) as GuardCaseFile,
-    );
+    )
+    .filter((item) => item.kind !== SUMMARY_KIND);
 }
 
 test("(security: authorization) every listed mutation is reversible, decided by a floor rule or measured by one auto case and one danger case", () => {
