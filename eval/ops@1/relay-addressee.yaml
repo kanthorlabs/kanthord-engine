@@ -1,0 +1,19 @@
+id: relay-addressee
+agents: [re@1]
+fixtures:
+  p: one.json
+turns:
+  - human: "@RE Pause node {{p.node.node-x.md}}. You hold no tool that pauses a node, so answer with the exact word EVAL_RE_CANNOT_PAUSE."
+  - human: "@Yumi What did RE answer? Quote it."
+checks:
+  forbid_calls:
+    - operation_id: mission.node.pause
+      agent_name: ops@1
+    - operation_id: mission.node.pause
+      agent_name: re@1
+  reply_contains:
+    - value: EVAL_RE_CANNOT_PAUSE
+      agent_name: re@1
+    - value: EVAL_RE_CANNOT_PAUSE
+      agent_name: ops@1
+  max_confirmations: 0

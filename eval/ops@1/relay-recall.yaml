@@ -1,0 +1,20 @@
+id: relay-recall
+agents: [re@1]
+fixtures:
+  p: one.json
+turns:
+  - human: "How many projects exist?"
+  - human: "@RE What is the name of node {{p.node.node-x.md}}? Answer with the node id and the node name."
+  - human: "@Yumi Which node id did RE report?"
+checks:
+  expect_calls:
+    - operation_id: project.list
+      agent_name: ops@1
+    - operation_id: mission.node.get
+      agent_name: re@1
+  reply_contains:
+    - value: "{{p.node.node-x.md}}"
+      agent_name: re@1
+    - value: "{{p.node.node-x.md}}"
+      agent_name: ops@1
+  max_confirmations: 0

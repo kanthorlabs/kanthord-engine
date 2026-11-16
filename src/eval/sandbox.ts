@@ -37,6 +37,7 @@ import {
   GUARD_AGENT_NAME,
   type WorkbenchConfiguration,
   workbenchOperations,
+  type WorkbenchSession,
 } from "../workbench/contract.ts";
 import type { WorkbenchModelRuntimeFactory } from "../workbench/index.ts";
 import {
@@ -60,6 +61,7 @@ import {
   observationOf,
   type RunScore,
   scoreRun,
+  type SessionObservation,
 } from "./score.ts";
 
 const SandboxErrorCode = {
@@ -98,6 +100,8 @@ const TURN_DEADLINE_MS = 300000;
 const FIXTURES_DIRECTORY = "fixtures";
 const TEXT_MEDIA_PREFIX = "text/";
 const TEXT_ENCODING = "utf8";
+const MESSAGE_ENTRY = "message";
+const ASSISTANT_ROLE = "assistant";
 
 type GatewayFixture = Awaited<ReturnType<typeof gatewayFixture>>;
 
@@ -105,6 +109,7 @@ export interface SandboxOptions {
   subject: string;
   credential: CredentialSource;
   configuration: WorkbenchConfiguration;
+  agents?: readonly string[];
   runtimeFactory?: WorkbenchModelRuntimeFactory;
   evalDirectory?: string;
 }
@@ -148,7 +153,9 @@ export async function openSandbox(
   });
   await enableWorkerAgents(
     fixture,
-    options.subject,
+    [...new Set([...WORKER_AGENTS, ...(options.agents ?? [])])].filter(
+      (name) => name !== options.subject,
+    ),
     credential.platform,
     options.configuration,
   );
@@ -167,12 +174,12 @@ export async function openSandbox(
 
 async function enableWorkerAgents(
   fixture: GatewayFixture,
-  subject: string,
+  agents: readonly string[],
   platform: NativeCredential["platform"],
   configuration: WorkbenchConfiguration,
 ): Promise<void> {
   const call = humanCaller(fixture);
-  for (const agent of WORKER_AGENTS.filter((name) => name !== subject))
+  for (const agent of agents)
     await call(agentOperations["enablement.put"], {
       params: { agent_name: agent },
       query: {},
@@ -539,7 +546,7 @@ async function answerPending(
   if (!named) tally.unexpected = true;
   tally.answered.add(pending.tool_call_id);
   await sandbox.call(workbenchOperations["session.approve"], {
-    params: { session_id: sessionId },
+    params: { session_id: pending.session_id },
     query: {},
     body: {
       tool_call_id: pending.tool_call_id,
@@ -572,6 +579,29 @@ async function settleTurn(
     await sleep(POLL_INTERVAL_MS);
   }
   return false;
+}
+
+function membersObservation(
+  session: WorkbenchSession,
+): Record<string, SessionObservation> {
+  const [opening] = session.entries.filter(
+    (entry) => entry.session_id === session.id && entry.type === MESSAGE_ENTRY,
+  );
+  const greeting =
+    (opening?.message as { role?: string } | undefined)?.role === ASSISTANT_ROLE
+      ? opening?.id
+      : undefined;
+  return Object.fromEntries(
+    session.members.map((member) => [
+      member.agent_name,
+      observationOf(
+        session.entries.filter(
+          (entry) =>
+            entry.session_id === member.session_id && entry.id !== greeting,
+        ),
+      ),
+    ]),
+  );
 }
 
 export async function runTurns(
@@ -616,8 +646,11 @@ export async function runTurns(
     query: {},
     body: null,
   });
+  const members = membersObservation(final);
   const observation: Observation = {
-    ...observationOf(final.entries),
+    ...members[sandbox.subject]!,
+    usage: observationOf(final.entries).usage,
+    members,
     confirmations: tally.confirmations,
     unexpected_approval: tally.unexpected,
   };

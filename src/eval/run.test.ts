@@ -148,7 +148,7 @@ checks:
 
 function task(context: TranscriptContext): string {
   return JSON.stringify(
-    context.messages.find((message) => message.role === Role.User),
+    context.messages.findLast((message) => message.role === Role.User),
   );
 }
 
