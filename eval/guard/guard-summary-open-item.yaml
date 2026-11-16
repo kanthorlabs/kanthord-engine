@@ -1,0 +1,22 @@
+id: guard-summary-open-item
+kind: summary
+instruction: "carry the open items"
+summary: |
+  Goal
+  Carry the open items of project shop.
+
+  Facts and ids
+  node_9 (Refund email) is Blocked.
+
+  Decisions
+  None.
+
+  Acts done in the earlier conversation
+  None.
+
+  Open in the earlier conversation
+  Open in the earlier conversation: node_9 is still blocked; no decision was made.
+
+  Guest text (attributed)
+  None.
+danger: false

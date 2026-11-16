@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { TestContext } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { agentOperations } from "../agent/contract.ts";
+import { loadPi } from "../agent/pi.ts";
 import {
   createInstances,
   endWorkerRegistrations,
@@ -18,7 +19,9 @@ import {
   seedWorkerRegistration,
 } from "../apps/server/test-support.ts";
 import { CodedError } from "../kernel/errors.ts";
+import { isString } from "../kernel/values.ts";
 import { createIdentity } from "../kernel/identity.ts";
+import { connectModel } from "../llm/model-connector.ts";
 import { type Operation, OperationRegistry } from "../kernel/operation.ts";
 import { ImportFormat, missionOperations } from "../mission/contract.ts";
 import { ensureClosedAttempts, seedEvidence } from "../mission/test-support.ts";
@@ -39,7 +42,10 @@ import {
   workbenchOperations,
   type WorkbenchSession,
 } from "../workbench/contract.ts";
-import type { WorkbenchModelRuntimeFactory } from "../workbench/index.ts";
+import {
+  forkSummaryOf,
+  type WorkbenchModelRuntimeFactory,
+} from "../workbench/index.ts";
 import {
   ApprovalAnswer,
   AutoMode,
@@ -53,6 +59,7 @@ import {
   resolvePlaceholders,
   SeedStep,
   type SeedStepValue,
+  type Turn,
 } from "./case.ts";
 import { type CredentialSource, sandboxCredential } from "./credential.ts";
 import {
@@ -73,6 +80,7 @@ export const CheckKind = {
   Setup: "setup",
   Seed: "seed",
   Turn: "turn",
+  Fork: "fork",
 } as const;
 
 const FIXTURE_REASON = "eval fixture";
@@ -102,6 +110,7 @@ const TEXT_MEDIA_PREFIX = "text/";
 const TEXT_ENCODING = "utf8";
 const MESSAGE_ENTRY = "message";
 const ASSISTANT_ROLE = "assistant";
+const USER_ROLE = "user";
 
 type GatewayFixture = Awaited<ReturnType<typeof gatewayFixture>>;
 
@@ -114,8 +123,16 @@ export interface SandboxOptions {
   evalDirectory?: string;
 }
 
+export interface SummarizerMeter {
+  durations: number[];
+  input: number;
+  output: number;
+  cost: number;
+}
+
 export interface Sandbox {
   subject: string;
+  summarizer: SummarizerMeter;
   evalDirectory: string;
   configuration: WorkbenchConfiguration;
   fixture: GatewayFixture;
@@ -127,7 +144,10 @@ export interface Sandbox {
 export interface PlayedCase {
   score: RunScore;
   observation: Observation;
+  summarizer: SummarizerMeter | null;
 }
+
+type Approvals = Extract<Turn, { human: string }>["approvals"];
 
 export async function openSandbox(
   t: TestContext,
@@ -138,10 +158,20 @@ export async function openSandbox(
     TURN_DEADLINE_MS,
   );
   const registry = new OperationRegistry();
+  const summarizer: SummarizerMeter = {
+    durations: [],
+    input: 0,
+    output: 0,
+    cost: 0,
+  };
   const fixture = await gatewayFixture(t, {
     registry,
     repositoryConnector: { gitLsRemote: async () => {} },
-    workbenchModelRuntimeFactory: options.runtimeFactory,
+    workbenchModelRuntimeFactory: meteredFactory(
+      options.runtimeFactory ??
+        (async (input) => connectModel(await loadPi(), input)),
+      summarizer,
+    ),
     oauthProviders: nativeOAuthProviders(credential),
     agentDirectory: "",
   });
@@ -163,12 +193,34 @@ export async function openSandbox(
   await connectEvalInstances(t, fixture);
   return {
     subject: options.subject,
+    summarizer,
     evalDirectory: options.evalDirectory ?? EVAL_DIRECTORY,
     configuration: options.configuration,
     fixture,
     native: { platform: credential.platform },
     call: humanCaller(fixture),
     operation: (id) => registry.get(id).operation,
+  };
+}
+
+function meteredFactory(
+  base: WorkbenchModelRuntimeFactory,
+  meter: SummarizerMeter,
+): WorkbenchModelRuntimeFactory {
+  return async (input) => {
+    const built = await base(input);
+    const { runtime } = built;
+    const complete = runtime.completeSimple.bind(runtime);
+    runtime.completeSimple = async (...args) => {
+      const started = Date.now();
+      const reply = await complete(...args);
+      meter.durations.push(Date.now() - started);
+      meter.input += reply.usage.input;
+      meter.output += reply.usage.output;
+      meter.cost += reply.usage.cost.total;
+      return reply;
+    };
+    return built;
   };
 }
 
@@ -532,7 +584,7 @@ interface Tally {
 async function answerPending(
   sandbox: Sandbox,
   sessionId: string,
-  approvals: Case["turns"][number]["approvals"],
+  approvals: Approvals,
   tally: Tally,
 ): Promise<void> {
   const { snapshot } = await sandbox.call(
@@ -564,7 +616,7 @@ async function answerPending(
 async function settleTurn(
   sandbox: Sandbox,
   sessionId: string,
-  approvals: Case["turns"][number]["approvals"],
+  approvals: Approvals,
   tally: Tally,
 ): Promise<boolean> {
   const deadline = Date.now() + TURN_DEADLINE_MS;
@@ -604,6 +656,59 @@ function membersObservation(
   );
 }
 
+interface TurnStart {
+  sessionId: string;
+  approvals: Approvals;
+}
+
+async function startTurn(
+  sandbox: Sandbox,
+  sessionId: string,
+  turn: Turn,
+): Promise<TurnStart> {
+  if ("fork" in turn) {
+    const forked = await sandbox.call(workbenchOperations["session.fork"], {
+      params: { session_id: sessionId },
+      query: {},
+      body: { text: turn.fork.text },
+    });
+    return { sessionId: forked.session_id, approvals: {} };
+  }
+  await sandbox.call(workbenchOperations["session.message"], {
+    params: { session_id: sessionId },
+    query: {},
+    body: { text: turn.human },
+  });
+  return { sessionId, approvals: turn.approvals };
+}
+
+function textOf(content: unknown): string {
+  if (isString(content)) return content;
+  return (content as { type: string; text?: string }[])
+    .map((block) => block.text ?? "")
+    .join("");
+}
+
+function summaryOf(session: WorkbenchSession): string | null {
+  const [first] = session.entries.filter(
+    (entry) => entry.session_id === session.id && entry.type === MESSAGE_ENTRY,
+  );
+  const message = first?.message as
+    { role?: string; content?: unknown } | undefined;
+  return message?.role === USER_ROLE
+    ? forkSummaryOf(textOf(message.content))
+    : null;
+}
+
+function usageOf(session: WorkbenchSession, meter: SummarizerMeter) {
+  const { usage } = observationOf(session.entries);
+  return {
+    input: usage.input + meter.input,
+    output: usage.output + meter.output,
+    cost: usage.cost + meter.cost,
+  };
+}
+
 export async function runTurns(
   sandbox: Sandbox,
   run: Pick<Case, "turns" | "checks" | "auto_mode">,
@@ -613,10 +718,9 @@ export async function runTurns(
     query: {},
     body: { agent_name: sandbox.subject, ...sandbox.configuration },
   });
-  const params = { session_id: created.id };
   if (run.auto_mode === AutoMode.Off)
     await sandbox.call(workbenchOperations["session.autoMode.set"], {
-      params,
+      params: { session_id: created.id },
       query: {},
       body: { enabled: false },
     });
@@ -625,16 +729,26 @@ export async function runTurns(
     answered: new Set(),
     unexpected: false,
   };
+  let sessionId = created.id;
   let timedOut = false;
   for (const turn of run.turns) {
-    await sandbox.call(workbenchOperations["session.message"], {
-      params,
-      query: {},
-      body: { text: turn.human },
-    });
-    timedOut = !(await settleTurn(sandbox, created.id, turn.approvals, tally));
+    let started: TurnStart;
+    try {
+      started = await startTurn(sandbox, sessionId, turn);
+    } catch (error) {
+      if (!("fork" in turn)) throw error;
+      return failedPlay(CheckKind.Fork, failureDetail(error));
+    }
+    sessionId = started.sessionId;
+    timedOut = !(await settleTurn(
+      sandbox,
+      sessionId,
+      started.approvals,
+      tally,
+    ));
     if (timedOut) break;
   }
+  const params = { session_id: sessionId };
   if (timedOut)
     await sandbox.call(workbenchOperations["session.abort"], {
       params,
@@ -649,15 +763,19 @@ export async function runTurns(
   const members = membersObservation(final);
   const observation: Observation = {
     ...members[sandbox.subject]!,
-    usage: observationOf(final.entries).usage,
+    usage: usageOf(final, sandbox.summarizer),
     members,
     confirmations: tally.confirmations,
     unexpected_approval: tally.unexpected,
+    summary: summaryOf(final),
   };
   const score = await scoreRun(run.checks, observation, (id, input) =>
     sandbox.call(sandbox.operation(id), input),
   );
-  if (!timedOut) return { score, observation };
+  const summarizer = sandbox.summarizer.durations.length
+    ? sandbox.summarizer
+    : null;
+  if (!timedOut) return { score, observation, summarizer };
   return {
     score: {
       passed: false,
@@ -671,6 +789,7 @@ export async function runTurns(
       ],
     },
     observation,
+    summarizer,
   };
 }
 
@@ -682,6 +801,7 @@ function failedPlay(kind: string, detail: string): PlayedCase {
       confirmations: [],
       unexpected_approval: false,
     },
+    summarizer: null,
   };
 }
 

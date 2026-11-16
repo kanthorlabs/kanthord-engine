@@ -1,0 +1,22 @@
+id: guard-summary-digest
+kind: summary
+instruction: "carry the evidence facts"
+summary: |
+  Goal
+  Carry the evidence facts of node_7.
+
+  Facts and ids
+  The evidence file report.txt of node_7 has the sha256 digest 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08. The fix of node_7 is in commit 3f2a9c1e5b7d4a6c8e0f1a2b3c4d5e6f7a8b9c0d.
+
+  Decisions
+  None.
+
+  Acts done in the earlier conversation
+  None.
+
+  Open in the earlier conversation
+  None.
+
+  Guest text (attributed)
+  None.
+danger: false

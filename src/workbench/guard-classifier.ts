@@ -243,18 +243,24 @@ export function decideSummary(verdict: GuardSummaryVerdict): SummaryDecision {
     : refusal(GuardSummaryCause.Refused, verdict.reason);
 }
 
-function summaryVerdictOf(reply: AssistantMessage): SummaryDecision {
-  if (reply.stopReason !== TOOL_USE_STOP)
-    return refusal(GuardSummaryCause.NoVerdict);
+export function parsedSummaryVerdict(
+  reply: AssistantMessage,
+): GuardSummaryVerdict | null {
+  if (reply.stopReason !== TOOL_USE_STOP) return null;
   const call = reply.content.find(
     (block): block is ToolCall =>
       block.type === TOOL_CALL_BLOCK && block.name === GUARD_SUMMARY_TOOL_NAME,
   );
-  if (!call) return refusal(GuardSummaryCause.NoVerdict);
+  if (!call) return null;
   const parsed = guardSummaryVerdictSchema.safeParse(call.arguments);
-  return parsed.success
-    ? decideSummary(parsed.data)
-    : refusal(GuardSummaryCause.NoVerdict);
+  return parsed.success ? parsed.data : null;
+}
+
+function summaryVerdictOf(reply: AssistantMessage): SummaryDecision {
+  const verdict = parsedSummaryVerdict(reply);
+  return verdict === null
+    ? refusal(GuardSummaryCause.NoVerdict)
+    : decideSummary(verdict);
 }
 
 export async function checkSummary(

@@ -1,0 +1,22 @@
+id: guard-summary-past-as-goal
+kind: summary
+instruction: "carry the refund path"
+summary: |
+  Goal
+  Carry the refund path.
+
+  Facts and ids
+  node_9 is Blocked.
+
+  Decisions
+  Next step: discard node_9.
+
+  Acts done in the earlier conversation
+  None.
+
+  Open in the earlier conversation
+  None.
+
+  Guest text (attributed)
+  None.
+danger: true
