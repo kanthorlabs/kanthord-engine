@@ -2,7 +2,7 @@ import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { homedir } from "node:os";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import type { Logger } from "pino";
 import type {
   AgentSession,
@@ -80,6 +80,7 @@ import {
   GuardSummaryCause,
   MessageDelivery,
   type PendingApproval,
+  type PlanPhase,
   type QueuedMessage,
   type RunSnapshot,
   type SessionEntry,
@@ -135,6 +136,13 @@ import {
   evidenceReadTool,
 } from "./evidence.ts";
 import type { WorkbenchConfig } from "./config.ts";
+import {
+  createPhaseSession,
+  type PhaseAnswer,
+  PLAN_AGENT,
+  planMutations,
+  runPlanPipeline,
+} from "./plan-pipeline.ts";
 import {
   builtinTools,
   type InvokeOperation,
@@ -276,6 +284,7 @@ interface OpenSession {
   disposeAgent: () => void;
   queue: Promise<void>;
   run: Run | null;
+  phase: PlanPhase | null;
   runError: string | null;
   agentErrorStale: boolean;
   queuedMessages: PendingMessage[];
@@ -344,7 +353,17 @@ interface Run {
   ended: boolean;
   endingCall: string | null;
   offerToolCallId: string | null;
+  phase: PlanPhase | null;
+  phaseSession: OpenSession | null;
   settled: Promise<void>;
+}
+
+interface PlanLaunch {
+  host: OpenSession;
+  member: OpenSession;
+  run: Run;
+  item: LaunchItem;
+  resolved: Resolved;
 }
 
 type AgentEvent = Parameters<Parameters<AgentSession["subscribe"]>[0]>[0];
@@ -371,6 +390,7 @@ interface ActionReportResult {
 const IDLE_SESSION = {
   disposeAgent: () => {},
   run: null,
+  phase: null,
   runError: null,
   agentErrorStale: false,
   redaction: null,
@@ -381,6 +401,11 @@ const NOT_FOUND_INDEX = -1;
 const SUMMARY_REFUSED_LOG = "workbench.fork.summary_refused";
 const AGENT_START = "agent_start";
 const AGENT_END = "agent_end";
+const ASSISTANT_ROLE = "assistant";
+const TEXT_BLOCK = "text";
+const ERROR_STOP_REASON = "error";
+const ABORTED_STOP_REASON = "aborted";
+const PHASE_ERROR_MESSAGE = "The plan phase ended with an error.";
 const TOOL_EXECUTION_END = "tool_execution_end";
 const ALLOWED: ToolDecision = { allowed: true };
 const REJECTED: ToolDecision = {
@@ -937,6 +962,7 @@ export class WorkbenchService implements Service {
     context: Context,
   ): Promise<void> {
     assert.equal(session.agent, null);
+    const isPhase = session.phase !== null;
     const declaration = getAgentDeclaration(session.agentName);
     assert.ok(declaration);
     const { provider, runtime, model, credentials, lifetime } = built;
@@ -966,21 +992,25 @@ export class WorkbenchService implements Service {
           () => session.requester,
         );
       });
-      const offer = offerActionTool({
-        operations: this.dependencies.operations(),
-        invoke: this.dependencies.invoke,
-        requester: () => session.requester,
-        offer: {
-          taken: () => this.hostOf(session).run?.offerToolCallId != null,
-          append: (record) => {
-            appendRecord(session.manager, record);
-            const { run } = this.hostOf(session);
-            assert.ok(run);
-            run.offerToolCallId = record.tool_call_id;
-            this.notify(session);
-          },
-        },
-      });
+      const offer = isPhase
+        ? []
+        : [
+            offerActionTool({
+              operations: this.dependencies.operations(),
+              invoke: this.dependencies.invoke,
+              requester: () => session.requester,
+              offer: {
+                taken: () => this.hostOf(session).run?.offerToolCallId != null,
+                append: (record) => {
+                  appendRecord(session.manager, record);
+                  const { run } = this.hostOf(session);
+                  assert.ok(run);
+                  run.offerToolCallId = record.tool_call_id;
+                  this.notify(session);
+                },
+              },
+            }),
+          ];
       const evidence = declaration.tools.workbench.includes(
         WorkbenchTool.EvidenceRead,
       )
@@ -1008,13 +1038,13 @@ export class WorkbenchService implements Service {
         allowlist: [
           ...builtin.allowlist,
           ...operations.map((tool) => tool.name),
-          offer.name,
+          ...offer.map((tool) => tool.name),
           ...evidence.map((tool) => tool.name),
         ],
         customTools: [
           ...builtin.customTools,
           ...operations,
-          offer,
+          ...offer,
           ...evidence,
         ],
         hostHome,
@@ -1054,7 +1084,8 @@ export class WorkbenchService implements Service {
         if (requiresAbort(host.run, event)) void session.agent?.abort();
         if (event.type === AGENT_START && !host.run?.stopped)
           host.agentErrorStale = false;
-        if (event.type === AGENT_END && host.run) host.run.ended = true;
+        if (event.type === AGENT_END && host.run && !isPhase)
+          host.run.ended = true;
         this.notify(session);
       });
       const running = agent;
@@ -1375,6 +1406,11 @@ export class WorkbenchService implements Service {
     return run !== null && !run.ended;
   }
 
+  private activePhase(session: OpenSession): PlanPhase | null {
+    const { run } = this.hostOf(session);
+    return run !== null && !run.ended ? run.phase : null;
+  }
+
   private notify(session: OpenSession): void {
     const host = this.hostOf(session);
     host.version++;
@@ -1400,6 +1436,7 @@ export class WorkbenchService implements Service {
       pending_tool_calls: state ? [...state.pendingToolCalls] : [],
       pending_approval: this.pendingApprovalOf(session),
       run_active: this.runActive(session),
+      phase: this.activePhase(session),
       queue: session.queuedMessages.map(queuedView),
       error_message:
         session.runError ??
@@ -1469,6 +1506,8 @@ export class WorkbenchService implements Service {
       ended: false,
       endingCall: null,
       offerToolCallId: null,
+      phase: null,
+      phaseSession: null,
       stopped: false,
       settled: completion.promise,
     };
@@ -1491,6 +1530,8 @@ export class WorkbenchService implements Service {
     const resolved = this.dependencies.store.transaction((tx) =>
       this.resolve(tx, member.agentName, member.configuration),
     );
+    if (member.agentName === PLAN_AGENT)
+      return this.launchPlan({ host, member, run, item, resolved });
     if (!member.agent) {
       const built = await this.buildRuntime(member, resolved, item.context);
       await this.openAgent(member, built, item.context);
@@ -1505,6 +1546,95 @@ export class WorkbenchService implements Service {
       .finally(run.settle);
   }
 
+  private async launchPlan(launch: PlanLaunch): Promise<void> {
+    const { host, member, run, item } = launch;
+    const relay = await this.relayContent(host, member, item);
+    const templates = await this.dependencies.agentPrompt.templates(
+      item.context,
+    );
+    void runPlanPipeline({
+      participant: member.manager,
+      request: item.text,
+      relay: relay ?? "",
+      mutations: planMutations(this.dependencies.operations()),
+      templates,
+      stopped: () => this.phaseEnded(run),
+      runPhase: (phase, message) => this.runPhase(launch, phase, message),
+    })
+      .catch((error: unknown) => {
+        host.runError = error instanceof Error ? error.message : String(error);
+      })
+      .finally(() => {
+        run.ended = true;
+        run.phase = null;
+        run.settle();
+      });
+  }
+
+  private phaseEnded(run: Run): boolean {
+    return run.stopped || this.shutdown.signal.aborted;
+  }
+
+  private async runPhase(
+    launch: PlanLaunch,
+    phase: PlanPhase,
+    message: string,
+  ): Promise<PhaseAnswer | null> {
+    const { host, member, run, resolved } = launch;
+    if (this.phaseEnded(run)) return null;
+    const id = createIdentity(WORKBENCH_SESSION_PREFIX);
+    const session = {
+      ...newOpenSession({
+        id,
+        hostId: host.id,
+        agentName: member.agentName,
+        place: member.place,
+        manager: await createPhaseSession(this.dependencies.stateDirectory, id),
+        configuration: member.configuration,
+        requester: member.requester,
+        autoMode: true,
+      }),
+      phase,
+    };
+    run.phase = phase;
+    run.phaseSession = session;
+    this.notify(host);
+    try {
+      const built = await this.buildRuntime(member, resolved, this.shutdown);
+      await this.openAgent(session, built, this.shutdown);
+      if (this.phaseEnded(run)) return null;
+      assert.ok(session.agent);
+      await session.agent.prompt(message, { expandPromptTemplates: false });
+      return this.phaseAnswer(launch, session);
+    } finally {
+      this.closeAgent(session);
+      run.phaseSession = null;
+    }
+  }
+
+  private phaseAnswer(
+    launch: PlanLaunch,
+    session: OpenSession,
+  ): PhaseAnswer | null {
+    assert.ok(session.agent);
+    const last = session.agent.state.messages.findLast(
+      (entry): entry is AssistantMessage => entry.role === ASSISTANT_ROLE,
+    );
+    assert.ok(last);
+    if (this.phaseEnded(launch.run) || last.stopReason === ABORTED_STOP_REASON)
+      return null;
+    if (last.stopReason === ERROR_STOP_REASON) {
+      launch.host.runError = last.errorMessage ?? PHASE_ERROR_MESSAGE;
+      return null;
+    }
+    return {
+      sessionId: session.id,
+      text: last.content
+        .flatMap((block) => (block.type === TEXT_BLOCK ? [block.text] : []))
+        .join(""),
+    };
+  }
+
   private relayMember(member: OpenSession): RelayMember {
     return {
       id: member.id,
@@ -1513,19 +1643,27 @@ export class WorkbenchService implements Service {
     };
   }
 
+  private async relayContent(
+    host: OpenSession,
+    member: OpenSession,
+    item: LaunchItem,
+  ): Promise<string | null> {
+    const self = this.relayMember(member);
+    return relayText(self, {
+      members: host.members.map((other) => this.relayMember(other)),
+      startEntry: lastTurnEntry(self.entries),
+      authorName: item.requester.name,
+      templates: await this.dependencies.agentPrompt.templates(item.context),
+    });
+  }
+
   private async relay(
     host: OpenSession,
     member: OpenSession,
     item: LaunchItem,
   ): Promise<void> {
     assert.ok(member.agent);
-    const self = this.relayMember(member);
-    const content = relayText(self, {
-      members: host.members.map((other) => this.relayMember(other)),
-      startEntry: lastTurnEntry(self.entries),
-      authorName: item.requester.name,
-      templates: await this.dependencies.agentPrompt.templates(item.context),
-    });
+    const content = await this.relayContent(host, member, item);
     if (content === null) return;
     await member.agent.sendCustomMessage({
       customType: WORKBENCH_RELAY_ENTRY,
@@ -1632,6 +1770,7 @@ export class WorkbenchService implements Service {
     run.stopped = true;
     session.agentErrorStale = true;
     for (const member of session.members) this.rejectApprovals(member);
+    await run.phaseSession?.agent?.abort();
     await this.memberOfRun(session, run).agent?.abort();
   }
 
@@ -2151,6 +2290,7 @@ export class WorkbenchService implements Service {
     this.started = false;
     for (const session of this.sessions.values()) {
       void session.agent?.abort();
+      void session.run?.phaseSession?.agent?.abort();
       this.closeAgent(session);
     }
     this.sessions.clear();

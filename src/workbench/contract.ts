@@ -276,6 +276,7 @@ export const runSnapshotSchema = z.strictObject({
   pending_tool_calls: z.array(z.string()),
   pending_approval: pendingApprovalSchema.nullable(),
   run_active: z.boolean(),
+  phase: z.enum(PlanPhase).nullable(),
   queue: z.array(queuedMessageSchema),
   error_message: z.string().nullable(),
   auto_mode: z.boolean(),

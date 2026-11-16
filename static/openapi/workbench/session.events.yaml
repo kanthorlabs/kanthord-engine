@@ -209,6 +209,13 @@ components:
                 - type: "null"
             run_active:
               type: boolean
+            phase:
+              anyOf:
+                - type: string
+                  enum:
+                    - planner
+                    - reviewer
+                - type: "null"
             queue:
               type: array
               items:
@@ -248,6 +255,7 @@ components:
             - pending_tool_calls
             - pending_approval
             - run_active
+            - phase
             - queue
             - error_message
             - auto_mode

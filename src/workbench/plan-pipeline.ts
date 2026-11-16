@@ -2,14 +2,17 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
 import { AGENT_DECLARATIONS } from "../agent/catalog.ts";
-import type { GuardClass } from "../agent/contract.ts";
+import type { GuardClass, PromptTemplates } from "../agent/contract.ts";
 import { loadPi } from "../agent/pi.ts";
 import { ensureDirectory } from "../kernel/files.ts";
 import type { Operation } from "../kernel/operation.ts";
+import { PromptTemplate } from "../agent/contract.ts";
+import { renderTemplate } from "../agent/prompt-templates.ts";
 import { isString } from "../kernel/values.ts";
 import {
   type PlanDetails,
   planDetailsSchema,
+  PlanPhase,
   type SessionEntry,
   UNRESOLVED_MISSING,
   WORKBENCH_PLAN_ENTRY,
@@ -37,7 +40,7 @@ export function planMutations(
   });
 }
 
-const PLAN_AGENT = "plan@1";
+export const PLAN_AGENT = "plan@1";
 const PHASE_DIRECTORY_NAME = "phases";
 const REVIEW_HEADING = "## Review";
 const LINE_BREAK = /\r?\n/;
@@ -126,4 +129,56 @@ export function planOf(
     return null;
   const parsed = planDetailsSchema.safeParse(entry.details);
   return parsed.success ? { text: entry.content, details: parsed.data } : null;
+}
+
+const USER_ROLE = "user";
+const TEXT_BLOCK = "text";
+
+export interface PhaseAnswer {
+  sessionId: string;
+  text: string;
+}
+
+export interface PlanPipelineInput {
+  participant: SessionManager;
+  request: string;
+  relay: string;
+  mutations: readonly PlanMutation[];
+  templates: PromptTemplates;
+  stopped: () => boolean;
+  runPhase: (phase: PlanPhase, message: string) => Promise<PhaseAnswer | null>;
+}
+
+export async function runPlanPipeline(input: PlanPipelineInput): Promise<void> {
+  const { participant, request, mutations, templates } = input;
+  participant.appendMessage({
+    role: USER_ROLE,
+    content: [{ type: TEXT_BLOCK, text: request }],
+    timestamp: Date.now(),
+  });
+  const planner = await input.runPhase(
+    PlanPhase.Planner,
+    renderTemplate(templates, PromptTemplate.PlanDraft, {
+      request,
+      relay: input.relay,
+      mutations,
+    }),
+  );
+  if (planner === null) return;
+  const reviewer = await input.runPhase(
+    PlanPhase.Reviewer,
+    renderTemplate(templates, PromptTemplate.PlanReview, {
+      request,
+      draft: planner.text,
+      mutations,
+    }),
+  );
+  if (reviewer === null || input.stopped()) return;
+  appendPlan(participant, reviewer.text, {
+    phases: [
+      { phase: PlanPhase.Planner, session_id: planner.sessionId },
+      { phase: PlanPhase.Reviewer, session_id: reviewer.sessionId },
+    ],
+    unresolved: unresolvedOf(reviewer.text),
+  });
 }
