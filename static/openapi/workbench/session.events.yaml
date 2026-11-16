@@ -141,6 +141,8 @@ components:
                       type: string
                     operation_id:
                       type: string
+                    session_id:
+                      type: string
                     input:
                       type: object
                       propertyNames:
@@ -177,6 +179,7 @@ components:
                   required:
                     - tool_call_id
                     - operation_id
+                    - session_id
                     - input
                     - guard
                   additionalProperties: false

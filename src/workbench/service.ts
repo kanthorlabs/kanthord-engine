@@ -97,6 +97,7 @@ import {
   type WorkbenchSession,
 } from "./contract.ts";
 import { missionOperations } from "../mission/contract.ts";
+import { lastAnswerer, resolveMention } from "./conversation.ts";
 import { offerActionTool } from "./actions.ts";
 import { classifyCall } from "./guard-classifier.ts";
 import {
@@ -126,6 +127,7 @@ import {
   appendRecord,
   createSession,
   findSession,
+  hostIdOf,
   lastModel,
   lastThinkingLevel,
   listSessions,
@@ -215,6 +217,8 @@ interface GuardOutcomeOptions {
 
 interface OpenSession {
   id: string;
+  hostId: string | null;
+  members: OpenSession[];
   agentName: string;
   place: SessionPlace;
   manager: SessionManager;
@@ -241,6 +245,8 @@ interface OpenSession {
 interface EvidenceGrantOptions {
   signal: AbortSignal | undefined;
 }
+
+type PendingApprovalRequest = Omit<PendingApproval, "session_id">;
 
 interface Approval {
   approval: PendingApproval;
@@ -269,6 +275,7 @@ interface MessageBody {
 
 interface Run {
   request: string;
+  memberId: string | null;
   settle: () => void;
   stopped: boolean;
   firstEntry: number;
@@ -335,6 +342,48 @@ function sessionNotFound(sessionId: string): OperationError {
     "Workbench session not found.",
     { session_id: sessionId },
   );
+}
+
+function notHost(session: OpenSession): OperationError {
+  assert.ok(session.hostId);
+  return new OperationError(
+    HttpStatus.Conflict,
+    WorkbenchErrorCode.NotHost,
+    "The workbench session is a participant. Use the host session.",
+    { session_id: session.id, host_session_id: session.hostId },
+  );
+}
+
+interface StoredSession {
+  agentName: string;
+  manager: SessionManager;
+}
+
+interface SessionFields {
+  id: string;
+  hostId: string | null;
+  agentName: string;
+  place: SessionPlace;
+  manager: SessionManager;
+  configuration: WorkbenchConfiguration;
+  requester: HumanIdentity | undefined;
+  autoMode: boolean;
+}
+
+function newOpenSession(fields: SessionFields): OpenSession {
+  return {
+    ...fields,
+    members: [],
+    agent: null,
+    ...IDLE_SESSION,
+    queuedMessages: [],
+    queue: Promise.resolve(),
+    waiters: new Set(),
+    version: 0,
+    approvals: new Map(),
+    doneReports: new Set(),
+    evidenceGrants: new Set(),
+  };
 }
 
 function refused(sessionId: string): OperationError {
@@ -528,11 +577,12 @@ export class WorkbenchService implements Service {
     session: OpenSession,
     signal: AbortSignal | undefined,
   ): GuardRun {
-    assert.ok(session.run);
+    const host = this.hostOf(session);
+    assert.ok(host.run);
     return {
       agentName: session.agentName,
-      request: session.run.request,
-      autoMode: () => session.autoMode,
+      request: host.run.request,
+      autoMode: () => host.autoMode,
       classifier: () => this.guardClassifier(session, signal),
     };
   }
@@ -587,8 +637,9 @@ export class WorkbenchService implements Service {
   }
 
   private exclusive<T>(session: OpenSession, work: () => Promise<T>) {
-    const result = session.queue.then(work, work);
-    session.queue = result.then(
+    const host = this.hostOf(session);
+    const result = host.queue.then(work, work);
+    host.queue = result.then(
       () => undefined,
       () => undefined,
     );
@@ -615,36 +666,92 @@ export class WorkbenchService implements Service {
       sessionId,
     );
     if (!found) throw sessionNotFound(sessionId);
+    const parentPath = found.manager.getHeader()?.parentSession;
+    if (parentPath !== undefined) {
+      await this.session(hostIdOf(parentPath));
+      const participant = this.sessions.get(sessionId);
+      if (!participant) throw sessionNotFound(sessionId);
+      return participant;
+    }
+    const host = this.stored(found, null);
+    this.sessions.set(host.id, host);
+    host.members.push(host);
+    for (const participant of await this.participantsOf(host)) {
+      this.sessions.set(participant.id, participant);
+      host.members.push(participant);
+    }
+    return host;
+  }
+
+  private stored(found: StoredSession, hostId: string | null): OpenSession {
+    const id = found.manager.getSessionId();
+    const entries = this.entries(found.manager);
     const parsed = workbenchConfigurationSchema.safeParse(
-      storedConfiguration(this.entries(found.manager)),
+      storedConfiguration(entries),
     );
     if (!parsed.success)
       throw new OperationError(
         HttpStatus.Conflict,
         WorkbenchErrorCode.ConfigurationInvalid,
         "The stored configuration of the workbench session is invalid.",
-        { session_id: sessionId },
+        { session_id: id },
       );
-    const session: OpenSession = {
-      id: sessionId,
+    return newOpenSession({
+      id,
+      hostId,
       agentName: found.agentName,
       place: sessionPlace(this.dependencies.stateDirectory, found.agentName),
       manager: found.manager,
       configuration: parsed.data,
       requester: undefined,
-      agent: null,
-      ...IDLE_SESSION,
-      queuedMessages: [],
-      queue: Promise.resolve(),
-      waiters: new Set(),
-      version: 0,
-      approvals: new Map(),
-      doneReports: new Set(),
-      evidenceGrants: new Set(),
-      autoMode: storedAutoMode(this.entries(found.manager)),
-    };
-    this.sessions.set(sessionId, session);
-    return session;
+      autoMode: storedAutoMode(entries),
+    });
+  }
+
+  private async participantsOf(host: OpenSession): Promise<OpenSession[]> {
+    const participants: { created: number; session: OpenSession }[] = [];
+    for (const agentName of workbenchAgentNames()) {
+      const listed = await listSessions(
+        sessionPlace(this.dependencies.stateDirectory, agentName),
+        agentName,
+      );
+      for (const { id, created, host_session_id } of listed) {
+        if (host_session_id !== host.id) continue;
+        const found = await findSession(this.dependencies.stateDirectory, id);
+        assert.ok(found);
+        participants.push({ created, session: this.stored(found, host.id) });
+      }
+    }
+    return participants
+      .sort((left, right) => left.created - right.created)
+      .map(({ session }) => session);
+  }
+
+  private hostOf(session: OpenSession): OpenSession {
+    if (session.hostId === null) return session;
+    const host = this.sessions.get(session.hostId);
+    assert.ok(host);
+    return host;
+  }
+
+  private requireHost(session: OpenSession): void {
+    if (session.hostId !== null) throw notHost(session);
+  }
+
+  private membersOf(session: OpenSession): OpenSession[] {
+    return session.hostId === null ? session.members : [session];
+  }
+
+  private runningMember(host: OpenSession): OpenSession {
+    return this.memberOfRun(host, host.run);
+  }
+
+  private memberOfRun(host: OpenSession, run: Run | null): OpenSession {
+    return host.members.find(({ id }) => id === run?.memberId) ?? host;
+  }
+
+  private entries(manager: SessionManager): SessionEntry[] {
+    return JSON.parse(JSON.stringify(manager.getEntries())) as SessionEntry[];
   }
 
   private async greeting(
@@ -666,10 +773,6 @@ export class WorkbenchService implements Service {
   private title(session: OpenSession, text: string): void {
     if (session.manager.getSessionName() === undefined)
       session.manager.appendSessionInfo(text);
-  }
-
-  private entries(manager: SessionManager): SessionEntry[] {
-    return JSON.parse(JSON.stringify(manager.getEntries())) as SessionEntry[];
   }
 
   private async buildRuntime(
@@ -767,11 +870,12 @@ export class WorkbenchService implements Service {
         invoke: this.dependencies.invoke,
         requester: () => session.requester,
         offer: {
-          taken: () => session.run?.offerToolCallId != null,
+          taken: () => this.hostOf(session).run?.offerToolCallId != null,
           append: (record) => {
             appendRecord(session.manager, record);
-            assert.ok(session.run);
-            session.run.offerToolCallId = record.tool_call_id;
+            const { run } = this.hostOf(session);
+            assert.ok(run);
+            run.offerToolCallId = record.tool_call_id;
             this.notify(session);
           },
         },
@@ -786,7 +890,7 @@ export class WorkbenchService implements Service {
               {
                 grants: {
                   has: (nodeId) =>
-                    session.evidenceGrants.has(nodeId) ||
+                    this.hostOf(session).evidenceGrants.has(nodeId) ||
                     this.messageGrants(session, nodeId),
                 },
               },
@@ -845,10 +949,11 @@ export class WorkbenchService implements Service {
       session.redaction = opened.redaction;
       pinnedLayers().pinInference(agent, opened.systemPrompt);
       const unsubscribeEvents = agent.subscribe((event) => {
-        if (requiresAbort(session.run, event)) void session.agent?.abort();
-        if (event.type === AGENT_START && !session.run?.stopped)
-          session.agentErrorStale = false;
-        if (event.type === AGENT_END && session.run) session.run.ended = true;
+        const host = this.hostOf(session);
+        if (requiresAbort(host.run, event)) void session.agent?.abort();
+        if (event.type === AGENT_START && !host.run?.stopped)
+          host.agentErrorStale = false;
+        if (event.type === AGENT_END && host.run) host.run.ended = true;
         this.notify(session);
       });
       const running = agent;
@@ -882,7 +987,8 @@ export class WorkbenchService implements Service {
       if (message.startsWith(EVIDENCE_ASSET_MISMATCH)) return ALLOWED;
       return { allowed: false, reason: message, terminate: false };
     }
-    if (session.evidenceGrants.has(facts.node_id)) return ALLOWED;
+    const host = this.hostOf(session);
+    if (host.evidenceGrants.has(facts.node_id)) return ALLOWED;
     if (this.messageGrants(session, facts.node_id)) return ALLOWED;
     const { offset, length } = call.input as {
       offset?: number;
@@ -906,24 +1012,26 @@ export class WorkbenchService implements Service {
       },
       options.signal,
     );
-    if (decision.allowed) session.evidenceGrants.add(facts.node_id);
+    if (decision.allowed) host.evidenceGrants.add(facts.node_id);
     return decision;
   }
 
   private messageGrants(session: OpenSession, nodeId: string): boolean {
-    return session.autoMode && !!session.run?.request.includes(nodeId);
+    const host = this.hostOf(session);
+    return host.autoMode && !!host.run?.request.includes(nodeId);
   }
 
   private approval(
     session: OpenSession,
-    approval: PendingApproval,
+    approval: PendingApprovalRequest,
     signal: AbortSignal | undefined,
   ): Promise<ToolDecision> {
     if (signal?.aborted) return Promise.resolve(REJECTED);
     const decision = Promise.withResolvers<ToolDecision>();
     const reject = () => decide(REJECTED);
     const expire = () => {
-      if (session.run) session.run.endingCall = approval.tool_call_id;
+      const { run } = this.hostOf(session);
+      if (run) run.endingCall = approval.tool_call_id;
       decide(EXPIRED);
     };
     const timer = setTimeout(expire, this.dependencies.config.approval_wait_ms);
@@ -935,7 +1043,10 @@ export class WorkbenchService implements Service {
       this.notify(session);
     };
     signal?.addEventListener("abort", reject, { once: true });
-    session.approvals.set(approval.tool_call_id, { approval, decide });
+    session.approvals.set(approval.tool_call_id, {
+      approval: { ...approval, session_id: session.id },
+      decide,
+    });
     this.notify(session);
     return decision.promise;
   }
@@ -966,6 +1077,7 @@ export class WorkbenchService implements Service {
     enabled: boolean,
   ): Promise<{ session_id: string; enabled: boolean }> {
     const session = await this.session(sessionId);
+    this.requireHost(session);
     if (session.autoMode !== enabled) {
       session.autoMode = enabled;
       appendRecord(session.manager, {
@@ -1119,20 +1231,26 @@ export class WorkbenchService implements Service {
   }
 
   private pendingApprovalOf(session: OpenSession): PendingApproval | null {
-    return session.approvals.values().next().value?.approval ?? null;
+    for (const member of this.membersOf(session)) {
+      const pending = member.approvals.values().next().value?.approval;
+      if (pending) return pending;
+    }
+    return null;
   }
 
   private runActive(session: OpenSession): boolean {
-    return session.run !== null && !session.run.ended;
+    const { run } = this.hostOf(session);
+    return run !== null && !run.ended;
   }
 
   private notify(session: OpenSession): void {
-    session.version++;
-    for (const wake of [...session.waiters]) wake();
+    const host = this.hostOf(session);
+    host.version++;
+    for (const wake of [...host.waiters]) wake();
   }
 
   private requireIdle(session: OpenSession): void {
-    if (session.run)
+    if (this.hostOf(session).run)
       throw new OperationError(
         HttpStatus.Conflict,
         WorkbenchErrorCode.RunActive,
@@ -1142,7 +1260,7 @@ export class WorkbenchService implements Service {
   }
 
   private snapshot(session: OpenSession): RunSnapshot {
-    const state = session.agent?.state;
+    const state = this.runningMember(session).agent?.state;
     const streaming = state?.streamingMessage;
     return {
       streaming_message:
@@ -1179,6 +1297,7 @@ export class WorkbenchService implements Service {
     context: Context,
   ): Promise<SessionEvents> {
     const session = await this.session(sessionId);
+    this.requireHost(session);
     const window = new CancellationContext(
       context,
       Date.now() + WORKBENCH_EVENTS_WAIT_MS,
@@ -1204,7 +1323,8 @@ export class WorkbenchService implements Service {
       if (settled) return;
       settled = true;
       if (!run.stopped)
-        session.runError ??= session.agent?.state.errorMessage ?? null;
+        session.runError ??=
+          this.memberOfRun(session, run).agent?.state.errorMessage ?? null;
       if (session.run === run) session.run = null;
       completion.resolve();
       this.notify(session);
@@ -1212,6 +1332,7 @@ export class WorkbenchService implements Service {
     };
     const run: Run = {
       request: options.request,
+      memberId: null,
       settle,
       firstEntry: session.manager.getEntries().length,
       ended: false,
@@ -1227,27 +1348,101 @@ export class WorkbenchService implements Service {
   }
 
   private async launch(
-    session: OpenSession,
+    host: OpenSession,
     run: Run,
     item: LaunchItem,
   ): Promise<void> {
     if (run.stopped) return run.settle();
-    session.requester = item.requester;
+    const member = await this.member(host, item);
+    run.memberId = member.id;
+    member.requester = item.requester;
     const resolved = this.dependencies.store.transaction((tx) =>
-      this.resolve(tx, session.agentName, session.configuration),
+      this.resolve(tx, member.agentName, member.configuration),
     );
-    if (!session.agent) {
-      const built = await this.buildRuntime(session, resolved, item.context);
-      await this.openAgent(session, built, item.context);
+    if (!member.agent) {
+      const built = await this.buildRuntime(member, resolved, item.context);
+      await this.openAgent(member, built, item.context);
     }
-    assert.ok(session.agent);
-    void session.agent
+    assert.ok(member.agent);
+    void member.agent
       .prompt(item.text, { expandPromptTemplates: false })
       .catch((error: unknown) => {
-        session.runError =
-          error instanceof Error ? error.message : String(error);
+        host.runError = error instanceof Error ? error.message : String(error);
       })
       .finally(run.settle);
+  }
+
+  private async member(host: OpenSession, item: LaunchItem) {
+    const mention = this.dependencies.store.transaction((tx) =>
+      resolveMention(tx, item.text, this.dependencies),
+    );
+    if (mention === null) return this.answeredLast(host);
+    const existing = host.members.find(
+      ({ agentName }) => agentName === mention.agent_name,
+    );
+    return existing ?? this.createParticipant(host, mention.agent_name, item);
+  }
+
+  private answeredLast(host: OpenSession): OpenSession {
+    const id = lastAnswerer(
+      host.members.map((member) => ({
+        id: member.id,
+        entries: this.entries(member.manager),
+      })),
+    );
+    return host.members.find((member) => member.id === id) ?? host;
+  }
+
+  private async createParticipant(
+    host: OpenSession,
+    agentName: string,
+    item: LaunchItem,
+  ): Promise<OpenSession> {
+    const { configuration, resolved } = this.dependencies.store.transaction(
+      (tx) => {
+        const view = this.dependencies.agentConfiguration.agentView(
+          tx,
+          agentName,
+          null,
+        );
+        const defaults = workbenchConfigurationSchema.parse(view?.defaults);
+        return {
+          configuration: defaults,
+          resolved: this.resolve(tx, agentName, defaults),
+        };
+      },
+    );
+    const parentSession = host.manager.getSessionFile();
+    assert.ok(parentSession);
+    const id = createIdentity(WORKBENCH_SESSION_PREFIX);
+    const place = sessionPlace(this.dependencies.stateDirectory, agentName);
+    const participant = newOpenSession({
+      id,
+      hostId: host.id,
+      agentName,
+      place,
+      manager: await createSession(place, id, { parentSession }),
+      configuration,
+      requester: item.requester,
+      autoMode: true,
+    });
+    this.sessions.set(id, participant);
+    host.members.push(participant);
+    let built: BuiltRuntime | undefined;
+    try {
+      built = await this.buildRuntime(participant, resolved, item.context);
+      await this.openAgent(participant, built, item.context);
+      this.syncEntries(participant, piProviderId(resolved.provider));
+    } catch (error) {
+      built?.lifetime.cancel();
+      this.closeAgent(participant);
+      this.sessions.delete(id);
+      host.members.splice(host.members.indexOf(participant), 1);
+      const file = participant.manager.getSessionFile();
+      if (file) rmSync(file, { force: true });
+      throw error;
+    }
+    return participant;
   }
 
   private startNext(session: OpenSession): void {
@@ -1274,8 +1469,8 @@ export class WorkbenchService implements Service {
     if (!run || session.run !== run) return;
     run.stopped = true;
     session.agentErrorStale = true;
-    this.rejectApprovals(session);
-    await session.agent?.abort();
+    for (const member of session.members) this.rejectApprovals(member);
+    await this.memberOfRun(session, run).agent?.abort();
   }
 
   private enqueue(
@@ -1316,6 +1511,7 @@ export class WorkbenchService implements Service {
   }> {
     const { text, delivery } = body;
     const session = await this.session(sessionId);
+    this.requireHost(session);
     const requester = humanOf(caller);
     const active = session.run;
     if (active) {
@@ -1365,6 +1561,7 @@ export class WorkbenchService implements Service {
     queuedMessageId: string,
   ): Promise<{ session_id: string; queued_message_id: string }> {
     const session = await this.session(sessionId);
+    this.requireHost(session);
     const index = session.queuedMessages.findIndex(
       ({ id }) => id === queuedMessageId,
     );
@@ -1386,6 +1583,7 @@ export class WorkbenchService implements Service {
     cleared: QueuedMessage[];
   }> {
     const session = await this.session(sessionId);
+    this.requireHost(session);
     const run = session.run;
     const cleared = this.clearQueue(session);
     await this.exclusive(session, () => this.stopRun(session, run));
@@ -1419,24 +1617,17 @@ export class WorkbenchService implements Service {
     );
     const id = createIdentity(WORKBENCH_SESSION_PREFIX);
     const place = sessionPlace(this.dependencies.stateDirectory, agentName);
-    const session: OpenSession = {
+    const session = newOpenSession({
       id,
+      hostId: null,
       agentName,
       place,
       manager: await createSession(place, id, {}),
       configuration,
       requester: humanOf(caller),
-      agent: null,
-      ...IDLE_SESSION,
-      queuedMessages: [],
-      queue: Promise.resolve(),
-      waiters: new Set(),
-      version: 0,
-      approvals: new Map(),
-      doneReports: new Set(),
-      evidenceGrants: new Set(),
       autoMode: true,
-    };
+    });
+    session.members.push(session);
     this.sessions.set(id, session);
     let built: BuiltRuntime | undefined;
     try {
@@ -1459,7 +1650,9 @@ export class WorkbenchService implements Service {
   }
 
   async get(sessionId: string): Promise<WorkbenchSession> {
-    return this.view(await this.session(sessionId));
+    const session = await this.session(sessionId);
+    this.requireHost(session);
+    return this.view(session);
   }
 
   async configure(

@@ -3,6 +3,7 @@ import { AgentErrorCode } from "../agent/contract.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
+import type { SessionEntry } from "./contract.ts";
 import type { Dependencies } from "./service.ts";
 
 const MENTION_PREFIX = "@";
@@ -10,6 +11,9 @@ const NAME_CHARACTER = /[A-Za-z0-9 _-]/;
 const WHITESPACE = /\s/;
 const AFTER_PREFIX = 1;
 const FIRST_TOKEN = 0;
+const MESSAGE_ENTRY = "message";
+const ASSISTANT_ROLE = "assistant";
+const FINAL_STOP_REASON = "stop";
 const NO_CHARACTERS = 0;
 
 export interface MentionName {
@@ -99,4 +103,31 @@ export function resolveMention(
     display_name: mention.display_name,
     rest: mention.rest,
   };
+}
+
+export interface Answerer {
+  id: string;
+  entries: readonly SessionEntry[];
+}
+
+function lastAnswerAt(entries: readonly SessionEntry[]): number | null {
+  const answer = entries.findLast((entry) => {
+    const message = entry.message as
+      { role?: unknown; stopReason?: unknown } | undefined;
+    return (
+      entry.type === MESSAGE_ENTRY &&
+      message?.role === ASSISTANT_ROLE &&
+      message.stopReason === FINAL_STOP_REASON
+    );
+  });
+  return answer === undefined ? null : Date.parse(answer.timestamp);
+}
+
+export function lastAnswerer(members: readonly Answerer[]): string | null {
+  let latest: { id: string; at: number } | null = null;
+  for (const { id, entries } of members) {
+    const at = lastAnswerAt(entries);
+    if (at !== null && (latest === null || at > latest.at)) latest = { id, at };
+  }
+  return latest?.id ?? null;
 }

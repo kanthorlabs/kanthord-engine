@@ -180,6 +180,7 @@ export const guardInfoSchema = z.strictObject({
 export type GuardInfo = z.infer<typeof guardInfoSchema>;
 
 export const pendingApprovalSchema = pendingApprovalSummarySchema.extend({
+  session_id: z.string(),
   input: z.record(z.string(), z.unknown()),
   guard: guardInfoSchema.nullable(),
 });
