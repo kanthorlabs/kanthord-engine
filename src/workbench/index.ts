@@ -26,3 +26,4 @@ export {
   parsedSummaryVerdict,
   SummaryVerdict,
 } from "./guard-classifier.ts";
+export { planMutations } from "./plan-pipeline.ts";
