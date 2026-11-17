@@ -26,6 +26,7 @@ import {
   type ExecutionRun,
   ExecutionStop,
 } from "./execution-run.ts";
+import type { ImplementPorts } from "./foundry-ports.ts";
 import { Phase, type SpanEnd } from "./telemetry.ts";
 
 const CHECKPOINT_FAILED = "checkpoint failed";
@@ -37,6 +38,7 @@ export interface ChainIo {
   budget: ExecutionBudget;
   resources: AsyncDisposableStack;
   host: StepHost;
+  ports: ImplementPorts;
 }
 
 interface Walk {
@@ -76,7 +78,7 @@ async function walkStep(
   step: ChainStep,
   holder: ScopeHolder,
 ): Promise<StepKind> {
-  const { run, budget, resources, host } = walk.io;
+  const { run, budget, resources, host, ports } = walk.io;
   const context = stepContext(walk, step);
   const io: StepIo = {
     run,
@@ -88,6 +90,7 @@ async function walkStep(
     resources,
     spans: run.spans,
     host,
+    ports,
   };
   try {
     const result = await step.run(

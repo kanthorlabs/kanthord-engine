@@ -6,6 +6,7 @@ import type { ExecutionBudget } from "./budget.ts";
 import { examineChain } from "./chain-examine.ts";
 import { runChain } from "./chain-runner.ts";
 import { hostOf, seedOf } from "./step-support.ts";
+import { workerPorts } from "./worker-ports.ts";
 
 export const REPORT_SUBJECT = "Report on current dependency outcomes";
 export const REPORT_MEDIA_TYPE = "text/markdown";
@@ -25,6 +26,7 @@ export function runStepsExamine(
       budget,
       resources: new AsyncDisposableStack(),
       host: hostOf(input, openAgent),
+      ports: workerPorts(input, run),
     },
   );
 }

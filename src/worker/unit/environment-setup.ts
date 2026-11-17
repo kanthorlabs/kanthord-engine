@@ -17,20 +17,17 @@ import { SpanStatus } from "../../tracking/contract.ts";
 import type { ExecutionEnvironment } from "../contract.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { PortResultKind, type ReleaseTreePort } from "./foundry-ports.ts";
 import {
   checkoutDetached,
   cloneLocal,
-  clonePacked,
   commitOf,
   excludeUntracked,
-  fetchLocal,
   fileAtRevision,
   type GitCall,
   headCommit,
   ignoredPaths,
-  matchCheckoutRefs,
   restoreTracked,
-  scrubTree,
   trackedChanges,
 } from "./local-git.ts";
 import {
@@ -40,7 +37,7 @@ import {
   writeSetupRecord,
 } from "./setup-record.ts";
 import { SpanOperation, type SpanRecorder } from "./telemetry.ts";
-import { PoolClass, prepareTree } from "./tree-pool.ts";
+import { PoolClass } from "./tree-pool.ts";
 import {
   type CommandObserver,
   runVerificationsWithOutput,
@@ -62,7 +59,6 @@ const TREE_PREPARED = "tree prepared";
 const TREE_DELETED = "tree deleted";
 const BASE_PURPOSE = "base";
 const UNKNOWN_ERROR = "unknown";
-const NO_REFS: readonly string[] = [];
 
 export interface SetupRepository {
   binding_id: string;
@@ -88,6 +84,7 @@ export interface BaseTrees {
   nodeId: string;
   addresses: ReadonlyMap<string, string>;
   log: (msg: string, fields: Record<string, unknown>) => void;
+  takeBase: ReleaseTreePort["takeBase"];
 }
 
 export interface BasePlace {
@@ -576,46 +573,22 @@ export class BaseHead {
     ensureDirectory(this.directory);
     const clones: SetupEntry[] = [];
     for (const [index, checkout] of this.checkouts.entries()) {
-      const directory = join(this.directory, checkout.repository.name);
-      const commit = commits[index]!;
-      const address = this.addressOf(checkout);
-      const call = () => ({
-        env,
-        directory,
-        context,
-        deadlineMs: remaining(this.input),
-      });
-      const { source } = await prepareTree({
-        pool: trees.workspaces.pool,
-        address,
-        poolClass: PoolClass.Command,
-        target: directory,
-        nodeId: trees.nodeId,
-        keepRefs: NO_REFS,
-        env,
-        context,
-        deadlineMs: remaining(this.input),
-        fresh: async () => {
-          await clonePacked(call(), checkout.directory);
-          await fetchLocal(call(), checkout.directory);
-          await checkoutDetached(
-            env,
-            directory,
-            commit,
-            context,
-            remaining(this.input),
-          );
-          await matchCheckoutRefs(call(), checkout.directory, address);
+      const taken = await trees.takeBase(
+        {
+          binding_id: checkout.repository.binding_id,
+          name: checkout.repository.name,
+          directory: checkout.directory,
         },
-        reuse: async () => {
-          await fetchLocal(call(), checkout.directory);
-          const record = await readSetupRecord(call());
-          await scrubTree(call(), commit, record?.roots ?? []);
-          await matchCheckoutRefs(call(), checkout.directory, address);
-        },
+        commits[index]!,
+        { context, deadline: this.input.deadline },
+      );
+      if (taken.kind === PortResultKind.Failed)
+        throw new ExecutionStop(EndReason.OperationFailed, taken.code);
+      trees.log(TREE_PREPARED, {
+        purpose: BASE_PURPOSE,
+        source: taken.value.source,
       });
-      trees.log(TREE_PREPARED, { purpose: BASE_PURPOSE, source });
-      clones.push({ ...checkout, directory });
+      clones.push({ ...checkout, directory: taken.value.directory });
     }
     return runSetup(this.input, clones);
   }

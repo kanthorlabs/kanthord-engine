@@ -7,7 +7,7 @@ import {
   joined,
 } from "../../kernel/context.ts";
 import { CodedError } from "../../kernel/errors.ts";
-import { thrownReason } from "../../kernel/probe.ts";
+import { redactReason, thrownReason } from "../../kernel/probe.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
   type ClientOptions,
@@ -29,6 +29,7 @@ import { type GitStep, gitStepOf } from "./git-step.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 import { RepositoryErrorCode } from "../../repository/contract.ts";
 import { codedStopDetail, stopCauseOf } from "./stop-cause.ts";
+import { type PortResult, PortResultKind } from "./foundry-ports.ts";
 
 type EvidenceBody = Omit<
   Parameters<MethodClients["mission"]["evidence.submit"]>[0]["body"],
@@ -258,6 +259,16 @@ export class ExecutionRun {
     return thrownReason(error, secrets);
   }
 
+  async redact(text: string): Promise<string | null> {
+    let secrets: readonly string[];
+    try {
+      secrets = await this.secrets();
+    } catch {
+      return null;
+    }
+    return redactReason(text, secrets);
+  }
+
   async stopOf(error: unknown): Promise<ExecutionStop> {
     if (error instanceof ExecutionStop)
       return this.halt(error.reason, error.code, error.detail);
@@ -363,6 +374,28 @@ export class ExecutionRun {
         ? codedStopDetail(result.error.error.code, result.error.error.details)
         : null,
     );
+  }
+
+  async callNoHalt<T>(
+    invoke: (options: ClientOptions) => Promise<OperationResult<T>>,
+  ): Promise<PortResult<T>> {
+    let result: OperationResult<T>;
+    try {
+      result = await invoke({
+        context: this.operationContext,
+        idempotencyKey: createIdempotencyKey(),
+      });
+    } catch (error) {
+      const code = error instanceof CodedError ? error.code : null;
+      return { kind: PortResultKind.Failed, code, message: code ?? "thrown" };
+    }
+    if (result.type === OperationResultType.Completed)
+      return { kind: PortResultKind.Ok, value: result.data };
+    const code =
+      result.type === OperationResultType.Failure
+        ? result.error.error.code
+        : null;
+    return { kind: PortResultKind.Failed, code, message: code ?? result.type };
   }
 
   async checkClaim(): Promise<void> {

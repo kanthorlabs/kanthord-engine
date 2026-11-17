@@ -67,6 +67,7 @@ import { doneRecordPut } from "./step-done-record-put.ts";
 import { setupCommandsOf } from "./step-env-setup.ts";
 import { hostOf, seedOf } from "./step-support.ts";
 import { openUnit, unitScopeOf } from "./step-unit-enter.ts";
+import { workerPorts } from "./worker-ports.ts";
 
 export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
 const NO_TASKS = 0;
@@ -98,7 +99,7 @@ function unitsOf(state: StepsState): TaskContent[] {
 
 export function repositoryOf(
   state: Pick<StepsState, "input">,
-  checkout: WorkspaceCheckout,
+  checkout: Pick<WorkspaceCheckout, "binding_id">,
 ): ExecutionSetup["repositories"][number] {
   const repository = state.input.setup.repositories.find(
     (row) => row.binding_id === checkout.binding_id,
@@ -119,6 +120,7 @@ export function stateIo(state: StepsState): ChainIo {
     budget: state.agent.budget,
     resources: new AsyncDisposableStack(),
     host: hostOf(state.input, () => assert.fail("The state holds the agent.")),
+    ports: workerPorts(state.input, state.run),
   };
 }
 
@@ -231,6 +233,7 @@ export async function prepareStepsWorkspace(
         }),
         resources,
         host: hostOf(input, () => assert.fail("The workspace opens no agent.")),
+        ports: workerPorts(input, run),
       },
     );
     if (kind === StepKind.BudgetEnd)

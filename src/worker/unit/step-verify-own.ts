@@ -168,7 +168,7 @@ export const verifyOwn: Step<UnitScope, "state", never> = {
     "environment_failed/command_absent",
     "environment_failed/setup_failed",
   ],
-  note: "verdict rule, unchanged-turn count, pending setup, own commands; restore on exit",
+  note: "port: releaseTrees.takeBase; verdict rule, unchanged-turn count, pending setup, own commands; restore on exit",
   run({ state }, scope) {
     return scope.node === null
       ? verifyTask(state, scope)

@@ -22,6 +22,7 @@ import type {
   ExecutionStop,
   MethodClaim,
 } from "./execution-run.ts";
+import type { ImplementPorts } from "./foundry-ports.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import type { Prior, readDependencies } from "./node-reads.ts";
 import { Phase, type SpanEnd, type SpanRecorder } from "./telemetry.ts";
@@ -156,6 +157,7 @@ export interface StepIo {
   resources: AsyncDisposableStack;
   spans: SpanRecorder;
   host: StepHost;
+  ports: ImplementPorts;
 }
 
 export interface Step<S, R extends Key, W extends Key> {

@@ -67,6 +67,7 @@ export const setupEntriesLive: Step<
             ]),
           ),
           log: (msg, fields) => io.run.log(msg, fields),
+          takeBase: io.ports.releaseTrees.takeBase,
         },
       },
       entries,

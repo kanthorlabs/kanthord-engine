@@ -35,6 +35,7 @@ import { evaluationChain } from "./chain-evaluation.ts";
 import { examineChain } from "./chain-examine.ts";
 import { implementChain } from "./chain-implement.ts";
 import { executionBoundary, runChain } from "./chain-runner.ts";
+import { workerPorts } from "./worker-ports.ts";
 
 export type { ExecutionEnd } from "./execution-run.ts";
 export { executionBoundary } from "./chain-runner.ts";
@@ -156,6 +157,7 @@ export async function runNativeExecution(
             env: input.env,
             openAgent: open,
           },
+          ports: workerPorts(input, run),
         },
       );
     });

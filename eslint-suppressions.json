@@ -1418,11 +1418,6 @@
       "count": 1
     }
   },
-  "src/worker/unit/release-gate.ts": {
-    "@typescript-eslint/max-params": {
-      "count": 1
-    }
-  },
   "src/worker/unit/session-entries.ts": {
     "kanthord/no-inline-param-type": {
       "count": 1

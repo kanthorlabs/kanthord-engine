@@ -15,9 +15,9 @@ export const releaseVerify: Step<unknown, "state", "releaseCheck"> = {
     "environment_failed/affected_invalid",
     "environment_failed/affected_timeout",
   ],
-  note: "release trees, setup, every command, affected tests; gives the trees back; budget end",
-  async run({ state }, scope) {
-    const releaseCheck = await verifyRelease(state);
+  note: "port: releaseTrees.take, releaseTrees.takeBase, releaseTrees.give; release trees, setup, every command, affected tests; gives the trees back; budget end",
+  async run({ state }, scope, io) {
+    const releaseCheck = await verifyRelease(state, io.ports);
     return releaseCheck === null
       ? budgetEnd(scope)
       : next(scope, { releaseCheck });

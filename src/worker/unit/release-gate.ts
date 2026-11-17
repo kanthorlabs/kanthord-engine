@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
-import { readdirSync, rmSync } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
-import type { Context } from "../../kernel/context.ts";
-import { ensureDirectory } from "../../kernel/files.ts";
+import { dirname, join, relative } from "node:path";
 import type { Revision, TaskContent } from "../../mission/contract.ts";
 import {
   type AffectedResult,
@@ -19,15 +16,13 @@ import {
   affectedRevisionInstruction,
   releaseRevisionInstruction,
 } from "./judgement.ts";
+import { EndReason } from "./execution-run.ts";
 import {
-  checkoutDetached,
-  clonePacked,
-  fetchLocal,
-  matchOriginHead,
-  matchRemote,
-  removeBranches,
-  scrubTree,
-} from "./local-git.ts";
+  type CommandTree,
+  type ImplementPorts,
+  type PortCall,
+  PortResultKind,
+} from "./foundry-ports.ts";
 import {
   environmentDigestsOf,
   testedCommitOf,
@@ -47,21 +42,16 @@ import {
   type VerificationRun,
 } from "./verification.ts";
 import { verificationFactsOf } from "./progress-rule.ts";
-import { CHECKOUTS_DIRECTORY, RELEASE_DIRECTORY } from "./workspace.ts";
 import { SetupEnd, type SetupEntry, setUpHeads } from "./environment-setup.ts";
-import { readSetupRecord } from "./setup-record.ts";
-import { PoolClass, prepareTree } from "./tree-pool.ts";
 
 const EXIT_SUCCESS = 0;
 const NOT_FOUND = -1;
 const NO_ITEMS = 0;
-const PARENT = "..";
 export const RELEASE_GATE_RESULT = "kanthord.release_gate.result";
 export const RELEASE_GATE_UNIT_ID = "kanthord.release_gate.unit_id";
 export const RELEASE_GATE_AFFECTED = "kanthord.release_gate.affected";
 const TREE_PREPARED = "tree prepared";
 const RELEASE_PURPOSE = "release";
-const NO_REFS: readonly string[] = [];
 
 export const ReleaseGateKind = {
   Passed: "passed",
@@ -122,11 +112,12 @@ export interface VerifiedRelease {
 
 export async function verifyRelease(
   state: StepsState,
+  ports: ImplementPorts,
 ): Promise<VerifiedRelease | null> {
   const commands = verificationCommands(state.revision);
   const owners = commandOwners(state);
   assert.equal(owners.length, commands.length);
-  const checked = await verifyInReleaseClones(state, commands);
+  const checked = await verifyInReleaseClones(state, { ports, commands });
   const run = checked.run;
   state.run.noteVerification(
     run.verification.results.at(-1)?.timed_out ?? false,
@@ -240,13 +231,11 @@ function budgetEndRun(state: StepsState): VerificationRun {
 
 async function setUpReleaseClones(
   state: StepsState,
-  key: string,
-  base: string,
+  trees: readonly CommandTree[],
 ): Promise<ReleaseCheck | null> {
-  const checkouts = join(key, CHECKOUTS_DIRECTORY);
   const clones: SetupEntry[] = state.setup.map((entry) => ({
     ...entry,
-    directory: join(base, layoutOf(checkouts, entry.directory)),
+    directory: treeOf(trees, entry.repository.binding_id),
   }));
   const result = await setUpHeads(
     {
@@ -277,16 +266,33 @@ async function setUpReleaseClones(
   return null;
 }
 
+interface ReleaseVerification {
+  ports: ImplementPorts;
+  commands: readonly string[];
+}
+
+interface ReleaseTrees {
+  ports: ImplementPorts;
+  call: PortCall;
+  trees: CommandTree[];
+}
+
 async function verifyInReleaseClones(
   state: StepsState,
-  commands: readonly string[],
+  verification: ReleaseVerification,
 ): Promise<ReleaseCheck> {
+  const { ports, commands } = verification;
   const key = state.input.workspaces.nodeKey(state.input.claim.node_id);
-  const base = join(key, RELEASE_DIRECTORY);
   const cleanup = state.agent.budget.cleanupContext(state.run.operationContext);
+  const trees: CommandTree[] = [];
   try {
-    const directory = await buildReleaseClones(state, key, base, cleanup);
-    const setup = await setUpReleaseClones(state, key, base);
+    await takeReleaseTrees(state, {
+      ports,
+      call: { context: cleanup, deadline: state.input.claim.expired_at },
+      trees,
+    });
+    const directory = releaseRootOf(state, trees);
+    const setup = await setUpReleaseClones(state, trees);
     if (setup !== null) return setup;
     const testedInput = testedInputOf(state.checkouts);
     const owners = commandOwners(state);
@@ -314,7 +320,7 @@ async function verifyInReleaseClones(
     });
     const listed = { run, commands, setup: false, affected: null };
     if (!verificationPassed(run.verification, commands)) return listed;
-    const affected = await runAffectedChecks(state, key, base);
+    const affected = await runAffectedChecks(state, key, trees);
     if (affected === null)
       return {
         ...listed,
@@ -323,7 +329,7 @@ async function verifyInReleaseClones(
     return { ...listed, affected };
   } finally {
     try {
-      giveReleaseTrees(state, key, base);
+      for (const tree of trees) await ports.releaseTrees.give(tree);
     } finally {
       cleanup.cancel();
     }
@@ -333,9 +339,8 @@ async function verifyInReleaseClones(
 async function runAffectedChecks(
   state: StepsState,
   key: string,
-  base: string,
+  trees: readonly CommandTree[],
 ): Promise<AffectedCheck | null> {
-  const checkouts = join(key, CHECKOUTS_DIRECTORY);
   const results: AffectedResult[] = [];
   for (const checkout of state.checkouts) {
     const result = await runAffected({
@@ -349,7 +354,7 @@ async function runAffectedChecks(
       checkout: {
         binding_id: checkout.binding_id,
         name: checkout.name,
-        directory: join(base, layoutOf(checkouts, checkout.directory)),
+        directory: treeOf(trees, checkout.binding_id),
         base_branch: repositoryOf(state, checkout).strategy.base_branch,
         head: checkout.head,
       },
@@ -368,111 +373,40 @@ async function runAffectedChecks(
   };
 }
 
-function giveReleaseTrees(state: StepsState, key: string, base: string): void {
-  const checkouts = join(key, CHECKOUTS_DIRECTORY);
-  for (const checkout of state.checkouts) {
-    const tree = join(base, layoutOf(checkouts, checkout.directory));
-    state.input.workspaces.giveTree(
-      {
-        address: repositoryOf(state, checkout).address,
-        poolClass: PoolClass.Command,
-      },
-      tree,
-      {
-        nodeId: state.input.claim.node_id,
-        log: (msg, fields) => state.run.log(msg, fields),
-      },
-    );
-  }
-  state.input.workspaces.removeSafely(base);
-}
-
-async function buildReleaseClones(
+async function takeReleaseTrees(
   state: StepsState,
-  key: string,
-  base: string,
-  context: Context,
-): Promise<string> {
-  const checkouts = join(key, CHECKOUTS_DIRECTORY);
-  const remaining = () => state.input.claim.expired_at - Date.now();
-  state.input.workspaces.removeUnreal(base);
-  ensureDirectory(base);
-  const current = new Set(
-    state.checkouts.map((checkout) => layoutOf(checkouts, checkout.directory)),
-  );
-  for (const name of readdirSync(base))
-    if (!current.has(name))
-      rmSync(join(base, name), { recursive: true, force: true });
+  release: ReleaseTrees,
+): Promise<void> {
   for (const checkout of state.checkouts) {
-    const directory = join(base, layoutOf(checkouts, checkout.directory));
-    const address = repositoryOf(state, checkout).address;
-    const env = state.input.env;
-    rmSync(directory, { recursive: true, force: true });
-    const { source } = await prepareTree({
-      pool: state.input.workspaces.pool,
-      address,
-      poolClass: PoolClass.Command,
-      target: directory,
-      nodeId: state.input.claim.node_id,
-      keepRefs: NO_REFS,
-      env,
-      context,
-      deadlineMs: remaining(),
-      fresh: async () => {
-        const call = () => ({
-          env,
-          directory,
-          context,
-          deadlineMs: remaining(),
-        });
-        await clonePacked(call(), checkout.directory);
-        await fetchLocal(call(), checkout.directory);
-        await matchRemote(
-          env,
-          directory,
-          checkout.directory,
-          address,
-          context,
-          remaining(),
-        );
-        await matchOriginHead(call(), checkout.directory);
-        await checkoutDetached(
-          env,
-          directory,
-          checkout.head,
-          context,
-          remaining(),
-        );
-        await removeBranches(call());
-      },
-      reuse: async () => {
-        const call = () => ({
-          env,
-          directory,
-          context,
-          deadlineMs: remaining(),
-        });
-        await matchRemote(
-          env,
-          directory,
-          checkout.directory,
-          address,
-          context,
-          remaining(),
-        );
-        await matchOriginHead(call(), checkout.directory);
-        await fetchLocal(call(), checkout.directory);
-        const record = await readSetupRecord(call());
-        await scrubTree(call(), checkout.head, record?.roots ?? []);
-      },
+    const taken = await release.ports.releaseTrees.take(
+      checkout,
+      checkout.head,
+      release.call,
+    );
+    if (taken.kind === PortResultKind.Failed)
+      state.run.stop(EndReason.OperationFailed, taken.code);
+    release.trees.push(taken.value);
+    release.ports.log.log(TREE_PREPARED, {
+      purpose: RELEASE_PURPOSE,
+      source: taken.value.source,
     });
-    state.run.log(TREE_PREPARED, { purpose: RELEASE_PURPOSE, source });
   }
-  return join(base, layoutOf(checkouts, state.root));
 }
 
-function layoutOf(checkouts: string, directory: string): string {
-  const path = relative(checkouts, directory);
-  assert.ok(!path.startsWith(PARENT) && !isAbsolute(path));
-  return path;
+function treeOf(trees: readonly CommandTree[], bindingId: string): string {
+  const tree = trees.find((entry) => entry.binding_id === bindingId);
+  assert.ok(tree);
+  return tree.directory;
+}
+
+function releaseRootOf(
+  state: StepsState,
+  trees: readonly CommandTree[],
+): string {
+  const [checkout] = state.checkouts;
+  assert.ok(checkout);
+  return join(
+    dirname(treeOf(trees, checkout.binding_id)),
+    relative(dirname(checkout.directory), state.root),
+  );
 }
