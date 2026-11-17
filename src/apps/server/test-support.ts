@@ -44,7 +44,7 @@ import {
   type Provider,
   type ProviderAuthInteraction,
 } from "@earendil-works/pi-ai";
-import { setTimeout as delay, setImmediate } from "node:timers/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { agentOperations } from "../../agent/contract.ts";
 import { loadPi } from "../../agent/pi.ts";
 import { scriptedProvider } from "../../agent/test-support.ts";
@@ -104,6 +104,7 @@ import {
   GUARD_SUMMARY_PASS_CONFIDENCE,
   GUARD_SUMMARY_TOOL_NAME,
   WORKBENCH_SERVICE_NAME,
+  WORKBENCH_STREAM_TICK_MS,
   type WorkbenchConfiguration,
   workbenchOperations,
 } from "../../workbench/contract.ts";
@@ -3319,25 +3320,53 @@ export function sendMessage(
   );
 }
 
+const PUMP_INTERVAL_MS = 20;
+let mockedTimers: TestContext["mock"]["timers"] | null = null;
+
+export function pumpTimers(t: TestContext): void {
+  mockedTimers = t.mock.timers;
+  t.after(() => {
+    mockedTimers = null;
+  });
+}
+
+export async function pumped<T>(request: Promise<T>): Promise<T> {
+  const timers = mockedTimers;
+  if (timers === null) return request;
+  const pump = setInterval(
+    () => timers.tick(WORKBENCH_STREAM_TICK_MS),
+    PUMP_INTERVAL_MS,
+  );
+  try {
+    return await request;
+  } finally {
+    clearInterval(pump);
+  }
+}
+
 export async function untilSettled(
   fixture: WorkbenchFixture,
   sessionId: string,
   signal: AbortSignal,
 ) {
+  let version: number | undefined;
   const cursor = new Map<string, string>();
   for (;;) {
     signal.throwIfAborted();
     const after = [...cursor].map(([member, entry]) => `${member}:${entry}`);
     const answer = completed(
-      await fixture.workbench["session.events"](
-        {
-          params: { session_id: sessionId },
-          query: {
-            ...(after.length ? { after: after.join(",") } : {}),
+      await pumped(
+        fixture.workbench["session.events"](
+          {
+            params: { session_id: sessionId },
+            query: {
+              ...(after.length ? { after: after.join(",") } : {}),
+              ...(version === undefined ? {} : { version }),
+            },
+            body: null,
           },
-          body: null,
-        },
-        fixture.options,
+          fixture.options,
+        ),
       ),
     );
     for (const entry of answer.entries) cursor.set(entry.session_id, entry.id);
@@ -3345,7 +3374,7 @@ export async function untilSettled(
       return answer.snapshot.pending_approval;
     if (!answer.snapshot.run_active && !answer.snapshot.queue.length)
       return null;
-    await setImmediate();
+    version = answer.version;
   }
 }
 

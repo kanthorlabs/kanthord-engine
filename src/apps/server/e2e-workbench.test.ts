@@ -98,6 +98,8 @@ import {
   pass,
   type Persistence,
   PRIMARY_KEY,
+  pumped,
+  pumpTimers,
   SONNET,
   SPARE_CREDENTIAL,
   SPARE_KEY,
@@ -668,28 +670,32 @@ async function untilIdle(
 ): Promise<Entry[]> {
   const entries: Entry[] = [];
   let cursor = after;
+  let version: number | undefined;
   for (;;) {
     signal.throwIfAborted();
     const answer = completed(
-      await fixture.workbench["session.events"](
-        {
-          params: { session_id: sessionId },
-          query: {
-            ...(cursor === undefined ? {} : { after: cursor }),
+      await pumped(
+        fixture.workbench["session.events"](
+          {
+            params: { session_id: sessionId },
+            query: {
+              ...(cursor === undefined ? {} : { after: cursor }),
+              ...(version === undefined ? {} : { version }),
+            },
+            body: null,
           },
-          body: null,
-        },
-        fixture.options,
+          fixture.options,
+        ),
       ),
     );
     entries.push(...answer.entries);
     cursor = (entries.at(-1)?.id as string | undefined) ?? cursor;
+    version = answer.version;
     if (
       !answer.snapshot.run_active &&
       answer.snapshot.queue.length === NO_QUEUED_MESSAGES
     )
       return entries;
-    await setImmediate();
   }
 }
 
@@ -1206,22 +1212,25 @@ async function untilApproval(
   sessionId: string,
   signal: AbortSignal,
 ) {
+  let version: number | undefined;
   for (;;) {
     signal.throwIfAborted();
     const answer = completed(
-      await fixture.workbench["session.events"](
-        {
-          params: { session_id: sessionId },
-          query: {},
-          body: null,
-        },
-        fixture.options,
+      await pumped(
+        fixture.workbench["session.events"](
+          {
+            params: { session_id: sessionId },
+            query: version === undefined ? {} : { version },
+            body: null,
+          },
+          fixture.options,
+        ),
       ),
     );
     if (answer.snapshot.pending_approval)
       return answer.snapshot.pending_approval;
     assert.ok(answer.snapshot.run_active);
-    await setImmediate();
+    version = answer.version;
   }
 }
 
@@ -1606,6 +1615,7 @@ const ASSISTANT_ROLE = "assistant";
 
 function enableTimers(t: TestContext): void {
   t.mock.timers.enable({ apis: ["setTimeout"] });
+  pumpTimers(t);
 }
 
 async function snapshotOf(fixture: Fixture, sessionId: string) {
@@ -1663,13 +1673,27 @@ test("(happy path) a card with no decision expires, returns the expiry reason an
   );
 });
 
+async function untilPendingApproval(
+  fixture: Fixture,
+  sessionId: string,
+  signal: AbortSignal,
+) {
+  for (;;) {
+    signal.throwIfAborted();
+    const answer = await snapshotOf(fixture, sessionId);
+    if (answer.snapshot.pending_approval)
+      return answer.snapshot.pending_approval;
+    await setImmediate();
+  }
+}
+
 test("(invariant guard) an approve one millisecond before the expiry runs the call and a later tick changes nothing", async (t) => {
   enableTimers(t);
   const { fixture, session, nodeId } = await cardFixture(t);
   const sessionId = session.id;
   const wait = fixture.config.workbench.approval_wait_ms;
   completed(await message(fixture, sessionId, QUESTION));
-  const pending = await untilApproval(fixture, sessionId, t.signal);
+  const pending = await untilPendingApproval(fixture, sessionId, t.signal);
   t.mock.timers.tick(wait - SINGLE);
   assert.equal(
     (await snapshotOf(fixture, sessionId)).snapshot.pending_approval

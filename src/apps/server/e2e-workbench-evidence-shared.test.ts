@@ -15,6 +15,7 @@ import { type SeededNode, seedEvidence } from "./evidence-test-support.ts";
 import {
   completed,
   createHost,
+  pumpTimers,
   sendMessage,
   toolCall,
   untilIdle,
@@ -366,6 +367,7 @@ test(
     ]);
     await invite(fixture, host.id);
     t.mock.timers.enable({ apis: ["setTimeout"] });
+    pumpTimers(t);
     const pending = await sharedCard(t, fixture, host.id);
     t.mock.timers.tick(fixture.config.workbench.approval_wait_ms);
     await untilIdle(fixture, host.id, t.signal);
