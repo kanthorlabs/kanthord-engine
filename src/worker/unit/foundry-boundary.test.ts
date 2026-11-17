@@ -33,17 +33,27 @@ const FORBIDDEN_NAMES = [
   "MethodClients",
   "ExecutionRun",
   "hostToolsOf",
+  "hkdf",
+  "hkdfSync",
+  "createCipheriv",
+  "createDecipheriv",
+  "createPrivateKey",
 ];
+const FORBIDDEN_PACKAGES = ["@hpke/core"];
 
 interface Imports {
   resolved: string[];
   unresolved: string[];
 }
 
-function importsOf(file: string): Imports {
-  const targets = ts
+function specifiersOf(file: string): string[] {
+  return ts
     .preProcessFile(readFileSync(file, "utf8"), true, true)
-    .importedFiles.map(({ fileName }) => fileName)
+    .importedFiles.map(({ fileName }) => fileName);
+}
+
+function importsOf(file: string): Imports {
+  const targets = specifiersOf(file)
     .filter((specifier) => specifier.startsWith("."))
     .map((specifier) => resolve(dirname(file), specifier));
   return {
@@ -123,6 +133,14 @@ test("no module of the Foundry imports a transport, a client, the execution run,
       importedNames(file)
         .filter((name) => FORBIDDEN_NAMES.includes(name))
         .map((name) => `${file}: ${name}`),
+    ),
+    [],
+  );
+  assert.deepEqual(
+    modules.flatMap((file) =>
+      specifiersOf(resolve(ENGINE_ROOT, file))
+        .filter((specifier) => FORBIDDEN_PACKAGES.includes(specifier))
+        .map((specifier) => `${file}: ${specifier}`),
     ),
     [],
   );
