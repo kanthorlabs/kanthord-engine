@@ -404,6 +404,12 @@ paths:
     $ref: ./openapi/tracking/trace.get.yaml#/pathItem
   /api/tracking/trace:
     $ref: ./openapi/tracking/trace.list.yaml#/pathItem
+  /api/workbench/guest/session:
+    $ref: ./openapi/workbench/guest.get.yaml#/pathItem
+  /api/workbench/guest/session/message:
+    $ref: ./openapi/workbench/guest.message.yaml#/pathItem
+  /api/workbench/guest/session/stream:
+    $ref: ./openapi/workbench/guest.stream.yaml#/pathItem
   /api/workbench/session/{session_id}/invite:
     $ref: ./openapi/workbench/invite.create.yaml#/pathItem
   /api/workbench/invite/join:

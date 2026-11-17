@@ -1,0 +1,344 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: workbench.guest.get
+    tags:
+      - workbench
+    description: "Read the conversation of the invite of the guest. The conversation
+      comes from the guest token. The entries hold the guest view only: no tool
+      result, no thinking and no configuration. An ended invite answers 401
+      `gateway.jwt.invite_ended`."
+    x-access-policy: guest
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters: []
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/workbench.guest.get.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    workbench.guest.get.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    workbench.guest.get.Output:
+      type: object
+      properties:
+        session_id:
+          type: string
+          minLength: 44
+          maxLength: 44
+          pattern: ^workbench_session_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: workbench_session_ followed by a canonical 26-character uppercase
+            ULID.
+        title:
+          anyOf:
+            - type: string
+            - type: "null"
+        members:
+          type: array
+          items:
+            type: object
+            properties:
+              session_id:
+                type: string
+              agent_name:
+                type: string
+              display_name:
+                type: string
+            required:
+              - session_id
+              - agent_name
+              - display_name
+            additionalProperties: false
+        owner_name:
+          type: string
+        entries:
+          type: array
+          items:
+            oneOf:
+              - type: object
+                properties:
+                  id:
+                    type: string
+                  session_id:
+                    type: string
+                  agent_name:
+                    type: string
+                  timestamp:
+                    type: string
+                  kind:
+                    type: string
+                    const: user
+                  text:
+                    type: string
+                required:
+                  - id
+                  - session_id
+                  - agent_name
+                  - timestamp
+                  - kind
+                  - text
+                additionalProperties: false
+              - type: object
+                properties:
+                  id:
+                    type: string
+                  session_id:
+                    type: string
+                  agent_name:
+                    type: string
+                  timestamp:
+                    type: string
+                  kind:
+                    type: string
+                    const: assistant
+                  content:
+                    type: array
+                    items:
+                      oneOf:
+                        - type: object
+                          properties:
+                            type:
+                              type: string
+                              const: text
+                            text:
+                              type: string
+                          required:
+                            - type
+                            - text
+                          additionalProperties: false
+                        - type: object
+                          properties:
+                            type:
+                              type: string
+                              const: toolCall
+                            name:
+                              type: string
+                          required:
+                            - type
+                            - name
+                          additionalProperties: false
+                required:
+                  - id
+                  - session_id
+                  - agent_name
+                  - timestamp
+                  - kind
+                  - content
+                additionalProperties: false
+              - type: object
+                properties:
+                  id:
+                    type: string
+                  session_id:
+                    type: string
+                  agent_name:
+                    type: string
+                  timestamp:
+                    type: string
+                  kind:
+                    type: string
+                    const: summary
+                  text:
+                    type: string
+                required:
+                  - id
+                  - session_id
+                  - agent_name
+                  - timestamp
+                  - kind
+                  - text
+                additionalProperties: false
+              - type: object
+                properties:
+                  id:
+                    type: string
+                  session_id:
+                    type: string
+                  agent_name:
+                    type: string
+                  timestamp:
+                    type: string
+                  kind:
+                    type: string
+                    const: plan
+                  markdown:
+                    type: string
+                required:
+                  - id
+                  - session_id
+                  - agent_name
+                  - timestamp
+                  - kind
+                  - markdown
+                additionalProperties: false
+              - type: object
+                properties:
+                  id:
+                    type: string
+                  session_id:
+                    type: string
+                  agent_name:
+                    type: string
+                  timestamp:
+                    type: string
+                  kind:
+                    type: string
+                    const: action_result
+                  tool_call_id:
+                    type: string
+                  text:
+                    type: string
+                required:
+                  - id
+                  - session_id
+                  - agent_name
+                  - timestamp
+                  - kind
+                  - tool_call_id
+                  - text
+                additionalProperties: false
+              - type: object
+                properties:
+                  id:
+                    type: string
+                  session_id:
+                    type: string
+                  agent_name:
+                    type: string
+                  timestamp:
+                    type: string
+                  kind:
+                    type: string
+                    const: note
+                  text:
+                    type: string
+                  author:
+                    type: object
+                    properties:
+                      kind:
+                        type: string
+                        enum:
+                          - owner
+                          - guest
+                      name:
+                        type: string
+                        minLength: 1
+                        maxLength: 64
+                    required:
+                      - kind
+                      - name
+                    additionalProperties: false
+                required:
+                  - id
+                  - session_id
+                  - agent_name
+                  - timestamp
+                  - kind
+                  - text
+                  - author
+                additionalProperties: false
+              - type: object
+                properties:
+                  id:
+                    type: string
+                  session_id:
+                    type: string
+                  agent_name:
+                    type: string
+                  timestamp:
+                    type: string
+                  kind:
+                    type: string
+                    const: action_offer
+                  tool_call_id:
+                    type: string
+                  operation_id:
+                    type: string
+                  target_id:
+                    type: string
+                required:
+                  - id
+                  - session_id
+                  - agent_name
+                  - timestamp
+                  - kind
+                  - tool_call_id
+                  - operation_id
+                  - target_id
+                additionalProperties: false
+              - type: object
+                properties:
+                  id:
+                    type: string
+                  session_id:
+                    type: string
+                  agent_name:
+                    type: string
+                  timestamp:
+                    type: string
+                  kind:
+                    type: string
+                    const: fork
+                  source_title:
+                    type: string
+                required:
+                  - id
+                  - session_id
+                  - agent_name
+                  - timestamp
+                  - kind
+                  - source_title
+                additionalProperties: false
+        run_active:
+          type: boolean
+      required:
+        - session_id
+        - title
+        - members
+        - owner_name
+        - entries
+        - run_active
+      additionalProperties: false

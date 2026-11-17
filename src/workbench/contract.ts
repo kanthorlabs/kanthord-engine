@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { HttpMethod, HttpStatus } from "../kernel/http.ts";
+import { HttpMethod, HttpStatus, MediaType } from "../kernel/http.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import {
   AccessPolicy,
@@ -29,6 +29,7 @@ export const WORKBENCH_INVITE_PREFIX = "workbench_invite";
 export const WORKBENCH_INVITE_LIFETIME_MS = 604_800_000;
 export const WORKBENCH_INVITE_NAME_MAX_LENGTH = 64;
 export const WORKBENCH_INVITE_NAME_INPUT_MAX_LENGTH = 256;
+export const WORKBENCH_GUEST_MESSAGE_MAX_BYTES = 16384;
 export const WORKBENCH_STREAM_TICK_MS = 1000;
 export const WORKBENCH_STREAM_HEARTBEAT_MS = 15000;
 export const WORKBENCH_STREAM_QUEUE_BYTES = 1048576;
@@ -325,6 +326,65 @@ export const inviteItemSchema = z.strictObject({
   expires_at: timestampSchema,
 });
 
+const guestBlockSchema = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("text"), text: z.string() }),
+  z.strictObject({ type: z.literal("toolCall"), name: z.string() }),
+]);
+
+const guestEnvelope = {
+  id: z.string(),
+  session_id: z.string(),
+  agent_name: z.string(),
+  timestamp: z.string(),
+};
+
+export const guestEntrySchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    ...guestEnvelope,
+    kind: z.literal("user"),
+    text: z.string(),
+  }),
+  z.strictObject({
+    ...guestEnvelope,
+    kind: z.literal("assistant"),
+    content: z.array(guestBlockSchema),
+  }),
+  z.strictObject({
+    ...guestEnvelope,
+    kind: z.literal("summary"),
+    text: z.string(),
+  }),
+  z.strictObject({
+    ...guestEnvelope,
+    kind: z.literal("plan"),
+    markdown: z.string(),
+  }),
+  z.strictObject({
+    ...guestEnvelope,
+    kind: z.literal("action_result"),
+    tool_call_id: z.string(),
+    text: z.string(),
+  }),
+  z.strictObject({
+    ...guestEnvelope,
+    kind: z.literal(WorkbenchRecordKind.Note),
+    text: z.string(),
+    author: authorSchema,
+  }),
+  z.strictObject({
+    ...guestEnvelope,
+    kind: z.literal(WorkbenchRecordKind.ActionOffer),
+    tool_call_id: z.string(),
+    operation_id: z.string(),
+    target_id: z.string(),
+  }),
+  z.strictObject({
+    ...guestEnvelope,
+    kind: z.literal(WorkbenchRecordKind.Fork),
+    source_title: z.string(),
+  }),
+]);
+
 const emptyFields = z.strictObject({});
 const sessionParams = z.strictObject({
   session_id: identitySchema(WORKBENCH_SESSION_PREFIX),
@@ -336,6 +396,10 @@ const workbenchOperation = {
   access: AccessPolicy.Human,
   timeoutMs: WORKBENCH_TIMEOUT_MS,
   status: HttpStatus.OK,
+} as const;
+const guestOperation = {
+  ...workbenchOperation,
+  access: AccessPolicy.Guest,
 } as const;
 const workbenchMutation = {
   ...workbenchOperation,
@@ -657,5 +721,75 @@ export const workbenchOperations = {
     }),
     description:
       "Join a workbench conversation with an invite token and a name. The answer holds a guest token for the guest routes. An unknown or expired token answers `workbench.invite.not_found`. A blank name or one of more than 64 characters answers `workbench.invite.name_invalid`.",
+  },
+  "guest.get": {
+    ...guestOperation,
+    id: "workbench.guest.get",
+    method: HttpMethod.Get,
+    path: "/api/workbench/guest/session",
+    mutation: false,
+    body: false,
+    input: z.strictObject({
+      params: emptyFields,
+      query: emptyFields,
+      body: z.null(),
+    }),
+    output: z.strictObject({
+      session_id: identitySchema(WORKBENCH_SESSION_PREFIX),
+      title: z.string().nullable(),
+      members: z.array(conversationMemberSchema),
+      owner_name: z.string(),
+      entries: z.array(guestEntrySchema),
+      run_active: z.boolean(),
+    }),
+    description:
+      "Read the conversation of the invite of the guest. The conversation comes from the guest token. The entries hold the guest view only: no tool result, no thinking and no configuration. An ended invite answers 401 `gateway.jwt.invite_ended`.",
+  },
+  "guest.stream": {
+    ...guestOperation,
+    id: "workbench.guest.stream",
+    method: HttpMethod.Get,
+    path: "/api/workbench/guest/session/stream",
+    lifetime: OperationLifetime.Stream,
+    contentType: MediaType.EventStream,
+    mutation: false,
+    body: false,
+    input: z.strictObject({
+      params: emptyFields,
+      query: z.strictObject({ after: z.string().min(1).optional() }),
+      body: z.null(),
+    }),
+    output: z.string(),
+    description:
+      "Follow the conversation of the invite of the guest as server-sent events. The first frames hold the entries after `after` and the current state. Event `entries` holds the new guest view entries. Event `state` holds `run_active`, `display_name`, `auto_mode` and `streaming`. The comment `: keepalive` comes every 15 seconds. `after` holds one `<session_id>:<entry_id>` pair per member, comma-separated. A plain entry id names the host pair. The server closes the stream at the end of the invite. The server keeps no position per guest.",
+  },
+  "guest.message": {
+    ...guestOperation,
+    id: "workbench.guest.message",
+    method: HttpMethod.Post,
+    path: "/api/workbench/guest/session/message",
+    mutation: true,
+    body: true,
+    status: HttpStatus.Accepted,
+    input: z.strictObject({
+      params: emptyFields,
+      query: emptyFields,
+      body: z.strictObject({
+        text: z
+          .string()
+          .min(1)
+          .refine(
+            (text) =>
+              Buffer.byteLength(text, "utf8") <=
+              WORKBENCH_GUEST_MESSAGE_MAX_BYTES,
+            {
+              message: `The text holds at most ${WORKBENCH_GUEST_MESSAGE_MAX_BYTES} bytes.`,
+            },
+          ),
+      }),
+    }),
+    output: z.strictObject({ kind: z.literal(MessageKind.Note) }),
+    description:
+      "Append a note of the guest to the conversation. Every guest message is a note: it starts no run, also with a leading mention. The text holds at most 16384 UTF-8 bytes.",
   },
 } as const satisfies Record<string, Operation>;

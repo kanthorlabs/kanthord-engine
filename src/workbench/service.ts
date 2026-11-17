@@ -19,11 +19,11 @@ import {
   reasonOf,
 } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
-import { HttpStatus } from "../kernel/http.ts";
+import { HttpStatus, MediaType } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { piProviderId } from "../kernel/pi-provider.ts";
-import type { HumanIdentity } from "../kernel/caller.ts";
-import { isHumanIdentity } from "../kernel/caller.ts";
+import type { GuestIdentity, HumanIdentity } from "../kernel/caller.ts";
+import { isGuestIdentity, isHumanIdentity } from "../kernel/caller.ts";
 import type {
   CallerContext,
   Operation,
@@ -141,7 +141,13 @@ import {
 } from "./evidence.ts";
 import type { WorkbenchConfig } from "./config.ts";
 import { type FeedState, GuestFeed } from "./guest-feed.ts";
-import type { CreatedInvite, InviteItem, WorkbenchInvites } from "./invites.ts";
+import { projectEntries } from "./guest-view.ts";
+import type {
+  CreatedInvite,
+  InviteItem,
+  ResolvedInvite,
+  WorkbenchInvites,
+} from "./invites.ts";
 import {
   createPhaseSession,
   openPhaseSession,
@@ -424,6 +430,11 @@ const IDLE_SESSION = {
   secrets: async () => [],
 } as const;
 const NOT_FOUND_INDEX = -1;
+const INVITE_ENDED_CODE = "gateway.jwt.invite_ended";
+const STREAM_HEADERS = {
+  "Content-Type": MediaType.EventStream,
+  "Cache-Control": "no-store",
+};
 const NO_CHARACTERS = 0;
 const OWNER_NAME_MAX_LENGTH = WORKBENCH_INVITE_NAME_MAX_LENGTH;
 const SUMMARY_REFUSED_LOG = "workbench.fork.summary_refused";
@@ -457,6 +468,19 @@ function sessionNotFound(sessionId: string): OperationError {
     WorkbenchErrorCode.SessionNotFound,
     "Workbench session not found.",
     { session_id: sessionId },
+  );
+}
+
+function guestOf(caller: CallerContext): GuestIdentity {
+  assert.ok(isGuestIdentity(caller.identity));
+  return caller.identity;
+}
+
+function inviteEnded(): OperationError {
+  return new OperationError(
+    HttpStatus.Unauthorized,
+    INVITE_ENDED_CODE,
+    "The invite of the guest token ended.",
   );
 }
 
@@ -1934,15 +1958,67 @@ export class WorkbenchService implements Service {
     );
   }
 
-  async note(sessionId: string, author: Author, text: string): Promise<void> {
-    const session = await this.session(sessionId);
-    this.requireHost(session);
-    appendRecord(session.manager, {
+  private appendNote(host: OpenSession, author: Author, text: string): void {
+    appendRecord(host.manager, {
       kind: WorkbenchRecordKind.Note,
       text,
       author: { kind: author.kind, name: author.name },
     });
-    this.notify(session);
+    this.notify(host);
+  }
+
+  async note(sessionId: string, author: Author, text: string): Promise<void> {
+    const session = await this.session(sessionId);
+    this.requireHost(session);
+    this.appendNote(session, author, text);
+  }
+
+  private async guestHost(guest: GuestIdentity): Promise<OpenSession> {
+    const host = await this.session(guest.sessionId);
+    this.requireHost(host);
+    return host;
+  }
+
+  private requireLiveInvite(guest: GuestIdentity): ResolvedInvite {
+    const invite = this.dependencies.invites.resolve(guest.inviteId);
+    if (invite === null) throw inviteEnded();
+    return invite;
+  }
+
+  async guestGet(guest: GuestIdentity) {
+    const host = await this.guestHost(guest);
+    this.requireLiveInvite(guest);
+    return {
+      session_id: host.id,
+      title: host.manager.getSessionName() ?? null,
+      members: this.conversationMembers(host),
+      owner_name: guest.invitedBy,
+      entries: projectEntries(mergeEntries(this.memberEntries(host, false))),
+      run_active: this.runActive(host),
+    };
+  }
+
+  async guestStream(
+    guest: GuestIdentity,
+    after: string | undefined,
+    context: Context,
+  ): Promise<Response> {
+    const host = await this.guestHost(guest);
+    const invite = this.requireLiveInvite(guest);
+    const stream = this.feedOf(host).open({
+      inviteId: guest.inviteId,
+      expiresAt: invite.expires_at,
+      after,
+      signal: context.signal,
+    });
+    return new Response(stream, { headers: STREAM_HEADERS });
+  }
+
+  async guestMessage(guest: GuestIdentity, text: string) {
+    const host = await this.guestHost(guest);
+    this.requireLiveInvite(guest);
+    this.appendNote(host, { kind: AuthorKind.Guest, name: guest.name }, text);
+    return { kind: MessageKind.Note };
   }
 
   async message(
@@ -2400,6 +2476,7 @@ export class WorkbenchService implements Service {
   inviteRevoke(inviteId: string): { id: string } {
     const revoked = this.dependencies.invites.revoke(inviteId);
     if (!revoked) throw inviteNotFound();
+    this.feeds.get(revoked.session_id)?.closeInvite(revoked.id);
     return { id: revoked.id };
   }
 
@@ -2481,6 +2558,18 @@ export class WorkbenchService implements Service {
     );
     registry.register(workbenchOperations["invite.join"], ({ body }) =>
       this.inviteJoin(body),
+    );
+    registry.register(workbenchOperations["guest.get"], (_input, caller) =>
+      this.guestGet(guestOf(caller)),
+    );
+    registry.register(
+      workbenchOperations["guest.stream"],
+      ({ query }, caller) =>
+        this.guestStream(guestOf(caller), query.after, caller.context),
+    );
+    registry.register(
+      workbenchOperations["guest.message"],
+      ({ body }, caller) => this.guestMessage(guestOf(caller), body.text),
     );
     registry.register(
       workbenchOperations["session.events"],
