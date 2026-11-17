@@ -112,6 +112,7 @@ import {
   ENVIRONMENT_SECRET_PLATFORMS,
   EnvironmentAgent,
   type EnvironmentModelRuntimeFactory,
+  isProjectServicePrefix,
   PE_AGENT_NAME,
   projectMigrations,
   ProjectService,
@@ -144,6 +145,7 @@ import {
   ServerHost,
 } from "../../footprint/index.ts";
 import { mintServiceIdentity } from "../../kernel/service-mint.ts";
+import { ProjectScope } from "../../kernel/project-scope.ts";
 import {
   agentPromptContribution,
   agentPromptSpanId,
@@ -389,8 +391,15 @@ export function composeServices(options: ComposeServicesOptions) {
   const envelopeKey = deriveEnvelopeKey(options.config.master_key);
   const registry = options.registry ?? new OperationRegistry();
   const invites = new WorkbenchInvites(options.store);
+  const projectScope = new ProjectScope({
+    projectOf: (prefix, id) =>
+      isProjectServicePrefix(prefix)
+        ? project.projectOf(prefix, id)
+        : mission.projectOf(prefix, id),
+  });
   const invocation = createInvocation({
     registry,
+    projectScope,
     stores: {
       [StoreName.Operational]: options.store,
       [StoreName.Tracking]: options.trackingStore,
@@ -1373,6 +1382,8 @@ export function composeServices(options: ComposeServicesOptions) {
   const workbench = new WorkbenchService({
     store: options.store,
     invites,
+    projectScope,
+    projectNames: (ids) => project.projectNames(ids),
     signGuestToken: (guest) =>
       generateGuestJWT(
         options.config.master_key,

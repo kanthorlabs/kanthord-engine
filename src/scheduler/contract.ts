@@ -9,6 +9,7 @@ import {
   OperationLifetime,
   StoreName,
 } from "../kernel/operation.ts";
+import { ProjectScopeRule } from "../kernel/project-scope.ts";
 import type { Transaction } from "../kernel/store.ts";
 
 export const SCHEDULER_SERVICE_NAME = "scheduler";
@@ -583,6 +584,7 @@ export const QUEUE_LIST_LIMIT_MAX = 1000;
 export const schedulerOperations = {
   executionList: {
     id: "scheduler.execution.list",
+    projectScope: ProjectScopeRule.Target,
     service: SCHEDULER_SERVICE_NAME,
     method: HttpMethod.Get,
     path: "/api/scheduler/project/:project_id/execution",
@@ -716,6 +718,7 @@ export const schedulerOperations = {
   },
   queueList: {
     id: "scheduler.queue.list",
+    projectScope: ProjectScopeRule.Target,
     service: SCHEDULER_SERVICE_NAME,
     method: HttpMethod.Get,
     path: "/api/scheduler/project/:project_id/queue",

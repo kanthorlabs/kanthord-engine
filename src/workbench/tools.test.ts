@@ -23,6 +23,7 @@ import {
   OperationLifetime,
   OperationResultType,
 } from "../kernel/operation.ts";
+import { PROJECT_BOUND_PREFIXES } from "../kernel/project-scope.ts";
 import { footprintOperations } from "../footprint/contract.ts";
 import { gatewayOperations } from "../gateway/contract.ts";
 import {
@@ -40,7 +41,11 @@ import { schedulerOperations } from "../scheduler/contract.ts";
 import { storageOperations } from "../storage/contract.ts";
 import { trackingOperations } from "../tracking/contract.ts";
 import { workerOperations } from "../worker/contract.ts";
-import { ACTION_CARD_OPERATIONS, ActionTarget } from "./actions.ts";
+import {
+  ACTION_CARD_OPERATIONS,
+  ActionTarget,
+  TARGET_READS,
+} from "./actions.ts";
 import { workbenchOperations } from "./contract.ts";
 import {
   floorOf,
@@ -420,4 +425,56 @@ test("(security: authorization) every listed mutation is reversible, decided by 
     return !(auto && danger);
   });
   assert.deepEqual(unmeasured, []);
+});
+
+const SCOPE_REFUSED_OPERATIONS: ReadonlySet<string> = new Set([
+  "gateway.healthcheck",
+  "agent.cooldown.list",
+  "agent.cooldown.clear",
+  "workbench.session.list",
+  "worker.catalog.list",
+  "llm.credential.list",
+  "llm.credential.get",
+  "agent.enablement.get",
+  "mission.evidence.asset.content.download",
+]);
+const TASK_PREFIX = "task";
+const IDENTITY_PATTERN_PREFIX = /\^\(?([a-z]+(?:_[a-z]+)*)_\[0-7\]/g;
+
+function patternPrefixes(schema: unknown): string[] {
+  return [...JSON.stringify(schema).matchAll(IDENTITY_PATTERN_PREFIX)].map(
+    (match) => match[1]!,
+  );
+}
+
+test("(security) resolver test 20: every listed and target-read operation has projectScope or is in the refused set, and each identity pattern of a scoped input is project-bound", () => {
+  const byId = new Map(
+    OPERATION_UNION.map((operation) => [operation.id, operation]),
+  );
+  const ids = new Set([
+    ...Object.values(AGENT_DECLARATIONS).flatMap(
+      (declaration) => declaration.tools.operation,
+    ),
+    ...Object.values(TARGET_READS).map((read) => read.operation_id),
+  ]);
+  const unscoped = [...ids].filter((id) => {
+    const operation = byId.get(id);
+    assert.ok(operation, id);
+    return (
+      operation.projectScope === undefined && !SCOPE_REFUSED_OPERATIONS.has(id)
+    );
+  });
+  assert.deepEqual(unscoped, []);
+  const foreign = OPERATION_UNION.filter(
+    (operation) => operation.projectScope !== undefined,
+  ).flatMap((operation) =>
+    patternPrefixes(z.toJSONSchema(operation.input, { io: "input" }))
+      .filter(
+        (prefix) =>
+          prefix !== TASK_PREFIX &&
+          !(PROJECT_BOUND_PREFIXES as readonly string[]).includes(prefix),
+      )
+      .map((prefix) => `${operation.id}:${prefix}`),
+  );
+  assert.deepEqual(foreign, []);
 });

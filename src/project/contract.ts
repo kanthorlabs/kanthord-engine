@@ -3,12 +3,14 @@ import { z } from "zod";
 import type { ServiceIdentity } from "../kernel/caller.ts";
 import type { Context } from "../kernel/context.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
+import { identitySchema } from "../kernel/identity.ts";
 import {
   AccessPolicy,
   type Operation,
   OperationLifetime,
   StoreName,
 } from "../kernel/operation.ts";
+import { ProjectScopeRule } from "../kernel/project-scope.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { isObject, isString } from "../kernel/values.ts";
 import {
@@ -865,6 +867,7 @@ export type SlotEnvironment = {
 };
 
 const emptyFields = z.strictObject({});
+const PROJECT_LIST_ID_MAX = 50;
 const projectParams = z.strictObject({ project_id: z.string().min(1) });
 const bindingParams = z.strictObject({
   project_id: z.string().min(1),
@@ -1087,15 +1090,27 @@ export const projectOperations = {
   list: {
     ...readOperation,
     id: "project.list",
+    projectScope: ProjectScopeRule.List,
     method: HttpMethod.Get,
     path: "/api/project",
-    input: readInput(emptyFields, pageQuery),
+    input: readInput(
+      emptyFields,
+      pageQuery.extend({
+        id: z
+          .preprocess(
+            (value) => (isString(value) ? [value] : value),
+            z.array(identitySchema("project")).max(PROJECT_LIST_ID_MAX),
+          )
+          .optional(),
+      }),
+    ),
     output: pageOf(projectRecord),
     description: "List projects in descending identity order.",
   },
   get: {
     ...readOperation,
     id: "project.get",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Get,
     path: "/api/project/:project_id",
     input: readInput(projectParams, emptyFields),
@@ -1120,6 +1135,7 @@ export const projectOperations = {
     mutation: true,
     body: false,
     id: "project.pause",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Post,
     path: "/api/project/:project_id/pause",
     input: readInput(projectParams, emptyFields),
@@ -1131,6 +1147,7 @@ export const projectOperations = {
     mutation: true,
     body: false,
     id: "project.resume",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Post,
     path: "/api/project/:project_id/resume",
     input: readInput(projectParams, emptyFields),
@@ -1140,6 +1157,7 @@ export const projectOperations = {
   "binding.list": {
     ...readOperation,
     id: "project.binding.list",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Get,
     path: "/api/project/:project_id/binding",
     input: readInput(
@@ -1176,6 +1194,7 @@ export const projectOperations = {
   "bindingSet.get": {
     ...readOperation,
     id: "project.bindingSet.get",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Get,
     path: "/api/project/:project_id/binding-set",
     input: readInput(projectParams, emptyFields),
@@ -1207,6 +1226,7 @@ export const projectOperations = {
   "agentConfiguration.list": {
     ...readOperation,
     id: "project.agentConfiguration.list",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Get,
     path: "/api/project/:project_id/binding/:binding_id/agent",
     input: readInput(bindingParams, pageQuery),

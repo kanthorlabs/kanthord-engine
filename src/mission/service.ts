@@ -201,6 +201,8 @@ import {
 } from "./node-read.ts";
 import {
   insertMission,
+  type MissionBoundPrefix,
+  projectOfRecord,
   readCurrentPins,
   readLiveNodesPinning,
   readMissionByProject,
@@ -1426,6 +1428,12 @@ export class MissionService
     assert.ok(facts);
     recordAct(this.dependencies, act, facts);
     return result;
+  }
+
+  projectOf(prefix: MissionBoundPrefix, id: string): string | null {
+    return this.dependencies.store.transaction((tx) =>
+      projectOfRecord(tx, prefix, id),
+    );
   }
 
   createMission(tx: Transaction, projectId: string, actor: HumanActor): void {

@@ -10,6 +10,7 @@ import {
   OperationLifetime,
   StoreName,
 } from "../kernel/operation.ts";
+import { ProjectScopeRule } from "../kernel/project-scope.ts";
 import type { Transaction } from "../kernel/store.ts";
 import type { Context } from "../kernel/context.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";
@@ -2344,6 +2345,7 @@ export const missionOperations = {
   "node.check": {
     ...writeOperation,
     id: "mission.node.check",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Post,
     path: "/api/mission/node/:node_id/check",
     input: z.strictObject({
@@ -2408,6 +2410,7 @@ export const missionOperations = {
   "evidence.asset.content.get": {
     ...readOperation,
     id: "mission.evidence.asset.content.get",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Get,
     path: "/api/mission/evidence/asset/:asset_id/content",
     input: readInput(
@@ -2460,6 +2463,7 @@ export const missionOperations = {
   "evidence.list": {
     ...readOperation,
     id: "mission.evidence.list",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Get,
     path: "/api/mission/node/:node_id/evidence",
     input: readInput(
@@ -2472,6 +2476,7 @@ export const missionOperations = {
   "evidence.get": {
     ...readOperation,
     id: "mission.evidence.get",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Get,
     path: "/api/mission/evidence/:evidence_id",
     input: readInput(
@@ -2529,6 +2534,7 @@ export const missionOperations = {
   "assessment.list": {
     ...readOperation,
     id: "mission.assessment.list",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Get,
     path: "/api/mission/node/:node_id/assessment",
     input: readInput(
@@ -2556,6 +2562,7 @@ export const missionOperations = {
   "outcome.list": {
     ...readOperation,
     id: "mission.outcome.list",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Get,
     path: "/api/mission/node/:node_id/outcome",
     input: readInput(
@@ -2583,6 +2590,7 @@ export const missionOperations = {
   "attempt.list": {
     ...readOperation,
     id: "mission.attempt.list",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Get,
     path: "/api/mission/node/:node_id/attempt",
     input: readInput(
@@ -2610,6 +2618,7 @@ export const missionOperations = {
   "externalAction.list": {
     ...readOperation,
     id: "mission.externalAction.list",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Get,
     path: "/api/mission/node/:node_id/external-action",
     input: readInput(
@@ -2641,6 +2650,7 @@ export const missionOperations = {
   "proposal.list": {
     ...readOperation,
     id: "mission.proposal.list",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Get,
     path: "/api/mission/node/:node_id/proposal",
     input: readInput(
@@ -2692,6 +2702,7 @@ export const missionOperations = {
   "proposal.decide": {
     ...writeOperation,
     id: "mission.proposal.decide",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Post,
     path: "/api/mission/assessment/:assessment_id/decide",
     input: z.strictObject({
@@ -2822,6 +2833,7 @@ export const missionOperations = {
   "node.unblock": {
     ...writeOperation,
     id: "mission.node.unblock",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Post,
     path: "/api/mission/node/:node_id/unblock",
     input: z.strictObject({
@@ -2848,6 +2860,7 @@ export const missionOperations = {
   "node.block": {
     ...writeOperation,
     id: "mission.node.block",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Post,
     path: "/api/mission/node/:node_id/block",
     input: z.strictObject({
@@ -2887,6 +2900,7 @@ export const missionOperations = {
   "node.resume": {
     ...writeOperation,
     id: "mission.node.resume",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Post,
     path: "/api/mission/node/:node_id/resume",
     input: z.strictObject({
@@ -2900,6 +2914,7 @@ export const missionOperations = {
   "node.pause": {
     ...writeOperation,
     id: "mission.node.pause",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Post,
     path: "/api/mission/node/:node_id/pause",
     input: z.strictObject({
@@ -2913,6 +2928,7 @@ export const missionOperations = {
   export: {
     ...readOperation,
     id: "mission.export",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Get,
     path: "/api/mission/:mission_id/export",
     input: readInput(
@@ -2925,6 +2941,7 @@ export const missionOperations = {
   "import.apply": {
     ...writeOperation,
     id: "mission.import.apply",
+    projectScope: ProjectScopeRule.TargetJson,
     method: HttpMethod.Post,
     path: "/api/mission/:mission_id/import",
     input: z.strictObject({
@@ -2941,6 +2958,7 @@ export const missionOperations = {
     ...readOperation,
     body: true,
     id: "mission.import.preview",
+    projectScope: ProjectScopeRule.TargetJson,
     method: HttpMethod.Post,
     path: "/api/mission/:mission_id/import/preview",
     input: z.strictObject({
@@ -2971,6 +2989,7 @@ export const missionOperations = {
   "dependency.add": {
     ...writeOperation,
     id: "mission.dependency.add",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Put,
     path: "/api/mission/node/:node_id/dependency/:depends_on_id",
     input: dependencyInput,
@@ -2980,6 +2999,7 @@ export const missionOperations = {
   "dependency.remove": {
     ...writeOperation,
     id: "mission.dependency.remove",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Delete,
     path: "/api/mission/node/:node_id/dependency/:depends_on_id",
     input: dependencyInput,
@@ -2989,6 +3009,7 @@ export const missionOperations = {
   "node.list": {
     ...readOperation,
     id: "mission.node.list",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Get,
     path: "/api/mission/:mission_id/node",
     input: readInput(
@@ -3006,6 +3027,7 @@ export const missionOperations = {
   "node.get": {
     ...readOperation,
     id: "mission.node.get",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Get,
     path: "/api/mission/node/:node_id",
     input: readInput(
@@ -3087,6 +3109,7 @@ export const missionOperations = {
   "node.priority.set": {
     ...writeOperation,
     id: "mission.node.priority.set",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Post,
     path: "/api/mission/node/:node_id/priority",
     input: z.strictObject({
@@ -3100,6 +3123,7 @@ export const missionOperations = {
   "criterion.set": {
     ...writeOperation,
     id: "mission.criterion.set",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Put,
     path: "/api/mission/node/:node_id/criterion",
     input: z.strictObject({
@@ -3113,6 +3137,7 @@ export const missionOperations = {
   "node.update": {
     ...writeOperation,
     id: "mission.node.update",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Put,
     path: "/api/mission/node/:node_id",
     input: z.strictObject({
@@ -3126,6 +3151,7 @@ export const missionOperations = {
   "node.create": {
     ...writeOperation,
     id: "mission.node.create",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Post,
     path: "/api/mission/:mission_id/node",
     input: z.strictObject({
@@ -3141,6 +3167,7 @@ export const missionOperations = {
   get: {
     ...readOperation,
     id: "mission.get",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Get,
     path: "/api/mission/project/:project_id",
     input: readInput(

@@ -21,6 +21,7 @@ import {
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus, MediaType } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
+import type { ProjectScope } from "../kernel/project-scope.ts";
 import { piProviderId } from "../kernel/pi-provider.ts";
 import type { GuestIdentity, HumanIdentity } from "../kernel/caller.ts";
 import { isGuestIdentity, isHumanIdentity } from "../kernel/caller.ts";
@@ -218,6 +219,8 @@ interface JoinBody {
 export interface Dependencies {
   store: Store;
   invites: WorkbenchInvites;
+  projectScope: ProjectScope;
+  projectNames(ids: readonly string[]): ReadonlyMap<string, string>;
   signGuestToken: (guest: GuestTokenRequest) => Promise<{ token: string }>;
   config: WorkbenchConfig;
   logger: Logger;
