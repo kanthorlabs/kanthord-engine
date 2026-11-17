@@ -4,6 +4,7 @@ import type { CallerIdentity } from "./caller.ts";
 import type { Transaction } from "./store.ts";
 import type { Context } from "./context.ts";
 import type { HttpMethod } from "./http.ts";
+import type { ProjectScopeRule } from "./project-scope.ts";
 
 export const AccessPolicy = {
   Human: "human",
@@ -69,6 +70,7 @@ export interface Operation<
   requiresRegistration?: boolean;
   endedGroup?: { code: string; message: string };
   requiresExecution?: boolean;
+  projectScope?: ProjectScopeRule;
   replayGuard?: (recorded: unknown, identity: CallerIdentity) => boolean;
   lifetime: OperationLifetime;
   delivery?: true;
