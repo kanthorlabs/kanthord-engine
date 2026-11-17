@@ -84,6 +84,7 @@ export const WorkbenchErrorCode = {
   SummaryRefused: "workbench.fork.summary_refused",
   InviteNotFound: "workbench.invite.not_found",
   InviteNameInvalid: "workbench.invite.name_invalid",
+  EvidenceNameMismatch: "workbench.evidence.name_mismatch",
 } as const;
 
 export const workbenchConfigurationSchema = z.strictObject({
@@ -569,6 +570,7 @@ export const workbenchOperations = {
       body: z.strictObject({
         tool_call_id: z.string().min(1),
         approved: z.boolean(),
+        node_name: z.string().optional(),
       }),
     }),
     output: sessionParams.extend({
@@ -576,7 +578,7 @@ export const workbenchOperations = {
       approved: z.boolean(),
     }),
     description:
-      "Approve or reject the pending call of a mutation tool of the active run.",
+      "Approve or reject the pending call of a mutation tool of the active run. A pending evidence card with `shared` true needs `node_name`, the exact name of the node, with `approved` true. No `node_name` or a different one answers 409 `workbench.evidence.name_mismatch` and the card stays pending.",
   },
   "session.autoMode.set": {
     ...workbenchMutation,

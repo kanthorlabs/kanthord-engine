@@ -24,11 +24,13 @@ import { createIdentity } from "../kernel/identity.ts";
 import { piProviderId } from "../kernel/pi-provider.ts";
 import type { GuestIdentity, HumanIdentity } from "../kernel/caller.ts";
 import { isGuestIdentity, isHumanIdentity } from "../kernel/caller.ts";
-import type {
-  CallerContext,
-  Operation,
-  OperationRegistry,
+import {
+  type CallerContext,
+  type Operation,
+  type OperationRegistry,
+  OperationResultType,
 } from "../kernel/operation.ts";
+import { isString } from "../kernel/values.ts";
 import {
   type Healthcheck,
   HealthStatus,
@@ -136,6 +138,7 @@ import {
 import {
   EVIDENCE_ASSET_MISMATCH,
   EVIDENCE_READ_TOOL,
+  EVIDENCE_SHARED_CONVERSATION,
   evidenceFacts,
   evidenceReadTool,
 } from "./evidence.ts";
@@ -195,6 +198,12 @@ export interface GuestTokenRequest {
   name: string;
   inviteId: string;
   expiresAt: number;
+}
+
+interface ApprovalDecision {
+  toolCallId: string;
+  approved: boolean;
+  nodeName?: string | undefined;
 }
 
 interface InviteBody {
@@ -430,6 +439,7 @@ const IDLE_SESSION = {
   secrets: async () => [],
 } as const;
 const NOT_FOUND_INDEX = -1;
+const EVIDENCE_SHARED_TEXT = `${EVIDENCE_SHARED_CONVERSATION}: The conversation has a live invite. The owner unblocks a node with the typed name of the node.`;
 const INVITE_ENDED_CODE = "gateway.jwt.invite_ended";
 const STREAM_HEADERS = {
   "Content-Type": MediaType.EventStream,
@@ -468,6 +478,44 @@ function sessionNotFound(sessionId: string): OperationError {
     WorkbenchErrorCode.SessionNotFound,
     "Workbench session not found.",
     { session_id: sessionId },
+  );
+}
+
+function evidenceRequest(
+  call: ToolCallEvent,
+  facts: Awaited<ReturnType<typeof evidenceFacts>>,
+  shared: boolean,
+): PendingApprovalRequest {
+  const { offset, length } = call.input as {
+    offset?: number;
+    length?: number;
+  };
+  return {
+    tool_call_id: call.toolCallId,
+    operation_id: missionOperations["evidence.asset.content.download"].id,
+    input: {
+      node_id: facts.node_id,
+      attempt: facts.attempt,
+      evidence_id: facts.evidence_id,
+      asset_id: facts.asset_id,
+      kind: facts.kind,
+      ...(offset === undefined ? {} : { offset }),
+      ...(length === undefined ? {} : { length }),
+      ...(shared ? { shared: true } : {}),
+    },
+    guard: null,
+  };
+}
+
+function approvalNotFound(
+  sessionId: string,
+  toolCallId: string,
+): OperationError {
+  return new OperationError(
+    HttpStatus.NotFound,
+    WorkbenchErrorCode.ApprovalNotFound,
+    "The workbench session holds no pending call with this identity.",
+    { session_id: sessionId, tool_call_id: toolCallId },
   );
 }
 
@@ -1081,9 +1129,7 @@ export class WorkbenchService implements Service {
               () => session.requester,
               {
                 grants: {
-                  has: (nodeId) =>
-                    this.hostOf(session).evidenceGrants.has(nodeId) ||
-                    this.messageGrants(session, nodeId),
+                  has: (nodeId) => this.granted(session, nodeId),
                 },
               },
             ),
@@ -1181,32 +1227,27 @@ export class WorkbenchService implements Service {
       return { allowed: false, reason: message, terminate: false };
     }
     const host = this.hostOf(session);
-    if (host.evidenceGrants.has(facts.node_id)) return ALLOWED;
-    if (this.messageGrants(session, facts.node_id)) return ALLOWED;
-    const { offset, length } = call.input as {
-      offset?: number;
-      length?: number;
-    };
+    const shared = this.dependencies.invites.isShared(host.id);
+    if (this.granted(session, facts.node_id)) return ALLOWED;
     const decision = await this.approval(
       session,
-      {
-        tool_call_id: call.toolCallId,
-        operation_id: missionOperations["evidence.asset.content.download"].id,
-        input: {
-          node_id: facts.node_id,
-          attempt: facts.attempt,
-          evidence_id: facts.evidence_id,
-          asset_id: facts.asset_id,
-          kind: facts.kind,
-          ...(offset === undefined ? {} : { offset }),
-          ...(length === undefined ? {} : { length }),
-        },
-        guard: null,
-      },
+      evidenceRequest(call, facts, shared),
       options.signal,
     );
-    if (decision.allowed) host.evidenceGrants.add(facts.node_id);
+    if (!decision.allowed) return decision;
+    if (!shared && this.dependencies.invites.isShared(host.id))
+      return { allowed: false, reason: EVIDENCE_SHARED_TEXT, terminate: false };
+    host.evidenceGrants.add(facts.node_id);
     return decision;
+  }
+
+  private granted(session: OpenSession, nodeId: string): boolean {
+    const host = this.hostOf(session);
+    if (host.evidenceGrants.has(nodeId)) return true;
+    return (
+      !this.dependencies.invites.isShared(host.id) &&
+      this.messageGrants(session, nodeId)
+    );
   }
 
   private messageGrants(session: OpenSession, nodeId: string): boolean {
@@ -1248,19 +1289,51 @@ export class WorkbenchService implements Service {
     for (const { decide } of [...session.approvals.values()]) decide(REJECTED);
   }
 
-  approve(
-    sessionId: string,
-    toolCallId: string,
-    approved: boolean,
-  ): { session_id: string; tool_call_id: string; approved: boolean } {
-    const pending = this.sessions.get(sessionId)?.approvals.get(toolCallId);
-    if (!pending)
+  private async requireNodeName(
+    caller: CallerContext,
+    pending: Approval,
+    nodeName: string | undefined,
+  ): Promise<void> {
+    const nodeId = pending.approval.input.node_id;
+    assert.ok(isString(nodeId), "A shared evidence card names its node.");
+    const result = await this.dependencies.invoke(
+      missionOperations["node.get"],
+      { params: { node_id: nodeId }, query: {}, body: null },
+      { identity: caller.identity, context: caller.context },
+    );
+    if (result.type === OperationResultType.Failure)
       throw new OperationError(
-        HttpStatus.NotFound,
-        WorkbenchErrorCode.ApprovalNotFound,
-        "The workbench session holds no pending call with this identity.",
-        { session_id: sessionId, tool_call_id: toolCallId },
+        result.status,
+        result.error.error.code,
+        result.error.error.message,
       );
+    assert.ok(result.type === OperationResultType.Completed);
+    const node = missionOperations["node.get"].output.parse(result.data);
+    if (nodeName === node.content.name) return;
+    throw new OperationError(
+      HttpStatus.Conflict,
+      WorkbenchErrorCode.EvidenceNameMismatch,
+      "The typed name differs from the name of the node.",
+      {
+        session_id: pending.approval.session_id,
+        tool_call_id: pending.approval.tool_call_id,
+      },
+    );
+  }
+
+  async approve(
+    caller: CallerContext,
+    sessionId: string,
+    decision: ApprovalDecision,
+  ): Promise<{ session_id: string; tool_call_id: string; approved: boolean }> {
+    const { toolCallId, approved, nodeName } = decision;
+    const pending = this.sessions.get(sessionId)?.approvals.get(toolCallId);
+    if (!pending) throw approvalNotFound(sessionId, toolCallId);
+    if (approved && pending.approval.input.shared === true) {
+      await this.requireNodeName(caller, pending, nodeName);
+      if (this.sessions.get(sessionId)?.approvals.get(toolCallId) !== pending)
+        throw approvalNotFound(sessionId, toolCallId);
+    }
     pending.decide(approved ? ALLOWED : REJECTED);
     return { session_id: sessionId, tool_call_id: toolCallId, approved };
   }
@@ -2525,8 +2598,12 @@ export class WorkbenchService implements Service {
     );
     registry.register(
       workbenchOperations["session.approve"],
-      ({ params, body }) =>
-        this.approve(params.session_id, body.tool_call_id, body.approved),
+      ({ params, body }, caller) =>
+        this.approve(caller, params.session_id, {
+          toolCallId: body.tool_call_id,
+          approved: body.approved,
+          nodeName: body.node_name,
+        }),
     );
     registry.register(
       workbenchOperations["session.action.report"],
