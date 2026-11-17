@@ -212,7 +212,7 @@ test("security: projectStreaming redacts thinking and tool input", () => {
   assert.equal(projectStreaming(null), null);
 });
 
-test("guest view projects a note, an action card and its result lines", () => {
+test("(security, redaction) guest view drops the seen field of an action card", () => {
   const view = projectEntries([
     recordEntry(1, {
       kind: WorkbenchRecordKind.Note,
