@@ -1,11 +1,11 @@
 import {
   DeadlineKind,
   type ExecutionCtx,
+  type FoundryIo,
+  type FoundryStep,
   type Step,
-  type StepIo,
 } from "./chain.ts";
 import { namedCheckouts } from "./environment-setup.ts";
-import { EndReason } from "./execution-run.ts";
 import {
   type AgentOpenRequest,
   type AgentSession,
@@ -13,7 +13,13 @@ import {
   type ExaminePorts,
   PortResultKind,
 } from "./foundry-ports.ts";
-import { budgetEnd, budgetMapped, next } from "./step-support.ts";
+import { portStop } from "./execution-run.ts";
+import {
+  budgetEnd,
+  budgetMapped,
+  next,
+  stopsReturned,
+} from "./step-support.ts";
 
 type OpenKeys = "claim" | "setup" | "reviewWorkspace";
 
@@ -51,31 +57,34 @@ function agentOpenRequestOf(
 
 export async function openedAgent(
   ctx: Readonly<Pick<ExecutionCtx, OpenKeys>>,
-  io: StepIo<EvaluationPorts | ExaminePorts>,
+  io: FoundryIo<EvaluationPorts | ExaminePorts>,
 ): Promise<AgentSession | null> {
-  const opened = await io.ports.agent.open(
-    agentOpenRequestOf(ctx),
-    io.run.operationContext,
-  );
+  const opened = await io.ports.agent.open(agentOpenRequestOf(ctx), io.context);
   if (opened.kind === PortResultKind.Ok) return opened.value;
-  if (io.budget.exhausted() && !io.run.operationContext.signal.aborted)
-    return null;
-  return io.run.stop(EndReason.OperationFailed, opened.code);
+  if (opened.kind === PortResultKind.BudgetEnd) return null;
+  throw portStop(opened);
 }
 
-export const agentOpenExamine: Step<unknown, OpenKeys, "agent", ExaminePorts> =
-  {
-    id: "agent.open",
-    deadline: DeadlineKind.Work,
-    reads: ["claim", "setup", "reviewWorkspace"],
-    writes: ["agent"],
-    stops: ["operation_failed"],
-    note: "port: agent.open; budget end after the open",
-    run(ctx, scope, io) {
-      return budgetMapped(io, scope, async () => {
+export const agentOpenExamine: FoundryStep<
+  unknown,
+  OpenKeys,
+  "agent",
+  ExaminePorts
+> = {
+  foundry: true,
+  id: "agent.open",
+  deadline: DeadlineKind.Work,
+  reads: ["claim", "setup", "reviewWorkspace"],
+  writes: ["agent"],
+  stops: ["operation_failed"],
+  note: "port: agent.open; budget end after the open",
+  run(ctx, scope, io) {
+    return stopsReturned(scope, () =>
+      budgetMapped(io, scope, async () => {
         const agent = await openedAgent(ctx, io);
         if (agent === null || agent.budget.exhausted()) return budgetEnd(scope);
         return next(scope, { agent });
-      });
-    },
-  };
+      }),
+    );
+  },
+};

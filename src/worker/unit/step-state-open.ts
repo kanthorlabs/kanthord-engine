@@ -43,7 +43,8 @@ export const stateOpen: Step<
     return next(scope, {
       state: {
         input: stepsInputOf(ctx, io),
-        run: io.run,
+        cancel: io.run.operationContext,
+        ports: io.ports,
         revision: ctx.revision,
         agent: ctx.agent,
         ...ctx.workspace,
@@ -60,6 +61,7 @@ export const stateOpen: Step<
         lastVerification: null,
         revisionCount: 0,
         memo: new VerificationMemo(),
+        verificationTimedOut: false,
       },
     });
   },

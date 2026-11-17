@@ -23,7 +23,7 @@ export async function judgedCheckouts(
       if (await onHistory(state, checkout, commit, context, remaining))
         found.push({ checkout, commit });
       else
-        state.run.log("judged commit off the node history", {
+        state.ports.log.log("judged commit off the node history", {
           binding: checkout.name,
           commit,
         });
@@ -76,7 +76,7 @@ export async function withinCleanup<T>(
   state: StepsState,
   work: (context: Context, remaining: () => number) => Promise<T>,
 ): Promise<T> {
-  const context = state.agent.budget.cleanupContext(state.run.operationContext);
+  const context = state.agent.budget.cleanupContext(state.cancel);
   try {
     return await work(context, () => state.input.claim.expired_at - Date.now());
   } finally {

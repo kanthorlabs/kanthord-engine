@@ -10,7 +10,9 @@ import {
 } from "./workspace.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import { removeRootEntries, restoreCheckout } from "./turn-gate.ts";
+import type { CancellationContext } from "../../kernel/context.ts";
 import type { ExecutionRun } from "./execution-run.ts";
+import type { CommonPorts } from "./foundry-ports.ts";
 import {
   EndReason,
   type ExecutionEnd,
@@ -114,7 +116,7 @@ export type TaskRunner = (
   instruction: string | null,
 ) => Promise<TaskResult>;
 
-export function stateIo(state: StepsState): ChainIo {
+export function stateIo(state: HostedState): ChainIo {
   return {
     run: state.run,
     budget: state.agent.budget,
@@ -125,7 +127,7 @@ export function stateIo(state: StepsState): ChainIo {
 }
 
 export function runStepsImplement(
-  state: StepsState,
+  state: HostedState,
   taskRunner: TaskRunner | null = null,
 ): Promise<ExecutionEnd> {
   const io = stateIo(state);
@@ -155,7 +157,7 @@ export type TaskResult =
   | { kind: typeof TaskResultKind.BudgetEnd };
 
 export async function runTask(
-  state: StepsState,
+  state: HostedState,
   task: TaskContent,
   initialInstruction: string | null = null,
 ): Promise<TaskResult> {
@@ -193,7 +195,8 @@ export interface StepsInput {
 }
 export interface StepsState {
   input: StepsInput;
-  run: ExecutionRun;
+  cancel: CancellationContext;
+  ports: CommonPorts;
   agent: NativeAgent;
   revision: Revision;
   root: string;
@@ -211,7 +214,12 @@ export interface StepsState {
   setupPending: boolean;
   setupInstruction: string | null;
   memo: VerificationMemo;
+  verificationTimedOut: boolean;
   task?: TaskContent;
+}
+
+export interface HostedState extends StepsState {
+  run: ExecutionRun;
 }
 
 export async function prepareStepsWorkspace(
@@ -293,9 +301,9 @@ async function pendingSetup(state: StepsState): Promise<CheckedRun | null> {
   const result = await runSetup(
     {
       env: state.input.env,
-      context: state.run.operationContext,
+      context: state.cancel,
       deadline: state.agent.budget.wallDeadline(),
-      spans: state.run.spans,
+      spans: state.ports.telemetry,
       exhausted: () => state.agent.budget.exhausted(),
     },
     state.setup,
@@ -335,7 +343,7 @@ export async function verifyCommands(
       : VerificationContext.Task;
   const run = await runVerificationsWithOutput({
     observe: verificationObserver(
-      state.run.spans,
+      state.ports.telemetry,
       testedCommitOf(testedInput),
       environmentDigestsOf(state.input.setup.repositories),
       { context, ownerOf: () => task.id },
@@ -345,14 +353,14 @@ export async function verifyCommands(
     commands,
     tested_input: testedInput,
     deadline: state.agent.budget.wallDeadline(),
-    context: state.run.operationContext,
+    context: state.cancel,
     env: state.input.env,
     exhausted: () => state.agent.budget.exhausted(),
     baseline: (command) => state.base.exitOf(command),
   });
   if (run.outcome === VerificationClass.BudgetEnd)
     state.agent.budget.wallDeadlineReached();
-  const cleanup = state.agent.budget.cleanupContext(state.run.operationContext);
+  const cleanup = state.agent.budget.cleanupContext(state.cancel);
   try {
     for (const checkout of state.checkouts)
       await restoreCheckout(
@@ -410,7 +418,7 @@ async function nodeInstructionOf(
     state.verdict.source === VerdictSource.FailedChecks &&
     state.refreshed === RefreshResult.Merged
   ) {
-    state.run.log("verdict planned", {
+    state.ports.log.log("verdict planned", {
       commit: headSetOf(state.checkouts),
       judged: judged.map(({ checkout }) => checkout.name),
       holds: false,
@@ -421,7 +429,7 @@ async function nodeInstructionOf(
   }
   const holds =
     judged.length > NO_CHECKOUTS && (await verdictRuleHolds(state, judged));
-  state.run.log("verdict planned", {
+  state.ports.log.log("verdict planned", {
     commit: headSetOf(state.checkouts),
     judged: judged.map(({ checkout }) => checkout.name),
     holds,
@@ -445,7 +453,7 @@ export async function startCheck(state: StepsState): Promise<StartCheck> {
   const pending = unitsOf(state)
     .filter((task) => !isDone(done, task))
     .map((task) => ({ task, instruction: null }));
-  state.run.log("units planned", {
+  state.ports.log.log("units planned", {
     commit: headSetOf(state.checkouts),
     pending: pending.map(({ task }) => task.id),
   });

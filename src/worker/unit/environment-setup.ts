@@ -16,7 +16,7 @@ import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
 import type { ExecutionEnvironment } from "../contract.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
-import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { EndReason, ExecutionStop, portStop } from "./execution-run.ts";
 import { PortResultKind, type ReleaseTreePort } from "./foundry-ports.ts";
 import {
   checkoutDetached,
@@ -582,8 +582,7 @@ export class BaseHead {
         commits[index]!,
         { context, deadline: this.input.deadline },
       );
-      if (taken.kind === PortResultKind.Failed)
-        throw new ExecutionStop(EndReason.OperationFailed, taken.code);
+      if (taken.kind === PortResultKind.Failed) throw portStop(taken);
       trees.log(TREE_PREPARED, {
         purpose: BASE_PURPOSE,
         source: taken.value.source,

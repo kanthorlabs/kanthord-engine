@@ -11,15 +11,20 @@ import {
 import {
   DeadlineKind,
   type ExecutionCtx,
-  type Step,
-  type StepIo,
+  type FoundryIo,
+  type FoundryStep,
 } from "./chain.ts";
 import { verificationCommands } from "./evaluation-input.ts";
 import {
   environmentDigestsOf,
   VerificationContext,
 } from "./method-telemetry.ts";
-import { budgetEnd, budgetMapped, next } from "./step-support.ts";
+import {
+  budgetEnd,
+  budgetMapped,
+  next,
+  stopsReturned,
+} from "./step-support.ts";
 import { type TestedInput, verificationPassed } from "./verification.ts";
 
 const NO_ITEMS = 0;
@@ -33,6 +38,7 @@ export interface AffectedStep {
 type AffectedKeys =
   | "claim"
   | "setup"
+  | "env"
   | "revision"
   | "reviewWorkspace"
   | "testedInput"
@@ -52,7 +58,7 @@ function headOf(testedInput: TestedInput, bindingId: string): string {
 
 async function affectedResults(
   ctx: Readonly<Pick<ExecutionCtx, AffectedKeys>>,
-  io: StepIo,
+  io: FoundryIo,
 ): Promise<AffectedResult[] | null> {
   assert.ok(ctx.baseHead);
   const results: AffectedResult[] = [];
@@ -62,11 +68,11 @@ async function affectedResults(
     );
     assert.ok(repository);
     const result = await runAffected({
-      env: io.host.env,
-      context: io.run.operationContext,
+      env: ctx.env,
+      context: io.context,
       deadline: io.budget.wallDeadline(),
       exhausted: () => io.budget.exhausted(),
-      spans: io.run.spans,
+      spans: io.ports.telemetry,
       scope: VerificationContext.Evaluation,
       workspaceKey: ctx.reviewWorkspace.key,
       checkout: {
@@ -97,12 +103,18 @@ function runnable(ctx: Readonly<Pick<ExecutionCtx, AffectedKeys>>): boolean {
   );
 }
 
-export const affectedRunEvaluation: Step<unknown, AffectedKeys, "affected"> = {
+export const affectedRunEvaluation: FoundryStep<
+  unknown,
+  AffectedKeys,
+  "affected"
+> = {
+  foundry: true,
   id: "affected.run(evaluation)",
   deadline: DeadlineKind.Work,
   reads: [
     "claim",
     "setup",
+    "env",
     "revision",
     "reviewWorkspace",
     "testedInput",
@@ -120,17 +132,19 @@ export const affectedRunEvaluation: Step<unknown, AffectedKeys, "affected"> = {
   note: "implement intent, one checkout or more, setup and verify.all passed; budget end",
   async run(ctx, scope, io) {
     if (!runnable(ctx)) return next(scope, { affected: null });
-    return budgetMapped(io, scope, async () => {
-      const results = await affectedResults(ctx, io);
-      if (results === null) return budgetEnd(scope);
-      const evidence = affectedEvidenceOf(results);
-      return next(scope, {
-        affected: {
-          results,
-          verdict: evidence.verdict,
-          document: evidence.repositories.length > NO_ITEMS ? evidence : null,
-        },
-      });
-    });
+    return stopsReturned(scope, () =>
+      budgetMapped(io, scope, async () => {
+        const results = await affectedResults(ctx, io);
+        if (results === null) return budgetEnd(scope);
+        const evidence = affectedEvidenceOf(results);
+        return next(scope, {
+          affected: {
+            results,
+            verdict: evidence.verdict,
+            document: evidence.repositories.length > NO_ITEMS ? evidence : null,
+          },
+        });
+      }),
+    );
   },
 };

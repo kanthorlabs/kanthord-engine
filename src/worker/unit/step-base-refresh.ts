@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { refreshAtClaim, RefreshResult } from "./base-refresh.ts";
-import { DeadlineKind, type Step, type StopCode } from "./chain.ts";
-import { budgetEnd, next } from "./step-support.ts";
+import { DeadlineKind, type FoundryStep, type StopCode } from "./chain.ts";
+import { budgetEnd, next, stopsReturned } from "./step-support.ts";
 
 const NO_CHECKOUTS = 0;
 const STOPS: readonly StopCode[] = [
@@ -14,7 +14,8 @@ const STOPS: readonly StopCode[] = [
 const NOTE =
   "per checkout and merged branch: merge, Conflict turn on a conflict, gate G; budget end";
 
-export const baseRefreshClaim: Step<unknown, "state", never> = {
+export const baseRefreshClaim: FoundryStep<unknown, "state", never> = {
+  foundry: true,
   id: "base.refresh(claim)",
   deadline: DeadlineKind.Work,
   reads: ["state"],
@@ -22,16 +23,19 @@ export const baseRefreshClaim: Step<unknown, "state", never> = {
   stops: STOPS,
   llm: true,
   note: NOTE,
-  async run({ state }, scope) {
-    assert.ok(state.checkouts.length > NO_CHECKOUTS);
-    state.refreshed = await refreshAtClaim(state);
-    return state.refreshed === RefreshResult.BudgetEnd
-      ? budgetEnd(scope)
-      : next(scope);
+  run({ state }, scope) {
+    return stopsReturned(scope, async () => {
+      assert.ok(state.checkouts.length > NO_CHECKOUTS);
+      state.refreshed = await refreshAtClaim(state);
+      return state.refreshed === RefreshResult.BudgetEnd
+        ? budgetEnd(scope)
+        : next(scope);
+    });
   },
 };
 
-export const baseRefreshRelease: Step<unknown, "state", never> = {
+export const baseRefreshRelease: FoundryStep<unknown, "state", never> = {
+  foundry: true,
   id: "base.refresh(release)",
   deadline: DeadlineKind.Work,
   reads: ["state"],
@@ -39,9 +43,11 @@ export const baseRefreshRelease: Step<unknown, "state", never> = {
   stops: STOPS,
   llm: true,
   note: NOTE,
-  async run({ state }, scope) {
-    return (await refreshAtClaim(state)) === RefreshResult.BudgetEnd
-      ? budgetEnd(scope)
-      : next(scope);
+  run({ state }, scope) {
+    return stopsReturned(scope, async () =>
+      (await refreshAtClaim(state)) === RefreshResult.BudgetEnd
+        ? budgetEnd(scope)
+        : next(scope),
+    );
   },
 };

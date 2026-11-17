@@ -546,7 +546,7 @@ async function poolFixture(t: TestContext) {
             nodeId,
             env,
             addressOf: () => origin,
-            run: { stopOf: (error) => Promise.reject(error) },
+            run: { failureOf: (error) => Promise.reject(error) },
           }),
         },
       },

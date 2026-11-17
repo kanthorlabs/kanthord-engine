@@ -1,15 +1,20 @@
 import assert from "node:assert/strict";
 import { PromptTemplate } from "../../agent/contract.ts";
 import type { TaskContent } from "../../mission/contract.ts";
-import { DeadlineKind, type Step } from "./chain.ts";
-import { EndReason } from "./execution-run.ts";
+import { DeadlineKind, type FoundryStep } from "./chain.ts";
+import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { taskRevisionInstruction } from "./judgement.ts";
 import {
   noProgressDetail,
   NoProgressRule,
   verificationFactsOf,
 } from "./progress-rule.ts";
-import { budgetEnd, type BudgetEndResult, next } from "./step-support.ts";
+import {
+  budgetEnd,
+  type BudgetEndResult,
+  next,
+  stopsReturned,
+} from "./step-support.ts";
 import type { NextResult } from "./step-support.ts";
 import type { UnitScope } from "./step-unit-enter.ts";
 import {
@@ -31,7 +36,7 @@ type Verified = NextResult<UnitScope, never> | BudgetEndResult<UnitScope>;
 function countUnchangedTurn(state: StepsState, rule: NoProgressRule): void {
   state.unchangedTurns++;
   if (state.unchangedTurns >= NO_PROGRESS_LIMIT)
-    state.run.stop(
+    throw new ExecutionStop(
       EndReason.NoProgress,
       null,
       noProgressDetail({
@@ -51,8 +56,8 @@ function recordTaskVerification(
   const { verification } = checked;
   const passed = verificationPassed(verification, checked.commands);
   state.lastVerification = verificationFactsOf(passed, verification);
-  state.run.noteVerification(state.lastVerification?.timed_out ?? false);
-  state.run.log("task verified", {
+  state.verificationTimedOut = state.lastVerification?.timed_out ?? false;
+  state.ports.log.log("task verified", {
     task_id: unit.id,
     commit: headSetOf(state.checkouts),
     passed,
@@ -88,7 +93,7 @@ function verdictTurnRetried(
 ): boolean {
   state.unchangedTurns = unchangedTurns;
   if (state.unchangedTurns + ONE_TURN >= NO_PROGRESS_LIMIT) {
-    state.run.log("verdict rule waived for review", {
+    state.ports.log.log("verdict rule waived for review", {
       task_id: unit.id,
       commit: headSetOf(state.checkouts),
     });
@@ -106,7 +111,7 @@ async function verifyTask(
   assert.ok(scope.gated);
   if (scope.instruction !== null && !scope.gated.changed())
     countUnchangedTurn(state, NoProgressRule.UnchangedRevision);
-  state.run.log("task committed", {
+  state.ports.log.log("task committed", {
     task_id: scope.unit.id,
     commit: headSetOf(state.checkouts),
   });
@@ -130,7 +135,7 @@ async function verdictRuleRetried(
     return false;
   }
   scope.ruled = !(await verdictRuleHolds(state, node.judged));
-  state.run.log("verdict rule checked", {
+  state.ports.log.log("verdict rule checked", {
     task_id: scope.unit.id,
     commit: headSetOf(state.checkouts),
     holds: !scope.ruled,
@@ -156,11 +161,16 @@ async function verifyVerdict(
   return next(scope);
 }
 
-export const verifyOwn: Step<UnitScope, "state", never> = {
+export const verifyOwn: FoundryStep<
+  UnitScope,
+  "state",
+  "verificationTimedOut"
+> = {
+  foundry: true,
   id: "verify.own",
   deadline: DeadlineKind.Work,
   reads: ["state"],
-  writes: [],
+  writes: ["verificationTimedOut"],
   stops: [
     "no_progress",
     "operation_failed/worker.verification.infrastructure_failed",
@@ -169,9 +179,15 @@ export const verifyOwn: Step<UnitScope, "state", never> = {
     "environment_failed/setup_failed",
   ],
   note: "port: releaseTrees.takeBase; verdict rule, unchanged-turn count, pending setup, own commands; restore on exit",
-  run({ state }, scope) {
-    return scope.node === null
-      ? verifyTask(state, scope)
-      : verifyVerdict(state, scope, scope.node);
+  async run({ state }, scope) {
+    const verified = await stopsReturned(scope, () =>
+      scope.node === null
+        ? verifyTask(state, scope)
+        : verifyVerdict(state, scope, scope.node),
+    );
+    return {
+      ...verified,
+      patch: { verificationTimedOut: state.verificationTimedOut },
+    };
   },
 };

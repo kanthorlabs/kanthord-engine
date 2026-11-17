@@ -20,7 +20,7 @@ import {
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { fauxAssistantMessage, fauxToolCall } from "./test-support.ts";
-import { EndReason } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { TaskRunner } from "./steps-implement.ts";
@@ -190,6 +190,9 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
 
   const STOP_REASONS = [
     EndReason.OperationFailed,
+    EndReason.ProviderFailed,
+    EndReason.EnvironmentFailed,
+    EndReason.NoProgress,
     EndReason.JudgementInvalid,
     EndReason.ReportAbsent,
     EndReason.ActionUnsettled,
@@ -198,6 +201,13 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
   const STOP_CODE = "test.operation.failed";
   const STOP_CAUSES: Readonly<Record<string, FailureCause>> = {
     [EndReason.OperationFailed]: unattributed([]),
+    [EndReason.ProviderFailed]: unattributed([]),
+    [EndReason.EnvironmentFailed]: unattributed([]),
+    [EndReason.NoProgress]: unattributed([
+      CauseCategory.Model,
+      CauseCategory.Prompt,
+      CauseCategory.Plan,
+    ]),
     [EndReason.JudgementInvalid]: unattributed([
       CauseCategory.Model,
       CauseCategory.Prompt,
@@ -217,7 +227,7 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
   function stoppingRunner(reason: EndReason): TaskRunner {
     return async (state) => {
       writeFileSync(join(state.root, PARTIAL_WORK), PARTIAL_WORK);
-      return state.run.stop(reason, STOP_CODE);
+      throw new ExecutionStop(reason, STOP_CODE);
     };
   }
 
@@ -279,6 +289,60 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
         runStepsImplement(refused, stoppingRunner(EndReason.OperationFailed)),
       ),
       { kind: "ended", reason: stop.reason, code: stop.code },
+    );
+  });
+
+  const REACHED_WORK = "reached";
+  const REACHED_HEADER = "feat: reached";
+  const UNKNOWN_ERROR = "unknown failure";
+  const TWO_COMMITS = "-2";
+
+  test("an unknown error in a unit checkpoints and pushes on the head that the walk reached", async (t) => {
+    const reached = task("reached", "false");
+    const h = await fixture(t, [reached, task("stopped", "false")], []);
+    const bodies = recordReleases(h);
+    const checkout = h.checkouts[0]!;
+    const runner: TaskRunner = async (state, unit) => {
+      if (unit.id !== reached.id) {
+        writeFileSync(join(state.root, PARTIAL_WORK), PARTIAL_WORK);
+        throw new Error(UNKNOWN_ERROR);
+      }
+      writeFileSync(join(checkout.directory, REACHED_WORK), REACHED_WORK);
+      const head = await commitWork(
+        state.input.env,
+        checkout.directory,
+        REACHED_HEADER,
+        background,
+        COMMIT_DEADLINE_MS,
+      );
+      assert.ok(head);
+      checkout.head = head;
+      return { kind: "complete", recorded: false };
+    };
+    const stop = {
+      reason: EndReason.OperationFailed,
+      code: null,
+      detail: `Error: ${UNKNOWN_ERROR}`,
+      cause: unattributed([
+        CauseCategory.Infrastructure,
+        CauseCategory.WorkerAction,
+      ]),
+    };
+    assert.deepEqual(
+      await executionBoundary(h.run, () => runStepsImplement(h, runner)),
+      { kind: "released", furtherWork: true, stop },
+    );
+    assert.deepEqual(bodies, [{ further_work: true, stop }]);
+    const branch = `refs/heads/${h.nodeBranch}`;
+    const pushed = (
+      await simpleGit(h.bare).raw(["log", TWO_COMMITS, "--format=%s", branch])
+    )
+      .trim()
+      .split("\n");
+    assert.deepEqual(pushed, [STOPPED_HEADER, REACHED_HEADER]);
+    assert.equal(
+      await simpleGit(h.bare).raw(["show", `${branch}:${PARTIAL_WORK}`]),
+      PARTIAL_WORK,
     );
   });
 

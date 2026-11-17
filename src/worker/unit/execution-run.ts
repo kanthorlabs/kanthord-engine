@@ -29,7 +29,11 @@ import { type GitStep, gitStepOf } from "./git-step.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 import { RepositoryErrorCode } from "../../repository/contract.ts";
 import { codedStopDetail, stopCauseOf } from "./stop-cause.ts";
-import { type PortResult, PortResultKind } from "./foundry-ports.ts";
+import {
+  type PortFailure,
+  type PortResult,
+  PortResultKind,
+} from "./foundry-ports.ts";
 
 type EvidenceBody = Omit<
   Parameters<MethodClients["mission"]["evidence.submit"]>[0]["body"],
@@ -129,6 +133,15 @@ export class ExecutionStop extends Error {
     this.detail = detail;
     this.cause = cause;
   }
+}
+
+export function portStop(failed: PortFailure): ExecutionStop {
+  return new ExecutionStop(
+    EndReason.OperationFailed,
+    failed.code,
+    failed.detail ?? null,
+    failed.cause ?? null,
+  );
 }
 
 const detailFactsSchema = z.record(z.string(), z.unknown());
@@ -246,7 +259,7 @@ export class ExecutionRun {
     code: string | null = null,
     detail: string | null = null,
   ): never {
-    throw this.halt(reason, code, detail);
+    throw this.store(this.stopWith(reason, code, detail, null));
   }
 
   async reasonOf(error: unknown): Promise<string | null> {
@@ -269,12 +282,11 @@ export class ExecutionRun {
     return redactReason(text, secrets);
   }
 
-  async stopOf(error: unknown): Promise<ExecutionStop> {
-    if (error instanceof ExecutionStop)
-      return this.halt(error.reason, error.code, error.detail);
+  private async builtStop(error: unknown): Promise<ExecutionStop> {
+    if (error instanceof ExecutionStop) return this.restated(error);
     const gitStep = gitStepOf(error);
     if (error instanceof CodedError)
-      return this.halt(
+      return this.stopWith(
         EndReason.OperationFailed,
         error.code,
         GIT_FAILURE_CODES.has(error.code)
@@ -285,7 +297,7 @@ export class ExecutionRun {
             ),
         gitStep,
       );
-    return this.halt(
+    return this.stopWith(
       EndReason.OperationFailed,
       null,
       await this.reasonOf(error),
@@ -293,18 +305,39 @@ export class ExecutionRun {
     );
   }
 
+  async stopOf(error: unknown): Promise<ExecutionStop> {
+    return this.store(await this.builtStop(error));
+  }
+
+  async failureOf(error: unknown): Promise<PortFailure> {
+    const stop =
+      error instanceof ExecutionStop ? error : await this.builtStop(error);
+    return {
+      kind: PortResultKind.Failed,
+      code: stop.code,
+      message: stop.detail ?? stop.message,
+      detail: stop.detail,
+      cause: stop.cause,
+    };
+  }
+
+  halt(stop: ExecutionStop): ExecutionStop {
+    return this.store(this.restated(stop));
+  }
+
+  private restated(stop: ExecutionStop): ExecutionStop {
+    const built = this.stopWith(stop.reason, stop.code, stop.detail, null);
+    return stop.cause === null || built.cause === null
+      ? built
+      : new ExecutionStop(built.reason, built.code, built.detail, stop.cause);
+  }
+
   cleanupContext(): CancellationContext {
     return new CancellationContext(this.parent, this.claim.expired_at);
   }
 
-  private halt(
-    reason: EndReason,
-    code: string | null,
-    detail: string | null = null,
-    gitStep: GitStep | null = null,
-  ): ExecutionStop {
-    this.stopped ??=
-      this.requestedStop() ?? this.stopWith(reason, code, detail, gitStep);
+  private store(stop: ExecutionStop): ExecutionStop {
+    this.stopped ??= this.requestedStop() ?? stop;
     this.operationContext.cancel(this.stopped);
     return this.stopped;
   }

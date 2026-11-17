@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
-import { DeadlineKind, type Step } from "./chain.ts";
+import { DeadlineKind, type FoundryStep } from "./chain.ts";
 import { isDone } from "./done-record.ts";
 import { next } from "./step-support.ts";
 import type { UnitScope } from "./step-unit-enter.ts";
 import { TaskResultKind } from "./steps-implement.ts";
 
-export const unitLeave: Step<
+export const unitLeave: FoundryStep<
   UnitScope,
   "state" | "plan" | "completedUnits" | "reports",
   "completedUnits" | "reports"
 > = {
+  foundry: true,
   id: "unit.leave",
   deadline: DeadlineKind.Work,
   reads: ["state", "plan", "completedUnits", "reports"],

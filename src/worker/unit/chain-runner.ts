@@ -10,13 +10,15 @@ import {
   type ChainNode,
   type ChainSeed,
   type ChainStep,
+  type ChainStepResult,
   DeadlineKind,
   type ExecutionCtx,
+  type FoundryEnd,
+  FoundryEndKind,
   FrameOutcome,
   type Key,
   NodeKind,
   type StepHost,
-  type StepIo,
   StepKind,
 } from "./chain.ts";
 import {
@@ -45,16 +47,24 @@ interface Walk {
   ctx: ExecutionCtx;
   io: ChainIo;
   stopping: boolean;
+  foundry: boolean;
 }
+
+const CANCELLED = "cancelled";
+type Walked = StepKind | typeof CANCELLED | ExecutionStop;
 
 interface ScopeHolder {
   scope: unknown;
 }
 
 export function seededContext(seed: Partial<ExecutionCtx>): ExecutionCtx {
-  const runner: Pick<ExecutionCtx, "completedUnits" | "reports"> = {
+  const runner: Pick<
+    ExecutionCtx,
+    "completedUnits" | "reports" | "verificationTimedOut"
+  > = {
     completedUnits: new Set(),
     reports: new Map(),
+    verificationTimedOut: false,
   };
   return { ...runner, ...seed } as ExecutionCtx;
 }
@@ -73,14 +83,25 @@ function stepContext(walk: Walk, step: ChainStep): CancellationContext {
     : budget.cleanupContext(run.operationContext);
 }
 
-async function walkStep(
+function stepResult(
   walk: Walk,
   step: ChainStep,
-  holder: ScopeHolder,
-): Promise<StepKind> {
+  call: StepCall,
+): Promise<ChainStepResult> {
   const { run, budget, resources, host, ports } = walk.io;
-  const context = stepContext(walk, step);
-  const io: StepIo = {
+  const { context } = call;
+  const slice = sliceOf(walk.ctx, step.reads) as never;
+  const scope = call.holder.scope as never;
+  if (step.foundry)
+    return step.run(slice, scope, {
+      budget,
+      context,
+      get deadline() {
+        return budget.wallDeadline();
+      },
+      ports,
+    });
+  return step.run(slice, scope, {
     run,
     budget,
     context,
@@ -91,33 +112,49 @@ async function walkStep(
     spans: run.spans,
     host,
     ports,
-  };
+  });
+}
+
+interface StepCall {
+  context: CancellationContext;
+  holder: ScopeHolder;
+}
+
+function hostWalked(walk: Walk, result: ChainStepResult): Walked {
+  const { run } = walk.io;
+  if ("verificationTimedOut" in result.patch)
+    run.noteVerification(walk.ctx.verificationTimedOut);
+  if (result.stop !== undefined) throw run.halt(result.stop);
+  return result.kind;
+}
+
+function foundryWalked(
+  walk: Walk,
+  step: ChainStep,
+  result: ChainStepResult,
+): Walked {
+  if (result.stop !== undefined) return result.stop;
+  const { reason } = walk.io.run.operationContext.signal;
+  if (step.foundry && reason instanceof ExecutionStop) return CANCELLED;
+  return result.kind;
+}
+
+async function walkStep(
+  walk: Walk,
+  step: ChainStep,
+  holder: ScopeHolder,
+): Promise<Walked> {
+  const context = stepContext(walk, step);
   try {
-    const result = await step.run(
-      sliceOf(walk.ctx, step.reads) as never,
-      holder.scope as never,
-      io,
-    );
+    const result = await stepResult(walk, step, { context, holder });
     Object.assign(walk.ctx, result.patch);
     holder.scope = result.scope;
-    return result.kind;
+    return walk.foundry
+      ? foundryWalked(walk, step, result)
+      : hostWalked(walk, result);
   } finally {
     if (step.deadline === DeadlineKind.Cleanup) context.cancel();
   }
-}
-
-function frameEndOf(
-  walk: Walk,
-  frame: ChainFrame,
-  holder: ScopeHolder,
-): (kind: StepKind) => SpanEnd {
-  return (kind) => {
-    const outcome =
-      kind === StepKind.BudgetEnd ? FrameOutcome.BudgetEnd : FrameOutcome.Next;
-    return frame.end
-      ? frame.end(walk.ctx, holder.scope as never, { outcome })
-      : { status: SpanStatus.Ok };
-  };
 }
 
 function frameFailureOf(
@@ -134,11 +171,35 @@ function frameFailureOf(
       : { status: SpanStatus.Error };
 }
 
+function frameEndOf(
+  walk: Walk,
+  frame: ChainFrame,
+  holder: ScopeHolder,
+): (walked: Walked) => SpanEnd {
+  return (walked) => {
+    if (walked instanceof ExecutionStop)
+      return frameFailureOf(walk, frame, holder)(walked);
+    if (walked === CANCELLED)
+      return frameFailureOf(
+        walk,
+        frame,
+        holder,
+      )(walk.io.run.operationContext.signal.reason);
+    const outcome =
+      walked === StepKind.BudgetEnd
+        ? FrameOutcome.BudgetEnd
+        : FrameOutcome.Next;
+    return frame.end
+      ? frame.end(walk.ctx, holder.scope as never, { outcome })
+      : { status: SpanStatus.Ok };
+  };
+}
+
 function walkFrame(
   walk: Walk,
   frame: ChainFrame,
   holder: ScopeHolder,
-): Promise<StepKind> {
+): Promise<Walked> {
   if (!frame.span) return walkNodes(walk, frame.body, holder);
   return walk.io.run.spans.within(
     frame.span(walk.ctx, holder.scope as never, walk.io.run.spans),
@@ -152,12 +213,12 @@ async function walkLoop(
   walk: Walk,
   frame: ChainFrame,
   outer: ScopeHolder,
-): Promise<StepKind> {
+): Promise<Walked> {
   let scope = frame.init(walk.ctx, outer.scope);
   while (scope !== null) {
     const holder: ScopeHolder = { scope };
-    const kind = await walkFrame(walk, frame, holder);
-    if (kind !== StepKind.Next) return kind;
+    const walked = await walkFrame(walk, frame, holder);
+    if (walked !== StepKind.Next) return walked;
     scope = frame.next(walk.ctx, holder.scope as never);
   }
   return StepKind.Next;
@@ -167,15 +228,66 @@ async function walkNodes(
   walk: Walk,
   nodes: readonly ChainNode[],
   holder: ScopeHolder,
-): Promise<StepKind> {
+): Promise<Walked> {
   for (const node of nodes) {
-    const kind =
+    const walked =
       node.kind === NodeKind.Step
         ? await walkStep(walk, node.step, holder)
         : await walkLoop(walk, node.frame, holder);
-    if (kind !== StepKind.Next) return kind;
+    if (walked !== StepKind.Next) return walked;
   }
   return StepKind.Next;
+}
+
+async function hostNodes(
+  walk: Walk,
+  nodes: readonly ChainNode[],
+  holder: ScopeHolder,
+): Promise<StepKind> {
+  const walked = await walkNodes({ ...walk, foundry: false }, nodes, holder);
+  assert.ok(!(walked instanceof ExecutionStop) && walked !== CANCELLED);
+  return walked;
+}
+
+async function walkTasks(
+  walk: Walk,
+  nodes: readonly ChainNode[],
+): Promise<FoundryEnd<ExecutionCtx>> {
+  const reached = () => ({
+    result: walk.ctx,
+    verificationTimedOut: walk.ctx.verificationTimedOut,
+  });
+  let walked: Walked;
+  try {
+    walked = await walkNodes({ ...walk, foundry: true }, nodes, {
+      scope: null,
+    });
+  } catch (error) {
+    return { kind: FoundryEndKind.Failed, error, ...reached() };
+  }
+  if (walked instanceof ExecutionStop)
+    return { kind: FoundryEndKind.Stop, stop: walked, ...reached() };
+  if (walked === CANCELLED)
+    return { kind: FoundryEndKind.Cancelled, ...reached() };
+  if (walked === StepKind.BudgetEnd)
+    return { kind: FoundryEndKind.BudgetEnd, ...reached() };
+  assert.equal(walked, StepKind.Next, "A tasks phase holds no final step.");
+  return { kind: FoundryEndKind.Completed, ...reached() };
+}
+
+async function tasksKind(
+  walk: Walk,
+  end: FoundryEnd<ExecutionCtx>,
+): Promise<StepKind> {
+  const { run } = walk.io;
+  run.noteVerification(end.verificationTimedOut);
+  if (end.kind === FoundryEndKind.Stop) throw run.halt(end.stop);
+  if (end.kind === FoundryEndKind.Cancelled)
+    throw await run.stopOf(run.operationContext.signal.reason);
+  if (end.kind === FoundryEndKind.Failed) throw end.error;
+  return end.kind === FoundryEndKind.BudgetEnd
+    ? StepKind.BudgetEnd
+    : StepKind.Next;
 }
 
 export interface NodesEnd {
@@ -194,10 +306,10 @@ export async function runNodes(
   input: NodesInput,
   io: ChainIo,
 ): Promise<NodesEnd> {
-  const ctx = seededContext(input.seed);
+  const ctx = seededContext({ env: io.host.env, ...input.seed });
   const holder: ScopeHolder = { scope: input.scope ?? null };
-  const kind = await walkNodes(
-    { ctx, io, stopping: false },
+  const kind = await hostNodes(
+    { ctx, io, stopping: false, foundry: false },
     input.nodes,
     holder,
   );
@@ -221,7 +333,7 @@ async function budgetEnd(
     throw new ExecutionStop(EndReason.BudgetEnd, BudgetLimit.WallTime);
   return closedEnd(
     walk.ctx,
-    await walkNodes(walk, rule.nodes, { scope: null }),
+    await hostNodes(walk, rule.nodes, { scope: null }),
   );
 }
 
@@ -231,7 +343,10 @@ async function walkPhases(
   progress: Progress,
 ): Promise<ExecutionEnd> {
   for (const { phase, nodes } of built.phases.slice(progress.from)) {
-    const kind = await walkNodes(walk, nodes, { scope: null });
+    const kind =
+      phase === Phase.Tasks
+        ? await tasksKind(walk, await walkTasks(walk, nodes))
+        : await hostNodes(walk, nodes, { scope: null });
     if (kind === StepKind.BudgetEnd)
       return budgetEnd(built, walk, progress.prepared);
     if (kind === StepKind.Closed) return closedEnd(walk.ctx, kind);
@@ -248,7 +363,7 @@ async function stopNodes(
   const { run } = walk.io;
   walk.ctx.stop = stop;
   try {
-    await walkNodes({ ...walk, stopping: true }, built.onStop, {
+    await hostNodes({ ...walk, stopping: true }, built.onStop, {
       scope: null,
     });
   } catch (error) {
@@ -302,7 +417,12 @@ export async function runChain(
       .slice(FIRST_PHASE, from)
       .some(({ phase }) => phase === Phase.Prepare),
   };
-  const walk: Walk = { ctx: seededContext(input.seed), io, stopping: false };
+  const walk: Walk = {
+    ctx: seededContext({ env: io.host.env, ...input.seed }),
+    io,
+    stopping: false,
+    foundry: false,
+  };
   try {
     return await walkPhases(built, walk, progress);
   } catch (error) {

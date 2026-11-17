@@ -58,6 +58,7 @@ import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import { PoolClass } from "./tree-pool.ts";
 import { prepareStepsWorkspace } from "./steps-implement.ts";
+import { commonPorts } from "./worker-ports.ts";
 import type { RefreshResult } from "./base-refresh.ts";
 import type { Verdict } from "./node-reads.ts";
 import type { VerificationFacts } from "./progress-rule.ts";
@@ -397,6 +398,10 @@ async function openExecution(
   return {
     input,
     run,
+    cancel: run.operationContext,
+    get ports() {
+      return commonPorts(run);
+    },
     agent,
     revision: {
       filename: "implement.md",
@@ -417,6 +422,7 @@ async function openExecution(
     lastVerification: null as VerificationFacts,
     revisionCount: 0,
     memo: new VerificationMemo(),
+    verificationTimedOut: false,
     provider,
     bare: bares[0]!,
     bares,
