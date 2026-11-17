@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { basename, dirname, relative, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { test } from "node:test";
 import ts from "typescript";
 
@@ -10,7 +10,6 @@ const FOUNDRY_ENTRIES = [
   "src/worker/unit/foundry-evaluation.ts",
   "src/worker/unit/foundry-examine.ts",
 ];
-const CONTRACT_FILE = "contract.ts";
 const FORBIDDEN_DIRECTORIES = [
   "src/custody/",
   "src/gateway/",
@@ -62,7 +61,6 @@ function foundryClosure(): FoundryClosure {
   const unresolved: string[] = [];
   const queue = [...reached];
   for (let file = queue.shift(); file; file = queue.shift()) {
-    if (basename(file) === CONTRACT_FILE) continue;
     const imports = importsOf(file);
     unresolved.push(...imports.unresolved);
     for (const target of imports.resolved)

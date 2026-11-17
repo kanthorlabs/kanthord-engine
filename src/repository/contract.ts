@@ -13,7 +13,7 @@ import {
   credentialRotateBodySchema,
   credentialUpdateMetadataBodySchema,
   LIST_LIMIT_MAX,
-} from "../custody/contract.ts";
+} from "../kernel/credential-shapes.ts";
 import type { Context } from "../kernel/context.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
