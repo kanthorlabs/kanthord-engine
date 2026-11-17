@@ -7,7 +7,7 @@ import { z } from "zod";
 import { ulid } from "ulid";
 import { decode, sign } from "hono/jwt";
 import { gatewayFixture } from "./test-support.ts";
-import { deriveKey } from "../kernel/json.ts";
+import { deriveKey } from "../kernel/key-derivation.ts";
 import {
   emptyInput,
   type Operation,

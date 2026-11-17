@@ -3,7 +3,7 @@ import { test, type TestContext } from "node:test";
 import { decode, sign } from "hono/jwt";
 import { ulid } from "ulid";
 import { background } from "../../kernel/context.ts";
-import { deriveKey } from "../../kernel/json.ts";
+import { deriveKey } from "../../kernel/key-derivation.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { OperationError } from "../../kernel/errors.ts";

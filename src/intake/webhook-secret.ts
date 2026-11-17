@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { identitySchema } from "../kernel/identity.ts";
-import { deriveKey } from "../kernel/json.ts";
+import { deriveKey } from "../kernel/key-derivation.ts";
 import { INBOUND_ID_PREFIX } from "./contract.ts";
 
 const WEBHOOK_SECRET_LABEL_PREFIX = "webhook/";

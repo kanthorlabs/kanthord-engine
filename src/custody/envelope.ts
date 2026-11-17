@@ -1,5 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { canonicalJSON, deriveKey } from "../kernel/json.ts";
+import { canonicalJSON } from "../kernel/json.ts";
+import { deriveKey } from "../kernel/key-derivation.ts";
 
 export const CIPHER_ALGORITHM = "aes-256-gcm";
 export const CIPHER_KEY_LABEL = "custody/aes-256-gcm/v1";

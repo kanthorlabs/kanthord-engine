@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { canonicalJSON, deriveKey, digest } from "./json.ts";
+import { canonicalJSON, digest } from "./json.ts";
+import { deriveKey } from "./key-derivation.ts";
 
 const CANONICAL_NESTED_OBJECT =
   '{"10":10,"2":2,"array":[3,1],"nested":{"a":0,"z":0}}';

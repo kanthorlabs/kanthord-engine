@@ -23,7 +23,7 @@ import {
 import {
   type HandoverEnvelope,
   handoverEnvelopeSchema,
-} from "../kernel/handover.ts";
+} from "../kernel/handover-envelope.ts";
 import type { CallerIdentity, MachineIdentity } from "../kernel/caller.ts";
 import type { Context } from "../kernel/context.ts";
 import {
