@@ -225,6 +225,43 @@ export interface FoundryStep<
   ): Promise<FoundryStepResult<S, W>>;
 }
 
+export const FoundryEndKind = {
+  Completed: "completed",
+  BudgetEnd: "budget_end",
+  Stop: "stop",
+  Cancelled: "cancelled",
+  Failed: "failed",
+} as const;
+
+export type FoundryEnd<R> =
+  | {
+      kind: typeof FoundryEndKind.Completed;
+      result: R;
+      verificationTimedOut: boolean;
+    }
+  | {
+      kind: typeof FoundryEndKind.BudgetEnd;
+      result: R;
+      verificationTimedOut: boolean;
+    }
+  | {
+      kind: typeof FoundryEndKind.Stop;
+      stop: ExecutionStop;
+      result: R;
+      verificationTimedOut: boolean;
+    }
+  | {
+      kind: typeof FoundryEndKind.Cancelled;
+      result: R;
+      verificationTimedOut: boolean;
+    }
+  | {
+      kind: typeof FoundryEndKind.Failed;
+      error: unknown;
+      result: R;
+      verificationTimedOut: boolean;
+    };
+
 interface ChainStepShape {
   id: string;
   deadline: DeadlineKind;

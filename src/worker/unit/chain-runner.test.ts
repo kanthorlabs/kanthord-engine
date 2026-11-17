@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { background } from "../../kernel/context.ts";
+import {
+  attributed,
+  CauseCategory,
+  CauseSubcategory,
+} from "../../kernel/cause.ts";
+import { background, CancellationContext } from "../../kernel/context.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { stopAfter } from "../../kernel/test-support.ts";
 import { BudgetLimit } from "../../scheduler/contract.ts";
@@ -10,6 +15,7 @@ import {
   chain,
   type ChainBuilder,
   ChainBuildError,
+  type ChainFoundryStep,
   ChainId,
   type ChainSeed,
   type ChainStep,
@@ -20,7 +26,7 @@ import {
   StepKind,
   stepNode,
 } from "./chain.ts";
-import { type ChainIo, runChain } from "./chain-runner.ts";
+import { type ChainIo, executionBoundary, runChain } from "./chain-runner.ts";
 import {
   EndReason,
   type ExecutionEnd,
@@ -51,9 +57,10 @@ interface Harness {
   seed: ChainSeed;
   trace: string[];
   logs: string[];
+  releases: unknown[];
 }
 
-function harness(t: TestContext): Harness {
+function harness(t: TestContext, stop?: CancellationContext): Harness {
   const claim = {
     execution_id: createIdentity("execution"),
     node_id: createIdentity("node"),
@@ -66,11 +73,20 @@ function harness(t: TestContext): Harness {
     root_span_id: "1".repeat(16),
   };
   const logs: string[] = [];
+  const releases: unknown[] = [];
   const run = new ExecutionRun({
     claim,
-    clients: {} as MethodClients,
+    clients: {
+      scheduler: {
+        executionRelease: async (input: { body: unknown }) => {
+          releases.push(input.body);
+          return { type: "completed", status: 200, data: {} };
+        },
+      },
+    } as unknown as MethodClients,
     credentials: { release: async () => {} },
     context: background,
+    ...(stop === undefined ? {} : { stop }),
     log: (record) => logs.push(String(record.msg)),
   });
   stopAfter(t, () => run.dispose());
@@ -92,6 +108,7 @@ function harness(t: TestContext): Harness {
     seed: { claim } as ChainSeed,
     trace,
     logs,
+    releases,
   };
 }
 
@@ -117,6 +134,25 @@ function stepOf(h: Harness, id: string, act: Act = {}): ChainStep {
         patch: act.patch ?? {},
         scope,
       };
+    },
+  };
+}
+
+function returningStep(
+  h: Harness,
+  id: string,
+  work: () => ExecutionStop,
+): ChainFoundryStep {
+  return {
+    foundry: true,
+    id,
+    deadline: DeadlineKind.Work,
+    reads: [],
+    writes: [],
+    stops: [],
+    async run(_ctx: Partial<ExecutionCtx>, scope: unknown) {
+      h.trace.push(id);
+      return { kind: StepKind.Stop, stop: work(), patch: {}, scope };
     },
   };
 }
@@ -302,3 +338,70 @@ test("a revoked stop and a stop in prepare run no stop node", async (t) => {
   );
   assert.deepEqual(early.trace.slice(0, -DISPOSALS), ["prepare"]);
 });
+
+test("a stored stop wins over the stop that a tasks step returns", async (t) => {
+  const h = harness(t);
+  const built = stoppable(
+    h,
+    returningStep(h, "work", () => {
+      assert.throws(() => h.io.run.stop(EndReason.Revoked));
+      return new ExecutionStop(EndReason.OperationFailed, STOP_CODE);
+    }),
+  )
+    .onStop([stepNode(stepOf(h, "checkpoint"))])
+    .build();
+  assert.deepEqual(
+    await executionBoundary(h.io.run, () =>
+      runChain(built, { seed: h.seed }, h.io),
+    ),
+    { kind: ExecutionEndKind.Ended, reason: EndReason.Revoked, code: null },
+  );
+  assert.deepEqual(h.trace.slice(0, -DISPOSALS), ["prepare", "work"]);
+  assert.deepEqual(h.releases, []);
+});
+
+const REQUESTED_STOPS = [
+  EndReason.HumanPaused,
+  EndReason.InstanceArchived,
+  EndReason.WorkerStopped,
+];
+
+for (const reason of REQUESTED_STOPS) {
+  test(`a requested stop with the reason ${reason} wins over the stop of the tasks step that it aborted`, async (t) => {
+    const order = new CancellationContext();
+    const h = harness(t, order);
+    const built = stoppable(
+      h,
+      returningStep(h, "work", () => {
+        order.cancel(new ExecutionStop(reason, null));
+        return new ExecutionStop(EndReason.OperationFailed, STOP_CODE);
+      }),
+    )
+      .onStop([
+        stepNode(
+          stepOf(h, "checkpoint", {
+            reads: ["stop"],
+            work: (ctx) => assert.equal(ctx.stop?.reason, reason),
+          }),
+        ),
+      ])
+      .build();
+    const stop = {
+      reason,
+      code: null,
+      cause: attributed(CauseCategory.Human, CauseSubcategory.Intervention),
+    };
+    assert.deepEqual(
+      await executionBoundary(h.io.run, () =>
+        runChain(built, { seed: h.seed }, h.io),
+      ),
+      { kind: ExecutionEndKind.Released, furtherWork: true, stop },
+    );
+    assert.deepEqual(h.releases, [{ further_work: true, stop }]);
+    assert.deepEqual(h.trace.slice(0, -DISPOSALS), [
+      "prepare",
+      "work",
+      "checkpoint",
+    ]);
+  });
+}
