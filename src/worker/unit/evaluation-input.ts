@@ -10,6 +10,7 @@ import {
 import { lstatSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
+import { evidencePlacementOf } from "../../agent/review-roots.ts";
 import { ensureDirectory } from "../../kernel/files.ts";
 import { CancellationContext } from "../../kernel/context.ts";
 import { identitySchema } from "../../kernel/identity.ts";
@@ -21,11 +22,7 @@ import {
 } from "../../mission/contract.ts";
 import type { ExecutionRun } from "./execution-run.ts";
 import { EndReason } from "./execution-stop.ts";
-import {
-  EVIDENCE_DIRECTORY,
-  type ExamineCheckout,
-  WorkspaceKind,
-} from "./workspace-layout.ts";
+import { type ExamineCheckout, WorkspaceKind } from "./workspace-layout.ts";
 import type { HostInput } from "./chain-host.ts";
 import type { TestedInput } from "./verification.ts";
 import type {
@@ -453,10 +450,7 @@ export async function placeReviewAssets(
       )
       .map((asset) => ({ evidenceId: item.id, asset })),
   );
-  const placement =
-    workspace.key === workspace.directory
-      ? workspace.directory
-      : join(workspace.key, EVIDENCE_DIRECTORY);
+  const placement = evidencePlacementOf(workspace);
   ensureDirectory(placement);
   for (const { evidenceId, asset } of selected) {
     const name = await placeAsset(placement, run, asset, deadline);
