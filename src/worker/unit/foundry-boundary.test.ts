@@ -15,12 +15,16 @@ const FORBIDDEN_DIRECTORIES = [
   "src/gateway/",
   "src/apps/",
   "src/repository/",
+  "src/agent/capabilities/",
 ];
 const ADMITTED_MODULES = ["src/repository/contract.ts"];
 const FORBIDDEN_MODULES = [
   "src/kernel/hpke.ts",
   "src/kernel/handover.ts",
   "src/kernel/key-derivation.ts",
+  "src/agent/agent-port.ts",
+  "src/worker/unit/native-method.ts",
+  "src/worker/unit/model-runtime.ts",
   "src/worker/unit/method-clients.ts",
   "src/worker/unit/execution-run.ts",
   "src/worker/unit/tree-pool.ts",

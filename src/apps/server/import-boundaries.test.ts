@@ -266,6 +266,30 @@ test("a dynamic import is a lint error in a worker element", async () => {
     );
 });
 
+const CAPABILITY_FILE = "src/agent/capabilities/probe.ts";
+const REFUSED_CAPABILITY_SOURCES = [
+  "export const probe = (ctx: { modelRegistry: unknown }) => ctx.modelRegistry;\n",
+  'export const probe = (ctx: Record<string, unknown>) => ctx["modelRegistry"];\n',
+  "export const probe = (ctx: { modelRegistry: unknown }) => {\n  const { modelRegistry } = ctx;\n  return modelRegistry;\n};\n",
+  'export const probe = (pi: { registerProvider(name: string): void }) =>\n  pi.registerProvider("probe");\n',
+];
+
+test("key_refused: a capability that reads the model registry or registers a provider is a lint error", async () => {
+  for (const source of REFUSED_CAPABILITY_SOURCES)
+    assert.ok(
+      (await ruleErrors(SYNTAX_RULE, CAPABILITY_FILE, source)) > NO_REFUSALS,
+      source,
+    );
+  assert.equal(
+    await ruleErrors(
+      SYNTAX_RULE,
+      CAPABILITY_FILE,
+      "export const probe = (ctx: { cwd: string }) => ctx.cwd;\n",
+    ),
+    NO_REFUSALS,
+  );
+});
+
 test("an import of a test support file from a worker element is a lint error outside the test files", async () => {
   for (const directory of WORKER_ELEMENT_DIRECTORIES)
     for (const target of [

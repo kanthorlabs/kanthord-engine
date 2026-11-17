@@ -972,6 +972,27 @@ export default tseslint.config(
     },
   },
   {
+    files: ["src/agent/capabilities/**/*.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        ...syntaxRules,
+        ...["modelRegistry", "registerProvider"].flatMap((name) =>
+          [
+            `MemberExpression[property.name='${name}']`,
+            `MemberExpression[property.value='${name}']`,
+            `Property[key.name='${name}']`,
+            `Property[key.value='${name}']`,
+          ].map((selector) => ({
+            selector,
+            message:
+              "A capability reads no model registry and registers no provider.",
+          })),
+        ),
+      ],
+    },
+  },
+  {
     files: workerFiles,
     rules: {
       "no-restricted-syntax": [
