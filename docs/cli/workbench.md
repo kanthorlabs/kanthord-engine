@@ -12,7 +12,7 @@ The [operation contracts](../../src/workbench/contract.ts) and the generated Ope
 
 ## Operations
 
-Every operation has `human` access.
+Every operation has `human` access, except `workbench.invite.join` (`public`) and the three `workbench.guest.*` operations (`guest`).
 
 | Operation ID                      | Route                                                                 | Lifetime |
 | --------------------------------- | --------------------------------------------------------------------- | -------- |
@@ -28,6 +28,13 @@ Every operation has `human` access.
 | `workbench.session.abort`         | `POST /api/workbench/session/:session_id/abort`                       | `unary`  |
 | `workbench.session.queue.remove`  | `DELETE /api/workbench/session/:session_id/queue/:queued_message_id`  | `unary`  |
 | `workbench.session.events`        | `GET /api/workbench/session/:session_id/events`                       | `wait`   |
+| `workbench.invite.create`         | `POST /api/workbench/session/:session_id/invite`                      | `unary`  |
+| `workbench.invite.list`           | `GET /api/workbench/session/:session_id/invite`                       | `unary`  |
+| `workbench.invite.revoke`         | `DELETE /api/workbench/invite/:invite_id`                             | `unary`  |
+| `workbench.invite.join`           | `POST /api/workbench/invite/join`                                     | `unary`  |
+| `workbench.guest.get`             | `GET /api/workbench/guest/session`                                    | `unary`  |
+| `workbench.guest.stream`          | `GET /api/workbench/guest/session/stream`                             | `stream` |
+| `workbench.guest.message`         | `POST /api/workbench/guest/session/message`                           | `unary`  |
 
 `workbench.session.autoMode.set` takes the body `{ enabled }` and answers `{ session_id, enabled }`. It is a human-only act of the owner. The run snapshot of `workbench.session.events` answers `auto_mode`.
 
@@ -60,13 +67,17 @@ Every operation can also answer the shared codes of [other.md](other.md#error-co
 
 | HTTP  | Code                                         | Condition                                                                                                                                                                                                                                              |
 | ----- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 404   | `workbench.session.not_found`                | The session identity names no session.                                                                                                                                                                                                                 |
+| 404   | `workbench.session.not_found`                | The session identity names no session, also at `invite.create` on an unknown session.                                                                                                                                                                  |
 | 404   | `workbench.session.approval_not_found`       | The tool call of an approval waits for no approval, or the approval expired.                                                                                                                                                                           |
 | 404   | `workbench.session.queued_message_not_found` | The queued message identity names no queued message of the session.                                                                                                                                                                                    |
 | 404   | `workbench.session.action_not_found`         | No `action_offer` record of the session holds the `tool_call_id`.                                                                                                                                                                                      |
 | 409   | `workbench.session.action_settled`           | A `done` result already exists for the `tool_call_id`.                                                                                                                                                                                                 |
 | 409   | `workbench.session.agent_refused`            | A create names a catalog agent with no operation tool, such as `pe@1` or `guard@1`; details `{ agent_name }`.                                                                                                                                          |
-| 409   | `workbench.session.not_host`                 | The session id names a participant; send the call to the host session. Details `{ session_id, host_session_id }`.                                                                                                                                      |
+| 409   | `workbench.session.not_host`                 | The session id names a participant; send the call to the host session, also at `invite.create` on a participant id. Details `{ session_id, host_session_id }`.                                                                                         |
+| 404   | `workbench.invite.not_found`                 | An unknown or expired token at join, an unknown invite id at revoke.                                                                                                                                                                                   |
+| 400   | `workbench.invite.name_invalid`              | A blank or 65-character join name or invitee name.                                                                                                                                                                                                     |
+| 401   | `gateway.jwt.invite_ended`                   | A guest request or a stream open for a deleted or expired invite.                                                                                                                                                                                      |
+| 409   | `workbench.evidence.name_mismatch`           | A typed approve of a danger card. The `approve` body field `node_name` is absent or differs from `node.content.name`. The card stays pending.                                                                                                          |
 | 400   | `gateway.request.validation_failed`          | The `text` of a fork is empty, blank or longer than 4096 bytes.                                                                                                                                                                                        |
 | 409   | `workbench.fork.summary_refused`             | The guard refused the summary of a fork, or the check failed; details `{ cause, reason }`. `cause` is one of `refused`, `timeout`, `no_verdict`, `oversize` and `unavailable`. `reason` is `null` except for cause `refused`. The fork writes no file. |
 | 502   | `workbench.fork.summary_failed`              | The summarizer of a fork gave no usable summary; details `{ session_id }`. The fork writes no file.                                                                                                                                                    |
@@ -79,3 +90,13 @@ Every operation can also answer the shared codes of [other.md](other.md#error-co
 | 404   | `agent.catalog.not_found`                    | The agent name of a create or a list is absent from the agent catalog, or a message starts with a mention of an unknown name; details `{ mention }` for a mention.                                                                                     |
 | 400   | `agent.enablement.unavailable`               | A message starts with a mention of an agent that is disabled or has no enablement.                                                                                                                                                                     |
 | 409   | `agent.prompt.template_invalid`              | An override file or a prompt template of the agent directory is invalid at the session open; details `{ file, path, reason }`.                                                                                                                         |
+
+## Shared conversations
+
+A conversation holds a live invite while an invite of its host has not ended. The three `workbench.guest.*` operations take the conversation from the guest token and take no `session_id`. `workbench.guest.stream` answers `text/event-stream` with the events `entries` and `state`, and `after` takes the merged cursor. `workbench.guest.message` takes the body `{ text }` of at most 16384 UTF-8 bytes, appends a note and answers `{ kind: "note" }`. A longer `text` answers `400 gateway.request.validation_failed` with the path `body.text`.
+
+`workbench.session.approve` takes the optional body field `node_name`. While an invite is live, `evidence_read` shows a danger card whose input holds `shared: true`. An approve of that card needs `node_name` with the exact `node.content.name`.
+
+## Evidence tool errors
+
+`evidence_read` fails with one of these tool errors: `workbench.evidence.asset_mismatch`, `workbench.evidence.media_refused`, `workbench.evidence.not_granted` and `workbench.evidence.shared_conversation`. `workbench.evidence.shared_conversation` fails a call that the owner approved with a plain card after `invite.create`. The call reads nothing and grants nothing.
