@@ -6,6 +6,7 @@ import {
   setupEntries,
   type SetupInput,
 } from "./environment-setup.ts";
+import type { ImplementPorts } from "./foundry-ports.ts";
 import { repositoryOf } from "./steps-implement.ts";
 import {
   budgetMapped,
@@ -33,7 +34,8 @@ export function setupInputOf(
 export const setupEntriesLive: Step<
   unknown,
   "claim" | "setup" | "sshAccess" | "workspace",
-  "setupEntries" | "baseHead"
+  "setupEntries" | "baseHead",
+  ImplementPorts
 > = {
   id: "setup.entries(live)",
   deadline: DeadlineKind.Work,

@@ -61,12 +61,12 @@ chain evaluation
   phase tasks
     loop evaluation                         one frame; span worker.evaluation
       step verify.all(evaluation)           every node and task command; the stop class goes to judgement
-      step evidence.publish(verification)
+      step evidence.publish(verification)   port: evidence.submit
       step affected.run(evaluation)         implement intent, one checkout or more, setup and verify.all passed; budget end; stop operation_failed/worker.verification.infrastructure_failed, environment_failed/affected_invalid, environment_failed/affected_timeout, environment_failed/command_absent
-      step evidence.publish(affected)       only when the affected step holds a document
+      step evidence.publish(affected)       port: evidence.submit; only when the affected step holds a document
       step inputs.read(dependencies)        examine intent only
-      step judgement                        [LLM] shortcut on failure -> criterion-not-met; else Evaluation, Repair once; budget end; stop operation_failed/worker.verification.infrastructure_failed, environment_failed/verification_timeout, environment_failed/command_absent, judgement_invalid, operation_failed, provider_failed
-      step evidence.publish(patches)
+      step judgement                        [LLM] port: agent.open; shortcut on failure -> criterion-not-met; else Evaluation, Repair once; budget end; stop operation_failed/worker.verification.infrastructure_failed, environment_failed/verification_timeout, environment_failed/command_absent, judgement_invalid, operation_failed, provider_failed
+      step evidence.publish(patches)        port: evidence.submit
   phase finish
     step assessment.submit                  [cleanup] outcome -> closed; node not Evaluating -> revoked; success -> request actions, then execution.release(false); stop operation_failed, action_unsettled
   budget_end in each phase: stop assessment_absent
@@ -82,9 +82,9 @@ chain examine
     step setup.entries(examine)             stop environment_failed/setup_failed
     step env.setup(examine)                 budget end; stop environment_failed/setup_failed
     step inputs.read(dependencies)          budget end after the read
-    step agent.open                         budget end after the open; stop operation_failed
+    step agent.open                         port: agent.open; budget end after the open; stop operation_failed
     step verify.node                        node commands at the base heads; skipped with no checkout
-    step examine.turn                       [LLM] Examine; budget end after the turn; submits the report evidence; stop report_absent, provider_failed
+    step examine.turn                       [LLM] port: evidence.submit; Examine; budget end after the turn; submits the report evidence; stop report_absent, provider_failed
   phase finish
     step execution.release                  [cleanup] further_work false
   budget_end in prepare: stop budget_end/wall_time

@@ -1,11 +1,16 @@
 import { DeadlineKind, type Step } from "./chain.ts";
 import { EndReason } from "./execution-run.ts";
-import { PortResultKind } from "./foundry-ports.ts";
+import { type ImplementPorts, PortResultKind } from "./foundry-ports.ts";
 import { headCommit } from "./local-git.ts";
 import { next } from "./step-support.ts";
 import { HEAD_COMMIT_SUBJECT } from "./steps-implement.ts";
 
-export const evidenceHead: Step<unknown, "claim" | "state", never> = {
+export const evidenceHead: Step<
+  unknown,
+  "claim" | "state",
+  never,
+  ImplementPorts
+> = {
   id: "evidence.head",
   deadline: DeadlineKind.Cleanup,
   reads: ["claim", "state"],

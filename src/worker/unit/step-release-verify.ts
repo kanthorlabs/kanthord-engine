@@ -1,8 +1,14 @@
 import { DeadlineKind, type Step } from "./chain.ts";
+import type { ImplementPorts } from "./foundry-ports.ts";
 import { verifyRelease } from "./release-gate.ts";
 import { budgetEnd, next } from "./step-support.ts";
 
-export const releaseVerify: Step<unknown, "state", "releaseCheck"> = {
+export const releaseVerify: Step<
+  unknown,
+  "state",
+  "releaseCheck",
+  ImplementPorts
+> = {
   id: "release.verify",
   deadline: DeadlineKind.Work,
   reads: ["state"],

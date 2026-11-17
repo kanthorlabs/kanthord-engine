@@ -1,8 +1,9 @@
 import { fetchAtRelease } from "./base-refresh.ts";
 import { DeadlineKind, type Step } from "./chain.ts";
+import type { ImplementPorts } from "./foundry-ports.ts";
 import { next } from "./step-support.ts";
 
-export const baseFetch: Step<unknown, "state", never> = {
+export const baseFetch: Step<unknown, "state", never, ImplementPorts> = {
   id: "base.fetch",
   deadline: DeadlineKind.Work,
   reads: ["state"],

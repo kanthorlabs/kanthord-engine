@@ -37,7 +37,11 @@ import { ExecutionIntent } from "../contract.ts";
 import { AFFECTED_SUBJECT } from "./affected.ts";
 import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 import { ROUND_PATCH_SUBJECT, roundPatchName } from "./round-patch.ts";
-import { workerPorts } from "./worker-ports.ts";
+import {
+  type AgentOpener,
+  agentPort,
+  evaluationPorts,
+} from "./worker-ports.ts";
 
 const NO_SNAPSHOTS = 0;
 const NO_PATCH_BYTES = 0;
@@ -508,6 +512,12 @@ export async function prepareEvaluation(
 ) {
   const resources = new AsyncDisposableStack();
   try {
+    const budget = new ExecutionBudget({
+      ...input.claim,
+      resource_budget: input.setup.resource_budget,
+    });
+    const open: AgentOpener = () =>
+      assert.fail("The review preparation opens no agent.");
     const { kind, ctx } = await runNodes(
       {
         nodes: evaluationPrepareNodes(),
@@ -520,15 +530,10 @@ export async function prepareEvaluation(
       },
       {
         run,
-        budget: new ExecutionBudget({
-          ...input.claim,
-          resource_budget: input.setup.resource_budget,
-        }),
+        budget,
         resources,
-        host: hostOf(input, () =>
-          assert.fail("The review preparation opens no agent."),
-        ),
-        ports: workerPorts(input, run),
+        host: hostOf(input, open),
+        ports: evaluationPorts(run, agentPort({ run, budget, open })),
       },
     );
     if (kind === StepKind.BudgetEnd)

@@ -10,12 +10,15 @@ import {
   type ExecutionEnd,
   type ExecutionRun,
 } from "./execution-run.ts";
-import type { NativeAgent } from "./native-agent.ts";
 import { failedVerificationReport } from "./judgement.ts";
 import { EvaluationStage } from "./rework-cause.ts";
 import type { StepsInput } from "./steps-implement.ts";
 import { ActionResultKind } from "../contract.ts";
-import { workerPorts } from "./worker-ports.ts";
+import {
+  type AgentOpener,
+  agentPort,
+  evaluationPorts,
+} from "./worker-ports.ts";
 
 export { EvaluationStage };
 
@@ -34,7 +37,6 @@ export async function requestAndRelease(
 }
 
 export const VERIFICATION_SUBJECT = "Evaluation verification results";
-type OpenAgent = (directory: string) => Promise<NativeAgent>;
 
 export function setupFailureAssessment(setupFailure: SetupFailure | null) {
   if (setupFailure === null) return null;
@@ -52,7 +54,7 @@ export async function runEvaluation(
   input: StepsInput,
   run: ExecutionRun,
   budget: ExecutionBudget,
-  openAgent: OpenAgent,
+  openAgent: AgentOpener,
 ): Promise<ExecutionEnd> {
   const revision = await readPinnedRevision(run);
   return runChain(
@@ -63,7 +65,7 @@ export async function runEvaluation(
       budget,
       resources: new AsyncDisposableStack(),
       host: hostOf(input, openAgent),
-      ports: workerPorts(input, run),
+      ports: evaluationPorts(run, agentPort({ run, budget, open: openAgent })),
     },
   );
 }

@@ -4,6 +4,10 @@ import type {
   EvidenceSubmit,
   ExecutionContext,
 } from "../../mission/contract.ts";
+import type { ExecutionSetup } from "../contract.ts";
+import type { ReviewWorkspace } from "./chain.ts";
+import type { MethodClaim } from "./execution-run.ts";
+import type { NativeAgent } from "./native-agent.ts";
 import type { SpanRecorder } from "./telemetry.ts";
 import type { TreeSource } from "./tree-pool.ts";
 
@@ -69,6 +73,22 @@ export interface ReleaseTreePort {
   give(tree: CommandTree): Promise<void>;
 }
 
+export type AgentSession = NativeAgent;
+
+export interface AgentOpenRequest {
+  claim: MethodClaim;
+  setup: ExecutionSetup;
+  checkouts: readonly CheckoutRef[];
+  reviewWorkspace: ReviewWorkspace | null;
+}
+
+export interface AgentPort {
+  open(
+    request: AgentOpenRequest,
+    context: CancellationContext,
+  ): Promise<PortResult<AgentSession>>;
+}
+
 export interface SecretPort {
   redact(text: string): Promise<string | null>;
 }
@@ -87,4 +107,14 @@ export interface ImplementPorts extends CommonPorts {
   evidence: EvidencePort;
   repository: RepositoryPort;
   releaseTrees: ReleaseTreePort;
+}
+
+export interface EvaluationPorts extends CommonPorts {
+  evidence: EvidencePort;
+  agent: AgentPort;
+}
+
+export interface ExaminePorts extends CommonPorts {
+  evidence: EvidencePort;
+  agent: AgentPort;
 }

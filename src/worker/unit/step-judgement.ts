@@ -17,6 +17,7 @@ import {
 import { setupFailureAssessment } from "./evaluation.ts";
 import { verificationCommands } from "./evaluation-input.ts";
 import { EndReason, type ExecutionRun } from "./execution-run.ts";
+import type { AgentSession, EvaluationPorts } from "./foundry-ports.ts";
 import {
   affectedFailureReport,
   type Blocker,
@@ -30,8 +31,8 @@ import {
   ReplyRepair,
   withFlakyVerification,
 } from "./judgement.ts";
-import type { NativeAgent } from "./native-agent.ts";
 import { type EvaluationFacts, EvaluationStage } from "./rework-cause.ts";
+import { openedAgent } from "./step-agent-open.ts";
 import { budgetEnd, budgetMapped, next } from "./step-support.ts";
 import {
   environmentStop,
@@ -160,7 +161,7 @@ function shortcutAssessment(context: JudgeContext) {
   return null;
 }
 
-async function askJudgement(context: JudgeContext, agent: NativeAgent) {
+async function askJudgement(context: JudgeContext, agent: AgentSession) {
   const { run, round } = context;
   const { claim, setup, revision } = context.ctx;
   const evidence = context.ctx.placed.reviewBundle;
@@ -261,7 +262,9 @@ export type EvaluationAssessment =
   | NonNullable<ReturnType<typeof shortcutAssessment>>
   | ReturnType<typeof judgedAssessment>;
 
-export const judgement: Step<unknown, JudgeKeys, "judgement"> = {
+type JudgementStep = Step<unknown, JudgeKeys, "judgement", EvaluationPorts>;
+
+export const judgement: JudgementStep = {
   id: "judgement",
   deadline: DeadlineKind.Work,
   reads: [
@@ -286,7 +289,7 @@ export const judgement: Step<unknown, JudgeKeys, "judgement"> = {
     "provider_failed",
   ],
   llm: true,
-  note: "shortcut on failure -> criterion-not-met; else Evaluation, Repair once; budget end",
+  note: "port: agent.open; shortcut on failure -> criterion-not-met; else Evaluation, Repair once; budget end",
   run(ctx, scope, io) {
     return budgetMapped(io, scope, async () => {
       const context = judgeContextOf(ctx, io);
@@ -294,8 +297,8 @@ export const judgement: Step<unknown, JudgeKeys, "judgement"> = {
         return budgetEnd(scope);
       const shortcut = shortcutAssessment(context);
       if (shortcut !== null) return next(scope, { judgement: shortcut });
-      const agent = await io.host.openAgent(ctx.reviewWorkspace.directory);
-      if (agent.budget.exhausted()) return budgetEnd(scope);
+      const agent = await openedAgent(ctx, io);
+      if (agent === null || agent.budget.exhausted()) return budgetEnd(scope);
       const asked = await askJudgement(context, agent);
       if (asked === null) return budgetEnd(scope);
       return next(scope, { judgement: judgedAssessment(context, asked) });

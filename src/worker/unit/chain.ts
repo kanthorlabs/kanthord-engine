@@ -22,7 +22,7 @@ import type {
   ExecutionStop,
   MethodClaim,
 } from "./execution-run.ts";
-import type { ImplementPorts } from "./foundry-ports.ts";
+import type { CommonPorts } from "./foundry-ports.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import type { Prior, readDependencies } from "./node-reads.ts";
 import { Phase, type SpanEnd, type SpanRecorder } from "./telemetry.ts";
@@ -149,7 +149,7 @@ export interface StepHost {
   openAgent: (workspace: string) => Promise<NativeAgent>;
 }
 
-export interface StepIo {
+export interface StepIo<P extends CommonPorts = CommonPorts> {
   run: ExecutionRun;
   budget: ExecutionBudget;
   context: Context;
@@ -157,10 +157,15 @@ export interface StepIo {
   resources: AsyncDisposableStack;
   spans: SpanRecorder;
   host: StepHost;
-  ports: ImplementPorts;
+  ports: P;
 }
 
-export interface Step<S, R extends Key, W extends Key> {
+export interface Step<
+  S,
+  R extends Key,
+  W extends Key,
+  P extends CommonPorts = CommonPorts,
+> {
   id: string;
   deadline: DeadlineKind;
   reads: readonly R[];
@@ -171,7 +176,7 @@ export interface Step<S, R extends Key, W extends Key> {
   run(
     ctx: Readonly<Pick<ExecutionCtx, R>>,
     scope: S,
-    io: StepIo,
+    io: StepIo<P>,
   ): Promise<StepResult<S, W>>;
 }
 

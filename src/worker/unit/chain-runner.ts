@@ -26,7 +26,7 @@ import {
   type ExecutionRun,
   ExecutionStop,
 } from "./execution-run.ts";
-import type { ImplementPorts } from "./foundry-ports.ts";
+import type { CommonPorts } from "./foundry-ports.ts";
 import { Phase, type SpanEnd } from "./telemetry.ts";
 
 const CHECKPOINT_FAILED = "checkpoint failed";
@@ -38,7 +38,7 @@ export interface ChainIo {
   budget: ExecutionBudget;
   resources: AsyncDisposableStack;
   host: StepHost;
-  ports: ImplementPorts;
+  ports: CommonPorts;
 }
 
 interface Walk {

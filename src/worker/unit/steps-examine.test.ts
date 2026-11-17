@@ -354,6 +354,80 @@ test("an examine node that its agent deadline cuts releases with further work an
   assert.deepEqual(releases, [{ further_work: true, stop: null }]);
 });
 
+test("an examine agent open that fails releases with the operation_failed stop", async (t) => {
+  const setup = anthropicSetup({ repositories: [] });
+  const claim = {
+    execution_id: setup.execution_id,
+    node_id: createIdentity("node"),
+    attempt: 1,
+    pinned_revision: 1,
+    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    trace_id: "trace",
+    root_span_id: "1".repeat(16),
+  };
+  const page = async () => ({
+    type: "completed",
+    status: 200,
+    data: { items: [], next_cursor: null },
+  });
+  const releases: {
+    further_work: boolean;
+    stop: { reason: string; code: string | null };
+  }[] = [];
+  const clients = {
+    mission: {
+      "execution.dependency.list": page,
+      "execution.dependency.outcome.list": page,
+      "execution.dependency.evidence.list": page,
+    },
+    scheduler: {
+      executionRelease: async (input: { body: (typeof releases)[number] }) => {
+        releases.push(input.body);
+        return { type: "completed", status: 200, data: {} };
+      },
+    },
+  } as unknown as MethodClients;
+  const run = new ExecutionRun({
+    claim,
+    clients,
+    credentials: { release: async () => {} },
+    context: background,
+  });
+  stopAfter(t, () => run.dispose());
+  const budget = new ExecutionBudget({
+    ...claim,
+    resource_budget: setup.resource_budget,
+  });
+  await executionBoundary(run, () =>
+    runStepsExamine(
+      {
+        setup,
+        claim,
+        workspaces: WorkspaceRoot.open(temporary(t)),
+        transport: {} as RepositoryTransport,
+        sshAccess: everyBindingSshAccess,
+        env: hostEnvironment(),
+      },
+      run,
+      {} as Revision,
+      budget,
+      async () => {
+        throw new Error("open failed");
+      },
+    ),
+  );
+  assert.deepEqual(
+    releases.map(({ further_work, stop }) => ({
+      further_work,
+      reason: stop.reason,
+      code: stop.code,
+    })),
+    [{ further_work: true, reason: EndReason.OperationFailed, code: null }],
+  );
+});
+
 test("an examine node with two repository bindings runs from checkouts/ and lists each repository in the work and examine prompts", async (t) => {
   const names = ["first", "second"];
   const setup = anthropicSetup({
