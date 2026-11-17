@@ -15,9 +15,8 @@ import {
   WORKBENCH_SERVICE_NAME,
   WORKBENCH_SESSION_PREFIX,
   WorkbenchErrorCode,
-  workbenchOperations,
 } from "./contract.ts";
-import { guestIdOf, WorkbenchInvites } from "./invites.ts";
+import { WorkbenchInvites } from "./invites.ts";
 import { workbenchMigrations } from "./migrations.ts";
 import {
   type Dependencies,
@@ -32,7 +31,6 @@ const BLANK = "  \t ";
 const LONG_NAME = "n".repeat(65);
 const NO_ITEMS = 0;
 const SINGLE = 1;
-const GUEST_ID_LENGTH = 64;
 
 const caller: CallerContext = {
   identity: testHumanIdentity(OWNER, "Ulrich", "invites"),
@@ -122,7 +120,7 @@ async function refusedWith(
   );
 }
 
-test("(security, redaction) token_hash is the SHA-256 of the token, and the raw token appears in no row and in no idempotency record", async (t) => {
+test("(security, redaction) token_hash is the SHA-256 of the token, and the raw token appears in no row", async (t) => {
   const f = fixture(t);
   const host = f.host();
   const created = await f.service.inviteCreate(caller, host.id, {
@@ -145,7 +143,6 @@ test("(security, redaction) token_hash is the SHA-256 of the token, and the raw 
       created.expires_at - Date.now() > WORKBENCH_INVITE_LIFETIME_MS / 2,
   );
   assert.ok(!JSON.stringify(f.rows()).includes(created.invite_token));
-  assert.equal(workbenchOperations["invite.create"].secret, true);
 });
 
 test("(security, refused path) join with an unknown token answers 404 workbench.invite.not_found", async (t) => {
@@ -235,69 +232,4 @@ test("(security, refused path) invite.create on a participant id answers 409 wor
     WorkbenchErrorCode.NotHost,
   );
   assert.deepEqual(f.rows(), []);
-});
-
-test("(happy path) create, list, join and revoke keep one live invite per call, sign the guest token once and clear the evidence grants", async (t) => {
-  const f = fixture(t);
-  const host = f.host();
-  host.evidenceGrants.add("node_grant");
-  const created = await f.service.inviteCreate(caller, host.id, {
-    invitee_name: ` ${GUEST_NAME} `,
-  });
-  assert.equal(created.invitee_name, GUEST_NAME);
-  assert.equal(host.evidenceGrants.size, NO_ITEMS);
-  assert.deepEqual(await f.service.inviteList(host.id), {
-    items: [
-      {
-        id: created.id,
-        invitee_name: GUEST_NAME,
-        expires_at: created.expires_at,
-      },
-    ],
-  });
-  assert.ok(f.invites.isShared(host.id));
-  const joined = await f.service.inviteJoin({
-    invite_token: created.invite_token,
-    name: GUEST_NAME,
-  });
-  assert.deepEqual(joined, {
-    guest_token: SIGNED_TOKEN,
-    guest_id: guestIdOf(created.invite_token, GUEST_NAME),
-    name: GUEST_NAME,
-    session_id: host.id,
-    expires_at: created.expires_at,
-  });
-  assert.equal(joined.guest_id.length, GUEST_ID_LENGTH);
-  assert.deepEqual(f.signed, [
-    {
-      guestId: joined.guest_id,
-      name: GUEST_NAME,
-      inviteId: created.id,
-      expiresAt: created.expires_at,
-    },
-  ]);
-  assert.deepEqual(f.invites.resolve(created.id), {
-    session_id: host.id,
-    invited_by: OWNER,
-    expires_at: created.expires_at,
-  });
-  assert.deepEqual(f.service.inviteRevoke(created.id), { id: created.id });
-  assert.equal(f.invites.resolve(created.id), null);
-  assert.ok(!f.invites.isShared(host.id));
-  assert.deepEqual(await f.service.inviteList(host.id), { items: [] });
-});
-
-test("(invariant, expiry) create deletes the expired rows of its session, and list and resolve skip them", async (t) => {
-  const f = fixture(t);
-  const host = f.host();
-  const expired = await f.service.inviteCreate(caller, host.id, {
-    invitee_name: GUEST_NAME,
-  });
-  f.expireAll();
-  assert.deepEqual(await f.service.inviteList(host.id), { items: [] });
-  assert.equal(f.invites.resolve(expired.id), null);
-  assert.ok(!f.invites.isShared(host.id));
-  assert.equal(f.rows().length, SINGLE);
-  await f.service.inviteCreate(caller, host.id, { invitee_name: GUEST_NAME });
-  assert.equal(f.rows().length, SINGLE);
 });

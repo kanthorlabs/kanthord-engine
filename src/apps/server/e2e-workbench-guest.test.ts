@@ -7,7 +7,11 @@ import { createIdempotencyKey } from "../../kernel/identity.ts";
 import { background } from "../../kernel/context.ts";
 import { OperationError } from "../../kernel/errors.ts";
 import { HttpStatus } from "../../kernel/http.ts";
-import { AccessPolicy, hasHttpRoute } from "../../kernel/operation.ts";
+import {
+  AccessPolicy,
+  hasHttpRoute,
+  OperationResultType,
+} from "../../kernel/operation.ts";
 import {
   testGuestIdentity,
   testHumanIdentity,
@@ -79,7 +83,12 @@ interface Joined {
   inviteId: string;
 }
 
-async function invite(fixture: Fixture, sessionId: string, name: string) {
+async function invite(
+  fixture: Fixture,
+  sessionId: string,
+  name: string,
+  idempotencyKey?: string,
+) {
   return completed(
     await fixture.workbench["invite.create"](
       {
@@ -87,7 +96,9 @@ async function invite(fixture: Fixture, sessionId: string, name: string) {
         query: {},
         body: { invitee_name: name },
       },
-      fixture.options,
+      idempotencyKey === undefined
+        ? fixture.options
+        : { ...fixture.options, idempotencyKey },
     ),
   );
 }
@@ -250,7 +261,24 @@ test(
         persistence,
       );
       sessionId = (await createHost(first, OPS)).id;
-      created = await invite(first, sessionId, GUEST_NAME);
+      const key = createIdempotencyKey();
+      created = await invite(first, sessionId, GUEST_NAME, key);
+      const replay = await first.workbench["invite.create"](
+        {
+          params: { session_id: sessionId },
+          query: {},
+          body: { invitee_name: GUEST_NAME },
+        },
+        { ...first.options, idempotencyKey: key },
+      );
+      assert.equal(
+        replay.type,
+        OperationResultType.Failure,
+        JSON.stringify(replay),
+      );
+      assert.ok(replay.type === OperationResultType.Failure);
+      assert.equal(replay.status, HttpStatus.Conflict);
+      assert.ok(!JSON.stringify(replay).includes(created.invite_token));
       const listed = completed(
         await first.workbench["invite.list"](
           { params: { session_id: sessionId }, query: {}, body: null },
