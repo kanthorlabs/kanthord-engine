@@ -10,9 +10,9 @@ import {
   type StepsState,
 } from "./steps-implement.ts";
 import type { WorkspaceCheckout } from "./workspace.ts";
-import { EndReason } from "./execution-run.ts";
 import { type ImplementPorts, PortResultKind } from "./foundry-ports.ts";
 import { GitStep, withinGit } from "./method-telemetry.ts";
+import { portStop } from "./execution-run.ts";
 import { gatedAgent, mergeCommitMessage } from "./turn-gate.ts";
 
 const NO_FILES = 0;
@@ -149,7 +149,7 @@ export async function fetchAtRelease(
         deadline: state.input.claim.expired_at,
       });
       if (fetched.kind === PortResultKind.Failed)
-        state.run.stop(EndReason.OperationFailed, fetched.code);
+        throw state.run.halt(portStop(fetched));
     }
   } finally {
     context.cancel();

@@ -1,3 +1,4 @@
+import type { FailureCause } from "../../kernel/cause.ts";
 import type { CancellationContext, Context } from "../../kernel/context.ts";
 import type {
   Evidence,
@@ -11,15 +12,26 @@ import type { NativeAgent } from "./native-agent.ts";
 import type { SpanRecorder } from "./telemetry.ts";
 import type { TreeSource } from "./tree-pool.ts";
 
-export const PortResultKind = { Ok: "ok", Failed: "failed" } as const;
+export const PortResultKind = {
+  Ok: "ok",
+  Failed: "failed",
+  BudgetEnd: "budget_end",
+} as const;
+
+export interface PortFailure {
+  kind: typeof PortResultKind.Failed;
+  code: string | null;
+  message: string;
+  detail?: string | null;
+  cause?: FailureCause | null;
+}
+
+export interface PortBudgetEnd {
+  kind: typeof PortResultKind.BudgetEnd;
+}
 
 export type PortResult<T> =
-  | { kind: typeof PortResultKind.Ok; value: T }
-  | {
-      kind: typeof PortResultKind.Failed;
-      code: string | null;
-      message: string;
-    };
+  { kind: typeof PortResultKind.Ok; value: T } | PortFailure;
 
 export type EvidenceDraft = Omit<EvidenceSubmit, keyof ExecutionContext>;
 export type EvidenceId = Evidence["id"];
@@ -86,7 +98,7 @@ export interface AgentPort {
   open(
     request: AgentOpenRequest,
     context: CancellationContext,
-  ): Promise<PortResult<AgentSession>>;
+  ): Promise<PortResult<AgentSession> | PortBudgetEnd>;
 }
 
 export interface SecretPort {

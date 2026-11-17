@@ -16,7 +16,6 @@ import {
   affectedRevisionInstruction,
   releaseRevisionInstruction,
 } from "./judgement.ts";
-import { EndReason } from "./execution-run.ts";
 import {
   type CommandTree,
   type ImplementPorts,
@@ -29,6 +28,7 @@ import {
   VerificationContext,
   verificationObserver,
 } from "./method-telemetry.ts";
+import { portStop } from "./execution-run.ts";
 import { repositoryOf, stateIo, type StepsState } from "./steps-implement.ts";
 import { memoScopeOf } from "./verification-memo.ts";
 import {
@@ -384,7 +384,7 @@ async function takeReleaseTrees(
       release.call,
     );
     if (taken.kind === PortResultKind.Failed)
-      state.run.stop(EndReason.OperationFailed, taken.code);
+      throw state.run.halt(portStop(taken));
     release.trees.push(taken.value);
     release.ports.log.log(TREE_PREPARED, {
       purpose: RELEASE_PURPOSE,

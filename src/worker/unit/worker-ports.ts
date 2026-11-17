@@ -46,29 +46,15 @@ const NO_REFS: readonly string[] = [];
 const NO_TREES = 0;
 const MIN_DEADLINE_MS = 1;
 const PARENT = "..";
-const BUDGET_END = "budget end";
 
-type PortFailure = Extract<
-  PortResult<never>,
-  { kind: typeof PortResultKind.Failed }
->;
-type StopMapper = Pick<ExecutionRun, "stopOf">;
+type FailureMapper = Pick<ExecutionRun, "failureOf">;
 
 export interface BaseTreeHost {
   workspaces: WorkspaceRoot;
   nodeId: string;
   env: NodeJS.ProcessEnv;
   addressOf: (checkout: CheckoutRef) => string;
-  run: StopMapper;
-}
-
-async function failedOf(run: StopMapper, error: unknown): Promise<PortFailure> {
-  const stop = await run.stopOf(error);
-  return {
-    kind: PortResultKind.Failed,
-    code: stop.code,
-    message: stop.detail ?? stop.message,
-  };
+  run: FailureMapper;
 }
 
 function ok<T>(value: T): PortResult<T> {
@@ -96,7 +82,7 @@ function evidencePort(run: ExecutionRun): EvidencePort {
       try {
         return ok((await run.submitEvidence(run.claim.node_id, draft)).id);
       } catch (error) {
-        return failedOf(run, error);
+        return run.failureOf(error);
       }
     },
   };
@@ -118,7 +104,7 @@ function repositoryPort(input: StepsInput, run: ExecutionRun): RepositoryPort {
           );
         return ok(null);
       } catch (error) {
-        return failedOf(run, error);
+        return run.failureOf(error);
       }
     },
   };
@@ -169,7 +155,7 @@ export function baseTreeTaker(host: BaseTreeHost): ReleaseTreePort["takeBase"] {
       });
       return ok({ binding_id: checkout.binding_id, directory, source });
     } catch (error) {
-      return failedOf(host.run, error);
+      return host.run.failureOf(error);
     }
   };
 }
@@ -266,7 +252,7 @@ function releaseTreePort(
         return ok({ binding_id: checkout.binding_id, directory, source });
       } catch (error) {
         giveBack(checkout, directory);
-        return failedOf(run, error);
+        return run.failureOf(error);
       }
     },
     takeBase: baseTreeTaker({
@@ -299,12 +285,8 @@ export function agentPort(host: AgentHost): AgentPort {
         return ok(await host.open(workspace.directory));
       } catch (error) {
         if (endedByBudget(host, error))
-          return {
-            kind: PortResultKind.Failed,
-            code: null,
-            message: BUDGET_END,
-          };
-        return failedOf(host.run, error);
+          return { kind: PortResultKind.BudgetEnd };
+        return host.run.failureOf(error);
       }
     },
   };

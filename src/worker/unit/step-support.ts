@@ -6,7 +6,7 @@ import {
   type StepIo,
   StepKind,
 } from "./chain.ts";
-import { EndReason } from "./execution-run.ts";
+import { portStop } from "./execution-run.ts";
 import {
   type EvaluationPorts,
   type EvidenceDraft,
@@ -120,6 +120,6 @@ export async function submittedEvidence(
     { halt: true },
   );
   if (submitted.kind === PortResultKind.Failed)
-    return io.run.stop(EndReason.OperationFailed, submitted.code);
+    throw io.run.halt(portStop(submitted));
   return submitted.value;
 }

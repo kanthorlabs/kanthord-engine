@@ -5,7 +5,6 @@ import {
   type StepIo,
 } from "./chain.ts";
 import { namedCheckouts } from "./environment-setup.ts";
-import { EndReason } from "./execution-run.ts";
 import {
   type AgentOpenRequest,
   type AgentSession,
@@ -13,6 +12,7 @@ import {
   type ExaminePorts,
   PortResultKind,
 } from "./foundry-ports.ts";
+import { portStop } from "./execution-run.ts";
 import { budgetEnd, budgetMapped, next } from "./step-support.ts";
 
 type OpenKeys = "claim" | "setup" | "reviewWorkspace";
@@ -58,9 +58,8 @@ export async function openedAgent(
     io.run.operationContext,
   );
   if (opened.kind === PortResultKind.Ok) return opened.value;
-  if (io.budget.exhausted() && !io.run.operationContext.signal.aborted)
-    return null;
-  return io.run.stop(EndReason.OperationFailed, opened.code);
+  if (opened.kind === PortResultKind.BudgetEnd) return null;
+  throw io.run.halt(portStop(opened));
 }
 
 export const agentOpenExamine: Step<unknown, OpenKeys, "agent", ExaminePorts> =
