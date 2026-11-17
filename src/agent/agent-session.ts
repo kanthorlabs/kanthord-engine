@@ -200,6 +200,35 @@ function runtimeFactory(
   };
 }
 
+export async function closeRuntime(
+  runtime: AgentSessionRuntime,
+  cleanup: CancellationContext,
+): Promise<void> {
+  const ended = runtime.session
+    .abort()
+    .then(() => runtime.dispose())
+    .then(
+      () => true,
+      () => false,
+    );
+  try {
+    const disposed = await Promise.race([
+      ended,
+      cancelled(cleanup.signal).then(() => false),
+    ]);
+    if (!disposed) runtime.session.dispose();
+  } finally {
+    cleanup.cancel();
+  }
+}
+
+function setupCleanup(parent: Context): CancellationContext {
+  return new CancellationContext(
+    parent,
+    Date.now() + RUNTIME_SETUP_DEADLINE_MS,
+  );
+}
+
 export async function openSessionRuntime(
   input: OpenSessionInput & SessionRedactionInput,
 ): Promise<OpenedRuntime> {
@@ -211,12 +240,12 @@ export async function openSessionRuntime(
       sessionManager: parts.sessionManager,
     }),
     input.context,
-    (late) => void late.dispose(),
+    (late) => void closeRuntime(late, setupCleanup(input.context)),
   );
   try {
     await withDeadline(runtime.session.bindExtensions({}), input.context);
   } catch (error) {
-    await runtime.dispose();
+    await closeRuntime(runtime, setupCleanup(input.context));
     throw error;
   }
   return {

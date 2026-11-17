@@ -7,14 +7,14 @@ import type {
   InlineExtension,
   ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
-import {
-  type CancellationContext,
-  cancelled,
-  type Context,
-} from "../kernel/context.ts";
+import type { CancellationContext, Context } from "../kernel/context.ts";
 import { SpanStatus } from "../tracking/contract.ts";
 import type { AgentSetup, ExecutionSetup } from "../worker/contract.ts";
-import { openSessionRuntime, withDeadline } from "./agent-session.ts";
+import {
+  closeRuntime,
+  openSessionRuntime,
+  withDeadline,
+} from "./agent-session.ts";
 import { isConfinedAgent } from "./catalog.ts";
 import { checkoutConfinement } from "./hooks/checkout-confinement.ts";
 import type {
@@ -128,25 +128,6 @@ function guardsOf(
   ];
 }
 
-async function closeRuntime(
-  runtime: AgentSessionRuntime,
-  cleanup: CancellationContext,
-): Promise<void> {
-  const disposed = runtime.dispose().then(
-    () => true,
-    () => false,
-  );
-  try {
-    const ended = await Promise.race([
-      disposed,
-      cancelled(cleanup.signal).then(() => false),
-    ]);
-    if (!ended) runtime.session.dispose();
-  } finally {
-    cleanup.cancel();
-  }
-}
-
 interface SessionStore {
   cwd: string;
   executionId: string;
@@ -178,6 +159,7 @@ export function agentPort<T extends SessionTrace>(
       const { agent, cwd } = plan;
       const context = input.budget.agentContext(parent);
       let trace: T | null = null;
+      let runtime: AgentSessionRuntime | null = null;
       try {
         await input.knownSecrets();
         const { runtime: modelRuntime, model } = await withDeadline(
@@ -218,6 +200,7 @@ export function agentPort<T extends SessionTrace>(
           }),
           knownSecrets: input.knownSecrets,
         });
+        runtime = opened.runtime;
         const { session } = opened.runtime;
         pins.pinInference(session, opened.systemPrompt);
         let closed = false;
@@ -242,6 +225,8 @@ export function agentPort<T extends SessionTrace>(
       } catch (error) {
         trace?.end(SpanStatus.Error);
         context.cancel();
+        if (runtime)
+          await closeRuntime(runtime, input.budget.cleanupContext(parent));
         throw error;
       }
     },
