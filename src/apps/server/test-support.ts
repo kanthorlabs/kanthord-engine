@@ -3279,6 +3279,25 @@ export type WorkbenchFixture = Awaited<
   ReturnType<ReturnType<typeof workbenchHarness>["workbenchFixture"]>
 >;
 
+export async function invitedProjectIds(
+  fixture: WorkbenchFixture,
+): Promise<string[]> {
+  const listed = completed(
+    await fixture.projects.list(
+      { params: {}, query: { limit: 1 }, body: null },
+      fixture.options,
+    ),
+  );
+  if (listed.items[0]) return [listed.items[0].id];
+  const created = completed(
+    await fixture.projects.create(
+      { params: {}, query: {}, body: { name: "invite-scope" } },
+      fixture.options,
+    ),
+  );
+  return [created.id];
+}
+
 const TOOL_USE = "toolUse" as const;
 const WORKBENCH_CONFIGURATION = {
   agent_provider: DEFAULT,

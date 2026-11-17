@@ -390,7 +390,9 @@ export function composeServices(options: ComposeServicesOptions) {
     options.repositoryTransport ?? repositoryComponent;
   const envelopeKey = deriveEnvelopeKey(options.config.master_key);
   const registry = options.registry ?? new OperationRegistry();
-  const invites = new WorkbenchInvites(options.store);
+  const invites = new WorkbenchInvites(options.store, (ids) =>
+    project.projectNames(ids),
+  );
   const projectScope = new ProjectScope({
     projectOf: (prefix, id) =>
       isProjectServicePrefix(prefix)

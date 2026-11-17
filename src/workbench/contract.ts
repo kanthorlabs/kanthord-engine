@@ -33,6 +33,7 @@ export const WORKBENCH_QUEUE_LIMIT = 10;
 export const WORKBENCH_QUEUED_MESSAGE_PREFIX = "workbench_queued_message";
 export const WORKBENCH_INVITE_PREFIX = "workbench_invite";
 export const WORKBENCH_INVITE_LIFETIME_MS = 604_800_000;
+export const WORKBENCH_INVITE_PROJECT_LIMIT = 50;
 export const WORKBENCH_INVITE_NAME_MAX_LENGTH = 64;
 export const WORKBENCH_INVITE_NAME_INPUT_MAX_LENGTH = 256;
 export const WORKBENCH_GUEST_MESSAGE_MAX_BYTES = 16384;
@@ -90,6 +91,8 @@ export const WorkbenchErrorCode = {
   SummaryRefused: "workbench.fork.summary_refused",
   InviteNotFound: "workbench.invite.not_found",
   InviteNameInvalid: "workbench.invite.name_invalid",
+  ProjectInvalid: "workbench.invite.project_invalid",
+  ScopeMismatch: "workbench.invite.scope_mismatch",
   EvidenceNameMismatch: "workbench.evidence.name_mismatch",
 } as const;
 
@@ -331,6 +334,13 @@ export const inviteItemSchema = z.strictObject({
   id: identitySchema(WORKBENCH_INVITE_PREFIX),
   invitee_name: z.string(),
   expires_at: timestampSchema,
+});
+const inviteProjectSchema = z.strictObject({
+  id: identitySchema("project"),
+  name: z.string().nullable(),
+});
+export const inviteListItemSchema = inviteItemSchema.extend({
+  projects: z.array(inviteProjectSchema),
 });
 
 const guestBlockSchema = z.discriminatedUnion("type", [
@@ -664,6 +674,7 @@ export const workbenchOperations = {
       query: emptyFields,
       body: z.strictObject({
         invitee_name: z.string().max(WORKBENCH_INVITE_NAME_INPUT_MAX_LENGTH),
+        project_ids: z.array(z.string()),
       }),
     }),
     output: inviteItemSchema.extend({
@@ -671,7 +682,7 @@ export const workbenchOperations = {
       invite_token: z.uuid(),
     }),
     description:
-      "Invite one person to a workbench conversation. The answer holds `invite_token` once. The server stores only its hash. The invite lasts 7 days. Creating an invite clears the evidence grants of the conversation. Error `workbench.invite.name_invalid` answers a blank `invitee_name` or one of more than 64 characters.",
+      "Invite one person to a workbench conversation. The answer holds `invite_token` once. The server stores only its hash. The invite lasts 7 days. Creating an invite clears the evidence grants of the conversation. Error `workbench.invite.name_invalid` answers a blank `invitee_name` or one of more than 64 characters. `project_ids` names 1 to 50 existing projects, each once. A repeated, malformed or unknown id, no id, or more than 50 ids answers 400 `workbench.invite.project_invalid` with the refused ids in `details`. A set that differs from the set of a live invite of the conversation answers 409 `workbench.invite.scope_mismatch`. The set never changes: revoke the invite and create a new one.",
   },
   "invite.list": {
     ...workbenchOperation,
@@ -685,8 +696,12 @@ export const workbenchOperations = {
       query: emptyFields,
       body: z.null(),
     }),
-    output: z.strictObject({ items: z.array(inviteItemSchema) }),
-    description: "List the live invites of a workbench conversation.",
+    output: z.strictObject({
+      items: z.array(inviteListItemSchema),
+      project_ids: z.array(identitySchema("project")).nullable(),
+    }),
+    description:
+      "List the live invites of a workbench conversation. Each item names its projects with the live project name, or a null name for an id with no project. `project_ids` holds the set of the live invites, or null when no invite is live.",
   },
   "invite.revoke": {
     ...workbenchOperation,
@@ -747,6 +762,7 @@ export const workbenchOperations = {
       title: z.string().nullable(),
       members: z.array(conversationMemberSchema),
       owner_name: z.string(),
+      projects: z.array(inviteProjectSchema),
       entries: z.array(guestEntrySchema),
       run_active: z.boolean(),
     }),

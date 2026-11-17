@@ -26,7 +26,11 @@ import {
 } from "./service.ts";
 
 const OWNER = "kanthord";
+const PROJECT = createIdentity("project");
+const OTHER_PROJECT = createIdentity("project");
 const GUEST_NAME = "Mira";
+const OTHER_GUEST_NAME = "Noor";
+const PROJECT_NAME = "alpha";
 const SIGNED_TOKEN = "signed-guest-token";
 const BLANK = "  \t ";
 const LONG_NAME = "n".repeat(65);
@@ -54,7 +58,15 @@ function fixture(t: TestContext) {
   store.migrate([
     { service: WORKBENCH_SERVICE_NAME, migrations: workbenchMigrations },
   ]);
-  const invites = new WorkbenchInvites(store);
+  const invites = new WorkbenchInvites(
+    store,
+    (ids) =>
+      new Map(
+        ids
+          .filter((id) => id === PROJECT || id === OTHER_PROJECT)
+          .map((id) => [id, PROJECT_NAME]),
+      ),
+  );
   const signed: GuestTokenRequest[] = [];
   const service = new WorkbenchService({
     store,
@@ -126,6 +138,7 @@ test("(security, redaction) token_hash is the SHA-256 of the token, and the raw 
   const host = f.host();
   const created = await f.service.inviteCreate(caller, host.id, {
     invitee_name: GUEST_NAME,
+    project_ids: [PROJECT],
   });
   const [row] = f.rows() as Record<string, unknown>[];
   assert.ok(row);
@@ -161,6 +174,7 @@ test("(security, refused path) join with the token of an expired row answers 404
   const f = fixture(t);
   const created = await f.service.inviteCreate(caller, f.host().id, {
     invitee_name: GUEST_NAME,
+    project_ids: [PROJECT],
   });
   f.expireAll();
   await refusedWith(
@@ -178,6 +192,7 @@ test("(security, argument guard) a blank or 65-character name at join answers 40
   const f = fixture(t);
   const created = await f.service.inviteCreate(caller, f.host().id, {
     invitee_name: GUEST_NAME,
+    project_ids: [PROJECT],
   });
   for (const name of [BLANK, LONG_NAME])
     await refusedWith(
@@ -193,7 +208,10 @@ test("(security, argument guard) a blank or 65-character invitee_name at create 
   const host = f.host();
   for (const invitee_name of [BLANK, LONG_NAME])
     await refusedWith(
-      f.service.inviteCreate(caller, host.id, { invitee_name }),
+      f.service.inviteCreate(caller, host.id, {
+        invitee_name,
+        project_ids: [PROJECT],
+      }),
       HttpStatus.BadRequest,
       WorkbenchErrorCode.InviteNameInvalid,
     );
@@ -205,6 +223,7 @@ test("(security, refused path) invite.create on an unknown session answers 404 w
   await refusedWith(
     f.service.inviteCreate(caller, createIdentity(WORKBENCH_SESSION_PREFIX), {
       invitee_name: GUEST_NAME,
+      project_ids: [PROJECT],
     }),
     HttpStatus.NotFound,
     WorkbenchErrorCode.SessionNotFound,
@@ -229,9 +248,63 @@ test("(security, refused path) invite.create on a participant id answers 409 wor
   await refusedWith(
     f.service.inviteCreate(caller, participant.id, {
       invitee_name: GUEST_NAME,
+      project_ids: [PROJECT],
     }),
     HttpStatus.Conflict,
     WorkbenchErrorCode.NotHost,
   );
   assert.deepEqual(f.rows(), []);
+});
+
+const CORRUPT_PROJECT_IDS = "[not json";
+
+test("(security, argument guard) create with an unknown id and a repeated id answers 400 workbench.invite.project_invalid and lists both", async (t) => {
+  const f = fixture(t);
+  const host = f.host();
+  const unknown = createIdentity("project");
+  await assert.rejects(
+    f.service.inviteCreate(caller, host.id, {
+      invitee_name: GUEST_NAME,
+      project_ids: [PROJECT, PROJECT, unknown],
+    }),
+    (error: unknown) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.BadRequest &&
+      error.code === WorkbenchErrorCode.ProjectInvalid &&
+      JSON.stringify(error.details) === JSON.stringify([PROJECT, unknown]),
+  );
+  assert.deepEqual(f.rows(), []);
+});
+
+test("(security, refused path) create with a set that differs from a live invite answers 409 workbench.invite.scope_mismatch", async (t) => {
+  const f = fixture(t);
+  const host = f.host();
+  await f.service.inviteCreate(caller, host.id, {
+    invitee_name: GUEST_NAME,
+    project_ids: [PROJECT],
+  });
+  await refusedWith(
+    f.service.inviteCreate(caller, host.id, {
+      invitee_name: OTHER_GUEST_NAME,
+      project_ids: [OTHER_PROJECT],
+    }),
+    HttpStatus.Conflict,
+    WorkbenchErrorCode.ScopeMismatch,
+  );
+  assert.equal(f.rows().length, SINGLE);
+});
+
+test("(security) a corrupt project_ids column resolves to no project", async (t) => {
+  const f = fixture(t);
+  const created = await f.service.inviteCreate(caller, f.host().id, {
+    invitee_name: GUEST_NAME,
+    project_ids: [PROJECT],
+  });
+  assert.deepEqual(f.invites.resolve(created.id)?.project_ids, [PROJECT]);
+  f.store.transaction((tx) =>
+    tx.database
+      .prepare("UPDATE workbench_invite SET project_ids = ?")
+      .run(CORRUPT_PROJECT_IDS),
+  );
+  assert.deepEqual(f.invites.resolve(created.id)?.project_ids, []);
 });

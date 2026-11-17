@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { test, type TestContext } from "node:test";
 import { createIdempotencyKey, createIdentity } from "../../kernel/identity.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import type { Operation } from "../../kernel/operation.ts";
-import { testReadOnlyIdentity } from "../../kernel/test-identity.ts";
-import { WorkbenchInvites } from "../../workbench/index.ts";
+import {
+  testGuestIdentity,
+  testHumanIdentity,
+  testReadOnlyIdentity,
+} from "../../kernel/test-identity.ts";
 import {
   ImportFormat,
   Intent,
@@ -18,8 +22,11 @@ import { environment } from "./cli-test-support.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import {
   applyCoveringBindings,
+  completed as completedResult,
+  createHost,
   enableCoveringAgents,
   gatewayFixture,
+  workbenchHarness,
 } from "./test-support.ts";
 
 const TEST_TIMEOUT_MS = 60000;
@@ -129,13 +136,22 @@ async function scopeFixture(t: TestContext) {
   const second = await projectOf("scope-two");
   const inviteId = createIdentity("workbench_invite");
   const projectIds = [first.projectId];
-  t.mock.method(WorkbenchInvites.prototype, "resolve", () => ({
-    session_id: createIdentity("workbench_session"),
-    invited_by: ACCOUNT,
-    invited_by_name: ACCOUNT,
-    expires_at: Date.now() + TEST_TIMEOUT_MS,
-    project_ids: projectIds,
-  }));
+  fixture.store.transaction((tx) =>
+    tx.database
+      .prepare(
+        "INSERT INTO workbench_invite (id, session_id, token_hash, invited_by, invited_by_name, expires_at, invitee_name, project_ids) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        inviteId,
+        createIdentity("workbench_session"),
+        randomUUID(),
+        ACCOUNT,
+        ACCOUNT,
+        Date.now() + TEST_TIMEOUT_MS,
+        "Mira",
+        JSON.stringify(projectIds),
+      ),
+  );
   const reader = testReadOnlyIdentity(ACCOUNT, { inviteId, projectIds });
   const scoped = (operation: Operation, input: unknown) =>
     call(operation, input, { identity: reader });
@@ -340,5 +356,87 @@ test(
         key === ID_KEY ? undefined : value,
       );
     assert.equal(withoutId(foreign), withoutId(absent));
+  },
+);
+
+const OWNER = testHumanIdentity(ACCOUNT, "Ulrich", "project-scope");
+const OPS = "ops@1";
+const GUEST_NAME = "Mira";
+const FIRST_NAME = "scope-one";
+const RENAMED = "scope-one-renamed";
+
+test(
+  "(happy path) invite.list and guest.get answer the project names live after a rename, and invite.list answers the live set",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { conversationFixture } = workbenchHarness(OWNER);
+    const { fixture } = await conversationFixture(t, []);
+    const created = await Promise.all(
+      [FIRST_NAME, "scope-two"].map(async (name) =>
+        completedResult(
+          await fixture.projects.create(
+            { params: {}, query: {}, body: { name } },
+            fixture.options,
+          ),
+        ),
+      ),
+    );
+    const projectIds = created.map((project) => project.id).sort();
+    const host = await createHost(fixture, OPS);
+    const listInvites = async () =>
+      completedResult(
+        await fixture.workbench["invite.list"](
+          { params: { session_id: host.id }, query: {}, body: null },
+          fixture.options,
+        ),
+      );
+    assert.equal((await listInvites()).project_ids, null);
+    const invite = completedResult(
+      await fixture.workbench["invite.create"](
+        {
+          params: { session_id: host.id },
+          query: {},
+          body: { invitee_name: GUEST_NAME, project_ids: projectIds },
+        },
+        fixture.options,
+      ),
+    );
+    const renamed = created.find((project) => project.name === FIRST_NAME)!;
+    completedResult(
+      await fixture.projects.rename(
+        {
+          params: { project_id: renamed.id },
+          query: {},
+          body: { name: RENAMED },
+        },
+        fixture.options,
+      ),
+    );
+    const listed = await listInvites();
+    assert.deepEqual(listed.project_ids, projectIds);
+    const nameOf = (projects: { id: string; name: string | null }[]) =>
+      projects.find((project) => project.id === renamed.id)?.name;
+    assert.equal(nameOf(listed.items[0]!.projects), RENAMED);
+    const guest = testGuestIdentity({
+      guestId: createIdentity("workbench_guest"),
+      name: GUEST_NAME,
+      inviteId: invite.id,
+      sessionId: host.id,
+      invitedBy: ACCOUNT,
+      reader: testReadOnlyIdentity(ACCOUNT, {
+        inviteId: invite.id,
+        projectIds,
+      }),
+      jti: "guest",
+    });
+    const seen = await fixture.workbenchService.guestGet(guest);
+    assert.equal(nameOf(seen.projects), RENAMED);
+    completedResult(
+      await fixture.workbench["invite.revoke"](
+        { params: { invite_id: invite.id }, query: {}, body: null },
+        fixture.options,
+      ),
+    );
+    assert.equal((await listInvites()).project_ids, null);
   },
 );

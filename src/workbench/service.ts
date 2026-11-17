@@ -146,12 +146,7 @@ import {
 import type { WorkbenchConfig } from "./config.ts";
 import { type FeedState, GuestFeed } from "./guest-feed.ts";
 import { projectEntries } from "./guest-view.ts";
-import type {
-  CreatedInvite,
-  InviteItem,
-  LiveInvite,
-  WorkbenchInvites,
-} from "./invites.ts";
+import type { CreatedInvite, LiveInvite, WorkbenchInvites } from "./invites.ts";
 import {
   createPhaseSession,
   openPhaseSession,
@@ -209,6 +204,7 @@ interface ApprovalDecision {
 
 interface InviteBody {
   invitee_name: string;
+  project_ids: string[];
 }
 
 interface JoinBody {
@@ -2069,6 +2065,7 @@ export class WorkbenchService implements Service {
       title: host.manager.getSessionName() ?? null,
       members: this.conversationMembers(host),
       owner_name: invite.invited_by_name,
+      projects: this.projectsOf(invite.project_ids),
       entries: projectEntries(mergeEntries(this.memberEntries(host, false))),
       run_active: this.runActive(host),
     };
@@ -2541,16 +2538,28 @@ export class WorkbenchService implements Service {
         accountId: requester.accountId,
         name: requester.name.slice(NO_CHARACTERS, OWNER_NAME_MAX_LENGTH),
       },
-      body.invitee_name,
+      { name: body.invitee_name, projectIds: body.project_ids },
     );
     host.evidenceGrants.clear();
     return created;
   }
 
-  async inviteList(sessionId: string): Promise<{ items: InviteItem[] }> {
+  private projectsOf(ids: readonly string[]) {
+    const names = this.dependencies.projectNames(ids);
+    return ids.map((id) => ({ id, name: names.get(id) ?? null }));
+  }
+
+  async inviteList(sessionId: string) {
     const host = await this.session(sessionId);
     this.requireHost(host);
-    return { items: this.dependencies.invites.list(host.id) };
+    const live = this.dependencies.invites.list(host.id);
+    return {
+      items: live.map(({ project_ids: ids, ...item }) => ({
+        ...item,
+        projects: this.projectsOf(ids),
+      })),
+      project_ids: live[NO_CHARACTERS]?.project_ids ?? null,
+    };
   }
 
   inviteRevoke(inviteId: string): { id: string } {

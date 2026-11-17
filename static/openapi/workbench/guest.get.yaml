@@ -94,6 +94,25 @@ components:
             additionalProperties: false
         owner_name:
           type: string
+        projects:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                minLength: 34
+                maxLength: 34
+                pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: project_ followed by a canonical 26-character uppercase ULID.
+              name:
+                anyOf:
+                  - type: string
+                  - type: "null"
+            required:
+              - id
+              - name
+            additionalProperties: false
         entries:
           type: array
           items:
@@ -339,6 +358,7 @@ components:
         - title
         - members
         - owner_name
+        - projects
         - entries
         - run_active
       additionalProperties: false

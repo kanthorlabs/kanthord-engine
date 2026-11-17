@@ -27,6 +27,7 @@ import {
 import {
   completed,
   createHost,
+  invitedProjectIds,
   sendMessage,
   untilIdle,
   type WorkbenchFixture,
@@ -95,7 +96,10 @@ async function invite(
       {
         params: { session_id: sessionId },
         query: {},
-        body: { invitee_name: name },
+        body: {
+          invitee_name: name,
+          project_ids: await invitedProjectIds(fixture),
+        },
       },
       idempotencyKey === undefined
         ? fixture.options
@@ -269,7 +273,10 @@ test(
         {
           params: { session_id: sessionId },
           query: {},
-          body: { invitee_name: GUEST_NAME },
+          body: {
+            invitee_name: GUEST_NAME,
+            project_ids: await invitedProjectIds(first),
+          },
         },
         { ...first.options, idempotencyKey: key },
       );

@@ -15,6 +15,7 @@ import { type SeededNode, seedEvidence } from "./evidence-test-support.ts";
 import {
   completed,
   createHost,
+  invitedProjectIds,
   pumpTimers,
   sendMessage,
   toolCall,
@@ -111,7 +112,10 @@ async function invite(fixture: WorkbenchFixture, sessionId: string) {
       {
         params: { session_id: sessionId },
         query: {},
-        body: { invitee_name: GUEST_NAME },
+        body: {
+          invitee_name: GUEST_NAME,
+          project_ids: await invitedProjectIds(fixture),
+        },
       },
       fixture.options,
     ),

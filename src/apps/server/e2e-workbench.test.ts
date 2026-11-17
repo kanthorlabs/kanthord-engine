@@ -94,6 +94,7 @@ import {
   GUARD_MODEL,
   HAIKU,
   heldAnswer,
+  invitedProjectIds,
   OFF,
   pass,
   type Persistence,
@@ -4535,7 +4536,10 @@ async function inviteGuest(fixture: Fixture, sessionId: string) {
       {
         params: { session_id: sessionId },
         query: {},
-        body: { invitee_name: GUEST_NAME },
+        body: {
+          invitee_name: GUEST_NAME,
+          project_ids: await invitedProjectIds(fixture),
+        },
       },
       fixture.options,
     ),
