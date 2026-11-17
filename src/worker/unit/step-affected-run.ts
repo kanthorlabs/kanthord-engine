@@ -14,7 +14,7 @@ import {
   type FoundryIo,
   type FoundryStep,
 } from "./chain.ts";
-import { verificationCommands } from "./evaluation-input.ts";
+import { verificationCommands } from "./review-scope.ts";
 import {
   environmentDigestsOf,
   VerificationContext,
@@ -38,7 +38,6 @@ export interface AffectedStep {
 type AffectedKeys =
   | "claim"
   | "setup"
-  | "env"
   | "revision"
   | "reviewWorkspace"
   | "testedInput"
@@ -68,7 +67,7 @@ async function affectedResults(
     );
     assert.ok(repository);
     const result = await runAffected({
-      env: ctx.env,
+      env: io.env,
       context: io.context,
       deadline: io.budget.wallDeadline(),
       exhausted: () => io.budget.exhausted(),
@@ -110,11 +109,11 @@ export const affectedRunEvaluation: FoundryStep<
 > = {
   foundry: true,
   id: "affected.run(evaluation)",
+  ports: [],
   deadline: DeadlineKind.Work,
   reads: [
     "claim",
     "setup",
-    "env",
     "revision",
     "reviewWorkspace",
     "testedInput",

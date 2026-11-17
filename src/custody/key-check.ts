@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { Diagnostic } from "../kernel/errors.ts";
-import { deriveKey } from "../kernel/json.ts";
+import { deriveKey } from "../kernel/key-derivation.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 
 export const KEY_CHECK_LABEL = "custody/key-check/v1";

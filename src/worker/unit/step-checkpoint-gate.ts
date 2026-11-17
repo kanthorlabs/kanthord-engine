@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { DeadlineKind, type Step } from "./chain.ts";
+import { DeadlineKind } from "./chain.ts";
+import type { Step } from "./chain-host.ts";
 import { nodeUnitOf } from "./release-gate.ts";
 import { next } from "./step-support.ts";
 import type { StepsState } from "./steps-implement.ts";

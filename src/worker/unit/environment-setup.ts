@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Context } from "../../kernel/context.ts";
 import {
   DEVCONTAINER_FILE,
@@ -16,8 +16,13 @@ import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
 import type { ExecutionEnvironment } from "../contract.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
-import { EndReason, ExecutionStop, portStop } from "./execution-run.ts";
-import { PortResultKind, type ReleaseTreePort } from "./foundry-ports.ts";
+import { EndReason, ExecutionStop, portStop } from "./execution-stop.ts";
+import {
+  type CommandTree,
+  type LogPort,
+  PortResultKind,
+  type ReleaseTreePort,
+} from "./foundry-ports.ts";
 import {
   checkoutDetached,
   cloneLocal,
@@ -37,14 +42,12 @@ import {
   writeSetupRecord,
 } from "./setup-record.ts";
 import { SpanOperation, type SpanRecorder } from "./telemetry.ts";
-import { PoolClass } from "./tree-pool.ts";
 import {
   type CommandObserver,
   runVerificationsWithOutput,
   VerificationClass,
   type VerificationRun,
 } from "./verification.ts";
-import type { WorkspaceRoot } from "./workspace.ts";
 
 export const SETUP_COMMAND_LIMIT_MS = COMMAND_LIMIT_MS;
 const SINGLE_CHECKOUT = 1;
@@ -56,9 +59,7 @@ const TRACKED_CHANGE_EXIT = 1;
 const SETUP_ENTRY_COUNT = "kanthord.setup.entry_count";
 const SETUP_RESULT = "kanthord.setup.result";
 const TREE_PREPARED = "tree prepared";
-const TREE_DELETED = "tree deleted";
 const BASE_PURPOSE = "base";
-const UNKNOWN_ERROR = "unknown";
 
 export interface SetupRepository {
   binding_id: string;
@@ -80,17 +81,13 @@ export interface BaseRunInput {
 }
 
 export interface BaseTrees {
-  workspaces: WorkspaceRoot;
-  nodeId: string;
-  addresses: ReadonlyMap<string, string>;
-  log: (msg: string, fields: Record<string, unknown>) => void;
-  takeBase: ReleaseTreePort["takeBase"];
+  port: Pick<ReleaseTreePort, "takeBase" | "giveBase">;
+  log: LogPort;
 }
 
-export interface BasePlace {
-  directory: string;
-  trees?: BaseTrees;
-}
+export type BasePlace =
+  | { directory: string; trees?: undefined }
+  | { directory?: undefined; trees: BaseTrees };
 
 export interface SetupInput {
   env: NodeJS.ProcessEnv;
@@ -129,21 +126,23 @@ export function setupStop(result: SetupFailure): ExecutionStop {
   return new ExecutionStop(
     EndReason.EnvironmentFailed,
     EnvironmentFailure.SetupFailed,
-    redactReason(
-      JSON.stringify(
-        last === undefined
-          ? { commands: result.commands }
-          : {
-              exit_code: last.exit_code,
-              signal: last.signal,
-              timed_out: last.timed_out,
-              command: last.command,
-              ...(result.changed === undefined
-                ? {}
-                : { changed_tracked_files: result.changed }),
-            },
+    {
+      detail: redactReason(
+        JSON.stringify(
+          last === undefined
+            ? { commands: result.commands }
+            : {
+                exit_code: last.exit_code,
+                signal: last.signal,
+                timed_out: last.timed_out,
+                command: last.command,
+                ...(result.changed === undefined
+                  ? {}
+                  : { changed_tracked_files: result.changed }),
+              },
+        ),
       ),
-    ),
+    },
   );
 }
 
@@ -151,7 +150,7 @@ function invalidEnvironment(reason: string): ExecutionStop {
   return new ExecutionStop(
     EndReason.EnvironmentFailed,
     EnvironmentFailure.SetupFailed,
-    redactReason(`${DEVCONTAINER_FILE}: ${reason}`),
+    { detail: redactReason(`${DEVCONTAINER_FILE}: ${reason}`) },
   );
 }
 
@@ -366,8 +365,10 @@ async function setUpEntries(
 
 export class BaseHead {
   private readonly input: SetupInput;
-  private readonly directory: string;
+  private readonly directory: string | null;
   private readonly checkouts: readonly SetupEntry[];
+  private readonly taken: CommandTree[] = [];
+  private readonly clones = new Map<string, string>();
   private commitsRead: Promise<string[]> | null = null;
   private prepared: Promise<SetupResult> | null = null;
   private readonly results = new Map<string, number>();
@@ -380,7 +381,7 @@ export class BaseHead {
   ) {
     assert.ok(checkouts.length);
     this.input = input;
-    this.directory = place.directory;
+    this.directory = place.directory ?? null;
     this.checkouts = checkouts;
     this.trees = place.trees ?? null;
   }
@@ -425,7 +426,7 @@ export class BaseHead {
     if (setup.end === SetupEnd.Failed) throw setupStop(setup);
     if (setup.end === SetupEnd.BudgetEnd) return null;
     const run = await runVerificationsWithOutput({
-      directory: join(this.directory, name),
+      directory: this.cloneOf(name),
       commands: [input.command],
       variables: input.variables,
       commandLimitMs: input.commandLimitMs,
@@ -483,40 +484,23 @@ export class BaseHead {
     if (this.prepared === null) return;
     await this.prepared.catch(() => null);
     if (this.trees === null) {
+      assert.ok(this.directory !== null);
       rmSync(this.directory, { recursive: true, force: true });
       return;
     }
-    const { workspaces, nodeId, log } = this.trees;
-    for (const checkout of this.checkouts)
-      workspaces.giveTree(
-        {
-          address: this.addressOf(checkout),
-          poolClass: PoolClass.Command,
-        },
-        join(this.directory, checkout.repository.name),
-        { nodeId, log },
-      );
-    try {
-      workspaces.removeSafely(this.directory);
-    } catch (error) {
-      log(TREE_DELETED, {
-        path: this.directory,
-        code:
-          (error as NodeJS.ErrnoException | undefined)?.code ?? UNKNOWN_ERROR,
-      });
-    }
+    for (const tree of this.taken.splice(0))
+      await this.trees.port.giveBase(tree);
   }
 
-  private addressOf(checkout: SetupEntry): string {
-    const address = this.trees?.addresses.get(checkout.repository.name);
-    assert.ok(address, "A checkout of the base head holds an address.");
-    return address;
+  private cloneOf(name: string): string {
+    const directory = this.clones.get(name);
+    assert.ok(directory, "A name belongs to a checkout of the base head.");
+    return directory;
   }
 
   private root(): string {
-    return this.checkouts.length === SINGLE_CHECKOUT
-      ? join(this.directory, this.checkouts[0]!.repository.name)
-      : this.directory;
+    const first = this.cloneOf(this.checkouts[0]!.repository.name);
+    return this.checkouts.length === SINGLE_CHECKOUT ? first : dirname(first);
   }
 
   private digests(): string[] {
@@ -526,6 +510,7 @@ export class BaseHead {
   private async prepare(): Promise<SetupResult> {
     const commits = await this.commits();
     if (this.trees !== null) return this.prepareTrees(this.trees, commits);
+    assert.ok(this.directory !== null);
     rmSync(this.directory, { recursive: true, force: true });
     ensureDirectory(this.directory);
     const clones: SetupEntry[] = [];
@@ -545,6 +530,7 @@ export class BaseHead {
         this.input.context,
         remaining(this.input),
       );
+      this.clones.set(checkout.repository.name, directory);
       clones.push({ ...checkout, directory });
     }
     return runSetup(this.input, clones);
@@ -554,26 +540,10 @@ export class BaseHead {
     trees: BaseTrees,
     commits: readonly string[],
   ): Promise<SetupResult> {
-    const { env, context } = this.input;
-    await trees.workspaces.giveLeftoverTrees(
-      this.directory,
-      {
-        env,
-        context,
-        nodeId: trees.nodeId,
-        repositories: this.checkouts.map((checkout) => ({
-          name: checkout.repository.name,
-          address: this.addressOf(checkout),
-        })),
-        poolClass: PoolClass.Command,
-        log: trees.log,
-      },
-      performance.now() + remaining(this.input),
-    );
-    ensureDirectory(this.directory);
+    const { context } = this.input;
     const clones: SetupEntry[] = [];
     for (const [index, checkout] of this.checkouts.entries()) {
-      const taken = await trees.takeBase(
+      const taken = await trees.port.takeBase(
         {
           binding_id: checkout.repository.binding_id,
           name: checkout.repository.name,
@@ -583,10 +553,12 @@ export class BaseHead {
         { context, deadline: this.input.deadline },
       );
       if (taken.kind === PortResultKind.Failed) throw portStop(taken);
-      trees.log(TREE_PREPARED, {
+      this.taken.push(taken.value);
+      trees.log.log(TREE_PREPARED, {
         purpose: BASE_PURPOSE,
         source: taken.value.source,
       });
+      this.clones.set(checkout.repository.name, taken.value.directory);
       clones.push({ ...checkout, directory: taken.value.directory });
     }
     return runSetup(this.input, clones);

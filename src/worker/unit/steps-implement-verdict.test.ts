@@ -7,20 +7,21 @@ import { background } from "../../kernel/context.ts";
 import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
 import { doneTrailerOf } from "./done-record.ts";
 import { nodeUnitOf } from "./release-gate.ts";
-import { EndReason, type ExecutionEnd } from "./execution-run.ts";
+import { EndReason, type ExecutionEnd } from "./execution-stop.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
 import {
   HEAD_COMMIT_SUBJECT,
-  runStepsImplement,
   startCheck,
   TaskResultKind,
 } from "./steps-implement.ts";
-import type { WorkspaceCheckout } from "./workspace.ts";
+import { runStepsImplement } from "./steps-implement-host.ts";
+import type { WorkspaceCheckout } from "./workspace-layout.ts";
 import { NoProgressRule } from "./progress-rule.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
 import { linkUpdatesText } from "./judgement.ts";
-import { readPrior, VerdictSource } from "./node-reads.ts";
+import { readPrior } from "./node-reads.ts";
+import { VerdictSource } from "./node-verdict.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
 import {

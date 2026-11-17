@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { simpleGit } from "simple-git";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { runStepsImplement } from "./steps-implement.ts";
+import { runStepsImplement } from "./steps-implement-host.ts";
 import { DONE_TRAILER, doneRecordOf } from "./done-record.ts";
 import {
   advanceBase,

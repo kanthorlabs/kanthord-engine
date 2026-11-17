@@ -29,23 +29,22 @@ import { SpanOperation } from "./telemetry.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
 import { VerificationContext } from "./method-telemetry.ts";
 import { CauseCategory, unattributed } from "../../kernel/cause.ts";
-import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { CHECKOUTS_DIRECTORY, WorkspaceKind } from "./workspace.ts";
+import { CHECKOUTS_DIRECTORY, WorkspaceKind } from "./workspace-layout.ts";
 import { DONE_TRAILER, doneRecordOf } from "./done-record.ts";
 import { readPushRecord } from "./push-record.ts";
 import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 import {
   HEAD_COMMIT_SUBJECT,
-  runStepsImplement,
-  runTask,
   startCheck,
   TaskResultKind,
   taskWork,
   verifyTaskRun,
 } from "./steps-implement.ts";
+import { runStepsImplement, runTask } from "./steps-implement-host.ts";
 import { nodeWork } from "./base-refresh.ts";
-import { VerdictSource } from "./node-reads.ts";
+import { VerdictSource } from "./node-verdict.ts";
 import { nodeUnitOf } from "./release-gate.ts";
 import { ProviderFailure } from "../../scheduler/contract.ts";
 import { NoProgressRule } from "./progress-rule.ts";
@@ -65,7 +64,7 @@ import { background } from "../../kernel/context.ts";
 import { PromptTemplate } from "../../agent/contract.ts";
 import { AssetKind, type Revision } from "../../mission/contract.ts";
 import { executionBoundary } from "./native-method.ts";
-import { REPORT_MEDIA_TYPE } from "./steps-examine.ts";
+import { REPORT_MEDIA_TYPE } from "./step-examine-turn.ts";
 
 const TASK_VERIFIED = "task verified";
 const REVISION_COUNT_ATTRIBUTE = "kanthord.task.revision_count";

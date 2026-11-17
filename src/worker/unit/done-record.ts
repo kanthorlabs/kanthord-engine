@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { digest } from "../../kernel/json.ts";
 import type { TaskContent } from "../../mission/contract.ts";
 import { amendTrailer, headCommit, trailerValues } from "./local-git.ts";
-import { repositoryOf, type StepsState } from "./steps-implement.ts";
+import type { StepsState } from "./steps-implement.ts";
+import { repositoryOf } from "./setup-repository.ts";
 import { withinCleanup } from "./verdict-rule.ts";
 
 export const DONE_TRAILER = "Kanthord-Done";

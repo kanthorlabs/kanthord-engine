@@ -6,6 +6,7 @@ import { TaskResultKind } from "./steps-implement.ts";
 export const unitRunner: FoundryStep<UnitScope, "state", never> = {
   foundry: true,
   id: "unit.runner",
+  ports: [],
   deadline: DeadlineKind.Work,
   reads: ["state"],
   writes: [],

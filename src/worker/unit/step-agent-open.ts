@@ -3,7 +3,6 @@ import {
   type ExecutionCtx,
   type FoundryIo,
   type FoundryStep,
-  type Step,
 } from "./chain.ts";
 import { namedCheckouts } from "./environment-setup.ts";
 import {
@@ -11,9 +10,10 @@ import {
   type AgentSession,
   type EvaluationPorts,
   type ExaminePorts,
+  type ImplementHostPorts,
   PortResultKind,
 } from "./foundry-ports.ts";
-import { portStop } from "./execution-run.ts";
+import { portStop } from "./execution-stop.ts";
 import {
   budgetEnd,
   budgetMapped,
@@ -23,15 +23,33 @@ import {
 
 type OpenKeys = "claim" | "setup" | "reviewWorkspace";
 
-export const agentOpenImplement: Step<unknown, "workspace", "agent"> = {
+export const agentOpenImplement: FoundryStep<
+  unknown,
+  "claim" | "setup" | "workspace",
+  "agent",
+  ImplementHostPorts
+> = {
+  foundry: true,
   id: "agent.open",
+  ports: ["agent.open"],
   deadline: DeadlineKind.Work,
-  reads: ["workspace"],
+  reads: ["claim", "setup", "workspace"],
   writes: ["agent"],
   stops: ["operation_failed"],
-  async run(ctx, scope, io) {
-    return next(scope, {
-      agent: await io.host.openAgent(ctx.workspace.root),
+  run(ctx, scope, io) {
+    return stopsReturned(scope, async () => {
+      const opened = await io.ports.agent.open(
+        {
+          claim: ctx.claim,
+          setup: ctx.setup,
+          checkouts: ctx.workspace.checkouts,
+          reviewWorkspace: null,
+        },
+        io.context,
+      );
+      if (opened.kind === PortResultKind.Failed) throw portStop(opened);
+      if (opened.kind === PortResultKind.BudgetEnd) return budgetEnd(scope);
+      return next(scope, { agent: opened.value });
     });
   },
 };
@@ -73,11 +91,12 @@ export const agentOpenExamine: FoundryStep<
 > = {
   foundry: true,
   id: "agent.open",
+  ports: ["agent.open"],
   deadline: DeadlineKind.Work,
   reads: ["claim", "setup", "reviewWorkspace"],
   writes: ["agent"],
   stops: ["operation_failed"],
-  note: "port: agent.open; budget end after the open",
+  note: "budget end after the open",
   run(ctx, scope, io) {
     return stopsReturned(scope, () =>
       budgetMapped(io, scope, async () => {

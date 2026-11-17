@@ -1,4 +1,4 @@
-import { VerdictSource } from "./node-reads.ts";
+import { VerdictSource } from "./node-verdict.ts";
 import assert from "node:assert/strict";
 import { simpleGit } from "simple-git";
 import {
@@ -13,21 +13,18 @@ import { existsSync, readFileSync } from "node:fs";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import { RecordKind, type TelemetryRecord } from "../../tracking/contract.ts";
-import { EndReason, type ExecutionEnd } from "./execution-run.ts";
+import { EndReason, type ExecutionEnd } from "./execution-stop.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { VERIFICATION_INFRASTRUCTURE_FAILED } from "./verification.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
-import { BASE_DIRECTORY, RELEASE_DIRECTORY } from "./workspace.ts";
+import { BASE_DIRECTORY, RELEASE_DIRECTORY } from "./workspace-layout.ts";
 import { PoolClass } from "./tree-pool.ts";
 import { SetupEnd } from "./environment-setup.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { VerificationContext } from "./method-telemetry.ts";
-import {
-  runStepsImplement,
-  runTask,
-  TaskResultKind,
-} from "./steps-implement.ts";
+import { TaskResultKind } from "./steps-implement.ts";
+import { runStepsImplement, runTask } from "./steps-implement-host.ts";
 import {
   commandLimitClock,
   fauxAssistantMessage,

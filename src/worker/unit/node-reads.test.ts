@@ -4,7 +4,8 @@ import { background } from "../../kernel/context.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { AssessmentResult, ClosingEvent } from "../../mission/contract.ts";
 import { linkUpdatesText } from "./judgement.ts";
-import { ExecutionRun, ExecutionStop } from "./execution-run.ts";
+import { ExecutionRun } from "./execution-run.ts";
+import { ExecutionStop } from "./execution-stop.ts";
 import {
   READ_PAGE_LIMIT,
   readAllPages,
@@ -13,8 +14,8 @@ import {
   readRequestedChanges,
   readReworkAssessment,
   VERDICT_LINK_UPDATE_LIMIT,
-  VerdictSource,
 } from "./node-reads.ts";
+import { VerdictSource } from "./node-verdict.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { stopAfter } from "../../kernel/stop-test-support.ts";
 

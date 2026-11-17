@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
-import {
-  EndReason,
-  type ExecutionEnd,
-  type ExecutionRun,
-} from "./execution-run.ts";
-import { type NativeAgent, openNativeAgent } from "./native-agent.ts";
+import type { ExecutionRun } from "./execution-run.ts";
+import { EndReason, type ExecutionEnd } from "./execution-stop.ts";
+import { openNativeAgent } from "./native-agent.ts";
+import type { NativeAgent } from "./native-agent-session.ts";
 import {
   credentialSecrets,
   mergedSecrets,
@@ -12,7 +10,8 @@ import {
 import type { TelemetrySink } from "./telemetry.ts";
 import type { Context } from "../../kernel/context.ts";
 import type { Diagnostic } from "../../kernel/errors.ts";
-import { type MethodClaim, ExecutionRun as Run } from "./execution-run.ts";
+import { ExecutionRun as Run } from "./execution-run.ts";
+import type { MethodClaim } from "./execution-stop.ts";
 import type { MethodClients } from "./method-clients.ts";
 import {
   ExecutionIntent,
@@ -34,16 +33,21 @@ import type { Chain } from "./chain.ts";
 import { evaluationChain } from "./chain-evaluation.ts";
 import { examineChain } from "./chain-examine.ts";
 import { implementChain } from "./chain-implement.ts";
-import { executionBoundary, runChain } from "./chain-runner.ts";
-import type { AgentPort, CommonPorts } from "./foundry-ports.ts";
 import {
-  agentPort,
+  type ChainIo,
+  executionBoundary,
+  runChain,
+  type WalkInput,
+} from "./chain-runner.ts";
+import type { CommonPorts } from "./foundry-ports.ts";
+import {
+  type AgentHost,
   evaluationPorts,
   examinePorts,
-  workerPorts,
+  implementHostPorts,
 } from "./worker-ports.ts";
 
-export type { ExecutionEnd } from "./execution-run.ts";
+export type { ExecutionEnd } from "./execution-stop.ts";
 export { executionBoundary } from "./chain-runner.ts";
 const WORKING_AGENT = 0;
 export interface NativeExecutionInput {
@@ -145,11 +149,9 @@ export async function runNativeExecution(
       };
       const hosted = hostedChainOf(method, intent, {
         input,
-        run,
-        agent: agentPort({ run, budget, open }),
+        agent: { run, budget, open },
       });
-      return runChain(
-        hosted.chain,
+      return hosted(
         {
           seed: {
             claim: input.claim,
@@ -166,9 +168,7 @@ export async function runNativeExecution(
             workspaces: input.workspaces,
             transport: input.transport,
             env: input.env,
-            openAgent: open,
           },
-          ports: hosted.ports,
         },
       );
     });
@@ -202,13 +202,19 @@ export async function releaseSetupRefusal(
 
 interface ChainHost {
   input: NativeExecutionInput;
-  run: ExecutionRun;
-  agent: AgentPort;
+  agent: AgentHost;
 }
 
-interface HostedChain {
-  chain: Chain;
-  ports: CommonPorts;
+type HostedChain = (
+  input: WalkInput,
+  io: Omit<ChainIo, "ports">,
+) => Promise<ExecutionEnd>;
+
+function hostedOf<P extends CommonPorts>(
+  built: Chain<P>,
+  ports: NoInfer<P>,
+): HostedChain {
+  return (input, io) => runChain(built, input, { ...io, ports });
 }
 
 function hostedChainOf(
@@ -216,12 +222,12 @@ function hostedChainOf(
   intent: ExecutionIntent,
   host: ChainHost,
 ): HostedChain {
-  const { input, run, agent } = host;
+  const { input, agent } = host;
   if (method === WorkerMethod.Evaluation)
-    return { chain: evaluationChain(), ports: evaluationPorts(run, agent) };
+    return hostedOf(evaluationChain(), evaluationPorts(agent));
   if (intent === ExecutionIntent.Examine)
-    return { chain: examineChain(), ports: examinePorts(run, agent) };
-  return { chain: implementChain(), ports: workerPorts(input, run) };
+    return hostedOf(examineChain(), examinePorts(agent));
+  return hostedOf(implementChain(), implementHostPorts(input, agent));
 }
 
 export function environmentDigestsOf(

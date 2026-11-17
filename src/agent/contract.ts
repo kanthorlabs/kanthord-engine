@@ -11,7 +11,7 @@ import {
 } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import type { Context } from "../kernel/context.ts";
-import { SERVER_HOLDER } from "../custody/contract.ts";
+import { SERVER_HOLDER } from "../kernel/holder.ts";
 import {
   AdvancingProviderFailure,
   agentSelectionSchema,

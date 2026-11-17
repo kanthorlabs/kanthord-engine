@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { ulid } from "ulid";
 import { Diagnostic } from "../../kernel/errors.ts";
-import { deriveKey } from "../../kernel/json.ts";
+import { deriveKey } from "../../kernel/key-derivation.ts";
 import { createIdentity, identitySchema } from "../../kernel/identity.ts";
 import {
   bindingNameSchema,

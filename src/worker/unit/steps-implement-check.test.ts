@@ -1,4 +1,4 @@
-import { VerdictSource } from "./node-reads.ts";
+import { VerdictSource } from "./node-verdict.ts";
 import assert from "node:assert/strict";
 import { suite, test, type TestContext } from "node:test";
 import { existsSync, readFileSync } from "node:fs";
@@ -16,20 +16,20 @@ import {
   releasedRoot,
   TEST_SSH_ACCESS,
 } from "./test-support.ts";
+import { ExecutionRun } from "./execution-run.ts";
 import {
   EndReason,
   ExecutionEndKind,
-  ExecutionRun,
   ExecutionStop,
-} from "./execution-run.ts";
+} from "./execution-stop.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { WorkspaceKind } from "./workspace.ts";
+import { WorkspaceKind } from "./workspace-layout.ts";
+import { startCheck } from "./steps-implement.ts";
 import {
   prepareStepsWorkspace,
   runStepsImplement,
-  startCheck,
-} from "./steps-implement.ts";
+} from "./steps-implement-host.ts";
 import { refreshAtClaim, RefreshResult } from "./base-refresh.ts";
 import { MERGE_MARKERS_LEFT } from "./turn-gate.ts";
 import { nodeUnitOf } from "./release-gate.ts";

@@ -12,6 +12,7 @@ export const unitLeave: FoundryStep<
 > = {
   foundry: true,
   id: "unit.leave",
+  ports: [],
   deadline: DeadlineKind.Work,
   reads: ["state", "plan", "completedUnits", "reports"],
   writes: ["completedUnits", "reports"],

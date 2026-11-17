@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { hkdfSync, randomBytes } from "node:crypto";
 import { test } from "node:test";
-import { deriveKey } from "../kernel/json.ts";
+import { deriveKey } from "../kernel/key-derivation.ts";
 import { webhookSecret } from "./webhook-secret.ts";
 
 const KEY_BYTES = 32;

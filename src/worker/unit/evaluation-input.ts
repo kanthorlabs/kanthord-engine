@@ -18,30 +18,32 @@ import {
   type Evidence,
   type EvidenceAsset,
   type ReviewRound,
-  type Revision,
 } from "../../mission/contract.ts";
-import { EndReason, type ExecutionRun } from "./execution-run.ts";
+import type { ExecutionRun } from "./execution-run.ts";
+import { EndReason } from "./execution-stop.ts";
 import {
   EVIDENCE_DIRECTORY,
   type ExamineCheckout,
   WorkspaceKind,
-} from "./workspace.ts";
-import type { StepsInput } from "./steps-implement.ts";
+} from "./workspace-layout.ts";
+import type { HostInput } from "./chain-host.ts";
 import type { TestedInput } from "./verification.ts";
+import type {
+  PlacedAsset,
+  PlacedPatch,
+  PlacedReview,
+  ReviewScope,
+} from "./review-scope.ts";
 import { ExecutionBudget } from "./budget.ts";
 import { type ExecutionCtx, StepKind } from "./chain.ts";
 import { evaluationPrepareNodes } from "./chain-evaluation.ts";
 import { runNodes } from "./chain-runner.ts";
-import { hostOf, seedOf } from "./step-support.ts";
+import { hostOf, seedOf } from "./chain-host.ts";
 import { ExecutionIntent } from "../contract.ts";
 import { AFFECTED_SUBJECT } from "./affected.ts";
 import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 import { ROUND_PATCH_SUBJECT, roundPatchName } from "./round-patch.ts";
-import {
-  type AgentOpener,
-  agentPort,
-  evaluationPorts,
-} from "./worker-ports.ts";
+import { type AgentOpener, evaluationPorts } from "./worker-ports.ts";
 
 const NO_SNAPSHOTS = 0;
 const NO_PATCH_BYTES = 0;
@@ -53,19 +55,6 @@ function isSupportEvidence(item: Evidence): boolean {
     item.subject !== AFFECTED_SUBJECT &&
     item.subject !== ROUND_PATCH_SUBJECT
   );
-}
-
-export interface BindingPatch {
-  binding_id: string;
-  name: string;
-  text: string;
-}
-
-export interface ReviewScope {
-  addedFiles: string[];
-  changedFiles: string[];
-  patches: BindingPatch[];
-  emptyPatches: string[];
 }
 
 function withLatestCoderReport(support: readonly Evidence[]): Evidence[] {
@@ -169,7 +158,7 @@ export interface ReviewInputs {
 }
 
 export async function reviewWorkspaceOf(
-  input: StepsInput,
+  input: HostInput,
   run: ExecutionRun,
   { evidence, round }: ReviewInputs,
 ) {
@@ -268,7 +257,7 @@ interface RepositorySnapshot {
 }
 
 interface ReviewScopeContext {
-  input: StepsInput;
+  input: HostInput;
   run: ExecutionRun;
   round: ReviewRound;
   deadline: number;
@@ -407,7 +396,7 @@ async function originScope(
 }
 
 async function reviewScopeOf(
-  input: StepsInput,
+  input: HostInput,
   run: ExecutionRun,
   workspace: { directory: string; checkouts: readonly ExamineCheckout[] },
   snapshots: readonly RepositorySnapshot[],
@@ -441,12 +430,6 @@ async function reviewScopeOf(
   return scope;
 }
 
-export interface PlacedPatch extends BindingPatch {
-  path: string;
-}
-
-export type PlacedReview = Awaited<ReturnType<typeof placeReviewAssets>>;
-
 export interface PlaceInput extends ReviewInputs {
   workspace: { key: string; directory: string };
   evidenceIds: readonly string[];
@@ -454,10 +437,13 @@ export interface PlaceInput extends ReviewInputs {
   deadline: number;
 }
 
-export async function placeReviewAssets(run: ExecutionRun, place: PlaceInput) {
+export async function placeReviewAssets(
+  run: ExecutionRun,
+  place: PlaceInput,
+): Promise<PlacedReview> {
   const { workspace, evidence, round, deadline } = place;
   const evidenceIds = new Set(place.evidenceIds);
-  const assets: { evidence_id: string; asset_id: string; path: string }[] = [];
+  const assets: PlacedAsset[] = [];
   const support = withLatestCoderReport(evidence.filter(isSupportEvidence));
   const selected = support.flatMap((item) =>
     item.assets
@@ -504,7 +490,7 @@ export async function placeReviewAssets(run: ExecutionRun, place: PlaceInput) {
 }
 
 export async function prepareEvaluation(
-  input: StepsInput,
+  input: HostInput,
   run: ExecutionRun,
   intent: ExecutionIntent,
   evidence: readonly Evidence[],
@@ -532,8 +518,8 @@ export async function prepareEvaluation(
         run,
         budget,
         resources,
-        host: hostOf(input, open),
-        ports: evaluationPorts(run, agentPort({ run, budget, open })),
+        host: hostOf(input),
+        ports: evaluationPorts({ run, budget, open }),
       },
     );
     if (kind === StepKind.BudgetEnd)
@@ -562,13 +548,4 @@ export function preparedOf(
     setupFailure: ctx.setupFailure,
     ...ctx.placed,
   };
-}
-
-export function verificationCommands(
-  revision: Pick<Revision, "content" | "tasks">,
-): string[] {
-  return [
-    ...revision.content.verifications,
-    ...revision.tasks.flatMap((task) => task.content.verifications),
-  ];
 }

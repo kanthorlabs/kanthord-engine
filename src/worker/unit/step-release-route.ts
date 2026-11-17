@@ -9,6 +9,7 @@ export const releaseRoute: FoundryStep<
 > = {
   foundry: true,
   id: "release.route",
+  ports: [],
   deadline: DeadlineKind.Work,
   reads: ["state", "releaseCheck"],
   writes: ["route"],

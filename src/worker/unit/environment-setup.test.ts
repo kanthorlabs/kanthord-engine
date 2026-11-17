@@ -22,7 +22,7 @@ import { digest } from "../../kernel/json.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import type { ExecutionEnvironment } from "../contract.ts";
-import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import {
   BaseHead,
   runSetup,
@@ -35,9 +35,10 @@ import { commitOf, headCommit } from "./local-git.ts";
 import { validRoots } from "./setup-record.ts";
 import { VerificationClass } from "./verification.ts";
 import { spawnedPids, survivingProcesses } from "../../agent/test-support.ts";
-import { BASE_DIRECTORY, WorkspaceRoot } from "./workspace.ts";
+import { WorkspaceRoot } from "./workspace.ts";
+import { BASE_DIRECTORY } from "./workspace-layout.ts";
 import { PoolClass, repoKeyOf } from "./tree-pool.ts";
-import { baseTreeTaker } from "./worker-ports.ts";
+import { baseTreePort } from "./worker-ports.ts";
 
 const env = hostEnvironment();
 const IDENTITY = [
@@ -535,19 +536,19 @@ async function poolFixture(t: TestContext) {
     new BaseHead(
       input(),
       {
-        directory: join(workspaces.nodeKey(nodeId), BASE_DIRECTORY),
         trees: {
-          workspaces,
-          nodeId,
-          addresses: new Map([[environment.repository.name, origin]]),
-          log: (msg, fields) => logs.push({ msg, fields }),
-          takeBase: baseTreeTaker({
+          port: baseTreePort({
             workspaces,
             nodeId,
             env,
+            repositories: [
+              { name: environment.repository.name, address: origin },
+            ],
             addressOf: () => origin,
+            log: (msg, fields) => logs.push({ msg, fields }),
             run: { failureOf: (error) => Promise.reject(error) },
           }),
+          log: { log: (msg, fields) => logs.push({ msg, fields }) },
         },
       },
       await setupEntries(input(), [environment]),

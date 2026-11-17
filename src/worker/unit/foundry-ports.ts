@@ -4,13 +4,14 @@ import type {
   Evidence,
   EvidenceSubmit,
   ExecutionContext,
+  ExecutionDependency,
+  Outcome,
 } from "../../mission/contract.ts";
 import type { ExecutionSetup } from "../contract.ts";
 import type { ReviewWorkspace } from "./chain.ts";
-import type { MethodClaim } from "./execution-run.ts";
-import type { NativeAgent } from "./native-agent.ts";
+import type { MethodClaim } from "./execution-stop.ts";
+import type { NativeAgent } from "./native-agent-session.ts";
 import type { SpanRecorder } from "./telemetry.ts";
-import type { TreeSource } from "./tree-pool.ts";
 
 export const PortResultKind = {
   Ok: "ok",
@@ -32,6 +33,13 @@ export interface PortBudgetEnd {
 
 export type PortResult<T> =
   { kind: typeof PortResultKind.Ok; value: T } | PortFailure;
+
+export const TreeSource = {
+  Pool: "pool",
+  Clone: "clone",
+  Node: "node",
+} as const;
+export type TreeSource = (typeof TreeSource)[keyof typeof TreeSource];
 
 export type EvidenceDraft = Omit<EvidenceSubmit, keyof ExecutionContext>;
 export type EvidenceId = Evidence["id"];
@@ -83,6 +91,7 @@ export interface ReleaseTreePort {
     call: PortCall,
   ): Promise<PortResult<CommandTree>>;
   give(tree: CommandTree): Promise<void>;
+  giveBase(tree: CommandTree): Promise<void>;
 }
 
 export interface ClaimPort {
@@ -103,6 +112,18 @@ export interface AgentPort {
     request: AgentOpenRequest,
     context: CancellationContext,
   ): Promise<PortResult<AgentSession> | PortBudgetEnd>;
+}
+
+export interface DependencyRead {
+  dependencies: ExecutionDependency[];
+  outcomes: Outcome[];
+  evidence: Evidence[];
+}
+
+export interface DependencyPort {
+  read(
+    context: CancellationContext,
+  ): Promise<PortResult<DependencyRead> | PortBudgetEnd>;
 }
 
 export interface SecretPort {
@@ -126,12 +147,56 @@ export interface ImplementPorts extends CommonPorts {
   claim: ClaimPort;
 }
 
+export interface ImplementHostPorts extends ImplementPorts {
+  agent: AgentPort;
+}
+
 export interface EvaluationPorts extends CommonPorts {
   evidence: EvidencePort;
   agent: AgentPort;
+  dependencies: DependencyPort;
 }
 
 export interface ExaminePorts extends CommonPorts {
   evidence: EvidencePort;
   agent: AgentPort;
+  dependencies: DependencyPort;
 }
+
+type CalledPorts<P> = Omit<P, "telemetry" | "log">;
+
+export type PortNameOf<P> = {
+  [K in keyof CalledPorts<P> & string]: `${K}.${keyof P[K] & string}`;
+}[keyof CalledPorts<P> & string];
+
+export type PortName = string;
+
+export const IMPLEMENT_PORTS = [
+  "secrets.redact",
+  "evidence.submit",
+  "repository.fetchBase",
+  "releaseTrees.take",
+  "releaseTrees.takeBase",
+  "releaseTrees.give",
+  "releaseTrees.giveBase",
+  "claim.check",
+] as const satisfies readonly PortNameOf<ImplementPorts>[];
+
+export const IMPLEMENT_HOST_PORTS = [
+  ...IMPLEMENT_PORTS,
+  "agent.open",
+] as const satisfies readonly PortNameOf<ImplementHostPorts>[];
+
+export const EVALUATION_PORTS = [
+  "secrets.redact",
+  "evidence.submit",
+  "agent.open",
+  "dependencies.read",
+] as const satisfies readonly PortNameOf<EvaluationPorts>[];
+
+export const EXAMINE_PORTS = [
+  "secrets.redact",
+  "evidence.submit",
+  "agent.open",
+  "dependencies.read",
+] as const satisfies readonly PortNameOf<ExaminePorts>[];

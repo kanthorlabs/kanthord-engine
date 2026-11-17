@@ -13,7 +13,7 @@ import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
 import type { BaseHead } from "./environment-setup.ts";
-import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import {
   changedEntries,
   type ChangeEntry,
@@ -650,11 +650,9 @@ function redactedDetail(detail: object): object {
 }
 
 function environmentStop(code: string, detail: object): ExecutionStop {
-  return new ExecutionStop(
-    EndReason.EnvironmentFailed,
-    code,
-    JSON.stringify(redactedDetail(detail)),
-  );
+  return new ExecutionStop(EndReason.EnvironmentFailed, code, {
+    detail: JSON.stringify(redactedDetail(detail)),
+  });
 }
 
 function baseRunOf(base: BaseCheck, prepared: Prepared): BaseRunResult {

@@ -38,7 +38,7 @@ import {
   temporary,
 } from "../../kernel/test-support.ts";
 import { openNativeAgent, promptStop } from "./native-agent.ts";
-import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import { CodedError } from "../../kernel/errors.ts";
 import { ExecutionIntent } from "../contract.ts";
 import type { ExecutionSetup, HostTools } from "../contract.ts";

@@ -4,15 +4,12 @@ import { PromptTemplate, type PromptTemplates } from "../../agent/contract.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { renderTemplate } from "../../agent/prompt-templates.ts";
 import { commitOf, headCommit, isAncestor, mergeRef } from "./local-git.ts";
-import {
-  implementRepositoriesOf,
-  repositoryOf,
-  type StepsState,
-} from "./steps-implement.ts";
-import type { WorkspaceCheckout } from "./workspace.ts";
+import { implementRepositoriesOf, type StepsState } from "./steps-implement.ts";
+import { mergedBranchesOf } from "./setup-repository.ts";
+import type { WorkspaceCheckout } from "./workspace-layout.ts";
 import { type ImplementPorts, PortResultKind } from "./foundry-ports.ts";
 import { GitStep, withinGit } from "./method-telemetry.ts";
-import { portStop } from "./execution-run.ts";
+import { portStop } from "./execution-stop.ts";
 import { gatedAgent, mergeCommitMessage } from "./turn-gate.ts";
 
 const NO_FILES = 0;
@@ -23,19 +20,6 @@ export const RefreshResult = {
   BudgetEnd: "budget_end",
 } as const;
 export type RefreshResult = (typeof RefreshResult)[keyof typeof RefreshResult];
-
-export function mergedBranchesOf(
-  state: Pick<StepsState, "input">,
-  checkout: Pick<WorkspaceCheckout, "binding_id">,
-): string[] {
-  const { base_branch, upstream_branch } = repositoryOf(
-    state,
-    checkout,
-  ).strategy;
-  return upstream_branch === undefined
-    ? [base_branch]
-    : [base_branch, upstream_branch];
-}
 
 export function conflictInstruction(
   templates: PromptTemplates,

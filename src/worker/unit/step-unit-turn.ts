@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { DeadlineKind, type FoundryStep } from "./chain.ts";
-import { portStop } from "./execution-run.ts";
+import { portStop } from "./execution-stop.ts";
 import { type ImplementPorts, PortResultKind } from "./foundry-ports.ts";
 import { budgetEnd, next, stopped, stopsReturned } from "./step-support.ts";
 import type { UnitScope } from "./step-unit-enter.ts";
@@ -10,6 +10,7 @@ export const unitTurn: FoundryStep<UnitScope, "state", never, ImplementPorts> =
   {
     foundry: true,
     id: "unit.turn",
+    ports: ["claim.check", "secrets.redact"],
     deadline: DeadlineKind.Work,
     reads: ["state"],
     writes: [],

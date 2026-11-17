@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { z } from "zod";
-import { canonicalJSON, deriveKey } from "./json.ts";
+import {
+  type HandoverEnvelope,
+  handoverEnvelopeSchema,
+} from "./handover-envelope.ts";
+import { canonicalJSON } from "./json.ts";
+import { deriveKey } from "./key-derivation.ts";
+
+export {
+  type HandoverEnvelope,
+  handoverEnvelopeSchema,
+} from "./handover-envelope.ts";
 
 export const HANDOVER_KEY_INFO = "handover/server-to-worker/v1";
 export const REPORT_KEY_INFO = "handover/worker-to-server/v1";
@@ -13,12 +22,6 @@ export const HANDOVER_TAG_BYTES = 16;
 export const HANDOVER_AAD_LENGTH_BYTES = 4;
 const KEY_BYTES = 32;
 const LENGTH_MAX = 0xffffffff;
-
-export const handoverEnvelopeSchema = z.strictObject({
-  nonce: z.string().min(1),
-  ciphertext: z.string().min(1),
-});
-export type HandoverEnvelope = z.infer<typeof handoverEnvelopeSchema>;
 
 export class HandoverOpenError extends Error {
   constructor() {

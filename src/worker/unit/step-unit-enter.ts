@@ -94,6 +94,7 @@ export function openUnit(state: StepsState, scope: UnitScope): void {
 export const unitEnter: FoundryStep<UnitScope, "state", never> = {
   foundry: true,
   id: "unit.enter",
+  ports: [],
   deadline: DeadlineKind.Work,
   reads: ["state"],
   writes: [],

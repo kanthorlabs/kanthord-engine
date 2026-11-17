@@ -79,8 +79,8 @@ document.
    `gateway.request.validation_failed`.
 6. **Mandated tests.** Keep each case of `src/config/upgrade.test.ts`, of each
    `migrations.test.ts`, of `import-boundaries.test.ts`,
-   `unwired-import.test.ts`, `unwired.test.ts`, `container-live.test.ts` and
-   `chain-golden.test.ts`,
+   `unwired-import.test.ts`, `unwired.test.ts`, `container-live.test.ts`,
+   `chain-golden.test.ts` and `foundry-boundary.test.ts`,
    and of each file of `always_run` of `.kanthord/suite-pass.json`. In each
    other file that calls `startTestSshd`, keep one case that calls it.
 7. **No other test.** Write no other test. Assert the observed result and the

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { decode, sign } from "hono/jwt";
 import { ulid } from "ulid";
-import { deriveKey } from "../../kernel/json.ts";
+import { deriveKey } from "../../kernel/key-derivation.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { OperationError } from "../../kernel/errors.ts";
 import { isMachineIdentity, isWorkerIdentity } from "../../kernel/caller.ts";

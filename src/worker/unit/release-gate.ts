@@ -8,10 +8,7 @@ import {
   nodeVerdict,
   runAffected,
 } from "./affected.ts";
-import { loopNode, StepKind } from "./chain.ts";
-import { releaseGateFrame } from "./chain-implement.ts";
-import { runNodes } from "./chain-runner.ts";
-import { verificationCommands } from "./evaluation-input.ts";
+import { verificationCommands } from "./review-scope.ts";
 import {
   affectedRevisionInstruction,
   releaseRevisionInstruction,
@@ -28,14 +25,10 @@ import {
   VerificationContext,
   verificationObserver,
 } from "./method-telemetry.ts";
-import { portStop } from "./execution-run.ts";
-import {
-  type HostedState,
-  repositoryOf,
-  stateIo,
-  type StepsState,
-} from "./steps-implement.ts";
+import { portStop } from "./execution-stop.ts";
+import type { StepsState } from "./steps-implement.ts";
 import { memoScopeOf } from "./verification-memo.ts";
+import { repositoryOf } from "./setup-repository.ts";
 import {
   environmentStop,
   infrastructureStop,
@@ -91,19 +84,6 @@ export function commandOwners(
       task.content.verifications.map(() => task),
     ),
   ];
-}
-
-export async function releaseGate(state: HostedState): Promise<ReleaseGate> {
-  const end = await runNodes(
-    {
-      nodes: [loopNode("release_gate", releaseGateFrame)],
-      seed: { state },
-    },
-    stateIo(state),
-  );
-  return end.kind === StepKind.BudgetEnd
-    ? { kind: ReleaseGateKind.BudgetEnd }
-    : end.ctx.route;
 }
 
 export interface AffectedNote {
@@ -287,7 +267,7 @@ async function verifyInReleaseClones(
   verification: ReleaseVerification,
 ): Promise<ReleaseCheck> {
   const { ports, commands } = verification;
-  const key = state.input.workspaces.nodeKey(state.input.claim.node_id);
+  const key = state.workspaceKey;
   const cleanup = state.agent.budget.cleanupContext(state.cancel);
   const trees: CommandTree[] = [];
   try {

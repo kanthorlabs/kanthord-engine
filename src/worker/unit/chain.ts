@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import type { CancellationContext, Context } from "../../kernel/context.ts";
+import type { CancellationContext } from "../../kernel/context.ts";
 import type {
   Evidence,
   ReviewRound,
@@ -8,7 +8,7 @@ import type {
 } from "../../mission/contract.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 import type { AffectedTest } from "../../agent/prompt-composer.ts";
-import type { ExecutionSetup, RepositoryTransport } from "../contract.ts";
+import type { ExecutionSetup } from "../contract.ts";
 import type { ExecutionBudget } from "./budget.ts";
 import type {
   BaseHead,
@@ -18,13 +18,18 @@ import type {
 import type {
   EndReason,
   ExecutionEnd,
-  ExecutionRun,
   ExecutionStop,
   MethodClaim,
-} from "./execution-run.ts";
-import type { CommonPorts } from "./foundry-ports.ts";
-import type { NativeAgent } from "./native-agent.ts";
-import type { Prior, readDependencies } from "./node-reads.ts";
+} from "./execution-stop.ts";
+import type {
+  CommonPorts,
+  DependencyRead,
+  PortName,
+  PortNameOf,
+} from "./foundry-ports.ts";
+import type { FoundryControl, FoundryHost } from "./foundry.ts";
+import type { NativeAgent } from "./native-agent-session.ts";
+import type { Prior } from "./node-verdict.ts";
 import { Phase, type SpanEnd, type SpanRecorder } from "./telemetry.ts";
 import type { SpanStart } from "./telemetry.ts";
 import type { TestedInput, VerificationRun } from "./verification.ts";
@@ -32,13 +37,12 @@ import type {
   ExamineCheckout,
   WorkspaceCheckout,
   WorkspaceKind,
-  WorkspaceRoot,
-} from "./workspace.ts";
-import type { PlacedReview, ReviewScope } from "./evaluation-input.ts";
+} from "./workspace-layout.ts";
+import type { PlacedReview, ReviewScope } from "./review-scope.ts";
 import type { ReleaseGate, VerifiedRelease } from "./release-gate.ts";
 import type { AffectedStep } from "./step-affected-run.ts";
 import type { EvaluationAssessment } from "./step-judgement.ts";
-import type { StartCheck, StepsState } from "./steps-implement.ts";
+import type { StartCheck, StartState } from "./steps-implement.ts";
 
 export const ChainId = {
   Implement: "implement",
@@ -84,12 +88,11 @@ export interface ExecutionCtx {
   claim: MethodClaim;
   setup: ExecutionSetup;
   sshAccess: ReadonlyMap<string, SshAccess>;
-  env: NodeJS.ProcessEnv;
   revision: Revision;
   prior: Prior;
   attemptEvidence: readonly Evidence[];
   reviewRound: ReviewRound;
-  dependencies: Awaited<ReturnType<typeof readDependencies>> | null;
+  dependencies: DependencyRead | null;
   workspace: NodeWorkspace;
   reviewWorkspace: ReviewWorkspace;
   reviewScope: { evidenceIds: string[]; scope: ReviewScope };
@@ -102,7 +105,7 @@ export interface ExecutionCtx {
   setupFailure: SetupFailure | null;
   placed: PlacedReview;
   agent: NativeAgent;
-  state: StepsState;
+  state: StartState;
   plan: StartCheck;
   releaseCheck: VerifiedRelease;
   route: ReleaseGate;
@@ -130,7 +133,6 @@ export const SEED_KEYS: readonly Key[] = [
 export type ChainSeed = Partial<ExecutionCtx> &
   Pick<ExecutionCtx, "claim" | "setup" | "sshAccess" | "revision">;
 export const RUNNER_KEYS: readonly Key[] = [
-  "env",
   "completedUnits",
   "reports",
   "verificationTimedOut",
@@ -150,48 +152,11 @@ export type StepResult<S, W extends Key> =
       scope: S;
     };
 
-export interface StepHost {
-  workspaces: WorkspaceRoot;
-  transport: RepositoryTransport;
-  env: NodeJS.ProcessEnv;
-  openAgent: (workspace: string) => Promise<NativeAgent>;
-}
-
-export interface StepIo<P extends CommonPorts = CommonPorts> {
-  run: ExecutionRun;
-  budget: ExecutionBudget;
-  context: Context;
-  deadline: number;
-  resources: AsyncDisposableStack;
-  spans: SpanRecorder;
-  host: StepHost;
-  ports: P;
-}
-
-export interface Step<
-  S,
-  R extends Key,
-  W extends Key,
-  P extends CommonPorts = CommonPorts,
-> {
-  id: string;
-  deadline: DeadlineKind;
-  reads: readonly R[];
-  writes: readonly W[];
-  stops: readonly StopCode[];
-  llm?: boolean;
-  note?: string;
-  run(
-    ctx: Readonly<Pick<ExecutionCtx, R>>,
-    scope: S,
-    io: StepIo<P>,
-  ): Promise<StepResult<S, W>>;
-}
-
 export interface FoundryIo<P extends CommonPorts = CommonPorts> {
   budget: ExecutionBudget;
   context: CancellationContext;
   deadline: number;
+  env: NodeJS.ProcessEnv;
   ports: P;
 }
 
@@ -216,6 +181,7 @@ export interface FoundryStep<
   reads: readonly R[];
   writes: readonly W[];
   stops: readonly StopCode[];
+  ports: readonly PortNameOf<P>[];
   llm?: boolean;
   note?: string;
   run(
@@ -274,11 +240,12 @@ interface ChainStepShape {
 
 export interface ChainHostStep extends ChainStepShape {
   foundry?: undefined;
-  run(ctx: never, scope: never, io: StepIo): Promise<ChainStepResult>;
+  run(ctx: never, scope: never, io: never): Promise<ChainStepResult>;
 }
 
 export interface ChainFoundryStep extends ChainStepShape {
   foundry: true;
+  ports: readonly PortName[];
   run(ctx: never, scope: never, io: FoundryIo): Promise<ChainStepResult>;
 }
 
@@ -331,21 +298,35 @@ export interface ChainPhase {
   nodes: readonly ChainNode[];
 }
 
-export interface Chain {
+export interface ChainTasks<P extends CommonPorts> {
+  name: string;
+  ports: readonly PortName[];
+  nodes: readonly ChainNode[];
+  run(
+    ctx: ExecutionCtx,
+    control: FoundryControl,
+    host: FoundryHost<P>,
+  ): Promise<FoundryEnd<unknown>>;
+}
+
+export interface Chain<P extends CommonPorts = CommonPorts> {
   id: ChainId;
+  ports: readonly PortName[];
   phases: readonly ChainPhase[];
+  tasks: ChainTasks<P> | null;
   onStop: readonly ChainNode[];
   budgetEnd: BudgetEndRule;
 }
 
-export interface ChainBuilder {
-  phase(phase: Phase): ChainBuilder;
-  step(step: ChainStep): ChainBuilder;
-  loop<S>(id: string, frame: LoopFrame<S>): ChainBuilder;
-  nodes(nodes: readonly ChainNode[]): ChainBuilder;
-  onStop(nodes: readonly ChainNode[]): ChainBuilder;
-  budgetEnd(rule: BudgetEndRule): ChainBuilder;
-  build(): Chain;
+export interface ChainBuilder<P extends CommonPorts> {
+  phase(phase: Phase): ChainBuilder<P>;
+  tasks(tasks: ChainTasks<P>): ChainBuilder<P>;
+  step(step: ChainStep): ChainBuilder<P>;
+  loop<S>(id: string, frame: LoopFrame<S>): ChainBuilder<P>;
+  nodes(nodes: readonly ChainNode[]): ChainBuilder<P>;
+  onStop(nodes: readonly ChainNode[]): ChainBuilder<P>;
+  budgetEnd(rule: BudgetEndRule): ChainBuilder<P>;
+  build(): Chain<P>;
 }
 
 export function stepNode(step: ChainStep): ChainNode {
@@ -365,25 +346,47 @@ const PHASE_ORDER: readonly Phase[] = [
 ];
 const UNKNOWN_PHASE = -1;
 
-export function chain(id: ChainId): ChainBuilder {
-  const phases: { phase: Phase; nodes: ChainNode[] }[] = [];
+interface BuiltPhases<P extends CommonPorts> {
+  phases: { phase: Phase; nodes: ChainNode[] }[];
+  tasks: ChainTasks<P> | null;
+}
+
+function openPhase<P extends CommonPorts>(
+  built: BuiltPhases<P>,
+  phase: Phase,
+): void {
+  const order = PHASE_ORDER.indexOf(phase);
+  assert.notEqual(order, UNKNOWN_PHASE);
+  const last = built.phases.at(-1);
+  assert.ok(
+    last === undefined || PHASE_ORDER.indexOf(last.phase) < order,
+    "The phases of a chain follow the phase order.",
+  );
+  built.phases.push({ phase, nodes: [] });
+}
+
+export function chain<P extends CommonPorts>(
+  id: ChainId,
+  ports: readonly PortNameOf<P>[],
+): ChainBuilder<P> {
+  const built: BuiltPhases<P> = { phases: [], tasks: null };
   let onStop: readonly ChainNode[] = [];
   let budgetEnd: BudgetEndRule | null = null;
   const current = (): ChainNode[] => {
-    const last = phases.at(-1);
+    const last = built.phases.at(-1);
     assert.ok(last, "A node belongs to a phase.");
     return last.nodes;
   };
-  const builder: ChainBuilder = {
+  const builder: ChainBuilder<P> = {
     phase(phase) {
-      const order = PHASE_ORDER.indexOf(phase);
-      assert.notEqual(order, UNKNOWN_PHASE);
-      const last = phases.at(-1);
-      assert.ok(
-        last === undefined || PHASE_ORDER.indexOf(last.phase) < order,
-        "The phases of a chain follow the phase order.",
-      );
-      phases.push({ phase, nodes: [] });
+      assert.notEqual(phase, Phase.Tasks, "A tasks phase holds a tasks call.");
+      openPhase(built, phase);
+      return builder;
+    },
+    tasks(tasks) {
+      openPhase(built, Phase.Tasks);
+      current().push(...tasks.nodes);
+      built.tasks = tasks;
       return builder;
     },
     step(step) {
@@ -408,31 +411,58 @@ export function chain(id: ChainId): ChainBuilder {
     },
     build() {
       assert.ok(budgetEnd, "A chain declares its budget end rule.");
-      const built: Chain = { id, phases, onStop, budgetEnd };
-      checkChain(built);
-      return built;
+      const done: Chain<P> = {
+        id,
+        ports,
+        phases: built.phases,
+        tasks: built.tasks,
+        onStop,
+        budgetEnd,
+      };
+      checkChain(done);
+      return done;
     },
   };
   return builder;
 }
 
+export const ChainRule = {
+  ReadBeforeWrite: "read_before_write",
+  PortOutsidePhase: "port_outside_phase",
+  HostStepInTasks: "host_step_in_tasks",
+  FoundryReadsSshAccess: "foundry_reads_ssh_access",
+} as const;
+export type ChainRule = (typeof ChainRule)[keyof typeof ChainRule];
+
+export interface ChainRefusal {
+  rule: ChainRule;
+  key?: Key;
+  port?: PortName;
+}
+
 export class ChainBuildError extends Error {
   readonly chain: ChainId;
   readonly node: string;
-  readonly key: Key;
-  constructor(chainId: ChainId, node: string, key: Key) {
+  readonly rule: ChainRule;
+  readonly key: Key | null;
+  readonly port: PortName | null;
+  constructor(chainId: ChainId, node: string, refusal: ChainRefusal) {
     super(
-      `Chain ${chainId}: ${node} reads the key ${key} with no earlier writer.`,
+      `Chain ${chainId}: ${node} breaks the rule ${refusal.rule} (${refusal.key ?? refusal.port ?? ""}).`,
     );
     this.chain = chainId;
     this.node = node;
-    this.key = key;
+    this.rule = refusal.rule;
+    this.key = refusal.key ?? null;
+    this.port = refusal.port ?? null;
   }
 }
 
 interface Written {
   chain: ChainId;
   keys: Set<Key>;
+  ports: readonly PortName[];
+  tasks: boolean;
 }
 
 function requireKeys(
@@ -442,12 +472,38 @@ function requireKeys(
 ): void {
   for (const key of reads)
     if (!written.keys.has(key))
-      throw new ChainBuildError(written.chain, node, key);
+      throw new ChainBuildError(written.chain, node, {
+        rule: ChainRule.ReadBeforeWrite,
+        key,
+      });
+}
+
+function checkStep(written: Written, step: ChainStep): void {
+  const node = `step ${step.id}`;
+  if (!step.foundry) {
+    if (written.tasks)
+      throw new ChainBuildError(written.chain, node, {
+        rule: ChainRule.HostStepInTasks,
+      });
+    return;
+  }
+  if (step.reads.includes("sshAccess"))
+    throw new ChainBuildError(written.chain, node, {
+      rule: ChainRule.FoundryReadsSshAccess,
+      key: "sshAccess",
+    });
+  const outside = step.ports.find((port) => !written.ports.includes(port));
+  if (outside !== undefined)
+    throw new ChainBuildError(written.chain, node, {
+      rule: ChainRule.PortOutsidePhase,
+      port: outside,
+    });
 }
 
 function checkNodes(written: Written, nodes: readonly ChainNode[]): void {
   for (const node of nodes) {
     if (node.kind === NodeKind.Step) {
+      checkStep(written, node.step);
       requireKeys(written, `step ${node.step.id}`, node.step.reads);
       for (const key of node.step.writes) written.keys.add(key);
       continue;
@@ -458,24 +514,36 @@ function checkNodes(written: Written, nodes: readonly ChainNode[]): void {
   }
 }
 
-function checkChain(built: Chain): void {
-  const written: Written = {
+function hostWritten(built: Chain, keys: Iterable<Key>): Written {
+  return {
     chain: built.id,
-    keys: new Set([...SEED_KEYS, ...RUNNER_KEYS]),
+    keys: new Set(keys),
+    ports: built.ports,
+    tasks: false,
   };
+}
+
+function checkChain(built: Chain): void {
+  assert.equal(
+    built.tasks !== null,
+    built.phases.some(({ phase }) => phase === Phase.Tasks),
+  );
+  const written = hostWritten(built, [...SEED_KEYS, ...RUNNER_KEYS]);
   let prepared: Set<Key> | null = null;
   for (const { phase, nodes } of built.phases) {
-    checkNodes(written, nodes);
+    const tasks = phase === Phase.Tasks;
+    checkNodes(
+      {
+        ...written,
+        ports: tasks ? (built.tasks?.ports ?? []) : built.ports,
+        tasks,
+      },
+      nodes,
+    );
     if (phase === Phase.Prepare) prepared = new Set(written.keys);
   }
   const atPrepareEnd = prepared ?? new Set(written.keys);
   if (built.budgetEnd.kind === BudgetEndKind.Exit)
-    checkNodes(
-      { chain: built.id, keys: new Set(atPrepareEnd) },
-      built.budgetEnd.nodes,
-    );
-  checkNodes(
-    { chain: built.id, keys: new Set([...atPrepareEnd, ...STOP_KEYS]) },
-    built.onStop,
-  );
+    checkNodes(hostWritten(built, atPrepareEnd), built.budgetEnd.nodes);
+  checkNodes(hostWritten(built, [...atPrepareEnd, ...STOP_KEYS]), built.onStop);
 }

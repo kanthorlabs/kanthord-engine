@@ -20,12 +20,13 @@ import {
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { fauxAssistantMessage, fauxToolCall } from "./test-support.ts";
-import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { TaskRunner } from "./steps-implement.ts";
-import { runStepsImplement, runTask } from "./steps-implement.ts";
-import { nodeUnitOf, releaseGate, ReleaseGateKind } from "./release-gate.ts";
+import { runStepsImplement, runTask } from "./steps-implement-host.ts";
+import { nodeUnitOf, ReleaseGateKind } from "./release-gate.ts";
+import { releaseGate } from "./steps-implement-host.ts";
 import { background } from "../../kernel/context.ts";
 import { commitWork } from "./local-git.ts";
 import { RecordKind, type TelemetryRecord } from "../../tracking/contract.ts";
@@ -301,12 +302,12 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
     const reached = task("reached", "false");
     const h = await fixture(t, [reached, task("stopped", "false")], []);
     const bodies = recordReleases(h);
-    const checkout = h.checkouts[0]!;
     const runner: TaskRunner = async (state, unit) => {
       if (unit.id !== reached.id) {
         writeFileSync(join(state.root, PARTIAL_WORK), PARTIAL_WORK);
         throw new Error(UNKNOWN_ERROR);
       }
+      const checkout = state.checkouts[0]!;
       writeFileSync(join(checkout.directory, REACHED_WORK), REACHED_WORK);
       const head = await commitWork(
         state.input.env,

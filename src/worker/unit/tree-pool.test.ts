@@ -15,13 +15,8 @@ import { test, type TestContext } from "node:test";
 import { simpleGit } from "simple-git";
 import { background, CancellationContext } from "../../kernel/context.ts";
 import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
-import {
-  PoolClass,
-  prepareTree,
-  repoKeyOf,
-  TreePool,
-  TreeSource,
-} from "./tree-pool.ts";
+import { PoolClass, prepareTree, repoKeyOf, TreePool } from "./tree-pool.ts";
+import { TreeSource } from "./foundry-ports.ts";
 
 const env = hostEnvironment();
 const ADDRESS = "ssh://git@example.invalid/one.git";

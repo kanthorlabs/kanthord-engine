@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { DeadlineKind, type FoundryStep } from "./chain.ts";
-import { verificationCommands } from "./evaluation-input.ts";
+import { verificationCommands } from "./review-scope.ts";
 import {
   environmentDigestsOf,
   testedCommitOf,
@@ -18,7 +18,6 @@ export const verifyAllEvaluation: FoundryStep<
   unknown,
   | "claim"
   | "setup"
-  | "env"
   | "revision"
   | "reviewWorkspace"
   | "testedInput"
@@ -27,11 +26,11 @@ export const verifyAllEvaluation: FoundryStep<
 > = {
   foundry: true,
   id: "verify.all(evaluation)",
+  ports: [],
   deadline: DeadlineKind.Work,
   reads: [
     "claim",
     "setup",
-    "env",
     "revision",
     "reviewWorkspace",
     "testedInput",
@@ -61,7 +60,7 @@ export const verifyAllEvaluation: FoundryStep<
       tested_input: ctx.testedInput,
       deadline: io.budget.wallDeadline(),
       context: io.context,
-      env: ctx.env,
+      env: io.env,
       reruns: VERIFICATION_RERUNS,
       exhausted: () => io.budget.exhausted(),
       ...(base === null

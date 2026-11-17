@@ -1,24 +1,15 @@
 import assert from "node:assert/strict";
 import type { Revision, TaskContent } from "../../mission/contract.ts";
-import type { ExecutionSetup, RepositoryTransport } from "../contract.ts";
-import type { SshAccess } from "../../repository/contract.ts";
+import type { ExecutionSetup } from "../contract.ts";
 import {
   workRepositoriesOf,
   type WorkspaceCheckout,
-  WorkspaceKind,
-  type WorkspaceRoot,
-} from "./workspace.ts";
-import type { NativeAgent } from "./native-agent.ts";
+} from "./workspace-layout.ts";
+import type { NativeAgent } from "./native-agent-session.ts";
 import { removeRootEntries, restoreCheckout } from "./turn-gate.ts";
 import type { CancellationContext } from "../../kernel/context.ts";
-import type { ExecutionRun } from "./execution-run.ts";
 import type { CommonPorts } from "./foundry-ports.ts";
-import {
-  EndReason,
-  type ExecutionEnd,
-  ExecutionStop,
-  type MethodClaim,
-} from "./execution-run.ts";
+import type { MethodClaim } from "./execution-stop.ts";
 import {
   type AffectedTest,
   renderWorkPrompt,
@@ -37,16 +28,14 @@ import {
   SetupEnd,
   type SetupEntry,
 } from "./environment-setup.ts";
-import { BudgetLimit } from "../../scheduler/contract.ts";
 import { criterionRevisionInstruction } from "./judgement.ts";
 import { isDone, readDoneRecords } from "./done-record.ts";
-import { type Verdict, VerdictSource } from "./node-reads.ts";
+import { type Verdict, VerdictSource } from "./node-verdict.ts";
 import {
   type JudgedCheckout,
   judgedCheckouts,
   verdictRuleHolds,
 } from "./verdict-rule.ts";
-import { Phase } from "./telemetry.ts";
 import {
   environmentDigestsOf,
   testedCommitOf,
@@ -57,19 +46,8 @@ import { nodeWork, RefreshResult } from "./base-refresh.ts";
 import type { VerificationFacts } from "./progress-rule.ts";
 import { nodeUnitOf } from "./release-gate.ts";
 import { memoScopeOf, type VerificationMemo } from "./verification-memo.ts";
-import { ExecutionBudget } from "./budget.ts";
-import { loopNode, StepKind, stepNode } from "./chain.ts";
-import {
-  implementChain,
-  implementWorkspaceNodes,
-  revisionsFrame,
-} from "./chain-implement.ts";
-import { type ChainIo, runChain, runNodes } from "./chain-runner.ts";
-import { doneRecordPut } from "./step-done-record-put.ts";
 import { setupCommandsOf } from "./step-env-setup.ts";
-import { hostOf, seedOf } from "./step-support.ts";
-import { openUnit, unitScopeOf } from "./step-unit-enter.ts";
-import { workerPorts } from "./worker-ports.ts";
+import { repositoryOf } from "./setup-repository.ts";
 
 export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
 const NO_TASKS = 0;
@@ -77,7 +55,6 @@ const NO_CHECKOUTS = 0;
 const NO_LINK_UPDATES = 0;
 const SINGLE_CHECKOUT = 1;
 const BASE_MERGED = "base_merged";
-const FIRST_UNIT = 0;
 
 export function workUnitsOf(
   nodeId: string,
@@ -99,54 +76,11 @@ function unitsOf(state: StepsState): TaskContent[] {
   return workUnitsOf(state.input.claim.node_id, state.revision);
 }
 
-export function repositoryOf(
-  state: Pick<StepsState, "input">,
-  checkout: Pick<WorkspaceCheckout, "binding_id">,
-): ExecutionSetup["repositories"][number] {
-  const repository = state.input.setup.repositories.find(
-    (row) => row.binding_id === checkout.binding_id,
-  );
-  assert.ok(repository);
-  return repository;
-}
-
 export type TaskRunner = (
   state: StepsState,
   task: TaskContent,
   instruction: string | null,
 ) => Promise<TaskResult>;
-
-export function stateIo(state: HostedState): ChainIo {
-  return {
-    run: state.run,
-    budget: state.agent.budget,
-    resources: new AsyncDisposableStack(),
-    host: hostOf(state.input, () => assert.fail("The state holds the agent.")),
-    ports: workerPorts(state.input, state.run),
-  };
-}
-
-export function runStepsImplement(
-  state: HostedState,
-  taskRunner: TaskRunner | null = null,
-): Promise<ExecutionEnd> {
-  const io = stateIo(state);
-  io.resources.defer(() =>
-    state.input.workspaces.release(
-      state.input.workspaces.nodeKey(state.input.claim.node_id),
-      WorkspaceKind.Node,
-    ),
-  );
-  io.resources.defer(() => state.base.giveBack());
-  return runChain(
-    implementChain(taskRunner),
-    {
-      seed: { ...seedOf(state.input), revision: state.revision, state },
-      from: Phase.Start,
-    },
-    io,
-  );
-}
 
 export const TaskResultKind = {
   Complete: "complete",
@@ -156,58 +90,28 @@ export type TaskResult =
   | { kind: typeof TaskResultKind.Complete; recorded: boolean }
   | { kind: typeof TaskResultKind.BudgetEnd };
 
-export async function runTask(
-  state: HostedState,
-  task: TaskContent,
-  initialInstruction: string | null = null,
-): Promise<TaskResult> {
-  const scope = unitScopeOf(
-    {
-      units: [{ task, instruction: initialInstruction, node: null }],
-      planned: false,
-      runner: null,
-    },
-    FIRST_UNIT,
-  );
-  assert.ok(scope);
-  openUnit(state, scope);
-  const end = await runNodes(
-    {
-      nodes: [loopNode("revisions", revisionsFrame), stepNode(doneRecordPut)],
-      seed: { state },
-      scope,
-    },
-    stateIo(state),
-  );
-  if (end.kind === StepKind.BudgetEnd)
-    return { kind: TaskResultKind.BudgetEnd };
-  assert.ok(scope.result);
-  return scope.result;
-}
-
 export interface StepsInput {
   claim: MethodClaim;
   setup: ExecutionSetup;
-  workspaces: WorkspaceRoot;
-  transport: RepositoryTransport;
-  sshAccess: ReadonlyMap<string, SshAccess>;
   env: NodeJS.ProcessEnv;
 }
-export interface StepsState {
+
+export interface ProgressCtx {
+  unchangedTurns: number;
+  lastVerification: VerificationFacts;
+  revisionCount: number;
+}
+
+export interface StepsState extends ProgressCtx {
   input: StepsInput;
   cancel: CancellationContext;
   ports: CommonPorts;
   agent: NativeAgent;
   revision: Revision;
   root: string;
+  workspaceKey: string;
   checkouts: WorkspaceCheckout[];
   nodeBranch: string;
-  verdict: Verdict | null;
-  cleared: string | null;
-  unchangedTurns: number;
-  refreshed: RefreshResult | null;
-  lastVerification: VerificationFacts;
-  revisionCount: number;
   setup: SetupEntry[];
   affectedTests: AffectedTest[];
   base: BaseHead;
@@ -218,48 +122,10 @@ export interface StepsState {
   task?: TaskContent;
 }
 
-export interface HostedState extends StepsState {
-  run: ExecutionRun;
-}
-
-export async function prepareStepsWorkspace(
-  input: StepsInput,
-  run: ExecutionRun,
-) {
-  const resources = new AsyncDisposableStack();
-  try {
-    const { kind, ctx } = await runNodes(
-      {
-        nodes: implementWorkspaceNodes(),
-        seed: seedOf(input),
-      },
-      {
-        run,
-        budget: new ExecutionBudget({
-          ...input.claim,
-          resource_budget: input.setup.resource_budget,
-        }),
-        resources,
-        host: hostOf(input, () => assert.fail("The workspace opens no agent.")),
-        ports: workerPorts(input, run),
-      },
-    );
-    if (kind === StepKind.BudgetEnd)
-      throw new ExecutionStop(EndReason.BudgetEnd, BudgetLimit.WallTime);
-    assert.ok(ctx.baseHead);
-    return {
-      ...ctx.workspace,
-      nodeBranch: input.claim.node_branch,
-      setup: ctx.setupEntries,
-      affectedTests: ctx.affectedTests,
-      base: ctx.baseHead,
-      setupPending: ctx.setupPending,
-      setupInstruction: ctx.setupInstruction,
-    };
-  } catch (error) {
-    await resources.disposeAsync();
-    throw error;
-  }
+export interface StartState extends StepsState {
+  verdict: Verdict | null;
+  cleared: string | null;
+  refreshed: RefreshResult | null;
 }
 
 export function taskWork(state: StepsState, task: TaskContent) {
@@ -407,7 +273,7 @@ export interface StartCheck {
 }
 
 async function nodeInstructionOf(
-  state: StepsState,
+  state: StartState,
 ): Promise<NodeInstruction | null> {
   if (state.verdict === null)
     return state.cleared === null
@@ -446,7 +312,7 @@ async function nodeInstructionOf(
   };
 }
 
-export async function startCheck(state: StepsState): Promise<StartCheck> {
+export async function startCheck(state: StartState): Promise<StartCheck> {
   assert.ok(state.checkouts.length > NO_CHECKOUTS);
   const node = await nodeInstructionOf(state);
   const done = await readDoneRecords(state);

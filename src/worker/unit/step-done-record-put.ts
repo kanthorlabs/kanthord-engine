@@ -8,6 +8,7 @@ import { TaskResultKind } from "./steps-implement.ts";
 export const doneRecordPut: FoundryStep<UnitScope, "state", never> = {
   foundry: true,
   id: "done_record.put",
+  ports: [],
   deadline: DeadlineKind.Work,
   reads: ["state"],
   writes: [],

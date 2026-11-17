@@ -16,11 +16,14 @@ import {
 } from "../kernel/cleanup.ts";
 import type { ExternalLink } from "../kernel/external-link.ts";
 import { canonicalJSON, timestamp } from "../kernel/json.ts";
-import { base64urlSchema, sealedObjectSchema } from "../kernel/hpke.ts";
+import {
+  base64urlSchema,
+  sealedObjectSchema,
+} from "../kernel/sealed-object.ts";
 import {
   type HandoverEnvelope,
   handoverEnvelopeSchema,
-} from "../kernel/handover.ts";
+} from "../kernel/handover-envelope.ts";
 import type { CallerIdentity, MachineIdentity } from "../kernel/caller.ts";
 import type { Context } from "../kernel/context.ts";
 import {

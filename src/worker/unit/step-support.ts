@@ -1,13 +1,16 @@
-import { ContextCancelled, DeadlineExceeded } from "../../kernel/context.ts";
+import {
+  type Context,
+  ContextCancelled,
+  DeadlineExceeded,
+} from "../../kernel/context.ts";
+import type { ExecutionBudget } from "./budget.ts";
 import {
   type ExecutionCtx,
   type FoundryIo,
   type Key,
-  type StepHost,
-  type StepIo,
   StepKind,
 } from "./chain.ts";
-import { ExecutionStop, portStop } from "./execution-run.ts";
+import { ExecutionStop, portStop } from "./execution-stop.ts";
 import {
   type EvaluationPorts,
   type EvidenceDraft,
@@ -15,43 +18,6 @@ import {
   type ExaminePorts,
   PortResultKind,
 } from "./foundry-ports.ts";
-import type { StepsInput } from "./steps-implement.ts";
-
-type InputKeys = "claim" | "setup" | "sshAccess";
-
-export function stepsInputOf(
-  ctx: Pick<ExecutionCtx, InputKeys>,
-  io: StepIo,
-): StepsInput {
-  return {
-    claim: ctx.claim,
-    setup: ctx.setup,
-    sshAccess: ctx.sshAccess,
-    workspaces: io.host.workspaces,
-    transport: io.host.transport,
-    env: io.host.env,
-  };
-}
-
-export function seedOf(input: StepsInput): Pick<ExecutionCtx, InputKeys> {
-  return {
-    claim: input.claim,
-    setup: input.setup,
-    sshAccess: input.sshAccess,
-  };
-}
-
-export function hostOf(
-  input: StepsInput,
-  openAgent: StepHost["openAgent"],
-): StepHost {
-  return {
-    workspaces: input.workspaces,
-    transport: input.transport,
-    env: input.env,
-    openAgent,
-  };
-}
 
 export function wallDeadlineOf(
   ctx: Pick<ExecutionCtx, "claim" | "setup">,
@@ -110,7 +76,10 @@ export async function stopsReturned<S, R>(
   }
 }
 
-type BudgetIo = Pick<StepIo, "budget" | "context">;
+interface BudgetIo {
+  budget: ExecutionBudget;
+  context: Context;
+}
 
 export function endedByBudget(io: BudgetIo, error: unknown): boolean {
   return (

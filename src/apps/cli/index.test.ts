@@ -26,7 +26,7 @@ import {
 } from "../../gateway/auth/jwt.ts";
 import { decode, verify } from "hono/jwt";
 import { identitySchema } from "../../kernel/identity.ts";
-import { deriveKey } from "../../kernel/json.ts";
+import { deriveKey } from "../../kernel/key-derivation.ts";
 import { parse, stringify } from "yaml";
 import {
   PRIVATE_DIRECTORY_MODE,

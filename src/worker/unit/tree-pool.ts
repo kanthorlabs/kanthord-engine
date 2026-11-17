@@ -21,15 +21,10 @@ import {
   normaliseGitState,
   writeConfigTemplate,
 } from "./local-git.ts";
+import { TreeSource } from "./foundry-ports.ts";
 
 export const PoolClass = { Agent: "agent", Command: "command" } as const;
 export type PoolClass = (typeof PoolClass)[keyof typeof PoolClass];
-export const TreeSource = {
-  Pool: "pool",
-  Clone: "clone",
-  Node: "node",
-} as const;
-export type TreeSource = (typeof TreeSource)[keyof typeof TreeSource];
 export const AGENT_FREE_TREES_MAX = 1;
 export const COMMAND_FREE_TREES_MAX = 2;
 export const POOL_DIRECTORY = "pool";

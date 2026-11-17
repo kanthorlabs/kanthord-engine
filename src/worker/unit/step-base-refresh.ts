@@ -17,6 +17,7 @@ const NOTE =
 export const baseRefreshClaim: FoundryStep<unknown, "state", never> = {
   foundry: true,
   id: "base.refresh(claim)",
+  ports: ["secrets.redact"],
   deadline: DeadlineKind.Work,
   reads: ["state"],
   writes: [],
@@ -37,6 +38,7 @@ export const baseRefreshClaim: FoundryStep<unknown, "state", never> = {
 export const baseRefreshRelease: FoundryStep<unknown, "state", never> = {
   foundry: true,
   id: "base.refresh(release)",
+  ports: ["secrets.redact"],
   deadline: DeadlineKind.Work,
   reads: ["state"],
   writes: [],

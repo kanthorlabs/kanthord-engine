@@ -1,7 +1,6 @@
 import { canonicalJSON } from "../../kernel/json.ts";
 import { AFFECTED_SUBJECT } from "./affected.ts";
 import { DeadlineKind, type FoundryStep } from "./chain.ts";
-import { VERIFICATION_SUBJECT } from "./evaluation.ts";
 import type { EvaluationPorts } from "./foundry-ports.ts";
 import {
   ROUND_PATCH_MEDIA_TYPE,
@@ -9,6 +8,8 @@ import {
   roundPatchContent,
 } from "./round-patch.ts";
 import { next, stopsReturned, submittedEvidence } from "./step-support.ts";
+
+export const VERIFICATION_SUBJECT = "Evaluation verification results";
 
 function jsonAsset(value: unknown) {
   return {
@@ -29,11 +30,11 @@ export const evidencePublishVerification: FoundryStep<
 > = {
   foundry: true,
   id: "evidence.publish(verification)",
+  ports: ["evidence.submit"],
   deadline: DeadlineKind.Work,
   reads: ["verification"],
   writes: ["verificationEvidence"],
   stops: [],
-  note: "port: evidence.submit",
   run(ctx, scope, io) {
     return stopsReturned(scope, async () => {
       const verification = ctx.verification.verification;
@@ -55,11 +56,12 @@ export const evidencePublishAffected: FoundryStep<
 > = {
   foundry: true,
   id: "evidence.publish(affected)",
+  ports: ["evidence.submit"],
   deadline: DeadlineKind.Work,
   reads: ["affected"],
   writes: ["affectedEvidence"],
   stops: [],
-  note: "port: evidence.submit; only when the affected step holds a document",
+  note: "only when the affected step holds a document",
   run(ctx, scope, io) {
     return stopsReturned(scope, async () => {
       const document = ctx.affected?.document;
@@ -81,11 +83,11 @@ export const evidencePublishPatches: FoundryStep<
 > = {
   foundry: true,
   id: "evidence.publish(patches)",
+  ports: ["evidence.submit"],
   deadline: DeadlineKind.Work,
   reads: ["placed"],
   writes: ["patchEvidence"],
   stops: [],
-  note: "port: evidence.submit",
   run(ctx, scope, io) {
     return stopsReturned(scope, async () => {
       const patchEvidence: string[] = [];

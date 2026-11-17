@@ -23,19 +23,19 @@ import {
   EndReason,
   type ExecutionEnd,
   ExecutionEndKind,
-} from "./execution-run.ts";
+} from "./execution-stop.ts";
 import { executionBoundary } from "./native-method.ts";
 import { refreshAtClaim, RefreshResult } from "./base-refresh.ts";
+import { TaskResultKind } from "./steps-implement.ts";
 import {
   prepareStepsWorkspace,
   runStepsImplement,
   runTask,
-  TaskResultKind,
-} from "./steps-implement.ts";
+} from "./steps-implement-host.ts";
 import { SpanOperation, SpanRecorder } from "./telemetry.ts";
 import { gatedAgent, GateMode, TurnViolation } from "./turn-gate.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
-import { WorkspaceKind } from "./workspace.ts";
+import { WorkspaceKind } from "./workspace-layout.ts";
 import {
   advanceBase,
   commitOnNode,

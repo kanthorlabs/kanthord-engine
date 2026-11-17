@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { decode, sign } from "hono/jwt";
-import { deriveKey } from "../../kernel/json.ts";
+import { deriveKey } from "../../kernel/key-derivation.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { IdentityKind, isHumanIdentity } from "../../kernel/caller.ts";
 import { gatewayOperations } from "../../gateway/contract.ts";

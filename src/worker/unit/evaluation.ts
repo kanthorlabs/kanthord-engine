@@ -1,24 +1,14 @@
-import type { SetupFailure } from "./environment-setup.ts";
-import { AssessmentResult } from "../../mission/contract.ts";
 import type { ExecutionBudget } from "./budget.ts";
 import { evaluationChain } from "./chain-evaluation.ts";
 import { readPinnedRevision } from "./node-reads.ts";
 import { runChain } from "./chain-runner.ts";
-import { hostOf, seedOf } from "./step-support.ts";
-import {
-  EndReason,
-  type ExecutionEnd,
-  type ExecutionRun,
-} from "./execution-run.ts";
-import { failedVerificationReport } from "./judgement.ts";
+import { hostOf, seedOf } from "./chain-host.ts";
+import type { ExecutionRun } from "./execution-run.ts";
+import { EndReason, type ExecutionEnd } from "./execution-stop.ts";
 import { EvaluationStage } from "./rework-cause.ts";
-import type { StepsInput } from "./steps-implement.ts";
+import type { HostInput } from "./chain-host.ts";
 import { ActionResultKind } from "../contract.ts";
-import {
-  type AgentOpener,
-  agentPort,
-  evaluationPorts,
-} from "./worker-ports.ts";
+import { type AgentOpener, evaluationPorts } from "./worker-ports.ts";
 
 export { EvaluationStage };
 
@@ -36,22 +26,8 @@ export async function requestAndRelease(
   return run.release(false);
 }
 
-export const VERIFICATION_SUBJECT = "Evaluation verification results";
-
-export function setupFailureAssessment(setupFailure: SetupFailure | null) {
-  if (setupFailure === null) return null;
-  return {
-    result: AssessmentResult.CriterionNotMet,
-    rationale: failedVerificationReport(
-      setupFailure.run,
-      setupFailure.commands,
-    ),
-    proposals: [],
-  };
-}
-
 export async function runEvaluation(
-  input: StepsInput,
+  input: HostInput,
   run: ExecutionRun,
   budget: ExecutionBudget,
   openAgent: AgentOpener,
@@ -64,8 +40,8 @@ export async function runEvaluation(
       run,
       budget,
       resources: new AsyncDisposableStack(),
-      host: hostOf(input, openAgent),
-      ports: evaluationPorts(run, agentPort({ run, budget, open: openAgent })),
+      host: hostOf(input),
+      ports: evaluationPorts({ run, budget, open: openAgent }),
     },
   );
 }

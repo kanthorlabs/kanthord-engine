@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Attributes } from "../../tracking/contract.ts";
 import { STOP_DETAIL_MAX_LENGTH } from "../../scheduler/contract.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
-import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import type { Verification } from "./verification.ts";
 
 export const NoProgressRule = {

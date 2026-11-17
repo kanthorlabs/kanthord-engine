@@ -1,8 +1,10 @@
 import type { AffectedTest } from "../../agent/prompt-composer.ts";
 import { readDeclaration } from "./affected.ts";
-import { DeadlineKind, type Step } from "./chain.ts";
-import { next, stepsInputOf, wallDeadlineOf } from "./step-support.ts";
-import { repositoryOf } from "./steps-implement.ts";
+import { DeadlineKind } from "./chain.ts";
+import type { Step } from "./chain-host.ts";
+import { next, wallDeadlineOf } from "./step-support.ts";
+import { hostInputOf } from "./chain-host.ts";
+import { repositoryOf } from "./setup-repository.ts";
 
 export const affectedDeclaration: Step<
   unknown,
@@ -16,7 +18,7 @@ export const affectedDeclaration: Step<
   stops: [],
   note: "an absent or invalid declaration gives no entry",
   async run(ctx, scope, io) {
-    const input = stepsInputOf(ctx, io);
+    const input = hostInputOf(ctx, io);
     const deadline = wallDeadlineOf(ctx);
     const affectedTests: AffectedTest[] = [];
     for (const checkout of ctx.workspace.checkouts) {

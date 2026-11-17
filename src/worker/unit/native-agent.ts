@@ -26,12 +26,13 @@ import type {
   ExecutionCredential,
   ModelRuntimeFactory,
 } from "./model-runtime.ts";
-import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import { providerFailureOf } from "../../llm/provider-failure.ts";
 import { redactReason, thrownReason } from "../../kernel/probe.ts";
 import { CodedError } from "../../kernel/errors.ts";
 import { type Attributes, SpanStatus } from "../../tracking/contract.ts";
 import { traceAgent } from "./agent-telemetry.ts";
+import type { NativeAgent } from "./native-agent-session.ts";
 import {
   SessionFormat,
   SpanOperation,
@@ -70,19 +71,6 @@ export interface TurnPrompt {
   template_digest: string;
   work_digest: string;
 }
-export interface NativeAgent {
-  prompt(work: WorkPrompt): Promise<void>;
-  instruct(
-    work: WorkPrompt,
-    text: string,
-    template: PromptTemplate,
-  ): Promise<void>;
-  lastText(): string | undefined;
-  abort(): Promise<void>;
-  readonly budget: ExecutionBudget;
-  closeTrace(status: SpanStatus): void;
-  dispose(): void;
-}
 
 const ASSISTANT_ROLE = "assistant";
 const PROVIDER_ERROR = "error";
@@ -95,7 +83,7 @@ export async function promptStop(
   return new ExecutionStop(
     EndReason.OperationFailed,
     error instanceof CodedError ? error.code : null,
-    thrownReason(error, await secrets()),
+    { detail: thrownReason(error, await secrets()) },
   );
 }
 
@@ -112,7 +100,7 @@ async function providerFailure(
   return new ExecutionStop(
     EndReason.ProviderFailed,
     providerFailureOf(errorMessage),
-    detail || null,
+    { detail: detail || null },
   );
 }
 
