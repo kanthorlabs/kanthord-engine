@@ -9,7 +9,9 @@ import {
   intakeCredentialOperations,
   intakeOperations,
 } from "../intake/contract.ts";
+import { createIdentity } from "../kernel/identity.ts";
 import { AccessPolicy, type Operation } from "../kernel/operation.ts";
+import { ProjectScope } from "../kernel/project-scope.ts";
 import { isObject } from "../kernel/values.ts";
 import { llmOperations } from "../llm/contract.ts";
 import { missionOperations } from "../mission/contract.ts";
@@ -25,11 +27,17 @@ import { workerOperations } from "../worker/contract.ts";
 import {
   WORKBENCH_IMPORT_FORMAT_TEXT,
   WORKBENCH_IMPORT_RETIREMENT_TEXT,
+  WORKBENCH_PROJECT_SCOPE_TEXT,
   WorkbenchGuardReason,
   workbenchHumanOnlyText,
   workbenchOperations,
 } from "./contract.ts";
-import { floorOf, HUMAN_ONLY_OPERATIONS } from "./guard.ts";
+import {
+  floorOf,
+  guardDecision,
+  type GuardRun,
+  HUMAN_ONLY_OPERATIONS,
+} from "./guard.ts";
 import { SECRET_OPERATION_IDS } from "./tools.ts";
 
 const NO_OPERATIONS = 0;
@@ -201,5 +209,120 @@ test("(security: refused path) floorOf applies the import rules in order", () =>
   assert.deepEqual(
     floorOf(apply, { params: {}, query: {}, body: { format: "json" } }),
     IMPORT_CONFIRM,
+  );
+});
+
+const SCOPE_PROJECT = createIdentity("project");
+const OTHER_PROJECT = createIdentity("project");
+const OWN_NODE = createIdentity("node");
+const OWN_MISSION = createIdentity("mission");
+const OTHER_NODE = createIdentity("node");
+const OTHER_MISSION = createIdentity("mission");
+const OWNERS = new Map([
+  [OWN_NODE, SCOPE_PROJECT],
+  [OWN_MISSION, SCOPE_PROJECT],
+  [OTHER_NODE, OTHER_PROJECT],
+  [OTHER_MISSION, OTHER_PROJECT],
+]);
+const GUEST_RUN_CONFIRM = {
+  action: "confirm",
+  guard: { cause: "guest_run", reason: null, confidence: null },
+};
+const PROJECT_SCOPE_BLOCK = {
+  action: "block",
+  reason: WORKBENCH_PROJECT_SCOPE_TEXT,
+};
+const HUMAN_ACT = {
+  reason: "plan",
+  expected_mission_version: 1,
+  expected_state: "available",
+  expected_attempt: 1,
+};
+const DIGEST = "0".repeat(64);
+
+function guestRun() {
+  let classifierCalls = 0;
+  const run: GuardRun = {
+    agentName: "ops@1",
+    request: "@Yumi pause the node",
+    autoMode: () => true,
+    classifier: async () => {
+      classifierCalls++;
+      return null;
+    },
+    guest: {
+      scope: new Set([SCOPE_PROJECT]),
+      resolver: new ProjectScope({
+        projectOf: (_prefix, id) => OWNERS.get(id) ?? null,
+      }),
+    },
+  };
+  return { run, classifierCalls: () => classifierCalls };
+}
+
+function nodeAct(nodeId: string) {
+  return { params: { node_id: nodeId }, query: {}, body: HUMAN_ACT };
+}
+
+function importOf(missionId: string) {
+  return {
+    params: { mission_id: missionId },
+    query: {},
+    body: {
+      format: "json",
+      mission_id: missionId,
+      mission_version: 1,
+      reason: "plan",
+      entries: [],
+      preview_digest: DIGEST,
+      confirmed_retirements: [],
+    },
+  };
+}
+
+test("(security) layer test 2: an R1 call and an R2 call on an in-scope target of a guest run wait on a card with cause guest_run and reach no classifier", async () => {
+  const { run, classifierCalls } = guestRun();
+  for (const operation of [
+    missionOperations["node.pause"],
+    missionOperations["node.block"],
+  ])
+    assert.deepEqual(
+      await guardDecision(operation, nodeAct(OWN_NODE), run),
+      GUEST_RUN_CONFIRM,
+      operation.id,
+    );
+  assert.equal(classifierCalls(), NO_OPERATIONS);
+});
+
+test("(security) resolver test 15: an R1 call and an import on a target of another project block with project_scope in a guest run", async () => {
+  const { run, classifierCalls } = guestRun();
+  assert.deepEqual(
+    await guardDecision(
+      missionOperations["node.pause"],
+      nodeAct(OTHER_NODE),
+      run,
+    ),
+    PROJECT_SCOPE_BLOCK,
+  );
+  assert.deepEqual(
+    await guardDecision(
+      missionOperations["import.apply"],
+      importOf(OTHER_MISSION),
+      run,
+    ),
+    PROJECT_SCOPE_BLOCK,
+  );
+  assert.equal(classifierCalls(), NO_OPERATIONS);
+});
+
+test("(security) resolver test 15: agent.cooldown.clear blocks with project_scope in a guest run", async () => {
+  const { run } = guestRun();
+  assert.deepEqual(
+    await guardDecision(
+      agentOperations["cooldown.clear"],
+      { params: { credential: "primary" }, query: {} },
+      run,
+    ),
+    PROJECT_SCOPE_BLOCK,
   );
 });

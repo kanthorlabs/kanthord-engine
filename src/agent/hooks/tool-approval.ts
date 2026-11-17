@@ -1,10 +1,12 @@
+import type { HumanIdentity } from "../../kernel/caller.ts";
 import type {
   InlineExtension,
   ToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
 
 export type ToolDecision =
-  { allowed: true } | { allowed: false; reason: string; terminate: boolean };
+  | { allowed: true; approver?: HumanIdentity }
+  | { allowed: false; reason: string; terminate: boolean };
 
 export function toolApproval(input: {
   approve(

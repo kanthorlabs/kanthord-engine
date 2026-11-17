@@ -5,6 +5,11 @@ import {
   intakeOperations,
 } from "../intake/contract.ts";
 import type { Operation } from "../kernel/operation.ts";
+import {
+  type ProjectScope,
+  type ScopedInput,
+  ScopeVerdict,
+} from "../kernel/project-scope.ts";
 import { isObject } from "../kernel/values.ts";
 import { llmOperations } from "../llm/contract.ts";
 import { ImportFormat, missionOperations } from "../mission/contract.ts";
@@ -21,7 +26,10 @@ import {
   type GuardInfo,
   WORKBENCH_IMPORT_FORMAT_TEXT,
   WORKBENCH_IMPORT_RETIREMENT_TEXT,
+  WORKBENCH_PROJECT_SCOPE_TEXT,
   WORKBENCH_REJECTION_REASON,
+  WORKBENCH_SERVICE_NAME,
+  workbenchGuestScopeText,
   workbenchHumanOnlyText,
   workbenchOperations,
 } from "./contract.ts";
@@ -34,6 +42,7 @@ import {
   type GuardRequest,
   GuardTier,
 } from "./guard-classifier.ts";
+import { fullInput } from "./tools.ts";
 
 export const HUMAN_ONLY_OPERATIONS: ReadonlySet<string> = new Set([
   missionOperations["node.discard"].id,
@@ -158,8 +167,14 @@ export type GuardClassifier = (
   request: GuardRequest,
 ) => Promise<ClassifyResult>;
 
+export interface GuestRunScope {
+  scope: ReadonlySet<string>;
+  resolver: ProjectScope;
+}
+
 export interface GuardRun {
   agentName: string;
+  guest?: GuestRunScope;
   request: string;
   autoMode(): boolean;
   classifier(): Promise<GuardClassifier | null>;
@@ -235,13 +250,34 @@ function classified(result: ClassifyResult, run: GuardRun): GuardDecision {
   });
 }
 
+function guestBlock(
+  operation: Operation,
+  input: unknown,
+  guest: GuestRunScope,
+): GuardDecision | undefined {
+  if (operation.service === WORKBENCH_SERVICE_NAME)
+    return block(workbenchGuestScopeText(operation.id));
+  const parsed = operation.input.safeParse(fullInput(operation, input));
+  if (!parsed.success) return block(WORKBENCH_PROJECT_SCOPE_TEXT);
+  const verdict = guest.resolver.check(operation, {
+    input: parsed.data as ScopedInput,
+    scope: guest.scope,
+  });
+  return verdict === ScopeVerdict.Allowed
+    ? undefined
+    : block(WORKBENCH_PROJECT_SCOPE_TEXT);
+}
+
 export async function guardDecision(
   operation: Operation,
   input: unknown,
   run: GuardRun,
 ): Promise<GuardDecision> {
+  const refused = run.guest && guestBlock(operation, input, run.guest);
+  if (refused) return refused;
   const floor = floorOf(operation, input);
   if (floor) return floor;
+  if (run.guest) return confirm(GuardCause.GuestRun);
   if (!run.autoMode()) return confirm(GuardCause.AutoModeOff);
   if (REVERSIBLE_OPERATIONS.has(operation.id))
     return { action: GuardAction.Auto, reason: GuardCause.Reversible };

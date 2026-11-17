@@ -2,12 +2,17 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import type { TSchema } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { HumanIdentity } from "../kernel/caller.ts";
+import { type HumanIdentity, isReadOnlyIdentity } from "../kernel/caller.ts";
 import { CancellationContext } from "../kernel/context.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import { agentOperations } from "../agent/contract.ts";
 import { llmOperations } from "../llm/contract.ts";
-import { type Operation, OperationResultType } from "../kernel/operation.ts";
+import { HttpStatus } from "../kernel/http.ts";
+import {
+  type Operation,
+  type OperationResult,
+  OperationResultType,
+} from "../kernel/operation.ts";
 import { nodeStateSchema } from "../mission/contract.ts";
 import { projectOperations } from "../project/contract.ts";
 import { type WorkbenchRecord, WorkbenchRecordKind } from "./contract.ts";
@@ -164,6 +169,25 @@ function assertCardAct(operationId: string): void {
     );
 }
 
+const SCOPE_REFUSAL_STATUSES: readonly number[] = [
+  HttpStatus.Forbidden,
+  HttpStatus.NotFound,
+];
+const TARGET_REFUSED_TEXT =
+  "workbench.action.target_refused: The target is not available in this conversation.";
+
+function refusedText(
+  identity: HumanIdentity,
+  failure: Extract<OperationResult<unknown>, { type: "failure" }>,
+): string {
+  if (
+    isReadOnlyIdentity(identity) &&
+    SCOPE_REFUSAL_STATUSES.includes(failure.status)
+  )
+    return TARGET_REFUSED_TEXT;
+  return `${failure.error.error.code}: ${failure.error.error.message}`;
+}
+
 export function offerActionTool(input: OfferActionToolInput): ToolDefinition {
   const { operations, invoke, requester, offer } = input;
   async function readTarget(
@@ -187,9 +211,7 @@ export function offerActionTool(input: OfferActionToolInput): ToolDefinition {
       );
       if (result.type === OperationResultType.Completed) return result.data;
       if (result.type === OperationResultType.Failure)
-        throw new Error(
-          `${result.error.error.code}: ${result.error.error.message}`,
-        );
+        throw new Error(refusedText(identity, result));
       throw new Error(
         `${operation.id}: the result of the operation is indeterminate.`,
       );

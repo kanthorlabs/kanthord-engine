@@ -6,7 +6,12 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { CancellationContext } from "../kernel/context.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { isObject } from "../kernel/values.ts";
-import type { HumanIdentity } from "../kernel/caller.ts";
+import { type HumanIdentity, isReadOnlyIdentity } from "../kernel/caller.ts";
+import {
+  type ProjectScope,
+  type ScopedInput,
+  ScopeVerdict,
+} from "../kernel/project-scope.ts";
 import {
   AccessPolicy,
   type ClientOptions,
@@ -31,6 +36,7 @@ import {
   intakeCredentialOperations,
   intakeOperations,
 } from "../intake/contract.ts";
+import { WORKBENCH_PROJECT_SCOPE_TEXT } from "./contract.ts";
 import { guardClassOf } from "./guard.ts";
 import { llmOperations } from "../llm/contract.ts";
 import { missionOperations } from "../mission/contract.ts";
@@ -189,10 +195,45 @@ export function workbenchToolDeclarations(
   return agent.tools.workbench.map((tool) => WORKBENCH_TOOL_DECLARATIONS[tool]);
 }
 
+export function fullInput(operation: Operation, params: unknown): unknown {
+  return { ...(params as object), ...toolShape(operation).omitted };
+}
+
+export interface OperationToolOptions {
+  requester: (toolCallId: string) => HumanIdentity | undefined;
+  scopeOf: () => ReadonlySet<string> | null;
+  projectScope: ProjectScope;
+}
+
+function refuseOutOfScope(
+  operation: Operation,
+  input: unknown,
+  options: OperationToolOptions,
+): void {
+  const scope = options.scopeOf();
+  if (scope === null) return;
+  const verdict = options.projectScope.check(operation, {
+    input: input as ScopedInput,
+    scope,
+  });
+  if (verdict !== ScopeVerdict.Allowed)
+    throw new Error(WORKBENCH_PROJECT_SCOPE_TEXT);
+}
+
+function refuseUnapprovedOwner(
+  operation: Operation,
+  identity: HumanIdentity,
+  options: OperationToolOptions,
+): void {
+  if (options.scopeOf() === null || operation.mutation) return;
+  if (!isReadOnlyIdentity(identity))
+    throw new Error(WORKBENCH_PROJECT_SCOPE_TEXT);
+}
+
 export function operationTool(
   operation: Operation,
   invoke: InvokeOperation,
-  requester: () => HumanIdentity | undefined,
+  options: OperationToolOptions,
 ): ToolDefinition {
   assert.ok(HUMAN_POLICIES.includes(operation.access));
   const { schema, omitted } = toolShape(operation);
@@ -201,24 +242,23 @@ export function operationTool(
     label: operation.id,
     description: operation.description,
     parameters: schema,
-    async execute(_toolCallId, params, signal) {
-      const identity = requester();
+    async execute(toolCallId, params, signal) {
+      const identity = options.requester(toolCallId);
       assert.ok(identity);
+      const input = { ...(params as object), ...omitted };
+      refuseOutOfScope(operation, input, options);
+      refuseUnapprovedOwner(operation, identity, options);
       const context = new CancellationContext();
       const cancel = () => context.cancel();
       signal?.addEventListener("abort", cancel, { once: true });
       try {
-        const result = await invoke(
-          operation,
-          { ...(params as object), ...omitted },
-          {
-            identity,
-            context,
-            ...(operation.mutation
-              ? { idempotencyKey: createIdempotencyKey() }
-              : {}),
-          },
-        );
+        const result = await invoke(operation, input, {
+          identity,
+          context,
+          ...(operation.mutation
+            ? { idempotencyKey: createIdempotencyKey() }
+            : {}),
+        });
         if (result.type === OperationResultType.Completed)
           return {
             content: [{ type: "text", text: canonicalJSON(result.data) }],

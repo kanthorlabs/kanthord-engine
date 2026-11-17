@@ -105,6 +105,7 @@ import {
   type WorkbenchConfiguration,
   workbenchConfigurationSchema,
   WorkbenchErrorCode,
+  workbenchGuestScopeText,
   workbenchOperations,
   WorkbenchRecordKind,
   type WorkbenchSession,
@@ -335,6 +336,7 @@ interface OpenSession {
   agentErrorStale: boolean;
   queuedMessages: PendingMessage[];
   approvals: Map<string, Approval>;
+  approvers: Map<string, HumanIdentity>;
   doneReports: Set<string>;
   evidenceGrants: Set<string>;
   autoMode: boolean;
@@ -347,7 +349,10 @@ interface EvidenceGrantOptions {
   signal: AbortSignal | undefined;
 }
 
-type PendingApprovalRequest = Omit<PendingApproval, "session_id">;
+type PendingApprovalRequest = Omit<
+  PendingApproval,
+  "session_id" | "requested_by"
+>;
 
 interface Approval {
   approval: PendingApproval;
@@ -614,6 +619,7 @@ function newOpenSession(fields: SessionFields): OpenSession {
     queuedMessages: [],
     queue: Promise.resolve(),
     approvals: new Map(),
+    approvers: new Map(),
     doneReports: new Set(),
     evidenceGrants: new Set(),
   };
@@ -825,8 +831,12 @@ export class WorkbenchService implements Service {
   ): GuardRun {
     const host = this.hostOf(session);
     assert.ok(host.run);
+    const scope = this.scopeOf(session);
     return {
       agentName: session.agentName,
+      ...(scope === null
+        ? {}
+        : { guest: { scope, resolver: this.dependencies.projectScope } }),
       request: host.run.request,
       autoMode: () => host.autoMode,
       classifier: () => this.guardClassifier(session, signal),
@@ -1107,11 +1117,11 @@ export class WorkbenchService implements Service {
         declaration.tools.operation,
       ).map((operation) => {
         toolOperationsByName.set(toolName(operation.id), operation);
-        return operationTool(
-          operation,
-          this.dependencies.invoke,
-          () => session.requester,
-        );
+        return operationTool(operation, this.dependencies.invoke, {
+          requester: (toolCallId) => this.callIdentity(session, toolCallId),
+          scopeOf: () => this.scopeOf(session),
+          projectScope: this.dependencies.projectScope,
+        });
       });
       const offer = isPhase
         ? []
@@ -1239,6 +1249,8 @@ export class WorkbenchService implements Service {
       return { allowed: false, reason: message, terminate: false };
     }
     const host = this.hostOf(session);
+    const guestBlock = this.guestEvidenceBlock(host);
+    if (guestBlock) return guestBlock;
     const shared = this.dependencies.invites.isShared(host.id);
     if (this.granted(session, facts.node_id)) return ALLOWED;
     const decision = await this.approval(
@@ -1253,6 +1265,15 @@ export class WorkbenchService implements Service {
     return decision;
   }
 
+  private guestEvidenceBlock(host: OpenSession): ToolDecision | null {
+    if (host.run?.origin?.kind !== AuthorKind.Guest) return null;
+    return {
+      allowed: false,
+      reason: workbenchGuestScopeText(EVIDENCE_READ_TOOL),
+      terminate: false,
+    };
+  }
+
   private granted(session: OpenSession, nodeId: string): boolean {
     const host = this.hostOf(session);
     if (host.evidenceGrants.has(nodeId)) return true;
@@ -1265,6 +1286,27 @@ export class WorkbenchService implements Service {
   private messageGrants(session: OpenSession, nodeId: string): boolean {
     const host = this.hostOf(session);
     return host.autoMode && !!host.run?.request.includes(nodeId);
+  }
+
+  private requestedBy(session: OpenSession): Author {
+    const origin = this.hostOf(session).run?.origin;
+    assert.ok(origin, "An approval card belongs to a run with an origin.");
+    return { kind: origin.kind, name: origin.name };
+  }
+
+  private callIdentity(
+    session: OpenSession,
+    toolCallId: string,
+  ): HumanIdentity | undefined {
+    const approver = session.approvers.get(toolCallId);
+    session.approvers.delete(toolCallId);
+    return approver ?? session.requester;
+  }
+
+  private scopeOf(session: OpenSession): ReadonlySet<string> | null {
+    const { run } = this.hostOf(session);
+    const ids = run === null ? null : this.runScope(run);
+    return ids === null ? null : new Set(ids);
   }
 
   private approval(
@@ -1285,12 +1327,18 @@ export class WorkbenchService implements Service {
       clearTimeout(timer);
       signal?.removeEventListener("abort", reject);
       session.approvals.delete(approval.tool_call_id);
+      if (result.allowed && result.approver)
+        session.approvers.set(approval.tool_call_id, result.approver);
       decision.resolve(result);
       this.notify(session);
     };
     signal?.addEventListener("abort", reject, { once: true });
     session.approvals.set(approval.tool_call_id, {
-      approval: { ...approval, session_id: session.id },
+      approval: {
+        ...approval,
+        session_id: session.id,
+        requested_by: this.requestedBy(session),
+      },
       decide,
     });
     this.notify(session);
@@ -1346,7 +1394,9 @@ export class WorkbenchService implements Service {
       if (this.sessions.get(sessionId)?.approvals.get(toolCallId) !== pending)
         throw approvalNotFound(sessionId, toolCallId);
     }
-    pending.decide(approved ? ALLOWED : REJECTED);
+    pending.decide(
+      approved ? { allowed: true, approver: humanOf(caller) } : REJECTED,
+    );
     return { session_id: sessionId, tool_call_id: toolCallId, approved };
   }
 

@@ -125,6 +125,7 @@ export const GuardCause = {
   Oversize: "oversize",
   NoVerdict: "no_verdict",
   Classifier: "classifier",
+  GuestRun: "guest_run",
 } as const;
 export type GuardCause = (typeof GuardCause)[keyof typeof GuardCause];
 
@@ -295,10 +296,16 @@ export const WORKBENCH_REJECTION_REASON = "The human rejected the call.";
 export const WorkbenchGuardReason = {
   HumanOnly: "workbench.guard.human_only",
   ImportFormat: "workbench.guard.import_format",
+  GuestScope: "workbench.guard.guest_scope",
+  ProjectScope: "workbench.guard.project_scope",
 } as const;
 export function workbenchHumanOnlyText(operationId: string): string {
   return `${WorkbenchGuardReason.HumanOnly}: ${operationId} is a human-only action. Only the human runs it.`;
 }
+export function workbenchGuestScopeText(operationId: string): string {
+  return `${WorkbenchGuardReason.GuestScope}: ${operationId} is not available in a run that a guest started.`;
+}
+export const WORKBENCH_PROJECT_SCOPE_TEXT = `${WorkbenchGuardReason.ProjectScope}: The record is not available in this conversation.`;
 export const WORKBENCH_IMPORT_RETIREMENT_TEXT = `${WorkbenchGuardReason.HumanOnly}: mission.import.apply with confirmed_retirements is a human-only action. Import with no retirement, or ask the human to retire the nodes.`;
 export const WORKBENCH_IMPORT_FORMAT_TEXT = `${WorkbenchGuardReason.ImportFormat}: Agent imports use format json.`;
 export const WORKBENCH_EXPIRY_REASON =
@@ -313,6 +320,7 @@ export type GuardInfo = z.infer<typeof guardInfoSchema>;
 
 export const pendingApprovalSchema = pendingApprovalSummarySchema.extend({
   session_id: z.string(),
+  requested_by: authorSchema,
   input: z.record(z.string(), z.unknown()),
   guard: guardInfoSchema.nullable(),
 });
