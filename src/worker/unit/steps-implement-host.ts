@@ -10,12 +10,12 @@ import {
   revisionsFrame,
 } from "./chain-implement.ts";
 import { type ChainIo, runChain, runNodes } from "./chain-runner.ts";
+import type { ExecutionRun } from "./execution-run.ts";
 import {
   EndReason,
   type ExecutionEnd,
-  type ExecutionRun,
   ExecutionStop,
-} from "./execution-run.ts";
+} from "./execution-stop.ts";
 import { type ReleaseGate, ReleaseGateKind } from "./release-gate.ts";
 import { doneRecordPut } from "./step-done-record-put.ts";
 import { hostOf, seedOf } from "./step-support.ts";
@@ -28,7 +28,7 @@ import {
   type TaskRunner,
 } from "./steps-implement.ts";
 import { Phase } from "./telemetry.ts";
-import { WorkspaceKind } from "./workspace.ts";
+import { WorkspaceKind } from "./workspace-layout.ts";
 import { workerPorts } from "./worker-ports.ts";
 
 const FIRST_UNIT = 0;

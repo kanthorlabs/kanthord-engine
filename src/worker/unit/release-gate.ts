@@ -8,7 +8,7 @@ import {
   nodeVerdict,
   runAffected,
 } from "./affected.ts";
-import { verificationCommands } from "./evaluation-input.ts";
+import { verificationCommands } from "./review-scope.ts";
 import {
   affectedRevisionInstruction,
   releaseRevisionInstruction,
@@ -25,7 +25,7 @@ import {
   VerificationContext,
   verificationObserver,
 } from "./method-telemetry.ts";
-import { portStop } from "./execution-run.ts";
+import { portStop } from "./execution-stop.ts";
 import type { StepsState } from "./steps-implement.ts";
 import { memoScopeOf } from "./verification-memo.ts";
 import { repositoryOf } from "./setup-repository.ts";

@@ -1,5 +1,5 @@
 import { BudgetLimit } from "../../scheduler/contract.ts";
-import { EndReason } from "./execution-run.ts";
+import { EndReason } from "./execution-stop.ts";
 import {
   BudgetEndKind,
   type Chain,

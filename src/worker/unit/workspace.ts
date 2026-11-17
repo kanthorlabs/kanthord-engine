@@ -65,19 +65,22 @@ import {
   type PoolSlot,
   prepareTree,
   TreePool,
-  TreeSource,
 } from "./tree-pool.ts";
+import { TreeSource } from "./foundry-ports.ts";
 import type { HandoverSshIdentity } from "../../custody/contract.ts";
+import {
+  CHECKOUTS_DIRECTORY,
+  type ExamineCheckout,
+  RELEASE_DIRECTORY,
+  REVIEW_DIRECTORY,
+  SCRATCH_DIRECTORY,
+  SCRATCH_STORE_DIRECTORY,
+  type WorkspaceCheckout,
+  WorkspaceKind,
+  WORKSPACES_DIRECTORY,
+} from "./workspace-layout.ts";
 
-export const WORKSPACES_DIRECTORY = "workspaces";
-export const SCRATCH_DIRECTORY = ".kanthord-scratch/";
 const GIT_EXCLUDE = [".git", "info", "exclude"];
-export const CHECKOUTS_DIRECTORY = "checkouts";
-export const RELEASE_DIRECTORY = "release";
-export const BASE_DIRECTORY = "base";
-export const REVIEW_DIRECTORY = "review";
-export const EVIDENCE_DIRECTORY = "evidence";
-export const SCRATCH_STORE_DIRECTORY = "scratch";
 const SCRATCH_ENTRY = basename(SCRATCH_DIRECTORY);
 const SCRATCH_BRANCH_FILE = "branch";
 const SCRATCH_NOT_STORED = "scratch not stored";
@@ -94,12 +97,6 @@ const NO_REFS: readonly string[] = [];
 const NO_CHECKOUTS = 0;
 const SINGLE_CHECKOUT = 1;
 const FIRST_CHECKOUT = 0;
-export const WorkspaceKind = {
-  Node: "node",
-  Execution: "execution",
-  Review: "review",
-} as const;
-export type WorkspaceKind = (typeof WorkspaceKind)[keyof typeof WorkspaceKind];
 export const WorkspaceRemoval = {
   Removed: "removed",
   Absent: "absent",
@@ -164,17 +161,6 @@ interface RepositoryAddress {
   kind: "repository";
   binding_id: string;
   commit: string;
-}
-export interface ExamineCheckout {
-  name: string;
-  directory: string;
-  base_branch: string;
-}
-export interface WorkspaceCheckout {
-  binding_id: string;
-  name: string;
-  directory: string;
-  head: string;
 }
 interface WorkspaceRepository {
   binding_id: string;
@@ -935,16 +921,6 @@ export class WorkspaceRoot {
       }
     }
   }
-}
-
-export function workRepositoriesOf(
-  root: string,
-  checkouts: readonly ExamineCheckout[],
-): ExamineCheckout[] {
-  return checkouts.map((checkout) => ({
-    ...checkout,
-    directory: relative(root, checkout.directory) || ".",
-  }));
 }
 
 function codeOf(error: unknown): string {

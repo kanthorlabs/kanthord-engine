@@ -13,7 +13,7 @@ import {
   type ExaminePorts,
   PortResultKind,
 } from "./foundry-ports.ts";
-import { portStop } from "./execution-run.ts";
+import { portStop } from "./execution-stop.ts";
 import {
   budgetEnd,
   budgetMapped,

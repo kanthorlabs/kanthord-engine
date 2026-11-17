@@ -6,10 +6,10 @@ import { renderTemplate } from "../../agent/prompt-templates.ts";
 import { commitOf, headCommit, isAncestor, mergeRef } from "./local-git.ts";
 import { implementRepositoriesOf, type StepsState } from "./steps-implement.ts";
 import { mergedBranchesOf } from "./setup-repository.ts";
-import type { WorkspaceCheckout } from "./workspace.ts";
+import type { WorkspaceCheckout } from "./workspace-layout.ts";
 import { type ImplementPorts, PortResultKind } from "./foundry-ports.ts";
 import { GitStep, withinGit } from "./method-telemetry.ts";
-import { portStop } from "./execution-run.ts";
+import { portStop } from "./execution-stop.ts";
 import { gatedAgent, mergeCommitMessage } from "./turn-gate.ts";
 
 const NO_FILES = 0;

@@ -1,5 +1,5 @@
 import { DeadlineKind, type Step } from "./chain.ts";
-import { EndReason } from "./execution-run.ts";
+import { EndReason } from "./execution-stop.ts";
 import { type ImplementPorts, PortResultKind } from "./foundry-ports.ts";
 import { headCommit } from "./local-git.ts";
 import { next } from "./step-support.ts";

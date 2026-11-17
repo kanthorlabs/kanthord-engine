@@ -3,7 +3,7 @@ import { AssetKind } from "../../mission/contract.ts";
 import { DeadlineKind, type Step } from "./chain.ts";
 import { next, stepsInputOf, wallDeadlineOf } from "./step-support.ts";
 import { restoreCheckout } from "./turn-gate.ts";
-import { WorkspaceKind } from "./workspace.ts";
+import { WorkspaceKind } from "./workspace-layout.ts";
 
 const NO_CHECKOUTS = 0;
 

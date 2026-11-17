@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { DeadlineKind, type FoundryStep } from "./chain.ts";
-import { verificationCommands } from "./evaluation-input.ts";
+import { verificationCommands } from "./review-scope.ts";
 import {
   environmentDigestsOf,
   testedCommitOf,

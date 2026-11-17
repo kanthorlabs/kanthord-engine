@@ -1,7 +1,6 @@
 import { canonicalJSON } from "../../kernel/json.ts";
 import { AFFECTED_SUBJECT } from "./affected.ts";
 import { DeadlineKind, type FoundryStep } from "./chain.ts";
-import { VERIFICATION_SUBJECT } from "./evaluation.ts";
 import type { EvaluationPorts } from "./foundry-ports.ts";
 import {
   ROUND_PATCH_MEDIA_TYPE,
@@ -9,6 +8,8 @@ import {
   roundPatchContent,
 } from "./round-patch.ts";
 import { next, stopsReturned, submittedEvidence } from "./step-support.ts";
+
+export const VERIFICATION_SUBJECT = "Evaluation verification results";
 
 function jsonAsset(value: unknown) {
   return {

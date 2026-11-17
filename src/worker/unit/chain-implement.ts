@@ -12,7 +12,7 @@ import {
   loopNode,
   stepNode,
 } from "./chain.ts";
-import { verificationCommands } from "./evaluation-input.ts";
+import { verificationCommands } from "./review-scope.ts";
 import {
   phaseSpan,
   taskEnd,

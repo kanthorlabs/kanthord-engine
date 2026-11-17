@@ -1,5 +1,5 @@
 import { DeadlineKind, type FoundryStep } from "./chain.ts";
-import { ExecutionStop } from "./execution-run.ts";
+import { ExecutionStop } from "./execution-stop.ts";
 import type { ImplementPorts } from "./foundry-ports.ts";
 import { verifyRelease } from "./release-gate.ts";
 import { budgetEnd, next, stopped } from "./step-support.ts";

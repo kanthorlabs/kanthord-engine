@@ -1,9 +1,7 @@
-export {
-  openNativeAgent,
-  type NativeAgent,
-  type NativeAgentInput,
-} from "./native-agent.ts";
-export { handedSshAccess, WorkspaceRoot, WorkspaceKind } from "./workspace.ts";
+export { openNativeAgent, type NativeAgentInput } from "./native-agent.ts";
+export type { NativeAgent } from "./native-agent-session.ts";
+export { handedSshAccess, WorkspaceRoot } from "./workspace.ts";
+export { WorkspaceKind } from "./workspace-layout.ts";
 export { UnitFootprint, type UnitFootprintOptions } from "./footprint.ts";
 export { runVerifications, verificationPassed } from "./verification.ts";
 export { discardChanges, headCommit } from "./local-git.ts";
@@ -21,13 +19,13 @@ export {
   runNativeExecution,
   type NativeExecutionInput,
 } from "./native-method.ts";
+export { isExecutionEnd } from "./execution-run.ts";
 export {
-  isExecutionEnd,
   EndReason,
   ExecutionEndKind,
   ExecutionStop,
   type ExecutionEnd,
-} from "./execution-run.ts";
+} from "./execution-stop.ts";
 export type { MethodClients } from "./method-clients.ts";
 export {
   executionSessionItems,

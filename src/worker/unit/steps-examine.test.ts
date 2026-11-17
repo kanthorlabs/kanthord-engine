@@ -18,22 +18,20 @@ import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { background } from "../../kernel/context.ts";
 import type { Revision } from "../../mission/contract.ts";
-import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
+import { ExecutionRun } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import {
   anthropicSetup,
   everyBindingSshAccess,
   repositorySetup,
   transport,
 } from "./test-support.ts";
-import {
-  CHECKOUTS_DIRECTORY,
-  REVIEW_DIRECTORY,
-  WorkspaceRoot,
-} from "./workspace.ts";
+import { WorkspaceRoot } from "./workspace.ts";
+import { CHECKOUTS_DIRECTORY, REVIEW_DIRECTORY } from "./workspace-layout.ts";
 import { PoolClass } from "./tree-pool.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { RepositoryTransport } from "../contract.ts";
-import type { NativeAgent } from "./native-agent.ts";
+import type { NativeAgent } from "./native-agent-session.ts";
 import { runStepsExamine } from "./steps-examine.ts";
 import {
   type CancellationContext,

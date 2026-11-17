@@ -9,7 +9,7 @@ import {
   stepNode,
 } from "./chain.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
-import { EndReason } from "./execution-run.ts";
+import { EndReason } from "./execution-stop.ts";
 import {
   evaluationEnd,
   evaluationSpan,

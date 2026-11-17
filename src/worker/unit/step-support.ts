@@ -7,7 +7,7 @@ import {
   type StepIo,
   StepKind,
 } from "./chain.ts";
-import { ExecutionStop, portStop } from "./execution-run.ts";
+import { ExecutionStop, portStop } from "./execution-stop.ts";
 import {
   type EvaluationPorts,
   type EvidenceDraft,

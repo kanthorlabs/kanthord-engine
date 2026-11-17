@@ -23,7 +23,7 @@ import {
   type VerificationInput,
   verificationPassed,
 } from "./verification.ts";
-import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import { VerificationContext } from "./method-telemetry.ts";
 import { VerificationMemo } from "./verification-memo.ts";
 import { REASON_MAX_LENGTH } from "../../kernel/probe.ts";

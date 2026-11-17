@@ -16,7 +16,7 @@ import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
 import type { ExecutionEnvironment } from "../contract.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
-import { EndReason, ExecutionStop, portStop } from "./execution-run.ts";
+import { EndReason, ExecutionStop, portStop } from "./execution-stop.ts";
 import {
   type CommandTree,
   type LogPort,
@@ -126,21 +126,23 @@ export function setupStop(result: SetupFailure): ExecutionStop {
   return new ExecutionStop(
     EndReason.EnvironmentFailed,
     EnvironmentFailure.SetupFailed,
-    redactReason(
-      JSON.stringify(
-        last === undefined
-          ? { commands: result.commands }
-          : {
-              exit_code: last.exit_code,
-              signal: last.signal,
-              timed_out: last.timed_out,
-              command: last.command,
-              ...(result.changed === undefined
-                ? {}
-                : { changed_tracked_files: result.changed }),
-            },
+    {
+      detail: redactReason(
+        JSON.stringify(
+          last === undefined
+            ? { commands: result.commands }
+            : {
+                exit_code: last.exit_code,
+                signal: last.signal,
+                timed_out: last.timed_out,
+                command: last.command,
+                ...(result.changed === undefined
+                  ? {}
+                  : { changed_tracked_files: result.changed }),
+              },
+        ),
       ),
-    ),
+    },
   );
 }
 
@@ -148,7 +150,7 @@ function invalidEnvironment(reason: string): ExecutionStop {
   return new ExecutionStop(
     EndReason.EnvironmentFailed,
     EnvironmentFailure.SetupFailed,
-    redactReason(`${DEVCONTAINER_FILE}: ${reason}`),
+    { detail: redactReason(`${DEVCONTAINER_FILE}: ${reason}`) },
   );
 }
 

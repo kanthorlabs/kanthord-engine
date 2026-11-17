@@ -1035,7 +1035,7 @@ test("a stop context reaches the execution with the given stop and keeps the con
   const context = new CancellationContext();
   const stops = new CancellationContext();
   const entered = Promise.withResolvers<void>();
-  const requested = new ExecutionStop(EndReason.WorkerStopped, null, null);
+  const requested = new ExecutionStop(EndReason.WorkerStopped, null);
   const seen: { reason: unknown; contextOpen: boolean }[] = [];
   const hosted = hostExecution(
     {

@@ -2,16 +2,16 @@ import assert from "node:assert/strict";
 import type { Revision, TaskContent } from "../../mission/contract.ts";
 import type { ExecutionSetup, RepositoryTransport } from "../contract.ts";
 import type { SshAccess } from "../../repository/contract.ts";
+import type { WorkspaceRoot } from "./workspace.ts";
 import {
   workRepositoriesOf,
   type WorkspaceCheckout,
-  type WorkspaceRoot,
-} from "./workspace.ts";
-import type { NativeAgent } from "./native-agent.ts";
+} from "./workspace-layout.ts";
+import type { NativeAgent } from "./native-agent-session.ts";
 import { removeRootEntries, restoreCheckout } from "./turn-gate.ts";
 import type { CancellationContext } from "../../kernel/context.ts";
 import type { CommonPorts } from "./foundry-ports.ts";
-import type { MethodClaim } from "./execution-run.ts";
+import type { MethodClaim } from "./execution-stop.ts";
 import {
   type AffectedTest,
   renderWorkPrompt,
@@ -32,7 +32,7 @@ import {
 } from "./environment-setup.ts";
 import { criterionRevisionInstruction } from "./judgement.ts";
 import { isDone, readDoneRecords } from "./done-record.ts";
-import { type Verdict, VerdictSource } from "./node-reads.ts";
+import { type Verdict, VerdictSource } from "./node-verdict.ts";
 import {
   type JudgedCheckout,
   judgedCheckouts,

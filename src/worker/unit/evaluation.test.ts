@@ -15,7 +15,8 @@ import {
   DeadlineExceeded,
 } from "../../kernel/context.ts";
 import { COMMAND_LIMIT_MS, ExecutionBudget } from "./budget.ts";
-import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
+import { ExecutionRun } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import { executionBoundary } from "./native-method.ts";
 import { ExecutionIntent } from "../contract.ts";
 import {
@@ -31,7 +32,7 @@ import { PoolClass } from "./tree-pool.ts";
 import { AFFECTED_DECLARATION_FILE, AffectedVerdict } from "./affected.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { RepositoryTransport } from "../contract.ts";
-import type { NativeAgent } from "./native-agent.ts";
+import type { NativeAgent } from "./native-agent-session.ts";
 import type { WorkPrompt } from "../../agent/prompt-composer.ts";
 import { requestAndRelease, runEvaluation } from "./evaluation.ts";
 import { EnvironmentFailure } from "../../scheduler/contract.ts";

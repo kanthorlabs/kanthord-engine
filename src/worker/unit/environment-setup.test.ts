@@ -22,7 +22,7 @@ import { digest } from "../../kernel/json.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import type { ExecutionEnvironment } from "../contract.ts";
-import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import {
   BaseHead,
   runSetup,
@@ -35,7 +35,8 @@ import { commitOf, headCommit } from "./local-git.ts";
 import { validRoots } from "./setup-record.ts";
 import { VerificationClass } from "./verification.ts";
 import { spawnedPids, survivingProcesses } from "../../agent/test-support.ts";
-import { BASE_DIRECTORY, WorkspaceRoot } from "./workspace.ts";
+import { WorkspaceRoot } from "./workspace.ts";
+import { BASE_DIRECTORY } from "./workspace-layout.ts";
 import { PoolClass, repoKeyOf } from "./tree-pool.ts";
 import { baseTreePort } from "./worker-ports.ts";
 

@@ -1,4 +1,4 @@
-import { VerdictSource } from "./node-reads.ts";
+import { VerdictSource } from "./node-verdict.ts";
 import assert from "node:assert/strict";
 import { suite, test } from "node:test";
 import { existsSync } from "node:fs";

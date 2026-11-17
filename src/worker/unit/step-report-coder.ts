@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { DeadlineKind, type Step } from "./chain.ts";
 import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
-import { EndReason } from "./execution-run.ts";
+import { EndReason } from "./execution-stop.ts";
 import { type ImplementPorts, PortResultKind } from "./foundry-ports.ts";
 import { next } from "./step-support.ts";
-import { REPORT_MEDIA_TYPE } from "./steps-examine.ts";
+import { REPORT_MEDIA_TYPE } from "./step-examine-turn.ts";
 
 const NO_ITEMS = 0;
 

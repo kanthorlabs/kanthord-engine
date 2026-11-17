@@ -30,20 +30,22 @@ import {
   scrubTree,
 } from "./local-git.ts";
 import { GitStep, withinGit } from "./method-telemetry.ts";
-import type { NativeAgent } from "./native-agent.ts";
+import type { NativeAgent } from "./native-agent-session.ts";
 import { readSetupRecord } from "./setup-record.ts";
 import { endedByBudget } from "./step-support.ts";
 import { mergedBranchesOf, repositoryOf } from "./setup-repository.ts";
 import type { StepsInput } from "./steps-implement.ts";
 import { PoolClass, prepareTree } from "./tree-pool.ts";
 import {
-  BASE_DIRECTORY,
-  CHECKOUTS_DIRECTORY,
   type LeftoverRepository,
-  RELEASE_DIRECTORY,
   sshAccessOf,
   type WorkspaceRoot,
 } from "./workspace.ts";
+import {
+  BASE_DIRECTORY,
+  CHECKOUTS_DIRECTORY,
+  RELEASE_DIRECTORY,
+} from "./workspace-layout.ts";
 
 const NO_REFS: readonly string[] = [];
 const NO_TREES = 0;

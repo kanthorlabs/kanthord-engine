@@ -7,10 +7,9 @@ import type {
 } from "../../mission/contract.ts";
 import type { ExecutionSetup } from "../contract.ts";
 import type { ReviewWorkspace } from "./chain.ts";
-import type { MethodClaim } from "./execution-run.ts";
-import type { NativeAgent } from "./native-agent.ts";
+import type { MethodClaim } from "./execution-stop.ts";
+import type { NativeAgent } from "./native-agent-session.ts";
 import type { SpanRecorder } from "./telemetry.ts";
-import type { TreeSource } from "./tree-pool.ts";
 
 export const PortResultKind = {
   Ok: "ok",
@@ -32,6 +31,13 @@ export interface PortBudgetEnd {
 
 export type PortResult<T> =
   { kind: typeof PortResultKind.Ok; value: T } | PortFailure;
+
+export const TreeSource = {
+  Pool: "pool",
+  Clone: "clone",
+  Node: "node",
+} as const;
+export type TreeSource = (typeof TreeSource)[keyof typeof TreeSource];
 
 export type EvidenceDraft = Omit<EvidenceSubmit, keyof ExecutionContext>;
 export type EvidenceId = Evidence["id"];

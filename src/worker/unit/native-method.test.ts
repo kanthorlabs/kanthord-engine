@@ -9,13 +9,15 @@ import { setTimeout } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
 import { background } from "../../kernel/context.ts";
 import {
-  EndReason,
   EXECUTION_NOT_RUNNING,
   EXECUTION_PROOF_FAILED,
-  ExecutionEndKind,
   ExecutionRun,
-  ExecutionStop,
 } from "./execution-run.ts";
+import {
+  EndReason,
+  ExecutionEndKind,
+  ExecutionStop,
+} from "./execution-stop.ts";
 import {
   disposeAgent,
   executionBoundary,
@@ -43,7 +45,8 @@ import {
   testSshAccess,
   transport,
 } from "./test-support.ts";
-import { BASE_DIRECTORY, WorkspaceRoot } from "./workspace.ts";
+import { WorkspaceRoot } from "./workspace.ts";
+import { BASE_DIRECTORY } from "./workspace-layout.ts";
 import { PoolClass } from "./tree-pool.ts";
 import {
   RecordKind,
@@ -55,7 +58,8 @@ import { SpanOperation } from "./telemetry.ts";
 import { ExecutionIntent, type RepositoryTransport } from "../contract.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { type NativeAgent, openNativeAgent } from "./native-agent.ts";
+import { openNativeAgent } from "./native-agent.ts";
+import type { NativeAgent } from "./native-agent-session.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 
@@ -197,7 +201,7 @@ test("a stop during a turn ends the open tool and turn with stopped and the agen
   } as unknown as MethodClients);
   run.onTraceClose((status) => agent.closeTrace(status));
   const result = await executionBoundary(run, async () => {
-    throw new ExecutionStop(EndReason.OperationFailed, null, null);
+    throw new ExecutionStop(EndReason.OperationFailed, null);
   });
   await pending.catch(() => {});
   disposeAgent(agent);

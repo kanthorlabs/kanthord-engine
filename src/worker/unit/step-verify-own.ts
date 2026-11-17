@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { PromptTemplate } from "../../agent/contract.ts";
 import type { TaskContent } from "../../mission/contract.ts";
 import { DeadlineKind, type FoundryStep } from "./chain.ts";
-import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import { taskRevisionInstruction } from "./judgement.ts";
 import {
   noProgressDetail,
@@ -36,16 +36,14 @@ type Verified = NextResult<UnitScope, never> | BudgetEndResult<UnitScope>;
 function countUnchangedTurn(state: StepsState, rule: NoProgressRule): void {
   state.unchangedTurns++;
   if (state.unchangedTurns >= NO_PROGRESS_LIMIT)
-    throw new ExecutionStop(
-      EndReason.NoProgress,
-      null,
-      noProgressDetail({
+    throw new ExecutionStop(EndReason.NoProgress, null, {
+      detail: noProgressDetail({
         rule,
         count: state.unchangedTurns,
         limit: NO_PROGRESS_LIMIT,
         verification: state.lastVerification,
       }),
-    );
+    });
 }
 
 function recordTaskVerification(

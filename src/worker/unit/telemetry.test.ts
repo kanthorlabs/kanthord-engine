@@ -29,7 +29,7 @@ import {
   verificationObserver,
   type VerificationScope,
 } from "./method-telemetry.ts";
-import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import { noProgressDetail, NoProgressRule } from "./progress-rule.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
 import type { TaskContent } from "../../mission/contract.ts";
@@ -307,10 +307,8 @@ async function stoppedTaskEnd(stop: ExecutionStop) {
 
 test("a no_progress stop ends the task span with the rule, the counts and the verification state", async () => {
   const end = await stoppedTaskEnd(
-    new ExecutionStop(
-      EndReason.NoProgress,
-      null,
-      noProgressDetail({
+    new ExecutionStop(EndReason.NoProgress, null, {
+      detail: noProgressDetail({
         rule: NoProgressRule.UnchangedRevision,
         count: NO_PROGRESS_COUNT,
         limit: NO_PROGRESS_COUNT,
@@ -324,7 +322,7 @@ test("a no_progress stop ends the task span with the rule, the counts and the ve
           timed_out: false,
         },
       }),
-    ),
+    }),
   );
   assert.equal(end?.status, SpanStatus.Error);
   assert.deepEqual(end?.attributes, {

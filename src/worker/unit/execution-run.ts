@@ -24,7 +24,7 @@ import {
 } from "../../scheduler/contract.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
-import { type FailureCause, unattributed } from "../../kernel/cause.ts";
+import { unattributed } from "../../kernel/cause.ts";
 import { type GitStep, gitStepOf } from "./git-step.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 import { RepositoryErrorCode } from "../../repository/contract.ts";
@@ -34,6 +34,13 @@ import {
   type PortResult,
   PortResultKind,
 } from "./foundry-ports.ts";
+import {
+  EndReason,
+  type ExecutionEnd,
+  ExecutionEndKind,
+  ExecutionStop,
+  type MethodClaim,
+} from "./execution-stop.ts";
 
 type EvidenceBody = Omit<
   Parameters<MethodClients["mission"]["evidence.submit"]>[0]["body"],
@@ -56,47 +63,12 @@ function gitFailureCause(error: CodedError): unknown {
   return cause;
 }
 
-export const EndReason = {
-  ...ExecutionStopReason,
-  Revoked: "revoked",
-} as const;
-export type EndReason = (typeof EndReason)[keyof typeof EndReason];
-export const ExecutionEndKind = {
-  Released: "released",
-  Closed: "closed",
-  Ended: "ended",
-} as const;
-export type ExecutionEnd =
-  | {
-      kind: typeof ExecutionEndKind.Released;
-      furtherWork: boolean;
-      stop?: ReleaseStop;
-    }
-  | { kind: typeof ExecutionEndKind.Closed; outcomeId: string }
-  | {
-      kind: typeof ExecutionEndKind.Ended;
-      reason: EndReason;
-      code: string | null;
-      detail?: string;
-    };
 export const EXECUTION_PROOF_FAILED =
   "gateway.invocation.execution_proof_failed";
 export const EXECUTION_NOT_RUNNING = "scheduler.execution.not_running";
 const NO_TELEMETRY_FAULTS = 0;
 const TELEMETRY_FLUSH_MS = 5000;
 const UNNAMED_WORKER = "unnamed";
-
-export interface MethodClaim {
-  execution_id: string;
-  node_id: string;
-  attempt: number;
-  pinned_revision: number;
-  node_branch: string;
-  created_at: number;
-  expired_at: number;
-  trace_id: string;
-  root_span_id: string;
-}
 
 export function isExecutionEnd(result: OperationResult<unknown>): boolean {
   return (
@@ -113,34 +85,6 @@ export function endsExecution(error: unknown): error is CodedError {
     error instanceof CodedError &&
     (error.code === EXECUTION_PROOF_FAILED ||
       error.code === EXECUTION_NOT_RUNNING)
-  );
-}
-
-export class ExecutionStop extends Error {
-  readonly reason: EndReason;
-  readonly code: string | null;
-  readonly detail: string | null;
-  readonly cause: FailureCause | null;
-  constructor(
-    reason: EndReason,
-    code: string | null,
-    detail: string | null = null,
-    cause: FailureCause | null = null,
-  ) {
-    super(`Execution stopped: ${reason}`);
-    this.reason = reason;
-    this.code = code;
-    this.detail = detail;
-    this.cause = cause;
-  }
-}
-
-export function portStop(failed: PortFailure): ExecutionStop {
-  return new ExecutionStop(
-    EndReason.OperationFailed,
-    failed.code,
-    failed.detail ?? null,
-    failed.cause ?? null,
   );
 }
 
@@ -329,7 +273,10 @@ export class ExecutionRun {
     const built = this.stopWith(stop.reason, stop.code, stop.detail, null);
     return stop.cause === null || built.cause === null
       ? built
-      : new ExecutionStop(built.reason, built.code, built.detail, stop.cause);
+      : new ExecutionStop(built.reason, built.code, {
+          detail: built.detail,
+          cause: stop.cause,
+        });
   }
 
   cleanupContext(): CancellationContext {
@@ -371,7 +318,7 @@ export class ExecutionRun {
             git_step: gitStep,
             verification_timed_out: this.verificationTimedOut,
           });
-    return new ExecutionStop(reason, code, stored, cause);
+    return new ExecutionStop(reason, code, { detail: stored, cause });
   }
 
   private requireActive(): void {

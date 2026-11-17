@@ -27,13 +27,13 @@ import {
   stepNode,
 } from "./chain.ts";
 import { type ChainIo, executionBoundary, runChain } from "./chain-runner.ts";
+import { ExecutionRun } from "./execution-run.ts";
 import {
   EndReason,
   type ExecutionEnd,
   ExecutionEndKind,
-  ExecutionRun,
   ExecutionStop,
-} from "./execution-run.ts";
+} from "./execution-stop.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { Phase } from "./telemetry.ts";
 

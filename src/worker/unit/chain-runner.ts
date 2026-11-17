@@ -21,13 +21,13 @@ import {
   type StepHost,
   StepKind,
 } from "./chain.ts";
+import type { ExecutionRun } from "./execution-run.ts";
 import {
   EndReason,
   type ExecutionEnd,
   ExecutionEndKind,
-  type ExecutionRun,
   ExecutionStop,
-} from "./execution-run.ts";
+} from "./execution-stop.ts";
 import type { CommonPorts } from "./foundry-ports.ts";
 import { Phase, type SpanEnd } from "./telemetry.ts";
 

@@ -14,9 +14,9 @@ import {
   type FoundryIo,
   type FoundryStep,
 } from "./chain.ts";
-import { setupFailureAssessment } from "./evaluation.ts";
-import { verificationCommands } from "./evaluation-input.ts";
-import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { verificationCommands } from "./review-scope.ts";
+import type { SetupFailure } from "./environment-setup.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import type {
   AgentSession,
   EvaluationPorts,
@@ -50,7 +50,7 @@ import {
   verificationPassed,
   type VerificationRun,
 } from "./verification.ts";
-import { workRepositoriesOf } from "./workspace.ts";
+import { workRepositoriesOf } from "./workspace-layout.ts";
 
 const NO_ITEMS = 0;
 const NO_PATCHES = 0;
@@ -322,3 +322,15 @@ export const judgement: JudgementStep = {
     );
   },
 };
+
+export function setupFailureAssessment(setupFailure: SetupFailure | null) {
+  if (setupFailure === null) return null;
+  return {
+    result: AssessmentResult.CriterionNotMet,
+    rationale: failedVerificationReport(
+      setupFailure.run,
+      setupFailure.commands,
+    ),
+    proposals: [],
+  };
+}

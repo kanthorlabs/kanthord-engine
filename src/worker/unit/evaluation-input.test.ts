@@ -30,16 +30,18 @@ import {
   TEST_SSH_HOST_KEY,
   TEST_SSH_PUBLIC_KEY,
 } from "./test-support.ts";
-import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
+import { ExecutionRun } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import { ExecutionIntent } from "../contract.ts";
+import { WorkspaceRoot } from "./workspace.ts";
 import {
   CHECKOUTS_DIRECTORY,
   EVIDENCE_DIRECTORY,
   REVIEW_DIRECTORY,
-  WorkspaceRoot,
-} from "./workspace.ts";
+} from "./workspace-layout.ts";
 import type { RepositoryTransport } from "../contract.ts";
-import { prepareEvaluation, verificationCommands } from "./evaluation-input.ts";
+import { prepareEvaluation } from "./evaluation-input.ts";
+import { verificationCommands } from "./review-scope.ts";
 import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 
 const FIRST_ROUND = {

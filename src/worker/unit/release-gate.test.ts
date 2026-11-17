@@ -21,7 +21,7 @@ import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
 import type { ExecutionEnvironment } from "../contract.ts";
 import type { TaskContent } from "../../mission/contract.ts";
-import { EndReason } from "./execution-run.ts";
+import { EndReason } from "./execution-stop.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { taskWork } from "./steps-implement.ts";
@@ -34,7 +34,7 @@ import { refreshAtRelease } from "./base-refresh.ts";
 import { nodeUnitOf, ReleaseGateKind } from "./release-gate.ts";
 import { releaseGate } from "./steps-implement-host.ts";
 import { noProgressDetail, NoProgressRule } from "./progress-rule.ts";
-import { RELEASE_DIRECTORY, WorkspaceKind } from "./workspace.ts";
+import { RELEASE_DIRECTORY, WorkspaceKind } from "./workspace-layout.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
 import {
   advanceBase,
@@ -56,7 +56,8 @@ import { RecordKind } from "../../tracking/contract.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { VerificationContext } from "./method-telemetry.ts";
 import { VERIFICATION_RERUNS } from "./verification.ts";
-import { PoolClass, repoKeyOf, TreeSource } from "./tree-pool.ts";
+import { PoolClass, repoKeyOf } from "./tree-pool.ts";
+import { TreeSource } from "./foundry-ports.ts";
 import { workerPorts } from "./worker-ports.ts";
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;

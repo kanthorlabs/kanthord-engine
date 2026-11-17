@@ -5,7 +5,7 @@ import {
   StepKind,
   type StepResult,
 } from "./chain.ts";
-import type { ExecutionEnd } from "./execution-run.ts";
+import type { ExecutionEnd } from "./execution-stop.ts";
 
 const NO_UNITS = 0;
 

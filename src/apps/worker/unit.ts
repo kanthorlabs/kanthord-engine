@@ -251,7 +251,7 @@ export class WorkerUnit {
     if (!this.executionLive || !execution) return;
     for (const order of orders)
       if (order.execution_id === execution.claim.execution_id)
-        execution.stopWith(new ExecutionStop(order.reason, null, null));
+        execution.stopWith(new ExecutionStop(order.reason, null));
   }
 
   private async reportFootprint(
@@ -363,10 +363,7 @@ export class WorkerUnit {
   private async endLiveExecution(): Promise<void> {
     const execution = this.execution!;
     if (this.abandoning) execution.context.cancel();
-    else
-      execution.stopWith(
-        new ExecutionStop(EndReason.WorkerStopped, null, null),
-      );
+    else execution.stopWith(new ExecutionStop(EndReason.WorkerStopped, null));
     const result = await execution.task;
     if (result === null && !this.abandoning) return;
     throw new Diagnostic(

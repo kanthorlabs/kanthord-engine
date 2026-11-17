@@ -1,4 +1,4 @@
-import { EndReason } from "./execution-run.ts";
+import { EndReason } from "./execution-stop.ts";
 import { DeadlineKind, type Step } from "./chain.ts";
 import { placedOf, reviewWorkspaceOf } from "./evaluation-input.ts";
 import { next, stepsInputOf, wallDeadlineOf } from "./step-support.ts";

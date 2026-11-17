@@ -15,9 +15,9 @@ import {
   COLLECTION_MAX,
   SpanStatus,
 } from "../../tracking/contract.ts";
-import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import { gitFailure } from "./method-telemetry.ts";
-import type { NativeAgent } from "./native-agent.ts";
+import type { NativeAgent } from "./native-agent-session.ts";
 import {
   abortMerge,
   changedFiles,
@@ -40,7 +40,10 @@ import {
 import { MERGE_MARKERS_LEFT, TurnViolation } from "./stop-codes.ts";
 import type { StepsState } from "./steps-implement.ts";
 import { type SpanEnd, SpanOperation } from "./telemetry.ts";
-import { SCRATCH_DIRECTORY, type WorkspaceCheckout } from "./workspace.ts";
+import {
+  SCRATCH_DIRECTORY,
+  type WorkspaceCheckout,
+} from "./workspace-layout.ts";
 
 export const GateMode = {
   Write: "write",
@@ -218,11 +221,9 @@ async function runGate(
         violated = violation.code;
         const detail = await violate(state, before, violation, context);
         if (turn.violationEnd === ViolationEnd.Restore) return false;
-        throw new ExecutionStop(
-          EndReason.OperationFailed,
-          violation.code,
+        throw new ExecutionStop(EndReason.OperationFailed, violation.code, {
           detail,
-        );
+        });
       }
       let changed = false;
       for (const [index, checkout] of state.checkouts.entries()) {

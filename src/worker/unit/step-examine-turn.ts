@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { PromptTemplate } from "../../agent/contract.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { DeadlineKind, type FoundryStep } from "./chain.ts";
-import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import type { ExaminePorts } from "./foundry-ports.ts";
 import { examineInstruction } from "./judgement.ts";
 import { reportFacts } from "./report-facts.ts";
@@ -14,8 +14,10 @@ import {
   stopsReturned,
   submittedEvidence,
 } from "./step-support.ts";
-import { REPORT_MEDIA_TYPE, REPORT_SUBJECT } from "./steps-examine.ts";
-import { workRepositoriesOf } from "./workspace.ts";
+import { workRepositoriesOf } from "./workspace-layout.ts";
+
+export const REPORT_SUBJECT = "Report on current dependency outcomes";
+export const REPORT_MEDIA_TYPE = "text/markdown";
 
 export const examineTurn: FoundryStep<
   unknown,

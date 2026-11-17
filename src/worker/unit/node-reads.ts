@@ -9,7 +9,6 @@ import {
   AssessmentResult,
   AssetKind,
   ClosingEvent,
-  type Finding,
   MissionErrorCode,
   type Outcome,
   type TestedInput,
@@ -21,7 +20,13 @@ import {
   requestedChangesText,
 } from "./judgement.ts";
 import type { ExecutionRun } from "./execution-run.ts";
-import { EndReason } from "./execution-run.ts";
+import { EndReason } from "./execution-stop.ts";
+import {
+  type JudgedCommit,
+  type Prior,
+  type Verdict,
+  VerdictSource,
+} from "./node-verdict.ts";
 
 export const READ_PAGE_LIMIT = 1000;
 const FIRST_ATTEMPT = 1;
@@ -276,31 +281,6 @@ function testedCommits(testedInput: TestedInput | null): JudgedCommit[] {
 interface RepositoryName {
   binding_id: string;
   name: string;
-}
-
-export interface JudgedCommit {
-  binding_id: string;
-  commit: string;
-}
-
-export const VerdictSource = {
-  FailedChecks: "failed_checks",
-  Rework: "rework",
-} as const;
-export type VerdictSource = (typeof VerdictSource)[keyof typeof VerdictSource];
-
-export interface Verdict {
-  source: VerdictSource;
-  text: string;
-  judged: JudgedCommit[];
-  findings: Finding[];
-  round: number | null;
-  linkUpdates?: number;
-}
-
-export interface Prior {
-  verdict: Verdict | null;
-  cleared: string | null;
 }
 
 async function readLinkUpdates(

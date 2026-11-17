@@ -6,7 +6,7 @@ import {
   StepKind,
 } from "./chain.ts";
 import { requestAndRelease } from "./evaluation.ts";
-import { EndReason, ExecutionEndKind } from "./execution-run.ts";
+import { EndReason, ExecutionEndKind } from "./execution-stop.ts";
 import { reworkCauseOf } from "./rework-cause.ts";
 
 export const assessmentSubmit: Step<

@@ -20,7 +20,8 @@ import {
   fauxToolCall,
   implementFixture,
 } from "./test-support.ts";
-import { RELEASE_DIRECTORY, sshAccessOf } from "./workspace.ts";
+import { sshAccessOf } from "./workspace.ts";
+import { RELEASE_DIRECTORY } from "./workspace-layout.ts";
 import { PoolClass, repoKeyOf } from "./tree-pool.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 import { workerPorts } from "./worker-ports.ts";

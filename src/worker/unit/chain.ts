@@ -15,26 +15,27 @@ import type {
   SetupEntry,
   SetupFailure,
 } from "./environment-setup.ts";
+import type { ExecutionRun } from "./execution-run.ts";
 import type {
   EndReason,
   ExecutionEnd,
-  ExecutionRun,
   ExecutionStop,
   MethodClaim,
-} from "./execution-run.ts";
+} from "./execution-stop.ts";
 import type { CommonPorts } from "./foundry-ports.ts";
-import type { NativeAgent } from "./native-agent.ts";
-import type { Prior, readDependencies } from "./node-reads.ts";
+import type { NativeAgent } from "./native-agent-session.ts";
+import type { readDependencies } from "./node-reads.ts";
+import type { Prior } from "./node-verdict.ts";
 import { Phase, type SpanEnd, type SpanRecorder } from "./telemetry.ts";
 import type { SpanStart } from "./telemetry.ts";
 import type { TestedInput, VerificationRun } from "./verification.ts";
+import type { WorkspaceRoot } from "./workspace.ts";
 import type {
   ExamineCheckout,
   WorkspaceCheckout,
   WorkspaceKind,
-  WorkspaceRoot,
-} from "./workspace.ts";
-import type { PlacedReview, ReviewScope } from "./evaluation-input.ts";
+} from "./workspace-layout.ts";
+import type { PlacedReview, ReviewScope } from "./review-scope.ts";
 import type { ReleaseGate, VerifiedRelease } from "./release-gate.ts";
 import type { AffectedStep } from "./step-affected-run.ts";
 import type { EvaluationAssessment } from "./step-judgement.ts";

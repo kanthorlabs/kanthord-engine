@@ -1,16 +1,10 @@
-import type { SetupFailure } from "./environment-setup.ts";
-import { AssessmentResult } from "../../mission/contract.ts";
 import type { ExecutionBudget } from "./budget.ts";
 import { evaluationChain } from "./chain-evaluation.ts";
 import { readPinnedRevision } from "./node-reads.ts";
 import { runChain } from "./chain-runner.ts";
 import { hostOf, seedOf } from "./step-support.ts";
-import {
-  EndReason,
-  type ExecutionEnd,
-  type ExecutionRun,
-} from "./execution-run.ts";
-import { failedVerificationReport } from "./judgement.ts";
+import type { ExecutionRun } from "./execution-run.ts";
+import { EndReason, type ExecutionEnd } from "./execution-stop.ts";
 import { EvaluationStage } from "./rework-cause.ts";
 import type { StepsInput } from "./steps-implement.ts";
 import { ActionResultKind } from "../contract.ts";
@@ -34,20 +28,6 @@ export async function requestAndRelease(
   if (!items.every((item) => ACCEPTED_ITEM_KINDS.includes(item.kind)))
     return run.stop(EndReason.ActionUnsettled);
   return run.release(false);
-}
-
-export const VERIFICATION_SUBJECT = "Evaluation verification results";
-
-export function setupFailureAssessment(setupFailure: SetupFailure | null) {
-  if (setupFailure === null) return null;
-  return {
-    result: AssessmentResult.CriterionNotMet,
-    rationale: failedVerificationReport(
-      setupFailure.run,
-      setupFailure.commands,
-    ),
-    proposals: [],
-  };
 }
 
 export async function runEvaluation(

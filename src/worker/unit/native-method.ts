@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
-import {
-  EndReason,
-  type ExecutionEnd,
-  type ExecutionRun,
-} from "./execution-run.ts";
-import { type NativeAgent, openNativeAgent } from "./native-agent.ts";
+import type { ExecutionRun } from "./execution-run.ts";
+import { EndReason, type ExecutionEnd } from "./execution-stop.ts";
+import { openNativeAgent } from "./native-agent.ts";
+import type { NativeAgent } from "./native-agent-session.ts";
 import {
   credentialSecrets,
   mergedSecrets,
@@ -12,7 +10,8 @@ import {
 import type { TelemetrySink } from "./telemetry.ts";
 import type { Context } from "../../kernel/context.ts";
 import type { Diagnostic } from "../../kernel/errors.ts";
-import { type MethodClaim, ExecutionRun as Run } from "./execution-run.ts";
+import { ExecutionRun as Run } from "./execution-run.ts";
+import type { MethodClaim } from "./execution-stop.ts";
 import type { MethodClients } from "./method-clients.ts";
 import {
   ExecutionIntent,
@@ -43,7 +42,7 @@ import {
   workerPorts,
 } from "./worker-ports.ts";
 
-export type { ExecutionEnd } from "./execution-run.ts";
+export type { ExecutionEnd } from "./execution-stop.ts";
 export { executionBoundary } from "./chain-runner.ts";
 const WORKING_AGENT = 0;
 export interface NativeExecutionInput {

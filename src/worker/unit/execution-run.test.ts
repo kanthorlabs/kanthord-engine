@@ -6,12 +6,11 @@ import {
   OperationResultType,
 } from "../../kernel/operation.ts";
 import {
-  EndReason,
   EXECUTION_NOT_RUNNING,
   EXECUTION_PROOF_FAILED,
   ExecutionRun,
-  ExecutionStop,
 } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { ProviderFailure } from "../../scheduler/contract.ts";
 import { CodedError, Diagnostic, OperationError } from "../../kernel/errors.ts";
@@ -384,7 +383,7 @@ test("a stop release sends the cause detail of a provider failure", async (t) =>
     cause: attributed(CauseCategory.LlmProvider, CauseSubcategory.Unavailable),
   };
   const stopped = await run.stopOf(
-    new ExecutionStop(stop.reason, stop.code, stop.detail),
+    new ExecutionStop(stop.reason, stop.code, { detail: stop.detail }),
   );
   const bodies: unknown[] = [];
   run.clients.scheduler = {
@@ -560,11 +559,9 @@ test("an environment failure stop detail holds the digests of the environments o
   stopAfter(t, () => run.dispose());
   const stop = await releasedStop(
     run,
-    new ExecutionStop(
-      EndReason.EnvironmentFailed,
-      "setup_failed",
-      JSON.stringify({ exit_code: 3, command: "exit 3" }),
-    ),
+    new ExecutionStop(EndReason.EnvironmentFailed, "setup_failed", {
+      detail: JSON.stringify({ exit_code: 3, command: "exit 3" }),
+    }),
   );
   assert.deepEqual(JSON.parse(stop.detail!), {
     exit_code: 3,

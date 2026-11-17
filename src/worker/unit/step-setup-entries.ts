@@ -21,7 +21,7 @@ import {
   wallDeadlineOf,
 } from "./step-support.ts";
 import type { ExecutionCtx } from "./chain.ts";
-import { BASE_DIRECTORY } from "./workspace.ts";
+import { BASE_DIRECTORY } from "./workspace-layout.ts";
 
 const SETUP_STOP = "environment_failed/setup_failed";
 
