@@ -57,6 +57,7 @@ import {
   type EnvironmentSessionInput,
 } from "./environment-agent.ts";
 import { EnvironmentTarget, type ProofFile } from "./environment-state.ts";
+import { environmentAgentTools } from "./environment-agent-tools.ts";
 
 const TEST_TIMEOUT_MS = 60000;
 const ROLE_TOOL_RESULT = "toolResult";
@@ -71,7 +72,7 @@ const PACKAGE_TEXT = "fixture-package-text";
 const OUTSIDE_TEXT = "text-outside-the-checkout";
 const LINKED_TEXT = "text-behind-the-link";
 const WRITE_TOOL = "environment_write";
-const FINISH_TOOL = "environment_finish";
+const FINISH_TOOL = "probe";
 const BINDING_NAME = "app";
 const BINDING_ID = "binding_01";
 const ENV_BINDING_TEXT = "Use the pinned toolchain image.";
@@ -457,6 +458,46 @@ test(
     );
     assert.equal(f.provider.calls.length, ONE_CALL);
     assert.deepEqual(f.runDirectories(), []);
+  },
+);
+
+test(
+  "the env@1 session runs each of its session tools",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const calls: [string, Parameters<typeof fauxToolCall>[1]][] = [
+      ["read", { path: "package.json" }],
+      ["grep", { pattern: "fixture" }],
+      ["find", { pattern: "*.json" }],
+      ["ls", {}],
+      ["probe", { command: "uname -a" }],
+      ["environment_write", { environment: {} }],
+    ];
+    const f = fixture(t, [
+      ...calls.map(([tool, input]) =>
+        fauxAssistantMessage([fauxToolCall(tool, input)], {
+          stopReason: "toolUse",
+        }),
+      ),
+      fauxAssistantMessage("done"),
+    ]);
+    const served: string[] = [];
+    const tools = () =>
+      environmentAgentTools({
+        probe: async () => served.push("probe"),
+        write: async () => served.push("environment_write"),
+      });
+    assert.equal(
+      await f.agent.run(f.input(tools)),
+      EnvironmentSessionEnd.Ended,
+    );
+    assert.deepEqual(
+      toolResults(f.provider).map(
+        (result) => (result as { isError: boolean }).isError,
+      ),
+      calls.map(() => false),
+    );
+    assert.deepEqual(served, ["probe", "environment_write"]);
   },
 );
 
