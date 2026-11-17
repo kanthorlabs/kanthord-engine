@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { resourceFailureReasonSchema, ResourceStatus } from "./health.ts";
-import { sealedObjectSchema } from "./hpke.ts";
+import { sealedObjectSchema } from "./sealed-object.ts";
 
 export const SecretShape = {
   ApiKey: "api_key",

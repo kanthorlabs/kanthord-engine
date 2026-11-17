@@ -18,6 +18,7 @@ const FORBIDDEN_DIRECTORIES = [
 ];
 const ADMITTED_MODULES = ["src/repository/contract.ts"];
 const FORBIDDEN_MODULES = [
+  "src/kernel/hpke.ts",
   "src/worker/unit/method-clients.ts",
   "src/worker/unit/execution-run.ts",
   "src/worker/unit/tree-pool.ts",

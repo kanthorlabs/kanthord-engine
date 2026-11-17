@@ -16,7 +16,10 @@ import {
 } from "../kernel/cleanup.ts";
 import type { ExternalLink } from "../kernel/external-link.ts";
 import { canonicalJSON, timestamp } from "../kernel/json.ts";
-import { base64urlSchema, sealedObjectSchema } from "../kernel/hpke.ts";
+import {
+  base64urlSchema,
+  sealedObjectSchema,
+} from "../kernel/sealed-object.ts";
 import {
   type HandoverEnvelope,
   handoverEnvelopeSchema,
