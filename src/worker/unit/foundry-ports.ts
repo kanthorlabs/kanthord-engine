@@ -4,6 +4,8 @@ import type {
   Evidence,
   EvidenceSubmit,
   ExecutionContext,
+  ExecutionDependency,
+  Outcome,
 } from "../../mission/contract.ts";
 import type { ExecutionSetup } from "../contract.ts";
 import type { ReviewWorkspace } from "./chain.ts";
@@ -112,6 +114,18 @@ export interface AgentPort {
   ): Promise<PortResult<AgentSession> | PortBudgetEnd>;
 }
 
+export interface DependencyRead {
+  dependencies: ExecutionDependency[];
+  outcomes: Outcome[];
+  evidence: Evidence[];
+}
+
+export interface DependencyPort {
+  read(
+    context: CancellationContext,
+  ): Promise<PortResult<DependencyRead> | PortBudgetEnd>;
+}
+
 export interface SecretPort {
   redact(text: string): Promise<string | null>;
 }
@@ -133,12 +147,18 @@ export interface ImplementPorts extends CommonPorts {
   claim: ClaimPort;
 }
 
+export interface ImplementHostPorts extends ImplementPorts {
+  agent: AgentPort;
+}
+
 export interface EvaluationPorts extends CommonPorts {
   evidence: EvidencePort;
   agent: AgentPort;
+  dependencies: DependencyPort;
 }
 
 export interface ExaminePorts extends CommonPorts {
   evidence: EvidencePort;
   agent: AgentPort;
+  dependencies: DependencyPort;
 }

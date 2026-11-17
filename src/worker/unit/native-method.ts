@@ -34,12 +34,12 @@ import { evaluationChain } from "./chain-evaluation.ts";
 import { examineChain } from "./chain-examine.ts";
 import { implementChain } from "./chain-implement.ts";
 import { executionBoundary, runChain } from "./chain-runner.ts";
-import type { AgentPort, CommonPorts } from "./foundry-ports.ts";
+import type { CommonPorts } from "./foundry-ports.ts";
 import {
-  agentPort,
+  type AgentHost,
   evaluationPorts,
   examinePorts,
-  workerPorts,
+  implementHostPorts,
 } from "./worker-ports.ts";
 
 export type { ExecutionEnd } from "./execution-stop.ts";
@@ -144,8 +144,7 @@ export async function runNativeExecution(
       };
       const hosted = hostedChainOf(method, intent, {
         input,
-        run,
-        agent: agentPort({ run, budget, open }),
+        agent: { run, budget, open },
       });
       return runChain(
         hosted.chain,
@@ -165,7 +164,6 @@ export async function runNativeExecution(
             workspaces: input.workspaces,
             transport: input.transport,
             env: input.env,
-            openAgent: open,
           },
           ports: hosted.ports,
         },
@@ -201,8 +199,7 @@ export async function releaseSetupRefusal(
 
 interface ChainHost {
   input: NativeExecutionInput;
-  run: ExecutionRun;
-  agent: AgentPort;
+  agent: AgentHost;
 }
 
 interface HostedChain {
@@ -215,12 +212,12 @@ function hostedChainOf(
   intent: ExecutionIntent,
   host: ChainHost,
 ): HostedChain {
-  const { input, run, agent } = host;
+  const { input, agent } = host;
   if (method === WorkerMethod.Evaluation)
-    return { chain: evaluationChain(), ports: evaluationPorts(run, agent) };
+    return { chain: evaluationChain(), ports: evaluationPorts(agent) };
   if (intent === ExecutionIntent.Examine)
-    return { chain: examineChain(), ports: examinePorts(run, agent) };
-  return { chain: implementChain(), ports: workerPorts(input, run) };
+    return { chain: examineChain(), ports: examinePorts(agent) };
+  return { chain: implementChain(), ports: implementHostPorts(input, agent) };
 }
 
 export function environmentDigestsOf(

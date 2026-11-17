@@ -41,15 +41,11 @@ export function seedOf(input: StepsInput): Pick<ExecutionCtx, InputKeys> {
   };
 }
 
-export function hostOf(
-  input: StepsInput,
-  openAgent: StepHost["openAgent"],
-): StepHost {
+export function hostOf(input: StepsInput): StepHost {
   return {
     workspaces: input.workspaces,
     transport: input.transport,
     env: input.env,
-    openAgent,
   };
 }
 

@@ -8,7 +8,7 @@ chain implement
       step setup.entries(live)              stop environment_failed/setup_failed
       step affected.declaration             an absent or invalid declaration gives no entry
       step env.setup(live)                  port: releaseTrees.takeBase; node failure -> setup instruction of the first unit; budget end; stop environment_failed/setup_failed
-    step agent.open                         stop operation_failed
+    step agent.open                         port: agent.open; stop operation_failed
     step state.open                         the live implement state of the later phases
   phase start
     loop start                              one frame; span worker.phase start
@@ -64,7 +64,7 @@ chain evaluation
       step evidence.publish(verification)   port: evidence.submit
       step affected.run(evaluation)         implement intent, one checkout or more, setup and verify.all passed; budget end; stop operation_failed/worker.verification.infrastructure_failed, environment_failed/affected_invalid, environment_failed/affected_timeout, environment_failed/command_absent
       step evidence.publish(affected)       port: evidence.submit; only when the affected step holds a document
-      step inputs.read(dependencies)        examine intent only
+      step inputs.read(dependencies)        port: dependencies.read; examine intent only
       step judgement                        [LLM] port: agent.open; shortcut on failure -> criterion-not-met; else Evaluation, Repair once; budget end; stop operation_failed/worker.verification.infrastructure_failed, environment_failed/verification_timeout, environment_failed/command_absent, judgement_invalid, operation_failed, provider_failed
       step evidence.publish(patches)        port: evidence.submit
   phase finish
@@ -81,7 +81,7 @@ chain examine
   phase tasks
     step setup.entries(examine)             stop environment_failed/setup_failed
     step env.setup(examine)                 budget end; stop environment_failed/setup_failed
-    step inputs.read(dependencies)          budget end after the read
+    step inputs.read(dependencies)          port: dependencies.read; budget end after the read
     step agent.open                         port: agent.open; budget end after the open; stop operation_failed
     step verify.node                        node commands at the base heads; skipped with no checkout
     step examine.turn                       [LLM] port: evidence.submit; Examine; budget end after the turn; submits the report evidence; stop report_absent, provider_failed

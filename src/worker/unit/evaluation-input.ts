@@ -43,11 +43,7 @@ import { ExecutionIntent } from "../contract.ts";
 import { AFFECTED_SUBJECT } from "./affected.ts";
 import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 import { ROUND_PATCH_SUBJECT, roundPatchName } from "./round-patch.ts";
-import {
-  type AgentOpener,
-  agentPort,
-  evaluationPorts,
-} from "./worker-ports.ts";
+import { type AgentOpener, evaluationPorts } from "./worker-ports.ts";
 
 const NO_SNAPSHOTS = 0;
 const NO_PATCH_BYTES = 0;
@@ -522,8 +518,8 @@ export async function prepareEvaluation(
         run,
         budget,
         resources,
-        host: hostOf(input, open),
-        ports: evaluationPorts(run, agentPort({ run, budget, open })),
+        host: hostOf(input),
+        ports: evaluationPorts({ run, budget, open }),
       },
     );
     if (kind === StepKind.BudgetEnd)

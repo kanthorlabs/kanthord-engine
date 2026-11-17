@@ -21,6 +21,7 @@ import {
 } from "./judgement.ts";
 import type { ExecutionRun } from "./execution-run.ts";
 import { EndReason } from "./execution-stop.ts";
+import type { DependencyRead } from "./foundry-ports.ts";
 import {
   type JudgedCommit,
   type Prior,
@@ -78,7 +79,9 @@ export function readAttemptEvidence(run: ExecutionRun) {
   );
 }
 
-export async function readDependencies(run: ExecutionRun) {
+export async function readDependencies(
+  run: ExecutionRun,
+): Promise<DependencyRead> {
   const input = (cursor: string | null) => ({
     params: { execution_id: run.claim.execution_id },
     query: cursor === null ? {} : { cursor },

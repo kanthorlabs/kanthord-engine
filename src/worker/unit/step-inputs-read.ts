@@ -1,13 +1,18 @@
 import { ExecutionIntent } from "../contract.ts";
-import { DeadlineKind, type Step } from "./chain.ts";
+import { DeadlineKind, type FoundryStep, type Step } from "./chain.ts";
+import { portStop } from "./execution-stop.ts";
+import {
+  type EvaluationPorts,
+  type ExaminePorts,
+  PortResultKind,
+} from "./foundry-ports.ts";
 import {
   readAttemptEvidence,
-  readDependencies,
   readPinnedRevision,
   readPrior,
   readReviewRound,
 } from "./node-reads.ts";
-import { budgetEnd, budgetMapped, next } from "./step-support.ts";
+import { budgetEnd, budgetMapped, next, stopped } from "./step-support.ts";
 
 export const inputsReadRevision: Step<unknown, "claim", "revision"> = {
   id: "inputs.read(revision)",
@@ -59,43 +64,51 @@ export const inputsReadReviewRound: Step<unknown, "claim", "reviewRound"> = {
   },
 };
 
-export const inputsReadDependenciesExamine: Step<
+export const inputsReadDependenciesExamine: FoundryStep<
   unknown,
-  "claim",
-  "dependencies"
+  never,
+  "dependencies",
+  ExaminePorts
 > = {
+  foundry: true,
   id: "inputs.read(dependencies)",
   deadline: DeadlineKind.Work,
-  reads: ["claim"],
+  reads: [],
   writes: ["dependencies"],
   stops: [],
-  note: "budget end after the read",
+  note: "port: dependencies.read; budget end after the read",
   run(_ctx, scope, io) {
     return budgetMapped(io, scope, async () => {
-      const dependencies = await readDependencies(io.run);
-      if (io.budget.exhausted()) return budgetEnd(scope);
-      return next(scope, { dependencies });
+      const read = await io.ports.dependencies.read(io.context);
+      if (read.kind === PortResultKind.Failed)
+        return stopped(scope, portStop(read));
+      if (read.kind === PortResultKind.BudgetEnd || io.budget.exhausted())
+        return budgetEnd(scope);
+      return next(scope, { dependencies: read.value });
     });
   },
 };
 
-export const inputsReadDependenciesEvaluation: Step<
+export const inputsReadDependenciesEvaluation: FoundryStep<
   unknown,
-  "claim" | "setup",
-  "dependencies"
+  "setup",
+  "dependencies",
+  EvaluationPorts
 > = {
+  foundry: true,
   id: "inputs.read(dependencies)",
   deadline: DeadlineKind.Work,
-  reads: ["claim", "setup"],
+  reads: ["setup"],
   writes: ["dependencies"],
   stops: [],
-  note: "examine intent only",
+  note: "port: dependencies.read; examine intent only",
   async run(ctx, scope, io) {
-    return next(scope, {
-      dependencies:
-        ctx.setup.intent === ExecutionIntent.Examine
-          ? await readDependencies(io.run)
-          : null,
-    });
+    if (ctx.setup.intent !== ExecutionIntent.Examine)
+      return next(scope, { dependencies: null });
+    const read = await io.ports.dependencies.read(io.context);
+    if (read.kind === PortResultKind.Failed)
+      return stopped(scope, portStop(read));
+    if (read.kind === PortResultKind.BudgetEnd) return budgetEnd(scope);
+    return next(scope, { dependencies: read.value });
   },
 };

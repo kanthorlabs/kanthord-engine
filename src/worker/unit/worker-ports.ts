@@ -1,18 +1,21 @@
 import assert from "node:assert/strict";
 import { readdirSync, rmSync } from "node:fs";
-import { isAbsolute, join, relative } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { ensureDirectory } from "../../kernel/files.ts";
 import type { ExecutionBudget } from "./budget.ts";
 import type { ExecutionRun } from "./execution-run.ts";
 import {
   type AgentPort,
+  type AgentSession,
   type CheckoutRef,
   type ClaimPort,
   type CommandTree,
   type CommonPorts,
+  type DependencyPort,
   type EvaluationPorts,
   type EvidencePort,
   type ExaminePorts,
+  type ImplementHostPorts,
   type ImplementPorts,
   type PortResult,
   PortResultKind,
@@ -31,6 +34,7 @@ import {
 } from "./local-git.ts";
 import { GitStep, withinGit } from "./method-telemetry.ts";
 import type { NativeAgent } from "./native-agent-session.ts";
+import { readDependencies } from "./node-reads.ts";
 import { readSetupRecord } from "./setup-record.ts";
 import { endedByBudget } from "./step-support.ts";
 import { mergedBranchesOf, repositoryOf } from "./setup-repository.ts";
@@ -51,6 +55,7 @@ const NO_REFS: readonly string[] = [];
 const NO_TREES = 0;
 const MIN_DEADLINE_MS = 1;
 const PARENT = "..";
+const SINGLE_CHECKOUT = 1;
 const TREE_DELETED = "tree deleted";
 const UNKNOWN_ERROR = "unknown";
 
@@ -334,11 +339,30 @@ export interface AgentHost {
   open: AgentOpener;
 }
 
+function checkoutsRootOf(checkouts: readonly CheckoutRef[]): string {
+  const [first] = checkouts;
+  assert.ok(first);
+  return checkouts.length > SINGLE_CHECKOUT
+    ? dirname(first.directory)
+    : first.directory;
+}
+
+async function openedNode(
+  host: AgentHost,
+  checkouts: readonly CheckoutRef[],
+): Promise<PortResult<AgentSession>> {
+  try {
+    return ok(await host.open(checkoutsRootOf(checkouts)));
+  } catch (error) {
+    return host.run.failureOf(error);
+  }
+}
+
 export function agentPort(host: AgentHost): AgentPort {
   return {
     async open(request) {
       const workspace = request.reviewWorkspace;
-      assert.ok(workspace);
+      if (workspace === null) return openedNode(host, request.checkouts);
       try {
         return ok(await host.open(workspace.directory));
       } catch (error) {
@@ -376,18 +400,48 @@ export function commonPorts(run: ExecutionRun): CommonPorts {
   };
 }
 
-export function evaluationPorts(
-  run: ExecutionRun,
-  agent: AgentPort,
-): EvaluationPorts {
-  return { ...commonPorts(run), evidence: evidencePort(run), agent };
+function dependencyPort(host: AgentHost): DependencyPort {
+  return {
+    async read() {
+      try {
+        return ok(await readDependencies(host.run));
+      } catch (error) {
+        if (
+          endedByBudget(
+            { budget: host.budget, context: host.run.operationContext },
+            error,
+          )
+        )
+          return { kind: PortResultKind.BudgetEnd };
+        return host.run.failureOf(error);
+      }
+    },
+  };
 }
 
-export function examinePorts(
-  run: ExecutionRun,
-  agent: AgentPort,
-): ExaminePorts {
-  return { ...commonPorts(run), evidence: evidencePort(run), agent };
+export function evaluationPorts(host: AgentHost): EvaluationPorts {
+  return {
+    ...commonPorts(host.run),
+    evidence: evidencePort(host.run),
+    agent: agentPort(host),
+    dependencies: dependencyPort(host),
+  };
+}
+
+export function examinePorts(host: AgentHost): ExaminePorts {
+  return {
+    ...commonPorts(host.run),
+    evidence: evidencePort(host.run),
+    agent: agentPort(host),
+    dependencies: dependencyPort(host),
+  };
+}
+
+export function implementHostPorts(
+  input: StepsInput,
+  host: AgentHost,
+): ImplementHostPorts {
+  return { ...workerPorts(input, host.run), agent: agentPort(host) };
 }
 
 export function workerPorts(

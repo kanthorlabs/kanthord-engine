@@ -8,11 +8,7 @@ import { EndReason, type ExecutionEnd } from "./execution-stop.ts";
 import { EvaluationStage } from "./rework-cause.ts";
 import type { StepsInput } from "./steps-implement.ts";
 import { ActionResultKind } from "../contract.ts";
-import {
-  type AgentOpener,
-  agentPort,
-  evaluationPorts,
-} from "./worker-ports.ts";
+import { type AgentOpener, evaluationPorts } from "./worker-ports.ts";
 
 export { EvaluationStage };
 
@@ -44,8 +40,8 @@ export async function runEvaluation(
       run,
       budget,
       resources: new AsyncDisposableStack(),
-      host: hostOf(input, openAgent),
-      ports: evaluationPorts(run, agentPort({ run, budget, open: openAgent })),
+      host: hostOf(input),
+      ports: evaluationPorts({ run, budget, open: openAgent }),
     },
   );
 }

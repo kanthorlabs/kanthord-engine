@@ -38,7 +38,7 @@ export function stateIo(state: HostedState): ChainIo {
     run: state.run,
     budget: state.agent.budget,
     resources: new AsyncDisposableStack(),
-    host: hostOf(state.input, () => assert.fail("The state holds the agent.")),
+    host: hostOf(state.input),
     ports: workerPorts(state.input, state.run),
   };
 }
@@ -116,7 +116,7 @@ export async function prepareStepsWorkspace(
           resource_budget: input.setup.resource_budget,
         }),
         resources,
-        host: hostOf(input, () => assert.fail("The workspace opens no agent.")),
+        host: hostOf(input),
         ports: workerPorts(input, run),
       },
     );

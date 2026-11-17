@@ -22,9 +22,8 @@ import type {
   ExecutionStop,
   MethodClaim,
 } from "./execution-stop.ts";
-import type { CommonPorts } from "./foundry-ports.ts";
+import type { CommonPorts, DependencyRead } from "./foundry-ports.ts";
 import type { NativeAgent } from "./native-agent-session.ts";
-import type { readDependencies } from "./node-reads.ts";
 import type { Prior } from "./node-verdict.ts";
 import { Phase, type SpanEnd, type SpanRecorder } from "./telemetry.ts";
 import type { SpanStart } from "./telemetry.ts";
@@ -90,7 +89,7 @@ export interface ExecutionCtx {
   prior: Prior;
   attemptEvidence: readonly Evidence[];
   reviewRound: ReviewRound;
-  dependencies: Awaited<ReturnType<typeof readDependencies>> | null;
+  dependencies: DependencyRead | null;
   workspace: NodeWorkspace;
   reviewWorkspace: ReviewWorkspace;
   reviewScope: { evidenceIds: string[]; scope: ReviewScope };
@@ -155,7 +154,6 @@ export interface StepHost {
   workspaces: WorkspaceRoot;
   transport: RepositoryTransport;
   env: NodeJS.ProcessEnv;
-  openAgent: (workspace: string) => Promise<NativeAgent>;
 }
 
 export interface StepIo<P extends CommonPorts = CommonPorts> {
