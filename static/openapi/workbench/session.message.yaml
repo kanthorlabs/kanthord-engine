@@ -4,11 +4,14 @@ pathItem:
     operationId: workbench.session.message
     tags:
       - workbench
-    description: Start a run on one human message, or queue it behind the active
+    description: "Start a run on one human message, or queue it behind the active
       run. A leading `@<display name>` names the member that runs the message.
       `agent_name` answers the member that runs now, the mention of a queued
       message, or null for an untagged queued message. `replace` clears the
-      queue, stops the active run and queues the message.
+      queue, stops the active run and queues the message. In a conversation with
+      a live invite, an untagged message is a note: it starts no run, queues
+      nothing and answers `kind` `note` with a null `agent_name`. A message that
+      starts or queues a run answers `kind` `run`."
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: true
@@ -115,7 +118,6 @@ components:
             - type: "null"
         run_active:
           type: boolean
-          const: true
         queued_message_id:
           anyOf:
             - type: string
@@ -153,10 +155,16 @@ components:
               - agent_name
               - display_name
             additionalProperties: false
+        kind:
+          type: string
+          enum:
+            - note
+            - run
       required:
         - session_id
         - agent_name
         - run_active
         - queued_message_id
         - cleared
+        - kind
       additionalProperties: false

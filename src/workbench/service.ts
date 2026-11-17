@@ -19,16 +19,18 @@ import {
   reasonOf,
 } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
-import { HttpStatus } from "../kernel/http.ts";
+import { HttpStatus, MediaType } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { piProviderId } from "../kernel/pi-provider.ts";
-import type { HumanIdentity } from "../kernel/caller.ts";
-import { isHumanIdentity } from "../kernel/caller.ts";
-import type {
-  CallerContext,
-  Operation,
-  OperationRegistry,
+import type { GuestIdentity, HumanIdentity } from "../kernel/caller.ts";
+import { isGuestIdentity, isHumanIdentity } from "../kernel/caller.ts";
+import {
+  type CallerContext,
+  type Operation,
+  type OperationRegistry,
+  OperationResultType,
 } from "../kernel/operation.ts";
+import { isString } from "../kernel/values.ts";
 import {
   type Healthcheck,
   HealthStatus,
@@ -75,10 +77,13 @@ import type {
 } from "../custody/contract.ts";
 import {
   ActionOutcome,
+  type Author,
+  AuthorKind,
   type ConversationMember,
   GUARD_AGENT_NAME,
   GuardSummaryCause,
   MessageDelivery,
+  MessageKind,
   type PendingApproval,
   type PlanPhase,
   type QueuedMessage,
@@ -89,6 +94,7 @@ import {
   WORKBENCH_CONFIGURATION_ENTRY,
   WORKBENCH_EVENTS_WAIT_MS,
   WORKBENCH_EXPIRY_REASON,
+  WORKBENCH_INVITE_NAME_MAX_LENGTH,
   WORKBENCH_QUEUE_LIMIT,
   WORKBENCH_QUEUED_MESSAGE_PREFIX,
   WORKBENCH_REJECTION_REASON,
@@ -132,10 +138,19 @@ import {
 import {
   EVIDENCE_ASSET_MISMATCH,
   EVIDENCE_READ_TOOL,
+  EVIDENCE_SHARED_CONVERSATION,
   evidenceFacts,
   evidenceReadTool,
 } from "./evidence.ts";
 import type { WorkbenchConfig } from "./config.ts";
+import { type FeedState, GuestFeed } from "./guest-feed.ts";
+import { projectEntries } from "./guest-view.ts";
+import type {
+  CreatedInvite,
+  InviteItem,
+  LiveInvite,
+  WorkbenchInvites,
+} from "./invites.ts";
 import {
   createPhaseSession,
   openPhaseSession,
@@ -178,8 +193,32 @@ export type WorkbenchModelRuntimeFactory = (
   input: ModelConnectorInput,
 ) => Promise<{ runtime: ModelRuntime; model: Model<Api> }>;
 
+export interface GuestTokenRequest {
+  guestId: string;
+  name: string;
+  inviteId: string;
+  expiresAt: number;
+}
+
+interface ApprovalDecision {
+  toolCallId: string;
+  approved: boolean;
+  nodeName?: string | undefined;
+}
+
+interface InviteBody {
+  invitee_name: string;
+}
+
+interface JoinBody {
+  invite_token: string;
+  name: string;
+}
+
 export interface Dependencies {
   store: Store;
+  invites: WorkbenchInvites;
+  signGuestToken: (guest: GuestTokenRequest) => Promise<{ token: string }>;
   config: WorkbenchConfig;
   logger: Logger;
   stateDirectory: string;
@@ -291,8 +330,6 @@ interface OpenSession {
   runError: string | null;
   agentErrorStale: boolean;
   queuedMessages: PendingMessage[];
-  waiters: Set<() => void>;
-  version: number;
   approvals: Map<string, Approval>;
   doneReports: Set<string>;
   evidenceGrants: Set<string>;
@@ -402,6 +439,14 @@ const IDLE_SESSION = {
   secrets: async () => [],
 } as const;
 const NOT_FOUND_INDEX = -1;
+const EVIDENCE_SHARED_TEXT = `${EVIDENCE_SHARED_CONVERSATION}: The conversation has a live invite. The owner unblocks a node with the typed name of the node.`;
+const INVITE_ENDED_CODE = "gateway.jwt.invite_ended";
+const STREAM_HEADERS = {
+  "Content-Type": MediaType.EventStream,
+  "Cache-Control": "no-store",
+};
+const NO_CHARACTERS = 0;
+const OWNER_NAME_MAX_LENGTH = WORKBENCH_INVITE_NAME_MAX_LENGTH;
 const SUMMARY_REFUSED_LOG = "workbench.fork.summary_refused";
 const AGENT_START = "agent_start";
 const AGENT_END = "agent_end";
@@ -433,6 +478,65 @@ function sessionNotFound(sessionId: string): OperationError {
     WorkbenchErrorCode.SessionNotFound,
     "Workbench session not found.",
     { session_id: sessionId },
+  );
+}
+
+function evidenceRequest(
+  call: ToolCallEvent,
+  facts: Awaited<ReturnType<typeof evidenceFacts>>,
+  shared: boolean,
+): PendingApprovalRequest {
+  const { offset, length } = call.input as {
+    offset?: number;
+    length?: number;
+  };
+  return {
+    tool_call_id: call.toolCallId,
+    operation_id: missionOperations["evidence.asset.content.download"].id,
+    input: {
+      node_id: facts.node_id,
+      attempt: facts.attempt,
+      evidence_id: facts.evidence_id,
+      asset_id: facts.asset_id,
+      kind: facts.kind,
+      ...(offset === undefined ? {} : { offset }),
+      ...(length === undefined ? {} : { length }),
+      ...(shared ? { shared: true } : {}),
+    },
+    guard: null,
+  };
+}
+
+function approvalNotFound(
+  sessionId: string,
+  toolCallId: string,
+): OperationError {
+  return new OperationError(
+    HttpStatus.NotFound,
+    WorkbenchErrorCode.ApprovalNotFound,
+    "The workbench session holds no pending call with this identity.",
+    { session_id: sessionId, tool_call_id: toolCallId },
+  );
+}
+
+function guestOf(caller: CallerContext): GuestIdentity {
+  assert.ok(isGuestIdentity(caller.identity));
+  return caller.identity;
+}
+
+function inviteEnded(): OperationError {
+  return new OperationError(
+    HttpStatus.Unauthorized,
+    INVITE_ENDED_CODE,
+    "The invite of the guest token ended.",
+  );
+}
+
+function inviteNotFound(): OperationError {
+  return new OperationError(
+    HttpStatus.NotFound,
+    WorkbenchErrorCode.InviteNotFound,
+    "Workbench invite not found.",
   );
 }
 
@@ -497,8 +601,6 @@ function newOpenSession(fields: SessionFields): OpenSession {
     ...IDLE_SESSION,
     queuedMessages: [],
     queue: Promise.resolve(),
-    waiters: new Set(),
-    version: 0,
     approvals: new Map(),
     doneReports: new Set(),
     evidenceGrants: new Set(),
@@ -544,6 +646,7 @@ export class WorkbenchService implements Service {
   private readonly dependencies: Dependencies;
   private readonly sessions = new Map<string, OpenSession>();
   private readonly finishedPhaseEntries = new Map<string, SessionEntry[]>();
+  private readonly feeds = new Map<string, GuestFeed>();
   private readonly loading = new Map<string, Promise<OpenSession>>();
   private readonly shutdown = new CancellationContext();
   private started = false;
@@ -1026,9 +1129,7 @@ export class WorkbenchService implements Service {
               () => session.requester,
               {
                 grants: {
-                  has: (nodeId) =>
-                    this.hostOf(session).evidenceGrants.has(nodeId) ||
-                    this.messageGrants(session, nodeId),
+                  has: (nodeId) => this.granted(session, nodeId),
                 },
               },
             ),
@@ -1126,32 +1227,27 @@ export class WorkbenchService implements Service {
       return { allowed: false, reason: message, terminate: false };
     }
     const host = this.hostOf(session);
-    if (host.evidenceGrants.has(facts.node_id)) return ALLOWED;
-    if (this.messageGrants(session, facts.node_id)) return ALLOWED;
-    const { offset, length } = call.input as {
-      offset?: number;
-      length?: number;
-    };
+    const shared = this.dependencies.invites.isShared(host.id);
+    if (this.granted(session, facts.node_id)) return ALLOWED;
     const decision = await this.approval(
       session,
-      {
-        tool_call_id: call.toolCallId,
-        operation_id: missionOperations["evidence.asset.content.download"].id,
-        input: {
-          node_id: facts.node_id,
-          attempt: facts.attempt,
-          evidence_id: facts.evidence_id,
-          asset_id: facts.asset_id,
-          kind: facts.kind,
-          ...(offset === undefined ? {} : { offset }),
-          ...(length === undefined ? {} : { length }),
-        },
-        guard: null,
-      },
+      evidenceRequest(call, facts, shared),
       options.signal,
     );
-    if (decision.allowed) host.evidenceGrants.add(facts.node_id);
+    if (!decision.allowed) return decision;
+    if (!shared && this.dependencies.invites.isShared(host.id))
+      return { allowed: false, reason: EVIDENCE_SHARED_TEXT, terminate: false };
+    host.evidenceGrants.add(facts.node_id);
     return decision;
+  }
+
+  private granted(session: OpenSession, nodeId: string): boolean {
+    const host = this.hostOf(session);
+    if (host.evidenceGrants.has(nodeId)) return true;
+    return (
+      !this.dependencies.invites.isShared(host.id) &&
+      this.messageGrants(session, nodeId)
+    );
   }
 
   private messageGrants(session: OpenSession, nodeId: string): boolean {
@@ -1193,19 +1289,51 @@ export class WorkbenchService implements Service {
     for (const { decide } of [...session.approvals.values()]) decide(REJECTED);
   }
 
-  approve(
-    sessionId: string,
-    toolCallId: string,
-    approved: boolean,
-  ): { session_id: string; tool_call_id: string; approved: boolean } {
-    const pending = this.sessions.get(sessionId)?.approvals.get(toolCallId);
-    if (!pending)
+  private async requireNodeName(
+    caller: CallerContext,
+    pending: Approval,
+    nodeName: string | undefined,
+  ): Promise<void> {
+    const nodeId = pending.approval.input.node_id;
+    assert.ok(isString(nodeId), "A shared evidence card names its node.");
+    const result = await this.dependencies.invoke(
+      missionOperations["node.get"],
+      { params: { node_id: nodeId }, query: {}, body: null },
+      { identity: caller.identity, context: caller.context },
+    );
+    if (result.type === OperationResultType.Failure)
       throw new OperationError(
-        HttpStatus.NotFound,
-        WorkbenchErrorCode.ApprovalNotFound,
-        "The workbench session holds no pending call with this identity.",
-        { session_id: sessionId, tool_call_id: toolCallId },
+        result.status,
+        result.error.error.code,
+        result.error.error.message,
       );
+    assert.ok(result.type === OperationResultType.Completed);
+    const node = missionOperations["node.get"].output.parse(result.data);
+    if (nodeName === node.content.name) return;
+    throw new OperationError(
+      HttpStatus.Conflict,
+      WorkbenchErrorCode.EvidenceNameMismatch,
+      "The typed name differs from the name of the node.",
+      {
+        session_id: pending.approval.session_id,
+        tool_call_id: pending.approval.tool_call_id,
+      },
+    );
+  }
+
+  async approve(
+    caller: CallerContext,
+    sessionId: string,
+    decision: ApprovalDecision,
+  ): Promise<{ session_id: string; tool_call_id: string; approved: boolean }> {
+    const { toolCallId, approved, nodeName } = decision;
+    const pending = this.sessions.get(sessionId)?.approvals.get(toolCallId);
+    if (!pending) throw approvalNotFound(sessionId, toolCallId);
+    if (approved && pending.approval.input.shared === true) {
+      await this.requireNodeName(caller, pending, nodeName);
+      if (this.sessions.get(sessionId)?.approvals.get(toolCallId) !== pending)
+        throw approvalNotFound(sessionId, toolCallId);
+    }
     pending.decide(approved ? ALLOWED : REJECTED);
     return { session_id: sessionId, tool_call_id: toolCallId, approved };
   }
@@ -1472,9 +1600,36 @@ export class WorkbenchService implements Service {
   }
 
   private notify(session: OpenSession): void {
-    const host = this.hostOf(session);
-    host.version++;
-    for (const wake of [...host.waiters]) wake();
+    if (this.shutdown.signal.aborted) return;
+    this.feedOf(this.hostOf(session)).notify();
+  }
+
+  private feedOf(host: OpenSession): GuestFeed {
+    const existing = this.feeds.get(host.id);
+    if (existing) return existing;
+    const feed = new GuestFeed({
+      entries: (after) =>
+        mergeEntries(
+          this.memberEntries(host, false),
+          parseCursor(after, host.id),
+        ),
+      state: () => this.feedState(host),
+    });
+    this.feeds.set(host.id, feed);
+    return feed;
+  }
+
+  private feedState(host: OpenSession): FeedState {
+    const active = this.runActive(host);
+    const running = this.runningMember(host);
+    const streaming = running.agent?.state.streamingMessage;
+    return {
+      run_active: active,
+      display_name: active ? displayNameOf(running.agentName) : null,
+      auto_mode: host.autoMode,
+      streaming:
+        streaming === undefined ? null : JSON.parse(JSON.stringify(streaming)),
+    };
   }
 
   private requireIdle(session: OpenSession): void {
@@ -1517,7 +1672,7 @@ export class WorkbenchService implements Service {
         parseCursor(after, host.id),
       ),
       snapshot: this.snapshot(host),
-      version: host.version,
+      version: this.feedOf(host).version,
     };
   }
 
@@ -1533,8 +1688,7 @@ export class WorkbenchService implements Service {
       context,
       Date.now() + WORKBENCH_EVENTS_WAIT_MS,
     );
-    const wake = () => window.cancel();
-    session.waiters.add(wake);
+    const unsubscribe = this.feedOf(session).subscribe(() => window.cancel());
     try {
       const current = await this.changes(session, after);
       if (current.entries.length || version !== current.version) return current;
@@ -1542,7 +1696,7 @@ export class WorkbenchService implements Service {
       await new Promise((resolve) => setImmediate(resolve));
       return await this.changes(session, after);
     } finally {
-      session.waiters.delete(wake);
+      unsubscribe();
       window.cancel();
     }
   }
@@ -1869,6 +2023,77 @@ export class WorkbenchService implements Service {
     return cleared;
   }
 
+  private mentioned(text: string): boolean {
+    return (
+      this.dependencies.store.transaction((tx) =>
+        resolveMention(tx, text, this.dependencies),
+      ) !== null
+    );
+  }
+
+  private appendNote(host: OpenSession, author: Author, text: string): void {
+    appendRecord(host.manager, {
+      kind: WorkbenchRecordKind.Note,
+      text,
+      author: { kind: author.kind, name: author.name },
+    });
+    this.notify(host);
+  }
+
+  async note(sessionId: string, author: Author, text: string): Promise<void> {
+    const session = await this.session(sessionId);
+    this.requireHost(session);
+    this.appendNote(session, author, text);
+  }
+
+  private async guestHost(guest: GuestIdentity): Promise<OpenSession> {
+    const host = await this.session(guest.sessionId);
+    this.requireHost(host);
+    return host;
+  }
+
+  private requireLiveInvite(guest: GuestIdentity): LiveInvite {
+    const invite = this.dependencies.invites.resolve(guest.inviteId);
+    if (invite === null) throw inviteEnded();
+    return invite;
+  }
+
+  async guestGet(guest: GuestIdentity) {
+    const host = await this.guestHost(guest);
+    const invite = this.requireLiveInvite(guest);
+    return {
+      session_id: host.id,
+      title: host.manager.getSessionName() ?? null,
+      members: this.conversationMembers(host),
+      owner_name: invite.invited_by_name,
+      entries: projectEntries(mergeEntries(this.memberEntries(host, false))),
+      run_active: this.runActive(host),
+    };
+  }
+
+  async guestStream(
+    guest: GuestIdentity,
+    after: string | undefined,
+    context: Context,
+  ): Promise<Response> {
+    const host = await this.guestHost(guest);
+    const invite = this.requireLiveInvite(guest);
+    const stream = this.feedOf(host).open({
+      inviteId: guest.inviteId,
+      expiresAt: invite.expires_at,
+      after,
+      signal: context.signal,
+    });
+    return new Response(stream, { headers: STREAM_HEADERS });
+  }
+
+  async guestMessage(guest: GuestIdentity, text: string) {
+    const host = await this.guestHost(guest);
+    this.requireLiveInvite(guest);
+    this.appendNote(host, { kind: AuthorKind.Guest, name: guest.name }, text);
+    return { kind: MessageKind.Note };
+  }
+
   async message(
     caller: CallerContext,
     sessionId: string,
@@ -1876,14 +2101,36 @@ export class WorkbenchService implements Service {
   ): Promise<{
     session_id: string;
     agent_name: string | null;
-    run_active: true;
+    run_active: boolean;
     queued_message_id: string | null;
     cleared: QueuedMessage[];
+    kind: MessageKind;
   }> {
     const { text, delivery } = body;
     const session = await this.session(sessionId);
     this.requireHost(session);
     const requester = humanOf(caller);
+    if (
+      this.dependencies.invites.isShared(session.id) &&
+      !this.mentioned(text)
+    ) {
+      await this.note(
+        sessionId,
+        {
+          kind: AuthorKind.Owner,
+          name: requester.name.slice(NO_CHARACTERS, OWNER_NAME_MAX_LENGTH),
+        },
+        text,
+      );
+      return {
+        session_id: sessionId,
+        agent_name: null,
+        run_active: this.runActive(session),
+        queued_message_id: null,
+        cleared: [],
+        kind: MessageKind.Note,
+      };
+    }
     const active = session.run;
     if (active) {
       const mention = this.dependencies.store.transaction((tx) =>
@@ -1907,6 +2154,7 @@ export class WorkbenchService implements Service {
         run_active: true,
         queued_message_id: queued,
         cleared,
+        kind: MessageKind.Run,
       };
     }
     const run = this.claim(session, { clearError: true, request: text });
@@ -1929,6 +2177,7 @@ export class WorkbenchService implements Service {
       run_active: true,
       queued_message_id: null,
       cleared: [],
+      kind: MessageKind.Run,
     };
   }
 
@@ -2275,6 +2524,57 @@ export class WorkbenchService implements Service {
     });
   }
 
+  async inviteCreate(
+    caller: CallerContext,
+    sessionId: string,
+    body: InviteBody,
+  ): Promise<CreatedInvite> {
+    const host = await this.session(sessionId);
+    this.requireHost(host);
+    const requester = humanOf(caller);
+    const created = this.dependencies.invites.create(
+      host.id,
+      {
+        accountId: requester.accountId,
+        name: requester.name.slice(NO_CHARACTERS, OWNER_NAME_MAX_LENGTH),
+      },
+      body.invitee_name,
+    );
+    host.evidenceGrants.clear();
+    return created;
+  }
+
+  async inviteList(sessionId: string): Promise<{ items: InviteItem[] }> {
+    const host = await this.session(sessionId);
+    this.requireHost(host);
+    return { items: this.dependencies.invites.list(host.id) };
+  }
+
+  inviteRevoke(inviteId: string): { id: string } {
+    const revoked = this.dependencies.invites.revoke(inviteId);
+    if (!revoked) throw inviteNotFound();
+    this.feeds.get(revoked.session_id)?.closeInvite(revoked.id);
+    return { id: revoked.id };
+  }
+
+  async inviteJoin(body: JoinBody) {
+    const joined = this.dependencies.invites.join(body.invite_token, body.name);
+    if (!joined) throw inviteNotFound();
+    const { token } = await this.dependencies.signGuestToken({
+      guestId: joined.guest_id,
+      name: joined.name,
+      inviteId: joined.invite_id,
+      expiresAt: joined.expires_at,
+    });
+    return {
+      guest_token: token,
+      guest_id: joined.guest_id,
+      name: joined.name,
+      session_id: joined.session_id,
+      expires_at: joined.expires_at,
+    };
+  }
+
   declare(registry: OperationRegistry): void {
     registry.register(workbenchOperations["session.list"], ({ query }) =>
       this.list(query.agent_name),
@@ -2302,8 +2602,12 @@ export class WorkbenchService implements Service {
     );
     registry.register(
       workbenchOperations["session.approve"],
-      ({ params, body }) =>
-        this.approve(params.session_id, body.tool_call_id, body.approved),
+      ({ params, body }, caller) =>
+        this.approve(caller, params.session_id, {
+          toolCallId: body.tool_call_id,
+          approved: body.approved,
+          nodeName: body.node_name,
+        }),
     );
     registry.register(
       workbenchOperations["session.action.report"],
@@ -2321,6 +2625,32 @@ export class WorkbenchService implements Service {
       workbenchOperations["session.queue.remove"],
       ({ params }) =>
         this.removeQueued(params.session_id, params.queued_message_id),
+    );
+    registry.register(
+      workbenchOperations["invite.create"],
+      ({ params, body }, caller) =>
+        this.inviteCreate(caller, params.session_id, body),
+    );
+    registry.register(workbenchOperations["invite.list"], ({ params }) =>
+      this.inviteList(params.session_id),
+    );
+    registry.register(workbenchOperations["invite.revoke"], ({ params }) =>
+      this.inviteRevoke(params.invite_id),
+    );
+    registry.register(workbenchOperations["invite.join"], ({ body }) =>
+      this.inviteJoin(body),
+    );
+    registry.register(workbenchOperations["guest.get"], (_input, caller) =>
+      this.guestGet(guestOf(caller)),
+    );
+    registry.register(
+      workbenchOperations["guest.stream"],
+      ({ query }, caller) =>
+        this.guestStream(guestOf(caller), query.after, caller.context),
+    );
+    registry.register(
+      workbenchOperations["guest.message"],
+      ({ body }, caller) => this.guestMessage(guestOf(caller), body.text),
     );
     registry.register(
       workbenchOperations["session.events"],
@@ -2363,6 +2693,8 @@ export class WorkbenchService implements Service {
       this.closeAgent(session);
     }
     this.sessions.clear();
+    for (const feed of this.feeds.values()) feed.stop();
+    this.feeds.clear();
     this.finishedPhaseEntries.clear();
     return Promise.resolve(null);
   }

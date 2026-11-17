@@ -144,6 +144,7 @@ const BEARER_POLICIES: readonly AccessPolicy[] = [
   AccessPolicy.Human,
   AccessPolicy.HumanOrService,
   AccessPolicy.Client,
+  AccessPolicy.Guest,
 ];
 
 const ERROR_STATUSES: readonly number[] = [

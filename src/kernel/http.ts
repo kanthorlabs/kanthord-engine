@@ -34,4 +34,5 @@ export const MediaType = {
   JSON: "application/json",
   YAML: "application/yaml",
   Binary: "application/octet-stream",
+  EventStream: "text/event-stream",
 } as const;

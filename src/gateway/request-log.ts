@@ -1,5 +1,6 @@
 import {
   type CallerIdentity,
+  isGuestIdentity,
   isHumanIdentity,
   isMachineIdentity,
   isWorkerIdentity,
@@ -20,6 +21,7 @@ export function callerName(identity: CallerIdentity): string {
   if (isHumanIdentity(identity)) return identity.name;
   if (isMachineIdentity(identity)) return identity.clientId;
   if (isWorkerIdentity(identity)) return identity.instanceId;
+  if (isGuestIdentity(identity)) return identity.guestId;
   return identity.service;
 }
 

@@ -117,7 +117,9 @@ async function generateJWT(
     resource_identity?: string;
     instance_id?: string;
     connection_id?: string;
+    invite_id?: string;
   },
+  fixedExpiry?: number,
 ): Promise<TokenResponse> {
   if (!Number.isSafeInteger(lifetime) || lifetime < MIN_TOKEN_LIFETIME)
     throw new Diagnostic(
@@ -125,7 +127,7 @@ async function generateJWT(
       "lifetime: expected a nonnegative safe integer of seconds.",
     );
   const iat = Math.floor(Date.now() / MILLISECONDS_PER_SECOND);
-  const exp = iat + lifetime;
+  const exp = fixedExpiry ?? iat + lifetime;
   assert.ok(Number.isSafeInteger(exp));
   assert.ok(Number.isSafeInteger(exp * MILLISECONDS_PER_SECOND));
   const { sign } = await import("hono/jwt");
@@ -151,6 +153,32 @@ export async function generateHumanJWT(
     name: parseDisplayName(name),
     kind: IdentityKind.Human,
   });
+}
+
+export interface GuestTokenOptions {
+  guestId: string;
+  name: string;
+  inviteId: string;
+  expiresAt: number;
+}
+
+export async function generateGuestJWT(
+  masterKey: string,
+  authVersion: number,
+  guest: GuestTokenOptions,
+): Promise<TokenResponse> {
+  return generateJWT(
+    masterKey,
+    authVersion,
+    MIN_TOKEN_LIFETIME,
+    {
+      sub: guest.guestId,
+      name: parseDisplayName(guest.name),
+      kind: IdentityKind.Guest,
+      invite_id: guest.inviteId,
+    },
+    Math.floor(guest.expiresAt / MILLISECONDS_PER_SECOND),
+  );
 }
 
 export async function generateMachineJWT(

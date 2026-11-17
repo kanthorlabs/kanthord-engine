@@ -106,4 +106,19 @@ test("OpenAPI scopes isolate services and keep methods sharing a path in one ref
   await SwaggerParser.validate(join(root, "openapi.yaml"));
 });
 
+test("OpenAPI projection of a guest operation declares bearer security", () => {
+  const guest = {
+    ...gatewayOperations.liveness,
+    id: "workbench.guest.read",
+    service: "workbench",
+    path: "/api/workbench/guest",
+    access: "guest",
+  } as const;
+  const files = emitOpenAPIFiles([guest]);
+  const item = Object.values(files).find((file) => "pathItem" in file) as {
+    pathItem: { get: { security: unknown } };
+  };
+  assert.deepEqual(item.pathItem.get.security, [{ bearerAuth: [] }]);
+});
+
 const apiOperations = { ...gatewayOperations, ...workerOperations };

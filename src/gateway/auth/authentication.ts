@@ -6,8 +6,10 @@ import {
   type CallerIdentity,
   CLIENT_IDENTITY_PREFIX,
   CONNECTION_PREFIX,
+  type GuestIdentity,
   type HumanIdentity,
   IdentityKind,
+  isGuestIdentity,
   isHumanIdentity,
   isMachineIdentity,
   isServiceIdentity,
@@ -19,11 +21,13 @@ import {
   type WorkerIdentity,
 } from "../../kernel/caller.ts";
 import {
+  mintGuestIdentity,
   mintHumanIdentity,
   mintMachineIdentity,
   mintWorkerIdentity,
 } from "../../kernel/caller-mint.ts";
 import type { ProjectBindings } from "../../project/contract.ts";
+import type { ResolvedInvite } from "../../workbench/contract.ts";
 import {
   InstancePlacement,
   type LiveInstance,
@@ -46,6 +50,7 @@ const clientIdentitySchema = identitySchema(CLIENT_IDENTITY_PREFIX);
 const instanceIdentitySchema = identitySchema(WORKER_INSTANCE_PREFIX);
 const connectionIdentitySchema = identitySchema(CONNECTION_PREFIX);
 const projectIdentitySchema = identitySchema("project");
+const inviteIdentitySchema = identitySchema("workbench_invite");
 const ClaimType = { Text: "text", Integer: "integer" } as const;
 type ClaimType = (typeof ClaimType)[keyof typeof ClaimType];
 const CLAIM_TYPES: Readonly<Record<string, ClaimType>> = {
@@ -59,6 +64,7 @@ const CLAIM_TYPES: Readonly<Record<string, ClaimType>> = {
   resource_identity: ClaimType.Text,
   instance_id: ClaimType.Text,
   connection_id: ClaimType.Text,
+  invite_id: ClaimType.Text,
 };
 const REQUIRED_CLAIMS = ["sub", "name", "kind", "iat", "exp", "jti"] as const;
 const MACHINE_CLAIMS = ["project_id", "resource_identity"] as const;
@@ -74,11 +80,21 @@ interface Claims {
   resource_identity?: string;
   instance_id?: string;
   connection_id?: string;
+  invite_id?: string;
+}
+interface GuestCredentials {
+  guestId: string;
+  name: string;
+  inviteId: string;
+  jti: string;
 }
 export interface AuthenticationLookups {
   project: Pick<ProjectBindings, "resolveWorkerGroup" | "workerGroupEnded">;
   worker: Pick<WorkerRegistrations, "findByClient" | "heartbeat">;
   instances?: WorkerInstanceLookups;
+  workbench?: {
+    resolveInvite(inviteId: string): ResolvedInvite | null;
+  };
 }
 
 function hasType(value: unknown, type: ClaimType): boolean {
@@ -122,6 +138,7 @@ function refuseForbidden(
 }
 
 function refuseClientForms(claims: Claims): void {
+  refuseForbidden(claims, ["invite_id"]);
   for (const name of MACHINE_CLAIMS)
     if (!(name in claims)) throw jwtRefused(JwtCause.MissingClaim);
   if (
@@ -183,7 +200,7 @@ function refuseRegistrationMismatch(
 }
 
 function humanIdentity(claims: Claims): HumanIdentity {
-  refuseForbidden(claims, [...MACHINE_CLAIMS, ...INSTANCE_CLAIMS]);
+  refuseForbidden(claims, [...MACHINE_CLAIMS, ...INSTANCE_CLAIMS, "invite_id"]);
   if (!validText(claims.sub, MAX_HUMAN_USERNAME_LENGTH))
     throw jwtRefused(JwtCause.InvalidType);
   return mintHumanIdentity(claims.sub, claims.name, claims.jti);
@@ -336,6 +353,17 @@ export class Authentication {
     return mintWorkerIdentity(instanceId, name, jti);
   }
 
+  private resolveGuest(guest: GuestCredentials): GuestIdentity {
+    const invite = this.machines?.workbench?.resolveInvite(guest.inviteId);
+    if (!invite || invite.expires_at <= Date.now())
+      throw jwtRefused(JwtCause.InviteEnded);
+    return mintGuestIdentity({
+      ...guest,
+      sessionId: invite.session_id,
+      invitedBy: invite.invited_by,
+    });
+  }
+
   async recheck(
     identity: CallerIdentity,
     context: Context,
@@ -344,6 +372,13 @@ export class Authentication {
     if (isHumanIdentity(identity))
       return mintHumanIdentity(identity.accountId, identity.name, identity.jti);
     if (isServiceIdentity(identity)) return identity;
+    if (isGuestIdentity(identity))
+      return this.resolveGuest({
+        guestId: identity.guestId,
+        name: identity.name,
+        inviteId: identity.inviteId,
+        jti: identity.jti,
+      });
     if (isWorkerIdentity(identity))
       return this.resolveWorker(
         identity.instanceId,
@@ -398,10 +433,30 @@ export class Authentication {
   }
 
   private workerIdentity(claims: Claims): WorkerIdentity {
-    refuseForbidden(claims, [...MACHINE_CLAIMS, ...INSTANCE_CLAIMS]);
+    refuseForbidden(claims, [
+      ...MACHINE_CLAIMS,
+      ...INSTANCE_CLAIMS,
+      "invite_id",
+    ]);
     if (!instanceIdentitySchema.safeParse(claims.sub).success)
       throw jwtRefused(JwtCause.InvalidType);
     return this.resolveWorker(claims.sub, claims.name, claims.jti);
+  }
+
+  private guestIdentity(claims: Claims): GuestIdentity {
+    if (!("invite_id" in claims)) throw jwtRefused(JwtCause.MissingClaim);
+    refuseForbidden(claims, [...MACHINE_CLAIMS, ...INSTANCE_CLAIMS]);
+    if (
+      !validText(claims.sub, MAX_HUMAN_USERNAME_LENGTH) ||
+      !inviteIdentitySchema.safeParse(claims.invite_id).success
+    )
+      throw jwtRefused(JwtCause.InvalidType);
+    return this.resolveGuest({
+      guestId: claims.sub,
+      name: claims.name,
+      inviteId: claims.invite_id!,
+      jti: claims.jti,
+    });
   }
 
   private async clientIdentity(
@@ -422,10 +477,11 @@ export class Authentication {
   async authenticate(
     authorization: string | undefined,
     context: Context = background,
-  ): Promise<HumanIdentity | MachineIdentity | WorkerIdentity> {
+  ): Promise<HumanIdentity | MachineIdentity | WorkerIdentity | GuestIdentity> {
     const claims = await this.verifiedClaims(authorization);
     if (claims.kind === IdentityKind.Human) return humanIdentity(claims);
     if (claims.kind === IdentityKind.Worker) return this.workerIdentity(claims);
+    if (claims.kind === IdentityKind.Guest) return this.guestIdentity(claims);
     if (claims.kind !== IdentityKind.Client)
       throw jwtRefused(JwtCause.InvalidType);
     return this.clientIdentity(claims, context);

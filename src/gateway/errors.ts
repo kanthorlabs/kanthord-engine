@@ -53,6 +53,7 @@ export const JwtCause = {
   InstanceRequired: "instance_required",
   ConnectionSuperseded: "connection_superseded",
   InstanceNotListed: "instance_not_listed",
+  InviteEnded: "invite_ended",
 } as const;
 export type JwtCause = (typeof JwtCause)[keyof typeof JwtCause];
 const JWT_MESSAGES: Record<JwtCause, string> = {
@@ -69,6 +70,7 @@ const JWT_MESSAGES: Record<JwtCause, string> = {
     "Another connection of the worker instance is current.",
   [JwtCause.InstanceNotListed]:
     "The binding does not list the worker instance.",
+  [JwtCause.InviteEnded]: "The invite of the guest token ended.",
 };
 export const jwtRefused = (cause: JwtCause) =>
   new GatewayError(

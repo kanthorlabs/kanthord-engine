@@ -29,6 +29,9 @@ import type { Dependencies } from "./service.ts";
 const MENTION_PREFIX = "@";
 const NAME_CHARACTER = /[A-Za-z0-9 _-]/;
 const WHITESPACE = /\s/;
+const WHITESPACE_RUN = /\s+/g;
+const SINGLE_SPACE = " ";
+const LINE_BREAK = /\r\n|\r|\n/g;
 const AFTER_PREFIX = 1;
 const FIRST_TOKEN = 0;
 const MESSAGE_ENTRY = "message";
@@ -249,11 +252,26 @@ interface LineContext {
   forkEntry: string | null;
 }
 
+interface RelayContext extends LineContext {
+  own: boolean;
+}
+
+function noteLineOf(entry: SessionEntry): string | null {
+  const record = recordOf(entry);
+  if (record?.kind !== WorkbenchRecordKind.Note) return null;
+  const name = record.author.name.replace(WHITESPACE_RUN, SINGLE_SPACE);
+  const text = record.text.replace(LINE_BREAK, SINGLE_SPACE);
+  return `${name} (${record.author.kind}): ${text}`;
+}
+
 function relayLineOf(
   author: RelayMember,
   entry: SessionEntry,
-  context: LineContext,
+  context: RelayContext,
 ): RelayLine | null {
+  const note = noteLineOf(entry);
+  if (note !== null) return { summary: false, text: note };
+  if (context.own) return null;
   const summary = summaryOfEntry(entry, context.forkEntry);
   if (summary !== null) return { summary: true, text: summary };
   const text = relayItemOf(author, entry, context.authorName);
@@ -275,12 +293,12 @@ function relayItems(member: RelayMember, input: RelayInput): RelayItems {
     forkEntry: forkEntryOf(input.members),
   };
   for (const author of input.members) {
-    if (author.id === member.id) continue;
+    const own = author.id === member.id;
     const opening = openingIds(author.entries);
     for (const entry of author.entries) {
       const at = Date.parse(entry.timestamp);
       if (opening.hidden.has(entry.id) || !(at > since)) continue;
-      const line = relayLineOf(author, entry, context);
+      const line = relayLineOf(author, entry, { ...context, own });
       if (line === null) continue;
       (line.summary ? summaries : items).push({ at, text: line.text });
     }
@@ -412,6 +430,8 @@ function forkItemOf(
   }
   const card = cardLineOf(entry, context.settled);
   if (card !== null) return { kind: ForkItemKind.Other, text: card };
+  const note = noteLineOf(entry);
+  if (note !== null) return { kind: ForkItemKind.Other, text: note };
   return messageLineOf(author, entry, context);
 }
 

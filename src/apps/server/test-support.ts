@@ -104,6 +104,7 @@ import {
   GUARD_SUMMARY_PASS_CONFIDENCE,
   GUARD_SUMMARY_TOOL_NAME,
   WORKBENCH_SERVICE_NAME,
+  WORKBENCH_STREAM_TICK_MS,
   type WorkbenchConfiguration,
   workbenchOperations,
 } from "../../workbench/contract.ts";
@@ -3319,6 +3320,30 @@ export function sendMessage(
   );
 }
 
+const PUMP_INTERVAL_MS = 20;
+let mockedTimers: TestContext["mock"]["timers"] | null = null;
+
+export function pumpTimers(t: TestContext): void {
+  mockedTimers = t.mock.timers;
+  t.after(() => {
+    mockedTimers = null;
+  });
+}
+
+export async function pumped<T>(request: Promise<T>): Promise<T> {
+  const timers = mockedTimers;
+  if (timers === null) return request;
+  const pump = setInterval(
+    () => timers.tick(WORKBENCH_STREAM_TICK_MS),
+    PUMP_INTERVAL_MS,
+  );
+  try {
+    return await request;
+  } finally {
+    clearInterval(pump);
+  }
+}
+
 export async function untilSettled(
   fixture: WorkbenchFixture,
   sessionId: string,
@@ -3330,16 +3355,18 @@ export async function untilSettled(
     signal.throwIfAborted();
     const after = [...cursor].map(([member, entry]) => `${member}:${entry}`);
     const answer = completed(
-      await fixture.workbench["session.events"](
-        {
-          params: { session_id: sessionId },
-          query: {
-            ...(after.length ? { after: after.join(",") } : {}),
-            ...(version === undefined ? {} : { version }),
+      await pumped(
+        fixture.workbench["session.events"](
+          {
+            params: { session_id: sessionId },
+            query: {
+              ...(after.length ? { after: after.join(",") } : {}),
+              ...(version === undefined ? {} : { version }),
+            },
+            body: null,
           },
-          body: null,
-        },
-        fixture.options,
+          fixture.options,
+        ),
       ),
     );
     for (const entry of answer.entries) cursor.set(entry.session_id, entry.id);

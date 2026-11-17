@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { setImmediate } from "node:timers/promises";
+import { setTimeout as delay, setImmediate } from "node:timers/promises";
 import {
   fauxAssistantMessage,
   type FauxResponseStep,
@@ -13,6 +13,7 @@ import {
 } from "@earendil-works/pi-ai";
 import {
   BASE_PROMPT,
+  FORK_SUMMARY_PROMPT,
   GUARD_PROMPT,
   GUARD_SUMMARY_PROMPT,
   SWE_AGENT_PROMPT,
@@ -54,16 +55,19 @@ import {
 import { llmOperations } from "../../llm/contract.ts";
 import {
   ActionOutcome,
+  AuthorKind,
   GUARD_AUTO_CONFIDENCE,
   GUARD_TOOL_NAME,
   GuardCause,
   MessageDelivery,
+  MessageKind,
   WORKBENCH_ACTION_RESULT_ENTRY,
   WORKBENCH_CONFIGURATION_ENTRY,
   WORKBENCH_EXPIRY_REASON,
   WORKBENCH_OPENING_TEXT,
   WORKBENCH_QUEUE_LIMIT,
   WORKBENCH_REJECTION_REASON,
+  WORKBENCH_STREAM_TICK_MS,
   type WorkbenchConfiguration,
   WorkbenchErrorCode,
   WorkbenchGuardReason,
@@ -80,21 +84,27 @@ import {
   ANTHROPIC,
   BACKUP,
   BACKUP_KEY,
+  callsOf,
   completed,
   COVERING_WORKER_BINDINGS,
   DEFAULT,
   fakeS3,
+  forkOf,
   GUARD_AGENT,
   GUARD_MODEL,
   HAIKU,
   heldAnswer,
   OFF,
+  pass,
   type Persistence,
   PRIMARY_KEY,
+  pumped,
+  pumpTimers,
   SONNET,
   SPARE_CREDENTIAL,
   SPARE_KEY,
   untilAbort,
+  userRequestOf,
   workbenchHarness,
 } from "./test-support.ts";
 import { type SeededNode, seedEvidence } from "./evidence-test-support.ts";
@@ -664,16 +674,18 @@ async function untilIdle(
   for (;;) {
     signal.throwIfAborted();
     const answer = completed(
-      await fixture.workbench["session.events"](
-        {
-          params: { session_id: sessionId },
-          query: {
-            ...(cursor === undefined ? {} : { after: cursor }),
-            ...(version === undefined ? {} : { version }),
+      await pumped(
+        fixture.workbench["session.events"](
+          {
+            params: { session_id: sessionId },
+            query: {
+              ...(cursor === undefined ? {} : { after: cursor }),
+              ...(version === undefined ? {} : { version }),
+            },
+            body: null,
           },
-          body: null,
-        },
-        fixture.options,
+          fixture.options,
+        ),
       ),
     );
     entries.push(...answer.entries);
@@ -725,6 +737,7 @@ test("a message runs the agent while a long poll follows the run to its end", as
     run_active: true,
     queued_message_id: null,
     cleared: [],
+    kind: MessageKind.Run,
   });
   const during = completed(
     await fixture.workbench["session.get"](
@@ -1203,13 +1216,15 @@ async function untilApproval(
   for (;;) {
     signal.throwIfAborted();
     const answer = completed(
-      await fixture.workbench["session.events"](
-        {
-          params: { session_id: sessionId },
-          query: version === undefined ? {} : { version },
-          body: null,
-        },
-        fixture.options,
+      await pumped(
+        fixture.workbench["session.events"](
+          {
+            params: { session_id: sessionId },
+            query: version === undefined ? {} : { version },
+            body: null,
+          },
+          fixture.options,
+        ),
       ),
     );
     if (answer.snapshot.pending_approval)
@@ -1600,6 +1615,7 @@ const ASSISTANT_ROLE = "assistant";
 
 function enableTimers(t: TestContext): void {
   t.mock.timers.enable({ apis: ["setTimeout"] });
+  pumpTimers(t);
 }
 
 async function snapshotOf(fixture: Fixture, sessionId: string) {
@@ -1657,13 +1673,27 @@ test("(happy path) a card with no decision expires, returns the expiry reason an
   );
 });
 
+async function untilPendingApproval(
+  fixture: Fixture,
+  sessionId: string,
+  signal: AbortSignal,
+) {
+  for (;;) {
+    signal.throwIfAborted();
+    const answer = await snapshotOf(fixture, sessionId);
+    if (answer.snapshot.pending_approval)
+      return answer.snapshot.pending_approval;
+    await setImmediate();
+  }
+}
+
 test("(invariant guard) an approve one millisecond before the expiry runs the call and a later tick changes nothing", async (t) => {
   enableTimers(t);
   const { fixture, session, nodeId } = await cardFixture(t);
   const sessionId = session.id;
   const wait = fixture.config.workbench.approval_wait_ms;
   completed(await message(fixture, sessionId, QUESTION));
-  const pending = await untilApproval(fixture, sessionId, t.signal);
+  const pending = await untilPendingApproval(fixture, sessionId, t.signal);
   t.mock.timers.tick(wait - SINGLE);
   assert.equal(
     (await snapshotOf(fixture, sessionId)).snapshot.pending_approval
@@ -1677,6 +1707,7 @@ test("(invariant guard) an approve one millisecond before the expiry runs the ca
     [false],
   );
   assert.equal(await criterionOf(fixture, nodeId), NEW_CRITERION);
+  t.mock.timers.tick(WORKBENCH_STREAM_TICK_MS);
   const before = await snapshotOf(fixture, sessionId);
   t.mock.timers.tick(wait);
   await setImmediate();
@@ -1697,6 +1728,7 @@ test("(invariant guard) an abort and then a full tick leave the version unchange
       fixture.options,
     ),
   );
+  t.mock.timers.tick(WORKBENCH_STREAM_TICK_MS);
   const before = await snapshotOf(fixture, sessionId);
   t.mock.timers.tick(fixture.config.workbench.approval_wait_ms);
   await setImmediate();
@@ -4462,3 +4494,260 @@ test("(invariant guard: data loss) a guard record between a tool call and its re
     TOOL_RESULT,
   ]);
 });
+
+const NOTE_KIND = "note";
+const OWNER_NOTE = "Check the billing node before the release.";
+const GUEST_NOTE = "Mai asks which node blocks the release.";
+const GUEST_NAME = "Mai";
+const OWNER_NAME = "Ulrich";
+const NOTE_PAUSE_MS = 5;
+const TWO_NOTES = 2;
+const TWO_CALLS = 2;
+const THREE_CALLS = 3;
+const HOST_CALL = 1;
+const SECOND_RE_CALL = 2;
+const NOTE_TIMEOUT_MS = 60000;
+const MENTION_RE = "@RE what is blocked?";
+const MENTION_HOST = "@Yumi what is blocked?";
+const FOLLOW_UP = "What else is open?";
+const FORK_NOTE_SUMMARY = "Goal: finish the release.";
+
+async function sharedHost(
+  t: TestContext,
+  script: FauxResponseStep[],
+  enabled: readonly string[] = [OPS, REVIEW_AGENT],
+  agentName = OPS,
+) {
+  const fixture = await workbenchFixture(
+    t,
+    script,
+    temporaryDirectory(),
+    undefined,
+    enabled,
+  );
+  const session = await createSession(fixture, undefined, agentName);
+  return { fixture, session };
+}
+
+async function inviteGuest(fixture: Fixture, sessionId: string) {
+  return completed(
+    await fixture.workbench["invite.create"](
+      {
+        params: { session_id: sessionId },
+        query: {},
+        body: { invitee_name: GUEST_NAME },
+      },
+      fixture.options,
+    ),
+  );
+}
+
+function noteRecords(entries: readonly Entry[]): Entry[] {
+  return recordsOf(entries).filter(
+    (entry) => (entry.data as { kind?: string }).kind === NOTE_KIND,
+  );
+}
+
+function providerText(fixture: Fixture, call: number): string {
+  return JSON.stringify(fixture.provider.calls[call]!.messages);
+}
+
+test(
+  "(happy path, note) an untagged message in a shared conversation appends a note, starts no run and the next run of each member holds it with its author",
+  { timeout: NOTE_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, session } = await sharedHost(t, [
+      fauxAssistantMessage(ANSWER),
+      fauxAssistantMessage(SECOND_ANSWER),
+      fauxAssistantMessage(THIRD_ANSWER),
+    ]);
+    await inviteGuest(fixture, session.id);
+    const first = completed(await message(fixture, session.id, MENTION_RE));
+    assert.equal(first.kind, MessageKind.Run);
+    await untilIdle(fixture, session.id, t.signal);
+    await delay(NOTE_PAUSE_MS);
+    const note = completed(await message(fixture, session.id, OWNER_NOTE));
+    assert.deepEqual(note, {
+      session_id: session.id,
+      agent_name: null,
+      run_active: false,
+      queued_message_id: null,
+      cleared: [],
+      kind: MessageKind.Note,
+    });
+    await fixture.workbenchService.note(
+      session.id,
+      { kind: AuthorKind.Guest, name: GUEST_NAME },
+      GUEST_NOTE,
+    );
+    assert.equal(fixture.provider.calls.length, SINGLE);
+    completed(await message(fixture, session.id, MENTION_HOST));
+    await untilIdle(fixture, session.id, t.signal);
+    completed(await message(fixture, session.id, MENTION_RE));
+    await untilIdle(fixture, session.id, t.signal);
+    assert.equal(fixture.provider.calls.length, THREE_CALLS);
+    for (const call of [HOST_CALL, SECOND_RE_CALL]) {
+      const text = providerText(fixture, call);
+      assert.ok(text.includes(`${OWNER_NAME} (owner): ${OWNER_NOTE}`), text);
+      assert.ok(text.includes(`${GUEST_NAME} (guest): ${GUEST_NOTE}`), text);
+    }
+    assert.equal(
+      noteRecords(await sessionEntries(fixture, session.id)).length,
+      TWO_NOTES,
+    );
+  },
+);
+
+test(
+  "(happy path, mention) a message with a leading mention in a shared conversation starts a run",
+  { timeout: NOTE_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, session } = await sharedHost(t, [
+      fauxAssistantMessage(ANSWER),
+    ]);
+    await inviteGuest(fixture, session.id);
+    const accepted = completed(await message(fixture, session.id, MENTION_RE));
+    assert.equal(accepted.kind, MessageKind.Run);
+    assert.equal(accepted.agent_name, REVIEW_AGENT);
+    assert.equal(accepted.run_active, true);
+    await untilIdle(fixture, session.id, t.signal);
+    assert.equal(fixture.provider.calls.length, SINGLE);
+    assert.equal(
+      noteRecords(await sessionEntries(fixture, session.id)).length,
+      NO_QUEUED_MESSAGES,
+    );
+  },
+);
+
+test(
+  "(happy path, unshared) after the last revoke an untagged message runs the member that answered last",
+  { timeout: NOTE_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, session } = await sharedHost(t, [
+      fauxAssistantMessage(ANSWER),
+      fauxAssistantMessage(SECOND_ANSWER),
+    ]);
+    const invite = await inviteGuest(fixture, session.id);
+    completed(await message(fixture, session.id, MENTION_RE));
+    await untilIdle(fixture, session.id, t.signal);
+    completed(
+      await fixture.workbench["invite.revoke"](
+        { params: { invite_id: invite.id }, query: {}, body: null },
+        fixture.options,
+      ),
+    );
+    const accepted = completed(await message(fixture, session.id, FOLLOW_UP));
+    assert.equal(accepted.kind, MessageKind.Run);
+    assert.equal(accepted.agent_name, REVIEW_AGENT);
+    await untilIdle(fixture, session.id, t.signal);
+    assert.equal(fixture.provider.calls.length, TWO_CALLS);
+  },
+);
+
+test(
+  "(security, guest attribution) the fork material holds an owner note and a guest note marked with its author",
+  { timeout: NOTE_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, session } = await sharedHost(
+      t,
+      [
+        fauxAssistantMessage(ANSWER),
+        fauxAssistantMessage(FORK_NOTE_SUMMARY),
+        pass(),
+        fauxAssistantMessage(SECOND_ANSWER),
+      ],
+      [AGENT, GUARD_AGENT],
+      AGENT,
+    );
+    completed(await message(fixture, session.id, QUESTION));
+    await untilIdle(fixture, session.id, t.signal);
+    await inviteGuest(fixture, session.id);
+    completed(await message(fixture, session.id, OWNER_NOTE));
+    await fixture.workbenchService.note(
+      session.id,
+      { kind: AuthorKind.Guest, name: GUEST_NAME },
+      GUEST_NOTE,
+    );
+    completed(await forkOf(fixture, session.id, FOLLOW_UP));
+    const [summarizer] = callsOf(fixture, FORK_SUMMARY_PROMPT);
+    const { conversation } = userRequestOf(summarizer!);
+    assert.ok(conversation!.includes(`${GUEST_NAME} (guest): ${GUEST_NOTE}`));
+    assert.ok(conversation!.includes(`${OWNER_NAME} (owner): ${OWNER_NOTE}`));
+    assert.ok(!conversation!.includes(`${OWNER_NAME} (guest)`));
+  },
+);
+
+test(
+  "(security, guard floor) an owner note leaves the auto mode unchanged",
+  { timeout: NOTE_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, session } = await sharedHost(t, []);
+    completed(await setAutoMode(fixture, session.id, false));
+    await inviteGuest(fixture, session.id);
+    const before = await autoModeState(fixture, session.id);
+    const note = completed(await message(fixture, session.id, OWNER_NOTE));
+    assert.equal(note.kind, MessageKind.Note);
+    assert.deepEqual(await autoModeState(fixture, session.id), before);
+    assert.equal(before.enabled, false);
+    assert.equal(fixture.provider.calls.length, NO_QUEUED_MESSAGES);
+  },
+);
+
+test(
+  "(invariant, two-writer race) a note during a run leaves buildSessionContext unchanged",
+  { timeout: NOTE_TIMEOUT_MS },
+  async (t) => {
+    const held = heldAnswer(ANSWER);
+    const { fixture, session } = await sharedHost(t, [held.step]);
+    await inviteGuest(fixture, session.id);
+    completed(await message(fixture, session.id, MENTION_HOST));
+    await untilProviderCall(fixture, t.signal);
+    const note = completed(await message(fixture, session.id, OWNER_NOTE));
+    assert.equal(note.kind, MessageKind.Note);
+    assert.equal(note.run_active, true);
+    held.gate.resolve();
+    await untilIdle(fixture, session.id, t.signal);
+    const entries = await sessionEntries(fixture, session.id);
+    const [record] = noteRecords(entries);
+    assert.ok(record);
+    const without = entries
+      .filter((entry) => entry !== record)
+      .map((entry) =>
+        entry.parentId === record.id
+          ? { ...entry, parentId: record.parentId }
+          : entry,
+      );
+    const { buildSessionContext } = await loadPi();
+    assert.deepEqual(
+      buildSessionContext(entries as never),
+      buildSessionContext(without as never),
+    );
+    assert.equal(fixture.provider.calls.length, SINGLE);
+  },
+);
+
+test(
+  "(invariant, two-writer race) an untagged item queued before invite.create starts by D8",
+  { timeout: NOTE_TIMEOUT_MS },
+  async (t) => {
+    const held = heldAnswer(ANSWER);
+    const { fixture, session } = await sharedHost(t, [
+      held.step,
+      fauxAssistantMessage(SECOND_ANSWER),
+    ]);
+    completed(await message(fixture, session.id, QUESTION));
+    await untilProviderCall(fixture, t.signal);
+    const queued = completed(await message(fixture, session.id, FOLLOW_UP));
+    assert.equal(queued.kind, MessageKind.Run);
+    assert.ok(queued.queued_message_id);
+    await inviteGuest(fixture, session.id);
+    held.gate.resolve();
+    await untilIdle(fixture, session.id, t.signal);
+    assert.equal(fixture.provider.calls.length, TWO_CALLS);
+    assert.ok(providerText(fixture, SINGLE).includes(FOLLOW_UP));
+    assert.equal(
+      noteRecords(await sessionEntries(fixture, session.id)).length,
+      NO_QUEUED_MESSAGES,
+    );
+  },
+);

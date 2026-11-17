@@ -20,6 +20,7 @@ import {
 } from "./auth/authentication.ts";
 import { type GatewayConfig, gatewayConfigSchema } from "./config.ts";
 import type { InventoryCollector } from "./contract.ts";
+import type { ResolvedInvite } from "../workbench/contract.ts";
 import { gatewayMigrations } from "./migrations.ts";
 import { GatewayService } from "./service.ts";
 import type { DashboardLoader } from "./dashboard.ts";
@@ -45,6 +46,12 @@ export function configuration(value: unknown) {
 
 export function fakeLookups() {
   const registrations = new Map<string, Registration>();
+  const invites = new Map<string, ResolvedInvite>();
+  const workbench = {
+    invites,
+    resolveInvite: (inviteId: string): ResolvedInvite | null =>
+      invites.get(inviteId) ?? null,
+  };
   const worker = {
     registrations,
     findByClient: (client: string) => registrations.get(client),
@@ -71,6 +78,7 @@ export function fakeLookups() {
       },
     },
     worker,
+    workbench,
   } satisfies AuthenticationLookups;
 }
 

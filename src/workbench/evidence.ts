@@ -11,6 +11,8 @@ import type { InvokeOperation } from "./tools.ts";
 
 export const EVIDENCE_READ_TOOL = "evidence_read";
 export const EVIDENCE_ASSET_MISMATCH = "workbench.evidence.asset_mismatch";
+export const EVIDENCE_SHARED_CONVERSATION =
+  "workbench.evidence.shared_conversation";
 export const EVIDENCE_TEXT_MAX_BYTES = 65536;
 export const EVIDENCE_TEXT_MEDIA_TYPES: readonly string[] = [
   "text/*",

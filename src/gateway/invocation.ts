@@ -15,6 +15,7 @@ import { lifecycle } from "../kernel/service.ts";
 import type { Authentication } from "./auth/authentication.ts";
 import {
   type CallerIdentity,
+  isGuestIdentity,
   isHumanIdentity,
   isMachineIdentity,
   isServiceIdentity,
@@ -53,6 +54,7 @@ const AUTHENTICATED_POLICIES: Partial<
   [AccessPolicy.Human]: isHumanIdentity,
   [AccessPolicy.Client]: isMachineIdentity,
   [AccessPolicy.Worker]: isWorkerIdentity,
+  [AccessPolicy.Guest]: isGuestIdentity,
   [AccessPolicy.HumanOrWorker]: (identity) =>
     isHumanIdentity(identity) || isWorkerIdentity(identity),
   [AccessPolicy.HumanOrService]: (identity, operation) => {
@@ -218,6 +220,7 @@ function idempotencyCaller(
   if (isHumanIdentity(identity)) return identity.accountId;
   if (isMachineIdentity(identity)) return identity.clientId;
   if (isWorkerIdentity(identity)) return identity.instanceId;
+  if (isGuestIdentity(identity)) return `guest:${identity.guestId}`;
   if (isServiceIdentity(identity)) return identity.service;
   return undefined;
 }

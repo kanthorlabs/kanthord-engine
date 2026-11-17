@@ -7,6 +7,7 @@ export type DashboardLoader = (path: string) => ArrayBuffer | undefined;
 const API_PATH = "/api";
 const DASHBOARD_INDEX = "index.html";
 const HEAD_METHOD = "HEAD";
+const JOIN_PATH = "/join/";
 const HEAD_OPEN_TAG = /<head(?:\s[^>]*)?>/i;
 
 function isDashboardRequest(method: string, path: string): boolean {
@@ -41,6 +42,17 @@ function assetResponse(
   return new Response(method === HEAD_METHOD ? null : body, { headers });
 }
 
+function indexResponse(
+  method: string,
+  basePath: string,
+  load: DashboardLoader,
+): Response | undefined {
+  const index = load(DASHBOARD_INDEX);
+  return index
+    ? assetResponse(method, DASHBOARD_INDEX, index, basePath)
+    : undefined;
+}
+
 export function dashboardResponse(
   method: string,
   path: string,
@@ -50,9 +62,10 @@ export function dashboardResponse(
   if (!isDashboardRequest(method, path)) return undefined;
   const name = path.slice(1);
   const asset = name ? load(name) : undefined;
-  if (asset) return assetResponse(method, name, asset, basePath);
-  const index = load(DASHBOARD_INDEX);
-  return index
-    ? assetResponse(method, DASHBOARD_INDEX, index, basePath)
-    : undefined;
+  const response = asset
+    ? assetResponse(method, name, asset, basePath)
+    : indexResponse(method, basePath, load);
+  if (response && path.startsWith(JOIN_PATH))
+    response.headers.set("Referrer-Policy", "no-referrer");
+  return response;
 }
