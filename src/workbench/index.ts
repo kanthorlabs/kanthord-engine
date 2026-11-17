@@ -3,6 +3,7 @@ export {
   type Dependencies,
   type WorkbenchModelRuntimeFactory,
 } from "./service.ts";
+export { WorkbenchInvites } from "./invites.ts";
 export { workbenchConfigSchema, type WorkbenchConfig } from "./config.ts";
 export { workbenchMigrations } from "./migrations.ts";
 export {

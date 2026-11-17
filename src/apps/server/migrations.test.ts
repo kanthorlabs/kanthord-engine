@@ -117,6 +117,7 @@ const INTAKE_TABLES = [
   INTAKE_OUTBOUND_REQUEST_TABLE,
 ];
 const REPOSITORY_HOST_KEY_TABLE = "repository_host_key";
+const WORKBENCH_INVITE_TABLE = "workbench_invite";
 const FOOTPRINT_TABLES = ["footprint_cleanup", "footprint_alert"];
 const INTEGRITY_OK = "ok";
 const NO_PREFIX_MATCHES = 0;
@@ -146,6 +147,7 @@ const ALL_TABLES = [
   SCHEDULER_EXECUTION_TABLE,
   SCHEDULER_JOB_TABLE,
   SCHEDULER_QUEUE_PLACE_TABLE,
+  WORKBENCH_INVITE_TABLE,
   WORKER_INSTANCE_TABLE,
   WORKER_MACHINE_TABLE,
   WORKER_REGISTRATION_TABLE,
@@ -173,6 +175,7 @@ const ALL_INDEXES = [
   "scheduler_execution_node_live",
   "scheduler_execution_runtime_live",
   "scheduler_job_node_id",
+  "workbench_invite_token_hash",
   "worker_instance_fingerprint",
   "worker_instance_name_revision",
   "worker_machine_fingerprint",
@@ -239,6 +242,7 @@ test("service migrations own distinct prefixes and create only tables in their n
       PROJECT_BINDING_TABLE,
       ...SCHEDULER_TABLES,
       ...MISSION_TABLES,
+      WORKBENCH_INVITE_TABLE,
       ...INTAKE_TABLES,
       REPOSITORY_HOST_KEY_TABLE,
       ...FOOTPRINT_TABLES,
@@ -493,7 +497,7 @@ test("each service migration set applies alone to an empty store", () => {
   }
 });
 
-test("all ERD 1, ERD 2 and ERD 3 migrations produce exactly the twenty-five tables", () => {
+test("all ERD 1, ERD 2 and ERD 3 migrations produce exactly the twenty-six tables", () => {
   const allServices: Migrations = [
     { service: CUSTODY_SERVICE_NAME, migrations: custodyMigrations },
     { service: SCHEDULER_SERVICE_NAME, migrations: schedulerMigrations },

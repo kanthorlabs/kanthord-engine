@@ -136,6 +136,7 @@ import {
   evidenceReadTool,
 } from "./evidence.ts";
 import type { WorkbenchConfig } from "./config.ts";
+import type { CreatedInvite, InviteItem, WorkbenchInvites } from "./invites.ts";
 import {
   createPhaseSession,
   openPhaseSession,
@@ -178,8 +179,26 @@ export type WorkbenchModelRuntimeFactory = (
   input: ModelConnectorInput,
 ) => Promise<{ runtime: ModelRuntime; model: Model<Api> }>;
 
+export interface GuestTokenRequest {
+  guestId: string;
+  name: string;
+  inviteId: string;
+  expiresAt: number;
+}
+
+interface InviteBody {
+  invitee_name: string;
+}
+
+interface JoinBody {
+  invite_token: string;
+  name: string;
+}
+
 export interface Dependencies {
   store: Store;
+  invites: WorkbenchInvites;
+  signGuestToken: (guest: GuestTokenRequest) => Promise<{ token: string }>;
   config: WorkbenchConfig;
   logger: Logger;
   stateDirectory: string;
@@ -433,6 +452,14 @@ function sessionNotFound(sessionId: string): OperationError {
     WorkbenchErrorCode.SessionNotFound,
     "Workbench session not found.",
     { session_id: sessionId },
+  );
+}
+
+function inviteNotFound(): OperationError {
+  return new OperationError(
+    HttpStatus.NotFound,
+    WorkbenchErrorCode.InviteNotFound,
+    "Workbench invite not found.",
   );
 }
 
@@ -2275,6 +2302,52 @@ export class WorkbenchService implements Service {
     });
   }
 
+  async inviteCreate(
+    caller: CallerContext,
+    sessionId: string,
+    body: InviteBody,
+  ): Promise<CreatedInvite> {
+    const host = await this.session(sessionId);
+    this.requireHost(host);
+    const created = this.dependencies.invites.create(
+      host.id,
+      humanOf(caller).accountId,
+      body.invitee_name,
+    );
+    host.evidenceGrants.clear();
+    return created;
+  }
+
+  async inviteList(sessionId: string): Promise<{ items: InviteItem[] }> {
+    const host = await this.session(sessionId);
+    this.requireHost(host);
+    return { items: this.dependencies.invites.list(host.id) };
+  }
+
+  inviteRevoke(inviteId: string): { id: string } {
+    const revoked = this.dependencies.invites.revoke(inviteId);
+    if (!revoked) throw inviteNotFound();
+    return { id: revoked.id };
+  }
+
+  async inviteJoin(body: JoinBody) {
+    const joined = this.dependencies.invites.join(body.invite_token, body.name);
+    if (!joined) throw inviteNotFound();
+    const { token } = await this.dependencies.signGuestToken({
+      guestId: joined.guest_id,
+      name: joined.name,
+      inviteId: joined.invite_id,
+      expiresAt: joined.expires_at,
+    });
+    return {
+      guest_token: token,
+      guest_id: joined.guest_id,
+      name: joined.name,
+      session_id: joined.session_id,
+      expires_at: joined.expires_at,
+    };
+  }
+
   declare(registry: OperationRegistry): void {
     registry.register(workbenchOperations["session.list"], ({ query }) =>
       this.list(query.agent_name),
@@ -2321,6 +2394,20 @@ export class WorkbenchService implements Service {
       workbenchOperations["session.queue.remove"],
       ({ params }) =>
         this.removeQueued(params.session_id, params.queued_message_id),
+    );
+    registry.register(
+      workbenchOperations["invite.create"],
+      ({ params, body }, caller) =>
+        this.inviteCreate(caller, params.session_id, body),
+    );
+    registry.register(workbenchOperations["invite.list"], ({ params }) =>
+      this.inviteList(params.session_id),
+    );
+    registry.register(workbenchOperations["invite.revoke"], ({ params }) =>
+      this.inviteRevoke(params.invite_id),
+    );
+    registry.register(workbenchOperations["invite.join"], ({ body }) =>
+      this.inviteJoin(body),
     );
     registry.register(
       workbenchOperations["session.events"],

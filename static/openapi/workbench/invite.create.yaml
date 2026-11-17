@@ -1,0 +1,231 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: workbench.invite.create
+    tags:
+      - workbench
+    description: Invite one person to a workbench conversation. The answer holds
+      `invite_token` once. The server stores only its hash. The invite lasts 7
+      days. Creating an invite clears the evidence grants of the conversation.
+      Error `workbench.invite.name_invalid` answers a blank `invitee_name` or
+      one of more than 64 characters.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/workbench.invite.create.Input/properties/params/pro\
+            perties/session_id"
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/workbench.invite.create.Input/properties/body"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/workbench.invite.create.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+  get:
+    operationId: workbench.invite.list
+    tags:
+      - workbench
+    description: List the live invites of a workbench conversation.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/workbench.invite.list.Input/properties/params/prope\
+            rties/session_id"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/workbench.invite.list.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    workbench.invite.create.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            session_id:
+              type: string
+              minLength: 44
+              maxLength: 44
+              pattern: ^workbench_session_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: workbench_session_ followed by a canonical 26-character uppercase
+                ULID.
+          required:
+            - session_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            invitee_name:
+              type: string
+              maxLength: 256
+          required:
+            - invitee_name
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    workbench.invite.create.Output:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 43
+          maxLength: 43
+          pattern: ^workbench_invite_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: workbench_invite_ followed by a canonical 26-character uppercase
+            ULID.
+        invitee_name:
+          type: string
+        expires_at:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+          description: Unix epoch time in milliseconds.
+        session_id:
+          type: string
+          minLength: 44
+          maxLength: 44
+          pattern: ^workbench_session_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: workbench_session_ followed by a canonical 26-character uppercase
+            ULID.
+        invite_token:
+          type: string
+          format: uuid
+          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+      required:
+        - id
+        - invitee_name
+        - expires_at
+        - session_id
+        - invite_token
+      additionalProperties: false
+    workbench.invite.list.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            session_id:
+              type: string
+              minLength: 44
+              maxLength: 44
+              pattern: ^workbench_session_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: workbench_session_ followed by a canonical 26-character uppercase
+                ULID.
+          required:
+            - session_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    workbench.invite.list.Output:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                minLength: 43
+                maxLength: 43
+                pattern: ^workbench_invite_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: workbench_invite_ followed by a canonical 26-character uppercase
+                  ULID.
+              invitee_name:
+                type: string
+              expires_at:
+                type: integer
+                minimum: -9007199254740991
+                maximum: 9007199254740991
+                description: Unix epoch time in milliseconds.
+            required:
+              - id
+              - invitee_name
+              - expires_at
+            additionalProperties: false
+      required:
+        - items
+      additionalProperties: false

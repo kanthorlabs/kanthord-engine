@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
-import { deriveClientSecret } from "../../gateway/auth/jwt.ts";
+import {
+  deriveClientSecret,
+  generateGuestJWT,
+} from "../../gateway/auth/jwt.ts";
 import {
   configPath,
   directories,
@@ -173,6 +176,7 @@ import { AgentComponent, agentMigrations } from "../../agent/index.ts";
 import {
   operationToolDeclarations,
   WorkbenchFootprint,
+  WorkbenchInvites,
   workbenchMigrations,
   type WorkbenchModelRuntimeFactory,
   WorkbenchService,
@@ -384,6 +388,7 @@ export function composeServices(options: ComposeServicesOptions) {
     options.repositoryTransport ?? repositoryComponent;
   const envelopeKey = deriveEnvelopeKey(options.config.master_key);
   const registry = options.registry ?? new OperationRegistry();
+  const invites = new WorkbenchInvites(options.store);
   const invocation = createInvocation({
     registry,
     stores: {
@@ -417,6 +422,9 @@ export function composeServices(options: ComposeServicesOptions) {
         findByClient: (client) => worker.registrations.findByClient(client),
         heartbeat: (runtimeIdentity) =>
           worker.registrations.heartbeat(runtimeIdentity),
+      },
+      workbench: {
+        resolveInvite: (inviteId) => invites.resolve(inviteId),
       },
       instances: {
         liveInstance: (instanceId) => worker.instances.liveInstance(instanceId),
@@ -1364,6 +1372,13 @@ export function composeServices(options: ComposeServicesOptions) {
   });
   const workbench = new WorkbenchService({
     store: options.store,
+    invites,
+    signGuestToken: (guest) =>
+      generateGuestJWT(
+        options.config.master_key,
+        options.config.gateway.auth.version,
+        guest,
+      ),
     config: options.config.workbench,
     logger: options.logger,
     stateDirectory: options.stateDirectory,

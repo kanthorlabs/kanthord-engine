@@ -39,7 +39,7 @@ const IMPORT_CONFIRM = {
   action: "confirm",
   guard: { cause: "import", reason: null, confidence: null },
 };
-const HUMAN_ONLY_COUNT = 90;
+const HUMAN_ONLY_COUNT = 91;
 const HUMAN_ONLY_CODE = "workbench.guard.human_only";
 const IMPORT_FORMAT_CODE = "workbench.guard.import_format";
 const HUMAN_ONLY_TEXT =

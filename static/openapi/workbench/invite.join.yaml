@@ -1,0 +1,109 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: workbench.invite.join
+    tags:
+      - workbench
+    description: Join a workbench conversation with an invite token and a name. The
+      answer holds a guest token for the guest routes. An unknown or expired
+      token answers `workbench.invite.not_found`. A blank name or one of more
+      than 64 characters answers `workbench.invite.name_invalid`.
+    x-access-policy: public
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security: []
+    parameters: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/workbench.invite.join.Input/properties/body"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/workbench.invite.join.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    workbench.invite.join.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties: {}
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            invite_token:
+              type: string
+              format: uuid
+              pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+            name:
+              type: string
+              maxLength: 256
+          required:
+            - invite_token
+            - name
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    workbench.invite.join.Output:
+      type: object
+      properties:
+        guest_token:
+          type: string
+        guest_id:
+          type: string
+        name:
+          type: string
+        session_id:
+          type: string
+          minLength: 44
+          maxLength: 44
+          pattern: ^workbench_session_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: workbench_session_ followed by a canonical 26-character uppercase
+            ULID.
+        expires_at:
+          type: integer
+          minimum: -9007199254740991
+          maximum: 9007199254740991
+          description: Unix epoch time in milliseconds.
+      required:
+        - guest_token
+        - guest_id
+        - name
+        - session_id
+        - expires_at
+      additionalProperties: false
