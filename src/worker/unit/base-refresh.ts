@@ -12,7 +12,6 @@ import {
 import type { WorkspaceCheckout } from "./workspace.ts";
 import { EndReason } from "./execution-run.ts";
 import { type ImplementPorts, PortResultKind } from "./foundry-ports.ts";
-import { workerPorts } from "./worker-ports.ts";
 import { GitStep, withinGit } from "./method-telemetry.ts";
 import { gatedAgent, mergeCommitMessage } from "./turn-gate.ts";
 
@@ -159,7 +158,8 @@ export async function fetchAtRelease(
 
 export async function refreshAtRelease(
   state: StepsState,
+  ports: ImplementPorts,
 ): Promise<RefreshResult> {
-  await fetchAtRelease(state, workerPorts(state.input, state.run));
+  await fetchAtRelease(state, ports);
   return refreshAtClaim(state);
 }

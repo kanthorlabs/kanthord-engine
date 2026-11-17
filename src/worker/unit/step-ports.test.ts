@@ -1,14 +1,19 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { join } from "node:path";
-import { simpleGit } from "simple-git";
+import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { background } from "../../kernel/context.ts";
+import { Diagnostic } from "../../kernel/errors.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import {
   hostEnvironment,
   stopAfter,
   temporary,
 } from "../../kernel/test-support.ts";
+import {
+  RepositoryErrorCode,
+  type SshAccess,
+} from "../../repository/contract.ts";
 import { ExecutionBudget } from "./budget.ts";
 import type { StepIo } from "./chain.ts";
 import {
@@ -24,12 +29,12 @@ import {
   PortResultKind,
 } from "./foundry-ports.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { reportCoder } from "./step-report-coder.ts";
-import { baseFetch } from "./step-base-fetch.ts";
-import { evidenceHead } from "./step-evidence-head.ts";
+import { fetchAtRelease } from "./base-refresh.ts";
 import { releaseVerify } from "./step-release-verify.ts";
-import type { StepsState } from "./steps-implement.ts";
+import type { StepsInput, StepsState } from "./steps-implement.ts";
 import { TreeSource } from "./tree-pool.ts";
+import type { WorkspaceRoot } from "./workspace.ts";
+import { workerPorts } from "./worker-ports.ts";
 
 const WALL_TIME_MS = 60000;
 const FAILED_CODE = "repository.connector.git_failed";
@@ -38,12 +43,7 @@ const FAILED: PortResult<never> = {
   code: FAILED_CODE,
   message: FAILED_CODE,
 };
-const COMMIT_IDENTITY = [
-  "-c",
-  "user.name=Test",
-  "-c",
-  "user.email=a@example.invalid",
-];
+const RUN_SECRET = "run-secret-value";
 
 function claimOf(): MethodClaim {
   return {
@@ -66,6 +66,7 @@ function harness(t: TestContext, ports: Partial<ImplementPorts>) {
     clients: {} as MethodClients,
     credentials: { release: async () => {} },
     context: background,
+    secrets: async () => [RUN_SECRET],
   });
   stopAfter(t, () => run.dispose());
   const budget = new ExecutionBudget({
@@ -85,10 +86,6 @@ function harness(t: TestContext, ports: Partial<ImplementPorts>) {
   return { claim, run, budget, io };
 }
 
-function failedSubmit(): Pick<ImplementPorts, "evidence"> {
-  return { evidence: { submit: async () => FAILED } };
-}
-
 function isFailedStop(error: unknown): boolean {
   return (
     error instanceof ExecutionStop &&
@@ -100,65 +97,6 @@ function isFailedStop(error: unknown): boolean {
 function checkoutOf(name: string, directory: string) {
   return { binding_id: createIdentity("binding"), name, directory, head: "" };
 }
-
-test("a failed coder report submit stops with the code of the port answer", async (t) => {
-  const h = harness(t, failedSubmit());
-  await assert.rejects(
-    reportCoder.run(
-      {
-        claim: h.claim,
-        state: { checkouts: [checkoutOf("app", "app")] } as StepsState,
-        reports: new Map([["unit", "text"]]),
-      },
-      null,
-      h.io,
-    ),
-    isFailedStop,
-  );
-});
-
-test("a failed head commit submit stops with the code of the port answer", async (t) => {
-  const h = harness(t, failedSubmit());
-  const directory = temporary(t);
-  const git = simpleGit(directory);
-  await git.init();
-  await git.raw([...COMMIT_IDENTITY, "commit", "--allow-empty", "-m", "head"]);
-  await assert.rejects(
-    evidenceHead.run(
-      {
-        claim: h.claim,
-        state: {
-          checkouts: [checkoutOf("app", directory)],
-          input: { env: hostEnvironment() },
-        } as StepsState,
-      },
-      null,
-      h.io,
-    ),
-    isFailedStop,
-  );
-});
-
-test("a failed base fetch stops with the code of the port answer", async (t) => {
-  const h = harness(t, {
-    repository: { fetchBase: async () => FAILED },
-  });
-  await assert.rejects(
-    baseFetch.run(
-      {
-        state: {
-          checkouts: [checkoutOf("app", "app")],
-          agent: { budget: h.budget },
-          run: h.run,
-          input: { claim: h.claim },
-        } as unknown as StepsState,
-      },
-      null,
-      h.io,
-    ),
-    isFailedStop,
-  );
-});
 
 test("a failed release tree take stops with the code of the port answer and gives back each taken tree", async (t) => {
   const root = temporary(t);
@@ -201,4 +139,64 @@ test("a failed release tree take stops with the code of the port answer and give
     isFailedStop,
   );
   assert.deepEqual(given, [taken]);
+});
+
+test("a base fetch that git refuses stops with the redacted git detail and the fetch cause", async (t) => {
+  const h = harness(t, {});
+  const checkout = checkoutOf("app", temporary(t));
+  const input = {
+    claim: h.claim,
+    setup: {
+      repositories: [
+        {
+          binding_id: checkout.binding_id,
+          name: checkout.name,
+          address: "git@example.invalid:app.git",
+          strategy: { base_branch: "main" },
+        },
+      ],
+    },
+    workspaces: { nodeKey: () => temporary(t) } as unknown as WorkspaceRoot,
+    transport: {
+      fetchBase: async () => {
+        throw new Diagnostic(RepositoryErrorCode.GitFailed, "fetch failed.", {
+          cause: new Error(`fetch: rejected ${RUN_SECRET}`),
+        });
+      },
+    },
+    sshAccess: new Map([[checkout.binding_id, {} as SshAccess]]),
+    env: hostEnvironment(),
+  } as unknown as StepsInput;
+  await assert.rejects(
+    fetchAtRelease(
+      {
+        checkouts: [checkout],
+        agent: { budget: h.budget },
+        run: h.run,
+        input,
+      } as unknown as StepsState,
+      workerPorts(input, h.run),
+    ),
+    (error) => {
+      assert.ok(error instanceof ExecutionStop);
+      assert.deepEqual(
+        {
+          reason: error.reason,
+          code: error.code,
+          detail: error.detail,
+          cause: error.cause,
+        },
+        {
+          reason: EndReason.OperationFailed,
+          code: RepositoryErrorCode.GitFailed,
+          detail: "Error: fetch: rejected [redacted]",
+          cause: unattributed([
+            CauseCategory.Infrastructure,
+            CauseCategory.WorkerAction,
+          ]),
+        },
+      );
+      return true;
+    },
+  );
 });

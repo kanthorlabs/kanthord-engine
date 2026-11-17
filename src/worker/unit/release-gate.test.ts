@@ -56,6 +56,7 @@ import { SpanOperation } from "./telemetry.ts";
 import { VerificationContext } from "./method-telemetry.ts";
 import { VERIFICATION_RERUNS } from "./verification.ts";
 import { PoolClass, repoKeyOf, TreeSource } from "./tree-pool.ts";
+import { workerPorts } from "./worker-ports.ts";
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
@@ -698,7 +699,7 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
   test("a node change that edits the declaration does not change the command that judges it", async (t) => {
     const h = await fixture(t, [task("pass", "true")], []);
     await declareAffected(h, t, affectedCommand(FAILS_WHEN_BROKEN));
-    await refreshAtRelease(h);
+    await refreshAtRelease(h, workerPorts(h.input, h.run));
     writeFileSync(
       join(h.root, AFFECTED_DECLARATION_FILE),
       JSON.stringify({ version: 1, command: affectedCommand(NEVER_FAILS) }),

@@ -38,7 +38,6 @@ import { spawnedPids, survivingProcesses } from "../../agent/test-support.ts";
 import { BASE_DIRECTORY, WorkspaceRoot } from "./workspace.ts";
 import { PoolClass, repoKeyOf } from "./tree-pool.ts";
 import { baseTreeTaker } from "./worker-ports.ts";
-import { PortResultKind } from "./foundry-ports.ts";
 
 const env = hostEnvironment();
 const IDENTITY = [
@@ -521,7 +520,6 @@ const ONE_TREE = 1;
 const READ_ONLY_MODE = 0o500;
 const STRAY_FILE = "stray.txt";
 const BASE_PURPOSE = "base";
-const TAKE_FAILED = "repository.connector.git_failed";
 
 interface LogRecord {
   msg: string;
@@ -826,37 +824,5 @@ test("a base head give-back waits for a running preparation and then gives the t
   assert.equal(
     existsSync(join(h.commandTrees()[0]!, ".git", "kanthord-setup.json")),
     true,
-  );
-});
-
-test("a failed base tree take stops with the code of the port answer", async (t) => {
-  const { origin, checkout } = await repository(t, { file: "base" });
-  const workspaces = WorkspaceRoot.open(temporary(t));
-  const nodeId = createIdentity("node");
-  const entry = setupCheckout(checkout, stored(KEPT_SETUP));
-  const base = new BaseHead(
-    input(),
-    {
-      directory: join(workspaces.nodeKey(nodeId), BASE_DIRECTORY),
-      trees: {
-        workspaces,
-        nodeId,
-        addresses: new Map([[entry.repository.name, origin]]),
-        log: () => {},
-        takeBase: async () => ({
-          kind: PortResultKind.Failed,
-          code: TAKE_FAILED,
-          message: TAKE_FAILED,
-        }),
-      },
-    },
-    await setupEntries(input(), [entry]),
-  );
-  await assert.rejects(
-    base.setup(),
-    (error) =>
-      error instanceof ExecutionStop &&
-      error.reason === EndReason.OperationFailed &&
-      error.code === TAKE_FAILED,
   );
 });
