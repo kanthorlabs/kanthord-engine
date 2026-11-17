@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { DeadlineKind } from "./chain.ts";
-import { hostInputOf, type Step } from "./chain-host.ts";
+import type { Step } from "./chain-host.ts";
 import { BaseHead, namedCheckouts, setupEntries } from "./environment-setup.ts";
 import type { ImplementPorts } from "./foundry-ports.ts";
 import { repositoryOf } from "./setup-repository.ts";
@@ -10,22 +10,21 @@ import { BASE_DIRECTORY } from "./workspace-layout.ts";
 
 export const setupEntriesLive: Step<
   unknown,
-  "claim" | "setup" | "sshAccess" | "workspace",
+  "claim" | "setup" | "workspace",
   "setupEntries" | "baseHead",
   ImplementPorts
 > = {
   id: "setup.entries(live)",
   deadline: DeadlineKind.Work,
-  reads: ["claim", "setup", "sshAccess", "workspace"],
+  reads: ["claim", "setup", "workspace"],
   writes: ["setupEntries", "baseHead"],
   stops: [SETUP_STOP],
   async run(ctx, scope, io) {
-    const input = hostInputOf(ctx, io);
     const setupInput = setupInputOf(ctx, { ...io, env: io.host.env });
     const entries = await setupEntries(
       setupInput,
       ctx.workspace.checkouts.map((checkout) => ({
-        repository: repositoryOf({ input }, checkout),
+        repository: repositoryOf({ input: ctx }, checkout),
         directory: checkout.directory,
       })),
     );

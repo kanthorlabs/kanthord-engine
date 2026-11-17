@@ -93,3 +93,15 @@ chain examine
   onStop not revoked, after prepare         no node
   dispose resources                         on every end
   step execution.release(stop)              [cleanup] on each stop that is not revoked
+
+chain tasks_prepare
+  seed claim, setup, workspace, revision, prior
+  phase prepare                             runPhase; no onExit, no onStop
+    loop tasks_prepare                      one frame; span worker.phase prepare
+      step affected.declaration             an absent or invalid declaration gives no entry
+      step setup.entries(live)              stop environment_failed/setup_failed
+      step agent.open                       port: agent.open; stop operation_failed
+      step env.setup(live)                  node failure -> setup instruction of the first unit; budget end; stop environment_failed/setup_failed
+      step state.open                       the live implement state of the later phases
+      step units.plan                       verdict rule, done records, pending units
+  dispose resources                         by the caller, on every end

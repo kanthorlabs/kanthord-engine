@@ -14,6 +14,8 @@ import {
   type ExecutionCtx,
   type FoundryEnd,
   FoundryEndKind,
+  type Key,
+  phaseReads,
   StepKind,
 } from "./chain.ts";
 import type { StepHost } from "./chain-host.ts";
@@ -21,6 +23,7 @@ import {
   CANCELLED,
   type ScopeHolder,
   sliceOf,
+  UNTIL,
   type Walked,
   walkNodes,
 } from "./chain-walk.ts";
@@ -51,6 +54,7 @@ interface Walk<P extends CommonPorts = CommonPorts> {
   ctx: ExecutionCtx;
   io: ChainIo<P>;
   stopping: boolean;
+  step?: string;
 }
 
 export function seededContext(seed: Partial<ExecutionCtx>): ExecutionCtx {
@@ -118,6 +122,7 @@ async function walkStep(
 ): Promise<Walked> {
   const { run } = walk.io;
   const context = stepContext(walk, step);
+  walk.step = step.id;
   try {
     const result = await stepResult(walk, step, { context, holder });
     Object.assign(walk.ctx, result.patch);
@@ -146,7 +151,11 @@ async function hostNodes(
     nodes,
     holder,
   );
-  assert.ok(!(walked instanceof ExecutionStop) && walked !== CANCELLED);
+  assert.ok(
+    !(walked instanceof ExecutionStop) &&
+      walked !== CANCELLED &&
+      walked !== UNTIL,
+  );
   return walked;
 }
 
@@ -331,6 +340,75 @@ export async function runChain<P extends CommonPorts>(
     throw await stopOf(built, walk, { error, prepared: progress.prepared });
   } finally {
     await disposeResources(io.resources);
+  }
+}
+
+export const PhaseEndKind = {
+  Completed: "completed",
+  BudgetEnd: "budget_end",
+  Stop: "stop",
+} as const;
+
+export type PhaseEnd =
+  | { kind: typeof PhaseEndKind.Completed; ctx: ExecutionCtx }
+  | { kind: typeof PhaseEndKind.BudgetEnd; ctx: ExecutionCtx }
+  | {
+      kind: typeof PhaseEndKind.Stop;
+      stop: ExecutionStop;
+      step: string | null;
+      ctx: ExecutionCtx;
+    };
+
+export interface PhaseSeed {
+  keys: Partial<ExecutionCtx>;
+}
+
+export interface PhaseInput {
+  phase: Phase;
+  seed: PhaseSeed;
+}
+
+export class PhaseSeedMissing extends Error {
+  readonly keys: readonly Key[];
+  constructor(keys: readonly Key[]) {
+    super(`The phase seed lacks the keys ${keys.join(", ")}.`);
+    this.keys = keys;
+  }
+}
+
+function phaseNodes(built: Chain, phase: Phase): readonly ChainNode[] {
+  const found = built.phases.find((entry) => entry.phase === phase);
+  assert.ok(found, "A phase run names a phase of the chain.");
+  return found.nodes;
+}
+
+export async function runPhase<P extends CommonPorts>(
+  built: Chain<P>,
+  input: PhaseInput,
+  io: ChainIo<NoInfer<P>>,
+): Promise<PhaseEnd> {
+  const nodes = phaseNodes(built, input.phase);
+  const missing = phaseReads(nodes).filter((key) => !(key in input.seed.keys));
+  if (missing.length > NO_NODES) throw new PhaseSeedMissing(missing);
+  const walk: Walk<P> = {
+    ctx: seededContext(input.seed.keys),
+    io,
+    stopping: false,
+  };
+  try {
+    const kind = await hostNodes(walk, nodes, { scope: null });
+    return kind === StepKind.BudgetEnd
+      ? { kind: PhaseEndKind.BudgetEnd, ctx: walk.ctx }
+      : { kind: PhaseEndKind.Completed, ctx: walk.ctx };
+  } catch (error) {
+    const stop = await io.run.stopOf(error);
+    if ("agent" in walk.ctx) await walk.ctx.agent.abort();
+    return {
+      kind: PhaseEndKind.Stop,
+      stop,
+      step: walk.step ?? null,
+      ctx: walk.ctx,
+    };
   }
 }
 
