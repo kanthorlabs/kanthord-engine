@@ -57,7 +57,7 @@ import { ExecutionRun, type MethodClaim } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import { PoolClass } from "./tree-pool.ts";
-import { prepareStepsWorkspace } from "./steps-implement.ts";
+import { prepareStepsWorkspace } from "./steps-implement-host.ts";
 import { commonPorts } from "./worker-ports.ts";
 import type { RefreshResult } from "./base-refresh.ts";
 import type { Verdict } from "./node-reads.ts";

@@ -23,11 +23,8 @@ import { PoolClass } from "./tree-pool.ts";
 import { SetupEnd } from "./environment-setup.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { VerificationContext } from "./method-telemetry.ts";
-import {
-  runStepsImplement,
-  runTask,
-  TaskResultKind,
-} from "./steps-implement.ts";
+import { TaskResultKind } from "./steps-implement.ts";
+import { runStepsImplement, runTask } from "./steps-implement-host.ts";
 import {
   commandLimitClock,
   fauxAssistantMessage,

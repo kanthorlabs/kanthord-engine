@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { readdirSync, rmSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import { ensureDirectory } from "../../kernel/files.ts";
-import { mergedBranchesOf } from "./base-refresh.ts";
 import type { ExecutionBudget } from "./budget.ts";
 import type { ExecutionRun } from "./execution-run.ts";
 import {
   type AgentPort,
   type CheckoutRef,
   type ClaimPort,
+  type CommandTree,
   type CommonPorts,
   type EvaluationPorts,
   type EvidencePort,
@@ -33,11 +33,13 @@ import { GitStep, withinGit } from "./method-telemetry.ts";
 import type { NativeAgent } from "./native-agent.ts";
 import { readSetupRecord } from "./setup-record.ts";
 import { endedByBudget } from "./step-support.ts";
-import { repositoryOf, type StepsInput } from "./steps-implement.ts";
+import { mergedBranchesOf, repositoryOf } from "./setup-repository.ts";
+import type { StepsInput } from "./steps-implement.ts";
 import { PoolClass, prepareTree } from "./tree-pool.ts";
 import {
   BASE_DIRECTORY,
   CHECKOUTS_DIRECTORY,
+  type LeftoverRepository,
   RELEASE_DIRECTORY,
   sshAccessOf,
   type WorkspaceRoot,
@@ -47,6 +49,8 @@ const NO_REFS: readonly string[] = [];
 const NO_TREES = 0;
 const MIN_DEADLINE_MS = 1;
 const PARENT = "..";
+const TREE_DELETED = "tree deleted";
+const UNKNOWN_ERROR = "unknown";
 
 type FailureMapper = Pick<ExecutionRun, "failureOf">;
 
@@ -54,9 +58,13 @@ export interface BaseTreeHost {
   workspaces: WorkspaceRoot;
   nodeId: string;
   env: NodeJS.ProcessEnv;
-  addressOf: (checkout: CheckoutRef) => string;
+  repositories: readonly LeftoverRepository[];
+  addressOf: (checkout: Pick<CheckoutRef, "binding_id">) => string;
+  log: (msg: string, fields: Record<string, unknown>) => void;
   run: FailureMapper;
 }
+
+export type BaseTreePort = Pick<ReleaseTreePort, "takeBase" | "giveBase">;
 
 function ok<T>(value: T): PortResult<T> {
   return { kind: PortResultKind.Ok, value };
@@ -117,47 +125,92 @@ function layoutOf(checkouts: string, directory: string): string {
   return path;
 }
 
-export function baseTreeTaker(host: BaseTreeHost): ReleaseTreePort["takeBase"] {
-  return async (checkout, commit, call) => {
-    const { env } = host;
-    const { context } = call;
-    const directory = join(
-      host.workspaces.nodeKey(host.nodeId),
-      BASE_DIRECTORY,
-      checkout.name,
+export function baseTreePort(host: BaseTreeHost): BaseTreePort {
+  const { workspaces, nodeId, env, log } = host;
+  const base = join(workspaces.nodeKey(nodeId), BASE_DIRECTORY);
+  const held = new Set<string>();
+  const owner = { nodeId, log };
+  const give = (tree: Pick<CommandTree, "binding_id" | "directory">) => {
+    held.delete(tree.directory);
+    workspaces.giveTree(
+      { address: host.addressOf(tree), poolClass: PoolClass.Command },
+      tree.directory,
+      owner,
     );
-    const address = host.addressOf(checkout);
-    const remaining = () =>
-      Math.max(MIN_DEADLINE_MS, call.deadline - Date.now());
-    const git = () => ({ env, directory, context, deadlineMs: remaining() });
+    if (held.size > NO_TREES) return;
     try {
-      const { source } = await prepareTree({
-        pool: host.workspaces.pool,
-        address,
-        poolClass: PoolClass.Command,
-        target: directory,
-        nodeId: host.nodeId,
-        keepRefs: NO_REFS,
-        env,
-        context,
-        deadlineMs: remaining(),
-        fresh: async () => {
-          await clonePacked(git(), checkout.directory);
-          await fetchLocal(git(), checkout.directory);
-          await checkoutDetached(env, directory, commit, context, remaining());
-          await matchCheckoutRefs(git(), checkout.directory, address);
-        },
-        reuse: async () => {
-          await fetchLocal(git(), checkout.directory);
-          const record = await readSetupRecord(git());
-          await scrubTree(git(), commit, record?.roots ?? []);
-          await matchCheckoutRefs(git(), checkout.directory, address);
-        },
-      });
-      return ok({ binding_id: checkout.binding_id, directory, source });
+      workspaces.removeSafely(base);
     } catch (error) {
-      return host.run.failureOf(error);
+      log(TREE_DELETED, {
+        path: base,
+        code:
+          (error as NodeJS.ErrnoException | undefined)?.code ?? UNKNOWN_ERROR,
+      });
     }
+  };
+  return {
+    async takeBase(checkout, commit, call) {
+      const { context } = call;
+      const directory = join(base, checkout.name);
+      const address = host.addressOf(checkout);
+      const remaining = () =>
+        Math.max(MIN_DEADLINE_MS, call.deadline - Date.now());
+      const git = () => ({ env, directory, context, deadlineMs: remaining() });
+      try {
+        if (held.size === NO_TREES) {
+          await workspaces.giveLeftoverTrees(
+            base,
+            {
+              env,
+              context,
+              nodeId,
+              repositories: host.repositories,
+              poolClass: PoolClass.Command,
+              log,
+            },
+            performance.now() + remaining(),
+          );
+          ensureDirectory(base);
+        }
+        held.add(directory);
+        const { source } = await prepareTree({
+          pool: workspaces.pool,
+          address,
+          poolClass: PoolClass.Command,
+          target: directory,
+          nodeId,
+          keepRefs: NO_REFS,
+          env,
+          context,
+          deadlineMs: remaining(),
+          fresh: async () => {
+            await clonePacked(git(), checkout.directory);
+            await fetchLocal(git(), checkout.directory);
+            await checkoutDetached(
+              env,
+              directory,
+              commit,
+              context,
+              remaining(),
+            );
+            await matchCheckoutRefs(git(), checkout.directory, address);
+          },
+          reuse: async () => {
+            await fetchLocal(git(), checkout.directory);
+            const record = await readSetupRecord(git());
+            await scrubTree(git(), commit, record?.roots ?? []);
+            await matchCheckoutRefs(git(), checkout.directory, address);
+          },
+        });
+        return ok({ binding_id: checkout.binding_id, directory, source });
+      } catch (error) {
+        give({ ...checkout, directory });
+        return host.run.failureOf(error);
+      }
+    },
+    async giveBase(tree) {
+      give(tree);
+    },
   };
 }
 
@@ -256,11 +309,13 @@ function releaseTreePort(
         return run.failureOf(error);
       }
     },
-    takeBase: baseTreeTaker({
+    ...baseTreePort({
       workspaces,
       nodeId,
       env: input.env,
+      repositories: input.setup.repositories,
       addressOf,
+      log: owner.log,
       run,
     }),
     async give(tree) {

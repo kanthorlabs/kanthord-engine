@@ -2,7 +2,7 @@ import type { AffectedTest } from "../../agent/prompt-composer.ts";
 import { readDeclaration } from "./affected.ts";
 import { DeadlineKind, type Step } from "./chain.ts";
 import { next, stepsInputOf, wallDeadlineOf } from "./step-support.ts";
-import { repositoryOf } from "./steps-implement.ts";
+import { repositoryOf } from "./setup-repository.ts";
 
 export const affectedDeclaration: Step<
   unknown,

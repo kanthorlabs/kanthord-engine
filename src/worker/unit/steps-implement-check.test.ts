@@ -25,11 +25,11 @@ import {
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceKind } from "./workspace.ts";
+import { startCheck } from "./steps-implement.ts";
 import {
   prepareStepsWorkspace,
   runStepsImplement,
-  startCheck,
-} from "./steps-implement.ts";
+} from "./steps-implement-host.ts";
 import { refreshAtClaim, RefreshResult } from "./base-refresh.ts";
 import { MERGE_MARKERS_LEFT } from "./turn-gate.ts";
 import { nodeUnitOf } from "./release-gate.ts";

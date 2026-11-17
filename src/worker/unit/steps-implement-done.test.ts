@@ -9,7 +9,7 @@ import type { Revision } from "../../mission/contract.ts";
 import { executionBoundary } from "./native-method.ts";
 import { JUDGEMENT_MARKER } from "./judgement.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { runStepsImplement } from "./steps-implement.ts";
+import { runStepsImplement } from "./steps-implement-host.ts";
 import { nodeUnitOf } from "./release-gate.ts";
 import { DONE_TRAILER, doneRecordOf } from "./done-record.ts";
 import {

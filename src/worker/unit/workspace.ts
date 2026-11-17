@@ -151,11 +151,12 @@ interface ReviewTree {
   target: string;
   end: number;
 }
+export type LeftoverRepository = Pick<WorkspaceRepository, "name" | "address">;
 interface LeftoverTrees {
   env: NodeJS.ProcessEnv;
   context: Context;
   nodeId: string;
-  repositories: readonly Pick<WorkspaceRepository, "name" | "address">[];
+  repositories: readonly LeftoverRepository[];
   poolClass: PoolClass;
   log?: WorkspaceLog;
 }

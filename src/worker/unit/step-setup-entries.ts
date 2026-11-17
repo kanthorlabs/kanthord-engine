@@ -12,7 +12,7 @@ import {
   type SetupInput,
 } from "./environment-setup.ts";
 import type { ImplementPorts } from "./foundry-ports.ts";
-import { repositoryOf } from "./steps-implement.ts";
+import { repositoryOf } from "./setup-repository.ts";
 import {
   budgetMapped,
   next,
@@ -60,24 +60,7 @@ export const setupEntriesLive: Step<
     );
     const baseHead = new BaseHead(
       setupInput,
-      {
-        directory: join(
-          input.workspaces.nodeKey(input.claim.node_id),
-          BASE_DIRECTORY,
-        ),
-        trees: {
-          workspaces: input.workspaces,
-          nodeId: input.claim.node_id,
-          addresses: new Map(
-            input.setup.repositories.map(({ name, address }) => [
-              name,
-              address,
-            ]),
-          ),
-          log: (msg, fields) => io.run.log(msg, fields),
-          takeBase: io.ports.releaseTrees.takeBase,
-        },
-      },
+      { trees: { port: io.ports.releaseTrees, log: io.ports.log } },
       entries,
     );
     io.resources.defer(() => baseHead.giveBack());

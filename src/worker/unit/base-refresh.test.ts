@@ -11,7 +11,8 @@ import {
   refreshAtRelease,
   RefreshResult,
 } from "./base-refresh.ts";
-import { releaseGate, ReleaseGateKind } from "./release-gate.ts";
+import { ReleaseGateKind } from "./release-gate.ts";
+import { releaseGate } from "./steps-implement-host.ts";
 import {
   advanceBase,
   commitOnNode,

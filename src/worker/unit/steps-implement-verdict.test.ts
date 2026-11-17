@@ -12,10 +12,10 @@ import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
 import {
   HEAD_COMMIT_SUBJECT,
-  runStepsImplement,
   startCheck,
   TaskResultKind,
 } from "./steps-implement.ts";
+import { runStepsImplement } from "./steps-implement-host.ts";
 import type { WorkspaceCheckout } from "./workspace.ts";
 import { NoProgressRule } from "./progress-rule.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";

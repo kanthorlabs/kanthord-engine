@@ -83,6 +83,7 @@ export interface ReleaseTreePort {
     call: PortCall,
   ): Promise<PortResult<CommandTree>>;
   give(tree: CommandTree): Promise<void>;
+  giveBase(tree: CommandTree): Promise<void>;
 }
 
 export interface ClaimPort {

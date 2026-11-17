@@ -109,6 +109,7 @@ test("a failed release tree take stops with the code of the port answer and give
         checkout === first ? { kind: PortResultKind.Ok, value: taken } : FAILED,
       takeBase: async () => FAILED,
       give: async (tree) => void given.push(tree),
+      giveBase: async () => assert.fail("The release takes no base tree."),
     },
   });
   const result = await releaseVerify.run(

@@ -26,12 +26,12 @@ import {
 } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
 import { refreshAtClaim, RefreshResult } from "./base-refresh.ts";
+import { TaskResultKind } from "./steps-implement.ts";
 import {
   prepareStepsWorkspace,
   runStepsImplement,
   runTask,
-  TaskResultKind,
-} from "./steps-implement.ts";
+} from "./steps-implement-host.ts";
 import { SpanOperation, SpanRecorder } from "./telemetry.ts";
 import { gatedAgent, GateMode, TurnViolation } from "./turn-gate.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";

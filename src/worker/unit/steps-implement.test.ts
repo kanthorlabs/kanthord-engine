@@ -37,13 +37,12 @@ import { readPushRecord } from "./push-record.ts";
 import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 import {
   HEAD_COMMIT_SUBJECT,
-  runStepsImplement,
-  runTask,
   startCheck,
   TaskResultKind,
   taskWork,
   verifyTaskRun,
 } from "./steps-implement.ts";
+import { runStepsImplement, runTask } from "./steps-implement-host.ts";
 import { nodeWork } from "./base-refresh.ts";
 import { VerdictSource } from "./node-reads.ts";
 import { nodeUnitOf } from "./release-gate.ts";
