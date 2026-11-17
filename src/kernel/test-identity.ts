@@ -1,10 +1,12 @@
 import {
+  mintGuestIdentity,
   mintHumanIdentity,
   mintMachineIdentity,
   mintWorkerIdentity,
 } from "./caller-mint.ts";
 import { mintServiceIdentity } from "./service-mint.ts";
 import type {
+  GuestIdentity,
   HumanIdentity,
   MachineIdentity,
   ServiceIdentity,
@@ -33,6 +35,12 @@ export function testWorkerIdentity(
   jti: string,
 ): WorkerIdentity {
   return mintWorkerIdentity(instanceId, name, jti);
+}
+
+export function testGuestIdentity(
+  guest: Omit<GuestIdentity, "kind">,
+): GuestIdentity {
+  return mintGuestIdentity(guest);
 }
 
 export function testServiceIdentity(service: string): ServiceIdentity {

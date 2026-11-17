@@ -3,6 +3,7 @@ import { identitySchema } from "./identity.ts";
 import {
   callerProvenance,
   CLIENT_IDENTITY_PREFIX,
+  type GuestIdentity,
   type HumanIdentity,
   IdentityKind,
   type MachineIdentity,
@@ -26,6 +27,29 @@ export function mintHumanIdentity(
     jti,
   });
   callerProvenance.human(value);
+  return value;
+}
+
+export function mintGuestIdentity(
+  guest: Omit<GuestIdentity, "kind">,
+): GuestIdentity {
+  assert.ok(
+    guest.guestId.trim() && guest.guestId.length <= MAX_HUMAN_USERNAME_LENGTH,
+  );
+  assert.ok(guest.name.trim() && guest.name.length <= MAX_DISPLAY_NAME_LENGTH);
+  assert.ok(guest.inviteId.trim());
+  assert.ok(guest.sessionId.trim());
+  assert.ok(guest.invitedBy.trim());
+  const value = Object.freeze({
+    kind: IdentityKind.Guest,
+    guestId: guest.guestId,
+    name: guest.name,
+    inviteId: guest.inviteId,
+    sessionId: guest.sessionId,
+    invitedBy: guest.invitedBy,
+    jti: guest.jti,
+  });
+  callerProvenance.guest(value);
   return value;
 }
 

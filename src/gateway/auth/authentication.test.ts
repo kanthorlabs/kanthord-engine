@@ -20,8 +20,17 @@ import {
   MAX_DISPLAY_NAME_LENGTH,
   MAX_HUMAN_USERNAME_LENGTH,
 } from "../../kernel/caller.ts";
-import { generateHumanJWT, generateMachineJWT } from "./jwt.ts";
-import { isHumanIdentity, isMachineIdentity } from "../../kernel/caller.ts";
+import {
+  generateGuestJWT,
+  generateHumanJWT,
+  generateMachineJWT,
+} from "./jwt.ts";
+import {
+  isGuestIdentity,
+  isHumanIdentity,
+  isMachineIdentity,
+} from "../../kernel/caller.ts";
+import { testGuestIdentity } from "../../kernel/test-identity.ts";
 import { gatewayOperations } from "../contract.ts";
 import { JwtCause, WorkerGroupEnded } from "../errors.ts";
 import { InstancePlacement } from "../../worker/contract.ts";
@@ -618,4 +627,173 @@ test("a machine token of a worker instance still needs connection_id", async (t)
   );
   assert.ok(isMachineIdentity(identity));
   assert.equal(identity.connectionId, subject.connectionId);
+});
+
+const GUEST_NAME = "Mira";
+const GUEST_LIFETIME_MS = 600_000;
+const INVITER = "ulrich";
+
+async function guestFixture(t: TestContext) {
+  const machines = fakeLookups();
+  const fixture = await authenticationFixture(t, machines);
+  const key = await tokenKey(fixture.config.master_key);
+  const inviteId = `workbench_invite_${ulid()}`;
+  const sessionId = `workbench_session_${ulid()}`;
+  const guestId = `workbench_guest_${ulid()}`;
+  const expiresAt = Date.now() + GUEST_LIFETIME_MS;
+  machines.workbench.invites.set(inviteId, {
+    session_id: sessionId,
+    invited_by: INVITER,
+    expires_at: expiresAt,
+  });
+  const issued = await generateGuestJWT(
+    fixture.config.master_key,
+    fixture.config.gateway.auth.version,
+    { guestId, name: GUEST_NAME, inviteId, expiresAt },
+  );
+  const claims = decode(issued.token).payload;
+  const forged = (changes: Record<string, unknown>) =>
+    sign({ ...claims, ...changes }, key, "HS256");
+  const refuse = (bearer: string, code: string) =>
+    assert.rejects(
+      fixture.authentication.authenticate(`Bearer ${bearer}`),
+      (error: unknown) =>
+        error instanceof OperationError &&
+        error.status === HttpStatus.Unauthorized &&
+        error.code === code,
+    );
+  return {
+    machines,
+    fixture,
+    key,
+    inviteId,
+    sessionId,
+    guestId,
+    expiresAt,
+    issued,
+    claims,
+    forged,
+    refuse,
+  };
+}
+
+test("a guest token signs sub, name, kind and invite_id with the exp of the invite, and authenticates to a guest identity", async (t) => {
+  const g = await guestFixture(t);
+  assert.equal(g.claims.sub, g.guestId);
+  assert.equal(g.claims.name, GUEST_NAME);
+  assert.equal(g.claims.kind, IdentityKind.Guest);
+  assert.equal(g.claims.invite_id, g.inviteId);
+  assert.equal(g.claims.exp, Math.floor(g.expiresAt / MILLISECONDS_PER_SECOND));
+  const identity = await g.fixture.authentication.authenticate(
+    `Bearer ${g.issued.token}`,
+  );
+  assert.ok(isGuestIdentity(identity));
+  assert.equal(identity.guestId, g.guestId);
+  assert.equal(identity.inviteId, g.inviteId);
+  assert.equal(identity.sessionId, g.sessionId);
+  assert.equal(identity.invitedBy, INVITER);
+});
+
+test("a guest token without invite_id answers gateway.jwt.missing_claim", async (t) => {
+  const g = await guestFixture(t);
+  await g.refuse(
+    await g.forged({ invite_id: undefined }),
+    `gateway.jwt.${JwtCause.MissingClaim}`,
+  );
+});
+
+test("a guest token with a machine or instance claim answers gateway.jwt.forbidden_claim", async (t) => {
+  const g = await guestFixture(t);
+  for (const claim of [
+    { project_id: TEST_PROJECT_ID },
+    { resource_identity: `worker:kanthord:${TEST_WORKER_BINDING}` },
+    { instance_id: `worker_instance_${ulid()}` },
+    { connection_id: `connection_${ulid()}` },
+  ])
+    await g.refuse(
+      await g.forged(claim),
+      `gateway.jwt.${JwtCause.ForbiddenClaim}`,
+    );
+});
+
+test("a human, worker or client token with invite_id answers 401", async (t) => {
+  const g = await guestFixture(t);
+  const human = decode(g.fixture.token).payload;
+  const client = decode(
+    await g.fixture.machineToken(TEST_PROJECT_ID, TEST_WORKER_BINDING),
+  ).payload;
+  const instanceId = `worker_instance_${ulid()}`;
+  const worker = { ...human, sub: instanceId, kind: IdentityKind.Worker };
+  for (const claims of [human, worker, client])
+    await g.refuse(
+      await sign({ ...claims, invite_id: g.inviteId }, g.key, "HS256"),
+      `gateway.jwt.${JwtCause.ForbiddenClaim}`,
+    );
+});
+
+test("a guest token of a deleted invite answers gateway.jwt.invite_ended", async (t) => {
+  const g = await guestFixture(t);
+  g.machines.workbench.invites.delete(g.inviteId);
+  await g.refuse(g.issued.token, `gateway.jwt.${JwtCause.InviteEnded}`);
+});
+
+test("a guest token with a future exp and an invite row that expired answers gateway.jwt.invite_ended", async (t) => {
+  const g = await guestFixture(t);
+  g.machines.workbench.invites.set(g.inviteId, {
+    session_id: g.sessionId,
+    invited_by: INVITER,
+    expires_at: Date.now() - 1,
+  });
+  await g.refuse(g.issued.token, `gateway.jwt.${JwtCause.InviteEnded}`);
+});
+
+test("a guest token past exp answers gateway.jwt.expired", async (t) => {
+  const g = await guestFixture(t);
+  const expired = await generateGuestJWT(
+    g.fixture.config.master_key,
+    g.fixture.config.gateway.auth.version,
+    {
+      guestId: g.guestId,
+      name: GUEST_NAME,
+      inviteId: g.inviteId,
+      expiresAt: Date.now() - GUEST_LIFETIME_MS,
+    },
+  );
+  await g.refuse(expired.token, `gateway.jwt.${JwtCause.Expired}`);
+});
+
+test("recheck of a guest identity whose invite row is gone answers gateway.jwt.invite_ended", async (t) => {
+  const g = await guestFixture(t);
+  const identity = await g.fixture.authentication.authenticate(
+    `Bearer ${g.issued.token}`,
+  );
+  const rechecked = await g.fixture.authentication.recheck(
+    identity,
+    background,
+  );
+  assert.ok(isGuestIdentity(rechecked));
+  g.machines.workbench.invites.delete(g.inviteId);
+  await assert.rejects(
+    g.fixture.authentication.recheck(identity, background),
+    (error: unknown) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.Unauthorized &&
+      error.code === `gateway.jwt.${JwtCause.InviteEnded}`,
+  );
+});
+
+test("a guest identity from the factory passes isGuestIdentity and fails isHumanIdentity, and a copied object passes neither", () => {
+  const guest = testGuestIdentity({
+    guestId: `workbench_guest_${ulid()}`,
+    name: GUEST_NAME,
+    inviteId: `workbench_invite_${ulid()}`,
+    sessionId: `workbench_session_${ulid()}`,
+    invitedBy: INVITER,
+    jti: ulid(),
+  });
+  assert.ok(isGuestIdentity(guest));
+  assert.ok(!isHumanIdentity(guest));
+  const copy = { ...guest };
+  assert.ok(!isGuestIdentity(copy));
+  assert.ok(!isHumanIdentity(copy));
 });

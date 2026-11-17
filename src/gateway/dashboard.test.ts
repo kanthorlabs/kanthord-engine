@@ -25,6 +25,7 @@ const HTML_MEDIA_TYPE = "text/html; charset=utf-8";
 const SCRIPT_MEDIA_TYPE = "text/javascript; charset=utf-8";
 const JSON_MEDIA_TYPE = "application/json";
 const NO_CACHE = "no-cache";
+const NO_REFERRER = "no-referrer";
 const EMPTY_BODY = "";
 
 const encoder = new TextEncoder();
@@ -224,4 +225,13 @@ test("a prefixed gateway checks the host before the prefix", async (t) => {
   assert.equal(response.status, HttpStatus.Forbidden);
   assert.equal(await errorCode(response.clone()), HOST_NOT_ALLOWED);
   assert.deepEqual(await errorDetails(response), REFUSED_HOST_DETAILS);
+});
+
+test("the answer of a join path holds Referrer-Policy no-referrer", async (t) => {
+  const { request } = await gatewayFixture(t, { dashboard: loadEmbedded });
+  const response = await request(`/join/${crypto.randomUUID()}`);
+  assert.equal(response.status, HttpStatus.OK);
+  assert.equal(response.headers.get("referrer-policy"), NO_REFERRER);
+  const other = await request("/");
+  assert.equal(other.headers.get("referrer-policy"), null);
 });

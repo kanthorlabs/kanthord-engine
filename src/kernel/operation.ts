@@ -9,6 +9,7 @@ export const AccessPolicy = {
   Human: "human",
   Client: "client",
   Worker: "worker",
+  Guest: "guest",
   HumanOrWorker: "human_or_worker",
   HumanOrService: "human_or_service",
   Public: "public",

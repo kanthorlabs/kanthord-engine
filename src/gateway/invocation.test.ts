@@ -16,7 +16,11 @@ import {
 } from "../kernel/operation.ts";
 import { Store } from "../kernel/store.ts";
 import { createInvocation, gatewayMigrations } from "./index.ts";
-import { generateHumanJWT, generateMachineJWT } from "./auth/jwt.ts";
+import {
+  generateGuestJWT,
+  generateHumanJWT,
+  generateMachineJWT,
+} from "./auth/jwt.ts";
 import { createIdempotencyKey, createIdentity } from "../kernel/identity.ts";
 import {
   testHumanIdentity,
@@ -27,6 +31,7 @@ import type { ExecutionProofRow } from "../kernel/operation.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
 
 const AUTH_VERSION = 1;
+const GUEST_LIFETIME_MS = 600_000;
 
 const operation = {
   id: "test.commit.read",
@@ -603,4 +608,62 @@ test("human_or_service accepts a human and the listed service, and refuses every
     (other.body as { error: { code: string } }).error.code,
     SERVICE_REFUSED,
   );
+});
+
+test("the idempotency caller key of a guest mutation is guest:<guest_id>", async (t) => {
+  const guestOperation = {
+    ...operation,
+    id: "test.guest.write",
+    method: "POST",
+    path: "/api/test/guest-write",
+    access: AccessPolicy.Guest,
+    mutation: true,
+  } as const;
+  const registry = new OperationRegistry();
+  registry.register(guestOperation, (_input, caller) =>
+    caller.commit(() => COMMITTED_VALUE),
+  );
+  const store = new Store(":memory:");
+  stopAfter(t, () => store.close());
+  store.migrate([{ service: "gateway", migrations: gatewayMigrations }]);
+  registry.seal({ [StoreName.Operational]: store });
+  const masterKey = randomBytes(MASTER_KEY_BYTES).toString("base64");
+  const inviteId = createIdentity("workbench_invite");
+  const guestId = createIdentity("workbench_guest");
+  const expiresAt = Date.now() + GUEST_LIFETIME_MS;
+  const invocation = createInvocation({
+    registry,
+    stores: { [StoreName.Operational]: store },
+    masterKey,
+    authVersion: AUTH_VERSION,
+    lookups: {
+      project: {
+        resolveWorkerGroup: async () => null,
+        workerGroupEnded: async () => false,
+      },
+      worker: { findByClient: () => undefined, heartbeat: () => {} },
+      workbench: {
+        resolveInvite: () => ({
+          session_id: createIdentity("workbench_session"),
+          invited_by: "ulrich",
+          expires_at: expiresAt,
+        }),
+      },
+    },
+  });
+  stopAfter(t, () => invocation.stop());
+  const { token } = await generateGuestJWT(masterKey, AUTH_VERSION, {
+    guestId,
+    name: "Mira",
+    inviteId,
+    expiresAt,
+  });
+  const reserve = t.mock.method(invocation.idempotency, "reserve");
+  const answer = await invocation.invoke(guestOperation.id, input, {
+    authorization: `Bearer ${token}`,
+    idempotencyKey: createIdempotencyKey(),
+  });
+  assert.equal(answer.status, HttpStatus.OK);
+  assert.equal(reserve.mock.callCount(), ONE_RESERVE_CALL);
+  assert.equal(reserve.mock.calls[0]!.arguments[1], `guest:${guestId}`);
 });

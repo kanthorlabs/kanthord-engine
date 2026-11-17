@@ -17,6 +17,7 @@ import type { Registration } from "../worker/contract.ts";
 import {
   Authentication,
   type AuthenticationLookups,
+  type ResolvedInvite,
 } from "./auth/authentication.ts";
 import { type GatewayConfig, gatewayConfigSchema } from "./config.ts";
 import type { InventoryCollector } from "./contract.ts";
@@ -45,6 +46,12 @@ export function configuration(value: unknown) {
 
 export function fakeLookups() {
   const registrations = new Map<string, Registration>();
+  const invites = new Map<string, ResolvedInvite>();
+  const workbench = {
+    invites,
+    resolveInvite: (inviteId: string): ResolvedInvite | null =>
+      invites.get(inviteId) ?? null,
+  };
   const worker = {
     registrations,
     findByClient: (client: string) => registrations.get(client),
@@ -71,6 +78,7 @@ export function fakeLookups() {
       },
     },
     worker,
+    workbench,
   } satisfies AuthenticationLookups;
 }
 
