@@ -214,7 +214,11 @@ test("security: projectStreaming redacts thinking and tool input", () => {
 
 test("guest view projects a note, an action card and its result lines", () => {
   const view = projectEntries([
-    recordEntry(1, { kind: WorkbenchRecordKind.Note, text: "Ask Mai." }),
+    recordEntry(1, {
+      kind: WorkbenchRecordKind.Note,
+      text: "Ask Mai.",
+      author: { kind: "guest", name: "Mai" },
+    }),
     recordEntry(2, {
       kind: WorkbenchRecordKind.ActionOffer,
       tool_call_id: "call_1",
@@ -239,7 +243,11 @@ test("guest view projects a note, an action card and its result lines", () => {
     }),
   ]);
   assert.deepEqual(bodies(view), [
-    { kind: "note", text: "Ask Mai." },
+    {
+      kind: "note",
+      text: "Ask Mai.",
+      author: { kind: "guest", name: "Mai" },
+    },
     {
       kind: "action_offer",
       tool_call_id: "call_1",

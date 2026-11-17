@@ -75,10 +75,13 @@ import type {
 } from "../custody/contract.ts";
 import {
   ActionOutcome,
+  type Author,
+  AuthorKind,
   type ConversationMember,
   GUARD_AGENT_NAME,
   GuardSummaryCause,
   MessageDelivery,
+  MessageKind,
   type PendingApproval,
   type PlanPhase,
   type QueuedMessage,
@@ -89,6 +92,7 @@ import {
   WORKBENCH_CONFIGURATION_ENTRY,
   WORKBENCH_EVENTS_WAIT_MS,
   WORKBENCH_EXPIRY_REASON,
+  WORKBENCH_INVITE_NAME_MAX_LENGTH,
   WORKBENCH_QUEUE_LIMIT,
   WORKBENCH_QUEUED_MESSAGE_PREFIX,
   WORKBENCH_REJECTION_REASON,
@@ -421,6 +425,8 @@ const IDLE_SESSION = {
   secrets: async () => [],
 } as const;
 const NOT_FOUND_INDEX = -1;
+const NO_CHARACTERS = 0;
+const OWNER_NAME_MAX_LENGTH = WORKBENCH_INVITE_NAME_MAX_LENGTH;
 const SUMMARY_REFUSED_LOG = "workbench.fork.summary_refused";
 const AGENT_START = "agent_start";
 const AGENT_END = "agent_end";
@@ -1896,6 +1902,25 @@ export class WorkbenchService implements Service {
     return cleared;
   }
 
+  private mentioned(text: string): boolean {
+    return (
+      this.dependencies.store.transaction((tx) =>
+        resolveMention(tx, text, this.dependencies),
+      ) !== null
+    );
+  }
+
+  async note(sessionId: string, author: Author, text: string): Promise<void> {
+    const session = await this.session(sessionId);
+    this.requireHost(session);
+    appendRecord(session.manager, {
+      kind: WorkbenchRecordKind.Note,
+      text,
+      author: { kind: author.kind, name: author.name },
+    });
+    this.notify(session);
+  }
+
   async message(
     caller: CallerContext,
     sessionId: string,
@@ -1903,14 +1928,36 @@ export class WorkbenchService implements Service {
   ): Promise<{
     session_id: string;
     agent_name: string | null;
-    run_active: true;
+    run_active: boolean;
     queued_message_id: string | null;
     cleared: QueuedMessage[];
+    kind: MessageKind;
   }> {
     const { text, delivery } = body;
     const session = await this.session(sessionId);
     this.requireHost(session);
     const requester = humanOf(caller);
+    if (
+      this.dependencies.invites.isShared(session.id) &&
+      !this.mentioned(text)
+    ) {
+      await this.note(
+        sessionId,
+        {
+          kind: AuthorKind.Owner,
+          name: requester.name.slice(NO_CHARACTERS, OWNER_NAME_MAX_LENGTH),
+        },
+        text,
+      );
+      return {
+        session_id: sessionId,
+        agent_name: null,
+        run_active: this.runActive(session),
+        queued_message_id: null,
+        cleared: [],
+        kind: MessageKind.Note,
+      };
+    }
     const active = session.run;
     if (active) {
       const mention = this.dependencies.store.transaction((tx) =>
@@ -1934,6 +1981,7 @@ export class WorkbenchService implements Service {
         run_active: true,
         queued_message_id: queued,
         cleared,
+        kind: MessageKind.Run,
       };
     }
     const run = this.claim(session, { clearError: true, request: text });
@@ -1956,6 +2004,7 @@ export class WorkbenchService implements Service {
       run_active: true,
       queued_message_id: null,
       cleared: [],
+      kind: MessageKind.Run,
     };
   }
 

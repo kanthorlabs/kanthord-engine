@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { isString } from "../kernel/values.ts";
 import {
   ActionOutcome,
+  type Author,
   type MemberEntry,
   WORKBENCH_ACTION_RESULT_ENTRY,
   type WorkbenchRecord,
@@ -37,7 +38,7 @@ export type GuestBody =
   | { kind: "summary"; text: string }
   | { kind: "plan"; markdown: string }
   | { kind: "action_result"; tool_call_id: string; text: string }
-  | { kind: typeof WorkbenchRecordKind.Note; text: string }
+  | { kind: typeof WorkbenchRecordKind.Note; text: string; author: Author }
   | {
       kind: typeof WorkbenchRecordKind.ActionOffer;
       tool_call_id: string;
@@ -85,7 +86,11 @@ function projectRecord(record: WorkbenchRecord): GuestBody | null {
   if (!isGuestRecord(record)) return null;
   switch (record.kind) {
     case WorkbenchRecordKind.Note:
-      return { kind: record.kind, text: record.text };
+      return {
+        kind: record.kind,
+        text: record.text,
+        author: { kind: record.author.kind, name: record.author.name },
+      };
     case WorkbenchRecordKind.ActionOffer:
       return {
         kind: record.kind,

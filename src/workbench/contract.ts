@@ -43,6 +43,18 @@ export const FORK_TEXT_MAX_BYTES = 4096;
 export const FORK_SUMMARY_MAX_TOKENS = 2048;
 export const FORK_SUMMARY_MAX_BYTES = 8192;
 
+export const AuthorKind = { Owner: "owner", Guest: "guest" } as const;
+export type AuthorKind = (typeof AuthorKind)[keyof typeof AuthorKind];
+
+export const authorSchema = z.strictObject({
+  kind: z.enum(AuthorKind),
+  name: z.string().min(1).max(WORKBENCH_INVITE_NAME_MAX_LENGTH),
+});
+export type Author = z.infer<typeof authorSchema>;
+
+export const MessageKind = { Note: "note", Run: "run" } as const;
+export type MessageKind = (typeof MessageKind)[keyof typeof MessageKind];
+
 export const MessageDelivery = { Queue: "queue", Replace: "replace" } as const;
 export type MessageDelivery =
   (typeof MessageDelivery)[keyof typeof MessageDelivery];
@@ -157,6 +169,7 @@ export const workbenchRecordSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal(WorkbenchRecordKind.Note),
     text: z.string().max(WORKBENCH_MESSAGE_MAX_LENGTH),
+    author: authorSchema,
   }),
 ]);
 export type WorkbenchRecord = z.infer<typeof workbenchRecordSchema>;
@@ -433,14 +446,15 @@ export const workbenchOperations = {
     }),
     output: sessionParams.extend({
       agent_name: z.string().nullable(),
-      run_active: z.literal(true),
+      run_active: z.boolean(),
       queued_message_id: identitySchema(
         WORKBENCH_QUEUED_MESSAGE_PREFIX,
       ).nullable(),
       cleared: z.array(queuedMessageSchema),
+      kind: z.enum(MessageKind),
     }),
     description:
-      "Start a run on one human message, or queue it behind the active run. A leading `@<display name>` names the member that runs the message. `agent_name` answers the member that runs now, the mention of a queued message, or null for an untagged queued message. `replace` clears the queue, stops the active run and queues the message.",
+      "Start a run on one human message, or queue it behind the active run. A leading `@<display name>` names the member that runs the message. `agent_name` answers the member that runs now, the mention of a queued message, or null for an untagged queued message. `replace` clears the queue, stops the active run and queues the message. In a conversation with a live invite, an untagged message is a note: it starts no run, queues nothing and answers `kind` `note` with a null `agent_name`. A message that starts or queues a run answers `kind` `run`.",
   },
   "session.abort": {
     ...workbenchOperation,
