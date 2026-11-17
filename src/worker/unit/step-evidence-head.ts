@@ -1,4 +1,6 @@
 import { DeadlineKind, type Step } from "./chain.ts";
+import { EndReason } from "./execution-run.ts";
+import { PortResultKind } from "./foundry-ports.ts";
 import { headCommit } from "./local-git.ts";
 import { next } from "./step-support.ts";
 import { HEAD_COMMIT_SUBJECT } from "./steps-implement.ts";
@@ -9,7 +11,7 @@ export const evidenceHead: Step<unknown, "claim" | "state", never> = {
   reads: ["claim", "state"],
   writes: [],
   stops: [],
-  note: "the pushed head of each binding",
+  note: "port: evidence.submit; the pushed head of each binding",
   async run({ claim, state }, scope, io) {
     for (const checkout of state.checkouts)
       checkout.head = await headCommit(
@@ -18,17 +20,23 @@ export const evidenceHead: Step<unknown, "claim" | "state", never> = {
         io.context,
         claim.expired_at - Date.now(),
       );
-    await io.run.submitEvidence(claim.node_id, {
-      subject: HEAD_COMMIT_SUBJECT,
-      assets: state.checkouts.map((checkout) => ({
-        kind: "repository",
-        address: {
+    const submitted = await io.ports.evidence.submit(
+      {
+        subject: HEAD_COMMIT_SUBJECT,
+        assets: state.checkouts.map((checkout) => ({
           kind: "repository",
-          binding_id: checkout.binding_id,
-          commit: checkout.head,
-        },
-      })),
-    });
+          address: {
+            kind: "repository",
+            binding_id: checkout.binding_id,
+            commit: checkout.head,
+          },
+        })),
+      },
+      io.run.operationContext,
+      { halt: true },
+    );
+    if (submitted.kind === PortResultKind.Failed)
+      io.run.stop(EndReason.OperationFailed, submitted.code);
     return next(scope);
   },
 };

@@ -22,6 +22,7 @@ import {
 import { RELEASE_DIRECTORY, sshAccessOf } from "./workspace.ts";
 import { PoolClass, repoKeyOf } from "./tree-pool.ts";
 import type { SshAccess } from "../../repository/contract.ts";
+import { workerPorts } from "./worker-ports.ts";
 
 const BINDINGS = ["api", "web"];
 const DEADLINE_MS = 20000;
@@ -101,7 +102,10 @@ test("a conflict at the release goes through the conflict turn and concludes the
   web.head = await headOf(web.directory);
   const before = web.head;
   await advanceBase({ bare: webBare }, t, "main side");
-  assert.equal(await refreshAtRelease(h), RefreshResult.Merged);
+  assert.equal(
+    await refreshAtRelease(h, workerPorts(h.input, h.run)),
+    RefreshResult.Merged,
+  );
   assert.equal(readFileSync(join(web.directory, "file"), "utf8"), RESOLVED);
   assert.equal(web.head, await headOf(web.directory));
   assert.equal(
@@ -164,7 +168,10 @@ test("the refresh fetches the base of each checkout with the SSH identity of its
       return fetchBase(directory, base, context, deadlineMs, ssh);
     },
   };
-  assert.equal(await refreshAtRelease(h), RefreshResult.Current);
+  assert.equal(
+    await refreshAtRelease(h, workerPorts(h.input, h.run)),
+    RefreshResult.Current,
+  );
   assert.deepEqual(
     fetched,
     h.checkouts.map((checkout) => ({
@@ -266,7 +273,10 @@ test("an upstream conflict runs the conflict turn and the result keeps two paren
   web.head = await headOf(web.directory);
   const before = web.head;
   await advanceUpstream(webBare, t, "upstream side");
-  assert.equal(await refreshAtRelease(h), RefreshResult.Merged);
+  assert.equal(
+    await refreshAtRelease(h, workerPorts(h.input, h.run)),
+    RefreshResult.Merged,
+  );
   assert.ok(
     JSON.stringify(h.provider.calls[0]).includes(
       `The merge of origin/${UPSTREAM} into the node branch of repository web`,

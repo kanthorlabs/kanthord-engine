@@ -37,6 +37,7 @@ import { VerificationClass } from "./verification.ts";
 import { spawnedPids, survivingProcesses } from "../../agent/test-support.ts";
 import { BASE_DIRECTORY, WorkspaceRoot } from "./workspace.ts";
 import { PoolClass, repoKeyOf } from "./tree-pool.ts";
+import { baseTreeTaker } from "./worker-ports.ts";
 
 const env = hostEnvironment();
 const IDENTITY = [
@@ -540,6 +541,13 @@ async function poolFixture(t: TestContext) {
           nodeId,
           addresses: new Map([[environment.repository.name, origin]]),
           log: (msg, fields) => logs.push({ msg, fields }),
+          takeBase: baseTreeTaker({
+            workspaces,
+            nodeId,
+            env,
+            addressOf: () => origin,
+            run: { stopOf: (error) => Promise.reject(error) },
+          }),
         },
       },
       await setupEntries(input(), [environment]),

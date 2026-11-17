@@ -8,9 +8,9 @@ export const baseFetch: Step<unknown, "state", never> = {
   reads: ["state"],
   writes: [],
   stops: ["operation_failed/repository.connector.git_failed"],
-  note: "base_branch and upstream_branch of each checkout",
-  async run({ state }, scope) {
-    await fetchAtRelease(state);
+  note: "port: repository.fetchBase; base_branch and upstream_branch of each checkout",
+  async run({ state }, scope, io) {
+    await fetchAtRelease(state, io.ports);
     return next(scope);
   },
 };

@@ -38,7 +38,7 @@ export const envSetupLive: Step<
   reads: ["claim", "setup", "workspace", "setupEntries", "baseHead"],
   writes: ["setupPending", "setupInstruction"],
   stops: [SETUP_STOP],
-  note: "node failure -> setup instruction of the first unit; budget end",
+  note: "port: releaseTrees.takeBase; node failure -> setup instruction of the first unit; budget end",
   async run(ctx, scope, io) {
     assert.ok(ctx.baseHead);
     const result = await setUpHeads(

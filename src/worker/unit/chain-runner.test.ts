@@ -87,6 +87,7 @@ function harness(t: TestContext): Harness {
       }),
       resources,
       host: {} as ChainIo["host"],
+      ports: {} as ChainIo["ports"],
     },
     seed: { claim } as ChainSeed,
     trace,

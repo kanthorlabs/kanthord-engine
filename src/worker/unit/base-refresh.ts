@@ -9,7 +9,9 @@ import {
   repositoryOf,
   type StepsState,
 } from "./steps-implement.ts";
-import { sshAccessOf, type WorkspaceCheckout } from "./workspace.ts";
+import type { WorkspaceCheckout } from "./workspace.ts";
+import { EndReason } from "./execution-run.ts";
+import { type ImplementPorts, PortResultKind } from "./foundry-ports.ts";
 import { GitStep, withinGit } from "./method-telemetry.ts";
 import { gatedAgent, mergeCommitMessage } from "./turn-gate.ts";
 
@@ -22,9 +24,9 @@ export const RefreshResult = {
 } as const;
 export type RefreshResult = (typeof RefreshResult)[keyof typeof RefreshResult];
 
-function mergedBranchesOf(
+export function mergedBranchesOf(
   state: Pick<StepsState, "input">,
-  checkout: WorkspaceCheckout,
+  checkout: Pick<WorkspaceCheckout, "binding_id">,
 ): string[] {
   const { base_branch, upstream_branch } = repositoryOf(
     state,
@@ -135,21 +137,20 @@ async function mergeUnder(
   return RefreshResult.Merged;
 }
 
-export async function fetchAtRelease(state: StepsState): Promise<void> {
+export async function fetchAtRelease(
+  state: StepsState,
+  ports: ImplementPorts,
+): Promise<void> {
   const context = state.agent.budget.cleanupContext(state.run.operationContext);
-  const remaining = () => state.input.claim.expired_at - Date.now();
   try {
-    for (const checkout of state.checkouts)
-      for (const branch of mergedBranchesOf(state, checkout))
-        await withinGit(state.run.spans, GitStep.FetchBase, () =>
-          state.input.transport.fetchBase(
-            checkout.directory,
-            branch,
-            context,
-            remaining(),
-            sshAccessOf(state.input.sshAccess, checkout.binding_id),
-          ),
-        );
+    for (const checkout of state.checkouts) {
+      const fetched = await ports.repository.fetchBase(checkout, {
+        context,
+        deadline: state.input.claim.expired_at,
+      });
+      if (fetched.kind === PortResultKind.Failed)
+        state.run.stop(EndReason.OperationFailed, fetched.code);
+    }
   } finally {
     context.cancel();
   }
@@ -157,7 +158,8 @@ export async function fetchAtRelease(state: StepsState): Promise<void> {
 
 export async function refreshAtRelease(
   state: StepsState,
+  ports: ImplementPorts,
 ): Promise<RefreshResult> {
-  await fetchAtRelease(state);
+  await fetchAtRelease(state, ports);
   return refreshAtClaim(state);
 }

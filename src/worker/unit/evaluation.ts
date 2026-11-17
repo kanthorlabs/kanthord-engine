@@ -15,6 +15,7 @@ import { failedVerificationReport } from "./judgement.ts";
 import { EvaluationStage } from "./rework-cause.ts";
 import type { StepsInput } from "./steps-implement.ts";
 import { ActionResultKind } from "../contract.ts";
+import { workerPorts } from "./worker-ports.ts";
 
 export { EvaluationStage };
 
@@ -62,6 +63,7 @@ export async function runEvaluation(
       budget,
       resources: new AsyncDisposableStack(),
       host: hostOf(input, openAgent),
+      ports: workerPorts(input, run),
     },
   );
 }
