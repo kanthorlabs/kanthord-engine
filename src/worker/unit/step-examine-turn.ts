@@ -3,9 +3,15 @@ import { PromptTemplate } from "../../agent/contract.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { DeadlineKind, type Step } from "./chain.ts";
 import { EndReason } from "./execution-run.ts";
+import type { ExaminePorts } from "./foundry-ports.ts";
 import { examineInstruction } from "./judgement.ts";
 import { reportFacts } from "./report-facts.ts";
-import { budgetEnd, budgetMapped, next } from "./step-support.ts";
+import {
+  budgetEnd,
+  budgetMapped,
+  next,
+  submittedEvidence,
+} from "./step-support.ts";
 import { REPORT_MEDIA_TYPE, REPORT_SUBJECT } from "./steps-examine.ts";
 import { workRepositoriesOf } from "./workspace.ts";
 
@@ -18,7 +24,8 @@ export const examineTurn: Step<
   | "reviewWorkspace"
   | "nodeVerification"
   | "dependencies",
-  never
+  never,
+  ExaminePorts
 > = {
   id: "examine.turn",
   deadline: DeadlineKind.Work,
@@ -34,7 +41,7 @@ export const examineTurn: Step<
   writes: [],
   stops: ["report_absent", "provider_failed"],
   llm: true,
-  note: "Examine; budget end after the turn; submits the report evidence",
+  note: "port: evidence.submit; Examine; budget end after the turn; submits the report evidence",
   run(ctx, scope, io) {
     return budgetMapped(io, scope, async () => {
       const { agent, claim, setup, dependencies: current } = ctx;
@@ -62,7 +69,7 @@ export const examineTurn: Step<
       const assessment = agent.lastText();
       if (!assessment?.trim()) io.run.stop(EndReason.ReportAbsent);
       const report = `${reportFacts(current.dependencies, current.outcomes, verification)}\n\n## Assessment\n\n${assessment}`;
-      await io.run.submitEvidence(claim.node_id, {
+      await submittedEvidence(io, {
         subject: REPORT_SUBJECT,
         assets: [
           {

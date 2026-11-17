@@ -35,7 +35,13 @@ import { evaluationChain } from "./chain-evaluation.ts";
 import { examineChain } from "./chain-examine.ts";
 import { implementChain } from "./chain-implement.ts";
 import { executionBoundary, runChain } from "./chain-runner.ts";
-import { workerPorts } from "./worker-ports.ts";
+import type { AgentPort, CommonPorts } from "./foundry-ports.ts";
+import {
+  agentPort,
+  evaluationPorts,
+  examinePorts,
+  workerPorts,
+} from "./worker-ports.ts";
 
 export type { ExecutionEnd } from "./execution-run.ts";
 export { executionBoundary } from "./chain-runner.ts";
@@ -137,8 +143,13 @@ export async function runNativeExecution(
         opened.set(native, combined);
         return native;
       };
+      const hosted = hostedChainOf(method, intent, {
+        input,
+        run,
+        agent: agentPort({ run, budget, open }),
+      });
       return runChain(
-        chainOf(method, intent),
+        hosted.chain,
         {
           seed: {
             claim: input.claim,
@@ -157,7 +168,7 @@ export async function runNativeExecution(
             env: input.env,
             openAgent: open,
           },
-          ports: workerPorts(input, run),
+          ports: hosted.ports,
         },
       );
     });
@@ -189,10 +200,28 @@ export async function releaseSetupRefusal(
   }
 }
 
-function chainOf(method: WorkerMethod, intent: ExecutionIntent): Chain {
-  if (method === WorkerMethod.Evaluation) return evaluationChain();
-  if (intent === ExecutionIntent.Examine) return examineChain();
-  return implementChain();
+interface ChainHost {
+  input: NativeExecutionInput;
+  run: ExecutionRun;
+  agent: AgentPort;
+}
+
+interface HostedChain {
+  chain: Chain;
+  ports: CommonPorts;
+}
+
+function hostedChainOf(
+  method: WorkerMethod,
+  intent: ExecutionIntent,
+  host: ChainHost,
+): HostedChain {
+  const { input, run, agent } = host;
+  if (method === WorkerMethod.Evaluation)
+    return { chain: evaluationChain(), ports: evaluationPorts(run, agent) };
+  if (intent === ExecutionIntent.Examine)
+    return { chain: examineChain(), ports: examinePorts(run, agent) };
+  return { chain: implementChain(), ports: workerPorts(input, run) };
 }
 
 export function environmentDigestsOf(

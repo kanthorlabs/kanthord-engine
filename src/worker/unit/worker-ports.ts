@@ -3,10 +3,15 @@ import { readdirSync, rmSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
 import { ensureDirectory } from "../../kernel/files.ts";
 import { mergedBranchesOf } from "./base-refresh.ts";
+import type { ExecutionBudget } from "./budget.ts";
 import type { ExecutionRun } from "./execution-run.ts";
 import {
+  type AgentPort,
   type CheckoutRef,
+  type CommonPorts,
+  type EvaluationPorts,
   type EvidencePort,
+  type ExaminePorts,
   type ImplementPorts,
   type PortResult,
   PortResultKind,
@@ -24,7 +29,9 @@ import {
   scrubTree,
 } from "./local-git.ts";
 import { GitStep, withinGit } from "./method-telemetry.ts";
+import type { NativeAgent } from "./native-agent.ts";
 import { readSetupRecord } from "./setup-record.ts";
+import { endedByBudget } from "./step-support.ts";
 import { repositoryOf, type StepsInput } from "./steps-implement.ts";
 import { PoolClass, prepareTree } from "./tree-pool.ts";
 import {
@@ -39,6 +46,7 @@ const NO_REFS: readonly string[] = [];
 const NO_TREES = 0;
 const MIN_DEADLINE_MS = 1;
 const PARENT = "..";
+const BUDGET_END = "budget end";
 
 type PortFailure = Extract<
   PortResult<never>,
@@ -274,14 +282,62 @@ function releaseTreePort(
   };
 }
 
+export type AgentOpener = (workspace: string) => Promise<NativeAgent>;
+
+export interface AgentHost {
+  run: ExecutionRun;
+  budget: ExecutionBudget;
+  open: AgentOpener;
+}
+
+export function agentPort(host: AgentHost): AgentPort {
+  return {
+    async open(request) {
+      const workspace = request.reviewWorkspace;
+      assert.ok(workspace);
+      try {
+        return ok(await host.open(workspace.directory));
+      } catch (error) {
+        if (endedByBudget(host, error))
+          return {
+            kind: PortResultKind.Failed,
+            code: null,
+            message: BUDGET_END,
+          };
+        return failedOf(host.run, error);
+      }
+    },
+  };
+}
+
+function commonPorts(run: ExecutionRun): CommonPorts {
+  return {
+    telemetry: run.spans,
+    secrets: { redact: (text) => run.redact(text) },
+    log: { log: (message, fields) => run.log(message, fields) },
+  };
+}
+
+export function evaluationPorts(
+  run: ExecutionRun,
+  agent: AgentPort,
+): EvaluationPorts {
+  return { ...commonPorts(run), evidence: evidencePort(run), agent };
+}
+
+export function examinePorts(
+  run: ExecutionRun,
+  agent: AgentPort,
+): ExaminePorts {
+  return { ...commonPorts(run), evidence: evidencePort(run), agent };
+}
+
 export function workerPorts(
   input: StepsInput,
   run: ExecutionRun,
 ): ImplementPorts {
   return {
-    telemetry: run.spans,
-    secrets: { redact: (text) => run.redact(text) },
-    log: { log: (message, fields) => run.log(message, fields) },
+    ...commonPorts(run),
     evidence: evidencePort(run),
     repository: repositoryPort(input, run),
     releaseTrees: releaseTreePort(input, run),

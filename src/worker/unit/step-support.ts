@@ -6,6 +6,14 @@ import {
   type StepIo,
   StepKind,
 } from "./chain.ts";
+import { EndReason } from "./execution-run.ts";
+import {
+  type EvaluationPorts,
+  type EvidenceDraft,
+  type EvidenceId,
+  type ExaminePorts,
+  PortResultKind,
+} from "./foundry-ports.ts";
 import type { StepsInput } from "./steps-implement.ts";
 
 type InputKeys = "claim" | "setup" | "sshAccess";
@@ -78,7 +86,10 @@ export function budgetEnd<S>(scope: S): BudgetEndResult<S> {
   return { kind: StepKind.BudgetEnd, patch: {}, scope };
 }
 
-export function endedByBudget(io: StepIo, error: unknown): boolean {
+export function endedByBudget(
+  io: Pick<StepIo, "budget" | "run">,
+  error: unknown,
+): boolean {
   return (
     (error instanceof ContextCancelled || error instanceof DeadlineExceeded) &&
     io.budget.exhausted() &&
@@ -97,4 +108,18 @@ export async function budgetMapped<S, R>(
     if (endedByBudget(io, error)) return budgetEnd(scope);
     throw error;
   }
+}
+
+export async function submittedEvidence(
+  io: StepIo<EvaluationPorts | ExaminePorts>,
+  draft: EvidenceDraft,
+): Promise<EvidenceId> {
+  const submitted = await io.ports.evidence.submit(
+    draft,
+    io.run.operationContext,
+    { halt: true },
+  );
+  if (submitted.kind === PortResultKind.Failed)
+    return io.run.stop(EndReason.OperationFailed, submitted.code);
+  return submitted.value;
 }
