@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import {
   addedFiles,
   changePatch,
@@ -21,21 +22,17 @@ import {
 } from "../../mission/contract.ts";
 import { EndReason, type ExecutionRun } from "./execution-run.ts";
 import {
-  BASE_DIRECTORY,
   EVIDENCE_DIRECTORY,
   type ExamineCheckout,
   WorkspaceKind,
 } from "./workspace.ts";
 import type { StepsInput } from "./steps-implement.ts";
 import type { TestedInput } from "./verification.ts";
-import {
-  BaseHead,
-  namedCheckouts,
-  SetupEnd,
-  setupEntries,
-  type SetupFailure,
-  setUpHeads,
-} from "./environment-setup.ts";
+import { ExecutionBudget } from "./budget.ts";
+import { type ExecutionCtx, StepKind } from "./chain.ts";
+import { evaluationPrepareNodes } from "./chain-evaluation.ts";
+import { runNodes } from "./chain-runner.ts";
+import { hostOf, seedOf } from "./step-support.ts";
 import { ExecutionIntent } from "../contract.ts";
 import { AFFECTED_SUBJECT } from "./affected.ts";
 import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
@@ -53,13 +50,13 @@ function isSupportEvidence(item: Evidence): boolean {
   );
 }
 
-interface BindingPatch {
+export interface BindingPatch {
   binding_id: string;
   name: string;
   text: string;
 }
 
-interface ReviewScope {
+export interface ReviewScope {
   addedFiles: string[];
   changedFiles: string[];
   patches: BindingPatch[];
@@ -161,13 +158,17 @@ const NO_SCOPE: ReviewScope = {
   emptyPatches: [],
 };
 
-async function prepareWorkspace(
+export interface ReviewInputs {
+  evidence: readonly Evidence[];
+  round: ReviewRound;
+}
+
+export async function reviewWorkspaceOf(
   input: StepsInput,
   run: ExecutionRun,
-  intent: ExecutionIntent,
-  evidence: readonly Evidence[],
-  round: ReviewRound,
+  { evidence, round }: ReviewInputs,
 ) {
+  const intent = input.setup.intent;
   const deadline = Math.min(
     input.claim.created_at + input.setup.resource_budget.wall_time_ms,
     input.claim.expired_at,
@@ -435,53 +436,65 @@ async function reviewScopeOf(
   return scope;
 }
 
-function testedCommits(testedInput: TestedInput): string[] {
-  const addresses = Array.isArray(testedInput) ? testedInput : [testedInput];
-  return addresses.flatMap((address) =>
-    "commit" in address ? [address.commit] : [],
-  );
+export interface PlacedPatch extends BindingPatch {
+  path: string;
 }
 
-async function setUpReview(
-  input: StepsInput,
-  run: ExecutionRun,
-  workspace: { key: string; checkouts: readonly ExamineCheckout[] },
-  testedInput: TestedInput,
-  deadline: number,
-): Promise<{ base: BaseHead | null; setupFailure: SetupFailure | null }> {
-  if (!workspace.checkouts.length) return { base: null, setupFailure: null };
-  const setupInput = {
-    env: input.env,
-    context: run.operationContext,
-    deadline,
-    spans: run.spans,
-  };
-  const setup = await setupEntries(
-    setupInput,
-    namedCheckouts(input.setup.repositories, workspace.checkouts),
+export type PlacedReview = Awaited<ReturnType<typeof placeReviewAssets>>;
+
+export interface PlaceInput extends ReviewInputs {
+  workspace: { key: string; directory: string };
+  evidenceIds: readonly string[];
+  scope: ReviewScope;
+  deadline: number;
+}
+
+export async function placeReviewAssets(run: ExecutionRun, place: PlaceInput) {
+  const { workspace, evidence, round, deadline } = place;
+  const evidenceIds = new Set(place.evidenceIds);
+  const assets: { evidence_id: string; asset_id: string; path: string }[] = [];
+  const support = withLatestCoderReport(evidence.filter(isSupportEvidence));
+  const selected = support.flatMap((item) =>
+    item.assets
+      .filter(
+        (asset) =>
+          asset.kind === AssetKind.Produced || asset.kind === AssetKind.Object,
+      )
+      .map((asset) => ({ evidenceId: item.id, asset })),
   );
-  const base = new BaseHead(
-    setupInput,
-    { directory: join(workspace.key, BASE_DIRECTORY) },
-    setup,
-  );
-  const result = await setUpHeads(
-    setupInput,
-    setup,
-    base,
-    testedCommits(testedInput),
-  );
-  if (result.end === SetupEnd.BudgetEnd)
-    return run.stop(EndReason.AssessmentAbsent);
-  if (result.end === SetupEnd.Failed)
-    run.log("setup failed on the node head", {
-      exit_codes: result.run.verification.results.map(
-        (entry) => entry.exit_code,
-      ),
-    });
+  const placement =
+    workspace.key === workspace.directory
+      ? workspace.directory
+      : join(workspace.key, EVIDENCE_DIRECTORY);
+  ensureDirectory(placement);
+  for (const { evidenceId, asset } of selected) {
+    const name = await placeAsset(placement, run, asset, deadline);
+    const path = relative(workspace.directory, join(placement, name));
+    evidenceIds.add(evidenceId);
+    assets.push({ evidence_id: evidenceId, asset_id: asset.id, path });
+  }
+  const patches: PlacedPatch[] = [];
+  for (const patch of place.scope.patches) {
+    const file = join(placement, roundPatchName(round.round, patch.name));
+    await writeFile(file, patch.text, { mode: 0o600, flag: "wx" });
+    patches.push({ ...patch, path: relative(workspace.directory, file) });
+  }
   return {
-    base,
-    setupFailure: result.end === SetupEnd.Failed ? result : null,
+    evidenceIds: [...evidenceIds],
+    patches: patches.filter((patch) => patch.text.length > NO_PATCH_BYTES),
+    reviewBundle: {
+      evidence: evidence.filter((item) => evidenceIds.has(item.id)),
+      assets,
+      added_files: place.scope.addedFiles,
+      changed_files: place.scope.changedFiles,
+      patch_paths: patches.map((patch) => patch.path),
+      empty_patches: place.scope.emptyPatches,
+      ...(round.review_base === null
+        ? {}
+        : {
+            round: { number: round.round, review_base: round.review_base },
+          }),
+    },
   };
 }
 
@@ -492,80 +505,56 @@ export async function prepareEvaluation(
   evidence: readonly Evidence[],
   round: ReviewRound,
 ) {
-  const workspace = await prepareWorkspace(input, run, intent, evidence, round);
+  const resources = new AsyncDisposableStack();
   try {
-    const testedInput: TestedInput | undefined =
-      workspace.tested_input ?? placedOf(evidence)?.asset.address;
-    if (!testedInput) return run.stop(EndReason.OperationFailed);
-    const evidenceIds = new Set(workspace.evidenceIds);
-    const assets: { evidence_id: string; asset_id: string; path: string }[] =
-      [];
-    const support = withLatestCoderReport(evidence.filter(isSupportEvidence));
-    const selected = support.flatMap((item) =>
-      item.assets
-        .filter(
-          (asset) =>
-            asset.kind === AssetKind.Produced ||
-            asset.kind === AssetKind.Object,
-        )
-        .map((asset) => ({ evidenceId: item.id, asset })),
-    );
-    const deadline = Math.min(
-      input.claim.created_at + input.setup.resource_budget.wall_time_ms,
-      input.claim.expired_at,
-    );
-    const { base, setupFailure } = await setUpReview(
-      input,
-      run,
-      workspace,
-      testedInput,
-      deadline,
-    );
-    const placement =
-      workspace.key === workspace.directory
-        ? workspace.directory
-        : join(workspace.key, EVIDENCE_DIRECTORY);
-    ensureDirectory(placement);
-    for (const { evidenceId, asset } of selected) {
-      const name = await placeAsset(placement, run, asset, deadline);
-      const path = relative(workspace.directory, join(placement, name));
-      evidenceIds.add(evidenceId);
-      assets.push({ evidence_id: evidenceId, asset_id: asset.id, path });
-    }
-    const patches: (BindingPatch & { path: string })[] = [];
-    for (const patch of workspace.scope.patches) {
-      const file = join(placement, roundPatchName(round.round, patch.name));
-      await writeFile(file, patch.text, { mode: 0o600, flag: "wx" });
-      patches.push({ ...patch, path: relative(workspace.directory, file) });
-    }
-    return {
-      key: workspace.key,
-      kind: workspace.kind,
-      directory: workspace.directory,
-      checkouts: workspace.checkouts,
-      tested_input: testedInput,
-      base,
-      setupFailure,
-      evidenceIds: [...evidenceIds],
-      patches: patches.filter((patch) => patch.text.length > NO_PATCH_BYTES),
-      reviewBundle: {
-        evidence: evidence.filter((item) => evidenceIds.has(item.id)),
-        assets,
-        added_files: workspace.scope.addedFiles,
-        changed_files: workspace.scope.changedFiles,
-        patch_paths: patches.map((patch) => patch.path),
-        empty_patches: workspace.scope.emptyPatches,
-        ...(round.review_base === null
-          ? {}
-          : {
-              round: { number: round.round, review_base: round.review_base },
-            }),
+    const { kind, ctx } = await runNodes(
+      {
+        nodes: evaluationPrepareNodes(),
+        seed: {
+          ...seedOf(input),
+          setup: { ...input.setup, intent },
+          attemptEvidence: evidence,
+          reviewRound: round,
+        },
       },
-    };
+      {
+        run,
+        budget: new ExecutionBudget({
+          ...input.claim,
+          resource_budget: input.setup.resource_budget,
+        }),
+        resources,
+        host: hostOf(input, () =>
+          assert.fail("The review preparation opens no agent."),
+        ),
+      },
+    );
+    if (kind === StepKind.BudgetEnd)
+      return run.stop(EndReason.AssessmentAbsent);
+    return preparedOf(ctx);
   } catch (error) {
-    input.workspaces.release(workspace.key, workspace.kind);
+    await resources.disposeAsync();
     throw error;
   }
+}
+
+export function preparedOf(
+  ctx: Pick<
+    ExecutionCtx,
+    "reviewWorkspace" | "testedInput" | "baseHead" | "setupFailure" | "placed"
+  >,
+) {
+  const workspace = ctx.reviewWorkspace;
+  return {
+    key: workspace.key,
+    kind: workspace.kind,
+    directory: workspace.directory,
+    checkouts: workspace.checkouts,
+    tested_input: ctx.testedInput,
+    base: ctx.baseHead,
+    setupFailure: ctx.setupFailure,
+    ...ctx.placed,
+  };
 }
 
 export function verificationCommands(

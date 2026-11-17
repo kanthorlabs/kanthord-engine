@@ -4,7 +4,6 @@ import { isAbsolute, join, relative } from "node:path";
 import type { Context } from "../../kernel/context.ts";
 import { ensureDirectory } from "../../kernel/files.ts";
 import type { Revision, TaskContent } from "../../mission/contract.ts";
-import { SpanStatus } from "../../tracking/contract.ts";
 import {
   type AffectedResult,
   type AffectedRun,
@@ -12,7 +11,9 @@ import {
   nodeVerdict,
   runAffected,
 } from "./affected.ts";
-import { refreshAtRelease, RefreshResult } from "./base-refresh.ts";
+import { loopNode, StepKind } from "./chain.ts";
+import { releaseGateFrame } from "./chain-implement.ts";
+import { runNodes } from "./chain-runner.ts";
 import { verificationCommands } from "./evaluation-input.ts";
 import {
   affectedRevisionInstruction,
@@ -33,7 +34,7 @@ import {
   VerificationContext,
   verificationObserver,
 } from "./method-telemetry.ts";
-import { repositoryOf, type StepsState } from "./steps-implement.ts";
+import { repositoryOf, stateIo, type StepsState } from "./steps-implement.ts";
 import { memoScopeOf } from "./verification-memo.ts";
 import {
   environmentStop,
@@ -47,7 +48,6 @@ import {
 } from "./verification.ts";
 import { verificationFactsOf } from "./progress-rule.ts";
 import { CHECKOUTS_DIRECTORY, RELEASE_DIRECTORY } from "./workspace.ts";
-import { SpanOperation } from "./telemetry.ts";
 import { SetupEnd, type SetupEntry, setUpHeads } from "./environment-setup.ts";
 import { readSetupRecord } from "./setup-record.ts";
 import { PoolClass, prepareTree } from "./tree-pool.ts";
@@ -56,9 +56,9 @@ const EXIT_SUCCESS = 0;
 const NOT_FOUND = -1;
 const NO_ITEMS = 0;
 const PARENT = "..";
-const RELEASE_GATE_RESULT = "kanthord.release_gate.result";
-const RELEASE_GATE_UNIT_ID = "kanthord.release_gate.unit_id";
-const RELEASE_GATE_AFFECTED = "kanthord.release_gate.affected";
+export const RELEASE_GATE_RESULT = "kanthord.release_gate.result";
+export const RELEASE_GATE_UNIT_ID = "kanthord.release_gate.unit_id";
+export const RELEASE_GATE_AFFECTED = "kanthord.release_gate.affected";
 const TREE_PREPARED = "tree prepared";
 const RELEASE_PURPOSE = "release";
 const NO_REFS: readonly string[] = [];
@@ -97,44 +97,32 @@ export function commandOwners(
   ];
 }
 
-export function releaseGate(state: StepsState): Promise<ReleaseGate> {
-  const spans = state.run.spans;
-  const affected: AffectedNote = { verdict: null };
-  return spans.within(
+export async function releaseGate(state: StepsState): Promise<ReleaseGate> {
+  const end = await runNodes(
     {
-      key: spans.key(SpanOperation.ReleaseGate),
-      operation: SpanOperation.ReleaseGate,
+      nodes: [loopNode("release_gate", releaseGateFrame)],
+      seed: { state },
     },
-    () => gateRelease(state, affected),
-    (gate) => ({
-      status: SpanStatus.Ok,
-      attributes: {
-        [RELEASE_GATE_RESULT]: gate.kind,
-        ...(affected.verdict === null
-          ? {}
-          : { [RELEASE_GATE_AFFECTED]: affected.verdict }),
-        ...(gate.kind === ReleaseGateKind.Routed
-          ? { [RELEASE_GATE_UNIT_ID]: gate.unit.id }
-          : {}),
-      },
-    }),
+    stateIo(state),
   );
+  return end.kind === StepKind.BudgetEnd
+    ? { kind: ReleaseGateKind.BudgetEnd }
+    : end.ctx.route;
 }
 
-interface AffectedNote {
+export interface AffectedNote {
   verdict: AffectedVerdict | null;
 }
 
-interface VerifiedRelease {
+export interface VerifiedRelease {
   checked: ReleaseCheck;
   commands: readonly string[];
   owners: readonly TaskContent[];
 }
 
-async function verifyRelease(
+export async function verifyRelease(
   state: StepsState,
 ): Promise<VerifiedRelease | null> {
-  if ((await refreshAtRelease(state)) === RefreshResult.BudgetEnd) return null;
   const commands = verificationCommands(state.revision);
   const owners = commandOwners(state);
   assert.equal(owners.length, commands.length);
@@ -199,7 +187,7 @@ function routedRelease(
   };
 }
 
-function releaseOutcome(
+export function releaseOutcome(
   state: StepsState,
   verified: VerifiedRelease,
   note: AffectedNote,
@@ -218,15 +206,6 @@ function releaseOutcome(
   });
   if (passed) return { kind: ReleaseGateKind.Passed };
   return routedRelease(state, verified);
-}
-
-async function gateRelease(
-  state: StepsState,
-  note: AffectedNote,
-): Promise<ReleaseGate> {
-  const verified = await verifyRelease(state);
-  if (verified === null) return { kind: ReleaseGateKind.BudgetEnd };
-  return releaseOutcome(state, verified, note);
 }
 
 function firstFailedIndex(run: VerificationRun): number {

@@ -2,20 +2,14 @@ import assert from "node:assert/strict";
 import {
   EndReason,
   type ExecutionEnd,
-  ExecutionEndKind,
   type ExecutionRun,
-  type ExecutionStop,
 } from "./execution-run.ts";
 import { type NativeAgent, openNativeAgent } from "./native-agent.ts";
 import {
   credentialSecrets,
   mergedSecrets,
 } from "../../agent/hooks/sensitive-text-redaction.ts";
-import { Phase, type SpanEnd, type TelemetrySink } from "./telemetry.ts";
-import { SpanStatus } from "../../tracking/contract.ts";
-import type { Revision } from "../../mission/contract.ts";
-import { verificationCommands } from "./evaluation-input.ts";
-import { VerificationMemo } from "./verification-memo.ts";
+import type { TelemetrySink } from "./telemetry.ts";
 import type { Context } from "../../kernel/context.ts";
 import type { Diagnostic } from "../../kernel/errors.ts";
 import { type MethodClaim, ExecutionRun as Run } from "./execution-run.ts";
@@ -29,23 +23,22 @@ import {
 } from "../contract.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 import { getWorkerDeclaration } from "../catalog.ts";
-import { WorkspaceKind, type WorkspaceRoot } from "./workspace.ts";
+import type { WorkspaceRoot } from "./workspace.ts";
 import type {
   ExecutionCredential,
   ModelRuntimeFactory,
 } from "./model-runtime.ts";
 import { ExecutionBudget } from "./budget.ts";
-import { readPinnedRevision, readPrior } from "./node-reads.ts";
-import { prepareStepsWorkspace, runStepsImplement } from "./steps-implement.ts";
-import { runStepsExamine } from "./steps-examine.ts";
-import { runEvaluation } from "./evaluation.ts";
-import { phaseSpan } from "./method-telemetry.ts";
+import { readPinnedRevision } from "./node-reads.ts";
+import type { Chain } from "./chain.ts";
+import { evaluationChain } from "./chain-evaluation.ts";
+import { examineChain } from "./chain-examine.ts";
+import { implementChain } from "./chain-implement.ts";
+import { executionBoundary, runChain } from "./chain-runner.ts";
 
 export type { ExecutionEnd } from "./execution-run.ts";
+export { executionBoundary } from "./chain-runner.ts";
 const WORKING_AGENT = 0;
-const NODE_TASK_COUNT = "kanthord.node.task_count";
-const NODE_VERIFICATION_COUNT = "kanthord.node.verification_count";
-const NODE_BINDING_COUNT = "kanthord.node.binding_count";
 export interface NativeExecutionInput {
   claim: MethodClaim;
   setup: ExecutionSetup;
@@ -143,42 +136,28 @@ export async function runNativeExecution(
         opened.set(native, combined);
         return native;
       };
-      if (method === WorkerMethod.Evaluation)
-        return runEvaluation(input, run, budget, open);
-      if (intent === ExecutionIntent.Examine)
-        return runStepsExamine(input, run, revision, budget, open);
-      const prior = await readPrior(run, input.setup.repositories);
-      const workspace = await run.spans.within(
-        phaseSpan(Phase.Prepare),
-        () => prepareStepsWorkspace(input, run),
-        () => nodeShapeEnd(revision),
+      return runChain(
+        chainOf(method, intent),
+        {
+          seed: {
+            claim: input.claim,
+            setup: input.setup,
+            sshAccess: input.sshAccess,
+            revision,
+          },
+        },
+        {
+          run,
+          budget,
+          resources: new AsyncDisposableStack(),
+          host: {
+            workspaces: input.workspaces,
+            transport: input.transport,
+            env: input.env,
+            openAgent: open,
+          },
+        },
       );
-      let working: NativeAgent;
-      try {
-        working = await open(workspace.root);
-      } catch (error) {
-        await workspace.base.giveBack();
-        input.workspaces.release(
-          input.workspaces.nodeKey(input.claim.node_id),
-          WorkspaceKind.Node,
-        );
-        throw error;
-      }
-      const state = {
-        input,
-        run,
-        revision,
-        agent: working,
-        ...workspace,
-        verdict: prior.verdict,
-        cleared: prior.cleared,
-        unchangedTurns: 0,
-        refreshed: null,
-        lastVerification: null,
-        revisionCount: 0,
-        memo: new VerificationMemo(),
-      };
-      return runStepsImplement(state);
     });
   } finally {
     try {
@@ -208,15 +187,10 @@ export async function releaseSetupRefusal(
   }
 }
 
-function nodeShapeEnd(revision: Revision): SpanEnd {
-  return {
-    status: SpanStatus.Ok,
-    attributes: {
-      [NODE_TASK_COUNT]: revision.tasks.length,
-      [NODE_VERIFICATION_COUNT]: verificationCommands(revision).length,
-      [NODE_BINDING_COUNT]: revision.content.bindings.length,
-    },
-  };
+function chainOf(method: WorkerMethod, intent: ExecutionIntent): Chain {
+  if (method === WorkerMethod.Evaluation) return evaluationChain();
+  if (intent === ExecutionIntent.Examine) return examineChain();
+  return implementChain();
 }
 
 export function environmentDigestsOf(
@@ -238,22 +212,4 @@ export function disposeAgent(agent: NativeAgent | null): void {
 
 export function stopOnEnd(run: ExecutionRun, agent: NativeAgent): Disposable {
   return run.onStop(() => void agent.abort());
-}
-
-export async function executionBoundary(
-  run: ExecutionRun,
-  invoke: () => Promise<ExecutionEnd>,
-): Promise<ExecutionEnd> {
-  let stopped: ExecutionStop;
-  try {
-    return await invoke();
-  } catch (error) {
-    stopped = await run.stopOf(error);
-  }
-  if (stopped.reason !== EndReason.Revoked) return run.releaseStop(stopped);
-  return {
-    kind: ExecutionEndKind.Ended,
-    reason: stopped.reason,
-    code: stopped.code,
-  };
 }

@@ -135,9 +135,7 @@ async function mergeUnder(
   return RefreshResult.Merged;
 }
 
-export async function refreshAtRelease(
-  state: StepsState,
-): Promise<RefreshResult> {
+export async function fetchAtRelease(state: StepsState): Promise<void> {
   const context = state.agent.budget.cleanupContext(state.run.operationContext);
   const remaining = () => state.input.claim.expired_at - Date.now();
   try {
@@ -155,5 +153,11 @@ export async function refreshAtRelease(
   } finally {
     context.cancel();
   }
+}
+
+export async function refreshAtRelease(
+  state: StepsState,
+): Promise<RefreshResult> {
+  await fetchAtRelease(state);
   return refreshAtClaim(state);
 }
