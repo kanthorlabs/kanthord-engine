@@ -154,3 +154,15 @@ test("an absolute path, a reference prefix and a file URL inside a root pass, al
     true,
   );
 });
+
+test("path_refused: a dangling link to a target outside the checkout is blocked as the last component and as a directory component", (t) => {
+  const f = fixture(t);
+  symlinkSync(join(f.outside, "absent.txt"), join(f.root, "dangling"));
+  symlinkSync(join(f.outside, "absent"), join(f.root, "dangling-directory"));
+  for (const tool of FILE_TOOLS)
+    for (const path of ["dangling", "dangling-directory/file.txt"])
+      assert.deepEqual(f.call(tool, { path }), {
+        block: true,
+        reason: `The path ${path} is outside the checkout. Use a relative path inside the checkout.`,
+      });
+});

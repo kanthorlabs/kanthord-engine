@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { realpathSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import {
   basename,
@@ -41,6 +41,16 @@ function errorCode(error: unknown): string | undefined {
     : undefined;
 }
 
+function dangling(path: string): boolean {
+  try {
+    return (
+      lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink() ?? false
+    );
+  } catch (error) {
+    return !ABSENT_CODES.has(errorCode(error) ?? "");
+  }
+}
+
 function resolveNearest(path: string): string | null {
   const absent: string[] = [];
   let current = path;
@@ -50,6 +60,7 @@ function resolveNearest(path: string): string | null {
     } catch (error) {
       if (!ABSENT_CODES.has(errorCode(error) ?? "")) return null;
     }
+    if (dangling(current)) return null;
     const parent = dirname(current);
     if (parent === current) return null;
     absent.push(basename(current));
@@ -127,7 +138,10 @@ export function checkoutConfinement(confinement: Confinement): InlineExtension {
             value !== undefined &&
             (!isString(value) || leaves(confinement, value)),
         );
-      if (refused === undefined) return undefined;
+      if (refused === undefined) {
+        Object.freeze(input);
+        return undefined;
+      }
       return {
         block: true,
         reason: `The path ${String(refused)} is outside the checkout. Use a relative path inside the checkout.`,
