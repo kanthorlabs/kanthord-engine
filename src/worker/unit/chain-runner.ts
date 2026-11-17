@@ -44,7 +44,7 @@ const UNKNOWN_PHASE = -1;
 export interface ChainIo<P extends CommonPorts = CommonPorts> {
   run: ExecutionRun;
   budget: ExecutionBudget;
-  capabilities?: readonly InlineExtension[];
+  capabilities: readonly InlineExtension[];
   resources: AsyncDisposableStack;
   host: StepHost;
   ports: P;
@@ -173,7 +173,7 @@ function tasksEnd<P extends CommonPorts>(
   built: Chain<P>,
   walk: Walk<P>,
 ): Promise<FoundryEnd<unknown>> {
-  const { run, budget, host, ports, capabilities = [] } = walk.io;
+  const { run, budget, host, ports, capabilities } = walk.io;
   assert.ok(built.tasks, "A tasks phase holds a tasks call.");
   return built.tasks.run(
     walk.ctx,

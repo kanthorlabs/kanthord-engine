@@ -90,7 +90,7 @@ function prepareWorkspaceFrame(): LoopFrame<true> {
   };
 }
 
-function implementInputOf(
+export function implementInputOf(
   ctx: ExecutionCtx,
   control: FoundryControl,
 ): ImplementInput {

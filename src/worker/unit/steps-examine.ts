@@ -21,6 +21,7 @@ export function runStepsExamine(
     {
       run,
       budget,
+      capabilities: [],
       resources: new AsyncDisposableStack(),
       host: hostOf(input),
       ports: examinePorts({ run, budget, open: openAgent }),

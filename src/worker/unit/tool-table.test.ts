@@ -57,7 +57,7 @@ function runBash(
   );
 }
 
-test("child environment removes provider keys and bash timeout stays below the budget and the command limit", async (t) => {
+test("child environment removes provider keys, bash takes the session environment with the shell PATH, and bash timeout stays below the budget and the command limit", async (t) => {
   const env = {
     ANTHROPIC_API_KEY: "secret",
     OPENAI_API_KEY: "secret",
@@ -93,9 +93,23 @@ test("child environment removes provider keys and bash timeout stays below the b
   await runBash(tools(budget), "true", 3600);
   const maximumSeconds = 4;
   assert.ok(recording.timeout! <= maximumSeconds);
-  assert.deepEqual(captured!.spawnHook!({ command: "true", cwd, env }).env, {
-    PATH: "/bin",
-  });
+  await runBash(
+    sessionTools(mockPi, "swe@1", {
+      cwd,
+      budget,
+      env,
+      processes: recording,
+    }),
+    "true",
+  );
+  assert.deepEqual(
+    captured!.spawnHook!({
+      command: "true",
+      cwd,
+      env: { PATH: "/usr/bin", HOST_ONLY: "host" },
+    }).env,
+    { PATH: "/usr/bin" },
+  );
   assert.equal(captured!.exposeSessionEnvironment, false);
   const ended = new ExecutionBudget({
     created_at: now - 10000,

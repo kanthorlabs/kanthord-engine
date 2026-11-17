@@ -115,6 +115,7 @@ function harness(t: TestContext, stop?: CancellationContext): Harness {
         ...claim,
         resource_budget: { wall_time_ms: WALL_TIME_MS },
       }),
+      capabilities: [],
       resources,
       host: { env: {} } as unknown as ChainIo["host"],
       ports: {} as ChainIo["ports"],

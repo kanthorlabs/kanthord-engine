@@ -94,7 +94,7 @@ export function sessionTools(
     exposeSessionEnvironment: false,
     spawnHook: (context) => ({
       ...context,
-      env: childEnvironment(context.env),
+      env: childEnvironment({ ...env, PATH: context.env.PATH ?? env.PATH }),
     }),
     operations: {
       exec: (command, directory, execOptions) => {

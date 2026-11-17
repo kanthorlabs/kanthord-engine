@@ -927,7 +927,7 @@ function codeOf(error: unknown): string {
   return (error as NodeJS.ErrnoException | undefined)?.code ?? UNKNOWN_ERROR;
 }
 
-function excludeScratch(directory: string): void {
+export function excludeScratch(directory: string): void {
   const exclude = join(directory, ...GIT_EXCLUDE);
   const text = existsSync(exclude) ? readFileSync(exclude, "utf8") : "";
   if (text.split("\n").includes(SCRATCH_DIRECTORY)) return;

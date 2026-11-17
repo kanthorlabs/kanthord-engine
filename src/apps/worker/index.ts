@@ -678,3 +678,26 @@ export {
   readMachineConfiguration,
   writeMachineFile,
 } from "./machine-config.ts";
+export {
+  checkOutputFolder,
+  credentialInvalid,
+  credentialOf,
+  credentialValues,
+  EndReason,
+  ExecutionStop,
+  passEnvRefused,
+  RunEndKind,
+  runTasksLocal,
+  TasksErrorCode,
+  tasksDiagnostic,
+  PI_AUTH_FILE,
+  TasksExit,
+  TasksOutput,
+  tasksPlanOf,
+  defaultModelRuntimeFactory,
+  type LocalTasksEnd,
+  type LocalTasksInput,
+  type ModelRuntimeFactory,
+  type TasksOptions,
+} from "../../worker/unit/index.ts";
+export { localHostTools } from "./tasks-host-tools.ts";

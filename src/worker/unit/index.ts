@@ -42,3 +42,28 @@ export {
 } from "../contract.ts";
 export { evidenceUploadTool } from "../../agent/capabilities/execution-evidence.ts";
 export type { TelemetrySink } from "./telemetry.ts";
+export type { SessionHostTools } from "../../agent/capabilities/host-tools.ts";
+export type { MethodClaim } from "./execution-stop.ts";
+export {
+  tasksPlanOf,
+  passEnvRefused,
+  TasksErrorCode,
+  tasksDiagnostic,
+  type TasksOptions,
+  type TasksPlan,
+} from "./tasks-seed.ts";
+export {
+  credentialInvalid,
+  credentialOf,
+  credentialValues,
+  type LocalCredential,
+} from "./tasks-credential.ts";
+export { checkOutputFolder, TasksOutput } from "./tasks-output.ts";
+export {
+  runTasksLocal,
+  PI_AUTH_FILE,
+  TasksExit,
+  type LocalTasksEnd,
+  type LocalTasksInput,
+} from "./tasks-run.ts";
+export { RunEndKind } from "./tasks-verify.ts";
