@@ -23,13 +23,13 @@ function jsonAsset(value: unknown) {
 
 export const evidencePublishVerification: Step<
   unknown,
-  "claim" | "verification",
+  "verification",
   "verificationEvidence",
   EvaluationPorts
 > = {
   id: "evidence.publish(verification)",
   deadline: DeadlineKind.Work,
-  reads: ["claim", "verification"],
+  reads: ["verification"],
   writes: ["verificationEvidence"],
   stops: [],
   note: "port: evidence.submit",
@@ -46,13 +46,13 @@ export const evidencePublishVerification: Step<
 
 export const evidencePublishAffected: Step<
   unknown,
-  "claim" | "affected",
+  "affected",
   "affectedEvidence",
   EvaluationPorts
 > = {
   id: "evidence.publish(affected)",
   deadline: DeadlineKind.Work,
-  reads: ["claim", "affected"],
+  reads: ["affected"],
   writes: ["affectedEvidence"],
   stops: [],
   note: "port: evidence.submit; only when the affected step holds a document",
@@ -69,13 +69,13 @@ export const evidencePublishAffected: Step<
 
 export const evidencePublishPatches: Step<
   unknown,
-  "claim" | "placed",
+  "placed",
   "patchEvidence",
   EvaluationPorts
 > = {
   id: "evidence.publish(patches)",
   deadline: DeadlineKind.Work,
-  reads: ["claim", "placed"],
+  reads: ["placed"],
   writes: ["patchEvidence"],
   stops: [],
   note: "port: evidence.submit",
