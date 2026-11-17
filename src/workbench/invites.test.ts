@@ -15,6 +15,7 @@ import {
   WORKBENCH_SERVICE_NAME,
   WORKBENCH_SESSION_PREFIX,
   WorkbenchErrorCode,
+  workbenchOperations,
 } from "./contract.ts";
 import { WorkbenchInvites } from "./invites.ts";
 import { workbenchMigrations } from "./migrations.ts";
@@ -120,7 +121,7 @@ async function refusedWith(
   );
 }
 
-test("(security, redaction) token_hash is the SHA-256 of the token, and the raw token appears in no row", async (t) => {
+test("(security, redaction) token_hash is the SHA-256 of the token, and the raw token appears in no row and in no idempotency record", async (t) => {
   const f = fixture(t);
   const host = f.host();
   const created = await f.service.inviteCreate(caller, host.id, {
@@ -143,6 +144,7 @@ test("(security, redaction) token_hash is the SHA-256 of the token, and the raw 
       created.expires_at - Date.now() > WORKBENCH_INVITE_LIFETIME_MS / 2,
   );
   assert.ok(!JSON.stringify(f.rows()).includes(created.invite_token));
+  assert.equal(workbenchOperations["invite.create"].secret, true);
 });
 
 test("(security, refused path) join with an unknown token answers 404 workbench.invite.not_found", async (t) => {
