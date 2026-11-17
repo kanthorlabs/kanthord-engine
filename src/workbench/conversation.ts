@@ -1,4 +1,8 @@
-import { getAgentDeclaration, workbenchAgentNames } from "../agent/catalog.ts";
+import {
+  type AgentDeclaration,
+  getAgentDeclaration,
+  workbenchAgentNames,
+} from "../agent/catalog.ts";
 import { AgentErrorCode } from "../agent/contract.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -15,6 +19,7 @@ import {
   type PlanPhase,
   type SessionEntry,
   WORKBENCH_ACTION_RESULT_ENTRY,
+  WorkbenchErrorCode,
   WorkbenchRecordKind,
 } from "./contract.ts";
 import {
@@ -138,6 +143,48 @@ export function resolveMention(
     display_name: mention.display_name,
     rest: mention.rest,
   };
+}
+
+export type DeclarationOf = (agentName: string) => AgentDeclaration | undefined;
+
+function declared(
+  declarationOf: DeclarationOf,
+  agentName: string,
+): AgentDeclaration {
+  const declaration = declarationOf(agentName);
+  if (declaration === undefined)
+    throw new Error(`Undeclared agent ${agentName}.`);
+  return declaration;
+}
+
+function holdsBuiltinTool(declaration: AgentDeclaration): boolean {
+  return declaration.tools.builtin.length > NO_CHARACTERS;
+}
+
+export function resolveGuestMention(
+  tx: Transaction,
+  text: string,
+  dependencies: Pick<Dependencies, "agentConfiguration" | "declarationOf">,
+): MentionMatch | null {
+  const mention = resolveMention(tx, text, dependencies);
+  if (
+    mention !== null &&
+    holdsBuiltinTool(declared(dependencies.declarationOf, mention.agent_name))
+  )
+    throw new OperationError(
+      HttpStatus.Conflict,
+      WorkbenchErrorCode.GuestAgentRefused,
+      "A guest cannot mention an agent that holds a built-in tool.",
+      { agent_name: mention.agent_name },
+    );
+  return mention;
+}
+
+export function guestMentionNames(declarationOf: DeclarationOf): string[] {
+  return workbenchAgentNames()
+    .map((agentName) => declared(declarationOf, agentName))
+    .filter((declaration) => !holdsBuiltinTool(declaration))
+    .map((declaration) => declaration.display_name);
 }
 
 export interface Answerer {

@@ -24,11 +24,20 @@ type Frame = Uint8Array<ArrayBuffer>;
 const encoder = new TextEncoder();
 const KEEPALIVE_FRAME = encoder.encode(KEEPALIVE_COMMENT);
 
+export interface GuestQueueItem {
+  id: string;
+  agent_name: string | null;
+  display_name: string | null;
+  author_name: string;
+}
+
 export interface FeedState {
   run_active: boolean;
   display_name: string | null;
   auto_mode: boolean;
   streaming: Record<string, unknown> | null;
+  waiting_for_approval: { operation_id: string } | null;
+  queue: GuestQueueItem[];
 }
 
 export interface GuestState {
@@ -36,6 +45,8 @@ export interface GuestState {
   display_name: string | null;
   auto_mode: boolean;
   streaming: GuestStreaming | null;
+  waiting_for_approval: { operation_id: string } | null;
+  queue: GuestQueueItem[];
 }
 
 export interface FeedSource {
@@ -68,6 +79,8 @@ function guestStateOf(state: FeedState): GuestState {
     display_name: state.display_name,
     auto_mode: state.auto_mode,
     streaming: projectStreaming(state.streaming),
+    waiting_for_approval: state.waiting_for_approval,
+    queue: state.queue.map((item) => ({ ...item })),
   };
 }
 

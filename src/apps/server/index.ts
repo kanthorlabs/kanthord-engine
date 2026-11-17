@@ -174,7 +174,11 @@ import {
 import { packageVersion } from "../../kernel/version.ts";
 import { WorkerPool } from "./worker-pool.ts";
 import { instanceIssuer } from "./instance-issuer.ts";
-import { AgentComponent, agentMigrations } from "../../agent/index.ts";
+import {
+  AgentComponent,
+  agentMigrations,
+  getAgentDeclaration,
+} from "../../agent/index.ts";
 import {
   operationToolDeclarations,
   WorkbenchFootprint,
@@ -1384,6 +1388,7 @@ export function composeServices(options: ComposeServicesOptions) {
   const workbench = new WorkbenchService({
     store: options.store,
     invites,
+    declarationOf: getAgentDeclaration,
     projectScope,
     projectNames: (ids) => project.projectNames(ids),
     signGuestToken: (guest) =>

@@ -4,9 +4,16 @@ pathItem:
     operationId: workbench.guest.message
     tags:
       - workbench
-    description: "Append a note of the guest to the conversation. Every guest
-      message is a note: it starts no run, also with a leading mention. The text
-      holds at most 16384 UTF-8 bytes."
+    description: "Send a message of the guest to the conversation. A message with no
+      leading mention is a note: it starts no run and answers `kind` `note`. A
+      leading `@<display name>` starts a run of that member, or queues the
+      message behind the active run, and answers `kind` `run` with `agent_name`
+      and `queued_message_id` (null when the run starts now). The run reads
+      under the read-only identity of the inviter and runs no mutation without
+      the owner's card. A mention of an unknown name answers 404
+      `agent.catalog.not_found`. A mention of an agent that holds a built-in
+      tool answers 409 `workbench.guest.agent_refused`. A full queue answers 409
+      `workbench.session.queue_full`. The text holds at most 16384 UTF-8 bytes."
     x-access-policy: guest
     x-timeout-ms: 30000
     x-mutation: true
@@ -76,11 +83,33 @@ components:
         - body
       additionalProperties: false
     workbench.guest.message.Output:
-      type: object
-      properties:
-        kind:
-          type: string
-          const: note
-      required:
-        - kind
-      additionalProperties: false
+      oneOf:
+        - type: object
+          properties:
+            kind:
+              type: string
+              const: note
+          required:
+            - kind
+          additionalProperties: false
+        - type: object
+          properties:
+            kind:
+              type: string
+              const: run
+            agent_name:
+              type: string
+            queued_message_id:
+              anyOf:
+                - type: string
+                  minLength: 51
+                  maxLength: 51
+                  pattern: ^workbench_queued_message_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                  description: workbench_queued_message_ followed by a canonical 26-character
+                    uppercase ULID.
+                - type: "null"
+          required:
+            - kind
+            - agent_name
+            - queued_message_id
+          additionalProperties: false

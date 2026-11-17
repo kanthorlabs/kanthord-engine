@@ -87,6 +87,7 @@ import {
   MessageKind,
   type PendingApproval,
   type PlanPhase,
+  QueueClearCause,
   type QueuedMessage,
   type RunSnapshot,
   type SessionEntry,
@@ -110,7 +111,9 @@ import {
 } from "./contract.ts";
 import { missionOperations } from "../mission/contract.ts";
 import {
+  type DeclarationOf,
   forkMaterial,
+  guestMentionNames,
   lastAnswerer,
   lastTurnEntry,
   type MentionMatch,
@@ -119,6 +122,7 @@ import {
   parseCursor,
   type RelayMember,
   relayText,
+  resolveGuestMention,
   resolveMention,
 } from "./conversation.ts";
 import { offerActionTool } from "./actions.ts";
@@ -215,6 +219,7 @@ interface JoinBody {
 export interface Dependencies {
   store: Store;
   invites: WorkbenchInvites;
+  declarationOf: DeclarationOf;
   projectScope: ProjectScope;
   projectNames(ids: readonly string[]): ReadonlyMap<string, string>;
   signGuestToken: (guest: GuestTokenRequest) => Promise<{ token: string }>;
@@ -351,11 +356,15 @@ interface Approval {
 
 interface PendingMessage extends QueuedMessage {
   requester: HumanIdentity;
+  origin: Author;
+  invite_id: string | null;
 }
 
 interface EnqueueItem {
   text: string;
   requester: HumanIdentity;
+  origin: Author;
+  invite_id: string | null;
 }
 
 function queuedView({
@@ -370,6 +379,8 @@ function queuedView({
 interface LaunchItem {
   text: string;
   requester: HumanIdentity;
+  origin: Author;
+  invite_id: string | null;
   context: Context;
 }
 
@@ -385,6 +396,8 @@ interface MessageBody {
 
 interface Run {
   request: string;
+  origin: Author | null;
+  inviteId: string | null;
   memberId: string | null;
   settle: () => void;
   stopped: boolean;
@@ -1622,12 +1635,22 @@ export class WorkbenchService implements Service {
     const active = this.runActive(host);
     const running = this.runningMember(host);
     const streaming = running.agent?.state.streamingMessage;
+    const waiting = this.pendingApprovalOf(host);
     return {
       run_active: active,
       display_name: active ? displayNameOf(running.agentName) : null,
       auto_mode: host.autoMode,
       streaming:
         streaming === undefined ? null : JSON.parse(JSON.stringify(streaming)),
+      waiting_for_approval: waiting
+        ? { operation_id: waiting.operation_id }
+        : null,
+      queue: host.queuedMessages.map((item) => ({
+        id: item.id,
+        agent_name: item.agent_name,
+        display_name: item.display_name,
+        author_name: item.origin.name,
+      })),
     };
   }
 
@@ -1716,6 +1739,8 @@ export class WorkbenchService implements Service {
     };
     const run: Run = {
       request: options.request,
+      origin: null,
+      inviteId: null,
       memberId: null,
       settle,
       firstEntry: session.manager.getEntries().length,
@@ -1742,6 +1767,8 @@ export class WorkbenchService implements Service {
     if (run.stopped) return run.settle();
     const member = await this.member(host, item);
     run.memberId = member.id;
+    run.origin = item.origin;
+    run.inviteId = item.invite_id;
     run.firstEntry = member.manager.getEntries().length;
     member.requester = item.requester;
     const resolved = this.dependencies.store.transaction((tx) =>
@@ -1755,6 +1782,7 @@ export class WorkbenchService implements Service {
     }
     assert.ok(member.agent);
     await this.relay(host, member, item);
+    this.appendAuthor(member, item);
     void member.agent
       .prompt(item.text, { expandPromptTemplates: false })
       .catch((error: unknown) => {
@@ -1769,6 +1797,7 @@ export class WorkbenchService implements Service {
     const templates = await this.dependencies.agentPrompt.templates(
       item.context,
     );
+    this.appendAuthor(member, item);
     void runPlanPipeline({
       participant: member.manager,
       request: item.text,
@@ -1786,6 +1815,20 @@ export class WorkbenchService implements Service {
         run.phase = null;
         run.settle();
       });
+  }
+
+  private appendAuthor(member: OpenSession, item: LaunchItem): void {
+    if (item.origin.kind !== AuthorKind.Guest) return;
+    appendRecord(member.manager, {
+      kind: WorkbenchRecordKind.Author,
+      author: { kind: item.origin.kind, name: item.origin.name },
+    });
+    this.notify(member);
+  }
+
+  runScope(run: Run): readonly string[] | null {
+    if (run.inviteId === null) return null;
+    return this.dependencies.invites.resolve(run.inviteId)?.project_ids ?? [];
   }
 
   private phaseEnded(run: Run): boolean {
@@ -1963,6 +2006,25 @@ export class WorkbenchService implements Service {
     return participant;
   }
 
+  private queuedRefusal(item: PendingMessage): OperationError | null {
+    if (item.invite_id === null) return null;
+    if (this.dependencies.invites.resolve(item.invite_id) === null)
+      return new OperationError(
+        HttpStatus.Unauthorized,
+        INVITE_ENDED_CODE,
+        "The invite of the queued message ended.",
+      );
+    try {
+      this.dependencies.store.transaction((tx) =>
+        resolveGuestMention(tx, item.text, this.dependencies),
+      );
+    } catch (error) {
+      if (error instanceof OperationError) return error;
+      throw error;
+    }
+    return null;
+  }
+
   private startNext(session: OpenSession): void {
     if (this.shutdown.signal.aborted) {
       session.queuedMessages.length = 0;
@@ -1971,6 +2033,12 @@ export class WorkbenchService implements Service {
     if (session.run) return;
     const item = session.queuedMessages.shift();
     if (!item) return;
+    const refusal = this.queuedRefusal(item);
+    if (refusal) {
+      session.runError = refusal.message;
+      this.notify(session);
+      return this.startNext(session);
+    }
     const run = this.claim(session, {
       clearError: false,
       request: item.text,
@@ -2009,6 +2077,8 @@ export class WorkbenchService implements Service {
       id,
       text: item.text,
       requester: item.requester,
+      origin: item.origin,
+      invite_id: item.invite_id,
       agent_name: mention?.agent_name ?? null,
       display_name: mention?.display_name ?? null,
     });
@@ -2016,10 +2086,21 @@ export class WorkbenchService implements Service {
     return id;
   }
 
-  private clearQueue(session: OpenSession): QueuedMessage[] {
-    const cleared = session.queuedMessages.splice(0).map(queuedView);
-    if (cleared.length) this.notify(session);
-    return cleared;
+  private clearQueue(
+    session: OpenSession,
+    cause: QueueClearCause,
+  ): QueuedMessage[] {
+    const removed = session.queuedMessages.splice(NO_CHARACTERS);
+    if (removed.length === NO_CHARACTERS) return [];
+    appendRecord(session.manager, {
+      kind: WorkbenchRecordKind.QueueClear,
+      count: removed.length,
+      cause,
+    });
+    this.notify(session);
+    return removed
+      .filter(({ origin }) => origin.kind === AuthorKind.Owner)
+      .map(queuedView);
   }
 
   private mentioned(text: string): boolean {
@@ -2066,6 +2147,7 @@ export class WorkbenchService implements Service {
       members: this.conversationMembers(host),
       owner_name: invite.invited_by_name,
       projects: this.projectsOf(invite.project_ids),
+      mention_names: guestMentionNames(this.dependencies.declarationOf),
       entries: projectEntries(mergeEntries(this.memberEntries(host, false))),
       run_active: this.runActive(host),
     };
@@ -2087,11 +2169,47 @@ export class WorkbenchService implements Service {
     return new Response(stream, { headers: STREAM_HEADERS });
   }
 
-  async guestMessage(guest: GuestIdentity, text: string) {
+  async guestMessage(guest: GuestIdentity, text: string, context: Context) {
     const host = await this.guestHost(guest);
     this.requireLiveInvite(guest);
-    this.appendNote(host, { kind: AuthorKind.Guest, name: guest.name }, text);
-    return { kind: MessageKind.Note };
+    const origin = { kind: AuthorKind.Guest, name: guest.name };
+    const mention = this.dependencies.store.transaction((tx) =>
+      resolveGuestMention(tx, text, this.dependencies),
+    );
+    if (mention === null) {
+      this.appendNote(host, origin, text);
+      return { kind: MessageKind.Note };
+    }
+    const item = {
+      text,
+      requester: guest.reader,
+      origin,
+      invite_id: guest.inviteId,
+    };
+    if (host.run) {
+      const queued = this.enqueue(host, item, mention);
+      this.title(host, text);
+      return {
+        kind: MessageKind.Run,
+        agent_name: mention.agent_name,
+        queued_message_id: queued,
+      };
+    }
+    const run = this.claim(host, { clearError: true, request: text });
+    try {
+      await this.exclusive(host, () =>
+        this.launch(host, run, { ...item, context }),
+      );
+    } catch (error) {
+      run.settle();
+      throw error;
+    }
+    this.title(host, text);
+    return {
+      kind: MessageKind.Run,
+      agent_name: this.memberOfRun(host, run).agentName,
+      queued_message_id: null,
+    };
   }
 
   async message(
@@ -2110,18 +2228,15 @@ export class WorkbenchService implements Service {
     const session = await this.session(sessionId);
     this.requireHost(session);
     const requester = humanOf(caller);
+    const origin = {
+      kind: AuthorKind.Owner,
+      name: requester.name.slice(NO_CHARACTERS, OWNER_NAME_MAX_LENGTH),
+    };
     if (
       this.dependencies.invites.isShared(session.id) &&
       !this.mentioned(text)
     ) {
-      await this.note(
-        sessionId,
-        {
-          kind: AuthorKind.Owner,
-          name: requester.name.slice(NO_CHARACTERS, OWNER_NAME_MAX_LENGTH),
-        },
-        text,
-      );
+      await this.note(sessionId, origin, text);
       return {
         session_id: sessionId,
         agent_name: null,
@@ -2137,8 +2252,14 @@ export class WorkbenchService implements Service {
         resolveMention(tx, text, this.dependencies),
       );
       const cleared =
-        delivery === MessageDelivery.Replace ? this.clearQueue(session) : [];
-      const queued = this.enqueue(session, { text, requester }, mention);
+        delivery === MessageDelivery.Replace
+          ? this.clearQueue(session, QueueClearCause.Replace)
+          : [];
+      const queued = this.enqueue(
+        session,
+        { text, requester, origin, invite_id: null },
+        mention,
+      );
       this.title(session, text);
       if (delivery === MessageDelivery.Replace)
         this.exclusive(session, () => this.stopRun(session, active)).catch(
@@ -2163,6 +2284,8 @@ export class WorkbenchService implements Service {
         this.launch(session, run, {
           text,
           requester,
+          origin,
+          invite_id: null,
           context: caller.context,
         }),
       );
@@ -2400,7 +2523,7 @@ export class WorkbenchService implements Service {
     const session = await this.session(sessionId);
     this.requireHost(session);
     const run = session.run;
-    const cleared = this.clearQueue(session);
+    const cleared = this.clearQueue(session, QueueClearCause.Stop);
     await this.exclusive(session, () => this.stopRun(session, run));
     if (run) await run.settled;
     return { session_id: sessionId, run_active: false, cleared };
@@ -2662,7 +2785,8 @@ export class WorkbenchService implements Service {
     );
     registry.register(
       workbenchOperations["guest.message"],
-      ({ body }, caller) => this.guestMessage(guestOf(caller), body.text),
+      ({ body }, caller) =>
+        this.guestMessage(guestOf(caller), body.text, caller.context),
     );
     registry.register(
       workbenchOperations["session.events"],

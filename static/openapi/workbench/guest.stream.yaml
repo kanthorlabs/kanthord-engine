@@ -7,11 +7,14 @@ pathItem:
     description: "Follow the conversation of the invite of the guest as server-sent
       events. The first frames hold the entries after `after` and the current
       state. Event `entries` holds the new guest view entries. Event `state`
-      holds `run_active`, `display_name`, `auto_mode` and `streaming`. The
-      comment `: keepalive` comes every 15 seconds. `after` holds one
-      `<session_id>:<entry_id>` pair per member, comma-separated. A plain entry
-      id names the host pair. The server closes the stream at the end of the
-      invite. The server keeps no position per guest."
+      holds `run_active`, `display_name`, `auto_mode`, `streaming`,
+      `waiting_for_approval` (the operation id of the pending approval, or null)
+      and `queue` (the id, agent, display name and author name of each queued
+      message, with no text). The comment `: keepalive` comes every 15 seconds.
+      `after` holds one `<session_id>:<entry_id>` pair per member,
+      comma-separated. A plain entry id names the host pair. The server closes
+      the stream at the end of the invite. The server keeps no position per
+      guest."
     x-access-policy: guest
     x-timeout-ms: 30000
     x-mutation: false

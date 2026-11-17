@@ -90,6 +90,7 @@ export const WorkbenchErrorCode = {
   SummaryFailed: "workbench.fork.summary_failed",
   SummaryRefused: "workbench.fork.summary_refused",
   InviteNotFound: "workbench.invite.not_found",
+  GuestAgentRefused: "workbench.guest.agent_refused",
   InviteNameInvalid: "workbench.invite.name_invalid",
   ProjectInvalid: "workbench.invite.project_invalid",
   ScopeMismatch: "workbench.invite.scope_mismatch",
@@ -143,9 +144,15 @@ export const WorkbenchRecordKind = {
   Guard: "guard",
   Fork: "fork",
   Note: "note",
+  Author: "author",
+  QueueClear: "queue_clear",
 } as const;
 export type WorkbenchRecordKind =
   (typeof WorkbenchRecordKind)[keyof typeof WorkbenchRecordKind];
+
+export const QueueClearCause = { Stop: "stop", Replace: "replace" } as const;
+export type QueueClearCause =
+  (typeof QueueClearCause)[keyof typeof QueueClearCause];
 
 const actionSeenSchema = z.union([
   z.strictObject({
@@ -184,6 +191,15 @@ export const workbenchRecordSchema = z.discriminatedUnion("kind", [
     kind: z.literal(WorkbenchRecordKind.Note),
     text: z.string().max(WORKBENCH_MESSAGE_MAX_LENGTH),
     author: authorSchema,
+  }),
+  z.strictObject({
+    kind: z.literal(WorkbenchRecordKind.Author),
+    author: authorSchema,
+  }),
+  z.strictObject({
+    kind: z.literal(WorkbenchRecordKind.QueueClear),
+    count: z.number().int().positive(),
+    cause: z.enum(QueueClearCause),
   }),
 ]);
 export type WorkbenchRecord = z.infer<typeof workbenchRecordSchema>;
@@ -399,6 +415,18 @@ export const guestEntrySchema = z.discriminatedUnion("kind", [
     ...guestEnvelope,
     kind: z.literal(WorkbenchRecordKind.Fork),
     source_title: z.string(),
+  }),
+  z.strictObject({
+    ...guestEnvelope,
+    kind: z.literal(WorkbenchRecordKind.Author),
+    author: authorSchema,
+  }),
+  z.strictObject({
+    ...guestEnvelope,
+    kind: z.literal(WorkbenchRecordKind.QueueClear),
+    count: z.number().int().positive(),
+    cause: z.enum(QueueClearCause),
+    text: z.string(),
   }),
 ]);
 
@@ -763,11 +791,12 @@ export const workbenchOperations = {
       members: z.array(conversationMemberSchema),
       owner_name: z.string(),
       projects: z.array(inviteProjectSchema),
+      mention_names: z.array(z.string()),
       entries: z.array(guestEntrySchema),
       run_active: z.boolean(),
     }),
     description:
-      "Read the conversation of the invite of the guest. The conversation comes from the guest token. The entries hold the guest view only: no tool result, no thinking and no configuration. An ended invite answers 401 `gateway.jwt.invite_ended`.",
+      "Read the conversation of the invite of the guest. The conversation comes from the guest token. The entries hold the guest view only: no tool result, no thinking and no configuration. `projects` names the projects of the invite. `mention_names` lists the display names that a guest can mention: the agents that hold no built-in tool. An ended invite answers 401 `gateway.jwt.invite_ended`.",
   },
   "guest.stream": {
     ...guestOperation,
@@ -785,7 +814,7 @@ export const workbenchOperations = {
     }),
     output: z.string(),
     description:
-      "Follow the conversation of the invite of the guest as server-sent events. The first frames hold the entries after `after` and the current state. Event `entries` holds the new guest view entries. Event `state` holds `run_active`, `display_name`, `auto_mode` and `streaming`. The comment `: keepalive` comes every 15 seconds. `after` holds one `<session_id>:<entry_id>` pair per member, comma-separated. A plain entry id names the host pair. The server closes the stream at the end of the invite. The server keeps no position per guest.",
+      "Follow the conversation of the invite of the guest as server-sent events. The first frames hold the entries after `after` and the current state. Event `entries` holds the new guest view entries. Event `state` holds `run_active`, `display_name`, `auto_mode`, `streaming`, `waiting_for_approval` (the operation id of the pending approval, or null) and `queue` (the id, agent, display name and author name of each queued message, with no text). The comment `: keepalive` comes every 15 seconds. `after` holds one `<session_id>:<entry_id>` pair per member, comma-separated. A plain entry id names the host pair. The server closes the stream at the end of the invite. The server keeps no position per guest.",
   },
   "guest.message": {
     ...guestOperation,
@@ -812,8 +841,17 @@ export const workbenchOperations = {
           ),
       }),
     }),
-    output: z.strictObject({ kind: z.literal(MessageKind.Note) }),
+    output: z.discriminatedUnion("kind", [
+      z.strictObject({ kind: z.literal(MessageKind.Note) }),
+      z.strictObject({
+        kind: z.literal(MessageKind.Run),
+        agent_name: z.string(),
+        queued_message_id: identitySchema(
+          WORKBENCH_QUEUED_MESSAGE_PREFIX,
+        ).nullable(),
+      }),
+    ]),
     description:
-      "Append a note of the guest to the conversation. Every guest message is a note: it starts no run, also with a leading mention. The text holds at most 16384 UTF-8 bytes.",
+      "Send a message of the guest to the conversation. A message with no leading mention is a note: it starts no run and answers `kind` `note`. A leading `@<display name>` starts a run of that member, or queues the message behind the active run, and answers `kind` `run` with `agent_name` and `queued_message_id` (null when the run starts now). The run reads under the read-only identity of the inviter and runs no mutation without the owner's card. A mention of an unknown name answers 404 `agent.catalog.not_found`. A mention of an agent that holds a built-in tool answers 409 `workbench.guest.agent_refused`. A full queue answers 409 `workbench.session.queue_full`. The text holds at most 16384 UTF-8 bytes.",
   },
 } as const satisfies Record<string, Operation>;

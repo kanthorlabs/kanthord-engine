@@ -4,6 +4,7 @@ import {
   ActionOutcome,
   type Author,
   type MemberEntry,
+  QueueClearCause,
   WORKBENCH_ACTION_RESULT_ENTRY,
   type WorkbenchRecord,
   WorkbenchRecordKind,
@@ -20,11 +21,21 @@ const TOOL_CALL_BLOCK = "toolCall";
 const NO_ITEMS = 0;
 const DONE_LINE = "Done by the owner.";
 const FAILED_LINE = "Failed";
+const QUEUE_CLEAR_LINES: Readonly<Record<QueueClearCause, string>> = {
+  [QueueClearCause.Stop]: "The owner stopped the run.",
+  [QueueClearCause.Replace]: "The owner replaced the run.",
+};
+
+function queueClearLine(cause: QueueClearCause, count: number): string {
+  return `${QUEUE_CLEAR_LINES[cause]} ${count} queued messages were cleared.`;
+}
 
 export const GUEST_RECORD_KINDS = [
   WorkbenchRecordKind.Note,
   WorkbenchRecordKind.ActionOffer,
   WorkbenchRecordKind.Fork,
+  WorkbenchRecordKind.Author,
+  WorkbenchRecordKind.QueueClear,
 ] as const;
 export type GuestRecordKind = (typeof GUEST_RECORD_KINDS)[number];
 
@@ -45,7 +56,14 @@ export type GuestBody =
       operation_id: string;
       target_id: string;
     }
-  | { kind: typeof WorkbenchRecordKind.Fork; source_title: string };
+  | { kind: typeof WorkbenchRecordKind.Fork; source_title: string }
+  | { kind: typeof WorkbenchRecordKind.Author; author: Author }
+  | {
+      kind: typeof WorkbenchRecordKind.QueueClear;
+      count: number;
+      cause: QueueClearCause;
+      text: string;
+    };
 
 export type GuestEntry = {
   id: string;
@@ -100,6 +118,18 @@ function projectRecord(record: WorkbenchRecord): GuestBody | null {
       };
     case WorkbenchRecordKind.Fork:
       return { kind: record.kind, source_title: record.source_title };
+    case WorkbenchRecordKind.Author:
+      return {
+        kind: record.kind,
+        author: { kind: record.author.kind, name: record.author.name },
+      };
+    case WorkbenchRecordKind.QueueClear:
+      return {
+        kind: record.kind,
+        count: record.count,
+        cause: record.cause,
+        text: queueClearLine(record.cause, record.count),
+      };
     default:
       return assert.fail("A guest record kind has a projection.");
   }
