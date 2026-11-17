@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -29,7 +30,8 @@ import { InvalidReason } from "../agent/prompt-source.ts";
 import { resolveAgentPrompt } from "../agent/prompt-files.ts";
 import { REDACTION_LOG_MESSAGE } from "../agent/hooks/sensitive-text-redaction.ts";
 import { SensitiveRule } from "../agent/sensitive-text.ts";
-import { loadPi } from "../agent/pi.ts";
+import { loadPi, PI_DIRECTORY_NAME, usePiDirectory } from "../agent/pi.ts";
+import { installPiTools } from "../agent/pi-tools.ts";
 import {
   scriptedProvider,
   type ScriptedProvider,
@@ -44,6 +46,7 @@ import {
   redactingLogger,
   stopAfter,
   temporary,
+  temporaryDirectory,
 } from "../kernel/test-support.ts";
 import { isString } from "../kernel/values.ts";
 import { createModelRuntime, resolveModel } from "../llm/model-connector.ts";
@@ -58,6 +61,11 @@ import {
 } from "./environment-agent.ts";
 import { EnvironmentTarget, type ProofFile } from "./environment-state.ts";
 import { environmentAgentTools } from "./environment-agent-tools.ts";
+
+const PI_ROOT = temporaryDirectory();
+const PI_DIRECTORY = join(PI_ROOT, PI_DIRECTORY_NAME);
+process.on("exit", () => rmSync(PI_ROOT, { recursive: true, force: true }));
+usePiDirectory(PI_DIRECTORY);
 
 const TEST_TIMEOUT_MS = 60000;
 const ROLE_TOOL_RESULT = "toolResult";
@@ -481,6 +489,7 @@ test(
       ),
       fauxAssistantMessage("done"),
     ]);
+    installPiTools({ directory: PI_DIRECTORY });
     const served: string[] = [];
     const tools = () =>
       environmentAgentTools({
