@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import type { ExecutionRun } from "./execution-run.ts";
 import { EndReason, type ExecutionEnd } from "./execution-stop.ts";
-import { openNativeAgent } from "./native-agent.ts";
+import { nativeSessionTrace, openNativeAgent } from "./native-agent.ts";
 import type { NativeAgent } from "./native-agent-session.ts";
 import {
   credentialSecrets,
   mergedSecrets,
 } from "../../agent/hooks/sensitive-text-redaction.ts";
+import { agentPort, type SessionModelFactory } from "../../agent/agent-port.ts";
+import { executionEvidence } from "../../agent/capabilities/execution-evidence.ts";
+import { linkUpdates } from "../../agent/capabilities/link-updates.ts";
+import type { SessionHostTools } from "../../agent/capabilities/host-tools.ts";
 import type { TelemetrySink } from "./telemetry.ts";
 import type { Context } from "../../kernel/context.ts";
 import type { Diagnostic } from "../../kernel/errors.ts";
@@ -16,7 +20,6 @@ import type { MethodClients } from "./method-clients.ts";
 import {
   ExecutionIntent,
   type ExecutionSetup,
-  type HostTools,
   type RepositoryTransport,
   WorkerMethod,
 } from "../contract.ts";
@@ -39,7 +42,7 @@ import {
   runChain,
   type WalkInput,
 } from "./chain-runner.ts";
-import type { CommonPorts } from "./foundry-ports.ts";
+import type { AgentOpenRequest, CommonPorts } from "./foundry-ports.ts";
 import {
   type AgentHost,
   evaluationPorts,
@@ -49,7 +52,6 @@ import {
 
 export type { ExecutionEnd } from "./execution-stop.ts";
 export { executionBoundary } from "./chain-runner.ts";
-const WORKING_AGENT = 0;
 export interface NativeExecutionInput {
   claim: MethodClaim;
   setup: ExecutionSetup;
@@ -65,7 +67,7 @@ export interface NativeExecutionInput {
   env: NodeJS.ProcessEnv;
   modelRuntimeFactory: ModelRuntimeFactory;
   sessionRoot?: string;
-  hostTools: (workspace: string) => HostTools;
+  hostTools: SessionHostTools;
   context: Context;
   stop?: Context;
   log?: (record: Record<string, unknown>) => void;
@@ -91,16 +93,30 @@ export async function runNativeExecution(
     ...input.claim,
     resource_budget: input.setup.resource_budget,
   });
-  const close = (agent: NativeAgent) => {
+  const close = async (agent: NativeAgent) => {
     const unlink = opened.get(agent);
     if (!unlink) return;
     opened.delete(agent);
     try {
-      disposeAgent(agent);
+      await disposeAgent(agent);
     } finally {
       unlink[Symbol.dispose]();
     }
   };
+  const capabilities = [
+    executionEvidence(input.hostTools),
+    linkUpdates(input.hostTools),
+  ];
+  const sessions = agentPort({
+    capabilities,
+    modelRuntimeFactory: modelFactoryOf(input),
+    knownSecrets: secrets,
+    trace: nativeSessionTrace(run.spans),
+    sessionRoot: input.sessionRoot ?? null,
+    budget,
+    env: input.env,
+    hostHome: input.hostHome,
+  });
   try {
     return await executionBoundary(run, async () => {
       await secrets();
@@ -108,30 +124,14 @@ export async function runNativeExecution(
       if (!method) return run.stop(EndReason.OperationFailed);
       const revision = await readPinnedRevision(run);
       const intent = input.setup.intent;
-      const open = async (workspace: string) => {
-        const agent = input.setup.agents[WORKING_AGENT];
-        assert.ok(agent);
-        const credential = input.credentials.items.find(
-          (item) => item.credential_id === agent.credential_id,
-        );
-        assert.ok(credential);
+      const open = async (request: AgentOpenRequest) => {
         const native = await openNativeAgent({
-          setup: input.setup,
-          claim: input.claim,
-          intent,
-          agent,
-          credential,
-          knownSecrets: secrets,
+          sessions,
+          request,
           budget,
-          workspace,
-          hostHome: input.hostHome,
-          env: input.env,
-          modelRuntimeFactory: input.modelRuntimeFactory,
-          hostTools: input.hostTools(workspace),
+          knownSecrets: secrets,
           context: run.operationContext,
           turnCheck: () => run.checkClaim(),
-          spans: run.spans,
-          sessionRoot: input.sessionRoot,
         });
         const stop = stopOnEnd(run, native);
         const trace = run.onTraceClose((status) => native.closeTrace(status));
@@ -163,6 +163,7 @@ export async function runNativeExecution(
         {
           run,
           budget,
+          capabilities,
           resources: new AsyncDisposableStack(),
           host: {
             workspaces: input.workspaces,
@@ -174,7 +175,7 @@ export async function runNativeExecution(
     });
   } finally {
     try {
-      for (const agent of [...opened.keys()]) close(agent);
+      for (const agent of [...opened.keys()]) await close(agent);
     } finally {
       run.dispose();
     }
@@ -242,9 +243,19 @@ export function environmentDigestsOf(
   );
 }
 
-export function disposeAgent(agent: NativeAgent | null): void {
+function modelFactoryOf(input: NativeExecutionInput): SessionModelFactory {
+  return ({ agent, signal }) => {
+    const credential = input.credentials.items.find(
+      (item) => item.credential_id === agent.credential_id,
+    );
+    assert.ok(credential);
+    return input.modelRuntimeFactory({ credential, agent, signal });
+  };
+}
+
+export async function disposeAgent(agent: NativeAgent | null): Promise<void> {
   if (!agent) return;
-  agent.dispose();
+  await agent.close();
 }
 
 export function stopOnEnd(run: ExecutionRun, agent: NativeAgent): Disposable {

@@ -42,8 +42,10 @@ import {
   scriptedModelRuntime,
   scriptedProvider,
   task,
+  testSessions,
   testSshAccess,
   transport,
+  workspaceRequest,
 } from "./test-support.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import { BASE_DIRECTORY } from "./workspace-layout.ts";
@@ -118,29 +120,29 @@ async function startedSession(t: TestContext, clients: MethodClients) {
     ),
     fauxAssistantMessage("unexpected"),
   ]);
+  const knownSecrets = credentialSecrets(store, "anthropic");
+  const budget = new ExecutionBudget({
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    resource_budget: setup.resource_budget,
+  });
   const agent = await openNativeAgent({
-    hostTools: unusedHostTools,
-    setup,
-    claim,
-    intent: ExecutionIntent.Implement,
-    agent: setup.agents[0]!,
-    credential: {
-      credential_id: setup.agents[0]!.credential_id,
-      provider_id: "anthropic",
-      store,
-    },
-    knownSecrets: credentialSecrets(store, "anthropic"),
-    budget: new ExecutionBudget({
-      created_at: Date.now(),
-      expired_at: Date.now() + 60000,
-      resource_budget: setup.resource_budget,
+    sessions: testSessions({
+      credential: {
+        credential_id: setup.agents[0]!.credential_id,
+        provider_id: "anthropic",
+        store,
+      },
+      modelRuntimeFactory: scriptedModelRuntime(provider),
+      knownSecrets,
+      budget,
+      hostHome: temporary(t),
+      spans: run.spans,
     }),
-    workspace,
-    hostHome: temporary(t),
-    env: hostEnvironment(),
-    modelRuntimeFactory: scriptedModelRuntime(provider),
+    request: workspaceRequest(setup, claim, workspace),
+    knownSecrets,
+    budget,
     context: run.operationContext,
-    spans: run.spans,
   });
   stopOnEnd(run, agent);
   const pending = agent.prompt(
@@ -183,8 +185,8 @@ test("S1 refusal aborts an active native session and ends its agent.session span
     reason: EndReason.Revoked,
     code: EXECUTION_NOT_RUNNING,
   });
-  disposeAgent(agent);
-  disposeAgent(agent);
+  await disposeAgent(agent);
+  await disposeAgent(agent);
   run.dispose();
   assert.equal(ends.length, EXPECTED_CALL_COUNT);
   assert.equal(provider.calls.length, EXPECTED_CALL_COUNT);
@@ -204,7 +206,7 @@ test("a stop during a turn ends the open tool and turn with stopped and the agen
     throw new ExecutionStop(EndReason.OperationFailed, null);
   });
   await pending.catch(() => {});
-  disposeAgent(agent);
+  await disposeAgent(agent);
   run.dispose();
   assert.equal(result.kind, ExecutionEndKind.Released);
   assert.equal(ends.length, EXPECTED_CALL_COUNT);

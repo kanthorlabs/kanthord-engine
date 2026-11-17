@@ -1413,11 +1413,6 @@
       "count": 3
     }
   },
-  "src/worker/unit/native-agent.ts": {
-    "@typescript-eslint/max-params": {
-      "count": 1
-    }
-  },
   "src/worker/unit/session-entries.ts": {
     "kanthord/no-inline-param-type": {
       "count": 1
@@ -1442,11 +1437,6 @@
     }
   },
   "src/worker/unit/telemetry.ts": {
-    "@typescript-eslint/max-params": {
-      "count": 2
-    }
-  },
-  "src/worker/unit/tool-table.ts": {
     "@typescript-eslint/max-params": {
       "count": 2
     }

@@ -12,7 +12,7 @@ import {
   type LinkUpdateRead,
 } from "../contract.ts";
 import { unusedHostTools } from "../test-support.ts";
-import { linkUpdateListTool } from "./host-tools.ts";
+import { linkUpdateListTool } from "../../agent/capabilities/link-updates.ts";
 
 const NO_READS = 0;
 const ONE_READ = 1;

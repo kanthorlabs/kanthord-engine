@@ -8,7 +8,7 @@ import {
 import { BudgetLimit } from "../../scheduler/contract.ts";
 
 const BUDGET_FLOOR = 0;
-export const COMMAND_LIMIT_MS = 600000;
+export { COMMAND_LIMIT_MS } from "../../agent/tool-table.ts";
 export class ExecutionBudget {
   private readonly deadline: number;
   private readonly expiredAt: number;

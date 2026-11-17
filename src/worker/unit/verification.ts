@@ -12,7 +12,7 @@ import {
 import { redactReason } from "../../kernel/probe.ts";
 import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import { EnvironmentFailure } from "../../scheduler/contract.ts";
-import { childEnvironment } from "./tool-table.ts";
+import { childEnvironment } from "../../agent/environment.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
 import { VERIFICATION_INFRASTRUCTURE_FAILED } from "./stop-codes.ts";
 import type { WorkspaceCheckout } from "./workspace-layout.ts";

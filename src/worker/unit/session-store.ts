@@ -3,7 +3,7 @@ import { constants, type Stats } from "node:fs";
 import { type FileHandle, lstat, open, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { PI_DIRECTORY_NAME } from "../../agent/pi.ts";
-import { ensureDirectory, FILE_NOT_FOUND } from "../../kernel/files.ts";
+import { FILE_NOT_FOUND } from "../../kernel/files.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import { isObject } from "../../kernel/values.ts";
 import {
@@ -44,17 +44,7 @@ export function executionSessionRoot(dataDirectory: string): string {
   return join(sessionRootOf(dataDirectory), EXECUTION_DIRECTORY);
 }
 
-export function executionSessionDirectory(
-  sessionRoot: string,
-  executionId: string,
-): string {
-  const directory = join(
-    sessionRoot,
-    identitySchema("execution").parse(executionId),
-  );
-  ensureDirectory(directory);
-  return directory;
-}
+export { executionSessionDirectory } from "../../agent/session-directory.ts";
 
 class Unreadable extends Error {}
 

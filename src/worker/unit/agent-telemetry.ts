@@ -13,7 +13,7 @@ import { SpanOperation, type SpanRecorder } from "./telemetry.ts";
 import { sessionEntryRecord } from "./session-entries.ts";
 import { knownMatcher } from "../../agent/sensitive-text.ts";
 import type { TurnPrompt } from "./native-agent.ts";
-import type { ToolProcesses, ToolTimeout } from "./tool-table.ts";
+import type { ToolProcesses, ToolTimeout } from "../../agent/tool-table.ts";
 import type { BashProcess } from "../../agent/bash-process.ts";
 
 const TURN_START = "turn_start";

@@ -14,5 +14,5 @@ export interface NativeAgent {
   abort(): Promise<void>;
   readonly budget: ExecutionBudget;
   closeTrace(status: SpanStatus): void;
-  dispose(): void;
+  close(): Promise<void>;
 }

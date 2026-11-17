@@ -99,7 +99,7 @@ document.
    or type. Write no object type inline in a parameter list. When a third-party
    type fixes the signature of a callback, take `...args: Parameters<T>` with
    `T` the callback type. For example, the bash tool `execute` of
-   `src/worker/unit/tool-table.ts:128-137` takes
+   `src/agent/tool-table.ts:128-136` takes
    `...args: Parameters<typeof declared.execute>`.
 3. **Small functions.** Keep the cyclomatic complexity of a function at 10 or
    below. A function above 10 holds more than one job. Split it. Keep each new

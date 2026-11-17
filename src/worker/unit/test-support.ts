@@ -39,20 +39,30 @@ import {
 } from "../test-support.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 import {
+  type ExecutionCredential,
   modelConnectorInput,
   type ModelRuntimeFactory,
 } from "./model-runtime.ts";
-import {
-  type ExecutionEnvironment,
-  ExecutionIntent,
-  type ExecutionSetup,
-  type RepositoryTransport,
+import type {
+  ExecutionEnvironment,
+  ExecutionSetup,
+  HostTools,
+  RepositoryTransport,
 } from "../contract.ts";
 import { RecordKind, type TelemetryRecord } from "../../tracking/contract.ts";
 import { AFFECTED_DECLARATION_FILE } from "./affected.ts";
 import { COMMAND_LIMIT_MS, ExecutionBudget } from "./budget.ts";
 import { SpanOperation, SpanRecorder } from "./telemetry.ts";
-import { openNativeAgent } from "./native-agent.ts";
+import {
+  type NativeOpenRequest,
+  nativeSessionTrace,
+  type NativeTrace,
+  openNativeAgent,
+} from "./native-agent.ts";
+import { agentPort, type SessionPort } from "../../agent/agent-port.ts";
+import { executionEvidence } from "../../agent/capabilities/execution-evidence.ts";
+import { linkUpdates } from "../../agent/capabilities/link-updates.ts";
+import type { KnownSecrets } from "../../agent/hooks/sensitive-text-redaction.ts";
 import { ExecutionRun } from "./execution-run.ts";
 import type { MethodClaim } from "./execution-stop.ts";
 import type { MethodClients } from "./method-clients.ts";
@@ -372,30 +382,30 @@ async function openExecution(
     type: "api_key",
     key: STEPS_KEY,
   }));
+  const knownSecrets = credentialSecrets(credentials, "anthropic");
+  const budget = new ExecutionBudget({
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    resource_budget: setup.resource_budget,
+  });
   const agent = await openNativeAgent({
-    hostTools: unusedHostTools,
-    setup,
-    claim,
-    intent: ExecutionIntent.Implement,
-    agent: setup.agents[0]!,
-    credential: {
-      credential_id: setup.agents[0]!.credential_id,
-      provider_id: "anthropic",
-      store: credentials,
-    },
-    knownSecrets: credentialSecrets(credentials, "anthropic"),
-    budget: new ExecutionBudget({
-      created_at: Date.now(),
-      expired_at: Date.now() + 60000,
-      resource_budget: setup.resource_budget,
+    sessions: testSessions({
+      credential: {
+        credential_id: setup.agents[0]!.credential_id,
+        provider_id: "anthropic",
+        store: credentials,
+      },
+      modelRuntimeFactory: scriptedModelRuntime(provider),
+      knownSecrets,
+      budget,
+      hostHome: temporary(t),
     }),
-    workspace: workspace.root,
-    hostHome: temporary(t),
-    env: hostEnvironment(),
-    modelRuntimeFactory: scriptedModelRuntime(provider),
+    request: workspaceRequest(setup, claim, workspace.root),
+    knownSecrets,
+    budget,
     context: run.operationContext,
   });
-  stopAfter(t, () => agent.dispose());
+  stopAfter(t, () => agent.close());
   return {
     input,
     run,
@@ -604,5 +614,50 @@ export function commandLimitClock(t: TestContext, startedMarker: string) {
       assert.ok(ticked, "a verification started");
       await ticked;
     },
+  };
+}
+
+export interface TestSessionsInput {
+  credential: ExecutionCredential;
+  modelRuntimeFactory: ModelRuntimeFactory;
+  knownSecrets: KnownSecrets;
+  budget: ExecutionBudget;
+  hostHome: string;
+  hostTools?: HostTools;
+  spans?: SpanRecorder;
+  sessionRoot?: string;
+}
+
+export function testSessions(
+  input: TestSessionsInput,
+): SessionPort<NativeTrace> {
+  const tools = () => input.hostTools ?? unusedHostTools;
+  return agentPort({
+    capabilities: [executionEvidence(tools), linkUpdates(tools)],
+    modelRuntimeFactory: ({ agent, signal }) =>
+      input.modelRuntimeFactory({
+        credential: input.credential,
+        agent,
+        signal,
+      }),
+    knownSecrets: input.knownSecrets,
+    trace: nativeSessionTrace(input.spans),
+    sessionRoot: input.sessionRoot ?? null,
+    budget: input.budget,
+    env: hostEnvironment(),
+    hostHome: input.hostHome,
+  });
+}
+
+export function workspaceRequest(
+  setup: ExecutionSetup,
+  claim: NativeOpenRequest["claim"],
+  workspace: string,
+): NativeOpenRequest {
+  return {
+    claim,
+    setup,
+    checkouts: [{ directory: workspace }],
+    reviewWorkspace: null,
   };
 }

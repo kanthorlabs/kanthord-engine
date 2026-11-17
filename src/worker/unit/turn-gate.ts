@@ -157,7 +157,7 @@ export function gatedAgent(
     lastText: () => agent.lastText(),
     abort: () => agent.abort(),
     closeTrace: (status) => agent.closeTrace(status),
-    dispose: () => agent.dispose(),
+    close: () => agent.close(),
   };
 }
 

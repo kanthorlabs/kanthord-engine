@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { unusedHostTools } from "./test-support.ts";
 import { test, type TestContext } from "node:test";
 import type {
   BashOperations,
@@ -16,7 +15,11 @@ import {
   spawnedPids,
   survivingProcesses,
 } from "../../agent/test-support.ts";
-import { childEnvironment, sessionTools, ToolProcesses } from "./tool-table.ts";
+import { sessionTools, ToolProcesses } from "../../agent/tool-table.ts";
+import { childEnvironment } from "../../agent/environment.ts";
+import { evidenceUploadTool } from "../../agent/capabilities/execution-evidence.ts";
+import { linkUpdateListTool } from "../../agent/capabilities/link-updates.ts";
+import { unusedHostTools } from "./test-support.ts";
 import { HOST_TOOL_PARAMETERS } from "../../agent/catalog.ts";
 import { HostTool } from "../contract.ts";
 
@@ -81,15 +84,12 @@ test("child environment removes provider keys and bash timeout stays below the b
   });
   const cwd = temporary(t);
   const tools = (executionBudget: ExecutionBudget) =>
-    sessionTools(
-      mockPi,
-      "swe@1",
+    sessionTools(mockPi, "swe@1", {
       cwd,
-      executionBudget,
-      unusedHostTools,
-      hostEnvironment(),
-      recording,
-    );
+      budget: executionBudget,
+      env: hostEnvironment(),
+      processes: recording,
+    });
   await runBash(tools(budget), "true", 3600);
   const maximumSeconds = 4;
   assert.ok(recording.timeout! <= maximumSeconds);
@@ -113,27 +113,21 @@ test("child environment removes provider keys and bash timeout stays below the b
   await runBash(tools(long), "true", MODEL_TIMEOUT_SECONDS);
   assert.equal(recording.timeout, MODEL_TIMEOUT_SECONDS);
   assert.deepEqual(
-    sessionTools(
-      pi,
-      "re@1",
+    sessionTools(pi, "re@1", {
       cwd,
       budget,
-      unusedHostTools,
-      hostEnvironment(),
-      recording,
-    ).customTools,
+      env: hostEnvironment(),
+      processes: recording,
+    }).customTools,
     [],
   );
   const processes = new ToolProcesses(pi.getShellConfig());
-  const real = sessionTools(
-    mockPi,
-    "swe@1",
+  const real = sessionTools(mockPi, "swe@1", {
     cwd,
     budget,
-    unusedHostTools,
-    hostEnvironment(),
+    env: hostEnvironment(),
     processes,
-  );
+  });
   await runBash(real, "true");
   const output = await captured!.operations!.exec(
     'test -z "$ANTHROPIC_API_KEY"',
@@ -145,7 +139,7 @@ test("child environment removes provider keys and bash timeout stays below the b
   assert.equal(processes.take(TOOL_CALL), undefined);
 });
 
-test("sessionTools of swe@1 holds both host tools under their own names and re@1 holds none", async (t) => {
+test("sessionTools of swe@1 names both host tools in the tools option and holds none in customTools, and re@1 names none", async (t) => {
   const pi = await loadPi();
   const processes = new ToolProcesses(pi.getShellConfig());
   const now = Date.now();
@@ -155,21 +149,23 @@ test("sessionTools of swe@1 holds both host tools under their own names and re@1
     resource_budget: { wall_time_ms: 5000 },
   });
   const tools = (agent: string) =>
-    sessionTools(
-      pi,
-      agent,
-      temporary(t),
+    sessionTools(pi, agent, {
+      cwd: temporary(t),
       budget,
-      unusedHostTools,
-      hostEnvironment(),
+      env: hostEnvironment(),
       processes,
-    );
+    });
   const names = Object.values(HostTool);
   const swe = tools("swe@1");
   for (const name of names) assert.ok(swe.allowlist.includes(name), name);
-  const hosts = swe.customTools.filter((tool) =>
-    (names as string[]).includes(tool.name),
+  assert.deepEqual(
+    swe.customTools.filter((tool) => (names as string[]).includes(tool.name)),
+    [],
   );
+  const hosts = [
+    evidenceUploadTool(unusedHostTools),
+    linkUpdateListTool(unusedHostTools),
+  ];
   assert.deepEqual(hosts.map((tool) => tool.name).sort(), [...names].sort());
   for (const tool of hosts)
     assert.deepEqual(
@@ -194,15 +190,12 @@ test("bash records the requested and the applied timeout once and records nothin
       resource_budget: { wall_time_ms: wallTimeMs },
     });
   const tools = (executionBudget: ExecutionBudget) =>
-    sessionTools(
-      pi,
-      "swe@1",
+    sessionTools(pi, "swe@1", {
       cwd,
-      executionBudget,
-      unusedHostTools,
-      hostEnvironment(),
+      budget: executionBudget,
+      env: hostEnvironment(),
       processes,
-    );
+    });
   const long = budget(COMMAND_LIMIT_MS * 2, now);
   const limitSeconds = COMMAND_LIMIT_MS / MILLISECONDS_PER_SECOND - 1;
   const requestedSeconds = COMMAND_LIMIT_MS;
@@ -238,15 +231,12 @@ async function killedBashCall(
     expired_at: now + COMMAND_LIMIT_MS,
     resource_budget: { wall_time_ms: COMMAND_LIMIT_MS },
   });
-  const [bash] = sessionTools(
-    pi,
-    "swe@1",
+  const [bash] = sessionTools(pi, "swe@1", {
     cwd,
     budget,
-    unusedHostTools,
-    hostEnvironment(),
-    new ToolProcesses(pi.getShellConfig()),
-  ).customTools;
+    env: hostEnvironment(),
+    processes: new ToolProcesses(pi.getShellConfig()),
+  }).customTools;
   const failure: Error = await bash!
     .execute(
       TOOL_CALL,

@@ -32,11 +32,7 @@ import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { background, CancellationContext } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { createIdentity } from "../../kernel/identity.ts";
-import {
-  hostEnvironment,
-  stopAfter,
-  temporary,
-} from "../../kernel/test-support.ts";
+import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import { openNativeAgent, promptStop } from "./native-agent.ts";
 import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import { CodedError } from "../../kernel/errors.ts";
@@ -56,6 +52,8 @@ import {
   SETUP_PROMPT,
   TEST_SSH_HOST_KEY,
   TEST_SSH_PUBLIC_KEY,
+  testSessions,
+  workspaceRequest,
 } from "./test-support.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import {
@@ -141,38 +139,34 @@ async function fixture(
     options.sessionRoot === false
       ? undefined
       : (options.sessionRoot ?? temporary(t));
+  const knownSecrets = credentialSecrets(credentials, "anthropic");
+  const budget = new ExecutionBudget({
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    resource_budget: setup.resource_budget,
+  });
   const agent = await openNativeAgent({
-    spans,
-    sessionRoot,
-    hostTools,
-    setup,
-    claim: {
-      execution_id: setup.execution_id,
-      node_id: NODE,
-      created_at: Date.now(),
-      expired_at: Date.now() + 60000,
-    },
-    intent: options.intent ?? ExecutionIntent.Implement,
-    agent: setup.agents[0]!,
-    credential: {
-      credential_id: setup.agents[0]!.credential_id,
-      provider_id: "anthropic",
-      store: credentials,
-    },
-    knownSecrets: credentialSecrets(credentials, "anthropic"),
-    budget: new ExecutionBudget({
-      created_at: Date.now(),
-      expired_at: Date.now() + 60000,
-      resource_budget: setup.resource_budget,
+    sessions: testSessions({
+      credential: {
+        credential_id: setup.agents[0]!.credential_id,
+        provider_id: "anthropic",
+        store: credentials,
+      },
+      modelRuntimeFactory: scriptedModelRuntime(provider),
+      knownSecrets,
+      budget,
+      hostHome,
+      hostTools,
+      spans,
+      sessionRoot,
     }),
-    workspace,
-    hostHome,
-    env: hostEnvironment(),
-    modelRuntimeFactory: scriptedModelRuntime(provider),
+    request: workspaceRequest(setup, setup, workspace),
+    knownSecrets,
+    budget,
     context,
     turnCheck: options.turnCheck && (() => options.turnCheck!(context)),
   });
-  stopAfter(t, () => agent.dispose());
+  stopAfter(t, () => agent.close());
   return {
     agent,
     provider,
@@ -243,14 +237,14 @@ test("native software agent writes and runs bounded bash with execution credenti
 test("dispose ends the agent.session span once with the entry count", async (t) => {
   const h = await fixture(t, [fauxAssistantMessage("done")]);
   await h.agent.prompt(WORK);
-  h.agent.dispose();
+  await h.agent.close();
   const [end] = sessionEnds(h);
   assert.equal(sessionEnds(h).length, SINGLE_CALL_COUNT);
   assert.equal(end?.status, SpanStatus.Ok);
   assert.ok(
     Number(end?.attributes?.["kanthord.session.entry_count"]) > NO_ENTRIES,
   );
-  h.agent.dispose();
+  await h.agent.close();
   assert.equal(sessionEnds(h).length, SINGLE_CALL_COUNT);
 });
 
@@ -259,7 +253,7 @@ test("closeTrace ends the agent.session span with its status and dispose writes 
   await h.agent.prompt(WORK);
   h.agent.closeTrace(SpanStatus.Error);
   h.agent.closeTrace(SpanStatus.Ok);
-  h.agent.dispose();
+  await h.agent.close();
   assert.equal(sessionEnds(h).length, SINGLE_CALL_COUNT);
   assert.equal(sessionEnds(h)[0]?.status, SpanStatus.Error);
 });
@@ -704,7 +698,7 @@ test("native parent cancellation aborts an active tool and disposal refuses reus
   h.context.cancel();
   await pending;
   assert.equal(h.provider.calls.length, SINGLE_CALL_COUNT);
-  h.agent.dispose();
+  await h.agent.close();
   await assert.rejects(h.agent.prompt(WORK));
   await assert.rejects(
     h.agent.instruct(WORK, "judge", PromptTemplate.Evaluation),
