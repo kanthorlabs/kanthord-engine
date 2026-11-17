@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { credentialSecrets } from "../../agent/hooks/sensitive-text-redaction.ts";
-import { unusedHostTools } from "../../worker/test-support.ts";
 import {
   existsSync,
   mkdirSync,
@@ -38,7 +37,6 @@ import {
   WorkPullKind,
 } from "../../scheduler/contract.ts";
 import {
-  ExecutionIntent,
   type RepositoryTransport,
   workerOperations,
 } from "../../worker/contract.ts";
@@ -63,6 +61,8 @@ import {
   remapOrigin,
   scriptedModelRuntime,
   scriptedProvider,
+  testSessions,
+  workspaceRequest,
 } from "../../worker/unit/test-support.ts";
 import { environment, kanthord } from "./cli-test-support.ts";
 import {
@@ -455,32 +455,36 @@ test(
       tool("read", { path: "hello.txt" }),
       fauxAssistantMessage("done"),
     ]);
+    const agentSecrets = credentialSecrets(
+      runtimeX.credentials.store,
+      runtimeX.item.provider_id,
+    );
+    const agentBudget = new ExecutionBudget({
+      ...x.execution,
+      resource_budget: runtimeX.setup.resource_budget,
+    });
     const agent = await openNativeAgent({
-      hostTools: unusedHostTools,
-      setup: runtimeX.setup,
-      claim: x.execution,
-      intent: ExecutionIntent.Implement,
-      agent: runtimeX.setup.agents[0]!,
-      credential: {
-        credential_id: runtimeX.item.credential_id,
-        provider_id: runtimeX.item.provider_id,
-        store: runtimeX.credentials.store,
-      },
-      knownSecrets: credentialSecrets(
-        runtimeX.credentials.store,
-        runtimeX.item.provider_id,
-      ),
-      budget: new ExecutionBudget({
-        ...x.execution,
-        resource_budget: runtimeX.setup.resource_budget,
+      sessions: testSessions({
+        credential: {
+          credential_id: runtimeX.item.credential_id,
+          provider_id: runtimeX.item.provider_id,
+          store: runtimeX.credentials.store,
+        },
+        modelRuntimeFactory: scriptedModelRuntime(provider),
+        knownSecrets: agentSecrets,
+        budget: agentBudget,
+        hostHome,
       }),
-      workspace: prepared.directory,
-      hostHome,
-      env: hostEnvironment(),
-      modelRuntimeFactory: scriptedModelRuntime(provider),
+      request: workspaceRequest(
+        runtimeX.setup,
+        x.execution,
+        prepared.directory,
+      ),
+      knownSecrets: agentSecrets,
+      budget: agentBudget,
       context: background,
     });
-    stopAfter(t, () => agent.dispose());
+    stopAfter(t, () => agent.close());
     await t.test(
       "E07.5 layered inference and execution credentials",
       async () => {
@@ -633,29 +637,29 @@ test(
         tool("read", { path: "AGENTS.md" }),
         tool("read", { path: "AGENTS.md" }),
       ]);
+      const labAgentSecrets = credentialSecrets(
+        runtimeY.credentials.store,
+        runtimeY.item.provider_id,
+      );
+      const labAgentBudget = new ExecutionBudget({
+        ...y.execution,
+        resource_budget: runtimeY.setup.resource_budget,
+      });
       const labAgent = await openNativeAgent({
-        hostTools: unusedHostTools,
-        setup: runtimeY.setup,
-        claim: y.execution,
-        intent: ExecutionIntent.Implement,
-        agent: runtimeY.setup.agents[0]!,
-        credential: {
-          credential_id: runtimeY.item.credential_id,
-          provider_id: runtimeY.item.provider_id,
-          store: runtimeY.credentials.store,
-        },
-        knownSecrets: credentialSecrets(
-          runtimeY.credentials.store,
-          runtimeY.item.provider_id,
-        ),
-        budget: new ExecutionBudget({
-          ...y.execution,
-          resource_budget: runtimeY.setup.resource_budget,
+        sessions: testSessions({
+          credential: {
+            credential_id: runtimeY.item.credential_id,
+            provider_id: runtimeY.item.provider_id,
+            store: runtimeY.credentials.store,
+          },
+          modelRuntimeFactory: scriptedModelRuntime(fake),
+          knownSecrets: labAgentSecrets,
+          budget: labAgentBudget,
+          hostHome,
         }),
-        workspace: lab.directory,
-        hostHome,
-        env: hostEnvironment(),
-        modelRuntimeFactory: scriptedModelRuntime(fake),
+        request: workspaceRequest(runtimeY.setup, y.execution, lab.directory),
+        knownSecrets: labAgentSecrets,
+        budget: labAgentBudget,
         context: background,
       });
       try {
@@ -667,7 +671,7 @@ test(
         assert.equal(fake.calls.length, SINGLE_CALL);
         assert.equal(turns.mock.callCount(), SINGLE_TURN);
       } finally {
-        labAgent.dispose();
+        await labAgent.close();
         root.release(root.nodeKey(y.execution.node_id), WorkspaceKind.Node);
       }
     });

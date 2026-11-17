@@ -770,7 +770,11 @@ test("a later gate sees the unchanged marker of a read path", async (t) => {
     },
   } as unknown as ExtensionAPI;
   (redaction.restore as (pi: ExtensionAPI) => void)(api);
-  (checkoutConfinement(root) as (pi: ExtensionAPI) => void)(api);
+  (
+    checkoutConfinement({ cwd: root, roots: [root] }) as (
+      pi: ExtensionAPI,
+    ) => void
+  )(api);
   const event = {
     type: "tool_call",
     toolCallId: "c",

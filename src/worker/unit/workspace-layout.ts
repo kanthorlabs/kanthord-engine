@@ -6,7 +6,7 @@ export const CHECKOUTS_DIRECTORY = "checkouts";
 export const RELEASE_DIRECTORY = "release";
 export const BASE_DIRECTORY = "base";
 export const REVIEW_DIRECTORY = "review";
-export const EVIDENCE_DIRECTORY = "evidence";
+export { EVIDENCE_DIRECTORY } from "../../agent/review-roots.ts";
 export const SCRATCH_STORE_DIRECTORY = "scratch";
 
 export const WorkspaceKind = {

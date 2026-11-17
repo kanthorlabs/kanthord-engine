@@ -18,7 +18,7 @@ import {
 import { CodedError } from "../../kernel/errors.ts";
 import { ensureDirectory } from "../../kernel/files.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
-import { childEnvironment } from "./tool-table.ts";
+import { childEnvironment } from "../../agent/environment.ts";
 const EXPIRED = 0;
 const CLEAN_STATUS = "";
 const NO_CONFLICTS = 0;

@@ -513,6 +513,13 @@ export default tseslint.config(
                       "pi-tools",
                       "bash-process",
                       "agent-session",
+                      "agent-port",
+                      "capabilities/execution-evidence",
+                      "capabilities/host-tools",
+                      "capabilities/link-updates",
+                      "review-roots",
+                      "session-directory",
+                      "tool-table",
                       "environment",
                       "catalog",
                       "prompt-composer",
@@ -962,6 +969,27 @@ export default tseslint.config(
         threads: true,
         production: false,
       }),
+    },
+  },
+  {
+    files: ["src/agent/capabilities/**/*.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        ...syntaxRules,
+        ...["modelRegistry", "registerProvider"].flatMap((name) =>
+          [
+            `MemberExpression[property.name='${name}']`,
+            `MemberExpression[property.value='${name}']`,
+            `Property[key.name='${name}']`,
+            `Property[key.value='${name}']`,
+          ].map((selector) => ({
+            selector,
+            message:
+              "A capability reads no model registry and registers no provider.",
+          })),
+        ),
+      ],
     },
   },
   {

@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { readdirSync, rmSync } from "node:fs";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import { ensureDirectory } from "../../kernel/files.ts";
 import type { ExecutionBudget } from "./budget.ts";
 import type { ExecutionRun } from "./execution-run.ts";
 import {
+  type AgentOpenRequest,
   type AgentPort,
   type AgentSession,
   type CheckoutRef,
@@ -55,7 +56,6 @@ const NO_REFS: readonly string[] = [];
 const NO_TREES = 0;
 const MIN_DEADLINE_MS = 1;
 const PARENT = "..";
-const SINGLE_CHECKOUT = 1;
 const TREE_DELETED = "tree deleted";
 const UNKNOWN_ERROR = "unknown";
 
@@ -328,7 +328,7 @@ function releaseTreePort(input: HostInput, run: ExecutionRun): ReleaseTreePort {
   };
 }
 
-export type AgentOpener = (workspace: string) => Promise<NativeAgent>;
+export type AgentOpener = (request: AgentOpenRequest) => Promise<NativeAgent>;
 
 export interface AgentHost {
   run: ExecutionRun;
@@ -336,32 +336,23 @@ export interface AgentHost {
   open: AgentOpener;
 }
 
-function checkoutsRootOf(checkouts: readonly CheckoutRef[]): string {
-  const [first] = checkouts;
-  assert.ok(first);
-  return checkouts.length > SINGLE_CHECKOUT
-    ? dirname(first.directory)
-    : first.directory;
-}
-
 async function openedNode(
   host: AgentHost,
-  checkouts: readonly CheckoutRef[],
+  request: AgentOpenRequest,
 ): Promise<PortResult<AgentSession>> {
   try {
-    return ok(await host.open(checkoutsRootOf(checkouts)));
+    return ok(await host.open(request));
   } catch (error) {
     return host.run.failureOf(error);
   }
 }
 
-export function agentPort(host: AgentHost): AgentPort {
+export function agentOpenPort(host: AgentHost): AgentPort {
   return {
     async open(request) {
-      const workspace = request.reviewWorkspace;
-      if (workspace === null) return openedNode(host, request.checkouts);
+      if (request.reviewWorkspace === null) return openedNode(host, request);
       try {
-        return ok(await host.open(workspace.directory));
+        return ok(await host.open(request));
       } catch (error) {
         if (
           endedByBudget(
@@ -420,7 +411,7 @@ export function evaluationPorts(host: AgentHost): EvaluationPorts {
   return {
     ...commonPorts(host.run),
     evidence: evidencePort(host.run),
-    agent: agentPort(host),
+    agent: agentOpenPort(host),
     dependencies: dependencyPort(host),
   };
 }
@@ -429,7 +420,7 @@ export function examinePorts(host: AgentHost): ExaminePorts {
   return {
     ...commonPorts(host.run),
     evidence: evidencePort(host.run),
-    agent: agentPort(host),
+    agent: agentOpenPort(host),
     dependencies: dependencyPort(host),
   };
 }
@@ -438,7 +429,7 @@ export function implementHostPorts(
   input: HostInput,
   host: AgentHost,
 ): ImplementHostPorts {
-  return { ...workerPorts(input, host.run), agent: agentPort(host) };
+  return { ...workerPorts(input, host.run), agent: agentOpenPort(host) };
 }
 
 export function workerPorts(

@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type {
   AgentSession,
+  AgentSessionRuntime,
+  CreateAgentSessionRuntimeFactory,
   InlineExtension,
   ModelRuntime,
+  ResourceLoader,
   SessionManager,
+  SettingsManager,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
@@ -13,7 +17,7 @@ import {
   cancelled,
   type Context,
 } from "../kernel/context.ts";
-import { loadPi, piAgentDirectory } from "./pi.ts";
+import { loadPi, piAgentDirectory, type PiCodingAgent } from "./pi.ts";
 import { homeRelativeCwd } from "./hooks/home-relative-cwd.ts";
 import {
   type KnownSecrets,
@@ -72,13 +76,18 @@ export interface OpenSessionInput {
 export type SessionRedactionInput =
   { knownSecrets: KnownSecrets } | { redaction: SensitiveTextRedaction };
 
-export async function openSession(
-  input: OpenSessionInput & SessionRedactionInput,
-): Promise<{
-  session: AgentSession;
+interface SessionParts {
+  pi: PiCodingAgent;
+  settingsManager: SettingsManager;
+  sessionManager: SessionManager;
   redaction: SensitiveTextRedaction;
   systemPrompt: string;
-}> {
+  resourceLoader: ResourceLoader;
+}
+
+async function sessionParts(
+  input: OpenSessionInput & SessionRedactionInput,
+): Promise<SessionParts> {
   assert.ok(input.cwd);
   assert.ok(input.hostHome);
   assert.ok(input.systemPrompt);
@@ -119,8 +128,26 @@ export async function openSession(
     ],
   });
   await withDeadline(resourceLoader.reload(), input.context);
+  return {
+    pi,
+    settingsManager,
+    sessionManager,
+    redaction,
+    systemPrompt,
+    resourceLoader,
+  };
+}
+
+export async function openSession(
+  input: OpenSessionInput & SessionRedactionInput,
+): Promise<{
+  session: AgentSession;
+  redaction: SensitiveTextRedaction;
+  systemPrompt: string;
+}> {
+  const parts = await sessionParts(input);
   const { session } = await withDeadline(
-    pi.createAgentSession({
+    parts.pi.createAgentSession({
       cwd: input.cwd,
       agentDir: piAgentDirectory(),
       modelRuntime: input.modelRuntime,
@@ -128,12 +155,102 @@ export async function openSession(
       thinkingLevel: input.thinkingLevel,
       tools: input.allowlist,
       customTools: input.customTools,
-      resourceLoader,
-      sessionManager,
-      settingsManager,
+      resourceLoader: parts.resourceLoader,
+      sessionManager: parts.sessionManager,
+      settingsManager: parts.settingsManager,
     }),
     input.context,
     ({ session }) => session.dispose(),
   );
-  return { session, redaction, systemPrompt };
+  return {
+    session,
+    redaction: parts.redaction,
+    systemPrompt: parts.systemPrompt,
+  };
+}
+
+export interface OpenedRuntime {
+  runtime: AgentSessionRuntime;
+  redaction: SensitiveTextRedaction;
+  systemPrompt: string;
+}
+
+function runtimeFactory(
+  input: OpenSessionInput,
+  parts: SessionParts,
+): CreateAgentSessionRuntimeFactory {
+  return async (options) => {
+    const services = {
+      cwd: options.cwd,
+      agentDir: options.agentDir,
+      modelRuntime: input.modelRuntime,
+      settingsManager: parts.settingsManager,
+      resourceLoader: parts.resourceLoader,
+      diagnostics: [],
+    };
+    const created = await parts.pi.createAgentSessionFromServices({
+      services,
+      sessionManager: options.sessionManager,
+      model: input.model,
+      thinkingLevel: input.thinkingLevel,
+      tools: input.allowlist,
+      customTools: input.customTools,
+    });
+    return { ...created, services, diagnostics: [] };
+  };
+}
+
+export async function closeRuntime(
+  runtime: AgentSessionRuntime,
+  cleanup: CancellationContext,
+): Promise<void> {
+  const ended = runtime.session
+    .abort()
+    .then(() => runtime.dispose())
+    .then(
+      () => true,
+      () => false,
+    );
+  try {
+    const disposed = await Promise.race([
+      ended,
+      cancelled(cleanup.signal).then(() => false),
+    ]);
+    if (!disposed) runtime.session.dispose();
+  } finally {
+    cleanup.cancel();
+  }
+}
+
+function setupCleanup(parent: Context): CancellationContext {
+  return new CancellationContext(
+    parent,
+    Date.now() + RUNTIME_SETUP_DEADLINE_MS,
+  );
+}
+
+export async function openSessionRuntime(
+  input: OpenSessionInput & SessionRedactionInput,
+): Promise<OpenedRuntime> {
+  const parts = await sessionParts(input);
+  const runtime = await withDeadline(
+    parts.pi.createAgentSessionRuntime(runtimeFactory(input, parts), {
+      cwd: input.cwd,
+      agentDir: piAgentDirectory(),
+      sessionManager: parts.sessionManager,
+    }),
+    input.context,
+    (late) => void closeRuntime(late, setupCleanup(input.context)),
+  );
+  try {
+    await withDeadline(runtime.session.bindExtensions({}), input.context);
+  } catch (error) {
+    await closeRuntime(runtime, setupCleanup(input.context));
+    throw error;
+  }
+  return {
+    runtime,
+    redaction: parts.redaction,
+    systemPrompt: parts.systemPrompt,
+  };
 }

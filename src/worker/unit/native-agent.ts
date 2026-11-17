@@ -3,29 +3,25 @@ import assert from "node:assert/strict";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type { CancellationContext, Context } from "../../kernel/context.ts";
-import type {
-  AgentSetup,
-  ExecutionIntent,
-  ExecutionSetup,
-  HostTools,
-} from "../contract.ts";
+import type { Context } from "../../kernel/context.ts";
 import type { ExecutionBudget } from "./budget.ts";
 import { digest, type WorkPrompt } from "../../agent/prompt-composer.ts";
-import { PromptTemplate, type PromptTemplates } from "../../agent/contract.ts";
-import { openSession, withDeadline } from "../../agent/agent-session.ts";
+import { PromptTemplate } from "../../agent/contract.ts";
+import type {
+  PortSession,
+  SessionOpenRequest,
+  SessionPort,
+  SessionTrace,
+  SessionTraceFactory,
+  SessionTraceStart,
+} from "../../agent/agent-port.ts";
 import {
   type KnownSecrets,
   redactionSummary,
   type SensitiveTextRedaction,
 } from "../../agent/hooks/sensitive-text-redaction.ts";
-import { countTurns, pinnedLayers } from "../../agent/pinned-layers.ts";
-import { loadPi } from "../../agent/pi.ts";
-import { sessionTools, ToolProcesses } from "./tool-table.ts";
-import type {
-  ExecutionCredential,
-  ModelRuntimeFactory,
-} from "./model-runtime.ts";
+import { countTurns } from "../../agent/pinned-layers.ts";
+import type { ExecutionSetup } from "../contract.ts";
 import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import { providerFailureOf } from "../../llm/provider-failure.ts";
 import { redactReason, thrownReason } from "../../kernel/probe.ts";
@@ -38,33 +34,21 @@ import {
   SpanOperation,
   type SpanRecorder,
 } from "./telemetry.ts";
-import { executionSessionDirectory } from "./session-store.ts";
 import { PINNED_CONTEXT_TYPE, PinnedContextPart } from "./session-entries.ts";
 
 const REASONING_EFFORT_ATTRIBUTE = "kanthord.agent.reasoning_effort";
 
+export interface NativeOpenRequest extends SessionOpenRequest {
+  setup: Pick<ExecutionSetup, "agents" | "execution_id" | "templates">;
+}
+
 export interface NativeAgentInput {
-  setup: ExecutionSetup;
-  claim: {
-    execution_id: string;
-    node_id: string;
-    created_at: number;
-    expired_at: number;
-  };
-  intent: ExecutionIntent;
-  agent: AgentSetup;
-  credential: ExecutionCredential;
-  knownSecrets: KnownSecrets;
+  sessions: SessionPort<NativeTrace>;
+  request: NativeOpenRequest;
   budget: ExecutionBudget;
-  workspace: string;
-  hostHome: string;
-  env: NodeJS.ProcessEnv;
-  modelRuntimeFactory: ModelRuntimeFactory;
-  hostTools: HostTools;
+  knownSecrets: KnownSecrets;
   context: Context;
   turnCheck?: () => Promise<void>;
-  spans?: SpanRecorder;
-  sessionRoot?: string;
 }
 export interface TurnPrompt {
   template: PromptTemplate;
@@ -104,9 +88,14 @@ async function providerFailure(
   );
 }
 
-interface SessionTrace {
-  watch(finish: () => number, redaction: SensitiveTextRedaction): void;
-  end(status: SpanStatus): void;
+interface TraceWatch {
+  secrets: readonly string[];
+  refreshSecrets: KnownSecrets;
+  promptOf: () => TurnPrompt | null;
+}
+
+export interface NativeTrace extends SessionTrace {
+  watch(opened: PortSession<NativeTrace>, tracing: TraceWatch): void;
 }
 
 function redactionAttributes(redaction: SensitiveTextRedaction): Attributes {
@@ -117,45 +106,80 @@ function redactionAttributes(redaction: SensitiveTextRedaction): Attributes {
   );
 }
 
-function sessionTrace(spans: SpanRecorder, spanId: string): SessionTrace {
-  let open = true;
-  let finish: () => Attributes = () => ({});
+function sessionAttributes(
+  start: SessionTraceStart,
+  sessionId: string,
+): Attributes {
+  const { agent } = start;
   return {
-    watch(next, redaction) {
-      finish = () => ({
-        "kanthord.session.entry_count": next(),
-        ...redactionAttributes(redaction),
-      });
-    },
-    end(status) {
-      if (!open) return;
-      open = false;
-      spans.end(spanId, { status, attributes: finish() });
-    },
+    "gen_ai.operation.name": "invoke_agent",
+    "gen_ai.conversation.id": sessionId,
+    "gen_ai.agent.name": agent.agent_name,
+    "kanthord.agent.name": agent.agent_name,
+    "kanthord.agent.chain_position": agent.position,
+    "kanthord.agent.chain_level": agent.level,
+    "gen_ai.request.model": agent.effective_configuration.model_identifier,
+    [REASONING_EFFORT_ATTRIBUTE]:
+      agent.effective_configuration.reasoning_effort,
+    "kanthord.session.format": SessionFormat.Pi,
+    "kanthord.session.format_version": start.formatVersion,
+  };
+}
+
+export function nativeSessionTrace(
+  spans: SpanRecorder | undefined,
+): SessionTraceFactory<NativeTrace> {
+  return (start) => {
+    if (!spans) return null;
+    const key = spans.key("session");
+    const sessionId = spans.spanIdOf(key);
+    spans.start({
+      key,
+      operation: SpanOperation.Session,
+      attributes: sessionAttributes(start, sessionId),
+    });
+    let open = true;
+    let finish: () => Attributes = () => ({});
+    return {
+      sessionId,
+      watch(opened, tracing) {
+        const entries = traceAgent(opened.session, spans, start.agent, {
+          sessionId,
+          ...tracing,
+          processes: opened.processes,
+        });
+        finish = () => ({
+          "kanthord.session.entry_count": entries(),
+          ...redactionAttributes(opened.redaction),
+        });
+      },
+      end(status) {
+        if (!open) return;
+        open = false;
+        spans.end(sessionId, { status, attributes: finish() });
+      },
+    };
   };
 }
 
 function nativeAgent(
-  opened: AgentSession,
-  pins: ReturnType<typeof pinnedLayers>,
-  budget: ExecutionBudget,
-  context: CancellationContext,
-  turnCheck: () => Promise<void>,
-  trace: SessionTrace | undefined,
-  secrets: KnownSecrets,
-  redaction: SensitiveTextRedaction,
-  templates: PromptTemplates,
+  opened: PortSession<NativeTrace>,
+  input: NativeAgentInput,
   record: (sent: TurnPrompt) => void,
 ): NativeAgent {
+  const { budget, knownSecrets: secrets } = input;
+  const { context, pins, redaction, trace } = opened;
+  const { templates } = input.request.setup;
+  const turnCheck = input.turnCheck ?? (async () => {});
   const recordSend = (work: WorkPrompt, template: PromptTemplate) =>
     record({
       template,
       template_digest: digest(templates[template]),
       work_digest: work.digest,
     });
-  let session: AgentSession | null = opened;
-  const finishTurn = opened.agent.finishTurn;
-  opened.agent.finishTurn = async (turn, signal) => {
+  let session: AgentSession | null = opened.session;
+  const finishTurn = opened.session.agent.finishTurn;
+  opened.session.agent.finishTurn = async (turn, signal) => {
     if (budget.exhaustedAfterTurn()) return { action: "end" };
     try {
       await turnCheck();
@@ -177,7 +201,7 @@ function nativeAgent(
     const failed = await providerFailure(session.messages, secrets);
     if (failed) throw failed;
   };
-  let unsubscribeTurns: (() => void) | null = countTurns(opened, () => {
+  let unsubscribeTurns: (() => void) | null = countTurns(opened.session, () => {
     budget.turnEnded();
     if (budget.exhausted()) void session?.abort();
   });
@@ -211,15 +235,14 @@ function nativeAgent(
     closeTrace(status) {
       if (session) trace?.end(status);
     },
-    dispose() {
+    async close() {
       if (session) trace?.end(SpanStatus.Ok);
       unsubscribeTurns?.();
       cancellation?.[Symbol.dispose]();
       unsubscribeTurns = null;
       cancellation = null;
-      context.cancel();
-      session?.dispose();
       session = null;
+      await opened.close();
     },
   };
 }
@@ -237,132 +260,28 @@ function appendPinnedContext(session: AgentSession): void {
   });
 }
 
-type PiRuntime = Awaited<ReturnType<typeof loadPi>>;
-
-interface StartedSessionTrace {
-  sessionId: string | undefined;
-  trace: SessionTrace | undefined;
-}
-
-function startSessionTrace(
-  input: NativeAgentInput,
-  pi: PiRuntime,
-): StartedSessionTrace {
-  if (!input.spans) return { sessionId: undefined, trace: undefined };
-  const key = input.spans.key("session");
-  const sessionId = input.spans.spanIdOf(key);
-  input.spans.start({
-    key,
-    operation: SpanOperation.Session,
-    attributes: {
-      "gen_ai.operation.name": "invoke_agent",
-      "gen_ai.conversation.id": sessionId,
-      "gen_ai.agent.name": input.agent.agent_name,
-      "kanthord.agent.name": input.agent.agent_name,
-      "kanthord.agent.chain_position": input.agent.position,
-      "kanthord.agent.chain_level": input.agent.level,
-      "gen_ai.request.model":
-        input.agent.effective_configuration.model_identifier,
-      [REASONING_EFFORT_ATTRIBUTE]:
-        input.agent.effective_configuration.reasoning_effort,
-      "kanthord.session.format": SessionFormat.Pi,
-      "kanthord.session.format_version": pi.CURRENT_SESSION_VERSION,
-    },
-  });
-  return { sessionId, trace: sessionTrace(input.spans, sessionId) };
-}
-
 export async function openNativeAgent(
   input: NativeAgentInput,
 ): Promise<NativeAgent> {
-  assert.equal(input.claim.execution_id, input.setup.execution_id);
-  assert.equal(input.credential.credential_id, input.agent.credential_id);
-  const budget = input.budget;
-  const context = budget.agentContext(input.context);
-  let session: AgentSession | undefined;
-  let trace: SessionTrace | undefined;
+  const { request } = input;
+  assert.equal(request.claim.execution_id, request.setup.execution_id);
   const secrets = input.knownSecrets;
+  const opened = await input.sessions.open(request, input.context);
   let sent: TurnPrompt | null = null;
   try {
-    await secrets();
-    const { runtime, model } = await withDeadline(
-      input.modelRuntimeFactory({
-        credential: input.credential,
-        agent: input.agent,
-        signal: context.signal,
-      }),
-      context,
-    );
-    const pins = pinnedLayers();
-    const pi = await withDeadline(loadPi(), context);
-    const started = startSessionTrace(input, pi);
-    const { sessionId } = started;
-    trace = started.trace;
-    const options = sessionId === undefined ? {} : { id: sessionId };
-    const sessionManager = input.sessionRoot
-      ? pi.SessionManager.create(
-          input.workspace,
-          executionSessionDirectory(
-            input.sessionRoot,
-            input.claim.execution_id,
-          ),
-          options,
-        )
-      : pi.SessionManager.inMemory(input.workspace, options);
-    const processes = new ToolProcesses(pi.getShellConfig());
-    const opened = await openSession({
-      cwd: input.workspace,
-      modelRuntime: runtime,
-      model,
-      thinkingLevel: input.agent.effective_configuration.reasoning_effort,
-      systemPrompt: input.agent.prompt.final,
-      ...sessionTools(
-        pi,
-        input.agent.agent_name,
-        input.workspace,
-        budget,
-        input.hostTools,
-        input.env,
-        processes,
-      ),
-      hostHome: input.hostHome,
-      hooks: [pins.hook],
-      context,
-      sessionManager,
-      knownSecrets: secrets,
+    appendPinnedContext(opened.session);
+    if (opened.trace)
+      opened.trace.watch(opened, {
+        secrets: await secrets(),
+        refreshSecrets: secrets,
+        promptOf: () => sent,
+      });
+    return nativeAgent(opened, input, (prompt) => {
+      sent = prompt;
     });
-    session = opened.session;
-    pins.pinInference(session, opened.systemPrompt);
-    appendPinnedContext(session);
-    if (input.spans && sessionId !== undefined)
-      trace?.watch(
-        traceAgent(session, input.spans, input.agent, {
-          sessionId,
-          secrets: await secrets(),
-          refreshSecrets: secrets,
-          processes,
-          promptOf: () => sent,
-        }),
-        opened.redaction,
-      );
-    return nativeAgent(
-      session,
-      pins,
-      budget,
-      context,
-      input.turnCheck ?? (async () => {}),
-      trace,
-      secrets,
-      opened.redaction,
-      input.setup.templates,
-      (prompt) => {
-        sent = prompt;
-      },
-    );
   } catch (error) {
-    trace?.end(SpanStatus.Error);
-    session?.dispose();
-    context.cancel();
+    opened.trace?.end(SpanStatus.Error);
+    await opened.close();
     throw error;
   }
 }

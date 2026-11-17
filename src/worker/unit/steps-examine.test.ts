@@ -32,6 +32,7 @@ import { PoolClass } from "./tree-pool.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { RepositoryTransport } from "../contract.ts";
 import type { NativeAgent } from "./native-agent-session.ts";
+import type { AgentOpenRequest } from "./foundry-ports.ts";
 import { runStepsExamine } from "./steps-examine.ts";
 import {
   type CancellationContext,
@@ -482,8 +483,8 @@ test("an examine node with two repository bindings runs from checkouts/ and list
   } as unknown as RepositoryTransport;
   const opened: string[] = [];
   const texts: string[] = [];
-  const open = async (directory: string) => {
-    opened.push(directory);
+  const open = async (request: AgentOpenRequest) => {
+    opened.push(request.reviewWorkspace!.directory);
     return {
       instruct: async (work: { text: string }, text: string) => {
         texts.push(work.text, text);

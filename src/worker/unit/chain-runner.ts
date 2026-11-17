@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import type { CancellationContext } from "../../kernel/context.ts";
 import { BudgetLimit } from "../../scheduler/contract.ts";
 import type { ExecutionBudget } from "./budget.ts";
@@ -40,6 +41,7 @@ const UNKNOWN_PHASE = -1;
 export interface ChainIo<P extends CommonPorts = CommonPorts> {
   run: ExecutionRun;
   budget: ExecutionBudget;
+  capabilities?: readonly InlineExtension[];
   resources: AsyncDisposableStack;
   host: StepHost;
   ports: P;
@@ -162,7 +164,7 @@ function tasksEnd<P extends CommonPorts>(
   built: Chain<P>,
   walk: Walk<P>,
 ): Promise<FoundryEnd<unknown>> {
-  const { run, budget, host, ports } = walk.io;
+  const { run, budget, host, ports, capabilities = [] } = walk.io;
   assert.ok(built.tasks, "A tasks phase holds a tasks call.");
   return built.tasks.run(
     walk.ctx,
@@ -172,7 +174,7 @@ function tasksEnd<P extends CommonPorts>(
       until: null,
       env: childEnvironmentOf(host.env),
     },
-    { capabilities: [], ports },
+    { capabilities, ports },
   );
 }
 

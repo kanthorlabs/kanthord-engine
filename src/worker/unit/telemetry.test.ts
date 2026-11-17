@@ -18,7 +18,7 @@ import {
 } from "./telemetry.ts";
 import { AgentErrorType, traceAgent } from "./agent-telemetry.ts";
 import type { TurnPrompt } from "./native-agent.ts";
-import type { ToolTimeout } from "./tool-table.ts";
+import type { ToolTimeout } from "../../agent/tool-table.ts";
 import {
   environmentDigestsOf,
   taskEnd,
