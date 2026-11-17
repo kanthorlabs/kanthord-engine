@@ -67,6 +67,7 @@ import {
   WORKBENCH_OPENING_TEXT,
   WORKBENCH_QUEUE_LIMIT,
   WORKBENCH_REJECTION_REASON,
+  WORKBENCH_STREAM_TICK_MS,
   type WorkbenchConfiguration,
   WorkbenchErrorCode,
   WorkbenchGuardReason,
@@ -667,7 +668,6 @@ async function untilIdle(
 ): Promise<Entry[]> {
   const entries: Entry[] = [];
   let cursor = after;
-  let version: number | undefined;
   for (;;) {
     signal.throwIfAborted();
     const answer = completed(
@@ -676,7 +676,6 @@ async function untilIdle(
           params: { session_id: sessionId },
           query: {
             ...(cursor === undefined ? {} : { after: cursor }),
-            ...(version === undefined ? {} : { version }),
           },
           body: null,
         },
@@ -685,12 +684,12 @@ async function untilIdle(
     );
     entries.push(...answer.entries);
     cursor = (entries.at(-1)?.id as string | undefined) ?? cursor;
-    version = answer.version;
     if (
       !answer.snapshot.run_active &&
       answer.snapshot.queue.length === NO_QUEUED_MESSAGES
     )
       return entries;
+    await setImmediate();
   }
 }
 
@@ -1207,14 +1206,13 @@ async function untilApproval(
   sessionId: string,
   signal: AbortSignal,
 ) {
-  let version: number | undefined;
   for (;;) {
     signal.throwIfAborted();
     const answer = completed(
       await fixture.workbench["session.events"](
         {
           params: { session_id: sessionId },
-          query: version === undefined ? {} : { version },
+          query: {},
           body: null,
         },
         fixture.options,
@@ -1223,7 +1221,7 @@ async function untilApproval(
     if (answer.snapshot.pending_approval)
       return answer.snapshot.pending_approval;
     assert.ok(answer.snapshot.run_active);
-    version = answer.version;
+    await setImmediate();
   }
 }
 
@@ -1685,6 +1683,7 @@ test("(invariant guard) an approve one millisecond before the expiry runs the ca
     [false],
   );
   assert.equal(await criterionOf(fixture, nodeId), NEW_CRITERION);
+  t.mock.timers.tick(WORKBENCH_STREAM_TICK_MS);
   const before = await snapshotOf(fixture, sessionId);
   t.mock.timers.tick(wait);
   await setImmediate();
@@ -1705,6 +1704,7 @@ test("(invariant guard) an abort and then a full tick leave the version unchange
       fixture.options,
     ),
   );
+  t.mock.timers.tick(WORKBENCH_STREAM_TICK_MS);
   const before = await snapshotOf(fixture, sessionId);
   t.mock.timers.tick(fixture.config.workbench.approval_wait_ms);
   await setImmediate();

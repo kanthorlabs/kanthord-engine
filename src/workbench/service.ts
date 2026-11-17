@@ -140,6 +140,7 @@ import {
   evidenceReadTool,
 } from "./evidence.ts";
 import type { WorkbenchConfig } from "./config.ts";
+import { type FeedState, GuestFeed } from "./guest-feed.ts";
 import type { CreatedInvite, InviteItem, WorkbenchInvites } from "./invites.ts";
 import {
   createPhaseSession,
@@ -314,8 +315,6 @@ interface OpenSession {
   runError: string | null;
   agentErrorStale: boolean;
   queuedMessages: PendingMessage[];
-  waiters: Set<() => void>;
-  version: number;
   approvals: Map<string, Approval>;
   doneReports: Set<string>;
   evidenceGrants: Set<string>;
@@ -530,8 +529,6 @@ function newOpenSession(fields: SessionFields): OpenSession {
     ...IDLE_SESSION,
     queuedMessages: [],
     queue: Promise.resolve(),
-    waiters: new Set(),
-    version: 0,
     approvals: new Map(),
     doneReports: new Set(),
     evidenceGrants: new Set(),
@@ -577,6 +574,7 @@ export class WorkbenchService implements Service {
   private readonly dependencies: Dependencies;
   private readonly sessions = new Map<string, OpenSession>();
   private readonly finishedPhaseEntries = new Map<string, SessionEntry[]>();
+  private readonly feeds = new Map<string, GuestFeed>();
   private readonly loading = new Map<string, Promise<OpenSession>>();
   private readonly shutdown = new CancellationContext();
   private started = false;
@@ -1505,9 +1503,36 @@ export class WorkbenchService implements Service {
   }
 
   private notify(session: OpenSession): void {
-    const host = this.hostOf(session);
-    host.version++;
-    for (const wake of [...host.waiters]) wake();
+    if (this.shutdown.signal.aborted) return;
+    this.feedOf(this.hostOf(session)).notify();
+  }
+
+  private feedOf(host: OpenSession): GuestFeed {
+    const existing = this.feeds.get(host.id);
+    if (existing) return existing;
+    const feed = new GuestFeed({
+      entries: (after) =>
+        mergeEntries(
+          this.memberEntries(host, false),
+          parseCursor(after, host.id),
+        ),
+      state: () => this.feedState(host),
+    });
+    this.feeds.set(host.id, feed);
+    return feed;
+  }
+
+  private feedState(host: OpenSession): FeedState {
+    const active = this.runActive(host);
+    const running = this.runningMember(host);
+    const streaming = running.agent?.state.streamingMessage;
+    return {
+      run_active: active,
+      display_name: active ? displayNameOf(running.agentName) : null,
+      auto_mode: host.autoMode,
+      streaming:
+        streaming === undefined ? null : JSON.parse(JSON.stringify(streaming)),
+    };
   }
 
   private requireIdle(session: OpenSession): void {
@@ -1550,7 +1575,7 @@ export class WorkbenchService implements Service {
         parseCursor(after, host.id),
       ),
       snapshot: this.snapshot(host),
-      version: host.version,
+      version: this.feedOf(host).version,
     };
   }
 
@@ -1566,8 +1591,7 @@ export class WorkbenchService implements Service {
       context,
       Date.now() + WORKBENCH_EVENTS_WAIT_MS,
     );
-    const wake = () => window.cancel();
-    session.waiters.add(wake);
+    const unsubscribe = this.feedOf(session).subscribe(() => window.cancel());
     try {
       const current = await this.changes(session, after);
       if (current.entries.length || version !== current.version) return current;
@@ -1575,7 +1599,7 @@ export class WorkbenchService implements Service {
       await new Promise((resolve) => setImmediate(resolve));
       return await this.changes(session, after);
     } finally {
-      session.waiters.delete(wake);
+      unsubscribe();
       window.cancel();
     }
   }
@@ -2499,6 +2523,8 @@ export class WorkbenchService implements Service {
       this.closeAgent(session);
     }
     this.sessions.clear();
+    for (const feed of this.feeds.values()) feed.stop();
+    this.feeds.clear();
     this.finishedPhaseEntries.clear();
     return Promise.resolve(null);
   }

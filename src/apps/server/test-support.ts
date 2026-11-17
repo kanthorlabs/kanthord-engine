@@ -44,7 +44,7 @@ import {
   type Provider,
   type ProviderAuthInteraction,
 } from "@earendil-works/pi-ai";
-import { setTimeout as delay } from "node:timers/promises";
+import { setTimeout as delay, setImmediate } from "node:timers/promises";
 import { agentOperations } from "../../agent/contract.ts";
 import { loadPi } from "../../agent/pi.ts";
 import { scriptedProvider } from "../../agent/test-support.ts";
@@ -3324,7 +3324,6 @@ export async function untilSettled(
   sessionId: string,
   signal: AbortSignal,
 ) {
-  let version: number | undefined;
   const cursor = new Map<string, string>();
   for (;;) {
     signal.throwIfAborted();
@@ -3335,7 +3334,6 @@ export async function untilSettled(
           params: { session_id: sessionId },
           query: {
             ...(after.length ? { after: after.join(",") } : {}),
-            ...(version === undefined ? {} : { version }),
           },
           body: null,
         },
@@ -3347,7 +3345,7 @@ export async function untilSettled(
       return answer.snapshot.pending_approval;
     if (!answer.snapshot.run_active && !answer.snapshot.queue.length)
       return null;
-    version = answer.version;
+    await setImmediate();
   }
 }
 
