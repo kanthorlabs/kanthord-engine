@@ -11,19 +11,17 @@ const FOUNDRY_ENTRIES = [
   "src/worker/unit/foundry-examine.ts",
 ];
 const CONTRACT_FILE = "contract.ts";
+const FORBIDDEN_DIRECTORIES = [
+  "src/custody/",
+  "src/gateway/",
+  "src/apps/",
+  "src/repository/",
+];
+const ADMITTED_MODULES = ["src/repository/contract.ts"];
 const FORBIDDEN_MODULES = [
-  "src/repository/connector.ts",
-  "src/repository/index.ts",
-  "src/gateway/client.ts",
-  "src/gateway/direct-client.ts",
-  "src/gateway/client-result.ts",
   "src/worker/unit/method-clients.ts",
   "src/worker/unit/execution-run.ts",
-  "src/custody/execution-store.ts",
-  "src/custody/client.ts",
-  "src/custody/contract.ts",
   "src/worker/unit/tree-pool.ts",
-  "src/apps/worker/execution.ts",
   "src/worker/unit/worker-ports.ts",
   "src/worker/unit/chain-host.ts",
   "src/worker/unit/chain-runner.ts",
@@ -35,29 +33,57 @@ const FORBIDDEN_NAMES = [
   "hostToolsOf",
 ];
 
-function importsOf(file: string): string[] {
-  return ts
+interface Imports {
+  resolved: string[];
+  unresolved: string[];
+}
+
+function importsOf(file: string): Imports {
+  const targets = ts
     .preProcessFile(readFileSync(file, "utf8"), true, true)
     .importedFiles.map(({ fileName }) => fileName)
     .filter((specifier) => specifier.startsWith("."))
-    .map((specifier) => resolve(dirname(file), specifier))
-    .filter((target) => existsSync(target));
+    .map((specifier) => resolve(dirname(file), specifier));
+  return {
+    resolved: targets.filter((target) => existsSync(target)),
+    unresolved: targets.filter((target) => !existsSync(target)),
+  };
 }
 
-function foundryModules(): string[] {
+interface FoundryClosure {
+  modules: string[];
+  unresolved: string[];
+}
+
+function foundryClosure(): FoundryClosure {
   const reached = new Set(
     FOUNDRY_ENTRIES.map((entry) => resolve(ENGINE_ROOT, entry)),
   );
+  const unresolved: string[] = [];
   const queue = [...reached];
   for (let file = queue.shift(); file; file = queue.shift()) {
     if (basename(file) === CONTRACT_FILE) continue;
-    for (const target of importsOf(file))
+    const imports = importsOf(file);
+    unresolved.push(...imports.unresolved);
+    for (const target of imports.resolved)
       if (!reached.has(target)) {
         reached.add(target);
         queue.push(target);
       }
   }
-  return [...reached].map((file) => relative(ENGINE_ROOT, file)).sort();
+  const relativeOf = (file: string) => relative(ENGINE_ROOT, file);
+  return {
+    modules: [...reached].map(relativeOf).sort(),
+    unresolved: unresolved.map(relativeOf),
+  };
+}
+
+function forbidden(file: string): boolean {
+  if (ADMITTED_MODULES.includes(file)) return false;
+  return (
+    FORBIDDEN_MODULES.includes(file) ||
+    FORBIDDEN_DIRECTORIES.some((directory) => file.startsWith(directory))
+  );
 }
 
 function importedNames(file: string): string[] {
@@ -88,11 +114,9 @@ function importedNames(file: string): string[] {
 }
 
 test("no module of the Foundry imports a transport, a client, the execution run, the credential store, the custody contract, the tree pool or the host tools", () => {
-  const modules = foundryModules();
-  assert.deepEqual(
-    modules.filter((file) => FORBIDDEN_MODULES.includes(file)),
-    [],
-  );
+  const { modules, unresolved } = foundryClosure();
+  assert.deepEqual(unresolved, []);
+  assert.deepEqual(modules.filter(forbidden), []);
   assert.deepEqual(
     modules.flatMap((file) =>
       importedNames(file)

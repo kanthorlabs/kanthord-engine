@@ -4,12 +4,13 @@ import {
   type Chain,
   ChainId,
   type ChainNode,
+  type ChainTasks,
   stepNode,
 } from "./chain.ts";
 import { EndReason } from "./execution-stop.ts";
 import {
   evaluationTasksNodes,
-  foundryEvaluation,
+  runEvaluationTasks,
 } from "./foundry-evaluation.ts";
 import { EVALUATION_PORTS, type EvaluationPorts } from "./foundry-ports.ts";
 import { assessmentSubmit } from "./step-assessment-submit.ts";
@@ -33,6 +34,35 @@ export function evaluationPrepareNodes(): ChainNode[] {
   ];
 }
 
+function evaluationTasks(): ChainTasks<EvaluationPorts> {
+  const nodes = evaluationTasksNodes();
+  return {
+    name: "foundryEvaluation",
+    ports: EVALUATION_PORTS,
+    nodes,
+    async run(ctx, control, host) {
+      const end = await runEvaluationTasks(
+        nodes,
+        {
+          ...control,
+          claim: ctx.claim,
+          setup: ctx.setup,
+          revision: ctx.revision,
+          reviewWorkspace: ctx.reviewWorkspace,
+          testedInput: ctx.testedInput,
+          baseHead: ctx.baseHead,
+          setupFailure: ctx.setupFailure,
+          placed: ctx.placed,
+          reviewRound: ctx.reviewRound,
+        },
+        host,
+      );
+      Object.assign(ctx, end.result);
+      return end;
+    },
+  };
+}
+
 export function evaluationChain(): Chain<EvaluationPorts> {
   return chain<EvaluationPorts>(ChainId.Evaluation, EVALUATION_PORTS)
     .phase(Phase.Prepare)
@@ -40,30 +70,7 @@ export function evaluationChain(): Chain<EvaluationPorts> {
     .step(inputsReadAttemptEvidence)
     .step(inputsReadReviewRound)
     .nodes(evaluationPrepareNodes())
-    .tasks({
-      name: "foundryEvaluation",
-      ports: EVALUATION_PORTS,
-      nodes: evaluationTasksNodes(),
-      async run(ctx, control, host) {
-        const end = await foundryEvaluation(
-          {
-            ...control,
-            claim: ctx.claim,
-            setup: ctx.setup,
-            revision: ctx.revision,
-            reviewWorkspace: ctx.reviewWorkspace,
-            testedInput: ctx.testedInput,
-            baseHead: ctx.baseHead,
-            setupFailure: ctx.setupFailure,
-            placed: ctx.placed,
-            reviewRound: ctx.reviewRound,
-          },
-          host,
-        );
-        Object.assign(ctx, end.result);
-        return end;
-      },
-    })
+    .tasks(evaluationTasks())
     .phase(Phase.Finish)
     .step(assessmentSubmit)
     .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.AssessmentAbsent })

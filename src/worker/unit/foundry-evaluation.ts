@@ -93,9 +93,17 @@ export function foundryEvaluation(
   input: EvaluationInput,
   host: FoundryHost<EvaluationPorts>,
 ): Promise<FoundryEnd<EvaluationResult>> {
+  return runEvaluationTasks(evaluationTasksNodes(), input, host);
+}
+
+export function runEvaluationTasks(
+  nodes: readonly ChainNode[],
+  input: EvaluationInput,
+  host: FoundryHost<EvaluationPorts>,
+): Promise<FoundryEnd<EvaluationResult>> {
   return runTasks(
     {
-      nodes: evaluationTasksNodes(),
+      nodes,
       seed: pickKeys(input, EVALUATION_INPUT_KEYS),
       resultOf: (ctx) => pickKeys(ctx, EVALUATION_RESULT_KEYS),
     },

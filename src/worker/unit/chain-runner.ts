@@ -305,7 +305,7 @@ export interface WalkInput {
 export async function runChain<P extends CommonPorts>(
   built: Chain<P>,
   input: WalkInput,
-  io: ChainIo<P>,
+  io: ChainIo<NoInfer<P>>,
 ): Promise<ExecutionEnd> {
   const from =
     input.from === undefined

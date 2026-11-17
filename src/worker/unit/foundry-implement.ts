@@ -299,13 +299,13 @@ function resultOf(ctx: ExecutionCtx): ImplementResult {
 }
 
 export function runImplementTasks(
+  nodes: readonly ChainNode[],
   input: ImplementInput,
   host: FoundryHost<ImplementPorts>,
-  runner: TaskRunner | null,
 ): Promise<FoundryEnd<ImplementResult>> {
   return runTasks(
     {
-      nodes: implementTasksNodes(runner),
+      nodes,
       seed: {
         state: stateOf(input, host.ports),
         plan: input.plan,
@@ -323,5 +323,5 @@ export function foundryImplement(
   input: ImplementInput,
   host: FoundryHost<ImplementPorts>,
 ): Promise<FoundryEnd<ImplementResult>> {
-  return runImplementTasks(input, host, null);
+  return runImplementTasks(implementTasksNodes(null), input, host);
 }

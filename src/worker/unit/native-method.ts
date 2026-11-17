@@ -212,7 +212,7 @@ type HostedChain = (
 
 function hostedOf<P extends CommonPorts>(
   built: Chain<P>,
-  ports: P,
+  ports: NoInfer<P>,
 ): HostedChain {
   return (input, io) => runChain(built, input, { ...io, ports });
 }

@@ -46,9 +46,17 @@ export function foundryExamine(
   input: ExamineInput,
   host: FoundryHost<ExaminePorts>,
 ): Promise<FoundryEnd<ExamineResult>> {
+  return runExamineTasks(examineTasksNodes(), input, host);
+}
+
+export function runExamineTasks(
+  nodes: readonly ChainNode[],
+  input: ExamineInput,
+  host: FoundryHost<ExaminePorts>,
+): Promise<FoundryEnd<ExamineResult>> {
   return runTasks(
     {
-      nodes: examineTasksNodes(),
+      nodes,
       seed: pickKeys(input, EXAMINE_INPUT_KEYS),
       resultOf: (ctx) => pickKeys(ctx, EXAMINE_RESULT_KEYS),
     },

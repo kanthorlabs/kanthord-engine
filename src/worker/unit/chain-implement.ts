@@ -6,6 +6,7 @@ import {
   chain,
   ChainId,
   type ChainNode,
+  type ChainTasks,
   type ExecutionCtx,
   FrameOutcome,
   type LoopFrame,
@@ -150,6 +151,29 @@ function implementPortsOf(ports: ImplementHostPorts): ImplementPorts {
   };
 }
 
+function implementTasks(
+  runner: TaskRunner | null,
+): ChainTasks<ImplementHostPorts> {
+  const nodes = implementTasksNodes(runner);
+  return {
+    name: "foundryImplement",
+    ports: IMPLEMENT_PORTS,
+    nodes,
+    async run(ctx, control, host) {
+      const end = await runImplementTasks(
+        nodes,
+        implementInputOf(ctx, control),
+        {
+          capabilities: host.capabilities,
+          ports: implementPortsOf(host.ports),
+        },
+      );
+      mergeImplement(ctx, end.result);
+      return end;
+    },
+  };
+}
+
 export function implementChain(
   runner: TaskRunner | null = null,
 ): Chain<ImplementHostPorts> {
@@ -167,23 +191,7 @@ export function implementChain(
         stepNode(unitsPlan),
       ]),
     )
-    .tasks({
-      name: "foundryImplement",
-      ports: IMPLEMENT_PORTS,
-      nodes: implementTasksNodes(runner),
-      async run(ctx, control, host) {
-        const end = await runImplementTasks(
-          implementInputOf(ctx, control),
-          {
-            capabilities: host.capabilities,
-            ports: implementPortsOf(host.ports),
-          },
-          runner,
-        );
-        mergeImplement(ctx, end.result);
-        return end;
-      },
-    })
+    .tasks(implementTasks(runner))
     .phase(Phase.Finish)
     .loop(
       "finish",
