@@ -49,6 +49,7 @@ export function evaluationPrepareNodes(): ChainNode[] {
 
 const evaluationFrame: LoopFrame<true> = {
   reads: ["testedInput"],
+  endReads: ["judgement"],
   note: "one frame; span worker.evaluation",
   init: () => ONE_FRAME,
   body: [

@@ -1,3 +1,5 @@
+import { BudgetLimit } from "../../scheduler/contract.ts";
+import { EndReason } from "./execution-run.ts";
 import {
   BudgetEndKind,
   type Chain,
@@ -45,9 +47,16 @@ function nodeLines(nodes: readonly ChainNode[], depth: number): string[] {
 function budgetEndLines(built: Chain): string[] {
   const rule = built.budgetEnd;
   if (rule.kind === BudgetEndKind.Stop)
-    return [line(CHAIN_DEPTH, `budget_end stop ${rule.reason}`, "")];
+    return [
+      line(CHAIN_DEPTH, `budget_end in each phase: stop ${rule.reason}`, ""),
+    ];
   return [
-    line(CHAIN_DEPTH, "onExit budget_end", ""),
+    line(
+      CHAIN_DEPTH,
+      `budget_end in prepare: stop ${EndReason.BudgetEnd}/${BudgetLimit.WallTime}`,
+      "",
+    ),
+    line(CHAIN_DEPTH, "onExit budget_end, after prepare", ""),
     ...nodeLines(rule.nodes, NODE_DEPTH),
   ];
 }
@@ -61,9 +70,17 @@ export function printChain(built: Chain): string {
       ...nodeLines(nodes, NODE_DEPTH),
     ]),
     ...budgetEndLines(built),
-    line(CHAIN_DEPTH, "onStop not revoked", ""),
+    line(
+      CHAIN_DEPTH,
+      "onStop not revoked, after prepare",
+      built.onStop.length ? "" : "no node",
+    ),
     ...nodeLines(built.onStop, NODE_DEPTH),
-    line(NODE_DEPTH, "dispose resources", ""),
-    line(NODE_DEPTH, "step execution.release(stop)", "[cleanup]"),
+    line(CHAIN_DEPTH, "dispose resources", "on every end"),
+    line(
+      CHAIN_DEPTH,
+      "step execution.release(stop)",
+      "[cleanup] on each stop that is not revoked",
+    ),
   ].join("\n");
 }

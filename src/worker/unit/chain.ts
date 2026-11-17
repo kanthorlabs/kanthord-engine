@@ -124,7 +124,7 @@ export const SEED_KEYS: readonly Key[] = [
   "revision",
 ];
 export type ChainSeed = Partial<ExecutionCtx> &
-  Pick<ExecutionCtx, "claim" | "setup" | "sshAccess">;
+  Pick<ExecutionCtx, "claim" | "setup" | "sshAccess" | "revision">;
 export const RUNNER_KEYS: readonly Key[] = ["completedUnits", "reports"];
 const STOP_KEYS: readonly Key[] = ["stop"];
 
@@ -197,6 +197,7 @@ export type FrameEnd =
 
 export interface LoopFrame<S> {
   reads: readonly Key[];
+  endReads?: readonly Key[];
   note?: string;
   init(ctx: ExecutionCtx, outer: unknown): S | null;
   body: readonly ChainNode[];
@@ -207,6 +208,7 @@ export interface LoopFrame<S> {
 
 export interface ChainFrame {
   reads: readonly Key[];
+  endReads?: readonly Key[];
   note?: string;
   init(ctx: ExecutionCtx, outer: unknown): unknown;
   body: readonly ChainNode[];
@@ -351,6 +353,7 @@ function checkNodes(written: Written, nodes: readonly ChainNode[]): void {
     }
     requireKeys(written, `loop ${node.id}`, node.frame.reads);
     checkNodes(written, node.frame.body);
+    requireKeys(written, `loop ${node.id}`, node.frame.endReads ?? []);
   }
 }
 

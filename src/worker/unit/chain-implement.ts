@@ -183,6 +183,7 @@ function unitsFrame(runner: TaskRunner | null): LoopFrame<UnitScope> {
 
 export const releaseGateFrame: LoopFrame<AffectedNote> = {
   reads: ["state"],
+  endReads: ["route"],
   note: "one frame per round; span worker.release_gate; a planned round resets the unchanged-turn count",
   init: (ctx, outer) => {
     const round = outer as RoundScope | null;
@@ -223,6 +224,7 @@ export const releaseGateFrame: LoopFrame<AffectedNote> = {
 function releaseRoundsFrame(runner: TaskRunner | null): LoopFrame<RoundScope> {
   return {
     reads: ["plan", "state"],
+    endReads: ["route"],
     note: "until the release gate passes; a routed failure gives the next round",
     init: ({ plan, state }) => {
       const units: RoundUnit[] = withSetupInstruction(

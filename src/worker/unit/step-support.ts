@@ -1,6 +1,5 @@
 import { ContextCancelled, DeadlineExceeded } from "../../kernel/context.ts";
 import {
-  type ChainSeed,
   type ExecutionCtx,
   type Key,
   type StepHost,
@@ -25,7 +24,7 @@ export function stepsInputOf(
   };
 }
 
-export function seedOf(input: StepsInput): ChainSeed {
+export function seedOf(input: StepsInput): Pick<ExecutionCtx, InputKeys> {
   return {
     claim: input.claim,
     setup: input.setup,

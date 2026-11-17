@@ -36,16 +36,17 @@ chain implement
       step branch.push                      [cleanup] per checkout; push record around each push; stop operation_failed/repository.connector.git_failed, operation_failed/repository.node_branch.taken
       step evidence.head                    [cleanup] the pushed head of each binding
     step execution.release                  [cleanup] further_work false
-  onExit budget_end
+  budget_end in prepare: stop budget_end/wall_time
+  onExit budget_end, after prepare
     loop finish                             one frame; span worker.phase finish
       step checkpoint.gate                  [cleanup] aborts the agent; commits the partial work of the current unit; stop operation_failed/worker.turn.*, operation_failed/worker.git.commit_failed
       step branch.push                      [cleanup] per checkout; push record around each push; stop operation_failed/repository.connector.git_failed, operation_failed/repository.node_branch.taken
     step execution.release                  [cleanup] further_work true; stop budget_end/<limit> only when no unit completed
-  onStop not revoked
+  onStop not revoked, after prepare
     step checkpoint.gate(restore)           [cleanup] aborts the agent; skipped after a turn violation; a violation restores
     step branch.push(stop)                  [cleanup] per checkout; no worker.git span; a failure logs checkpoint failed
-    dispose resources
-    step execution.release(stop)            [cleanup]
+  dispose resources                         on every end
+  step execution.release(stop)              [cleanup] on each stop that is not revoked
 
 chain evaluation
   seed claim, setup, sshAccess, revision
@@ -68,10 +69,10 @@ chain evaluation
       step evidence.publish(patches)
   phase finish
     step assessment.submit                  [cleanup] outcome -> closed; node not Evaluating -> revoked; success -> request actions, then execution.release(false); stop operation_failed, action_unsettled
-  budget_end stop assessment_absent
-  onStop not revoked
-    dispose resources
-    step execution.release(stop)            [cleanup]
+  budget_end in each phase: stop assessment_absent
+  onStop not revoked, after prepare         no node
+  dispose resources                         on every end
+  step execution.release(stop)              [cleanup] on each stop that is not revoked
 
 chain examine
   seed claim, setup, sshAccess, revision
@@ -86,8 +87,9 @@ chain examine
     step examine.turn                       [LLM] Examine; budget end after the turn; submits the report evidence; stop report_absent, provider_failed
   phase finish
     step execution.release                  [cleanup] further_work false
-  onExit budget_end
+  budget_end in prepare: stop budget_end/wall_time
+  onExit budget_end, after prepare
     step execution.release                  [cleanup] further_work true; no stop
-  onStop not revoked
-    dispose resources
-    step execution.release(stop)            [cleanup]
+  onStop not revoked, after prepare         no node
+  dispose resources                         on every end
+  step execution.release(stop)              [cleanup] on each stop that is not revoked

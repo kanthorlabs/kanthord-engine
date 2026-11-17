@@ -305,7 +305,19 @@ export async function runChain(
   } catch (error) {
     throw await stopOf(built, walk, { error, prepared: progress.prepared });
   } finally {
-    await io.resources.disposeAsync();
+    await disposeResources(io.resources);
+  }
+}
+
+async function disposeResources(
+  resources: AsyncDisposableStack,
+): Promise<void> {
+  try {
+    await resources.disposeAsync();
+  } catch (error) {
+    let first = error;
+    while (first instanceof SuppressedError) first = first.suppressed;
+    throw first;
   }
 }
 
