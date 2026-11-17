@@ -1,12 +1,13 @@
 import { ContextCancelled, DeadlineExceeded } from "../../kernel/context.ts";
 import {
   type ExecutionCtx,
+  type FoundryIo,
   type Key,
   type StepHost,
   type StepIo,
   StepKind,
 } from "./chain.ts";
-import { portStop } from "./execution-run.ts";
+import { ExecutionStop, portStop } from "./execution-run.ts";
 import {
   type EvaluationPorts,
   type EvidenceDraft,
@@ -86,19 +87,41 @@ export function budgetEnd<S>(scope: S): BudgetEndResult<S> {
   return { kind: StepKind.BudgetEnd, patch: {}, scope };
 }
 
-export function endedByBudget(
-  io: Pick<StepIo, "budget" | "run">,
-  error: unknown,
-): boolean {
+export interface StopResult<S> {
+  kind: typeof StepKind.Stop;
+  stop: ExecutionStop;
+  patch: Partial<Pick<ExecutionCtx, never>>;
+  scope: S;
+}
+
+export function stopped<S>(scope: S, stop: ExecutionStop): StopResult<S> {
+  return { kind: StepKind.Stop, stop, patch: {}, scope };
+}
+
+export async function stopsReturned<S, R>(
+  scope: S,
+  work: () => Promise<R>,
+): Promise<R | StopResult<S>> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof ExecutionStop) return stopped(scope, error);
+    throw error;
+  }
+}
+
+type BudgetIo = Pick<StepIo, "budget" | "context">;
+
+export function endedByBudget(io: BudgetIo, error: unknown): boolean {
   return (
     (error instanceof ContextCancelled || error instanceof DeadlineExceeded) &&
     io.budget.exhausted() &&
-    !io.run.operationContext.signal.aborted
+    !io.context.signal.aborted
   );
 }
 
 export async function budgetMapped<S, R>(
-  io: StepIo,
+  io: BudgetIo,
   scope: S,
   work: () => Promise<R>,
 ): Promise<R | BudgetEndResult<S>> {
@@ -111,15 +134,12 @@ export async function budgetMapped<S, R>(
 }
 
 export async function submittedEvidence(
-  io: StepIo<EvaluationPorts | ExaminePorts>,
+  io: FoundryIo<EvaluationPorts | ExaminePorts>,
   draft: EvidenceDraft,
 ): Promise<EvidenceId> {
-  const submitted = await io.ports.evidence.submit(
-    draft,
-    io.run.operationContext,
-    { halt: true },
-  );
-  if (submitted.kind === PortResultKind.Failed)
-    throw io.run.halt(portStop(submitted));
+  const submitted = await io.ports.evidence.submit(draft, io.context, {
+    halt: true,
+  });
+  if (submitted.kind === PortResultKind.Failed) throw portStop(submitted);
   return submitted.value;
 }

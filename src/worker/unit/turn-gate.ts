@@ -134,7 +134,7 @@ export function gatedAgent(
     changed = false;
     await work();
     if (agent.budget.exhausted()) return;
-    const context = agent.budget.cleanupContext(state.run.operationContext);
+    const context = agent.budget.cleanupContext(state.cancel);
     try {
       changed = await runGate(state, turn, before, context);
     } finally {
@@ -182,9 +182,9 @@ async function runGate(
   assert.equal(before.length, state.checkouts.length);
   let violated: TurnViolation | null = null;
   const changedPaths: string[] = [];
-  return state.run.spans.within(
+  return state.ports.telemetry.within(
     {
-      key: state.run.spans.key(SpanOperation.Gate),
+      key: state.ports.telemetry.key(SpanOperation.Gate),
       operation: SpanOperation.Gate,
       attributes: { [GATE_MODE_ATTRIBUTE]: turn.mode },
     },
@@ -218,7 +218,11 @@ async function runGate(
         violated = violation.code;
         const detail = await violate(state, before, violation, context);
         if (turn.violationEnd === ViolationEnd.Restore) return false;
-        state.run.stop(EndReason.OperationFailed, violation.code, detail);
+        throw new ExecutionStop(
+          EndReason.OperationFailed,
+          violation.code,
+          detail,
+        );
       }
       let changed = false;
       for (const [index, checkout] of state.checkouts.entries()) {
@@ -370,8 +374,10 @@ async function violate(
       context,
       remainingOf(state),
     );
-  const detail = await state.run.reasonOf(new Error(violation.detail));
-  state.run.log("turn violation", { code: violation.code, detail });
+  const detail = await state.ports.secrets.redact(
+    String(new Error(violation.detail)),
+  );
+  state.ports.log.log("turn violation", { code: violation.code, detail });
   return detail;
 }
 
@@ -418,7 +424,7 @@ async function refuseMarkers(
   );
   if (left.length === NO_ENTRIES) return;
   await abortMerge(state.input.env, checkout.directory, context, remaining());
-  state.run.stop(EndReason.OperationFailed, MERGE_MARKERS_LEFT);
+  throw new ExecutionStop(EndReason.OperationFailed, MERGE_MARKERS_LEFT);
 }
 
 export async function restoreCheckout(
@@ -471,5 +477,5 @@ export function removeRootEntries(state: StepsState): void {
   for (const entry of removed)
     rmSync(join(state.root, entry), { recursive: true, force: true });
   if (removed.length > NO_ENTRIES)
-    state.run.log("root entries removed", { entries: removed });
+    state.ports.log.log("root entries removed", { entries: removed });
 }

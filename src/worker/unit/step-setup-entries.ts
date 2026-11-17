@@ -1,5 +1,10 @@
 import { join } from "node:path";
-import { DeadlineKind, type Step, type StepIo } from "./chain.ts";
+import {
+  DeadlineKind,
+  type FoundryStep,
+  type Step,
+  type StepIo,
+} from "./chain.ts";
 import {
   BaseHead,
   namedCheckouts,
@@ -12,6 +17,7 @@ import {
   budgetMapped,
   next,
   stepsInputOf,
+  stopsReturned,
   wallDeadlineOf,
 } from "./step-support.ts";
 import type { ExecutionCtx } from "./chain.ts";
@@ -20,26 +26,26 @@ import { BASE_DIRECTORY } from "./workspace.ts";
 const SETUP_STOP = "environment_failed/setup_failed";
 
 export function setupInputOf(
-  ctx: Pick<ExecutionCtx, "claim" | "setup">,
-  io: StepIo,
+  ctx: Pick<ExecutionCtx, "claim" | "setup" | "env">,
+  io: Pick<StepIo, "context" | "ports">,
 ): SetupInput {
   return {
-    env: io.host.env,
-    context: io.run.operationContext,
+    env: ctx.env,
+    context: io.context,
     deadline: wallDeadlineOf(ctx),
-    spans: io.run.spans,
+    spans: io.ports.telemetry,
   };
 }
 
 export const setupEntriesLive: Step<
   unknown,
-  "claim" | "setup" | "sshAccess" | "workspace",
+  "claim" | "setup" | "sshAccess" | "env" | "workspace",
   "setupEntries" | "baseHead",
   ImplementPorts
 > = {
   id: "setup.entries(live)",
   deadline: DeadlineKind.Work,
-  reads: ["claim", "setup", "sshAccess", "workspace"],
+  reads: ["claim", "setup", "sshAccess", "env", "workspace"],
   writes: ["setupEntries", "baseHead"],
   stops: [SETUP_STOP],
   async run(ctx, scope, io) {
@@ -81,12 +87,12 @@ export const setupEntriesLive: Step<
 
 export const setupEntriesReview: Step<
   unknown,
-  "claim" | "setup" | "reviewWorkspace",
+  "claim" | "setup" | "env" | "reviewWorkspace",
   "setupEntries" | "baseHead"
 > = {
   id: "setup.entries(review)",
   deadline: DeadlineKind.Work,
-  reads: ["claim", "setup", "reviewWorkspace"],
+  reads: ["claim", "setup", "env", "reviewWorkspace"],
   writes: ["setupEntries", "baseHead"],
   stops: [SETUP_STOP],
   async run(ctx, scope, io) {
@@ -107,26 +113,29 @@ export const setupEntriesReview: Step<
   },
 };
 
-export const setupEntriesExamine: Step<
+export const setupEntriesExamine: FoundryStep<
   unknown,
-  "claim" | "setup" | "reviewWorkspace",
+  "claim" | "setup" | "env" | "reviewWorkspace",
   "setupEntries" | "baseHead"
 > = {
+  foundry: true,
   id: "setup.entries(examine)",
   deadline: DeadlineKind.Work,
-  reads: ["claim", "setup", "reviewWorkspace"],
+  reads: ["claim", "setup", "env", "reviewWorkspace"],
   writes: ["setupEntries", "baseHead"],
   stops: [SETUP_STOP],
   run(ctx, scope, io) {
-    return budgetMapped(io, scope, async () => {
-      const { checkouts } = ctx.reviewWorkspace;
-      if (!checkouts.length)
-        return next(scope, { setupEntries: [], baseHead: null });
-      const entries = await setupEntries(
-        setupInputOf(ctx, io),
-        namedCheckouts(ctx.setup.repositories, checkouts),
-      );
-      return next(scope, { setupEntries: entries, baseHead: null });
-    });
+    return stopsReturned(scope, () =>
+      budgetMapped(io, scope, async () => {
+        const { checkouts } = ctx.reviewWorkspace;
+        if (!checkouts.length)
+          return next(scope, { setupEntries: [], baseHead: null });
+        const entries = await setupEntries(
+          setupInputOf(ctx, io),
+          namedCheckouts(ctx.setup.repositories, checkouts),
+        );
+        return next(scope, { setupEntries: entries, baseHead: null });
+      }),
+    );
   },
 };

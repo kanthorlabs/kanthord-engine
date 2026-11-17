@@ -20,7 +20,7 @@ import {
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { fauxAssistantMessage, fauxToolCall } from "./test-support.ts";
-import { EndReason } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { TaskRunner } from "./steps-implement.ts";
@@ -217,7 +217,7 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
   function stoppingRunner(reason: EndReason): TaskRunner {
     return async (state) => {
       writeFileSync(join(state.root, PARTIAL_WORK), PARTIAL_WORK);
-      return state.run.stop(reason, STOP_CODE);
+      throw new ExecutionStop(reason, STOP_CODE);
     };
   }
 

@@ -10,13 +10,13 @@ import {
   type ChainNode,
   type ChainSeed,
   type ChainStep,
+  type ChainStepResult,
   DeadlineKind,
   type ExecutionCtx,
   FrameOutcome,
   type Key,
   NodeKind,
   type StepHost,
-  type StepIo,
   StepKind,
 } from "./chain.ts";
 import {
@@ -52,9 +52,13 @@ interface ScopeHolder {
 }
 
 export function seededContext(seed: Partial<ExecutionCtx>): ExecutionCtx {
-  const runner: Pick<ExecutionCtx, "completedUnits" | "reports"> = {
+  const runner: Pick<
+    ExecutionCtx,
+    "completedUnits" | "reports" | "verificationTimedOut"
+  > = {
     completedUnits: new Set(),
     reports: new Map(),
+    verificationTimedOut: false,
   };
   return { ...runner, ...seed } as ExecutionCtx;
 }
@@ -73,14 +77,25 @@ function stepContext(walk: Walk, step: ChainStep): CancellationContext {
     : budget.cleanupContext(run.operationContext);
 }
 
-async function walkStep(
+function stepResult(
   walk: Walk,
   step: ChainStep,
-  holder: ScopeHolder,
-): Promise<StepKind> {
+  call: StepCall,
+): Promise<ChainStepResult> {
   const { run, budget, resources, host, ports } = walk.io;
-  const context = stepContext(walk, step);
-  const io: StepIo = {
+  const { context } = call;
+  const slice = sliceOf(walk.ctx, step.reads) as never;
+  const scope = call.holder.scope as never;
+  if (step.foundry)
+    return step.run(slice, scope, {
+      budget,
+      context,
+      get deadline() {
+        return budget.wallDeadline();
+      },
+      ports,
+    });
+  return step.run(slice, scope, {
     run,
     budget,
     context,
@@ -91,15 +106,28 @@ async function walkStep(
     spans: run.spans,
     host,
     ports,
-  };
+  });
+}
+
+interface StepCall {
+  context: CancellationContext;
+  holder: ScopeHolder;
+}
+
+async function walkStep(
+  walk: Walk,
+  step: ChainStep,
+  holder: ScopeHolder,
+): Promise<StepKind> {
+  const { run } = walk.io;
+  const context = stepContext(walk, step);
   try {
-    const result = await step.run(
-      sliceOf(walk.ctx, step.reads) as never,
-      holder.scope as never,
-      io,
-    );
+    const result = await stepResult(walk, step, { context, holder });
     Object.assign(walk.ctx, result.patch);
     holder.scope = result.scope;
+    if ("verificationTimedOut" in result.patch)
+      run.noteVerification(walk.ctx.verificationTimedOut);
+    if (result.stop !== undefined) throw run.halt(result.stop);
     return result.kind;
   } finally {
     if (step.deadline === DeadlineKind.Cleanup) context.cancel();
@@ -194,7 +222,7 @@ export async function runNodes(
   input: NodesInput,
   io: ChainIo,
 ): Promise<NodesEnd> {
-  const ctx = seededContext(input.seed);
+  const ctx = seededContext({ env: io.host.env, ...input.seed });
   const holder: ScopeHolder = { scope: input.scope ?? null };
   const kind = await walkNodes(
     { ctx, io, stopping: false },
@@ -302,7 +330,11 @@ export async function runChain(
       .slice(FIRST_PHASE, from)
       .some(({ phase }) => phase === Phase.Prepare),
   };
-  const walk: Walk = { ctx: seededContext(input.seed), io, stopping: false };
+  const walk: Walk = {
+    ctx: seededContext({ env: io.host.env, ...input.seed }),
+    io,
+    stopping: false,
+  };
   try {
     return await walkPhases(built, walk, progress);
   } catch (error) {

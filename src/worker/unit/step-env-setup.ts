@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { setupScriptsOf } from "../../kernel/devcontainer.ts";
-import { DeadlineKind, type Step } from "./chain.ts";
+import { DeadlineKind, type FoundryStep, type Step } from "./chain.ts";
 import {
   runSetup,
   SetupEnd,
@@ -9,7 +9,13 @@ import {
   setupStop,
 } from "./environment-setup.ts";
 import { taskRevisionInstruction } from "./judgement.ts";
-import { budgetEnd, budgetMapped, next } from "./step-support.ts";
+import {
+  budgetEnd,
+  budgetMapped,
+  next,
+  stopped,
+  stopsReturned,
+} from "./step-support.ts";
 import { setupInputOf } from "./step-setup-entries.ts";
 import type { TestedInput } from "./verification.ts";
 
@@ -30,12 +36,12 @@ function testedCommits(testedInput: TestedInput): string[] {
 
 export const envSetupLive: Step<
   unknown,
-  "claim" | "setup" | "workspace" | "setupEntries" | "baseHead",
+  "claim" | "setup" | "env" | "workspace" | "setupEntries" | "baseHead",
   "setupPending" | "setupInstruction"
 > = {
   id: "env.setup(live)",
   deadline: DeadlineKind.Work,
-  reads: ["claim", "setup", "workspace", "setupEntries", "baseHead"],
+  reads: ["claim", "setup", "env", "workspace", "setupEntries", "baseHead"],
   writes: ["setupPending", "setupInstruction"],
   stops: [SETUP_STOP],
   note: "port: releaseTrees.takeBase; node failure -> setup instruction of the first unit; budget end",
@@ -73,12 +79,12 @@ export const envSetupLive: Step<
 
 export const envSetupReview: Step<
   unknown,
-  "claim" | "setup" | "setupEntries" | "baseHead" | "testedInput",
+  "claim" | "setup" | "env" | "setupEntries" | "baseHead" | "testedInput",
   "setupFailure"
 > = {
   id: "env.setup(review)",
   deadline: DeadlineKind.Work,
-  reads: ["claim", "setup", "setupEntries", "baseHead", "testedInput"],
+  reads: ["claim", "setup", "env", "setupEntries", "baseHead", "testedInput"],
   writes: ["setupFailure"],
   stops: [SETUP_STOP],
   note: "node failure -> criterion-not-met; budget end",
@@ -102,23 +108,29 @@ export const envSetupReview: Step<
   },
 };
 
-export const envSetupExamine: Step<
+export const envSetupExamine: FoundryStep<
   unknown,
-  "claim" | "setup" | "setupEntries" | "reviewWorkspace",
+  "claim" | "setup" | "env" | "setupEntries" | "reviewWorkspace",
   never
 > = {
+  foundry: true,
   id: "env.setup(examine)",
   deadline: DeadlineKind.Work,
-  reads: ["claim", "setup", "setupEntries", "reviewWorkspace"],
+  reads: ["claim", "setup", "env", "setupEntries", "reviewWorkspace"],
   writes: [],
   stops: [SETUP_STOP],
   note: "budget end",
   run(ctx, scope, io) {
-    return budgetMapped(io, scope, async () => {
-      if (!ctx.reviewWorkspace.checkouts.length) return next(scope);
-      const result = await runSetup(setupInputOf(ctx, io), ctx.setupEntries);
-      if (result.end === SetupEnd.Failed) throw setupStop(result);
-      return result.end === SetupEnd.BudgetEnd ? budgetEnd(scope) : next(scope);
-    });
+    return stopsReturned(scope, () =>
+      budgetMapped(io, scope, async () => {
+        if (!ctx.reviewWorkspace.checkouts.length) return next(scope);
+        const result = await runSetup(setupInputOf(ctx, io), ctx.setupEntries);
+        if (result.end === SetupEnd.Failed)
+          return stopped(scope, setupStop(result));
+        return result.end === SetupEnd.BudgetEnd
+          ? budgetEnd(scope)
+          : next(scope);
+      }),
+    );
   },
 };

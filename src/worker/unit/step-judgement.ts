@@ -11,13 +11,17 @@ import { AffectedVerdict } from "./affected.ts";
 import {
   DeadlineKind,
   type ExecutionCtx,
-  type Step,
-  type StepIo,
+  type FoundryIo,
+  type FoundryStep,
 } from "./chain.ts";
 import { setupFailureAssessment } from "./evaluation.ts";
 import { verificationCommands } from "./evaluation-input.ts";
-import { EndReason, type ExecutionRun } from "./execution-run.ts";
-import type { AgentSession, EvaluationPorts } from "./foundry-ports.ts";
+import { EndReason, ExecutionStop } from "./execution-run.ts";
+import type {
+  AgentSession,
+  EvaluationPorts,
+  LogPort,
+} from "./foundry-ports.ts";
 import {
   affectedFailureReport,
   type Blocker,
@@ -33,7 +37,12 @@ import {
 } from "./judgement.ts";
 import { type EvaluationFacts, EvaluationStage } from "./rework-cause.ts";
 import { openedAgent } from "./step-agent-open.ts";
-import { budgetEnd, budgetMapped, next } from "./step-support.ts";
+import {
+  budgetEnd,
+  budgetMapped,
+  next,
+  stopsReturned,
+} from "./step-support.ts";
 import {
   environmentStop,
   infrastructureStop,
@@ -107,7 +116,7 @@ type JudgeKeys =
   | "reviewRound";
 
 interface JudgeContext {
-  run: ExecutionRun;
+  log: LogPort;
   ctx: Readonly<Pick<ExecutionCtx, JudgeKeys>>;
   round: ReviewRound;
   verificationRun: VerificationRun;
@@ -115,10 +124,10 @@ interface JudgeContext {
 
 function judgeContextOf(
   ctx: Readonly<Pick<ExecutionCtx, JudgeKeys>>,
-  io: StepIo,
+  io: FoundryIo,
 ): JudgeContext {
   return {
-    run: io.run,
+    log: io.ports.log,
     ctx,
     round: ctx.reviewRound,
     verificationRun: ctx.verification,
@@ -162,7 +171,7 @@ function shortcutAssessment(context: JudgeContext) {
 }
 
 async function askJudgement(context: JudgeContext, agent: AgentSession) {
-  const { run, round } = context;
+  const { round } = context;
   const { claim, setup, revision } = context.ctx;
   const evidence = context.ctx.placed.reviewBundle;
   const { directory, checkouts } = context.ctx.reviewWorkspace;
@@ -206,7 +215,7 @@ async function askJudgement(context: JudgeContext, agent: AgentSession) {
   );
   if (judgement === ReplyRepair.BudgetEnd) return null;
   if (judgement === ReplyRepair.Invalid)
-    return run.stop(EndReason.JudgementInvalid);
+    throw new ExecutionStop(EndReason.JudgementInvalid, null);
   return { judgement, repaired };
 }
 
@@ -214,11 +223,11 @@ function judgedAssessment(
   context: JudgeContext,
   asked: NonNullable<Awaited<ReturnType<typeof askJudgement>>>,
 ) {
-  const { run, verificationRun, round } = context;
+  const { log, verificationRun, round } = context;
   const { claim, setup, affected } = context.ctx;
   const { judgement, repaired } = asked;
   const blockers = judgementBlockers(claim.node_id, judgement, round.findings);
-  run.log("node judged", {
+  log.log("node judged", {
     result: judgement.result,
     unmet: blockers.map((item) => item.id),
     findings: judgement.findings.map((finding) => finding.label),
@@ -262,9 +271,15 @@ export type EvaluationAssessment =
   | NonNullable<ReturnType<typeof shortcutAssessment>>
   | ReturnType<typeof judgedAssessment>;
 
-type JudgementStep = Step<unknown, JudgeKeys, "judgement", EvaluationPorts>;
+type JudgementStep = FoundryStep<
+  unknown,
+  JudgeKeys,
+  "judgement",
+  EvaluationPorts
+>;
 
 export const judgement: JudgementStep = {
+  foundry: true,
   id: "judgement",
   deadline: DeadlineKind.Work,
   reads: [
@@ -291,17 +306,19 @@ export const judgement: JudgementStep = {
   llm: true,
   note: "port: agent.open; shortcut on failure -> criterion-not-met; else Evaluation, Repair once; budget end",
   run(ctx, scope, io) {
-    return budgetMapped(io, scope, async () => {
-      const context = judgeContextOf(ctx, io);
-      if (ctx.verification.outcome === VerificationClass.BudgetEnd)
-        return budgetEnd(scope);
-      const shortcut = shortcutAssessment(context);
-      if (shortcut !== null) return next(scope, { judgement: shortcut });
-      const agent = await openedAgent(ctx, io);
-      if (agent === null || agent.budget.exhausted()) return budgetEnd(scope);
-      const asked = await askJudgement(context, agent);
-      if (asked === null) return budgetEnd(scope);
-      return next(scope, { judgement: judgedAssessment(context, asked) });
-    });
+    return stopsReturned(scope, () =>
+      budgetMapped(io, scope, async () => {
+        const context = judgeContextOf(ctx, io);
+        if (ctx.verification.outcome === VerificationClass.BudgetEnd)
+          return budgetEnd(scope);
+        const shortcut = shortcutAssessment(context);
+        if (shortcut !== null) return next(scope, { judgement: shortcut });
+        const agent = await openedAgent(ctx, io);
+        if (agent === null || agent.budget.exhausted()) return budgetEnd(scope);
+        const asked = await askJudgement(context, agent);
+        if (asked === null) return budgetEnd(scope);
+        return next(scope, { judgement: judgedAssessment(context, asked) });
+      }),
+    );
   },
 };

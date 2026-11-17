@@ -29,7 +29,12 @@ import {
   verificationObserver,
 } from "./method-telemetry.ts";
 import { portStop } from "./execution-run.ts";
-import { repositoryOf, stateIo, type StepsState } from "./steps-implement.ts";
+import {
+  type HostedState,
+  repositoryOf,
+  stateIo,
+  type StepsState,
+} from "./steps-implement.ts";
 import { memoScopeOf } from "./verification-memo.ts";
 import {
   environmentStop,
@@ -76,18 +81,19 @@ export function nodeUnitOf(
 }
 
 export function commandOwners(
-  state: Pick<StepsState, "input" | "revision">,
+  nodeId: string,
+  revision: Pick<Revision, "filename" | "content" | "tasks">,
 ): TaskContent[] {
-  const node = nodeUnitOf(state.input.claim.node_id, state.revision);
+  const node = nodeUnitOf(nodeId, revision);
   return [
-    ...state.revision.content.verifications.map(() => node),
-    ...state.revision.tasks.flatMap((task) =>
+    ...revision.content.verifications.map(() => node),
+    ...revision.tasks.flatMap((task) =>
       task.content.verifications.map(() => task),
     ),
   ];
 }
 
-export async function releaseGate(state: StepsState): Promise<ReleaseGate> {
+export async function releaseGate(state: HostedState): Promise<ReleaseGate> {
   const end = await runNodes(
     {
       nodes: [loopNode("release_gate", releaseGateFrame)],
@@ -115,13 +121,12 @@ export async function verifyRelease(
   ports: ImplementPorts,
 ): Promise<VerifiedRelease | null> {
   const commands = verificationCommands(state.revision);
-  const owners = commandOwners(state);
+  const owners = commandOwners(state.input.claim.node_id, state.revision);
   assert.equal(owners.length, commands.length);
   const checked = await verifyInReleaseClones(state, { ports, commands });
   const run = checked.run;
-  state.run.noteVerification(
-    run.verification.results.at(-1)?.timed_out ?? false,
-  );
+  state.verificationTimedOut =
+    run.verification.results.at(-1)?.timed_out ?? false;
   if (run.outcome === VerificationClass.BudgetEnd) {
     state.agent.budget.wallDeadlineReached();
     return null;
@@ -129,7 +134,7 @@ export async function verifyRelease(
   const stop = infrastructureStop(run) ?? environmentStop(run);
   if (stop) throw stop;
   if (run.flaky_failures.length > NO_ITEMS)
-    state.run.log("verification flaky", {
+    state.ports.log.log("verification flaky", {
       flaky: run.flaky_failures.map((failure) => ({
         index: failure.index,
         command: failure.command,
@@ -188,7 +193,7 @@ export function releaseOutcome(
   note.verdict = affected?.verdict ?? null;
   const passed = releasePassed(verified);
   state.lastVerification = verificationFactsOf(passed, run.verification);
-  state.run.log("release verified", {
+  state.ports.log.log("release verified", {
     commits: state.checkouts.map((checkout) => checkout.head),
     passed,
     setup: checked.setup,
@@ -240,9 +245,9 @@ async function setUpReleaseClones(
   const result = await setUpHeads(
     {
       env: state.input.env,
-      context: state.run.operationContext,
+      context: state.cancel,
       deadline: state.agent.budget.wallDeadline(),
-      spans: state.run.spans,
+      spans: state.ports.telemetry,
       exhausted: () => state.agent.budget.exhausted(),
     },
     clones,
@@ -283,7 +288,7 @@ async function verifyInReleaseClones(
 ): Promise<ReleaseCheck> {
   const { ports, commands } = verification;
   const key = state.input.workspaces.nodeKey(state.input.claim.node_id);
-  const cleanup = state.agent.budget.cleanupContext(state.run.operationContext);
+  const cleanup = state.agent.budget.cleanupContext(state.cancel);
   const trees: CommandTree[] = [];
   try {
     await takeReleaseTrees(state, {
@@ -295,10 +300,10 @@ async function verifyInReleaseClones(
     const setup = await setUpReleaseClones(state, trees);
     if (setup !== null) return setup;
     const testedInput = testedInputOf(state.checkouts);
-    const owners = commandOwners(state);
+    const owners = commandOwners(state.input.claim.node_id, state.revision);
     const run = await runVerificationsWithOutput({
       observe: verificationObserver(
-        state.run.spans,
+        state.ports.telemetry,
         testedCommitOf(testedInput),
         environmentDigestsOf(state.input.setup.repositories),
         {
@@ -312,7 +317,7 @@ async function verifyInReleaseClones(
       reruns: VERIFICATION_RERUNS,
       tested_input: testedInput,
       deadline: state.agent.budget.wallDeadline(),
-      context: state.run.operationContext,
+      context: state.cancel,
       env: state.input.env,
       exhausted: () => state.agent.budget.exhausted(),
       baseline: (command) => state.base.exitOf(command),
@@ -345,10 +350,10 @@ async function runAffectedChecks(
   for (const checkout of state.checkouts) {
     const result = await runAffected({
       env: state.input.env,
-      context: state.run.operationContext,
+      context: state.cancel,
       deadline: state.agent.budget.wallDeadline(),
       exhausted: () => state.agent.budget.exhausted(),
-      spans: state.run.spans,
+      spans: state.ports.telemetry,
       scope: VerificationContext.Release,
       workspaceKey: key,
       checkout: {
@@ -383,8 +388,7 @@ async function takeReleaseTrees(
       checkout.head,
       release.call,
     );
-    if (taken.kind === PortResultKind.Failed)
-      throw state.run.halt(portStop(taken));
+    if (taken.kind === PortResultKind.Failed) throw portStop(taken);
     release.trees.push(taken.value);
     release.ports.log.log(TREE_PREPARED, {
       purpose: RELEASE_PURPOSE,

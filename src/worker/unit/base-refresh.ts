@@ -77,7 +77,7 @@ async function mergeAtClaim(
   state: StepsState,
   checkout: WorkspaceCheckout,
 ): Promise<RefreshResult> {
-  const context = state.agent.budget.cleanupContext(state.run.operationContext);
+  const context = state.agent.budget.cleanupContext(state.cancel);
   try {
     let result: RefreshResult = RefreshResult.Current;
     for (const branch of mergedBranchesOf(state, checkout)) {
@@ -105,8 +105,10 @@ async function mergeUnder(
     return RefreshResult.Current;
   const commit = await commitOf(env, directory, ref, context, remaining());
   const message = mergeCommitMessage(state, base);
-  const conflicts = await withinGit(state.run.spans, GitStep.MergeBase, () =>
-    mergeRef(env, directory, ref, message, context, remaining()),
+  const conflicts = await withinGit(
+    state.ports.telemetry,
+    GitStep.MergeBase,
+    () => mergeRef(env, directory, ref, message, context, remaining()),
   );
   if (conflicts.length > NO_FILES) {
     await gatedAgent(state, message, {
@@ -128,7 +130,7 @@ async function mergeUnder(
     );
     if (state.agent.budget.exhausted()) return RefreshResult.BudgetEnd;
   } else checkout.head = await headCommit(env, directory, context, remaining());
-  state.run.log("base merged", {
+  state.ports.log.log("base merged", {
     binding: checkout.name,
     base_branch: base,
     commit: checkout.head,
@@ -141,15 +143,14 @@ export async function fetchAtRelease(
   state: StepsState,
   ports: ImplementPorts,
 ): Promise<void> {
-  const context = state.agent.budget.cleanupContext(state.run.operationContext);
+  const context = state.agent.budget.cleanupContext(state.cancel);
   try {
     for (const checkout of state.checkouts) {
       const fetched = await ports.repository.fetchBase(checkout, {
         context,
         deadline: state.input.claim.expired_at,
       });
-      if (fetched.kind === PortResultKind.Failed)
-        throw state.run.halt(portStop(fetched));
+      if (fetched.kind === PortResultKind.Failed) throw portStop(fetched);
     }
   } finally {
     context.cancel();

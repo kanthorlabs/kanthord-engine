@@ -1,18 +1,20 @@
-import { DeadlineKind, type Step } from "./chain.ts";
+import { DeadlineKind, type FoundryStep } from "./chain.ts";
+import { ExecutionStop } from "./execution-run.ts";
 import type { ImplementPorts } from "./foundry-ports.ts";
 import { verifyRelease } from "./release-gate.ts";
-import { budgetEnd, next } from "./step-support.ts";
+import { budgetEnd, next, stopped } from "./step-support.ts";
 
-export const releaseVerify: Step<
+export const releaseVerify: FoundryStep<
   unknown,
   "state",
-  "releaseCheck",
+  "releaseCheck" | "verificationTimedOut",
   ImplementPorts
 > = {
+  foundry: true,
   id: "release.verify",
   deadline: DeadlineKind.Work,
   reads: ["state"],
-  writes: ["releaseCheck"],
+  writes: ["releaseCheck", "verificationTimedOut"],
   stops: [
     "operation_failed/worker.verification.infrastructure_failed",
     "environment_failed/verification_timeout",
@@ -23,9 +25,15 @@ export const releaseVerify: Step<
   ],
   note: "port: releaseTrees.take, releaseTrees.takeBase, releaseTrees.give; release trees, setup, every command, affected tests; gives the trees back; budget end",
   async run({ state }, scope, io) {
-    const releaseCheck = await verifyRelease(state, io.ports);
-    return releaseCheck === null
-      ? budgetEnd(scope)
-      : next(scope, { releaseCheck });
+    const noted = () => ({ verificationTimedOut: state.verificationTimedOut });
+    try {
+      const releaseCheck = await verifyRelease(state, io.ports);
+      return releaseCheck === null
+        ? { ...budgetEnd(scope), patch: noted() }
+        : next(scope, { releaseCheck, ...noted() });
+    } catch (error) {
+      if (!(error instanceof ExecutionStop)) throw error;
+      return { ...stopped(scope, error), patch: noted() };
+    }
   },
 };

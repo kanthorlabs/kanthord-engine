@@ -1,17 +1,20 @@
 import { fetchAtRelease } from "./base-refresh.ts";
-import { DeadlineKind, type Step } from "./chain.ts";
+import { DeadlineKind, type FoundryStep } from "./chain.ts";
 import type { ImplementPorts } from "./foundry-ports.ts";
-import { next } from "./step-support.ts";
+import { next, stopsReturned } from "./step-support.ts";
 
-export const baseFetch: Step<unknown, "state", never, ImplementPorts> = {
+export const baseFetch: FoundryStep<unknown, "state", never, ImplementPorts> = {
+  foundry: true,
   id: "base.fetch",
   deadline: DeadlineKind.Work,
   reads: ["state"],
   writes: [],
   stops: ["operation_failed/repository.connector.git_failed"],
   note: "port: repository.fetchBase; base_branch and upstream_branch of each checkout",
-  async run({ state }, scope, io) {
-    await fetchAtRelease(state, io.ports);
-    return next(scope);
+  run({ state }, scope, io) {
+    return stopsReturned(scope, async () => {
+      await fetchAtRelease(state, io.ports);
+      return next(scope);
+    });
   },
 };

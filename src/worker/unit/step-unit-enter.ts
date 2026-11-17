@@ -1,6 +1,6 @@
 import { PromptTemplate } from "../../agent/contract.ts";
 import type { TaskContent } from "../../mission/contract.ts";
-import { DeadlineKind, type Step } from "./chain.ts";
+import { DeadlineKind, type FoundryStep } from "./chain.ts";
 import { next } from "./step-support.ts";
 import {
   type NodeInstruction,
@@ -76,7 +76,7 @@ export function runnerOf(scope: UnitScope): TaskRunner | null {
 export function openUnit(state: StepsState, scope: UnitScope): void {
   const { unit, node } = scope;
   if (node === null) {
-    state.run.log("task started", { task_id: unit.id });
+    state.ports.log.log("task started", { task_id: unit.id });
     scope.gated = gatedAgent(state, unitCommitMessage(state, unit));
     return;
   }
@@ -85,13 +85,14 @@ export function openUnit(state: StepsState, scope: UnitScope): void {
   scope.ruled = node.judged.length > NO_CHECKOUTS;
   scope.instruction = node.text;
   scope.template = PromptTemplate.CriterionRevision;
-  state.run.log("node instruction started", {
+  state.ports.log.log("node instruction started", {
     task_id: unit.id,
     ruled: scope.ruled,
   });
 }
 
-export const unitEnter: Step<UnitScope, "state", never> = {
+export const unitEnter: FoundryStep<UnitScope, "state", never> = {
+  foundry: true,
   id: "unit.enter",
   deadline: DeadlineKind.Work,
   reads: ["state"],

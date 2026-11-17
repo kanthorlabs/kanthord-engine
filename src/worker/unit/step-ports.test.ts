@@ -15,7 +15,7 @@ import {
   type SshAccess,
 } from "../../repository/contract.ts";
 import { ExecutionBudget } from "./budget.ts";
-import type { StepIo } from "./chain.ts";
+import { type FoundryIo, StepKind } from "./chain.ts";
 import {
   EndReason,
   ExecutionRun,
@@ -74,15 +74,11 @@ function harness(t: TestContext, ports: Partial<ImplementPorts>) {
     resource_budget: { wall_time_ms: WALL_TIME_MS },
   });
   const io = {
-    run,
     budget,
     context: run.operationContext,
     deadline: budget.wallDeadline(),
-    resources: new AsyncDisposableStack(),
-    spans: run.spans,
-    host: {} as StepIo["host"],
     ports: { log: { log: () => {} }, ...ports } as ImplementPorts,
-  } satisfies StepIo;
+  } satisfies FoundryIo<ImplementPorts>;
   return { claim, run, budget, io };
 }
 
@@ -115,29 +111,27 @@ test("a failed release tree take stops with the code of the port answer and give
       give: async (tree) => void given.push(tree),
     },
   });
-  await assert.rejects(
-    releaseVerify.run(
-      {
-        state: {
-          checkouts: [first, checkoutOf("lib", join(root, "lib"))],
-          agent: { budget: h.budget },
-          run: h.run,
-          input: {
-            claim: h.claim,
-            workspaces: { nodeKey: () => root },
-          },
-          revision: {
-            filename: "node.md",
-            content: { verifications: ["true"] },
-            tasks: [],
-          },
-        } as unknown as StepsState,
-      },
-      null,
-      h.io,
-    ),
-    isFailedStop,
+  const result = await releaseVerify.run(
+    {
+      state: {
+        checkouts: [first, checkoutOf("lib", join(root, "lib"))],
+        agent: { budget: h.budget },
+        cancel: h.run.operationContext,
+        input: {
+          claim: h.claim,
+          workspaces: { nodeKey: () => root },
+        },
+        revision: {
+          filename: "node.md",
+          content: { verifications: ["true"] },
+          tasks: [],
+        },
+      } as unknown as StepsState,
+    },
+    null,
+    h.io,
   );
+  assert.ok(result.kind === StepKind.Stop && isFailedStop(result.stop));
   assert.deepEqual(given, [taken]);
 });
 
@@ -172,7 +166,7 @@ test("a base fetch that git refuses stops with the redacted git detail and the f
       {
         checkouts: [checkout],
         agent: { budget: h.budget },
-        run: h.run,
+        cancel: h.run.operationContext,
         input,
       } as unknown as StepsState,
       workerPorts(input, h.run),

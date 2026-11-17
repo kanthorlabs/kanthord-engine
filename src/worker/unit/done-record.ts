@@ -50,7 +50,7 @@ export async function writeDoneRecord(
 ): Promise<boolean> {
   const held = state.checkouts.filter((checkout) => commits.has(checkout.head));
   if (held.length === NO_CHECKOUTS) {
-    state.run.log("done record skipped", { task_id: unit.id });
+    state.ports.log.log("done record skipped", { task_id: unit.id });
     return false;
   }
   await withinCleanup(state, async (context, remaining) => {
@@ -70,7 +70,7 @@ export async function writeDoneRecord(
       );
     }
   });
-  state.run.log("done recorded", {
+  state.ports.log.log("done recorded", {
     task_id: unit.id,
     commits: held.map((checkout) => checkout.head),
   });

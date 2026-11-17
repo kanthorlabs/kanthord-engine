@@ -85,6 +85,10 @@ export interface ReleaseTreePort {
   give(tree: CommandTree): Promise<void>;
 }
 
+export interface ClaimPort {
+  check(context: CancellationContext): Promise<PortResult<null>>;
+}
+
 export type AgentSession = NativeAgent;
 
 export interface AgentOpenRequest {
@@ -119,6 +123,7 @@ export interface ImplementPorts extends CommonPorts {
   evidence: EvidencePort;
   repository: RepositoryPort;
   releaseTrees: ReleaseTreePort;
+  claim: ClaimPort;
 }
 
 export interface EvaluationPorts extends CommonPorts {

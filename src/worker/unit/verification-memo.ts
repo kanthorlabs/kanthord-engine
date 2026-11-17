@@ -88,7 +88,7 @@ export class VerificationMemo {
 }
 
 export async function memoScopeOf(
-  state: Pick<StepsState, "input" | "run" | "checkouts" | "memo">,
+  state: Pick<StepsState, "input" | "cancel" | "checkouts" | "memo">,
   context: MemoContext,
   commands: readonly string[],
 ): Promise<MemoScope | undefined> {
@@ -100,7 +100,7 @@ export async function memoScopeOf(
         state.input.env,
         checkout.directory,
         checkout.head,
-        state.run.operationContext,
+        state.cancel,
         state.input.claim.expired_at - Date.now(),
       ),
     );

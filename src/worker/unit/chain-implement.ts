@@ -246,7 +246,7 @@ function releaseRoundsFrame(runner: TaskRunner | null): LoopFrame<RoundScope> {
     ],
     next: ({ route, state }) => {
       if (route.kind !== ReleaseGateKind.Routed) return null;
-      state.run.log("release failure routed", { task_id: route.unit.id });
+      state.ports.log.log("release failure routed", { task_id: route.unit.id });
       return {
         units: [
           { task: route.unit, instruction: route.instruction, node: null },

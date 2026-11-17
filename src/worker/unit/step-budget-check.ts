@@ -1,7 +1,8 @@
-import { DeadlineKind, type Step } from "./chain.ts";
+import { DeadlineKind, type FoundryStep } from "./chain.ts";
 import { budgetEnd, next } from "./step-support.ts";
 
-export const budgetCheck: Step<unknown, "state", never> = {
+export const budgetCheck: FoundryStep<unknown, "state", never> = {
+  foundry: true,
   id: "budget.check",
   deadline: DeadlineKind.Work,
   reads: ["state"],

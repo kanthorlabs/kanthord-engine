@@ -1,12 +1,13 @@
-import { DeadlineKind, type Step } from "./chain.ts";
+import { DeadlineKind, type FoundryStep } from "./chain.ts";
 import { type AffectedNote, releaseOutcome } from "./release-gate.ts";
 import { next } from "./step-support.ts";
 
-export const releaseRoute: Step<
+export const releaseRoute: FoundryStep<
   AffectedNote,
   "state" | "releaseCheck",
   "route"
 > = {
+  foundry: true,
   id: "release.route",
   deadline: DeadlineKind.Work,
   reads: ["state", "releaseCheck"],

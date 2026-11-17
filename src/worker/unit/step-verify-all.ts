@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { DeadlineKind, type Step } from "./chain.ts";
+import { DeadlineKind, type FoundryStep } from "./chain.ts";
 import { verificationCommands } from "./evaluation-input.ts";
 import {
   environmentDigestsOf,
@@ -8,48 +8,48 @@ import {
   verificationObserver,
 } from "./method-telemetry.ts";
 import { commandOwners } from "./release-gate.ts";
-import { next, stepsInputOf } from "./step-support.ts";
+import { next } from "./step-support.ts";
 import {
   runVerificationsWithOutput,
   VERIFICATION_RERUNS,
 } from "./verification.ts";
 
-export const verifyAllEvaluation: Step<
+export const verifyAllEvaluation: FoundryStep<
   unknown,
   | "claim"
   | "setup"
-  | "sshAccess"
+  | "env"
   | "revision"
   | "reviewWorkspace"
   | "testedInput"
   | "baseHead",
-  "verification"
+  "verification" | "verificationTimedOut"
 > = {
+  foundry: true,
   id: "verify.all(evaluation)",
   deadline: DeadlineKind.Work,
   reads: [
     "claim",
     "setup",
-    "sshAccess",
+    "env",
     "revision",
     "reviewWorkspace",
     "testedInput",
     "baseHead",
   ],
-  writes: ["verification"],
+  writes: ["verification", "verificationTimedOut"],
   stops: [],
   note: "every node and task command; the stop class goes to judgement",
   async run(ctx, scope, io) {
-    const { revision, baseHead: base } = ctx;
-    const input = stepsInputOf(ctx, io);
+    const { claim, setup, revision, baseHead: base } = ctx;
     assert.ok(ctx.reviewWorkspace.directory);
-    assert.equal(input.claim.execution_id, input.setup.execution_id);
-    const owners = commandOwners({ input, revision });
+    assert.equal(claim.execution_id, setup.execution_id);
+    const owners = commandOwners(claim.node_id, revision);
     const verification = await runVerificationsWithOutput({
       observe: verificationObserver(
-        io.run.spans,
+        io.ports.telemetry,
         testedCommitOf(ctx.testedInput),
-        environmentDigestsOf(input.setup.repositories),
+        environmentDigestsOf(setup.repositories),
         {
           context: VerificationContext.Evaluation,
           ownerOf: (index) => owners[index]!.id,
@@ -60,17 +60,18 @@ export const verifyAllEvaluation: Step<
       copyRepeated: true,
       tested_input: ctx.testedInput,
       deadline: io.budget.wallDeadline(),
-      context: io.run.operationContext,
-      env: input.env,
+      context: io.context,
+      env: ctx.env,
       reruns: VERIFICATION_RERUNS,
       exhausted: () => io.budget.exhausted(),
       ...(base === null
         ? {}
         : { baseline: (command: string) => base.exitOf(command) }),
     });
-    io.run.noteVerification(
-      verification.verification.results.at(-1)?.timed_out ?? false,
-    );
-    return next(scope, { verification });
+    return next(scope, {
+      verification,
+      verificationTimedOut:
+        verification.verification.results.at(-1)?.timed_out ?? false,
+    });
   },
 };

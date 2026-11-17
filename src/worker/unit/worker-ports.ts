@@ -8,6 +8,7 @@ import type { ExecutionRun } from "./execution-run.ts";
 import {
   type AgentPort,
   type CheckoutRef,
+  type ClaimPort,
   type CommonPorts,
   type EvaluationPorts,
   type EvidencePort,
@@ -284,7 +285,12 @@ export function agentPort(host: AgentHost): AgentPort {
       try {
         return ok(await host.open(workspace.directory));
       } catch (error) {
-        if (endedByBudget(host, error))
+        if (
+          endedByBudget(
+            { budget: host.budget, context: host.run.operationContext },
+            error,
+          )
+        )
           return { kind: PortResultKind.BudgetEnd };
         return host.run.failureOf(error);
       }
@@ -292,7 +298,20 @@ export function agentPort(host: AgentHost): AgentPort {
   };
 }
 
-function commonPorts(run: ExecutionRun): CommonPorts {
+function claimPort(run: ExecutionRun): ClaimPort {
+  return {
+    async check() {
+      try {
+        await run.checkClaim();
+        return ok(null);
+      } catch (error) {
+        return run.failureOf(error);
+      }
+    },
+  };
+}
+
+export function commonPorts(run: ExecutionRun): CommonPorts {
   return {
     telemetry: run.spans,
     secrets: { redact: (text) => run.redact(text) },
@@ -323,5 +342,6 @@ export function workerPorts(
     evidence: evidencePort(run),
     repository: repositoryPort(input, run),
     releaseTrees: releaseTreePort(input, run),
+    claim: claimPort(run),
   };
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import type { Context } from "../../kernel/context.ts";
+import type { CancellationContext, Context } from "../../kernel/context.ts";
 import type {
   Evidence,
   ReviewRound,
@@ -55,6 +55,7 @@ export const StepKind = {
   Next: "next",
   BudgetEnd: "budget_end",
   Closed: "closed",
+  Stop: "stop",
 } as const;
 export type StepKind = (typeof StepKind)[keyof typeof StepKind];
 export const FrameOutcome = {
@@ -83,6 +84,7 @@ export interface ExecutionCtx {
   claim: MethodClaim;
   setup: ExecutionSetup;
   sshAccess: ReadonlyMap<string, SshAccess>;
+  env: NodeJS.ProcessEnv;
   revision: Revision;
   prior: Prior;
   attemptEvidence: readonly Evidence[];
@@ -113,6 +115,7 @@ export interface ExecutionCtx {
   affectedEvidence: string | null;
   patchEvidence: readonly string[];
   judgement: EvaluationAssessment;
+  verificationTimedOut: boolean;
   stop: ExecutionStop;
   end: ExecutionEnd;
 }
@@ -126,7 +129,12 @@ export const SEED_KEYS: readonly Key[] = [
 ];
 export type ChainSeed = Partial<ExecutionCtx> &
   Pick<ExecutionCtx, "claim" | "setup" | "sshAccess" | "revision">;
-export const RUNNER_KEYS: readonly Key[] = ["completedUnits", "reports"];
+export const RUNNER_KEYS: readonly Key[] = [
+  "env",
+  "completedUnits",
+  "reports",
+  "verificationTimedOut",
+];
 const STOP_KEYS: readonly Key[] = ["stop"];
 
 export type StepResult<S, W extends Key> =
@@ -180,7 +188,44 @@ export interface Step<
   ): Promise<StepResult<S, W>>;
 }
 
-export interface ChainStep {
+export interface FoundryIo<P extends CommonPorts = CommonPorts> {
+  budget: ExecutionBudget;
+  context: CancellationContext;
+  deadline: number;
+  ports: P;
+}
+
+export type FoundryStepResult<S, W extends Key> =
+  | StepResult<S, W>
+  | {
+      kind: typeof StepKind.Stop;
+      stop: ExecutionStop;
+      patch: Partial<Pick<ExecutionCtx, W>>;
+      scope: S;
+    };
+
+export interface FoundryStep<
+  S,
+  R extends Key,
+  W extends Key,
+  P extends CommonPorts = CommonPorts,
+> {
+  foundry: true;
+  id: string;
+  deadline: DeadlineKind;
+  reads: readonly R[];
+  writes: readonly W[];
+  stops: readonly StopCode[];
+  llm?: boolean;
+  note?: string;
+  run(
+    ctx: Readonly<Pick<ExecutionCtx, R>>,
+    scope: S,
+    io: FoundryIo<P>,
+  ): Promise<FoundryStepResult<S, W>>;
+}
+
+interface ChainStepShape {
   id: string;
   deadline: DeadlineKind;
   reads: readonly Key[];
@@ -188,13 +233,25 @@ export interface ChainStep {
   stops: readonly StopCode[];
   llm?: boolean;
   note?: string;
+}
+
+export interface ChainHostStep extends ChainStepShape {
+  foundry?: undefined;
   run(ctx: never, scope: never, io: StepIo): Promise<ChainStepResult>;
 }
+
+export interface ChainFoundryStep extends ChainStepShape {
+  foundry: true;
+  run(ctx: never, scope: never, io: FoundryIo): Promise<ChainStepResult>;
+}
+
+export type ChainStep = ChainHostStep | ChainFoundryStep;
 
 export interface ChainStepResult {
   kind: StepKind;
   patch: Partial<ExecutionCtx>;
   scope: unknown;
+  stop?: ExecutionStop;
 }
 
 export type FrameEnd =
