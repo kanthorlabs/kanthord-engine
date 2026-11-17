@@ -7,6 +7,7 @@ const createInviteTable: Migration = (database) => {
       session_id TEXT NOT NULL,
       token_hash TEXT NOT NULL,
       invited_by TEXT NOT NULL,
+      invited_by_name TEXT NOT NULL,
       expires_at INTEGER NOT NULL,
       invitee_name TEXT NOT NULL
     );

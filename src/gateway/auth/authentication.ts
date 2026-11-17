@@ -27,6 +27,7 @@ import {
   mintWorkerIdentity,
 } from "../../kernel/caller-mint.ts";
 import type { ProjectBindings } from "../../project/contract.ts";
+import type { ResolvedInvite } from "../../workbench/contract.ts";
 import {
   InstancePlacement,
   type LiveInstance,
@@ -80,11 +81,6 @@ interface Claims {
   instance_id?: string;
   connection_id?: string;
   invite_id?: string;
-}
-export interface ResolvedInvite {
-  session_id: string;
-  invited_by: string;
-  expires_at: number;
 }
 interface GuestCredentials {
   guestId: string;

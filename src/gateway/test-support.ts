@@ -17,10 +17,10 @@ import type { Registration } from "../worker/contract.ts";
 import {
   Authentication,
   type AuthenticationLookups,
-  type ResolvedInvite,
 } from "./auth/authentication.ts";
 import { type GatewayConfig, gatewayConfigSchema } from "./config.ts";
 import type { InventoryCollector } from "./contract.ts";
+import type { ResolvedInvite } from "../workbench/contract.ts";
 import { gatewayMigrations } from "./migrations.ts";
 import { GatewayService } from "./service.ts";
 import type { DashboardLoader } from "./dashboard.ts";

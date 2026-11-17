@@ -148,7 +148,7 @@ import { projectEntries } from "./guest-view.ts";
 import type {
   CreatedInvite,
   InviteItem,
-  ResolvedInvite,
+  LiveInvite,
   WorkbenchInvites,
 } from "./invites.ts";
 import {
@@ -2052,7 +2052,7 @@ export class WorkbenchService implements Service {
     return host;
   }
 
-  private requireLiveInvite(guest: GuestIdentity): ResolvedInvite {
+  private requireLiveInvite(guest: GuestIdentity): LiveInvite {
     const invite = this.dependencies.invites.resolve(guest.inviteId);
     if (invite === null) throw inviteEnded();
     return invite;
@@ -2060,12 +2060,12 @@ export class WorkbenchService implements Service {
 
   async guestGet(guest: GuestIdentity) {
     const host = await this.guestHost(guest);
-    this.requireLiveInvite(guest);
+    const invite = this.requireLiveInvite(guest);
     return {
       session_id: host.id,
       title: host.manager.getSessionName() ?? null,
       members: this.conversationMembers(host),
-      owner_name: guest.invitedBy,
+      owner_name: invite.invited_by_name,
       entries: projectEntries(mergeEntries(this.memberEntries(host, false))),
       run_active: this.runActive(host),
     };
@@ -2531,9 +2531,13 @@ export class WorkbenchService implements Service {
   ): Promise<CreatedInvite> {
     const host = await this.session(sessionId);
     this.requireHost(host);
+    const requester = humanOf(caller);
     const created = this.dependencies.invites.create(
       host.id,
-      humanOf(caller).accountId,
+      {
+        accountId: requester.accountId,
+        name: requester.name.slice(NO_CHARACTERS, OWNER_NAME_MAX_LENGTH),
+      },
       body.invitee_name,
     );
     host.evidenceGrants.clear();

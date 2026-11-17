@@ -4,6 +4,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import type { Store } from "../kernel/store.ts";
 import {
+  type ResolvedInvite,
   WORKBENCH_INVITE_LIFETIME_MS,
   WORKBENCH_INVITE_NAME_MAX_LENGTH,
   WORKBENCH_INVITE_PREFIX,
@@ -26,10 +27,13 @@ export interface CreatedInvite extends InviteItem {
   invite_token: string;
 }
 
-export interface ResolvedInvite {
-  session_id: string;
-  invited_by: string;
-  expires_at: number;
+export interface Inviter {
+  accountId: string;
+  name: string;
+}
+
+export interface LiveInvite extends ResolvedInvite {
+  invited_by_name: string;
 }
 
 export interface JoinedInvite {
@@ -82,7 +86,7 @@ export class WorkbenchInvites {
 
   create(
     sessionId: string,
-    invitedBy: string,
+    inviter: Inviter,
     inviteeName: string,
   ): CreatedInvite {
     const name = inviteNameOf(inviteeName);
@@ -98,9 +102,17 @@ export class WorkbenchInvites {
         .run(sessionId, now);
       tx.database
         .prepare(
-          "INSERT INTO workbench_invite (id, session_id, token_hash, invited_by, expires_at, invitee_name) VALUES (?, ?, ?, ?, ?, ?)",
+          "INSERT INTO workbench_invite (id, session_id, token_hash, invited_by, invited_by_name, expires_at, invitee_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
-        .run(id, sessionId, tokenHashOf(token), invitedBy, expiresAt, name);
+        .run(
+          id,
+          sessionId,
+          tokenHashOf(token),
+          inviter.accountId,
+          inviter.name,
+          expiresAt,
+          name,
+        );
     });
     return {
       id,
@@ -131,14 +143,14 @@ export class WorkbenchInvites {
     };
   }
 
-  resolve(inviteId: string): ResolvedInvite | null {
+  resolve(inviteId: string): LiveInvite | null {
     const row = this.store.transaction(
       (tx) =>
         tx.database
           .prepare(
-            "SELECT session_id, invited_by, expires_at FROM workbench_invite WHERE id = ? AND expires_at > ?",
+            "SELECT session_id, invited_by, invited_by_name, expires_at FROM workbench_invite WHERE id = ? AND expires_at > ?",
           )
-          .get(inviteId, Date.now()) as ResolvedInvite | undefined,
+          .get(inviteId, Date.now()) as LiveInvite | undefined,
     );
     return row === undefined ? null : { ...row };
   }

@@ -10,6 +10,11 @@ import {
 import { reasoningEffortSchema } from "../agent/contract.ts";
 import { COPY_REPORT_TEXT_MAX_LENGTH } from "../llm/contract.ts";
 
+export interface ResolvedInvite {
+  session_id: string;
+  invited_by: string;
+  expires_at: number;
+}
 export const WORKBENCH_SERVICE_NAME = "workbench";
 export const WORKBENCH_SESSION_PREFIX = "workbench_session";
 export const WORKBENCH_DIRECTORY_NAME = "workbench";

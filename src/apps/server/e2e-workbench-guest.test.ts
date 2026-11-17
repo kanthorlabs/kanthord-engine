@@ -210,6 +210,7 @@ async function guestEntries(fixture: Fixture, token: string) {
   assert.equal(response.status, HttpStatus.OK);
   return (await response.json()) as {
     session_id: string;
+    owner_name: string;
     entries: GuestEntryView[];
     members: { session_id: string; agent_name: string; display_name: string }[];
   };
@@ -307,6 +308,7 @@ test(
     const joined = await joinGuest(second, created, GUEST_NAME);
     const view = await guestEntries(second, joined.token);
     assert.equal(view.session_id, sessionId);
+    assert.equal(view.owner_name, identity.name);
     const text = JSON.stringify(view.entries);
     assert.ok(text.includes(GREETING_PREFIX));
     assert.ok(!text.includes(WORKBENCH_OPENING_TEXT));
@@ -502,11 +504,13 @@ test(
       invitedBy: identity.accountId,
       jti: "race",
     });
-    const opening = fixture.workbenchService.guestStream(
-      checked,
-      undefined,
-      background,
-    );
+    let opened: Response | undefined;
+    const opening = fixture.workbenchService
+      .guestStream(checked, undefined, background)
+      .then((response) => {
+        opened = response;
+        return response;
+      });
     fixture.workbenchService.inviteRevoke(created.id);
     await assert.rejects(opening, (error: unknown) => {
       assert.ok(error instanceof OperationError);
@@ -519,6 +523,14 @@ test(
       { kind: AuthorKind.Owner, name: "Ulrich" },
       GUEST_NOTE,
     );
+    const feed = fixture.workbenchService["feeds"].get(host.id);
+    assert.ok(feed);
+    assert.equal(
+      [...feed["streams"]].filter((stream) => stream.inviteId === created.id)
+        .length,
+      NO_ITEMS,
+    );
+    assert.equal(opened, undefined);
   },
 );
 
