@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
-import { DeadlineKind, type Step } from "./chain.ts";
-import { next, stepsInputOf } from "./step-support.ts";
+import { DeadlineKind } from "./chain.ts";
+import type { Step } from "./chain-host.ts";
+import { next } from "./step-support.ts";
 import { VerificationMemo } from "./verification-memo.ts";
 
 export const stateOpen: Step<
   unknown,
   | "claim"
   | "setup"
-  | "sshAccess"
   | "revision"
   | "prior"
   | "workspace"
@@ -24,7 +24,6 @@ export const stateOpen: Step<
   reads: [
     "claim",
     "setup",
-    "sshAccess",
     "revision",
     "prior",
     "workspace",
@@ -42,7 +41,8 @@ export const stateOpen: Step<
     assert.ok(ctx.baseHead);
     return next(scope, {
       state: {
-        input: stepsInputOf(ctx, io),
+        input: { claim: ctx.claim, setup: ctx.setup, env: io.host.env },
+        workspaceKey: io.host.workspaces.nodeKey(ctx.claim.node_id),
         cancel: io.run.operationContext,
         ports: io.ports,
         revision: ctx.revision,

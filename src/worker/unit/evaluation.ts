@@ -2,11 +2,11 @@ import type { ExecutionBudget } from "./budget.ts";
 import { evaluationChain } from "./chain-evaluation.ts";
 import { readPinnedRevision } from "./node-reads.ts";
 import { runChain } from "./chain-runner.ts";
-import { hostOf, seedOf } from "./step-support.ts";
+import { hostOf, seedOf } from "./chain-host.ts";
 import type { ExecutionRun } from "./execution-run.ts";
 import { EndReason, type ExecutionEnd } from "./execution-stop.ts";
 import { EvaluationStage } from "./rework-cause.ts";
-import type { StepsInput } from "./steps-implement.ts";
+import type { HostInput } from "./chain-host.ts";
 import { ActionResultKind } from "../contract.ts";
 import { type AgentOpener, evaluationPorts } from "./worker-ports.ts";
 
@@ -27,7 +27,7 @@ export async function requestAndRelease(
 }
 
 export async function runEvaluation(
-  input: StepsInput,
+  input: HostInput,
   run: ExecutionRun,
   budget: ExecutionBudget,
   openAgent: AgentOpener,

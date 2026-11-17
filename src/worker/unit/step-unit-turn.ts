@@ -10,6 +10,7 @@ export const unitTurn: FoundryStep<UnitScope, "state", never, ImplementPorts> =
   {
     foundry: true,
     id: "unit.turn",
+    ports: ["claim.check", "secrets.redact"],
     deadline: DeadlineKind.Work,
     reads: ["state"],
     writes: [],

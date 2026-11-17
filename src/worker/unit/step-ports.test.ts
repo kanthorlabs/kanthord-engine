@@ -31,7 +31,8 @@ import {
 import type { MethodClients } from "./method-clients.ts";
 import { fetchAtRelease } from "./base-refresh.ts";
 import { releaseVerify } from "./step-release-verify.ts";
-import type { StepsInput, StepsState } from "./steps-implement.ts";
+import type { StartState } from "./steps-implement.ts";
+import type { HostInput } from "./chain-host.ts";
 import { TreeSource } from "./foundry-ports.ts";
 import type { WorkspaceRoot } from "./workspace.ts";
 import { workerPorts } from "./worker-ports.ts";
@@ -77,6 +78,7 @@ function harness(t: TestContext, ports: Partial<ImplementPorts>) {
     budget,
     context: run.operationContext,
     deadline: budget.wallDeadline(),
+    env: {},
     ports: { log: { log: () => {} }, ...ports } as ImplementPorts,
   } satisfies FoundryIo<ImplementPorts>;
   return { claim, run, budget, io };
@@ -127,7 +129,7 @@ test("a failed release tree take stops with the code of the port answer and give
           content: { verifications: ["true"] },
           tasks: [],
         },
-      } as unknown as StepsState,
+      } as unknown as StartState,
     },
     null,
     h.io,
@@ -161,7 +163,7 @@ test("a base fetch that git refuses stops with the redacted git detail and the f
     },
     sshAccess: new Map([[checkout.binding_id, {} as SshAccess]]),
     env: hostEnvironment(),
-  } as unknown as StepsInput;
+  } as unknown as HostInput;
   await assert.rejects(
     fetchAtRelease(
       {
@@ -169,7 +171,7 @@ test("a base fetch that git refuses stops with the redacted git detail and the f
         agent: { budget: h.budget },
         cancel: h.run.operationContext,
         input,
-      } as unknown as StepsState,
+      } as unknown as StartState,
       workerPorts(input, h.run),
     ),
     (error) => {

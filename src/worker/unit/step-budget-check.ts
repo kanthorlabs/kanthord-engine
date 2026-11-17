@@ -4,6 +4,7 @@ import { budgetEnd, next } from "./step-support.ts";
 export const budgetCheck: FoundryStep<unknown, "state", never> = {
   foundry: true,
   id: "budget.check",
+  ports: [],
   deadline: DeadlineKind.Work,
   reads: ["state"],
   writes: [],

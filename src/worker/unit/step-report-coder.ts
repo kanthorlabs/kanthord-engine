@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { DeadlineKind, type Step } from "./chain.ts";
+import { DeadlineKind } from "./chain.ts";
+import type { Step } from "./chain-host.ts";
 import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 import { EndReason } from "./execution-stop.ts";
 import { type ImplementPorts, PortResultKind } from "./foundry-ports.ts";
@@ -19,7 +20,7 @@ export const reportCoder: Step<
   reads: ["claim", "state", "reports"],
   writes: [],
   stops: [],
-  note: "port: evidence.submit; one evidence with the final text of each unit; skipped with no text",
+  note: "one evidence with the final text of each unit; skipped with no text",
   async run(ctx, scope, io) {
     assert.ok(ctx.state.checkouts.length > NO_ITEMS);
     if (ctx.reports.size === NO_ITEMS) return next(scope);

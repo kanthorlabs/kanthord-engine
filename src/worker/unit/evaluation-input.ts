@@ -26,7 +26,7 @@ import {
   type ExamineCheckout,
   WorkspaceKind,
 } from "./workspace-layout.ts";
-import type { StepsInput } from "./steps-implement.ts";
+import type { HostInput } from "./chain-host.ts";
 import type { TestedInput } from "./verification.ts";
 import type {
   PlacedAsset,
@@ -38,7 +38,7 @@ import { ExecutionBudget } from "./budget.ts";
 import { type ExecutionCtx, StepKind } from "./chain.ts";
 import { evaluationPrepareNodes } from "./chain-evaluation.ts";
 import { runNodes } from "./chain-runner.ts";
-import { hostOf, seedOf } from "./step-support.ts";
+import { hostOf, seedOf } from "./chain-host.ts";
 import { ExecutionIntent } from "../contract.ts";
 import { AFFECTED_SUBJECT } from "./affected.ts";
 import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
@@ -158,7 +158,7 @@ export interface ReviewInputs {
 }
 
 export async function reviewWorkspaceOf(
-  input: StepsInput,
+  input: HostInput,
   run: ExecutionRun,
   { evidence, round }: ReviewInputs,
 ) {
@@ -257,7 +257,7 @@ interface RepositorySnapshot {
 }
 
 interface ReviewScopeContext {
-  input: StepsInput;
+  input: HostInput;
   run: ExecutionRun;
   round: ReviewRound;
   deadline: number;
@@ -396,7 +396,7 @@ async function originScope(
 }
 
 async function reviewScopeOf(
-  input: StepsInput,
+  input: HostInput,
   run: ExecutionRun,
   workspace: { directory: string; checkouts: readonly ExamineCheckout[] },
   snapshots: readonly RepositorySnapshot[],
@@ -490,7 +490,7 @@ export async function placeReviewAssets(
 }
 
 export async function prepareEvaluation(
-  input: StepsInput,
+  input: HostInput,
   run: ExecutionRun,
   intent: ExecutionIntent,
   evidence: readonly Evidence[],

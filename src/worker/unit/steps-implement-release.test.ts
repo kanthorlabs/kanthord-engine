@@ -302,12 +302,12 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
     const reached = task("reached", "false");
     const h = await fixture(t, [reached, task("stopped", "false")], []);
     const bodies = recordReleases(h);
-    const checkout = h.checkouts[0]!;
     const runner: TaskRunner = async (state, unit) => {
       if (unit.id !== reached.id) {
         writeFileSync(join(state.root, PARTIAL_WORK), PARTIAL_WORK);
         throw new Error(UNKNOWN_ERROR);
       }
+      const checkout = state.checkouts[0]!;
       writeFileSync(join(checkout.directory, REACHED_WORK), REACHED_WORK);
       const head = await commitWork(
         state.input.env,

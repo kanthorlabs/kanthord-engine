@@ -267,7 +267,7 @@ async function verifyInReleaseClones(
   verification: ReleaseVerification,
 ): Promise<ReleaseCheck> {
   const { ports, commands } = verification;
-  const key = state.input.workspaces.nodeKey(state.input.claim.node_id);
+  const key = state.workspaceKey;
   const cleanup = state.agent.budget.cleanupContext(state.cancel);
   const trees: CommandTree[] = [];
   try {

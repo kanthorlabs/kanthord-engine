@@ -12,6 +12,7 @@ export const releaseVerify: FoundryStep<
 > = {
   foundry: true,
   id: "release.verify",
+  ports: ["releaseTrees.take", "releaseTrees.takeBase", "releaseTrees.give"],
   deadline: DeadlineKind.Work,
   reads: ["state"],
   writes: ["releaseCheck", "verificationTimedOut"],
@@ -23,7 +24,7 @@ export const releaseVerify: FoundryStep<
     "environment_failed/affected_invalid",
     "environment_failed/affected_timeout",
   ],
-  note: "port: releaseTrees.take, releaseTrees.takeBase, releaseTrees.give; release trees, setup, every command, affected tests; gives the trees back; budget end",
+  note: "release trees, setup, every command, affected tests; gives the trees back; budget end",
   async run({ state }, scope, io) {
     const noted = () => ({ verificationTimedOut: state.verificationTimedOut });
     try {

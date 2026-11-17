@@ -38,7 +38,7 @@ import { readDependencies } from "./node-reads.ts";
 import { readSetupRecord } from "./setup-record.ts";
 import { endedByBudget } from "./step-support.ts";
 import { mergedBranchesOf, repositoryOf } from "./setup-repository.ts";
-import type { StepsInput } from "./steps-implement.ts";
+import type { HostInput } from "./chain-host.ts";
 import { PoolClass, prepareTree } from "./tree-pool.ts";
 import {
   type LeftoverRepository,
@@ -104,7 +104,7 @@ function evidencePort(run: ExecutionRun): EvidencePort {
   };
 }
 
-function repositoryPort(input: StepsInput, run: ExecutionRun): RepositoryPort {
+function repositoryPort(input: HostInput, run: ExecutionRun): RepositoryPort {
   return {
     async fetchBase(checkout, call) {
       try {
@@ -221,10 +221,7 @@ export function baseTreePort(host: BaseTreeHost): BaseTreePort {
   };
 }
 
-function releaseTreePort(
-  input: StepsInput,
-  run: ExecutionRun,
-): ReleaseTreePort {
+function releaseTreePort(input: HostInput, run: ExecutionRun): ReleaseTreePort {
   const { workspaces } = input;
   const nodeId = input.claim.node_id;
   const key = workspaces.nodeKey(nodeId);
@@ -438,14 +435,14 @@ export function examinePorts(host: AgentHost): ExaminePorts {
 }
 
 export function implementHostPorts(
-  input: StepsInput,
+  input: HostInput,
   host: AgentHost,
 ): ImplementHostPorts {
   return { ...workerPorts(input, host.run), agent: agentPort(host) };
 }
 
 export function workerPorts(
-  input: StepsInput,
+  input: HostInput,
   run: ExecutionRun,
 ): ImplementPorts {
   return {

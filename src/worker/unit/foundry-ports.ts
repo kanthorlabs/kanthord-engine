@@ -162,3 +162,41 @@ export interface ExaminePorts extends CommonPorts {
   agent: AgentPort;
   dependencies: DependencyPort;
 }
+
+type CalledPorts<P> = Omit<P, "telemetry" | "log">;
+
+export type PortNameOf<P> = {
+  [K in keyof CalledPorts<P> & string]: `${K}.${keyof P[K] & string}`;
+}[keyof CalledPorts<P> & string];
+
+export type PortName = string;
+
+export const IMPLEMENT_PORTS = [
+  "secrets.redact",
+  "evidence.submit",
+  "repository.fetchBase",
+  "releaseTrees.take",
+  "releaseTrees.takeBase",
+  "releaseTrees.give",
+  "releaseTrees.giveBase",
+  "claim.check",
+] as const satisfies readonly PortNameOf<ImplementPorts>[];
+
+export const IMPLEMENT_HOST_PORTS = [
+  ...IMPLEMENT_PORTS,
+  "agent.open",
+] as const satisfies readonly PortNameOf<ImplementHostPorts>[];
+
+export const EVALUATION_PORTS = [
+  "secrets.redact",
+  "evidence.submit",
+  "agent.open",
+  "dependencies.read",
+] as const satisfies readonly PortNameOf<EvaluationPorts>[];
+
+export const EXAMINE_PORTS = [
+  "secrets.redact",
+  "evidence.submit",
+  "agent.open",
+  "dependencies.read",
+] as const satisfies readonly PortNameOf<ExaminePorts>[];

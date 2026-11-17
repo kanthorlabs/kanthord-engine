@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import type { Revision, TaskContent } from "../../mission/contract.ts";
-import type { ExecutionSetup, RepositoryTransport } from "../contract.ts";
-import type { SshAccess } from "../../repository/contract.ts";
-import type { WorkspaceRoot } from "./workspace.ts";
+import type { ExecutionSetup } from "../contract.ts";
 import {
   workRepositoriesOf,
   type WorkspaceCheckout,
@@ -95,26 +93,25 @@ export type TaskResult =
 export interface StepsInput {
   claim: MethodClaim;
   setup: ExecutionSetup;
-  workspaces: WorkspaceRoot;
-  transport: RepositoryTransport;
-  sshAccess: ReadonlyMap<string, SshAccess>;
   env: NodeJS.ProcessEnv;
 }
-export interface StepsState {
+
+export interface ProgressCtx {
+  unchangedTurns: number;
+  lastVerification: VerificationFacts;
+  revisionCount: number;
+}
+
+export interface StepsState extends ProgressCtx {
   input: StepsInput;
   cancel: CancellationContext;
   ports: CommonPorts;
   agent: NativeAgent;
   revision: Revision;
   root: string;
+  workspaceKey: string;
   checkouts: WorkspaceCheckout[];
   nodeBranch: string;
-  verdict: Verdict | null;
-  cleared: string | null;
-  unchangedTurns: number;
-  refreshed: RefreshResult | null;
-  lastVerification: VerificationFacts;
-  revisionCount: number;
   setup: SetupEntry[];
   affectedTests: AffectedTest[];
   base: BaseHead;
@@ -123,6 +120,12 @@ export interface StepsState {
   memo: VerificationMemo;
   verificationTimedOut: boolean;
   task?: TaskContent;
+}
+
+export interface StartState extends StepsState {
+  verdict: Verdict | null;
+  cleared: string | null;
+  refreshed: RefreshResult | null;
 }
 
 export function taskWork(state: StepsState, task: TaskContent) {
@@ -270,7 +273,7 @@ export interface StartCheck {
 }
 
 async function nodeInstructionOf(
-  state: StepsState,
+  state: StartState,
 ): Promise<NodeInstruction | null> {
   if (state.verdict === null)
     return state.cleared === null
@@ -309,7 +312,7 @@ async function nodeInstructionOf(
   };
 }
 
-export async function startCheck(state: StepsState): Promise<StartCheck> {
+export async function startCheck(state: StartState): Promise<StartCheck> {
   assert.ok(state.checkouts.length > NO_CHECKOUTS);
   const node = await nodeInstructionOf(state);
   const done = await readDoneRecords(state);

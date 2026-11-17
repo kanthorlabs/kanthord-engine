@@ -10,13 +10,14 @@ import { runVerifications } from "./verification.ts";
 
 export const verifyNode: FoundryStep<
   unknown,
-  "claim" | "setup" | "env" | "revision" | "reviewWorkspace",
+  "claim" | "setup" | "revision" | "reviewWorkspace",
   "nodeVerification" | "verificationTimedOut"
 > = {
   foundry: true,
   id: "verify.node",
+  ports: [],
   deadline: DeadlineKind.Work,
-  reads: ["claim", "setup", "env", "revision", "reviewWorkspace"],
+  reads: ["claim", "setup", "revision", "reviewWorkspace"],
   writes: ["nodeVerification", "verificationTimedOut"],
   stops: [],
   note: "node commands at the base heads; skipped with no checkout",
@@ -41,7 +42,7 @@ export const verifyNode: FoundryStep<
               tested_input: workspace.tested_input,
               deadline: io.budget.wallDeadline(),
               context: io.context,
-              env: ctx.env,
+              env: io.env,
             });
       return next(scope, {
         nodeVerification,

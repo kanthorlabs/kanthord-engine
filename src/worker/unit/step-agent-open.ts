@@ -31,11 +31,11 @@ export const agentOpenImplement: FoundryStep<
 > = {
   foundry: true,
   id: "agent.open",
+  ports: ["agent.open"],
   deadline: DeadlineKind.Work,
   reads: ["claim", "setup", "workspace"],
   writes: ["agent"],
   stops: ["operation_failed"],
-  note: "port: agent.open",
   run(ctx, scope, io) {
     return stopsReturned(scope, async () => {
       const opened = await io.ports.agent.open(
@@ -91,11 +91,12 @@ export const agentOpenExamine: FoundryStep<
 > = {
   foundry: true,
   id: "agent.open",
+  ports: ["agent.open"],
   deadline: DeadlineKind.Work,
   reads: ["claim", "setup", "reviewWorkspace"],
   writes: ["agent"],
   stops: ["operation_failed"],
-  note: "port: agent.open; budget end after the open",
+  note: "budget end after the open",
   run(ctx, scope, io) {
     return stopsReturned(scope, () =>
       budgetMapped(io, scope, async () => {

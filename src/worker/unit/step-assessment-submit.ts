@@ -1,10 +1,6 @@
 import { AssessmentResult, NodeState } from "../../mission/contract.ts";
-import {
-  DeadlineKind,
-  type ExecutionCtx,
-  type Step,
-  StepKind,
-} from "./chain.ts";
+import { DeadlineKind, type ExecutionCtx, StepKind } from "./chain.ts";
+import type { Step } from "./chain-host.ts";
 import { requestAndRelease } from "./evaluation.ts";
 import { EndReason, ExecutionEndKind } from "./execution-stop.ts";
 import { reworkCauseOf } from "./rework-cause.ts";

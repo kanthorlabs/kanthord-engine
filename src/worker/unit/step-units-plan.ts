@@ -1,4 +1,5 @@
-import { DeadlineKind, type Step } from "./chain.ts";
+import { DeadlineKind } from "./chain.ts";
+import type { Step } from "./chain-host.ts";
 import { next } from "./step-support.ts";
 import { startCheck } from "./steps-implement.ts";
 

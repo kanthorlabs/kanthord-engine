@@ -3,14 +3,11 @@ import type { TaskContent } from "../../mission/contract.ts";
 import { BudgetLimit } from "../../scheduler/contract.ts";
 import { ExecutionBudget } from "./budget.ts";
 import { loopNode, StepKind, stepNode } from "./chain.ts";
-import {
-  implementChain,
-  implementWorkspaceNodes,
-  releaseGateFrame,
-  revisionsFrame,
-} from "./chain-implement.ts";
+import { implementChain, implementWorkspaceNodes } from "./chain-implement.ts";
+import { releaseGateFrame, revisionsFrame } from "./foundry-implement.ts";
 import { type ChainIo, runChain, runNodes } from "./chain-runner.ts";
 import type { ExecutionRun } from "./execution-run.ts";
+import type { ImplementHostPorts } from "./foundry-ports.ts";
 import {
   EndReason,
   type ExecutionEnd,
@@ -18,28 +15,31 @@ import {
 } from "./execution-stop.ts";
 import { type ReleaseGate, ReleaseGateKind } from "./release-gate.ts";
 import { doneRecordPut } from "./step-done-record-put.ts";
-import { hostOf, seedOf } from "./step-support.ts";
+import { type HostInput, hostOf, seedOf } from "./chain-host.ts";
 import { openUnit, unitScopeOf } from "./step-unit-enter.ts";
 import {
-  type StepsInput,
-  type StepsState,
+  type StartState,
   type TaskResult,
   TaskResultKind,
   type TaskRunner,
 } from "./steps-implement.ts";
 import { Phase } from "./telemetry.ts";
 import { WorkspaceKind } from "./workspace-layout.ts";
-import { workerPorts } from "./worker-ports.ts";
+import { implementHostPorts, workerPorts } from "./worker-ports.ts";
 
 const FIRST_UNIT = 0;
 
-export function stateIo(state: HostedState): ChainIo {
+export function stateIo(state: HostedState): ChainIo<ImplementHostPorts> {
   return {
     run: state.run,
     budget: state.agent.budget,
     resources: new AsyncDisposableStack(),
     host: hostOf(state.input),
-    ports: workerPorts(state.input, state.run),
+    ports: implementHostPorts(state.input, {
+      run: state.run,
+      budget: state.agent.budget,
+      open: () => assert.fail("The state holds the agent."),
+    }),
   };
 }
 
@@ -94,12 +94,13 @@ export async function runTask(
   return scope.result;
 }
 
-export interface HostedState extends StepsState {
+export interface HostedState extends StartState {
   run: ExecutionRun;
+  input: HostInput;
 }
 
 export async function prepareStepsWorkspace(
-  input: StepsInput,
+  input: HostInput,
   run: ExecutionRun,
 ) {
   const resources = new AsyncDisposableStack();
@@ -125,6 +126,7 @@ export async function prepareStepsWorkspace(
     assert.ok(ctx.baseHead);
     return {
       ...ctx.workspace,
+      workspaceKey: input.workspaces.nodeKey(input.claim.node_id),
       nodeBranch: input.claim.node_branch,
       setup: ctx.setupEntries,
       affectedTests: ctx.affectedTests,

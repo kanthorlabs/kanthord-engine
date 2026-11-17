@@ -33,7 +33,12 @@ import type { Chain } from "./chain.ts";
 import { evaluationChain } from "./chain-evaluation.ts";
 import { examineChain } from "./chain-examine.ts";
 import { implementChain } from "./chain-implement.ts";
-import { executionBoundary, runChain } from "./chain-runner.ts";
+import {
+  type ChainIo,
+  executionBoundary,
+  runChain,
+  type WalkInput,
+} from "./chain-runner.ts";
 import type { CommonPorts } from "./foundry-ports.ts";
 import {
   type AgentHost,
@@ -146,8 +151,7 @@ export async function runNativeExecution(
         input,
         agent: { run, budget, open },
       });
-      return runChain(
-        hosted.chain,
+      return hosted(
         {
           seed: {
             claim: input.claim,
@@ -165,7 +169,6 @@ export async function runNativeExecution(
             transport: input.transport,
             env: input.env,
           },
-          ports: hosted.ports,
         },
       );
     });
@@ -202,9 +205,16 @@ interface ChainHost {
   agent: AgentHost;
 }
 
-interface HostedChain {
-  chain: Chain;
-  ports: CommonPorts;
+type HostedChain = (
+  input: WalkInput,
+  io: Omit<ChainIo, "ports">,
+) => Promise<ExecutionEnd>;
+
+function hostedOf<P extends CommonPorts>(
+  built: Chain<P>,
+  ports: P,
+): HostedChain {
+  return (input, io) => runChain(built, input, { ...io, ports });
 }
 
 function hostedChainOf(
@@ -214,10 +224,10 @@ function hostedChainOf(
 ): HostedChain {
   const { input, agent } = host;
   if (method === WorkerMethod.Evaluation)
-    return { chain: evaluationChain(), ports: evaluationPorts(agent) };
+    return hostedOf(evaluationChain(), evaluationPorts(agent));
   if (intent === ExecutionIntent.Examine)
-    return { chain: examineChain(), ports: examinePorts(agent) };
-  return { chain: implementChain(), ports: implementHostPorts(input, agent) };
+    return hostedOf(examineChain(), examinePorts(agent));
+  return hostedOf(implementChain(), implementHostPorts(input, agent));
 }
 
 export function environmentDigestsOf(

@@ -30,11 +30,11 @@ export const evidencePublishVerification: FoundryStep<
 > = {
   foundry: true,
   id: "evidence.publish(verification)",
+  ports: ["evidence.submit"],
   deadline: DeadlineKind.Work,
   reads: ["verification"],
   writes: ["verificationEvidence"],
   stops: [],
-  note: "port: evidence.submit",
   run(ctx, scope, io) {
     return stopsReturned(scope, async () => {
       const verification = ctx.verification.verification;
@@ -56,11 +56,12 @@ export const evidencePublishAffected: FoundryStep<
 > = {
   foundry: true,
   id: "evidence.publish(affected)",
+  ports: ["evidence.submit"],
   deadline: DeadlineKind.Work,
   reads: ["affected"],
   writes: ["affectedEvidence"],
   stops: [],
-  note: "port: evidence.submit; only when the affected step holds a document",
+  note: "only when the affected step holds a document",
   run(ctx, scope, io) {
     return stopsReturned(scope, async () => {
       const document = ctx.affected?.document;
@@ -82,11 +83,11 @@ export const evidencePublishPatches: FoundryStep<
 > = {
   foundry: true,
   id: "evidence.publish(patches)",
+  ports: ["evidence.submit"],
   deadline: DeadlineKind.Work,
   reads: ["placed"],
   writes: ["patchEvidence"],
   stops: [],
-  note: "port: evidence.submit",
   run(ctx, scope, io) {
     return stopsReturned(scope, async () => {
       const patchEvidence: string[] = [];

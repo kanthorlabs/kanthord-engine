@@ -1,10 +1,10 @@
 import {
   DeadlineKind,
   type ExecutionCtx,
-  type Step,
   StepKind,
   type StepResult,
 } from "./chain.ts";
+import type { Step } from "./chain-host.ts";
 import type { ExecutionEnd } from "./execution-stop.ts";
 
 const NO_UNITS = 0;

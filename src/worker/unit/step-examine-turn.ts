@@ -33,6 +33,7 @@ export const examineTurn: FoundryStep<
 > = {
   foundry: true,
   id: "examine.turn",
+  ports: ["evidence.submit"],
   deadline: DeadlineKind.Work,
   reads: [
     "agent",
@@ -46,7 +47,7 @@ export const examineTurn: FoundryStep<
   writes: [],
   stops: ["report_absent", "provider_failed"],
   llm: true,
-  note: "port: evidence.submit; Examine; budget end after the turn; submits the report evidence",
+  note: "Examine; budget end after the turn; submits the report evidence",
   run(ctx, scope, io) {
     return stopsReturned(scope, () =>
       budgetMapped(io, scope, async () => {

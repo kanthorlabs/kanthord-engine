@@ -1,5 +1,7 @@
 import type { Context } from "../../kernel/context.ts";
-import { DeadlineKind, type Step, type StopCode } from "./chain.ts";
+import type { SshAccess } from "../../repository/contract.ts";
+import { DeadlineKind, type StopCode } from "./chain.ts";
+import type { Step, StepHost } from "./chain-host.ts";
 import { headCommit } from "./local-git.ts";
 import { GitStep, withinGit } from "./method-telemetry.ts";
 import { readPushRecord, writePushRecord } from "./push-record.ts";
@@ -12,14 +14,21 @@ const STOPS: readonly StopCode[] = [
   "operation_failed/repository.node_branch.taken",
 ];
 
+interface PushCtx {
+  state: StepsState;
+  sshAccess: ReadonlyMap<string, SshAccess>;
+}
+
 async function pushNodeBranches(
-  state: StepsState,
+  ctx: PushCtx,
+  host: StepHost,
   context: Context,
 ): Promise<void> {
+  const { state } = ctx;
   const remaining = () => state.input.claim.expired_at - Date.now();
   for (const checkout of state.checkouts) {
     const key = {
-      nodeKey: state.input.workspaces.nodeKey(state.input.claim.node_id),
+      nodeKey: host.workspaces.nodeKey(state.input.claim.node_id),
       nodeBranch: state.nodeBranch,
       bindingId: checkout.binding_id,
     };
@@ -33,41 +42,41 @@ async function pushNodeBranches(
       confirmed: readPushRecord(key)?.confirmed ?? null,
       pending: head,
     });
-    await state.input.transport.pushNodeBranch(
+    await host.transport.pushNodeBranch(
       checkout.directory,
       state.nodeBranch,
       context,
       remaining(),
-      sshAccessOf(state.input.sshAccess, checkout.binding_id),
+      sshAccessOf(ctx.sshAccess, checkout.binding_id),
     );
     writePushRecord(key, { confirmed: head, pending: null });
   }
 }
 
-export const branchPush: Step<unknown, "state", never> = {
+export const branchPush: Step<unknown, "state" | "sshAccess", never> = {
   id: "branch.push",
   deadline: DeadlineKind.Cleanup,
-  reads: ["state"],
+  reads: ["state", "sshAccess"],
   writes: [],
   stops: STOPS,
   note: "per checkout; push record around each push",
-  async run({ state }, scope, io) {
+  async run(ctx, scope, io) {
     await withinGit(io.spans, GitStep.Push, () =>
-      pushNodeBranches(state, io.context),
+      pushNodeBranches(ctx, io.host, io.context),
     );
     return next(scope);
   },
 };
 
-export const branchPushStop: Step<unknown, "state", never> = {
+export const branchPushStop: Step<unknown, "state" | "sshAccess", never> = {
   id: "branch.push(stop)",
   deadline: DeadlineKind.Cleanup,
-  reads: ["state"],
+  reads: ["state", "sshAccess"],
   writes: [],
   stops: [],
   note: "per checkout; no worker.git span; a failure logs checkpoint failed",
-  async run({ state }, scope, io) {
-    await pushNodeBranches(state, io.context);
+  async run(ctx, scope, io) {
+    await pushNodeBranches(ctx, io.host, io.context);
     return next(scope);
   },
 };

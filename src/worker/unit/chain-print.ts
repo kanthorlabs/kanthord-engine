@@ -9,6 +9,7 @@ import {
   NodeKind,
   SEED_KEYS,
 } from "./chain.ts";
+import { Phase } from "./telemetry.ts";
 
 const INDENT = "  ";
 const NOTE_COLUMN = 44;
@@ -27,6 +28,9 @@ function stepNote(step: ChainStep): string {
     ...(step.deadline === DeadlineKind.Cleanup ? ["[cleanup]"] : []),
   ];
   const texts = [
+    ...(step.foundry && step.ports.length
+      ? [`port: ${step.ports.join(", ")}`]
+      : []),
     ...(step.note ? [step.note] : []),
     ...(step.stops.length ? [`stop ${step.stops.join(", ")}`] : []),
   ];
@@ -61,12 +65,18 @@ function budgetEndLines(built: Chain): string[] {
   ];
 }
 
+function phaseNote(built: Chain, phase: Phase): string {
+  return phase === Phase.Tasks && built.tasks
+    ? `one call: ${built.tasks.name}(input, host)`
+    : "";
+}
+
 export function printChain(built: Chain): string {
   return [
     `chain ${built.id}`,
     line(CHAIN_DEPTH, `seed ${SEED_KEYS.join(", ")}`, ""),
     ...built.phases.flatMap(({ phase, nodes }) => [
-      line(CHAIN_DEPTH, `phase ${phase}`, ""),
+      line(CHAIN_DEPTH, `phase ${phase}`, phaseNote(built, phase)),
       ...nodeLines(nodes, NODE_DEPTH),
     ]),
     ...budgetEndLines(built),

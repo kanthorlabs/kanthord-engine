@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { AssetKind } from "../../mission/contract.ts";
-import { DeadlineKind, type Step } from "./chain.ts";
-import { next, stepsInputOf, wallDeadlineOf } from "./step-support.ts";
+import { DeadlineKind } from "./chain.ts";
+import type { Step } from "./chain-host.ts";
+import { next, wallDeadlineOf } from "./step-support.ts";
+import { hostInputOf } from "./chain-host.ts";
 import { restoreCheckout } from "./turn-gate.ts";
 import { WorkspaceKind } from "./workspace-layout.ts";
 
@@ -23,7 +25,7 @@ export const workspaceNode: Step<
   ],
   note: "one coder checkout per binding at the node branch; restore to the read head",
   async run(ctx, scope, io) {
-    const input = stepsInputOf(ctx, io);
+    const input = hostInputOf(ctx, io);
     assert.ok(input.setup.repositories.length > NO_CHECKOUTS);
     assert.equal(input.claim.execution_id, input.setup.execution_id);
     const pushed = new Set(

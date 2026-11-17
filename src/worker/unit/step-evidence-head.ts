@@ -1,4 +1,5 @@
-import { DeadlineKind, type Step } from "./chain.ts";
+import { DeadlineKind } from "./chain.ts";
+import type { Step } from "./chain-host.ts";
 import { EndReason } from "./execution-stop.ts";
 import { type ImplementPorts, PortResultKind } from "./foundry-ports.ts";
 import { headCommit } from "./local-git.ts";
@@ -16,7 +17,7 @@ export const evidenceHead: Step<
   reads: ["claim", "state"],
   writes: [],
   stops: [],
-  note: "port: evidence.submit; the pushed head of each binding",
+  note: "the pushed head of each binding",
   async run({ claim, state }, scope, io) {
     for (const checkout of state.checkouts)
       checkout.head = await headCommit(

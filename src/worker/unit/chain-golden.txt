@@ -7,34 +7,34 @@ chain implement
       step workspace.node                   one coder checkout per binding at the node branch; restore to the read head; stop operation_failed/repository.node_checkout.pending_rebuild, operation_failed/repository.node_branch.missing, operation_failed/repository.connector.git_failed
       step setup.entries(live)              stop environment_failed/setup_failed
       step affected.declaration             an absent or invalid declaration gives no entry
-      step env.setup(live)                  port: releaseTrees.takeBase; node failure -> setup instruction of the first unit; budget end; stop environment_failed/setup_failed
+      step env.setup(live)                  node failure -> setup instruction of the first unit; budget end; stop environment_failed/setup_failed
     step agent.open                         port: agent.open; stop operation_failed
     step state.open                         the live implement state of the later phases
   phase start
     loop start                              one frame; span worker.phase start
-      step base.refresh(claim)              [LLM] per checkout and merged branch: merge, Conflict turn on a conflict, gate G; budget end; stop operation_failed/repository.connector.git_failed, operation_failed/worker.turn.*, operation_failed/worker.git.commit_failed, operation_failed/worker.merge.markers_left, provider_failed
+      step base.refresh(claim)              [LLM] port: secrets.redact; per checkout and merged branch: merge, Conflict turn on a conflict, gate G; budget end; stop operation_failed/repository.connector.git_failed, operation_failed/worker.turn.*, operation_failed/worker.git.commit_failed, operation_failed/worker.merge.markers_left, provider_failed
       step units.plan                       verdict rule, done records, pending units
-  phase tasks
+  phase tasks                               one call: foundryImplement(input, host)
     loop tasks                              one frame; span worker.phase tasks
       loop release_rounds                   until the release gate passes; a routed failure gives the next round
         step budget.check                   budget end at the start of a round
         loop units                          one frame per unit of the round; span worker.task
           step unit.enter                   names the current unit; a planned round resets the unchanged-turn count
           loop revisions                    until the unit passes; scope of the unit
-            step unit.turn                  [LLM] claim check; Work | TaskRevision | CriterionRevision; gate G in write mode; budget end; stop provider_failed, revoked, operation_failed/worker.turn.*, operation_failed/worker.git.commit_failed
+            step unit.turn                  [LLM] port: claim.check, secrets.redact; claim check; Work | TaskRevision | CriterionRevision; gate G in write mode; budget end; stop provider_failed, revoked, operation_failed/worker.turn.*, operation_failed/worker.git.commit_failed
             step verify.own                 port: releaseTrees.takeBase; verdict rule, unchanged-turn count, pending setup, own commands; restore on exit; stop no_progress, operation_failed/worker.verification.infrastructure_failed, environment_failed/verification_timeout, environment_failed/command_absent, environment_failed/setup_failed
           step done_record.put              on a pass; the done trailer on the commits of the unit; stop operation_failed/worker.git.commit_failed
           step unit.leave                   notes the final agent text for the coder report; counts the completed unit
         loop release_gate                   one frame per round; span worker.release_gate; a planned round resets the unchanged-turn count
           step base.fetch                   port: repository.fetchBase; base_branch and upstream_branch of each checkout; stop operation_failed/repository.connector.git_failed
-          step base.refresh(release)        [LLM] per checkout and merged branch: merge, Conflict turn on a conflict, gate G; budget end; stop operation_failed/repository.connector.git_failed, operation_failed/worker.turn.*, operation_failed/worker.git.commit_failed, operation_failed/worker.merge.markers_left, provider_failed
+          step base.refresh(release)        [LLM] port: secrets.redact; per checkout and merged branch: merge, Conflict turn on a conflict, gate G; budget end; stop operation_failed/repository.connector.git_failed, operation_failed/worker.turn.*, operation_failed/worker.git.commit_failed, operation_failed/worker.merge.markers_left, provider_failed
           step release.verify               port: releaseTrees.take, releaseTrees.takeBase, releaseTrees.give; release trees, setup, every command, affected tests; gives the trees back; budget end; stop operation_failed/worker.verification.infrastructure_failed, environment_failed/verification_timeout, environment_failed/command_absent, environment_failed/setup_failed, environment_failed/affected_invalid, environment_failed/affected_timeout
           step release.route                passed -> leave release_rounds; routed -> owner unit, next round
   phase finish
     loop finish                             one frame; span worker.phase finish
-      step report.coder                     port: evidence.submit; one evidence with the final text of each unit; skipped with no text
+      step report.coder                     one evidence with the final text of each unit; skipped with no text
       step branch.push                      [cleanup] per checkout; push record around each push; stop operation_failed/repository.connector.git_failed, operation_failed/repository.node_branch.taken
-      step evidence.head                    [cleanup] port: evidence.submit; the pushed head of each binding
+      step evidence.head                    [cleanup] the pushed head of each binding
     step execution.release                  [cleanup] further_work false
   budget_end in prepare: stop budget_end/wall_time
   onExit budget_end, after prepare
@@ -58,7 +58,7 @@ chain evaluation
     step setup.entries(review)              stop environment_failed/setup_failed
     step env.setup(review)                  node failure -> criterion-not-met; budget end; stop environment_failed/setup_failed
     step assets.place                       support assets and round patches for the reviewer; stop operation_failed
-  phase tasks
+  phase tasks                               one call: foundryEvaluation(input, host)
     loop evaluation                         one frame; span worker.evaluation
       step verify.all(evaluation)           every node and task command; the stop class goes to judgement
       step evidence.publish(verification)   port: evidence.submit
@@ -78,7 +78,7 @@ chain examine
   seed claim, setup, sshAccess, revision
   phase prepare
     step workspace.review(base)             one tree per binding at its base head; stop operation_failed/repository.connector.git_failed
-  phase tasks
+  phase tasks                               one call: foundryExamine(input, host)
     step setup.entries(examine)             stop environment_failed/setup_failed
     step env.setup(examine)                 budget end; stop environment_failed/setup_failed
     step inputs.read(dependencies)          port: dependencies.read; budget end after the read

@@ -281,6 +281,7 @@ type JudgementStep = FoundryStep<
 export const judgement: JudgementStep = {
   foundry: true,
   id: "judgement",
+  ports: ["agent.open"],
   deadline: DeadlineKind.Work,
   reads: [
     "claim",
@@ -304,7 +305,7 @@ export const judgement: JudgementStep = {
     "provider_failed",
   ],
   llm: true,
-  note: "port: agent.open; shortcut on failure -> criterion-not-met; else Evaluation, Repair once; budget end",
+  note: "shortcut on failure -> criterion-not-met; else Evaluation, Repair once; budget end",
   run(ctx, scope, io) {
     return stopsReturned(scope, () =>
       budgetMapped(io, scope, async () => {

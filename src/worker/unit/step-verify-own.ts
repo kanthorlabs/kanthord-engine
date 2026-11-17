@@ -3,6 +3,7 @@ import { PromptTemplate } from "../../agent/contract.ts";
 import type { TaskContent } from "../../mission/contract.ts";
 import { DeadlineKind, type FoundryStep } from "./chain.ts";
 import { EndReason, ExecutionStop } from "./execution-stop.ts";
+import type { ImplementPorts } from "./foundry-ports.ts";
 import { taskRevisionInstruction } from "./judgement.ts";
 import {
   noProgressDetail,
@@ -162,10 +163,12 @@ async function verifyVerdict(
 export const verifyOwn: FoundryStep<
   UnitScope,
   "state",
-  "verificationTimedOut"
+  "verificationTimedOut",
+  ImplementPorts
 > = {
   foundry: true,
   id: "verify.own",
+  ports: ["releaseTrees.takeBase"],
   deadline: DeadlineKind.Work,
   reads: ["state"],
   writes: ["verificationTimedOut"],
@@ -176,7 +179,7 @@ export const verifyOwn: FoundryStep<
     "environment_failed/command_absent",
     "environment_failed/setup_failed",
   ],
-  note: "port: releaseTrees.takeBase; verdict rule, unchanged-turn count, pending setup, own commands; restore on exit",
+  note: "verdict rule, unchanged-turn count, pending setup, own commands; restore on exit",
   async run({ state }, scope) {
     const verified = await stopsReturned(scope, () =>
       scope.node === null

@@ -17,12 +17,16 @@ import {
   ChainBuildError,
   type ChainFoundryStep,
   ChainId,
+  type ChainNode,
+  ChainRule,
   type ChainSeed,
   type ChainStep,
+  type ChainTasks,
   DeadlineKind,
   type ExecutionCtx,
   type Key,
   type LoopFrame,
+  loopNode,
   StepKind,
   stepNode,
 } from "./chain.ts";
@@ -34,6 +38,8 @@ import {
   ExecutionEndKind,
   ExecutionStop,
 } from "./execution-stop.ts";
+import type { CommonPorts } from "./foundry-ports.ts";
+import { runTasks } from "./foundry.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { Phase } from "./telemetry.ts";
 
@@ -102,7 +108,7 @@ function harness(t: TestContext, stop?: CancellationContext): Harness {
         resource_budget: { wall_time_ms: WALL_TIME_MS },
       }),
       resources,
-      host: {} as ChainIo["host"],
+      host: { env: {} } as unknown as ChainIo["host"],
       ports: {} as ChainIo["ports"],
     },
     seed: { claim } as ChainSeed,
@@ -150,6 +156,7 @@ function returningStep(
     reads: [],
     writes: [],
     stops: [],
+    ports: [],
     async run(_ctx: Partial<ExecutionCtx>, scope: unknown) {
       h.trace.push(id);
       return { kind: StepKind.Stop, stop: work(), patch: {}, scope };
@@ -169,6 +176,7 @@ function abortedStep(
     reads: [],
     writes: [],
     stops: [],
+    ports: [],
     async run(_ctx: Partial<ExecutionCtx>, scope: unknown) {
       h.trace.push(id);
       abort();
@@ -181,12 +189,32 @@ function finalStep(h: Harness, id: string, end: ExecutionEnd): ChainStep {
   return stepOf(h, id, { kind: StepKind.Closed, patch: { end } });
 }
 
-function stoppable(h: Harness, work: ChainStep): ChainBuilder {
-  return chain(ChainId.Implement)
+function foundryOf(step: ChainStep): ChainFoundryStep {
+  return step.foundry ? step : { ...step, foundry: true, ports: [] };
+}
+
+function tasksOf(nodes: readonly ChainNode[]): ChainTasks<CommonPorts> {
+  return {
+    name: "foundryTest",
+    ports: [],
+    nodes,
+    async run(ctx, control, host) {
+      const end = await runTasks(
+        { nodes, seed: ctx, resultOf: (reached) => reached },
+        control,
+        host,
+      );
+      Object.assign(ctx, end.result);
+      return end;
+    },
+  };
+}
+
+function stoppable(h: Harness, work: ChainStep): ChainBuilder<CommonPorts> {
+  return chain<CommonPorts>(ChainId.Implement, [])
     .phase(Phase.Prepare)
     .step(stepOf(h, "prepare"))
-    .phase(Phase.Tasks)
-    .step(work)
+    .tasks(tasksOf([stepNode(foundryOf(work))]))
     .phase(Phase.Finish)
     .step(finalStep(h, "release", RELEASED))
     .budgetEnd({
@@ -202,19 +230,20 @@ test("a chain runs each phase, each frame of a loop and the final step, then dis
     init: () => 1,
     body: [
       stepNode(
-        stepOf(h, "turn", {
-          reads: ["setupPending"],
-          work: (ctx) => assert.equal(ctx.setupPending, true),
-        }),
+        foundryOf(
+          stepOf(h, "turn", {
+            reads: ["setupPending"],
+            work: (ctx) => assert.equal(ctx.setupPending, true),
+          }),
+        ),
       ),
     ],
     next: (_ctx, scope) => (scope < FRAMES ? scope + 1 : null),
   };
-  const built = chain(ChainId.Implement)
+  const built = chain<CommonPorts>(ChainId.Implement, [])
     .phase(Phase.Prepare)
     .step(stepOf(h, "prepare", { patch: { setupPending: true } }))
-    .phase(Phase.Tasks)
-    .loop("turns", frame)
+    .tasks(tasksOf([loopNode("turns", frame)]))
     .phase(Phase.Finish)
     .step(finalStep(h, "release", RELEASED))
     .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd })
@@ -232,7 +261,7 @@ test("a chain runs each phase, each frame of a loop and the final step, then dis
 
 test("a build rejects a step that reads a key with no earlier writer", (t) => {
   const h = harness(t);
-  const built = chain(ChainId.Examine)
+  const built = chain<CommonPorts>(ChainId.Examine, [])
     .phase(Phase.Prepare)
     .step(stepOf(h, "reader", { reads: [UNWRITTEN_KEY] }))
     .phase(Phase.Finish)
@@ -241,6 +270,70 @@ test("a build rejects a step that reads a key with no earlier writer", (t) => {
   assert.throws(
     () => built.build(),
     (error) => error instanceof ChainBuildError && error.key === UNWRITTEN_KEY,
+  );
+});
+
+const PHASE_PORT = "secrets.redact";
+const WORK_NODE = "step work";
+const READER_NODE = "step reader";
+const SSH_ACCESS_KEY: Key = "sshAccess";
+
+test("a build rejects a tasks step whose port is not in the port set of the tasks phase", (t) => {
+  const h = harness(t);
+  const built = chain<CommonPorts>(ChainId.Examine, [PHASE_PORT])
+    .phase(Phase.Prepare)
+    .step({ ...foundryOf(stepOf(h, "prepare")), ports: [PHASE_PORT] })
+    .tasks(
+      tasksOf([
+        stepNode({ ...foundryOf(stepOf(h, "work")), ports: [PHASE_PORT] }),
+      ]),
+    )
+    .phase(Phase.Finish)
+    .step(finalStep(h, "release", RELEASED))
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd });
+  assert.throws(
+    () => built.build(),
+    (error) =>
+      error instanceof ChainBuildError &&
+      error.node === WORK_NODE &&
+      error.rule === ChainRule.PortOutsidePhase &&
+      error.port === PHASE_PORT,
+  );
+});
+
+test("a build rejects a host step in a tasks phase", (t) => {
+  const h = harness(t);
+  const built = chain<CommonPorts>(ChainId.Examine, [])
+    .phase(Phase.Prepare)
+    .step(stepOf(h, "prepare"))
+    .tasks(tasksOf([stepNode(stepOf(h, "work"))]))
+    .phase(Phase.Finish)
+    .step(finalStep(h, "release", RELEASED))
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd });
+  assert.throws(
+    () => built.build(),
+    (error) =>
+      error instanceof ChainBuildError &&
+      error.node === WORK_NODE &&
+      error.rule === ChainRule.HostStepInTasks,
+  );
+});
+
+test("a build rejects a Foundry step that reads sshAccess", (t) => {
+  const h = harness(t);
+  const built = chain<CommonPorts>(ChainId.Examine, [])
+    .phase(Phase.Prepare)
+    .step(foundryOf(stepOf(h, "reader", { reads: [SSH_ACCESS_KEY] })))
+    .phase(Phase.Finish)
+    .step(finalStep(h, "release", RELEASED))
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd });
+  assert.throws(
+    () => built.build(),
+    (error) =>
+      error instanceof ChainBuildError &&
+      error.node === READER_NODE &&
+      error.rule === ChainRule.FoundryReadsSshAccess &&
+      error.key === SSH_ACCESS_KEY,
   );
 });
 
@@ -260,7 +353,7 @@ test("a budget end after prepare runs the exit nodes, and a budget end in prepar
     "exit",
   ]);
   const early = harness(t);
-  const stopped = chain(ChainId.Implement)
+  const stopped = chain<CommonPorts>(ChainId.Implement, [])
     .phase(Phase.Prepare)
     .step(stepOf(early, "prepare", { kind: StepKind.BudgetEnd }))
     .phase(Phase.Finish)
@@ -340,7 +433,7 @@ test("a revoked stop and a stop in prepare run no stop node", async (t) => {
   );
   assert.deepEqual(revoked.trace.slice(0, -DISPOSALS), ["prepare", "work"]);
   const early = harness(t);
-  const built = chain(ChainId.Implement)
+  const built = chain<CommonPorts>(ChainId.Implement, [])
     .phase(Phase.Prepare)
     .step(
       stepOf(early, "prepare", {

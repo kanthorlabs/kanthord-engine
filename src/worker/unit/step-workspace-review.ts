@@ -1,7 +1,9 @@
 import { EndReason } from "./execution-stop.ts";
-import { DeadlineKind, type Step } from "./chain.ts";
+import { DeadlineKind } from "./chain.ts";
+import type { Step } from "./chain-host.ts";
 import { placedOf, reviewWorkspaceOf } from "./evaluation-input.ts";
-import { next, stepsInputOf, wallDeadlineOf } from "./step-support.ts";
+import { next, wallDeadlineOf } from "./step-support.ts";
+import { hostInputOf } from "./chain-host.ts";
 
 export const workspaceReviewBase: Step<
   unknown,
@@ -15,7 +17,7 @@ export const workspaceReviewBase: Step<
   stops: ["operation_failed/repository.connector.git_failed"],
   note: "one tree per binding at its base head",
   async run(ctx, scope, io) {
-    const input = stepsInputOf(ctx, io);
+    const input = hostInputOf(ctx, io);
     const reviewWorkspace = await input.workspaces.prepareExamine({
       env: input.env,
       executionId: input.claim.execution_id,
@@ -49,7 +51,7 @@ export const workspaceReviewSnapshot: Step<
   ],
   note: "review trees and the round scope; stop when a snapshot or the tested input is absent",
   async run(ctx, scope, io) {
-    const input = stepsInputOf(ctx, io);
+    const input = hostInputOf(ctx, io);
     const {
       evidenceIds,
       scope: files,
