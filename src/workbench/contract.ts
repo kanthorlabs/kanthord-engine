@@ -116,6 +116,7 @@ export const WorkbenchRecordKind = {
   AutoMode: "auto_mode",
   Guard: "guard",
   Fork: "fork",
+  Note: "note",
 } as const;
 export type WorkbenchRecordKind =
   (typeof WorkbenchRecordKind)[keyof typeof WorkbenchRecordKind];
@@ -152,6 +153,10 @@ export const workbenchRecordSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal(WorkbenchRecordKind.Fork),
     source_title: z.string().max(FORK_SOURCE_TITLE_MAX_CHARS),
+  }),
+  z.strictObject({
+    kind: z.literal(WorkbenchRecordKind.Note),
+    text: z.string().max(WORKBENCH_MESSAGE_MAX_LENGTH),
   }),
 ]);
 export type WorkbenchRecord = z.infer<typeof workbenchRecordSchema>;
