@@ -157,6 +157,26 @@ function returningStep(
   };
 }
 
+function abortedStep(
+  h: Harness,
+  id: string,
+  abort: () => void,
+): ChainFoundryStep {
+  return {
+    foundry: true,
+    id,
+    deadline: DeadlineKind.Work,
+    reads: [],
+    writes: [],
+    stops: [],
+    async run(_ctx: Partial<ExecutionCtx>, scope: unknown) {
+      h.trace.push(id);
+      abort();
+      return { kind: StepKind.Next, patch: {}, scope };
+    },
+  };
+}
+
 function finalStep(h: Harness, id: string, end: ExecutionEnd): ChainStep {
   return stepOf(h, id, { kind: StepKind.Closed, patch: { end } });
 }
@@ -405,3 +425,53 @@ for (const reason of REQUESTED_STOPS) {
     ]);
   });
 }
+
+test("a requested stop wins when the tasks step that it aborted returns next", async (t) => {
+  const order = new CancellationContext();
+  const h = harness(t, order);
+  const reason = EndReason.HumanPaused;
+  const built = stoppable(
+    h,
+    abortedStep(h, "work", () => order.cancel(new ExecutionStop(reason, null))),
+  )
+    .onStop([stepNode(stepOf(h, "checkpoint"))])
+    .build();
+  const stop = {
+    reason,
+    code: null,
+    cause: attributed(CauseCategory.Human, CauseSubcategory.Intervention),
+  };
+  assert.deepEqual(
+    await executionBoundary(h.io.run, () =>
+      runChain(built, { seed: h.seed }, h.io),
+    ),
+    { kind: ExecutionEndKind.Released, furtherWork: true, stop },
+  );
+  assert.deepEqual(h.releases, [{ further_work: true, stop }]);
+  assert.deepEqual(h.trace.slice(0, -DISPOSALS), [
+    "prepare",
+    "work",
+    "checkpoint",
+  ]);
+});
+
+test("an abort with no stop leaves the result of the tasks step and the walk goes on", async (t) => {
+  const order = new CancellationContext();
+  const h = harness(t, order);
+  const built = stoppable(
+    h,
+    abortedStep(h, "work", () => order.cancel()),
+  ).build();
+  assert.deepEqual(
+    await executionBoundary(h.io.run, () =>
+      runChain(built, { seed: h.seed }, h.io),
+    ),
+    RELEASED,
+  );
+  assert.deepEqual(h.trace.slice(0, -DISPOSALS), [
+    "prepare",
+    "work",
+    "release",
+  ]);
+  assert.deepEqual(h.releases, []);
+});

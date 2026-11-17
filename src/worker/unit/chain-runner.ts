@@ -134,8 +134,8 @@ function foundryWalked(
   result: ChainStepResult,
 ): Walked {
   if (result.stop !== undefined) return result.stop;
-  if (step.foundry && walk.io.run.operationContext.signal.aborted)
-    return CANCELLED;
+  const { reason } = walk.io.run.operationContext.signal;
+  if (step.foundry && reason instanceof ExecutionStop) return CANCELLED;
   return result.kind;
 }
 
