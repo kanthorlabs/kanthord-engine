@@ -42,6 +42,7 @@ export interface GuestIdentity {
   readonly inviteId: string;
   readonly sessionId: string;
   readonly invitedBy: string;
+  readonly reader: HumanIdentity;
   readonly jti: string;
 }
 export interface ServiceIdentity {
@@ -59,6 +60,11 @@ const machines = new WeakSet<object>();
 const workers = new WeakSet<object>();
 const guests = new WeakSet<object>();
 const services = new WeakSet<object>();
+interface ReaderMark {
+  inviteId: string;
+  projects: ReadonlySet<string>;
+}
+const readers = new WeakMap<object, ReaderMark>();
 
 export function isHumanIdentity(value: unknown): value is HumanIdentity {
   return isObject(value) && humans.has(value);
@@ -75,6 +81,19 @@ export function isGuestIdentity(value: unknown): value is GuestIdentity {
 export function isServiceIdentity(value: unknown): value is ServiceIdentity {
   return isObject(value) && services.has(value);
 }
+export function isReadOnlyIdentity(value: unknown): boolean {
+  return isObject(value) && readers.has(value);
+}
+export function projectScopeOf(
+  identity: CallerIdentity | undefined,
+): ReadonlySet<string> | null {
+  return isObject(identity) ? (readers.get(identity)?.projects ?? null) : null;
+}
+export function readOnlyInviteOf(
+  identity: CallerIdentity | undefined,
+): string | null {
+  return isObject(identity) ? (readers.get(identity)?.inviteId ?? null) : null;
+}
 
 export const callerProvenance = Object.freeze({
   human: humans.add.bind(humans),
@@ -82,4 +101,8 @@ export const callerProvenance = Object.freeze({
   worker: workers.add.bind(workers),
   guest: guests.add.bind(guests),
   service: services.add.bind(services),
+  reader: (value: HumanIdentity, mark: ReaderMark) => {
+    humans.add(value);
+    readers.set(value, mark);
+  },
 });

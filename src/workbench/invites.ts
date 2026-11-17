@@ -150,9 +150,10 @@ export class WorkbenchInvites {
           .prepare(
             "SELECT session_id, invited_by, invited_by_name, expires_at FROM workbench_invite WHERE id = ? AND expires_at > ?",
           )
-          .get(inviteId, Date.now()) as LiveInvite | undefined,
+          .get(inviteId, Date.now()) as
+          Omit<LiveInvite, "project_ids"> | undefined,
     );
-    return row === undefined ? null : { ...row };
+    return row === undefined ? null : { ...row, project_ids: [] };
   }
 
   list(sessionId: string): InviteItem[] {

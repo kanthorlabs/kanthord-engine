@@ -29,8 +29,13 @@ import {
   isGuestIdentity,
   isHumanIdentity,
   isMachineIdentity,
+  isReadOnlyIdentity,
+  projectScopeOf,
 } from "../../kernel/caller.ts";
-import { testGuestIdentity } from "../../kernel/test-identity.ts";
+import {
+  testGuestIdentity,
+  testReadOnlyIdentity,
+} from "../../kernel/test-identity.ts";
 import { gatewayOperations } from "../contract.ts";
 import { JwtCause, WorkerGroupEnded } from "../errors.ts";
 import { InstancePlacement } from "../../worker/contract.ts";
@@ -641,10 +646,12 @@ async function guestFixture(t: TestContext) {
   const sessionId = `workbench_session_${ulid()}`;
   const guestId = `workbench_guest_${ulid()}`;
   const expiresAt = Date.now() + GUEST_LIFETIME_MS;
+  const projectIds = [`project_${ulid()}`];
   machines.workbench.invites.set(inviteId, {
     session_id: sessionId,
     invited_by: INVITER,
     expires_at: expiresAt,
+    project_ids: projectIds,
   });
   const issued = await generateGuestJWT(
     fixture.config.master_key,
@@ -669,6 +676,7 @@ async function guestFixture(t: TestContext) {
     inviteId,
     sessionId,
     guestId,
+    projectIds,
     expiresAt,
     issued,
     claims,
@@ -743,6 +751,7 @@ test("a guest token with a future exp and an invite row that expired answers gat
     session_id: g.sessionId,
     invited_by: INVITER,
     expires_at: Date.now() - 1,
+    project_ids: g.projectIds,
   });
   await g.refuse(g.issued.token, `gateway.jwt.${JwtCause.InviteEnded}`);
 });
@@ -789,6 +798,10 @@ test("a guest identity from the factory passes isGuestIdentity and fails isHuman
     inviteId: `workbench_invite_${ulid()}`,
     sessionId: `workbench_session_${ulid()}`,
     invitedBy: INVITER,
+    reader: testReadOnlyIdentity(INVITER, {
+      inviteId: `workbench_invite_${ulid()}`,
+      projectIds: [],
+    }),
     jti: ulid(),
   });
   assert.ok(isGuestIdentity(guest));
@@ -796,4 +809,51 @@ test("a guest identity from the factory passes isGuestIdentity and fails isHuman
   const copy = { ...guest };
   assert.ok(!isGuestIdentity(copy));
   assert.ok(!isHumanIdentity(copy));
+});
+
+test("(security) guest verification mints the reader with the project_ids of the row", async (t) => {
+  const g = await guestFixture(t);
+  const identity = await g.fixture.authentication.authenticate(
+    `Bearer ${g.issued.token}`,
+  );
+  assert.ok(isGuestIdentity(identity));
+  assert.ok(isReadOnlyIdentity(identity.reader));
+  assert.equal(identity.reader.accountId, INVITER);
+  assert.deepEqual([...projectScopeOf(identity.reader)!], g.projectIds);
+});
+
+test("(security) recheck re-mints the read-only identity with the live project_ids", async (t) => {
+  const g = await guestFixture(t);
+  const identity = await g.fixture.authentication.authenticate(
+    `Bearer ${g.issued.token}`,
+  );
+  assert.ok(isGuestIdentity(identity));
+  const liveIds = [`project_${ulid()}`, `project_${ulid()}`];
+  g.machines.workbench.invites.set(g.inviteId, {
+    session_id: g.sessionId,
+    invited_by: INVITER,
+    expires_at: g.expiresAt,
+    project_ids: liveIds,
+  });
+  const rechecked = await g.fixture.authentication.recheck(
+    identity.reader,
+    background,
+  );
+  assert.ok(isReadOnlyIdentity(rechecked));
+  assert.deepEqual([...projectScopeOf(rechecked)!], liveIds);
+});
+
+test("(security) after a revoke, recheck of the read-only identity answers 401", async (t) => {
+  const g = await guestFixture(t);
+  const identity = await g.fixture.authentication.authenticate(
+    `Bearer ${g.issued.token}`,
+  );
+  assert.ok(isGuestIdentity(identity));
+  g.machines.workbench.invites.delete(g.inviteId);
+  await assert.rejects(
+    g.fixture.authentication.recheck(identity.reader, background),
+    (error: unknown) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.Unauthorized,
+  );
 });

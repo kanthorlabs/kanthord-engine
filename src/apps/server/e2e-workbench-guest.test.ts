@@ -15,6 +15,7 @@ import {
 import {
   testGuestIdentity,
   testHumanIdentity,
+  testReadOnlyIdentity,
 } from "../../kernel/test-identity.ts";
 import { temporary, temporaryDirectory } from "../../kernel/test-support.ts";
 import {
@@ -502,6 +503,10 @@ test(
       inviteId: created.id,
       sessionId: host.id,
       invitedBy: identity.accountId,
+      reader: testReadOnlyIdentity(identity.accountId, {
+        inviteId: created.id,
+        projectIds: [],
+      }),
       jti: "race",
     });
     let opened: Response | undefined;

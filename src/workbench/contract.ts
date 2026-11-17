@@ -14,6 +14,7 @@ export interface ResolvedInvite {
   session_id: string;
   invited_by: string;
   expires_at: number;
+  project_ids: readonly string[];
 }
 export const WORKBENCH_SERVICE_NAME = "workbench";
 export const WORKBENCH_SESSION_PREFIX = "workbench_session";

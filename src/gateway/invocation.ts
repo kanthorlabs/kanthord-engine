@@ -18,12 +18,22 @@ import {
   isGuestIdentity,
   isHumanIdentity,
   isMachineIdentity,
+  isReadOnlyIdentity,
   isServiceIdentity,
   isWorkerIdentity,
+  projectScopeOf,
 } from "../kernel/caller.ts";
+import {
+  type ProjectScope,
+  ProjectScopeRule,
+  type ScopeCheck,
+  ScopeVerdict,
+} from "../kernel/project-scope.ts";
 import {
   failure,
   GatewayError,
+  scopeNotFound,
+  scopeRefused,
   unauthorized,
   WorkerGroupEnded,
 } from "./errors.ts";
@@ -110,6 +120,17 @@ interface ExecutionRun {
   context: CancellationContext;
   state: ExecutionState;
   dispose: () => void;
+}
+
+export interface InvocationWiring {
+  projectScope?: ProjectScope;
+}
+
+interface ScopeGate {
+  operation: Operation;
+  request?: ScopeCheck;
+  input: ExecutionInput;
+  empty: boolean;
 }
 
 interface MutationRequest {
@@ -205,6 +226,13 @@ function parsedInput(operation: Operation, raw: unknown): ExecutionInput {
   return parsed.data as ExecutionInput;
 }
 
+function refuseReadOnlyMutation(
+  operation: Operation,
+  identity: CallerIdentity | undefined,
+): void {
+  if (operation.mutation && isReadOnlyIdentity(identity)) throw unauthorized();
+}
+
 function refuseCancelled(context: CancellationContext): void {
   if (context.signal.aborted)
     throw new GatewayError(
@@ -270,6 +298,7 @@ export class Invocation {
   private stopTask?: Promise<Error | null>;
   private stopped = false;
   private readonly scheduler?: ExecutionLookup;
+  private readonly projectScope?: ProjectScope;
 
   constructor(
     registry: OperationRegistry,
@@ -277,12 +306,49 @@ export class Invocation {
     idempotency: Idempotency,
     stores: StoreMap<Store>,
     scheduler?: ExecutionLookup,
+    wiring: InvocationWiring = {},
   ) {
     this.registry = registry;
     this.authentication = authentication;
     this.idempotency = idempotency;
     this.stores = stores;
     this.scheduler = scheduler;
+    this.projectScope = wiring.projectScope;
+  }
+
+  private scopeGate(
+    operation: Operation,
+    identity: CallerIdentity | undefined,
+    input: ExecutionInput,
+  ): ScopeGate {
+    const scope = projectScopeOf(identity);
+    if (scope === null) return { operation, input, empty: false };
+    if (!this.projectScope) throw scopeRefused();
+    const request = { input, scope };
+    const verdict = this.projectScope.check(operation, request);
+    if (verdict === ScopeVerdict.Refused) throw scopeRefused();
+    if (verdict === ScopeVerdict.NotFound) throw scopeNotFound();
+    if (operation.projectScope !== ProjectScopeRule.List)
+      return { operation, request, input, empty: false };
+    const narrowed = this.projectScope.narrow(input, scope);
+    return narrowed === null
+      ? { operation, request, input, empty: true }
+      : { operation, request, input: narrowed, empty: false };
+  }
+
+  private refuseForeignAnswer(
+    output: unknown,
+    gate: ScopeGate,
+    run: ExecutionRun,
+  ): void {
+    const { operation, request } = gate;
+    if (!request || !this.projectScope) return;
+    if (this.projectScope.admitsAnswer(operation, output, request)) return;
+    run.options.logger?.error(
+      { operation: operation.id, request_id: run.options.requestId },
+      "gateway.scope.answer_refused",
+    );
+    throw scopeNotFound();
   }
 
   private executionRowOf(
@@ -634,8 +700,15 @@ export class Invocation {
     };
     try {
       const identity = await this.admit(operation, run);
+      refuseReadOnlyMutation(operation, identity);
       const input = parsedInput(operation, raw);
       refuseCancelled(context);
+      const gate = this.scopeGate(operation, identity, input);
+      if (gate.empty)
+        return {
+          status: operation.status,
+          body: { items: [], next_cursor: null },
+        };
       const execution = operation.requiresExecution
         ? this.proveExecution(input, identity)
         : undefined;
@@ -651,7 +724,8 @@ export class Invocation {
         identity,
         execution,
       });
-      const output = await handler(input, caller);
+      const output = await handler(gate.input, caller);
+      this.refuseForeignAnswer(output, gate, run);
       return this.settle(operation, output, run);
     } catch (thrown) {
       return this.recordFailure(operation, thrown, run);
