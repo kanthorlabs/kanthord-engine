@@ -215,6 +215,7 @@ import {
   storedAutoMode,
   storedConfiguration,
 } from "./sessions.ts";
+import { createdNodeIds } from "./watch.ts";
 
 export type WorkbenchModelRuntimeFactory = (
   input: ModelConnectorInput,
@@ -560,6 +561,7 @@ const STREAM_HEADERS = {
   "Cache-Control": "no-store",
 };
 const NO_CHARACTERS = 0;
+const NO_ITEMS = 0;
 const OWNER_NAME_MAX_LENGTH = WORKBENCH_INVITE_NAME_MAX_LENGTH;
 const SUMMARY_REFUSED_LOG = "workbench.fork.summary_refused";
 const AGENT_START = "agent_start";
@@ -1312,6 +1314,19 @@ export class WorkbenchService implements Service {
       .map(({ session }) => session);
   }
 
+  private watchCreated(
+    session: OpenSession,
+    operationId: string,
+    data: unknown,
+  ): void {
+    const nodeIds = createdNodeIds(operationId, data);
+    if (nodeIds.length === NO_ITEMS) return;
+    appendRecord(this.hostOf(session).manager, {
+      kind: WorkbenchRecordKind.Watch,
+      node_ids: nodeIds,
+    });
+  }
+
   private hostOf(session: OpenSession): OpenSession {
     if (session.hostId === null) return session;
     const host = this.sessions.get(session.hostId);
@@ -1450,6 +1465,8 @@ export class WorkbenchService implements Service {
           callerOf: (toolCallId) => this.callerOf(session, toolCallId),
           scopeOf: () => this.scopeOf(session),
           projectScope: this.dependencies.projectScope,
+          completed: (operationId, data) =>
+            this.watchCreated(session, operationId, data),
         });
       });
       const offer = isPhase

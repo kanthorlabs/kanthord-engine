@@ -2,7 +2,6 @@ import { z } from "zod";
 import { HttpMethod, HttpStatus, MediaType } from "../kernel/http.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import { timestamp } from "../kernel/json.ts";
-import { NodeState } from "../mission/contract.ts";
 import { PROJECT_NAME_MAX_LENGTH } from "../kernel/project-name.ts";
 import {
   AccessPolicy,
@@ -179,6 +178,11 @@ export const WorkbenchRecordKind = {
 export type WorkbenchRecordKind =
   (typeof WorkbenchRecordKind)[keyof typeof WorkbenchRecordKind];
 
+export const NoticeState = {
+  Completed: "Completed",
+  Discarded: "Discarded",
+} as const;
+
 export const QueueClearCause = { Stop: "stop", Replace: "replace" } as const;
 export type QueueClearCause =
   (typeof QueueClearCause)[keyof typeof QueueClearCause];
@@ -255,7 +259,7 @@ export const workbenchRecordSchema = z.discriminatedUnion("kind", [
               z.strictObject({
                 node_id: identitySchema("node"),
                 name: z.string(),
-                state: z.enum([NodeState.Completed, NodeState.Discarded]),
+                state: z.enum(NoticeState),
                 ended_at: timestamp,
               }),
             )

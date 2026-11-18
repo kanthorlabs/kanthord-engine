@@ -661,6 +661,7 @@ test("(security) the tool result of workbench--session--list drops scope_request
       callerOf: () => ({ identity: OWNER_IDENTITY }),
       scopeOf: () => null,
       projectScope: new ProjectScope({ projectOf: () => null }),
+      completed: () => undefined,
     },
   );
   const answer = await f.service.list(undefined);

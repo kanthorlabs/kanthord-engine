@@ -282,6 +282,7 @@ async function fixture(t: TestContext) {
       callerOf: (id) => internals.callerOf(session, id) as never,
       scopeOf: () => new Set([PROJECT]),
       projectScope,
+      completed: () => undefined,
     });
     try {
       await tool.execute(

@@ -78,6 +78,7 @@ import {
   type WorkbenchConfiguration,
   WorkbenchErrorCode,
   WorkbenchGuardReason,
+  WorkbenchRecordKind,
 } from "../../workbench/contract.ts";
 import { toolName } from "../../workbench/index.ts";
 import {
@@ -5927,3 +5928,282 @@ test(
     assert.equal(world.fixture.workbenchService["grantTickets"].size, NO_CALLS);
   },
 );
+
+const NODE_CREATE = missionOperations["node.create"].id;
+const WATCH_REASON = "plan the thread";
+const YUMI_CREATE_REQUEST = "@Yumi create the second node.";
+const EXTRA_FILENAMES = ["extra-one.md", "extra-two.md"];
+const TWO_NODES = 2;
+const NO_WATCH_RECORDS = 0;
+
+interface WatchWorld {
+  fixture: Fixture;
+  target: ImportTarget;
+  hostFile: string;
+  hostId: string;
+}
+
+function nodeCreateInput(target: ImportTarget, filename: string) {
+  return {
+    params: { mission_id: target.missionId },
+    body: {
+      filename,
+      content: {
+        name: "Second node",
+        requirement: "Review the second thread",
+        criterion: "The second thread is reviewed",
+        verifications: ["true"],
+        bindings: [],
+        intent: "examine",
+      },
+      tasks: [],
+      reason: WATCH_REASON,
+      expected_mission_version: target.version,
+    },
+  };
+}
+
+function extraEntry(filename: string) {
+  return {
+    filename,
+    intent: "examine",
+    name: filename,
+    requirement: "Review the thread",
+    criterion: "The thread is reviewed",
+    verifications: ["true"],
+    bindings: [],
+  };
+}
+
+async function importApplyInput(fixture: Fixture, target: ImportTarget) {
+  const exported = completed(
+    await fixture.missions.export(
+      {
+        params: { mission_id: target.missionId },
+        query: { format: ImportFormat.Json },
+        body: null,
+      },
+      fixture.options,
+    ),
+  ) as { mission_version: number; entries: Record<string, unknown>[] };
+  const snapshot = {
+    format: ImportFormat.Json,
+    mission_id: target.missionId,
+    mission_version: exported.mission_version,
+    reason: IMPORT_REASON,
+    entries: [...exported.entries, ...EXTRA_FILENAMES.map(extraEntry)],
+  };
+  const preview = completed(
+    await fixture.missions["import.preview"](
+      {
+        params: { mission_id: target.missionId },
+        query: {},
+        body: snapshot,
+      } as never,
+      fixture.options,
+    ),
+  );
+  return {
+    params: { mission_id: target.missionId },
+    body: {
+      ...snapshot,
+      mission_version: preview.expected_mission_version,
+      preview_digest: preview.preview_digest,
+      confirmed_retirements: [],
+    },
+  } as Parameters<typeof toolCall>[1];
+}
+
+function fileRecordsOf(file: string, kind: string): Record<string, unknown>[] {
+  return readFileSync(file, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+    .filter((entry) => entry.type === CustomType)
+    .filter((entry) => entry.customType === RECORD_ENTRY)
+    .map((entry) => entry.data as Record<string, unknown>)
+    .filter((data) => data.kind === kind);
+}
+
+function otherSessionFiles(fixture: Fixture, hostFile: string): string[] {
+  return readdirSync(fixture.stateDirectory, {
+    recursive: true,
+    encoding: "utf8",
+  })
+    .filter((name) => name.endsWith(SESSION_FILE_SUFFIX))
+    .map((name) => join(fixture.stateDirectory, name))
+    .filter((file) => file !== hostFile);
+}
+
+async function watchWorld(
+  t: TestContext,
+  steps: (world: Partial<WatchWorld>) => FauxResponseStep[],
+  options: { agentName?: string; guard?: boolean } = {},
+): Promise<WatchWorld> {
+  const world: Partial<WatchWorld> = {};
+  const fixture = await workbenchFixture(
+    t,
+    steps(world),
+    undefined,
+    undefined,
+    [OPS, AGENT, REVIEW_AGENT, ...(options.guard ? [GUARD_AGENT] : [])],
+  );
+  const target = await importTarget(fixture);
+  const host = await createSession(fixture, undefined, options.agentName);
+  return Object.assign(world, {
+    fixture,
+    target,
+    hostId: host.id,
+    hostFile: host.resume_command.replace(/^pi --session /, ""),
+  }) as WatchWorld;
+}
+
+async function newNodeIds(world: WatchWorld): Promise<string[]> {
+  const state = await importState(world.fixture, world.target);
+  return state.nodeIds.filter((id) => id !== world.target.nodeId);
+}
+
+test("(happy path) an approved mission--node--create appends one watch record with the created node id", async (t) => {
+  const world = await watchWorld(
+    t,
+    (holder) => [
+      () =>
+        toolCall(
+          toolName(NODE_CREATE),
+          nodeCreateInput(holder.target!, EXTRA_FILENAMES[0]!),
+        ),
+      fauxAssistantMessage(ANSWER),
+    ],
+    { agentName: OPS },
+  );
+  const { fixture, hostId } = world;
+  completed(await setAutoMode(fixture, hostId, false));
+  completed(await message(fixture, hostId, QUESTION));
+  const pending = await untilApproval(fixture, hostId, t.signal);
+  assert.equal(pending.operation_id, NODE_CREATE);
+  assert.deepEqual(
+    fileRecordsOf(world.hostFile, WorkbenchRecordKind.Watch),
+    [],
+  );
+  completed(await decide(fixture, hostId, pending.tool_call_id, true));
+  await untilIdle(fixture, hostId, t.signal);
+  assert.deepEqual(fileRecordsOf(world.hostFile, WorkbenchRecordKind.Watch), [
+    { kind: WorkbenchRecordKind.Watch, node_ids: await newNodeIds(world) },
+  ]);
+  assert.equal((await newNodeIds(world)).length, SINGLE);
+});
+
+test("(happy path) an auto mission--node--create appends one watch record", async (t) => {
+  const quote = "Create the second node";
+  const world = await watchWorld(
+    t,
+    (holder) => [
+      () =>
+        toolCall(
+          toolName(NODE_CREATE),
+          nodeCreateInput(holder.target!, EXTRA_FILENAMES[0]!),
+        ),
+      verdictStep({ input: {}, nodeId: "", request: quote, quote }),
+      fauxAssistantMessage(ANSWER),
+    ],
+    { agentName: OPS, guard: true },
+  );
+  const { fixture, hostId } = world;
+  completed(await message(fixture, hostId, `${quote}.`));
+  await untilIdle(fixture, hostId, t.signal);
+  assert.equal(guardCalls(fixture).length, SINGLE);
+  assert.deepEqual(fileRecordsOf(world.hostFile, WorkbenchRecordKind.Watch), [
+    { kind: WorkbenchRecordKind.Watch, node_ids: await newNodeIds(world) },
+  ]);
+  assert.equal((await newNodeIds(world)).length, SINGLE);
+});
+
+test("(happy path) an approved mission--import--apply that creates two nodes appends one watch record with both node ids", async (t) => {
+  const world = await watchWorld(
+    t,
+    (holder) => [
+      async () =>
+        toolCall(
+          toolName(IMPORT_APPLY),
+          await importApplyInput(holder.fixture!, holder.target!),
+        ),
+      fauxAssistantMessage(ANSWER),
+    ],
+    { agentName: OPS },
+  );
+  const { fixture, hostId } = world;
+  completed(await message(fixture, hostId, QUESTION));
+  const pending = await untilApproval(fixture, hostId, t.signal);
+  assert.equal(pending.operation_id, IMPORT_APPLY);
+  completed(await decide(fixture, hostId, pending.tool_call_id, true));
+  await untilIdle(fixture, hostId, t.signal);
+  const created = await newNodeIds(world);
+  assert.equal(created.length, TWO_NODES);
+  const [watch] = fileRecordsOf(world.hostFile, WorkbenchRecordKind.Watch);
+  assert.equal(
+    fileRecordsOf(world.hostFile, WorkbenchRecordKind.Watch).length,
+    SINGLE,
+  );
+  assert.deepEqual(
+    (watch!.node_ids as string[]).toSorted(),
+    created.toSorted(),
+  );
+});
+
+test("(security: refused path) a rejected mission--node--create appends no watch record", async (t) => {
+  const world = await watchWorld(
+    t,
+    (holder) => [
+      () =>
+        toolCall(
+          toolName(NODE_CREATE),
+          nodeCreateInput(holder.target!, EXTRA_FILENAMES[0]!),
+        ),
+      fauxAssistantMessage(ANSWER),
+    ],
+    { agentName: OPS },
+  );
+  const { fixture, hostId } = world;
+  completed(await setAutoMode(fixture, hostId, false));
+  completed(await message(fixture, hostId, QUESTION));
+  const pending = await untilApproval(fixture, hostId, t.signal);
+  completed(await decide(fixture, hostId, pending.tool_call_id, false));
+  const entries = await untilIdle(fixture, hostId, t.signal);
+  assert.ok(toolResults(entries).every(({ isError }) => isError));
+  assert.equal(
+    fileRecordsOf(world.hostFile, WorkbenchRecordKind.Watch).length,
+    NO_WATCH_RECORDS,
+  );
+  assert.deepEqual(await newNodeIds(world), []);
+});
+
+test("(happy path) a mission--node--create of a participant appends the watch record to the host session file only", async (t) => {
+  const world = await watchWorld(t, (holder) => [
+    () =>
+      toolCall(
+        toolName(NODE_CREATE),
+        nodeCreateInput(holder.target!, EXTRA_FILENAMES[0]!),
+      ),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  const { fixture, hostId } = world;
+  completed(await setAutoMode(fixture, hostId, false));
+  completed(await message(fixture, hostId, YUMI_CREATE_REQUEST));
+  const pending = await untilApproval(fixture, hostId, t.signal);
+  assert.equal(pending.operation_id, NODE_CREATE);
+  assert.notEqual(pending.session_id, hostId);
+  completed(
+    await decide(fixture, pending.session_id, pending.tool_call_id, true),
+  );
+  await untilIdle(fixture, hostId, t.signal);
+  assert.deepEqual(fileRecordsOf(world.hostFile, WorkbenchRecordKind.Watch), [
+    { kind: WorkbenchRecordKind.Watch, node_ids: await newNodeIds(world) },
+  ]);
+  const participantFiles = otherSessionFiles(fixture, world.hostFile);
+  assert.equal(participantFiles.length, SINGLE);
+  for (const file of participantFiles)
+    assert.equal(
+      fileRecordsOf(file, WorkbenchRecordKind.Watch).length,
+      NO_WATCH_RECORDS,
+    );
+});

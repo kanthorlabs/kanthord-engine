@@ -265,6 +265,7 @@ test("a tool call of a bodiless operation without body reaches the operation wit
     }),
     scopeOf: () => null,
     projectScope: new ProjectScope({ projectOf: () => null }),
+    completed: () => undefined,
   });
   assert.deepEqual(Object.keys(envelopeProperties(tool.parameters)), [
     "params",
@@ -522,6 +523,7 @@ test("(security) resolver test 16: a call whose params change to a target of ano
     projectScope: new ProjectScope({
       projectOf: (_prefix, id) => owners.get(id) ?? null,
     }),
+    completed: () => undefined,
   });
   await tool.execute(
     "call_mine",
