@@ -19,7 +19,6 @@ import {
   WorkbenchErrorCode,
   workbenchOperations,
 } from "./contract.ts";
-import { liveGrant } from "./guard.ts";
 import { WorkbenchInvites } from "./invites.ts";
 import { workbenchMigrations } from "./migrations.ts";
 import {
@@ -368,7 +367,7 @@ test("create stores the granted ids sorted", async (t) => {
   ]);
 });
 
-test("(security) a row with an invalid granted_operations value gives an empty live grant", async (t) => {
+test("(security) a row with an invalid granted_operations value fails the read", async (t) => {
   const f = fixture(t);
   const created = await f.service.inviteCreate(caller, f.host().id, {
     invitee_name: GUEST_NAME,
@@ -381,8 +380,6 @@ test("(security) a row with an invalid granted_operations value gives an empty l
         .prepare("UPDATE workbench_invite SET granted_operations = ?")
         .run(invalid),
     );
-    const stored = f.invites.resolve(created.id)?.granted_operations;
-    assert.deepEqual(stored, []);
-    assert.equal(liveGrant(stored ?? [], HOST_AGENT).size, NO_ITEMS);
+    assert.throws(() => f.invites.resolve(created.id));
   }
 });

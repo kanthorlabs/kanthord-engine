@@ -75,15 +75,9 @@ const projectIdSchema = identitySchema("project");
 const projectIdsSchema = z.array(projectIdSchema);
 const NO_PROJECTS: string[] = [];
 const grantedOperationsSchema = z.array(z.string());
-const NO_GRANT: string[] = [];
 
 function grantedOperationsOf(stored: string): string[] {
-  try {
-    const parsed = grantedOperationsSchema.safeParse(JSON.parse(stored));
-    return parsed.success ? parsed.data : NO_GRANT;
-  } catch {
-    return NO_GRANT;
-  }
+  return grantedOperationsSchema.parse(JSON.parse(stored));
 }
 
 function checkedGrant(agentName: string, ids: readonly string[]): string[] {
