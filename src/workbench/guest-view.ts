@@ -4,6 +4,7 @@ import {
   ActionOutcome,
   type Author,
   type MemberEntry,
+  type NoticeRecord,
   QueueClearCause,
   WORKBENCH_ACTION_RESULT_ENTRY,
   WORKBENCH_REQUEST_OWNER_ACT_TOOL,
@@ -38,6 +39,7 @@ export const GUEST_RECORD_KINDS = [
   WorkbenchRecordKind.Author,
   WorkbenchRecordKind.QueueClear,
   WorkbenchRecordKind.ScopeStop,
+  WorkbenchRecordKind.Notice,
 ] as const;
 export type GuestRecordKind = (typeof GUEST_RECORD_KINDS)[number];
 
@@ -66,7 +68,15 @@ export type GuestBody =
       cause: QueueClearCause;
       text: string;
     }
-  | { kind: typeof WorkbenchRecordKind.ScopeStop; operation_id: string };
+  | { kind: typeof WorkbenchRecordKind.ScopeStop; operation_id: string }
+  | {
+      kind: typeof WorkbenchRecordKind.Notice;
+      watch_entry_id: string;
+      projects: {
+        name: string;
+        nodes: NoticeRecord["projects"][number]["nodes"];
+      }[];
+    };
 
 export type GuestEntry = {
   id: string;
@@ -139,6 +149,20 @@ function projectRecord(record: WorkbenchRecord): GuestBody | null {
       };
     case WorkbenchRecordKind.ScopeStop:
       return { kind: record.kind, operation_id: record.operation_id };
+    case WorkbenchRecordKind.Notice:
+      return {
+        kind: record.kind,
+        watch_entry_id: record.watch_entry_id,
+        projects: record.projects.map((block) => ({
+          name: block.name,
+          nodes: block.nodes.map((node) => ({
+            node_id: node.node_id,
+            name: node.name,
+            state: node.state,
+            ended_at: node.ended_at,
+          })),
+        })),
+      };
     default:
       return assert.fail("A guest record kind has a projection.");
   }

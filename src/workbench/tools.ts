@@ -227,6 +227,7 @@ export interface OperationToolOptions {
   callerOf: (toolCallId: string) => ToolCaller;
   scopeOf: () => ReadonlySet<string> | null;
   projectScope: ProjectScope;
+  completed: (operationId: string, data: unknown) => void;
 }
 
 function refuseOutOfScope(
@@ -285,6 +286,7 @@ export function operationTool(
             : {}),
         });
         if (result.type === OperationResultType.Completed) {
+          options.completed(operation.id, result.data);
           const data = toolData(operation, result.data);
           return {
             content: [{ type: "text", text: canonicalJSON(data) }],

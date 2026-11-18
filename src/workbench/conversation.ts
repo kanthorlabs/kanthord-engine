@@ -32,6 +32,7 @@ import {
 } from "./sessions.ts";
 import { planOf } from "./plan-pipeline.ts";
 import type { Dependencies } from "./service.ts";
+import { noticeLine } from "./watch.ts";
 
 const MENTION_PREFIX = "@";
 const NAME_CHARACTER = /[A-Za-z0-9 _-]/;
@@ -51,6 +52,7 @@ const HOST_INDEX = 0;
 const NOT_FOUND = -1;
 const LAST_ENTRY = 1;
 const PROJECT_SEPARATOR = ", ";
+const NOTICE_LINE_SEPARATOR = "\n";
 const SHARED_PROJECTS_PREFIX = "Projects shared in this conversation: ";
 const FIRST_AFTER = 1;
 const PAIR_SEPARATOR = ",";
@@ -396,6 +398,12 @@ function noteLineOf(
   return `${authorMark(record.author)}${separator} ${text}`;
 }
 
+function noticeTextOf(entry: SessionEntry): string | null {
+  const record = recordOf(entry);
+  if (record?.kind !== WorkbenchRecordKind.Notice) return null;
+  return record.projects.map(noticeLine).join(NOTICE_LINE_SEPARATOR);
+}
+
 function relayLineOf(
   author: RelayMember,
   entry: SessionEntry,
@@ -403,6 +411,8 @@ function relayLineOf(
 ): RelayLine | null {
   const note = noteLineOf(entry);
   if (note !== null) return { summary: false, text: note };
+  const notice = noticeTextOf(entry);
+  if (notice !== null) return { summary: false, text: notice };
   if (context.own) return null;
   const summary = summaryOfEntry(entry, context.forkEntry);
   if (summary !== null) return { summary: true, text: summary };
@@ -582,6 +592,8 @@ function forkItemOf(
   if (card !== null) return { kind: ForkItemKind.Other, text: card };
   const note = noteLineOf(entry, GUEST_NOTE_FORK_SEPARATOR);
   if (note !== null) return { kind: ForkItemKind.Other, text: note };
+  const notice = noticeTextOf(entry);
+  if (notice !== null) return { kind: ForkItemKind.Other, text: notice };
   return messageLineOf(author, entry, context);
 }
 

@@ -38,6 +38,8 @@ Every operation has `human` access, except `workbench.invite.join` (`public`) an
 | `workbench.guest.stream`                 | `GET /api/workbench/guest/session/stream`                                   | `stream` |
 | `workbench.guest.message`                | `POST /api/workbench/guest/session/message`                                 | `unary`  |
 
+Each item of `workbench.session.list` answers `notice`, a string or null. See [Completion notice](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/workbench-service.impl.md#completion-notice).
+
 `workbench.session.scopeRequest.approve` and `reject` are human-only acts of the owner. No agent tool list holds them. A delegate identity, a read-only identity and a guest token answer `401 gateway.authentication.unauthorized`.
 
 `workbench.session.autoMode.set` takes the body `{ enabled }` and answers `{ session_id, enabled }`. It is a human-only act of the owner. The run snapshot of `workbench.session.events` answers `auto_mode`.

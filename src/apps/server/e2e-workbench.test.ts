@@ -75,9 +75,11 @@ import {
   WORKBENCH_QUEUE_LIMIT,
   WORKBENCH_REJECTION_REASON,
   WORKBENCH_STREAM_TICK_MS,
+  WORKBENCH_WATCH_CHECK_MS,
   type WorkbenchConfiguration,
   WorkbenchErrorCode,
   WorkbenchGuardReason,
+  WorkbenchRecordKind,
 } from "../../workbench/contract.ts";
 import { toolName } from "../../workbench/index.ts";
 import {
@@ -5927,3 +5929,758 @@ test(
     assert.equal(world.fixture.workbenchService["grantTickets"].size, NO_CALLS);
   },
 );
+
+const NODE_CREATE = missionOperations["node.create"].id;
+const WATCH_REASON = "plan the thread";
+const YUMI_CREATE_REQUEST = "@Yumi create the second node.";
+const EXTRA_FILENAMES = ["extra-one.md", "extra-two.md"];
+const TWO_NODES = 2;
+const NO_WATCH_RECORDS = 0;
+
+interface WatchWorld {
+  fixture: Fixture;
+  target: ImportTarget;
+  hostFile: string;
+  hostId: string;
+}
+
+function nodeCreateInput(target: ImportTarget, filename: string) {
+  return {
+    params: { mission_id: target.missionId },
+    body: {
+      filename,
+      content: {
+        name: "Second node",
+        requirement: "Review the second thread",
+        criterion: "The second thread is reviewed",
+        verifications: ["true"],
+        bindings: [],
+        intent: "examine",
+      },
+      tasks: [],
+      reason: WATCH_REASON,
+      expected_mission_version: target.version,
+    },
+  };
+}
+
+function extraEntry(filename: string) {
+  return {
+    filename,
+    intent: "examine",
+    name: filename,
+    requirement: "Review the thread",
+    criterion: "The thread is reviewed",
+    verifications: ["true"],
+    bindings: [],
+  };
+}
+
+async function importApplyInput(fixture: Fixture, target: ImportTarget) {
+  const exported = completed(
+    await fixture.missions.export(
+      {
+        params: { mission_id: target.missionId },
+        query: { format: ImportFormat.Json },
+        body: null,
+      },
+      fixture.options,
+    ),
+  ) as { mission_version: number; entries: Record<string, unknown>[] };
+  const snapshot = {
+    format: ImportFormat.Json,
+    mission_id: target.missionId,
+    mission_version: exported.mission_version,
+    reason: IMPORT_REASON,
+    entries: [...exported.entries, ...EXTRA_FILENAMES.map(extraEntry)],
+  };
+  const preview = completed(
+    await fixture.missions["import.preview"](
+      {
+        params: { mission_id: target.missionId },
+        query: {},
+        body: snapshot,
+      } as never,
+      fixture.options,
+    ),
+  );
+  return {
+    params: { mission_id: target.missionId },
+    body: {
+      ...snapshot,
+      mission_version: preview.expected_mission_version,
+      preview_digest: preview.preview_digest,
+      confirmed_retirements: [],
+    },
+  } as Parameters<typeof toolCall>[1];
+}
+
+function fileRecordsOf(file: string, kind: string): Record<string, unknown>[] {
+  return readFileSync(file, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+    .filter((entry) => entry.type === CustomType)
+    .filter((entry) => entry.customType === RECORD_ENTRY)
+    .map((entry) => entry.data as Record<string, unknown>)
+    .filter((data) => data.kind === kind);
+}
+
+function otherSessionFiles(fixture: Fixture, hostFile: string): string[] {
+  return readdirSync(fixture.stateDirectory, {
+    recursive: true,
+    encoding: "utf8",
+  })
+    .filter((name) => name.endsWith(SESSION_FILE_SUFFIX))
+    .map((name) => join(fixture.stateDirectory, name))
+    .filter((file) => file !== hostFile);
+}
+
+async function watchWorld(
+  t: TestContext,
+  steps: (world: Partial<WatchWorld>) => FauxResponseStep[],
+  options: {
+    agentName?: string;
+    guard?: boolean;
+    now?: () => number;
+    stateDirectory?: string;
+    persistence?: Persistence;
+  } = {},
+): Promise<WatchWorld> {
+  const world: Partial<WatchWorld> = {};
+  const fixture = await workbenchFixture(
+    t,
+    steps(world),
+    options.stateDirectory,
+    undefined,
+    [OPS, AGENT, REVIEW_AGENT, ...(options.guard ? [GUARD_AGENT] : [])],
+    undefined,
+    options.persistence,
+    options.now,
+  );
+  const target = await importTarget(fixture);
+  const host = await createSession(fixture, undefined, options.agentName);
+  return Object.assign(world, {
+    fixture,
+    target,
+    hostId: host.id,
+    hostFile: host.resume_command.replace(/^pi --session /, ""),
+  }) as WatchWorld;
+}
+
+async function newNodeIds(world: WatchWorld): Promise<string[]> {
+  const state = await importState(world.fixture, world.target);
+  return state.nodeIds.filter((id) => id !== world.target.nodeId);
+}
+
+test("(happy path) an approved mission--node--create appends one watch record with the created node id", async (t) => {
+  const world = await watchWorld(
+    t,
+    (holder) => [
+      () =>
+        toolCall(
+          toolName(NODE_CREATE),
+          nodeCreateInput(holder.target!, EXTRA_FILENAMES[0]!),
+        ),
+      fauxAssistantMessage(ANSWER),
+    ],
+    { agentName: OPS },
+  );
+  const { fixture, hostId } = world;
+  completed(await setAutoMode(fixture, hostId, false));
+  completed(await message(fixture, hostId, QUESTION));
+  const pending = await untilApproval(fixture, hostId, t.signal);
+  assert.equal(pending.operation_id, NODE_CREATE);
+  assert.deepEqual(
+    fileRecordsOf(world.hostFile, WorkbenchRecordKind.Watch),
+    [],
+  );
+  completed(await decide(fixture, hostId, pending.tool_call_id, true));
+  await untilIdle(fixture, hostId, t.signal);
+  assert.deepEqual(fileRecordsOf(world.hostFile, WorkbenchRecordKind.Watch), [
+    { kind: WorkbenchRecordKind.Watch, node_ids: await newNodeIds(world) },
+  ]);
+  assert.equal((await newNodeIds(world)).length, SINGLE);
+});
+
+test("(happy path) an auto mission--node--create appends one watch record", async (t) => {
+  const quote = "Create the second node";
+  const world = await watchWorld(
+    t,
+    (holder) => [
+      () =>
+        toolCall(
+          toolName(NODE_CREATE),
+          nodeCreateInput(holder.target!, EXTRA_FILENAMES[0]!),
+        ),
+      verdictStep({ input: {}, nodeId: "", request: quote, quote }),
+      fauxAssistantMessage(ANSWER),
+    ],
+    { agentName: OPS, guard: true },
+  );
+  const { fixture, hostId } = world;
+  completed(await message(fixture, hostId, `${quote}.`));
+  await untilIdle(fixture, hostId, t.signal);
+  assert.equal(guardCalls(fixture).length, SINGLE);
+  assert.deepEqual(fileRecordsOf(world.hostFile, WorkbenchRecordKind.Watch), [
+    { kind: WorkbenchRecordKind.Watch, node_ids: await newNodeIds(world) },
+  ]);
+  assert.equal((await newNodeIds(world)).length, SINGLE);
+});
+
+test("(happy path) an approved mission--import--apply that creates two nodes appends one watch record with both node ids", async (t) => {
+  const world = await watchWorld(
+    t,
+    (holder) => [
+      async () =>
+        toolCall(
+          toolName(IMPORT_APPLY),
+          await importApplyInput(holder.fixture!, holder.target!),
+        ),
+      fauxAssistantMessage(ANSWER),
+    ],
+    { agentName: OPS },
+  );
+  const { fixture, hostId } = world;
+  completed(await message(fixture, hostId, QUESTION));
+  const pending = await untilApproval(fixture, hostId, t.signal);
+  assert.equal(pending.operation_id, IMPORT_APPLY);
+  completed(await decide(fixture, hostId, pending.tool_call_id, true));
+  await untilIdle(fixture, hostId, t.signal);
+  const created = await newNodeIds(world);
+  assert.equal(created.length, TWO_NODES);
+  const [watch] = fileRecordsOf(world.hostFile, WorkbenchRecordKind.Watch);
+  assert.equal(
+    fileRecordsOf(world.hostFile, WorkbenchRecordKind.Watch).length,
+    SINGLE,
+  );
+  assert.deepEqual(
+    (watch!.node_ids as string[]).toSorted(),
+    created.toSorted(),
+  );
+});
+
+test("(security: refused path) a rejected mission--node--create appends no watch record", async (t) => {
+  const world = await watchWorld(
+    t,
+    (holder) => [
+      () =>
+        toolCall(
+          toolName(NODE_CREATE),
+          nodeCreateInput(holder.target!, EXTRA_FILENAMES[0]!),
+        ),
+      fauxAssistantMessage(ANSWER),
+    ],
+    { agentName: OPS },
+  );
+  const { fixture, hostId } = world;
+  completed(await setAutoMode(fixture, hostId, false));
+  completed(await message(fixture, hostId, QUESTION));
+  const pending = await untilApproval(fixture, hostId, t.signal);
+  completed(await decide(fixture, hostId, pending.tool_call_id, false));
+  const entries = await untilIdle(fixture, hostId, t.signal);
+  assert.ok(toolResults(entries).every(({ isError }) => isError));
+  assert.equal(
+    fileRecordsOf(world.hostFile, WorkbenchRecordKind.Watch).length,
+    NO_WATCH_RECORDS,
+  );
+  assert.deepEqual(await newNodeIds(world), []);
+});
+
+test("(happy path) a mission--node--create of a participant appends the watch record to the host session file only", async (t) => {
+  const world = await watchWorld(t, (holder) => [
+    () =>
+      toolCall(
+        toolName(NODE_CREATE),
+        nodeCreateInput(holder.target!, EXTRA_FILENAMES[0]!),
+      ),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  const { fixture, hostId } = world;
+  completed(await setAutoMode(fixture, hostId, false));
+  completed(await message(fixture, hostId, YUMI_CREATE_REQUEST));
+  const pending = await untilApproval(fixture, hostId, t.signal);
+  assert.equal(pending.operation_id, NODE_CREATE);
+  assert.notEqual(pending.session_id, hostId);
+  completed(
+    await decide(fixture, pending.session_id, pending.tool_call_id, true),
+  );
+  await untilIdle(fixture, hostId, t.signal);
+  assert.deepEqual(fileRecordsOf(world.hostFile, WorkbenchRecordKind.Watch), [
+    { kind: WorkbenchRecordKind.Watch, node_ids: await newNodeIds(world) },
+  ]);
+  const participantFiles = otherSessionFiles(fixture, world.hostFile);
+  assert.equal(participantFiles.length, SINGLE);
+  for (const file of participantFiles)
+    assert.equal(
+      fileRecordsOf(file, WorkbenchRecordKind.Watch).length,
+      NO_WATCH_RECORDS,
+    );
+});
+
+const WATCH_CLOCK_START = 1_700_000_000_000;
+const DISCARD_WATCH_REASON = "discard the watched node";
+const GUEST_ENTRIES_EVENT = "entries";
+const GUEST_STATE_EVENT = "state";
+const GUEST_GET_PATH = "/api/workbench/guest/session";
+const GUEST_STREAM_PATH = "/api/workbench/guest/session/stream";
+const GUEST_MESSAGE_PATH = "/api/workbench/guest/session/message";
+const GUEST_NOTE_TEXT = "Mira asks which node is done.";
+const GUEST_RUN_TEXT = "@Yumi what is done?";
+const SECOND_WATCH_ANSWER = "Noted.";
+const FRAME_SEPARATOR = "\n\n";
+const FRAME_LINE = /^event: (\w+)\ndata: (.*)$/s;
+const NO_STREAM_FRAMES = 0;
+
+function watchClock() {
+  const clock = { now: WATCH_CLOCK_START };
+  return { clock, now: () => clock.now };
+}
+
+function createSteps(holder: Partial<WatchWorld>, ...rest: FauxResponseStep[]) {
+  return [
+    () =>
+      toolCall(
+        toolName(NODE_CREATE),
+        nodeCreateInput(holder.target!, EXTRA_FILENAMES[0]!),
+      ),
+    fauxAssistantMessage(ANSWER),
+    ...rest,
+  ];
+}
+
+async function approveCreate(world: WatchWorld, signal: AbortSignal) {
+  const { fixture, hostId } = world;
+  completed(await setAutoMode(fixture, hostId, false));
+  completed(await message(fixture, hostId, QUESTION));
+  const pending = await untilApproval(fixture, hostId, signal);
+  completed(await decide(fixture, hostId, pending.tool_call_id, true));
+  await untilIdle(fixture, hostId, signal);
+  const [nodeId] = await newNodeIds(world);
+  assert.ok(nodeId);
+  return nodeId;
+}
+
+async function discardWatched(fixture: Fixture, nodeId: string) {
+  const mission = completed(
+    await fixture.missions.get(
+      {
+        params: { project_id: await firstProjectId(fixture) },
+        query: {},
+        body: null,
+      },
+      fixture.options,
+    ),
+  );
+  const node = await nodeOf(fixture, nodeId);
+  completed(
+    await fixture.missions["node.discard"](
+      {
+        params: { node_id: nodeId },
+        query: {},
+        body: {
+          reason: DISCARD_WATCH_REASON,
+          expected_mission_version: mission.version,
+          expected_state: node.state,
+          expected_attempt: node.attempt,
+        },
+      },
+      fixture.options,
+    ),
+  );
+}
+
+async function watchedDiscard(
+  t: TestContext,
+  rest: FauxResponseStep[] = [],
+  setup: {
+    stateDirectory?: string;
+    persistence?: Persistence;
+    guard?: boolean;
+  } = {},
+) {
+  const { clock, now } = watchClock();
+  const world = await watchWorld(t, (holder) => createSteps(holder, ...rest), {
+    agentName: OPS,
+    now,
+    ...setup,
+  });
+  const nodeId = await approveCreate(world, t.signal);
+  await discardWatched(world.fixture, nodeId);
+  clock.now += WORKBENCH_WATCH_CHECK_MS;
+  return { world, clock, nodeId };
+}
+
+function ownerGet(fixture: Fixture, sessionId: string) {
+  return fixture.workbench["session.get"](
+    { params: { session_id: sessionId }, query: {}, body: null },
+    fixture.options,
+  );
+}
+
+function noticeRecords(world: WatchWorld) {
+  return fileRecordsOf(world.hostFile, WorkbenchRecordKind.Notice);
+}
+
+async function listedNotice(fixture: Fixture, hostId: string) {
+  const answer = completed(
+    await fixture.workbench["session.list"](
+      { params: {}, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  const item = answer.items.find(({ id }) => id === hostId);
+  assert.ok(item);
+  return item;
+}
+
+async function newestOutcomeAt(fixture: Fixture, nodeId: string) {
+  const page = completed(
+    await fixture.missions["outcome.list"](
+      { params: { node_id: nodeId }, query: { limit: 1 }, body: null },
+      fixture.options,
+    ),
+  );
+  return page.items[0]!.created_at;
+}
+
+async function guestJoin(world: WatchWorld) {
+  const created = completed(
+    await world.fixture.workbench["invite.create"](
+      {
+        params: { session_id: world.hostId },
+        query: {},
+        body: {
+          invitee_name: GUEST_NAME,
+          project_ids: [await firstProjectId(world.fixture)],
+          granted_operations: [],
+        },
+      },
+      world.fixture.options,
+    ),
+  );
+  const joined = completed(
+    await world.fixture.workbench["invite.join"](
+      {
+        params: {},
+        query: {},
+        body: { invite_token: created.invite_token, name: GUEST_NAME },
+      },
+      world.fixture.options,
+    ),
+  );
+  return joined.guest_token;
+}
+
+function asGuestToken(
+  fixture: Fixture,
+  token: string,
+  path: string,
+  init: RequestInit = {},
+) {
+  return fixture.request(path, {
+    ...init,
+    headers: {
+      authorization: `Bearer ${token}`,
+      ...(init.body === undefined
+        ? {}
+        : {
+            "content-type": "application/json",
+            "Idempotency-Key": createIdempotencyKey(),
+          }),
+    },
+  });
+}
+
+async function guestView(fixture: Fixture, token: string) {
+  const response = await asGuestToken(fixture, token, GUEST_GET_PATH);
+  assert.equal(response.status, HttpStatus.OK);
+  return (await response.json()) as {
+    entries: ({ kind: string } & Record<string, unknown>)[];
+  };
+}
+
+async function openGuestStream(
+  t: TestContext,
+  fixture: Fixture,
+  token: string,
+) {
+  const controller = new AbortController();
+  t.after(() => controller.abort());
+  const response = await fixture.request(GUEST_STREAM_PATH, {
+    headers: { authorization: `Bearer ${token}` },
+    signal: controller.signal,
+  });
+  assert.equal(response.status, HttpStatus.OK);
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  return async () => {
+    for (;;) {
+      const end = buffered.indexOf(FRAME_SEPARATOR);
+      if (end >= NO_STREAM_FRAMES) {
+        const block = buffered.slice(NO_STREAM_FRAMES, end);
+        buffered = buffered.slice(end + FRAME_SEPARATOR.length);
+        const match = FRAME_LINE.exec(block);
+        if (match) return { event: match[1]!, data: JSON.parse(match[2]!) };
+        continue;
+      }
+      const chunk = await reader.read();
+      assert.equal(chunk.done, false);
+      buffered += decoder.decode(chunk.value, { stream: true });
+    }
+  };
+}
+
+test("(security) a guest read and a guest stream run no check, then the next owner get appends the notice that the guest view shows with no project_id", async (t) => {
+  const { world, nodeId } = await watchedDiscard(t);
+  const { fixture, hostId } = world;
+  const token = await guestJoin(world);
+  const before = await guestView(fixture, token);
+  await openGuestStream(t, fixture, token);
+  assert.equal(noticeRecords(world).length, NO_WATCH_RECORDS);
+  assert.ok(
+    before.entries.every(({ kind }) => kind !== WorkbenchRecordKind.Notice),
+  );
+  completed(await ownerGet(fixture, hostId));
+  const projectId = await firstProjectId(fixture);
+  const [notice, ...others] = noticeRecords(world);
+  assert.equal(others.length, NO_WATCH_RECORDS);
+  assert.equal(notice!.kind, WorkbenchRecordKind.Notice);
+  assert.ok(isString(notice!.watch_entry_id));
+  assert.deepEqual(notice!.projects, [
+    {
+      project_id: projectId,
+      name: PROJECT_NAME,
+      nodes: [
+        {
+          node_id: nodeId,
+          name: "Second node",
+          state: NodeState.Discarded,
+          ended_at: await newestOutcomeAt(fixture, nodeId),
+        },
+      ],
+    },
+  ]);
+  const after = await guestView(fixture, token);
+  const notices = after.entries.filter(
+    ({ kind }) => kind === WorkbenchRecordKind.Notice,
+  );
+  assert.equal(notices.length, SINGLE);
+  assert.deepEqual(notices[0]!.projects, [
+    {
+      name: PROJECT_NAME,
+      nodes: [
+        {
+          node_id: nodeId,
+          name: "Second node",
+          state: NodeState.Discarded,
+          ended_at: await newestOutcomeAt(fixture, nodeId),
+        },
+      ],
+    },
+  ]);
+  assert.ok(!JSON.stringify(notices[0]).includes(projectId));
+  assert.ok(
+    after.entries.every(({ kind }) => kind !== WorkbenchRecordKind.Watch),
+  );
+});
+
+test("(invariant) a restart before any owner read keeps the watch, and the first owner get on the new service appends the notice", async (t) => {
+  const state = temporaryDirectory();
+  stopAfter(t, () => rmSync(state, { recursive: true, force: true }));
+  const persistence = {
+    path: join(temporary(t), "operational.db"),
+    masterKey: randomBytes(MASTER_KEY_BYTES).toString("base64"),
+    resumed: false,
+  };
+  const { clock, now } = watchClock();
+  const first = { world: undefined as WatchWorld | undefined };
+  await t.test("watch and discard, then stop", async (step) => {
+    const watched = await watchedDiscard(step, [], {
+      stateDirectory: state,
+      persistence,
+    });
+    first.world = watched.world;
+    clock.now = watched.clock.now;
+  });
+  const { hostId, hostFile } = first.world!;
+  const second = await workbenchFixture(
+    t,
+    [],
+    state,
+    undefined,
+    [OPS, AGENT, REVIEW_AGENT],
+    undefined,
+    { ...persistence, resumed: true },
+    now,
+  );
+  assert.equal(
+    fileRecordsOf(hostFile, WorkbenchRecordKind.Notice).length,
+    NO_WATCH_RECORDS,
+  );
+  completed(await ownerGet(second, hostId));
+  assert.equal(
+    fileRecordsOf(hostFile, WorkbenchRecordKind.Notice).length,
+    SINGLE,
+  );
+});
+
+test("(happy path) a list read with no agent_name answers the notice of a conversation that the owner did not open", async (t) => {
+  const { world } = await watchedDiscard(t);
+  const item = await listedNotice(world.fixture, world.hostId);
+  assert.equal(item.notice, `${PROJECT_NAME} · 1 Discarded`);
+  assert.ok(item.participants.every(({ notice }) => notice === null));
+  assert.equal(noticeRecords(world).length, SINGLE);
+});
+
+test("(happy path) an owner message after the notice clears it in the next list read", async (t) => {
+  const { world } = await watchedDiscard(t, [
+    fauxAssistantMessage(SECOND_WATCH_ANSWER),
+  ]);
+  const { fixture, hostId } = world;
+  assert.notEqual((await listedNotice(fixture, hostId)).notice, null);
+  completed(await message(fixture, hostId, QUESTION));
+  await untilIdle(fixture, hostId, t.signal);
+  assert.equal((await listedNotice(fixture, hostId)).notice, null);
+});
+
+test("(happy path) a guest note and a guest-run user message after the notice leave it standing", async (t) => {
+  const { world } = await watchedDiscard(t, [
+    fauxAssistantMessage(SECOND_WATCH_ANSWER),
+  ]);
+  const { fixture, hostId } = world;
+  const token = await guestJoin(world);
+  const expected = `${PROJECT_NAME} · 1 Discarded`;
+  assert.equal((await listedNotice(fixture, hostId)).notice, expected);
+  const note = await asGuestToken(fixture, token, GUEST_MESSAGE_PATH, {
+    method: "POST",
+    body: JSON.stringify({ text: GUEST_NOTE_TEXT }),
+  });
+  assert.equal(note.status, HttpStatus.Accepted);
+  assert.equal((await listedNotice(fixture, hostId)).notice, expected);
+  const run = await asGuestToken(fixture, token, GUEST_MESSAGE_PATH, {
+    method: "POST",
+    body: JSON.stringify({ text: GUEST_RUN_TEXT }),
+  });
+  assert.equal(run.status, HttpStatus.Accepted);
+  await untilIdle(fixture, hostId, t.signal);
+  assert.equal((await listedNotice(fixture, hostId)).notice, expected);
+});
+
+test("(happy path) an owner events poll appends the notice of a terminal watch", async (t) => {
+  const { world } = await watchedDiscard(t);
+  const answer = completed(
+    await world.fixture.workbench["session.events"](
+      { params: { session_id: world.hostId }, query: {}, body: null },
+      world.fixture.options,
+    ),
+  );
+  assert.equal(noticeRecords(world).length, SINGLE);
+  assert.ok(
+    answer.entries.some(
+      (entry) =>
+        (entry.data as { kind?: string } | undefined)?.kind ===
+        WorkbenchRecordKind.Notice,
+    ),
+  );
+});
+
+test("(happy path) an open guest stream receives one entries frame with the projected notice after the owner read", async (t) => {
+  const { world, nodeId } = await watchedDiscard(t);
+  const { fixture, hostId } = world;
+  const token = await guestJoin(world);
+  const next = await openGuestStream(t, fixture, token);
+  assert.equal((await next()).event, GUEST_ENTRIES_EVENT);
+  assert.equal((await next()).event, GUEST_STATE_EVENT);
+  completed(await ownerGet(fixture, hostId));
+  let frame = await next();
+  while (frame.event !== GUEST_ENTRIES_EVENT) frame = await next();
+  const entries = frame.data as ({ kind: string } & Record<string, unknown>)[];
+  assert.equal(entries.length, SINGLE);
+  assert.equal(entries[0]!.kind, WorkbenchRecordKind.Notice);
+  assert.deepEqual(entries[0]!.projects, [
+    {
+      name: PROJECT_NAME,
+      nodes: [
+        {
+          node_id: nodeId,
+          name: "Second node",
+          state: NodeState.Discarded,
+          ended_at: await newestOutcomeAt(fixture, nodeId),
+        },
+      ],
+    },
+  ]);
+  assert.ok(
+    !JSON.stringify(frame.data).includes(await firstProjectId(fixture)),
+  );
+});
+
+const WATCH_FORK_SUMMARY = "Goal: finish the watched node.";
+const WATCH_FORK_TEXT = "Continue after the watched node.";
+const WATCH_FORK_ANSWER = "I continue after the watched node.";
+const WATCH_NOTICE_LINE = `Completed: ${PROJECT_NAME} · 1 Discarded`;
+const FORK_RECORD_KIND = "fork";
+
+function forkSteps() {
+  return [
+    fauxAssistantMessage(WATCH_FORK_SUMMARY),
+    pass(),
+    fauxAssistantMessage(WATCH_FORK_ANSWER),
+  ];
+}
+
+function kindsOf(file: string): string[] {
+  return [
+    WorkbenchRecordKind.Watch,
+    WorkbenchRecordKind.Notice,
+    FORK_RECORD_KIND,
+  ].flatMap((kind) => fileRecordsOf(file, kind).map(() => kind));
+}
+
+test("(happy path, fork state) the fork material of a source with a notice record holds its notice line", async (t) => {
+  const { world } = await watchedDiscard(t, forkSteps(), { guard: true });
+  const { fixture, hostId } = world;
+  completed(await ownerGet(fixture, hostId));
+  assert.equal(noticeRecords(world).length, SINGLE);
+  completed(await forkOf(fixture, hostId, WATCH_FORK_TEXT));
+  const [summarizer] = callsOf(fixture, FORK_SUMMARY_PROMPT);
+  const { conversation } = userRequestOf(summarizer!);
+  assert.ok(conversation!.includes(WATCH_NOTICE_LINE));
+});
+
+test("(invariant, fork state) a fork copies no watch record, and the notice of a watched node appears in the source only", async (t) => {
+  const { world, clock, nodeId } = await watchedDiscardLater(t);
+  const { fixture, hostId } = world;
+  const before = kindsOf(world.hostFile);
+  assert.deepEqual(before, [WorkbenchRecordKind.Watch]);
+  const forked = completed(await forkOf(fixture, hostId, WATCH_FORK_TEXT));
+  await untilIdle(fixture, forked.session_id, t.signal);
+  const forkFile = completed(
+    await ownerGet(fixture, forked.session_id),
+  ).resume_command.replace(/^pi --session /, "");
+  assert.deepEqual(kindsOf(forkFile), [FORK_RECORD_KIND]);
+  await discardWatched(fixture, nodeId);
+  clock.now += WORKBENCH_WATCH_CHECK_MS;
+  completed(await ownerGet(fixture, forked.session_id));
+  assert.deepEqual(kindsOf(forkFile), [FORK_RECORD_KIND]);
+  completed(await ownerGet(fixture, hostId));
+  assert.deepEqual(kindsOf(world.hostFile), [
+    WorkbenchRecordKind.Watch,
+    WorkbenchRecordKind.Notice,
+  ]);
+  completed(await ownerGet(fixture, forked.session_id));
+  assert.deepEqual(kindsOf(forkFile), [FORK_RECORD_KIND]);
+});
+
+async function watchedDiscardLater(t: TestContext) {
+  const { clock, now } = watchClock();
+  const world = await watchWorld(
+    t,
+    (holder) => createSteps(holder, ...forkSteps()),
+    { agentName: OPS, now, guard: true },
+  );
+  const nodeId = await approveCreate(world, t.signal);
+  return { world, clock, nodeId };
+}

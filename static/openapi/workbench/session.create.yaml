@@ -333,6 +333,10 @@ components:
                       - operation_id
                     additionalProperties: false
                   - type: "null"
+              notice:
+                anyOf:
+                  - type: string
+                  - type: "null"
               participants:
                 type: array
                 items:
@@ -392,6 +396,10 @@ components:
                             - operation_id
                           additionalProperties: false
                         - type: "null"
+                    notice:
+                      anyOf:
+                        - type: string
+                        - type: "null"
                     participants:
                       type: array
                       prefixItems: []
@@ -408,6 +416,7 @@ components:
                     - forked_from
                     - run_active
                     - pending_approval
+                    - notice
                     - participants
                   additionalProperties: false
               scope_requests:
@@ -427,6 +436,7 @@ components:
               - forked_from
               - run_active
               - pending_approval
+              - notice
               - participants
               - scope_requests
             additionalProperties: false

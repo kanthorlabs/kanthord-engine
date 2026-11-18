@@ -631,20 +631,21 @@ test("(security) the guest read holds no request, and the owner snapshot and the
   const guestText = JSON.stringify(await f.service.guestGet(guest));
   assert.ok(!guestText.includes(request.id));
   assert.ok(!guestText.includes("scope_request"));
-  const shown = await f.service.get(host.id);
+  const shown = await f.service.get(host.id, caller());
   assert.equal(shown.scope_requests.length, SINGLE);
   assert.equal(shown.scope_requests[NO_ITEMS]?.id, request.id);
-  const listed = await f.service.list(undefined);
+  const listed = await f.service.list(undefined, caller());
   assert.equal(
     listed.items.find(({ id }) => id === host.id)?.scope_requests,
     SINGLE,
   );
   const now = Date.now();
   t.mock.method(Date, "now", () => now + 8 * 86_400_000);
-  assert.deepEqual((await f.service.get(host.id)).scope_requests, []);
+  assert.deepEqual((await f.service.get(host.id, caller())).scope_requests, []);
   assert.equal(
-    (await f.service.list(undefined)).items.find(({ id }) => id === host.id)
-      ?.scope_requests,
+    (await f.service.list(undefined, caller())).items.find(
+      ({ id }) => id === host.id,
+    )?.scope_requests,
     NO_ITEMS,
   );
 });
@@ -656,14 +657,15 @@ test("(security) the tool result of workbench--session--list drops scope_request
   const listOperation = workbenchOperations["session.list"];
   const tool = operationTool(
     listOperation,
-    async () => completed(await f.service.list(undefined)),
+    async () => completed(await f.service.list(undefined, caller())),
     {
       callerOf: () => ({ identity: OWNER_IDENTITY }),
       scopeOf: () => null,
       projectScope: new ProjectScope({ projectOf: () => null }),
+      completed: () => undefined,
     },
   );
-  const answer = await f.service.list(undefined);
+  const answer = await f.service.list(undefined, caller());
   const item = answer.items.find(({ id }) => id === host.id);
   assert.equal(item?.scope_requests, SINGLE);
   const result = await tool.execute(
