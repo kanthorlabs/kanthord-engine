@@ -5,6 +5,7 @@ import {
   type AuthenticationLookups,
 } from "./auth/authentication.ts";
 import { Idempotency } from "./idempotency.ts";
+import type { ProjectScope } from "../kernel/project-scope.ts";
 import { type ExecutionLookup, Invocation } from "./invocation.ts";
 export { GatewayService, type GatewayDependencies } from "./service.ts";
 export { gatewayMigrations } from "./migrations.ts";
@@ -20,6 +21,7 @@ export function createInvocation(options: {
   masterKey: string;
   authVersion: number;
   lookups?: AuthenticationLookups & { scheduler?: ExecutionLookup };
+  projectScope?: ProjectScope;
 }): Invocation {
   const authentication = new Authentication(
     options.masterKey,
@@ -33,5 +35,6 @@ export function createInvocation(options: {
     idempotency,
     options.stores,
     options.lookups?.scheduler,
+    { projectScope: options.projectScope },
   );
 }

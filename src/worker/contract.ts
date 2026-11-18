@@ -33,6 +33,7 @@ import {
   type OperationResult,
   StoreName,
 } from "../kernel/operation.ts";
+import { ProjectScopeRule } from "../kernel/project-scope.ts";
 import type {
   CheckoutResult,
   PushRecord,
@@ -1545,6 +1546,7 @@ export const instanceOperations = {
   "instance.list": {
     ...humanOperation,
     id: "worker.instance.list",
+    projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Get,
     path: "/api/worker/instance",
     mutation: false,

@@ -12,7 +12,12 @@ import { loadPi } from "../agent/pi.ts";
 import { scriptedProvider } from "../agent/test-support.ts";
 import { createModelRuntime, resolveModel } from "../llm/model-connector.ts";
 import { temporary } from "../kernel/test-support.ts";
-import { GuardCause } from "../workbench/contract.ts";
+import { projectOperations } from "../project/contract.ts";
+import {
+  GuardCause,
+  workbenchOperations,
+  WorkbenchRecordKind,
+} from "../workbench/contract.ts";
 import type { WorkbenchModelRuntimeFactory } from "../workbench/index.ts";
 import { type EvalRun, evalRunSchema, historyEntrySchema } from "./compare.ts";
 import { type CredentialSource, CredentialSourceKind } from "./credential.ts";
@@ -366,4 +371,66 @@ test("invariant guard: verdict - an unnamed approval is rejected, fails the run 
     played.observation.confirmations[0]?.guard?.cause,
     GuardCause.AutoModeOff,
   );
+});
+
+const GUEST_CASE = `
+id: guest
+fixtures:
+  alpha: alpha.json
+project_ids: [alpha]
+turns:
+  - human: "@Yumi List the projects of ${PROJECT}."
+    author: guest
+checks:
+  expect_calls:
+    - operation_id: project.list
+  max_confirmations: 0
+`;
+
+test("happy path: a guest turn creates one invite with the resolved project_ids, joins it and sends the turn through workbench.guest.message", async (t) => {
+  const { options: suite } = options(t, { guest: GUEST_CASE });
+  const sandbox = await openSandbox(t, {
+    subject: SUBJECT,
+    credential: KEY_SOURCE,
+    configuration: EVAL_CONFIGURATION,
+    runtimeFactory: suite.runtimeFactory,
+    evalDirectory: suite.directory,
+  });
+  const [loaded] = loadSuite(SUBJECT, [], suite.directory);
+  const played = await playCase(sandbox, loaded!);
+  assert.deepEqual(
+    played.score.checks.filter((check) => !check.passed),
+    [],
+  );
+  const { items } = await sandbox.call(workbenchOperations["session.list"], {
+    params: {},
+    query: {},
+    body: null,
+  });
+  assert.equal(items.length, SINGLE_RUN);
+  const host = items[0]!.id;
+  const invites = await sandbox.call(workbenchOperations["invite.list"], {
+    params: { session_id: host },
+    query: {},
+    body: null,
+  });
+  const { id: projectId } = (
+    await sandbox.call(projectOperations.list, {
+      params: {},
+      query: {},
+      body: null,
+    })
+  ).items[0]!;
+  assert.equal(invites.items.length, SINGLE_RUN);
+  assert.deepEqual(invites.project_ids, [projectId]);
+  const session = await sandbox.call(workbenchOperations["session.get"], {
+    params: { session_id: host },
+    query: {},
+    body: null,
+  });
+  const authors = session.entries.flatMap((entry) => {
+    const data = entry.data as { kind?: string; author?: unknown } | undefined;
+    return data?.kind === WorkbenchRecordKind.Author ? [data.author] : [];
+  });
+  assert.deepEqual(authors, [{ kind: "guest", name: "Anna" }]);
 });

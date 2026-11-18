@@ -1,0 +1,19 @@
+{
+  "entries": [
+    {
+      "filename": "node-z.md",
+      "intent": "implement",
+      "name": "Foreign ledger",
+      "requirement": "Foreign ledger as specified.",
+      "criterion": "Foreign ledger works.",
+      "verifications": [
+        "pnpm test"
+      ],
+      "bindings": [
+        "repo"
+      ],
+      "tags": [],
+      "depends_on": []
+    }
+  ]
+}

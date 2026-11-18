@@ -3,6 +3,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
+import type { ProjectBoundPrefix } from "../kernel/project-scope.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   type Intent,
@@ -721,4 +722,32 @@ export function openAttemptsOf(
     node_id: string;
     attempt: number;
   }[];
+}
+
+export type MissionBoundPrefix = Exclude<
+  ProjectBoundPrefix,
+  "project" | "binding"
+>;
+
+const NODE_PROJECT_JOIN = `JOIN mission_node n ON n.id = r.node_id
+     JOIN mission_mission m ON m.id = n.mission_id`;
+const PROJECT_OF_QUERIES: Readonly<Record<MissionBoundPrefix, string>> = {
+  mission: "SELECT project_id FROM mission_mission WHERE id = ?",
+  node: `SELECT m.project_id FROM mission_node r
+     JOIN mission_mission m ON m.id = r.mission_id WHERE r.id = ?`,
+  proposal: `SELECT m.project_id FROM mission_proposal r ${NODE_PROJECT_JOIN} WHERE r.id = ?`,
+  assessment: `SELECT m.project_id FROM mission_assessment r ${NODE_PROJECT_JOIN} WHERE r.id = ?`,
+  evidence: `SELECT m.project_id FROM mission_evidence r ${NODE_PROJECT_JOIN} WHERE r.id = ?`,
+  evidence_asset: `SELECT m.project_id FROM mission_evidence_asset a
+     JOIN mission_evidence r ON r.id = a.evidence_id ${NODE_PROJECT_JOIN} WHERE a.id = ?`,
+};
+
+export function projectOfRecord(
+  tx: Transaction,
+  prefix: MissionBoundPrefix,
+  id: string,
+): string | null {
+  const row = tx.database.prepare(PROJECT_OF_QUERIES[prefix]).get(id) as
+    { project_id: string } | undefined;
+  return row?.project_id ?? null;
 }

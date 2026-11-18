@@ -171,6 +171,22 @@ components:
                       type: string
                     session_id:
                       type: string
+                    requested_by:
+                      type: object
+                      properties:
+                        kind:
+                          type: string
+                          enum:
+                            - owner
+                            - guest
+                        name:
+                          type: string
+                          minLength: 1
+                          maxLength: 64
+                      required:
+                        - kind
+                        - name
+                      additionalProperties: false
                     input:
                       type: object
                       propertyNames:
@@ -190,6 +206,7 @@ components:
                                 - oversize
                                 - no_verdict
                                 - classifier
+                                - guest_run
                             reason:
                               anyOf:
                                 - type: string
@@ -208,6 +225,7 @@ components:
                     - tool_call_id
                     - operation_id
                     - session_id
+                    - requested_by
                     - input
                     - guard
                   additionalProperties: false

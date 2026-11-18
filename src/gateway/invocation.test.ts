@@ -25,8 +25,16 @@ import { createIdempotencyKey, createIdentity } from "../kernel/identity.ts";
 import {
   testHumanIdentity,
   testMachineIdentity,
+  testReadOnlyIdentity,
   testServiceIdentity,
 } from "../kernel/test-identity.ts";
+import {
+  type ProjectBoundPrefix,
+  type ProjectLookup,
+  ProjectScope,
+  ProjectScopeRule,
+} from "../kernel/project-scope.ts";
+import { fakeLookups } from "./test-support.ts";
 import type { ExecutionProofRow } from "../kernel/operation.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
 
@@ -647,6 +655,7 @@ test("the idempotency caller key of a guest mutation is guest:<guest_id>", async
           session_id: createIdentity("workbench_session"),
           invited_by: "ulrich",
           expires_at: expiresAt,
+          project_ids: [],
         }),
       },
     },
@@ -666,4 +675,235 @@ test("the idempotency caller key of a guest mutation is guest:<guest_id>", async
   assert.equal(answer.status, HttpStatus.OK);
   assert.equal(reserve.mock.callCount(), ONE_RESERVE_CALL);
   assert.equal(reserve.mock.calls[0]!.arguments[1], `guest:${guestId}`);
+});
+
+const SHARED_REQUEST_ID = createIdentity("request");
+const ANSWER_REFUSED_MESSAGE = "gateway.scope.answer_refused";
+const SCOPE_REFUSED = "gateway.scope.refused";
+const SCOPE_NOT_FOUND = "gateway.scope.not_found";
+const scopedInput = z.strictObject({
+  params: z.strictObject({ id: z.string() }),
+  query: z.strictObject({}),
+  body: z.null(),
+});
+const scopedRead = {
+  ...operation,
+  id: "test.scope.read",
+  path: "/api/test/scope/:id",
+  input: scopedInput,
+  output: z.unknown(),
+  projectScope: ProjectScopeRule.Target,
+} as const;
+const scopedMutation = {
+  ...scopedRead,
+  id: "test.scope.mutation",
+  method: "POST",
+  mutation: true,
+} as const;
+const scopedList = {
+  ...operation,
+  id: "test.scope.list",
+  path: "/api/test/scope",
+  input: z.strictObject({
+    params: z.strictObject({}),
+    query: z.strictObject({ id: z.array(z.string()).optional() }),
+    body: z.null(),
+  }),
+  output: z.unknown(),
+  projectScope: ProjectScopeRule.List,
+} as const;
+
+class CountingLookup implements ProjectLookup {
+  readonly owners = new Map<string, string>();
+  calls = 0;
+  projectOf(_prefix: ProjectBoundPrefix, id: string): string | null {
+    this.calls += 1;
+    return this.owners.get(id) ?? null;
+  }
+}
+
+async function scopeFixture(
+  t: TestContext,
+  options: { wired?: boolean; projectIds?: readonly string[] } = {},
+) {
+  const registry = new OperationRegistry();
+  const handlerCalls: unknown[] = [];
+  let answer: unknown = COMMITTED_VALUE;
+  const handler = (handlerInput: unknown) => {
+    handlerCalls.push(handlerInput);
+    return answer;
+  };
+  registry.register(scopedRead, handler);
+  registry.register(scopedMutation, handler);
+  registry.register(scopedList, handler);
+  const store = new Store(":memory:");
+  stopAfter(t, () => store.close());
+  store.migrate([{ service: "gateway", migrations: gatewayMigrations }]);
+  registry.seal({ [StoreName.Operational]: store });
+  const lookups = fakeLookups();
+  const inviteId = createIdentity("workbench_invite");
+  const projectId = createIdentity("project");
+  const projectIds = options.projectIds ?? [projectId];
+  lookups.workbench.invites.set(inviteId, {
+    session_id: createIdentity("workbench_session"),
+    invited_by: "ulrich",
+    expires_at: Date.now() + GUEST_LIFETIME_MS,
+    project_ids: projectIds,
+  });
+  const lookup = new CountingLookup();
+  const invocation = createInvocation({
+    registry,
+    stores: { [StoreName.Operational]: store },
+    masterKey: randomBytes(MASTER_KEY_BYTES).toString("base64"),
+    authVersion: AUTH_VERSION,
+    lookups,
+    ...(options.wired === false
+      ? {}
+      : { projectScope: new ProjectScope(lookup) }),
+  });
+  stopAfter(t, () => invocation.stop());
+  const errors: { fields: Record<string, unknown>; message: string }[] = [];
+  const logger = {
+    error: (fields: Record<string, unknown>, message: string) =>
+      errors.push({ fields, message }),
+  } as unknown as Logger;
+  return {
+    invocation,
+    lookups,
+    lookup,
+    inviteId,
+    projectId,
+    handlerCalls,
+    errors,
+    logger,
+    reader: testReadOnlyIdentity("ulrich", { inviteId, projectIds }),
+    setAnswer: (value: unknown) => {
+      answer = value;
+    },
+  };
+}
+
+function errorCodeOf(response: { body: unknown }): string {
+  return (response.body as { error: { code: string } }).error.code;
+}
+
+test("security: a direct mutation under the read-only identity answers 401, and a direct read after a revoke answers 401", async (t) => {
+  const f = await scopeFixture(t);
+  const params = { id: createIdentity("node") };
+  const mutation = await f.invocation.invoke(
+    scopedMutation.id,
+    { params, query: {}, body: null },
+    { identity: f.reader, idempotencyKey: createIdempotencyKey() },
+  );
+  assert.equal(mutation.status, HttpStatus.Unauthorized);
+  assert.equal(errorCodeOf(mutation), UNAUTHORIZED);
+  assert.deepEqual(f.handlerCalls, []);
+  f.lookups.workbench.invites.delete(f.inviteId);
+  const read = await f.invocation.invoke(
+    scopedRead.id,
+    { params, query: {}, body: null },
+    { identity: f.reader },
+  );
+  assert.equal(read.status, HttpStatus.Unauthorized);
+});
+
+test("invariant: a refused mutation under the read-only identity reserves no idempotency key", async (t) => {
+  const f = await scopeFixture(t);
+  const reserve = t.mock.method(f.invocation.idempotency, "reserve");
+  const response = await f.invocation.invoke(
+    scopedMutation.id,
+    { params: { id: createIdentity("node") }, query: {}, body: null },
+    { identity: f.reader, idempotencyKey: createIdempotencyKey() },
+  );
+  assert.equal(response.status, HttpStatus.Unauthorized);
+  assert.equal(reserve.mock.callCount(), NO_RESERVE_CALLS);
+});
+
+test("security: a handler answer with a foreign project_id answers 404 and logs one error line", async (t) => {
+  const f = await scopeFixture(t);
+  const nodeId = createIdentity("node");
+  f.lookup.owners.set(nodeId, f.projectId);
+  f.setAnswer({ project_id: createIdentity("project") });
+  const response = await f.invocation.invoke(
+    scopedRead.id,
+    { params: { id: nodeId }, query: {}, body: null },
+    { identity: f.reader, logger: f.logger, requestId: SHARED_REQUEST_ID },
+  );
+  assert.equal(response.status, HttpStatus.NotFound);
+  assert.equal(errorCodeOf(response), SCOPE_NOT_FOUND);
+  assert.equal(f.handlerCalls.length, ONE_HANDLER_CALL);
+  assert.equal(f.errors.length, ONE_HANDLER_CALL);
+  assert.equal(f.errors[0]!.message, ANSWER_REFUSED_MESSAGE);
+});
+
+test("security: an absent and a foreign record answer equal 404 bodies after equal lookup counts", async (t) => {
+  const f = await scopeFixture(t);
+  const foreign = createIdentity("node");
+  f.lookup.owners.set(foreign, createIdentity("project"));
+  const ask = async (id: string) => {
+    const before = f.lookup.calls;
+    const response = await f.invocation.invoke(
+      scopedRead.id,
+      { params: { id }, query: {}, body: null },
+      { identity: f.reader, requestId: SHARED_REQUEST_ID },
+    );
+    return { response, lookups: f.lookup.calls - before };
+  };
+  const absent = await ask(createIdentity("node"));
+  const other = await ask(foreign);
+  assert.equal(absent.response.status, HttpStatus.NotFound);
+  assert.equal(
+    JSON.stringify(absent.response.body),
+    JSON.stringify(other.response.body),
+  );
+  assert.equal(absent.lookups, other.lookups);
+  assert.deepEqual(f.handlerCalls, []);
+});
+
+test("security: a read-only identity with an empty set refuses every scoped operation", async (t) => {
+  const f = await scopeFixture(t, { projectIds: [] });
+  const nodeId = createIdentity("node");
+  f.lookup.owners.set(nodeId, f.projectId);
+  const read = await f.invocation.invoke(
+    scopedRead.id,
+    { params: { id: nodeId }, query: {}, body: null },
+    { identity: f.reader },
+  );
+  assert.equal(read.status, HttpStatus.NotFound);
+  const list = await f.invocation.invoke(
+    scopedList.id,
+    { params: {}, query: {}, body: null },
+    { identity: f.reader },
+  );
+  assert.deepEqual(list.body, { items: [], next_cursor: null });
+  assert.deepEqual(f.handlerCalls, []);
+});
+
+test("security: a scoped list drops a foreign id before the handler", async (t) => {
+  const f = await scopeFixture(t);
+  const response = await f.invocation.invoke(
+    scopedList.id,
+    {
+      params: {},
+      query: { id: [createIdentity("project"), f.projectId] },
+      body: null,
+    },
+    { identity: f.reader },
+  );
+  assert.equal(response.status, HttpStatus.OK);
+  assert.deepEqual(f.handlerCalls, [
+    { params: {}, query: { id: [f.projectId] }, body: null },
+  ]);
+});
+
+test("security: with no projectScope in createInvocation, a scoped read answers 403 gateway.scope.refused", async (t) => {
+  const f = await scopeFixture(t, { wired: false });
+  const response = await f.invocation.invoke(
+    scopedRead.id,
+    { params: { id: createIdentity("node") }, query: {}, body: null },
+    { identity: f.reader },
+  );
+  assert.equal(response.status, HttpStatus.Forbidden);
+  assert.equal(errorCodeOf(response), SCOPE_REFUSED);
+  assert.deepEqual(f.handlerCalls, []);
 });

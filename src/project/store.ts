@@ -131,6 +131,33 @@ export function requireProject(tx: Transaction, id: string): StoredProject {
   return toProject(row);
 }
 
+export function projectIdOf(tx: Transaction, id: string): string | null {
+  const row = tx.database
+    .prepare("SELECT id FROM project_project WHERE id = ?")
+    .get(id) as { id: string } | undefined;
+  return row?.id ?? null;
+}
+
+export function bindingProjectOf(tx: Transaction, id: string): string | null {
+  const row = tx.database
+    .prepare("SELECT project_id FROM project_binding WHERE id = ?")
+    .get(id) as { project_id: string } | undefined;
+  return row?.project_id ?? null;
+}
+
+export function projectNamesOf(
+  tx: Transaction,
+  ids: readonly string[],
+): ReadonlyMap<string, string> {
+  if (ids.length === EMPTY_LENGTH) return new Map();
+  const rows = tx.database
+    .prepare(
+      `SELECT id, name FROM project_project WHERE id IN (${ids.map(() => "?").join(", ")})`,
+    )
+    .all(...ids) as { id: string; name: string }[];
+  return new Map(rows.map((row) => [row.id, row.name]));
+}
+
 export function renameProject(
   tx: Transaction,
   id: string,
@@ -165,7 +192,7 @@ export function resumeProject(tx: Transaction, id: string): StoredProject {
 
 export function listProjects(
   tx: Transaction,
-  filter: PageFilter,
+  filter: PageFilter & { id?: readonly string[] },
 ): { items: StoredProject[]; next_cursor: string | null } {
   const cursor =
     filter.cursor == null
@@ -174,11 +201,16 @@ export function listProjects(
           filter.cursor,
           (value) => projectIdentitySchema.safeParse(value).success,
         );
+  const ids = filter.id ?? [];
+  const idCondition =
+    filter.id === undefined
+      ? ""
+      : ` AND id IN (${ids.map(() => "?").join(", ")})`;
   const rows = tx.database
     .prepare(
-      `SELECT ${PROJECT_COLUMNS} FROM project_project WHERE (? IS NULL OR id < ?) ORDER BY id DESC LIMIT ?`,
+      `SELECT ${PROJECT_COLUMNS} FROM project_project WHERE (? IS NULL OR id < ?)${idCondition} ORDER BY id DESC LIMIT ?`,
     )
-    .all(cursor, cursor, filter.limit + EXTRA_ROW) as ProjectRow[];
+    .all(cursor, cursor, ...ids, filter.limit + EXTRA_ROW) as ProjectRow[];
   return page(rows, filter.limit, (row) => row.id, toProject);
 }
 

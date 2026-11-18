@@ -235,6 +235,8 @@ export const guardSchema = z.array(
       reason: z.enum([
         WorkbenchGuardReason.HumanOnly,
         WorkbenchGuardReason.ImportFormat,
+        WorkbenchGuardReason.GuestScope,
+        WorkbenchGuardReason.ProjectScope,
       ]),
       or_absent_input: z.record(z.string(), z.unknown()).optional(),
     }),

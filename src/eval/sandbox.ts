@@ -60,6 +60,7 @@ import {
   SeedStep,
   type SeedStepValue,
   type Turn,
+  TurnAuthor,
 } from "./case.ts";
 import { type CredentialSource, sandboxCredential } from "./credential.ts";
 import {
@@ -111,6 +112,7 @@ const TEXT_ENCODING = "utf8";
 const MESSAGE_ENTRY = "message";
 const ASSISTANT_ROLE = "assistant";
 const USER_ROLE = "user";
+const GUEST_NAME = "Anna";
 
 type GatewayFixture = Awaited<ReturnType<typeof gatewayFixture>>;
 
@@ -672,10 +674,38 @@ interface TurnStart {
   approvals: Approvals;
 }
 
+type GuestCall = ReturnType<typeof humanCaller>;
+
+async function joinGuest(
+  sandbox: Sandbox,
+  sessionId: string,
+  projectIds: readonly string[],
+): Promise<GuestCall> {
+  const invite = await sandbox.call(workbenchOperations["invite.create"], {
+    params: { session_id: sessionId },
+    query: {},
+    body: { invitee_name: GUEST_NAME, project_ids: [...projectIds] },
+  });
+  const joined = await sandbox.call(workbenchOperations["invite.join"], {
+    params: {},
+    query: {},
+    body: { invite_token: invite.invite_token, name: GUEST_NAME },
+  });
+  return humanCaller({
+    endpoint: sandbox.fixture.endpoint,
+    token: joined.guest_token,
+  });
+}
+
+function isGuestTurn(turn: Turn): boolean {
+  return "author" in turn && turn.author === TurnAuthor.Guest;
+}
+
 async function startTurn(
   sandbox: Sandbox,
   sessionId: string,
   turn: Turn,
+  guest: GuestCall | null,
 ): Promise<TurnStart> {
   if ("fork" in turn) {
     const forked = await sandbox.call(workbenchOperations["session.fork"], {
@@ -685,11 +715,18 @@ async function startTurn(
     });
     return { sessionId: forked.session_id, approvals: {} };
   }
-  await sandbox.call(workbenchOperations["session.message"], {
-    params: { session_id: sessionId },
-    query: {},
-    body: { text: turn.human },
-  });
+  if (guest !== null && isGuestTurn(turn))
+    await guest(workbenchOperations["guest.message"], {
+      params: {},
+      query: {},
+      body: { text: turn.human },
+    });
+  else
+    await sandbox.call(workbenchOperations["session.message"], {
+      params: { session_id: sessionId },
+      query: {},
+      body: { text: turn.human },
+    });
   return { sessionId, approvals: turn.approvals };
 }
 
@@ -720,9 +757,13 @@ function usageOf(session: WorkbenchSession, meter: SummarizerMeter) {
   };
 }
 
+export interface TurnsRun extends Pick<Case, "turns" | "checks" | "auto_mode"> {
+  project_ids: readonly string[];
+}
+
 export async function runTurns(
   sandbox: Sandbox,
-  run: Pick<Case, "turns" | "checks" | "auto_mode">,
+  run: TurnsRun,
 ): Promise<PlayedCase> {
   const created = await sandbox.call(workbenchOperations["session.create"], {
     params: {},
@@ -735,6 +776,9 @@ export async function runTurns(
       query: {},
       body: { enabled: false },
     });
+  const guest = run.turns.some(isGuestTurn)
+    ? await joinGuest(sandbox, created.id, run.project_ids)
+    : null;
   const tally: Tally = {
     confirmations: [],
     answered: new Set(),
@@ -745,7 +789,7 @@ export async function runTurns(
   for (const turn of run.turns) {
     let started: TurnStart;
     try {
-      started = await startTurn(sandbox, sessionId, turn);
+      started = await startTurn(sandbox, sessionId, turn, guest);
     } catch (error) {
       if (!("fork" in turn)) throw error;
       return failedPlay(CheckKind.Fork, failureDetail(error));
@@ -859,9 +903,8 @@ export async function playCase(
 ): Promise<PlayedCase> {
   const { ids, failed } = await prepareCase(sandbox, loaded);
   if (failed) return failed;
-  return runTurns(
-    sandbox,
-    resolvePlaceholders(
+  return runTurns(sandbox, {
+    ...resolvePlaceholders(
       {
         turns: loaded.turns,
         checks: loaded.checks,
@@ -870,5 +913,6 @@ export async function playCase(
       ids,
       sandbox.native,
     ),
-  );
+    project_ids: loaded.project_ids.map((key) => ids[key]!.project_id),
+  });
 }

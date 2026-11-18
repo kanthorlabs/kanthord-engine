@@ -23,6 +23,7 @@ function tool() {
     operations: [],
     invoke: () => Promise.reject(new Error("no read expected")),
     requester: () => undefined,
+    guestRun: () => false,
     offer: { taken: () => false, append: () => undefined },
   });
 }
@@ -49,12 +50,37 @@ test("(happy path) the workbench prompt lists every card act", () => {
   );
 });
 
+test("(security) offer_action in a guest-started run answers the guest error and records nothing", async () => {
+  const records: unknown[] = [];
+  const offerTool = offerActionTool({
+    operations: [],
+    invoke: () => Promise.reject(new Error("no read expected")),
+    requester: () => undefined,
+    guestRun: () => true,
+    offer: { taken: () => false, append: (record) => records.push(record) },
+  });
+  await assert.rejects(
+    offerTool.execute(
+      "call_1",
+      { operation_id: "mission.node.pause", target_id: "node_X" },
+      undefined,
+      undefined,
+      undefined as never,
+    ),
+    new Error(
+      "offer_action is not available in a run that a guest started. Call the operation. The owner approves it on the guard card.",
+    ),
+  );
+  assert.deepEqual(records, []);
+});
+
 test("(security) an id outside the set fails with operation_refused and records nothing", async () => {
   const records: unknown[] = [];
   const offerTool = offerActionTool({
     operations: [],
     invoke: () => Promise.reject(new Error("no read expected")),
     requester: () => undefined,
+    guestRun: () => false,
     offer: { taken: () => false, append: (record) => records.push(record) },
   });
   for (const operation_id of [
@@ -93,6 +119,7 @@ test("(security) a credential read with no live revision throws target_refused a
         },
       } as never),
     requester: () => ({}) as never,
+    guestRun: () => false,
     offer: { taken: () => false, append: (record) => records.push(record) },
   });
   await assert.rejects(
@@ -120,6 +147,7 @@ test("(happy path) the offer_action result tells the agent to write the full ans
         data: { version: 1 },
       } as never),
     requester: () => ({}) as never,
+    guestRun: () => false,
     offer: { taken: () => false, append: () => undefined },
   });
   const result = await offerTool.execute(

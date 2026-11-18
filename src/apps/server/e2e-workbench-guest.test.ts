@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
-import { fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { setImmediate } from "node:timers/promises";
+import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
+import { getAgentDeclaration } from "../../agent/catalog.ts";
+import { FORK_SUMMARY_PROMPT } from "../../agent/prompt-assets.ts";
+import { isString } from "../../kernel/values.ts";
+import { isReadOnlyIdentity } from "../../kernel/caller.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 import { background } from "../../kernel/context.ts";
 import { OperationError } from "../../kernel/errors.ts";
@@ -15,19 +20,33 @@ import {
 import {
   testGuestIdentity,
   testHumanIdentity,
+  testReadOnlyIdentity,
 } from "../../kernel/test-identity.ts";
 import { temporary, temporaryDirectory } from "../../kernel/test-support.ts";
 import {
   AuthorKind,
+  MessageDelivery,
   WORKBENCH_GUEST_MESSAGE_MAX_BYTES,
   WORKBENCH_OPENING_TEXT,
+  WORKBENCH_QUEUE_LIMIT,
+  WORKBENCH_RELAY_ENTRY,
+  workbenchOperations,
   WorkbenchRecordKind,
 } from "../../workbench/contract.ts";
+import { toolName } from "../../workbench/index.ts";
 import {
+  callsOf,
   completed,
   createHost,
+  forkOf,
+  GUARD_AGENT,
+  heldAnswer,
+  invitedProjectIds,
+  pass,
   sendMessage,
+  untilAbort,
   untilIdle,
+  userRequestOf,
   type WorkbenchFixture,
   workbenchHarness,
 } from "./test-support.ts";
@@ -94,7 +113,10 @@ async function invite(
       {
         params: { session_id: sessionId },
         query: {},
-        body: { invitee_name: name },
+        body: {
+          invitee_name: name,
+          project_ids: await invitedProjectIds(fixture),
+        },
       },
       idempotencyKey === undefined
         ? fixture.options
@@ -268,7 +290,10 @@ test(
         {
           params: { session_id: sessionId },
           query: {},
-          body: { invitee_name: GUEST_NAME },
+          body: {
+            invitee_name: GUEST_NAME,
+            project_ids: await invitedProjectIds(first),
+          },
         },
         { ...first.options, idempotencyKey: key },
       );
@@ -335,6 +360,8 @@ test(
         display_name: null,
         auto_mode: true,
         streaming: null,
+        waiting_for_approval: null,
+        queue: [],
       },
     });
   },
@@ -349,7 +376,7 @@ test(
     const { joined } = await guest(fixture, host.id, GUEST_NAME);
     const response = await asGuest(fixture, joined.token, MESSAGE_PATH, {
       method: "POST",
-      body: JSON.stringify({ text: MENTION_RE }),
+      body: JSON.stringify({ text: GUEST_NOTE }),
     });
     assert.equal(response.status, HttpStatus.Accepted);
     assert.deepEqual(await response.json(), { kind: "note" });
@@ -360,7 +387,7 @@ test(
     assert.deepEqual(notes, [
       {
         kind: WorkbenchRecordKind.Note,
-        text: MENTION_RE,
+        text: GUEST_NOTE,
         author: { kind: AuthorKind.Guest, name: GUEST_NAME },
       },
     ]);
@@ -502,6 +529,10 @@ test(
       inviteId: created.id,
       sessionId: host.id,
       invitedBy: identity.accountId,
+      reader: testReadOnlyIdentity(identity.accountId, {
+        inviteId: created.id,
+        projectIds: [],
+      }),
       jti: "race",
     });
     let opened: Response | undefined;
@@ -569,5 +600,634 @@ test(
     );
     assert.equal(assistants.length, PAIR);
     assert.equal((await stream.next())?.event, STATE_EVENT);
+  },
+);
+
+const GUEST_MENTION = "@Yumi what is blocked?";
+const OWNER_MENTION = "@Yumi owner question";
+const SECOND_OWNER_MENTION = "@Yumi second owner question";
+const OWNER_AGENT_NAME = "ops@1";
+const LIST_PROJECTS = toolName("project.list");
+const TOOL_RESULT_ROLE = "toolResult";
+const USER_ROLE = "user";
+const MESSAGE_ENTRY = "message";
+const AUTHOR_KIND = "author";
+const QUEUE_CLEAR_KIND = "queue_clear";
+const KIND_RUN = "run";
+const AGENT_REFUSED = "workbench.guest.agent_refused";
+const QUEUE_FULL = "workbench.session.queue_full";
+const AGENT_NOT_FOUND = "agent.catalog.not_found";
+const BUILTIN_TOOL = "read";
+const FOLLOW_STATE_FRAMES = 20;
+const SETTLE_TURNS = 20;
+
+interface RunAnswer {
+  kind: string;
+  agent_name: string;
+  queued_message_id: string | null;
+}
+
+interface StateFrameData {
+  queue: {
+    id: string;
+    agent_name: string | null;
+    display_name: string | null;
+    author_name: string;
+  }[];
+}
+
+function guestSend(fixture: Fixture, token: string, text: string) {
+  return asGuest(fixture, token, MESSAGE_PATH, {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
+}
+
+async function guestRun(fixture: Fixture, token: string, text: string) {
+  const response = await guestSend(fixture, token, text);
+  assert.equal(response.status, HttpStatus.Accepted);
+  return (await response.json()) as RunAnswer;
+}
+
+async function untilProviderCalls(
+  fixture: Fixture,
+  count: number,
+  signal: AbortSignal,
+) {
+  while (fixture.provider.calls.length < count) {
+    signal.throwIfAborted();
+    await setImmediate();
+  }
+}
+
+function userTexts(entries: readonly { type: string; message?: unknown }[]) {
+  return entries
+    .filter((entry) => entry.type === MESSAGE_ENTRY)
+    .map((entry) => entry.message as { role: string; content: unknown })
+    .filter((message) => message.role === USER_ROLE)
+    .map((message) =>
+      isString(message.content)
+        ? message.content
+        : (message.content as { text?: string }[])
+            .map((block) => block.text ?? "")
+            .join(""),
+    );
+}
+
+function recordsOfKind(
+  entries: readonly Record<string, unknown>[],
+  kind: string,
+): Record<string, unknown>[] {
+  return entries.flatMap((entry) => {
+    const data = entry.data as Record<string, unknown> | undefined;
+    return data?.kind === kind ? [data] : [];
+  });
+}
+
+function sessionOf(fixture: Fixture, sessionId: string) {
+  const session = fixture.workbenchService["sessions"].get(sessionId);
+  assert.ok(session);
+  return session;
+}
+
+async function queuedFixture(
+  t: TestContext,
+  script: Parameters<typeof conversationFixture>[1],
+) {
+  const { fixture } = await conversationFixture(t, script);
+  const host = await createHost(fixture, OPS);
+  const { created, joined } = await guest(fixture, host.id, GUEST_NAME);
+  return { fixture, host, created, joined };
+}
+
+test(
+  "(happy path) a guest mention starts a run whose reads run under the read-only identity of the inviter",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture } = await conversationFixture(t, [
+      fauxAssistantMessage(fauxToolCall(LIST_PROJECTS, { query: {} }), {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage(FIRST_ANSWER),
+    ]);
+    const host = await createHost(fixture, OPS);
+    const { joined } = await guest(fixture, host.id, GUEST_NAME);
+    const [invited] = await invitedProjectIds(fixture);
+    const other = completed(
+      await fixture.projects.create(
+        { params: {}, query: {}, body: { name: "not-invited" } },
+        fixture.options,
+      ),
+    );
+    const answer = await guestRun(fixture, joined.token, GUEST_MENTION);
+    assert.deepEqual(answer, {
+      kind: KIND_RUN,
+      agent_name: OWNER_AGENT_NAME,
+      queued_message_id: null,
+    });
+    await untilIdle(fixture, host.id, t.signal);
+    const results = JSON.stringify(
+      (await ownerEntries(fixture, host.id)).filter(
+        (entry) =>
+          (entry.message as { role?: string } | undefined)?.role ===
+          TOOL_RESULT_ROLE,
+      ),
+    );
+    assert.ok(results.includes(invited!));
+    assert.ok(!results.includes(other.id));
+  },
+);
+
+test(
+  "(happy path) a guest mention during a run queues, and the drained run carries the guest origin and the invite scope",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const first = heldAnswer(FIRST_ANSWER);
+    const second = heldAnswer(SECOND_ANSWER);
+    const { fixture, host, created, joined } = await queuedFixture(t, [
+      first.step,
+      second.step,
+    ]);
+    completed(await sendMessage(fixture, host.id, OWNER_MENTION));
+    await untilProviderCalls(fixture, SINGLE, t.signal);
+    const answer = await guestRun(fixture, joined.token, GUEST_MENTION);
+    assert.equal(answer.kind, KIND_RUN);
+    assert.ok(answer.queued_message_id);
+    first.gate.resolve();
+    await untilProviderCalls(fixture, PAIR, t.signal);
+    const run = sessionOf(fixture, host.id).run;
+    assert.ok(run);
+    assert.deepEqual(run.origin, { kind: AuthorKind.Guest, name: GUEST_NAME });
+    assert.equal(run.inviteId, created.id);
+    assert.deepEqual(
+      fixture.workbenchService.runScope(run),
+      await invitedProjectIds(fixture),
+    );
+    second.gate.resolve();
+    await untilIdle(fixture, host.id, t.signal);
+    completed(await revoke(fixture, created.id));
+    assert.deepEqual(fixture.workbenchService.runScope(run), []);
+  },
+);
+
+test(
+  "(security, authorization) a guest answers 401 on session.message, session.abort, session.queue.remove, session.autoMode.set and session.approve",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, joined } = await queuedFixture(t, []);
+    for (const key of [
+      "session.message",
+      "session.abort",
+      "session.queue.remove",
+      "session.autoMode.set",
+      "session.approve",
+    ] as const) {
+      const operation = workbenchOperations[key];
+      const response = await asGuest(
+        fixture,
+        joined.token,
+        operation.path.replace(PATH_PARAMETER, PLACEHOLDER),
+        { method: operation.method, body: "{}" },
+      );
+      assert.equal(response.status, HttpStatus.Unauthorized, key);
+      await response.body?.cancel();
+    }
+  },
+);
+
+test(
+  "(happy path) a stop drops the guest item, and cleared holds the owner items only",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, host, joined } = await queuedFixture(t, [
+      untilAbort(FIRST_ANSWER),
+    ]);
+    completed(await sendMessage(fixture, host.id, OWNER_MENTION));
+    await untilProviderCalls(fixture, SINGLE, t.signal);
+    await guestRun(fixture, joined.token, GUEST_MENTION);
+    const owner = completed(
+      await sendMessage(fixture, host.id, SECOND_OWNER_MENTION),
+    );
+    const stopped = completed(
+      await fixture.workbench["session.abort"](
+        { params: { session_id: host.id }, query: {}, body: null },
+        fixture.options,
+      ),
+    );
+    assert.deepEqual(
+      stopped.cleared.map(({ id }) => id),
+      [owner.queued_message_id],
+    );
+    for (let turn = 0; turn < SETTLE_TURNS; turn++) await setImmediate();
+    assert.equal(fixture.provider.calls.length, SINGLE);
+    assert.deepEqual(sessionOf(fixture, host.id).queuedMessages, []);
+  },
+);
+
+test(
+  "(security, refused path) a guest @Nobody answers 404 agent.catalog.not_found",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, host, joined } = await queuedFixture(t, []);
+    const response = await guestSend(fixture, joined.token, "@Nobody hello");
+    assert.equal(response.status, HttpStatus.NotFound);
+    assert.equal((await errorOf(response)).code, AGENT_NOT_FOUND);
+    assert.equal(sessionOf(fixture, host.id).run, null);
+  },
+);
+
+test(
+  "(security, refused path) a guest mention past the queue cap answers 409 workbench.session.queue_full",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, host, joined } = await queuedFixture(t, [
+      untilAbort(FIRST_ANSWER),
+    ]);
+    completed(await sendMessage(fixture, host.id, OWNER_MENTION));
+    await untilProviderCalls(fixture, SINGLE, t.signal);
+    for (let queued = 0; queued < WORKBENCH_QUEUE_LIMIT; queued++)
+      await guestRun(fixture, joined.token, GUEST_MENTION);
+    const response = await guestSend(fixture, joined.token, GUEST_MENTION);
+    assert.equal(response.status, HttpStatus.Conflict);
+    assert.equal((await errorOf(response)).code, QUEUE_FULL);
+    assert.equal(
+      sessionOf(fixture, host.id).queuedMessages.length,
+      WORKBENCH_QUEUE_LIMIT,
+    );
+  },
+);
+
+test(
+  "(security, invariant) a guest item whose invite ended before its start is dropped and the next item runs",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const first = heldAnswer(FIRST_ANSWER);
+    const { fixture, host, created, joined } = await queuedFixture(t, [
+      first.step,
+      fauxAssistantMessage(SECOND_ANSWER),
+    ]);
+    completed(await sendMessage(fixture, host.id, OWNER_MENTION));
+    await untilProviderCalls(fixture, SINGLE, t.signal);
+    await guestRun(fixture, joined.token, GUEST_MENTION);
+    completed(await sendMessage(fixture, host.id, SECOND_OWNER_MENTION));
+    completed(await revoke(fixture, created.id));
+    first.gate.resolve();
+    await untilIdle(fixture, host.id, t.signal);
+    const users = userTexts(await ownerEntries(fixture, host.id));
+    assert.ok(users.includes(SECOND_OWNER_MENTION));
+    assert.ok(!users.includes(GUEST_MENTION));
+    assert.equal(fixture.provider.calls.length, PAIR);
+  },
+);
+
+test(
+  "(security) a guest item then an owner item each run under their own identity",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const first = heldAnswer(FIRST_ANSWER);
+    const requesters: boolean[] = [];
+    const seen = (answer: string) => async () => {
+      const session = sessionOf(fixture, host.id);
+      const running = fixture.workbenchService["memberOfRun"](
+        session,
+        session.run,
+      );
+      requesters.push(isReadOnlyIdentity(running.requester));
+      return fauxAssistantMessage(answer);
+    };
+    const { fixture, host, joined } = await queuedFixture(t, [
+      first.step,
+      seen(SECOND_ANSWER),
+      seen(THIRD_ANSWER),
+    ]);
+    completed(await sendMessage(fixture, host.id, OWNER_MENTION));
+    await untilProviderCalls(fixture, SINGLE, t.signal);
+    await guestRun(fixture, joined.token, GUEST_MENTION);
+    completed(await sendMessage(fixture, host.id, SECOND_OWNER_MENTION));
+    first.gate.resolve();
+    await untilIdle(fixture, host.id, t.signal);
+    assert.deepEqual(requesters, [true, false]);
+  },
+);
+
+test(
+  "(security) a queue change publishes a guest frame whose queue holds no text",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const first = heldAnswer(FIRST_ANSWER);
+    const { fixture, host, joined } = await queuedFixture(t, [
+      first.step,
+      fauxAssistantMessage(SECOND_ANSWER),
+    ]);
+    const stream = await openStream(t, fixture, joined.token);
+    completed(await sendMessage(fixture, host.id, OWNER_MENTION));
+    await untilProviderCalls(fixture, SINGLE, t.signal);
+    const queued = await guestRun(fixture, joined.token, GUEST_MENTION);
+    let frame: Frame | null = null;
+    for (let read = 0; read < FOLLOW_STATE_FRAMES; read++) {
+      frame = await stream.next();
+      const data = frame?.data as Partial<StateFrameData> | undefined;
+      if (frame?.event === STATE_EVENT && data?.queue?.length) break;
+    }
+    const data = frame?.data as StateFrameData;
+    assert.deepEqual(data.queue, [
+      {
+        id: queued.queued_message_id,
+        agent_name: OWNER_AGENT_NAME,
+        display_name: "Yumi",
+        author_name: GUEST_NAME,
+      },
+    ]);
+    assert.ok(!JSON.stringify(frame).includes(GUEST_MENTION));
+    first.gate.resolve();
+  },
+);
+
+test(
+  "(happy path) a stop with two queued owner items appends one queue_clear record with count 2 and cause stop, which the guest view holds and the context omits",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, host, joined } = await queuedFixture(t, [
+      untilAbort(FIRST_ANSWER),
+    ]);
+    completed(await sendMessage(fixture, host.id, OWNER_MENTION));
+    await untilProviderCalls(fixture, SINGLE, t.signal);
+    completed(await sendMessage(fixture, host.id, SECOND_OWNER_MENTION));
+    completed(await sendMessage(fixture, host.id, SECOND_OWNER_MENTION));
+    completed(
+      await fixture.workbench["session.abort"](
+        { params: { session_id: host.id }, query: {}, body: null },
+        fixture.options,
+      ),
+    );
+    const records = recordsOfKind(
+      await ownerEntries(fixture, host.id),
+      QUEUE_CLEAR_KIND,
+    );
+    assert.deepEqual(records, [
+      { kind: QUEUE_CLEAR_KIND, count: PAIR, cause: "stop" },
+    ]);
+    const context = sessionOf(fixture, host.id).manager.buildSessionContext();
+    assert.ok(!JSON.stringify(context).includes(QUEUE_CLEAR_KIND));
+    const view = (await guestEntries(fixture, joined.token)).entries as {
+      kind: string;
+      count?: number;
+      text?: string;
+    }[];
+    assert.deepEqual(
+      view.filter(({ kind }) => kind === QUEUE_CLEAR_KIND),
+      [
+        {
+          ...view.find(({ kind }) => kind === QUEUE_CLEAR_KIND),
+          count: PAIR,
+          text: "The owner stopped the run. 2 queued messages were cleared.",
+        },
+      ],
+    );
+  },
+);
+
+test(
+  "(happy path) a replace with two queued owner items appends one queue_clear record with count 2 and cause replace",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, host } = await queuedFixture(t, [
+      untilAbort(FIRST_ANSWER),
+      fauxAssistantMessage(SECOND_ANSWER),
+    ]);
+    completed(await sendMessage(fixture, host.id, OWNER_MENTION));
+    await untilProviderCalls(fixture, SINGLE, t.signal);
+    completed(await sendMessage(fixture, host.id, SECOND_OWNER_MENTION));
+    completed(await sendMessage(fixture, host.id, SECOND_OWNER_MENTION));
+    completed(
+      await fixture.workbench["session.message"](
+        {
+          params: { session_id: host.id },
+          query: {},
+          body: { text: OWNER_MENTION, delivery: MessageDelivery.Replace },
+        },
+        fixture.options,
+      ),
+    );
+    await untilIdle(fixture, host.id, t.signal);
+    assert.deepEqual(
+      recordsOfKind(await ownerEntries(fixture, host.id), QUEUE_CLEAR_KIND),
+      [{ kind: QUEUE_CLEAR_KIND, count: PAIR, cause: "replace" }],
+    );
+  },
+);
+
+test(
+  "(happy path) an author record precedes the user message of a guest run, and the guest view reads it",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, host, joined } = await queuedFixture(t, [
+      fauxAssistantMessage(FIRST_ANSWER),
+    ]);
+    await guestRun(fixture, joined.token, GUEST_MENTION);
+    await untilIdle(fixture, host.id, t.signal);
+    const entries = await ownerEntries(fixture, host.id);
+    const at = entries.findIndex(
+      (entry) =>
+        (entry.data as { kind?: string } | undefined)?.kind === AUTHOR_KIND,
+    );
+    const asked = entries.findIndex((entry) =>
+      userTexts([entry]).includes(GUEST_MENTION),
+    );
+    assert.ok(at >= NO_ITEMS && at < asked, `${at} ${asked}`);
+    assert.deepEqual(entries[at]!.data, {
+      kind: AUTHOR_KIND,
+      author: { kind: AuthorKind.Guest, name: GUEST_NAME },
+    });
+    const view = (await guestEntries(fixture, joined.token)).entries as {
+      kind: string;
+      author?: unknown;
+    }[];
+    assert.deepEqual(view.find(({ kind }) => kind === AUTHOR_KIND)?.author, {
+      kind: AuthorKind.Guest,
+      name: GUEST_NAME,
+    });
+  },
+);
+
+test(
+  "(security) a guest @SWE answers 409 workbench.guest.agent_refused at send and starts no run",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, host, joined } = await queuedFixture(t, []);
+    const response = await guestSend(fixture, joined.token, "@SWE fix it");
+    assert.equal(response.status, HttpStatus.Conflict);
+    assert.equal((await errorOf(response)).code, AGENT_REFUSED);
+    assert.equal(sessionOf(fixture, host.id).run, null);
+    assert.equal(fixture.provider.calls.length, NO_ITEMS);
+  },
+);
+
+test(
+  "(security) a queued guest item whose agent gains a built-in tool before its start is dropped with an error message",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const first = heldAnswer(FIRST_ANSWER);
+    const { fixture, host, joined } = await queuedFixture(t, [
+      first.step,
+      fauxAssistantMessage(SECOND_ANSWER),
+    ]);
+    completed(await sendMessage(fixture, host.id, OWNER_MENTION));
+    await untilProviderCalls(fixture, SINGLE, t.signal);
+    await guestRun(fixture, joined.token, GUEST_MENTION);
+    completed(await sendMessage(fixture, host.id, SECOND_OWNER_MENTION));
+    const dependencies = fixture.workbenchService["dependencies"];
+    dependencies.declarationOf = (agentName) => {
+      const declaration = getAgentDeclaration(agentName)!;
+      return agentName === OWNER_AGENT_NAME
+        ? {
+            ...declaration,
+            tools: { ...declaration.tools, builtin: [BUILTIN_TOOL as never] },
+          }
+        : declaration;
+    };
+    first.gate.resolve();
+    await untilIdle(fixture, host.id, t.signal);
+    const users = userTexts(await ownerEntries(fixture, host.id));
+    assert.ok(users.includes(SECOND_OWNER_MENTION));
+    assert.ok(!users.includes(GUEST_MENTION));
+    assert.ok(sessionOf(fixture, host.id).runError);
+  },
+);
+
+test(
+  "(security) workbench.guest.get lists Yumi and Jeremy as mention names and not SWE or RE",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, joined } = await queuedFixture(t, []);
+    const response = await asGuest(fixture, joined.token, GET_PATH);
+    const view = (await response.json()) as { mention_names: string[] };
+    assert.deepEqual([...view.mention_names].sort(), ["Jeremy", "Yumi"]);
+  },
+);
+
+const PROJECT_NAME = "invite-scope";
+const FORK_RELEASES = 3;
+const FORK_TEXT = "Carry on.";
+const FORK_SUMMARY = "Goal: carry on.";
+const FORK_ANSWER = "Carrying on.";
+const FOLLOW_UP_MENTION = "@Yumi what else is blocked?";
+
+function relayContents(entries: readonly Record<string, unknown>[]) {
+  return entries
+    .filter((entry) => entry.customType === WORKBENCH_RELAY_ENTRY)
+    .map((entry) => String(entry.content));
+}
+
+test(
+  "(happy path) the relay of a guest-started run holds the author line of the author record and the shared projects line with their names, and an owner-started run holds neither",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, host, joined } = await queuedFixture(t, [
+      fauxAssistantMessage(FIRST_ANSWER),
+      fauxAssistantMessage(SECOND_ANSWER),
+    ]);
+    await guestRun(fixture, joined.token, GUEST_MENTION);
+    await untilIdle(fixture, host.id, t.signal);
+    completed(await sendMessage(fixture, host.id, OWNER_MENTION));
+    await untilIdle(fixture, host.id, t.signal);
+    const [projectId] = await invitedProjectIds(fixture);
+    const relays = relayContents(await ownerEntries(fixture, host.id));
+    assert.equal(relays.length, SINGLE);
+    assert.ok(
+      relays[0]!.endsWith(
+        `${GUEST_NAME} (guest):\n\nProjects shared in this conversation: ${projectId} (${PROJECT_NAME})`,
+      ),
+      relays[0]!,
+    );
+  },
+);
+
+test(
+  "(happy path) the fork material marks a guest run message and its answer with the guest mark, and marks the in-progress line of a guest-started run",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const held = heldAnswer(SECOND_ANSWER);
+    const fixture = await workbenchFixture(
+      t,
+      [
+        fauxAssistantMessage(FIRST_ANSWER),
+        held.step,
+        fauxAssistantMessage(FORK_SUMMARY),
+        pass(),
+        fauxAssistantMessage(FORK_ANSWER),
+      ],
+      undefined,
+      undefined,
+      [OPS, GUARD_AGENT],
+    );
+    const host = await createHost(fixture, OPS);
+    const { joined } = await guest(fixture, host.id, GUEST_NAME);
+    await guestRun(fixture, joined.token, GUEST_MENTION);
+    await untilIdle(fixture, host.id, t.signal);
+    await guestRun(fixture, joined.token, FOLLOW_UP_MENTION);
+    await untilProviderCalls(fixture, PAIR, t.signal);
+    const forked = completed(await forkOf(fixture, host.id, FORK_TEXT));
+    await untilIdle(fixture, forked.session_id, t.signal);
+    held.gate.resolve();
+    await untilIdle(fixture, host.id, t.signal);
+    const [summarizer] = callsOf(fixture, FORK_SUMMARY_PROMPT);
+    const { conversation } = userRequestOf(summarizer!);
+    const lines = conversation!.split("\n\n");
+    assert.ok(lines.includes(`${GUEST_NAME} (guest): ${GUEST_MENTION}`));
+    assert.ok(
+      lines.includes(`${GUEST_NAME} (guest): Yumi answered: ${FIRST_ANSWER}`),
+    );
+    assert.ok(
+      lines.includes(
+        `In progress in the earlier conversation: ${GUEST_NAME} (guest): ${FOLLOW_UP_MENTION}.`,
+      ),
+    );
+    const forkRecords = recordsOfKind(
+      await ownerEntries(fixture, forked.session_id),
+      "author",
+    );
+    assert.equal(forkRecords.length, NO_ITEMS);
+  },
+);
+
+test(
+  "(security) a fork while the source runs a guest-started run releases the summarizer and the guard credential under the owner",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const held = heldAnswer(SECOND_ANSWER);
+    const fixture = await workbenchFixture(
+      t,
+      [
+        held.step,
+        fauxAssistantMessage(FORK_SUMMARY),
+        pass(),
+        fauxAssistantMessage(FORK_ANSWER),
+      ],
+      undefined,
+      undefined,
+      [OPS, GUARD_AGENT],
+    );
+    const host = await createHost(fixture, OPS);
+    const { joined } = await guest(fixture, host.id, GUEST_NAME);
+    await guestRun(fixture, joined.token, GUEST_MENTION);
+    await untilProviderCalls(fixture, SINGLE, t.signal);
+    const dependencies = fixture.workbenchService["dependencies"];
+    const original = dependencies.workbenchCredentials;
+    const requesters: (() => unknown)[] = [];
+    dependencies.workbenchCredentials = (request) => {
+      requesters.push(request.requester);
+      return original(request);
+    };
+    const forked = completed(await forkOf(fixture, host.id, FORK_TEXT));
+    await untilIdle(fixture, forked.session_id, t.signal);
+    held.gate.resolve();
+    await untilIdle(fixture, host.id, t.signal);
+    assert.equal(requesters.length, FORK_RELEASES);
+    for (const requester of requesters) {
+      const released = requester() as { jti: string };
+      assert.equal(isReadOnlyIdentity(released as never), false);
+      assert.equal(released.jti, identity.jti);
+    }
   },
 );

@@ -17,6 +17,7 @@ import {
   type MachineIdentity,
   MAX_DISPLAY_NAME_LENGTH,
   MAX_HUMAN_USERNAME_LENGTH,
+  readOnlyInviteOf,
   WORKER_INSTANCE_PREFIX,
   type WorkerIdentity,
 } from "../../kernel/caller.ts";
@@ -24,6 +25,7 @@ import {
   mintGuestIdentity,
   mintHumanIdentity,
   mintMachineIdentity,
+  mintReadOnlyIdentity,
   mintWorkerIdentity,
 } from "../../kernel/caller-mint.ts";
 import type { ProjectBindings } from "../../project/contract.ts";
@@ -353,15 +355,35 @@ export class Authentication {
     return mintWorkerIdentity(instanceId, name, jti);
   }
 
-  private resolveGuest(guest: GuestCredentials): GuestIdentity {
-    const invite = this.machines?.workbench?.resolveInvite(guest.inviteId);
+  private liveInvite(inviteId: string): ResolvedInvite {
+    const invite = this.machines?.workbench?.resolveInvite(inviteId);
     if (!invite || invite.expires_at <= Date.now())
       throw jwtRefused(JwtCause.InviteEnded);
+    return invite;
+  }
+
+  private readerOf(inviteId: string, invite: ResolvedInvite): HumanIdentity {
+    return mintReadOnlyIdentity(invite.invited_by, {
+      inviteId,
+      projectIds: invite.project_ids,
+    });
+  }
+
+  private resolveGuest(guest: GuestCredentials): GuestIdentity {
+    const invite = this.liveInvite(guest.inviteId);
     return mintGuestIdentity({
       ...guest,
       sessionId: invite.session_id,
       invitedBy: invite.invited_by,
+      reader: this.readerOf(guest.inviteId, invite),
     });
+  }
+
+  private recheckHuman(identity: HumanIdentity): HumanIdentity {
+    const readerInvite = readOnlyInviteOf(identity);
+    if (readerInvite !== null)
+      return this.readerOf(readerInvite, this.liveInvite(readerInvite));
+    return mintHumanIdentity(identity.accountId, identity.name, identity.jti);
   }
 
   async recheck(
@@ -369,8 +391,7 @@ export class Authentication {
     context: Context,
     requiresRegistration = true,
   ): Promise<CallerIdentity> {
-    if (isHumanIdentity(identity))
-      return mintHumanIdentity(identity.accountId, identity.name, identity.jti);
+    if (isHumanIdentity(identity)) return this.recheckHuman(identity);
     if (isServiceIdentity(identity)) return identity;
     if (isGuestIdentity(identity))
       return this.resolveGuest({

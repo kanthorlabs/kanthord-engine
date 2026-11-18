@@ -25,6 +25,7 @@ import {
 import { asError, Diagnostic, OperationError } from "../kernel/errors.ts";
 import { ensureDirectory } from "../kernel/files.ts";
 import { homeRelative } from "../kernel/xdg.ts";
+import type { ProjectBoundPrefix } from "../kernel/project-scope.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import {
   type Healthcheck,
@@ -151,6 +152,7 @@ import {
   workerTagsSchema,
 } from "./contract.ts";
 import {
+  bindingProjectOf,
   deriveResourceIdentity,
   hasBindingTombstone,
   insertProject,
@@ -160,6 +162,8 @@ import {
   listRevisions,
   parseRepositoryAddress,
   pauseProject,
+  projectIdOf,
+  projectNamesOf,
   readBindingRevision,
   readCredentialBindings,
   readCurrentBindingByName,
@@ -866,6 +870,18 @@ interface NativeWorker {
   agents: readonly string[];
 }
 
+const PROJECT_SERVICE_PREFIXES = ["project", "binding"] as const;
+export type ProjectServicePrefix = (typeof PROJECT_SERVICE_PREFIXES)[number];
+const PROJECT_OF: Readonly<
+  Record<ProjectServicePrefix, (tx: Transaction, id: string) => string | null>
+> = { project: projectIdOf, binding: bindingProjectOf };
+
+export function isProjectServicePrefix(
+  prefix: ProjectBoundPrefix,
+): prefix is ProjectServicePrefix {
+  return (PROJECT_SERVICE_PREFIXES as readonly string[]).includes(prefix);
+}
+
 export class ProjectService implements Service, ProjectBindings {
   private readonly bindings?: ProjectBindings;
   private readonly operationalStore: Store;
@@ -984,6 +1000,16 @@ export class ProjectService implements Service, ProjectBindings {
     });
     dependencies.health?.register("project", () => this.healthcheck());
   }
+  projectOf(prefix: ProjectServicePrefix, id: string): string | null {
+    return this.operationalStore.transaction((tx) =>
+      PROJECT_OF[prefix](tx, id),
+    );
+  }
+
+  projectNames(ids: readonly string[]): ReadonlyMap<string, string> {
+    return this.operationalStore.transaction((tx) => projectNamesOf(tx, ids));
+  }
+
   declare(registry: OperationRegistry): void {
     new EnvironmentSecretRoutes({
       records: this.credentialRecords,

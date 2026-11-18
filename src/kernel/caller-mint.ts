@@ -6,6 +6,7 @@ import {
   type GuestIdentity,
   type HumanIdentity,
   IdentityKind,
+  isReadOnlyIdentity,
   type MachineIdentity,
   MAX_DISPLAY_NAME_LENGTH,
   MAX_HUMAN_USERNAME_LENGTH,
@@ -30,6 +31,30 @@ export function mintHumanIdentity(
   return value;
 }
 
+export interface ReadOnlyGrant {
+  inviteId: string;
+  projectIds: readonly string[];
+}
+
+export function mintReadOnlyIdentity(
+  accountId: string,
+  grant: ReadOnlyGrant,
+): HumanIdentity {
+  assert.ok(accountId.trim() && accountId.length <= MAX_HUMAN_USERNAME_LENGTH);
+  assert.ok(grant.inviteId.trim());
+  const value = Object.freeze({
+    kind: IdentityKind.Human,
+    accountId,
+    name: accountId,
+    jti: `reader:${grant.inviteId}`,
+  });
+  callerProvenance.reader(value, {
+    inviteId: grant.inviteId,
+    projects: Object.freeze(new Set(grant.projectIds)),
+  });
+  return value;
+}
+
 export function mintGuestIdentity(
   guest: Omit<GuestIdentity, "kind">,
 ): GuestIdentity {
@@ -40,6 +65,7 @@ export function mintGuestIdentity(
   assert.ok(guest.inviteId.trim());
   assert.ok(guest.sessionId.trim());
   assert.ok(guest.invitedBy.trim());
+  assert.ok(isReadOnlyIdentity(guest.reader));
   const value = Object.freeze({
     kind: IdentityKind.Guest,
     guestId: guest.guestId,
@@ -47,6 +73,7 @@ export function mintGuestIdentity(
     inviteId: guest.inviteId,
     sessionId: guest.sessionId,
     invitedBy: guest.invitedBy,
+    reader: guest.reader,
     jti: guest.jti,
   });
   callerProvenance.guest(value);

@@ -70,6 +70,11 @@ pathItem:
         schema:
           $ref: "#/components/schemas/project.list.Input/properties/query/properties/curs\
             or"
+      - name: id
+        in: query
+        required: false
+        schema:
+          $ref: "#/components/schemas/project.list.Input/properties/query/properties/id"
     responses:
       "200":
         description: Completed result
@@ -175,6 +180,15 @@ components:
             cursor:
               type: string
               minLength: 1
+            id:
+              maxItems: 50
+              type: array
+              items:
+                type: string
+                minLength: 34
+                maxLength: 34
+                pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: project_ followed by a canonical 26-character uppercase ULID.
           required: []
           additionalProperties: false
         body:

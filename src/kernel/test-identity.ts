@@ -2,7 +2,9 @@ import {
   mintGuestIdentity,
   mintHumanIdentity,
   mintMachineIdentity,
+  mintReadOnlyIdentity,
   mintWorkerIdentity,
+  type ReadOnlyGrant,
 } from "./caller-mint.ts";
 import { mintServiceIdentity } from "./service-mint.ts";
 import type {
@@ -19,6 +21,13 @@ export function testHumanIdentity(
   jti: string,
 ): HumanIdentity {
   return mintHumanIdentity(accountId, name, jti);
+}
+
+export function testReadOnlyIdentity(
+  accountId: string,
+  grant: ReadOnlyGrant,
+): HumanIdentity {
+  return mintReadOnlyIdentity(accountId, grant);
 }
 
 export function testMachineIdentity(

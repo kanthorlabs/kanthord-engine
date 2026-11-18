@@ -4,11 +4,16 @@ pathItem:
     operationId: workbench.invite.create
     tags:
       - workbench
-    description: Invite one person to a workbench conversation. The answer holds
+    description: "Invite one person to a workbench conversation. The answer holds
       `invite_token` once. The server stores only its hash. The invite lasts 7
       days. Creating an invite clears the evidence grants of the conversation.
       Error `workbench.invite.name_invalid` answers a blank `invitee_name` or
-      one of more than 64 characters.
+      one of more than 64 characters. `project_ids` names 1 to 50 existing
+      projects, each once. A repeated, malformed or unknown id, no id, or more
+      than 50 ids answers 400 `workbench.invite.project_invalid` with the
+      refused ids in `details`. A set that differs from the set of a live invite
+      of the conversation answers 409 `workbench.invite.scope_mismatch`. The set
+      never changes: revoke the invite and create a new one."
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: true
@@ -60,7 +65,10 @@ pathItem:
     operationId: workbench.invite.list
     tags:
       - workbench
-    description: List the live invites of a workbench conversation.
+    description: List the live invites of a workbench conversation. Each item names
+      its projects with the live project name, or a null name for an id with no
+      project. `project_ids` holds the set of the live invites, or null when no
+      invite is live.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: false
@@ -129,8 +137,13 @@ components:
             invitee_name:
               type: string
               maxLength: 256
+            project_ids:
+              type: array
+              items:
+                type: string
           required:
             - invitee_name
+            - project_ids
           additionalProperties: false
       required:
         - params
@@ -221,11 +234,42 @@ components:
                 minimum: -9007199254740991
                 maximum: 9007199254740991
                 description: Unix epoch time in milliseconds.
+              projects:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                      minLength: 34
+                      maxLength: 34
+                      pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                      description: project_ followed by a canonical 26-character uppercase ULID.
+                    name:
+                      anyOf:
+                        - type: string
+                        - type: "null"
+                  required:
+                    - id
+                    - name
+                  additionalProperties: false
             required:
               - id
               - invitee_name
               - expires_at
+              - projects
             additionalProperties: false
+        project_ids:
+          anyOf:
+            - type: array
+              items:
+                type: string
+                minLength: 34
+                maxLength: 34
+                pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: project_ followed by a canonical 26-character uppercase ULID.
+            - type: "null"
       required:
         - items
+        - project_ids
       additionalProperties: false

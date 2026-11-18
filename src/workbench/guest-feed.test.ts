@@ -68,6 +68,8 @@ function conversation(t: TestContext) {
     display_name: null,
     auto_mode: true,
     streaming: null,
+    waiting_for_approval: null,
+    queue: [],
   };
   const feed = new GuestFeed({
     entries: () => [...entries],
@@ -118,6 +120,8 @@ test("invariant, data loss: a configure within one tick after a run end still pu
     display_name: null,
     auto_mode: true,
     streaming: null,
+    waiting_for_approval: null,
+    queue: [],
   });
   state.run_active = true;
   state.display_name = "Yumi";
@@ -138,6 +142,8 @@ test("invariant, data loss: a configure within one tick after a run end still pu
       display_name: null,
       auto_mode: false,
       streaming: null,
+      waiting_for_approval: null,
+      queue: [],
     },
   });
   feed.notify();
@@ -150,6 +156,8 @@ test("invariant, data loss: a configure within one tick after a run end still pu
     display_name: null,
     auto_mode: true,
     streaming: null,
+    waiting_for_approval: null,
+    queue: [],
   });
 });
 

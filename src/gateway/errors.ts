@@ -37,6 +37,18 @@ export const unauthorized = () =>
     UNAUTHORIZED_CODE,
     UNAUTHORIZED_MESSAGE,
   );
+export const scopeRefused = () =>
+  new GatewayError(
+    HttpStatus.Forbidden,
+    "gateway.scope.refused",
+    "This operation is not available in a run that a guest started.",
+  );
+export const scopeNotFound = () =>
+  new GatewayError(
+    HttpStatus.NotFound,
+    "gateway.scope.not_found",
+    "The record is not found.",
+  );
 export class WorkerGroupEnded extends GatewayError {
   constructor() {
     super(HttpStatus.Unauthorized, UNAUTHORIZED_CODE, UNAUTHORIZED_MESSAGE);

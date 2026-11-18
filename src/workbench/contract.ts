@@ -14,6 +14,7 @@ export interface ResolvedInvite {
   session_id: string;
   invited_by: string;
   expires_at: number;
+  project_ids: readonly string[];
 }
 export const WORKBENCH_SERVICE_NAME = "workbench";
 export const WORKBENCH_SESSION_PREFIX = "workbench_session";
@@ -32,6 +33,7 @@ export const WORKBENCH_QUEUE_LIMIT = 10;
 export const WORKBENCH_QUEUED_MESSAGE_PREFIX = "workbench_queued_message";
 export const WORKBENCH_INVITE_PREFIX = "workbench_invite";
 export const WORKBENCH_INVITE_LIFETIME_MS = 604_800_000;
+export const WORKBENCH_INVITE_PROJECT_LIMIT = 50;
 export const WORKBENCH_INVITE_NAME_MAX_LENGTH = 64;
 export const WORKBENCH_INVITE_NAME_INPUT_MAX_LENGTH = 256;
 export const WORKBENCH_GUEST_MESSAGE_MAX_BYTES = 16384;
@@ -88,7 +90,10 @@ export const WorkbenchErrorCode = {
   SummaryFailed: "workbench.fork.summary_failed",
   SummaryRefused: "workbench.fork.summary_refused",
   InviteNotFound: "workbench.invite.not_found",
+  GuestAgentRefused: "workbench.guest.agent_refused",
   InviteNameInvalid: "workbench.invite.name_invalid",
+  ProjectInvalid: "workbench.invite.project_invalid",
+  ScopeMismatch: "workbench.invite.scope_mismatch",
   EvidenceNameMismatch: "workbench.evidence.name_mismatch",
 } as const;
 
@@ -120,6 +125,7 @@ export const GuardCause = {
   Oversize: "oversize",
   NoVerdict: "no_verdict",
   Classifier: "classifier",
+  GuestRun: "guest_run",
 } as const;
 export type GuardCause = (typeof GuardCause)[keyof typeof GuardCause];
 
@@ -139,9 +145,15 @@ export const WorkbenchRecordKind = {
   Guard: "guard",
   Fork: "fork",
   Note: "note",
+  Author: "author",
+  QueueClear: "queue_clear",
 } as const;
 export type WorkbenchRecordKind =
   (typeof WorkbenchRecordKind)[keyof typeof WorkbenchRecordKind];
+
+export const QueueClearCause = { Stop: "stop", Replace: "replace" } as const;
+export type QueueClearCause =
+  (typeof QueueClearCause)[keyof typeof QueueClearCause];
 
 const actionSeenSchema = z.union([
   z.strictObject({
@@ -180,6 +192,15 @@ export const workbenchRecordSchema = z.discriminatedUnion("kind", [
     kind: z.literal(WorkbenchRecordKind.Note),
     text: z.string().max(WORKBENCH_MESSAGE_MAX_LENGTH),
     author: authorSchema,
+  }),
+  z.strictObject({
+    kind: z.literal(WorkbenchRecordKind.Author),
+    author: authorSchema,
+  }),
+  z.strictObject({
+    kind: z.literal(WorkbenchRecordKind.QueueClear),
+    count: z.number().int().positive(),
+    cause: z.enum(QueueClearCause),
   }),
 ]);
 export type WorkbenchRecord = z.infer<typeof workbenchRecordSchema>;
@@ -275,10 +296,16 @@ export const WORKBENCH_REJECTION_REASON = "The human rejected the call.";
 export const WorkbenchGuardReason = {
   HumanOnly: "workbench.guard.human_only",
   ImportFormat: "workbench.guard.import_format",
+  GuestScope: "workbench.guard.guest_scope",
+  ProjectScope: "workbench.guard.project_scope",
 } as const;
 export function workbenchHumanOnlyText(operationId: string): string {
   return `${WorkbenchGuardReason.HumanOnly}: ${operationId} is a human-only action. Only the human runs it.`;
 }
+export function workbenchGuestScopeText(operationId: string): string {
+  return `${WorkbenchGuardReason.GuestScope}: ${operationId} is not available in a run that a guest started.`;
+}
+export const WORKBENCH_PROJECT_SCOPE_TEXT = `${WorkbenchGuardReason.ProjectScope}: The record is not available in this conversation.`;
 export const WORKBENCH_IMPORT_RETIREMENT_TEXT = `${WorkbenchGuardReason.HumanOnly}: mission.import.apply with confirmed_retirements is a human-only action. Import with no retirement, or ask the human to retire the nodes.`;
 export const WORKBENCH_IMPORT_FORMAT_TEXT = `${WorkbenchGuardReason.ImportFormat}: Agent imports use format json.`;
 export const WORKBENCH_EXPIRY_REASON =
@@ -293,6 +320,7 @@ export type GuardInfo = z.infer<typeof guardInfoSchema>;
 
 export const pendingApprovalSchema = pendingApprovalSummarySchema.extend({
   session_id: z.string(),
+  requested_by: authorSchema,
   input: z.record(z.string(), z.unknown()),
   guard: guardInfoSchema.nullable(),
 });
@@ -330,6 +358,13 @@ export const inviteItemSchema = z.strictObject({
   id: identitySchema(WORKBENCH_INVITE_PREFIX),
   invitee_name: z.string(),
   expires_at: timestampSchema,
+});
+const inviteProjectSchema = z.strictObject({
+  id: identitySchema("project"),
+  name: z.string().nullable(),
+});
+export const inviteListItemSchema = inviteItemSchema.extend({
+  projects: z.array(inviteProjectSchema),
 });
 
 const guestBlockSchema = z.discriminatedUnion("type", [
@@ -388,6 +423,18 @@ export const guestEntrySchema = z.discriminatedUnion("kind", [
     ...guestEnvelope,
     kind: z.literal(WorkbenchRecordKind.Fork),
     source_title: z.string(),
+  }),
+  z.strictObject({
+    ...guestEnvelope,
+    kind: z.literal(WorkbenchRecordKind.Author),
+    author: authorSchema,
+  }),
+  z.strictObject({
+    ...guestEnvelope,
+    kind: z.literal(WorkbenchRecordKind.QueueClear),
+    count: z.number().int().positive(),
+    cause: z.enum(QueueClearCause),
+    text: z.string(),
   }),
 ]);
 
@@ -663,6 +710,7 @@ export const workbenchOperations = {
       query: emptyFields,
       body: z.strictObject({
         invitee_name: z.string().max(WORKBENCH_INVITE_NAME_INPUT_MAX_LENGTH),
+        project_ids: z.array(z.string()),
       }),
     }),
     output: inviteItemSchema.extend({
@@ -670,7 +718,7 @@ export const workbenchOperations = {
       invite_token: z.uuid(),
     }),
     description:
-      "Invite one person to a workbench conversation. The answer holds `invite_token` once. The server stores only its hash. The invite lasts 7 days. Creating an invite clears the evidence grants of the conversation. Error `workbench.invite.name_invalid` answers a blank `invitee_name` or one of more than 64 characters.",
+      "Invite one person to a workbench conversation. The answer holds `invite_token` once. The server stores only its hash. The invite lasts 7 days. Creating an invite clears the evidence grants of the conversation. Error `workbench.invite.name_invalid` answers a blank `invitee_name` or one of more than 64 characters. `project_ids` names 1 to 50 existing projects, each once. A repeated, malformed or unknown id, no id, or more than 50 ids answers 400 `workbench.invite.project_invalid` with the refused ids in `details`. A set that differs from the set of a live invite of the conversation answers 409 `workbench.invite.scope_mismatch`. The set never changes: revoke the invite and create a new one.",
   },
   "invite.list": {
     ...workbenchOperation,
@@ -684,8 +732,12 @@ export const workbenchOperations = {
       query: emptyFields,
       body: z.null(),
     }),
-    output: z.strictObject({ items: z.array(inviteItemSchema) }),
-    description: "List the live invites of a workbench conversation.",
+    output: z.strictObject({
+      items: z.array(inviteListItemSchema),
+      project_ids: z.array(identitySchema("project")).nullable(),
+    }),
+    description:
+      "List the live invites of a workbench conversation. Each item names its projects with the live project name, or a null name for an id with no project. `project_ids` holds the set of the live invites, or null when no invite is live.",
   },
   "invite.revoke": {
     ...workbenchOperation,
@@ -746,11 +798,13 @@ export const workbenchOperations = {
       title: z.string().nullable(),
       members: z.array(conversationMemberSchema),
       owner_name: z.string(),
+      projects: z.array(inviteProjectSchema),
+      mention_names: z.array(z.string()),
       entries: z.array(guestEntrySchema),
       run_active: z.boolean(),
     }),
     description:
-      "Read the conversation of the invite of the guest. The conversation comes from the guest token. The entries hold the guest view only: no tool result, no thinking and no configuration. An ended invite answers 401 `gateway.jwt.invite_ended`.",
+      "Read the conversation of the invite of the guest. The conversation comes from the guest token. The entries hold the guest view only: no tool result, no thinking and no configuration. `projects` names the projects of the invite. `mention_names` lists the display names that a guest can mention: the agents that hold no built-in tool. An ended invite answers 401 `gateway.jwt.invite_ended`.",
   },
   "guest.stream": {
     ...guestOperation,
@@ -768,7 +822,7 @@ export const workbenchOperations = {
     }),
     output: z.string(),
     description:
-      "Follow the conversation of the invite of the guest as server-sent events. The first frames hold the entries after `after` and the current state. Event `entries` holds the new guest view entries. Event `state` holds `run_active`, `display_name`, `auto_mode` and `streaming`. The comment `: keepalive` comes every 15 seconds. `after` holds one `<session_id>:<entry_id>` pair per member, comma-separated. A plain entry id names the host pair. The server closes the stream at the end of the invite. The server keeps no position per guest.",
+      "Follow the conversation of the invite of the guest as server-sent events. The first frames hold the entries after `after` and the current state. Event `entries` holds the new guest view entries. Event `state` holds `run_active`, `display_name`, `auto_mode`, `streaming`, `waiting_for_approval` (the operation id of the pending approval, or null) and `queue` (the id, agent, display name and author name of each queued message, with no text). The comment `: keepalive` comes every 15 seconds. `after` holds one `<session_id>:<entry_id>` pair per member, comma-separated. A plain entry id names the host pair. The server closes the stream at the end of the invite. The server keeps no position per guest.",
   },
   "guest.message": {
     ...guestOperation,
@@ -795,8 +849,17 @@ export const workbenchOperations = {
           ),
       }),
     }),
-    output: z.strictObject({ kind: z.literal(MessageKind.Note) }),
+    output: z.discriminatedUnion("kind", [
+      z.strictObject({ kind: z.literal(MessageKind.Note) }),
+      z.strictObject({
+        kind: z.literal(MessageKind.Run),
+        agent_name: z.string(),
+        queued_message_id: identitySchema(
+          WORKBENCH_QUEUED_MESSAGE_PREFIX,
+        ).nullable(),
+      }),
+    ]),
     description:
-      "Append a note of the guest to the conversation. Every guest message is a note: it starts no run, also with a leading mention. The text holds at most 16384 UTF-8 bytes.",
+      "Send a message of the guest to the conversation. A message with no leading mention is a note: it starts no run and answers `kind` `note`. A leading `@<display name>` starts a run of that member, or queues the message behind the active run, and answers `kind` `run` with `agent_name` and `queued_message_id` (null when the run starts now). The run reads under the read-only identity of the inviter and runs no mutation without the owner's card. A mention of an unknown name answers 404 `agent.catalog.not_found`. A mention of an agent that holds a built-in tool answers 409 `workbench.guest.agent_refused`. A full queue answers 409 `workbench.session.queue_full`. The text holds at most 16384 UTF-8 bytes.",
   },
 } as const satisfies Record<string, Operation>;

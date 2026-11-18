@@ -20,7 +20,12 @@ import {
   WORKBENCH_PROMPT,
 } from "../../agent/prompt-assets.ts";
 import { directClient } from "../../gateway/index.ts";
-import { testHumanIdentity } from "../../kernel/test-identity.ts";
+import { background } from "../../kernel/context.ts";
+import {
+  testGuestIdentity,
+  testHumanIdentity,
+  testReadOnlyIdentity,
+} from "../../kernel/test-identity.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
   type OperationResult,
@@ -65,6 +70,7 @@ import {
   WORKBENCH_CONFIGURATION_ENTRY,
   WORKBENCH_EXPIRY_REASON,
   WORKBENCH_OPENING_TEXT,
+  WORKBENCH_PROJECT_SCOPE_TEXT,
   WORKBENCH_QUEUE_LIMIT,
   WORKBENCH_REJECTION_REASON,
   WORKBENCH_STREAM_TICK_MS,
@@ -94,6 +100,7 @@ import {
   GUARD_MODEL,
   HAIKU,
   heldAnswer,
+  invitedProjectIds,
   OFF,
   pass,
   type Persistence,
@@ -1104,6 +1111,7 @@ async function pausedAt(
 }
 
 interface CreatedNode {
+  projectId: string;
   nodeId: string;
   missionVersion: number;
 }
@@ -1112,10 +1120,13 @@ async function createNode(fixture: Fixture): Promise<string> {
   return (await createdNode(fixture)).nodeId;
 }
 
-async function createdNode(fixture: Fixture): Promise<CreatedNode> {
+async function createdNode(
+  fixture: Fixture,
+  projectName = PROJECT_NAME,
+): Promise<CreatedNode> {
   const project = completed(
     await fixture.projects.create(
-      { params: {}, query: {}, body: { name: PROJECT_NAME } },
+      { params: {}, query: {}, body: { name: projectName } },
       fixture.options,
     ),
   );
@@ -1162,6 +1173,7 @@ async function createdNode(fixture: Fixture): Promise<CreatedNode> {
     ),
   ) as { revisions: { node_id: string }[]; mission_version: number };
   return {
+    projectId: project.id,
     nodeId: created.revisions[0]!.node_id,
     missionVersion: created.mission_version,
   };
@@ -4535,7 +4547,10 @@ async function inviteGuest(fixture: Fixture, sessionId: string) {
       {
         params: { session_id: sessionId },
         query: {},
-        body: { invitee_name: GUEST_NAME },
+        body: {
+          invitee_name: GUEST_NAME,
+          project_ids: await invitedProjectIds(fixture),
+        },
       },
       fixture.options,
     ),
@@ -4671,7 +4686,9 @@ test(
     completed(await forkOf(fixture, session.id, FOLLOW_UP));
     const [summarizer] = callsOf(fixture, FORK_SUMMARY_PROMPT);
     const { conversation } = userRequestOf(summarizer!);
-    assert.ok(conversation!.includes(`${GUEST_NAME} (guest): ${GUEST_NOTE}`));
+    assert.ok(
+      conversation!.includes(`${GUEST_NAME} (guest) wrote: ${GUEST_NOTE}`),
+    );
     assert.ok(conversation!.includes(`${OWNER_NAME} (owner): ${OWNER_NOTE}`));
     assert.ok(!conversation!.includes(`${OWNER_NAME} (guest)`));
   },
@@ -4748,6 +4765,112 @@ test(
     assert.equal(
       noteRecords(await sessionEntries(fixture, session.id)).length,
       NO_QUEUED_MESSAGES,
+    );
+  },
+);
+
+const FOUR_RESULTS = 4;
+const FOREIGN_PROJECT_NAME = "other-ledger";
+const SCOPE_MENTION =
+  "@Yumi read the projects and pause the node of the other project.";
+const SCOPE_TEST_TIMEOUT_MS = 60000;
+
+test(
+  "(security) resolver test 22: a guest-started run with scope P1 leaks no name or id of P2 in any tool result",
+  { timeout: SCOPE_TEST_TIMEOUT_MS },
+  async (t) => {
+    const target = { first: "", second: "", secondNode: "" };
+    const fixture = await workbenchFixture(
+      t,
+      [
+        toolCall(toolName("project.list"), { query: {} }),
+        () =>
+          toolCall(toolName("mission.get"), {
+            params: { project_id: target.first },
+          }),
+        () =>
+          toolCall(toolName("mission.get"), {
+            params: { project_id: target.second },
+          }),
+        () =>
+          toolCall(toolName("mission.node.pause"), {
+            params: { node_id: target.secondNode },
+            body: {
+              reason: "hold",
+              expected_mission_version: FIRST_BINDING_SET,
+              expected_state: NodeState.Available,
+              expected_attempt: NO_QUEUED_MESSAGES,
+            },
+          }),
+        fauxAssistantMessage(ANSWER),
+      ],
+      undefined,
+      undefined,
+      [OPS, AGENT, REVIEW_AGENT],
+    );
+    const first = await createdNode(fixture);
+    const second = await createdNode(fixture, FOREIGN_PROJECT_NAME);
+    Object.assign(target, {
+      first: first.projectId,
+      second: second.projectId,
+      secondNode: second.nodeId,
+    });
+    const session = await createSession(fixture, undefined, OPS);
+    const invite = completed(
+      await fixture.workbench["invite.create"](
+        {
+          params: { session_id: session.id },
+          query: {},
+          body: { invitee_name: GUEST_NAME, project_ids: [first.projectId] },
+        },
+        fixture.options,
+      ),
+    );
+    const joined = completed(
+      await fixture.workbench["invite.join"](
+        {
+          params: {},
+          query: {},
+          body: { invite_token: invite.invite_token, name: GUEST_NAME },
+        },
+        fixture.options,
+      ),
+    );
+    const guest = testGuestIdentity({
+      guestId: joined.guest_id,
+      name: GUEST_NAME,
+      inviteId: invite.id,
+      sessionId: session.id,
+      invitedBy: identity.accountId,
+      reader: testReadOnlyIdentity(identity.accountId, {
+        inviteId: invite.id,
+        projectIds: [first.projectId],
+      }),
+      jti: "resolver-test-22",
+    });
+    await fixture.workbenchService.guestMessage(
+      guest,
+      SCOPE_MENTION,
+      background,
+    );
+    await untilIdle(fixture, session.id, t.signal);
+    const results = toolResults(await eventEntries(fixture, session.id));
+    assert.equal(results.length, FOUR_RESULTS);
+    const text = results.map((result) => result.text).join("\n");
+    assert.ok(text.includes(first.projectId));
+    for (const leaked of [
+      second.projectId,
+      second.nodeId,
+      FOREIGN_PROJECT_NAME,
+    ])
+      assert.ok(!text.includes(leaked), leaked);
+    assert.deepEqual(
+      results.slice(-TWO_RESULTS).map((result) => result.text),
+      [WORKBENCH_PROJECT_SCOPE_TEXT, WORKBENCH_PROJECT_SCOPE_TEXT],
+    );
+    assert.equal(
+      (await nodeOf(fixture, second.nodeId)).state,
+      NodeState.Available,
     );
   },
 );

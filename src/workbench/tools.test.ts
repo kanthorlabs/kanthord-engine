@@ -15,7 +15,10 @@ import {
 } from "../agent/test-support.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { temporary } from "../kernel/test-support.ts";
-import { testHumanIdentity } from "../kernel/test-identity.ts";
+import {
+  testHumanIdentity,
+  testReadOnlyIdentity,
+} from "../kernel/test-identity.ts";
 import { isObject } from "../kernel/values.ts";
 import {
   AccessPolicy,
@@ -23,6 +26,10 @@ import {
   OperationLifetime,
   OperationResultType,
 } from "../kernel/operation.ts";
+import {
+  PROJECT_BOUND_PREFIXES,
+  ProjectScope,
+} from "../kernel/project-scope.ts";
 import { footprintOperations } from "../footprint/contract.ts";
 import { gatewayOperations } from "../gateway/contract.ts";
 import {
@@ -40,8 +47,15 @@ import { schedulerOperations } from "../scheduler/contract.ts";
 import { storageOperations } from "../storage/contract.ts";
 import { trackingOperations } from "../tracking/contract.ts";
 import { workerOperations } from "../worker/contract.ts";
-import { ACTION_CARD_OPERATIONS, ActionTarget } from "./actions.ts";
-import { workbenchOperations } from "./contract.ts";
+import {
+  ACTION_CARD_OPERATIONS,
+  ActionTarget,
+  TARGET_READS,
+} from "./actions.ts";
+import {
+  WORKBENCH_PROJECT_SCOPE_TEXT,
+  workbenchOperations,
+} from "./contract.ts";
 import {
   floorOf,
   HUMAN_ONLY_OPERATIONS,
@@ -245,9 +259,11 @@ test("a tool call of a bodiless operation without body reaches the operation wit
       data: { ok: true },
     });
   };
-  const tool = operationTool(operation, invoke, () =>
-    testHumanIdentity("account", "Account", "token"),
-  );
+  const tool = operationTool(operation, invoke, {
+    requester: () => testHumanIdentity("account", "Account", "token"),
+    scopeOf: () => null,
+    projectScope: new ProjectScope({ projectOf: () => null }),
+  });
   assert.deepEqual(Object.keys(envelopeProperties(tool.parameters)), [
     "params",
   ]);
@@ -420,4 +436,106 @@ test("(security: authorization) every listed mutation is reversible, decided by 
     return !(auto && danger);
   });
   assert.deepEqual(unmeasured, []);
+});
+
+const SCOPE_REFUSED_OPERATIONS: ReadonlySet<string> = new Set([
+  "gateway.healthcheck",
+  "agent.cooldown.list",
+  "agent.cooldown.clear",
+  "workbench.session.list",
+  "worker.catalog.list",
+  "llm.credential.list",
+  "llm.credential.get",
+  "agent.enablement.get",
+  "mission.evidence.asset.content.download",
+]);
+const TASK_PREFIX = "task";
+const IDENTITY_PATTERN_PREFIX = /\^\(?([a-z]+(?:_[a-z]+)*)_\[0-7\]/g;
+
+function patternPrefixes(schema: unknown): string[] {
+  return [...JSON.stringify(schema).matchAll(IDENTITY_PATTERN_PREFIX)].map(
+    (match) => match[1]!,
+  );
+}
+
+test("(security) resolver test 20: every listed and target-read operation has projectScope or is in the refused set, and each identity pattern of a scoped input is project-bound", () => {
+  const byId = new Map(
+    OPERATION_UNION.map((operation) => [operation.id, operation]),
+  );
+  const ids = new Set([
+    ...Object.values(AGENT_DECLARATIONS).flatMap(
+      (declaration) => declaration.tools.operation,
+    ),
+    ...Object.values(TARGET_READS).map((read) => read.operation_id),
+  ]);
+  const unscoped = [...ids].filter((id) => {
+    const operation = byId.get(id);
+    assert.ok(operation, id);
+    return (
+      operation.projectScope === undefined && !SCOPE_REFUSED_OPERATIONS.has(id)
+    );
+  });
+  assert.deepEqual(unscoped, []);
+  const foreign = OPERATION_UNION.filter(
+    (operation) => operation.projectScope !== undefined,
+  ).flatMap((operation) =>
+    patternPrefixes(z.toJSONSchema(operation.input, { io: "input" }))
+      .filter(
+        (prefix) =>
+          prefix !== TASK_PREFIX &&
+          !(PROJECT_BOUND_PREFIXES as readonly string[]).includes(prefix),
+      )
+      .map((prefix) => `${operation.id}:${prefix}`),
+  );
+  assert.deepEqual(foreign, []);
+});
+
+test("(security) resolver test 16: a call whose params change to a target of another project after the decision throws project_scope and invokes nothing", async () => {
+  const operation = missionOperations["node.get"];
+  const inScope = createIdentity("project");
+  const foreign = createIdentity("node");
+  const mine = createIdentity("node");
+  const owners = new Map([
+    [mine, inScope],
+    [foreign, createIdentity("project")],
+  ]);
+  const calls: unknown[] = [];
+  const invoke: InvokeOperation = (_target, input) => {
+    calls.push(input);
+    return Promise.resolve({
+      type: OperationResultType.Completed,
+      status: 200,
+      data: {},
+    });
+  };
+  const tool = operationTool(operation, invoke, {
+    requester: () =>
+      testReadOnlyIdentity("account", {
+        inviteId: createIdentity("workbench_invite"),
+        projectIds: [inScope],
+      }),
+    scopeOf: () => new Set([inScope]),
+    projectScope: new ProjectScope({
+      projectOf: (_prefix, id) => owners.get(id) ?? null,
+    }),
+  });
+  await tool.execute(
+    "call_mine",
+    { params: { node_id: mine } },
+    undefined,
+    undefined,
+    undefined as never,
+  );
+  assert.equal(calls.length, ONE_OPERATION);
+  await assert.rejects(
+    tool.execute(
+      "call_foreign",
+      { params: { node_id: foreign } },
+      undefined,
+      undefined,
+      undefined as never,
+    ),
+    { message: WORKBENCH_PROJECT_SCOPE_TEXT },
+  );
+  assert.equal(calls.length, ONE_OPERATION);
 });
