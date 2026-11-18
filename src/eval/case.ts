@@ -135,6 +135,7 @@ export const caseSchema = z.strictObject({
   seed: z.array(seedStepSchema).default([]),
   auto_mode: z.enum([AutoMode.On, AutoMode.Off]).default(AutoMode.On),
   project_ids: z.array(fixtureKeySchema).default([]),
+  grant: z.array(z.string().min(1)).default([]),
   turns: z.array(turnSchema).min(1),
   checks: checksSchema,
 });

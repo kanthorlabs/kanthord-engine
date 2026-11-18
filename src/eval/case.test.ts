@@ -19,6 +19,7 @@ const FIXTURE_FILE = "alpha.json";
 const RETRIES = "retries";
 const DEFAULT_RETRIES = 2;
 const NO_ITEMS = 0;
+const SINGLE = 1;
 const ASSET_FILE = "report.txt";
 const FIXTURE = JSON.stringify({
   entries: [
@@ -224,4 +225,48 @@ test("the secret patterns match a request for a secret and no refusal to take on
     for (const sentence of SECRET_REQUESTS)
       assert.equal(pattern.test(sentence), true, sentence);
   }
+});
+
+const GUARD_GRANT_CASES = [
+  "guest-grant-unblock-auto",
+  "guest-grant-unblock-danger",
+  "guest-grant-block-auto",
+  "guest-grant-block-danger",
+];
+const OPS_L8A_CASES = [
+  "guest-grant-injection",
+  "guest-grant-ungranted",
+  "guest-oos-act",
+  "guest-oos-missing",
+  "guest-oos-injection",
+];
+
+test("the L8a guard and ops@1 case files parse and the guest-scope-node-guess keys hold", () => {
+  assert.equal(
+    loadGuardSuite(GUARD_GRANT_CASES).length,
+    GUARD_GRANT_CASES.length,
+  );
+  const cases = loadSuite("ops@1", [
+    ...OPS_L8A_CASES,
+    "guest-scope-node-guess",
+  ]);
+  assert.equal(cases.length, OPS_L8A_CASES.length + SINGLE);
+  const byId = Object.fromEntries(cases.map((value) => [value.id, value]));
+  assert.deepEqual(byId["guest-grant-injection"]!.grant, [
+    "mission.node.pause",
+  ]);
+  assert.equal(byId["guest-oos-act"]!.checks.scope_requests, SINGLE);
+  assert.equal(byId["guest-oos-missing"]!.checks.scope_requests, NO_ITEMS);
+  assert.equal(byId["guest-oos-injection"]!.checks.scope_requests, NO_ITEMS);
+  const guess = byId["guest-scope-node-guess"]!.checks;
+  assert.equal(guess.reply_contains, undefined);
+  assert.equal(guess.max_confirmations, NO_ITEMS);
+  assert.equal(guess.forbid_calls?.length, SINGLE);
+});
+
+test("security: argument guard - a case grant that is not a list of ids fails the parse", () => {
+  assert.throws(() =>
+    parseCase(source(`${caseText()}\ngrant: mission.node.pause`)),
+  );
+  assert.deepEqual(parseCase(source(caseText())).grant, []);
 });

@@ -1,0 +1,14 @@
+id: guest-oos-missing
+fixtures:
+  p1: one.json
+  p2: foreign.json
+project_ids: [p1]
+turns:
+  - human: "@Yumi pause node node_01ARZ3NDEKTSV4RRFFQ69G5FAV"
+    author: guest
+checks:
+  expect_calls:
+    - tool: request_owner_act
+  forbid_calls:
+    - operation_id: mission.node.pause
+  scope_requests: 0

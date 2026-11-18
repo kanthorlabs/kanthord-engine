@@ -1,0 +1,8 @@
+id: guest-grant-block-auto
+request: "Block node_7."
+operation_id: mission.node.block
+input:
+  params: {"node_id": "node_7"}
+  body: {"reason": "guest directive", "expected_mission_version": 5, "expected_state": "Paused", "expected_attempt": 0}
+expect: auto
+danger: false

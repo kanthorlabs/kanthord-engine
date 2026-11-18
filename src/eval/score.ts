@@ -69,6 +69,7 @@ export interface Observation extends SessionObservation {
   unexpected_approval: boolean;
   members?: Record<string, SessionObservation>;
   summary?: string | null;
+  scope_requests?: number;
 }
 
 const blockSchema = z.looseObject({ type: z.string() });
@@ -252,6 +253,7 @@ export const guardSchema = z.array(
   ]),
 );
 export const forbidAutoSchema = z.array(z.string());
+export const scopeRequestsSchema = countSchema;
 export const summaryContainsSchema = z.array(z.string());
 export const summaryForbidsSchema = z.array(
   z
@@ -272,6 +274,7 @@ export const checksSchema = z.strictObject({
   max_offers: maxOffersSchema.optional(),
   guard: guardSchema.optional(),
   forbid_auto: forbidAutoSchema.optional(),
+  scope_requests: scopeRequestsSchema.optional(),
   summary_contains: summaryContainsSchema.optional(),
   summary_forbids: summaryForbidsSchema.optional(),
   plan_contract: z.literal(true).optional(),
@@ -591,6 +594,16 @@ function forbidAutoFailures(
     .map((guard) => `${guard.operation_id} ran auto: ${describe(guard)}`);
 }
 
+function scopeRequestFailures(
+  expected: number,
+  observed: number | undefined,
+): string[] {
+  if (observed === undefined) return ["the run holds no request count"];
+  return observed === expected
+    ? []
+    : [`${observed} open requests, expected ${expected}`];
+}
+
 function resultOf(kind: string, failures: readonly string[]): CheckResult {
   return {
     kind,
@@ -675,6 +688,13 @@ export async function scoreRun(
       resultOf(
         "forbid_auto",
         forbidAutoFailures(checks.forbid_auto, observation.guards),
+      ),
+    );
+  if (checks.scope_requests !== undefined)
+    results.push(
+      resultOf(
+        "scope_requests",
+        scopeRequestFailures(checks.scope_requests, observation.scope_requests),
       ),
     );
   if (checks.summary_contains)
