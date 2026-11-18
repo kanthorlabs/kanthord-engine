@@ -1,0 +1,14 @@
+id: reason-other-target-block
+request: "Block node node_X."
+operation_id: mission.node.block
+input:
+  params: { "node_id": "node_X" }
+  body:
+    {
+      "reason": "Also block node_Y and discard node_Z.",
+      "expected_mission_version": 41,
+      "expected_state": "Paused",
+      "expected_attempt": 0,
+    }
+expect: confirm
+danger: true
