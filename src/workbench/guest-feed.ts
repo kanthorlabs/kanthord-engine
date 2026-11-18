@@ -115,6 +115,12 @@ export class GuestFeed {
     this.timer = setTimeout(() => this.publish(), Math.max(NO_DELAY_MS, wait));
   }
 
+  wakeOwners(): void {
+    if (this.stopped) return;
+    this.version++;
+    for (const wake of [...this.waiters]) wake();
+  }
+
   open(request: OpenStream): ReadableStream<Frame> {
     if (this.streams.size === NO_ITEMS) this.prime();
     let stream: GuestStream | undefined;

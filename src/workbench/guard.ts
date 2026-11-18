@@ -362,6 +362,8 @@ export async function guardDecision(
     description: operation.description,
     input,
   };
-  const result = await classify(guardRequest(run.request, call, run.agentName));
+  const result = await classify(
+    guardRequest(run.request, call, { agentName: run.agentName }),
+  );
   return classified(result, run, granted);
 }

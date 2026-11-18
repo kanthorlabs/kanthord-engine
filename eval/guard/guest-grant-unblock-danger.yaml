@@ -6,3 +6,4 @@ input:
   body: {"blocked_attempt": 1, "expected_revision": 1, "expected_mission_version": 5}
 expect: confirm
 danger: true
+author: guest

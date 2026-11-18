@@ -248,8 +248,17 @@ export const requestOwnerActParams = z.strictObject({
 
 const REQUEST_OWNER_ACT_PARAMETERS = Type.Object(
   {
-    operation_id: Type.String(),
-    input: Type.Object({}, { additionalProperties: true }),
+    operation_id: Type.String({
+      description: "The id of the act, for example mission.node.pause.",
+    }),
+    input: Type.Object(
+      {},
+      {
+        additionalProperties: true,
+        description:
+          "The params, query and body of the act. Leave out every key that starts with expected_ and the key blocked_attempt. The owner supplies them.",
+      },
+    ),
   },
   { additionalProperties: false },
 );
@@ -272,7 +281,12 @@ function holdsConcurrencyKey(value: unknown): boolean {
 
 function ownerActCall(params: unknown): OwnerActCall {
   const parsed = requestOwnerActParams.safeParse(params);
-  if (!parsed.success) return { operationId: "", input: null };
+  if (!parsed.success) {
+    const raw = isObject(params)
+      ? (params as Record<string, unknown>).operation_id
+      : undefined;
+    return { operationId: isString(raw) ? raw : "", input: null };
+  }
   const { operation_id: operationId, input } = parsed.data;
   return {
     operationId,

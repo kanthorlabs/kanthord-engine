@@ -30,7 +30,6 @@ export interface GrantedInvite {
   projectIds: readonly string[];
 }
 
-export const WORKBENCH_PROJECT_NAME_MAX_LENGTH = 63;
 export const WORKBENCH_REQUEST_OWNER_ACT_TOOL = "request_owner_act";
 export const WORKBENCH_SERVICE_NAME = "workbench";
 export const WORKBENCH_SESSION_PREFIX = "workbench_session";
@@ -735,7 +734,7 @@ export const workbenchOperations = {
       }),
       query: emptyFields,
       body: z.strictObject({
-        project_name: z.string().min(1).max(WORKBENCH_PROJECT_NAME_MAX_LENGTH),
+        project_name: z.string().min(1),
         expected: z.record(
           z.string().regex(/^(expected_[a-z_]+|blocked_attempt)$/),
           z.union([z.number().int(), z.string()]),

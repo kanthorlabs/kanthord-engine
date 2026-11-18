@@ -1029,7 +1029,10 @@ export class WorkbenchService implements Service {
     if (row === null || row.session_id !== raise.hostId) return;
     const operation = this.dependencies
       .operations()
-      .find(({ id }) => id === raise.operationId);
+      .find(
+        ({ id }) =>
+          id === raise.operationId || toolName(id) === raise.operationId,
+      );
     if (!operation) return;
     const parsed = requestInputSchema(operation).safeParse(
       fullInput(operation, raise.input),
@@ -1052,7 +1055,7 @@ export class WorkbenchService implements Service {
       scope,
     });
     const host = this.sessions.get(raise.hostId);
-    if (raised && host) this.notify(host);
+    if (raised && host) this.notifyOwners(host);
   }
 
   private applyRunTools(member: OpenSession, guestRun: boolean): void {
@@ -1831,7 +1834,17 @@ export class WorkbenchService implements Service {
       this.scopeRequests.settle(request);
       throw scopeRequestNotFound();
     }
-    const name = await this.projectNameOf(caller, request.projectId);
+    const name = await this.projectNameOf(caller, request.projectId).catch(
+      (error: unknown) => {
+        if (!(error instanceof OperationError)) throw error;
+        this.scopeRequests.settle(request);
+        throw scopeRequestError(
+          HttpStatus.Conflict,
+          WorkbenchErrorCode.ScopeRequestRefused,
+          "The act is no longer open to the owner as an out-of-scope request.",
+        );
+      },
+    );
     if (body.project_name !== name)
       throw scopeRequestError(
         HttpStatus.Conflict,
@@ -1912,7 +1925,7 @@ export class WorkbenchService implements Service {
     this.requireHost(host);
     const request = this.scopeRequests.claim(host.id, approval.requestId);
     if (!request) throw scopeRequestNotFound();
-    this.notify(host);
+    this.notifyOwners(host);
     try {
       return await this.runScopeRequest(caller, host, {
         request,
@@ -1925,7 +1938,7 @@ export class WorkbenchService implements Service {
       );
       throw error;
     } finally {
-      this.notify(host);
+      this.notifyOwners(host);
     }
   }
 
@@ -1939,7 +1952,7 @@ export class WorkbenchService implements Service {
       typedName: null,
       code: null,
     });
-    this.notify(host);
+    this.notifyOwners(host);
     return { request_id: request.id };
   }
 
@@ -2207,6 +2220,11 @@ export class WorkbenchService implements Service {
   private notify(session: OpenSession): void {
     if (this.shutdown.signal.aborted) return;
     this.feedOf(this.hostOf(session)).notify();
+  }
+
+  private notifyOwners(session: OpenSession): void {
+    if (this.shutdown.signal.aborted) return;
+    this.feedOf(this.hostOf(session)).wakeOwners();
   }
 
   private feedOf(host: OpenSession): GuestFeed {

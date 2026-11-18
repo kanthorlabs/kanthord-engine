@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { setImmediate } from "node:timers/promises";
+import { setImmediate, setTimeout as sleep } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
 import { agentOperations } from "../agent/contract.ts";
@@ -18,6 +18,7 @@ import {
   WORKBENCH_PROJECT_SCOPE_TEXT,
   WORKBENCH_REQUEST_OWNER_ACT_TOOL,
   WORKBENCH_SERVICE_NAME,
+  WORKBENCH_STREAM_TICK_MS,
   type WorkbenchRecord,
   WorkbenchRecordKind,
 } from "./contract.ts";
@@ -43,6 +44,11 @@ const FIRST_CALL = "call_1";
 const WRITE_CALL = "call_write";
 const SINGLE = 1;
 const PAIR = 2;
+const RAISE_BLOCK_MS = 2000;
+const FRAME_SKEW_LIMIT_MS = WORKBENCH_STREAM_TICK_MS / PAIR;
+const FRAME_TEST_TIMEOUT_MS = 20000;
+const RAISE_SETTLE_MS = 50;
+const SCOPE_STOP_KIND = "scope_stop";
 const P1 = createIdentity("project");
 const P2 = createIdentity("project");
 const OWN_NODE = createIdentity("node");
@@ -115,6 +121,14 @@ interface Internals {
     call: OwnerActCall,
   ): void;
   applyRunTools(session: HeldSession, guestRun: boolean): void;
+  feedOf(session: HeldSession): {
+    open(request: {
+      inviteId: string;
+      expiresAt: number;
+      after: undefined;
+      signal: AbortSignal;
+    }): ReadableStream<Uint8Array>;
+  };
   memberEntries(
     host: HeldSession,
     limited: boolean,
@@ -227,8 +241,12 @@ async function fixture(t: TestContext) {
       .getEntries()
       .map((entry) => recordOf(entry as never))
       .filter(
-        (record): record is WorkbenchRecord =>
-          record?.kind === WorkbenchRecordKind.ScopeStop,
+        (
+          record,
+        ): record is Extract<
+          WorkbenchRecord,
+          { kind: typeof WorkbenchRecordKind.ScopeStop }
+        > => record?.kind === WorkbenchRecordKind.ScopeStop,
       );
   const guestView = (session: HeldSession) =>
     projectEntries(mergeEntries(internals.memberEntries(session, false)));
@@ -394,14 +412,64 @@ test("(security) the run end does not wait on the raise: the raise runs only aft
   let ran = false;
   t.mock.method(f.internals.scopeRequests, "raise", () => {
     ran = true;
+    Atomics.wait(
+      new Int32Array(new SharedArrayBuffer(4)),
+      0,
+      0,
+      RAISE_BLOCK_MS,
+    );
     return null;
   });
+  const started = performance.now();
   const result = await f.call(host, "call_1", pauseCall(f.foreignNode()));
+  const ended = performance.now() - started;
   assert.equal(ran, false);
   assert.equal(host.run?.endingCall, FIRST_CALL);
   assert.ok(JSON.stringify(result).includes('"terminate":true'));
+  assert.ok(ended < RAISE_BLOCK_MS / PAIR);
   await setImmediate();
   assert.equal(ran, true);
+});
+
+test("(invariant) a guest run on an existing out-of-scope node leaves one open request for the id and the tool name of the act", async (t) => {
+  const f = await fixture(t);
+  const host = f.host();
+  const created = f.invite(host);
+  for (const [index, operationId] of [
+    PAUSE.id,
+    "mission--node--pause",
+  ].entries()) {
+    const run = f.guestRun(host, created);
+    await f.call(host, `call_${index}`, {
+      ...pauseCall(f.foreignNode()),
+      operation_id: operationId,
+    });
+    await setImmediate();
+    run.settle();
+    assert.equal(f.internals.scopeRequests.count(host.id), index + SINGLE);
+  }
+});
+
+test("(invariant) a call that fails to parse keeps the raw operation_id in scope_stop and uses an empty one only when it is absent", async (t) => {
+  const f = await fixture(t);
+  const host = f.host();
+  const created = f.invite(host);
+  const calls: [string, Record<string, unknown>][] = [
+    ["call_text", { operation_id: PAUSE.id, input: "not an object" }],
+    ["call_extra", { operation_id: PAUSE.id, input: {}, extra: true }],
+    ["call_absent", { input: {} }],
+  ];
+  for (const [toolCallId, params] of calls) {
+    const run = f.guestRun(host, created);
+    await f.call(host, toolCallId, params);
+    await setImmediate();
+    run.settle();
+  }
+  assert.deepEqual(
+    f.scopeStops(host).map(({ operation_id }) => operation_id),
+    [PAUSE.id, PAUSE.id, ""],
+  );
+  assert.equal(f.internals.scopeRequests.count(host.id), NO_ITEMS);
 });
 
 test("(security) a revoke during a guest run ends the run at the next granted act with scope_stop, no card and no request", async (t) => {
@@ -544,3 +612,46 @@ test("(invariant) a batch with two request_owner_act calls gives one scope_stop 
   ]);
   assert.equal(f.internals.scopeRequests.count(host.id), SINGLE);
 });
+
+test(
+  "(security) the guest scope_stop frame time is the same for an existing out-of-scope node and an absent node",
+  { timeout: FRAME_TEST_TIMEOUT_MS },
+  async (t) => {
+    const f = await fixture(t);
+    const host = f.host();
+    const created = f.invite(host);
+    const abort = new AbortController();
+    t.after(() => abort.abort());
+    const reader = f.internals
+      .feedOf(host)
+      .open({
+        inviteId: created.id,
+        expiresAt: Date.now() + FRAME_TEST_TIMEOUT_MS,
+        after: undefined,
+        signal: abort.signal,
+      })
+      .getReader();
+    const decoder = new TextDecoder();
+    const scopeStopDelay = async (nodeId: string) => {
+      const run = f.guestRun(host, created);
+      await sleep(PAIR * WORKBENCH_STREAM_TICK_MS + RAISE_SETTLE_MS);
+      await f.call(host, `call_${nodeId}`, pauseCall(nodeId));
+      await sleep(RAISE_SETTLE_MS);
+      const started = performance.now();
+      run.settle();
+      for (;;) {
+        const { value, done } = await reader.read();
+        assert.ok(!done && value);
+        if (decoder.decode(value).includes(SCOPE_STOP_KIND))
+          return performance.now() - started;
+      }
+    };
+    const absent = await scopeStopDelay(createIdentity("node"));
+    const existing = await scopeStopDelay(f.foreignNode());
+    assert.equal(f.internals.scopeRequests.count(host.id), SINGLE);
+    assert.ok(
+      Math.abs(existing - absent) < FRAME_SKEW_LIMIT_MS,
+      `${existing} against ${absent}`,
+    );
+  },
+);

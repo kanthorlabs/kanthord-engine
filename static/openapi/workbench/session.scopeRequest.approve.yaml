@@ -108,7 +108,6 @@ components:
             project_name:
               type: string
               minLength: 1
-              maxLength: 63
             expected:
               type: object
               propertyNames:

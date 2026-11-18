@@ -69,13 +69,13 @@ The run snapshot reads the running member. `pending_approval` carries `session_i
 
 `workbench.invite.create` takes the body `{ invitee_name, project_ids, granted_operations }`. `project_ids` names 1 to 50 existing projects, each once. The set never changes. Revoke the invite and create a new one to change it. `granted_operations` lists the project-scoped operations that the guest-started runs of the invite run with no card. The list is fixed at create. A refused or repeated id answers 400 `workbench.invite.grant_invalid`.
 
-`workbench.invite.list` answers `{ items, project_ids }`. Each item adds `projects`: `{ id, name }` of each project of the invite, with `name` `null` for an id with no project. `project_ids` holds the set of the live invites, or `null` when no invite is live.
+`workbench.invite.list` answers `{ items, project_ids, grantable }`. Each item adds `projects`: `{ id, name }` of each project of the invite, with `name` `null` for an id with no project. Each item adds `granted_operations`: `{ operation_id, guard_class }` of each id of the live grant. `project_ids` holds the set of the live invites, or `null` when no invite is live. `grantable` lists `{ operation_id, guard_class, description }` of each operation that the host agent of the conversation lets an invite grant.
 
-`workbench.guest.get` adds `projects` (the projects of the invite, as in `invite.list`) and `mention_names` (the display names that a guest can mention: the agents with no built-in tool).
+`workbench.guest.get` adds `projects` (the projects of the invite, as in `invite.list`), `granted_operations` (the live grant of the invite, as in `invite.list`) and `mention_names` (the display names that a guest can mention: the agents with no built-in tool).
 
 `workbench.guest.message` answers `{ kind: "note" }` for a message with no leading mention. It answers `{ kind: "run", agent_name, queued_message_id }` for a mention that starts or queues a run. `queued_message_id` is `null` when the run starts now.
 
-A run that a guest started reads and acts only on the projects of the invite. Its calls run under the read-only identity of the inviter. A call outside the projects answers 403 `gateway.scope.refused` or 404 `gateway.scope.not_found`. A foreign record and an absent record answer the same 404. The guard blocks a call of such a run before any card with one of these texts:
+A run that a guest started reads and acts only on the projects of the invite. Its reads run under the read-only identity of the inviter. A mutation runs under the human who approves it, or under a one-call delegate identity for a granted act. A call outside the projects answers 403 `gateway.scope.refused` or 404 `gateway.scope.not_found`. A foreign record and an absent record answer the same 404. The guard blocks a call of such a run before any card with one of these texts:
 
 - `workbench.guard.guest_scope: <operation_id> is not available in a run that a guest started.` The run called a `workbench.*` operation or `evidence_read`.
 - `workbench.guard.project_scope: The record is not available in this conversation.` The call names a record outside the projects of the invite, an absent record, or a global record.

@@ -24,7 +24,7 @@ import {
 import { temporary } from "../kernel/test-support.ts";
 import { background } from "../kernel/context.ts";
 import { missionOperations } from "../mission/contract.ts";
-import { projectOperations } from "../project/contract.ts";
+import { ProjectErrorCode, projectOperations } from "../project/contract.ts";
 import {
   ActionOutcome,
   AuthorKind,
@@ -178,6 +178,7 @@ async function fixture(t: TestContext, stateDirectory = temporary(t)) {
   const logged: { fields: Record<string, unknown>; message: string }[] = [];
   const behaviour = {
     projectName: PROJECT_NAME,
+    projectMissing: false,
     pause: (): Promise<
       Awaited<ReturnType<typeof completed>> | Awaited<ReturnType<typeof failed>>
     > => completed({}),
@@ -198,6 +199,8 @@ async function fixture(t: TestContext, stateDirectory = temporary(t)) {
     },
     invoke: (operation: Operation, input: unknown, options: ClientOptions) => {
       calls.push({ operation, input, options });
+      if (operation.id === projectOperations.get.id && behaviour.projectMissing)
+        return failed(HttpStatus.NotFound, ProjectErrorCode.ProjectNotFound);
       if (operation.id === projectOperations.get.id)
         return completed({
           id: P2,
@@ -363,6 +366,31 @@ test("(security) a typed name that differs by a space, the case or the id answer
     assert.equal(open?.state, ScopeRequestState.Open);
   }
   assert.deepEqual(actCalls(f.calls), []);
+});
+
+test("(invariant) an approve on a deleted project settles the request and answers 409 refused", async (t) => {
+  const f = await fixture(t);
+  const host = await f.host();
+  const request = await f.raise(host, f.invite(host));
+  f.behaviour.projectMissing = true;
+  await refusedWith(
+    f.approve(host, request.id, {
+      project_name: PROJECT_NAME,
+      expected: EXPECTED,
+    }),
+    HttpStatus.Conflict,
+    WorkbenchErrorCode.ScopeRequestRefused,
+  );
+  assert.equal(f.internals.scopeRequests.count(host.id), NO_ITEMS);
+  assert.deepEqual(actCalls(f.calls), []);
+  await refusedWith(
+    f.approve(host, request.id, {
+      project_name: PROJECT_NAME,
+      expected: EXPECTED,
+    }),
+    HttpStatus.NotFound,
+    WorkbenchErrorCode.ScopeRequestNotFound,
+  );
 });
 
 test("(security) a key set unequal to expected_keys answers 400 expected_invalid and leaves the request open", async (t) => {

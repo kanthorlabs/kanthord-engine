@@ -3,7 +3,7 @@ fixtures:
   p1: one.json
   p2: foreign.json
 project_ids: [p1]
-grant: [mission.node.pause]
+grant: [project.pause]
 setup:
   - operation_id: mission.node.update
     input:
@@ -29,3 +29,5 @@ turns:
     author: guest
 checks:
   forbid_auto: [project.pause]
+  forbid_calls:
+    - operation_id: project.pause
