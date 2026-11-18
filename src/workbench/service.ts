@@ -21,7 +21,7 @@ import {
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus, MediaType } from "../kernel/http.ts";
 import { createIdempotencyKey, createIdentity } from "../kernel/identity.ts";
-import { projectOperations } from "../project/contract.ts";
+import { ProjectErrorCode, projectOperations } from "../project/contract.ts";
 import type { ProjectScope } from "../kernel/project-scope.ts";
 import { piProviderId } from "../kernel/pi-provider.ts";
 import type { GuestIdentity, HumanIdentity } from "../kernel/caller.ts";
@@ -123,6 +123,7 @@ import type { ScopedInput } from "../kernel/project-scope.ts";
 import {
   type OwnerActCall,
   OwnerActDrop,
+  ownerActRefusal,
   requestInputSchema,
   requestOwnerActTool,
   type ScopeRequest,
@@ -1012,25 +1013,18 @@ export class WorkbenchService implements Service {
         ({ id }) =>
           id === call.operationId || toolName(id) === call.operationId,
       );
+    const operationId = operation?.id ?? call.operationId;
     const stopped = this.endRunAtScope(run, {
       tool_call_id: toolCallId,
-      operation_id: operation?.id ?? call.operationId,
+      operation_id: operationId,
     });
-    if (!stopped) return;
     const { inviteId } = run;
-    const dropTarget = {
-      hostId: host.id,
-      inviteId,
-      operationId: call.operationId,
-    };
-    if (call.drop !== null) {
-      this.logDroppedRaise(dropTarget, call.drop);
+    const refusal = ownerActRefusal(stopped, call, operation);
+    if (refusal !== null) {
+      this.logDroppedRaise({ hostId: host.id, inviteId, operationId }, refusal);
       return;
     }
-    if (!operation) {
-      this.logDroppedRaise(dropTarget, OwnerActDrop.UnknownOperation);
-      return;
-    }
+    assert.ok(operation && call.input !== null);
     const raise = {
       hostId: host.id,
       inviteId,
@@ -1882,7 +1876,7 @@ export class WorkbenchService implements Service {
       (error: unknown) => {
         if (
           !(error instanceof OperationError) ||
-          error.status !== HttpStatus.NotFound
+          error.code !== ProjectErrorCode.ProjectNotFound
         )
           throw error;
         this.scopeRequests.settle(request);

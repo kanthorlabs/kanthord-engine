@@ -181,6 +181,7 @@ async function fixture(t: TestContext, stateDirectory = temporary(t)) {
     projectName: PROJECT_NAME,
     projectMissing: false,
     projectStatus: null as number | null,
+    projectCode: "project.store.unavailable",
     pause: (): Promise<
       Awaited<ReturnType<typeof completed>> | Awaited<ReturnType<typeof failed>>
     > => completed({}),
@@ -205,7 +206,7 @@ async function fixture(t: TestContext, stateDirectory = temporary(t)) {
       if (operation.id === projectOperations.get.id && behaviour.projectMissing)
         return failed(HttpStatus.NotFound, ProjectErrorCode.ProjectNotFound);
       if (operation.id === projectOperations.get.id && behaviour.projectStatus)
-        return failed(behaviour.projectStatus, "project.store.unavailable");
+        return failed(behaviour.projectStatus, behaviour.projectCode);
       if (operation.id === projectOperations.get.id)
         return completed({
           id: P2,
@@ -397,6 +398,26 @@ test("(invariant) an approve on a deleted project settles the request and answer
     HttpStatus.NotFound,
     WorkbenchErrorCode.ScopeRequestNotFound,
   );
+});
+
+test("(invariant) an approve with a 404 project read of another code rethrows it and keeps the request open", async (t) => {
+  const f = await fixture(t);
+  const host = await f.host();
+  const request = await f.raise(host, f.invite(host));
+  f.behaviour.projectStatus = HttpStatus.NotFound;
+  f.behaviour.projectCode = "project.store.missing";
+  await refusedWith(
+    f.approve(host, request.id, {
+      project_name: PROJECT_NAME,
+      expected: EXPECTED,
+    }),
+    HttpStatus.NotFound,
+    "project.store.missing",
+  );
+  const [open] = f.internals.scopeRequests.open(host.id);
+  assert.equal(open?.id, request.id);
+  assert.equal(open?.state, ScopeRequestState.Open);
+  assert.deepEqual(actCalls(f.calls), []);
 });
 
 test("(invariant) an approve with a 503 project read rethrows it and keeps the request open", async (t) => {

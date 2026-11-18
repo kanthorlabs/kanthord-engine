@@ -248,13 +248,15 @@ export const requestOwnerActParams = z.strictObject({
 
 const REQUEST_OWNER_ACT_PARAMETERS = Type.Object(
   {
-    operation_id: Type.String(),
+    operation_id: Type.String({
+      description: "The id of the act, for example mission.node.pause.",
+    }),
     input: Type.Object(
       {},
       {
         additionalProperties: true,
         description:
-          "The params, query and body of the act, with every field that the act input requires, for example body.reason. Omit every key that starts with expected_ and the key blocked_attempt. The owner supplies them.",
+          "The params, query and body of the act, with every field that the act input requires, for example body.reason in the words of the guest. Leave out every key that starts with expected_ and the key blocked_attempt, even when the schema of the act lists them as required. The owner supplies them.",
       },
     ),
   },
@@ -269,6 +271,7 @@ export const OwnerActDrop = {
   InputParseFailure: "input_parse_failure",
   ConcurrencyKey: "concurrency_key_in_input",
   NoRaise: "no_raise",
+  RunStopped: "run_stopped",
 } as const;
 
 export type OwnerActDrop = (typeof OwnerActDrop)[keyof typeof OwnerActDrop];
@@ -284,6 +287,16 @@ export type OwnerActCall =
       readonly input: null;
       readonly drop: OwnerActDrop;
     };
+
+export function ownerActRefusal(
+  stopped: boolean,
+  call: OwnerActCall,
+  operation: Operation | undefined,
+): OwnerActDrop | null {
+  if (!stopped) return OwnerActDrop.RunStopped;
+  if (call.drop !== null) return call.drop;
+  return operation ? null : OwnerActDrop.UnknownOperation;
+}
 
 function holdsConcurrencyKey(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(holdsConcurrencyKey);

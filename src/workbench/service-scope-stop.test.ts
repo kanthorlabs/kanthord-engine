@@ -33,6 +33,7 @@ import {
   type ScopeRequests,
 } from "./scope-requests.ts";
 import { recordOf } from "./sessions.ts";
+import { toolName } from "./tools.ts";
 import { type Dependencies, WorkbenchService } from "./service.ts";
 
 const OWNER = "kanthord";
@@ -721,5 +722,41 @@ test("(invariant) scope_stop holds the operation id when the call names the tool
   assert.deepEqual(
     f.scopeStops(host).map(({ operation_id }) => operation_id),
     [PAUSE.id, PAUSE.id, "x.y"],
+  );
+});
+
+test("(invariant) a second request_owner_act call in a stopped run writes one warn log with the reason run_stopped", async (t) => {
+  const f = await fixture(t);
+  const host = f.host();
+  const created = f.invite(host);
+  const run = f.guestRun(host, created);
+  await f.call(host, "call_first", pauseCall(f.foreignNode()));
+  await setImmediate();
+  f.warned.length = NO_ITEMS;
+  await f.call(host, "call_second", pauseCall(f.foreignNode()));
+  run.settle();
+  assert.deepEqual(
+    f.warned.map(({ fields, message }) => [
+      message,
+      fields.reason,
+      fields.operation_id,
+    ]),
+    [["workbench.scope_request.dropped", "run_stopped", PAUSE.id]],
+  );
+});
+
+test("(invariant) an early drop logs the operation id when the call names the tool name", async (t) => {
+  const f = await fixture(t);
+  const host = f.host();
+  const created = f.invite(host);
+  const run = f.guestRun(host, created);
+  await f.call(host, "call_tool", {
+    operation_id: toolName(PAUSE.id),
+    input: "text",
+  });
+  run.settle();
+  assert.deepEqual(
+    f.warned.map(({ fields }) => [fields.reason, fields.operation_id]),
+    [["input_parse_failure", PAUSE.id]],
   );
 });
