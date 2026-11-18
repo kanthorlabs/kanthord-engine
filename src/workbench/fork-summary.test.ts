@@ -70,3 +70,8 @@ test("the summarizer prompt holds the owner rule", () => {
     ),
   );
 });
+
+test("the summarizer prompt uses the marked guest form", () => {
+  assert.ok(FORK_SUMMARY_PROMPT.includes('Example: "Anna (guest) wrote: …".'));
+  assert.ok(!FORK_SUMMARY_PROMPT.includes("wrote that"));
+});
