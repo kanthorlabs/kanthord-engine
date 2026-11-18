@@ -1260,6 +1260,7 @@ export class WorkbenchService implements Service {
       options.signal,
     );
     if (!decision.allowed) return decision;
+    session.approvers.delete(call.toolCallId);
     if (!shared && this.dependencies.invites.isShared(host.id))
       return { allowed: false, reason: EVIDENCE_SHARED_TEXT, terminate: false };
     host.evidenceGrants.add(facts.node_id);
