@@ -218,6 +218,7 @@ async function inviteGuest(
       reader: testReadOnlyIdentity(identity.accountId, {
         inviteId: created.id,
         projectIds,
+        guestName: GUEST_NAME,
       }),
       jti: "workbench-scope-guest",
     }),

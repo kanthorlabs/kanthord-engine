@@ -17,6 +17,8 @@ import type { Registration } from "../worker/contract.ts";
 import {
   Authentication,
   type AuthenticationLookups,
+  type GrantClaim,
+  type GrantedInvite,
 } from "./auth/authentication.ts";
 import { type GatewayConfig, gatewayConfigSchema } from "./config.ts";
 import type { InventoryCollector } from "./contract.ts";
@@ -47,10 +49,17 @@ export function configuration(value: unknown) {
 export function fakeLookups() {
   const registrations = new Map<string, Registration>();
   const invites = new Map<string, ResolvedInvite>();
+  const claims: GrantClaim[] = [];
   const workbench = {
     invites,
+    claims,
+    claimAnswer: null as GrantedInvite | null,
     resolveInvite: (inviteId: string): ResolvedInvite | null =>
       invites.get(inviteId) ?? null,
+    claimGrant(claim: GrantClaim): GrantedInvite | null {
+      claims.push(claim);
+      return workbench.claimAnswer;
+    },
   };
   const worker = {
     registrations,

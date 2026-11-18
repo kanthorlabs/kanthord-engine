@@ -315,6 +315,7 @@ export interface ClientOptions {
   context?: Context;
   traceparent?: string;
   tracestate?: string;
+  grant?: { sessionId: string; toolCallId: string };
 }
 export type ServiceClient<T extends Record<string, Operation>> = {
   [K in keyof T]: (

@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { test, type TestContext } from "node:test";
 import type { Logger } from "pino";
 import { z } from "zod";
-import { IdentityKind } from "../kernel/caller.ts";
+import { type CallerIdentity, IdentityKind } from "../kernel/caller.ts";
 import { CancellationContext, type Context } from "../kernel/context.ts";
 import { MASTER_KEY_BYTES } from "../config/global.ts";
 import { HttpStatus } from "../kernel/http.ts";
@@ -34,7 +34,7 @@ import {
   ProjectScope,
   ProjectScopeRule,
 } from "../kernel/project-scope.ts";
-import { fakeLookups } from "./test-support.ts";
+import { fakeLookups, gatewayFixture } from "./test-support.ts";
 import type { ExecutionProofRow } from "../kernel/operation.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
 
@@ -658,6 +658,7 @@ test("the idempotency caller key of a guest mutation is guest:<guest_id>", async
           project_ids: [],
           granted_operations: [],
         }),
+        claimGrant: () => null,
       },
     },
   });
@@ -778,7 +779,11 @@ async function scopeFixture(
     handlerCalls,
     errors,
     logger,
-    reader: testReadOnlyIdentity("ulrich", { inviteId, projectIds }),
+    reader: testReadOnlyIdentity("ulrich", {
+      inviteId,
+      projectIds,
+      guestName: "Mira",
+    }),
     setAnswer: (value: unknown) => {
       answer = value;
     },
@@ -908,4 +913,188 @@ test("security: with no projectScope in createInvocation, a scoped read answers 
   assert.equal(response.status, HttpStatus.Forbidden);
   assert.equal(errorCodeOf(response), SCOPE_REFUSED);
   assert.deepEqual(f.handlerCalls, []);
+});
+
+const GRANT_REFUSED = "gateway.grant.refused";
+const INVITER = "ulrich";
+const TOOL_CALL = "tool-call-1";
+
+function grantOf(sessionId = createIdentity("workbench_session")) {
+  return { sessionId, toolCallId: TOOL_CALL };
+}
+
+function grantedCall(
+  f: Awaited<ReturnType<typeof scopeFixture>>,
+  nodeId: string,
+  options: { identity?: CallerIdentity; grant?: ReturnType<typeof grantOf> },
+) {
+  return f.invocation.invoke(
+    scopedMutation.id,
+    { params: { id: nodeId }, query: {}, body: null },
+    {
+      identity: options.identity ?? f.reader,
+      grant: options.grant ?? grantOf(),
+      idempotencyKey: createIdempotencyKey(),
+    },
+  );
+}
+
+test("(security) a read-only identity with grant and a claim that answers null gets 401 gateway.grant.refused", async (t) => {
+  const f = await scopeFixture(t);
+  const reserve = t.mock.method(f.invocation.idempotency, "reserve");
+  const response = await grantedCall(f, createIdentity("node"), {});
+  assert.equal(response.status, HttpStatus.Unauthorized);
+  assert.equal(errorCodeOf(response), GRANT_REFUSED);
+  assert.equal(f.lookups.workbench.claims.length, ONE_RESERVE_CALL);
+  assert.deepEqual(f.handlerCalls, []);
+  assert.equal(reserve.mock.callCount(), NO_RESERVE_CALLS);
+});
+
+test("(security) a claim that answers another invitedBy gives 401 gateway.grant.refused", async (t) => {
+  const f = await scopeFixture(t);
+  f.lookups.workbench.claimAnswer = {
+    invitedBy: "mallory",
+    projectIds: [f.projectId],
+  };
+  const response = await grantedCall(f, createIdentity("node"), {});
+  assert.equal(response.status, HttpStatus.Unauthorized);
+  assert.equal(errorCodeOf(response), GRANT_REFUSED);
+  assert.deepEqual(f.handlerCalls, []);
+});
+
+test("(security) grant with a plain human identity and grant on a read answer 401 gateway.grant.refused", async (t) => {
+  const f = await scopeFixture(t);
+  f.lookups.workbench.claimAnswer = {
+    invitedBy: INVITER,
+    projectIds: [f.projectId],
+  };
+  const plain = await grantedCall(f, createIdentity("node"), {
+    identity: testHumanIdentity(INVITER, "Ulrich", "plain"),
+  });
+  assert.equal(plain.status, HttpStatus.Unauthorized);
+  assert.equal(errorCodeOf(plain), GRANT_REFUSED);
+  const read = await f.invocation.invoke(
+    scopedRead.id,
+    { params: { id: createIdentity("node") }, query: {}, body: null },
+    { identity: f.reader, grant: grantOf() },
+  );
+  assert.equal(read.status, HttpStatus.Unauthorized);
+  assert.equal(errorCodeOf(read), GRANT_REFUSED);
+  assert.deepEqual(f.lookups.workbench.claims, []);
+  assert.deepEqual(f.handlerCalls, []);
+});
+
+test("a granted mutation inside the scope claims the grant once and runs the handler", async (t) => {
+  const f = await scopeFixture(t);
+  const nodeId = createIdentity("node");
+  f.lookup.owners.set(nodeId, f.projectId);
+  f.lookups.workbench.claimAnswer = {
+    invitedBy: INVITER,
+    projectIds: [f.projectId],
+  };
+  const response = await grantedCall(f, nodeId, {});
+  assert.equal(response.status, HttpStatus.OK);
+  assert.equal(f.handlerCalls.length, ONE_RESERVE_CALL);
+  const [claim] = f.lookups.workbench.claims;
+  assert.equal(claim?.inviteId, f.inviteId);
+  assert.equal(claim?.toolCallId, TOOL_CALL);
+  assert.equal(claim?.operationId, scopedMutation.id);
+});
+
+test("(security) a delegate identity carries the scope: a granted call on a node of another project answers 404 after the claim", async (t) => {
+  const f = await scopeFixture(t);
+  const nodeId = createIdentity("node");
+  f.lookup.owners.set(nodeId, createIdentity("project"));
+  f.lookups.workbench.claimAnswer = {
+    invitedBy: INVITER,
+    projectIds: [f.projectId],
+  };
+  const reserve = t.mock.method(f.invocation.idempotency, "reserve");
+  const response = await grantedCall(f, nodeId, {});
+  assert.equal(response.status, HttpStatus.NotFound);
+  assert.equal(errorCodeOf(response), SCOPE_NOT_FOUND);
+  assert.equal(f.lookups.workbench.claims.length, ONE_RESERVE_CALL);
+  assert.deepEqual(f.handlerCalls, []);
+  assert.equal(reserve.mock.callCount(), NO_RESERVE_CALLS);
+});
+
+async function guestMutationFixture(t: TestContext) {
+  const registry = new OperationRegistry();
+  const handlerCalls: unknown[] = [];
+  const route = {
+    ...operation,
+    id: "test.guest.route",
+    method: "POST",
+    path: "/api/test/guest-route",
+    mutation: true,
+    body: true,
+    input: z.strictObject({
+      params: z.strictObject({}),
+      query: z.strictObject({}),
+      body: z.unknown(),
+    }),
+    output: z.unknown(),
+  } as const;
+  registry.register(route, (handlerInput) => {
+    handlerCalls.push(handlerInput);
+    return COMMITTED_VALUE;
+  });
+  const lookups = fakeLookups();
+  const inviteId = createIdentity("workbench_invite");
+  const expiresAt = Date.now() + GUEST_LIFETIME_MS;
+  lookups.workbench.invites.set(inviteId, {
+    session_id: createIdentity("workbench_session"),
+    invited_by: INVITER,
+    expires_at: expiresAt,
+    project_ids: [],
+    granted_operations: [],
+  });
+  lookups.workbench.claimAnswer = { invitedBy: INVITER, projectIds: [] };
+  const gateway = await gatewayFixture(t, { registry, lookups });
+  const { token } = await generateGuestJWT(
+    gateway.config.master_key,
+    gateway.config.gateway.auth.version,
+    {
+      guestId: createIdentity("workbench_guest"),
+      name: "Mira",
+      inviteId,
+      expiresAt,
+    },
+  );
+  const post = (body: unknown) =>
+    gateway.request(route.path, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        "idempotency-key": createIdempotencyKey(),
+      },
+      body: JSON.stringify(body),
+    });
+  return { post, handlerCalls, lookups };
+}
+
+test("(security) a guest JWT on a mutation route answers 401 gateway.authentication.unauthorized", async (t) => {
+  const f = await guestMutationFixture(t);
+  const response = await f.post({ value: 1 });
+  assert.equal(response.status, HttpStatus.Unauthorized);
+  assert.equal(
+    ((await response.json()) as { error: { code: string } }).error.code,
+    UNAUTHORIZED,
+  );
+  assert.deepEqual(f.handlerCalls, []);
+});
+
+test("(security) a guest JWT on a mutation route with a body field grant answers 401 gateway.authentication.unauthorized and claims nothing", async (t) => {
+  const f = await guestMutationFixture(t);
+  const response = await f.post({
+    grant: { sessionId: createIdentity("workbench_session"), toolCallId: "x" },
+  });
+  assert.equal(response.status, HttpStatus.Unauthorized);
+  assert.equal(
+    ((await response.json()) as { error: { code: string } }).error.code,
+    UNAUTHORIZED,
+  );
+  assert.deepEqual(f.handlerCalls, []);
+  assert.deepEqual(f.lookups.workbench.claims, []);
 });

@@ -4850,6 +4850,7 @@ test(
       reader: testReadOnlyIdentity(identity.accountId, {
         inviteId: invite.id,
         projectIds: [first.projectId],
+        guestName: GUEST_NAME,
       }),
       jti: "resolver-test-22",
     });

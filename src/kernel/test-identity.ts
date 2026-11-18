@@ -1,4 +1,6 @@
 import {
+  type DelegateIdentityOptions,
+  mintDelegateIdentity,
   mintGuestIdentity,
   mintHumanIdentity,
   mintMachineIdentity,
@@ -28,6 +30,13 @@ export function testReadOnlyIdentity(
   grant: ReadOnlyGrant,
 ): HumanIdentity {
   return mintReadOnlyIdentity(accountId, grant);
+}
+
+export function testDelegateIdentity(
+  accountId: string,
+  options: DelegateIdentityOptions,
+): HumanIdentity {
+  return mintDelegateIdentity(accountId, options);
 }
 
 export function testMachineIdentity(

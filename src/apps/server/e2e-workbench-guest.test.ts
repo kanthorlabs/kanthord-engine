@@ -537,6 +537,7 @@ test(
       reader: testReadOnlyIdentity(identity.accountId, {
         inviteId: created.id,
         projectIds: [],
+        guestName: GUEST_NAME,
       }),
       jti: "race",
     });

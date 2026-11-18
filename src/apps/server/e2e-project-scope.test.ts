@@ -152,7 +152,11 @@ async function scopeFixture(t: TestContext) {
         JSON.stringify(projectIds),
       ),
   );
-  const reader = testReadOnlyIdentity(ACCOUNT, { inviteId, projectIds });
+  const reader = testReadOnlyIdentity(ACCOUNT, {
+    inviteId,
+    projectIds,
+    guestName: GUEST_NAME,
+  });
   const scoped = (operation: Operation, input: unknown) =>
     call(operation, input, { identity: reader });
   return { call, scoped, first, second };
@@ -430,6 +434,7 @@ test(
       reader: testReadOnlyIdentity(ACCOUNT, {
         inviteId: invite.id,
         projectIds,
+        guestName: GUEST_NAME,
       }),
       jti: "guest",
     });

@@ -513,6 +513,7 @@ test("(security) resolver test 16: a call whose params change to a target of ano
       testReadOnlyIdentity("account", {
         inviteId: createIdentity("workbench_invite"),
         projectIds: [inScope],
+        guestName: "Mira",
       }),
     scopeOf: () => new Set([inScope]),
     projectScope: new ProjectScope({

@@ -26,6 +26,7 @@ import {
   generateMachineJWT,
 } from "./jwt.ts";
 import {
+  isDelegateIdentity,
   isGuestIdentity,
   isHumanIdentity,
   isMachineIdentity,
@@ -803,6 +804,7 @@ test("a guest identity from the factory passes isGuestIdentity and fails isHuman
     reader: testReadOnlyIdentity(INVITER, {
       inviteId: `workbench_invite_${ulid()}`,
       projectIds: [],
+      guestName: GUEST_NAME,
     }),
     jti: ulid(),
   });
@@ -855,6 +857,32 @@ test("(security) after a revoke, recheck of the read-only identity answers 401",
   g.machines.workbench.invites.delete(g.inviteId);
   await assert.rejects(
     g.fixture.authentication.recheck(identity.reader, background),
+    (error: unknown) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.Unauthorized,
+  );
+});
+
+test("(security) recheck of a delegate identity answers 401", async (t) => {
+  const g = await guestFixture(t);
+  const identity = await g.fixture.authentication.authenticate(
+    `Bearer ${g.issued.token}`,
+  );
+  assert.ok(isGuestIdentity(identity));
+  g.machines.workbench.claimAnswer = {
+    invitedBy: INVITER,
+    projectIds: g.projectIds,
+  };
+  const delegate = g.fixture.authentication.delegateOf(
+    identity.reader,
+    { sessionId: g.sessionId, toolCallId: "call-1" },
+    { operationId: "mission.node.pause", input: {} },
+  );
+  assert.ok(isDelegateIdentity(delegate));
+  assert.equal(delegate.accountId, INVITER);
+  assert.deepEqual([...projectScopeOf(delegate)!], g.projectIds);
+  await assert.rejects(
+    g.fixture.authentication.recheck(delegate, background),
     (error: unknown) =>
       error instanceof OperationError &&
       error.status === HttpStatus.Unauthorized,

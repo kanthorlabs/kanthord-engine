@@ -9,6 +9,7 @@ import {
   type GuestIdentity,
   type HumanIdentity,
   IdentityKind,
+  isDelegateIdentity,
   isGuestIdentity,
   isHumanIdentity,
   isMachineIdentity,
@@ -17,11 +18,13 @@ import {
   type MachineIdentity,
   MAX_DISPLAY_NAME_LENGTH,
   MAX_HUMAN_USERNAME_LENGTH,
+  readOnlyGuestNameOf,
   readOnlyInviteOf,
   WORKER_INSTANCE_PREFIX,
   type WorkerIdentity,
 } from "../../kernel/caller.ts";
 import {
+  mintDelegateIdentity,
   mintGuestIdentity,
   mintHumanIdentity,
   mintMachineIdentity,
@@ -40,6 +43,7 @@ import {
 } from "../../worker/contract.ts";
 import { signingKey, validText } from "./jwt.ts";
 import {
+  grantRefused,
   JwtCause,
   jwtRefused,
   unauthorized,
@@ -90,12 +94,32 @@ interface GuestCredentials {
   inviteId: string;
   jti: string;
 }
+export interface GrantClaim {
+  inviteId: string;
+  sessionId: string;
+  toolCallId: string;
+  operationId: string;
+  input: unknown;
+}
+export interface GrantTicket {
+  sessionId: string;
+  toolCallId: string;
+}
+export interface GrantedCall {
+  operationId: string;
+  input: unknown;
+}
+export interface GrantedInvite {
+  invitedBy: string;
+  projectIds: readonly string[];
+}
 export interface AuthenticationLookups {
   project: Pick<ProjectBindings, "resolveWorkerGroup" | "workerGroupEnded">;
   worker: Pick<WorkerRegistrations, "findByClient" | "heartbeat">;
   instances?: WorkerInstanceLookups;
   workbench?: {
     resolveInvite(inviteId: string): ResolvedInvite | null;
+    claimGrant(claim: GrantClaim): GrantedInvite | null;
   };
 }
 
@@ -362,10 +386,15 @@ export class Authentication {
     return invite;
   }
 
-  private readerOf(inviteId: string, invite: ResolvedInvite): HumanIdentity {
+  private readerOf(
+    inviteId: string,
+    invite: ResolvedInvite,
+    guestName: string,
+  ): HumanIdentity {
     return mintReadOnlyIdentity(invite.invited_by, {
       inviteId,
       projectIds: invite.project_ids,
+      guestName,
     });
   }
 
@@ -375,15 +404,45 @@ export class Authentication {
       ...guest,
       sessionId: invite.session_id,
       invitedBy: invite.invited_by,
-      reader: this.readerOf(guest.inviteId, invite),
+      reader: this.readerOf(guest.inviteId, invite, guest.name),
     });
   }
 
   private recheckHuman(identity: HumanIdentity): HumanIdentity {
+    if (isDelegateIdentity(identity)) throw unauthorized();
     const readerInvite = readOnlyInviteOf(identity);
-    if (readerInvite !== null)
-      return this.readerOf(readerInvite, this.liveInvite(readerInvite));
+    const guestName = readOnlyGuestNameOf(identity);
+    if (readerInvite !== null && guestName !== null)
+      return this.readerOf(
+        readerInvite,
+        this.liveInvite(readerInvite),
+        guestName,
+      );
     return mintHumanIdentity(identity.accountId, identity.name, identity.jti);
+  }
+
+  delegateOf(
+    reader: HumanIdentity,
+    grant: GrantTicket,
+    call: GrantedCall,
+  ): HumanIdentity {
+    const inviteId = readOnlyInviteOf(reader);
+    const guestName = readOnlyGuestNameOf(reader);
+    if (inviteId === null || guestName === null) throw grantRefused();
+    const claimed = this.machines?.workbench?.claimGrant({
+      inviteId,
+      sessionId: grant.sessionId,
+      toolCallId: grant.toolCallId,
+      operationId: call.operationId,
+      input: call.input,
+    });
+    if (!claimed || claimed.invitedBy !== reader.accountId)
+      throw grantRefused();
+    return mintDelegateIdentity(claimed.invitedBy, {
+      guestName,
+      toolCallId: grant.toolCallId,
+      projectIds: claimed.projectIds,
+    });
   }
 
   async recheck(

@@ -34,6 +34,25 @@ export function mintHumanIdentity(
 export interface ReadOnlyGrant {
   inviteId: string;
   projectIds: readonly string[];
+  guestName: string;
+}
+
+export interface DelegateIdentityOptions {
+  guestName: string;
+  toolCallId: string;
+  projectIds: readonly string[];
+}
+
+const DELEGATE_SUFFIX = " (guest)";
+const DELEGATE_JTI_PREFIX = "grant:";
+
+function cutAtCodePoint(text: string, limit: number): string {
+  let cut = "";
+  for (const codePoint of text) {
+    if (cut.length + codePoint.length > limit) break;
+    cut += codePoint;
+  }
+  return cut;
 }
 
 export function mintReadOnlyIdentity(
@@ -42,6 +61,7 @@ export function mintReadOnlyIdentity(
 ): HumanIdentity {
   assert.ok(accountId.trim() && accountId.length <= MAX_HUMAN_USERNAME_LENGTH);
   assert.ok(grant.inviteId.trim());
+  assert.ok(grant.guestName.trim());
   const value = Object.freeze({
     kind: IdentityKind.Human,
     accountId,
@@ -50,8 +70,31 @@ export function mintReadOnlyIdentity(
   });
   callerProvenance.reader(value, {
     inviteId: grant.inviteId,
+    guestName: grant.guestName,
     projects: Object.freeze(new Set(grant.projectIds)),
   });
+  return value;
+}
+
+export function mintDelegateIdentity(
+  accountId: string,
+  options: DelegateIdentityOptions,
+): HumanIdentity {
+  assert.ok(accountId.trim() && accountId.length <= MAX_HUMAN_USERNAME_LENGTH);
+  assert.ok(options.guestName.trim());
+  assert.ok(options.toolCallId.trim());
+  const name = `${cutAtCodePoint(
+    options.guestName,
+    MAX_DISPLAY_NAME_LENGTH - DELEGATE_SUFFIX.length,
+  )}${DELEGATE_SUFFIX}`;
+  assert.ok(name.trim() && name.length <= MAX_DISPLAY_NAME_LENGTH);
+  const value = Object.freeze({
+    kind: IdentityKind.Human,
+    accountId,
+    name,
+    jti: `${DELEGATE_JTI_PREFIX}${options.toolCallId}`,
+  });
+  callerProvenance.delegate(value, Object.freeze(new Set(options.projectIds)));
   return value;
 }
 

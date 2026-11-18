@@ -43,6 +43,12 @@ export const scopeRefused = () =>
     "gateway.scope.refused",
     "This operation is not available in a run that a guest started.",
   );
+export const grantRefused = () =>
+  new GatewayError(
+    HttpStatus.Unauthorized,
+    "gateway.grant.refused",
+    "The grant does not cover this call.",
+  );
 export const scopeNotFound = () =>
   new GatewayError(
     HttpStatus.NotFound,
