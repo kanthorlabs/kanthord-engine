@@ -112,6 +112,7 @@ import {
 } from "./contract.ts";
 import { missionOperations } from "../mission/contract.ts";
 import {
+  authorMark,
   type DeclarationOf,
   forkMaterial,
   guestMentionNames,
@@ -1831,8 +1832,8 @@ export class WorkbenchService implements Service {
       await this.openAgent(member, built, item.context);
     }
     assert.ok(member.agent);
-    await this.relay(host, member, item);
     this.appendAuthor(member, item);
+    await this.relay(host, member, item);
     void member.agent
       .prompt(item.text, { expandPromptTemplates: false })
       .catch((error: unknown) => {
@@ -1843,11 +1844,11 @@ export class WorkbenchService implements Service {
 
   private async launchPlan(launch: PlanLaunch): Promise<void> {
     const { host, member, run, item } = launch;
+    this.appendAuthor(member, item);
     const relay = await this.relayContent(host, member, item);
     const templates = await this.dependencies.agentPrompt.templates(
       item.context,
     );
-    this.appendAuthor(member, item);
     void runPlanPipeline({
       participant: member.manager,
       request: item.text,
@@ -1878,7 +1879,12 @@ export class WorkbenchService implements Service {
 
   runScope(run: Run): readonly string[] | null {
     if (run.inviteId === null) return null;
-    return this.dependencies.invites.resolve(run.inviteId)?.project_ids ?? [];
+    return this.inviteProjects(run.inviteId);
+  }
+
+  private inviteProjects(inviteId: string | null): readonly string[] {
+    if (inviteId === null) return [];
+    return this.dependencies.invites.resolve(inviteId)?.project_ids ?? [];
   }
 
   private phaseEnded(run: Run): boolean {
@@ -1964,6 +1970,7 @@ export class WorkbenchService implements Service {
       members: host.members.map((other) => this.relayMember(other)),
       startEntry: lastTurnEntry(self.entries),
       authorName: item.requester.name,
+      projects: this.projectsOf(this.inviteProjects(item.invite_id)),
       templates: await this.dependencies.agentPrompt.templates(item.context),
     });
   }
@@ -2503,7 +2510,9 @@ export class WorkbenchService implements Service {
     const material = forkMaterial({
       members,
       authorName: humanOf(caller).name,
-      inProgress: this.runActive(source) ? source.run!.request : null,
+      inProgress: this.runActive(source)
+        ? this.inProgressOf(source.run!)
+        : null,
     });
     const title = forkSourceTitle(
       this.entries(source.manager),
@@ -2715,6 +2724,12 @@ export class WorkbenchService implements Service {
     );
     host.evidenceGrants.clear();
     return created;
+  }
+
+  private inProgressOf(run: Run): string {
+    return run.origin?.kind === AuthorKind.Guest
+      ? `${authorMark(run.origin)}: ${run.request}`
+      : run.request;
   }
 
   private projectsOf(ids: readonly string[]) {

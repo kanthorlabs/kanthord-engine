@@ -14,6 +14,8 @@ import {
   SHIPPED_TEMPLATES,
 } from "../agent/prompt-templates.ts";
 import {
+  type Author,
+  AuthorKind,
   FORK_SOURCE_MAX_BYTES,
   type MemberEntry,
   type PlanPhase,
@@ -45,6 +47,9 @@ const FINAL_STOP_REASON = "stop";
 const NO_CHARACTERS = 0;
 const HOST_INDEX = 0;
 const NOT_FOUND = -1;
+const LAST_ENTRY = 1;
+const PROJECT_SEPARATOR = ", ";
+const SHARED_PROJECTS_PREFIX = "Projects shared in this conversation: ";
 const FIRST_AFTER = 1;
 const PAIR_SEPARATOR = ",";
 const PAIR_DELIMITER = ":";
@@ -227,10 +232,16 @@ export interface RelayMember {
   entries: readonly SessionEntry[];
 }
 
+export interface SharedProject {
+  id: string;
+  name: string | null;
+}
+
 export type RelayInput = {
   members: readonly RelayMember[];
   startEntry: string | null;
   authorName: string;
+  projects?: readonly SharedProject[];
   templates?: PromptTemplates;
 };
 
@@ -248,24 +259,91 @@ function textOf(content: unknown): string {
     .join("");
 }
 
+interface ItemLabels {
+  authorName: string;
+  guestMark: string | undefined;
+}
+
+function answerLine(
+  author: RelayMember,
+  text: string,
+  guestMark: string | undefined,
+): string {
+  return guestMark === undefined
+    ? `${author.displayName}: ${text}`
+    : `${guestMark}: ${author.displayName} answered: ${text}`;
+}
+
 function relayItemOf(
   author: RelayMember,
   entry: SessionEntry,
-  authorName: string,
+  labels: ItemLabels,
 ): string | null {
   const plan = planOf(entry);
   if (plan !== null)
     return plan.text.length === NO_CHARACTERS
       ? null
-      : `${author.displayName}: ${plan.text}`;
+      : answerLine(author, plan.text, labels.guestMark);
   const message = entry.message as
     { role?: unknown; content?: unknown } | undefined;
   if (entry.type !== MESSAGE_ENTRY) return null;
   const text = textOf(message?.content);
   if (text.length === NO_CHARACTERS) return null;
   if (message?.role === USER_ROLE)
-    return `${authorName} to @${author.displayName}: ${text}`;
-  return isFinalAnswer(entry) ? `${author.displayName}: ${text}` : null;
+    return labels.guestMark === undefined
+      ? `${labels.authorName} to @${author.displayName}: ${text}`
+      : `${labels.guestMark}: ${text}`;
+  return isFinalAnswer(entry)
+    ? answerLine(author, text, labels.guestMark)
+    : null;
+}
+
+export function authorMark(author: Author): string {
+  const name = author.name.replace(WHITESPACE_RUN, SINGLE_SPACE);
+  return `${name} (${author.kind})`;
+}
+
+function isUserMessage(entry: SessionEntry): boolean {
+  const message = entry.message as { role?: unknown } | undefined;
+  return entry.type === MESSAGE_ENTRY && message?.role === USER_ROLE;
+}
+
+function guestRunMarks(entries: readonly SessionEntry[]): Map<string, string> {
+  const marks = new Map<string, string>();
+  let pending: Author | null = null;
+  let run: string | null = null;
+  for (const entry of entries) {
+    const record = recordOf(entry);
+    if (record?.kind === WorkbenchRecordKind.Author) {
+      pending = record.author;
+      continue;
+    }
+    const asked = isUserMessage(entry);
+    if (asked) {
+      run = pending === null ? null : authorMark(pending);
+      pending = null;
+    }
+    if (run !== null && (asked || isFinalAnswer(entry)))
+      marks.set(entry.id, run);
+  }
+  return marks;
+}
+
+function starterOf(member: RelayMember | undefined): Author | null {
+  const record = member?.entries.length
+    ? recordOf(member.entries[member.entries.length - LAST_ENTRY]!)
+    : null;
+  return record?.kind === WorkbenchRecordKind.Author &&
+    record.author.kind === AuthorKind.Guest
+    ? record.author
+    : null;
+}
+
+function projectsLine(projects: readonly SharedProject[]): string {
+  const shared = projects.map(({ id, name }) =>
+    name === null ? id : `${id} (${name})`,
+  );
+  return `${SHARED_PROJECTS_PREFIX}${shared.join(PROJECT_SEPARATOR)}`;
 }
 
 interface RelayItems {
@@ -301,14 +379,14 @@ interface LineContext {
 
 interface RelayContext extends LineContext {
   own: boolean;
+  marks: ReadonlyMap<string, string>;
 }
 
 function noteLineOf(entry: SessionEntry): string | null {
   const record = recordOf(entry);
   if (record?.kind !== WorkbenchRecordKind.Note) return null;
-  const name = record.author.name.replace(WHITESPACE_RUN, SINGLE_SPACE);
   const text = record.text.replace(LINE_BREAK, SINGLE_SPACE);
-  return `${name} (${record.author.kind}): ${text}`;
+  return `${authorMark(record.author)}: ${text}`;
 }
 
 function relayLineOf(
@@ -321,7 +399,10 @@ function relayLineOf(
   if (context.own) return null;
   const summary = summaryOfEntry(entry, context.forkEntry);
   if (summary !== null) return { summary: true, text: summary };
-  const text = relayItemOf(author, entry, context.authorName);
+  const text = relayItemOf(author, entry, {
+    authorName: context.authorName,
+    guestMark: isUserMessage(entry) ? context.marks.get(entry.id) : undefined,
+  });
   return text === null ? null : { summary: false, text };
 }
 
@@ -342,10 +423,11 @@ function relayItems(member: RelayMember, input: RelayInput): RelayItems {
   for (const author of input.members) {
     const own = author.id === member.id;
     const opening = openingIds(author.entries);
+    const marks = guestRunMarks(author.entries);
     for (const entry of author.entries) {
       const at = Date.parse(entry.timestamp);
       if (opening.hidden.has(entry.id) || !(at > since)) continue;
-      const line = relayLineOf(author, entry, { ...context, own });
+      const line = relayLineOf(author, entry, { ...context, own, marks });
       if (line === null) continue;
       (line.summary ? summaries : items).push({ at, text: line.text });
     }
@@ -363,13 +445,18 @@ export function relayText(
   input: RelayInput,
 ): string | null {
   const { summary, items } = relayItems(member, input);
+  const starter = starterOf(input.members.find(({ id }) => id === member.id));
+  const tail =
+    starter === null
+      ? []
+      : [`${authorMark(starter)}:`, projectsLine(input.projects ?? [])];
   const head = renderTemplate(
     input.templates ?? SHIPPED_TEMPLATES,
     PromptTemplate.Relay,
     {},
   );
   const content = () =>
-    [head, ...(summary === null ? [] : [summary]), ...items].join(
+    [head, ...(summary === null ? [] : [summary]), ...items, ...tail].join(
       ITEM_SEPARATOR,
     );
   while (
@@ -377,7 +464,12 @@ export function relayText(
     Buffer.byteLength(content(), BYTES_ENCODING) > RELAY_MAX_BYTES
   )
     items.shift();
-  if (items.length === NO_CHARACTERS && summary === null) return null;
+  if (
+    items.length === NO_CHARACTERS &&
+    summary === null &&
+    tail.length === NO_CHARACTERS
+  )
+    return null;
   return clippedToBytes(content(), RELAY_MAX_BYTES);
 }
 
@@ -438,6 +530,7 @@ function cardLineOf(
 
 interface ForkContext extends LineContext {
   settled: ReadonlySet<string>;
+  marks: ReadonlyMap<string, string>;
 }
 
 interface ForkLine {
@@ -448,7 +541,7 @@ interface ForkLine {
 function messageLineOf(
   author: RelayMember,
   entry: SessionEntry,
-  context: LineContext,
+  context: LineContext & { marks: ReadonlyMap<string, string> },
 ): ForkLine | null {
   const message = entry.message as
     { role?: unknown; content?: unknown } | undefined;
@@ -459,7 +552,10 @@ function messageLineOf(
       kind: ForkItemKind.Summary,
       text: `${FORK_SUMMARY_LABEL}${summary}`,
     };
-  const text = relayItemOf(author, entry, `${context.authorName}${OWNER_MARK}`);
+  const text = relayItemOf(author, entry, {
+    authorName: `${context.authorName}${OWNER_MARK}`,
+    guestMark: context.marks.get(entry.id),
+  });
   if (text === null) return null;
   return { kind: human ? ForkItemKind.Human : ForkItemKind.Other, text };
 }
@@ -488,12 +584,14 @@ function forkItems(conversation: ForkConversation): ForkItem[] {
   const items: ForkItem[] = [];
   for (const author of conversation.members) {
     const { hidden } = openingIds(author.entries);
+    const marks = guestRunMarks(author.entries);
     for (const entry of author.entries) {
       if (hidden.has(entry.id)) continue;
       const item = forkItemOf(author, entry, {
         authorName: conversation.authorName,
         forkEntry,
         settled,
+        marks,
       });
       if (item !== null)
         items.push({ ...item, at: Date.parse(entry.timestamp) });

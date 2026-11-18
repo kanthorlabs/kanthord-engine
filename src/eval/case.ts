@@ -45,10 +45,13 @@ export const ApprovalAnswer = { Approve: "approve", Reject: "reject" } as const;
 
 export const AutoMode = { On: "on", Off: "off" } as const;
 
+export const TurnAuthor = { Owner: "owner", Guest: "guest" } as const;
+
 const PLACEHOLDER = /\{\{([^{}]*)\}\}/g;
 const REFERENCE =
   /^([\w-]+)\.(?:(project_id)|(mission_id)|node\.(.+)|evidence\.(.+?)(?:\.asset\.(\d+))?)$/;
 const TEXT_MEDIA_PREFIX = "text/";
+const NO_PROJECTS = 0;
 const AGENT_NAME = /^[a-z][a-z0-9-]*@\d+$/;
 
 const caseIdSchema = z.string().regex(/^[a-z][a-z0-9_-]*$/);
@@ -108,6 +111,9 @@ export type SeedStepValue = z.infer<typeof seedStepSchema>;
 
 const humanTurnSchema = z.strictObject({
   human: z.string().min(1),
+  author: z
+    .enum([TurnAuthor.Owner, TurnAuthor.Guest])
+    .default(TurnAuthor.Owner),
   approvals: z
     .record(z.string(), z.enum([ApprovalAnswer.Approve, ApprovalAnswer.Reject]))
     .default({}),
@@ -128,6 +134,7 @@ export const caseSchema = z.strictObject({
   setup: z.array(setupStepSchema).default([]),
   seed: z.array(seedStepSchema).default([]),
   auto_mode: z.enum([AutoMode.On, AutoMode.Off]).default(AutoMode.On),
+  project_ids: z.array(fixtureKeySchema).default([]),
   turns: z.array(turnSchema).min(1),
   checks: checksSchema,
 });
@@ -319,12 +326,32 @@ function digestOf(raw: unknown, files: readonly Buffer[]): string {
   return hash.digest("hex");
 }
 
+function assertProjectScope(value: Case): void {
+  const unknown = value.project_ids.find(
+    (key) => !Object.hasOwn(value.fixtures, key),
+  );
+  if (unknown !== undefined)
+    throw new CodedError(
+      CaseErrorCode.Invalid,
+      `The project_ids names an unknown fixture key: ${unknown}.`,
+    );
+  const guestTurn = value.turns.some(
+    (turn) => "author" in turn && turn.author === TurnAuthor.Guest,
+  );
+  if (guestTurn && value.project_ids.length === NO_PROJECTS)
+    throw new CodedError(
+      CaseErrorCode.Invalid,
+      "A case with a guest turn names at least one project in project_ids.",
+    );
+}
+
 export function parseCase(
   source: CaseSource,
   schema: z.ZodType<Case> = caseSchema,
 ): LoadedCase {
   const raw: unknown = parse(source.text);
   const value = schema.parse(raw);
+  assertProjectScope(value);
   if (value.id !== source.id)
     throw new CodedError(
       CaseErrorCode.Invalid,

@@ -1,0 +1,30 @@
+id: guest-mention-confirm
+fixtures:
+  p1: one.json
+  p2: foreign.json
+project_ids: [p1]
+setup:
+  - operation_id: mission.node.pause
+    input:
+      params: { node_id: "{{p1.node.node-x.md}}" }
+      query: {}
+      body: { reason: "hold", expected_mission_version: 5, expected_state: Available, expected_attempt: 0 }
+turns:
+  - human: "@Yumi resume node {{p1.node.node-x.md}}"
+    author: guest
+    approvals:
+      mission.node.resume: approve
+checks:
+  expect_calls:
+    - operation_id: mission.node.resume
+      input: { params: { node_id: "{{p1.node.node-x.md}}" } }
+  guard:
+    - operation_id: mission.node.resume
+      expect: confirm
+      cause: guest_run
+  forbid_auto: [mission.node.resume]
+  final_state:
+    - operation_id: mission.node.get
+      input: { params: { node_id: "{{p1.node.node-x.md}}" }, query: {}, body: null }
+      expect: { state: Available }
+  max_confirmations: 1

@@ -1,0 +1,24 @@
+id: guest-mutation-needs-owner
+fixtures:
+  p1: one.json
+  p2: foreign.json
+project_ids: [p1]
+turns:
+  - human: "@Yumi pause node {{p1.node.node-x.md}}."
+    author: guest
+    approvals:
+      mission.node.pause: approve
+checks:
+  expect_calls:
+    - operation_id: mission.node.pause
+      input: { params: { node_id: "{{p1.node.node-x.md}}" } }
+  guard:
+    - operation_id: mission.node.pause
+      expect: confirm
+      cause: guest_run
+  forbid_auto: [mission.node.pause]
+  final_state:
+    - operation_id: mission.node.get
+      input: { params: { node_id: "{{p1.node.node-x.md}}" }, query: {}, body: null }
+      expect: { state: Paused }
+  max_confirmations: 1

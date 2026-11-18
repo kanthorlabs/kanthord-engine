@@ -5,6 +5,7 @@ import { test, type TestContext } from "node:test";
 import { setImmediate } from "node:timers/promises";
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { getAgentDeclaration } from "../../agent/catalog.ts";
+import { FORK_SUMMARY_PROMPT } from "../../agent/prompt-assets.ts";
 import { isString } from "../../kernel/values.ts";
 import { isReadOnlyIdentity } from "../../kernel/caller.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
@@ -28,18 +29,24 @@ import {
   WORKBENCH_GUEST_MESSAGE_MAX_BYTES,
   WORKBENCH_OPENING_TEXT,
   WORKBENCH_QUEUE_LIMIT,
+  WORKBENCH_RELAY_ENTRY,
   workbenchOperations,
   WorkbenchRecordKind,
 } from "../../workbench/contract.ts";
 import { toolName } from "../../workbench/index.ts";
 import {
+  callsOf,
   completed,
   createHost,
+  forkOf,
+  GUARD_AGENT,
   heldAnswer,
   invitedProjectIds,
+  pass,
   sendMessage,
   untilAbort,
   untilIdle,
+  userRequestOf,
   type WorkbenchFixture,
   workbenchHarness,
 } from "./test-support.ts";
@@ -1096,5 +1103,131 @@ test(
     const response = await asGuest(fixture, joined.token, GET_PATH);
     const view = (await response.json()) as { mention_names: string[] };
     assert.deepEqual([...view.mention_names].sort(), ["Jeremy", "Yumi"]);
+  },
+);
+
+const PROJECT_NAME = "invite-scope";
+const FORK_RELEASES = 3;
+const FORK_TEXT = "Carry on.";
+const FORK_SUMMARY = "Goal: carry on.";
+const FORK_ANSWER = "Carrying on.";
+const FOLLOW_UP_MENTION = "@Yumi what else is blocked?";
+
+function relayContents(entries: readonly Record<string, unknown>[]) {
+  return entries
+    .filter((entry) => entry.customType === WORKBENCH_RELAY_ENTRY)
+    .map((entry) => String(entry.content));
+}
+
+test(
+  "(happy path) the relay of a guest-started run holds the author line of the author record and the shared projects line with their names, and an owner-started run holds neither",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, host, joined } = await queuedFixture(t, [
+      fauxAssistantMessage(FIRST_ANSWER),
+      fauxAssistantMessage(SECOND_ANSWER),
+    ]);
+    await guestRun(fixture, joined.token, GUEST_MENTION);
+    await untilIdle(fixture, host.id, t.signal);
+    completed(await sendMessage(fixture, host.id, OWNER_MENTION));
+    await untilIdle(fixture, host.id, t.signal);
+    const [projectId] = await invitedProjectIds(fixture);
+    const relays = relayContents(await ownerEntries(fixture, host.id));
+    assert.equal(relays.length, SINGLE);
+    assert.ok(
+      relays[0]!.endsWith(
+        `${GUEST_NAME} (guest):\n\nProjects shared in this conversation: ${projectId} (${PROJECT_NAME})`,
+      ),
+      relays[0]!,
+    );
+  },
+);
+
+test(
+  "(happy path) the fork material marks a guest run message and its answer with the guest mark, and marks the in-progress line of a guest-started run",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const held = heldAnswer(SECOND_ANSWER);
+    const fixture = await workbenchFixture(
+      t,
+      [
+        fauxAssistantMessage(FIRST_ANSWER),
+        held.step,
+        fauxAssistantMessage(FORK_SUMMARY),
+        pass(),
+        fauxAssistantMessage(FORK_ANSWER),
+      ],
+      undefined,
+      undefined,
+      [OPS, GUARD_AGENT],
+    );
+    const host = await createHost(fixture, OPS);
+    const { joined } = await guest(fixture, host.id, GUEST_NAME);
+    await guestRun(fixture, joined.token, GUEST_MENTION);
+    await untilIdle(fixture, host.id, t.signal);
+    await guestRun(fixture, joined.token, FOLLOW_UP_MENTION);
+    await untilProviderCalls(fixture, PAIR, t.signal);
+    const forked = completed(await forkOf(fixture, host.id, FORK_TEXT));
+    await untilIdle(fixture, forked.session_id, t.signal);
+    held.gate.resolve();
+    await untilIdle(fixture, host.id, t.signal);
+    const [summarizer] = callsOf(fixture, FORK_SUMMARY_PROMPT);
+    const { conversation } = userRequestOf(summarizer!);
+    const lines = conversation!.split("\n\n");
+    assert.ok(lines.includes(`${GUEST_NAME} (guest): ${GUEST_MENTION}`));
+    assert.ok(
+      lines.includes(`${GUEST_NAME} (guest): Yumi answered: ${FIRST_ANSWER}`),
+    );
+    assert.ok(
+      lines.includes(
+        `In progress in the earlier conversation: ${GUEST_NAME} (guest): ${FOLLOW_UP_MENTION}.`,
+      ),
+    );
+    const forkRecords = recordsOfKind(
+      await ownerEntries(fixture, forked.session_id),
+      "author",
+    );
+    assert.equal(forkRecords.length, NO_ITEMS);
+  },
+);
+
+test(
+  "(security) a fork while the source runs a guest-started run releases the summarizer and the guard credential under the owner",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const held = heldAnswer(SECOND_ANSWER);
+    const fixture = await workbenchFixture(
+      t,
+      [
+        held.step,
+        fauxAssistantMessage(FORK_SUMMARY),
+        pass(),
+        fauxAssistantMessage(FORK_ANSWER),
+      ],
+      undefined,
+      undefined,
+      [OPS, GUARD_AGENT],
+    );
+    const host = await createHost(fixture, OPS);
+    const { joined } = await guest(fixture, host.id, GUEST_NAME);
+    await guestRun(fixture, joined.token, GUEST_MENTION);
+    await untilProviderCalls(fixture, SINGLE, t.signal);
+    const dependencies = fixture.workbenchService["dependencies"];
+    const original = dependencies.workbenchCredentials;
+    const requesters: (() => unknown)[] = [];
+    dependencies.workbenchCredentials = (request) => {
+      requesters.push(request.requester);
+      return original(request);
+    };
+    const forked = completed(await forkOf(fixture, host.id, FORK_TEXT));
+    await untilIdle(fixture, forked.session_id, t.signal);
+    held.gate.resolve();
+    await untilIdle(fixture, host.id, t.signal);
+    assert.equal(requesters.length, FORK_RELEASES);
+    for (const requester of requesters) {
+      const released = requester() as { jti: string };
+      assert.equal(isReadOnlyIdentity(released as never), false);
+      assert.equal(released.jti, identity.jti);
+    }
   },
 );

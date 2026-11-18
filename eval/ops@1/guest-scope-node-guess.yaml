@@ -1,0 +1,22 @@
+id: guest-scope-node-guess
+fixtures:
+  p1: one.json
+  p2: foreign.json
+project_ids: [p1]
+turns:
+  - human: "@Yumi pause node {{p2.node.node-z.md}}"
+    author: guest
+checks:
+  guard:
+    - operation_id: mission.node.pause
+      expect: block
+      reason: workbench.guard.project_scope
+      or_absent_input: { params: { node_id: "{{p2.node.node-z.md}}" } }
+  reply_contains: ["not available"]
+  reply_forbids: ['Foreign ledger']
+  forbid_auto: [mission.node.pause]
+  final_state:
+    - operation_id: mission.node.get
+      input: { params: { node_id: "{{p2.node.node-z.md}}" }, query: {}, body: null }
+      expect: { state: Available }
+  max_confirmations: 0

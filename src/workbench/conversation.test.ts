@@ -195,3 +195,116 @@ test("(security, guest attribution) a guest note that holds a line break and an 
   assert.ok(!material.includes(forged));
   assert.ok(!material.split("\n").some((line) => line.startsWith("Ulrich")));
 });
+
+function messageEntry(
+  id: string,
+  second: number,
+  message: Record<string, unknown>,
+) {
+  return {
+    type: "message",
+    id,
+    parentId: null,
+    timestamp: new Date(FIRST_TIMESTAMP + second * STEP_MS).toISOString(),
+    message,
+  };
+}
+
+function recordEntry(id: string, second: number, data: unknown) {
+  return {
+    type: "custom",
+    id,
+    parentId: null,
+    timestamp: new Date(FIRST_TIMESTAMP + second * STEP_MS).toISOString(),
+    customType: "kanthord.workbench.record",
+    data,
+  };
+}
+
+test("(security, guest attribution) the fork material marks the message and the answer of a guest run, marks the in-progress line, and copies no author or queue_clear record", () => {
+  const answer = (text: string) => ({
+    role: "assistant",
+    stopReason: "stop",
+    content: [{ type: "text", text }],
+  });
+  const host = {
+    id: "host",
+    displayName: "Ops",
+    entries: [
+      messageEntry("owner_ask", 1, { role: "user", content: "owner asks" }),
+      messageEntry("owner_answer", 2, answer("owner answer")),
+      recordEntry("author_1", 3, {
+        kind: "author",
+        author: { kind: "guest", name: "Mai" },
+      }),
+      messageEntry("guest_ask", 4, {
+        role: "user",
+        content: "@Ops guest asks",
+      }),
+      messageEntry("guest_answer", 5, answer("guest answer")),
+      recordEntry("clear_1", 6, {
+        kind: "queue_clear",
+        count: 2,
+        cause: "stop",
+      }),
+      messageEntry("owner_next", 7, { role: "user", content: "owner again" }),
+      messageEntry("owner_next_answer", 8, answer("owner second answer")),
+    ],
+  };
+  const material = forkMaterial({
+    members: [host],
+    authorName: "Ulrich",
+    inProgress: "Mai (guest): @Ops still asking",
+  });
+  const lines = material.split("\n\n");
+  assert.ok(lines.includes("Mai (guest): @Ops guest asks"));
+  assert.ok(lines.includes("Mai (guest): Ops answered: guest answer"));
+  assert.ok(lines.includes("Ops: owner answer"));
+  assert.ok(lines.includes("Ops: owner second answer"));
+  assert.ok(lines.includes("Ulrich (owner) to @Ops: owner again"));
+  assert.ok(
+    lines.includes(
+      "In progress in the earlier conversation: Mai (guest): @Ops still asking.",
+    ),
+  );
+  assert.ok(!material.includes("queue_clear"));
+  assert.ok(!material.includes("author"));
+});
+
+test("(security, guest attribution) the relay of a guest-started run ends with the author line and the shared projects line, and an owner-started run holds neither", () => {
+  const entries = [
+    messageEntry("asked", 1, { role: "user", content: "@Ops guest asks" }),
+  ];
+  const writer = { id: "writer", displayName: "RE", entries };
+  const starter = (entry: unknown[]) => ({
+    id: "reader",
+    displayName: "Ops",
+    entries: entry as typeof entries,
+  });
+  const guest = starter([
+    recordEntry("author_1", 2, {
+      kind: "author",
+      author: { kind: "guest", name: "Mai" },
+    }),
+  ]);
+  const input = {
+    startEntry: null,
+    authorName: "Ulrich",
+    projects: [
+      { id: "project_a", name: "Alpha" },
+      { id: "project_b", name: null },
+    ],
+  };
+  const relay = relayText(guest, { ...input, members: [guest, writer] });
+  assert.ok(relay);
+  assert.ok(
+    relay.endsWith(
+      "Mai (guest):\n\nProjects shared in this conversation: project_a (Alpha), project_b",
+    ),
+  );
+  const owner = starter([]);
+  const ownerRelay = relayText(owner, { ...input, members: [owner, writer] });
+  assert.ok(ownerRelay);
+  assert.ok(!ownerRelay.includes("Mai (guest)"));
+  assert.ok(!ownerRelay.includes("Projects shared in this conversation:"));
+});
