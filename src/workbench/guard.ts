@@ -329,7 +329,7 @@ function guestBlock(
     return block(workbenchGuestScopeText(operation.id));
   const parsed = operation.input.safeParse(fullInput(operation, input));
   if (!parsed.success) return block(WORKBENCH_PROJECT_SCOPE_TEXT);
-  const verdict = guest.resolver.check(operation, {
+  const { verdict } = guest.resolver.resolve(operation, {
     input: parsed.data as ScopedInput,
     scope: guest.scope,
   });

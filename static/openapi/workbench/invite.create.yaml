@@ -13,7 +13,14 @@ pathItem:
       than 50 ids answers 400 `workbench.invite.project_invalid` with the
       refused ids in `details`. A set that differs from the set of a live invite
       of the conversation answers 409 `workbench.invite.scope_mismatch`. The set
-      never changes: revoke the invite and create a new one."
+      never changes: revoke the invite and create a new one.
+      `granted_operations` lists the operation ids that the guest-started runs
+      of the invite can run without the owner's card. Each id is a
+      project-scoped operation that the host agent lists and that a grant can
+      hold, each once. A refused or repeated id answers 400
+      `workbench.invite.grant_invalid` with the refused ids in `details`. The
+      list is fixed at create and is stored sorted. An empty list grants
+      nothing."
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: true
@@ -68,7 +75,9 @@ pathItem:
     description: List the live invites of a workbench conversation. Each item names
       its projects with the live project name, or a null name for an id with no
       project. `project_ids` holds the set of the live invites, or null when no
-      invite is live.
+      invite is live. Each item holds `granted_operations`, the live grant with
+      the guard class of each id. `grantable` lists the operations that the host
+      agent of the conversation lets an invite grant.
     x-access-policy: human
     x-timeout-ms: 30000
     x-mutation: false
@@ -141,9 +150,14 @@ components:
               type: array
               items:
                 type: string
+            granted_operations:
+              type: array
+              items:
+                type: string
           required:
             - invitee_name
             - project_ids
+            - granted_operations
           additionalProperties: false
       required:
         - params
@@ -178,12 +192,17 @@ components:
           type: string
           format: uuid
           pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+        granted_operations:
+          type: array
+          items:
+            type: string
       required:
         - id
         - invitee_name
         - expires_at
         - session_id
         - invite_token
+        - granted_operations
       additionalProperties: false
     workbench.invite.list.Input:
       type: object
@@ -253,11 +272,30 @@ components:
                     - id
                     - name
                   additionalProperties: false
+              granted_operations:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    operation_id:
+                      type: string
+                    guard_class:
+                      type: string
+                      enum:
+                        - read
+                        - card
+                        - reversible
+                        - judged
+                  required:
+                    - operation_id
+                    - guard_class
+                  additionalProperties: false
             required:
               - id
               - invitee_name
               - expires_at
               - projects
+              - granted_operations
             additionalProperties: false
         project_ids:
           anyOf:
@@ -269,7 +307,29 @@ components:
                 pattern: ^project_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                 description: project_ followed by a canonical 26-character uppercase ULID.
             - type: "null"
+        grantable:
+          type: array
+          items:
+            type: object
+            properties:
+              operation_id:
+                type: string
+              guard_class:
+                type: string
+                enum:
+                  - read
+                  - card
+                  - reversible
+                  - judged
+              description:
+                type: string
+            required:
+              - operation_id
+              - guard_class
+              - description
+            additionalProperties: false
       required:
         - items
         - project_ids
+        - grantable
       additionalProperties: false

@@ -30,6 +30,7 @@ export interface GrantedInvite {
   projectIds: readonly string[];
 }
 
+export const WORKBENCH_REQUEST_OWNER_ACT_TOOL = "request_owner_act";
 export const WORKBENCH_SERVICE_NAME = "workbench";
 export const WORKBENCH_SESSION_PREFIX = "workbench_session";
 export const WORKBENCH_SCOPE_REQUEST_PREFIX = "workbench_scope_request";
@@ -163,6 +164,7 @@ export const WorkbenchRecordKind = {
   Note: "note",
   Author: "author",
   QueueClear: "queue_clear",
+  ScopeStop: "scope_stop",
 } as const;
 export type WorkbenchRecordKind =
   (typeof WorkbenchRecordKind)[keyof typeof WorkbenchRecordKind];
@@ -220,6 +222,11 @@ export const workbenchRecordSchema = z.discriminatedUnion("kind", [
     kind: z.literal(WorkbenchRecordKind.QueueClear),
     count: z.number().int().positive(),
     cause: z.enum(QueueClearCause),
+  }),
+  z.strictObject({
+    kind: z.literal(WorkbenchRecordKind.ScopeStop),
+    tool_call_id: z.string(),
+    operation_id: z.string(),
   }),
 ]);
 export type WorkbenchRecord = z.infer<typeof workbenchRecordSchema>;
@@ -462,6 +469,11 @@ export const guestEntrySchema = z.discriminatedUnion("kind", [
     count: z.number().int().positive(),
     cause: z.enum(QueueClearCause),
     text: z.string(),
+  }),
+  z.strictObject({
+    ...guestEnvelope,
+    kind: z.literal(WorkbenchRecordKind.ScopeStop),
+    operation_id: z.string(),
   }),
 ]);
 

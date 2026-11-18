@@ -20,9 +20,11 @@ import {
 } from "../../kernel/test-identity.ts";
 import {
   AuthorKind,
+  MessageKind,
   WORKBENCH_EXPIRY_REASON,
   WORKBENCH_PROJECT_SCOPE_TEXT,
   WORKBENCH_RECORD_ENTRY,
+  WORKBENCH_REQUEST_OWNER_ACT_TOOL,
   workbenchGuestScopeText,
   WorkbenchRecordKind,
 } from "../../workbench/contract.ts";
@@ -762,7 +764,6 @@ test(
             expected_attempt: FIRST_VERSION,
           },
         }),
-      fauxAssistantMessage(ANSWER),
     ];
     const world = await scopeWorld(t, () => [...calls(), ...calls()]);
     const lookups = [
@@ -891,5 +892,135 @@ test(
     );
     hold.gate.resolve();
     await untilIdle(fixture, host.id, t.signal);
+  },
+);
+
+const BLOCKED_PAUSE_TEXT = WORKBENCH_PROJECT_SCOPE_TEXT;
+const REQUEST_OWNER_ACT = WORKBENCH_REQUEST_OWNER_ACT_TOOL;
+
+function foreignPause(world: World) {
+  return toolCall(NODE_PAUSE, {
+    params: { node_id: world.second.nodeId },
+    body: {
+      reason: "hold",
+      expected_mission_version: FIRST_VERSION,
+      expected_state: "Available",
+      expected_attempt: FIRST_VERSION,
+    },
+  });
+}
+
+test(
+  "(happy path) read mode: a blocked read of a guest-started run on a P2 node keeps the run alive with the error",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const world = await scopeWorld(t, (target) => [
+      () => toolCall(NODE_GET, { params: { node_id: target.second.nodeId } }),
+      fauxAssistantMessage(ANSWER),
+    ]);
+    await guestMention(world, GUEST_RUN_MENTION);
+    await untilIdle(world.fixture, world.hostId, t.signal);
+    const entries = await ownerEntries(world.fixture, world.hostId);
+    assert.deepEqual(
+      toolResults(entries).map(({ isError, text }) => ({ isError, text })),
+      [{ isError: true, text: BLOCKED_PAUSE_TEXT }],
+    );
+    assert.equal(world.fixture.provider.calls.length, PAIR);
+    assert.equal(
+      recordsOf(entries, WorkbenchRecordKind.ScopeStop).length,
+      NO_ITEMS,
+    );
+    assert.ok(JSON.stringify(await guestEntries(world)).includes(ANSWER));
+  },
+);
+
+test(
+  "(happy path) queue mode: after a scope stop the queue stays and its next item starts",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const gate = Promise.withResolvers<void>();
+    const world = await scopeWorld(t, (target) => [
+      async () => {
+        await gate.promise;
+        return foreignPause(target);
+      },
+      fauxAssistantMessage(ANSWER),
+    ]);
+    await guestMention(world, GUEST_RUN_MENTION);
+    await untilCalls(world, SINGLE, t.signal);
+    const queued = await guestMention(world, GUEST_RUN_MENTION);
+    assert.equal(queued.kind, MessageKind.Run);
+    assert.ok(queued.queued_message_id);
+    gate.resolve();
+    await untilIdle(world.fixture, world.hostId, t.signal);
+    const entries = await ownerEntries(world.fixture, world.hostId);
+    assert.deepEqual(
+      recordsOf(entries, WorkbenchRecordKind.ScopeStop).map(
+        ({ kind, operation_id }: Entry) => ({ kind, operation_id }),
+      ),
+      [{ kind: WorkbenchRecordKind.ScopeStop, operation_id: NODE_PAUSE_ID }],
+    );
+    assert.equal(world.fixture.provider.calls.length, PAIR);
+    assert.ok(JSON.stringify(await guestEntries(world)).includes(ANSWER));
+    assert.equal(sessionOf(world).queuedMessages.length, NO_ITEMS);
+  },
+);
+
+test(
+  "(security) request_owner_act ends a guest-started run, raises one request, shows the guest only the scope_stop line, and an owner-started run holds no such tool",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const world = await scopeWorld(t, (target) => [
+      () =>
+        toolCall(REQUEST_OWNER_ACT, {
+          operation_id: NODE_PAUSE_ID,
+          input: {
+            params: { node_id: target.second.nodeId },
+            body: { reason: "hold" },
+          },
+        }),
+      fauxAssistantMessage(ANSWER),
+    ]);
+    await guestMention(world, GUEST_RUN_MENTION);
+    await untilIdle(world.fixture, world.hostId, t.signal);
+    await setImmediate();
+    const entries = await ownerEntries(world.fixture, world.hostId);
+    assert.deepEqual(
+      toolResults(entries).map(({ isError, text }) => ({ isError, text })),
+      [{ isError: false, text: BLOCKED_PAUSE_TEXT }],
+    );
+    assert.equal(
+      recordsOf(entries, WorkbenchRecordKind.ScopeStop).length,
+      SINGLE,
+    );
+    const open = world.fixture.workbenchService["scopeRequests"].open(
+      world.hostId,
+    );
+    assert.equal(open.length, SINGLE);
+    assert.equal(open[NO_ITEMS]!.operationId, NODE_PAUSE_ID);
+    assert.equal(open[NO_ITEMS]!.projectId, world.second.projectId);
+    assert.equal(world.fixture.provider.calls.length, SINGLE);
+    assert.ok(
+      world.fixture.provider.tools[NO_ITEMS]!.includes(REQUEST_OWNER_ACT),
+    );
+    const guestView = JSON.stringify(await guestEntries(world));
+    assert.ok(!guestView.includes(REQUEST_OWNER_ACT));
+    assert.ok(!guestView.includes(world.second.nodeId));
+    assert.ok(guestView.includes(WorkbenchRecordKind.ScopeStop));
+    completed(
+      await world.fixture.workbench["session.message"](
+        {
+          params: { session_id: world.hostId },
+          query: {},
+          body: { text: OWNER_MENTION },
+        },
+        world.fixture.options,
+      ),
+    );
+    await untilIdle(world.fixture, world.hostId, t.signal);
+    assert.equal(world.fixture.provider.calls.length, PAIR);
+    assert.ok(
+      !world.fixture.provider.tools[SINGLE]!.includes(REQUEST_OWNER_ACT),
+    );
   },
 );

@@ -1,9 +1,15 @@
+import { Type } from "@earendil-works/pi-ai";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { z } from "zod";
 import { canonicalJSON } from "../kernel/json.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import type { Operation } from "../kernel/operation.ts";
 import { isObject, isString } from "../kernel/values.ts";
-import { WORKBENCH_SCOPE_REQUEST_PREFIX } from "./contract.ts";
+import {
+  WORKBENCH_PROJECT_SCOPE_TEXT,
+  WORKBENCH_REQUEST_OWNER_ACT_TOOL,
+  WORKBENCH_SCOPE_REQUEST_PREFIX,
+} from "./contract.ts";
 import { grantableOperations, grantCovers } from "./guard.ts";
 
 export const WORKBENCH_SCOPE_REQUEST_LIMIT = 10;
@@ -241,4 +247,77 @@ export class ScopeRequests {
     for (const request of this.ofInvite(inviteId))
       this.requests.delete(request.id);
   }
+}
+
+export const requestOwnerActParams = z.strictObject({
+  operation_id: z.string(),
+  input: z.record(z.string(), z.unknown()),
+});
+
+const REQUEST_OWNER_ACT_PARAMETERS = Type.Object(
+  {
+    operation_id: Type.String(),
+    input: Type.Object({}, { additionalProperties: true }),
+  },
+  { additionalProperties: false },
+);
+
+const REQUEST_OWNER_ACT_DESCRIPTION =
+  "Ask the owner to run one act on a record that is not available in this conversation. The act never runs in this run. The run ends.";
+
+export interface OwnerActCall {
+  readonly operationId: string;
+  readonly input: Record<string, unknown> | null;
+}
+
+function holdsConcurrencyKey(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(holdsConcurrencyKey);
+  if (!isObject(value)) return false;
+  return Object.entries(value).some(
+    ([key, item]) => isConcurrencyKey(key) || holdsConcurrencyKey(item),
+  );
+}
+
+function ownerActCall(params: unknown): OwnerActCall {
+  const parsed = requestOwnerActParams.safeParse(params);
+  if (!parsed.success) return { operationId: "", input: null };
+  const { operation_id: operationId, input } = parsed.data;
+  return {
+    operationId,
+    input: holdsConcurrencyKey(input[BODY_PART]) ? null : input,
+  };
+}
+
+export function requestInputSchema(operation: Operation): z.ZodType {
+  const input = operation.input as unknown as z.ZodObject;
+  const body = input.shape[BODY_PART];
+  if (!(body instanceof z.ZodObject)) return input;
+  const omitted = Object.fromEntries(
+    Object.keys(body.shape)
+      .filter(isConcurrencyKey)
+      .map((key) => [key, true as const]),
+  );
+  return z.strictObject({
+    ...input.shape,
+    [BODY_PART]: body.omit(omitted as never),
+  });
+}
+
+export function requestOwnerActTool(
+  onCall: (toolCallId: string, call: OwnerActCall) => void,
+): ToolDefinition {
+  return {
+    name: WORKBENCH_REQUEST_OWNER_ACT_TOOL,
+    label: WORKBENCH_REQUEST_OWNER_ACT_TOOL,
+    description: REQUEST_OWNER_ACT_DESCRIPTION,
+    parameters: REQUEST_OWNER_ACT_PARAMETERS,
+    execute(toolCallId, params) {
+      onCall(toolCallId, ownerActCall(params));
+      return Promise.resolve({
+        content: [{ type: "text", text: WORKBENCH_PROJECT_SCOPE_TEXT }],
+        details: {},
+        terminate: true,
+      });
+    },
+  };
 }
