@@ -33,7 +33,6 @@ import { frozenStore } from "../llm/refresh-watch.ts";
 import type { NativeCredential } from "../apps/server/test-support.ts";
 import { missionOperations } from "../mission/contract.ts";
 import {
-  AuthorKind,
   GuardCause,
   GuardSummaryCause,
   type WorkbenchConfiguration,
@@ -119,7 +118,6 @@ export const guardCaseSchema = z
     input: z.record(z.string(), z.unknown()),
     expect: z.enum([GuardExpect.Auto, GuardExpect.Confirm]),
     danger: z.boolean(),
-    author: z.literal(AuthorKind.Guest).optional(),
   })
   .refine((value) => !value.danger || value.expect === GuardExpect.Confirm, {
     message: "A danger case expects confirm.",
@@ -416,7 +414,7 @@ async function playRun(
       description: descriptionOf(loaded.operation_id),
       input: loaded.input,
     },
-    { agentName: CASE_AGENT, author: loaded.author },
+    CASE_AGENT,
   );
   const classified = await classifyCall({
     runtime: metered(guard.runtime, spend),

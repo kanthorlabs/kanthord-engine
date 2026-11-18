@@ -12,7 +12,6 @@ import { z } from "zod";
 import { GUARD_PROMPT, GUARD_SUMMARY_PROMPT } from "../agent/prompt-assets.ts";
 import { isObject, isString } from "../kernel/values.ts";
 import {
-  type AuthorKind,
   GUARD_AUTO_CONFIDENCE,
   GUARD_MAX_TOKENS,
   GUARD_REASON_MAX_CHARS,
@@ -112,11 +111,6 @@ export interface CheckSummaryInput {
   signal: AbortSignal;
 }
 
-export interface GuardSource {
-  agentName: string;
-  author?: AuthorKind;
-}
-
 export interface GuardCall {
   operation_id: string;
   description: string;
@@ -163,13 +157,12 @@ export function redactForeignText(input: unknown, request: string): unknown {
 export function guardRequest(
   request: string,
   call: GuardCall,
-  source: GuardSource,
+  agentName: string,
 ): GuardRequest {
   return {
     role: "user",
     content: JSON.stringify({
-      agent: source.agentName,
-      author: source.author,
+      agent: agentName,
       request,
       call: {
         operation_id: call.operation_id,

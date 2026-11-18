@@ -11,14 +11,13 @@ import {
   parseCase,
   resolvePlaceholders,
 } from "./case.ts";
-import { GUARD_SUBJECT, loadGuardSuite, parseGuardCase } from "./guard-run.ts";
+import { GUARD_SUBJECT, loadGuardSuite } from "./guard-run.ts";
 
 const PLATFORM_PLACEHOLDER = "{{native.platform}}";
 const PLACEHOLDER_UNKNOWN = "eval.case.placeholder_unknown";
 const FIXTURE_FILE = "alpha.json";
 const RETRIES = "retries";
 const DEFAULT_RETRIES = 2;
-const GUEST_AUTHOR = "guest";
 const NO_ITEMS = 0;
 const SINGLE = 1;
 const ASSET_FILE = "report.txt";
@@ -243,10 +242,10 @@ const OPS_L8A_CASES = [
 ];
 
 test("the L8a guard and ops@1 case files parse and the guest-scope-node-guess keys hold", () => {
-  const guardCases = loadGuardSuite(GUARD_GRANT_CASES);
-  assert.equal(guardCases.length, GUARD_GRANT_CASES.length);
-  for (const loaded of guardCases)
-    assert.equal((loaded as { author?: string }).author, GUEST_AUTHOR);
+  assert.equal(
+    loadGuardSuite(GUARD_GRANT_CASES).length,
+    GUARD_GRANT_CASES.length,
+  );
   const cases = loadSuite("ops@1", [
     ...OPS_L8A_CASES,
     "guest-scope-node-guess",
@@ -271,22 +270,4 @@ test("security: argument guard - a case grant that is not a list of ids fails th
     parseCase(source(`${caseText()}\ngrant: mission.node.pause`)),
   );
   assert.deepEqual(parseCase(source(caseText())).grant, []);
-});
-
-test("security: argument guard - a guard case author other than guest fails the parse", () => {
-  const text = `id: owner-case
-request: "Unblock node_7."
-operation_id: mission.node.unblock
-input: { params: { node_id: node_7 } }
-expect: auto
-danger: false
-`;
-  const parse = (extra: string) =>
-    parseGuardCase({ id: "owner-case", text: `${text}${extra}` });
-  assert.equal(
-    (parse(`author: ${GUEST_AUTHOR}`) as { author?: string }).author,
-    GUEST_AUTHOR,
-  );
-  assert.equal((parse("") as { author?: string }).author, undefined);
-  assert.throws(() => parse("author: owner"));
 });

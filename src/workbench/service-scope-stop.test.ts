@@ -152,12 +152,17 @@ async function fixture(t: TestContext) {
   });
   const invoked: string[] = [];
   const logged: unknown[] = [];
+  const warned: { fields: Record<string, unknown>; message: string }[] = [];
   const service = new WorkbenchService({
     store,
     invites,
     projectScope,
     operations: () => OPERATION_LIST,
-    logger: { error: (...args: unknown[]) => logged.push(args) },
+    logger: {
+      error: (...args: unknown[]) => logged.push(args),
+      warn: (fields: Record<string, unknown>, message: string) =>
+        warned.push({ fields, message }),
+    },
     invoke: (operation: Operation) => {
       invoked.push(operation.id);
       return Promise.resolve({
@@ -263,6 +268,7 @@ async function fixture(t: TestContext) {
     guestView,
     invoked,
     logged,
+    warned,
     owners,
   };
 }
@@ -664,4 +670,56 @@ test("(invariant) the input description of request_owner_act names the body reas
   assert.match(description, /body\.reason/);
   assert.match(description, /expected_/);
   assert.match(description, /blocked_attempt/);
+});
+
+test("(invariant) a raise that a drop ends writes one warn log with the drop reason", async (t) => {
+  const f = await fixture(t);
+  const host = f.host();
+  const created = f.invite(host);
+  const scenarios: [string, Record<string, unknown>][] = [
+    [
+      "unknown_operation",
+      { ...pauseCall(f.foreignNode()), operation_id: "x.y" },
+    ],
+    ["input_parse_failure", { operation_id: PAUSE.id, input: "text" }],
+    [
+      "concurrency_key_in_input",
+      pauseCall(f.foreignNode(), { expected_mission_version: SINGLE }),
+    ],
+    ["no_raise", pauseCall(createIdentity("node"))],
+  ];
+  for (const [index, [, params]] of scenarios.entries()) {
+    const run = f.guestRun(host, created);
+    await f.call(host, `call_${index}`, params);
+    await setImmediate();
+    run.settle();
+  }
+  assert.deepEqual(
+    f.warned.map(({ fields, message }) => [message, fields.reason]),
+    scenarios.map(([reason]) => ["workbench.scope_request.dropped", reason]),
+  );
+  assert.equal(f.internals.scopeRequests.count(host.id), NO_ITEMS);
+});
+
+test("(invariant) scope_stop holds the operation id when the call names the tool name and the raw string when nothing matches", async (t) => {
+  const f = await fixture(t);
+  const host = f.host();
+  const created = f.invite(host);
+  for (const [index, operationId] of [
+    "mission--node--pause",
+    PAUSE.id,
+    "x.y",
+  ].entries()) {
+    const run = f.guestRun(host, created);
+    await f.call(host, `call_${index}`, {
+      ...pauseCall(f.foreignNode()),
+      operation_id: operationId,
+    });
+    await setImmediate();
+    run.settle();
+  }
+  assert.deepEqual(
+    f.scopeStops(host).map(({ operation_id }) => operation_id),
+    [PAUSE.id, PAUSE.id, "x.y"],
+  );
 });

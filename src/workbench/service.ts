@@ -122,6 +122,7 @@ import { missionOperations } from "../mission/contract.ts";
 import type { ScopedInput } from "../kernel/project-scope.ts";
 import {
   type OwnerActCall,
+  OwnerActDrop,
   requestInputSchema,
   requestOwnerActTool,
   type ScopeRequest,
@@ -391,8 +392,14 @@ interface ScopeRaise {
   inviteId: string;
   guestName: string;
   agentName: string;
-  operationId: string;
+  operation: Operation;
   input: Record<string, unknown>;
+}
+
+interface DroppedRaise {
+  hostId: string;
+  inviteId: string;
+  operationId: string;
 }
 
 interface GrantTicket {
@@ -999,17 +1006,37 @@ export class WorkbenchService implements Service {
     const host = this.hostOf(session);
     const { run } = host;
     assert.ok(run?.origin?.kind === AuthorKind.Guest && run.inviteId !== null);
+    const operation = this.dependencies
+      .operations()
+      .find(
+        ({ id }) =>
+          id === call.operationId || toolName(id) === call.operationId,
+      );
     const stopped = this.endRunAtScope(run, {
       tool_call_id: toolCallId,
-      operation_id: call.operationId,
+      operation_id: operation?.id ?? call.operationId,
     });
-    if (!stopped || call.input === null) return;
+    if (!stopped) return;
+    const { inviteId } = run;
+    const dropTarget = {
+      hostId: host.id,
+      inviteId,
+      operationId: call.operationId,
+    };
+    if (call.drop !== null) {
+      this.logDroppedRaise(dropTarget, call.drop);
+      return;
+    }
+    if (!operation) {
+      this.logDroppedRaise(dropTarget, OwnerActDrop.UnknownOperation);
+      return;
+    }
     const raise = {
       hostId: host.id,
-      inviteId: run.inviteId,
+      inviteId,
       guestName: run.origin.name,
       agentName: session.agentName,
-      operationId: call.operationId,
+      operation,
       input: call.input,
     };
     setImmediate(() => {
@@ -1024,20 +1051,36 @@ export class WorkbenchService implements Service {
     });
   }
 
+  private logDroppedRaise(dropped: DroppedRaise, reason: OwnerActDrop): void {
+    this.dependencies.logger.warn(
+      {
+        conversation_id: dropped.hostId,
+        invite_id: dropped.inviteId,
+        operation_id: dropped.operationId,
+        reason,
+      },
+      "workbench.scope_request.dropped",
+    );
+  }
+
   private raiseScopeRequest(raise: ScopeRaise): void {
-    const row = this.dependencies.invites.resolve(raise.inviteId);
-    if (row === null || row.session_id !== raise.hostId) return;
-    const operation = this.dependencies
-      .operations()
-      .find(
-        ({ id }) =>
-          id === raise.operationId || toolName(id) === raise.operationId,
+    const { operation } = raise;
+    const dropped = (reason: OwnerActDrop) =>
+      this.logDroppedRaise(
+        {
+          hostId: raise.hostId,
+          inviteId: raise.inviteId,
+          operationId: operation.id,
+        },
+        reason,
       );
-    if (!operation) return;
+    const row = this.dependencies.invites.resolve(raise.inviteId);
+    if (row === null || row.session_id !== raise.hostId)
+      return dropped(OwnerActDrop.NoRaise);
     const parsed = requestInputSchema(operation).safeParse(
       fullInput(operation, raise.input),
     );
-    if (!parsed.success) return;
+    if (!parsed.success) return dropped(OwnerActDrop.InputParseFailure);
     const scope = new Set(row.project_ids);
     const { projects } = this.dependencies.projectScope.resolve(operation, {
       input: parsed.data as ScopedInput,
@@ -1054,8 +1097,9 @@ export class WorkbenchService implements Service {
       projects,
       scope,
     });
+    if (!raised) return dropped(OwnerActDrop.NoRaise);
     const host = this.sessions.get(raise.hostId);
-    if (raised && host) this.notifyOwners(host);
+    if (host) this.notifyOwners(host);
   }
 
   private applyRunTools(member: OpenSession, guestRun: boolean): void {
@@ -1836,7 +1880,11 @@ export class WorkbenchService implements Service {
     }
     const name = await this.projectNameOf(caller, request.projectId).catch(
       (error: unknown) => {
-        if (!(error instanceof OperationError)) throw error;
+        if (
+          !(error instanceof OperationError) ||
+          error.status !== HttpStatus.NotFound
+        )
+          throw error;
         this.scopeRequests.settle(request);
         throw scopeRequestError(
           HttpStatus.Conflict,

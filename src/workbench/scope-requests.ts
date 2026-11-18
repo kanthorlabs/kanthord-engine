@@ -248,15 +248,13 @@ export const requestOwnerActParams = z.strictObject({
 
 const REQUEST_OWNER_ACT_PARAMETERS = Type.Object(
   {
-    operation_id: Type.String({
-      description: "The id of the act, for example mission.node.pause.",
-    }),
+    operation_id: Type.String(),
     input: Type.Object(
       {},
       {
         additionalProperties: true,
         description:
-          "The params, query and body of the act, with every field that the act input requires, for example body.reason in the words of the guest. Leave out every key that starts with expected_ and the key blocked_attempt, even when the schema of the act lists them as required. The owner supplies them.",
+          "The params, query and body of the act, with every field that the act input requires, for example body.reason. Omit every key that starts with expected_ and the key blocked_attempt. The owner supplies them.",
       },
     ),
   },
@@ -266,10 +264,26 @@ const REQUEST_OWNER_ACT_PARAMETERS = Type.Object(
 const REQUEST_OWNER_ACT_DESCRIPTION =
   "Ask the owner to run one act on a record that is not available in this conversation. The act never runs in this run. The run ends.";
 
-export interface OwnerActCall {
-  readonly operationId: string;
-  readonly input: Record<string, unknown> | null;
-}
+export const OwnerActDrop = {
+  UnknownOperation: "unknown_operation",
+  InputParseFailure: "input_parse_failure",
+  ConcurrencyKey: "concurrency_key_in_input",
+  NoRaise: "no_raise",
+} as const;
+
+export type OwnerActDrop = (typeof OwnerActDrop)[keyof typeof OwnerActDrop];
+
+export type OwnerActCall =
+  | {
+      readonly operationId: string;
+      readonly input: Record<string, unknown>;
+      readonly drop: null;
+    }
+  | {
+      readonly operationId: string;
+      readonly input: null;
+      readonly drop: OwnerActDrop;
+    };
 
 function holdsConcurrencyKey(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(holdsConcurrencyKey);
@@ -285,13 +299,16 @@ function ownerActCall(params: unknown): OwnerActCall {
     const raw = isObject(params)
       ? (params as Record<string, unknown>).operation_id
       : undefined;
-    return { operationId: isString(raw) ? raw : "", input: null };
+    return {
+      operationId: isString(raw) ? raw : "",
+      input: null,
+      drop: OwnerActDrop.InputParseFailure,
+    };
   }
   const { operation_id: operationId, input } = parsed.data;
-  return {
-    operationId,
-    input: holdsConcurrencyKey(input[BODY_PART]) ? null : input,
-  };
+  if (holdsConcurrencyKey(input[BODY_PART]))
+    return { operationId, input: null, drop: OwnerActDrop.ConcurrencyKey };
+  return { operationId, input, drop: null };
 }
 
 export function requestInputSchema(operation: Operation): z.ZodType {

@@ -180,6 +180,7 @@ async function fixture(t: TestContext, stateDirectory = temporary(t)) {
   const behaviour = {
     projectName: PROJECT_NAME,
     projectMissing: false,
+    projectStatus: null as number | null,
     pause: (): Promise<
       Awaited<ReturnType<typeof completed>> | Awaited<ReturnType<typeof failed>>
     > => completed({}),
@@ -196,12 +197,15 @@ async function fixture(t: TestContext, stateDirectory = temporary(t)) {
     logger: {
       info: (fields: Record<string, unknown>, message: string) =>
         logged.push({ fields, message }),
+      warn: () => {},
       error: () => {},
     },
     invoke: (operation: Operation, input: unknown, options: ClientOptions) => {
       calls.push({ operation, input, options });
       if (operation.id === projectOperations.get.id && behaviour.projectMissing)
         return failed(HttpStatus.NotFound, ProjectErrorCode.ProjectNotFound);
+      if (operation.id === projectOperations.get.id && behaviour.projectStatus)
+        return failed(behaviour.projectStatus, "project.store.unavailable");
       if (operation.id === projectOperations.get.id)
         return completed({
           id: P2,
@@ -299,6 +303,7 @@ async function fixture(t: TestContext, stateDirectory = temporary(t)) {
         params: { node_id: nodeId },
         body: { reason: "hold" },
       },
+      drop: null,
     });
     await setImmediate();
     run.settle();
@@ -392,6 +397,25 @@ test("(invariant) an approve on a deleted project settles the request and answer
     HttpStatus.NotFound,
     WorkbenchErrorCode.ScopeRequestNotFound,
   );
+});
+
+test("(invariant) an approve with a 503 project read rethrows it and keeps the request open", async (t) => {
+  const f = await fixture(t);
+  const host = await f.host();
+  const request = await f.raise(host, f.invite(host));
+  f.behaviour.projectStatus = HttpStatus.ServiceUnavailable;
+  await refusedWith(
+    f.approve(host, request.id, {
+      project_name: PROJECT_NAME,
+      expected: EXPECTED,
+    }),
+    HttpStatus.ServiceUnavailable,
+    "project.store.unavailable",
+  );
+  const [open] = f.internals.scopeRequests.open(host.id);
+  assert.equal(open?.id, request.id);
+  assert.equal(open?.state, ScopeRequestState.Open);
+  assert.deepEqual(actCalls(f.calls), []);
 });
 
 test("(security) a key set unequal to expected_keys answers 400 expected_invalid and leaves the request open", async (t) => {
