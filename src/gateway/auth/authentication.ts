@@ -32,7 +32,11 @@ import {
   mintWorkerIdentity,
 } from "../../kernel/caller-mint.ts";
 import type { ProjectBindings } from "../../project/contract.ts";
-import type { ResolvedInvite } from "../../workbench/contract.ts";
+import type {
+  GrantClaim,
+  GrantedInvite,
+  ResolvedInvite,
+} from "../../workbench/contract.ts";
 import {
   InstancePlacement,
   type LiveInstance,
@@ -94,13 +98,6 @@ interface GuestCredentials {
   inviteId: string;
   jti: string;
 }
-export interface GrantClaim {
-  inviteId: string;
-  sessionId: string;
-  toolCallId: string;
-  operationId: string;
-  input: unknown;
-}
 export interface GrantTicket {
   sessionId: string;
   toolCallId: string;
@@ -108,10 +105,6 @@ export interface GrantTicket {
 export interface GrantedCall {
   operationId: string;
   input: unknown;
-}
-export interface GrantedInvite {
-  invitedBy: string;
-  projectIds: readonly string[];
 }
 export interface AuthenticationLookups {
   project: Pick<ProjectBindings, "resolveWorkerGroup" | "workerGroupEnded">;

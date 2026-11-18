@@ -17,6 +17,19 @@ export interface ResolvedInvite {
   project_ids: readonly string[];
   granted_operations: readonly string[];
 }
+export interface GrantClaim {
+  inviteId: string;
+  sessionId: string;
+  toolCallId: string;
+  operationId: string;
+  input: unknown;
+}
+
+export interface GrantedInvite {
+  invitedBy: string;
+  projectIds: readonly string[];
+}
+
 export const WORKBENCH_SERVICE_NAME = "workbench";
 export const WORKBENCH_SESSION_PREFIX = "workbench_session";
 export const WORKBENCH_DIRECTORY_NAME = "workbench";
@@ -185,6 +198,9 @@ export const workbenchRecordSchema = z.discriminatedUnion("kind", [
     tool_call_id: z.string(),
     operation_id: z.string(),
     reason: z.string().max(GUARD_REASON_MAX_CHARS),
+    grant: z
+      .strictObject({ invite_id: z.string(), author: authorSchema })
+      .optional(),
   }),
   z.strictObject({
     kind: z.literal(WorkbenchRecordKind.Fork),

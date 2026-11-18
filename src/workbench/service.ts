@@ -81,6 +81,8 @@ import {
   type Author,
   AuthorKind,
   type ConversationMember,
+  type GrantClaim,
+  type GrantedInvite,
   GUARD_AGENT_NAME,
   GuardSummaryCause,
   MessageDelivery,
@@ -137,10 +139,12 @@ import {
 import { forkSummaryRequest, summarize, visibleText } from "./fork-summary.ts";
 import {
   grantableOperations,
+  grantCovers,
+  type GrantedCall,
   GuardAction,
   type GuardClassifier,
-  type GuardDecision,
   guardDecision,
+  type GuardDecision,
   type GuardRun,
   liveGrant,
 } from "./guard.ts";
@@ -169,6 +173,7 @@ import {
   builtinTools,
   type InvokeOperation,
   operationTool,
+  type ToolCaller,
   toolName,
   toolOperations,
 } from "./tools.ts";
@@ -320,6 +325,12 @@ interface GuardOutcomeOptions {
   operation: Operation;
   input: Record<string, unknown>;
   signal: AbortSignal | undefined;
+}
+
+interface GrantTicket {
+  session_id: string;
+  invite_id: string;
+  operation_id: string;
 }
 
 interface OpenSession {
@@ -677,6 +688,7 @@ export class WorkbenchService implements Service {
   private readonly sessions = new Map<string, OpenSession>();
   private readonly finishedPhaseEntries = new Map<string, SessionEntry[]>();
   private readonly feeds = new Map<string, GuestFeed>();
+  private readonly grantTickets = new Map<string, GrantTicket>();
   private readonly loading = new Map<string, Promise<OpenSession>>();
   private readonly shutdown = new CancellationContext();
   private started = false;
@@ -848,11 +860,76 @@ export class WorkbenchService implements Service {
       agentName: session.agentName,
       ...(scope === null
         ? {}
-        : { guest: { scope, resolver: this.dependencies.projectScope } }),
+        : {
+            guest: {
+              scope,
+              resolver: this.dependencies.projectScope,
+              covers: (call) => this.runGrantCovers(host, call),
+            },
+          }),
       request: host.run.request,
       autoMode: () => host.autoMode,
       classifier: () => this.guardClassifier(session, signal),
     };
+  }
+
+  private runGrantCovers(host: OpenSession, call: GrantedCall): boolean {
+    const inviteId = host.run?.inviteId ?? null;
+    if (inviteId === null) return false;
+    const row = this.dependencies.invites.resolve(inviteId);
+    return (
+      row !== null &&
+      grantCovers(liveGrant(row.granted_operations, host.agentName), call)
+    );
+  }
+
+  private storeGrantTicket(
+    session: OpenSession,
+    call: ToolCallEvent,
+    operation: Operation,
+  ) {
+    const host = this.hostOf(session);
+    const inviteId = host.run?.inviteId ?? null;
+    if (host.run?.origin?.kind !== AuthorKind.Guest || inviteId === null)
+      return undefined;
+    this.grantTickets.set(`${host.id}:${call.toolCallId}`, {
+      session_id: host.id,
+      invite_id: inviteId,
+      operation_id: operation.id,
+    });
+    return { invite_id: inviteId, author: this.requestedBy(session) };
+  }
+
+  private dropGrantTickets(host: OpenSession): void {
+    for (const [key, ticket] of this.grantTickets)
+      if (ticket.session_id === host.id) this.grantTickets.delete(key);
+  }
+
+  claimGrant(claim: GrantClaim): GrantedInvite | null {
+    const key = `${claim.sessionId}:${claim.toolCallId}`;
+    const ticket = this.grantTickets.get(key);
+    this.grantTickets.delete(key);
+    if (
+      !ticket ||
+      ticket.session_id !== claim.sessionId ||
+      ticket.invite_id !== claim.inviteId ||
+      ticket.operation_id !== claim.operationId
+    )
+      return null;
+    const row = this.dependencies.invites.resolve(claim.inviteId);
+    const host = this.sessions.get(claim.sessionId);
+    if (!row || row.session_id !== claim.sessionId || !host?.autoMode)
+      return null;
+    const covered = grantCovers(
+      liveGrant(row.granted_operations, host.agentName),
+      {
+        operationId: claim.operationId,
+        input: claim.input,
+      },
+    );
+    return covered
+      ? { invitedBy: row.invited_by, projectIds: row.project_ids }
+      : null;
   }
 
   private guardOutcome(
@@ -865,11 +942,13 @@ export class WorkbenchService implements Service {
     if (decision.action === GuardAction.Block)
       return { allowed: false, reason: decision.reason, terminate: false };
     if (decision.action === GuardAction.Auto) {
+      const grant = this.storeGrantTicket(session, call, operation);
       appendRecord(session.manager, {
         kind: WorkbenchRecordKind.Guard,
         tool_call_id: call.toolCallId,
         operation_id: operation.id,
         reason: decision.reason,
+        ...(grant ? { grant } : {}),
       });
       this.notify(session);
       return ALLOWED;
@@ -1130,7 +1209,7 @@ export class WorkbenchService implements Service {
       ).map((operation) => {
         toolOperationsByName.set(toolName(operation.id), operation);
         return operationTool(operation, this.dependencies.invoke, {
-          requester: (toolCallId) => this.callIdentity(session, toolCallId),
+          callerOf: (toolCallId) => this.callerOf(session, toolCallId),
           scopeOf: () => this.scopeOf(session),
           projectScope: this.dependencies.projectScope,
         });
@@ -1309,13 +1388,16 @@ export class WorkbenchService implements Service {
     return { kind: origin.kind, name: origin.name };
   }
 
-  private callIdentity(
-    session: OpenSession,
-    toolCallId: string,
-  ): HumanIdentity | undefined {
+  private callerOf(session: OpenSession, toolCallId: string): ToolCaller {
+    const host = this.hostOf(session);
+    if (this.grantTickets.has(`${host.id}:${toolCallId}`))
+      return {
+        identity: session.requester,
+        grant: { sessionId: host.id, toolCallId },
+      };
     const approver = session.approvers.get(toolCallId);
     session.approvers.delete(toolCallId);
-    return approver ?? session.requester;
+    return { identity: approver ?? session.requester };
   }
 
   private scopeOf(session: OpenSession): ReadonlySet<string> | null {
@@ -1799,6 +1881,7 @@ export class WorkbenchService implements Service {
         session.runError ??=
           this.memberOfRun(session, run).agent?.state.errorMessage ?? null;
       if (session.run === run) session.run = null;
+      this.dropGrantTickets(session);
       completion.resolve();
       this.notify(session);
       this.startNext(session);

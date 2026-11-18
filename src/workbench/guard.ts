@@ -176,6 +176,7 @@ export type GuardClassifier = (
 export interface GuestRunScope {
   scope: ReadonlySet<string>;
   resolver: ProjectScope;
+  covers(call: GrantedCall): boolean;
 }
 
 export interface GuardRun {
@@ -300,11 +301,16 @@ export function grantCovers(
   return !body || !Object.hasOwn(body, "change");
 }
 
-function classified(result: ClassifyResult, run: GuardRun): GuardDecision {
+function classified(
+  result: ClassifyResult,
+  run: GuardRun,
+  call: GrantedCall,
+): GuardDecision {
   if (result.kind === ClassifyKind.Aborted)
     return block(WORKBENCH_REJECTION_REASON);
   if (result.kind === ClassifyKind.Failed) return confirm(result.cause);
   if (!run.autoMode()) return confirm(GuardCause.AutoModeOff);
+  if (run.guest && !run.guest.covers(call)) return confirm(GuardCause.GuestRun);
   const decision = decide(result.verdict, run.request);
   if (decision.tier === GuardTier.Auto)
     return { action: GuardAction.Auto, reason: result.verdict.reason };
@@ -341,7 +347,9 @@ export async function guardDecision(
   if (refused) return refused;
   const floor = floorOf(operation, input);
   if (floor) return floor;
-  if (run.guest) return confirm(GuardCause.GuestRun);
+  const granted = { operationId: operation.id, input };
+  if (run.guest && !run.guest.covers(granted))
+    return confirm(GuardCause.GuestRun);
   if (!run.autoMode()) return confirm(GuardCause.AutoModeOff);
   if (REVERSIBLE_OPERATIONS.has(operation.id))
     return { action: GuardAction.Auto, reason: GuardCause.Reversible };
@@ -353,5 +361,5 @@ export async function guardDecision(
     input,
   };
   const result = await classify(guardRequest(run.request, call, run.agentName));
-  return classified(result, run);
+  return classified(result, run, granted);
 }

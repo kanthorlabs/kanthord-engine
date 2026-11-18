@@ -259,6 +259,7 @@ function guestRun() {
       resolver: new ProjectScope({
         projectOf: (_prefix, id) => OWNERS.get(id) ?? null,
       }),
+      covers: () => false,
     },
   };
   return { run, classifierCalls: () => classifierCalls };

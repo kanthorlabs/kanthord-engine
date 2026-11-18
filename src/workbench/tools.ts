@@ -199,8 +199,13 @@ export function fullInput(operation: Operation, params: unknown): unknown {
   return { ...(params as object), ...toolShape(operation).omitted };
 }
 
+export interface ToolCaller {
+  identity: HumanIdentity | undefined;
+  grant?: NonNullable<ClientOptions["grant"]>;
+}
+
 export interface OperationToolOptions {
-  requester: (toolCallId: string) => HumanIdentity | undefined;
+  callerOf: (toolCallId: string) => ToolCaller;
   scopeOf: () => ReadonlySet<string> | null;
   projectScope: ProjectScope;
 }
@@ -243,7 +248,7 @@ export function operationTool(
     description: operation.description,
     parameters: schema,
     async execute(toolCallId, params, signal) {
-      const identity = options.requester(toolCallId);
+      const { identity, grant } = options.callerOf(toolCallId);
       assert.ok(identity);
       const input = { ...(params as object), ...omitted };
       refuseOutOfScope(operation, input, options);
@@ -255,6 +260,7 @@ export function operationTool(
         const result = await invoke(operation, input, {
           identity,
           context,
+          ...(grant ? { grant } : {}),
           ...(operation.mutation
             ? { idempotencyKey: createIdempotencyKey() }
             : {}),
