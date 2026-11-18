@@ -71,6 +71,7 @@ export type GuestBody =
   | { kind: typeof WorkbenchRecordKind.ScopeStop; operation_id: string }
   | {
       kind: typeof WorkbenchRecordKind.Notice;
+      watch_entry_id: string;
       projects: {
         name: string;
         nodes: NoticeRecord["projects"][number]["nodes"];
@@ -151,7 +152,16 @@ function projectRecord(record: WorkbenchRecord): GuestBody | null {
     case WorkbenchRecordKind.Notice:
       return {
         kind: record.kind,
-        projects: record.projects.map(({ name, nodes }) => ({ name, nodes })),
+        watch_entry_id: record.watch_entry_id,
+        projects: record.projects.map((block) => ({
+          name: block.name,
+          nodes: block.nodes.map((node) => ({
+            node_id: node.node_id,
+            name: node.name,
+            state: node.state,
+            ended_at: node.ended_at,
+          })),
+        })),
       };
     default:
       return assert.fail("A guest record kind has a projection.");

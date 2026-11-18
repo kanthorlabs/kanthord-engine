@@ -561,6 +561,7 @@ export const guestEntrySchema = z.discriminatedUnion("kind", [
   z.strictObject({
     ...guestEnvelope,
     kind: z.literal(WorkbenchRecordKind.Notice),
+    watch_entry_id: z.string(),
     projects: z.array(
       z.strictObject({
         name: z.string(),

@@ -13,7 +13,9 @@ import { temporaryDirectory } from "../../kernel/test-support.ts";
 import { isString } from "../../kernel/values.ts";
 import {
   WORKBENCH_OPENING_TEXT,
+  WORKBENCH_RECORD_ENTRY,
   WORKBENCH_RELAY_ENTRY,
+  WorkbenchRecordKind,
 } from "../../workbench/contract.ts";
 import {
   completed,
@@ -143,5 +145,76 @@ test(
       [HOST_REQUEST, MENTION_REQUEST].sort(),
     );
     for (const request of requests) assert.ok(!request.includes(RELAY_HEAD));
+  },
+);
+
+const NOTICE_NODE_ONE = "node_01M78TVZCNWCDNTBPNNYJT3EDX";
+const NOTICE_NODE_TWO = "node_01M78TVZCNWCDNTBPNNYJT3EDY";
+const NOTICE_NODE_THREE = "node_01M78TVZCNWCDNTBPNNYJT3EDZ";
+const NOTICE_PROJECT_ONE = "project_01M78TVZCNWCDNTBPNNYJT3EDX";
+const NOTICE_PROJECT_TWO = "project_01M78TVZCNWCDNTBPNNYJT3EDY";
+const NOTICE_ENDED_AT = 1_700_000_000_000;
+const SECOND_REVIEW_REQUEST = "@RE what changed?";
+const SECOND_REVIEW_ANSWER = "Two nodes ended.";
+
+function noticeNode(nodeId: string, state: string) {
+  return {
+    node_id: nodeId,
+    name: `name of ${nodeId}`,
+    state,
+    ended_at: NOTICE_ENDED_AT,
+  };
+}
+
+test(
+  "(happy path) the relay of the next run holds the notice line of each project block and no line for a watch record",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const fixture = await workbenchFixture(
+      t,
+      [
+        fauxAssistantMessage(REVIEW_ANSWER),
+        fauxAssistantMessage(SECOND_REVIEW_ANSWER),
+      ],
+      undefined,
+      undefined,
+      [OPS, REVIEW_AGENT],
+    );
+    const host = await createHost(fixture, OPS);
+    completed(await sendMessage(fixture, host.id, MENTION_REQUEST));
+    await untilIdle(fixture, host.id, t.signal);
+    const { manager } = fixture.workbenchService["sessions"].get(host.id)!;
+    const watchId = manager.appendCustomEntry(WORKBENCH_RECORD_ENTRY, {
+      kind: WorkbenchRecordKind.Watch,
+      node_ids: [NOTICE_NODE_ONE, NOTICE_NODE_TWO, NOTICE_NODE_THREE],
+    });
+    manager.appendCustomEntry(WORKBENCH_RECORD_ENTRY, {
+      kind: WorkbenchRecordKind.Notice,
+      watch_entry_id: watchId,
+      projects: [
+        {
+          project_id: NOTICE_PROJECT_ONE,
+          name: "shop",
+          nodes: [
+            noticeNode(NOTICE_NODE_ONE, "Completed"),
+            noticeNode(NOTICE_NODE_TWO, "Completed"),
+          ],
+        },
+        {
+          project_id: NOTICE_PROJECT_TWO,
+          name: "api",
+          nodes: [noticeNode(NOTICE_NODE_THREE, "Discarded")],
+        },
+      ],
+    });
+    completed(await sendMessage(fixture, host.id, SECOND_REVIEW_REQUEST));
+    await untilIdle(fixture, host.id, t.signal);
+    const [relay] = relaysOf(fixture.provider.calls.at(-SINGLE)!.messages);
+    assert.ok(relay);
+    assert.equal(occurrences(relay, "Completed: shop · 2 Completed"), SINGLE);
+    assert.equal(occurrences(relay, "Completed: api · 1 Discarded"), SINGLE);
+    assert.ok(!relay.includes(watchId));
+    assert.ok(!relay.includes("node_ids"));
+    assert.ok(!relay.includes(NOTICE_PROJECT_ONE));
   },
 );

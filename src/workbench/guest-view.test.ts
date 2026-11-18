@@ -322,3 +322,93 @@ test("(security) guest view drops request_owner_act calls in entries and in stre
     [],
   );
 });
+
+const PROJECT_ID_SHOP = "project_01M78TVZCNWCDNTBPNNYJT3EDX";
+const PROJECT_ID_API = "project_01M78TVZCNWCDNTBPNNYJT3EDY";
+const NODE_ID_ONE = "node_01M78TVZCNWCDNTBPNNYJT3EDX";
+const NODE_ID_TWO = "node_01M78TVZCNWCDNTBPNNYJT3EDY";
+const ENDED_AT = 1_700_000_000_000;
+const WATCH_ENTRY_ID = "entry_watch";
+
+test("(security) guest view projects a notice with names and nodes and with no project_id at any depth", () => {
+  const view = projectEntries([
+    recordEntry(1, {
+      kind: WorkbenchRecordKind.Notice,
+      watch_entry_id: WATCH_ENTRY_ID,
+      projects: [
+        {
+          project_id: PROJECT_ID_SHOP,
+          name: "shop",
+          nodes: [
+            {
+              node_id: NODE_ID_ONE,
+              name: "Checkout",
+              state: "Completed",
+              ended_at: ENDED_AT,
+            },
+          ],
+        },
+        {
+          project_id: PROJECT_ID_API,
+          name: "api",
+          nodes: [
+            {
+              node_id: NODE_ID_TWO,
+              name: "Gateway",
+              state: "Discarded",
+              ended_at: ENDED_AT,
+            },
+          ],
+        },
+      ],
+    }),
+  ]);
+  assert.deepEqual(bodies(view), [
+    {
+      kind: WorkbenchRecordKind.Notice,
+      watch_entry_id: WATCH_ENTRY_ID,
+      projects: [
+        {
+          name: "shop",
+          nodes: [
+            {
+              node_id: NODE_ID_ONE,
+              name: "Checkout",
+              state: "Completed",
+              ended_at: ENDED_AT,
+            },
+          ],
+        },
+        {
+          name: "api",
+          nodes: [
+            {
+              node_id: NODE_ID_TWO,
+              name: "Gateway",
+              state: "Discarded",
+              ended_at: ENDED_AT,
+            },
+          ],
+        },
+      ],
+    },
+  ]);
+  assert.ok(!JSON.stringify(view).includes("project_id"));
+  assert.ok(!JSON.stringify(view).includes(PROJECT_ID_SHOP));
+  assert.ok(GUEST_RECORD_KINDS.includes(WorkbenchRecordKind.Notice));
+});
+
+test("(security) guest view projects a watch record to nothing", () => {
+  const view = projectEntries([
+    recordEntry(1, {
+      kind: WorkbenchRecordKind.Watch,
+      node_ids: [NODE_ID_ONE],
+    }),
+  ]);
+  assert.deepEqual(view, []);
+  assert.ok(
+    !(GUEST_RECORD_KINDS as readonly string[]).includes(
+      WorkbenchRecordKind.Watch,
+    ),
+  );
+});

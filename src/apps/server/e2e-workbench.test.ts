@@ -6293,7 +6293,11 @@ async function discardWatched(fixture: Fixture, nodeId: string) {
 async function watchedDiscard(
   t: TestContext,
   rest: FauxResponseStep[] = [],
-  setup: { stateDirectory?: string; persistence?: Persistence } = {},
+  setup: {
+    stateDirectory?: string;
+    persistence?: Persistence;
+    guard?: boolean;
+  } = {},
 ) {
   const { clock, now } = watchClock();
   const world = await watchWorld(t, (holder) => createSteps(holder, ...rest), {
@@ -6612,3 +6616,71 @@ test("(happy path) an open guest stream receives one entries frame with the proj
     !JSON.stringify(frame.data).includes(await firstProjectId(fixture)),
   );
 });
+
+const WATCH_FORK_SUMMARY = "Goal: finish the watched node.";
+const WATCH_FORK_TEXT = "Continue after the watched node.";
+const WATCH_FORK_ANSWER = "I continue after the watched node.";
+const WATCH_NOTICE_LINE = `Completed: ${PROJECT_NAME} · 1 Discarded`;
+const FORK_RECORD_KIND = "fork";
+
+function forkSteps() {
+  return [
+    fauxAssistantMessage(WATCH_FORK_SUMMARY),
+    pass(),
+    fauxAssistantMessage(WATCH_FORK_ANSWER),
+  ];
+}
+
+function kindsOf(file: string): string[] {
+  return [
+    WorkbenchRecordKind.Watch,
+    WorkbenchRecordKind.Notice,
+    FORK_RECORD_KIND,
+  ].flatMap((kind) => fileRecordsOf(file, kind).map(() => kind));
+}
+
+test("(happy path, fork state) the fork material of a source with a notice record holds its notice line", async (t) => {
+  const { world } = await watchedDiscard(t, forkSteps(), { guard: true });
+  const { fixture, hostId } = world;
+  completed(await ownerGet(fixture, hostId));
+  assert.equal(noticeRecords(world).length, SINGLE);
+  completed(await forkOf(fixture, hostId, WATCH_FORK_TEXT));
+  const [summarizer] = callsOf(fixture, FORK_SUMMARY_PROMPT);
+  const { conversation } = userRequestOf(summarizer!);
+  assert.ok(conversation!.includes(WATCH_NOTICE_LINE));
+});
+
+test("(invariant, fork state) a fork copies no watch record, and the notice of a watched node appears in the source only", async (t) => {
+  const { world, clock, nodeId } = await watchedDiscardLater(t);
+  const { fixture, hostId } = world;
+  const before = kindsOf(world.hostFile);
+  assert.deepEqual(before, [WorkbenchRecordKind.Watch]);
+  const forked = completed(await forkOf(fixture, hostId, WATCH_FORK_TEXT));
+  await untilIdle(fixture, forked.session_id, t.signal);
+  const forkFile = completed(
+    await ownerGet(fixture, forked.session_id),
+  ).resume_command.replace(/^pi --session /, "");
+  assert.deepEqual(kindsOf(forkFile), [FORK_RECORD_KIND]);
+  await discardWatched(fixture, nodeId);
+  clock.now += WORKBENCH_WATCH_CHECK_MS;
+  completed(await ownerGet(fixture, forked.session_id));
+  assert.deepEqual(kindsOf(forkFile), [FORK_RECORD_KIND]);
+  completed(await ownerGet(fixture, hostId));
+  assert.deepEqual(kindsOf(world.hostFile), [
+    WorkbenchRecordKind.Watch,
+    WorkbenchRecordKind.Notice,
+  ]);
+  completed(await ownerGet(fixture, forked.session_id));
+  assert.deepEqual(kindsOf(forkFile), [FORK_RECORD_KIND]);
+});
+
+async function watchedDiscardLater(t: TestContext) {
+  const { clock, now } = watchClock();
+  const world = await watchWorld(
+    t,
+    (holder) => createSteps(holder, ...forkSteps()),
+    { agentName: OPS, now, guard: true },
+  );
+  const nodeId = await approveCreate(world, t.signal);
+  return { world, clock, nodeId };
+}
