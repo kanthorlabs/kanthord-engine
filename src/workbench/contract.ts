@@ -30,6 +30,7 @@ export interface GrantedInvite {
   projectIds: readonly string[];
 }
 
+export const WORKBENCH_PROJECT_NAME_MAX_LENGTH = 63;
 export const WORKBENCH_REQUEST_OWNER_ACT_TOOL = "request_owner_act";
 export const WORKBENCH_SERVICE_NAME = "workbench";
 export const WORKBENCH_SESSION_PREFIX = "workbench_session";
@@ -111,6 +112,10 @@ export const WorkbenchErrorCode = {
   ProjectInvalid: "workbench.invite.project_invalid",
   ScopeMismatch: "workbench.invite.scope_mismatch",
   GrantInvalid: "workbench.invite.grant_invalid",
+  ScopeRequestNotFound: "workbench.scope_request.not_found",
+  ScopeRequestNameMismatch: "workbench.scope_request.name_mismatch",
+  ScopeRequestExpectedInvalid: "workbench.scope_request.expected_invalid",
+  ScopeRequestRefused: "workbench.scope_request.refused",
   EvidenceNameMismatch: "workbench.evidence.name_mismatch",
 } as const;
 
@@ -303,7 +308,35 @@ export const participantListItemSchema = sessionListFields.extend({
 
 export const sessionListItemSchema = sessionListFields.extend({
   participants: z.array(participantListItemSchema),
+  scope_requests: z.number().int().nonnegative(),
 });
+
+export const ScopeRequestState = {
+  Open: "open",
+  Running: "running",
+} as const;
+export type ScopeRequestState =
+  (typeof ScopeRequestState)[keyof typeof ScopeRequestState];
+
+export const scopeRequestViewSchema = z.strictObject({
+  id: identitySchema(WORKBENCH_SCOPE_REQUEST_PREFIX),
+  invite_id: z.string(),
+  invitee_name: z.string(),
+  guest_name: z.string(),
+  agent_name: z.string(),
+  operation_id: z.string(),
+  description: z.string(),
+  input: z.unknown(),
+  target_id: z.string(),
+  ids: z.array(z.string()),
+  project_id: z.string(),
+  expected_keys: z.array(z.string()),
+  created_at: timestampSchema,
+  expires_at: timestampSchema,
+  state: z.enum(ScopeRequestState),
+  error_code: z.string().nullable(),
+});
+export type ScopeRequestView = z.infer<typeof scopeRequestViewSchema>;
 
 export const workbenchSessionSchema = z.strictObject({
   id: identitySchema(WORKBENCH_SESSION_PREFIX),
@@ -316,6 +349,11 @@ export const workbenchSessionSchema = z.strictObject({
   resume_command: z.string(),
 });
 export type WorkbenchSession = z.infer<typeof workbenchSessionSchema>;
+
+export const workbenchSessionGetSchema = workbenchSessionSchema.extend({
+  scope_requests: z.array(scopeRequestViewSchema),
+});
+export type WorkbenchSessionGet = z.infer<typeof workbenchSessionGetSchema>;
 
 export const WORKBENCH_REJECTION_REASON = "The human rejected the call.";
 
@@ -376,6 +414,7 @@ export const sessionEventsSchema = z.strictObject({
   members: z.array(conversationMemberSchema),
   entries: z.array(memberEntrySchema),
   snapshot: runSnapshotSchema,
+  scope_requests: z.array(scopeRequestViewSchema),
   version: z.number().int().nonnegative(),
 });
 export type SessionEvents = z.infer<typeof sessionEventsSchema>;
@@ -543,9 +582,9 @@ export const workbenchOperations = {
       query: emptyFields,
       body: z.null(),
     }),
-    output: workbenchSessionSchema,
+    output: workbenchSessionGetSchema,
     description:
-      "Get the configuration, the entries of the completed runs and the run state of a workbench session.",
+      "Get the configuration, the entries of the completed runs, the run state and the open out-of-scope requests of a workbench session.",
   },
   "session.fork": {
     ...workbenchMutation,
@@ -684,6 +723,50 @@ export const workbenchOperations = {
     output: sessionParams.extend({ enabled: z.boolean() }),
     description:
       "Switch auto mode of a workbench session on or off. Only the owner changes it. A set to the current value changes nothing.",
+  },
+  "session.scopeRequest.approve": {
+    ...workbenchMutation,
+    id: "workbench.session.scopeRequest.approve",
+    method: HttpMethod.Post,
+    path: "/api/workbench/session/:session_id/scope-request/:request_id/approve",
+    input: z.strictObject({
+      params: sessionParams.extend({
+        request_id: identitySchema(WORKBENCH_SCOPE_REQUEST_PREFIX),
+      }),
+      query: emptyFields,
+      body: z.strictObject({
+        project_name: z.string().min(1).max(WORKBENCH_PROJECT_NAME_MAX_LENGTH),
+        expected: z.record(
+          z.string().regex(/^(expected_[a-z_]+|blocked_attempt)$/),
+          z.union([z.number().int(), z.string()]),
+        ),
+      }),
+    }),
+    output: z.strictObject({
+      request_id: identitySchema(WORKBENCH_SCOPE_REQUEST_PREFIX),
+      outcome: z.enum(ActionOutcome),
+      error_code: z.string().nullable(),
+    }),
+    description:
+      "Run one act that a guest-started run asked for outside the shared projects, as the owner's own act. `project_name` is the exact name of the project of the act, with no trim and no case folding. `expected` holds one value for each concurrency key of the act, the keys that `expected_keys` of the request lists. A request that is unknown, expired, settled, running or revoked answers 404 `workbench.scope_request.not_found`. A different `project_name` answers 409 `workbench.scope_request.name_mismatch` and the request stays open. A key set that differs from `expected_keys`, or values that fail the act input, answers 400 `workbench.scope_request.expected_invalid` and the request stays open. An act that is no longer eligible, or whose target is now inside the shared projects, answers 409 `workbench.scope_request.refused` and deletes the request. An act that the owning service refuses answers `outcome` `failed` with its `error_code`, and the request stays open.",
+  },
+  "session.scopeRequest.reject": {
+    ...workbenchMutation,
+    id: "workbench.session.scopeRequest.reject",
+    method: HttpMethod.Post,
+    path: "/api/workbench/session/:session_id/scope-request/:request_id/reject",
+    input: z.strictObject({
+      params: sessionParams.extend({
+        request_id: identitySchema(WORKBENCH_SCOPE_REQUEST_PREFIX),
+      }),
+      query: emptyFields,
+      body: z.strictObject({}),
+    }),
+    output: z.strictObject({
+      request_id: identitySchema(WORKBENCH_SCOPE_REQUEST_PREFIX),
+    }),
+    description:
+      "Reject an out-of-scope request of a guest-started run. A request that is unknown, expired, settled, running or revoked answers 404 `workbench.scope_request.not_found`.",
   },
   "session.action.report": {
     ...workbenchMutation,

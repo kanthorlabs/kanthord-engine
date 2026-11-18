@@ -20,7 +20,8 @@ import {
 } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus, MediaType } from "../kernel/http.ts";
-import { createIdentity } from "../kernel/identity.ts";
+import { createIdempotencyKey, createIdentity } from "../kernel/identity.ts";
+import { projectOperations } from "../project/contract.ts";
 import type { ProjectScope } from "../kernel/project-scope.ts";
 import { piProviderId } from "../kernel/pi-provider.ts";
 import type { GuestIdentity, HumanIdentity } from "../kernel/caller.ts";
@@ -29,9 +30,10 @@ import {
   type CallerContext,
   type Operation,
   type OperationRegistry,
+  type OperationResult,
   OperationResultType,
 } from "../kernel/operation.ts";
-import { isString } from "../kernel/values.ts";
+import { isObject, isString } from "../kernel/values.ts";
 import {
   type Healthcheck,
   HealthStatus,
@@ -92,6 +94,7 @@ import {
   QueueClearCause,
   type QueuedMessage,
   type RunSnapshot,
+  type ScopeRequestView,
   type SessionEntry,
   type SessionEvents,
   WORKBENCH_ACTION_RESULT_ENTRY,
@@ -113,6 +116,7 @@ import {
   workbenchOperations,
   WorkbenchRecordKind,
   type WorkbenchSession,
+  type WorkbenchSessionGet,
 } from "./contract.ts";
 import { missionOperations } from "../mission/contract.ts";
 import type { ScopedInput } from "../kernel/project-scope.ts";
@@ -120,6 +124,7 @@ import {
   type OwnerActCall,
   requestInputSchema,
   requestOwnerActTool,
+  type ScopeRequest,
   ScopeRequests,
 } from "./scope-requests.ts";
 import {
@@ -155,6 +160,7 @@ import {
   guardDecision,
   type GuardDecision,
   type GuardRun,
+  HUMAN_ONLY_OPERATIONS,
   liveGrant,
 } from "./guard.ts";
 import {
@@ -229,6 +235,44 @@ interface InviteBody {
   invitee_name: string;
   project_ids: string[];
   granted_operations: string[];
+}
+
+const SCOPE_REQUEST_APPROVED = "approved";
+const SCOPE_REQUEST_REJECTED = "rejected";
+const SCOPE_REQUEST_INDETERMINATE = "indeterminate";
+const SCOPE_REQUEST_FAILED = "workbench.scope_request.failed";
+
+interface ScopeRequestAnswer {
+  request_id: string;
+  outcome: ActionOutcome;
+  error_code: string | null;
+}
+
+interface ScopeRequestSettled {
+  decision: string;
+  typedName: string | null;
+  code: string | null;
+}
+
+interface ScopeRequestDone {
+  result: OperationResult<unknown>;
+  typedName: string;
+}
+
+interface RunningScopeRequest {
+  request: ScopeRequest;
+  body: ScopeRequestApproveBody;
+}
+
+interface ScopeRequestApproveBody {
+  project_name: string;
+  expected: Record<string, number | string>;
+}
+
+interface ScopeRequestApproval {
+  sessionId: string;
+  requestId: string;
+  body: ScopeRequestApproveBody;
 }
 
 interface JoinBody {
@@ -637,6 +681,22 @@ function displayNameOf(agentName: string): string {
   return declaration.display_name;
 }
 
+function scopeRequestError(
+  status: number,
+  code: string,
+  message: string,
+): OperationError {
+  return new OperationError(status, code, message);
+}
+
+function scopeRequestNotFound(): OperationError {
+  return scopeRequestError(
+    HttpStatus.NotFound,
+    WorkbenchErrorCode.ScopeRequestNotFound,
+    "The workbench conversation holds no such request.",
+  );
+}
+
 function notHost(session: OpenSession): OperationError {
   assert.ok(session.hostId);
   return new OperationError(
@@ -980,7 +1040,7 @@ export class WorkbenchService implements Service {
       input: parsed.data as ScopedInput,
       scope,
     });
-    this.scopeRequests.raise({
+    const raised = this.scopeRequests.raise({
       sessionId: raise.hostId,
       inviteId: raise.inviteId,
       inviteExpiresAt: row.expires_at,
@@ -991,6 +1051,8 @@ export class WorkbenchService implements Service {
       projects,
       scope,
     });
+    const host = this.sessions.get(raise.hostId);
+    if (raised && host) this.notify(host);
   }
 
   private applyRunTools(member: OpenSession, guestRun: boolean): void {
@@ -1641,6 +1703,246 @@ export class WorkbenchService implements Service {
     return { session_id: sessionId, tool_call_id: toolCallId, approved };
   }
 
+  private scopeRequestViews(host: OpenSession): ScopeRequestView[] {
+    const names = new Map(
+      this.dependencies.invites
+        .list(host.id)
+        .map(({ id, invitee_name: name }) => [id, name]),
+    );
+    const descriptions = new Map(
+      this.dependencies
+        .operations()
+        .map(({ id, description }) => [id, description]),
+    );
+    return this.scopeRequests.open(host.id).map((request) => ({
+      id: request.id,
+      invite_id: request.inviteId,
+      invitee_name: names.get(request.inviteId) ?? request.guestName,
+      guest_name: request.guestName,
+      agent_name: request.agentName,
+      operation_id: request.operationId,
+      description: descriptions.get(request.operationId) ?? "",
+      input: request.input,
+      target_id: request.targetId,
+      ids: [...request.ids],
+      project_id: request.projectId,
+      expected_keys: [...request.expectedKeys],
+      created_at: request.createdAt,
+      expires_at: request.expiresAt,
+      state: request.state,
+      error_code: request.error,
+    }));
+  }
+
+  private logScopeRequest(
+    host: OpenSession,
+    request: ScopeRequest,
+    settled: ScopeRequestSettled,
+  ): void {
+    this.dependencies.logger.info(
+      {
+        conversation_id: host.id,
+        request_id: request.id,
+        invite_id: request.inviteId,
+        guest_name: request.guestName,
+        operation_id: request.operationId,
+        target_id: request.targetId,
+        project_id: request.projectId,
+        typed_name: settled.typedName,
+        decision: settled.decision,
+        outcome_code: settled.code,
+      },
+      "workbench.scope_request.settled",
+    );
+  }
+
+  private async projectNameOf(
+    caller: CallerContext,
+    projectId: string,
+  ): Promise<string> {
+    const result = await this.dependencies.invoke(
+      projectOperations.get,
+      { params: { project_id: projectId }, query: {}, body: null },
+      { identity: caller.identity, context: caller.context },
+    );
+    if (result.type === OperationResultType.Failure)
+      throw new OperationError(
+        result.status,
+        result.error.error.code,
+        result.error.error.message,
+      );
+    assert.ok(result.type === OperationResultType.Completed);
+    return projectOperations.get.output.parse(result.data).name;
+  }
+
+  private scopeRequestOperation(
+    request: ScopeRequest,
+    row: LiveInvite,
+  ): Operation | null {
+    const operation = this.dependencies
+      .operations()
+      .find(({ id }) => id === request.operationId);
+    if (!operation || HUMAN_ONLY_OPERATIONS.has(operation.id)) return null;
+    const grantable = new Set(grantableOperations(request.agentName).keys());
+    const covered = grantCovers(grantable, {
+      operationId: operation.id,
+      input: request.input,
+    });
+    const scope = new Set(row.project_ids);
+    const { projects } = this.dependencies.projectScope.resolve(operation, {
+      input: request.input as ScopedInput,
+      scope,
+    });
+    const owners = [...projects.values()];
+    const held =
+      owners.length > NO_CHARACTERS &&
+      owners.every((owner) => owner === request.projectId) &&
+      !scope.has(request.projectId);
+    return covered && held ? operation : null;
+  }
+
+  private mergedScopeInput(
+    operation: Operation,
+    request: ScopeRequest,
+    expected: Record<string, number | string>,
+  ): ScopedInput {
+    const stored = request.input as ScopedInput;
+    const merged = isObject(stored.body)
+      ? { ...stored, body: { ...stored.body, ...expected } }
+      : stored;
+    const parsed = operation.input.safeParse(merged);
+    if (!parsed.success)
+      throw scopeRequestError(
+        HttpStatus.BadRequest,
+        WorkbenchErrorCode.ScopeRequestExpectedInvalid,
+        "The values do not fit the input of the act.",
+      );
+    return parsed.data as ScopedInput;
+  }
+
+  private async runScopeRequest(
+    caller: CallerContext,
+    host: OpenSession,
+    approval: RunningScopeRequest,
+  ): Promise<ScopeRequestAnswer> {
+    const { request, body } = approval;
+    const row = this.dependencies.invites.resolve(request.inviteId);
+    if (row === null || row.session_id !== host.id) {
+      this.scopeRequests.settle(request);
+      throw scopeRequestNotFound();
+    }
+    const name = await this.projectNameOf(caller, request.projectId);
+    if (body.project_name !== name)
+      throw scopeRequestError(
+        HttpStatus.Conflict,
+        WorkbenchErrorCode.ScopeRequestNameMismatch,
+        "The typed name differs from the name of the project.",
+      );
+    const keys = Object.keys(body.expected).sort();
+    if (keys.join() !== request.expectedKeys.join())
+      throw scopeRequestError(
+        HttpStatus.BadRequest,
+        WorkbenchErrorCode.ScopeRequestExpectedInvalid,
+        "The expected values name the concurrency keys of the act.",
+      );
+    const operation = this.scopeRequestOperation(request, row);
+    if (operation === null) {
+      this.scopeRequests.settle(request);
+      throw scopeRequestError(
+        HttpStatus.Conflict,
+        WorkbenchErrorCode.ScopeRequestRefused,
+        "The act is no longer open to the owner as an out-of-scope request.",
+      );
+    }
+    const input = this.mergedScopeInput(operation, request, body.expected);
+    const result = await this.dependencies.invoke(operation, input, {
+      identity: caller.identity,
+      context: caller.context,
+      idempotencyKey: createIdempotencyKey(),
+    });
+    return this.settledScopeRequest(host, request, {
+      result,
+      typedName: body.project_name,
+    });
+  }
+
+  private settledScopeRequest(
+    host: OpenSession,
+    request: ScopeRequest,
+    done: ScopeRequestDone,
+  ): ScopeRequestAnswer {
+    const { result, typedName } = done;
+    if (result.type === OperationResultType.Completed) {
+      this.scopeRequests.settle(request);
+      this.logScopeRequest(host, request, {
+        decision: SCOPE_REQUEST_APPROVED,
+        typedName,
+        code: null,
+      });
+      return {
+        request_id: request.id,
+        outcome: ActionOutcome.Done,
+        error_code: null,
+      };
+    }
+    const code =
+      result.type === OperationResultType.Failure
+        ? result.error.error.code
+        : SCOPE_REQUEST_INDETERMINATE;
+    if (result.type === OperationResultType.Failure)
+      this.scopeRequests.release(request, code);
+    else this.scopeRequests.settle(request);
+    this.logScopeRequest(host, request, {
+      decision: SCOPE_REQUEST_APPROVED,
+      typedName,
+      code,
+    });
+    return {
+      request_id: request.id,
+      outcome: ActionOutcome.Failed,
+      error_code: code,
+    };
+  }
+
+  async scopeRequestApprove(
+    caller: CallerContext,
+    approval: ScopeRequestApproval,
+  ): Promise<ScopeRequestAnswer> {
+    const host = await this.session(approval.sessionId);
+    this.requireHost(host);
+    const request = this.scopeRequests.claim(host.id, approval.requestId);
+    if (!request) throw scopeRequestNotFound();
+    this.notify(host);
+    try {
+      return await this.runScopeRequest(caller, host, {
+        request,
+        body: approval.body,
+      });
+    } catch (error) {
+      this.scopeRequests.release(
+        request,
+        error instanceof OperationError ? error.code : SCOPE_REQUEST_FAILED,
+      );
+      throw error;
+    } finally {
+      this.notify(host);
+    }
+  }
+
+  async scopeRequestReject(sessionId: string, requestId: string) {
+    const host = await this.session(sessionId);
+    this.requireHost(host);
+    const request = this.scopeRequests.reject(host.id, requestId);
+    if (!request) throw scopeRequestNotFound();
+    this.logScopeRequest(host, request, {
+      decision: SCOPE_REQUEST_REJECTED,
+      typedName: null,
+      code: null,
+    });
+    this.notify(host);
+    return { request_id: request.id };
+  }
+
   async autoModeSet(
     sessionId: string,
     enabled: boolean,
@@ -1986,6 +2288,7 @@ export class WorkbenchService implements Service {
         parseCursor(after, host.id),
       ),
       snapshot: this.snapshot(host),
+      scope_requests: this.scopeRequestViews(host),
       version: this.feedOf(host).version,
     };
   }
@@ -2867,6 +3170,7 @@ export class WorkbenchService implements Service {
       items.push({
         ...host,
         ...this.runState(host.id),
+        scope_requests: this.scopeRequests.count(host.id),
         display_name: displayNameOf(host.agent_name),
         modified: Math.max(
           host.modified,
@@ -2921,10 +3225,13 @@ export class WorkbenchService implements Service {
     return this.view(session);
   }
 
-  async get(sessionId: string): Promise<WorkbenchSession> {
+  async get(sessionId: string): Promise<WorkbenchSessionGet> {
     const session = await this.session(sessionId);
     this.requireHost(session);
-    return this.view(session);
+    return {
+      ...(await this.view(session)),
+      scope_requests: this.scopeRequestViews(session),
+    };
   }
 
   async configure(
@@ -3090,6 +3397,20 @@ export class WorkbenchService implements Service {
           approved: body.approved,
           nodeName: body.node_name,
         }),
+    );
+    registry.register(
+      workbenchOperations["session.scopeRequest.approve"],
+      ({ params, body }, caller) =>
+        this.scopeRequestApprove(caller, {
+          sessionId: params.session_id,
+          requestId: params.request_id,
+          body,
+        }),
+    );
+    registry.register(
+      workbenchOperations["session.scopeRequest.reject"],
+      ({ params }) =>
+        this.scopeRequestReject(params.session_id, params.request_id),
     );
     registry.register(
       workbenchOperations["session.action.report"],

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { ScopeRequestState } from "./contract.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import type { Operation } from "../kernel/operation.ts";
 import { ProjectScope } from "../kernel/project-scope.ts";
@@ -8,7 +9,6 @@ import { projectOperations } from "../project/contract.ts";
 import {
   isConcurrencyKey,
   ScopeRequests,
-  ScopeRequestState,
   WORKBENCH_SCOPE_REQUEST_LIMIT,
   WORKBENCH_SCOPE_REQUEST_REPEAT_MS,
 } from "./scope-requests.ts";

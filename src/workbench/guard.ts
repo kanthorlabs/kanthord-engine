@@ -91,6 +91,8 @@ export const HUMAN_ONLY_OPERATIONS: ReadonlySet<string> = new Set([
   workbenchOperations["session.queue.remove"].id,
   workbenchOperations["session.action.report"].id,
   workbenchOperations["session.autoMode.set"].id,
+  workbenchOperations["session.scopeRequest.approve"].id,
+  workbenchOperations["session.scopeRequest.reject"].id,
   workbenchOperations["invite.revoke"].id,
   footprintOperations["alert.acknowledge"].id,
   footprintOperations["backup.delete"].id,

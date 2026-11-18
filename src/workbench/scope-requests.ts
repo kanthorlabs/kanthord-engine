@@ -6,6 +6,7 @@ import { createIdentity } from "../kernel/identity.ts";
 import type { Operation } from "../kernel/operation.ts";
 import { isObject, isString } from "../kernel/values.ts";
 import {
+  ScopeRequestState,
   WORKBENCH_PROJECT_SCOPE_TEXT,
   WORKBENCH_REQUEST_OWNER_ACT_TOOL,
   WORKBENCH_SCOPE_REQUEST_PREFIX,
@@ -20,13 +21,6 @@ const BLOCKED_ATTEMPT_KEY = "blocked_attempt";
 const TARGET_KEYS = ["node_id", "project_id"] as const;
 const BODY_PART = "body";
 const ONE_PROJECT = 1;
-
-export const ScopeRequestState = {
-  Open: "open",
-  Running: "running",
-} as const;
-type ScopeRequestState =
-  (typeof ScopeRequestState)[keyof typeof ScopeRequestState];
 
 export function isConcurrencyKey(key: string): boolean {
   return key.startsWith(EXPECTED_PREFIX) || key === BLOCKED_ATTEMPT_KEY;
@@ -194,9 +188,7 @@ export class ScopeRequests {
   open(sessionId: string): readonly ScopeRequest[] {
     this.prune();
     return [...this.requests.values()].filter(
-      (request) =>
-        request.sessionId === sessionId &&
-        request.state === ScopeRequestState.Open,
+      (request) => request.sessionId === sessionId,
     );
   }
 
