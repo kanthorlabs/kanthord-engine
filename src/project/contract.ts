@@ -10,6 +10,7 @@ import {
   OperationLifetime,
   StoreName,
 } from "../kernel/operation.ts";
+import { PROJECT_NAME_MAX_LENGTH } from "../kernel/project-name.ts";
 import { ProjectScopeRule } from "../kernel/project-scope.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { isObject, isString } from "../kernel/values.ts";
@@ -102,7 +103,6 @@ export const WORKER_PLATFORM = "kanthord";
 export const PROJECT_OPERATION_TIMEOUT_MS = 30000;
 export const LIST_LIMIT_DEFAULT = 100;
 export const LIST_LIMIT_MAX = 1000;
-export const PROJECT_NAME_MAX_LENGTH = 63;
 export const ENVIRONMENT_KEY_MAX_LENGTH = 512;
 export const EMPTY_LENGTH = 0;
 export const PROJECT_NAME_PATTERN = /^[a-z][a-z0-9-]*$/;

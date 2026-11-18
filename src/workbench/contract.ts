@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { HttpMethod, HttpStatus, MediaType } from "../kernel/http.ts";
 import { identitySchema } from "../kernel/identity.ts";
+import { PROJECT_NAME_MAX_LENGTH } from "../kernel/project-name.ts";
 import {
   AccessPolicy,
   type Operation,
@@ -734,7 +735,7 @@ export const workbenchOperations = {
       }),
       query: emptyFields,
       body: z.strictObject({
-        project_name: z.string().min(1),
+        project_name: z.string().min(1).max(PROJECT_NAME_MAX_LENGTH),
         expected: z.record(
           z.string().regex(/^(expected_[a-z_]+|blocked_attempt)$/),
           z.union([z.number().int(), z.string()]),

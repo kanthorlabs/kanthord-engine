@@ -23,6 +23,7 @@ import {
 } from "../kernel/test-identity.ts";
 import { temporary } from "../kernel/test-support.ts";
 import { background } from "../kernel/context.ts";
+import { PROJECT_NAME_MAX_LENGTH } from "../kernel/project-name.ts";
 import { missionOperations } from "../mission/contract.ts";
 import { ProjectErrorCode, projectOperations } from "../project/contract.ts";
 import {
@@ -668,4 +669,15 @@ test("(security) a new service on the same state directory holds no request and 
   const restarted = await fixture(t, f.stateDirectory);
   assert.equal(restarted.internals.scopeRequests.count(host.id), NO_ITEMS);
   assert.equal(restarted.internals.grantTickets.size, NO_ITEMS);
+});
+
+test("(invariant) the approve body refuses a project_name longer than the project name limit", () => {
+  const { body } = workbenchOperations["session.scopeRequest.approve"].input
+    .shape as unknown as {
+    body: { safeParse(input: unknown): { success: boolean } };
+  };
+  const approve = (name: string) =>
+    body.safeParse({ project_name: name, expected: EXPECTED }).success;
+  assert.equal(approve("a".repeat(PROJECT_NAME_MAX_LENGTH)), true);
+  assert.equal(approve("a".repeat(PROJECT_NAME_MAX_LENGTH + SINGLE)), false);
 });

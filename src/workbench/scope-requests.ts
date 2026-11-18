@@ -256,7 +256,7 @@ const REQUEST_OWNER_ACT_PARAMETERS = Type.Object(
       {
         additionalProperties: true,
         description:
-          "The params, query and body of the act. Leave out every key that starts with expected_ and the key blocked_attempt. The owner supplies them.",
+          "The params, query and body of the act, with every field that the act input requires, for example body.reason in the words of the guest. Leave out every key that starts with expected_ and the key blocked_attempt, even when the schema of the act lists them as required. The owner supplies them.",
       },
     ),
   },

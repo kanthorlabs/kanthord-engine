@@ -655,3 +655,13 @@ test(
     );
   },
 );
+
+test("(invariant) the input description of request_owner_act names the body reason to give and the expected_ keys to leave out", () => {
+  const { parameters } = requestOwnerActTool(() => undefined);
+  const { description } = (
+    parameters as { properties: { input: { description: string } } }
+  ).properties.input;
+  assert.match(description, /body\.reason/);
+  assert.match(description, /expected_/);
+  assert.match(description, /blocked_attempt/);
+});
