@@ -652,6 +652,7 @@ async function guestFixture(t: TestContext) {
     invited_by: INVITER,
     expires_at: expiresAt,
     project_ids: projectIds,
+    granted_operations: [],
   });
   const issued = await generateGuestJWT(
     fixture.config.master_key,
@@ -752,6 +753,7 @@ test("a guest token with a future exp and an invite row that expired answers gat
     invited_by: INVITER,
     expires_at: Date.now() - 1,
     project_ids: g.projectIds,
+    granted_operations: [],
   });
   await g.refuse(g.issued.token, `gateway.jwt.${JwtCause.InviteEnded}`);
 });
@@ -834,6 +836,7 @@ test("(security) recheck re-mints the read-only identity with the live project_i
     invited_by: INVITER,
     expires_at: g.expiresAt,
     project_ids: liveIds,
+    granted_operations: [],
   });
   const rechecked = await g.fixture.authentication.recheck(
     identity.reader,

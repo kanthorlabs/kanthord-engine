@@ -656,6 +656,7 @@ test("the idempotency caller key of a guest mutation is guest:<guest_id>", async
           invited_by: "ulrich",
           expires_at: expiresAt,
           project_ids: [],
+          granted_operations: [],
         }),
       },
     },
@@ -749,6 +750,7 @@ async function scopeFixture(
     invited_by: "ulrich",
     expires_at: Date.now() + GUEST_LIFETIME_MS,
     project_ids: projectIds,
+    granted_operations: [],
   });
   const lookup = new CountingLookup();
   const invocation = createInvocation({

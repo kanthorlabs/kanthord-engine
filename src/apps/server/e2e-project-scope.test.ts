@@ -396,7 +396,11 @@ test(
         {
           params: { session_id: host.id },
           query: {},
-          body: { invitee_name: GUEST_NAME, project_ids: projectIds },
+          body: {
+            invitee_name: GUEST_NAME,
+            project_ids: projectIds,
+            granted_operations: [],
+          },
         },
         fixture.options,
       ),

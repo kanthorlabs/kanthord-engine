@@ -115,6 +115,7 @@ async function invite(fixture: WorkbenchFixture, sessionId: string) {
         body: {
           invitee_name: GUEST_NAME,
           project_ids: await invitedProjectIds(fixture),
+          granted_operations: [],
         },
       },
       fixture.options,

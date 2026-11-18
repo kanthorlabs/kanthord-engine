@@ -4550,6 +4550,7 @@ async function inviteGuest(fixture: Fixture, sessionId: string) {
         body: {
           invitee_name: GUEST_NAME,
           project_ids: await invitedProjectIds(fixture),
+          granted_operations: [],
         },
       },
       fixture.options,
@@ -4821,7 +4822,11 @@ test(
         {
           params: { session_id: session.id },
           query: {},
-          body: { invitee_name: GUEST_NAME, project_ids: [first.projectId] },
+          body: {
+            invitee_name: GUEST_NAME,
+            project_ids: [first.projectId],
+            granted_operations: [],
+          },
         },
         fixture.options,
       ),

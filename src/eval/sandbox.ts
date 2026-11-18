@@ -684,7 +684,11 @@ async function joinGuest(
   const invite = await sandbox.call(workbenchOperations["invite.create"], {
     params: { session_id: sessionId },
     query: {},
-    body: { invitee_name: GUEST_NAME, project_ids: [...projectIds] },
+    body: {
+      invitee_name: GUEST_NAME,
+      project_ids: [...projectIds],
+      granted_operations: [],
+    },
   });
   const joined = await sandbox.call(workbenchOperations["invite.join"], {
     params: {},

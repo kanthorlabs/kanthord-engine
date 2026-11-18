@@ -4,6 +4,8 @@ import { test, type TestContext } from "node:test";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
+import { agentOperations } from "../agent/contract.ts";
+import { missionOperations } from "../mission/contract.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import { Store } from "../kernel/store.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
@@ -17,6 +19,7 @@ import {
   WorkbenchErrorCode,
   workbenchOperations,
 } from "./contract.ts";
+import { liveGrant } from "./guard.ts";
 import { WorkbenchInvites } from "./invites.ts";
 import { workbenchMigrations } from "./migrations.ts";
 import {
@@ -26,6 +29,7 @@ import {
 } from "./service.ts";
 
 const OWNER = "kanthord";
+const HOST_AGENT = "ops@1";
 const PROJECT = createIdentity("project");
 const OTHER_PROJECT = createIdentity("project");
 const GUEST_NAME = "Mira";
@@ -49,6 +53,7 @@ const caller: CallerContext = {
 interface HeldSession {
   id: string;
   hostId: string | null;
+  agentName: string;
   evidenceGrants: Set<string>;
 }
 
@@ -83,6 +88,7 @@ function fixture(t: TestContext) {
     const session = {
       id: createIdentity(WORKBENCH_SESSION_PREFIX),
       hostId: null,
+      agentName: HOST_AGENT,
       evidenceGrants: new Set<string>(),
     };
     held.set(session.id, session);
@@ -92,6 +98,7 @@ function fixture(t: TestContext) {
     const session = {
       id: createIdentity(WORKBENCH_SESSION_PREFIX),
       hostId,
+      agentName: HOST_AGENT,
       evidenceGrants: new Set<string>(),
     };
     held.set(session.id, session);
@@ -139,6 +146,7 @@ test("(security, redaction) token_hash is the SHA-256 of the token, and the raw 
   const created = await f.service.inviteCreate(caller, host.id, {
     invitee_name: GUEST_NAME,
     project_ids: [PROJECT],
+    granted_operations: [],
   });
   const [row] = f.rows() as Record<string, unknown>[];
   assert.ok(row);
@@ -175,6 +183,7 @@ test("(security, refused path) join with the token of an expired row answers 404
   const created = await f.service.inviteCreate(caller, f.host().id, {
     invitee_name: GUEST_NAME,
     project_ids: [PROJECT],
+    granted_operations: [],
   });
   f.expireAll();
   await refusedWith(
@@ -193,6 +202,7 @@ test("(security, argument guard) a blank or 65-character name at join answers 40
   const created = await f.service.inviteCreate(caller, f.host().id, {
     invitee_name: GUEST_NAME,
     project_ids: [PROJECT],
+    granted_operations: [],
   });
   for (const name of [BLANK, LONG_NAME])
     await refusedWith(
@@ -211,6 +221,7 @@ test("(security, argument guard) a blank or 65-character invitee_name at create 
       f.service.inviteCreate(caller, host.id, {
         invitee_name,
         project_ids: [PROJECT],
+        granted_operations: [],
       }),
       HttpStatus.BadRequest,
       WorkbenchErrorCode.InviteNameInvalid,
@@ -224,6 +235,7 @@ test("(security, refused path) invite.create on an unknown session answers 404 w
     f.service.inviteCreate(caller, createIdentity(WORKBENCH_SESSION_PREFIX), {
       invitee_name: GUEST_NAME,
       project_ids: [PROJECT],
+      granted_operations: [],
     }),
     HttpStatus.NotFound,
     WorkbenchErrorCode.SessionNotFound,
@@ -249,6 +261,7 @@ test("(security, refused path) invite.create on a participant id answers 409 wor
     f.service.inviteCreate(caller, participant.id, {
       invitee_name: GUEST_NAME,
       project_ids: [PROJECT],
+      granted_operations: [],
     }),
     HttpStatus.Conflict,
     WorkbenchErrorCode.NotHost,
@@ -266,6 +279,7 @@ test("(security, argument guard) create with an unknown id and a repeated id ans
     f.service.inviteCreate(caller, host.id, {
       invitee_name: GUEST_NAME,
       project_ids: [PROJECT, PROJECT, unknown],
+      granted_operations: [],
     }),
     (error: unknown) =>
       error instanceof OperationError &&
@@ -282,11 +296,13 @@ test("(security, refused path) create with a set that differs from a live invite
   await f.service.inviteCreate(caller, host.id, {
     invitee_name: GUEST_NAME,
     project_ids: [PROJECT],
+    granted_operations: [],
   });
   await refusedWith(
     f.service.inviteCreate(caller, host.id, {
       invitee_name: OTHER_GUEST_NAME,
       project_ids: [OTHER_PROJECT],
+      granted_operations: [],
     }),
     HttpStatus.Conflict,
     WorkbenchErrorCode.ScopeMismatch,
@@ -299,6 +315,7 @@ test("(security) a corrupt project_ids column resolves to no project", async (t)
   const created = await f.service.inviteCreate(caller, f.host().id, {
     invitee_name: GUEST_NAME,
     project_ids: [PROJECT],
+    granted_operations: [],
   });
   assert.deepEqual(f.invites.resolve(created.id)?.project_ids, [PROJECT]);
   f.store.transaction((tx) =>
@@ -307,4 +324,65 @@ test("(security) a corrupt project_ids column resolves to no project", async (t)
       .run(CORRUPT_PROJECT_IDS),
   );
   assert.deepEqual(f.invites.resolve(created.id)?.project_ids, []);
+});
+
+test("(security, argument guard) create refuses an ungrantable, an unlisted, a read and a repeated id with 400 workbench.invite.grant_invalid and lists each", async (t) => {
+  const f = fixture(t);
+  const host = f.host();
+  const pause = missionOperations["node.pause"].id;
+  const unlisted = [
+    missionOperations["import.apply"].id,
+    agentOperations["cooldown.clear"].id,
+    missionOperations["node.get"].id,
+    missionOperations["node.discard"].id,
+  ];
+  const refused = [...unlisted, pause];
+  await assert.rejects(
+    f.service.inviteCreate(caller, host.id, {
+      invitee_name: GUEST_NAME,
+      project_ids: [PROJECT],
+      granted_operations: [...unlisted, pause, pause],
+    }),
+    (error: unknown) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.BadRequest &&
+      error.code === WorkbenchErrorCode.GrantInvalid &&
+      JSON.stringify(error.details) === JSON.stringify(refused),
+  );
+  assert.deepEqual(f.rows(), []);
+});
+
+test("create stores the granted ids sorted", async (t) => {
+  const f = fixture(t);
+  const resume = missionOperations["node.resume"].id;
+  const pause = missionOperations["node.pause"].id;
+  const created = await f.service.inviteCreate(caller, f.host().id, {
+    invitee_name: GUEST_NAME,
+    project_ids: [PROJECT],
+    granted_operations: [resume, pause],
+  });
+  assert.deepEqual(created.granted_operations, [pause, resume]);
+  assert.deepEqual(f.invites.resolve(created.id)?.granted_operations, [
+    pause,
+    resume,
+  ]);
+});
+
+test("(security) a row with an invalid granted_operations value gives an empty live grant", async (t) => {
+  const f = fixture(t);
+  const created = await f.service.inviteCreate(caller, f.host().id, {
+    invitee_name: GUEST_NAME,
+    project_ids: [PROJECT],
+    granted_operations: [missionOperations["node.pause"].id],
+  });
+  for (const invalid of ["[not json", "[1]", '{"a":1}']) {
+    f.store.transaction((tx) =>
+      tx.database
+        .prepare("UPDATE workbench_invite SET granted_operations = ?")
+        .run(invalid),
+    );
+    const stored = f.invites.resolve(created.id)?.granted_operations;
+    assert.deepEqual(stored, []);
+    assert.equal(liveGrant(stored ?? [], HOST_AGENT).size, NO_ITEMS);
+  }
 });

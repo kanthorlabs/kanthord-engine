@@ -136,11 +136,13 @@ import {
 } from "./guard-classifier.ts";
 import { forkSummaryRequest, summarize, visibleText } from "./fork-summary.ts";
 import {
+  grantableOperations,
   GuardAction,
   type GuardClassifier,
-  guardDecision,
   type GuardDecision,
+  guardDecision,
   type GuardRun,
+  liveGrant,
 } from "./guard.ts";
 import {
   EVIDENCE_ASSET_MISMATCH,
@@ -211,6 +213,7 @@ interface ApprovalDecision {
 interface InviteBody {
   invitee_name: string;
   project_ids: string[];
+  granted_operations: string[];
 }
 
 interface JoinBody {
@@ -577,6 +580,14 @@ function summaryRefused(
     "The guard refused the summary of the workbench conversation.",
     { cause, reason },
   );
+}
+
+function grantedView(agentName: string, stored: readonly string[]) {
+  const grantable = grantableOperations(agentName);
+  return [...liveGrant(stored, agentName)].map((operationId) => ({
+    operation_id: operationId,
+    guard_class: grantable.get(operationId)!,
+  }));
 }
 
 function displayNameOf(agentName: string): string {
@@ -2208,6 +2219,10 @@ export class WorkbenchService implements Service {
       members: this.conversationMembers(host),
       owner_name: invite.invited_by_name,
       projects: this.projectsOf(invite.project_ids),
+      granted_operations: grantedView(
+        host.agentName,
+        invite.granted_operations,
+      ),
       mention_names: guestMentionNames(this.dependencies.declarationOf),
       entries: projectEntries(mergeEntries(this.memberEntries(host, false))),
       run_active: this.runActive(host),
@@ -2724,7 +2739,12 @@ export class WorkbenchService implements Service {
         accountId: requester.accountId,
         name: requester.name.slice(NO_CHARACTERS, OWNER_NAME_MAX_LENGTH),
       },
-      { name: body.invitee_name, projectIds: body.project_ids },
+      {
+        name: body.invitee_name,
+        projectIds: body.project_ids,
+        agentName: host.agentName,
+        grantedOperations: body.granted_operations,
+      },
     );
     host.evidenceGrants.clear();
     return created;
@@ -2741,16 +2761,39 @@ export class WorkbenchService implements Service {
     return ids.map((id) => ({ id, name: names.get(id) ?? null }));
   }
 
+  private grantableView(agentName: string) {
+    const descriptions = new Map(
+      this.dependencies
+        .operations()
+        .map(({ id, description }) => [id, description]),
+    );
+    return [...grantableOperations(agentName)].map(
+      ([operationId, guardClass]) => {
+        const description = descriptions.get(operationId);
+        assert.ok(description !== undefined, `${operationId} is registered`);
+        return {
+          operation_id: operationId,
+          guard_class: guardClass,
+          description,
+        };
+      },
+    );
+  }
+
   async inviteList(sessionId: string) {
     const host = await this.session(sessionId);
     this.requireHost(host);
     const live = this.dependencies.invites.list(host.id);
     return {
-      items: live.map(({ project_ids: ids, ...item }) => ({
-        ...item,
-        projects: this.projectsOf(ids),
-      })),
+      items: live.map(
+        ({ project_ids: ids, granted_operations: stored, ...item }) => ({
+          ...item,
+          projects: this.projectsOf(ids),
+          granted_operations: grantedView(host.agentName, stored),
+        }),
+      ),
       project_ids: live[NO_CHARACTERS]?.project_ids ?? null,
+      grantable: this.grantableView(host.agentName),
     };
   }
 

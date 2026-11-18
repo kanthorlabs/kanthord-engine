@@ -187,7 +187,11 @@ async function inviteGuest(
       {
         params: { session_id: hostId },
         query: {},
-        body: { invitee_name: GUEST_NAME, project_ids: projectIds },
+        body: {
+          invitee_name: GUEST_NAME,
+          project_ids: projectIds,
+          granted_operations: [],
+        },
       },
       fixture.options,
     ),

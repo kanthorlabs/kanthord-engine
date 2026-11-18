@@ -7,7 +7,7 @@ import {
   OperationLifetime,
   StoreName,
 } from "../kernel/operation.ts";
-import { reasoningEffortSchema } from "../agent/contract.ts";
+import { GuardClass, reasoningEffortSchema } from "../agent/contract.ts";
 import { COPY_REPORT_TEXT_MAX_LENGTH } from "../llm/contract.ts";
 
 export interface ResolvedInvite {
@@ -15,6 +15,7 @@ export interface ResolvedInvite {
   invited_by: string;
   expires_at: number;
   project_ids: readonly string[];
+  granted_operations: readonly string[];
 }
 export const WORKBENCH_SERVICE_NAME = "workbench";
 export const WORKBENCH_SESSION_PREFIX = "workbench_session";
@@ -94,6 +95,7 @@ export const WorkbenchErrorCode = {
   InviteNameInvalid: "workbench.invite.name_invalid",
   ProjectInvalid: "workbench.invite.project_invalid",
   ScopeMismatch: "workbench.invite.scope_mismatch",
+  GrantInvalid: "workbench.invite.grant_invalid",
   EvidenceNameMismatch: "workbench.evidence.name_mismatch",
 } as const;
 
@@ -363,8 +365,16 @@ const inviteProjectSchema = z.strictObject({
   id: identitySchema("project"),
   name: z.string().nullable(),
 });
+const grantedOperationSchema = z.strictObject({
+  operation_id: z.string(),
+  guard_class: z.enum(GuardClass),
+});
+const grantableOperationSchema = grantedOperationSchema.extend({
+  description: z.string(),
+});
 export const inviteListItemSchema = inviteItemSchema.extend({
   projects: z.array(inviteProjectSchema),
+  granted_operations: z.array(grantedOperationSchema),
 });
 
 const guestBlockSchema = z.discriminatedUnion("type", [
@@ -711,14 +721,16 @@ export const workbenchOperations = {
       body: z.strictObject({
         invitee_name: z.string().max(WORKBENCH_INVITE_NAME_INPUT_MAX_LENGTH),
         project_ids: z.array(z.string()),
+        granted_operations: z.array(z.string()),
       }),
     }),
     output: inviteItemSchema.extend({
       session_id: identitySchema(WORKBENCH_SESSION_PREFIX),
       invite_token: z.uuid(),
+      granted_operations: z.array(z.string()),
     }),
     description:
-      "Invite one person to a workbench conversation. The answer holds `invite_token` once. The server stores only its hash. The invite lasts 7 days. Creating an invite clears the evidence grants of the conversation. Error `workbench.invite.name_invalid` answers a blank `invitee_name` or one of more than 64 characters. `project_ids` names 1 to 50 existing projects, each once. A repeated, malformed or unknown id, no id, or more than 50 ids answers 400 `workbench.invite.project_invalid` with the refused ids in `details`. A set that differs from the set of a live invite of the conversation answers 409 `workbench.invite.scope_mismatch`. The set never changes: revoke the invite and create a new one.",
+      "Invite one person to a workbench conversation. The answer holds `invite_token` once. The server stores only its hash. The invite lasts 7 days. Creating an invite clears the evidence grants of the conversation. Error `workbench.invite.name_invalid` answers a blank `invitee_name` or one of more than 64 characters. `project_ids` names 1 to 50 existing projects, each once. A repeated, malformed or unknown id, no id, or more than 50 ids answers 400 `workbench.invite.project_invalid` with the refused ids in `details`. A set that differs from the set of a live invite of the conversation answers 409 `workbench.invite.scope_mismatch`. The set never changes: revoke the invite and create a new one. `granted_operations` lists the operation ids that the guest-started runs of the invite can run without the owner's card. Each id is a project-scoped operation that the host agent lists and that a grant can hold, each once. A refused or repeated id answers 400 `workbench.invite.grant_invalid` with the refused ids in `details`. The list is fixed at create and is stored sorted. An empty list grants nothing.",
   },
   "invite.list": {
     ...workbenchOperation,
@@ -735,9 +747,10 @@ export const workbenchOperations = {
     output: z.strictObject({
       items: z.array(inviteListItemSchema),
       project_ids: z.array(identitySchema("project")).nullable(),
+      grantable: z.array(grantableOperationSchema),
     }),
     description:
-      "List the live invites of a workbench conversation. Each item names its projects with the live project name, or a null name for an id with no project. `project_ids` holds the set of the live invites, or null when no invite is live.",
+      "List the live invites of a workbench conversation. Each item names its projects with the live project name, or a null name for an id with no project. `project_ids` holds the set of the live invites, or null when no invite is live. Each item holds `granted_operations`, the live grant with the guard class of each id. `grantable` lists the operations that the host agent of the conversation lets an invite grant.",
   },
   "invite.revoke": {
     ...workbenchOperation,
@@ -799,12 +812,13 @@ export const workbenchOperations = {
       members: z.array(conversationMemberSchema),
       owner_name: z.string(),
       projects: z.array(inviteProjectSchema),
+      granted_operations: z.array(grantedOperationSchema),
       mention_names: z.array(z.string()),
       entries: z.array(guestEntrySchema),
       run_active: z.boolean(),
     }),
     description:
-      "Read the conversation of the invite of the guest. The conversation comes from the guest token. The entries hold the guest view only: no tool result, no thinking and no configuration. `projects` names the projects of the invite. `mention_names` lists the display names that a guest can mention: the agents that hold no built-in tool. An ended invite answers 401 `gateway.jwt.invite_ended`.",
+      "Read the conversation of the invite of the guest. The conversation comes from the guest token. The entries hold the guest view only: no tool result, no thinking and no configuration. `projects` names the projects of the invite. `granted_operations` lists the live grant of the invite with the guard class of each id. `mention_names` lists the display names that a guest can mention: the agents that hold no built-in tool. An ended invite answers 401 `gateway.jwt.invite_ended`.",
   },
   "guest.stream": {
     ...guestOperation,
