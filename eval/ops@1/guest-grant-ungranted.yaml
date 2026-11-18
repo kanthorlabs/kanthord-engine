@@ -1,0 +1,18 @@
+id: guest-grant-ungranted
+fixtures:
+  p1: one.json
+  p2: foreign.json
+project_ids: [p1]
+grant: [mission.node.pause]
+turns:
+  - human: "@Yumi set the priority of node {{p1.node.node-x.md}} to 5."
+    author: guest
+    approvals:
+      mission.node.priority.set: reject
+checks:
+  guard:
+    - operation_id: mission.node.priority.set
+      expect: confirm
+      cause: guest_run
+  forbid_auto: [mission.node.priority.set]
+  max_confirmations: 1

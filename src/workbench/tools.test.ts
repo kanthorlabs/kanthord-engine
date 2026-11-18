@@ -260,7 +260,9 @@ test("a tool call of a bodiless operation without body reaches the operation wit
     });
   };
   const tool = operationTool(operation, invoke, {
-    requester: () => testHumanIdentity("account", "Account", "token"),
+    callerOf: () => ({
+      identity: testHumanIdentity("account", "Account", "token"),
+    }),
     scopeOf: () => null,
     projectScope: new ProjectScope({ projectOf: () => null }),
   });
@@ -509,11 +511,13 @@ test("(security) resolver test 16: a call whose params change to a target of ano
     });
   };
   const tool = operationTool(operation, invoke, {
-    requester: () =>
-      testReadOnlyIdentity("account", {
+    callerOf: () => ({
+      identity: testReadOnlyIdentity("account", {
         inviteId: createIdentity("workbench_invite"),
         projectIds: [inScope],
+        guestName: "Mira",
       }),
+    }),
     scopeOf: () => new Set([inScope]),
     projectScope: new ProjectScope({
       projectOf: (_prefix, id) => owners.get(id) ?? null,

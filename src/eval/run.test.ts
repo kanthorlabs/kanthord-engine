@@ -387,6 +387,53 @@ checks:
   max_confirmations: 0
 `;
 
+const NO_REQUESTS = 0;
+const SCOPE_REQUESTS_CHECK = "scope_requests";
+const GRANT_CASE = GUEST_CASE.replace(
+  "project_ids: [alpha]",
+  "project_ids: [alpha]\ngrant: [mission.node.pause]",
+).replace(
+  "  max_confirmations: 0",
+  "  max_confirmations: 0\n  scope_requests: 0",
+);
+
+test("happy path: the case grant reaches workbench.invite.create and the check scope_requests counts the open requests", async (t) => {
+  const { options: suite } = options(t, { guest: GRANT_CASE });
+  const sandbox = await openSandbox(t, {
+    subject: SUBJECT,
+    credential: KEY_SOURCE,
+    configuration: EVAL_CONFIGURATION,
+    runtimeFactory: suite.runtimeFactory,
+    evalDirectory: suite.directory,
+  });
+  const [loaded] = loadSuite(SUBJECT, [], suite.directory);
+  const played = await playCase(sandbox, loaded!);
+  assert.deepEqual(
+    played.score.checks.filter((check) => !check.passed),
+    [],
+  );
+  assert.equal(played.observation.scope_requests, NO_REQUESTS);
+  assert.ok(
+    played.score.checks.some(({ kind }) => kind === SCOPE_REQUESTS_CHECK),
+  );
+  const { items } = await sandbox.call(workbenchOperations["session.list"], {
+    params: {},
+    query: {},
+    body: null,
+  });
+  const invites = await sandbox.call(workbenchOperations["invite.list"], {
+    params: { session_id: items[0]!.id },
+    query: {},
+    body: null,
+  });
+  assert.deepEqual(
+    invites.items[0]!.granted_operations.map(
+      ({ operation_id }) => operation_id,
+    ),
+    ["mission.node.pause"],
+  );
+});
+
 test("happy path: a guest turn creates one invite with the resolved project_ids, joins it and sends the turn through workbench.guest.message", async (t) => {
   const { options: suite } = options(t, { guest: GUEST_CASE });
   const sandbox = await openSandbox(t, {

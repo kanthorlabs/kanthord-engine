@@ -26,6 +26,7 @@ import {
   generateMachineJWT,
 } from "./jwt.ts";
 import {
+  isDelegateIdentity,
   isGuestIdentity,
   isHumanIdentity,
   isMachineIdentity,
@@ -652,6 +653,7 @@ async function guestFixture(t: TestContext) {
     invited_by: INVITER,
     expires_at: expiresAt,
     project_ids: projectIds,
+    granted_operations: [],
   });
   const issued = await generateGuestJWT(
     fixture.config.master_key,
@@ -752,6 +754,7 @@ test("a guest token with a future exp and an invite row that expired answers gat
     invited_by: INVITER,
     expires_at: Date.now() - 1,
     project_ids: g.projectIds,
+    granted_operations: [],
   });
   await g.refuse(g.issued.token, `gateway.jwt.${JwtCause.InviteEnded}`);
 });
@@ -801,6 +804,7 @@ test("a guest identity from the factory passes isGuestIdentity and fails isHuman
     reader: testReadOnlyIdentity(INVITER, {
       inviteId: `workbench_invite_${ulid()}`,
       projectIds: [],
+      guestName: GUEST_NAME,
     }),
     jti: ulid(),
   });
@@ -834,6 +838,7 @@ test("(security) recheck re-mints the read-only identity with the live project_i
     invited_by: INVITER,
     expires_at: g.expiresAt,
     project_ids: liveIds,
+    granted_operations: [],
   });
   const rechecked = await g.fixture.authentication.recheck(
     identity.reader,
@@ -852,6 +857,32 @@ test("(security) after a revoke, recheck of the read-only identity answers 401",
   g.machines.workbench.invites.delete(g.inviteId);
   await assert.rejects(
     g.fixture.authentication.recheck(identity.reader, background),
+    (error: unknown) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.Unauthorized,
+  );
+});
+
+test("(security) recheck of a delegate identity answers 401", async (t) => {
+  const g = await guestFixture(t);
+  const identity = await g.fixture.authentication.authenticate(
+    `Bearer ${g.issued.token}`,
+  );
+  assert.ok(isGuestIdentity(identity));
+  g.machines.workbench.claimAnswer = {
+    invitedBy: INVITER,
+    projectIds: g.projectIds,
+  };
+  const delegate = g.fixture.authentication.delegateOf(
+    identity.reader,
+    { sessionId: g.sessionId, toolCallId: "call-1" },
+    { operationId: "mission.node.pause", input: {} },
+  );
+  assert.ok(isDelegateIdentity(delegate));
+  assert.equal(delegate.accountId, INVITER);
+  assert.deepEqual([...projectScopeOf(delegate)!], g.projectIds);
+  await assert.rejects(
+    g.fixture.authentication.recheck(delegate, background),
     (error: unknown) =>
       error instanceof OperationError &&
       error.status === HttpStatus.Unauthorized,

@@ -36,7 +36,10 @@ import {
   intakeCredentialOperations,
   intakeOperations,
 } from "../intake/contract.ts";
-import { WORKBENCH_PROJECT_SCOPE_TEXT } from "./contract.ts";
+import {
+  WORKBENCH_PROJECT_SCOPE_TEXT,
+  workbenchOperations,
+} from "./contract.ts";
 import { guardClassOf } from "./guard.ts";
 import { llmOperations } from "../llm/contract.ts";
 import { missionOperations } from "../mission/contract.ts";
@@ -199,8 +202,29 @@ export function fullInput(operation: Operation, params: unknown): unknown {
   return { ...(params as object), ...toolShape(operation).omitted };
 }
 
+const SESSION_LIST_ID = workbenchOperations["session.list"].id;
+const SCOPE_REQUESTS_KEY = "scope_requests";
+
+function toolData(operation: Operation, data: unknown): unknown {
+  if (operation.id !== SESSION_LIST_ID) return data;
+  const { items } = data as { items: Record<string, unknown>[] };
+  return {
+    ...(data as object),
+    items: items.map((item) =>
+      Object.fromEntries(
+        Object.entries(item).filter(([key]) => key !== SCOPE_REQUESTS_KEY),
+      ),
+    ),
+  };
+}
+
+export interface ToolCaller {
+  identity: HumanIdentity | undefined;
+  grant?: NonNullable<ClientOptions["grant"]>;
+}
+
 export interface OperationToolOptions {
-  requester: (toolCallId: string) => HumanIdentity | undefined;
+  callerOf: (toolCallId: string) => ToolCaller;
   scopeOf: () => ReadonlySet<string> | null;
   projectScope: ProjectScope;
 }
@@ -243,7 +267,7 @@ export function operationTool(
     description: operation.description,
     parameters: schema,
     async execute(toolCallId, params, signal) {
-      const identity = options.requester(toolCallId);
+      const { identity, grant } = options.callerOf(toolCallId);
       assert.ok(identity);
       const input = { ...(params as object), ...omitted };
       refuseOutOfScope(operation, input, options);
@@ -255,15 +279,18 @@ export function operationTool(
         const result = await invoke(operation, input, {
           identity,
           context,
+          ...(grant ? { grant } : {}),
           ...(operation.mutation
             ? { idempotencyKey: createIdempotencyKey() }
             : {}),
         });
-        if (result.type === OperationResultType.Completed)
+        if (result.type === OperationResultType.Completed) {
+          const data = toolData(operation, result.data);
           return {
-            content: [{ type: "text", text: canonicalJSON(result.data) }],
-            details: result.data,
+            content: [{ type: "text", text: canonicalJSON(data) }],
+            details: data,
           };
+        }
         if (result.type === OperationResultType.Failure)
           throw new Error(
             `${result.error.error.code}: ${result.error.error.message}`,

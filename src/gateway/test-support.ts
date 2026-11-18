@@ -20,7 +20,11 @@ import {
 } from "./auth/authentication.ts";
 import { type GatewayConfig, gatewayConfigSchema } from "./config.ts";
 import type { InventoryCollector } from "./contract.ts";
-import type { ResolvedInvite } from "../workbench/contract.ts";
+import type {
+  GrantClaim,
+  GrantedInvite,
+  ResolvedInvite,
+} from "../workbench/contract.ts";
 import { gatewayMigrations } from "./migrations.ts";
 import { GatewayService } from "./service.ts";
 import type { DashboardLoader } from "./dashboard.ts";
@@ -47,10 +51,17 @@ export function configuration(value: unknown) {
 export function fakeLookups() {
   const registrations = new Map<string, Registration>();
   const invites = new Map<string, ResolvedInvite>();
+  const claims: GrantClaim[] = [];
   const workbench = {
     invites,
+    claims,
+    claimAnswer: null as GrantedInvite | null,
     resolveInvite: (inviteId: string): ResolvedInvite | null =>
       invites.get(inviteId) ?? null,
+    claimGrant(claim: GrantClaim): GrantedInvite | null {
+      claims.push(claim);
+      return workbench.claimAnswer;
+    },
   };
   const worker = {
     registrations,

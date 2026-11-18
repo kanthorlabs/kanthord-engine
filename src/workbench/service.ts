@@ -20,7 +20,8 @@ import {
 } from "../kernel/context.ts";
 import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus, MediaType } from "../kernel/http.ts";
-import { createIdentity } from "../kernel/identity.ts";
+import { createIdempotencyKey, createIdentity } from "../kernel/identity.ts";
+import { ProjectErrorCode, projectOperations } from "../project/contract.ts";
 import type { ProjectScope } from "../kernel/project-scope.ts";
 import { piProviderId } from "../kernel/pi-provider.ts";
 import type { GuestIdentity, HumanIdentity } from "../kernel/caller.ts";
@@ -29,9 +30,10 @@ import {
   type CallerContext,
   type Operation,
   type OperationRegistry,
+  type OperationResult,
   OperationResultType,
 } from "../kernel/operation.ts";
-import { isString } from "../kernel/values.ts";
+import { isObject, isString } from "../kernel/values.ts";
 import {
   type Healthcheck,
   HealthStatus,
@@ -81,6 +83,8 @@ import {
   type Author,
   AuthorKind,
   type ConversationMember,
+  type GrantClaim,
+  type GrantedInvite,
   GUARD_AGENT_NAME,
   GuardSummaryCause,
   MessageDelivery,
@@ -90,6 +94,7 @@ import {
   QueueClearCause,
   type QueuedMessage,
   type RunSnapshot,
+  type ScopeRequestView,
   type SessionEntry,
   type SessionEvents,
   WORKBENCH_ACTION_RESULT_ENTRY,
@@ -97,10 +102,12 @@ import {
   WORKBENCH_EVENTS_WAIT_MS,
   WORKBENCH_EXPIRY_REASON,
   WORKBENCH_INVITE_NAME_MAX_LENGTH,
+  WORKBENCH_PROJECT_SCOPE_TEXT,
   WORKBENCH_QUEUE_LIMIT,
   WORKBENCH_QUEUED_MESSAGE_PREFIX,
   WORKBENCH_REJECTION_REASON,
   WORKBENCH_RELAY_ENTRY,
+  WORKBENCH_REQUEST_OWNER_ACT_TOOL,
   WORKBENCH_SESSION_PREFIX,
   type WorkbenchConfiguration,
   workbenchConfigurationSchema,
@@ -109,8 +116,19 @@ import {
   workbenchOperations,
   WorkbenchRecordKind,
   type WorkbenchSession,
+  type WorkbenchSessionGet,
 } from "./contract.ts";
 import { missionOperations } from "../mission/contract.ts";
+import type { ScopedInput } from "../kernel/project-scope.ts";
+import {
+  type OwnerActCall,
+  OwnerActDrop,
+  ownerActRefusal,
+  requestInputSchema,
+  requestOwnerActTool,
+  type ScopeRequest,
+  ScopeRequests,
+} from "./scope-requests.ts";
 import {
   authorMark,
   type DeclarationOf,
@@ -136,11 +154,16 @@ import {
 } from "./guard-classifier.ts";
 import { forkSummaryRequest, summarize, visibleText } from "./fork-summary.ts";
 import {
+  grantableOperations,
+  grantCovers,
+  type GrantedCall,
   GuardAction,
   type GuardClassifier,
   guardDecision,
   type GuardDecision,
   type GuardRun,
+  HUMAN_ONLY_OPERATIONS,
+  liveGrant,
 } from "./guard.ts";
 import {
   EVIDENCE_ASSET_MISMATCH,
@@ -165,8 +188,10 @@ import {
 } from "./plan-pipeline.ts";
 import {
   builtinTools,
+  fullInput,
   type InvokeOperation,
   operationTool,
+  type ToolCaller,
   toolName,
   toolOperations,
 } from "./tools.ts";
@@ -211,6 +236,45 @@ interface ApprovalDecision {
 interface InviteBody {
   invitee_name: string;
   project_ids: string[];
+  granted_operations: string[];
+}
+
+const SCOPE_REQUEST_APPROVED = "approved";
+const SCOPE_REQUEST_REJECTED = "rejected";
+const SCOPE_REQUEST_INDETERMINATE = "indeterminate";
+const SCOPE_REQUEST_FAILED = "workbench.scope_request.failed";
+
+interface ScopeRequestAnswer {
+  request_id: string;
+  outcome: ActionOutcome;
+  error_code: string | null;
+}
+
+interface ScopeRequestSettled {
+  decision: string;
+  typedName: string | null;
+  code: string | null;
+}
+
+interface ScopeRequestDone {
+  result: OperationResult<unknown>;
+  typedName: string;
+}
+
+interface RunningScopeRequest {
+  request: ScopeRequest;
+  body: ScopeRequestApproveBody;
+}
+
+interface ScopeRequestApproveBody {
+  project_name: string;
+  expected: Record<string, number | string>;
+}
+
+interface ScopeRequestApproval {
+  sessionId: string;
+  requestId: string;
+  body: ScopeRequestApproveBody;
 }
 
 interface JoinBody {
@@ -319,6 +383,32 @@ interface GuardOutcomeOptions {
   signal: AbortSignal | undefined;
 }
 
+interface BlockedCall {
+  call: ToolCallEvent;
+  operation: Operation;
+}
+
+interface ScopeRaise {
+  hostId: string;
+  inviteId: string;
+  guestName: string;
+  agentName: string;
+  operation: Operation;
+  input: Record<string, unknown>;
+}
+
+interface DroppedRaise {
+  hostId: string;
+  inviteId: string;
+  operationId: string;
+}
+
+interface GrantTicket {
+  session_id: string;
+  invite_id: string;
+  operation_id: string;
+}
+
 interface OpenSession {
   id: string;
   hostId: string | null;
@@ -400,6 +490,11 @@ interface MessageBody {
   delivery: MessageDelivery;
 }
 
+interface ScopeStop {
+  tool_call_id: string;
+  operation_id: string;
+}
+
 interface Run {
   request: string;
   origin: Author | null;
@@ -410,6 +505,7 @@ interface Run {
   firstEntry: number;
   ended: boolean;
   endingCall: string | null;
+  scopeStop: ScopeStop | null;
   offerToolCallId: string | null;
   phase: PlanPhase | null;
   phaseSession: OpenSession | null;
@@ -579,10 +675,34 @@ function summaryRefused(
   );
 }
 
+function grantedView(agentName: string, stored: readonly string[]) {
+  const grantable = grantableOperations(agentName);
+  return [...liveGrant(stored, agentName)].map((operationId) => ({
+    operation_id: operationId,
+    guard_class: grantable.get(operationId)!,
+  }));
+}
+
 function displayNameOf(agentName: string): string {
   const declaration = getAgentDeclaration(agentName);
   assert.ok(declaration);
   return declaration.display_name;
+}
+
+function scopeRequestError(
+  status: number,
+  code: string,
+  message: string,
+): OperationError {
+  return new OperationError(status, code, message);
+}
+
+function scopeRequestNotFound(): OperationError {
+  return scopeRequestError(
+    HttpStatus.NotFound,
+    WorkbenchErrorCode.ScopeRequestNotFound,
+    "The workbench conversation holds no such request.",
+  );
 }
 
 function notHost(session: OpenSession): OperationError {
@@ -666,6 +786,8 @@ export class WorkbenchService implements Service {
   private readonly sessions = new Map<string, OpenSession>();
   private readonly finishedPhaseEntries = new Map<string, SessionEntry[]>();
   private readonly feeds = new Map<string, GuestFeed>();
+  private readonly grantTickets = new Map<string, GrantTicket>();
+  private readonly scopeRequests = new ScopeRequests(() => Date.now());
   private readonly loading = new Map<string, Promise<OpenSession>>();
   private readonly shutdown = new CancellationContext();
   private started = false;
@@ -837,11 +959,211 @@ export class WorkbenchService implements Service {
       agentName: session.agentName,
       ...(scope === null
         ? {}
-        : { guest: { scope, resolver: this.dependencies.projectScope } }),
+        : {
+            guest: {
+              scope,
+              resolver: this.dependencies.projectScope,
+              covers: (call) => this.runGrantCovers(host, call),
+            },
+          }),
       request: host.run.request,
       autoMode: () => host.autoMode,
       classifier: () => this.guardClassifier(session, signal),
     };
+  }
+
+  private endRunAtScope(run: Run, stop: ScopeStop): boolean {
+    if (run.scopeStop !== null) return false;
+    run.endingCall = stop.tool_call_id;
+    run.scopeStop = stop;
+    return true;
+  }
+
+  private endsRun(
+    session: OpenSession,
+    reason: string,
+    blocked: BlockedCall,
+  ): boolean {
+    const { call, operation } = blocked;
+    const { run } = this.hostOf(session);
+    if (
+      !operation.mutation ||
+      reason !== WORKBENCH_PROJECT_SCOPE_TEXT ||
+      run?.origin?.kind !== AuthorKind.Guest
+    )
+      return false;
+    this.endRunAtScope(run, {
+      tool_call_id: call.toolCallId,
+      operation_id: operation.id,
+    });
+    return true;
+  }
+
+  private requestOwnerAct(
+    session: OpenSession,
+    toolCallId: string,
+    call: OwnerActCall,
+  ): void {
+    const host = this.hostOf(session);
+    const { run } = host;
+    assert.ok(run?.origin?.kind === AuthorKind.Guest && run.inviteId !== null);
+    const operation = this.dependencies
+      .operations()
+      .find(
+        ({ id }) =>
+          id === call.operationId || toolName(id) === call.operationId,
+      );
+    const operationId = operation?.id ?? call.operationId;
+    const stopped = this.endRunAtScope(run, {
+      tool_call_id: toolCallId,
+      operation_id: operationId,
+    });
+    const { inviteId } = run;
+    const refusal = ownerActRefusal(stopped, call, operation);
+    if (refusal !== null) {
+      this.logDroppedRaise({ hostId: host.id, inviteId, operationId }, refusal);
+      return;
+    }
+    assert.ok(operation && call.input !== null);
+    const raise = {
+      hostId: host.id,
+      inviteId,
+      guestName: run.origin.name,
+      agentName: session.agentName,
+      operation,
+      input: call.input,
+    };
+    setImmediate(() => {
+      try {
+        this.raiseScopeRequest(raise);
+      } catch (error) {
+        this.dependencies.logger.error(
+          { err: error },
+          "workbench.scope_request.raise_failed",
+        );
+      }
+    });
+  }
+
+  private logDroppedRaise(dropped: DroppedRaise, reason: OwnerActDrop): void {
+    this.dependencies.logger.warn(
+      {
+        conversation_id: dropped.hostId,
+        invite_id: dropped.inviteId,
+        operation_id: dropped.operationId,
+        reason,
+      },
+      "workbench.scope_request.dropped",
+    );
+  }
+
+  private raiseScopeRequest(raise: ScopeRaise): void {
+    const { operation } = raise;
+    const dropped = (reason: OwnerActDrop) =>
+      this.logDroppedRaise(
+        {
+          hostId: raise.hostId,
+          inviteId: raise.inviteId,
+          operationId: operation.id,
+        },
+        reason,
+      );
+    const row = this.dependencies.invites.resolve(raise.inviteId);
+    if (row === null || row.session_id !== raise.hostId)
+      return dropped(OwnerActDrop.NoRaise);
+    const parsed = requestInputSchema(operation).safeParse(
+      fullInput(operation, raise.input),
+    );
+    if (!parsed.success) return dropped(OwnerActDrop.InputParseFailure);
+    const scope = new Set(row.project_ids);
+    const { projects } = this.dependencies.projectScope.resolve(operation, {
+      input: parsed.data as ScopedInput,
+      scope,
+    });
+    const raised = this.scopeRequests.raise({
+      sessionId: raise.hostId,
+      inviteId: raise.inviteId,
+      inviteExpiresAt: row.expires_at,
+      guestName: raise.guestName,
+      agentName: raise.agentName,
+      operation,
+      input: parsed.data,
+      projects,
+      scope,
+    });
+    if (!raised) return dropped(OwnerActDrop.NoRaise);
+    const host = this.sessions.get(raise.hostId);
+    if (host) this.notifyOwners(host);
+  }
+
+  private applyRunTools(member: OpenSession, guestRun: boolean): void {
+    const { agent } = member;
+    assert.ok(agent);
+    const kept = agent
+      .getActiveToolNames()
+      .filter((name) => name !== WORKBENCH_REQUEST_OWNER_ACT_TOOL);
+    agent.setActiveToolsByName(
+      guestRun ? [...kept, WORKBENCH_REQUEST_OWNER_ACT_TOOL] : kept,
+    );
+  }
+
+  private runGrantCovers(host: OpenSession, call: GrantedCall): boolean {
+    const inviteId = host.run?.inviteId ?? null;
+    if (inviteId === null) return false;
+    const row = this.dependencies.invites.resolve(inviteId);
+    return (
+      row !== null &&
+      grantCovers(liveGrant(row.granted_operations, host.agentName), call)
+    );
+  }
+
+  private storeGrantTicket(
+    session: OpenSession,
+    call: ToolCallEvent,
+    operation: Operation,
+  ) {
+    const host = this.hostOf(session);
+    const inviteId = host.run?.inviteId ?? null;
+    if (host.run?.origin?.kind !== AuthorKind.Guest || inviteId === null)
+      return undefined;
+    this.grantTickets.set(`${host.id}:${call.toolCallId}`, {
+      session_id: host.id,
+      invite_id: inviteId,
+      operation_id: operation.id,
+    });
+    return { invite_id: inviteId, author: this.requestedBy(session) };
+  }
+
+  private dropGrantTickets(host: OpenSession): void {
+    for (const [key, ticket] of this.grantTickets)
+      if (ticket.session_id === host.id) this.grantTickets.delete(key);
+  }
+
+  claimGrant(claim: GrantClaim): GrantedInvite | null {
+    const key = `${claim.sessionId}:${claim.toolCallId}`;
+    const ticket = this.grantTickets.get(key);
+    this.grantTickets.delete(key);
+    if (
+      !ticket ||
+      ticket.session_id !== claim.sessionId ||
+      ticket.invite_id !== claim.inviteId ||
+      ticket.operation_id !== claim.operationId
+    )
+      return null;
+    const row = this.dependencies.invites.resolve(claim.inviteId);
+    const host = this.sessions.get(claim.sessionId);
+    if (!row || row.session_id !== claim.sessionId || !host?.autoMode)
+      return null;
+    const covered = grantCovers(
+      liveGrant(row.granted_operations, host.agentName),
+      {
+        operationId: claim.operationId,
+        input: claim.input,
+      },
+    );
+    return covered
+      ? { invitedBy: row.invited_by, projectIds: row.project_ids }
+      : null;
   }
 
   private guardOutcome(
@@ -852,13 +1174,19 @@ export class WorkbenchService implements Service {
     const { call, operation, input, signal } = options;
     if (decision.action === GuardAction.Run) return ALLOWED;
     if (decision.action === GuardAction.Block)
-      return { allowed: false, reason: decision.reason, terminate: false };
+      return {
+        allowed: false,
+        reason: decision.reason,
+        terminate: this.endsRun(session, decision.reason, { call, operation }),
+      };
     if (decision.action === GuardAction.Auto) {
+      const grant = this.storeGrantTicket(session, call, operation);
       appendRecord(session.manager, {
         kind: WorkbenchRecordKind.Guard,
         tool_call_id: call.toolCallId,
         operation_id: operation.id,
         reason: decision.reason,
+        ...(grant ? { grant } : {}),
       });
       this.notify(session);
       return ALLOWED;
@@ -1119,7 +1447,7 @@ export class WorkbenchService implements Service {
       ).map((operation) => {
         toolOperationsByName.set(toolName(operation.id), operation);
         return operationTool(operation, this.dependencies.invoke, {
-          requester: (toolCallId) => this.callIdentity(session, toolCallId),
+          callerOf: (toolCallId) => this.callerOf(session, toolCallId),
           scopeOf: () => this.scopeOf(session),
           projectScope: this.dependencies.projectScope,
         });
@@ -1144,6 +1472,13 @@ export class WorkbenchService implements Service {
                 },
               },
             }),
+          ];
+      const request = isPhase
+        ? []
+        : [
+            requestOwnerActTool((toolCallId, call) =>
+              this.requestOwnerAct(session, toolCallId, call),
+            ),
           ];
       const evidence = declaration.tools.workbench.includes(
         WorkbenchTool.EvidenceRead,
@@ -1171,12 +1506,14 @@ export class WorkbenchService implements Service {
           ...builtin.allowlist,
           ...operations.map((tool) => tool.name),
           ...offer.map((tool) => tool.name),
+          ...request.map((tool) => tool.name),
           ...evidence.map((tool) => tool.name),
         ],
         customTools: [
           ...builtin.customTools,
           ...operations,
           ...offer,
+          ...request,
           ...evidence,
         ],
         hostHome,
@@ -1298,13 +1635,16 @@ export class WorkbenchService implements Service {
     return { kind: origin.kind, name: origin.name };
   }
 
-  private callIdentity(
-    session: OpenSession,
-    toolCallId: string,
-  ): HumanIdentity | undefined {
+  private callerOf(session: OpenSession, toolCallId: string): ToolCaller {
+    const host = this.hostOf(session);
+    if (this.grantTickets.has(`${host.id}:${toolCallId}`))
+      return {
+        identity: session.requester,
+        grant: { sessionId: host.id, toolCallId },
+      };
     const approver = session.approvers.get(toolCallId);
     session.approvers.delete(toolCallId);
-    return approver ?? session.requester;
+    return { identity: approver ?? session.requester };
   }
 
   private scopeOf(session: OpenSession): ReadonlySet<string> | null {
@@ -1402,6 +1742,260 @@ export class WorkbenchService implements Service {
       approved ? { allowed: true, approver: humanOf(caller) } : REJECTED,
     );
     return { session_id: sessionId, tool_call_id: toolCallId, approved };
+  }
+
+  private scopeRequestViews(host: OpenSession): ScopeRequestView[] {
+    const names = new Map(
+      this.dependencies.invites
+        .list(host.id)
+        .map(({ id, invitee_name: name }) => [id, name]),
+    );
+    const descriptions = new Map(
+      this.dependencies
+        .operations()
+        .map(({ id, description }) => [id, description]),
+    );
+    return this.scopeRequests.open(host.id).map((request) => ({
+      id: request.id,
+      invite_id: request.inviteId,
+      invitee_name: names.get(request.inviteId) ?? request.guestName,
+      guest_name: request.guestName,
+      agent_name: request.agentName,
+      operation_id: request.operationId,
+      description: descriptions.get(request.operationId) ?? "",
+      input: request.input,
+      target_id: request.targetId,
+      ids: [...request.ids],
+      project_id: request.projectId,
+      expected_keys: [...request.expectedKeys],
+      created_at: request.createdAt,
+      expires_at: request.expiresAt,
+      state: request.state,
+      error_code: request.error,
+    }));
+  }
+
+  private logScopeRequest(
+    host: OpenSession,
+    request: ScopeRequest,
+    settled: ScopeRequestSettled,
+  ): void {
+    this.dependencies.logger.info(
+      {
+        conversation_id: host.id,
+        request_id: request.id,
+        invite_id: request.inviteId,
+        guest_name: request.guestName,
+        operation_id: request.operationId,
+        target_id: request.targetId,
+        project_id: request.projectId,
+        typed_name: settled.typedName,
+        decision: settled.decision,
+        outcome_code: settled.code,
+      },
+      "workbench.scope_request.settled",
+    );
+  }
+
+  private async projectNameOf(
+    caller: CallerContext,
+    projectId: string,
+  ): Promise<string> {
+    const result = await this.dependencies.invoke(
+      projectOperations.get,
+      { params: { project_id: projectId }, query: {}, body: null },
+      { identity: caller.identity, context: caller.context },
+    );
+    if (result.type === OperationResultType.Failure)
+      throw new OperationError(
+        result.status,
+        result.error.error.code,
+        result.error.error.message,
+      );
+    assert.ok(result.type === OperationResultType.Completed);
+    return projectOperations.get.output.parse(result.data).name;
+  }
+
+  private scopeRequestOperation(
+    request: ScopeRequest,
+    row: LiveInvite,
+  ): Operation | null {
+    const operation = this.dependencies
+      .operations()
+      .find(({ id }) => id === request.operationId);
+    if (!operation || HUMAN_ONLY_OPERATIONS.has(operation.id)) return null;
+    const grantable = new Set(grantableOperations(request.agentName).keys());
+    const covered = grantCovers(grantable, {
+      operationId: operation.id,
+      input: request.input,
+    });
+    const scope = new Set(row.project_ids);
+    const { projects } = this.dependencies.projectScope.resolve(operation, {
+      input: request.input as ScopedInput,
+      scope,
+    });
+    const owners = [...projects.values()];
+    const held =
+      owners.length > NO_CHARACTERS &&
+      owners.every((owner) => owner === request.projectId) &&
+      !scope.has(request.projectId);
+    return covered && held ? operation : null;
+  }
+
+  private mergedScopeInput(
+    operation: Operation,
+    request: ScopeRequest,
+    expected: Record<string, number | string>,
+  ): ScopedInput {
+    const stored = request.input as ScopedInput;
+    const merged = isObject(stored.body)
+      ? { ...stored, body: { ...stored.body, ...expected } }
+      : stored;
+    const parsed = operation.input.safeParse(merged);
+    if (!parsed.success)
+      throw scopeRequestError(
+        HttpStatus.BadRequest,
+        WorkbenchErrorCode.ScopeRequestExpectedInvalid,
+        "The values do not fit the input of the act.",
+      );
+    return parsed.data as ScopedInput;
+  }
+
+  private async runScopeRequest(
+    caller: CallerContext,
+    host: OpenSession,
+    approval: RunningScopeRequest,
+  ): Promise<ScopeRequestAnswer> {
+    const { request, body } = approval;
+    const row = this.dependencies.invites.resolve(request.inviteId);
+    if (row === null || row.session_id !== host.id) {
+      this.scopeRequests.settle(request);
+      throw scopeRequestNotFound();
+    }
+    const name = await this.projectNameOf(caller, request.projectId).catch(
+      (error: unknown) => {
+        if (
+          !(error instanceof OperationError) ||
+          error.code !== ProjectErrorCode.ProjectNotFound
+        )
+          throw error;
+        this.scopeRequests.settle(request);
+        throw scopeRequestError(
+          HttpStatus.Conflict,
+          WorkbenchErrorCode.ScopeRequestRefused,
+          "The act is no longer open to the owner as an out-of-scope request.",
+        );
+      },
+    );
+    if (body.project_name !== name)
+      throw scopeRequestError(
+        HttpStatus.Conflict,
+        WorkbenchErrorCode.ScopeRequestNameMismatch,
+        "The typed name differs from the name of the project.",
+      );
+    const keys = Object.keys(body.expected).sort();
+    if (keys.join() !== request.expectedKeys.join())
+      throw scopeRequestError(
+        HttpStatus.BadRequest,
+        WorkbenchErrorCode.ScopeRequestExpectedInvalid,
+        "The expected values name the concurrency keys of the act.",
+      );
+    const operation = this.scopeRequestOperation(request, row);
+    if (operation === null) {
+      this.scopeRequests.settle(request);
+      throw scopeRequestError(
+        HttpStatus.Conflict,
+        WorkbenchErrorCode.ScopeRequestRefused,
+        "The act is no longer open to the owner as an out-of-scope request.",
+      );
+    }
+    const input = this.mergedScopeInput(operation, request, body.expected);
+    const result = await this.dependencies.invoke(operation, input, {
+      identity: caller.identity,
+      context: caller.context,
+      idempotencyKey: createIdempotencyKey(),
+    });
+    return this.settledScopeRequest(host, request, {
+      result,
+      typedName: body.project_name,
+    });
+  }
+
+  private settledScopeRequest(
+    host: OpenSession,
+    request: ScopeRequest,
+    done: ScopeRequestDone,
+  ): ScopeRequestAnswer {
+    const { result, typedName } = done;
+    if (result.type === OperationResultType.Completed) {
+      this.scopeRequests.settle(request);
+      this.logScopeRequest(host, request, {
+        decision: SCOPE_REQUEST_APPROVED,
+        typedName,
+        code: null,
+      });
+      return {
+        request_id: request.id,
+        outcome: ActionOutcome.Done,
+        error_code: null,
+      };
+    }
+    const code =
+      result.type === OperationResultType.Failure
+        ? result.error.error.code
+        : SCOPE_REQUEST_INDETERMINATE;
+    if (result.type === OperationResultType.Failure)
+      this.scopeRequests.release(request, code);
+    else this.scopeRequests.settle(request);
+    this.logScopeRequest(host, request, {
+      decision: SCOPE_REQUEST_APPROVED,
+      typedName,
+      code,
+    });
+    return {
+      request_id: request.id,
+      outcome: ActionOutcome.Failed,
+      error_code: code,
+    };
+  }
+
+  async scopeRequestApprove(
+    caller: CallerContext,
+    approval: ScopeRequestApproval,
+  ): Promise<ScopeRequestAnswer> {
+    const host = await this.session(approval.sessionId);
+    this.requireHost(host);
+    const request = this.scopeRequests.claim(host.id, approval.requestId);
+    if (!request) throw scopeRequestNotFound();
+    this.notifyOwners(host);
+    try {
+      return await this.runScopeRequest(caller, host, {
+        request,
+        body: approval.body,
+      });
+    } catch (error) {
+      this.scopeRequests.release(
+        request,
+        error instanceof OperationError ? error.code : SCOPE_REQUEST_FAILED,
+      );
+      throw error;
+    } finally {
+      this.notifyOwners(host);
+    }
+  }
+
+  async scopeRequestReject(sessionId: string, requestId: string) {
+    const host = await this.session(sessionId);
+    this.requireHost(host);
+    const request = this.scopeRequests.reject(host.id, requestId);
+    if (!request) throw scopeRequestNotFound();
+    this.logScopeRequest(host, request, {
+      decision: SCOPE_REQUEST_REJECTED,
+      typedName: null,
+      code: null,
+    });
+    this.notifyOwners(host);
+    return { request_id: request.id };
   }
 
   async autoModeSet(
@@ -1670,6 +2264,11 @@ export class WorkbenchService implements Service {
     this.feedOf(this.hostOf(session)).notify();
   }
 
+  private notifyOwners(session: OpenSession): void {
+    if (this.shutdown.signal.aborted) return;
+    this.feedOf(this.hostOf(session)).wakeOwners();
+  }
+
   private feedOf(host: OpenSession): GuestFeed {
     const existing = this.feeds.get(host.id);
     if (existing) return existing;
@@ -1749,6 +2348,7 @@ export class WorkbenchService implements Service {
         parseCursor(after, host.id),
       ),
       snapshot: this.snapshot(host),
+      scope_requests: this.scopeRequestViews(host),
       version: this.feedOf(host).version,
     };
   }
@@ -1787,7 +2387,13 @@ export class WorkbenchService implements Service {
       if (!run.stopped)
         session.runError ??=
           this.memberOfRun(session, run).agent?.state.errorMessage ?? null;
+      if (run.scopeStop)
+        appendRecord(this.memberOfRun(session, run).manager, {
+          kind: WorkbenchRecordKind.ScopeStop,
+          ...run.scopeStop,
+        });
       if (session.run === run) session.run = null;
+      this.dropGrantTickets(session);
       completion.resolve();
       this.notify(session);
       this.startNext(session);
@@ -1801,6 +2407,7 @@ export class WorkbenchService implements Service {
       firstEntry: session.manager.getEntries().length,
       ended: false,
       endingCall: null,
+      scopeStop: null,
       offerToolCallId: null,
       phase: null,
       phaseSession: null,
@@ -1836,6 +2443,7 @@ export class WorkbenchService implements Service {
       await this.openAgent(member, built, item.context);
     }
     assert.ok(member.agent);
+    this.applyRunTools(member, item.origin.kind === AuthorKind.Guest);
     this.appendAuthor(member, item);
     await this.relay(host, member, item);
     void member.agent
@@ -2208,6 +2816,10 @@ export class WorkbenchService implements Service {
       members: this.conversationMembers(host),
       owner_name: invite.invited_by_name,
       projects: this.projectsOf(invite.project_ids),
+      granted_operations: grantedView(
+        host.agentName,
+        invite.granted_operations,
+      ),
       mention_names: guestMentionNames(this.dependencies.declarationOf),
       entries: projectEntries(mergeEntries(this.memberEntries(host, false))),
       run_active: this.runActive(host),
@@ -2618,6 +3230,7 @@ export class WorkbenchService implements Service {
       items.push({
         ...host,
         ...this.runState(host.id),
+        scope_requests: this.scopeRequests.count(host.id),
         display_name: displayNameOf(host.agent_name),
         modified: Math.max(
           host.modified,
@@ -2672,10 +3285,13 @@ export class WorkbenchService implements Service {
     return this.view(session);
   }
 
-  async get(sessionId: string): Promise<WorkbenchSession> {
+  async get(sessionId: string): Promise<WorkbenchSessionGet> {
     const session = await this.session(sessionId);
     this.requireHost(session);
-    return this.view(session);
+    return {
+      ...(await this.view(session)),
+      scope_requests: this.scopeRequestViews(session),
+    };
   }
 
   async configure(
@@ -2724,7 +3340,12 @@ export class WorkbenchService implements Service {
         accountId: requester.accountId,
         name: requester.name.slice(NO_CHARACTERS, OWNER_NAME_MAX_LENGTH),
       },
-      { name: body.invitee_name, projectIds: body.project_ids },
+      {
+        name: body.invitee_name,
+        projectIds: body.project_ids,
+        agentName: host.agentName,
+        grantedOperations: body.granted_operations,
+      },
     );
     host.evidenceGrants.clear();
     return created;
@@ -2741,22 +3362,46 @@ export class WorkbenchService implements Service {
     return ids.map((id) => ({ id, name: names.get(id) ?? null }));
   }
 
+  private grantableView(agentName: string) {
+    const descriptions = new Map(
+      this.dependencies
+        .operations()
+        .map(({ id, description }) => [id, description]),
+    );
+    return [...grantableOperations(agentName)].map(
+      ([operationId, guardClass]) => {
+        const description = descriptions.get(operationId);
+        assert.ok(description !== undefined, `${operationId} is registered`);
+        return {
+          operation_id: operationId,
+          guard_class: guardClass,
+          description,
+        };
+      },
+    );
+  }
+
   async inviteList(sessionId: string) {
     const host = await this.session(sessionId);
     this.requireHost(host);
     const live = this.dependencies.invites.list(host.id);
     return {
-      items: live.map(({ project_ids: ids, ...item }) => ({
-        ...item,
-        projects: this.projectsOf(ids),
-      })),
+      items: live.map(
+        ({ project_ids: ids, granted_operations: stored, ...item }) => ({
+          ...item,
+          projects: this.projectsOf(ids),
+          granted_operations: grantedView(host.agentName, stored),
+        }),
+      ),
       project_ids: live[NO_CHARACTERS]?.project_ids ?? null,
+      grantable: this.grantableView(host.agentName),
     };
   }
 
   inviteRevoke(inviteId: string): { id: string } {
     const revoked = this.dependencies.invites.revoke(inviteId);
     if (!revoked) throw inviteNotFound();
+    this.scopeRequests.dropInvite(revoked.id);
     this.feeds.get(revoked.session_id)?.closeInvite(revoked.id);
     return { id: revoked.id };
   }
@@ -2812,6 +3457,20 @@ export class WorkbenchService implements Service {
           approved: body.approved,
           nodeName: body.node_name,
         }),
+    );
+    registry.register(
+      workbenchOperations["session.scopeRequest.approve"],
+      ({ params, body }, caller) =>
+        this.scopeRequestApprove(caller, {
+          sessionId: params.session_id,
+          requestId: params.request_id,
+          body,
+        }),
+    );
+    registry.register(
+      workbenchOperations["session.scopeRequest.reject"],
+      ({ params }) =>
+        this.scopeRequestReject(params.session_id, params.request_id),
     );
     registry.register(
       workbenchOperations["session.action.report"],

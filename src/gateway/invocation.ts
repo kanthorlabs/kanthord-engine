@@ -32,6 +32,7 @@ import {
 import {
   failure,
   GatewayError,
+  grantRefused,
   scopeNotFound,
   scopeRefused,
   unauthorized,
@@ -90,6 +91,7 @@ export interface InvocationOptions {
   tracestate?: string;
   delivery?: CallerContext["delivery"];
   rejection?: GatewayError;
+  grant?: { sessionId: string; toolCallId: string };
   request?: Request;
   host?: string;
   logger?: Logger;
@@ -103,6 +105,13 @@ interface ExecutionInput {
   params: unknown;
   query: unknown;
   body: unknown;
+}
+
+interface GrantedRequest {
+  operation: Operation;
+  identity: CallerIdentity | undefined;
+  input: ExecutionInput;
+  grant: InvocationOptions["grant"];
 }
 
 interface ExecutionOptions extends InvocationOptions {
@@ -229,8 +238,10 @@ function parsedInput(operation: Operation, raw: unknown): ExecutionInput {
 function refuseReadOnlyMutation(
   operation: Operation,
   identity: CallerIdentity | undefined,
+  grant: InvocationOptions["grant"],
 ): void {
-  if (operation.mutation && isReadOnlyIdentity(identity)) throw unauthorized();
+  if (operation.mutation && isReadOnlyIdentity(identity) && !grant)
+    throw unauthorized();
 }
 
 function refuseCancelled(context: CancellationContext): void {
@@ -314,6 +325,21 @@ export class Invocation {
     this.stores = stores;
     this.scheduler = scheduler;
     this.projectScope = wiring.projectScope;
+  }
+
+  private granted({
+    operation,
+    identity,
+    input,
+    grant,
+  }: GrantedRequest): CallerIdentity | undefined {
+    if (!grant) return identity;
+    if (!operation.mutation || !isHumanIdentity(identity)) throw grantRefused();
+    if (!isReadOnlyIdentity(identity)) throw grantRefused();
+    return this.authentication.delegateOf(identity, grant, {
+      operationId: operation.id,
+      input,
+    });
   }
 
   private scopeGate(
@@ -699,9 +725,15 @@ export class Invocation {
       dispose: () => context.cancel(),
     };
     try {
-      const identity = await this.admit(operation, run);
-      refuseReadOnlyMutation(operation, identity);
+      const admitted = await this.admit(operation, run);
+      refuseReadOnlyMutation(operation, admitted, options.grant);
       const input = parsedInput(operation, raw);
+      const identity = this.granted({
+        operation,
+        identity: admitted,
+        input,
+        grant: options.grant,
+      });
       refuseCancelled(context);
       const gate = this.scopeGate(operation, identity, input);
       if (gate.empty)

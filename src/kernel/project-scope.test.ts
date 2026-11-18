@@ -19,6 +19,7 @@ import type {
 } from "./project-scope.ts";
 
 const TWO_IDENTITIES = 2;
+const EMPTY_MAP = 0;
 const inProject = createIdentity("project");
 const otherProject = createIdentity("project");
 const scope: ReadonlySet<string> = new Set([inProject]);
@@ -194,4 +195,29 @@ test("security: admitsAnswer refuses a project_id and a list item outside the sc
     ),
     false,
   );
+});
+
+test("resolve maps each distinct id to its project or null, and answers no map for a refused input", () => {
+  const lookup = new CountingLookup();
+  const node = createIdentity("node");
+  const absent = createIdentity("node");
+  lookup.owners.set(node, otherProject);
+  const resolver = new ProjectScope(lookup);
+  const target = declaration(ProjectScopeRule.Target);
+  const resolved = resolver.resolve(target, {
+    input: input(null, { node_id: node, depends_on_id: absent, again: node }),
+    scope,
+  });
+  assert.equal(resolved.verdict, ScopeVerdict.NotFound);
+  assert.deepEqual(
+    [...resolved.projects],
+    [
+      [node, otherProject],
+      [absent, null],
+    ],
+  );
+  assert.equal(lookup.calls, TWO_IDENTITIES);
+  const refused = resolver.resolve(target, { input: input(null), scope });
+  assert.equal(refused.verdict, ScopeVerdict.Refused);
+  assert.equal(refused.projects.size, EMPTY_MAP);
 });

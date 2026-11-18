@@ -129,6 +129,20 @@ function listItemsInScope(
   );
 }
 
+export interface ScopeResolution {
+  readonly verdict: ScopeVerdict;
+  readonly projects: ReadonlyMap<string, string | null>;
+}
+
+const NO_PROJECTS: ReadonlyMap<string, string | null> = new Map();
+
+function resolution(
+  verdict: ScopeVerdict,
+  projects: ReadonlyMap<string, string | null> = NO_PROJECTS,
+): ScopeResolution {
+  return { verdict, projects };
+}
+
 export class ProjectScope {
   readonly #lookup: ProjectLookup;
 
@@ -137,16 +151,22 @@ export class ProjectScope {
   }
 
   check(operation: Operation, request: ScopeCheck): ScopeVerdict {
+    return this.resolve(operation, request).verdict;
+  }
+
+  resolve(operation: Operation, request: ScopeCheck): ScopeResolution {
     const rule = operation.projectScope;
-    if (rule === undefined) return ScopeVerdict.Refused;
-    if (rule === ProjectScopeRule.List) return ScopeVerdict.Allowed;
+    if (rule === undefined) return resolution(ScopeVerdict.Refused);
+    if (rule === ProjectScopeRule.List) return resolution(ScopeVerdict.Allowed);
     if (rule === ProjectScopeRule.TargetJson && !this.#isJson(request.input)) {
-      return ScopeVerdict.Refused;
+      return resolution(ScopeVerdict.Refused);
     }
     const identities = collectIdentities(request.input);
-    if (identities.size > SCOPE_IDENTITY_LIMIT) return ScopeVerdict.Refused;
-    if (identities.size === EMPTY_SIZE) return ScopeVerdict.Refused;
-    return this.#verdictOf(identities, request.scope);
+    if (identities.size > SCOPE_IDENTITY_LIMIT) {
+      return resolution(ScopeVerdict.Refused);
+    }
+    if (identities.size === EMPTY_SIZE) return resolution(ScopeVerdict.Refused);
+    return this.#resolveIdentities(identities, request.scope);
   }
 
   narrow(input: ScopedInput, scope: ReadonlySet<string>): ScopedInput | null {
@@ -175,17 +195,19 @@ export class ProjectScope {
     return isRecord(input.body) && input.body["format"] === JSON_FORMAT;
   }
 
-  #verdictOf(
+  #resolveIdentities(
     identities: ReadonlySet<string>,
     scope: ReadonlySet<string>,
-  ): ScopeVerdict {
+  ): ScopeResolution {
     let verdict: ScopeVerdict = ScopeVerdict.Allowed;
+    const projects = new Map<string, string | null>();
     for (const identity of identities) {
       const project = this.#lookup.projectOf(prefixOf(identity), identity);
+      projects.set(identity, project);
       if (project === null || !scope.has(project)) {
         verdict = ScopeVerdict.NotFound;
       }
     }
-    return verdict;
+    return resolution(verdict, projects);
   }
 }

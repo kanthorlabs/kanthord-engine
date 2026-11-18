@@ -33,6 +33,7 @@ import {
   workbenchOperations,
   WorkbenchRecordKind,
 } from "../../workbench/contract.ts";
+import { missionOperations } from "../../mission/contract.ts";
 import { toolName } from "../../workbench/index.ts";
 import {
   callsOf,
@@ -82,6 +83,7 @@ const MIN_HUMAN_OPERATIONS = 100;
 const NO_ITEMS = 0;
 const SINGLE = 1;
 const PAIR = 2;
+const OPS_GRANTABLE_COUNT = 10;
 
 type Fixture = WorkbenchFixture;
 
@@ -116,6 +118,7 @@ async function invite(
         body: {
           invitee_name: name,
           project_ids: await invitedProjectIds(fixture),
+          granted_operations: [],
         },
       },
       idempotencyKey === undefined
@@ -233,6 +236,7 @@ async function guestEntries(fixture: Fixture, token: string) {
   return (await response.json()) as {
     session_id: string;
     owner_name: string;
+    granted_operations: { operation_id: string; guard_class: string }[];
     entries: GuestEntryView[];
     members: { session_id: string; agent_name: string; display_name: string }[];
   };
@@ -293,6 +297,7 @@ test(
           body: {
             invitee_name: GUEST_NAME,
             project_ids: await invitedProjectIds(first),
+            granted_operations: [],
           },
         },
         { ...first.options, idempotencyKey: key },
@@ -532,6 +537,7 @@ test(
       reader: testReadOnlyIdentity(identity.accountId, {
         inviteId: created.id,
         projectIds: [],
+        guestName: GUEST_NAME,
       }),
       jti: "race",
     });
@@ -1229,5 +1235,59 @@ test(
       assert.equal(isReadOnlyIdentity(released as never), false);
       assert.equal(released.jti, identity.jti);
     }
+  },
+);
+
+test(
+  "(happy path) an invite with a grant: invite.list answers the live grant per item and the grantable list, and guest.get answers the live grant",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture } = await conversationFixture(t, []);
+    const host = await createHost(fixture, OPS);
+    const pause = missionOperations["node.pause"].id;
+    const block = missionOperations["node.block"].id;
+    const created = completed(
+      await fixture.workbench["invite.create"](
+        {
+          params: { session_id: host.id },
+          query: {},
+          body: {
+            invitee_name: GUEST_NAME,
+            project_ids: await invitedProjectIds(fixture),
+            granted_operations: [block, pause],
+          },
+        },
+        fixture.options,
+      ),
+    );
+    assert.deepEqual(created.granted_operations, [block, pause]);
+    const joined = await joinGuest(fixture, created, GUEST_NAME);
+    const expected = [
+      { operation_id: block, guard_class: "judged" },
+      { operation_id: pause, guard_class: "reversible" },
+    ];
+    const listed = completed(
+      await fixture.workbench["invite.list"](
+        { params: { session_id: host.id }, query: {}, body: null },
+        fixture.options,
+      ),
+    );
+    assert.deepEqual(listed.items[NO_ITEMS]?.granted_operations, expected);
+    assert.equal(listed.grantable.length, OPS_GRANTABLE_COUNT);
+    assert.deepEqual(
+      expected.map(
+        ({ operation_id, guard_class }) =>
+          listed.grantable.find((item) => item.operation_id === operation_id)
+            ?.guard_class === guard_class,
+      ),
+      [true, true],
+    );
+    assert.ok(
+      listed.grantable.every(
+        ({ description }) => description.length > NO_ITEMS,
+      ),
+    );
+    const view = await guestEntries(fixture, joined.token);
+    assert.deepEqual(view.granted_operations, expected);
   },
 );

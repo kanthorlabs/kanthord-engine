@@ -440,6 +440,7 @@ export function composeServices(options: ComposeServicesOptions) {
       },
       workbench: {
         resolveInvite: (inviteId) => invites.resolve(inviteId),
+        claimGrant: (claim) => workbench.claimGrant(claim),
       },
       instances: {
         liveInstance: (instanceId) => worker.instances.liveInstance(instanceId),

@@ -1,0 +1,155 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  post:
+    operationId: workbench.session.scopeRequest.approve
+    tags:
+      - workbench
+    description: Run one act that a guest-started run asked for outside the shared
+      projects, as the owner's own act. `project_name` is the exact name of the
+      project of the act, with no trim and no case folding. `expected` holds one
+      value for each concurrency key of the act, the keys that `expected_keys`
+      of the request lists. A request that is unknown, expired, settled, running
+      or revoked answers 404 `workbench.scope_request.not_found`. A different
+      `project_name` answers 409 `workbench.scope_request.name_mismatch` and the
+      request stays open. A key set that differs from `expected_keys`, or values
+      that fail the act input, answers 400
+      `workbench.scope_request.expected_invalid` and the request stays open. An
+      act that is no longer eligible, or whose target is now inside the shared
+      projects, answers 409 `workbench.scope_request.refused` and deletes the
+      request. An act that the owning service refuses answers `outcome` `failed`
+      with its `error_code`, and the request stays open.
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/workbench.session.scopeRequest.approve.Input/proper\
+            ties/params/properties/session_id"
+      - name: request_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/workbench.session.scopeRequest.approve.Input/proper\
+            ties/params/properties/request_id"
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/workbench.session.scopeRequest.approve.Input/proper\
+              ties/body"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/workbench.session.scopeRequest.approve.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    workbench.session.scopeRequest.approve.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            session_id:
+              type: string
+              minLength: 44
+              maxLength: 44
+              pattern: ^workbench_session_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: workbench_session_ followed by a canonical 26-character uppercase
+                ULID.
+            request_id:
+              type: string
+              minLength: 50
+              maxLength: 50
+              pattern: ^workbench_scope_request_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: workbench_scope_request_ followed by a canonical 26-character
+                uppercase ULID.
+          required:
+            - session_id
+            - request_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            project_name:
+              type: string
+              minLength: 1
+              maxLength: 63
+            expected:
+              type: object
+              propertyNames:
+                type: string
+                pattern: ^(expected_[a-z_]+|blocked_attempt)$
+              additionalProperties:
+                anyOf:
+                  - type: integer
+                    minimum: -9007199254740991
+                    maximum: 9007199254740991
+                  - type: string
+          required:
+            - project_name
+            - expected
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    workbench.session.scopeRequest.approve.Output:
+      type: object
+      properties:
+        request_id:
+          type: string
+          minLength: 50
+          maxLength: 50
+          pattern: ^workbench_scope_request_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+          description: workbench_scope_request_ followed by a canonical 26-character
+            uppercase ULID.
+        outcome:
+          type: string
+          enum:
+            - done
+            - failed
+        error_code:
+          anyOf:
+            - type: string
+            - type: "null"
+      required:
+        - request_id
+        - outcome
+        - error_code
+      additionalProperties: false

@@ -10,7 +10,8 @@ const createInviteTable: Migration = (database) => {
       invited_by_name TEXT NOT NULL,
       expires_at INTEGER NOT NULL,
       invitee_name TEXT NOT NULL,
-      project_ids TEXT NOT NULL
+      project_ids TEXT NOT NULL,
+      granted_operations TEXT NOT NULL DEFAULT '[]'
     );
     CREATE UNIQUE INDEX workbench_invite_token_hash ON workbench_invite (token_hash);
   `);

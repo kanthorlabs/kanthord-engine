@@ -34,9 +34,13 @@ import {
 } from "./contract.ts";
 import {
   floorOf,
+  grantableOperations,
+  grantCovers,
   guardDecision,
   type GuardRun,
   HUMAN_ONLY_OPERATIONS,
+  liveGrant,
+  REVERSIBLE_OPERATIONS,
 } from "./guard.ts";
 import { SECRET_OPERATION_IDS } from "./tools.ts";
 
@@ -47,7 +51,7 @@ const IMPORT_CONFIRM = {
   action: "confirm",
   guard: { cause: "import", reason: null, confidence: null },
 };
-const HUMAN_ONLY_COUNT = 91;
+const HUMAN_ONLY_COUNT = 93;
 const HUMAN_ONLY_CODE = "workbench.guard.human_only";
 const IMPORT_FORMAT_CODE = "workbench.guard.import_format";
 const HUMAN_ONLY_TEXT =
@@ -255,6 +259,7 @@ function guestRun() {
       resolver: new ProjectScope({
         projectOf: (_prefix, id) => OWNERS.get(id) ?? null,
       }),
+      covers: () => false,
     },
   };
   return { run, classifierCalls: () => classifierCalls };
@@ -325,4 +330,55 @@ test("(security) resolver test 15: agent.cooldown.clear blocks with project_scop
     ),
     PROJECT_SCOPE_BLOCK,
   );
+});
+
+test("(security: authorization) no grantable set holds a human, secret, import, workbench or unscoped operation", () => {
+  const unscoped = OPERATION_UNION.filter(
+    (operation) => operation.projectScope === undefined,
+  ).map((operation) => operation.id);
+  assert.ok(unscoped.includes(agentOperations["cooldown.clear"].id));
+  for (const { agent_name } of Object.values(AGENT_DECLARATIONS)) {
+    for (const id of grantableOperations(agent_name).keys()) {
+      assert.ok(!HUMAN_ONLY_OPERATIONS.has(id), `${agent_name} grants ${id}`);
+      assert.ok(!SECRET_OPERATION_IDS.has(id), `${agent_name} grants ${id}`);
+      assert.ok(!unscoped.includes(id), `${agent_name} grants ${id}`);
+      assert.notEqual(id, missionOperations["import.apply"].id);
+      assert.ok(!id.startsWith("workbench."), `${agent_name} grants ${id}`);
+    }
+  }
+});
+
+test("(security: authorization) grantCovers refuses an unblock with change and an id outside the grant", () => {
+  const unblock = missionOperations["node.unblock"].id;
+  const grant = new Set([unblock]);
+  assert.equal(
+    grantCovers(grant, {
+      operationId: unblock,
+      input: { body: { change: {} } },
+    }),
+    false,
+  );
+  assert.equal(
+    grantCovers(grant, {
+      operationId: missionOperations["node.pause"].id,
+      input: {},
+    }),
+    false,
+  );
+});
+
+test("(security: authorization) liveGrant only narrows a stored grant", () => {
+  const pause = missionOperations["node.pause"].id;
+  const resume = missionOperations["node.resume"].id;
+  const clear = agentOperations["cooldown.clear"].id;
+  const stored = [pause, resume];
+  assert.deepEqual([...liveGrant(stored, "ops@1")], stored);
+  assert.deepEqual([...liveGrant([pause, clear], "ops@1")], [pause]);
+  const reversible = REVERSIBLE_OPERATIONS as Set<string>;
+  reversible.delete(pause);
+  try {
+    assert.deepEqual([...liveGrant(stored, "ops@1")], [resume]);
+  } finally {
+    reversible.add(pause);
+  }
 });

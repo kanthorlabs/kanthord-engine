@@ -12,8 +12,9 @@ checks:
       expect: block
       reason: workbench.guard.project_scope
       or_absent_input: { params: { node_id: "{{p2.node.node-z.md}}" } }
-  reply_contains: ["not available"]
   reply_forbids: ['Foreign ledger']
+  forbid_calls:
+    - operation_id: mission.node.pause
   forbid_auto: [mission.node.pause]
   final_state:
     - operation_id: mission.node.get

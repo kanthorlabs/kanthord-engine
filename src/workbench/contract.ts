@@ -1,13 +1,14 @@
 import { z } from "zod";
 import { HttpMethod, HttpStatus, MediaType } from "../kernel/http.ts";
 import { identitySchema } from "../kernel/identity.ts";
+import { PROJECT_NAME_MAX_LENGTH } from "../kernel/project-name.ts";
 import {
   AccessPolicy,
   type Operation,
   OperationLifetime,
   StoreName,
 } from "../kernel/operation.ts";
-import { reasoningEffortSchema } from "../agent/contract.ts";
+import { GuardClass, reasoningEffortSchema } from "../agent/contract.ts";
 import { COPY_REPORT_TEXT_MAX_LENGTH } from "../llm/contract.ts";
 
 export interface ResolvedInvite {
@@ -15,9 +16,25 @@ export interface ResolvedInvite {
   invited_by: string;
   expires_at: number;
   project_ids: readonly string[];
+  granted_operations: readonly string[];
 }
+export interface GrantClaim {
+  inviteId: string;
+  sessionId: string;
+  toolCallId: string;
+  operationId: string;
+  input: unknown;
+}
+
+export interface GrantedInvite {
+  invitedBy: string;
+  projectIds: readonly string[];
+}
+
+export const WORKBENCH_REQUEST_OWNER_ACT_TOOL = "request_owner_act";
 export const WORKBENCH_SERVICE_NAME = "workbench";
 export const WORKBENCH_SESSION_PREFIX = "workbench_session";
+export const WORKBENCH_SCOPE_REQUEST_PREFIX = "workbench_scope_request";
 export const WORKBENCH_DIRECTORY_NAME = "workbench";
 export const WORKBENCH_CONFIGURATION_ENTRY = "kanthord.workbench.configuration";
 export const WORKBENCH_RECORD_ENTRY = "kanthord.workbench.record";
@@ -94,6 +111,11 @@ export const WorkbenchErrorCode = {
   InviteNameInvalid: "workbench.invite.name_invalid",
   ProjectInvalid: "workbench.invite.project_invalid",
   ScopeMismatch: "workbench.invite.scope_mismatch",
+  GrantInvalid: "workbench.invite.grant_invalid",
+  ScopeRequestNotFound: "workbench.scope_request.not_found",
+  ScopeRequestNameMismatch: "workbench.scope_request.name_mismatch",
+  ScopeRequestExpectedInvalid: "workbench.scope_request.expected_invalid",
+  ScopeRequestRefused: "workbench.scope_request.refused",
   EvidenceNameMismatch: "workbench.evidence.name_mismatch",
 } as const;
 
@@ -147,6 +169,7 @@ export const WorkbenchRecordKind = {
   Note: "note",
   Author: "author",
   QueueClear: "queue_clear",
+  ScopeStop: "scope_stop",
 } as const;
 export type WorkbenchRecordKind =
   (typeof WorkbenchRecordKind)[keyof typeof WorkbenchRecordKind];
@@ -183,6 +206,9 @@ export const workbenchRecordSchema = z.discriminatedUnion("kind", [
     tool_call_id: z.string(),
     operation_id: z.string(),
     reason: z.string().max(GUARD_REASON_MAX_CHARS),
+    grant: z
+      .strictObject({ invite_id: z.string(), author: authorSchema })
+      .optional(),
   }),
   z.strictObject({
     kind: z.literal(WorkbenchRecordKind.Fork),
@@ -201,6 +227,11 @@ export const workbenchRecordSchema = z.discriminatedUnion("kind", [
     kind: z.literal(WorkbenchRecordKind.QueueClear),
     count: z.number().int().positive(),
     cause: z.enum(QueueClearCause),
+  }),
+  z.strictObject({
+    kind: z.literal(WorkbenchRecordKind.ScopeStop),
+    tool_call_id: z.string(),
+    operation_id: z.string(),
   }),
 ]);
 export type WorkbenchRecord = z.infer<typeof workbenchRecordSchema>;
@@ -277,7 +308,35 @@ export const participantListItemSchema = sessionListFields.extend({
 
 export const sessionListItemSchema = sessionListFields.extend({
   participants: z.array(participantListItemSchema),
+  scope_requests: z.number().int().nonnegative(),
 });
+
+export const ScopeRequestState = {
+  Open: "open",
+  Running: "running",
+} as const;
+export type ScopeRequestState =
+  (typeof ScopeRequestState)[keyof typeof ScopeRequestState];
+
+export const scopeRequestViewSchema = z.strictObject({
+  id: identitySchema(WORKBENCH_SCOPE_REQUEST_PREFIX),
+  invite_id: z.string(),
+  invitee_name: z.string(),
+  guest_name: z.string(),
+  agent_name: z.string(),
+  operation_id: z.string(),
+  description: z.string(),
+  input: z.unknown(),
+  target_id: z.string(),
+  ids: z.array(z.string()),
+  project_id: z.string(),
+  expected_keys: z.array(z.string()),
+  created_at: timestampSchema,
+  expires_at: timestampSchema,
+  state: z.enum(ScopeRequestState),
+  error_code: z.string().nullable(),
+});
+export type ScopeRequestView = z.infer<typeof scopeRequestViewSchema>;
 
 export const workbenchSessionSchema = z.strictObject({
   id: identitySchema(WORKBENCH_SESSION_PREFIX),
@@ -290,6 +349,11 @@ export const workbenchSessionSchema = z.strictObject({
   resume_command: z.string(),
 });
 export type WorkbenchSession = z.infer<typeof workbenchSessionSchema>;
+
+export const workbenchSessionGetSchema = workbenchSessionSchema.extend({
+  scope_requests: z.array(scopeRequestViewSchema),
+});
+export type WorkbenchSessionGet = z.infer<typeof workbenchSessionGetSchema>;
 
 export const WORKBENCH_REJECTION_REASON = "The human rejected the call.";
 
@@ -350,6 +414,7 @@ export const sessionEventsSchema = z.strictObject({
   members: z.array(conversationMemberSchema),
   entries: z.array(memberEntrySchema),
   snapshot: runSnapshotSchema,
+  scope_requests: z.array(scopeRequestViewSchema),
   version: z.number().int().nonnegative(),
 });
 export type SessionEvents = z.infer<typeof sessionEventsSchema>;
@@ -363,8 +428,16 @@ const inviteProjectSchema = z.strictObject({
   id: identitySchema("project"),
   name: z.string().nullable(),
 });
+const grantedOperationSchema = z.strictObject({
+  operation_id: z.string(),
+  guard_class: z.enum(GuardClass),
+});
+const grantableOperationSchema = grantedOperationSchema.extend({
+  description: z.string(),
+});
 export const inviteListItemSchema = inviteItemSchema.extend({
   projects: z.array(inviteProjectSchema),
+  granted_operations: z.array(grantedOperationSchema),
 });
 
 const guestBlockSchema = z.discriminatedUnion("type", [
@@ -436,6 +509,11 @@ export const guestEntrySchema = z.discriminatedUnion("kind", [
     cause: z.enum(QueueClearCause),
     text: z.string(),
   }),
+  z.strictObject({
+    ...guestEnvelope,
+    kind: z.literal(WorkbenchRecordKind.ScopeStop),
+    operation_id: z.string(),
+  }),
 ]);
 
 const emptyFields = z.strictObject({});
@@ -504,9 +582,9 @@ export const workbenchOperations = {
       query: emptyFields,
       body: z.null(),
     }),
-    output: workbenchSessionSchema,
+    output: workbenchSessionGetSchema,
     description:
-      "Get the configuration, the entries of the completed runs and the run state of a workbench session.",
+      "Get the configuration, the entries of the completed runs, the run state and the open out-of-scope requests of a workbench session.",
   },
   "session.fork": {
     ...workbenchMutation,
@@ -646,6 +724,50 @@ export const workbenchOperations = {
     description:
       "Switch auto mode of a workbench session on or off. Only the owner changes it. A set to the current value changes nothing.",
   },
+  "session.scopeRequest.approve": {
+    ...workbenchMutation,
+    id: "workbench.session.scopeRequest.approve",
+    method: HttpMethod.Post,
+    path: "/api/workbench/session/:session_id/scope-request/:request_id/approve",
+    input: z.strictObject({
+      params: sessionParams.extend({
+        request_id: identitySchema(WORKBENCH_SCOPE_REQUEST_PREFIX),
+      }),
+      query: emptyFields,
+      body: z.strictObject({
+        project_name: z.string().min(1).max(PROJECT_NAME_MAX_LENGTH),
+        expected: z.record(
+          z.string().regex(/^(expected_[a-z_]+|blocked_attempt)$/),
+          z.union([z.number().int(), z.string()]),
+        ),
+      }),
+    }),
+    output: z.strictObject({
+      request_id: identitySchema(WORKBENCH_SCOPE_REQUEST_PREFIX),
+      outcome: z.enum(ActionOutcome),
+      error_code: z.string().nullable(),
+    }),
+    description:
+      "Run one act that a guest-started run asked for outside the shared projects, as the owner's own act. `project_name` is the exact name of the project of the act, with no trim and no case folding. `expected` holds one value for each concurrency key of the act, the keys that `expected_keys` of the request lists. A request that is unknown, expired, settled, running or revoked answers 404 `workbench.scope_request.not_found`. A different `project_name` answers 409 `workbench.scope_request.name_mismatch` and the request stays open. A key set that differs from `expected_keys`, or values that fail the act input, answers 400 `workbench.scope_request.expected_invalid` and the request stays open. An act that is no longer eligible, or whose target is now inside the shared projects, answers 409 `workbench.scope_request.refused` and deletes the request. An act that the owning service refuses answers `outcome` `failed` with its `error_code`, and the request stays open.",
+  },
+  "session.scopeRequest.reject": {
+    ...workbenchMutation,
+    id: "workbench.session.scopeRequest.reject",
+    method: HttpMethod.Post,
+    path: "/api/workbench/session/:session_id/scope-request/:request_id/reject",
+    input: z.strictObject({
+      params: sessionParams.extend({
+        request_id: identitySchema(WORKBENCH_SCOPE_REQUEST_PREFIX),
+      }),
+      query: emptyFields,
+      body: z.strictObject({}),
+    }),
+    output: z.strictObject({
+      request_id: identitySchema(WORKBENCH_SCOPE_REQUEST_PREFIX),
+    }),
+    description:
+      "Reject an out-of-scope request of a guest-started run. A request that is unknown, expired, settled, running or revoked answers 404 `workbench.scope_request.not_found`.",
+  },
   "session.action.report": {
     ...workbenchMutation,
     id: "workbench.session.action.report",
@@ -711,14 +833,16 @@ export const workbenchOperations = {
       body: z.strictObject({
         invitee_name: z.string().max(WORKBENCH_INVITE_NAME_INPUT_MAX_LENGTH),
         project_ids: z.array(z.string()),
+        granted_operations: z.array(z.string()),
       }),
     }),
     output: inviteItemSchema.extend({
       session_id: identitySchema(WORKBENCH_SESSION_PREFIX),
       invite_token: z.uuid(),
+      granted_operations: z.array(z.string()),
     }),
     description:
-      "Invite one person to a workbench conversation. The answer holds `invite_token` once. The server stores only its hash. The invite lasts 7 days. Creating an invite clears the evidence grants of the conversation. Error `workbench.invite.name_invalid` answers a blank `invitee_name` or one of more than 64 characters. `project_ids` names 1 to 50 existing projects, each once. A repeated, malformed or unknown id, no id, or more than 50 ids answers 400 `workbench.invite.project_invalid` with the refused ids in `details`. A set that differs from the set of a live invite of the conversation answers 409 `workbench.invite.scope_mismatch`. The set never changes: revoke the invite and create a new one.",
+      "Invite one person to a workbench conversation. The answer holds `invite_token` once. The server stores only its hash. The invite lasts 7 days. Creating an invite clears the evidence grants of the conversation. Error `workbench.invite.name_invalid` answers a blank `invitee_name` or one of more than 64 characters. `project_ids` names 1 to 50 existing projects, each once. A repeated, malformed or unknown id, no id, or more than 50 ids answers 400 `workbench.invite.project_invalid` with the refused ids in `details`. A set that differs from the set of a live invite of the conversation answers 409 `workbench.invite.scope_mismatch`. The set never changes: revoke the invite and create a new one. `granted_operations` lists the operation ids that the guest-started runs of the invite can run without the owner's card. Each id is a project-scoped operation that the host agent lists and that a grant can hold, each once. A refused or repeated id answers 400 `workbench.invite.grant_invalid` with the refused ids in `details`. The list is fixed at create and is stored sorted. An empty list grants nothing.",
   },
   "invite.list": {
     ...workbenchOperation,
@@ -735,9 +859,10 @@ export const workbenchOperations = {
     output: z.strictObject({
       items: z.array(inviteListItemSchema),
       project_ids: z.array(identitySchema("project")).nullable(),
+      grantable: z.array(grantableOperationSchema),
     }),
     description:
-      "List the live invites of a workbench conversation. Each item names its projects with the live project name, or a null name for an id with no project. `project_ids` holds the set of the live invites, or null when no invite is live.",
+      "List the live invites of a workbench conversation. Each item names its projects with the live project name, or a null name for an id with no project. `project_ids` holds the set of the live invites, or null when no invite is live. Each item holds `granted_operations`, the live grant with the guard class of each id. `grantable` lists the operations that the host agent of the conversation lets an invite grant.",
   },
   "invite.revoke": {
     ...workbenchOperation,
@@ -799,12 +924,13 @@ export const workbenchOperations = {
       members: z.array(conversationMemberSchema),
       owner_name: z.string(),
       projects: z.array(inviteProjectSchema),
+      granted_operations: z.array(grantedOperationSchema),
       mention_names: z.array(z.string()),
       entries: z.array(guestEntrySchema),
       run_active: z.boolean(),
     }),
     description:
-      "Read the conversation of the invite of the guest. The conversation comes from the guest token. The entries hold the guest view only: no tool result, no thinking and no configuration. `projects` names the projects of the invite. `mention_names` lists the display names that a guest can mention: the agents that hold no built-in tool. An ended invite answers 401 `gateway.jwt.invite_ended`.",
+      "Read the conversation of the invite of the guest. The conversation comes from the guest token. The entries hold the guest view only: no tool result, no thinking and no configuration. `projects` names the projects of the invite. `granted_operations` lists the live grant of the invite with the guard class of each id. `mention_names` lists the display names that a guest can mention: the agents that hold no built-in tool. An ended invite answers 401 `gateway.jwt.invite_ended`.",
   },
   "guest.stream": {
     ...guestOperation,

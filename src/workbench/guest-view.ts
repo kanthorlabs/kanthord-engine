@@ -6,6 +6,7 @@ import {
   type MemberEntry,
   QueueClearCause,
   WORKBENCH_ACTION_RESULT_ENTRY,
+  WORKBENCH_REQUEST_OWNER_ACT_TOOL,
   type WorkbenchRecord,
   WorkbenchRecordKind,
 } from "./contract.ts";
@@ -36,6 +37,7 @@ export const GUEST_RECORD_KINDS = [
   WorkbenchRecordKind.Fork,
   WorkbenchRecordKind.Author,
   WorkbenchRecordKind.QueueClear,
+  WorkbenchRecordKind.ScopeStop,
 ] as const;
 export type GuestRecordKind = (typeof GUEST_RECORD_KINDS)[number];
 
@@ -63,7 +65,8 @@ export type GuestBody =
       count: number;
       cause: QueueClearCause;
       text: string;
-    };
+    }
+  | { kind: typeof WorkbenchRecordKind.ScopeStop; operation_id: string };
 
 export type GuestEntry = {
   id: string;
@@ -87,7 +90,11 @@ function blocksOf(content: unknown): GuestBlock[] {
   return content.flatMap((block): GuestBlock[] => {
     if (block?.type === TEXT_BLOCK && isString(block.text))
       return [{ type: TEXT_BLOCK, text: block.text }];
-    if (block?.type === TOOL_CALL_BLOCK && isString(block.name))
+    if (
+      block?.type === TOOL_CALL_BLOCK &&
+      isString(block.name) &&
+      block.name !== WORKBENCH_REQUEST_OWNER_ACT_TOOL
+    )
       return [{ type: TOOL_CALL_BLOCK, name: block.name }];
     return [];
   });
@@ -130,6 +137,8 @@ function projectRecord(record: WorkbenchRecord): GuestBody | null {
         cause: record.cause,
         text: queueClearLine(record.cause, record.count),
       };
+    case WorkbenchRecordKind.ScopeStop:
+      return { kind: record.kind, operation_id: record.operation_id };
     default:
       return assert.fail("A guest record kind has a projection.");
   }

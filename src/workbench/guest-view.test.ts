@@ -8,10 +8,12 @@ import {
   WORKBENCH_ACTION_RESULT_ENTRY,
   WORKBENCH_FORK_ACK,
   WORKBENCH_PLAN_ENTRY,
+  WORKBENCH_REQUEST_OWNER_ACT_TOOL,
   WorkbenchRecordKind,
 } from "./contract.ts";
 import { mergeEntries } from "./conversation.ts";
 import {
+  GUEST_RECORD_KINDS,
   type GuestEntry,
   projectEntries,
   projectStreaming,
@@ -267,4 +269,56 @@ test("(security, redaction) guest view drops the seen field of an action card", 
     { kind: "action_result", tool_call_id: "call_1", text: "Failed." },
   ]);
   assert.equal(JSON.stringify(view).includes(SECRET), false);
+});
+
+test("(security) guest view drops request_owner_act calls in entries and in streaming, and projects scope_stop as kind and operation_id only", () => {
+  const SECOND_CALL = "call_2";
+  const view = projectEntries([
+    message(1, "assistant", [
+      { type: "text", text: "I ask." },
+      {
+        type: "toolCall",
+        id: SECOND_CALL,
+        name: WORKBENCH_REQUEST_OWNER_ACT_TOOL,
+        arguments: { operation_id: "mission.node.pause", input: SECRET },
+      },
+    ]),
+    message(2, "assistant", [
+      {
+        type: "toolCall",
+        id: SECOND_CALL,
+        name: WORKBENCH_REQUEST_OWNER_ACT_TOOL,
+        arguments: { operation_id: "mission.node.pause", input: SECRET },
+      },
+    ]),
+    message(3, "toolResult", [{ type: "text", text: SECRET }]),
+    recordEntry(4, {
+      kind: WorkbenchRecordKind.ScopeStop,
+      tool_call_id: SECOND_CALL,
+      operation_id: "mission.node.pause",
+    }),
+  ]);
+  assert.deepEqual(bodies(view), [
+    { kind: "assistant", content: [{ type: "text", text: "I ask." }] },
+    { kind: "scope_stop", operation_id: "mission.node.pause" },
+  ]);
+  const streaming = projectStreaming({
+    role: "assistant",
+    content: [
+      { type: "text", text: "I ask." },
+      { type: "toolCall", name: WORKBENCH_REQUEST_OWNER_ACT_TOOL },
+    ],
+  });
+  assert.deepEqual(streaming, { content: [{ type: "text", text: "I ask." }] });
+  assert.ok(!JSON.stringify([view, streaming]).includes(SECRET));
+  assert.ok(
+    !JSON.stringify([view, streaming]).includes(
+      WORKBENCH_REQUEST_OWNER_ACT_TOOL,
+    ),
+  );
+  assert.ok(GUEST_RECORD_KINDS.includes(WorkbenchRecordKind.ScopeStop));
+  assert.deepEqual(
+    GUEST_RECORD_KINDS.filter((kind) => kind.includes("request")),
+    [],
+  );
 });

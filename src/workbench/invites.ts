@@ -12,6 +12,7 @@ import {
   WORKBENCH_INVITE_PROJECT_LIMIT,
   WorkbenchErrorCode,
 } from "./contract.ts";
+import { grantableOperations } from "./guard.ts";
 
 const NO_CHARACTERS = 0;
 const HASH_ALGORITHM = "sha256";
@@ -26,6 +27,7 @@ export interface InviteItem {
 
 export interface CreatedInvite extends InviteItem {
   session_id: string;
+  granted_operations: string[];
   invite_token: string;
 }
 
@@ -36,11 +38,14 @@ export interface Inviter {
 
 export interface LiveInviteItem extends InviteItem {
   project_ids: string[];
+  granted_operations: string[];
 }
 
 export interface InviteRequest {
   name: string;
   projectIds: readonly string[];
+  agentName: string;
+  grantedOperations: readonly string[];
 }
 
 export type ProjectNames = (
@@ -69,6 +74,29 @@ interface InviteRow {
 const projectIdSchema = identitySchema("project");
 const projectIdsSchema = z.array(projectIdSchema);
 const NO_PROJECTS: string[] = [];
+const grantedOperationsSchema = z.array(z.string());
+
+function grantedOperationsOf(stored: string): string[] {
+  return grantedOperationsSchema.parse(JSON.parse(stored));
+}
+
+function checkedGrant(agentName: string, ids: readonly string[]): string[] {
+  const grantable = grantableOperations(agentName);
+  const seen = new Set<string>();
+  const refused = new Set<string>();
+  for (const id of ids) {
+    if (!grantable.has(id) || seen.has(id)) refused.add(id);
+    seen.add(id);
+  }
+  if (refused.size > NO_CHARACTERS)
+    throw new OperationError(
+      HttpStatus.BadRequest,
+      WorkbenchErrorCode.GrantInvalid,
+      "The grant names only operations that the host agent lists and that a grant can hold, each once.",
+      [...refused],
+    );
+  return [...ids].sort();
+}
 
 function projectIdsOf(stored: string): string[] {
   try {
@@ -156,6 +184,7 @@ export class WorkbenchInvites {
   ): CreatedInvite {
     const name = inviteNameOf(request.name);
     const projectIds = JSON.stringify(this.checkedProjects(request.projectIds));
+    const granted = checkedGrant(request.agentName, request.grantedOperations);
     const token = randomUUID();
     const id = createIdentity(WORKBENCH_INVITE_PREFIX);
     const now = Date.now();
@@ -179,7 +208,7 @@ export class WorkbenchInvites {
         );
       tx.database
         .prepare(
-          "INSERT INTO workbench_invite (id, session_id, token_hash, invited_by, invited_by_name, expires_at, invitee_name, project_ids) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO workbench_invite (id, session_id, token_hash, invited_by, invited_by_name, expires_at, invitee_name, project_ids, granted_operations) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .run(
           id,
@@ -190,11 +219,13 @@ export class WorkbenchInvites {
           expiresAt,
           name,
           projectIds,
+          JSON.stringify(granted),
         );
     });
     return {
       id,
       session_id: sessionId,
+      granted_operations: granted,
       invitee_name: name,
       expires_at: expiresAt,
       invite_token: token,
@@ -226,15 +257,22 @@ export class WorkbenchInvites {
       (tx) =>
         tx.database
           .prepare(
-            "SELECT session_id, invited_by, invited_by_name, expires_at, project_ids FROM workbench_invite WHERE id = ? AND expires_at > ?",
+            "SELECT session_id, invited_by, invited_by_name, expires_at, project_ids, granted_operations FROM workbench_invite WHERE id = ? AND expires_at > ?",
           )
           .get(inviteId, Date.now()) as
-          | (Omit<LiveInvite, "project_ids"> & { project_ids: string })
+          | (Omit<LiveInvite, "project_ids" | "granted_operations"> & {
+              project_ids: string;
+              granted_operations: string;
+            })
           | undefined,
     );
     return row === undefined
       ? null
-      : { ...row, project_ids: projectIdsOf(row.project_ids) };
+      : {
+          ...row,
+          project_ids: projectIdsOf(row.project_ids),
+          granted_operations: grantedOperationsOf(row.granted_operations),
+        };
   }
 
   list(sessionId: string): LiveInviteItem[] {
@@ -242,16 +280,24 @@ export class WorkbenchInvites {
       .transaction((tx) =>
         tx.database
           .prepare(
-            "SELECT id, invitee_name, expires_at, project_ids FROM workbench_invite WHERE session_id = ? AND expires_at > ? ORDER BY expires_at, id",
+            "SELECT id, invitee_name, expires_at, project_ids, granted_operations FROM workbench_invite WHERE session_id = ? AND expires_at > ? ORDER BY expires_at, id",
           )
           .all(sessionId, Date.now()),
       )
       .map((row) => {
-        const { project_ids: stored, ...item } =
-          row as unknown as InviteItem & {
-            project_ids: string;
-          };
-        return { ...item, project_ids: projectIdsOf(stored) };
+        const {
+          project_ids: stored,
+          granted_operations: storedGrant,
+          ...item
+        } = row as unknown as InviteItem & {
+          project_ids: string;
+          granted_operations: string;
+        };
+        return {
+          ...item,
+          project_ids: projectIdsOf(stored),
+          granted_operations: grantedOperationsOf(storedGrant),
+        };
       });
   }
 

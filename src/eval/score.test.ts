@@ -661,3 +661,69 @@ test("(happy path, service level) for a plan@1 member, reply is the plan text an
     ["forbid_calls", "max_tool_calls"],
   );
 });
+
+const OWNER_ACT_CALL = {
+  tool_call_id: "call-6",
+  name: "request_owner_act",
+  arguments: { operation_id: "mission.node.pause", input: {} },
+};
+const OWNER_ACT_EXPECTED: Checks = {
+  expect_calls: [{ tool: "request_owner_act" }],
+};
+const OWNER_ACT_FORBIDDEN: Checks = {
+  forbid_calls: [{ tool: "request_owner_act" }],
+};
+const SCOPE_REQUESTS_KIND = "scope_requests";
+
+test("(happy path) the check scope_requests passes one scripted run and fails another", async () => {
+  const checks: Checks = { scope_requests: 1 };
+  const passing = await scoreRun(
+    checks,
+    observation({ scope_requests: 1 }),
+    read,
+  );
+  assert.equal(passing.passed, true);
+  const failing = await scoreRun(
+    checks,
+    observation({ scope_requests: 0 }),
+    read,
+  );
+  assert.equal(failing.passed, false);
+  assert.equal(
+    failing.checks.find(({ kind }) => kind === SCOPE_REQUESTS_KIND)?.passed,
+    false,
+  );
+  const none = await scoreRun(
+    { scope_requests: 0 },
+    observation({ scope_requests: 0 }),
+    read,
+  );
+  assert.equal(none.passed, true);
+});
+
+test("(happy path) the check scope_requests fails a run with no request count", async () => {
+  const score = await scoreRun({ scope_requests: 0 }, observation(), read);
+  assert.equal(score.passed, false);
+});
+
+test("(happy path) expect_calls and forbid_calls match request_owner_act in one passing and one failing scripted run", async () => {
+  const asked = observation({ calls: [OWNER_ACT_CALL] });
+  const silent = observation({ calls: [LIST_CALL] });
+  assert.equal((await scoreRun(OWNER_ACT_EXPECTED, asked, read)).passed, true);
+  assert.equal(
+    (await scoreRun(OWNER_ACT_EXPECTED, silent, read)).passed,
+    false,
+  );
+  assert.equal(
+    (await scoreRun(OWNER_ACT_FORBIDDEN, silent, read)).passed,
+    true,
+  );
+  assert.equal(
+    (await scoreRun(OWNER_ACT_FORBIDDEN, asked, read)).passed,
+    false,
+  );
+  const byId: Checks = {
+    expect_calls: [{ operation_id: "request_owner_act" }],
+  };
+  assert.equal((await scoreRun(byId, asked, read)).passed, true);
+});

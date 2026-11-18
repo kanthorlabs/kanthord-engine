@@ -1,3 +1,4 @@
+import { getAgentDeclaration } from "../agent/catalog.ts";
 import { agentOperations, GuardClass } from "../agent/contract.ts";
 import { footprintOperations } from "../footprint/contract.ts";
 import {
@@ -90,6 +91,8 @@ export const HUMAN_ONLY_OPERATIONS: ReadonlySet<string> = new Set([
   workbenchOperations["session.queue.remove"].id,
   workbenchOperations["session.action.report"].id,
   workbenchOperations["session.autoMode.set"].id,
+  workbenchOperations["session.scopeRequest.approve"].id,
+  workbenchOperations["session.scopeRequest.reject"].id,
   workbenchOperations["invite.revoke"].id,
   footprintOperations["alert.acknowledge"].id,
   footprintOperations["backup.delete"].id,
@@ -150,6 +153,11 @@ export const REVERSIBLE_OPERATIONS: ReadonlySet<string> = new Set([
   agentOperations["cooldown.clear"].id,
 ]);
 
+export const GRANTABLE_JUDGED_OPERATIONS: ReadonlySet<string> = new Set([
+  missionOperations["node.block"].id,
+  missionOperations["node.unblock"].id,
+]);
+
 export const GuardAction = {
   Run: "run",
   Block: "block",
@@ -170,6 +178,7 @@ export type GuardClassifier = (
 export interface GuestRunScope {
   scope: ReadonlySet<string>;
   resolver: ProjectScope;
+  covers(call: GrantedCall): boolean;
 }
 
 export interface GuardRun {
@@ -236,11 +245,74 @@ export function guardClassOf(operation: Operation): GuardClass {
     : GuardClass.Card;
 }
 
-function classified(result: ClassifyResult, run: GuardRun): GuardDecision {
+const OPERATIONS_BY_ID: ReadonlyMap<string, Operation> = new Map(
+  [
+    agentOperations,
+    footprintOperations,
+    intakeCredentialOperations,
+    intakeOperations,
+    llmOperations,
+    missionOperations,
+    environmentSecretOperations,
+    projectOperations,
+    repositoryOperations,
+    storageOperations,
+    trackingOperations,
+    workerOperations,
+    workbenchOperations,
+  ]
+    .flatMap((operations) => Object.values(operations) as Operation[])
+    .map((operation) => [operation.id, operation]),
+);
+
+export function grantableOperations(
+  agentName: string,
+): ReadonlyMap<string, GuardClass> {
+  const listed = getAgentDeclaration(agentName)?.tools.operation ?? [];
+  const grantable = new Map<string, GuardClass>();
+  for (const id of listed) {
+    const operation = OPERATIONS_BY_ID.get(id);
+    if (!operation || operation.projectScope === undefined) continue;
+    if (!REVERSIBLE_OPERATIONS.has(id) && !GRANTABLE_JUDGED_OPERATIONS.has(id))
+      continue;
+    grantable.set(id, guardClassOf(operation));
+  }
+  return grantable;
+}
+
+export function liveGrant(
+  stored: readonly string[],
+  agentName: string,
+): ReadonlySet<string> {
+  const grantable = grantableOperations(agentName);
+  return new Set(stored.filter((id) => grantable.has(id)));
+}
+
+export interface GrantedCall {
+  readonly operationId: string;
+  readonly input: unknown;
+}
+
+export function grantCovers(
+  grant: ReadonlySet<string>,
+  call: GrantedCall,
+): boolean {
+  if (!grant.has(call.operationId)) return false;
+  if (call.operationId !== missionOperations["node.unblock"].id) return true;
+  const body = importBody(call.input);
+  return !body || !Object.hasOwn(body, "change");
+}
+
+function classified(
+  result: ClassifyResult,
+  run: GuardRun,
+  call: GrantedCall,
+): GuardDecision {
   if (result.kind === ClassifyKind.Aborted)
     return block(WORKBENCH_REJECTION_REASON);
   if (result.kind === ClassifyKind.Failed) return confirm(result.cause);
   if (!run.autoMode()) return confirm(GuardCause.AutoModeOff);
+  if (run.guest && !run.guest.covers(call)) return confirm(GuardCause.GuestRun);
   const decision = decide(result.verdict, run.request);
   if (decision.tier === GuardTier.Auto)
     return { action: GuardAction.Auto, reason: result.verdict.reason };
@@ -259,7 +331,7 @@ function guestBlock(
     return block(workbenchGuestScopeText(operation.id));
   const parsed = operation.input.safeParse(fullInput(operation, input));
   if (!parsed.success) return block(WORKBENCH_PROJECT_SCOPE_TEXT);
-  const verdict = guest.resolver.check(operation, {
+  const { verdict } = guest.resolver.resolve(operation, {
     input: parsed.data as ScopedInput,
     scope: guest.scope,
   });
@@ -277,7 +349,9 @@ export async function guardDecision(
   if (refused) return refused;
   const floor = floorOf(operation, input);
   if (floor) return floor;
-  if (run.guest) return confirm(GuardCause.GuestRun);
+  const granted = { operationId: operation.id, input };
+  if (run.guest && !run.guest.covers(granted))
+    return confirm(GuardCause.GuestRun);
   if (!run.autoMode()) return confirm(GuardCause.AutoModeOff);
   if (REVERSIBLE_OPERATIONS.has(operation.id))
     return { action: GuardAction.Auto, reason: GuardCause.Reversible };
@@ -289,5 +363,5 @@ export async function guardDecision(
     input,
   };
   const result = await classify(guardRequest(run.request, call, run.agentName));
-  return classified(result, run);
+  return classified(result, run, granted);
 }

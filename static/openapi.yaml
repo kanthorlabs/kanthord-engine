@@ -438,6 +438,10 @@ paths:
     $ref: ./openapi/workbench/session.message.yaml#/pathItem
   /api/workbench/session/{session_id}/queue/{queued_message_id}:
     $ref: ./openapi/workbench/session.queue.remove.yaml#/pathItem
+  /api/workbench/session/{session_id}/scope-request/{request_id}/approve:
+    $ref: ./openapi/workbench/session.scopeRequest.approve.yaml#/pathItem
+  /api/workbench/session/{session_id}/scope-request/{request_id}/reject:
+    $ref: ./openapi/workbench/session.scopeRequest.reject.yaml#/pathItem
   /api/worker/execution/{execution_id}/action/request:
     $ref: ./openapi/worker/action.request.yaml#/pathItem
   /api/worker/catalog/{worker_name}:

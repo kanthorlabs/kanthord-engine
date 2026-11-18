@@ -9,6 +9,7 @@ import {
   parseEnvironmentText,
 } from "../../kernel/devcontainer.ts";
 import { createIdempotencyKey, identitySchema } from "../../kernel/identity.ts";
+import { PROJECT_NAME_MAX_LENGTH } from "../../kernel/project-name.ts";
 import {
   BINDING_ID_PREFIX,
   BindingKind,
@@ -21,7 +22,6 @@ import {
   LIST_LIMIT_DEFAULT,
   LIST_LIMIT_MAX,
   PROJECT_ID_PREFIX,
-  PROJECT_NAME_MAX_LENGTH,
   projectNameSchema,
   projectOperations,
 } from "../../project/contract.ts";

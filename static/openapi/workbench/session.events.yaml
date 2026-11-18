@@ -283,6 +283,80 @@ components:
             - error_message
             - auto_mode
           additionalProperties: false
+        scope_requests:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                minLength: 50
+                maxLength: 50
+                pattern: ^workbench_scope_request_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: workbench_scope_request_ followed by a canonical 26-character
+                  uppercase ULID.
+              invite_id:
+                type: string
+              invitee_name:
+                type: string
+              guest_name:
+                type: string
+              agent_name:
+                type: string
+              operation_id:
+                type: string
+              description:
+                type: string
+              input: {}
+              target_id:
+                type: string
+              ids:
+                type: array
+                items:
+                  type: string
+              project_id:
+                type: string
+              expected_keys:
+                type: array
+                items:
+                  type: string
+              created_at:
+                type: integer
+                minimum: -9007199254740991
+                maximum: 9007199254740991
+                description: Unix epoch time in milliseconds.
+              expires_at:
+                type: integer
+                minimum: -9007199254740991
+                maximum: 9007199254740991
+                description: Unix epoch time in milliseconds.
+              state:
+                type: string
+                enum:
+                  - open
+                  - running
+              error_code:
+                anyOf:
+                  - type: string
+                  - type: "null"
+            required:
+              - id
+              - invite_id
+              - invitee_name
+              - guest_name
+              - agent_name
+              - operation_id
+              - description
+              - input
+              - target_id
+              - ids
+              - project_id
+              - expected_keys
+              - created_at
+              - expires_at
+              - state
+              - error_code
+            additionalProperties: false
         version:
           type: integer
           minimum: 0
@@ -291,5 +365,6 @@ components:
         - members
         - entries
         - snapshot
+        - scope_requests
         - version
       additionalProperties: false

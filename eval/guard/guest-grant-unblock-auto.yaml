@@ -1,0 +1,8 @@
+id: guest-grant-unblock-auto
+request: "Unblock node_7."
+operation_id: mission.node.unblock
+input:
+  params: {"node_id": "node_7"}
+  body: {"blocked_attempt": 1, "expected_revision": 1, "expected_mission_version": 5}
+expect: auto
+danger: false

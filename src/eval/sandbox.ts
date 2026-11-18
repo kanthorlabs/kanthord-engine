@@ -38,9 +38,11 @@ import {
 } from "../worker/contract.ts";
 import {
   GUARD_AGENT_NAME,
+  ScopeRequestState,
   type WorkbenchConfiguration,
   workbenchOperations,
   type WorkbenchSession,
+  type WorkbenchSessionGet,
 } from "../workbench/contract.ts";
 import {
   forkSummaryOf,
@@ -680,11 +682,16 @@ async function joinGuest(
   sandbox: Sandbox,
   sessionId: string,
   projectIds: readonly string[],
+  grant: readonly string[],
 ): Promise<GuestCall> {
   const invite = await sandbox.call(workbenchOperations["invite.create"], {
     params: { session_id: sessionId },
     query: {},
-    body: { invitee_name: GUEST_NAME, project_ids: [...projectIds] },
+    body: {
+      invitee_name: GUEST_NAME,
+      project_ids: [...projectIds],
+      granted_operations: [...grant],
+    },
   });
   const joined = await sandbox.call(workbenchOperations["invite.join"], {
     params: {},
@@ -748,6 +755,12 @@ function summaryOf(session: WorkbenchSession): string | null {
     : null;
 }
 
+function openRequestsOf(session: WorkbenchSessionGet): number {
+  return session.scope_requests.filter(
+    ({ state }) => state === ScopeRequestState.Open,
+  ).length;
+}
+
 function usageOf(session: WorkbenchSession, meter: SummarizerMeter) {
   const { usage } = observationOf(session.entries);
   return {
@@ -759,6 +772,7 @@ function usageOf(session: WorkbenchSession, meter: SummarizerMeter) {
 
 export interface TurnsRun extends Pick<Case, "turns" | "checks" | "auto_mode"> {
   project_ids: readonly string[];
+  grant: readonly string[];
 }
 
 export async function runTurns(
@@ -777,7 +791,7 @@ export async function runTurns(
       body: { enabled: false },
     });
   const guest = run.turns.some(isGuestTurn)
-    ? await joinGuest(sandbox, created.id, run.project_ids)
+    ? await joinGuest(sandbox, created.id, run.project_ids, run.grant)
     : null;
   const tally: Tally = {
     confirmations: [],
@@ -823,6 +837,7 @@ export async function runTurns(
     confirmations: tally.confirmations,
     unexpected_approval: tally.unexpected,
     summary: summaryOf(final),
+    scope_requests: openRequestsOf(final),
   };
   const score = await scoreRun(
     run.checks,
@@ -914,5 +929,6 @@ export async function playCase(
       sandbox.native,
     ),
     project_ids: loaded.project_ids.map((key) => ids[key]!.project_id),
+    grant: loaded.grant,
   });
 }

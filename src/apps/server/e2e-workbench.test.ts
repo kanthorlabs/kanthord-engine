@@ -21,6 +21,7 @@ import {
 } from "../../agent/prompt-assets.ts";
 import { directClient } from "../../gateway/index.ts";
 import { background } from "../../kernel/context.ts";
+import { type GuestIdentity, isDelegateIdentity } from "../../kernel/caller.ts";
 import {
   testGuestIdentity,
   testHumanIdentity,
@@ -218,7 +219,7 @@ test("a workbench session is created with its configuration in pi entries", asyn
       fixture.options,
     ),
   );
-  assert.deepEqual(read, session);
+  assert.deepEqual(read, { ...session, scope_requests: [] });
 });
 
 test("a configuration change appends the custom entry only when the agent provider changes", async (t) => {
@@ -4550,6 +4551,7 @@ async function inviteGuest(fixture: Fixture, sessionId: string) {
         body: {
           invitee_name: GUEST_NAME,
           project_ids: await invitedProjectIds(fixture),
+          granted_operations: [],
         },
       },
       fixture.options,
@@ -4821,7 +4823,11 @@ test(
         {
           params: { session_id: session.id },
           query: {},
-          body: { invitee_name: GUEST_NAME, project_ids: [first.projectId] },
+          body: {
+            invitee_name: GUEST_NAME,
+            project_ids: [first.projectId],
+            granted_operations: [],
+          },
         },
         fixture.options,
       ),
@@ -4845,6 +4851,7 @@ test(
       reader: testReadOnlyIdentity(identity.accountId, {
         inviteId: invite.id,
         projectIds: [first.projectId],
+        guestName: GUEST_NAME,
       }),
       jti: "resolver-test-22",
     });
@@ -4872,5 +4879,1051 @@ test(
       (await nodeOf(fixture, second.nodeId)).state,
       NodeState.Available,
     );
+  },
+);
+
+const ANNA = "Anna";
+const SHOP_V1 = "shop-v1";
+const SHOP_V2 = "shop-v2";
+const ANNA_MESSAGE = "@Yumi tidy the node.";
+const ANNA_AGENTS = [OPS, AGENT, REVIEW_AGENT];
+const REQUEST_OWNER_ACT = "request_owner_act";
+const SCOPE_STOP_KIND = "scope_stop";
+const GUARD_KIND = "guard";
+const NODE_PAUSE_ID = "mission.node.pause";
+const COOLDOWN_CLEAR_ID = "agent.cooldown.clear";
+const ANNA_REASON = "zq-anna-reason";
+const ANNA_DELEGATE_NAME = "Anna (guest)";
+const ANNA_TIMEOUT_MS = 60000;
+const GUEST_SESSION_PATH = "/api/workbench/guest/session";
+const FRAME_END = "\n\n";
+const FRAME_PATTERN = /^event: (\w+)\ndata: (.*)$/s;
+const STATE_EVENT = "state";
+const STATE_KEYS = [
+  "auto_mode",
+  "display_name",
+  "queue",
+  "run_active",
+  "streaming",
+  "waiting_for_approval",
+];
+const FLUSH_TICKS = 3;
+const NO_CALLS = 0;
+const STALE_VERSION = 999;
+const IDENTITY_PATTERN = /\b[a-z_]+_[0-7][0-9A-HJKMNP-TV-Z]{25}\b/g;
+const ENTRY_ID_PATTERN = /"(id|parentId)":"[^"]*"/g;
+const TIMESTAMP_PATTERN = /"timestamp":("[^"]*"|\d+)/g;
+const OPERATION_PATTERN = /"operation_id":"[^"]*"/g;
+const USAGE_PATTERN = /"usage":\{[^{}]*\{[^{}]*\}\}/g;
+const DURATION_PATTERN = /"(duration\w*)":\d+/g;
+const TOOL_CALL_ID_PATTERN = /"(toolCallId|tool_call_id)":"[^"]*"/g;
+const TOOL_CALL_PATTERN = /"toolCall","name":"[^"]*"/g;
+const APPROVE_ID = "session.scopeRequest.approve";
+const REJECT_ID = "session.scopeRequest.reject";
+const ANNA_BLOCKED_ATTEMPT = 0;
+const ANNA_PRIORITY = 5;
+
+interface AnnaWorld {
+  fixture: Fixture;
+  hostId: string;
+  hostFile: string;
+  token: string;
+  inviteId: string;
+  guest: GuestIdentity;
+  first: CreatedNode;
+  second: CreatedNode;
+  firstOther: string;
+  secondOther: string;
+}
+
+interface AnnaOptions {
+  grant?: readonly string[];
+  guard?: boolean;
+}
+
+async function addNode(
+  fixture: Fixture,
+  projectId: string,
+  filename: string,
+): Promise<string> {
+  const mission = completed(
+    await fixture.missions.get(
+      { params: { project_id: projectId }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  const created = completed(
+    await fixture.missions["node.create"](
+      {
+        params: { mission_id: mission.id },
+        query: {},
+        body: {
+          filename,
+          content: NODE_CONTENT,
+          tasks: [],
+          reason: "plan",
+          expected_mission_version: mission.version,
+        },
+      } as never,
+      fixture.options,
+    ),
+  ) as { revisions: { node_id: string }[] };
+  return created.revisions[0]!.node_id;
+}
+
+const NODE_CONTENT = {
+  name: "Review the thread",
+  requirement: "Review the thread",
+  criterion: "The thread is reviewed",
+  verifications: ["true"],
+  bindings: [],
+  intent: "examine",
+};
+
+async function annaWorld(
+  t: TestContext,
+  script: (world: AnnaWorld) => FauxResponseStep[],
+  options: AnnaOptions = {},
+): Promise<AnnaWorld> {
+  const world = {} as AnnaWorld;
+  const fixture = await workbenchFixture(
+    t,
+    script(world),
+    undefined,
+    undefined,
+    [...ANNA_AGENTS, ...(options.guard ? [GUARD_AGENT] : [])],
+  );
+  const first = await createdNode(fixture, SHOP_V1);
+  const second = await createdNode(fixture, SHOP_V2);
+  const firstOther = await addNode(fixture, first.projectId, "other.md");
+  const secondOther = await addNode(fixture, second.projectId, "other.md");
+  const host = await createSession(fixture, undefined, OPS);
+  const invite = completed(
+    await fixture.workbench["invite.create"](
+      {
+        params: { session_id: host.id },
+        query: {},
+        body: {
+          invitee_name: ANNA,
+          project_ids: [first.projectId],
+          granted_operations: [...(options.grant ?? [])],
+        },
+      },
+      fixture.options,
+    ),
+  );
+  const joined = completed(
+    await fixture.workbench["invite.join"](
+      {
+        params: {},
+        query: {},
+        body: { invite_token: invite.invite_token, name: ANNA },
+      },
+      fixture.options,
+    ),
+  );
+  return Object.assign(world, {
+    fixture,
+    hostId: host.id,
+    hostFile: host.resume_command.replace(/^pi --session /, ""),
+    token: joined.guest_token,
+    inviteId: invite.id,
+    guest: testGuestIdentity({
+      guestId: joined.guest_id,
+      name: ANNA,
+      inviteId: invite.id,
+      sessionId: host.id,
+      invitedBy: identity.accountId,
+      reader: testReadOnlyIdentity(identity.accountId, {
+        inviteId: invite.id,
+        projectIds: [first.projectId],
+        guestName: ANNA,
+      }),
+      jti: "workbench-anna",
+    }),
+    first,
+    second,
+    firstOther,
+    secondOther,
+  });
+}
+
+function annaHost(world: AnnaWorld) {
+  const host = world.fixture.workbenchService["sessions"].get(world.hostId);
+  assert.ok(host);
+  return host;
+}
+
+function annaAsks(world: AnnaWorld, text = ANNA_MESSAGE) {
+  return world.fixture.workbenchService.guestMessage(
+    world.guest,
+    text,
+    background,
+  );
+}
+
+async function untilRunEnds(world: AnnaWorld, signal: AbortSignal) {
+  while (annaHost(world).run !== null) {
+    signal.throwIfAborted();
+    await setImmediate();
+  }
+}
+
+async function flushFeed(t: TestContext) {
+  for (let tick = 0; tick < FLUSH_TICKS; tick++) {
+    t.mock.timers.tick(WORKBENCH_STREAM_TICK_MS);
+    await setImmediate();
+  }
+}
+
+function annaGuestRequest(
+  world: AnnaWorld,
+  path: string,
+  signal?: AbortSignal,
+) {
+  return world.fixture.request(path, {
+    headers: { authorization: `Bearer ${world.token}` },
+    ...(signal ? { signal } : {}),
+  });
+}
+
+async function guestViewOf(world: AnnaWorld) {
+  const response = await annaGuestRequest(world, GUEST_SESSION_PATH);
+  return (await response.json()) as { entries: unknown[] };
+}
+
+function annaNormalised(value: unknown): string {
+  return JSON.stringify(value)
+    .replaceAll(IDENTITY_PATTERN, "<id>")
+    .replaceAll(ENTRY_ID_PATTERN, '"$1":"<entry>"')
+    .replaceAll(TIMESTAMP_PATTERN, '"timestamp":"<time>"')
+    .replaceAll(OPERATION_PATTERN, '"operation_id":"<operation>"')
+    .replaceAll(TOOL_CALL_ID_PATTERN, '"$1":"<call>"')
+    .replaceAll(USAGE_PATTERN, '"usage":"<usage>"')
+    .replaceAll(DURATION_PATTERN, '"$1":0')
+    .replaceAll(TOOL_CALL_PATTERN, '"toolCall","name":"<tool>"');
+}
+
+function openRequests(world: AnnaWorld) {
+  return world.fixture.workbenchService["scopeRequests"].open(world.hostId);
+}
+
+async function ownerRequests(world: AnnaWorld) {
+  return completed(
+    await world.fixture.workbench["session.get"](
+      { params: { session_id: world.hostId }, query: {}, body: null },
+      world.fixture.options,
+    ),
+  ).scope_requests;
+}
+
+function scopeStopsOf(entries: readonly Entry[]): Entry[] {
+  return recordsOf(entries).filter(
+    (entry) => (entry.data as { kind?: string }).kind === SCOPE_STOP_KIND,
+  );
+}
+
+function assistantTextAfterResult(entries: readonly Entry[]): number {
+  const roles = entries
+    .filter((entry) => entry.type === MESSAGE_ENTRY)
+    .map((entry) => (entry.message as { role: string }).role);
+  return roles.length - roles.lastIndexOf(TOOL_RESULT) - SINGLE;
+}
+
+function streamCollector(
+  t: TestContext,
+  response: Response,
+  controller: AbortController,
+) {
+  t.after(() => controller.abort());
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  const chunks: string[] = [];
+  void (async () => {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      chunks.push(decoder.decode(value, { stream: true }));
+    }
+  })().catch(() => undefined);
+  return { take: () => chunks.splice(NO_CALLS).join("") };
+}
+
+function framesOf(text: string) {
+  return text
+    .split(FRAME_END)
+    .filter((block) => block.length > NO_CALLS)
+    .map((block) => {
+      const match = FRAME_PATTERN.exec(block);
+      assert.ok(match, block);
+      return { event: match[1]!, data: JSON.parse(match[2]!) as unknown };
+    });
+}
+
+interface AnnaCapture {
+  view: string;
+  frames: string;
+  states: string[];
+  stateKeys: string[][];
+  queue: string[];
+  calls: number;
+  scopeStops: number;
+  afterResult: number;
+  requests: number;
+  runActive: boolean;
+  entries: Entry[];
+  fileUnchanged: boolean;
+}
+
+type AnnaCase = {
+  call: (world: AnnaWorld) => ReturnType<typeof toolCall>;
+  settle?: (world: AnnaWorld, requestId: string) => Promise<void>;
+};
+
+function nodePauseInput(nodeId: string) {
+  return {
+    params: { node_id: nodeId },
+    body: {
+      reason: ANNA_REASON,
+      expected_mission_version: FIRST_BINDING_SET,
+      expected_state: "Available",
+      expected_attempt: FIRST_BINDING_SET,
+    },
+  };
+}
+
+function askOwner(operationId: string, input: Parameters<typeof toolCall>[1]) {
+  return toolCall(REQUEST_OWNER_ACT, { operation_id: operationId, input });
+}
+
+function requestCases(): AnnaCase[] {
+  const ask = askOwner;
+  return [
+    {
+      call: () =>
+        ask(NODE_PAUSE_ID, {
+          params: { node_id: UNKNOWN_NODE },
+          body: { reason: ANNA_REASON },
+        }),
+    },
+    {
+      call: (world) =>
+        ask(NODE_PAUSE_ID, {
+          params: { node_id: world.second.nodeId },
+          body: { reason: ANNA_REASON },
+        }),
+      settle: ownerDecides,
+    },
+    {
+      call: () => ask(COOLDOWN_CLEAR_ID, { params: { credential: "primary" } }),
+    },
+  ];
+}
+
+function plainCases(): AnnaCase[] {
+  return [
+    {
+      call: () =>
+        toolCall(toolName(NODE_PAUSE_ID), nodePauseInput(UNKNOWN_NODE)),
+    },
+    {
+      call: (world) =>
+        toolCall(toolName(NODE_PAUSE_ID), nodePauseInput(world.second.nodeId)),
+    },
+    {
+      call: () =>
+        toolCall(toolName(COOLDOWN_CLEAR_ID), {
+          params: { credential: "primary" },
+          query: {},
+        }),
+    },
+  ];
+}
+
+async function ownerDecides(world: AnnaWorld, requestId: string) {
+  const params = { session_id: world.hostId, request_id: requestId };
+  const stale = completed(
+    await world.fixture.workbench[APPROVE_ID](
+      {
+        params,
+        query: {},
+        body: {
+          project_name: SHOP_V2,
+          expected: {
+            expected_attempt: FIRST_BINDING_SET,
+            expected_mission_version: STALE_VERSION,
+            expected_state: "Available",
+          },
+        },
+      },
+      world.fixture.options,
+    ),
+  );
+  assert.equal(stale.outcome, ActionOutcome.Failed);
+  completed(
+    await world.fixture.workbench[REJECT_ID](
+      { params, query: {}, body: {} },
+      world.fixture.options,
+    ),
+  );
+}
+
+async function annaRuns(
+  t: TestContext,
+  cases: readonly AnnaCase[],
+  after: readonly FauxResponseStep[] = [],
+): Promise<{ world: AnnaWorld; captures: AnnaCapture[] }> {
+  const started = cases.map(() => Promise.withResolvers<void>());
+  const gates = cases.map(() => Promise.withResolvers<void>());
+  const world = await annaWorld(t, (target) => [
+    ...cases.map(({ call }, index) => async () => {
+      started[index]!.resolve();
+      await gates[index]!.promise;
+      return call(target);
+    }),
+    ...after,
+  ]);
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const controller = new AbortController();
+  const stream = streamCollector(
+    t,
+    await annaGuestRequest(
+      world,
+      `${GUEST_SESSION_PATH}/stream`,
+      controller.signal,
+    ),
+    controller,
+  );
+  await flushFeed(t);
+  stream.take();
+  const captures: AnnaCapture[] = [];
+  let seen = (await guestViewOf(world)).entries.length;
+  for (const [index, scenario] of cases.entries()) {
+    const calls = world.fixture.provider.calls.length;
+    await annaAsks(world);
+    await started[index]!.promise;
+    await flushFeed(t);
+    gates[index]!.resolve();
+    await untilRunEnds(world, t.signal);
+    await flushFeed(t);
+    const requests = await ownerRequests(world);
+    const requested = requests.length;
+    const fileBefore = readFileSync(world.hostFile, "utf8");
+    for (const request of requests) await scenario.settle?.(world, request.id);
+    await flushFeed(t);
+    const fileUnchanged = readFileSync(world.hostFile, "utf8") === fileBefore;
+    const { entries: view, ...rest } = await guestViewOf(world);
+    const frames = framesOf(stream.take());
+    const states = frames.filter(({ event }) => event === STATE_EVENT);
+    const owner = await sessionEntries(world.fixture, world.hostId);
+    captures.push({
+      view: annaNormalised({ entries: view.slice(seen), rest }),
+      frames: annaNormalised(frames),
+      states: states.map(({ data }) => annaNormalised(data)),
+      stateKeys: states.map(({ data }) => Object.keys(data as object).sort()),
+      queue: states.map(({ data }) =>
+        annaNormalised((data as { queue: unknown }).queue),
+      ),
+      calls: world.fixture.provider.calls.length - calls,
+      scopeStops: scopeStopsOf(owner).length,
+      afterResult: assistantTextAfterResult(owner),
+      requests: requested,
+      runActive: annaHost(world).run !== null,
+      entries: owner,
+      fileUnchanged,
+    });
+    seen = view.length;
+  }
+  return { world, captures };
+}
+
+function assertEqualViews(captures: readonly AnnaCapture[]): void {
+  const [first] = captures;
+  assert.ok(first);
+  assert.ok(first.states.length > NO_CALLS);
+  for (const capture of captures) {
+    assert.equal(capture.view, first.view);
+    assert.equal(capture.frames, first.frames);
+    assert.deepEqual(capture.states, first.states);
+    assert.deepEqual(capture.queue, first.queue);
+    assert.equal(capture.runActive, false);
+    assert.equal(capture.calls, SINGLE);
+    assert.equal(capture.afterResult, NO_CALLS);
+    for (const keys of capture.stateKeys) assert.deepEqual(keys, STATE_KEYS);
+  }
+  assert.deepEqual(
+    captures.map(({ scopeStops }) => scopeStops),
+    [SINGLE, TWO_RESULTS, TWO_RESULTS + SINGLE],
+  );
+}
+
+test(
+  "(security) non-disclosure: request_owner_act with an absent node, a P2 node and a global act gives equal guest views, frames, queue and run state, and only the P2 case gives an owner request",
+  { timeout: ANNA_TIMEOUT_MS },
+  async (t) => {
+    const { captures } = await annaRuns(t, requestCases());
+    assertEqualViews(captures);
+    assert.deepEqual(
+      captures.map(({ requests }) => requests),
+      [NO_CALLS, SINGLE, NO_CALLS],
+    );
+  },
+);
+
+test(
+  "(security) non-disclosure: the same three cases as plain mutation calls give equal guest views, one scope_stop each and no owner request",
+  { timeout: ANNA_TIMEOUT_MS },
+  async (t) => {
+    const { world, captures } = await annaRuns(t, plainCases());
+    assertEqualViews(captures);
+    assert.deepEqual(
+      captures.map(({ requests }) => requests),
+      [NO_CALLS, NO_CALLS, NO_CALLS],
+    );
+    assert.equal(openRequests(world).length, NO_CALLS);
+  },
+);
+
+async function liveVersion(world: AnnaWorld, projectId: string) {
+  return completed(
+    await world.fixture.missions.get(
+      { params: { project_id: projectId }, query: {}, body: null },
+      world.fixture.options,
+    ),
+  ).version;
+}
+
+async function liveNode(world: AnnaWorld, nodeId: string) {
+  return completed(
+    await world.fixture.missions["node.get"](
+      { params: { node_id: nodeId }, query: {}, body: null },
+      world.fixture.options,
+    ),
+  );
+}
+
+async function humanAct(world: AnnaWorld, projectId: string, nodeId: string) {
+  const node = await liveNode(world, nodeId);
+  return {
+    reason: "anna-act",
+    expected_mission_version: await liveVersion(world, projectId),
+    expected_state: node.state,
+    expected_attempt: node.attempt,
+  };
+}
+
+async function ownerApproves(world: AnnaWorld, requestId: string) {
+  const request = (await ownerRequests(world)).find(
+    ({ id }) => id === requestId,
+  );
+  assert.ok(request);
+  const answer = completed(
+    await world.fixture.workbench[APPROVE_ID](
+      {
+        params: { session_id: world.hostId, request_id: requestId },
+        query: {},
+        body: {
+          project_name: SHOP_V2,
+          expected: await humanActExpected(
+            world,
+            request.project_id,
+            request.target_id,
+          ),
+        },
+      },
+      world.fixture.options,
+    ),
+  );
+  assert.equal(answer.outcome, ActionOutcome.Done);
+}
+
+async function humanActExpected(
+  world: AnnaWorld,
+  projectId: string,
+  nodeId: string,
+) {
+  const { reason, ...expected } = await humanAct(world, projectId, nodeId);
+  assert.ok(reason);
+  return expected;
+}
+
+async function ownerRejects(world: AnnaWorld, requestId: string) {
+  completed(
+    await world.fixture.workbench[REJECT_ID](
+      {
+        params: { session_id: world.hostId, request_id: requestId },
+        query: {},
+        body: {},
+      },
+      world.fixture.options,
+    ),
+  );
+}
+
+test(
+  "(security) the relay of the next run holds no request text and the guest state frame keys are unchanged",
+  { timeout: ANNA_TIMEOUT_MS },
+  async (t) => {
+    const [, foreign] = requestCases();
+    const { world, captures } = await annaRuns(
+      t,
+      [{ call: foreign!.call }],
+      [fauxAssistantMessage(ANSWER)],
+    );
+    const [raised] = captures;
+    assert.equal(raised!.requests, SINGLE);
+    assert.ok(raised!.stateKeys.length > NO_CALLS);
+    for (const keys of raised!.stateKeys) assert.deepEqual(keys, STATE_KEYS);
+    const [request] = await ownerRequests(world);
+    assert.ok(request);
+    completed(await message(world.fixture, world.hostId, "@RE what happened?"));
+    await untilRunEnds(world, t.signal);
+    assert.equal(world.fixture.provider.calls.length, TWO_RESULTS);
+    const relayed = JSON.stringify(
+      world.fixture.provider.calls[SINGLE]!.messages,
+    );
+    for (const text of [world.second.nodeId, ANNA_REASON, request.id, SHOP_V2])
+      assert.ok(!relayed.includes(text), text);
+    assert.equal(openRequests(world).length, SINGLE);
+  },
+);
+
+function runSlices(captures: readonly AnnaCapture[]): string[] {
+  return captures.map(({ entries }, index) =>
+    index === NO_CALLS
+      ? ""
+      : annaNormalised(entries.slice(captures[index - SINGLE]!.entries.length)),
+  );
+}
+
+test(
+  "(security) no session file changes at raise, approve or reject",
+  { timeout: ANNA_TIMEOUT_MS },
+  async (t) => {
+    const [absent] = requestCases();
+    const { world, captures } = await annaRuns(t, [
+      absent!,
+      absent!,
+      {
+        call: (target) =>
+          askOwner(NODE_PAUSE_ID, {
+            params: { node_id: target.second.nodeId },
+            body: { reason: ANNA_REASON },
+          }),
+        settle: ownerApproves,
+      },
+      {
+        call: (target) =>
+          askOwner(NODE_PAUSE_ID, {
+            params: { node_id: target.secondOther },
+            body: { reason: ANNA_REASON },
+          }),
+        settle: ownerRejects,
+      },
+    ]);
+    assert.deepEqual(
+      captures.map(({ requests }) => requests),
+      [NO_CALLS, NO_CALLS, SINGLE, SINGLE],
+    );
+    assert.ok(captures.every(({ fileUnchanged }) => fileUnchanged));
+    const [, none, approved, rejected] = runSlices(captures);
+    assert.equal(approved, none);
+    assert.equal(rejected, none);
+    assert.equal(
+      (await liveNode(world, world.second.nodeId)).state,
+      NodeState.Paused,
+    );
+    assert.equal(
+      (await liveNode(world, world.secondOther)).state,
+      NodeState.Available,
+    );
+  },
+);
+
+interface GrantScenario {
+  refusal?: string;
+  target: (world: AnnaWorld) => string;
+  prepare?: (world: AnnaWorld) => Promise<void>;
+  input: (world: AnnaWorld) => Promise<Parameters<typeof toolCall>[1]>;
+}
+
+const GUEST_RESUME_TARGET = "Available";
+
+async function ownerPauses(world: AnnaWorld, nodeId: string) {
+  completed(
+    await world.fixture.missions["node.pause"](
+      {
+        params: { node_id: nodeId },
+        query: {},
+        body: await humanAct(world, world.first.projectId, nodeId),
+      },
+      world.fixture.options,
+    ),
+  );
+}
+
+async function ownerBlocks(world: AnnaWorld, nodeId: string) {
+  completed(
+    await world.fixture.missions["node.block"](
+      {
+        params: { node_id: nodeId },
+        query: {},
+        body: await humanAct(world, world.first.projectId, nodeId),
+      },
+      world.fixture.options,
+    ),
+  );
+}
+
+async function dependencyBody(world: AnnaWorld) {
+  return {
+    reason: "anna-act",
+    expected_mission_version: await liveVersion(world, world.first.projectId),
+  };
+}
+
+function dependencyParams(world: AnnaWorld) {
+  return { node_id: world.first.nodeId, depends_on_id: world.firstOther };
+}
+
+const GRANT_SCENARIOS: Record<string, GrantScenario> = {
+  "mission.node.pause": {
+    target: (world) => world.first.nodeId,
+    input: async (world) => ({
+      params: { node_id: world.first.nodeId },
+      body: await humanAct(world, world.first.projectId, world.first.nodeId),
+    }),
+  },
+  "mission.node.resume": {
+    target: (world) => world.first.nodeId,
+    prepare: (world) => ownerPauses(world, world.first.nodeId),
+    input: async (world) => ({
+      params: { node_id: world.first.nodeId },
+      body: {
+        ...(await humanAct(world, world.first.projectId, world.first.nodeId)),
+        target: GUEST_RESUME_TARGET,
+      },
+    }),
+  },
+  "mission.node.check": {
+    refusal: MissionErrorCode.NoUnresolvedRequest,
+    target: (world) => world.first.nodeId,
+    input: async (world) => ({
+      params: { node_id: world.first.nodeId },
+      body: {
+        expected_mission_version: await liveVersion(
+          world,
+          world.first.projectId,
+        ),
+      },
+    }),
+  },
+  "mission.node.priority.set": {
+    target: (world) => world.first.nodeId,
+    input: async (world) => ({
+      params: { node_id: world.first.nodeId },
+      body: {
+        value: ANNA_PRIORITY,
+        expected_mission_version: await liveVersion(
+          world,
+          world.first.projectId,
+        ),
+      },
+    }),
+  },
+  "mission.dependency.add": {
+    target: (world) => world.first.nodeId,
+    input: async (world) => ({
+      params: dependencyParams(world),
+      body: await dependencyBody(world),
+    }),
+  },
+  "mission.dependency.remove": {
+    target: (world) => world.first.nodeId,
+    prepare: async (world) => {
+      completed(
+        await world.fixture.missions["dependency.add"](
+          {
+            params: dependencyParams(world),
+            query: {},
+            body: await dependencyBody(world),
+          },
+          world.fixture.options,
+        ),
+      );
+    },
+    input: async (world) => ({
+      params: dependencyParams(world),
+      body: await dependencyBody(world),
+    }),
+  },
+  "project.pause": {
+    target: (world) => world.first.projectId,
+    input: async (world) => ({ params: { project_id: world.first.projectId } }),
+  },
+  "project.resume": {
+    target: (world) => world.first.projectId,
+    prepare: async (world) => {
+      completed(
+        await world.fixture.projects.pause(
+          {
+            params: { project_id: world.first.projectId },
+            query: {},
+            body: null,
+          },
+          world.fixture.options,
+        ),
+      );
+    },
+    input: async (world) => ({ params: { project_id: world.first.projectId } }),
+  },
+  "mission.node.block": {
+    target: (world) => world.first.nodeId,
+    prepare: (world) => ownerPauses(world, world.first.nodeId),
+    input: async (world) => ({
+      params: { node_id: world.first.nodeId },
+      body: await humanAct(world, world.first.projectId, world.first.nodeId),
+    }),
+  },
+  "mission.node.unblock": {
+    target: (world) => world.first.nodeId,
+    prepare: async (world) => {
+      await ownerPauses(world, world.first.nodeId);
+      await ownerBlocks(world, world.first.nodeId);
+    },
+    input: async (world) => ({
+      params: { node_id: world.first.nodeId },
+      body: {
+        blocked_attempt: (await liveNode(world, world.first.nodeId)).attempt,
+        expected_revision: FIRST_REVISION,
+        expected_mission_version: await liveVersion(
+          world,
+          world.first.projectId,
+        ),
+      },
+    }),
+  },
+};
+
+function grantedSteps(
+  operationId: string,
+  scenario: GrantScenario,
+  world: AnnaWorld,
+  judged: boolean,
+  quote: string,
+): FauxResponseStep[] {
+  return [
+    async () => toolCall(toolName(operationId), await scenario.input(world)),
+    ...(judged
+      ? [
+          () =>
+            toolCall(GUARD_TOOL_NAME, {
+              tier: "auto",
+              confidence: GUARD_AUTO_CONFIDENCE,
+              request_quote: quote,
+              reason: GUARD_REASON,
+            }),
+        ]
+      : []),
+    fauxAssistantMessage(ANSWER),
+  ];
+}
+
+function guardRecordsOf(entries: readonly Entry[]) {
+  return recordsOf(entries)
+    .map((entry) => entry.data as { kind: string; grant?: unknown })
+    .filter(({ kind }) => kind === GUARD_KIND);
+}
+
+test("(happy path) delegate scope: every grantable operation of ops@1 runs under a delegate identity in a guest run with a matching grant and completes", async (t) => {
+  const probe = await annaWorld(t, () => []);
+  const { grantable } = completed(
+    await probe.fixture.workbench["invite.list"](
+      { params: { session_id: probe.hostId }, query: {}, body: null },
+      probe.fixture.options,
+    ),
+  );
+  assert.deepEqual(
+    grantable.map(({ operation_id }) => operation_id).sort(),
+    Object.keys(GRANT_SCENARIOS).sort(),
+  );
+  for (const {
+    operation_id: operationId,
+    guard_class: guardClass,
+  } of grantable)
+    await t.test(operationId, { timeout: ANNA_TIMEOUT_MS }, async (step) => {
+      const scenario = GRANT_SCENARIOS[operationId]!;
+      const judged = guardClass === GuardClass.Judged;
+      const quote = `run ${operationId} on the target`;
+      const world = await annaWorld(
+        step,
+        (target) => grantedSteps(operationId, scenario, target, judged, quote),
+        { grant: [operationId], guard: judged },
+      );
+      await scenario.prepare?.(world);
+      const delegate = step.mock.method(
+        world.fixture.invocation.authentication,
+        "delegateOf",
+      );
+      await annaAsks(world, `@Yumi ${quote} ${scenario.target(world)}.`);
+      await untilRunEnds(world, step.signal);
+      const entries = await sessionEntries(world.fixture, world.hostId);
+      const results = toolResults(entries).filter(
+        ({ toolName: name }) => name === toolName(operationId),
+      );
+      assert.equal(results.length, SINGLE);
+      const [result] = results;
+      if (scenario.refusal === undefined)
+        assert.notEqual(result!.isError, true, result!.text);
+      else assert.ok(result!.text.startsWith(`${scenario.refusal}:`));
+      assert.equal(delegate.mock.callCount(), SINGLE);
+      assert.ok(isDelegateIdentity(delegate.mock.calls[NO_CALLS]!.result));
+      assert.equal(guardRecordsOf(entries).length, SINGLE);
+      assert.equal(
+        world.fixture.workbenchService["grantTickets"].size,
+        NO_CALLS,
+      );
+      assert.equal(openRequests(world).length, NO_CALLS);
+    });
+});
+
+test(
+  "(security) audit: a granted mission.node.pause runs with no card, names the inviter and the guest in the Mission act and holds the grant in the guard record",
+  { timeout: ANNA_TIMEOUT_MS },
+  async (t) => {
+    const scenario = GRANT_SCENARIOS[NODE_PAUSE_ID]!;
+    const world = await annaWorld(
+      t,
+      (target) => grantedSteps(NODE_PAUSE_ID, scenario, target, false, ""),
+      { grant: [NODE_PAUSE_ID] },
+    );
+    await annaAsks(world);
+    await untilRunEnds(world, t.signal);
+    const entries = await sessionEntries(world.fixture, world.hostId);
+    const [result] = toolResults(entries).filter(
+      ({ toolName: name }) => name === toolName(NODE_PAUSE_ID),
+    );
+    assert.ok(result);
+    assert.notEqual(result.isError, true, result.text);
+    const act = JSON.parse(result.text) as { actor: unknown };
+    assert.deepEqual(act.actor, {
+      kind: "human",
+      account: identity.accountId,
+      name: ANNA_DELEGATE_NAME,
+    });
+    assert.equal(
+      (await liveNode(world, world.first.nodeId)).state,
+      NodeState.Paused,
+    );
+    const [guard] = recordsOf(entries)
+      .map((entry) => entry.data as { kind: string; grant?: unknown })
+      .filter(({ kind }) => kind === GUARD_KIND);
+    assert.deepEqual(guard!.grant, {
+      invite_id: world.inviteId,
+      author: { kind: AuthorKind.Guest, name: ANNA },
+    });
+    assert.equal(
+      (await snapshotOf(world.fixture, world.hostId)).snapshot.pending_approval,
+      null,
+    );
+  },
+);
+
+test(
+  "(security) grant and scope: rule 0a blocks a granted pause on a P2 node, the run ends with scope_stop and the call creates no ticket and raises nothing",
+  { timeout: ANNA_TIMEOUT_MS },
+  async (t) => {
+    const world = await annaWorld(
+      t,
+      (target) => [
+        async () =>
+          toolCall(toolName(NODE_PAUSE_ID), {
+            params: { node_id: target.second.nodeId },
+            body: await humanAct(
+              target,
+              target.second.projectId,
+              target.second.nodeId,
+            ),
+          }),
+      ],
+      { grant: [NODE_PAUSE_ID] },
+    );
+    await annaAsks(world);
+    await untilRunEnds(world, t.signal);
+    const entries = await sessionEntries(world.fixture, world.hostId);
+    assert.equal(scopeStopsOf(entries).length, SINGLE);
+    assert.deepEqual(
+      toolResults(entries).map(({ isError, text }) => ({ isError, text })),
+      [{ isError: true, text: WORKBENCH_PROJECT_SCOPE_TEXT }],
+    );
+    assert.equal(guardRecordsOf(entries).length, NO_CALLS);
+    assert.equal(world.fixture.workbenchService["grantTickets"].size, NO_CALLS);
+    assert.equal(openRequests(world).length, NO_CALLS);
+    assert.equal(
+      (await liveNode(world, world.second.nodeId)).state,
+      NodeState.Available,
+    );
+  },
+);
+
+test(
+  "(security) a Gateway ticket for an unblock with no change refuses the invocation of the same tool call with change with 401 gateway.grant.refused",
+  { timeout: ANNA_TIMEOUT_MS },
+  async (t) => {
+    const world = await annaWorld(t, () => [], {
+      grant: ["mission.node.unblock"],
+    });
+    const mission = directClient(missionOperations, world.fixture.invocation);
+    const invoke = (toolCallId: string, change: boolean) =>
+      mission["node.unblock"](
+        {
+          params: { node_id: world.first.nodeId },
+          query: {},
+          body: {
+            blocked_attempt: ANNA_BLOCKED_ATTEMPT,
+            expected_revision: FIRST_REVISION,
+            expected_mission_version: world.first.missionVersion,
+            ...(change
+              ? {
+                  change: {
+                    content: NODE_CONTENT,
+                    tasks: [],
+                    reason: "anna-change",
+                  },
+                }
+              : {}),
+          },
+        } as never,
+        {
+          identity: world.guest.reader,
+          idempotencyKey: createIdempotencyKey(),
+          grant: { sessionId: world.hostId, toolCallId },
+        },
+      );
+    const ticket = (toolCallId: string) =>
+      world.fixture.workbenchService["grantTickets"].set(
+        `${world.hostId}:${toolCallId}`,
+        {
+          session_id: world.hostId,
+          invite_id: world.inviteId,
+          operation_id: "mission.node.unblock",
+        },
+      );
+    ticket("call_plain");
+    const plain = await invoke("call_plain", false);
+    if (plain.type === OperationResultType.Failure)
+      assert.notEqual(plain.status, HttpStatus.Unauthorized);
+    ticket("call_change");
+    failed(
+      await invoke("call_change", true),
+      HttpStatus.Unauthorized,
+      "gateway.grant.refused",
+    );
+    failed(
+      await invoke("call_change", false),
+      HttpStatus.Unauthorized,
+      "gateway.grant.refused",
+    );
+    assert.equal(world.fixture.workbenchService["grantTickets"].size, NO_CALLS);
   },
 );
