@@ -4,6 +4,7 @@ import {
   ActionOutcome,
   type Author,
   type MemberEntry,
+  type NoticeRecord,
   QueueClearCause,
   WORKBENCH_ACTION_RESULT_ENTRY,
   WORKBENCH_REQUEST_OWNER_ACT_TOOL,
@@ -67,7 +68,14 @@ export type GuestBody =
       cause: QueueClearCause;
       text: string;
     }
-  | { kind: typeof WorkbenchRecordKind.ScopeStop; operation_id: string };
+  | { kind: typeof WorkbenchRecordKind.ScopeStop; operation_id: string }
+  | {
+      kind: typeof WorkbenchRecordKind.Notice;
+      projects: {
+        name: string;
+        nodes: NoticeRecord["projects"][number]["nodes"];
+      }[];
+    };
 
 export type GuestEntry = {
   id: string;
@@ -140,6 +148,11 @@ function projectRecord(record: WorkbenchRecord): GuestBody | null {
       };
     case WorkbenchRecordKind.ScopeStop:
       return { kind: record.kind, operation_id: record.operation_id };
+    case WorkbenchRecordKind.Notice:
+      return {
+        kind: record.kind,
+        projects: record.projects.map(({ name, nodes }) => ({ name, nodes })),
+      };
     default:
       return assert.fail("A guest record kind has a projection.");
   }

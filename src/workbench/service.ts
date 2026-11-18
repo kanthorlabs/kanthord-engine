@@ -22,10 +22,14 @@ import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus, MediaType } from "../kernel/http.ts";
 import { createIdempotencyKey, createIdentity } from "../kernel/identity.ts";
 import { ProjectErrorCode, projectOperations } from "../project/contract.ts";
-import type { ProjectScope } from "../kernel/project-scope.ts";
+import type { ProjectLookup, ProjectScope } from "../kernel/project-scope.ts";
 import { piProviderId } from "../kernel/pi-provider.ts";
 import type { GuestIdentity, HumanIdentity } from "../kernel/caller.ts";
-import { isGuestIdentity, isHumanIdentity } from "../kernel/caller.ts";
+import {
+  isGuestIdentity,
+  isHumanIdentity,
+  isReadOnlyIdentity,
+} from "../kernel/caller.ts";
 import {
   type CallerContext,
   type Operation,
@@ -215,7 +219,13 @@ import {
   storedAutoMode,
   storedConfiguration,
 } from "./sessions.ts";
-import { createdNodeIds } from "./watch.ts";
+import {
+  createdNodeIds,
+  noticeSummary,
+  openWatch,
+  pendingNotice,
+  WatchChecker,
+} from "./watch.ts";
 
 export type WorkbenchModelRuntimeFactory = (
   input: ModelConnectorInput,
@@ -288,6 +298,8 @@ export interface Dependencies {
   invites: WorkbenchInvites;
   declarationOf: DeclarationOf;
   projectScope: ProjectScope;
+  projectLookup: ProjectLookup;
+  watchNow?: () => number;
   projectNames(ids: readonly string[]): ReadonlyMap<string, string>;
   signGuestToken: (guest: GuestTokenRequest) => Promise<{ token: string }>;
   config: WorkbenchConfig;
@@ -792,10 +804,18 @@ export class WorkbenchService implements Service {
   private readonly scopeRequests = new ScopeRequests(() => Date.now());
   private readonly loading = new Map<string, Promise<OpenSession>>();
   private readonly shutdown = new CancellationContext();
+  private readonly watch: WatchChecker;
   private started = false;
 
   constructor(dependencies: Dependencies) {
     this.dependencies = dependencies;
+    this.watch = new WatchChecker({
+      invoke: dependencies.invoke,
+      projectOf: (prefix, id) =>
+        dependencies.projectLookup.projectOf(prefix, id),
+      projectNames: (ids) => dependencies.projectNames(ids),
+      now: dependencies.watchNow,
+    });
   }
 
   authorize(
@@ -1325,6 +1345,63 @@ export class WorkbenchService implements Service {
       kind: WorkbenchRecordKind.Watch,
       node_ids: nodeIds,
     });
+  }
+
+  private watchOpen(host: OpenSession): boolean {
+    return openWatch(this.entries(host.manager)).nodeIds.length > NO_ITEMS;
+  }
+
+  private async runWatch(
+    host: OpenSession,
+    caller: CallerContext,
+  ): Promise<void> {
+    if (isReadOnlyIdentity(caller.identity)) return;
+    try {
+      await this.watch.check(
+        {
+          id: host.id,
+          entries: () => this.entries(host.manager),
+          append: (record) => {
+            appendRecord(host.manager, record);
+            this.notify(host);
+          },
+        },
+        { identity: humanOf(caller), context: caller.context },
+      );
+    } catch (error) {
+      this.dependencies.logger.warn(
+        { conversation_id: host.id, err: error },
+        "workbench.watch.check_failed",
+      );
+    }
+  }
+
+  private async noticeOf(
+    sessionId: string,
+    caller: CallerContext,
+  ): Promise<string | null> {
+    const host = await this.loadedHost(sessionId);
+    if (host === null) return null;
+    if (this.watchOpen(host)) await this.runWatch(host, caller);
+    const record = pendingNotice(
+      this.memberEntries(host, false).flatMap((member) =>
+        member.entries.map((entry) => ({
+          ...entry,
+          session_id: member.sessionId,
+          agent_name: member.agentName,
+        })),
+      ),
+    );
+    return record === null ? null : noticeSummary(record);
+  }
+
+  private async loadedHost(sessionId: string): Promise<OpenSession | null> {
+    try {
+      return await this.session(sessionId);
+    } catch (error) {
+      if (error instanceof OperationError) return null;
+      throw error;
+    }
   }
 
   private hostOf(session: OpenSession): OpenSession {
@@ -2374,12 +2451,13 @@ export class WorkbenchService implements Service {
     sessionId: string,
     after: string | undefined,
     version: number | undefined,
-    context: Context,
+    caller: CallerContext,
   ): Promise<SessionEvents> {
     const session = await this.session(sessionId);
     this.requireHost(session);
+    if (this.watchOpen(session)) await this.runWatch(session, caller);
     const window = new CancellationContext(
-      context,
+      caller.context,
       Date.now() + WORKBENCH_EVENTS_WAIT_MS,
     );
     const unsubscribe = this.feedOf(session).subscribe(() => window.cancel());
@@ -3221,7 +3299,7 @@ export class WorkbenchService implements Service {
     return { session_id: sessionId, run_active: false, cleared };
   }
 
-  async list(agentName: string | undefined) {
+  async list(agentName: string | undefined, caller: CallerContext) {
     if (agentName !== undefined) requireAgent(agentName);
     const stored = [];
     for (const name of workbenchAgentNames())
@@ -3242,13 +3320,14 @@ export class WorkbenchService implements Service {
           ...participant,
           ...this.runState(participant.id),
           display_name: displayNameOf(participant.agent_name),
+          notice: null,
           participants: [] as [],
         }));
       items.push({
         ...host,
         ...this.runState(host.id),
         scope_requests: this.scopeRequests.count(host.id),
-        notice: null,
+        notice: await this.noticeOf(host.id, caller),
         display_name: displayNameOf(host.agent_name),
         modified: Math.max(
           host.modified,
@@ -3303,9 +3382,13 @@ export class WorkbenchService implements Service {
     return this.view(session);
   }
 
-  async get(sessionId: string): Promise<WorkbenchSessionGet> {
+  async get(
+    sessionId: string,
+    caller: CallerContext,
+  ): Promise<WorkbenchSessionGet> {
     const session = await this.session(sessionId);
     this.requireHost(session);
+    if (this.watchOpen(session)) await this.runWatch(session, caller);
     return {
       ...(await this.view(session)),
       scope_requests: this.scopeRequestViews(session),
@@ -3443,15 +3526,17 @@ export class WorkbenchService implements Service {
   }
 
   declare(registry: OperationRegistry): void {
-    registry.register(workbenchOperations["session.list"], ({ query }) =>
-      this.list(query.agent_name),
+    registry.register(
+      workbenchOperations["session.list"],
+      ({ query }, caller) => this.list(query.agent_name, caller),
     );
     registry.register(
       workbenchOperations["session.create"],
       ({ body }, caller) => this.create(caller, body),
     );
-    registry.register(workbenchOperations["session.get"], ({ params }) =>
-      this.get(params.session_id),
+    registry.register(
+      workbenchOperations["session.get"],
+      ({ params }, caller) => this.get(params.session_id, caller),
     );
     registry.register(
       workbenchOperations["session.fork"],
@@ -3537,12 +3622,7 @@ export class WorkbenchService implements Service {
     registry.register(
       workbenchOperations["session.events"],
       ({ params, query }, caller) =>
-        this.events(
-          params.session_id,
-          query.after,
-          query.version,
-          caller.context,
-        ),
+        this.events(params.session_id, query.after, query.version, caller),
     );
   }
 

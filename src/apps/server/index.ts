@@ -300,6 +300,7 @@ interface ComposeServicesOptions {
   bindings?: ProjectBindings;
   registrations?: WorkerRegistrations;
   workbenchModelRuntimeFactory?: WorkbenchModelRuntimeFactory;
+  workbenchWatchNow?: () => number;
   environmentModelRuntimeFactory?: EnvironmentModelRuntimeFactory;
   inventoryOverrides?: Partial<ResourceInventories>;
   intake?: { pendingEventLimit?: number; pollIntervalMs?: number };
@@ -1391,6 +1392,7 @@ export function composeServices(options: ComposeServicesOptions) {
     invites,
     declarationOf: getAgentDeclaration,
     projectScope,
+    projectLookup: mission,
     projectNames: (ids) => project.projectNames(ids),
     signGuestToken: (guest) =>
       generateGuestJWT(
@@ -1419,6 +1421,7 @@ export function composeServices(options: ComposeServicesOptions) {
       custody.credentialMetadata(tx, name, SERVER_HOLDER),
     workbenchCredentials: (input) => custody.workbenchCredentials(input),
     modelRuntimeFactory: options.workbenchModelRuntimeFactory,
+    watchNow: options.workbenchWatchNow,
     operations: () => registry.all().map(({ operation }) => operation),
     invoke: (operation, input, clientOptions) =>
       directClient({ [operation.id]: operation }, invocation)[operation.id]!(

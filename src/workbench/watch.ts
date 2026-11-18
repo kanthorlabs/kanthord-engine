@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { HumanIdentity } from "../kernel/caller.ts";
-import type { CancellationContext } from "../kernel/context.ts";
+import type { Context } from "../kernel/context.ts";
 import { timestamp } from "../kernel/json.ts";
 import { OperationResultType } from "../kernel/operation.ts";
 import {
@@ -166,7 +166,7 @@ export interface WatchConversation {
 
 export interface WatchCheckOptions {
   identity: HumanIdentity;
-  context: CancellationContext;
+  context: Context;
 }
 
 export interface WatchCheckerDependencies {

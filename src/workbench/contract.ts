@@ -343,6 +343,7 @@ const sessionListFields = z.strictObject({
   forked_from: identitySchema(WORKBENCH_SESSION_PREFIX).nullable(),
   run_active: z.boolean(),
   pending_approval: pendingApprovalSummarySchema.nullable(),
+  notice: z.string().nullable(),
 });
 
 export const participantListItemSchema = sessionListFields.extend({
@@ -352,7 +353,6 @@ export const participantListItemSchema = sessionListFields.extend({
 export const sessionListItemSchema = sessionListFields.extend({
   participants: z.array(participantListItemSchema),
   scope_requests: z.number().int().nonnegative(),
-  notice: z.string().nullable(),
 });
 
 export const ScopeRequestState = {
@@ -557,6 +557,23 @@ export const guestEntrySchema = z.discriminatedUnion("kind", [
     ...guestEnvelope,
     kind: z.literal(WorkbenchRecordKind.ScopeStop),
     operation_id: z.string(),
+  }),
+  z.strictObject({
+    ...guestEnvelope,
+    kind: z.literal(WorkbenchRecordKind.Notice),
+    projects: z.array(
+      z.strictObject({
+        name: z.string(),
+        nodes: z.array(
+          z.strictObject({
+            node_id: identitySchema("node"),
+            name: z.string(),
+            state: z.enum(NoticeState),
+            ended_at: timestamp,
+          }),
+        ),
+      }),
+    ),
   }),
 ]);
 

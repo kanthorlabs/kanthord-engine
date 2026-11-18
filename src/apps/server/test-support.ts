@@ -666,6 +666,7 @@ export async function gatewayFixture(
     environmentModelRuntimeFactory?: Parameters<
       typeof composeServices
     >[0]["environmentModelRuntimeFactory"];
+    workbenchWatchNow?: () => number;
     stateDirectory?: string;
     agentDirectory?: string;
     serverInstanceLimit?: number;
@@ -757,6 +758,7 @@ export async function gatewayFixture(
       trackingStore,
       stateDirectory,
       workbenchModelRuntimeFactory: options.workbenchModelRuntimeFactory,
+      workbenchWatchNow: options.workbenchWatchNow,
       environmentModelRuntimeFactory: options.environmentModelRuntimeFactory,
       registry: options.registry,
       health: options.health ?? new HealthRegistry(),
@@ -3150,12 +3152,14 @@ export function workbenchHarness(identity: HumanIdentity) {
     enabledAgents: readonly string[] = [AGENT],
     beforeOpen?: () => Promise<void>,
     persistence?: Persistence,
+    watchNow?: () => number,
   ) {
     const scripted = scriptedFactory(script, beforeOpen);
     const fixture = await gatewayFixture(t, {
       stateDirectory,
       agentDirectory,
       workbenchModelRuntimeFactory: scripted.factory,
+      workbenchWatchNow: watchNow,
       repositoryConnector: { gitLsRemote: async () => {} },
       ...(persistence
         ? { path: persistence.path, masterKey: persistence.masterKey }
