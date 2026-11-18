@@ -1,3 +1,4 @@
+import { getAgentDeclaration } from "../agent/catalog.ts";
 import { agentOperations, GuardClass } from "../agent/contract.ts";
 import { footprintOperations } from "../footprint/contract.ts";
 import {
@@ -150,6 +151,11 @@ export const REVERSIBLE_OPERATIONS: ReadonlySet<string> = new Set([
   agentOperations["cooldown.clear"].id,
 ]);
 
+export const GRANTABLE_JUDGED_OPERATIONS: ReadonlySet<string> = new Set([
+  missionOperations["node.block"].id,
+  missionOperations["node.unblock"].id,
+]);
+
 export const GuardAction = {
   Run: "run",
   Block: "block",
@@ -234,6 +240,64 @@ export function guardClassOf(operation: Operation): GuardClass {
   return floorOf(operation, {}) === undefined
     ? GuardClass.Judged
     : GuardClass.Card;
+}
+
+const OPERATIONS_BY_ID: ReadonlyMap<string, Operation> = new Map(
+  [
+    agentOperations,
+    footprintOperations,
+    intakeCredentialOperations,
+    intakeOperations,
+    llmOperations,
+    missionOperations,
+    environmentSecretOperations,
+    projectOperations,
+    repositoryOperations,
+    storageOperations,
+    trackingOperations,
+    workerOperations,
+    workbenchOperations,
+  ]
+    .flatMap((operations) => Object.values(operations) as Operation[])
+    .map((operation) => [operation.id, operation]),
+);
+
+export function grantableOperations(
+  agentName: string,
+): ReadonlyMap<string, GuardClass> {
+  const listed = getAgentDeclaration(agentName)?.tools.operation ?? [];
+  const grantable = new Map<string, GuardClass>();
+  for (const id of listed) {
+    const operation = OPERATIONS_BY_ID.get(id);
+    if (!operation || operation.projectScope === undefined) continue;
+    if (!REVERSIBLE_OPERATIONS.has(id) && !GRANTABLE_JUDGED_OPERATIONS.has(id))
+      continue;
+    grantable.set(id, guardClassOf(operation));
+  }
+  return grantable;
+}
+
+export function liveGrant(
+  stored: readonly string[],
+  agentName: string,
+): ReadonlySet<string> {
+  const grantable = grantableOperations(agentName);
+  return new Set(stored.filter((id) => grantable.has(id)));
+}
+
+export interface GrantedCall {
+  readonly operationId: string;
+  readonly input: unknown;
+}
+
+export function grantCovers(
+  grant: ReadonlySet<string>,
+  call: GrantedCall,
+): boolean {
+  if (!grant.has(call.operationId)) return false;
+  if (call.operationId !== missionOperations["node.unblock"].id) return true;
+  const body = importBody(call.input);
+  return !body || !Object.hasOwn(body, "change");
 }
 
 function classified(result: ClassifyResult, run: GuardRun): GuardDecision {
