@@ -38,6 +38,7 @@ export const GUEST_RECORD_KINDS = [
   WorkbenchRecordKind.Author,
   WorkbenchRecordKind.QueueClear,
   WorkbenchRecordKind.ScopeStop,
+  WorkbenchRecordKind.Notice,
 ] as const;
 export type GuestRecordKind = (typeof GUEST_RECORD_KINDS)[number];
 

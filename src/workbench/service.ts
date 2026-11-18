@@ -3231,6 +3231,7 @@ export class WorkbenchService implements Service {
         ...host,
         ...this.runState(host.id),
         scope_requests: this.scopeRequests.count(host.id),
+        notice: null,
         display_name: displayNameOf(host.agent_name),
         modified: Math.max(
           host.modified,

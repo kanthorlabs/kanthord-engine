@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { HttpMethod, HttpStatus, MediaType } from "../kernel/http.ts";
 import { identitySchema } from "../kernel/identity.ts";
+import { timestamp } from "../kernel/json.ts";
+import { NodeState } from "../mission/contract.ts";
 import { PROJECT_NAME_MAX_LENGTH } from "../kernel/project-name.ts";
 import {
   AccessPolicy,
@@ -43,6 +45,7 @@ export const WORKBENCH_RELAY_ENTRY = "kanthord.workbench.relay";
 export const WORKBENCH_PLAN_ENTRY = "kanthord.workbench.plan";
 export const WORKBENCH_OPENING_TEXT = "The owner opened this conversation.";
 export const WORKBENCH_TIMEOUT_MS = 30000;
+export const WORKBENCH_WATCH_CHECK_MS = 60000;
 export const WORKBENCH_EVENTS_WAIT_MS = 25000;
 export const WORKBENCH_MESSAGE_MAX_LENGTH = 1048576;
 export const WORKBENCH_ERROR_CODE_MAX_LENGTH = 128;
@@ -170,6 +173,8 @@ export const WorkbenchRecordKind = {
   Author: "author",
   QueueClear: "queue_clear",
   ScopeStop: "scope_stop",
+  Watch: "watch",
+  Notice: "notice",
 } as const;
 export type WorkbenchRecordKind =
   (typeof WorkbenchRecordKind)[keyof typeof WorkbenchRecordKind];
@@ -233,8 +238,42 @@ export const workbenchRecordSchema = z.discriminatedUnion("kind", [
     tool_call_id: z.string(),
     operation_id: z.string(),
   }),
+  z.strictObject({
+    kind: z.literal(WorkbenchRecordKind.Watch),
+    node_ids: z.array(identitySchema("node")).min(1),
+  }),
+  z.strictObject({
+    kind: z.literal(WorkbenchRecordKind.Notice),
+    watch_entry_id: z.string().min(1),
+    projects: z
+      .array(
+        z.strictObject({
+          project_id: identitySchema("project"),
+          name: z.string(),
+          nodes: z
+            .array(
+              z.strictObject({
+                node_id: identitySchema("node"),
+                name: z.string(),
+                state: z.enum([NodeState.Completed, NodeState.Discarded]),
+                ended_at: timestamp,
+              }),
+            )
+            .min(1),
+        }),
+      )
+      .min(1),
+  }),
 ]);
 export type WorkbenchRecord = z.infer<typeof workbenchRecordSchema>;
+export type WatchRecord = Extract<
+  WorkbenchRecord,
+  { kind: typeof WorkbenchRecordKind.Watch }
+>;
+export type NoticeRecord = Extract<
+  WorkbenchRecord,
+  { kind: typeof WorkbenchRecordKind.Notice }
+>;
 
 export const PlanPhase = { Planner: "planner", Reviewer: "reviewer" } as const;
 export type PlanPhase = (typeof PlanPhase)[keyof typeof PlanPhase];
@@ -309,6 +348,7 @@ export const participantListItemSchema = sessionListFields.extend({
 export const sessionListItemSchema = sessionListFields.extend({
   participants: z.array(participantListItemSchema),
   scope_requests: z.number().int().nonnegative(),
+  notice: z.string().nullable(),
 });
 
 export const ScopeRequestState = {
