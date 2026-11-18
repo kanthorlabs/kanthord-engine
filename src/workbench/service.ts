@@ -1131,6 +1131,8 @@ export class WorkbenchService implements Service {
               operations: this.dependencies.operations(),
               invoke: this.dependencies.invoke,
               requester: () => session.requester,
+              guestRun: () =>
+                this.hostOf(session).run?.origin?.kind === AuthorKind.Guest,
               offer: {
                 taken: () => this.hostOf(session).run?.offerToolCallId != null,
                 append: (record) => {
@@ -1237,6 +1239,9 @@ export class WorkbenchService implements Service {
     call: ToolCallEvent,
     options: EvidenceGrantOptions,
   ): Promise<ToolDecision> {
+    const host = this.hostOf(session);
+    const guestBlock = this.guestEvidenceBlock(host);
+    if (guestBlock) return guestBlock;
     let facts: Awaited<ReturnType<typeof evidenceFacts>>;
     try {
       facts = await evidenceFacts(
@@ -1249,9 +1254,6 @@ export class WorkbenchService implements Service {
       if (message.startsWith(EVIDENCE_ASSET_MISMATCH)) return ALLOWED;
       return { allowed: false, reason: message, terminate: false };
     }
-    const host = this.hostOf(session);
-    const guestBlock = this.guestEvidenceBlock(host);
-    if (guestBlock) return guestBlock;
     const shared = this.dependencies.invites.isShared(host.id);
     if (this.granted(session, facts.node_id)) return ALLOWED;
     const decision = await this.approval(
@@ -1694,9 +1696,10 @@ export class WorkbenchService implements Service {
       auto_mode: host.autoMode,
       streaming:
         streaming === undefined ? null : JSON.parse(JSON.stringify(streaming)),
-      waiting_for_approval: waiting
-        ? { operation_id: waiting.operation_id }
-        : null,
+      waiting_for_approval:
+        waiting && host.run?.origin?.kind === AuthorKind.Guest
+          ? { operation_id: waiting.operation_id }
+          : null,
       queue: host.queuedMessages.map((item) => ({
         id: item.id,
         agent_name: item.agent_name,

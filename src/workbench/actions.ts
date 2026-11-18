@@ -115,6 +115,7 @@ export interface OfferActionToolInput {
   operations: readonly Operation[];
   invoke: InvokeOperation;
   requester: () => HumanIdentity | undefined;
+  guestRun: () => boolean;
   offer: { taken(): boolean; append(record: ActionOffer): void };
 }
 
@@ -173,6 +174,8 @@ const SCOPE_REFUSAL_STATUSES: readonly number[] = [
   HttpStatus.Forbidden,
   HttpStatus.NotFound,
 ];
+const GUEST_RUN_OFFER_TEXT =
+  "offer_action is not available in a run that a guest started. Call the operation. The owner approves it on the guard card.";
 const TARGET_REFUSED_TEXT =
   "workbench.action.target_refused: The target is not available in this conversation.";
 
@@ -189,7 +192,7 @@ function refusedText(
 }
 
 export function offerActionTool(input: OfferActionToolInput): ToolDefinition {
-  const { operations, invoke, requester, offer } = input;
+  const { operations, invoke, requester, guestRun, offer } = input;
   async function readTarget(
     target: ActionTarget,
     targetId: string,
@@ -231,6 +234,7 @@ export function offerActionTool(input: OfferActionToolInput): ToolDefinition {
       return args;
     },
     async execute(toolCallId, params, signal) {
+      if (guestRun()) throw new Error(GUEST_RUN_OFFER_TEXT);
       const { operation_id, target_id } = offerCallSchema.parse(params);
       assertCardAct(operation_id);
       const target = ACTION_CARD_OPERATIONS[operation_id];

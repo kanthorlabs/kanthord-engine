@@ -4686,7 +4686,9 @@ test(
     completed(await forkOf(fixture, session.id, FOLLOW_UP));
     const [summarizer] = callsOf(fixture, FORK_SUMMARY_PROMPT);
     const { conversation } = userRequestOf(summarizer!);
-    assert.ok(conversation!.includes(`${GUEST_NAME} (guest): ${GUEST_NOTE}`));
+    assert.ok(
+      conversation!.includes(`${GUEST_NAME} (guest) wrote: ${GUEST_NOTE}`),
+    );
     assert.ok(conversation!.includes(`${OWNER_NAME} (owner): ${OWNER_NOTE}`));
     assert.ok(!conversation!.includes(`${OWNER_NAME} (guest)`));
   },

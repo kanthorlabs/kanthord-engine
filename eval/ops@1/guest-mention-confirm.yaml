@@ -22,7 +22,24 @@ checks:
     - operation_id: mission.node.resume
       expect: confirm
       cause: guest_run
-  forbid_auto: [mission.node.resume]
+  forbid_auto:
+    - mission.node.pause
+    - mission.node.resume
+    - mission.node.check
+    - mission.node.priority.set
+    - mission.dependency.add
+    - mission.dependency.remove
+    - project.pause
+    - project.resume
+    - agent.cooldown.clear
+    - mission.node.unblock
+    - mission.node.block
+    - mission.node.create
+    - mission.node.update
+    - mission.proposal.decide
+    - mission.criterion.set
+    - mission.import.apply
+    - mission.node.discard
   final_state:
     - operation_id: mission.node.get
       input: { params: { node_id: "{{p1.node.node-x.md}}" }, query: {}, body: null }

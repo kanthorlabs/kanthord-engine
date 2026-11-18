@@ -56,6 +56,7 @@ const PLAN = "plan@1";
 const COVERED_AGENTS = [AGENT, "re@1"];
 const GUEST_NAME = "Mira";
 const GUEST_MENTION = "@Yumi tighten the criterion.";
+const OWNER_MENTION = "@Yumi tighten the criterion now.";
 const READ_MENTION = "@Yumi list the projects.";
 const PLAN_MENTION = "@Jeremy plan the next mission.";
 const GUEST_RUN_MENTION = "@Yumi check the node.";
@@ -78,7 +79,8 @@ const SESSION_LIST = toolName("workbench.session.list");
 const OFFER_ACTION = "offer_action";
 const NODE_PAUSE_ID = "mission.node.pause";
 const ROTATE_ID = "llm.credential.rotate";
-const TARGET_REFUSED = "workbench.action.target_refused";
+const GUEST_RUN_OFFER_TEXT =
+  "offer_action is not available in a run that a guest started. Call the operation. The owner approves it on the guard card.";
 const SCOPE_REFUSED = "gateway.scope.refused";
 const GUEST_ENTRIES_PATH = "/api/workbench/guest/session";
 const FRAME_END = "\n\n";
@@ -443,6 +445,7 @@ test(
   async (t) => {
     const world = await scopeWorld(t, (target) => [
       criterionStep(target),
+      criterionStep(target),
       fauxAssistantMessage(ANSWER),
     ]);
     const stream = await openStream(t, world);
@@ -469,6 +472,39 @@ test(
         [WORKBENCH_EXPIRY_REASON],
       );
       assert.notEqual(await criterionOf(world), NEW_CRITERION);
+      completed(
+        await world.fixture.workbench["session.autoMode.set"](
+          {
+            params: { session_id: world.hostId },
+            query: {},
+            body: { enabled: false },
+          },
+          world.fixture.options,
+        ),
+      );
+      completed(
+        await world.fixture.workbench["session.message"](
+          {
+            params: { session_id: world.hostId },
+            query: {},
+            body: { text: OWNER_MENTION },
+          },
+          world.fixture.options,
+        ),
+      );
+      const ownerPending = await untilSettled(
+        world.fixture,
+        world.hostId,
+        t.signal,
+      );
+      assert.ok(ownerPending);
+      assert.equal(
+        world.fixture.workbenchService["feedState"](sessionOf(world))
+          .waiting_for_approval,
+        null,
+      );
+      completed(await approve(world, ownerPending.tool_call_id, false));
+      await untilIdle(world.fixture, world.hostId, t.signal);
     } finally {
       t.mock.timers.reset();
       await stream.close();
@@ -618,7 +654,7 @@ test(
 );
 
 test(
-  "(happy path) a guest run offers an action card on a node of the invite project and writes the action_offer record",
+  "(security) a guest run offer_action answers the guest-run error and writes no action_offer record",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const world = await scopeWorld(t, (target) => [
@@ -633,14 +669,12 @@ test(
     await untilIdle(world.fixture, world.hostId, t.signal);
     const entries = await ownerEntries(world.fixture, world.hostId);
     assert.deepEqual(
-      toolResults(entries).map(({ isError }) => isError),
-      [false],
+      toolResults(entries).map(({ isError, text }) => ({ isError, text })),
+      [{ isError: true, text: GUEST_RUN_OFFER_TEXT }],
     );
-    const offers = recordsOf(entries, WorkbenchRecordKind.ActionOffer);
-    assert.equal(offers.length, SINGLE);
     assert.equal(
-      (offers[0] as { target_id?: string }).target_id,
-      world.first.nodeId,
+      recordsOf(entries, WorkbenchRecordKind.ActionOffer).length,
+      NO_ITEMS,
     );
   },
 );
@@ -675,7 +709,7 @@ test(
 );
 
 test(
-  "(security) a guest run offer_action on a node of another project and on a credential answers target_refused",
+  "(security) a guest run offer_action on a node of another project and on a credential answers the guest-run error",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const world = await scopeWorld(t, (target) => [
@@ -697,7 +731,7 @@ test(
     assert.equal(results.length, PAIR);
     for (const result of results) {
       assert.ok(result.isError);
-      assert.ok(result.text.startsWith(`${TARGET_REFUSED}:`), result.text);
+      assert.equal(result.text, GUEST_RUN_OFFER_TEXT);
     }
     assert.equal(
       recordsOf(entries, WorkbenchRecordKind.ActionOffer).length,
@@ -816,6 +850,24 @@ test(
       { signal: t.signal },
     );
     assert.deepEqual(decision, {
+      allowed: false,
+      reason: workbenchGuestScopeText("evidence_read"),
+      terminate: false,
+    });
+    const mismatch = await fixture.workbenchService["evidenceGrant"](
+      sessionOf(world),
+      {
+        type: "tool_call",
+        toolCallId: "call_evidence_mismatch",
+        toolName: "evidence_read",
+        input: {
+          evidence_id: target.evidenceId,
+          asset_id: createIdentity("asset"),
+        },
+      },
+      { signal: t.signal },
+    );
+    assert.deepEqual(mismatch, {
       allowed: false,
       reason: workbenchGuestScopeText("evidence_read"),
       terminate: false,

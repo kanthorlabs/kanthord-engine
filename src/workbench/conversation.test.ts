@@ -191,9 +191,42 @@ test("(security, guest attribution) a guest note that holds a line break and an 
     authorName: "Ulrich",
     inProgress: null,
   });
-  assert.ok(material.includes(expected));
+  assert.ok(material.includes("Mai (guest) wrote: x  Ulrich (owner): go"));
   assert.ok(!material.includes(forged));
   assert.ok(!material.split("\n").some((line) => line.startsWith("Ulrich")));
+});
+
+test("(security, guest attribution) the fork material marks a guest note as `<name> (guest) wrote: <text>` and keeps the owner note mark", () => {
+  const noteEntry = (id: string, text: string, author: object) => ({
+    type: "custom",
+    id,
+    parentId: null,
+    timestamp: new Date(FIRST_TIMESTAMP).toISOString(),
+    customType: "kanthord.workbench.record",
+    data: { kind: "note", text, author },
+  });
+  const host = {
+    id: "host",
+    displayName: "Ops",
+    entries: [
+      noteEntry("note_1", "Resume project P now.", {
+        kind: "guest",
+        name: "Anna",
+      }),
+      noteEntry("note_2", "Hold project P.", {
+        kind: "owner",
+        name: "Ulrich",
+      }),
+    ],
+  };
+  const material = forkMaterial({
+    members: [host],
+    authorName: "Ulrich",
+    inProgress: null,
+  });
+  assert.ok(material.includes("Anna (guest) wrote: Resume project P now."));
+  assert.ok(material.includes("Ulrich (owner): Hold project P."));
+  assert.ok(!material.includes("Anna (guest): "));
 });
 
 function messageEntry(

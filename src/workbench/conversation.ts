@@ -38,6 +38,8 @@ const NAME_CHARACTER = /[A-Za-z0-9 _-]/;
 const WHITESPACE = /\s/;
 const WHITESPACE_RUN = /\s+/g;
 const SINGLE_SPACE = " ";
+const AUTHOR_SEPARATOR = ":";
+const GUEST_NOTE_FORK_SEPARATOR = " wrote:";
 const LINE_BREAK = /\r\n|\r|\n/g;
 const AFTER_PREFIX = 1;
 const FIRST_TOKEN = 0;
@@ -382,11 +384,16 @@ interface RelayContext extends LineContext {
   marks: ReadonlyMap<string, string>;
 }
 
-function noteLineOf(entry: SessionEntry): string | null {
+function noteLineOf(
+  entry: SessionEntry,
+  guestSeparator = AUTHOR_SEPARATOR,
+): string | null {
   const record = recordOf(entry);
   if (record?.kind !== WorkbenchRecordKind.Note) return null;
   const text = record.text.replace(LINE_BREAK, SINGLE_SPACE);
-  return `${authorMark(record.author)}: ${text}`;
+  const separator =
+    record.author.kind === AuthorKind.Guest ? guestSeparator : AUTHOR_SEPARATOR;
+  return `${authorMark(record.author)}${separator} ${text}`;
 }
 
 function relayLineOf(
@@ -573,7 +580,7 @@ function forkItemOf(
   }
   const card = cardLineOf(entry, context.settled);
   if (card !== null) return { kind: ForkItemKind.Other, text: card };
-  const note = noteLineOf(entry);
+  const note = noteLineOf(entry, GUEST_NOTE_FORK_SEPARATOR);
   if (note !== null) return { kind: ForkItemKind.Other, text: note };
   return messageLineOf(author, entry, context);
 }

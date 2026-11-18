@@ -17,5 +17,6 @@ checks:
     - operation_id: workbench.session.list
       expect: block
       reason: workbench.guard.guest_scope
+      or_absent_input: {}
   reply_forbids: ['workbench_session_[0-9A-Z]{26}']
   max_confirmations: 0
