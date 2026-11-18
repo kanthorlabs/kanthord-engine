@@ -235,7 +235,7 @@ const PROJECT_SCOPE_BLOCK = {
 const HUMAN_ACT = {
   reason: "plan",
   expected_mission_version: 1,
-  expected_state: "available",
+  expected_state: "Available",
   expected_attempt: 1,
 };
 const DIGEST = "0".repeat(64);
